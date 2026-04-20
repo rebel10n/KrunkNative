@@ -52,6 +52,11 @@ BasicMaterial *basic_material_init() {
     BasicMaterial *material = calloc(1, sizeof(BasicMaterial));
     material->base.vtable = &basic_material_vtable;
 
+    material->color.x = 1.0f;
+    material->color.y = 1.0f;
+    material->color.z = 1.0f;
+    material->color.w = 1.0f;
+
     material->texture_repeat.x = 1.0f;
     material->texture_repeat.y = 1.0f;
 

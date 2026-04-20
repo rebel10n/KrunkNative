@@ -1,12 +1,12 @@
 #include <glad/glad.h>
-#include <glfw/glfw3.h>
+#include <GLFW/glfw3.h>
 #include <client.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #ifdef WIN32
 #include <direct.h>
+#define getcwd _getcwd
 #else
 #include <unistd.h>
 #endif
@@ -24,7 +24,7 @@ int main() {
     GameWindow *game_window = game_window_init(800, 800);
     if (!game_window) return -1;
 
-    char *map_path = concat(client_assets_path(), "maps/shipyard.json");
+    char *map_path = concat(client_assets_path(), "maps/sandstorm.json");
     FILE *map = fopen(map_path, "rb");
 
     free(map_path);
@@ -70,7 +70,7 @@ int main() {
 
 const char *client_assets_path() {
     char path[256];
-    if (!_getcwd(path, sizeof(path))) return NULL;
+    if (!getcwd(path, sizeof(path))) return NULL;
 
 #ifdef WIN32
     const char slash = '\\';

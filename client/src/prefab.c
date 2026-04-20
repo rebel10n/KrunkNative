@@ -76,6 +76,26 @@ const PrefabModel prefab_models[] = {
     {"knight_0", 4.0f},
 };
 
+const char *prefab_textures[] = {
+    "wall",
+    "dirt",
+    "floor",
+    "grid",
+    "grey",
+    "default",
+    "roof",
+    "flag",
+    "grass",
+    "check",
+    "lines",
+    "brick",
+    "link",
+    "liquid",
+    "grain",
+    "fabric",
+    "tile",
+};
+
 Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
     if (object->prefab < 0 || object->prefab >= sizeof(prefab_models) / sizeof(prefab_models[0])) {
         return NULL;
@@ -169,23 +189,61 @@ Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
 
         // === DEBUG CODE START ===
         // mesh->material->wireframe = 1;
-
-        material->color.x = 1.0f;
-        material->color.y = 1.0f;
-        material->color.z = 1.0f;
-        material->color.w = 1.0f;
         // === DEBUG CODE END ===
 
         return mesh;
-    } else if (object->prefab == PREFAB_CUBE) {
+    }
+
+    const cJSON *t = cJSON_GetObjectItem(raw_obj, "t");
+
+    const int tex_id = cJSON_IsNumber(t) ? (int) cJSON_GetNumberValue(t) : 0;
+    const int texture_path_length = snprintf(NULL, 0, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
+
+    char *texture_path = malloc(texture_path_length + 1);
+    snprintf(texture_path, texture_path_length + 1, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
+
+    char *full_texture_path = concat(client_assets_path(), texture_path);
+    free(texture_path);
+
+    if (object->prefab == PREFAB_CUBE) {
         if (!g_cube_model) g_cube_model = create_cube_model();
-        if (!g_cube_model) return NULL;
+
+        if (!g_cube_model) {
+            free(full_texture_path);
+            return NULL;
+        }
+
+        unsigned int texture_id = 0;
+        asset_cache_map_itr texture_cache_itr = vt_get(&g_texture_cache, full_texture_path);
+
+        if (!vt_is_end(texture_cache_itr)) {
+            texture_id = texture_cache_itr.data->val;
+            free(full_texture_path);
+        } else if (tex_id != 5) {
+            printf("PREFABS :: (cache miss) loading cube with texture :: %s\n", full_texture_path);
+
+            int texture_width, texture_height, _;
+            unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
+
+            if (texture) {
+                glGenTextures(1, &texture_id);
+                glBindTexture(GL_TEXTURE_2D, texture_id);
+
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
+                glGenerateMipmap(GL_TEXTURE_2D);
+
+                stbi_image_free(texture);
+                vt_insert(&g_texture_cache, full_texture_path, texture_id);
+            } else {
+                free(full_texture_path);
+            }
+        } else free(full_texture_path);
 
         BasicMaterial *material = basic_material_init();
         Mesh *mesh = mesh_init((unsigned int) g_cube_model, (unsigned int) (g_cube_model >> 32), (Material *) material);
-
-        mesh->position = object->position;
-        mesh->scale = object->scale;
 
         const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
 
@@ -199,17 +257,18 @@ Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
             if (mesh->rotation.z == NAN) mesh->rotation.z = 0.0f;
         }
 
+        mesh->position = object->position;
+        mesh->scale = object->scale;
+
+        material->texture = texture_id;
+
         // === DEBUG CODE START ===
         // mesh->material->wireframe = 1;
-
-        material->color.x = 1.0f;
-        material->color.y = 1.0f;
-        material->color.z = 1.0f;
-        material->color.w = 0.3f;
         // === DEBUG CODE END ===
 
         return mesh;
     }
 
+    free(full_texture_path);
     return NULL;
 }
