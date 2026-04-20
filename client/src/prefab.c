@@ -1,9 +1,12 @@
 #include <glad/glad.h>
 #include <client.h>
-#include <stdio.h>
-#include <fast_obj.h>
 #include <math.h>
+#include <stdio.h>
 #include <stb_image.h>
+
+typedef enum {
+    PREFAB_CUBE,
+} Prefab;
 
 typedef struct {
     const char *filename;
@@ -73,7 +76,7 @@ const PrefabModel prefab_models[] = {
     {"knight_0", 4.0f},
 };
 
-Mesh *map_mesh_init(Object *object, const cJSON *raw_obj) {
+Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
     if (object->prefab < 0 || object->prefab >= sizeof(prefab_models) / sizeof(prefab_models[0])) {
         return NULL;
     }
@@ -103,57 +106,50 @@ Mesh *map_mesh_init(Object *object, const cJSON *raw_obj) {
         free(model_path);
         free(texture_path);
 
-        fastObjMesh *model = fast_obj_read(full_model_path);
-
         stbi_set_flip_vertically_on_load(1);
 
         unsigned int texture_id = 0;
-        int texture_width, texture_height, _;
-        unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
+        asset_cache_map_itr texture_cache_itr = vt_get(&g_texture_cache, full_texture_path);
 
-        if (texture) {
-            glGenTextures(1, &texture_id);
-            glBindTexture(GL_TEXTURE_2D, texture_id);
+        if (!vt_is_end(texture_cache_itr)) {
+            texture_id = texture_cache_itr.data->val;
+            free(full_texture_path);
+        } else {
+            int texture_width, texture_height, _;
+            unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
 
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            if (texture) {
+                glGenTextures(1, &texture_id);
+                glBindTexture(GL_TEXTURE_2D, texture_id);
 
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
-            glGenerateMipmap(GL_TEXTURE_2D);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-            stbi_image_free(texture);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
+                glGenerateMipmap(GL_TEXTURE_2D);
+
+                stbi_image_free(texture);
+                vt_insert(&g_texture_cache, full_texture_path, texture_id);
+            } else {
+                free(full_texture_path);
+            }
         }
 
-        free(full_model_path);
-        free(full_texture_path);
+        unsigned long long model = 0;
+        asset_cache_map_itr model_cache_itr = vt_get(&g_model_cache, full_model_path);
 
-        vertex *vertices = calloc(model->index_count, sizeof(vertex));
+        if (!vt_is_end(model_cache_itr)) {
+            model = model_cache_itr.data->val;
+            free(full_model_path);
+        } else {
+            model = load_obj_model(full_model_path);
 
-        if (!vertices) {
-            fast_obj_destroy(model);
-            return NULL;
-        }
-
-        for (size_t i = 1; i < model->index_count; i++) {
-            const fastObjIndex idx = model->indices[i];
-            vertex vtx = {0};
-
-            if (idx.p) {
-                vtx.position.x = model->positions[idx.p * 3];
-                vtx.position.y = model->positions[idx.p * 3 + 1];
-                vtx.position.z = model->positions[idx.p * 3 + 2];
-            }
-
-            if (idx.t) {
-                vtx.tex_coord.x = model->texcoords[idx.t * 2];
-                vtx.tex_coord.y = model->texcoords[idx.t * 2 + 1];
-            }
-
-            vertices[i] = vtx;
+            if (model) vt_insert(&g_model_cache, full_model_path, model);
+            else free(full_model_path);
         }
 
         BasicMaterial *material = basic_material_init();
-        Mesh *mesh = mesh_init(vertices, NULL, (int) model->index_count, 0, (Material *) material);
+        Mesh *mesh = mesh_init((unsigned int) model, (unsigned int) (model >> 32), (Material *) material);
 
         mesh->position = object->position;
         mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
@@ -172,7 +168,7 @@ Mesh *map_mesh_init(Object *object, const cJSON *raw_obj) {
         }
 
         // === DEBUG CODE START ===
-        mesh->material->wireframe = 1;
+        // mesh->material->wireframe = 1;
 
         material->color.x = 1.0f;
         material->color.y = 1.0f;
@@ -180,8 +176,37 @@ Mesh *map_mesh_init(Object *object, const cJSON *raw_obj) {
         material->color.w = 1.0f;
         // === DEBUG CODE END ===
 
-        fast_obj_destroy(model);
-        free(vertices);
+        return mesh;
+    } else if (object->prefab == PREFAB_CUBE) {
+        if (!g_cube_model) g_cube_model = create_cube_model();
+        if (!g_cube_model) return NULL;
+
+        BasicMaterial *material = basic_material_init();
+        Mesh *mesh = mesh_init((unsigned int) g_cube_model, (unsigned int) (g_cube_model >> 32), (Material *) material);
+
+        mesh->position = object->position;
+        mesh->scale = object->scale;
+
+        const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
+
+        if (cJSON_IsArray(raw_rotation)) {
+            mesh->rotation.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 0));
+            mesh->rotation.y = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 1));
+            mesh->rotation.z = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 2));
+
+            if (mesh->rotation.x == NAN) mesh->rotation.x = 0.0f;
+            if (mesh->rotation.y == NAN) mesh->rotation.y = 0.0f;
+            if (mesh->rotation.z == NAN) mesh->rotation.z = 0.0f;
+        }
+
+        // === DEBUG CODE START ===
+        // mesh->material->wireframe = 1;
+
+        material->color.x = 1.0f;
+        material->color.y = 1.0f;
+        material->color.z = 1.0f;
+        material->color.w = 0.3f;
+        // === DEBUG CODE END ===
 
         return mesh;
     }

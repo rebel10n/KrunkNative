@@ -11,13 +11,20 @@
 #include <unistd.h>
 #endif
 
+asset_cache_map g_model_cache;
+asset_cache_map g_texture_cache;
+unsigned long long g_cube_model;
+
 int main() {
+    vt_init(&g_model_cache);
+    vt_init(&g_texture_cache);
+
     if (!glfwInit()) return -1;
 
     GameWindow *game_window = game_window_init(800, 800);
     if (!game_window) return -1;
 
-    char *map_path = concat(client_assets_path(), "maps/burg.json");
+    char *map_path = concat(client_assets_path(), "maps/shipyard.json");
     FILE *map = fopen(map_path, "rb");
 
     free(map_path);

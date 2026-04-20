@@ -102,7 +102,7 @@ GameMap *game_map_init(const char *raw) {
         object->prefab = prefab_id;
 
 #ifdef KRUNKNATIVE_CLIENT
-        object->mesh = map_mesh_init(object, raw_obj);
+        object->mesh = prefab_init(object, raw_obj);
 #endif
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {

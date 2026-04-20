@@ -3,6 +3,15 @@
 #include <glfw/glfw3.h>
 #include <cJSON.h>
 
+#define NAME asset_cache_map
+#define KEY_TY char*
+#define VAL_TY unsigned long long
+#include <verstable.h>
+
+extern asset_cache_map g_model_cache; // low 4 bytes = VBO, high 4 bytes = EBO
+extern asset_cache_map g_texture_cache; // low 4 bytes = texID, high 4 bytes = unused
+extern unsigned long long g_cube_model; // low 4 bytes = VBO, high 4 bytes = EBO
+
 typedef struct {
     float near;
     float far;
@@ -73,7 +82,7 @@ typedef struct Mesh {
     Material *material;
 } Mesh;
 
-Mesh *mesh_init(const vertex*, const unsigned int*, int, int, Material*);
+Mesh *mesh_init(unsigned int, unsigned int, Material*);
 void mesh_update_transform_matrix(Mesh*);
 void mesh_fini(Mesh*); // CAUTION: does NOT free underlying Material!
 
@@ -132,4 +141,7 @@ void game_window_fini(GameWindow*);
 const char *client_assets_path();
 void client_tick(GameWindow*, double);
 
-Mesh *map_mesh_init(Object*, const cJSON*);
+unsigned long long create_cube_model();
+unsigned long long load_obj_model(const char*);
+
+Mesh *prefab_init(Object*, const cJSON*);

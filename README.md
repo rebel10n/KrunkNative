@@ -9,5 +9,6 @@ Krunker.io - except it's awesome.
 - GLAD - OpenGL loader
 - FreeType - font rasterizer
 - STB Image - single-header image loading library
-- fast_obj - single-header OBJ loading library
+- tinyobjloader-c - single-header OBJ loading library
+- verstable - single-header hash table library
 - cJSON - lightweight JSON parser
