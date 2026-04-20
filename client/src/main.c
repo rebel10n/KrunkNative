@@ -32,10 +32,6 @@ int main() {
 
     map_data[map_size] = 0;
 
-#ifdef KRUNKNATIVE_CLIENT
-    printf("KRUNKNATIVE_CLIENT is indeed defined!\n");
-#endif
-
     const GameMap *map_obj = game_map_init(map_data);
 
     free(map_data);

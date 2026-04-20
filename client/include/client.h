@@ -50,6 +50,8 @@ typedef struct {
     Material base;
 
     vec4 color;
+    vec2 texture_repeat;
+    vec2 texture_offset;
     unsigned int texture;
 } BasicMaterial;
 

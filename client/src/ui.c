@@ -52,10 +52,10 @@ void ui_fill_rect(UI *ui, const int x, const int y, const int width, const int h
     const float max_y = 1.0f - (float) (y + height) / (float) viewport[3] * 2.0f;
 
     const vertex vertices[] = {
-        {min_x, max_y, 0.0f, 0.0f, 1.0f},
-        {max_x, min_y, 0.0f, 1.0f, 0.0f},
-        {min_x, min_y, 0.0f, 0.0f, 0.0f},
-        {max_x, max_y, 0.0f, 1.0f, 1.0f},
+        {min_x, max_y, 0.0f, 0.0f, 0.0f},
+        {max_x, min_y, 0.0f, 1.0f, 1.0f},
+        {min_x, min_y, 0.0f, 0.0f, 1.0f},
+        {max_x, max_y, 0.0f, 1.0f, 0.0f},
     };
 
     const unsigned int indices[] = {0, 1, 2, 0, 3, 1};

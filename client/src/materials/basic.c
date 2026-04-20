@@ -7,9 +7,26 @@ static unsigned int blank_texture = 0;
 
 void basic_material_update_uniforms(BasicMaterial *material) {
     const int color = glGetUniformLocation(material->base.program, "color");
+    const int tex_transform = glGetUniformLocation(material->base.program, "tex_transform");
     const int texture = glGetUniformLocation(material->base.program, "tex");
 
+    const float repeat[] = {
+        material->texture_repeat.x, 0.0f, 0.0f,
+        0.0f, material->texture_repeat.y, 0.0f,
+        0.0f, 0.0f, 1.0f,
+    };
+
+    const float translate[] = {
+        1.0f, 0.0f, material->texture_offset.x,
+        0.0f, 1.0f, material->texture_offset.y,
+        0.0f, 0.0f, 1.0f,
+    };
+
+    float transform[9];
+    mat3x3(repeat, translate, transform);
+
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
+    glUniformMatrix3fv(tex_transform, 1, GL_TRUE, transform);
 
     glUniform1i(texture, 0);
     glActiveTexture(GL_TEXTURE0);
@@ -34,6 +51,9 @@ static MaterialVTable basic_material_vtable = { (void *) basic_material_update_u
 BasicMaterial *basic_material_init() {
     BasicMaterial *material = calloc(1, sizeof(BasicMaterial));
     material->base.vtable = &basic_material_vtable;
+
+    material->texture_repeat.x = 1.0f;
+    material->texture_repeat.y = 1.0f;
 
     if (!shader_program) {
         char *vert_shader = concat(client_assets_path(), "shaders/basic.vert");

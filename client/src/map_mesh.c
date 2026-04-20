@@ -1,43 +1,45 @@
+#include <glad/glad.h>
 #include <client.h>
 #include <stdio.h>
 #include <fast_obj.h>
 #include <math.h>
+#include <stb_image.h>
 
 typedef struct {
-    const char *path;
+    const char *filename;
     const float scale;
 } PrefabModel;
 
 const PrefabModel prefab_models[] = {
     {NULL}, // cube (software-generated)
-    {"models/crate_0.obj", 6.0f},
-    {"models/barrel_0.obj", 4.0f},
+    {"crate_0", 6.0f},
+    {"barrel_0", 4.0f},
     {NULL}, // ladder (software-generated)
     {NULL}, // plane (software-generated)
     {NULL}, // spawnpoint
     {NULL}, // camera position
-    {"models/vehicle_0.obj", 20.0f},
-    {"models/stack_0.obj", 6.0f},
+    {"vehicle_0", 20.0f},
+    {"stack_0", 6.0f},
     {NULL}, // ramp (software-generated)
     {NULL}, // score zone
     {NULL}, // billboard (software-generated)
     {NULL}, // death zone
     {NULL}, // particles
     {NULL}, // objective
-    {"models/tree_0.obj", 10.0f},
-    {"models/cone_0.obj", 4.0f},
-    {"models/container_0.obj", 7.0f},
-    {"models/grass_0.obj", 32.0f},
-    {"models/containerr_0.obj", 7.0f},
-    {"models/acidbarrel_0.obj", 4.0f},
-    {"models/door_0.obj", 5.0f},
-    {"models/window_0.obj", 6.0f},
+    {"tree_0", 10.0f},
+    {"cone_0", 4.0f},
+    {"container_0", 7.0f},
+    {"grass_0", 32.0f},
+    {"containerr_0", 7.0f},
+    {"acidbarrel_0", 4.0f},
+    {"door_0", 5.0f},
+    {"window_0", 6.0f},
     {NULL}, // flag
     {NULL}, // gate
     {NULL}, // check point
     {NULL}, // weapon pickup (software-generated)
     {NULL}, // teleporter
-    {"models/teddy_0.obj", 6.0f},
+    {"teddy_0", 6.0f},
     {NULL}, // trigger
     {NULL}, // sign (software-generated)
     {NULL}, // deposit box
@@ -45,8 +47,8 @@ const PrefabModel prefab_models[] = {
     {NULL}, // spectate cam
     {NULL}, // sphere (software-generated)
     {NULL}, // placeholder
-    {"models/cardb_0.obj", 5.0f},
-    {"models/pallet_0.obj", 6.0f},
+    {"cardb_0", 5.0f},
+    {"pallet_0", 6.0f},
     {NULL}, // liquid
     {NULL}, // sound emitter
     {NULL}, // event
@@ -58,28 +60,72 @@ const PrefabModel prefab_models[] = {
     {NULL}, // boost pad (software-generated)
     {NULL}, // team zone
     {NULL}, // cylinder (software-generated)
-    {"models/police_0.obj", 4.0f},
-    {"models/cage_0.obj", 6.0f},
-    {"models/ebarrel_0.obj", 4.0f},
+    {"police_0", 4.0f},
+    {"cage_0", 6.0f},
+    {"ebarrel_0", 4.0f},
     {NULL}, // showcase
     {NULL}, // point light
-    {"models/ghost_0.obj", 4.0f},
+    {"ghost_0", 4.0f},
     {NULL}, // bot (unsupported - for now at least)
-    {"models/pumpkin_0.obj", 4.0f},
+    {"pumpkin_0", 4.0f},
     {NULL}, // rune (software-generated)
-    {"models/skeleton_0.obj", 4.0f},
-    {"models/knight_0.obj", 4.0f},
+    {"skeleton_0", 4.0f},
+    {"knight_0", 4.0f},
 };
 
 Mesh *map_mesh_init(Object *object, const cJSON *raw_obj) {
+    if (object->prefab < 0 || object->prefab >= sizeof(prefab_models) / sizeof(prefab_models[0])) {
+        return NULL;
+    }
+
     const PrefabModel prefab_model = prefab_models[object->prefab];
 
-    if (prefab_model.path) {
-        char *model_path = concat(client_assets_path(), prefab_model.path);
-        printf("loading model path=%s for prefab=%u\n", model_path, object->prefab);
+    if (prefab_model.filename) {
+        const int model_path_length = snprintf(NULL, 0, "models/%s.obj", prefab_model.filename);
+        const int texture_path_length = snprintf(NULL, 0, "textures/%s.png", prefab_model.filename);
 
-        fastObjMesh *model = fast_obj_read(model_path);
+        char *model_path = malloc(model_path_length + 1);
+        if (!model_path) return NULL;
+
+        char *texture_path = malloc(texture_path_length + 1);
+
+        if (!texture_path) {
+            free(model_path);
+            return NULL;
+        }
+
+        snprintf(model_path, model_path_length + 1, "models/%s.obj", prefab_model.filename);
+        snprintf(texture_path, texture_path_length + 1, "textures/%s.png", prefab_model.filename);
+
+        char *full_model_path = concat(client_assets_path(), model_path);
+        char *full_texture_path = concat(client_assets_path(), texture_path);
+        
         free(model_path);
+        free(texture_path);
+
+        fastObjMesh *model = fast_obj_read(full_model_path);
+
+        stbi_set_flip_vertically_on_load(1);
+
+        unsigned int texture_id = 0;
+        int texture_width, texture_height, _;
+        unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
+
+        if (texture) {
+            glGenTextures(1, &texture_id);
+            glBindTexture(GL_TEXTURE_2D, texture_id);
+
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
+            glGenerateMipmap(GL_TEXTURE_2D);
+
+            stbi_image_free(texture);
+        }
+
+        free(full_model_path);
+        free(full_texture_path);
 
         vertex *vertices = calloc(model->index_count, sizeof(vertex));
 
@@ -88,7 +134,7 @@ Mesh *map_mesh_init(Object *object, const cJSON *raw_obj) {
             return NULL;
         }
 
-        for (size_t i = 0; i < model->index_count; i++) {
+        for (size_t i = 1; i < model->index_count; i++) {
             const fastObjIndex idx = model->indices[i];
             vertex vtx = {0};
 
@@ -111,6 +157,7 @@ Mesh *map_mesh_init(Object *object, const cJSON *raw_obj) {
 
         mesh->position = object->position;
         mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
+        material->texture = texture_id;
 
         const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
 

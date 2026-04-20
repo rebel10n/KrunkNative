@@ -53,6 +53,19 @@ GameMap *game_map_init(const char*);
 
 char *concat(const char*, const char*);
 
+static inline void mat3x3(const float *a, const float *b, float *out) {
+#define MAT3x3 \
+    X(0) X(1) X(2) \
+    X(3) X(4) X(5) \
+    X(6) X(7) X(8)
+
+#define X(i) out[i] = a[(i / 3) * 3] * b[(i % 3)] + a[(i / 3) * 3 + 1] * b[(i % 3) + 3] + a[(i / 3) * 3 + 2] * b[(i % 3) + 6];
+    MAT3x3
+
+#undef X
+#undef MAT3x3
+}
+
 static inline void mat4x4(const float *a, const float *b, float *out) {
 #define MAT4x4 \
     X(0) X(1) X(2) X(3) \
