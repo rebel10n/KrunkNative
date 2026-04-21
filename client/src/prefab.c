@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stb_image.h>
+#include <pcg_basic.h>
 
 typedef enum {
     PREFAB_CUBE,
@@ -269,12 +270,26 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     }
 
     const cJSON *t = cJSON_GetObjectItem(raw_obj, "t");
-
     const int tex_id = cJSON_IsNumber(t) ? (int) cJSON_GetNumberValue(t) : 0;
-    const int texture_path_length = snprintf(NULL, 0, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
 
-    char *texture_path = malloc(texture_path_length + 1);
-    snprintf(texture_path, texture_path_length + 1, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
+    char *texture_path;
+
+    if (object->prefab == PREFAB_BILLBOARD) {
+        const cJSON *bb = cJSON_GetObjectItem(raw_obj, "bb");
+        int billboard_id = cJSON_IsNumber(bb) ? (int) cJSON_GetNumberValue(bb) : 0;
+
+        if (!billboard_id) billboard_id = (int) (pcg32_boundedrand(6) % 6) + 1;
+
+        const int texture_path_length = snprintf(NULL, 0, "textures/pubs/b_%d.png", billboard_id);
+
+        texture_path = malloc(texture_path_length + 1);
+        snprintf(texture_path, texture_path_length + 1, "textures/pubs/b_%d.png", billboard_id);
+    } else {
+        const int texture_path_length = snprintf(NULL, 0, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
+
+        texture_path = malloc(texture_path_length + 1);
+        snprintf(texture_path, texture_path_length + 1, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
+    }
 
     char *full_texture_path = concat(client_assets_path(), texture_path);
     free(texture_path);
@@ -286,6 +301,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         texture_id = texture_cache_itr.data->val;
         free(full_texture_path);
     } else if (tex_id != 5) {
+        stbi_set_flip_vertically_on_load(1);
+
         int texture_width, texture_height, _;
         unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
 
@@ -304,9 +321,9 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         } else free(full_texture_path);
     } else free(full_texture_path);
 
-    if (object->prefab == PREFAB_CUBE || object->prefab == PREFAB_PLANE) {
+    if (object->prefab == PREFAB_CUBE || object->prefab == PREFAB_PLANE || object->prefab == PREFAB_BILLBOARD) {
         if (object->prefab == PREFAB_CUBE && !g_cube_model) g_cube_model = create_cube_model();
-        if (object->prefab == PREFAB_PLANE && !g_plane_model) g_plane_model = create_plane_model();
+        else if (!g_plane_model) g_plane_model = create_plane_model();
 
         const unsigned long long model = object->prefab == PREFAB_CUBE ? g_cube_model : g_plane_model;
         if (!model) return NULL;
@@ -322,10 +339,10 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->texture = texture_id;
         material->color = color;
 
-        material->use_face_tex_scaling = 1;
+        material->use_face_tex_scaling = object->prefab != PREFAB_BILLBOARD;
         material->face_scale = object->scale;
 
-        if (object->prefab == PREFAB_PLANE) {
+        if (object->prefab != PREFAB_CUBE) {
             mesh->scale.y = 0.01f;
 
             material->face_scale.x = object->scale.x;

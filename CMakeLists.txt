@@ -17,13 +17,14 @@ add_subdirectory(client/lib/glad)
 add_subdirectory(client/lib/glfw)
 
 add_subdirectory(shared/lib/cJSON)
+add_subdirectory(shared/lib/pcg_basic)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(CLIENT_BINARY client)
     list(APPEND CLIENT_SOURCES client/win.rc)
 endif ()
 
-link_libraries(cJSON)
+link_libraries(cJSON pcg_basic)
 
 add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
 target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)

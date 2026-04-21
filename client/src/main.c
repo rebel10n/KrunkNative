@@ -4,6 +4,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pcg_basic.h>
+#include <time.h>
 
 #ifdef WIN32
 #include <direct.h>
@@ -19,6 +21,8 @@ unsigned long long g_cube_model;
 unsigned long long g_plane_model;
 
 int main() {
+    pcg32_srandom(time(NULL), 0x1337);
+
     vt_init(&g_model_cache);
     vt_init(&g_texture_cache);
 
@@ -27,7 +31,7 @@ int main() {
     GameWindow *game_window = game_window_init(800, 800);
     if (!game_window) return -1;
 
-    char *map_path = concat(client_assets_path(), "maps/newtown.json");
+    char *map_path = concat(client_assets_path(), "maps/kanji.json");
     FILE *map = fopen(map_path, "rb");
 
     free(map_path);
