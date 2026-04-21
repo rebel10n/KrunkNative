@@ -212,9 +212,9 @@ void mesh_update_transform_matrix(Mesh *mesh) {
     };
 
     const float rotate_y_matrix[] = {
-        cosf(mesh->rotation.y), 0.0f, -sinf(mesh->rotation.y), 0.0f,
+        cosf(mesh->rotation.y), 0.0f, sinf(mesh->rotation.y), 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
-        sinf(mesh->rotation.y), 0.0f, cosf(mesh->rotation.y), 0.0f,
+        -sinf(mesh->rotation.y), 0.0f, cosf(mesh->rotation.y), 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f,
     };
 
@@ -233,13 +233,13 @@ void mesh_update_transform_matrix(Mesh *mesh) {
     };
 
     float tmp[16];
-    mat4x4(rotate_x_matrix, scale_matrix, tmp);
+    mat4x4(rotate_z_matrix, scale_matrix, tmp);
 
     float tmp1[16];
     mat4x4(rotate_y_matrix, tmp, tmp1);
 
     float tmp2[16];
-    mat4x4(rotate_z_matrix, tmp1, tmp2);
+    mat4x4(rotate_x_matrix, tmp1, tmp2);
     mat4x4(translate_matrix, tmp2, mesh->transform_matrix);
 }
 
