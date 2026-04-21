@@ -5,6 +5,7 @@ in vec2 tex_coord;
 in flat int face_idx;
 
 uniform bool use_face_tex_scaling;
+uniform float world_uv_scale;
 uniform vec3 face_scale;
 
 uniform vec4 color;
@@ -21,7 +22,7 @@ void main() {
         else if (face_idx < 4) scale = face_scale.zy;
         else scale = face_scale.xz;
 
-        scaled_tex_coord = (1.0f / 60.0f) * scale * tex_coord;
+        scaled_tex_coord = (1.0f / world_uv_scale) * scale * tex_coord;
         scaled_tex_coord.x = 0.5f + scaled_tex_coord.x - scale.x / 2.0f;
     } else {
         scaled_tex_coord = tex_coord;

@@ -274,7 +274,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         const cJSON *bb = cJSON_GetObjectItem(raw_obj, "bb");
         int billboard_id = cJSON_IsNumber(bb) ? (int) cJSON_GetNumberValue(bb) : 0;
 
-        if (!billboard_id) billboard_id = (int) (pcg32_boundedrand(6) % 6) + 1;
+        if (!billboard_id) billboard_id = (int) (pcg32_boundedrand(game_constants.billboard_count) % game_constants.billboard_count) + 1;
 
         const int texture_path_length = snprintf(NULL, 0, "textures/pubs/b_%d.png", billboard_id);
 

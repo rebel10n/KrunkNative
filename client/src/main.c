@@ -62,7 +62,7 @@ int main() {
     unsigned char *map_data;
 
     if (!read_file(map_path, &map_data, &map_size)) {
-        const GameMap *map = game_map_init((const char *) map_data);
+        const Map *map = map_init((const char *) map_data);
 
         for (size_t i = 0; i < map->object_count; i++) {
             if (!map->objects[i]->mesh) continue;

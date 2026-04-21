@@ -137,6 +137,8 @@ typedef struct {
     Camera camera;
     Scene *scene;
     UI *ui;
+
+    Game game;
 } Client;
 
 const char *client_assets_path();

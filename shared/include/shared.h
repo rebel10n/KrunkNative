@@ -20,6 +20,14 @@ typedef struct {
 } vec4;
 
 typedef struct {
+    int billboard_count;
+    float world_uv_scale;
+    float player_height;
+} GameConstants;
+
+extern GameConstants game_constants;
+
+typedef struct {
     unsigned int prefab;
     unsigned int texture;
 
@@ -47,9 +55,43 @@ typedef struct {
         vec3 min;
         vec3 max;
     } dimensions;
-} GameMap;
+} Map;
 
-GameMap *game_map_init(const char*);
+Map *map_init(const char*);
+void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
+
+typedef struct {
+
+} GameMode;
+
+typedef enum {
+    PLAYER_MESH_HEAD
+} PlayerMesh;
+
+#define NAME player_mesh_map
+#define KEY_TY PlayerMesh
+#define VAL_TY void*
+#include <verstable.h>
+
+typedef struct {
+    int uid;
+    int active;
+
+    int health;
+
+    vec3 position;
+    vec2 direction;
+
+    player_mesh_map meshes;
+} Player;
+
+typedef struct {
+    GameMode mode;
+    Map *map;
+
+    size_t player_count;
+    Player **players;
+} Game;
 
 char *concat(const char*, const char*);
 int read_file(const char*, unsigned char**, size_t*);

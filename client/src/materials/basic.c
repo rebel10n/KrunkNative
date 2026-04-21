@@ -6,9 +6,11 @@ static unsigned int shader_program = 0;
 
 void basic_material_update_uniforms(BasicMaterial *material) {
     const int use_face_tex_scaling = glGetUniformLocation(material->base.program, "use_face_tex_scaling");
+    const int world_uv_scale = glGetUniformLocation(material->base.program, "world_uv_scale");
     const int face_scale = glGetUniformLocation(material->base.program, "face_scale");
 
     glUniform1i(use_face_tex_scaling, material->use_face_tex_scaling);
+    glUniform1f(world_uv_scale, game_constants.world_uv_scale);
     glUniform3f(face_scale, material->face_scale.x, material->face_scale.y, material->face_scale.z);
 
     const int color = glGetUniformLocation(material->base.program, "color");

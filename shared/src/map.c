@@ -6,7 +6,7 @@
 #include <client.h>
 #endif
 
-GameMap *game_map_init(const char *raw) {
+Map *map_init(const char *raw) {
     const cJSON *raw_map = cJSON_Parse(raw);
     if (!cJSON_IsObject(raw_map)) return NULL;
 
@@ -17,7 +17,7 @@ GameMap *game_map_init(const char *raw) {
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
     vec4 *parsed_colors = cJSON_IsArray(colors) ? calloc(cJSON_GetArraySize(colors), sizeof(vec4)) : NULL;
-    GameMap *map = calloc(1, sizeof(GameMap));
+    Map *map = calloc(1, sizeof(Map));
 
     if (parsed_colors) {
         for (int i = 0; i < cJSON_GetArraySize(colors); i++) {
@@ -164,4 +164,24 @@ GameMap *game_map_init(const char *raw) {
 
     free(parsed_colors);
     return map;
+}
+
+void map_fini(Map *map) {
+    if (map->spawn_count) {
+        for (size_t i = 0; i < map->spawn_count; i++) free(map->spawns[i]);
+
+        free(map->spawns);
+
+        map->spawn_count = 0;
+        map->spawns = NULL;
+    }
+
+    if (map->object_count) {
+        for (size_t i = 0; i < map->object_count; i++) free(map->objects[i]);
+
+        free(map->objects);
+
+        map->object_count = 0;
+        map->objects = NULL;
+    }
 }

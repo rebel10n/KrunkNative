@@ -12,3 +12,4 @@ Krunker.io - except it's awesome.
 - tinyobjloader-c - single-header OBJ loading library
 - verstable - single-header hash table library
 - cJSON - lightweight JSON parser
+- pcg_basic - pseudorandom number generator
