@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,6 +16,35 @@ char *concat(const char *a, const char *b) {
     result[len_a + len_b] = 0;
 
     return result;
+}
+
+int read_file(const char *path, unsigned char **buf, size_t *length) {
+    FILE *file = fopen(path, "rb");
+    if (!file) return -1;
+
+    fseek(file, 0, SEEK_END);
+    *length = ftell(file);
+
+    fseek(file, 0, SEEK_SET);
+    *buf = malloc(*length + 1);
+
+    if (!*buf) {
+        fclose(file);
+        return -1;
+    }
+
+    if (fread(*buf, 1, *length, file) != *length) {
+        fclose(file);
+        free(*buf);
+
+        *buf = NULL;
+        return -1;
+    }
+
+    fclose(file);
+    (*buf)[*length] = 0;
+
+    return 0;
 }
 
 int parse_hex_color(const char *hex_str, vec4 *out) {

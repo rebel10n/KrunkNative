@@ -4,48 +4,16 @@
 #include <stdlib.h>
 
 unsigned int shader_compile(const char *vertex_shader_path, const char *fragment_shader_path) {
-    FILE *vertex_shader_file = fopen(vertex_shader_path, "rb");
-    FILE *fragment_shader_file = fopen(fragment_shader_path, "rb");
+    size_t vertex_shader_length;
+    unsigned char *vertex_shader;
 
-    if (!vertex_shader_file || !fragment_shader_file) return 0;
+    size_t fragment_shader_length;
+    unsigned char *fragment_shader;
 
-    fseek(vertex_shader_file, 0, SEEK_END);
-    fseek(fragment_shader_file, 0, SEEK_END);
-
-    const size_t vertex_shader_length = ftell(vertex_shader_file);
-    const size_t fragment_shader_length = ftell(fragment_shader_file);
-
-    fseek(vertex_shader_file, 0, SEEK_SET);
-    fseek(fragment_shader_file, 0, SEEK_SET);
-
-    char *vertex_shader = malloc(vertex_shader_length + 1);
-    char *fragment_shader = malloc(fragment_shader_length + 1);
-
-    if (!vertex_shader || !fragment_shader) {
-        if (vertex_shader) free(vertex_shader);
-        if (fragment_shader) free(fragment_shader);
-
-        fclose(vertex_shader_file);
-        fclose(fragment_shader_file);
-
-        return 0;
-    }
-
-    const size_t vertex_shader_read = fread(vertex_shader, 1, vertex_shader_length, vertex_shader_file);
-    const size_t fragment_shader_read = fread(fragment_shader, 1, fragment_shader_length, fragment_shader_file);
-
-    fclose(vertex_shader_file);
-    fclose(fragment_shader_file);
-
-    if (vertex_shader_read != vertex_shader_length || fragment_shader_read != fragment_shader_length) {
-        free(vertex_shader);
-        free(fragment_shader);
-
-        return 0;
-    }
-
-    vertex_shader[vertex_shader_length] = 0;
-    fragment_shader[fragment_shader_length] = 0;
+    if (
+        read_file(vertex_shader_path, &vertex_shader, &vertex_shader_length) ||
+        read_file(fragment_shader_path, &fragment_shader, &fragment_shader_length)
+    ) return 0;
 
     const unsigned int vert = glCreateShader(GL_VERTEX_SHADER);
     const unsigned int frag = glCreateShader(GL_FRAGMENT_SHADER);

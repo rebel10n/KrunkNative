@@ -262,10 +262,6 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->texture = texture_id;
         material->color = color;
 
-        // === DEBUG CODE START ===
-        // mesh->material->wireframe = 1;
-        // === DEBUG CODE END ===
-
         return mesh;
     }
 
@@ -348,10 +344,6 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
             material->face_scale.x = object->scale.x;
             material->face_scale.y = object->scale.z;
         }
-
-        // === DEBUG CODE START ===
-        // mesh->material->wireframe = 1;
-        // === DEBUG CODE END ===
 
         return mesh;
     }

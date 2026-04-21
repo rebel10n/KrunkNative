@@ -20,6 +20,11 @@ asset_cache_map g_texture_cache;
 unsigned long long g_cube_model;
 unsigned long long g_plane_model;
 
+unsigned int g_blank_texture;
+
+void client_tick(Client*, float, float);
+void resize_viewport(GLFWwindow*, int, int);
+
 int main() {
     pcg32_srandom(time(NULL), 0x1337);
 
@@ -28,48 +33,60 @@ int main() {
 
     if (!glfwInit()) return -1;
 
-    GameWindow *game_window = game_window_init(800, 800);
-    if (!game_window) return -1;
+    static Client INSTANCE = {0};
 
-    char *map_path = concat(client_assets_path(), "maps/kanji.json");
-    FILE *map = fopen(map_path, "rb");
+    INSTANCE.camera.fov = M_PI / 2.0f;
+    INSTANCE.camera.near = 0.1f;
+    INSTANCE.camera.far = 10000.0f;
 
-    free(map_path);
-    fseek(map, 0, SEEK_END);
+    INSTANCE.window = glfwCreateWindow(800, 800, "KrunkNative", NULL, NULL);
+    if (!INSTANCE.window) return -1;
 
-    const size_t map_size = ftell(map);
-    char *map_data = malloc(map_size + 1);
+    glfwSetFramebufferSizeCallback(INSTANCE.window, resize_viewport);
+    glfwMakeContextCurrent(INSTANCE.window);
 
-    fseek(map, 0, SEEK_SET);
-    fread(map_data, 1, map_size, map);
-    fclose(map);
+    if (!gladLoadGLLoader((void *) glfwGetProcAddress)) return -1;
 
-    map_data[map_size] = 0;
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    const GameMap *map_obj = game_map_init(map_data);
+    INSTANCE.scene = scene_init();
+    if (!INSTANCE.scene) return -1;
 
-    free(map_data);
+    INSTANCE.ui = (UI *) main_menu_init();
 
-    for (size_t i = 0; i < map_obj->object_count; i++) {
-        const Object *object = map_obj->objects[i];
-        if (object->mesh) scene_add_mesh(game_window->scene, object->mesh);
+    // === LOAD MAP FOR DEBUG ===
+    char *map_path = concat(client_assets_path(), "maps/littletown.json");
+
+    size_t map_size;
+    unsigned char *map_data;
+
+    if (!read_file(map_path, &map_data, &map_size)) {
+        const GameMap *map = game_map_init((const char *) map_data);
+
+        for (size_t i = 0; i < map->object_count; i++) {
+            if (!map->objects[i]->mesh) continue;
+            scene_add_mesh(INSTANCE.scene, map->objects[i]->mesh);
+        }
+
+        free(map_data);
     }
 
-    MainMenu *ui = main_menu_init();
-    game_window->ui = (UI *) ui;
+    free(map_path);
+    // === END OF DEBUG SECTION ===
 
     double last_tick = glfwGetTime();
 
-    while (!glfwWindowShouldClose(game_window->glfw_window)) {
+    while (!glfwWindowShouldClose(INSTANCE.window)) {
         glfwPollEvents();
 
-        const double now = glfwGetTime();
-        const double delta = now - last_tick;
+        const float now = (float) glfwGetTime();
+        const float delta = (float) (now - last_tick);
 
-        client_tick(game_window, delta);
         last_tick = now;
 
-        glfwSwapBuffers(game_window->glfw_window);
+        client_tick(&INSTANCE, now, delta);
+        glfwSwapBuffers(INSTANCE.window);
     }
 
     return 0;
@@ -107,26 +124,34 @@ const char *client_assets_path() {
     return devel ? devel_assets : assets;
 }
 
+void resize_viewport(GLFWwindow *window, const int width, const int height) {
+    if (glfwGetCurrentContext() != window) return;
+    glViewport(0, 0, width, height);
+}
+
 double last_mouse_x, last_mouse_y;
 
-void client_tick(GameWindow *game_window, const double delta) {
-    game_window_render(game_window);
+void client_tick(Client *client, const float now, const float delta) {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    scene_render(client->scene, &client->camera);
+    ui_render(client->ui);
 
     vec3 forward = {0};
     vec3 right = {0};
     vec3 up = {0};
 
     const float yaw[] = {
-        cosf(game_window->scene->camera.rotation.y), 0.0f, -sinf(game_window->scene->camera.rotation.y), 0.0f,
+        cosf(client->camera.rotation.y), 0.0f, -sinf(client->camera.rotation.y), 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
-        sinf(game_window->scene->camera.rotation.y), 0.0f, cosf(game_window->scene->camera.rotation.y), 0.0f,
+        sinf(client->camera.rotation.y), 0.0f, cosf(client->camera.rotation.y), 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f,
     };
 
     const float pitch[] = {
         1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, cosf(game_window->scene->camera.rotation.x), -sinf(game_window->scene->camera.rotation.x), 0.0f,
-        0.0f, sinf(game_window->scene->camera.rotation.x), cosf(game_window->scene->camera.rotation.x), 0.0f,
+        0.0f, cosf(client->camera.rotation.x), -sinf(client->camera.rotation.x), 0.0f,
+        0.0f, sinf(client->camera.rotation.x), cosf(client->camera.rotation.x), 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f,
     };
 
@@ -149,52 +174,52 @@ void client_tick(GameWindow *game_window, const double delta) {
     float vel_y = 0.0f;
     float vel_z = 0.0f;
 
-    int locked = glfwGetInputMode(game_window->glfw_window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+    int locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
 
-    if (glfwGetMouseButton(game_window->glfw_window, GLFW_MOUSE_BUTTON_LEFT) && !locked) {
-        glfwSetInputMode(game_window->glfw_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        glfwGetCursorPos(game_window->glfw_window, &last_mouse_x, &last_mouse_y);
-    } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_ESCAPE) && locked) {
-        glfwSetInputMode(game_window->glfw_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    if (glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_LEFT) && !locked) {
+        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        glfwGetCursorPos(client->window, &last_mouse_x, &last_mouse_y);
+    } else if (glfwGetKey(client->window, GLFW_KEY_ESCAPE) && locked) {
+        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         locked = false;
     }
 
     if (locked) {
         double mouse_x, mouse_y;
-        glfwGetCursorPos(game_window->glfw_window, &mouse_x, &mouse_y);
+        glfwGetCursorPos(client->window, &mouse_x, &mouse_y);
 
         const double delta_x = mouse_x - last_mouse_x;
         const double delta_y = mouse_y - last_mouse_y;
 
-        game_window->scene->camera.rotation.y += (float) delta_x * 0.001f;
-        game_window->scene->camera.rotation.x -= (float) delta_y * 0.001f;
+        client->camera.rotation.y += (float) delta_x * 0.001f;
+        client->camera.rotation.x -= (float) delta_y * 0.001f;
 
-        if (game_window->scene->camera.rotation.x > M_PI / 2.0f) game_window->scene->camera.rotation.x = M_PI / 2.0f;
-        else if (game_window->scene->camera.rotation.x < -M_PI / 2.0f) game_window->scene->camera.rotation.x = -(float) M_PI / 2.0f;
+        if (client->camera.rotation.x > M_PI / 2.0f) client->camera.rotation.x = M_PI / 2.0f;
+        else if (client->camera.rotation.x < -M_PI / 2.0f) client->camera.rotation.x = -(float) M_PI / 2.0f;
 
         last_mouse_x = mouse_x;
         last_mouse_y = mouse_y;
     }
 
-    if (glfwGetKey(game_window->glfw_window, GLFW_KEY_W)) {
+    if (glfwGetKey(client->window, GLFW_KEY_W)) {
         vel_z = (float) delta * -50.0f;
-    } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_S)) {
+    } else if (glfwGetKey(client->window, GLFW_KEY_S)) {
         vel_z = (float) delta * 50.0f;
     }
 
-    if (glfwGetKey(game_window->glfw_window, GLFW_KEY_SPACE)) {
+    if (glfwGetKey(client->window, GLFW_KEY_SPACE)) {
         vel_y = (float) delta * 50.0f;
-    } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_LEFT_CONTROL)) {
+    } else if (glfwGetKey(client->window, GLFW_KEY_LEFT_CONTROL)) {
         vel_y = (float) delta * -50.0f;
     }
 
-    if (glfwGetKey(game_window->glfw_window, GLFW_KEY_A)) {
+    if (glfwGetKey(client->window, GLFW_KEY_A)) {
         vel_x = (float) delta * -50.0f;
-    } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_D)) {
+    } else if (glfwGetKey(client->window, GLFW_KEY_D)) {
         vel_x = (float) delta * 50.0f;
     }
 
-    game_window->scene->camera.position.x += vel_x * right.x + vel_y * up.x + vel_z * forward.x;
-    game_window->scene->camera.position.y += vel_x * right.y + vel_y * up.y + vel_z * forward.y;
-    game_window->scene->camera.position.z += vel_x * right.z + vel_y * up.z + vel_z * forward.z;
+    client->camera.position.x += vel_x * right.x + vel_y * up.x + vel_z * forward.x;
+    client->camera.position.y += vel_x * right.y + vel_y * up.y + vel_z * forward.y;
+    client->camera.position.z += vel_x * right.z + vel_y * up.z + vel_z * forward.z;
 }

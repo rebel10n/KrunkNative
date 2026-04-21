@@ -3,7 +3,6 @@
 #include <stdlib.h>
 
 static unsigned int shader_program = 0;
-static unsigned int blank_texture = 0;
 
 void flat_material_update_uniforms(FlatMaterial *material) {
     const int color = glGetUniformLocation(material->base.program, "color");
@@ -17,15 +16,15 @@ void flat_material_update_uniforms(FlatMaterial *material) {
     if (material->texture) {
         glBindTexture(GL_TEXTURE_2D, material->texture);
     } else {
-        if (!blank_texture) {
-            glCreateTextures(GL_TEXTURE_2D, 1, &blank_texture);
-            glBindTexture(GL_TEXTURE_2D, blank_texture);
+        if (!g_blank_texture) {
+            glCreateTextures(GL_TEXTURE_2D, 1, &g_blank_texture);
+            glBindTexture(GL_TEXTURE_2D, g_blank_texture);
 
             const unsigned char blank[] = {255, 255, 255};
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, blank);
         }
 
-        glBindTexture(GL_TEXTURE_2D, blank_texture);
+        glBindTexture(GL_TEXTURE_2D, g_blank_texture);
     }
 }
 

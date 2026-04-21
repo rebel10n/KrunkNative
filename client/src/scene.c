@@ -6,11 +6,6 @@
 
 Scene *scene_init() {
     Scene *scene = calloc(1, sizeof(Scene));
-
-    scene->camera.near = 0.1f;
-    scene->camera.far = 1000.0f;
-    scene->camera.fov = M_PI / 2.0f;
-
     return scene;
 }
 
@@ -54,12 +49,14 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
     scene->meshes = meshes;
 }
 
-void scene_render(Scene *scene) {
+void scene_render(const Scene *scene, Camera *camera) {
     int viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
 
-    camera_update_projection_matrix(&scene->camera, (float) viewport[2] / (float) viewport[3]);
-    camera_update_world_inverse_matrix(&scene->camera);
+    glEnable(GL_DEPTH_TEST);
+
+    camera_update_projection_matrix(camera, (float) viewport[2] / (float) viewport[3]);
+    camera_update_world_inverse_matrix(camera);
 
     for (size_t i = 0; i < scene->mesh_count; i++) {
         Mesh *mesh = scene->meshes[i];
@@ -80,8 +77,8 @@ void scene_render(Scene *scene) {
         const int camera_projection = glGetUniformLocation(mesh->material->program, "camera_projection");
 
         if (transform > -1) glUniformMatrix4fv(transform, 1, GL_TRUE, mesh->transform_matrix);
-        if (camera_world_inverse > -1) glUniformMatrix4fv(camera_world_inverse, 1, GL_TRUE, scene->camera.world_inverse_matrix);
-        if (camera_projection > -1) glUniformMatrix4fv(camera_projection, 1, GL_TRUE, scene->camera.projection_matrix);
+        if (camera_world_inverse > -1) glUniformMatrix4fv(camera_world_inverse, 1, GL_TRUE, camera->world_inverse_matrix);
+        if (camera_projection > -1) glUniformMatrix4fv(camera_projection, 1, GL_TRUE, camera->projection_matrix);
 
         if (mesh->material->wireframe) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);

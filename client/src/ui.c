@@ -72,9 +72,12 @@ void ui_fill_rect(UI *ui, const int x, const int y, const int width, const int h
 }
 
 void ui_render(UI *ui) {
+    if (!ui) return;
+
     int viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
 
+    glDisable(GL_DEPTH_TEST);
     ui->vtable->render(ui, viewport[2], viewport[3]);
 }
 
