@@ -1,6 +1,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <client.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -100,26 +101,94 @@ const char *client_assets_path() {
     return devel ? devel_assets : assets;
 }
 
+double last_mouse_x, last_mouse_y;
+
 void client_tick(GameWindow *game_window, const double delta) {
     game_window_render(game_window);
 
-    // TODO: logic xD
+    vec3 forward = {0};
+    vec3 right = {0};
+    vec3 up = {0};
+
+    const float yaw[] = {
+        cosf(game_window->scene->camera.rotation.y), 0.0f, -sinf(game_window->scene->camera.rotation.y), 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        sinf(game_window->scene->camera.rotation.y), 0.0f, cosf(game_window->scene->camera.rotation.y), 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+
+    const float pitch[] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, cosf(game_window->scene->camera.rotation.x), -sinf(game_window->scene->camera.rotation.x), 0.0f,
+        0.0f, sinf(game_window->scene->camera.rotation.x), cosf(game_window->scene->camera.rotation.x), 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+
+    float out[16];
+    mat4x4(yaw, pitch, out);
+
+    forward.x = out[2];
+    forward.y = out[6];
+    forward.z = out[10];
+
+    right.x = out[0];
+    right.y = out[4];
+    right.z = out[8];
+
+    up.x = out[1];
+    up.y = out[5];
+    up.z = out[9];
+
+    float vel_x = 0.0f;
+    float vel_y = 0.0f;
+    float vel_z = 0.0f;
+
+    int locked = glfwGetInputMode(game_window->glfw_window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+
+    if (glfwGetMouseButton(game_window->glfw_window, GLFW_MOUSE_BUTTON_LEFT) && !locked) {
+        glfwSetInputMode(game_window->glfw_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        glfwGetCursorPos(game_window->glfw_window, &last_mouse_x, &last_mouse_y);
+    } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_ESCAPE) && locked) {
+        glfwSetInputMode(game_window->glfw_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        locked = false;
+    }
+
+    if (locked) {
+        double mouse_x, mouse_y;
+        glfwGetCursorPos(game_window->glfw_window, &mouse_x, &mouse_y);
+
+        const double delta_x = mouse_x - last_mouse_x;
+        const double delta_y = mouse_y - last_mouse_y;
+
+        game_window->scene->camera.rotation.y += (float) delta_x * 0.001f;
+        game_window->scene->camera.rotation.x -= (float) delta_y * 0.001f;
+
+        if (game_window->scene->camera.rotation.x > M_PI / 2.0f) game_window->scene->camera.rotation.x = M_PI / 2.0f;
+        else if (game_window->scene->camera.rotation.x < -M_PI / 2.0f) game_window->scene->camera.rotation.x = -(float) M_PI / 2.0f;
+
+        last_mouse_x = mouse_x;
+        last_mouse_y = mouse_y;
+    }
 
     if (glfwGetKey(game_window->glfw_window, GLFW_KEY_W)) {
-        game_window->scene->camera.position.z -= (float) delta * 50.0f;
+        vel_z = (float) delta * -50.0f;
     } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_S)) {
-        game_window->scene->camera.position.z += (float) delta * 50.0f;
+        vel_z = (float) delta * 50.0f;
     }
 
     if (glfwGetKey(game_window->glfw_window, GLFW_KEY_SPACE)) {
-        game_window->scene->camera.position.y += (float) delta * 50.0f;
+        vel_y = (float) delta * 50.0f;
     } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_LEFT_CONTROL)) {
-        game_window->scene->camera.position.y -= (float) delta * 50.0f;
+        vel_y = (float) delta * -50.0f;
     }
 
     if (glfwGetKey(game_window->glfw_window, GLFW_KEY_A)) {
-        game_window->scene->camera.position.x -= (float) delta * 50.0f;
+        vel_x = (float) delta * -50.0f;
     } else if (glfwGetKey(game_window->glfw_window, GLFW_KEY_D)) {
-        game_window->scene->camera.position.x += (float) delta * 50.0f;
+        vel_x = (float) delta * 50.0f;
     }
+
+    game_window->scene->camera.position.x += vel_x * right.x + vel_y * up.x + vel_z * forward.x;
+    game_window->scene->camera.position.y += vel_x * right.y + vel_y * up.y + vel_z * forward.y;
+    game_window->scene->camera.position.z += vel_x * right.z + vel_y * up.z + vel_z * forward.z;
 }
