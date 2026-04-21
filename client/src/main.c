@@ -14,7 +14,9 @@
 
 asset_cache_map g_model_cache;
 asset_cache_map g_texture_cache;
+
 unsigned long long g_cube_model;
+unsigned long long g_plane_model;
 
 int main() {
     vt_init(&g_model_cache);

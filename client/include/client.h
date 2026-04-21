@@ -10,7 +10,10 @@
 
 extern asset_cache_map g_model_cache; // low 4 bytes = VBO, high 4 bytes = EBO
 extern asset_cache_map g_texture_cache; // low 4 bytes = texID, high 4 bytes = unused
-extern unsigned long long g_cube_model; // low 4 bytes = VBO, high 4 bytes = EBO
+
+// low 4 bytes = VBO, high 4 bytes = EBO
+extern unsigned long long g_cube_model;
+extern unsigned long long g_plane_model;
 
 typedef struct {
     float near;
@@ -146,6 +149,7 @@ const char *client_assets_path();
 void client_tick(GameWindow*, double);
 
 unsigned long long create_cube_model();
+unsigned long long create_plane_model();
 unsigned long long load_obj_model(const char*);
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);

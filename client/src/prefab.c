@@ -6,6 +6,65 @@
 
 typedef enum {
     PREFAB_CUBE,
+    PREFAB_CRATE,
+    PREFAB_BARREL,
+    PREFAB_LADDER,
+    PREFAB_PLANE,
+    PREFAB_SPAWN_POINT,
+    PREFAB_CAMERA_POSITION,
+    PREFAB_VEHICLE,
+    PREFAB_STACK,
+    PREFAB_RAMP,
+    PREFAB_SCORE_ZONE,
+    PREFAB_BILLBOARD,
+    PREFAB_DEATH_ZONE,
+    PREFAB_PARTICLES,
+    PREFAB_OBJECTIVE,
+    PREFAB_TREE,
+    PREFAB_CONE,
+    PREFAB_CONTAINER,
+    PREFAB_GRASS,
+    PREFAB_CONTAINER_R,
+    PREFAB_ACID_BARREL,
+    PREFAB_DOOR,
+    PREFAB_WINDOW,
+    PREFAB_FLAG,
+    PREFAB_GATE,
+    PREFAB_CHECK_POINT,
+    PREFAB_WEAPON_PICKUP,
+    PREFAB_TELEPORTER,
+    PREFAB_TEDDY,
+    PREFAB_TRIGGER,
+    PREFAB_SIGN,
+    PREFAB_DEPOSIT_BOX,
+    PREFAB_LIGHT_CONE,
+    PREFAB_SPECTATE_CAM,
+    PREFAB_SPHERE,
+    PREFAB_PLACEHOLDER,
+    PREFAB_CARD_B,
+    PREFAB_PALLET,
+    PREFAB_LIQUID,
+    PREFAB_SOUND_EMITTER,
+    PREFAB_EVENT,
+    PREFAB_TERMINAL,
+    PREFAB_PREMIUM_ZONE,
+    PREFAB_VERIFIED_ZONE,
+    PREFAB_CUSTOM_ASSET,
+    PREFAB_BOMB_SITE,
+    PREFAB_BOOST_PAD,
+    PREFAB_TEAM_ZONE,
+    PREFAB_CYLINDER,
+    PREFAB_POLICE,
+    PREFAB_CAGE,
+    PREFAB_E_BARREL,
+    PREFAB_SHOWCASE,
+    PREFAB_POINT_LIGHT,
+    PREFAB_GHOST,
+    PREFAB_GHOST_AI,
+    PREFAB_PUMPKIN,
+    PREFAB_RUNE,
+    PREFAB_SKELETON,
+    PREFAB_KNIGHT,
 } Prefab;
 
 typedef struct {
@@ -200,6 +259,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
 
         material->texture = texture_id;
+        material->color = color;
 
         // === DEBUG CODE START ===
         // mesh->material->wireframe = 1;
@@ -219,45 +279,40 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     char *full_texture_path = concat(client_assets_path(), texture_path);
     free(texture_path);
 
-    if (object->prefab == PREFAB_CUBE) {
-        if (!g_cube_model) g_cube_model = create_cube_model();
+    unsigned int texture_id = 0;
+    asset_cache_map_itr texture_cache_itr = vt_get(&g_texture_cache, full_texture_path);
 
-        if (!g_cube_model) {
-            free(full_texture_path);
-            return NULL;
-        }
+    if (!vt_is_end(texture_cache_itr)) {
+        texture_id = texture_cache_itr.data->val;
+        free(full_texture_path);
+    } else if (tex_id != 5) {
+        int texture_width, texture_height, _;
+        unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
 
-        unsigned int texture_id = 0;
-        asset_cache_map_itr texture_cache_itr = vt_get(&g_texture_cache, full_texture_path);
+        if (texture) {
+            glGenTextures(1, &texture_id);
+            glBindTexture(GL_TEXTURE_2D, texture_id);
 
-        if (!vt_is_end(texture_cache_itr)) {
-            texture_id = texture_cache_itr.data->val;
-            free(full_texture_path);
-        } else if (tex_id != 5) {
-            printf("PREFABS :: (cache miss) loading cube with texture :: %s\n", full_texture_path);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-            int texture_width, texture_height, _;
-            unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
+            glGenerateMipmap(GL_TEXTURE_2D);
 
-            if (texture) {
-                glGenTextures(1, &texture_id);
-                glBindTexture(GL_TEXTURE_2D, texture_id);
-
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
-                glGenerateMipmap(GL_TEXTURE_2D);
-
-                stbi_image_free(texture);
-                vt_insert(&g_texture_cache, full_texture_path, texture_id);
-            } else {
-                free(full_texture_path);
-            }
+            stbi_image_free(texture);
+            vt_insert(&g_texture_cache, full_texture_path, texture_id);
         } else free(full_texture_path);
+    } else free(full_texture_path);
+
+    if (object->prefab == PREFAB_CUBE || object->prefab == PREFAB_PLANE) {
+        if (object->prefab == PREFAB_CUBE && !g_cube_model) g_cube_model = create_cube_model();
+        if (object->prefab == PREFAB_PLANE && !g_plane_model) g_plane_model = create_plane_model();
+
+        const unsigned long long model = object->prefab == PREFAB_CUBE ? g_cube_model : g_plane_model;
+        if (!model) return NULL;
 
         BasicMaterial *material = basic_material_init();
-        Mesh *mesh = mesh_init((unsigned int) g_cube_model, (unsigned int) (g_cube_model >> 32), (Material *) material);
+        Mesh *mesh = mesh_init((unsigned int) model, (unsigned int) (model >> 32), (Material *) material);
 
         mesh->visible = visible;
         mesh->position = object->position;
@@ -266,8 +321,16 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         material->texture = texture_id;
         material->color = color;
-        material->use_face_tex_scaling = true;
+
+        material->use_face_tex_scaling = 1;
         material->face_scale = object->scale;
+
+        if (object->prefab == PREFAB_PLANE) {
+            mesh->scale.y = 0.01f;
+
+            material->face_scale.x = object->scale.x;
+            material->face_scale.y = object->scale.z;
+        }
 
         // === DEBUG CODE START ===
         // mesh->material->wireframe = 1;
@@ -276,6 +339,5 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         return mesh;
     }
 
-    free(full_texture_path);
     return NULL;
 }

@@ -67,6 +67,31 @@ unsigned long long create_cube_model() {
     return (unsigned long long) ebo << 32 | vbo;
 }
 
+unsigned long long create_plane_model() {
+    static const vertex vertices[] = {
+        {-0.5f, 1.0f, 0.5f, 0.0f, 0.0f},
+        {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+        {0.5f, 1.0f, 0.5f, 1.0f, 0.0f},
+    };
+
+    static const unsigned int indices[] = {0, 1, 2, 0, 3, 1};
+
+    unsigned int vbo;
+    unsigned int ebo;
+
+    glGenBuffers(1, &vbo);
+    glGenBuffers(1, &ebo);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    return (unsigned long long) ebo << 32 | vbo;
+}
+
 unsigned long long load_obj_model(const char *path) {
     fastObjMesh *mesh = fast_obj_read(path);
     size_t idx = 0;
