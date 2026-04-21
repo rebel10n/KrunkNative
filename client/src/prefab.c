@@ -96,14 +96,24 @@ const char *prefab_textures[] = {
     "tile",
 };
 
-Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
+Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     if (object->prefab < 0 || object->prefab >= sizeof(prefab_models) / sizeof(prefab_models[0])) {
         return NULL;
     }
 
     const PrefabModel prefab_model = prefab_models[object->prefab];
 
+    const cJSON *raw_visibility = cJSON_GetObjectItem(raw_obj, "v");
     const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
+    const cJSON *raw_color = cJSON_GetObjectItem(raw_obj, "c");
+    const cJSON *raw_color_idx = cJSON_GetObjectItem(raw_obj, "ci");
+
+    vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
+
+    if (cJSON_IsString(raw_color)) parse_hex_color(cJSON_GetStringValue(raw_color), &color);
+    else if (cJSON_IsNumber(raw_color_idx)) color = colors[(int) cJSON_GetNumberValue(raw_color_idx)];
+
+    const int visible = cJSON_GetNumberValue(raw_visibility) != 1;
     vec3 rotation = {0};
 
     if (cJSON_IsArray(raw_rotation)) {
@@ -184,6 +194,7 @@ Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
         BasicMaterial *material = basic_material_init();
         Mesh *mesh = mesh_init((unsigned int) model, (unsigned int) (model >> 32), (Material *) material);
 
+        mesh->visible = visible;
         mesh->position = object->position;
         mesh->rotation = rotation;
         mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
@@ -248,11 +259,13 @@ Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
         BasicMaterial *material = basic_material_init();
         Mesh *mesh = mesh_init((unsigned int) g_cube_model, (unsigned int) (g_cube_model >> 32), (Material *) material);
 
+        mesh->visible = visible;
         mesh->position = object->position;
         mesh->rotation = rotation;
         mesh->scale = object->scale;
 
         material->texture = texture_id;
+        material->color = color;
         material->use_face_tex_scaling = true;
         material->face_scale = object->scale;
 

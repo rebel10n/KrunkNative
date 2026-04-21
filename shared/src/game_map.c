@@ -16,7 +16,18 @@ GameMap *game_map_init(const char *raw) {
 
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
+    vec4 *parsed_colors = cJSON_IsArray(colors) ? calloc(cJSON_GetArraySize(colors), sizeof(vec4)) : NULL;
     GameMap *map = calloc(1, sizeof(GameMap));
+
+    if (parsed_colors) {
+        for (int i = 0; i < cJSON_GetArraySize(colors); i++) {
+            const char *hex = cJSON_GetStringValue(cJSON_GetArrayItem(colors, i));
+            vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
+
+            if (hex) parse_hex_color(hex, &color);
+            parsed_colors[i] = color;
+        }
+    }
 
     for (int i  = 0;  i < cJSON_GetArraySize(spawns); i++) {
         const cJSON *raw_spawn = cJSON_GetArrayItem(spawns, i);
@@ -66,16 +77,12 @@ GameMap *game_map_init(const char *raw) {
     }
 
     for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
-        cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
+        const cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
 
         const cJSON *obj_i = cJSON_GetObjectItem(raw_obj, "i");
         const cJSON *obj_id = cJSON_GetObjectItem(raw_obj, "id");
         const cJSON *obj_pos = cJSON_GetObjectItem(raw_obj, "p");
         const cJSON *obj_scale = cJSON_GetObjectItem(raw_obj, "s");
-        const cJSON *obj_color = cJSON_GetObjectItem(raw_obj, "c");
-        const cJSON *obj_color_idx = cJSON_GetObjectItem(raw_obj, "ci");
-
-        // TODO: parse color
 
         int prefab_id = 0;
 
@@ -107,7 +114,7 @@ GameMap *game_map_init(const char *raw) {
         object->prefab = prefab_id;
 
 #ifdef KRUNKNATIVE_CLIENT
-        object->mesh = prefab_init(object, raw_obj);
+        object->mesh = prefab_init(object, parsed_colors, raw_obj);
 #endif
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {
@@ -133,6 +140,7 @@ GameMap *game_map_init(const char *raw) {
 
             if (!map->objects) {
                 free(object);
+                free(parsed_colors);
                 free(map);
                 return NULL;
             }
@@ -144,6 +152,7 @@ GameMap *game_map_init(const char *raw) {
 
             if (!new_objects) {
                 free(object);
+                free(parsed_colors);
                 free(map);
                 return NULL;
             }
@@ -153,5 +162,6 @@ GameMap *game_map_init(const char *raw) {
         }
     }
 
+    free(parsed_colors);
     return map;
 }

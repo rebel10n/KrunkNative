@@ -24,7 +24,7 @@ int main() {
     GameWindow *game_window = game_window_init(800, 800);
     if (!game_window) return -1;
 
-    char *map_path = concat(client_assets_path(), "maps/sandstorm.json");
+    char *map_path = concat(client_assets_path(), "maps/newtown.json");
     FILE *map = fopen(map_path, "rb");
 
     free(map_path);

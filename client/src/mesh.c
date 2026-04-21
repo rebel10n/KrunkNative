@@ -161,6 +161,7 @@ Mesh *mesh_init(const unsigned int vbo, const unsigned int ebo, Material *materi
     mesh->scale.y = 1.0f;
     mesh->scale.z = 1.0f;
 
+    mesh->visible = 1;
     mesh->material = material;
 
     glGenVertexArrays(1, &mesh->vao);

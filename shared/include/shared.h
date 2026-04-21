@@ -52,6 +52,7 @@ typedef struct {
 GameMap *game_map_init(const char*);
 
 char *concat(const char*, const char*);
+int parse_hex_color(const char*, vec4*);
 
 static inline void mat3x3(const float *a, const float *b, float *out) {
 #define MAT3x3 \

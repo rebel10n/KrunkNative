@@ -78,6 +78,7 @@ typedef struct Mesh {
     unsigned int vbo;
     unsigned int ebo;
 
+    int visible;
     int vertex_count;
     int index_count;
 
@@ -147,4 +148,4 @@ void client_tick(GameWindow*, double);
 unsigned long long create_cube_model();
 unsigned long long load_obj_model(const char*);
 
-Mesh *prefab_init(Object*, const cJSON*);
+Mesh *prefab_init(Object*, const vec4*, const cJSON*);

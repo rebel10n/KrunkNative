@@ -63,6 +63,8 @@ void scene_render(Scene *scene) {
 
     for (size_t i = 0; i < scene->mesh_count; i++) {
         Mesh *mesh = scene->meshes[i];
+        if (!mesh->visible) continue;
+
         mesh_update_transform_matrix(mesh);
 
         glBindVertexArray(mesh->vao);
