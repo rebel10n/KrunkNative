@@ -58,6 +58,9 @@ FlatMaterial *flat_material_init();
 typedef struct {
     Material base;
 
+    int use_face_tex_scaling;
+    vec3 face_scale;
+
     vec4 color;
     vec2 texture_repeat;
     vec2 texture_offset;

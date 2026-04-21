@@ -103,6 +103,19 @@ Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
 
     const PrefabModel prefab_model = prefab_models[object->prefab];
 
+    const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
+    vec3 rotation = {0};
+
+    if (cJSON_IsArray(raw_rotation)) {
+        rotation.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 0));
+        rotation.y = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 1));
+        rotation.z = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 2));
+
+        if (rotation.x == NAN) rotation.x = 0.0f;
+        if (rotation.y == NAN) rotation.y = 0.0f;
+        if (rotation.z == NAN) rotation.z = 0.0f;
+    }
+
     if (prefab_model.filename) {
         const int model_path_length = snprintf(NULL, 0, "models/%s.obj", prefab_model.filename);
         const int texture_path_length = snprintf(NULL, 0, "textures/%s.png", prefab_model.filename);
@@ -172,20 +185,10 @@ Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
         Mesh *mesh = mesh_init((unsigned int) model, (unsigned int) (model >> 32), (Material *) material);
 
         mesh->position = object->position;
+        mesh->rotation = rotation;
         mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
+
         material->texture = texture_id;
-
-        const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
-
-        if (cJSON_IsArray(raw_rotation)) {
-            mesh->rotation.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 0));
-            mesh->rotation.y = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 1));
-            mesh->rotation.z = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 2));
-
-            if (mesh->rotation.x == NAN) mesh->rotation.x = 0.0f;
-            if (mesh->rotation.y == NAN) mesh->rotation.y = 0.0f;
-            if (mesh->rotation.z == NAN) mesh->rotation.z = 0.0f;
-        }
 
         // === DEBUG CODE START ===
         // mesh->material->wireframe = 1;
@@ -245,22 +248,13 @@ Mesh *prefab_init(Object *object, const cJSON *raw_obj) {
         BasicMaterial *material = basic_material_init();
         Mesh *mesh = mesh_init((unsigned int) g_cube_model, (unsigned int) (g_cube_model >> 32), (Material *) material);
 
-        const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
-
-        if (cJSON_IsArray(raw_rotation)) {
-            mesh->rotation.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 0));
-            mesh->rotation.y = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 1));
-            mesh->rotation.z = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_rotation, 2));
-
-            if (mesh->rotation.x == NAN) mesh->rotation.x = 0.0f;
-            if (mesh->rotation.y == NAN) mesh->rotation.y = 0.0f;
-            if (mesh->rotation.z == NAN) mesh->rotation.z = 0.0f;
-        }
-
         mesh->position = object->position;
+        mesh->rotation = rotation;
         mesh->scale = object->scale;
 
         material->texture = texture_id;
+        material->use_face_tex_scaling = true;
+        material->face_scale = object->scale;
 
         // === DEBUG CODE START ===
         // mesh->material->wireframe = 1;

@@ -12,6 +12,7 @@ GameMap *game_map_init(const char *raw) {
 
     const cJSON *objects = cJSON_GetObjectItem(raw_map, "objects");
     const cJSON *spawns = cJSON_GetObjectItem(raw_map, "spawns");
+    const cJSON *colors = cJSON_GetObjectItem(raw_map, "colors");
 
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
@@ -65,12 +66,16 @@ GameMap *game_map_init(const char *raw) {
     }
 
     for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
-        const cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
+        cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
 
         const cJSON *obj_i = cJSON_GetObjectItem(raw_obj, "i");
         const cJSON *obj_id = cJSON_GetObjectItem(raw_obj, "id");
         const cJSON *obj_pos = cJSON_GetObjectItem(raw_obj, "p");
         const cJSON *obj_scale = cJSON_GetObjectItem(raw_obj, "s");
+        const cJSON *obj_color = cJSON_GetObjectItem(raw_obj, "c");
+        const cJSON *obj_color_idx = cJSON_GetObjectItem(raw_obj, "ci");
+
+        // TODO: parse color
 
         int prefab_id = 0;
 
