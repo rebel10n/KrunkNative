@@ -127,20 +127,59 @@ Map *map_init(const char *raw) {
             if (!ramp) continue;
 
             ramp->direction = cJSON_IsNumber(dir) ? (int) cJSON_GetNumberValue(dir) % 4 : 0;
-            ramp->start_x = position.x;
-            ramp->start_z = position.z;
-            ramp->end_x = position.x;
-            ramp->end_z = position.z;
+            ramp->start.x = position.x;
+            ramp->start.y = position.z;
+            ramp->end.x = position.x;
+            ramp->end.y = position.z;
 
             if (ramp->direction % 2) {
-                ramp->start_z -= scale.z * 0.5f * (ramp->direction < 2 ? -1.0f : 1.0f);
-                ramp->end_z += scale.z * 0.5f * (ramp->direction < 2 ? -1.0f : 1.0f);
+                ramp->start.y -= scale.z * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
+                ramp->end.y += scale.z * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
             } else {
-                ramp->start_x -= scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
-                ramp->end_x += scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
+                ramp->start.x -= scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
+                ramp->end.x += scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
             }
 
             object->ramp = ramp;
+        }
+
+        const cJSON *obj_l = cJSON_GetObjectItem(raw_obj, "l");
+        const cJSON *obj_col = cJSON_GetObjectItem(raw_obj, "col");
+        const int no_collisions = obj_l && !cJSON_IsNull(obj_l) && (!cJSON_IsNumber(obj_l) || cJSON_GetNumberValue(obj_l) != 0) || obj_col && !cJSON_IsNull(obj_col) && (!cJSON_IsNumber(obj_col) || cJSON_GetNumberValue(obj_col) != 0);
+
+        switch (prefab_id) {
+            // TODO: handle collisions for these properly, will do later
+            case PREFAB_SPHERE:
+            case PREFAB_POINT_LIGHT:
+            case PREFAB_GATE:
+            case PREFAB_TRIGGER:
+            case PREFAB_TERMINAL:
+            case PREFAB_DEPOSIT_BOX:
+            case PREFAB_LIGHT_CONE:
+            case PREFAB_SOUND_EMITTER:
+            case PREFAB_OBJECTIVE:
+            case PREFAB_BOMB_SITE:
+            case PREFAB_FLAG:
+            case PREFAB_BOOST_PAD:
+            case PREFAB_WEAPON_PICKUP:
+            case PREFAB_SHOWCASE:
+            case PREFAB_PARTICLES:
+            case PREFAB_LIQUID:
+            case PREFAB_SPECTATE_CAM:
+            case PREFAB_RAMP:
+            case PREFAB_PREMIUM_ZONE:
+            case PREFAB_VERIFIED_ZONE:
+            case PREFAB_TEAM_ZONE:
+            case PREFAB_SCORE_ZONE:
+            case PREFAB_DEATH_ZONE:
+            case PREFAB_CHECK_POINT:
+            case PREFAB_TELEPORTER:
+            case PREFAB_LADDER:
+                object->collision_type = COLLISION_TYPE_NONE;
+                break;
+            default:
+                object->collision_type = no_collisions ? COLLISION_TYPE_NONE : prefab_id == PREFAB_CYLINDER ? COLLISION_TYPE_CYLINDER : COLLISION_TYPE_BOX;
+                break;
         }
 
 #ifdef KRUNKNATIVE_CLIENT

@@ -107,7 +107,7 @@ typedef enum {
     PREFAB_SHOWCASE,
     PREFAB_POINT_LIGHT,
     PREFAB_GHOST,
-    PREFAB_GHOST_AI,
+    PREFAB_BOT,
     PREFAB_PUMPKIN,
     PREFAB_RUNE,
     PREFAB_SKELETON,
@@ -116,10 +116,8 @@ typedef enum {
 
 typedef struct {
     int direction;
-    float start_x;
-    float start_z;
-    float end_x;
-    float end_z;
+    vec2 start;
+    vec2 end;
 } Ramp;
 
 typedef struct {
@@ -130,9 +128,16 @@ typedef struct {
     float frame_time;
 } TextureAnimation;
 
+typedef enum {
+    COLLISION_TYPE_BOX,
+    COLLISION_TYPE_CYLINDER,
+    COLLISION_TYPE_NONE,
+} CollisionType;
+
 typedef struct {
     unsigned int prefab;
     unsigned int texture;
+    CollisionType collision_type;
 
     vec3 position;
     vec3 scale;
@@ -252,6 +257,7 @@ char *concat(const char*, const char*);
 int read_file(const char*, unsigned char**, size_t*);
 int parse_hex_color(const char*, vec4*);
 float normalize_angle(float);
+float progress_on_line(vec2, vec2, vec2);
 
 static inline void mat3x3(const float *a, const float *b, float *out) {
 #define MAT3x3 \
@@ -280,4 +286,6 @@ static inline void mat4x4(const float *a, const float *b, float *out) {
 #undef MAT4x4
 }
 
-#define CLAMP(x, min, max) x < min ? min : x > max ? max : x
+#define CLAMP(x, min, max) (x < min ? min : x > max ? max : x)
+#define MIN(a, b) (a < b ? a : b)
+#define MAX(a, b) (a > b ? a : b)

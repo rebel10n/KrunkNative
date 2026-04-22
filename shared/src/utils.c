@@ -90,3 +90,8 @@ float normalize_angle(float angle) {
     if (angle < 0) return angle + (float) M_PI;
     return angle - (float) M_PI;
 }
+
+float progress_on_line(const vec2 line_start, const vec2 line_end, const vec2 point) {
+    const vec2 dir = {line_end.x - line_start.x, line_end.y - line_start.y};
+    return (dir.x * (point.x - line_start.x) + (point.y - line_start.y) * dir.y) / (dir.x*dir.x + dir.y*dir.y);
+}

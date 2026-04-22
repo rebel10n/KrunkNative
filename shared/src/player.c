@@ -37,15 +37,52 @@ void player_do_map_collisions(Player *player) {
         const Object *object = player->game->map->objects[i];
 
         const int collides =
+            (object->ramp || object->collision_type == COLLISION_TYPE_BOX) &&
             player->position.x + player->scale > object->position.x - object->scale.x * 0.5f &&
             player->position.x - player->scale < object->position.x + object->scale.x * 0.5f &&
             player->position.y + player->height > object->position.y &&
             player->position.y < object->position.y + object->scale.y &&
             player->position.z + player->scale > object->position.z - object->scale.z * 0.5f &&
-            player->position.z - player->scale < object->position.z + object->scale.z * 0.5f
+            player->position.z - player->scale < object->position.z + object->scale.z * 0.5f ||
+
+            object->collision_type == COLLISION_TYPE_CYLINDER &&
+            player->position.y < object->position.x + object->scale.y &&
+            player->position.y + player->height > object->position.y
         ;
 
         if (!collides) continue;
+
+        if (object->collision_type == COLLISION_TYPE_CYLINDER) {
+            const float closest_x =
+                object->position.x > player->position.x + player->scale ? player->position.x + player->scale :
+                object->position.x < player->position.x - player->scale ? player->position.x - player->scale :
+                object->position.x
+            ;
+
+            const float closest_z =
+                object->position.z > player->position.z + player->scale ? player->position.z + player->scale :
+                object->position.z < player->position.z - player->scale ? player->position.z - player->scale :
+                object->position.x
+            ;
+
+            const float r = hypotf(closest_x - object->position.x, closest_z - object->position.z);
+            const float coll_r = MIN(object->scale.x, object->scale.z) * 0.5f;
+
+            if (r > coll_r) continue;
+
+            // TODO
+            continue;
+        }
+
+        if (object->ramp) {
+            const vec2 player_xz = {player->position.x, player->position.z};
+            const float progress = CLAMP(progress_on_line(object->ramp->start, object->ramp->end, player_xz), 0.0f, 1.0f);
+
+            printf("PLAYER :: proc_inputs :: progress on ramp = %f \n", progress);
+
+            player->position.y = object->position.y + (object->scale.y + 0.01f) * progress;
+            continue;
+        }
 
         if (
             player->position.y < object->position.y + object->scale.y &&
