@@ -14,6 +14,7 @@ extern asset_cache_map g_texture_cache; // low 4 bytes = texID, high 4 bytes = u
 // low 4 bytes = VBO, high 4 bytes = EBO
 extern unsigned long long g_cube_model;
 extern unsigned long long g_plane_model;
+extern unsigned long long g_ramp_model;
 
 extern unsigned int g_blank_texture;
 
@@ -63,6 +64,7 @@ FlatMaterial *flat_material_init();
 typedef struct {
     Material base;
 
+    int is_ramp;
     int use_face_tex_scaling;
     vec3 face_scale;
 
@@ -72,6 +74,7 @@ typedef struct {
     unsigned int texture;
 } BasicMaterial;
 
+extern MaterialVTable basic_material_vtable;
 BasicMaterial *basic_material_init();
 
 typedef struct Mesh {
@@ -142,9 +145,11 @@ typedef struct {
 } Client;
 
 const char *client_assets_path();
+void client_animate_object_texture(Object*, float);
 
 unsigned long long create_cube_model();
 unsigned long long create_plane_model();
+unsigned long long create_ramp_model();
 unsigned long long load_obj_model(const char*);
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);

@@ -5,72 +5,11 @@
 #include <stb_image.h>
 #include <pcg_basic.h>
 
-typedef enum {
-    PREFAB_CUBE,
-    PREFAB_CRATE,
-    PREFAB_BARREL,
-    PREFAB_LADDER,
-    PREFAB_PLANE,
-    PREFAB_SPAWN_POINT,
-    PREFAB_CAMERA_POSITION,
-    PREFAB_VEHICLE,
-    PREFAB_STACK,
-    PREFAB_RAMP,
-    PREFAB_SCORE_ZONE,
-    PREFAB_BILLBOARD,
-    PREFAB_DEATH_ZONE,
-    PREFAB_PARTICLES,
-    PREFAB_OBJECTIVE,
-    PREFAB_TREE,
-    PREFAB_CONE,
-    PREFAB_CONTAINER,
-    PREFAB_GRASS,
-    PREFAB_CONTAINER_R,
-    PREFAB_ACID_BARREL,
-    PREFAB_DOOR,
-    PREFAB_WINDOW,
-    PREFAB_FLAG,
-    PREFAB_GATE,
-    PREFAB_CHECK_POINT,
-    PREFAB_WEAPON_PICKUP,
-    PREFAB_TELEPORTER,
-    PREFAB_TEDDY,
-    PREFAB_TRIGGER,
-    PREFAB_SIGN,
-    PREFAB_DEPOSIT_BOX,
-    PREFAB_LIGHT_CONE,
-    PREFAB_SPECTATE_CAM,
-    PREFAB_SPHERE,
-    PREFAB_PLACEHOLDER,
-    PREFAB_CARD_B,
-    PREFAB_PALLET,
-    PREFAB_LIQUID,
-    PREFAB_SOUND_EMITTER,
-    PREFAB_EVENT,
-    PREFAB_TERMINAL,
-    PREFAB_PREMIUM_ZONE,
-    PREFAB_VERIFIED_ZONE,
-    PREFAB_CUSTOM_ASSET,
-    PREFAB_BOMB_SITE,
-    PREFAB_BOOST_PAD,
-    PREFAB_TEAM_ZONE,
-    PREFAB_CYLINDER,
-    PREFAB_POLICE,
-    PREFAB_CAGE,
-    PREFAB_E_BARREL,
-    PREFAB_SHOWCASE,
-    PREFAB_POINT_LIGHT,
-    PREFAB_GHOST,
-    PREFAB_GHOST_AI,
-    PREFAB_PUMPKIN,
-    PREFAB_RUNE,
-    PREFAB_SKELETON,
-    PREFAB_KNIGHT,
-} Prefab;
-
 typedef struct {
     const char *filename;
     const float scale;
+    const int frames;
+    const float frame_time;
 } PrefabModel;
 
 const PrefabModel prefab_models[] = {
@@ -92,7 +31,7 @@ const PrefabModel prefab_models[] = {
     {"tree_0", 10.0f},
     {"cone_0", 4.0f},
     {"container_0", 7.0f},
-    {"grass_0", 32.0f},
+    {"grass_0", 32.0f, 4, 0.18f},
     {"containerr_0", 7.0f},
     {"acidbarrel_0", 4.0f},
     {"door_0", 5.0f},
@@ -184,6 +123,20 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         if (rotation.x == NAN) rotation.x = 0.0f;
         if (rotation.y == NAN) rotation.y = 0.0f;
         if (rotation.z == NAN) rotation.z = 0.0f;
+    }
+
+    if (prefab_model.frames) {
+        TextureAnimation *tex_anim = object->tex_anim;
+
+        if (!tex_anim) {
+            tex_anim = calloc(1, sizeof(TextureAnimation));
+            object->tex_anim = tex_anim;
+        }
+
+        if (tex_anim) {
+            tex_anim->frames = prefab_model.frames;
+            tex_anim->frame_time = prefab_model.frame_time;
+        }
     }
 
     if (prefab_model.filename) {
@@ -317,6 +270,23 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         } else free(full_texture_path);
     } else free(full_texture_path);
 
+    const cJSON *ts = cJSON_GetObjectItem(raw_obj, "ts");
+    const cJSON *td = cJSON_GetObjectItem(raw_obj, "td");
+
+    if (cJSON_IsNumber(ts)) {
+        TextureAnimation *tex_anim = object->tex_anim;
+
+        if (!tex_anim) {
+            tex_anim = calloc(1, sizeof(TextureAnimation));
+            object->tex_anim = tex_anim;
+        }
+
+        if (tex_anim) {
+            tex_anim->move = (float) cJSON_GetNumberValue(ts) / 10.0f;
+            tex_anim->move_direction = cJSON_IsNumber(td) ? (int) cJSON_GetNumberValue(td) % 2 : 0;
+        }
+    }
+
     if (object->prefab == PREFAB_CUBE || object->prefab == PREFAB_PLANE || object->prefab == PREFAB_BILLBOARD) {
         if (object->prefab == PREFAB_CUBE && !g_cube_model) g_cube_model = create_cube_model();
         else if (!g_plane_model) g_plane_model = create_plane_model();
@@ -344,6 +314,31 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
             material->face_scale.x = object->scale.x;
             material->face_scale.y = object->scale.z;
         }
+
+        return mesh;
+    }
+
+    if (object->prefab == PREFAB_RAMP) {
+        if (!g_ramp_model) g_ramp_model = create_ramp_model();
+        if (!g_ramp_model) return NULL;
+
+        BasicMaterial *material = basic_material_init();
+        Mesh *mesh = mesh_init((unsigned int) g_ramp_model, (unsigned int) (g_ramp_model >> 32), (Material *) material);
+
+        mesh->visible = visible;
+        mesh->position = object->position;
+        mesh->rotation.y = -(float) M_PI / 2.0f * (1.0f + (float) object->ramp->direction);
+        mesh->scale.y = object->scale.y;
+
+        mesh->scale.x = object->ramp->direction % 2 ? object->scale.x : object->scale.z;
+        mesh->scale.z = object->ramp->direction % 2 ? object->scale.z : object->scale.x;
+
+        material->texture = texture_id;
+        material->color = color;
+
+        material->is_ramp = 1;
+        material->use_face_tex_scaling = 1;
+        material->face_scale = mesh->scale;
 
         return mesh;
     }

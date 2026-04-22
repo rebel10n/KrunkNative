@@ -25,7 +25,86 @@ typedef struct {
     float player_height;
 } GameConstants;
 
+typedef enum {
+    PREFAB_CUBE,
+    PREFAB_CRATE,
+    PREFAB_BARREL,
+    PREFAB_LADDER,
+    PREFAB_PLANE,
+    PREFAB_SPAWN_POINT,
+    PREFAB_CAMERA_POSITION,
+    PREFAB_VEHICLE,
+    PREFAB_STACK,
+    PREFAB_RAMP,
+    PREFAB_SCORE_ZONE,
+    PREFAB_BILLBOARD,
+    PREFAB_DEATH_ZONE,
+    PREFAB_PARTICLES,
+    PREFAB_OBJECTIVE,
+    PREFAB_TREE,
+    PREFAB_CONE,
+    PREFAB_CONTAINER,
+    PREFAB_GRASS,
+    PREFAB_CONTAINER_R,
+    PREFAB_ACID_BARREL,
+    PREFAB_DOOR,
+    PREFAB_WINDOW,
+    PREFAB_FLAG,
+    PREFAB_GATE,
+    PREFAB_CHECK_POINT,
+    PREFAB_WEAPON_PICKUP,
+    PREFAB_TELEPORTER,
+    PREFAB_TEDDY,
+    PREFAB_TRIGGER,
+    PREFAB_SIGN,
+    PREFAB_DEPOSIT_BOX,
+    PREFAB_LIGHT_CONE,
+    PREFAB_SPECTATE_CAM,
+    PREFAB_SPHERE,
+    PREFAB_PLACEHOLDER,
+    PREFAB_CARD_B,
+    PREFAB_PALLET,
+    PREFAB_LIQUID,
+    PREFAB_SOUND_EMITTER,
+    PREFAB_EVENT,
+    PREFAB_TERMINAL,
+    PREFAB_PREMIUM_ZONE,
+    PREFAB_VERIFIED_ZONE,
+    PREFAB_CUSTOM_ASSET,
+    PREFAB_BOMB_SITE,
+    PREFAB_BOOST_PAD,
+    PREFAB_TEAM_ZONE,
+    PREFAB_CYLINDER,
+    PREFAB_POLICE,
+    PREFAB_CAGE,
+    PREFAB_E_BARREL,
+    PREFAB_SHOWCASE,
+    PREFAB_POINT_LIGHT,
+    PREFAB_GHOST,
+    PREFAB_GHOST_AI,
+    PREFAB_PUMPKIN,
+    PREFAB_RUNE,
+    PREFAB_SKELETON,
+    PREFAB_KNIGHT,
+} Prefab;
+
 extern GameConstants game_constants;
+
+typedef struct {
+    int direction;
+    float start_x;
+    float start_z;
+    float end_x;
+    float end_z;
+} Ramp;
+
+typedef struct {
+    float move;
+    int move_direction;
+
+    int frames;
+    float frame_time;
+} TextureAnimation;
 
 typedef struct {
     unsigned int prefab;
@@ -34,6 +113,8 @@ typedef struct {
     vec3 position;
     vec3 scale;
 
+    TextureAnimation *tex_anim;
+    Ramp *ramp;
     void *mesh;
 } Object;
 

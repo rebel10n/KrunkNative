@@ -92,6 +92,60 @@ unsigned long long create_plane_model() {
     return (unsigned long long) ebo << 32 | vbo;
 }
 
+unsigned long long create_ramp_model() {
+    static const vertex vertices[] = {
+        // TOP
+        {-0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
+        {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+        {0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
+
+        // BOTTOM
+        {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+        {0.5f, 0.0f, 0.5f, 1.0f, 1.0f},
+        {-0.5f, 0.0f, 0.5f, 0.0f, 1.0f},
+        {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+
+        // LEFT
+        {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+        {-0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
+        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+
+        // RIGHT
+        {0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
+        {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+        {0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+
+        // BACK
+        {0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+        {-0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+        {0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+        {-0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+    };
+
+    static const unsigned int indices[] = {
+        0, 1, 2, 0, 3, 1, // TOP
+        4, 5, 6, 4, 7, 5, // BOTTOM
+        8, 9, 10, // LEFT
+        11, 12, 13, // RIGHT
+        14, 15, 16, 14, 17, 15, // BACK
+    };
+
+    unsigned int vbo;
+    unsigned int ebo;
+
+    glGenBuffers(1, &vbo);
+    glGenBuffers(1, &ebo);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    return (unsigned long long) ebo << 32 | vbo;
+}
+
 unsigned long long load_obj_model(const char *path) {
     fastObjMesh *mesh = fast_obj_read(path);
     size_t idx = 0;

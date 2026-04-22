@@ -113,8 +113,32 @@ Map *map_init(const char *raw) {
         object->scale = scale;
         object->prefab = prefab_id;
 
+        if (prefab_id == PREFAB_RAMP) {
+            const cJSON *dir = cJSON_GetObjectItem(raw_obj, "d");
+            Ramp *ramp = calloc(1, sizeof(Ramp));
+
+            if (!ramp) continue;
+
+            ramp->direction = cJSON_IsNumber(dir) ? (int) cJSON_GetNumberValue(dir) % 4 : 0;
+            ramp->start_x = position.x;
+            ramp->start_z = position.z;
+            ramp->end_x = position.x;
+            ramp->end_z = position.z;
+
+            if (ramp->direction % 2) {
+                ramp->start_z -= scale.z * 0.5f * (ramp->direction < 2 ? -1.0f : 1.0f);
+                ramp->end_z += scale.z * 0.5f * (ramp->direction < 2 ? -1.0f : 1.0f);
+            } else {
+                ramp->start_x -= scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
+                ramp->end_x += scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
+            }
+
+            object->ramp = ramp;
+        }
+
 #ifdef KRUNKNATIVE_CLIENT
         object->mesh = prefab_init(object, parsed_colors, raw_obj);
+        client_animate_object_texture(object, 0.0f);
 #endif
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {

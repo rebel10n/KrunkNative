@@ -19,6 +19,7 @@ asset_cache_map g_texture_cache;
 
 unsigned long long g_cube_model;
 unsigned long long g_plane_model;
+unsigned long long g_ramp_model;
 
 unsigned int g_blank_texture;
 
@@ -56,15 +57,16 @@ int main() {
     INSTANCE.ui = (UI *) main_menu_init();
 
     // === LOAD MAP FOR DEBUG ===
-    char *map_path = concat(client_assets_path(), "maps/littletown.json");
+    char *map_path = concat(client_assets_path(), "maps/citadel.json");
 
     size_t map_size;
     unsigned char *map_data;
 
     if (!read_file(map_path, &map_data, &map_size)) {
-        const Map *map = map_init((const char *) map_data);
+        Map *map = map_init((const char *) map_data);
+        INSTANCE.game.map = map;
 
-        for (size_t i = 0; i < map->object_count; i++) {
+        if (map) for (size_t i = 0; i < map->object_count; i++) {
             if (!map->objects[i]->mesh) continue;
             scene_add_mesh(INSTANCE.scene, map->objects[i]->mesh);
         }
@@ -129,11 +131,47 @@ void resize_viewport(GLFWwindow *window, const int width, const int height) {
     glViewport(0, 0, width, height);
 }
 
+void client_animate_object_texture(Object *object, const float now) {
+    if (!object->mesh || !object->tex_anim) return;
+
+    const Mesh *mesh = object->mesh;
+    const TextureAnimation *tex_anim = object->tex_anim;
+
+    if (mesh->material->vtable != &basic_material_vtable) return;
+
+    BasicMaterial *material = (BasicMaterial *) mesh->material;
+
+    if (tex_anim->frames) {
+        const int frame = (int) (fmodf(now, (float) tex_anim->frames * tex_anim->frame_time) / tex_anim->frame_time);
+
+        material->texture_repeat.x = 1.0f / (float) tex_anim->frames;
+        material->texture_offset.x = (float) frame;
+    }
+
+    if (tex_anim->move) {
+        const float period = 1.0f / tex_anim->move;
+        const float progress = fmodf(now, period) / period;
+
+        if (tex_anim->move_direction) material->texture_offset.y = progress;
+        else material->texture_offset.x = progress;
+    }
+}
+
+void client_tick_textures(Client *client, const float now) {
+    if (client->game.map) {
+        for (size_t i = 0; i < client->game.map->object_count; i++) {
+            Object *object = client->game.map->objects[i];
+            client_animate_object_texture(object, now);
+        }
+    }
+}
+
 double last_mouse_x, last_mouse_y;
 
 void client_tick(Client *client, const float now, const float delta) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    client_tick_textures(client, now);
     scene_render(client->scene, &client->camera);
     ui_render(client->ui);
 
@@ -184,22 +222,22 @@ void client_tick(Client *client, const float now, const float delta) {
         locked = false;
     }
 
-    if (locked) {
-        double mouse_x, mouse_y;
-        glfwGetCursorPos(client->window, &mouse_x, &mouse_y);
+    if (!locked) return;
 
-        const double delta_x = mouse_x - last_mouse_x;
-        const double delta_y = mouse_y - last_mouse_y;
+    double mouse_x, mouse_y;
+    glfwGetCursorPos(client->window, &mouse_x, &mouse_y);
 
-        client->camera.rotation.y += (float) delta_x * 0.001f;
-        client->camera.rotation.x -= (float) delta_y * 0.001f;
+    const double delta_x = mouse_x - last_mouse_x;
+    const double delta_y = mouse_y - last_mouse_y;
 
-        if (client->camera.rotation.x > M_PI / 2.0f) client->camera.rotation.x = M_PI / 2.0f;
-        else if (client->camera.rotation.x < -M_PI / 2.0f) client->camera.rotation.x = -(float) M_PI / 2.0f;
+    client->camera.rotation.y += (float) delta_x * 0.001f;
+    client->camera.rotation.x -= (float) delta_y * 0.001f;
 
-        last_mouse_x = mouse_x;
-        last_mouse_y = mouse_y;
-    }
+    if (client->camera.rotation.x > M_PI / 2.0f) client->camera.rotation.x = M_PI / 2.0f;
+    else if (client->camera.rotation.x < -M_PI / 2.0f) client->camera.rotation.x = -(float) M_PI / 2.0f;
+
+    last_mouse_x = mouse_x;
+    last_mouse_y = mouse_y;
 
     if (glfwGetKey(client->window, GLFW_KEY_W)) {
         vel_z = (float) delta * -50.0f;
