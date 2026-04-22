@@ -31,7 +31,7 @@ const PrefabModel prefab_models[] = {
     {"tree_0", 10.0f},
     {"cone_0", 4.0f},
     {"container_0", 7.0f},
-    {"grass_0", 32.0f, 4, 0.18f},
+    {"grass_0", 32.0f, 4, 180.0f},
     {"containerr_0", 7.0f},
     {"acidbarrel_0", 4.0f},
     {"door_0", 5.0f},

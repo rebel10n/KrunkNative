@@ -48,6 +48,10 @@ int main() {
     glfwSetFramebufferSizeCallback(INSTANCE.window, resize_viewport);
     glfwMakeContextCurrent(INSTANCE.window);
 
+    if (glfwRawMouseMotionSupported()) {
+        glfwSetInputMode(INSTANCE.window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+    }
+
     if (!gladLoadGLLoader((void *) glfwGetProcAddress)) return -1;
 
     glEnable(GL_BLEND);
@@ -185,17 +189,41 @@ void client_tick(Client *client, const float now, const float delta) {
     scene_render(client->scene, &client->camera);
     ui_render(client->ui);
 
+    Input input = {0};
     vec2 mouse_delta = {0};
 
+    input.move_dir = -1;
+    client->mouse_state.locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+
+    double x, y;
+    glfwGetCursorPos(client->window, &x, &y);
+
     if (client->mouse_state.locked) {
-        double x, y;
-        glfwGetCursorPos(client->window, &x, &y);
+        if (glfwGetKey(client->window, GLFW_KEY_ESCAPE)) {
+            glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
 
         mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
         mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
 
-        client->mouse_state.last_pos.x = (float) x;
-        client->mouse_state.last_pos.y = (float) y;
+        const int forward = glfwGetKey(client->window, GLFW_KEY_W);
+        const int back = glfwGetKey(client->window, GLFW_KEY_S);
+        const int left = glfwGetKey(client->window, GLFW_KEY_A);
+        const int right = glfwGetKey(client->window, GLFW_KEY_D);
+
+        if (forward ^ back) {
+            input.move_dir += forward ? 1 : 5;
+            if (left ^ right) input.move_dir += right ? (forward ? 1 : -1) : forward ? 7 : 1;
+        } else if (left ^ right) {
+            input.move_dir += right ? 3 : 7;
+        }
+    }
+
+    client->mouse_state.last_pos.x = (float) x;
+    client->mouse_state.last_pos.y = (float) y;
+
+    if (!client->mouse_state.locked && glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_LEFT)) {
+        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 
     Player *me = client->game.players ? client->game.players[0] : NULL;
@@ -207,15 +235,13 @@ void client_tick(Client *client, const float now, const float delta) {
         client->camera.rotation.x = me->direction.x;
         client->camera.rotation.y = me->direction.y;
 
-        Input input = {0};
-
         input.seq = ++me->input_seq;
         input.delta = delta;
 
         input.x_dir = me->direction.x - mouse_delta.y * game_constants.mouse_sensitivity;
         input.y_dir = me->direction.y - mouse_delta.x * game_constants.mouse_sensitivity;
 
-        player_proc_input(me, &input);
+        player_proc_input(me, &input, 0, 0);
     } else {
         client->camera.position = client->game.map->camera_position;
         client->camera.rotation.y = fmodf(client->camera.rotation.y + delta * 0.1f, M_PI * 2.0f);

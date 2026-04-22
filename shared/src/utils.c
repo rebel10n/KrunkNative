@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 char *concat(const char *a, const char *b) {
     const size_t len_a = strlen(a);
@@ -81,4 +82,11 @@ int parse_hex_color(const char *hex_str, vec4 *out) {
     out->w = hex_len == 4 || hex_len == 8 ? (float) channels[3] / 255.0f : 1.0f;
 
     return 0;
+}
+
+float normalize_angle(float angle) {
+    angle = fmodf(angle, (float) M_PI * 2.0f);
+
+    if (angle < 0) return angle + (float) M_PI;
+    return angle - (float) M_PI;
 }

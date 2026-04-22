@@ -27,6 +27,21 @@ typedef struct {
     float camera_height;
     float min_delta;
     float max_delta;
+    float crouch_speed;
+    float player_speed;
+    float slipping_speed;
+    float air_speed;
+    float aim_slow;
+    float crouch_slow;
+    float terrain_slide_threshold;
+    float terrain_slip_decel;
+    float terrain_slide_decel;
+    float terrain_decel;
+    float slide_decel;
+    float air_decel;
+    float ground_decel;
+    float ladder_decel;
+    float crouch_distance;
 } GameConstants;
 
 extern GameConstants game_constants;
@@ -181,7 +196,12 @@ typedef struct {
 
     int uid;
     int active;
+    int noclip;
+
     int on_ground;
+    int on_ladder;
+    int on_terrain;
+    int terrain_slipping;
 
     int input_seq;
 
@@ -189,10 +209,19 @@ typedef struct {
     int max_health;
 
     float height;
+    float speed;
+
     float crouch_val;
+    float aim_val;
+
+    int slid_cont;
+
+    float slide_timer;
+    float jump_timer;
 
     vec3 position;
     vec3 last_position;
+    vec3 velocity;
     vec2 direction;
 
     player_mesh_map meshes;
@@ -200,7 +229,7 @@ typedef struct {
 
 Player *player_init(struct Game_t*);
 void player_spawn(Player*);
-void player_proc_input(Player*, const Input*);
+void player_proc_input(Player*, const Input*, int, int);
 
 typedef struct Game_t {
     GameMode mode;
@@ -215,6 +244,7 @@ void game_players_add(Game*, Player*, int);
 char *concat(const char*, const char*);
 int read_file(const char*, unsigned char**, size_t*);
 int parse_hex_color(const char*, vec4*);
+float normalize_angle(float);
 
 static inline void mat3x3(const float *a, const float *b, float *out) {
 #define MAT3x3 \
