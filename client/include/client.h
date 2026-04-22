@@ -141,7 +141,13 @@ typedef struct {
     Scene *scene;
     UI *ui;
 
+    struct {
+        int locked;
+        vec2 last_pos;
+    } mouse_state;
+
     Game game;
+    Player **me;
 } Client;
 
 const char *client_assets_path();

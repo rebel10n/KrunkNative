@@ -36,6 +36,8 @@ int main() {
 
     static Client INSTANCE = {0};
 
+    INSTANCE.me = &INSTANCE.game.players[0];
+
     INSTANCE.camera.fov = M_PI / 2.0f;
     INSTANCE.camera.near = 0.1f;
     INSTANCE.camera.far = 10000.0f;
@@ -54,7 +56,8 @@ int main() {
     INSTANCE.scene = scene_init();
     if (!INSTANCE.scene) return -1;
 
-    INSTANCE.ui = (UI *) main_menu_init();
+    // TODO: proper UI
+    // INSTANCE.ui = (UI *) main_menu_init();
 
     // === LOAD MAP FOR DEBUG ===
     char *map_path = concat(client_assets_path(), "maps/citadel.json");
@@ -75,6 +78,15 @@ int main() {
     }
 
     free(map_path);
+
+    // === ADD LOCAL PLAYER ===
+    Player *me = player_init(&INSTANCE.game);
+
+    if (me) {
+        player_spawn(me);
+        game_players_add(&INSTANCE.game, me, 1);
+    }
+
     // === END OF DEBUG SECTION ===
 
     double last_tick = glfwGetTime();
@@ -166,8 +178,6 @@ void client_tick_textures(Client *client, const float now) {
     }
 }
 
-double last_mouse_x, last_mouse_y;
-
 void client_tick(Client *client, const float now, const float delta) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -175,92 +185,39 @@ void client_tick(Client *client, const float now, const float delta) {
     scene_render(client->scene, &client->camera);
     ui_render(client->ui);
 
-    // client->camera.position = client->game.map->camera_position;
-    // client->camera.rotation.y = fmodf(client->camera.rotation.y + delta * 0.1f, M_PI * 2.0f);
+    vec2 mouse_delta = {0};
 
-    vec3 forward = {0};
-    vec3 right = {0};
-    vec3 up = {0};
+    if (client->mouse_state.locked) {
+        double x, y;
+        glfwGetCursorPos(client->window, &x, &y);
 
-    const float yaw[] = {
-        cosf(client->camera.rotation.y), 0.0f, -sinf(client->camera.rotation.y), 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        sinf(client->camera.rotation.y), 0.0f, cosf(client->camera.rotation.y), 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
+        mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
+        mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
 
-    const float pitch[] = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, cosf(client->camera.rotation.x), -sinf(client->camera.rotation.x), 0.0f,
-        0.0f, sinf(client->camera.rotation.x), cosf(client->camera.rotation.x), 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-
-    float out[16];
-    mat4x4(yaw, pitch, out);
-
-    forward.x = out[2];
-    forward.y = out[6];
-    forward.z = out[10];
-
-    right.x = out[0];
-    right.y = out[4];
-    right.z = out[8];
-
-    up.x = out[1];
-    up.y = out[5];
-    up.z = out[9];
-
-    float vel_x = 0.0f;
-    float vel_y = 0.0f;
-    float vel_z = 0.0f;
-
-    int locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
-
-    if (glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_LEFT) && !locked) {
-        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        glfwGetCursorPos(client->window, &last_mouse_x, &last_mouse_y);
-    } else if (glfwGetKey(client->window, GLFW_KEY_ESCAPE) && locked) {
-        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        locked = false;
+        client->mouse_state.last_pos.x = (float) x;
+        client->mouse_state.last_pos.y = (float) y;
     }
 
-    if (!locked) return;
+    Player *me = client->game.players ? client->game.players[0] : NULL;
 
-    double mouse_x, mouse_y;
-    glfwGetCursorPos(client->window, &mouse_x, &mouse_y);
+    if (me && me->active) {
+        client->camera.position = me->position;
+        client->camera.position.y += me->height - game_constants.camera_height;
 
-    const double delta_x = mouse_x - last_mouse_x;
-    const double delta_y = mouse_y - last_mouse_y;
+        client->camera.rotation.x = me->direction.x;
+        client->camera.rotation.y = me->direction.y;
 
-    client->camera.rotation.y -= (float) delta_x * game_constants.mouse_sensitivity;
-    client->camera.rotation.x -= (float) delta_y * game_constants.mouse_sensitivity;
+        Input input = {0};
 
-    if (client->camera.rotation.x > M_PI / 2.0f) client->camera.rotation.x = M_PI / 2.0f;
-    else if (client->camera.rotation.x < -M_PI / 2.0f) client->camera.rotation.x = -(float) M_PI / 2.0f;
+        input.seq = ++me->input_seq;
+        input.delta = delta;
 
-    last_mouse_x = mouse_x;
-    last_mouse_y = mouse_y;
+        input.x_dir = me->direction.x - mouse_delta.y * game_constants.mouse_sensitivity;
+        input.y_dir = me->direction.y - mouse_delta.x * game_constants.mouse_sensitivity;
 
-    if (glfwGetKey(client->window, GLFW_KEY_W)) {
-        vel_z = (float) delta * -50.0f;
-    } else if (glfwGetKey(client->window, GLFW_KEY_S)) {
-        vel_z = (float) delta * 50.0f;
+        player_proc_input(me, &input);
+    } else {
+        client->camera.position = client->game.map->camera_position;
+        client->camera.rotation.y = fmodf(client->camera.rotation.y + delta * 0.1f, M_PI * 2.0f);
     }
-
-    if (glfwGetKey(client->window, GLFW_KEY_SPACE)) {
-        vel_y = (float) delta * 50.0f;
-    } else if (glfwGetKey(client->window, GLFW_KEY_LEFT_CONTROL)) {
-        vel_y = (float) delta * -50.0f;
-    }
-
-    if (glfwGetKey(client->window, GLFW_KEY_A)) {
-        vel_x = (float) delta * -50.0f;
-    } else if (glfwGetKey(client->window, GLFW_KEY_D)) {
-        vel_x = (float) delta * 50.0f;
-    }
-
-    client->camera.position.x += vel_x * right.x + vel_y * up.x + vel_z * forward.x;
-    client->camera.position.y += vel_x * right.y + vel_y * up.y + vel_z * forward.y;
-    client->camera.position.z += vel_x * right.z + vel_y * up.z + vel_z * forward.z;
 }

@@ -24,7 +24,12 @@ typedef struct {
     float mouse_sensitivity;
     float world_uv_scale;
     float player_height;
+    float camera_height;
+    float min_delta;
+    float max_delta;
 } GameConstants;
+
+extern GameConstants game_constants;
 
 typedef enum {
     PREFAB_CUBE,
@@ -88,8 +93,6 @@ typedef enum {
     PREFAB_SKELETON,
     PREFAB_KNIGHT,
 } Prefab;
-
-extern GameConstants game_constants;
 
 typedef struct {
     int direction;
@@ -158,24 +161,56 @@ typedef enum {
 #include <verstable.h>
 
 typedef struct {
+    int seq;
+    int move_dir;
+
+    float delta;
+    float x_dir;
+    float y_dir;
+
+    unsigned char shoot:1;
+    unsigned char jump:1;
+    unsigned char crouch:1;
+    unsigned char reload:1;
+} Input;
+
+struct Game_t;
+
+typedef struct {
+    struct Game_t* game;
+
     int uid;
     int active;
+    int on_ground;
+
+    int input_seq;
 
     int health;
+    int max_health;
+
+    float height;
+    float crouch_val;
 
     vec3 position;
+    vec3 last_position;
     vec2 direction;
 
     player_mesh_map meshes;
 } Player;
 
-typedef struct {
+Player *player_init(struct Game_t*);
+void player_spawn(Player*);
+void player_proc_input(Player*, const Input*);
+
+typedef struct Game_t {
     GameMode mode;
     Map *map;
 
     size_t player_count;
     Player **players;
 } Game;
+
+void game_players_add(Game*, Player*, int);
 
 char *concat(const char*, const char*);
 int read_file(const char*, unsigned char**, size_t*);
@@ -207,3 +242,5 @@ static inline void mat4x4(const float *a, const float *b, float *out) {
 #undef X
 #undef MAT4x4
 }
+
+#define CLAMP(x, min, max) x < min ? min : x > max ? max : x
