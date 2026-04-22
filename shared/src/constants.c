@@ -1,6 +1,10 @@
 #include <shared.h>
 
-GameConstants game_constants = {
+const float arm_scale = 1.2f;
+const float arm_inset = -0.1f;
+const float chest_width = 2.6f;
+
+const GameConstants game_constants = {
     .billboard_count = 6,
     .mouse_sensitivity = 0.0024f,
     .world_uv_scale = 60.0f,
@@ -23,4 +27,9 @@ GameConstants game_constants = {
     .ground_decel = 0.99f,
     .ladder_decel = 0.97f,
     .crouch_distance = 3.0f,
+    .gravity = 0.15f,
+    .arm_scale = arm_scale,
+    .arm_inset = arm_inset,
+    .chest_width = chest_width,
+    .player_scale = (arm_scale * 0.5f + chest_width + arm_inset) * 0.5f,
 };

@@ -8,6 +8,7 @@ Player *player_init(Game *game) {
     if (!player) return NULL;
 
     player->game = game;
+    player->scale = game_constants.player_scale;
 
     return player;
 }
@@ -31,6 +32,68 @@ void player_spawn(Player *player) {
     }
 }
 
+void player_do_map_collisions(Player *player) {
+    for (size_t i = 0; i < player->game->map->object_count; i++) {
+        const Object *object = player->game->map->objects[i];
+
+        const int collides =
+            player->position.x + player->scale > object->position.x - object->scale.x * 0.5f &&
+            player->position.x - player->scale < object->position.x + object->scale.x * 0.5f &&
+            player->position.y + player->height > object->position.y &&
+            player->position.y < object->position.y + object->scale.y &&
+            player->position.z + player->scale > object->position.z - object->scale.z * 0.5f &&
+            player->position.z - player->scale < object->position.z + object->scale.z * 0.5f
+        ;
+
+        if (!collides) continue;
+
+        if (
+            player->position.y < object->position.y + object->scale.y &&
+            player->last_position.y >= object->position.y + object->scale.y
+        ) {
+            player->position.y = object->position.y + object->scale.y;
+            player->velocity.y = 0.0f;
+
+            player->on_ground = 1;
+            player->on_terrain = 0;
+        } else if (
+            player->position.y + player->height > object->position.y &&
+            player->last_position.y + player->height <= object->position.y
+        ) {
+            player->position.y = object->position.y - player->height;
+            player->velocity.y = 0.0f;
+        }
+
+        if (
+            player->position.x - player->scale < object->position.x + object->scale.x * 0.5f &&
+            player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f
+        ) {
+            player->position.x = object->position.x + object->scale.x * 0.5f + player->scale;
+            player->velocity.x = 0.0f;
+        } else if (
+            player->position.x + player->scale > object->position.x - object->scale.x * 0.5f &&
+            player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f
+        ) {
+            player->position.x = object->position.x - object->scale.x * 0.5f - player->scale;
+            player->velocity.x = 0.0f;
+        }
+
+        if (
+            player->position.z - player->scale < object->position.z + object->scale.z * 0.5f &&
+            player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f
+        ) {
+            player->position.z = object->position.z + object->scale.z * 0.5f + player->scale;
+            player->velocity.z = 0.0f;
+        } else if (
+            player->position.z + player->scale > object->position.z - object->scale.z * 0.5f &&
+            player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f
+        ) {
+            player->position.z = object->position.z - object->scale.z * 0.5f - player->scale;
+            player->velocity.z = 0.0f;
+        }
+    }
+}
+
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
     const float delta = CLAMP(input->delta, game_constants.min_delta, game_constants.max_delta);
     const float move_dir = (float) -M_PI / 4.0f * (float) input->move_dir;
@@ -45,6 +108,8 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     if (!recon) {
         // TODO: RECOIL ANIMATION
     }
+
+    player->last_position = player->position;
 
     // TODO: SCOPING
 
@@ -122,7 +187,11 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             // TODO: try jump
         }
 
-        // TODO: wall jumps
+        if (!contact) {
+            const float wall_mlt = 1.0f; // TODO: wall jumps
+            player->velocity.y -= delta * game_constants.gravity * 1.0f * wall_mlt; // TODO: game config gravity mlt
+        }
+
         // TODO: accel *= CLAMP(1.0f - inputs[12], 0.0f, 1.0f); "what?" - joe biden
 
         if (input->move_dir % 1) {
@@ -162,5 +231,11 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             player->position.z += player->velocity.z * delta * 1000.0f; // TODO: multiply by game map config speed_z
             player->velocity.z *= powf(decel, delta * 1000.0f);
         }
+
+        player->on_ground = player->noclip;
+        player->on_ladder = 0;
+        player->on_wall = 0;
+
+        if (!player->noclip) player_do_map_collisions(player);
     }
 }

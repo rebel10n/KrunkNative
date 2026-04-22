@@ -42,9 +42,14 @@ typedef struct {
     float ground_decel;
     float ladder_decel;
     float crouch_distance;
+    float gravity;
+    float arm_scale;
+    float arm_inset;
+    float chest_width;
+    float player_scale;
 } GameConstants;
 
-extern GameConstants game_constants;
+extern const GameConstants game_constants;
 
 typedef enum {
     PREFAB_CUBE,
@@ -200,6 +205,7 @@ typedef struct {
 
     int on_ground;
     int on_ladder;
+    int on_wall;
     int on_terrain;
     int terrain_slipping;
 
@@ -208,6 +214,7 @@ typedef struct {
     int health;
     int max_health;
 
+    float scale;
     float height;
     float speed;
 
