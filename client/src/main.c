@@ -175,6 +175,9 @@ void client_tick(Client *client, const float now, const float delta) {
     scene_render(client->scene, &client->camera);
     ui_render(client->ui);
 
+    // client->camera.position = client->game.map->camera_position;
+    // client->camera.rotation.y = fmodf(client->camera.rotation.y + delta * 0.1f, M_PI * 2.0f);
+
     vec3 forward = {0};
     vec3 right = {0};
     vec3 up = {0};
@@ -230,8 +233,8 @@ void client_tick(Client *client, const float now, const float delta) {
     const double delta_x = mouse_x - last_mouse_x;
     const double delta_y = mouse_y - last_mouse_y;
 
-    client->camera.rotation.y += (float) delta_x * 0.001f;
-    client->camera.rotation.x -= (float) delta_y * 0.001f;
+    client->camera.rotation.y -= (float) delta_x * game_constants.mouse_sensitivity;
+    client->camera.rotation.x -= (float) delta_y * game_constants.mouse_sensitivity;
 
     if (client->camera.rotation.x > M_PI / 2.0f) client->camera.rotation.x = M_PI / 2.0f;
     else if (client->camera.rotation.x < -M_PI / 2.0f) client->camera.rotation.x = -(float) M_PI / 2.0f;

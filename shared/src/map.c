@@ -13,11 +13,18 @@ Map *map_init(const char *raw) {
     const cJSON *objects = cJSON_GetObjectItem(raw_map, "objects");
     const cJSON *spawns = cJSON_GetObjectItem(raw_map, "spawns");
     const cJSON *colors = cJSON_GetObjectItem(raw_map, "colors");
+    const cJSON *cam_pos = cJSON_GetObjectItem(raw_map, "camPos");
 
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
     vec4 *parsed_colors = cJSON_IsArray(colors) ? calloc(cJSON_GetArraySize(colors), sizeof(vec4)) : NULL;
     Map *map = calloc(1, sizeof(Map));
+
+    if (cJSON_IsArray(cam_pos) && cJSON_GetArraySize(cam_pos) >= 3) {
+        map->camera_position.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(cam_pos, 0));
+        map->camera_position.y = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(cam_pos, 1));
+        map->camera_position.z = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(cam_pos, 2));
+    }
 
     if (parsed_colors) {
         for (int i = 0; i < cJSON_GetArraySize(colors); i++) {

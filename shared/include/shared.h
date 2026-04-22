@@ -21,6 +21,7 @@ typedef struct {
 
 typedef struct {
     int billboard_count;
+    float mouse_sensitivity;
     float world_uv_scale;
     float player_height;
 } GameConstants;
@@ -136,6 +137,8 @@ typedef struct {
         vec3 min;
         vec3 max;
     } dimensions;
+
+    vec3 camera_position;
 } Map;
 
 Map *map_init(const char*);

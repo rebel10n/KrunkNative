@@ -28,9 +28,9 @@ void camera_update_world_inverse_matrix(Camera *camera) {
     };
 
     const float rotate_y_matrix[] = {
-        cosf(-camera->rotation.y), 0.0f, -sinf(-camera->rotation.y), 0.0f,
+        cosf(-camera->rotation.y), 0.0f, sinf(-camera->rotation.y), 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
-        sinf(-camera->rotation.y), 0.0f, cosf(-camera->rotation.y), 0.0f,
+        -sinf(-camera->rotation.y), 0.0f, cosf(-camera->rotation.y), 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f,
     };
 
