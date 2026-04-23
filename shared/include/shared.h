@@ -301,7 +301,7 @@ static inline void mat4x4(const float *a, const float *b, float *out) {
 #undef MAT4x4
 }
 
-#define CROP(x, v) (x > v ? v : x < -v ? -v : x)
+#define CROP(x, lim) (x <= lim && x >= -lim ? 0 : x)
 #define CLAMP(x, min, max) (x < min ? min : x > max ? max : x)
 #define MIN(a, b) (a < b ? a : b)
 #define MAX(a, b) (a > b ? a : b)
