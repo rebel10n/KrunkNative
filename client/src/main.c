@@ -71,6 +71,7 @@ int main() {
 
     if (!gladLoadGLLoader((void *) glfwGetProcAddress)) return -1;
 
+    glEnable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -81,7 +82,7 @@ int main() {
     INSTANCE.ui = (UI *) main_menu_init();
 
     // === LOAD MAP FOR DEBUG ===
-    char *map_path = concat(client_assets_path(), "maps/citadel.json");
+    char *map_path = concat(client_assets_path(), "maps/lostworld.json");
 
     size_t map_size;
     unsigned char *map_data;
@@ -249,6 +250,10 @@ void client_tick(Client *client, const float now, const float delta) {
     Player *me = client->game.players ? client->game.players[0] : NULL;
 
     if (me && me->active) {
+        if (client->mouse_state.locked && glfwGetKey(client->window, GLFW_KEY_N) == GLFW_PRESS) {
+            me->noclip ^= 1;
+        }
+
         client->camera.position = me->position;
         client->camera.position.y += me->height - game_constants.camera_height;
 
