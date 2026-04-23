@@ -216,6 +216,31 @@ void client_tick(Client *client, const float now, const float delta) {
     double x, y;
     glfwGetCursorPos(client->window, &x, &y);
 
+    const int fullscreen_key = glfwGetKey(client->window, GLFW_KEY_F11);
+    if (fullscreen_key && !client->last_fullscreen_key) {
+        if (client->fullscreen) {
+            glfwSetWindowMonitor(client->window, NULL,
+                client->windowed_rect.x, client->windowed_rect.y,
+                client->windowed_rect.width, client->windowed_rect.height, 0);
+            client->fullscreen = 0;
+        } else {
+            glfwGetWindowPos(client->window, &client->windowed_rect.x, &client->windowed_rect.y);
+            glfwGetWindowSize(client->window, &client->windowed_rect.width, &client->windowed_rect.height);
+
+            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+            const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+            glfwSetWindowMonitor(client->window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+            client->fullscreen = 1;
+
+            glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            glfwGetCursorPos(client->window, &x, &y);
+            client->mouse_state.last_pos.x = (float) x;
+            client->mouse_state.last_pos.y = (float) y;
+            client->mouse_state.locked = 1;
+        }
+    }
+    client->last_fullscreen_key = fullscreen_key;
+
     if (client->mouse_state.locked) {
         if (glfwGetKey(client->window, GLFW_KEY_ESCAPE)) {
             glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);

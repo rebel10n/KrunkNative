@@ -146,7 +146,13 @@ typedef struct {
         vec2 last_pos;
     } mouse_state;
 
+    int fullscreen;
+    struct {
+        int x, y, width, height;
+    } windowed_rect;
+
     int last_noclip_key;
+    int last_fullscreen_key;
 
     Game game;
     Player **me;
