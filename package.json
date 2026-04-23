@@ -1,0 +1,7 @@
+{
+  "name": "KrunkNative",
+  "scripts": {
+    "start": "cd cmake-build-debug && ./client_bin",
+    "build": "mkdir -p cmake-build-debug && cd cmake-build-debug && cmake .. && make"
+  }
+}
