@@ -30,6 +30,7 @@ typedef struct {
     float max_delta;
     float jump_velocity;
     float jump_aim_slow;
+    float jump_push;
     float crouch_jump;
     float crouch_speed;
     float player_speed;

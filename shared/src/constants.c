@@ -15,6 +15,7 @@ const GameConstants game_constants = {
     .max_delta = 1.0f / 25.0f,
     .jump_velocity = 0.072f,
     .jump_aim_slow = 0.85f,
+    .jump_push = 0.1f,
     .crouch_jump = 0.25f,
     .crouch_speed = 7.0f,
     .player_speed =  0.42f,

@@ -135,10 +135,10 @@ void player_do_map_collisions(Player *player, const int can_jump, const float de
             player->on_ground = 1;
             player->on_terrain = 0;
         } else if (player->last_position.y >= object->position.y + object->scale.y) {
+            if (player->last_position.y > player->position.y) player_reset_step(player, recon);
+
             player->position.y = object->position.y + object->scale.y;
             player->velocity.y = 0.0f;
-
-            if (player->last_position.y > player->position.y) player_reset_step(player, recon);
 
             player->on_ground = 1;
             player->on_terrain = 0;
@@ -168,10 +168,14 @@ void player_jump(Player *player) {
     player->did_wall_jump = 1;
     player->on_terrain = 0;
 
-    const float jump_vel = game_constants.jump_velocity * 1.0f; // TODO game config jumpMlt
-    // TODO: if game mode realMov jump_vel *= 0.92
+    const float jump_push = game_constants.jump_push * 1.0f; // TODO game config jumpMlt
+    const float jump_vel = game_constants.jump_velocity * 1.0f; // TODO game config jumpMlt, if game mode realMov jump_vel *= 0.92
+    const float vel = hypotf(player->velocity.x, player->velocity.z);
 
-    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * (1.0f /* TODO: player weapon jumpMlt || player weapon speedMlt */) * (player->aim_val ? 1.0f : game_constants.jump_aim_slow);
+    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * 1.0f /* TODO: player weapon jumpMlt || player weapon speedMlt */ * (player->aim_val ? 1.0f : game_constants.jump_aim_slow);
+
+    player->velocity.x -= vel * jump_push * sinf(player->direction.y);
+    player->velocity.z -= vel * jump_push * cosf(player->direction.y);
 }
 
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
@@ -262,12 +266,11 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
         player->jump_timer = MAX(0.0f, player->jump_timer - delta);
 
-        if (player->jump_timer <= 0.0f && (player->on_ground || false /* TODO: game map config infinite jump */)) {
+        if (player->jump_timer <= 0.0f && (player->on_ground || 0 /* TODO: game map config infinite jump */)) {
             if (player->did_jump && !input->jump) player->did_jump = 0;
-            if (!player->did_jump && input->jump || false /* TODO: game map config infinite jump */) {
+            if (input->jump && (!player->did_jump || 0 /* TODO: game map config auto jump */)) {
                 player_jump(player);
             }
-
         }
 
         if (!contact) {
@@ -305,7 +308,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             if (player->noclip) {
                 player->velocity.y *= powf(decel, delta * 1000.0f);
             } else if (player->velocity.y > 0.0f) {
-                player->velocity.y -= delta * 0.0032f;
+                player->velocity.y -= delta * 0.032f;
             } else if (player->velocity.y < -0.3f) {
                 player->velocity.y = -0.3f;
             }
