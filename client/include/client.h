@@ -146,6 +146,8 @@ typedef struct {
         vec2 last_pos;
     } mouse_state;
 
+    int last_noclip_key;
+
     Game game;
     Player **me;
 } Client;

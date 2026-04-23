@@ -250,9 +250,10 @@ void client_tick(Client *client, const float now, const float delta) {
     Player *me = client->game.players ? client->game.players[0] : NULL;
 
     if (me && me->active) {
-        if (client->mouse_state.locked && glfwGetKey(client->window, GLFW_KEY_N) == GLFW_PRESS) {
-            me->noclip ^= 1;
-        }
+        const int noclip_key = glfwGetKey(client->window, GLFW_KEY_N);
+
+        if (client->mouse_state.locked && noclip_key && !client->last_noclip_key) me->noclip ^= 1;
+        client->last_noclip_key = noclip_key;
 
         client->camera.position = me->position;
         client->camera.position.y += me->height - game_constants.camera_height;
