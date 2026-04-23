@@ -62,12 +62,12 @@ void player_do_map_collisions(Player *player, const int can_jump, const float de
 
         const int collides =
             (object->ramp || object->collision_type == COLLISION_TYPE_BOX) &&
-            player->position.x + player->scale >= object->position.x - object->scale.x * 0.5f &&
-            player->position.x - player->scale <= object->position.x + object->scale.x * 0.5f &&
+            player->position.x + player->scale > object->position.x - object->scale.x * 0.5f &&
+            player->position.x - player->scale < object->position.x + object->scale.x * 0.5f &&
             player->position.y + player->height >= object->position.y &&
             player->position.y <= object->position.y + object->scale.y &&
-            player->position.z + player->scale >= object->position.z - object->scale.z * 0.5f &&
-            player->position.z - player->scale <= object->position.z + object->scale.z * 0.5f ||
+            player->position.z + player->scale > object->position.z - object->scale.z * 0.5f &&
+            player->position.z - player->scale < object->position.z + object->scale.z * 0.5f ||
 
             object->collision_type == COLLISION_TYPE_CYLINDER &&
             player->position.y <= object->position.x + object->scale.y &&
@@ -308,7 +308,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             if (player->noclip) {
                 player->velocity.y *= powf(decel, delta * 1000.0f);
             } else if (player->velocity.y > 0.0f) {
-                player->velocity.y -= delta * 0.032f;
+                player->velocity.y -= delta * 0.0032f;
             } else if (player->velocity.y < -0.3f) {
                 player->velocity.y = -0.3f;
             }

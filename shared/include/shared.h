@@ -184,6 +184,10 @@ void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scen
 
 typedef struct {
 
+} GameModeConfig;
+
+typedef struct {
+    GameModeConfig config;
 } GameMode;
 
 typedef enum {
@@ -258,7 +262,12 @@ Player *player_init(struct Game_t*);
 void player_spawn(Player*);
 void player_proc_input(Player*, const Input*, int, int);
 
+typedef struct {
+
+} GameConfig;
+
 typedef struct Game_t {
+    GameConfig config;
     GameMode mode;
     Map *map;
 

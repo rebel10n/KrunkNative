@@ -71,7 +71,6 @@ int main() {
 
     if (!gladLoadGLLoader((void *) glfwGetProcAddress)) return -1;
 
-    glEnable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -82,7 +81,7 @@ int main() {
     INSTANCE.ui = (UI *) main_menu_init();
 
     // === LOAD MAP FOR DEBUG ===
-    char *map_path = concat(client_assets_path(), "maps/lostworld.json");
+    char *map_path = concat(client_assets_path(), "maps/littletown.json");
 
     size_t map_size;
     unsigned char *map_data;

@@ -31,7 +31,7 @@ const PrefabModel prefab_models[] = {
     {"tree_0", 10.0f},
     {"cone_0", 4.0f},
     {"container_0", 7.0f},
-    {"grass_0", 32.0f, 4, 180.0f},
+    {"grass_0", 32.0f, 4, 0.180f},
     {"containerr_0", 7.0f},
     {"acidbarrel_0", 4.0f},
     {"door_0", 5.0f},
@@ -178,8 +178,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
                 glGenTextures(1, &texture_id);
                 glBindTexture(GL_TEXTURE_2D, texture_id);
 
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
                 glGenerateMipmap(GL_TEXTURE_2D);
