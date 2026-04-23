@@ -38,4 +38,7 @@ const GameConstants game_constants = {
     .chest_width = chest_width,
     .player_scale = (arm_scale * 0.5f + chest_width + arm_inset) * 0.5f,
     .min_decel = 0.1f,
+    .slide_time = 0.35f,
+    .player_slide_velocity_mlt = 1.2f,
+    .player_terrain_slide_velocity_mlt = 0.4f,
 };

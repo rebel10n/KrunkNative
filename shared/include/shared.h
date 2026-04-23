@@ -53,6 +53,9 @@ typedef struct {
     float chest_width;
     float player_scale;
     float min_decel;
+    float slide_time;
+    float player_slide_velocity_mlt;
+    float player_terrain_slide_velocity_mlt;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -223,6 +226,7 @@ typedef struct {
     int did_act;
     int did_jump;
     int did_wall_jump;
+    int can_slide;
 
     int input_seq;
 

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <pcg_basic.h>
 #include <time.h>
+#include <stb_image.h>
 
 #ifdef WIN32
 #include <direct.h>
@@ -27,7 +28,10 @@ void client_tick(Client*, float, float);
 void resize_viewport(GLFWwindow*, int, int);
 
 int main() {
-    pcg32_srandom(time(NULL), 0x1337);
+    char *rand_memory = malloc(1);
+    pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
+
+    if (rand_memory) free(rand_memory);
 
     vt_init(&g_model_cache);
     vt_init(&g_texture_cache);
@@ -42,8 +46,21 @@ int main() {
     INSTANCE.camera.near = 0.1f;
     INSTANCE.camera.far = 10000.0f;
 
-    INSTANCE.window = glfwCreateWindow(800, 800, "KrunkNative", NULL, NULL);
+    INSTANCE.window = glfwCreateWindow(1280, 720, "KrunkNative", NULL, NULL);
     if (!INSTANCE.window) return -1;
+
+    GLFWimage icon = {0};
+    char *icon_path = concat(client_assets_path(), "icon.png");
+
+    int icon_channels;
+    icon.pixels = stbi_load(icon_path, &icon.width, &icon.height, &icon_channels, 4);
+
+    if (icon.pixels) {
+        glfwSetWindowIcon(INSTANCE.window, 1, &icon);
+        stbi_image_free(icon.pixels);
+    }
+
+    free(icon_path);
 
     glfwSetFramebufferSizeCallback(INSTANCE.window, resize_viewport);
     glfwMakeContextCurrent(INSTANCE.window);

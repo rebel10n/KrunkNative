@@ -32,7 +32,31 @@ void player_spawn(Player *player) {
     }
 }
 
-void player_do_map_collisions(Player *player, const int can_jump, const float delta) {
+void player_reset_step(Player *player, const int recon) {
+    // TODO: animate
+
+    if (!1 /* TODO: game config can slide */ || 0 /* TODO: game mode real mov */ || !player->crouch_val || !player->can_slide) return;
+
+    player->can_slide = 0;
+
+    player->slide_timer =
+        game_constants.slide_time *
+        1.0f /* TODO: game config slide time */ *
+        1.0f /* TODO: game map config slide time */ *
+        player->crouch_val
+    ;
+
+    const float slide_mlt = (
+        player->on_terrain ?
+        game_constants.player_terrain_slide_velocity_mlt :
+        game_constants.player_slide_velocity_mlt
+    ) * 1.0f; // TODO: game map config slide accel
+
+    player->velocity.x *= slide_mlt;
+    player->velocity.z *= slide_mlt;
+}
+
+void player_do_map_collisions(Player *player, const int can_jump, const float delta, const int recon) {
     for (size_t i = 0; i < player->game->map->object_count; i++) {
         const Object *object = player->game->map->objects[i];
 
@@ -82,6 +106,10 @@ void player_do_map_collisions(Player *player, const int can_jump, const float de
             const float collision_height = object->position.y + (object->scale.y + 0.01f) * progress;
 
             if (player->position.y <= collision_height || can_jump) {
+                // TODO: ramp boost
+
+                if (player->last_position.y > player->position.y) player_reset_step(player, recon);
+
                 player->position.y = collision_height;
                 player->velocity.y = 0.0f;
                 player->on_wall = 0;
@@ -109,6 +137,8 @@ void player_do_map_collisions(Player *player, const int can_jump, const float de
         } else if (player->last_position.y >= object->position.y + object->scale.y) {
             player->position.y = object->position.y + object->scale.y;
             player->velocity.y = 0.0f;
+
+            if (player->last_position.y > player->position.y) player_reset_step(player, recon);
 
             player->on_ground = 1;
             player->on_terrain = 0;
@@ -146,7 +176,7 @@ void player_jump(Player *player) {
 
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
     const float delta = CLAMP(input->delta, game_constants.min_delta, game_constants.max_delta);
-    const float move_dir = (float) -M_PI / 4.0f * (float) input->move_dir;
+    const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir;
 
     if (player->noclip) player->on_ground = 1;
 
@@ -201,6 +231,8 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         else if (player->on_terrain) decel = game_constants.terrain_decel;
         else if (player->on_ground) decel = game_constants.ground_decel;
 
+        if (player->crouch_val <= 0.5) player->can_slide = 1;
+
         if (!player->on_ground || !player->crouch_val) {
             player->slide_timer = 0.0f;
         }
@@ -213,18 +245,18 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
                 decel = player->on_terrain ? game_constants.terrain_slide_decel : game_constants.slide_decel;
 
                 const float vel = hypotf(player->velocity.x, player->velocity.z);
-                const float yaw = normalize_angle(player->direction.y);
+                const float dir = (float) M_PI / 2.0f - player->direction.y;
 
-                // if (player->slid_cont) {
-                //     player->velocity.x = vel * cosf(yaw + (float) M_PI);
-                //     player->velocity.z = vel * sinf(yaw + (float) M_PI);
-                // } else {
-                //     const float vel_dir = atan2f(-player->velocity.x, -player->velocity.z);
-                //     const float angle_delta = normalize_angle(yaw - vel_dir) * 0.18f;
-                //
-                //     player->velocity.x = vel * cosf(vel_dir + (float) M_PI - angle_delta);
-                //     player->velocity.z = vel * sinf(vel_dir + (float) M_PI - angle_delta);
-                // }
+                if (player->slid_cont) {
+                    player->velocity.x = vel * cosf(dir + (float) M_PI);
+                    player->velocity.z = vel * sinf(dir + (float) M_PI);
+                } else {
+                    const float vel_dir = atan2f(player->velocity.z, player->velocity.x);
+                    const float angle_delta = normalize_angle(dir - vel_dir) * 0.18f;
+
+                    player->velocity.x = vel * cosf(dir + (float) M_PI - angle_delta);
+                    player->velocity.z = vel * sinf(dir + (float) M_PI - angle_delta);
+                }
             }
         }
 
@@ -252,8 +284,8 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         if (input->move_dir >= 0) {
             const float yaw_origin = player->direction.y; // TODO: support different cam types?
 
-            player->velocity.x += accel * -sinf(move_dir + yaw_origin);
-            player->velocity.z += accel * -cosf(move_dir + yaw_origin);
+            player->velocity.x += accel * cosf(move_dir - yaw_origin);
+            player->velocity.z += accel * sinf(move_dir - yaw_origin);
 
             if (player->noclip) player->velocity.y += accel * player->direction.x * (input->move_dir > 2 && input->move_dir < 6 ? -1.0f : 1.0f);
         }
@@ -291,6 +323,6 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         player->on_ladder = 0;
         player->on_wall = 0;
 
-        if (!player->noclip) player_do_map_collisions(player, can_jump, delta);
+        if (!player->noclip) player_do_map_collisions(player, can_jump, delta, recon);
     }
 }
