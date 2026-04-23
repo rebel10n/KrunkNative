@@ -61,7 +61,7 @@ int main() {
     if (!INSTANCE.scene) return -1;
 
     // TODO: proper UI
-    // INSTANCE.ui = (UI *) main_menu_init();
+    INSTANCE.ui = (UI *) main_menu_init();
 
     // === LOAD MAP FOR DEBUG ===
     char *map_path = concat(client_assets_path(), "maps/citadel.json");
@@ -206,6 +206,9 @@ void client_tick(Client *client, const float now, const float delta) {
         mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
         mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
 
+        input.jump = glfwGetKey(client->window, GLFW_KEY_SPACE);
+        input.crouch = glfwGetKey(client->window, GLFW_KEY_LEFT_SHIFT);
+
         const int forward = glfwGetKey(client->window, GLFW_KEY_W);
         const int back = glfwGetKey(client->window, GLFW_KEY_S);
         const int left = glfwGetKey(client->window, GLFW_KEY_A);
@@ -238,8 +241,8 @@ void client_tick(Client *client, const float now, const float delta) {
         input.seq = ++me->input_seq;
         input.delta = delta;
 
-        input.x_dir = me->direction.x - mouse_delta.y * game_constants.mouse_sensitivity;
-        input.y_dir = me->direction.y - mouse_delta.x * game_constants.mouse_sensitivity;
+        input.x_dir = me->direction.x - mouse_delta.y * game_constants.mouse_sensitivity * 0.5f;
+        input.y_dir = me->direction.y - mouse_delta.x * game_constants.mouse_sensitivity * 0.5f;
 
         player_proc_input(me, &input, 0, 0);
     } else {

@@ -25,14 +25,19 @@ typedef struct {
     float world_uv_scale;
     float player_height;
     float camera_height;
+    float climb_height;
     float min_delta;
     float max_delta;
+    float jump_velocity;
+    float jump_aim_slow;
+    float crouch_jump;
     float crouch_speed;
     float player_speed;
     float slipping_speed;
     float air_speed;
     float aim_slow;
     float crouch_slow;
+    float player_slipping_jump_cooldown;
     float terrain_slide_threshold;
     float terrain_slip_decel;
     float terrain_slide_decel;
@@ -47,6 +52,7 @@ typedef struct {
     float arm_inset;
     float chest_width;
     float player_scale;
+    float min_decel;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -214,6 +220,10 @@ typedef struct {
     int on_terrain;
     int terrain_slipping;
 
+    int did_act;
+    int did_jump;
+    int did_wall_jump;
+
     int input_seq;
 
     int health;
@@ -286,6 +296,7 @@ static inline void mat4x4(const float *a, const float *b, float *out) {
 #undef MAT4x4
 }
 
+#define CROP(x, v) (x > v ? v : x < -v ? -v : x)
 #define CLAMP(x, min, max) (x < min ? min : x > max ? max : x)
 #define MIN(a, b) (a < b ? a : b)
 #define MAX(a, b) (a > b ? a : b)
