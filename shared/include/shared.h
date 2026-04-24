@@ -218,6 +218,8 @@ struct Game_t;
 typedef struct {
     struct Game_t* game;
 
+    float last_tick_accel;
+
     int uid;
     int active;
     int noclip;

@@ -30,3 +30,10 @@ add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEA
 target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
 target_link_libraries(${CLIENT_BINARY} PRIVATE glfw glad freetype)
 target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
+
+set(TEST_BINARY test_bin)
+file(GLOB TEST_SOURCES shared/tests/*.c)
+add_executable(${TEST_BINARY} ${TEST_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
+if (NOT MSVC)
+    target_link_libraries(${TEST_BINARY} PRIVATE m)
+endif ()

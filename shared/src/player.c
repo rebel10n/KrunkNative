@@ -327,5 +327,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         player->on_wall = 0;
 
         if (!player->noclip) player_do_map_collisions(player, can_jump, delta, recon);
+
+        player->last_tick_accel = accel;
     }
 }
