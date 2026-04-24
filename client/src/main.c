@@ -75,10 +75,9 @@ int main() {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     INSTANCE.scene = scene_init();
-    if (!INSTANCE.scene) return -1;
+    INSTANCE.ui = ui_init();
 
-    // TODO: proper UI
-    INSTANCE.ui = (UI *) main_menu_init();
+    if (!INSTANCE.scene || !INSTANCE.ui) return -1;
 
     // === LOAD MAP FOR DEBUG ===
     char *map_path = concat(client_assets_path(), "maps/littletown.json");
@@ -204,7 +203,7 @@ void client_tick(Client *client, const float now, const float delta) {
 
     client_tick_textures(client, now);
     scene_render(client->scene, &client->camera);
-    ui_render(client->ui);
+    overlay_render(client);
 
     Input input = {0};
     vec2 mouse_delta = {0};

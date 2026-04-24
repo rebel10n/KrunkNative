@@ -4,12 +4,14 @@
 
 static unsigned int shader_program = 0;
 
-void flat_material_update_uniforms(FlatMaterial *material) {
+void quad_material_update_uniforms(QuadMaterial *material) {
     const int color = glGetUniformLocation(material->base.program, "color");
     const int texture = glGetUniformLocation(material->base.program, "tex");
+    const int texture_viewport = glGetUniformLocation(material->base.program, "tex_viewport");
 
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
 
+    glUniform1fv(texture_viewport, 4, material->texture_viewport);
     glUniform1i(texture, 0);
     glActiveTexture(GL_TEXTURE0);
 
@@ -28,15 +30,15 @@ void flat_material_update_uniforms(FlatMaterial *material) {
     }
 }
 
-static MaterialVTable flat_material_vtable = { (void *) flat_material_update_uniforms };
+static MaterialVTable quad_material_vtable = { (void *) quad_material_update_uniforms };
 
-FlatMaterial *flat_material_init() {
-    FlatMaterial *material = calloc(1, sizeof(FlatMaterial));
-    material->base.vtable = &flat_material_vtable;
+QuadMaterial *quad_material_init() {
+    QuadMaterial *material = calloc(1, sizeof(QuadMaterial));
+    material->base.vtable = &quad_material_vtable;
 
     if (!shader_program) {
-        char *vert_shader = concat(client_assets_path(), "shaders/flat.vert");
-        char *frag_shader = concat(client_assets_path(), "shaders/flat.frag");
+        char *vert_shader = concat(client_assets_path(), "shaders/quad.vert");
+        char *frag_shader = concat(client_assets_path(), "shaders/quad.frag");
 
         shader_program = shader_compile(vert_shader, frag_shader);
 

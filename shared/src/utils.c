@@ -85,7 +85,7 @@ int parse_hex_color(const char *hex_str, vec4 *out) {
 }
 
 float normalize_angle(float angle) {
-    angle = fmodf(angle, (float) M_PI * 2.0f);
+    angle = fmodf(angle + (float) M_PI, (float) M_PI * 2.0f);
 
     if (angle < 0) return angle + (float) M_PI;
     return angle - (float) M_PI;

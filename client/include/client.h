@@ -54,12 +54,13 @@ void material_fini(Material*);
 
 typedef struct {
     Material base;
-
     vec4 color;
-    unsigned int texture;
-} FlatMaterial;
 
-FlatMaterial *flat_material_init();
+    float texture_viewport[4];
+    unsigned int texture;
+} QuadMaterial;
+
+QuadMaterial *quad_material_init();
 
 typedef struct {
     Material base;
@@ -110,30 +111,20 @@ void scene_render(const Scene*, Camera*);
 void scene_fini(Scene*);
 
 typedef struct {
-    void (*render)(void*, int, int);
-} UIVTable;
-
-typedef struct {
-    UIVTable *vtable;
-    FlatMaterial *material;
+    QuadMaterial *material;
 
     unsigned int vao;
     unsigned int vbo;
     unsigned int ebo;
+
+    float width;
+    float height;
 } UI;
 
-void ui_init(UI*);
-void ui_draw_color(UI*, vec4);
-void ui_draw_texture(UI*, unsigned int, vec4);
-void ui_fill_rect(UI*, int, int, int, int);
-void ui_render(UI*);
+UI *ui_init();
+void ui_update_size(UI*);
+void ui_fill_rect(UI*, vec4, float, float, float, float);
 void ui_fini(UI*);
-
-typedef struct {
-    UI base;
-} MainMenu;
-
-MainMenu *main_menu_init();
 
 typedef struct {
     GLFWwindow *window;
@@ -157,6 +148,8 @@ typedef struct {
     Game game;
     Player **me;
 } Client;
+
+void overlay_render(Client*);
 
 const char *client_assets_path();
 void client_animate_object_texture(Object*, float);

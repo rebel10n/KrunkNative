@@ -3,8 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void ui_init(UI *ui) {
-    ui->material = flat_material_init();
+UI *ui_init() {
+    UI *ui = calloc(1, sizeof(UI));
+    if (!ui) return NULL;
+
+    ui->material = quad_material_init();
 
     glGenBuffers(1, &ui->vbo);
     glGenBuffers(1, &ui->ebo);
@@ -24,61 +27,52 @@ void ui_init(UI *ui) {
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glVertexArrayElementBuffer(ui->vao, ui->ebo);
+
+    return ui;
 }
 
-void ui_draw_color(UI *ui, const vec4 color) {
-    ui->material->texture = 0;
-    ui->material->color = color;
-
-    glUseProgram(ui->material->base.program);
-    material_update_uniforms((Material *) ui->material);
-}
-
-void ui_draw_texture(UI *ui, const unsigned int texture, const vec4 color) {
-    ui->material->texture = texture;
-    ui->material->color = color;
-
-    glUseProgram(ui->material->base.program);
-    material_update_uniforms((Material *) ui->material);
-}
-
-void ui_fill_rect(UI *ui, const int x, const int y, const int width, const int height) {
+void ui_update_size(UI *ui) {
     int viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
 
-    const float min_x = (float) x / (float) viewport[2] * 2.0f - 1.0f;
-    const float max_x = (float) (x + width) / (float) viewport[2] * 2.0f - 1.0f;
-    const float min_y = 1.0f - (float) y / (float) viewport[3] * 2.0f;
-    const float max_y = 1.0f - (float) (y + height) / (float) viewport[3] * 2.0f;
+    ui->width = (float) viewport[2];
+    ui->height = (float) viewport[3];
+}
+
+void ui_fill_rect_(UI *ui, const float x, const float y, const float width, const float height) {
+    const float min_x = x / ui->width * 2.0f - 1.0f;
+    const float max_x = (x + width) / ui->width * 2.0f - 1.0f;
+    const float min_y = 1.0f - y / ui->height * 2.0f;
+    const float max_y = 1.0f - (y + height) / ui->height * 2.0f;
 
     const vertex vertices[] = {
         {min_x, max_y, 0.0f, 0.0f, 0.0f},
+        {max_x, max_y, 0.0f, 1.0f, 0.0f},
         {max_x, min_y, 0.0f, 1.0f, 1.0f},
         {min_x, min_y, 0.0f, 0.0f, 1.0f},
-        {max_x, max_y, 0.0f, 1.0f, 0.0f},
     };
-
-    const unsigned int indices[] = {0, 1, 2, 0, 3, 1};
 
     glBindVertexArray(ui->vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, ui->vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui->ebo);
-    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, sizeof(indices), indices);
-
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+    glDrawArrays(GL_QUADS, 0, 4);
 }
 
-void ui_render(UI *ui) {
-    if (!ui) return;
+void ui_fill_rect(UI *ui, const vec4 color, const float x, const float y, const float width, const float height) {
+    ui->material->color = color;
+    ui->material->texture = 0;
 
-    int viewport[4];
-    glGetIntegerv(GL_VIEWPORT, viewport);
+    ui->material->texture_viewport[0] = 0.0f;
+    ui->material->texture_viewport[1] = 0.0f;
+    ui->material->texture_viewport[2] = 1.0f;
+    ui->material->texture_viewport[3] = 1.0f;
 
-    glDisable(GL_DEPTH_TEST);
-    ui->vtable->render(ui, viewport[2], viewport[3]);
+    glUseProgram(ui->material->base.program);
+    material_update_uniforms((Material *) ui->material);
+
+    ui_fill_rect_(ui, x, y, width, height);
 }
 
 void ui_fini(UI *ui) {

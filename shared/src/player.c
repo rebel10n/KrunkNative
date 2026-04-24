@@ -220,7 +220,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     const int contact = player->on_ground || player->on_ladder;
 
     if (!move_lock) {
-        float accel = contact ? (player->terrain_slipping ? game_constants.slipping_speed : game_constants.player_speed) * player->speed : game_constants.air_speed * 1.0f * 1.0f;
+        float accel = contact ? (player->terrain_slipping ? game_constants.slipping_speed : game_constants.player_speed) * player->speed : game_constants.air_speed;
 
         accel *= player->aim_val == 1.0f ? game_constants.aim_slow : 1.0f;
         accel *= player->crouch_val ? game_constants.crouch_slow : 1.0f;
@@ -255,7 +255,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
                     player->velocity.x = vel * cosf(dir + (float) M_PI);
                     player->velocity.z = vel * sinf(dir + (float) M_PI);
                 } else {
-                    const float vel_dir = atan2f(player->velocity.z, player->velocity.x);
+                    const float vel_dir = atan2f(-player->velocity.z, -player->velocity.x);
                     const float angle_delta = normalize_angle(dir - vel_dir) * 0.18f;
 
                     player->velocity.x = vel * cosf(dir + (float) M_PI - angle_delta);
