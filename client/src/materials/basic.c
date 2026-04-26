@@ -16,6 +16,7 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     glUniform3f(face_scale, material->face_scale.x, material->face_scale.y, material->face_scale.z);
 
     const int color = glGetUniformLocation(material->base.program, "color");
+    const int emissive = glGetUniformLocation(material->base.program, "emissive");
     const int tex_transform = glGetUniformLocation(material->base.program, "tex_transform");
     const int texture = glGetUniformLocation(material->base.program, "tex");
 
@@ -35,9 +36,11 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     mat3x3(repeat, translate, transform);
 
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
-    glUniformMatrix3fv(tex_transform, 1, GL_TRUE, transform);
+    glUniform4f(emissive, material->emissive.x, material->emissive.y, material->emissive.z, material->emissive.w);
 
+    glUniformMatrix3fv(tex_transform, 1, GL_TRUE, transform);
     glUniform1i(texture, 0);
+
     glActiveTexture(GL_TEXTURE0);
 
     if (material->texture) {

@@ -11,6 +11,8 @@ uniform float world_uv_scale;
 uniform vec3 face_scale;
 
 uniform vec4 color;
+uniform vec4 emissive;
+
 uniform mat3 tex_transform;
 uniform sampler2D tex;
 
@@ -47,5 +49,5 @@ void main() {
     }
 
     vec3 t_tex_coord = tex_transform * vec3(scaled_tex_coord, 1.0f);
-    frag_color = texture(tex, t_tex_coord.xy) * color;
+    frag_color = texture(tex, t_tex_coord.xy) * color * emissive;
 }

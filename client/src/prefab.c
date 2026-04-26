@@ -106,11 +106,17 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     const cJSON *raw_rotation = cJSON_GetObjectItem(raw_obj, "r");
     const cJSON *raw_color = cJSON_GetObjectItem(raw_obj, "c");
     const cJSON *raw_color_idx = cJSON_GetObjectItem(raw_obj, "ci");
+    const cJSON *raw_emissive = cJSON_GetObjectItem(raw_obj, "e");
+    const cJSON *raw_emissive_idx = cJSON_GetObjectItem(raw_obj, "ei");
 
     vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
+    vec4 emissive = {1.0f, 1.0f, 1.0f, 1.0f};
 
     if (cJSON_IsString(raw_color)) parse_hex_color(cJSON_GetStringValue(raw_color), &color);
     else if (cJSON_IsNumber(raw_color_idx)) color = colors[(int) cJSON_GetNumberValue(raw_color_idx)];
+
+    if (cJSON_IsString(raw_emissive)) parse_hex_color(cJSON_GetStringValue(raw_emissive), &emissive);
+    else if (cJSON_IsNumber(raw_emissive_idx)) emissive = colors[(int) cJSON_GetNumberValue(raw_emissive_idx)];
 
     const int visible = cJSON_GetNumberValue(raw_visibility) != 1;
     vec3 rotation = {0};
@@ -162,47 +168,11 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         free(model_path);
         free(texture_path);
 
-        stbi_set_flip_vertically_on_load(1);
+        const unsigned int texture_id = load_texture(full_texture_path);
+        free(full_texture_path);
 
-        unsigned int texture_id = 0;
-        asset_cache_map_itr texture_cache_itr = vt_get(&g_texture_cache, full_texture_path);
-
-        if (!vt_is_end(texture_cache_itr)) {
-            texture_id = texture_cache_itr.data->val;
-            free(full_texture_path);
-        } else {
-            int texture_width, texture_height, _;
-            unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
-
-            if (texture) {
-                glGenTextures(1, &texture_id);
-                glBindTexture(GL_TEXTURE_2D, texture_id);
-
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
-                glGenerateMipmap(GL_TEXTURE_2D);
-
-                stbi_image_free(texture);
-                vt_insert(&g_texture_cache, full_texture_path, texture_id);
-            } else {
-                free(full_texture_path);
-            }
-        }
-
-        unsigned long long model = 0;
-        asset_cache_map_itr model_cache_itr = vt_get(&g_model_cache, full_model_path);
-
-        if (!vt_is_end(model_cache_itr)) {
-            model = model_cache_itr.data->val;
-            free(full_model_path);
-        } else {
-            model = load_obj_model(full_model_path);
-
-            if (model) vt_insert(&g_model_cache, full_model_path, model);
-            else free(full_model_path);
-        }
+        const unsigned long long model = load_obj_model(full_model_path);
+        free(full_model_path);
 
         BasicMaterial *material = basic_material_init();
         Mesh *mesh = mesh_init((unsigned int) model, (unsigned int) (model >> 32), (Material *) material);
@@ -214,6 +184,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         material->texture = texture_id;
         material->color = color;
+        material->emissive = emissive;
 
         return mesh;
     }
@@ -243,32 +214,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     char *full_texture_path = concat(client_assets_path(), texture_path);
     free(texture_path);
 
-    unsigned int texture_id = 0;
-    asset_cache_map_itr texture_cache_itr = vt_get(&g_texture_cache, full_texture_path);
-
-    if (!vt_is_end(texture_cache_itr)) {
-        texture_id = texture_cache_itr.data->val;
-        free(full_texture_path);
-    } else if (tex_id != 5) {
-        stbi_set_flip_vertically_on_load(1);
-
-        int texture_width, texture_height, _;
-        unsigned char *texture = stbi_load(full_texture_path, &texture_width, &texture_height, &_, 4);
-
-        if (texture) {
-            glGenTextures(1, &texture_id);
-            glBindTexture(GL_TEXTURE_2D, texture_id);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
-            glGenerateMipmap(GL_TEXTURE_2D);
-
-            stbi_image_free(texture);
-            vt_insert(&g_texture_cache, full_texture_path, texture_id);
-        } else free(full_texture_path);
-    } else free(full_texture_path);
+    const unsigned int texture_id = load_texture(full_texture_path);
+    free(full_texture_path);
 
     const cJSON *ts = cJSON_GetObjectItem(raw_obj, "ts");
     const cJSON *td = cJSON_GetObjectItem(raw_obj, "td");
@@ -304,6 +251,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         material->texture = texture_id;
         material->color = color;
+        material->emissive = emissive;
 
         material->use_face_tex_scaling = object->prefab != PREFAB_BILLBOARD;
         material->face_scale = object->scale;
@@ -335,6 +283,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         material->texture = texture_id;
         material->color = color;
+        material->emissive = emissive;
 
         material->is_ramp = 1;
         material->use_face_tex_scaling = 1;

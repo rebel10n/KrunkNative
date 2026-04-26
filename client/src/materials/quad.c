@@ -6,10 +6,23 @@ static unsigned int shader_program = 0;
 
 void quad_material_update_uniforms(QuadMaterial *material) {
     const int color = glGetUniformLocation(material->base.program, "color");
+    const int aspect = glGetUniformLocation(material->base.program, "aspect");
+
+    const int border_bottom_left_radius = glGetUniformLocation(material->base.program, "border_bottom_left_radius");
+    const int border_bottom_right_radius = glGetUniformLocation(material->base.program, "border_bottom_right_radius");
+    const int border_top_left_radius = glGetUniformLocation(material->base.program, "border_top_left_radius");
+    const int border_top_right_radius = glGetUniformLocation(material->base.program, "border_top_right_radius");
+
     const int texture = glGetUniformLocation(material->base.program, "tex");
     const int texture_viewport = glGetUniformLocation(material->base.program, "tex_viewport");
 
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
+    glUniform1f(aspect, material->aspect);
+
+    glUniform1f(border_bottom_left_radius, material->border_bottom_left_radius);
+    glUniform1f(border_bottom_right_radius, material->border_bottom_right_radius);
+    glUniform1f(border_top_left_radius, material->border_top_left_radius);
+    glUniform1f(border_top_right_radius, material->border_top_right_radius);
 
     glUniform1fv(texture_viewport, 4, material->texture_viewport);
     glUniform1i(texture, 0);

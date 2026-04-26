@@ -56,6 +56,12 @@ typedef struct {
     Material base;
     vec4 color;
 
+    float aspect;
+    float border_bottom_left_radius;
+    float border_bottom_right_radius;
+    float border_top_left_radius;
+    float border_top_right_radius;
+
     float texture_viewport[4];
     unsigned int texture;
 } QuadMaterial;
@@ -70,6 +76,8 @@ typedef struct {
     vec3 face_scale;
 
     vec4 color;
+    vec4 emissive;
+
     vec2 texture_repeat;
     vec2 texture_offset;
     unsigned int texture;
@@ -124,6 +132,9 @@ typedef struct {
 UI *ui_init();
 void ui_update_size(UI*);
 void ui_fill_rect(UI*, vec4, float, float, float, float);
+void ui_round_rect(UI*, vec4, float, float, float, float, float);
+void ui_draw_image(UI*, unsigned int, float, float, float, float);
+void ui_draw_image_rounded(UI*, unsigned int, float, float, float, float, float);
 void ui_fini(UI*);
 
 typedef struct {
@@ -154,9 +165,11 @@ void overlay_render(Client*);
 const char *client_assets_path();
 void client_animate_object_texture(Object*, float);
 
+unsigned long long load_obj_model(char*);
+unsigned long long load_texture(char*);
+
 unsigned long long create_cube_model();
 unsigned long long create_plane_model();
 unsigned long long create_ramp_model();
-unsigned long long load_obj_model(const char*);
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);

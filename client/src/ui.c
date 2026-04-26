@@ -69,6 +69,77 @@ void ui_fill_rect(UI *ui, const vec4 color, const float x, const float y, const 
     ui->material->texture_viewport[2] = 1.0f;
     ui->material->texture_viewport[3] = 1.0f;
 
+    ui->material->border_bottom_left_radius = 0.0f;
+    ui->material->border_bottom_right_radius = 0.0f;
+    ui->material->border_top_left_radius = 0.0f;
+    ui->material->border_top_right_radius = 0.0f;
+
+    glUseProgram(ui->material->base.program);
+    material_update_uniforms((Material *) ui->material);
+
+    ui_fill_rect_(ui, x, y, width, height);
+}
+
+void ui_round_rect(UI *ui, const vec4 color, const float x, const float y, const float width, const float height, const float radius) {
+    ui->material->color = color;
+    ui->material->texture = 0;
+
+    ui->material->texture_viewport[0] = 0.0f;
+    ui->material->texture_viewport[1] = 0.0f;
+    ui->material->texture_viewport[2] = 1.0f;
+    ui->material->texture_viewport[3] = 1.0f;
+
+    const float radius_mlt = radius / (width > height ? height : width);
+
+    ui->material->aspect = width / height;
+    ui->material->border_bottom_left_radius = radius_mlt;
+    ui->material->border_bottom_right_radius = radius_mlt;
+    ui->material->border_top_left_radius = radius_mlt;
+    ui->material->border_top_right_radius = radius_mlt;
+
+    glUseProgram(ui->material->base.program);
+    material_update_uniforms((Material *) ui->material);
+
+    ui_fill_rect_(ui, x, y, width, height);
+}
+
+void ui_draw_image(UI *ui, const unsigned int texture_id, const float x, const float y, const float width, const float height) {
+    ui->material->color = (vec4) {1.0f, 1.0f, 1.0f, 1.0f};
+    ui->material->texture = texture_id;
+
+    ui->material->texture_viewport[0] = 0.0f;
+    ui->material->texture_viewport[1] = 0.0f;
+    ui->material->texture_viewport[2] = 1.0f;
+    ui->material->texture_viewport[3] = 1.0f;
+
+    ui->material->border_bottom_left_radius = 0.0f;
+    ui->material->border_bottom_right_radius = 0.0f;
+    ui->material->border_top_left_radius = 0.0f;
+    ui->material->border_top_right_radius = 0.0f;
+
+    glUseProgram(ui->material->base.program);
+    material_update_uniforms((Material *) ui->material);
+
+    ui_fill_rect_(ui, x, y, width, height);
+}
+
+void ui_draw_image_rounded(UI *ui, const unsigned int texture_id, const float x, const float y, const float width, const float height, const float radius) {
+    ui->material->color = (vec4) {1.0f, 1.0f, 1.0f, 1.0f};
+    ui->material->texture = texture_id;
+
+    ui->material->texture_viewport[0] = 0.0f;
+    ui->material->texture_viewport[1] = 0.0f;
+    ui->material->texture_viewport[2] = 1.0f;
+    ui->material->texture_viewport[3] = 1.0f;
+
+    const float radius_mlt = radius / (width > height ? height : width);
+
+    ui->material->aspect = width / height;
+    ui->material->border_bottom_left_radius = radius_mlt;
+    ui->material->border_bottom_right_radius = radius_mlt;
+    ui->material->border_top_left_radius = radius_mlt;
+    ui->material->border_top_right_radius = radius_mlt;
+
     glUseProgram(ui->material->base.program);
     material_update_uniforms((Material *) ui->material);
 

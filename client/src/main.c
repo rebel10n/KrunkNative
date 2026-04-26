@@ -50,7 +50,7 @@ int main() {
     if (!INSTANCE.window) return -1;
 
     GLFWimage icon = {0};
-    char *icon_path = concat(client_assets_path(), "icon.png");
+    char *icon_path = concat(client_assets_path(), "img/icon.png");
 
     int icon_channels;
     icon.pixels = stbi_load(icon_path, &icon.width, &icon.height, &icon_channels, 4);
@@ -80,7 +80,7 @@ int main() {
     if (!INSTANCE.scene || !INSTANCE.ui) return -1;
 
     // === LOAD MAP FOR DEBUG ===
-    char *map_path = concat(client_assets_path(), "maps/littletown.json");
+    char *map_path = concat(client_assets_path(), "maps/sandstorm.json");
 
     size_t map_size;
     unsigned char *map_data;
