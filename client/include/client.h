@@ -2,14 +2,31 @@
 #include <shared.h>
 #include <GLFW/glfw3.h>
 #include <cJSON.h>
+#include <freetype/freetype.h>
 
 #define NAME asset_cache_map
 #define KEY_TY char*
 #define VAL_TY unsigned long long
 #include <verstable.h>
 
+typedef struct {
+    unsigned int texture;
+    vec2 size;
+    vec2 bearing;
+    float advance;
+} GlyphCacheEntry;
+
+#define NAME glyph_cache_map
+#define KEY_TY char
+#define VAL_TY GlyphCacheEntry*
+#include <verstable.h>
+
 extern asset_cache_map g_model_cache; // low 4 bytes = VBO, high 4 bytes = EBO
 extern asset_cache_map g_texture_cache; // low 4 bytes = texID, high 4 bytes = unused
+
+extern glyph_cache_map g_glyph_cache;
+extern FT_Library g_freetype;
+extern FT_Face g_game_font;
 
 // low 4 bytes = VBO, high 4 bytes = EBO
 extern unsigned long long g_cube_model;
@@ -135,6 +152,7 @@ void ui_fill_rect(UI*, vec4, float, float, float, float);
 void ui_round_rect(UI*, vec4, float, float, float, float, float);
 void ui_draw_image(UI*, unsigned int, float, float, float, float);
 void ui_draw_image_rounded(UI*, unsigned int, float, float, float, float, float);
+void ui_fill_text(UI*, const char*, float, float);
 void ui_fini(UI*);
 
 typedef struct {
@@ -164,8 +182,9 @@ void overlay_render(Client*);
 const char *client_assets_path();
 void client_animate_object_texture(Object*, float);
 
-unsigned long long load_obj_model(char*);
 unsigned long long load_texture(char*);
+GlyphCacheEntry *load_glyph(char);
+unsigned long long load_obj_model(char*);
 
 unsigned long long create_cube_model();
 unsigned long long create_plane_model();

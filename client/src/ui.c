@@ -146,6 +146,35 @@ void ui_draw_image_rounded(UI *ui, const unsigned int texture_id, const float x,
     ui_fill_rect_(ui, x, y, width, height);
 }
 
+void ui_fill_text(UI *ui, const char *text, float x, const float y) {
+    ui->material->color = (vec4) {1.0f, 1.0f, 1.0f, 1.0f};
+
+    ui->material->texture_viewport[0] = 0.0f;
+    ui->material->texture_viewport[1] = 0.0f;
+    ui->material->texture_viewport[2] = 1.0f;
+    ui->material->texture_viewport[3] = 1.0f;
+
+    ui->material->border_bottom_left_radius = 0.0f;
+    ui->material->border_bottom_right_radius = 0.0f;
+    ui->material->border_top_left_radius = 0.0f;
+    ui->material->border_top_right_radius = 0.0f;
+
+    glUseProgram(ui->material->base.program);
+
+    while (*text != 0) {
+        GlyphCacheEntry *glyph = load_glyph(*text);
+        text++;
+
+        if (!glyph) continue;
+
+        ui->material->texture = glyph->texture;
+        material_update_uniforms((Material *) ui->material);
+
+        ui_fill_rect_(ui, x + glyph->bearing.x, y - (glyph->size.y - glyph->bearing.y), glyph->size.x, glyph->size.y);
+        x += glyph->advance;
+    }
+}
+
 void ui_fini(UI *ui) {
     free(ui);
 }

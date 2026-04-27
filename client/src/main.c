@@ -2,7 +2,6 @@
 #include <GLFW/glfw3.h>
 #include <client.h>
 #include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <pcg_basic.h>
 #include <time.h>
@@ -17,6 +16,10 @@
 
 asset_cache_map g_model_cache;
 asset_cache_map g_texture_cache;
+
+glyph_cache_map g_glyph_cache;
+FT_Library g_freetype;
+FT_Face g_game_font;
 
 unsigned long long g_cube_model;
 unsigned long long g_plane_model;
@@ -35,6 +38,16 @@ int main() {
 
     vt_init(&g_model_cache);
     vt_init(&g_texture_cache);
+    vt_init(&g_glyph_cache);
+
+    char *game_font_path = concat(client_assets_path(), "css/fonts/font2.ttf");
+
+    if (FT_Init_FreeType(&g_freetype) || FT_New_Face(g_freetype, game_font_path, 0, &g_game_font)) {
+        return -1;
+    }
+
+    FT_Set_Pixel_Sizes(g_game_font, 0, 48);
+    free(game_font_path);
 
     if (!glfwInit()) return -1;
 

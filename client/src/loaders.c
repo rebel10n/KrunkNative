@@ -38,6 +38,43 @@ unsigned long long load_texture(char *path) {
     return texture_id;
 }
 
+GlyphCacheEntry *load_glyph(const char c) {
+    glyph_cache_map_itr cached = vt_get(&g_glyph_cache, c);
+
+    if (!vt_is_end(cached)) return cached.data->val;
+
+    if (FT_Load_Char(g_game_font, c, FT_LOAD_RENDER)) return NULL;
+
+    GlyphCacheEntry *entry = calloc(1, sizeof(GlyphCacheEntry));
+    if (!entry) return NULL;
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glGenTextures(1, &entry->texture);
+    glBindTexture(GL_TEXTURE_2D, entry->texture);
+
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RED,
+        (int) g_game_font->glyph->bitmap.width,
+        (int) g_game_font->glyph->bitmap.rows,
+        0, GL_RED, GL_UNSIGNED_BYTE,
+        g_game_font->glyph->bitmap.buffer
+    );
+
+    entry->size.x = (float) g_game_font->glyph->bitmap.width;
+    entry->size.y = (float) g_game_font->glyph->bitmap.rows;
+    entry->bearing.x = (float) g_game_font->glyph->bitmap_left;
+    entry->bearing.y = (float) g_game_font->glyph->bitmap_top;
+    entry->advance = (float) g_game_font->glyph->advance.x / 64.0f;
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    vt_insert(&g_glyph_cache, c, entry);
+    return entry;
+}
+
 unsigned long long load_obj_model(char *path) {
     asset_cache_map_itr cached = vt_get(&g_model_cache, path);
     if (!vt_is_end(cached)) return cached.data->val;

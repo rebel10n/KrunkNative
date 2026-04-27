@@ -65,4 +65,6 @@ void overlay_render(Client *client) {
         ui_fill_rect(client->ui, color, client->ui->width * 0.5f - 1.0f, client->ui->height * 0.5f - 5.0f, 2.0f, 10.0f);
         ui_fill_rect(client->ui, color, client->ui->width * 0.5f - 5.0f, client->ui->height * 0.5f - 1.0f, 10.0f, 2.0f);
     }
+
+    ui_fill_text(client->ui, "nigger", client->ui->width * 0.5f, client->ui->height * 0.5f);
 }
