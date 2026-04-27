@@ -92,10 +92,6 @@ void scene_render(const Scene *scene, Camera *camera) {
         Mesh *mesh = scene->meshes[indices[i]];
         if (!mesh->visible) continue;
 
-        if (i == 918) {
-            mesh->material->transparent = mesh->material->transparent;
-        }
-
         if (mesh->material->transparent) {
             glEnable(GL_BLEND);
         } else {
@@ -105,8 +101,6 @@ void scene_render(const Scene *scene, Camera *camera) {
         mesh_update_transform_matrix(mesh);
 
         glBindVertexArray(mesh->vao);
-
-        glBindBuffer(GL_ARRAY_BUFFER, mesh->vbo);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
 
         glUseProgram(mesh->material->program);
