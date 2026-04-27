@@ -40,7 +40,8 @@ int main() {
 
     static Client INSTANCE = {0};
 
-    INSTANCE.me = &INSTANCE.game.players[0];
+    INSTANCE.game.config = g_default_game_config;
+    INSTANCE.game.mode = (GameMode *) ffa_init();
 
     INSTANCE.camera.fov = M_PI / 2.0f;
     INSTANCE.camera.near = 0.1f;

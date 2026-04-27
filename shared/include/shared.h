@@ -24,6 +24,7 @@ typedef struct {
     float mouse_sensitivity;
     float world_uv_scale;
     float player_height;
+    float border_height;
     float camera_height;
     float climb_height;
     float min_delta;
@@ -147,6 +148,24 @@ typedef enum {
 typedef struct {
     unsigned int prefab;
     unsigned int texture;
+
+    unsigned char is_border:1;
+    unsigned char premium:1;
+    unsigned char verified:1;
+    unsigned char team_zone:1;
+    unsigned char score_zone:1;
+    unsigned char teleporter:1;
+    unsigned char checkpoint:1;
+    unsigned char pickup:1;
+    unsigned char flag:1;
+    unsigned char trigger:1;
+    unsigned char kill:1;
+    unsigned char objective:1;
+    unsigned char bomb_site:1;
+
+    unsigned int team;
+    unsigned int score_points;
+
     CollisionType collision_type;
 
     vec3 position;
@@ -164,7 +183,41 @@ typedef struct {
     int comp;
 } Spawn;
 
+typedef enum {
+    CAMERA_TYPE_NORMAL,
+    CAMERA_TYPE_TOP_DOWN,
+    CAMERA_TYPE_PLATFORMER_X,
+    CAMERA_TYPE_PLATFORMER_Z,
+} CameraType;
+
+typedef enum {
+    MODEL_TYPE_NORMAL,
+    MODEL_TYPE_SPRITE,
+} ModelType;
+
 typedef struct {
+    CameraType cam_type;
+    unsigned char cam_rotation:1;
+    vec3 cam_offset;
+
+    ModelType model;
+
+    vec3 speed;
+
+    float ladder_accel;
+    float air_accel;
+    float slide_time;
+    float slide_accel;
+    float jump_cooldown;
+
+    unsigned char infinite_jump:1;
+} MapConfig;
+
+extern const MapConfig g_default_map_config;
+
+typedef struct {
+    MapConfig config;
+
     size_t spawn_count;
     Spawn **spawns;
 
@@ -183,12 +236,84 @@ Map *map_init(const char*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
 
 typedef struct {
+    const char *name;
+    const char **texts;
+    const int *loadout;
+    unsigned char secondary:1;
+    unsigned char wall_jump:1;
+    int colors[6];
+    int health;
+    int health_segments;
+    float regen;
+    float speed;
+} ClassConfig;
 
-} GameModeConfig;
+extern const ClassConfig g_classes[];
 
 typedef struct {
+
+} Weapon;
+
+typedef enum {
+    TEAM_OPTIONS_NONE,
+    TEAM_OPTIONS_HIDERS,
+    TEAM_OPTIONS_SEEKERS,
+    TEAM_OPTIONS_SURVIVORS,
+    TEAM_OPTIONS_INFECTED,
+    TEAM_OPTIONS_FOLLOWERS,
+    TEAM_OPTIONS_SIMON,
+    TEAM_OPTIONS_PROP,
+    TEAM_OPTIONS_HEROES,
+    TEAM_OPTIONS_BOSS,
+    TEAM_OPTIONS_LIVING,
+    TEAM_OPTIONS_STALKER,
+    TEAM_OPTIONS_INNOCENT,
+    TEAM_OPTIONS_TRAITOR
+} TeamOptions;
+
+typedef struct {
+    unsigned char real_movement:1;
+    unsigned char no_weapons:1;
+    unsigned char no_regen:1;
+    unsigned char no_reloads:1;
+    unsigned char no_pickups:1;
+    unsigned char teams:1;
+    unsigned char dmg_team:1;
+    unsigned char site:1;
+    unsigned char flags:1;
+    unsigned char convert_team:1;
+    unsigned char kill_on_convert:1;
+    unsigned char friendly:1;
+    unsigned char clan_war:1;
+    int *starting_loadout;
+    int starting_loadout_size;
+    int team_class[3];
+    float speed_mlt[3];
+    int force_class;
+    int health;
+    int lives;
+    int ammo_limit;
+    float hitbox_pad;
+} GameModeConfig;
+
+extern const GameModeConfig g_default_game_mode_config;
+
+typedef struct {
+
+} GameModeVTable;
+
+typedef struct {
+    const GameModeVTable *vtable;
     GameModeConfig config;
 } GameMode;
+
+extern const GameModeVTable ffa_vtable;
+
+typedef struct {
+    GameMode base;
+} FreeForAll;
+
+FreeForAll *ffa_init();
 
 typedef enum {
     PLAYER_MESH_HEAD
@@ -219,24 +344,25 @@ typedef struct {
     struct Game_t* game;
 
     int uid;
-    int active;
-    int noclip;
+    unsigned char active:1;
+    unsigned char noclip:1;
 
-    int on_ground;
-    int on_ladder;
-    int on_wall;
-    int on_terrain;
-    int terrain_slipping;
+    unsigned char on_ground:1;
+    unsigned char on_ladder:1;
+    unsigned char on_wall:1;
+    unsigned char on_terrain:1;
+    unsigned char terrain_slipping:1;
 
-    int did_act;
-    int did_jump;
-    int did_wall_jump;
-    int can_slide;
+    unsigned char did_act:1;
+    unsigned char did_jump:1;
+    unsigned char did_wall_jump:1;
+    unsigned char can_slide:1;
 
     int input_seq;
 
     int health;
     int max_health;
+    int team;
 
     float scale;
     float height;
@@ -263,12 +389,49 @@ void player_spawn(Player*);
 void player_proc_input(Player*, const Input*, int, int);
 
 typedef struct {
-
+    int max_players;
+    int min_players;
+    int game_time;
+    float warmup_time;
+    int auto_respawn;
+    int lives;
+    int score_limit;
+    float gravity_mlt;
+    float jump_mlt;
+    float delta_mlt;
+    float slide_time;
+    float impulse_mlt;
+    float wall_jump;
+    float strafe_speed;
+    unsigned int can_slide:1;
+    unsigned int air_strafe:1;
+    unsigned int auto_jump:1;
+    unsigned int bullet_drop:1;
+    unsigned int health_regen:1;
+    unsigned int kill_rewards:1;
+    unsigned int headshots_only:1;
+    unsigned int no_secondaries:1;
+    unsigned int no_streaks:1;
+    unsigned int disable_borders:1;
+    unsigned int throwable_melees:1;
+    unsigned int select_team:1;
+    unsigned int allow_spectate:1;
+    unsigned int third_person:1;
+    unsigned int hide_nametags:1;
+    char *team1_name;
+    char *team2_name;
+    float team1_damage;
+    float team2_damage;
+    float health_mlt;
+    float fire_rate;
+    float reload_speed;
 } GameConfig;
+
+extern const GameConfig g_default_game_config;
 
 typedef struct Game_t {
     GameConfig config;
-    GameMode mode;
+    GameMode *mode;
     Map *map;
 
     size_t player_count;

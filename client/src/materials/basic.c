@@ -58,7 +58,7 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     }
 }
 
-MaterialVTable basic_material_vtable = { (void *) basic_material_update_uniforms };
+const MaterialVTable basic_material_vtable = { (void *) basic_material_update_uniforms };
 
 BasicMaterial *basic_material_init() {
     BasicMaterial *material = calloc(1, sizeof(BasicMaterial));

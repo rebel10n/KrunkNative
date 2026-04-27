@@ -6,6 +6,20 @@
 #include <client.h>
 #endif
 
+const MapConfig g_default_map_config = {
+    .cam_type = CAMERA_TYPE_NORMAL,
+    .cam_rotation = 1,
+    .cam_offset = {},
+    .model = MODEL_TYPE_NORMAL,
+    .speed = {1.0f, 1.0f, 1.0f},
+    .ladder_accel = 1.0f,
+    .air_accel = 1.0f,
+    .slide_time = 1.0f,
+    .slide_accel = 1.0f,
+    .jump_cooldown = 1.0f,
+    .infinite_jump = 0,
+};
+
 Map *map_init(const char *raw) {
     const cJSON *raw_map = cJSON_Parse(raw);
     if (!cJSON_IsObject(raw_map)) return NULL;
@@ -19,6 +33,8 @@ Map *map_init(const char *raw) {
 
     vec4 *parsed_colors = cJSON_IsArray(colors) ? calloc(cJSON_GetArraySize(colors), sizeof(vec4)) : NULL;
     Map *map = calloc(1, sizeof(Map));
+
+    map->config = g_default_map_config;
 
     if (cJSON_IsArray(cam_pos) && cJSON_GetArraySize(cam_pos) >= 3) {
         map->camera_position.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(cam_pos, 0));
@@ -145,40 +161,95 @@ Map *map_init(const char *raw) {
 
         const cJSON *obj_l = cJSON_GetObjectItem(raw_obj, "l");
         const cJSON *obj_col = cJSON_GetObjectItem(raw_obj, "col");
+        const cJSON *obj_bo = cJSON_GetObjectItem(raw_obj, "bo");
+
         const int no_collisions = obj_l && !cJSON_IsNull(obj_l) && (!cJSON_IsNumber(obj_l) || cJSON_GetNumberValue(obj_l) != 0) || obj_col && !cJSON_IsNull(obj_col) && (!cJSON_IsNumber(obj_col) || cJSON_GetNumberValue(obj_col) != 0);
+        const int is_border = obj_bo && !cJSON_IsNull(obj_bo) && (!cJSON_IsNumber(obj_bo) || cJSON_GetNumberValue(obj_bo) != 0);
 
         switch (prefab_id) {
-            // TODO: handle collisions for these properly, will do later
+            case PREFAB_CUBE:
+            case PREFAB_GATE:
+            case PREFAB_DEPOSIT_BOX:
+            case PREFAB_PREMIUM_ZONE:
+            case PREFAB_VERIFIED_ZONE:
+            case PREFAB_TEAM_ZONE:
+                object->is_border = is_border;
+                break;
+            default:
+                break;
+        }
+
+        switch (prefab_id) {
             case PREFAB_SPHERE:
             case PREFAB_POINT_LIGHT:
+            case PREFAB_LIGHT_CONE:
+            case PREFAB_SOUND_EMITTER:
+            case PREFAB_PARTICLES:
+            case PREFAB_LIQUID:
+            case PREFAB_SPECTATE_CAM:
+            case PREFAB_EVENT:
+                object->collision_type = COLLISION_TYPE_NONE;
+                break;
             case PREFAB_GATE:
             case PREFAB_TRIGGER:
             case PREFAB_TERMINAL:
             case PREFAB_DEPOSIT_BOX:
-            case PREFAB_LIGHT_CONE:
-            case PREFAB_SOUND_EMITTER:
             case PREFAB_OBJECTIVE:
             case PREFAB_BOMB_SITE:
             case PREFAB_FLAG:
-            case PREFAB_BOOST_PAD:
             case PREFAB_WEAPON_PICKUP:
             case PREFAB_SHOWCASE:
-            case PREFAB_PARTICLES:
-            case PREFAB_LIQUID:
-            case PREFAB_SPECTATE_CAM:
             case PREFAB_RAMP:
             case PREFAB_PREMIUM_ZONE:
             case PREFAB_VERIFIED_ZONE:
-            case PREFAB_TEAM_ZONE:
             case PREFAB_SCORE_ZONE:
             case PREFAB_DEATH_ZONE:
             case PREFAB_CHECK_POINT:
             case PREFAB_TELEPORTER:
             case PREFAB_LADDER:
-                object->collision_type = COLLISION_TYPE_NONE;
+                object->collision_type = COLLISION_TYPE_BOX;
                 break;
             default:
                 object->collision_type = no_collisions ? COLLISION_TYPE_NONE : prefab_id == PREFAB_CYLINDER ? COLLISION_TYPE_CYLINDER : COLLISION_TYPE_BOX;
+                break;
+        }
+
+        // TODO: parse any additional metadata
+        switch (prefab_id) {
+            case PREFAB_VERIFIED_ZONE:
+                object->verified = 1;
+                break;
+            case PREFAB_PREMIUM_ZONE:
+                object->premium = 1;
+                break;
+            case PREFAB_SCORE_ZONE:
+                object->score_zone = 1;
+                break;
+            case PREFAB_TELEPORTER:
+                object->teleporter = 1;
+                break;
+            case PREFAB_CHECK_POINT:
+                object->checkpoint = 1;
+                break;
+            case PREFAB_WEAPON_PICKUP:
+                object->pickup = 1;
+                break;
+            case PREFAB_FLAG:
+                object->flag = 1;
+                break;
+            case PREFAB_TRIGGER:
+                object->trigger = 1;
+                break;
+            case PREFAB_DEATH_ZONE:
+                object->kill = 1;
+                break;
+            case PREFAB_OBJECTIVE:
+                object->objective = 1;
+                break;
+            case PREFAB_BOMB_SITE:
+                object->bomb_site = 1;
+                break;
+            default:
                 break;
         }
 

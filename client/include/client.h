@@ -43,7 +43,7 @@ typedef struct {
 } MaterialVTable;
 
 typedef struct {
-    MaterialVTable *vtable;
+    const MaterialVTable *vtable;
     int wireframe;
     unsigned int program;
 } Material;
@@ -83,7 +83,7 @@ typedef struct {
     unsigned int texture;
 } BasicMaterial;
 
-extern MaterialVTable basic_material_vtable;
+extern const MaterialVTable basic_material_vtable;
 BasicMaterial *basic_material_init();
 
 typedef struct Mesh {
@@ -157,7 +157,6 @@ typedef struct {
     int last_fullscreen_key;
 
     Game game;
-    Player **me;
 } Client;
 
 void overlay_render(Client*);
