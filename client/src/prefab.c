@@ -8,6 +8,7 @@
 typedef struct {
     const char *filename;
     const float scale;
+    const unsigned char transparent:1;
     const int frames;
     const float frame_time;
 } PrefabModel;
@@ -31,11 +32,11 @@ const PrefabModel prefab_models[] = {
     {"tree_0", 10.0f},
     {"cone_0", 4.0f},
     {"container_0", 7.0f},
-    {"grass_0", 32.0f, 4, 0.180f},
+    {"grass_0", 32.0f, 1, 4, 0.180f},
     {"containerr_0", 7.0f},
     {"acidbarrel_0", 4.0f},
     {"door_0", 5.0f},
-    {"window_0", 6.0f},
+    {"window_0", 6.0f, 1},
     {NULL}, // flag
     {NULL}, // gate
     {NULL}, // check point
@@ -75,24 +76,29 @@ const PrefabModel prefab_models[] = {
     {"knight_0", 4.0f},
 };
 
-const char *prefab_textures[] = {
-    "wall",
-    "dirt",
-    "floor",
-    "grid",
-    "grey",
-    "default",
-    "roof",
-    "flag",
-    "grass",
-    "check",
-    "lines",
-    "brick",
-    "link",
-    "liquid",
-    "grain",
-    "fabric",
-    "tile",
+typedef struct {
+    const char *name;
+    const unsigned char transparent:1;
+} PrefabTexture;
+
+const PrefabTexture prefab_textures[] = {
+    {"wall"},
+    {"dirt"},
+    {"floor"},
+    {"grid"},
+    {"grey"},
+    {"default"},
+    {"roof"},
+    {"flag"},
+    {"grass"},
+    {"check"},
+    {"lines"},
+    {"brick"},
+    {"link", 1},
+    {"liquid", 1},
+    {"grain"},
+    {"fabric"},
+    {"tile"},
 };
 
 Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
@@ -182,6 +188,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         mesh->rotation = rotation;
         mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
 
+        material->base.transparent = prefab_model.transparent;
         material->texture = texture_id;
         material->color = color;
         material->emissive = emissive;
@@ -205,10 +212,10 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         texture_path = malloc(texture_path_length + 1);
         snprintf(texture_path, texture_path_length + 1, "textures/pubs/b_%d.png", billboard_id);
     } else {
-        const int texture_path_length = snprintf(NULL, 0, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
+        const int texture_path_length = snprintf(NULL, 0, "textures/%s_%d.png", prefab_textures[tex_id].name, tex_id == 8);
 
         texture_path = malloc(texture_path_length + 1);
-        snprintf(texture_path, texture_path_length + 1, "textures/%s_%d.png", prefab_textures[tex_id], tex_id == 8);
+        snprintf(texture_path, texture_path_length + 1, "textures/%s_%d.png", prefab_textures[tex_id].name, tex_id == 8);
     }
 
     char *full_texture_path = concat(client_assets_path(), texture_path);
@@ -252,6 +259,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->texture = texture_id;
         material->color = color;
         material->emissive = emissive;
+        material->base.transparent = object->prefab != PREFAB_BILLBOARD && prefab_textures[tex_id].transparent;
 
         material->use_face_tex_scaling = object->prefab != PREFAB_BILLBOARD;
         material->face_scale = object->scale;

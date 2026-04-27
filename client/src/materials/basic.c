@@ -33,7 +33,7 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     };
 
     float transform[9];
-    mat3x3(repeat, translate, transform);
+    mat3x3(translate, repeat, transform);
 
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
     glUniform4f(emissive, material->emissive.x, material->emissive.y, material->emissive.z, material->emissive.w);

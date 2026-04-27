@@ -19,6 +19,8 @@ unsigned long long load_texture(char *path) {
     glGenTextures(1, &texture_id);
     glBindTexture(GL_TEXTURE_2D, texture_id);
 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -43,6 +45,7 @@ GlyphCacheEntry *load_glyph(const char c) {
 
     if (!vt_is_end(cached)) return cached.data->val;
 
+    FT_Set_Pixel_Sizes(g_game_font, 0, 100);
     if (FT_Load_Char(g_game_font, c, FT_LOAD_RENDER)) return NULL;
 
     GlyphCacheEntry *entry = calloc(1, sizeof(GlyphCacheEntry));
@@ -62,10 +65,14 @@ GlyphCacheEntry *load_glyph(const char c) {
 
     entry->size.x = (float) g_game_font->glyph->bitmap.width;
     entry->size.y = (float) g_game_font->glyph->bitmap.rows;
-    entry->bearing.x = (float) g_game_font->glyph->bitmap_left;
-    entry->bearing.y = (float) g_game_font->glyph->bitmap_top;
+    entry->h_bearing.x = (float) g_game_font->glyph->metrics.horiBearingX / 64.0f;
+    entry->h_bearing.y = (float) g_game_font->glyph->metrics.horiBearingY / 64.0f;
+    entry->v_bearing.x = (float) g_game_font->glyph->metrics.vertBearingX / 64.0f;
+    entry->v_bearing.y = (float) g_game_font->glyph->metrics.vertBearingY / 64.0f;
     entry->advance = (float) g_game_font->glyph->advance.x / 64.0f;
 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 

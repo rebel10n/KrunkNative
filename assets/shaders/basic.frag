@@ -49,5 +49,5 @@ void main() {
     }
 
     vec3 t_tex_coord = tex_transform * vec3(scaled_tex_coord, 1.0f);
-    frag_color = texture(tex, t_tex_coord.xy) * color * emissive;
+    frag_color = texture(tex, t_tex_coord.xy) * mix(color, emissive, 0.0f);
 }

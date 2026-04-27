@@ -1,7 +1,5 @@
 #include <glad/glad.h>
 #include <client.h>
-#include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,6 +48,29 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
     scene->meshes = meshes;
 }
 
+const Scene *sort_scene;
+const Camera *sort_camera;
+
+int scene_depth_sort(const size_t *p_a_idx, const size_t *p_b_idx) {
+    const Mesh *a = sort_scene->meshes[*p_a_idx];
+    const Mesh *b = sort_scene->meshes[*p_b_idx];
+
+    if (!a->visible) return 1;
+    if (!b->visible) return -1;
+
+    if (a->material->transparent || b->material->transparent) {
+        if (!b->material->transparent) return 1;
+        if (!a->material->transparent) return -1;
+
+        const float a_depth = sort_camera->world_inverse_matrix[8] * a->position.x + sort_camera->world_inverse_matrix[9] * a->position.y + sort_camera->world_inverse_matrix[10] * a->position.z + sort_camera->world_inverse_matrix[11];
+        const float b_depth = sort_camera->world_inverse_matrix[8] * b->position.x + sort_camera->world_inverse_matrix[9] * b->position.y + sort_camera->world_inverse_matrix[10] * b->position.z + sort_camera->world_inverse_matrix[11];
+
+        return b_depth > a_depth ? -1 : 1;
+    }
+
+    return 0;
+}
+
 void scene_render(const Scene *scene, Camera *camera) {
     int viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
@@ -59,9 +80,27 @@ void scene_render(const Scene *scene, Camera *camera) {
     camera_update_projection_matrix(camera, (float) viewport[2] / (float) viewport[3]);
     camera_update_world_inverse_matrix(camera);
 
+    size_t indices[scene->mesh_count];
+    for (size_t i = 0; i < scene->mesh_count; i++) indices[i] = i;
+
+    sort_scene = scene;
+    sort_camera = camera;
+
+    qsort(indices, scene->mesh_count, sizeof(size_t), (void *) scene_depth_sort);
+
     for (size_t i = 0; i < scene->mesh_count; i++) {
-        Mesh *mesh = scene->meshes[i];
+        Mesh *mesh = scene->meshes[indices[i]];
         if (!mesh->visible) continue;
+
+        if (i == 918) {
+            mesh->material->transparent = mesh->material->transparent;
+        }
+
+        if (mesh->material->transparent) {
+            glEnable(GL_BLEND);
+        } else {
+            glDisable(GL_BLEND);
+        }
 
         mesh_update_transform_matrix(mesh);
 

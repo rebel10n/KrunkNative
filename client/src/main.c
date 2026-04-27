@@ -46,7 +46,6 @@ int main() {
         return -1;
     }
 
-    FT_Set_Pixel_Sizes(g_game_font, 0, 48);
     free(game_font_path);
 
     if (!glfwInit()) return -1;
@@ -59,6 +58,10 @@ int main() {
     INSTANCE.camera.fov = M_PI / 2.0f;
     INSTANCE.camera.near = 0.1f;
     INSTANCE.camera.far = 10000.0f;
+
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 
     INSTANCE.window = glfwCreateWindow(1280, 720, "KrunkNative", NULL, NULL);
     if (!INSTANCE.window) return -1;
@@ -85,7 +88,7 @@ int main() {
 
     if (!gladLoadGLLoader((void *) glfwGetProcAddress)) return -1;
 
-    glEnable(GL_BLEND);
+    glfwSwapInterval(0);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     INSTANCE.scene = scene_init();
@@ -94,7 +97,7 @@ int main() {
     if (!INSTANCE.scene || !INSTANCE.ui) return -1;
 
     // === LOAD MAP FOR DEBUG ===
-    char *map_path = concat(client_assets_path(), "maps/sandstorm.json");
+    char *map_path = concat(client_assets_path(), "maps/lostworld.json");
 
     size_t map_size;
     unsigned char *map_data;

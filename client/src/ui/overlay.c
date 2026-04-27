@@ -1,11 +1,29 @@
 #include <glad/glad.h>
 #include <client.h>
+#include <math.h>
 
 void overlay_render(Client *client) {
     glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+
     ui_update_size(client->ui);
 
     const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
+
+    if (client->watermark) { // alpha build watermark
+        const char *watermark = "ALPHA BUILD @REBEL10N";
+        const float width = ui_measure_text(client->ui, watermark, 30.0f);
+
+        const size_t grid_h = (size_t) ceilf(client->ui->height / 100.0f) + 1;
+        const size_t grid_w = (size_t) ceilf(client->ui->width / (width + 70.0f));
+
+        for (size_t i = 0; i < grid_h * grid_w; i++) {
+            const size_t x = i % grid_w;
+            const size_t y = i / grid_w;
+
+            ui_fill_text(client->ui, (vec4) {1.0f, 1.0f, 1.0f, 0.1f}, watermark, -10.0f + (width + 70.0f) * (float) x, -10.0f + 100.0f * (float) y, 30.0f);
+        }
+    }
 
     { // bottom left HUD (icon, health)
         const vec2 hud_icon_size = {103.0f, 103.0f};
@@ -65,6 +83,4 @@ void overlay_render(Client *client) {
         ui_fill_rect(client->ui, color, client->ui->width * 0.5f - 1.0f, client->ui->height * 0.5f - 5.0f, 2.0f, 10.0f);
         ui_fill_rect(client->ui, color, client->ui->width * 0.5f - 5.0f, client->ui->height * 0.5f - 1.0f, 10.0f, 2.0f);
     }
-
-    ui_fill_text(client->ui, "nigger", client->ui->width * 0.5f, client->ui->height * 0.5f);
 }

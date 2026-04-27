@@ -12,7 +12,8 @@
 typedef struct {
     unsigned int texture;
     vec2 size;
-    vec2 bearing;
+    vec2 h_bearing;
+    vec2 v_bearing;
     float advance;
 } GlyphCacheEntry;
 
@@ -61,7 +62,8 @@ typedef struct {
 
 typedef struct {
     const MaterialVTable *vtable;
-    int wireframe;
+    unsigned char wireframe:1;
+    unsigned char transparent:1;
     unsigned int program;
 } Material;
 
@@ -84,6 +86,15 @@ typedef struct {
 } QuadMaterial;
 
 QuadMaterial *quad_material_init();
+
+typedef struct {
+    Material base;
+    vec4 color;
+
+    unsigned int texture;
+} TextMaterial;
+
+TextMaterial *text_material_init();
 
 typedef struct {
     Material base;
@@ -137,10 +148,10 @@ void scene_fini(Scene*);
 
 typedef struct {
     QuadMaterial *material;
+    TextMaterial *text_material;
 
     unsigned int vao;
     unsigned int vbo;
-    unsigned int ebo;
 
     float width;
     float height;
@@ -152,7 +163,8 @@ void ui_fill_rect(UI*, vec4, float, float, float, float);
 void ui_round_rect(UI*, vec4, float, float, float, float, float);
 void ui_draw_image(UI*, unsigned int, float, float, float, float);
 void ui_draw_image_rounded(UI*, unsigned int, float, float, float, float, float);
-void ui_fill_text(UI*, const char*, float, float);
+float ui_measure_text(UI*, const char*, float);
+void ui_fill_text(UI*, vec4, const char*, float, float, float);
 void ui_fini(UI*);
 
 typedef struct {
@@ -166,9 +178,14 @@ typedef struct {
         vec2 last_pos;
     } mouse_state;
 
+    int watermark;
     int fullscreen;
+
     struct {
-        int x, y, width, height;
+        int x;
+        int y;
+        int width;
+        int height;
     } windowed_rect;
 
     int last_noclip_key;
