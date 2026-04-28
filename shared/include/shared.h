@@ -59,6 +59,8 @@ typedef struct {
     float slide_time;
     float player_slide_velocity_mlt;
     float player_terrain_slide_velocity_mlt;
+    float idle_anim_speed;
+    float interpolation;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -304,6 +306,7 @@ typedef struct {
     int uid;
     unsigned char active:1;
     unsigned char noclip:1;
+    unsigned char interpolate:1;
 
     unsigned char on_ground:1;
     unsigned char on_ladder:1;
@@ -318,7 +321,15 @@ typedef struct {
 
     int input_seq;
 
-    int health;
+    float dt;
+    float send_rate;
+
+    vec3 interp_pos_start;
+    vec3 interp_pos_end;
+    vec2 interp_dir_start;
+    vec2 interp_dir_end;
+
+    float health;
     int max_health;
     int team;
 
@@ -334,6 +345,9 @@ typedef struct {
     float slide_timer;
     float jump_timer;
 
+    float idle_anim;
+    float hp_chase;
+
     vec3 position;
     vec3 last_position;
     vec3 velocity;
@@ -343,6 +357,9 @@ typedef struct {
     int loadout_size;
     int loadout_index;
 
+    Input *input_queue;
+    size_t input_queue_size;
+
     Weapon *weapon;
     player_mesh_map meshes;
 } Player;
@@ -350,6 +367,7 @@ typedef struct {
 Player *player_init(struct Game_t*);
 void player_spawn(Player*);
 void player_proc_input(Player*, const Input*, int, int);
+void player_update(Player*, float);
 
 typedef struct {
     int max_players;
@@ -399,6 +417,14 @@ typedef struct Game_t {
 
     size_t player_count;
     Player **players;
+
+    unsigned char move_lock:1;
+    unsigned char is_local:1;
+
+    float nuke_timer;
+    int nuke_player;
+
+    void *server; // TODO
 } Game;
 
 void game_players_add(Game*, Player*, int);

@@ -43,4 +43,6 @@ const GameConstants game_constants = {
     .slide_time = 0.35f,
     .player_slide_velocity_mlt = 1.2f,
     .player_terrain_slide_velocity_mlt = 0.4f,
+    .idle_anim_speed = 1.5f,
+    .interpolation = 1.1f,
 };

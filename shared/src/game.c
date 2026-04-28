@@ -39,6 +39,42 @@ const GameConfig g_default_game_config = {
     .reload_speed = 1.0f
 };
 
+void game_clear_players(Game *game) {
+    // TODO
+}
+
+void game_init(Game *game, const GameConfig *config, int map_index, int mode_index) {
+    if (config) game->config = *config;
+    game_clear_players(game);
+
+    // TODO: load map & mode
+    // TODO: timers, win conditions, etc
+}
+
+void game_tick(Game *game, const float now, const float delta) {
+    if (game->is_local || game->server) {
+        // TODO: tick timers
+    }
+
+    for (size_t i = 0; i < game->player_count; i++) {
+        player_update(game->players[i], delta);
+    }
+
+    // TODO: update AIs, teleporters, destructible's
+
+    if (game->is_local || game->server) {
+        // TODO: objectives
+    }
+
+    // TODO: zones
+    // TODO: projectiles
+    // TODO: interactable's
+
+    if (game->is_local || game->server) {
+        // TODO: check leaderboard update
+    }
+}
+
 void game_players_add(Game *game, Player *player, const int is_you) {
     if (!game->players) {
         game->player_count = is_you ? 1 : 2;

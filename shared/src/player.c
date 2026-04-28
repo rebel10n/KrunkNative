@@ -19,7 +19,8 @@ void player_update_height(Player *player) {
 
 void player_spawn(Player *player) {
     player->active = 1;
-    player->speed = 1.0f; // TODO: apply from class index
+    player->speed = g_classes[0].speed;
+    player->max_health = g_classes[0].health;
 
     player_update_height(player);
 
@@ -346,5 +347,47 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         player->on_wall = 0;
 
         if (!player->noclip) player_do_map_collisions(player, can_jump, delta, recon);
+    }
+}
+
+void player_step(Player *player, const float distance) {
+
+}
+
+void player_update(Player *player, const float delta) {
+    if (!player->active) return;
+
+    if (player->input_queue_size) {
+        for (size_t i = 0; i < player->input_queue_size; i++) {
+            player_proc_input(player, &player->input_queue[i], 0, player->game->move_lock);
+        }
+
+        player->input_queue_size = 0;
+    }
+
+    player->idle_anim += game_constants.idle_anim_speed * delta;
+
+    if (player->hp_chase > player->health / (float) player->max_health) {
+        player->hp_chase = MAX(0.0f, player->hp_chase - delta * 0.2f);
+    } else {
+        player->hp_chase = player->health / (float) player->max_health;
+    }
+
+    if (player->interpolate) {
+        player->dt += delta;
+
+        const float progress = MIN(1.6f, player->dt * player->send_rate / game_constants.interpolation) / player->game->config.delta_mlt;
+
+        player->last_position = player->position;
+
+        player->position.x = player->interp_pos_start.x + (player->interp_pos_end.x - player->interp_pos_start.x) * progress;
+        player->position.y = player->interp_pos_start.y + (player->interp_pos_end.y - player->interp_pos_start.y) * progress;
+        player->position.z = player->interp_pos_start.z + (player->interp_pos_end.z - player->interp_pos_start.z) * progress;
+
+        if (player->on_ground) {
+            player_step(player, hypotf(player->last_position.x - player->position.x, player->last_position.z - player->position.z));
+        }
+
+        // TODO: linear interpolate direction change
     }
 }

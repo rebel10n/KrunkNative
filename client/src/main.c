@@ -308,7 +308,8 @@ void client_tick(Client *client, const float now, const float delta) {
         input.x_dir = me->direction.x - mouse_delta.y * game_constants.mouse_sensitivity * 0.5f;
         input.y_dir = me->direction.y - mouse_delta.x * game_constants.mouse_sensitivity * 0.5f;
 
-        player_proc_input(me, &input, 0, 0);
+        // player_queue_input(me, input);
+        player_update(me, delta);
     } else {
         client->camera.position = client->game.map->camera_position;
         client->camera.rotation.y = fmodf(client->camera.rotation.y + delta * 0.1f, M_PI * 2.0f);
