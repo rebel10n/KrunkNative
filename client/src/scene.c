@@ -101,8 +101,8 @@ void scene_render(const Scene *scene, Camera *camera) {
 
         mesh_update_transform_matrix(mesh);
 
-        glBindVertexArray(mesh->vao);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
+        glBindVertexArray(mesh->geometry->vao);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
 
         glUseProgram(mesh->material->program);
         material_update_uniforms(mesh->material);
@@ -121,7 +121,7 @@ void scene_render(const Scene *scene, Camera *camera) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
 
-        glDrawElements(GL_TRIANGLES, mesh->index_count, GL_UNSIGNED_INT, NULL);
+        glDrawElements(GL_TRIANGLES, mesh->geometry->index_count, GL_UNSIGNED_INT, NULL);
     }
 }
 

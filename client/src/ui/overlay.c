@@ -41,11 +41,13 @@ void overlay_render(Client *client) {
         const float health = 100.0f;
         const float max_health = 100.0f;
 
+        const vec2 health_seg_size = {40.0f, 50.0f};
+        const vec2 health_seg_origin = {hud_icon.x + hud_icon_size.x + 10.0f, hud_icon.y + hud_icon_size.y - health_seg_size.y};
+
         const size_t segments = 5;
 
         for (size_t i = 0; i < segments; i++) {
-            const vec2 health_seg_size = {40.0f, 50.0f};
-            const vec2 health_seg = {hud_icon.x + hud_icon_size.x + 10.0f + (10.0f + health_seg_size.x) * (float) i, hud_icon.y + hud_icon_size.y - health_seg_size.y};
+            const vec2 health_seg = {health_seg_origin.x + (10.0f + health_seg_size.x) * (float) i, health_seg_origin.y};
 
             ui_round_rect(client->ui, background_color, health_seg.x, health_seg.y, health_seg_size.x, health_seg_size.y, 5.0f);
 

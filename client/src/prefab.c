@@ -177,11 +177,13 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         const unsigned int texture_id = load_texture(full_texture_path);
         free(full_texture_path);
 
-        const unsigned long long model = load_obj_model(full_model_path);
+        Geometry *geometry = load_obj_model(full_model_path);
         free(full_model_path);
 
+        if (!geometry) return NULL;
+
         BasicMaterial *material = basic_material_init();
-        Mesh *mesh = mesh_init((unsigned int) model, (unsigned int) (model >> 32), (Material *) material);
+        Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
         mesh->position = object->position;
@@ -242,14 +244,11 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     }
 
     if (object->prefab == PREFAB_CUBE || object->prefab == PREFAB_PLANE || object->prefab == PREFAB_BILLBOARD) {
-        if (object->prefab == PREFAB_CUBE && !g_cube_model) g_cube_model = create_cube_model();
-        else if (!g_plane_model) g_plane_model = create_plane_model();
-
-        const unsigned long long model = object->prefab == PREFAB_CUBE ? g_cube_model : g_plane_model;
-        if (!model) return NULL;
+        Geometry *geometry = object->prefab == PREFAB_CUBE ? create_cube_geo() : create_plane_geo();
+        if (!geometry) return NULL;
 
         BasicMaterial *material = basic_material_init();
-        Mesh *mesh = mesh_init((unsigned int) model, (unsigned int) (model >> 32), (Material *) material);
+        Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
         mesh->position = object->position;
@@ -275,11 +274,11 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     }
 
     if (object->prefab == PREFAB_RAMP) {
-        if (!g_ramp_model) g_ramp_model = create_ramp_model();
-        if (!g_ramp_model) return NULL;
+        Geometry *geometry = create_ramp_geo();
+        if (!geometry) return NULL;
 
         BasicMaterial *material = basic_material_init();
-        Mesh *mesh = mesh_init((unsigned int) g_ramp_model, (unsigned int) (g_ramp_model >> 32), (Material *) material);
+        Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
         mesh->position = object->position;

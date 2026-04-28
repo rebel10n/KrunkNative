@@ -155,14 +155,15 @@ float ui_measure_text(UI *ui, const char *text, const float size) {
 
         if (!glyph) continue;
 
-        if (*text) width += glyph->advance * size / 100.0f;
-        else width += glyph->size.x * size / 100.0f;
+        width += glyph->advance * size / 100.0f;
     }
 
     return width;
 }
 
-void ui_fill_text(UI *ui, const vec4 color, const char *text, float x, const float y, const float size) {
+float ui_fill_text(UI *ui, const vec4 color, const char *text, float x, const float y, const float size) {
+    const float start_x = x;
+
     ui->text_material->color = color;
     glUseProgram(ui->text_material->base.program);
     glBindVertexArray(ui->vao);
@@ -179,11 +180,21 @@ void ui_fill_text(UI *ui, const vec4 color, const char *text, float x, const flo
             ui->text_material->texture = glyph->texture;
             material_update_uniforms((Material *) ui->text_material);
 
-            ui_fill_rect_(ui, ui->text_material->base.program, x - glyph->h_bearing.x, y + (100.0f - glyph->h_bearing.y) * size / 100.0f, glyph->size.x * size / 100.0f, glyph->size.y * size / 100.0f);
+            float glyph_y = y + (100.0f - glyph->h_bearing.y) * size / 100.0f;
+
+            if (ui->text_baseline == TEXT_BASELINE_MIDDLE) {
+                glyph_y += glyph->h_bearing.y * size / 100.0f * 0.5f;
+            } else if (ui->text_baseline == TEXT_BASELINE_TOP) {
+                glyph_y += glyph->h_bearing.y * size / 100.0f;
+            }
+
+            ui_fill_rect_(ui, ui->text_material->base.program, x - glyph->h_bearing.x, glyph_y, glyph->size.x * size / 100.0f, glyph->size.y * size / 100.0f);
         }
 
         x += glyph->advance * size / 100.0f;
     }
+
+    return x - start_x;
 }
 
 void ui_fini(UI *ui) {

@@ -3,7 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 
-Mesh *mesh_init(const unsigned int vao, const unsigned int ebo, Material *material) {
+Mesh *mesh_init(Geometry *geometry, Material *material) {
     Mesh *mesh = calloc(1, sizeof(Mesh));
 
     mesh->scale.x = 1.0f;
@@ -11,17 +11,8 @@ Mesh *mesh_init(const unsigned int vao, const unsigned int ebo, Material *materi
     mesh->scale.z = 1.0f;
 
     mesh->visible = 1;
+    mesh->geometry = geometry;
     mesh->material = material;
-
-    int ebo_size;
-
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER, GL_BUFFER_SIZE, &ebo_size);
-
-    mesh->vao = vao;
-    mesh->ebo = ebo;
-    mesh->index_count = ebo_size / (int) sizeof(unsigned int);
 
     return mesh;
 }
@@ -74,8 +65,6 @@ void mesh_update_transform_matrix(Mesh *mesh) {
 }
 
 void mesh_fini(Mesh *mesh) {
-    glDeleteBuffers(1, &mesh->ebo);
-    glDeleteVertexArrays(1, &mesh->vao);
-
+    material_fini(mesh->material);
     free(mesh);
 }

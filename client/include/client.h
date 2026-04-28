@@ -4,9 +4,21 @@
 #include <cJSON.h>
 #include <freetype/freetype.h>
 
-#define NAME asset_cache_map
+#define NAME texture_cache_map
 #define KEY_TY char*
-#define VAL_TY unsigned long long
+#define VAL_TY unsigned int
+#include <verstable.h>
+
+typedef struct {
+    unsigned int vao;
+    unsigned int ebo;
+    int index_count;
+    float bounding_sphere_radius;
+} Geometry;
+
+#define NAME geometry_cache_map
+#define KEY_TY char*
+#define VAL_TY Geometry*
 #include <verstable.h>
 
 typedef struct {
@@ -22,17 +34,17 @@ typedef struct {
 #define VAL_TY GlyphCacheEntry*
 #include <verstable.h>
 
-extern asset_cache_map g_model_cache; // low 4 bytes = VAO, high 4 bytes = EBO
-extern asset_cache_map g_texture_cache; // low 4 bytes = texID, high 4 bytes = unused
+extern geometry_cache_map g_geometry_cache;
+extern texture_cache_map g_texture_cache;
 
 extern glyph_cache_map g_glyph_cache;
 extern FT_Library g_freetype;
 extern FT_Face g_game_font;
 
 // low 4 bytes = VBO, high 4 bytes = EBO
-extern unsigned long long g_cube_model;
-extern unsigned long long g_plane_model;
-extern unsigned long long g_ramp_model;
+extern Geometry *g_cube_geometry;
+extern Geometry *g_plane_geometry;
+extern Geometry *g_ramp_geometry;
 
 extern unsigned int g_blank_texture;
 
@@ -119,19 +131,16 @@ typedef struct Mesh {
     vec3 rotation;
     vec3 scale;
 
-    unsigned int vao;
-    unsigned int ebo;
-
     int visible;
-    int index_count;
+    Geometry *geometry;
 
     float transform_matrix[16];
     Material *material;
 } Mesh;
 
-Mesh *mesh_init(unsigned int, unsigned int, Material*);
+Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);
-void mesh_fini(Mesh*); // CAUTION: does NOT free underlying Material!
+void mesh_fini(Mesh*); // CAUTION: does NOT free underlying vertex/element buffers in case of re-use!
 
 typedef struct {
     size_t mesh_count;
@@ -144,9 +153,16 @@ void scene_remove_mesh(Scene*, Mesh*);
 void scene_render(const Scene*, Camera*);
 void scene_fini(Scene*);
 
+typedef enum {
+    TEXT_BASELINE_TOP,
+    TEXT_BASELINE_MIDDLE,
+    TEXT_BASELINE_BOTTOM,
+} TextBaseline;
+
 typedef struct {
     QuadMaterial *material;
     TextMaterial *text_material;
+    TextBaseline text_baseline;
 
     unsigned int vao;
     unsigned int vbo;
@@ -162,7 +178,7 @@ void ui_round_rect(UI*, vec4, float, float, float, float, float);
 void ui_draw_image(UI*, unsigned int, float, float, float, float);
 void ui_draw_image_rounded(UI*, unsigned int, float, float, float, float, float);
 float ui_measure_text(UI*, const char*, float);
-void ui_fill_text(UI*, vec4, const char*, float, float, float);
+float ui_fill_text(UI*, vec4, const char*, float, float, float);
 void ui_fini(UI*);
 
 typedef struct {
@@ -197,12 +213,12 @@ void overlay_render(Client*);
 const char *client_assets_path();
 void client_animate_object_texture(Object*, float);
 
-unsigned long long load_texture(char*);
+unsigned int load_texture(char*);
 GlyphCacheEntry *load_glyph(char);
-unsigned long long load_obj_model(char*);
+Geometry *load_obj_model(char*);
 
-unsigned long long create_cube_model();
-unsigned long long create_plane_model();
-unsigned long long create_ramp_model();
+Geometry *create_cube_geo();
+Geometry *create_plane_geo();
+Geometry *create_ramp_geo();
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);

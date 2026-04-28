@@ -14,16 +14,16 @@
 #include <unistd.h>
 #endif
 
-asset_cache_map g_model_cache;
-asset_cache_map g_texture_cache;
-
+geometry_cache_map g_geometry_cache;
+texture_cache_map g_texture_cache;
 glyph_cache_map g_glyph_cache;
+
 FT_Library g_freetype;
 FT_Face g_game_font;
 
-unsigned long long g_cube_model;
-unsigned long long g_plane_model;
-unsigned long long g_ramp_model;
+Geometry *g_cube_geometry;
+Geometry *g_plane_geometry;
+Geometry *g_ramp_geometry;
 
 unsigned int g_blank_texture;
 
@@ -36,7 +36,7 @@ int main() {
 
     if (rand_memory) free(rand_memory);
 
-    vt_init(&g_model_cache);
+    vt_init(&g_geometry_cache);
     vt_init(&g_texture_cache);
     vt_init(&g_glyph_cache);
 
@@ -51,6 +51,8 @@ int main() {
     if (!glfwInit()) return -1;
 
     static Client INSTANCE = {0};
+
+    INSTANCE.watermark = 1;
 
     INSTANCE.game.config = g_default_game_config;
     INSTANCE.game.mode = (GameMode *) ffa_init();
