@@ -24,12 +24,15 @@ void quad_material_update_uniforms(QuadMaterial *material) {
     glUniform1f(border_top_left_radius, material->border_top_left_radius);
     glUniform1f(border_top_right_radius, material->border_top_right_radius);
 
+    if (material->texture && g_active_texture == material->texture || !material->texture && g_blank_texture && g_active_texture == g_blank_texture) return;
+
     glUniform1fv(texture_viewport, 4, material->texture_viewport);
     glUniform1i(texture, 0);
     glActiveTexture(GL_TEXTURE0);
 
     if (material->texture) {
         glBindTexture(GL_TEXTURE_2D, material->texture);
+        g_active_texture = material->texture;
     } else {
         if (!g_blank_texture) {
             glCreateTextures(GL_TEXTURE_2D, 1, &g_blank_texture);
@@ -40,6 +43,7 @@ void quad_material_update_uniforms(QuadMaterial *material) {
         }
 
         glBindTexture(GL_TEXTURE_2D, g_blank_texture);
+        g_active_texture = g_blank_texture;
     }
 }
 

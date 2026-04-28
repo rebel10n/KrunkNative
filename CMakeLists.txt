@@ -20,6 +20,8 @@ add_subdirectory(shared/lib/cJSON)
 add_subdirectory(shared/lib/pcg_basic)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(CMAKE_C_FLAGS --static)
+
     set(CLIENT_BINARY client)
     list(APPEND CLIENT_SOURCES client/win.rc)
 endif ()

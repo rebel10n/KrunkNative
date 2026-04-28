@@ -299,5 +299,12 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         return mesh;
     }
 
-    return NULL;
+    BasicMaterial *debug_material = basic_material_init();
+    Mesh *debug_mesh = mesh_init(create_cube_geo(), (Material *) debug_material);
+
+    debug_material->base.wireframe = 1;
+    debug_mesh->position = object->position;
+    debug_mesh->scale = object->scale;
+
+    return debug_mesh;
 }

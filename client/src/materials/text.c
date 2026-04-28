@@ -10,11 +10,14 @@ void text_material_update_uniforms(TextMaterial *material) {
 
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
 
+    if (material->texture && g_active_texture == material->texture || !material->texture && g_blank_texture && g_active_texture == g_blank_texture) return;
+
     glUniform1i(texture, 0);
     glActiveTexture(GL_TEXTURE0);
 
     if (material->texture) {
         glBindTexture(GL_TEXTURE_2D, material->texture);
+        g_active_texture = material->texture;
     } else {
         if (!g_blank_texture) {
             glCreateTextures(GL_TEXTURE_2D, 1, &g_blank_texture);
@@ -25,6 +28,7 @@ void text_material_update_uniforms(TextMaterial *material) {
         }
 
         glBindTexture(GL_TEXTURE_2D, g_blank_texture);
+        g_active_texture = g_blank_texture;
     }
 }
 

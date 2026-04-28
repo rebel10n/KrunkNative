@@ -38,13 +38,15 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
     glUniform4f(emissive, material->emissive.x, material->emissive.y, material->emissive.z, material->emissive.w);
 
+    if (material->texture && g_active_texture == material->texture || !material->texture && g_blank_texture && g_active_texture == g_blank_texture) return;
+
     glUniformMatrix3fv(tex_transform, 1, GL_TRUE, transform);
     glUniform1i(texture, 0);
-
     glActiveTexture(GL_TEXTURE0);
 
     if (material->texture) {
         glBindTexture(GL_TEXTURE_2D, material->texture);
+        g_active_texture = material->texture;
     } else {
         if (!g_blank_texture) {
             glCreateTextures(GL_TEXTURE_2D, 1, &g_blank_texture);
@@ -55,6 +57,7 @@ void basic_material_update_uniforms(BasicMaterial *material) {
         }
 
         glBindTexture(GL_TEXTURE_2D, g_blank_texture);
+        g_active_texture = g_blank_texture;
     }
 }
 

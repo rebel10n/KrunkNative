@@ -26,6 +26,8 @@ Geometry *g_plane_geometry;
 Geometry *g_ramp_geometry;
 
 unsigned int g_blank_texture;
+unsigned int g_active_texture;
+unsigned int g_active_shader;
 
 void client_tick(Client*, float, float);
 void resize_viewport(GLFWwindow*, int, int);
@@ -129,8 +131,6 @@ int main() {
     double last_tick = glfwGetTime();
 
     while (!glfwWindowShouldClose(INSTANCE.window)) {
-        glfwPollEvents();
-
         const float now = (float) glfwGetTime();
         const float delta = (float) (now - last_tick);
 
@@ -138,6 +138,7 @@ int main() {
 
         client_tick(&INSTANCE, now, delta);
         glfwSwapBuffers(INSTANCE.window);
+        glfwPollEvents();
     }
 
     return 0;

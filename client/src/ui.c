@@ -74,7 +74,11 @@ void ui_fill_rect(UI *ui, const vec4 color, const float x, const float y, const 
     ui->material->border_top_left_radius = 0.0f;
     ui->material->border_top_right_radius = 0.0f;
 
-    glUseProgram(ui->material->base.program);
+    if (g_active_shader != ui->material->base.program) {
+        glUseProgram(ui->material->base.program);
+        g_active_shader = ui->material->base.program;
+    }
+
     material_update_uniforms((Material *) ui->material);
 
     ui_fill_rect_(ui, ui->material->base.program, x, y, width, height);
@@ -97,7 +101,11 @@ void ui_round_rect(UI *ui, const vec4 color, const float x, const float y, const
     ui->material->border_top_left_radius = radius_mlt;
     ui->material->border_top_right_radius = radius_mlt;
 
-    glUseProgram(ui->material->base.program);
+    if (g_active_shader != ui->material->base.program) {
+        glUseProgram(ui->material->base.program);
+        g_active_shader = ui->material->base.program;
+    }
+
     material_update_uniforms((Material *) ui->material);
 
     ui_fill_rect_(ui, ui->material->base.program, x, y, width, height);
@@ -117,7 +125,11 @@ void ui_draw_image(UI *ui, const unsigned int texture_id, const float x, const f
     ui->material->border_top_left_radius = 0.0f;
     ui->material->border_top_right_radius = 0.0f;
 
-    glUseProgram(ui->material->base.program);
+    if (g_active_shader != ui->material->base.program) {
+        glUseProgram(ui->material->base.program);
+        g_active_shader = ui->material->base.program;
+    }
+
     material_update_uniforms((Material *) ui->material);
 
     ui_fill_rect_(ui, ui->material->base.program, x, y, width, height);
@@ -140,7 +152,11 @@ void ui_draw_image_rounded(UI *ui, const unsigned int texture_id, const float x,
     ui->material->border_top_left_radius = radius_mlt;
     ui->material->border_top_right_radius = radius_mlt;
 
-    glUseProgram(ui->material->base.program);
+    if (g_active_shader != ui->material->base.program) {
+        glUseProgram(ui->material->base.program);
+        g_active_shader = ui->material->base.program;
+    }
+
     material_update_uniforms((Material *) ui->material);
 
     ui_fill_rect_(ui, ui->material->base.program, x, y, width, height);
@@ -165,8 +181,12 @@ float ui_fill_text(UI *ui, const vec4 color, const char *text, float x, const fl
     const float start_x = x;
 
     ui->text_material->color = color;
-    glUseProgram(ui->text_material->base.program);
     glBindVertexArray(ui->vao);
+
+    if (g_active_shader != ui->text_material->base.program) {
+        glUseProgram(ui->text_material->base.program);
+        g_active_shader = ui->text_material->base.program;
+    }
 
     while (*text != 0) {
         const char c = *text;

@@ -104,7 +104,11 @@ void scene_render(const Scene *scene, Camera *camera) {
         glBindVertexArray(mesh->geometry->vao);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
 
-        glUseProgram(mesh->material->program);
+        if (g_active_shader != mesh->material->program) {
+            glUseProgram(mesh->material->program);
+            g_active_shader = mesh->material->program;
+        }
+
         material_update_uniforms(mesh->material);
 
         const int transform = glGetUniformLocation(mesh->material->program, "transform");

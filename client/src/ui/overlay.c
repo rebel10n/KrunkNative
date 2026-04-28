@@ -21,7 +21,7 @@ void overlay_render(Client *client) {
             const size_t x = i % grid_w;
             const size_t y = i / grid_w;
 
-            ui_fill_text(client->ui, (vec4) {1.0f, 1.0f, 1.0f, 0.1f}, watermark, -10.0f + (width + 70.0f) * (float) x, -10.0f + 100.0f * (float) y, 30.0f);
+            ui_fill_text(client->ui, (vec4) {1.0f, 1.0f, 1.0f, 0.03f}, watermark, -10.0f + (width + 70.0f) * (float) x, -10.0f + 100.0f * (float) y, 30.0f);
         }
     }
 

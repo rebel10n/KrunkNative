@@ -48,6 +48,8 @@ extern Geometry *g_plane_geometry;
 extern Geometry *g_ramp_geometry;
 
 extern unsigned int g_blank_texture;
+extern unsigned int g_active_texture;
+extern unsigned int g_active_shader;
 
 typedef struct {
     float near;
