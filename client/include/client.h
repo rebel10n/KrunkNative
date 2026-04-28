@@ -14,6 +14,7 @@ typedef struct {
     unsigned int ebo;
     int index_count;
     float bounding_sphere_radius;
+    float height;
 } Geometry;
 
 #define NAME geometry_cache_map

@@ -52,8 +52,6 @@ int main() {
 
     static Client INSTANCE = {0};
 
-    INSTANCE.watermark = 1;
-
     INSTANCE.game.config = g_default_game_config;
     INSTANCE.game.mode = (GameMode *) ffa_init();
 
