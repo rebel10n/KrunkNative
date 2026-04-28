@@ -89,8 +89,11 @@ unsigned long long load_obj_model(char *path) {
     fastObjMesh *mesh = fast_obj_read(path);
     size_t idx = 0;
 
-    size_t naive_vertex_count = 0;
+    size_t vertex_count = 0;
+    size_t index_count = 0;
+
     size_t alloc_vertex_count = 0;
+    size_t alloc_index_count = 0;
 
     float min_y = 0.0f;
 
@@ -98,75 +101,93 @@ unsigned long long load_obj_model(char *path) {
         const unsigned int fv = mesh->face_vertices[f];
         const unsigned int extra = fv - 3;
 
-        naive_vertex_count += 3 + 3 * extra;
+        if (fv < 3) continue;
+
+        vertex_count += fv;
+        index_count += 3 * (1 + extra);
     }
 
-    vertex *vertices = calloc(naive_vertex_count, sizeof(vertex));
-    if (!vertices) return 0;
+    vertex vertices[vertex_count];
+    unsigned int indices[index_count];
 
     for (size_t f = 0; f < mesh->face_count; f++) {
         const unsigned int fv = mesh->face_vertices[f];
-        fastObjIndex anchor = {0};
 
-        for (size_t v = 0; v < fv; v++) {
-            const fastObjIndex indices = mesh->indices[idx];
+        const fastObjIndex anchor = mesh->indices[idx++];
+        const size_t anchor_idx = alloc_vertex_count++;
 
-            if (!v || v < 2) {
-                if (!v) anchor = indices;
+        const fastObjIndex prev = mesh->indices[idx++];
+        size_t prev_idx = alloc_vertex_count++;
 
-                idx++;
-                continue;
-            }
+        vertices[anchor_idx] = (vertex) {
+            mesh->positions[anchor.p * 3],
+            mesh->positions[anchor.p * 3 + 1],
+            mesh->positions[anchor.p * 3 + 2],
+            mesh->texcoords[anchor.t * 2],
+            mesh->texcoords[anchor.t * 2 + 1],
+        };
 
-            const fastObjIndex prev = mesh->indices[idx-1];
+        vertices[prev_idx] = (vertex) {
+            mesh->positions[prev.p * 3],
+            mesh->positions[prev.p * 3 + 1],
+            mesh->positions[prev.p * 3 + 2],
+            mesh->texcoords[prev.t * 2],
+            mesh->texcoords[prev.t * 2 + 1],
+        };
 
-            vertex v0 = {};
-            vertex v1 = {};
-            vertex v2 = {};
+        if (vertices[anchor_idx].position.y < min_y) min_y = vertices[anchor_idx].position.y;
+        if (vertices[prev_idx].position.y < min_y) min_y = vertices[prev_idx].position.y;
 
-            v0.position.x = mesh->positions[anchor.p * 3];
-            v0.position.y = mesh->positions[anchor.p * 3 + 1];
-            v0.position.z = mesh->positions[anchor.p * 3 + 2];
-            v0.tex_coord.x = mesh->texcoords[anchor.t * 2];
-            v0.tex_coord.y = mesh->texcoords[anchor.t * 2 + 1];
+        for (size_t v = 2; v < fv; v++) {
+            const fastObjIndex current = mesh->indices[idx++];
+            const size_t current_idx = alloc_vertex_count++;
 
-            v1.position.x = mesh->positions[prev.p * 3];
-            v1.position.y = mesh->positions[prev.p * 3 + 1];
-            v1.position.z = mesh->positions[prev.p * 3 + 2];
-            v1.tex_coord.x = mesh->texcoords[prev.t * 2];
-            v1.tex_coord.y = mesh->texcoords[prev.t * 2 + 1];
+            vertices[current_idx] = (vertex) {
+                mesh->positions[current.p * 3],
+                mesh->positions[current.p * 3 + 1],
+                mesh->positions[current.p * 3 + 2],
+                mesh->texcoords[current.t * 2],
+                mesh->texcoords[current.t * 2 + 1],
+            };
 
-            v2.position.x = mesh->positions[indices.p * 3];
-            v2.position.y = mesh->positions[indices.p * 3 + 1];
-            v2.position.z = mesh->positions[indices.p * 3 + 2];
-            v2.tex_coord.x = mesh->texcoords[indices.t * 2];
-            v2.tex_coord.y = mesh->texcoords[indices.t * 2 + 1];
+            if (vertices[current_idx].position.y < min_y) min_y = vertices[current_idx].position.y;
 
-            if (v0.position.y < min_y) min_y = v0.position.y;
-            if (v1.position.y < min_y) min_y = v1.position.y;
-            if (v2.position.y < min_y) min_y = v2.position.y;
+            indices[alloc_index_count++] = anchor_idx;
+            indices[alloc_index_count++] = prev_idx;
+            indices[alloc_index_count++] = current_idx;
 
-            vertices[alloc_vertex_count] = v0;
-            vertices[alloc_vertex_count + 1] = v1;
-            vertices[alloc_vertex_count + 2] = v2;
-
-            alloc_vertex_count += 3;
-            idx++;
+            prev_idx = current_idx;
         }
     }
 
-    for (size_t i = 0; i < naive_vertex_count; i++) {
+    for (size_t i = 0; i < alloc_vertex_count; i++) {
         vertex *vertex = &vertices[i];
         vertex->position.y -= min_y;
     }
 
+    unsigned int vao;
     unsigned int vbo;
+    unsigned int ebo;
 
+    glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, (long long) (naive_vertex_count * sizeof(vertex)), vertices, GL_STATIC_DRAW);
+    glGenBuffers(1, &ebo);
 
-    free(vertices);
+    glBindVertexArray(vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (int) (alloc_vertex_count * sizeof(vertex)), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (int) (alloc_index_count * sizeof(unsigned int)), indices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(vao, ebo);
+
     fast_obj_destroy(mesh);
 
     const size_t path_length = strlen(path);
@@ -174,10 +195,10 @@ unsigned long long load_obj_model(char *path) {
 
     if (cache_path) {
         memcpy(cache_path, path, path_length + 1);
-        vt_insert(&g_model_cache, cache_path, vbo);
+        vt_insert(&g_model_cache, cache_path, (unsigned long long) ebo << 32 | vao);
     }
 
-    return vbo;
+    return (unsigned long long) ebo << 32 | vao;
 }
 
 unsigned long long create_cube_model() {
@@ -228,11 +249,15 @@ unsigned long long create_cube_model() {
         20, 21, 22, 20, 23, 21, // BOTTOM
     };
 
+    unsigned int vao;
     unsigned int vbo;
     unsigned int ebo;
 
+    glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
     glGenBuffers(1, &ebo);
+
+    glBindVertexArray(vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
@@ -240,7 +265,14 @@ unsigned long long create_cube_model() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    return (unsigned long long) ebo << 32 | vbo;
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(vao, ebo);
+
+    return (unsigned long long) ebo << 32 | vao;
 }
 
 unsigned long long create_plane_model() {
@@ -253,11 +285,15 @@ unsigned long long create_plane_model() {
 
     static const unsigned int indices[] = {0, 1, 2, 0, 3, 1};
 
+    unsigned int vao;
     unsigned int vbo;
     unsigned int ebo;
 
+    glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
     glGenBuffers(1, &ebo);
+
+    glBindVertexArray(vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
@@ -265,7 +301,14 @@ unsigned long long create_plane_model() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    return (unsigned long long) ebo << 32 | vbo;
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(vao, ebo);
+
+    return (unsigned long long) ebo << 32 | vao;
 }
 
 unsigned long long create_ramp_model() {
@@ -307,11 +350,15 @@ unsigned long long create_ramp_model() {
         14, 15, 16, 14, 17, 15, // BACK
     };
 
+    unsigned int vao;
     unsigned int vbo;
     unsigned int ebo;
 
+    glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
     glGenBuffers(1, &ebo);
+
+    glBindVertexArray(vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
@@ -319,5 +366,12 @@ unsigned long long create_ramp_model() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    return (unsigned long long) ebo << 32 | vbo;
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(vao, ebo);
+
+    return (unsigned long long) ebo << 32 | vao;
 }

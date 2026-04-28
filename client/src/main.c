@@ -88,6 +88,7 @@ int main() {
 
     if (!gladLoadGLLoader((void *) glfwGetProcAddress)) return -1;
 
+    glfwSwapInterval(0);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     INSTANCE.scene = scene_init();

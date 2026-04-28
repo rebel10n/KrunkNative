@@ -76,6 +76,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     glGetIntegerv(GL_VIEWPORT, viewport);
 
     glEnable(GL_DEPTH_TEST);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     camera_update_projection_matrix(camera, (float) viewport[2] / (float) viewport[3]);
     camera_update_world_inverse_matrix(camera);
@@ -120,11 +121,7 @@ void scene_render(const Scene *scene, Camera *camera) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
 
-        if (mesh->ebo && mesh->index_count) {
-            glDrawElements(GL_TRIANGLES, mesh->index_count, GL_UNSIGNED_INT, NULL);
-        } else {
-            glDrawArrays(GL_TRIANGLES, 0, mesh->vertex_count);
-        }
+        glDrawElements(GL_TRIANGLES, mesh->index_count, GL_UNSIGNED_INT, NULL);
     }
 }
 

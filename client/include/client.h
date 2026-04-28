@@ -22,7 +22,7 @@ typedef struct {
 #define VAL_TY GlyphCacheEntry*
 #include <verstable.h>
 
-extern asset_cache_map g_model_cache; // low 4 bytes = VBO, high 4 bytes = EBO
+extern asset_cache_map g_model_cache; // low 4 bytes = VAO, high 4 bytes = EBO
 extern asset_cache_map g_texture_cache; // low 4 bytes = texID, high 4 bytes = unused
 
 extern glyph_cache_map g_glyph_cache;
@@ -120,11 +120,9 @@ typedef struct Mesh {
     vec3 scale;
 
     unsigned int vao;
-    unsigned int vbo;
     unsigned int ebo;
 
     int visible;
-    int vertex_count;
     int index_count;
 
     float transform_matrix[16];

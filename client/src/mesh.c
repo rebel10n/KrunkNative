@@ -3,7 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 
-Mesh *mesh_init(const unsigned int vbo, const unsigned int ebo, Material *material) {
+Mesh *mesh_init(const unsigned int vao, const unsigned int ebo, Material *material) {
     Mesh *mesh = calloc(1, sizeof(Mesh));
 
     mesh->scale.x = 1.0f;
@@ -13,34 +13,15 @@ Mesh *mesh_init(const unsigned int vbo, const unsigned int ebo, Material *materi
     mesh->visible = 1;
     mesh->material = material;
 
-    glGenVertexArrays(1, &mesh->vao);
-    glBindVertexArray(mesh->vao);
+    int ebo_size;
 
-    int vbo_size;
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER, GL_BUFFER_SIZE, &ebo_size);
 
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &vbo_size);
-
-    mesh->vbo = vbo;
-    mesh->vertex_count = vbo_size / (int) sizeof(vertex);
-
-    if (ebo) {
-        int ebo_size;
-
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-        glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER, GL_BUFFER_SIZE, &ebo_size);
-
-        mesh->ebo = ebo;
-        mesh->index_count = ebo_size / (int) sizeof(unsigned int);
-    }
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
-
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-
-    if (ebo) glVertexArrayElementBuffer(mesh->vao, mesh->ebo);
+    mesh->vao = vao;
+    mesh->ebo = ebo;
+    mesh->index_count = ebo_size / (int) sizeof(unsigned int);
 
     return mesh;
 }
@@ -93,7 +74,6 @@ void mesh_update_transform_matrix(Mesh *mesh) {
 }
 
 void mesh_fini(Mesh *mesh) {
-    glDeleteBuffers(1, &mesh->vbo);
     glDeleteBuffers(1, &mesh->ebo);
     glDeleteVertexArrays(1, &mesh->vao);
 
