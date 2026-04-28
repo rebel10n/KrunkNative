@@ -214,7 +214,7 @@ Geometry *load_obj_model(char *path) {
     glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
     geometry->index_count = (int) alloc_index_count;
-    geometry->bounding_sphere_radius = sqrtf(powf((bounds_max.x - bounds_min.x) * 0.5f, 2.0f) + powf((bounds_max.y - bounds_min.y) * 0.5f, 2.0f) + powf((bounds_max.z - bounds_min.z) * 0.5f, 2.0f));
+    geometry->bounding_sphere_radius = sqrtf(powf((bounds_max.x - bounds_min.x) * 0.5f, 2.0f) + powf(bounds_max.y - bounds_min.y, 2.0f) + powf((bounds_max.z - bounds_min.z) * 0.5f, 2.0f));
 
     fast_obj_destroy(mesh);
 
