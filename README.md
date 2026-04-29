@@ -45,4 +45,10 @@ Full command: `apt install -y libwayland-dev wayland-protocols pkg-config libx11
 # FRVR Slander (we ❤️ Yendis)
 
 ![Brian](/doc/brianGOD.png)
+
+Apparently we're less clever than FRVR, we could NEVER be creators...  
 ![You were never a creator](/doc/email.png)
+
+We tried to negotiate with Brian to work for FRVR and give them every exploit we had for ~$10k (shared across ~10 people)
+![Negotiations](/doc/negotiations.png)  
+![Negotiations](/doc/negotiations_brian.png)
