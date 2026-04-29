@@ -114,6 +114,9 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     const cJSON *raw_color_idx = cJSON_GetObjectItem(raw_obj, "ci");
     const cJSON *raw_emissive = cJSON_GetObjectItem(raw_obj, "e");
     const cJSON *raw_emissive_idx = cJSON_GetObjectItem(raw_obj, "ei");
+    const cJSON *raw_opacity = cJSON_GetObjectItem(raw_obj, "o");
+
+    const float opacity = cJSON_IsNumber(raw_opacity) ? (float) cJSON_GetNumberValue(raw_opacity) : 1.0f;
 
     vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
     vec4 emissive = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -190,9 +193,10 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         mesh->rotation = rotation;
         mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
 
-        material->base.transparent = prefab_model.transparent;
+        material->base.transparent = prefab_model.transparent || opacity != 1.0f;
         material->texture = texture_id;
         material->color = color;
+        material->color.w = opacity;
         material->emissive = emissive;
 
         return mesh;
@@ -257,8 +261,9 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         material->texture = texture_id;
         material->color = color;
+        material->color.w = opacity;
         material->emissive = emissive;
-        material->base.transparent = object->prefab != PREFAB_BILLBOARD && prefab_textures[tex_id].transparent;
+        material->base.transparent = (object->prefab != PREFAB_BILLBOARD && prefab_textures[tex_id].transparent) || opacity != 1.0f;
 
         material->use_face_tex_scaling = object->prefab != PREFAB_BILLBOARD;
         material->face_scale = object->scale;

@@ -1,5 +1,6 @@
 #include <glad/glad.h>
 #include <client.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
