@@ -195,9 +195,6 @@ typedef struct {
         vec2 last_pos;
     } mouse_state;
 
-    int watermark;
-    int fullscreen;
-
     struct {
         int x;
         int y;
@@ -209,6 +206,7 @@ typedef struct {
     int last_fullscreen_key;
 
     Game game;
+    Player *me;
 } Client;
 
 void overlay_render(Client*);

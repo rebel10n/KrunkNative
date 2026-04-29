@@ -9,7 +9,6 @@
 
 #ifdef WIN32
 #include <direct.h>
-#define getcwd _getcwd
 #else
 #include <unistd.h>
 #endif
@@ -210,104 +209,85 @@ void client_tick_textures(Client *client, const float now) {
 void client_tick(Client *client, const float now, const float delta) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    if (!client->game.ready) return;
+
     client_tick_textures(client, now);
     scene_render(client->scene, &client->camera);
-
-    Input input = {0};
-    vec2 mouse_delta = {0};
-
-    input.move_dir = -1;
-    client->mouse_state.locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
 
     double x, y;
     glfwGetCursorPos(client->window, &x, &y);
 
     const int fullscreen_key = glfwGetKey(client->window, GLFW_KEY_F11);
+
     if (fullscreen_key && !client->last_fullscreen_key) {
-        if (client->fullscreen) {
+        const int fullscreen = !!glfwGetWindowMonitor(client->window);
+
+        if (fullscreen) {
             glfwSetWindowMonitor(client->window, NULL,
                 client->windowed_rect.x, client->windowed_rect.y,
-                client->windowed_rect.width, client->windowed_rect.height, 0);
-            client->fullscreen = 0;
+                client->windowed_rect.width, client->windowed_rect.height, 0
+            );
         } else {
             glfwGetWindowPos(client->window, &client->windowed_rect.x, &client->windowed_rect.y);
             glfwGetWindowSize(client->window, &client->windowed_rect.width, &client->windowed_rect.height);
 
             GLFWmonitor *monitor = glfwGetPrimaryMonitor();
             const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-            glfwSetWindowMonitor(client->window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
-            client->fullscreen = 1;
 
-            glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            glfwGetCursorPos(client->window, &x, &y);
-            client->mouse_state.last_pos.x = (float) x;
-            client->mouse_state.last_pos.y = (float) y;
-            client->mouse_state.locked = 1;
+            glfwSetWindowMonitor(client->window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
         }
     }
+
     client->last_fullscreen_key = fullscreen_key;
+    client->mouse_state.locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
 
-    if (client->mouse_state.locked) {
-        if (glfwGetKey(client->window, GLFW_KEY_ESCAPE)) {
-            glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    if (client->mouse_state.locked && glfwGetKey(client->window, GLFW_KEY_ESCAPE)) {
+        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        client->mouse_state.locked = 0;
+    }
+
+    if (!client->me) {
+        client->camera.position = client->game.map->camera_position;
+        client->camera.rotation.y += delta * 0.1f;
+        client->camera.rotation.y = fmodf(client->camera.rotation.y, 2.0f * (float) M_PI);
+    }
+
+    if (client->me && client->me->active) {
+        if (client->mouse_state.locked) {
+            Input input = {0};
+            vec2 mouse_delta = {0};
+
+            mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
+            mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
+
+            input.move_dir = -1;
+            input.jump = glfwGetKey(client->window, GLFW_KEY_SPACE);
+            input.crouch = glfwGetKey(client->window, GLFW_KEY_LEFT_SHIFT);
+
+            const int forward = glfwGetKey(client->window, GLFW_KEY_W);
+            const int back = glfwGetKey(client->window, GLFW_KEY_S);
+            const int left = glfwGetKey(client->window, GLFW_KEY_A);
+            const int right = glfwGetKey(client->window, GLFW_KEY_D);
+
+            if (forward ^ back) {
+                input.move_dir += forward ? 1 : 5;
+                if (left ^ right) input.move_dir += right ? (forward ? 1 : -1) : forward ? 7 : 1;
+            } else if (left ^ right) {
+                input.move_dir += right ? 3 : 7;
+            }
+
+            player_queue_input(client->me, &input);
         }
 
-        mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
-        mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
+        client->camera.position = client->me->position;
+        client->camera.position.y += client->me->height - game_constants.camera_height;
 
-        input.jump = glfwGetKey(client->window, GLFW_KEY_SPACE);
-        input.crouch = glfwGetKey(client->window, GLFW_KEY_LEFT_SHIFT);
-
-        const int forward = glfwGetKey(client->window, GLFW_KEY_W);
-        const int back = glfwGetKey(client->window, GLFW_KEY_S);
-        const int left = glfwGetKey(client->window, GLFW_KEY_A);
-        const int right = glfwGetKey(client->window, GLFW_KEY_D);
-
-        if (forward ^ back) {
-            input.move_dir += forward ? 1 : 5;
-            if (left ^ right) input.move_dir += right ? (forward ? 1 : -1) : forward ? 7 : 1;
-        } else if (left ^ right) {
-            input.move_dir += right ? 3 : 7;
-        }
+        client->camera.rotation.x = client->me->direction.x;
+        client->camera.rotation.y = client->me->direction.y;
     }
 
     client->mouse_state.last_pos.x = (float) x;
     client->mouse_state.last_pos.y = (float) y;
-
-    if (!client->mouse_state.locked && glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_LEFT)) {
-        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    }
-
-    Player *me = client->game.players ? client->game.players[0] : NULL;
-
-    if (me && me->active) {
-        const int noclip_key = glfwGetKey(client->window, GLFW_KEY_N);
-
-        if (client->mouse_state.locked) {
-            if (noclip_key && !client->last_noclip_key) me->noclip ^= 1;
-
-            overlay_render(client);
-        }
-
-        client->last_noclip_key = noclip_key;
-
-        client->camera.position = me->position;
-        client->camera.position.y += me->height - game_constants.camera_height;
-
-        client->camera.rotation.x = me->direction.x;
-        client->camera.rotation.y = me->direction.y;
-
-        input.seq = ++me->input_seq;
-        input.delta = delta;
-
-        input.x_dir = me->direction.x - mouse_delta.y * game_constants.mouse_sensitivity * 0.5f;
-        input.y_dir = me->direction.y - mouse_delta.x * game_constants.mouse_sensitivity * 0.5f;
-
-        player_queue_input(me, &input);
-    } else if (client->game.map) {
-        client->camera.position = client->game.map->camera_position;
-        client->camera.rotation.y = fmodf(client->camera.rotation.y + delta * 0.1f, M_PI * 2.0f);
-    }
 
     game_tick(&client->game, now, delta);
 }

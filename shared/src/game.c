@@ -45,7 +45,10 @@ const GameConfig g_default_game_config = {
 };
 
 void game_clear_players(Game *game) {
-    // TODO
+    if (game->player_count) {
+        free(game->players);
+        game->player_count = 0;
+    }
 }
 
 void game_configure(Game *game, const GameConfig *config, const cJSON **maps, const size_t map_count, int *modes, const size_t mode_count) {
@@ -93,6 +96,7 @@ void game_configure(Game *game, const GameConfig *config, const cJSON **maps, co
 }
 
 void game_init(Game *game, const int map_index, const int mode_index) {
+    game->ready = 0;
     game_clear_players(game);
 
     if (!game->map_count || !game->mode_count) return;
@@ -116,7 +120,9 @@ void game_init(Game *game, const int map_index, const int mode_index) {
     if (game->mode) mode_fini(game->mode);
     game->mode = new_mode;
 
-    // TODO: apply mode
+    if (!game->mode || !game->map) return;
+    game->ready = 1;
+
     // TODO: timers, win conditions, etc
 }
 

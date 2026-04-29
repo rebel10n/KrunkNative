@@ -440,6 +440,7 @@ typedef struct Game_t {
 
     unsigned char move_lock:1;
     unsigned char is_local:1;
+    unsigned char ready:1;
 
     float nuke_timer;
     int nuke_player;
