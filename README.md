@@ -53,6 +53,6 @@ If you wish to run KrunkNative, you must first add game assets, please read [the
 Apparently we're less clever than FRVR, we could NEVER be creators...  
 ![You were never a creator](/doc/email.png)
 
-We tried to negotiate with Brian to work for FRVR and give them every script/exploit we had for ~$10k (shared across ~10 people)
+We tried to negotiate with Brian to work for FRVR and give them every script/exploit we had for ~$10k (shared across ~10 people)  
 ![Negotiations](/doc/negotiations.png)  
 ![Negotiations](/doc/negotiations_brian.png)
