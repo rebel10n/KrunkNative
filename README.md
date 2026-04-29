@@ -45,3 +45,4 @@ Full command: `apt install -y libwayland-dev wayland-protocols pkg-config libx11
 # FRVR Slander (we ❤️ Yendis)
 
 ![Brian](/doc/brianGOD.png)
+![You were never a creator](/doc/email.png)
