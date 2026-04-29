@@ -217,9 +217,6 @@ typedef struct {
     unsigned char infinite_jump:1;
 } MapConfig;
 
-extern const MapConfig g_default_map_config;
-extern const char *g_default_map_names[15];
-
 typedef struct {
     const cJSON *raw_data;
     MapConfig config;
@@ -237,6 +234,12 @@ typedef struct {
 
     vec3 camera_position;
 } Map;
+
+extern const MapConfig g_default_map_config;
+extern const cJSON *g_maps[15];
+extern const int g_rotation_maps[13];
+
+void load_default_maps();
 
 Map *map_init(const cJSON*);
 void map_reset(Map*);
@@ -411,6 +414,12 @@ typedef struct {
     float health_mlt;
     float fire_rate;
     float reload_speed;
+
+    int *maps;
+    int map_count;
+
+    int *modes;
+    int mode_count;
 } GameConfig;
 
 extern const GameConfig g_default_game_config;

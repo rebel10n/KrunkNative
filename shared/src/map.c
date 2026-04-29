@@ -4,6 +4,8 @@
 
 #ifdef KRUNKNATIVE_CLIENT
 #include <client.h>
+#elif defined(KRUNKNATIVE_SERVER)
+#include <server.h>
 #endif
 
 const MapConfig g_default_map_config = {
@@ -20,7 +22,7 @@ const MapConfig g_default_map_config = {
     .infinite_jump = 0,
 };
 
-const char *g_default_map_names[] = {
+const char *default_map_names[] = {
     "burg",
     "littletown",
     "sandstorm",
@@ -37,6 +39,38 @@ const char *g_default_map_names[] = {
     "soul_sanctum",
     "evacuation",
 };
+
+const cJSON *g_maps[sizeof(default_map_names) / sizeof(default_map_names[0])];
+const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 14};
+
+void load_default_maps() {
+    for (size_t i = 0; i < sizeof(default_map_names) / sizeof(default_map_names[0]); i++) {
+        if (g_maps[i]) continue;
+
+        const size_t path_length = snprintf(NULL, 0, "maps/%s.json", default_map_names[i]);
+        char *path = malloc(path_length + 1);
+        if (!path) continue;
+
+        snprintf(path, path_length + 1, "maps/%s.json", default_map_names[i]);
+
+#ifdef KRUNKNATIVE_CLIENT
+        char *full_path = concat(client_assets_path(), path);
+#elif defined(KRUNKNATIVE_SERVER)
+        char *full_path = concat(server_assets_path(), path);
+#endif
+
+        size_t map_length;
+        unsigned char *map_buffer;
+
+        if (read_file(full_path, &map_buffer, &map_length)) continue;
+
+        g_maps[i] = cJSON_Parse((char *) map_buffer);
+
+        free(map_buffer);
+        free(full_path);
+        free(path);
+    }
+}
 
 Map *map_init(const cJSON *raw_data) {
     if (!cJSON_IsObject(raw_data)) return NULL;

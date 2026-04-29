@@ -42,6 +42,8 @@ typedef struct {
     GameMode base;
 } FreeForAll;
 
+extern const int g_rotation_modes[1];
+
 GameMode *mode_init(int);
 void mode_fini(GameMode*);
 

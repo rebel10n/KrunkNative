@@ -25,6 +25,8 @@ const GameModeConfig g_default_game_mode_config = {
     .hitbox_pad = 1.0f
 };
 
+const int g_rotation_modes[] = {0};
+
 GameMode *mode_init(const int index) {
     switch (index) {
         case 0:

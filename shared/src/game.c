@@ -57,23 +57,38 @@ void game_configure(Game *game, const GameConfig *config, const cJSON **maps, co
         game->map_count = 0;
     }
 
-    if (game->mode_count) {
-        free(game->modes);
-        game->mode_count = 0;
-    }
-
     if (map_count) {
         game->maps = maps;
         game->map_count = map_count;
     } else {
-        // TODO: load default maps
+        load_default_maps();
+
+        game->map_count = sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]);
+        game->maps = calloc(game->map_count, sizeof(cJSON*));
+
+        if (game->maps) {
+            for (size_t i = 0; i < game->map_count; i++) {
+                game->maps[i] = g_maps[g_rotation_maps[i]];
+            }
+        } else {
+            game->map_count = 0;
+        }
+    }
+
+    if (game->mode_count) {
+        free(game->modes);
+        game->mode_count = 0;
     }
 
     if (mode_count) {
         game->modes = modes;
         game->mode_count = mode_count;
     } else {
-        // TODO: load default modes
+        game->mode_count = sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]);
+        game->modes = calloc(game->mode_count, sizeof(int));
+
+        if (game->modes) memcpy(game->modes, g_rotation_modes, sizeof(g_rotation_modes));
+        else game->mode_count = 0;
     }
 }
 
