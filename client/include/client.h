@@ -196,8 +196,9 @@ typedef struct {
         int height;
     } windowed_rect;
 
-    int last_noclip_key;
-    int last_fullscreen_key;
+    unsigned char last_debug_key:1;
+    unsigned char last_fullscreen_key:1;
+    unsigned char enter_game_lock:1;
 
     Game game;
     Player *me;

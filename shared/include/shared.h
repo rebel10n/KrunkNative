@@ -449,9 +449,9 @@ typedef struct Game_t {
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t);
-void game_init(Game*, int, int);
+void game_init(Game*, int, int, unsigned char);
 void game_tick(Game*, float, float);
-void game_players_add(Game*, Player*, int);
+void game_players_add(Game*, Player*);
 
 char *concat(const char*, const char*);
 int read_file(const char*, unsigned char**, size_t*);

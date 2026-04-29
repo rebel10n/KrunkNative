@@ -97,7 +97,7 @@ int main() {
     if (!INSTANCE.scene || !INSTANCE.ui) return -1;
 
     game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0);
-    game_init(&INSTANCE.game, -1, -1);
+    game_init(&INSTANCE.game, -1, -1, 1);
     client_load_map(&INSTANCE);
 
     double last_tick = glfwGetTime();
@@ -206,6 +206,29 @@ void client_tick_textures(Client *client, const float now) {
     }
 }
 
+void client_enter_game(Client *client) {
+    if (!client->game.ready || client->enter_game_lock) return;
+    client->enter_game_lock = 1;
+
+    if (client->game.is_local) {
+        if (!client->me) {
+            client->me = player_init(&client->game);
+
+            if (!client->me) {
+                client->enter_game_lock = 0;
+                return;
+            }
+
+            game_players_add(&client->game, client->me);
+        }
+
+        player_spawn(client->me);
+        client->enter_game_lock = 0;
+    } else {
+        // TODO: liftoff
+    }
+}
+
 void client_tick(Client *client, const float now, const float delta) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -215,7 +238,25 @@ void client_tick(Client *client, const float now, const float delta) {
     scene_render(client->scene, &client->camera);
 
     ui_update(client->ui);
-    hud_render(client, now);
+
+    if (!client->mouse_state.locked) {
+        hud_render(client, now);
+    } else {
+        overlay_render(client);
+    }
+
+    const int debug_key = glfwGetKey(client->window, GLFW_KEY_GRAVE_ACCENT);
+
+    if (debug_key && !client->last_debug_key) {
+        client_unload_map(client);
+
+        client->me = NULL;
+
+        game_init(&client->game, -1, -1, 1);
+        client_load_map(client);
+    }
+
+    client->last_debug_key = debug_key;
 
     double x, y;
     glfwGetCursorPos(client->window, &x, &y);
@@ -247,6 +288,16 @@ void client_tick(Client *client, const float now, const float delta) {
     if (client->mouse_state.locked && glfwGetKey(client->window, GLFW_KEY_ESCAPE)) {
         glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         client->mouse_state.locked = 0;
+    } else if (!client->mouse_state.locked && glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_LEFT)) {
+        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+        client->mouse_state.locked = 1;
+        client->mouse_state.last_pos.x = (float) x;
+        client->mouse_state.last_pos.y = (float) y;
+    }
+
+    if (client->mouse_state.locked && (!client->me || !client->me->active)) {
+        client_enter_game(client);
     }
 
     if (!client->me) {
@@ -256,14 +307,22 @@ void client_tick(Client *client, const float now, const float delta) {
     }
 
     if (client->me && client->me->active) {
+        Input input = {0};
+        vec2 mouse_delta = {0};
+
+        mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
+        mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
+
+        input.move_dir = -1;
+        input.delta = delta;
+
+        input.x_dir = client->me->direction.x;
+        input.y_dir = client->me->direction.y;
+
         if (client->mouse_state.locked) {
-            Input input = {0};
-            vec2 mouse_delta = {0};
+            input.x_dir -= mouse_delta.y * game_constants.mouse_sensitivity;
+            input.y_dir -= mouse_delta.x * game_constants.mouse_sensitivity;
 
-            mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
-            mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
-
-            input.move_dir = -1;
             input.jump = glfwGetKey(client->window, GLFW_KEY_SPACE);
             input.crouch = glfwGetKey(client->window, GLFW_KEY_LEFT_SHIFT);
 
@@ -278,9 +337,9 @@ void client_tick(Client *client, const float now, const float delta) {
             } else if (left ^ right) {
                 input.move_dir += right ? 3 : 7;
             }
-
-            player_queue_input(client->me, &input);
         }
+
+        player_queue_input(client->me, &input);
 
         client->camera.position = client->me->position;
         client->camera.position.y += client->me->height - game_constants.camera_height;

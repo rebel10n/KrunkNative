@@ -95,8 +95,10 @@ void game_configure(Game *game, const GameConfig *config, const cJSON **maps, co
     }
 }
 
-void game_init(Game *game, const int map_index, const int mode_index) {
+void game_init(Game *game, const int map_index, const int mode_index, const unsigned char is_local) {
     game->ready = 0;
+    game->is_local = is_local;
+
     game_clear_players(game);
 
     if (!game->map_count || !game->mode_count) return;
@@ -150,26 +152,16 @@ void game_tick(Game *game, const float now, const float delta) {
     }
 }
 
-void game_players_add(Game *game, Player *player, const int is_you) {
-    if (!game->players) {
-        game->player_count = is_you ? 1 : 2;
-        game->players = calloc(game->player_count, sizeof(Player));
-
-        if (!game->players) {
-            game->player_count = 0;
-            return;
-        }
-
-        game->players[is_you ? 0 : 1] = player;
-        return;
-    }
-
-    if (is_you) game->players[0] = player;
-    else {
+void game_players_add(Game *game, Player *player) {
+    if (!game->player_count) {
+        game->players = calloc(1, sizeof(Player *));
+        if (!game->players) return;
+    } else {
         Player **new_players = realloc(game->players, (game->player_count + 1) * sizeof(Player *));
         if (!new_players) return;
 
-        new_players[game->player_count++] = player;
         game->players = new_players;
     }
+
+    game->players[game->player_count++] = player;
 }

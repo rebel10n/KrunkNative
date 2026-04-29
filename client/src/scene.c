@@ -9,7 +9,7 @@ Scene *scene_init() {
 }
 
 void scene_add_mesh(Scene *scene, Mesh *mesh) {
-    if (!scene->meshes) {
+    if (!scene->mesh_count) {
         scene->meshes = calloc(1, sizeof(Mesh *));
         if (!scene->meshes) return;
 
@@ -41,6 +41,11 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
 
     memcpy(&scene->meshes[index], &scene->meshes[index + 1], (scene->mesh_count - index - 1) * sizeof(Mesh *));
     scene->mesh_count--;
+
+    if (!scene->mesh_count) {
+        free(scene->meshes);
+        return;
+    }
 
     Mesh **meshes = realloc(scene->meshes, scene->mesh_count * sizeof(Mesh *));
     if (!meshes) return;
