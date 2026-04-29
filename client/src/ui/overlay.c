@@ -3,11 +3,6 @@
 #include <math.h>
 
 void overlay_render(Client *client) {
-    glDisable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-
-    ui_update_size(client->ui);
-
     { // test crosshair
         const vec4 color = {1.0f, 1.0f, 0.0f, 1.0f};
 

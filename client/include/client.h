@@ -156,26 +156,20 @@ void scene_remove_mesh(Scene*, Mesh*);
 void scene_render(const Scene*, Camera*);
 void scene_fini(Scene*);
 
-typedef enum {
-    TEXT_BASELINE_TOP,
-    TEXT_BASELINE_MIDDLE,
-    TEXT_BASELINE_BOTTOM,
-} TextBaseline;
-
 typedef struct {
     QuadMaterial *material;
     TextMaterial *text_material;
-    TextBaseline text_baseline;
 
     unsigned int vao;
     unsigned int vbo;
 
     float width;
     float height;
+    float scale;
 } UI;
 
 UI *ui_init();
-void ui_update_size(UI*);
+void ui_update(UI*);
 void ui_fill_rect(UI*, vec4, float, float, float, float);
 void ui_round_rect(UI*, vec4, float, float, float, float, float);
 void ui_draw_image(UI*, unsigned int, float, float, float, float);
@@ -209,6 +203,7 @@ typedef struct {
     Player *me;
 } Client;
 
+void hud_render(Client*, float);
 void overlay_render(Client*);
 
 const char *client_assets_path();

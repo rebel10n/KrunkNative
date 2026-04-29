@@ -34,12 +34,16 @@ UI *ui_init() {
     return ui;
 }
 
-void ui_update_size(UI *ui) {
+void ui_update(UI *ui) {
     int viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
 
     ui->width = (float) viewport[2];
     ui->height = (float) viewport[3];
+    ui->scale = 1.0f;
+
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
 }
 
 void ui_fill_rect_(UI *ui, const unsigned int shader, const float x, const float y, const float width, const float height) {
@@ -200,15 +204,8 @@ float ui_fill_text(UI *ui, const vec4 color, const char *text, float x, const fl
             ui->text_material->texture = glyph->texture;
             material_update_uniforms((Material *) ui->text_material);
 
-            float glyph_y = y + (100.0f - glyph->h_bearing.y) * size / 100.0f;
-
-            if (ui->text_baseline == TEXT_BASELINE_MIDDLE) {
-                glyph_y += glyph->h_bearing.y * size / 100.0f * 0.5f;
-            } else if (ui->text_baseline == TEXT_BASELINE_TOP) {
-                glyph_y += glyph->h_bearing.y * size / 100.0f;
-            }
-
-            ui_fill_rect_(ui, ui->text_material->base.program, x - glyph->h_bearing.x, glyph_y, glyph->size.x * size / 100.0f, glyph->size.y * size / 100.0f);
+            const float glyph_y = y - glyph->h_bearing.y * size / 100.0f + size * 0.5f;
+            ui_fill_rect_(ui, ui->text_material->base.program, x - glyph->h_bearing.x * size / 100.0f, glyph_y, glyph->size.x * size / 100.0f, glyph->size.y * size / 100.0f);
         }
 
         x += glyph->advance * size / 100.0f;

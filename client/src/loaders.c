@@ -65,8 +65,8 @@ GlyphCacheEntry *load_glyph(const char c) {
         g_game_font->glyph->bitmap.buffer
     );
 
-    entry->size.x = (float) g_game_font->glyph->bitmap.width;
-    entry->size.y = (float) g_game_font->glyph->bitmap.rows;
+    entry->size.x = (float) g_game_font->glyph->metrics.width / 64.0f;
+    entry->size.y = (float) g_game_font->glyph->metrics.height / 64.0f;
     entry->h_bearing.x = (float) g_game_font->glyph->metrics.horiBearingX / 64.0f;
     entry->h_bearing.y = (float) g_game_font->glyph->metrics.horiBearingY / 64.0f;
     entry->v_bearing.x = (float) g_game_font->glyph->metrics.vertBearingX / 64.0f;

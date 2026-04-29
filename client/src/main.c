@@ -214,6 +214,9 @@ void client_tick(Client *client, const float now, const float delta) {
     client_tick_textures(client, now);
     scene_render(client->scene, &client->camera);
 
+    ui_update(client->ui);
+    hud_render(client, now);
+
     double x, y;
     glfwGetCursorPos(client->window, &x, &y);
 
