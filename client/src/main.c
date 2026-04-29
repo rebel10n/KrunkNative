@@ -306,6 +306,8 @@ void client_tick(Client *client, const float now, const float delta) {
         client->camera.rotation.y = fmodf(client->camera.rotation.y, 2.0f * (float) M_PI);
     }
 
+    const int noclip_key = glfwGetKey(client->window, GLFW_KEY_N);
+
     if (client->me && client->me->active) {
         Input input = {0};
         vec2 mouse_delta = {0};
@@ -320,6 +322,8 @@ void client_tick(Client *client, const float now, const float delta) {
         input.y_dir = client->me->direction.y;
 
         if (client->mouse_state.locked) {
+            if (noclip_key && !client->last_noclip_key) client->me->noclip ^= 1;
+
             input.x_dir -= mouse_delta.y * game_constants.mouse_sensitivity;
             input.y_dir -= mouse_delta.x * game_constants.mouse_sensitivity;
 
@@ -350,6 +354,7 @@ void client_tick(Client *client, const float now, const float delta) {
 
     client->mouse_state.last_pos.x = (float) x;
     client->mouse_state.last_pos.y = (float) y;
+    client->last_noclip_key = noclip_key;
 
     game_tick(&client->game, now, delta);
 }
