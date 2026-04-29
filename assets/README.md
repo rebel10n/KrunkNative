@@ -7,6 +7,8 @@ Please unpack Krunker's `mod.zip` into this folder, more specifically:
 - `sound/*`
 - `css/fonts/font2.ttf`
 
-> RECOMMENDED: Use a 2021 or earlier version of `mod.zip` if possible.
+> [!TIP]
+> It is recommended to use a 2020-2021 version of `mod.zip` if possible.
 
-> WARNING: Do not unpack Krunker's `shaders` folder here, nor delete the pre-existing assets.
+> [!CAUTION]
+> Do not delete the pre-existing assets (files that are already in this folder).
