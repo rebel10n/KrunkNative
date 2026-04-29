@@ -20,20 +20,38 @@ const MapConfig g_default_map_config = {
     .infinite_jump = 0,
 };
 
-Map *map_init(const char *raw) {
-    const cJSON *raw_map = cJSON_Parse(raw);
-    if (!cJSON_IsObject(raw_map)) return NULL;
+const char *g_default_map_names[] = {
+    "burg",
+    "littletown",
+    "sandstorm",
+    "subzero",
+    "undergrowth",
+    "shipyard",
+    "freight",
+    "lostworld",
+    "citadel",
+    "oasis",
+    "kanji",
+    "newtown",
+    "industry",
+    "soul_sanctum",
+    "evacuation",
+};
 
-    const cJSON *objects = cJSON_GetObjectItem(raw_map, "objects");
-    const cJSON *spawns = cJSON_GetObjectItem(raw_map, "spawns");
-    const cJSON *colors = cJSON_GetObjectItem(raw_map, "colors");
-    const cJSON *cam_pos = cJSON_GetObjectItem(raw_map, "camPos");
+Map *map_init(const cJSON *raw_data) {
+    if (!cJSON_IsObject(raw_data)) return NULL;
+
+    const cJSON *objects = cJSON_GetObjectItem(raw_data, "objects");
+    const cJSON *spawns = cJSON_GetObjectItem(raw_data, "spawns");
+    const cJSON *colors = cJSON_GetObjectItem(raw_data, "colors");
+    const cJSON *cam_pos = cJSON_GetObjectItem(raw_data, "camPos");
 
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
     vec4 *parsed_colors = cJSON_IsArray(colors) ? calloc(cJSON_GetArraySize(colors), sizeof(vec4)) : NULL;
     Map *map = calloc(1, sizeof(Map));
 
+    map->raw_data = raw_data;
     map->config = g_default_map_config;
 
     if (cJSON_IsArray(cam_pos) && cJSON_GetArraySize(cam_pos) >= 3) {
@@ -307,6 +325,10 @@ Map *map_init(const char *raw) {
     return map;
 }
 
+void map_reset(Map *map) {
+
+}
+
 void map_fini(Map *map) {
     if (map->spawn_count) {
         for (size_t i = 0; i < map->spawn_count; i++) free(map->spawns[i]);
@@ -318,7 +340,18 @@ void map_fini(Map *map) {
     }
 
     if (map->object_count) {
-        for (size_t i = 0; i < map->object_count; i++) free(map->objects[i]);
+        for (size_t i = 0; i < map->object_count; i++) {
+            Object *object = map->objects[i];
+
+            if (object->tex_anim) free(object->tex_anim);
+            if (object->ramp) free(object->ramp);
+
+#ifdef KRUNKNATIVE_CLIENT
+            if (object->mesh) mesh_fini(object->mesh);
+#endif
+
+            free(object);
+        }
 
         free(map->objects);
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <stdlib.h>
 #include <modes.h>
+#include <cJSON.h>
 
 typedef struct {
     float x;
@@ -217,8 +218,10 @@ typedef struct {
 } MapConfig;
 
 extern const MapConfig g_default_map_config;
+extern const char *g_default_map_names[15];
 
 typedef struct {
+    const cJSON *raw_data;
     MapConfig config;
 
     size_t spawn_count;
@@ -235,7 +238,8 @@ typedef struct {
     vec3 camera_position;
 } Map;
 
-Map *map_init(const char*);
+Map *map_init(const cJSON*);
+void map_reset(Map*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
 
 typedef struct {
@@ -366,6 +370,7 @@ typedef struct {
 
 Player *player_init(struct Game_t*);
 void player_spawn(Player*);
+void player_queue_input(Player*, const Input*);
 void player_proc_input(Player*, const Input*, int, int);
 void player_update(Player*, float);
 
@@ -415,6 +420,12 @@ typedef struct Game_t {
     GameMode *mode;
     Map *map;
 
+    const cJSON **maps;
+    int *modes;
+
+    size_t map_count;
+    size_t mode_count;
+
     size_t player_count;
     Player **players;
 
@@ -427,6 +438,9 @@ typedef struct Game_t {
     void *server; // TODO
 } Game;
 
+void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t);
+void game_init(Game*, int, int);
+void game_tick(Game*, float, float);
 void game_players_add(Game*, Player*, int);
 
 char *concat(const char*, const char*);

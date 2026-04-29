@@ -42,4 +42,7 @@ typedef struct {
     GameMode base;
 } FreeForAll;
 
+GameMode *mode_init(int);
+void mode_fini(GameMode*);
+
 FreeForAll *ffa_init();

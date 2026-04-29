@@ -1,11 +1,16 @@
 #include <shared.h>
+#include <pcg_basic.h>
+
+#ifdef KRUNKNATIVE_CLIENT
+#include <client.h>
+#endif
 
 const GameConfig g_default_game_config = {
     .max_players = 2,
     .min_players = 0,
     .game_time = 4,
     .warmup_time = 0.0f,
-    .auto_respawn = 0.0f,
+    .auto_respawn = 0,
     .lives = 0,
     .score_limit = 0,
     .gravity_mlt = 1.0f,
@@ -43,11 +48,60 @@ void game_clear_players(Game *game) {
     // TODO
 }
 
-void game_init(Game *game, const GameConfig *config, int map_index, int mode_index) {
+void game_configure(Game *game, const GameConfig *config, const cJSON **maps, const size_t map_count, int *modes, const size_t mode_count) {
     if (config) game->config = *config;
+    else game->config = g_default_game_config;
+
+    if (game->map_count) {
+        free(game->maps);
+        game->map_count = 0;
+    }
+
+    if (game->mode_count) {
+        free(game->modes);
+        game->mode_count = 0;
+    }
+
+    if (map_count) {
+        game->maps = maps;
+        game->map_count = map_count;
+    } else {
+        // TODO: load default maps
+    }
+
+    if (mode_count) {
+        game->modes = modes;
+        game->mode_count = mode_count;
+    } else {
+        // TODO: load default modes
+    }
+}
+
+void game_init(Game *game, const int map_index, const int mode_index) {
     game_clear_players(game);
 
-    // TODO: load map & mode
+    if (!game->map_count || !game->mode_count) return;
+
+    const int map_to_load = map_index >= 0 && map_index < game->map_count ? map_index : (int) pcg32_boundedrand(game->map_count);
+    const int map_changed = !game->map || game->map->raw_data != game->maps[map_to_load];
+
+    const int mode_to_load = mode_index >= 0 && mode_index < game->mode_count ? mode_index : (int) pcg32_boundedrand(game->mode_count);
+
+    if (map_changed) {
+        Map *new_map = map_init(game->maps[map_to_load]);
+
+        if (game->map) map_fini(game->map);
+        game->map = new_map;
+    } else {
+        map_reset(game->map);
+    }
+
+    GameMode *new_mode = mode_init(game->modes[mode_to_load]);
+
+    if (game->mode) mode_fini(game->mode);
+    game->mode = new_mode;
+
+    // TODO: apply mode
     // TODO: timers, win conditions, etc
 }
 

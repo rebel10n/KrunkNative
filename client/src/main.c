@@ -29,6 +29,8 @@ unsigned int g_blank_texture;
 unsigned int g_active_texture;
 unsigned int g_active_shader;
 
+void client_load_map(Client*);
+void client_unload_map(Client*);
 void client_tick(Client*, float, float);
 void resize_viewport(GLFWwindow*, int, int);
 
@@ -53,9 +55,6 @@ int main() {
     if (!glfwInit()) return -1;
 
     static Client INSTANCE = {0};
-
-    INSTANCE.game.config = g_default_game_config;
-    INSTANCE.game.mode = (GameMode *) ffa_init();
 
     INSTANCE.camera.fov = M_PI / 2.0f;
     INSTANCE.camera.near = 0.1f;
@@ -98,35 +97,9 @@ int main() {
 
     if (!INSTANCE.scene || !INSTANCE.ui) return -1;
 
-    // === LOAD MAP FOR DEBUG ===
-    char *map_path = concat(client_assets_path(), "maps/lostworld.json");
-
-    size_t map_size;
-    unsigned char *map_data;
-
-    if (!read_file(map_path, &map_data, &map_size)) {
-        Map *map = map_init((const char *) map_data);
-        INSTANCE.game.map = map;
-
-        if (map) for (size_t i = 0; i < map->object_count; i++) {
-            if (!map->objects[i]->mesh) continue;
-            scene_add_mesh(INSTANCE.scene, map->objects[i]->mesh);
-        }
-
-        free(map_data);
-    }
-
-    free(map_path);
-
-    // === ADD LOCAL PLAYER ===
-    Player *me = player_init(&INSTANCE.game);
-
-    if (me) {
-        player_spawn(me);
-        game_players_add(&INSTANCE.game, me, 1);
-    }
-
-    // === END OF DEBUG SECTION ===
+    game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0);
+    game_init(&INSTANCE.game, -1, -1);
+    client_load_map(&INSTANCE);
 
     double last_tick = glfwGetTime();
 
@@ -142,6 +115,24 @@ int main() {
     }
 
     return 0;
+}
+
+void client_load_map(Client *client) {
+    if (!client->game.map) return;
+
+    for (size_t i = 0; i < client->game.map->object_count; i++) {
+        const Object *object = client->game.map->objects[i];
+        if (object->mesh) scene_add_mesh(client->scene, object->mesh);
+    }
+}
+
+void client_unload_map(Client *client) {
+    if (!client->game.map) return;
+
+    for (size_t i = 0; i < client->game.map->object_count; i++) {
+        const Object *object = client->game.map->objects[i];
+        if (object->mesh) scene_remove_mesh(client->scene, object->mesh);
+    }
 }
 
 const char *client_assets_path() {
@@ -208,11 +199,11 @@ void client_animate_object_texture(Object *object, const float now) {
 }
 
 void client_tick_textures(Client *client, const float now) {
-    if (client->game.map) {
-        for (size_t i = 0; i < client->game.map->object_count; i++) {
-            Object *object = client->game.map->objects[i];
-            client_animate_object_texture(object, now);
-        }
+    if (!client->game.map) return;
+
+    for (size_t i = 0; i < client->game.map->object_count; i++) {
+        Object *object = client->game.map->objects[i];
+        client_animate_object_texture(object, now);
     }
 }
 
@@ -221,7 +212,6 @@ void client_tick(Client *client, const float now, const float delta) {
 
     client_tick_textures(client, now);
     scene_render(client->scene, &client->camera);
-    overlay_render(client);
 
     Input input = {0};
     vec2 mouse_delta = {0};
@@ -293,7 +283,12 @@ void client_tick(Client *client, const float now, const float delta) {
     if (me && me->active) {
         const int noclip_key = glfwGetKey(client->window, GLFW_KEY_N);
 
-        if (client->mouse_state.locked && noclip_key && !client->last_noclip_key) me->noclip ^= 1;
+        if (client->mouse_state.locked) {
+            if (noclip_key && !client->last_noclip_key) me->noclip ^= 1;
+
+            overlay_render(client);
+        }
+
         client->last_noclip_key = noclip_key;
 
         client->camera.position = me->position;
@@ -308,10 +303,11 @@ void client_tick(Client *client, const float now, const float delta) {
         input.x_dir = me->direction.x - mouse_delta.y * game_constants.mouse_sensitivity * 0.5f;
         input.y_dir = me->direction.y - mouse_delta.x * game_constants.mouse_sensitivity * 0.5f;
 
-        // player_queue_input(me, input);
-        player_update(me, delta);
-    } else {
+        player_queue_input(me, &input);
+    } else if (client->game.map) {
         client->camera.position = client->game.map->camera_position;
         client->camera.rotation.y = fmodf(client->camera.rotation.y + delta * 0.1f, M_PI * 2.0f);
     }
+
+    game_tick(&client->game, now, delta);
 }

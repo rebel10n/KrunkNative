@@ -33,6 +33,20 @@ void player_spawn(Player *player) {
     }
 }
 
+void player_queue_input(Player *player, const Input *input) {
+    if (player->input_queue_size) {
+        Input *new_input_queue = realloc(player->input_queue, (player->input_queue_size + 1) * sizeof(Input));
+        if (!new_input_queue) return;
+
+        player->input_queue = new_input_queue;
+    } else {
+        player->input_queue = calloc(1, sizeof(Input));
+        if (!player->input_queue) return;
+    }
+
+    player->input_queue[player->input_queue_size++] = *input;
+}
+
 void player_reset_step(Player *player, const int recon) {
     // TODO: animate
 
@@ -363,6 +377,7 @@ void player_update(Player *player, const float delta) {
         }
 
         player->input_queue_size = 0;
+        free(player->input_queue);
     }
 
     player->idle_anim += game_constants.idle_anim_speed * delta;

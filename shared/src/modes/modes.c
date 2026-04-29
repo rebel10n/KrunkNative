@@ -24,3 +24,16 @@ const GameModeConfig g_default_game_mode_config = {
     .ammo_limit = 0,
     .hitbox_pad = 1.0f
 };
+
+GameMode *mode_init(const int index) {
+    switch (index) {
+        case 0:
+            return (GameMode *) ffa_init();
+        default:
+            return NULL;
+    }
+}
+
+void mode_fini(GameMode *mode) {
+    free(mode);
+}
