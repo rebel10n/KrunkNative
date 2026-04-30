@@ -1,6 +1,7 @@
 #pragma once
 #include <stdlib.h>
 #include <modes.h>
+#include <weapons.h>
 #include <cJSON.h>
 
 typedef struct {
@@ -62,6 +63,13 @@ typedef struct {
     float player_terrain_slide_velocity_mlt;
     float idle_anim_speed;
     float interpolation;
+    float lean_sensitivity;
+    float lean_max;
+    float lean_pull;
+    float lean_pull_z;
+    float bob_pull_y;
+    float bob_pull_z;
+    float crouch_anim;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -260,10 +268,6 @@ typedef struct {
 
 extern const ClassConfig g_classes[];
 
-typedef struct {
-
-} Weapon;
-
 typedef enum {
     TEAM_OPTIONS_NONE,
     TEAM_OPTIONS_HIDERS,
@@ -299,6 +303,7 @@ typedef struct {
     float y_dir;
 
     unsigned char shoot:1;
+    unsigned char scope:1;
     unsigned char jump:1;
     unsigned char crouch:1;
     unsigned char reload:1;
@@ -320,11 +325,13 @@ typedef struct {
     unsigned char on_wall:1;
     unsigned char on_terrain:1;
     unsigned char terrain_slipping:1;
+    unsigned char wall_jump:1;
 
     unsigned char did_act:1;
     unsigned char did_jump:1;
     unsigned char did_wall_jump:1;
     unsigned char can_slide:1;
+    unsigned char can_throw:1;
 
     int input_seq;
 
@@ -346,9 +353,12 @@ typedef struct {
 
     float crouch_val;
     float aim_val;
+    float aim_time;
 
     int slid_cont;
 
+    float swap_time;
+    float reload_timer;
     float slide_timer;
     float jump_timer;
 
@@ -360,6 +370,14 @@ typedef struct {
     vec3 velocity;
     vec2 direction;
 
+    vec3 bob_anim;
+    vec3 lean_anim;
+    vec3 recoil;
+
+    float recoil_force;
+    float recoil_anim;
+    float recoil_anim_y;
+
     int *loadout;
     int loadout_size;
     int loadout_index;
@@ -367,7 +385,7 @@ typedef struct {
     Input *input_queue;
     size_t input_queue_size;
 
-    Weapon *weapon;
+    const Weapon *weapon;
     player_mesh_map meshes;
 } Player;
 

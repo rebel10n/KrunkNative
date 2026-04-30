@@ -10,6 +10,7 @@ typedef struct {
     unsigned char akimbo:1;
     unsigned char no_aim:1;
     unsigned char no_auto:1;
+    unsigned char melee:1;
 
     unsigned int ammo;
 
@@ -26,6 +27,12 @@ typedef struct {
     float rate;
     float spread;
     float min_spread;
+    float recoil;
+    float recoil_y;
+    float recover;
+    float recover_y;
+    float recover_f;
+    float zoom;
 } Weapon;
 
 extern const Weapon g_awp;

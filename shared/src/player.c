@@ -21,6 +21,7 @@ void player_spawn(Player *player) {
     player->active = 1;
     player->speed = g_classes[0].speed;
     player->max_health = g_classes[0].health;
+    player->weapon = g_weapons[0];
 
     player_update_height(player);
 
@@ -218,24 +219,88 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
     if (player->noclip) player->on_ground = 1;
 
+    const float pitch_delta = normalize_angle(input->x_dir - player->direction.x);
+    const float yaw_delta = normalize_angle(input->y_dir - player->direction.y);
+
+    // TODO: spin distance (unused?)
+
+#ifdef KRUNKNATIVE_CLIENT
+    if (!recon) {
+        player->lean_anim.x -= yaw_delta * game_constants.lean_sensitivity;
+        player->lean_anim.x = CLAMP(player->lean_anim.x, -game_constants.lean_max, game_constants.lean_max);
+
+        player->lean_anim.y -= pitch_delta * game_constants.lean_sensitivity;
+        player->lean_anim.y = CLAMP(player->lean_anim.x, -game_constants.lean_max, game_constants.lean_max);
+
+        if (player->lean_anim.x) player->lean_anim.x *= powf(game_constants.lean_pull, delta * 1000.0f);
+        if (player->lean_anim.y) player->lean_anim.y *= powf(game_constants.lean_pull, delta * 1000.0f);
+        if (player->lean_anim.z) player->lean_anim.z *= powf(game_constants.lean_pull_z, delta * 1000.0f);
+
+        if (player->bob_anim.y) player->bob_anim.y *= powf(game_constants.bob_pull_y, delta * 1000.0f);
+        if (player->bob_anim.z) player->bob_anim.z *= powf(game_constants.bob_pull_z, delta * 1000.0f);
+
+        if (player->recoil.x) player->recoil.x *= powf(game_constants.lean_pull, delta * 1000.0f);
+        if (player->recoil.z) player->recoil.z *= powf(game_constants.lean_pull, delta * 1000.0f);
+    }
+#endif
+
     player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
     player->direction.y = input->y_dir;
 
-    // TODO: WEAPON LEAN & BOB ANIMATIONS
+    // TODO: weapon swapping
 
     if (!recon) {
-        // TODO: RECOIL ANIMATION
+        if (player->recoil_force != 0.0f) {
+            player->recoil_anim += player->recoil_force * delta;
+            player->recoil_anim_y += player->recoil_force * (player->weapon->recoil_y) * (1.0f - player->crouch_val * 0.3f) * delta;
+            player->recoil_force *= powf(player->weapon->recover_f, delta * 1000.0f);
+        }
+
+        if (player->recoil_anim) player->recoil_anim *= powf(player->weapon->recover, delta * 1000.0f);
+        if (player->recoil_anim_y) player->recoil_anim_y *= powf(player->weapon->recover_y != 0.0f ? player->weapon->recover_y : player->weapon->recover, delta * 1000.0f);
     }
 
     player->last_position = player->position;
 
-    // TODO: SCOPING
+    if (player->weapon->no_aim && player->aim_val > 0.0f) {
+        // TODO: toggle aim (HUD)
+        player->aim_val = 0.0f;
+    } else if (player->weapon->zoom != 0.0f && (!player->weapon->no_aim || player->swap_time > 0.0f)) {
+        const int can_scope = player->reload_timer <= 0.0f && player->swap_time <= 0.0f && (!player->weapon->melee || (player->can_throw && player->game->config.throwable_melees));
+
+        if (input->scope && player->aim_val < 1.0f && can_scope) {
+            // TODO: cancel inspect animation
+            player->aim_val += 1.0f / player->weapon->aim_speed * delta;
+            player->aim_val = MIN(1.0f, player->aim_val);
+
+            if (player->aim_val == 1.0f && !recon) {
+                // TODO: toggle aim (HUD)
+            }
+        } else if (!can_scope || !input->scope && player->aim_val > 0.0f) {
+            player->aim_val -= 1.0f / player->weapon->aim_speed * delta;
+            player->aim_val = MAX(0.0f, player->aim_val);
+
+            if (player->aim_val == 0.0f && !recon) {
+                // TODO: toggle aim (HUD)
+            }
+        }
+
+        // TODO: update aim (HUD)
+
+        if (player->aim_val == 1.0f) {
+            player->aim_time += delta;
+        } else {
+            player->aim_time = 0.0f;
+        }
+    }
 
     if (input->crouch && player->crouch_val < 1.0f && !player->on_ladder) {
         player->crouch_val = MIN(1.0f, player->crouch_val + game_constants.crouch_speed * delta);
 
         if (player->on_ground) {
-            // TODO: WEAPON BOB ANIMATION
+#ifdef KRUNKNATIVE_CLIENT
+            if (!recon) player->bob_anim.y -= game_constants.crouch_anim * 1.4f * delta;
+#endif
         } else {
             player->position.y += game_constants.crouch_speed * delta;
         }
@@ -243,7 +308,9 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         player->crouch_val = MAX(0.0f, player->crouch_val - game_constants.crouch_speed * delta);
 
         if (player->on_ground) {
-            // TODO: WEAPON BOB ANIMATION
+#ifdef KRUNKNATIVE_CLIENT
+            if (!recon) player->bob_anim.y += game_constants.crouch_anim * delta;
+#endif
         } else {
             player->position.y -= game_constants.crouch_speed * delta;
         }
@@ -254,20 +321,24 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     const int contact = player->on_ground || player->on_ladder;
 
     if (!move_lock) {
-        float accel = contact ? (player->terrain_slipping ? game_constants.slipping_speed : game_constants.player_speed) * player->speed : game_constants.air_speed;
+        float accel;
+
+        if (contact) accel = (player->terrain_slipping ? game_constants.slipping_speed : game_constants.player_speed) * player->speed;
+        else accel = game_constants.air_speed * player->game->map->config.air_accel * (player->game->mode->config.real_movement ? 0.72f : 1.0f);
 
         accel *= player->aim_val == 1.0f ? game_constants.aim_slow : 1.0f;
-        accel *= player->crouch_val ? game_constants.crouch_slow : 1.0f;
+        accel *= player->crouch_val != 0.0f ? game_constants.crouch_slow : 1.0f;
         accel *= player->game->mode->config.speed_mlt[player->team];
-        // TODO: accel *= weapon speed mlt
+        accel *= player->weapon->speed_mlt;
         accel *= (player->noclip ? 2.0f : 1.0f) * delta;
 
-        float decel = game_constants.air_decel;
+        float decel;
 
         if (player->on_ladder) decel = game_constants.ladder_decel;
         else if (player->terrain_slipping) decel = game_constants.terrain_slip_decel;
         else if (player->on_terrain) decel = game_constants.terrain_decel;
         else if (player->on_ground) decel = game_constants.ground_decel;
+        else decel = game_constants.air_decel;
 
         if (player->crouch_val <= 0.5) player->can_slide = 1;
 
@@ -307,14 +378,16 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             }
         }
 
+        const float wall_jump = player->game->config.wall_jump;
+
         if (!contact) {
-            const float wall_mlt = 1.0f; // TODO: wall jumps
+            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && wall_jump > 0.0f && player->crouch_val != 0.0f ? 0.3f : 1.0f;
             player->velocity.y -= delta * game_constants.gravity * player->game->config.gravity_mlt * wall_mlt;
         }
 
         // TODO: accel *= CLAMP(1.0f - inputs[12], 0.0f, 1.0f); "what?" - joe biden
 
-        if (input->move_dir % 1) {
+        if (input->move_dir > 0 && input->move_dir % 2) {
             // TODO: accel *= strafe_speed;
         }
 

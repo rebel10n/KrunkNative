@@ -45,4 +45,11 @@ const GameConstants game_constants = {
     .player_terrain_slide_velocity_mlt = 0.4f,
     .idle_anim_speed = 1.5f,
     .interpolation = 1.1f,
+    .lean_sensitivity = 0.05f,
+    .lean_max = 0.16f,
+    .lean_pull = 0.99f,
+    .lean_pull_z = 0.99f,
+    .bob_pull_y = 0.985f,
+    .bob_pull_z = 0.99f,
+    .crouch_anim = 0.8f,
 };
