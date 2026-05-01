@@ -207,7 +207,7 @@ typedef struct {
 } Client;
 
 void hud_render(Client*, float);
-void overlay_render(Client*);
+void overlay_render(Client*, float);
 
 const char *client_assets_path();
 void client_animate_object_texture(Object*, float);

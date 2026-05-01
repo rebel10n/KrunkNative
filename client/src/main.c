@@ -243,7 +243,7 @@ void client_tick(Client *client, const float now, const float delta) {
     if (!client->mouse_state.locked) {
         hud_render(client, now);
     } else {
-        overlay_render(client);
+        overlay_render(client, delta);
     }
 
     const int debug_key = glfwGetKey(client->window, GLFW_KEY_GRAVE_ACCENT);
