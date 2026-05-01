@@ -22,6 +22,7 @@ const Weapon g_ak47 = {
     .rate = 0.11f,
     .spread = 100.0f,
     .min_spread = 5.0f,
+    .zoom = 1.6f,
 };
 
 // {

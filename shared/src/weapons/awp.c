@@ -22,6 +22,7 @@ const Weapon g_awp = {
     .damage_drop = 30.0f,
     .rate = 0.9f,
     .spread = 260.0f,
+    .zoom = 2.7f,
 };
 
 // {

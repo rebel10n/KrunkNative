@@ -21,6 +21,7 @@ const Weapon g_revolver = {
     .damage_drop = 10.0f,
     .rate = 0.39f,
     .spread = 100.0f,
+    .zoom = 1.45f,
 };
 
 // {

@@ -20,6 +20,7 @@ const Weapon g_pistol = {
     .damage_drop = 10.0f,
     .rate = 0.15f,
     .spread = 60.0f,
+    .zoom = 1.4f,
 };
 
 // {

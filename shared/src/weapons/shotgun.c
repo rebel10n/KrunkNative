@@ -21,7 +21,8 @@ const Weapon g_shotgun = {
     .damage_drop = 50.0f,
     .rate = 0.45f,
     .spread = 180.0f,
-    .min_spread = 20.0f
+    .min_spread = 20.0f,
+    .zoom = 1.25f,
 };
 
 // {

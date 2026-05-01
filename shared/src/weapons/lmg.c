@@ -14,6 +14,7 @@ const Weapon g_lmg = {
     .reload_time = 3.5f,
     .aim_speed = 0.2f,
     .speed_mlt = 0.79f,
+    .jump_mlt = 0.85f,
     .damage = 18.0f,
     .headshot_mlt = 1.5f,
     .pierce = 1.0f,
@@ -21,7 +22,8 @@ const Weapon g_lmg = {
     .damage_drop = 10.0f,
     .rate = 0.13f,
     .spread = 300.0f,
-    .min_spread = 10.0f
+    .min_spread = 10.0f,
+    .zoom = 1.3f,
 };
 
 // {

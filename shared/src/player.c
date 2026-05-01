@@ -21,7 +21,7 @@ void player_spawn(Player *player) {
     player->active = 1;
     player->speed = g_classes[0].speed;
     player->max_health = g_classes[0].health;
-    player->weapon = g_weapons[0];
+    player->weapon = g_weapons[1];
 
     player_update_height(player);
 
@@ -297,7 +297,7 @@ void player_jump(Player *player) {
     const float jump_vel = game_constants.jump_velocity * player->game->config.jump_mlt * (player->game->mode->config.real_movement ? 0.92f : 1.0f);
     const float vel = hypotf(player->velocity.x, player->velocity.z);
 
-    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * 1.0f /* TODO: player weapon jumpMlt || player weapon speedMlt */ * (player->aim_val ? 1.0f : game_constants.jump_aim_slow);
+    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * (player->weapon->jump_mlt != 0.0f ? player->weapon->jump_mlt : player->weapon->speed_mlt) * (player->aim_val != 1.0f ? 1.0f : game_constants.jump_aim_slow);
 
     player->velocity.x -= vel * jump_push * sinf(player->direction.y);
     player->velocity.z -= vel * jump_push * cosf(player->direction.y);

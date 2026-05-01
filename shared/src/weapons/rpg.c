@@ -19,6 +19,7 @@ const Weapon g_rpg = {
     .rate = 0.35f,
     .spread = 120.0f,
     .min_spread = 15.0f,
+    .zoom = 1.5f,
 };
 
 // {

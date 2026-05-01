@@ -18,6 +18,7 @@ typedef struct {
     float reload_time;
     float aim_speed;
     float speed_mlt;
+    float jump_mlt;
     float damage;
     float headshot_mlt;
     float pierce;

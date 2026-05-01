@@ -1,7 +1,5 @@
-#include <glad/glad.h>
 #include <client.h>
 #include <math.h>
-#include <stdio.h>
 
 Mesh *mesh_init(Geometry *geometry, Material *material) {
     Mesh *mesh = calloc(1, sizeof(Mesh));

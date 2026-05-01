@@ -22,6 +22,7 @@ const Weapon g_smg = {
     .rate = 0.09f,
     .spread = 70.0f,
     .min_spread = 5.0f,
+    .zoom = 1.65f,
 };
 
 // {

@@ -55,6 +55,7 @@ int main() {
 
     static Client INSTANCE = {0};
 
+    INSTANCE.camera.zoom = 1.0f;
     INSTANCE.camera.fov = M_PI / 2.0f;
     INSTANCE.camera.near = 0.1f;
     INSTANCE.camera.far = 10000.0f;
@@ -324,11 +325,12 @@ void client_tick(Client *client, const float now, const float delta) {
         if (client->mouse_state.locked) {
             if (noclip_key && !client->last_noclip_key) client->me->noclip ^= 1;
 
-            input.x_dir -= mouse_delta.y * game_constants.mouse_sensitivity;
-            input.y_dir -= mouse_delta.x * game_constants.mouse_sensitivity;
+            input.x_dir -= mouse_delta.y * game_constants.mouse_sensitivity / client->camera.zoom;
+            input.y_dir -= mouse_delta.x * game_constants.mouse_sensitivity / client->camera.zoom;
 
             input.jump = glfwGetKey(client->window, GLFW_KEY_SPACE);
             input.crouch = glfwGetKey(client->window, GLFW_KEY_LEFT_SHIFT);
+            input.scope = glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_RIGHT);
 
             const int forward = glfwGetKey(client->window, GLFW_KEY_W);
             const int back = glfwGetKey(client->window, GLFW_KEY_S);
@@ -350,6 +352,8 @@ void client_tick(Client *client, const float now, const float delta) {
 
         client->camera.rotation.x = client->me->direction.x;
         client->camera.rotation.y = client->me->direction.y;
+
+        client->camera.zoom = 1.0f + (client->me->weapon->zoom - 1.0f) * client->me->aim_val * 1.0f; // TODO: adsFovMlt
     }
 
     client->mouse_state.last_pos.x = (float) x;

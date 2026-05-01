@@ -3,7 +3,7 @@
 #include <string.h>
 
 void camera_update_projection_matrix(Camera *camera, const float aspect) {
-    const float half_height = tanf(camera->fov / 2.0f) * camera->near;
+    const float half_height = tanf(camera->fov / camera->zoom / 2.0f) * camera->near;
     const float half_width = half_height * aspect;
 
     const float A = -(camera->far + camera->near) / (camera->far - camera->near);

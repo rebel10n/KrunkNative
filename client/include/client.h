@@ -55,6 +55,7 @@ typedef struct {
     float near;
     float far;
     float fov;
+    float zoom;
 
     vec3 position;
     vec3 rotation;
