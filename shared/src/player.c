@@ -8,6 +8,7 @@ Player *player_init(Game *game) {
     if (!player) return NULL;
 
     player->game = game;
+    player->slid_cont = 1;
     player->scale = game_constants.player_scale;
 
     return player;
@@ -475,10 +476,10 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
                     player->velocity.z = vel * sinf(dir + (float) M_PI);
                 } else {
                     const float vel_dir = atan2f(-player->velocity.z, -player->velocity.x);
-                    const float angle_delta = normalize_angle(dir - vel_dir) * 0.18f;
+                    const float angle_delta = normalize_angle(vel_dir - dir) * 0.18f;
 
-                    player->velocity.x = vel * cosf(dir + (float) M_PI - angle_delta);
-                    player->velocity.z = vel * sinf(dir + (float) M_PI - angle_delta);
+                    player->velocity.x = vel * cosf(vel_dir + (float) M_PI - angle_delta);
+                    player->velocity.z = vel * sinf(vel_dir + (float) M_PI - angle_delta);
                 }
             }
         }
