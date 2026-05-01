@@ -287,11 +287,11 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         mesh->visible = visible;
         mesh->position = object->position;
-        mesh->rotation.y = -(float) M_PI / 2.0f * (1.0f + (float) object->ramp->direction);
+        mesh->rotation.y = -(float) M_PI / 2.0f * (1.0f + (float) object->direction);
         mesh->scale.y = object->scale.y;
 
-        mesh->scale.x = object->ramp->direction % 2 ? object->scale.x : object->scale.z;
-        mesh->scale.z = object->ramp->direction % 2 ? object->scale.z : object->scale.x;
+        mesh->scale.x = object->direction % 2 ? object->scale.x : object->scale.z;
+        mesh->scale.z = object->direction % 2 ? object->scale.z : object->scale.x;
 
         material->texture = texture_id;
         material->color = color;

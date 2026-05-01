@@ -72,6 +72,7 @@ typedef struct {
     float crouch_anim;
     float collision_padding;
     float booster_speed;
+    float ladder_speed;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -140,7 +141,6 @@ typedef enum {
 } Prefab;
 
 typedef struct {
-    int direction;
     float boost;
     vec2 start;
     vec2 end;
@@ -183,6 +183,8 @@ typedef struct {
     unsigned char crouch:1;
     unsigned char ladder:1;
     unsigned char wall_jumpable:1;
+
+    unsigned char direction:2;
 
     unsigned int team;
     unsigned int score_points;

@@ -189,27 +189,44 @@ Map *map_init(const cJSON *raw_data) {
         object->scale = scale;
         object->prefab = prefab_id;
 
+        if (prefab_id == PREFAB_BOOST_PAD) {
+            const cJSON *bm = cJSON_GetObjectItem(raw_obj, "bm");
+            const cJSON *cr = cJSON_GetObjectItem(raw_obj, "cr");
+
+            object->jump_pad = 1;
+            object->bounce = cJSON_IsNumber(bm) ? (float) cJSON_GetNumberValue(bm) : 0.0f;
+            object->crouch = !cr || cJSON_IsNull(cr) || cJSON_IsNumber(cr) && cJSON_GetNumberValue(cr) == 0.0f;
+
+            if (object->bounce == 0.0f) object->bounce = 1.0f;
+        }
+
+        const cJSON *dir = cJSON_GetObjectItem(raw_obj, "d");
+
+        if (prefab_id == PREFAB_LADDER) {
+            object->ladder = 1;
+            object->direction = cJSON_IsNumber(dir) ? (int) cJSON_GetNumberValue(dir) % 4 : 0;
+        }
+
         if (prefab_id == PREFAB_RAMP) {
-            const cJSON *dir = cJSON_GetObjectItem(raw_obj, "d");
             const cJSON *boost = cJSON_GetObjectItem(raw_obj, "b");
 
             Ramp *ramp = calloc(1, sizeof(Ramp));
-
             if (!ramp) continue;
 
-            ramp->direction = cJSON_IsNumber(dir) ? (int) cJSON_GetNumberValue(dir) % 4 : 0;
+            object->direction = cJSON_IsNumber(dir) ? (int) cJSON_GetNumberValue(dir) % 4 : 0;
+
             ramp->boost = cJSON_IsNumber(boost) ? (float) cJSON_GetNumberValue(boost) : 0.0f;
             ramp->start.x = position.x;
             ramp->start.y = position.z;
             ramp->end.x = position.x;
             ramp->end.y = position.z;
 
-            if (ramp->direction % 2) {
-                ramp->start.y -= scale.z * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
-                ramp->end.y += scale.z * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
+            if (object->direction % 2) {
+                ramp->start.y -= scale.z * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
+                ramp->end.y += scale.z * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
             } else {
-                ramp->start.x -= scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
-                ramp->end.x += scale.x * 0.5f * (ramp->direction < 2 ? 1.0f : -1.0f);
+                ramp->start.x -= scale.x * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
+                ramp->end.x += scale.x * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
             }
 
             object->ramp = ramp;

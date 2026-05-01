@@ -92,7 +92,7 @@ int player_collides(Player *player, const Object *object, const float pad) {
     return 0;
 }
 
-void player_do_map_collisions(Player *player, const int can_jump, const float delta, const int recon) {
+void player_do_map_collisions(Player *player, const Input *input, const float move_dir, const int can_jump, const float delta, const int recon) {
     float *max_ramp_height = NULL;
 
     // TODO: grid arrays (perf)
@@ -158,6 +158,24 @@ void player_do_map_collisions(Player *player, const int can_jump, const float de
             }
 
             if (object->ladder) {
+                if (player->position.y >= object->position.y + object->scale.y || player->crouch_val != 0.0f) continue;
+
+                player->velocity.y = 0.0f;
+                player->on_ladder = 1;
+                player->on_terrain = 1;
+
+                // TODO: step src
+
+                if (input->move_dir >= 0) {
+                    const float ladder_dir = (float) M_PI * 0.5f * (float) object->direction;
+                    const float dir = (fabsf(normalize_angle(ladder_dir - (move_dir - player->direction.y))) - (float) M_PI * 0.5f) / ((float) M_PI * 0.5f);
+
+                    if (dir > 0.0f) {
+                        player->position.y += game_constants.ladder_speed * player->game->map->config.ladder_accel * player->weapon->speed_mlt * dir * delta;
+                        player->position.y = CLAMP(player->position.y, object->position.y, object->position.y + object->scale.y);
+                    }
+                }
+
                 continue;
             }
 
@@ -178,7 +196,7 @@ void player_do_map_collisions(Player *player, const int can_jump, const float de
             if (object->ramp) {
                 if (player->position.y >= object->position.y + object->scale.y) continue;
 
-                const float ramp_direction = (float) M_PI * 0.5f * (float) object->ramp->direction;
+                const float ramp_direction = (float) M_PI * 0.5f * (float) object->direction;
                 const vec2 player_dir = {player->position.x + player->scale * cosf(ramp_direction), player->position.z + player->scale * sinf(ramp_direction)};
 
                 const float progress = MAX(0.0f, MIN(1.0f, progress_on_line(object->ramp->start, object->ramp->end, player_dir)));
@@ -506,7 +524,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         player->on_wall = 0;
         player->on_ramp = 0;
 
-        if (!player->noclip) player_do_map_collisions(player, can_jump, delta, recon);
+        if (!player->noclip) player_do_map_collisions(player, input, move_dir, can_jump, delta, recon);
 
         if (!player->did_jump && player->ramp_fix && fabsf(player->position.y - *player->ramp_fix) <= game_constants.climb_height) {
             if (!player->on_ramp) {
