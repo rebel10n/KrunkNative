@@ -184,17 +184,21 @@ Map *map_init(const cJSON *raw_data) {
             (float) cJSON_GetNumberValue(cJSON_GetArrayItem(obj_scale, 2)),
         };
 
+        object->active = 1;
         object->position = position;
         object->scale = scale;
         object->prefab = prefab_id;
 
         if (prefab_id == PREFAB_RAMP) {
             const cJSON *dir = cJSON_GetObjectItem(raw_obj, "d");
+            const cJSON *boost = cJSON_GetObjectItem(raw_obj, "b");
+
             Ramp *ramp = calloc(1, sizeof(Ramp));
 
             if (!ramp) continue;
 
             ramp->direction = cJSON_IsNumber(dir) ? (int) cJSON_GetNumberValue(dir) % 4 : 0;
+            ramp->boost = cJSON_IsNumber(boost) ? (float) cJSON_GetNumberValue(boost) : 0.0f;
             ramp->start.x = position.x;
             ramp->start.y = position.z;
             ramp->end.x = position.x;

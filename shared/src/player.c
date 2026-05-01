@@ -72,24 +72,22 @@ void player_reset_step(Player *player, const int recon) {
     player->velocity.z *= slide_mlt;
 }
 
-int player_on_collision(Player *player, const Object *object) {
-    if (object->verified || object->premium) {
-        return 1; // TODO: verified & premium zones
-    } else if (object->score_zone) {
-        return 1; // TODO: score zones
-    } else if (object->teleporter) {
-        return 1; // TODO: teleporters
-    } else if (object->checkpoint) {
-        return 1; // TODO: checkpoints
+int player_collides(Player *player, const Object *object, const float pad) {
+    switch (object->collision_type) {
+        case COLLISION_TYPE_NONE:
+            return 0;
+        case COLLISION_TYPE_BOX: {
+            const int in_x = player->position.x + player->scale > object->position.x - (object->scale.x * 0.5f + pad) && player->position.x - player->scale < object->position.x + (object->scale.x * 0.5f + pad);
+            const int in_z = player->position.z + player->scale > object->position.z - (object->scale.z * 0.5f + pad) && player->position.z - player->scale < object->position.z + (object->scale.z * 0.5f + pad);
+            const int in_y = player->position.y + player->height >= object->position.y && player->position.y <= object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
+
+            return in_x && in_y && in_z;
+        }
+        case COLLISION_TYPE_CYLINDER: {
+            const int in_y = player->position.y + player->height > object->position.y && player->position.y < object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
+            return in_y && hypotf(player->position.x - object->position.x, player->position.z - object->position.z) <= object->scale.x * 0.5f + player->scale + pad;
+        }
     }
-
-    // TODO: pickups, flags, triggers, death zones
-    if (object->pickup || object->flag || object->trigger) return 1;
-    if (object->kill) return 1;
-
-    // TODO: objectives, bomb sites
-    if (object->objective) return 1;
-    if (object->bomb_site) return 1;
 
     return 0;
 }
@@ -97,99 +95,173 @@ int player_on_collision(Player *player, const Object *object) {
 void player_do_map_collisions(Player *player, const int can_jump, const float delta, const int recon) {
     float *max_ramp_height = NULL;
 
+    // TODO: grid arrays (perf)
     for (size_t i = 0; i < player->game->map->object_count; i++) {
         const Object *object = player->game->map->objects[i];
+        const int collides_padded = player_collides(player, object, game_constants.collision_padding);
 
-        const int collides =
-            (object->ramp || object->collision_type == COLLISION_TYPE_BOX) &&
-            player->position.x + player->scale > object->position.x - object->scale.x * 0.5f &&
-            player->position.x - player->scale < object->position.x + object->scale.x * 0.5f &&
-            player->position.y + player->height >= object->position.y &&
-            player->position.y <= object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0 : game_constants.border_height) &&
-            player->position.z + player->scale > object->position.z - object->scale.z * 0.5f &&
-            player->position.z - player->scale < object->position.z + object->scale.z * 0.5f ||
-
-            object->collision_type == COLLISION_TYPE_CYLINDER &&
-            player->position.y <= object->position.x + object->scale.y &&
-            player->position.y + player->height >= object->position.y // TODO: finish cylinder col
-        ;
-
-        if (!collides) continue;
-
-        if (object->collision_type == COLLISION_TYPE_CYLINDER) {
-            // TODO
+        if (!object->active || !collides_padded) {
+            // TODO: in object
             continue;
         }
 
-        if (object->ramp) {
-            const float ramp_direction = -(float) M_PI / 2.0f * (float) object->ramp->direction;
-            const vec2 player_xz = {player->position.x + player->scale * cosf(ramp_direction), player->position.z + player->scale * sinf(ramp_direction)};
+        const int collides = player_collides(player, object, 0.0f);
 
-            const float progress = CLAMP(progress_on_line(object->ramp->start, object->ramp->end, player_xz), 0.0f, 1.0f);
-            const float collision_height = object->position.y + (object->scale.y + 0.01f) * progress;
+        // TODO: interactable's
+        // TODO: collision trigger (onCollision, onTrigger)
+        // TODO: onInteract
+        // TODO: onEnter
 
-            if (!max_ramp_height) {
-                max_ramp_height = calloc(1, sizeof(float));
-                if (max_ramp_height) *max_ramp_height = collision_height;
+        if (object->jump_pad) {
+            const float bounce_vel = object->bounce * 0.1f * (player->crouch_val == 1.0f && object->crouch ? 0.5f : 1.0f);
+
+            player->velocity.y = bounce_vel;
+            player->on_ground = 0;
+
+            // TODO: bounce sound
+        } else if (object->score_zone) {
+            // TODO: score
+        } else if (
+            !object->objective && !object->bomb_site &&
+            (!object->premium || !1) && // TODO: check premium
+            (!object->verified || !1) && // TODO: check verified
+            (!object->team_zone || player->game->mode->config.teams && object->team != player->team)
+        ) {
+            if (object->teleporter) {
+                // TODO: check teleport
+                continue;
             }
 
-            if ((player->position.y <= collision_height || can_jump) && (!max_ramp_height || *max_ramp_height <= collision_height)) {
-                if (max_ramp_height) *max_ramp_height = collision_height;
+            if (object->checkpoint) {
+                // TODO: set checkpoint
+                continue;
+            }
 
-                // TODO: ramp boost
+            if (object->pickup) {
+                // TODO: pickups
+                continue;
+            }
+
+            if (object->flag) {
+                // TODO: flags
+                continue;
+            }
+
+            if (object->trigger) {
+                // TODO: triggers
+                continue;
+            }
+
+            if (object->kill) {
+                // TODO: kill player
+                continue;
+            }
+
+            if (object->ladder) {
+                continue;
+            }
+
+            if (!object->ramp && object->collision_type != COLLISION_TYPE_CYLINDER && !can_jump && object->position.y + object->scale.y - player->position.y > game_constants.climb_height && object->wall_jumpable) {
+                if (player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f - game_constants.collision_padding) {
+                    player->on_wall = 1;
+                } else if (player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f + game_constants.collision_padding) {
+                    player->on_wall = 2;
+                } else if (player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f - game_constants.collision_padding) {
+                    player->on_wall = 3;
+                } else if (player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f + game_constants.collision_padding) {
+                    player->on_wall = 4;
+                }
+            }
+
+            if (!collides) continue;
+
+            if (object->ramp) {
+                if (player->position.y >= object->position.y + object->scale.y) continue;
+
+                const float ramp_direction = (float) M_PI * 0.5f * (float) object->ramp->direction;
+                const vec2 player_dir = {player->position.x + player->scale * cosf(ramp_direction), player->position.z + player->scale * sinf(ramp_direction)};
+
+                const float progress = MAX(0.0f, MIN(1.0f, progress_on_line(object->ramp->start, object->ramp->end, player_dir)));
+                const float collision_height = object->position.y + (object->scale.y + 0.01f) * progress;
+
+                if (!max_ramp_height) {
+                    max_ramp_height = calloc(1, sizeof(float));
+                    if (max_ramp_height) *max_ramp_height = collision_height;
+                }
+
+                if ((player->position.y <= collision_height || can_jump) && (!max_ramp_height || *max_ramp_height <= collision_height)) {
+                    if (max_ramp_height) *max_ramp_height = collision_height;
+
+                    if (object->ramp->boost != 0.0f) {
+                        player->position.y = collision_height;
+
+                        const float boost_velocity = object->ramp->boost * game_constants.booster_speed * delta;
+                        const float boost_direction = asinf(object->scale.y / hypotf(object->scale.y, object->scale.z));
+
+                        player->velocity.x += boost_velocity * sinf(-ramp_direction + (float) M_PI * 0.5f) * cosf(boost_direction);
+                        player->velocity.z += boost_velocity * cosf(-ramp_direction + (float) M_PI * 0.5f) * cosf(boost_direction);
+                        player->velocity.y += boost_velocity * sinf(boost_direction);
+                    } else {
+                        if (player->last_position.y > player->position.y) player_reset_step(player, recon);
+
+                        player->position.y = collision_height;
+                        player->velocity.y = 0.0f;
+                        player->on_wall = 0;
+                        player->on_ground = 1;
+                        player->on_terrain = 0;
+
+                        if (!player->ramp_fix) player->ramp_fix = calloc(1, sizeof(float));
+
+                        if (player->ramp_fix) {
+                            player->on_ramp = 1;
+                            *player->ramp_fix = object->position.y + object->scale.y * roundf(progress);
+                        }
+                    }
+                }
+
+                continue;
+            }
+
+            if (object->collision_type == COLLISION_TYPE_CYLINDER) {
+                continue;
+            }
+
+            if (
+                (!object->is_border || player->game->config.disable_borders) &&
+                player->position.y < object->position.y + object->scale.y &&
+                object->position.y + object->scale.y - player->position.y <= game_constants.climb_height &&
+                player->last_position.y < object->position.y + object->scale.y && can_jump
+            ) {
+                player->position.y += delta * 30.0f;
+                player->position.y = MIN(player->position.y, object->position.y + object->scale.y);
+
+                player->on_ground = 1;
+                player->on_terrain = 0;
+            } else if (player->last_position.y >= object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0.0f : game_constants.border_height)) {
+                // TODO: step src
 
                 if (player->last_position.y > player->position.y) player_reset_step(player, recon);
 
-                player->position.y = collision_height;
+                player->position.y = object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0.0f : game_constants.border_height);
                 player->velocity.y = 0.0f;
-                player->on_wall = 0;
                 player->on_ground = 1;
                 player->on_terrain = 0;
+            } else if (player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f - 0.00001f) {
+                player->position.x = object->position.x + object->scale.x * 0.5f + player->scale;
+                player->velocity.x = 0.0f;
+            } else if (player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f + 0.00001f) {
+                player->position.x = object->position.x - object->scale.x * 0.5f - player->scale;
+                player->velocity.x = 0.0f;
+            } else if (player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f - 0.00001f) {
+                player->position.z = object->position.z + object->scale.z * 0.5f + player->scale;
+                player->velocity.z = 0.0f;
+            } else if (player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f + 0.00001f) {
+                player->position.z = object->position.z - object->scale.z * 0.5f - player->scale;
+                player->velocity.z = 0.0f;
+            } else if (player->last_position.y + player->height <= object->position.y) {
+                player->position.y = object->position.y - player->height;
+                player->velocity.y = 0.0f;
             }
-
-            continue;
-        }
-
-        if (player_on_collision(player, object)) continue;
-
-        if (
-            (!object->is_border || player->game->config.disable_borders) &&
-            player->position.y <= object->position.y + object->scale.y &&
-            player->last_position.y < object->position.y + object->scale.y &&
-            object->position.y + object->scale.y - player->position.y <= game_constants.climb_height &&
-            can_jump
-        ) {
-            player->position.y += delta * 30.0f;
-
-            if (player->position.y > object->position.y + object->scale.y) {
-                player->position.y = object->position.y + object->scale.y;
-            }
-
-            player->on_ground = 1;
-            player->on_terrain = 0;
-        } else if (player->last_position.y >= object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0 : game_constants.border_height)) {
-            if (player->last_position.y > player->position.y) player_reset_step(player, recon);
-
-            player->position.y = object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0 : game_constants.border_height);
-            player->velocity.y = 0.0f;
-
-            player->on_ground = 1;
-            player->on_terrain = 0;
-        } else if (player->last_position.y + player->height <= object->position.y) {
-            player->position.y = object->position.y - player->height;
-            player->velocity.y = 0.0f;
-        } else if (player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f) {
-            player->position.x = object->position.x + object->scale.x * 0.5f + player->scale;
-            player->velocity.x = 0.0f;
-        } else if (player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f) {
-            player->position.x = object->position.x - object->scale.x * 0.5f - player->scale;
-            player->velocity.x = 0.0f;
-        } else if (player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f) {
-            player->position.z = object->position.z + object->scale.z * 0.5f + player->scale;
-            player->velocity.z = 0.0f;
-        } else if (player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f) {
-            player->position.z = object->position.z - object->scale.z * 0.5f - player->scale;
-            player->velocity.z = 0.0f;
         }
     }
 
@@ -432,8 +504,23 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         player->on_ground = player->noclip;
         player->on_ladder = 0;
         player->on_wall = 0;
+        player->on_ramp = 0;
 
         if (!player->noclip) player_do_map_collisions(player, can_jump, delta, recon);
+
+        if (!player->did_jump && player->ramp_fix && fabsf(player->position.y - *player->ramp_fix) <= game_constants.climb_height) {
+            if (!player->on_ramp) {
+                player->position.y = *player->ramp_fix;
+                player->on_ground = 1;
+                player->velocity.y = 0.0f;
+
+                free(player->ramp_fix);
+                player->ramp_fix = NULL;
+            }
+        } else {
+            if (player->ramp_fix) free(player->ramp_fix);
+            player->ramp_fix = NULL;
+        }
     }
 }
 

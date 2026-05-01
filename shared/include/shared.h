@@ -70,6 +70,8 @@ typedef struct {
     float bob_pull_y;
     float bob_pull_z;
     float crouch_anim;
+    float collision_padding;
+    float booster_speed;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -139,6 +141,7 @@ typedef enum {
 
 typedef struct {
     int direction;
+    float boost;
     vec2 start;
     vec2 end;
 } Ramp;
@@ -161,9 +164,11 @@ typedef struct {
     unsigned int prefab;
     unsigned int texture;
 
+    unsigned char active:1;
     unsigned char is_border:1;
     unsigned char premium:1;
     unsigned char verified:1;
+    unsigned char jump_pad:1;
     unsigned char team_zone:1;
     unsigned char score_zone:1;
     unsigned char teleporter:1;
@@ -174,9 +179,15 @@ typedef struct {
     unsigned char kill:1;
     unsigned char objective:1;
     unsigned char bomb_site:1;
+    unsigned char spawnable:1;
+    unsigned char crouch:1;
+    unsigned char ladder:1;
+    unsigned char wall_jumpable:1;
 
     unsigned int team;
     unsigned int score_points;
+
+    float bounce;
 
     CollisionType collision_type;
 
@@ -322,8 +333,9 @@ typedef struct {
 
     unsigned char on_ground:1;
     unsigned char on_ladder:1;
-    unsigned char on_wall:1;
+    unsigned char on_ramp:1; // added instead of the didCollideRamp local in procInputs
     unsigned char on_terrain:1;
+    unsigned char on_wall:3;
     unsigned char terrain_slipping:1;
     unsigned char wall_jump:1;
 
@@ -361,6 +373,8 @@ typedef struct {
     float reload_timer;
     float slide_timer;
     float jump_timer;
+
+    float *ramp_fix;
 
     float idle_anim;
     float hp_chase;

@@ -52,4 +52,6 @@ const GameConstants game_constants = {
     .bob_pull_y = 0.985f,
     .bob_pull_z = 0.99f,
     .crouch_anim = 0.8f,
+    .collision_padding = 1.1f,
+    .booster_speed = 2.0f,
 };

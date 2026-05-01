@@ -304,7 +304,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         return mesh;
     }
 
-    return NULL;
+    // return NULL;
 
     BasicMaterial *debug_material = basic_material_init();
     Mesh *debug_mesh = mesh_init(create_cube_geo(), (Material *) debug_material);
