@@ -23,6 +23,30 @@ void player_spawn(Player *player) {
     player->max_health = g_classes[0].health;
     player->weapon = g_weapons[1];
 
+    player->velocity.x = 0.0f;
+    player->velocity.y = 0.0f;
+    player->velocity.z = 0.0f;
+
+    player->crouch_val = 0.0f;
+    player->aim_val = 0.0f;
+
+    player->on_ground = 0;
+    player->on_wall = 0;
+    player->on_terrain = 0;
+    player->on_ladder = 0;
+
+    player->can_slide = 1;
+    player->can_throw = 1;
+
+    player->did_jump = 0;
+    player->did_wall_jump = 0;
+    player->did_act = 0;
+
+    player->aim_time = 0.0f;
+    player->slide_timer = 0.0f;
+    player->jump_timer = 0.0f;
+    player->reload_timer = 0.0f;
+
     player_update_height(player);
 
     if (player->game->map && player->game->map->spawn_count) {

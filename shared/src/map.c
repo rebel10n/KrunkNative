@@ -57,6 +57,11 @@ void load_default_maps() {
         char *full_path = concat(client_assets_path(), path);
 #elif defined(KRUNKNATIVE_SERVER)
         char *full_path = concat(server_assets_path(), path);
+#else
+        char *full_path = NULL;
+
+        free(path);
+        continue;
 #endif
 
         size_t map_length;
