@@ -503,7 +503,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             if (player->noclip) {
                 player->velocity.y *= powf(decel, delta * 1000.0f);
             } else if (player->velocity.y > 0.0f) {
-                player->velocity.y -= delta * 0.0032f;
+                player->velocity.y -= delta * 0.032f;
             } else if (player->velocity.y < -0.3f) {
                 player->velocity.y = -0.3f;
             }
