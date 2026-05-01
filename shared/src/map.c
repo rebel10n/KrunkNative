@@ -195,7 +195,7 @@ Map *map_init(const cJSON *raw_data) {
 
             object->jump_pad = 1;
             object->bounce = cJSON_IsNumber(bm) ? (float) cJSON_GetNumberValue(bm) : 0.0f;
-            object->crouch = !cr || cJSON_IsNull(cr) || cJSON_IsNumber(cr) && cJSON_GetNumberValue(cr) == 0.0f;
+            object->crouch = !cr || cJSON_IsNull(cr);
 
             if (object->bounce == 0.0f) object->bounce = 1.0f;
         }
@@ -285,6 +285,36 @@ Map *map_init(const cJSON *raw_data) {
             default:
                 object->collision_type = no_collisions ? COLLISION_TYPE_NONE : prefab_id == PREFAB_CYLINDER ? COLLISION_TYPE_CYLINDER : COLLISION_TYPE_BOX;
                 break;
+        }
+
+        switch (prefab_id) {
+            case PREFAB_BOT:
+            case PREFAB_TELEPORTER:
+            case PREFAB_CHECK_POINT:
+            case PREFAB_DEATH_ZONE:
+            case PREFAB_SCORE_ZONE:
+            case PREFAB_TEAM_ZONE:
+            case PREFAB_VERIFIED_ZONE:
+            case PREFAB_RAMP:
+            case PREFAB_SPECTATE_CAM:
+            case PREFAB_SIGN:
+            case PREFAB_LIQUID:
+            case PREFAB_PARTICLES:
+            case PREFAB_SHOWCASE:
+            case PREFAB_WEAPON_PICKUP:
+            case PREFAB_FLAG:
+            case PREFAB_BOMB_SITE:
+            case PREFAB_OBJECTIVE:
+            case PREFAB_SOUND_EMITTER:
+            case PREFAB_LIGHT_CONE:
+            case PREFAB_POINT_LIGHT:
+                object->wall_jumpable = 0;
+                break;
+            default: {
+                const cJSON *wj = cJSON_GetObjectItem(raw_obj, "wj");
+                object->wall_jumpable = !wj || cJSON_IsNull(wj);
+                break;
+            }
         }
 
         // TODO: parse any additional metadata

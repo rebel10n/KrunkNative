@@ -468,10 +468,8 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             }
         }
 
-        const float wall_jump = player->game->config.wall_jump;
-
         if (!contact) {
-            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && wall_jump > 0.0f && player->crouch_val != 0.0f ? 0.3f : 1.0f;
+            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && player->game->config.wall_jump > 0.0f && player->crouch_val != 0.0f ? 0.3f : 1.0f;
             player->velocity.y -= delta * game_constants.gravity * player->game->config.gravity_mlt * wall_mlt;
         }
 
@@ -539,7 +537,52 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             if (player->ramp_fix) free(player->ramp_fix);
             player->ramp_fix = NULL;
         }
+
+        // TODO: inter prog
+        // TODO: terrain ray cast
+        // TODO: track air time
     }
+
+    // TODO: track covered distance
+    // TODO: reload
+    // TODO: swap timer
+    // TODO: shot cooldowns (reloads array)
+    // TODO: shooting
+    // TODO: vel obj
+
+    if (!move_lock && player->wall_jump && !player->on_ground && !player->on_ladder && player->on_wall && player->game->config.wall_jump > 0.0f) {
+        if (player->did_wall_jump && !input->jump) player->did_wall_jump = 0;
+
+        if (!player->did_wall_jump && input->jump) {
+            player->did_wall_jump = 1;
+            // TODO: animate
+
+            const float velocity = (player->game->mode->config.real_movement ? 0.7f : 1.0f) * 0.03f;
+            player->velocity.y = (player->game->mode->config.real_movement ? 0.9f : 1.0f) * 0.058f;
+
+            switch (player->on_wall) {
+                case 1:
+                    player->velocity.x = velocity * player->game->config.wall_jump;
+                    break;
+                case 2:
+                    player->velocity.x = -velocity * player->game->config.wall_jump;
+                    break;
+                case 3:
+                    player->velocity.z = velocity * player->game->config.wall_jump;
+                    break;
+                case 4:
+                    player->velocity.z = -velocity * player->game->config.wall_jump;
+                    break;
+                default:
+                    break;
+            }
+
+            player->on_wall = 0;
+        }
+    }
+
+    // TODO: player collisions
+    // TODO: update interact
 }
 
 void player_step(Player *player, const float distance) {
