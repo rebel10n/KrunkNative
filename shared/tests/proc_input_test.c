@@ -219,6 +219,7 @@ void run_test(const char *name, Player *player) {
 
 int main() {
     const char *tests[] = {
+        "collide.json",
         "crouch.json",
         "jump.json",
         "scope.json",
