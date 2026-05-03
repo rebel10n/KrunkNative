@@ -221,6 +221,7 @@ int main() {
     const char *tests[] = {
         "crouch.json",
         "jump.json",
+        "scope.json",
         "spawn.json",
         "walk_forwards.json",
         "walk_ramp.json",
