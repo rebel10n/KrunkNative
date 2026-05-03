@@ -206,6 +206,7 @@ void run_test(const char *name, Player *player) {
     player_spawn(player);
 
     player->position = ticks[0].expected.position;
+    player->wall_jump = !strcmp(name, "wall_jump.json");
 
     for (int i = 0; i < tick_count; i++) {
         if (!validate_tick(player, &ticks[i].expected, i)) {
