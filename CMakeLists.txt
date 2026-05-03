@@ -37,3 +37,4 @@ target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
 
 # TESTS
 add_executable(proc_input_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/proc_input_test.c)
+target_link_libraries(proc_input_test PRIVATE m)
