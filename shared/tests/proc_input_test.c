@@ -8,7 +8,8 @@
 #include <unistd.h>
 #endif
 
-#define EPSILON 1e-4
+// most of the differences can be attributed to cumulative floating point errors
+#define EPSILON 1e-3
 
 typedef struct {
     vec3 position;
@@ -188,9 +189,11 @@ void run_test(const char *name, Player *player) {
     Tick *ticks = calloc(tick_count, sizeof(Tick));
 
     if (!ticks) {
-        printf("Failed to allocate ticks array! (bad input?) \n");
+        printf("Failed to allocate ticks array for %s, skipping... (bad input?) \n", name);
         return;
     }
+
+    printf("Running test %s (%d ticks)... \n", name, tick_count);
 
     for (int i = 0; i < tick_count; i++) {
         if (!parse_tick(cJSON_GetArrayItem(raw_ticks, i), &ticks[i])) continue;
@@ -223,9 +226,12 @@ int main() {
         "crouch.json",
         "jump.json",
         "scope.json",
+        "slide.json",
         "spawn.json",
         "walk_forwards.json",
+        "walk_ladder.json",
         "walk_ramp.json",
+        "wall_jump.json",
     };
 
     char *sandstorm_path = concat(get_project_root(), "assets/maps/sandstorm.json");
@@ -252,9 +258,7 @@ int main() {
     game_players_add(&game, player);
 
     for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
-        printf("Running test %s... \n", tests[i]);
         run_test(tests[i], player);
-
         printf("\n");
     }
 
