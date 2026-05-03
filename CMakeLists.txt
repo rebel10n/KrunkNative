@@ -12,6 +12,7 @@ set(CLIENT_BINARY client_bin)
 file(GLOB_RECURSE CLIENT_SOURCES client/src/*.c)
 file(GLOB_RECURSE CLIENT_HEADERS client/include/*.h)
 
+# LIBRARIES
 add_subdirectory(client/lib/freetype)
 add_subdirectory(client/lib/glad)
 add_subdirectory(client/lib/glfw)
@@ -28,7 +29,11 @@ endif ()
 
 link_libraries(cJSON pcg_basic)
 
+# CLIENT
 add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
 target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
 target_link_libraries(${CLIENT_BINARY} PRIVATE glfw glad freetype)
 target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
+
+# TESTS
+add_executable(proc_input_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/proc_input_test.c)

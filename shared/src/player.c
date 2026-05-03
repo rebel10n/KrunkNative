@@ -31,7 +31,7 @@ void player_spawn(Player *player) {
     player->crouch_val = 0.0f;
     player->aim_val = 0.0f;
 
-    player->on_ground = 0;
+    player->on_ground = 1;
     player->on_wall = 0;
     player->on_terrain = 0;
     player->on_ladder = 0;
