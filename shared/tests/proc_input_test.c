@@ -263,5 +263,22 @@ int main() {
         printf("\n");
     }
 
+    char *kanji_path = concat(get_project_root(), "assets/maps/kanji.json");
+    const cJSON *kanji = load_json(kanji_path);
+
+    free(kanji_path);
+
+    if (!kanji) {
+        printf("Failed to load sandstorm! \n");
+        return 1;
+    }
+
+    game.map_count = 0; // hack: game_configure free()'s maps (assumes maps is malloc()'d), so to prevent that we set map_count to 0
+
+    game_configure(&game, NULL, &kanji, 1, NULL, 0);
+    game_init(&game, 0, -1, 1);
+
+    run_test("kanji_jump_pad.json", player);
+
     return 0;
 }
