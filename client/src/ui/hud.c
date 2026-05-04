@@ -8,7 +8,7 @@ void hud_render(Client *client, const float now) {
     ui_fill_rect(client->ui, (vec4) {0.0f, 0.0f, 0.0f, 0.5f}, 0.0f, 0.0f, client->ui->width, client->ui->height);
 
     const char *instructions = "CLICK TO PLAY";
-    const float text_size = 32.0f - 2.0f * progress;
+    const float text_size = (32.0f - 2.0f * progress) * client->ui->scale;
     const float opacity = 0.8f * (1.0f - 0.7f * progress);
     const float text_width = ui_measure_text(client->ui, instructions, text_size);
 

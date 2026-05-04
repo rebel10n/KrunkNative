@@ -182,4 +182,8 @@ const ClassConfig trooper = {
     .speed = 1.0f,
 };
 
-const ClassConfig g_classes[] = {triggerman, hunter, run_n_gun, spray_n_pray, vince, detective, marksman, rocketeer, agent, runner, deagler, bowman, commando, trooper};
+const ClassConfig g_classes[] = {
+    triggerman, hunter, run_n_gun, spray_n_pray,
+    vince, detective, marksman, rocketeer, agent,
+    runner, deagler, bowman, commando, trooper,
+};

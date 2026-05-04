@@ -59,6 +59,10 @@ void game_configure(Game *game, const GameConfig *config, const cJSON **maps, co
     game->weapons = (Weapon **) g_weapons;
     game->weapon_count = sizeof(g_weapons) / sizeof(g_weapons[0]);
 
+    // TODO: PROPER CLASS SETUP!
+    game->classes = (ClassConfig *) g_classes;
+    game->class_count = sizeof(g_classes) / sizeof(g_classes[0]);
+
     if (game->map_count) {
         free(game->maps);
         game->map_count = 0;

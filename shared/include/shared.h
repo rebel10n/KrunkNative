@@ -281,7 +281,7 @@ typedef struct {
     float speed;
 } ClassConfig;
 
-extern const ClassConfig g_classes[];
+extern const ClassConfig g_classes[14];
 
 typedef enum {
     TEAM_OPTIONS_NONE,
@@ -362,6 +362,8 @@ typedef struct {
     float health;
     int max_health;
     int team;
+
+    int class_index;
 
     float scale;
     float height;
@@ -472,11 +474,13 @@ typedef struct Game_t {
     Map *map;
 
     Weapon **weapons;
+    ClassConfig *classes;
     const cJSON **maps;
     int *modes;
 
     size_t map_count;
     size_t mode_count;
+    size_t class_count;
     size_t weapon_count;
 
     size_t player_count;
@@ -500,6 +504,7 @@ void game_players_add(Game*, Player*);
 char *concat(const char*, const char*);
 int read_file(const char*, unsigned char**, size_t*);
 int parse_hex_color(const char*, vec4*);
+vec4 hex_to_vec(int);
 float normalize_angle(float);
 float progress_on_line(vec2, vec2, vec2);
 

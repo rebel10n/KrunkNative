@@ -22,9 +22,11 @@ void player_update_height(Player *player) {
 
 void player_spawn(Player *player) {
     player->active = 1;
+
+    player->class_index = 0;
     player->speed = g_classes[0].speed;
+    player->health = (float) g_classes[0].health;
     player->max_health = g_classes[0].health;
-    player->weapon = g_weapons[1];
 
     player->loadout_size = 3;
 
