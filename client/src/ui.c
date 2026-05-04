@@ -42,6 +42,14 @@ void ui_update(UI *ui) {
     ui->height = (float) viewport[3];
     ui->scale = 1.0f;
 
+    const float target_width = 1700.0f;
+    const float target_height = 900.0f;
+
+    const float scale_x = ui->width / target_width;
+    const float scale_y = ui->height / target_height;
+
+    ui->scale = MIN(scale_x, scale_y);
+
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
 }
