@@ -3,6 +3,8 @@
 #include <pcg_basic.h>
 #include <stdio.h>
 
+void player_swap_weapon(Player*, int, int, int, int);
+
 Player *player_init(Game *game) {
     Player *player = calloc(1, sizeof(Player));
     if (!player) return NULL;
@@ -24,6 +26,13 @@ void player_spawn(Player *player) {
     player->max_health = g_classes[0].health;
     player->weapon = g_weapons[1];
 
+    player->loadout_size = 3;
+    player->loadout = calloc(3, sizeof(int));
+
+    player->loadout[0] = 1;
+    player->loadout[1] = 2;
+    player->loadout[2] = 12;
+
     player->velocity.x = 0.0f;
     player->velocity.y = 0.0f;
     player->velocity.z = 0.0f;
@@ -43,12 +52,17 @@ void player_spawn(Player *player) {
     player->did_wall_jump = 0;
     player->did_act = 0;
 
+    player->air_time = 0.0f;
+    player->covered_distance = 0.0f;
     player->aim_time = 0.0f;
+
+    player->swap_timer = 0.0f;
     player->slide_timer = 0.0f;
     player->jump_timer = 0.0f;
     player->reload_timer = 0.0f;
 
     player_update_height(player);
+    player_swap_weapon(player, 0, 1, 0, 0);
 
     if (player->game->map && player->game->map->spawn_count) {
         const Spawn *spawn = player->game->map->spawns[pcg32_boundedrand(player->game->map->spawn_count)];
@@ -328,6 +342,38 @@ void player_jump(Player *player) {
     player->velocity.z -= vel * jump_push * cosf(player->direction.y);
 }
 
+void player_swap_weapon(Player *player, const int index, const int force_swap, const int instant_swap, const int recon) {
+    int loadout_changed = force_swap || player->loadout_index != index;
+    player->loadout_index = index;
+
+    if (!instant_swap && loadout_changed) {
+        // TODO: reset reload
+    }
+
+    player->weapon = player->game->weapons[player->loadout[player->loadout_index]];
+
+    if (!player->weapon) {
+        player->weapon = player->game->weapons[player->loadout[0]];
+
+        if (player->weapon) {
+            player->loadout_index = 0;
+            loadout_changed = 1;
+        }
+    }
+
+    // TODO: update inspect, weapon meshes
+
+    if (!instant_swap && player->weapon) {
+        if (!recon && loadout_changed) player->swap_timer = player->weapon->swap_time;
+
+        // TODO: animations & HUD
+    }
+}
+
+void player_reload(Player *player) {
+
+}
+
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
     const float delta = CLAMP(input->delta, game_constants.min_delta, game_constants.max_delta);
     const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir;
@@ -362,12 +408,42 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
     player->direction.y = input->y_dir;
 
-    // TODO: weapon swapping
+    if (input->swap && player->loadout_size > 1) {
+        const int swap_secondary = input->swap == 1;
+        const int swap_melee = input->swap == 2;
+        const int swap_equipment = input->swap == 3;
+
+        int swap_to = -1;
+
+        for (int i = 0; i < player->loadout_size; i++) {
+            const int weapon = player->loadout[i];
+
+            if (swap_secondary && player->game->weapons[weapon]->secondary) {
+                swap_to = i;
+                break;
+            }
+
+            if (swap_melee && player->game->weapons[weapon]->melee) {
+                swap_to = i;
+                break;
+            }
+
+            if (swap_equipment && player->game->weapons[weapon]->equipment) {
+                swap_to = i;
+                break;
+            }
+        }
+
+        if (swap_to >= 0) {
+            if (player->loadout_index == swap_to) swap_to = 0;
+            player_swap_weapon(player, swap_to, 0, 0, recon);
+        }
+    }
 
     if (!recon) {
         if (player->recoil_force != 0.0f) {
             player->recoil_anim += player->recoil_force * delta;
-            player->recoil_anim_y += player->recoil_force * (player->weapon->recoil_y) * (1.0f - player->crouch_val * 0.3f) * delta;
+            player->recoil_anim_y += player->recoil_force * (player->weapon->recoil_y == 0.0f ? 1.0f : player->weapon->recoil_y) * (1.0f - player->crouch_val * 0.3f) * delta;
             player->recoil_force *= powf(player->weapon->recover_f, delta * 1000.0f);
         }
 
@@ -380,8 +456,8 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     if (player->weapon->no_aim && player->aim_val > 0.0f) {
         // TODO: toggle aim (HUD)
         player->aim_val = 0.0f;
-    } else if (player->weapon->zoom != 0.0f && (!player->weapon->no_aim || player->swap_time > 0.0f)) {
-        const int can_scope = player->reload_timer <= 0.0f && player->swap_time <= 0.0f && (!player->weapon->melee || (player->can_throw && player->game->config.throwable_melees));
+    } else if (player->weapon->zoom != 0.0f && (!player->weapon->no_aim || player->swap_timer > 0.0f)) {
+        const int can_scope = player->reload_timer <= 0.0f && player->swap_timer <= 0.0f && (!player->weapon->melee || (player->can_throw && player->game->config.throwable_melees));
 
         if (input->scope && player->aim_val < 1.0f && can_scope) {
             // TODO: cancel inspect animation
@@ -603,6 +679,31 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             }
 
             player->on_wall = 0;
+        }
+
+        // TODO: terrain
+
+        player->air_time = player->on_ground ? 0 : player->air_time + delta;
+    }
+
+    player->covered_distance += hypotf(player->position.x - player->last_position.x, player->position.z - player->last_position.z);
+
+    if (!recon && 1 /* TODO: check that teamOptions != prop */ && player->game->map->config.model != MODEL_TYPE_SPRITE) {
+        // TODO: update bob, lean, step animations
+        // TODO: update spread
+
+        if (input->reload && !player->game->mode->config.no_reloads) {
+            player_reload(player);
+        }
+
+        if (player->reload_timer > 0.0f) {
+            player->reload_timer = MAX(0.0f, player->reload_timer - delta);
+
+            // TODO: play reload end sound
+
+            if (player->reload_timer == 0.0f) {
+                // TODO: update ammo & reset HUD reload animation
+            }
         }
     }
 

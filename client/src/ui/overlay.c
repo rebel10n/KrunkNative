@@ -47,7 +47,18 @@ void overlay_render(Client *client, const float delta) {
             snprintf(speed_str, speed_length + 1, "player speed = %.f", speed);
             ui_fill_text(client->ui, color, speed_str, 10.0f, metrics_offset, 10.0f);
 
+            metrics_offset += 15.0f;
             free(speed_str);
+        }
+
+        const size_t weapon_length = snprintf(NULL, 0, "player weapon = %s", client->me->weapon->name);
+        char *weapon_str = malloc(weapon_length + 1);
+
+        if (weapon_str) {
+            snprintf(weapon_str, weapon_length + 1, "player weapon = %s", client->me->weapon->name);
+            ui_fill_text(client->ui, color, weapon_str, 10.0f, metrics_offset, 10.0f);
+
+            free(weapon_str);
         }
     }
 }

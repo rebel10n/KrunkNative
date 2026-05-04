@@ -332,6 +332,14 @@ void client_tick(Client *client, const float now, const float delta) {
             input.crouch = glfwGetKey(client->window, GLFW_KEY_LEFT_SHIFT);
             input.scope = glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_RIGHT);
 
+            if (glfwGetKey(client->window, GLFW_KEY_E)) input.swap = 1;
+            else if (glfwGetKey(client->window, GLFW_KEY_Q)) input.swap = 2;
+
+            const int swap_key = input.swap;
+
+            if (swap_key == client->last_swap_key) input.swap = 0;
+            client->last_swap_key = swap_key;
+
             const int forward = glfwGetKey(client->window, GLFW_KEY_W);
             const int back = glfwGetKey(client->window, GLFW_KEY_S);
             const int left = glfwGetKey(client->window, GLFW_KEY_A);

@@ -373,7 +373,10 @@ typedef struct {
 
     int slid_cont;
 
-    float swap_time;
+    float air_time;
+    float covered_distance;
+
+    float swap_timer;
     float reload_timer;
     float slide_timer;
     float jump_timer;
@@ -465,11 +468,13 @@ typedef struct Game_t {
     GameMode *mode;
     Map *map;
 
+    Weapon **weapons;
     const cJSON **maps;
     int *modes;
 
     size_t map_count;
     size_t mode_count;
+    size_t weapon_count;
 
     size_t player_count;
     Player **players;

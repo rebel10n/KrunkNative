@@ -11,6 +11,7 @@ typedef struct {
     unsigned char no_aim:1;
     unsigned char no_auto:1;
     unsigned char melee:1;
+    unsigned char equipment:1;
 
     unsigned int ammo;
 
@@ -45,5 +46,9 @@ extern const Weapon g_shotgun;
 extern const Weapon g_lmg;
 extern const Weapon g_semi_auto;
 extern const Weapon g_rpg;
+extern const Weapon g_akimbo;
+extern const Weapon g_deagle;
+extern const Weapon g_alien_blaster;
+extern const Weapon g_knife;
 
-extern const Weapon *g_weapons[];
+extern const Weapon *g_weapons[13];

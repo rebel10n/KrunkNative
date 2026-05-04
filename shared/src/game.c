@@ -55,6 +55,10 @@ void game_configure(Game *game, const GameConfig *config, const cJSON **maps, co
     if (config) game->config = *config;
     else game->config = g_default_game_config;
 
+    // TODO: PROPER WEAPON SETUP!
+    game->weapons = (Weapon **) g_weapons;
+    game->weapon_count = sizeof(g_weapons) / sizeof(g_weapons[0]);
+
     if (game->map_count) {
         free(game->maps);
         game->map_count = 0;

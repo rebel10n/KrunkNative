@@ -200,6 +200,7 @@ typedef struct {
     unsigned char last_noclip_key:1;
     unsigned char last_debug_key:1;
     unsigned char last_fullscreen_key:1;
+    unsigned char last_swap_key:2;
     unsigned char enter_game_lock:1;
 
     Game game;
