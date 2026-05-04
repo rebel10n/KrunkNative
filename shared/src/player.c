@@ -27,7 +27,10 @@ void player_spawn(Player *player) {
     player->weapon = g_weapons[1];
 
     player->loadout_size = 3;
+
     player->loadout = calloc(3, sizeof(int));
+    player->ammo = calloc(3, sizeof(int));
+    player->reloads = calloc(3, sizeof(float));
 
     player->loadout[0] = 1;
     player->loadout[1] = 2;
