@@ -73,6 +73,8 @@ typedef struct {
     float collision_padding;
     float booster_speed;
     float ladder_speed;
+    float ladder_scale;
+    float ladder_width;
 } GameConstants;
 
 extern const GameConstants game_constants;

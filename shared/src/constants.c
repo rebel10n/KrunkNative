@@ -55,4 +55,6 @@ const GameConstants game_constants = {
     .collision_padding = 1.1f,
     .booster_speed = 2.0f,
     .ladder_speed = 35.0f,
+    .ladder_scale = 0.5f,
+    .ladder_width = 3.2f,
 };

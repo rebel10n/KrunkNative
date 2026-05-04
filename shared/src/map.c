@@ -1,5 +1,6 @@
 #include <shared.h>
 #include <cJSON.h>
+#include <math.h>
 #include <stdio.h>
 
 #ifdef KRUNKNATIVE_CLIENT
@@ -137,6 +138,7 @@ Map *map_init(const cJSON *raw_data) {
             if (!map->spawns) {
                 free(spawn);
                 free(map);
+                if (parsed_colors) free(parsed_colors);
                 return NULL;
             }
 
@@ -148,6 +150,7 @@ Map *map_init(const cJSON *raw_data) {
             if (!new_spawns) {
                 free(spawn);
                 free(map);
+                if (parsed_colors) free(parsed_colors);
                 return NULL;
             }
 
@@ -210,6 +213,14 @@ Map *map_init(const cJSON *raw_data) {
         if (prefab_id == PREFAB_LADDER) {
             object->ladder = 1;
             object->direction = cJSON_IsNumber(dir) ? (int) cJSON_GetNumberValue(dir) % 4 : 0;
+
+            const float direction = (float) M_PI * 0.5f * (float) object->direction;
+
+            object->position.x += game_constants.ladder_scale * cosf(direction);
+            object->position.z += game_constants.ladder_scale * sinf(direction);
+
+            object->scale.x = (object->direction % 2 ? game_constants.ladder_width : game_constants.ladder_scale) * 2.0f;
+            object->scale.z = (object->direction % 2 ? game_constants.ladder_scale : game_constants.ladder_width) * 2.0f;
         }
 
         if (prefab_id == PREFAB_RAMP) {
@@ -411,7 +422,7 @@ Map *map_init(const cJSON *raw_data) {
         }
     }
 
-    free(parsed_colors);
+    if (parsed_colors) free(parsed_colors);
     return map;
 }
 
