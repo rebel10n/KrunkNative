@@ -371,7 +371,7 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
 }
 
 void player_reload(Player *player) {
-
+    // TODO
 }
 
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
@@ -641,14 +641,39 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
         // TODO: inter prog
         // TODO: terrain ray cast
-        // TODO: track air time
+
+        player->air_time = player->on_ground ? 0 : player->air_time + delta;
     }
 
-    // TODO: track covered distance
-    // TODO: reload
-    // TODO: swap timer
-    // TODO: shot cooldowns (reloads array)
-    // TODO: shooting
+    player->covered_distance += hypotf(player->position.x - player->last_position.x, player->position.z - player->last_position.z);
+
+    if (!recon && 1 /* TODO: check that teamOptions != prop */ && player->game->map->config.model != MODEL_TYPE_SPRITE) {
+        // TODO: update bob, lean, step animations
+        // TODO: update spread
+
+        if (input->reload && !player->game->mode->config.no_reloads) {
+            player_reload(player);
+        }
+
+        if (player->reload_timer > 0.0f) {
+            player->reload_timer = MAX(0.0f, player->reload_timer - delta);
+
+            // TODO: play reload end sound
+
+            if (player->reload_timer == 0.0f) {
+                // TODO: update ammo & reset HUD reload animation
+            }
+        }
+
+        player->swap_timer = MAX(0.0f, player->swap_timer - delta);
+
+        for (int i = 0; i < player->loadout_size; i++) {
+            player->reloads[i] = MAX(0.0f, player->reloads[i] - delta);
+        }
+
+        // TODO: shooting
+    }
+
     // TODO: vel obj
 
     if (!move_lock && player->wall_jump && !player->on_ground && !player->on_ladder && player->on_wall && player->game->config.wall_jump > 0.0f) {
@@ -680,33 +705,9 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
             player->on_wall = 0;
         }
-
-        // TODO: terrain
-
-        player->air_time = player->on_ground ? 0 : player->air_time + delta;
     }
 
-    player->covered_distance += hypotf(player->position.x - player->last_position.x, player->position.z - player->last_position.z);
-
-    if (!recon && 1 /* TODO: check that teamOptions != prop */ && player->game->map->config.model != MODEL_TYPE_SPRITE) {
-        // TODO: update bob, lean, step animations
-        // TODO: update spread
-
-        if (input->reload && !player->game->mode->config.no_reloads) {
-            player_reload(player);
-        }
-
-        if (player->reload_timer > 0.0f) {
-            player->reload_timer = MAX(0.0f, player->reload_timer - delta);
-
-            // TODO: play reload end sound
-
-            if (player->reload_timer == 0.0f) {
-                // TODO: update ammo & reset HUD reload animation
-            }
-        }
-    }
-
+    // TODO: trading?
     // TODO: player collisions
     // TODO: update interact
 }

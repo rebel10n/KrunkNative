@@ -400,6 +400,9 @@ typedef struct {
     float recoil_anim_y;
 
     int *loadout;
+    int *ammo;
+    float *reloads;
+
     int loadout_size;
     int loadout_index;
 
