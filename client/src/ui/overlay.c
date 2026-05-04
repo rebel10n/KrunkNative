@@ -1,6 +1,5 @@
 #include <glad/glad.h>
 #include <client.h>
-#include <math.h>
 
 void overlay_render(Client *client, const float delta) {
     { // bottom left HUD

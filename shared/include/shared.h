@@ -349,6 +349,10 @@ typedef struct {
     unsigned char can_slide:1;
     unsigned char can_throw:1;
 
+    unsigned int kills;
+    unsigned int deaths;
+    unsigned int death_streak;
+
     int input_seq;
 
     float dt;
@@ -496,7 +500,7 @@ typedef struct Game_t {
     void *server; // TODO
 } Game;
 
-void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t);
+void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);
 void game_init(Game*, int, int, unsigned char);
 void game_tick(Game*, float, float);
 void game_players_add(Game*, Player*);

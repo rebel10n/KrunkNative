@@ -51,17 +51,15 @@ void game_clear_players(Game *game) {
     }
 }
 
-void game_configure(Game *game, const GameConfig *config, const cJSON **maps, const size_t map_count, int *modes, const size_t mode_count) {
+void game_configure(
+    Game *game, const GameConfig *config,
+    const cJSON **maps, const size_t map_count,
+    int *modes, const size_t mode_count,
+    Weapon **weapons, const size_t weapon_count,
+    ClassConfig *classes, size_t class_count
+) {
     if (config) game->config = *config;
     else game->config = g_default_game_config;
-
-    // TODO: PROPER WEAPON SETUP!
-    game->weapons = (Weapon **) g_weapons;
-    game->weapon_count = sizeof(g_weapons) / sizeof(g_weapons[0]);
-
-    // TODO: PROPER CLASS SETUP!
-    game->classes = (ClassConfig *) g_classes;
-    game->class_count = sizeof(g_classes) / sizeof(g_classes[0]);
 
     if (game->map_count) {
         free(game->maps);
@@ -100,6 +98,38 @@ void game_configure(Game *game, const GameConfig *config, const cJSON **maps, co
 
         if (game->modes) memcpy(game->modes, g_rotation_modes, sizeof(g_rotation_modes));
         else game->mode_count = 0;
+    }
+
+    if (game->weapon_count) {
+        free(game->weapons);
+        game->weapon_count = 0;
+    }
+
+    if (weapon_count) {
+        game->weapons = weapons;
+        game->weapon_count = weapon_count;
+    } else {
+        game->weapon_count = sizeof(g_weapons) / sizeof(g_weapons[0]);
+        game->weapons = calloc(game->weapon_count, sizeof(Weapon*));
+
+        if (game->weapons) memcpy(game->weapons, g_weapons, sizeof(g_weapons));
+        else game->weapon_count = 0;
+    }
+
+    if (game->class_count) {
+        free(game->classes);
+        game->class_count = 0;
+    }
+
+    if (class_count) {
+        game->classes = classes;
+        game->class_count = class_count;
+    } else {
+        game->class_count = sizeof(g_classes) / sizeof(g_classes[0]);
+        game->classes = calloc(game->class_count, sizeof(ClassConfig));
+
+        if (game->classes) memcpy(game->classes, g_classes, sizeof(g_classes));
+        else game->class_count = 0;
     }
 }
 

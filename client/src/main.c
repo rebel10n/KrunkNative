@@ -97,7 +97,7 @@ int main() {
 
     if (!INSTANCE.scene || !INSTANCE.ui) return -1;
 
-    game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0);
+    game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
     game_init(&INSTANCE.game, -1, -1, 1);
     client_load_map(&INSTANCE);
 

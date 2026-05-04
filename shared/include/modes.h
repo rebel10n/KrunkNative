@@ -6,6 +6,8 @@ typedef struct {
     unsigned char no_regen:1;
     unsigned char no_reloads:1;
     unsigned char no_pickups:1;
+    unsigned char no_streaks:1;
+    unsigned char no_clan:1;
     unsigned char teams:1;
     unsigned char dmg_team:1;
     unsigned char site:1;
