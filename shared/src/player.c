@@ -187,7 +187,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
 
                 player->velocity.y = 0.0f;
                 player->on_ladder = 1;
-                player->on_terrain = 1;
+                player->on_terrain = 0;
 
                 // TODO: step src
 
