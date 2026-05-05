@@ -36,6 +36,8 @@ typedef struct {
 typedef struct {
     const GameModeVTable *vtable;
     GameModeConfig config;
+
+    unsigned char objective:1;
 } GameMode;
 
 extern const GameModeVTable ffa_vtable;

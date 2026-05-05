@@ -75,6 +75,7 @@ typedef struct {
     float ladder_speed;
     float ladder_scale;
     float ladder_width;
+    float death_y;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -242,7 +243,9 @@ typedef struct {
 
 typedef struct {
     const cJSON *raw_data;
+
     MapConfig config;
+    float death_y;
 
     size_t spawn_count;
     Spawn **spawns;
@@ -333,8 +336,11 @@ typedef struct {
     int uid;
     unsigned char active:1;
     unsigned char noclip:1;
+    unsigned char god_mode:1;
+    unsigned char force_hide:1;
     unsigned char interpolate:1;
 
+    unsigned char is_hidden:1;
     unsigned char on_ground:1;
     unsigned char on_ladder:1;
     unsigned char on_ramp:1; // added instead of the didCollideRamp local in procInputs
@@ -419,11 +425,18 @@ typedef struct {
     player_mesh_map meshes;
 } Player;
 
+typedef struct {
+    int streak;
+    int weapon_id;
+} PlayerKillInfo;
+
 Player *player_init(struct Game_t*);
 void player_spawn(Player*);
+void player_kill(Player*, const Player*, PlayerKillInfo*, int);
 void player_queue_input(Player*, const Input*);
 void player_proc_input(Player*, const Input*, int, int);
 void player_update(Player*, float);
+void player_send_event();
 
 typedef struct {
     int max_players;
@@ -472,6 +485,15 @@ typedef struct {
 
 extern const GameConfig g_default_game_config;
 
+typedef struct {
+    float timer;
+
+    int votes_for;
+    int votes_req;
+
+    Player *player;
+} VoteKick;
+
 typedef struct Game_t {
     GameConfig config;
     GameMode *mode;
@@ -494,8 +516,12 @@ typedef struct Game_t {
     unsigned char is_local:1;
     unsigned char ready:1;
 
+    float end_timer;
+
     float nuke_timer;
-    int nuke_player;
+    Player *nuke_player;
+
+    VoteKick *vote_kick;
 
     void *server; // TODO
 } Game;
@@ -504,6 +530,7 @@ void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_
 void game_init(Game*, int, int, unsigned char);
 void game_tick(Game*, float, float);
 void game_players_add(Game*, Player*);
+void game_broadcast();
 
 char *concat(const char*, const char*);
 int read_file(const char*, unsigned char**, size_t*);

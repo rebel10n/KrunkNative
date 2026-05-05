@@ -78,6 +78,12 @@ void player_spawn(Player *player) {
     }
 }
 
+void player_kill(Player *player, const Player *killer, PlayerKillInfo *kill_info, const int skip_rewards) {
+    if (!player->active) return;
+
+    player->active = 0;
+}
+
 void player_queue_input(Player *player, const Input *input) {
     if (player->input_queue_size) {
         Input *new_input_queue = realloc(player->input_queue, (player->input_queue_size + 1) * sizeof(Input));
@@ -196,13 +202,14 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                 continue;
             }
 
-            if (object->kill) {
-                // TODO: kill player
+            if (object->kill && !player->god_mode) {
+                // TODO: reset flag
+                player_kill(player, NULL, NULL, 0);
                 continue;
             }
 
             if (object->ladder) {
-                if (player->position.y >= object->position.y + object->scale.y || player->crouch_val != 0.0f) continue;
+                if (player->position.y >= object->position.y + object->scale.y || player->crouch_val) continue;
 
                 player->velocity.y = 0.0f;
                 player->on_ladder = 1;
@@ -254,7 +261,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                 if ((player->position.y <= collision_height || can_jump) && (!max_ramp_height || *max_ramp_height <= collision_height)) {
                     if (max_ramp_height) *max_ramp_height = collision_height;
 
-                    if (object->ramp->boost != 0.0f) {
+                    if (object->ramp->boost) {
                         player->position.y = collision_height;
 
                         const float boost_velocity = object->ramp->boost * game_constants.booster_speed * delta;
@@ -341,7 +348,7 @@ void player_jump(Player *player) {
     const float jump_vel = game_constants.jump_velocity * player->game->config.jump_mlt * (player->game->mode->config.real_movement ? 0.92f : 1.0f);
     const float vel = hypotf(player->velocity.x, player->velocity.z);
 
-    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * (player->weapon->jump_mlt != 0.0f ? player->weapon->jump_mlt : player->weapon->speed_mlt) * (player->aim_val != 1.0f ? 1.0f : game_constants.jump_aim_slow);
+    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * (player->weapon->jump_mlt ? player->weapon->jump_mlt : player->weapon->speed_mlt) * (player->aim_val != 1.0f ? 1.0f : game_constants.jump_aim_slow);
 
     player->velocity.x -= vel * jump_push * sinf(player->direction.y);
     player->velocity.z -= vel * jump_push * cosf(player->direction.y);
@@ -446,14 +453,14 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     }
 
     if (!recon) {
-        if (player->recoil_force != 0.0f) {
+        if (player->recoil_force) {
             player->recoil_anim += player->recoil_force * delta;
-            player->recoil_anim_y += player->recoil_force * (player->weapon->recoil_y == 0.0f ? 1.0f : player->weapon->recoil_y) * (1.0f - player->crouch_val * 0.3f) * delta;
+            player->recoil_anim_y += player->recoil_force * (!player->weapon->recoil_y ? 1.0f : player->weapon->recoil_y) * (1.0f - player->crouch_val * 0.3f) * delta;
             player->recoil_force *= powf(player->weapon->recover_f, delta * 1000.0f);
         }
 
         if (player->recoil_anim) player->recoil_anim *= powf(player->weapon->recover, delta * 1000.0f);
-        if (player->recoil_anim_y) player->recoil_anim_y *= powf(player->weapon->recover_y != 0.0f ? player->weapon->recover_y : player->weapon->recover, delta * 1000.0f);
+        if (player->recoil_anim_y) player->recoil_anim_y *= powf(player->weapon->recover_y ? player->weapon->recover_y : player->weapon->recover, delta * 1000.0f);
     }
 
     player->last_position = player->position;
@@ -461,7 +468,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     if (player->weapon->no_aim && player->aim_val > 0.0f) {
         // TODO: toggle aim (HUD)
         player->aim_val = 0.0f;
-    } else if (player->weapon->zoom != 0.0f && (!player->weapon->no_aim || player->swap_timer > 0.0f)) {
+    } else if (player->weapon->zoom && (!player->weapon->no_aim || player->swap_timer > 0.0f)) {
         const int can_scope = player->reload_timer <= 0.0f && player->swap_timer <= 0.0f && (!player->weapon->melee || (player->can_throw && player->game->config.throwable_melees));
 
         if (input->scope && player->aim_val < 1.0f && can_scope) {
@@ -476,7 +483,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             player->aim_val -= 1.0f / player->weapon->aim_speed * delta;
             player->aim_val = MAX(0.0f, player->aim_val);
 
-            if (player->aim_val == 0.0f && !recon) {
+            if (!player->aim_val && !recon) {
                 // TODO: toggle aim (HUD)
             }
         }
@@ -523,7 +530,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         else accel = game_constants.air_speed * player->game->map->config.air_accel * (player->game->mode->config.real_movement ? 0.72f : 1.0f);
 
         accel *= player->aim_val == 1.0f ? game_constants.aim_slow : 1.0f;
-        accel *= player->crouch_val != 0.0f ? game_constants.crouch_slow : 1.0f;
+        accel *= player->crouch_val ? game_constants.crouch_slow : 1.0f;
         accel *= player->game->mode->config.speed_mlt[player->team];
         accel *= player->weapon->speed_mlt;
         accel *= (player->noclip ? 2.0f : 1.0f) * delta;
@@ -575,7 +582,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         }
 
         if (!contact) {
-            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && player->game->config.wall_jump > 0.0f && player->crouch_val != 0.0f ? 0.3f : 1.0f;
+            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && player->game->config.wall_jump > 0.0f && player->crouch_val ? 0.3f : 1.0f;
             player->velocity.y -= delta * game_constants.gravity * player->game->config.gravity_mlt * wall_mlt;
         }
 
@@ -665,7 +672,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
             // TODO: play reload end sound
 
-            if (player->reload_timer == 0.0f) {
+            if (!player->reload_timer) {
                 // TODO: update ammo & reset HUD reload animation
             }
         }

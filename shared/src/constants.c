@@ -57,4 +57,5 @@ const GameConstants game_constants = {
     .ladder_speed = 35.0f,
     .ladder_scale = 0.5f,
     .ladder_width = 3.2f,
+    .death_y = -100.0f,
 };

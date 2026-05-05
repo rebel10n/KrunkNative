@@ -85,14 +85,18 @@ Map *map_init(const cJSON *raw_data) {
     const cJSON *spawns = cJSON_GetObjectItem(raw_data, "spawns");
     const cJSON *colors = cJSON_GetObjectItem(raw_data, "colors");
     const cJSON *cam_pos = cJSON_GetObjectItem(raw_data, "camPos");
+    const cJSON *death_y = cJSON_GetObjectItem(raw_data, "dthY");
 
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
     vec4 *parsed_colors = cJSON_IsArray(colors) ? calloc(cJSON_GetArraySize(colors), sizeof(vec4)) : NULL;
     Map *map = calloc(1, sizeof(Map));
 
+    if (!map) return NULL;
+
     map->raw_data = raw_data;
     map->config = g_default_map_config;
+    map->death_y = cJSON_IsNumber(death_y) ? (float) cJSON_GetNumberValue(death_y) : game_constants.death_y;
 
     if (cJSON_IsArray(cam_pos) && cJSON_GetArraySize(cam_pos) >= 3) {
         map->camera_position.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(cam_pos, 0));
@@ -205,7 +209,7 @@ Map *map_init(const cJSON *raw_data) {
             object->bounce = cJSON_IsNumber(bm) ? (float) cJSON_GetNumberValue(bm) : 0.0f;
             object->crouch = !cr || cJSON_IsNull(cr);
 
-            if (object->bounce == 0.0f) object->bounce = 1.0f;
+            if (!object->bounce) object->bounce = 1.0f;
         }
 
         const cJSON *dir = cJSON_GetObjectItem(raw_obj, "d");

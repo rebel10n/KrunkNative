@@ -160,33 +160,67 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
     if (game->mode) mode_fini(game->mode);
     game->mode = new_mode;
 
-    if (!game->mode || !game->map) return;
-    game->ready = 1;
+    if (game->vote_kick) {
+        free(game->vote_kick);
+        game->vote_kick = NULL;
+    }
 
-    // TODO: timers, win conditions, etc
+    if (!game->mode || !game->map) return;
+
+    game->ready = 1;
 }
 
 void game_tick(Game *game, const float now, const float delta) {
+    if (!game->ready) return;
+
+    // TODO: lots of stuff xD
+
     if (game->is_local || game->server) {
-        // TODO: tick timers
+        if (!game->end_timer && game->nuke_timer) {
+            game->nuke_timer = MAX(0.0f, game->nuke_timer - delta);
+
+            if (!game->nuke_timer) {
+                int nuke_reward = 0;
+
+                for (size_t i = 0; i < game->player_count; i++) {
+                    Player *player = game->players[i];
+                    if (!player->active || player == game->nuke_player || (player->team && game->nuke_player->team == player->team) || player->god_mode) continue;
+
+                    PlayerKillInfo kill_info = {
+                        .streak = 0,
+                        .weapon_id = -1,
+                    };
+
+                    nuke_reward += 50;
+                    player_kill(player, game->nuke_player, &kill_info, 1);
+                }
+
+                if (nuke_reward) {
+                    // TODO: score
+                }
+            }
+        }
+
+        if (game->vote_kick) {
+            game->vote_kick->timer = MAX(0.0f, game->vote_kick->timer - delta);
+
+            if (!game->vote_kick->timer) {
+                free(game->vote_kick);
+                game->vote_kick = NULL;
+
+                // TODO: send vote kick fail
+            }
+        }
     }
 
     for (size_t i = 0; i < game->player_count; i++) {
-        player_update(game->players[i], delta);
-    }
+        Player *player = game->players[i];
+        player_update(player, delta * game->config.delta_mlt);
 
-    // TODO: update AIs, teleporters, destructible's
-
-    if (game->is_local || game->server) {
-        // TODO: objectives
-    }
-
-    // TODO: zones
-    // TODO: projectiles
-    // TODO: interactable's
-
-    if (game->is_local || game->server) {
-        // TODO: check leaderboard update
+        if (player->position.y <= game->map->death_y) {
+            // TODO: reset flag
+            player_kill(player, NULL, NULL, 0);
+        }
     }
 }
 
