@@ -1,15 +1,24 @@
 #include <glad/glad.h>
 #include <client.h>
 
+static unsigned int ammo_icon;
+
 void overlay_render(Client *client, const float delta) {
+    { // xp bar
+        const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
+        const vec2 anchor = {20.0f * client->ui->scale, client->ui->height - 22.0f * client->ui->scale};
+
+        ui_round_rect(client->ui, background_color, anchor.x, anchor.y, client->ui->width - 35.0f * client->ui->scale, 12.0f * client->ui->scale, 4.0f * client->ui->scale);
+    }
+
     { // bottom left HUD
         const ClassConfig *class = &client->game.classes[client->me->class_index];
         const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
 
-        const vec2 anchor = {20.0f * client->ui->scale, client->ui->height - 30.0f * client->ui->scale};
+        const vec2 anchor = {20.0f * client->ui->scale, client->ui->height - 35.0f * client->ui->scale};
         const vec2 class_icon_pos = {anchor.x, anchor.y - 103.0f * client->ui->scale};
 
-        ui_round_rect(client->ui, background_color, class_icon_pos.x, class_icon_pos.y, 103.0f * client->ui->scale, 103.0f * client->ui->scale, 10.0f);
+        ui_round_rect(client->ui, background_color, class_icon_pos.x, class_icon_pos.y, 103.0f * client->ui->scale, 103.0f * client->ui->scale, 10.0f * client->ui->scale);
 
         const vec4 segment_color = hex_to_vec(0x9eeb56);
 
@@ -20,7 +29,7 @@ void overlay_render(Client *client, const float delta) {
                 anchor.y - 50.0f * client->ui->scale,
                 40.0f * client->ui->scale,
                 50.0f * client->ui->scale,
-                5.0f
+                5.0f * client->ui->scale
             );
 
             const float health_per_segment = (float) client->me->max_health / (float) class->health_segments;
@@ -33,7 +42,7 @@ void overlay_render(Client *client, const float delta) {
                     anchor.y - 50.0f * client->ui->scale,
                     40.0f * client->ui->scale * progress,
                     (50.0f - 10.0f * (float) j) * client->ui->scale,
-                    5.0f
+                    5.0f * client->ui->scale
                 );
 
                 ui_round_rect(
@@ -42,7 +51,7 @@ void overlay_render(Client *client, const float delta) {
                     anchor.y - 50.0f * client->ui->scale,
                     40.0f * client->ui->scale * progress,
                     50.0f * client->ui->scale * (1.0f - (float) j),
-                    5.0f
+                    5.0f * client->ui->scale
                 );
             }
         }

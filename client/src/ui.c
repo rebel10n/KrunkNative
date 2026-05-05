@@ -40,10 +40,10 @@ void ui_update(UI *ui) {
 
     ui->width = (float) viewport[2];
     ui->height = (float) viewport[3];
-    ui->scale = 1.0f;
 
-    const float target_width = 1700.0f;
-    const float target_height = 900.0f;
+    const float scale_factor = 1.5f;
+    const float target_width = scale_factor * 1700.0f;
+    const float target_height = scale_factor * 900.0f;
 
     const float scale_x = ui->width / target_width;
     const float scale_y = ui->height / target_height;
