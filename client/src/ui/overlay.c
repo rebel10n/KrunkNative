@@ -2,12 +2,13 @@
 #include <client.h>
 
 static unsigned int ammo_icon;
+static unsigned int timer_icon;
 
 void overlay_render(Client *client, const float delta) {
     const vec4 white = {1.0f, 1.0f, 1.0f, 1.0f};
+    const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
 
     { // xp bar
-        const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
         const vec2 anchor = {20.0f * client->ui->scale, client->ui->height - 22.0f * client->ui->scale};
 
         ui_round_rect(client->ui, background_color, anchor.x, anchor.y, client->ui->width - 35.0f * client->ui->scale, 12.0f * client->ui->scale, 4.0f * client->ui->scale);
@@ -15,7 +16,6 @@ void overlay_render(Client *client, const float delta) {
 
     { // bottom left HUD
         const ClassConfig *class = &client->game.classes[client->me->class_index];
-        const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
 
         const vec2 anchor = {20.0f * client->ui->scale, client->ui->height - 35.0f * client->ui->scale};
         const vec2 class_icon_pos = {anchor.x, anchor.y - 103.0f * client->ui->scale};
@@ -82,7 +82,6 @@ void overlay_render(Client *client, const float delta) {
     }
 
     { // bottom right HUD
-        const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
         const vec4 max_ammo_color = {1.0f, 1.0f, 1.0f, 0.7f};
         const vec2 anchor = {client->ui->width - 20.0f * client->ui->scale, client->ui->height - 35.0f * client->ui->scale};
 
@@ -170,6 +169,26 @@ void overlay_render(Client *client, const float delta) {
 
             // TODO: draw weapon icon
             // ui_draw_image(client->ui, icon, 0, 0, 200.0f, 200.0f);
+        }
+    }
+
+    { // top left HUD
+        const vec2 anchor = {20.0f * client->ui->scale, 20.0f * client->ui->scale};
+
+        if (!timer_icon) {
+            char *icon_path = concat(client_assets_path(), "img/timer.png");
+
+            timer_icon = load_texture(icon_path);
+            free(icon_path);
+        }
+
+        if (timer_icon) {
+            const char *timer = "04:00";
+            const float timer_width = ui_measure_text(client->ui, timer, 32.0f * client->ui->scale);
+
+            ui_round_rect(client->ui, background_color, anchor.x, anchor.y, timer_width + 88.0f * client->ui->scale, 76.0f * client->ui->scale, 10.0f * client->ui->scale);
+            ui_draw_image(client->ui, timer_icon, anchor.x + 10.0f * client->ui->scale, anchor.y + (76.0f - 45.0f) * 0.5f * client->ui->scale, 45.0f * client->ui->scale, 45.0f * client->ui->scale);
+            ui_fill_text(client->ui, white, timer, anchor.x + 68.0f * client->ui->scale, anchor.y + (76.0f - 18.0f) * client->ui->scale, 32.0f * client->ui->scale);
         }
     }
 }
