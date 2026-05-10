@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 void player_swap_weapon(Player*, int, int, int, int);
+void player_shoot(Player*);
 
 Player *player_init(Game *game) {
     Player *player = calloc(1, sizeof(Player));
@@ -37,6 +38,10 @@ void player_spawn(Player *player) {
     player->loadout[0] = 1;
     player->loadout[1] = 2;
     player->loadout[2] = 12;
+
+    player->ammo[0] = player->game->weapons[player->loadout[0]]->ammo;
+    player->ammo[1] = player->game->weapons[player->loadout[1]]->ammo;
+    player->ammo[2] = player->game->weapons[player->loadout[2]]->ammo;
 
     player->velocity.x = 0.0f;
     player->velocity.y = 0.0f;
@@ -383,7 +388,12 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
 }
 
 void player_reload(Player *player) {
-    // TODO
+    if (player->reload_timer || player->ammo[player->loadout_index] >= player->weapon->ammo) return;
+
+    player->reload_timer = player->weapon->reload_time * player->game->config.reload_speed;
+    player->burst_count = 0;
+
+    // TODO: cancel inspect
 }
 
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
@@ -673,7 +683,8 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             // TODO: play reload end sound
 
             if (!player->reload_timer) {
-                // TODO: update ammo & reset HUD reload animation
+                player->did_shoot = 0;
+                player->ammo[player->loadout_index] = player->weapon->ammo;
             }
         }
 
@@ -681,6 +692,26 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
         for (int i = 0; i < player->loadout_size; i++) {
             player->reloads[i] = MAX(0.0f, player->reloads[i] - delta);
+        }
+
+        if (player->weapon && !move_lock && !0 /* TODO: doing interact */) {
+            int will_shoot = player->weapon->burst_count || !player->weapon->no_auto && input->shoot;
+
+            if (player->did_shoot && !input->shoot) {
+                player->did_shoot = 0;
+            }
+
+            if (!player->did_shoot && input->shoot) {
+                will_shoot = 1;
+            }
+
+            if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
+                if (player->weapon->melee) {
+                    // TODO: melee
+                } else if (player->ammo[player->loadout_index] > 0) {
+                    player_shoot(player);
+                }
+            }
         }
 
         // TODO: shooting
@@ -726,6 +757,56 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
 void player_step(Player *player, const float distance) {
 
+}
+
+void player_shoot(Player *player) {
+    // TODO: increase shots stat
+
+    if (!player->unlimited_ammo) player->ammo[player->loadout_index]--;
+
+    player->did_shoot = 1;
+    player->did_act = 1;
+
+    if (player->burst_count) player->burst_count--;
+    else player->burst_count = player->weapon->burst ? player->weapon->burst_count - 1 : 0;
+
+    player->reloads[player->loadout_index] = (player->burst_count && player->weapon->burst ? player->weapon->burst_rate : player->weapon->rate) * player->game->config.fire_rate;
+
+    // TODO: update player ammo (HUD)
+    // TODO: play sound
+
+    player->recoil_force += player->weapon->recoil;
+
+    // TODO: gamepad rumble?
+
+#ifdef KRUNKNATIVE_CLIENT
+    const float rand_recoil = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * (float) M_PI;
+
+    player->recoil.x += player->weapon->recoil_r * sinf(rand_recoil);
+    player->recoil.z += player->weapon->recoil_r * 0.3f * cosf(rand_recoil);
+
+    // TODO: recoil tween
+#endif
+
+    // TODO: cancel inspect
+    // TODO: muzzle flash & casings
+
+    const float shot_height = player->position.y + player->height - game_constants.camera_height;
+    const int is_projectile = player->weapon->projectile && (!player->weapon->projectile_disable || player->game->config.bullet_drop);
+
+    if (is_projectile) {
+
+    }
+
+    if (!is_projectile || player->weapon->physical_power) {
+        for (int i = player->weapon->physical_power ? -1 : 0; i < (player->weapon->shots ? player->weapon->shots : 1); i++) {
+            // if (player->weapon->custom_spread && i >= 0) {
+            //
+            // } else {
+            //
+            // }
+        }
+    }
 }
 
 void player_update(Player *player, const float delta) {

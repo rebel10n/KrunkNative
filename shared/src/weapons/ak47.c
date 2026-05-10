@@ -23,6 +23,10 @@ const Weapon g_ak47 = {
     .spread = 100.0f,
     .min_spread = 5.0f,
     .zoom = 1.6f,
+    .recoil = 3.0f,
+    .recover = 0.978f,
+    .recover_y = 0.995f,
+    .recover_f = 0.975f,
 };
 
 // {

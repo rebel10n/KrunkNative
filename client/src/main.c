@@ -207,15 +207,15 @@ void client_tick_textures(Client *client, const float now) {
 }
 
 void client_enter_game(Client *client) {
-    if (!client->game.ready || client->enter_game_lock) return;
-    client->enter_game_lock = 1;
+    if (!client->game.ready || client->in_game) return;
+    client->in_game = 1;
 
     if (client->game.is_local) {
         if (!client->me) {
             client->me = player_init(&client->game);
 
             if (!client->me) {
-                client->enter_game_lock = 0;
+                client->in_game = 0;
                 return;
             }
 
@@ -223,7 +223,6 @@ void client_enter_game(Client *client) {
         }
 
         player_spawn(client->me);
-        client->enter_game_lock = 0;
     } else {
         // TODO: liftoff
     }
@@ -251,6 +250,7 @@ void client_tick(Client *client, const float now, const float delta) {
         client_unload_map(client);
 
         client->me = NULL;
+        client->in_game = 0;
 
         game_init(&client->game, -1, -1, 1);
         client_load_map(client);
@@ -329,6 +329,8 @@ void client_tick(Client *client, const float now, const float delta) {
 
             input.jump = glfwGetKey(client->window, GLFW_KEY_SPACE);
             input.crouch = glfwGetKey(client->window, GLFW_KEY_LEFT_SHIFT);
+            input.reload = glfwGetKey(client->window, GLFW_KEY_R);
+            input.shoot = glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_LEFT);
             input.scope = glfwGetMouseButton(client->window, GLFW_MOUSE_BUTTON_RIGHT);
 
             if (glfwGetKey(client->window, GLFW_KEY_E)) input.swap = 1;
@@ -357,7 +359,7 @@ void client_tick(Client *client, const float now, const float delta) {
         client->camera.position = client->me->position;
         client->camera.position.y += client->me->height - game_constants.camera_height;
 
-        client->camera.rotation.x = client->me->direction.x;
+        client->camera.rotation.x = client->me->direction.x + client->me->recoil_anim_y * game_constants.recoil_mlt;
         client->camera.rotation.y = client->me->direction.y;
 
         client->camera.zoom = 1.0f + (client->me->weapon->zoom - 1.0f) * client->me->aim_val * 1.0f; // TODO: adsFovMlt

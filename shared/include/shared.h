@@ -76,6 +76,7 @@ typedef struct {
     float ladder_scale;
     float ladder_width;
     float death_y;
+    float recoil_mlt;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -338,6 +339,7 @@ typedef struct {
     unsigned char active:1;
     unsigned char noclip:1;
     unsigned char god_mode:1;
+    unsigned char unlimited_ammo:1;
     unsigned char force_hide:1;
     unsigned char interpolate:1;
 
@@ -351,6 +353,7 @@ typedef struct {
     unsigned char wall_jump:1;
 
     unsigned char did_act:1;
+    unsigned char did_shoot:1;
     unsigned char did_jump:1;
     unsigned char did_wall_jump:1;
     unsigned char can_slide:1;
@@ -413,8 +416,9 @@ typedef struct {
     float recoil_anim_y;
 
     int *loadout;
-    int *ammo;
+    unsigned int *ammo;
     float *reloads;
+    int burst_count;
 
     int loadout_size;
     int loadout_index;
@@ -539,6 +543,7 @@ int parse_hex_color(const char*, vec4*);
 vec4 hex_to_vec(int);
 float normalize_angle(float);
 float progress_on_line(vec2, vec2, vec2);
+float line_in_rect(vec3, vec3, vec3, vec3);
 
 static inline void mat3x3(const float *a, const float *b, float *out) {
 #define MAT3x3 \

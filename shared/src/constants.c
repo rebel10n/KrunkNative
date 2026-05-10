@@ -58,4 +58,5 @@ const GameConstants game_constants = {
     .ladder_scale = 0.5f,
     .ladder_width = 3.2f,
     .death_y = -100.0f,
+    .recoil_mlt = 0.3f,
 };

@@ -12,8 +12,15 @@ typedef struct {
     unsigned char no_auto:1;
     unsigned char melee:1;
     unsigned char equipment:1;
+    unsigned char burst:1;
+    unsigned char projectile:1;
+    unsigned char projectile_disable:1;
+
+    unsigned int burst_count;
+    float burst_rate;
 
     unsigned int ammo;
+    unsigned int shots;
 
     float swap_time;
     float reload_time;
@@ -31,9 +38,11 @@ typedef struct {
     float min_spread;
     float recoil;
     float recoil_y;
+    float recoil_r;
     float recover;
     float recover_y;
     float recover_f;
+    float physical_power;
     float zoom;
 } Weapon;
 
