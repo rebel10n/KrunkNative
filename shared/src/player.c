@@ -334,7 +334,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
         }
     }
 
-    if (max_ramp_height) free(max_ramp_height);
+    free(max_ramp_height);
 }
 
 void player_jump(Player *player) {
@@ -647,7 +647,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
                 player->ramp_fix = NULL;
             }
         } else {
-            if (player->ramp_fix) free(player->ramp_fix);
+            free(player->ramp_fix);
             player->ramp_fix = NULL;
         }
 

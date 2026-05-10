@@ -142,7 +142,7 @@ Map *map_init(const cJSON *raw_data) {
             if (!map->spawns) {
                 free(spawn);
                 free(map);
-                if (parsed_colors) free(parsed_colors);
+                free(parsed_colors);
                 return NULL;
             }
 
@@ -154,7 +154,7 @@ Map *map_init(const cJSON *raw_data) {
             if (!new_spawns) {
                 free(spawn);
                 free(map);
-                if (parsed_colors) free(parsed_colors);
+                free(parsed_colors);
                 return NULL;
             }
 

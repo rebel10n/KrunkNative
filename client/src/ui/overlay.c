@@ -16,6 +16,7 @@ void overlay_render(Client *client, const float delta) {
 
     { // bottom left HUD
         const ClassConfig *class = &client->game.classes[client->me->class_index];
+        const vec4 max_health_color = {1.0f, 1.0f, 1.0f, 0.8f};
 
         const vec2 anchor = {20.0f * client->ui->scale, client->ui->height - 35.0f * client->ui->scale};
         const vec2 class_icon_pos = {anchor.x, anchor.y - 103.0f * client->ui->scale};
@@ -72,6 +73,35 @@ void overlay_render(Client *client, const float delta) {
                 );
             }
         }
+
+        const size_t health_length = snprintf(NULL, 0, "%.f", client->me->health);
+        char *health_str = malloc(health_length + 1);
+
+        if (health_str) snprintf(health_str, health_length + 1, "%.f", client->me->health);
+
+        const size_t max_health_length = snprintf(NULL, 0, "| %d", class->health);
+        char *max_health_str = malloc(max_health_length + 1);
+
+        if (max_health_str) snprintf(max_health_str, max_health_length + 1, "| %d", class->health);
+
+        const float health_size = 20.0f * client->ui->scale;
+        const float health_str_width = ui_measure_text(client->ui, health_str, health_size);
+        const float space_width = ui_measure_text(client->ui, " ", health_size);
+
+        const float text_width = health_str_width + space_width + ui_measure_text(client->ui, max_health_str, health_size);
+
+        ui_round_rect(client->ui, background_color, anchor.x + 113.0f * client->ui->scale, anchor.y - (59.0f + 41.0f) * client->ui->scale, text_width + 54.0f * client->ui->scale, 41.0f * client->ui->scale, 5.0f * client->ui->scale);
+        ui_fill_text(client->ui, white, health_str, anchor.x + 125.0f * client->ui->scale, anchor.y - (59.0f + 8.0f) * client->ui->scale, health_size);
+        ui_fill_text(client->ui, white, " ", anchor.x + 125.0f * client->ui->scale + health_str_width, anchor.y - (59.0f + 8.0f) * client->ui->scale, health_size);
+        ui_fill_text(client->ui, max_health_color, max_health_str, anchor.x + 125.0f * client->ui->scale + health_str_width + space_width, anchor.y - (59.0f + 8.0f) * client->ui->scale, health_size);
+
+        char *icon_path = concat(client_assets_path(), 0 ? "img/skull_0.png" : "img/hp_0.png"); // TODO: challenge mode
+        const unsigned int icon = load_texture(icon_path);
+
+        if (icon) ui_draw_image(client->ui, icon, anchor.x + 130.0f * client->ui->scale + text_width, anchor.y - (59.0f + 41.0f) * client->ui->scale + (41.0f - 28.0f) * 0.5f * client->ui->scale, 28.0f * client->ui->scale, 28.0f * client->ui->scale);
+
+        free(health_str);
+        free(max_health_str);
     }
 
     { // test crosshair

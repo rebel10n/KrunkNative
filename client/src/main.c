@@ -36,8 +36,7 @@ void resize_viewport(GLFWwindow*, int, int);
 int main() {
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
-
-    if (rand_memory) free(rand_memory);
+    free(rand_memory);
 
     vt_init(&g_geometry_cache);
     vt_init(&g_texture_cache);
