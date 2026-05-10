@@ -4,6 +4,8 @@
 static unsigned int ammo_icon;
 
 void overlay_render(Client *client, const float delta) {
+    const vec4 white = {1.0f, 1.0f, 1.0f, 1.0f};
+
     { // xp bar
         const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
         const vec2 anchor = {20.0f * client->ui->scale, client->ui->height - 22.0f * client->ui->scale};
@@ -19,6 +21,21 @@ void overlay_render(Client *client, const float delta) {
         const vec2 class_icon_pos = {anchor.x, anchor.y - 103.0f * client->ui->scale};
 
         ui_round_rect(client->ui, background_color, class_icon_pos.x, class_icon_pos.y, 103.0f * client->ui->scale, 103.0f * client->ui->scale, 10.0f * client->ui->scale);
+
+        const size_t class_icon_length = snprintf(NULL, 0, "textures/classes/icon_%d.png", class->icon_index);
+        char *class_icon_path = malloc(class_icon_length + 1);
+
+        if (class_icon_path) {
+            snprintf(class_icon_path, class_icon_length + 1, "textures/classes/icon_%d.png", class->icon_index);
+
+            char *full_class_icon_path = concat(client_assets_path(), class_icon_path);
+            const unsigned int class_icon = load_texture(full_class_icon_path);
+
+            if (class_icon) ui_draw_image_rounded(client->ui, class_icon, class_icon_pos.x, class_icon_pos.y, 103.0f * client->ui->scale, 103.0f * client->ui->scale, 10.0f * client->ui->scale);
+
+            free(class_icon_path);
+            free(full_class_icon_path);
+        }
 
         const vec4 segment_color = hex_to_vec(0x9eeb56);
 
@@ -64,11 +81,95 @@ void overlay_render(Client *client, const float delta) {
         ui_fill_rect(client->ui, color, client->ui->width * 0.5f - 5.0f * client->ui->scale, client->ui->height * 0.5f - 1.0f * client->ui->scale, 10.0f * client->ui->scale, 2.0f * client->ui->scale);
     }
 
-    { // debug (bottom right HUD)
-        const vec4 color = {0.0f, 0.0f, 0.0f, 1.0f};
-        const vec2 anchor = {client->ui->width - 20.0f * client->ui->scale, client->ui->height - 30.0f * client->ui->scale};
+    { // bottom right HUD
+        const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
+        const vec4 max_ammo_color = {1.0f, 1.0f, 1.0f, 0.7f};
+        const vec2 anchor = {client->ui->width - 20.0f * client->ui->scale, client->ui->height - 35.0f * client->ui->scale};
 
-        const float weapon_text_length = ui_measure_text(client->ui, client->me->weapon->name, 16.0f * client->ui->scale);
-        ui_fill_text(client->ui, color, client->me->weapon->name, anchor.x - weapon_text_length, anchor.y - 16.0f * client->ui->scale, 16.0f * client->ui->scale);
+        if (!ammo_icon) {
+            char *icon_path = concat(client_assets_path(), "textures/ammo_0.png");
+
+            ammo_icon = load_texture(icon_path);
+            free(icon_path);
+        }
+
+        if (ammo_icon) {
+            const int ammo = client->me->ammo[client->me->loadout_index];
+            char *ammo_str;
+
+            if (client->me->ammo[client->me->loadout_index]) {
+                const size_t ammo_str_length = snprintf(NULL, 0, "%d", ammo);
+                ammo_str = malloc(ammo_str_length + 1);
+
+                if (ammo_str) snprintf(ammo_str, ammo_str_length + 1, "%d", ammo);
+            } else if (client->me->weapon->melee) {
+                ammo_str = malloc(2);
+
+                if (ammo_str) {
+                    ammo_str[0] = '-';
+                    ammo_str[1] = 0;
+                }
+            } else {
+                ammo_str = malloc(2);
+
+                if (ammo_str) {
+                    ammo_str[0] = '0';
+                    ammo_str[1] = 0;
+                }
+            }
+
+            char *max_ammo_str;
+
+            if (client->game.mode->config.ammo_limit || !client->me->weapon->ammo) {
+                max_ammo_str = malloc(4);
+
+                if (max_ammo_str) {
+                    const char *max_ammo = "| -";
+                    memcpy(max_ammo_str, max_ammo, 4);
+                }
+            } else {
+                const size_t max_ammo_length = snprintf(NULL, 0, "| %d", client->me->weapon->ammo);
+                max_ammo_str = malloc(max_ammo_length + 1);
+
+                if (max_ammo_str) snprintf(max_ammo_str, max_ammo_length + 1, "| %d", client->me->weapon->ammo);
+            }
+
+            const float ammo_size = 35.0f * client->ui->scale;
+            const float ammo_str_width = ui_measure_text(client->ui, ammo_str, ammo_size);
+            const float space_width = ui_measure_text(client->ui, " ", ammo_size);
+
+            const float text_width = ammo_str_width + space_width + ui_measure_text(client->ui, max_ammo_str, ammo_size);
+            const vec2 ammo_holder_size = {text_width + 107.0f * client->ui->scale, (65.0f + 7.0f + 8.0f) * client->ui->scale};
+
+            ui_round_rect(client->ui, background_color, anchor.x - ammo_holder_size.x, anchor.y - ammo_holder_size.y, ammo_holder_size.x, ammo_holder_size.y, 10.0f * client->ui->scale);
+            ui_fill_text(client->ui, white, ammo_str, anchor.x - ammo_holder_size.x + 20.0f * client->ui->scale, anchor.y - ammo_holder_size.y * 0.5f + (35.0f - 14.0f) * client->ui->scale, ammo_size);
+            ui_fill_text(client->ui, white, " ", anchor.x - ammo_holder_size.x + ammo_str_width + 20.0f * client->ui->scale, anchor.y - ammo_holder_size.y * 0.5f + (35.0f - 14.0f) * client->ui->scale, ammo_size);
+            ui_fill_text(client->ui, max_ammo_color, max_ammo_str, anchor.x - ammo_holder_size.x + ammo_str_width + space_width + 20.0f * client->ui->scale, anchor.y - ammo_holder_size.y * 0.5f + (35.0f - 14.0f) * client->ui->scale, ammo_size);
+
+            ui_draw_image(client->ui, ammo_icon, anchor.x - ammo_holder_size.x + text_width + 35.0f * client->ui->scale, anchor.y - (55.0f + 7.0f) * client->ui->scale, 55.0f * client->ui->scale, 55.0f * client->ui->scale);
+
+            free(ammo_str);
+            free(max_ammo_str);
+        }
+
+        for (size_t i = 0; i < client->me->loadout_size; i++) {
+            const Weapon *weapon =  client->game.weapons[client->me->loadout[i]];
+            if (!weapon) continue;
+
+            char *icon_suffixed = concat(weapon->icon, ".png");
+            char *icon_path = concat("textures/weapons/", icon_suffixed);
+
+            char *full_icon_path = concat(client_assets_path(), icon_path);
+            const unsigned int icon = load_texture(full_icon_path);
+
+            free(icon_path);
+            free(icon_suffixed);
+            free(full_icon_path);
+
+            if (!icon) continue;
+
+            // TODO: draw weapon icon
+            // ui_draw_image(client->ui, icon, 0, 0, 200.0f, 200.0f);
+        }
     }
 }

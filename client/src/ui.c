@@ -212,7 +212,7 @@ float ui_fill_text(UI *ui, const vec4 color, const char *text, float x, const fl
             ui->text_material->texture = glyph->texture;
             material_update_uniforms((Material *) ui->text_material);
 
-            const float glyph_y = y - glyph->h_bearing.y * size / 100.0f + size * 0.5f;
+            const float glyph_y = y - glyph->h_bearing.y * size / 100.0f;
             ui_fill_rect_(ui, ui->text_material->base.program, x - glyph->h_bearing.x * size / 100.0f, glyph_y, glyph->size.x * size / 100.0f, glyph->size.y * size / 100.0f);
         }
 

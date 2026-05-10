@@ -273,6 +273,7 @@ void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scen
 
 typedef struct {
     const char *name;
+    int icon_index;
     const char **texts;
     const int *loadout;
     unsigned char secondary:1;
