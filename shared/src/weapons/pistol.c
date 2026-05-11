@@ -21,6 +21,10 @@ const Weapon g_pistol = {
     .rate = 0.15f,
     .spread = 60.0f,
     .zoom = 1.4f,
+    .recoil = 6.0f,
+    .recover = 0.98f,
+    .recover_y = 0.99f,
+    .recover_f = 0.98f,
 };
 
 // {

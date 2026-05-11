@@ -20,6 +20,10 @@ const Weapon g_rpg = {
     .spread = 120.0f,
     .min_spread = 15.0f,
     .zoom = 1.5f,
+    .recoil = 8.0f,
+    .recover = 0.99f,
+    .recover_y = 0.998f,
+    .recover_f = 0.975f,
 };
 
 // {

@@ -22,6 +22,10 @@ const Weapon g_revolver = {
     .rate = 0.39f,
     .spread = 100.0f,
     .zoom = 1.45f,
+    .recoil = 13.0f,
+    .recover = 0.982f,
+    .recover_y = 0.992f,
+    .recover_f = 0.98f,
 };
 
 // {

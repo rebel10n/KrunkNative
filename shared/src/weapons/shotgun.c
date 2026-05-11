@@ -23,6 +23,9 @@ const Weapon g_shotgun = {
     .spread = 180.0f,
     .min_spread = 20.0f,
     .zoom = 1.25f,
+    .recoil = 20.0f,
+    .recover = 0.99f,
+    .recover_f = 0.97f,
 };
 
 // {

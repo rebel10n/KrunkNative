@@ -23,6 +23,10 @@ const Weapon g_awp = {
     .rate = 0.9f,
     .spread = 260.0f,
     .zoom = 2.7f,
+    .recoil = 9.0f,
+    .recover = 0.993f,
+    .recover_y = 0.997f,
+    .recover_f = 0.975f,
 };
 
 // {

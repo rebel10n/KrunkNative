@@ -22,6 +22,10 @@ const Weapon g_semi_auto = {
     .rate = 0.12f,
     .spread = 250.0f,
     .zoom = 2.1f,
+    .recoil = 10.0f,
+    .recover = 0.98f,
+    .recover_y = 0.994f,
+    .recover_f = 0.975f,
 };
 
 // {

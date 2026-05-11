@@ -24,6 +24,10 @@ const Weapon g_lmg = {
     .spread = 300.0f,
     .min_spread = 10.0f,
     .zoom = 1.3f,
+    .recoil = 3.2f,
+    .recover = 0.98f,
+    .recover_y = 0.9975f,
+    .recover_f = 0.975f,
 };
 
 // {
