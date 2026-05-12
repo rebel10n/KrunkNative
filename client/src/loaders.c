@@ -3,6 +3,7 @@
 #include <fast_obj.h>
 #include <math.h>
 #include <stb_image.h>
+#include <pcg_basic.h>
 
 unsigned int load_texture(char *path) {
     texture_cache_map_itr cached = vt_get(&g_texture_cache, path);
@@ -214,13 +215,6 @@ Geometry *load_obj_model(char *path) {
     glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
     geometry->index_count = (int) alloc_index_count;
-    geometry->height = bounds_max.x - bounds_min.y;
-    geometry->bounding_sphere_radius = sqrtf(
-        powf((bounds_max.x - bounds_min.x) * 0.5f, 2.0f) +
-        powf((bounds_max.z - bounds_min.z) * 0.5f, 2.0f) +
-        powf(geometry->height * 0.5f, 2.0f)
-    );
-
     fast_obj_destroy(mesh);
 
     const size_t path_length = strlen(path);
@@ -236,58 +230,58 @@ Geometry *load_obj_model(char *path) {
     return geometry;
 }
 
+static const vertex cube_vertices[] = {
+    // FRONT
+    {-0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
+    {0.5f, 1.0f, 0.5f, 1.0f, 1.0f},
+    {-0.5f, 1.0f, 0.5f, 0.0f, 1.0f},
+    {0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
+
+    // BACK
+    {0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+    {-0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+    {0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+    {-0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+
+    // LEFT
+    {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+    {-0.5f, 1.0f, 0.5f, 1.0f, 1.0f},
+    {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+    {-0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
+
+    // RIGHT
+    {0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
+    {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+    {0.5f, 1.0f, 0.5f, 0.0f, 1.0f},
+    {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+
+    // TOP
+    {-0.5f, 1.0f, 0.5f, 0.0f, 0.0f},
+    {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+    {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+    {0.5f, 1.0f, 0.5f, 1.0f, 0.0f},
+
+    // BOTTOM
+    {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+    {0.5f, 0.0f, 0.5f, 1.0f, 1.0f},
+    {-0.5f, 0.0f, 0.5f, 0.0f, 1.0f},
+    {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+};
+
+static const unsigned int cube_indices[] = {
+    0, 1, 2, 0, 3, 1, // FRONT
+    4, 5, 6, 4, 7, 5, // BACK
+    8, 9, 10, 8, 11, 9, // LEFT
+    12, 13, 14, 12, 15, 13, // RIGHT
+    16, 17, 18, 16, 19, 17, // TOP
+    20, 21, 22, 20, 23, 21, // BOTTOM
+};
+
 Geometry *create_cube_geo() {
     if (g_cube_geometry) return g_cube_geometry;
 
     Geometry *geometry = calloc(1, sizeof(Geometry));
     if (!geometry) return NULL;
-
-    static const vertex vertices[] = {
-        // FRONT
-        {-0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
-        {0.5f, 1.0f, 0.5f, 1.0f, 1.0f},
-        {-0.5f, 1.0f, 0.5f, 0.0f, 1.0f},
-        {0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
-
-        // BACK
-        {0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
-        {-0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
-        {0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
-        {-0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
-
-        // LEFT
-        {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
-        {-0.5f, 1.0f, 0.5f, 1.0f, 1.0f},
-        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
-        {-0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
-
-        // RIGHT
-        {0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
-        {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
-        {0.5f, 1.0f, 0.5f, 0.0f, 1.0f},
-        {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
-
-        // TOP
-        {-0.5f, 1.0f, 0.5f, 0.0f, 0.0f},
-        {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
-        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
-        {0.5f, 1.0f, 0.5f, 1.0f, 0.0f},
-
-        // BOTTOM
-        {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
-        {0.5f, 0.0f, 0.5f, 1.0f, 1.0f},
-        {-0.5f, 0.0f, 0.5f, 0.0f, 1.0f},
-        {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
-    };
-
-    static const unsigned int indices[] = {
-        0, 1, 2, 0, 3, 1, // FRONT
-        4, 5, 6, 4, 7, 5, // BACK
-        8, 9, 10, 8, 11, 9, // LEFT
-        12, 13, 14, 12, 15, 13, // RIGHT
-        16, 17, 18, 16, 19, 17, // TOP
-        20, 21, 22, 20, 23, 21, // BOTTOM
-    };
 
     unsigned int vbo;
 
@@ -298,10 +292,10 @@ Geometry *create_cube_geo() {
     glBindVertexArray(geometry->vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cube_vertices), cube_vertices, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cube_indices), cube_indices, GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
@@ -310,12 +304,21 @@ Geometry *create_cube_geo() {
     glEnableVertexAttribArray(1);
     glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
-    geometry->index_count = sizeof(indices) / sizeof(indices[0]);
-    geometry->bounding_sphere_radius = sqrtf(1.5f);
+    geometry->index_count = sizeof(cube_indices) / sizeof(cube_indices[0]);
 
     g_cube_geometry = geometry;
     return geometry;
 }
+
+static const vertex plane_vertices[] = {
+    {-0.5f, 1.0f, 0.5f, 0.0f, 0.0f},
+    {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+    {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+    {0.5f, 1.0f, 0.5f, 1.0f, 0.0f},
+};
+
+static const unsigned int plane_indices[] = {0, 1, 2, 0, 3, 1};
+
 
 Geometry *create_plane_geo() {
     if (g_plane_geometry) return g_plane_geometry;
@@ -323,15 +326,6 @@ Geometry *create_plane_geo() {
     Geometry *geometry = calloc(1, sizeof(Geometry));
     if (!geometry) return NULL;
 
-    static const vertex vertices[] = {
-        {-0.5f, 1.0f, 0.5f, 0.0f, 0.0f},
-        {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
-        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
-        {0.5f, 1.0f, 0.5f, 1.0f, 0.0f},
-    };
-
-    static const unsigned int indices[] = {0, 1, 2, 0, 3, 1};
-
     unsigned int vbo;
 
     glGenVertexArrays(1, &geometry->vao);
@@ -341,10 +335,10 @@ Geometry *create_plane_geo() {
     glBindVertexArray(geometry->vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(plane_vertices), plane_vertices, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(plane_indices), plane_indices, GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
@@ -353,8 +347,7 @@ Geometry *create_plane_geo() {
     glEnableVertexAttribArray(1);
     glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
-    geometry->index_count = sizeof(indices) / sizeof(indices[0]);
-    geometry->bounding_sphere_radius = sqrtf(1.5f);
+    geometry->index_count = sizeof(plane_indices) / sizeof(plane_indices[0]);
 
     g_plane_geometry = geometry;
     return geometry;
@@ -426,8 +419,92 @@ Geometry *create_ramp_geo() {
     glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
     geometry->index_count = sizeof(indices) / sizeof(indices[0]);
-    geometry->bounding_sphere_radius = sqrtf(1.5f);
 
     g_ramp_geometry = geometry;
+    return geometry;
+}
+
+Geometry *create_ladder_geo(const float height) {
+    Geometry *geometry = calloc(1, sizeof(Geometry));
+    if (!geometry) return NULL;
+
+    const int steps = (int) (height / 6.0f);
+
+    vertex vertices[steps * 4 + 24 * 2];
+    int indices[steps * 6 + 36 * 2];
+
+    for (int i = 0; i < 2; i++) {
+        const int v_offset = 24 * i;
+        const int i_offset = 36 * i;
+
+        memcpy(vertices + v_offset, cube_vertices, sizeof(cube_vertices));
+        memcpy(indices + i_offset, cube_indices, sizeof(cube_indices));
+
+        for (int v = 0; v < 24; v++) {
+            vertices[v_offset + v].position.x *= game_constants.ladder_scale * 2.0f;
+            vertices[v_offset + v].position.z *= game_constants.ladder_scale * 2.0f;
+            vertices[v_offset + v].position.y *= height + 2.0f;
+
+            vertices[v_offset + v].position.x += game_constants.ladder_width * (i ? 1.0f : -1.0f);
+        }
+
+        for (int j = 0; j < 36; j++) indices[i_offset + j] += v_offset;
+    }
+
+    for (int i = 0; i < steps; i++) {
+        const int v_offset = 24 * 2 + i * 4;
+
+        vertex step_vertices[4];
+        memcpy(step_vertices, plane_vertices, sizeof(plane_vertices));
+
+        const float displace = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f;
+        const float rotate = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * 0.1f;
+
+        for (int v = 0; v < 4; v++) {
+            step_vertices[v].position.y -= 1.0f;
+            step_vertices[v].position.x *= game_constants.ladder_width * 2.0f;
+            step_vertices[v].position.z *= game_constants.ladder_scale * 2.0f;
+
+            vec3 tmp = step_vertices[v].position;
+
+            step_vertices[v].position.y = tmp.y * cosf((float) M_PI * 0.5f) + tmp.z * -sinf((float) M_PI * 0.5f);
+            step_vertices[v].position.z = tmp.y * sinf((float) M_PI * 0.5f) + tmp.z * cosf((float) M_PI * 0.5f);
+
+            tmp = step_vertices[v].position;
+
+            step_vertices[v].position.x = tmp.x * cosf(rotate) + tmp.y * -sinf(rotate);
+            step_vertices[v].position.y = tmp.x * sinf(rotate) + tmp.y * cosf(rotate);
+
+            step_vertices[v].position.y += (float) (i + 1) * 6.0f + displace;
+        }
+
+        const int step_indices[] = {v_offset, v_offset + 1, v_offset + 2, v_offset, v_offset + 3, v_offset + 1};
+
+        memcpy(vertices + 24 * 2 + i * 4, step_vertices, sizeof(step_vertices));
+        memcpy(indices + 36 * 2 + i * 6, step_indices, sizeof(step_indices));
+    }
+
+    unsigned int vbo;
+
+    glGenVertexArrays(1, &geometry->vao);
+    glGenBuffers(1, &geometry->ebo);
+    glGenBuffers(1, &vbo);
+
+    glBindVertexArray(geometry->vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (long long) sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long long) sizeof(indices), indices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
+
+    geometry->index_count = (int) (sizeof(indices) / sizeof(indices[0]));
     return geometry;
 }

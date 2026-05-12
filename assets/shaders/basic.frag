@@ -5,6 +5,7 @@ in vec2 tex_coord;
 in flat int face_idx;
 
 uniform bool is_ramp;
+uniform bool is_ladder;
 
 uniform bool use_face_tex_scaling;
 uniform float world_uv_scale;
@@ -36,6 +37,13 @@ void main() {
                     scale = face_scale.xy;
                     break;
             }
+        } else if (is_ladder) {
+            if (face_idx < 2) scale = face_scale.xy;
+            else if (face_idx < 4) scale = face_scale.zy;
+            else if (face_idx < 6) scale = face_scale.xz;
+            else if (face_idx < 8) scale = face_scale.xy;
+            else if (face_idx < 10) scale = face_scale.zy;
+            else scale = face_scale.xz;
         } else {
             if (face_idx < 2) scale = face_scale.xy;
             else if (face_idx < 4) scale = face_scale.zy;

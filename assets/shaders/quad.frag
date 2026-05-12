@@ -10,6 +10,8 @@ uniform float border_bottom_right_radius;
 uniform float border_top_left_radius;
 uniform float border_top_right_radius;
 
+uniform float r_clip;
+
 uniform float tex_viewport[4];
 uniform sampler2D tex;
 
@@ -50,7 +52,7 @@ void main() {
         is_corner = false;
     }
 
-    if (is_corner && radius > max_radius) discard;
+    if (is_corner && radius > max_radius || tex_coord.x > 1.0f - r_clip) discard;
 
     frag_color = texture(tex, vec2(
         tex_coord.x * tex_viewport[2] - tex_viewport[0],

@@ -4,7 +4,7 @@
 #include <weapons.h>
 #include <cJSON.h>
 
-typedef struct {
+typedef struct vec2_t {
     float x;
     float y;
 } vec2;
@@ -77,6 +77,7 @@ typedef struct {
     float ladder_width;
     float death_y;
     float recoil_mlt;
+    float spread_adjustment;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -383,6 +384,7 @@ typedef struct {
     float height;
     float speed;
 
+    float spread;
     float crouch_val;
     float aim_val;
     float aim_time;

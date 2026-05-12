@@ -13,8 +13,6 @@ typedef struct {
     unsigned int vao;
     unsigned int ebo;
     int index_count;
-    float bounding_sphere_radius;
-    float height;
 } Geometry;
 
 #define NAME geometry_cache_map
@@ -97,6 +95,8 @@ typedef struct {
     float border_top_left_radius;
     float border_top_right_radius;
 
+    float r_clip;
+
     float texture_viewport[4];
     unsigned int texture;
 } QuadMaterial;
@@ -116,6 +116,7 @@ typedef struct {
     Material base;
 
     int is_ramp;
+    int is_ladder;
     int use_face_tex_scaling;
     vec3 face_scale;
 
@@ -173,6 +174,7 @@ UI *ui_init();
 void ui_update(UI*);
 void ui_fill_rect(UI*, vec4, float, float, float, float);
 void ui_round_rect(UI*, vec4, float, float, float, float, float);
+void ui_fill_rect_rclip(UI*, vec4, float, float, float, float, float, float);
 void ui_draw_image(UI*, unsigned int, float, float, float, float);
 void ui_draw_image_rounded(UI*, unsigned int, float, float, float, float, float);
 float ui_measure_text(UI*, const char*, float);
@@ -220,5 +222,6 @@ Geometry *load_obj_model(char*);
 Geometry *create_cube_geo();
 Geometry *create_plane_geo();
 Geometry *create_ramp_geo();
+Geometry *create_ladder_geo(float);
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);

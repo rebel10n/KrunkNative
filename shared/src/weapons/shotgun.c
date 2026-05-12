@@ -1,4 +1,5 @@
 #include <weapons.h>
+#include <shared.h>
 
 // sex assault gun
 const Weapon g_shotgun = {
@@ -26,6 +27,19 @@ const Weapon g_shotgun = {
     .recoil = 20.0f,
     .recover = 0.99f,
     .recover_f = 0.97f,
+    .custom_spread = (const vec2[]) {
+        {0.03f, 0.02f},
+        {-0.27f, 0.02f},
+        {0.03f, -0.31f},
+        {0.3f, -0.01f},
+        {0.01f, 0.28f},
+
+        {0.01f, 0.02f},
+        {-0.17f, -0.22f},
+        {-0.3f, 0.31f},
+        {0.32f, 0.28f},
+        {0.3f, -0.2f},
+    },
 };
 
 // {

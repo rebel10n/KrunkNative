@@ -7,6 +7,7 @@ static unsigned int shader_program = 0;
 void quad_material_update_uniforms(QuadMaterial *material) {
     const int color = glGetUniformLocation(material->base.program, "color");
     const int aspect = glGetUniformLocation(material->base.program, "aspect");
+    const int r_clip = glGetUniformLocation(material->base.program, "r_clip");
 
     const int border_bottom_left_radius = glGetUniformLocation(material->base.program, "border_bottom_left_radius");
     const int border_bottom_right_radius = glGetUniformLocation(material->base.program, "border_bottom_right_radius");
@@ -18,6 +19,7 @@ void quad_material_update_uniforms(QuadMaterial *material) {
 
     glUniform4f(color, material->color.x, material->color.y, material->color.z, material->color.w);
     glUniform1f(aspect, material->aspect);
+    glUniform1f(r_clip, material->r_clip);
 
     glUniform1f(border_bottom_left_radius, material->border_bottom_left_radius);
     glUniform1f(border_bottom_right_radius, material->border_bottom_right_radius);

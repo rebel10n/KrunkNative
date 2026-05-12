@@ -1,5 +1,7 @@
 #pragma once
 
+struct vec2_t;
+
 typedef struct {
     const char *name;
     const char *src;
@@ -10,6 +12,7 @@ typedef struct {
     unsigned char akimbo:1;
     unsigned char no_aim:1;
     unsigned char no_auto:1;
+    unsigned char can_throw:1;
     unsigned char melee:1;
     unsigned char equipment:1;
     unsigned char burst:1;
@@ -43,7 +46,11 @@ typedef struct {
     float recover_y;
     float recover_f;
     float physical_power;
+    float physical_range;
     float zoom;
+    float inaccuracy;
+
+    const struct vec2_t *custom_spread;
 } Weapon;
 
 extern const Weapon g_awp;

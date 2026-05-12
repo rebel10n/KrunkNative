@@ -304,6 +304,31 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         return mesh;
     }
 
+    if (object->prefab == PREFAB_LADDER) {
+        Geometry *geometry = create_ladder_geo(object->scale.y);
+        if (!geometry) return NULL;
+
+        BasicMaterial *material = basic_material_init();
+        Mesh *mesh = mesh_init(geometry, (Material *) material);
+
+        mesh->visible = visible;
+        mesh->position = object->position;
+        mesh->rotation.y = (float) M_PI * 0.5f * (float) (object->direction - 1);
+
+        material->texture = texture_id;
+        material->color = color;
+        material->emissive = emissive;
+
+        material->is_ladder = 1;
+        material->use_face_tex_scaling = 1;
+
+        material->face_scale.x = game_constants.ladder_width * 2.0f;
+        material->face_scale.z = game_constants.ladder_scale * 2.0f;
+        material->face_scale.y = mesh->scale.y;
+
+        return mesh;
+    }
+
     // return NULL;
 
     BasicMaterial *debug_material = basic_material_init();

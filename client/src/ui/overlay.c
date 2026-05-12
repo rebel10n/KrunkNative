@@ -169,13 +169,13 @@ void overlay_render(Client *client, const float delta) {
 
             const float text_width = ammo_str_width + space_width + ui_measure_text(client->ui, max_ammo_str, ammo_size);
             const vec2 ammo_holder_size = {text_width + 107.0f * client->ui->scale, (65.0f + 7.0f + 8.0f) * client->ui->scale};
-            const float reload_animation = client->me->reload_timer / (client->me->weapon->reload_time * client->game.config.reload_speed);
+            const float reload_animation = client->me->weapon->reload_time ? client->me->reload_timer / (client->me->weapon->reload_time * client->game.config.reload_speed) : 0.0f;
 
             ui_round_rect(client->ui, background_color, anchor.x - ammo_holder_size.x, anchor.y - ammo_holder_size.y, ammo_holder_size.x, ammo_holder_size.y, 10.0f * client->ui->scale);
 
             if (reload_animation) {
                 const vec4 reload_color = {1.0f, 1.0f, 1.0f, 0.247f};
-                ui_round_rect(client->ui, reload_color, anchor.x - ammo_holder_size.x, anchor.y - ammo_holder_size.y, ammo_holder_size.x * reload_animation, ammo_holder_size.y, 10.0f * client->ui->scale);
+                ui_fill_rect_rclip(client->ui, reload_color, anchor.x - ammo_holder_size.x, anchor.y - ammo_holder_size.y, ammo_holder_size.x, ammo_holder_size.y, 10.0f * client->ui->scale, 1.0f - reload_animation);
             }
 
             ui_fill_text(client->ui, white, ammo_str, anchor.x - ammo_holder_size.x + 20.0f * client->ui->scale, anchor.y - ammo_holder_size.y * 0.5f + (35.0f - 14.0f) * client->ui->scale, ammo_size);

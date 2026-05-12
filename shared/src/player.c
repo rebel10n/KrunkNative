@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 void player_swap_weapon(Player*, int, int, int, int);
+void player_melee(Player*);
 void player_shoot(Player*);
 
 Player *player_init(Game *game) {
@@ -707,7 +708,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
             if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
                 if (player->weapon->melee) {
-                    // TODO: melee
+                    player_melee(player);
                 } else if (player->ammo[player->loadout_index] > 0) {
                     player_shoot(player);
                 }
@@ -759,6 +760,29 @@ void player_step(Player *player, const float distance) {
 
 }
 
+void player_melee(Player *player) {
+    const int is_throw = player->can_throw && player->weapon->can_throw && player->aim_val == 1.0f;
+
+    player->reloads[player->loadout_index] = player->weapon->rate * player->game->config.fire_rate;
+    player->did_shoot = 1;
+    player->did_act = 1;
+
+    // TODO: gamepad rumble?
+    // TODO: animate
+    // TODO: play sound
+    // TODO: cancel inspect
+
+    const float shot_height = player->position.y + player->height - game_constants.camera_height;
+    vec2 shot_dir = {};
+
+    if (is_throw) {
+        player->can_throw = !!player->unlimited_ammo;
+        // TODO: init projectile
+    } else {
+        // TODO: hitscan
+    }
+}
+
 void player_shoot(Player *player) {
     // TODO: increase shots stat
 
@@ -791,20 +815,48 @@ void player_shoot(Player *player) {
     // TODO: cancel inspect
     // TODO: muzzle flash & casings
 
-    const float shot_height = player->position.y + player->height - game_constants.camera_height;
     const int is_projectile = player->weapon->projectile && (!player->weapon->projectile_disable || player->game->config.bullet_drop);
+    const float shot_height = player->position.y + player->height - game_constants.camera_height;
+
+    vec2 shot_dir = {};
 
     if (is_projectile) {
+        const float projectile_spread = 0.0f; // TODO
+        const float spread = (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment * projectile_spread;
 
+        shot_dir.x = player->direction.x + player->recoil_anim_y * game_constants.recoil_mlt + spread;
+        shot_dir.y = player->direction.y + spread;
+
+        // TODO: init projectile
     }
 
     if (!is_projectile || player->weapon->physical_power) {
         for (int i = player->weapon->physical_power ? -1 : 0; i < (player->weapon->shots ? player->weapon->shots : 1); i++) {
-            // if (player->weapon->custom_spread && i >= 0) {
-            //
-            // } else {
-            //
-            // }
+            if (player->weapon->custom_spread && i >= 0) {
+                const unsigned int offset = player->ammo[player->loadout_index] * player->weapon->shots;
+
+                const vec2 spread = player->weapon->custom_spread[offset + i];
+                const float spread_mlt = (float) pcg32_random() / (float) UINT32_MAX * 0.02f + 0.3f;
+
+                // swizzle spread (x is pitch, y is yaw)
+                shot_dir.x = player->direction.x + spread.y * spread_mlt;
+                shot_dir.y = player->direction.y + spread.x * spread_mlt;
+            } else {
+                const float spread_range = i >= 0 ? (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment : 0.0f;
+                const vec2 spread = {
+                    ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * spread_range,
+                    ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * spread_range,
+                };
+
+                shot_dir.x = player->direction.x + spread.x;
+                shot_dir.y = player->direction.y + spread.y;
+            }
+
+            shot_dir.x += player->recoil_anim_y * game_constants.recoil_mlt;
+
+            const float range = i < 0 ? player->weapon->physical_range : player->weapon->range;
+
+            // TODO: hitscan
         }
     }
 }

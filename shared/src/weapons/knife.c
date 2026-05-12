@@ -6,6 +6,7 @@ const Weapon g_knife = {
     .secondary = 0,
     .no_spread = 0,
     .akimbo = 0,
+    .can_throw = 1,
     .melee = 1,
     .equipment = 0,
     .swap_time = 0.25f,
