@@ -709,8 +709,12 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
                 if (player->weapon->melee) {
                     player_melee(player);
-                } else if (player->ammo[player->loadout_index] > 0) {
-                    player_shoot(player);
+                } else {
+                    if (player->ammo[player->loadout_index] > 0) {
+                        player_shoot(player);
+                    } else if (!player->game->mode->config.no_reloads) {
+                        player_reload(player);
+                    }
                 }
             }
         }
