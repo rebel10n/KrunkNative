@@ -306,15 +306,6 @@ typedef enum {
     TEAM_OPTIONS_TRAITOR
 } TeamOptions;
 
-typedef enum {
-    PLAYER_MESH_HEAD
-} PlayerMesh;
-
-#define NAME player_mesh_map
-#define KEY_TY PlayerMesh
-#define VAL_TY void*
-#include <verstable.h>
-
 typedef struct {
     int seq;
     int move_dir;
@@ -332,6 +323,33 @@ typedef struct {
 } Input;
 
 struct Game_t;
+
+typedef struct {
+    int primary;
+    int secondary;
+
+    int face;
+    int hat;
+    int back;
+    int waist;
+    int melee;
+    int dye;
+
+    int skin_color;
+    int hair_color;
+} PlayerSkins;
+
+typedef struct {
+    void *anchor;
+    void *head;
+    void *body;
+
+    void *legs[2];
+    void *legs_crouched[2];
+
+    void **arms;
+    void **weapons;
+} PlayerMesh;
 
 typedef struct {
     struct Game_t* game;
@@ -429,7 +447,9 @@ typedef struct {
     size_t input_queue_size;
 
     const Weapon *weapon;
-    player_mesh_map meshes;
+
+    PlayerSkins skins;
+    PlayerMesh *mesh;
 } Player;
 
 typedef struct {

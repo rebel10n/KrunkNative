@@ -131,7 +131,17 @@ typedef struct {
 extern const MaterialVTable basic_material_vtable;
 BasicMaterial *basic_material_init();
 
-typedef struct Mesh {
+typedef struct MeshTransform_t {
+    struct MeshTransform_t *parent;
+
+    vec3 position;
+    vec3 rotation;
+    vec3 scale;
+} MeshTransform;
+
+typedef struct {
+    MeshTransform *parent;
+
     vec3 position;
     vec3 rotation;
     vec3 scale;
@@ -142,6 +152,13 @@ typedef struct Mesh {
     float transform_matrix[16];
     Material *material;
 } Mesh;
+
+typedef struct {
+    MeshTransform transform;
+
+    size_t mesh_count;
+    Mesh **meshes;
+} ColorCube;
 
 Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);
