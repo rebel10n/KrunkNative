@@ -25,6 +25,10 @@ const Weapon g_pistol = {
     .recover = 0.98f,
     .recover_y = 0.99f,
     .recover_f = 0.98f,
+
+    .offset = {1.2f, -0.6f, -3.7f},
+    .right_hold = {0.0f, -0.62f, -0.32f},
+    .left_hold = {0.0f, -1.1f, -0.3f},
 };
 
 // {

@@ -127,3 +127,9 @@ float line_in_rect(const vec3 origin, const vec3 direction, const vec3 obj_cente
 
     return tmin < tmax && tmin > 0 ? tmin : -1.0f;
 }
+
+void angles_from_sides(const float a, const float b, const float c, float *out) {
+    out[0] = acosf((b*b + c*c - a*a) / (2.0f * b * c));
+    out[1] = acosf((a*a + c*c - b*b) / (2.0f * a * c));
+    out[2] = acosf((a*a + b*b - c*c) / (2.0f * a * b));
+}

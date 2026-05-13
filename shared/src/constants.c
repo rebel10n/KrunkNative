@@ -4,11 +4,15 @@ const float arm_scale = 1.2f;
 const float arm_inset = -0.1f;
 const float chest_width = 2.6f;
 
+const float player_height = 11.0f;
+const float leg_height = 4.2f;
+const float head_scale = 2.0f;
+
 const GameConstants game_constants = {
     .billboard_count = 6,
     .mouse_sensitivity = 0.0024f,
     .world_uv_scale = 60.0f,
-    .player_height = 11.0f,
+    .player_height = player_height,
     .border_height = 250.0f,
     .camera_height = 1.5f,
     .climb_height = 3.0f,
@@ -38,6 +42,11 @@ const GameConstants game_constants = {
     .arm_scale = arm_scale,
     .arm_inset = arm_inset,
     .chest_width = chest_width,
+    .chest_scale = 1.3f,
+    .leg_scale = 1.3f,
+    .leg_height = leg_height,
+    .head_scale = head_scale,
+    .body_height = player_height - head_scale - leg_height,
     .player_scale = (arm_scale * 2.0f + chest_width + arm_inset) * 0.5f,
     .min_decel = 0.0001f,
     .slide_time = 0.35f,
@@ -60,4 +69,7 @@ const GameConstants game_constants = {
     .death_y = -100.0f,
     .recoil_mlt = 0.3f,
     .spread_adjustment = 0.00063f,
+    .upper_arm_length = 2.7f,
+    .lower_arm_length = 2.7f,
+    .arm_offset = -0.8f,
 };

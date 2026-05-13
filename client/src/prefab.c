@@ -189,9 +189,9 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
-        mesh->position = object->position;
-        mesh->rotation = rotation;
-        mesh->scale.x = mesh->scale.y = mesh->scale.z = prefab_model.scale;
+        mesh->transform.position = object->position;
+        mesh->transform.rotation = rotation;
+        mesh->transform.scale.x = mesh->transform.scale.y = mesh->transform.scale.z = prefab_model.scale;
 
         material->base.transparent = prefab_model.transparent || opacity != 1.0f;
         material->texture = texture_id;
@@ -255,9 +255,9 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
-        mesh->position = object->position;
-        mesh->rotation = rotation;
-        mesh->scale = object->scale;
+        mesh->transform.position = object->position;
+        mesh->transform.rotation = rotation;
+        mesh->transform.scale = object->scale;
 
         material->texture = texture_id;
         material->color = color;
@@ -269,7 +269,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->face_scale = object->scale;
 
         if (object->prefab != PREFAB_CUBE) {
-            mesh->scale.y = 0.01f;
+            mesh->transform.scale.y = 0.01f;
 
             material->face_scale.x = object->scale.x;
             material->face_scale.y = object->scale.z;
@@ -286,12 +286,12 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
-        mesh->position = object->position;
-        mesh->rotation.y = -(float) M_PI / 2.0f * (1.0f + (float) object->direction);
-        mesh->scale.y = object->scale.y;
+        mesh->transform.position = object->position;
+        mesh->transform.rotation.y = -(float) M_PI / 2.0f * (1.0f + (float) object->direction);
+        mesh->transform.scale.y = object->scale.y;
 
-        mesh->scale.x = object->direction % 2 ? object->scale.x : object->scale.z;
-        mesh->scale.z = object->direction % 2 ? object->scale.z : object->scale.x;
+        mesh->transform.scale.x = object->direction % 2 ? object->scale.x : object->scale.z;
+        mesh->transform.scale.z = object->direction % 2 ? object->scale.z : object->scale.x;
 
         material->texture = texture_id;
         material->color = color;
@@ -299,7 +299,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         material->is_ramp = 1;
         material->use_face_tex_scaling = 1;
-        material->face_scale = mesh->scale;
+        material->face_scale = mesh->transform.scale;
 
         return mesh;
     }
@@ -312,8 +312,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
-        mesh->position = object->position;
-        mesh->rotation.y = (float) M_PI * 0.5f * (float) (object->direction - 1);
+        mesh->transform.position = object->position;
+        mesh->transform.rotation.y = (float) M_PI * 0.5f * (float) (object->direction - 1);
 
         material->texture = texture_id;
         material->color = color;
@@ -324,7 +324,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         material->face_scale.x = game_constants.ladder_width * 2.0f;
         material->face_scale.z = game_constants.ladder_scale * 2.0f;
-        material->face_scale.y = mesh->scale.y;
+        material->face_scale.y = mesh->transform.scale.y;
 
         return mesh;
     }
@@ -335,8 +335,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     Mesh *debug_mesh = mesh_init(create_cube_geo(), (Material *) debug_material);
 
     debug_material->base.wireframe = 1;
-    debug_mesh->position = object->position;
-    debug_mesh->scale = object->scale;
+    debug_mesh->transform.position = object->position;
+    debug_mesh->transform.scale = object->scale;
 
     return debug_mesh;
 }

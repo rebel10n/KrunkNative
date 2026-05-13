@@ -9,6 +9,53 @@ Scene *scene_init() {
     return scene;
 }
 
+void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
+    if (player_mesh->body) {
+        for (size_t i = 0; i < player_mesh->body->mesh_count; i++) {
+            scene_add_mesh(scene, player_mesh->body->meshes[i]);
+        }
+    }
+
+    if (player_mesh->head) {
+        for (size_t i = 0; i < player_mesh->head->mesh_count; i++) {
+            scene_add_mesh(scene, player_mesh->head->meshes[i]);
+        }
+    }
+
+    if (player_mesh->arms) {
+        for (size_t i = 0; i < loadout_size; i++) {
+            const PlayerArms *arms = player_mesh->arms[i];
+            if (!arms) continue;
+
+            for (size_t ii = 0; ii < 2; ii++) {
+                const PlayerArmMesh *arm = ii ? arms->left : arms->right;
+
+                if (arm->upper) scene_add_mesh(scene, arm->upper);
+                if (arm->joint) scene_add_mesh(scene, arm->joint);
+
+                for (size_t iii = 0; iii < arm->lower->mesh_count; iii++) {
+                    scene_add_mesh(scene, arm->lower->meshes[iii]);
+                }
+            }
+
+            break;
+        }
+    }
+
+    for (size_t i = 0; i < 2; i++) {
+        ColorCube *leg = player_mesh->legs[i];
+        if (!leg) continue;
+
+        for (size_t j = 0; j < leg->mesh_count; j++) {
+            scene_add_mesh(scene, leg->meshes[j]);
+        }
+    }
+}
+
+void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh) {
+
+}
+
 void scene_add_mesh(Scene *scene, Mesh *mesh) {
     if (!scene->mesh_count) {
         scene->meshes = calloc(1, sizeof(Mesh *));
@@ -55,7 +102,6 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
 }
 
 const Scene *sort_scene;
-const Camera *sort_camera;
 
 int scene_depth_sort(const size_t *p_a_idx, const size_t *p_b_idx) {
     const Mesh *a = sort_scene->meshes[*p_a_idx];
@@ -68,8 +114,8 @@ int scene_depth_sort(const size_t *p_a_idx, const size_t *p_b_idx) {
         if (!b->material->transparent) return 1;
         if (!a->material->transparent) return -1;
 
-        const float a_depth = sort_camera->world_inverse_matrix[8] * a->position.x + sort_camera->world_inverse_matrix[9] * a->position.y + sort_camera->world_inverse_matrix[10] * a->position.z + sort_camera->world_inverse_matrix[11];
-        const float b_depth = sort_camera->world_inverse_matrix[8] * b->position.x + sort_camera->world_inverse_matrix[9] * b->position.y + sort_camera->world_inverse_matrix[10] * b->position.z + sort_camera->world_inverse_matrix[11];
+        const float a_depth = a->_camera_space_matrix[11];
+        const float b_depth = b->_camera_space_matrix[11];
 
         return b_depth > a_depth ? -1 : 1;
     }
@@ -88,15 +134,24 @@ void scene_render(const Scene *scene, Camera *camera) {
     camera_update_world_inverse_matrix(camera);
 
     size_t indices[scene->mesh_count];
-    for (size_t i = 0; i < scene->mesh_count; i++) indices[i] = i;
+
+    for (size_t i = 0; i < scene->mesh_count; i++) {
+        Mesh *mesh = scene->meshes[i];
+        mesh_update_transform_matrix(mesh);
+
+        if (mesh->material->transparent) {
+            mat4x4(camera->world_inverse_matrix, mesh->transform_matrix, mesh->_camera_space_matrix);
+        }
+
+        indices[i] = i;
+    }
 
     sort_scene = scene;
-    sort_camera = camera;
-
     qsort(indices, scene->mesh_count, sizeof(size_t), (void *) scene_depth_sort);
 
     for (size_t i = 0; i < scene->mesh_count; i++) {
-        Mesh *mesh = scene->meshes[indices[i]];
+        const Mesh *mesh = scene->meshes[indices[i]];
+
         if (!mesh->visible) continue;
 
         if (mesh->material->transparent) {
@@ -104,8 +159,6 @@ void scene_render(const Scene *scene, Camera *camera) {
         } else {
             glDisable(GL_BLEND);
         }
-
-        mesh_update_transform_matrix(mesh);
 
         glBindVertexArray(mesh->geometry->vao);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);

@@ -131,8 +131,15 @@ typedef struct {
 extern const MaterialVTable basic_material_vtable;
 BasicMaterial *basic_material_init();
 
+typedef enum {
+    ROTATION_ORDER_INTRINSIC,
+    ROTATION_ORDER_EXTRINSIC,
+} RotationOrder;
+
 typedef struct MeshTransform_t {
     struct MeshTransform_t *parent;
+
+    RotationOrder rotation_order;
 
     vec3 position;
     vec3 rotation;
@@ -140,16 +147,14 @@ typedef struct MeshTransform_t {
 } MeshTransform;
 
 typedef struct {
-    MeshTransform *parent;
-
-    vec3 position;
-    vec3 rotation;
-    vec3 scale;
+    MeshTransform transform;
 
     int visible;
     Geometry *geometry;
 
     float transform_matrix[16];
+    float _camera_space_matrix[16]; // temporary - used during scene depth sort
+
     Material *material;
 } Mesh;
 
@@ -159,6 +164,41 @@ typedef struct {
     size_t mesh_count;
     Mesh **meshes;
 } ColorCube;
+
+typedef struct {
+    // third person
+    Mesh *upper;
+    Mesh *joint;
+
+    // shared
+    ColorCube *lower;
+    MeshTransform anchor;
+} PlayerArmMesh;
+
+typedef struct {
+    MeshTransform anchor;
+
+    PlayerArmMesh *left;
+    PlayerArmMesh *right;
+
+    Mesh *weapon_left;
+    Mesh *weapon_right;
+} PlayerArms;
+
+typedef struct {
+    MeshTransform *anchor;
+    MeshTransform *body_anchor;
+
+    ColorCube *head;
+    ColorCube *body;
+
+    ColorCube *legs[2];
+    void *legs_crouched[2];
+
+    PlayerArms **arms;
+} PlayerMesh;
+
+void player_generate_meshes(Player*, int);
 
 Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);
@@ -170,6 +210,8 @@ typedef struct {
 } Scene;
 
 Scene *scene_init();
+void scene_add_player_mesh(Scene*, const PlayerMesh*, size_t);
+void scene_remove_player_mesh(Scene*, const PlayerMesh*);
 void scene_add_mesh(Scene*, Mesh*);
 void scene_remove_mesh(Scene*, Mesh*);
 void scene_render(const Scene*, Camera*);

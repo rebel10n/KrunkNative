@@ -3,24 +3,7 @@
 #include <modes.h>
 #include <weapons.h>
 #include <cJSON.h>
-
-typedef struct vec2_t {
-    float x;
-    float y;
-} vec2;
-
-typedef struct {
-    float x;
-    float y;
-    float z;
-} vec3;
-
-typedef struct {
-    float x;
-    float y;
-    float z;
-    float w;
-} vec4;
+#include <common.h>
 
 typedef struct {
     int billboard_count;
@@ -56,6 +39,11 @@ typedef struct {
     float arm_scale;
     float arm_inset;
     float chest_width;
+    float chest_scale;
+    float leg_scale;
+    float leg_height;
+    float head_scale;
+    float body_height;
     float player_scale;
     float min_decel;
     float slide_time;
@@ -78,6 +66,9 @@ typedef struct {
     float death_y;
     float recoil_mlt;
     float spread_adjustment;
+    float upper_arm_length;
+    float lower_arm_length;
+    float arm_offset;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -340,18 +331,6 @@ typedef struct {
 } PlayerSkins;
 
 typedef struct {
-    void *anchor;
-    void *head;
-    void *body;
-
-    void *legs[2];
-    void *legs_crouched[2];
-
-    void **arms;
-    void **weapons;
-} PlayerMesh;
-
-typedef struct {
     struct Game_t* game;
 
     int uid;
@@ -449,7 +428,7 @@ typedef struct {
     const Weapon *weapon;
 
     PlayerSkins skins;
-    PlayerMesh *mesh;
+    void *mesh;
 } Player;
 
 typedef struct {
@@ -566,6 +545,7 @@ vec4 hex_to_vec(int);
 float normalize_angle(float);
 float progress_on_line(vec2, vec2, vec2);
 float line_in_rect(vec3, vec3, vec3, vec3);
+void angles_from_sides(float, float, float, float*);
 
 static inline void mat3x3(const float *a, const float *b, float *out) {
 #define MAT3x3 \

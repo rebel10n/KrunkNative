@@ -4,9 +4,9 @@
 Mesh *mesh_init(Geometry *geometry, Material *material) {
     Mesh *mesh = calloc(1, sizeof(Mesh));
 
-    mesh->scale.x = 1.0f;
-    mesh->scale.y = 1.0f;
-    mesh->scale.z = 1.0f;
+    mesh->transform.scale.x = 1.0f;
+    mesh->transform.scale.y = 1.0f;
+    mesh->transform.scale.z = 1.0f;
 
     mesh->visible = 1;
     mesh->geometry = geometry;
@@ -16,94 +16,72 @@ Mesh *mesh_init(Geometry *geometry, Material *material) {
 }
 
 void mesh_update_transform_matrix(Mesh *mesh) {
-    const float scale_matrix[] = {
-        mesh->scale.x, 0.0f, 0.0f, 0.0f,
-        0.0f, mesh->scale.y, 0.0f, 0.0f,
-        0.0f, 0.0f, mesh->scale.z, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-
-    const float rotate_x_matrix[] = {
+    static const float identity[] = {
         1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, cosf(mesh->rotation.x), -sinf(mesh->rotation.x), 0.0f,
-        0.0f, sinf(mesh->rotation.x), cosf(mesh->rotation.x), 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-
-    const float rotate_y_matrix[] = {
-        cosf(mesh->rotation.y), 0.0f, sinf(mesh->rotation.y), 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
-        -sinf(mesh->rotation.y), 0.0f, cosf(mesh->rotation.y), 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-
-    const float rotate_z_matrix[] = {
-        cosf(mesh->rotation.z), -sinf(mesh->rotation.z), 0.0f, 0.0f,
-        sinf(mesh->rotation.z), cosf(mesh->rotation.z), 0.0f, 0.0f,
         0.0f, 0.0f, 1.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f,
     };
 
-    const float translate_matrix[] = {
-        1.0f, 0.0f, 0.0f, mesh->position.x,
-        0.0f, 1.0f, 0.0f, mesh->position.y,
-        0.0f, 0.0f, 1.0f, mesh->position.z,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
+    memcpy(mesh->transform_matrix, identity, sizeof(identity));
 
     float tmp[16];
     float tmp1[16];
 
-    mat4x4(rotate_z_matrix, scale_matrix, tmp);
-    mat4x4(rotate_y_matrix, tmp, tmp1);
-    mat4x4(rotate_x_matrix, tmp1, tmp);
-    mat4x4(translate_matrix, tmp, mesh->transform_matrix);
+    const MeshTransform *transform = &mesh->transform;
 
-    const MeshTransform *parent = mesh->parent;
-
-    while (parent) {
-        const float parent_scale_matrix[] = {
-            parent->scale.x, 0.0f, 0.0f, 0.0f,
-            0.0f, parent->scale.y, 0.0f, 0.0f,
-            0.0f, 0.0f, parent->scale.z, 0.0f,
+    while (transform) {
+        const float scale_matrix[] = {
+            transform->scale.x, 0.0f, 0.0f, 0.0f,
+            0.0f, transform->scale.y, 0.0f, 0.0f,
+            0.0f, 0.0f, transform->scale.z, 0.0f,
             0.0f, 0.0f, 0.0f, 1.0f,
         };
 
-        const float parent_rotate_x_matrix[] = {
+        const float rotate_x_matrix[] = {
             1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, cosf(parent->rotation.x), -sinf(parent->rotation.x), 0.0f,
-            0.0f, sinf(parent->rotation.x), cosf(parent->rotation.x), 0.0f,
+            0.0f, cosf(transform->rotation.x), -sinf(transform->rotation.x), 0.0f,
+            0.0f, sinf(transform->rotation.x), cosf(transform->rotation.x), 0.0f,
             0.0f, 0.0f, 0.0f, 1.0f,
         };
 
-        const float parent_rotate_y_matrix[] = {
-            cosf(parent->rotation.y), 0.0f, sinf(parent->rotation.y), 0.0f,
+        const float rotate_y_matrix[] = {
+            cosf(transform->rotation.y), 0.0f, sinf(transform->rotation.y), 0.0f,
             0.0f, 1.0f, 0.0f, 0.0f,
-            -sinf(parent->rotation.y), 0.0f, cosf(parent->rotation.y), 0.0f,
+            -sinf(transform->rotation.y), 0.0f, cosf(transform->rotation.y), 0.0f,
             0.0f, 0.0f, 0.0f, 1.0f,
         };
 
-        const float parent_rotate_z_matrix[] = {
-            cosf(parent->rotation.z), -sinf(parent->rotation.z), 0.0f, 0.0f,
-            sinf(parent->rotation.z), cosf(parent->rotation.z), 0.0f, 0.0f,
+        const float rotate_z_matrix[] = {
+            cosf(transform->rotation.z), -sinf(transform->rotation.z), 0.0f, 0.0f,
+            sinf(transform->rotation.z), cosf(transform->rotation.z), 0.0f, 0.0f,
             0.0f, 0.0f, 1.0f, 0.0f,
             0.0f, 0.0f, 0.0f, 1.0f,
         };
 
-        const float parent_translate_matrix[] = {
-            1.0f, 0.0f, 0.0f, parent->position.x,
-            0.0f, 1.0f, 0.0f, parent->position.y,
-            0.0f, 0.0f, 1.0f, parent->position.z,
+        const float translate_matrix[] = {
+            1.0f, 0.0f, 0.0f, transform->position.x,
+            0.0f, 1.0f, 0.0f, transform->position.y,
+            0.0f, 0.0f, 1.0f, transform->position.z,
             0.0f, 0.0f, 0.0f, 1.0f,
         };
 
-        mat4x4(parent_scale_matrix, mesh->transform_matrix, tmp);
-        mat4x4(parent_rotate_x_matrix, tmp, tmp1);
-        mat4x4(parent_rotate_y_matrix, tmp1, tmp);
-        mat4x4(parent_rotate_z_matrix, tmp, tmp1);
-        mat4x4(parent_translate_matrix, tmp1, mesh->transform_matrix);
+        mat4x4(scale_matrix, mesh->transform_matrix, tmp);
 
-        parent = parent->parent;
+        // Intrinsic rotation by default (THREE.js style)
+        if (transform->rotation_order == ROTATION_ORDER_INTRINSIC) {
+            mat4x4(rotate_z_matrix, tmp, tmp1);
+            mat4x4(rotate_y_matrix, tmp1, tmp);
+            mat4x4(rotate_x_matrix, tmp, tmp1);
+        } else {
+            mat4x4(rotate_x_matrix, tmp, tmp1);
+            mat4x4(rotate_y_matrix, tmp1, tmp);
+            mat4x4(rotate_z_matrix, tmp, tmp1);
+        }
+
+        mat4x4(translate_matrix, tmp1, mesh->transform_matrix);
+
+        transform = transform->parent;
     }
 }
 

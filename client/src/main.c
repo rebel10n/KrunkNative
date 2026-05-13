@@ -223,6 +223,12 @@ void client_enter_game(Client *client) {
         }
 
         player_spawn(client->me);
+        player_generate_meshes(client->me, 0);
+
+        const PlayerMesh *player_mesh = client->me->mesh;
+        player_mesh->anchor->position = client->me->position;
+
+        scene_add_player_mesh(client->scene, client->me->mesh, client->me->loadout_size);
     } else {
         // TODO: liftoff
     }

@@ -1,6 +1,5 @@
 #pragma once
-
-struct vec2_t;
+#include <common.h>
 
 typedef struct {
     const char *name;
@@ -50,7 +49,11 @@ typedef struct {
     float zoom;
     float inaccuracy;
 
-    const struct vec2_t *custom_spread;
+    vec3 offset;
+    vec3 left_hold;
+    vec3 right_hold;
+
+    const vec2 *custom_spread;
 } Weapon;
 
 extern const Weapon g_awp;

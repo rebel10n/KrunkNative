@@ -27,6 +27,10 @@ const Weapon g_ak47 = {
     .recover = 0.978f,
     .recover_y = 0.995f,
     .recover_f = 0.975f,
+
+    .offset = {0.7f, -0.87f, -3.33f},
+    .right_hold = {0.0f, -0.6f, -1.2f},
+    .left_hold = {0.0f, -0.41f, 0.5f},
 };
 
 // {
