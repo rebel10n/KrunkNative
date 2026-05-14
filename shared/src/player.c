@@ -365,7 +365,9 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
     player->loadout_index = index;
 
     if (!instant_swap && loadout_changed) {
-        // TODO: reset reload
+        player->reload_timer = 0.0f;
+        player->did_shoot = 0;
+        player->burst_count = 0;
     }
 
     player->weapon = player->game->weapons[player->loadout[player->loadout_index]];
