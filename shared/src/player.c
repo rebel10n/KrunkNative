@@ -3,7 +3,10 @@
 #include <pcg_basic.h>
 #include <stdio.h>
 
-void player_swap_weapon(Player*, int, int, int, int);
+#ifdef KRUNKNATIVE_CLIENT
+#include <client.h>
+#endif
+
 void player_melee(Player*);
 void player_shoot(Player*);
 
@@ -381,7 +384,31 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
         }
     }
 
+#ifdef KRUNKNATIVE_CLIENT
     // TODO: update inspect, weapon meshes
+
+    const PlayerMesh *player_mesh = player->mesh;
+
+    if (player_mesh) {
+        for (size_t i = 0; i < player->loadout_size; i++) {
+            const PlayerArms *arms = player_mesh->arms[i];
+            const int show = i == player->loadout_index;
+
+            for (int j = 0; j < 2; j++) {
+                const PlayerArmMesh *arm = j ? arms->left : arms->right;
+
+                if (arm->extender) arm->extender->visible = show;
+
+                if (arm->upper) arm->upper->visible = show;
+                if (arm->joint) arm->joint->visible = show;
+
+                for (size_t k = 0; k < arm->lower->mesh_count; k++) {
+                    arm->lower->meshes[k]->visible = show;
+                }
+            }
+        }
+    }
+#endif
 
     if (!instant_swap && player->weapon) {
         if (!recon && loadout_changed) player->swap_timer = player->weapon->swap_time;

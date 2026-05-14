@@ -225,6 +225,7 @@ void client_enter_game(Client *client) {
         client->me->is_you = 1;
         player_spawn(client->me);
         player_generate_meshes(client->me, 1);
+        player_swap_weapon(client->me, 0, 1, 0, 0);
 
         const PlayerMesh *player_mesh = client->me->mesh;
         player_mesh->anchor->position = client->me->position;

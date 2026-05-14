@@ -64,10 +64,10 @@ typedef struct {
     float aim_recoil_mlt;
     float lean_mlt;
     float inspect_rotation;
+    float inspect_mlt;
     float crouch_lean;
     float crouch_rotation;
     float crouch_drop;
-    float inspect_mlt;
 
     float hold_distance_offset;
     vec3 origin;

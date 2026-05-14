@@ -457,6 +457,7 @@ typedef struct {
 
 Player *player_init(struct Game_t*);
 void player_spawn(Player*);
+void player_swap_weapon(Player*, int, int, int, int);
 void player_kill(Player*, const Player*, PlayerKillInfo*, int);
 void player_queue_input(Player*, const Input*);
 void player_proc_input(Player*, const Input*, int, int);

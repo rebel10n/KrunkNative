@@ -398,12 +398,12 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float anim_mlt_crouch = 1.0f - player->crouch_val * 0.8f;
     const float anim_mlt_lean = player->render_you ? 1.0f - aim_val_mlt * game_constants.anim_mlt : 0.0f;
     const float recoil_y_mlt = 1.0f - (player->weapon->recoil_y_mlt ? player->weapon->recoil_y_mlt : 1.0f) * game_constants.anim_mlt;
-    const float recoil_z_mlt = 1.0f - (player->weapon->recoil_z_mlt ? player->weapon->recoil_z_mlt : 0.5f) * aim_val_mlt;
-    const float anim_rotate_mlt = (1.0f - (player->weapon->z_rotation ? player->weapon->z_rotation : 0.3f) * aim_val_mlt) * (player->weapon->z_rotation_mlt ? player->weapon->z_rotation_mlt : 1.0f) * weapon_bobbing_mlt;
-    const float anim_y_mlt = 1.0f - (player->weapon->jump_y_mlt ? player->weapon->jump_y_mlt : 1.0f) * aim_val_mlt;
-    const float lean_aim_mlt = 1.0f * aim_val_mlt * 0.45f;
+    const float recoil_z_mlt = 1.0f - (player->weapon->recoil_z_mlt ? player->weapon->recoil_z_mlt : 0.5f) * aim_mlt;
+    const float anim_rotate_mlt = (1.0f - (player->weapon->z_rotation ? player->weapon->z_rotation : 0.3f) * aim_mlt) * (player->weapon->z_rotation_mlt ? player->weapon->z_rotation_mlt : 1.0f) * weapon_bobbing_mlt;
+    const float anim_y_mlt = 1.0f - (player->weapon->jump_y_mlt ? player->weapon->jump_y_mlt : 1.0f) * aim_mlt;
+    const float lean_aim_mlt = 1.0f * aim_mlt * 0.45f;
     const float bob_anim_y = player->bob_anim.y * 0.9f * anim_y_mlt * anim_mlt_lean * weapon_bobbing_mlt;
-    const float land_bob_y = (player->land_bob_y * (player->weapon->land_bob ? player->weapon->land_bob : 1.0f) * 0.6f) * (1.0f - aim_val_mlt * 0.75f) * weapon_bobbing_mlt;
+    const float land_bob_y = (player->land_bob_y * (player->weapon->land_bob ? player->weapon->land_bob : 1.0f) * 0.6f) * (1.0f - aim_mlt * 0.75f) * weapon_bobbing_mlt;
 
     if (player->land_bob_yr != land_bob_y) {
         player->land_bob_yr += (land_bob_y - player->land_bob_yr) * 0.1f;
@@ -418,8 +418,8 @@ void player_update_meshes(Player *player, const int is_preview) {
     }
 
     const float jump_bob_y = player->jump_bob_y * (player->weapon->jump_y_mlt ? player->weapon->jump_y_mlt : 1.0f) * anim_mlt_lean * bob_crouch_mlt * weapon_bobbing_mlt;
-    const float recoil_aim_mlt = 1.0f - aim_val_mlt * 0.89f;
-    const float recoil_mlt = 1.0f - (player->weapon->aim_recoil_mlt ? player->weapon->aim_recoil_mlt : 1.0f) * aim_val_mlt;
+    const float recoil_aim_mlt = 1.0f - aim_mlt * 0.89f;
+    const float recoil_mlt = 1.0f - (player->weapon->aim_recoil_mlt ? player->weapon->aim_recoil_mlt : 1.0f) * aim_mlt;
     const float step_mlt = is_preview ? 0.05f : game_constants.step_anim;
     float step_anim = sinf(player->step_val) * step_mlt;
     float step_half = cosf(2.0f * player->step_val) * 0.5f * step_mlt;
