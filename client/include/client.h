@@ -200,6 +200,7 @@ typedef struct {
 typedef struct {
     MeshTransform *anchor;
     MeshTransform *body_anchor;
+    MeshTransform *upper_body_anchor;
 
     ColorCube *head;
     ColorCube *body;

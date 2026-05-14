@@ -404,6 +404,7 @@ typedef struct {
     float reload_timer;
     float slide_timer;
     float jump_timer;
+    float interact_progress;
 
     float *ramp_fix;
 

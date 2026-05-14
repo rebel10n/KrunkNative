@@ -71,10 +71,6 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     float arm_angles[3];
     angles_from_sides(arm_length, game_constants.upper_arm_length, game_constants.lower_arm_length, arm_angles);
 
-    arm->anchor.position.x = x;
-    arm->anchor.position.y = y;
-    arm->anchor.scale.x = arm->anchor.scale.y = arm->anchor.scale.z = 1.0f;
-
     if (third_person) {
         BasicMaterial *upper_material = basic_material_init();
         BasicMaterial *joint_material = basic_material_init();
@@ -131,7 +127,10 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     arm->lower->transform.position.y = -game_constants.lower_arm_length * 0.5f * cosf(arm->lower->transform.rotation.x);
     arm->lower->transform.position.z = -game_constants.upper_arm_length - game_constants.lower_arm_length * 0.5f * sinf(arm->lower->transform.rotation.x);
 
-    // TODO: anchor position?
+    arm->anchor.position.x = x - weapon->offset.x * left_handed_mlt;
+    arm->anchor.position.y = y - weapon->offset.y;
+    arm->anchor.position.z = -weapon->offset.z;
+    arm->anchor.scale = (vec3) {1.0f, 1.0f, 1.0f};
 
     arm->anchor.rotation.x = -arm_angles[1] + atan2f(weapon->offset.y + hold.y - y, -(weapon->offset.z - hold.z));
     arm->anchor.rotation.y = atan2f(x - (weapon->offset.x * left_handed_mlt - hold.x), -(weapon->offset.z - hold.z));
@@ -156,6 +155,8 @@ PlayerArms *generate_arms(const Weapon *weapon, const int shirt_color, const int
 
         return NULL;
     }
+
+    arms->anchor.position.z += third_person ? 0.0f : weapon->hold_distance_offset;
 
     arms->anchor.scale = (vec3) {1.0f, 1.0f, 1.0f};
     arms->left->anchor.parent = &arms->anchor;
@@ -275,6 +276,109 @@ PlayerCrouchedLeg *generate_crouched_leg(const int is_left, const int pants_colo
     return leg;
 }
 
+void player_generate_meshes(Player *player, const int render_you) {
+    if (player->mesh) return;
+    player->render_you = render_you;
+
+    int colors[6];
+    memcpy(colors, player->game->classes[player->class_index].colors, sizeof(colors));
+
+    // TODO: dye colors
+    // TODO: mode specific skins
+
+    const int third_person = !render_you || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
+
+    PlayerMesh *player_mesh = calloc(1, sizeof(PlayerMesh));
+    if (!player_mesh) return;
+
+    player_mesh->anchor = calloc(1, sizeof(MeshTransform));
+    player_mesh->body_anchor = calloc(1, sizeof(MeshTransform));
+    player_mesh->upper_body_anchor = calloc(1, sizeof(MeshTransform));
+
+    if (!player_mesh->anchor || !player_mesh->body_anchor || !player_mesh->upper_body_anchor) {
+        free(player_mesh->anchor);
+        free(player_mesh->body_anchor);
+        free(player_mesh->upper_body_anchor);
+        return;
+    }
+
+    player_mesh->body_anchor->position.y = game_constants.leg_height;
+    player_mesh->body_anchor->parent = player_mesh->anchor;
+    player_mesh->upper_body_anchor->parent = player_mesh->body_anchor;
+
+    player_mesh->anchor->scale = player_mesh->body_anchor->scale = player_mesh->upper_body_anchor->scale = (vec3) {1.0f, 1.0f, 1.0f};
+    player->mesh = player_mesh;
+
+    if (player->game->map->config.model == MODEL_TYPE_SPRITE) {
+
+    } else if (0 /* TODO: prop hunt */) {
+
+    } else {
+        int no_head = 0;
+
+        if (third_person) {
+            player_mesh->body = generate_body(colors[1], colors[2]);
+            player_mesh->head = !no_head ? generate_head(colors[0], colors[4]) : NULL;
+
+            player_mesh->body->transform.parent = player_mesh->body_anchor;
+            player_mesh->head->transform.parent = player_mesh->body_anchor;
+        }
+
+        int no_legs = 0;
+
+        // TODO: back skin
+        // TODO: waist skin
+        // TODO: hat skin
+        // TODO: face skin
+
+        if (third_person && !no_legs) {
+            for (int i = 0; i < 2; i++) {
+                ColorCube *leg = generate_leg(i, colors[2], colors[3]);
+
+                leg->transform.parent = player_mesh->anchor;
+                player_mesh->legs[i] = leg;
+            }
+
+            for (int i = 0; i < 2; i++) {
+                PlayerCrouchedLeg *leg = generate_crouched_leg(i, colors[2], colors[3]);
+
+                leg->anchor.parent = player_mesh->anchor;
+                player_mesh->crouched_legs[i] = leg;
+            }
+        }
+
+        player_mesh->arms = calloc(player->loadout_size, sizeof(PlayerArms *));
+
+        if (player_mesh->arms) {
+            for (int i = 0; i < player->loadout_size; i++) {
+                const Weapon *weapon = player->game->weapons[player->loadout[i]];
+
+                // ARM GENERATION
+                PlayerArms *arms = generate_arms(weapon, colors[1], colors[5], colors[0], third_person, player->left_handed);
+
+                if (arms) {
+                    arms->anchor.parent = player_mesh->upper_body_anchor;
+                    player_mesh->arms[i] = arms;
+                }
+
+                // MELEE MESH
+                if (weapon->melee) {
+                    // TODO
+                }
+
+                // WEAPON MESH
+                if (weapon->src) {
+                    for (int j = 0; j < 2; j++) {
+                        // TODO
+
+                        if (!weapon->akimbo) break;
+                    }
+                }
+            }
+        }
+    }
+}
+
 void player_update_meshes(Player *player, const int is_preview) {
     if (!player->mesh) return;
 
@@ -283,6 +387,8 @@ void player_update_meshes(Player *player, const int is_preview) {
     // TODO: move to client settings?
     const int animate_aim = 1;
     const float weapon_bobbing_mlt = 1.0f;
+    const float weapon_lean_mlt = 1.0f;
+    const float weapon_rotate_mlt = 1.0f;
     const vec3 weapon_offset_mlt = {1.0f, 1.0f, 1.0f};
 
     const int third_person = player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
@@ -291,6 +397,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float anim_mlt = (1.0f - (1.0f - game_constants.aim_anim_mlt) * aim_val_mlt) * game_constants.anim_mlt * weapon_bobbing_mlt;
     const float anim_mlt_crouch = 1.0f - player->crouch_val * 0.8f;
     const float anim_mlt_lean = player->render_you ? 1.0f - aim_val_mlt * game_constants.anim_mlt : 0.0f;
+    const float recoil_y_mlt = 1.0f - (player->weapon->recoil_y_mlt ? player->weapon->recoil_y_mlt : 1.0f) * game_constants.anim_mlt;
     const float recoil_z_mlt = 1.0f - (player->weapon->recoil_z_mlt ? player->weapon->recoil_z_mlt : 0.5f) * aim_val_mlt;
     const float anim_rotate_mlt = (1.0f - (player->weapon->z_rotation ? player->weapon->z_rotation : 0.3f) * aim_val_mlt) * (player->weapon->z_rotation_mlt ? player->weapon->z_rotation_mlt : 1.0f) * weapon_bobbing_mlt;
     const float anim_y_mlt = 1.0f - (player->weapon->jump_y_mlt ? player->weapon->jump_y_mlt : 1.0f) * aim_val_mlt;
@@ -364,107 +471,57 @@ void player_update_meshes(Player *player, const int is_preview) {
     // TODO: attachment & flap
     // TODO: upper body
     // TODO: weapon meshes
-}
 
-void player_generate_meshes(Player *player, const int render_you) {
-    if (player->mesh) return;
-    player->render_you = render_you;
+    const float reload_mlt = third_person ? 0.4f : 1.0f;
 
-    int colors[6];
-    memcpy(colors, player->game->classes[player->class_index].colors, sizeof(colors));
+    player_mesh->upper_body_anchor->rotation.x = bob_anim_y * -0.2f + land_bob_ya + reload_anim * (reload_mlt * -2.8f) +
+        player->direction.x * (player->render_you && !third_person ? 1.0f : 0.5f) +
+        ((float) -M_PI * 0.25f * swap_anim + player->recoil_anim_y * game_constants.recoil_mlt) +
+        (player->weapon->y_rotation ? player->weapon->y_rotation : 0.0f);
 
-    // TODO: dye colors
-    // TODO: mode specific skins
+    player_mesh->upper_body_anchor->rotation.y = reload_anim * -reload_mlt;
+    player_mesh->upper_body_anchor->rotation.z = 0.35f * weapon_rotate_mlt;
 
-    const int third_person = !render_you || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
+    player_mesh->upper_body_anchor->position.x = player_mesh->upper_body_anchor->position.z = 0.0f;
+    player_mesh->upper_body_anchor->position.y = player->recoil_anim_y * (player->weapon->recoil_y_mlt ? player->weapon->recoil_y_mlt : 0.3f) * recoil_y_mlt + player->height - game_constants.camera_height - game_constants.leg_height;
 
-    PlayerMesh *player_mesh = calloc(1, sizeof(PlayerMesh));
-    if (!player_mesh) return;
+    MeshTransform *arm_anchor = &player_mesh->arms[player->loadout_index]->anchor;
 
-    player_mesh->anchor = calloc(1, sizeof(MeshTransform));
-    player_mesh->body_anchor = calloc(1, sizeof(MeshTransform));
+    arm_anchor->rotation.x = -cosf(player->idle_anim) * bob_crouch_mlt * 0.01f * idle_anim +
+        player->weapon->rotation_offset * anim_mlt_lean + player->weapon->rotation_offset_aim * (1.0f - anim_mlt_lean) -
+        0.0f /* TODO: player->swap_tween_r */ * 0.35f * anim_mlt_lean -
+        player->land_bob_yr * 0.4f +
+        0.0f /* TODO: player->recoil_tween_y */ * recoil_mlt +
+        player->lean_anim.y * lean_aim_mlt * (player->weapon->lean_mlt ? player->weapon->lean_mlt : 1.0f) * weapon_lean_mlt +
+        step_half_rotate * -0.9f * anim_mlt;
 
-    if (!player_mesh->anchor || !player_mesh->body_anchor) {
-        free(player_mesh->anchor);
-        free(player_mesh->body_anchor);
-        return;
-    }
+    arm_anchor->rotation.y = 0.0f /* TODO: player->inspect.x */ * left_hand_mlt +
+        player->jump_rotate_mlt * 0.2f +
+        player->lean_anim.x * lean_aim_mlt * (player->weapon->lean_mlt ? player->weapon->lean_mlt : 1.0f) * weapon_lean_mlt +
+        (-step_anim_rotate * 0.16f * anim_mlt_lean * anim_mlt_crouch + player->lean_anim.z * 0.2f) * anim_mlt;
 
-    player_mesh->body_anchor->position.y = game_constants.leg_height;
-    player_mesh->body_anchor->parent = player_mesh->anchor;
+    arm_anchor->rotation.z = jump_rotate + aim_lean + 0.0f /* TODO: player->swap_tween_r */ * recoil_mlt +
+        player->lean_anim.z * 0.7f * anim_rotate_mlt +
+        -0.0f /* TODO: player->inspect.x */ * left_hand_mlt * player->weapon->inspect_rotation +
+        player->weapon->crouch_lean * left_hand_mlt * player->crouch_val * anim_mlt_lean * anim_mlt;
 
-    player_mesh->anchor->scale = player_mesh->body_anchor->scale = (vec3) {1.0f, 1.0f, 1.0f};
-    player->mesh = player_mesh;
+    arm_anchor->position.x = player->recoil.x * recoil_aim_mlt +
+        0.0f /* TODO: player->swap_tween_r */ * 0.2f -
+        player->jump_rotate_mlt * anim_mlt_lean * 1.3f -
+        0.0f /* TODO: player->inspect.x */ * left_hand_mlt * player->weapon->inspect_mlt +
+        (player->lean_anim.z * 0.35f - player->weapon->crouch_rotation * left_hand_mlt * player->crouch_val * anim_mlt_lean + step_anim * 0.5f * anim_mlt_crouch * anim_mlt_lean) * aim_val_mlt * anim_mlt +
+        weapon_offset.x - (weapon_offset.x - player->weapon->origin.x * left_hand_mlt) * aim_val;
 
-    if (player->game->map->config.model == MODEL_TYPE_SPRITE) {
+    arm_anchor->position.y = player->recoil.z * recoil_aim_mlt +
+        sinf(player->idle_anim) * 0.02f * idle_anim +
+        0.0f /* TODO: player->recoil_tween_ym */ * recoil_mlt +
+        jump_bob_y + land_bob_y * 0.5f - bob_anim_y * 1.5f -
+        (player->weapon->bomb ? player->interact_progress * 3.0f : 0.0f) +
+        (step_half * 0.85f - player->weapon->crouch_drop * player->crouch_val * anim_mlt_lean) * anim_mlt +
+        weapon_offset.y - (weapon_offset.y - player->weapon->origin.y + 0.0f /* TODO: weapon skin y origin */ + 0.0f /* TODO: aim offset y */) * aim_val;
 
-    } else if (0 /* TODO: prop hunt */) {
-
-    } else {
-        int no_head = 0;
-
-        if (third_person) {
-            player_mesh->body = generate_body(colors[1], colors[2]);
-            player_mesh->head = !no_head ? generate_head(colors[0], colors[4]) : NULL;
-
-            player_mesh->body->transform.parent = player_mesh->body_anchor;
-            player_mesh->head->transform.parent = player_mesh->body_anchor;
-        }
-
-        int no_legs = 0;
-
-        // TODO: back skin
-        // TODO: waist skin
-        // TODO: hat skin
-        // TODO: face skin
-
-        if (third_person && !no_legs) {
-            for (int i = 0; i < 2; i++) {
-                ColorCube *leg = generate_leg(i, colors[2], colors[3]);
-
-                leg->transform.parent = player_mesh->anchor;
-                player_mesh->legs[i] = leg;
-            }
-
-            for (int i = 0; i < 2; i++) {
-                PlayerCrouchedLeg *leg = generate_crouched_leg(i, colors[2], colors[3]);
-
-                leg->anchor.parent = player_mesh->anchor;
-                player_mesh->crouched_legs[i] = leg;
-            }
-        }
-
-        player_mesh->arms = calloc(player->loadout_size, sizeof(PlayerArms *));
-
-        if (player_mesh->arms) {
-            for (int i = 0; i < player->loadout_size; i++) {
-                const Weapon *weapon = player->game->weapons[player->loadout[i]];
-
-                // ARM GENERATION
-                PlayerArms *arms = generate_arms(weapon, colors[1], colors[5], colors[0], third_person, player->left_handed);
-
-                if (arms) {
-                    arms->anchor.position.y = player->height - game_constants.camera_height - game_constants.leg_height;
-                    arms->anchor.parent = player_mesh->body_anchor;
-                    player_mesh->arms[i] = arms;
-                }
-
-                // MELEE MESH
-                if (weapon->melee) {
-                    // TODO
-                }
-
-                // WEAPON MESH
-                if (weapon->src) {
-                    for (int j = 0; j < 2; j++) {
-                        // TODO
-
-                        if (!weapon->akimbo) break;
-                    }
-                }
-            }
-        }
-    }
+    arm_anchor->position.z = weapon_offset.z - (weapon_offset.z - player->weapon->origin.z) * aim_val +
+        0.0f /* TODO: player->recoil_tween_z */ + player->bob_anim.z * anim_mlt + player->recoil_anim * player->weapon->recoil_z * recoil_z_mlt;
 }
 
 void player_meshes_fini(Player *player) {
@@ -537,6 +594,7 @@ void player_meshes_fini(Player *player) {
         free(leg);
     }
 
+    free(player_mesh->upper_body_anchor);
     free(player_mesh->body_anchor);
     free(player_mesh->anchor);
     free(player_mesh);

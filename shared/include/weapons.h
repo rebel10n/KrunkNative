@@ -14,6 +14,7 @@ typedef struct {
     unsigned char can_throw:1;
     unsigned char melee:1;
     unsigned char equipment:1;
+    unsigned char bomb:1;
     unsigned char burst:1;
     unsigned char projectile:1;
     unsigned char projectile_disable:1;
@@ -50,13 +51,26 @@ typedef struct {
     float zoom;
     float inaccuracy;
 
+    float recoil_y_mlt;
+    float recoil_z;
     float recoil_z_mlt;
     float z_rotation;
     float z_rotation_mlt;
+    float y_rotation;
+    float rotation_offset;
+    float rotation_offset_aim;
     float jump_y_mlt;
     float land_bob;
     float aim_recoil_mlt;
+    float lean_mlt;
+    float inspect_rotation;
+    float crouch_lean;
+    float crouch_rotation;
+    float crouch_drop;
+    float inspect_mlt;
 
+    float hold_distance_offset;
+    vec3 origin;
     vec3 offset;
     vec3 left_hold;
     vec3 right_hold;
