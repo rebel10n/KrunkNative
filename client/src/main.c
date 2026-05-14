@@ -222,8 +222,9 @@ void client_enter_game(Client *client) {
             game_players_add(&client->game, client->me);
         }
 
+        client->me->is_you = 1;
         player_spawn(client->me);
-        player_generate_meshes(client->me, 0);
+        player_generate_meshes(client->me, 1);
 
         const PlayerMesh *player_mesh = client->me->mesh;
         player_mesh->anchor->position = client->me->position;

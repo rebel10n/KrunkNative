@@ -72,4 +72,8 @@ const GameConstants game_constants = {
     .upper_arm_length = 2.7f,
     .lower_arm_length = 2.7f,
     .arm_offset = -0.8f,
+    .anim_mlt = 1.2f,
+    .aim_anim_mlt = 0.18f,
+    .crouch_anim_mlt = 0.5f,
+    .step_anim = 0.075f,
 };

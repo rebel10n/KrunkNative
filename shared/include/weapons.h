@@ -17,6 +17,7 @@ typedef struct {
     unsigned char burst:1;
     unsigned char projectile:1;
     unsigned char projectile_disable:1;
+    unsigned char animate_while_aiming:1;
 
     unsigned int burst_count;
     float burst_rate;
@@ -48,6 +49,13 @@ typedef struct {
     float physical_range;
     float zoom;
     float inaccuracy;
+
+    float recoil_z_mlt;
+    float z_rotation;
+    float z_rotation_mlt;
+    float jump_y_mlt;
+    float land_bob;
+    float aim_recoil_mlt;
 
     vec3 offset;
     vec3 left_hold;

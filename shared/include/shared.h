@@ -69,6 +69,10 @@ typedef struct {
     float upper_arm_length;
     float lower_arm_length;
     float arm_offset;
+    float anim_mlt;
+    float aim_anim_mlt;
+    float crouch_anim_mlt;
+    float step_anim;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -334,6 +338,11 @@ typedef struct {
     struct Game_t* game;
 
     int uid;
+
+    unsigned char is_you:1;
+    unsigned char render_you:1;
+    unsigned char left_handed:1;
+
     unsigned char active:1;
     unsigned char noclip:1;
     unsigned char god_mode:1;
@@ -405,6 +414,15 @@ typedef struct {
     vec3 last_position;
     vec3 velocity;
     vec2 direction;
+
+    float jump_rotate;
+
+    float land_bob_y;
+    float land_bob_yr;
+    float jump_bob_y;
+    float jump_rotate_mlt;
+    float step_val;
+    float step_chase;
 
     vec3 bob_anim;
     vec3 lean_anim;

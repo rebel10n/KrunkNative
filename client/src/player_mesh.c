@@ -275,8 +275,100 @@ PlayerCrouchedLeg *generate_crouched_leg(const int is_left, const int pants_colo
     return leg;
 }
 
+void player_update_meshes(Player *player, const int is_preview) {
+    if (!player->mesh) return;
+
+    const PlayerMesh *player_mesh = player->mesh;
+
+    // TODO: move to client settings?
+    const int animate_aim = 1;
+    const float weapon_bobbing_mlt = 1.0f;
+    const vec3 weapon_offset_mlt = {1.0f, 1.0f, 1.0f};
+
+    const int third_person = player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
+    const float aim_val_mlt = animate_aim && player->is_you ? player->aim_val : 0.0f;
+    const float aim_mlt = player->weapon->animate_while_aiming ? 0.0f : aim_val_mlt;
+    const float anim_mlt = (1.0f - (1.0f - game_constants.aim_anim_mlt) * aim_val_mlt) * game_constants.anim_mlt * weapon_bobbing_mlt;
+    const float anim_mlt_crouch = 1.0f - player->crouch_val * 0.8f;
+    const float anim_mlt_lean = player->render_you ? 1.0f - aim_val_mlt * game_constants.anim_mlt : 0.0f;
+    const float recoil_z_mlt = 1.0f - (player->weapon->recoil_z_mlt ? player->weapon->recoil_z_mlt : 0.5f) * aim_val_mlt;
+    const float anim_rotate_mlt = (1.0f - (player->weapon->z_rotation ? player->weapon->z_rotation : 0.3f) * aim_val_mlt) * (player->weapon->z_rotation_mlt ? player->weapon->z_rotation_mlt : 1.0f) * weapon_bobbing_mlt;
+    const float anim_y_mlt = 1.0f - (player->weapon->jump_y_mlt ? player->weapon->jump_y_mlt : 1.0f) * aim_val_mlt;
+    const float lean_aim_mlt = 1.0f * aim_val_mlt * 0.45f;
+    const float bob_anim_y = player->bob_anim.y * 0.9f * anim_y_mlt * anim_mlt_lean * weapon_bobbing_mlt;
+    const float land_bob_y = (player->land_bob_y * (player->weapon->land_bob ? player->weapon->land_bob : 1.0f) * 0.6f) * (1.0f - aim_val_mlt * 0.75f) * weapon_bobbing_mlt;
+
+    if (player->land_bob_yr != land_bob_y) {
+        player->land_bob_yr += (land_bob_y - player->land_bob_yr) * 0.1f;
+    }
+
+    const float land_bob_ya = player->land_bob_y * (player->weapon->land_bob ? player->weapon->land_bob : 1.0f) * 0.1f;
+    const float bob_crouch_mlt = 1.0f - player->crouch_val * 0.5f;
+    const float jump_rotate = player->jump_rotate * bob_crouch_mlt * anim_mlt_lean * weapon_bobbing_mlt;
+
+    if (player->jump_rotate_mlt != jump_rotate) {
+        player->jump_rotate_mlt += (jump_rotate - player->jump_rotate_mlt) * 0.08f;
+    }
+
+    const float jump_bob_y = player->jump_bob_y * (player->weapon->jump_y_mlt ? player->weapon->jump_y_mlt : 1.0f) * anim_mlt_lean * bob_crouch_mlt * weapon_bobbing_mlt;
+    const float recoil_aim_mlt = 1.0f - aim_val_mlt * 0.89f;
+    const float recoil_mlt = 1.0f - (player->weapon->aim_recoil_mlt ? player->weapon->aim_recoil_mlt : 1.0f) * aim_val_mlt;
+    const float step_mlt = is_preview ? 0.05f : game_constants.step_anim;
+    float step_anim = sinf(player->step_val) * step_mlt;
+    float step_half = cosf(2.0f * player->step_val) * 0.5f * step_mlt;
+    const float step_anim_rotate = -sinf(player->step_chase) * step_mlt;
+    const float step_half_rotate = -cosf(2.0f * player->step_chase) * 0.5f * step_mlt;
+    const float aim_val = third_person ? 0.0f : aim_val_mlt;
+    const float aim_lean = (aim_val <= 0.5f ? aim_val : 0.5f - (aim_val - 0.5f)) * 0.5f;
+    const float swap_anim = player->swap_timer / player->weapon->swap_time;
+    const float left_hand_mlt = player->left_handed ? -1.0f : 1.0f;
+
+    const vec3 weapon_offset = {
+        player->weapon->offset.x * (player->render_you ? weapon_offset_mlt.x : 1.0f) * left_hand_mlt,
+        player->weapon->offset.y * (player->render_you ? weapon_offset_mlt.y : 1.0f),
+        player->weapon->offset.z * (player->render_you ? weapon_offset_mlt.z : 1.0f),
+    };
+
+    float reload_anim = player->reload_timer > 0.0f ? 1.0f - player->reload_timer / (player->weapon->reload_time * player->game->config.reload_speed) : 0.0f;
+    if (reload_anim > 0.5f) reload_anim = 1.0f - reload_anim;
+
+    reload_anim *= player->render_you ? 1.0f : 0.3f;
+
+    const float idle_anim = (1.0f - aim_val_mlt * 0.88f) * 1.75f * weapon_bobbing_mlt;
+    const float step_y = player->render_you && !third_person ? fabsf(step_anim_rotate * 0.5f) * anim_mlt_lean : fabsf(step_anim * 3.5f);
+    const float step_yaw = player->render_you ? third_person ? -step_anim * 0.5f : 0.0f : -step_anim * 2.0f;
+
+    if (player->is_you || player->uid == -1) {
+        player_mesh->anchor->position = player->position;
+        player_mesh->anchor->position.y += step_y;
+    }
+
+    if (player->game->map->config.model != MODEL_TYPE_SPRITE) { // TODO: check that is not prop
+        player_mesh->anchor->rotation.y = player->direction.y + step_yaw;
+    }
+
+    step_half -= step_half * player->crouch_val * game_constants.crouch_anim_mlt;
+    step_anim -= step_anim * player->crouch_val * game_constants.crouch_anim_mlt;
+
+    if (!player->render_you) {
+        for (int i = 0; i < 4; i++) {
+            MeshTransform *leg_anchor = i < 2 ? &player_mesh->legs[i]->transform : &player_mesh->crouched_legs[i - 2]->anchor;
+            leg_anchor->rotation.x = step_anim * (i == 1 || i == 3 ? 1.0f : -1.0f) * 7.0f + (i > 1 ? -0.6f : 0.0f);
+        }
+    }
+
+    for (size_t i = 0; i < player->loadout_size; i++) {
+        // TODO: update arms
+    }
+
+    // TODO: attachment & flap
+    // TODO: upper body
+    // TODO: weapon meshes
+}
+
 void player_generate_meshes(Player *player, const int render_you) {
     if (player->mesh) return;
+    player->render_you = render_you;
 
     int colors[6];
     memcpy(colors, player->game->classes[player->class_index].colors, sizeof(colors));
@@ -349,7 +441,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                 const Weapon *weapon = player->game->weapons[player->loadout[i]];
 
                 // ARM GENERATION
-                PlayerArms *arms = generate_arms(weapon, colors[1], colors[5], colors[0], third_person, 0);
+                PlayerArms *arms = generate_arms(weapon, colors[1], colors[5], colors[0], third_person, player->left_handed);
 
                 if (arms) {
                     arms->anchor.position.y = player->height - game_constants.camera_height - game_constants.leg_height;

@@ -215,6 +215,11 @@ void game_tick(Game *game, const float now, const float delta) {
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
+
+#ifdef KRUNKNATIVE_CLIENT
+        player_update_meshes(player, 0);
+#endif
+
         player_update(player, delta * game->config.delta_mlt);
 
         if (player->position.y <= game->map->death_y) {

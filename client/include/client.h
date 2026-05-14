@@ -211,6 +211,7 @@ typedef struct {
 } PlayerMesh;
 
 void player_generate_meshes(Player*, int);
+void player_update_meshes(Player*, int);
 void player_meshes_fini(Player*);
 
 Mesh *mesh_init(Geometry*, Material*);
