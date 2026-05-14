@@ -255,6 +255,9 @@ void client_tick(Client *client, const float now, const float delta) {
     if (debug_key && !client->last_debug_key) {
         client_unload_map(client);
 
+        scene_remove_player_mesh(client->scene, client->me->mesh, client->me->loadout_size);
+        player_meshes_fini(client->me);
+
         client->me = NULL;
         client->in_game = 0;
 

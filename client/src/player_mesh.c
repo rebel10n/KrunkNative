@@ -76,11 +76,13 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     arm->anchor.scale.x = arm->anchor.scale.y = arm->anchor.scale.z = 1.0f;
 
     if (third_person) {
-        BasicMaterial *material = basic_material_init();
-        material->color = hex_to_vec(shirt_color);
+        BasicMaterial *upper_material = basic_material_init();
+        BasicMaterial *joint_material = basic_material_init();
 
-        arm->upper = mesh_init(create_cube_geo(), (Material *) material);
-        arm->joint = mesh_init(create_cube_geo(), (Material *) material);
+        upper_material->color = joint_material->color = hex_to_vec(shirt_color);
+
+        arm->upper = mesh_init(create_cube_geo(), (Material *) upper_material);
+        arm->joint = mesh_init(create_cube_geo(), (Material *) joint_material);
 
         arm->upper->transform.scale.x = arm->upper->transform.scale.z = arm_scale;
         arm->upper->transform.scale.y = game_constants.upper_arm_length;
@@ -206,11 +208,13 @@ PlayerCrouchedLeg *generate_crouched_leg(const int is_left, const int pants_colo
 
     const float leg_angles[] = {2.0f, 0.5f}; // upper, lower
 
-    BasicMaterial *pants_material = basic_material_init();
-    pants_material->color = hex_to_vec(pants_color);
+    BasicMaterial *upper_material = basic_material_init();
+    BasicMaterial *joint_material = basic_material_init();
 
-    leg->upper = mesh_init(create_cube_geo(), (Material *) pants_material);
-    leg->joint = mesh_init(create_cube_geo(), (Material *) pants_material);
+    upper_material->color = joint_material->color = hex_to_vec(pants_color);
+
+    leg->upper = mesh_init(create_cube_geo(), (Material *) upper_material);
+    leg->joint = mesh_init(create_cube_geo(), (Material *) joint_material);
 
     leg->upper->transform.scale.x = leg->upper->transform.scale.z = game_constants.leg_scale;
     leg->upper->transform.scale.y = game_constants.leg_height * 0.5f;
@@ -260,6 +264,8 @@ PlayerCrouchedLeg *generate_crouched_leg(const int is_left, const int pants_colo
 }
 
 void player_generate_meshes(Player *player, const int render_you) {
+    if (player->mesh) return;
+
     int colors[6];
     memcpy(colors, player->game->classes[player->class_index].colors, sizeof(colors));
 
@@ -355,4 +361,79 @@ void player_generate_meshes(Player *player, const int render_you) {
             }
         }
     }
+}
+
+void player_meshes_fini(Player *player) {
+    if (!player->mesh) return;
+
+    PlayerMesh *player_mesh = player->mesh;
+
+    if (player_mesh->body) {
+        for (size_t i = 0; i < player_mesh->body->mesh_count; i++) {
+            mesh_fini(player_mesh->body->meshes[i]);
+        }
+
+        free(player_mesh->body);
+    }
+
+    if (player_mesh->head) {
+        for (size_t i = 0; i < player_mesh->head->mesh_count; i++) {
+            mesh_fini(player_mesh->head->meshes[i]);
+        }
+
+        free(player_mesh->head);
+    }
+
+    if (player_mesh->arms) {
+        for (size_t i = 0; i < player->loadout_size; i++) {
+            PlayerArms *arms = player_mesh->arms[i];
+            if (!arms) continue;
+
+            for (int ii = 0; ii < 2; ii++) {
+                const PlayerArmMesh *arm = ii ? arms->left : arms->right;
+
+                if (arm->upper) mesh_fini(arm->upper);
+                if (arm->joint) mesh_fini(arm->joint);
+
+                for (size_t iii = 0; iii < arm->lower->mesh_count; iii++) {
+                    mesh_fini(arm->lower->meshes[iii]);
+                }
+            }
+
+            free(arms);
+        }
+
+        free(player_mesh->arms);
+    }
+
+    for (int i = 0; i < 2; i++) {
+        ColorCube *leg = player_mesh->legs[i];
+        if (!leg) continue;
+
+        for (size_t j = 0; j < leg->mesh_count; j++) {
+            mesh_fini(leg->meshes[j]);
+        }
+
+        free(leg);
+    }
+
+    for (int i = 0; i < 2; i++) {
+        PlayerCrouchedLeg *leg = player_mesh->crouched_legs[i];
+        if (!leg) continue;
+
+        mesh_fini(leg->upper);
+        mesh_fini(leg->joint);
+
+        for (size_t j = 0; j < leg->lower->mesh_count; j++) {
+            mesh_fini(leg->lower->meshes[j]);
+        }
+
+        free(leg);
+    }
+
+    free(player_mesh->body_anchor);
+    free(player_mesh->anchor);
+    free(player_mesh);
+
+    player->mesh = NULL;
 }

@@ -208,6 +208,7 @@ typedef struct {
 } PlayerMesh;
 
 void player_generate_meshes(Player*, int);
+void player_meshes_fini(Player*);
 
 Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);
@@ -220,7 +221,7 @@ typedef struct {
 
 Scene *scene_init();
 void scene_add_player_mesh(Scene*, const PlayerMesh*, size_t);
-void scene_remove_player_mesh(Scene*, const PlayerMesh*);
+void scene_remove_player_mesh(Scene*, const PlayerMesh*, size_t);
 void scene_add_mesh(Scene*, Mesh*);
 void scene_remove_mesh(Scene*, Mesh*);
 void scene_render(const Scene*, Camera*);

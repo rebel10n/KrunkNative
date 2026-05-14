@@ -64,8 +64,62 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
     }
 }
 
-void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh) {
+// NOTE: probably should optimize - scene_remove_mesh iterates over scene children until it finds the target mesh!
+void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
+    if (!player_mesh) return;
 
+    if (player_mesh->body) {
+        for (size_t i = 0; i < player_mesh->body->mesh_count; i++) {
+            scene_remove_mesh(scene, player_mesh->body->meshes[i]);
+        }
+    }
+
+    if (player_mesh->head) {
+        for (size_t i = 0; i < player_mesh->head->mesh_count; i++) {
+            scene_remove_mesh(scene, player_mesh->head->meshes[i]);
+        }
+    }
+
+    if (player_mesh->arms) {
+        for (size_t i = 0; i < loadout_size; i++) {
+            const PlayerArms *arms = player_mesh->arms[i];
+            if (!arms) continue;
+
+            for (int ii = 0; ii < 2; ii++) {
+                const PlayerArmMesh *arm = ii ? arms->left : arms->right;
+
+                if (arm->upper) scene_remove_mesh(scene, arm->upper);
+                if (arm->joint) scene_remove_mesh(scene, arm->joint);
+
+                for (size_t iii = 0; iii < arm->lower->mesh_count; iii++) {
+                    scene_remove_mesh(scene, arm->lower->meshes[iii]);
+                }
+            }
+
+            break;
+        }
+    }
+
+    for (int i = 0; i < 2; i++) {
+        ColorCube *leg = player_mesh->legs[i];
+        if (!leg) continue;
+
+        for (size_t j = 0; j < leg->mesh_count; j++) {
+            scene_remove_mesh(scene, leg->meshes[j]);
+        }
+    }
+
+    for (int i = 0; i < 2; i++) {
+        PlayerCrouchedLeg *leg = player_mesh->crouched_legs[i];
+        if (!leg) continue;
+
+        scene_remove_mesh(scene, leg->upper);
+        scene_remove_mesh(scene, leg->joint);
+
+        for (size_t j = 0; j < leg->lower->mesh_count; j++) {
+            scene_remove_mesh(scene, leg->lower->meshes[j]);
+        }
+    }
 }
 
 void scene_add_mesh(Scene *scene, Mesh *mesh) {
