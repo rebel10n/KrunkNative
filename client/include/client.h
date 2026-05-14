@@ -166,6 +166,15 @@ typedef struct {
 } ColorCube;
 
 typedef struct {
+    MeshTransform anchor;
+
+    Mesh *upper;
+    Mesh *joint;
+
+    ColorCube *lower;
+} PlayerCrouchedLeg;
+
+typedef struct {
     // third person
     Mesh *upper;
     Mesh *joint;
@@ -193,7 +202,7 @@ typedef struct {
     ColorCube *body;
 
     ColorCube *legs[2];
-    void *legs_crouched[2];
+    PlayerCrouchedLeg *crouched_legs[2];
 
     PlayerArms **arms;
 } PlayerMesh;

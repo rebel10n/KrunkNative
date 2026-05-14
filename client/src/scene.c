@@ -27,7 +27,7 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
             const PlayerArms *arms = player_mesh->arms[i];
             if (!arms) continue;
 
-            for (size_t ii = 0; ii < 2; ii++) {
+            for (int ii = 0; ii < 2; ii++) {
                 const PlayerArmMesh *arm = ii ? arms->left : arms->right;
 
                 if (arm->upper) scene_add_mesh(scene, arm->upper);
@@ -42,12 +42,24 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
         }
     }
 
-    for (size_t i = 0; i < 2; i++) {
+    for (int i = 0; i < 2; i++) {
         ColorCube *leg = player_mesh->legs[i];
         if (!leg) continue;
 
         for (size_t j = 0; j < leg->mesh_count; j++) {
             scene_add_mesh(scene, leg->meshes[j]);
+        }
+    }
+
+    for (int i = 0; i < 2; i++) {
+        PlayerCrouchedLeg *leg = player_mesh->crouched_legs[i];
+        if (!leg) continue;
+
+        scene_add_mesh(scene, leg->upper);
+        scene_add_mesh(scene, leg->joint);
+
+        for (size_t j = 0; j < leg->lower->mesh_count; j++) {
+            scene_add_mesh(scene, leg->lower->meshes[j]);
         }
     }
 }

@@ -200,8 +200,63 @@ ColorCube *generate_leg(const int is_left, const int pants_color, const int shoe
     return leg;
 }
 
-void generate_crouched_leg() {
+PlayerCrouchedLeg *generate_crouched_leg(const int is_left, const int pants_color, const int shoe_color) {
+    PlayerCrouchedLeg *leg = calloc(1, sizeof(PlayerCrouchedLeg));
+    if (!leg) return NULL;
 
+    const float leg_angles[] = {2.0f, 0.5f}; // upper, lower
+
+    BasicMaterial *pants_material = basic_material_init();
+    pants_material->color = hex_to_vec(pants_color);
+
+    leg->upper = mesh_init(create_cube_geo(), (Material *) pants_material);
+    leg->joint = mesh_init(create_cube_geo(), (Material *) pants_material);
+
+    leg->upper->transform.scale.x = leg->upper->transform.scale.z = game_constants.leg_scale;
+    leg->upper->transform.scale.y = game_constants.leg_height * 0.5f;
+
+    leg->upper->transform.rotation.x = leg_angles[0];
+
+    leg->upper->transform.position.y = -game_constants.leg_height * 0.5f * cosf(leg->upper->transform.rotation.x);
+    leg->upper->transform.position.z = -game_constants.leg_height * 0.5f * sinf(leg->upper->transform.rotation.x);
+
+    leg->upper->transform.parent = &leg->anchor;
+
+    const float joint_length = sqrtf(2.0f * game_constants.leg_scale * 0.5f * game_constants.leg_scale * 0.5f - 2.0f * game_constants.leg_scale * 0.5f * game_constants.leg_scale * 0.5f * cosf((float) M_PI - (leg_angles[0] - leg_angles[1])));
+    const float joint_height = sqrtf(game_constants.leg_scale * 0.5f * game_constants.leg_scale * 0.5f - joint_length * 0.5f * joint_length * 0.5f) * 2.0f;
+
+    leg->joint->transform.scale.x = game_constants.leg_scale;
+    leg->joint->transform.scale.y = joint_height;
+    leg->joint->transform.scale.z = joint_length;
+
+    leg->joint->transform.rotation.x = (leg_angles[0] + leg_angles[1]) * 0.5f;
+
+    leg->joint->transform.position.y = -game_constants.leg_height * 0.5f * cosf(leg->upper->transform.rotation.x) - joint_height * 0.5f * cosf(leg->joint->transform.rotation.x);
+    leg->joint->transform.position.z = -game_constants.leg_height * 0.5f * sinf(leg->upper->transform.rotation.x) - joint_height * 0.5f * sinf(leg->joint->transform.rotation.x);
+
+    leg->joint->transform.parent = &leg->anchor;
+
+    const ColorCubeSegment lower_segments[] = {
+        {pants_color, 0.5f, 1.0f},
+        {shoe_color, 0.5f, 1.0f},
+    };
+
+    leg->lower = generate_color_cube(game_constants.leg_scale, game_constants.leg_height * 0.5f, game_constants.leg_scale, lower_segments, sizeof(lower_segments) / sizeof(lower_segments[0]));
+    leg->lower->transform.parent = &leg->anchor;
+
+    leg->lower->transform.rotation.x = leg_angles[1];
+
+    leg->lower->transform.position.y = -game_constants.leg_height * 0.5f * cosf(leg->upper->transform.rotation.x) - game_constants.leg_height * 0.25f * cosf(leg->lower->transform.rotation.x);
+    leg->lower->transform.position.z = -game_constants.leg_height * 0.5f * sinf(leg->upper->transform.rotation.x) - game_constants.leg_height * 0.25f * sinf(leg->lower->transform.rotation.x);
+
+    leg->anchor.scale = (vec3) {1.0f, 1.0f, 1.0f};
+
+    leg->anchor.position.x = game_constants.leg_scale * 0.5f * (is_left ? -1.0f : 1.0f);
+    leg->anchor.position.y = game_constants.leg_height - game_constants.crouch_distance + 0.5f;
+
+    leg->anchor.rotation.y = is_left ? (float) M_PI / 8.0f : (float) -M_PI / 6.0f;
+
+    return leg;
 }
 
 void player_generate_meshes(Player *player, const int render_you) {
@@ -259,6 +314,13 @@ void player_generate_meshes(Player *player, const int render_you) {
 
                 leg->transform.parent = player_mesh->anchor;
                 player_mesh->legs[i] = leg;
+            }
+
+            for (int i = 0; i < 2; i++) {
+                PlayerCrouchedLeg *leg = generate_crouched_leg(i, colors[2], colors[3]);
+
+                leg->anchor.parent = player_mesh->anchor;
+                player_mesh->crouched_legs[i] = leg;
             }
         }
 
