@@ -175,6 +175,9 @@ typedef struct {
 } PlayerCrouchedLeg;
 
 typedef struct {
+    // first person
+    Mesh *extender;
+
     // third person
     Mesh *upper;
     Mesh *joint;

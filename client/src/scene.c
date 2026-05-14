@@ -30,6 +30,8 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
             for (int ii = 0; ii < 2; ii++) {
                 const PlayerArmMesh *arm = ii ? arms->left : arms->right;
 
+                if (arm->extender) scene_add_mesh(scene, arm->extender);
+
                 if (arm->upper) scene_add_mesh(scene, arm->upper);
                 if (arm->joint) scene_add_mesh(scene, arm->joint);
 
@@ -87,6 +89,8 @@ void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const
 
             for (int ii = 0; ii < 2; ii++) {
                 const PlayerArmMesh *arm = ii ? arms->left : arms->right;
+
+                if (arm->extender) scene_remove_mesh(scene, arm->extender);
 
                 if (arm->upper) scene_remove_mesh(scene, arm->upper);
                 if (arm->joint) scene_remove_mesh(scene, arm->joint);

@@ -103,6 +103,18 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
         arm->joint->transform.position.z = -game_constants.upper_arm_length - joint_height * 0.5f * sinf(arm->joint->transform.rotation.x);
 
         arm->joint->transform.parent = &arm->anchor;
+    } else {
+        BasicMaterial *material = basic_material_init();
+        material->color = hex_to_vec(shirt_color);
+
+        arm->extender = mesh_init(create_cube_geo(), (Material *) material);
+        arm->extender->transform.parent = &arm->anchor;
+
+        arm->extender->transform.scale.x = arm->extender->transform.scale.z = arm_scale;
+        arm->extender->transform.scale.y = 20.0f;
+
+        arm->extender->transform.rotation.x = (float) -M_PI * 0.5f - arm_angles[0];
+        arm->extender->transform.position.z = -game_constants.upper_arm_length;
     }
 
     const ColorCubeSegment lower_segments[] = {
@@ -391,6 +403,8 @@ void player_meshes_fini(Player *player) {
 
             for (int ii = 0; ii < 2; ii++) {
                 const PlayerArmMesh *arm = ii ? arms->left : arms->right;
+
+                if (arm->extender) mesh_fini(arm->extender);
 
                 if (arm->upper) mesh_fini(arm->upper);
                 if (arm->joint) mesh_fini(arm->joint);
