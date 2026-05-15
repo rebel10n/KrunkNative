@@ -26,6 +26,19 @@ const Weapon g_pistol = {
     .recover_y = 0.99f,
     .recover_f = 0.98f,
 
+    .recoil_y_mlt = 0.2f,
+    .recoil_z = 3.8f,
+    .recoil_z_mlt = -0.4f,
+    .aim_recoil_mlt = 0.4f,
+
+    .crouch_lean = 0.3f,
+    .crouch_rotation = 0.3f,
+    .lean_mlt = 1.0f,
+    .inspect_rotation = 0.3f,
+    .inspect_mlt = 0.8f,
+
+    .hold_width = 1.3f,
+    .origin = {0.0f, -0.23f, -3.9f},
     .offset = {1.2f, -0.6f, -3.7f},
     .right_hold = {0.0f, -0.62f, -0.32f},
     .left_hold = {0.0f, -1.1f, -0.3f},

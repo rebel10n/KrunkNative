@@ -143,10 +143,10 @@ PlayerArms *generate_arms(const Weapon *weapon, const int shirt_color, const int
     PlayerArms *arms = calloc(1, sizeof(PlayerArms));
     if (!arms) return NULL;
 
-    const float offset = (game_constants.chest_width - game_constants.arm_scale * 0.5f + game_constants.arm_inset) * (third_person ? 1.0f : 0.4f);
+    const float offset = (-game_constants.chest_width + game_constants.arm_scale * 0.5f - game_constants.arm_inset) * (third_person ? 1.0f : weapon->hold_width ? weapon->hold_width : 0.4f);
 
-    arms->right = generate_arm(offset, game_constants.arm_offset, weapon,  left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed);
-    arms->left = generate_arm(-offset, game_constants.arm_offset, weapon, !left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed);
+    arms->left = generate_arm(offset, game_constants.arm_offset, weapon, !left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed);
+    arms->right = generate_arm(-offset, game_constants.arm_offset, weapon,  left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed);
 
     if (!arms->left || !arms->right) {
         free(arms->left);
@@ -388,7 +388,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     const int animate_aim = 1;
     const float weapon_bobbing_mlt = 1.0f;
     const float weapon_lean_mlt = 1.0f;
-    const float weapon_rotate_mlt = 1.0f;
+    const float weapon_rotation = 0.0f;
     const vec3 weapon_offset_mlt = {1.0f, 1.0f, 1.0f};
 
     const int third_person = player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
@@ -480,7 +480,7 @@ void player_update_meshes(Player *player, const int is_preview) {
         (player->weapon->y_rotation ? player->weapon->y_rotation : 0.0f);
 
     player_mesh->upper_body_anchor->rotation.y = reload_anim * -reload_mlt;
-    player_mesh->upper_body_anchor->rotation.z = 0.35f * weapon_rotate_mlt;
+    player_mesh->upper_body_anchor->rotation.z = 0.35f * weapon_rotation;
 
     player_mesh->upper_body_anchor->position.x = player_mesh->upper_body_anchor->position.z = 0.0f;
     player_mesh->upper_body_anchor->position.y = player->recoil_anim_y * (player->weapon->recoil_y_mlt ? player->weapon->recoil_y_mlt : 0.3f) * recoil_y_mlt + player->height - game_constants.camera_height - game_constants.leg_height;

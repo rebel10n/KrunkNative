@@ -69,6 +69,7 @@ typedef struct {
     float crouch_rotation;
     float crouch_drop;
 
+    float hold_width;
     float hold_distance_offset;
     vec3 origin;
     vec3 offset;

@@ -217,7 +217,7 @@ void game_tick(Game *game, const float now, const float delta) {
         Player *player = game->players[i];
 
 #ifdef KRUNKNATIVE_CLIENT
-        // player_update_meshes(player, 0);
+        player_update_meshes(player, 0);
 #endif
 
         player_update(player, delta * game->config.delta_mlt);
