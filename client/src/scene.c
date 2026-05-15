@@ -85,20 +85,18 @@ void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const
             const PlayerArms *arms = player_mesh->arms[i];
             if (!arms) continue;
 
-            for (int ii = 0; ii < 2; ii++) {
-                const PlayerArmMesh *arm = ii ? arms->left : arms->right;
+            for (int j = 0; j < 2; j++) {
+                const PlayerArmMesh *arm = j ? arms->left : arms->right;
 
                 if (arm->extender) scene_remove_mesh(scene, arm->extender);
 
                 if (arm->upper) scene_remove_mesh(scene, arm->upper);
                 if (arm->joint) scene_remove_mesh(scene, arm->joint);
 
-                for (size_t iii = 0; iii < arm->lower->mesh_count; iii++) {
-                    scene_remove_mesh(scene, arm->lower->meshes[iii]);
+                for (size_t k = 0; k < arm->lower->mesh_count; k++) {
+                    scene_remove_mesh(scene, arm->lower->meshes[k]);
                 }
             }
-
-            break;
         }
     }
 

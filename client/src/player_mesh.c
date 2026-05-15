@@ -550,16 +550,16 @@ void player_meshes_fini(Player *player) {
             PlayerArms *arms = player_mesh->arms[i];
             if (!arms) continue;
 
-            for (int ii = 0; ii < 2; ii++) {
-                const PlayerArmMesh *arm = ii ? arms->left : arms->right;
+            for (int j = 0; j < 2; j++) {
+                const PlayerArmMesh *arm = j ? arms->left : arms->right;
 
                 if (arm->extender) mesh_fini(arm->extender);
 
                 if (arm->upper) mesh_fini(arm->upper);
                 if (arm->joint) mesh_fini(arm->joint);
 
-                for (size_t iii = 0; iii < arm->lower->mesh_count; iii++) {
-                    mesh_fini(arm->lower->meshes[iii]);
+                for (size_t k = 0; k < arm->lower->mesh_count; k++) {
+                    mesh_fini(arm->lower->meshes[k]);
                 }
             }
 
