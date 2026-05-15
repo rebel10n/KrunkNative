@@ -259,6 +259,7 @@ typedef struct {
     GLFWwindow *window;
     Camera camera;
     Scene *scene;
+    Scene *fps_scene;
     UI *ui;
 
     struct {
@@ -291,7 +292,7 @@ void client_animate_object_texture(Object*, float);
 
 unsigned int load_texture(char*);
 GlyphCacheEntry *load_glyph(char);
-Geometry *load_obj_model(char*);
+Geometry *load_obj_model(char*, int);
 
 Geometry *create_cube_geo();
 Geometry *create_plane_geo();

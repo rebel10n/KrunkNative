@@ -115,6 +115,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     const cJSON *raw_emissive = cJSON_GetObjectItem(raw_obj, "e");
     const cJSON *raw_emissive_idx = cJSON_GetObjectItem(raw_obj, "ei");
     const cJSON *raw_opacity = cJSON_GetObjectItem(raw_obj, "o");
+    const cJSON *raw_model_size = cJSON_GetObjectItem(raw_obj, "ms");
 
     const float opacity = cJSON_IsNumber(raw_opacity) ? (float) cJSON_GetNumberValue(raw_opacity) : 1.0f;
 
@@ -180,7 +181,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         const unsigned int texture_id = load_texture(full_texture_path);
         free(full_texture_path);
 
-        Geometry *geometry = load_obj_model(full_model_path);
+        Geometry *geometry = load_obj_model(full_model_path, 1);
         free(full_model_path);
 
         if (!geometry) return NULL;
@@ -191,7 +192,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         mesh->visible = visible;
         mesh->transform.position = object->position;
         mesh->transform.rotation = rotation;
-        mesh->transform.scale.x = mesh->transform.scale.y = mesh->transform.scale.z = prefab_model.scale;
+        mesh->transform.scale.x = mesh->transform.scale.y = mesh->transform.scale.z = cJSON_IsNumber(raw_model_size) ? (float) cJSON_GetNumberValue(raw_model_size) : prefab_model.scale;
 
         material->base.transparent = prefab_model.transparent || opacity != 1.0f;
         material->texture = texture_id;

@@ -29,6 +29,13 @@ const Weapon g_akimbo = {
     .recover_y = 0.996f,
     .recover_f = 0.975f,
     .zoom = 1.5f,
+    .scale = 0.9f,
+    .hold_width = 1.3f,
+
+    .origin = {0.0f, -0.62f, -2.5f},
+    .offset = {1.5f, -0.95f, -3.3f},
+    .left_hold = {-0.1f, -0.55f, 0.2f},
+    .right_hold = {-0.1f, -0.55f, 0.2f},
 };
 
 // {

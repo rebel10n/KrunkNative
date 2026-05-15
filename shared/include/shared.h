@@ -55,8 +55,11 @@ typedef struct {
     float lean_max;
     float lean_pull;
     float lean_pull_z;
+    float lean_mlt_z;
     float bob_pull_y;
     float bob_pull_z;
+    float bob_mlt_y;
+    float bob_mlt_z;
     float crouch_anim;
     float collision_padding;
     float booster_speed;
@@ -73,6 +76,7 @@ typedef struct {
     float aim_anim_mlt;
     float crouch_anim_mlt;
     float step_anim;
+    float step_pull;
 } GameConstants;
 
 extern const GameConstants game_constants;

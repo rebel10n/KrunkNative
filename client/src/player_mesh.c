@@ -63,7 +63,7 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
 
     const float arm_scale = game_constants.arm_scale * (third_person ? 1.0f : 0.68f);
     const float arm_length = MIN(game_constants.upper_arm_length + game_constants.lower_arm_length - 0.01f, sqrtf(
-        powf((weapon->offset.x * left_handed_mlt - hold.x - x), 2.0f) +
+        powf(((weapon->offset.x * left_handed_mlt - hold.x) * (is_left && weapon->akimbo ? -1.0f : 1.0f) - x), 2.0f) +
         powf((weapon->offset.y + hold.y - y), 2.0f) +
         powf((weapon->offset.z - hold.z), 2.0f)
     ));
@@ -133,7 +133,7 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     arm->anchor.scale = (vec3) {1.0f, 1.0f, 1.0f};
 
     arm->anchor.rotation.x = -arm_angles[1] + atan2f(weapon->offset.y + hold.y - y, -(weapon->offset.z - hold.z));
-    arm->anchor.rotation.y = atan2f(x - (weapon->offset.x * left_handed_mlt - hold.x), -(weapon->offset.z - hold.z));
+    arm->anchor.rotation.y = atan2f(x - (weapon->offset.x * left_handed_mlt - hold.x) * (is_left && weapon->akimbo ? -1.0f : 1.0f), -(weapon->offset.z - hold.z));
     arm->anchor.rotation_order = ROTATION_ORDER_EXTRINSIC;
 
     return arm;
@@ -353,27 +353,104 @@ void player_generate_meshes(Player *player, const int render_you) {
             for (int i = 0; i < player->loadout_size; i++) {
                 const Weapon *weapon = player->game->weapons[player->loadout[i]];
 
-                // ARM GENERATION
                 PlayerArms *arms = generate_arms(weapon, colors[1], colors[5], colors[0], third_person, player->left_handed);
+                if (!arms) continue;
 
-                if (arms) {
-                    arms->anchor.parent = player_mesh->upper_body_anchor;
-                    player_mesh->arms[i] = arms;
-                }
+                arms->anchor.parent = player_mesh->upper_body_anchor;
+                player_mesh->arms[i] = arms;
 
                 // MELEE MESH
                 if (weapon->melee) {
-                    // TODO
+                    const char *model = "models/melee/melee_0.obj";
+                    const char *texture = "textures/melee/melee_0.png";
+
+                    char *model_path = concat(client_assets_path(), model);
+                    char *texture_path = concat(client_assets_path(), texture);
+
+                    Geometry *melee_geo = load_obj_model(model_path, 0);
+                    const unsigned int melee_texture = load_texture(texture_path);
+
+                    free(model_path);
+                    free(texture_path);
+
+                    if (melee_geo && melee_texture) {
+                        BasicMaterial *melee_mat = basic_material_init();
+                        Mesh *melee = mesh_init(melee_geo, (Material *) melee_mat);
+
+                        melee_mat->texture = melee_texture;
+                        melee->transform.parent = &arms->anchor;
+
+                        // TODO: skin hold offsets
+                        melee->transform.position.x = render_you ? 0.9f : 1.7f;
+                        melee->transform.position.y = render_you ? -0.95f : -0.4f;
+                        melee->transform.position.z = render_you ? 0.72f : 1.2f;
+
+                        // TODO: skin rotation
+                        melee->transform.rotation.x = (float) -M_PI / 3.5f;
+                        melee->transform.rotation.y = render_you ? 0.3f : (float) M_PI * 0.5f;
+                        melee->transform.rotation.z = (float) M_PI * -0.9f;
+
+                        arms->weapon_right = melee;
+                    }
                 }
 
-                // WEAPON MESH
                 if (weapon->src) {
                     for (int j = 0; j < 2; j++) {
-                        // TODO
+                        const size_t model_length = snprintf(NULL, 0, "models/weapons/%s.obj", weapon->src);
+                        char *model = malloc(model_length + 1);
+
+                        const size_t texture_length = snprintf(NULL, 0, "textures/weapons/%s.png", weapon->src);
+                        char *texture = malloc(texture_length + 1);
+
+                        char *model_path = NULL;
+                        char *texture_path = NULL;
+
+                        if (model) {
+                            snprintf(model, model_length + 1, "models/weapons/%s.obj", weapon->src);
+                            model_path = concat(client_assets_path(), model);
+
+                            free(model);
+                        }
+
+                        if (texture) {
+                            snprintf(texture, texture_length + 1, "textures/weapons/%s.png", weapon->src);
+                            texture_path = concat(client_assets_path(), texture);
+
+                            free(texture);
+                        }
+
+                        if (!model_path || !texture_path) continue;
+
+                        Geometry *weapon_geo = load_obj_model(model_path, 0);
+                        const unsigned int weapon_tex = load_texture(texture_path);
+
+                        free(texture_path);
+                        free(model_path);
+
+                        if (!weapon_geo) continue;
+
+                        BasicMaterial *weapon_mat = basic_material_init();
+                        Mesh *weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
+
+                        weapon_mat->texture = weapon_tex;
+
+                        weapon_mesh->transform.position.x = j ? weapon->offset.x * -2.0f : 0.0f;
+                        weapon_mesh->transform.position.y = 0.0f; // TODO: weapon skin y offset
+                        weapon_mesh->transform.position.z = 0.0f; // TODO: weapon skin z offset
+
+                        weapon_mesh->transform.scale.x = weapon_mesh->transform.scale.y = weapon_mesh->transform.scale.z = weapon->scale;
+
+                        weapon_mesh->transform.rotation.y = weapon->rotation ? weapon->rotation : (float) M_PI * 0.5f;
+                        weapon_mesh->transform.parent = &arms->anchor;
+
+                        if (j) arms->weapon_left = weapon_mesh;
+                        else arms->weapon_right = weapon_mesh;
 
                         if (!weapon->akimbo) break;
                     }
                 }
+
+                // TODO: attachments & flaps
             }
         }
     }
@@ -549,6 +626,9 @@ void player_meshes_fini(Player *player) {
         for (size_t i = 0; i < player->loadout_size; i++) {
             PlayerArms *arms = player_mesh->arms[i];
             if (!arms) continue;
+
+            if (arms->weapon_right) mesh_fini(arms->weapon_right);
+            if (arms->weapon_left) mesh_fini(arms->weapon_left);
 
             for (int j = 0; j < 2; j++) {
                 const PlayerArmMesh *arm = j ? arms->left : arms->right;

@@ -58,8 +58,11 @@ const GameConstants game_constants = {
     .lean_max = 0.16f,
     .lean_pull = 0.99f,
     .lean_pull_z = 0.99f,
+    .lean_mlt_z = 0.03f,
     .bob_pull_y = 0.985f,
     .bob_pull_z = 0.99f,
+    .bob_mlt_y = 0.024f,
+    .bob_mlt_z = 0.02f,
     .crouch_anim = 0.8f,
     .collision_padding = 1.1f,
     .booster_speed = 2.0f,
@@ -76,4 +79,5 @@ const GameConstants game_constants = {
     .aim_anim_mlt = 0.18f,
     .crouch_anim_mlt = 0.5f,
     .step_anim = 0.075f,
+    .step_pull = 0.995f,
 };

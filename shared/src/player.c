@@ -394,6 +394,9 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
             const PlayerArms *arms = player_mesh->arms[i];
             const int show = i == player->loadout_index;
 
+            if (arms->weapon_right) arms->weapon_right->visible = show;
+            if (arms->weapon_left) arms->weapon_left->visible = show;
+
             for (int j = 0; j < 2; j++) {
                 const PlayerArmMesh *arm = j ? arms->left : arms->right;
 
@@ -438,7 +441,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
     // TODO: spin distance (unused?)
 
 #ifdef KRUNKNATIVE_CLIENT
-    if (!recon) {
+    if (!recon && player->render_you) {
         player->lean_anim.x -= yaw_delta * game_constants.lean_sensitivity;
         player->lean_anim.x = CLAMP(player->lean_anim.x, -game_constants.lean_max, game_constants.lean_max);
 
@@ -454,6 +457,8 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
         if (player->recoil.x) player->recoil.x *= powf(game_constants.lean_pull, delta * 1000.0f);
         if (player->recoil.z) player->recoil.z *= powf(game_constants.lean_pull, delta * 1000.0f);
+
+        // TODO: inspect x
     }
 #endif
 
@@ -697,10 +702,33 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         player->air_time = player->on_ground ? 0 : player->air_time + delta;
     }
 
-    player->covered_distance += hypotf(player->position.x - player->last_position.x, player->position.z - player->last_position.z);
+    const float delta_pos2D = hypotf(player->position.x - player->last_position.x, player->position.z - player->last_position.z);
+    player->covered_distance += delta_pos2D;
 
     if (!recon && 1 /* TODO: check that teamOptions != prop */ && player->game->map->config.model != MODEL_TYPE_SPRITE) {
-        // TODO: update bob, lean, step animations
+        const float delta_pos = sqrtf(
+            powf(player->position.x - player->last_position.x, 2.0f) +
+            powf(player->position.y - player->last_position.y, 2.0f) +
+            powf(player->position.z - player->last_position.z, 2.0f)
+        ) * (player->render_you && player->on_ladder ? 1.4f : 1.0f);
+
+        if (player->render_you) {
+            player->bob_anim.z += delta_pos2D * game_constants.bob_mlt_z;
+            player->bob_anim.y -= (player->last_position.y - player->position.y) * game_constants.bob_mlt_y;
+        }
+
+        // TODO: play step sound
+
+        if (player->render_you) {
+            if (contact && input->move_dir >= 0) {
+                player->lean_anim.z -= delta_pos * game_constants.lean_mlt_z * (player->weapon->z_lean_mlt ? player->weapon->z_lean_mlt : 1.0f) * cosf(move_dir);
+            } else {
+                player->step_val *= powf(game_constants.step_pull, delta * 1000.0f);
+            }
+
+            if (player->step_chase != player->step_val) player->step_chase += (player->step_val - player->step_chase) * 0.15f;
+        }
+
         // TODO: update spread
 
         if (input->reload && !player->game->mode->config.no_reloads) {

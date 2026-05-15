@@ -54,8 +54,10 @@ typedef struct {
     float recoil_y_mlt;
     float recoil_z;
     float recoil_z_mlt;
+    float rotation;
     float z_rotation;
     float z_rotation_mlt;
+    float z_lean_mlt;
     float y_rotation;
     float rotation_offset;
     float rotation_offset_aim;
@@ -68,6 +70,7 @@ typedef struct {
     float crouch_lean;
     float crouch_rotation;
     float crouch_drop;
+    float scale;
 
     float hold_width;
     float hold_distance_offset;

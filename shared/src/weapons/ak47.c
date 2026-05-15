@@ -43,6 +43,7 @@ const Weapon g_ak47 = {
     .crouch_rotation = 0.1f,
     .crouch_drop = 0.1f,
     .hold_width = 0.8f,
+    .scale = 0.00095745145728643f,
 
     .origin = {0.0f, -0.59f, -2.14f},
     .offset = {0.7f, -0.87f, -3.33f},

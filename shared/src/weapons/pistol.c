@@ -36,11 +36,12 @@ const Weapon g_pistol = {
     .lean_mlt = 1.0f,
     .inspect_rotation = 0.3f,
     .inspect_mlt = 0.8f,
+    .scale = 0.0003158947055276376f,
 
     .hold_width = 1.3f,
     .origin = {0.0f, -0.23f, -3.9f},
     .offset = {1.2f, -0.6f, -3.7f},
-    .right_hold = {0.0f, -0.62f, -0.32f},
+    .right_hold = {0.13f, -0.62f, -0.32f},
     .left_hold = {0.0f, -1.1f, -0.3f},
 };
 

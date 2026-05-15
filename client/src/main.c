@@ -92,9 +92,10 @@ int main() {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     INSTANCE.scene = scene_init();
+    INSTANCE.fps_scene = scene_init();
     INSTANCE.ui = ui_init();
 
-    if (!INSTANCE.scene || !INSTANCE.ui) return -1;
+    if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
 
     game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
     game_init(&INSTANCE.game, -1, -1, 1);
@@ -231,7 +232,7 @@ void client_enter_game(Client *client) {
         const PlayerMesh *player_mesh = client->me->mesh;
         player_mesh->anchor->position = client->me->position;
 
-        scene_add_player_mesh(client->scene, client->me->mesh, client->me->loadout_size);
+        scene_add_player_mesh(client->fps_scene, client->me->mesh, client->me->loadout_size);
     } else {
         // TODO: liftoff
     }
@@ -244,6 +245,9 @@ void client_tick(Client *client, const float now, const float delta) {
 
     client_tick_textures(client, now);
     scene_render(client->scene, &client->camera);
+
+    glClear(GL_DEPTH_BUFFER_BIT);
+    scene_render(client->fps_scene, &client->camera);
 
     ui_update(client->ui);
 
@@ -258,7 +262,7 @@ void client_tick(Client *client, const float now, const float delta) {
     if (debug_key && !client->last_debug_key) {
         client_unload_map(client);
 
-        scene_remove_player_mesh(client->scene, client->me->mesh, client->me->loadout_size);
+        scene_remove_player_mesh(client->fps_scene, client->me->mesh, client->me->loadout_size);
         player_meshes_fini(client->me);
 
         client->me = NULL;

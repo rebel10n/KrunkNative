@@ -20,6 +20,13 @@ const Weapon g_knife = {
     .recover = 0.98f,
     .recover_f = 0.98f,
     .zoom = 1.2f,
+
+    .z_rotation_mlt = 0.35f,
+
+    .origin = {0.0001f, -0.6f, -3.6f},
+    .offset = {0.0f, -0.6f, -3.6f},
+    .left_hold = {1.5f, -0.82f, -0.5f},
+    .right_hold = {-1.5f, -0.82f, -0.5f}
 };
 
 // {

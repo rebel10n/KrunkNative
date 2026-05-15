@@ -85,7 +85,7 @@ GlyphCacheEntry *load_glyph(const char c) {
     return entry;
 }
 
-Geometry *load_obj_model(char *path) {
+Geometry *load_obj_model(char *path, const int transform_y) {
     geometry_cache_map_itr cached = vt_get(&g_geometry_cache, path);
     if (!vt_is_end(cached)) return cached.data->val;
 
@@ -188,9 +188,11 @@ Geometry *load_obj_model(char *path) {
         }
     }
 
-    for (size_t i = 0; i < alloc_vertex_count; i++) {
-        vertex *vertex = &vertices[i];
-        vertex->position.y -= bounds_min.y;
+    if (transform_y) {
+        for (size_t i = 0; i < alloc_vertex_count; i++) {
+            vertex *vertex = &vertices[i];
+            vertex->position.y -= bounds_min.y;
+        }
     }
 
     unsigned int vbo;
