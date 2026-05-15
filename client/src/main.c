@@ -227,11 +227,6 @@ void client_enter_game(Client *client) {
         player_spawn(client->me);
         player_generate_meshes(client->me, 1);
         player_swap_weapon(client->me, 0, 1, 0, 0);
-        player_update_meshes(client->me, 0);
-
-        const PlayerMesh *player_mesh = client->me->mesh;
-        player_mesh->anchor->position = client->me->position;
-
         scene_add_player_mesh(client->fps_scene, client->me->mesh, client->me->loadout_size);
     } else {
         // TODO: liftoff

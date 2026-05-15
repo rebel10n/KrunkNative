@@ -560,7 +560,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     player_mesh->upper_body_anchor->rotation.z = 0.35f * weapon_rotation;
 
     player_mesh->upper_body_anchor->position.x = player_mesh->upper_body_anchor->position.z = 0.0f;
-    player_mesh->upper_body_anchor->position.y = player->recoil_anim_y * (player->weapon->recoil_y_mlt ? player->weapon->recoil_y_mlt : 0.3f) * recoil_y_mlt + player->height - game_constants.camera_height - game_constants.leg_height;
+    player_mesh->upper_body_anchor->position.y = player->recoil_anim_y * (player->weapon->recoil_y_mlt ? player->weapon->recoil_y_mlt : 0.3f) * recoil_y_mlt + (player->render_you && !third_person ? player->height : game_constants.player_height) - game_constants.camera_height - game_constants.leg_height;
 
     MeshTransform *arm_anchor = &player_mesh->arms[player->loadout_index]->anchor;
 
@@ -599,6 +599,41 @@ void player_update_meshes(Player *player, const int is_preview) {
 
     arm_anchor->position.z = weapon_offset.z - (weapon_offset.z - player->weapon->origin.z) * aim_val +
         0.0f /* TODO: player->recoil_tween_z */ + player->bob_anim.z * anim_mlt + player->recoil_anim * player->weapon->recoil_z * recoil_z_mlt;
+
+
+    if (!player->render_you || third_person) {
+        const float crouch_distance = game_constants.crouch_distance * player->crouch_val;
+        const float crouch_lean = game_constants.crouch_lean * player->crouch_val;
+
+        player_mesh->body_anchor->rotation.y = player_mesh->body_anchor->rotation.z = 0.0f;
+        player_mesh->body_anchor->rotation.x = crouch_lean + player->direction.x * 0.5f;
+
+        player_mesh->upper_body_anchor->rotation.x -= crouch_lean;
+
+        player_mesh->body_anchor->position.x = player_mesh->body_anchor->position.z = 0.0f;
+        player_mesh->body_anchor->position.y = game_constants.leg_height - crouch_distance;
+
+        for (int i = 0; i < 2; i++) {
+            ColorCube *leg = player_mesh->legs[i];
+            if (!leg) continue;
+
+            for (size_t j = 0; j < leg->mesh_count; j++) {
+                leg->meshes[j]->visible = !player->crouch_val;
+            }
+        }
+
+        for (int i = 0; i < 2; i++) {
+            PlayerCrouchedLeg *leg = player_mesh->crouched_legs[i];
+            if (!leg) continue;
+
+            leg->upper->visible = !!player->crouch_val;
+            leg->joint->visible = !!player->crouch_val;
+
+            for (size_t j = 0; j < leg->lower->mesh_count; j++) {
+                leg->lower->meshes[j]->visible = !!player->crouch_val;
+            }
+        }
+    }
 }
 
 void player_meshes_fini(Player *player) {

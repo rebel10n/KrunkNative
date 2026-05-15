@@ -1,3 +1,4 @@
+#include <math.h>
 #include <shared.h>
 
 const float arm_scale = 1.2f;
@@ -23,6 +24,7 @@ const GameConstants game_constants = {
     .jump_push = 0.1f,
     .crouch_jump = 0.25f,
     .crouch_speed = 7.0f,
+    .crouch_lean = (float) M_PI * -0.1f,
     .player_speed = 0.42f,
     .slipping_speed = 0.3f,
     .air_speed = 0.047f,
