@@ -125,7 +125,7 @@ float line_in_rect(const vec3 origin, const vec3 direction, const vec3 obj_origi
     const float tmin = MAX(MAX(MIN(tx1, tx2), MIN(ty1, ty2)), MIN(tz1, tz2));
     const float tmax = MIN(MIN(MAX(tx1, tx2), MAX(ty1, ty2)), MAX(tz1, tz2));
 
-    return tmin < tmax && tmin > 0 ? tmin : -1.0f;
+    return tmin <= tmax && tmin > 0 ? tmin : -1.0f;
 }
 
 void angles_from_sides(const float a, const float b, const float c, float *out) {

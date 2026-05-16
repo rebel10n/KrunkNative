@@ -924,9 +924,9 @@ void player_shoot(Player *player) {
 
             const vec3 shot_origin = {player->position.x, shot_height, player->position.z};
             const vec3 shot_dir = {
-                sinf(shot_angles.y + (float) M_PI) * cosf(shot_angles.x),
-                sinf(shot_angles.x),
-                cosf(shot_angles.y + (float) M_PI) * cosf(shot_angles.x),
+                range * sinf(shot_angles.y + (float) M_PI) * cosf(shot_angles.x),
+                range * sinf(shot_angles.x),
+                range * cosf(shot_angles.y + (float) M_PI) * cosf(shot_angles.x),
             };
 
             size_t hit_count = 0;
@@ -936,7 +936,7 @@ void player_shoot(Player *player) {
                 const Object *object = player->game->map->objects[j];
                 const float t = line_in_rect(shot_origin, shot_dir, object->position, object->scale);
 
-                if (t < 0.0f) continue;
+                if (t < 0.0f || t > 1.0f) continue;
 
                 if (!hit_count) {
                     hits = calloc(1, sizeof(Hit));
