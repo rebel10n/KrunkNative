@@ -82,4 +82,5 @@ const GameConstants game_constants = {
     .crouch_anim_mlt = 0.5f,
     .step_anim = 0.075f,
     .step_pull = 0.995f,
+    .disk_spin = 0.2f,
 };

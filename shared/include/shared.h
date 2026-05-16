@@ -78,6 +78,7 @@ typedef struct {
     float crouch_anim_mlt;
     float step_anim;
     float step_pull;
+    float disk_spin;
 } GameConstants;
 
 extern const GameConstants game_constants;
@@ -194,6 +195,7 @@ typedef struct {
     unsigned int team;
     unsigned int score_points;
 
+    float spin;
     float bounce;
 
     CollisionType collision_type;
@@ -420,6 +422,9 @@ typedef struct {
     vec3 last_position;
     vec3 velocity;
     vec2 direction;
+
+    float x_vel_cylinder;
+    float z_vel_cylinder;
 
     float jump_rotate;
 

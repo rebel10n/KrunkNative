@@ -301,6 +301,45 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             }
 
             if (object->collision_type == COLLISION_TYPE_CYLINDER) {
+                int y_collision = 1;
+
+                if (player->last_position.y >= object->position.y + object->scale.y) {
+                    if (player->last_position.y > player->position.y) ; // TODO: reset step
+
+                    player->position.y = object->position.y + object->scale.y;
+                    player->velocity.y = 0.0f;
+                    player->on_ground = 1;
+                    player->on_terrain = 0;
+                } else if (player->last_position.y + player->height <= object->position.y) {
+                    player->position.y = object->position.y - player->height;
+                    player->velocity.y = 0.0f;
+                } else if (player->position.y < object->position.y + object->scale.y && object->position.y + object->scale.y - player->position.y <= game_constants.climb_height && player->last_position.y < object->position.y + object->scale.y && can_jump) {
+                    player->position.y += (object->position.y + object->scale.y - player->position.y) * 0.3f;
+                    player->on_ground = 1;
+                    player->on_terrain = 0;
+                } else {
+                    const float direction = atan2f(player->position.z - object->position.z, player->position.x - object->position.x);
+
+                    player->position.x = object->position.x + (object->scale.x * 0.5f + player->scale) * cosf(direction);
+                    player->position.z = object->position.z + (object->scale.x * 0.5f + player->scale) * sinf(direction);
+
+                    y_collision = 0;
+                }
+
+                if (y_collision) {
+                    const float direction = atan2f(player->position.z - object->position.z, player->position.x - object->position.x) - object->spin * delta * game_constants.disk_spin;
+                    const float distance = hypotf(player->position.x - object->position.x, player->position.z - object->position.z);
+
+                    const float old_x = player->position.x;
+                    const float old_z = player->position.z;
+
+                    player->position.x = object->position.x + distance * cosf(direction);
+                    player->position.z = object->position.z + distance * sinf(direction);
+
+                    player->x_vel_cylinder = player->position.x - old_x;
+                    player->z_vel_cylinder = player->position.z - old_z;
+                }
+
                 continue;
             }
 
@@ -430,7 +469,8 @@ void player_reload(Player *player) {
 }
 
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
-    const float delta = CLAMP(input->delta, game_constants.min_delta, game_constants.max_delta);
+    // const float delta = CLAMP(input->delta, game_constants.min_delta, game_constants.max_delta);
+    const float delta = MIN(input->delta, game_constants.max_delta);
     const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir;
 
     if (player->noclip) player->on_ground = 1;
@@ -647,7 +687,18 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         }
 
         // TODO: air strafes
-        // TODO: xVelC, zVelC (apparently for cylinders?)
+
+        if (!contact) {
+            if (player->x_vel_cylinder) {
+                player->velocity.x += player->x_vel_cylinder * 0.07f;
+                player->x_vel_cylinder = 0.0f;
+            }
+
+            if (player->z_vel_cylinder) {
+                player->velocity.z += player->z_vel_cylinder * 0.07f;
+                player->z_vel_cylinder = 0.0f;
+            }
+        }
 
         if (player->velocity.x) {
             player->position.x += player->velocity.x * player->game->map->config.speed.x * delta * 1000.0f;
