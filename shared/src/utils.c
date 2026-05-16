@@ -105,22 +105,22 @@ float progress_on_line(const vec2 line_start, const vec2 line_end, const vec2 po
     return (dir.x * (point.x - line_start.x) + (point.y - line_start.y) * dir.y) / (dir.x*dir.x + dir.y*dir.y);
 }
 
-float line_in_rect(const vec3 origin, const vec3 direction, const vec3 obj_center, const vec3 obj_scale) {
+float line_in_rect(const vec3 origin, const vec3 direction, const vec3 obj_origin, const vec3 obj_scale) {
     if (
-        direction.x > 0.0f && obj_center.x + obj_scale.x * 0.5f < origin.x ||
-        direction.x < 0.0f && obj_center.x - obj_scale.x * 0.5f > origin.x ||
-        direction.y > 0.0f && obj_center.y + obj_scale.y * 0.5f < origin.y ||
-        direction.y < 0.0f && obj_center.y - obj_scale.y * 0.5f > origin.y ||
-        direction.z > 0.0f && obj_center.z + obj_scale.z * 0.5f < origin.z ||
-        direction.z < 0.0f && obj_center.z - obj_scale.z * 0.5f > origin.z
+        direction.x > 0.0f && obj_origin.x + obj_scale.x * 0.5f < origin.x ||
+        direction.x < 0.0f && obj_origin.x - obj_scale.x * 0.5f > origin.x ||
+        direction.y > 0.0f && obj_origin.y + obj_scale.y < origin.y ||
+        direction.y < 0.0f && obj_origin.y > origin.y ||
+        direction.z > 0.0f && obj_origin.z + obj_scale.z * 0.5f < origin.z ||
+        direction.z < 0.0f && obj_origin.z - obj_scale.z * 0.5f > origin.z
     ) return -1.0f;
 
-    const float tx1 = (obj_center.x - obj_scale.x * 0.5f - origin.x) / direction.x;
-    const float tx2 = (obj_center.x + obj_scale.x * 0.5f - origin.x) / direction.x;
-    const float ty1 = (obj_center.y - obj_scale.y * 0.5f - origin.y) / direction.y;
-    const float ty2 = (obj_center.y + obj_scale.y * 0.5f - origin.y) / direction.y;
-    const float tz1 = (obj_center.z - obj_scale.z * 0.5f - origin.z) / direction.z;
-    const float tz2 = (obj_center.z + obj_scale.z * 0.5f - origin.z) / direction.z;
+    const float tx1 = (obj_origin.x - obj_scale.x * 0.5f - origin.x) / direction.x;
+    const float tx2 = (obj_origin.x + obj_scale.x * 0.5f - origin.x) / direction.x;
+    const float ty1 = (obj_origin.y - origin.y) / direction.y;
+    const float ty2 = (obj_origin.y + obj_scale.y - origin.y) / direction.y;
+    const float tz1 = (obj_origin.z - obj_scale.z * 0.5f - origin.z) / direction.z;
+    const float tz2 = (obj_origin.z + obj_scale.z * 0.5f - origin.z) / direction.z;
 
     const float tmin = MAX(MAX(MIN(tx1, tx2), MIN(ty1, ty2)), MIN(tz1, tz2));
     const float tmax = MIN(MIN(MAX(tx1, tx2), MAX(ty1, ty2)), MAX(tz1, tz2));

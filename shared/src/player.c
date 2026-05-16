@@ -844,6 +844,11 @@ void player_melee(Player *player) {
     }
 }
 
+typedef struct {
+    const Object *object;
+    float t;
+} Hit;
+
 void player_shoot(Player *player) {
     // TODO: increase shots stat
 
@@ -879,14 +884,14 @@ void player_shoot(Player *player) {
     const int is_projectile = player->weapon->projectile && (!player->weapon->projectile_disable || player->game->config.bullet_drop);
     const float shot_height = player->position.y + player->height - game_constants.camera_height;
 
-    vec2 shot_dir = {};
+    vec2 shot_angles = {};
 
     if (is_projectile) {
         const float projectile_spread = 0.0f; // TODO
         const float spread = (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment * projectile_spread;
 
-        shot_dir.x = player->direction.x + player->recoil_anim_y * game_constants.recoil_mlt + spread;
-        shot_dir.y = player->direction.y + spread;
+        shot_angles.x = player->direction.x + player->recoil_anim_y * game_constants.recoil_mlt + spread;
+        shot_angles.y = player->direction.y + spread;
 
         // TODO: init projectile
     }
@@ -900,8 +905,8 @@ void player_shoot(Player *player) {
                 const float spread_mlt = (float) pcg32_random() / (float) UINT32_MAX * 0.02f + 0.3f;
 
                 // swizzle spread (x is pitch, y is yaw)
-                shot_dir.x = player->direction.x + spread.y * spread_mlt;
-                shot_dir.y = player->direction.y + spread.x * spread_mlt;
+                shot_angles.x = player->direction.x + spread.y * spread_mlt;
+                shot_angles.y = player->direction.y + spread.x * spread_mlt;
             } else {
                 const float spread_range = i >= 0 ? (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment : 0.0f;
                 const vec2 spread = {
@@ -909,15 +914,47 @@ void player_shoot(Player *player) {
                     ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * spread_range,
                 };
 
-                shot_dir.x = player->direction.x + spread.x;
-                shot_dir.y = player->direction.y + spread.y;
+                shot_angles.x = player->direction.x + spread.x;
+                shot_angles.y = player->direction.y + spread.y;
             }
 
-            shot_dir.x += player->recoil_anim_y * game_constants.recoil_mlt;
+            shot_angles.x += player->recoil_anim_y * game_constants.recoil_mlt;
 
             const float range = i < 0 ? player->weapon->physical_range : player->weapon->range;
 
-            // TODO: hitscan
+            const vec3 shot_origin = {player->position.x, shot_height, player->position.z};
+            const vec3 shot_dir = {
+                sinf(shot_angles.y + (float) M_PI) * cosf(shot_angles.x),
+                sinf(shot_angles.x),
+                cosf(shot_angles.y + (float) M_PI) * cosf(shot_angles.x),
+            };
+
+            size_t hit_count = 0;
+            Hit *hits = NULL;
+
+            for (size_t j = 0; j < player->game->map->object_count; j++) {
+                const Object *object = player->game->map->objects[j];
+                const float t = line_in_rect(shot_origin, shot_dir, object->position, object->scale);
+
+                if (t < 0.0f) continue;
+
+                if (!hit_count) {
+                    hits = calloc(1, sizeof(Hit));
+                    if (hits) hit_count = 1;
+                } else {
+                    Hit *new_hits = realloc(hits, (hit_count + 1) * sizeof(Hit));
+                    if (new_hits) {
+                        hits = new_hits;
+                        hit_count++;
+                    } else {
+                        free(hits);
+                        hits = NULL;
+                    }
+                }
+
+                ((Mesh *) object->mesh)->material->wireframe = 1;
+                hits[hit_count - 1] = (Hit) {object, t};
+            }
         }
     }
 }
