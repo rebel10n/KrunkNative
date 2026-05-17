@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <server.h>
 
 ReplxxActionResult cli_sigint(int ignored, void *user_data) {

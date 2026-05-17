@@ -1,5 +1,10 @@
 #include <server.h>
 #include <errno.h>
+#include <string.h>
+
+#ifndef WIN32
+#include <unistd.h>
+#endif
 
 #define NET_ERROR(...) { replxx_print(g_replxx, __VA_ARGS__); g_server->should_quit = 1; return; }
 
@@ -7,7 +12,12 @@ void net_add_client(ClientConnection *client) {
     ClientConnection *new_clients = realloc(g_server->clients, (g_server->client_count + 1) * sizeof(ClientConnection));
 
     if (!new_clients) {
+#ifdef WIN32
         closesocket(client->fd);
+#else
+        close(client->fd);
+#endif
+
         free(client);
 
         return;
