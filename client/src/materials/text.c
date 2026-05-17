@@ -39,8 +39,8 @@ TextMaterial *text_material_init() {
     material->base.vtable = &text_material_vtable;
 
     if (!shader_program) {
-        char *vert_shader = concat(client_assets_path(), "shaders/quad.vert");
-        char *frag_shader = concat(client_assets_path(), "shaders/text.frag");
+        char *vert_shader = concat(assets_path(), "shaders/quad.vert");
+        char *frag_shader = concat(assets_path(), "shaders/text.frag");
 
         shader_program = shader_compile(vert_shader, frag_shader);
 

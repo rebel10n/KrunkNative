@@ -172,8 +172,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         snprintf(model_path, model_path_length + 1, "models/%s.obj", prefab_model.filename);
         snprintf(texture_path, texture_path_length + 1, "textures/%s.png", prefab_model.filename);
 
-        char *full_model_path = concat(client_assets_path(), model_path);
-        char *full_texture_path = concat(client_assets_path(), texture_path);
+        char *full_model_path = concat(assets_path(), model_path);
+        char *full_texture_path = concat(assets_path(), texture_path);
         
         free(model_path);
         free(texture_path);
@@ -225,7 +225,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         snprintf(texture_path, texture_path_length + 1, "textures/%s_%d.png", prefab_textures[tex_id].name, tex_id == 8);
     }
 
-    char *full_texture_path = concat(client_assets_path(), texture_path);
+    char *full_texture_path = concat(assets_path(), texture_path);
     free(texture_path);
 
     const unsigned int texture_id = load_texture(full_texture_path);

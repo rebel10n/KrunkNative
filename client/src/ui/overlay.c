@@ -29,7 +29,7 @@ void overlay_render(Client *client, const float delta) {
         if (class_icon_path) {
             snprintf(class_icon_path, class_icon_length + 1, "textures/classes/icon_%d.png", class->icon_index);
 
-            char *full_class_icon_path = concat(client_assets_path(), class_icon_path);
+            char *full_class_icon_path = concat(assets_path(), class_icon_path);
             const unsigned int class_icon = load_texture(full_class_icon_path);
 
             if (class_icon) ui_draw_image_rounded(client->ui, class_icon, class_icon_pos.x, class_icon_pos.y, 103.0f * client->ui->scale, 103.0f * client->ui->scale, 10.0f * client->ui->scale);
@@ -95,7 +95,7 @@ void overlay_render(Client *client, const float delta) {
         ui_fill_text(client->ui, white, " ", anchor.x + 125.0f * client->ui->scale + health_str_width, anchor.y - (59.0f + 8.0f) * client->ui->scale, health_size);
         ui_fill_text(client->ui, max_health_color, max_health_str, anchor.x + 125.0f * client->ui->scale + health_str_width + space_width, anchor.y - (59.0f + 8.0f) * client->ui->scale, health_size);
 
-        char *icon_path = concat(client_assets_path(), 0 ? "img/skull_0.png" : "img/hp_0.png"); // TODO: challenge mode
+        char *icon_path = concat(assets_path(), 0 ? "img/skull_0.png" : "img/hp_0.png"); // TODO: challenge mode
         const unsigned int icon = load_texture(icon_path);
 
         if (icon) ui_draw_image(client->ui, icon, anchor.x + 130.0f * client->ui->scale + text_width, anchor.y - (59.0f + 41.0f) * client->ui->scale + (41.0f - 28.0f) * 0.5f * client->ui->scale, 28.0f * client->ui->scale, 28.0f * client->ui->scale);
@@ -116,7 +116,7 @@ void overlay_render(Client *client, const float delta) {
         const vec2 anchor = {client->ui->width - 20.0f * client->ui->scale, client->ui->height - 35.0f * client->ui->scale};
 
         if (!ammo_icon) {
-            char *icon_path = concat(client_assets_path(), "textures/ammo_0.png");
+            char *icon_path = concat(assets_path(), "textures/ammo_0.png");
 
             ammo_icon = load_texture(icon_path);
             free(icon_path);
@@ -195,7 +195,7 @@ void overlay_render(Client *client, const float delta) {
             char *icon_suffixed = concat(weapon->icon, ".png");
             char *icon_path = concat("textures/weapons/", icon_suffixed);
 
-            char *full_icon_path = concat(client_assets_path(), icon_path);
+            char *full_icon_path = concat(assets_path(), icon_path);
             const unsigned int icon = load_texture(full_icon_path);
 
             free(icon_path);
@@ -213,7 +213,7 @@ void overlay_render(Client *client, const float delta) {
         const vec2 anchor = {20.0f * client->ui->scale, 20.0f * client->ui->scale};
 
         if (!timer_icon) {
-            char *icon_path = concat(client_assets_path(), "img/timer.png");
+            char *icon_path = concat(assets_path(), "img/timer.png");
 
             timer_icon = load_texture(icon_path);
             free(icon_path);

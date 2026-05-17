@@ -53,17 +53,7 @@ void load_default_maps() {
         if (!path) continue;
 
         snprintf(path, path_length + 1, "maps/%s.json", default_map_names[i]);
-
-#ifdef KRUNKNATIVE_CLIENT
-        char *full_path = concat(client_assets_path(), path);
-#elif defined(KRUNKNATIVE_SERVER)
-        char *full_path = concat(server_assets_path(), path);
-#else
-        char *full_path = NULL;
-
-        free(path);
-        continue;
-#endif
+        char *full_path = concat(assets_path(), path);
 
         size_t map_length;
         unsigned char *map_buffer;

@@ -78,8 +78,8 @@ BasicMaterial *basic_material_init() {
     material->texture_repeat.y = 1.0f;
 
     if (!shader_program) {
-        char *vert_shader = concat(client_assets_path(), "shaders/basic.vert");
-        char *frag_shader = concat(client_assets_path(), "shaders/basic.frag");
+        char *vert_shader = concat(assets_path(), "shaders/basic.vert");
+        char *frag_shader = concat(assets_path(), "shaders/basic.frag");
 
         shader_program = shader_compile(vert_shader, frag_shader);
 

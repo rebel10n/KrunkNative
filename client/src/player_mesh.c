@@ -364,8 +364,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const char *model = "models/melee/melee_0.obj";
                     const char *texture = "textures/melee/melee_0.png";
 
-                    char *model_path = concat(client_assets_path(), model);
-                    char *texture_path = concat(client_assets_path(), texture);
+                    char *model_path = concat(assets_path(), model);
+                    char *texture_path = concat(assets_path(), texture);
 
                     Geometry *melee_geo = load_obj_model(model_path, 0);
                     const unsigned int melee_texture = load_texture(texture_path);
@@ -407,14 +407,14 @@ void player_generate_meshes(Player *player, const int render_you) {
 
                         if (model) {
                             snprintf(model, model_length + 1, "models/weapons/%s.obj", weapon->src);
-                            model_path = concat(client_assets_path(), model);
+                            model_path = concat(assets_path(), model);
 
                             free(model);
                         }
 
                         if (texture) {
                             snprintf(texture, texture_length + 1, "textures/weapons/%s.png", weapon->src);
-                            texture_path = concat(client_assets_path(), texture);
+                            texture_path = concat(assets_path(), texture);
 
                             free(texture);
                         }

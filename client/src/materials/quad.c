@@ -56,8 +56,8 @@ QuadMaterial *quad_material_init() {
     material->base.vtable = &quad_material_vtable;
 
     if (!shader_program) {
-        char *vert_shader = concat(client_assets_path(), "shaders/quad.vert");
-        char *frag_shader = concat(client_assets_path(), "shaders/quad.frag");
+        char *vert_shader = concat(assets_path(), "shaders/quad.vert");
+        char *frag_shader = concat(assets_path(), "shaders/quad.frag");
 
         shader_program = shader_compile(vert_shader, frag_shader);
 

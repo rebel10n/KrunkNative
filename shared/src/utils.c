@@ -4,6 +4,12 @@
 #include <string.h>
 #include <math.h>
 
+#ifdef WIN32
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
+
 char *concat(const char *a, const char *b) {
     const size_t len_a = strlen(a);
     const size_t len_b = strlen(b);
@@ -17,6 +23,38 @@ char *concat(const char *a, const char *b) {
     result[len_a + len_b] = 0;
 
     return result;
+}
+
+const char *assets_path() {
+    char path[256];
+    if (!getcwd(path, sizeof(path))) return NULL;
+
+#ifdef WIN32
+    const char slash = '\\';
+    const char *cmake_debug_suffix = "\\cmake-build-debug";
+    const char *cmake_release_suffix = "\\cmake-build-release";
+#else
+    const char slash = '/';
+    const char *cmake_debug_suffix = "/cmake-build-debug";
+    const char *cmake_release_suffix = "/cmake-build-release";
+#endif
+
+    const size_t path_length = strlen(path);
+    const size_t debug_length = strlen(cmake_debug_suffix);
+    const size_t release_length = strlen(cmake_release_suffix);
+
+    int devel = 0;
+
+    if (path_length >= debug_length && !strcmp(path + path_length - debug_length, cmake_debug_suffix)) devel = 1;
+    if (path_length > debug_length && !strcmp(path + path_length - debug_length - 1, cmake_debug_suffix) && path[path_length-1] == slash) devel = 1;
+
+    if (path_length >= release_length && !strcmp(path + path_length - release_length, cmake_release_suffix)) devel = 1;
+    if (path_length > release_length && !strcmp(path + path_length - release_length - 1, cmake_release_suffix) && path[path_length-1] == slash) devel = 1;
+
+    const char *devel_assets = "../assets/";
+    const char *assets = "./assets/";
+
+    return devel ? devel_assets : assets;
 }
 
 int read_file(const char *path, unsigned char **buf, size_t *length) {

@@ -42,7 +42,7 @@ int main() {
     vt_init(&g_texture_cache);
     vt_init(&g_glyph_cache);
 
-    char *game_font_path = concat(client_assets_path(), "css/fonts/font2.ttf");
+    char *game_font_path = concat(assets_path(), "css/fonts/font2.ttf");
 
     if (FT_Init_FreeType(&g_freetype) || FT_New_Face(g_freetype, game_font_path, 0, &g_game_font)) {
         return -1;
@@ -52,7 +52,7 @@ int main() {
 
     if (!glfwInit()) return -1;
 
-    static Client INSTANCE = {0};
+    static Client INSTANCE = {};
 
     INSTANCE.camera.zoom = 1.0f;
     INSTANCE.camera.fov = M_PI / 2.0f;
@@ -67,7 +67,7 @@ int main() {
     if (!INSTANCE.window) return -1;
 
     GLFWimage icon = {0};
-    char *icon_path = concat(client_assets_path(), "img/icon.png");
+    char *icon_path = concat(assets_path(), "img/icon.png");
 
     int icon_channels;
     icon.pixels = stbi_load(icon_path, &icon.width, &icon.height, &icon_channels, 4);
@@ -133,38 +133,6 @@ void client_unload_map(Client *client) {
         const Object *object = client->game.map->objects[i];
         if (object->mesh) scene_remove_mesh(client->scene, object->mesh);
     }
-}
-
-const char *client_assets_path() {
-    char path[256];
-    if (!getcwd(path, sizeof(path))) return NULL;
-
-#ifdef WIN32
-    const char slash = '\\';
-    const char *cmake_debug_suffix = "\\cmake-build-debug";
-    const char *cmake_release_suffix = "\\cmake-build-release";
-#else
-    const char slash = '/';
-    const char *cmake_debug_suffix = "/cmake-build-debug";
-    const char *cmake_release_suffix = "/cmake-build-release";
-#endif
-
-    const size_t path_length = strlen(path);
-    const size_t debug_length = strlen(cmake_debug_suffix);
-    const size_t release_length = strlen(cmake_release_suffix);
-
-    int devel = 0;
-
-    if (path_length >= debug_length && !strcmp(path + path_length - debug_length, cmake_debug_suffix)) devel = 1;
-    if (path_length > debug_length && !strcmp(path + path_length - debug_length - 1, cmake_debug_suffix) && path[path_length-1] == slash) devel = 1;
-
-    if (path_length >= release_length && !strcmp(path + path_length - release_length, cmake_release_suffix)) devel = 1;
-    if (path_length > release_length && !strcmp(path + path_length - release_length - 1, cmake_release_suffix) && path[path_length-1] == slash) devel = 1;
-
-    const char *devel_assets = "../assets/";
-    const char *assets = "./assets/";
-
-    return devel ? devel_assets : assets;
 }
 
 void resize_viewport(GLFWwindow *window, const int width, const int height) {

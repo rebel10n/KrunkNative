@@ -1,5 +1,6 @@
 #include <shared.h>
 #include <pcg_basic.h>
+#include <string.h>
 
 #ifdef KRUNKNATIVE_CLIENT
 #include <client.h>

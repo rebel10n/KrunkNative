@@ -1003,9 +1003,16 @@ void player_shoot(Player *player) {
                     }
                 }
 
+                if (!hits) continue;
+
+#ifdef KRUNKNATIVE_CLIENT
                 ((Mesh *) object->mesh)->material->wireframe = 1;
+#endif
+
                 hits[hit_count - 1] = (Hit) {object, t};
             }
+
+            free(hits);
         }
     }
 }

@@ -287,7 +287,6 @@ typedef struct {
 void hud_render(Client*, float);
 void overlay_render(Client*, float);
 
-const char *client_assets_path();
 void client_animate_object_texture(Object*, float);
 
 unsigned int load_texture(char*);

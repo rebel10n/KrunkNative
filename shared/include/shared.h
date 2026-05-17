@@ -569,6 +569,7 @@ void game_players_add(Game*, Player*);
 void game_broadcast();
 
 char *concat(const char*, const char*);
+const char *assets_path();
 int read_file(const char*, unsigned char**, size_t*);
 int parse_hex_color(const char*, vec4*);
 vec4 hex_to_vec(int);
