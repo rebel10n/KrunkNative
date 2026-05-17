@@ -47,12 +47,22 @@ int main() {
         const long long expected_nsec = 1000000000 / g_server->config.tick_rate;
         long long elapsed_nsec = 0;
 
+#ifdef WIN32
         do {
             clock_gettime(CLOCK_MONOTONIC, &tick_end);
 
             const time_t elapsed_sec = tick_end.tv_sec - tick_start.tv_sec;
             elapsed_nsec = elapsed_sec * 1000000000 + (tick_end.tv_nsec - tick_start.tv_nsec);
         } while (elapsed_nsec < expected_nsec && !g_server->should_quit);
+#else
+        long long sleep_nsec = expected_nsec - elapsed_nsec;
+        struct timespec sleep_ts;
+
+        sleep_ts.tv_sec = sleep_nsec / 1000000000LL;
+        sleep_ts.tv_nsec = (long) (sleep_nsec % 1000000000LL);
+
+        nanosleep(&sleep_ts, NULL);
+#endif
     }
 
     // TODO: destructor logic
