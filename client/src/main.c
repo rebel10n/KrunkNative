@@ -97,6 +97,13 @@ int main() {
 
     if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
 
+    NetMainArgs net_args;
+
+    net_args.address = "127.0.0.1";
+    net_args.client = &INSTANCE;
+
+    // pthread_create(&INSTANCE.net_thread, NULL, (void *) net_main, &net_args);
+
     game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
     game_init(&INSTANCE.game, -1, -1, 1);
     client_load_map(&INSTANCE);

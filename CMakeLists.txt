@@ -50,6 +50,7 @@ target_link_libraries(${SERVER_BINARY} PRIVATE replxx)
 target_include_directories(${SERVER_BINARY} PRIVATE server/include)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32)
     target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
 endif ()
 

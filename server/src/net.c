@@ -2,8 +2,11 @@
 #include <errno.h>
 #include <string.h>
 
-#ifndef WIN32
+#ifdef WIN32
+#define NET_ERRNO WSAGetLastError()
+#else
 #include <unistd.h>
+#define NET_ERRNO errno
 #endif
 
 #define NET_ERROR(...) { replxx_print(g_replxx, __VA_ARGS__); g_server->should_quit = 1; return; }
@@ -57,7 +60,11 @@ int net_poll_client(ClientConnection *client) {
     int read;
 
     if ((read = recv(client->fd, buffer, sizeof(buffer), 0)) <= 0) {
-        if (read < 0 && (!errno || errno == EAGAIN || errno == EWOULDBLOCK)) return 1;
+#ifdef WIN32
+        if (read < 0 && NET_ERRNO == WSAEWOULDBLOCK) return 1;
+#else
+        if (read < 0 && (NET_ERRNO == EAGAIN || NET_ERRNO == EWOULDBLOCK)) return 1;
+#endif
 
         net_remove_client(client);
         return 0;
@@ -111,8 +118,13 @@ void net_main() {
         const int client = (int) accept(server_socket, (struct  sockaddr *) &client_addr, &client_addr_size);
 
         if (client < 0) {
-            if (errno && errno != EAGAIN && errno != EWOULDBLOCK) break;
-            continue;
+#ifdef WIN32
+            if (NET_ERRNO == WSAEWOULDBLOCK) continue;
+#else
+            if (NET_ERRNO == EAGAIN || NET_ERRNO == EWOULDBLOCK) continue;
+#endif
+
+            break;
         }
 
         ClientConnection conn = {};

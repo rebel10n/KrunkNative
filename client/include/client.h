@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 #include <cJSON.h>
 #include <freetype/freetype.h>
+#include <pthread.h>
 
 #define NAME texture_cache_map
 #define KEY_TY char*
@@ -280,12 +281,26 @@ typedef struct {
     unsigned char last_swap_key:2;
     unsigned char in_game:1;
 
+    pthread_t net_thread;
+
     Game game;
     Player *me;
 } Client;
 
 void hud_render(Client*, float);
 void overlay_render(Client*, float);
+
+void on_client_socket_connect(Client*);
+void on_client_socket_disconnect(Client*);
+void on_client_socket_error(Client*, int);
+void on_client_socket_event(Client*);
+
+typedef struct {
+    Client *client;
+    const char *address;
+} NetMainArgs;
+
+void net_main(NetMainArgs *args);
 
 void client_animate_object_texture(Object*, float);
 
