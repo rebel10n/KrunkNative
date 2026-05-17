@@ -389,31 +389,17 @@ Map *map_init(const cJSON *raw_data) {
             map->dimensions.max.z = position.z + scale.z * 0.5f;
         }
 
-        if (!map->objects) {
-            map->objects = calloc(1, sizeof(Object));
+        Object **new_objects = realloc(map->objects, sizeof(Object) * (map->object_count + 1));
 
-            if (!map->objects) {
-                free(object);
-                free(parsed_colors);
-                free(map);
-                return NULL;
-            }
-
-            map->objects[0] = object;
-            map->object_count = 1;
-        } else {
-            Object **new_objects = realloc(map->objects, sizeof(Object) * (map->object_count + 1));
-
-            if (!new_objects) {
-                free(object);
-                free(parsed_colors);
-                free(map);
-                return NULL;
-            }
-
-            map->objects = new_objects;
-            map->objects[map->object_count++] = object;
+        if (!new_objects) {
+            free(object);
+            free(parsed_colors);
+            free(map);
+            return NULL;
         }
+
+        map->objects = new_objects;
+        map->objects[map->object_count++] = object;
     }
 
     if (parsed_colors) free(parsed_colors);

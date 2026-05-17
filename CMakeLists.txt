@@ -49,6 +49,10 @@ target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)
 target_link_libraries(${SERVER_BINARY} PRIVATE replxx)
 target_include_directories(${SERVER_BINARY} PRIVATE server/include)
 
+if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
+endif ()
+
 # TESTS
 add_executable(proc_input_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/proc_input_test.c)
 target_link_libraries(proc_input_test PRIVATE m)

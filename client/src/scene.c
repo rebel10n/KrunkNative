@@ -129,16 +129,6 @@ void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const
 }
 
 void scene_add_mesh(Scene *scene, Mesh *mesh) {
-    if (!scene->mesh_count) {
-        scene->meshes = calloc(1, sizeof(Mesh *));
-        if (!scene->meshes) return;
-
-        scene->mesh_count = 1;
-        scene->meshes[0] = mesh;
-
-        return;
-    }
-
     Mesh **meshes = realloc(scene->meshes, (scene->mesh_count + 1) * sizeof(Mesh *));
     if (!meshes) return;
 
@@ -164,6 +154,7 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
 
     if (!scene->mesh_count) {
         free(scene->meshes);
+        scene->meshes = NULL;
         return;
     }
 

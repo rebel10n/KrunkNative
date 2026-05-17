@@ -356,6 +356,7 @@ typedef struct {
     unsigned char unlimited_ammo:1;
     unsigned char force_hide:1;
     unsigned char interpolate:1;
+    unsigned char inspecting:1;
 
     unsigned char is_hidden:1;
     unsigned char on_ground:1;

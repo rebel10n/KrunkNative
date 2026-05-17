@@ -94,16 +94,10 @@ void player_kill(Player *player, const Player *killer, PlayerKillInfo *kill_info
 }
 
 void player_queue_input(Player *player, const Input *input) {
-    if (player->input_queue_size) {
-        Input *new_input_queue = realloc(player->input_queue, (player->input_queue_size + 1) * sizeof(Input));
-        if (!new_input_queue) return;
+    Input *new_input_queue = realloc(player->input_queue, (player->input_queue_size + 1) * sizeof(Input));
+    if (!new_input_queue) return;
 
-        player->input_queue = new_input_queue;
-    } else {
-        player->input_queue = calloc(1, sizeof(Input));
-        if (!player->input_queue) return;
-    }
-
+    player->input_queue = new_input_queue;
     player->input_queue[player->input_queue_size++] = *input;
 }
 
@@ -466,6 +460,24 @@ void player_reload(Player *player) {
     player->burst_count = 0;
 
     // TODO: cancel inspect
+}
+
+void player_cancel_inspect(Player *player) {
+    player->inspecting = 0;
+    // TODO
+}
+
+void player_inspect_weapon(Player *player) {
+    if (player->inspecting) return player_cancel_inspect(player);
+    if (player->weapon->no_inspect || player->aim_val || player->reload_timer || (player->weapon->melee && !player->can_throw)) return;
+
+    player->inspecting = 1;
+
+    if (player->weapon->melee) {
+        // TODO: melee inspect
+    } else {
+        // TODO
+    }
 }
 
 void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
@@ -1025,8 +1037,10 @@ void player_update(Player *player, const float delta) {
             player_proc_input(player, &player->input_queue[i], 0, player->game->move_lock);
         }
 
-        player->input_queue_size = 0;
         free(player->input_queue);
+
+        player->input_queue_size = 0;
+        player->input_queue = NULL;
     }
 
     player->idle_anim += game_constants.idle_anim_speed * delta;

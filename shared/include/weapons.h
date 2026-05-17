@@ -11,6 +11,7 @@ typedef struct {
     unsigned char akimbo:1;
     unsigned char no_aim:1;
     unsigned char no_auto:1;
+    unsigned char no_inspect:1;
     unsigned char can_throw:1;
     unsigned char melee:1;
     unsigned char equipment:1;
