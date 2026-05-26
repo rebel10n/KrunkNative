@@ -2,6 +2,7 @@
 #include <client.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include <stb_image.h>
 #include <pcg_basic.h>
 
@@ -101,10 +102,347 @@ const PrefabTexture prefab_textures[] = {
     {"tile"},
 };
 
+static int prefab_texture_id_from_string(const char *name) {
+    if (!name) return 0;
+
+    for (size_t i = 0; i < sizeof(prefab_textures) / sizeof(prefab_textures[0]); i++) {
+        if (!strcmp(name, prefab_textures[i].name)) return (int) i;
+    }
+
+    return 0;
+}
+
+static int prefab_face_mask(const cJSON *raw_faces) {
+    if (!cJSON_IsString(raw_faces)) return 0x3f;
+
+    const long bits = strtol(cJSON_GetStringValue(raw_faces), NULL, 16);
+    int mask = 0;
+
+    for (int i = 0; i < 6; i++) {
+        if (bits & (1 << (5 - i))) mask |= 1 << i;
+    }
+
+    return mask;
+}
+
+static int prefab_hidden_in_game(const int prefab) {
+    switch (prefab) {
+        case PREFAB_SPAWN_POINT:
+        case PREFAB_CAMERA_POSITION:
+        case PREFAB_SCORE_ZONE:
+        case PREFAB_DEATH_ZONE:
+        case PREFAB_PARTICLES:
+        case PREFAB_OBJECTIVE:
+        case PREFAB_FLAG:
+        case PREFAB_CHECK_POINT:
+        case PREFAB_WEAPON_PICKUP:
+        case PREFAB_TELEPORTER:
+        case PREFAB_TRIGGER:
+        case PREFAB_SPECTATE_CAM:
+        case PREFAB_PLACEHOLDER:
+        case PREFAB_SOUND_EMITTER:
+        case PREFAB_EVENT:
+        case PREFAB_PREMIUM_ZONE:
+        case PREFAB_VERIFIED_ZONE:
+        case PREFAB_CUSTOM_ASSET:
+        case PREFAB_BOMB_SITE:
+        case PREFAB_TEAM_ZONE:
+        case PREFAB_SHOWCASE:
+        case PREFAB_POINT_LIGHT:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static Geometry *prefab_cube_geo(const int face_mask) {
+    static Geometry *cached[64];
+    static const vertex vertices[] = {
+        // FRONT (Krunker face 4)
+        {-0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
+        {0.5f, 1.0f, 0.5f, 1.0f, 1.0f},
+        {-0.5f, 1.0f, 0.5f, 0.0f, 1.0f},
+        {0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
+
+        // BACK (Krunker face 5)
+        {0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+        {-0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+        {0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+        {-0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+
+        // LEFT (Krunker face 1)
+        {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+        {-0.5f, 1.0f, 0.5f, 1.0f, 1.0f},
+        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+        {-0.5f, 0.0f, 0.5f, 1.0f, 0.0f},
+
+        // RIGHT (Krunker face 0)
+        {0.5f, 0.0f, 0.5f, 0.0f, 0.0f},
+        {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+        {0.5f, 1.0f, 0.5f, 0.0f, 1.0f},
+        {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+
+        // TOP (Krunker face 2)
+        {-0.5f, 1.0f, 0.5f, 0.0f, 0.0f},
+        {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},
+        {-0.5f, 1.0f, -0.5f, 0.0f, 1.0f},
+        {0.5f, 1.0f, 0.5f, 1.0f, 0.0f},
+
+        // BOTTOM (Krunker face 3)
+        {-0.5f, 0.0f, -0.5f, 0.0f, 0.0f},
+        {0.5f, 0.0f, 0.5f, 1.0f, 1.0f},
+        {-0.5f, 0.0f, 0.5f, 0.0f, 1.0f},
+        {0.5f, 0.0f, -0.5f, 1.0f, 0.0f},
+    };
+    static const unsigned int face_indices[][6] = {
+        {0, 1, 2, 0, 3, 1},
+        {4, 5, 6, 4, 7, 5},
+        {8, 9, 10, 8, 11, 9},
+        {12, 13, 14, 12, 15, 13},
+        {16, 17, 18, 16, 19, 17},
+        {20, 21, 22, 20, 23, 21},
+    };
+    static const int krunker_to_native[] = {3, 2, 4, 5, 0, 1};
+
+    if (face_mask == 0x3f) return create_cube_geo();
+    if (face_mask >= 0 && face_mask < 64 && cached[face_mask]) return cached[face_mask];
+
+    unsigned int indices[36];
+    size_t index_count = 0;
+
+    for (int i = 0; i < 6; i++) {
+        if (!(face_mask & (1 << i))) continue;
+
+        const int native_face = krunker_to_native[i];
+        memcpy(indices + index_count, face_indices[native_face], sizeof(face_indices[native_face]));
+        index_count += 6;
+    }
+
+    Geometry *geometry = calloc(1, sizeof(Geometry));
+    if (!geometry) return NULL;
+
+    unsigned int vbo;
+    glGenVertexArrays(1, &geometry->vao);
+    glGenBuffers(1, &geometry->ebo);
+    glGenBuffers(1, &vbo);
+
+    glBindVertexArray(geometry->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (int) (index_count * sizeof(unsigned int)), indices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
+
+    geometry->index_count = (int) index_count;
+    if (face_mask >= 0 && face_mask < 64) cached[face_mask] = geometry;
+    return geometry;
+}
+
+static Geometry *prefab_cylinder_geo(const int segments, const int cone) {
+    static Geometry *cached_cylinder;
+    static Geometry *cached_cone;
+
+    if (!cone && cached_cylinder) return cached_cylinder;
+    if (cone && cached_cone) return cached_cone;
+
+    const int side_vertices = segments * 4;
+    const int cap_vertices = cone ? segments + 1 : (segments + 1) * 2;
+    const int vertex_count = side_vertices + cap_vertices;
+    const int index_count = segments * 6 + (cone ? segments * 3 : segments * 6);
+
+    vertex *vertices = calloc(vertex_count, sizeof(vertex));
+    unsigned int *indices = calloc(index_count, sizeof(unsigned int));
+
+    if (!vertices || !indices) {
+        free(vertices);
+        free(indices);
+        return NULL;
+    }
+
+    int v = 0;
+    int idx = 0;
+
+    for (int i = 0; i < segments; i++) {
+        const float a0 = (float) i / (float) segments * 2.0f * (float) M_PI;
+        const float a1 = (float) (i + 1) / (float) segments * 2.0f * (float) M_PI;
+        const float x0 = cosf(a0) * 0.5f;
+        const float z0 = sinf(a0) * 0.5f;
+        const float x1 = cosf(a1) * 0.5f;
+        const float z1 = sinf(a1) * 0.5f;
+        const float u0 = (float) i / (float) segments;
+        const float u1 = (float) (i + 1) / (float) segments;
+        const int base = v;
+
+        vertices[v++] = (vertex) {x0, 0.0f, z0, u0, 0.0f};
+        vertices[v++] = (vertex) {cone ? 0.0f : x0, 1.0f, cone ? 0.0f : z0, u0, 1.0f};
+        vertices[v++] = (vertex) {cone ? 0.0f : x1, 1.0f, cone ? 0.0f : z1, u1, 1.0f};
+        vertices[v++] = (vertex) {x1, 0.0f, z1, u1, 0.0f};
+
+        indices[idx++] = base;
+        indices[idx++] = base + 1;
+        indices[idx++] = base + 2;
+        indices[idx++] = base;
+        indices[idx++] = base + 2;
+        indices[idx++] = base + 3;
+    }
+
+    const int bottom_center = v;
+    vertices[v++] = (vertex) {0.0f, 0.0f, 0.0f, 0.5f, 0.5f};
+
+    for (int i = 0; i < segments; i++) {
+        const float a = (float) i / (float) segments * 2.0f * (float) M_PI;
+        vertices[v++] = (vertex) {cosf(a) * 0.5f, 0.0f, sinf(a) * 0.5f, cosf(a) * 0.5f + 0.5f, sinf(a) * 0.5f + 0.5f};
+    }
+
+    for (int i = 0; i < segments; i++) {
+        indices[idx++] = bottom_center;
+        indices[idx++] = bottom_center + 1 + ((i + 1) % segments);
+        indices[idx++] = bottom_center + 1 + i;
+    }
+
+    if (!cone) {
+        const int top_center = v;
+        vertices[v++] = (vertex) {0.0f, 1.0f, 0.0f, 0.5f, 0.5f};
+
+        for (int i = 0; i < segments; i++) {
+            const float a = (float) i / (float) segments * 2.0f * (float) M_PI;
+            vertices[v++] = (vertex) {cosf(a) * 0.5f, 1.0f, sinf(a) * 0.5f, cosf(a) * 0.5f + 0.5f, sinf(a) * 0.5f + 0.5f};
+        }
+
+        for (int i = 0; i < segments; i++) {
+            indices[idx++] = top_center;
+            indices[idx++] = top_center + 1 + i;
+            indices[idx++] = top_center + 1 + ((i + 1) % segments);
+        }
+    }
+
+    Geometry *geometry = calloc(1, sizeof(Geometry));
+    if (!geometry) {
+        free(vertices);
+        free(indices);
+        return NULL;
+    }
+
+    unsigned int vbo;
+    glGenVertexArrays(1, &geometry->vao);
+    glGenBuffers(1, &geometry->ebo);
+    glGenBuffers(1, &vbo);
+
+    glBindVertexArray(geometry->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * sizeof(vertex), vertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_count * sizeof(unsigned int), indices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
+
+    geometry->index_count = index_count;
+    if (cone) cached_cone = geometry;
+    else cached_cylinder = geometry;
+
+    free(vertices);
+    free(indices);
+    return geometry;
+}
+
+static Geometry *prefab_sphere_geo() {
+    static Geometry *cached;
+    if (cached) return cached;
+
+    const int rings = 12;
+    const int segments = 24;
+    const int vertex_count = (rings + 1) * (segments + 1);
+    const int index_count = rings * segments * 6;
+
+    vertex *vertices = calloc(vertex_count, sizeof(vertex));
+    unsigned int *indices = calloc(index_count, sizeof(unsigned int));
+
+    if (!vertices || !indices) {
+        free(vertices);
+        free(indices);
+        return NULL;
+    }
+
+    int v = 0;
+    for (int y = 0; y <= rings; y++) {
+        const float vy = (float) y / (float) rings;
+        const float phi = vy * (float) M_PI;
+
+        for (int x = 0; x <= segments; x++) {
+            const float vx = (float) x / (float) segments;
+            const float theta = vx * 2.0f * (float) M_PI;
+            vertices[v++] = (vertex) {
+                sinf(phi) * cosf(theta) * 0.5f,
+                0.5f + cosf(phi) * 0.5f,
+                sinf(phi) * sinf(theta) * 0.5f,
+                vx,
+                vy,
+            };
+        }
+    }
+
+    int idx = 0;
+    for (int y = 0; y < rings; y++) {
+        for (int x = 0; x < segments; x++) {
+            const int a = y * (segments + 1) + x;
+            const int b = a + segments + 1;
+
+            indices[idx++] = a;
+            indices[idx++] = b;
+            indices[idx++] = a + 1;
+            indices[idx++] = a + 1;
+            indices[idx++] = b;
+            indices[idx++] = b + 1;
+        }
+    }
+
+    Geometry *geometry = calloc(1, sizeof(Geometry));
+    if (!geometry) {
+        free(vertices);
+        free(indices);
+        return NULL;
+    }
+
+    unsigned int vbo;
+    glGenVertexArrays(1, &geometry->vao);
+    glGenBuffers(1, &geometry->ebo);
+    glGenBuffers(1, &vbo);
+
+    glBindVertexArray(geometry->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * sizeof(vertex), vertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_count * sizeof(unsigned int), indices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
+
+    geometry->index_count = index_count;
+    cached = geometry;
+
+    free(vertices);
+    free(indices);
+    return geometry;
+}
+
 Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     if (object->prefab < 0 || object->prefab >= sizeof(prefab_models) / sizeof(prefab_models[0])) {
         return NULL;
     }
+    if (prefab_hidden_in_game(object->prefab)) return NULL;
 
     const PrefabModel prefab_model = prefab_models[object->prefab];
 
@@ -204,7 +542,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     }
 
     const cJSON *t = cJSON_GetObjectItem(raw_obj, "t");
-    const int tex_id = cJSON_IsNumber(t) ? (int) cJSON_GetNumberValue(t) : 0;
+    int tex_id = cJSON_IsString(t) ? prefab_texture_id_from_string(cJSON_GetStringValue(t)) : cJSON_IsNumber(t) ? (int) cJSON_GetNumberValue(t) : 0;
+    if (tex_id < 0 || tex_id >= (int) (sizeof(prefab_textures) / sizeof(prefab_textures[0]))) tex_id = object->prefab == PREFAB_LADDER ? 2 : 0;
 
     char *texture_path;
 
@@ -248,8 +587,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         }
     }
 
-    if (object->prefab == PREFAB_CUBE || object->prefab == PREFAB_PLANE || object->prefab == PREFAB_BILLBOARD) {
-        Geometry *geometry = object->prefab == PREFAB_CUBE ? create_cube_geo() : create_plane_geo();
+    if (object->prefab == PREFAB_CUBE || object->prefab == PREFAB_PLANE || object->prefab == PREFAB_BILLBOARD || object->prefab == PREFAB_SIGN || object->prefab == PREFAB_LIQUID || object->prefab == PREFAB_RUNE || object->prefab == PREFAB_BOOST_PAD) {
+        Geometry *geometry = object->prefab == PREFAB_CUBE ? prefab_cube_geo(prefab_face_mask(cJSON_GetObjectItem(raw_obj, "f"))) : create_plane_geo();
         if (!geometry) return NULL;
 
         BasicMaterial *material = basic_material_init();
@@ -264,7 +603,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->color = color;
         material->color.w = opacity;
         material->emissive = emissive;
-        material->base.transparent = (object->prefab != PREFAB_BILLBOARD && prefab_textures[tex_id].transparent) || opacity != 1.0f;
+        material->base.transparent = (object->prefab != PREFAB_BILLBOARD && prefab_textures[tex_id].transparent) || opacity != 1.0f || object->prefab == PREFAB_LIQUID || object->prefab == PREFAB_RUNE;
 
         material->use_face_tex_scaling = object->prefab != PREFAB_BILLBOARD;
         material->face_scale = object->scale;
@@ -275,6 +614,28 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
             material->face_scale.x = object->scale.x;
             material->face_scale.y = object->scale.z;
         }
+
+        return mesh;
+    }
+
+    if (object->prefab == PREFAB_CYLINDER || object->prefab == PREFAB_SPHERE || object->prefab == PREFAB_LIGHT_CONE) {
+        Geometry *geometry = object->prefab == PREFAB_SPHERE ? prefab_sphere_geo() : prefab_cylinder_geo(32, object->prefab == PREFAB_LIGHT_CONE);
+        if (!geometry) return NULL;
+
+        BasicMaterial *material = basic_material_init();
+        Mesh *mesh = mesh_init(geometry, (Material *) material);
+
+        mesh->visible = visible;
+        mesh->transform.position = object->position;
+        mesh->transform.rotation = rotation;
+        mesh->transform.scale = object->scale;
+
+        material->texture = texture_id;
+        material->color = color;
+        material->color.w = object->prefab == PREFAB_LIGHT_CONE && opacity == 1.0f ? 0.35f : opacity;
+        material->emissive = emissive;
+        material->base.transparent = opacity != 1.0f || object->prefab == PREFAB_LIGHT_CONE || prefab_textures[tex_id].transparent;
+        material->use_face_tex_scaling = 0;
 
         return mesh;
     }

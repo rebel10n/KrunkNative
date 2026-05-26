@@ -203,6 +203,14 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.crouch_val);
             break;
         }
+        case NET_PACKET_CYCLE:
+            if (length) {
+                client_net_log_bad_payload("cycle", type, payload, length);
+                break;
+            }
+
+            printf("{\"type\":\"cycle\",\"id\":%u}", (unsigned int) type);
+            break;
         default:
             client_net_log_bad_payload("unknown", type, payload, length);
             break;

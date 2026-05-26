@@ -70,6 +70,43 @@ static void net_send_existing_spawns(ClientConnection *client) {
     }
 }
 
+static void net_free_players() {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        g_server->clients[i].player = NULL;
+    }
+
+    for (size_t i = 0; i < g_server->game.player_count; i++) {
+        Player *player = g_server->game.players[i];
+        if (!player) continue;
+
+        free(player->loadout);
+        free(player->ammo);
+        free(player->reloads);
+        free(player->input_queue);
+        free(player);
+    }
+
+    free(g_server->game.players);
+    g_server->game.players = NULL;
+    g_server->game.player_count = 0;
+}
+
+static void net_cycle_map() {
+    if (!g_server->game.map_count) return;
+
+    const int next_map = (g_server->game.current_map_index + 1) % (int) g_server->game.map_count;
+    const int mode = g_server->game.current_mode_index;
+
+    net_free_players();
+    game_init(&g_server->game, next_map, mode, 0);
+
+    replxx_print(g_replxx, "Loaded map %d mode %d \n", g_server->game.current_map_index, g_server->game.current_mode_index);
+
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        net_send_init(&g_server->clients[i]);
+    }
+}
+
 void net_add_client(ClientConnection *client) {
     ClientConnection *new_clients = realloc(g_server->clients, (g_server->client_count + 1) * sizeof(ClientConnection));
 
@@ -151,6 +188,9 @@ static void net_handle_packet(ClientConnection *client, const NetPacket *packet)
             player_queue_input(client->player, &input);
             break;
         }
+        case NET_PACKET_CYCLE:
+            if (!packet->length) net_cycle_map();
+            break;
         default:
             on_client_event(client);
             break;

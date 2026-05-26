@@ -585,6 +585,7 @@ typedef enum {
     NET_PACKET_SPAWN = 4,
     NET_PACKET_INPUT = 5,
     NET_PACKET_STATE = 6,
+    NET_PACKET_CYCLE = 7,
 } NetPacketType;
 
 enum {

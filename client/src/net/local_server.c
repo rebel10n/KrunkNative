@@ -107,6 +107,39 @@ static void local_server_send_state(Client *client, const Player *player) {
     local_server_send_packet(client, NET_PACKET_STATE, &packet, sizeof(packet));
 }
 
+static void local_server_free_players(Client *client) {
+    for (size_t i = 0; i < client->local_server_game.player_count; i++) {
+        Player *player = client->local_server_game.players[i];
+        if (!player) continue;
+
+        free(player->loadout);
+        free(player->ammo);
+        free(player->reloads);
+        free(player->input_queue);
+        free(player);
+    }
+
+    free(client->local_server_game.players);
+    client->local_server_game.players = NULL;
+    client->local_server_game.player_count = 0;
+    client->local_server_player = NULL;
+}
+
+static void local_server_cycle_map(Client *client) {
+    if (!client->local_server_game.map_count) return;
+
+    const int next_map = (client->local_server_game.current_map_index + 1) % (int) client->local_server_game.map_count;
+    const int mode = client->local_server_game.current_mode_index;
+
+    local_server_free_players(client);
+
+    g_skip_map_meshes = 1;
+    game_init(&client->local_server_game, next_map, mode, 0);
+    g_skip_map_meshes = 0;
+
+    local_server_send_init(client);
+}
+
 static void local_server_handle_ent(Client *client) {
     if (!client->local_server_player) {
         Player *player = player_init(&client->local_server_game);
@@ -139,6 +172,9 @@ static void local_server_handle_packet(Client *client, const NetPacket *packet) 
             player_queue_input(client->local_server_player, &input);
             break;
         }
+        case NET_PACKET_CYCLE:
+            if (!packet->length) local_server_cycle_map(client);
+            break;
         default:
             break;
     }

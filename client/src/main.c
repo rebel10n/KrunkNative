@@ -145,6 +145,33 @@ void client_unload_map(Client *client) {
     }
 }
 
+void client_clear_players(Client *client) {
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        Player *player = client->game.players[i];
+        if (!player) continue;
+
+        if (player->mesh) {
+            scene_remove_player_mesh(player->render_you ? client->fps_scene : client->scene, player->mesh, player->loadout_size);
+            player_meshes_fini(player);
+        }
+
+        free(player->loadout);
+        free(player->ammo);
+        free(player->reloads);
+        free(player->input_queue);
+        free(player);
+    }
+
+    free(client->game.players);
+    client->game.players = NULL;
+    client->game.player_count = 0;
+    client->me = NULL;
+    client->in_game = 0;
+    client->spawn_requested = 0;
+    client->net_next_input_seq = 0;
+    client->last_swap_key = 0;
+}
+
 Player *client_find_player(Client *client, const int uid) {
     for (size_t i = 0; i < client->game.player_count; i++) {
         Player *player = client->game.players[i];
@@ -210,6 +237,26 @@ void client_apply_state(Client *client, const NetStatePacket *packet) {
     net_packet_apply_player(player, packet);
 }
 
+void client_send_cycle_packet(Client *client) {
+    pthread_mutex_lock(&client->net_lock);
+    const int socket = client->net_socket;
+    pthread_mutex_unlock(&client->net_lock);
+
+    if (client->local_server_running) {
+        local_server_queue_packet(client, NET_PACKET_CYCLE, NULL, 0);
+    } else if (socket >= 0) {
+        client_net_send_packet(socket, NET_PACKET_CYCLE, NULL, 0);
+    } else if (client->game.is_local && client->game.map_count) {
+        if (client->map_loaded) client_unload_map(client);
+        client_clear_players(client);
+
+        const int next_map = (client->game.current_map_index + 1) % (int) client->game.map_count;
+        game_init(&client->game, next_map, client->game.current_mode_index, 1);
+        client_load_map(client);
+        client->map_loaded = client->game.ready;
+    }
+}
+
 void client_tick_net(Client *client) {
     pthread_mutex_lock(&client->net_lock);
 
@@ -232,6 +279,7 @@ void client_tick_net(Client *client) {
                 memcpy(&init, packet->payload, sizeof(init));
 
                 if (client->map_loaded) client_unload_map(client);
+                client_clear_players(client);
 
                 game_init(&client->game, init.map_index, init.mode_index, 0);
                 client_load_map(client);
@@ -365,19 +413,8 @@ void client_tick(Client *client, const float now, const float delta) {
 
     const int debug_key = glfwGetKey(client->window, GLFW_KEY_GRAVE_ACCENT);
 
-    if (debug_key && !client->last_debug_key && client->game.is_local) {
-        client_unload_map(client);
-
-        if (client->me) {
-            scene_remove_player_mesh(client->fps_scene, client->me->mesh, client->me->loadout_size);
-            player_meshes_fini(client->me);
-        }
-
-        client->me = NULL;
-        client->in_game = 0;
-
-        game_init(&client->game, -1, -1, 1);
-        client_load_map(client);
+    if (debug_key && !client->last_debug_key) {
+        client_send_cycle_packet(client);
     }
 
     client->last_debug_key = debug_key;

@@ -2,6 +2,7 @@
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifdef KRUNKNATIVE_CLIENT
 #include <client.h>
@@ -43,6 +44,79 @@ const char *default_map_names[] = {
 
 const cJSON *g_maps[sizeof(default_map_names) / sizeof(default_map_names[0])];
 const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 14};
+
+static const char *prefab_names[] = {
+    "CUBE",
+    "CRATE",
+    "BARREL",
+    "LADDER",
+    "PLANE",
+    "SPAWN_POINT",
+    "CAMERA_POSITION",
+    "VEHICLE",
+    "STACK",
+    "RAMP",
+    "SCORE_ZONE",
+    "BILLBOARD",
+    "DEATH_ZONE",
+    "PARTICLES",
+    "OBJECTIVE",
+    "TREE",
+    "CONE",
+    "CONTAINER",
+    "GRASS",
+    "CONTAINERR",
+    "ACIDBARREL",
+    "DOOR",
+    "WINDOW",
+    "FLAG",
+    "GATE",
+    "CHECK_POINT",
+    "WEAPON_PICKUP",
+    "TELEPORTER",
+    "TEDDY",
+    "TRIGGER",
+    "SIGN",
+    "DEPOSIT_BOX",
+    "LIGHT_CONE",
+    "SPECTATE_CAM",
+    "SPHERE",
+    "PLACEHOLDER",
+    "CARDB",
+    "PALLET",
+    "LIQUID",
+    "SOUND_EMITTER",
+    "EVENT",
+    "TERMINAL",
+    "PREMIUM_ZONE",
+    "VERIFIED_ZONE",
+    "CUSTOM_ASSET",
+    "BOMB_SITE",
+    "BOOST_PAD",
+    "TEAM_ZONE",
+    "CYLINDER",
+    "POLICE",
+    "CAGE",
+    "EBARREL",
+    "SHOWCASE",
+    "POINT_LIGHT",
+    "GHOST",
+    "BOT",
+    "PUMPKIN",
+    "RUNE",
+    "SKELETON",
+    "KNIGHT",
+};
+
+static int prefab_id_from_string(const char *name) {
+    if (!name) return 0;
+
+    for (size_t i = 0; i < sizeof(prefab_names) / sizeof(prefab_names[0]); i++) {
+        if (!strcmp(name, prefab_names[i])) return (int) i;
+    }
+
+    return 0;
+}
 
 void load_default_maps() {
     for (size_t i = 0; i < sizeof(default_map_names) / sizeof(default_map_names[0]); i++) {
@@ -165,8 +239,12 @@ Map *map_init(const cJSON *raw_data) {
 
         if (cJSON_IsNumber(obj_i)) {
             prefab_id = (int) cJSON_GetNumberValue(obj_i);
+        } else if (cJSON_IsString(obj_i)) {
+            prefab_id = prefab_id_from_string(cJSON_GetStringValue(obj_i));
         } else if (cJSON_IsNumber(obj_id)) {
             prefab_id = (int) cJSON_GetNumberValue(obj_id);
+        } else if (cJSON_IsString(obj_id)) {
+            prefab_id = prefab_id_from_string(cJSON_GetStringValue(obj_id));
         }
 
         if (!cJSON_IsArray(obj_pos) || cJSON_GetArraySize(obj_pos) < 3 || cJSON_GetArraySize(obj_scale) < 3) continue;
