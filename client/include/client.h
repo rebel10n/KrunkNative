@@ -322,6 +322,7 @@ typedef struct {
 
     Game game;
     Game local_server_game;
+    const cJSON *startup_map;
     Player *local_server_player;
     Player *me;
 } Client;

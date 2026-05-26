@@ -185,8 +185,23 @@ static void *local_server_main(void *user_data) {
 
     client->local_server_game.server = client;
 
+    const cJSON **maps = NULL;
+    size_t map_count = 0;
+
+    if (client->startup_map) {
+        maps = calloc(1, sizeof(cJSON *));
+
+        if (maps) {
+            maps[0] = client->startup_map;
+            map_count = 1;
+        } else {
+            client->local_server_should_quit = 1;
+            return NULL;
+        }
+    }
+
     g_skip_map_meshes = 1;
-    game_configure(&client->local_server_game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+    game_configure(&client->local_server_game, NULL, maps, map_count, NULL, 0, NULL, 0, NULL, 0);
     game_init(&client->local_server_game, -1, -1, 0);
     g_skip_map_meshes = 0;
 

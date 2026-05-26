@@ -1,9 +1,11 @@
 {
   "name": "KrunkNative",
   "scripts": {
-    "start": "node -e \"const cp = require('child_process'); const bin = process.platform === 'win32' ? 'cmake-build-debug\\\\client.exe' : 'cmake-build-debug/client_bin'; cp.spawnSync(bin, {stdio: 'inherit', shell: true})\"",
+    "start": "node -e \"const cp = require('child_process'); const bin = process.platform === 'win32' ? 'cmake-build-debug\\\\client.exe' : 'cmake-build-debug/client_bin'; cp.spawnSync(bin, process.argv.slice(1), {stdio: 'inherit', shell: true})\"",
     "build": "cmake -B cmake-build-debug -S . -DCMAKE_BUILD_TYPE=Debug && cmake --build cmake-build-debug --config Debug",
-    "release:start": "node -e \"const cp = require('child_process'); const bin = process.platform === 'win32' ? 'cmake-build-release\\\\client.exe' : 'cmake-build-release/client_bin'; cp.spawnSync(bin, {stdio: 'inherit', shell: true})\"",
+    "server": "node -e \"const cp = require('child_process'); const bin = process.platform === 'win32' ? 'cmake-build-debug\\\\server.exe' : 'cmake-build-debug/server_bin'; cp.spawnSync(bin, process.argv.slice(1), {stdio: 'inherit', shell: true})\"",
+    "release:start": "node -e \"const cp = require('child_process'); const bin = process.platform === 'win32' ? 'cmake-build-release\\\\client.exe' : 'cmake-build-release/client_bin'; cp.spawnSync(bin, process.argv.slice(1), {stdio: 'inherit', shell: true})\"",
+    "release:server": "node -e \"const cp = require('child_process'); const bin = process.platform === 'win32' ? 'cmake-build-release\\\\server.exe' : 'cmake-build-release/server_bin'; cp.spawnSync(bin, process.argv.slice(1), {stdio: 'inherit', shell: true})\"",
     "release:build": "cmake -B cmake-build-release -S . -DCMAKE_BUILD_TYPE=Release && cmake --build cmake-build-release --config Release"
   },
   "version": "1.0.0"

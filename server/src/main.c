@@ -1,6 +1,7 @@
 #include <server.h>
 #include <pthread.h>
 #include <pcg_basic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -9,10 +10,31 @@ static const ServerVersion g_version = {1, 0, 0};
 Replxx *g_replxx;
 Server *g_server;
 
-int main() {
+static const cJSON **single_map_list(const cJSON *map) {
+    if (!map) return NULL;
+
+    const cJSON **maps = calloc(1, sizeof(cJSON *));
+    if (maps) maps[0] = map;
+
+    return maps;
+}
+
+int main(int argc, char **argv) {
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
     free(rand_memory);
+
+    cJSON *startup_map = NULL;
+
+    if (argc > 2) {
+        fprintf(stderr, "Usage: %s [map.json]\n", argv[0]);
+        return -1;
+    }
+
+    if (argc == 2 && load_json_file(argv[1], &startup_map)) {
+        fprintf(stderr, "Failed to load map JSON: %s\n", argv[1]);
+        return -1;
+    }
 
     g_replxx = replxx_init();
     replxx_bind_key(g_replxx, REPLXX_KEY_CONTROL('C'), cli_sigint, NULL);
@@ -24,8 +46,15 @@ int main() {
     g_server->config.listen_port = 21015;
     pthread_mutex_init(&g_server->lock, NULL);
 
+    const cJSON **startup_maps = single_map_list(startup_map);
+
+    if (startup_map && !startup_maps) {
+        fprintf(stderr, "Failed to allocate startup map list\n");
+        return -1;
+    }
+
     g_server->game.server = g_server;
-    game_configure(&g_server->game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+    game_configure(&g_server->game, NULL, startup_maps, startup_map ? 1 : 0, NULL, 0, NULL, 0, NULL, 0);
     game_init(&g_server->game, -1, -1, 0);
 
     replxx_print(g_replxx, "Starting KrunkNative server v%d.%d.%d... \n", g_version.major, g_version.minor, g_version.patch);

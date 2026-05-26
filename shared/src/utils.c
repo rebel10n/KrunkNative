@@ -86,6 +86,24 @@ int read_file(const char *path, unsigned char **buf, size_t *length) {
     return 0;
 }
 
+int load_json_file(const char *path, cJSON **out) {
+    unsigned char *buffer;
+    size_t length;
+
+    if (!out) return -1;
+    *out = NULL;
+
+    if (read_file(path, &buffer, &length)) return -1;
+
+    cJSON *json = cJSON_Parse((char *) buffer);
+    free(buffer);
+
+    if (!json) return -1;
+
+    *out = json;
+    return 0;
+}
+
 int parse_hex_color(const char *hex_str, vec4 *out) {
     const int hex_len = (int) strlen(hex_str) - 1;
 

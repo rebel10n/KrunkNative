@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <client.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <pcg_basic.h>
 #include <string.h>
@@ -64,6 +65,15 @@ static float json_float_or(const cJSON *json, const float fallback) {
     return cJSON_IsNumber(json) ? (float) cJSON_GetNumberValue(json) : fallback;
 }
 
+static const cJSON **single_map_list(const cJSON *map) {
+    if (!map) return NULL;
+
+    const cJSON **maps = calloc(1, sizeof(cJSON *));
+    if (maps) maps[0] = map;
+
+    return maps;
+}
+
 static void client_apply_map_lighting(const Map *map) {
     if (!map || !map->raw_data) return;
 
@@ -105,7 +115,7 @@ static void client_apply_map_lighting(const Map *map) {
     glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, g_render_lighting.sky_color.w);
 }
 
-int main() {
+int main(int argc, char **argv) {
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
     free(rand_memory);
@@ -124,7 +134,20 @@ int main() {
 
     if (!glfwInit()) return -1;
 
+    cJSON *startup_map = NULL;
+
+    if (argc > 2) {
+        fprintf(stderr, "Usage: %s [map.json]\n", argv[0]);
+        return -1;
+    }
+
+    if (argc == 2 && load_json_file(argv[1], &startup_map)) {
+        fprintf(stderr, "Failed to load map JSON: %s\n", argv[1]);
+        return -1;
+    }
+
     static Client INSTANCE = {};
+    INSTANCE.startup_map = startup_map;
 
     pthread_mutex_init(&INSTANCE.net_lock, NULL);
     pthread_mutex_init(&INSTANCE.local_server_lock, NULL);
@@ -173,7 +196,14 @@ int main() {
 
     if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
 
-    game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+    const cJSON **startup_maps = single_map_list(startup_map);
+
+    if (startup_map && !startup_maps) {
+        fprintf(stderr, "Failed to allocate startup map list\n");
+        return -1;
+    }
+
+    game_configure(&INSTANCE.game, NULL, startup_maps, startup_map ? 1 : 0, NULL, 0, NULL, 0, NULL, 0);
 
     if (!local_server_start(&INSTANCE)) return -1;
 
