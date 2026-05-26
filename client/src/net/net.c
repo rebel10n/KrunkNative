@@ -56,8 +56,8 @@ void net_main(NetMainArgs *args) {
     unsigned long non_blocking = 1;
     ioctlsocket(client_socket, FIONBIO, &non_blocking);
 #else
-    int flags = fcntl(server_socket, F_GETFL, 0);
-    fcntl(server_socket, F_SETFL, flags | O_NONBLOCK);
+    int flags = fcntl(client_socket, F_GETFL, 0);
+    fcntl(client_socket, F_SETFL, flags | O_NONBLOCK);
 #endif
 
     on_client_socket_connect(args->client);

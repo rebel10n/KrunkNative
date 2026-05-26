@@ -6,6 +6,7 @@
 #include <direct.h>
 #else
 #include <unistd.h>
+#include <string.h>
 #endif
 
 // most of the differences can be attributed to cumulative floating point errors
