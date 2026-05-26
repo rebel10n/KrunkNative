@@ -5,5 +5,6 @@
     "build": "cmake -B cmake-build-debug -S . -DCMAKE_BUILD_TYPE=Debug && cmake --build cmake-build-debug --config Debug",
     "release:start": "node -e \"const cp = require('child_process'); const bin = process.platform === 'win32' ? 'cmake-build-release\\\\client.exe' : 'cmake-build-release/client_bin'; cp.spawnSync(bin, {stdio: 'inherit', shell: true})\"",
     "release:build": "cmake -B cmake-build-release -S . -DCMAKE_BUILD_TYPE=Release && cmake --build cmake-build-release --config Release"
-  }
+  },
+  "version": "1.0.0"
 }
