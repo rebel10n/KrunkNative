@@ -189,12 +189,9 @@ static void *local_server_main(void *user_data) {
     size_t map_count = 0;
 
     if (client->startup_map) {
-        maps = calloc(1, sizeof(cJSON *));
+        maps = map_list_with_custom(client->startup_map, &map_count);
 
-        if (maps) {
-            maps[0] = client->startup_map;
-            map_count = 1;
-        } else {
+        if (!maps) {
             client->local_server_should_quit = 1;
             return NULL;
         }
@@ -202,7 +199,7 @@ static void *local_server_main(void *user_data) {
 
     g_skip_map_meshes = 1;
     game_configure(&client->local_server_game, NULL, maps, map_count, NULL, 0, NULL, 0, NULL, 0);
-    game_init(&client->local_server_game, -1, -1, 0);
+    game_init(&client->local_server_game, client->startup_map ? 0 : -1, -1, 0);
     g_skip_map_meshes = 0;
 
     local_server_send_init(client);

@@ -142,6 +142,26 @@ void load_default_maps() {
     }
 }
 
+const cJSON **map_list_with_custom(const cJSON *custom_map, size_t *map_count) {
+    if (map_count) *map_count = 0;
+    if (!custom_map) return NULL;
+
+    load_default_maps();
+
+    const size_t default_count = sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]);
+    const cJSON **maps = calloc(default_count + 1, sizeof(cJSON *));
+    if (!maps) return NULL;
+
+    maps[0] = custom_map;
+
+    for (size_t i = 0; i < default_count; i++) {
+        maps[i + 1] = g_maps[g_rotation_maps[i]];
+    }
+
+    if (map_count) *map_count = default_count + 1;
+    return maps;
+}
+
 Map *map_init(const cJSON *raw_data) {
     if (!cJSON_IsObject(raw_data)) return NULL;
 

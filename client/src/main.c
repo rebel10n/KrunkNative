@@ -66,15 +66,6 @@ static float json_float_or(const cJSON *json, const float fallback) {
     return cJSON_IsNumber(json) ? (float) cJSON_GetNumberValue(json) : fallback;
 }
 
-static const cJSON **single_map_list(const cJSON *map) {
-    if (!map) return NULL;
-
-    const cJSON **maps = calloc(1, sizeof(cJSON *));
-    if (maps) maps[0] = map;
-
-    return maps;
-}
-
 static void client_apply_map_lighting(const Map *map) {
     if (!map || !map->raw_data) return;
 
@@ -223,14 +214,15 @@ int main(int argc, char **argv) {
 
     if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
 
-    const cJSON **startup_maps = single_map_list(startup_map);
+    size_t startup_map_count = 0;
+    const cJSON **startup_maps = map_list_with_custom(startup_map, &startup_map_count);
 
     if (startup_map && !startup_maps) {
         fprintf(stderr, "Failed to allocate startup map list\n");
         return -1;
     }
 
-    game_configure(&INSTANCE.game, NULL, startup_maps, startup_map ? 1 : 0, NULL, 0, NULL, 0, NULL, 0);
+    game_configure(&INSTANCE.game, NULL, startup_maps, startup_map_count, NULL, 0, NULL, 0, NULL, 0);
 
     if (!local_server_start(&INSTANCE)) return -1;
 

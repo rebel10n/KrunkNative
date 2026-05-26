@@ -10,15 +10,6 @@ static const ServerVersion g_version = {1, 0, 0};
 Replxx *g_replxx;
 Server *g_server;
 
-static const cJSON **single_map_list(const cJSON *map) {
-    if (!map) return NULL;
-
-    const cJSON **maps = calloc(1, sizeof(cJSON *));
-    if (maps) maps[0] = map;
-
-    return maps;
-}
-
 int main(int argc, char **argv) {
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
@@ -46,7 +37,8 @@ int main(int argc, char **argv) {
     g_server->config.listen_port = 21015;
     pthread_mutex_init(&g_server->lock, NULL);
 
-    const cJSON **startup_maps = single_map_list(startup_map);
+    size_t startup_map_count = 0;
+    const cJSON **startup_maps = map_list_with_custom(startup_map, &startup_map_count);
 
     if (startup_map && !startup_maps) {
         fprintf(stderr, "Failed to allocate startup map list\n");
@@ -54,8 +46,8 @@ int main(int argc, char **argv) {
     }
 
     g_server->game.server = g_server;
-    game_configure(&g_server->game, NULL, startup_maps, startup_map ? 1 : 0, NULL, 0, NULL, 0, NULL, 0);
-    game_init(&g_server->game, -1, -1, 0);
+    game_configure(&g_server->game, NULL, startup_maps, startup_map_count, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&g_server->game, startup_map ? 0 : -1, -1, 0);
 
     replxx_print(g_replxx, "Starting KrunkNative server v%d.%d.%d... \n", g_version.major, g_version.minor, g_version.patch);
     replxx_print(g_replxx, "Loaded map %d mode %d \n", g_server->game.current_map_index, g_server->game.current_mode_index);

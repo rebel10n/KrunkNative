@@ -271,6 +271,7 @@ extern const cJSON *g_maps[15];
 extern const int g_rotation_maps[13];
 
 void load_default_maps();
+const cJSON **map_list_with_custom(const cJSON*, size_t*);
 
 Map *map_init(const cJSON*);
 void map_reset(Map*);
