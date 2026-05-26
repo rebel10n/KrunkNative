@@ -49,6 +49,7 @@ void client_unload_map(Client*);
 void client_tick(Client*, float, float);
 void client_tick_net(Client*);
 void resize_viewport(GLFWwindow*, int, int);
+void scroll_callback(GLFWwindow*, double, double);
 
 static vec4 json_color_or(const cJSON *json, const vec4 fallback) {
     if (cJSON_IsNumber(json)) return hex_to_vec((int) cJSON_GetNumberValue(json));
@@ -115,6 +116,30 @@ static void client_apply_map_lighting(const Map *map) {
     glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, g_render_lighting.sky_color.w);
 }
 
+static int weapon_swap_category(const Player *player, const int loadout_index) {
+    if (!player || loadout_index < 0 || loadout_index >= player->loadout_size) return 0;
+
+    const int weapon_id = player->loadout[loadout_index];
+    const Weapon *weapon = player->game->weapons[weapon_id];
+    if (!weapon) return 0;
+
+    if (weapon->secondary) return 1;
+    if (weapon->melee) return 2;
+    if (weapon->equipment) return 3;
+    return 0;
+}
+
+static int weapon_scroll_swap(const Player *player, const int direction) {
+    if (!player || player->loadout_size <= 1 || !direction) return 0;
+
+    const int current = player->loadout_index;
+    const int next = (current + (direction > 0 ? 1 : player->loadout_size - 1)) % player->loadout_size;
+    const int next_category = weapon_swap_category(player, next);
+
+    if (next_category) return next_category;
+    return weapon_swap_category(player, current);
+}
+
 int main(int argc, char **argv) {
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
@@ -178,8 +203,10 @@ int main(int argc, char **argv) {
 
     free(icon_path);
 
-    glfwSetFramebufferSizeCallback(INSTANCE.window, resize_viewport);
     glfwMakeContextCurrent(INSTANCE.window);
+    glfwSetWindowUserPointer(INSTANCE.window, &INSTANCE);
+    glfwSetFramebufferSizeCallback(INSTANCE.window, resize_viewport);
+    glfwSetScrollCallback(INSTANCE.window, scroll_callback);
 
     if (glfwRawMouseMotionSupported()) {
         glfwSetInputMode(INSTANCE.window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
@@ -416,6 +443,15 @@ void resize_viewport(GLFWwindow *window, const int width, const int height) {
     glViewport(0, 0, width, height);
 }
 
+void scroll_callback(GLFWwindow *window, const double xoffset, const double yoffset) {
+    (void) xoffset;
+
+    Client *client = glfwGetWindowUserPointer(window);
+    if (!client || !yoffset) return;
+
+    client->mouse_state.scroll_delta = yoffset > 0.0 ? 1 : -1;
+}
+
 void client_animate_object_texture(Object *object, const float now) {
     if (!object->mesh || !object->tex_anim) return;
 
@@ -507,6 +543,7 @@ void client_tick(Client *client, const float now, const float delta) {
     ui_update(client->ui);
 
     if (!client->mouse_state.locked) {
+        client->mouse_state.scroll_delta = 0;
         hud_render(client, now);
     } else {
         overlay_render(client, delta);
@@ -598,10 +635,19 @@ void client_tick(Client *client, const float now, const float delta) {
             if (glfwGetKey(client->window, GLFW_KEY_E)) input.swap = 1;
             else if (glfwGetKey(client->window, GLFW_KEY_Q)) input.swap = 2;
 
-            const int swap_key = input.swap;
+            const int scroll_delta = client->mouse_state.scroll_delta;
+            const int scroll_swap = !input.swap && scroll_delta ? weapon_scroll_swap(client->me, scroll_delta > 0 ? -1 : 1) : 0;
+            if (scroll_swap) input.swap = scroll_swap;
+            client->mouse_state.scroll_delta = 0;
 
-            if (swap_key == client->last_swap_key) input.swap = 0;
-            client->last_swap_key = swap_key;
+            if (scroll_swap) {
+                client->last_swap_key = 0;
+            } else {
+                const int swap_key = input.swap;
+
+                if (swap_key == client->last_swap_key) input.swap = 0;
+                client->last_swap_key = swap_key;
+            }
 
             const int forward = glfwGetKey(client->window, GLFW_KEY_W);
             const int back = glfwGetKey(client->window, GLFW_KEY_S);

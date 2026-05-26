@@ -284,6 +284,7 @@ typedef struct {
     struct {
         int locked;
         vec2 last_pos;
+        int scroll_delta;
     } mouse_state;
 
     struct {
