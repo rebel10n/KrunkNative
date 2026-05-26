@@ -1018,7 +1018,7 @@ void player_shoot(Player *player) {
                 if (!hits) continue;
 
 #ifdef KRUNKNATIVE_CLIENT
-                ((Mesh *) object->mesh)->material->wireframe = 1;
+                if (object->mesh) ((Mesh *) object->mesh)->material->wireframe = 1;
 #endif
 
                 hits[hit_count - 1] = (Hit) {object, t};
@@ -1035,6 +1035,7 @@ void player_update(Player *player, const float delta) {
     if (player->input_queue_size) {
         for (size_t i = 0; i < player->input_queue_size; i++) {
             player_proc_input(player, &player->input_queue[i], 0, player->game->move_lock);
+            player->input_seq = player->input_queue[i].seq;
         }
 
         free(player->input_queue);

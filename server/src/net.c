@@ -1,39 +1,94 @@
 #include <server.h>
 #include <errno.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef WIN32
+#include <windows.h>
 #define NET_ERRNO WSAGetLastError()
+#define CLOSE_SOCKET closesocket
+#define WOULD_BLOCK(err) ((err) == WSAEWOULDBLOCK)
+#define SLEEP_MILLIS(ms) Sleep(ms)
 #else
 #include <unistd.h>
 #define NET_ERRNO errno
+#define CLOSE_SOCKET close
+#define WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
+#define SLEEP_MILLIS(ms) do { struct timespec ts = {0, (ms) * 1000000L}; nanosleep(&ts, NULL); } while (0)
 #endif
 
 #define NET_ERROR(...) { replxx_print(g_replxx, __VA_ARGS__); g_server->should_quit = 1; return; }
+
+static void net_set_nonblocking(const int fd) {
+#ifdef WIN32
+    unsigned long non_blocking = 1;
+    ioctlsocket(fd, FIONBIO, &non_blocking);
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
+
+static void net_send_init(ClientConnection *client) {
+    const NetInitPacket packet = {
+        .major = 1,
+        .minor = 0,
+        .patch = 0,
+        .map_index = g_server->game.current_map_index,
+        .mode_index = g_server->game.current_mode_index,
+        .tick_rate = g_server->config.tick_rate,
+        .client_id = client->id,
+    };
+
+    net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
+}
+
+static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
+    const NetSpawnPacket packet = {
+        .uid = player->uid,
+        .is_you = (uint8_t) is_you,
+        .active = player->active,
+        .position = {player->position.x, player->position.y, player->position.z},
+        .direction = {player->direction.x, player->direction.y},
+    };
+
+    net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, sizeof(packet));
+}
+
+static void net_broadcast_spawn(const Player *player) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        net_send_spawn(client, player, client->player == player);
+    }
+}
+
+static void net_send_existing_spawns(ClientConnection *client) {
+    for (size_t i = 0; i < g_server->game.player_count; i++) {
+        Player *player = g_server->game.players[i];
+        if (!player || !player->active || player == client->player) continue;
+        net_send_spawn(client, player, 0);
+    }
+}
 
 void net_add_client(ClientConnection *client) {
     ClientConnection *new_clients = realloc(g_server->clients, (g_server->client_count + 1) * sizeof(ClientConnection));
 
     if (!new_clients) {
-#ifdef WIN32
-        closesocket(client->fd);
-#else
-        close(client->fd);
-#endif
-
-        free(client);
-
+        CLOSE_SOCKET(client->fd);
         return;
     }
 
     g_server->clients = new_clients;
-    g_server->clients[g_server->client_count++] = *client;
+    client->id = g_server->next_client_id++;
+    g_server->clients[g_server->client_count] = *client;
 
-    on_client_connect(client);
+    ClientConnection *stored_client = &g_server->clients[g_server->client_count++];
+    on_client_connect(stored_client);
+    net_send_init(stored_client);
 }
 
 void net_remove_client(ClientConnection *client) {
-    size_t index = -1;
+    size_t index = SIZE_MAX;
 
     for (size_t i = 0; i < g_server->client_count; i++) {
         if (&g_server->clients[i] == client) {
@@ -42,17 +97,64 @@ void net_remove_client(ClientConnection *client) {
         }
     }
 
-    if (index == -1) return;
+    if (index == SIZE_MAX) return;
 
     on_client_disconnect(client);
+    if (client->player) client->player->active = 0;
+    CLOSE_SOCKET(client->fd);
 
-    memcpy(&g_server->clients[index], &g_server->clients[index + 1], (g_server->client_count - index + 1) * sizeof(ClientConnection));
+    if (index + 1 < g_server->client_count) {
+        memmove(&g_server->clients[index], &g_server->clients[index + 1], (g_server->client_count - index - 1) * sizeof(ClientConnection));
+    }
+
     g_server->client_count--;
 
-    ClientConnection *new_clients = realloc(g_server->clients, (g_server->client_count - 1) * sizeof(ClientConnection));
-    if (!new_clients) return;
+    if (!g_server->client_count) {
+        free(g_server->clients);
+        g_server->clients = NULL;
+        return;
+    }
 
-    g_server->clients = new_clients;
+    ClientConnection *new_clients = realloc(g_server->clients, g_server->client_count * sizeof(ClientConnection));
+    if (new_clients) g_server->clients = new_clients;
+}
+
+static void net_handle_packet(ClientConnection *client, const NetPacket *packet) {
+    switch (packet->type) {
+        case NET_PACKET_HELLO:
+            break;
+        case NET_PACKET_ENT: {
+            if (packet->length != sizeof(NetEntPacket)) break;
+
+            if (!client->player) {
+                Player *player = player_init(&g_server->game);
+                if (!player) break;
+
+                player->uid = client->id;
+                client->player = player;
+                game_players_add(&g_server->game, player);
+            }
+
+            player_spawn(client->player);
+            net_send_existing_spawns(client);
+            net_broadcast_spawn(client->player);
+            break;
+        }
+        case NET_PACKET_INPUT: {
+            if (packet->length != sizeof(NetInputPacket) || !client->player || !client->player->active) break;
+
+            NetInputPacket net_input;
+            Input input;
+
+            memcpy(&net_input, packet->payload, sizeof(net_input));
+            net_packet_to_input(&input, &net_input);
+            player_queue_input(client->player, &input);
+            break;
+        }
+        default:
+            on_client_event(client);
+            break;
+    }
 }
 
 int net_poll_client(ClientConnection *client) {
@@ -60,17 +162,28 @@ int net_poll_client(ClientConnection *client) {
     int read;
 
     if ((read = recv(client->fd, buffer, sizeof(buffer), 0)) <= 0) {
-#ifdef WIN32
-        if (read < 0 && NET_ERRNO == WSAEWOULDBLOCK) return 1;
-#else
-        if (read < 0 && (NET_ERRNO == EAGAIN || NET_ERRNO == EWOULDBLOCK)) return 1;
-#endif
+        if (read < 0 && WOULD_BLOCK(NET_ERRNO)) return 1;
 
         net_remove_client(client);
         return 0;
     }
 
-    // TODO: process data
+    if (!net_buffer_push(&client->read_buffer, buffer, (size_t) read)) {
+        net_remove_client(client);
+        return 0;
+    }
+
+    NetPacket packet;
+    int result;
+
+    while ((result = net_buffer_next(&client->read_buffer, &packet)) > 0) {
+        net_handle_packet(client, &packet);
+    }
+
+    if (result < 0) {
+        net_remove_client(client);
+        return 0;
+    }
 
     return 1;
 }
@@ -97,42 +210,64 @@ void net_main() {
 
     if (listen(server_socket, 5) < 0) NET_ERROR("Failed to listen on port %d, quitting...", g_server->config.listen_port);
 
-#ifdef WIN32
-    unsigned long non_blocking = 1;
-    ioctlsocket(server_socket, FIONBIO, &non_blocking);
-#else
-    int flags = fcntl(server_socket, F_GETFL, 0);
-    fcntl(server_socket, F_SETFL, flags | O_NONBLOCK);
-#endif
+    net_set_nonblocking(server_socket);
 
     replxx_print(g_replxx, "Listening on port %d \n", g_server->config.listen_port);
 
-    while (1) {
+    while (!g_server->should_quit) {
+        pthread_mutex_lock(&g_server->lock);
+
         for (size_t i = 0; i < g_server->client_count; i++) {
             if (!net_poll_client(&g_server->clients[i])) i--;
         }
 
+        pthread_mutex_unlock(&g_server->lock);
+
         struct sockaddr_in client_addr;
+#ifdef WIN32
         int client_addr_size = sizeof(client_addr);
+#else
+        socklen_t client_addr_size = sizeof(client_addr);
+#endif
 
         const int client = (int) accept(server_socket, (struct  sockaddr *) &client_addr, &client_addr_size);
 
         if (client < 0) {
-#ifdef WIN32
-            if (NET_ERRNO == WSAEWOULDBLOCK) continue;
-#else
-            if (NET_ERRNO == EAGAIN || NET_ERRNO == EWOULDBLOCK) continue;
-#endif
+            if (WOULD_BLOCK(NET_ERRNO)) {
+                SLEEP_MILLIS(1);
+                continue;
+            }
 
             break;
         }
+
+        net_set_nonblocking(client);
 
         ClientConnection conn = {};
 
         conn.fd = client;
         conn.addr = client_addr;
 
+        pthread_mutex_lock(&g_server->lock);
         net_add_client(&conn);
+        pthread_mutex_unlock(&g_server->lock);
+    }
+
+    CLOSE_SOCKET(server_socket);
+}
+
+void net_broadcast_states() {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+
+        for (size_t j = 0; j < g_server->game.player_count; j++) {
+            Player *player = g_server->game.players[j];
+            if (!player || !player->active) continue;
+
+            NetStatePacket packet;
+            net_packet_from_player(&packet, player);
+            net_send_packet(client->fd, NET_PACKET_STATE, &packet, sizeof(packet));
+        }
     }
 }
 

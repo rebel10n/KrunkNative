@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <pcg_basic.h>
+#include <string.h>
 #include <time.h>
 #include <stb_image.h>
 
@@ -27,10 +28,12 @@ Geometry *g_ramp_geometry;
 unsigned int g_blank_texture;
 unsigned int g_active_texture;
 unsigned int g_active_shader;
+int g_skip_map_meshes;
 
 void client_load_map(Client*);
 void client_unload_map(Client*);
 void client_tick(Client*, float, float);
+void client_tick_net(Client*);
 void resize_viewport(GLFWwindow*, int, int);
 
 int main() {
@@ -53,6 +56,10 @@ int main() {
     if (!glfwInit()) return -1;
 
     static Client INSTANCE = {};
+
+    pthread_mutex_init(&INSTANCE.net_lock, NULL);
+    pthread_mutex_init(&INSTANCE.local_server_lock, NULL);
+    INSTANCE.net_socket = -1;
 
     INSTANCE.camera.zoom = 1.0f;
     INSTANCE.camera.fov = M_PI / 2.0f;
@@ -97,16 +104,9 @@ int main() {
 
     if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
 
-    NetMainArgs net_args;
-
-    net_args.address = "127.0.0.1";
-    net_args.client = &INSTANCE;
-
-    // pthread_create(&INSTANCE.net_thread, NULL, (void *) net_main, &net_args);
-
     game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
-    game_init(&INSTANCE.game, -1, -1, 1);
-    client_load_map(&INSTANCE);
+
+    if (!local_server_start(&INSTANCE)) return -1;
 
     double last_tick = glfwGetTime();
 
@@ -120,6 +120,9 @@ int main() {
         glfwSwapBuffers(INSTANCE.window);
         glfwPollEvents();
     }
+
+    INSTANCE.net_should_quit = 1;
+    local_server_stop(&INSTANCE);
 
     return 0;
 }
@@ -140,6 +143,123 @@ void client_unload_map(Client *client) {
         const Object *object = client->game.map->objects[i];
         if (object->mesh) scene_remove_mesh(client->scene, object->mesh);
     }
+}
+
+Player *client_find_player(Client *client, const int uid) {
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        Player *player = client->game.players[i];
+        if (player && player->uid == uid) return player;
+    }
+
+    return NULL;
+}
+
+void client_add_player_mesh(Client *client, Player *player, const int render_you) {
+    if (player->mesh) return;
+
+    player_generate_meshes(player, render_you);
+    player_swap_weapon(player, player->loadout_index, 1, 1, 1);
+    player_update_meshes(player, 0);
+
+    if (render_you) {
+        scene_add_player_mesh(client->fps_scene, player->mesh, player->loadout_size);
+    } else {
+        scene_add_player_mesh(client->scene, player->mesh, player->loadout_size);
+    }
+}
+
+void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
+    Player *player = client_find_player(client, packet->uid);
+
+    if (!player) {
+        player = player_init(&client->game);
+        if (!player) return;
+
+        player->uid = packet->uid;
+        game_players_add(&client->game, player);
+        player_spawn(player);
+    } else if (!player->loadout_size) {
+        player_spawn(player);
+    }
+
+    player->active = packet->active;
+    player->position.x = packet->position[0];
+    player->position.y = packet->position[1];
+    player->position.z = packet->position[2];
+    player->direction.x = packet->direction[0];
+    player->direction.y = packet->direction[1];
+
+    if (packet->is_you) {
+        client->me = player;
+        player->is_you = 1;
+        client_add_player_mesh(client, player, 1);
+    } else {
+        client_add_player_mesh(client, player, 0);
+    }
+}
+
+void client_apply_state(Client *client, const NetStatePacket *packet) {
+    Player *player = client_find_player(client, packet->uid);
+    if (!player) return;
+
+    if (player == client->me) {
+        player->input_seq = packet->ack_seq;
+        return;
+    }
+
+    net_packet_apply_player(player, packet);
+}
+
+void client_tick_net(Client *client) {
+    pthread_mutex_lock(&client->net_lock);
+
+    const size_t packet_count = client->net_packet_count;
+    NetPacket *packets = client->net_packets;
+
+    client->net_packet_count = 0;
+    client->net_packets = NULL;
+
+    pthread_mutex_unlock(&client->net_lock);
+
+    for (size_t i = 0; i < packet_count; i++) {
+        const NetPacket *packet = &packets[i];
+
+        switch (packet->type) {
+            case NET_PACKET_INIT: {
+                if (packet->length != sizeof(NetInitPacket)) break;
+
+                NetInitPacket init;
+                memcpy(&init, packet->payload, sizeof(init));
+
+                if (client->map_loaded) client_unload_map(client);
+
+                game_init(&client->game, init.map_index, init.mode_index, 0);
+                client_load_map(client);
+                client->map_loaded = client->game.ready;
+                break;
+            }
+            case NET_PACKET_SPAWN: {
+                if (packet->length != sizeof(NetSpawnPacket) || !client->game.ready) break;
+
+                NetSpawnPacket spawn;
+                memcpy(&spawn, packet->payload, sizeof(spawn));
+                client_apply_spawn(client, &spawn);
+                break;
+            }
+            case NET_PACKET_STATE: {
+                if (packet->length != sizeof(NetStatePacket) || !client->game.ready) break;
+
+                NetStatePacket state;
+                memcpy(&state, packet->payload, sizeof(state));
+                client_apply_state(client, &state);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    free(packets);
 }
 
 void resize_viewport(GLFWwindow *window, const int width, const int height) {
@@ -204,12 +324,28 @@ void client_enter_game(Client *client) {
         player_swap_weapon(client->me, 0, 1, 0, 0);
         scene_add_player_mesh(client->fps_scene, client->me->mesh, client->me->loadout_size);
     } else {
-        // TODO: liftoff
+        const NetEntPacket packet = {0};
+
+        pthread_mutex_lock(&client->net_lock);
+        const int socket = client->net_socket;
+        pthread_mutex_unlock(&client->net_lock);
+
+        if (client->local_server_running) {
+            local_server_queue_packet(client, NET_PACKET_ENT, &packet, sizeof(packet));
+            client->spawn_requested = 1;
+        } else if (socket >= 0) {
+            client_net_send_packet(socket, NET_PACKET_ENT, &packet, sizeof(packet));
+            client->spawn_requested = 1;
+        } else {
+            client->in_game = 0;
+        }
     }
 }
 
 void client_tick(Client *client, const float now, const float delta) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    client_tick_net(client);
 
     if (!client->game.ready) return;
 
@@ -229,7 +365,7 @@ void client_tick(Client *client, const float now, const float delta) {
 
     const int debug_key = glfwGetKey(client->window, GLFW_KEY_GRAVE_ACCENT);
 
-    if (debug_key && !client->last_debug_key) {
+    if (debug_key && !client->last_debug_key && client->game.is_local) {
         client_unload_map(client);
 
         if (client->me) {
@@ -342,7 +478,23 @@ void client_tick(Client *client, const float now, const float delta) {
             }
         }
 
+        input.seq = client->net_next_input_seq++;
         player_queue_input(client->me, &input);
+
+        if (!client->game.is_local) {
+            NetInputPacket packet;
+            net_packet_from_input(&packet, &input);
+
+            pthread_mutex_lock(&client->net_lock);
+            const int socket = client->net_socket;
+            pthread_mutex_unlock(&client->net_lock);
+
+            if (client->local_server_running) {
+                local_server_queue_packet(client, NET_PACKET_INPUT, &packet, sizeof(packet));
+            } else if (socket >= 0) {
+                client_net_send_packet(socket, NET_PACKET_INPUT, &packet, sizeof(packet));
+            }
+        }
 
         client->camera.position = client->me->position;
         client->camera.position.y += client->me->height - game_constants.camera_height;

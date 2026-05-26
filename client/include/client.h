@@ -49,6 +49,7 @@ extern Geometry *g_ramp_geometry;
 extern unsigned int g_blank_texture;
 extern unsigned int g_active_texture;
 extern unsigned int g_active_shader;
+extern int g_skip_map_meshes;
 
 typedef struct {
     float near;
@@ -280,10 +281,31 @@ typedef struct {
     unsigned char last_fullscreen_key:1;
     unsigned char last_swap_key:2;
     unsigned char in_game:1;
+    unsigned char spawn_requested:1;
+    unsigned char map_loaded:1;
+    unsigned char net_connected:1;
+    unsigned char local_server_running:1;
 
     pthread_t net_thread;
+    pthread_t local_server_thread;
+    pthread_mutex_t net_lock;
+    pthread_mutex_t local_server_lock;
+    int net_socket;
+    int net_should_quit;
+    int net_map_index;
+    int net_mode_index;
+    int net_next_input_seq;
+    int local_server_should_quit;
+    int local_server_next_client_id;
+
+    size_t net_packet_count;
+    NetPacket *net_packets;
+    size_t local_server_packet_count;
+    NetPacket *local_server_packets;
 
     Game game;
+    Game local_server_game;
+    Player *local_server_player;
     Player *me;
 } Client;
 
@@ -301,6 +323,12 @@ typedef struct {
 } NetMainArgs;
 
 void net_main(NetMainArgs *args);
+void client_net_queue_packet(Client*, const NetPacket*);
+void client_net_log_packet(const char*, NetPacketType, const void*, uint16_t);
+int client_net_send_packet(int, NetPacketType, const void*, uint16_t);
+int local_server_start(Client*);
+void local_server_stop(Client*);
+void local_server_queue_packet(Client*, NetPacketType, const void*, uint16_t);
 
 void client_animate_object_texture(Object*, float);
 

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(KrunkNative)
 
 set(CMAKE_C_STANDARD 11)
+find_package(Threads REQUIRED)
 
 include_directories(shared/include)
 
@@ -40,13 +41,13 @@ link_libraries(cJSON pcg_basic)
 # CLIENT
 add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
 target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
-target_link_libraries(${CLIENT_BINARY} PRIVATE glfw glad freetype)
+target_link_libraries(${CLIENT_BINARY} PRIVATE glfw glad freetype Threads::Threads m)
 target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
 
 # SERVER
 add_executable(${SERVER_BINARY} ${SERVER_HEADERS} ${SERVER_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
 target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)
-target_link_libraries(${SERVER_BINARY} PRIVATE replxx)
+target_link_libraries(${SERVER_BINARY} PRIVATE replxx Threads::Threads m)
 target_include_directories(${SERVER_BINARY} PRIVATE server/include)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

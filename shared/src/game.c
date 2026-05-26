@@ -147,6 +147,9 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
 
     const int mode_to_load = mode_index >= 0 && mode_index < game->mode_count ? mode_index : game->modes[(int) pcg32_boundedrand(game->mode_count)];
 
+    game->current_map_index = map_to_load;
+    game->current_mode_index = mode_to_load;
+
     if (map_changed) {
         Map *new_map = map_init(game->maps[map_to_load]);
 

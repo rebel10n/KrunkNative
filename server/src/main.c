@@ -1,5 +1,8 @@
 #include <server.h>
 #include <pthread.h>
+#include <pcg_basic.h>
+#include <stdlib.h>
+#include <time.h>
 
 static const ServerVersion g_version = {1, 0, 0};
 
@@ -7,6 +10,10 @@ Replxx *g_replxx;
 Server *g_server;
 
 int main() {
+    char *rand_memory = malloc(1);
+    pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
+    free(rand_memory);
+
     g_replxx = replxx_init();
     replxx_bind_key(g_replxx, REPLXX_KEY_CONTROL('C'), cli_sigint, NULL);
 
@@ -15,10 +22,14 @@ int main() {
 
     g_server->config.tick_rate = 30;
     g_server->config.listen_port = 21015;
+    pthread_mutex_init(&g_server->lock, NULL);
 
     g_server->game.server = g_server;
+    game_configure(&g_server->game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&g_server->game, -1, -1, 0);
 
     replxx_print(g_replxx, "Starting KrunkNative server v%d.%d.%d... \n", g_version.major, g_version.minor, g_version.patch);
+    replxx_print(g_replxx, "Loaded map %d mode %d \n", g_server->game.current_map_index, g_server->game.current_mode_index);
 
     pthread_t cli_thread;
     pthread_create(&cli_thread, NULL, (void *) cli_main, NULL);
@@ -42,7 +53,10 @@ int main() {
         now += delta;
         last_tick = tick_start;
 
+        pthread_mutex_lock(&g_server->lock);
         game_tick(&g_server->game, now, delta);
+        net_broadcast_states();
+        pthread_mutex_unlock(&g_server->lock);
 
         const long long expected_nsec = 1000000000 / g_server->config.tick_rate;
         long long elapsed_nsec = 0;

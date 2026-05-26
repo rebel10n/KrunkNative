@@ -1,5 +1,6 @@
 #pragma once
 #include <stdlib.h>
+#include <stdint.h>
 #include <modes.h>
 #include <weapons.h>
 #include <cJSON.h>
@@ -546,6 +547,9 @@ typedef struct Game_t {
     size_t class_count;
     size_t weapon_count;
 
+    int current_map_index;
+    int current_mode_index;
+
     size_t player_count;
     Player **players;
 
@@ -568,6 +572,100 @@ void game_init(Game*, int, int, unsigned char);
 void game_tick(Game*, float, float);
 void game_players_add(Game*, Player*);
 void game_broadcast();
+
+#define NET_DEFAULT_PORT 21015
+#define NET_MAX_PAYLOAD 512
+#define NET_PACKET_HEADER_SIZE 3
+#define NET_BUFFER_SIZE 4096
+
+typedef enum {
+    NET_PACKET_HELLO = 1,
+    NET_PACKET_INIT = 2,
+    NET_PACKET_ENT = 3,
+    NET_PACKET_SPAWN = 4,
+    NET_PACKET_INPUT = 5,
+    NET_PACKET_STATE = 6,
+} NetPacketType;
+
+enum {
+    NET_INPUT_SHOOT = 1 << 0,
+    NET_INPUT_SCOPE = 1 << 1,
+    NET_INPUT_JUMP = 1 << 2,
+    NET_INPUT_CROUCH = 1 << 3,
+    NET_INPUT_RELOAD = 1 << 4,
+};
+
+#pragma pack(push, 1)
+typedef struct {
+    uint8_t major;
+    uint8_t minor;
+    uint8_t patch;
+} NetHelloPacket;
+
+typedef struct {
+    uint8_t major;
+    uint8_t minor;
+    uint8_t patch;
+    int32_t map_index;
+    int32_t mode_index;
+    uint16_t tick_rate;
+    int32_t client_id;
+} NetInitPacket;
+
+typedef struct {
+    int32_t class_index;
+} NetEntPacket;
+
+typedef struct {
+    int32_t uid;
+    uint8_t is_you;
+    uint8_t active;
+    float position[3];
+    float direction[2];
+} NetSpawnPacket;
+
+typedef struct {
+    int32_t seq;
+    int32_t move_dir;
+    float delta;
+    float x_dir;
+    float y_dir;
+    uint8_t flags;
+    uint8_t swap;
+} NetInputPacket;
+
+typedef struct {
+    int32_t uid;
+    int32_t ack_seq;
+    uint8_t active;
+    int32_t loadout_index;
+    float position[3];
+    float velocity[3];
+    float direction[2];
+    float health;
+    float aim_val;
+    float crouch_val;
+} NetStatePacket;
+#pragma pack(pop)
+
+typedef struct {
+    uint8_t type;
+    uint16_t length;
+    uint8_t payload[NET_MAX_PAYLOAD];
+} NetPacket;
+
+typedef struct {
+    size_t length;
+    uint8_t data[NET_BUFFER_SIZE];
+} NetPacketBuffer;
+
+int net_send_packet(int, NetPacketType, const void*, uint16_t);
+int net_buffer_push(NetPacketBuffer*, const void*, size_t);
+int net_buffer_next(NetPacketBuffer*, NetPacket*);
+void net_packet_from_input(NetInputPacket*, const Input*);
+void net_packet_to_input(Input*, const NetInputPacket*);
+void net_packet_from_player(NetStatePacket*, const Player*);
+void net_packet_apply_player(Player*, const NetStatePacket*);
 
 char *concat(const char*, const char*);
 const char *assets_path();

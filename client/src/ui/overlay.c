@@ -5,6 +5,8 @@ static unsigned int ammo_icon;
 static unsigned int timer_icon;
 
 void overlay_render(Client *client, const float delta) {
+    if (!client->me) return;
+
     const vec4 white = {1.0f, 1.0f, 1.0f, 1.0f};
     const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
 

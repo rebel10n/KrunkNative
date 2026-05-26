@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <server.h>
+#include <time.h>
 
 ReplxxActionResult cli_sigint(int ignored, void *user_data) {
     g_server->should_quit = 1;
@@ -15,7 +16,8 @@ ReplxxActionResult cli_sigint(int ignored, void *user_data) {
         } while (!line && errno == EAGAIN);
 
         if (!line) {
-            replxx_print(g_replxx, "\n");
+            struct timespec ts = {0, 100000000L};
+            nanosleep(&ts, NULL);
             continue;
         }
 

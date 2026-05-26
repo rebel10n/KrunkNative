@@ -34,6 +34,24 @@ Full command: `apt install -y libwayland-dev wayland-protocols pkg-config libx11
 
 If you wish to run KrunkNative, you must first add game assets, please read [the assets readme](/assets/README.md) for more information. The client looks for the `assets` folder in the same directory in release mode, or in the parent directory in development mode (when the binary is inside the `cmake-build-release` or `cmake-build-debug` folder).
 
+## Packet Logging
+
+Set `KRUNKNATIVE_PACKET_LOG=1` before launching the client to print decoded, color-coded client packets. Incoming packets are marked `<=` in orange, and outgoing packets are marked `=>` in green.
+
+Linux:
+
+```sh
+KRUNKNATIVE_PACKET_LOG=1 ./cmake-build-debug/client_bin
+```
+
+Windows PowerShell:
+
+```powershell
+$env:KRUNKNATIVE_PACKET_LOG = "1"; .\cmake-build-debug\client.exe
+```
+
+Leave `KRUNKNATIVE_PACKET_LOG` unset, or set it to `0`, to disable packet logging.
+
 ## Acknowledgements
 
 - OpenGL - graphics backend

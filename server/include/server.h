@@ -1,6 +1,7 @@
 #pragma once
 #include <shared.h>
 #include <replxx.h>
+#include <pthread.h>
 
 #ifdef WIN32
 #include <winsock2.h>
@@ -25,6 +26,8 @@ typedef struct {
 typedef struct {
     int fd;
     struct sockaddr_in addr;
+    NetPacketBuffer read_buffer;
+    int id;
 
     Player *player;
 } ClientConnection;
@@ -34,6 +37,8 @@ typedef struct {
 
     size_t client_count;
     ClientConnection *clients;
+    int next_client_id;
+    pthread_mutex_t lock;
 
     ServerConfig config;
     Game game;
@@ -47,6 +52,7 @@ void cli_main();
 
 void net_main();
 void net_cleanup();
+void net_broadcast_states();
 
 void on_client_connect(ClientConnection*);
 void on_client_disconnect(ClientConnection*);

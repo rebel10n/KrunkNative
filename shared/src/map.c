@@ -367,8 +367,10 @@ Map *map_init(const cJSON *raw_data) {
         }
 
 #ifdef KRUNKNATIVE_CLIENT
-        object->mesh = prefab_init(object, parsed_colors, raw_obj);
-        client_animate_object_texture(object, 0.0f);
+        if (!g_skip_map_meshes) {
+            object->mesh = prefab_init(object, parsed_colors, raw_obj);
+            client_animate_object_texture(object, 0.0f);
+        }
 #endif
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {
