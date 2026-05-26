@@ -2,17 +2,30 @@
 out vec4 frag_color;
 
 in vec2 tex_coord;
+in vec3 world_pos;
+in float view_depth;
 in flat int face_idx;
 
 uniform bool is_ramp;
 uniform bool is_ladder;
 
 uniform bool use_face_tex_scaling;
+uniform bool unlit;
 uniform float world_uv_scale;
 uniform vec3 face_scale;
 
 uniform vec4 color;
 uniform vec4 emissive;
+uniform vec4 ambient_color;
+uniform vec4 light_color;
+uniform vec4 fog_color;
+uniform vec3 light_direction;
+uniform float ambient_intensity;
+uniform float light_intensity;
+uniform float fog_near;
+uniform float fog_far;
+uniform bool lighting_enabled;
+uniform bool fog_enabled;
 
 uniform mat3 tex_transform;
 uniform sampler2D tex;
@@ -58,5 +71,27 @@ void main() {
     }
 
     vec3 t_tex_coord = tex_transform * vec3(scaled_tex_coord, 1.0f);
-    frag_color = texture(tex, t_tex_coord.xy) * mix(color, emissive, 0.0f);
+    vec4 texel = texture(tex, t_tex_coord.xy);
+    vec4 base_color = texel * color;
+
+    if (lighting_enabled && !unlit) {
+        vec3 dx = dFdx(world_pos);
+        vec3 dy = dFdy(world_pos);
+        vec3 normal = normalize(cross(dx, dy));
+        if (!gl_FrontFacing) normal = -normal;
+
+        float lambert = max(dot(normal, normalize(light_direction)), 0.0f);
+        vec3 ambient = ambient_color.rgb * ambient_intensity;
+        vec3 direct = light_color.rgb * light_intensity * lambert;
+        vec3 lit = base_color.rgb * (ambient + direct);
+
+        base_color.rgb = max(lit, emissive.rgb * emissive.a);
+    }
+
+    if (fog_enabled && !unlit) {
+        float fog_amount = smoothstep(fog_near, fog_far, view_depth);
+        base_color.rgb = mix(base_color.rgb, fog_color.rgb, fog_amount);
+    }
+
+    frag_color = base_color;
 }

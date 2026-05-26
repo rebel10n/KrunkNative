@@ -52,6 +52,22 @@ extern unsigned int g_active_shader;
 extern int g_skip_map_meshes;
 
 typedef struct {
+    vec4 ambient_color;
+    vec4 light_color;
+    vec4 sky_color;
+    vec4 fog_color;
+    vec3 light_direction;
+    float ambient_intensity;
+    float light_intensity;
+    float fog_near;
+    float fog_far;
+    unsigned char enabled:1;
+    unsigned char fog_enabled:1;
+} RenderLighting;
+
+extern RenderLighting g_render_lighting;
+
+typedef struct {
     float near;
     float far;
     float fov;
@@ -120,6 +136,7 @@ typedef struct {
     int is_ramp;
     int is_ladder;
     int use_face_tex_scaling;
+    int unlit;
     vec3 face_scale;
 
     vec4 color;

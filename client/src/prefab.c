@@ -252,9 +252,9 @@ static Geometry *prefab_cylinder_geo(const int segments, const int cone) {
     if (cone && cached_cone) return cached_cone;
 
     const int side_vertices = segments * 4;
-    const int cap_vertices = cone ? segments + 1 : (segments + 1) * 2;
+    const int cap_vertices = cone ? 0 : (segments + 1) * 2;
     const int vertex_count = side_vertices + cap_vertices;
-    const int index_count = segments * 6 + (cone ? segments * 3 : segments * 6);
+    const int index_count = segments * 6 + (cone ? 0 : segments * 6);
 
     vertex *vertices = calloc(vertex_count, sizeof(vertex));
     unsigned int *indices = calloc(index_count, sizeof(unsigned int));
@@ -292,21 +292,21 @@ static Geometry *prefab_cylinder_geo(const int segments, const int cone) {
         indices[idx++] = base + 3;
     }
 
-    const int bottom_center = v;
-    vertices[v++] = (vertex) {0.0f, 0.0f, 0.0f, 0.5f, 0.5f};
-
-    for (int i = 0; i < segments; i++) {
-        const float a = (float) i / (float) segments * 2.0f * (float) M_PI;
-        vertices[v++] = (vertex) {cosf(a) * 0.5f, 0.0f, sinf(a) * 0.5f, cosf(a) * 0.5f + 0.5f, sinf(a) * 0.5f + 0.5f};
-    }
-
-    for (int i = 0; i < segments; i++) {
-        indices[idx++] = bottom_center;
-        indices[idx++] = bottom_center + 1 + ((i + 1) % segments);
-        indices[idx++] = bottom_center + 1 + i;
-    }
-
     if (!cone) {
+        const int bottom_center = v;
+        vertices[v++] = (vertex) {0.0f, 0.0f, 0.0f, 0.5f, 0.5f};
+
+        for (int i = 0; i < segments; i++) {
+            const float a = (float) i / (float) segments * 2.0f * (float) M_PI;
+            vertices[v++] = (vertex) {cosf(a) * 0.5f, 0.0f, sinf(a) * 0.5f, cosf(a) * 0.5f + 0.5f, sinf(a) * 0.5f + 0.5f};
+        }
+
+        for (int i = 0; i < segments; i++) {
+            indices[idx++] = bottom_center;
+            indices[idx++] = bottom_center + 1 + ((i + 1) % segments);
+            indices[idx++] = bottom_center + 1 + i;
+        }
+
         const int top_center = v;
         vertices[v++] = (vertex) {0.0f, 1.0f, 0.0f, 0.5f, 0.5f};
 
@@ -458,7 +458,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     const float opacity = cJSON_IsNumber(raw_opacity) ? (float) cJSON_GetNumberValue(raw_opacity) : 1.0f;
 
     vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
-    vec4 emissive = {1.0f, 1.0f, 1.0f, 1.0f};
+    vec4 emissive = {0.0f, 0.0f, 0.0f, 0.0f};
 
     if (cJSON_IsString(raw_color)) parse_hex_color(cJSON_GetStringValue(raw_color), &color);
     else if (cJSON_IsNumber(raw_color_idx)) color = colors[(int) cJSON_GetNumberValue(raw_color_idx)];
@@ -547,7 +547,13 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
     char *texture_path;
 
-    if (object->prefab == PREFAB_BILLBOARD) {
+    if (object->prefab == PREFAB_LIGHT_CONE) {
+        const int cone_frame = cJSON_GetObjectItem(raw_obj, "fc") == NULL ? 0 : 1;
+        const int texture_path_length = snprintf(NULL, 0, "textures/lightcone_%d.png", cone_frame);
+
+        texture_path = malloc(texture_path_length + 1);
+        snprintf(texture_path, texture_path_length + 1, "textures/lightcone_%d.png", cone_frame);
+    } else if (object->prefab == PREFAB_BILLBOARD) {
         const cJSON *bb = cJSON_GetObjectItem(raw_obj, "bb");
         int billboard_id = cJSON_IsNumber(bb) ? (int) cJSON_GetNumberValue(bb) : 0;
 
@@ -636,6 +642,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->emissive = emissive;
         material->base.transparent = opacity != 1.0f || object->prefab == PREFAB_LIGHT_CONE || prefab_textures[tex_id].transparent;
         material->use_face_tex_scaling = 0;
+        material->unlit = object->prefab == PREFAB_LIGHT_CONE;
 
         return mesh;
     }

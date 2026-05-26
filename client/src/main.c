@@ -29,12 +29,81 @@ unsigned int g_blank_texture;
 unsigned int g_active_texture;
 unsigned int g_active_shader;
 int g_skip_map_meshes;
+RenderLighting g_render_lighting = {
+    .ambient_color = {0.592f, 0.627f, 0.659f, 1.0f},
+    .light_color = {0.949f, 0.973f, 0.988f, 1.0f},
+    .sky_color = {0.863f, 0.910f, 0.929f, 1.0f},
+    .fog_color = {0.553f, 0.604f, 0.627f, 1.0f},
+    .light_direction = {0.0f, 0.809f, -0.588f},
+    .ambient_intensity = 1.0f,
+    .light_intensity = 1.3f,
+    .fog_near = 1.0f,
+    .fog_far = 2000.0f,
+    .enabled = 1,
+    .fog_enabled = 1,
+};
 
 void client_load_map(Client*);
 void client_unload_map(Client*);
 void client_tick(Client*, float, float);
 void client_tick_net(Client*);
 void resize_viewport(GLFWwindow*, int, int);
+
+static vec4 json_color_or(const cJSON *json, const vec4 fallback) {
+    if (cJSON_IsNumber(json)) return hex_to_vec((int) cJSON_GetNumberValue(json));
+
+    if (cJSON_IsString(json)) {
+        vec4 parsed = fallback;
+        if (!parse_hex_color(cJSON_GetStringValue(json), &parsed)) return parsed;
+    }
+
+    return fallback;
+}
+
+static float json_float_or(const cJSON *json, const float fallback) {
+    return cJSON_IsNumber(json) ? (float) cJSON_GetNumberValue(json) : fallback;
+}
+
+static void client_apply_map_lighting(const Map *map) {
+    if (!map || !map->raw_data) return;
+
+    const cJSON *raw = map->raw_data;
+
+    g_render_lighting.ambient_color = json_color_or(cJSON_GetObjectItem(raw, "ambient"), g_render_lighting.ambient_color);
+    g_render_lighting.light_color = json_color_or(cJSON_GetObjectItem(raw, "light"), g_render_lighting.light_color);
+    g_render_lighting.sky_color = json_color_or(cJSON_GetObjectItem(raw, "sky"), g_render_lighting.sky_color);
+    g_render_lighting.fog_color = json_color_or(cJSON_GetObjectItem(raw, "fog"), g_render_lighting.fog_color);
+
+    g_render_lighting.ambient_intensity = json_float_or(cJSON_GetObjectItem(raw, "ambientI"), 1.0f);
+    g_render_lighting.light_intensity = json_float_or(cJSON_GetObjectItem(raw, "lightI"), 1.3f);
+    g_render_lighting.fog_near = 1.0f;
+    g_render_lighting.fog_far = json_float_or(cJSON_GetObjectItem(raw, "fogD"), 2000.0f);
+    g_render_lighting.enabled = 1;
+    g_render_lighting.fog_enabled = cJSON_GetObjectItem(raw, "fog") != NULL && g_render_lighting.fog_far > g_render_lighting.fog_near;
+
+    const float sun_y = json_float_or(cJSON_GetObjectItem(raw, "sunAngY"), 54.0f);
+    const float sun_x = json_float_or(cJSON_GetObjectItem(raw, "sunAngX"), 90.0f);
+    const float u = (float) M_PI * (sun_y / -180.0f);
+    const float v = (float) M_PI * (sun_x / -180.0f);
+
+    g_render_lighting.light_direction.x = cosf(v);
+    g_render_lighting.light_direction.y = sinf(v) * sinf(u);
+    g_render_lighting.light_direction.z = sinf(v) * cosf(u);
+
+    const float len = sqrtf(
+        g_render_lighting.light_direction.x * g_render_lighting.light_direction.x +
+        g_render_lighting.light_direction.y * g_render_lighting.light_direction.y +
+        g_render_lighting.light_direction.z * g_render_lighting.light_direction.z
+    );
+
+    if (len > 0.0f) {
+        g_render_lighting.light_direction.x /= len;
+        g_render_lighting.light_direction.y /= len;
+        g_render_lighting.light_direction.z /= len;
+    }
+
+    glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, g_render_lighting.sky_color.w);
+}
 
 int main() {
     char *rand_memory = malloc(1);
@@ -129,6 +198,8 @@ int main() {
 
 void client_load_map(Client *client) {
     if (!client->game.map) return;
+
+    client_apply_map_lighting(client->game.map);
 
     for (size_t i = 0; i < client->game.map->object_count; i++) {
         const Object *object = client->game.map->objects[i];
