@@ -87,31 +87,51 @@ jobs:
 
       - name: Stage Windows artifact (exes + runtime DLLs)
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           mkdir -p dist
-          cp cmake-build-release/client.exe dist/
-          cp cmake-build-release/server.exe dist/
+          cp -v cmake-build-release/client.exe dist/
+          cp -v cmake-build-release/server.exe dist/
+
+          echo "=== ldd dist/client.exe ==="
+          ldd dist/client.exe || true
+          echo "=== ldd dist/server.exe ==="
+          ldd dist/server.exe || true
 
           # Recursively resolve MinGW DLL dependencies of the exes and copy
-          # everything that lives under /mingw64/bin into the artifact dir.
-          # Without this, end-users hit "libbrotlidec.dll / libbz2-1.dll not
-          # found" errors because FreeType pulls in brotli, bzip2, harfbuzz,
-          # png, zlib, etc. at runtime.
+          # everything that lives under the MSYS2 prefix (mingw64/ucrt64) into
+          # the artifact dir. Without this, end-users hit "libbrotlidec.dll /
+          # libbz2-1.dll not found" errors because FreeType pulls in brotli,
+          # bzip2, harfbuzz, png, zlib, etc. at runtime.
+          #
+          # `ldd` on MSYS2 emits Windows-style absolute paths like
+          # `D:/a/_temp/msys64/mingw64/bin/libfoo.dll`, so we match on the
+          # `/mingw64/bin/` or `/ucrt64/bin/` substring rather than a leading
+          # slash. System DLLs under C:/WINDOWS are skipped automatically.
           resolve_deps() {
-            local target="$1"
-            local seen_file="$2"
-            ldd "$target" 2>/dev/null \
+            target="$1"
+            seen_file="$2"
+            depth="${3:-0}"
+            indent=$(printf '%*s' "$((depth * 2))" '')
+            echo "${indent}-> resolving deps of $target"
+            deps=$(ldd "$target" 2>/dev/null \
               | awk '{print $3}' \
-              | grep -Ei '^/(mingw64|ucrt64)/bin/' \
-              | while read -r dll; do
-                  local name
-                  name="$(basename "$dll")"
-                  if ! grep -qx "$name" "$seen_file" 2>/dev/null; then
-                    echo "$name" >> "$seen_file"
-                    cp -n "$dll" dist/
-                    resolve_deps "$dll" "$seen_file"
-                  fi
-                done
+              | grep -Ei '/(mingw64|ucrt64)/bin/' || true)
+            if [ -z "$deps" ]; then
+              echo "${indent}   (no MinGW deps)"
+              return 0
+            fi
+            echo "$deps" | while read -r dll; do
+              [ -z "$dll" ] && continue
+              name="$(basename "$dll")"
+              if grep -qx "$name" "$seen_file" 2>/dev/null; then
+                echo "${indent}   skip  $name (already bundled)"
+              else
+                echo "$name" >> "$seen_file"
+                echo "${indent}   copy  $name  <-  $dll"
+                cp -n "$dll" dist/
+                resolve_deps "$dll" "$seen_file" "$((depth + 1))"
+              fi
+            done
           }
 
           : > dist/.seen
@@ -119,8 +139,10 @@ jobs:
           resolve_deps dist/server.exe dist/.seen
           rm -f dist/.seen
 
-          echo "Bundled DLLs:"
-          ls -1 dist/*.dll || true
+          echo "=== Final artifact contents ==="
+          ls -la dist/
+          echo "=== Bundled DLL count ==="
+          ls -1 dist/*.dll 2>/dev/null | wc -l || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
