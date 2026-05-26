@@ -444,8 +444,6 @@ void resize_viewport(GLFWwindow *window, const int width, const int height) {
 }
 
 void scroll_callback(GLFWwindow *window, const double xoffset, const double yoffset) {
-    (void) xoffset;
-
     Client *client = glfwGetWindowUserPointer(window);
     if (!client || !yoffset) return;
 
