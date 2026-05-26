@@ -89,8 +89,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp cmake-build-release/client_bin.exe dist/
-          cp cmake-build-release/server_bin.exe dist/
+          cp cmake-build-release/client.exe dist/
+          cp cmake-build-release/server.exe dist/
 
           # Recursively resolve MinGW DLL dependencies of the exes and copy
           # everything that lives under /mingw64/bin into the artifact dir.
@@ -115,8 +115,8 @@ jobs:
           }
 
           : > dist/.seen
-          resolve_deps dist/client_bin.exe dist/.seen
-          resolve_deps dist/server_bin.exe dist/.seen
+          resolve_deps dist/client.exe dist/.seen
+          resolve_deps dist/server.exe dist/.seen
           rm -f dist/.seen
 
           echo "Bundled DLLs:"
