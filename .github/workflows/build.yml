@@ -93,3 +93,42 @@ jobs:
             cmake-build-release/client.exe
             cmake-build-release/server.exe
           if-no-files-found: error
+
+  macos:
+    name: macOS (Clang)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-13
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          brew update
+          brew install cmake ninja pkg-config
+
+      - name: Configure (Release)
+        run: cmake -G Ninja -B cmake-build-release -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build cmake-build-release --config Release --parallel
+
+      - name: Run tests
+        run: ./cmake-build-release/proc_input_test
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KrunkNative-macos-${{ matrix.arch }}
+          path: |
+            cmake-build-release/client_bin
+            cmake-build-release/server_bin
+          if-no-files-found: error
