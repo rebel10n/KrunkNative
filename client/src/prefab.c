@@ -79,34 +79,59 @@ const PrefabModel prefab_models[] = {
 
 typedef struct {
     const char *name;
+    const char *src;
     const unsigned char transparent:1;
 } PrefabTexture;
 
 const PrefabTexture prefab_textures[] = {
-    {"wall"},
-    {"dirt"},
-    {"floor"},
-    {"grid"},
-    {"grey"},
-    {"default"},
-    {"roof"},
-    {"flag"},
-    {"grass"},
-    {"check"},
-    {"lines"},
-    {"brick"},
-    {"link", 1},
-    {"liquid", 1},
-    {"grain"},
-    {"fabric"},
-    {"tile"},
+    {"WALL", "wall_0"},
+    {"DIRT", "dirt_0"},
+    {"FLOOR", "floor_0"},
+    {"GRID", "grid_0"},
+    {"GREY", "grey_0"},
+    {"DEFAULT", "default"},
+    {"ROOF", "roof_0"},
+    {"FLAG", "flag_0"},
+    {"GRASS", "grass_1"},
+    {"CHECK", "check_0"},
+    {"LINES", "lines_0"},
+    {"BRICK", "brick_0"},
+    {"LINK", "link_0", 1},
+    {"LIQUID", "liquid_0", 1},
+    {"GRAIN", "grain_0"},
+    {"FABRIC", "fabric_0"},
+    {"TILE", "tile_0"},
 };
+
+static int prefab_texture_string_equals(const char *a, const char *b) {
+    if (!a || !b) return 0;
+
+    while (*a && *b) {
+        const char ca = *a >= 'a' && *a <= 'z' ? *a - 32 : *a;
+        const char cb = *b >= 'a' && *b <= 'z' ? *b - 32 : *b;
+        if (ca != cb) return 0;
+
+        a++;
+        b++;
+    }
+
+    return *a == *b;
+}
 
 static int prefab_texture_id_from_string(const char *name) {
     if (!name) return 0;
 
+    char *end = NULL;
+    const long parsed_id = strtol(name, &end, 10);
+    if (end && *end == '\0') return (int) parsed_id;
+
     for (size_t i = 0; i < sizeof(prefab_textures) / sizeof(prefab_textures[0]); i++) {
-        if (!strcmp(name, prefab_textures[i].name)) return (int) i;
+        if (
+            prefab_texture_string_equals(name, prefab_textures[i].name) ||
+            prefab_texture_string_equals(name, prefab_textures[i].src)
+        ) {
+            return (int) i;
+        }
     }
 
     return 0;
@@ -153,6 +178,33 @@ static int prefab_hidden_in_game(const int prefab) {
         default:
             return 0;
     }
+}
+
+static void prefab_apply_lighting_controls(BasicMaterial *material, const Object *object) {
+    material->ambient_enabled = object->ambient_enabled;
+    material->fog_enabled = object->fog_enabled;
+}
+
+static vec3 prefab_rotated_up_normal(const vec3 rotation) {
+    const float sx = sinf(rotation.x);
+    const float cx = cosf(rotation.x);
+    const float sy = sinf(rotation.y);
+    const float cy = cosf(rotation.y);
+    const float sz = sinf(rotation.z);
+    const float cz = cosf(rotation.z);
+
+    vec3 normal = {-sz, cz, 0.0f};
+    normal = (vec3) {cy * normal.x + sy * normal.z, normal.y, -sy * normal.x + cy * normal.z};
+    normal = (vec3) {normal.x, cx * normal.y - sx * normal.z, sx * normal.y + cx * normal.z};
+
+    const float length = sqrtf(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+    if (length > 0.0f) {
+        normal.x /= length;
+        normal.y /= length;
+        normal.z /= length;
+    }
+
+    return normal;
 }
 
 static Geometry *prefab_cube_geo(const int face_mask) {
@@ -512,7 +564,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
         char *full_model_path = concat(assets_path(), model_path);
         char *full_texture_path = concat(assets_path(), texture_path);
-        
+
         free(model_path);
         free(texture_path);
 
@@ -537,6 +589,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->color = color;
         material->color.w = opacity;
         material->emissive = emissive;
+        prefab_apply_lighting_controls(material, object);
 
         return mesh;
     }
@@ -545,7 +598,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     int tex_id = cJSON_IsString(t) ? prefab_texture_id_from_string(cJSON_GetStringValue(t)) : cJSON_IsNumber(t) ? (int) cJSON_GetNumberValue(t) : 0;
     if (tex_id < 0 || tex_id >= (int) (sizeof(prefab_textures) / sizeof(prefab_textures[0]))) tex_id = object->prefab == PREFAB_LADDER ? 2 : 0;
 
-    char *texture_path;
+    char *texture_path = NULL;
 
     if (object->prefab == PREFAB_LIGHT_CONE) {
         const int cone_frame = cJSON_GetObjectItem(raw_obj, "fc") == NULL ? 0 : 1;
@@ -564,17 +617,25 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         texture_path = malloc(texture_path_length + 1);
         snprintf(texture_path, texture_path_length + 1, "textures/pubs/b_%d.png", billboard_id);
     } else {
-        const int texture_path_length = snprintf(NULL, 0, "textures/%s_%d.png", prefab_textures[tex_id].name, tex_id == 8);
+        const char *src = prefab_textures[tex_id].src;
 
-        texture_path = malloc(texture_path_length + 1);
-        snprintf(texture_path, texture_path_length + 1, "textures/%s_%d.png", prefab_textures[tex_id].name, tex_id == 8);
+        if (strcmp(src, "default")) {
+            const int texture_path_length = snprintf(NULL, 0, "textures/%s.png", src);
+
+            texture_path = malloc(texture_path_length + 1);
+            snprintf(texture_path, texture_path_length + 1, "textures/%s.png", src);
+        }
     }
 
-    char *full_texture_path = concat(assets_path(), texture_path);
-    free(texture_path);
+    unsigned int texture_id = 0;
 
-    const unsigned int texture_id = load_texture(full_texture_path);
-    free(full_texture_path);
+    if (texture_path) {
+        char *full_texture_path = concat(assets_path(), texture_path);
+        free(texture_path);
+
+        texture_id = load_texture(full_texture_path);
+        free(full_texture_path);
+    }
 
     const cJSON *ts = cJSON_GetObjectItem(raw_obj, "ts");
     const cJSON *td = cJSON_GetObjectItem(raw_obj, "td");
@@ -610,11 +671,17 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->color.w = opacity;
         material->emissive = emissive;
         material->base.transparent = (object->prefab != PREFAB_BILLBOARD && prefab_textures[tex_id].transparent) || opacity != 1.0f || object->prefab == PREFAB_LIQUID || object->prefab == PREFAB_RUNE;
+        prefab_apply_lighting_controls(material, object);
 
         material->use_face_tex_scaling = object->prefab != PREFAB_BILLBOARD;
         material->face_scale = object->scale;
 
         if (object->prefab != PREFAB_CUBE) {
+            if (object->prefab != PREFAB_BILLBOARD) {
+                material->use_flat_normal = 1;
+                material->flat_normal = prefab_rotated_up_normal(rotation);
+            }
+
             mesh->transform.scale.y = 0.01f;
 
             material->face_scale.x = object->scale.x;
@@ -643,6 +710,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->base.transparent = opacity != 1.0f || object->prefab == PREFAB_LIGHT_CONE || prefab_textures[tex_id].transparent;
         material->use_face_tex_scaling = 0;
         material->unlit = object->prefab == PREFAB_LIGHT_CONE;
+        prefab_apply_lighting_controls(material, object);
 
         return mesh;
     }
@@ -665,6 +733,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->texture = texture_id;
         material->color = color;
         material->emissive = emissive;
+        prefab_apply_lighting_controls(material, object);
 
         material->is_ramp = 1;
         material->use_face_tex_scaling = 1;
@@ -687,6 +756,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->texture = texture_id;
         material->color = color;
         material->emissive = emissive;
+        prefab_apply_lighting_controls(material, object);
 
         material->is_ladder = 1;
         material->use_face_tex_scaling = 1;
@@ -703,7 +773,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     BasicMaterial *debug_material = basic_material_init();
     Mesh *debug_mesh = mesh_init(create_cube_geo(), (Material *) debug_material);
 
-    debug_material->base.wireframe = 1;
+    // debug_material->base.wireframe = 1;
     debug_mesh->transform.position = object->position;
     debug_mesh->transform.scale = object->scale;
 

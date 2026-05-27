@@ -2,6 +2,7 @@
 #include <client.h>
 #include <fast_obj.h>
 #include <math.h>
+#include <stdio.h>
 #include <stb_image.h>
 #include <pcg_basic.h>
 
@@ -14,12 +15,16 @@ unsigned int load_texture(char *path) {
     int width, height, _;
     unsigned char *texture = stbi_load(path, &width, &height, &_, 4);
 
-    if (!texture) return 0;
-
+    if (!texture) {
+        fprintf(stderr, "failed to load texture %s: %s\n", path, stbi_failure_reason());
+        return 0;
+    }
     unsigned int texture_id;
 
     glGenTextures(1, &texture_id);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture_id);
+    g_active_texture = texture_id;
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -56,7 +61,9 @@ GlyphCacheEntry *load_glyph(const char c) {
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glGenTextures(1, &entry->texture);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, entry->texture);
+    g_active_texture = entry->texture;
 
     glTexImage2D(
         GL_TEXTURE_2D, 0, GL_RED,

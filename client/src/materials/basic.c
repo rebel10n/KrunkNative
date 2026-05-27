@@ -9,15 +9,23 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     const int is_ladder = glGetUniformLocation(material->base.program, "is_ladder");
     const int use_face_tex_scaling = glGetUniformLocation(material->base.program, "use_face_tex_scaling");
     const int unlit = glGetUniformLocation(material->base.program, "unlit");
+    const int ambient_enabled = glGetUniformLocation(material->base.program, "ambient_enabled");
+    const int material_fog_enabled = glGetUniformLocation(material->base.program, "material_fog_enabled");
+    const int use_flat_normal = glGetUniformLocation(material->base.program, "use_flat_normal");
     const int world_uv_scale = glGetUniformLocation(material->base.program, "world_uv_scale");
     const int face_scale = glGetUniformLocation(material->base.program, "face_scale");
+    const int flat_normal = glGetUniformLocation(material->base.program, "flat_normal");
 
     glUniform1i(is_ramp, material->is_ramp);
     glUniform1i(is_ladder, material->is_ladder);
     glUniform1i(use_face_tex_scaling, material->use_face_tex_scaling);
     glUniform1i(unlit, material->unlit);
+    glUniform1i(ambient_enabled, material->ambient_enabled);
+    glUniform1i(material_fog_enabled, material->fog_enabled);
+    glUniform1i(use_flat_normal, material->use_flat_normal);
     glUniform1f(world_uv_scale, game_constants.world_uv_scale);
     glUniform3f(face_scale, material->face_scale.x, material->face_scale.y, material->face_scale.z);
+    glUniform3f(flat_normal, material->flat_normal.x, material->flat_normal.y, material->flat_normal.z);
 
     const int color = glGetUniformLocation(material->base.program, "color");
     const int emissive = glGetUniformLocation(material->base.program, "emissive");
@@ -98,6 +106,9 @@ BasicMaterial *basic_material_init() {
 
     material->texture_repeat.x = 1.0f;
     material->texture_repeat.y = 1.0f;
+    material->ambient_enabled = 1;
+    material->fog_enabled = 1;
+    material->flat_normal.y = 1.0f;
 
     if (!shader_program) {
         char *vert_shader = concat(assets_path(), "shaders/basic.vert");

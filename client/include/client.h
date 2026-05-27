@@ -137,7 +137,11 @@ typedef struct {
     int is_ladder;
     int use_face_tex_scaling;
     int unlit;
+    int ambient_enabled;
+    int fog_enabled;
+    int use_flat_normal;
     vec3 face_scale;
+    vec3 flat_normal;
 
     vec4 color;
     vec4 emissive;

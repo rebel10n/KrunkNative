@@ -118,6 +118,12 @@ static int prefab_id_from_string(const char *name) {
     return 0;
 }
 
+static int map_flag_is_set(const cJSON *item) {
+    if (!item || cJSON_IsNull(item) || cJSON_IsFalse(item)) return 0;
+    if (cJSON_IsNumber(item)) return cJSON_GetNumberValue(item) != 0;
+    return 1;
+}
+
 void load_default_maps() {
     for (size_t i = 0; i < sizeof(default_map_names) / sizeof(default_map_names[0]); i++) {
         if (g_maps[i]) continue;
@@ -288,6 +294,8 @@ Map *map_init(const cJSON *raw_data) {
         object->position = position;
         object->scale = scale;
         object->prefab = prefab_id;
+        object->ambient_enabled = !map_flag_is_set(cJSON_GetObjectItem(raw_obj, "ab"));
+        object->fog_enabled = !map_flag_is_set(cJSON_GetObjectItem(raw_obj, "nf"));
 
         if (prefab_id == PREFAB_BOOST_PAD) {
             const cJSON *bm = cJSON_GetObjectItem(raw_obj, "bm");

@@ -190,6 +190,8 @@ typedef struct {
     unsigned char crouch:1;
     unsigned char ladder:1;
     unsigned char wall_jumpable:1;
+    unsigned char ambient_enabled:1;
+    unsigned char fog_enabled:1;
 
     unsigned char direction:2;
 

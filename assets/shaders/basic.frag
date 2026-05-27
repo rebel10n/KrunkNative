@@ -11,8 +11,12 @@ uniform bool is_ladder;
 
 uniform bool use_face_tex_scaling;
 uniform bool unlit;
+uniform bool ambient_enabled;
+uniform bool material_fog_enabled;
+uniform bool use_flat_normal;
 uniform float world_uv_scale;
 uniform vec3 face_scale;
+uniform vec3 flat_normal;
 
 uniform vec4 color;
 uniform vec4 emissive;
@@ -75,20 +79,26 @@ void main() {
     vec4 base_color = texel * color;
 
     if (lighting_enabled && !unlit) {
-        vec3 dx = dFdx(world_pos);
-        vec3 dy = dFdy(world_pos);
-        vec3 normal = normalize(cross(dx, dy));
-        if (!gl_FrontFacing) normal = -normal;
+        vec3 normal;
+
+        if (use_flat_normal) {
+            normal = normalize(flat_normal);
+        } else {
+            vec3 dx = dFdx(world_pos);
+            vec3 dy = dFdy(world_pos);
+            normal = normalize(cross(dx, dy));
+            if (!gl_FrontFacing) normal = -normal;
+        }
 
         float lambert = max(dot(normal, normalize(light_direction)), 0.0f);
-        vec3 ambient = ambient_color.rgb * ambient_intensity;
+        vec3 ambient = ambient_enabled ? ambient_color.rgb * ambient_intensity : vec3(0.0f);
         vec3 direct = light_color.rgb * light_intensity * lambert;
         vec3 lit = base_color.rgb * (ambient + direct);
 
         base_color.rgb = max(lit, emissive.rgb * emissive.a);
     }
 
-    if (fog_enabled && !unlit) {
+    if (fog_enabled && material_fog_enabled && !unlit) {
         float fog_amount = smoothstep(fog_near, fog_far, view_depth);
         base_color.rgb = mix(base_color.rgb, fog_color.rgb, fog_amount);
     }
