@@ -6,3 +6,4 @@ assets/*/*
 !assets/maps/*
 !assets/img/*
 !assets/shaders/*
+/AGENTS.md
