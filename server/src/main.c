@@ -1,8 +1,10 @@
 #include <server.h>
 #include <pthread.h>
 #include <pcg_basic.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 static const ServerVersion g_version = {1, 0, 0};
@@ -10,20 +12,58 @@ static const ServerVersion g_version = {1, 0, 0};
 Replxx *g_replxx;
 Server *g_server;
 
+static int parse_port(const char *value, unsigned short *port) {
+    if (!value || !value[0]) return 0;
+
+    char *end = NULL;
+    errno = 0;
+    const long parsed = strtol(value, &end, 10);
+
+    if (errno || !end || *end || parsed <= 0 || parsed > 65535) return 0;
+
+    *port = (unsigned short) parsed;
+    return 1;
+}
+
+static int parse_args(const int argc, char **argv, const char **map_path, unsigned short *port) {
+    for (int i = 1; i < argc; i++) {
+        const char *arg = argv[i];
+
+        if (!strcmp(arg, "--port")) {
+            if (++i >= argc || !parse_port(argv[i], port)) return 0;
+            continue;
+        }
+
+        if (!strncmp(arg, "--port=", 7)) {
+            if (!parse_port(arg + 7, port)) return 0;
+            continue;
+        }
+
+        if (arg[0] == '-') return 0;
+
+        if (*map_path) return 0;
+        *map_path = arg;
+    }
+
+    return 1;
+}
+
 int main(int argc, char **argv) {
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
     free(rand_memory);
 
     cJSON *startup_map = NULL;
+    const char *startup_map_path = NULL;
+    unsigned short listen_port = 21015;
 
-    if (argc > 2) {
-        fprintf(stderr, "Usage: %s [map.json]\n", argv[0]);
+    if (!parse_args(argc, argv, &startup_map_path, &listen_port)) {
+        fprintf(stderr, "Usage: %s [--port PORT] [map.json]\n", argv[0]);
         return -1;
     }
 
-    if (argc == 2 && load_json_file(argv[1], &startup_map)) {
-        fprintf(stderr, "Failed to load map JSON: %s\n", argv[1]);
+    if (startup_map_path && load_json_file(startup_map_path, &startup_map)) {
+        fprintf(stderr, "Failed to load map JSON: %s\n", startup_map_path);
         return -1;
     }
 
@@ -34,7 +74,10 @@ int main(int argc, char **argv) {
     g_server = &INSTANCE;
 
     g_server->config.tick_rate = 30;
-    g_server->config.listen_port = 21015;
+    g_server->config.listen_port = listen_port;
+    g_server->config.max_players = 8;
+    g_server->config.idle_timeout = 60.0f;
+    g_server->config.idle_move_threshold = 1.0f;
     pthread_mutex_init(&g_server->lock, NULL);
 
     size_t startup_map_count = 0;
@@ -75,7 +118,9 @@ int main(int argc, char **argv) {
         last_tick = tick_start;
 
         pthread_mutex_lock(&g_server->lock);
+        g_server->now = now;
         game_tick(&g_server->game, now, delta);
+        net_check_idle_clients(now);
         net_broadcast_states();
         pthread_mutex_unlock(&g_server->lock);
 

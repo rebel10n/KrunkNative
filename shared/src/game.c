@@ -7,7 +7,7 @@
 #endif
 
 const GameConfig g_default_game_config = {
-    .max_players = 2,
+    .max_players = 8,
     .min_players = 0,
     .game_time = 4,
     .warmup_time = 0.0f,

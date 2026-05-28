@@ -624,8 +624,13 @@ typedef struct {
     int32_t uid;
     uint8_t is_you;
     uint8_t active;
+    int32_t class_index;
+    int32_t team;
+    float health;
+    int32_t max_health;
     float position[3];
     float direction[2];
+    char name[32];
 } NetSpawnPacket;
 
 typedef struct {

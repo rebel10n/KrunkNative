@@ -26,26 +26,67 @@ void player_update_height(Player *player) {
 }
 
 void player_spawn(Player *player) {
+    free(player->loadout);
+    free(player->ammo);
+    free(player->reloads);
+    free(player->input_queue);
+
+    player->loadout = NULL;
+    player->ammo = NULL;
+    player->reloads = NULL;
+    player->input_queue = NULL;
+    player->input_queue_size = 0;
+
     player->active = 1;
 
-    player->class_index = 0;
-    player->speed = g_classes[0].speed;
-    player->health = (float) g_classes[0].health;
-    player->max_health = g_classes[0].health;
+    const size_t class_count = player->game->class_count ? player->game->class_count : sizeof(g_classes) / sizeof(g_classes[0]);
+    const ClassConfig *classes = player->game->classes ? player->game->classes : g_classes;
+    const size_t weapon_count = player->game->weapon_count ? player->game->weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
+    Weapon **weapons = player->game->weapons ? player->game->weapons : (Weapon**) g_weapons;
 
-    player->loadout_size = 3;
+    if (player->class_index < 0 || player->class_index >= (int) class_count) {
+        player->class_index = 0;
+    }
 
-    player->loadout = calloc(3, sizeof(int));
-    player->ammo = calloc(3, sizeof(int));
-    player->reloads = calloc(3, sizeof(float));
+    const ClassConfig *class_config = &classes[player->class_index];
+    int loadout[3] = {1, 12, 12};
+    int loadout_size = 0;
+    const int primary = class_config->loadout ? class_config->loadout[0] : 1;
+    const int fallback_weapon = weapon_count > 1 ? 1 : 0;
+    const int primary_index = primary >= 0 && primary < (int) weapon_count ? primary : fallback_weapon;
+    const int secondary_index = 2 < (int) weapon_count ? 2 : -1;
+    const int melee_index = 12 < (int) weapon_count ? 12 : primary_index;
 
-    player->loadout[0] = 1;
-    player->loadout[1] = 2;
-    player->loadout[2] = 12;
+    loadout[loadout_size++] = primary_index;
+    if (class_config->secondary && secondary_index >= 0 && secondary_index != primary_index) loadout[loadout_size++] = secondary_index;
+    if (melee_index != primary_index && loadout_size < (int) (sizeof(loadout) / sizeof(loadout[0]))) loadout[loadout_size++] = melee_index;
 
-    player->ammo[0] = player->game->weapons[player->loadout[0]]->ammo;
-    player->ammo[1] = player->game->weapons[player->loadout[1]]->ammo;
-    player->ammo[2] = player->game->weapons[player->loadout[2]]->ammo;
+    player->speed = class_config->speed;
+    player->health = (float) class_config->health;
+    player->max_health = class_config->health;
+    player->wall_jump = class_config->wall_jump;
+    player->loadout_size = loadout_size;
+
+    player->loadout = calloc((size_t) loadout_size, sizeof(int));
+    player->ammo = calloc((size_t) loadout_size, sizeof(int));
+    player->reloads = calloc((size_t) loadout_size, sizeof(float));
+
+    if (!player->loadout || !player->ammo || !player->reloads) {
+        free(player->loadout);
+        free(player->ammo);
+        free(player->reloads);
+        player->loadout = NULL;
+        player->ammo = NULL;
+        player->reloads = NULL;
+        player->loadout_size = 0;
+        player->active = 0;
+        return;
+    }
+
+    for (int i = 0; i < loadout_size; i++) {
+        player->loadout[i] = loadout[i];
+        player->ammo[i] = weapons[player->loadout[i]]->ammo;
+    }
 
     player->velocity.x = 0.0f;
     player->velocity.y = 0.0f;

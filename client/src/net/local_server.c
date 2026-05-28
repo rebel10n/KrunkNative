@@ -1,5 +1,6 @@
 #include <client.h>
 #include <pcg_basic.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifdef WIN32
@@ -89,14 +90,19 @@ static void local_server_send_init(Client *client) {
 }
 
 static void local_server_send_spawn(Client *client, const Player *player) {
-    const NetSpawnPacket packet = {
+    NetSpawnPacket packet = {
         .uid = player->uid,
         .is_you = 1,
         .active = player->active,
+        .class_index = player->class_index,
+        .team = player->team,
+        .health = player->health,
+        .max_health = player->max_health,
         .position = {player->position.x, player->position.y, player->position.z},
         .direction = {player->direction.x, player->direction.y},
     };
 
+    snprintf(packet.name, sizeof(packet.name), "Guest_%d", player->uid + 1);
     local_server_send_packet(client, NET_PACKET_SPAWN, &packet, sizeof(packet));
 }
 
@@ -140,7 +146,7 @@ static void local_server_cycle_map(Client *client) {
     local_server_send_init(client);
 }
 
-static void local_server_handle_ent(Client *client) {
+static void local_server_handle_ent(Client *client, const NetEntPacket *ent) {
     if (!client->local_server_player) {
         Player *player = player_init(&client->local_server_game);
         if (!player) return;
@@ -150,6 +156,7 @@ static void local_server_handle_ent(Client *client) {
         game_players_add(&client->local_server_game, player);
     }
 
+    client->local_server_player->class_index = ent ? ent->class_index : 0;
     player_spawn(client->local_server_player);
     local_server_send_spawn(client, client->local_server_player);
 }
@@ -159,7 +166,11 @@ static void local_server_handle_packet(Client *client, const NetPacket *packet) 
         case NET_PACKET_HELLO:
             break;
         case NET_PACKET_ENT:
-            if (packet->length == sizeof(NetEntPacket)) local_server_handle_ent(client);
+            if (packet->length == sizeof(NetEntPacket)) {
+                NetEntPacket ent;
+                memcpy(&ent, packet->payload, sizeof(ent));
+                local_server_handle_ent(client, &ent);
+            }
             break;
         case NET_PACKET_INPUT: {
             if (packet->length != sizeof(NetInputPacket) || !client->local_server_player || !client->local_server_player->active) break;

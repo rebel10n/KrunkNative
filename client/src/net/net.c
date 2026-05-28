@@ -142,12 +142,18 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
 
             NetSpawnPacket packet;
             memcpy(&packet, payload, sizeof(packet));
+            packet.name[sizeof(packet.name) - 1] = '\0';
 
-            printf("{\"type\":\"spawn\",\"id\":%u,\"uid\":%d,\"is_you\":%u,\"active\":%u,\"position\":[%g,%g,%g],\"direction\":[%g,%g]}",
+            printf("{\"type\":\"spawn\",\"id\":%u,\"uid\":%d,\"is_you\":%u,\"active\":%u,\"class_index\":%d,\"team\":%d,\"health\":%g,\"max_health\":%d,\"name\":\"%s\",\"position\":[%g,%g,%g],\"direction\":[%g,%g]}",
                    (unsigned int) type,
                    packet.uid,
                    (unsigned int) packet.is_you,
                    (unsigned int) packet.active,
+                   packet.class_index,
+                   packet.team,
+                   packet.health,
+                   packet.max_health,
+                   packet.name,
                    packet.position[0],
                    packet.position[1],
                    packet.position[2],

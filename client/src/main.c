@@ -318,18 +318,46 @@ void client_add_player_mesh(Client *client, Player *player, const int render_you
 void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     Player *player = client_find_player(client, packet->uid);
 
+    if (!packet->active) {
+        if (!player) return;
+
+        player->active = 0;
+
+        if (player->mesh) {
+            scene_remove_player_mesh(player->render_you ? client->fps_scene : client->scene, player->mesh, player->loadout_size);
+            player_meshes_fini(player);
+        }
+
+        if (player == client->me) {
+            client->me = NULL;
+            client->in_game = 0;
+        }
+
+        return;
+    }
+
     if (!player) {
         player = player_init(&client->game);
         if (!player) return;
 
         player->uid = packet->uid;
+        player->class_index = packet->class_index;
         game_players_add(&client->game, player);
         player_spawn(player);
-    } else if (!player->loadout_size) {
+    } else if (!player->loadout_size || player->class_index != packet->class_index) {
+        if (player->mesh) {
+            scene_remove_player_mesh(player->render_you ? client->fps_scene : client->scene, player->mesh, player->loadout_size);
+            player_meshes_fini(player);
+        }
+
+        player->class_index = packet->class_index;
         player_spawn(player);
     }
 
     player->active = packet->active;
+    player->team = packet->team;
+    player->health = packet->health;
+    player->max_health = packet->max_health;
     player->position.x = packet->position[0];
     player->position.y = packet->position[1];
     player->position.z = packet->position[2];
