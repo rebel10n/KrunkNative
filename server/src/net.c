@@ -59,20 +59,18 @@ int net_poll_client(ClientConnection *client) {
     char buffer[1024];
     int read;
 
-    if ((read = recv(client->fd, buffer, sizeof(buffer), 0)) <= 0) {
-#ifdef WIN32
-        if (read < 0 && NET_ERRNO == WSAEWOULDBLOCK) return 1;
-#else
-        if (read < 0 && (NET_ERRNO == EAGAIN || NET_ERRNO == EWOULDBLOCK)) return 1;
-#endif
-
-        net_remove_client(client);
-        return 0;
+    while ((read = recv(client->fd, buffer, sizeof(buffer), 0)) > 0) {
+        // TODO: process data
     }
 
-    // TODO: process data
+#ifdef WIN32
+    if (!read || read < 0 && NET_ERRNO == WSAEWOULDBLOCK) return 1;
+#else
+    if (!read || read < 0 && (NET_ERRNO == EAGAIN || NET_ERRNO == EWOULDBLOCK)) return 1;
+#endif
 
-    return 1;
+    net_remove_client(client);
+    return 0;
 }
 
 void net_main() {
