@@ -27,6 +27,7 @@ void main() {
             switch (face_idx) {
                 case 0:
                     scale = vec2(face_scale.x, sqrt(face_scale.z*face_scale.z + face_scale.y*face_scale.y));
+                    break;
                 case 1:
                     scale = face_scale.xz;
                     break;
