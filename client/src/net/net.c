@@ -273,7 +273,9 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
     return 1;
 }
 
-void net_main(NetMainArgs *args) {
+void *net_main(void *user_data) {
+    NetMainArgs *args = user_data;
+
 #ifdef WIN32
     WSADATA wsa_data;
     WSAStartup(MAKEWORD(2, 2), &wsa_data);
@@ -290,7 +292,7 @@ void net_main(NetMainArgs *args) {
 
     if (client_socket < 0 || connect(client_socket, (struct sockaddr *) &server_address, sizeof(server_address)) < 0) {
         on_client_socket_error(args->client, NET_ERRNO);
-        return;
+        return NULL;
     }
 
     pthread_mutex_lock(&args->client->net_lock);
@@ -329,4 +331,5 @@ void net_main(NetMainArgs *args) {
 #endif
 
     on_client_socket_disconnect(args->client);
+    return NULL;
 }

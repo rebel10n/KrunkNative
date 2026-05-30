@@ -7,3 +7,4 @@ assets/*/*
 !assets/img/*
 !assets/shaders/*
 /AGENTS.md
+net-bridge/node_modules

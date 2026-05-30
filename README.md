@@ -34,6 +34,18 @@ Full command: `apt install -y libwayland-dev wayland-protocols pkg-config libx11
 
 If you wish to run KrunkNative, you must first add game assets, please read [the assets readme](/assets/README.md) for more information. The client looks for the `assets` folder in the same directory in release mode, or in the parent directory in development mode (when the binary is inside the `cmake-build-release` or `cmake-build-debug` folder).
 
+By default the client connects to a native TCP server on `127.0.0.1:21015`. Start the bridge or server first, then launch the client:
+
+```sh
+npm start
+```
+
+To run against the embedded local server instead, pass `--offline`:
+
+```sh
+npm start -- --offline
+```
+
 ## Packet Logging
 
 Set `KRUNKNATIVE_PACKET_LOG=1` before launching the client to print decoded, color-coded client packets. Incoming packets are marked `<=` in orange, and outgoing packets are marked `=>` in green.

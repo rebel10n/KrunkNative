@@ -306,6 +306,7 @@ typedef struct {
     unsigned char spawn_requested:1;
     unsigned char map_loaded:1;
     unsigned char net_connected:1;
+    unsigned char net_thread_running:1;
     unsigned char local_server_running:1;
 
     pthread_t net_thread;
@@ -345,7 +346,7 @@ typedef struct {
     const char *address;
 } NetMainArgs;
 
-void net_main(NetMainArgs *args);
+void *net_main(void*);
 void client_net_queue_packet(Client*, const NetPacket*);
 void client_net_log_packet(const char*, NetPacketType, const void*, uint16_t);
 int client_net_send_packet(int, NetPacketType, const void*, uint16_t);

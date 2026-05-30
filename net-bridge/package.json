@@ -1,0 +1,21 @@
+{
+  "name": "net-bridge",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node -r ts-node/register/transpile-only index.ts",
+    "server": "node -r ts-node/register/transpile-only index.ts",
+    "native-to-krunker": "node -r ts-node/register/transpile-only index.ts --native-to-krunker",
+    "browser-to-native": "node -r ts-node/register/transpile-only index.ts --browser-to-native",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "msgpack-lite": "^0.1.26",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^14.18.63",
+    "@types/ws": "^8.18.1"
+  }
+}

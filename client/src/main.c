@@ -15,6 +15,8 @@
 #include <unistd.h>
 #endif
 
+#define DEFAULT_SERVER_ADDRESS "127.0.0.1"
+
 geometry_cache_map g_geometry_cache;
 texture_cache_map g_texture_cache;
 glyph_cache_map g_glyph_cache;
@@ -131,6 +133,31 @@ static int weapon_scroll_swap(const Player *player, const int direction) {
     return weapon_swap_category(player, current);
 }
 
+static void print_usage(const char *program) {
+    fprintf(stderr, "Usage: %s [--offline] [map.json]\n", program);
+}
+
+static int parse_startup_args(int argc, char **argv, int *offline, const char **map_path) {
+    *offline = 0;
+    *map_path = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--offline")) {
+            *offline = 1;
+        } else if (argv[i][0] == '-') {
+            print_usage(argv[0]);
+            return 0;
+        } else if (!*map_path) {
+            *map_path = argv[i];
+        } else {
+            print_usage(argv[0]);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 int main(int argc, char **argv) {
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);
@@ -151,14 +178,15 @@ int main(int argc, char **argv) {
     if (!glfwInit()) return -1;
 
     cJSON *startup_map = NULL;
+    int offline = 0;
+    const char *startup_map_path = NULL;
 
-    if (argc > 2) {
-        fprintf(stderr, "Usage: %s [map.json]\n", argv[0]);
+    if (!parse_startup_args(argc, argv, &offline, &startup_map_path)) {
         return -1;
     }
 
-    if (argc == 2 && load_json_file(argv[1], &startup_map)) {
-        fprintf(stderr, "Failed to load map JSON: %s\n", argv[1]);
+    if (startup_map_path && load_json_file(startup_map_path, &startup_map)) {
+        fprintf(stderr, "Failed to load map JSON: %s\n", startup_map_path);
         return -1;
     }
 
@@ -224,7 +252,19 @@ int main(int argc, char **argv) {
 
     game_configure(&INSTANCE.game, NULL, startup_maps, startup_map_count, NULL, 0, NULL, 0, NULL, 0);
 
-    if (!local_server_start(&INSTANCE)) return -1;
+    NetMainArgs net_args = {
+        .client = &INSTANCE,
+        .address = DEFAULT_SERVER_ADDRESS,
+    };
+
+    if (offline) {
+        if (!local_server_start(&INSTANCE)) return -1;
+    } else if (pthread_create(&INSTANCE.net_thread, NULL, net_main, &net_args)) {
+        fprintf(stderr, "Failed to start network thread\n");
+        return -1;
+    } else {
+        INSTANCE.net_thread_running = 1;
+    }
 
     double last_tick = glfwGetTime();
 
@@ -240,6 +280,12 @@ int main(int argc, char **argv) {
     }
 
     INSTANCE.net_should_quit = 1;
+
+    if (INSTANCE.net_thread_running) {
+        pthread_join(INSTANCE.net_thread, NULL);
+        INSTANCE.net_thread_running = 0;
+    }
+
     local_server_stop(&INSTANCE);
 
     return 0;
