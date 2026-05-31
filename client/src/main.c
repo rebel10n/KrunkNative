@@ -102,11 +102,11 @@ int main() {
     net_args.address = "127.0.0.1";
     net_args.client = &INSTANCE;
 
-    // pthread_create(&INSTANCE.net_thread, NULL, (void *) net_main, &net_args);
+    pthread_create(&INSTANCE.net_thread, NULL, (void *) net_main, &net_args);
 
-    game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
-    game_init(&INSTANCE.game, -1, -1, 1);
-    client_load_map(&INSTANCE);
+    // game_configure(&INSTANCE.game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+    // game_init(&INSTANCE.game, -1, -1, 1);
+    // client_load_map(&INSTANCE);
 
     double last_tick = glfwGetTime();
 
