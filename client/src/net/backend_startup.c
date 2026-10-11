@@ -71,7 +71,13 @@ int backend_startup(Client *client, const int offline, const int scenario) {
 #else
     // the hub / editor windows are separate processes (app_window.c): they inherit an
     // explicit URL; a default one (local config) is probed by each process itself
-    if (backend_enabled() && !backend_url_is_default()) setenv("KRUNKNATIVE_BRAIN_URL", backend_url(), 1);
+    if (backend_enabled() && !backend_url_is_default()) {
+#ifdef _WIN32
+        _putenv_s("KRUNKNATIVE_BRAIN_URL", backend_url());
+#else
+        setenv("KRUNKNATIVE_BRAIN_URL", backend_url(), 1);
+#endif
+    }
 #endif
     backend_probe_start(); // a default URL (page origin / local config) needs a kn_brain answer first
     account_ui_init(client);

@@ -40,8 +40,8 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <process.h>
-#include <shellapi.h>
 #include <windows.h>
+#include <shellapi.h> // after windows.h: it uses its types
 #else
 #include <limits.h>
 #include <sys/resource.h>

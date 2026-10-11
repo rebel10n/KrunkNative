@@ -3169,7 +3169,7 @@ static double clock_ms(Widgets *w)
 {
     struct timespec ts;
     if (w->time_set) return w->now_ms;
-    timespec_get(&ts, TIME_UTC);
+    clock_gettime(CLOCK_REALTIME, &ts); // not C11 timespec_get: MinGW's msvcrt lacks it
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 

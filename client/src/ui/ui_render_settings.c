@@ -24,6 +24,8 @@
 #include <emscripten.h>
 #elif defined(_WIN32)
 #include <windows.h>
+#undef near // minwindef.h empty macros: Camera has near/far members
+#undef far
 #else
 #include <time.h>
 #endif

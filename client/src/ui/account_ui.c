@@ -22,6 +22,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#define timegm _mkgmtime // MinGW has no timegm (same as editor_net.c)
+#endif
 #include "account_flags.h"
 
 #define RANK_VAR 0.03            // config.rankVar

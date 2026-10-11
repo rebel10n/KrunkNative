@@ -13,6 +13,7 @@
 
 #ifdef WIN32
 #include <windows.h>
+#include <ws2tcpip.h> // inet_pton
 #define NET_ERRNO WSAGetLastError()
 #define CLOSE_SOCKET closesocket
 #define WOULD_BLOCK(err) ((err) == WSAEWOULDBLOCK)
