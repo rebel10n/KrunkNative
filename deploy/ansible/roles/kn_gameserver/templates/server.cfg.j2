@@ -11,6 +11,10 @@ query_port      0
 listen_host     "{{ kn_gameserver_listen_host }}"
 public_host     "{{ kn_gameserver_hostname_fmt | format(n) }}"
 max_players     {{ kn_gameserver_max_players }}
+{% if kn_gameserver_billboard %}
+// In-map billboards (v3.1.1 billboards / game.updateBillboards; default "Your Ad Here").
+billboard       "{{ kn_gameserver_billboard }}"
+{% endif %}
 online_mode     {{ 1 if n in kn_gameserver_online_instances else 0 }}
 auth_url        "{{ kn_gameserver_auth_url }}"
 // Public listing (opt-in): heartbeat to the finder with host = public_host.

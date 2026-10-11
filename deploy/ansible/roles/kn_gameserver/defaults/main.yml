@@ -15,6 +15,8 @@ kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
 # v3.1.1 region id (config.regionNames / accounts.region_index); per host in the inventory.
 kn_gameserver_region: us-nj
 kn_gameserver_max_players: 8
+# In-map billboard text (server.cfg billboard); empty = the engine default "Your Ad Here".
+kn_gameserver_billboard: ""
 # online_mode 1 (accounts verified via auth_url hasJoined) on these instances; the
 # rest are offline-mode (guests welcome, nothing saved).
 kn_gameserver_online_instances: [1]

@@ -41,3 +41,6 @@ edge_firewall_dropins:
 # Live since 2026-10-11 (go-live): a plain `ansible-playbook edges.yml` keeps the units
 # running. Set false (or -e kn_gameserver_enabled=false) to take the edges down.
 kn_gameserver_enabled: true
+
+# In-map billboard text on every edge server.
+kn_gameserver_billboard: "FRVR please hire me"
