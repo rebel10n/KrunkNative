@@ -177,8 +177,10 @@ jobs:
   # Native macOS renders through Metal via ANGLE (OpenGL ES 3.0, the KN_GLES path the web
   # build shares; README.md "ANGLE / Metal (macOS)"). ANGLE is built from the commit pinned in
   # tools/angle/build-angle.sh and cached per arch: the cache key is that script's hash, so
-  # bumping the pin rebuilds it (cold: ~30-60 min, then a cache restore). The `desktop` entry
-  # keeps Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
+  # bumping the pin rebuilds it (cold: ~10 min on arm64, ~65 min on Intel, then a cache
+  # restore). The cache is saved right after the ANGLE build, so a later failing step does not
+  # throw a cold build away. The `desktop` entry keeps Apple's deprecated OpenGL 4.1 fallback
+  # (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
   macos:
     name: macOS (Clang, ${{ matrix.gl == 'angle' && 'ANGLE/Metal' || 'desktop GL 4.1' }}, ${{ matrix.arch }})
     strategy:
@@ -197,6 +199,8 @@ jobs:
             arch: arm64
             gl: desktop
     runs-on: ${{ matrix.runner }}
+    # A cold ANGLE build on the Intel runner is ~65 min; warm runs take a few minutes.
+    timeout-minutes: ${{ matrix.gl == 'angle' && 180 || 60 }}
     env:
       ANGLE_DIR: ${{ github.workspace }}/angle-dist
     steps:
@@ -204,15 +208,35 @@ jobs:
         with:
           submodules: recursive
 
+      # The runner images ship cmake, ninja and pkg-config: install only what is missing and
+      # never `brew update`/upgrade. Homebrew has no Intel bottles any more, so an upgrade
+      # there compiles cmake from source (~45 min).
       - name: Install build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_UPGRADE: 1
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
         run: |
-          brew update
-          brew install cmake ninja pkg-config
+          set -euo pipefail
+          missing=()
+          for tool in cmake ninja pkg-config; do command -v "$tool" > /dev/null || missing+=("$tool"); done
+          if [ ${#missing[@]} -gt 0 ]; then brew install "${missing[@]}"; fi
+          cmake --version | head -1
+          echo "ninja $(ninja --version), pkg-config $(pkg-config --version)"
+          # services/ (knsvc, linked by server_bin) needs libcrypto: Homebrew's keg-only OpenSSL
+          for formula in openssl@3 openssl@4; do
+            prefix="$(brew --prefix "$formula" 2> /dev/null || true)"
+            if [ -n "$prefix" ] && [ -d "$prefix/include/openssl" ]; then
+              echo "OPENSSL_ROOT_DIR=$prefix" >> "$GITHUB_ENV"
+              echo "OpenSSL: $prefix"
+              break
+            fi
+          done
 
-      - name: Cache ANGLE
+      - name: Restore ANGLE
         if: matrix.gl == 'angle'
         id: angle-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: angle-dist
           key: angle-macos-${{ matrix.arch }}-${{ hashFiles('tools/angle/build-angle.sh') }}
@@ -222,6 +246,13 @@ jobs:
       - name: Build ANGLE (pinned commit)
         if: matrix.gl == 'angle' && steps.angle-cache.outputs.cache-hit != 'true'
         run: tools/angle/build-angle.sh "$ANGLE_DIR" --work "$RUNNER_TEMP/angle-work"
+
+      - name: Save ANGLE
+        if: matrix.gl == 'angle' && steps.angle-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: angle-dist
+          key: ${{ steps.angle-cache.outputs.cache-primary-key }}
 
       - name: Build (Release)
         run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }}"
