@@ -42,6 +42,8 @@ Player *player_init(Game *game) {
     player->last_kill_time = -1e6f; // Krunker lastKill starts far in the past (no multi-kill on the first kill)
     player->last_spray = -1e6f;     // lastSpray 0 against Date.now(): the first spray is never on cooldown
     for (int i = 0; i < PLAYER_DAMAGE_SLOTS; i++) player->damage_received[i].uid = -1;
+    player->lag_comp = 1.0f;                        // players.js: this.lagComp = 1
+    player->c_send_rate = GAME_LAG_COMP_SEND_RATE;  // this.cSendRate = 10
 
     return player;
 }
@@ -66,6 +68,8 @@ void player_spawn(Player *player) {
     player->input_seq = -1;
     player->recon_snap = 0;
     player->has_shot_vel_obj = 0;
+    player->state_history_count = 0; // players.js init: this.stateHistory.length = 0
+    player->state_history_head = 0;
 
     player->active = 1;
 
@@ -207,6 +211,8 @@ int player_accept_input(Player *player, Input *input) {
     if (!player || !input) return 0;
     if (!isfinite(input->delta) || !isfinite(input->x_dir) || !isfinite(input->y_dir) || !isfinite(input->slowdown)) return 0;
     input->delta = input->delta < 0.0f ? 0.0f : MIN(input->delta, game_constants.max_delta);
+    input->x_dir = player_clamp_pitch(input->x_dir); // a v3.1.1 client never sends more (controls.js)
+    input->y_dir = player_wrap_yaw(input->y_dir);
     if (input->move_dir < -1 || input->move_dir > 7) input->move_dir = -1; // no movement key, like an unknown input[4]
     if (input->swap > 4) input->swap = 0;                                  // input[11] codes are 0..4
 
@@ -942,7 +948,27 @@ void player_inspect_weapon(Player *player) {
 
 // JS Number.prototype.round(3) (2.js): Math.round(v * 1000) / 1000, halves toward +inf.
 float player_round3(const float v) {
+    // Past 2^23 / 1000 a float has no thousandths left to round, and v * 1000 must not
+    // overflow to inf (a huge network yaw used to become inf here, then NaN positions).
+    if (!(fabsf(v) < 8388.0f)) return v;
     return floorf(v * 1000.0f + 0.5f) / 1000.0f;
+}
+
+// controls.js: xDr = object.rotation.y % Math.PI2 (JS % keeps the sign), so the yaw a client
+// sends stays in (-2pi, 2pi) however far it turns. KrunkNative applies it on both sides: an
+// unbounded yaw loses float precision, and remote players interpolating between two far-apart
+// unwrapped yaws spun on screen ("visual spinbot"). Non-finite (only a broken or malicious
+// client) becomes 0 so it can never reach the physics.
+float player_wrap_yaw(const float yaw) {
+    if (!isfinite(yaw)) return 0.0f;
+    if (yaw > -(float) M_PI * 2.0f && yaw < (float) M_PI * 2.0f) return yaw;
+    return fmodf(yaw, (float) M_PI * 2.0f);
+}
+
+// controls.js: pitchObj.rotation.x = max(-PI_2, min(PI_2, ...)) before yDr is taken.
+float player_clamp_pitch(const float pitch) {
+    if (!isfinite(pitch)) return 0.0f;
+    return CLAMP(pitch, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
 }
 
 // manager.reload(player, Q = +-1) / 95.js pY2(P, Q): the scroll wheel (input[10]) and the
@@ -973,8 +999,10 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     // Input carries floats: round them here, on both sides, before anything uses them.
     Input rounded = *raw_input;
     rounded.delta = roundf(raw_input->delta * 1000.0f) / 1000.0f;
-    rounded.x_dir = player_round3(raw_input->x_dir);
-    rounded.y_dir = player_round3(raw_input->y_dir);
+    // The client clamps pitch and wraps yaw before rounding (controls.js yDr / xDr); done here
+    // again so no input (prediction, replay or a hostile network frame) has an out-of-range look.
+    rounded.x_dir = player_round3(player_clamp_pitch(raw_input->x_dir));
+    rounded.y_dir = player_round3(player_wrap_yaw(raw_input->y_dir));
     const Input *input = &rounded;
 
     // Math.max(0, Math.min(input[1], config.dltMx)): NaN and negative deltas become 0.
@@ -1448,9 +1476,93 @@ void player_step(Player *player, float distance) {
 // melee, changeHealth, kill, score) and src/data/kills.js (reward). Only the
 // authority (native server, offline local server, is_local games) applies damage;
 // clients predict recoil/spread and learn the outcome from HIT/HEALTH/KILL packets.
-// Not ported yet: lag compensation (fetchState rewind) and kill streak rewards. AI
+// Lag compensation (storeState / fetchState) is below. Not ported yet: kill streak rewards. AI
 // targets: shared/src/ai.c (game_ai_damage); map object hits (destructibles, trigger
 // events): shared/src/triggers.c (game_object_hit).
+
+// ---------------------------------------------------------------- lag compensation
+// v3.1.1 players.js storeState / fetchState / getStateConst (and projectile.js stateConst).
+// The server keeps every player's {time, h, x, y, z} for config.stateHistory (500 ms), one
+// entry per update (game_tick_world). A shot (hitscan rays, the melee swing, and every tick
+// of a projectile's flight) tests a target's hitbox where it stood at
+//     targetTime = game.now - (stateConst + (1000 / target.cSendRate) * config.interpolation)
+// (ms): the newest entry at or before targetTime, else the oldest one, with no interpolation
+// between entries. (1000 / cSendRate) * interpolation is the client's remote-player delay
+// (players.js update moves x1 -> x2 over that time; client_apply_state). Only targets are
+// rewound: the shooter's origin, map objects and AI boxes stay current, and only players alive
+// now (active) are tested. Head and leg zones (combat_fire_ray) use the target's current y and
+// height, like v3.1.1's G.obj.y, not the rewound state.
+//
+// stateConst, the network part of the rewind (player_get_state_const):
+//  - literal (server.cfg lag_comp_anchor 0): v3.1.1 getStateConst = ping * 2 * lagComp,
+//    counted back from game.now when the shot is processed. player.ping is the smoothed RTT
+//    (packetHandlers.ts io_po), so this goes back two RTTs, about one more than the client saw.
+//  - anchored (lag_comp_anchor 1, the default; intentional difference from v3.1.1): the shot
+//    is resolved at the time its input was fired, not at the later tick that processed it.
+//    Input.arrival is when the input reached the server on the state_now clock, minus the
+//    deltas of the later frames of its batch. The client fired it RTT/2 (uplink) before that,
+//    and was showing targets as they were RTT/2 (downlink) plus the interpolation delay earlier.
+//    So stateConst = (game.now - arrival) + ping * lagComp (lagComp 1: one RTT), and
+//    fetchState still adds the interpolation delay as in v3.1.1. The time an input waited for
+//    its tick (or a batch that arrived at once) is measured instead of folded into "ping * 2".
+// The 500 ms stateHistory window bounds the rewind in both modes: the oldest entry is the limit.
+
+static const PlayerStoredState *player_state_entry(const Player *player, const int newest_first) {
+    const int index = (player->state_history_head - newest_first + PLAYER_STATE_HISTORY_MAX) % PLAYER_STATE_HISTORY_MAX;
+    return &player->state_history[index];
+}
+
+// players.js storeState: unshift {time: game.now, h, x, y, z}, then drop every entry at least
+// config.stateHistory old (they are the oldest ones: time only grows).
+void player_store_state(Player *player) {
+    const Game *game = player->game;
+
+    player->state_history_head = (player->state_history_head + 1) % PLAYER_STATE_HISTORY_MAX;
+    player->state_history[player->state_history_head] = (PlayerStoredState) {game->state_now, player->position, player->height};
+    if (player->state_history_count < PLAYER_STATE_HISTORY_MAX) player->state_history_count++;
+
+    while (player->state_history_count > 0 &&
+           game->state_now - player_state_entry(player, player->state_history_count - 1)->time >= GAME_STATE_HISTORY) {
+        player->state_history_count--;
+    }
+}
+
+// players.js getStateConst: ping * 2 * lagComp (a lagComp <= 0 counts as 1); anchored: the
+// time since the running input arrived plus one ping (see above).
+float player_get_state_const(const Player *player) {
+    const Game *game = player->game;
+    const float lag_comp = player->lag_comp > 0.0f ? player->lag_comp : 1.0f;
+    const float ping = player->ping > 0.0f ? player->ping : 0.0f;
+    if (!game->lag_comp_anchor) return ping * 2.0f * lag_comp;
+
+    const double age = player->input_arrival > 0.0 && game->state_now > player->input_arrival ? game->state_now - player->input_arrival : 0.0;
+    return (float) (age * 1000.0) + ping * lag_comp;
+}
+
+// players.js fetchState(player, ping). 0: nothing to hit (v3.1.1 `if (G = fetchState(...))`
+// with an empty stateHistory, e.g. a player who spawned after this tick's storeState).
+int players_fetch_state(const Player *target, const float ping_ms, PlayerStoredState *out) {
+    const Game *game = target->game;
+    if (!game->lag_comp) { // offline / lag_comp 0: where the target is now
+        *out = (PlayerStoredState) {game->state_now, target->position, target->height};
+        return 1;
+    }
+    if (!target->state_history_count) return 0;
+
+    const float send_rate = target->c_send_rate > 0.0f ? target->c_send_rate : GAME_LAG_COMP_SEND_RATE;
+    const double target_time = game->state_now - (ping_ms + 1000.0f / send_rate * game_constants.interpolation) / 1000.0;
+
+    for (int i = 0; i < target->state_history_count; i++) {
+        const PlayerStoredState *state = player_state_entry(target, i);
+        if (state->time <= target_time) {
+            *out = *state;
+            return 1;
+        }
+    }
+
+    *out = *player_state_entry(target, target->state_history_count - 1);
+    return 1;
+}
 
 typedef struct {
     const Object *object;
@@ -1542,14 +1654,19 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
     if (!include_players) return;
 
     const float pad = game->mode && game->mode->config.hitbox_pad ? game->mode->config.hitbox_pad : 1.0f;
+    const float state_const = player_get_state_const(shooter);
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *other = game->players[i];
         if (!other || !other->active || other == shooter || !combat_can_damage(shooter, other)) continue;
 
+        // G = fetchState(list[i], player.getStateConst()): the box where the shooter saw it
+        PlayerStoredState state;
+        if (!players_fetch_state(other, state_const, &state)) continue;
+
         const float half = other->scale + pad;
-        const vec3 box_scale = {half * 2.0f, other->height + pad, half * 2.0f};
-        const float t = line_in_rect(origin, dir, other->position, box_scale);
+        const vec3 box_scale = {half * 2.0f, state.height + pad, half * 2.0f};
+        const float t = line_in_rect(origin, dir, state.position, box_scale);
         if (t <= 0.0f || t > 1.0f) continue;
 
         hit_list_push(hits, (Hit) {NULL, other, t});
@@ -2105,13 +2222,17 @@ void player_shoot(Player *player) {
 
 // index.js Math.lerpAngle(a, b, t): b + (a - b) * t the short way round, wrapped into [0, 2PI]
 // by % (so a negative result stays negative, as in JS).
+// Math.lerpAngle(from = a, to = b, t) adds 2pi to the smaller angle when they are more than pi
+// apart, which is the shortest arc only while |a - b| < 3pi. Here the difference is always
+// taken modulo 2pi, so endpoints from different wraps (or a stale, unwrapped yaw) still turn
+// the short way instead of spinning; for the v3.1.1 range (-2pi, 2pi) the result is the same.
 float player_lerp_angle(float a, float b, const float t) {
     const float pi2 = (float) M_PI * 2.0f;
-    if (fabsf(b - a) > (float) M_PI) {
-        if (a > b) b += pi2;
-        else a += pi2;
-    }
-    const float v = b + (a - b) * t;
+    if (!isfinite(a)) a = isfinite(b) ? b : 0.0f;
+    if (!isfinite(b)) b = a;
+    b = player_wrap_yaw(b);
+    const float d = normalize_angle(player_wrap_yaw(a) - b); // shortest signed arc b -> a, [-pi, pi)
+    const float v = b + d * t;
     return v >= 0.0f && v <= pi2 ? v : fmodf(v, pi2);
 }
 
@@ -2127,9 +2248,11 @@ void player_drain_inputs(Player *player) {
     player->input_queue_size = 0;
 
     for (size_t i = 0; i < count && player->active; i++) {
+        player->input_arrival = queue[i].arrival; // anchored lag compensation: this input's shots
         player_proc_input(player, &queue[i], 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
         player->input_seq = queue[i].seq;
     }
+    player->input_arrival = 0.0;
 
     free(queue);
 }

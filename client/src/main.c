@@ -1467,7 +1467,11 @@ static void client_tick_game(Client *client, const float now, const float frame_
             client->mouse_state.scroll_delta = 0;
             client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
         }
-        g_look.x = CLAMP(input.x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        // controls.js: the pitch is clamped and xDr = rotation.y % Math.PI2 before the input
+        // frame takes them, so the yaw sent (and predicted) never grows without bound.
+        input.x_dir = player_clamp_pitch(input.x_dir);
+        input.y_dir = player_wrap_yaw(input.y_dir);
+        g_look.x = input.x_dir;
         g_look.y = input.y_dir;
 
         input.seq = client->net_next_input_seq++;

@@ -122,6 +122,7 @@ void menu_schedule_rect(void);                   // scheduleRect
 void menu_play(void);                            // play
 void menu_host_offline(void);                    // hostOffline
 void menu_retry_connect(void);                   // retryConnect
+void menu_show_connecting(void);                 // CONNECTING... + the connect timeout, no reconnect / seek
 void menu_set_class_index(int index, int silent);// setClassIndex
 void menu_select_class(int index);               // selectClass
 void menu_select_map(int index);                 // knSelectMap

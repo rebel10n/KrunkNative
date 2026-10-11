@@ -181,6 +181,24 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    (int) packet.scroll);
             break;
         }
+        case NET_PACKET_INPUT_BATCH: { // "q": the frames' seq range and whether any moves
+            NetPacket packet = {.type = (uint8_t) type, .length = length};
+            NetInputBatchPacket batch;
+            if (length > sizeof(packet.payload)) {
+                client_net_log_bad_payload("input_batch", type, payload, length);
+                break;
+            }
+            memcpy(packet.payload, payload, length);
+            if (!net_packet_read_input_batch(&batch, &packet) || !batch.count) {
+                client_net_log_bad_payload("input_batch", type, payload, length);
+                break;
+            }
+            int moving = 0;
+            for (int i = 0; i < batch.count; i++) moving |= batch.frames[i].move_dir >= 0;
+            printf("{\"type\":\"input_batch\",\"id\":%u,\"count\":%u,\"first_seq\":%d,\"last_seq\":%d,\"moving\":%d}",
+                   (unsigned int) type, (unsigned int) batch.count, batch.frames[0].seq, batch.frames[batch.count - 1].seq, moving);
+            break;
+        }
         case NET_PACKET_STATE: {
             if (length != sizeof(NetStatePacket)) {
                 client_net_log_bad_payload("state", type, payload, length);

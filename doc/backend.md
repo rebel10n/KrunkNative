@@ -1316,6 +1316,9 @@ New keys (also in config.example.json):
 | `tags` | `[]` | extra info-query tags |
 | `enforce_skins` | `auto` | cosmetics must be owned (8.9); auto = on while linked to a coordinator |
 | `shutdown_grace` | `10` | seconds a SIGTERM/SIGINT drain lets the round finish |
+| `lag_comp` | `true` | hits test targets where the shooter saw them (v3.1.1 storeState / fetchState, 500 ms history); console `lagcomp` |
+| `lag_comp_anchor` | `true` | rewind from the shot input's arrival + 1 ping; `false` = v3.1.1 `ping * 2 * lagComp` from processing |
+| `lag_comp_scale` | `1` | v3.1.1 `player.lagComp` (0.1..1) for every player: scales the ping part of the rewind |
 | `log_file` | `""` | also append every console line (timestamped) here |
 
 CLI additions: `--cfg FILE`, `--hostname`, `--password`, `--online-mode` /
@@ -1546,6 +1549,11 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 it matches `KRUNK_NATIVE_TARGETS` (comma list of `host:port`, `host:lo-hi`, `host:*`;
 default `KRUNK_NATIVE_HOST:KRUNK_NATIVE_PORT..+63`); other targets are refused (1008).
 No `target` = `KRUNK_NATIVE_HOST:KRUNK_NATIVE_PORT` as before.
+`target=localhost:<port>` matches the `127.0.0.1` rules. A local/dev bridge also bridges
+any loopback target (`localhost`, `127.x`, `::1`, any port: a developer's own `server_bin`
+through the web console's `connect localhost:<port>` or Direct Connect): `make bridge` (no
+`KRUNK_NATIVE_TARGETS`) or `KRUNK_NATIVE_ALLOW_LOOPBACK=1` (`deploy/local/backend.sh`).
+Deployed bridges set `KRUNK_NATIVE_TARGETS` and keep the strict list.
 
 ### 9.7 Coordinator roles, central auth, server finder, client modes (coord-auth)
 

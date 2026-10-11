@@ -214,7 +214,7 @@ typedef struct {
     unsigned char single_use:1;         // check point "su": only once per life of the player list
     unsigned char stop_momentum:1;      // teleporter "m": telStopMo
     unsigned char force_dir:1;          // teleporter "fd": the receiver sets the view direction
-    unsigned char no_vis:1;             // client: the mesh was created hidden (noVis "v"), interface state never shows it
+    unsigned char no_vis:1;             // noVis ("v", every build; the client also sets it for meshes created hidden): not rendered, no spray, interface state never shows it
 
     unsigned char direction:2;
 
@@ -381,6 +381,11 @@ typedef struct {
     // since replays skip shooting (index.js reconcilePlayer -> procInputs(recon = true)).
     unsigned char has_vel_obj;
     vec3 vel_obj;
+    // Server only, never sent: when this frame reached the server on the Game.state_now clock,
+    // pulled back by the deltas of the frames after it in the same "q" batch (the client
+    // generated it that much earlier). The anchor of anchored lag compensation
+    // (player_get_state_const); 0 = unknown (offline, tests): the shot counts as arriving now.
+    double arrival;
 } Input;
 
 struct Game_t;
@@ -479,6 +484,18 @@ typedef struct {
 } PlayerCosmetics;
 
 #define PLAYER_COSMETICS_NONE ((PlayerCosmetics) {-1, -1, -1, -1, -1, -1, -1})
+
+// Lag compensation: v3.1.1 players.js storeState / fetchState (shared/src/player.c). One
+// stateHistory entry {time, h, x, y, z} per server update; entries older than
+// config.stateHistory are dropped. The ring holds 500 ms at the 240 Hz tick_rate maximum.
+#define PLAYER_STATE_HISTORY_MAX 128
+#define GAME_STATE_HISTORY 0.5f       // config.stateHistory (500 ms)
+#define GAME_LAG_COMP_SEND_RATE 10.0f // player.cSendRate default (ent[16] servSendR off; = NET_STATE_SEND_HZ)
+typedef struct {
+    double time;       // Game.state_now when stored
+    vec3 position;     // x, y, z (feet)
+    float height;      // h
+} PlayerStoredState;
 
 typedef struct Player_t {
     struct Game_t* game;
@@ -665,6 +682,15 @@ typedef struct Player_t {
     void *mesh;
 
     ModePlayerState mode;         // game mode stats (lives, caps, tier, ...), shared/src/modes
+
+    // Lag compensation (players.js storeState / fetchState / getStateConst, player.c).
+    float ping;                   // player.ping: smoothed RTT in ms (server: ClientConnection.ping_ms)
+    float lag_comp;               // player.lagComp (ent[11], 0.1..1; KrunkNative: server.cfg lag_comp_scale)
+    float c_send_rate;            // player.cSendRate (ent[16] servSendR: 20, else 10)
+    double input_arrival;         // Input.arrival of the input procInputs is running (0 = now)
+    PlayerStoredState state_history[PLAYER_STATE_HISTORY_MAX]; // stateHistory ring, newest at state_history_head
+    int state_history_head;
+    int state_history_count;
 } Player;
 
 typedef struct {
@@ -689,9 +715,11 @@ int player_accept_input(Player*, Input*); // a network frame: v3.1.1 inputDecode
 void player_drain_inputs(Player*);         // procInputs every queued frame now (player_update; io_int before its action)
 void player_proc_input(Player*, const Input*, int, int);
 float player_round3(float v); // JS v.round(3); procInputs rounds delta (ms), yaw and pitch (0.001 rad)
+float player_wrap_yaw(float yaw); // controls.js xDr = rotation.y % Math.PI2: (-2pi, 2pi), non-finite -> 0
+float player_clamp_pitch(float pitch); // controls.js pitchObj clamp [-pi/2, pi/2], non-finite -> 0
 void player_scroll_weapon(Player*, int dir, int recon); // manager.reload(player, +-1): wheel / melee on melee
 void player_update(Player*, float);
-float player_lerp_angle(float a, float b, float t); // index.js Math.lerpAngle (remote yaw/pitch interpolation)
+float player_lerp_angle(float a, float b, float t); // index.js Math.lerpAngle (remote yaw/pitch interpolation), shortest arc
 void player_reset_feel(Player*); // spawn: step/bob/lean/recoil animation state back to rest
 void player_inspect_weapon(Player*); // wInspect: toggle the weapon inspect (local player, inspKey)
 void player_cancel_inspect(Player*);
@@ -699,6 +727,13 @@ void player_melee_anim_reset(Player*); // resetMeleeAnim (stop meleeAnim.anim fi
 void player_melee_anim_stop(Player*);  // meleeAnim.anim.stop()
 void player_melee_anim_start(Player*, const MeleeAnimStep *step, const MeleeAnimStep *then); // then: onComplete step or NULL
 void player_send_event();
+// Lag compensation (v3.1.1 players.js): storeState once per server update, getStateConst
+// (the shooter's rewind in ms), fetchState (the target's stored state that far back, plus the
+// remote-player interpolation delay). fetchState returns 0 when no state may be hit (empty
+// history); without lag compensation (offline, lag_comp 0) it gives the current state.
+void player_store_state(Player*);
+float player_get_state_const(const Player*);
+int players_fetch_state(const Player *target, float ping_ms, PlayerStoredState *out);
 
 typedef struct {
     int max_players;
@@ -804,6 +839,7 @@ typedef struct {
     float explode_damage; // eDmg at the centre
     float hit_box;      // hitB: sphere test radius around the target's middle, 0 = player box
     unsigned char no_impact:1; // nImp: no impact particles
+    unsigned char dont_pred:1; // dontPred: no lag compensation (stateConst 0; the Crossbow)
 } ProjectileConfig;
 
 typedef struct {
@@ -820,6 +856,7 @@ typedef struct {
     float pitch_dir;
     float range;
     int ai_kind;        // projectiles.stored index of an AI shot (owner -1, "orb_0"), 0 = a player's weapon
+    float state_const;  // stateConst: the owner's getStateConst at launch (ms), 0 dontPred / AI
     ProjectileConfig config;
 } GameProjectile;
 
@@ -874,6 +911,13 @@ typedef struct Game_t {
     // keeps the players active behind the end screen (v3.1.1's client plays the endAnim slow
     // motion with them) instead of players.clear(); only their input queues are dropped.
     unsigned char end_keep_players:1;
+    // Lag compensation (players.js storeState / fetchState): the server turns it on (server.cfg
+    // lag_comp, lag_comp_anchor). Off in the offline local game, which has no network delay and
+    // shows its players without interpolation, so the current state is what the shooter saw.
+    unsigned char lag_comp:1;
+    unsigned char lag_comp_anchor:1; // getStateConst from the shot input's arrival (player.c)
+    double state_now;             // Krunker game.now for stateHistory (s); double: `now` is a float
+                                  // that loses millisecond precision after a day of server uptime
     GameHooks hooks;
     GameProjectile projectiles[GAME_MAX_PROJECTILES];
     struct GameAIs_t *ai;         // Krunker game.AI (shared/include/ai.h): NULL until the first AI

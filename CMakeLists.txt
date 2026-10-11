@@ -343,6 +343,13 @@ else ()
         target_link_libraries(match_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # lagcomp_test: v3.1.1 storeState / fetchState lag compensation (hit with, miss without; window, selection)
+    add_executable(lagcomp_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/lagcomp_test.c)
+    target_link_libraries(lagcomp_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(lagcomp_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # modes_test: every v3.1.1 game mode (scoring, objectives, picks, lives, win rules) with simulated players
     add_executable(modes_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/modes_test.c)
     target_link_libraries(modes_test PRIVATE m)

@@ -1158,6 +1158,60 @@ static void test_trigger_map_parse(void) {
     printf("Trigger map parse test %s\n", g_failures != failures ? "FAILED" : "OK");
 }
 
+// players.spray (shared/src/interact.c): the ray skips noVis ("v") objects and lands on the
+// rendered wall behind them, on server_bin as well (no meshes: map.c parses "v" itself).
+static const SentPacket *spray_once(Game *game, Player *player) {
+    g_sent_count = 0;
+    player->last_spray = -1e6f;
+    game_player_spray(game, player);
+    return find_sent(NET_PACKET_SPRAY, NET_TARGET_ALL, 0);
+}
+
+static void test_spray_invisible(Game *game) {
+    const int failures = g_failures;
+    printf("Running spray invisible object test...\n");
+    const char *json =
+        "{\"name\":\"t\",\"spawns\":[[0,0,0]],\"objects\":["
+        "{\"p\":[0,-2,0],\"s\":[200,2,200]},"          // floor
+        "{\"p\":[0,0,-10],\"s\":[40,40,2],\"v\":1},"  // invisible wall, front face z = -9 (spray 0.1 before it: -8.9)
+        "{\"p\":[0,0,-20],\"s\":[40,40,2]}"            // visible wall, front face z = -19
+        "]}";
+    cJSON *raw = cJSON_Parse(json);
+    Map *map = raw ? map_init(raw) : NULL;
+    Player *a = game_find_player(game, 1);
+    CHECK(map && map->object_count == 3 && map->objects[1]->no_vis && !map->objects[2]->no_vis, "\"v\" parsed as noVis");
+    if (map && map->object_count == 3 && a) {
+        Map *saved = game->map;
+        game->map = map;
+        if (!a->active) player_spawn(a);
+        a->position = (vec3) {0.0f, 0.0f, 0.0f};
+        a->direction = (vec2) {0.0f, 0.0f}; // pitch 0, yaw 0: facing -z
+        a->spray_index = 7;
+
+        const SentPacket *sent = spray_once(game, a);
+        NetSprayPacket spray = {0};
+        if (sent && sent->length == sizeof(spray)) memcpy(&spray, sent->payload, sizeof(spray));
+        CHECK(sent && sent->length == sizeof(spray), "a spray through the invisible wall");
+        CHECK(near(spray.position[2], -18.9f, 0.011f) && spray.y_rot == 0 && spray.x_rot == 0 && spray.spray_index == 7 && spray.uid == 1,
+              "lands on the visible wall behind (z %g, rot %d/%d)", spray.position[2], spray.y_rot, spray.x_rot);
+
+        map->objects[1]->no_vis = 0; // a rendered wall in front stops the ray
+        sent = spray_once(game, a);
+        if (sent && sent->length == sizeof(spray)) memcpy(&spray, sent->payload, sizeof(spray));
+        CHECK(sent && near(spray.position[2], -8.9f, 0.011f), "a visible wall in front takes the spray (z %g)", spray.position[2]);
+
+        map->objects[1]->no_vis = 1;
+        map->objects[2]->no_vis = 1; // only invisible walls ahead (the floor is below the ray): no spray
+        CHECK(!spray_once(game, a), "no spray on invisible walls alone");
+
+        game->map = saved;
+        player_spawn(a);
+    }
+    if (map) map_fini(map);
+    cJSON_Delete(raw);
+    printf("Spray invisible object test %s\n", g_failures != failures ? "FAILED" : "OK");
+}
+
 // kills.js reward(): the killer gets "6" (NET_PACKET_KILL_MEDALS) with the [name, score]
 // pairs whose sum is the SCORE delta; every 5th kill of a streak broadcasts "kst".
 static void test_kill_medals(Game *game) {
@@ -1383,6 +1437,7 @@ int main(void) {
     test_trigger_events(&game);
     test_checkpoints_teleporters(&game);
     test_trigger_map_parse();
+    test_spray_invisible(&game);
     test_kill_medals(&game);
     test_endless(&game);
     test_round(&game);

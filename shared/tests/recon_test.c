@@ -483,6 +483,190 @@ static void case_packets(void) {
     CHECK(length <= NET_MAX_PAYLOAD, "batch %u bytes", length);
 }
 
+// ---------------------------------------------------------------- look rotation ("visual spinbot")
+
+static float angle_gap(const float a, const float b) { // |a - b| on the circle
+    return fabsf(normalize_angle(a - b));
+}
+
+static int finite_player(const Player *p) {
+    return isfinite(p->position.x) && isfinite(p->position.y) && isfinite(p->position.z) && isfinite(p->velocity.x) &&
+           isfinite(p->velocity.y) && isfinite(p->velocity.z) && isfinite(p->direction.x) && isfinite(p->direction.y);
+}
+
+// Wrap / clamp / round3 / lerp and the STATE / "l" round trips at large and broken angles.
+static void case_rotation_math(void) {
+    const float pi2 = (float) M_PI * 2.0f;
+    const float yaws[] = {0.0f, 1.0f, -1.0f, 6.28f, -6.28f, 6.3f, -6.3f, 100.0f, -1000.5f, -123456.789f, 1e9f, -3.0e38f, 3.4028235e38f};
+    for (size_t i = 0; i < sizeof(yaws) / sizeof(yaws[0]); i++) {
+        const float w = player_wrap_yaw(yaws[i]);
+        CHECK(isfinite(w) && w > -pi2 && w < pi2, "wrap(%g) = %g", yaws[i], w);
+        if (fabsf(yaws[i]) < 1e4f) CHECK(angle_gap(w, yaws[i]) < 1e-3f, "wrap(%g) = %g changed the heading", yaws[i], w);
+        if (yaws[i] > -pi2 && yaws[i] < pi2) CHECK(w == yaws[i], "wrap(%g) = %g: v3.1.1-range yaws must pass unchanged", yaws[i], w);
+        const float r = player_round3(yaws[i]);
+        CHECK(isfinite(r), "round3(%g) = %g", yaws[i], r);
+
+        NetStatePacket state = {0};
+        Player p = {0};
+        p.direction = (vec2) {yaws[i], yaws[i]};
+        net_packet_from_player(&state, &p);
+        CHECK(state.direction[1] > -pi2 && state.direction[1] < pi2, "STATE yaw %g from %g", state.direction[1], yaws[i]);
+        CHECK(fabsf(state.direction[0]) <= (float) M_PI / 2.0f, "STATE pitch %g from %g", state.direction[0], yaws[i]);
+        NetReconPacket recon;
+        net_packet_from_recon(&recon, &p, 0);
+        CHECK(recon.yaw > -pi2 && recon.yaw < pi2, "l yaw %g from %g", recon.yaw, yaws[i]);
+    }
+    const float bad[] = {NAN, INFINITY, -INFINITY};
+    for (size_t i = 0; i < 3; i++) {
+        CHECK(player_wrap_yaw(bad[i]) == 0.0f && player_clamp_pitch(bad[i]) == 0.0f, "non-finite look not zeroed");
+        NetStatePacket state = {.direction = {bad[i], bad[i]}};
+        Player p = {0};
+        p.direction = (vec2) {1.0f, 1.0f};
+        net_packet_apply_player(&p, &state);
+        CHECK(isfinite(p.direction.x) && isfinite(p.direction.y), "STATE apply took a non-finite direction");
+        CHECK(isfinite(player_lerp_angle(bad[i], 1.0f, 0.5f)) && isfinite(player_lerp_angle(1.0f, bad[i], 0.5f)), "lerp of non-finite");
+    }
+    CHECK(fabsf(player_clamp_pitch(10.0f) - (float) M_PI / 2.0f) < 1e-6f && fabsf(player_clamp_pitch(-10.0f) + (float) M_PI / 2.0f) < 1e-6f,
+          "pitch clamp");
+
+    // Math.lerpAngle parity inside the v3.1.1 range, and the short way between any two wraps.
+    CHECK(fabsf(player_lerp_angle(0.1f, 6.2f, 0.5f) - fmodf(6.2f + (6.383185f - 6.2f) * 0.5f, pi2)) < 1e-4f, "lerp across 2pi");
+    CHECK(fabsf(player_lerp_angle(1.0f, 0.5f, 0.5f) - 0.75f) < 1e-6f, "plain lerp");
+    for (int k = -6; k <= 6; k++) {
+        for (int j = 0; j < 64; j++) {
+            const float from = -3.0f + 0.1f * (float) j, step = -0.3f; // a remote player turning right
+            const float to = from + step;
+            const float a = to + (float) k * pi2, b = from - (float) (k * 3) * pi2; // wrapped differently
+            const float mid = player_lerp_angle(a, b, 0.5f);
+            CHECK(angle_gap(mid, from + step * 0.5f) < 1e-3f, "lerp(%g, %g) = %g, want %g: long way round", a, b, mid,
+                  from + step * 0.5f);
+        }
+    }
+}
+
+// The report: a player turning right for a long time. The old client let its yaw grow without
+// bound (input.y_dir -= look forever); remote players interpolated between far-apart unwrapped
+// yaws and spun. Here the inputs are the old, unbounded ones: the server must still store and
+// send a wrapped yaw, prediction and the authority must agree, and an observer interpolating the
+// STATE packets (client_apply_state + player_update) must turn smoothly the short way.
+static void case_turn_right(void) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
+
+    Player *watched = player_init(&sim->client); // the turning player as another client sees it
+    watched->uid = 2;
+    game_players_add(&sim->client, watched);
+    player_spawn(watched);
+    watched->send_rate = 30.0f;
+
+    const float rate = 7.5f; // rad/s to the right: a fast flick, sustained
+    float yaw = sim->c->direction.y;
+    const float yaw_start = yaw;
+    float max_step = 0.0f, max_server_yaw = 0.0f, last_seen = 0.0f, seen_start = 0.0f;
+    double turned = 0.0; // the observer's signed turn, frame by frame (a spin adds whole turns)
+    int have_seen = 0, states = 0;
+    const double start = sim->now, server_tick = 1.0 / 30.0;
+    double next_state = sim->now;
+    while (sim->now - start < 40.0 && sim->c->active) {
+        const double before = sim->now;
+        yaw -= rate / 60.0f; // ~ -300 rad by the end: never wrapped by this "client"
+        const Input input = {.move_dir = -1, .x_dir = 0.3f, .y_dir = yaw}; // standing: no fall, no respawn
+        sim_step(sim, &input, 60.0f);
+        const float dt = (float) (sim->now - before);
+        max_server_yaw = MAX(max_server_yaw, fabsf(sim->s->direction.y));
+
+        if (sim->now >= next_state) { // "k": the server's STATE of this player to the observer
+            next_state += server_tick;
+            NetStatePacket state;
+            net_packet_from_player(&state, sim->s);
+            const vec2 dir = watched->direction;
+            const vec3 pos = watched->position;
+            net_packet_apply_player(watched, &state);
+            watched->dt = 0.0f;
+            watched->interp_pos_start = pos;
+            watched->interp_pos_end = watched->position;
+            watched->interp_dir_start = dir;
+            watched->interp_dir_end = watched->direction;
+            watched->position = pos;
+            watched->direction = dir;
+            watched->interpolate = 1;
+            states++;
+        }
+        // the client's game_tick (in sim_step) ran player_update(watched) for this frame
+        if (have_seen && states > 3) { // from the 4th STATE: the first ones turn from the spawn yaw
+            const float step = normalize_angle(watched->direction.y - last_seen);
+            max_step = MAX(max_step, fabsf(step));
+            turned += step;
+        } else if (states == 3) {
+            seen_start = watched->direction.y;
+        }
+        last_seen = watched->direction.y;
+        have_seen = states >= 3;
+        (void) dt;
+    }
+    for (int i = 0; i < 30; i++) { // let the observer reach the last STATE
+        game_tick(&sim->client, (float) (sim->now += 1.0 / 60.0), 1.0f / 60.0f);
+        turned += normalize_angle(watched->direction.y - last_seen);
+        last_seen = watched->direction.y;
+    }
+    sim_settle(sim, 60.0f);
+    const float pi2 = (float) M_PI * 2.0f;
+    // The observer starts from its first STATE (seen_start ~ the spawn yaw) and must end on
+    // the sent heading having turned exactly as far as the sender, frame steps well below pi.
+    const double want = (double) yaw - (double) yaw_start - normalize_angle(seen_start - yaw_start);
+    printf("  turn right: sent yaw %.1f, server |yaw| <= %.3f, observer turned %.2f rad (sent %.2f), max %.3f rad/frame, %d states\n",
+           yaw, max_server_yaw, turned, want, max_step, states);
+    CHECK(yaw < -250.0f, "the test did not turn far enough (%f)", yaw);
+    CHECK(max_server_yaw < pi2, "server yaw left (-2pi, 2pi): %f", max_server_yaw);
+    CHECK(max_step < 1.0f, "observer yaw jumped %f rad in one frame (spin)", max_step);
+    // Up to latency * rate (the inputs still in flight when the last STATE left) short; every
+    // spin would add a whole 2pi.
+    CHECK(fabs(turned - want) < 1.5, "observer turned %f rad, the player %f rad: it spun", turned, want);
+    CHECK(angle_gap(sim->c->direction.y, sim->s->direction.y) < 1e-3f, "client yaw %f != server yaw %f", sim->c->direction.y,
+          sim->s->direction.y);
+    CHECK(angle_gap(sim->s->direction.y, yaw) < 1e-2f, "server heading %f != sent heading %f", sim->s->direction.y, yaw);
+    CHECK(dist3(sim->c->position, sim->s->position) < 1e-3f, "turning: client/server diverged by %f", dist3(sim->c->position, sim->s->position));
+    CHECK(finite_player(sim->s), "server player went non-finite");
+    free(sim);
+}
+
+// A hostile client: huge, NaN and inf look values (single frames, as the server's
+// player_accept_input sees them) must never reach the physics, the STATE or the "l".
+static void case_bad_rotation(void) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 0.0f, 0.0f)) { CHECK(0, "map"); free(sim); return; }
+    const float values[] = {NAN, INFINITY, -INFINITY, 3.4028235e38f, -3.4028235e38f, 1e30f, -1e30f, 2.2e9f, -2.2e9f,
+                            1e-45f, -0.0f, 123456.0f, 6.2831855f, -6.2831855f};
+    const size_t n = sizeof(values) / sizeof(values[0]);
+    int seq = 0;
+    for (int round = 0; round < 3; round++) {
+        for (size_t i = 0; i < n; i++) {
+            for (size_t j = 0; j < n; j++) {
+                Input input = {.seq = seq++, .move_dir = (int) ((i + j) % 9) - 1, .delta = 1.0f / 60.0f, .x_dir = values[i],
+                               .y_dir = values[j], .shoot = (int) (j & 1), .jump = (int) (i & 1)};
+                player_accept_input(sim->s, &input);
+                NetInputPacket wire;
+                net_packet_from_input(&wire, &input); // and the raw prediction path on the client
+                Input back;
+                net_packet_to_input(&back, &wire);
+                if (sim->c->active) player_proc_input(sim->c, &back, 0, 0);
+            }
+            game_tick(&sim->server, (float) (sim->now += 1.0 / 30.0), 1.0f / 30.0f);
+            if (!sim->s->active) player_spawn(sim->s);
+            CHECK(finite_player(sim->s), "server player non-finite after look %g", values[i]);
+            CHECK(fabsf(sim->s->direction.y) < (float) M_PI * 2.0f && fabsf(sim->s->direction.x) <= (float) M_PI / 2.0f,
+                  "server look %g %g out of range", sim->s->direction.x, sim->s->direction.y);
+            CHECK(!sim->c->active || finite_player(sim->c), "predicted player non-finite after look %g", values[i]);
+        }
+    }
+    NetStatePacket state;
+    net_packet_from_player(&state, sim->s);
+    CHECK(isfinite(state.position[0]) && isfinite(state.direction[1]), "STATE non-finite");
+    printf("  bad rotation: %d frames, server player finite at %.2f %.2f %.2f yaw %.3f\n", seq, sim->s->position.x,
+           sim->s->position.y, sim->s->position.z, sim->s->direction.y);
+    free(sim);
+}
+
 int main(void) {
     printf("Running reconciliation tests...\n");
     case_packets();
@@ -503,6 +687,10 @@ int main(void) {
     case_respawn();
     case_control_no_replay(50.0f, 15.0f);
     case_control_no_replay(150.0f, 45.0f);
+    // Last: these games draw from the shared spawn RNG, and the cases above expect its sequence.
+    case_rotation_math();
+    case_turn_right();
+    case_bad_rotation();
 
     if (g_failures) {
         printf("Reconciliation tests: %d failure(s)\n", g_failures);

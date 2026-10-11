@@ -122,7 +122,7 @@ cmd_up() {
 
     if [ "$use_bridge" = 1 ]; then
         start bridge env KRUNK_NATIVE_BRIDGE_HOST=127.0.0.1 KRUNK_NATIVE_BRIDGE_PORT="$BRIDGE_PORT" \
-            KRUNK_NATIVE_HOST=127.0.0.1 KRUNK_NATIVE_PORT="$GAME_PORT" KRUNK_NATIVE_TARGETS="$targets" \
+            KRUNK_NATIVE_HOST=127.0.0.1 KRUNK_NATIVE_PORT="$GAME_PORT" KRUNK_NATIVE_TARGETS="$targets" KRUNK_NATIVE_ALLOW_LOOPBACK=1 \
             KRUNKNATIVE_BRAIN_URL="http://127.0.0.1:$BRAIN_PORT" KN_BRAIN_URL="http://127.0.0.1:$BRAIN_PORT" \
             bash -c 'cd net-bridge && exec node -r ts-node/register/transpile-only index.ts --web'
     else

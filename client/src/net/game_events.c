@@ -115,8 +115,10 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
 
     if (!victim || victim != client->me) return;
 
+    client_recon_on_death(client); // no movement input leaves until the respawn (net/recon.c)
     HudKillCard card = {0};
     const int by_other = killer && killer != victim;
+    client->camera.zoom = 1.0f; // kill(): toggleAim(player, 0) -> resetAim() -> RENDER.zoom(1); hud_ui_show_death the DOM half
     menu_view_death_cam(client, by_other ? killer : NULL); // CONTROLS.camLookAt(killer.x, y + height / 1.5, z)
 
     if (by_other) {

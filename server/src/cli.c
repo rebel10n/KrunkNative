@@ -259,6 +259,7 @@ static void cli_cmd_mode(const char *args);
 static void cli_cmd_say(const char *args);
 #endif
 static void cli_cmd_round(const char *args);
+static void cli_cmd_lagcomp(const char *args);
 static void cli_cmd_op(const char *args);
 static void cli_cmd_deop(const char *args);
 static void cli_cmd_clear(const char *args);
@@ -282,6 +283,7 @@ static const CliCommand g_cli_commands[] = {
     {CLI_NAMES("say"), "say <message>", "Send a chat message to every player", CLI_ARG_TEXT, cli_cmd_say},
 #endif
     {CLI_NAMES("round"), "round [end | time <s> | length <s>]", "Show the round clock, end the round now, set the seconds left, or the length of later rounds (0 = mode default)", CLI_ARG_TEXT, cli_cmd_round},
+    {CLI_NAMES("lagcomp", "lag_comp"), "lagcomp [on | off | anchor on|off | scale <0.1-1>]", "Show or change lag compensation (server.cfg lag_comp, lag_comp_anchor, lag_comp_scale)", CLI_ARG_TEXT, cli_cmd_lagcomp},
     {CLI_NAMES("op"), "op <id|name>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
     {CLI_NAMES("deop"), "deop <id|name>", "Take op away again", CLI_ARG_PLAYER, cli_cmd_deop},
     {CLI_NAMES("clear", "cls"), "clear", "Clear the screen", CLI_ARG_NONE, cli_cmd_clear},
@@ -558,6 +560,45 @@ static void cli_cmd_say(const char *args) {
 #endif
 
 // round: debug controls for the match clock (shared/src/game.c).
+static int cli_parse_switch(const char *word, int *out) {
+    if (!strcmp(word, "on") || !strcmp(word, "1") || !strcmp(word, "true")) return *out = 1, 1;
+    if (!strcmp(word, "off") || !strcmp(word, "0") || !strcmp(word, "false")) return *out = 0, 1;
+    return 0;
+}
+
+// Lag compensation (shared/src/player.c storeState / fetchState): the server.cfg knobs at runtime.
+static void cli_cmd_lagcomp(const char *args) {
+    pthread_mutex_lock(&g_server->lock);
+    Game *game = &g_server->game;
+    char word[16] = "", value[16] = "";
+    const int parsed = sscanf(args, "%15s %15s", word, value);
+    int on = 0;
+    int ok = 1;
+
+    if (parsed <= 0) {
+    } else if (cli_parse_switch(word, &on)) {
+        game->lag_comp = (unsigned char) on;
+    } else if (!strcmp(word, "anchor") && parsed == 2 && cli_parse_switch(value, &on)) {
+        game->lag_comp_anchor = (unsigned char) on;
+    } else if (!strcmp(word, "scale") && parsed == 2 && atof(value) >= 0.1 && atof(value) <= 1.0) {
+        g_gs_config.lag_comp_scale = (float) atof(value);
+        for (size_t i = 0; i < game->player_count; i++) {
+            if (game->players[i]) game->players[i]->lag_comp = g_gs_config.lag_comp_scale;
+        }
+    } else {
+        ok = 0;
+        server_log("Usage: lagcomp [on | off | anchor on|off | scale <0.1-1>]");
+    }
+
+    if (ok) {
+        server_log("Lag compensation %s: %s rewind (%s), lagComp %.2f, %.0f ms history",
+                   game->lag_comp ? "on" : "off", game->lag_comp_anchor ? "anchored" : "v3.1.1",
+                   game->lag_comp_anchor ? "input arrival + ping" : "ping * 2", g_gs_config.lag_comp_scale,
+                   GAME_STATE_HISTORY * 1000.0f);
+    }
+    pthread_mutex_unlock(&g_server->lock);
+}
+
 static void cli_cmd_round(const char *args) {
     pthread_mutex_lock(&g_server->lock);
     Game *game = &g_server->game;

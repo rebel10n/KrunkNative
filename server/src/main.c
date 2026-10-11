@@ -550,6 +550,7 @@ static void server_run_tick_loop(void) {
 
         pthread_mutex_lock(&g_server->lock);
         g_server->now = now;
+        g_server->tick_wall = tick_start; // net_input_arrival: wall clock -> game.state_now
         game_tick(&g_server->game, now, delta);
         accounts_tick(now); // brain events, join timeouts, stats commits, lobby pushes
         net_check_idle_clients(now);
@@ -694,6 +695,8 @@ int main(int argc, char **argv) {
     g_server->config.idle_move_threshold = cfg->idle_move_threshold;
     g_server->config.perms = cfg->perms; // --perms, PERMS=1 or gameserver.perms
     g_server->config.cheats_open = cfg->cheats_open;
+    g_server->game.lag_comp = (unsigned char) !!cfg->lag_comp; // players.js fetchState (shared/src/player.c)
+    g_server->game.lag_comp_anchor = (unsigned char) !!cfg->lag_comp_anchor;
     pthread_mutex_init(&g_server->lock, NULL);
 
     // --mode: one mode for every round (Krunker config.modes = [id]), or the public rotation;

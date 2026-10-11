@@ -55,6 +55,9 @@ void gs_config_defaults(GsConfig *cfg) {
     gs_copy(cfg->auth_url, sizeof(cfg->auth_url), "https://coordinator.krunk.io"); // coord-auth contract
     cfg->enforce_skins = -1;            // auto: on when linked to a coordinator
     cfg->shutdown_grace = 10.0f;
+    cfg->lag_comp = 1;
+    cfg->lag_comp_anchor = 1;
+    cfg->lag_comp_scale = 1.0f;         // players.js lagComp = 1 (settings lagCompensation: 1)
 }
 
 // ------------------------------------------------------------------ file location
@@ -489,6 +492,9 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
         else if (item) gs_read_bool(s, "enforce_skins", &cfg->enforce_skins);
     }
     gs_read_float(s, "shutdown_grace", &cfg->shutdown_grace, 0.0f, 3600.0f);
+    gs_read_bool(s, "lag_comp", &cfg->lag_comp);
+    gs_read_bool(s, "lag_comp_anchor", &cfg->lag_comp_anchor);
+    gs_read_float(s, "lag_comp_scale", &cfg->lag_comp_scale, 0.1f, 1.0f); // gameserver.ts applyLagCompFromEnt clamp
     {
         char path[GS_STR_LARGE] = "";
         gs_read_str(s, "log_file", path, sizeof(path));
@@ -1022,4 +1028,7 @@ void gs_config_log_summary(const GsConfig *cfg) {
                cfg->rcon_port && cfg->rcon_password[0] ? "local tcp" : cfg->brain_url[0] ? "coordinator only" : "off",
                cfg->finder_url[0] ? cfg->finder_url : "off (unlisted)", cfg->password[0] ? " | password protected" : "",
                cfg->community[0] ? " | community set" : "");
+    if (!cfg->lag_comp) server_log("Lag compensation: off");
+    else server_log("Lag compensation: %s, lagComp %.2f, %.0f ms history",
+                    cfg->lag_comp_anchor ? "anchored (input arrival + ping)" : "v3.1.1 (ping * 2)", cfg->lag_comp_scale, GAME_STATE_HISTORY * 1000.0f);
 }

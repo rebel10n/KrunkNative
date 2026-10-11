@@ -145,8 +145,9 @@ void net_packet_from_player(NetStatePacket *packet, const Player *player) {
     packet->velocity[0] = player->velocity.x;
     packet->velocity[1] = player->velocity.y;
     packet->velocity[2] = player->velocity.z;
-    packet->direction[0] = player->direction.x;
-    packet->direction[1] = player->direction.y;
+    // Sent wrapped (controls.js xDr range): a receiver interpolates between consecutive states.
+    packet->direction[0] = player_clamp_pitch(player->direction.x);
+    packet->direction[1] = player_wrap_yaw(player->direction.y);
     packet->health = player->health;
     packet->aim_val = player->aim_val;
     packet->crouch_val = player->crouch_val;
@@ -183,8 +184,8 @@ void net_packet_apply_player(Player *player, const NetStatePacket *packet) {
     player->velocity.x = packet->velocity[0];
     player->velocity.y = packet->velocity[1];
     player->velocity.z = packet->velocity[2];
-    player->direction.x = packet->direction[0];
-    player->direction.y = packet->direction[1];
+    player->direction.x = player_clamp_pitch(packet->direction[0]);
+    player->direction.y = player_wrap_yaw(packet->direction[1]);
     player->health = packet->health;
     player->aim_val = packet->aim_val;
     player->crouch_val = packet->crouch_val;
@@ -204,7 +205,7 @@ void net_packet_from_recon(NetReconPacket *packet, const Player *player, const i
     packet->velocity[0] = player->velocity.x;
     packet->velocity[1] = player->velocity.y;
     packet->velocity[2] = player->velocity.z;
-    packet->yaw = player->direction.y;
+    packet->yaw = player_wrap_yaw(player->direction.y);
     packet->aim_val = player->aim_val;
     packet->crouch_val = player->crouch_val;
     packet->loadout_index = player->loadout_index;
@@ -227,7 +228,7 @@ void net_packet_apply_recon(Player *player, const NetReconPacket *packet) {
     if (!isfinite(packet->position[0]) || !isfinite(packet->position[1]) || !isfinite(packet->position[2])) return;
     player->position = (vec3) {packet->position[0], packet->position[1], packet->position[2]};
     player->velocity = (vec3) {packet->velocity[0], packet->velocity[1], packet->velocity[2]};
-    player->direction.y = packet->yaw;
+    player->direction.y = player_wrap_yaw(packet->yaw);
     player->aim_val = packet->aim_val;
     player->crouch_val = packet->crouch_val;
     player_update_height(player);

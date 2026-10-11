@@ -59,7 +59,11 @@ void store_ui_tick(void);                   // per frame: spin screen geometry +
 
 // ---- servers_ui.c (ClientManager + windows[1])
 void servers_ui_init(Client*, int brain_mode); // brain_mode: matchmake at startup instead of the default server
-int  servers_ui_brain_mode(void);
+int  servers_ui_brain_mode(void);            // matchmaking on and the session is a brain lobby (not pinned)
+int  servers_ui_pinned(void);               // 1 = pinned to a direct server (console connect, Direct Connect)
+void servers_ui_connect_direct(const char *host, int port); // console `connect`: a pinned direct session
+void servers_ui_disconnect(void);           // console `disconnect`: stay disconnected, no automatic seek
+int  servers_ui_reconnect(void);            // console `reconnect`: the last server (lobby: sought again); 1 = started
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours

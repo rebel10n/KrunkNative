@@ -14,7 +14,7 @@ static const struct {
     ProjectileConfig config;
 } g_projectile_configs[] = {
     {"Rocket Launcher", {.speed = 0.72f, .gravity = 0.00008f, .range = 1500.0f, .damage = 50.0f, .explode = 35.0f, .explode_damage = 35.0f, .no_impact = 1}},
-    {"Crossbow", {.speed = 0.68f, .gravity = 0.0f, .range = 1500.0f, .damage = 200.0f}},
+    {"Crossbow", {.speed = 0.68f, .gravity = 0.0f, .range = 1500.0f, .damage = 200.0f, .dont_pred = 1}},
     {"Blaster", {.speed = 1.0f, .gravity = 0.0f, .range = 500.0f, .damage = 35.0f, .no_impact = 1}},
 };
 
@@ -65,6 +65,9 @@ static void projectile_spawn(Game *game, Player *owner, const int weapon_index, 
     projectile->skip_move = 1;
     projectile->thrown_melee = (unsigned char) !!thrown_melee;
     projectile->ai_kind = ai_kind;
+    // projectile.js init: stateConst = owner && !dontPred ? ping * 2 * lagComp : 0 (the owner's
+    // getStateConst; anchored lag compensation measures it from this shot's input, player.c)
+    projectile->state_const = owner && !config->dont_pred ? player_get_state_const(owner) : 0.0f;
     projectile->position = (vec3) {roundf(origin.x * 10.0f) / 10.0f, roundf(origin.y * 10.0f) / 10.0f, roundf(origin.z * 10.0f) / 10.0f};
     projectile->config = *config;
     projectile->speed = config->speed;
@@ -175,18 +178,22 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         Player *player = game->players[i];
         if (!player || !player->active || player->uid == projectile->owner_uid) continue;
 
+        // p = fetchState(q, m.stateConst): every tick of the flight tests the rewound box
+        PlayerStoredState state;
+        if (!players_fetch_state(player, projectile->state_const, &state)) continue;
+
         float t;
         if (projectile->config.hit_box > 0.0f) {
-            const float dx = projectile->position.x - player->position.x;
-            const float dy = projectile->position.y - (player->position.y + player->height * 0.5f);
-            const float dz = projectile->position.z - player->position.z;
+            const float dx = projectile->position.x - state.position.x;
+            const float dy = projectile->position.y - (state.position.y + state.height * 0.5f);
+            const float dz = projectile->position.z - state.position.z;
             const float distance = sqrtf(dx * dx + dy * dy + dz * dz);
             t = distance <= projectile->config.hit_box ? distance / projectile->config.hit_box : -1.0f;
         } else {
             const float pad = 1.0f; // config.hitBoxPad
             const float half = player->scale + pad;
-            const vec3 box = {half * 2.0f, player->height + pad, half * 2.0f};
-            t = step_length > 0.0f ? line_in_rect(projectile->position, step, player->position, box) : -1.0f;
+            const vec3 box = {half * 2.0f, state.height + pad, half * 2.0f};
+            t = step_length > 0.0f ? line_in_rect(projectile->position, step, state.position, box) : -1.0f;
         }
 
         if (t > 0.0f && t <= 1.0f && t < best.t) {

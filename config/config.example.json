@@ -229,6 +229,9 @@
     "tags": [],
     "enforce_skins": "auto",
     "shutdown_grace": 10,
+    "lag_comp": true,
+    "lag_comp_anchor": true,
+    "lag_comp_scale": 1,
     "log_file": ""
   }
 }

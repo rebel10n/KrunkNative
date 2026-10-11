@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 // The main thread (input, chat, ...) and this transport thread (PONG, HELLO/JOIN) both send:
 // the lock keeps their frames from interleaving on the stream. It covers the send only.
@@ -107,21 +108,42 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
 
 // Retry backoff between failed connects / after a dropped session, sliced so
 // quitting (net_should_quit) and the page's `reconnect` (net_retry_now) are
-// honoured promptly.
+// honoured promptly. It doubles per consecutive failure (a refused connect, no UDP
+// answer, a session that ended within NET_SESSION_STABLE_SECONDS: a server that accepts
+// and drops us) up to NET_RETRY_MAX_MILLIS, so a broken target is never hammered; a
+// session that lasted, or an explicit reconnect / server switch, starts over at 2 s.
 #define NET_RETRY_MILLIS 2000
+#define NET_RETRY_MAX_MILLIS 30000
+#define NET_SESSION_STABLE_SECONDS 10
 // Give up on a single connect attempt after this long (unreachable hosts).
 #define NET_CONNECT_TIMEOUT_MILLIS 5000
 
-static void net_retry_sleep(Client *client) {
+static int net_retry_delay_millis(const int failures) {
+    int delay = NET_RETRY_MILLIS;
+    for (int i = 1; i < failures && delay < NET_RETRY_MAX_MILLIS; i++) delay *= 2;
+    return delay < NET_RETRY_MAX_MILLIS ? delay : NET_RETRY_MAX_MILLIS;
+}
+
+// Returns the failure count to continue with: 0 after an explicit retry (net_retry_now).
+static int net_retry_sleep(Client *client, const int failures) {
+    const int delay = net_retry_delay_millis(failures);
+    if (!client->net_hold_retry && !client->net_should_quit && !client->net_retry_now) {
+        printf("[net] retrying %s:%u in %d s (failure %d)\n", client->net_address, (unsigned int) client->net_port, delay / 1000, failures);
+    }
     // After a server ERROR (kick) wait for the page's `reconnect` instead of the backoff.
-    for (int waited = 0; (client->net_hold_retry || waited < NET_RETRY_MILLIS) && !client->net_should_quit; waited += 100) {
-        if (client->net_retry_now) break;
+    int explicit_retry = 0;
+    for (int waited = 0; (client->net_hold_retry || waited < delay) && !client->net_should_quit; waited += 100) {
+        if (client->net_retry_now) {
+            explicit_retry = 1;
+            break;
+        }
         SLEEP_MILLIS(100);
     }
 
     client->net_hold_retry = 0;
 
     client->net_retry_now = 0;
+    return explicit_retry ? 0 : failures;
 }
 
 static void net_set_non_blocking(const int client_socket) {
@@ -218,6 +240,7 @@ void *net_main(void *user_data) {
     if (!client->net_port) client->net_port = NET_DEFAULT_PORT;
 
     struct sockaddr_in server_address;
+    int failures = 0; // consecutive failed connects / short sessions (net_retry_sleep backoff)
 
     while (!client->net_should_quit) {
         // Resolved per attempt: the brain's matchmaker (client_net_switch_server) can
@@ -246,10 +269,12 @@ void *net_main(void *user_data) {
         // handshake gets the TCP session below. KRUNKNATIVE_NET_TRANSPORT=tcp|udp forces one.
         const int udp_mode = net_udp_client_mode();
         if (udp_mode >= 0 && server_address.sin_addr.s_addr != INADDR_NONE) {
+            const time_t udp_started = time(NULL);
             const int udp = net_udp_client_session(client, &server_address);
             if (udp != 0 || udp_mode > 0) {
                 if (udp == 0 && !client->net_should_quit) on_client_socket_failed(client, "No UDP answer from the server");
-                if (!client->net_should_quit) net_retry_sleep(client);
+                failures = udp > 0 && time(NULL) - udp_started >= NET_SESSION_STABLE_SECONDS ? 1 : failures + 1;
+                if (!client->net_should_quit) failures = net_retry_sleep(client, failures);
                 continue;
             }
         }
@@ -258,7 +283,7 @@ void *net_main(void *user_data) {
 
         if (client_socket < 0) {
             on_client_socket_error(client, NET_ERRNO);
-            net_retry_sleep(client);
+            failures = net_retry_sleep(client, failures + 1);
             continue;
         }
 
@@ -269,7 +294,7 @@ void *net_main(void *user_data) {
 
             if (!client->net_should_quit) {
                 on_client_socket_error(client, connect_error);
-                net_retry_sleep(client);
+                failures = net_retry_sleep(client, failures + 1);
             }
 
             continue;
@@ -291,6 +316,7 @@ void *net_main(void *user_data) {
         client_net_send_join(client, client_socket); // brain ticket / session / guest name (net_join.c)
 
         NetPacketBuffer read_buffer = {};
+        const time_t session_started = time(NULL);
 
         while (!client->net_should_quit) {
             if (!net_poll(client, client_socket, &read_buffer)) break;
@@ -304,10 +330,34 @@ void *net_main(void *user_data) {
         net_close_socket(client_socket);
         on_client_socket_disconnect(client);
 
-        if (!client->net_should_quit) net_retry_sleep(client);
+        failures = time(NULL) - session_started >= NET_SESSION_STABLE_SECONDS ? 1 : failures + 1;
+        if (!client->net_should_quit) failures = net_retry_sleep(client, failures);
     }
 
     return NULL;
+}
+
+void client_net_stop(Client *client, const char *reason) {
+    const int had_session = client->net_session_connected;
+    if (client->net_thread_running) {
+        pthread_mutex_lock(&client->net_lock);
+        const int socket = client->net_socket;
+        if (socket >= 0) { // on_client_socket_disconnect shows it instead of "Disconnected from server"
+            snprintf(client->net_disconnect_reason, sizeof(client->net_disconnect_reason), "%s", reason ? reason : "Disconnected");
+            snprintf(client->net_disconnect_code, sizeof(client->net_disconnect_code), "000000");
+        }
+        pthread_mutex_unlock(&client->net_lock);
+        client->net_should_quit = 1;
+        client->net_retry_now = 1;
+        if (socket >= 0) net_socket_shutdown(socket);
+        pthread_join(client->net_thread, NULL);
+        client->net_thread_running = 0;
+    }
+    client->net_should_quit = 0;
+    client->net_hold_retry = 0;
+    client->net_retry_now = 0;
+    client->net_connected = 0;
+    if (!had_session) on_client_socket_failed(client, reason ? reason : "Disconnected"); // stopped while (re)trying
 }
 
 // Brain matchmaking: move the session to client->net_address:net_port (set by the

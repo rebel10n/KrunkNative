@@ -49,6 +49,14 @@ static double g_start_time;
 static char g_region[32];        // region id the client seeks in
 static char g_game_id[160];      // gameId: the lobby this client is in (or joining)
 static int g_seek_inflight;
+// Source-console style pinning: a server the user picked by hand (console `connect`, Direct
+// Connect, the finder list) or a console `disconnect` is never overridden by automatic
+// matchmaking (the startup seek, the account-change reseek, a late seek answer). Only an
+// explicit matchmaking action (Play / Find New Game on the error screen, the server browser,
+// quick join, playMap, a ranked ticket, a server REDIRECT) goes through seek() and unpins.
+enum { PIN_NONE, PIN_DIRECT, PIN_IDLE };
+static int g_pin;
+static int g_last_direct;        // the last session was a direct one: `reconnect` reuses net_address
 static int g_quick_join_left;    // quickJoinRegion: remaining candidates
 static char **g_quick_join;      // candidate game ids
 static int g_quick_join_count, g_quick_join_next;
@@ -71,7 +79,10 @@ static const char *region_name(const char *id) {
     return id && id[0] ? id : "Unknown";
 }
 
-int servers_ui_brain_mode(void) { return g_brain_mode; }
+// A brain-assigned lobby (net_join.c sends the session token only there): matchmaking on
+// and not pinned to a direct server.
+int servers_ui_brain_mode(void) { return g_brain_mode && g_pin == PIN_NONE; }
+int servers_ui_pinned(void) { return g_pin == PIN_DIRECT; }
 
 static int hide_full(void) {
     if (g_hide_full < 0) {
@@ -86,6 +97,8 @@ static int hide_full(void) {
 // joinServer(host, port, gameId, clientKey): point the transport at the game server.
 static void join_server(const char *host, const int port, const char *game_id, const char *client_key, const char *web_url) {
     Client *client = g_client;
+    g_pin = PIN_NONE; // a matchmade (or server-redirected) session
+    g_last_direct = 0;
     snprintf(g_game_id, sizeof(g_game_id), "%s", game_id ? game_id : "");
 
 #ifdef __EMSCRIPTEN__
@@ -116,6 +129,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
 }
 
 static void switch_server(const char *id);
+static void direct_join(const char *host, int port);
 
 // NET_PACKET_REDIRECT (server console `send`, doc/backend.md 8.10): another lobby of the
 // network (seek it: a fresh ticket from the matchmaker) or a direct host:port.
@@ -123,11 +137,14 @@ void servers_ui_redirect(const char *game_id, const char *host, const int port, 
     if (!g_client) return;
     printf("[mm] server redirect: %s%s%s:%d (%s)\n", game_id && game_id[0] ? game_id : "", game_id && game_id[0] ? " / " : "",
            host ? host : "", port, reason ? reason : "");
-    if (game_id && game_id[0] && g_brain_mode && backend_available() == 1) {
+    if (game_id && game_id[0] && g_brain_mode && g_pin == PIN_NONE && backend_available() == 1) {
         switch_server(game_id);
         return;
     }
-    if (host && host[0] && port > 0) join_server(host, port, game_id, NULL, NULL);
+    if (host && host[0] && port > 0) {
+        if (g_pin != PIN_NONE) direct_join(host, port); // a direct server sends us on: still direct
+        else join_server(host, port, game_id, NULL, NULL);
+    }
 }
 
 void servers_ui_join_ticket(const char *host, const int port, const char *game_id, const char *ticket, const char *web_url) {
@@ -156,6 +173,11 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     (void) length;
     const int quiet = user != NULL; // quick join: try the next candidate instead of failing
     g_seek_inflight = 0;
+    if (g_pin != PIN_NONE) {
+        // the user connected to / disconnected from a server by hand while this seek ran
+        printf("[mm] seek answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        return;
+    }
     cJSON *res = cJSON_Parse(body);
     const cJSON *host = cJSON_GetObjectItem(res, "host");
     const cJSON *port = cJSON_GetObjectItem(res, "port");
@@ -180,8 +202,11 @@ static void on_seek(void *user, const int status, const char *body, const size_t
 }
 
 // ClientManager.matchmakerSeek(region, gameId, dataQuery, autoChangeGame)
+// Every caller is an explicit matchmaking action (the automatic ones check g_pin first):
+// it unpins.
 static void seek(const char *game_id, const int auto_change, void *quiet) {
     char path[1024], enc[512];
+    g_pin = PIN_NONE;
     backend_url_encode(enc, sizeof(enc), g_region);
     int n = snprintf(path, sizeof(path), "/mm/seek-game?hostname=krunknative&region=%s&autoChangeGame=%s", enc, auto_change ? "true" : "false");
     if (game_id && game_id[0]) {
@@ -219,7 +244,8 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", cached[0] ? cached : "local");
     html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
     cJSON_Delete(list);
-    seek(requested_game, 1, NULL);
+    if (g_pin != PIN_NONE) printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+    else seek(requested_game, 1, NULL);
     free((void *) requested_game);
 }
 
@@ -486,7 +512,10 @@ static void finder_servers_html(StrBuf *sb) {
 // Leave the brain's lobby (if any) and connect straight to host:port.
 static void direct_join(const char *host, const int port) {
     if (!g_client || !host || !host[0] || port <= 0 || port > 65535) return;
-    g_brain_mode = 0; // a direct session: no seek-game, no lobby id
+    // a direct session: no seek-game, no lobby id, no automatic matchmaking until the
+    // user asks for it (g_pin)
+    g_pin = PIN_DIRECT;
+    g_last_direct = 1;
     g_game_id[0] = 0;
     pthread_mutex_lock(&g_client->net_lock);
     memset(&g_client->net_join, 0, sizeof(g_client->net_join));
@@ -499,6 +528,39 @@ static void direct_join(const char *host, const int port) {
     printf("[mm] direct connect %s:%d (%s mode)\n", host, port, online_mode_name());
     menu_show_window(MENU_WINDOW_NONE, 0);
     client_net_switch_server(g_client);
+}
+
+// Console `connect host[:port]`: the same direct (pinned) session as Direct Connect.
+void servers_ui_connect_direct(const char *host, const int port) { direct_join(host, port); }
+
+// Console `disconnect`: leave the server and stay disconnected (the connection error screen
+// says "Disconnected") until the user picks Play / a server / `connect` / `reconnect`.
+void servers_ui_disconnect(void) {
+    if (!g_client) return;
+    if (g_pin != PIN_IDLE) g_last_direct = g_pin == PIN_DIRECT || !g_brain_mode || !g_game_id[0];
+    g_pin = PIN_IDLE;
+    printf("[mm] disconnected by the user (reconnect: %s)\n", g_last_direct ? "same server" : g_game_id);
+    if (g_client->offline) local_game_stop(g_client);
+    client_net_stop(g_client, "Disconnected");
+}
+
+// Console `reconnect`: the last server again, through the same transport fallback (UDP,
+// then TCP / WebTransport, then WebSocket). A brain lobby is sought again by its id: its
+// join ticket is single-use and expires (server/src/accounts.c "Join key expired").
+int servers_ui_reconnect(void) {
+    if (!g_client) return 0;
+    if (!g_last_direct && g_brain_mode && g_game_id[0] && g_pin != PIN_DIRECT) {
+        char id[sizeof(g_game_id)];
+        snprintf(id, sizeof(id), "%s", g_game_id);
+        printf("[mm] reconnect: seeking %s again\n", id);
+        seek(id, 0, NULL);
+        return 1;
+    }
+    if (!g_client->net_address[0]) return 0;
+    g_pin = g_last_direct ? PIN_DIRECT : PIN_NONE;
+    printf("[mm] reconnect: %s:%u\n", g_client->net_address, (unsigned int) g_client->net_port);
+    client_net_switch_server(g_client);
+    return 1;
 }
 
 // "host[:port]" (default port 21015); [v6]:port accepted.
@@ -943,6 +1005,7 @@ static void on_host(void *user, const int status, const char *body, const size_t
         g_last_load_ms = -1e18; // windows[1].lastLoadTime = 0
         cJSON_Delete(res);
         menu_show_window(MENU_WINDOW_NONE, 0);
+        g_pin = PIN_NONE; // our own hosted game
         on_seek(NULL, status, body, length);
         return;
     }
@@ -1000,8 +1063,12 @@ void servers_ui_init(Client *client, const int brain_mode) {
 }
 
 int servers_ui_retry(void) {
+    // pinned: the link retries that server (menu_retry_connect -> client_net_request_reconnect)
+    if (g_pin == PIN_DIRECT) return 0;
+    if (g_pin == PIN_IDLE && !g_brain_mode) return servers_ui_reconnect(); // the transport is stopped
     if (!g_brain_mode) return 0;
     // "Try seeking a new game": a fresh seek in the same region (v3.1.1 reloads the page)
+    g_pin = PIN_NONE; // the user asked for matchmaking (also after a console `disconnect`)
     g_game_id[0] = 0;
     start_seek(NULL);
     return 1;
@@ -1009,18 +1076,19 @@ int servers_ui_retry(void) {
 
 // --connect with a brain: the session reaches the direct server through JOIN, so an
 // account change in the menu reconnects (same server) to attach or drop it.
-static void direct_account_tick(Client *client) {
+static void direct_account_tick(Client *client, const int direct) {
     static int last = -1;
     const AccountInfo *acc = account_get();
     const int id = acc ? acc->id : 0;
     if (last < 0) last = id;
     if (id == last) return;
     last = id;
-    if (!client->offline && client->net_connected && !client->in_game) client_net_switch_server(client);
+    if (direct && !client->offline && client->net_connected && !client->in_game) client_net_switch_server(client);
 }
 
 void servers_ui_tick(Client *client) {
-    if (!g_brain_mode && backend_enabled()) direct_account_tick(client);
+    if (backend_enabled()) direct_account_tick(client, !g_brain_mode || g_pin == PIN_DIRECT); // tracks the account either way
+    if (g_pin != PIN_NONE) g_started = 1; // connected / disconnected by hand first: no startup seek
     // ?play= / ?game= requests once the startup seek is done (or right away without one)
     if ((g_pending_play[0] || g_pending_game[0]) && (!g_brain_mode || (g_started && !g_seek_inflight && client->net_connected))) {
         if (g_pending_game[0] && g_brain_mode) switch_server(g_pending_game);
@@ -1085,6 +1153,6 @@ void servers_ui_tick(Client *client) {
     if (last_account < 0) last_account = account_id;
     if (account_id != last_account) {
         last_account = account_id;
-        if (g_game_id[0] && !client->in_game && !g_seek_inflight) seek(g_game_id, 1, NULL);
+        if (g_pin == PIN_NONE && g_game_id[0] && !client->in_game && !g_seek_inflight) seek(g_game_id, 1, NULL);
     }
 }

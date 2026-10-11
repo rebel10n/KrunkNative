@@ -122,6 +122,7 @@ typedef struct {
     int next_client_id;
     unsigned int used_player_numbers;
     float now;
+    double tick_wall;              // CLOCK_MONOTONIC seconds when the running/last game_tick started
     pthread_mutex_t lock;
 
     ServerConfig config;

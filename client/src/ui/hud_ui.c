@@ -64,9 +64,9 @@ void hud_ui_hit(Client*, int kill);
 #define FEED_COLOR_YOU "#fff"
 #define HEALTH_COLOR_LOW "#eb5656"
 #define HEALTH_COLOR_HIGH "#9eeb56"
-#define PING_COLOR_LOW "#9eeb56"
-#define PING_COLOR_MEDIUM "#ffea78"
-#define PING_COLOR_HIGH "#eb5656"
+#define PING_COLOR_LOW "rgb(158, 235, 86)"    // COLORS.ping (v3.1.1 src/data/colors.js)
+#define PING_COLOR_MEDIUM "rgb(255, 213, 66)"
+#define PING_COLOR_HIGH "rgb(255, 75, 66)"
 #define SERVER_MSG_COLOR "#fc03ec"
 #define XP_BAR_COLOR "#fbc02d"     // settings.interface.xpBarCol default
 #define SCORE_COLOR "#ffea78"      // settings.interface.scoreColor default (kill card +score)
@@ -968,6 +968,13 @@ static void hud_render_crosshair(const HudUiExtra *extra, const int reloading) {
     }
 }
 
+// #knCrosshair down (the overlay canvas skips it); hud_render_crosshair shows it again.
+static void hud_hide_crosshair(void) {
+    if (g_hud_ui.cross_shown == 0) return;
+    if (g_hud_ui.crosshair) html_dom_set_display(g_hud_ui.crosshair, "none");
+    g_hud_ui.cross_shown = 0;
+}
+
 static void hud_hide_hit(void) {
     if (g_hud_ui.hitmarker) html_dom_set_display(g_hud_ui.hitmarker, "none");
     g_hud_ui.hit_active = 0;
@@ -1606,6 +1613,17 @@ static void hud_render_scope(const int scoped) {
     dom_style("aimRecticle", "opacity", scoped ? "1" : "0");
 }
 
+// players.js resetAim() (kill() -> toggleAim(player, 0)): the scope (#aimRecticle) and the
+// sight reticle (#aimDot) go to opacity 0; the RENDER.zoom(1) half is game_events.c's.
+// The HUD state follows so the next pass after a respawn only rewrites what changed.
+static void hud_reset_aim(Client *client) {
+    dom_style("aimRecticle", "opacity", "0");
+    dom_style("aimDot", "opacity", "0");
+    if (!client) return;
+    client->hud_html.scoped = 0;
+    client->hud_html.aim_dot = 0;
+}
+
 // reconcilePlayer: pingText = ping == -1 ? "-" : ping; icon colored by COLORS.ping.
 static void hud_render_ping(const int ping) {
     char text[16];
@@ -1741,8 +1759,7 @@ static void hud_toggle_game_ui(const int on) {
     g_hud_ui.in_game = on;
     // Krunker's crosshair and hit marker live on the overlay canvas hidden above.
     if (!on) {
-        if (g_hud_ui.crosshair) html_dom_set_display(g_hud_ui.crosshair, "none");
-        g_hud_ui.cross_shown = 0;
+        hud_hide_crosshair();
         hud_hide_hit();
         hud_dmg_hide_all();
     }
@@ -1751,8 +1768,8 @@ static void hud_toggle_game_ui(const int on) {
 // Krunker g1() for the local player: #killCard markup + toggleGameUI(false). `card` NULL
 // (or no killer) is the "You died" variant without a card.
 void hud_ui_show_death(Client *client, const HudKillCard *card) {
-    (void) client;
     if (!html_ui_available() || !html_ui_is_ready()) return;
+    hud_reset_aim(client); // kill(): toggleAim(player, 0) for the local player
     const int by = card && card->killer && card->killer[0];
     char html[1024];
     size_t len = 0;
@@ -1843,8 +1860,7 @@ static void hud_end_screen_dom(void) {
         snprintf(text, sizeof(text), "Next Round in %s", g_end_timer); // i18n timer.end
         dom_text("endTimer", text);
     }
-    if (g_hud_ui.crosshair) html_dom_set_display(g_hud_ui.crosshair, "none");
-    g_hud_ui.cross_shown = 0;
+    hud_hide_crosshair();
     hud_hide_hit();
     hud_dmg_hide_all();
 }
@@ -2522,6 +2538,9 @@ static void hud_spectator_tick(Client *client, const double now) {
     if (ui->nums_last_ms >= 0.0) hud_nums_hide_all();
     hud_speed_step(client, now * 1000.0); // ui->visible != 1: hides it
     if (ui->hit_active) hud_hide_hit();
+    // The overlay draws the crosshair only `!window.spectating` (hud_spectate.c hides
+    // #knCrosshair too): keep cross_shown in step so playing again shows it.
+    hud_hide_crosshair();
     if (now < hud->next_emit_time) return;
     hud->next_emit_time = now + HUD_UI_MIN_INTERVAL;
 
@@ -2635,6 +2654,11 @@ void client_hud_html_tick(Client *client, const float now_f) {
         return;
     }
     if (ui->visible != 1 || !hud_in_game(client)) {
+        // Dead (kill() -> toggleAim(player, 0), the overlay canvas hidden with the death
+        // card), menu or no player: no crosshair, scope or sight reticle. A respawn or
+        // closing the menu rewrites them (valid = 0 below).
+        if (hud->scoped || hud->aim_dot) hud_reset_aim(client);
+        hud_hide_crosshair();
         if (ui->dmg_last_ms >= 0.0) hud_dmg_hide_all();
         if (ui->nums_last_ms >= 0.0) hud_nums_hide_all();
         hud_speed_step(client, now * 1000.0); // hides it
@@ -2672,11 +2696,12 @@ void client_hud_html_tick(Client *client, const float now_f) {
     next.class_index = me->class_index;
     // 95.js hvJK5: #aimRecticle only for `scope` weapons, once fully aimed (jKFi4 == 0);
     // vfx.c hides the muzzle sprite / overlay flash / casings on the same condition.
-    next.scoped = weapon && weapon->scope && me->aim_val >= 1.0f;
+    // Both are drawn on the overlay canvas by default, which the end screen hides (hideUI).
+    next.scoped = weapon && weapon->scope && me->aim_val >= 1.0f && !ui->ended;
     // 95.js toggleAim: with an attachment (and the normal first-person camera) the reticle image
     // (textures/reticles/reticle_<reticleIndex>.png, drawn centred by 91.js) shows once fully aimed.
     // aiming cancels an inspect in v3.1.1, so the dot never shows during one; keep that explicit
-    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting;
+    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting && !ui->ended;
     next.weapon = weapon;
     hud_timer(client, next.timer_text, sizeof(next.timer_text));
     next_extra.spread = (int) lroundf(hud_spread(me));

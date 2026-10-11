@@ -334,7 +334,7 @@ void spectate_tick(Client *client, const float delta, const float mouse_dx, cons
         look.y_dir = g_spect.yaw;
         ui_controls_fill_input(client, &look, mouse_dx, mouse_dy);
         g_spect.pitch = CLAMP(look.x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
-        g_spect.yaw = look.y_dir;
+        g_spect.yaw = player_wrap_yaw(look.y_dir); // controls.js xDr % Math.PI2 (float precision)
     }
 
     if (first_person) {

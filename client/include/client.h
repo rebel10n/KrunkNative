@@ -568,6 +568,9 @@ void client_net_request_reconnect(Client*);        // page `reconnect`: retry no
 // client_net_request_reconnect); NET_STATUS_FAILED carries reason/code. No-op without a session.
 #define CLIENT_HAVE_NET_DISCONNECT 1
 void client_net_disconnect(Client*, const char *reason, const char *code);
+// Console `disconnect`: close the session (or stop retrying) and leave the transport idle
+// until client_net_switch_server; NET_STATUS_FAILED carries `reason` (net.c / net_web.c).
+void client_net_stop(Client*, const char *reason);
 void on_client_socket_event(Client*);
 
 typedef struct {
@@ -633,6 +636,8 @@ void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the sock
 // Prediction / reconciliation (client/src/net/recon.c, Krunker tmpInpts / "q" / reconcilePlayer).
 void client_recon_reset(Client*);                                 // CONTROLS.reset(): our spawn, a new session
 void client_recon_record(Client*, const Input*);                  // a predicted input: pending + the "q" batch
+int  client_recon_sending(const Client*);                         // inputs may leave: alive, round not over (net/recon.c)
+void client_recon_on_death(Client*);                              // our KILL: the unsent "q" window is dropped
 void client_recon_after_tick(Client*);                            // the frame's shot knockback -> input.velObj
 void client_recon_apply(Client*, const NetReconPacket*);          // "l": snap + replay
 int  client_recon_delay_inbound(Client*, const NetPacket*);       // KRUNKNATIVE_NET_DELAY_MS: 1 = held

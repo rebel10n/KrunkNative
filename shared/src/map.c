@@ -438,6 +438,13 @@ Map *map_init(const cJSON *raw_data) {
         object->ambient_enabled = !map_no_ambient && (!obj_ab || cJSON_IsNull(obj_ab));
         object->fog_enabled = !map_flag_is_set(cJSON_GetObjectItem(raw_obj, "nf"));
         object->penetrable = map_flag_is_set(cJSON_GetObjectItem(raw_obj, "pe")); // 93.js penetrable: T.pe
+        // map.js passes noVis: OBJECT.v (JS truthiness) to every rendered builder but addCanvas
+        // (SIGN) / addShowcase / particles. Parsed here so server_bin (no meshes) knows it too:
+        // players.spray skips noVis objects.
+        const cJSON *obj_v = cJSON_GetObjectItem(raw_obj, "v");
+        object->no_vis = prefab_id != PREFAB_SIGN && prefab_id != PREFAB_SHOWCASE && prefab_id != PREFAB_PARTICLES && obj_v &&
+            (cJSON_IsTrue(obj_v) || (cJSON_IsNumber(obj_v) && cJSON_GetNumberValue(obj_v) != 0.0) ||
+             (cJSON_IsString(obj_v) && cJSON_GetStringValue(obj_v)[0]));
 
         // objects.js noShoot helpers (94.js addLadder/addRamp set noShoot: true as well)
         switch (prefab_id) {
@@ -647,7 +654,7 @@ Map *map_init(const cJSON *raw_data) {
 #ifdef KRUNKNATIVE_CLIENT
         object->mesh = prefab_init(object, parsed_colors, raw_obj);
         client_animate_object_texture(object, 0.0f);
-        object->no_vis = object->mesh && !((Mesh *) object->mesh)->visible; // noVis (v), hidden objectives
+        object->no_vis = object->no_vis || (object->mesh && !((Mesh *) object->mesh)->visible); // + meshes created hidden (objectives)
         if (object->mesh && !object->active && !object->no_vis) ((Mesh *) object->mesh)->visible = 0; // meshRef.visible = active
 #endif
 

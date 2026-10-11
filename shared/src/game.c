@@ -574,6 +574,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
     if (!game->ready) return;
 
     game->now = now;
+    game->state_now += delta; // game.now of the stateHistory (lag compensation, player.c)
 
     const int authority = game_is_authority(game);
     int next_round = 0;
@@ -630,6 +631,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
         if (!authority || !player->active || game->end_timer > 0.0f) continue; // end screen: kept players only animate
 
         game_tick_regen(game, player, delta);
+        player_store_state(player); // players.js update: tickPlayer, storeState, then the deathY check
 
         // KrunkNative (deliberate difference): v3.1.1 players.js update() kills at deathY even in
         // noclip; a noclipping player (a dev/host tool) may fly under the map instead.

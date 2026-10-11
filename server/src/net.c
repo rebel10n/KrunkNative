@@ -493,6 +493,8 @@ static void net_spawn_client(ClientConnection *client) {
 
         player->uid = client->id;
         player->team = accounts_assigned_team(client); // ranked roster team (players.setTeam isFromQueue), 0 = mode picks
+        player->ping = client->ping_ms > 0 ? (float) client->ping_ms : 0.0f; // lag compensation (getStateConst)
+        player->lag_comp = g_gs_config.lag_comp_scale;                        // v3.1.1 lagComp (ent[11]) for everyone
         client->player = player;
         game_players_add(&g_server->game, player);
     }
@@ -885,6 +887,7 @@ static void net_handle_pong(ClientConnection *client, const NetPacket *packet) {
     const double received_at = readable_at > client->ping_sent_at && readable_at < now ? readable_at : now;
     client->ping_ms = net_ping_update(client->ping_ms, (float) (received_at - client->ping_sent_at));
     client->ping_seq = 0;
+    if (client->player) client->player->ping = (float) client->ping_ms; // io_po: player.ping = smoothed
     client->next_ping_at = now + NET_PING_INTERVAL;
 
     const NetPingResultPacket result = {.ping_ms = client->ping_ms};
@@ -994,19 +997,41 @@ static void net_handle_teleport(ClientConnection *client, const NetPacket *packe
 // (non-finite fields dropped, delta clamped, seq floor, 240-frame cap). Physics only ever runs
 // from these inputs: the server never takes a position from the client, so a client-side
 // noclip flag or position jump has no effect on the authoritative player.
-static void net_handle_input_frame(ClientConnection *client, const NetInputPacket *net_input) {
+static void net_handle_input_frame(ClientConnection *client, const NetInputPacket *net_input, const double arrival) {
     Input input;
     if (!client->player || !client->player->active) return;
     if (g_server->game.end_timer > 0.0f) return; // io_q: isVoteWindow drops the batch
     net_packet_to_input(&input, net_input);
+    input.arrival = arrival;
     player_accept_input(client->player, &input);
 }
 
-// "q": every frame of the batch, in order, through the same checks as a single INPUT.
+// When this client's packet reached the server, on the game.state_now clock that stamps the
+// stateHistory (anchored lag compensation, shared/src/player.c): the wall time poll() saw the
+// socket readable (TCP; the handler may have waited for the tick's lock) or now, mapped by the
+// last tick's start. state_now advances by each tick's wall delta, so state_now - tick_wall
+// is constant up to float rounding.
+static double net_input_arrival(const ClientConnection *client) {
+    const double now = net_time();
+    const double readable_at = client->fd >= 0 && client->fd < NET_READABLE_FDS ? g_net_readable_at[client->fd] : 0.0;
+    const double wall = readable_at > 0.0 && readable_at <= now && now - readable_at < 1.0 ? readable_at : now;
+    return g_server->game.state_now + (wall - g_server->tick_wall);
+}
+
+// "q": every frame of the batch, in order, through the same checks as a single INPUT. The
+// client sends a batch once per clientSendRate, so its earlier frames were generated earlier:
+// each one arrives "back" by the deltas (seconds, clamped like procInputs) of the frames after it.
 static void net_handle_input_batch(ClientConnection *client, const NetPacket *packet) {
     NetInputBatchPacket batch;
     if (!net_packet_read_input_batch(&batch, packet)) return;
-    for (int i = 0; i < batch.count; i++) net_handle_input_frame(client, &batch.frames[i]);
+    double arrival[NET_INPUT_BATCH_MAX];
+    double at = net_input_arrival(client);
+    for (int i = batch.count - 1; i >= 0; i--) {
+        arrival[i] = at;
+        const float delta = batch.frames[i].delta;
+        if (isfinite(delta) && delta > 0.0f) at -= MIN(delta, game_constants.max_delta);
+    }
+    for (int i = 0; i < batch.count; i++) net_handle_input_frame(client, &batch.frames[i], arrival[i]);
 }
 
 // ENT after its fields were stored (also replayed by accounts.c once a deferred join settled).
@@ -1092,7 +1117,7 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             break;
         case NET_PACKET_INPUT: {
             NetInputPacket net_input;
-            if (net_packet_read_input(&net_input, packet)) net_handle_input_frame(client, &net_input);
+            if (net_packet_read_input(&net_input, packet)) net_handle_input_frame(client, &net_input, net_input_arrival(client));
             break;
         }
         case NET_PACKET_INPUT_BATCH: // "q"

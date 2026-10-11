@@ -557,7 +557,9 @@ void menu_update_instructions(void) {
     } else if (g_ui.connect_error[0] && !g_ui.connected) {
         sb_append(&sb, "<span style='color: rgba(255, 255, 255, 0.6)'>");
         sb_append_esc(&sb, g_ui.connect_error);
-        sb_append(&sb, "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'>Try seeking a new game by clicking <a href='#' onclick='return knRetry()'>here</a>.</span>"
+        sb_append(&sb, servers_ui_pinned() ? "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'>Try reconnecting by clicking " // console connect / Direct Connect
+                                           : "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'>Try seeking a new game by clicking ");
+        sb_append(&sb, "<a href='#' onclick='return knRetry()'>here</a>.</span>"
             "<br/><span style='color: rgba(255, 255, 255, 0.6)'>Or <a href='#' onclick='return knHostOffline()'>play offline</a>.</span>"
             "<div style='margin-top:10px;font-size:20px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them (Error 0x");
         sb_append_esc(&sb, g_connect_code[0] ? g_connect_code : "000000");
@@ -585,6 +587,34 @@ void menu_set_region_label(const char *name) {
 void menu_update_top_bar(void) {
     HtmlElem lbl = by_id("menuRegionLabel");
     if (lbl) html_dom_set_text(lbl, g_ui.connected ? (g_region_label[0] ? g_region_label : MENU_REGION_NAME) : "...");
+}
+
+// The top bar's #menuPingText / #menuPingIcon. v3.1.1 reconcilePlayer writes them on every
+// change of the "l" ping while #menuHolder shows: text = ping == -1 ? "-" : ping, icon
+// COLORS.ping (src/data/colors.js: low < 50 <= medium < 150 <= high). KrunkNative's ping
+// comes in PING_RESULT (one per pong, NET_PING_INTERVAL) instead of "l", so the menu also
+// follows it before the first spawn and while dead, and catches up when it reopens.
+// Offline, disconnected or before the first sample: the page's own "0" in gray
+// (clearPingCounter). -1 = that state; the page starts in it.
+#define MENU_PING_COLOR_LOW "rgb(158, 235, 86)"
+#define MENU_PING_COLOR_MEDIUM "rgb(255, 213, 66)"
+#define MENU_PING_COLOR_HIGH "rgb(255, 75, 66)"
+static int g_menu_ping = -1;
+
+static void menu_update_ping(const Client *client) {
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) return; // the reference captures keep the page's "0"
+#endif
+    if (!html_ui_is_menu_open()) return;
+    const int ping = client->offline || client->game.is_local || !client->net_connected || client->net_ping_ms < 0 ? -1 : client->net_ping_ms;
+    if (ping == g_menu_ping) return;
+    g_menu_ping = ping;
+
+    char text[16];
+    snprintf(text, sizeof(text), "%d", ping < 0 ? 0 : ping);
+    const HtmlElem el = by_id("menuPingText");
+    if (el) html_dom_set_text(el, text);
+    set_style("menuPingIcon", "color", ping < 0 ? "gray" : ping >= 150 ? MENU_PING_COLOR_HIGH : ping >= 50 ? MENU_PING_COLOR_MEDIUM : MENU_PING_COLOR_LOW);
 }
 
 // Krunker's map load: mapInfo.textContent = mode.alias + "_" + map.name, and the
@@ -901,12 +931,18 @@ void menu_host_offline(void) {
     menu_request_play(1);
 }
 
-// The error screen's "here" link: ask for an immediate reconnect (natively the net
-// thread retries on its own every 2 s anyway).
-void menu_retry_connect(void) {
+// CONNECTING... (the error screen goes) until the server answers or the timer fires.
+void menu_show_connecting(void) {
     g_ui.connect_error[0] = 0;
     arm_connect_timer();
     menu_update_instructions();
+}
+
+// The error screen's "here" link: ask for an immediate reconnect (natively the net
+// thread retries on its own with a backoff anyway). Pinned to a direct server
+// (servers_ui.c) it retries that server; otherwise with a brain it seeks a new game.
+void menu_retry_connect(void) {
+    menu_show_connecting();
     if (client_is_connected(g_ui.client)) return;
     if (servers_ui_retry()) return; // brain matchmaker: seek a new game (servers_ui.c)
     client_net_request_reconnect(g_ui.client);
@@ -1087,6 +1123,7 @@ static void menu_dom_init(void) {
     menu_update_top_bar();
     menu_update_class_box();
     menu_update_instructions();
+    g_menu_ping = -1; // a fresh page shows "0" in gray
 
     // bridgeReady
     g_ui.dom_ready = 1;
@@ -1174,6 +1211,7 @@ void client_menu_tick(Client *client) {
     if (g_ui.dom_ready) {
         menu_refresh_tables(client);
         if (menu_state_changed(client)) menu_apply_state(client);
+        menu_update_ping(client);
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.
         float w, h, dpr;

@@ -129,6 +129,13 @@ static void batch_flush(Client *client) {
     else send_now(client, &packet);
 }
 
+// Whether this frame's input may join the "q" window: our player is alive and the round
+// is not over (END seen while playing, until the next INIT; menu_view.c's `ended`).
+int client_recon_sending(const Client *client) {
+    if (client->game.is_local || !client->me || !client->me->active) return 0;
+    return !(client->net_end_seconds >= 0 && client->net_end_result != INT32_MIN);
+}
+
 // tmpInpts.push(b9) + the "q" window: called with each input right after it was queued for
 // prediction. Online only.
 void client_recon_record(Client *client, const Input *input) {
@@ -143,6 +150,18 @@ void client_recon_record(Client *client, const Input *input) {
     }
     client->net_pending_inputs[client->net_pending_count++] = *input;
 
+    // gameLoop only batches `!Game.singlePlayer && !endAnimationTimeLeft`, and the "q" send
+    // needs `player && player.active`: nothing leaves while dead (death card, death cam,
+    // spectating: no active player, so main.c builds no input at all) or on the end screen.
+    // v3.1.1 resumes zero-delta frames once its endAnim reached 0, which its io_q drops in
+    // the vote window like our server (end_timer); KrunkNative keeps quiet until the next
+    // INIT. The frame still predicts locally and stays in the pending list (tmpInpts).
+    if (!client_recon_sending(client)) {
+        client->net_batch_count = 0; // the half-filled window is dropped, not sent late
+        client->net_batch_time = 0.0f;
+        return;
+    }
+
     if (client->net_batch_count >= NET_INPUT_BATCH_MAX) batch_flush(client);
     net_packet_from_input(&client->net_batch[client->net_batch_count++], input);
 
@@ -153,6 +172,14 @@ void client_recon_record(Client *client, const Input *input) {
         if (client->net_batch_time > NET_INPUT_SEND_INTERVAL) client->net_batch_time = 0.0f; // a long hitch
         batch_flush(client);
     }
+}
+
+// Our KILL: the half-filled "q" window is never sent (the server killed us before this
+// packet left it, and io_q ignores a dead player). The pending inputs stay until the
+// respawn's client_recon_reset, like tmpInpts until CONTROLS.reset().
+void client_recon_on_death(Client *client) {
+    client->net_batch_count = 0;
+    client->net_batch_time = 0.0f;
 }
 
 // After the frame's game tick ran the input: the shot's physPow knockback becomes that

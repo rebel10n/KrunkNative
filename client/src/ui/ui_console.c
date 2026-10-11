@@ -17,6 +17,7 @@
 #include <console.h>
 #include <ui_mods.h>
 #include <ui_logic.h>
+#include <backend_ui.h> // servers_ui_connect_direct / _disconnect / _reconnect
 #include <html_ui.h>
 #include <chat_commands.h>
 #include <map_catalog.h>
@@ -1163,8 +1164,6 @@ static void cmd_exec(const int argc, char **argv, const char *rest) {
 }
 
 #ifndef __EMSCRIPTEN__
-static NetMainArgs g_net_args;
-
 static void stop_net(Client *client) {
     if (!client->net_thread_running) return;
     client->net_should_quit = 1;
@@ -1178,19 +1177,13 @@ static void stop_net(Client *client) {
     client->net_should_quit = 0;
     client->net_connected = 0;
 }
-
-static int start_net(Client *client) {
-    client->net_should_quit = 0;
-    client->net_hold_retry = 0;
-    g_net_args = (NetMainArgs) {.client = client, .address = NULL};
-    if (pthread_create(&client->net_thread, NULL, net_main, &g_net_args)) return 0;
-    client->net_thread_running = 1;
-    return 1;
-}
 #endif
 
 // connect [local|hostname]: devConsole points the matchmaker at the host and seeks a game;
-// KrunkNative servers are reached directly (host[:port], TCP).
+// KrunkNative servers are reached directly (host[:port]; UDP, then TCP; the web build goes
+// through the bridge's /native?target=). Like a Source console the server is pinned:
+// matchmaking never moves the session elsewhere until Play / the server browser
+// (servers_ui.c g_pin), and `reconnect` comes back here.
 static void cmd_connect(const int argc, char **argv, const char *rest) {
     char input[CON_TEXT_MAX];
     if (rest && *rest) snprintf(input, sizeof(input), "%s", rest);
@@ -1226,45 +1219,29 @@ static void cmd_connect(const int argc, char **argv, const char *rest) {
     if (local) append("Connecting through local...", COL_INFO);
     else appendf(COL_INFO, "Connecting through %s:%u...", host, port);
     appendf(COL_INFO, "  Server: tcp://%s:%u", host, port);
-#ifdef __EMSCRIPTEN__
-    append("endpoint updated; live seek is unavailable on this page", COL_WARN);
-#else
+#ifndef __EMSCRIPTEN__
     unsigned int b[4];
     char tail;
     if (sscanf(host, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &tail) != 4 || b[0] > 255 || b[1] > 255 || b[2] > 255 || b[3] > 255) {
         appendf(COL_ERROR, "connect failed: cannot resolve %s (IPv4 addresses only)", host);
         return;
     }
-    Client *client = con_client();
-    if (!client) return;
-    if (client->offline) local_game_stop(client);
-    stop_net(client);
-    snprintf(client->net_address, sizeof(client->net_address), "%s", host);
-    client->net_port = (unsigned short) port;
-    if (!start_net(client)) {
-        append("connect failed: could not start the network thread", COL_ERROR);
-        return;
-    }
-    menu_retry_connect(); // CONNECTING... until the server answers
 #endif
+    if (!con_client()) return;
+    servers_ui_connect_direct(host, (int) port); // pinned; switch_server leaves an offline game
+    menu_show_connecting(); // CONNECTING... until the server answers
 }
 
-// disconnect: endpoints back to the defaults, socket closed, back to the menu ("/").
+// disconnect: socket closed, back to the menu, and nothing reconnects (no matchmaker seek,
+// no transport retry) until Play / a server / `connect` / `reconnect`. (devConsole goes
+// to "/", which on KrunkNative's page would seek a new public game.)
 static void cmd_disconnect(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
-#ifdef __EMSCRIPTEN__
-    emscripten_run_script("location.href = '/';");
-#else
     Client *client = con_client();
     if (!client) return;
-    if (client->offline) local_game_stop(client);
-    stop_net(client);
-    snprintf(client->net_address, sizeof(client->net_address), "127.0.0.1");
-    client->net_port = NET_DEFAULT_PORT;
-    start_net(client);
+    servers_ui_disconnect();
     client_set_menu_open(client, 1);
-    menu_retry_connect();
-#endif
+    append("Disconnected.", COL_INFO);
 }
 
 static void cmd_quit(const int argc, char **argv, const char *rest) {
@@ -1277,22 +1254,23 @@ static void cmd_quit(const int argc, char **argv, const char *rest) {
 #endif
 }
 
-// reconnect: location.reload() (natively: the session starts over)
+// reconnect: location.reload() in devConsole; KrunkNative reconnects to the last server
+// (a `connect` target, a Direct Connect server or the matchmade lobby, sought again for a
+// fresh join ticket), also after `disconnect`. Offline: the local game starts over.
 static void cmd_reconnect(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
-#ifdef __EMSCRIPTEN__
-    emscripten_run_script("location.reload();");
-#else
     Client *client = con_client();
     if (!client) return;
     if (client->offline) {
         local_game_host(client, client->game.ready ? client->game.current_map_index : -1, client->game.ready ? game_mode_id(&client->game) : 0);
         return;
     }
-    if (!client->net_thread_running) start_net(client);
-    client_net_request_reconnect(client);
-    menu_retry_connect();
-#endif
+    if (!servers_ui_reconnect()) {
+        append("reconnect: no server to reconnect to", COL_ERROR);
+        return;
+    }
+    appendf(COL_INFO, "Reconnecting to %s:%u...", client->net_address, (unsigned int) client->net_port);
+    menu_show_connecting();
 }
 
 // clearPingCounter
@@ -1392,9 +1370,9 @@ static void register_commands(void) {
     register_local("alias", ARGS(A_ALIAS), "define a command alias", cmd_alias);
     register_local("exec", ARGS(A_COMMANDS), "run multiple commands separated by ;", cmd_exec);
     register_local("connect", ARGS(A_HOSTNAME), "seek and connect through a matchmaker hostname", cmd_connect);
-    register_local("disconnect", NO_ARGS, "disconnect and reset to default endpoints", cmd_disconnect);
+    register_local("disconnect", NO_ARGS, "disconnect and stay in the menu", cmd_disconnect);
     register_local("quit", NO_ARGS, "close the window", cmd_quit);
-    register_local("reconnect", NO_ARGS, "reload the current page", cmd_reconnect);
+    register_local("reconnect", NO_ARGS, "reconnect to the last server", cmd_reconnect);
     register_local("offline", NO_ARGS, "switch to offline mode", cmd_offline);
     register_local("ahk", NO_ARGS, "show current antihack key", cmd_ahk);
     register_local("version", NO_ARGS, "show current client version", cmd_version);

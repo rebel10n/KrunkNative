@@ -93,6 +93,9 @@ typedef struct {
     char tags[GS_STR_SMALL * 2];         // extra comma-separated info-query tags
     int enforce_skins;                   // -1 auto (on with a coordinator), 0 off, 1 on
     float shutdown_grace;                // seconds a SIGTERM/SIGINT drain waits for players (0 = immediate)
+    int lag_comp;                        // 1: hits rewind targets (v3.1.1 storeState / fetchState), 0 = current positions
+    int lag_comp_anchor;                 // 1: rewind from the shot input's arrival + ping (default); 0: v3.1.1 ping * 2 from processing
+    float lag_comp_scale;                // v3.1.1 player.lagComp for every player (0.1..1, default 1)
     char log_file[GS_STR_LARGE];         // append every log line here too ("" = stdout/stderr only)
     char cfg_path[GS_STR_LARGE];         // server.cfg actually loaded ("" none)
 
