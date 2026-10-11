@@ -754,7 +754,7 @@ static void peer_name(int fd, char *out, size_t cap) {
 static void on_accept(kn_loop *loop, int lfd, unsigned ev, void *ud) {
     kn_http_server *s = ud;
     for (int i = 0; i < 256; i++) {
-        int fd = accept4(lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        int fd = kn_accept_nb(lfd);
         if (fd < 0) {
             if (errno == EINTR) continue;
             if (errno != EAGAIN && errno != EWOULDBLOCK) KN_WARN("http", "accept: %s", strerror(errno));
@@ -854,7 +854,7 @@ int kn_http_server_listen(kn_http_server *s) {
     }
     int fd = -1;
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
-        fd = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, ai->ai_protocol);
+        fd = kn_socket_nb(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd < 0) continue;
         int one = 1;
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);

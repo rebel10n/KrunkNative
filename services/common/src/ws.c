@@ -924,7 +924,7 @@ static int connect_next(kn_ws *ws) {
     while (ws->ai_next) {
         struct addrinfo *ai = ws->ai_next;
         ws->ai_next = ai->ai_next;
-        int fd = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, ai->ai_protocol);
+        int fd = kn_socket_nb(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd < 0) {
             err = errno;
             continue;
