@@ -9,7 +9,7 @@
     state: present
     install_recommends: false
 
-# The game ports are opened by kn_firewall (60-krunknative.nft in the shared
+# The game ports are opened by edge_firewall (60-krunknative.nft in the shared
 # edge-firewall-contract v1 nftables, same kn_gameserver_first_port/count).
 - name: Instance plan
   ansible.builtin.set_fact:

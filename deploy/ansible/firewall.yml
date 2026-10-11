@@ -1,8 +1,9 @@
-# Edge host firewall only (kn_firewall -> vendored edge_firewall, contract v1, README "Edge firewall"):
-#   ansible-playbook firewall.yml --check --diff [--limit com.chitown]
-# Facts are needed for kn_gameserver_count (vcpus). Applies with a 120s auto-rollback.
-- name: KrunkNative edge firewall
+# Host firewall only: the vendored edge_firewall role (edge-firewall-contract v1,
+# README.md "Edge firewall"). Inputs: group_vars/edges/main.yml.
+# Same playbook in abulxt (playbooks/firewall.yml) and KrunkNative (firewall.yml).
+#   ansible-playbook firewall.yml --check --diff [--limit <host>]
+- name: Edge host firewall
   hosts: edges
-  become: false
+  gather_facts: true
   roles:
-    - { role: kn_firewall, tags: [firewall] }
+    - { role: edge_firewall, tags: [firewall] }

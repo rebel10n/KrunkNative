@@ -4,3 +4,6 @@
 # user `kru` are not managed here.
 kn_release_bins: [kn_brain, kn_migrate]
 kn_release_migrations: true
+
+# Owner account: highest privilege (developer, which also sets moderator).
+kn_brain_developers: [ading2210]

@@ -3,13 +3,13 @@
 #   instance n (1-based): port {{ kn_gameserver_first_port }}+n-1, TCP game + UDP
 #   server-info query on the same number; hostname <edge>-<n>.krunk.io.
 # kn_gameserver_first_port / kn_gameserver_count live in group_vars/edges/main.yml
-# (shared with kn_firewall, which opens exactly those ports).
+# (shared with edge_firewall, which opens exactly those ports).
 kn_gameserver_hostname_fmt: "{{ kn_edge_name }}-%d.{{ kn_domain }}"
 # Units are installed but stay disabled/stopped until the finder heartbeat code
 # (server.cfg finder_url) lands in the shipped server_bin: flip to true then.
 kn_gameserver_enabled: false
 # Escape hatch: false keeps a host's units down regardless of kn_gameserver_enabled
-# (e.g. if its game ports cannot be opened). kn_firewall opens them on every edge.
+# (e.g. if its game ports cannot be opened). edge_firewall opens them on every edge.
 kn_gameserver_ports_open: true
 kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
 # v3.1.1 region id (config.regionNames / accounts.region_index); per host in the inventory.
