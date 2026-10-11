@@ -6,6 +6,14 @@ import type { IncomingMessage, ServerResponse } from "http";
 
 type ServeOptions = {
   root?: string;
+  /**
+   * URL path prefixes (e.g. "/assets/") whose files are immutable game
+   * content and may be cached for a long time. Everything else is served
+   * with `no-cache` so a rebuilt client.js/client.wasm is picked up at once.
+   */
+  longCachePrefixes?: string[];
+  /** Extra headers added to every successful response (e.g. COOP/COEP). */
+  extraHeaders?: Record<string, string>;
 };
 
 type FsErr = NodeJS.ErrnoException & { statusCode?: number };
@@ -31,6 +39,21 @@ export function contentTypeFor(filePath: string): string {
     case ".json":
     case ".map":
       return "application/json; charset=utf-8";
+    case ".wasm":
+      return "application/wasm";
+    case ".data":
+      // Emscripten --preload-file bundle.
+      return "application/octet-stream";
+    case ".obj":
+    case ".mtl":
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    case ".glsl":
+    case ".vert":
+    case ".frag":
+      return "text/plain; charset=utf-8";
+    case ".ogg":
+      return "audio/ogg";
     case ".png":
       return "image/png";
     case ".jpg":
@@ -57,6 +80,28 @@ export function contentTypeFor(filePath: string): string {
     default:
       return "application/octet-stream";
   }
+}
+
+const NO_CACHE_HEADERS = Object.freeze({
+  "Cache-Control": "no-cache, no-store, must-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+});
+
+const LONG_CACHE_HEADERS = Object.freeze({
+  "Cache-Control": "public, max-age=31536000, immutable",
+});
+
+function cacheHeadersFor(
+  urlPath: string,
+  prefixes: string[] | undefined,
+): Record<string, string> {
+  if (prefixes) {
+    for (const prefix of prefixes) {
+      if (urlPath.startsWith(prefix)) return { ...LONG_CACHE_HEADERS };
+    }
+  }
+  return { ...NO_CACHE_HEADERS };
 }
 
 export async function serve(
@@ -101,7 +146,15 @@ export async function serve(
   if (normalized === "/") filePath = path.join(root, "index.html");
 
   try {
-    const stat = await fs.promises.stat(filePath);
+    // fs.stat follows symlinks, so a `dist/web/assets -> ../../assets` link
+    // is served transparently. The path check above is done on the logical
+    // (pre-realpath) path, which is what keeps `..` escapes out.
+    let stat = await fs.promises.stat(filePath);
+    if (stat.isDirectory()) {
+      // `/ui/` -> `/ui/index.html`
+      filePath = path.join(filePath, "index.html");
+      stat = await fs.promises.stat(filePath);
+    }
     if (!stat.isFile()) {
       res.writeHead(404);
       res.end("Not Found");
@@ -111,9 +164,8 @@ export async function serve(
     res.writeHead(200, {
       "Content-Type": contentTypeFor(filePath),
       "Content-Length": stat.size,
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-      Pragma: "no-cache",
-      Expires: "0",
+      ...cacheHeadersFor(normalized, opts.longCachePrefixes),
+      ...(opts.extraHeaders || {}),
     });
 
     if (req.method === "HEAD") {

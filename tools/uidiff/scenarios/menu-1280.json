@@ -1,0 +1,22 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/menu/real-1280.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": null,
+    "settingsTab": 0,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "anim_time": 0.325
+  },
+  "frames": 3,
+  "note": "Logged-out loaded menu, no window. anim_time 0.325: `grow` phase of the capture (merch phase follows; its own best match is 0.4)."
+}

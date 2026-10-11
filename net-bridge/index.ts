@@ -1,17 +1,26 @@
 "use strict";
 
 import { createServer } from "http";
+import fs from "fs";
+import path from "path";
 import type { AddressInfo, Socket } from "net";
 import version from "./version.json";
 import * as krunkerProxy from "./krunkerProxy";
 import * as browserProxy from "./proxy";
 import * as publicRoutes from "./publicRoutes";
 import * as staticFiles from "./staticFiles";
+import * as webBridge from "./webBridge";
 
-type BridgeMode = "native-to-krunker" | "browser-to-native";
+type BridgeMode = "native-to-krunker" | "browser-to-native" | "web";
+
+const BRIDGE_MODES: readonly BridgeMode[] = ["native-to-krunker", "browser-to-native", "web"];
+
+// `npm run web:build` at the repo root writes the Emscripten client here.
+const DEFAULT_WEB_DIR = path.resolve(__dirname, "..", "dist", "web");
 
 type CliOptions = {
   mode: BridgeMode;
+  webDir?: string;
   listenHost?: string;
   listenPort?: number;
   krunkerOrigin?: string;
@@ -30,6 +39,10 @@ function usage(): string {
     "Flags:",
     "  --native-to-krunker       Run native TCP -> Krunker v3.1.1 WS mode (default)",
     "  --browser-to-native       Run the old browser WS -> KrunkNative TCP mode",
+    "  --web                     Serve the Emscripten web build over HTTP and bridge",
+    "                            ws /native <-> native TCP (raw passthrough)",
+    "  --serve-web DIR           Same as --web, serving DIR (default ../dist/web,",
+    "                            env KRUNK_NATIVE_WEB_DIR)",
     "  --krunker-origin URL      Matchmaker origin for native-to-krunker mode (default http://127.0.0.1:6767)",
     "  --krunker-ws URL          Skip matchmaker and connect directly to this ws://.../ws URL",
     "  --listen-host HOST        Native TCP listen host in native-to-krunker mode",
@@ -37,6 +50,12 @@ function usage(): string {
     "  --region REGION           Matchmaker region (default local)",
     "  --hostname HOSTNAME       Matchmaker hostname query (default 127.0.0.1)",
     "  --game GAME_ID            Request a specific v3.1.1 lobby id",
+    "",
+    "Environment (web / browser-to-native):",
+    "  KRUNK_NATIVE_BRIDGE_HOST / KRUNK_NATIVE_BRIDGE_PORT   HTTP listen address (127.0.0.1:8080)",
+    "  KRUNK_NATIVE_HOST / KRUNK_NATIVE_PORT                 native TCP server (127.0.0.1:21015)",
+    "  KRUNK_NATIVE_WEB_DIR                                  web build dir for --web",
+    "  KRUNK_NATIVE_WEB_COI=1                                add COOP/COEP headers (SharedArrayBuffer)",
   ].join("\n");
 }
 
@@ -70,9 +89,21 @@ function parseArgs(argv: string[]): CliOptions {
       options.mode = "browser-to-native";
       continue;
     }
+    if (arg === "--web") {
+      options.mode = "web";
+      continue;
+    }
+    if (arg === "--serve-web" || arg.startsWith("--serve-web=")) {
+      const [value, nextIndex] = readFlagValue(argv, i, "--serve-web");
+      if (!value) throw new Error("--serve-web requires a directory");
+      options.mode = "web";
+      options.webDir = value;
+      i = nextIndex;
+      continue;
+    }
     if (arg.startsWith("--mode=")) {
-      const mode = arg.slice("--mode=".length);
-      if (mode === "native-to-krunker" || mode === "browser-to-native") options.mode = mode;
+      const mode = arg.slice("--mode=".length) as BridgeMode;
+      if (BRIDGE_MODES.includes(mode)) options.mode = mode;
       else throw new Error(`unknown bridge mode: ${mode}`);
       continue;
     }
@@ -103,6 +134,106 @@ function parseArgs(argv: string[]): CliOptions {
   return options;
 }
 
+function bridgeListenAddress(): { host: string; port: number } {
+  const host = process.env.KRUNK_NATIVE_BRIDGE_HOST || process.env.MM_HOST || "127.0.0.1";
+  const port =
+    Number.parseInt(process.env.KRUNK_NATIVE_BRIDGE_PORT || process.env.MM_PORT || "8080", 10) ||
+    8080;
+  return { host, port };
+}
+
+function describeAddress(http: ReturnType<typeof createServer>): string {
+  const address = http.address() as AddressInfo | string | null;
+  if (!address || typeof address === "string") return "";
+  const host = address.family === "IPv6" ? `[${address.address}]` : address.address;
+  return `http://${host}:${address.port}`;
+}
+
+/**
+ * `--web`: static web build + raw `/native` WebSocket passthrough to the
+ * native TCP server. The legacy `/ws` translator stays attached because it
+ * costs nothing and lets the same bridge serve both clients.
+ */
+function startWeb(options: CliOptions): ReturnType<typeof createServer> {
+  const webDir = path.resolve(
+    options.webDir || process.env.KRUNK_NATIVE_WEB_DIR || DEFAULT_WEB_DIR,
+  );
+  if (!fs.existsSync(path.join(webDir, "index.html"))) {
+    console.warn(
+      `[net-bridge] web dir ${webDir} has no index.html (run \`npm run web:build\` at the repo root); ` +
+        "only the /native and /ws bridges will work",
+    );
+  }
+
+  const extraHeaders: Record<string, string> = {};
+  if (process.env.KRUNK_NATIVE_WEB_COI === "1") {
+    // Required for SharedArrayBuffer (Emscripten -pthread) on modern browsers.
+    extraHeaders["Cross-Origin-Opener-Policy"] = "same-origin";
+    extraHeaders["Cross-Origin-Embedder-Policy"] = "require-corp";
+  }
+
+  const serveOptions = {
+    root: webDir,
+    longCachePrefixes: ["/assets/"],
+    extraHeaders,
+  };
+
+  const http = createServer(async (req, res) => {
+    try {
+      if (publicRoutes.handle(req, res, { getStats: webBridge.getStats })) return;
+      if (await staticFiles.serve(req, res, serveOptions)) return;
+
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "not_found", path: req.url }));
+    } catch (err) {
+      console.error("[net-bridge] request handler threw:", err);
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "internal" }));
+      }
+    }
+  });
+
+  const nativeWss = webBridge.createServer();
+  const legacyWss = browserProxy.attach(http, { handleUpgrade: false });
+
+  http.on("upgrade", (request, socket, head) => {
+    let url: URL;
+    try {
+      url = new URL(request.url || "/", "http://localhost");
+    } catch (_err) {
+      socket.destroy();
+      return;
+    }
+
+    const wss =
+      url.pathname === webBridge.WEB_WS_PATH
+        ? nativeWss
+        : url.pathname === browserProxy.WS_PATH
+          ? legacyWss
+          : null;
+    if (!wss) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  });
+  http.on("close", () => nativeWss.close());
+
+  http.on("listening", () => {
+    const where = describeAddress(http) || "(unknown address)";
+    console.info(
+      `net-bridge ${version} web listening on ${where} ` +
+        `(static ${webDir}, ws ${webBridge.WEB_WS_PATH} -> tcp ${webBridge.NATIVE_HOST}:${webBridge.NATIVE_PORT}, ws ${browserProxy.WS_PATH})`,
+    );
+  });
+
+  http.listen(bridgeListenAddress());
+  return http;
+}
+
 function startBrowserToNative(): ReturnType<typeof createServer> {
   const http = createServer(async (req, res) => {
     try {
@@ -123,22 +254,13 @@ function startBrowserToNative(): ReturnType<typeof createServer> {
   browserProxy.attach(http);
 
   http.on("listening", () => {
-    const address = http.address() as AddressInfo | string | null;
-    if (!address || typeof address === "string") {
-      console.info(`net-bridge ${version} browser-to-native listening (ws /ws)`);
-      return;
-    }
+    const where = describeAddress(http);
     console.info(
-      `net-bridge ${version} browser-to-native listening on http://${address.address}:${address.port} (ws /ws)`,
+      `net-bridge ${version} browser-to-native listening${where ? ` on ${where}` : ""} (ws ${browserProxy.WS_PATH})`,
     );
   });
 
-  const host = process.env.KRUNK_NATIVE_BRIDGE_HOST || process.env.MM_HOST || "127.0.0.1";
-  const port =
-    Number.parseInt(process.env.KRUNK_NATIVE_BRIDGE_PORT || process.env.MM_PORT || "8080", 10) ||
-    8080;
-
-  http.listen({ host, port });
+  http.listen(bridgeListenAddress());
   return http;
 }
 
@@ -155,7 +277,12 @@ function startNativeToKrunker(options: CliOptions): ReturnType<typeof krunkerPro
 }
 
 const options = parseArgs(process.argv.slice(2));
-const server = options.mode === "browser-to-native" ? startBrowserToNative() : startNativeToKrunker(options);
+const server =
+  options.mode === "web"
+    ? startWeb(options)
+    : options.mode === "browser-to-native"
+      ? startBrowserToNative()
+      : startNativeToKrunker(options);
 const activeSockets = new Set<Socket>();
 
 server.on("connection", (socket: Socket) => {
@@ -169,8 +296,14 @@ server.on("error", (err) => {
 });
 
 function closeBridgeSessions(force = false): void {
-  if (options.mode === "browser-to-native") browserProxy.closeAllSessions(force);
-  else krunkerProxy.closeAllSessions(force);
+  if (options.mode === "web") {
+    webBridge.closeAllSessions(force);
+    browserProxy.closeAllSessions(force);
+  } else if (options.mode === "browser-to-native") {
+    browserProxy.closeAllSessions(force);
+  } else {
+    krunkerProxy.closeAllSessions(force);
+  }
 }
 
 function destroyActiveSockets(): void {

@@ -1,0 +1,770 @@
+// Krunker v3.1.1 display/render/game settings on the client (render_settings.h).
+//
+// The store (ui_settings.c) hands every changed or pushed key to client_apply_setting(),
+// which calls client_apply_render_setting() first. Each key below is one row of
+// Krunker.Unpacked-v3.1.1/134.js `this.list`; the comment says what its `set` does there
+// and what KrunkNative does with it. Values the renderer acts on are applied here or read
+// per frame (render_target.c, main.c); the rest are kept in ClientRenderSettings for the
+// system that draws the thing (HUD, VFX, viewmodel), see the report table in the header.
+#include <render_settings.h>
+#include <ui_logic.h>
+#include <html_dom.h>
+#include <html_ui.h>
+#include <GLFW/glfw3.h>
+#include <headless.h> // headless_swap_interval
+#include <ctype.h>
+#include <math.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
+// 134.js defaults (`val`), colours from 13.js (COLORS).
+static ClientRenderSettings g_rs = {
+    // Render
+    .resolution = 0.6f, .frame_cap = 0, .anti_alias = 0, .post_processing = 1,
+    .low_spec = 0, .no_textures = 0, .map_details = 1,
+    .particles = 1, .particles_dist = 160.0f, .render_dist = 100.0f,
+    .shadows = 1, .soft_shadows = 0, .high_res_shadows = 0, .dynamic_shadows = 0, .ambient_shading = 1,
+    .show_trails = 1, .your_trails = 1, .muzzle_flash = 1, .bullet_tracers = 1, .bullet_tracer_color = "#ffffdb",
+    .sniper_flap = 0, .texture_anim = 1, .object_anim = 1, .screen_shake = 1, .weapon_shine = 0, .lighting = 1,
+    .hud_health_high = "#9eeb56", .hud_health_low = "#eb5656",
+    .speed_lines = 0.6f, .speed_lines_color = "#e6e6e6",
+    .show_popup_score = 1, .popup_score_color = "#ffea78", .popup_score_shadow = 0,
+    .popup_score_scale = 1.0f, .popup_score_off_x = 5.0f, .popup_score_off_y = 3.7f,
+    .saturation = 1.0f, .hue = 0.0f, .menu_saturation = 1.0f, .menu_hue = 0.0f, .vignette = 0.0f, .feed_limit = 8,
+    // Display
+    .show_ui = 1, .old_scoreboard = 0, .old_browser = 0, .disable_rarity_anim = 0, .show_pfp = 1,
+    .dynamic_hp = 1, .show_hit_ind = 1, .hit_color = "#FF3F3F", .show_dmg = 1, .dmg_color = 1,
+    .crit_color = "#FFD542", .dmg_scale = 1.0f,
+    .show_kills = 1, .show_kill_c = 0, .show_deaths = 0, .show_score = 0, .show_streak = 0,
+    .show_ping = 1, .show_net_stat = 0, .show_fps = 0,
+    .show_speed = 0, .speed_off_x = 5.0f, .speed_off_y = 5.4f, .speed_scale = 2.4f, .speed_opacity = 1.0f,
+    .speed_color = "#ffea78", .speed_color_max = "#ff0000",
+    .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_style = 0, .health_num = 0,
+    .health_col_team = "#9eeb56", .health_col_enemy = "#eb5656",
+    .xp_bar_color = "#FBC02D", .xp_bar_opacity = 1.0f,
+    .chat_filter = 0, .show_messages = 1, .show_unboxings = 1, .chat_text_outline = 0,
+    .chat_opacity = 1.0f, .chat_bg_opacity = 0.2f, .chat_height = 2.5f, .chat_timer = 0.0f,
+    .crosshair_type = 1, .crosshair_style = 0, .crosshair_opacity = 1.0f,
+    .crosshair_use_opacity = 0, .crosshair_always = 0, .crosshair_dot = 0,
+    .crosshair_color = "#ffffff", .crosshair_shadow = "#000000",
+    .crosshair_shadow_thickness = 1.0f, .crosshair_thick = 2.0f, .crosshair_len = 16.0f, .crosshair_gap = 0.0f,
+    .hitmarker = 1, .hitmarker_color = "#FFFFFF", .hitmarker_kill_color = "#FF0000",
+    .hitmarker_opacity = 1.0f, .hitmarker_length = 25.0f, .hitmarker_thickness = 7.0f, .hitmarker_spacing = 37.0f,
+    .hitmarker_anim_size = 0.14f, .hitmarker_anim_speed = 0.008f, .hitmarker_fade = 0.0062f,
+    // Game
+    .weapon_bob = 0.9f, .weapon_lean = 1.0f, .weapon_rot = 0.0f,
+    .weapon_off_x = 1.0f, .weapon_off_y = 1.0f, .weapon_off_z = 1.0f, .weapon_ads_off_y = 1.0f,
+    .left_hand = 0, .aim_anim = 1, .show_hands = 1, .round_arms = 0, .hide_ads = 0,
+    .can_load_mods = 1, .can_change_logo = 1, .auto_load_last = 0, .scope_borders = 1,
+    .reticle_width = 2.0f, .reticle_height = 2.0f, .use_damage_overlay = 1,
+    // General
+    .lag_comp = 1.0f,
+    // KrunkNative
+    .vsync = 0, .window_mode = RS_WINDOWED,
+};
+
+const ClientRenderSettings *client_render_settings(void) {
+    return &g_rs;
+}
+
+// ---------------------------------------------------------------- parsing
+
+static int parse_number(const char *s, double *out) {
+    if (!s || !*s) return 0;
+    char *end;
+    const double d = strtod(s, &end);
+    while (*end && isspace((unsigned char) *end)) end++;
+    if (*end || end == s) return 0;
+    *out = d;
+    return 1;
+}
+
+// !!value for the store's string forms ("true"/"false", numbers, strings).
+static int parse_bool(const char *s) {
+    if (!s || !*s || !strcmp(s, "false")) return 0;
+    if (!strcmp(s, "true")) return 1;
+    double d;
+    return parse_number(s, &d) ? d != 0.0 : 1;
+}
+
+// g.isURL (2.js) without the full regex: optional http(s)://, a dotted host with an
+// alphabetic TLD (or an IPv4 address), no whitespace; and not an .svg (134.js).
+static int is_image_url(const char *s) {
+    if (!s || !*s || strstr(s, ".svg")) return 0;
+    for (const char *p = s; *p; p++) if (isspace((unsigned char) *p)) return 0;
+    const char *host = s;
+    if (!strncmp(host, "https://", 8)) host += 8;
+    else if (!strncmp(host, "http://", 7)) host += 7;
+    const size_t host_len = strcspn(host, "/:?#");
+    if (host_len < 3) return 0;
+    const char *last_dot = NULL;
+    for (size_t i = 0; i < host_len; i++) {
+        const char c = host[i];
+        if (c == '.') last_dot = host + i;
+        else if (!isalnum((unsigned char) c) && c != '-') return 0;
+    }
+    if (!last_dot) return 0;
+    const size_t tld_len = (size_t) (host + host_len - (last_dot + 1));
+    int alpha = tld_len >= 2, digits = tld_len >= 1;
+    for (size_t i = 0; i < tld_len; i++) {
+        if (!isalpha((unsigned char) last_dot[1 + i])) alpha = 0;
+        if (!isdigit((unsigned char) last_dot[1 + i])) digits = 0;
+    }
+    return alpha || digits;
+}
+
+// Krunker asset URLs -> the local copy. Krunker's own defaults and presets point at its
+// servers (utils assetsUrl(): "https://assets.krunker.io/" + path, plus "?build=..." from
+// versionifyUrl; page images under https://krunker.io/img/...), and ui/ mirrors those
+// paths (pro_crosshair.png, textures/..., img/...). Such a URL becomes the page-relative
+// path when the file exists under ui/ (natively checked on disk; on the web dist/web is a
+// copy of ui/, so the path is used as is).
+//
+// Any other remote URL: the web page loads it like Krunker does; the native engine has no
+// HTTP image fetching (image.c rejects scheme URLs), so natively it is dropped and the
+// element keeps its default image.
+static int krunker_asset_path(const char *url, char *path, const size_t n) {
+    static const char *const HOSTS[] = {"assets.krunker.io/", "krunker.io/", "www.krunker.io/"};
+    const char *p = url;
+    if (!strncmp(p, "https://", 8)) p += 8;
+    else if (!strncmp(p, "http://", 7)) p += 7;
+    else if (!strncmp(p, "//", 2)) p += 2;
+    const char *rest = NULL;
+    for (size_t i = 0; i < sizeof(HOSTS) / sizeof(HOSTS[0]) && !rest; i++) {
+        const size_t len = strlen(HOSTS[i]);
+        if (!strncmp(p, HOSTS[i], len)) rest = p + len;
+    }
+    if (!rest) return 0;
+    while (*rest == '/') rest++;
+    const size_t len = strcspn(rest, "?#");
+    if (!len || len >= n || strstr(rest, "..")) return 0;
+    memcpy(path, rest, len);
+    path[len] = 0;
+    return 1;
+}
+
+#ifndef __EMSCRIPTEN__
+static int ui_file_exists(const char *relative) {
+    const char *override = getenv("KRUNKNATIVE_UI_DIR"); // same lookup as main.c's html_ui_init
+    char full[1024];
+    if (override && *override) snprintf(full, sizeof(full), "%s/%s", override, relative);
+    else snprintf(full, sizeof(full), "%s../ui/%s", assets_path(), relative);
+    FILE *f = fopen(full, "rb");
+    if (f) fclose(f);
+    return f != NULL;
+}
+#endif
+
+// Value of an image setting as the DOM / HUD should use it ("" = default image).
+static void localize_image_url(const char *value, char *out, const size_t n) {
+    out[0] = 0;
+    if (!is_image_url(value)) return; // g.isURL && !.svg (134.js), else ""
+    char path[RS_URL_MAX];
+    if (krunker_asset_path(value, path, sizeof(path))) {
+#ifndef __EMSCRIPTEN__
+        if (ui_file_exists(path)) snprintf(out, n, "%s", path);
+        else fprintf(stderr, "[render] %s: no local copy under ui/, ignored natively\n", value);
+#else
+        snprintf(out, n, "%s", path);
+#endif
+        return;
+    }
+#ifdef __EMSCRIPTEN__
+    snprintf(out, n, "%s", value);
+#else
+    fprintf(stderr, "[render] %s: remote image, no HTTP image loading natively (ignored)\n", value);
+#endif
+}
+
+// ---------------------------------------------------------------- side effects
+
+static int g_dom_dirty = 1;       // DOM pieces need (re)applying
+static int g_swap_dirty = 1;      // swap interval needs syncing (native)
+static int g_forced_window_mode = -1;
+static int g_window_mode_applied = RS_WINDOWED;
+static float g_resolution_override = 0.0f; // KRUNKNATIVE_RESOLUTION
+static int g_fullscreen_kind = RS_FULLSCREEN; // F11 target: the last non-windowed mode chosen
+static int g_initialized;         // client_render_settings_init ran (not in --render-scenario runs)
+static int g_fps_log;             // KRUNKNATIVE_FPS_LOG
+
+static void mark_dom(Client *client) { (void) client; g_dom_dirty = 1; }
+static void mark_swap(Client *client) { (void) client; g_swap_dirty = 1; }
+
+// renderDist.set: camera.far = v * 60 (55.js camera: PerspectiveCamera(.., 0.1, 6000)).
+static void apply_render_dist(Client *client) {
+    if (client && g_rs.render_dist > 0.0f) client->camera.far = g_rs.render_dist * 60.0f;
+}
+
+#ifndef __EMSCRIPTEN__
+static int window_is_windowed(GLFWwindow *window) {
+    return !glfwGetWindowMonitor(window) && glfwGetWindowAttrib(window, GLFW_DECORATED);
+}
+
+static void set_window_mode(Client *client, const int mode) {
+    GLFWwindow *window = client ? client->window : NULL;
+    if (!window) return;
+
+    if (window_is_windowed(window) && mode != RS_WINDOWED) {
+        glfwGetWindowPos(window, &client->windowed_rect.x, &client->windowed_rect.y);
+        glfwGetWindowSize(window, &client->windowed_rect.width, &client->windowed_rect.height);
+    }
+
+    GLFWmonitor *monitor = glfwGetWindowMonitor(window);
+    if (!monitor) monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode *vid = monitor ? glfwGetVideoMode(monitor) : NULL;
+
+    if (mode == RS_FULLSCREEN && vid) {
+        // exclusive fullscreen at the monitor's current mode
+        glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
+        glfwSetWindowMonitor(window, monitor, 0, 0, vid->width, vid->height, vid->refreshRate);
+    } else if (mode == RS_BORDERLESS && vid) {
+        // undecorated window covering the monitor (no video mode change)
+        int mx = 0, my = 0;
+        glfwGetMonitorPos(monitor, &mx, &my);
+        glfwSetWindowMonitor(window, NULL, mx, my, vid->width, vid->height, 0);
+        glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_FALSE);
+        glfwSetWindowPos(window, mx, my);
+        glfwSetWindowSize(window, vid->width, vid->height);
+    } else {
+        int w = client->windowed_rect.width, h = client->windowed_rect.height;
+        if (w <= 0 || h <= 0) { w = 1280; h = 720; }
+        glfwSetWindowMonitor(window, NULL, client->windowed_rect.x, client->windowed_rect.y, w, h, 0);
+        glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
+    }
+    g_window_mode_applied = mode;
+    g_swap_dirty = 1; // monitor changes can reset the swap interval on some drivers
+    printf("[render] window mode %s\n", mode == RS_FULLSCREEN ? "fullscreen" : mode == RS_BORDERLESS ? "borderless" : "windowed");
+}
+#endif
+
+static void apply_window_mode(Client *client) {
+#ifndef __EMSCRIPTEN__
+    if (g_rs.window_mode < RS_WINDOWED || g_rs.window_mode > RS_BORDERLESS) g_rs.window_mode = RS_WINDOWED;
+    if (g_rs.window_mode != RS_WINDOWED) g_fullscreen_kind = g_rs.window_mode;
+    if (g_forced_window_mode > RS_WINDOWED) g_fullscreen_kind = g_forced_window_mode;
+    if (!g_initialized) return; // the scenario renderer keeps its fixed hidden window
+    const int mode = g_forced_window_mode >= 0 ? g_forced_window_mode : g_rs.window_mode;
+    if (client && client->window && mode != g_window_mode_applied) set_window_mode(client, mode);
+#else
+    (void) client; // the browser owns fullscreen (F11 / requestFullscreen)
+#endif
+}
+
+// ---------------------------------------------------------------- key table
+
+typedef enum { RS_T_BOOL, RS_T_INT, RS_T_FLOAT, RS_T_STR, RS_T_URL, RS_T_ASPECT } RsType;
+
+typedef struct {
+    const char *key;
+    RsType type;
+    size_t offset;
+    size_t size;
+    int shared;                  // ClientSettings (ui_settings.c) handles it too: return 0
+    void (*hook)(Client*);
+} RsEntry;
+
+#define RS_FIELD(field) offsetof(ClientRenderSettings, field), sizeof(((ClientRenderSettings *) 0)->field)
+#define RS_B(key, field, hook) {key, RS_T_BOOL, RS_FIELD(field), 0, hook}
+#define RS_I(key, field, hook) {key, RS_T_INT, RS_FIELD(field), 0, hook}
+#define RS_F(key, field, hook) {key, RS_T_FLOAT, RS_FIELD(field), 0, hook}
+#define RS_S(key, field, hook) {key, RS_T_STR, RS_FIELD(field), 0, hook}
+#define RS_U(key, field, hook) {key, RS_T_URL, RS_FIELD(field), 0, hook}
+#define RS_SHARED_B(key, field, hook) {key, RS_T_BOOL, RS_FIELD(field), 1, hook}
+#define RS_SHARED_F(key, field, hook) {key, RS_T_FLOAT, RS_FIELD(field), 1, hook}
+
+static const RsEntry RS_TABLE[] = {
+    // ---- Render tab
+    RS_SHARED_F("resolution", resolution, NULL),        // k.setResMlt(v): render_target.c scene FBO scale
+    RS_I("updateRate", frame_cap, mark_swap),           // gP(): skip frames until 1000/v ms passed
+    {"aspectRatio", RS_T_ASPECT, RS_FIELD(aspect_w), 0, NULL}, // k.aspectRatio = v; resize(): camera aspect
+    RS_B("antiAlias", anti_alias, NULL),                // WebGLRenderer({antialias}): MSAA scene FBO
+    RS_B("postProcessing", post_processing, NULL),      // composer.enabled (CopyShader: no visible change)
+    RS_B("lowSpec", low_spec, NULL),
+    RS_B("noTex", no_textures, NULL),
+    RS_B("mapDet", map_details, NULL),
+    RS_B("particles", particles, NULL),                 // PARTICLES.active
+    RS_F("particlesDist", particles_dist, NULL),        // PARTICLES.partDst
+    RS_F("renderDist", render_dist, apply_render_dist), // camera.far = v * 60
+    RS_SHARED_B("shadows", shadows, NULL),              // toggleShadowMap
+    RS_SHARED_B("softShad", soft_shadows, NULL),        // toggleShadQual: PCFSoft vs Basic
+    RS_SHARED_B("highResShad", high_res_shadows, NULL), // shadow map 4096
+    RS_B("shadowsDynamic", dynamic_shadows, NULL),      // shadowMap.autoUpdate
+    RS_SHARED_B("ambientShading", ambient_shading, NULL), // toggleMeshGroup("ambient_0/1")
+    RS_B("showTrails", show_trails, NULL),
+    RS_B("yourTrails", your_trails, NULL),
+    RS_B("muzzleFlash", muzzle_flash, NULL),
+    RS_B("bulletTracers", bullet_tracers, NULL),
+    RS_S("bulletTracerCol", bullet_tracer_color, NULL),
+    RS_B("sniperFlap", sniper_flap, NULL),
+    RS_B("textureAnim", texture_anim, NULL),            // main.c freezes client_tick_textures at frame 0
+    RS_B("objectAnim", object_anim, NULL),
+    RS_B("screenShake", screen_shake, NULL),
+    RS_B("weaponShine", weapon_shine, NULL),
+    RS_I("lighting", lighting, NULL),
+    RS_S("hudHealthHigh", hud_health_high, NULL),       // set(){} in v3.1.1
+    RS_S("hudHealthLow", hud_health_low, NULL),         // set(){} in v3.1.1
+    RS_F("showSpdLines", speed_lines, NULL),
+    RS_S("spdLinesCol", speed_lines_color, NULL),
+    RS_B("showPScore", show_popup_score, NULL),
+    RS_S("scoreColor", popup_score_color, NULL),
+    RS_B("scoreShadow", popup_score_shadow, NULL),
+    RS_F("scoreScale", popup_score_scale, NULL),
+    RS_F("scoreOffX", popup_score_off_x, NULL),
+    RS_F("scoreOffY", popup_score_off_y, NULL),
+    RS_F("saturationn", saturation, NULL),              // bundleFilters(0): saturate() on the 3D canvas
+    RS_F("hue", hue, NULL),                             // bundleFilters(0): hue-rotate(v * 3.6deg)
+    RS_F("menuSaturation", menu_saturation, mark_dom),  // bundleFilters(1): #uiBase filter
+    RS_F("menuHue", menu_hue, mark_dom),
+    RS_F("vignette", vignette, mark_dom),               // #vignette opacity
+    RS_I("feedLimit", feed_limit, NULL),                // refreshFeed(v)
+    // ---- Display tab
+    RS_B("showUI", show_ui, NULL),
+    RS_B("oldScoreboard", old_scoreboard, mark_dom),    // #leaderDisplay / #killFeed
+    RS_B("oldBrowser", old_browser, NULL),
+    RS_B("disableRarityAnim", disable_rarity_anim, NULL),
+    RS_B("showPfp", show_pfp, NULL),
+    RS_B("dynamicHP", dynamic_hp, NULL),
+    RS_B("showHitInd", show_hit_ind, NULL),
+    RS_S("hitColor", hit_color, NULL),
+    RS_B("showDMG", show_dmg, NULL),
+    RS_B("dmgColor", dmg_color, NULL),
+    RS_S("critColor", crit_color, NULL),
+    RS_SHARED_F("dmgScale", dmg_scale, NULL),
+    RS_B("showKills", show_kills, mark_dom),            // #killFeed
+    RS_B("showKillC", show_kill_c, mark_dom),           // #killCount
+    RS_B("showDeaths", show_deaths, mark_dom),          // #deathCount
+    RS_B("showScore", show_score, mark_dom),            // #scoreCount
+    RS_B("showStreak", show_streak, mark_dom),          // #streakCount
+    RS_B("showPing", show_ping, mark_dom),              // #pingDisplay
+    RS_B("showNetStat", show_net_stat, mark_dom),       // #ingressDisplay/#egressDisplay
+    RS_SHARED_B("showFPS", show_fps, mark_dom),         // #fpsDisplay (ui_settings.c) + #menuFPSDisplay
+    RS_B("showSpeed", show_speed, NULL),
+    RS_F("speedOffX", speed_off_x, NULL),
+    RS_F("speedOffY", speed_off_y, NULL),
+    RS_SHARED_F("speedScale", speed_scale, NULL),
+    RS_F("speedOpacity", speed_opacity, NULL),
+    RS_S("speedColor", speed_color, NULL),
+    RS_S("speedColorMax", speed_color_max, NULL),
+    RS_B("showMedals", show_medals, NULL),
+    RS_I("hideNames", hide_names, NULL),
+    RS_F("nametagOpac", nametag_opacity, NULL),
+    RS_I("nametagStyle", nametag_style, NULL),
+    RS_B("healthNum", health_num, NULL),
+    RS_S("healthColT", health_col_team, NULL),
+    RS_S("healthColE", health_col_enemy, NULL),
+    RS_S("xpBarCol", xp_bar_color, mark_dom),           // #igXPBarProg background
+    RS_F("xpBarOpac", xp_bar_opacity, mark_dom),        // #igXPBar opacity
+    RS_B("chatFilter", chat_filter, NULL),
+    RS_B("showMessages", show_messages, NULL),
+    RS_B("showUnboxings", show_unboxings, NULL),
+    RS_F("chatOp", chat_opacity, mark_dom),             // #chatList opacity
+    RS_F("chatBGOp", chat_bg_opacity, NULL),
+    RS_B("chatTextOutline", chat_text_outline, NULL),
+    RS_F("chatHeight", chat_height, mark_dom),          // #chatList max-height v * 100 px
+    RS_F("chatTimer", chat_timer, NULL),
+    RS_I("crosshairSho", crosshair_type, NULL),
+    RS_I("crosshairStyle", crosshair_style, NULL),
+    RS_U("crosshairImage", crosshair_image, NULL),
+    RS_F("crosshairOpacity", crosshair_opacity, NULL),
+    RS_B("crosshairUseOpacity", crosshair_use_opacity, NULL),
+    RS_B("crosshairAlways", crosshair_always, NULL),
+    RS_S("crosshairColor", crosshair_color, NULL),
+    RS_S("crosshairShadow", crosshair_shadow, NULL),
+    RS_F("crosshairShadowThickess", crosshair_shadow_thickness, NULL),
+    RS_F("crosshairThick", crosshair_thick, NULL),
+    RS_F("crosshairLen", crosshair_len, NULL),
+    RS_F("crosshairGap", crosshair_gap, NULL),
+    RS_B("crosshairDot", crosshair_dot, NULL),
+    RS_B("hitm", hitmarker, NULL),
+    RS_S("hitmCol", hitmarker_color, NULL),
+    RS_S("hitmKCol", hitmarker_kill_color, NULL),
+    RS_F("hitOpac", hitmarker_opacity, NULL),
+    RS_F("hitmLen", hitmarker_length, NULL),
+    RS_F("hitmThick", hitmarker_thickness, NULL),
+    RS_F("hitmSpac", hitmarker_spacing, NULL),
+    RS_F("hitmAnimD", hitmarker_anim_size, NULL),
+    RS_F("hitmAnimS", hitmarker_anim_speed, NULL),
+    RS_F("hitmFad", hitmarker_fade, NULL),
+    RS_U("customHitmarker", custom_hitmarker, NULL),
+    // ---- Game tab
+    RS_B("streamMode", stream_mode, NULL),
+    RS_B("anonMode", anon_mode, NULL),
+    RS_F("weaponBob", weapon_bob, NULL),
+    RS_F("weaponLean", weapon_lean, NULL),
+    RS_F("weaponRot", weapon_rot, NULL),
+    RS_F("weaponOffX", weapon_off_x, NULL),
+    RS_F("weaponOffY", weapon_off_y, NULL),
+    RS_F("weaponOffZ", weapon_off_z, NULL),
+    RS_F("weaponADSOffY", weapon_ads_off_y, NULL),
+    RS_B("leftHand", left_hand, NULL),
+    RS_B("aimAnim", aim_anim, NULL),
+    RS_B("hideADS", hide_ads, NULL),                    // main.c: no first-person weapon while fully aimed
+    RS_B("showHands", show_hands, NULL),
+    RS_B("roundArms", round_arms, NULL),
+    RS_B("canLoadMods", can_load_mods, NULL),
+    RS_B("canChangeLogo", can_change_logo, NULL),
+    RS_B("autoLoadLast", auto_load_last, NULL),
+    RS_B("scopeBorders", scope_borders, mark_dom),      // .black scope bars
+    RS_U("customScope", custom_scope, mark_dom),        // #recticleImg
+    RS_U("customADSDot", custom_ads_dot, mark_dom),     // updateAimDot(-2, v): #aimDot src
+    RS_F("reticleWidth", reticle_width, mark_dom),      // #aimDot width v * 10 px
+    RS_F("reticleHeight", reticle_height, mark_dom),    // #aimDot height v * 10 px
+    RS_S("endMessage", end_message, NULL),              // set(){}
+    RS_U("customAmmo", custom_ammo, mark_dom),          // #ammoIcon src
+    RS_U("customKills", custom_kills, mark_dom),        // #killsIcon src
+    RS_U("customDeaths", custom_deaths, mark_dom),      // #deathsIcon src
+    RS_U("customStreak", custom_streak, mark_dom),      // #streakIcon src
+    RS_U("customTimer", custom_timer, mark_dom),        // #timerIcon src
+    RS_U("customGameOverlay", custom_game_overlay, mark_dom), // #overlay background-image
+    RS_B("useDamageOverlay", use_damage_overlay, NULL),
+    RS_U("customDamage", custom_damage, NULL),
+    // ---- General tab
+    RS_F("lagComp", lag_comp, NULL),
+    RS_B("netRerouting", net_rerouting, NULL),
+    RS_B("servSendR", serv_send_r, NULL),
+    RS_B("shaderRendering", shader_rendering, NULL),    // set(){} in v3.1.1
+    // ---- KrunkNative-only
+    RS_B("vsync", vsync, mark_swap),
+    RS_I("windowMode", window_mode, apply_window_mode),
+};
+
+static const RsEntry *find_entry(const char *key) {
+    for (size_t i = 0; i < sizeof(RS_TABLE) / sizeof(RS_TABLE[0]); i++) {
+        if (!strcmp(RS_TABLE[i].key, key)) return &RS_TABLE[i];
+    }
+    return NULL;
+}
+
+// aspectRatio: /^[-]?\d*x[-]?\d*$/ ("" = the window's own aspect).
+static void parse_aspect(const char *value) {
+    int w = 0, h = 0;
+    if (value && sscanf(value, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
+        g_rs.aspect_w = w;
+        g_rs.aspect_h = h;
+    } else {
+        g_rs.aspect_w = g_rs.aspect_h = 0;
+    }
+}
+
+int client_apply_render_setting(Client *client, const char *key, const char *value) {
+    if (!key || !value) return 0;
+    const RsEntry *e = find_entry(key);
+    if (!e) return 0;
+
+    char *field = (char *) &g_rs + e->offset;
+    double d;
+    switch (e->type) {
+        case RS_T_BOOL: *(int *) field = parse_bool(value); break;
+        case RS_T_INT: if (parse_number(value, &d)) *(int *) field = (int) d; break;
+        case RS_T_FLOAT: if (parse_number(value, &d)) *(float *) field = (float) d; break;
+        case RS_T_STR: snprintf(field, e->size, "%s", value); break;
+        case RS_T_URL: localize_image_url(value, field, e->size); break;
+        case RS_T_ASPECT: parse_aspect(value); break;
+    }
+    if (!strcmp(key, "resolution")) {
+        if (g_resolution_override > 0.0f) g_rs.resolution = g_resolution_override;
+        if (g_rs.resolution < 0.1f) g_rs.resolution = 0.1f;
+        if (g_rs.resolution > 2.0f) g_rs.resolution = 2.0f;
+    }
+    if (e->hook) e->hook(client);
+    if (e->shared) return 0;
+    printf("[render] setting %s=%s\n", key, value);
+    return 1;
+}
+
+// ---------------------------------------------------------------- init / window
+
+void client_render_force_window_mode(const int mode) {
+    g_forced_window_mode = mode;
+}
+
+void client_render_settings_init(Client *client) {
+    const char *res = getenv("KRUNKNATIVE_RESOLUTION"); // e.g. 1 for full-resolution parity captures
+    double d;
+    if (res && parse_number(res, &d) && d >= 0.1 && d <= 2.0) {
+        g_resolution_override = (float) d;
+        g_rs.resolution = (float) d;
+    }
+    const char *cap = getenv("KRUNKNATIVE_FRAME_CAP");
+    if (cap && parse_number(cap, &d) && d >= 0.0) g_rs.frame_cap = (int) d;
+    const char *vsync = getenv("KRUNKNATIVE_VSYNC");
+    if (vsync && *vsync) g_rs.vsync = parse_bool(vsync);
+    const char *fps_log = getenv("KRUNKNATIVE_FPS_LOG"); // "[render] fps N" once a second (stderr)
+    g_fps_log = fps_log && *fps_log && strcmp(fps_log, "0");
+    g_initialized = 1;
+    apply_render_dist(client);
+    apply_window_mode(client);
+    g_swap_dirty = 1;
+    g_dom_dirty = 1;
+}
+
+void client_render_toggle_fullscreen(Client *client) {
+#ifndef __EMSCRIPTEN__
+    if (!client || !client->window) return;
+    const int next = g_window_mode_applied == RS_WINDOWED ? g_fullscreen_kind : RS_WINDOWED;
+    if (g_forced_window_mode >= 0) {
+        g_forced_window_mode = next; // --windowed/--fullscreen/--borderless: session only, the store keeps its value
+        apply_window_mode(client);
+        return;
+    }
+    // Persisted; the store calls client_apply_render_setting("windowMode") -> apply_window_mode.
+    char text[8];
+    snprintf(text, sizeof(text), "%d", next);
+    ui_settings_set_string("windowMode", text);
+    apply_window_mode(client); // no page/store (HTML engine off): apply directly
+#else
+    (void) client;
+#endif
+}
+
+// ---------------------------------------------------------------- frame pacing
+
+#define FPS_RING 4096
+static double g_frame_ms[FPS_RING]; // timestamps (ms) of the frames in the last second
+static int g_frame_head, g_frame_count;
+static double g_next_frame;          // native frame cap deadline (s)
+static double g_last_due_ms;         // web: Krunker's `bu`
+static double g_last_fps_text_ms;    // Krunker's cT (readout refresh every 100 ms)
+static double g_last_fps_log_ms;
+static int g_swap_interval = -1;
+
+static double now_ms(void) {
+#ifdef __EMSCRIPTEN__
+    return emscripten_get_now();
+#else
+    return glfwGetTime() * 1000.0;
+#endif
+}
+
+int client_render_frame_due(void) {
+#ifdef __EMSCRIPTEN__
+    // index.js gP(): if (updateRate && now - bu < 1000 / updateRate) skip this frame.
+    if (g_rs.frame_cap > 0) {
+        const double now = now_ms();
+        if (now - g_last_due_ms < 1000.0 / g_rs.frame_cap) return 0;
+        g_last_due_ms = now;
+    }
+#endif
+    return 1;
+}
+
+#ifndef __EMSCRIPTEN__
+static void sleep_seconds(const double seconds) {
+    if (seconds <= 0.0) return;
+#ifdef _WIN32
+    Sleep((DWORD) (seconds * 1000.0));
+#else
+    struct timespec ts;
+    ts.tv_sec = (time_t) seconds;
+    ts.tv_nsec = (long) ((seconds - (double) ts.tv_sec) * 1e9);
+    nanosleep(&ts, NULL);
+#endif
+}
+
+// Sleep most of the wait, spin the last bit (Windows Sleep() is ~1-15 ms coarse).
+static void wait_until(const double deadline) {
+#ifdef _WIN32
+    const double slack = 0.002;
+#else
+    const double slack = 0.0002;
+#endif
+    double now = glfwGetTime();
+    if (deadline - now > slack) sleep_seconds(deadline - now - slack);
+    while ((now = glfwGetTime()) < deadline) {}
+}
+#endif
+
+static void count_frame(void) {
+    const double now = now_ms();
+    g_frame_ms[g_frame_head] = now;
+    g_frame_head = (g_frame_head + 1) % FPS_RING;
+    if (g_frame_count < FPS_RING) g_frame_count++;
+    // drop the timestamps older than a second (cR.shift() while cR[0] <= now - 1000)
+    while (g_frame_count > 0) {
+        const int oldest = (g_frame_head - g_frame_count + FPS_RING) % FPS_RING;
+        if (g_frame_ms[oldest] > now - 1000.0) break;
+        g_frame_count--;
+    }
+}
+
+int client_render_fps(void) {
+    return g_frame_count;
+}
+
+void client_render_frame_end(Client *client) {
+    (void) client;
+    count_frame();
+
+    const double now = now_ms();
+    if (g_fps_log && now - g_last_fps_log_ms >= 1000.0) {
+        g_last_fps_log_ms = now;
+        fprintf(stderr, "[render] fps %d (cap %d, vsync %d)\n", g_frame_count, g_rs.frame_cap, g_rs.vsync);
+    }
+
+#ifndef __EMSCRIPTEN__
+    // vsync on: swap interval 1; otherwise 0 (uncapped or paced below). emscripten's
+    // glfwSwapInterval(0) would leave requestAnimationFrame, so the web never calls it.
+    if (g_swap_dirty) {
+        const int want = g_rs.vsync ? 1 : 0;
+        if (want != g_swap_interval) {
+            headless_swap_interval(want); // glfwSwapInterval (no-op headless: no GLFW context)
+            g_swap_interval = want;
+        }
+        g_swap_dirty = 0;
+    }
+
+    if (g_rs.frame_cap > 0) {
+        const double period = 1.0 / g_rs.frame_cap;
+        const double t = glfwGetTime();
+        if (g_next_frame <= 0.0 || t - g_next_frame > period) g_next_frame = t; // first frame / fell behind: resync
+        else wait_until(g_next_frame);
+        g_next_frame += period;
+    } else {
+        g_next_frame = 0.0;
+    }
+#endif
+}
+
+// ---------------------------------------------------------------- DOM pieces
+
+static void style_if(const char *id, const char *prop, const char *value) {
+    const HtmlElem el = html_dom_by_id(id);
+    if (!el) return;
+    char current[RS_URL_MAX + 16];
+    const int has = html_dom_get_style(el, prop, current, sizeof(current)) >= 0;
+    if (!*value) {
+        if (has && current[0]) html_dom_set_style(el, prop, "");
+    } else if (!has || strcmp(current, value)) {
+        html_dom_set_style(el, prop, value);
+    }
+}
+
+static void display_if(const char *id, const int on, const char *shown) {
+    style_if(id, "display", on ? shown : "none");
+}
+
+static void src_if(const char *id, const char *url, const char *fallback) {
+    const HtmlElem el = html_dom_by_id(id);
+    if (!el) return;
+    const char *want = url[0] ? url : fallback;
+    char current[RS_URL_MAX];
+    if (html_dom_get_attr(el, "src", current, sizeof(current)) < 0 || strcmp(current, want)) html_dom_set_attr(el, "src", want);
+}
+
+static void fmt(char *buf, const size_t n, const char *format, const double v) {
+    snprintf(buf, n, format, v);
+}
+
+// bundleFilters(1): "saturate(v*100%) hue-rotate(v*3.6deg)" on #uiBase.
+static void apply_menu_filter(void) {
+    char filter[96] = "";
+    size_t len = 0;
+    if (g_rs.menu_saturation != 1.0f) len += (size_t) snprintf(filter + len, sizeof(filter) - len, "saturate(%g%%)", g_rs.menu_saturation * 100.0);
+    if (g_rs.menu_hue != 0.0f && len < sizeof(filter)) {
+        snprintf(filter + len, sizeof(filter) - len, "%shue-rotate(%gdeg)", len ? " " : "", g_rs.menu_hue * 3.6);
+    }
+    style_if("uiBase", "filter", filter);
+}
+
+static int apply_dom(void) {
+    if (!html_dom_by_id("uiBase")) return 0;
+    char buf[RS_URL_MAX + 16];
+
+    display_if("killCount", g_rs.show_kill_c, "inline-block");
+    display_if("deathCount", g_rs.show_deaths, "inline-block");
+    display_if("scoreCount", g_rs.show_score, "inline-block");
+    display_if("streakCount", g_rs.show_streak, "inline-block");
+    display_if("pingDisplay", g_rs.show_ping, "block");
+    display_if("ingressDisplay", g_rs.show_net_stat, "block");
+    display_if("egressDisplay", g_rs.show_net_stat, "block");
+    display_if("menuFPSDisplay", g_rs.show_fps, "block");
+    // oldScoreboard.set: leaderDisplay shown, killFeed only without it (and with showKills)
+    display_if("leaderDisplay", g_rs.old_scoreboard, "block");
+    display_if("killFeed", !g_rs.old_scoreboard && g_rs.show_kills, "inline-block");
+
+    style_if("igXPBarProg", "background-color", g_rs.xp_bar_color);
+    fmt(buf, sizeof(buf), "%g", g_rs.xp_bar_opacity);
+    style_if("igXPBar", "opacity", buf);
+    // vignette.set: 1 removes the inline opacity (stylesheet value), else opacity = v
+    fmt(buf, sizeof(buf), "%g", g_rs.vignette);
+    style_if("vignette", "opacity", g_rs.vignette == 1.0f ? "" : buf);
+    fmt(buf, sizeof(buf), "%g", g_rs.chat_opacity);
+    style_if("chatList", "opacity", buf);
+    fmt(buf, sizeof(buf), "%gpx", g_rs.chat_height * 100.0);
+    style_if("chatList", "max-height", buf);
+    fmt(buf, sizeof(buf), "%gpx", g_rs.reticle_width * 10.0);
+    style_if("aimDot", "width", buf);
+    fmt(buf, sizeof(buf), "%gpx", g_rs.reticle_height * 10.0);
+    style_if("aimDot", "height", buf);
+    apply_menu_filter();
+
+    // scopeBorders.set: every .black bar
+    HtmlElem bars[8];
+    const int n = html_dom_query_all(0, ".black", bars, 8);
+    for (int i = 0; i < n; i++) {
+        char current[16];
+        const char *want = g_rs.scope_borders ? "block" : "none";
+        if (html_dom_get_style(bars[i], "display", current, sizeof(current)) < 0 || strcmp(current, want)) html_dom_set_display(bars[i], want);
+    }
+
+    src_if("ammoIcon", g_rs.custom_ammo, "textures/ammo_0.png");
+    src_if("killsIcon", g_rs.custom_kills, "img/skull_0.png");
+    src_if("deathsIcon", g_rs.custom_deaths, "img/skull_1.png");
+    src_if("streakIcon", g_rs.custom_streak, "img/skull_2.png");
+    src_if("timerIcon", g_rs.custom_timer, "img/timer.png");
+    src_if("recticleImg", g_rs.custom_scope, "textures/recticle.png");
+    // customADSDot: updateAimDot(-2, v) shows the custom reticle; empty leaves the picked
+    // reticle (#aimDot's markup default / the loadout window) alone.
+    if (g_rs.custom_ads_dot[0]) src_if("aimDot", g_rs.custom_ads_dot, "textures/reticles/reticle_0.png");
+    if (g_rs.custom_game_overlay[0]) snprintf(buf, sizeof(buf), "url('%s')", g_rs.custom_game_overlay);
+    else buf[0] = 0;
+    style_if("overlay", "background-image", buf);
+    return 1;
+}
+
+static int g_hud_visible = -1;
+
+void client_render_settings_tick(Client *client) {
+    (void) client;
+    const double now = now_ms();
+
+    // hud_ui.c reads client_render_settings() for the HUD pieces it owns; the custom
+    // images/overlay below are re-applied when settings change or the HUD shows/hides.
+    const HtmlElem root = html_dom_root();
+    const int hud_visible = root ? html_dom_has_class(root, "kn-hud-visible") : 0;
+    if (hud_visible != g_hud_visible) {
+        g_hud_visible = hud_visible;
+        g_dom_dirty = 1;
+    }
+    if (g_dom_dirty && apply_dom()) {
+        g_dom_dirty = 0;
+    }
+
+    // showFPS: the menu readout (index.js gP: menuFPS while #menuHolder shows, every 100 ms)
+    if (g_rs.show_fps && now - g_last_fps_text_ms >= 100.0 && html_ui_is_menu_open()) {
+        g_last_fps_text_ms = now;
+        const HtmlElem fps = html_dom_by_id("menuFPS");
+        if (fps) {
+            char text[16];
+            snprintf(text, sizeof(text), "%d", g_frame_count);
+            html_dom_set_text(fps, text);
+        }
+    }
+}
+
+int client_render_hide_weapon_ads(const Client *client) {
+    // 95.js: with hideADS the in-hand weapon is hidden once fully aimed (hvJK5(P, 1))
+    // and shown again as soon as the aim starts going out.
+    const Player *me = client ? client->me : NULL;
+    return g_rs.hide_ads && me && me->weapon && me->weapon->zoom && me->aim_val >= 1.0f;
+}

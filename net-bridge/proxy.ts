@@ -5,6 +5,7 @@ import type { IncomingMessage, Server as HttpServer } from "http";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import antihackKey from "./antihackkey.json";
 import * as UTILS from "./utils";
+import * as EV from "./nativeEvents";
 
 const WS_PATH = process.env.KRUNK_NATIVE_WS_PATH || "/ws";
 const NATIVE_HOST = process.env.KRUNK_NATIVE_HOST || "127.0.0.1";
@@ -24,6 +25,8 @@ export const NET_PACKET = Object.freeze({
   INPUT: 5,
   STATE: 6,
   CYCLE: 7,
+  CHAT_SEND: EV.NET_EVENT.CHAT_SEND,
+  PONG: EV.NET_EVENT.PONG,
 } as const);
 
 type NetPacketType = (typeof NET_PACKET)[keyof typeof NET_PACKET];
@@ -62,6 +65,8 @@ type NativeSpawnPacket = {
   position: Vec3;
   direction: Vec2;
   name: string;
+  secondaryIndex: number;
+  cosmetics: EV.Cosmetics;
 };
 
 type NativeStatePacket = {
@@ -98,6 +103,10 @@ type BridgeSession = {
   uidToBrowserId: Map<number, string>;
   activeUids: Set<number>;
   lastHealthByUid: Map<number, number>;
+  roundSeconds: number;
+  nameByUid: Map<number, string>;
+  stateByUid: Map<number, NativeStatePacket>;
+  pendingPingSeq: number | null;
   closed: boolean;
 };
 
@@ -126,7 +135,10 @@ function sendWs(session: BridgeSession, label: string, ...args: unknown[]): void
   session.ws.send(UTILS.encodeNetworkMessage(payload, 0));
 }
 
-function sendPing(session: BridgeSession): void {
+// The native server probes every 5 s (NET_PACKET_PING); the bridge forwards it
+// as "pi" and answers the server with PONG when the browser's "po" comes back.
+function forwardPing(session: BridgeSession, seq: number): void {
+  session.pendingPingSeq = seq;
   session.lastPingSentAt = Date.now();
   sendWs(session, "pi", null);
 }
@@ -168,14 +180,26 @@ function writeNativeHello(session: BridgeSession): void {
 }
 
 function writeNativeEnt(session: BridgeSession, entData: unknown): void {
-  const payload = Buffer.alloc(4);
+  const ent = Array.isArray(entData) ? entData : [];
+  const spectate = ent[6] === 1 || ent[6] === true;
+  const payload = Buffer.alloc(EV.ENT_COSMETICS_SIZE + (spectate ? 1 : 0));
   const classIndex = Array.isArray(entData) ? Number(entData[0]) || 0 : 0;
+  // ent[5] = selectedSecondaryIndex (null/undefined = class default)
+  const secondary = Array.isArray(entData) && entData[5] != null && Number.isFinite(Number(entData[5])) ? Number(entData[5]) | 0 : -1;
   payload.writeInt32LE(classIndex, 0);
+  payload.writeInt32LE(secondary, 4);
+  EV.writeCosmetics(payload, 8, EV.cosmeticsFromEnt(ent));
+  if (spectate) payload[EV.ENT_COSMETICS_SIZE] = 1; // ent[6] toggleSpect
   writeNativePacket(session, NET_PACKET.ENT, payload);
 }
 
 function writeNativeCycle(session: BridgeSession): void {
   writeNativePacket(session, NET_PACKET.CYCLE);
+}
+
+function writeNativeChat(session: BridgeSession, text: unknown): void {
+  if (typeof text !== "string" || !text.trim().length) return;
+  writeNativePacket(session, NET_PACKET.CHAT_SEND, EV.encodeChatSend(text));
 }
 
 function flushPendingNativeFrames(session: BridgeSession): void {
@@ -200,7 +224,7 @@ function krunkerMoveDirToNative(moveDir: number): number {
 function writeNativeInput(session: BridgeSession, frame: unknown[]): void {
   if (!Array.isArray(frame)) return;
 
-  const payload = Buffer.alloc(22);
+  const payload = Buffer.alloc(23); // NetInputPacket: 22-byte v1 + slowdown (input[12] in tenths)
   const seq = Number(frame[0]) || 0;
   const deltaMs = Number(frame[1]) || 0;
   const yaw = (Number(frame[2]) || 0) / 1000.0;
@@ -226,6 +250,7 @@ function writeNativeInput(session: BridgeSession, frame: unknown[]): void {
   payload.writeFloatLE(yaw, 16);
   payload[20] = flags;
   payload[21] = clampByte(swap);
+  payload[22] = Math.max(0, Math.min(10, Math.round((Number(frame[12]) || 0) * 10))); // 1 - speedLmt.round(1)
 
   writeNativePacket(session, NET_PACKET.INPUT, payload);
 }
@@ -343,6 +368,8 @@ function parseSpawnPacket(payload: Buffer): NativeSpawnPacket | null {
     ],
     direction: [payload.readFloatLE(34), payload.readFloatLE(38)],
     name: readCString(payload, 42, 32),
+    secondaryIndex: payload.length >= 78 ? payload.readInt32LE(74) : -1,
+    cosmetics: EV.readCosmetics(payload, EV.SPAWN_V1_SIZE),
   };
 }
 
@@ -411,19 +438,19 @@ function buildSpawnPayload(session: BridgeSession, spawn: NativeSpawnPacket): un
     100,
     null,
     [-1, -1],
-    -1,
-    -1,
-    null,
+    spawn.cosmetics.hat, // 13 hatIndex
+    spawn.cosmetics.back, // 14 backIndex
+    spawn.secondaryIndex >= 0 ? spawn.secondaryIndex : null, // secondaryIndex
     false,
     null,
     spawn.direction[1],
     -1,
-    0,
+    EV.skinIndexFromColor(spawn.cosmetics.skinColor), // 20 skinColIndex
     0,
     0,
     null,
     -1,
-    0,
+    Math.max(0, spawn.cosmetics.dye), // 25 dyeIndex
     0,
     0,
     0,
@@ -431,11 +458,11 @@ function buildSpawnPayload(session: BridgeSession, spawn: NativeSpawnPacket): un
     0,
     name,
     false,
-    -1,
+    spawn.cosmetics.waist, // 33 waistIndex
     0,
+    EV.hairColorToKrunker(spawn.cosmetics.hairColor), // 35 hairCol
     0,
-    0,
-    0,
+    Math.max(0, spawn.cosmetics.face), // 37 faceIndex
     null,
     null,
   ];
@@ -527,10 +554,10 @@ function handleNativePacket(session: BridgeSession, type: number, payload: Buffe
       const spawn = parseSpawnPacket(payload);
       if (!spawn) break;
       const sid = spawn.uid;
+      session.nameByUid.set(sid, spawn.name || `Guest_${sid + 1}`);
       if (!spawn.active) {
-        session.activeUids.delete(sid);
-        session.lastHealthByUid.delete(sid);
-        sendWs(session, "2", sid);
+        // A player the server knows who is dead right now (sent to joiners for the
+        // scoreboard); the Krunker client only learns about players when they spawn.
         break;
       }
 
@@ -539,7 +566,6 @@ function handleNativePacket(session: BridgeSession, type: number, payload: Buffe
       sendWs(session, "0", buildSpawnPayload(session, spawn), 1);
       if (spawn.isYou || sid === session.nativeClientId) {
         sendWs(session, "start", 0, 1, false, false, false, true);
-        sendWs(session, "7", [sid, 0]);
       }
       break;
     }
@@ -554,6 +580,7 @@ function handleNativePacket(session: BridgeSession, type: number, payload: Buffe
       }
 
       session.activeUids.add(state.uid);
+      session.stateByUid.set(state.uid, state);
       sendHealthIfChanged(session, state.uid, state.health);
 
       if (state.uid === session.nativeClientId) {
@@ -561,6 +588,161 @@ function handleNativePacket(session: BridgeSession, type: number, payload: Buffe
       } else {
         sendWs(session, "k", buildKPayload(state), session.tickRate || DEFAULT_TICK_RATE);
       }
+      break;
+    }
+    default:
+      handleNativeEvent(session, type, payload);
+      break;
+  }
+}
+
+function playerName(session: BridgeSession, uid: number): string {
+  return session.nameByUid.get(uid) || `Guest_${uid + 1}`;
+}
+
+// Match events (nativeEvents.ts) -> Krunker v3.1.1 client labels.
+function handleNativeEvent(session: BridgeSession, type: number, payload: Buffer): void {
+  switch (type) {
+    case EV.NET_EVENT.CHAT: {
+      const chat = EV.decodeChat(payload);
+      if (!chat) break;
+      if (chat.kind === EV.NET_CHAT_KIND.PLAYER) sendWs(session, "ch", chat.name || playerName(session, chat.uid), EV.escapeHtml(chat.text));
+      else sendWs(session, "ch", null, EV.escapeHtml(chat.text), chat.kind === EV.NET_CHAT_KIND.SERVER ? 2 : 1);
+      break;
+    }
+    case EV.NET_EVENT.KILL: {
+      const kill = EV.decodeKill(payload);
+      if (!kill) break;
+      const isYou = kill.victimUid === session.nativeClientId;
+      session.activeUids.delete(kill.victimUid);
+      // "3": [victimSid, deaths, killerSid, killCard (victim only), info, noFeed]
+      sendWs(
+        session,
+        "3",
+        kill.victimUid,
+        kill.victimDeaths,
+        kill.killerUid >= 0 ? kill.killerUid : -1,
+        isYou ? [kill.weaponIndex, kill.score || 0, 0, null] : null,
+        { hs: kill.headshot, wb: kill.wallbang, fs: kill.fists, wId: kill.weaponIndex >= 0 ? kill.weaponIndex : undefined },
+        false,
+      );
+      break;
+    }
+    case EV.NET_EVENT.HIT: {
+      const hit = EV.decodeHit(payload);
+      if (hit) sendWs(session, "4", hit.targetUid, hit.damage, hit.crit, hit.kill);
+      break;
+    }
+    case EV.NET_EVENT.HEALTH: {
+      const health = EV.decodeHealth(payload);
+      if (!health) break;
+      const rounded = Math.ceil(health.health);
+      session.lastHealthByUid.set(health.uid, rounded);
+      if (health.uid === session.nativeClientId) {
+        if (health.hasSource) sendWs(session, "h", rounded, null, Math.round(health.sourceX), Math.round(health.sourceZ));
+        else sendWs(session, "h", rounded);
+      } else {
+        sendWs(session, "h", rounded, health.uid);
+      }
+      break;
+    }
+    case EV.NET_EVENT.SCORE: {
+      const score = EV.decodeScore(payload);
+      if (score && score.delta) sendWs(session, "5", score.delta);
+      break;
+    }
+    case EV.NET_EVENT.LEADERBOARD: {
+      const board = EV.decodeLeaderboard(payload);
+      if (board) sendWs(session, "7", board.flatMap((row) => [row.uid, row.score]));
+      break;
+    }
+    case EV.NET_EVENT.TIMER: {
+      const timer = EV.decodeTimer(payload);
+      if (!timer) break;
+      if (timer.end) sendWs(session, "t", EV.formatTime(timer.seconds), 1);
+      else {
+        session.roundSeconds = timer.seconds;
+        sendWs(session, "t", EV.formatTime(timer.seconds));
+      }
+      break;
+    }
+    case EV.NET_EVENT.END: {
+      const end = EV.decodeEnd(payload);
+      if (!end) break;
+      session.activeUids.clear();
+      // config.endStats: sid, name ([name, alias]), score, kills, deaths, reward
+      const ed: unknown[] = [];
+      for (const row of end.board) {
+        const name = playerName(session, row.uid);
+        ed.push(row.uid, [name, name], row.score, row.kills, row.deaths, 0);
+      }
+      sendWs(session, "end", false, end.result, { modeIndex: session.modeIndex, vo: {}, tms: null, mts: [], ed }, -1, null, false);
+      break;
+    }
+    case EV.NET_EVENT.PING: {
+      const seq = EV.decodeUInt32(payload);
+      if (seq != null) forwardPing(session, seq);
+      break;
+    }
+    case EV.NET_EVENT.PING_RESULT: {
+      const ping = EV.decodeInt32(payload);
+      if (ping != null) session.pingMs = ping;
+      break;
+    }
+    case EV.NET_FX.SHOT: {
+      const shot = EV.decodeShot(payload);
+      if (!shot) break;
+      const from = session.stateByUid.get(shot.uid);
+      const round1 = (v: number) => Math.round(v * 10) / 10;
+      // "9": [sid, x, y, z, faceYaw?, facePitch?, trail, playerX, playerY, playerHeight, playerZ]
+      sendWs(session, "9", [
+        shot.uid,
+        Math.round(shot.hit[0]),
+        Math.round(shot.hit[1]),
+        Math.round(shot.hit[2]),
+        shot.hasNormal ? round1(shot.normalYaw) : undefined,
+        shot.hasNormal ? round1(shot.normalPitch) : undefined,
+        shot.trail ? 1 : 0,
+        round1(from?.position[0] ?? shot.hit[0]),
+        round1(from?.position[1] ?? shot.hit[1]),
+        11 - (from?.crouchVal ?? 0) * 3,
+        round1(from?.position[2] ?? shot.hit[2]),
+      ]);
+      break;
+    }
+    case EV.NET_FX.PROJECTILE: {
+      const p = EV.decodeProjectile(payload);
+      if (!p) break;
+      const [vx, vy, vz] = p.velocity;
+      const speed = Math.hypot(vx, vy, vz) || 1;
+      const yaw = Math.atan2(vx, vz) + Math.PI; // projectile.js: xD = yaw - PI
+      const pitch = Math.asin(Math.max(-1, Math.min(1, vy / speed)));
+      sendWs(session, "pr", p.position[0], p.position[1], p.position[2], yaw, pitch, p.weaponIndex, p.id);
+      break;
+    }
+    case EV.NET_FX.PROJECTILE_END: {
+      const end = EV.decodeProjectileEnd(payload);
+      if (end) sendWs(session, "pre", end.id, 0, end.position[0], end.position[1], end.position[2], end.impact ? 1 : 0);
+      break;
+    }
+    case EV.NET_FX.EXPLOSION: {
+      const ex = EV.decodeExplosion(payload);
+      if (ex) sendWs(session, "ex", Math.round(ex.position[0]), Math.round(ex.position[1]), Math.round(ex.position[2]), Math.round(ex.radius));
+      break;
+    }
+    case EV.NET_SPECTATE.SPECTATE: {
+      // io_etrg / io_ent spectate: "start" [timeString, team, spectating, locked, ?, ?, multipleRounds]
+      if (payload.length < 1) break;
+      sendWs(session, "start", EV.formatTime(session.roundSeconds), 1, !!payload[0], false, false, false, true);
+      break;
+    }
+    case EV.NET_EVENT.LEAVE: {
+      const uid = EV.decodeInt32(payload);
+      if (uid == null) break;
+      session.activeUids.delete(uid);
+      session.lastHealthByUid.delete(uid);
+      session.nameByUid.delete(uid);
+      sendWs(session, "2", uid);
       break;
     }
     default:
@@ -602,9 +784,15 @@ function handleBrowserPacket(session: BridgeSession, label: string, args: unknow
       sendWs(session, "ready", 0, 1);
       break;
     case "po":
+      if (session.pendingPingSeq != null) {
+        writeNativePacket(session, NET_PACKET.PONG, EV.encodeUInt32(session.pendingPingSeq));
+        session.pendingPingSeq = null;
+      }
       session.pingMs = Math.max(0, Math.min(999, Date.now() - session.lastPingSentAt));
       sendWs(session, "pir", 1);
-      setTimeout(() => sendPing(session), 5000);
+      break;
+    case "ct":
+      writeNativeChat(session, args[0]);
       break;
     case "cycle":
     case "nextMap":
@@ -614,7 +802,6 @@ function handleBrowserPacket(session: BridgeSession, label: string, args: unknow
     case "csv":
     case "sb":
     case "a":
-    case "ct":
     case "maVote":
     case "k":
     case "int":
@@ -646,6 +833,10 @@ function createSession(ws: WebSocket, request: IncomingMessage): BridgeSession {
     uidToBrowserId: new Map(),
     activeUids: new Set(),
     lastHealthByUid: new Map(),
+    roundSeconds: 0,
+    nameByUid: new Map(),
+    stateByUid: new Map(),
+    pendingPingSeq: null,
     closed: false,
   };
 }
@@ -676,7 +867,6 @@ function connectNative(session: BridgeSession): void {
     () => {
       tcp.setNoDelay(true);
       session.nativeConnected = true;
-      sendPing(session);
       sendWs(session, "load", 20000, session.id);
       sendWs(session, "io-init", session.id);
       sendWs(session, "inst-id", LOBBY_ID);
@@ -754,10 +944,27 @@ function handleConnection(ws: WebSocket, request: IncomingMessage): void {
   });
 }
 
-export function attach(http: HttpServer): WebSocketServer {
+export { WS_PATH };
+
+type AttachOptions = {
+  /**
+   * When false the caller routes HTTP `upgrade` events itself and hands
+   * matching requests to `wss.handleUpgrade(...)`; used by `--web` mode so
+   * `/ws` and `/native` can share one listener.
+   */
+  handleUpgrade?: boolean;
+};
+
+export function attach(http: HttpServer, opts: AttachOptions = {}): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", handleConnection);
+
+  if (opts.handleUpgrade === false) {
+    http.on("close", () => wss.close());
+    console.info(`[proxy] forwarding ${WS_PATH} to native ${NATIVE_HOST}:${NATIVE_PORT}`);
+    return wss;
+  }
 
   http.on("upgrade", (request, socket, head) => {
     let url: URL;

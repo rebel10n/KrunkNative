@@ -6,6 +6,7 @@
     "server": "node -r ts-node/register/transpile-only index.ts",
     "native-to-krunker": "node -r ts-node/register/transpile-only index.ts --native-to-krunker",
     "browser-to-native": "node -r ts-node/register/transpile-only index.ts --browser-to-native",
+    "web": "node -r ts-node/register/transpile-only index.ts --web",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

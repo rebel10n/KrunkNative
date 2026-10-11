@@ -1,0 +1,102 @@
+# Static images the menu page, its window templates and the C UI logic (client/src/ui/)
+# reference, copied byte-identical from the Krunker v3.1.1 public/ tree into ui/ at the
+# same relative path by menu_assets.py (`make ui-import`). One path per line; `{a..b}`
+# expands to the integers a..b; `dest = src` copies public/<src> to ui/<dest>; `#` starts
+# a comment. Only what the static interface
+# shows: add a line when C code starts generating a new image path, never whole folders.
+# The social hub's own images are listed in social_page.py.
+
+# site root: favicons, the Pro settings preset's crosshairImage/customScope/customADSDot
+favicon.ico
+favicon.png
+pro_ads.png
+pro_crosshair.png
+pro_scope.png
+
+# index.html / css/main.css chrome
+img/logo_4.png
+img/merch.png
+img/giveaway.png
+img/police.png
+img/phone_r.png
+img/app_0.png
+img/app_1.png
+img/blank_2.png
+img/country-flag.png
+img/noimg.png
+img/windows.png
+img/mac.png
+img/linux.png
+img/steam.png
+img/android.png
+img/ios.png
+img/editor.png
+img/black_m.png
+img/favicon.png
+img/medal.svg
+img/ad_2.png
+img/menu-icons/{chall,games,maps,mods,profile,ranked,settings,shop,social}.png
+img/menu-icons/{chall,games,maps,mods,profile,ranked,settings,shop,social}-white.png
+img/social-buttons/{discord,reddit,twitter}-{hover,normal,pressed}.png
+img/social-buttons/down_{hover,normal,pressed}.png
+img/mobile/icon_{0..6}.png
+img/backgrounds/bg_test.png
+img/crossed_swords_0.svg
+img/shaking_hands.svg
+
+# Host Game / Custom Games map cards (client/src/ui/ui_windows.c: img/maps/map_<index>.png)
+img/maps/map_{0..14}.png
+
+# in-game HUD (client/src/ui/hud_ui.c, ui_render_settings.c)
+img/hp_0.png
+img/skull_{0..2}.png
+img/timer.png
+img/headshot_0.png
+img/wallbang_0.png
+img/blood.png
+img/vic.png
+img/def.png
+img/dra.png
+textures/ammo_0.png
+textures/recticle.png
+textures/hitmarker_3.png
+# objective marker and CTF flags of the name-tag layer (first hand-copied from
+# assets/textures/, which holds the same v3.1.1 files)
+textures/objective_1.png
+textures/flag_b.png
+textures/flag_r.png
+textures/melee/icon_0.png
+# weapDisplay + kill feed: weaponConfig.icon of every weapon id 0..18 (shared/src/weapons/:
+# icon_0 knife .. icon_12, then icon_14..icon_19; Krunker has no weapon with icon_13)
+textures/weapons/icon_{0..12}.png
+textures/weapons/icon_{14..19}.png
+
+# class icons: class box, Select Class cards, kill card, spectate, scoreboard
+# (textures/classes/icon_<iconIndex>.png; -1 = Krunker's spectator icon)
+textures/classes/icon_{-1..15}.png
+
+# Change Loadout pickers (client/src/ui/ui_loadout.c): weaponConfig.src previews of every
+# weapon with one (Select Skin / Select Secondary; the knife and the bomb have none in
+# v3.1.1: textures/previews/weapons/undefined.png 404s on the real site too)
+textures/previews/weapons/weapon_{1..12}.png
+textures/previews/weapons/weapon_{14..17}.png
+textures/previews/weapons/weapon_19.png
+textures/previews/attach/attach_0.png
+textures/previews/cosmetics/{1,2,3,5,6,7}_default.png
+textures/reticles/reticle_{0..11}.png
+# Select Spray: the 53 default sprays of ui/windows/9.html
+textures/sprays/{0..38}.png
+textures/sprays/{54..59}.png
+textures/sprays/{63..66}.png
+textures/sprays/{79,83,87,88}.png
+
+# byte-identical site files besides images (transformed ones -- index.html, flag.css,
+# google-secular-one.css -- are hand-maintained, see ui/README.md)
+css/main.css
+css/material-icons.css
+css/fonts/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2
+css/fonts/font2.ttf
+css/fonts/header.ttf
+css/fonts/lucon.ttf
+# the Changelog source (ui_loadout.c), next to the templates for the web build's preload
+windows/versions.txt = docs/versions.txt

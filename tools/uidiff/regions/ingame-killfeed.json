@@ -1,0 +1,286 @@
+{
+  "scenario": "ingame-killfeed",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "timer",
+      "rect": [
+        18,
+        16,
+        104,
+        34
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff",
+        "#ca56eb"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#timerHolder: timer icon + #timerVal (box is translucent)"
+    },
+    {
+      "name": "ping",
+      "rect": [
+        138,
+        8,
+        40,
+        28
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#pingText rgba(255,255,255,.5) and the signal icon are translucent"
+    },
+    {
+      "name": "game-mode",
+      "rect": [
+        10,
+        60,
+        80,
+        18
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#curGameInfo first line `Free for All` (`on <map>` is rgba .6)"
+    },
+    {
+      "name": "chat-rows",
+      "rect": [
+        14,
+        488,
+        180,
+        112
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#fc03ec",
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#chatList rows: coloured message glyphs (row boxes are rgba(0,0,0,.2))"
+    },
+    {
+      "name": "chat-input",
+      "rect": [
+        10,
+        603,
+        180,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#chatInput placeholder is rgba(255,255,255,.7) on rgba(0,0,0,.4): translucent only, double-blended over the reference background"
+    },
+    {
+      "name": "chat-mic",
+      "rect": [
+        195,
+        603,
+        45,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#voiceDisplay has opacity .5: translucent only"
+    },
+    {
+      "name": "class-icon",
+      "rect": [
+        12,
+        634,
+        66,
+        66
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "mask": "colors",
+      "mask_colors": [
+        "#3d3d3d",
+        "#72503e",
+        "#282828",
+        "#bc9c7a",
+        "#dfd7d4",
+        "#95381e",
+        "#cfbc8f",
+        "#a9785d",
+        "#b2acaa"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "class icon (pixelated, transparent texels excluded)"
+    },
+    {
+      "name": "health-value",
+      "rect": [
+        85,
+        636,
+        95,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff",
+        "#eb4343"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#healthValue `100` + red cross (`| 100` is rgba .8)"
+    },
+    {
+      "name": "health-bar",
+      "rect": [
+        82,
+        664,
+        190,
+        38
+      ],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 1.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#9eeb56"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "6 .healthBarSeg fills (opaque #9eeb56)"
+    },
+    {
+      "name": "ammo",
+      "rect": [
+        1125,
+        650,
+        140,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff",
+        "#ffd542"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#ammoVal + `!!!` (#ammoMax is rgba .7)"
+    },
+    {
+      "name": "weapon-active",
+      "rect": [
+        1180,
+        538,
+        96,
+        30
+      ],
+      "kind": "image",
+      "fuzz": 10,
+      "max_pct": 2.5,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "active .weapItem icon (opacity 1)"
+    },
+    {
+      "name": "weapon-keys",
+      "rect": [
+        1250,
+        568,
+        26,
+        60
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "[E] / [Q] key labels"
+    },
+    {
+      "name": "weapon-holstered",
+      "rect": [
+        1170,
+        568,
+        80,
+        66
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "skip": true,
+      "note": "holstered .weapItem icons have opacity .7: translucent only"
+    },
+    {
+      "name": "crosshair",
+      "rect": [
+        584,
+        298,
+        112,
+        120
+      ],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "default crosshair bars over the 3D scene"
+    },
+    {
+      "name": "killfeed-row",
+      "rect": [
+        1104,
+        10,
+        166,
+        28
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff",
+        "#eb5656"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#killFeed row: `You`, skull, victim `Guest_2` (#eb5656); the weapon icon is translucent"
+    },
+    {
+      "name": "score-popup",
+      "rect": [
+        590,
+        240,
+        100,
+        40
+      ],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "+125 score popup is drawn by the game, not the HUD"
+    }
+  ]
+}

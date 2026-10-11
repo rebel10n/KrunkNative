@@ -1,0 +1,101 @@
+{
+  "windows": {
+    "5": {
+      "header": "Account",
+      "sticky": false,
+      "file": "5.html"
+    },
+    "14": {
+      "header": "Store",
+      "sticky": false,
+      "file": "14.html"
+    },
+    "33": {
+      "header": "Challenges",
+      "sticky": false,
+      "file": "33.html"
+    },
+    "4": {
+      "header": "Mod Manager",
+      "sticky": false,
+      "file": "4.html"
+    },
+    "27": {
+      "header": "Ranked",
+      "sticky": false,
+      "file": "27.html"
+    },
+    "2": {
+      "header": "Servers",
+      "sticky": true,
+      "file": "2.html"
+    },
+    "3": {
+      "header": "Change Loadout",
+      "sticky": false,
+      "file": "3.html"
+    },
+    "6": {
+      "header": "Select Class",
+      "sticky": false,
+      "file": "6.html",
+      "card": "6-card.html"
+    },
+    "10": {
+      "header": "Custom Games",
+      "sticky": false,
+      "file": "10.html",
+      "item": "10-item.html",
+      "itemCount": 36
+    },
+    "7": {
+      "header": "Change Controls",
+      "sticky": false,
+      "file": "7.html"
+    },
+    "25": {
+      "header": "Client",
+      "sticky": false,
+      "file": "25.html"
+    },
+    "host": {
+      "header": "Host Custom Game",
+      "sticky": false,
+      "file": "host.html",
+      "mapCard": "host-mapcard.html"
+    },
+    "join": {
+      "header": "Join",
+      "sticky": false,
+      "file": "join.html"
+    },
+    "21": {
+      "header": "Advertise",
+      "sticky": false,
+      "file": "21.html"
+    },
+    "29": {
+      "header": "Support",
+      "sticky": false,
+      "file": "29.html"
+    },
+    "9": {
+      "header": "Select Spray",
+      "sticky": false,
+      "file": "9.html"
+    }
+  },
+  "settings": {
+    "header": "Game Settings",
+    "sticky": true,
+    "head": "settings-head.html",
+    "tabs": [
+      "settings-tab-0.html",
+      "settings-tab-1.html",
+      "settings-tab-2.html",
+      "settings-tab-3.html",
+      "settings-tab-4.html",
+      "settings-tab-5.html"
+    ]
+  }
+}

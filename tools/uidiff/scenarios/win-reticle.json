@@ -1,0 +1,23 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/windows/win-reticle.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": 32,
+    "settingsTab": 0,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "scrollbars": true,
+    "anim_time": 0.375
+  },
+  "frames": 3,
+  "note": "Select Reticle: 14 reticle cards with preview images, scrollable; anim_time 0.375 = the reference's merch (scaleBob) phase"
+}

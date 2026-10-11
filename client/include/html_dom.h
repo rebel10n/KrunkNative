@@ -1,0 +1,102 @@
+// DOM-ops API: how C UI logic (client/src/ui/*) drives the HTML page without JS.
+// Implemented natively by the in-house engine (client/src/html/engine/engine.c)
+// and on the web by client/src/html/web_dom.c (EM_ASM over the browser DOM).
+// Contract and rationale: doc/html-engine-plan.md. Everything runs on the main thread.
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+
+typedef uint32_t HtmlElem;                      // 0 = none. native: node-table index; web: data-kn-id
+typedef struct HtmlRect { float x, y, w, h; } HtmlRect;  // CSS px, viewport origin (getBoundingClientRect)
+
+typedef enum { HTML_INSERT_BEFORE_BEGIN, HTML_INSERT_AFTER_BEGIN, HTML_INSERT_BEFORE_END, HTML_INSERT_AFTER_END } HtmlInsertPos;
+
+// ---- lookup / tree
+HtmlElem html_dom_root(void);                                   // <html>
+HtmlElem html_dom_body(void);
+HtmlElem html_dom_by_id(const char *id);                        // first match in document order (duplicate ids exist)
+HtmlElem html_dom_query(HtmlElem root, const char *selector);   // querySelector; root 0 = document
+int      html_dom_query_all(HtmlElem root, const char *selector, HtmlElem *out, int max);
+HtmlElem html_dom_parent(HtmlElem);
+HtmlElem html_dom_first_child(HtmlElem);
+HtmlElem html_dom_next(HtmlElem);
+HtmlElem html_dom_closest(HtmlElem, const char *selector);
+int      html_dom_child_count(HtmlElem);
+int      html_dom_tag(HtmlElem, char *buf, size_t n);           // lowercase tag name
+
+// ---- mutation
+HtmlElem html_dom_create(const char *tag, const char *id_or_null);   // detached element
+HtmlElem html_dom_create_text(const char *text);                     // detached text node
+void     html_dom_append(HtmlElem parent, HtmlElem child);
+void     html_dom_insert_html(HtmlElem ref, HtmlInsertPos pos, const char *html); // insertAdjacentHTML
+void     html_dom_remove(HtmlElem);
+void     html_dom_set_html(HtmlElem, const char *html);              // innerHTML
+void     html_dom_set_text(HtmlElem, const char *text);              // textContent
+int      html_dom_get_text(HtmlElem, char *buf, size_t n);           // returns length needed
+
+// ---- attributes / classes / style
+void     html_dom_set_attr(HtmlElem, const char *name, const char *value);
+void     html_dom_remove_attr(HtmlElem, const char *name);
+int      html_dom_get_attr(HtmlElem, const char *name, char *buf, size_t n); // -1 if absent
+void     html_dom_set_class(HtmlElem, const char *cls, int on);      // classList.toggle(cls, on)
+int      html_dom_has_class(HtmlElem, const char *cls);
+void     html_dom_set_display(HtmlElem, const char *value);          // style.display; "" clears
+void     html_dom_set_style(HtmlElem, const char *prop, const char *value); // style.setProperty (incl. --kn-*); "" removes
+int      html_dom_get_style(HtmlElem, const char *prop, char *buf, size_t n); // inline style only; -1 if unset
+
+// ---- form state
+void     html_dom_set_value(HtmlElem, const char *value);
+int      html_dom_get_value(HtmlElem, char *buf, size_t n);
+void     html_dom_set_checked(HtmlElem, int checked);
+int      html_dom_get_checked(HtmlElem);
+void     html_dom_focus(HtmlElem);
+void     html_dom_blur(HtmlElem);
+void     html_dom_scroll_to_bottom(HtmlElem);                        // scrollTop = scrollHeight
+
+// ---- geometry (valid after layout; 0/false when display:none)
+int      html_dom_get_rect(HtmlElem, HtmlRect *out);
+float    html_dom_offset_width(HtmlElem);
+float    html_dom_offset_height(HtmlElem);
+void     html_dom_viewport(float *w, float *h, float *dpr);          // innerWidth/innerHeight/devicePixelRatio
+typedef void (*HtmlResizeFn)(HtmlElem, void *user);
+void     html_dom_observe_resize(HtmlElem, HtmlResizeFn fn, void *user); // ResizeObserver-equivalent (coalesced per frame)
+HtmlElem html_dom_element_at(float x, float y);                     // document.elementFromPoint (CSS px; pointer-events aware); 0 = none
+HtmlElem html_dom_active_element(void);                             // document.activeElement; 0 = none / body
+
+// ---- events: page -> C
+typedef struct {
+    const char *type;      // "click" "mousedown" "input" "change" "keypress" "keydown" "mouseenter" "mouseover" "focus" "blur" "resize"
+    HtmlElem    target;    // element the inline handler / listener is attached to (bubbling already resolved)
+    const char *value;     // this.value for form controls, else ""
+    int         checked;   // this.checked
+    int         key;       // keydown/keypress: GLFW key code natively, DOM keyCode on web (Enter=257/13, Escape=256/27 are normalised: use html_key_is_enter/escape)
+    int         button;    // mouse button 0/1/2
+    float       x, y;      // CSS px
+} HtmlEvent;
+int html_key_is_enter(int key);
+int html_key_is_escape(int key);
+
+typedef enum { HTML_ARG_NUM, HTML_ARG_STR, HTML_ARG_BOOL, HTML_ARG_THIS, HTML_ARG_THIS_VALUE, HTML_ARG_THIS_CHECKED, HTML_ARG_EVENT } HtmlArgKind;
+typedef struct { HtmlArgKind kind; double num; const char *str; } HtmlArg;
+// Inline handler `onclick="showWindow(1)"` -> handler "showWindow" with args [{NUM,1}]. `windows[0].changeTab(2)` -> "windows.0.changeTab".
+// Return 0 to prevent default (like `return false`), 1 otherwise.
+typedef int (*HtmlHandlerFn)(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc);
+typedef struct { const char *name; HtmlHandlerFn fn; } HtmlHandlerEntry;
+void html_ui_set_handlers(const HtmlHandlerEntry *table, size_t count, void *user, HtmlHandlerFn fallback);
+// Normalised name of the handler being dispatched ("showWindow", "windows.0.changeTab"); NULL outside a
+// dispatch. Lets the fallback tell calls apart (its signature carries no name).
+const char *html_ui_current_handler(void);
+// Non-inline listeners krunknative.js used addEventListener for. elem_id NULL = window/document.
+void html_ui_set_listener(const char *elem_id, const char *type, HtmlHandlerFn fn);
+// Dispatch entry used by backends (native events.c / web ccall): resolves the handler by name and calls it.
+int  html_ui_dispatch(const char *handler_name, const HtmlEvent *ev, const HtmlArg *args, int argc);
+int  html_ui_dispatch_listener(const char *elem_id, const HtmlEvent *ev);
+
+// ---- timers (setTimeout equivalent; fired from html_ui_update on both platforms)
+int  html_timer_add(double ms, void (*fn)(void *user), void *user);   // returns id > 0
+void html_timer_cancel(int id);
+void html_timers_tick(double now_ms);                                 // called by html_ui_update
+
+// ---- storage (localStorage equivalent): native $XDG_CONFIG_HOME/krunknative/<key>.json, web localStorage
+int  html_storage_get(const char *key, char *buf, size_t n);          // -1 if absent
+void html_storage_set(const char *key, const char *value);

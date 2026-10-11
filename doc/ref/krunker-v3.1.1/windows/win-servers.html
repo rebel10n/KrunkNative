@@ -1,0 +1,8 @@
+<div id="windowHolder" style="display: block;">
+<div id="windowHeader">Servers</div>
+<div id="menuWindow" class="stickyHeader" style="overflow-y: auto;"><div class="serverHeader"><div class="sideTabs"><a onclick="openHostWindow()">+ Host Game</a></div><div class="centerTab"><input id="serverSearch" type="text" placeholder="Search Game" oninput="windows[1].searchList()"></div><div class="sideTabs"><div id="hideFull" style="display:inline-block;"><span class="grey">Hide Full</span><label class="switch2" style="margin-top: 4px;margin-left: 11px;"><input type="checkbox" onclick="toggleHF(this.checked);windows[1].searchList()"><span class="slider2"></span></label></div></div></div><div style="height:10px"></div><div style="font-size:20px"><div id="serverHolder"><div class="menuSelectorHeader" onclick="setExpandedRegion(0)" style="cursor: pointer;"><span class="material-icons plusOrMinus">navigate_next</span> Custom Games<span style="float:right">0 online</span></div><div class="quickJoin" onclick="quickJoinRegion(0)">Quick Join</div><div class="menuSelectorHeader" onclick="setExpandedRegion(1)" style="cursor: pointer;"><span class="material-icons plusOrMinus">navigate_next</span> New Jersey<span style="float:right">0 online</span></div><div class="quickJoin" onclick="quickJoinRegion(1)">Quick Join</div></div><div style="height:10px"></div><b style="color:rgba(0,0,0,0.6)">0 In Game<span style="float:right;color:rgba(0,0,0,0.6)">0 on Social</span></b></div></div>
+<div id="tradeChatHolder">
+<div id="tradeChatList"></div>
+ <input id="tradeChatInput" placeholder="Enter Message" maxlength="70" autocomplete="off">
+</div>
+</div>

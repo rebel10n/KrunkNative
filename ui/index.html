@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Krunker</title>
+<link rel="shortcut icon" type="image/png" href="img/favicon.png"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0">
+<meta name="description" content="Krunker.io is a free io Multiplayer First Person Shooter. No Download browser FPS! Free!">
+<meta name="keywords" content="FPS,Apex,Free,IO,roblox,fortnite,online,shooter">
+<meta http-equiv="Accept-Ranges" content="none">
+<link rel="stylesheet" href="css/main.css"/>
+<link rel="stylesheet" href="css/flag.css"/>
+<link rel="stylesheet" href="css/google-secular-one.css"/>
+<link rel="stylesheet" href="css/material-icons.css"/>
+<link rel="stylesheet" href="css/krunknative.css"/>
+<link rel="stylesheet" href="css/hud.css"/>
+</head>
+<body oncontextmenu="return false;">
+
+<canvas id="canvas" tabindex="-1"></canvas>
+
+<div id="loadingBg"></div>
+
+<canvas id="game-overlay" oncontextmenu="return false;" style="position:
+			absolute; pointer-events: none;z-index: 1;"></canvas>
+
+<div id="uiBase">
+
+<div id="errorNotification" class="menuCard" style="display: none">
+<div>It looks like Krunker ran in to a problem. Please try <a href="#" data-ext-href="https://www.computerhope.com/issues/ch001411.htm">disabling all of your browser extensions</a> and reloading the page. If the issue persists, please report the issue to us on Reddit or Discord.</div>
+<br/>
+<div style="text-align: center"><a onclick="errorNotification.style.display = 'none'" style="cursor:pointer">Hide</a></div>
+</div>
+
+<div id="aHolder">
+<div id="aMerger">
+<div id="baseLinks"></div>
+<div style="height:10px"></div>
+
+</div>
+</div>
+
+<div id="twoFAPop" style="display:none">
+<div id="twoFAWindow">
+2-Factor Authentication
+<div id="twoFAmsg">Please enter the pattern assigned to your account</div>
+<div id="twoFAGholder"></div>
+<div id="twoFAbtn" onclick="sub2FA()">Submit</div>
+</div>
+</div>
+
+<div id="bdayBlock" onclick="bdayPlay()">
+<div id="bdayShake">
+<div id="bdayWindow">
+<div id="bdaySpeech">
+Download and Login to Enter
+</div>
+<span id="bdayTag">Ends November 1st</span>
+<div style="position:absolute;left:76px;bottom:55px;">
+<img id="androidDB" onclick="openURL(&quot;https://play.google.com/store/apps/details?id=ch.yendis.krunkerhub&quot;)" src="img/android.png"></img>
+<img id="iosDB" onclick="openURL(&quot;https://apps.apple.com/app/id1515679115&quot;)" src="img/ios.png"></img>
+</div>
+</div>
+</div>
+</div>
+
+<div id="consentBlock">
+<div id="consentShake">
+<div id="consentWindow">
+<span style="font-size:25px">Welcome to Krunker.io</span>
+<div style="color:rgba(0,0,0,0.6)">
+This site uses cookies to personalize your experience. To use this site
+you must agree and read the <a href="docs/terms.txt">Terms &amp; Conditions.</a>
+Learn more about cookies <a href="#" data-ext-href="https://cookiesandyou.com/">here.</a>
+</div>
+<div>
+<div class="termsBtn" onclick="checkTerms(0)" style="background-color:#dd4a42">Decline</div>
+<div class="termsBtn" onclick="checkTerms(1)" style="background-color:#a6dd42">Accept</div>
+</div>
+</div>
+</div>
+</div>
+
+<div id="vignette"></div>
+
+<div id="overlay"></div>
+
+<div id="imgFlash"></div>
+
+<div id="infoHolder" style="display:none">
+<div id="mapInfoHolder">
+<div id="modVote"></div>
+<div id="mapVote"></div>
+<div id="mapInfo"></div>
+<div id="termsInfo">
+<div class="terms standout" onclick="showWindow(21)" onmouseover="SOUND.play('tick_0',0.1)">Advertise</div>
+<div class="verticalSeparatorInline"></div>
+<div class="terms" onclick="showWindow(29)" onmouseover="SOUND.play('tick_0',0.1)">Support</div>
+<div class="verticalSeparatorInline"></div>
+<div class="terms" onclick="openTab('./docs/terms.txt')" onmouseover="SOUND.play('tick_0',0.1)">Terms</div>
+<div class="verticalSeparatorInline"></div>
+<div class="terms" onclick="showWindow(35)" onmouseover="SOUND.play('tick_0',0.1)">v3.1.1</div>
+</div>
+</div>
+</div>
+
+<div id="purchaseHolder">
+<div id="purchaseSelector">
+PAYMENT METHOD<div></div>
+<div style="color:rgba(0,0,0,0.4);font-size:22px;margin-bottom:10px">
+Reversing a payment can<br/> result in the termination<br/>
+of your krunker account.</div>
+<div id="androidPayB" onclick="openURL('https://apps.apple.com/app/id1515679115')">
+<img src="img/app_1.png" style="width:26px;margin-right:6px;margin-bottom:-2px"/>
+Pay on Apple
+</div>
+<div id="androidPayB" onclick="openURL('https://play.google.com/store/apps/details?id=ch.yendis.krunkerhub&amp;hl=en_AU')">
+<img src="img/app_0.png" style="width:26px;margin-right:6px;margin-bottom:-5px"/>
+Pay on Android App
+</div>
+<div style="height:6px"></div>
+<div id="paypal-button"></div>
+</div>
+</div>
+
+<div id="purchaseResponse">
+<div id="purchaseRespH">
+</div>
+</div>
+
+<div id="menuHolder">
+
+<div id="spinUI">
+<div id="spinTHold">
+<div id="spinKR"></div>
+</div>
+<div id="spinItems"></div>
+<div id="spinInfo"></div>
+<div id="spinHolder" class="midHolder">
+<div id="spinRaysH">
+<div id="spinRays"></div>
+</div>
+<div id="spinItem">
+<div id="spinItemCanvas"></div>
+</div>
+<div id="spinItemName"></div>
+<div id="spinButton">
+<div id="spinText">
+<div id="spinHeader">SPIN</div>
+<div id="spinCost"></div>
+</div>
+</div>
+<canvas id="spinWindow"></canvas>
+</div>
+</div>
+
+<div id="respinUI">
+<div id="spinRespin" class="button smallNoS buttonP"></div>
+<div id="spinRespinInfo" class="button btnRespin">?</div>
+</div>
+
+<div id="purchaseLoad">
+<div class="centerV">
+<div id="purchLoadRing" class="lds-ring">
+<div></div><div></div><div></div><div></div></div>
+<div id="purchaseLabel"></div>
+</div>
+</div>
+
+<div id="menuHider" style="display: none;">
+
+<div id="subLogoButtons">
+<div id="braveWarning">Using Brave may cause performance issues</div>
+<div class="button small buttonP" id="menuBtnHost" onmouseenter="playTick()" onclick="openHostWindow()">Host Game</div>
+<div class="button small buttonR" id="menuBtnBrowser" onmouseenter="playTick()" onclick="showWindow(2)">Servers</div>
+<div class="button small buttonG" id="menuBtnRanked" onmouseenter="playTick()" onclick="showWindow(27)">Ranked</div>
+<div id="inviteButton" class="button small buttonPI" onmouseenter="playTick()" onclick="copyInviteLink()">Invite</div>
+<div class="button small buttonPI" id="menuBtnJoin" onmouseenter="playTick()" onclick="openJoinWindow()">Join</div>
+</div>
+
+<div id="streamContainer">Loading Streams...</div>
+
+<div id="teamSelector">
+<span class="teamNm" id="teamNm1" style="color:#fff">Team 1</span>
+<label class="switchsml centSwitch"><input type="checkbox" onclick="toggleTeam(this.checked)">
+<span class="sliderCent"></span></label>
+<span class="teamNm" id="teamNm2">Team 2</span>
+</div>
+
+<div id="gameNameHolder">
+<img id="mainLogo" src="img/logo_4.png"/>
+</div>
+
+
+<div id="claimHolder" onclick="claimReward()">
+<img id="claimImg"/>
+<div id="claimTimer"></div>
+</div>
+
+<div id="merchHolder" onclick="openURL('https://shop.spreadshirt.com/krunkerio')">
+<img id="merchImg" src="img/merch.png"/>
+</div>
+
+<div id="spectButton">
+<span style="font-size:15px;color:rgba(255,255,255,0.6)">Spectate</span>
+<label class="switchsml"><input type="checkbox" onclick="toggleSpect(this.checked)"><span class="sliderSml"></span></label>
+</div>
+
+<div id="menuClassContainer">
+<div id="bubbleContainer">
+<div class="speechBox sb1" id="txtBubble"></div>
+</div>
+<canvas id="classPreviewCanvas"></canvas>
+<div id="menuClassNameTag"></div>
+<div id="menuClassSubtext"></div>
+<div id="menuClassName"></div>
+<div>
+<div id="policeButton" class="button buttonB" onclick="shoPolicePop()" style="height:78px;width:60px;vertical-align:bottom">
+<img src="img/police.png" style="height:45px;margin-left:-10px"/>
+</div>
+<div id="customizeButton" class="button buttonG bigShadowT" onmouseenter="playTick()" onclick="showWindow(3)">
+Customize <span class="material-icons" style="font-size:36px;
+								color:#fff;margin-left:6px;margin-bottom:-15px;
+								vertical-align:top">colorize</span>
+</div>
+</div>
+</div>
+
+<div id="signedOutHeaderBar" class="headerBarLeft headerBar">
+<div class="button buttonP lgn" style="width:300px;margin-right:0px;padding-top:3px;padding-bottom:15px;" onmouseenter="playTick()" onclick="showWindow(5)">
+Login or Register <span class="material-icons" style="
+							vertical-align:bottom;color:#fff;font-size:30px;
+							margin-bottom:-1px;">person</span>
+</div>
+</div>
+<div id="signedInHeaderBar" class="headerBarLeft headerBar" style="display: none">
+<div id="menuUsernameContainer" onclick="showWindow(5)">
+<img src="img/favicon.png" id="menuMiniProfilePic">
+<div id="menuAccountUsername">?</div>
+</div>
+<div class="verticalSeparator" style="height:35px;"></div>
+<div class="krInfo">
+<div id="menuKRCount">?</div>
+<div class="krSocial" onmouseenter="playTick()" onclick="windows[13].purchase()">
++
+</div>
+</div>
+<div class="verticalSeparator" style="height:35px;"></div>
+<div id="mailContainer">
+<div id="mailCount"></div>
+<i class="material-icons" id="mailIcon" onclick="showWindow(30)" style="color:#fff;font-size:37px">email</i>
+</div>
+<div id="mLevelCont">...</div>
+<div class="progressBar" id="menuLvlHold">
+<div class="progressBarInner" id="menuLevelBar">
+</div></div>
+</div>
+<div class="headerBarRight headerBar">
+<div id="menuServerInfoContainer">
+<div id="menuRegionLabel" onclick="showWindow(2)">...</div>
+<div class="menuDebugInfo">
+<div id="menuFPSDisplay"><span id="menuFPS" style="color:#9eeb56">0</span> FPS</div>
+<div id="menuPingDisplay"><i id="menuPingIcon" class="material-icons" style="color: gray">signal_cellular_alt</i><span id="menuPingText">0</span></div>
+</div>
+</div>
+<div class="verticalSeparator"></div>
+<div class="imageButton downloadClient" onmouseenter="playTick()" onclick="showWindow(25)"></div>
+<div class="imageButton discordSocial" onmouseenter="playTick()" onclick="openURL('https://discord.gg/HfeUSZ3MGE')"></div>
+<div class="imageButton redditSocial" onmouseenter="playTick()" onclick="openURL('https://www.reddit.com/r/KrunkerIO')"></div>
+<div class="imageButton twitterSocial" onmouseenter="playTick()" onclick="openURL('https://twitter.com/krunkerio')"></div>
+</div>
+
+<div id="menuItemContainer">
+<div class="menuItem" onmouseenter="playTick()" onclick="showWindow(5)">
+<div class="menuItemIcon iconProfile"></div>
+<div class="menuItemTitle" id="menuBtnProfile">Profile</div>
+</div>
+<div class="menuItem" onmouseenter="playTick()" onclick="showWindow(14)">
+<div class="menuItemIcon iconShop"></div>
+<div class="menuItemTitle" id="menuBtnShop">Shop</div>
+</div>
+<div class="menuItem" onmouseenter="playTick()" onclick="showWindow(33)">
+<div class="menuItemIcon iconChall"></div>
+<div class="menuItemTitle" id="menuBtnChall" style="font-size:13px">Challenges</div>
+</div>
+<div class="menuItem" onmouseenter="playTick()" onclick="window.open('/social.html', '_blank')">
+<div class="menuItemIcon iconSocial"></div>
+<div class="menuItemTitle" id="menuBtnSocial">Hub</div>
+</div>
+<div class="menuItem" onmouseenter="playTick()" onclick="showWindow(10)">
+<div class="menuItemIcon iconGames"></div>
+<div class="menuItemTitle" id="menuBtnMaps">Games</div>
+</div>
+<div class="menuItem" onmouseenter="playTick()" onclick="showWindow(4)">
+<div class="menuItemIcon iconMods"></div>
+<div class="menuItemTitle" id="menuBtnMods">Mods</div>
+</div>
+<div class="menuItem" onmouseenter="playTick()" onclick="showWindow(1)">
+<div class="menuItemIcon iconSettings"></div>
+<div class="menuItemTitle" id="menuBtnSettings">Settings</div>
+</div>
+</div>
+
+<div id="popupHolder">
+<div id="popupBack" onclick="clearPops()"></div>
+<div id="popupContent"></div>
+<div id="confPremiumPop"></div>
+<div id="confPop"></div>
+<div id="pfpPop"></div>
+<div id="dropsPop"></div>
+<div id="twitchPop"></div>
+<div id="gameCodePop"></div>
+<div id="tradePop"></div>
+<div id="policePop">
+<div id="policePopC"></div>
+</div>
+</div>
+
+<div id="phonePop">
+<img id="phoneImg" src="img/phone_r.png"/>
+</div>
+
+<div id="windowHolder" style="display:none">
+<div id="windowHeader"></div>
+<div id="menuWindow"></div>
+<div id="tradeChatHolder">
+<div id="tradeChatList"></div>
+ <input id="tradeChatInput" placeholder="Enter Message" maxlength="70" autocomplete="off"></input>
+</div>
+</div>
+
+<div id="supportMapCreator" style="display:none"></div>
+</div>
+</div>
+
+<div id="endUI">
+<div id="endChals"></div>
+<div id="victorySubHolder">
+<img id="victorySub"/>
+</div>
+<div id="endInfo">
+<div id="victoryText"></div>
+<div id="teamTotal0" class="teamTotals" style="margin-right:15px;"></div>
+<div id="endTimer"></div>
+<div id="teamTotal1" class="teamTotals" style="margin-left:15px;"></div>
+</div>
+<div id="endMidHolder">
+<div class="endAHolder" id="endAHolderL" style="opacity:0;margin-right: 10px;">
+<div id="endAMerger">
+<div id="endAContainer">
+<div><div align="center" id="krunkerio_300x250_3">
+</div></div>
+</div>
+</div>
+</div>
+<div id="endTabbedView"></div>
+<div class="endAHolder" id="endAHolderR" style="opacity:0;">
+<div id="endAMerger">
+<div id="endAContainer">
+<div><div align="center" id="krunkerio_300x250_2">
+</div></div>
+</div>
+</div>
+</div>
+</div>
+<div></div>
+<div id="matchVoteHolder"></div>
+</div>
+
+<div id="aimRecticle">
+<div class="topBox black"></div>
+<div class="leftBox black"></div>
+<img id="recticleImg" src="textures/recticle.png"/>
+<div class="bottomBox black"></div>
+<div class="rightBox black"></div>
+</div>
+<img id="aimDot" src="textures/reticles/reticle_0.png"/>
+
+<div id="chatUI" style="display:none">
+<div id="chatBG"></div>
+<div id="chatHolder">
+<div id="chatList"></div>
+<input id="chatInput" placeholder="Enter Message" maxlength="70" autocomplete="off" onfocus="focusChat(1);" onblur="focusChat();"></input>
+</div>
+<div id="voiceDisplay"><i id="voiceIcon" class="material-icons" style="color:#fff;font-size:40px">mic</i> <div id="recTimer">[V]</div></div>
+</div>
+
+<div id="blockerDiv"></div>
+
+<img id="jumpSIMG" style="display:none"/>
+<div id="jumpSVIDHolder" style="display:none">
+<video id="jumpSVID"></video></div>
+
+<div id="spectateUI">
+<div id="spectateHUD">
+<div id="specTeam0"></div>
+<div id="spec0">
+<div id="specScoreTm0">0</div>
+<div id="specNameTm0">Team 1</div>
+</div>
+<div class="spectateInfo">
+<div id="specTimer"></div>
+<div id="specGameInfo"></div>
+</div>
+<div id="spec1">
+<div id="specScoreTm1">0</div>
+<div id="specNameTm1">Team 2</div>
+</div>
+<div id="specTeam1"></div>
+<div id="specGMessage"></div>
+</div>
+<div id="specNames">
+Spectating
+</div>
+<div id="specStats" style="display:none;"></div>
+<div id="specSUS" style="display:none;">SUSPECT</div>
+<div id="specContr">
+<div class="specContrI" style="margin-left:0"><span style="color:rgba(255,255,255,0.7)">Prev</span> [LM]</div>
+<div class="specContrI"><span style="color:rgba(255,255,255,0.7)">Next</span> [RM]</div>
+<div class="specContrI"><span style="color:rgba(255,255,255,0.7)">Objective Cam</span> [H]</div>
+<div class="specContrI"><span style="color:rgba(255,255,255,0.7)">Free Cam</span> [F]</div>
+<div class="specContrI"><span style="color:rgba(255,255,255,0.7)">Player/Cam</span> [1-9]</div>
+<div class="specContrI"><span id="specIns" style="color:rgba(255,255,255,0.7)">First Person</span> [R]</div>
+</div>
+<div id="specKPDContr">
+<div style="color: #fff;font-size: 30px;margin-bottom: 10px;">Was this report helpful?</div>
+<div class="specKPDContrI" style="margin-left:0"><span style="color:rgba(255,255,255,0.7)">NO</span> [N]</div>
+<div class="specKPDContrI"><span style="color:rgba(255,255,255,0.7)">YES</span> [Y]</div>
+</div>
+</div>
+
+<div id="pre-content-container" style="display: none">
+<div id="pre-content-text">Preparing Free KR</div>
+</div>
+
+<div id="twitchHolder" style="display: none" onclick="closeTwitch();"></div>
+
+<div id="gameUI">
+
+<div id="inGameUI" class="gameUIH">
+<div id="newLeaderDisplay">
+<div id="leaderContainerD" class="newLeaderContainer"></div>
+<div id="leaderContainer0" class="newLeaderContainer"></div>
+<div id="leaderContainer1" class="newLeaderContainer"></div>
+</div>
+<div id="topRight">
+<div id="leaderDisplay">
+<div id="leaderContainer"></div>
+</div><div></div>
+<div class="topRightCounters">
+<div id="scoreZoneCount" class="countIcon"></div>
+<div id="livesCount" class="countIcon"></div>
+<div id="killCount" class="countIcon">
+<img src="img/skull_0.png" id="killsIcon"/>
+<span id="killsVal">0</span>
+</div>
+<div id="deathCount" class="countIcon">
+<img src="img/skull_1.png" id="deathsIcon"/>
+<span id="deathsVal">0</span>
+</div>
+<div id="streakCount" class="countIcon">
+<img src="img/skull_2.png" id="streakIcon"/>
+<span id="streakVal">0</span>
+</div>
+<div id="scoreCount" class="countIcon">
+<i class="material-icons" style="color:#ffc147;font-size:35px;">star</i>
+<span id="myScoreVal">0</span>
+</div>
+</div>
+<div></div>
+<div id="killFeed"></div>
+</div>
+<img id="bloodDisplay" src="img/blood.png"/>
+<div id="chalDisplay">
+<div id="chalName" class="centerUIB"></div>
+</div>
+<div id="propInstruct">
+<span style="color:#fbc02d">[M1]</span> Change Prop
+<span style="color:#fbc02d">[1-5]</span> Taunts
+</div>
+<div id="botRightHider">
+<div id="weapDisplay"></div>
+<div id="bottomRight">
+<div id="killStreakHolder"></div>
+<div id="ammoDisplay" class="UIB">
+<div id="ammoVal"></div>&nbsp;<div id="ammoMax"></div>
+<img id="ammoIcon" src="textures/ammo_0.png">
+</div>
+</div>
+</div>
+<div id="gameMessage"></div>
+<div id="topLeftHolder">
+<div id="timerDisplay" class="leftUIB">
+<img src="img/timer.png" id="timerIcon"/>
+<span id="timerVal"></span>
+</div>
+<div class="debugInfo">
+<div id="fpsDisplay">
+<span id="ingameFPS" style="color:#9eeb56">0</span> FPS
+
+</div>
+<div id="pingDisplay"><span id="pingText">0</span><i id="pingIcon" class="material-icons" style="color: gray">signal_cellular_alt</i></div>
+<div id="ingressDisplay"><i id="ingressIcon" class="material-icons">keyboard_arrow_down</i><span id="ingressPacketCount">0 P/s</span><span id="ingressDataSize">0 KB/s</span></div>
+<div id="egressDisplay"><i id="egressIcon" class="material-icons">keyboard_arrow_up</i><span id="egressPacketCount">0 P/s</span><span id="egressDataSize">0 KB/s</span></div>
+</div>
+<div id="queueStatus" style="display:none">
+<div id="queueStatusText">QUEUED</div>
+</div>
+<div></div>
+<div id="curGameInfo"></div>
+<div></div>
+<div id="teamScores"></div>
+<div id="voteToKick">
+<div id="voteKickInfo"></div>
+<div id="voteKickNum">Votes: 0/0</div>
+<div id="voteKickName">Kick Guest_1</div>
+<div id="voteKickKeys">
+<span style="color:#FBC02D">[1]</span> YES
+<span style="color:#FBC02D">[2]</span> NO
+</div>
+</div>
+<div id="networkLag">
+<div id="networkLagHed">Network Lag Detected!</div>
+<div>Consider Using</div>
+<div>Experimental Settings</div>
+</div>
+<div id="speakerDisplay"></div>
+<div id="skinRewards"></div>
+</div>
+<div id="hiddenMsg">
+You are hidden
+<i class="material-icons" style="color:#fff;font-size:40px;vertical-align:middle;margin-top:-5px">
+remove_red_eye
+</i>
+</div>
+<div id="terminalHolder">
+<div id="terminalText">Input Message, Press Enter when done.</div>
+<input id="terminalInput" placeholder="Enter Message" maxlength="70">
+</div>
+<div id="interactProg">
+<div id="interProgB" class="interProg"></div>
+</div>
+<div id="interactMsg" class="centerUIB"></div>
+<div id="reloadMsg">[R] Reload</div>
+<div id="bottomLeftHolder">
+<div id="hudClassIcon">
+<img id="hudClassImg"/>
+</div>
+<div style="display:inline-block;vertical-align:bottom">
+<div id="healthValueHolder">
+<div id="healthValue"></div>
+<img id="challIcon"/>
+</div>
+<div></div>
+<div id="healthBar"></div>
+<div id="teamName"></div>
+</div>
+</div>
+<div id="hitHolder"></div>
+<div id="scoreText"></div>
+<div id="checkTextHolder">
+<div id="checkText"></div>
+</div>
+<div id="killCardHolder">
+<div id="killCardMsg">
+<div id="killCardKick">
+<span style="color:#FBC02D">[Tab]</span> to Votekick
+</div>
+<div id="killCardBy"></div>
+</div></br>
+<div id="killCard"></div>
+</div>
+<div id="texts3DHolder"></div>
+<img id="hitmarker" src="textures/hitmarker_3.png"/>
+<div id="igXPBar">
+<div id="igXPBarProg"></div>
+</div>
+</div>
+
+<div id="inGameUISurv" class="gameUIH">
+</div>
+
+<div id="instructionsUpdateBG"></div>
+<div id="instructionHolder">
+<div id="instructions">
+LOADING...
+</div>
+<div id="instructionsUpdate"></div>
+<div id="instructionsUpdateCredit" onclick="openURL('https://twitter.com/EmpoDesign')">Art by @EmpoDesign</div>
+</div>
+</div>
+
+<div id="killReactHolder">
+<div id="killReactC">
+<div id="kReactText">
+<div id="kReactTo">to</div>
+<div id="kReactTimer">00:00</div>
+</div>
+<div id="killReactWindow">
+<input id="reactInput" placeholder="Enter Message" maxlength="36"></input>
+<div id="reactButton" onclick="sendReaction()">Send Reaction</div>
+</div>
+</div>
+</div>
+</div>
+<div id="mobileUI">
+<div id="mobileJoystick"></div>
+<div id="mobileJump"></div>
+<div id="mobileCrouch"></div>
+<div id="mobileEsc"></div>
+<div id="mobileShoot"></div>
+<div id="mobileAimShoot"></div>
+<div id="mobileScope"></div>
+<div id="mobileReload"></div>
+<div id="mobileSwap"></div>
+</div>
+<script src="js/kn-shim.js"></script>
+<script src="js/loader.js"></script>
+</body>
+</html>

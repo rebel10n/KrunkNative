@@ -1,0 +1,740 @@
+// Krunker's SOUND manager (v3.1.1 Krunker.Unpacked-v3.1.1/64.js) on miniaudio's ma_engine.
+//
+// Howler semantics kept here:
+// - each play() starts a new overlapping voice of the clip (Howl sound pool);
+// - per-voice volume = clamp(volume * category volume, 0, 1): Howler's volume() ignores
+//   values outside [0, 1], so e.g. hit_0 at 3.1 plays at full volume, as here;
+// - the master slider (category 0) is Howler.volume(), i.e. the engine volume, and is also
+//   applied to sounds listed in category 0 (nuke_0, siren_0, beep_0, ...), like Krunker;
+// - sounds missing from soundCats play with a category factor of 1;
+// - play3D: Web Audio PannerNode with the "inverse" distance model, refDistance 25,
+//   rolloffFactor 1, maxDistance 10000 = ma_attenuation_model_inverse with the same values
+//   (panning is miniaudio's, level-matched to an equal-power panner; Howler uses HRTF).
+//
+// Clips are decoded to f32 once (assets/sound/<name>.mp3). Long files (the ambient loops,
+// > AUDIO_STREAM_BYTES of MP3) stay compressed in memory and every voice streams them
+// through its own decoder instead.
+#include <audio.h>
+#include <voice_chat.h> // voice_audio_fini
+#include <shared.h>
+#include "audio_miniaudio.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
+#define AUDIO_MAX_CLIPS 192
+#define AUDIO_MAX_VOICES 64
+#define AUDIO_MAX_PENDING 64
+#define AUDIO_NAME_MAX 48
+#define AUDIO_STREAM_BYTES (192 * 1024)
+#ifdef __EMSCRIPTEN__
+#define AUDIO_LOADS_PER_FRAME 1 // every first load is a blocking (asyncify) fetch
+#else
+#define AUDIO_LOADS_PER_FRAME 2
+#endif
+
+typedef enum {
+    CLIP_UNLOADED = 0,
+    CLIP_QUEUED,
+    CLIP_READY,
+    CLIP_FAILED,
+} ClipState;
+
+typedef struct {
+    char name[AUDIO_NAME_MAX];
+    ClipState state;
+    int category;          // -1: not in Krunker's soundCats (factor 1)
+    float *pcm;            // decoded clip (NULL when streamed)
+    ma_uint64 frames;
+    ma_uint32 channels;
+    ma_uint32 sample_rate;
+    unsigned char *file;   // compressed bytes of a streamed clip
+    size_t file_size;
+} AudioClip;
+
+typedef enum {
+    VOICE_2D,
+    VOICE_3D,
+    VOICE_3D_LOOP,
+} VoiceKind;
+
+typedef struct {
+    int in_use;
+    int clip;
+    VoiceKind kind;
+    int loop;
+    int streamed;
+    float volume;          // Howl `vol`: volume before the category factor
+    ma_audio_buffer_ref buffer;
+    ma_decoder decoder;
+    ma_sound sound;
+} AudioVoice;
+
+typedef struct {
+    int clip;
+    VoiceKind kind;
+    int loop;
+    vec3 position;
+    float volume, rate, ref_distance, rolloff;
+} PendingPlay;
+
+static struct {
+    int ready;
+    int log;
+    ma_context context;
+    int context_ready;
+    ma_engine engine;
+    float volumes[AUDIO_CAT_COUNT];
+    float rate_scale; // SOUND.rate (1 unless the round-end slow motion runs), see audio_set_rate
+
+    AudioClip clips[AUDIO_MAX_CLIPS];
+    int clip_count;
+    AudioVoice voices[AUDIO_MAX_VOICES];
+    PendingPlay pending[AUDIO_MAX_PENDING];
+    int pending_count;
+
+    FILE *capture;
+    ma_uint64 capture_frames;
+} g_audio = {
+    .volumes = {0.8f, 1.0f, 1.0f, 0.5f, 1.0f, 1.0f, 1.0f},
+    .rate_scale = 1.0f,
+};
+
+// SOUND.soundCats (64.js), verbatim.
+static const struct {
+    const char *name;
+    int category;
+} SOUND_CATS[] = {
+    {"nuke_0", 0}, {"siren_0", 0}, {"jumpS_0", 0}, {"beep_0", 0}, {"bo_plant", 0}, {"bo_diff", 0},
+    {"ambient_1", 2}, {"ambient_2", 2}, {"ambient_3", 2}, {"ambient_4", 2}, {"ambient_5", 2},
+    {"ambient_6", 2}, {"ambient_7", 2}, {"ambient_8", 2},
+    {"aim_0", 3}, {"aim_1", 3}, {"explosion", 3}, {"gclick_0", 3}, {"pick_0", 3}, {"pick_1", 3},
+    {"reload_1", 3}, {"reload_2", 3}, {"swsh_0_0", 3}, {"swsh_0_1", 3},
+    {"weapon_1", 3}, {"weapon_1_0", 3}, {"weapon_2", 3}, {"weapon_3", 3}, {"weapon_4", 3},
+    {"weapon_5", 3}, {"weapon_6", 3}, {"weapon_7", 3}, {"weapon_8", 3}, {"weapon_9", 3},
+    {"weapon_10", 3}, {"weapon_11", 3}, {"weapon_12", 3}, {"weapon_13", 3}, {"weapon_14", 3},
+    {"weapon_15", 3}, {"weapon_16", 3}, {"weapon_17", 3}, {"weapon_18", 3}, {"whizz_0", 3},
+    {"whizz_1", 3}, {"weapon_6_0", 3}, {"weapon_1_2", 3}, {"weapon_3_0", 3}, {"rico_1", 3},
+    {"rico_2", 3}, {"case_0", 3}, {"case_1", 3}, {"weapon_3_2", 3}, {"weapon_2_0", 3},
+    {"weapon_1_4", 3}, {"weapon_1_3", 3}, {"weapon_8_0", 3}, {"weapon_10_0", 3},
+    {"melee_12", 3}, {"swsh_12_0", 3}, {"swsh_12_1", 3}, {"weapon_4_0", 3}, {"melee_equip", 3},
+    {"melee_14", 3}, {"swsh_14_0", 3}, {"swsh_14_1", 3}, {"weapon_1_5", 3}, {"weapon_19", 3},
+    {"melee_19", 3}, {"swsh_19_0", 3}, {"swsh_19_1", 3},
+    {"fart_0", 4}, {"headshot_0", 4}, {"hit_0", 4}, {"impact_0", 4}, {"jump_0", 4}, {"jump_1", 4},
+    {"land_0", 4}, {"punch_0", 4}, {"punch_1", 4}, {"slide_0", 4}, {"spray", 4}, {"step_0", 4},
+    {"step_1", 4}, {"step_2", 4}, {"taunt_0", 4}, {"taunt_1", 4}, {"taunt_2", 4}, {"taunt_3", 4},
+    {"taunt_4", 4}, {"cough_1", 4}, {"cough_2", 4}, {"collect_1", 4}, {"bounce_0", 4},
+    {"buy_0", 5}, {"buy_1", 5}, {"cheer_0", 5}, {"reward", 5}, {"store", 5}, {"tick_0", 5},
+};
+
+// ---------------------------------------------------------------- helpers
+
+static float clamp01(const float v) {
+    return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
+}
+
+static int sound_category(const char *name) {
+    for (size_t i = 0; i < sizeof(SOUND_CATS) / sizeof(SOUND_CATS[0]); i++) {
+        if (!strcmp(SOUND_CATS[i].name, name)) return SOUND_CATS[i].category;
+    }
+    return -1;
+}
+
+static float category_factor(const int category) {
+    return category < 0 ? 1.0f : g_audio.volumes[category];
+}
+
+static double audio_now(void) {
+    return (double) ma_engine_get_time_in_milliseconds(&g_audio.engine) / 1000.0;
+}
+
+static int clip_find(const char *name, const int create) {
+    if (!name || !*name || strlen(name) >= AUDIO_NAME_MAX) return -1;
+
+    for (int i = 0; i < g_audio.clip_count; i++) {
+        if (!strcmp(g_audio.clips[i].name, name)) return i;
+    }
+
+    if (!create || g_audio.clip_count >= AUDIO_MAX_CLIPS) return -1;
+
+    AudioClip *clip = &g_audio.clips[g_audio.clip_count];
+    memset(clip, 0, sizeof(*clip));
+    strcpy(clip->name, name);
+    clip->category = sound_category(name);
+    return g_audio.clip_count++;
+}
+
+// 0 while assets/sound/<name>.mp3 is still downloading in the background (web).
+static int clip_prefetched(const AudioClip *clip) {
+    char relative[AUDIO_NAME_MAX + 16];
+    snprintf(relative, sizeof(relative), "sound/%s.mp3", clip->name);
+    char *path = concat(assets_path(), relative);
+    const int state = path ? asset_prefetch(path) : -1;
+    free(path);
+    return state != 0;
+}
+
+// Read and (for short clips) decode assets/sound/<name>.mp3. Can block on the web
+// (ensure_asset_file fetch): only called from audio_update().
+static int clip_load(AudioClip *clip) {
+    if (clip->state == CLIP_READY) return 1;
+    if (clip->state == CLIP_FAILED) return 0;
+
+    char relative[AUDIO_NAME_MAX + 16];
+    snprintf(relative, sizeof(relative), "sound/%s.mp3", clip->name);
+    char *path = concat(assets_path(), relative);
+
+    unsigned char *data = NULL;
+    size_t size = 0;
+    const int read_error = !path || read_file(path, &data, &size);
+    free(path);
+
+    if (read_error || !data || !size) {
+        free(data);
+        fprintf(stderr, "[audio] missing sound %s\n", clip->name);
+        clip->state = CLIP_FAILED;
+        return 0;
+    }
+
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
+
+    if (size > AUDIO_STREAM_BYTES) {
+        // Long loop: probe the format, keep the MP3 bytes, decode per voice while playing.
+        ma_decoder probe;
+        if (ma_decoder_init_memory(data, size, &config, &probe) != MA_SUCCESS) {
+            free(data);
+            fprintf(stderr, "[audio] cannot decode %s\n", clip->name);
+            clip->state = CLIP_FAILED;
+            return 0;
+        }
+        clip->channels = probe.outputChannels;
+        clip->sample_rate = probe.outputSampleRate;
+        ma_decoder_uninit(&probe);
+
+        clip->file = data;
+        clip->file_size = size;
+    } else {
+        void *pcm = NULL;
+        ma_uint64 frames = 0;
+        const ma_result result = ma_decode_memory(data, size, &config, &frames, &pcm);
+        free(data);
+
+        if (result != MA_SUCCESS || !pcm || !frames) {
+            if (pcm) ma_free(pcm, NULL);
+            fprintf(stderr, "[audio] cannot decode %s\n", clip->name);
+            clip->state = CLIP_FAILED;
+            return 0;
+        }
+
+        clip->pcm = pcm;
+        clip->frames = frames;
+        clip->channels = config.channels;
+        clip->sample_rate = config.sampleRate;
+    }
+
+    clip->state = CLIP_READY;
+    return 1;
+}
+
+static void clip_free(AudioClip *clip) {
+    if (clip->pcm) ma_free(clip->pcm, NULL);
+    free(clip->file);
+    clip->pcm = NULL;
+    clip->file = NULL;
+    clip->state = CLIP_UNLOADED;
+}
+
+// ---------------------------------------------------------------- voices
+
+static void voice_release(AudioVoice *voice) {
+    if (!voice->in_use) return;
+    ma_sound_uninit(&voice->sound);
+    if (voice->streamed) ma_decoder_uninit(&voice->decoder);
+    else ma_audio_buffer_ref_uninit(&voice->buffer);
+    voice->in_use = 0;
+}
+
+// miniaudio's spatializer pans linearly: a sound straight ahead reaches each speaker at
+// 0.5 gain. Web Audio's panner (Howler) keeps a frontal stereo source at unity and a mono
+// one at cos(PI/4) per speaker (equal power), so spatialized voices are scaled back up.
+static float spatial_compensation(const AudioVoice *voice) {
+    if (voice->kind == VOICE_2D) return 1.0f;
+    return g_audio.clips[voice->clip].channels >= 2 ? 2.0f : (float) M_SQRT2;
+}
+
+static void voice_apply_volume(AudioVoice *voice) {
+    const AudioClip *clip = &g_audio.clips[voice->clip];
+    ma_sound_set_volume(&voice->sound, clamp01(voice->volume * category_factor(clip->category)) * spatial_compensation(voice));
+}
+
+static AudioVoice *voice_alloc(void) {
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        if (!g_audio.voices[i].in_use) return &g_audio.voices[i];
+    }
+
+    // Pool full: steal the one-shot that has played longest (loops are never stolen).
+    AudioVoice *oldest = NULL;
+    ma_uint64 oldest_cursor = 0;
+
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        AudioVoice *voice = &g_audio.voices[i];
+        if (voice->loop) continue;
+
+        ma_uint64 cursor = 0;
+        ma_sound_get_cursor_in_pcm_frames(&voice->sound, &cursor);
+        if (!oldest || cursor > oldest_cursor) {
+            oldest = voice;
+            oldest_cursor = cursor;
+        }
+    }
+
+    if (oldest) voice_release(oldest);
+    return oldest;
+}
+
+static void voice_start(const PendingPlay *play) {
+    AudioClip *clip = &g_audio.clips[play->clip];
+    if (!clip_load(clip)) return;
+
+    AudioVoice *voice = voice_alloc();
+    if (!voice) return;
+
+    memset(voice, 0, sizeof(*voice));
+    voice->clip = play->clip;
+    voice->kind = play->kind;
+    voice->loop = play->loop;
+    voice->volume = play->volume;
+    voice->streamed = clip->file != NULL;
+
+    ma_data_source *source;
+
+    if (voice->streamed) {
+        ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
+        if (ma_decoder_init_memory(clip->file, clip->file_size, &config, &voice->decoder) != MA_SUCCESS) return;
+        source = &voice->decoder;
+    } else {
+        if (ma_audio_buffer_ref_init(ma_format_f32, clip->channels, clip->pcm, clip->frames, &voice->buffer) != MA_SUCCESS) return;
+        voice->buffer.sampleRate = clip->sample_rate;
+        source = &voice->buffer;
+    }
+
+    const ma_uint32 flags = play->kind == VOICE_2D ? MA_SOUND_FLAG_NO_SPATIALIZATION : 0;
+
+    if (ma_sound_init_from_data_source(&g_audio.engine, source, flags, NULL, &voice->sound) != MA_SUCCESS) {
+        if (voice->streamed) ma_decoder_uninit(&voice->decoder);
+        else ma_audio_buffer_ref_uninit(&voice->buffer);
+        return;
+    }
+
+    voice->in_use = 1;
+
+    if (play->kind != VOICE_2D) {
+        ma_sound_set_position(&voice->sound, play->position.x, play->position.y, play->position.z);
+        ma_sound_set_attenuation_model(&voice->sound, ma_attenuation_model_inverse);
+        ma_sound_set_min_distance(&voice->sound, play->ref_distance);
+        ma_sound_set_max_distance(&voice->sound, AUDIO_MAX_DISTANCE);
+        ma_sound_set_rolloff(&voice->sound, play->rolloff);
+        ma_sound_set_doppler_factor(&voice->sound, 0.0f); // Web Audio panners have no doppler
+    }
+
+    ma_sound_set_pitch(&voice->sound, play->rate);
+    ma_sound_set_looping(&voice->sound, play->loop ? MA_TRUE : MA_FALSE);
+    voice_apply_volume(voice);
+    ma_sound_start(&voice->sound);
+
+    if (g_audio.log) {
+        printf("[audio] t=%.3f play%s %s vol=%.3f rate=%.2f%s", audio_now(),
+            play->kind == VOICE_2D ? "2d" : "3d", clip->name,
+            clamp01(voice->volume * category_factor(clip->category)) * g_audio.volumes[AUDIO_CAT_MASTER],
+            play->rate, play->loop ? " loop" : "");
+        if (play->kind != VOICE_2D) {
+            const ma_vec3f l = ma_engine_listener_get_position(&g_audio.engine, 0);
+            const float dx = play->position.x - l.x, dy = play->position.y - l.y, dz = play->position.z - l.z;
+            printf(" pos=(%.1f,%.1f,%.1f) dist=%.1f", play->position.x, play->position.y, play->position.z, sqrtf(dx * dx + dy * dy + dz * dz));
+        }
+        printf("\n");
+        fflush(stdout);
+    }
+}
+
+static int clip_is_playing(const int clip, const VoiceKind kind) {
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        const AudioVoice *voice = &g_audio.voices[i];
+        if (voice->in_use && voice->clip == clip && voice->kind == kind && ma_sound_is_playing(&voice->sound)) return 1;
+    }
+    for (int i = 0; i < g_audio.pending_count; i++) {
+        if (g_audio.pending[i].clip == clip && g_audio.pending[i].kind == kind) return 1;
+    }
+    return 0;
+}
+
+static void play_request(const char *name, const VoiceKind kind, const int loop, const vec3 position,
+                         const float volume, const float rate, const float ref_distance, const float rolloff) {
+    if (!g_audio.ready) return;
+
+    const int clip = clip_find(name, 1);
+    if (clip < 0) return;
+    if (g_audio.clips[clip].state == CLIP_FAILED) return;
+
+    // SOUND.play(..., loop): `if (!j || !f.isPlaying)` - a running loop is not restarted.
+    if (loop && clip_is_playing(clip, kind)) return;
+
+    const PendingPlay play = {
+        .clip = clip,
+        .kind = kind,
+        .loop = loop,
+        .position = position,
+        .volume = volume,
+        .rate = rate > 0.0f ? rate : 1.0f,
+        .ref_distance = ref_distance > 0.0f ? ref_distance : AUDIO_REF_DISTANCE,
+        .rolloff = rolloff > 0.0f ? rolloff : AUDIO_ROLLOFF,
+    };
+
+    if (g_audio.clips[clip].state == CLIP_READY) {
+        voice_start(&play);
+        return;
+    }
+
+    // Not decoded yet: audio_update() loads it (outside any UI event handler) and plays it.
+    if (g_audio.pending_count < AUDIO_MAX_PENDING) g_audio.pending[g_audio.pending_count++] = play;
+    if (g_audio.clips[clip].state == CLIP_UNLOADED) g_audio.clips[clip].state = CLIP_QUEUED;
+}
+
+// ---------------------------------------------------------------- capture (debug)
+
+static void capture_write_header(FILE *file, const ma_uint32 sample_rate, const ma_uint64 frames) {
+    const ma_uint32 data_bytes = (ma_uint32) (frames * 4);
+    const ma_uint32 byte_rate = sample_rate * 4;
+    unsigned char header[44] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ',
+                                16, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 16, 0,
+                                'd', 'a', 't', 'a', 0, 0, 0, 0};
+    const ma_uint32 riff = 36 + data_bytes;
+    for (int i = 0; i < 4; i++) {
+        header[4 + i] = (unsigned char) (riff >> (8 * i));
+        header[24 + i] = (unsigned char) (sample_rate >> (8 * i));
+        header[28 + i] = (unsigned char) (byte_rate >> (8 * i));
+        header[40 + i] = (unsigned char) (data_bytes >> (8 * i));
+    }
+    fseek(file, 0, SEEK_SET);
+    fwrite(header, 1, sizeof(header), file);
+    fseek(file, 0, SEEK_END);
+}
+
+// ma_engine onProcess: the final (master-scaled) mix, on the audio thread.
+static void capture_process(void *user, float *frames, const ma_uint64 frame_count) {
+    (void) user;
+    if (!g_audio.capture) return;
+
+    const ma_uint32 channels = ma_engine_get_channels(&g_audio.engine);
+    short out[2 * 512];
+
+    for (ma_uint64 done = 0; done < frame_count;) {
+        const ma_uint64 n = frame_count - done < 512 ? frame_count - done : 512;
+        for (ma_uint64 i = 0; i < n; i++) {
+            const float *in = frames + (done + i) * channels;
+            const float l = in[0];
+            const float r = channels > 1 ? in[1] : in[0];
+            out[i * 2] = (short) (fmaxf(-1.0f, fminf(1.0f, l)) * 32767.0f);
+            out[i * 2 + 1] = (short) (fmaxf(-1.0f, fminf(1.0f, r)) * 32767.0f);
+        }
+        fwrite(out, 4, (size_t) n, g_audio.capture);
+        done += n;
+    }
+
+    // Keep the header valid while running (the client is often killed in automated runs).
+    const ma_uint64 second = ma_engine_get_sample_rate(&g_audio.engine);
+    const ma_uint64 before = g_audio.capture_frames;
+    g_audio.capture_frames += frame_count;
+    if (second && before / second != g_audio.capture_frames / second) {
+        capture_write_header(g_audio.capture, (ma_uint32) second, g_audio.capture_frames);
+    }
+}
+
+// ---------------------------------------------------------------- lifecycle
+
+#ifdef __EMSCRIPTEN__
+// miniaudio resumes its AudioContext on the first click/touchend (autoplay policy); keys
+// and pointer presses are user activations as well (the game is often entered by key).
+EM_JS(void, audio_web_install_unlock, (void), {
+    if (typeof window === 'undefined' || !window.miniaudio || window.knAudioUnlock) return;
+    window.knAudioUnlock = function () {
+        if (window.miniaudio && window.miniaudio.unlock) window.miniaudio.unlock();
+    };
+    ['keydown', 'pointerdown', 'mousedown'].forEach(function (type) {
+        document.addEventListener(type, window.knAudioUnlock, true);
+    });
+});
+#endif
+
+int audio_init(void) {
+    if (g_audio.ready) return 1;
+
+    const char *enabled = getenv("KRUNKNATIVE_AUDIO");
+    if (enabled && !strcmp(enabled, "0")) return 0;
+
+    const char *log = getenv("KRUNKNATIVE_AUDIO_LOG");
+    g_audio.log = log && *log && strcmp(log, "0") != 0;
+
+    ma_engine_config config = ma_engine_config_init();
+    config.listenerCount = 1;
+
+    const char *backend = getenv("KRUNKNATIVE_AUDIO_BACKEND");
+    if (backend && !strcmp(backend, "null")) {
+        const ma_backend backends[] = {ma_backend_null};
+        if (ma_context_init(backends, 1, NULL, &g_audio.context) != MA_SUCCESS) return 0;
+        g_audio.context_ready = 1;
+        config.pContext = &g_audio.context;
+    }
+
+    const char *capture = getenv("KRUNKNATIVE_AUDIO_CAPTURE");
+    if (capture && *capture) {
+        config.channels = 2;
+        config.onProcess = capture_process;
+    }
+
+    if (ma_engine_init(&config, &g_audio.engine) != MA_SUCCESS) {
+        fprintf(stderr, "[audio] no audio device, sound disabled\n");
+        if (g_audio.context_ready) ma_context_uninit(&g_audio.context);
+        g_audio.context_ready = 0;
+        return 0;
+    }
+
+    if (capture && *capture) {
+        g_audio.capture = fopen(capture, "wb+");
+        if (g_audio.capture) capture_write_header(g_audio.capture, ma_engine_get_sample_rate(&g_audio.engine), 0);
+        else fprintf(stderr, "[audio] cannot open capture file %s\n", capture);
+    }
+
+    ma_engine_set_volume(&g_audio.engine, g_audio.volumes[AUDIO_CAT_MASTER]);
+    ma_engine_listener_set_world_up(&g_audio.engine, 0, 0.0f, 1.0f, 0.0f);
+    g_audio.ready = 1;
+
+#ifdef __EMSCRIPTEN__
+    audio_web_install_unlock();
+#endif
+
+    if (g_audio.log) {
+        printf("[audio] engine %u Hz, %u channels\n", ma_engine_get_sample_rate(&g_audio.engine), ma_engine_get_channels(&g_audio.engine));
+    }
+
+    return 1;
+}
+
+void audio_fini(void) {
+    if (!g_audio.ready) return;
+
+    ma_engine_stop(&g_audio.engine); // no more onProcess calls past this point
+    const ma_uint32 sample_rate = ma_engine_get_sample_rate(&g_audio.engine);
+
+    voice_audio_fini(); // voice chat sounds (voice.c) live on this engine
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) voice_release(&g_audio.voices[i]);
+    ma_engine_uninit(&g_audio.engine);
+    if (g_audio.context_ready) ma_context_uninit(&g_audio.context);
+    g_audio.context_ready = 0;
+
+    for (int i = 0; i < g_audio.clip_count; i++) clip_free(&g_audio.clips[i]);
+    g_audio.clip_count = 0;
+    g_audio.pending_count = 0;
+
+    if (g_audio.capture) {
+        capture_write_header(g_audio.capture, sample_rate, g_audio.capture_frames);
+        fclose(g_audio.capture);
+        g_audio.capture = NULL;
+    }
+
+    g_audio.ready = 0;
+}
+
+int audio_available(void) {
+    return g_audio.ready;
+}
+
+void *audio_engine(void) {
+    return g_audio.ready ? &g_audio.engine : NULL;
+}
+
+void audio_update(const vec3 listener_position, const float yaw, const float pitch) {
+    if (!g_audio.ready) return;
+
+    // Howler.pos(camera) / Howler.orientation(forward): three.js YXZ camera, -Z forward.
+    ma_engine_listener_set_position(&g_audio.engine, 0, listener_position.x, listener_position.y, listener_position.z);
+    ma_engine_listener_set_direction(&g_audio.engine, 0,
+        -sinf(yaw) * cosf(pitch), sinf(pitch), -cosf(yaw) * cosf(pitch));
+
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        AudioVoice *voice = &g_audio.voices[i];
+        if (voice->in_use && !voice->loop && ma_sound_at_end(&voice->sound)) voice_release(voice);
+    }
+
+    // Deferred plays first (each loads its clip), then idle preloading.
+    int loads = 0;
+    int kept = 0;
+
+    for (int i = 0; i < g_audio.pending_count; i++) {
+        const PendingPlay play = g_audio.pending[i];
+        AudioClip *clip = &g_audio.clips[play.clip];
+
+        if (clip->state != CLIP_READY && clip->state != CLIP_FAILED) {
+            if (loads >= AUDIO_LOADS_PER_FRAME) {
+                g_audio.pending[kept++] = play;
+                continue;
+            }
+            loads++;
+            clip_load(clip);
+        }
+
+        if (clip->state == CLIP_READY) voice_start(&play);
+    }
+
+    g_audio.pending_count = kept;
+
+    // Idle preloads download in the background first (asset_prefetch; web only, all queued
+    // clips in parallel) and are decoded once their file is in MEMFS, so the menu never
+    // waits on the network for a clip nobody is playing yet.
+    for (int i = 0; i < g_audio.clip_count && loads < AUDIO_LOADS_PER_FRAME; i++) {
+        if (g_audio.clips[i].state == CLIP_QUEUED) {
+            if (!clip_prefetched(&g_audio.clips[i])) continue;
+            clip_load(&g_audio.clips[i]);
+            loads++;
+        }
+    }
+}
+
+// ---------------------------------------------------------------- volume
+
+void audio_set_volume(const AudioCategory category, const float volume) {
+    if ((int) category < 0 || category >= AUDIO_CAT_COUNT) return;
+
+    g_audio.volumes[category] = clamp01(volume);
+    if (!g_audio.ready) return;
+
+    if (category == AUDIO_CAT_MASTER) ma_engine_set_volume(&g_audio.engine, g_audio.volumes[AUDIO_CAT_MASTER]);
+
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        AudioVoice *voice = &g_audio.voices[i];
+        if (voice->in_use && g_audio.clips[voice->clip].category == (int) category) voice_apply_volume(voice);
+    }
+}
+
+float audio_get_volume(const AudioCategory category) {
+    if ((int) category < 0 || category >= AUDIO_CAT_COUNT) return 0.0f;
+    return g_audio.volumes[category];
+}
+
+int audio_apply_setting(const char *key, const char *value) {
+    static const struct {
+        const char *key;
+        AudioCategory category;
+    } KEYS[] = {
+        {"sound", AUDIO_CAT_MASTER},
+        {"voiceVolume", AUDIO_CAT_VOICE},
+        {"ambientVolume", AUDIO_CAT_AMBIENT},
+        {"gunsVolume", AUDIO_CAT_WEAPON},
+        {"playerVolume", AUDIO_CAT_PLAYER},
+        {"uiVolume", AUDIO_CAT_UI},
+        {"assetVolume", AUDIO_CAT_ASSET},
+    };
+
+    if (!key || !value) return 0;
+
+    for (size_t i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); i++) {
+        if (strcmp(KEYS[i].key, key) != 0) continue;
+
+        char *end;
+        const float v = strtof(value, &end);
+        if (end != value) audio_set_volume(KEYS[i].category, v);
+        return 1;
+    }
+
+    return 0;
+}
+
+// ---------------------------------------------------------------- playback
+
+void audio_preload(const char *name) {
+    if (!g_audio.ready) return;
+    const int clip = clip_find(name, 1);
+    if (clip >= 0 && g_audio.clips[clip].state == CLIP_UNLOADED) g_audio.clips[clip].state = CLIP_QUEUED;
+}
+
+void audio_set_rate(const float rate) {
+    g_audio.rate_scale = rate > 0.0f ? rate : 0.0f;
+}
+
+void audio_play(const char *name, const float volume, const int loop, const float rate) {
+    // SOUND.play: nothing plays while SOUND.rate is 0, and an explicit rate is scaled by it
+    // (sounds played without one keep rate 1; 3D sounds ignore SOUND.rate).
+    const float scale = g_audio.rate_scale;
+    if (scale <= 0.0f) return;
+    const vec3 origin = {0};
+    play_request(name, VOICE_2D, loop, origin, volume > 0.0f ? volume : 1.0f, rate > 0.0f ? rate * scale : rate, 0.0f, 0.0f);
+}
+
+void audio_play_3d(const char *name, const vec3 position, const float volume, const float rate,
+                   const float ref_distance, const float rolloff) {
+    // play3D: `if ((m = (m || 1) * otherSoundMlt) > 0.05)`. (Krunker still starts the Howl
+    // unpositioned below that threshold; such sounds are simply skipped here.)
+    const float v = (volume > 0.0f ? volume : 1.0f) * AUDIO_OTHER_SOUND_MLT;
+    if (v <= 0.05f) return;
+    play_request(name, VOICE_3D, 0, position, v, rate, ref_distance, rolloff);
+}
+
+void audio_play_3d_loop(const char *name, const vec3 position, const float volume, const float rate,
+                        const float ref_distance, const float rolloff) {
+    const float v = volume > 0.0f ? volume : 1.0f;
+    if (v <= 0.05f) return;
+    play_request(name, VOICE_3D_LOOP, 1, position, v, rate, ref_distance, rolloff);
+}
+
+void audio_play_3d_fade(const char *name, const vec3 position, const float range, const float volume, const float rate) {
+    if (!g_audio.ready || range <= 0.0f) return;
+
+    const ma_vec3f listener = ma_engine_listener_get_position(&g_audio.engine, 0);
+    const float dx = position.x - listener.x, dy = position.y - listener.y, dz = position.z - listener.z;
+    const float fade = 1.0f - sqrtf(dx * dx + dy * dy + dz * dz) / range;
+    if (fade <= 0.1f) return;
+
+    const vec3 origin = {0};
+    play_request(name, VOICE_2D, 0, origin, (volume > 0.0f ? volume : 1.0f) * fade * AUDIO_OTHER_SOUND_MLT, rate, 0.0f, 0.0f);
+}
+
+static void stop_matching(const int clip, const int only_kind, const VoiceKind kind) {
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        AudioVoice *voice = &g_audio.voices[i];
+        if (!voice->in_use) continue;
+        if (clip >= 0 && voice->clip != clip) continue;
+        if (only_kind && voice->kind != kind) continue;
+        voice_release(voice);
+    }
+
+    int kept = 0;
+    for (int i = 0; i < g_audio.pending_count; i++) {
+        const PendingPlay *play = &g_audio.pending[i];
+        const int match = (clip < 0 || play->clip == clip) && (!only_kind || play->kind == kind);
+        if (!match) g_audio.pending[kept++] = *play;
+    }
+    g_audio.pending_count = kept;
+}
+
+void audio_stop(const char *name) {
+    if (!g_audio.ready) return;
+    const int clip = clip_find(name, 0);
+    if (clip < 0) return;
+    if (g_audio.log) printf("[audio] t=%.3f stop %s\n", audio_now(), name);
+    stop_matching(clip, 1, VOICE_2D);
+}
+
+void audio_stop_3d_loops(void) {
+    if (!g_audio.ready) return;
+    stop_matching(-1, 1, VOICE_3D_LOOP);
+}
+
+void audio_stop_all(void) {
+    if (!g_audio.ready) return;
+    stop_matching(-1, 0, VOICE_2D);
+}

@@ -1,0 +1,323 @@
+{
+  "scenario": "ingame-pause-esc",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "logo",
+      "rect": [
+        400,
+        8,
+        480,
+        144
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "img/logo_4.png scaled by #uiBase"
+    },
+    {
+      "name": "login-button",
+      "rect": [
+        0,
+        0,
+        206,
+        50
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#signedOutHeaderBar: Login or Register"
+    },
+    {
+      "name": "class-preview",
+      "rect": [
+        1040,
+        288,
+        190,
+        96
+      ],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "3D class preview canvas"
+    },
+    {
+      "name": "class-text",
+      "rect": [
+        1060,
+        383,
+        150,
+        38
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#menuClassSubtext/#menuClassName drawn over the 3D preview character"
+    },
+    {
+      "name": "class-icon-button",
+      "rect": [
+        1018,
+        424,
+        36,
+        40
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "class icon button left of Customize"
+    },
+    {
+      "name": "customize-button",
+      "rect": [
+        1056,
+        424,
+        154,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Customize button"
+    },
+    {
+      "name": "bottom-buttons",
+      "rect": [
+        406,
+        598,
+        466,
+        38
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Host Game / Servers / Ranked / Invite / Join"
+    },
+    {
+      "name": "spectate",
+      "rect": [
+        88,
+        48,
+        92,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "Spectate label/switch are translucent: the un-dimmed background is wrong under any reference UI pixel"
+    },
+    {
+      "name": "merch",
+      "rect": [
+        88,
+        68,
+        90,
+        80
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "skip": true,
+      "note": "merch over the scene; scaleBob phase not measured on this capture"
+    },
+    {
+      "name": "menu-items",
+      "rect": [
+        0,
+        50,
+        82,
+        670
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff",
+        "#ffc710"
+      ],
+      "mask_color_fuzz": 6,
+      "note": "#menuItemContainer labels + icons (column bg is rgba(0,0,0,.75) over the scene)"
+    },
+    {
+      "name": "class-name-tag",
+      "rect": [
+        1100,
+        262,
+        66,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#menuClassNameTag `Guest` glyph cores"
+    },
+    {
+      "name": "click-to-play",
+      "rect": [
+        536,
+        338,
+        208,
+        36
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#instructions is rgba(255,255,255,.8) x grow opacity over the scene: translucent only"
+    },
+    {
+      "name": "region-label",
+      "rect": [
+        1040,
+        4,
+        92,
+        22
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#menuRegionLabel: New Jersey"
+    },
+    {
+      "name": "social-buttons",
+      "rect": [
+        1136,
+        0,
+        144,
+        42
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "4 social sprite buttons"
+    },
+    {
+      "name": "featured-creators",
+      "rect": [
+        1110,
+        44,
+        166,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#streamContainer `Featured Creators` list comes from the live Krunker streams feed; the offline client keeps `Loading Streams...`"
+    },
+    {
+      "name": "creator-row",
+      "rect": [
+        1130,
+        66,
+        146,
+        34
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "streams feed content (see featured-creators)"
+    },
+    {
+      "name": "chat-rows",
+      "rect": [
+        100,
+        598,
+        170,
+        82
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#fc03ec",
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "in-game chat next to the menu column"
+    },
+    {
+      "name": "chat-input",
+      "rect": [
+        96,
+        683,
+        170,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#chatInput placeholder is rgba(255,255,255,.7) on rgba(0,0,0,.4): translucent only, double-blended over the reference background"
+    },
+    {
+      "name": "chat-mic",
+      "rect": [
+        275,
+        683,
+        45,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#voiceDisplay has opacity .5: translucent only"
+    },
+    {
+      "name": "game-name",
+      "rect": [
+        1118,
+        646,
+        156,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#gameNameHolder: ffa_Soul Sanctum"
+    },
+    {
+      "name": "bottom-links",
+      "rect": [
+        1000,
+        683,
+        280,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#baseLinks: `Advertise` (#fff); Support/Terms/v3.1.1 are translucent grey"
+    }
+  ]
+}

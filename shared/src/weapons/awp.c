@@ -1,14 +1,22 @@
 #include <weapons.h>
 
+// Krunker v3.1.1 weapon 0 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, trail, flap, noAo, type, muzOff, muzMlt, rumble, rumbleDur, icnPad.
 const Weapon g_awp = {
     .name = "Sniper Rifle",
     .src = "weapon_1",
     .icon = "icon_1",
+
     .secondary = 0,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 1,
+    .animate_while_aiming = 1,
+    .scope = 1,
+    .projectile = 1,
+    .projectile_disable = 1,
+
     .ammo = 3,
     .swap_time = 0.3f,
     .reload_time = 1.5f,
@@ -22,11 +30,36 @@ const Weapon g_awp = {
     .damage_drop = 30.0f,
     .rate = 0.9f,
     .spread = 260.0f,
-    .zoom = 2.7f,
     .recoil = 9.0f,
+    .recoil_r = 0.05f,
     .recover = 0.993f,
     .recover_y = 0.997f,
     .recover_f = 0.975f,
+    .physical_power = 0.0f,
+    .physical_range = 0.0f,
+    .zoom = 2.7f,
+    .recoil_y_mlt = 0.55f,
+    .recoil_z = 1.5f,
+    .jump_bob_y_mlt = 0.15f,
+    .lean_mlt = 1.5f,
+    .inspect_rotation = 0.2f,
+    .inspect_mlt = 0.1f,
+    .crouch_lean = 0.2f,
+    .crouch_rotation = 0.2f,
+    .crouch_drop = 0.1f,
+    .scale = 0.00115608717587935f,
+    .hold_width = 1.0f,
+
+    .origin = {0.0f, -0.55f, -0.8f},
+    .offset = {0.8f, -0.65f, -1.8f},
+    .left_hold = {0.0f, -0.65f, 2.1f},
+    .right_hold = {0.0f, -0.68f, 0.75f},
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.28f,
+    .recoil_anim_aim_time = 0.5f,
+    .recoil_tween_y = 0.24f,
+    .recoil_anim_mask = 1,
 };
 
 // {
@@ -37,29 +70,29 @@ const Weapon g_awp = {
 // secondary: false,
 // noSpread: false,
 // projectile: {
-// disable: true,
-// mat: "BASIC",
-// color: 16777179,
-// dmg: 100,
-// spd: 2.5,
-// lookDir: true,
-// grav: 0.0001,
-// scale: 1.4,
-// length: 10,
-// range: 7000,
-// snd: 0
+//   disable: true,
+//   mat: "BASIC",
+//   color: 16777179,
+//   dmg: 100,
+//   spd: 2.5,
+//   lookDir: true,
+//   grav: 0.0001,
+//   scale: 1.4,
+//   length: 10,
+//   range: 7000,
+//   snd: 0
 // },
 // akimbo: false,
 // noAim: false,
 // animWhileAim: true,
 // trail: true,
 // flap: {
-// src: "flap_0",
-// rot: 2.1,
-// scl: 1,
-// zOff: 0.43,
-// xOff: 0.17,
-// yOff: 0.53
+//   src: "flap_0",
+//   rot: 2.1,
+//   scl: 1,
+//   zOff: 0.43,
+//   xOff: 0.17,
+//   yOff: 0.53
 // },
 // physRang: 0,
 // physPow: 0,
@@ -109,9 +142,9 @@ const Weapon g_awp = {
 // recoilYM: 0.55,
 // recoilZ: 1.5,
 // recoilAnim: {
-// time: 280,
-// aimTime: 500,
-// recoilTweenY: 0.24
+//   time: 280,
+//   aimTime: 500,
+//   recoilTweenY: 0.24
 // },
 // jumpYM: 0.15,
 // rumble: 0.9,

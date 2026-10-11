@@ -73,6 +73,11 @@ void mesh_update_transform_matrix(Mesh *mesh) {
             mat4x4(rotate_z_matrix, tmp, tmp1);
             mat4x4(rotate_y_matrix, tmp1, tmp);
             mat4x4(rotate_x_matrix, tmp, tmp1);
+        } else if (transform->rotation_order == ROTATION_ORDER_YXZ) {
+            // THREE.js Euler order "YXZ": R = Ry * Rx * Rz
+            mat4x4(rotate_z_matrix, tmp, tmp1);
+            mat4x4(rotate_x_matrix, tmp1, tmp);
+            mat4x4(rotate_y_matrix, tmp, tmp1);
         } else {
             mat4x4(rotate_x_matrix, tmp, tmp1);
             mat4x4(rotate_y_matrix, tmp1, tmp);

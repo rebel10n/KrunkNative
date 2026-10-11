@@ -1,0 +1,128 @@
+[
+ {
+  "name": "w6-pick-runngun",
+  "js": "showWindow(6)",
+  "clicks": [
+   [
+    640,
+    200
+   ]
+  ],
+  "wait": 900
+ },
+ {
+  "name": "w3-skincolor",
+  "js": "selectClass(0);selectSkinColor(2)"
+ },
+ {
+  "name": "w3-skincolor-hover",
+  "js": "selectClass(0)",
+  "move": [
+   761,
+   466
+  ]
+ },
+ {
+  "name": "w3-after-random",
+  "js": "selectClass(0);selectMelee(-2);selectHat(-2);selectAttachment(-1);selectReticle(3);selectSpray(-2)"
+ },
+ {
+  "name": "w3-runngun",
+  "js": "selectClass(2);selectMelee(-1);selectHat(-1);selectAttachment(0);selectReticle(0);selectSpray(0);selectSkinColor(-1)"
+ },
+ {
+  "name": "w3-hunter",
+  "js": "selectClass(1)"
+ },
+ {
+  "name": "w15-hunter",
+  "js": "selectClass(1);skinSelector(0)"
+ },
+ {
+  "name": "w31-hunter",
+  "js": "selectClass(1);showWindow(31)"
+ },
+ {
+  "name": "w35-toggle",
+  "js": "showWindow(35);windows[34].toggleLog(document.querySelectorAll('.mailObj')[1])"
+ },
+ {
+  "name": "invite-copied",
+  "js": "",
+  "clicks": [
+   [
+    763,
+    614
+   ]
+  ],
+  "wait": 300
+ },
+ {
+  "name": "w3-class0",
+  "js": "selectClass(0)"
+ },
+ {
+  "name": "w3-after-random",
+  "js": "selectClass(0);selectMelee(-2);selectHat(-2);selectAttachment(-1);selectReticle(3);selectSpray(-2);if(windowHolder.style.display!='block')showWindow(3)"
+ },
+ {
+  "name": "w3-runngun",
+  "js": "selectClass(2);selectMelee(-1);selectHat(-1);selectAttachment(0);selectReticle(0);selectSpray(0);selectSkinColor(-1);if(windowHolder.style.display!='block')showWindow(3)"
+ },
+ {
+  "name": "w10-tab0",
+  "js": "showWindow(10);windows[9].switchTab(0)",
+  "wait": 1500
+ },
+ {
+  "name": "w10-tab1",
+  "js": "showWindow(10);windows[9].switchTab(1)",
+  "wait": 1500
+ },
+ {
+  "name": "w10-tab2",
+  "js": "showWindow(10);windows[9].switchTab(2)",
+  "wait": 1500
+ },
+ {
+  "name": "w10-tab3",
+  "js": "showWindow(10);windows[9].switchTab(3)",
+  "wait": 1500
+ },
+ {
+  "name": "w10-tab4",
+  "js": "showWindow(10);windows[9].switchTab(4)",
+  "wait": 1500
+ },
+ {
+  "name": "w10-tab5",
+  "js": "showWindow(10);windows[9].switchTab(5)",
+  "wait": 1500
+ },
+ {
+  "name": "w4-tab0",
+  "js": "showWindow(4);windows[3].switchTab(0)",
+  "wait": 1200
+ },
+ {
+  "name": "w4-tab2",
+  "js": "showWindow(4);windows[3].switchTab(2)",
+  "wait": 1200
+ },
+ {
+  "name": "kpd-closed",
+  "js": "shoPolicePop()",
+  "clicks": [
+   [
+    300,
+    600
+   ]
+  ],
+  "wait": 900
+ },
+ {
+  "name": "menu",
+  "js": "",
+  "wait": 600
+ }
+]

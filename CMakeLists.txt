@@ -2,7 +2,37 @@ cmake_minimum_required(VERSION 3.10)
 project(KrunkNative)
 
 set(CMAKE_C_STANDARD 11)
-find_package(Threads REQUIRED)
+
+if (NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
+endif ()
+
+# HTML UI. The in-house HTML/CSS engine (client/src/html/engine + client/lib/lexbor +
+# FreeType; client/src/html/engine/README.md, doc/html-ui-engine.md) renders ui/index.html
+# natively, driven by the C UI logic in client/src/ui (menu_ui.c, hud_ui.c, ...) through
+# the DOM-ops API (client/include/html_dom.h). No JavaScript runs in the native client.
+# OFF builds a minimal client without any HTML UI (client/src/html/stub.c: the DOM ops
+# are no-ops and html_ui_available() is 0). The web build ignores the option: the
+# browser renders the same page and client/src/html/web_dom.c implements the DOM ops.
+option(KRUNKNATIVE_HTML_ENGINE "Build the in-house HTML/CSS UI engine (OFF: no HTML UI)" ON)
+
+# Adds client/src/html/<file> sources to a target together with the include paths they
+# need. With ENGINE, KRUNKNATIVE_HTML_ENGINE=1 is defined for the whole target: the
+# engine backend (or web_dom.c on the web) is compiled in instead of stub.c.
+function(krunknative_add_html_sources target)
+    cmake_parse_arguments(ARG "ENGINE" "" "SOURCES" ${ARGN})
+    foreach (src IN LISTS ARG_SOURCES)
+        target_sources(${target} PRIVATE "${CMAKE_SOURCE_DIR}/client/src/html/${src}")
+    endforeach ()
+    if (ARG_ENGINE)
+        target_compile_definitions(${target} PRIVATE KRUNKNATIVE_HTML_ENGINE=1)
+    endif ()
+    target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/client/include" "${CMAKE_SOURCE_DIR}/client/src/html")
+endfunction ()
+
+# The engine proper: client/src/html/engine/*.c (native only).
+file(GLOB HTML_ENGINE_SOURCES client/src/html/engine/*.c)
+file(GLOB HTML_ENGINE_HEADERS client/src/html/engine/*.h)
 
 include_directories(shared/include)
 
@@ -13,48 +43,224 @@ set(CLIENT_BINARY client_bin)
 file(GLOB_RECURSE CLIENT_SOURCES client/src/*.c)
 file(GLOB_RECURSE CLIENT_HEADERS client/include/*.h)
 
+# client/src/html is added per target below (engine, web_dom.c or stub.c); the C UI
+# logic in client/src/ui is part of every client build.
+list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/html/")
+
+# Network transport: TCP on a background thread natively, WebSocket on the web.
+if (EMSCRIPTEN)
+    list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/net/net\\.c$")
+else ()
+    list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/net/net_web\\.c$")
+endif ()
+
 set(SERVER_BINARY server_bin)
 file(GLOB_RECURSE SERVER_SOURCES server/src/*.c)
 file(GLOB_RECURSE SERVER_HEADERS server/include/*.h)
 
-# LIBRARIES
-add_subdirectory(client/lib/freetype)
-add_subdirectory(client/lib/glad)
-add_subdirectory(client/lib/glfw)
+if (EMSCRIPTEN)
+    # ------------------------------------------------------------------
+    # Web build (emcmake cmake ...): client only, output dist/web/client.js
+    # + client.wasm. Server, replxx, GLAD and the native test are skipped;
+    # GLFW and WebGL2 come from the emscripten ports (-sUSE_GLFW=3).
+    #
+    # FreeType: the vendored client/lib/freetype tree compiles cleanly with
+    # emcc once its optional system dependencies (zlib/bzip2/png/harfbuzz/
+    # brotli) are disabled, so the same sources are used natively and on the
+    # web and no -sUSE_FREETYPE port is required.
+    # ------------------------------------------------------------------
+    set(FT_DISABLE_ZLIB TRUE CACHE BOOL "" FORCE)
+    set(FT_DISABLE_BZIP2 TRUE CACHE BOOL "" FORCE)
+    set(FT_DISABLE_PNG TRUE CACHE BOOL "" FORCE)
+    set(FT_DISABLE_HARFBUZZ TRUE CACHE BOOL "" FORCE)
+    set(FT_DISABLE_BROTLI TRUE CACHE BOOL "" FORCE)
 
-add_subdirectory(server/lib/replxx)
+    add_subdirectory(client/lib/freetype)
+    add_subdirectory(shared/lib/cJSON)
+    add_subdirectory(shared/lib/pcg_basic)
 
-add_subdirectory(shared/lib/cJSON)
-add_subdirectory(shared/lib/pcg_basic)
+    set(CMAKE_EXECUTABLE_SUFFIX ".js")
+    # -DWEB_DIST_DIR=<dir> assembles the site elsewhere (parallel/test builds)
+    if(NOT WEB_DIST_DIR)
+        set(WEB_DIST_DIR ${CMAKE_SOURCE_DIR}/dist/web)
+    endif()
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(CMAKE_C_FLAGS --static)
+    add_executable(client ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_compile_definitions(client PRIVATE KRUNKNATIVE_CLIENT)
+    target_include_directories(client PRIVATE client/include)
+    target_link_libraries(client PRIVATE freetype cJSON pcg_basic m)
 
-    set(CLIENT_BINARY client)
-    list(APPEND CLIENT_SOURCES client/win.rc)
+    # HTML UI on the web: the browser page is the UI. The C UI logic drives the page's
+    # DOM through web_dom.c (html_dom.h) and ui/js/kn-shim.js; the engine itself is not
+    # compiled for the web. The lexbor target is still declared (EXCLUDE_FROM_ALL) so
+    # `--target lexbor` checks it builds with emcc.
+    add_subdirectory(client/lib/lexbor EXCLUDE_FROM_ALL)
+    krunknative_add_html_sources(client ENGINE SOURCES html_ui.c html_dom_core.c web_dom.c)
 
-    set(SERVER_BINARY server)
+    # Link flags:
+    #   USE_GLFW/WEBGL2            GLFW port on top of a WebGL2 (GLES 3.0) context. No FULL_ES3: its
+    #                              client-side array emulation costs a getParameter() per
+    #                              glBindVertexArray and an attribute scan per draw, and the
+    #                              renderer only draws from buffer objects
+    #   ASYNCIFY                   synchronous asset downloads (emscripten_wget_data in ensure_asset_file)
+    #   ASYNCIFY_STACK_SIZE        deep load paths (map -> prefab -> texture -> fetch) need more than the 4 KiB default
+    #   STACK_SIZE                 the OBJ loader keeps whole models in VLAs; match the 8 MiB native stack
+    #   FORCE_FILESYSTEM           MEMFS backing for fopen()-based loaders
+    #   -lwebsocket.js             emscripten/websocket.h implementation (net_web.c)
+    #   EXPORTED_RUNTIME_METHODS   UTF8ToString/stringToNewUTF8 are used from EM_ASM blocks; stack* let page JS ccall() with string arguments
+    #   EXPORTED_FUNCTIONS         JS -> C entry points called by ui/js/kn-shim.js (page events, ResizeObserver)
+    #   --preload-file             the window templates, read with fopen() from /ui/windows (MEMFS)
+    target_link_options(client PRIVATE
+        -sUSE_GLFW=3
+        -sUSE_WEBGL2=1
+        -sMIN_WEBGL_VERSION=2
+        -sMAX_WEBGL_VERSION=2
+        -sALLOW_MEMORY_GROWTH=1
+        -sASYNCIFY
+        -sASYNCIFY_STACK_SIZE=65536
+        -sSTACK_SIZE=8388608
+        -sFORCE_FILESYSTEM=1
+        -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,stringToNewUTF8,stackSave,stackRestore,stackAlloc
+        -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_kn_ui_event,_kn_ui_resize_observed
+        -lwebsocket.js
+        --preload-file ${CMAKE_SOURCE_DIR}/ui/windows@/ui/windows
+    )
+
+    # Assemble the static site: the ui/ page tree (its js/loader.js pulls in
+    # client.js when served over HTTP), the wasm, the preloaded ui/windows package
+    # (client.data), and assets/ linked in so the client can fetch game content on
+    # demand from /assets/.
+    # A custom target (no OUTPUT) runs on every build, so ui/-only edits are
+    # picked up without relinking the wasm; copy_if_different keeps it cheap.
+    # js/ is replaced wholesale so scripts deleted from ui/js do not linger.
+    add_custom_target(web_dist ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_DIST_DIR}
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/js
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ui ${WEB_DIST_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:client> ${WEB_DIST_DIR}/client.js
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.wasm ${WEB_DIST_DIR}/client.wasm
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.data ${WEB_DIST_DIR}/client.data
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/assets
+        COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_SOURCE_DIR}/assets ${WEB_DIST_DIR}/assets
+        DEPENDS client
+        COMMENT "Assembling web client in ${WEB_DIST_DIR}"
+    )
+else ()
+    # LIBRARIES
+    add_subdirectory(client/lib/freetype)
+    add_subdirectory(client/lib/glad)
+    add_subdirectory(client/lib/glfw)
+
+    add_subdirectory(server/lib/replxx)
+
+    add_subdirectory(shared/lib/cJSON)
+    add_subdirectory(shared/lib/pcg_basic)
+
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(CMAKE_C_FLAGS --static)
+
+        set(CLIENT_BINARY client)
+        list(APPEND CLIENT_SOURCES client/win.rc)
+
+        set(SERVER_BINARY server)
+    endif ()
+
+    link_libraries(cJSON pcg_basic)
+
+    # Headless GPU mode (client/include/headless.h: KRUNKNATIVE_HEADLESS=1 / --headless):
+    # an EGL context on a device display, no X11/Wayland window. Linux with libEGL only
+    # (libglvnd: NVIDIA's and Mesa's EGL vendors); without it the mode reports itself unavailable.
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(OpenGL_GL_PREFERENCE GLVND)
+        find_package(OpenGL COMPONENTS EGL)
+        if (NOT TARGET OpenGL::EGL)
+            message(STATUS "Headless: libEGL/EGL headers not found; KRUNKNATIVE_HEADLESS is unavailable")
+        endif ()
+    endif ()
+    function(krunknative_link_headless target)
+        if (TARGET OpenGL::EGL)
+            target_link_libraries(${target} PRIVATE OpenGL::EGL)
+            target_compile_definitions(${target} PRIVATE KRUNKNATIVE_HEADLESS_EGL=1)
+        endif ()
+    endfunction ()
+
+    # CLIENT
+    add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
+    target_link_libraries(${CLIENT_BINARY} PRIVATE glfw glad freetype Threads::Threads m)
+    # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
+    target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})
+    krunknative_link_headless(${CLIENT_BINARY})
+    target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
+
+    if (KRUNKNATIVE_HTML_ENGINE)
+        # HTML UI (in-house engine): Lexbor + engine/*.c + html_ui.c + html_dom_core.c,
+        # KRUNKNATIVE_HTML_ENGINE=1 on the whole client target.
+        add_subdirectory(client/lib/lexbor)
+        krunknative_add_html_sources(${CLIENT_BINARY} ENGINE SOURCES html_ui.c html_dom_core.c)
+        target_sources(${CLIENT_BINARY} PRIVATE ${HTML_ENGINE_SOURCES} ${HTML_ENGINE_HEADERS})
+        target_link_libraries(${CLIENT_BINARY} PRIVATE lexbor)
+    else ()
+        # No HTML UI: no-op DOM ops and backend, html_ui_available() == 0.
+        message(STATUS "HTML UI: KRUNKNATIVE_HTML_ENGINE is OFF; building the client without it (stub.c)")
+        krunknative_add_html_sources(${CLIENT_BINARY} SOURCES html_ui.c html_dom_core.c stub.c)
+    endif ()
+
+    # SERVER
+    add_executable(${SERVER_BINARY} ${SERVER_HEADERS} ${SERVER_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)
+    target_link_libraries(${SERVER_BINARY} PRIVATE replxx Threads::Threads m)
+    target_include_directories(${SERVER_BINARY} PRIVATE server/include)
+
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32)
+        target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
+    endif ()
+
+    # TESTS
+    add_executable(proc_input_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/proc_input_test.c)
+    target_link_libraries(proc_input_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(proc_input_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    add_executable(class_spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/class_spawn_test.c)
+    target_link_libraries(class_spawn_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(class_spawn_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # match_test: combat / kills / score / chat / round end through the shared game hooks
+    add_executable(match_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/match_test.c)
+    target_link_libraries(match_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(match_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # modes_test: every v3.1.1 game mode (scoring, objectives, picks, lives, win rules) with simulated players
+    add_executable(modes_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/modes_test.c)
+    target_link_libraries(modes_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(modes_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # ui_test: engine driver for dumps, probes, renders and benchmarks
+    # (client/src/html/ui_test.c holds the subcommand table). It is the engine plus
+    # the minimum of the client it needs: shader.c (shader_compile) and the shared
+    # sources (assets_path, read_file). Built with `make ui-test`.
+    if (KRUNKNATIVE_HTML_ENGINE)
+        add_executable(ui_test
+            client/src/html/ui_test.c
+            client/src/shader.c
+            client/src/png_write.c
+            client/src/headless.c
+            ${HTML_ENGINE_SOURCES} ${HTML_ENGINE_HEADERS}
+            ${SHARED_HEADERS} ${SHARED_SOURCES})
+        krunknative_add_html_sources(ui_test ENGINE SOURCES html_ui.c html_dom_core.c)
+        target_link_libraries(ui_test PRIVATE lexbor freetype glfw glad Threads::Threads m)
+        krunknative_link_headless(ui_test)
+        if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+            target_link_libraries(ui_test PRIVATE ws2_32) # shared/src/net.c
+        endif ()
+    endif ()
 endif ()
-
-link_libraries(cJSON pcg_basic)
-
-# CLIENT
-add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
-target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
-target_link_libraries(${CLIENT_BINARY} PRIVATE glfw glad freetype Threads::Threads m)
-target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
-
-# SERVER
-add_executable(${SERVER_BINARY} ${SERVER_HEADERS} ${SERVER_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
-target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)
-target_link_libraries(${SERVER_BINARY} PRIVATE replxx Threads::Threads m)
-target_include_directories(${SERVER_BINARY} PRIVATE server/include)
-
-if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32)
-    target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
-endif ()
-
-# TESTS
-add_executable(proc_input_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/proc_input_test.c)
-target_link_libraries(proc_input_test PRIVATE m)

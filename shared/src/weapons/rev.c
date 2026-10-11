@@ -1,14 +1,20 @@
 #include <weapons.h>
 
+// Krunker v3.1.1 weapon 4 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, noAo, nCase, transp, kill, type, muzOff, muzOffY, muzMlt, expScale, rumble, icnPad.
 const Weapon g_revolver = {
     .name = "Revolver",
     .src = "weapon_5",
     .icon = "icon_5",
+
     .secondary = 0,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 1,
+    .projectile = 1,
+    .projectile_disable = 1,
+
     .ammo = 6,
     .swap_time = 0.2f,
     .reload_time = 0.9f,
@@ -21,11 +27,41 @@ const Weapon g_revolver = {
     .damage_drop = 10.0f,
     .rate = 0.39f,
     .spread = 100.0f,
-    .zoom = 1.45f,
     .recoil = 13.0f,
+    .recoil_r = 0.082f,
     .recover = 0.982f,
     .recover_y = 0.992f,
     .recover_f = 0.98f,
+    .physical_power = 0.0f,
+    .physical_range = 0.0f,
+    .zoom = 1.45f,
+    .recoil_y_mlt = 0.5f,
+    .recoil_z = 4.0f,
+    .recoil_z_mlt = 0.01f,
+    .rotation_offset = -0.05f,
+    .jump_y_mlt = 0.4f,
+    .aim_recoil_mlt = 0.1f,
+    .lean_mlt = 1.6f,
+    .inspect_rotation = 0.1f,
+    .inspect_mlt = 0.3f,
+    .crouch_lean = 0.2f,
+    .crouch_rotation = 0.1f,
+    .crouch_drop = 0.1f,
+    .scale = 0.000515531266331653f,
+    .hold_width = 1.1f,
+    .hold_distance_offset = 1.6f,
+
+    .origin = {0.0f, -0.31f, -3.5f},
+    .offset = {0.7f, -0.5f, -3.5f},
+    .left_hold = {0.0f, -1.3f, -0.6f},
+    .right_hold = {0.1f, -0.8f, -0.72f},
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .swap_wiggle = 0.4f,
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.35f,
+    .recoil_tween_y = 0.39f,
+    .recoil_tween_ym = 0.25f,
+    .recoil_anim_mask = 5,
 };
 
 // {
@@ -40,17 +76,17 @@ const Weapon g_revolver = {
 // nAuto: true,
 // noAo: true,
 // projectile: {
-// disable: true,
-// mat: "BASIC",
-// color: 16777179,
-// dmg: 66,
-// spd: 2.3,
-// lookDir: true,
-// grav: 0.0001,
-// scale: 1.4,
-// length: 10,
-// range: 2600,
-// snd: 0
+//   disable: true,
+//   mat: "BASIC",
+//   color: 16777179,
+//   dmg: 66,
+//   spd: 2.3,
+//   lookDir: true,
+//   grav: 0.0001,
+//   scale: 1.4,
+//   length: 10,
+//   range: 2600,
+//   snd: 0
 // },
 // physRang: 0,
 // physPow: 0,
@@ -107,9 +143,9 @@ const Weapon g_revolver = {
 // recoilZM: 0.01,
 // recoilZ: 4,
 // recoilAnim: {
-// time: 350,
-// recoilTweenY: 0.39,
-// recoilTweenYM: 0.25
+//   time: 350,
+//   recoilTweenY: 0.39,
+//   recoilTweenYM: 0.25
 // },
 // expScale: 0.9,
 // rumble: 0.7,

@@ -1,0 +1,254 @@
+# KrunkNative — single entry point for building, running and testing.
+#
+# CMake does the compiling (vendored GLFW/FreeType/Lexbor/replxx/cJSON, Emscripten
+# toolchain); this Makefile drives it so every workflow is one command.
+# Configuration presets live in CMakePresets.json (shared with IDEs).
+#
+#   make                 debug client + server + test binary
+#   make run             run the debug client            (ARGS="--offline" MAP=kanji)
+#   make web             Emscripten client -> dist/web/  (needs emsdk)
+#   make test            shared movement test
+#   make ui-test         in-house HTML engine tool  (ARGS="lexbor-probe")
+#   make help            everything else
+#
+# Overridable variables: GENERATOR, JOBS, HTML_ENGINE (ON/OFF; OFF = native client
+# without HTML UI), EMSDK, ARGS, MAP, PORT, CMAKE_FLAGS (extra -D flags).
+
+SHELL := bash
+.DEFAULT_GOAL := build
+
+# =========================================================================== configuration
+
+CMAKE       ?= cmake
+JOBS        ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+GENERATOR   ?= $(if $(shell command -v ninja 2>/dev/null),Ninja,)
+GEN_FLAG    := $(if $(GENERATOR),-G "$(GENERATOR)",)
+HTML_ENGINE ?= ON
+CMAKE_FLAGS ?=
+EMSDK       ?= $(HOME)/emsdk
+ARGS        ?=
+MAP         ?=
+PORT        ?= 8080
+
+DEBUG_DIR     := cmake-build-debug
+RELEASE_DIR   := cmake-build-release
+WEB_DIR       := cmake-build-web
+WEB_DEBUG_DIR := cmake-build-web-debug
+DIST_WEB      := dist/web
+BRIDGE_DIR    := net-bridge
+
+ifeq ($(OS),Windows_NT)
+  CLIENT_BIN := client.exe
+  SERVER_BIN := server.exe
+  TEST_BIN   := proc_input_test.exe
+  PYTHON     ?= python
+else
+  CLIENT_BIN := client_bin
+  SERVER_BIN := server_bin
+  TEST_BIN   := proc_input_test
+  PYTHON     ?= python3
+endif
+
+# CMake refuses to change generator inside an existing build dir: wipe it when
+# GENERATOR differs from what the cache was configured with.
+CHECK_GENERATOR = if [ -n "$(GENERATOR)" ] && [ -f "$(1)/CMakeCache.txt" ] && \
+	  ! grep -q '^CMAKE_GENERATOR:INTERNAL=$(GENERATOR)$$' "$(1)/CMakeCache.txt"; then \
+	  echo "generator changed, wiping $(1)"; rm -rf "$(1)"; fi
+
+# Configure: preset + generator + HTML engine switch + user flags (the web build
+# ignores the switch: its UI is always the browser page driven by web_dom.c).
+CONFIGURE = $(call CHECK_GENERATOR,$(2)); $(CMAKE) --preset $(1) $(GEN_FLAG) -DKRUNKNATIVE_HTML_ENGINE=$(HTML_ENGINE) $(CMAKE_FLAGS)
+BUILD     = $(CMAKE) --build $(1) --parallel $(JOBS)
+
+# Emscripten: use emcc from PATH, else activate the emsdk checkout in $(EMSDK).
+EMSDK_ACTIVATE = if ! command -v emcc >/dev/null 2>&1; then \
+	  [ -f "$(EMSDK)/emsdk_env.sh" ] || { echo "emsdk not found: set EMSDK=/path/to/emsdk (https://emscripten.org/docs/getting_started/)"; exit 1; }; \
+	  source "$(EMSDK)/emsdk_env.sh" >/dev/null 2>&1; \
+	fi; export EMSDK="$${EMSDK:-$(EMSDK)}"
+
+# Map argument for run targets: MAP=kanji -> assets/maps/kanji.json
+MAP_ARG = $(if $(MAP),assets/maps/$(MAP).json,)
+
+# --------------------------------------------------------------------------- native
+
+.PHONY: build configure release configure-release all
+build: configure ## Build debug client, server and tests (default)
+	$(call BUILD,$(DEBUG_DIR))
+
+configure: ## Configure the debug build
+	@$(call CONFIGURE,debug,$(DEBUG_DIR))
+
+release: configure-release ## Build release client and server
+	$(call BUILD,$(RELEASE_DIR))
+
+configure-release: ## Configure the release build
+	@$(call CONFIGURE,release,$(RELEASE_DIR))
+
+all: build release web ## Build everything: debug, release and web
+
+.PHONY: run run-release server server-release
+run: build ## Run the debug client (ARGS="--offline" MAP=<name>)
+	cd $(DEBUG_DIR) && ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
+
+run-release: release ## Run the release client
+	cd $(RELEASE_DIR) && ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
+
+server: build ## Run the debug server (ARGS=...)
+	cd $(DEBUG_DIR) && ./$(SERVER_BIN) $(ARGS)
+
+server-release: release ## Run the release server
+	cd $(RELEASE_DIR) && ./$(SERVER_BIN) $(ARGS)
+
+.PHONY: test
+test: build ## Run the shared movement/collision test
+	./$(DEBUG_DIR)/$(TEST_BIN)
+
+# --------------------------------------------------------------------------- html-engine
+# The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).
+# These targets use the debug directory with HTML_ENGINE=ON (the default) so they also
+# work after a `make HTML_ENGINE=OFF`.
+
+.PHONY: ui-test ui-import uidiff
+ui-test: ## Build ui_test (HTML_ENGINE=ON) and run it: ARGS="lexbor-probe" (default: help)
+	@$(MAKE) --no-print-directory configure HTML_ENGINE=ON
+	$(call BUILD,$(DEBUG_DIR)) --target ui_test
+	./$(DEBUG_DIR)/ui_test $(or $(ARGS),help)
+
+ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon ligatures) via tools/ui-import
+	$(PYTHON) -I tools/ui-import/import.py --ui ui
+
+# uidiff renders every scenario through the real client and its C UI logic
+# (`client_bin --render-scenario`, client/src/ui/ui_scenario.c) on llvmpipe inside one
+# Xvfb server (1920x1080, large enough for every scenario size), then pixel-diffs the
+# regions (tools/uidiff/README.md). SCENARIOS="menu-1280 win-classes" limits the run;
+# UIDIFF_NO_XVFB=1 uses the current display; UIDIFF_OUT/UIDIFF_FUZZ_SCALE pass through.
+# UIDIFF_HEADLESS=1 renders with no window and no X server (EGL, llvmpipe);
+# UIDIFF_EGL_DEVICE=nvidia renders headless on the NVIDIA GPU (client/include/headless.h).
+SCENARIOS ?=
+UIDIFF_XVFB_SCREEN ?= 1920x1080x24
+UIDIFF_HEADLESS ?= 0
+UIDIFF_EGL_DEVICE ?=
+
+uidiff: ## Render tools/uidiff scenarios with client_bin --render-scenario (HTML_ENGINE=ON) and pixel-diff them (SCENARIOS=...)
+	@$(MAKE) --no-print-directory configure HTML_ENGINE=ON
+	$(call BUILD,$(DEBUG_DIR)) --target $(CLIENT_BIN)
+	@export UIDIFF_RENDER_CMD="$(CURDIR)/$(DEBUG_DIR)/$(CLIENT_BIN) --render-scenario" \
+	        LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+	        UIDIFF_HEADLESS="$(UIDIFF_HEADLESS)" UIDIFF_EGL_DEVICE="$(UIDIFF_EGL_DEVICE)"; \
+	if [ "$${UIDIFF_NO_XVFB:-0}" = 1 ] || [ "$(UIDIFF_HEADLESS)" = 1 ] || [ -n "$(UIDIFF_EGL_DEVICE)" ]; then \
+	  tools/uidiff/uidiff.sh $(DEBUG_DIR)/$(CLIENT_BIN) $(SCENARIOS); \
+	else \
+	  command -v xvfb-run >/dev/null || { echo "uidiff: xvfb-run not found (UIDIFF_NO_XVFB=1 uses the current display)"; exit 2; }; \
+	  xvfb-run $${UIDIFF_XVFB_ARGS:--a} -s "-screen 0 $(UIDIFF_XVFB_SCREEN)" \
+	    tools/uidiff/uidiff.sh $(DEBUG_DIR)/$(CLIENT_BIN) $(SCENARIOS); \
+	fi
+
+# --------------------------------------------------------------------------- web
+
+.PHONY: web web-debug web-serve
+web: ## Build the Emscripten client into dist/web/ (release)
+	@$(EMSDK_ACTIVATE); $(call CONFIGURE,web,$(WEB_DIR)) && $(call BUILD,$(WEB_DIR))
+	@echo "web client ready in $(DIST_WEB)/  (make web-serve, or: make bridge)"
+
+web-debug: ## Build the Emscripten client with debug info into dist/web/
+	@$(EMSDK_ACTIVATE); $(call CONFIGURE,web-debug,$(WEB_DEBUG_DIR)) && $(call BUILD,$(WEB_DEBUG_DIR))
+
+web-serve: ## Serve dist/web/ for local testing (PORT=8080); use ?offline=1 without a server
+	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
+	@echo "http://localhost:$(PORT)/?offline=1   (ctrl-c to stop; for the game server bridge use 'make bridge')"
+	cd $(DIST_WEB) && $(PYTHON) -m http.server $(PORT)
+
+# --------------------------------------------------------------------------- mobile
+# Krunker's mobile apps wrapped the web game; so do these (platform/README.md).
+# The web client itself detects phones and shows the touch UI (client/src/ui/ui_mobile.c).
+# ANDROID_ARGS passes Gradle properties, e.g. ANDROID_ARGS="-Pkrunknative.wsUrl=ws://192.168.1.10:8080/native".
+
+ANDROID_DIR  := platform/android
+ANDROID_APK  := $(ANDROID_DIR)/app/build/outputs/apk/debug/app-debug.apk
+ANDROID_ARGS ?=
+
+.PHONY: android android-only android-install ios-prepare
+android: web android-only ## Build the web client, then the Android debug APK (needs JDK 17+ and the Android SDK)
+
+android-only: ## Android debug APK from the existing dist/web (no web rebuild)
+	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
+	@[ -n "$${ANDROID_HOME:-$${ANDROID_SDK_ROOT:-}}" ] || [ -f $(ANDROID_DIR)/local.properties ] || \
+	  { echo "Android SDK not found: set ANDROID_HOME (or write sdk.dir=... to $(ANDROID_DIR)/local.properties)"; exit 1; }
+	cd $(ANDROID_DIR) && ./gradlew --no-daemon assembleDebug $(ANDROID_ARGS)
+	@ls -l $(ANDROID_APK)
+
+android-install: ## Install the debug APK on a connected device (adb)
+	adb install -r $(ANDROID_APK)
+
+ios-prepare: ## Copy dist/web into platform/ios/web (then: cd platform/ios && xcodegen generate, on macOS)
+	platform/ios/prepare.sh $(DIST_WEB)
+
+# --------------------------------------------------------------------------- net-bridge
+
+.PHONY: bridge bridge-install bridge-check
+bridge-install: ## Install net-bridge dependencies
+	cd $(BRIDGE_DIR) && npm install
+
+bridge: $(BRIDGE_DIR)/node_modules ## Host dist/web/ and bridge /native WebSocket <-> native TCP server (port 8080)
+	cd $(BRIDGE_DIR) && npm run web
+
+bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck net-bridge
+	cd $(BRIDGE_DIR) && npm run typecheck
+
+$(BRIDGE_DIR)/node_modules: $(BRIDGE_DIR)/package.json $(BRIDGE_DIR)/package-lock.json
+	cd $(BRIDGE_DIR) && npm ci
+	@touch $@
+
+# --------------------------------------------------------------------------- checks
+
+.PHONY: smoke smoke-native smoke-web lint check
+check: test lint bridge-check ## Everything CI runs that does not need a display
+
+lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
+	@command -v actionlint >/dev/null && actionlint || echo "actionlint not installed, skipping"
+	$(PYTHON) -c "import json; json.load(open('CMakePresets.json'))"
+	@for f in ui/js/*.js; do node --check $$f || exit 1; done
+	@echo "lint ok"
+
+smoke: smoke-native smoke-web ## Headless render checks for both clients (screenshots in /tmp)
+
+# The native smoke run is headless (client/include/headless.h): an EGL device context and
+# no window on any display. EGL_DEVICE=nvidia|mesa|<index> picks the GPU (default: NVIDIA
+# when present, else Mesa). KRUNKNATIVE_SCREENSHOT writes the frame once the menu map has
+# rendered, exits the client and keeps the run's settings in a private XDG_CONFIG_HOME.
+# Runs from the repo root: assets_path() is ./assets/.
+EGL_DEVICE ?=
+
+smoke-native: build ## Run the native client offline headless (no window; EGL_DEVICE=nvidia|mesa) and screenshot the menu (/tmp/smoke-native.png)
+	@rm -f /tmp/smoke-native.png
+	@env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \
+	  KRUNKNATIVE_SCREENSHOT=/tmp/smoke-native.png KRUNKNATIVE_CAPTURE_FRAMES=60 \
+	  timeout 120 stdbuf -oL $(DEBUG_DIR)/$(CLIENT_BIN) --offline > /tmp/smoke-native.log 2>&1 || { tail -20 /tmp/smoke-native.log; exit 1; }
+	@grep -q "^\[ui\] setting " /tmp/smoke-native.log && [ -s /tmp/smoke-native.png ] \
+	  && echo "smoke-native ok (C UI logic set up the page and applied its settings): /tmp/smoke-native.png" \
+	  && grep -m1 "GL_RENDERER" /tmp/smoke-native.log || { tail -20 /tmp/smoke-native.log; exit 1; }
+
+smoke-web: ## Load the web build offline in headless Chromium and screenshot it (/tmp/smoke-web.png)
+	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
+	@chrome=$$(command -v chromium-browser || command -v chromium || command -v google-chrome) || { echo "needs chromium or google-chrome"; exit 1; }; \
+	(cd $(DIST_WEB) && $(PYTHON) -m http.server $(PORT) >/dev/null 2>&1) & srv=$$!; sleep 1; \
+	timeout 120 $$chrome --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+	  --window-size=1280,720 --virtual-time-budget=20000 --enable-logging=stderr --v=0 \
+	  --screenshot=/tmp/smoke-web.png "http://localhost:$(PORT)/?offline=1" 2>&1 | grep CONSOLE | cut -c1-200 > /tmp/smoke-web.log; \
+	kill $$srv 2>/dev/null; \
+	[ -f /tmp/smoke-web.png ] && echo "smoke-web ok: /tmp/smoke-web.png ($$(wc -l < /tmp/smoke-web.log) console lines in /tmp/smoke-web.log)"
+
+# --------------------------------------------------------------------------- housekeeping
+
+.PHONY: clean distclean help
+clean: ## Remove build directories and dist/
+	rm -rf $(DEBUG_DIR) $(RELEASE_DIR) $(WEB_DIR) $(WEB_DEBUG_DIR) dist $(ANDROID_DIR)/app/build $(ANDROID_DIR)/.gradle platform/ios/web
+
+distclean: clean ## clean + net-bridge/node_modules
+	rm -rf $(BRIDGE_DIR)/node_modules
+
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage: make <target> [VAR=value]\n\n"} \
+	  /^# -+ [a-z-]+$$/ {gsub(/^# -+ /, ""); printf "\n\033[1m%s\033[0m\n", $$0} \
+	  /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@printf "\nVariables: GENERATOR=%s JOBS=%s HTML_ENGINE=%s EMSDK=%s PORT=%s\n\n" "$(GENERATOR)" "$(JOBS)" "$(HTML_ENGINE)" "$(EMSDK)" "$(PORT)"

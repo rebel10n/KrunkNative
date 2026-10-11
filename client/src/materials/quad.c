@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+#include <gl.h>
 #include <client.h>
 #include <stdlib.h>
 
@@ -37,7 +37,7 @@ void quad_material_update_uniforms(QuadMaterial *material) {
         g_active_texture = material->texture;
     } else {
         if (!g_blank_texture) {
-            glCreateTextures(GL_TEXTURE_2D, 1, &g_blank_texture);
+            glGenTextures(1, &g_blank_texture);
             glBindTexture(GL_TEXTURE_2D, g_blank_texture);
 
             const unsigned char blank[] = {255, 255, 255};

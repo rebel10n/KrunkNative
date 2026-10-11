@@ -1,0 +1,1295 @@
+/*
+ * test_layout.c - layout module tests (client/src/html/engine/layout*.c).
+ *
+ * Part 1: unit fixtures through the real DOM + cascade + text stack
+ *         (margin collapsing, floats + clear, inline-block baselines, flex,
+ *         grid (tracks, line placement, fr rows, self-alignment), table,
+ *         absolute right/bottom + translate, abs static position after
+ *         inline content, fixed inside a
+ *         transform, sticky, rtl scrollbar, custom scrollbar width, ellipsis,
+ *         text-transform, min-content, hit testing, <br>/nowrap, inline
+ *         fragments, select intrinsic width, incremental boundary relayout).
+ * Part 2: the v3.1.1 menu from doc/ref/krunker-v3.1.1/menu/real-1280.dom.html
+ *         (Chrome's live DOM incl. its inline styles) with the shipped sheets,
+ *         at 1280x720, compared against rects derived from the CSS and pixel
+ *         edges measured in real-1280.png.  Prints the expected/measured/delta
+ *         table.
+ *
+ * Usage: test_layout [repo root]      exit code = number of failures
+ */
+#define _POSIX_C_SOURCE 200809L
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "css_cascade.h"
+#include "css_sheet.h"
+#include "dom.h"
+#include "layout.h"
+#include "text.h"
+#include "ua_css.h"
+
+#ifndef KN_REPO_ROOT
+#define KN_REPO_ROOT "."
+#endif
+
+static const char *g_root = KN_REPO_ROOT;
+static int g_fail, g_pass;
+static TextSystem *g_ts;
+static LayoutCtx g_ctx;
+static CssSheet *g_ua;
+
+#define CHECK(cond, ...) do { if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+#define NEAR(a, b, tol) (fabsf((float)(a) - (float)(b)) <= (tol))
+#define CHECK_NEAR(a, b, tol, what) CHECK(NEAR(a, b, tol), "%s: got %.3f expected %.3f (tol %.2f)", what, (double)(a), (double)(b), (double)(tol))
+
+/* ------------------------------------------------------------------------- */
+/* host services                                                              */
+/* ------------------------------------------------------------------------- */
+
+static char *read_file(const char *rel, size_t *len)
+{
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/%s", g_root, rel);
+    FILE *f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "cannot open %s\n", path); exit(99); }
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc((size_t)n + 1);
+    if (fread(buf, 1, (size_t)n, f) != (size_t)n) { fprintf(stderr, "short read %s\n", path); exit(99); }
+    buf[n] = 0;
+    fclose(f);
+    if (len) *len = (size_t)n;
+    return buf;
+}
+
+/* PNG IHDR reader standing in for image_get() (which needs a GL context). */
+static int png_size(void *user, const char *url, const char *base, float *w, float *h)
+{
+    (void)user; (void)base;
+    char rel[512], path[1100];
+    size_t n = strcspn(url, "?#");
+    while (n && *url == '/') { url++; n--; }
+    if (n >= sizeof(rel)) return 0;
+    memcpy(rel, url, n); rel[n] = 0;
+    snprintf(path, sizeof(path), "%s/ui/%s", g_root, rel);
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    unsigned char hdr[24];
+    size_t got = fread(hdr, 1, sizeof(hdr), f);
+    fclose(f);
+    if (got < 24 || memcmp(hdr, "\x89PNG", 4) != 0) return 0;
+    *w = (float)((hdr[16] << 24) | (hdr[17] << 16) | (hdr[18] << 8) | hdr[19]);
+    *h = (float)((hdr[20] << 24) | (hdr[21] << 16) | (hdr[22] << 8) | hdr[23]);
+    return 1;
+}
+
+/* ::-webkit-scrollbar widths from the inventory: 12px global, 8px #chatList. */
+static float sb_width(void *user, lxb_dom_node_t *node, float def)
+{
+    (void)user;
+    if (node && node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+        size_t len;
+        const lxb_char_t *id = lxb_dom_element_id(lxb_dom_interface_element(node), &len);
+        if (id && len == 8 && memcmp(id, "chatList", 8) == 0) return 8.0f;
+    }
+    return def;
+}
+
+/* ------------------------------------------------------------------------- */
+/* fixtures                                                                   */
+/* ------------------------------------------------------------------------- */
+
+typedef struct Fx {
+    Dom *dom;
+    CssSheet *sheets[8];
+    int ns;
+    LayoutTree *tree;
+    float vw, vh;
+} Fx;
+
+static void fx_layout(Fx *fx)
+{
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    if (fx->tree) layout_tree_free(fx->tree);
+    fx->tree = layout_build(fx->dom, &g_ctx);
+    layout_run(fx->tree, fx->vw, fx->vh);
+}
+
+static Fx *fx_html(const char *body, const char *css)
+{
+    static const char *base_css = "html, body { margin: 0; padding: 0; } * { font-family: gamefont; }\n";
+    Fx *fx = calloc(1, sizeof(Fx));
+    fx->vw = 800; fx->vh = 600;
+    fx->dom = dom_create();
+    size_t hl = strlen(body) + 64;
+    char *html = malloc(hl);
+    if (!html) exit(99);
+    snprintf(html, hl, "<!doctype html><html><body>%s</body></html>", body);
+    dom_load_html(fx->dom, html, strlen(html));
+    free(html);
+    fx->sheets[fx->ns++] = css_sheet_load(base_css, strlen(base_css), "base");
+    if (css) fx->sheets[fx->ns++] = css_sheet_load(css, strlen(css), "fixture");
+    fx_layout(fx);
+    return fx;
+}
+
+static void fx_free(Fx *fx)
+{
+    if (!fx) return;
+    layout_tree_free(fx->tree);
+    dom_destroy(fx->dom);
+    for (int i = 0; i < fx->ns; i++) css_sheet_destroy(fx->sheets[i]);
+    free(fx);
+}
+
+static Box *bx(Fx *fx, const char *id)
+{
+    HtmlElem e = dom_by_id(fx->dom, id);
+    ElemData *ed = e ? dom_elem_data(fx->dom, e) : NULL;
+    Box *b = ed ? (Box *)ed->box : NULL;
+    if (!b) { printf("FAIL: no box for #%s\n", id); g_fail++; }
+    return b;
+}
+
+static void dump_id(Fx *fx, const char *id)
+{
+    const char *want = getenv("KN_DUMP_ID");
+    if (!want || strcmp(want, id) != 0) return;
+    HtmlElem e = dom_by_id(fx->dom, id);
+    ElemData *ed = e ? dom_elem_data(fx->dom, e) : NULL;
+    if (!ed || !ed->box) return;
+    KnStrBuf sb = { 0 };
+    layout_dump((Box *)ed->box, &sb);
+    printf("--- dump #%s\n%s", id, sb.data ? sb.data : "");
+    kn_sb_free(&sb);
+}
+
+static HtmlRect rc(Fx *fx, const char *id)
+{
+    HtmlRect r = { 0, 0, 0, 0 };
+    dump_id(fx, id);
+    Box *b = bx(fx, id);
+    if (b) layout_box_rect_in_viewport(b, &r);
+    return r;
+}
+
+static const char *box_id(const Box *b)
+{
+    static char buf[64];
+    buf[0] = 0;
+    if (b && b->node && b->node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+        size_t len;
+        const lxb_char_t *id = lxb_dom_element_id(lxb_dom_interface_element(b->node), &len);
+        if (id) { snprintf(buf, sizeof(buf), "%.*s", (int)len, (const char *)id); }
+    }
+    return buf;
+}
+
+static float tw(const char *family, float size, const char *s)
+{
+    TextFont *f = text_font(g_ts, family, size, 400, 0);
+    return f ? text_measure(f, s, strlen(s), 0) : 0;
+}
+
+static const TextRun *first_run(const Box *b)
+{
+    for (const Box *c = b->first_child; c; c = c->next) {
+        if (c->type == BOX_TEXT && c->run_count) return &c->runs[0];
+        const TextRun *r = first_run(c);
+        if (r) return r;
+    }
+    return NULL;
+}
+
+static int count_lines(const Box *b)
+{
+    if (b->line_count) return b->line_count;
+    for (const Box *c = b->first_child; c; c = c->next) if (c->line_count) return c->line_count;
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* unit cases                                                                 */
+/* ------------------------------------------------------------------------- */
+
+static void t_margin_collapse(void)
+{
+    Fx *fx = fx_html(
+        "<div id=a style='height:10px;margin-bottom:20px'></div>"
+        "<div id=b style='height:10px;margin-top:30px'></div>"
+        "<div id=p style='margin-top:10px'><div id=c style='margin-top:25px;height:5px'></div></div>"
+        "<div id=e style='margin-top:8px;margin-bottom:12px'></div>"
+        "<div id=f style='height:5px;margin-top:-4px'></div>"
+        "<div id=g style='overflow:hidden;margin-top:10px'><div id=gc style='margin-top:7px;height:3px'></div></div>", NULL);
+    CHECK_NEAR(rc(fx, "a").y, 0, 0.01, "collapse: a.y");
+    CHECK_NEAR(rc(fx, "b").y, 40, 0.01, "collapse: siblings max(20,30)");
+    CHECK_NEAR(rc(fx, "p").y, 75, 0.01, "collapse: parent/child top margins");
+    CHECK_NEAR(rc(fx, "c").y, 75, 0.01, "collapse: child at parent top");
+    CHECK_NEAR(rc(fx, "p").h, 5, 0.01, "collapse: parent height");
+    CHECK_NEAR(rc(fx, "f").y, 88, 0.01, "collapse: through empty block with negative margin (12 + -4)");
+    CHECK_NEAR(rc(fx, "g").y, 103, 0.01, "collapse: BFC root after f");
+    CHECK_NEAR(rc(fx, "gc").y, 110, 0.01, "collapse: no collapse into a BFC root");
+    fx_free(fx);
+}
+
+static void t_floats(void)
+{
+    Fx *fx = fx_html(
+        "<div id=w style='width:300px'>"
+        "<div id=fl style='float:left;width:100px;height:50px'></div>"
+        "<div id=fr style='float:right;width:80px;height:30px'></div>"
+        "<span id=t>hello</span>"
+        "<div id=cl style='clear:both;height:10px'></div></div>"
+        "<div id=w2 style='width:200px'><div id=fl2 style='float:left;width:150px;height:20px'></div>"
+        "<div id=bfc style='overflow:hidden;width:100px;height:10px'></div></div>", NULL);
+    HtmlRect fl = rc(fx, "fl"), fr = rc(fx, "fr"), cl = rc(fx, "cl"), w = rc(fx, "w");
+    CHECK_NEAR(fl.x, 0, 0.01, "float left x");
+    CHECK_NEAR(fr.x, 220, 0.01, "float right x");
+    Box *t = bx(fx, "t");
+    const TextRun *r = t ? first_run(t) : NULL;
+    CHECK(r != NULL, "float: text run exists");
+    if (r) CHECK_NEAR(r->x, 100, 0.01, "line box avoids the left float");
+    CHECK_NEAR(cl.y, 50, 0.01, "clear: both below floats");
+    CHECK_NEAR(w.h, 60, 0.01, "container height includes cleared block");
+    CHECK_NEAR(rc(fx, "bfc").y, rc(fx, "w2").y + 20, 0.01, "BFC root that does not fit beside a float moves below it");
+    fx_free(fx);
+}
+
+static void t_inline_block_baseline(void)
+{
+    Fx *fx = fx_html(
+        "<div id=lb style='font-size:20px'><span id=tx>Ab</span>"
+        "<div id=ib style='display:inline-block;width:30px;height:40px'></div>"
+        "<div id=ibm style='display:inline-block;width:10px;height:10px;vertical-align:top'></div>"
+        "<div id=ibt style='display:inline-block;font-size:10px'>x</div></div>", NULL);
+    Box *tx = bx(fx, "tx");
+    const TextRun *r = tx ? first_run(tx) : NULL;
+    TextFont *f = text_font(g_ts, "gamefont", 20, 400, 0);
+    const TextMetrics *m = text_font_metrics(f);
+    HtmlRect ib = rc(fx, "ib"), ibm = rc(fx, "ibm"), lb = rc(fx, "lb"), ibt = rc(fx, "ibt");
+    CHECK(r != NULL, "inline-block: text run");
+    if (r) {
+        CHECK_NEAR(ib.y + ib.h, r->y, 0.01, "empty inline-block: bottom margin edge on the baseline");
+        CHECK_NEAR(r->y, 40, 0.01, "baseline pushed down by the 40px inline-block");
+        Box *bt = bx(fx, "ibt");
+        float bl = bt ? bt->y + bt->first_baseline : 0;
+        CHECK_NEAR(bl, r->y, 0.01, "inline-block with text: its last line baseline on the parent baseline");
+    }
+    CHECK_NEAR(ibm.y, 0, 0.01, "vertical-align: top");
+    CHECK_NEAR(lb.h, 40 + m->descent, 0.01, "line height = baseline + strut descent");
+    (void)ibt;
+    fx_free(fx);
+}
+
+static void t_flex(void)
+{
+    Fx *fx = fx_html(
+        "<div id=fx style='display:flex;justify-content:space-between;align-items:center;width:400px;height:100px'>"
+        "<div id=f1 style='width:50px;height:20px'></div><div id=f2 style='width:50px;height:40px'></div>"
+        "<div id=f3 style='width:50px;height:20px'></div></div>"
+        "<div id=fc style='display:flex;flex-direction:column;height:300px'>"
+        "<div id=g1 style='flex-grow:1'></div><div id=g2 style='height:100px'></div></div>"
+        "<div id=fa style='display:flex;justify-content:space-around;width:300px'>"
+        "<div id=a1 style='width:50px;height:5px'></div><div id=a2 style='width:50px;height:5px'></div></div>"
+        "<div id=fb style='display:flex;width:300px'><div id=b1 style='flex-basis:200px'>x</div>"
+        "<div id=b2 style='flex-grow:1'>y</div></div>"
+        "<div id=fw style='display:flex;flex-wrap:wrap;width:120px'>"
+        "<div id=w1 style='width:50px;height:10px'></div><div id=w2 style='width:50px;height:10px'></div>"
+        "<div id=w3 style='width:50px;height:10px'></div></div>", NULL);
+    HtmlRect fxr = rc(fx, "fx");
+    CHECK_NEAR(rc(fx, "f1").x, fxr.x + 0, 0.01, "space-between first");
+    CHECK_NEAR(rc(fx, "f2").x, fxr.x + 175, 0.01, "space-between middle");
+    CHECK_NEAR(rc(fx, "f3").x, fxr.x + 350, 0.01, "space-between last");
+    CHECK_NEAR(rc(fx, "f1").y - fxr.y, 40, 0.01, "align-items center (20px item)");
+    CHECK_NEAR(rc(fx, "f2").y - fxr.y, 30, 0.01, "align-items center (40px item)");
+    HtmlRect fc = rc(fx, "fc"), g1 = rc(fx, "g1"), g2 = rc(fx, "g2");
+    CHECK_NEAR(g1.h, 200, 0.01, "column flex-grow");
+    CHECK_NEAR(g2.y - fc.y, 200, 0.01, "column second item");
+    CHECK_NEAR(g1.w, 800, 0.01, "column stretch width");
+    HtmlRect fa = rc(fx, "fa");
+    CHECK_NEAR(rc(fx, "a1").x - fa.x, 50, 0.01, "space-around first");
+    CHECK_NEAR(rc(fx, "a2").x - fa.x, 200, 0.01, "space-around second");
+    CHECK_NEAR(rc(fx, "b1").w, 200, 0.01, "flex-basis 200px");
+    CHECK_NEAR(rc(fx, "b2").w, 100, 0.01, "flex-grow takes the rest");
+    HtmlRect fw = rc(fx, "fw");
+    CHECK_NEAR(rc(fx, "w3").y - fw.y, 10, 0.01, "wrap: third item on the second line");
+    CHECK_NEAR(fw.h, 20, 0.01, "wrap: container height = two lines");
+    fx_free(fx);
+}
+
+static void t_grid(void)
+{
+    char html[4096];
+    int o = snprintf(html, sizeof(html), "<div id=gr style='display:grid;grid-template-columns:auto auto auto auto auto auto;"
+                     "column-gap:10px;row-gap:10px;width:650px'>");
+    for (int i = 0; i < 12; i++)
+        o += snprintf(html + o, sizeof(html) - (size_t)o, "<div id=g%d><span style='display:inline-block;width:40px;height:10px'></span></div>", i);
+    snprintf(html + o, sizeof(html) - (size_t)o, "</div><div id=gp style='display:grid;grid-template-columns:40px 50px auto 50px 40px;width:400px'>"
+             "<div id=p0>a</div><div id=p1>b</div><div id=p2>c</div><div id=p3>d</div><div id=p4>e</div></div>");
+    Fx *fx = fx_html(html, NULL);
+    HtmlRect gr = rc(fx, "gr");
+    char id[16];
+    for (int i = 0; i < 6; i++) {
+        snprintf(id, sizeof(id), "g%d", i);
+        HtmlRect r = rc(fx, id);
+        CHECK_NEAR(r.x - gr.x, i * 110.0f, 0.01, "grid: 6 auto columns x");
+        CHECK_NEAR(r.w, 100, 0.01, "grid: auto column width (650-50)/6");
+    }
+    HtmlRect g0 = rc(fx, "g0"), g6 = rc(fx, "g6");
+    CHECK_NEAR(g6.y, g0.y + g0.h + 10, 0.01, "grid: row-gap");
+    CHECK_NEAR(g6.x, g0.x, 0.01, "grid: auto-placement wraps to column 0");
+    CHECK_NEAR(rc(fx, "p2").x - rc(fx, "gp").x, 90, 0.01, "grid: px tracks then auto");
+    CHECK_NEAR(rc(fx, "p2").w, 220, 0.01, "grid: auto track takes the free space");
+    fx_free(fx);
+}
+
+/* calc() percentages, fit-content(), fr / minmax(), repeat() and stretched
+ * form controls; expected values measured in Chrome 152 (same markup). */
+static void t_grid_tracks(void)
+{
+    Fx *fx = fx_html(
+        "<div style='width:300px'><div id=v3 style='width:100%;display:grid;grid-template-columns:"
+        "calc((100% / 3) - 2px) calc((100% / 3) - 2px) calc((100% / 3) - 2px);column-gap:3px'>"
+        "<input id=v0 type=number><input id=v1 type=number><input id=v2 type=number></div></div>"
+        "<div id=pb style='width:300px;display:grid;grid-template-columns:fit-content(0) fit-content(100%) auto'>"
+        "<span id=pb0>Lock it</span><span id=pb1>Label</span><span id=pb2>X</span></div>"
+        "<div id=pl style='width:300px;display:grid;grid-template-columns:fit-content(0) fit-content(100%) auto'>"
+        "<span id=pl0>Lock it</span><span id=pl1>A long label text that wraps around the box twice or more often</span><span id=pl2>X</span></div>"
+        "<div id=fr style='width:310px;display:grid;grid-template-columns:1fr 2fr 50px;column-gap:5px'>"
+        "<div id=fr0></div><div id=fr1></div><div id=fr2></div></div>"
+        "<div id=mm style='width:300px;display:grid;grid-template-columns:repeat(3, minmax(0, 1fr))'>"
+        "<div id=mm0>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</div><div id=mm1></div><div id=mm2></div></div>"
+        "<div style='display:inline-block'><div id=ib style='display:grid;grid-template-columns:fit-content(0) fit-content(100%) auto'>"
+        "<span>Lock it</span><span id=ib1>Label</span><span>X</span></div></div>", NULL);
+    HtmlRect v3 = rc(fx, "v3");
+    const float track = 100.0f - 2.0f;
+    for (int i = 0; i < 3; i++) {
+        char id[8];
+        snprintf(id, sizeof(id), "v%d", i);
+        HtmlRect r = rc(fx, id);
+        CHECK_NEAR(r.x - v3.x, i * (track + 3), 0.01, "grid: calc(%) track x");
+        CHECK_NEAR(r.w, track, 0.01, "grid: inputs stretch to their calc(%) track");
+    }
+    float lock_min = tw("gamefont", 16, "Lock"), label = tw("gamefont", 16, "Label");
+    HtmlRect pb = rc(fx, "pb");
+    CHECK_NEAR(rc(fx, "pb0").w, lock_min, 0.5, "grid: fit-content(0) = min-content");
+    CHECK_NEAR(rc(fx, "pb1").x - pb.x, rc(fx, "pb0").w, 0.01, "grid: fit-content track x");
+    CHECK_NEAR(rc(fx, "pb1").w, label, 0.5, "grid: fit-content(100%) = max-content when it fits");
+    CHECK_NEAR(rc(fx, "pb2").x + rc(fx, "pb2").w, pb.x + 300, 0.01, "grid: auto track stretches, fit-content tracks do not");
+    HtmlRect pl = rc(fx, "pl");
+    float x_w = tw("gamefont", 16, "X");
+    CHECK_NEAR(rc(fx, "pl2").w, x_w, 0.5, "grid: long fit-content label leaves the auto track at max-content");
+    CHECK_NEAR(rc(fx, "pl1").w, 300 - rc(fx, "pl0").w - rc(fx, "pl2").w, 0.5, "grid: long fit-content label takes the rest");
+    CHECK(rc(fx, "pl1").h > rc(fx, "pb1").h + 1, "grid: the long label wraps");
+    (void)pl;
+    CHECK_NEAR(rc(fx, "fr0").w, 250.0f / 3, 0.01, "grid: 1fr of (310-50-10)/3");
+    CHECK_NEAR(rc(fx, "fr1").w, 500.0f / 3, 0.01, "grid: 2fr");
+    CHECK_NEAR(rc(fx, "fr2").x - rc(fx, "fr").x, 260, 0.01, "grid: fixed track after the fr tracks");
+    CHECK_NEAR(rc(fx, "mm0").w, 100, 0.01, "grid: repeat(3, minmax(0, 1fr)) ignores min-content");
+    CHECK_NEAR(rc(fx, "mm2").x - rc(fx, "mm").x, 200, 0.01, "grid: repeat() expands to 3 tracks");
+    HtmlRect ib = rc(fx, "ib");
+    CHECK_NEAR(ib.w, lock_min + label + x_w, 1.0, "grid: shrink-to-fit width from fit-content tracks");
+    fx_free(fx);
+}
+
+/* Line-based placement, fr rows in a definite height, spanning items,
+ * sparse auto-placement, self-alignment and auto margins.  Expected values
+ * from Chrome (getBoundingClientRect of the same markup). */
+static void t_grid_placement(void)
+{
+    Fx *fx = fx_html(
+        /* pickr nano .pcr-selection: 5fr row fills the definite height, 2/2/2/2 = row 2 span 1 */
+        "<div id=sel style='display:grid;grid-gap:10px;grid-template-columns:1fr 4fr;grid-template-rows:5fr auto auto;"
+        "align-items:center;height:168px;width:300px'>"
+        "<div id=pv style='grid-area:2/1/4/1;height:100%'><div style='height:32px'></div></div>"
+        "<div id=pa style='grid-area:1/1/2/3;height:100%'></div>"
+        "<div id=hu style='grid-area:2/2/2/2;height:8px'></div>"
+        "<div id=op style='grid-area:3/2/3/2;height:8px'></div></div>"
+        "<div id=g2 style='display:grid;grid-template-columns:50px 50px 50px;grid-template-rows:20px 30px;width:200px;column-gap:4px'>"
+        "<div id=a style='grid-column:2 / span 2'></div><div id=b style='grid-row:2;grid-column:3'></div><div id=c></div>"
+        "<div id=d style='grid-area:2/1'></div><div id=e></div><div id=f style='grid-column:-2'></div>"
+        "<div id=h style='grid-row:span 2 / 7'></div></div>"
+        "<div id=al style='display:grid;grid-template-columns:100px 100px;grid-template-rows:40px 40px;width:300px'>"
+        "<div id=al0 style='justify-self:center;width:30px;height:20px'></div>"
+        "<div id=al1 style='justify-self:end;align-self:end;width:30px;height:20px'></div>"
+        "<div id=al2 style='place-self:center;width:30px;height:20px'></div>"
+        "<div id=al3 style='margin:auto;width:30px;height:20px'></div></div>"
+        /* editor .right.panelButton: margin-left:auto pushes it to the end of its auto track */
+        "<div id=pbl style='width:260px;display:grid;grid-template-columns:40px auto'><div style='height:10px'></div>"
+        "<div id=lk style='width:max-content;margin-left:auto;margin-right:-15px'>"
+        "<span style='display:inline-block;width:20px;height:10px'></span></div></div>", NULL);
+    HtmlRect sel = rc(fx, "sel");
+    struct { const char *id; float x, y, w, h; } want[] = {
+        { "pv", 0, 136, 58, 32 }, { "pa", 0, 0, 300, 126 }, { "hu", 68, 137.5f, 232, 8 }, { "op", 68, 158.5f, 232, 8 },
+    };
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        HtmlRect r = rc(fx, want[i].id);
+        CHECK(NEAR(r.x - sel.x, want[i].x, 0.01) && NEAR(r.y - sel.y, want[i].y, 0.01) && NEAR(r.w, want[i].w, 0.01) && NEAR(r.h, want[i].h, 0.01),
+              "grid placement: #%s at %.2f,%.2f %.2fx%.2f, expected %.2f,%.2f %.2fx%.2f", want[i].id,
+              (double)(r.x - sel.x), (double)(r.y - sel.y), (double)r.w, (double)r.h,
+              (double)want[i].x, (double)want[i].y, (double)want[i].w, (double)want[i].h);
+    }
+    HtmlRect g2 = rc(fx, "g2");
+    struct { const char *id; float x, y, w, h; } want2[] = {
+        { "a", 54, 0, 104, 20 }, { "b", 108, 20, 50, 30 }, { "c", 54, 20, 50, 30 }, { "d", 0, 20, 50, 30 },
+        { "e", 0, 50, 50, 0 }, { "f", 108, 50, 50, 0 }, { "h", 0, 50, 50, 0 },
+    };
+    for (size_t i = 0; i < sizeof(want2) / sizeof(want2[0]); i++) {
+        HtmlRect r = rc(fx, want2[i].id);
+        CHECK(NEAR(r.x - g2.x, want2[i].x, 0.01) && NEAR(r.y - g2.y, want2[i].y, 0.01) && NEAR(r.w, want2[i].w, 0.01) && NEAR(r.h, want2[i].h, 0.01),
+              "grid auto-placement: #%s at %.2f,%.2f %.2fx%.2f, expected %.2f,%.2f %.2fx%.2f", want2[i].id,
+              (double)(r.x - g2.x), (double)(r.y - g2.y), (double)r.w, (double)r.h,
+              (double)want2[i].x, (double)want2[i].y, (double)want2[i].w, (double)want2[i].h);
+    }
+    CHECK_NEAR(g2.h, 50, 0.01, "grid: empty implicit rows are 0 tall");
+    HtmlRect al = rc(fx, "al");
+    CHECK_NEAR(rc(fx, "al0").x - al.x, 35, 0.01, "grid: justify-self center");
+    CHECK_NEAR(rc(fx, "al0").y - al.y, 0, 0.01, "grid: non-stretch fixed height at start");
+    CHECK_NEAR(rc(fx, "al1").x - al.x, 170, 0.01, "grid: justify-self end");
+    CHECK_NEAR(rc(fx, "al1").y - al.y, 20, 0.01, "grid: align-self end");
+    CHECK_NEAR(rc(fx, "al2").x - al.x, 35, 0.01, "grid: place-self center (x)");
+    CHECK_NEAR(rc(fx, "al2").y - al.y, 50, 0.01, "grid: place-self center (y)");
+    CHECK_NEAR(rc(fx, "al3").x - al.x, 135, 0.01, "grid: margin:auto centres (x)");
+    CHECK_NEAR(rc(fx, "al3").y - al.y, 50, 0.01, "grid: margin:auto centres (y)");
+    HtmlRect lk = rc(fx, "lk");
+    CHECK_NEAR(lk.x - rc(fx, "pbl").x, 255, 0.01, "grid: margin-left:auto pushes the item to the area end (+15px overhang)");
+    CHECK_NEAR(lk.w, 20, 0.01, "grid: width:max-content item keeps its width");
+    fx_free(fx);
+}
+
+/* align-self overrides the flex container's align-items per item. */
+static void t_flex_align_self(void)
+{
+    Fx *fx = fx_html(
+        "<div id=fa style='display:flex;align-items:center;height:50px;width:200px'>"
+        "<div id=fa0 style='width:10px;height:10px;align-self:flex-end'></div>"
+        "<div id=fa1 style='width:10px;height:10px'></div>"
+        "<div id=fa2 style='width:10px;align-self:stretch'></div>"
+        "<div id=fa3 style='width:10px;height:10px;align-self:flex-start'></div></div>", NULL);
+    HtmlRect fa = rc(fx, "fa");
+    CHECK_NEAR(rc(fx, "fa0").y - fa.y, 40, 0.01, "flex: align-self flex-end");
+    CHECK_NEAR(rc(fx, "fa1").y - fa.y, 20, 0.01, "flex: align-self auto uses align-items center");
+    CHECK_NEAR(rc(fx, "fa2").h, 50, 0.01, "flex: align-self stretch");
+    CHECK_NEAR(rc(fx, "fa3").y - fa.y, 0, 0.01, "flex: align-self flex-start");
+    fx_free(fx);
+}
+
+/* Static position of absolutely positioned boxes inside inline content:
+ * a block-level box (original display) goes to the start of the next line,
+ * an inline-level one stays at the pen (Chrome). */
+static void t_abs_static_inline(void)
+{
+    Fx *fx = fx_html(
+        "<div id=t6 style='width:200px;line-height:20px;padding-left:7px'>"
+        "<span style='display:inline-block;width:50px;height:10px'></span>"
+        "<div id=a6 style='position:absolute;width:10px;height:10px'></div>"
+        "<span id=i6 style='position:absolute;display:inline-block;width:10px;height:10px'></span></div>"
+        "<div id=t7 style='width:200px;line-height:20px;text-align:right'>"
+        "<div id=a7 style='position:absolute;width:10px;height:10px'></div>text</div>", NULL);
+    HtmlRect t6 = rc(fx, "t6"), a6 = rc(fx, "a6"), i6 = rc(fx, "i6");
+    CHECK_NEAR(a6.x - t6.x, 7, 0.01, "abs block after inline content: x at the content start");
+    CHECK_NEAR(a6.y, t6.y + t6.h, 0.01, "abs block after inline content: y at the next line");
+    CHECK_NEAR(i6.x - t6.x, 57, 0.01, "abs inline-block after inline content: x at the pen");
+    CHECK_NEAR(i6.y, t6.y, 0.01, "abs inline-block after inline content: y at the line top");
+    HtmlRect t7 = rc(fx, "t7"), a7 = rc(fx, "a7");
+    CHECK_NEAR(a7.x, t7.x, 0.01, "abs block on an empty line: x at the content start (text-align ignored)");
+    CHECK_NEAR(a7.y, t7.y, 0.01, "abs block on an empty line: y at the line top");
+    fx_free(fx);
+}
+
+/* CSS zoom (Chrome semantics, values from Chrome 152 getBoundingClientRect). */
+static void t_zoom(void)
+{
+    Fx *fx = fx_html(
+        "<div id=za style='width:100px;height:10px;border:1px solid red;zoom:0.7'></div>"
+        "<div id=zb style='width:100px;height:10px;border:3px solid red;zoom:0.7'></div>"
+        "<div id=zc style='width:100px;height:10px;border:1.5px solid red'></div>"
+        "<div style='line-height:20px;zoom:0.5'><div id=ze style='zoom:0.5'>x</div></div>"
+        "<div style='width:200px'><div id=zf style='width:50%;height:10px;zoom:0.5;margin-left:10%'></div></div>"
+        "<div style='font-size:20px;zoom:2'><div id=zh style='width:1em;height:1rem'></div></div>"
+        "<div id=zi style='width:2em;height:10px;font-size:10px;zoom:3'></div>"
+        "<div style='zoom:0.7'><input id=zj type=checkbox><canvas id=zn></canvas></div>"
+        "<div style='zoom:0.5'><div id=zo style='zoom:0.5;width:100px;height:4px'></div></div>"
+        "<div style='zoom:50%;padding:10px'><div id=zp style='height:10px;margin:4px'></div></div>", NULL);
+    HtmlRect r = rc(fx, "za");
+    CHECK_NEAR(r.w, 72, 0.01, "zoom: 100px*0.7 + 1px borders (0.7 snaps to 1)");
+    CHECK_NEAR(r.h, 9, 0.01, "zoom: height 10*0.7 + 2");
+    CHECK_NEAR(rc(fx, "zb").w, 74, 0.01, "zoom: 3px border * 0.7 floors to 2");
+    CHECK_NEAR(rc(fx, "zc").w, 102, 0.01, "border widths floor (1.5px -> 1)");
+    CHECK_NEAR(rc(fx, "ze").h, 5, 0.01, "zoom: inherited line-height follows the child's zoom");
+    CHECK_NEAR(rc(fx, "zf").w, 100, 0.01, "zoom: % width resolves against the zoomed containing block");
+    CHECK_NEAR(rc(fx, "zf").x, 20, 0.01, "zoom: % margin resolves against the containing block");
+    CHECK_NEAR(rc(fx, "zh").w, 40, 0.01, "zoom: em uses the zoomed font size");
+    CHECK_NEAR(rc(fx, "zh").h, 32, 0.01, "zoom: rem is zoomed");
+    CHECK_NEAR(rc(fx, "zi").w, 60, 0.01, "zoom: em with the element's own zoom");
+    CHECK_NEAR(rc(fx, "zj").w, 9.1, 0.01, "zoom: checkbox natural size");
+    CHECK_NEAR(rc(fx, "zj").x, 2.8, 0.01, "zoom: UA margins");
+    CHECK_NEAR(rc(fx, "zn").w, 210, 0.01, "zoom: canvas natural size");
+    CHECK_NEAR(rc(fx, "zo").w, 25, 0.01, "zoom: nested zoom multiplies");
+    CHECK_NEAR(rc(fx, "zp").x, 7, 0.01, "zoom: percentage zoom (10px pad + 4px margin) * 0.5");
+    const CssComputed *st = bx(fx, "zo")->style;
+    CHECK_NEAR(st->zoom, 0.25, 1e-4, "zoom: effective zoom stored");
+    CHECK_NEAR(st->font_size, 4, 1e-3, "zoom: font-size 16 * 0.25");
+    /* hit testing follows the zoomed boxes */
+    HtmlRect zo = rc(fx, "zo");
+    Box *hit = layout_hit_test(fx->tree, zo.x + zo.w - 1, zo.y + 0.5f, 0);
+    CHECK(hit && !strcmp(box_id(hit), "zo"), "zoom: hit test inside the zoomed box (%s)", box_id(hit));
+    hit = layout_hit_test(fx->tree, zo.x + zo.w + 2, zo.y + 0.5f, 0);
+    CHECK(!hit || strcmp(box_id(hit), "zo"), "zoom: hit test outside the zoomed width");
+    fx_free(fx);
+}
+
+/* Chrome UA defaults for <hr>, headings, text inputs (content-box), <b>. */
+static void t_ua_defaults(void)
+{
+    Fx *fx = fx_html(
+        "<div style='width:300px;font-size:16px'><div id=above style='height:10px'></div><hr id=hr><hr id=hw style='width:50%'>"
+        "<input id=tx style='width:100px;padding:10px'><textarea id=ta style='width:100px;padding:10px'></textarea>"
+        "<select id=se style='width:100px;padding:10px'></select></div>"
+        "<div style='font-weight:700'><b id=bb>x</b></div>", NULL);
+    HtmlRect hr = rc(fx, "hr");
+    CHECK_NEAR(hr.h, 2, 0.01, "hr: 1px inset border top and bottom");
+    CHECK_NEAR(hr.y - (rc(fx, "above").y + 10), 8, 0.01, "hr: margin 0.5em");
+    CHECK_NEAR(hr.w, 300, 0.01, "hr: auto width");
+    HtmlRect hw = rc(fx, "hw");
+    CHECK_NEAR(hw.x, 74, 0.01, "hr: margin-inline auto centres (300 - 152) / 2");
+    const CssComputed *s = bx(fx, "hr")->style;
+    CHECK(s->border_style[CSS_TOP] == CSS_BORDER_STYLE_INSET && s->color.r == 128 && s->overflow_x == CSS_OVERFLOW_HIDDEN, "hr: inset, gray, overflow hidden");
+    CHECK_NEAR(rc(fx, "tx").w, 124, 0.01, "input: content-box (100 + 2*10 + 2*2)");
+    CHECK_NEAR(rc(fx, "ta").w, 122, 0.01, "textarea: content-box, 1px border");
+    CHECK_NEAR(rc(fx, "se").w, 100, 0.01, "select: border-box");
+    CHECK(bx(fx, "bb")->style->font_weight == 900, "b: bolder (700 -> 900)");
+    fx_free(fx);
+}
+
+static void t_table(void)
+{
+    Fx *fx = fx_html(
+        "<div id=tb style='display:table;width:300px'>"
+        "<div id=c1 style='display:table-cell;width:25%'>a</div>"
+        "<div id=c2 style='display:table-cell'>b<br>c</div>"
+        "<div id=c3 style='display:table-cell;width:25%;vertical-align:middle'>d</div></div>"
+        "<div id=ta style='display:table;width:400px'><div id=t1 style='display:table-cell'>aaaa</div>"
+        "<div id=t2 style='display:table-cell'>aa</div></div>"
+        "<div id=ts style='display:table;border-spacing:10px'><div id=s1 style='display:table-cell;width:50px'>x</div></div>", NULL);
+    HtmlRect tb = rc(fx, "tb"), c1 = rc(fx, "c1"), c2 = rc(fx, "c2"), c3 = rc(fx, "c3");
+    CHECK_NEAR(c1.w, 75, 0.01, "table: 25% cell");
+    CHECK_NEAR(c2.x - tb.x, 75, 0.01, "table: auto cell x");
+    CHECK_NEAR(c2.w, 150, 0.01, "table: auto cell gets the rest");
+    CHECK_NEAR(c3.x - tb.x, 225, 0.01, "table: last cell x");
+    CHECK(c1.h > 0 && NEAR(c1.h, c2.h, 0.01) && NEAR(c3.h, c2.h, 0.01), "table: cells share the row height (%.1f %.1f %.1f)", c1.h, c2.h, c3.h);
+    Box *c3b = bx(fx, "c3");
+    const TextRun *r3 = c3b ? first_run(c3b) : NULL;
+    const TextRun *r1 = first_run(bx(fx, "c1"));
+    if (r3 && r1) CHECK(r3->y > r1->y + 1, "table: vertical-align middle moves the cell content down");
+    float wa = tw("gamefont", 16, "aaaa"), wb = tw("gamefont", 16, "aa");
+    CHECK_NEAR(rc(fx, "t1").w, 400 * wa / (wa + wb), 0.05, "table: auto layout distributes by max-content");
+    HtmlRect ts = rc(fx, "ts"), s1 = rc(fx, "s1");
+    CHECK_NEAR(ts.w, 70, 0.01, "table: border-spacing around the cell");
+    CHECK_NEAR(s1.x - ts.x, 10, 0.01, "table: border-spacing offset");
+    fx_free(fx);
+}
+
+static void t_positioned(void)
+{
+    Fx *fx = fx_html(
+        "<div id=rc style='position:relative;width:400px;height:300px;margin-left:20px'>"
+        "<div id=ab style='position:absolute;right:10px;bottom:20px;width:50px;height:40px'></div>"
+        "<div id=ctr style='position:absolute;left:50%;top:50%;width:100px;height:60px;transform:translate(-50%,-50%)'></div>"
+        "<div id=st style='position:absolute;left:10%;right:10%;top:0;height:5px'></div>"
+        "<div id=rel style='position:relative;left:7px;top:3px;height:5px'></div></div>"
+        "<div id=tf style='transform:translateX(10px);height:50px'>"
+        "<div id=fx2 style='position:fixed;left:0;top:0;width:5px;height:5px'></div></div>"
+        "<div id=fx3 style='position:fixed;right:0;bottom:0;width:5px;height:5px'></div>", NULL);
+    HtmlRect ab = rc(fx, "ab");
+    CHECK(NEAR(ab.x, 20 + 340, 0.01) && NEAR(ab.y, 240, 0.01) && NEAR(ab.w, 50, 0.01) && NEAR(ab.h, 40, 0.01),
+          "abs right/bottom: (%.1f,%.1f %.1fx%.1f)", ab.x, ab.y, ab.w, ab.h);
+    HtmlRect ctr = rc(fx, "ctr");
+    CHECK(NEAR(ctr.x, 20 + 150, 0.01) && NEAR(ctr.y, 120, 0.01), "abs 50%% + translate(-50%%,-50%%): (%.1f,%.1f)", ctr.x, ctr.y);
+    CHECK_NEAR(layout_offset_width(bx(fx, "ctr")), 100, 0.01, "offsetWidth ignores transforms");
+    HtmlRect st = rc(fx, "st");
+    CHECK(NEAR(st.x, 20 + 40, 0.01) && NEAR(st.w, 320, 0.01), "abs left/right %% stretch: x %.1f w %.1f", st.x, st.w);
+    HtmlRect rel = rc(fx, "rel");
+    CHECK(NEAR(rel.x, 27, 0.01) && NEAR(rel.y, 3, 0.01), "relative offset: (%.1f,%.1f)", rel.x, rel.y);
+    HtmlRect tf = rc(fx, "tf"), f2 = rc(fx, "fx2");
+    CHECK(NEAR(f2.x, tf.x, 0.01) && NEAR(f2.y, tf.y, 0.01), "fixed inside transform uses the transformed ancestor (%.1f,%.1f vs %.1f,%.1f)", f2.x, f2.y, tf.x, tf.y);
+    HtmlRect f3 = rc(fx, "fx3");
+    CHECK(NEAR(f3.x, 795, 0.01) && NEAR(f3.y, 595, 0.01), "fixed right/bottom against the viewport (%.1f,%.1f)", f3.x, f3.y);
+    fx_free(fx);
+}
+
+static void t_sticky_scroll(void)
+{
+    Fx *fx = fx_html(
+        "<div id=sc style='height:100px;overflow-y:auto;width:200px;margin-top:10px'>"
+        "<div id=sec style='height:300px'><div id=hd style='position:sticky;top:0;height:20px'></div></div>"
+        "<div style='height:500px'></div></div>"
+        "<div id=rs style='direction:rtl;overflow-y:scroll;width:200px;height:100px'><div id=rsc style='height:300px'></div></div>"
+        "<div id=chatList style='overflow-y:auto;height:50px;width:100px'><div style='height:200px'></div></div>"
+        "<div id=hid style='overflow:hidden;height:30px;width:30px'><div style='height:300px'></div></div>", NULL);
+    Box *sc = bx(fx, "sc");
+    HtmlRect scr = rc(fx, "sc");
+    CHECK(sc && (sc->flags & BOXF_VBAR), "auto scroller with overflow gets a bar");
+    if (sc) {
+        CHECK_NEAR(sc->scroll_h, 800, 0.01, "scrollHeight");
+        CHECK_NEAR(box_client_w(sc), 188, 0.01, "clientWidth excludes the 12px bar");
+        layout_set_scroll(fx->tree, sc, 0, 150);
+        CHECK_NEAR(rc(fx, "hd").y, scr.y, 0.01, "sticky header stuck at the scroller top");
+        layout_set_scroll(fx->tree, sc, 0, 290);
+        CHECK_NEAR(rc(fx, "hd").y, scr.y + 280 - 290, 0.01, "sticky header clamped to its containing block");
+        layout_set_scroll(fx->tree, sc, 0, 5000);
+        CHECK_NEAR(sc->scroll_y, 700, 0.01, "scroll offset clamped to scrollHeight - clientHeight");
+        layout_set_scroll(fx->tree, sc, 0, 0);
+        CHECK_NEAR(rc(fx, "hd").y, scr.y, 0.01, "sticky header in place at scroll 0");
+    }
+    Box *rs = bx(fx, "rs");
+    LayoutScrollbar sb;
+    if (rs && layout_scrollbar(fx->tree, rs, 1, &sb)) {
+        CHECK_NEAR(sb.track_x, rs->x, 0.01, "rtl: vertical bar on the left");
+        CHECK_NEAR(sb.track_w, 12, 0.01, "rtl: bar width 12");
+        CHECK_NEAR(rc(fx, "rsc").x, rs->x + 12, 0.01, "rtl: content shifted right of the bar");
+        CHECK_NEAR(rc(fx, "rsc").w, 188, 0.01, "rtl: content width");
+    } else CHECK(0, "rtl scrollbar present");
+    Box *cl = bx(fx, "chatList");
+    if (cl && layout_scrollbar(fx->tree, cl, 1, &sb)) {
+        CHECK_NEAR(sb.track_w, 8, 0.01, "#chatList bar 8px");
+        CHECK_NEAR(sb.thumb_h, 12.5, 0.01, "thumb = visible/total * track");
+        layout_set_scroll(fx->tree, cl, 0, 75);
+        layout_scrollbar(fx->tree, cl, 1, &sb);
+        CHECK_NEAR(sb.thumb_y - sb.track_y, 18.75, 0.01, "thumb position");
+    } else CHECK(0, "#chatList scrollbar present");
+    Box *hid = bx(fx, "hid");
+    CHECK(hid && !(hid->flags & BOXF_VBAR) && NEAR(hid->scroll_h, 300, 0.01), "overflow:hidden: no bar but scrollable overflow");
+    fx_free(fx);
+}
+
+static void t_text(void)
+{
+    Fx *fx = fx_html(
+        "<div id=el style='width:100px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>The quick brown fox jumps</div>"
+        "<div id=up style='text-transform:uppercase'>abc</div>"
+        "<div id=mc style='width:min-content'>hello world</div>"
+        "<div id=br1>a<br>b</div>"
+        "<div id=nw style='width:20px;white-space:nowrap'>aaa bbb ccc</div>"
+        "<div id=wr style='width:60px'>aaa bbb ccc ddd</div>"
+        "<div style='width:60px'><span id=sp style='padding:0 5px;background:red'>aaa bbb ccc ddd</span></div>"
+        "<div id=ls style='letter-spacing:-2px'>abc</div>"
+        "<div id=ce style='text-align:center;width:200px'>ab</div>"
+        "<select id=sel><option>x</option><option>longer option</option></select>", NULL);
+    Box *el = bx(fx, "el");
+    const TextRun *r = el ? first_run(el) : NULL;
+    CHECK(r && r->ellipsis, "ellipsis applied");
+    if (r) {
+        CHECK(r->width + r->ellipsis_w <= 100.01f, "ellipsis fits: %.2f + %.2f", r->width, r->ellipsis_w);
+        CHECK(r->width + r->ellipsis_w > 80.0f, "ellipsis keeps as much text as fits: %.2f", r->width + r->ellipsis_w);
+        CHECK(r->len < r->full_len || r->len < 25, "ellipsis truncates text");
+    }
+    r = first_run(bx(fx, "up"));
+    CHECK(r && r->len == 3 && memcmp(r->text, "ABC", 3) == 0, "text-transform: uppercase");
+    float mw = fmaxf(tw("gamefont", 16, "hello"), tw("gamefont", 16, "world"));
+    CHECK_NEAR(rc(fx, "mc").w, mw, 0.01, "width: min-content");
+    CHECK(count_lines(bx(fx, "br1")) == 2, "<br> forces a line break (%d)", count_lines(bx(fx, "br1")));
+    CHECK(count_lines(bx(fx, "nw")) == 1, "white-space: nowrap keeps one line");
+    CHECK(count_lines(bx(fx, "wr")) >= 2, "normal wrapping (%d lines)", count_lines(bx(fx, "wr")));
+    Box *sp = bx(fx, "sp");
+    CHECK(sp && sp->frag_count >= 2 && sp->frags[0].first && !sp->frags[0].last, "inline box fragments across lines (%d)", sp ? sp->frag_count : -1);
+    TextFont *f = text_font(g_ts, "gamefont", 16, 400, 0);
+    float wl = f ? text_measure(f, "abc", 3, -2) : 0;
+    CHECK_NEAR(first_run(bx(fx, "ls"))->width, wl, 0.01, "letter-spacing");
+    const TextRun *rce = first_run(bx(fx, "ce"));
+    if (rce) CHECK_NEAR(rce->x, (200 - tw("gamefont", 16, "ab")) * 0.5f, 0.01, "text-align: center");
+    Box *sel = bx(fx, "sel");
+    if (sel) {
+        float lw = sel->font ? text_measure(sel->font, "longer option", 13, 0) : 0;
+        CHECK_NEAR(sel->intrinsic_w, ceilf(lw) + 20, 0.01, "select: longest option + 20px arrow (UA fallback)");
+    }
+    fx_free(fx);
+}
+
+static void t_hit_test(void)
+{
+    Fx *fx = fx_html(
+        "<div id=h1 style='position:absolute;left:0;top:0;width:100px;height:100px;z-index:2'></div>"
+        "<div id=h2 style='position:absolute;left:0;top:0;width:100px;height:100px;z-index:1'></div>"
+        "<div id=h4 style='position:absolute;left:200px;top:0;width:100px;height:100px'></div>"
+        "<div id=h3 style='position:absolute;left:200px;top:0;width:100px;height:100px;z-index:5;pointer-events:none'></div>"
+        "<div id=h5 style='position:absolute;left:400px;top:0;width:100px;height:100px;transform:scale(0.5)'></div>"
+        "<div id=hc style='position:absolute;left:0;top:200px;width:50px;height:50px;overflow:hidden'>"
+        "<div id=hcc style='width:200px;height:20px'></div></div>"
+        "<div id=hn style='position:absolute;left:0;top:300px;width:100px;height:100px;z-index:-1'></div>", NULL);
+    Box *b = layout_hit_test(fx->tree, 50, 50, 1);
+    CHECK(b && strcmp(box_id(b), "h1") == 0, "hit: higher z-index wins (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 250, 50, 1);
+    CHECK(b && strcmp(box_id(b), "h4") == 0, "hit: pointer-events none passes through (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 250, 50, 0);
+    CHECK(b && strcmp(box_id(b), "h3") == 0, "hit: without pointer-events awareness (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 410, 10, 1);
+    CHECK(!b || strcmp(box_id(b), "h5") != 0, "hit: outside the scaled box (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 450, 50, 1);
+    CHECK(b && strcmp(box_id(b), "h5") == 0, "hit: inside the scaled box (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 100, 210, 1);
+    CHECK(!b || strcmp(box_id(b), "hcc") != 0, "hit: overflow hidden clips descendants (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 20, 210, 1);
+    CHECK(b && strcmp(box_id(b), "hcc") == 0, "hit: child inside the clip (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 50, 350, 1);
+    CHECK(b && strcmp(box_id(b), "hn") == 0, "hit: negative z-index still above the root background (%s)", box_id(b));
+    Box *list[16];
+    int n = layout_stacking_children(layout_tree_root(fx->tree), list, 16);
+    CHECK(n >= 6 && strcmp(box_id(list[0]), "hn") == 0 && strcmp(box_id(list[n - 1]), "h3") == 0,
+          "stacking order: negative first, highest last (%d: %s .. %s)", n, n ? box_id(list[0]) : "", n ? box_id(list[n - 1]) : "");
+    fx_free(fx);
+}
+
+static void t_end_table(void)
+{
+    /* the HUD's #endTable markup (hud_ui.c) with the shipped main.css, as in /tmp/kn-tabletest */
+    size_t len;
+    char *css = read_file("ui/css/main.css", &len);
+    Fx *fx = fx_html("<div id='endTabbedView'><div class='endCard'><div id='tabHolder'><div class='tabHeader selected'>Leaderboard</div>"
+                     "<div class='tabHeader '>Performance</div></div><div class='tabBody'><table id='endTable'>"
+                     "<tr><th id=h0>Rank</th><th id=h1>Name</th><th id=h2>Score</th><th>Kills</th><th>Deaths</th><th id=h5>Reward</th><th></th></tr>"
+                     "<tr style='border-bottom:none'><td id=d0 style='color:#fff'>1.</td><td id=d1><a class='endTableN' style='color:#fff'>Guest_1</a></td>"
+                     "<td id=d2>350</td><td>0</td><td>0</td><td id=d5>0</td>"
+                     "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr></table></div></div></div>", css);
+    free(css);
+    HtmlRect h0 = rc(fx, "h0"), h1 = rc(fx, "h1"), h2 = rc(fx, "h2"), h5 = rc(fx, "h5"), d0 = rc(fx, "d0"), d1 = rc(fx, "d1"), d5 = rc(fx, "d5");
+    printf("endTable: th x %.1f %.1f %.1f .. %.1f y %.1f | td y %.1f x %.1f %.1f %.1f\n", h0.x, h1.x, h2.x, h5.x, h0.y, d0.y, d0.x, d1.x, d5.x);
+    CHECK(NEAR(h0.y, h1.y, 0.01) && NEAR(h1.y, h5.y, 0.01) && h0.x < h1.x && h1.x < h2.x && h2.x < h5.x, "#endTable header cells share one row");
+    CHECK(NEAR(d0.y, d1.y, 0.01) && NEAR(d1.y, d5.y, 0.01) && d0.y > h0.y && NEAR(d0.x, h0.x, 0.01) && NEAR(d5.x, h5.x, 0.01),
+          "#endTable data row below, columns aligned with the header");
+    fx_free(fx);
+}
+
+static void t_html_table(void)
+{
+    /* like #endTable (hud_ui.c): real table elements (parser adds <tbody>), UA table styles,
+     * overflow-y:auto + height:min-content + max-height:100% */
+    Fx *fx = fx_html("<div style='height:300px;width:400px'>"
+                     "<table id=et style='overflow-y:auto;height:min-content;max-height:100%;width:100%'>"
+                     "<tr id=tr0><td id=a0>1.</td><td id=b0>Guest</td><td id=c0>0</td></tr>"
+                     "<tr id=tr1><td id=a1>2.</td><td id=b1>Somebody Long</td><td id=c1>12</td></tr></table></div>", NULL);
+    HtmlRect a0 = rc(fx, "a0"), b0 = rc(fx, "b0"), c0 = rc(fx, "c0"), a1 = rc(fx, "a1"), b1 = rc(fx, "b1"), et = rc(fx, "et");
+    CHECK(NEAR(a0.y, b0.y, 0.01) && NEAR(b0.y, c0.y, 0.01) && a0.x < b0.x && b0.x < c0.x, "cells of a row share a line (y %.1f %.1f %.1f)", a0.y, b0.y, c0.y);
+    CHECK(a1.y > a0.y + a0.h - 0.01 && NEAR(a1.x, a0.x, 0.01) && NEAR(b1.x, b0.x, 0.01), "second row below, columns aligned");
+    CHECK(NEAR(et.w, 400, 0.01), "table width:100%% (%.1f)", et.w);
+    CHECK(NEAR(a0.x - et.x, 2, 0.01) && NEAR(a0.y - et.y, 2, 0.01), "UA border-spacing 2px (%.1f,%.1f)", a0.x - et.x, a0.y - et.y);
+    CHECK(et.h < 100, "table height is content-sized (%.1f)", et.h);
+    Box *tr = bx(fx, "tr0");
+    CHECK(tr && tr->type == BOX_TABLE_ROW && tr->parent == bx(fx, "et"), "<tr> rows are direct rows of the table (tbody hoisted)");
+    fx_free(fx);
+}
+
+static void t_ellipsis_owner(void)
+{
+    /* like .classCard: the card clips + ellipsis, the title is direct text next to block children
+     * (anonymous block wrapper), and another card has the title inside a span */
+    const char *css = ".card { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; width: 120px; font-size: 26px; }";
+    Fx *fx = fx_html("<div class=card id=c1>Spray N Pray Long<div style='height:10px'></div></div>"
+                     "<div class=card id=c2><span id=sp>Reflex Sight Long</span></div>"
+                     "<div class=card id=c3>Short<div style='height:10px'></div></div>"
+                     "<div id=c4 style='overflow:hidden;white-space:nowrap;width:120px;font-size:26px'>Combat Knife Long<div></div></div>", css);
+    const TextRun *r1 = first_run(bx(fx, "c1")), *r2 = first_run(bx(fx, "c2")), *r3 = first_run(bx(fx, "c3")), *r4 = first_run(bx(fx, "c4"));
+    CHECK(r1 && r1->ellipsis && r1->width + r1->ellipsis_w <= 120.01f, "anonymous block uses the card's text-overflow (%d, %.1f)",
+          r1 ? r1->ellipsis : -1, r1 ? r1->width + r1->ellipsis_w : -1);
+    CHECK(r2 && r2->ellipsis && r2->width + r2->ellipsis_w <= 120.01f, "ellipsis applies to text inside a span");
+    /* gamefont has no U+2026: three '.' from gamefont, like Chrome */
+    TextFont *gf = text_font(g_ts, "gamefont", 26, 400, 0);
+    CHECK(r1 && r1->ellipsis_count == 3 && r1->ellipsis_glyphs[0].face == text_font_face(gf)
+          && NEAR(r1->ellipsis_w, text_measure(gf, "...", 3, 0), 0.01) && NEAR(r1->ellipsis_glyphs[2].x, 2 * r1->ellipsis_glyphs[1].x, 0.01),
+          "ellipsis falls back to three periods of the primary font (count %d)", r1 ? r1->ellipsis_count : -1);
+    CHECK(r3 && !r3->ellipsis && r3->len == 5, "text that fits is not truncated");
+    CHECK(r4 && !r4->ellipsis, "no ellipsis without text-overflow (clip)");
+    fx_free(fx);
+}
+
+static void t_inline_block_block_baseline(void)
+{
+    /* like win-games .mapListItem: inline-block whose last child is a flex row of text */
+    Fx *fx = fx_html("<div id=grid style='font-size:20px;width:460px'>"
+                     "<div id=i1 style='display:inline-block;width:220px;margin-bottom:12px;font-size:17px'>"
+                     "<div style='height:100px'></div><div>Name</div>"
+                     "<div id=fl style='display:flex'><span style='font-size:15px'>by x</span><div style='font-size:15px;flex-grow:1'>0</div></div></div>"
+                     "<div id=i2 style='display:inline-block;width:220px;margin-bottom:12px;font-size:17px'>"
+                     "<div style='height:100px'></div><div>Name</div>"
+                     "<div style='display:flex'><span style='font-size:15px'>by x</span><div style='font-size:15px;flex-grow:1'>0</div></div></div>"
+                     "<div id=i3 style='display:inline-block;width:220px;margin-bottom:12px;font-size:17px'>"
+                     "<div style='height:100px'></div><div>Name</div></div></div>", NULL);
+    TextFont *f17 = text_font(g_ts, "gamefont", 17, 400, 0), *f15 = text_font(g_ts, "gamefont", 15, 400, 0), *f20 = text_font(g_ts, "gamefont", 20, 400, 0);
+    float h17 = text_font_metrics(f17)->line_height, h15 = text_font_metrics(f15)->line_height;
+    float a15 = text_font_metrics(f15)->ascent, d20 = text_font_metrics(f20)->descent;
+    Box *i1 = bx(fx, "i1");
+    float item_h = 100 + h17 + h15;
+    CHECK(i1 && NEAR(i1->h, item_h, 0.01), "item height (%.1f vs %.1f)", i1 ? i1->h : -1, item_h);
+    CHECK(i1 && NEAR(i1->baseline_offset, 100 + h17 + a15, 0.01), "inline-block baseline from the last flex line (%.2f)", i1 ? i1->baseline_offset : -1);
+    HtmlRect r1 = rc(fx, "i1"), r3 = rc(fx, "i3");
+    float below = item_h + 12 - (100 + h17 + a15);   /* margin-box part under the baseline */
+    float pitch = item_h + 12 + (d20 > below ? d20 - below : 0);
+    CHECK_NEAR(r3.y - r1.y, pitch, 0.01, "row pitch: no extra strut descent under inline-blocks with a baseline");
+    fx_free(fx);
+}
+
+static void t_scroll_extent(void)
+{
+    /* like #menuWindow (padding:20px, overflow-y:auto): content that fits gets no bar */
+    Fx *fx = fx_html("<div id=fit style='overflow-y:auto;padding:20px;height:100px;width:200px'><div style='height:100px'></div></div>"
+                     "<div id=over style='overflow-y:auto;padding:20px;height:100px;width:200px'><div style='height:120px'></div></div>"
+                     "<div id=mrg style='overflow-y:auto;padding:20px;height:100px;width:200px'><div style='height:100px;margin-bottom:10px'></div></div>"
+                     "<div id=txt style='overflow-y:auto;padding:20px;height:100px;width:200px;line-height:25px'>a<br>b<br>c<br>d</div>"
+                     "<div id=abs style='overflow:hidden;position:relative;padding:10px;height:50px;width:200px'>"
+                     "<div style='position:absolute;top:100px;height:30px;width:10px'></div></div>", NULL);
+    Box *fit = bx(fx, "fit"), *over = bx(fx, "over"), *mrg = bx(fx, "mrg"), *txt = bx(fx, "txt"), *ab = bx(fx, "abs");
+    CHECK(fit && NEAR(fit->scroll_h, 140, 0.01) && fit->scrollbar_w == 0, "fitting content: scrollHeight = clientHeight 140, no bar (%.1f, bar %.0f)",
+          fit ? fit->scroll_h : -1, fit ? fit->scrollbar_w : -1);
+    CHECK(over && NEAR(over->scroll_h, 160, 0.01) && over->scrollbar_w == 12, "overflow: 20 + 120 + 20 = 160 (%.1f)", over ? over->scroll_h : -1);
+    CHECK(mrg && NEAR(mrg->scroll_h, 150, 0.01), "last child's margin-bottom counted, padding once (%.1f)", mrg ? mrg->scroll_h : -1);
+    CHECK(txt && NEAR(txt->scroll_h, 140, 0.01), "four 25px lines + padding = 140 (%.1f)", txt ? txt->scroll_h : -1);
+    CHECK(ab && NEAR(ab->scroll_h, 130, 0.01), "abs box extends scrollHeight by its border box only (%.1f)", ab ? ab->scroll_h : -1);
+    fx_free(fx);
+}
+
+static void t_closed_inline_states(void)
+{
+    /* like #pingDisplay: top-aligned text span (closed) + taller top-aligned inline-block icon */
+    Fx *fx = fx_html("<div id=pd style='font-size:18px;margin-top:20px'><span id=pt style='vertical-align:top'>2</span>"
+                     "<i id=ic style='display:inline-block;vertical-align:top;width:32px;height:32px'></i></div>"
+                     "<div id=two style='width:400px'><span id=s1 style='padding:0 4px'>ab</span> mid <span id=s2>cd</span></div>", NULL);
+    HtmlRect pd = rc(fx, "pd"), ic = rc(fx, "ic");
+    Box *pt = bx(fx, "pt");
+    const TextRun *r = pt ? first_run(pt) : NULL;
+    TextFont *f = text_font(g_ts, "gamefont", 18, 400, 0);
+    const TextMetrics *m = text_font_metrics(f);
+    float lead = (m->line_height - m->ascent - m->descent) * 0.5f;
+    CHECK(r && NEAR(r->y, pd.y + lead + m->ascent, 0.01), "closed top-aligned span: text at the line top (baseline %.2f, want %.2f)",
+          r ? r->y : -1, pd.y + lead + m->ascent);
+    CHECK_NEAR(ic.y, pd.y, 0.01, "top-aligned inline-block at the line top");
+    CHECK_NEAR(pd.h, 32, 0.01, "line height from the tall top-aligned box");
+    Box *s1 = bx(fx, "s1"), *s2 = bx(fx, "s2");
+    CHECK(s1 && s1->frag_count == 1 && s1->frags[0].first && s1->frags[0].last, "inline box closed mid-line has its fragment");
+    CHECK(s2 && s2->frag_count == 1 && s2->w > 0, "last inline box on the line has its fragment (w %.1f)", s2 ? s2->w : -1);
+    fx_free(fx);
+}
+
+static void t_float_relayout(void)
+{
+    /* like the settings windows: a float inside a block whose top margin collapses
+     * (forces the parent to re-lay the child out), then clearing content */
+    Fx *fx = fx_html("<div id=hold style='width:400px'>"
+                     "<div id=hed style='margin-top:15px'>Head<span id=fl style='float:right;width:50px;height:10px'></span></div>"
+                     "<div id=bod style='margin-top:5px'><div id=row style='clear:both;height:10px'>x"
+                     "<span id=fl2 style='float:right;width:20px;height:5px'></span></div>"
+                     "<div id=row2 style='clear:both;height:10px'></div></div></div>", NULL);
+    HtmlRect hed = rc(fx, "hed"), fl = rc(fx, "fl"), bod = rc(fx, "bod"), row = rc(fx, "row"), row2 = rc(fx, "row2"), fl2 = rc(fx, "fl2");
+    CHECK_NEAR(fl.y, hed.y, 0.01, "float stays in its line after the parent re-layout");
+    CHECK_NEAR(fl.x, 350, 0.01, "float right edge");
+    CHECK_NEAR(row.y, bod.y, 0.01, "clear: no stale float copies below");
+    CHECK_NEAR(fl2.y, row.y, 0.01, "nested float on its line");
+    CHECK_NEAR(row2.y, row.y + 10, 0.01, "second row right after the first");
+    fx_free(fx);
+}
+
+static void t_anonymous_style(void)
+{
+    /* like .classCard: padding + height on the element, mixed block/inline children */
+    Fx *fx = fx_html("<div id=card style='padding:10px;height:286px;margin-bottom:10px;width:200px;background:red'>"
+                     "Name<div id=blk style='height:20px'></div>tail<div id=last style='height:5px'></div></div>"
+                     "<div id=after style='height:5px'></div>", NULL);
+    Box *card = bx(fx, "card");
+    Box *anon = card ? card->first_child : NULL;
+    CHECK(anon && (anon->flags & BOXF_ANONYMOUS), "anonymous wrapper exists");
+    if (anon) {
+        CHECK(anon->style != card->style, "anonymous box has its own style");
+        CHECK(NEAR(anon->padding[CSS_TOP], 0, 0.01) && NEAR(anon->margin[CSS_BOTTOM], 0, 0.01), "anonymous box: no padding/margin");
+        CHECK(anon->style->height.kind == CSS_LEN_AUTO && anon->style->background_color.a == 0, "anonymous box: initial height/background");
+        CHECK(NEAR(anon->x, 10, 0.01) && NEAR(anon->y, 10, 0.01) && anon->h < 40, "anonymous box inside the content box (%.1f,%.1f h %.1f)", anon->x, anon->y, anon->h);
+        CHECK(anon->style->font_size == card->style->font_size && anon->style->color.r == card->style->color.r, "anonymous box inherits inherited properties");
+    }
+    HtmlRect blk = rc(fx, "blk"), last = rc(fx, "last");
+    CHECK(blk.y > 10 && blk.y < 40, "block after the anonymous line (%.1f)", blk.y);
+    CHECK(last.y + last.h < 10 + 286, "children stay inside the card (%.1f)", last.y + last.h);
+    CHECK_NEAR(rc(fx, "after").y, 306 + 10, 0.01, "next sibling after card height + margin");
+    /* restyle of the parent re-inherits */
+    HtmlElem ce = dom_by_id(fx->dom, "card");
+    CssComputed old = *dom_elem_data(fx->dom, ce)->computed;
+    dom_set_style(fx->dom, ce, "font-size", "30px");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    layout_restyled(fx->tree, dom_elem_node(fx->dom, ce), &old);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    anon = bx(fx, "card")->first_child;
+    CHECK(anon && anon->style->font_size == 30 && NEAR(anon->padding[CSS_TOP], 0, 0.01), "anonymous style re-inherited on restyle");
+    fx_free(fx);
+}
+
+static void t_root_overflow(void)
+{
+    /* <html>/<body> overflow:hidden and 0px tall (everything positioned), like ui/index.html */
+    Fx *fx = fx_html("<div id=ov style='position:absolute;left:10px;top:10px;width:100px;height:100px'></div>",
+                     "html, body { overflow: hidden; }");
+    Box *root = layout_tree_root(fx->tree);
+    CHECK(root && NEAR(root->h, 0, 0.01) && (root->flags & BOXF_CLIPS), "root is 0px tall and clipping (h %.1f)", root ? root->h : -1);
+    Box *b = layout_hit_test(fx->tree, 50, 50, 1);
+    CHECK(b && strcmp(box_id(b), "ov") == 0, "root overflow clips to the viewport, not to <html> (%s)", box_id(b));
+    fx_free(fx);
+    /* root visible, body hidden: body's overflow propagates to the viewport, body does not clip */
+    fx = fx_html("<div id=ov2 style='position:absolute;left:10px;top:10px;width:100px;height:100px'></div>",
+                 "body { overflow: hidden; height: 0; }");
+    b = layout_hit_test(fx->tree, 50, 50, 1);
+    CHECK(b && strcmp(box_id(b), "ov2") == 0, "propagated body overflow clips to the viewport (%s)", box_id(b));
+    fx_free(fx);
+    /* a non-propagating body clip still clips (root has its own overflow) */
+    fx = fx_html("<div id=ov3 style='position:relative;left:10px;top:10px;width:100px;height:100px'></div>",
+                 "html { overflow: hidden; } body { overflow: hidden; height: 20px; }");
+    b = layout_hit_test(fx->tree, 50, 50, 1);
+    CHECK(!b || strcmp(box_id(b), "ov3") != 0, "body's own clip applies when the root's overflow propagates (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 50, 15, 1);
+    CHECK(b && strcmp(box_id(b), "ov3") == 0, "inside body's clip (%s)", box_id(b));
+    fx_free(fx);
+}
+
+static void t_container_scrollbars(void)
+{
+    Fx *fx = fx_html(
+        "<div id=fs style='display:flex;flex-direction:column;align-items:center;overflow-y:scroll;width:200px;height:100px'>"
+        "<div id=fs1 style='height:30px;width:50px'></div></div>"
+        "<div id=fa style='display:flex;flex-direction:column;overflow-y:auto;width:200px;height:100px'>"
+        "<div id=fa1 style='height:300px;flex-shrink:0'></div></div>"
+        "<div id=fr style='display:flex;overflow-y:scroll;direction:rtl;width:200px;height:100px'>"
+        "<div id=fr1 style='flex-grow:1;height:20px'></div></div>"
+        "<div id=gs style='display:grid;grid-template-columns:auto auto;overflow-y:auto;width:200px;height:50px'>"
+        "<div id=gs1 style='height:80px'>a</div><div>b</div></div>"
+        "<div id=ts style='display:table;overflow-y:scroll;width:200px;height:50px'>"
+        "<div id=tc style='display:table-cell'>a</div></div>"
+        "<div id=fn style='display:flex;overflow-y:auto;width:200px;height:100px'><div style='height:10px'></div></div>", NULL);
+    struct { const char *id; int bar; } cases[] = { { "fs", 1 }, { "fa", 1 }, { "fr", 1 }, { "gs", 1 }, { "ts", 1 }, { "fn", 0 } };
+    for (int i = 0; i < 6; i++) {
+        Box *b = bx(fx, cases[i].id);
+        LayoutScrollbar sb;
+        int has = b && layout_scrollbar(fx->tree, b, 1, &sb);
+        CHECK(has == cases[i].bar && (!b || NEAR(b->scrollbar_w, cases[i].bar ? 12 : 0, 0.01)),
+              "#%s: vertical bar %d (scrollbar_w %.1f)", cases[i].id, has, b ? b->scrollbar_w : -1);
+    }
+    HtmlRect fs = rc(fx, "fs"), fs1 = rc(fx, "fs1");
+    CHECK_NEAR(fs1.x - fs.x, (188 - 50) * 0.5f, 0.01, "flex scroll: items centred in the content box minus the bar");
+    HtmlRect fa = rc(fx, "fa"), fa1 = rc(fx, "fa1");
+    CHECK_NEAR(fa1.w, 188, 0.01, "flex auto: overflowing column stretches to the width minus the bar");
+    CHECK_NEAR(bx(fx, "fa")->scroll_h, 300, 0.01, "flex auto: scrollHeight");
+    (void)fa;
+    HtmlRect fr = rc(fx, "fr"), fr1 = rc(fx, "fr1");
+    Box *frb = bx(fx, "fr");
+    LayoutScrollbar sb;
+    if (frb && layout_scrollbar(fx->tree, frb, 1, &sb)) CHECK_NEAR(sb.track_x, fr.x, 0.01, "flex rtl: bar on the left");
+    CHECK(NEAR(fr1.x, fr.x + 12, 0.01) && NEAR(fr1.w, 188, 0.01), "flex rtl: items right of the bar (%.1f, w %.1f)", fr1.x - fr.x, fr1.w);
+    HtmlRect gs = rc(fx, "gs"), gs1 = rc(fx, "gs1");
+    CHECK(NEAR(gs1.x, gs.x, 0.01) && gs1.w < 100 - 5, "grid auto: columns share 188px (w %.1f)", gs1.w);
+    HtmlRect tc = rc(fx, "tc"), ts = rc(fx, "ts");
+    CHECK_NEAR(tc.w, 188, 0.01, "table scroll: cell width excludes the bar");
+    (void)ts;
+    fx_free(fx);
+}
+
+static void t_incremental(void)
+{
+    Fx *fx = fx_html(
+        "<div id=wrap style='width:300px'><div id=a style='height:10px;color:red'></div>"
+        "<div id=b style='height:20px'>text</div><div id=c style='height:5px'></div></div>"
+        "<div id=fc style='display:flex;flex-direction:column;justify-content:center;align-items:center;"
+        "width:200px;height:200px;position:relative'><div id=ab style='position:absolute;width:20px;height:10px;margin-top:-6px'></div>"
+        "<div id=it style='width:10px;height:10px'></div></div>"
+        "<div id=hud style='width:100px'><span id=sp>a</span></div>", NULL);
+    HtmlRect fc = rc(fx, "fc"), ab = rc(fx, "ab");
+    CHECK(NEAR(ab.x - fc.x, 90, 0.01) && NEAR(ab.y - fc.y, 95 - 3, 0.01),
+          "flex static position: abs child centred like a sole item (%.1f,%.1f)", ab.x - fc.x, ab.y - fc.y);
+
+    HtmlElem ea = dom_by_id(fx->dom, "a");
+    ElemData *ed = dom_elem_data(fx->dom, ea);
+    CssComputed old = *ed->computed;
+    Box *box_a = (Box *)ed->box;
+    dom_set_style(fx->dom, ea, "color", "blue");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    int r = layout_restyled(fx->tree, dom_elem_node(fx->dom, ea), &old);
+    CHECK(r == LAYOUT_RESTYLE_PAINT && ed->box == box_a && box_a->paint_dirty, "restyle: color -> PAINT in place (%d)", r);
+    CHECK(layout_run(fx->tree, fx->vw, fx->vh) == 0, "restyle: paint-only change needs no layout");
+
+    old = *ed->computed;
+    dom_set_style(fx->dom, ea, "height", "40px");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    r = layout_restyled(fx->tree, dom_elem_node(fx->dom, ea), &old);
+    CHECK(r == LAYOUT_RESTYLE_LAYOUT, "restyle: height -> LAYOUT (%d)", r);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    CHECK_NEAR(rc(fx, "b").y, 40, 0.01, "restyle: sibling moved after relayout");
+
+    old = *ed->computed;
+    dom_set_style(fx->dom, ea, "transform", "translateX(5px)");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    r = layout_restyled(fx->tree, dom_elem_node(fx->dom, ea), &old);
+    CHECK(r == LAYOUT_RESTYLE_TRANSFORM && NEAR(rc(fx, "a").x, 5, 0.01), "restyle: transform -> TRANSFORM (%d, x %.1f)", r, rc(fx, "a").x);
+
+    old = *ed->computed;
+    dom_set_style(fx->dom, ea, "display", "none");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    r = layout_restyled(fx->tree, dom_elem_node(fx->dom, ea), &old);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    CHECK(r == LAYOUT_RESTYLE_REBUILT && ed->box == NULL, "restyle: display none -> REBUILT, box gone (%d)", r);
+    CHECK_NEAR(rc(fx, "b").y, 0, 0.01, "restyle: siblings close the gap");
+
+    old = *ed->computed;
+    dom_set_style(fx->dom, ea, "display", "");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    r = layout_restyled(fx->tree, dom_elem_node(fx->dom, ea), &old);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    CHECK(r == LAYOUT_RESTYLE_REBUILT && ed->box != NULL && NEAR(rc(fx, "b").y, 40, 0.01), "restyle: displayed again (%d)", r);
+
+    HtmlElem hud = dom_by_id(fx->dom, "hud");
+    for (int i = 0; i < 50; i++) {   /* HUD-style innerHTML churn reuses released boxes */
+        char html[128];
+        snprintf(html, sizeof(html), "<span id=sp>%d</span><div id=row style='height:%dpx'>x</div>", i, 10 + i % 3);
+        dom_set_html(fx->dom, hud, html, strlen(html));
+        cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+        r = layout_children_changed(fx->tree, dom_elem_node(fx->dom, hud));
+        layout_run(fx->tree, fx->vw, fx->vh);
+    }
+    CHECK(r == LAYOUT_RESTYLE_REBUILT, "children changed -> REBUILT");
+    HtmlRect row = rc(fx, "row"), hr = rc(fx, "hud");
+    Box *spb = bx(fx, "sp");
+    const TextRun *tr = spb ? first_run(spb) : NULL;
+    CHECK(tr && tr->len == 2 && memcmp(tr->text, "49", 2) == 0, "innerHTML: new text laid out");
+    CHECK(NEAR(row.h, 10 + 49 % 3, 0.01) && row.y > hr.y, "innerHTML: new block laid out (%.1f)", row.h);
+    layout_rebuild_all(fx->tree);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    CHECK_NEAR(rc(fx, "b").y, 40, 0.01, "rebuild_all keeps the same tree usable");
+    fx_free(fx);
+}
+
+/* ------------------------------------------------------------------------- */
+/* menu                                                                       */
+/* ------------------------------------------------------------------------- */
+
+typedef struct Expect {
+    const char *what;
+    const char *source;
+    float x, y, w, h;      /* viewport px; NAN = not checked */
+    float tol;
+} Expect;
+
+static int g_menu_rows;
+static void report(const char *what, const char *source, HtmlRect got, float x, float y, float w, float h, float tol)
+{
+    float d[4] = { isnan(x) ? 0 : got.x - x, isnan(y) ? 0 : got.y - y, isnan(w) ? 0 : got.w - w, isnan(h) ? 0 : got.h - h };
+    int ok = 1;
+    for (int i = 0; i < 4; i++) if (fabsf(d[i]) > tol) ok = 0;
+    printf("| %-28s | %-9s | %7.1f %6.1f %7.1f %6.1f | %7.1f %6.1f %7.1f %6.1f | %+5.1f %+5.1f %+5.1f %+5.1f | %s\n",
+           what, source, isnan(x) ? -1 : x, isnan(y) ? -1 : y, isnan(w) ? -1 : w, isnan(h) ? -1 : h,
+           got.x, got.y, got.w, got.h, d[0], d[1], d[2], d[3], ok ? "ok" : "FAIL");
+    if (ok) g_pass++; else g_fail++;
+    g_menu_rows++;
+}
+
+static HtmlRect rect_of(Box *b) { HtmlRect r = { 0, 0, 0, 0 }; if (b) layout_box_rect_in_viewport(b, &r); return r; }
+
+static void t_menu(void)
+{
+    Fx *fx = calloc(1, sizeof(Fx));
+    fx->vw = 1280; fx->vh = 720;
+    fx->dom = dom_create();
+    size_t len;
+    char *html = read_file("doc/ref/krunker-v3.1.1/menu/real-1280.dom.html", &len);
+    dom_load_html(fx->dom, html, len);
+    free(html);
+    static const char *sheets[] = { "ui/css/main.css", "ui/css/flag.css", "ui/css/google-secular-one.css", "ui/css/material-icons.css" };
+    for (int i = 0; i < 4; i++) {
+        char *css = read_file(sheets[i], &len);
+        fx->sheets[fx->ns++] = css_sheet_load(css, len, sheets[i]);
+        free(css);
+    }
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    fx_layout(fx);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double ms = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    printf("menu: restyle+build+layout %.2f ms\n", ms);
+
+    const float k = 0.627f;     /* #uiBase transform: scale(0.627) (Chrome DOM) */
+    printf("\n| %-28s | %-9s | %-30s | %-30s | %-23s |\n", "element", "source", "expected x y w h (viewport px)", "measured x y w h", "delta x y w h");
+    printf("|------------------------------|-----------|--------------------------------|--------------------------------|-------------------------|\n");
+    Box *ui = bx(fx, "uiBase");
+    report("#uiBase", "css", rect_of(ui), 0, 0, 2040 * k, 1147.5f * k, 0.5f);
+    if (ui) {
+        CHECK_NEAR(layout_offset_width(ui), 2040, 0.01, "#uiBase offsetWidth");
+        CHECK_NEAR(layout_offset_height(ui), 1147.5, 0.01, "#uiBase offsetHeight");
+    }
+    report("#menuItemContainer", "css", rc(fx, "menuItemContainer"), 0, 70 * k, 130 * k, 1077.5f * k, 0.5f);
+    HtmlElem items[8];
+    size_t ni = dom_query_all(fx->dom, 0, ".menuItem", items, 8);
+    CHECK(ni == 7, "7 .menuItem (got %zu)", ni);
+    float seams[8] = { 43.9f, 140.5f, NAN, 333.5f, 430.5f, 526.5f, 623.5f, 719.5f };   /* png seam rows */
+    for (size_t i = 0; i < ni; i++) {
+        Box *b = (Box *)dom_elem_data(fx->dom, items[i])->box;
+        char what[40];
+        snprintf(what, sizeof(what), ".menuItem[%zu]", i);
+        report(what, "css", rect_of(b), 0, (70 + 1077.5f / 7 * (float)i) * k, 130 * k, 1077.5f / 7 * k, 0.5f);
+        if (!isnan(seams[i]) && !isnan(seams[i + 1]))
+            report(what, "png", rect_of(b), 0, seams[i], 81.5f, seams[i + 1] - seams[i], 1.5f);
+    }
+    report("#signedOutHeaderBar", "png", rc(fx, "signedOutHeaderBar"), 0, 0, 205, 44, 1.5f);
+    HtmlElem hr = dom_query(fx->dom, 0, ".headerBarRight");
+    report(".headerBarRight", "png", rect_of(hr ? (Box *)dom_elem_data(fx->dom, hr)->box : NULL), 1091, 0, 189, 44, 1.5f);
+    static const struct { const char *id; float x0, x1; } btn[] = {
+        { "menuBtnHost", 409, 525 }, { "menuBtnBrowser", 532, 626 }, { "menuBtnRanked", 633, 720 },
+        { "inviteButton", 727, 801 }, { "menuBtnJoin", 808, 870 } };
+    for (int i = 0; i < 5; i++) {
+        char what[40];
+        snprintf(what, sizeof(what), "#%s", btn[i].id);
+        /* rows 603 / 632 are partially covered (57 % / ~50 %): edges 603.4 .. 632.5 */
+        report(what, "png", rc(fx, btn[i].id), btn[i].x0, 603.4f, btn[i].x1 - btn[i].x0, 29.1f, 1.5f);
+    }
+    report("#customizeButton", "png", rc(fx, "customizeButton"), 1058, 427, 151, 35, 1.5f);
+    /* abs child of the column flex #menuClassContainer: static position centred like a sole item
+     * (margin box incl. margin-top:-350px); "Guest" ink in the capture: x 1116..1149, baseline 279 */
+    report("#menuClassNameTag", "png", rc(fx, "menuClassNameTag"), 1116, NAN, NAN, NAN, 1.0f);
+    {
+        Box *tag = bx(fx, "menuClassNameTag");
+        const TextRun *gr = tag ? first_run(tag) : NULL;
+        if (gr) {
+            Mat2D m;
+            Box *mc = bx(fx, "menuClassContainer");
+            layout_box_matrix(mc, &m);
+            float by = (mc->y + m.b * (gr->x - mc->x) + m.d * (gr->y - mc->y) + m.f) * k;
+            printf("Guest: tag local y %.4f h %.4f, run baseline local %.4f, viewport baseline %.4f, x-height %.4f\n",
+                   tag->y, tag->h, gr->y, by, tag->fm.x_height);
+            CHECK_NEAR(by, 279.0f, 1.0f, "\"Guest\" baseline (capture)");
+        }
+    }
+    report("#policeButton", "png", rc(fx, "policeButton"), 1020, 423, 29, 39, 1.5f);
+    /* logo: 1024x302 at height 225 -> 762.9 wide, centred on 1020 design px, top 15 */
+    float lw = 1024.0f * 225.0f / 302.0f;
+    report("#mainLogo", "css", rc(fx, "mainLogo"), (1020 - lw / 2) * k, 15 * k, lw * k, 225 * k, 0.5f);
+    report("#classPreviewCanvas", "css", rc(fx, "classPreviewCanvas"), NAN, NAN, 660 * k * 0.8f, 350 * k * 0.8f, 0.5f);
+    HtmlRect ins = rc(fx, "instructions");
+    HtmlRect ins_c = { ins.x + ins.w / 2, ins.y + ins.h / 2, 0, 0 };
+    report("#instructions centre", "css", ins_c, 1020 * k, 573.75f * k, NAN, NAN, 0.5f);
+    report("#instructionHolder", "css", rc(fx, "instructionHolder"), 0, 0, 2040 * k, 1147.5f * k, 0.5f);
+    /* menu class container: abs right:-100 top:140 bottom:130 -> box 140..1017.5, scale(.8) about its centre */
+    report("#menuClassContainer", "css", rc(fx, "menuClassContainer"), NAN, (140 + 877.5f * 0.1f) * k, NAN, 877.5f * 0.8f * k, 0.5f);
+    printf("\n");
+
+    /* geometry helpers on the scaled tree */
+    Box *mi0 = ni ? (Box *)dom_elem_data(fx->dom, items[0])->box : NULL;
+    if (mi0) {
+        float lx, ly;
+        layout_point_to_box(mi0, 40, 90, &lx, &ly);
+        CHECK(NEAR(lx, 40 / k, 0.01) && NEAR(ly, 90 / k, 0.01), "point_to_box through the #uiBase scale (%.2f,%.2f)", lx, ly);
+        Box *h = layout_hit_test(fx->tree, 40, 90, 1);
+        int inside = 0;
+        for (Box *p = h; p; p = p->parent) if (p == mi0) inside = 1;
+        CHECK(inside, "hit test lands in the first .menuItem (%s)", box_id(h));
+    }
+
+    /* incremental: font-size change on #instructions (the `grow` animation) */
+    HtmlElem ie = dom_by_id(fx->dom, "instructions");
+    HtmlRect before_items = rc(fx, "menuItemContainer");
+    dom_set_style(fx->dom, ie, "font-size", "30px");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    layout_invalidate_node(fx->tree, dom_elem_node(fx->dom, ie), 0);
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    int n = layout_run(fx->tree, fx->vw, fx->vh);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double inc_ms = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    Box *ib = bx(fx, "instructions");
+    Box *boundary = NULL;
+    for (Box *p = ib ? ib->parent : NULL; p; p = p->parent) if (p->flags & BOXF_LAYOUT_BOUNDARY) { boundary = p; break; }
+    CHECK(n == 1 && boundary && strcmp(box_id(boundary), "instructionHolder") == 0,
+          "grow: one boundary relayout at #instructionHolder (%d, %s) in %.3f ms", n, boundary ? box_id(boundary) : "-", inc_ms);
+    printf("grow: incremental relayout %.3f ms (%d boundary)\n", inc_ms, n);
+    HtmlRect inc = rc(fx, "instructions");
+    HtmlRect after_items = rc(fx, "menuItemContainer");
+    CHECK(memcmp(&before_items, &after_items, sizeof(HtmlRect)) == 0, "grow: unrelated boxes untouched");
+    fx_layout(fx);   /* full rebuild for comparison */
+    HtmlRect full = rc(fx, "instructions");
+    CHECK(NEAR(inc.x, full.x, 0.01) && NEAR(inc.y, full.y, 0.01) && NEAR(inc.w, full.w, 0.01) && NEAR(inc.h, full.h, 0.01),
+          "grow: incremental == full layout (%.2f,%.2f %.2fx%.2f vs %.2f,%.2f %.2fx%.2f)", inc.x, inc.y, inc.w, inc.h, full.x, full.y, full.w, full.h);
+    CHECK(layout_run(fx->tree, fx->vw, fx->vh) == 0, "clean tree: layout_run is a no-op");
+
+    /* live scroller cases on the menu: a flex container forced to scroll */
+    {
+        static const char *force = "#menuClassContainer { overflow-y: scroll; }";
+        fx->sheets[fx->ns++] = css_sheet_load(force, strlen(force), "force");
+        dom_mark_all_dirty(fx->dom);
+        fx_layout(fx);
+        Box *mc = bx(fx, "menuClassContainer");
+        LayoutScrollbar sb;
+        CHECK(mc && (mc->flags & BOXF_SCROLL_CONTAINER) && layout_scrollbar(fx->tree, mc, 1, &sb) && NEAR(mc->scrollbar_w, 12, 0.01),
+              "#menuClassContainer overflow-y:scroll (flex) reserves a 12px bar (flags %x, scrollbar_w %.1f)",
+              mc ? mc->flags : 0, mc ? mc->scrollbar_w : -1);
+        if (mc) {
+            Box *cv = bx(fx, "classPreviewCanvas");
+            /* flex column, align-items center: items centred in content box minus the bar */
+            if (cv) CHECK_NEAR(cv->x + cv->w * 0.5f - mc->x, (mc->w - 12) * 0.5f, 0.01, "#menuClassContainer: items centred left of the bar");
+        }
+    }
+
+    if (getenv("KN_LAYOUT_DUMP")) {
+        KnStrBuf sb = { 0 };
+        layout_dump(layout_tree_root(fx->tree), &sb);
+        fputs(sb.data ? sb.data : "", stdout);
+        kn_sb_free(&sb);
+    }
+    fx_free(fx);
+}
+
+/* ------------------------------------------------------------------------- */
+
+int main(int argc, char **argv)
+{
+    if (argc > 1) g_root = argv[1];
+    char ui[1024];
+    snprintf(ui, sizeof(ui), "%s/ui", g_root);
+    g_ts = text_create(ui);
+    if (!g_ts) { fprintf(stderr, "text_create failed\n"); return 99; }
+    text_register_face(g_ts, "gamefont", "css/fonts/font2.ttf", 400, TEXT_STYLE_NORMAL);
+    text_register_face(g_ts, "headerfont", "css/fonts/header.ttf", 400, TEXT_STYLE_NORMAL);
+    text_register_face(g_ts, "material icons", "css/fonts/material-icons.ttf", 400, TEXT_STYLE_NORMAL);
+    layout_ctx_init(&g_ctx);
+    g_ctx.text = g_ts;
+    g_ctx.image_size = png_size;
+    g_ctx.scrollbar_width = sb_width;
+    g_ctx.base_url = "index.html";
+    g_ua = css_sheet_load(KN_UA_CSS, strlen(KN_UA_CSS), "ua.css");
+
+    t_margin_collapse();
+    t_floats();
+    t_inline_block_baseline();
+    t_flex();
+    t_grid();
+    t_grid_tracks();
+    t_grid_placement();
+    t_abs_static_inline();
+    t_flex_align_self();
+    t_zoom();
+    t_ua_defaults();
+    t_table();
+    t_positioned();
+    t_sticky_scroll();
+    t_text();
+    t_hit_test();
+    t_html_table();
+    t_end_table();
+    t_ellipsis_owner();
+    t_inline_block_block_baseline();
+    t_scroll_extent();
+    t_closed_inline_states();
+    t_float_relayout();
+    t_anonymous_style();
+    t_root_overflow();
+    t_container_scrollbars();
+    t_incremental();
+    t_menu();
+
+    css_sheet_destroy(g_ua);
+    cascade_shutdown();
+    text_destroy(g_ts);
+    printf("test_layout: %d passed, %d failed\n", g_pass, g_fail);
+    return g_fail;
+}

@@ -6,5 +6,5 @@ uniform vec4 color;
 uniform sampler2D tex;
 
 void main() {
-    frag_color = vec4(1.0f, 1.0f, 1.0f, texture(tex, vec2(tex_coord.x, 1.0f - tex_coord.y)).r) * color;
+    frag_color = vec4(1.0, 1.0, 1.0, texture(tex, vec2(tex_coord.x, 1.0 - tex_coord.y)).r) * color;
 }

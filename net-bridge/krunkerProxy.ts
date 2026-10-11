@@ -7,6 +7,7 @@ import { WebSocket, type RawData } from "ws";
 import antihackKey from "./antihackkey.json";
 import version from "./version.json";
 import * as UTILS from "./utils";
+import * as EV from "./nativeEvents";
 
 const DEFAULT_NATIVE_PORT = 21015;
 const DEFAULT_KRUNKER_ORIGIN = "http://127.0.0.1:6767";
@@ -25,7 +26,32 @@ const NET_PACKET = Object.freeze({
   INPUT: 5,
   STATE: 6,
   CYCLE: 7,
+  CHAT_SEND: EV.NET_EVENT.CHAT_SEND,
+  CHAT: EV.NET_EVENT.CHAT,
+  KILL: EV.NET_EVENT.KILL,
+  HIT: EV.NET_EVENT.HIT,
+  HEALTH: EV.NET_EVENT.HEALTH,
+  SCORE: EV.NET_EVENT.SCORE,
+  LEADERBOARD: EV.NET_EVENT.LEADERBOARD,
+  TIMER: EV.NET_EVENT.TIMER,
+  END: EV.NET_EVENT.END,
+  PING: EV.NET_EVENT.PING,
+  PONG: EV.NET_EVENT.PONG,
+  PING_RESULT: EV.NET_EVENT.PING_RESULT,
+  LEAVE: EV.NET_EVENT.LEAVE,
+  SHOT: EV.NET_FX.SHOT,
+  PROJECTILE: EV.NET_FX.PROJECTILE,
+  PROJECTILE_END: EV.NET_FX.PROJECTILE_END,
+  EXPLOSION: EV.NET_FX.EXPLOSION,
+  SPECTATE: EV.NET_SPECTATE.SPECTATE,
+  VOICE_SEND: 31, // C->S NetSocialChunk pieces of a "vc" data URL (shared/include/voice.h)
+  VOICE: 32, // S->C NetSocialChunk pieces of [alias length u8][alias][data URL], chunk id = sid
 } as const);
+
+// shared/include/social.h NetSocialChunk: u32 id, u16 index, u16 count, data.
+const VOICE_CHUNK_HEADER = 8;
+const VOICE_CHUNK_DATA = NET_MAX_PAYLOAD - VOICE_CHUNK_HEADER;
+const VOICE_MAX_DATA = 256 * 1024; // io_vc cap
 
 type NetPacketType = (typeof NET_PACKET)[keyof typeof NET_PACKET];
 
@@ -58,6 +84,7 @@ type NativeInputPacket = {
   yaw: number;
   flags: number;
   swap: number;
+  slowdown: number; // input[12] (1 - speedLmt.round(1)); 0 for 22-byte v1 packets
 };
 
 type NativeSpawn = {
@@ -71,6 +98,8 @@ type NativeSpawn = {
   position: Vec3;
   direction: Vec2;
   name: string;
+  secondaryIndex: number;
+  cosmetics: EV.Cosmetics;
 };
 
 type NativeState = {
@@ -117,6 +146,12 @@ type NativeToKrunkerSession = {
   teamByUid: Map<number, number>;
   nameByUid: Map<number, string>;
   lastStateByUid: Map<number, NativeState>;
+  killsByUid: Map<number, number>;
+  deathsByUid: Map<number, number>;
+  ownScore: number;
+  pingMs: number;
+  voiceParts: Buffer[]; // NET_PACKET_VOICE_SEND chunks of the clip being reassembled
+  voiceNext: number;
   closed: boolean;
 };
 
@@ -230,7 +265,7 @@ function writeNativeInit(session: NativeToKrunkerSession, mapIndex: number, mode
 }
 
 function writeNativeSpawn(session: NativeToKrunkerSession, spawn: NativeSpawn): void {
-  const payload = Buffer.alloc(74);
+  const payload = Buffer.alloc(EV.SPAWN_COSMETICS_SIZE);
   payload.writeInt32LE(spawn.uid, 0);
   payload[4] = spawn.isYou ? 1 : 0;
   payload[5] = spawn.active ? 1 : 0;
@@ -244,6 +279,8 @@ function writeNativeSpawn(session: NativeToKrunkerSession, spawn: NativeSpawn): 
   payload.writeFloatLE(spawn.direction[0], 34);
   payload.writeFloatLE(spawn.direction[1], 38);
   Buffer.from(spawn.name || `Guest_${spawn.uid}`, "utf8").copy(payload, 42, 0, 31);
+  payload.writeInt32LE(spawn.secondaryIndex, 74);
+  EV.writeCosmetics(payload, EV.SPAWN_V1_SIZE, spawn.cosmetics);
   writeNativeFrame(session.tcp, NET_PACKET.SPAWN, payload);
 
   session.healthByUid.set(spawn.uid, spawn.health);
@@ -301,6 +338,7 @@ function parseNativeInput(payload: Buffer): NativeInputPacket | null {
     yaw: payload.readFloatLE(16),
     flags: payload[20],
     swap: payload[21],
+    slowdown: payload.length >= 23 ? Math.min(payload[22], 10) / 10 : 0,
   };
 }
 
@@ -325,7 +363,7 @@ function sendInputToUpstream(session: NativeToKrunkerSession, input: NativeInput
     input.flags & NET_INPUT.RELOAD ? 1 : 0,
     0,
     input.swap,
-    0,
+    input.slowdown,
   );
 }
 
@@ -347,6 +385,8 @@ function parseSpawn(payload: unknown, session: NativeToKrunkerSession): NativeSp
     position: [toNumber(payload[2]), toNumber(payload[3], 10), toNumber(payload[4])],
     direction: [0, toNumber(payload[18], -Math.PI / 2)],
     name: String(payload[5] || payload[31] || `Guest_${uid}`),
+    secondaryIndex: toInt(payload[15], -1),
+    cosmetics: EV.cosmeticsFromSpawn(payload),
   };
 }
 
@@ -386,22 +426,6 @@ function stateFromK(session: NativeToKrunkerSession, data: unknown[], offset: nu
   };
 }
 
-function sendInactiveSpawn(session: NativeToKrunkerSession, uid: number): void {
-  writeNativeSpawn(session, {
-    uid,
-    isYou: uid === session.ownSid,
-    active: false,
-    classIndex: session.classByUid.get(uid) ?? 0,
-    team: session.teamByUid.get(uid) ?? 0,
-    health: session.healthByUid.get(uid) ?? 0,
-    maxHealth: session.maxHealthByUid.get(uid) ?? 100,
-    position: session.lastStateByUid.get(uid)?.position || [0, 10, 0],
-    direction: session.lastStateByUid.get(uid)?.direction || [0, -Math.PI / 2],
-    name: session.nameByUid.get(uid) || `Guest_${uid}`,
-  });
-  session.lastStateByUid.delete(uid);
-}
-
 function applyHealth(session: NativeToKrunkerSession, health: number, sidValue: unknown): void {
   const uid = sidValue == null ? session.ownSid : toInt(sidValue, -1);
   if (uid == null || uid < 0) return;
@@ -418,10 +442,13 @@ function handleUpstreamPacket(session: NativeToKrunkerSession, label: string, ar
     case "pi":
       sendUpstream(session, "po");
       break;
+    case "start":
+      // "start" [timeString, team, spectating, ...]: a spectating start -> native SPECTATE
+      if (args[2]) writeNativeFrame(session.tcp, NET_PACKET.SPECTATE, Buffer.from([1]));
+      break;
     case "pir":
     case "load":
     case "ready":
-    case "start":
     case "inst-id":
       break;
     case "init":
@@ -433,14 +460,24 @@ function handleUpstreamPacket(session: NativeToKrunkerSession, label: string, ar
       if (spawn) writeNativeSpawn(session, spawn);
       break;
     }
-    case "2":
-      sendInactiveSpawn(session, toInt(args[0], -1));
+    case "2": {
+      const uid = toInt(args[0], -1);
+      if (uid < 0) break;
+      writeNativeFrame(session.tcp, NET_PACKET.LEAVE, EV.encodeInt32(uid));
+      session.lastStateByUid.delete(uid);
+      session.nameByUid.delete(uid);
       break;
+    }
     case "l": {
       const reconciliation = Array.isArray(args[0]) ? args[0] : null;
       if (!reconciliation) break;
       const state = stateFromL(session, reconciliation);
       if (state) writeNativeState(session, state);
+      const ping = toInt(reconciliation[1], -1);
+      if (ping >= 0 && ping !== session.pingMs) {
+        session.pingMs = ping;
+        writeNativeFrame(session.tcp, NET_PACKET.PING_RESULT, EV.encodeInt32(ping));
+      }
       sendUpstream(session, "v");
       break;
     }
@@ -454,10 +491,222 @@ function handleUpstreamPacket(session: NativeToKrunkerSession, label: string, ar
     }
     case "h":
       applyHealth(session, toNumber(args[0], 0), args[1]);
+      writeNativeHealth(session, args);
+      break;
+    default:
+      handleUpstreamEvent(session, label, args);
       break;
     case "error":
       console.error("[krunker-proxy] upstream error:", args[0]);
       break;
+  }
+}
+
+function writeNativeHealth(session: NativeToKrunkerSession, args: unknown[]): void {
+  const uid = args[1] == null ? session.ownSid : toInt(args[1], -1);
+  if (uid == null || uid < 0) return;
+  const hasSource = args[1] == null && args[2] != null && args[3] != null;
+  writeNativeFrame(
+    session.tcp,
+    NET_PACKET.HEALTH,
+    EV.encodeHealth({ uid, health: toNumber(args[0], 0), hasSource, sourceX: toNumber(args[2]), sourceZ: toNumber(args[3]) }),
+  );
+}
+
+function boardFromFlat(session: NativeToKrunkerSession, flat: unknown[], stride: number, scoreOffset: number): EV.LeaderboardEntry[] {
+  const rows: EV.LeaderboardEntry[] = [];
+  for (let i = 0; i + stride - 1 < flat.length && rows.length < EV.LEADERBOARD_MAX; i += stride) {
+    const uid = toInt(flat[i], -1);
+    if (uid < 0) continue;
+    rows.push({
+      uid,
+      score: toInt(flat[i + scoreOffset]),
+      kills: stride > 3 ? toInt(flat[i + 3]) : session.killsByUid.get(uid) ?? 0,
+      deaths: stride > 4 ? toInt(flat[i + 4]) : session.deathsByUid.get(uid) ?? 0,
+    });
+  }
+  return rows;
+}
+
+// NET_PACKET_VOICE_SEND chunk -> the whole data URL once its last chunk arrived.
+function takeVoiceChunk(session: NativeToKrunkerSession, payload: Buffer): string | null {
+  if (payload.length < VOICE_CHUNK_HEADER) return null;
+  const index = payload.readUInt16LE(4);
+  const count = payload.readUInt16LE(6);
+  if (!count || index >= count || index !== (index === 0 ? 0 : session.voiceNext)) {
+    session.voiceParts = [];
+    session.voiceNext = 0;
+    return null;
+  }
+  if (index === 0) session.voiceParts = [];
+  session.voiceParts.push(Buffer.from(payload.subarray(VOICE_CHUNK_HEADER)));
+  session.voiceNext = index + 1;
+  if (session.voiceNext < count) return null;
+  const audio = Buffer.concat(session.voiceParts).toString("utf8");
+  session.voiceParts = [];
+  session.voiceNext = 0;
+  return audio.length && audio.length <= VOICE_MAX_DATA ? audio : null;
+}
+
+// ["vc", audio, alias, sid] -> NET_PACKET_VOICE chunks (shared/src/voice.c voice_relay).
+function writeNativeVoice(session: NativeToKrunkerSession, args: unknown[]): void {
+  if (typeof args[0] !== "string" || !args[0].length) return;
+  const alias = Buffer.from(String(args[1] ?? ""), "utf8").subarray(0, 255);
+  const msg = Buffer.concat([Buffer.from([alias.length]), alias, Buffer.from(args[0], "utf8")]);
+  const sid = toInt(args[2], -1) >>> 0;
+  const count = Math.ceil(msg.length / VOICE_CHUNK_DATA);
+  for (let i = 0; i < count; i++) {
+    const data = msg.subarray(i * VOICE_CHUNK_DATA, (i + 1) * VOICE_CHUNK_DATA);
+    const header = Buffer.alloc(VOICE_CHUNK_HEADER);
+    header.writeUInt32LE(sid, 0);
+    header.writeUInt16LE(i, 4);
+    header.writeUInt16LE(count, 6);
+    writeNativeFrame(session.tcp, NET_PACKET.VOICE, Buffer.concat([header, data]));
+  }
+}
+
+// Krunker v3.1.1 match events -> native packets (nativeEvents.ts).
+function handleUpstreamEvent(session: NativeToKrunkerSession, label: string, args: unknown[]): void {
+  switch (label) {
+    case "vc":
+      writeNativeVoice(session, args); // voiceChat(audio, alias, sid)
+      break;
+    case "ch": {
+      // gB(name, text, type, color): type 1 game line, 2 server line, else a player line.
+      const type = toInt(args[2], 0);
+      const kind = type === 2 ? EV.NET_CHAT_KIND.SERVER : type === 1 ? EV.NET_CHAT_KIND.GAME : EV.NET_CHAT_KIND.PLAYER;
+      const name = args[0] == null ? "" : String(args[0]);
+      let uid = -1;
+      for (const [knownUid, knownName] of session.nameByUid) if (knownName === name) uid = knownUid;
+      writeNativeFrame(session.tcp, NET_PACKET.CHAT, EV.encodeChat({ uid, kind, name, text: EV.unescapeHtml(String(args[1] ?? "")) }));
+      break;
+    }
+    case "3": {
+      // g1(victimSid, deaths, killerSid, killCard, info, noFeed)
+      const victimUid = toInt(args[0], -1);
+      const killerSid = toInt(args[2], 0);
+      const killerUid = killerSid && killerSid !== victimUid ? killerSid : -1;
+      const card = Array.isArray(args[3]) ? args[3] : null;
+      const info = args[4] && typeof args[4] === "object" ? (args[4] as Record<string, unknown>) : {};
+      session.deathsByUid.set(victimUid, toInt(args[1]));
+      if (killerUid >= 0) session.killsByUid.set(killerUid, (session.killsByUid.get(killerUid) ?? 0) + 1);
+      writeNativeFrame(
+        session.tcp,
+        NET_PACKET.KILL,
+        EV.encodeKill({
+          victimUid,
+          killerUid,
+          weaponIndex: toInt(card ? card[0] : info.wId, -1),
+          headshot: !!info.hs,
+          wallbang: !!info.wb,
+          fists: !!info.fs,
+          victimDeaths: toInt(args[1]),
+          killerKills: killerUid >= 0 ? session.killsByUid.get(killerUid) ?? 0 : 0,
+          killerClass: killerUid >= 0 ? session.classByUid.get(killerUid) ?? 0 : -1,
+          score: card ? toInt(card[1]) : 0,
+          respawnDelay: 2.8,
+        }),
+      );
+      break;
+    }
+    case "4": {
+      if (args[0] == null) break; // object hit
+      writeNativeFrame(
+        session.tcp,
+        NET_PACKET.HIT,
+        EV.encodeHit({ targetUid: toInt(args[0]), damage: toNumber(args[1]), crit: !!args[2], kill: !!args[3] }),
+      );
+      break;
+    }
+    case "5": {
+      if (args[1]) break; // spectated player's score
+      const delta = toInt(args[0]);
+      session.ownScore += delta;
+      writeNativeFrame(session.tcp, NET_PACKET.SCORE, EV.encodeScore({ delta, score: session.ownScore }));
+      break;
+    }
+    case "7": {
+      const flat = Array.isArray(args[0]) ? args[0] : [];
+      writeNativeFrame(session.tcp, NET_PACKET.LEADERBOARD, EV.encodeLeaderboard(boardFromFlat(session, flat, 2, 1)));
+      break;
+    }
+    case "t": {
+      const seconds = EV.parseTime(args[0]);
+      if (seconds == null) break;
+      writeNativeFrame(session.tcp, NET_PACKET.TIMER, EV.encodeTimer({ seconds, end: toInt(args[1]) === 1 }));
+      break;
+    }
+    case "9": {
+      // g7: [[sid, x, y, z, faceYaw?, facePitch?, trail, ...]]
+      const shot = Array.isArray(args[0]) ? args[0] : null;
+      if (!shot) break;
+      const hasNormal = shot[4] != null && shot[5] != null;
+      writeNativeFrame(
+        session.tcp,
+        NET_PACKET.SHOT,
+        EV.encodeShot({
+          uid: toInt(shot[0], -1),
+          weaponIndex: session.lastStateByUid.get(toInt(shot[0], -1))?.loadoutIndex ?? -1,
+          hit: [toNumber(shot[1]), toNumber(shot[2]), toNumber(shot[3])],
+          hasNormal,
+          normalYaw: toNumber(shot[4]),
+          normalPitch: toNumber(shot[5]),
+          trail: !!shot[6],
+          first: true,
+        }),
+      );
+      break;
+    }
+    case "pr": {
+      // [x, y, z, yaw, pitch, weaponId (or stored index with args[7]), sid, isStored]
+      const weaponIndex = args[7] ? 12 : toInt(args[5], -1);
+      const flight = EV.PROJECTILE_FLIGHT[weaponIndex] || { speed: 0.5, gravity: 0, range: 1000 };
+      const yaw = toNumber(args[3]) - Math.PI;
+      const pitch = toNumber(args[4]);
+      writeNativeFrame(
+        session.tcp,
+        NET_PACKET.PROJECTILE,
+        EV.encodeProjectile({
+          id: toInt(args[6], 0),
+          ownerUid: -1,
+          weaponIndex,
+          position: [toNumber(args[0]), toNumber(args[1]), toNumber(args[2])],
+          velocity: [
+            flight.speed * Math.sin(yaw) * Math.cos(pitch),
+            flight.speed * Math.sin(pitch),
+            flight.speed * Math.cos(yaw) * Math.cos(pitch),
+          ],
+          gravity: flight.gravity,
+          range: flight.range,
+        }),
+      );
+      break;
+    }
+    case "pre": {
+      if (toInt(args[1]) === 1) break; // own predicted shot counter, not a server slot id
+      writeNativeFrame(
+        session.tcp,
+        NET_PACKET.PROJECTILE_END,
+        EV.encodeProjectileEnd({ id: toInt(args[0]), position: [toNumber(args[2]), toNumber(args[3]), toNumber(args[4])], impact: !!args[5] }),
+      );
+      break;
+    }
+    case "ex":
+      writeNativeFrame(
+        session.tcp,
+        NET_PACKET.EXPLOSION,
+        EV.encodeExplosion({ position: [toNumber(args[0]), toNumber(args[1]), toNumber(args[2])], radius: toNumber(args[3]) }),
+      );
+      break;
+    case "end": {
+      // fq(spectating, didWin (-1 draw), endData, teamWinner, ...): endData.ed rows follow config.endStats.
+      const result = args[1] === -1 ? -1 : args[1] ? 1 : 0;
+      const endData = args[2] && typeof args[2] === "object" ? (args[2] as Record<string, unknown>) : {};
+      const ed = Array.isArray(endData.ed) ? endData.ed : [];
+      const board = boardFromFlat(session, ed, 6, 2);
+      writeNativeFrame(session.tcp, NET_PACKET.END, EV.encodeEnd({ result, nextRound: 25, winnerUid: board[0]?.uid ?? -1, board }));
+      break;
+    }
     default:
       break;
   }
@@ -529,9 +778,19 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
       void connectUpstream(session, options);
       break;
     case NET_PACKET.ENT: {
-      if (payload.length !== 4) break;
+      if (payload.length < 4 || payload.length > EV.ENT_COSMETICS_SIZE + 1) break;
       const classIndex = payload.readInt32LE(0);
-      sendUpstream(session, "ent", [classIndex, 0, [-1, -1], -1, -1, null, 0, 0, 0, -1, 0, 0, 0, null, 0, false, 0, -1, 0, 0, 0, 0]);
+      const secondary = payload.length >= 8 ? payload.readInt32LE(4) : -1;
+      const c = EV.readCosmetics(payload, 8);
+      const spectate = payload.length > EV.ENT_COSMETICS_SIZE && payload[EV.ENT_COSMETICS_SIZE] ? 1 : 0;
+      // gameserver.ts ent slots: 3 hat, 4 back, 5 secIndex, 6 toggleSpect, 10 skinColIndex, 14 dye, 17 waist, 18 hairCol, 21 face
+      const ent: unknown[] = [classIndex, 0, [-1, -1], c.hat, c.back, secondary >= 0 ? secondary : null, spectate, 0, 0, -1, 0, 0, 0, null, 0, false, 0, -1, 0, 0, 0, 0];
+      if (c.skinColor >= 0) ent[10] = EV.skinIndexFromColor(c.skinColor);
+      if (c.dye >= 0) ent[14] = c.dye;
+      ent[17] = c.waist;
+      if (c.hairColor >= 0) ent[18] = EV.hairColorToKrunker(c.hairColor);
+      ent[21] = c.face;
+      sendUpstream(session, "ent", ent);
       break;
     }
     case NET_PACKET.INPUT: {
@@ -542,6 +801,18 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
     case NET_PACKET.CYCLE:
       if (!payload.length) sendUpstream(session, "cycle");
       break;
+    case NET_PACKET.CHAT_SEND: {
+      const text = EV.decodeChatSend(payload);
+      if (text.trim().length) sendUpstream(session, "ct", text);
+      break;
+    }
+    case NET_PACKET.VOICE_SEND: {
+      const audio = takeVoiceChunk(session, payload);
+      if (audio) sendUpstream(session, "vc", audio); // toggleRecord: io.send("vc", dataUrl)
+      break;
+    }
+    case NET_PACKET.PONG:
+      break; // upstream "pi" is answered directly in handleUpstreamPacket
     default:
       break;
   }
@@ -585,6 +856,12 @@ function createSession(tcp: net.Socket): NativeToKrunkerSession {
     teamByUid: new Map(),
     nameByUid: new Map(),
     lastStateByUid: new Map(),
+    killsByUid: new Map(),
+    deathsByUid: new Map(),
+    ownScore: 0,
+    pingMs: -1,
+    voiceParts: [],
+    voiceNext: 0,
     closed: false,
   };
 }

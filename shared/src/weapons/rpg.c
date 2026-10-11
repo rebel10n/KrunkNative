@@ -1,29 +1,62 @@
 #include <weapons.h>
 
+// Krunker v3.1.1 weapon 8 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, nSkill, nCase, nRing, noAo, type, muzOff, muzOffY, muzMlt, expScale, rumble, rumbleDur, icnPad.
 const Weapon g_rpg = {
     .name = "Rocket Launcher",
     .src = "weapon_9",
     .icon = "icon_9",
+
     .secondary = 0,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 1,
+    .no_inspect = 1,
+    .projectile = 1,
+
     .ammo = 3,
+    .shots = 0,
     .swap_time = 0.4f,
     .reload_time = 1.5f,
     .aim_speed = 0.2f,
     .speed_mlt = 0.9f,
-    .damage = 50.0f,
     .headshot_mlt = 1.5f,
     .rate = 0.35f,
     .spread = 120.0f,
     .min_spread = 15.0f,
-    .zoom = 1.5f,
     .recoil = 8.0f,
+    .recoil_r = 0.012f,
     .recover = 0.99f,
     .recover_y = 0.998f,
     .recover_f = 0.975f,
+    .physical_power = 0.095f,
+    .physical_range = 46.0f,
+    .zoom = 1.5f,
+    .recoil_z = 4.0f,
+    .recoil_z_mlt = -0.5f,
+    .z_rotation = 0.9f,
+    .jump_y_mlt = 0.4f,
+    .jump_bob_y_mlt = 0.3f,
+    .land_bob = 0.8f,
+    .aim_recoil_mlt = 0.9f,
+    .lean_mlt = 1.4f,
+    .crouch_lean = 0.2f,
+    .crouch_rotation = 0.2f,
+    .crouch_drop = 0.1f,
+    .scale = 0.00076263407035176f,
+    .hold_width = 0.9f,
+
+    .origin = {0.0f, -0.945f, -3.0f},
+    .offset = {0.95f, -0.56f, -2.6f},
+    .left_hold = {-0.1f, -0.36f, 1.2f},
+    .right_hold = {-0.15f, -0.3f, -0.45f},
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .swap_wiggle = 0.4f,
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.4f,
+    .recoil_tween_y = 0.25f,
+    .recoil_anim_mask = 1,
 };
 
 // {
@@ -42,18 +75,18 @@ const Weapon g_rpg = {
 // nRing: true,
 // noAo: true,
 // projectile: {
-// mat: "BASIC",
-// color: 16777179,
-// explode: 35,
-// dmg: 50,
-// eDmg: 35,
-// spd: 0.72,
-// grav: 0.00008,
-// nImp: true,
-// lookDir: true,
-// scale: 1.4,
-// length: 10,
-// range: 1500
+//   mat: "BASIC",
+//   color: 16777179,
+//   explode: 35,
+//   dmg: 50,
+//   eDmg: 35,
+//   spd: 0.72,
+//   grav: 0.00008,
+//   nImp: true,
+//   lookDir: true,
+//   scale: 1.4,
+//   length: 10,
+//   range: 1500
 // },
 // type: 0,
 // swapTime: 400,
@@ -103,8 +136,8 @@ const Weapon g_rpg = {
 // recoilZM: -0.5,
 // aimRecMlt: 0.9,
 // recoilAnim: {
-// time: 400,
-// recoilTweenY: 0.25
+//   time: 400,
+//   recoilTweenY: 0.25
 // },
 // jumpYM: 0.3,
 // expScale: 0.7,

@@ -1,0 +1,47 @@
+/* KrunkNative additions to Krunker's editor page (ui/editor.html, imported by
+   tools/ui-import/editor_page.py). The 3D view is not a <canvas> inside #container
+   but the native GL scene (web: the full-window #canvas) under the page, drawn by
+   client/src/editor/ into #container's rectangle; the page is composited over it. */
+html,
+body {
+  background-color: transparent;
+}
+
+/* Web: events over the 3D area must fall through the page to #canvas (GLFW callbacks), so
+   the full-window layout boxes above it (#uiBase, #view, #center, #container, #editorUI,
+   #canvasUI) let them through and only the visible controls take them, as the three.js
+   canvas inside #container did in Krunker. Natively the editor hit-tests the page itself
+   (html_dom_element_at) and treats these boxes as the 3D view. */
+#uiBase,
+#view,
+#center,
+#container,
+#canvasUI,
+#editorUI {
+  pointer-events: none;
+}
+
+#hotbar,
+#view > .panel,
+#view > .restore,
+#canvasUI > .button,
+#canvasUI > #transform,
+#canvasInfo,
+#canvasAdd,
+#canvasObjEdit,
+#instructionHolder,
+#progress {
+  pointer-events: auto;
+}
+
+/* Web build: the WebGL canvas fills the window under the page (natively it is inert). */
+#canvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  display: block;
+  outline: none;
+}

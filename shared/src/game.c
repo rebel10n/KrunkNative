@@ -1,6 +1,7 @@
 #include <shared.h>
 #include <pcg_basic.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef KRUNKNATIVE_CLIENT
 #include <client.h>
@@ -94,10 +95,12 @@ void game_configure(
         game->modes = modes;
         game->mode_count = mode_count;
     } else {
-        game->mode_count = sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]);
+        // Free for All only unless the host picks modes (server --mode / CLI `mode`,
+        // Host Game); g_rotation_modes is Krunker's public rotation for `--mode rotation`.
+        game->mode_count = 1;
         game->modes = calloc(game->mode_count, sizeof(int));
 
-        if (game->modes) memcpy(game->modes, g_rotation_modes, sizeof(g_rotation_modes));
+        if (game->modes) game->modes[0] = MODE_ID_FFA;
         else game->mode_count = 0;
     }
 
@@ -145,7 +148,8 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
     const int map_to_load = map_index >= 0 && map_index < game->map_count ? map_index : (int) pcg32_boundedrand(game->map_count);
     const int map_changed = !game->map || game->map->raw_data != game->maps[map_to_load];
 
-    const int mode_to_load = mode_index >= 0 && mode_index < game->mode_count ? mode_index : game->modes[(int) pcg32_boundedrand(game->mode_count)];
+    // current_mode_index (and mode_index) index game->modes; game->modes holds mode ids.
+    const int mode_to_load = mode_index >= 0 && mode_index < (int) game->mode_count ? mode_index : (int) pcg32_boundedrand((uint32_t) game->mode_count);
 
     game->current_map_index = map_to_load;
     game->current_mode_index = mode_to_load;
@@ -172,15 +176,363 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
     if (!game->mode || !game->map) return;
 
     game->ready = 1;
+    game_start_round(game);
+}
+
+// The index of mode `mode_id` in game->modes, appending it when the list lacks it (a
+// client following a server's INIT, which carries the Krunker mode id). -1: unknown id.
+int game_mode_index_for(Game *game, const int mode_id) {
+    if (!mode_config(mode_id)) return -1;
+
+    for (size_t i = 0; i < game->mode_count; i++) {
+        if (game->modes && game->modes[i] == mode_id) return (int) i;
+    }
+
+    int *modes = realloc(game->modes, (game->mode_count + 1) * sizeof(int));
+    if (!modes) return -1;
+
+    game->modes = modes;
+    game->modes[game->mode_count] = mode_id;
+    return (int) game->mode_count++;
+}
+
+// The Krunker mode id of the current round (game->modes[current_mode_index]), -1 none.
+int game_mode_id(const Game *game) {
+    if (game->mode) return game->mode->config.id;
+    const int index = game->current_mode_index;
+    return index >= 0 && (size_t) index < game->mode_count && game->modes ? game->modes[index] : -1;
+}
+
+int game_is_authority(const Game *game) {
+    return game->is_local || game->server;
+}
+
+int game_can_spawn(const Game *game, const Player *player) {
+    if (!game->ready || game->end_timer > 0.0f) return 0;
+    if (player && player->active) return 0;
+    if (player && player->deaths && game->now - player->death_time < GAME_DEATH_DELAY - 0.25f) return 0;
+    return mode_can_spawn(game, player); // lives modes: out of lives once the match started
+}
+
+void game_player_changing(const Game *game, Player *player, const int done) {
+    if (game && game->hooks.player_changing) game->hooks.player_changing(game, player, done);
+}
+
+void game_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
+    if (game->hooks.send) game->hooks.send(game, uid, type, payload, length);
+}
+
+Player *game_find_player(Game *game, const int uid) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i] && game->players[i]->uid == uid) return game->players[i];
+    }
+
+    return NULL;
+}
+
+// UTILS.orderByScore: higher score first; ties keep the join order (stable).
+static size_t game_sorted_players(Game *game, Player **out, const size_t max) {
+    size_t count = 0;
+
+    for (size_t i = 0; i < game->player_count && count < max; i++) {
+        Player *player = game->players[i];
+        if (!player) continue;
+
+        size_t at = count;
+        while (at > 0 && out[at - 1]->score < player->score) {
+            out[at] = out[at - 1];
+            at--;
+        }
+
+        out[at] = player;
+        count++;
+    }
+
+    return count;
+}
+
+static void game_fill_board_from(const Player *const *sorted, const size_t count, NetLeaderboardPacket *board) {
+    memset(board, 0, sizeof(*board));
+    board->count = (uint8_t) count;
+
+    for (size_t i = 0; i < count; i++) {
+        board->entries[i].uid = sorted[i]->uid;
+        board->entries[i].score = sorted[i]->score;
+        board->entries[i].kills = (int32_t) sorted[i]->kills;
+        board->entries[i].deaths = (int32_t) sorted[i]->deaths;
+    }
+}
+
+static void game_fill_board(Game *game, NetLeaderboardPacket *board) {
+    Player *sorted[GAME_LEADERBOARD_MAX];
+    const size_t count = game_sorted_players(game, sorted, GAME_LEADERBOARD_MAX);
+
+    memset(board, 0, sizeof(*board));
+    board->count = (uint8_t) count;
+
+    for (size_t i = 0; i < count; i++) {
+        board->entries[i].uid = sorted[i]->uid;
+        board->entries[i].score = sorted[i]->score;
+        board->entries[i].kills = (int32_t) sorted[i]->kills;
+        board->entries[i].deaths = (int32_t) sorted[i]->deaths;
+    }
+}
+
+// players.syncLeaders(true, uid): the top 16 [sid, score] rows (KrunkNative adds kills/deaths).
+void game_sync_leaders(Game *game, const int uid) {
+    NetLeaderboardPacket board;
+    game_fill_board(game, &board);
+    game_send(game, uid, NET_PACKET_LEADERBOARD, &board, sizeof(board));
+
+    if (uid == NET_TARGET_ALL) game->leaders_dirty = 0;
+}
+
+// game.init -> gameTimer = config.gameTime * 60000 (a non-positive clock falls back to 4:00).
+void game_start_round(Game *game) {
+    const float minutes = (float) game->config.game_time;
+
+    game->round_timer = game->round_length > 0.0f ? game->round_length : minutes > 0.0f ? minutes * 60.0f : 240.0f;
+    game->round_seconds_sent = -1;
+    game->round_endless = 0;
+    game->end_timer = 0.0f;
+    game->kill_count = 0;
+    game->nuke_timer = 0.0f;
+    game->nuke_player = NULL;
+    game->leaders_dirty = 1;
+    memset(game->projectiles, 0, sizeof(game->projectiles));
+
+    // finishInit: the mode's clock (gameTime), waitTimers, conditions, objectives, gameStart
+    if (game->mode) mode_round_start(game);
+}
+
+static void game_send_timer(Game *game, const int uid, const int seconds, const int end) {
+    const NetTimerPacket packet = {.seconds = seconds, .end = (uint8_t) end};
+    game_send(game, uid, NET_PACKET_TIMER, &packet, sizeof(packet));
+}
+
+// endGame(): didWin = (team && team == winner) || player == winner; "end" carries didWin
+// when there is a winner, else -1 (draw).
+static void game_send_end(Game *game, Player *player, const ModeWinner winner, const NetLeaderboardPacket *board) {
+    NetEndPacket packet;
+    memset(&packet, 0, sizeof(packet));
+
+    const int did_win = (player->team && player->team == winner.team) || player == winner.player;
+    packet.result = (int8_t) (winner.team || winner.player ? did_win : -1);
+    packet.next_round = (int32_t) ceilf(game->end_timer);
+    packet.winner_uid = winner.player ? winner.player->uid : -1;
+    packet.board = *board;
+
+    game_send(game, player->uid, NET_PACKET_END, &packet, sizeof(packet));
+}
+
+// game.endGame(3): the round clock ran out. Winner = best score, per-player "end"
+// packets, end screen timer (config.endTimer), then players.clear().
+void game_end_round(Game *game) {
+    if (game->end_timer > 0.0f) return;
+
+    game->end_timer = GAME_END_TIMER;
+    game->round_timer = 0.0f;
+    game->round_seconds_sent = -1;
+    game->nuke_timer = 0.0f;
+    game->nuke_player = NULL;
+
+    // players.list.sort(mode.endSort || orderByScore), then the mode's winner
+    Player *sorted[GAME_LEADERBOARD_MAX];
+    size_t count = 0;
+    for (size_t i = 0; i < game->player_count && count < GAME_LEADERBOARD_MAX; i++) {
+        if (game->players[i]) sorted[count++] = game->players[i];
+    }
+    if (game->mode) mode_sort_players(game, sorted, count);
+    else count = game_sorted_players(game, sorted, GAME_LEADERBOARD_MAX);
+
+    ModeWinner winner = {0, NULL};
+    if (game->mode) winner = mode_pick_winner(game);
+    else if (count) winner.player = sorted[0];
+
+    NetLeaderboardPacket board;
+    game_fill_board_from((const Player *const *) sorted, count, &board);
+
+    // Spectators / menu clients see the end screen without a result (the v3.1.1 server's
+    // vote-window "end" with didWin -1).
+    NetEndPacket watcher;
+    memset(&watcher, 0, sizeof(watcher));
+    watcher.result = -1;
+    watcher.next_round = (int32_t) ceilf(game->end_timer);
+    watcher.winner_uid = winner.player ? winner.player->uid : -1;
+    watcher.board = board;
+    game_send(game, NET_TARGET_NON_PLAYERS, NET_PACKET_END, &watcher, sizeof(watcher));
+
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (player) game_send_end(game, player, winner, &board);
+    }
+
+    if (game->mode) mode_send_end(game, winner, sorted, count);
+
+    memset(game->projectiles, 0, sizeof(game->projectiles));
+
+    // players.clear(): nobody plays on the end screen (an in-process client keeps its
+    // players for the endAnim, Game.end_keep_players; game_tick skips their regen/kills).
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (!player) continue;
+
+        if (!game->end_keep_players) player->active = 0;
+        player->input_queue_size = 0;
+        free(player->input_queue);
+        player->input_queue = NULL;
+    }
+}
+
+void game_set_round_time(Game *game, const float seconds) {
+    if (!game->ready || game->end_timer > 0.0f) return;
+
+    game->round_timer = seconds > 0.0f ? seconds : 0.001f; // <= 0: the round ends on the next tick
+    game->round_seconds_sent = -1;
+}
+
+// /endless (v3.1.1 server cmd_endless): endTimer = "inf" stops the clock and every
+// client gets "t" 00:00; turning it off restores a full round (gameTime) and resumes.
+void game_set_endless(Game *game, const int on) {
+    if (!game->ready || game->end_timer > 0.0f) return;
+
+    game->round_endless = (unsigned char) !!on;
+    game->round_seconds_sent = -1;
+    if (on) {
+        game->round_timer = 0.0f;
+        game_send_timer(game, NET_TARGET_ALL, 0, 0);
+        return;
+    }
+
+    const float minutes = (float) game->config.game_time;
+    game->round_timer = game->round_length > 0.0f ? game->round_length : minutes > 0.0f ? minutes * 60.0f : 240.0f;
+}
+
+// What a client that connects mid-round needs: the clock, or the end screen.
+void game_send_round_state(Game *game, const int uid) {
+    if (!game->ready || !game_is_authority(game)) return;
+
+    if (game->end_timer > 0.0f) {
+        game_send_timer(game, uid, (int) game->end_timer, 1);
+        return;
+    }
+
+    if (game->mode && game->mode->config.timed) game_send_timer(game, uid, (int) game->mode->round_clock, 0);
+    else if (game->round_timer > 0.0f) game_send_timer(game, uid, (int) game->round_timer, 0);
+    if (game->mode) mode_send_state(game, uid);
+}
+
+void game_player_left(Game *game, Player *player) {
+    mode_player_left(game, player); // players.remove: dropFlag
+    if (game->nuke_player == player) {
+        game->nuke_player = NULL;
+        game->nuke_timer = 0.0f;
+    }
+
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *other = game->players[i];
+        if (!other || other == player) continue;
+
+        for (int k = 0; k < PLAYER_DAMAGE_SLOTS; k++) {
+            if (other->damage_received[k].uid == player->uid) other->damage_received[k].uid = -1;
+        }
+
+        if (other->last_killer_uid == player->uid) other->last_killer_uid = -1;
+    }
+
+    game->leaders_dirty = 1;
+}
+
+// game.update timers: the end screen countdown, else the round clock ("t" packets on
+// every whole-second change, UTILS.getTime floors). Returns 1 when the end screen ran
+// out and the hook must rotate the map.
+static int game_tick_round(Game *game, const float delta) {
+    if (game->end_timer > 0.0f) {
+        game->end_timer -= delta;
+
+        if (game->end_timer <= 0.0f) {
+            game->end_timer = 0.0f;
+            return 1;
+        }
+
+        const int seconds = (int) game->end_timer;
+        if (seconds != game->round_seconds_sent) {
+            game->round_seconds_sent = seconds;
+            game_send_timer(game, NET_TARGET_ALL, seconds, 1);
+        }
+
+        return 0;
+    }
+
+    // the mode's waitTimers and conditions (106.js update); HOLD stops the clock
+    const int state = game->mode ? mode_tick_round(game, delta) : MODE_ROUND_RUN;
+    if (state == MODE_ROUND_END) {
+        game_end_round(game);
+        return 0;
+    }
+    if (state == MODE_ROUND_HOLD) return 0;
+
+    if (game->mode && game->mode->config.timed) { // Race: the clock counts up
+        const int seconds = (int) game->mode->round_clock;
+        if (seconds != game->round_seconds_sent) {
+            game->round_seconds_sent = seconds;
+            game_send_timer(game, NET_TARGET_ALL, seconds, 0);
+        }
+        return 0;
+    }
+
+    if (game->round_timer <= 0.0f && game->mode && game->mode->config.game_time == 0.0f) return 0; // gameTime 0: no clock
+    if (game->round_endless) return 0; // /endless: endTimer "inf" skips the gameTimer countdown
+
+    game->round_timer -= delta;
+
+    if (game->round_timer <= 0.0f) {
+        game_end_round(game);
+        return 0;
+    }
+
+    const int seconds = (int) game->round_timer;
+    if (seconds != game->round_seconds_sent) {
+        game->round_seconds_sent = seconds;
+        game_send_timer(game, NET_TARGET_ALL, seconds, 0);
+    }
+
+    return 0;
+}
+
+// players.tickPlayer: every 0.5 s a player that was not hit for regenDelay heals
+// maxHealth * regen (class regen, 0 when the config/mode disables regen).
+static void game_tick_regen(Game *game, Player *player, const float delta) {
+    if (player->hit_timer > 0.0f) player->hit_timer -= delta;
+
+    player->regen_ticker -= delta;
+    if (player->regen_ticker > 0.0f) return;
+
+    player->regen_ticker = GAME_REGEN_TICK;
+    if (player->hit_timer > 0.0f) return;
+    if (!game->config.health_regen || (game->mode && game->mode->config.no_regen) || player->mode.no_regen) return;
+    if (!game->classes || player->class_index < 0 || player->class_index >= (int) game->class_count) return;
+
+    const float regen = game->classes[player->class_index].regen;
+    if (regen > 0.0f) player_change_health(player, NULL, -(float) player->max_health * regen, 0);
 }
 
 void game_tick(Game *game, const float now, const float delta) {
+    game_tick_world(game, now, delta, delta);
+}
+
+void game_tick_world(Game *game, const float now, const float delta, const float world_delta) {
     if (!game->ready) return;
 
-    // TODO: lots of stuff xD
+    game->now = now;
 
-    if (game->is_local || game->server) {
-        if (!game->end_timer && game->nuke_timer) {
+    const int authority = game_is_authority(game);
+    int next_round = 0;
+
+    if (authority) {
+        next_round = game_tick_round(game, delta);
+
+        if (!game->end_timer && game->nuke_timer && game->nuke_player) {
             game->nuke_timer = MAX(0.0f, game->nuke_timer - delta);
 
             if (!game->nuke_timer) {
@@ -199,9 +551,7 @@ void game_tick(Game *game, const float now, const float delta) {
                     player_kill(player, game->nuke_player, &kill_info, 1);
                 }
 
-                if (nuke_reward) {
-                    // TODO: score
-                }
+                if (nuke_reward) player_score(game->nuke_player, nuke_reward, 1);
             }
         }
 
@@ -220,17 +570,30 @@ void game_tick(Game *game, const float now, const float delta) {
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
 
+        player_update(player, world_delta * game->config.delta_mlt);
+
 #ifdef KRUNKNATIVE_CLIENT
+        // players.js update(): p.update(game, delta) then updateMsh(p), so the meshes
+        // (first-person viewmodel included) show this frame's input like the camera does.
         player_update_meshes(player, 0);
 #endif
 
-        player_update(player, delta * game->config.delta_mlt);
+        if (!authority || !player->active || game->end_timer > 0.0f) continue; // end screen: kept players only animate
+
+        game_tick_regen(game, player, delta);
 
         if (player->position.y <= game->map->death_y) {
-            // TODO: reset flag
+            // the CTF flag goes home in mode_on_kill (mode_in_kill_zone)
             player_kill(player, NULL, NULL, 0);
         }
     }
+
+    if (authority && !game->end_timer) game_tick_projectiles(game, delta);
+    if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn
+    if (authority && game->leaders_dirty) game_sync_leaders(game, NET_TARGET_ALL);
+
+    // Last: the hook re-inits the game (frees the players iterated above).
+    if (next_round && game->hooks.next_round) game->hooks.next_round(game);
 }
 
 void game_players_add(Game *game, Player *player) {
@@ -245,4 +608,25 @@ void game_players_add(Game *game, Player *player) {
     }
 
     game->players[game->player_count++] = player;
+    game->leaders_dirty = 1;
+
+    mode_player_added(game, player); // players.add: setTeam + lives (authority only)
+}
+
+// endData.mts[0] without votes: mode 0 with a random rotation map (pickWinningMap).
+// endData.mts[0] without votes: mode 0 when the rotation has it, else a random
+// rotation mode. Returns an index into game->modes.
+int game_pick_next_mode(const Game *game) {
+    if (!game->mode_count || !game->modes) return 0;
+
+    for (size_t i = 0; i < game->mode_count; i++) {
+        if (game->modes[i] == MODE_ID_FFA) return (int) i;
+    }
+
+    return (int) pcg32_boundedrand((uint32_t) game->mode_count);
+}
+
+int game_pick_next_map(const Game *game) {
+    if (!game->map_count) return 0;
+    return (int) pcg32_boundedrand((uint32_t) game->map_count);
 }

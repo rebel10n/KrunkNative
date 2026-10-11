@@ -1,0 +1,39 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Native Debug",
+      "binaryDir": "${sourceDir}/cmake-build-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "release",
+      "displayName": "Native Release",
+      "binaryDir": "${sourceDir}/cmake-build-release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "web",
+      "displayName": "Web (Emscripten, Release)",
+      "binaryDir": "${sourceDir}/cmake-build-web",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "web-debug",
+      "displayName": "Web (Emscripten, Debug)",
+      "inherits": "web",
+      "binaryDir": "${sourceDir}/cmake-build-web-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "web", "configurePreset": "web" },
+    { "name": "web-debug", "configurePreset": "web-debug" }
+  ],
+  "testPresets": []
+}

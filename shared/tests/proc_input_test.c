@@ -12,11 +12,28 @@
 // most of the differences can be attributed to cumulative floating point errors
 #define EPSILON 1e-3
 
+// First-person feel values a tick can also carry (state[7..13]): the deterministic,
+// per-input part of Krunker's local-player animation (players.js procInputs/playerStep).
+#define FEEL_COUNT 7
+static const char *feel_names[FEEL_COUNT] = {"step_val", "step_chase", "bob_anim_y", "bob_anim_z", "lean_anim_x", "lean_anim_y", "lean_anim_z"};
+
 typedef struct {
     vec3 position;
     vec3 velocity;
     float *ramp_fix;
+    int has_feel;
+    float feel[FEEL_COUNT];
 } PlayerState;
+
+static void player_feel_values(const Player *player, float out[FEEL_COUNT]) {
+    out[0] = player->step_val;
+    out[1] = player->step_chase;
+    out[2] = player->bob_anim.y;
+    out[3] = player->bob_anim.z;
+    out[4] = player->lean_anim.x;
+    out[5] = player->lean_anim.y;
+    out[6] = player->lean_anim.z;
+}
 
 typedef struct {
     Input input;
@@ -60,6 +77,11 @@ int parse_tick(const cJSON *raw, Tick *out) {
         if (out->expected.ramp_fix) *out->expected.ramp_fix = get_num(raw_state, 6);
     }
 
+    if (cJSON_GetArraySize(raw_state) >= 7 + FEEL_COUNT) {
+        out->expected.has_feel = 1;
+        for (int i = 0; i < FEEL_COUNT; i++) out->expected.feel[i] = get_num(raw_state, 7 + i);
+    }
+
     return 0;
 }
 
@@ -99,7 +121,13 @@ int validate_tick(const Player *player, const PlayerState *expected, const int i
     const int vz = fabsf(dvz) > EPSILON;
 
     const int ramp_fix = !!expected->ramp_fix ^ !!player->ramp_fix || (expected->ramp_fix && player->ramp_fix && fabsf(*player->ramp_fix - *expected->ramp_fix) > EPSILON);
-    const int bad = x || y || z || vx || vy || vz || ramp_fix;
+
+    float feel[FEEL_COUNT];
+    player_feel_values(player, feel);
+    int feel_bad = 0;
+    for (int f = 0; expected->has_feel && f < FEEL_COUNT; f++) feel_bad |= fabsf(feel[f] - expected->feel[f]) > EPSILON;
+
+    const int bad = x || y || z || vx || vy || vz || ramp_fix || feel_bad;
 
     if (bad) {
         printf("Failed at tick #%d! \n", i);
@@ -119,6 +147,8 @@ int validate_tick(const Player *player, const PlayerState *expected, const int i
         if (expected->ramp_fix) {
             print_field_delta("ramp_fix", *expected->ramp_fix, player->ramp_fix ? *player->ramp_fix : 0.0f);
         }
+
+        for (int f = 0; expected->has_feel && f < FEEL_COUNT; f++) print_field_delta(feel_names[f], expected->feel[f], feel[f]);
 
         printf("|--------------------------------|--------------------------------|--------------------------------|--------------------------------|\n");
     }
@@ -172,9 +202,12 @@ const char *get_project_root() {
     return devel ? devel_assets : assets;
 }
 
+static int g_failures = 0;
+
 void run_test(const char *name, Player *player) {
+    // Absolute paths (CLI replay of recorded/synthetic v3.1.1 runs) are used as is.
     char *test_base_path = concat(get_project_root(), "shared/tests/inputs/");
-    char *test_path = concat(test_base_path, name);
+    char *test_path = name[0] == '/' ? concat(name, "") : concat(test_base_path, name);
 
     const cJSON *raw_ticks = load_json(test_path);
 
@@ -183,6 +216,7 @@ void run_test(const char *name, Player *player) {
 
     if (!raw_ticks) {
         printf("Failed to parse %s, skipping... \n", name);
+        g_failures++;
         return;
     }
 
@@ -201,6 +235,7 @@ void run_test(const char *name, Player *player) {
         printf("Failed to parse tick #%d! \n", i);
 
         free(ticks);
+        g_failures++;
         return;
     }
 
@@ -208,10 +243,20 @@ void run_test(const char *name, Player *player) {
 
     player->position = ticks[0].expected.position;
     player->wall_jump = !strcmp(name, "wall_jump.json");
+    // Recorded/synthetic runs start from a long-alive v3.1.1 player: no spawn swap delay.
+    if (name[0] == '/') player->swap_timer = 0.0f;
+
+    // Ticks carrying feel values were recorded from the local (rendered) player.
+    player->is_you = player->render_you = tick_count > 0 && ticks[0].expected.has_feel;
+    if (player->is_you) {
+        player->direction.x = ticks[0].input.x_dir;
+        player->direction.y = ticks[0].input.y_dir;
+    }
 
     for (int i = 0; i < tick_count; i++) {
         if (!validate_tick(player, &ticks[i].expected, i)) {
             free(ticks);
+            g_failures++;
             return;
         }
 
@@ -222,7 +267,34 @@ void run_test(const char *name, Player *player) {
     free(ticks);
 }
 
-int main() {
+// proc_input_test <map.json> <ticks.json>...: replay recorded/synthetic v3.1.1 input
+// runs (tools/kref/movement-synth.js / movement-rec.js) on one map.
+static int replay_main(const int argc, char **argv) {
+    const cJSON *map = load_json(argv[1]);
+    if (!map) {
+        printf("Failed to load %s! \n", argv[1]);
+        return 1;
+    }
+
+    Game game = {};
+    game_configure(&game, NULL, &map, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&game, 0, -1, 1);
+
+    Player *player = player_init(&game);
+    if (!player) return 1;
+    game_players_add(&game, player);
+
+    for (int i = 2; i < argc; i++) {
+        run_test(argv[i], player);
+        printf("\n");
+    }
+
+    return g_failures ? 1 : 0;
+}
+
+int main(const int argc, char **argv) {
+    if (argc > 2) return replay_main(argc, argv);
+
     const char *tests[] = {
         "collide.json",
         "crouch.json",
@@ -234,6 +306,16 @@ int main() {
         "walk_ladder.json",
         "walk_ramp.json",
         "wall_jump.json",
+        // Generated from the real v3.1.1 client by tools/kref/movement-synth.js at fixed
+        // frame rates; these also check the first-person feel values (step/bob/lean).
+        "v3_walk_diag_60fps.json",     // diagonal strafe speed (config.strafeSpd)
+        "v3_aim_walk_60fps.json",      // aim slow while walking
+        "v3_crouch_slide_144fps.json", // sprint -> jump -> crouch slide, slide timer expiry
+        "v3_sprint_jump_30fps.json",   // jump push, landing, step bob
+        "v3_look_60fps.json",          // lean sway signs (yaw/pitch), strafe step
+        "v3_ladder_60fps.json",        // ladder climb, ladder step x1.4
+        "v3_turn_jump_144fps.json",    // turning in the air
+        "v3_crouch_walk_30fps.json",   // crouch speed, crouch bob, crouchVal.round(3)
     };
 
     char *sandstorm_path = concat(get_project_root(), "assets/maps/sandstorm.json");
@@ -280,6 +362,8 @@ int main() {
     game_init(&game, 0, -1, 1);
 
     run_test("kanji_jump_pad.json", player);
+    printf("\n");
+    run_test("v3_kanji_jump_pad_30fps.json", player);
 
-    return 0;
+    return g_failures ? 1 : 0;
 }

@@ -1,0 +1,84 @@
+/*
+ * KrunkNative overrides for the Krunker v3.1.1 menu.
+ *
+ * Loaded after Krunker's css/main.css, which is kept byte-identical. Only the
+ * deviations a different host forces live here; everything Krunker shows in
+ * its loaded, logged-out menu stays visible and styled by main.css. Menu
+ * open/closed is done with the same inline styles the game JS uses
+ * (client/src/ui/menu_ui.c), not with CSS.
+ */
+
+/* The 3D scene is rendered behind the page (native engine composite / WebGL
+ * canvas); Krunker's page itself is opaque black until its renderer canvas
+ * covers it. */
+html,
+body {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Emscripten WebGL target (first body child); a transparent no-op in the
+ * native client. Takes the place of Krunker's renderer canvas. */
+#canvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  display: block;
+  outline: none;
+}
+
+/* The class preview: Krunker's three.js canvas, kept at its size and position
+ * (#menuClassContainer / #classPreviewCanvas in main.css) but left empty; the
+ * engine renders the selected class's player model into its screen rectangle
+ * (client/src/ui/class_preview.c) underneath the page. */
+#classPreviewCanvas {
+  background: transparent;
+}
+
+/* The dimming layer behind the menu is #instructionHolder (50% black in
+ * main.css). Krunker's preview canvas sits above it; ours is rendered by the
+ * engine underneath the page, so while the preview is visible the holder's
+ * own background is swapped for a spread box-shadow cast by a transparent box
+ * placed exactly over #classPreviewCanvas (menu_ui.c keeps it in sync with
+ * the preview rectangle). Every pixel outside the box stays rgba(0,0,0,0.5). */
+#instructionHolder.kn-hole {
+  background-color: transparent;
+  overflow: hidden;
+}
+#knPreviewHole {
+  display: none;
+  position: absolute;
+  pointer-events: none;
+  box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5);
+}
+#instructionHolder.kn-hole #knPreviewHole {
+  display: block;
+}
+
+/* Things that literally cannot exist here: ad iframes and the captcha. */
+#aHolder iframe,
+#aMerger iframe,
+#endAHolderL iframe,
+#endAHolderR iframe,
+#twoFAGholder iframe,
+.grecaptcha-badge,
+iframe[src*="captcha"] {
+  display: none !important;
+}
+
+/* Menu closed: the page is a transparent HUD layer and must not swallow the
+ * game's pointer (menu_ui.c toggles html.kn-menu-open). */
+html:not(.kn-menu-open) #uiBase,
+html:not(.kn-menu-open) #uiBase * {
+  pointer-events: none !important;
+}
+
+/* ?bg=1 standalone preview helper: paint a fake "3D scene" on the canvas so
+ * the page's transparency is visible in a normal browser (?bg=<colour> paints
+ * a flat colour instead, handy for screenshot comparisons). */
+html.kn-preview-bg #canvas {
+  background: radial-gradient(ellipse at 50% 40%, #6f8aa6 0%, #3c4a5c 55%, #1a2029 100%);
+}

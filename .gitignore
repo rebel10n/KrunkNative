@@ -8,3 +8,16 @@ assets/*/*
 !assets/shaders/*
 /AGENTS.md
 net-bridge/node_modules
+cmake-build-web/
+dist/
+# mobile app projects (platform/README.md): build outputs and generated files
+platform/android/local.properties
+platform/android/.gradle/
+platform/android/app/build/
+platform/android/build/
+platform/ios/web/
+platform/ios/KrunkNative.xcodeproj/
+platform/ios/build/
+
+# Local service credentials (see config/config.example.json)
+/config/config.json

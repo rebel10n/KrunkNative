@@ -11,5 +11,5 @@ void main() {
     tex_coord = v_tex_coord;
 
     vec2 transformed = v_pos.xy * scale + offset;
-    gl_Position = vec4(transformed.xy, 0.0f, 1.0f);
+    gl_Position = vec4(transformed.xy, 0.0, 1.0);
 }

@@ -1,5 +1,10 @@
+// Native TCP transport: a background thread connects to the server, frames
+// outgoing packets with net_send_packet() and feeds received bytes through a
+// NetPacketBuffer into the client's inbound queue. The emscripten build uses
+// net_web.c instead (WebSocket, no threads).
 #ifdef WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #define NET_ERRNO WSAGetLastError()
 #define SLEEP_MILLIS(ms) Sleep(ms)
@@ -11,6 +16,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/select.h>
 #define NET_ERRNO errno
 #define CLOSE_SOCKET close
 #define WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
@@ -22,226 +28,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int client_net_packet_logging_enabled() {
-    static int checked = 0;
-    static int enabled = 0;
-
-    if (!checked) {
-        const char *value = getenv("KRUNKNATIVE_PACKET_LOG");
-        enabled = value && value[0] && strcmp(value, "0") != 0;
-        checked = 1;
-    }
-
-    return enabled;
-}
-
-static void client_net_log_bad_payload(const char *name, const NetPacketType type, const void *payload, const uint16_t length) {
-    const uint8_t *bytes = payload;
-
-    printf("{\"type\":\"%s\",\"id\":%u,\"length\":%u,\"payload\":\"", name, (unsigned int) type, (unsigned int) length);
-
-    for (uint16_t i = 0; i < length; i++) {
-        printf("%02X", bytes ? bytes[i] : 0);
-    }
-
-    printf("\"}");
-}
-
-#ifdef WIN32
-static void client_net_enable_ansi_output() {
-    static int checked = 0;
-    if (checked) return;
-
-    checked = 1;
-
-    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (output == INVALID_HANDLE_VALUE) return;
-
-    DWORD mode = 0;
-    if (!GetConsoleMode(output, &mode)) return;
-
-    SetConsoleMode(output, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-}
-#endif
-
-void client_net_log_packet(const char *direction, const NetPacketType type, const void *payload, const uint16_t length) {
-    if (!client_net_packet_logging_enabled()) return;
-
-#ifdef WIN32
-    client_net_enable_ansi_output();
-#endif
-
-    const int incoming = direction && direction[0] == '<';
-    const char *style = incoming ? "\x1b[48;2;255;106;25m\x1b[30m" : "\x1b[48;2;119;255;119m\x1b[30m";
-
-    printf("%s %s \x1b[0m ", style, incoming ? "<=" : "=>");
-
-    if (length && !payload) {
-        client_net_log_bad_payload("null", type, payload, length);
-        printf("\n");
-        fflush(stdout);
-        return;
-    }
-
-    switch (type) {
-        case NET_PACKET_HELLO: {
-            if (length != sizeof(NetHelloPacket)) {
-                client_net_log_bad_payload("hello", type, payload, length);
-                break;
-            }
-
-            NetHelloPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
-
-            printf("{\"type\":\"hello\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u}",
-                   (unsigned int) type,
-                   (unsigned int) packet.major,
-                   (unsigned int) packet.minor,
-                   (unsigned int) packet.patch);
-            break;
-        }
-        case NET_PACKET_INIT: {
-            if (length != sizeof(NetInitPacket)) {
-                client_net_log_bad_payload("init", type, payload, length);
-                break;
-            }
-
-            NetInitPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
-
-            printf("{\"type\":\"init\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u,\"map_index\":%d,\"mode_index\":%d,\"tick_rate\":%u,\"client_id\":%d}",
-                   (unsigned int) type,
-                   (unsigned int) packet.major,
-                   (unsigned int) packet.minor,
-                   (unsigned int) packet.patch,
-                   packet.map_index,
-                   packet.mode_index,
-                   (unsigned int) packet.tick_rate,
-                   packet.client_id);
-            break;
-        }
-        case NET_PACKET_ENT: {
-            if (length != sizeof(NetEntPacket)) {
-                client_net_log_bad_payload("ent", type, payload, length);
-                break;
-            }
-
-            NetEntPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
-
-            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d}",
-                   (unsigned int) type,
-                   packet.class_index);
-            break;
-        }
-        case NET_PACKET_SPAWN: {
-            if (length != sizeof(NetSpawnPacket)) {
-                client_net_log_bad_payload("spawn", type, payload, length);
-                break;
-            }
-
-            NetSpawnPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
-            packet.name[sizeof(packet.name) - 1] = '\0';
-
-            printf("{\"type\":\"spawn\",\"id\":%u,\"uid\":%d,\"is_you\":%u,\"active\":%u,\"class_index\":%d,\"team\":%d,\"health\":%g,\"max_health\":%d,\"name\":\"%s\",\"position\":[%g,%g,%g],\"direction\":[%g,%g]}",
-                   (unsigned int) type,
-                   packet.uid,
-                   (unsigned int) packet.is_you,
-                   (unsigned int) packet.active,
-                   packet.class_index,
-                   packet.team,
-                   packet.health,
-                   packet.max_health,
-                   packet.name,
-                   packet.position[0],
-                   packet.position[1],
-                   packet.position[2],
-                   packet.direction[0],
-                   packet.direction[1]);
-            break;
-        }
-        case NET_PACKET_INPUT: {
-            if (length != sizeof(NetInputPacket)) {
-                client_net_log_bad_payload("input", type, payload, length);
-                break;
-            }
-
-            NetInputPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
-
-            printf("{\"type\":\"input\",\"id\":%u,\"seq\":%d,\"move_dir\":%d,\"delta\":%g,\"x_dir\":%g,\"y_dir\":%g,\"flags\":%u,\"swap\":%u}",
-                   (unsigned int) type,
-                   packet.seq,
-                   packet.move_dir,
-                   packet.delta,
-                   packet.x_dir,
-                   packet.y_dir,
-                   (unsigned int) packet.flags,
-                   (unsigned int) packet.swap);
-            break;
-        }
-        case NET_PACKET_STATE: {
-            if (length != sizeof(NetStatePacket)) {
-                client_net_log_bad_payload("state", type, payload, length);
-                break;
-            }
-
-            NetStatePacket packet;
-            memcpy(&packet, payload, sizeof(packet));
-
-            printf("{\"type\":\"state\",\"id\":%u,\"uid\":%d,\"ack_seq\":%d,\"active\":%u,\"loadout_index\":%d,\"position\":[%g,%g,%g],\"velocity\":[%g,%g,%g],\"direction\":[%g,%g],\"health\":%g,\"aim_val\":%g,\"crouch_val\":%g}",
-                   (unsigned int) type,
-                   packet.uid,
-                   packet.ack_seq,
-                   (unsigned int) packet.active,
-                   packet.loadout_index,
-                   packet.position[0],
-                   packet.position[1],
-                   packet.position[2],
-                   packet.velocity[0],
-                   packet.velocity[1],
-                   packet.velocity[2],
-                   packet.direction[0],
-                   packet.direction[1],
-                   packet.health,
-                   packet.aim_val,
-                   packet.crouch_val);
-            break;
-        }
-        case NET_PACKET_CYCLE:
-            if (length) {
-                client_net_log_bad_payload("cycle", type, payload, length);
-                break;
-            }
-
-            printf("{\"type\":\"cycle\",\"id\":%u}", (unsigned int) type);
-            break;
-        default:
-            client_net_log_bad_payload("unknown", type, payload, length);
-            break;
-    }
-
-    printf("\n");
-    fflush(stdout);
-}
-
 int client_net_send_packet(const int socket, const NetPacketType type, const void *payload, const uint16_t length) {
     client_net_log_packet("=>", type, payload, length);
     return net_send_packet(socket, type, payload, length);
 }
 
-void client_net_queue_packet(Client *client, const NetPacket *packet) {
-    pthread_mutex_lock(&client->net_lock);
-
-    NetPacket *new_packets = realloc(client->net_packets, (client->net_packet_count + 1) * sizeof(NetPacket));
-
-    if (new_packets) {
-        client->net_packets = new_packets;
-        client->net_packets[client->net_packet_count++] = *packet;
-    }
-
-    pthread_mutex_unlock(&client->net_lock);
+void net_socket_shutdown(const int socket) {
+#ifdef WIN32
+    shutdown(socket, SD_BOTH);
+#else
+    shutdown(socket, SHUT_RDWR);
+#endif
 }
 
 int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
@@ -273,32 +70,26 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
     return 1;
 }
 
-void *net_main(void *user_data) {
-    NetMainArgs *args = user_data;
+// Retry backoff between failed connects / after a dropped session, sliced so
+// quitting (net_should_quit) and the page's `reconnect` (net_retry_now) are
+// honoured promptly.
+#define NET_RETRY_MILLIS 2000
+// Give up on a single connect attempt after this long (unreachable hosts).
+#define NET_CONNECT_TIMEOUT_MILLIS 5000
 
-#ifdef WIN32
-    WSADATA wsa_data;
-    WSAStartup(MAKEWORD(2, 2), &wsa_data);
-#endif
-
-    struct sockaddr_in server_address;
-
-    // TODO: better address parsing
-    server_address.sin_addr.s_addr = inet_addr(args->address);
-    server_address.sin_port = htons(NET_DEFAULT_PORT);
-    server_address.sin_family = AF_INET;
-
-    const int client_socket = (int) socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (client_socket < 0 || connect(client_socket, (struct sockaddr *) &server_address, sizeof(server_address)) < 0) {
-        on_client_socket_error(args->client, NET_ERRNO);
-        return NULL;
+static void net_retry_sleep(Client *client) {
+    // After a server ERROR (kick) wait for the page's `reconnect` instead of the backoff.
+    for (int waited = 0; (client->net_hold_retry || waited < NET_RETRY_MILLIS) && !client->net_should_quit; waited += 100) {
+        if (client->net_retry_now) break;
+        SLEEP_MILLIS(100);
     }
 
-    pthread_mutex_lock(&args->client->net_lock);
-    args->client->net_socket = client_socket;
-    pthread_mutex_unlock(&args->client->net_lock);
+    client->net_hold_retry = 0;
 
+    client->net_retry_now = 0;
+}
+
+static void net_set_non_blocking(const int client_socket) {
 #ifdef WIN32
     unsigned long non_blocking = 1;
     ioctlsocket(client_socket, FIONBIO, &non_blocking);
@@ -306,30 +97,146 @@ void *net_main(void *user_data) {
     int flags = fcntl(client_socket, F_GETFL, 0);
     fcntl(client_socket, F_SETFL, flags | O_NONBLOCK);
 #endif
+}
 
-    on_client_socket_connect(args->client);
+// Non-blocking connect with a timeout, polled in 100 ms slices so a quit does
+// not wait on an unreachable host. Returns 0 when connected, otherwise the
+// socket error (errno / WSA code).
+static int net_connect_with_timeout(Client *client, const int client_socket, const struct sockaddr_in *address) {
+    net_set_non_blocking(client_socket);
 
-    const NetHelloPacket hello = {1, 0, 0};
-    client_net_send_packet(client_socket, NET_PACKET_HELLO, &hello, sizeof(hello));
+    if (connect(client_socket, (const struct sockaddr *) address, sizeof(*address)) == 0) return 0;
 
-    NetPacketBuffer read_buffer = {};
+    const int connect_error = NET_ERRNO;
+#ifdef WIN32
+    if (connect_error != WSAEWOULDBLOCK) return connect_error;
+#else
+    if (connect_error != EINPROGRESS) return connect_error;
+#endif
 
-    while (!args->client->net_should_quit) {
-        if (!net_poll(args->client, client_socket, &read_buffer)) break;
-        SLEEP_MILLIS(1);
+    for (int waited = 0; waited < NET_CONNECT_TIMEOUT_MILLIS; waited += 100) {
+#ifdef WIN32
+        if (client->net_should_quit) return WSAECONNABORTED;
+#else
+        if (client->net_should_quit) return ECONNABORTED;
+#endif
+
+        fd_set write_set, error_set;
+        FD_ZERO(&write_set);
+        FD_ZERO(&error_set);
+        FD_SET(client_socket, &write_set);
+        FD_SET(client_socket, &error_set);
+
+        struct timeval timeout = {0, 100 * 1000};
+        const int ready = select(client_socket + 1, NULL, &write_set, &error_set, &timeout);
+
+        if (ready < 0) {
+            const int select_error = NET_ERRNO;
+#ifndef WIN32
+            if (select_error == EINTR) continue;
+#endif
+            return select_error;
+        }
+
+        if (ready == 0) continue;
+
+        int socket_error = 0;
+        socklen_t length = sizeof(socket_error);
+        if (getsockopt(client_socket, SOL_SOCKET, SO_ERROR, (void *) &socket_error, &length) < 0) return NET_ERRNO;
+        return socket_error;
     }
 
-    pthread_mutex_lock(&args->client->net_lock);
-    args->client->net_connected = 0;
-    args->client->net_socket = -1;
-    pthread_mutex_unlock(&args->client->net_lock);
+#ifdef WIN32
+    return WSAETIMEDOUT;
+#else
+    return ETIMEDOUT;
+#endif
+}
 
+static void net_close_socket(const int client_socket) {
 #ifdef WIN32
     closesocket(client_socket);
 #else
     CLOSE_SOCKET(client_socket);
 #endif
+}
 
-    on_client_socket_disconnect(args->client);
+// Thread entry. Connects to client->net_address:net_port (NetMainArgs.address
+// overrides the address when set) and keeps retrying every NET_RETRY_MILLIS
+// until net_should_quit, so a server started after the client is picked up and
+// a dropped session reconnects. Every failure is reported through
+// on_client_socket_error() for the menu's connection error screen.
+void *net_main(void *user_data) {
+    NetMainArgs *args = user_data;
+    Client *client = args->client;
+
+#ifdef WIN32
+    WSADATA wsa_data;
+    WSAStartup(MAKEWORD(2, 2), &wsa_data);
+#endif
+
+    if (args->address && args->address[0]) {
+        strncpy(client->net_address, args->address, sizeof(client->net_address) - 1);
+        client->net_address[sizeof(client->net_address) - 1] = 0;
+    }
+
+    if (!client->net_port) client->net_port = NET_DEFAULT_PORT;
+
+    struct sockaddr_in server_address;
+    memset(&server_address, 0, sizeof(server_address));
+
+    // TODO: better address parsing (host names)
+    server_address.sin_addr.s_addr = inet_addr(client->net_address);
+    server_address.sin_port = htons(client->net_port);
+    server_address.sin_family = AF_INET;
+
+    while (!client->net_should_quit) {
+        const int client_socket = (int) socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+        if (client_socket < 0) {
+            on_client_socket_error(client, NET_ERRNO);
+            net_retry_sleep(client);
+            continue;
+        }
+
+        const int connect_error = net_connect_with_timeout(client, client_socket, &server_address);
+
+        if (connect_error) {
+            net_close_socket(client_socket);
+
+            if (!client->net_should_quit) {
+                on_client_socket_error(client, connect_error);
+                net_retry_sleep(client);
+            }
+
+            continue;
+        }
+
+        pthread_mutex_lock(&client->net_lock);
+        client->net_socket = client_socket;
+        pthread_mutex_unlock(&client->net_lock);
+
+        on_client_socket_connect(client);
+
+        const NetHelloPacket hello = {1, 0, 0};
+        client_net_send_packet(client_socket, NET_PACKET_HELLO, &hello, sizeof(hello));
+
+        NetPacketBuffer read_buffer = {};
+
+        while (!client->net_should_quit) {
+            if (!net_poll(client, client_socket, &read_buffer)) break;
+            SLEEP_MILLIS(1);
+        }
+
+        pthread_mutex_lock(&client->net_lock);
+        client->net_socket = -1;
+        pthread_mutex_unlock(&client->net_lock);
+
+        net_close_socket(client_socket);
+        on_client_socket_disconnect(client);
+
+        if (!client->net_should_quit) net_retry_sleep(client);
+    }
+
     return NULL;
 }

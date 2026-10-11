@@ -2,6 +2,7 @@
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h> // atoi
 #include <string.h>
 
 #ifdef KRUNKNATIVE_CLIENT
@@ -124,7 +125,35 @@ static int map_flag_is_set(const cJSON *item) {
     return 1;
 }
 
+// parseInt(value) || 0 for a number or numeric string field
+static int map_int(const cJSON *obj, const char *key) {
+    const cJSON *item = cJSON_GetObjectItem(obj, key);
+    if (cJSON_IsNumber(item)) return (int) cJSON_GetNumberValue(item);
+    if (cJSON_IsString(item)) return atoi(cJSON_GetStringValue(item));
+    return 0;
+}
+
+// Starts every missing default map JSON downloading at once (web) and waits for the batch.
+static void prefetch_default_maps(void) {
+    const size_t count = sizeof(default_map_names) / sizeof(default_map_names[0]);
+    char *paths[sizeof(default_map_names) / sizeof(default_map_names[0])];
+    size_t path_count = 0;
+
+    for (size_t i = 0; i < count; i++) {
+        if (g_maps[i]) continue;
+        char relative[96];
+        snprintf(relative, sizeof(relative), "maps/%s.json", default_map_names[i]);
+        char *path = concat(assets_path(), relative);
+        if (path) paths[path_count++] = path;
+    }
+
+    asset_prefetch_wait((const char *const *) paths, path_count);
+    for (size_t i = 0; i < path_count; i++) free(paths[i]);
+}
+
 void load_default_maps() {
+    prefetch_default_maps();
+
     for (size_t i = 0; i < sizeof(default_map_names) / sizeof(default_map_names[0]); i++) {
         if (g_maps[i]) continue;
 
@@ -176,6 +205,8 @@ Map *map_init(const cJSON *raw_data) {
     const cJSON *colors = cJSON_GetObjectItem(raw_data, "colors");
     const cJSON *cam_pos = cJSON_GetObjectItem(raw_data, "camPos");
     const cJSON *death_y = cJSON_GetObjectItem(raw_data, "dthY");
+    // Krunker 93.js: amb = map.nAmb || obj.ab != null ? null : ambientVal (cube shading gradient)
+    const int map_no_ambient = map_flag_is_set(cJSON_GetObjectItem(raw_data, "nAmb"));
 
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
@@ -253,6 +284,10 @@ Map *map_init(const cJSON *raw_data) {
         }
     }
 
+#ifdef KRUNKNATIVE_CLIENT
+    prefab_begin_map(objects);
+#endif
+
     for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
         const cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
 
@@ -294,8 +329,29 @@ Map *map_init(const cJSON *raw_data) {
         object->position = position;
         object->scale = scale;
         object->prefab = prefab_id;
-        object->ambient_enabled = !map_flag_is_set(cJSON_GetObjectItem(raw_obj, "ab"));
+        const cJSON *obj_ab = cJSON_GetObjectItem(raw_obj, "ab"); // "ab != null", so ab: 0 counts too
+        object->ambient_enabled = !map_no_ambient && (!obj_ab || cJSON_IsNull(obj_ab));
         object->fog_enabled = !map_flag_is_set(cJSON_GetObjectItem(raw_obj, "nf"));
+        object->penetrable = map_flag_is_set(cJSON_GetObjectItem(raw_obj, "pe")); // 93.js penetrable: T.pe
+
+        // objects.js noShoot helpers (94.js addLadder/addRamp set noShoot: true as well)
+        switch (prefab_id) {
+            case PREFAB_FLAG:
+            case PREFAB_WEAPON_PICKUP:
+            case PREFAB_DEATH_ZONE:
+            case PREFAB_SCORE_ZONE:
+            case PREFAB_PREMIUM_ZONE:
+            case PREFAB_VERIFIED_ZONE:
+            case PREFAB_TEAM_ZONE:
+            case PREFAB_CHECK_POINT:
+            case PREFAB_TELEPORTER:
+            case PREFAB_LADDER:
+            case PREFAB_RAMP:
+                object->no_shoot = 1;
+                break;
+            default:
+                break;
+        }
 
         if (prefab_id == PREFAB_BOOST_PAD) {
             const cJSON *bm = cJSON_GetObjectItem(raw_obj, "bm");
@@ -457,7 +513,16 @@ Map *map_init(const cJSON *raw_data) {
                 object->flag = 1;
                 break;
             case PREFAB_TRIGGER:
+                // map.js addTrigger: event te, action ta, team tm, chance cha, singleUse su;
+                // objects.js noShoot = eventN == "onEnter"
                 object->trigger = 1;
+                object->trigger_on_enter = map_int(raw_obj, "te") == TRIGGER_EVENT_ON_ENTER;
+                object->trigger_action = map_int(raw_obj, "ta");
+                object->trigger_chance = map_int(raw_obj, "cha");
+                const cJSON *su = cJSON_GetObjectItem(raw_obj, "su"); // OBJECT.su != null
+                object->trigger_single_use = su && !cJSON_IsNull(su);
+                object->team = (unsigned int) map_int(raw_obj, "tm");
+                if (object->trigger_on_enter) object->no_shoot = 1;
                 break;
             case PREFAB_DEATH_ZONE:
                 object->kill = 1;
@@ -473,10 +538,8 @@ Map *map_init(const cJSON *raw_data) {
         }
 
 #ifdef KRUNKNATIVE_CLIENT
-        if (!g_skip_map_meshes) {
-            object->mesh = prefab_init(object, parsed_colors, raw_obj);
-            client_animate_object_texture(object, 0.0f);
-        }
+        object->mesh = prefab_init(object, parsed_colors, raw_obj);
+        client_animate_object_texture(object, 0.0f);
 #endif
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {

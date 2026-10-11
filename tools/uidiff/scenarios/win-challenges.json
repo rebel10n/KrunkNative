@@ -1,0 +1,22 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/windows/win-challenges.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": 33,
+    "settingsTab": 0,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "anim_time": 0.025
+  },
+  "frames": 3,
+  "note": "Challenges: LOGIN REQUIRED card; anim_time 0.025 = the reference's merch (scaleBob) phase"
+}
