@@ -1,0 +1,13 @@
+# Static web build served by OpenResty (role openresty):
+#   /opt/krunknative-web/releases/<id>/   dist/web without assets/
+#   /opt/krunknative-web/current -> releases/<id>
+#   /opt/krunknative-web/assets/          game content (synced separately, shared)
+kn_web_base: /opt/krunknative-web
+# Game content sync: the full assets/ tree is ~1.5 GB (dist/web/assets is a symlink
+# to it). The central node's disk is 83% full (5.2 GB free), so it is opt-in and
+# limited to what the web client fetches. Excludes keep source-only material out.
+kn_web_sync_assets: true
+kn_web_assets_src: "{{ kn_repo_root }}/assets/"
+# assets/css/{textures,models,sound} duplicate the top-level dirs (~450 MB); the
+# client only reads css/fonts from there.
+kn_web_assets_exclude: ["/README.md", "/user-assets/", "/css/textures/", "/css/models/", "/css/sound/", "*.blend", "*.psd"]

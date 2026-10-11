@@ -120,13 +120,18 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
  * to `tex`). */
 unsigned image_texture(const ImageEntry *entry, int nearest);
 
-/* Texture for drawing `entry` at dev_w x dev_h device pixels (the size the
- * whole image covers on the target).  Raster images: image_texture().  SVG
- * (entry->vector): a raster of exactly that size (clamped to 4096), created
- * on first request and kept in a small per-image LRU of sizes; falls back to
- * `tex` when rasterising fails.  The GL context must be current; the texture
- * binding of the active unit is preserved. */
-unsigned image_texture_sized(const ImageEntry *entry, int nearest, int dev_w, int dev_h);
+/* Texture for drawing `entry` over dev_w x dev_h device pixels (the size the
+ * whole image covers on the target, fractional) whose top-left sits at
+ * (frac_x, frac_y) inside its first device pixel.  Raster images:
+ * image_texture(), *tex_w = *tex_h = 0.  SVG (entry->vector): a raster of
+ * *tex_w x *tex_h = ceil(frac + dev) texels with the image placed at that
+ * sub-pixel offset, meant to be drawn texel-aligned on the device grid (as
+ * Chrome draws the vector there: no resampling blur).  Created on first
+ * request, kept in a small per-image LRU (positions quantised to 1/8 px);
+ * falls back to `tex` (*tex_w = 0) when rasterising fails.  The GL context
+ * must be current; the texture binding of the active unit is preserved. */
+unsigned image_texture_sized(const ImageEntry *entry, int nearest, float dev_w, float dev_h, float frac_x, float frac_y,
+                             int *tex_w, int *tex_h);
 
 /* Resolve `url` against `base_url` into the root-relative key ("img/x.png").
  * Returns 1 and writes at most `cap` bytes (NUL-terminated) on success, 0 when

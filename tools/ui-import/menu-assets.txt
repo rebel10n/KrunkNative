@@ -1,7 +1,7 @@
 # Static images the menu page, its window templates and the C UI logic (client/src/ui/)
 # reference, copied byte-identical from the Krunker v3.1.1 public/ tree into ui/ at the
 # same relative path by menu_assets.py (`make ui-import`). One path per line; `{a..b}`
-# expands to the integers a..b; `dest = src` copies public/<src> to ui/<dest>; `#` starts
+# expands to the integers a..b (`{a..b..step}` every step-th); `dest = src` copies public/<src> to ui/<dest>; `#` starts
 # a comment. Only what the static interface
 # shows: add a line when C code starts generating a new image path, never whole folders.
 # The social hub's own images are listed in social_page.py.
@@ -35,7 +35,7 @@ img/black_m.png
 img/favicon.png
 img/medal.svg
 img/ad_2.png
-img/menu-icons/{chall,games,maps,mods,profile,ranked,settings,shop,social}.png
+img/menu-icons/{chall,exit,games,maps,mods,profile,ranked,settings,shop,social}.png
 img/menu-icons/{chall,games,maps,mods,profile,ranked,settings,shop,social}-white.png
 img/social-buttons/{discord,reddit,twitter}-{hover,normal,pressed}.png
 img/social-buttons/down_{hover,normal,pressed}.png
@@ -44,7 +44,8 @@ img/backgrounds/bg_test.png
 img/crossed_swords_0.svg
 img/shaking_hands.svg
 
-# Host Game / Custom Games map cards (client/src/ui/ui_windows.c: img/maps/map_<index>.png)
+# Host Game map cards (client/src/ui/ui_windows.c gen_host, shared/src/map_catalog.c map_catalog_thumb:
+# img/maps/map_<mapIndex>.png for the 15 official maps; v3.1.1 has none for custom_maps/)
 img/maps/map_{0..14}.png
 
 # in-game HUD (client/src/ui/hud_ui.c, ui_render_settings.c)
@@ -90,6 +91,14 @@ textures/sprays/{54..59}.png
 textures/sprays/{63..66}.png
 textures/sprays/{79,83,87,88}.png
 
+# signed-in hub / leaderboards (client/src/ui/social_ui.c): level icons
+# levelIconId = clamp(roundToNearest(level, 2) - 1, 0, maxLevel 102 - 1), i.e. the odd ids
+# (v3.1.1 has no 101.png: level 101+ 404s on the real site too), and the ELO rank badges
+# eloIconId = clamp(floor(elo / 120), 1, 8) - 1 (v3.1.1 public/ only has icon_0, "No Rank";
+# icon_1..7 404 there too)
+img/levels/{1..99..2}.png
+img/ranks/icon_0.png
+
 # byte-identical site files besides images (transformed ones -- index.html, flag.css,
 # google-secular-one.css -- are hand-maintained, see ui/README.md)
 css/main.css
@@ -100,3 +109,14 @@ css/fonts/header.ttf
 css/fonts/lucon.ttf
 # the Changelog source (ui_loadout.c), next to the templates for the web build's preload
 windows/versions.txt = docs/versions.txt
+
+# map triggers' Jump Scare (index.js jumpScares[0].img "jumpS_2.png", client/src/map_triggers.c)
+scares/jumpS_2.png = scares/2.png
+
+# signed-in account (client/src/ui/account_ui.c, store_ui.c): daily reward (#claimImg),
+# prize wheel cards (windows[13] tab 0: spins/<wheel>_<icon>.png; v3.1.1 ships these
+# icons only), Account window / Ranked rank icon (UTILS.eloIconHTML: icon_0 is the only
+# one the reference serves)
+img/claim_{0..1}.png
+img/shop/spins/{0_0,0_1,1_0,1_1,1_2,2_0,2_1,2_2,2_3,2_4,3_0,4_0,4_1,6_0,6_1}.png
+img/ranks/icon_0.png

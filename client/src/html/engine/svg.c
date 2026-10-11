@@ -245,23 +245,28 @@ void svg_image_size(const SvgImage *svg, float *w, float *h) {
 }
 
 unsigned char *svg_image_rasterize(const SvgImage *svg, const int w, const int h) {
-    if (!svg || w < 1 || h < 1 || w > SVG_MAX_DIM || h > SVG_MAX_DIM) return NULL;
+    return svg_image_rasterize_placed(svg, w, h, (float) w, (float) h, 0.0f, 0.0f);
+}
+
+unsigned char *svg_image_rasterize_placed(const SvgImage *svg, const int w, const int h, const float vpw, const float vph,
+                                          const float ox, const float oy) {
+    if (!svg || w < 1 || h < 1 || w > SVG_MAX_DIM || h > SVG_MAX_DIM || !(vpw > 0.0f) || !(vph > 0.0f)) return NULL;
     /* The viewBox -> viewport mapping is done here, not by nanosvg: its
      * default is preserveAspectRatio="none" and it misreads the Y alignment
      * of xMidYMid-style values.  For uniform scaling the document is parsed
      * with a viewport of the viewBox size (identity mapping) and rasterised
      * with scale + offset; for "none" nanosvg stretches it to w x h itself. */
     const float vw = svg->vb[2], vh = svg->vb[3];
-    float scale = 1.0f, tx = 0.0f, ty = 0.0f;
+    float scale = 1.0f, tx = ox, ty = oy;
     char attrs[200];
     int al;
     if (svg->align_x < 0) {
-        al = snprintf(attrs, sizeof attrs, " width=\"%d\" height=\"%d\"", w, h); /* has a viewBox */
+        al = snprintf(attrs, sizeof attrs, " width=\"%.9g\" height=\"%.9g\"", (double) vpw, (double) vph); /* has a viewBox */
     } else {
-        const float sx = (float) w / vw, sy = (float) h / vh;
+        const float sx = vpw / vw, sy = vph / vh;
         scale = svg->slice ? fmaxf(sx, sy) : fminf(sx, sy);
-        tx = ((float) w - vw * scale) * 0.5f * (float) svg->align_x;
-        ty = ((float) h - vh * scale) * 0.5f * (float) svg->align_y;
+        tx += (vpw - vw * scale) * 0.5f * (float) svg->align_x;
+        ty += (vph - vh * scale) * 0.5f * (float) svg->align_y;
         al = snprintf(attrs, sizeof attrs, " width=\"%.9g\" height=\"%.9g\"", (double) vw, (double) vh);
     }
     if (al > 0 && !svg->has_viewbox) {

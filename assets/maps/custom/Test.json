@@ -1,0 +1,1 @@
+{"name":"Test","ambient":"#97a0a8","light":"#f2f8fc","sky":"#dce8ed","fog":"#8d9aa0","fogD":2000,"objects":[{"p":[0,-10,0],"s":[100,10,100]}],"spawns":[[0,0,0,0,0,0]],"creator":null,"hasLM":false,"official":false,"shadLength":80,"shadWidth":80}

@@ -28,10 +28,11 @@
 /* SVG entries keep their document and the textures rasterised at the device
  * sizes they were last drawn at (image_texture_sized), least recently used
  * first out. */
-#define IMAGE_SVG_SIZES 4
+#define IMAGE_SVG_SIZES 8
 
 typedef struct ImageSvgTex {
-    int w, h;              /* device px */
+    int w, h;              /* texels (device px) */
+    int qw, qh, qx, qy;    /* drawn size and sub-pixel offset, 1/8 px units */
     unsigned tex;          /* 0 = free slot */
     unsigned last_use;
 } ImageSvgTex;
@@ -653,38 +654,49 @@ unsigned image_texture(const ImageEntry *entry, const int nearest) {
     return entry->tex_nearest;
 }
 
-unsigned image_texture_sized(const ImageEntry *entry, const int nearest, int dev_w, int dev_h) {
+unsigned image_texture_sized(const ImageEntry *entry, const int nearest, float dev_w, float dev_h, float frac_x,
+                             float frac_y, int *tex_w, int *tex_h) {
+    *tex_w = *tex_h = 0;
     if (!entry || entry->failed || !entry->tex) return 0;
     if (!entry->vector) return image_texture(entry, nearest);
     /* vector entries always come from a cache slot (failed_entry is not) */
     ImageSlot *slot = (ImageSlot *) entry;
-    if (!slot->svg || dev_w < 1 || dev_h < 1) return entry->tex;
-    if (dev_w > 4096) dev_w = 4096;
-    if (dev_h > 4096) dev_h = 4096;
-    /* nearest and smooth sampling coincide at 1:1, one texture serves both */
-    if (dev_w == entry->w && dev_h == entry->h) return entry->tex;
+    if (!slot->svg || !(dev_w >= 0.5f) || !(dev_h >= 0.5f) || dev_w > 4000.0f || dev_h > 4000.0f) return entry->tex;
+    /* nearest and smooth sampling coincide when drawn texel-aligned */
+    const int qw = (int) lrintf(dev_w * 8.0f), qh = (int) lrintf(dev_h * 8.0f);
+    const int qx = (int) lrintf(frac_x * 8.0f) & 7, qy = (int) lrintf(frac_y * 8.0f) & 7;
+    const float vw = (float) qw / 8.0f, vh = (float) qh / 8.0f, ox = (float) qx / 8.0f, oy = (float) qy / 8.0f;
+    const int w = (int) ceilf(ox + vw - 1e-4f), h = (int) ceilf(oy + vh - 1e-4f);
 
     ImageSvgTex *victim = &slot->sized[0];
     for (int i = 0; i < IMAGE_SVG_SIZES; i++) {
         ImageSvgTex *t = &slot->sized[i];
-        if (t->tex && t->w == dev_w && t->h == dev_h) {
+        if (t->tex && t->qw == qw && t->qh == qh && t->qx == qx && t->qy == qy) {
             t->last_use = ++slot->use_clock;
+            *tex_w = t->w;
+            *tex_h = t->h;
             return t->tex;
         }
         if (!t->tex || (victim->tex && t->last_use < victim->last_use)) victim = t;
     }
 
-    unsigned char *px = svg_image_rasterize(slot->svg, dev_w, dev_h);
+    unsigned char *px = svg_image_rasterize_placed(slot->svg, w, h, vw, vh, ox, oy);
     if (!px) return entry->tex;
-    image_premultiply(px, (size_t) dev_w * (size_t) dev_h);
-    const unsigned tex = image_upload(px, dev_w, dev_h, 1);
+    image_premultiply(px, (size_t) w * (size_t) h);
+    const unsigned tex = image_upload(px, w, h, 1);
     free(px);
     if (!tex) return entry->tex;
     if (victim->tex) glDeleteTextures(1, &victim->tex);
-    victim->w = dev_w;
-    victim->h = dev_h;
+    victim->w = w;
+    victim->h = h;
+    victim->qw = qw;
+    victim->qh = qh;
+    victim->qx = qx;
+    victim->qy = qy;
     victim->tex = tex;
     victim->last_use = ++slot->use_clock;
+    *tex_w = w;
+    *tex_h = h;
     return tex;
 }
 

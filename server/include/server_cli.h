@@ -49,3 +49,12 @@ void cli_stop(void);
 // Save history and release replxx (replxx_end). Call after every thread that
 // may print through g_replxx has been joined.
 void cli_shutdown(void);
+
+// Runs one console line (any command, or a chat command as the console) and copies
+// what it logged into out: rcon (server/src/rcon.c, coordinator "rcon" frames).
+int cli_run_command(const char *line, char *out, size_t size);
+
+// Graceful stop (SIGTERM / SIGINT / `drain`): refuse new players, tell the coordinator,
+// finish the round (at most gameserver.shutdown_grace seconds), then stop. A second
+// request stops at once.
+void server_request_drain(const char *why);

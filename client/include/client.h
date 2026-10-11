@@ -187,6 +187,9 @@ typedef struct {
     // color at the top to color_bottom at the bottom, the bottom face is color_bottom.
     int use_color_gradient;
     vec4 color_bottom;
+    // three.js vertexColors: color is multiplied by the geometry's per-vertex colour
+    // (attribute 2, vec3; only ladder geometry has one, prefab.c)
+    int use_vertex_color;
     int double_sided;   // 0: back faces culled (three.js FrontSide)
     float alpha_test;   // fragments with alpha below this are discarded (0: off)
     int additive_blend; // three.js AdditiveBlending (SRC_ALPHA, ONE), e.g. light cones
@@ -321,6 +324,7 @@ enum { PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BACK, PLAYER_COSMETIC_WAIST, PLAYER_
 void player_generate_meshes(Player*, int);
 void player_update_meshes(Player*, int);
 void player_meshes_fini(Player*);
+void player_mesh_debug_log(Player*, double now); // KRUNKNATIVE_PLAYER_LOG (player_mesh.c)
 
 Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);
@@ -441,7 +445,6 @@ typedef struct {
         int height;
     } windowed_rect;
 
-    unsigned char last_noclip_key:1;
     unsigned char last_debug_key:1;
     unsigned char last_fullscreen_key:1;
     unsigned char last_swap_key:2;
@@ -467,10 +470,20 @@ typedef struct {
     int net_hold_retry;            // the server closed with an ERROR: no automatic reconnect until `reconnect`
     int net_session_connected;     // transport-private: a session was established (disconnect vs. failed connect)
     char net_address[64];          // server address/port, for net_main() and error messages
+    char net_ws_url[512];          // web: game WebSocket URL override (brain seek webUrl / /native?target=), "" = default (net_web.c)
+    NetJoinPacket net_join;        // sent right after HELLO (net.c / net_web.c, under net_lock); all empty = guest (backend_ui.h)
     unsigned short net_port;
     int net_map_index;
     int net_mode_index;
     int net_next_input_seq;
+    // Prediction / reconciliation (client/src/net/recon.c): CONTROLS.tmpInpts (sent, not yet
+    // acked inputs, seq ascending) and the "q" batch of the current clientSendRate window.
+    Input *net_pending_inputs;
+    size_t net_pending_count, net_pending_capacity;
+    NetInputPacket net_batch[NET_INPUT_BATCH_MAX];
+    int net_batch_count;
+    float net_batch_time;          // seconds summed into the current window (bI)
+    unsigned int net_recon_count;  // RECON packets applied (tests, KRUNKNATIVE_RECON_LOG)
 
     // Live match state from the server (client/src/net/game_events.c). Read by the HUD.
     int net_ping_ms;               // smoothed RTT from PING_RESULT, -1 = unknown (Krunker "-")
@@ -521,6 +534,9 @@ typedef struct {
 
     Game game;
     const cJSON *startup_map;
+    // Host Game / Games-window Play: the map (one of game.maps) the next local_game_start
+    // begins on instead of the startup / a random map; consumed by that start. NULL = none.
+    const cJSON *offline_start_map;
     Player *me;
 } Client;
 
@@ -532,6 +548,7 @@ void client_clear_players(Client*); // drops every player (and mesh) of the curr
 void client_menu_bind(Client*);
 void client_menu_tick(Client*);
 void client_set_menu_open(Client*, int);
+void client_window_focus_lost(Client*); // native alt-tab: resetKeys + menu, as on pointer lock loss (main.c)
 void client_hud_html_tick(Client*, float); // HTML HUD (client/src/ui/hud_ui.c)
 
 // Class preview (client/src/ui/class_preview.c). Rect is in CSS px (menu_send_preview_rect in menu_ui.c).
@@ -557,6 +574,17 @@ typedef struct {
 
 void *net_main(void*); // native TCP thread entry (net.c)
 void net_socket_shutdown(int socket); // net.c: wake the TCP thread with a closed session
+// Native UDP transport (net/net_udp.c): net_main() tries it before TCP.
+struct sockaddr_in;
+int net_udp_client_session(Client*, const struct sockaddr_in *address); // 1 ran, 0 no UDP answer, -1 refused
+int net_udp_client_mode(void);              // KRUNKNATIVE_NET_TRANSPORT: 0 auto, 1 udp, -1 tcp
+int net_udp_client_is_virtual(int socket);
+void net_udp_client_request_close(void);
+// Brain matchmaking (servers_ui.c): connect to client->net_address:net_port (web: net_ws_url)
+// with client->net_join, replacing the current session (starts the transport when idle,
+// leaves an offline game). net.c natively, net_web.c on the web.
+void client_net_switch_server(Client*);
+void client_net_send_join(Client*, int socket); // NET_PACKET_JOIN right after HELLO (net_join.c)
 #ifdef __EMSCRIPTEN__
 int net_web_connect(Client*); // WebSocket transport (net_web.c)
 void net_web_disconnect(Client*);
@@ -571,7 +599,7 @@ int client_net_send_packet(int, NetPacketType, const void*, uint16_t);
 // rules live in shared/ (as on server_bin); what a server would send reaches the event
 // handlers below directly as structs (GameHooks.send), what the client would send
 // (client_net_send) arrives in local_game_receive() as a function call.
-int local_game_start(Client*);   // load the offline game: startup map (else a random rotation map), net_mode_index / KRUNKNATIVE_MODE
+int local_game_start(Client*);   // load the offline game: offline_start_map, else the startup map, else a random rotation map; mode net_mode_index / KRUNKNATIVE_MODE
 void local_game_stop(Client*);   // leave offline mode; the game stays loaded as a plain mirror
 void local_game_receive(Client*, NetPacketType, const void *payload, uint16_t length); // a client->server message, typed payload
 // Host Game / console `map`: reload on `map_index` (-1 current) in Krunker mode `mode_id`,
@@ -592,6 +620,13 @@ void client_chat_send(Client*, const char *text); // Enter-to-chat: sends one li
 int client_handle_game_packet(Client*, const NetPacket*); // 1 = handled (KILL/HIT/HEALTH/CHAT/...)
 int client_handle_game_event(Client*, int type, const void *payload, uint16_t length); // same, typed payload
 void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the socket, or offline local_game_receive()
+// Prediction / reconciliation (client/src/net/recon.c, Krunker tmpInpts / "q" / reconcilePlayer).
+void client_recon_reset(Client*);                                 // CONTROLS.reset(): our spawn, a new session
+void client_recon_record(Client*, const Input*);                  // a predicted input: pending + the "q" batch
+void client_recon_after_tick(Client*);                            // the frame's shot knockback -> input.velObj
+void client_recon_apply(Client*, const NetReconPacket*);          // "l": snap + replay
+int  client_recon_delay_inbound(Client*, const NetPacket*);       // KRUNKNATIVE_NET_DELAY_MS: 1 = held
+void client_recon_drain_delayed(Client*, void (*)(Client*, const NetPacket*));
 void client_game_events_tick(Client*); // per frame: death delay -> menu, HUD bridge
 void client_game_events_reset(Client*); // new session / INIT: forget round and death state
 void client_apply_init(Client*, const NetInitPacket*);  // main.c: (re)load the map and drop the players
@@ -617,7 +652,6 @@ void geometry_set_bounds(Geometry*, const vertex *vertices, size_t vertex_count)
 Geometry *create_cube_geo();
 Geometry *create_plane_geo();
 Geometry *create_ramp_geo();
-Geometry *create_ladder_geo(float);
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);
-void prefab_begin_map(const cJSON *objects); // per-map prefab state (shared model materials, the raw objects) before prefab_init()
+void prefab_begin_map(const cJSON *objects, const cJSON *colors); // per-map prefab state (shared model materials, the raw objects) before prefab_init()

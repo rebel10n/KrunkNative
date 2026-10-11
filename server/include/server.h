@@ -28,9 +28,48 @@ typedef struct {
     float idle_timeout;
     float idle_move_threshold;
     int perms;                     // --perms / PERMS=1: DEV-only chat commands need an op'd or loopback client
+    int cheats_open;               // --open-cheats / gameserver.cheats "all": cheats for everyone while perms are off
 } ServerConfig;
 
 #define SERVER_PLAYER_NAME_MAX 32
+
+// Backend identity + match bookkeeping of one connection (server/src/accounts.c,
+// doc/backend.md section 8). account_id 0 = guest. Standalone servers never leave
+// SERVER_JOIN_READY.
+typedef enum {
+    SERVER_JOIN_READY = 0,     // identity settled (guest or account): ENT spawns
+    SERVER_JOIN_AWAIT,         // brain-linked: waiting for NET_PACKET_JOIN (join_timeout)
+    SERVER_JOIN_AUTH,          // JOIN received, waiting for the brain's auth-reply
+} ServerJoinState;
+
+typedef struct {
+    int account_id;            // 0 guest
+    char username[32];
+    int level;                 // 0 guest
+    char clan[8];
+    unsigned char flags;       // NET_PLAYER_INFO_*
+    unsigned char hack:1;      // account.hack: no rewards / stats (game.js)
+    unsigned char premium:1;
+    int funds;
+
+    unsigned char join_state;  // ServerJoinState
+    unsigned char spawn_deferred:1;    // an ENT arrived before the identity was settled
+    unsigned char spawn_spectate:1;
+    float join_deadline;       // g_server->now
+    uint32_t auth_rid;
+    char ticket_jti[40];       // seek-game ticket id (player-join releases its reservation)
+
+    float match_since;         // g_server->now of the first spawn in this round, 0 = not playing
+    int round_result;          // END result of this round: 1 won, 0 lost, -1 draw / none
+    unsigned char committed:1; // this round's stats were already sent
+
+    // dedicated server (doc/backend.md 8.7-8.9)
+    unsigned char central_pending:1;   // online_mode: waiting for central hasJoined
+    unsigned char central_verified:1;  // online_mode: identity confirmed by central auth
+    unsigned char skins_known:1;       // skins_owned holds the coordinator's inventory
+    unsigned char password_ok:1;       // a JOIN carried the right server password
+    uint8_t skins_owned[512];          // bitset of owned store.skins indices (4096), enforced on ENT
+} ServerAccount;
 
 typedef struct {
     int fd;
@@ -41,9 +80,14 @@ typedef struct {
     int class_index;
     int secondary_index;           // ENT secondary pick (weapon id, -1 default)
     PlayerCosmetics cosmetics;     // ENT skin colour / cosmetic items (none for older ENTs)
+    int slid_cont;                 // ENT slidCont (gameserver.ts ent[15]: player.slidCont), 1 for older ENTs
     char name[SERVER_PLAYER_NAME_MAX];
     char address[CHAT_CMD_ADDRESS_SIZE]; // dotted peer address (chat /ip, /banip)
     unsigned char op:1;            // CLI `op`: passes the DEV checks of chat commands while perms are on
+    // On the server's own machine: a loopback TCP peer that is not net-bridge (or a bridged
+    // browser whose forwarded address is loopback too). Such a player hosts the server: DEV.
+    unsigned char local:1;
+    unsigned char first_packet_seen:1; // NET_PACKET_FORWARDED counts only as the first packet
 
     float connected_at;
     float spawned_at;
@@ -60,10 +104,12 @@ typedef struct {
     double ping_sent_at;           // net_time() of that PING
     double next_ping_at;           // net_time() of the next PING
     int ping_ms;                   // smoothed RTT, -1 unknown
+    double next_recon_at;          // net_time() of the next periodic RECON ("l", NET_RECON_SEND_HZ)
     SocialAssembly social;         // social hub request being reassembled (shared/include/social.h)
     SocialAssembly voice;          // voice clip being reassembled (shared/include/voice.h, io_vc)
 
     Player *player;
+    ServerAccount acct;            // backend account + match stats (server/src/accounts.c)
 } ClientConnection;
 
 typedef struct {

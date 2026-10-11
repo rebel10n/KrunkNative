@@ -133,10 +133,17 @@ if (EMSCRIPTEN)
     # A custom target (no OUTPUT) runs on every build, so ui/-only edits are
     # picked up without relinking the wasm; copy_if_different keeps it cheap.
     # js/ is replaced wholesale so scripts deleted from ui/js do not linger.
+    # copy_directory_if_different (CMake 3.26+) leaves unchanged files alone, so a
+    # rebuild never rewrites (and half-serves) fonts/images a running server hands out.
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.26)
+        set(KN_WEB_COPY_UI copy_directory_if_different)
+    else ()
+        set(KN_WEB_COPY_UI copy_directory)
+    endif ()
     add_custom_target(web_dist ALL
         COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_DIST_DIR}
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/js
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ui ${WEB_DIST_DIR}
+        COMMAND ${CMAKE_COMMAND} -E ${KN_WEB_COPY_UI} ${CMAKE_SOURCE_DIR}/ui ${WEB_DIST_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:client> ${WEB_DIST_DIR}/client.js
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.wasm ${WEB_DIST_DIR}/client.wasm
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.data ${WEB_DIST_DIR}/client.data
@@ -192,6 +199,15 @@ else ()
     target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})
     krunknative_link_headless(${CLIENT_BINARY})
     target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
+    # Optional TLS for the backend client (client/src/net/backend_native.c: https:// auth service
+    # and server finder, wss:// social socket). Without OpenSSL only http:// / ws:// work.
+    find_package(OpenSSL COMPONENTS SSL Crypto QUIET)
+    if (OpenSSL_FOUND AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(${CLIENT_BINARY} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+    else ()
+        message(STATUS "Client: OpenSSL (libssl) not found; the backend client is http:// only")
+    endif ()
 
     if (KRUNKNATIVE_HTML_ENGINE)
         # HTML UI (in-house engine): Lexbor + engine/*.c + html_ui.c + html_dom_core.c,
@@ -211,6 +227,13 @@ else ()
     target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)
     target_link_libraries(${SERVER_BINARY} PRIVATE replxx Threads::Threads m)
     target_include_directories(${SERVER_BINARY} PRIVATE server/include)
+    # https:// for the finder heartbeat and central auth hasJoined (server/src/http_client.c);
+    # without libcurl server_bin only speaks plain http:// to them.
+    find_package(CURL QUIET)
+    if (CURL_FOUND)
+        target_link_libraries(${SERVER_BINARY} PRIVATE CURL::libcurl)
+        target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_HAVE_CURL=1)
+    endif ()
 
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32)
@@ -230,6 +253,13 @@ else ()
         target_link_libraries(class_spawn_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # recon_test: client prediction + server reconciliation over a simulated laggy link
+    add_executable(recon_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/recon_test.c)
+    target_link_libraries(recon_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(recon_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # match_test: combat / kills / score / chat / round end through the shared game hooks
     add_executable(match_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/match_test.c)
     target_link_libraries(match_test PRIVATE m)
@@ -242,6 +272,20 @@ else ()
     target_link_libraries(modes_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(modes_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # ai_test: v3.1.1 AI (map BOTs, behaviour, damage, sync, /summon /ais /kill, Traitor ghosts)
+    add_executable(ai_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/ai_test.c)
+    target_link_libraries(ai_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(ai_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # map_catalog_test: every v3.1.1 map (15 official + 21 community) loads, parses and plays
+    add_executable(map_catalog_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_catalog_test.c)
+    target_link_libraries(map_catalog_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # ui_test: engine driver for dumps, probes, renders and benchmarks
@@ -262,5 +306,20 @@ else ()
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
             target_link_libraries(ui_test PRIVATE ws2_32) # shared/src/net.c
         endif ()
+    endif ()
+
+    # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the
+    # brain when libpq is available). Optional; never affects the game targets. Tests: ctest.
+    option(KRUNKNATIVE_SERVICES "Build the backend services (services/; needs OpenSSL, libpq for the DB parts)" ON)
+    if (KRUNKNATIVE_SERVICES AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows" AND EXISTS ${CMAKE_SOURCE_DIR}/services/CMakeLists.txt)
+        enable_testing()
+        add_subdirectory(services)
+    endif ()
+
+    # Game server brain client (server/src/brain.c, doc/backend.md section 8): links the
+    # libpq-free knsvc when it was built; without it server_bin stays standalone-only.
+    if (TARGET knsvc)
+        target_link_libraries(${SERVER_BINARY} PRIVATE knsvc)
+        target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_HAVE_KNSVC=1)
     endif ()
 endif ()

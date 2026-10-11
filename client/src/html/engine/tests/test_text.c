@@ -219,6 +219,21 @@ static void test_shaping(TextSystem *ts) {
     }
     n = text_shape(game, "\xC3\xA9", 2, 0, g, 64, &total);
     CHECK(n == 1 && g[0].face == text_font_face(game) && g[0].glyph_index, "e-acute present in gamefont");
+    // U+2715 (dev console close button): the bundled symbol face, on every machine
+    n = text_shape(game, "\xE2\x9C\x95", 3, 0, g, 64, &total);
+    CHECK(n == 1 && g[0].glyph_index && !strcmp(text_face_family(g[0].face), "fallback-symbols"),
+          "U+2715 from the bundled kn-symbols face (%s)", n == 1 ? text_face_family(g[0].face) : "-");
+    // x-height without an OS/2 v2 value comes from the hinted 'x' outline (Skia's
+    // fXHeight under slight hinting): whole px, as vertical-align: middle sees it
+    // in Chrome (server list headers, win-servers)
+    const TextMetrics *gm22 = text_font_metrics(text_font(ts, "gamefont", 22, 400, 0));
+    CHECK(gm22 && gm22->x_height > 15 && fabsf(gm22->x_height - roundf(gm22->x_height)) < 1e-4f,
+          "gamefont 22px x-height grid-fitted (%.3f)", gm22 ? gm22->x_height : -1);
+    TextFont *mono = text_font(ts, "monospace", 13, 400, 0);
+    const char *mono_family = mono ? text_face_family(text_font_face(mono)) : "none";
+    CHECK(mono && strcmp(mono_family, "fallback-symbols") != 0, "monospace never resolves to the symbol face (%s)", mono_family);
+    printf("  monospace -> %s, sans-serif -> %s\n", mono_family,
+           text_face_family(text_font_face(text_font(ts, "sans-serif", 13, 400, 0))));
     // subpixel phases
     n = text_shape(head, "iiii", 4, 0, g, 64, &total);
     int phases = 0;

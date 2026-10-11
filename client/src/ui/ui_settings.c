@@ -7,6 +7,7 @@
 #include <ui_logic.h>
 #include <audio.h>
 #include <voice_chat.h> // audioInput: microphone list / selection (voice.c)
+#include <client_settings.h> // the Client tab's rows in searchList (ui_client_settings.c)
 #if defined(__has_include)
 #if __has_include(<render_settings.h>)
 #include <render_settings.h> // client_apply_render_setting (ui_render_settings.c)
@@ -28,6 +29,19 @@
 
 static cJSON *g_settings;  // saved values (object)
 static cJSON *g_defaults;  // scraped defaults (object)
+static cJSON *g_ranges;    // slider key -> [min, max] when v3.1.1's `min || max` holds
+
+// v3.1.1 settings with `color: true` (134.js): set()/init() replace any value failing
+// g.isHexColor (/^#([0-9A-F]{3}){1,2}$/i) with the default. dmgColor and hudHealthHigh
+// are `type: "switch"` there, so the page shows a checkbox whose true/false never passes
+// and the colour default (13.js) is what gets saved; their scraped default would be the
+// checkbox state, hence the explicit defaults. NULL = the scraped <input type=color> value.
+static const struct { const char *key, *def; } COLOR_SETTINGS[] = {
+    {"hitColor", NULL}, {"dmgColor", "#DE292F"}, {"critColor", NULL}, {"speedColor", NULL},
+    {"speedColorMax", NULL}, {"healthColT", NULL}, {"healthColE", NULL}, {"xpBarCol", NULL},
+    {"crosshairColor", NULL}, {"crosshairShadow", NULL}, {"hitmCol", NULL}, {"hitmKCol", NULL},
+    {"hudHealthHigh", "#9eeb56"}, {"hudHealthLow", NULL}, {"spdLinesCol", NULL}, {"scoreColor", NULL},
+};
 
 // Same selectors as collectDefaults()/applySettingValues() in krunknative.js.
 static const char *SLIDER_SELECTOR = "input[type=range][id^=slid_]";
@@ -40,7 +54,7 @@ static const char *CORE_SETTINGS[] = {
     "adsFovMlt", "scaleUI", "uiScaling", "resolution", "shadows", "softShad", "highResShad", "ambientShading",
     "showFPS", "speedScale", "dmgScale", "ambientVolume", "gunsVolume", "playerVolume", "uiVolume",
     // input/camera settings (ui_controls.c)
-    "fpsFOV", "scrollDir", "showWeapon", "showWeaponSec", "showWeaponMel", "shwChat",
+    "fpsFOV", "scrollDir", "showWeapon", "showWeaponSec", "showWeaponMel", "shwChat", "slidCont",
     "sound", "voiceVolume", "assetVolume",
     // Controller (CONTROLS.cntrlInput, ui_controls.c / gamepad.c)
     "sensitivityXCntrl", "sensitivityYCntrl", "aimSensitivityXCntrl", "aimSensitivityYCntrl",
@@ -128,6 +142,42 @@ void ui_settings_load(void) {
     if (!g_defaults) g_defaults = cJSON_CreateObject();
 }
 
+static cJSON *normalize_setting(const char *key, cJSON *v);
+
+// One-time repair of stores written before the value rules above: colour settings saved
+// as booleans (dmgColor: true), "true"/"false" strings, out-of-range numbers, and slider
+// numbers saved for boolean settings (invertYMbl: 50, the range input's sanitised value
+// the old default scrape stored) -- those go back to the default.
+static void settings_repair(void) {
+    if (!g_settings) return;
+    int changed = 0;
+    cJSON *item = g_settings->child;
+    while (item) {
+        cJSON *next = item->next;
+        const char *key = item->string;
+        const cJSON *def = g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
+        if (key && cJSON_IsBool(def) && cJSON_IsNumber(item) && !(g_ranges && cJSON_GetObjectItem(g_ranges, key))) {
+            printf("[ui] settings repair: %s=%g -> default\n", key, cJSON_GetNumberValue(item));
+            cJSON_DeleteItemFromObject(g_settings, key);
+            changed = 1;
+        } else if (key) {
+            cJSON *fixed = normalize_setting(key, cJSON_Duplicate(item, 1));
+            if (fixed && !cJSON_Compare(fixed, item, 1)) {
+                char before[64], after[64];
+                ui_setting_to_string(item, before, sizeof(before));
+                ui_setting_to_string(fixed, after, sizeof(after));
+                printf("[ui] settings repair: %s=%s -> %s\n", key, before, after);
+                cJSON_ReplaceItemInObject(g_settings, key, fixed);
+                changed = 1;
+            } else {
+                cJSON_Delete(fixed);
+            }
+        }
+        item = next;
+    }
+    if (changed) ui_settings_save();
+}
+
 void ui_settings_collect_defaults(void) {
     if (!g_defaults) g_defaults = cJSON_CreateObject();
     ui_windows_load();
@@ -152,6 +202,16 @@ void ui_settings_collect_defaults(void) {
             if (html_dom_get_attr(found[i], "value", value, sizeof(value)) < 0 &&
                 html_dom_get_value(found[i], value, sizeof(value)) < 0) continue;
             cJSON_DeleteItemFromObject(g_defaults, id + 5);
+            char lo_text[32], hi_text[32];
+            double lo = 0.0, hi = 0.0;
+            if (html_dom_get_attr(found[i], "min", lo_text, sizeof(lo_text)) >= 0 && string_is_number(lo_text, &lo) &&
+                html_dom_get_attr(found[i], "max", hi_text, sizeof(hi_text)) >= 0 && string_is_number(hi_text, &hi) &&
+                (lo != 0.0 || hi != 0.0)) {
+                if (!g_ranges) g_ranges = cJSON_CreateObject();
+                const double pair[2] = {lo, hi};
+                cJSON_DeleteItemFromObject(g_ranges, id + 5);
+                cJSON_AddItemToObject(g_ranges, id + 5, cJSON_CreateDoubleArray(pair, 2));
+            }
             if (!strcmp(value, "true") || !strcmp(value, "false")) {
                 cJSON_AddBoolToObject(g_defaults, id + 5, value[0] == 't'); // a boolean val on a "slider" (invertYMbl)
                 continue;
@@ -159,6 +219,16 @@ void ui_settings_collect_defaults(void) {
             double d;
             if (!string_is_number(value, &d)) d = strtod(value, NULL); // parseFloat
             cJSON_AddNumberToObject(g_defaults, id + 5, d);
+        }
+
+        // colour pickers: <input type=color id=slid_<key> value=<val> oninput=setSetting(...)>
+        n = html_dom_query_all(box, "input[type=color][id^=slid_]", found, UI_QUERY_MAX);
+        for (int i = 0; i < n; i++) {
+            char id[96], value[64];
+            if (html_dom_get_attr(found[i], "id", id, sizeof(id)) < 0 || strncmp(id, "slid_", 5)) continue;
+            if (html_dom_get_attr(found[i], "value", value, sizeof(value)) < 0) continue;
+            cJSON_DeleteItemFromObject(g_defaults, id + 5);
+            cJSON_AddStringToObject(g_defaults, id + 5, value);
         }
 
         n = html_dom_query_all(box, CONTROL_SELECTOR, found, UI_QUERY_MAX);
@@ -178,6 +248,13 @@ void ui_settings_collect_defaults(void) {
     html_dom_set_html(box, "");
     html_dom_remove(box);
     free(found);
+
+    for (size_t i = 0; i < sizeof(COLOR_SETTINGS) / sizeof(COLOR_SETTINGS[0]); i++) {
+        if (!COLOR_SETTINGS[i].def) continue;
+        cJSON_DeleteItemFromObject(g_defaults, COLOR_SETTINGS[i].key);
+        cJSON_AddStringToObject(g_defaults, COLOR_SETTINGS[i].key, COLOR_SETTINGS[i].def);
+    }
+    settings_repair();
 }
 
 // ---------------------------------------------------------------- lookups
@@ -221,9 +298,85 @@ static void sync_controls(const char *key, const char *value) {
     if (box && (html_dom_get_value(box, current, sizeof(current)) < 0 || strcmp(current, value))) html_dom_set_value(box, value);
 }
 
+// g.isHexColor
+static int is_hex_color(const char *s) {
+    if (!s || s[0] != '#') return 0;
+    const size_t n = strlen(s + 1);
+    if (n != 3 && n != 6) return 0;
+    for (size_t i = 1; i <= n; i++) {
+        if (!isxdigit((unsigned char) s[i])) return 0;
+    }
+    return 1;
+}
+
+static int color_setting(const char *key) {
+    for (size_t i = 0; i < sizeof(COLOR_SETTINGS) / sizeof(COLOR_SETTINGS[0]); i++) {
+        if (!strcmp(COLOR_SETTINGS[i].key, key)) return 1;
+    }
+    return 0;
+}
+
+static cJSON *default_copy(const char *key) {
+    const cJSON *def = g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
+    return def ? cJSON_Duplicate(def, 1) : NULL;
+}
+
+// The value rules of v3.1.1's settings.set() (134.js), so every stored value has the
+// type and value the real client keeps in settings.list[key].val:
+//   "false"/"true" -> booleans, "undefined" -> default; colour settings that are not a
+//   hex colour -> default; settings with min/max -> Math.min(max, Math.max(min, +G)).
+// Takes ownership of `v`, returns the value to store.
+static cJSON *normalize_setting(const char *key, cJSON *v) {
+    if (!v) return v;
+    if (cJSON_IsString(v)) {
+        const char *str = cJSON_GetStringValue(v);
+        cJSON *fixed = !strcmp(str, "false") ? cJSON_CreateFalse()
+            : !strcmp(str, "true") ? cJSON_CreateTrue()
+            : !strcmp(str, "undefined") ? default_copy(key) : NULL;
+        if (fixed) {
+            cJSON_Delete(v);
+            v = fixed;
+        }
+    }
+    if (color_setting(key) && !(cJSON_IsString(v) && is_hex_color(cJSON_GetStringValue(v)))) {
+        cJSON *def = default_copy(key);
+        if (def) {
+            cJSON_Delete(v);
+            v = def;
+        }
+    }
+    const cJSON *range = g_ranges ? cJSON_GetObjectItem(g_ranges, key) : NULL;
+    if (cJSON_IsArray(range) && cJSON_GetArraySize(range) == 2) {
+        double d = NAN;
+        if (cJSON_IsNumber(v)) d = cJSON_GetNumberValue(v);
+        else if (cJSON_IsBool(v)) d = cJSON_IsTrue(v) ? 1.0 : 0.0;            // +true
+        else if (cJSON_IsString(v)) {
+            const char *str = cJSON_GetStringValue(v);
+            if (!*str) d = 0.0;                                             // +""
+            else if (!string_is_number(str, &d)) d = NAN;
+        }
+        if (isnan(d)) { // Math.min(max, NaN) = NaN: keep the default rather than store NaN
+            cJSON *def = default_copy(key);
+            if (def) {
+                cJSON_Delete(v);
+                return def;
+            }
+            return v;
+        }
+        const double lo = cJSON_GetNumberValue(cJSON_GetArrayItem(range, 0));
+        const double hi = cJSON_GetNumberValue(cJSON_GetArrayItem(range, 1));
+        d = fmin(hi, fmax(lo, d));
+        cJSON_Delete(v);
+        v = cJSON_CreateNumber(d);
+    }
+    return v;
+}
+
 // Store an already-coerced value, forward it and sync the page (setSetting's tail).
 static void store_setting(const char *key, cJSON *value) {
     if (!g_settings) ui_settings_load();
+    value = normalize_setting(key, value);
+    if (!value) return;
     cJSON_DeleteItemFromObject(g_settings, key);
     cJSON_AddItemToObject(g_settings, key, value);
     ui_settings_save();
@@ -277,7 +430,8 @@ void ui_settings_reset(void) {
 
 // settings.export(): every setting whose value differs from its default, as JSON, handed
 // to downloadFile("settings.txt", ...). Natively the "download" is ./settings.txt.
-void ui_settings_export(void) {
+// exportSettings(true): the settings text (changed values + controls), malloc'd; NULL on failure.
+char *ui_settings_export_text(void) {
     cJSON *out = cJSON_CreateObject();
     const cJSON *item;
     cJSON_ArrayForEach(item, g_settings) {
@@ -288,6 +442,11 @@ void ui_settings_export(void) {
     if (controls) cJSON_AddItemToObject(out, "controls", controls);
     char *text = cJSON_PrintUnformatted(out);
     cJSON_Delete(out);
+    return text;
+}
+
+void ui_settings_export(void) {
+    char *text = ui_settings_export_text();
     if (!text) return;
 #ifdef __EMSCRIPTEN__
     EM_ASM({
@@ -355,6 +514,47 @@ static const SettingPreset PRESETS[] = {
     {"customADSDot", "\"https://assets.krunker.io/pro_ads.png\"", NULL}, {"useDamageOverlay", "false", "false"},
 };
 
+// KrunkNative addition: the "Beautiful" preset (index 4, offered after Performance in
+// #settingsPreset; v3.1.1 has Default/Pro/Performance/Custom only). Like Pro/Performance
+// it sets these keys and every other setting to its default, and it persists the same
+// way (preIndex = 4; leaving Custom saves krk_customPre, going back to Custom restores it).
+// Every render setting was chosen against what KrunkNative implements (render_settings.h):
+//   resolution 1        native framebuffer size, no supersampling (2x quadruples the fill
+//                       cost for little visible gain; on the web dpr already scales it)
+//   antiAlias           4x MSAA on the scene FBO
+//   highResShad         4096 sun shadow map instead of 1024 (shadow.c); shadows on
+//   softShad, shadowsDynamic  Krunker's best shadow flags; not ported yet (shadow.c), set so
+//                       they apply once they land
+//   lighting 2          high: Phong + map point lights (basic.c); default is 1
+//   particlesDist 1000  slider max: particles and impacts drawn at any distance (vfx.c)
+//   renderDist 100      slider max: camera far = 6000
+//   weaponShine, sniperFlap  Krunker's quality extras (stored; viewmodel flags)
+//   updateRate 0        no frame cap; mapDet/ambientShading/textureAnim/objectAnim/particles/
+//                       trails/muzzle flash/tracers/damage overlay on, noTex/lowSpec off
+//   postProcessing      on (CopyShader in v3.1.1: no visible effect)
+// Kept at Krunker's defaults on purpose: fov/fpsFOV 90 (listed: wide FOVs stretch the edges),
+// screenShake, showSpdLines, aspectRatio (window), saturationn/hue/vignette/menu filters
+// (colour grading is taste, the defaults are the maps' intended colours), HUD/viewmodel,
+// and the KrunkNative-only vsync/windowMode (device choices, not quality). Texture filtering
+// is not a setting: v3.1.1 samples map textures nearest-neighbour by design.
+static const struct { const char *key, *value; } BEAUTIFUL[] = {
+    {"resolution", "1"}, {"updateRate", "0"}, {"antiAlias", "true"}, {"postProcessing", "true"},
+    {"lowSpec", "false"}, {"noTex", "false"}, {"mapDet", "true"}, {"particles", "true"},
+    {"particlesDist", "1000"}, {"renderDist", "100"}, {"shadows", "true"}, {"softShad", "true"},
+    {"highResShad", "true"}, {"shadowsDynamic", "true"}, {"ambientShading", "true"},
+    {"showTrails", "true"}, {"yourTrails", "true"}, {"muzzleFlash", "true"}, {"bulletTracers", "true"},
+    {"sniperFlap", "true"}, {"textureAnim", "true"}, {"objectAnim", "true"}, {"weaponShine", "true"},
+    {"lighting", "2"}, {"useDamageOverlay", "true"}, {"fov", "90"}, {"fpsFOV", "90"},
+};
+#define PRESET_BEAUTIFUL 4
+
+static const char *beautiful_value(const char *key) {
+    for (size_t i = 0; i < sizeof(BEAUTIFUL) / sizeof(BEAUTIFUL[0]); i++) {
+        if (!strcmp(BEAUTIFUL[i].key, key)) return BEAUTIFUL[i].value;
+    }
+    return NULL;
+}
+
 static const SettingPreset *preset_for(const char *key) {
     for (size_t i = 0; i < sizeof(PRESETS) / sizeof(PRESETS[0]); i++) {
         if (!strcmp(PRESETS[i].key, key)) return &PRESETS[i];
@@ -385,6 +585,9 @@ static void each_setting(SettingVisit fn, void *user) {
     for (size_t i = 0; i < sizeof(PRESETS) / sizeof(PRESETS[0]); i++) {
         if (!cJSON_GetObjectItem(g_defaults, PRESETS[i].key)) fn(PRESETS[i].key, NULL, user);
     }
+    for (size_t i = 0; i < sizeof(BEAUTIFUL) / sizeof(BEAUTIFUL[0]); i++) {
+        if (!cJSON_GetObjectItem(g_defaults, BEAUTIFUL[i].key) && !preset_for(BEAUTIFUL[i].key)) fn(BEAUTIFUL[i].key, NULL, user);
+    }
 }
 
 static int preset_index(void) {
@@ -409,7 +612,7 @@ static void preset_visit(const char *key, const cJSON *def, void *user) {
     }
     if (r->from == 2 && val) cJSON_AddItemToObject(r->custom, key, cJSON_Duplicate(val, 1));
     const SettingPreset *p = preset_for(key);
-    const char *lit = p ? (r->target == 1 ? p->pro : p->perf) : NULL;
+    const char *lit = r->target == PRESET_BEAUTIFUL ? beautiful_value(key) : p ? (r->target == 1 ? p->pro : p->perf) : NULL;
     cJSON *pv = lit ? cJSON_Parse(lit) : NULL;
     if (pv) batch_set(key, pv);
     else if (def) batch_set(key, def);
@@ -423,7 +626,7 @@ static void preset_apply(const int target, const int keep_custom, const int sile
     const int from = preset_index();
     if (from == target) return;
     g_save_batch++;
-    if (target == 0 || target == 1 || target == 3) {
+    if (target == 0 || target == 1 || target == 3 || target == PRESET_BEAUTIFUL) {
         PresetRun r = {target, from, cJSON_CreateObject()};
         each_setting(preset_visit, &r);
         if (from == 2) {
@@ -452,10 +655,16 @@ static void preset_apply(const int target, const int keep_custom, const int sile
     if (!silent) menu_show_window(1, 1);
 }
 
-// The preset <select> shows the current preset (the static capture says Custom).
+// The preset <select> shows the current preset (the static capture says Custom), with
+// KrunkNative's Beautiful option added after Performance.
 static void sync_preset_select(void) {
     HtmlElem sel = html_dom_by_id("settingsPreset");
     if (!sel) return;
+    if (!html_dom_query(sel, "option[value=\"4\"]")) {
+        HtmlElem custom = html_dom_query(sel, "option[value=\"2\"]");
+        if (custom) html_dom_insert_html(custom, HTML_INSERT_BEFORE_BEGIN, "<option value=\"4\">Beautiful</option>");
+        else html_dom_insert_html(sel, HTML_INSERT_BEFORE_END, "<option value=\"4\">Beautiful</option>");
+    }
     char idx[16];
     snprintf(idx, sizeof(idx), "%d", preset_index());
     html_dom_set_value(sel, idx);
@@ -629,13 +838,12 @@ static int inline_display_is_none(const HtmlElem el) {
 
 // windows[0].searchList(): Krunker searches every tab, so show matching rows from all.
 void ui_settings_search(const char *query) {
-    char q[128];
-    snprintf(q, sizeof(q), "%s", query ? query : "");
-    // trim + lowercase
+    // settingSearch = hj.value (untrimmed); searchMatches lowercases both sides. The field is
+    // restored with the raw value, so spaces and case survive typing.
+    char raw[128], q[128];
+    snprintf(raw, sizeof(raw), "%s", query ? query : "");
+    snprintf(q, sizeof(q), "%s", raw);
     char *start = q;
-    while (*start && isspace((unsigned char) *start)) start++;
-    char *end = start + strlen(start);
-    while (end > start && isspace((unsigned char) end[-1])) *--end = 0;
     str_tolower(start);
 
     HtmlElem holder = html_dom_by_id("settHolder");
@@ -647,6 +855,9 @@ void ui_settings_search(const char *query) {
 
     StrBuf all = {0};
     for (int tab = 0; tab < ui_settings_tab_count(); tab++) sb_append(&all, ui_settings_tab_html(tab));
+    char *client_rows = ui_client_settings_tab_html(1); // Settings > Client (ui_client_settings.c)
+    sb_append(&all, client_rows);
+    free(client_rows);
     html_dom_set_html(holder, all.data ? all.data : "");
     sb_free(&all);
     ui_settings_apply_values(holder);
@@ -688,7 +899,7 @@ void ui_settings_search(const char *query) {
 
     HtmlElem search = html_dom_by_id("settSearch");
     if (search) {
-        html_dom_set_value(search, start);
+        html_dom_set_value(search, raw);
         html_dom_focus(search);
     }
 }
@@ -773,6 +984,7 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
     else if (!strcmp(key, "uiVolume")) s->ui_volume = parse_float(value, s->ui_volume);
     else if (!strcmp(key, "fpsFOV")) in->fps_fov = parse_float(value, in->fps_fov);
     else if (!strcmp(key, "scrollDir")) in->scroll_dir = parse_bool(value);
+    else if (!strcmp(key, "slidCont")) in->slid_cont = parse_bool(value); // settings.tmp.slidCont, sent in the next ENT
     else if (!strcmp(key, "showWeapon")) in->show_weapon = parse_bool(value);
     else if (!strcmp(key, "showWeaponSec")) in->show_weapon_sec = parse_bool(value);
     else if (!strcmp(key, "showWeaponMel")) in->show_weapon_mel = parse_bool(value);

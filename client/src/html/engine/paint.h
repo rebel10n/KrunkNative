@@ -39,6 +39,8 @@
  * device scale at its position changed, when the glyph atlas generation
  * changed, or after paint_invalidate_all().  The cached lists are flattened
  * into `out` every frame.  Caches of contexts no longer reachable are freed.
+ * When the atlas is rebuilt while recording (it filled up), paint_build()
+ * re-records everything once, so `out` never mixes atlas generations.
  */
 #ifndef KN_PAINT_H
 #define KN_PAINT_H

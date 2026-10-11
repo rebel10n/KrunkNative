@@ -319,7 +319,7 @@ static void test_shadows(void)
     CHECK(apply(&c, NULL, "box-shadow", "#000 0 0 1000px inset") && c.box_shadow.inset && feq(c.box_shadow.blur, 1000) && feq(c.box_shadow.spread, 0) && color_is(c.box_shadow.color, 0, 0, 0, 255));
     CHECK(apply(&c, NULL, "box-shadow", "0 0 1px #2196f3") && feq(c.box_shadow.blur, 1) && feq(c.box_shadow.spread, 0));
     CHECK(apply(&c, NULL, "box-shadow", "0 0 8px") && c.box_shadow.color.kind == CSS_COLOR_CURRENT);
-    CHECK(apply(&c, NULL, "box-shadow", "0 1px red, 0 2px blue") && c.box_shadow_count == 1 && color_is(c.box_shadow.color, 255, 0, 0, 255));
+    CHECK(apply(&c, NULL, "box-shadow", "0 1px red, 0 2px blue") && c.box_shadow_count == 2 && color_is(c.box_shadow.color, 255, 0, 0, 255) && color_is(c.box_shadow_more[0].color, 0, 0, 255, 255));
     CHECK(apply(&c, NULL, "box-shadow", "none") && c.box_shadow_count == 0);
     CHECK(!apply(&c, NULL, "box-shadow", "0 0 -2px red"));
     CHECK(!apply(&c, NULL, "box-shadow", "0 red 0"));
@@ -342,6 +342,12 @@ static void test_backgrounds(void)
           color_is(c.background_color, 0, 0, 0, 0));
     CHECK(apply(&c, NULL, "background", "-webkit-linear-gradient( left, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.3) 40%, rgba(0, 0, 0, 0.3) 60%, rgba(0, 0, 0, 0) 100% )") &&
           feq(c.bg_layers[0].image.gradient.angle_deg, 90) && c.bg_layers[0].image.gradient.stop_count == 4);
+    /* devconsole.css .grip: double-position hard stops (13 stops) */
+    CHECK(apply(&c, NULL, "background", "linear-gradient(135deg, transparent 0 6px, #9a9a9a 6px 7px, transparent 7px 9px, "
+                "#9a9a9a 9px 10px, transparent 10px 12px, #9a9a9a 12px 13px, transparent 13px)") &&
+          c.bg_layers[0].image.gradient.stop_count == 13 && len_is(c.bg_layers[0].image.gradient.stops[1].pos, 6, 0) &&
+          len_is(c.bg_layers[0].image.gradient.stops[2].pos, 6, 0) && color_is(c.bg_layers[0].image.gradient.stops[2].color, 0x9a, 0x9a, 0x9a, 255) &&
+          len_is(c.bg_layers[0].image.gradient.stops[12].pos, 13, 0));
     CHECK(apply(&c, NULL, "background", "linear-gradient(45deg, red, blue)") && feq(c.bg_layers[0].image.gradient.angle_deg, 45) &&
           !c.bg_layers[0].image.gradient.stops[0].has_pos);
     CHECK(apply(&c, NULL, "background", "radial-gradient(ellipse at 50% 40%, #6f8aa6 0%, #3c4a5c 55%, #1a2029 100%)") &&
@@ -463,6 +469,11 @@ static void test_zoom(void)
     CHECK(apply(&c, NULL, "zoom", "normal") && feq(c.zoom, 1));
     CHECK(apply(&c, NULL, "zoom", "0") && feq(c.zoom, 1));
     CHECK(!apply(&c, NULL, "zoom", "-1"));
+    CHECK(apply(&c, NULL, "box-shadow", "0 .15em 1.5em 0 rgba(0,0,0,.1), 0 0 1em 0 rgba(0,0,0,.03)") &&
+          c.box_shadow_count == 2 && feq(c.box_shadow.y, 2.4f) && feq(c.box_shadow.blur, 24) &&     /* em folded at 16px */
+          feq(c.box_shadow_more[0].blur, 16) && c.box_shadow_more[0].color.a == 8);                  /* the second shadow */
+    CHECK(apply(&c, NULL, "box-shadow", "1px 1px red, 2px 2px blue, 3px 3px green, 4px 4px #000, 5px 5px #fff") &&
+          c.box_shadow_count == 4 && feq(c.box_shadow_more[2].x, 4));                                /* 4 kept */
     CHECK(!apply(&c, NULL, "zoom", "10px"));
     c = fresh();
     CHECK(apply(&c, NULL, "width", "calc(50% - 10px)") && apply(&c, NULL, "margin-left", "8px") &&
@@ -532,7 +543,55 @@ static void test_layout_props(void)
         CHECK(!apply(&c, NULL, "grid-row-start", "0"));
         CHECK(!apply(&c, NULL, "grid-row-start", "span -1"));
         CHECK(!apply(&c, NULL, "grid-area", "1/2/3/4/5"));
-        CHECK(!apply(&c, NULL, "grid-column", "a / b"));   /* named lines unsupported */
+        CHECK(apply(&c, NULL, "grid-column", "a / b") && gl[CSS_GRID_COLUMN_START].name == kn_atom_cstr("a") &&
+              gl[CSS_GRID_COLUMN_END].name == kn_atom_cstr("b") && gl[CSS_GRID_COLUMN_END].line == 0);
+        CHECK(apply(&c, NULL, "grid-area", "hd") && gl[CSS_GRID_ROW_START].name == kn_atom_cstr("hd") &&
+              gl[CSS_GRID_COLUMN_START].name == gl[CSS_GRID_ROW_START].name && gl[CSS_GRID_ROW_END].name == gl[CSS_GRID_ROW_START].name &&
+              gl[CSS_GRID_COLUMN_END].name == gl[CSS_GRID_ROW_START].name);   /* omitted idents copy */
+        CHECK(apply(&c, NULL, "grid-area", "2 / x") && gl[CSS_GRID_ROW_END].line == 0 && !gl[CSS_GRID_ROW_END].name &&
+              gl[CSS_GRID_COLUMN_END].name == kn_atom_cstr("x"));
+        CHECK(apply(&c, NULL, "grid-row", "2 a / span b") && gl[CSS_GRID_ROW_START].line == 2 && gl[CSS_GRID_ROW_START].name == kn_atom_cstr("a") &&
+              gl[CSS_GRID_ROW_END].span && gl[CSS_GRID_ROW_END].line == 1 && gl[CSS_GRID_ROW_END].name == kn_atom_cstr("b"));
+        CHECK(!apply(&c, NULL, "grid-row", "span"));
+        CHECK(!apply(&c, NULL, "grid-row", "a span 2 b"));
+        CHECK(!apply(&c, NULL, "grid-row", "2 span auto"));
+    }
+    {
+        const CssGridNames *cn = &c.grid_names[CSS_GRID_AXIS_COLUMN];
+        CHECK(apply(&c, NULL, "grid-template-columns", "[a] 10px [b c] 1fr [d]") && c.grid_column_count == 2 &&
+              cn->line[0] == kn_atom_cstr("a") && cn->line[1] == kn_atom_cstr("b c") && cn->line[2] == kn_atom_cstr("d") && !cn->repeat);
+        CHECK(apply(&c, NULL, "grid-template-columns", "repeat(2, [x] 5px [y])") && c.grid_column_count == 2 &&
+              cn->line[0] == kn_atom_cstr("x") && cn->line[1] == kn_atom_cstr("y x") && cn->line[2] == kn_atom_cstr("y"));
+        CHECK(apply(&c, NULL, "grid-template-columns", "repeat(auto-fit, 1.75em)") && c.grid_column_count == 1 &&
+              cn->repeat == CSS_GRID_REPEAT_AUTO_FIT && cn->repeat_at == 0 && cn->repeat_n == 1 && len_is(c.grid_columns[0].size, 28, 0));
+        CHECK(apply(&c, NULL, "grid-template-columns", "[s] 20px repeat(auto-fill, [a] minmax(50px, 1fr) [b]) [e] 30px") &&
+              c.grid_column_count == 3 && cn->repeat == CSS_GRID_REPEAT_AUTO_FILL && cn->repeat_at == 1 && cn->repeat_n == 1 &&
+              cn->rep_first == kn_atom_cstr("a") && cn->rep_last == kn_atom_cstr("b") && cn->line[1] == NULL && cn->line[2] == kn_atom_cstr("e"));
+        CHECK(!apply(&c, NULL, "grid-template-columns", "repeat(auto-fill, 1fr)"));          /* not a <fixed-size> */
+        CHECK(!apply(&c, NULL, "grid-template-columns", "repeat(auto-fill, 10px) auto"));    /* <auto-track-list>: fixed sizes only */
+        CHECK(!apply(&c, NULL, "grid-template-columns", "repeat(auto-fill, 10px) repeat(auto-fit, 10px)"));
+        CHECK(!apply(&c, NULL, "grid-template-columns", "[span] 10px"));
+        CHECK(apply(&c, NULL, "grid-auto-rows", "10px minmax(20px, auto)") && c.grid_auto_count[CSS_GRID_AXIS_ROW] == 2 &&
+              c.grid_auto_tracks[CSS_GRID_AXIS_ROW][1].kind == CSS_TRACK_MINMAX);
+        CHECK(apply(&c, NULL, "grid-auto-flow", "dense column") && c.grid_auto_flow == (CSS_GRID_FLOW_COLUMN | CSS_GRID_FLOW_DENSE));
+        CHECK(!apply(&c, NULL, "grid-auto-flow", "row column"));
+        CHECK(apply(&c, NULL, "grid-template-areas", "'a a .' \"b  c c\"") && c.grid_area_rows == 2 && c.grid_area_cols == 3 &&
+              c.grid_areas == kn_atom_cstr("a a .\nb c c"));
+        CHECK(apply(&c, NULL, "grid-template-areas", "'a ... b'") && c.grid_areas == kn_atom_cstr("a . b"));
+        CHECK(!apply(&c, NULL, "grid-template-areas", "'a b a'"));                   /* not a rectangle */
+        CHECK(!apply(&c, NULL, "grid-template-areas", "'a b' 'c'"));                 /* ragged */
+        CHECK(!apply(&c, NULL, "grid-template-areas", "'a $'"));                     /* trash token */
+        CHECK(apply(&c, NULL, "grid-template", "[t] 'h h' 20px [m] 'n m' / 30px 1fr") && c.grid_row_count == 2 &&
+              len_is(c.grid_rows[0].size, 20, 0) && c.grid_rows[1].size.kind == CSS_LEN_AUTO && c.grid_column_count == 2 &&
+              c.grid_area_rows == 2 && c.grid_names[CSS_GRID_AXIS_ROW].line[0] == kn_atom_cstr("t") &&
+              c.grid_names[CSS_GRID_AXIS_ROW].line[1] == kn_atom_cstr("m"));
+        CHECK(apply(&c, NULL, "grid-template", "10px 20px / 30px") && c.grid_row_count == 2 && c.grid_column_count == 1 && !c.grid_areas);
+        CHECK(apply(&c, NULL, "grid", "auto-flow dense 15px / 40px 40px") && c.grid_auto_flow == CSS_GRID_FLOW_DENSE &&
+              c.grid_row_count == 0 && c.grid_column_count == 2 && len_is(c.grid_auto_tracks[CSS_GRID_AXIS_ROW][0].size, 15, 0));
+        CHECK(apply(&c, NULL, "grid", "50px / auto-flow 25px") && c.grid_auto_flow == CSS_GRID_FLOW_COLUMN && c.grid_row_count == 1 &&
+              len_is(c.grid_auto_tracks[CSS_GRID_AXIS_COLUMN][0].size, 25, 0) && c.grid_auto_tracks[CSS_GRID_AXIS_ROW][0].size.kind == CSS_LEN_AUTO);
+        CHECK(apply(&c, NULL, "grid", "'a' / 10px") && c.grid_area_rows == 1 && c.grid_auto_flow == 0);
+        CHECK(!apply(&c, NULL, "grid", "auto-flow / auto-flow"));
     }
     CHECK(c.align_self == CSS_ALIGN_ITEMS_AUTO && c.justify_self == CSS_ALIGN_ITEMS_AUTO && c.justify_items == CSS_ALIGN_ITEMS_STRETCH);
     CHECK(apply(&c, NULL, "justify-self", "center") && c.justify_self == CSS_ALIGN_ITEMS_CENTER);
@@ -715,7 +774,7 @@ static int chrome_drops(const char *name, size_t nl, const char *val, size_t vl)
         size_t pl = strlen(pfx[i]);
         if (nl > pl && kn_str_ieq(name, pl, pfx[i])) return 1;
     }
-    if (kn_str_ieq(name, nl, "-webkit-box-flex")) return 1;
+    if (kn_str_ieq(name, nl, "-webkit-box-flex") || kn_str_ieq(name, nl, "font-smooth")) return 1;
     /* -moz-/-o- functions and keywords Blink rejects (an unknown ident such as
      * `transition: -moz-transform 1s` stays valid there) */
     static const char *bad[] = { "-moz-calc(", "-o-calc(", "-moz-linear-gradient(", "-o-linear-gradient(",

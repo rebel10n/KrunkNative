@@ -1,6 +1,11 @@
 #include <server.h>
 #include <server_log.h>
+#include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
+#include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
+#include <server_net_udp.h>  // UDP game transport: virtual client fds (net-udp)
+#include <ai.h>
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -14,11 +19,17 @@
 #define SLEEP_MILLIS(ms) Sleep(ms)
 #else
 #include <unistd.h>
+#include <poll.h>
+#include <netinet/tcp.h>
 #define NET_ERRNO errno
 #define CLOSE_SOCKET close
 #define WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
 #define SLEEP_MILLIS(ms) do { struct timespec ts = {0, (ms) * 1000000L}; nanosleep(&ts, NULL); } while (0)
 #endif
+
+// Client fds may be virtual (UDP peers, server/src/net_udp.c): they close through the transport.
+#define CLOSE_RAW_SOCKET CLOSE_SOCKET
+#define CLOSE_CLIENT_FD(fd) ((fd) >= NET_VIRTUAL_FD_BASE ? net_udp_close(fd) : (void) CLOSE_RAW_SOCKET(fd))
 
 #define NET_ERROR(fd, ...) { server_log_error(__VA_ARGS__); if ((fd) >= 0) CLOSE_SOCKET(fd); g_server->should_quit = 1; return; }
 
@@ -28,6 +39,14 @@ static double net_time() {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double) ts.tv_sec + (double) ts.tv_nsec / 1e9;
 }
+
+// When poll() last saw each client fd readable (net thread). The thread then waits for
+// g_server->lock, which the tick holds while it runs: a PONG is stamped with that wake-up so
+// the ping measures the connection, not how long the tick kept the lock. (Intentional
+// difference: v3.1.1's io_po reads Date.now() when Node's event loop gets to the message,
+// so a running tick is included there.)
+#define NET_READABLE_FDS 1024
+static double g_net_readable_at[NET_READABLE_FDS];
 
 static ClientConnection *net_client_by_id(const int id) {
     for (size_t i = 0; i < g_server->client_count; i++) {
@@ -123,6 +142,7 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
     }
 
     ClientConnection *client = net_client_by_id(uid);
+    if (client && type == NET_PACKET_END && length == sizeof(NetEndPacket)) accounts_on_end_packet(uid, payload); // didWin for the commit
     if (client) net_send_packet(client->fd, (NetPacketType) type, payload, length);
 }
 
@@ -136,6 +156,12 @@ static void net_game_next_round(Game *game) {
 
 static ClientConnection *net_client_by_id(int id);
 static void net_spawn_client(ClientConnection *client);
+
+// GameHooks.reward: player.reward at endGame (accounts only, server/src/accounts.c).
+static int net_game_reward(Game *game, const Player *player) {
+    (void) game;
+    return accounts_reward(player);
+}
 
 // GameHooks.respawn: a mode respawns a dead player itself (forceSpawn, Krunker "frs").
 static void net_game_respawn(Game *game, const int uid) {
@@ -234,6 +260,73 @@ static void net_set_nonblocking(const int fd) {
 #endif
 }
 
+// Krunker's ws sockets run with Nagle off (ws calls socket.setNoDelay()). With Nagle on, a
+// small PING/STATE written while the previous tick's segment is unacked waits for the
+// peer's delayed ACK (40 ms on Linux loopback): the random 5-130 ms local pings.
+static void net_set_nodelay(const int fd) {
+    const int one = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *) &one, sizeof(one));
+}
+
+// One tick's frames for one client go out in a single send(): Krunker sends its per-tick
+// sync as one ws message, and ~one send() per player per client per tick (with
+// net_send_packet() spinning on EAGAIN) held g_server->lock for milliseconds at full lobbies.
+#define NET_BATCH_SIZE 8192
+
+typedef struct {
+    size_t length;
+    uint8_t data[NET_BATCH_SIZE];
+} NetSendBatch;
+
+static int net_batch_append(NetSendBatch *batch, const NetPacketType type, const void *payload, const uint16_t length) {
+    if (batch->length + NET_PACKET_HEADER_SIZE + length > sizeof(batch->data)) return 0;
+    uint8_t *frame = batch->data + batch->length;
+    frame[0] = (uint8_t) type;
+    frame[1] = (uint8_t) (length >> 8);
+    frame[2] = (uint8_t) (length & 0xff);
+    if (payload && length) memcpy(frame + NET_PACKET_HEADER_SIZE, payload, length);
+    batch->length += NET_PACKET_HEADER_SIZE + length;
+    return 1;
+}
+
+// Sends the batch. When the socket buffer is full (a stalled peer) nothing is written and the
+// tick's snapshots are dropped: the next tick carries fresher ones (intentional: Krunker's ws
+// would queue them in user space instead). A partial write is finished, since a cut frame
+// would desync the stream; that only waits on a peer that is draining.
+static void net_batch_flush(const int fd, NetSendBatch *batch) {
+    if (fd >= NET_VIRTUAL_FD_BASE) { // UDP peer: one knet message per frame (STATE rides the unreliable channel)
+        for (size_t at = 0; at + NET_PACKET_HEADER_SIZE <= batch->length;) {
+            const uint16_t length = (uint16_t) ((batch->data[at + 1] << 8) | batch->data[at + 2]);
+            net_send_packet(fd, (NetPacketType) batch->data[at], batch->data + at + NET_PACKET_HEADER_SIZE, length);
+            at += NET_PACKET_HEADER_SIZE + length;
+        }
+        batch->length = 0;
+        return;
+    }
+    size_t sent = 0;
+    while (sent < batch->length) {
+#ifdef WIN32
+        const int wrote = send(fd, (const char *) batch->data + sent, (int) (batch->length - sent), 0);
+#else
+        const ssize_t wrote = send(fd, batch->data + sent, batch->length - sent, MSG_NOSIGNAL);
+#endif
+        if (wrote > 0) {
+            sent += (size_t) wrote;
+            continue;
+        }
+        if (wrote < 0 && WOULD_BLOCK(NET_ERRNO)) {
+            if (!sent) break;
+#ifndef WIN32
+            struct pollfd pfd = {.fd = fd, .events = POLLOUT};
+            poll(&pfd, 1, 5);
+#endif
+            continue;
+        }
+        break; // closed / reset: net_poll_client() removes it on its next recv
+    }
+    batch->length = 0;
+}
+
 static const cJSON *net_current_map_json() {
     const Game *game = &g_server->game;
     const int index = game->current_map_index;
@@ -295,6 +388,7 @@ static void net_handle_map_request(ClientConnection *client, const NetPacket *pa
 }
 
 static void net_send_init(ClientConnection *client) {
+    accounts_send_billboard(client); // init "bill" (config gameserver.billboards), before the map loads
     net_send_map_info(client);
 
     const NetInitPacket packet = {
@@ -308,6 +402,7 @@ static void net_send_init(ClientConnection *client) {
     };
 
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
+    game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
 }
 
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
@@ -352,8 +447,10 @@ static void net_send_spectate_state(ClientConnection *client) {
     const NetSpectatePacket ack = {.spectating = 1};
     net_send_packet(client->fd, NET_PACKET_SPECTATE, &ack, sizeof(ack));
     net_send_existing_spawns(client);
+    accounts_send_infos_to(client);
     game_sync_leaders(&g_server->game, client->id);
     game_send_round_state(&g_server->game, client->id);
+    game_ai_sync_non_players(&g_server->game); // AI.sync sends spectators every AI ("aai" first)
 }
 
 // ENT with spectate = 1: a live player leaves the match first (LEAVE to the others),
@@ -390,6 +487,7 @@ static void net_spawn_client(ClientConnection *client) {
         if (!player) return;
 
         player->uid = client->id;
+        player->team = accounts_assigned_team(client); // ranked roster team (players.setTeam isFromQueue), 0 = mode picks
         client->player = player;
         game_players_add(&g_server->game, player);
     }
@@ -398,6 +496,7 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->class_index = client->class_index;
     client->player->secondary_index = client->secondary_index;
     client->player->cosmetics = client->cosmetics;
+    client->player->slid_cont = client->slid_cont; // gameserver.ts: player.slidCont = ent[15]
     player_spawn(client->player);
     client->joined = 1;
     net_mark_client_spawned(client);
@@ -413,14 +512,23 @@ static void net_spawn_client(ClientConnection *client) {
 
         if (!client->announced) {
             client->announced = 1;
-            net_broadcast_server_message(client, "$ joined the game", client->name);
+            if (accounts_join_message()[0]) net_broadcast_server_message(client, accounts_join_message(), client->name);
         }
     }
+
+    accounts_on_spawn(client, first_spawn); // PLAYER_INFO (account level / clan), MOTD on the first spawn
 }
 
 // ENT from a client: (re)spawn unless the round is over, the player is alive, or
 // it died less than config.deathDelay ago.
 static void net_request_spawn(ClientConnection *client) {
+    // io_ent in the vote window: spawn anyway, then the late "end" (didWin -1), so the
+    // joiner gets the end screen instead of a closed menu over nothing.
+    if (game_end_late_spawn(&g_server->game, client->player)) {
+        net_spawn_client(client);
+        game_send_end_late(&g_server->game, client->id);
+        return;
+    }
     if (!game_can_spawn(&g_server->game, client->player)) return; // shared with the offline client
 
     net_spawn_client(client);
@@ -462,11 +570,13 @@ static void net_change_map_internal(const int map_index, const int mode_index, c
         }
     }
 
+    accounts_round_ending(); // stats of a round abandoned before its END
     net_free_players();
 
     for (size_t i = 0; i < g_server->client_count; i++) g_server->clients[i].joined = 0;
 
     game_init(&g_server->game, map_index, mode_index, 0);
+    accounts_round_changed(); // lobby size / round length per mode, billboard rotation, match id
 
     server_log("Loaded map %d mode %d", g_server->game.current_map_index, g_server->game.current_mode_index);
 
@@ -511,6 +621,14 @@ static struct {
 static int g_pending_kick_count;
 static ChatCommandHost g_chat_host;
 
+// isDev: CLI / config op, a DEV account the brain verified (players.player_developer), or a
+// player on the server's own machine (it hosts this server, v3.1.1's offline host). Loopback
+// alone is not enough: net-bridge connects from 127.0.0.1 for every browser, so a bridged
+// connection counts by the address it forwards (NET_PACKET_FORWARDED, net_handle_forwarded).
+static int net_client_is_dev(const ClientConnection *client) {
+    return client->op || client->local || (client->acct.flags & NET_PLAYER_INFO_DEV);
+}
+
 static int net_chat_peer_count(void *user) {
     (void) user;
     return (int) g_server->client_count;
@@ -527,8 +645,9 @@ static int net_chat_peer_at(void *user, const int index, ChatPeer *out) {
         .ping_ms = client->ping_ms,
         .player = client->player,
         .spectating = net_is_spectating(client),
-        // perms on: CLI-op'd connections and the server's own machine count as DEV
-        .dev = client->op || !strcmp(client->address, "127.0.0.1"),
+        .dev = net_client_is_dev(client),
+        .premium_host = accounts_is_custom_host(client),
+        .account_id = client->acct.account_id, // backend account (server/src/accounts.c), 0 guest
     };
     return 1;
 }
@@ -544,6 +663,11 @@ static void net_chat_disconnect(void *user, const int id, const char *message, c
     g_pending_kick_count++;
 }
 
+// Close a connection after the current poll pass with NET_PACKET_ERROR (accounts.c).
+void net_kick_client(const int id, const char *message, const char *code) {
+    net_chat_disconnect(NULL, id, message, code);
+}
+
 static void net_chat_change_map(void *user, const int map_index, const int mode_index) {
     (void) user;
     net_change_map(map_index, mode_index);
@@ -554,9 +678,25 @@ static void net_chat_log(void *user, const char *text) {
     server_log("[Server] %s", text);
 }
 
+static int net_chat_ban_account(void *user, const int account_id, const char *name) {
+    (void) user;
+    return accounts_ban_account(account_id, name);
+}
+
+static int net_chat_unban_account(void *user, const int account_id) {
+    (void) user;
+    return accounts_unban_account(account_id);
+}
+
+static int net_chat_list_account_bans(void *user, int *out, const int max) {
+    (void) user;
+    return accounts_list_account_bans(out, max);
+}
+
 ChatCommandHost *net_chat_host(void) {
     g_chat_host.game = &g_server->game;
     g_chat_host.perms = g_server->config.perms;
+    g_chat_host.cheats_open = g_server->config.cheats_open;
     g_chat_host.lobby = "native";
     g_chat_host.region = "local";
     g_chat_host.tick_rate = g_server->config.tick_rate ? (float) g_server->config.tick_rate : 30.0f;
@@ -565,6 +705,9 @@ ChatCommandHost *net_chat_host(void) {
     g_chat_host.disconnect = net_chat_disconnect;
     g_chat_host.change_map = net_chat_change_map;
     g_chat_host.log = net_chat_log;
+    g_chat_host.ban_account = net_chat_ban_account;     // gameserver.bans_file "accounts"
+    g_chat_host.unban_account = net_chat_unban_account;
+    g_chat_host.list_account_bans = net_chat_list_account_bans;
     return &g_chat_host;
 }
 
@@ -583,23 +726,32 @@ static void net_process_pending_kicks(void) {
 void net_add_client(ClientConnection *client) {
     if (g_server->config.max_players && g_server->client_count >= g_server->config.max_players) {
         server_log("Rejecting client: server full (%zu/%u)", g_server->client_count, (unsigned int) g_server->config.max_players);
-        CLOSE_SOCKET(client->fd);
+        CLOSE_CLIENT_FD(client->fd);
         return;
     }
 
     snprintf(client->address, sizeof(client->address), "%s", inet_ntoa(client->addr.sin_addr));
+    client->local = (ntohl(client->addr.sin_addr.s_addr) >> 24) == 127; // until a FORWARDED says otherwise
+    client->first_packet_seen = 0;
     if (chat_command_ip_banned(net_chat_host(), client->address)) { // pnhBannedAddresses: close(4003, "banned")
         const NetErrorPacket error = {.message = "Banned", .code = "004003"};
         net_send_packet(client->fd, NET_PACKET_ERROR, &error, sizeof(error));
         server_log("Rejecting %s: IP banned", client->address);
-        CLOSE_SOCKET(client->fd);
+        CLOSE_CLIENT_FD(client->fd);
+        return;
+    }
+    NetErrorPacket refuse = {{0}};
+    if (accounts_refuse_connect(client->address, &refuse)) { // draining ("GAME UPDATING")
+        net_send_packet(client->fd, NET_PACKET_ERROR, &refuse, sizeof(refuse));
+        server_log("Rejecting %s: %s", client->address, refuse.message);
+        CLOSE_CLIENT_FD(client->fd);
         return;
     }
 
     ClientConnection *new_clients = realloc(g_server->clients, (g_server->client_count + 1) * sizeof(ClientConnection));
 
     if (!new_clients) {
-        CLOSE_SOCKET(client->fd);
+        CLOSE_CLIENT_FD(client->fd);
         return;
     }
 
@@ -608,7 +760,7 @@ void net_add_client(ClientConnection *client) {
     client->player_number = net_alloc_player_number();
 
     if (!client->player_number) {
-        CLOSE_SOCKET(client->fd);
+        CLOSE_CLIENT_FD(client->fd);
         return;
     }
 
@@ -623,6 +775,7 @@ void net_add_client(ClientConnection *client) {
     client->class_index = 0;
     client->secondary_index = -1;
     client->cosmetics = PLAYER_COSMETICS_NONE;
+    client->slid_cont = 1;
     client->chat_limiter = (NetChatLimiter) {0};
     client->ping_seq = 0;
     client->ping_ms = -1;
@@ -632,6 +785,7 @@ void net_add_client(ClientConnection *client) {
     g_server->clients[g_server->client_count] = *client;
 
     ClientConnection *stored_client = &g_server->clients[g_server->client_count++];
+    accounts_on_connect(stored_client);
     on_client_connect(stored_client);
     net_send_init(stored_client);
     game_send_round_state(&g_server->game, stored_client->id);
@@ -649,6 +803,7 @@ void net_remove_client(ClientConnection *client) {
 
     if (index == SIZE_MAX) return;
 
+    accounts_on_disconnect(client); // partial stats commit, player-leave to the brain
     on_client_disconnect(client);
     net_set_spectating(client, 0);
     if (client->player) {
@@ -663,12 +818,12 @@ void net_remove_client(ClientConnection *client) {
     }
     if (client->announced) {
         client->announced = 0;
-        net_broadcast_server_message(client, "$ left the game", client->name); // serverMessages[1]
+        if (accounts_leave_message()[0]) net_broadcast_server_message(client, accounts_leave_message(), client->name); // serverMessages[1]
     }
     net_release_player_number(client);
     social_assembly_free(&client->social);
     social_assembly_free(&client->voice);
-    CLOSE_SOCKET(client->fd);
+    CLOSE_CLIENT_FD(client->fd);
 
     if (index + 1 < g_server->client_count) {
         memmove(&g_server->clients[index], &g_server->clients[index + 1], (g_server->client_count - index - 1) * sizeof(ClientConnection));
@@ -716,7 +871,10 @@ static void net_handle_pong(ClientConnection *client, const NetPacket *packet) {
     if (pong.seq != client->ping_seq) return;
 
     const double now = net_time();
-    client->ping_ms = net_ping_update(client->ping_ms, (float) (now - client->ping_sent_at));
+    const double readable_at = client->fd >= NET_VIRTUAL_FD_BASE ? net_udp_pong_received_at(client->fd) // datagram arrival (net_udp.c)
+                               : client->fd >= 0 && client->fd < NET_READABLE_FDS ? g_net_readable_at[client->fd] : 0.0;
+    const double received_at = readable_at > client->ping_sent_at && readable_at < now ? readable_at : now;
+    client->ping_ms = net_ping_update(client->ping_ms, (float) (received_at - client->ping_sent_at));
     client->ping_seq = 0;
     client->next_ping_at = now + NET_PING_INTERVAL;
 
@@ -735,6 +893,13 @@ static void net_handle_social(ClientConnection *client, const NetPacket *packet)
     char *request = NULL;
     uint32_t id = 0;
     if (social_assembly_push(&client->social, packet->payload, packet->length, &request, &id) != 1) return;
+    if (brain_enabled()) {
+        // a node behind kn_brain: the hub is the brain's social socket and /api routes
+        // (v3.1.1 gameserver.ts MM_NODE_MODE=node leaves them to the brain); drop it like
+        // socialWs.ts drops what it does not handle
+        free(request);
+        return;
+    }
 
     SocialMapInfo maps[64];
     const SocialHost host = {.maps = maps, .map_count = social_maps_from_game(&g_server->game, maps, 64)};
@@ -762,10 +927,105 @@ static void net_handle_voice(ClientConnection *client, const NetPacket *packet) 
     voice_relay(&client->voice, packet->payload, packet->length, &speaker, (int) g_server->client_count, net_voice_send, NULL);
 }
 
+// packetHandlers.ts requireDev for the dev packets, through the chat commands' gate
+// (chat_command_allowed: perms, cheats_open, ChatPeer.dev / premium_host); a denial answers
+// ["notify", "DEV only"] (the mod's notify toast).
+static int net_require_dev(ClientConnection *client, const ChatCommandPerm perm, const char *label) {
+    return chat_command_allowed(net_chat_host(), client->id, perm, label);
+}
+
+// net-bridge's first frame: the browser's real address. Only a loopback peer (the bridge on
+// this machine) may claim one, and only before anything else; the claimed address then
+// decides IP bans and whether the player is on the server's machine.
+static int net_handle_forwarded(ClientConnection *client, const NetPacket *packet) {
+    if (client->first_packet_seen || !client->local || !packet->length || packet->length > NET_FORWARDED_ADDRESS_SIZE) {
+        server_log("[gameserver] ignored FORWARDED from %d (%s)", client->id, client->address);
+        return 1;
+    }
+    char address[NET_FORWARDED_ADDRESS_SIZE + 1];
+    memcpy(address, packet->payload, packet->length);
+    address[packet->length] = 0;
+    struct in_addr parsed;
+    const int v4 = inet_pton(AF_INET, address, &parsed) == 1;
+    client->local = v4 ? (ntohl(parsed.s_addr) >> 24) == 127 : !strcmp(address, "::1");
+    snprintf(client->address, sizeof(client->address), "%s", address[0] ? address : "?");
+    server_log("[gameserver] %d is bridged for %s%s", client->id, client->address, client->local ? " (this machine)" : "");
+    if (chat_command_ip_banned(net_chat_host(), client->address)) {
+        net_kick_client(client->id, "Banned", "004003");
+    }
+    return 1;
+}
+
+// io_prmA(index): premiumKeys / the N key (index 0 = noclip), gated like /noclip.
+static void net_handle_premium_action(ClientConnection *client, const NetPacket *packet) {
+    if (packet->length != 1) return;
+    chat_command_premium_action(net_chat_host(), client->id, packet->payload[0]);
+}
+
+// io_tp(x, y, z): DEV only with perms; finite coordinates; the feet go EYE_OFFSET_Y below
+// the given y; position/velocity/ground state reset; the sender gets the ack.
+static void net_handle_teleport(ClientConnection *client, const NetPacket *packet) {
+    if (packet->length != sizeof(NetTeleportPacket)) return;
+    if (!net_require_dev(client, CHAT_PERM_DEV_CHEAT, "tp")) return;
+    NetTeleportPacket tp;
+    memcpy(&tp, packet->payload, sizeof(tp));
+    if (!isfinite(tp.x) || !isfinite(tp.y) || !isfinite(tp.z)) {
+        server_log("[gameserver] tp invalid coords: %g %g %g", tp.x, tp.y, tp.z);
+        return;
+    }
+    Player *player = client->player;
+    if (!player) return; // io_tp would throw on ctx.player null
+    const NetTeleportPacket ack = {tp.x, tp.y - NET_TELEPORT_EYE_OFFSET, tp.z};
+    net_player_teleport(player, ack.x, ack.y, ack.z);
+    net_send_packet(client->fd, NET_PACKET_TELEPORT_ACK, &ack, sizeof(ack));
+    server_log("[gameserver] tp %d -> %g %g %g", client->id, ack.x, ack.y, ack.z);
+}
+
+// One INPUT frame (single or batched): v3.1.1 inputDecode.ts checks in player_accept_input
+// (non-finite fields dropped, delta clamped, seq floor, 240-frame cap). Physics only ever runs
+// from these inputs: the server never takes a position from the client, so a client-side
+// noclip flag or position jump has no effect on the authoritative player.
+static void net_handle_input_frame(ClientConnection *client, const NetInputPacket *net_input) {
+    Input input;
+    if (!client->player || !client->player->active) return;
+    if (g_server->game.end_timer > 0.0f) return; // io_q: isVoteWindow drops the batch
+    net_packet_to_input(&input, net_input);
+    player_accept_input(client->player, &input);
+}
+
+// "q": every frame of the batch, in order, through the same checks as a single INPUT.
+static void net_handle_input_batch(ClientConnection *client, const NetPacket *packet) {
+    NetInputBatchPacket batch;
+    if (!net_packet_read_input_batch(&batch, packet)) return;
+    for (int i = 0; i < batch.count; i++) net_handle_input_frame(client, &batch.frames[i]);
+}
+
+// ENT after its fields were stored (also replayed by accounts.c once a deferred join settled).
+void net_resume_ent(ClientConnection *client, const int spectate) {
+    if (spectate) {
+        client->voice_player = 0; // io_ent spectate: ctx.player = null
+        net_start_spectating(client);
+    } else {
+        client->voice_player = 1; // io_ent: ctx.player = ctx.server.addPlayer(...) on the first ENT
+        net_request_spawn(client);
+        // A spectator plays again once it actually spawned (not on the end screen).
+        if (client->player && client->player->active) net_set_spectating(client, 0);
+    }
+}
+
 // Returns 0 when the client was removed.
 static int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
+    const int first_packet = !client->first_packet_seen;
+    if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     switch (packet->type) {
         case NET_PACKET_HELLO:
+            break;
+        case NET_PACKET_FORWARDED: // net-bridge: the browser's address, before its HELLO
+            if (first_packet) net_handle_forwarded(client, packet);
+            client->first_packet_seen = 1;
+            break;
+        case NET_PACKET_PREMIUM_ACTION: // "prmA"
+            net_handle_premium_action(client, packet);
             break;
         case NET_PACKET_ENT: {
             NetEntPacket ent;
@@ -774,18 +1034,15 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             client->class_index = ent.class_index;
             client->secondary_index = ent.secondary_index;
             client->cosmetics = ent.cosmetics;
+            client->slid_cont = ent.slid_cont;
 
-            if (ent.spectate) {
-                client->voice_player = 0; // io_ent spectate: ctx.player = null
-                net_start_spectating(client);
-            } else {
-                client->voice_player = 1; // io_ent: ctx.player = ctx.server.addPlayer(...) on the first ENT
-                net_request_spawn(client);
-                // A spectator plays again once it actually spawned (not on the end screen).
-                if (client->player && client->player->active) net_set_spectating(client, 0);
-            }
+            // brain-linked: the first ENT waits for the JOIN / account lookup (server/src/accounts.c)
+            if (accounts_gate_ent(client, ent.spectate)) net_resume_ent(client, ent.spectate);
             break;
         }
+        case NET_PACKET_JOIN:
+            accounts_handle_join(client, packet);
+            break;
         case NET_PACKET_SPECTATE_TARGET: {
             const int index = net_spectator_index(client->id);
             if (packet->length != sizeof(NetSpectateTargetPacket) || index < 0) break;
@@ -798,6 +1055,24 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
         case NET_PACKET_CHAT_SEND:
             if (packet->length && packet->length <= sizeof(NetChatSendPacket)) return net_handle_chat(client, packet);
             break;
+        case NET_PACKET_INTERACT: { // io_int
+            NetInteractPacket interact = {0};
+            if (!client->player || !packet->length || packet->length > sizeof(interact)) break;
+            memcpy(&interact, packet->payload, packet->length);
+            game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
+            break;
+        }
+        case NET_PACKET_TERMINAL_MSG: { // "tmc" has no handler: io_default logs it
+            NetTerminalMsgPacket msg;
+            char text[NET_CHAT_TEXT_SIZE];
+            if (packet->length < sizeof(int32_t) + 1 || packet->length > sizeof(msg)) break;
+            memset(&msg, 0, sizeof(msg));
+            memcpy(&msg, packet->payload, packet->length);
+            if (net_chat_sanitize(text, sizeof(text), msg.text, packet->length - sizeof(int32_t))) {
+                server_log("tmc %d,\"%s\" (%s)", (int) msg.uid, text, client->name);
+            }
+            break;
+        }
         case NET_PACKET_PONG:
             net_handle_pong(client, packet);
             break;
@@ -806,15 +1081,20 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             break;
         case NET_PACKET_INPUT: {
             NetInputPacket net_input;
-            Input input;
-
-            if (!client->player || !client->player->active || !net_packet_read_input(&net_input, packet)) break;
-            net_packet_to_input(&input, &net_input);
-            player_queue_input(client->player, &input);
+            if (net_packet_read_input(&net_input, packet)) net_handle_input_frame(client, &net_input);
             break;
         }
-        case NET_PACKET_CYCLE:
-            if (!packet->length) net_cycle_map();
+        case NET_PACKET_INPUT_BATCH: // "q"
+            net_handle_input_batch(client, packet);
+            break;
+        case NET_PACKET_CYCLE: // io_cycle -> cmd_cycle: requireDev, like /cycle
+            if (!packet->length && net_require_dev(client, CHAT_PERM_DEV, "cycle")) net_cycle_map();
+            break;
+        case NET_PACKET_TELEPORT: // "tp" (the mod's Ctrl TP)
+            net_handle_teleport(client, packet);
+            break;
+        case NET_PACKET_CLEAR_LOG: // "clearLog" (the mod's F1): io_clearLog, no permission check
+            if (!packet->length) server_log_clear();
             break;
         case NET_PACKET_SOCIAL_REQUEST:
             net_handle_social(client, packet);
@@ -833,6 +1113,19 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
 int net_poll_client(ClientConnection *client) {
     char buffer[1024];
     int read;
+
+    if (client->fd >= NET_VIRTUAL_FD_BASE) { // UDP peer: whole packets from its knet inbox
+        NetPacket packet;
+        int result;
+        while ((result = net_udp_next_packet(client->fd, &packet)) > 0) {
+            if (!net_handle_packet(client, &packet)) return 0;
+        }
+        if (result < 0) {
+            net_remove_client(client);
+            return 0;
+        }
+        return 1;
+    }
 
     if ((read = recv(client->fd, buffer, sizeof(buffer), 0)) <= 0) {
         if (read < 0 && WOULD_BLOCK(NET_ERRNO)) return 1;
@@ -861,6 +1154,41 @@ int net_poll_client(ClientConnection *client) {
     return 1;
 }
 
+// Block until the listen socket or a client socket has data (5 ms at most, so pending kicks
+// and should_quit are still seen promptly). A fixed 1 ms sleep here delayed every PONG
+// (and input) by up to a millisecond plus timer slack.
+#define NET_WAIT_MAX_FDS 128
+#define NET_WAIT_TIMEOUT_MS 5
+static void net_wait_readable(const int server_socket) {
+#ifdef WIN32
+    (void) server_socket;
+    SLEEP_MILLIS(1);
+#else
+    struct pollfd fds[NET_WAIT_MAX_FDS];
+    nfds_t count = 0;
+    fds[count++] = (struct pollfd) {.fd = server_socket, .events = POLLIN};
+
+    const int udp_fd = net_udp_fd();
+    if (udp_fd >= 0) fds[count++] = (struct pollfd) {.fd = udp_fd, .events = POLLIN};
+    const nfds_t first_client = count;
+
+    pthread_mutex_lock(&g_server->lock);
+    for (size_t i = 0; i < g_server->client_count && count < NET_WAIT_MAX_FDS; i++) {
+        if (g_server->clients[i].fd >= NET_VIRTUAL_FD_BASE) continue; // UDP peers share udp_fd
+        fds[count++] = (struct pollfd) {.fd = g_server->clients[i].fd, .events = POLLIN};
+    }
+    pthread_mutex_unlock(&g_server->lock);
+
+    // a client closed meanwhile only makes this return early (POLLNVAL)
+    if (poll(fds, count, NET_WAIT_TIMEOUT_MS) <= 0) return;
+
+    const double now = net_time();
+    for (nfds_t i = first_client; i < count; i++) {
+        if ((fds[i].revents & POLLIN) && fds[i].fd >= 0 && fds[i].fd < NET_READABLE_FDS) g_net_readable_at[fds[i].fd] = now;
+    }
+#endif
+}
+
 void net_main() {
 
 #ifdef WIN32
@@ -887,12 +1215,17 @@ void net_main() {
     g_server->game.hooks.send = net_game_send;
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
+    g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
     pthread_mutex_unlock(&g_server->lock);
 
     struct sockaddr_in listen_addr;
 
     listen_addr.sin_family = AF_INET;
     listen_addr.sin_addr.s_addr = INADDR_ANY;
+    if (g_gs_config.listen_host[0] && strcmp(g_gs_config.listen_host, "0.0.0.0") &&
+        inet_pton(AF_INET, g_gs_config.listen_host, &listen_addr.sin_addr) != 1) {
+        NET_ERROR(server_socket, "Invalid gameserver.listen_host '%s' (IPv4 address expected), quitting...", g_gs_config.listen_host);
+    }
     listen_addr.sin_port = htons(g_server->config.listen_port);
 
     if (bind(server_socket, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
@@ -905,15 +1238,23 @@ void net_main() {
 
     server_log("Listening on port %d", g_server->config.listen_port);
 
+    // UDP game transport on the same port number (KRUNKNATIVE_NET_UDP=0: TCP only). It also
+    // answers server-info queries, so info_query.c opens no socket of its own.
+    if (net_udp_enabled()) net_udp_open(g_gs_config.listen_host, g_server->config.listen_port);
+
     while (!g_server->should_quit) {
+        net_udp_receive(); // datagrams in (stamps PONG arrival before the lock), acks/resends out
+
         pthread_mutex_lock(&g_server->lock);
 
+        net_udp_service(); // new UDP peers -> net_add_client, dead ones flagged
         for (size_t i = 0; i < g_server->client_count; i++) {
             if (!net_poll_client(&g_server->clients[i])) i--;
         }
         net_process_pending_kicks(); // chat /kick, /ban, /banip (and the CLI running them)
 
         pthread_mutex_unlock(&g_server->lock);
+        net_udp_flush_all(); // the handlers' replies leave now, not after the next poll
 
         struct sockaddr_in client_addr;
 #ifdef WIN32
@@ -926,7 +1267,7 @@ void net_main() {
 
         if (client < 0) {
             if (WOULD_BLOCK(NET_ERRNO)) {
-                SLEEP_MILLIS(1);
+                net_wait_readable(server_socket);
                 continue;
             }
 
@@ -934,6 +1275,7 @@ void net_main() {
         }
 
         net_set_nonblocking(client);
+        net_set_nodelay(client);
 
         ClientConnection conn = {};
 
@@ -947,6 +1289,7 @@ void net_main() {
 
     CLOSE_SOCKET(server_socket);
 }
+
 
 // kickIdleSocket: ["error", "Kicked for inactivity", "000005"], then close.
 static void net_kick_idle(ClientConnection *client, const char *phase) {
@@ -1027,26 +1370,70 @@ static void net_send_pings() {
     }
 }
 
-// Per tick (main thread): pings, then the player sync (Krunker "k"; none on the end screen).
-void net_broadcast_states() {
-    net_send_pings();
-    if (g_server->game.end_timer > 0.0f) return;
-
+// gameserver.ts tick: "l" to every playing connection at NET_RECON_SEND_HZ with the last
+// input procInputs drained (none before the first one of a life), and at once after a
+// server-driven change of its movement (teleport, changePosition recon, a noclip flip).
+// Intentional difference: those snaps ack player->input_seq instead of v3.1.1's
+// MAX_SAFE_INTEGER. The state is exactly the one after that input, so the client replays its
+// in-flight inputs on top of the new position like the server will, instead of dropping them
+// and rubber-banding back once the next 1 Hz "l" arrives.
+static void net_send_reconciliation(void) {
+    const double now = net_time();
     for (size_t i = 0; i < g_server->client_count; i++) {
         ClientConnection *client = &g_server->clients[i];
+        Player *player = client->player;
+        if (!net_recon_due(player, now, &client->next_recon_at)) continue;
 
-        for (size_t j = 0; j < g_server->game.player_count; j++) {
-            Player *player = g_server->game.players[j];
-            if (!player || !player->active) continue;
+        NetReconPacket packet;
+        net_packet_from_recon(&packet, player, player->input_seq);
+        net_send_packet(client->fd, NET_PACKET_RECON, &packet, sizeof(packet));
+    }
+}
 
-            NetStatePacket packet;
-            net_packet_from_player(&packet, player);
-            net_send_packet(client->fd, NET_PACKET_STATE, &packet, sizeof(packet));
+// Per tick (main thread): pings, reconciliation ("l"), then the player sync (Krunker "k",
+// NET_STATE_SEND_HZ; none on the end screen).
+static void net_broadcast_states_tick(void);
+
+// Per tick: the sync below, then the UDP peers' queued frames leave at once (the net
+// thread would only flush them after its next poll wake-up).
+void net_broadcast_states() {
+    net_broadcast_states_tick();
+    net_udp_flush_all();
+}
+
+static void net_broadcast_states_tick(void) {
+    net_send_pings();
+    if (g_server->game.end_timer > 0.0f) return;
+    net_send_reconciliation();
+
+    static double next_state_at; // gameserver.ts K_PACKET_INTERVAL_MS
+    const double state_now = net_time();
+    if (state_now < next_state_at) return;
+    next_state_at = state_now + 1.0 / NET_STATE_SEND_HZ;
+
+    NetStatePacket states[256];
+    size_t state_count = 0;
+    for (size_t j = 0; j < g_server->game.player_count && state_count < sizeof(states) / sizeof(states[0]); j++) {
+        Player *player = g_server->game.players[j];
+        if (player && player->active) net_packet_from_player(&states[state_count++], player);
+    }
+    if (!state_count) return;
+
+    static NetSendBatch batch; // main thread only
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        const int fd = g_server->clients[i].fd;
+        batch.length = 0;
+        for (size_t j = 0; j < state_count; j++) {
+            if (net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]))) continue;
+            net_batch_flush(fd, &batch); // full (> ~140 players): send and start the next batch
+            net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]));
         }
+        net_batch_flush(fd, &batch);
     }
 }
 
 void net_cleanup() {
+    net_udp_shutdown(); // after server_disconnect_all: the last ERROR / LEAVE still reach UDP peers
 #ifdef WIN32
     WSACleanup();
 #endif

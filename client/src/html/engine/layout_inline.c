@@ -253,7 +253,11 @@ static void state_metrics(Box *b, float *A, float *D, float *lt, float *lb)
     float lh = layout_line_height(b);
     float a = b->fm.ascent, d = b->fm.descent;
     float lead = lh - (a + d);
-    *A = a; *D = d; *lt = lead * 0.5f; *lb = lead - lead * 0.5f;
+    /* Blink (CalculateLeadingSpace): the ascent side gets floor(leading / 2),
+     * the descent side the rest, so an odd or fractional leading never puts
+     * the baseline on a fractional px (text would round differently). */
+    float top = floorf(lead * 0.5f + 1e-4f);
+    *A = a; *D = d; *lt = top; *lb = lead - top;
 }
 
 static int top_state(Lines *L) { return L->sp > 0 ? L->stack[L->sp - 1] : 0; }

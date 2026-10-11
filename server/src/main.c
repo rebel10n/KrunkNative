@@ -1,4 +1,8 @@
 #include <server_cli.h>
+#include <server_accounts.h>
+#include <brain.h>
+#include <info_query.h>
+#include <rcon.h>
 #include <pthread.h>
 #include <pcg_basic.h>
 #include <errno.h>
@@ -104,13 +108,50 @@ static void server_block_signals(const int block) {
 }
 #endif
 
+// ------------------------------------------------------------------ drain (graceful stop)
+//
+// First SIGINT / SIGTERM / SIGHUP / console `drain` / Ctrl+C at the prompt: refuse new
+// players, tell the coordinator, let the round finish (at most gameserver.shutdown_grace
+// seconds), then stop. A second request stops at once.
+
+static volatile sig_atomic_t g_drain_requested;
+static char g_drain_why[64];
+static int g_drain_active;
+static float g_drain_deadline;
+
+void server_request_drain(const char *why) {
+    if (g_drain_requested) {
+        server_request_stop(SERVER_STOP_SIGNAL, why && *why ? why : "second stop request");
+        return;
+    }
+    snprintf(g_drain_why, sizeof(g_drain_why), "%s", why ? why : "");
+    g_drain_requested = 1;
+}
+
+static void server_tick_drain(void) {
+    if (!g_drain_requested || g_server->should_quit) return;
+    if (!g_drain_active) {
+        g_drain_active = 1;
+        g_drain_deadline = g_server->now + g_gs_config.shutdown_grace;
+        accounts_begin_drain(g_drain_why);
+        if (g_gs_config.shutdown_grace > 0.0f && !accounts_drained())
+            server_log("Stopping after this round (at most %.0f s; signal again or 'quit' to stop now)", g_gs_config.shutdown_grace);
+    }
+    if (accounts_drained() || g_server->now >= g_drain_deadline) {
+        char detail[96];
+        snprintf(detail, sizeof(detail), "%s, drained", g_drain_why[0] ? g_drain_why : "drain");
+        server_request_stop(SERVER_STOP_SIGNAL, detail);
+    }
+}
+
 static void server_poll_signals(void) {
     const int pending = g_pending_signal;
     if (!pending) return;
+    g_pending_signal = 0;
 
     char detail[64];
     snprintf(detail, sizeof(detail), "received %s", server_signal_name(pending));
-    server_request_stop(SERVER_STOP_SIGNAL, detail);
+    server_request_drain(detail);
 }
 
 // ------------------------------------------------------------------ arguments
@@ -136,7 +177,64 @@ typedef struct {
     const char *mode;   // --mode: a Krunker mode alias / name / id, or "rotation"
     float round_seconds; // --round-seconds: round length override (debug: quick end screen / rotation tests)
     int perms;          // --perms (or PERMS=1): v3.1.1 PERMS, DEV-only chat commands
+    int open_cheats;    // --open-cheats: v3.1.1's perms-off cheats for everyone
+    // backend / config (doc/backend.md section 8); NULL / 0 = not given on the command line
+    const char *config_path; // --config FILE
+    const char *brain_url;   // --brain URL
+    const char *region;      // --region ID
+    const char *node_id;     // --node-id ID
+    const char *name;        // --name TEXT
+    const char *public_host; // --public-host HOST
+    unsigned short public_port; // --public-port PORT
+    int max_players;         // --max-players N
+    // dedicated server (doc/backend.md 8.7)
+    const char *cfg_path;    // --cfg FILE (server.cfg; "none" = skip the search)
+    const char *hostname;    // --hostname TEXT (= --name)
+    const char *password;    // --password TEXT (sv_password)
+    const char *log_file;    // --log FILE
+    int online_mode;         // --online-mode / --offline-mode (1 / 0, -1 not given)
+    const char *rcon_target; // --rcon [HOST:]PORT: client mode
+    const char *rcon_password; // --rcon-password PW
+    int rcon_argc;           // trailing words after --rcon ... = the command
+    char **rcon_argv;
+    int version;             // --version
 } ServerArgs;
+
+// "--flag VALUE" / "--flag=VALUE": 1 matched (value set, NULL when missing), 0 other flag.
+static int arg_value(const int argc, char **argv, int *i, const char *flag, const char **value) {
+    const size_t n = strlen(flag);
+    if (!strncmp(argv[*i], flag, n) && argv[*i][n] == '=') {
+        *value = argv[*i] + n + 1;
+        return 1;
+    }
+    if (strcmp(argv[*i], flag)) return 0;
+    *value = ++*i < argc ? argv[*i] : NULL;
+    return 1;
+}
+
+// --gameserver.<key>=<value> / --set gameserver.<key>=<value> (knsvc/config.h style).
+// Other sections' overrides (--set brain.port=..., --database.name=...) are accepted and
+// ignored: backend-up passes the same arguments to every service.
+static int parse_config_override(const char *spec) {
+    const char *dot = strchr(spec, '.');
+    const char *eq = strchr(spec, '=');
+    if (dot && eq && dot < eq && strncmp(spec, "gameserver.", 11)) {
+        // brain.host / brain.port feed gameserver.brain_url "auto" (server/src/config.c)
+#ifdef WIN32
+        if (!strncmp(spec, "brain.host=", 11)) _putenv_s("KN_BRAIN_HOST", eq + 1);
+        if (!strncmp(spec, "brain.port=", 11)) _putenv_s("KN_BRAIN_PORT", eq + 1);
+#else
+        if (!strncmp(spec, "brain.host=", 11)) setenv("KN_BRAIN_HOST", eq + 1, 1);
+        if (!strncmp(spec, "brain.port=", 11)) setenv("KN_BRAIN_PORT", eq + 1, 1);
+#endif
+        return 1;
+    }
+    if (strncmp(spec, "gameserver.", 11)) return 0;
+    if (!eq || eq == spec + 11) return 0;
+    char key[64];
+    snprintf(key, sizeof(key), "%.*s", (int) (eq - spec - 11), spec + 11);
+    return gs_config_set_cli(key, eq + 1) == 0;
+}
 
 static int parse_args(const int argc, char **argv, ServerArgs *args) {
     for (int i = 1; i < argc; i++) {
@@ -176,6 +274,85 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
             continue;
         }
 
+        if (args->rcon_target && arg[0] != '-') { // server_bin --rcon HOST:PORT status
+            args->rcon_argc = argc - i;
+            args->rcon_argv = argv + i;
+            break;
+        }
+        if (!strcmp(arg, "--online-mode") || !strcmp(arg, "--offline-mode")) {
+            args->online_mode = arg[3] == 'n';
+            continue;
+        }
+        if (!strcmp(arg, "--version") || !strcmp(arg, "-v")) {
+            args->version = 1;
+            continue;
+        }
+        {
+            static const struct {
+                const char *flag;
+                size_t offset;
+            } ds_flags[] = {
+                {"--cfg", offsetof(ServerArgs, cfg_path)},           {"--hostname", offsetof(ServerArgs, hostname)},
+                {"--password", offsetof(ServerArgs, password)},      {"--log", offsetof(ServerArgs, log_file)},
+                {"--rcon", offsetof(ServerArgs, rcon_target)},       {"--rcon-password", offsetof(ServerArgs, rcon_password)},
+            };
+            const char *v = NULL;
+            int hit = 0;
+            for (size_t f = 0; f < sizeof(ds_flags) / sizeof(ds_flags[0]) && !hit; f++) {
+                if (!arg_value(argc, argv, &i, ds_flags[f].flag, &v)) continue;
+                if (!v) return 0;
+                *(const char **) ((char *) args + ds_flags[f].offset) = v;
+                hit = 1;
+            }
+            if (hit) continue;
+        }
+
+        if (!strcmp(arg, "--open-cheats")) {
+            args->open_cheats = 1;
+            continue;
+        }
+
+        const char *value = NULL;
+        if (arg_value(argc, argv, &i, "--config", &args->config_path)) {
+            if (!args->config_path) return 0;
+            continue;
+        }
+        static const struct {
+            const char *flag;
+            size_t offset;
+        } string_flags[] = {
+            {"--brain", offsetof(ServerArgs, brain_url)},     {"--region", offsetof(ServerArgs, region)},
+            {"--node-id", offsetof(ServerArgs, node_id)},     {"--name", offsetof(ServerArgs, name)},
+            {"--public-host", offsetof(ServerArgs, public_host)},
+        };
+        int matched = 0;
+        for (size_t f = 0; f < sizeof(string_flags) / sizeof(string_flags[0]) && !matched; f++) {
+            if (!arg_value(argc, argv, &i, string_flags[f].flag, &value)) continue;
+            if (!value) return 0;
+            *(const char **) ((char *) args + string_flags[f].offset) = value;
+            matched = 1;
+        }
+        if (matched) continue;
+        if (arg_value(argc, argv, &i, "--public-port", &value)) {
+            if (!value || !parse_port(value, &args->public_port)) return 0;
+            continue;
+        }
+        if (arg_value(argc, argv, &i, "--max-players", &value)) {
+            char *end = NULL;
+            const long n = value ? strtol(value, &end, 10) : 0;
+            if (!value || !end || *end || n < 1 || n > 31) return 0;
+            args->max_players = (int) n;
+            continue;
+        }
+        if (arg_value(argc, argv, &i, "--set", &value)) {
+            if (!value || !parse_config_override(value)) return 0;
+            continue;
+        }
+        if (!strncmp(arg, "--", 2) && strchr(arg, '.') && strchr(arg, '=') && strchr(arg, '.') < strchr(arg, '=')) {
+            if (!parse_config_override(arg + 2)) return 0; // --gameserver.<key>=v (other sections ignored)
+            continue;
+        }
+
         if (!strcmp(arg, "--headless") || !strcmp(arg, "--no-cli")) {
             args->headless = 1;
             continue;
@@ -197,16 +374,55 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
 
 static void print_usage(FILE *stream, const char *argv0) {
     fprintf(stream,
-            "Usage: %s [--port PORT] [--mode MODE] [--headless] [map.json]\n"
+            "KrunkNative dedicated server (one lobby per process; doc/backend.md section 8).\n"
+            "Usage: %s [options] [map.json]\n"
+            "       %s --rcon [HOST:]PORT --rcon-password PW [command ...]   (remote console client)\n"
+            "\n"
+            "Hosting: put a server.cfg next to the binary (or in ./cfg/) and run it with no flags.\n"
+            "Example server.cfg (any gameserver key works; \"//\" comments):\n"
+            "  hostname \"My Krunker Server\"     port 21015          maxplayers 8\n"
+            "  mapcycle Burg,Sandstorm,Kanji     mode ffa,tdm        sv_password \"\"\n"
+            "  rcon_password \"change-me\"       rcon_port 27015     region us-nj\n"
+            "  online_mode 1                     // verify accounts with the central auth service\n"
+            "  coordinator_url ws://coord.example:5050/mm/internal/ws   coordinator_secret \"...\"\n"
+            "  finder_url https://matchmaker.krunker.party   // opt-in public listing\n"
+            "  public_ip 203.0.113.7   public_port 21015    log_file logs/server.log\n"
+            "\n"
+            "Dedicated server:\n"
+            "  --cfg FILE           server.cfg to load (default ./server.cfg, then ./cfg/server.cfg; 'none' = skip)\n"
+            "  --hostname TEXT      server name in lists (server.cfg hostname)\n"
+            "  --password TEXT      players need this password to join (sv_password)\n"
+            "  --online-mode | --offline-mode   verify every player's account / guests only\n"
+            "  --log FILE           also append the console log to FILE\n"
+            "  --version            print the version and exit\n"
+            "\n"
+            "Game:\n"
+            "  --port PORT   TCP port to listen on (default %d); the server-info query answers on UDP PORT\n"
             "  --port PORT   TCP port to listen on (default %d)\n"
             "  --mode MODE   game mode: alias (tdm, point, ctf, infect, gun, ...), name or id;\n"
             "                'rotation' plays Krunker's public rotation (default: ffa)\n"
             "  --round-seconds S  round length in seconds instead of the mode's game time (testing)\n"
             "  --perms       restrict DEV chat commands (/kick, /map, /god, ...) to op'd or local clients\n"
             "                (also PERMS=1); by default everyone may run them, like the v3.1.1 server\n"
+            "  --open-cheats cheats (/noclip /god /tp, the noclip key ...) for everyone while perms are off,\n"
+            "                like v3.1.1 (gameserver.cheats \"all\"); by default only DEV accounts, ops,\n"
+            "                the custom host and clients on this machine get them\n"
             "  --headless    no interactive console (implied when stdin/stdout is not a terminal)\n"
-            "Stop with 'quit', Ctrl+C, Ctrl+D or SIGTERM.\n",
-            argv0, NET_DEFAULT_PORT);
+            "\n"
+            "Coordinator / config (config/config.json \"gameserver\", doc/backend.md section 8):\n"
+            "  --config FILE        config file (default: $KN_CONFIG, else config/config.json)\n"
+            "  --brain URL          kn_brain internal socket, e.g. ws://127.0.0.1:5050/mm/internal/ws\n"
+            "  --region ID  --node-id ID  --name TEXT  --public-host HOST  --public-port PORT\n"
+            "  --max-players N      lobby size (1-31)\n"
+            "  --gameserver.KEY=VALUE  any gameserver key (also --set gameserver.KEY=VALUE)\n"
+            "  Precedence: command line > KN_GAMESERVER_* env > server.cfg > config.json > defaults.\n"
+            "\n"
+            "Console: status, players, kick, ban, map/changelevel, mode, say, round, op, drain, quit, help\n"
+            "(also every Krunker chat command without the slash). The same commands work over rcon.\n"
+            "Ctrl+C / SIGINT / SIGTERM drain: no new players, the round finishes (up to shutdown_grace\n"
+            "seconds, default 10), stats are committed, then the server exits; a second signal or 'quit'\n"
+            "stops at once.\n",
+            argv0, argv0, NET_DEFAULT_PORT);
 }
 
 // ------------------------------------------------------------------ startup checks
@@ -331,8 +547,11 @@ static void server_run_tick_loop(void) {
         pthread_mutex_lock(&g_server->lock);
         g_server->now = now;
         game_tick(&g_server->game, now, delta);
+        accounts_tick(now); // brain events, join timeouts, stats commits, lobby pushes
         net_check_idle_clients(now);
         net_broadcast_states();
+        info_query_update(now);
+        server_tick_drain();
 
         clock_gettime(CLOCK_MONOTONIC, &tick_ts);
         const float tick_ms = (float) ((timespec_seconds(&tick_ts) - tick_start) * 1000.0);
@@ -389,7 +608,8 @@ int main(int argc, char **argv) {
     pcg32_srandom(time(NULL), (uint64_t) (uintptr_t) rand_memory);
     free(rand_memory);
 
-    ServerArgs args = {.port = NET_DEFAULT_PORT};
+    ServerArgs args = {0}; // port 0: from the config (default NET_DEFAULT_PORT)
+    args.online_mode = -1;
 
     if (!parse_args(argc, argv, &args)) {
         print_usage(stderr, argv[0]);
@@ -399,6 +619,48 @@ int main(int argc, char **argv) {
     if (args.help) {
         print_usage(stdout, argv[0]);
         return 0;
+    }
+    if (args.version) {
+        printf("KrunkNative server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
+        return 0;
+    }
+    if (args.rcon_target) return rcon_client_main(args.rcon_target, args.rcon_password, args.rcon_argc, args.rcon_argv);
+    if (args.cfg_path) gs_config_set_cfg_path(args.cfg_path);
+
+    // config/config.json "gameserver" < KN_GAMESERVER_* env < these flags
+    gs_config_defaults(&g_gs_config);
+    char config_error[256] = "";
+    if (gs_config_load(&g_gs_config, args.config_path, args.config_path != NULL, config_error, sizeof(config_error))) {
+        fprintf(stderr, "Config error: %s\n", config_error);
+        return 2;
+    }
+    GsConfig *cfg = &g_gs_config;
+    if (args.port) cfg->listen_port = args.port;
+    if (args.brain_url) snprintf(cfg->brain_url, sizeof(cfg->brain_url), "%s", args.brain_url);
+    if (args.region) snprintf(cfg->region, sizeof(cfg->region), "%s", args.region);
+    if (args.node_id) snprintf(cfg->node_id, sizeof(cfg->node_id), "%s", args.node_id);
+    if (args.name) snprintf(cfg->name, sizeof(cfg->name), "%s", args.name);
+    if (args.hostname) snprintf(cfg->name, sizeof(cfg->name), "%s", args.hostname);
+    if (args.password) snprintf(cfg->password, sizeof(cfg->password), "%s", args.password);
+    if (args.log_file) snprintf(cfg->log_file, sizeof(cfg->log_file), "%s", args.log_file);
+    if (args.online_mode >= 0) cfg->online_mode = args.online_mode;
+    if (args.public_host) snprintf(cfg->public_host, sizeof(cfg->public_host), "%s", args.public_host);
+    if (args.public_port) cfg->public_port = args.public_port;
+    if (args.max_players) {
+        cfg->max_players = args.max_players;
+        memset(cfg->mode_max_players, 0, sizeof(cfg->mode_max_players));
+        cfg->team_size = 0;
+        memset(cfg->mode_team_size, 0, sizeof(cfg->mode_team_size));
+    }
+    if (args.round_seconds > 0.0f) {
+        cfg->round_seconds = args.round_seconds;
+        memset(cfg->mode_round_seconds, 0, sizeof(cfg->mode_round_seconds));
+    }
+    if (args.perms) cfg->perms = 1;
+    if (args.open_cheats) cfg->cheats_open = 1;
+    if (strchr(cfg->node_id, ':')) {
+        fprintf(stderr, "--node-id '%s' must not contain ':'\n", cfg->node_id);
+        return 2;
     }
 
     cJSON *startup_map = NULL;
@@ -412,8 +674,8 @@ int main(int argc, char **argv) {
 
     char port_error[128] = "";
 
-    if (!server_port_available(args.port, port_error, sizeof(port_error))) {
-        fprintf(stderr, "Cannot listen on port %u: %s\n", (unsigned int) args.port, port_error);
+    if (!server_port_available(cfg->listen_port, port_error, sizeof(port_error))) {
+        fprintf(stderr, "Cannot listen on port %u: %s\n", (unsigned int) cfg->listen_port, port_error);
         cJSON_Delete(startup_map);
         return 1;
     }
@@ -421,27 +683,17 @@ int main(int argc, char **argv) {
     static Server INSTANCE = {0};
     g_server = &INSTANCE;
 
-    g_server->config.tick_rate = 30;
-    g_server->config.listen_port = args.port;
-    g_server->config.max_players = 8;
-    g_server->config.idle_timeout = 60.0f;
-    g_server->config.idle_move_threshold = 1.0f;
-    g_server->config.perms = args.perms || (getenv("PERMS") && !strcmp(getenv("PERMS"), "1"));
+    g_server->config.tick_rate = cfg->tick_rate;
+    g_server->config.listen_port = cfg->listen_port;
+    g_server->config.max_players = (unsigned short) cfg->max_players; // per mode: accounts_round_changed()
+    g_server->config.idle_timeout = cfg->idle_timeout;
+    g_server->config.idle_move_threshold = cfg->idle_move_threshold;
+    g_server->config.perms = cfg->perms; // --perms, PERMS=1 or gameserver.perms
+    g_server->config.cheats_open = cfg->cheats_open;
     pthread_mutex_init(&g_server->lock, NULL);
 
-    size_t startup_map_count = 0;
-    const cJSON **startup_maps = map_list_with_custom(startup_map, &startup_map_count);
-
-    if (startup_map && !startup_maps) {
-        fprintf(stderr, "Failed to allocate startup map list\n");
-        cJSON_Delete(startup_map);
-        return 1;
-    }
-
-    // --mode: one mode for every round (Krunker config.modes = [id]), or the public rotation
-    int *startup_modes = NULL;
-    size_t startup_mode_count = 0;
-
+    // --mode: one mode for every round (Krunker config.modes = [id]), or the public rotation;
+    // it replaces gameserver.modes of the config
     if (args.mode) {
         const int rotation = !strcmp(args.mode, "rotation");
         const int mode_id = rotation ? -1 : mode_find(args.mode);
@@ -452,16 +704,18 @@ int main(int argc, char **argv) {
             return 2;
         }
 
-        startup_mode_count = rotation ? sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]) : 1;
-        startup_modes = calloc(startup_mode_count, sizeof(int));
-        if (!startup_modes) startup_mode_count = 0;
-        else if (rotation) memcpy(startup_modes, g_rotation_modes, sizeof(g_rotation_modes));
-        else startup_modes[0] = mode_id;
+        cfg->mode_count = 0;
+        if (rotation) {
+            for (size_t m = 0; m < sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]); m++) cfg->modes[cfg->mode_count++] = g_rotation_modes[m];
+        } else {
+            cfg->modes[cfg->mode_count++] = mode_id;
+        }
     }
 
+    // map list: the command line map.json + Krunker's rotation, else gameserver.maps /
+    // custom_map_dirs, else Krunker's rotation; GameConfig from gameserver.game
     g_server->game.server = g_server;
-    game_configure(&g_server->game, NULL, startup_maps, startup_map_count, startup_modes, startup_mode_count, NULL, 0, NULL, 0);
-    g_server->game.round_length = args.round_seconds; // 0: config.game_time
+    accounts_configure_public(&g_server->game, startup_map);
     game_init(&g_server->game, startup_map ? 0 : -1, -1, 0);
 
     // Interactive only when a human is on both ends; pipes, /dev/null, systemd
@@ -472,6 +726,8 @@ int main(int argc, char **argv) {
     // mode too; there it is only a printer (replxx_input is never called and
     // the terminal mode is never touched).
     g_replxx = replxx_init();
+    if (cfg->log_file[0] && server_log_open_file(cfg->log_file))
+        fprintf(stderr, "Cannot open log file %s: %s (logging to the console only)\n", cfg->log_file, strerror(errno));
 
     server_log("Starting KrunkNative server v%d.%d.%d%s", g_server_version.major, g_server_version.minor, g_server_version.patch,
                interactive ? "" : " (headless)");
@@ -484,6 +740,12 @@ int main(int argc, char **argv) {
         server_log_error("No playable map loaded");
     }
 
+    // backend: lobby id, bans file, per-mode lobby size / round length, brain thread
+    pthread_mutex_lock(&g_server->lock);
+    accounts_init();
+    pthread_mutex_unlock(&g_server->lock);
+    gs_config_log_summary(cfg);
+
     server_block_signals(1);
 
     pthread_t net_thread;
@@ -492,6 +754,8 @@ int main(int argc, char **argv) {
     if (!net_started) {
         server_request_stop(SERVER_STOP_ERROR, "could not start network thread");
     } else if (!server_wait_for_net_startup()) {
+        info_query_start(); // server-info query (UDP) + optional finder heartbeat
+        rcon_start();       // local rcon (rcon_port + rcon_password)
         if (cli_start(interactive)) server_log_error("Interactive console unavailable, running headless");
         if (cli_is_interactive()) server_log("Type 'help' for commands, 'quit' or Ctrl+C to stop.");
     }
@@ -514,12 +778,20 @@ int main(int argc, char **argv) {
     // 2. Stop accepting connections: net_main() exits on should_quit and closes the listen socket.
     if (net_started) pthread_join(net_thread, NULL);
 
-    // 3. Close every client socket.
+    // 3. Close every client socket (the backend first commits what everyone played).
+    //    Backend: drain + lobby-down to the brain.
+    pthread_mutex_lock(&g_server->lock);
+    accounts_shutdown();
+    pthread_mutex_unlock(&g_server->lock);
+
     const size_t client_count = g_server->client_count;
     server_disconnect_all();
     if (client_count) server_log("Disconnected %lu client%s", (unsigned long) client_count, client_count == 1 ? "" : "s");
 
     net_cleanup();
+    rcon_stop();
+    info_query_stop(); // final "shutdown" heartbeat to the finder
+    brain_stop(3000); // wait for the commits' replies, close the brain socket
 
     // 4. Save history and restore the terminal before anything else is printed.
     cli_shutdown();
@@ -529,6 +801,7 @@ int main(int argc, char **argv) {
     const int exit_code = reason == SERVER_STOP_ERROR ? 1 : 0;
     printf("KrunkNative server stopped.\n");
     fflush(stdout);
+    server_log_open_file(NULL);
 
 #ifdef WIN32
     g_shutdown_complete = 1;

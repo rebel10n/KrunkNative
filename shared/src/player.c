@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <ai.h>
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -58,6 +59,11 @@ void player_spawn(Player *player) {
     player->reloads = NULL;
     player->input_queue = NULL;
     player->input_queue_size = 0;
+    // A new life: no input processed yet (gameserver.ts addPlayer / respawn: _lastDecodedSN = -1,
+    // inputSN 0 = no "l" until procInputs drained one); the client restarts its counter at 0.
+    player->input_seq = -1;
+    player->recon_snap = 0;
+    player->has_shot_vel_obj = 0;
 
     player->active = 1;
 
@@ -173,6 +179,9 @@ void player_spawn(Player *player) {
     // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker) and,
     // on the authority, the team spawn point (getSpawnPoint(team)).
     mode_player_spawned(player->game, player);
+
+    // A player that reached a check point respawns there (shared/src/triggers.c).
+    if (game_is_authority(player->game)) game_spawn_at_checkpoint(player->game, player);
 }
 
 void player_queue_input(Player *player, const Input *input) {
@@ -181,6 +190,43 @@ void player_queue_input(Player *player, const Input *input) {
 
     player->input_queue = new_input_queue;
     player->input_queue[player->input_queue_size++] = *input;
+}
+
+// v3.1.1 server/inputDecode.ts decodeQ for one frame from the network. Rejects non-finite
+// fields; clamps delta to [0, max_delta] (sanitizeDelta; procInputs clamps again); drops
+// seq <= the last processed or queued seq (_lastDecodedSN), except a counter restart
+// (maybeRebaseForSNRestart: far below the floor, or back near zero), which clears the stale
+// queue; keeps at most PLAYER_INPUT_QUEUE_MAX frames by dropping the oldest (trimInputQueue).
+// v3.1.1 has no speed-hack check and neither does this.
+#define PLAYER_INPUT_QUEUE_MAX 240   // MAX_QUEUED_INPUTS
+#define PLAYER_INPUT_SEQ_RESTART 100 // SN_RESTART_THRESHOLD
+
+int player_accept_input(Player *player, Input *input) {
+    if (!player || !input) return 0;
+    if (!isfinite(input->delta) || !isfinite(input->x_dir) || !isfinite(input->y_dir) || !isfinite(input->slowdown)) return 0;
+    input->delta = input->delta < 0.0f ? 0.0f : MIN(input->delta, game_constants.max_delta);
+    if (input->move_dir < -1 || input->move_dir > 7) input->move_dir = -1; // no movement key, like an unknown input[4]
+    if (input->swap > 4) input->swap = 0;                                  // input[11] codes are 0..4
+
+    int floor = player->input_seq;
+    if (player->input_queue_size && player->input_queue[player->input_queue_size - 1].seq > floor) {
+        floor = player->input_queue[player->input_queue_size - 1].seq;
+    }
+    if (floor >= 0 && input->seq <= floor) {
+        const int far_below = input->seq < floor - PLAYER_INPUT_SEQ_RESTART;
+        const int fresh = input->seq < PLAYER_INPUT_SEQ_RESTART && input->seq < floor;
+        if (!far_below && !fresh) return 0; // replay / out of order
+        player->input_queue_size = 0;       // restarted counter: the old life's frames are stale
+        player->input_seq = input->seq - 1;
+    }
+
+    if (player->input_queue_size >= PLAYER_INPUT_QUEUE_MAX) {
+        const size_t drop = player->input_queue_size - PLAYER_INPUT_QUEUE_MAX + 1;
+        memmove(player->input_queue, player->input_queue + drop, (player->input_queue_size - drop) * sizeof(Input));
+        player->input_queue_size -= drop;
+    }
+    player_queue_input(player, input);
+    return 1;
 }
 
 // ---------------------------------------------------------------- movement feel
@@ -259,7 +305,10 @@ static int player_tween_advance(PlayerTween *tween, float *value, const float de
     if (!tween->active) return 0;
 
     tween->time += delta;
-    const float k = tween->duration > 0.0f ? MIN(1.0f, tween->time / tween->duration) : 1.0f;
+    // TWEEN.js measures elapsed time on the ms clock, so a 100 ms tween stepped 50 x 2 ms
+    // completes on the 50th frame; summed float seconds can fall a hair short of the
+    // duration and finish (and chain the landing's Elastic settle) one frame late.
+    const float k = tween->duration > 0.0f && tween->time < tween->duration - MOVEMENT_TIMER_EPSILON ? tween->time / tween->duration : 1.0f;
     *value = player_tween_value(tween, k);
 
     if (k < 1.0f) return 0;
@@ -510,25 +559,6 @@ int player_collides(Player *player, const Object *object, const float pad) {
     return 0;
 }
 
-// game.onTrigger(player, object): server only (io), team-filtered, singleUse / chance
-// gated, then triggers.actions[action].execute. Only "Refill Player Knife" is ported.
-static void player_on_trigger(Player *player, Object *object) {
-    Game *game = player->game;
-    if (!game_is_authority(game)) return;
-    if (object->team && game->mode && game->mode->config.teams && (int) object->team != player->team) return;
-    if (object->trigger_single_use && object->triggered) return;
-    if (object->trigger_chance && !((int) pcg32_boundedrand(101) <= object->trigger_chance)) return; // randInt(0, 100) <= chance
-    object->triggered = 1;
-    switch (object->trigger_action) {
-        case TRIGGER_ACTION_REFILL_KNIFE: // h.refillKnife(); g.send(h.id, "rfl")
-            player->can_throw = 1;
-            game_send(game, player->uid, NET_PACKET_REFILL, NULL, 0);
-            break;
-        default: // TODO: the other trigger actions
-            break;
-    }
-}
-
 void player_do_map_collisions(Player *player, const Input *input, const float move_dir, const int can_jump, const float delta, const int recon) {
     float *max_ramp_height = NULL;
 
@@ -543,16 +573,42 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
         }
 
         const int collides = player_collides(player, object, 0.0f);
+        Game *game = player->game;
+        const int event = game_object_event(object);
 
-        // TODO: interactable's
-        // TODO: collision trigger (onCollision, onTrigger)
-        // TODO: onInteract
-        // TODO: onEnter
+        // (the gate / bank / terminal interact prompts: game_interact_prompt, shared/src/interact.c)
 
-        if (object->trigger_on_enter) {
+        if (event == TRIGGER_EVENT_ON_COLLISION) {
+            // onCollision: game.now - lastColT >= onColT ((constantEvent || 1) s); lastColT starts at 0
+            TriggerData *trig = object->trig;
+            const float now = game->now * 1000.0f;
+            const float cooldown = (float) (trig->constant_event ? trig->constant_event : 1) * 1000.0f;
+            if (!trig->last_collision || now - trig->last_collision >= cooldown) {
+                trig->last_collision = fmaxf(now, 1e-3f);
+                game_on_trigger(game, player, (Object *) object, NULL);
+            }
+        }
+
+        if (event == TRIGGER_EVENT_ON_INTERACT) {
+            // onInteract: hold M1 on the ground for (constantEvent || 1) s (changeInteract type 4,
+            // the prompt and #interactProg come from game_interact_prompt / interact_progress)
+            if (input->shoot && player->on_ground) {
+                const float interact_ms = (float) (object->trig->constant_event ? object->trig->constant_event : 1) * 1000.0f;
+                player->doing_interact = 1;
+                player->making_progress = 1;
+                player->interact_progress += delta * 1000.0f / interact_ms;
+                if (player->interact_progress >= 1.0f) {
+                    player->interact_progress = 0.0f;
+                    game_on_trigger(game, player, (Object *) object, NULL);
+                }
+            }
+            continue; // walk-through: the jumpPad / zone / collision else-chain is skipped
+        }
+
+        if (event == TRIGGER_EVENT_ON_ENTER) {
             // onEnter: fires when the player steps in (inObject != sid); nothing else of the
             // object applies (the jumpPad / zone / collision else-chain is skipped)
-            if (player->in_object != (int) i + 1) player_on_trigger(player, (Object *) object);
+            if (player->in_object != (int) i + 1) game_on_trigger(game, player, (Object *) object, NULL);
             player->in_object = (int) i + 1;
             continue;
         }
@@ -573,12 +629,12 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             (!object->team_zone || player->game->mode->config.teams && object->team != player->team)
         ) {
             if (object->teleporter) {
-                // TODO: check teleport
+                game_check_teleport(player->game, player, (Object *) object);
                 continue;
             }
 
             if (object->checkpoint) {
-                // TODO: set checkpoint
+                game_set_checkpoint(player->game, player, (Object *) object);
                 continue;
             }
 
@@ -592,10 +648,8 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                 continue;
             }
 
-            if (object->trigger) {
-                // TODO: triggers
-                continue;
-            }
+            // A TRIGGER without onEnter / onInteract is a solid block (objects.js addTrigger:
+            // Krunker's `trigger` flag in this chain is the CTF flag zone, not this prefab).
 
             if (object->kill && !player->god_mode) {
                 // TODO: reset flag
@@ -880,9 +934,45 @@ void player_inspect_weapon(Player *player) {
     }
 }
 
-void player_proc_input(Player *player, const Input *input, const int recon, const int move_lock) {
-    // const float delta = CLAMP(input->delta, game_constants.min_delta, game_constants.max_delta);
-    const float delta = MIN(input->delta, game_constants.max_delta);
+// JS Number.prototype.round(3) (2.js): Math.round(v * 1000) / 1000, halves toward +inf.
+float player_round3(const float v) {
+    return floorf(v * 1000.0f + 0.5f) / 1000.0f;
+}
+
+// manager.reload(player, Q = +-1) / 95.js pY2(P, Q): the scroll wheel (input[10]) and the
+// melee key on melee step the weapon index. Up past ammos.length - (length > 3 ? 3 : 2)
+// wraps to 0 (so the melee of a 3+ weapon loadout is never scrolled to); down from slot 0
+// goes to min(length - 1, 2), from any other slot straight to 0.
+void player_scroll_weapon(Player *player, const int dir, const int recon) {
+    const int length = (int) player->loadout_size;
+    if (length <= 1 || !dir) return;
+
+    int index = player->loadout_index;
+    if (dir == 1) {
+        index++;
+        if (index > length - (length > 3 ? 3 : 2)) index = 0;
+    } else if (dir == -1 && index - 1 < 0) {
+        index = MIN(length - 1, 2);
+    } else {
+        index = 0; // Q == -1 from a later slot, or Q outside +-1 (pY2 treats it as 0)
+    }
+
+    player_swap_weapon(player, index, 0, 0, recon);
+}
+
+void player_proc_input(Player *player, const Input *raw_input, const int recon, const int move_lock) {
+    // v3.1.1 sends input[1] as whole ms (Math.round(delta * deltaMlt)) and yaw/pitch as
+    // Math.round(v.round(3) * 1000) (index.js b9) and runs procInputs on those values on
+    // both sides, so the prediction and the server see the same numbers. KrunkNative's
+    // Input carries floats: round them here, on both sides, before anything uses them.
+    Input rounded = *raw_input;
+    rounded.delta = roundf(raw_input->delta * 1000.0f) / 1000.0f;
+    rounded.x_dir = player_round3(raw_input->x_dir);
+    rounded.y_dir = player_round3(raw_input->y_dir);
+    const Input *input = &rounded;
+
+    // Math.max(0, Math.min(input[1], config.dltMx)): NaN and negative deltas become 0.
+    const float delta = input->delta > 0.0f ? MIN(input->delta, game_constants.max_delta) : 0.0f;
     const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir;
 
     if (player->noclip) player->on_ground = 1;
@@ -922,10 +1012,14 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
 
     const int feel_loadout_index = player->loadout_index;
 
-    if (input->swap && player->loadout_size > 1) {
+    // input[11]: 4 swapEquipment, 2 swapMelee, 1 swapSecondary, 3 primary (pY2 to slot 0),
+    // otherwise input[10] scrolls (players.js procInputs).
+    if (input->swap == 3) {
+        if (player->loadout_size > 1) player_swap_weapon(player, 0, 0, 0, recon);
+    } else if (input->swap && player->loadout_size > 1) {
         const int swap_secondary = input->swap == 1;
         const int swap_melee = input->swap == 2;
-        const int swap_equipment = input->swap == 3;
+        const int swap_equipment = input->swap == 4;
 
         int swap_to = -1;
 
@@ -949,9 +1043,14 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
         }
 
         if (swap_to >= 0) {
-            if (player->loadout_index == swap_to) swap_to = 0;
-            player_swap_weapon(player, swap_to, 0, 0, recon);
+            // swapSecondary / swapEquipment toggle back to slot 0; swapMelee on melee is
+            // reload(player, 1): the next slot (95.js swapMelee).
+            if (player->loadout_index != swap_to) player_swap_weapon(player, swap_to, 0, 0, recon);
+            else if (swap_melee) player_scroll_weapon(player, 1, recon);
+            else player_swap_weapon(player, 0, 0, 0, recon);
         }
+    } else if (!input->swap && input->scroll) {
+        player_scroll_weapon(player, input->scroll, recon);
     }
 
     if (!recon && player->is_you && player->loadout_index != feel_loadout_index) {
@@ -1155,12 +1254,15 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             player->velocity.z = CROP(player->velocity.z, game_constants.min_decel);
         }
 
+        if (!input->shoot && !recon) player->doing_interact = 0;
+
         const int can_jump = player->on_ground && !player->did_jump;
 
         player->on_ground = player->noclip;
         player->on_ladder = 0;
         player->on_wall = 0;
         player->on_ramp = 0;
+        player->making_progress = 0;
 
         if (!player->noclip) player_do_map_collisions(player, input, move_dir, can_jump, delta, recon);
 
@@ -1178,7 +1280,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             player->ramp_fix = NULL;
         }
 
-        // TODO: inter prog
+        if (!player->making_progress && !recon) player->interact_progress = 0.0f;
         // TODO: terrain ray cast
 
         player->air_time = player->on_ground ? 0 : player->air_time + delta;
@@ -1220,6 +1322,14 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             (player->weapon->spread - player->weapon->spread * COMBAT_CROUCH_SPREAD * player->crouch_val +
              player->recoil_anim * COMBAT_SPREAD_MLT + player->spread_plus) * (1.0f - player->aim_val));
 
+        // Intentional difference: a reconciliation replay (recon) stops here. v3.1.1 runs the
+        // reload / timers / shoot code in replays too and relies on the predicted reloads[]
+        // timers to keep shots from firing twice (while counting the timers down twice); its
+        // physPow knockback comes back through input.velObj below. Here replays never shoot,
+        // reload or advance weapon timers: the authority owns ammo and fire, and a replayed
+        // shot would duplicate client tracers, projectiles and recoil.
+        if (recon) goto weapon_done;
+
         if (input->reload && !player->game->mode->config.no_reloads) {
             player_reload(player);
         }
@@ -1241,7 +1351,7 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             player->reloads[i] = MAX(0.0f, player->reloads[i] - delta);
         }
 
-        if (player->weapon && !move_lock && !0 /* TODO: doing interact */) {
+        if (player->weapon && !move_lock && !player->doing_interact) {
             int will_shoot = player->burst_count || !player->weapon->no_auto && input->shoot;
 
             if (player->did_shoot && !input->shoot) {
@@ -1265,10 +1375,17 @@ void player_proc_input(Player *player, const Input *input, const int recon, cons
             }
         }
 
-        // TODO: shooting
+weapon_done:;
     }
 
-    // TODO: vel obj
+    // procInputs: if (!moveLock && recon && input.velObj) the shot's knockback again (the
+    // replay does not shoot, the reconciled velocity predates it).
+    if (!move_lock && recon && input->has_vel_obj) {
+        player->velocity.x -= input->vel_obj.x;
+        player->velocity.z -= input->vel_obj.z;
+        if (!player->noclip) player->velocity.y -= input->vel_obj.y;
+        player->on_ground = 0;
+    }
 
     if (!move_lock && player->wall_jump && !player->on_ground && !player->on_ladder && player->on_wall && player->game->config.wall_jump > 0.0f) {
         if (player->did_wall_jump && !input->jump) player->did_wall_jump = 0;
@@ -1325,13 +1442,15 @@ void player_step(Player *player, float distance) {
 // melee, changeHealth, kill, score) and src/data/kills.js (reward). Only the
 // authority (native server, offline local server, is_local games) applies damage;
 // clients predict recoil/spread and learn the outcome from HIT/HEALTH/KILL packets.
-// Not ported yet: lag compensation (fetchState rewind), projectiles, destructible
-// objects, AI targets, medals ("6" packet) and kill streak rewards.
+// Not ported yet: lag compensation (fetchState rewind) and kill streak rewards. AI
+// targets: shared/src/ai.c (game_ai_damage); map object hits (destructibles, trigger
+// events): shared/src/triggers.c (game_object_hit).
 
 typedef struct {
     const Object *object;
     Player *player;
     float t;
+    GameAI *ai;         // players.js shoot / melee: game.AI.ais boxes (authority)
 } Hit;
 
 typedef struct {
@@ -1376,8 +1495,8 @@ static void hit_list_sort(HitList *list) {
 static int combat_object_shootable(const Object *object) {
     if (!object->active || object->no_shoot || object->collision_type == COLLISION_TYPE_NONE) return 0;
     if (object->kill || object->score_zone || object->team_zone || object->teleporter || object->checkpoint ||
-        object->pickup || object->flag || object->premium || object->verified || object->trigger ||
-        object->ladder || object->ramp) return 0;
+        object->pickup || object->flag || object->premium || object->verified ||
+        object->ladder || object->ramp) return 0; // TRIGGERs: only onEnter ones are noShoot
 
     switch (object->prefab) {
         case PREFAB_TEAM_ZONE:
@@ -1423,6 +1542,15 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
         if (t <= 0.0f || t > 1.0f) continue;
 
         hit_list_push(hits, (Hit) {NULL, other, t});
+    }
+
+    // game.AI.ais: x/z +-scale, y .. y + 2 * scale (no hitBoxPad)
+    for (int i = 0; game->ai && i < game->ai->count; i++) {
+        GameAI *ai = &game->ai->ais[i];
+        if (!ai->active) continue;
+        const float t = game_ai_line_hit(ai, origin, dir);
+        if (t <= 0.0f || t > 1.0f) continue;
+        hit_list_push(hits, (Hit) {NULL, NULL, t, ai});
     }
 }
 
@@ -1640,6 +1768,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
 
     const int weapon_index = killer ? (kill_info && kill_info->weapon_id >= 0 ? kill_info->weapon_id : combat_weapon_index(killer)) : -1;
     int reward = 0;
+    int streak_message = 0; // the "kst" streak (killStreak % 5 == 0), 0 = none
 
     if (killer && killer != player) {
         player->last_killer_uid = killer->uid;
@@ -1649,6 +1778,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
             killer->streak++;
             killer->kill_streak++;
             killer->death_streak = 0;
+            if (killer->kill_streak % 5 == 0) streak_message = (int) killer->kill_streak; // X = killStreak
             if (game->now - killer->last_kill_time >= GAME_FEED_TIMER) killer->streak = 0;
         }
 
@@ -1700,6 +1830,10 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     game->leaders_dirty = 1;
 
     mode_on_kill(game, player, killer, weapon_index); // lives, mode.onKill (flags, Gun Game, tags, ...)
+    if (streak_message && killer) { // IO.broadcast("kst", Q.sid, X): killStreakMessage on every client
+        const NetKillStreakPacket kst = {.uid = killer->uid, .streak = streak_message};
+        game_send(game, NET_TARGET_ALL, NET_PACKET_KILL_STREAK, &kst, sizeof(kst));
+    }
 }
 
 void player_melee(Player *player) {
@@ -1742,6 +1876,9 @@ void player_melee(Player *player) {
 
     for (size_t i = 0; i < hits.count && damage > 0.0f; i++) {
         Player *victim = hits.items[i].player;
+        if (hits.items[i].ai && !mode_waiting(game)) game_ai_damage(game, hits.items[i].ai, player, player->smite ? 10000.0f : damage, 0); // G.ai: !waitTimers
+        // G.obj: destructible health and onMelee / onDamage / onPunch triggers
+        if (hits.items[i].object) game_object_hit(game, (Object *) hits.items[i].object, player, player->smite ? 10000.0f : damage, 0, GAME_HIT_MELEE);
 
         if (victim && player_change_health(victim, player, mode_melee_damage(game, player, victim, damage), 0)) { // onMelee (Stalker)
             PlayerKillInfo info = {.weapon_id = weapon_index, .fists = !player->can_throw, .distance = hits.items[i].t};
@@ -1813,10 +1950,17 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
 
         if (ray < 0) {
             const float impulse = (1.0f - hit->t) * weapon->physical_power * game->config.impulse_mlt;
-            player->velocity.x -= impulse * sinf(yaw + (float) M_PI) * cosf(pitch);
-            player->velocity.z -= impulse * cosf(yaw + (float) M_PI) * cosf(pitch);
-            player->velocity.y -= impulse * sinf(pitch);
+            const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
+                               impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};
+            player->velocity.x -= push.x;
+            player->velocity.z -= push.z;
+            player->velocity.y -= push.y;
             player->on_ground = 0;
+            // if (!IO) a1.velObj = {x, y, z}: the client keeps it for reconciliation replays
+            if (!authority) {
+                player->shot_vel_obj = push;
+                player->has_shot_vel_obj = 1;
+            }
             break;
         }
 
@@ -1844,11 +1988,16 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             }
 
             damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_FLESH * weapon->pierce : damage;
-        } else if (hit->object->penetrable) {
-            wallbang = 1;
+        } else if (hit->ai) {
+            // G.ai: changeHealth(-dmg, player), killScore, "4"; the bullet goes on like a wall it pierces
+            game_ai_damage(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0);
             damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         } else {
-            break;
+            // G.obj: destructible health ("4", "do", onDestroy) and onShoot / onDamage triggers
+            game_object_hit(game, (Object *) hit->object, player, dealt, 0, GAME_HIT_SHOT);
+            if (!hit->object->penetrable) break;
+            wallbang = 1;
+            damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         }
 
         if (damage <= 0.0f) break;
@@ -1943,6 +2092,18 @@ void player_shoot(Player *player) {
     }
 }
 
+// index.js Math.lerpAngle(a, b, t): b + (a - b) * t the short way round, wrapped into [0, 2PI]
+// by % (so a negative result stays negative, as in JS).
+float player_lerp_angle(float a, float b, const float t) {
+    const float pi2 = (float) M_PI * 2.0f;
+    if (fabsf(b - a) > (float) M_PI) {
+        if (a > b) b += pi2;
+        else a += pi2;
+    }
+    const float v = b + (a - b) * t;
+    return v >= 0.0f && v <= pi2 ? v : fmodf(v, pi2);
+}
+
 void player_update(Player *player, const float delta) {
     if (!player->active) return;
 
@@ -1987,6 +2148,9 @@ void player_update(Player *player, const float delta) {
             player_step(player, hypotf(player->last_position.x - player->position.x, player->last_position.z - player->position.z));
         }
 
-        // TODO: linear interpolate direction change
+        // yaw = lerpAngle(xDir2, xDir1, min(1, interp)), pitch likewise (players.js update)
+        const float t = MIN(1.0f, progress);
+        player->direction.y = player_lerp_angle(player->interp_dir_end.y, player->interp_dir_start.y, t);
+        player->direction.x = player_lerp_angle(player->interp_dir_end.x, player->interp_dir_start.x, t);
     }
 }

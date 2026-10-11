@@ -24,6 +24,8 @@ int  html_ui_backend_available(void);
 int  html_ui_backend_load_page(const char *page);
 // html_ui_add_stylesheet on the current document (1 = loaded or already there).
 int  html_ui_backend_add_stylesheet(const char *href);
+// html_ui_set_custom_css on the game page (NULL/"" removes the sheet).
+int  html_ui_backend_set_custom_css(const char *css);
 
 // Implemented by the dispatcher, called by the backend (main thread only) once the
 // page's DOM exists and the UI logic may query it: html_ui_is_ready() returns 1 from

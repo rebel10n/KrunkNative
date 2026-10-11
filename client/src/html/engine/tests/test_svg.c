@@ -153,6 +153,20 @@ static void test_mapping(void) {
     free(px);
     svg_image_destroy(s);
 
+    /* placed: a 10 x 10 viewport at (0.5, 0.25) inside an 11 x 11 buffer keeps
+     * the fractional position (half-covered first column, 3/4-covered first row) */
+    s = mk("<svg viewBox=\"0 0 10 10\"><rect width=\"10\" height=\"10\" fill=\"#fff\"/></svg>");
+    px = svg_image_rasterize_placed(s, 11, 11, 10, 10, 0.5f, 0.25f);
+    if (px) {
+        const int a0 = px_at(px, 11, 0, 5)[3], a1 = px_at(px, 11, 5, 0)[3], am = px_at(px, 11, 5, 5)[3];
+        CHECK(a0 > 100 && a0 < 156);        /* ~50 % */
+        CHECK(a1 > 160 && a1 < 220);        /* ~75 % */
+        CHECK(am == 255 && px_at(px, 11, 10, 5)[3] > 100 && px_at(px, 11, 10, 5)[3] < 156);   /* right column ~50 % */
+        CHECK(px_at(px, 11, 5, 10)[3] > 35 && px_at(px, 11, 5, 10)[3] < 95);                   /* bottom row ~25 % */
+    } else CHECK(0);
+    free(px);
+    svg_image_destroy(s);
+
     CHECK(svg_image_rasterize(NULL, 4, 4) == NULL);
     s = mk("<svg viewBox=\"0 0 1 1\"/>");
     CHECK(svg_image_rasterize(s, 0, 4) == NULL && svg_image_rasterize(s, 5000, 4) == NULL);

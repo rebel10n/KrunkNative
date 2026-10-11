@@ -71,8 +71,9 @@ void menu_view_death_cam(Client *client, const Player *killer) {
     g_view.yaw = me ? me->direction.y : client->camera.rotation.y;
     g_view.pitch = me ? me->direction.x : client->camera.rotation.x;
 
-    // g1() also sets killer.interpolate = false; KrunkNative applies remote states directly
-    // (net_packet_apply_player, no client interpolation), so that is already the case.
+    // g1() also sets killer.interpolate = false: the killer holds still until its next state
+    // (client_apply_state starts a new interpolation).
+    if (killer != me) ((Player *) killer)->interpolate = 0;
     g_view.killer_uid = killer->uid;
     const vec3 at = {killer->position.x, killer->position.y + killer->height / 1.5f, killer->position.z};
     chase_look_at(at);

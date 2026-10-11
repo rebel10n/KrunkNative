@@ -4,7 +4,7 @@ Copies every file listed in ``menu-assets.txt`` from the v3.1.1 ``public/`` tree
 ``ui/`` at the same relative path, byte-identical (``dest = src`` copies a file the
 reference serves elsewhere). The manifest is the complete list of images the menu page,
 its window templates and the C UI logic (``client/src/ui/``) reference, plus the other
-byte-identical site files (stylesheets, fonts, the changelog); ``{a..b}`` ranges and
+byte-identical site files (stylesheets, fonts, the changelog); ``{a..b[..step]}`` ranges and
 ``{x,y}`` lists expand like the shell's brace expansion.
 
 A listed file missing from the reference tree is an error (the manifest must only name
@@ -22,16 +22,16 @@ _BRACE = re.compile(r"\{([^{}]*)\}")
 
 
 def expand(pattern):
-    """Shell-style brace expansion: {0..14} (integers, may be negative) and {a,b,c}."""
+    """Shell-style brace expansion: {0..14}, {1..99..2} (integers, may be negative) and {a,b,c}."""
     m = _BRACE.search(pattern)
     if not m:
         return [pattern]
     body = m.group(1)
-    rng = re.fullmatch(r"(-?\d+)\.\.(-?\d+)", body)
+    rng = re.fullmatch(r"(-?\d+)\.\.(-?\d+)(?:\.\.(\d+))?", body)
     if rng:
         lo, hi = int(rng.group(1)), int(rng.group(2))
-        step = 1 if hi >= lo else -1
-        items = [str(i) for i in range(lo, hi + step, step)]
+        step = int(rng.group(3) or 1) * (1 if hi >= lo else -1)
+        items = [str(i) for i in range(lo, hi + (1 if step > 0 else -1), step)]
     else:
         items = body.split(",")
     out = []

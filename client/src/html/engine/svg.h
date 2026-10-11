@@ -39,4 +39,9 @@ void svg_image_size(const SvgImage *svg, float *w, float *h);
  * when the document does not parse. */
 unsigned char *svg_image_rasterize(const SvgImage *svg, int w, int h);
 
+/* Same into an out_w x out_h buffer, the viewport being vw x vh (fractional)
+ * at (ox, oy): lets a caller keep a fractional device position exact while
+ * drawing the raster texel-aligned (no resampling blur). */
+unsigned char *svg_image_rasterize_placed(const SvgImage *svg, int out_w, int out_h, float vw, float vh, float ox, float oy);
+
 #endif /* KN_SVG_H */

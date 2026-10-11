@@ -786,18 +786,49 @@ static void draw_rrect(GlBackend *b, DlRect r, DlRadii rad, CssColor color) {
 
 static float group_device_scale(const GlBackend *b);
 
-// Texture of a DL_IMAGE: vector sources are rasterised at the device size of
-// the whole image (dst covers the uv span of it), like Blink's SVG images.
+// Texture of a DL_IMAGE drawn stretched over dst: vector sources (cropped
+// uv or rotated/skewed) are rasterised at the device size of the whole image
+// (dst covers the uv span of it).
 static GLuint image_draw_texture(GlBackend *b, const DlItem *it) {
     const DlRect d = it->u.image.dst;
     const float su = fabsf(it->u.image.uv[2] - it->u.image.uv[0]), sv = fabsf(it->u.image.uv[3] - it->u.image.uv[1]);
     if (!it->u.image.vector || !b->image_resolver || d.w <= 0.0f || d.h <= 0.0f || su <= 1e-6f || sv <= 1e-6f)
         return it->u.image.tex;
     const float k = group_device_scale(b);
-    const int w = (int) lrintf(d.w * k / su), h = (int) lrintf(d.h * k / sv);
+    const float w = roundf(d.w * k / su), h = roundf(d.h * k / sv);
+    int tw = 0, th = 0;
     const GLuint tex = b->image_resolver(b->image_resolver_user, it->u.image.vector, it->u.image.nearest, w < 1 ? 1 : w,
-                                         h < 1 ? 1 : h);
+                                         h < 1 ? 1 : h, 0.0f, 0.0f, &tw, &th);
     return tex ? tex : it->u.image.tex;
+}
+
+// Vector DL_IMAGE (SVG) under an axis-aligned transform with the whole image
+// shown (uv 0..1): the resolver rasterises it at its exact target size and
+// sub-pixel offset, and the quad covers whole target pixels texel for texel.
+// Returns 0 when not applicable (draw_image then stretches `tex` over dst).
+static int draw_vector_image(GlBackend *b, const DlItem *it, const uint8_t rgba[4]) {
+    const DlRect d = it->u.image.dst;
+    const float *uv = it->u.image.uv;
+    if (!it->u.image.vector || !b->image_resolver || !xform_axis_aligned(b) || d.w <= 0.0f || d.h <= 0.0f) return 0;
+    if (fabsf(uv[0]) > 1e-6f || fabsf(uv[1]) > 1e-6f || fabsf(uv[2] - 1.0f) > 1e-6f || fabsf(uv[3] - 1.0f) > 1e-6f) return 0;
+    float r[4];
+    target_rect(b, d, r);
+    const float tw = r[2] - r[0], th = r[3] - r[1];
+    if (tw <= 0.0f || th <= 0.0f) return 0;   // mirrored transforms: stretched path
+    const float ix = floorf(r[0]), iy = floorf(r[1]);
+    int w = 0, h = 0;
+    const GLuint tex = b->image_resolver(b->image_resolver_user, it->u.image.vector, it->u.image.nearest, tw, th, r[0] - ix,
+                                         r[1] - iy, &w, &h);
+    if (!tex || w <= 0 || h <= 0) return 0;
+    // target pixels [ix, ix + w) x [iy, iy + h) back in local space
+    const float sx = d.w / tw, sy = d.h / th;
+    const DlRect q = dl_rect(d.x + (ix - r[0]) * sx, d.y + (iy - r[1]) * sy, (float) w * sx, (float) h * sy);
+    const float full[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    batch_texture(b, tex, 0);
+    GlbVertex t = vertex_template(b, MODE_IMAGE, rgba);
+    t.p0[0] = it->u.image.premultiplied ? 0.0f : 1.0f;
+    emit_textured_quad(b, &t, q, full);
+    return 1;
 }
 
 static void draw_image(GlBackend *b, const DlItem *it) {
@@ -806,6 +837,7 @@ static void draw_image(GlBackend *b, const DlItem *it) {
     const CssColor white = {255, 255, 255, 255, CSS_COLOR_RGBA};
     uint8_t rgba[4];
     color_premul(white, op, rgba);
+    if (draw_vector_image(b, it, rgba)) return;
     batch_texture(b, image_draw_texture(b, it), it->u.image.nearest ? 1 : 0);
     GlbVertex t = vertex_template(b, MODE_IMAGE, rgba);
     t.p0[0] = it->u.image.premultiplied ? 0.0f : 1.0f;

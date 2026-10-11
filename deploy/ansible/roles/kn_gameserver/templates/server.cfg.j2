@@ -1,0 +1,14 @@
+// {{ ansible_managed }} (deploy/ansible role kn_gameserver)
+// KrunkNative dedicated server instance {{ n }} of {{ kn_gameserver_count }} on {{ inventory_hostname }}.
+hostname        "{{ kn_gameserver_name_prefix }} #{{ n }}"
+region          "{{ kn_gameserver_region }}"
+node_id         "{{ kn_edge_name | upper }}{{ n }}"
+port            {{ kn_gameserver_first_port + n - 1 }}
+query_port      0
+public_host     "{{ kn_gameserver_hostname_fmt | format(n) }}"
+max_players     {{ kn_gameserver_max_players }}
+online_mode     {{ kn_gameserver_online_mode }}
+auth_url        "{{ kn_gameserver_auth_url }}"
+// Public listing (opt-in): heartbeat to the finder with host = public_host.
+finder_url      "{{ kn_gameserver_finder_url }}"
+rcon_port       0

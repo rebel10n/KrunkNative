@@ -30,7 +30,7 @@ looks up). The list is also `tools/kref/world-poses.txt`.
 | freight-sign | freight | 270,50,-100,-0.0500,-3.1416 | SIGN canvas text ("A-13", r[2] = -PI) |
 | industry-windows | industry | 45,52,-26,-0.0540,1.5708 | window models (transparent), brick/plaster walls |
 | industry-lightcone | industry | -130,48,38,-0.1544,-2.4942 | street lamp light cone, containers, grass |
-| industry-ladder | industry | 255,22,135,-0.1371,-3.1416 | ladder (stretched floor texture), crates, barrel, grass |
+| industry-ladder | industry | 255,22,135,-0.1371,-3.1416 | ladder (flat vertex-coloured rails + two-tone rungs: texture scale 0.02, nearest; fixed 2026-10-10, `*-native.png` predates the fix), crates, barrel, grass |
 | kanji-billboard | kanji | -440,-100,-406,-0.1019,1.5708 | billboard poster (r[2] = PI/2), emissive neon |
 | kanji-neon | kanji | 297,154,-272,-0.25,2.3 | emissive cubes, glass, night lighting |
 | kanji-glass | kanji | -399,300,-930,-0.0983,-0.0000 | link_0 chain-link fences (alpha test, transparent opacity) |

@@ -310,7 +310,11 @@ typedef struct Painter {
     Mat2D root_xform;       /* the context root's own transform, pushed first in the list */
     float snap_ox, snap_oy; /* frame origin inside the nearest transform space (pixel snapping) */
     const Box *scroll_emitted[PAINT_MAX_SCROLL_STACK];
+    float scroll_snap_x[PAINT_MAX_SCROLL_STACK];  /* composited-scroller origin snap (CSS px), see */
+    float scroll_snap_y[PAINT_MAX_SCROLL_STACK];  /* scroller_layer_snap(); part of DL_SCROLL_OFFSET */
     int n_scroll_emitted;
+    int no_layer_snap;      /* scroller_layer_snap() off: positions in pure layout space */
+    float text_layer_snap_y;/* folded scroller-layer snap in the current text run's y (paint_text_run) */
     /* inline boxes whose decorations were painted during the current line walk */
     const Box **seen;
     int n_seen, cap_seen;
@@ -330,8 +334,8 @@ static Mat2D painter_local_matrix(const Painter *p)
 {
     float sx = 0, sy = 0;
     for (int i = 0; i < p->n_scroll_emitted; i++) {
-        sx += p->scroll_emitted[i]->scroll_x;
-        sy += p->scroll_emitted[i]->scroll_y;
+        sx += p->scroll_emitted[i]->scroll_x - p->scroll_snap_x[i];
+        sy += p->scroll_emitted[i]->scroll_y - p->scroll_snap_y[i];
     }
     return mat_mul(p->root_xform, mat_translate(-sx, -sy));
 }
@@ -339,6 +343,19 @@ static Mat2D painter_local_matrix(const Painter *p)
 /* Scroll offsets that apply to `b` inside the current frame and were not
  * emitted as DL_SCROLL_OFFSET: scroll containers on b's containing-block
  * chain from its container up to (and including) the frame root. */
+static void scroller_layer_snap(const Painter *p, const Box *b, float *cx, float *cy);
+
+/* A scroll offset folded into positions instead of emitted: the scroll
+ * itself plus the scroller's composited-layer origin snap, so positioned
+ * descendants painted outside its clip land where its in-flow content does. */
+static void fold_scroll(const Painter *p, const Box *c, float *dx, float *dy)
+{
+    float cx, cy;
+    scroller_layer_snap(p, c, &cx, &cy);
+    *dx += cx - c->scroll_x;
+    *dy += cy - c->scroll_y;
+}
+
 static void scroll_shift(const Painter *p, const Box *b, float *dx, float *dy)
 {
     *dx = 0;
@@ -350,10 +367,7 @@ static void scroll_shift(const Painter *p, const Box *b, float *dx, float *dy)
      * by the parent list's DL_SCROLL_OFFSET, so nothing to compensate. */
     if (above && b == above) return;
     for (const Box *c = b->container; c && c != above; c = c->container) {
-        if (box_is_scroller(c) && !scroll_is_emitted(p, c)) {
-            *dx -= c->scroll_x;
-            *dy -= c->scroll_y;
-        }
+        if (box_is_scroller(c) && !scroll_is_emitted(p, c)) fold_scroll(p, c, dx, dy);
         if (c == p->root) break;
     }
 }
@@ -399,10 +413,7 @@ static void content_shift(const Painter *p, const Box *c, float *dx, float *dy)
 {
     scroll_shift(p, c, dx, dy);
     if (p->root && c == p->root->container) return;   /* outside the frame (see scroll_shift) */
-    if (box_is_scroller(c) && !scroll_is_emitted(p, c)) {
-        *dx -= c->scroll_x;
-        *dy -= c->scroll_y;
-    }
+    if (box_is_scroller(c) && !scroll_is_emitted(p, c)) fold_scroll(p, c, dx, dy);
 }
 
 static DlRect padding_rect_of(DlRect r, const Box *b)
@@ -431,6 +442,7 @@ typedef struct PaintChildRef {
     float dx, dy;   /* child frame origin in this frame */
     Mat2D local;    /* in-list transform state at the marker (root transform + emitted scroll offsets) */
     float scroll_x, scroll_y;   /* emitted scroll offsets in effect at the marker */
+    float layer_snap_x, layer_snap_y; /* part of dx/dy from folded scroller-layer snaps (not layout space) */
 } PaintChildRef;
 
 struct PaintCache {
@@ -688,12 +700,26 @@ static DlRect cutout_rect(const Painter *p, const Box *b, DlRect snapped)
     return dl_rect((dx - m.e) / m.a, (dy - m.f) / m.d, dw / m.a, dh / m.d);
 }
 
+static const CssShadow *box_shadow_at(const CssComputed *s, int i)
+{
+    return i == 0 ? &s->box_shadow : &s->box_shadow_more[i - 1];
+}
+
+static void paint_one_box_shadow(Painter *p, const Box *b, const CssShadow *sh, DlRect rect, DlRadii radii, int inset);
+
+/* box-shadow list: the first shadow is on top, so emit back to front. */
 static void paint_box_shadow(Painter *p, const Box *b, DlRect rect, DlRadii radii, int inset)
 {
     const CssComputed *s = b->style;
-    DlItem it;
     if (!s || !s->box_shadow_count) return;
-    const CssShadow *sh = &s->box_shadow;
+    for (int i = (int)s->box_shadow_count - 1; i >= 0; i--)
+        paint_one_box_shadow(p, b, box_shadow_at(s, i), rect, radii, inset);
+}
+
+static void paint_one_box_shadow(Painter *p, const Box *b, const CssShadow *sh, DlRect rect, DlRadii radii, int inset)
+{
+    const CssComputed *s = b->style;
+    DlItem it;
     if ((sh->inset != 0) != (inset != 0)) return;
     if (!inset && sh->spread >= PAINT_CUTOUT_SPREAD && !box_is_inline(b)) rect = cutout_rect(p, b, rect);
     CssColor c = paint_resolve_color(sh->color, s);
@@ -805,12 +831,55 @@ static int border_is_two_tone(uint8_t st) { return st == CSS_BORDER_STYLE_GROOVE
 /* edge_mask: bit i set -> edge i (CSS order) is painted (inline fragments).
  * groove/ridge edges are painted as two solid halves (outer item, then an
  * inner one inset by the outer widths). */
+/* Chrome's themed text fields and menulists: while a control (appearance
+ * auto) keeps its UA border -- 2px inset #767676 for a text field, 1px solid
+ * #767676 for a <select> -- the theme paints a 1px #767676 border with 2px
+ * radius (zoomed) at the border-box edge, background clipped to it (measured,
+ * Chrome 152).  Any author border change -> plain CSS painting. */
+static float style_zoom(const CssComputed *s);
+
+/* gray: the UA border grey (#767676, or #dddddd for a disabled menulist) */
+static int ua_border_is(const CssComputed *s, uint8_t style, float width, uint8_t gray)
+{
+    for (int i = 0; i < 4; i++) {
+        const CssColor c = s->border_color[i];
+        if (s->border_style[i] != style || s->border_width[i] != width ||
+            c.kind != CSS_COLOR_RGBA || c.r != gray || c.g != gray || c.b != gray || c.a != 255) return 0;
+    }
+    return 1;
+}
+
+static int text_field_themed(const Box *b)
+{
+    const CssComputed *s = b->style;
+    if (!s || s->appearance == CSS_APPEARANCE_NONE) return 0;
+    if (b->type == BOX_INPUT && (b->flags & BOXF_TEXT_CONTROL))
+        return ua_border_is(s, CSS_BORDER_STYLE_INSET, 2.0f * style_zoom(s), 0x76);
+    if (b->type == BOX_SELECT)
+        return ua_border_is(s, CSS_BORDER_STYLE_SOLID, style_zoom(s), 0x76) ||
+               ua_border_is(s, CSS_BORDER_STYLE_SOLID, style_zoom(s), 0xdd);
+    return 0;
+}
+
 static void paint_border(Painter *p, const Box *b, DlRect rect, DlRadii radii, unsigned edge_mask)
 {
     const CssComputed *s = b->style;
     DlItem it;
     int any = 0, two_tone = 0;
     if (!s) return;
+    if (edge_mask == 0xfu && text_field_themed(b)) {
+        memset(&it, 0, sizeof it);
+        it.op = DL_BORDER;
+        it.u.border.rect = rect;
+        it.u.border.radii = radii_zero(radii) ? dl_radii_all(2.0f * style_zoom(s)) : radii;
+        for (int i = 0; i < 4; i++) {
+            it.u.border.width[i] = style_zoom(s);
+            it.u.border.style[i] = DL_BORDER_SOLID;
+            it.u.border.color[i] = s->border_color[i];
+        }
+        emit(p, &it);
+        return;
+    }
     memset(&it, 0, sizeof it);
     it.op = DL_BORDER;
     it.u.border.rect = rect;
@@ -1032,7 +1101,8 @@ static void paint_background(Painter *p, const Box *b, DlRect border_rect, DlRad
 
 static void paint_decorations_rect(Painter *p, const Box *b, DlRect rect, unsigned edge_mask)
 {
-    const DlRadii radii = radii_for_rect(b->style, rect.w, rect.h);
+    DlRadii radii = radii_for_rect(b->style, rect.w, rect.h);
+    if (radii_zero(radii) && edge_mask == 0xfu && text_field_themed(b)) radii = dl_radii_all(2.0f * style_zoom(b->style));
     paint_box_shadow(p, b, rect, radii, 0);
     paint_background(p, b, rect, radii);
     paint_box_shadow(p, b, rect, radii, 1);
@@ -1105,7 +1175,14 @@ static int glyph_to_quad(Painter *p, const Glyph *g, unsigned synth, float font_
     d->tex = q.texture;
     d->uv[0] = q.u0; d->uv[1] = q.v0; d->uv[2] = q.u1; d->uv[3] = q.v1;
     d->x = axis_aligned ? (ix + q.x_off - dm.e) / dm.a : (ix + q.x_off) / scale;
-    d->y = (baseline * scale + q.y_off) / scale;
+    /* Blink's TextFragmentPainter rounds a horizontal text origin's y to a
+     * whole px in its local (transform) space, before any transform; the
+     * device-space rounding in gl_backend then follows.  Under a scale
+     * (#uiBase, the hub's body) the two roundings differ: rounding only in
+     * device space put hub tab labels 1 px low. */
+    const float ls = p->text_layer_snap_y;   /* not part of layout space */
+    const float bl = roundf(baseline - ls + p->snap_oy) - p->snap_oy + ls;
+    d->y = (bl * scale + q.y_off) / scale;
     d->w = q.w / scale;
     d->h = q.h / scale;
     return 1;
@@ -1157,6 +1234,14 @@ static void paint_text_run(Painter *p, const Box *tb, const TextRun *run, float 
     to_frame(p, run->x, run->y, &rx, &ry);
     rx += dx;
     ry += dy;
+    {   /* scroller-layer snaps folded into dy (positioned text outside its scroller's clip) */
+        float sx, sy, ux, uy;
+        scroll_shift(p, tb, &sx, &sy);
+        p->no_layer_snap = 1;
+        scroll_shift(p, tb, &ux, &uy);
+        p->no_layer_snap = 0;
+        p->text_layer_snap_y = sy - uy;
+    }
     const CssColor color = paint_resolve_color(s->color, s);
     const unsigned synth = run->synth;
     const float fs = run->font_size > 0 ? run->font_size : s->font_size;
@@ -1407,6 +1492,49 @@ typedef struct ClipMark {
     int start, body, children;
 } ClipMark;
 
+/* A position:sticky box inside the scroller (bounded walk): Chrome layerizes
+ * sticky boxes and what paints after them in the scroller, so the scroller's
+ * contents are drawn snapped even without overflow (win-servers'
+ * .serverHeader: rows below it 1 px off otherwise). */
+static int has_sticky_descendant(const Box *b)
+{
+    int budget = 256;
+    const Box *c = b->first_child;
+    while (c && budget-- > 0) {
+        if (c->style && c->style->position == CSS_POSITION_STICKY) return 1;
+        if (c->first_child && !box_is_scroller(c)) { c = c->first_child; continue; }
+        while (c && c != b && !c->next) c = c->parent;
+        if (!c || c == b) break;
+        c = c->next;
+    }
+    return 0;
+}
+
+/* Chrome composites a scroller with scrollable overflow into its own cc
+ * layer, rastered in its own space and drawn at a whole device pixel: its
+ * contents move by round(T) - T, T = the padding-box origin in device px.
+ * Measured with a scaled body (hub): glyph baselines inside such scrollers
+ * follow round(T) + round(y * s), not round(T + y * s).  Returned in CSS px
+ * of the scroller's space (0 when it does not apply). */
+static void scroller_layer_snap(const Painter *p, const Box *b, float *cx, float *cy)
+{
+    *cx = *cy = 0;
+    if (p->no_layer_snap) return;
+    /* user-scrollable vertically (overflow-y auto/scroll with overflow): Chrome
+     * keeps overflow:hidden boxes in their parent layer, and the windows'
+     * horizontal extents (scroll_w > client) do not match its layering */
+    const CssComputed *st = b->style;
+    if (!st || (st->overflow_y != CSS_OVERFLOW_AUTO && st->overflow_y != CSS_OVERFLOW_SCROLL)) return;
+    if (b->scroll_h <= box_padding_h(b) + 0.5f && !has_sticky_descendant(b)) return;
+    const Mat2D dm = mat_mul(p->dev_frame, painter_local_matrix(p));
+    if (fabsf(dm.b) > 1e-6f || fabsf(dm.c) > 1e-6f || fabsf(dm.a) < 1e-6f || fabsf(dm.d) < 1e-6f) return;
+    float x, y;
+    pos_rel(p, b, &x, &y);
+    const float tx = dm.a * (x + b->border[CSS_LEFT]) + dm.e, ty = dm.d * (y + b->border[CSS_TOP]) + dm.f;
+    *cx = (roundf(tx) - tx) / dm.a;
+    *cy = (roundf(ty) - ty) / dm.d;
+}
+
 /* Pushes the overflow clip (+ scroll offset) of `b`. */
 static ClipMark push_overflow_clip(Painter *p, const Box *b)
 {
@@ -1420,13 +1548,17 @@ static ClipMark push_overflow_clip(Painter *p, const Box *b)
     const DlRect r = overflow_clip_rect(p, b, &radii);
     emit_push_clip(p, r, radii);
     if (box_is_scroller(b) && p->n_scroll_emitted < PAINT_MAX_SCROLL_STACK) {
-        if (b->scroll_x != 0 || b->scroll_y != 0) {
+        float cx, cy;
+        scroller_layer_snap(p, b, &cx, &cy);
+        if (b->scroll_x != 0 || b->scroll_y != 0 || cx != 0 || cy != 0) {
             memset(&it, 0, sizeof it);
             it.op = DL_SCROLL_OFFSET;
-            it.u.scroll.dx = -b->scroll_x;
-            it.u.scroll.dy = -b->scroll_y;
+            it.u.scroll.dx = cx - b->scroll_x;
+            it.u.scroll.dy = cy - b->scroll_y;
             emit(p, &it);
         }
+        p->scroll_snap_x[p->n_scroll_emitted] = cx;
+        p->scroll_snap_y[p->n_scroll_emitted] = cy;
         p->scroll_emitted[p->n_scroll_emitted++] = b;
     }
     m.body = p->dl->n;
@@ -1542,9 +1674,11 @@ static DlRect own_bounds(const Painter *p, const Box *b)
     if (box_is_text(b)) return rect_expand(r, text_shadow_extent(s));
     if (b->overflow_r > b->overflow_l && b->overflow_b > b->overflow_t)
         r = rect_union(r, dl_rect(r.x + b->overflow_l, r.y + b->overflow_t, b->overflow_r - b->overflow_l, b->overflow_b - b->overflow_t));
-    if (s && s->box_shadow_count && !s->box_shadow.inset) {
-        const float ext = s->box_shadow.blur + fmaxf(0, s->box_shadow.spread);
-        r = rect_union(r, rect_expand(rect_offset(r, s->box_shadow.x, s->box_shadow.y), ext));
+    for (int i = 0; s && i < s->box_shadow_count; i++) {
+        const CssShadow *sh = box_shadow_at(s, i);
+        if (sh->inset) continue;
+        const float ext = sh->blur + fmaxf(0, sh->spread);
+        r = rect_union(r, rect_expand(rect_offset(r, sh->x, sh->y), ext));
     }
     if (s)
         for (int i = 0; i < s->filter_count; i++) {
@@ -1943,6 +2077,12 @@ static void add_child_ref(Painter *p, Box *child)
         ref->scroll_y += p->scroll_emitted[i]->scroll_y;
     }
     pos_rel(p, child, &ref->dx, &ref->dy);
+    float ux, uy;
+    p->no_layer_snap = 1;
+    pos_rel(p, child, &ux, &uy);
+    p->no_layer_snap = 0;
+    ref->layer_snap_x = ref->dx - ux;
+    ref->layer_snap_y = ref->dy - uy;
 }
 
 static void paint_layer_entry(Painter *p, const LayerEntry *e)
@@ -2242,8 +2382,8 @@ static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, f
             float cox = 0, coy = 0;
             if (!box_has_transform(ref->box) && !box_composited(ref->box)) {
                 const int own = box_has_transform(b) || box_composited(b);
-                cox = (own ? 0 : c->snap_ox) + ref->dx - ref->scroll_x;
-                coy = (own ? 0 : c->snap_oy) + ref->dy - ref->scroll_y;
+                cox = (own ? 0 : c->snap_ox) + ref->dx - ref->layer_snap_x - ref->scroll_x;
+                coy = (own ? 0 : c->snap_oy) + ref->dy - ref->layer_snap_y - ref->scroll_y;
             }
             if (flatten_context(ctx, ref->box, child_dev, cox, coy, out) != 0) return -1;
             if (tr && push_pop_transform(out) != 0) return -1;
@@ -2253,7 +2393,7 @@ static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, f
     return 0;
 }
 
-int paint_build(PaintCtx *ctx, Box *root, DisplayList *out)
+static int paint_build_once(PaintCtx *ctx, Box *root, DisplayList *out)
 {
     int rc;
     if (!ctx->caches) return -1;
@@ -2293,5 +2433,21 @@ int paint_build(PaintCtx *ctx, Box *root, DisplayList *out)
     rc = flatten_context(ctx, root, dev_root, 0, 0, out);
     if (tr && rc == 0 && push_pop_transform(out) != 0) rc = -1;
     table_evict(ctx->caches, ctx->frame);
+    return rc;
+}
+
+/* text_glyph_quad() rebuilds a full glyph atlas on the spot (generation + 1) and
+ * packs the new glyph from the top again.  When that happens while recording, the
+ * quads recorded before it - in this list and in the cached contexts flattened
+ * from earlier frames - point at atlas space the glyphs after it overwrite: that
+ * text shows pieces of the new glyphs (the top rows of a shrinking "FIRST BLOOD"
+ * popup's letters), and since the list is only rebuilt when something is dirty
+ * it stays on screen until the next paint.  Re-record everything once against the
+ * new atlas (the visible glyphs fit: the atlas held them all before). */
+int paint_build(PaintCtx *ctx, Box *root, DisplayList *out)
+{
+    int rc = paint_build_once(ctx, root, out);
+    if (rc == 0 && ctx->text && text_atlas_generation(ctx->text) != ctx->atlas_generation)
+        rc = paint_build_once(ctx, root, out);
     return rc;
 }

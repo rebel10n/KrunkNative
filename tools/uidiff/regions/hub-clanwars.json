@@ -23,13 +23,13 @@
       "rect": [
         440,
         0,
-        300,
+        340,
         42
       ],
       "kind": "image",
       "fuzz": 10,
       "max_pct": 3.0,
-      "note": "Terms + public/store/poll/videogame/extension icons; the crossed_swords_0.svg icon after them is left out (engine: no SVG images)"
+      "note": "Terms + public/store/poll/videogame/extension icons + the Clan Wars crossed_swords_0.svg icon (svg.c / nanosvg)"
     },
     {
       "name": "nav-logo",

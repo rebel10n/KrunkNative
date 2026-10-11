@@ -1269,7 +1269,7 @@ static int layout_changed(const CssComputed *a, const CssComputed *b)
         || a->overflow_wrap != b->overflow_wrap || a->word_break != b->word_break || a->direction != b->direction
         || a->border_collapse != b->border_collapse || !len_eq(&a->border_spacing_x, &b->border_spacing_x)
         || !len_eq(&a->border_spacing_y, &b->border_spacing_y)) return 1;
-    if (a->clear != b->clear || a->box_sizing != b->box_sizing || a->appearance != b->appearance) return 1;
+    if (a->clear != b->clear || a->box_sizing != b->box_sizing || a->appearance != b->appearance || a->table_layout != b->table_layout) return 1;
     for (int i = 0; i < 4; i++) {
         if (!len_eq(&a->inset[i], &b->inset[i]) || !len_eq(&a->margin[i], &b->margin[i]) || !len_eq(&a->padding[i], &b->padding[i])) return 1;
         if (used_border(a, i) != used_border(b, i)) return 1;
@@ -1291,6 +1291,13 @@ static int layout_changed(const CssComputed *a, const CssComputed *b)
         const CssTrack *ta = &a->grid_rows[i], *tb = &b->grid_rows[i];
         if (ta->kind != tb->kind || ta->fr != tb->fr || !len_eq(&ta->size, &tb->size) || !len_eq(&ta->max, &tb->max)) return 1;
     }
+    if (memcmp(a->grid_names, b->grid_names, sizeof(a->grid_names)) || a->grid_areas != b->grid_areas
+        || a->grid_auto_flow != b->grid_auto_flow || memcmp(a->grid_auto_count, b->grid_auto_count, sizeof(a->grid_auto_count))) return 1;
+    for (int x = 0; x < 2; x++)
+        for (int i = 0; i < a->grid_auto_count[x]; i++) {
+            const CssTrack *ta = &a->grid_auto_tracks[x][i], *tb = &b->grid_auto_tracks[x][i];
+            if (ta->kind != tb->kind || ta->fr != tb->fr || !len_eq(&ta->size, &tb->size) || !len_eq(&ta->max, &tb->max)) return 1;
+        }
     return 0;
 }
 
@@ -1352,8 +1359,15 @@ int layout_restyled(LayoutTree *t, lxb_dom_node_t *node, const CssComputed *old_
     Box *b = (Box *)ed->box;
     if (!b) {
         if (!s || s->display == CSS_DISPLAY_NONE) return LAYOUT_RESTYLE_NONE;
-        /* newly displayed: is the parent rendered? */
-        if (!node->parent || !rebuild_root_for_node(node->parent)) return LAYOUT_RESTYLE_NONE;
+        /* newly displayed: only when its parent element is rendered (has a box; display:
+         * contents builds one too). Inside a display:none ancestor nothing renders, so an
+         * animation running there (the menu's #merchImg / #instructions while in game)
+         * must not rebuild the nearest rendered ancestor's children on every tick. */
+        lxb_dom_node_t *p = node->parent;
+        while (p && p->type != LXB_DOM_NODE_TYPE_ELEMENT) p = p->parent;
+        ElemData *ped = p ? layout_elem_data(p) : NULL;
+        if (!ped || !ped->box) return LAYOUT_RESTYLE_NONE;
+        if (!rebuild_root_for_node(node->parent)) return LAYOUT_RESTYLE_NONE;
         return rebuild_for_node(t, node->parent);
     }
     if (!s || s->display == CSS_DISPLAY_NONE || !old_style || structural_changed(old_style, s)) {

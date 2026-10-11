@@ -36,11 +36,12 @@ extern "C" {
 
 #define CSS_MAX_TRANSFORM_OPS   4
 #define CSS_MAX_TEXT_SHADOWS    16
-#define CSS_MAX_GRADIENT_STOPS  8
+#define CSS_MAX_GRADIENT_STOPS  16  /* devconsole.css grip: 7 double-position stops = 13 */
 #define CSS_MAX_BG_LAYERS       2
 #define CSS_MAX_FILTER_OPS      6
 #define CSS_MAX_ANIMATIONS      2
 #define CSS_MAX_TRANSITIONS     2
+#define CSS_MAX_BOX_SHADOWS     4
 #define CSS_MAX_GRID_TRACKS     8
 #define CSS_MAX_CUSTOM_PROPS    12
 #define CSS_MAX_CLIP_POINTS     8
@@ -113,13 +114,15 @@ typedef enum CssPointerEvents { CSS_POINTER_EVENTS_AUTO = 0, CSS_POINTER_EVENTS_
 typedef enum CssCursor {
     CSS_CURSOR_AUTO = 0, CSS_CURSOR_DEFAULT, CSS_CURSOR_POINTER, CSS_CURSOR_NONE,
     CSS_CURSOR_CROSSHAIR, CSS_CURSOR_TEXT, CSS_CURSOR_MOVE, CSS_CURSOR_NOT_ALLOWED,
-    CSS_CURSOR_GRAB, CSS_CURSOR_GRABBING, CSS_CURSOR_WAIT, CSS_CURSOR_HELP
+    CSS_CURSOR_GRAB, CSS_CURSOR_GRABBING, CSS_CURSOR_WAIT, CSS_CURSOR_HELP,
+    CSS_CURSOR_EW_RESIZE, CSS_CURSOR_NS_RESIZE, CSS_CURSOR_NWSE_RESIZE, CSS_CURSOR_NESW_RESIZE
 } CssCursor;
 
 typedef enum CssUserSelect { CSS_USER_SELECT_AUTO = 0, CSS_USER_SELECT_NONE, CSS_USER_SELECT_TEXT, CSS_USER_SELECT_ALL } CssUserSelect;
 typedef enum CssDirection { CSS_DIRECTION_LTR = 0, CSS_DIRECTION_RTL } CssDirection;
 typedef enum CssAppearance { CSS_APPEARANCE_AUTO = 0, CSS_APPEARANCE_NONE, CSS_APPEARANCE_TEXTFIELD, CSS_APPEARANCE_MENULIST, CSS_APPEARANCE_BUTTON } CssAppearance;
 typedef enum CssBoxSizing { CSS_BOX_SIZING_CONTENT_BOX = 0, CSS_BOX_SIZING_BORDER_BOX } CssBoxSizing;
+typedef enum CssTableLayout { CSS_TABLE_LAYOUT_AUTO = 0, CSS_TABLE_LAYOUT_FIXED } CssTableLayout;
 
 typedef enum CssTextAlign {
     CSS_TEXT_ALIGN_START = 0, CSS_TEXT_ALIGN_LEFT, CSS_TEXT_ALIGN_RIGHT,
@@ -333,16 +336,45 @@ typedef struct CssTrack {
 } CssTrack;
 
 /* grid-row-start / grid-column-start / grid-row-end / grid-column-end:
- * auto (line 0, span 0), <integer> (line != 0, negative counts from the end
- * of the explicit grid) or span <integer> (span 1, line = the count).
- * Named lines are not supported. */
+ * auto (line 0, span 0, name NULL); [<integer> && <custom-ident>?] (line != 0,
+ * negative counts from the end of the explicit grid); <custom-ident> (name,
+ * line 0); span && [<integer> || <custom-ident>] (span 1, line = the count,
+ * 1 when only a name is given). */
 typedef struct CssGridLine {
     int16_t line;
     uint8_t span;
     uint8_t reserved_;     /* explicit padding: compared and hashed bytewise */
+    uint32_t reserved2_;
+    const char *name;      /* atom of the <custom-ident>, or NULL             */
 } CssGridLine;
 
 enum { CSS_GRID_ROW_START = 0, CSS_GRID_COLUMN_START, CSS_GRID_ROW_END, CSS_GRID_COLUMN_END };
+
+/* Axis index of the per-axis grid fields: rows, then columns (the parity of
+ * CSS_GRID_ROW_START / CSS_GRID_COLUMN_START). */
+enum { CSS_GRID_AXIS_ROW = 0, CSS_GRID_AXIS_COLUMN = 1 };
+
+#define CSS_MAX_GRID_AUTO_TRACKS 4
+
+/* repeat(auto-fill | auto-fit, ...) inside a track list */
+typedef enum CssGridRepeat { CSS_GRID_REPEAT_NONE = 0, CSS_GRID_REPEAT_AUTO_FILL, CSS_GRID_REPEAT_AUTO_FIT } CssGridRepeat;
+
+/* Line names and the auto-repeat of one axis' track list.  line[i] holds the
+ * names of line i (before track i) as a space-separated atom (NULL: none).
+ * With an auto repeat the tracks [repeat_at, repeat_at + repeat_n) are the
+ * repeated group; line[repeat_at] / line[repeat_at + repeat_n] are the names
+ * just outside the repeat(), rep_first / rep_last the names at its inner
+ * edges, and the lines strictly inside the group are line[]. */
+typedef struct CssGridNames {
+    const char *line[CSS_MAX_GRID_TRACKS + 1];
+    const char *rep_first, *rep_last;
+    uint8_t repeat;        /* CssGridRepeat                                   */
+    uint8_t repeat_at, repeat_n;
+    uint8_t reserved_[5];
+} CssGridNames;
+
+/* grid-auto-flow bits */
+enum { CSS_GRID_FLOW_COLUMN = 1, CSS_GRID_FLOW_DENSE = 2 };
 
 typedef struct CssCustomProp {
     const char *name;      /* atom including the leading "--"                 */
@@ -413,6 +445,7 @@ typedef struct CssComputed {
     uint8_t float_;                   /* CssFloat                              */
     uint8_t clear;                    /* CssClear                              */
     uint8_t box_sizing;               /* CssBoxSizing                          */
+    uint8_t table_layout;             /* CssTableLayout                        */
     uint8_t overflow_x, overflow_y;   /* CssOverflow                           */
     uint8_t appearance;               /* CssAppearance                         */
     uint8_t will_change;              /* bits, ignored by layout               */
@@ -441,8 +474,9 @@ typedef struct CssComputed {
 
     CssTransform transform;
     CssLength transform_origin_x, transform_origin_y;  /* default 50% 50%     */
-    CssShadow box_shadow;
-    uint8_t box_shadow_count;         /* 0 or 1                                */
+    CssShadow box_shadow;             /* the first (topmost) shadow            */
+    CssShadow box_shadow_more[CSS_MAX_BOX_SHADOWS - 1];  /* the rest, in order */
+    uint8_t box_shadow_count;         /* 0 .. CSS_MAX_BOX_SHADOWS (list length) */
     CssFilterOp filters[CSS_MAX_FILTER_OPS];
     uint8_t filter_count;
     CssClipPath clip_path;
@@ -468,6 +502,12 @@ typedef struct CssComputed {
     CssGridLine grid_lines[4];        /* CSS_GRID_ROW_START.. (grid-area order) */
     uint8_t justify_items;            /* CssAlignItems; legacy/normal == STRETCH */
     uint8_t justify_self, align_self; /* CssAlignItems; initial AUTO           */
+    CssGridNames grid_names[2];       /* CSS_GRID_AXIS_ROW / _COLUMN           */
+    CssTrack grid_auto_tracks[2][CSS_MAX_GRID_AUTO_TRACKS]; /* grid-auto-rows / -columns */
+    uint8_t grid_auto_count[2];       /* >= 1 (initial: one auto track)        */
+    uint8_t grid_auto_flow;           /* CSS_GRID_FLOW_* bits                  */
+    uint8_t grid_area_rows, grid_area_cols; /* grid-template-areas size (0: none) */
+    const char *grid_areas;           /* atom: rows '\n'-separated, cells ' '-separated, "." = null cell */
     CssLength row_gap, column_gap;    /* NORMAL == 0                           */
 
     CssAnimation animations[CSS_MAX_ANIMATIONS];

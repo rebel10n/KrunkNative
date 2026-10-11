@@ -28,6 +28,7 @@ U(u_uv_flip_sides, "uv_flip_sides");
 U(u_uv_flip_top, "uv_flip_top");
 U(u_use_color_gradient, "use_color_gradient");
 U(u_color_bottom, "color_bottom");
+U(u_use_vertex_color, "use_vertex_color");
 U(u_alpha_test, "alpha_test");
 U(u_ramp_shade_width, "ramp_shade_width");
 U(u_unlit, "unlit");
@@ -101,6 +102,7 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     gl_uniform_1i(&u_uv_flip_top, program, material->uv_flip_top);
     gl_uniform_1i(&u_use_color_gradient, program, material->use_color_gradient);
     gl_uniform_4f(&u_color_bottom, program, material->color_bottom.x, material->color_bottom.y, material->color_bottom.z, material->color_bottom.w);
+    gl_uniform_1i(&u_use_vertex_color, program, material->use_vertex_color);
     // ambientShading off: 134.js toggleMeshGroup("ambient_0"/"ambient_1", false) hides the AO planes
     gl_uniform_1f(&u_alpha_test, program, material->ambient_group && !render_settings->ambient_shading ? 2.0f : material->alpha_test);
     // ambientShading: 134.js toggleMeshGroup("ambient_1") shows/hides the ramp edge strips

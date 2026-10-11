@@ -944,7 +944,12 @@ const CssKeyword css_kw_cursor[] = {
     { "none", CSS_CURSOR_NONE }, { "crosshair", CSS_CURSOR_CROSSHAIR }, { "text", CSS_CURSOR_TEXT },
     { "move", CSS_CURSOR_MOVE }, { "not-allowed", CSS_CURSOR_NOT_ALLOWED }, { "grab", CSS_CURSOR_GRAB },
     { "grabbing", CSS_CURSOR_GRABBING }, { "wait", CSS_CURSOR_WAIT }, { "help", CSS_CURSOR_HELP },
-    { "hand", CSS_CURSOR_POINTER }, { NULL, 0 }
+    { "hand", CSS_CURSOR_POINTER },
+    { "ew-resize", CSS_CURSOR_EW_RESIZE }, { "col-resize", CSS_CURSOR_EW_RESIZE }, { "e-resize", CSS_CURSOR_EW_RESIZE },
+    { "w-resize", CSS_CURSOR_EW_RESIZE }, { "ns-resize", CSS_CURSOR_NS_RESIZE }, { "row-resize", CSS_CURSOR_NS_RESIZE },
+    { "n-resize", CSS_CURSOR_NS_RESIZE }, { "s-resize", CSS_CURSOR_NS_RESIZE }, { "nwse-resize", CSS_CURSOR_NWSE_RESIZE },
+    { "nw-resize", CSS_CURSOR_NWSE_RESIZE }, { "se-resize", CSS_CURSOR_NWSE_RESIZE }, { "nesw-resize", CSS_CURSOR_NESW_RESIZE },
+    { "ne-resize", CSS_CURSOR_NESW_RESIZE }, { "sw-resize", CSS_CURSOR_NESW_RESIZE }, { NULL, 0 }
 };
 const CssKeyword css_kw_border_style[] = {
     { "none", CSS_BORDER_STYLE_NONE }, { "hidden", CSS_BORDER_STYLE_HIDDEN }, { "solid", CSS_BORDER_STYLE_SOLID },
@@ -966,6 +971,7 @@ static const CssKeyword kw_user_select[] = { { "auto", CSS_USER_SELECT_AUTO }, {
 static const CssKeyword kw_direction[] = { { "ltr", CSS_DIRECTION_LTR }, { "rtl", CSS_DIRECTION_RTL }, { NULL, 0 } };
 static const CssKeyword kw_appearance[] = { { "auto", CSS_APPEARANCE_AUTO }, { "none", CSS_APPEARANCE_NONE }, { "textfield", CSS_APPEARANCE_TEXTFIELD }, { "menulist", CSS_APPEARANCE_MENULIST }, { "menulist-button", CSS_APPEARANCE_MENULIST }, { "button", CSS_APPEARANCE_BUTTON }, { "checkbox", CSS_APPEARANCE_AUTO }, { "radio", CSS_APPEARANCE_AUTO }, { "slider-horizontal", CSS_APPEARANCE_AUTO }, { NULL, 0 } };
 static const CssKeyword kw_box_sizing[] = { { "content-box", CSS_BOX_SIZING_CONTENT_BOX }, { "border-box", CSS_BOX_SIZING_BORDER_BOX }, { NULL, 0 } };
+static const CssKeyword kw_table_layout[] = { { "auto", CSS_TABLE_LAYOUT_AUTO }, { "fixed", CSS_TABLE_LAYOUT_FIXED }, { NULL, 0 } };
 static const CssKeyword kw_text_align[] = { { "start", CSS_TEXT_ALIGN_START }, { "left", CSS_TEXT_ALIGN_LEFT }, { "right", CSS_TEXT_ALIGN_RIGHT }, { "center", CSS_TEXT_ALIGN_CENTER }, { "justify", CSS_TEXT_ALIGN_JUSTIFY }, { "end", CSS_TEXT_ALIGN_END }, { "-webkit-center", CSS_TEXT_ALIGN_CENTER }, { NULL, 0 } };
 static const CssKeyword kw_text_transform[] = { { "none", CSS_TEXT_TRANSFORM_NONE }, { "uppercase", CSS_TEXT_TRANSFORM_UPPERCASE }, { "lowercase", CSS_TEXT_TRANSFORM_LOWERCASE }, { "capitalize", CSS_TEXT_TRANSFORM_CAPITALIZE }, { NULL, 0 } };
 static const CssKeyword kw_white_space[] = { { "normal", CSS_WHITE_SPACE_NORMAL }, { "nowrap", CSS_WHITE_SPACE_NOWRAP }, { "pre", CSS_WHITE_SPACE_PRE }, { "pre-wrap", CSS_WHITE_SPACE_PRE_WRAP }, { "pre-line", CSS_WHITE_SPACE_PRE_LINE }, { "break-spaces", CSS_WHITE_SPACE_PRE_WRAP }, { NULL, 0 } };
@@ -1414,6 +1420,10 @@ int css_parse_transform_origin(const CssToken *tokens, int n, CssLength *x, CssL
 /* Shadows                                                                   */
 /* ========================================================================= */
 
+/* em in shadow lengths: CssShadow holds px, so the parser folds em with the
+ * font size css_computed_apply() sets here (16 for validation-only parses). */
+static float g_shadow_em_px = 16.0f;
+
 int css_parse_shadow_item(const CssToken *tokens, int n, int allow_inset_spread, CssShadow *out, int *consumed)
 {
     CssShadow s;
@@ -1434,8 +1444,8 @@ int css_parse_shadow_item(const CssToken *tokens, int n, int allow_inset_spread,
         if (css_parse_length_item(tokens + i, n - i, 0, &l, &used)) {
             if (run_closed) return 0;                  /* lengths must be contiguous */
             if (lengths >= (allow_inset_spread ? 4 : 3)) return 0;
-            if (lengths == 2 && l.px < 0) return 0;    /* negative blur */
-            v[lengths++] = l.px;
+            if (lengths == 2 && (l.px < 0 || l.em < 0)) return 0;    /* negative blur */
+            v[lengths++] = l.px + l.em * g_shadow_em_px;
             i += used;
             continue;
         }
@@ -1452,6 +1462,24 @@ int css_parse_shadow_item(const CssToken *tokens, int n, int allow_inset_spread,
     s.x = v[0]; s.y = v[1]; s.blur = v[2]; s.spread = v[3];
     *out = s;
     *consumed = i;
+    return 1;
+}
+
+int css_parse_box_shadow_list(const CssToken *tokens, int n, CssShadow *out, int max, int *count)
+{
+    CssToken t[CSS_MAX_TOKENS];
+    int m = tokens_copy_nows(tokens, n, t, CSS_MAX_TOKENS);
+    if (m == 1 && tok_is_ident(&t[0], "none")) { *count = 0; return 1; }
+    int i = 0, k = 0;
+    while (i < m) {
+        CssShadow s; int used = 0;
+        if (!css_parse_shadow_item(t + i, m - i, 1, &s, &used)) return 0;
+        if (k < max) out[k++] = s;
+        i += used;
+        if (i < m) { if (t[i].type != CSS_TOK_COMMA) return 0; i++; if (i == m) return 0; }
+    }
+    if (k == 0) return 0;
+    *count = k;
     return 1;
 }
 
@@ -2201,34 +2229,133 @@ static int parse_track_size(const CssToken *t, int n, CssTrack *out, int *used)
     return css_parse_length_item(t, n, fl, &out->size, used);
 }
 
-int css_parse_grid_tracks(const CssToken *tokens, int n, CssTrack *out, int max, int *count)
+/* Joins two space-separated line-name atoms (either may be NULL). */
+static const char *grid_names_join(const char *a, const char *b)
 {
-    CssToken t[CSS_MAX_TOKENS];
-    int m = tokens_copy_nows(tokens, n, t, CSS_MAX_TOKENS);
-    if (m == 1 && tok_is_ident(&t[0], "none")) { *count = 0; return 1; }
+    if (!a) return b;
+    if (!b) return a;
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "%s %s", a, b);
+    if (n < 0 || n >= (int)sizeof(buf)) return a;
+    return kn_atom(buf, (size_t)n);
+}
+
+/* <custom-ident> usable as a grid line / area name (not a grid keyword). */
+static int grid_ident_ok(const CssToken *t)
+{
+    return t->type == CSS_TOK_IDENT && !tok_is_ident(t, "span") && !tok_is_ident(t, "auto") && !tok_is_global_kw(t)
+        && !tok_is_ident(t, "default");
+}
+
+/* <line-names>: '[' <custom-ident>* ']' at t[0]; *out = space-separated atom or NULL. */
+static int parse_line_names(const CssToken *t, int n, const char **out, int *used)
+{
+    int len = css_component_len(t, n, 0);
+    if (t[0].type != CSS_TOK_LBRACKET || len < 2 || t[len - 1].type != CSS_TOK_RBRACKET) return 0;
+    char buf[256];
+    size_t w = 0;
+    for (int i = 1; i < len - 1; i++) {
+        if (!grid_ident_ok(&t[i])) return 0;
+        if (w + t[i].len + 2 >= sizeof(buf)) return 0;
+        if (w) buf[w++] = ' ';
+        memcpy(buf + w, t[i].text, t[i].len);
+        w += t[i].len;
+    }
+    *out = w ? kn_atom(buf, w) : NULL;
+    *used = len;
+    return 1;
+}
+
+/* A <fixed-size> track (auto-repeat requires every track to be one). */
+static int track_is_fixed(const CssTrack *tr)
+{
+    int min_fixed = tr->size.kind == CSS_LEN_VALUE;
+    switch (tr->kind) {
+    case CSS_TRACK_SIZE: return min_fixed;
+    case CSS_TRACK_MINMAX: return min_fixed || tr->max.kind == CSS_LEN_VALUE;
+    case CSS_TRACK_MINMAX_FR: return min_fixed;
+    default: return 0;
+    }
+}
+
+/* The inside of repeat(): [<line-names>? <track-size>]+ <line-names>?.
+ * tracks[] / inner_names[0..count] receive the group. */
+static int parse_repeat_group(const CssToken *t, int n, CssTrack *tracks, const char **inner_names, int max, int *count)
+{
+    int k = 0, i = 0, used = 0;
+    inner_names[0] = NULL;
+    while (i < n) {
+        if (t[i].type == CSS_TOK_LBRACKET) {
+            const char *nm;
+            if (!parse_line_names(t + i, n - i, &nm, &used)) return 0;
+            inner_names[k] = grid_names_join(inner_names[k], nm);
+            i += used;
+            continue;
+        }
+        if (k >= max || !parse_track_size(t + i, n - i, &tracks[k], &used)) return 0;
+        k++;
+        inner_names[k] = NULL;
+        i += used;
+    }
+    if (k == 0) return 0;
+    *count = k;
+    return 1;
+}
+
+/* <track-list> | <auto-track-list> (whitespace stripped) with line names.
+ * names may be NULL: names are then accepted and dropped and an auto repeat
+ * is rejected. */
+static int parse_grid_track_list(const CssToken *t, int m, CssTrack *out, int max, int *count, CssGridNames *names)
+{
     CssTrack tmp[32];
-    int k = 0, i = 0;
+    const char *ln[33];
+    memset(ln, 0, sizeof(ln));
+    CssGridNames nm;
+    memset(&nm, 0, sizeof(nm));
+    int k = 0, i = 0, used = 0;
     while (i < m) {
-        int used = 0;
+        if (t[i].type == CSS_TOK_LBRACKET) {
+            const char *s;
+            if (!parse_line_names(t + i, m - i, &s, &used)) return 0;
+            ln[k] = grid_names_join(ln[k], s);
+            i += used;
+            continue;
+        }
         if (k >= 32) return 0;
         if (t[i].type == CSS_TOK_FUNCTION && tok_is_func(&t[i], "repeat")) {
-            /* repeat(<integer>, <track-size>+); auto-fill/auto-fit unsupported */
+            /* repeat(<integer> | auto-fill | auto-fit, <group>) */
             int len = css_component_len(t + i, m - i, 0);
             int j = i + 1, end = i + len - 1;
-            if (len < 5 || t[end].type != CSS_TOK_RPAREN || t[j].type != CSS_TOK_NUMBER ||
-                !(t[j].flags & CSS_TOKF_INTEGER) || t[j].num < 1 || t[j + 1].type != CSS_TOK_COMMA) return 0;
-            int reps = (int)t[j].num, first = k;
-            for (j += 2; j < end; j += used) {
-                if (k >= 32 || !parse_track_size(t + j, end - j, &tmp[k], &used)) return 0;
-                k++;
-            }
-            int per = k - first;
-            if (per == 0) return 0;
-            for (int r = 1; r < reps; r++)
+            if (len < 5 || t[end].type != CSS_TOK_RPAREN || t[j + 1].type != CSS_TOK_COMMA) return 0;
+            int reps = 0, autorep = CSS_GRID_REPEAT_NONE;
+            if (t[j].type == CSS_TOK_NUMBER && (t[j].flags & CSS_TOKF_INTEGER) && t[j].num >= 1 && t[j].num <= 1000) reps = (int)t[j].num;
+            else if (tok_is_ident(&t[j], "auto-fill")) autorep = CSS_GRID_REPEAT_AUTO_FILL;
+            else if (tok_is_ident(&t[j], "auto-fit")) autorep = CSS_GRID_REPEAT_AUTO_FIT;
+            else return 0;
+            CssTrack grp[32];
+            const char *gn[33];
+            int per = 0;
+            if (!parse_repeat_group(t + j + 2, end - j - 2, grp, gn, 32, &per)) return 0;
+            if (autorep) {
+                if (!names || nm.repeat) return 0;
+                if (k + per > 32) return 0;
+                nm.repeat = (uint8_t)autorep; nm.repeat_at = (uint8_t)k; nm.repeat_n = (uint8_t)per;
+                nm.rep_first = gn[0]; nm.rep_last = gn[per];
                 for (int q = 0; q < per; q++) {
-                    if (k >= 32) return 0;
-                    tmp[k++] = tmp[first + q];
+                    tmp[k + q] = grp[q];
+                    if (q) ln[k + q] = gn[q];
                 }
+                k += per;
+            } else {
+                for (int r = 0; r < reps; r++) {
+                    ln[k] = grid_names_join(ln[k], gn[0]);
+                    for (int q = 0; q < per; q++) {
+                        if (k >= 32) return 0;
+                        tmp[k++] = grp[q];
+                        ln[k] = gn[q + 1];
+                    }
+                }
+            }
             i += len;
             continue;
         }
@@ -2237,26 +2364,146 @@ int css_parse_grid_tracks(const CssToken *tokens, int n, CssTrack *out, int max,
         i += used;
     }
     if (k == 0 || k > max) return 0;
+    if (nm.repeat)
+        for (int j = 0; j < k; j++) if (!track_is_fixed(&tmp[j])) return 0;   /* <auto-track-list> */
     for (int j = 0; j < k; j++) out[j] = tmp[j];
+    for (int j = 0; j <= k; j++) nm.line[j] = ln[j];
+    *count = k;
+    if (names) *names = nm;
+    return 1;
+}
+
+int css_parse_grid_track_list(const CssToken *tokens, int n, CssTrack *out, int max, int *count, CssGridNames *names)
+{
+    CssToken t[CSS_MAX_TOKENS];
+    int m = tokens_copy_nows(tokens, n, t, CSS_MAX_TOKENS);
+    if (m == 1 && tok_is_ident(&t[0], "none")) {
+        *count = 0;
+        if (names) memset(names, 0, sizeof(*names));
+        return 1;
+    }
+    return parse_grid_track_list(t, m, out, max, count, names);
+}
+
+int css_parse_grid_tracks(const CssToken *tokens, int n, CssTrack *out, int max, int *count)
+{
+    return css_parse_grid_track_list(tokens, n, out, max, count, NULL);
+}
+
+/* grid-auto-rows / grid-auto-columns: <track-size>+ (no names, no repeat). */
+static int parse_grid_auto_tracks(const CssToken *t, int m, CssTrack *out, int *count)
+{
+    int k = 0, i = 0, used = 0;
+    while (i < m) {
+        if (k >= CSS_MAX_GRID_AUTO_TRACKS || !parse_track_size(t + i, m - i, &out[k], &used)) return 0;
+        k++;
+        i += used;
+    }
+    if (!k) return 0;
     *count = k;
     return 1;
 }
 
-/* <grid-line>: auto | <integer> | span <integer> | <integer> span (whitespace
- * stripped; named lines unsupported).  Line 0 and span < 1 are invalid. */
+/* grid-auto-flow: [row | column] || dense */
+static int parse_grid_auto_flow(const CssToken *t, int m, uint8_t *out)
+{
+    int dir = -1, dense = 0;
+    for (int i = 0; i < m; i++) {
+        if (dir < 0 && tok_is_ident(&t[i], "row")) dir = 0;
+        else if (dir < 0 && tok_is_ident(&t[i], "column")) dir = CSS_GRID_FLOW_COLUMN;
+        else if (!dense && tok_is_ident(&t[i], "dense")) dense = CSS_GRID_FLOW_DENSE;
+        else return 0;
+    }
+    if (m < 1) return 0;
+    *out = (uint8_t)((dir < 0 ? 0 : dir) | dense);
+    return 1;
+}
+
+static int is_area_name_char(unsigned char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c >= 0x80;
+}
+
+/* grid-template-areas: none | <string>+.  Every named area must be a filled
+ * rectangle.  *out = atom of the normalized cells (see CssComputed). */
+static int parse_grid_areas(const CssToken *t, int m, const char **out, uint8_t *rows, uint8_t *cols)
+{
+    if (m == 1 && tok_is_ident(&t[0], "none")) { *out = NULL; *rows = *cols = 0; return 1; }
+    enum { MAXR = 32, MAXC = 32 };
+    const char *cell[MAXR][MAXC];
+    int nr = 0, nc = -1;
+    for (int r = 0; r < m; r++) {
+        if (t[r].type != CSS_TOK_STRING || nr >= MAXR) return 0;
+        const char *s = t[r].text;
+        size_t len = t[r].len, p = 0;
+        int c = 0;
+        while (p < len) {
+            unsigned char ch = (unsigned char)s[p];
+            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') { p++; continue; }
+            size_t q = p;
+            if (ch == '.') while (q < len && s[q] == '.') q++;
+            else if (is_area_name_char(ch)) while (q < len && is_area_name_char((unsigned char)s[q])) q++;
+            else return 0;                                  /* trash token */
+            if (c >= MAXC) return 0;
+            cell[nr][c++] = ch == '.' ? NULL : kn_atom(s + p, q - p);
+            p = q;
+        }
+        if (c == 0 || (nc >= 0 && c != nc)) return 0;
+        nc = c;
+        nr++;
+    }
+    if (nr == 0) return 0;
+    /* rectangles: each name's cells fill its bounding box */
+    for (int r = 0; r < nr; r++)
+        for (int c = 0; c < nc; c++) {
+            const char *a = cell[r][c];
+            if (!a) continue;
+            int r0 = nr, r1 = -1, c0 = nc, c1 = -1, n = 0;
+            for (int y = 0; y < nr; y++)
+                for (int x = 0; x < nc; x++)
+                    if (cell[y][x] == a) { n++; if (y < r0) r0 = y; if (y > r1) r1 = y; if (x < c0) c0 = x; if (x > c1) c1 = x; }
+            if (n != (r1 - r0 + 1) * (c1 - c0 + 1)) return 0;
+        }
+    char buf[2048];
+    size_t w = 0;
+    for (int r = 0; r < nr; r++)
+        for (int c = 0; c < nc; c++) {
+            const char *a = cell[r][c] ? cell[r][c] : ".";
+            size_t l = strlen(a);
+            if (w + l + 2 >= sizeof(buf)) return 0;
+            if (c) buf[w++] = ' ';
+            else if (r) buf[w++] = '\n';
+            memcpy(buf + w, a, l);
+            w += l;
+        }
+    *out = kn_atom(buf, w);
+    *rows = (uint8_t)nr;
+    *cols = (uint8_t)nc;
+    return 1;
+}
+
+/* <grid-line>: auto | <custom-ident> | [<integer> && <custom-ident>?] |
+ * [span && [<integer> || <custom-ident>]] (whitespace stripped).  Line 0 and
+ * span < 1 are invalid. */
 static int parse_grid_line(const CssToken *t, int m, CssGridLine *out)
 {
     memset(out, 0, sizeof(*out));
     if (m == 1 && tok_is_ident(&t[0], "auto")) return 1;
-    int span = 0, num = -1;
+    int span = 0, num = -1, name = -1;
     for (int i = 0; i < m; i++) {
-        if (!span && tok_is_ident(&t[i], "span")) span = 1;
+        if (!span && tok_is_ident(&t[i], "span")) {
+            if (i != 0 && i != m - 1) return 0;           /* span first or last */
+            span = 1;
+        }
         else if (num < 0 && t[i].type == CSS_TOK_NUMBER && (t[i].flags & CSS_TOKF_INTEGER)) num = i;
+        else if (name < 0 && grid_ident_ok(&t[i])) name = i;
         else return 0;
     }
-    if (num < 0 || t[num].num == 0 || fabs(t[num].num) > 10000 || (span && t[num].num < 1)) return 0;
-    out->line = (int16_t)t[num].num;
+    if (num < 0 && name < 0) return 0;
+    if (num >= 0 && (t[num].num == 0 || fabs(t[num].num) > 10000 || (span && t[num].num < 1))) return 0;
+    out->line = (int16_t)(num >= 0 ? t[num].num : span ? 1 : 0);
     out->span = (uint8_t)span;
+    out->name = name >= 0 ? kn_atom(t[name].text, t[name].len) : NULL;
     return 1;
 }
 
@@ -2540,6 +2787,9 @@ static int shorthand_longhands(int id, int *out)
     case CSS_PROP_GRID_COLUMN: P(GRID_COLUMN_START); P(GRID_COLUMN_END); break;
     case CSS_PROP_GRID_AREA: P(GRID_ROW_START); P(GRID_COLUMN_START); P(GRID_ROW_END); P(GRID_COLUMN_END); break;
     case CSS_PROP_PLACE_SELF: P(ALIGN_SELF); P(JUSTIFY_SELF); break;
+    case CSS_PROP_GRID_TEMPLATE: P(GRID_TEMPLATE_ROWS); P(GRID_TEMPLATE_COLUMNS); P(GRID_TEMPLATE_AREAS); break;
+    case CSS_PROP_GRID: P(GRID_TEMPLATE_ROWS); P(GRID_TEMPLATE_COLUMNS); P(GRID_TEMPLATE_AREAS);
+        P(GRID_AUTO_ROWS); P(GRID_AUTO_COLUMNS); P(GRID_AUTO_FLOW); break;
     case CSS_PROP_LIST_STYLE: P(LIST_STYLE_TYPE); break;
     case CSS_PROP_FONT: P(FONT_STYLE); P(FONT_WEIGHT); P(FONT_SIZE); P(LINE_HEIGHT); P(FONT_FAMILY); break;
     default: break;
@@ -2776,6 +3026,138 @@ static int expand_flex(Emit *e, const CssToken *t, int m)
     return 1;
 }
 
+/* Index of the top-level '/' in t[0..m) or -1. */
+static int grid_find_slash(const CssToken *t, int m, int from)
+{
+    for (int i = from; i < m; i += css_component_len(t, m, i))
+        if (tok_is_delim(&t[i], '/')) return i;
+    return -1;
+}
+
+static int valid_track_list(const CssToken *t, int m, int allow_auto_repeat)
+{
+    CssTrack tr[CSS_MAX_GRID_TRACKS];
+    CssGridNames nm;
+    int c;
+    if (m == 1 && tok_is_ident(&t[0], "none")) return 1;
+    return m > 0 && parse_grid_track_list(t, m, tr, CSS_MAX_GRID_TRACKS, &c, allow_auto_repeat ? &nm : NULL);
+}
+
+/* grid-template: none | <rows> / <columns> |
+ * [<line-names>? <string> <track-size>? <line-names>?]+ [/ <explicit-track-list>]?
+ * lh = rows, columns, areas. */
+static int expand_grid_template(Emit *e, const int *lh, const CssToken *t, int m)
+{
+    if (m == 1 && tok_is_ident(&t[0], "none")) {
+        for (int k = 0; k < 3; k++) emit_lit(e, lh[k], "none");
+        return 1;
+    }
+    int has_string = 0;
+    for (int i = 0; i < m; i++) has_string |= t[i].type == CSS_TOK_STRING;
+    int slash = grid_find_slash(t, m, 0);
+    if (!has_string) {
+        if (slash < 0 || !valid_track_list(t, slash, 1) || !valid_track_list(t + slash + 1, m - slash - 1, 1)) return 0;
+        emit(e, lh[0], t, slash);
+        emit(e, lh[1], t + slash + 1, m - slash - 1);
+        emit_lit(e, lh[2], "none");
+        return 1;
+    }
+    /* areas form: the rows are the strings' track sizes (auto when omitted) */
+    int rows_end = slash < 0 ? m : slash;
+    CssToken rows[CSS_MAX_TOKENS], strs[64];
+    CssToken auto_tok[2];
+    tok_lit("auto", auto_tok, 2);
+    int nr = 0, ns = 0, i = 0;
+    while (i < rows_end) {
+        int len = css_component_len(t, rows_end, i);
+        if (t[i].type == CSS_TOK_LBRACKET) {
+            if (nr + len > CSS_MAX_TOKENS) return 0;
+            memcpy(rows + nr, t + i, (size_t)len * sizeof(CssToken));
+            nr += len; i += len;
+            continue;
+        }
+        if (t[i].type != CSS_TOK_STRING || ns >= 64) return 0;
+        strs[ns++] = t[i++];
+        /* optional <track-size> */
+        if (i < rows_end && t[i].type != CSS_TOK_STRING && t[i].type != CSS_TOK_LBRACKET) {
+            CssTrack tr;
+            int used = 0;
+            if (!parse_track_size(t + i, rows_end - i, &tr, &used) || nr + used > CSS_MAX_TOKENS) return 0;
+            memcpy(rows + nr, t + i, (size_t)used * sizeof(CssToken));
+            nr += used; i += used;
+        } else {
+            if (nr >= CSS_MAX_TOKENS) return 0;
+            rows[nr++] = auto_tok[0];
+        }
+    }
+    const char *areas; uint8_t ar, ac;
+    if (!ns || !parse_grid_areas(strs, ns, &areas, &ar, &ac) || !valid_track_list(rows, nr, 0)) return 0;
+    if (slash >= 0 && !valid_track_list(t + slash + 1, m - slash - 1, 0)) return 0;
+    emit(e, lh[0], rows, nr);
+    if (slash >= 0) emit(e, lh[1], t + slash + 1, m - slash - 1); else emit_lit(e, lh[1], "none");
+    emit(e, lh[2], strs, ns);
+    return 1;
+}
+
+/* auto-flow && dense? followed by optional auto tracks: t[0..m). */
+static int grid_parse_auto_flow_part(const CssToken *t, int m, int *dense, int *tracks_at)
+{
+    int seen_flow = 0, i = 0;
+    *dense = 0;
+    while (i < m && i < 2) {
+        if (!seen_flow && tok_is_ident(&t[i], "auto-flow")) { seen_flow = 1; i++; }
+        else if (!*dense && tok_is_ident(&t[i], "dense")) { *dense = 1; i++; }
+        else break;
+    }
+    if (!seen_flow) return 0;
+    *tracks_at = i;
+    return 1;
+}
+
+/* grid: <grid-template> | <rows> / [auto-flow && dense?] <auto-columns>? |
+ * [auto-flow && dense?] <auto-rows>? / <columns>.  lh = rows, columns,
+ * areas, auto rows, auto columns, auto flow. */
+static int expand_grid(Emit *e, const int *lh, const CssToken *t, int m)
+{
+    int slash = grid_find_slash(t, m, 0);
+    if (slash >= 0) {
+        int dense = 0, at = 0;
+        CssTrack tr[CSS_MAX_GRID_AUTO_TRACKS];
+        int c;
+        if (grid_parse_auto_flow_part(t + slash + 1, m - slash - 1, &dense, &at)) {
+            const CssToken *a = t + slash + 1 + at;
+            int an = m - slash - 1 - at;
+            if (!valid_track_list(t, slash, 1) || (an && !parse_grid_auto_tracks(a, an, tr, &c))) return 0;
+            emit(e, lh[0], t, slash);
+            emit_lit(e, lh[1], "none");
+            emit_lit(e, lh[2], "none");
+            emit_lit(e, lh[3], "auto");
+            if (an) emit(e, lh[4], a, an); else emit_lit(e, lh[4], "auto");
+            emit_lit(e, lh[5], dense ? "column dense" : "column");
+            return 1;
+        }
+        if (grid_parse_auto_flow_part(t, slash, &dense, &at)) {
+            int an = slash - at;
+            if (!valid_track_list(t + slash + 1, m - slash - 1, 1) || (an && !parse_grid_auto_tracks(t + at, an, tr, &c))) return 0;
+            emit_lit(e, lh[0], "none");
+            emit(e, lh[1], t + slash + 1, m - slash - 1);
+            emit_lit(e, lh[2], "none");
+            if (an) emit(e, lh[3], t + at, an); else emit_lit(e, lh[3], "auto");
+            emit_lit(e, lh[4], "auto");
+            emit_lit(e, lh[5], dense ? "row dense" : "row");
+            return 1;
+        }
+    }
+    Emit sub = *e;
+    sub.count = 0;
+    if (!expand_grid_template(&sub, lh, t, m)) return 0;
+    e->count += sub.count;
+    emit_lit(e, lh[3], "auto");
+    emit_lit(e, lh[4], "auto");
+    emit_lit(e, lh[5], "row");
+    return 1;
+}
+
 int css_expand_shorthand(int id, const CssToken *tokens, int n, int important, CssDeclCb cb, void *user)
 {
     if (!CSS_PROP_IS_SHORTHAND(id)) return 0;
@@ -2848,17 +3230,26 @@ int css_expand_shorthand(int id, const CssToken *tokens, int n, int important, C
     case CSS_PROP_FLEX: ok = expand_flex(&e, t, m); break;
     case CSS_PROP_FONT: ok = expand_font(&e, t, m); break;
     case CSS_PROP_GRID_ROW: case CSS_PROP_GRID_COLUMN: case CSS_PROP_GRID_AREA: {
-        /* omitted parts are auto (they would copy a <custom-ident>, unsupported) */
+        /* an omitted part copies its counterpart (grid-area: column-start from
+         * row-start, the ends from the starts) when that is a sole
+         * <custom-ident>, else it is auto */
         int ps[4], pl[4];
         int c = split_grid_lines(t, m, lc, ps, pl);
         if (c) {
+            for (int k = c; k < lc; k++) {
+                int src = lc == 4 ? (k == 1 ? 0 : k - 2) : 0;
+                if (pl[src] == 1 && grid_ident_ok(&t[ps[src]])) { ps[k] = ps[src]; pl[k] = 1; }
+                else pl[k] = 0;
+            }
             for (int k = 0; k < lc; k++) {
-                if (k < c) emit(&e, lh[k], t + ps[k], pl[k]); else emit_lit(&e, lh[k], "auto");
+                if (pl[k]) emit(&e, lh[k], t + ps[k], pl[k]); else emit_lit(&e, lh[k], "auto");
             }
             ok = 1;
         }
         break;
     }
+    case CSS_PROP_GRID_TEMPLATE: ok = expand_grid_template(&e, lh, t, m); break;
+    case CSS_PROP_GRID: ok = expand_grid(&e, lh, t, m); break;
     case CSS_PROP_PLACE_SELF: {
         int v0, v1;
         if (m == 1 && css_keyword_lookup(&t[0], kw_self_align, &v0)) { emit(&e, lh[0], t, 1); emit(&e, lh[1], t, 1); ok = 1; }
@@ -2976,6 +3367,7 @@ static void zoom_non_inherited(CssComputed *c, float k)
     }
     zoom_len(&c->transform_origin_x, k); zoom_len(&c->transform_origin_y, k);
     zoom_shadow(&c->box_shadow, k);
+    for (int i = 0; i < CSS_MAX_BOX_SHADOWS - 1; i++) zoom_shadow(&c->box_shadow_more[i], k);
     for (int i = 0; i < c->filter_count && i < CSS_MAX_FILTER_OPS; i++) {
         if (c->filters[i].kind == CSS_FILTER_BLUR) c->filters[i].amount *= k;
         else if (c->filters[i].kind == CSS_FILTER_DROP_SHADOW) zoom_shadow(&c->filters[i].shadow, k);
@@ -2987,6 +3379,8 @@ static void zoom_non_inherited(CssComputed *c, float k)
     zoom_len(&c->flex_basis, k);
     for (int i = 0; i < CSS_MAX_GRID_TRACKS; i++) { zoom_len(&c->grid_columns[i].size, k); zoom_len(&c->grid_columns[i].max, k); }
     for (int i = 0; i < CSS_MAX_GRID_TRACKS; i++) { zoom_len(&c->grid_rows[i].size, k); zoom_len(&c->grid_rows[i].max, k); }
+    for (int a = 0; a < 2; a++)
+        for (int i = 0; i < CSS_MAX_GRID_AUTO_TRACKS; i++) { zoom_len(&c->grid_auto_tracks[a][i].size, k); zoom_len(&c->grid_auto_tracks[a][i].max, k); }
     zoom_len(&c->row_gap, k); zoom_len(&c->column_gap, k);
 }
 
@@ -3067,6 +3461,7 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_FLOAT: CP(float_); break;
     case CSS_PROP_CLEAR: CP(clear); break;
     case CSS_PROP_BOX_SIZING: CP(box_sizing); break;
+    case CSS_PROP_TABLE_LAYOUT: CP(table_layout); break;
     case CSS_PROP_OVERFLOW_X: CP(overflow_x); break;
     case CSS_PROP_OVERFLOW_Y: CP(overflow_y); break;
     case CSS_PROP_APPEARANCE: CP(appearance); break;
@@ -3097,7 +3492,7 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_BACKGROUND_REPEAT: for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) { CP(bg_layers[i].repeat_x); CP(bg_layers[i].repeat_y); } break;
     case CSS_PROP_TRANSFORM: CP(transform); break;
     case CSS_PROP_TRANSFORM_ORIGIN: CP(transform_origin_x); CP(transform_origin_y); break;
-    case CSS_PROP_BOX_SHADOW: CP(box_shadow); CP(box_shadow_count); break;
+    case CSS_PROP_BOX_SHADOW: CP(box_shadow); CPA(box_shadow_more); CP(box_shadow_count); break;
     case CSS_PROP_FILTER: CPA(filters); CP(filter_count); break;
     case CSS_PROP_CLIP_PATH: CP(clip_path); break;
     case CSS_PROP_OBJECT_FIT: CP(object_fit); break;
@@ -3112,8 +3507,12 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_FLEX_GROW: CP(flex_grow); break;
     case CSS_PROP_FLEX_SHRINK: CP(flex_shrink); break;
     case CSS_PROP_FLEX_BASIS: CP(flex_basis); break;
-    case CSS_PROP_GRID_TEMPLATE_COLUMNS: CPA(grid_columns); CP(grid_column_count); break;
-    case CSS_PROP_GRID_TEMPLATE_ROWS: CPA(grid_rows); CP(grid_row_count); break;
+    case CSS_PROP_GRID_TEMPLATE_COLUMNS: CPA(grid_columns); CP(grid_column_count); CP(grid_names[CSS_GRID_AXIS_COLUMN]); break;
+    case CSS_PROP_GRID_TEMPLATE_ROWS: CPA(grid_rows); CP(grid_row_count); CP(grid_names[CSS_GRID_AXIS_ROW]); break;
+    case CSS_PROP_GRID_TEMPLATE_AREAS: CP(grid_areas); CP(grid_area_rows); CP(grid_area_cols); break;
+    case CSS_PROP_GRID_AUTO_ROWS: CPA(grid_auto_tracks[CSS_GRID_AXIS_ROW]); CP(grid_auto_count[CSS_GRID_AXIS_ROW]); break;
+    case CSS_PROP_GRID_AUTO_COLUMNS: CPA(grid_auto_tracks[CSS_GRID_AXIS_COLUMN]); CP(grid_auto_count[CSS_GRID_AXIS_COLUMN]); break;
+    case CSS_PROP_GRID_AUTO_FLOW: CP(grid_auto_flow); break;
     case CSS_PROP_GRID_ROW_START: case CSS_PROP_GRID_COLUMN_START: case CSS_PROP_GRID_ROW_END: case CSS_PROP_GRID_COLUMN_END:
         CP(grid_lines[id - CSS_PROP_GRID_ROW_START]); break;
     case CSS_PROP_JUSTIFY_ITEMS: CP(justify_items); break;
@@ -3165,6 +3564,7 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
 {
     CssToken t[CSS_MAX_TOKENS];
     int m = tokens_copy_nows(tokens, n, t, CSS_MAX_TOKENS);
+    g_shadow_em_px = font_px > 0 ? font_px : 16.0f;
     if (m > 0 && t[0].type == CSS_TOK_SHORTHAND_REF) {
         /* the cascade must substitute var() first; otherwise expansion
          * would re-emit the pending marker forever */
@@ -3243,7 +3643,14 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         return 1;
     }
     case CSS_PROP_LETTER_SPACING: SET_LEN(CSS_LENF_NORMAL, letter_spacing);
-    case CSS_PROP_TEXT_ALIGN: SET_KW(kw_text_align, text_align);
+    case CSS_PROP_TEXT_ALIGN:
+        /* Chrome's UA `th { text-align: -internal-center }`: center, unless the parent's
+         * text-align is not start (then inherited, e.g. #endTable's left) */
+        if (m == 1 && tok_is_ident(&t[0], "-internal-center")) {
+            d->text_align = parent && parent->text_align != CSS_TEXT_ALIGN_START ? parent->text_align : CSS_TEXT_ALIGN_CENTER;
+            return 1;
+        }
+        SET_KW(kw_text_align, text_align);
     case CSS_PROP_TEXT_TRANSFORM: SET_KW(kw_text_transform, text_transform);
     case CSS_PROP_WHITE_SPACE: SET_KW(kw_white_space, white_space);
     case CSS_PROP_OVERFLOW_WRAP: SET_KW(kw_overflow_wrap, overflow_wrap);
@@ -3284,6 +3691,7 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
     case CSS_PROP_FLOAT: SET_KW(kw_float, float_);
     case CSS_PROP_CLEAR: SET_KW(kw_clear, clear);
     case CSS_PROP_BOX_SIZING: SET_KW(kw_box_sizing, box_sizing);
+    case CSS_PROP_TABLE_LAYOUT: SET_KW(kw_table_layout, table_layout);
     case CSS_PROP_OVERFLOW_X: SET_KW(css_kw_overflow, overflow_x);
     case CSS_PROP_OVERFLOW_Y: SET_KW(css_kw_overflow, overflow_y);
     case CSS_PROP_APPEARANCE: SET_KW(kw_appearance, appearance);
@@ -3404,9 +3812,12 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         return 1;
     }
     case CSS_PROP_BOX_SHADOW: {
-        CssShadow s; int c;
-        if (!css_parse_box_shadow(t, m, &s, &c)) return 0;
-        if (c) d->box_shadow = s; else memset(&d->box_shadow, 0, sizeof(d->box_shadow));
+        CssShadow s[CSS_MAX_BOX_SHADOWS]; int c;
+        if (!css_parse_box_shadow_list(t, m, s, CSS_MAX_BOX_SHADOWS, &c)) return 0;
+        memset(&d->box_shadow, 0, sizeof(d->box_shadow));
+        memset(d->box_shadow_more, 0, sizeof(d->box_shadow_more));
+        if (c) d->box_shadow = s[0];
+        for (int i = 1; i < c; i++) d->box_shadow_more[i - 1] = s[i];
         d->box_shadow_count = (uint8_t)c;
         return 1;
     }
@@ -3449,21 +3860,40 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
     case CSS_PROP_FLEX_SHRINK: { float f; if (!css_parse_number(t, m, &f) || f < 0) return 0; d->flex_shrink = f; return 1; }
     case CSS_PROP_FLEX_BASIS: SET_LEN(CSS_LENF_PCT | CSS_LENF_AUTO | CSS_LENF_CONTENT | CSS_LENF_NONNEG, flex_basis);
     case CSS_PROP_GRID_TEMPLATE_COLUMNS: {
-        CssTrack tr[CSS_MAX_GRID_TRACKS]; int c;
-        if (!css_parse_grid_tracks(t, m, tr, CSS_MAX_GRID_TRACKS, &c)) return 0;
+        CssTrack tr[CSS_MAX_GRID_TRACKS]; int c; CssGridNames nm;
+        if (!css_parse_grid_track_list(t, m, tr, CSS_MAX_GRID_TRACKS, &c, &nm)) return 0;
         memset(d->grid_columns, 0, sizeof(d->grid_columns));
         for (int i = 0; i < c; i++) { resolve_em_len(&tr[i].size, font_px); resolve_em_len(&tr[i].max, font_px); d->grid_columns[i] = tr[i]; }
         d->grid_column_count = (uint8_t)c;
+        d->grid_names[CSS_GRID_AXIS_COLUMN] = nm;
         return 1;
     }
     case CSS_PROP_GRID_TEMPLATE_ROWS: {
-        CssTrack tr[CSS_MAX_GRID_TRACKS]; int c;
-        if (!css_parse_grid_tracks(t, m, tr, CSS_MAX_GRID_TRACKS, &c)) return 0;
+        CssTrack tr[CSS_MAX_GRID_TRACKS]; int c; CssGridNames nm;
+        if (!css_parse_grid_track_list(t, m, tr, CSS_MAX_GRID_TRACKS, &c, &nm)) return 0;
         memset(d->grid_rows, 0, sizeof(d->grid_rows));
         for (int i = 0; i < c; i++) { resolve_em_len(&tr[i].size, font_px); resolve_em_len(&tr[i].max, font_px); d->grid_rows[i] = tr[i]; }
         d->grid_row_count = (uint8_t)c;
+        d->grid_names[CSS_GRID_AXIS_ROW] = nm;
         return 1;
     }
+    case CSS_PROP_GRID_TEMPLATE_AREAS: {
+        const char *a; uint8_t r, c;
+        if (!parse_grid_areas(t, m, &a, &r, &c)) return 0;
+        d->grid_areas = a; d->grid_area_rows = r; d->grid_area_cols = c;
+        return 1;
+    }
+    case CSS_PROP_GRID_AUTO_ROWS: case CSS_PROP_GRID_AUTO_COLUMNS: {
+        CssTrack tr[CSS_MAX_GRID_AUTO_TRACKS]; int c;
+        int ax = id == CSS_PROP_GRID_AUTO_ROWS ? CSS_GRID_AXIS_ROW : CSS_GRID_AXIS_COLUMN;
+        memset(tr, 0, sizeof(tr));
+        if (!parse_grid_auto_tracks(t, m, tr, &c)) return 0;
+        for (int i = 0; i < c; i++) { resolve_em_len(&tr[i].size, font_px); resolve_em_len(&tr[i].max, font_px); }
+        memcpy(d->grid_auto_tracks[ax], tr, sizeof(tr));
+        d->grid_auto_count[ax] = (uint8_t)c;
+        return 1;
+    }
+    case CSS_PROP_GRID_AUTO_FLOW: { uint8_t f; if (!parse_grid_auto_flow(t, m, &f)) return 0; d->grid_auto_flow = f; return 1; }
     case CSS_PROP_GRID_ROW_START: case CSS_PROP_GRID_COLUMN_START: case CSS_PROP_GRID_ROW_END: case CSS_PROP_GRID_COLUMN_END: {
         CssGridLine g;
         if (!parse_grid_line(t, m, &g)) return 0;

@@ -461,6 +461,156 @@ static void t_grid_placement(void)
     fx_free(fx);
 }
 
+/* grid-template-areas, named lines, grid-auto-rows/columns, grid-auto-flow
+ * (column, dense), repeat(auto-fill/auto-fit), implicit tracks before the
+ * explicit grid, the grid / grid-template shorthands and baseline
+ * self-alignment.  Expected rects (relative to #ar) from Chrome
+ * getBoundingClientRect of the same markup. */
+static void t_grid_named(void)
+{
+    Fx *fx = fx_html(
+        "<div style='font-size:16px'>"
+        "<div id=ar style=\"display:grid;grid-template-areas:'h h' 's m' 'f f';grid-template-columns:50px 1fr;grid-template-rows:20px auto 15px;width:300px;gap:4px\">"
+        "<div id=ar_m style=\"grid-area:m;height:30px\"></div><div id=ar_h style=\"grid-area:h\"></div><div id=ar_s style=\"grid-area:s\"></div><div id=ar_f style=\"grid-area:f\"></div><div id=ar_x style=\"grid-row:m-start/f-end;grid-column:2\"></div><div id=ar_a></div></div>"
+        "<div id=nl style=\"display:grid;grid-template-columns:[a] 40px [b c] 50px [d] 60px [a];grid-auto-rows:10px;width:300px\">"
+        "<div id=nl1 style=\"grid-column:b / d\"></div><div id=nl2 style=\"grid-column:a 2 / span 1\"></div><div id=nl3 style=\"grid-column:c\"></div><div id=nl4 style=\"grid-column:span a / 3\"></div><div id=nl5 style=\"grid-column:x 2;\"></div><div id=nl6 style=\"grid-column:d / span a\"></div></div>"
+        "<div id=au style=\"display:grid;grid-template-columns:30px 30px;grid-auto-rows:10px 20px;grid-auto-columns:7px 9px;width:300px\">"
+        "<div id=au1></div><div id=au2></div><div id=au3></div><div id=au4 style=\"grid-column:-5\"></div><div id=au5 style=\"grid-column:4;grid-row:5\"></div><div id=au6></div></div>"
+        "<div id=fc style=\"display:grid;grid-auto-flow:column;grid-template-rows:10px 10px;grid-auto-columns:20px;width:300px;gap:2px\">"
+        "<div id=fc1></div><div id=fc2 style=\"grid-row:span 2\"></div><div id=fc3></div><div id=fc4></div><div id=fc5 style=\"grid-row:2\"></div></div>"
+        "<div id=dn style=\"display:grid;grid-auto-flow:row dense;grid-template-columns:repeat(3,20px);grid-auto-rows:10px;width:300px\">"
+        "<div id=dn1></div><div id=dn2 style=\"grid-column:span 3\"></div><div id=dn3 style=\"grid-column:span 2\"></div><div id=dn4></div><div id=dn5 style=\"grid-column:2\"></div></div>"
+        "<div id=af style=\"display:grid;grid-template-columns:repeat(auto-fill,50px);column-gap:10px;grid-auto-rows:10px;width:230px\">"
+        "<div id=af1></div><div id=af2></div><div id=af3></div><div id=af4></div><div id=af5></div><div id=af6 style=\"grid-column:-2\"></div></div>"
+        "<div id=ft style=\"display:grid;grid-template-columns:repeat(auto-fit,40px);justify-content:start;column-gap:10px;grid-auto-rows:10px;width:300px\">"
+        "<div id=ft1></div><div id=ft2></div><div id=ft3 style=\"grid-column:-2\"></div></div>"
+        "<div id=mm style=\"display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:5px;grid-auto-rows:10px;width:250px\">"
+        "<div id=mm1></div><div id=mm2></div><div id=mm3></div><div id=mm4></div><div id=mm5></div></div>"
+        "<div id=gt style=\"display:grid;grid-template:[t] 'a b' 12px [m] 'c c' 8px / 40px 1fr;width:200px\">"
+        "<div id=gt1 style=\"grid-area:c\"></div><div id=gt2 style=\"grid-row:m\"></div><div id=gt3 style=\"grid-area:b\"></div></div>"
+        "<div id=gs style=\"display:grid;grid:auto-flow dense 6px / 30px 30px;width:200px\">"
+        "<div id=gs1 style=\"grid-column:2\"></div><div id=gs2></div><div id=gs3></div></div>"
+        "<div id=ng style=\"display:grid;grid-template-columns:20px 20px;grid-template-rows:10px;grid-auto-rows:5px;width:200px\">"
+        "<div id=ng1 style=\"grid-row:-3/-2\"></div><div id=ng2 style=\"grid-row:1;grid-column:-4\"></div><div id=ng3 style=\"grid-row:span 2 / 1;grid-column:2\"></div></div>"
+        ""
+        "<div id=a2 style=\"display:grid;grid-template-areas:'a b' 'c d' 'e e';grid-template-rows:10px;grid-auto-rows:7px 9px;grid-template-columns:30px;grid-auto-columns:11px;width:300px\">"
+        "<div id=a2a style=\"grid-area:e\"></div><div id=a2b style=\"grid-area:d\"></div><div id=a2c style=\"grid-area:zz\"></div><div id=a2d></div></div>"
+        "<div id=nn style=\"display:grid;grid-template-columns:[x] 10px [x] 20px [x] 30px;grid-auto-columns:5px;grid-auto-rows:6px;width:300px\">"
+        "<div id=nn1 style=\"grid-column:x -1 / x -2\"></div><div id=nn2 style=\"grid-column:x -5\"></div><div id=nn3 style=\"grid-column:span x 2 / x 3\"></div><div id=nn4 style=\"grid-column:x 1 / span x 5\"></div><div id=nn5 style=\"grid-column:span x / 7\"></div></div>"
+        "<div id=fx style=\"display:flex;flex-direction:column;width:170px\"><div id=fsw style=\"display:grid;grid-template-columns:repeat(auto-fit,1.75em);align-items:center;margin-top:.75em\"><div id=fs1 style=\"height:10px;justify-self:center;width:10px\"></div><div id=fs2 style=\"height:20px\"></div></div></div>"
+        "<div id=cf style=\"display:grid;grid-auto-flow:column dense;grid-template-rows:repeat(3,8px);grid-auto-columns:15px;width:300px\">"
+        "<div id=cf1 style=\"grid-row:span 2\"></div><div id=cf2 style=\"grid-row:span 2\"></div><div id=cf3></div><div id=cf4 style=\"grid-column:1\"></div><div id=cf5 style=\"grid-row:3\"></div></div>"
+        "<div id=mh style=\"display:grid;grid-template-rows:repeat(auto-fill,20px);height:70px;width:100px;row-gap:5px\"><div id=mh1 style=\"grid-row:-2\"></div></div>"
+        "<div id=pr style=\"display:grid;grid-template-columns:repeat(auto-fill,[l] 30% [r]);width:200px;grid-auto-rows:4px\"><div id=pr1 style=\"grid-column:r 2\"></div><div id=pr2 style=\"grid-column:l 3 / r 3\"></div></div>"
+        "<div id=em style=\"display:grid;grid-template-rows:12px 13px;grid-template-columns:repeat(3,10px);row-gap:3px;width:100px\"></div><div id=bb style=\"display:grid;grid-template-columns:20px 20px 20px;align-items:baseline;width:100px\"><div id=bb1 style=\"height:20px\"></div><div id=bb2 style=\"height:30px;margin-top:4px\"></div><div id=bb3 style=\"height:10px;align-self:start\"></div><div id=bb4 style=\"height:5px;grid-row:2;grid-column:2\"></div></div>"
+        "</div>", NULL);
+    static const struct { const char *id; float x, y, w, h; } want[] = {
+        { "ar", 0, 0, 300, 77 },
+        { "ar_m", 54, 24, 246, 30 },
+        { "ar_h", 0, 0, 300, 20 },
+        { "ar_s", 0, 24, 50, 30 },
+        { "ar_f", 0, 58, 300, 15 },
+        { "ar_x", 54, 24, 246, 49 },
+        { "ar_a", 0, 77, 50, 0 },
+        { "nl", 0, 77, 300, 40 },
+        { "nl1", 40, 77, 50, 10 },
+        { "nl2", 150, 77, 50, 10 },
+        { "nl3", 40, 87, 50, 10 },
+        { "nl4", 0, 97, 90, 10 },
+        { "nl5", 250, 97, 50, 10 },
+        { "nl6", 90, 107, 60, 10 },
+        { "au", 0, 117, 300, 70 },
+        { "au1", 0, 117, 7, 10 },
+        { "au2", 7, 117, 9, 10 },
+        { "au3", 16, 117, 30, 10 },
+        { "au4", 0, 127, 7, 20 },
+        { "au5", 83, 177, 9, 10 },
+        { "au6", 7, 127, 9, 20 },
+        { "fc", 0, 187, 300, 22 },
+        { "fc1", 0, 187, 20, 10 },
+        { "fc2", 22, 187, 20, 22 },
+        { "fc3", 44, 187, 20, 10 },
+        { "fc4", 44, 199, 20, 10 },
+        { "fc5", 66, 199, 20, 10 },
+        { "dn", 0, 209, 300, 30 },
+        { "dn1", 0, 209, 20, 10 },
+        { "dn2", 0, 219, 60, 10 },
+        { "dn3", 20, 209, 40, 10 },
+        { "dn4", 0, 229, 20, 10 },
+        { "dn5", 20, 229, 20, 10 },
+        { "af", 0, 239, 230, 20 },
+        { "af1", 0, 239, 50, 10 },
+        { "af2", 60, 239, 50, 10 },
+        { "af3", 120, 239, 50, 10 },
+        { "af4", 180, 239, 50, 10 },
+        { "af5", 0, 249, 50, 10 },
+        { "af6", 180, 249, 50, 10 },
+        { "ft", 0, 259, 300, 10 },
+        { "ft1", 0, 259, 40, 10 },
+        { "ft2", 50, 259, 40, 10 },
+        { "ft3", 100, 259, 40, 10 },
+        { "mm", 0, 269, 250, 25 },
+        { "mm1", 0, 269, 80, 10 },
+        { "mm2", 85, 269, 80, 10 },
+        { "mm3", 170, 269, 80, 10 },
+        { "mm4", 0, 284, 80, 10 },
+        { "mm5", 85, 284, 80, 10 },
+        { "gt", 0, 294, 200, 20 },
+        { "gt1", 0, 306, 200, 8 },
+        { "gt2", 200, 306, 0, 8 },
+        { "gt3", 40, 294, 160, 12 },
+        { "gs", 0, 314, 200, 12 },
+        { "gs1", 30, 314, 30, 6 },
+        { "gs2", 0, 314, 30, 6 },
+        { "gs3", 0, 320, 30, 6 },
+        { "ng", 0, 326, 200, 20 },
+        { "ng1", 0, 331, 160, 5 },
+        { "ng2", 0, 336, 160, 10 },
+        { "ng3", 180, 326, 20, 10 },
+        { "a2", 0, 346, 300, 42 },
+        { "a2a", 0, 363, 41, 9 },
+        { "a2b", 30, 356, 11, 7 },
+        { "a2c", 52, 379, 11, 9 },
+        { "a2d", 0, 346, 30, 10 },
+        { "nn", 0, 388, 300, 24 },
+        { "nn1", 20, 388, 20, 6 },
+        { "nn2", 0, 394, 5, 6 },
+        { "nn3", 10, 394, 30, 6 },
+        { "nn4", 10, 400, 75, 6 },
+        { "nn5", 40, 406, 45, 6 },
+        { "fx", 0, 412, 170, 32 },
+        { "fsw", 0, 424, 170, 20 },
+        { "fs1", 9, 429, 10, 10 },
+        { "fs2", 28, 424, 28, 20 },
+        { "cf", 0, 444, 300, 24 },
+        { "cf1", 0, 452, 15, 16 },
+        { "cf2", 15, 444, 15, 16 },
+        { "cf3", 15, 460, 15, 8 },
+        { "cf4", 0, 444, 15, 8 },
+        { "cf5", 30, 460, 15, 8 },
+        { "mh", 0, 468, 100, 70 },
+        { "mh1", 0, 518, 100, 20 },
+        { "pr", 0, 538, 200, 8 },
+        { "pr1", 120, 538, 60, 4 },
+        { "pr2", 120, 542, 60, 4 },
+        { "em", 0, 546, 100, 28 },
+        { "bb", 0, 574, 100, 39 },
+        { "bb1", 0, 588, 20, 20 },
+        { "bb2", 20, 578, 20, 30 },
+        { "bb3", 40, 574, 20, 10 },
+        { "bb4", 20, 608, 20, 5 }
+    };
+    HtmlRect o = rc(fx, "ar");
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        HtmlRect r = rc(fx, want[i].id);
+        CHECK(NEAR(r.x - o.x, want[i].x, 0.05) && NEAR(r.y - o.y, want[i].y, 0.05) && NEAR(r.w, want[i].w, 0.05) && NEAR(r.h, want[i].h, 0.05),
+              "grid named/auto: #%s at %.2f,%.2f %.2fx%.2f, expected %.2f,%.2f %.2fx%.2f", want[i].id,
+              (double)(r.x - o.x), (double)(r.y - o.y), (double)r.w, (double)r.h,
+              (double)want[i].x, (double)want[i].y, (double)want[i].w, (double)want[i].h);
+    }
+    fx_free(fx);
+}
+
 /* align-self overrides the flex container's align-items per item. */
 static void t_flex_align_self(void)
 {
@@ -761,6 +911,13 @@ static void t_end_table(void)
     CHECK(NEAR(h0.y, h1.y, 0.01) && NEAR(h1.y, h5.y, 0.01) && h0.x < h1.x && h1.x < h2.x && h2.x < h5.x, "#endTable header cells share one row");
     CHECK(NEAR(d0.y, d1.y, 0.01) && NEAR(d1.y, d5.y, 0.01) && d0.y > h0.y && NEAR(d0.x, h0.x, 0.01) && NEAR(d5.x, h5.x, 0.01),
           "#endTable data row below, columns aligned with the header");
+    /* th's UA text-align (-internal-center) yields to #endTable's text-align:left */
+    Box *th = bx(fx, "h2");
+    CHECK(th && th->style->text_align == CSS_TEXT_ALIGN_LEFT, "#endTable th inherits text-align:left (%d)", th ? th->style->text_align : -1);
+    fx_free(fx);
+    fx = fx_html("<table><tr><th id=tc>A</th></tr></table>", NULL);
+    th = bx(fx, "tc");
+    CHECK(th && th->style->text_align == CSS_TEXT_ALIGN_CENTER, "th centers by default (%d)", th ? th->style->text_align : -1);
     fx_free(fx);
 }
 
@@ -862,7 +1019,7 @@ static void t_closed_inline_states(void)
     const TextRun *r = pt ? first_run(pt) : NULL;
     TextFont *f = text_font(g_ts, "gamefont", 18, 400, 0);
     const TextMetrics *m = text_font_metrics(f);
-    float lead = (m->line_height - m->ascent - m->descent) * 0.5f;
+    float lead = floorf((m->line_height - m->ascent - m->descent) * 0.5f + 1e-4f);   /* Blink: floor(leading / 2) above */
     CHECK(r && NEAR(r->y, pd.y + lead + m->ascent, 0.01), "closed top-aligned span: text at the line top (baseline %.2f, want %.2f)",
           r ? r->y : -1, pd.y + lead + m->ascent);
     CHECK_NEAR(ic.y, pd.y, 0.01, "top-aligned inline-block at the line top");
@@ -870,6 +1027,25 @@ static void t_closed_inline_states(void)
     Box *s1 = bx(fx, "s1"), *s2 = bx(fx, "s2");
     CHECK(s1 && s1->frag_count == 1 && s1->frags[0].first && s1->frags[0].last, "inline box closed mid-line has its fragment");
     CHECK(s2 && s2->frag_count == 1 && s2->w > 0, "last inline box on the line has its fragment (w %.1f)", s2 ? s2->w : -1);
+    fx_free(fx);
+}
+
+static void t_half_leading_floor(void)
+{
+    /* Blink CalculateLeadingSpace: the ascent side gets floor(leading / 2),
+     * so an odd / fractional leading keeps the baseline on a whole px.
+     * Chrome 154: gamefont 25px (ascent 28, descent 6), line-height 34 + L. */
+    Fx *fx = fx_html("<div id=a style='font-size:25px;line-height:35px'>F<i id=ai style='display:inline-block;width:1px;height:0'></i></div>"
+                     "<div id=b style='font-size:25px;line-height:35.6px'>F<i id=bi style='display:inline-block;width:1px;height:0'></i></div>"
+                     "<div id=c style='font-size:25px;line-height:33px'>F<i id=ci style='display:inline-block;width:1px;height:0'></i></div>", NULL);
+    TextFont *f = text_font(g_ts, "gamefont", 25, 400, 0);
+    const TextMetrics *m = text_font_metrics(f);
+    const float A = m->ascent, D = m->descent;
+    HtmlRect a = rc(fx, "a"), ai = rc(fx, "ai"), b = rc(fx, "b"), bi = rc(fx, "bi"), c = rc(fx, "c"), ci = rc(fx, "ci");
+    CHECK_NEAR(ai.y - a.y, floorf((35.0f - A - D) * 0.5f) + A, 0.01, "line-height 35: odd leading, baseline floor(L/2) + ascent");
+    CHECK_NEAR(bi.y - b.y, floorf((35.6f - A - D) * 0.5f) + A, 0.01, "line-height 35.6: fractional leading floored above");
+    CHECK_NEAR(ci.y - c.y, floorf((33.0f - A - D) * 0.5f) + A, 0.01, "line-height 33: negative leading floors (-1 above)");
+    CHECK_NEAR(b.h, 35.6f, 0.01, "line box keeps the full line-height");
     fx_free(fx);
 }
 
@@ -998,7 +1174,9 @@ static void t_incremental(void)
         "<div id=fc style='display:flex;flex-direction:column;justify-content:center;align-items:center;"
         "width:200px;height:200px;position:relative'><div id=ab style='position:absolute;width:20px;height:10px;margin-top:-6px'></div>"
         "<div id=it style='width:10px;height:10px'></div></div>"
-        "<div id=hud style='width:100px'><span id=sp>a</span></div>", NULL);
+        "<div id=hud style='width:100px'><span id=sp>a</span></div>"
+        "<div id=host style='width:100px'><div id=hidden><img id=bob style='width:10px;height:10px'></div>"
+        "<div id=keep style='height:10px'></div></div>", NULL);
     HtmlRect fc = rc(fx, "fc"), ab = rc(fx, "ab");
     CHECK(NEAR(ab.x - fc.x, 90, 0.01) && NEAR(ab.y - fc.y, 95 - 3, 0.01),
           "flex static position: abs child centred like a sole item (%.1f,%.1f)", ab.x - fc.x, ab.y - fc.y);
@@ -1041,6 +1219,23 @@ static void t_incremental(void)
     r = layout_restyled(fx->tree, dom_elem_node(fx->dom, ea), &old);
     layout_run(fx->tree, fx->vw, fx->vh);
     CHECK(r == LAYOUT_RESTYLE_REBUILT && ed->box != NULL && NEAR(rc(fx, "b").y, 40, 0.01), "restyle: displayed again (%d)", r);
+
+    /* an animation inside a display:none subtree (the menu's #merchImg while in game):
+     * its (stale, still set) computed style is animated, no box appears, and the nearest
+     * rendered ancestor keeps its boxes */
+    HtmlElem hidden = dom_by_id(fx->dom, "hidden"), bob = dom_by_id(fx->dom, "bob");
+    ElemData *hed = dom_elem_data(fx->dom, hidden), *bed = dom_elem_data(fx->dom, bob);
+    old = *hed->computed;
+    dom_set_style(fx->dom, hidden, "display", "none");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    layout_restyled(fx->tree, dom_elem_node(fx->dom, hidden), &old);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    Box *keep_box = bx(fx, "keep");
+    const int had_style = bed && bed->computed;
+    if (had_style) old = *bed->computed;
+    r = layout_restyled(fx->tree, dom_elem_node(fx->dom, bob), had_style ? &old : NULL);
+    CHECK(had_style && r == LAYOUT_RESTYLE_NONE && bed->box == NULL && bx(fx, "keep") == keep_box,
+          "restyle inside display:none: nothing rebuilt (%d)", r);
 
     HtmlElem hud = dom_by_id(fx->dom, "hud");
     for (int i = 0; i < 50; i++) {   /* HUD-style innerHTML churn reuses released boxes */
@@ -1267,7 +1462,9 @@ int main(int argc, char **argv)
     t_grid_placement();
     t_abs_static_inline();
     t_flex_align_self();
+    t_grid_named();
     t_zoom();
+    t_half_leading_floor();
     t_ua_defaults();
     t_table();
     t_positioned();

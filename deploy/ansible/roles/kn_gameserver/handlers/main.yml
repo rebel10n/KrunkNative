@@ -1,0 +1,8 @@
+- name: Restart game servers
+  ansible.builtin.systemd_service:
+    name: "kn-gameserver@{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: "{{ range(1, (kn_gameserver_count | int) + 1) | list }}"
+  when: kn_gameserver_active
+  ignore_errors: "{{ ansible_check_mode }}"

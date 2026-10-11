@@ -371,6 +371,9 @@ static void trigger(const int type, const GpEvent *e) {
         if (e->name >= GP_BUTTON_NAMES) printf("[gamepad] %s %s [%.3f, %.3f]\n", GP_TYPE[type], GP_NAME[e->name], e->axis[0], e->axis[1]);
         else printf("[gamepad] %s %s %.3f\n", GP_TYPE[type], GP_NAME[e->name], e->value);
     }
+    // KrunkNative: no pad press / hold acts while a text field has focus (ui_text_input_focused,
+    // the keyboard hotkeys' rule; v3.1.1 lets the pad through). Releases still land.
+    if (type != GP_RELEASE && ui_text_input_focused()) return;
     if (e->name < GP_BUTTON_NAMES) {
         on_mapped_button(type, e->name, e->value);
         if (e->name == GP_START && type == GP_PRESS) ui_controls_toggle(g_gp.client, !ui_controls_enabled(g_gp.client));

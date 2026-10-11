@@ -7,6 +7,7 @@ in vec3 local_pos;
 in float view_depth;
 in vec4 shadow_coord;
 in float vertex_shade;
+in vec3 vertex_color;
 flat in int face_idx;
 
 // BasicMaterial uv_mode (client.h BasicUvMode): 0 vertex UVs, 1 Krunker cube, 2 Krunker plane
@@ -16,6 +17,7 @@ uniform bool uv_flip_sides;
 uniform bool uv_flip_top;
 uniform bool use_color_gradient;
 uniform vec4 color_bottom;
+uniform bool use_vertex_color; // three.js vertexColors: color *= the per-vertex colour
 uniform float alpha_test;
 uniform float ramp_shade_width; // ramp width in world units, 0 = no ambient_1 edge strips
 
@@ -211,6 +213,7 @@ void main() {
     } else {
         scaled_tex_coord = tex_coord;
     }
+    if (use_vertex_color) object_color.rgb *= vertex_color;
 
     vec3 t_tex_coord = tex_transform * vec3(scaled_tex_coord, 1.0);
     vec4 texel = texture(tex, t_tex_coord.xy);

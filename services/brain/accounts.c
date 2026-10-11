@@ -1,0 +1,1194 @@
+/*
+ * services/brain/accounts.c - accounts, sessions and stats commits (Krunker
+ * v3.1.1 server/accounts.ts + the account dbOps of matchmaker/dbBroker.ts) on
+ * PostgreSQL. Schema and SQL functions: services/db/migrations/010x_*.sql.
+ * Protocol: doc/backend.md "Accounts & social socket".
+ */
+#include "acct_internal.h"
+
+#include <ctype.h>
+#include <math.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <libpq-fe.h>
+
+#include "knsvc/config.h"
+#include "knsvc/crypto.h"
+#include "knsvc/json.h"
+#include "knsvc/log.h"
+#include "knsvc/loop.h"
+
+#define MOD "accounts"
+
+AcctConfig g_acct;
+Brain *g_acct_brain;
+
+static kn_timer_id s_cleanup_timer;
+
+/* ------------------------------------------------------------------ config */
+
+static int cfg_int(const kn_config *cfg, const char *key, int def) {
+    char path[96];
+    snprintf(path, sizeof path, "accounts.%s", key);
+    return (int) kn_config_int(cfg, path, def);
+}
+
+void acct_config_load(Brain *b) {
+    const kn_config *cfg = b->cfg;
+    AcctConfig *c = &g_acct;
+    memset(c, 0, sizeof *c);
+    c->name_min = cfg_int(cfg, "name_min", 3);
+    c->name_max = cfg_int(cfg, "name_max", 16);
+    c->pass_min = cfg_int(cfg, "password_min", 6);
+    c->pass_max = cfg_int(cfg, "password_max", 100);
+    c->alias_min = cfg_int(cfg, "alias_min", 3);
+    c->alias_max = cfg_int(cfg, "alias_max", 16);
+    c->session_ttl_s = (int64_t) cfg_int(cfg, "session_ttl_days", 30) * 86400;
+    c->max_sessions = cfg_int(cfg, "max_sessions", 20);
+    c->starting_kr = kn_config_int(cfg, "accounts.starting_kr", 0);
+    c->free_premium = kn_config_bool(cfg, "accounts.free_premium", 1);
+    c->login_throttle_s = cfg_int(cfg, "login_throttle_s", 5);
+    c->ip_block_failures = cfg_int(cfg, "ip_block_failures", 100);
+    c->ip_block_days = cfg_int(cfg, "ip_block_days", 5);
+    c->register_per_ip_hour = cfg_int(cfg, "register_per_ip_hour", 0);
+    c->max_match_kr = cfg_int(cfg, "max_match_kr", 500);
+    c->rank_var = kn_config_num(cfg, "accounts.rank_var", 0.03);
+    c->trade_min_level = cfg_int(cfg, "trade_min_level", 20);
+    c->gift_min_level = cfg_int(cfg, "gift_min_level", 30);       /* config.giftMinLVl */
+    c->gift_fee_percent = cfg_int(cfg, "gift_fee_percent", 10);   /* config.giftFee 0.1 */
+    c->market_fee_percent = cfg_int(cfg, "market_fee_percent", 5); /* social.js calcFee 0.05 */
+    c->market_fee_bypass = kn_config_int(cfg, "accounts.market_fee_bypass", 0); /* config.marketFeeBypass */
+    c->sale_max = kn_config_int(cfg, "accounts.sale_max", 10000000);
+    c->max_listings = cfg_int(cfg, "max_listings", 50);
+    c->trade_max_items = cfg_int(cfg, "trade_max_items", 10);
+    c->clan_tag_max = cfg_int(cfg, "clan_tag_max", 4);
+    c->clan_max_members = cfg_int(cfg, "clan_max_members", 0);
+    c->post_max_len = cfg_int(cfg, "post_max_len", 1024);
+    c->comment_max_len = cfg_int(cfg, "comment_max_len", 500);
+    c->chat_max_len = cfg_int(cfg, "chat_max_len", 300);
+    c->page_size = cfg_int(cfg, "page_size", 100);
+    if (c->name_min < 1) c->name_min = 1;
+    if (c->name_max < c->name_min || c->name_max > 32) c->name_max = c->name_max > 32 ? 32 : c->name_min;
+    if (c->rank_var <= 0) c->rank_var = 0.03;
+    if (c->session_ttl_s <= 0) c->session_ttl_s = 30 * 86400;
+    c->dev_count = kn_config_str_list(cfg, "accounts.developers", c->dev_names, 32);
+    if (c->dev_count > 32) c->dev_count = 32;
+    c->mod_count = kn_config_str_list(cfg, "accounts.moderators", c->mod_names, 32);
+    if (c->mod_count > 32) c->mod_count = 32;
+    int64_t iters = kn_config_int(cfg, "accounts.password_iterations", 0);
+    if (iters > 0) kn_password_set_iterations((unsigned) iters);
+}
+
+/* ------------------------------------------------------------------ validation */
+
+static int utf8_len(const char *s) {
+    int n = 0;
+    for (; *s; s++) n += ((unsigned char) *s & 0xC0) != 0x80;
+    return n;
+}
+
+const char *acct_validate_name(const char *name) {
+    static char msg[96];
+    if (!name) return "Invalid username.";
+    const int n = (int) strlen(name);
+    if (n < g_acct.name_min || n > g_acct.name_max) {
+        snprintf(msg, sizeof msg, "Username must be %d\xE2\x80\x93%d characters.", g_acct.name_min, g_acct.name_max);
+        return msg;
+    }
+    for (const char *p = name; *p; p++) {
+        if (!isalnum((unsigned char) *p) && *p != '_') return "Username may only contain letters, digits, and underscores.";
+    }
+    return NULL;
+}
+
+const char *acct_validate_password(const char *pass) {
+    static char msg[96];
+    if (!pass) return "Invalid password.";
+    if (utf8_len(pass) < g_acct.pass_min) {
+        snprintf(msg, sizeof msg, "Password must be \xE2\x89\xA5 %d characters.", g_acct.pass_min);
+        return msg;
+    }
+    if ((int) strlen(pass) > g_acct.pass_max) return "Password is too long.";
+    return NULL;
+}
+
+const char *acct_validate_alias(const char *alias) {
+    static char msg[96];
+    if (!alias) return "Invalid display name.";
+    while (*alias == ' ') alias++;
+    int n = (int) strlen(alias);
+    while (n > 0 && alias[n - 1] == ' ') n--;
+    if (n < g_acct.alias_min || n > g_acct.alias_max) {
+        snprintf(msg, sizeof msg, "Display name must be %d\xE2\x80\x93%d characters.", g_acct.alias_min, g_acct.alias_max);
+        return msg;
+    }
+    for (int i = 0; i < n; i++) {
+        const char ch = alias[i];
+        if (!isalnum((unsigned char) ch) && ch != '_' && ch != '-' && ch != ' ')
+            return "Display name may only contain letters, digits, spaces, _ and -.";
+    }
+    return NULL;
+}
+
+int acct_level(int64_t score, int *prog) {
+    const double v = g_acct.rank_var * sqrt((double) (score > 0 ? score : 0));
+    int level = (int) floor(v);
+    if (prog) *prog = (int) lround((v - level) * 100.0);
+    return level < 1 ? 1 : level;
+}
+
+int accounts_level(int64_t score, int *prog_percent) {
+    if (g_acct.rank_var <= 0) g_acct.rank_var = 0.03;
+    return acct_level(score, prog_percent);
+}
+
+/* ------------------------------------------------------------------ DB helpers */
+
+const char *acct_db_error(kn_db_result *res, const char *ctx) {
+    static char msg[256];
+    if (!strcmp(kn_db_sqlstate(res), "P0001")) {
+        const PGresult *pg = kn_db_result_pg(res);
+        const char *primary = pg ? PQresultErrorField(pg, PG_DIAG_MESSAGE_PRIMARY) : NULL;
+        if (primary && *primary) {
+            snprintf(msg, sizeof msg, "%s", primary);
+            return msg;
+        }
+    }
+    KN_ERROR(MOD, "%s: %s (%s)", ctx ? ctx : "query", kn_db_error(res), kn_db_sqlstate(res));
+    return "Server error.";
+}
+
+cJSON *acct_db_json(kn_db_result *res) {
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1 || kn_db_isnull(res, 0, 0)) return NULL;
+    const char *text = kn_db_get(res, 0, 0);
+    return cJSON_Parse(text);
+}
+
+const char *acct_itoa(char buf[24], int64_t v) {
+    snprintf(buf, 24, "%lld", (long long) v);
+    return buf;
+}
+
+static int name_in(const char *name, const char *const *list, size_t n) {
+    for (size_t i = 0; name && i < n; i++)
+        if (list[i] && !strcasecmp(list[i], name)) return 1;
+    return 0;
+}
+
+static void set_data_slot(cJSON *data, int idx, cJSON *value) {
+    if (cJSON_IsArray(data) && cJSON_GetArraySize(data) > idx) cJSON_ReplaceItemInArray(data, idx, value);
+    else cJSON_Delete(value);
+}
+
+void acct_decorate(cJSON *account) {
+    if (!account) return;
+    cJSON *data = cJSON_GetObjectItemCaseSensitive(account, "data");
+    const char *name = kn_json_str(account, "username", NULL);
+    if (g_acct.free_premium && kn_json_int(account, "premium", 0) < 1) {
+        cJSON_ReplaceItemInObject(account, "premium", cJSON_CreateNumber(1));
+        set_data_slot(data, 27, cJSON_CreateNumber(1));
+    }
+    if (name_in(name, g_acct.dev_names, g_acct.dev_count)) {
+        cJSON_ReplaceItemInObject(account, "dev", cJSON_CreateNumber(1));
+        cJSON_ReplaceItemInObject(account, "mod", cJSON_CreateNumber(1));
+        set_data_slot(data, 12, cJSON_CreateNumber(1));
+        set_data_slot(data, 21, cJSON_CreateNumber(1));
+    } else if (name_in(name, g_acct.mod_names, g_acct.mod_count)) {
+        cJSON_ReplaceItemInObject(account, "mod", cJSON_CreateNumber(1));
+        set_data_slot(data, 21, cJSON_CreateNumber(1));
+    }
+    int prog = 0;
+    const int level = acct_level(kn_json_int(account, "score", 0), &prog);
+    cJSON_DeleteItemFromObject(account, "level");
+    cJSON_DeleteItemFromObject(account, "levelProg");
+    cJSON_AddNumberToObject(account, "level", level);
+    cJSON_AddNumberToObject(account, "levelProg", prog);
+    /* JSON booleans -> 0/1 like the rest of the Krunker fields */
+    cJSON *banned = cJSON_GetObjectItemCaseSensitive(account, "banned");
+    if (cJSON_IsBool(banned)) cJSON_ReplaceItemInObject(account, "banned", cJSON_CreateNumber(cJSON_IsTrue(banned)));
+}
+
+/* ------------------------------------------------------------------ hashing worker */
+
+typedef struct HashJob {
+    char *password;
+    char *encoded;      /* NULL = hash */
+    AcctHashFn cb;
+    void *ud;
+    int ok;
+    char new_hash[KN_PASSWORD_HASH_MAX];
+} HashJob;
+
+static int s_hash_inflight;
+#define HASH_MAX_INFLIGHT 32
+
+static void hash_job_free(HashJob *job) {
+    if (!job) return;
+    if (job->password) {
+        memset(job->password, 0, strlen(job->password));
+        free(job->password);
+    }
+    free(job->encoded);
+    memset(job->new_hash, 0, sizeof job->new_hash);
+    free(job);
+}
+
+static void hash_job_done(kn_loop *loop, void *ud) {
+    (void) loop;
+    HashJob *job = ud;
+    s_hash_inflight--;
+    job->cb(job->ud, job->ok, job->new_hash[0] ? job->new_hash : NULL);
+    hash_job_free(job);
+}
+
+static void *hash_job_run(void *arg) {
+    HashJob *job = arg;
+    if (job->encoded) {
+        job->ok = kn_password_verify(job->password, job->encoded) == 1;
+        if (job->ok && kn_password_needs_rehash(job->encoded) == 1 &&
+            kn_password_hash(job->password, job->new_hash, sizeof job->new_hash) != 0)
+            job->new_hash[0] = 0;
+    } else {
+        job->ok = kn_password_hash(job->password, job->new_hash, sizeof job->new_hash) == 0;
+        if (!job->ok) job->new_hash[0] = 0;
+    }
+    if (kn_loop_post_threadsafe(g_acct_brain->loop, hash_job_done, job) != 0) {
+        /* loop gone (shutdown): nothing can be answered anymore */
+        hash_job_free(job);
+    }
+    return NULL;
+}
+
+int acct_hash_async(const char *password, const char *encoded, AcctHashFn cb, void *ud) {
+    if (s_hash_inflight >= HASH_MAX_INFLIGHT) return -1;
+    HashJob *job = calloc(1, sizeof *job);
+    if (!job) return -1;
+    job->password = strdup(password ? password : "");
+    job->encoded = encoded ? strdup(encoded) : NULL;
+    job->cb = cb;
+    job->ud = ud;
+    if (!job->password || (encoded && !job->encoded)) {
+        hash_job_free(job);
+        return -1;
+    }
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_t th;
+    const int rc = pthread_create(&th, &attr, hash_job_run, job);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        hash_job_free(job);
+        return -1;
+    }
+    s_hash_inflight++;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ auth (login / register / token) */
+
+typedef struct AuthCtx {
+    int action;
+    char name[64];
+    char *pass;
+    char token[80];
+    char ref[64];
+    char ip[64];
+    char origin[16];
+    int account_id;
+    char *twofa_hash;   /* stored 2FA pattern hash, NULL = no 2FA */
+    char twofa[32];     /* pattern the client gave */
+    char *rehash;       /* password rehash pending until 2FA passes */
+    const char *fail_msg;
+    AcctReplyFn cb;
+    void *ud;
+} AuthCtx;
+
+static void auth_ctx_free(AuthCtx *c) {
+    if (!c) return;
+    free(c->twofa_hash);
+    free(c->rehash);
+    if (c->pass) {
+        memset(c->pass, 0, strlen(c->pass));
+        free(c->pass);
+    }
+    free(c);
+}
+
+static void auth_fail(AuthCtx *c, const char *err) {
+    c->cb(c->ud, err, NULL);
+    auth_ctx_free(c);
+}
+
+static const char *ip_param(const AuthCtx *c) { return c->ip[0] ? c->ip : NULL; }
+
+/* Drop the oldest sessions beyond accounts.max_sessions (fire and forget). */
+static void trim_cb(kn_db_result *res, void *ud) {
+    (void) ud;
+    if (!kn_db_ok(res)) KN_WARN(MOD, "session trim: %s", kn_db_error(res));
+}
+
+static void trim_sessions(int account_id) {
+    if (g_acct.max_sessions <= 0) return;
+    char id[24], max[24];
+    kn_db_query(g_acct_brain->db,
+                "DELETE FROM sessions WHERE account_id = $1 AND token_hash NOT IN "
+                "(SELECT token_hash FROM sessions WHERE account_id = $1 ORDER BY last_seen_at DESC LIMIT $2)",
+                KN_DB_ARGS(acct_itoa(id, account_id), acct_itoa(max, g_acct.max_sessions)), trim_cb, NULL);
+}
+
+static const char *ban_message(const cJSON *account) {
+    static char msg[256];
+    const char *reason = kn_json_str(account, "ban_reason", "");
+    if (reason && *reason) snprintf(msg, sizeof msg, "Banned: %s", reason);
+    else snprintf(msg, sizeof msg, "Account banned.");
+    return msg;
+}
+
+/* Final step: account object (with the token when one was issued). */
+static void auth_done(kn_db_result *res, void *ud) {
+    AuthCtx *c = ud;
+    if (!kn_db_ok(res)) {
+        auth_fail(c, kn_db_is_unique_violation(res) ? "Username already taken." : acct_db_error(res, "auth"));
+        return;
+    }
+    cJSON *account = acct_db_json(res);
+    if (!account) {
+        auth_fail(c, "Invalid login.");
+        return;
+    }
+    acct_decorate(account);
+    if (kn_json_int(account, "banned", 0)) {
+        /* token resumes of banned accounts end here (password logins are refused earlier) */
+        const char *msg = ban_message(account);
+        cJSON_Delete(account);
+        auth_fail(c, msg);
+        return;
+    }
+    if (c->token[0]) cJSON_AddStringToObject(account, "token", c->token);
+    if (c->action == 0 || c->pass) trim_sessions((int) kn_json_int(account, "id", 0));
+    c->cb(c->ud, NULL, account);
+    cJSON_Delete(account);
+    auth_ctx_free(c);
+}
+
+static int new_token(AuthCtx *c) {
+    return kn_random_hex(c->token, sizeof c->token, 16); /* 32 hex chars, as v3.1.1 */
+}
+
+static void login_success(AuthCtx *c, const char *new_hash) {
+    char id[24], ttl[24];
+    if (new_token(c) != 0) {
+        auth_fail(c, "Server error.");
+        return;
+    }
+    kn_db_query(g_acct_brain->db, "SELECT kn_login_success($1, $2, $3, $4, $5, $6, $7)",
+                KN_DB_ARGS(acct_itoa(id, c->account_id), ip_param(c), "password", c->token,
+                           acct_itoa(ttl, g_acct.session_ttl_s), c->origin, new_hash),
+                auth_done, c);
+}
+
+/* Answer only once the failure is logged, so the next attempt sees the throttle. */
+static void login_failed_cb(kn_db_result *res, void *ud) {
+    AuthCtx *c = ud;
+    if (!kn_db_ok(res)) KN_WARN(MOD, "failure log: %s", kn_db_error(res));
+    auth_fail(c, c->fail_msg ? c->fail_msg : "Invalid login.");
+}
+
+static void login_failed(AuthCtx *c, const char *msg) {
+    c->fail_msg = msg;
+    kn_db_query(g_acct_brain->db, "SELECT kn_login_failed($1, $2)", KN_DB_ARGS(c->name, ip_param(c)), login_failed_cb, c);
+}
+
+static void twofa_verified(void *ud, int ok, const char *new_hash) {
+    (void) new_hash;
+    AuthCtx *c = ud;
+    if (!ok) {
+        login_failed(c, ACCT_ERR_2FA_BAD);
+        return;
+    }
+    login_success(c, c->rehash);
+}
+
+static void login_verified(void *ud, int ok, const char *new_hash) {
+    AuthCtx *c = ud;
+    if (!ok) {
+        login_failed(c, "Invalid login.");
+        return;
+    }
+    if (c->twofa_hash) {
+        /* v3.1.1 menu 2FA: the pattern grid comes after a correct password */
+        if (!c->twofa[0]) {
+            auth_fail(c, ACCT_ERR_2FA);
+            return;
+        }
+        if (new_hash) c->rehash = strdup(new_hash);
+        if (acct_hash_async(c->twofa, c->twofa_hash, twofa_verified, c) != 0) auth_fail(c, "Server busy, try again.");
+        return;
+    }
+    login_success(c, new_hash);
+}
+
+/* A constant dummy hash so unknown names cost the same as wrong passwords. */
+static char s_dummy_hash[KN_PASSWORD_HASH_MAX];
+
+static void login_lookup_done(kn_db_result *res, void *ud) {
+    AuthCtx *c = ud;
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
+        auth_fail(c, acct_db_error(res, "login lookup"));
+        return;
+    }
+    if (kn_db_get_bool(res, 0, kn_db_col(res, "ip_blocked"), 0)) {
+        auth_fail(c, "Too many failed logins for this IP");
+        return;
+    }
+    if (kn_db_get_bool(res, 0, kn_db_col(res, "throttled"), 0)) {
+        auth_fail(c, "Please Try Later");
+        return;
+    }
+    const int id_col = kn_db_col(res, "account_id");
+    const int found = !kn_db_isnull(res, 0, id_col);
+    c->account_id = found ? (int) kn_db_get_int64(res, 0, id_col, 0) : 0;
+    if (found && kn_db_get_bool(res, 0, kn_db_col(res, "banned"), 0)) {
+        static char msg[256];
+        const char *reason = kn_db_get_by(res, 0, "ban_reason");
+        if (reason && *reason) snprintf(msg, sizeof msg, "Banned: %s", reason);
+        else snprintf(msg, sizeof msg, "Account banned.");
+        auth_fail(c, msg);
+        return;
+    }
+    const char *hash = found ? kn_db_get_by(res, 0, "password_hash") : NULL;
+    const int tf = kn_db_col(res, "twofa");
+    if (found && tf >= 0 && !kn_db_isnull(res, 0, tf)) c->twofa_hash = strdup(kn_db_get(res, 0, tf));
+    if (!found) {
+        snprintf(s_dummy_hash, sizeof s_dummy_hash, "$pbkdf2-sha256$i=%u$a3J1bmtuYXRpdmVkdW1teQ$"
+                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", kn_password_get_iterations());
+        /* still pay for one PBKDF2 so timing does not reveal registered names */
+        if (acct_hash_async(c->pass, s_dummy_hash, login_verified, c) != 0) auth_fail(c, "Server busy, try again.");
+        else c->account_id = 0;
+        return;
+    }
+    if (acct_hash_async(c->pass, hash, login_verified, c) != 0) auth_fail(c, "Server busy, try again.");
+}
+
+static void token_lookup_done(kn_db_result *res, void *ud) {
+    AuthCtx *c = ud;
+    if (!kn_db_ok(res)) {
+        auth_fail(c, acct_db_error(res, "token lookup"));
+        return;
+    }
+    cJSON *account = acct_db_json(res);
+    if (!account) {
+        auth_fail(c, "Invalid login.");
+        return;
+    }
+    const char *uname = kn_json_str(account, "username", "");
+    if (c->name[0] && strcasecmp(uname, c->name) != 0) {
+        cJSON_Delete(account);
+        auth_fail(c, "Invalid login.");
+        return;
+    }
+    acct_decorate(account);
+    if (kn_json_int(account, "banned", 0)) {
+        const char *msg = ban_message(account);
+        cJSON_Delete(account);
+        auth_fail(c, msg);
+        return;
+    }
+    cJSON_AddStringToObject(account, "token", c->token); /* keep the client's token (socialWs.ts) */
+    c->cb(c->ud, NULL, account);
+    cJSON_Delete(account);
+    auth_ctx_free(c);
+}
+
+static void register_hashed(void *ud, int ok, const char *new_hash) {
+    AuthCtx *c = ud;
+    char kr[24], prem[24], ttl[24];
+    if (!ok || !new_hash) {
+        auth_fail(c, "Server error.");
+        return;
+    }
+    if (new_token(c) != 0) {
+        auth_fail(c, "Server error.");
+        return;
+    }
+    kn_db_query(g_acct_brain->db, "SELECT kn_register($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                KN_DB_ARGS(c->name, new_hash, ip_param(c), c->ref[0] ? c->ref : NULL,
+                           acct_itoa(kr, g_acct.starting_kr), acct_itoa(prem, g_acct.free_premium ? 1 : 0),
+                           c->token, acct_itoa(ttl, g_acct.session_ttl_s), c->origin),
+                auth_done, c);
+}
+
+static void register_precheck_done(kn_db_result *res, void *ud) {
+    AuthCtx *c = ud;
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
+        auth_fail(c, acct_db_error(res, "register precheck"));
+        return;
+    }
+    if (kn_db_get_bool(res, 0, kn_db_col(res, "taken"), 0)) {
+        auth_fail(c, "Username already taken.");
+        return;
+    }
+    if (kn_db_get_bool(res, 0, kn_db_col(res, "banned"), 0)) {
+        auth_fail(c, "Banned from this server.");
+        return;
+    }
+    if (kn_db_get_bool(res, 0, kn_db_col(res, "limited"), 0)) {
+        auth_fail(c, "Too many accounts created from this IP. Please Try Later");
+        return;
+    }
+    if (acct_hash_async(c->pass, NULL, register_hashed, c) != 0) auth_fail(c, "Server busy, try again.");
+}
+
+void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
+    if (!g_acct_brain || !g_acct_brain->db) {
+        cb(ud, "Accounts are unavailable.", NULL);
+        return;
+    }
+    AuthCtx *c = calloc(1, sizeof *c);
+    if (!c) {
+        cb(ud, "Server error.", NULL);
+        return;
+    }
+    c->action = rq->action;
+    c->cb = cb;
+    c->ud = ud;
+    snprintf(c->name, sizeof c->name, "%s", rq->name ? rq->name : "");
+    snprintf(c->ref, sizeof c->ref, "%s", rq->ref ? rq->ref : "");
+    snprintf(c->ip, sizeof c->ip, "%s", rq->ip ? rq->ip : "");
+    snprintf(c->origin, sizeof c->origin, "%s", rq->origin ? rq->origin : "social");
+    snprintf(c->twofa, sizeof c->twofa, "%s", rq->twofa ? rq->twofa : "");
+
+    if (rq->action == 0) {
+        const char *err = acct_validate_name(rq->name);
+        if (!err) err = acct_validate_password(rq->pass);
+        if (err) {
+            auth_fail(c, err);
+            return;
+        }
+        c->pass = strdup(rq->pass);
+        char lim[24];
+        kn_db_query(g_acct_brain->db,
+                    "SELECT EXISTS (SELECT 1 FROM accounts WHERE lower(username) = lower($1)) AS taken, "
+                    "($2::text IS NOT NULL AND EXISTS (SELECT 1 FROM kn_active_ban(NULL, $2) b WHERE b.reason IS NOT NULL OR b.expires_at IS NOT NULL)) AS banned, "
+                    "($2::text IS NOT NULL AND $3::int > 0 AND (SELECT count(*) FROM accounts WHERE created_ip = $2 "
+                    "AND created_at > now() - interval '1 hour') >= $3::int) AS limited",
+                    KN_DB_ARGS(c->name, ip_param(c), acct_itoa(lim, g_acct.register_per_ip_hour)),
+                    register_precheck_done, c);
+        return;
+    }
+
+    if (rq->pass && *rq->pass) {
+        if (!rq->name || !*rq->name) {
+            auth_fail(c, "Invalid credentials.");
+            return;
+        }
+        if ((int) strlen(rq->pass) > g_acct.pass_max) {
+            auth_fail(c, "Invalid login.");
+            return;
+        }
+        c->pass = strdup(rq->pass);
+        char th[24], bm[24], bd[24];
+        kn_db_query(g_acct_brain->db, "SELECT * FROM kn_login_lookup($1, $2, $3, $4, $5)",
+                    KN_DB_ARGS(c->name, ip_param(c), acct_itoa(th, g_acct.login_throttle_s),
+                               acct_itoa(bm, g_acct.ip_block_failures), acct_itoa(bd, g_acct.ip_block_days)),
+                    login_lookup_done, c);
+        return;
+    }
+
+    if (rq->token && *rq->token && strlen(rq->token) < sizeof c->token) {
+        snprintf(c->token, sizeof c->token, "%s", rq->token);
+        char ttl[24];
+        kn_db_query(g_acct_brain->db, "SELECT kn_account_json(kn_session_account($1, $2))",
+                    KN_DB_ARGS(c->token, acct_itoa(ttl, g_acct.session_ttl_s)), token_lookup_done, c);
+        return;
+    }
+    auth_fail(c, rq->name ? "Invalid login." : "Invalid credentials.");
+}
+
+static void revoke_cb(kn_db_result *res, void *ud) {
+    (void) ud;
+    if (!kn_db_ok(res)) KN_WARN(MOD, "logout: %s", kn_db_error(res));
+}
+
+void acct_revoke_token(const char *token) {
+    if (!token || !*token || !g_acct_brain || !g_acct_brain->db) return;
+    kn_db_query(g_acct_brain->db, "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))",
+                KN_DB_ARGS(token), revoke_cb, NULL);
+}
+
+/* ------------------------------------------------------------------ 2FA (v3.1.1 menu pattern grid) */
+
+#define TWOFA_CELLS 25
+#define TWOFA_PICK 5
+
+size_t acct_twofa_pattern(const cJSON *cells, char out[32]) {
+    int on[TWOFA_CELLS] = {0};
+    const cJSON *it;
+    cJSON_ArrayForEach(it, cells) {
+        const int i = cJSON_IsNumber(it) ? (int) it->valuedouble : -1;
+        if (i >= 0 && i < TWOFA_CELLS) on[i] = 1;
+    }
+    size_t n = 0;
+    for (int i = 0; i < TWOFA_CELLS && n < 31; i++)
+        if (on[i]) out[n++] = (char) ('A' + i); /* config.alphabet */
+    out[n] = 0;
+    return n;
+}
+
+typedef struct TwofaCtx {
+    AcctReplyFn cb;
+    void *ud;
+    int64_t id;
+    char pattern[32];
+} TwofaCtx;
+
+static void twofa_stored(kn_db_result *res, void *ud) {
+    TwofaCtx *t = ud;
+    if (!kn_db_ok(res)) {
+        t->cb(t->ud, acct_db_error(res, "2fa"), NULL);
+    } else if (kn_db_rows(res) < 1) {
+        t->cb(t->ud, "2FA is already enabled", NULL);
+    } else {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddStringToObject(data, "pattern", t->pattern);
+        t->cb(t->ud, NULL, data);
+        cJSON_Delete(data);
+    }
+    memset(t->pattern, 0, sizeof t->pattern);
+    free(t);
+}
+
+static void twofa_hashed(void *ud, int ok, const char *hash) {
+    TwofaCtx *t = ud;
+    char id[24];
+    if (!ok || !hash) {
+        t->cb(t->ud, "Server error.", NULL);
+        free(t);
+        return;
+    }
+    kn_db_query(g_acct_brain->db, "UPDATE accounts SET twofa_secret = $2 WHERE id = $1 AND twofa_secret IS NULL RETURNING id",
+                KN_DB_ARGS(acct_itoa(id, t->id), hash), twofa_stored, t);
+}
+
+void acct_twofa_enable(int64_t id, AcctReplyFn cb, void *ud) {
+    TwofaCtx *t = calloc(1, sizeof *t);
+    if (!t) {
+        cb(ud, "Server error.", NULL);
+        return;
+    }
+    t->cb = cb;
+    t->ud = ud;
+    t->id = id;
+    /* TWOFA_PICK distinct random cells */
+    cJSON *cells = cJSON_CreateArray();
+    int picked[TWOFA_CELLS] = {0}, count = 0;
+    while (count < TWOFA_PICK) {
+        const int i = (int) (kn_random_u64() % TWOFA_CELLS);
+        if (picked[i]) continue;
+        picked[i] = 1;
+        count++;
+        cJSON_AddItemToArray(cells, cJSON_CreateNumber(i));
+    }
+    acct_twofa_pattern(cells, t->pattern);
+    cJSON_Delete(cells);
+    if (acct_hash_async(t->pattern, NULL, twofa_hashed, t) != 0) {
+        free(t);
+        cb(ud, "Server busy, try again.", NULL);
+    }
+}
+
+/* ------------------------------------------------------------------ internal ops (game servers) */
+
+typedef struct OpCtx {
+    AcctReplyFn cb;
+    void *ud;
+    char what[24];
+    int64_t id;
+    char *pass_old, *pass_new;
+    char token[80];
+} OpCtx;
+
+static void op_ctx_free(OpCtx *o) {
+    if (!o) return;
+    if (o->pass_old) {
+        memset(o->pass_old, 0, strlen(o->pass_old));
+        free(o->pass_old);
+    }
+    if (o->pass_new) {
+        memset(o->pass_new, 0, strlen(o->pass_new));
+        free(o->pass_new);
+    }
+    free(o);
+}
+
+static OpCtx *op_new(AcctReplyFn cb, void *ud, const char *what) {
+    OpCtx *o = calloc(1, sizeof *o);
+    if (!o) {
+        cb(ud, "Server error.", NULL);
+        return NULL;
+    }
+    o->cb = cb;
+    o->ud = ud;
+    snprintf(o->what, sizeof o->what, "%s", what);
+    return o;
+}
+
+static void op_reply(OpCtx *o, const char *err, const cJSON *data) {
+    o->cb(o->ud, err, data);
+    op_ctx_free(o);
+}
+
+/* Result is one jsonb column holding an account object (decorated before replying). */
+static void op_account_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res)) {
+        op_reply(o, acct_db_error(res, o->what), NULL);
+        return;
+    }
+    cJSON *account = acct_db_json(res);
+    if (!account) {
+        op_reply(o, "Account not found.", NULL);
+        return;
+    }
+    acct_decorate(account);
+    op_reply(o, NULL, account);
+    cJSON_Delete(account);
+}
+
+/* Result is one jsonb column passed through as-is ({} when NULL). */
+static void op_json_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res)) {
+        op_reply(o, acct_db_error(res, o->what), NULL);
+        return;
+    }
+    cJSON *data = acct_db_json(res);
+    if (!data) data = cJSON_CreateObject();
+    op_reply(o, NULL, data);
+    cJSON_Delete(data);
+}
+
+static void op_empty_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res)) {
+        op_reply(o, acct_db_error(res, o->what), NULL);
+        return;
+    }
+    cJSON *data = cJSON_CreateObject();
+    op_reply(o, NULL, data);
+    cJSON_Delete(data);
+}
+
+typedef struct AuthBridge {
+    AcctReplyFn cb;
+    void *ud;
+} AuthBridge;
+
+static void auth_bridge_cb(void *ud, const char *err, const cJSON *data) {
+    AuthBridge *b = ud;
+    b->cb(b->ud, err, data);
+    free(b);
+}
+
+static void internal_auth(int action, const cJSON *args, AcctReplyFn cb, void *ud) {
+    AuthBridge *bridge = malloc(sizeof *bridge);
+    if (!bridge) {
+        cb(ud, "Server error.", NULL);
+        return;
+    }
+    bridge->cb = cb;
+    bridge->ud = ud;
+    AcctAuthReq rq = {
+        .action = action,
+        .name = kn_json_str(args, "name", kn_json_str(args, "username", NULL)),
+        .pass = kn_json_str(args, "pass", kn_json_str(args, "password", NULL)),
+        .token = kn_json_str(args, "token", NULL),
+        .ref = kn_json_str(args, "ref", NULL),
+        .ip = kn_json_str(args, "ip", NULL),
+        .origin = "game",
+    };
+    if (action == 1 && rq.pass) rq.token = NULL;
+    acct_auth(&rq, auth_bridge_cb, bridge);
+}
+
+static void password_rehashed(void *ud, int ok, const char *new_hash) {
+    OpCtx *o = ud;
+    char id[24], ttl[24];
+    if (!ok || !new_hash) {
+        op_reply(o, "Server error.", NULL);
+        return;
+    }
+    if (kn_random_hex(o->token, sizeof o->token, 16) != 0) {
+        op_reply(o, "Server error.", NULL);
+        return;
+    }
+    /* new hash, every other session revoked, one fresh session returned */
+    kn_db_query(g_acct_brain->db,
+                "WITH u AS (UPDATE accounts SET password_hash = $2 WHERE id = $1 RETURNING id), "
+                "d AS (DELETE FROM sessions WHERE account_id IN (SELECT id FROM u)), "
+                "s AS (INSERT INTO sessions (token_hash, account_id, expires_at, origin) "
+                "SELECT sha256(convert_to($3, 'UTF8')), id, now() + make_interval(secs => $4), 'password' FROM u) "
+                "SELECT jsonb_build_object('token', $3::text) FROM u",
+                KN_DB_ARGS(acct_itoa(id, o->id), new_hash, o->token, acct_itoa(ttl, g_acct.session_ttl_s)),
+                op_json_done, o);
+}
+
+static void password_verified(void *ud, int ok, const char *new_hash) {
+    (void) new_hash;
+    OpCtx *o = ud;
+    if (!ok) {
+        op_reply(o, "Incorrect current password.", NULL);
+        return;
+    }
+    if (acct_hash_async(o->pass_new, NULL, password_rehashed, o) != 0) op_reply(o, "Server busy, try again.", NULL);
+}
+
+static void password_lookup_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
+        op_reply(o, kn_db_ok(res) ? "Account not found." : acct_db_error(res, "password"), NULL);
+        return;
+    }
+    if (acct_hash_async(o->pass_old, kn_db_get(res, 0, 0), password_verified, o) != 0)
+        op_reply(o, "Server busy, try again.", NULL);
+}
+
+/* Change password (game "upp" / social "upp"): verifies the old one. */
+void acct_change_password(int64_t id, const char *old_pass, const char *new_pass, AcctReplyFn cb, void *ud) {
+    const char *err = acct_validate_password(new_pass);
+    if (err) {
+        cb(ud, err, NULL);
+        return;
+    }
+    if (!old_pass) {
+        cb(ud, "Incorrect current password.", NULL);
+        return;
+    }
+    OpCtx *o = op_new(cb, ud, "password");
+    if (!o) return;
+    o->id = id;
+    o->pass_old = strdup(old_pass);
+    o->pass_new = strdup(new_pass);
+    char ids[24];
+    kn_db_query(g_acct_brain->db, "SELECT password_hash FROM accounts WHERE id = $1", KN_DB_ARGS(acct_itoa(ids, id)),
+                password_lookup_done, o);
+}
+
+void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud) {
+    const char *err = acct_validate_alias(alias);
+    if (err) {
+        cb(ud, err, NULL);
+        return;
+    }
+    char trimmed[64];
+    while (*alias == ' ') alias++;
+    snprintf(trimmed, sizeof trimmed, "%s", alias);
+    for (size_t n = strlen(trimmed); n > 0 && trimmed[n - 1] == ' '; n--) trimmed[n - 1] = 0;
+    OpCtx *o = op_new(cb, ud, "alias");
+    if (!o) return;
+    char ids[24];
+    kn_db_query(g_acct_brain->db, "SELECT kn_set_alias($1, $2)", KN_DB_ARGS(acct_itoa(ids, id), trimmed),
+                op_account_done, o);
+}
+
+void acct_get(int64_t id, AcctReplyFn cb, void *ud) {
+    OpCtx *o = op_new(cb, ud, "get");
+    if (!o) return;
+    char ids[24];
+    kn_db_query(g_acct_brain->db, "SELECT kn_account_json($1)", KN_DB_ARGS(acct_itoa(ids, id)), op_account_done, o);
+}
+
+/* Normalise the two stats spellings (gameserver / matchmaker) into kn_commit_stats' input. */
+static cJSON *stats_args(const cJSON *a) {
+    cJSON *p = cJSON_CreateObject();
+    cJSON_AddNumberToObject(p, "id", (double) kn_json_int(a, "id", 0));
+    const char *match = kn_json_str(a, "match", kn_json_str(a, "match_id", NULL));
+    if (match) cJSON_AddStringToObject(p, "match", match);
+    cJSON_AddNumberToObject(p, "kills", (double) kn_json_int(a, "kills", 0));
+    cJSON_AddNumberToObject(p, "deaths", (double) kn_json_int(a, "deaths", 0));
+    cJSON_AddNumberToObject(p, "score", (double) kn_json_int(a, "score", 0));
+    cJSON_AddNumberToObject(p, "xp", (double) kn_json_int(a, "xp", kn_json_int(a, "score", 0)));
+    cJSON_AddNumberToObject(p, "won", kn_json_bool(a, "won", 0));
+    cJSON_AddNumberToObject(p, "games", (double) kn_json_int(a, "games", 0));
+    cJSON_AddNumberToObject(p, "time_ms", (double) kn_json_int(a, "time_ms", kn_json_int(a, "timePlayed", 0)));
+    cJSON_AddNumberToObject(p, "kr", (double) kn_json_int(a, "kr", 0));
+    const int64_t cls = kn_json_int(a, "class", kn_json_int(a, "classIndex", -1));
+    if (cls >= 0) cJSON_AddNumberToObject(p, "class", (double) cls);
+    const char *keys[] = {"mode", "map", "region", "server"};
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(a, keys[i]);
+        if (cJSON_IsString(v)) cJSON_AddStringToObject(p, keys[i], v->valuestring);
+        else if (cJSON_IsNumber(v)) cJSON_AddNumberToObject(p, keys[i], v->valuedouble);
+    }
+    if (cJSON_HasObjectItem(a, "region_index")) {
+        cJSON_AddNumberToObject(p, "region_index", (double) kn_json_int(a, "region_index", 0));
+    } else {
+        /* accounts.region_index maps game regions to config.socialRegions (leaderboard filter) */
+        const char *region = kn_json_str(a, "region", NULL);
+        char path[128];
+        if (region && strlen(region) < 64 && !strchr(region, '.')) {
+            snprintf(path, sizeof path, "accounts.region_index.%s", region);
+            const int64_t idx = kn_config_int(g_acct_brain->cfg, path, -1);
+            if (idx >= 0) cJSON_AddNumberToObject(p, "region_index", (double) idx);
+        }
+    }
+    const cJSON *st = cJSON_GetObjectItemCaseSensitive(a, "stats");
+    if (cJSON_IsObject(st)) {
+        /* only numeric counters (hs, wb, mk, fk, n, tmk, s, h ...) */
+        cJSON *clean = cJSON_CreateObject();
+        const cJSON *it;
+        cJSON_ArrayForEach(it, st) {
+            if (cJSON_IsNumber(it) && it->string && strlen(it->string) < 16 && it->string[0] != 'c')
+                cJSON_AddNumberToObject(clean, it->string, it->valuedouble);
+        }
+        cJSON_AddItemToObject(p, "stats", clean);
+    }
+    return p;
+}
+
+static void op_stats_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res)) {
+        op_reply(o, acct_db_error(res, o->what), NULL);
+        return;
+    }
+    cJSON *account = acct_db_json(res);
+    if (!account) {
+        op_reply(o, "Account not found.", NULL);
+        return;
+    }
+    acct_decorate(account);
+    if (!kn_json_int(account, "duplicate", 0)) social_push_account_update(account); /* live header KR / level */
+    op_reply(o, NULL, account);
+    cJSON_Delete(account);
+}
+
+static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
+    if (kn_json_int(args, "id", 0) <= 0) {
+        cb(ud, "Account not found.", NULL);
+        return -1;
+    }
+    OpCtx *o = op_new(cb, ud, "stats");
+    if (!o) return -1;
+    cJSON *p = stats_args(args);
+    char *text = kn_json_print(p);
+    cJSON_Delete(p);
+    char maxkr[24];
+    kn_db_query(g_acct_brain->db, "SELECT kn_commit_stats($1::jsonb, $2)",
+                KN_DB_ARGS(text, acct_itoa(maxkr, g_acct.max_match_kr)), op_stats_done, o);
+    free(text);
+    return 0;
+}
+
+/* rewards {items:[[id,kr],...]} -> {funds:[...]} (v3.1.1 SAVE_REWARDS) */
+static int op_rewards(const cJSON *args, AcctReplyFn cb, void *ud) {
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(args, "items");
+    cJSON *ids = cJSON_CreateArray(), *krs = cJSON_CreateArray();
+    const cJSON *it;
+    cJSON_ArrayForEach(it, items) {
+        if (!cJSON_IsArray(it) || cJSON_GetArraySize(it) < 2) continue;
+        double kr = cJSON_GetArrayItem(it, 1)->valuedouble;
+        if (kr < 0) kr = 0;
+        if (kr > g_acct.max_match_kr) kr = g_acct.max_match_kr;
+        cJSON_AddItemToArray(ids, cJSON_CreateNumber(cJSON_GetArrayItem(it, 0)->valuedouble));
+        cJSON_AddItemToArray(krs, cJSON_CreateNumber(floor(kr)));
+    }
+    char *ids_t = kn_json_print(ids), *krs_t = kn_json_print(krs);
+    cJSON_Delete(ids);
+    cJSON_Delete(krs);
+    OpCtx *o = op_new(cb, ud, "rewards");
+    if (o) {
+        kn_db_query(g_acct_brain->db,
+                    "SELECT jsonb_build_object('funds', coalesce(jsonb_agg(f ORDER BY n), '[]'::jsonb)) FROM ("
+                    "SELECT n, kn_add_funds(i::int, k::bigint, 'reward', NULL) AS f "
+                    "FROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS a(i, n) "
+                    "JOIN jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS b(k, m) ON n = m "
+                    "WHERE EXISTS (SELECT 1 FROM players WHERE player_id = i::int)) q",
+                    KN_DB_ARGS(ids_t, krs_t), op_json_done, o);
+    }
+    free(ids_t);
+    free(krs_t);
+    return o ? 0 : -1;
+}
+
+int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctReplyFn cb, void *ud) {
+    (void) b;
+    if (!op || !cb) {
+        if (cb) cb(ud, "Unknown op.", NULL);
+        return -1;
+    }
+    if (!g_acct_brain || !g_acct_brain->db) {
+        cb(ud, "Accounts are unavailable.", NULL);
+        return -1;
+    }
+    char ids[24], v1[24], v2[24];
+    const int64_t id = kn_json_int(args, "id", 0);
+
+    if (!strcmp(op, "login")) {
+        internal_auth(1, args, cb, ud);
+        return 0;
+    }
+    if (!strcmp(op, "register")) {
+        internal_auth(0, args, cb, ud);
+        return 0;
+    }
+    if (!strcmp(op, "token") || !strcmp(op, "session")) {
+        const char *token = kn_json_str(args, "token", NULL);
+        if (!token || !*token) {
+            cb(ud, "Invalid login.", NULL);
+            return 0;
+        }
+        AcctAuthReq rq = {.action = 1, .name = kn_json_str(args, "name", NULL), .token = token, .origin = "game"};
+        AuthBridge *bridge = malloc(sizeof *bridge);
+        if (!bridge) {
+            cb(ud, "Server error.", NULL);
+            return -1;
+        }
+        bridge->cb = cb;
+        bridge->ud = ud;
+        acct_auth(&rq, auth_bridge_cb, bridge);
+        return 0;
+    }
+    if (!strcmp(op, "get")) {
+        acct_get(id, cb, ud);
+        return 0;
+    }
+    if (!strcmp(op, "logout")) {
+        acct_revoke_token(kn_json_str(args, "token", NULL));
+        cJSON *empty = cJSON_CreateObject();
+        cb(ud, NULL, empty);
+        cJSON_Delete(empty);
+        return 0;
+    }
+    if (!strcmp(op, "alias")) {
+        acct_set_alias(id, kn_json_str(args, "alias", NULL), cb, ud);
+        return 0;
+    }
+    if (!strcmp(op, "password")) {
+        acct_change_password(id, kn_json_str(args, "old", NULL), kn_json_str(args, "new", NULL), cb, ud);
+        return 0;
+    }
+    if (!strcmp(op, "stats")) return op_stats(args, cb, ud);
+    if (!strcmp(op, "rewards")) return op_rewards(args, cb, ud);
+    if (!strcmp(op, "give_skin")) {
+        OpCtx *o = op_new(cb, ud, "give_skin");
+        if (!o) return -1;
+        const int64_t skin = kn_json_int(args, "skin", -1);
+        kn_db_query(g_acct_brain->db,
+                    "SELECT jsonb_build_object('skin', $2::int, 'count', kn_add_skin($1, $2, 1, $3, NULL))",
+                    KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, skin), kn_json_str(args, "source", "spin")),
+                    op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "elo") && cJSON_HasObjectItem(args, "delta")) {
+        /* atomic ranked update: {id, mode, delta} -> {elo} (clamped at 0) */
+        const int64_t mode = kn_json_int(args, "mode", 1);
+        const char *col = mode == 4 ? "player_elo4" : mode == 2 ? "player_elo2" : "player_elo";
+        char sql[256];
+        snprintf(sql, sizeof sql,
+                 "UPDATE players SET %s = greatest(0, %s + $2::int) WHERE player_id = $1 "
+                 "RETURNING jsonb_build_object('elo', %s)", col, col, col);
+        OpCtx *o = op_new(cb, ud, "elo");
+        if (!o) return -1;
+        kn_db_query(g_acct_brain->db, sql, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "delta", 0))),
+                    op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "elo")) {
+        const int64_t mode = kn_json_int(args, "mode", 1);
+        const char *sql = mode == 4 ? "UPDATE players SET player_elo4 = $2 WHERE player_id = $1"
+                        : mode == 2 ? "UPDATE players SET player_elo2 = $2 WHERE player_id = $1"
+                                    : "UPDATE players SET player_elo = $2 WHERE player_id = $1";
+        OpCtx *o = op_new(cb, ud, "elo");
+        if (!o) return -1;
+        kn_db_query(g_acct_brain->db, sql, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "elo", 0))),
+                    op_empty_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "challenge")) {
+        OpCtx *o = op_new(cb, ud, "challenge");
+        if (!o) return -1;
+        int64_t kr = kn_json_int(args, "kr", 0);
+        if (kr < 0) kr = 0;
+        if (kr > g_acct.max_match_kr) kr = g_acct.max_match_kr;
+        kn_db_query(g_acct_brain->db,
+                    "WITH u AS (UPDATE players SET player_chal = greatest(player_chal, $2) WHERE player_id = $1 RETURNING player_chal) "
+                    "SELECT jsonb_build_object('chal', (SELECT player_chal FROM u), "
+                    "'funds', kn_add_funds($1, $3, 'challenge', $2::text))",
+                    KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "chal", 0)), acct_itoa(v2, kr)),
+                    op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "ban_check")) {
+        OpCtx *o = op_new(cb, ud, "ban_check");
+        if (!o) return -1;
+        kn_db_query(g_acct_brain->db,
+                    "SELECT jsonb_build_object('banned', CASE WHEN b.reason IS NOT NULL OR b.expires_at IS NOT NULL THEN 1 ELSE 0 END, "
+                    "'reason', b.reason, 'expires', coalesce(extract(epoch FROM b.expires_at)::bigint, 0)) "
+                    "FROM kn_active_ban(nullif($1, '0')::int, $2) b",
+                    KN_DB_ARGS(acct_itoa(ids, id), kn_json_str(args, "ip", NULL)), op_json_done, o);
+        return 0;
+    }
+    cb(ud, "Unknown op.", NULL);
+    return -1;
+}
+
+/* ------------------------------------------------------------------ module */
+
+static void cleanup_cb(kn_db_result *res, void *ud) {
+    (void) ud;
+    if (!kn_db_ok(res)) KN_WARN(MOD, "cleanup: %s", kn_db_error(res));
+}
+
+static void cleanup_tick(kn_loop *loop, void *ud) {
+    (void) loop;
+    (void) ud;
+    if (!g_acct_brain || !g_acct_brain->db) return;
+    kn_db_query(g_acct_brain->db, "DELETE FROM sessions WHERE expires_at < now()", 0, NULL, cleanup_cb, NULL);
+    kn_db_query(g_acct_brain->db, "DELETE FROM login_failures WHERE at < now() - interval '1 day'", 0, NULL,
+                cleanup_cb, NULL);
+}
+
+/* accounts.developers / accounts.moderators -> players flags (staff checks run in SQL). */
+static void staff_flags_apply(void) {
+    for (int dev = 1; dev >= 0; dev--) {
+        cJSON *names = cJSON_CreateArray();
+        const size_t n = dev ? g_acct.dev_count : g_acct.mod_count;
+        for (size_t i = 0; i < n; i++)
+            cJSON_AddItemToArray(names, cJSON_CreateString(dev ? g_acct.dev_names[i] : g_acct.mod_names[i]));
+        char *text = kn_json_print(names);
+        cJSON_Delete(names);
+        if (n && text) {
+            kn_db_query(g_acct_brain->db,
+                        dev ? "UPDATE players SET player_developer = 1, player_moderator = 1 FROM accounts a "
+                              "WHERE a.id = player_id AND lower(a.username) IN (SELECT lower(x) FROM jsonb_array_elements_text($1::jsonb) x)"
+                            : "UPDATE players SET player_moderator = 1 FROM accounts a "
+                              "WHERE a.id = player_id AND lower(a.username) IN (SELECT lower(x) FROM jsonb_array_elements_text($1::jsonb) x)",
+                        KN_DB_ARGS(text), cleanup_cb, NULL);
+        }
+        free(text);
+    }
+}
+
+int accounts_init(Brain *b) {
+    g_acct_brain = b;
+    acct_config_load(b);
+    if (!b->db) {
+        KN_WARN(MOD, "no database: accounts and the social socket answer guests only");
+        return 0;
+    }
+    s_cleanup_timer = kn_loop_add_timer(b->loop, 60 * 1000, 3600 * 1000, cleanup_tick, NULL);
+    staff_flags_apply();
+    KN_INFO(MOD, "ready (names %d-%d, sessions %lld days, password iterations %u)", g_acct.name_min,
+            g_acct.name_max, (long long) (g_acct.session_ttl_s / 86400), kn_password_get_iterations());
+    return 0;
+}
+
+void accounts_shutdown(Brain *b) {
+    if (s_cleanup_timer) kn_loop_cancel_timer(b->loop, s_cleanup_timer);
+    s_cleanup_timer = 0;
+}

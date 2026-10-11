@@ -1,0 +1,33 @@
+# Host aliases for deploy/ansible (ansible.cfg passes -F ssh_config).
+# CI overrides kru with KRU_HOST/KRU_PORT (inventory/hosts.yml) and its own key.
+
+# Central node: Debian 12 LXC, root. 172.16.5.47 is the LAN address; the public one
+# is 5.188.124.56 (GitHub-hosted runners must use that).
+Host kru
+  HostName 172.16.5.47
+  User root
+
+# --- Edges (G-Core, also run the abulxt relays: never touch their services) ---
+# Santa Clara, US - Debian 11, 4 vCPU
+Host com.clara
+  HostName 92.38.149.24
+  User root
+  IdentityFile ~/.ssh/desktop_ed25519
+
+# Los Angeles, US - Debian 13, 12 vCPU
+Host com.angeles
+  HostName 92.223.30.23
+  User root
+  IdentityFile ~/.ssh/desktop_ed25519
+
+# Chicago, US - Debian 13, 4 vCPU
+Host com.chitown
+  HostName 2.56.222.45
+  User root
+  IdentityFile ~/.ssh/desktop_ed25519
+
+# Ashburn, US - Debian 12, 4 vCPU (nftables managed by abulxt's Ansible)
+Host amph.ashburn
+  HostName 45.82.161.87
+  User root
+  IdentityFile ~/.ssh/desktop_ed25519

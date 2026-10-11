@@ -223,7 +223,20 @@ const char *assets_path() {
 
 #endif
 
+static FileRedirectFn g_file_redirect;
+
+void file_set_redirect(const FileRedirectFn fn) {
+    g_file_redirect = fn;
+}
+
+const char *file_redirect(const char *path, char *buf, const size_t n) {
+    if (!g_file_redirect || !path || !buf || !n) return path;
+    return g_file_redirect(path, buf, n) ? buf : path;
+}
+
 int read_file(const char *path, unsigned char **buf, size_t *length) {
+    char swapped[1024];
+    path = file_redirect(path, swapped, sizeof(swapped)); // resource swapper (client)
     ensure_asset_file(path);
 
     FILE *file = fopen(path, "rb");

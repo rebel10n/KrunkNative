@@ -259,7 +259,8 @@ EdCtl *ed_gui_text(EdBuild *b, const char *name, const char *placeholder, const 
 EdCtl *ed_gui_number(EdBuild *b, const char *name, const char *placeholder, const double min, const int sub) {
     EdCtl *c = ed_gui_ctl(b->panel, EG_NUMBER);
     c->arg = sub;
-    snprintf(c->path, sizeof(c->path), "%s|%g", placeholder ? placeholder : "", min);
+    if (min == min) snprintf(c->path, sizeof(c->path), "%s|%g", placeholder ? placeholder : "", min);
+    else snprintf(c->path, sizeof(c->path), "%s|", placeholder ? placeholder : ""); // NaN: no min (min="")
     g_ctl_names[b->panel][c->id % 10000] = name;
     return c;
 }
@@ -538,7 +539,8 @@ static double g_number_drag_y;
 static int h_update_number_mousedown(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) args; (void) argc;
     g_number_drag = ev->target;
-    g_number_drag_y = g_ed.mouse_y;
+    // the event's own position: on the web GLFW never sees the pointer over the page
+    g_number_drag_y = ev->y > 0 ? ev->y * (g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1) : g_ed.mouse_y;
     return 1;
 }
 
@@ -742,6 +744,7 @@ static void pickr_ensure(void) {
         "          </div>\n"
         "        </div>");
     g_pickr = html_dom_by_id("kn-pickr");
+    if (g_pickr) html_dom_set_attr(g_pickr, "data-kn-pointer", "2"); // web: the drag follows (editor.c)
 }
 
 static void pickr_layout(void) {
@@ -993,6 +996,7 @@ static int h_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
             value = cJSON_CreateBool(ev->checked);
             break;
         case EG_TEXT:
+        case EG_COLOR: // "#rrggbb" (not a number: strtod would store 0)
             value = cJSON_CreateString(ev->value ? ev->value : "");
             break;
         case EG_SELECT:

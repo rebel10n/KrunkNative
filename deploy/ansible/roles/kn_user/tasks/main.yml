@@ -1,0 +1,27 @@
+# Isolated service account: system user, no login shell, no sudo, no password.
+- name: Service group
+  ansible.builtin.group:
+    name: "{{ kn_group }}"
+    system: true
+
+- name: Service user (nologin, home = state dir)
+  ansible.builtin.user:
+    name: "{{ kn_user }}"
+    group: "{{ kn_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ kn_state_dir }}"
+    create_home: false
+    password: "!"
+    password_lock: true
+
+- name: State and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ kn_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ kn_state_dir }}", owner: "{{ kn_user }}", mode: "0750" }
+    - { path: "{{ kn_etc_dir }}", owner: root, mode: "0750" }

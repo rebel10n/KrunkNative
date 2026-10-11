@@ -1,0 +1,12 @@
+# Service release layout (binaries + the data files they read), shared by the
+# central node (kn_brain) and the edges (server_bin):
+#   {{ kn_svc_base }}/releases/<id>/{bin,assets,services/db/migrations}
+#   {{ kn_svc_base }}/current -> releases/<id>
+kn_svc_base: /opt/krunknative-svc
+kn_svc_current: "{{ kn_svc_base }}/current"
+# Which container build to ship (deploy/ansible/build.sh): bullseye for Debian 11,
+# bookworm for 12 and 13 (forward compatible glibc/OpenSSL 3).
+kn_build_codename: "{{ 'bullseye' if ansible_distribution_major_version | int <= 11 else 'bookworm' }}"
+kn_release_bins: [kn_brain, kn_migrate, server_bin]
+# Small, tracked data the services read (map catalogue, skins); not the 1.5 GB tree.
+kn_release_assets: [maps, skins.json]

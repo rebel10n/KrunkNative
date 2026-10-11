@@ -2,6 +2,7 @@
 // server sends as gmsg / tm / ts / ufl / ufi / obj / wep / lv / ac / inat / lock / lm /
 // crsp / dsp / end(tms) / am. All leave through game_send (GameHooks.send).
 #include "mode_internal.h"
+#include <math.h>
 #include <string.h>
 
 static void copy_text(char *out, const size_t size, const char *text) {
@@ -187,6 +188,8 @@ void mode_send_end(Game *game, const ModeWinner winner, Player **sorted, const s
         entry->stats[NET_MODE_STAT_CONVS] = clamp16(player->mode.convs);
         entry->stats[NET_MODE_STAT_LIVES] = clamp16(player->mode.lives);
         entry->stats[NET_MODE_STAT_ASSISTS] = clamp16((int) player->assists);
+        // getTime(lastTimer, showMS) keeps tenths: store them + 1 so 0 still means "DNF"
+        if (player->mode.has_timer) entry->stats[NET_MODE_STAT_TIME] = clamp16((int) floorf(player->mode.timer * 10.0f + 0.0001f) + 1);
     }
 
     game_send(game, NET_TARGET_ALL, NET_PACKET_MODE_END, &packet, sizeof(packet));

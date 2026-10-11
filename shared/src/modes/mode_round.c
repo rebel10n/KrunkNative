@@ -302,7 +302,7 @@ void mode_player_left(Game *game, Player *player) {
 
 // Krunker getSpawnPoint(team): the spawns of your team (or teamless ones), furthest
 // from the enemies (and in CTF from the enemy flags). Line of sight is not checked.
-static void mode_pick_spawn(Game *game, Player *player) {
+void mode_pick_spawn(Game *game, Player *player) {
     const Map *map = game->map;
     if (!map || !map->spawn_count || !player->team) return;
 

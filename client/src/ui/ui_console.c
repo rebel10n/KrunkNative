@@ -19,6 +19,8 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <chat_commands.h>
+#include <map_catalog.h>
+#include <ai.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -93,6 +95,12 @@ typedef struct {
     char value[CON_TEXT_MAX];
 } ConPair;
 
+#define CON_CANDS_MAX 256
+typedef struct {
+    char items[CON_CANDS_MAX][CON_NAME_MAX];
+    int count;
+} ConCands;
+
 typedef struct {
     Client *client;
     int built;                   // the overlay exists in the current page
@@ -118,8 +126,14 @@ typedef struct {
     int history_idx;
     char draft[CON_LINE_MAX];
 
-    char hint_names[CON_HINTS_MAX][CON_NAME_MAX]; // hint items that complete on mousedown
+    char hint_lines[CON_HINTS_MAX][CON_LINE_MAX]; // the line a mousedown on each hint item sets ("" inert)
     int hint_count;
+    int hint_sel;                // arrow-key selection: hint row index, -1 none (KrunkNative)
+    char hint_sel_value[CON_LINE_MAX]; // input value the selection belongs to
+    ConCands cycle;              // Tab cycle: candidates, the line before the token, the pick
+    int cycle_on, cycle_index;
+    char cycle_base[CON_LINE_MAX];
+    char cycle_value[CON_LINE_MAX];
 
     int mode_override;           // offlineModeOverrides (game mode id), -1 none
 
@@ -128,8 +142,6 @@ typedef struct {
     float dx, dy, start_x, start_y, start_w, start_h;
     HtmlElem pressed;
     int save_timer;
-    int user_size;               // width/height come from the saved geometry or the grip
-    float css_vw, css_vh;        // viewport the min() size was computed for
 } ConState;
 
 static ConState g_con = {.history_idx = -1, .mode_override = -1};
@@ -739,29 +751,58 @@ static void off_smite(const int argc, char **argv) { offline_bool(FLAG_SMITE, "S
 static void off_forcehide(const int argc, char **argv) { offline_bool(FLAG_FORCE_HIDE, "Forcehide", argc, argv); }
 static void off_unlimitedammo(const int argc, char **argv) { offline_bool(FLAG_UNLIMITED, "Unlimited ammo", argc, argv); }
 
-// resolveOfflineKillTarget (players; KrunkNative has no AI)
-static Player *resolve_kill_target(const char *query, ResReason *reason) {
+// resolveOfflineKillTarget: active players by name/id and AIs by name/sid; one exact
+// match wins, else one prefix match.
+typedef struct {
+    Player *player;
+    GameAI *ai;
+} KillTarget;
+
+static int key_match(const char *value, const char *needle, int *exact) {
+    char key[96];
+    normalise(value, key, sizeof(key));
+    if (!key[0]) return 0;
+    if (!strcmp(key, needle)) { *exact = 1; return 1; }
+    return starts_with(key, needle);
+}
+
+static KillTarget resolve_kill_target(const char *query, ResReason *reason) {
+    KillTarget none = {0}, exact_p = {0}, exact_a = {0}, any_p = {0}, any_a = {0};
     char needle[96];
     normalise(query, needle, sizeof(needle));
-    if (!needle[0]) { *reason = RES_EMPTY; return NULL; }
-    const Game *game = &con_client()->game;
-    Player *exact = NULL, *part = NULL;
-    int exact_n = 0, part_n = 0;
+    if (!needle[0]) { *reason = RES_EMPTY; return none; }
+    Game *game = &con_client()->game;
+    int ep = 0, ea = 0, pp = 0, pa = 0;
     for (size_t i = 0; i < game->player_count; i++) {
         Player *p = game->players[i];
         if (!p || !p->active) continue;
-        char name[96], id[16], nid[16];
-        normalise(p->name, name, sizeof(name));
+        char id[16];
         snprintf(id, sizeof(id), "%d", p->uid);
-        normalise(id, nid, sizeof(nid));
-        if ((name[0] && !strcmp(name, needle)) || !strcmp(nid, needle)) { exact = p; exact_n++; }
-        else if ((name[0] && starts_with(name, needle)) || starts_with(nid, needle)) { part = p; part_n++; }
+        int exact = 0;
+        if (!key_match(p->name, needle, &exact) && !key_match(id, needle, &exact)) continue;
+        pp++;
+        any_p.player = p;
+        if (exact) { ep++; exact_p.player = p; }
     }
-    if (exact_n == 1) { *reason = RES_OK; return exact; }
-    if (exact_n > 1) { *reason = RES_AMBIGUOUS; return NULL; }
-    if (part_n == 1) { *reason = RES_OK; return part; }
-    *reason = part_n > 1 ? RES_AMBIGUOUS : RES_NOT_FOUND;
-    return NULL;
+    for (int i = 0; game->ai && i < game->ai->count; i++) {
+        GameAI *ai = &game->ai->ais[i];
+        if (!ai->active) continue;
+        char sid[16];
+        snprintf(sid, sizeof(sid), "%d", ai->sid);
+        int exact = 0;
+        if (!key_match(ai->name, needle, &exact) && !key_match(sid, needle, &exact)) continue;
+        pa++;
+        any_a.ai = ai;
+        if (exact) { ea++; exact_a.ai = ai; }
+    }
+    *reason = RES_OK;
+    if (ep == 1 && ea == 0) return exact_p;
+    if (ea == 1 && ep == 0) return exact_a;
+    if (ep + ea > 1) { *reason = RES_AMBIGUOUS; return none; }
+    if (pp == 1 && pa == 0) return any_p;
+    if (pa == 1 && pp == 0) return any_a;
+    *reason = pp + pa > 1 ? RES_AMBIGUOUS : RES_NOT_FOUND;
+    return none;
 }
 
 static void off_kill(const int argc, char **argv) {
@@ -776,16 +817,26 @@ static void off_kill(const int argc, char **argv) {
         return;
     }
     ResReason reason;
-    Player *target = resolve_kill_target(query, &reason);
-    if (!target) {
+    const KillTarget target = resolve_kill_target(query, &reason);
+    if (!target.player && !target.ai) {
         if (reason == RES_AMBIGUOUS) appendf(COL_ERROR, "Kill target '%s' is ambiguous.", query);
         else appendf(COL_ERROR, "Kill target '%s' not found.", query);
         return;
     }
+    if (target.ai) { // killOfflineAI: ai.kill(source) + AI.sync()
+        char label[GAME_AI_NAME_SIZE + 16];
+        if (target.ai->name[0]) snprintf(label, sizeof(label), "%s", target.ai->name);
+        else snprintf(label, sizeof(label), "%d", target.ai->sid);
+        Game *game = &con_client()->game;
+        game_ai_kill(game, target.ai, p);
+        game_ai_sync(game);
+        appendf(COL_INFO, "Killed AI %s.", label);
+        return;
+    }
     char label[PLAYER_NAME_SIZE + 16];
-    if (target->name[0]) snprintf(label, sizeof(label), "%s", target->name);
-    else snprintf(label, sizeof(label), "%d", target->uid);
-    kill_offline_player(p, target);
+    if (target.player->name[0]) snprintf(label, sizeof(label), "%s", target.player->name);
+    else snprintf(label, sizeof(label), "%d", target.player->uid);
+    kill_offline_player(p, target.player);
     appendf(COL_INFO, "Killed player %s.", label);
 }
 
@@ -1470,9 +1521,11 @@ static void clear_hints(void) {
     html_dom_set_html(g_con.hints, "");
     html_dom_set_class(g_con.hints, "isOpen", 0);
     g_con.hint_count = 0;
+    g_con.hint_sel = -1;
 }
 
-static void add_hint_item(const char *label, const char *meta, const int active, const int pickable) {
+// One hint row; `pick` is the whole line a mousedown on it puts in the input ("" = inert).
+static void add_hint_item(const char *label, const char *meta, const int active, const char *pick) {
     char a[CON_TEXT_MAX], b[CON_LINE_MAX], html[CON_LINE_MAX * 2];
     escape_html(a, sizeof(a), label);
     if (meta) {
@@ -1484,79 +1537,333 @@ static void add_hint_item(const char *label, const char *meta, const int active,
         snprintf(html, sizeof(html), "<div class=\"hintItem%s\">%s</div>", active ? " isActive" : "", a);
     }
     html_dom_insert_html(g_con.hints, HTML_INSERT_BEFORE_END, html);
-    if (g_con.hint_count < CON_HINTS_MAX) snprintf(g_con.hint_names[g_con.hint_count++], CON_NAME_MAX, "%s", pickable ? label : "");
+    if (g_con.hint_count < CON_HINTS_MAX) snprintf(g_con.hint_lines[g_con.hint_count++], CON_LINE_MAX, "%s", pick ? pick : "");
 }
 
-// updateHints
+// ---- argument completion (KrunkNative extension: devConsole.ts completes command names only)
+
+typedef struct {
+    int is_command;              // completing the command word itself
+    char cmd[CON_NAME_MAX];      // lowercased, without the leading "/"
+    int arg;                     // index of the argument being completed
+    char prefix[CON_LINE_MAX];   // what is typed of it so far (quotes stripped)
+    size_t token_start;          // where that token starts in the line
+} LineCtx;
+
+static void parse_line(const char *v, LineCtx *c) {
+    memset(c, 0, sizeof(*c));
+    const char *space = strchr(v, ' ');
+    if (!space) {
+        c->is_command = 1;
+        c->token_start = v[0] == '/' ? 1 : 0;
+        snprintf(c->prefix, sizeof(c->prefix), "%s", v + c->token_start);
+        return;
+    }
+    const size_t head = (size_t) (space - v);
+    const size_t skip = v[0] == '/' ? 1 : 0;
+    snprintf(c->cmd, sizeof(c->cmd), "%.*s", (int) (head - skip < sizeof(c->cmd) - 1 ? head - skip : sizeof(c->cmd) - 1), v + skip);
+    lower(c->cmd);
+    const char *p = space;
+    for (;;) {
+        while (*p == ' ') p++;
+        const char *start = p;
+        if (*p == '"') {
+            const char *close = strchr(p + 1, '"');
+            p = close ? close + 1 : p + strlen(p);
+        } else {
+            while (*p && *p != ' ') p++;
+        }
+        if (!*p) { // the token under the caret (possibly empty)
+            c->token_start = (size_t) (start - v);
+            snprintf(c->prefix, sizeof(c->prefix), "%s", start[0] == '"' ? start + 1 : start);
+            const size_t n = strlen(c->prefix);
+            if (n && c->prefix[n - 1] == '"' && start[0] == '"') c->prefix[n - 1] = 0;
+            return;
+        }
+        c->arg++;
+    }
+}
+
+static int ci_starts_with(const char *s, const char *prefix) {
+    for (; *prefix; s++, prefix++) {
+        if (!*s || tolower((unsigned char) *s) != tolower((unsigned char) *prefix)) return 0;
+    }
+    return 1;
+}
+
+static void cand_add(ConCands *c, const char *value, const char *prefix) {
+    if (!value || !*value || c->count >= CON_CANDS_MAX || !ci_starts_with(value, prefix)) return;
+    for (int i = 0; i < c->count; i++) if (!strcmp(c->items[i], value)) return;
+    snprintf(c->items[c->count++], CON_NAME_MAX, "%s", value);
+}
+
+// The v3.1.1 map catalogue (shared/src/map_catalog.c): official maps by name, community
+// maps by file stem, which is what cmd_map resolves and cmd_maps prints.
+static void con_map_candidates(ConCands *c, const char *prefix) {
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (e) cand_add(c, e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key, prefix);
+    }
+}
+
+static void con_player_candidates(ConCands *c, const char *prefix) {
+    const Client *client = con_client();
+    if (!client) return;
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (p && p->name[0]) cand_add(c, p->name, prefix);
+    }
+}
+
+static void con_mode_candidates(ConCands *c, const char *prefix) {
+    int count = 0;
+    const GameModeConfig *modes = mode_list(&count);
+    for (int i = 0; i < count; i++) cand_add(c, modes[i].alias, prefix);
+    if (con_offline()) {
+        cand_add(c, "default", prefix); // devConsole's offline mode: clears the cycle override
+        cand_add(c, "reset", prefix);
+    }
+}
+
+static void con_key_candidates(ConCands *c, const char *prefix) {
+    for (int i = 0; i < g_con.bind_count; i++) cand_add(c, g_con.binds[i].key, prefix);
+    static const int KEYS[] = {GLFW_KEY_F1, GLFW_KEY_F2, GLFW_KEY_F3, GLFW_KEY_F4, GLFW_KEY_F5, GLFW_KEY_F6, GLFW_KEY_F7,
+                               GLFW_KEY_F8, GLFW_KEY_F9, GLFW_KEY_F10, GLFW_KEY_F11, GLFW_KEY_F12, GLFW_KEY_SPACE,
+                               GLFW_KEY_TAB, GLFW_KEY_LEFT_SHIFT, GLFW_KEY_LEFT_CONTROL, GLFW_KEY_LEFT_ALT};
+    for (int k = GLFW_KEY_A; k <= GLFW_KEY_Z; k++) cand_add(c, ui_mods_key_value(k, 0), prefix); // e.key
+    for (int k = GLFW_KEY_0; k <= GLFW_KEY_9; k++) cand_add(c, ui_mods_key_value(k, 0), prefix);
+    for (size_t i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); i++) cand_add(c, ui_mods_key_value(KEYS[i], 0), prefix);
+    for (int k = GLFW_KEY_A; k <= GLFW_KEY_Z; k++) cand_add(c, ui_mods_key_code(k), prefix);    // e.code
+    for (int k = GLFW_KEY_0; k <= GLFW_KEY_9; k++) cand_add(c, ui_mods_key_code(k), prefix);
+}
+
+static void con_command_candidates(ConCands *c, const char *prefix) {
+    for (int i = 0; i < g_con.cmd_count; i++) cand_add(c, g_con.cmds[i].name, prefix);
+}
+
+static void con_words(ConCands *c, const char *prefix, const char *const *words) {
+    for (; *words; words++) cand_add(c, *words, prefix);
+}
+
+static int cmd_is(const char *cmd, const char *const *names) {
+    for (; *names; names++) if (!strcmp(cmd, *names)) return 1;
+    return 0;
+}
+
+#define WORDS(...) ((const char *const[]) {__VA_ARGS__, NULL})
+
+// What fits argument `arg` of `cmd`, filtered by `prefix`.
+static void arg_candidates(const char *cmd, const int arg, const char *prefix, ConCands *c) {
+    static const char *const ON_OFF[] = {"on", "off", NULL};
+    if (cmd_is(cmd, WORDS("help", "exec"))) con_command_candidates(c, prefix);
+    else if (cmd_is(cmd, WORDS("alias"))) {
+        if (arg == 0) for (int i = 0; i < g_con.alias_count; i++) cand_add(c, g_con.aliases[i].key, prefix);
+        else con_command_candidates(c, prefix);
+    } else if (!strcmp(cmd, "bind")) {
+        if (arg == 0) con_key_candidates(c, prefix);
+        else con_command_candidates(c, prefix);
+    } else if (!strcmp(cmd, "unbind")) {
+        if (arg == 0) for (int i = 0; i < g_con.bind_count; i++) cand_add(c, g_con.binds[i].key, prefix);
+    } else if (!strcmp(cmd, "toggle")) {
+        if (arg == 0) con_words(c, prefix, WORDS("god", "noclip", "smite", "forcehide", "unlimitedammo", "borders", "forcecol", "endless", "bhop"));
+    } else if (cmd_is(cmd, WORDS("god", "noclip", "smite", "forcehide", "unlimitedammo"))) {
+        if (arg == 0) con_player_candidates(c, prefix); // resolveDevToggleTarget: [target] [on|off]
+        if (arg <= 1) con_words(c, prefix, ON_OFF);
+    } else if (cmd_is(cmd, WORDS("borders", "forcecol"))) {
+        if (arg == 0) con_words(c, prefix, ON_OFF);
+    } else if (!strcmp(cmd, "bhop")) {
+        if (arg == 0) con_words(c, prefix, WORDS("on", "off", "held"));
+    } else if (!strcmp(cmd, "kill")) {
+        if (arg == 0) {
+            con_player_candidates(c, prefix);
+            const Client *client = con_client(); // the active AIs (collectKillTargets also matches them)
+            for (int i = 0; client && client->game.ai && i < client->game.ai->count; i++) {
+                if (client->game.ai->ais[i].active) cand_add(c, client->game.ai->ais[i].name, prefix);
+            }
+        }
+    } else if (!strcmp(cmd, "summon")) {
+        int count = 0;
+        const GameAITemplate *templates = game_ai_templates(&count);
+        for (int i = 0; arg == 0 && i < count; i++) cand_add(c, templates[i].name, prefix);
+    } else if (cmd_is(cmd, WORDS("ping", "kick", "ban", "unban", "ip", "banip"))) {
+        if (arg == 0) con_player_candidates(c, prefix);
+    } else if (!strcmp(cmd, "map")) {
+        if (arg == 0) con_map_candidates(c, prefix);
+    } else if (!strcmp(cmd, "mode")) {
+        if (arg == 0) con_mode_candidates(c, prefix);
+    } else if (!strcmp(cmd, "team")) {
+        if (arg == 0) con_words(c, prefix, WORDS("red", "blue"));
+    } else if (!strcmp(cmd, "connect")) {
+        const Client *client = con_client();
+        if (arg == 0) {
+            cand_add(c, "local", prefix);
+            if (client) {
+                char addr[96];
+                snprintf(addr, sizeof(addr), "%s:%u", client->net_address, (unsigned int) client->net_port);
+                cand_add(c, addr, prefix);
+            }
+        }
+    } else if (!strcmp(cmd, "score")) {
+        if (arg == 0) con_words(c, prefix, WORDS("100", "250", "500", "1000", "-100"));
+    }
+}
+
+// The candidates for the token under the caret, and the line up to it.
+static void line_candidates(const char *v, ConCands *c, char *base, const size_t n) {
+    LineCtx ctx;
+    parse_line(v, &ctx);
+    c->count = 0;
+    snprintf(base, n, "%.*s", (int) ctx.token_start, v);
+    if (ctx.is_command) con_command_candidates(c, ctx.prefix);
+    else arg_candidates(ctx.cmd, ctx.arg, ctx.prefix, c);
+}
+
+static void quote_into(char *out, const size_t n, const char *base, const char *value, const int space_after) {
+    const int quote = strchr(value, ' ') != NULL;
+    snprintf(out, n, "%s%s%s%s%s", base, quote ? "\"" : "", value, quote ? "\"" : "", space_after ? " " : "");
+}
+
+// updateHints: the command list for the first word (devConsole), else the command's
+// signature row followed by the argument candidates; while Tab cycles, its pick is active.
 static void update_hints(void) {
     if (!g_con.built) return;
     char v[CON_LINE_MAX] = "";
     html_dom_get_value(g_con.input, v, sizeof(v));
     snprintf(g_con.last_value, sizeof(g_con.last_value), "%s", v);
+    if (g_con.cycle_on && strcmp(v, g_con.cycle_value)) g_con.cycle_on = 0; // typing resets the cycle
     clear_hints();
     if (!v[0]) return;
-    const char *space = strchr(v, ' ');
-    char head[CON_NAME_MAX];
-    const size_t len = space ? (size_t) (space - v) : strlen(v);
-    snprintf(head, sizeof(head), "%.*s", (int) (len < sizeof(head) - 1 ? len : sizeof(head) - 1), v);
-    lower(head);
-    const char *stripped = head[0] == '/' ? head + 1 : head;
 
-    if (!space) {
-        int matches[CON_HINTS_MAX];
-        int n = 0, active = 0;
-        for (int i = 0; i < g_con.cmd_count && n < CON_HINTS_MAX; i++) {
-            if (starts_with(g_con.cmds[i].name, stripped)) matches[n++] = i;
-        }
-        if (!n) return;
-        html_dom_set_class(g_con.hints, "isOpen", 1);
-        for (int i = 0; i < n; i++) {
-            if (!strcmp(g_con.cmds[matches[i]].name, stripped)) {
-                active = i;
-                break;
-            }
-        }
-        for (int i = 0; i < n; i++) add_hint_item(g_con.cmds[matches[i]].name, NULL, i == active, 1);
-        return;
-    }
-    const ConCommand *c = find_cmd(stripped);
-    html_dom_set_class(g_con.hints, "isOpen", 1);
-    if (c) {
-        char args[256], meta[CON_LINE_MAX];
-        fmt_args(c, args, sizeof(args));
-        snprintf(meta, sizeof(meta), "%s  \xE2\x80\x94  %s", args, c->desc);
-        add_hint_item(stripped, meta, 1, 0);
+    static ConCands cands;
+    char base[CON_LINE_MAX];
+    int active = -1;
+    if (g_con.cycle_on) {
+        cands = g_con.cycle;
+        snprintf(base, sizeof(base), "%s", g_con.cycle_base);
+        active = g_con.cycle_index;
     } else {
-        add_hint_item("(unknown command)", "will not be sent", 1, 0);
+        line_candidates(v, &cands, base, sizeof(base));
+    }
+    LineCtx ctx;
+    parse_line(v, &ctx);
+
+    if (ctx.is_command) {
+        if (!cands.count) return;
+        html_dom_set_class(g_con.hints, "isOpen", 1);
+        if (active < 0) {
+            active = 0;
+            for (int i = 0; i < cands.count; i++) if (!strcmp(cands.items[i], ctx.prefix)) { active = i; break; }
+        }
+    } else {
+        html_dom_set_class(g_con.hints, "isOpen", 1);
+        const ConCommand *c = find_cmd(ctx.cmd);
+        if (c) {
+            char args[256], meta[CON_LINE_MAX];
+            fmt_args(c, args, sizeof(args));
+            snprintf(meta, sizeof(meta), "%s  \xE2\x80\x94  %s", args, c->desc);
+            add_hint_item(ctx.cmd, meta, active < 0, NULL);
+        } else {
+            add_hint_item("(unknown command)", "will not be sent", 1, NULL);
+            return;
+        }
+    }
+    // a window of the list that keeps the active candidate visible
+    const int room = ctx.is_command ? CON_HINTS_MAX : CON_HINTS_MAX - 1;
+    int first = active >= room ? active - room + 1 : 0;
+    if (first + room > cands.count) first = cands.count - room > 0 ? cands.count - room : 0;
+    for (int i = first; i < cands.count && i < first + room; i++) {
+        char pick[CON_LINE_MAX];
+        quote_into(pick, sizeof(pick), base, cands.items[i], 1);
+        add_hint_item(cands.items[i], NULL, i == active, pick);
     }
 }
 
-// tabComplete: only the command name
-static void tab_complete(void) {
+// Tab / Shift+Tab: one candidate completes (plus a space); several cycle, starting at the
+// first (Tab) or last (Shift+Tab). devConsole.ts only completed the command name, to the
+// longest common prefix.
+static void tab_complete(const int dir) {
     if (!g_con.built) return;
     char v[CON_LINE_MAX] = "";
     html_dom_get_value(g_con.input, v, sizeof(v));
-    if (strchr(v, ' ')) return;
-    const char *head = v[0] == '/' ? v + 1 : v;
-    int first = -1, count = 0;
-    char prefix[CON_NAME_MAX] = "";
-    for (int i = 0; i < g_con.cmd_count; i++) {
-        if (!starts_with(g_con.cmds[i].name, head)) continue;
-        if (first < 0) {
-            first = i;
-            snprintf(prefix, sizeof(prefix), "%s", g_con.cmds[i].name);
+    if (g_con.cycle_on && !strcmp(v, g_con.cycle_value) && g_con.cycle.count) {
+        g_con.cycle_index = (g_con.cycle_index + dir + g_con.cycle.count) % g_con.cycle.count;
+    } else {
+        line_candidates(v, &g_con.cycle, g_con.cycle_base, sizeof(g_con.cycle_base));
+        g_con.cycle_on = 0;
+        if (!g_con.cycle.count) {
+            update_hints();
+            return;
         }
-        while (prefix[0] && !starts_with(g_con.cmds[i].name, prefix)) prefix[strlen(prefix) - 1] = 0;
-        count++;
+        if (g_con.cycle.count == 1) {
+            char line[CON_LINE_MAX];
+            quote_into(line, sizeof(line), g_con.cycle_base, g_con.cycle.items[0], 1);
+            set_input(line);
+            update_hints();
+            return;
+        }
+        g_con.cycle_on = 1;
+        g_con.cycle_index = dir > 0 ? 0 : g_con.cycle.count - 1;
     }
-    if (count == 1) {
-        char line[CON_NAME_MAX + 2];
-        snprintf(line, sizeof(line), "%s ", g_con.cmds[first].name);
-        set_input(line);
-    } else if (count > 1 && strlen(prefix) > strlen(head)) {
-        set_input(prefix);
-    }
+    char line[CON_LINE_MAX];
+    quote_into(line, sizeof(line), g_con.cycle_base, g_con.cycle.items[g_con.cycle_index], 0);
+    set_input(line);
+    snprintf(g_con.cycle_value, sizeof(g_con.cycle_value), "%s", line);
     update_hints();
+}
+
+// ---- arrow-key hint selection (KrunkNative extension: devConsole.ts has none; there
+// Up/Down only walk history). Up/Down move through the selectable hint rows, wrapping;
+// Tab/Enter accept the selected row. With no selectable rows, or while browsing history,
+// Up/Down stay history.
+
+static int hint_sel_valid(void) {
+    if (g_con.hint_sel < 0 || g_con.hint_sel >= g_con.hint_count || !g_con.hint_lines[g_con.hint_sel][0]) return 0;
+    char v[CON_LINE_MAX] = "";
+    html_dom_get_value(g_con.input, v, sizeof(v));
+    return !strcmp(v, g_con.hint_sel_value);
+}
+
+// Repaint .isActive onto the selected row (overrides update_hints' default highlight).
+static void hint_sel_paint(void) {
+    HtmlElem items[CON_HINTS_MAX];
+    const int n = html_dom_query_all(g_con.hints, ".hintItem", items, CON_HINTS_MAX);
+    for (int i = 0; i < n; i++) {
+        html_dom_set_class(items[i], "isActive", i == g_con.hint_sel);
+        html_dom_set_class(items[i], "isSelected", i == g_con.hint_sel);
+    }
+}
+
+// Returns 0 when there is nothing to select (the caller falls back to history).
+static int hint_sel_move(const int dir) {
+    if (!g_con.built || !html_dom_has_class(g_con.hints, "isOpen")) return 0;
+    if (g_con.history_idx != -1) { // still showing a recalled history line: keep walking history
+        char v[CON_LINE_MAX] = "";
+        html_dom_get_value(g_con.input, v, sizeof(v));
+        if (!strcmp(v, g_con.history[g_con.history_idx])) return 0;
+    }
+    int any = 0;
+    for (int i = 0; i < g_con.hint_count; i++) any |= g_con.hint_lines[i][0] != 0;
+    if (!any) return 0;
+    int i = hint_sel_valid() ? g_con.hint_sel : (dir > 0 ? -1 : g_con.hint_count);
+    do {
+        i = (i + dir + g_con.hint_count) % g_con.hint_count; // wrap-around
+    } while (!g_con.hint_lines[i][0]);
+    g_con.hint_sel = i;
+    html_dom_get_value(g_con.input, g_con.hint_sel_value, sizeof(g_con.hint_sel_value));
+    hint_sel_paint();
+    return 1;
+}
+
+// Tab / Enter on a selected row: the row's line goes in the input (like a click on it).
+static int hint_sel_accept(void) {
+    if (!g_con.built || !hint_sel_valid()) return 0;
+    char line[CON_LINE_MAX];
+    snprintf(line, sizeof(line), "%s", g_con.hint_lines[g_con.hint_sel]);
+    g_con.hint_sel = -1;
+    g_con.cycle_on = 0;
+    set_input(line);
+    update_hints();
+    return 1;
 }
 
 static void history_up(void) {
@@ -1638,7 +1945,7 @@ int ui_console_key_event(Client *client, const int key, const int scancode, cons
     if (client) g_con.client = client;
     if (!html_ui_available()) return 0;
     const int press = action == GLFW_PRESS;
-    const int typing = !g_con.visible && ui_controls_chat_focused(); // focus in another field
+    const int typing = ui_text_input_focused(); // a text field has focus (the console's own input too)
 
     // handleConsoleKeydown (window capture)
     if (g_con.visible && (press || action == GLFW_REPEAT)) {
@@ -1646,16 +1953,19 @@ int ui_console_key_event(Client *client, const int key, const int scancode, cons
             if (press) ui_console_toggle(1);
             return 1;
         }
+        // the console's own input has focus (ui_text_input_focused + activeElement == input);
+        // either way these keys are consumed below, so no game / editor bind sees them
+        const int in_input = typing && html_dom_active_element() == g_con.input;
         if (key == GLFW_KEY_UP) {
-            history_up();
+            if (in_input && !hint_sel_move(-1)) history_up();
             return 1;
         }
         if (key == GLFW_KEY_DOWN) {
-            history_down();
+            if (in_input && !hint_sel_move(1)) history_down();
             return 1;
         }
         if (key == GLFW_KEY_TAB) {
-            tab_complete();
+            if (in_input && !hint_sel_accept()) tab_complete((mods & GLFW_MOD_SHIFT) ? -1 : 1); // Shift+Tab cycles backwards
             return 1;
         }
     }
@@ -1664,7 +1974,7 @@ int ui_console_key_event(Client *client, const int key, const int scancode, cons
 
     if (g_con.visible) {
         if (press && (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER)) { // form submit
-            submit();
+            if (!hint_sel_accept()) submit(); // a selected hint is accepted first, Enter again runs it
             return 1;
         }
         html_ui_key(key, scancode, action, mods); // the input line edits itself
@@ -1690,21 +2000,21 @@ int ui_console_page_key(const HtmlEvent *ev) {
         return 1;
     }
     if (html_key_is_enter(ev->key)) {
-        submit();
+        if (!hint_sel_accept()) submit();
         return 1;
     }
 #ifdef __EMSCRIPTEN__
     // DOM keyCodes (kn-shim forwards these for data-kn-keys fields)
     if (ev->key == 38) {
-        history_up();
+        if (!hint_sel_move(-1)) history_up();
         return 1;
     }
     if (ev->key == 40) {
-        history_down();
+        if (!hint_sel_move(1)) history_down();
         return 1;
     }
     if (ev->key == 9) {
-        tab_complete();
+        if (!hint_sel_accept()) tab_complete(ev->x != 0.0f ? -1 : 1); // kn-shim: x = 1 when Shift is held on key events
         return 1;
     }
     if (ev->key == 192 && ui_mods_dev_console_enabled() && !strcmp(ui_mods_dev_console_key(), "Backquote")) {
@@ -1792,14 +2102,8 @@ static void restore_geom(void) {
     }
     const cJSON *w = cJSON_GetObjectItem(g, "width"), *h = cJSON_GetObjectItem(g, "height");
     const cJSON *l = cJSON_GetObjectItem(g, "left"), *t = cJSON_GetObjectItem(g, "top");
-    if (cJSON_IsNumber(w) && w->valuedouble >= 280) {
-        set_px(g_con.modal, "width", (float) w->valuedouble);
-        g_con.user_size = 1;
-    }
-    if (cJSON_IsNumber(h) && h->valuedouble >= 160) {
-        set_px(g_con.modal, "height", (float) h->valuedouble);
-        g_con.user_size = 1;
-    }
+    if (cJSON_IsNumber(w) && w->valuedouble >= 280) set_px(g_con.modal, "width", (float) w->valuedouble);
+    if (cJSON_IsNumber(h) && h->valuedouble >= 160) set_px(g_con.modal, "height", (float) h->valuedouble);
     if (cJSON_IsNumber(l) && cJSON_IsNumber(t)) {
         html_dom_set_style(g_con.modal, "transform", "none");
         set_px(g_con.modal, "left", (float) l->valuedouble);
@@ -1815,10 +2119,9 @@ static int pick_hint(const float x, const float y) {
     const int n = html_dom_query_all(g_con.hints, ".hintItem", items, CON_HINTS_MAX);
     for (int i = 0; i < n && i < g_con.hint_count; i++) {
         if (!hit(items[i], x, y)) continue;
-        if (g_con.hint_names[i][0]) { // addHintItem onPick: input.value = name + " "
-            char line[CON_NAME_MAX + 2];
-            snprintf(line, sizeof(line), "%s ", g_con.hint_names[i]);
-            set_input(line);
+        if (g_con.hint_lines[i][0]) { // addHintItem onPick: input.value = name + " " (or the argument)
+            g_con.cycle_on = 0;
+            set_input(g_con.hint_lines[i]);
             update_hints();
             html_dom_focus(g_con.input);
         }
@@ -1893,7 +2196,6 @@ int ui_console_mouse(const int action, double x, double y, const int css) {
     if (hit(g_con.grip, fx, fy)) {
         commit_initial_pos();
         g_con.resizing = 1;
-        g_con.user_size = 1;
         g_con.start_x = fx;
         g_con.start_y = fy;
         g_con.start_w = html_dom_offset_width(g_con.modal);
@@ -1931,27 +2233,12 @@ static void build(void) {
     if (!g_con.modal || !g_con.logs || !g_con.input) return;
     g_con.built = 1;
     g_con.log_lines = 0;
-    g_con.css_vw = g_con.css_vh = 0.0f;
     flush_pending();
     restore_geom();
     html_ui_set_listener(NULL, "knpointerdown", l_pointer);
     html_ui_set_listener(NULL, "knpointermove", l_pointer);
     html_ui_set_listener(NULL, "knpointerup", l_pointer);
     if (g_con.visible) html_dom_set_display(g_con.overlay, "block");
-}
-
-// .modal { width: min(744px, calc(100vw - 16px)); height: min(280px, calc(100vh - 16px)) }:
-// the native engine has no min(), so the used size is written inline (the web gets the
-// same numbers) until the grip or a saved geometry sets one.
-static void apply_css_min_size(void) {
-    if (g_con.user_size) return;
-    float vw, vh, dpr;
-    html_dom_viewport(&vw, &vh, &dpr);
-    if (vw <= 0.0f || vh <= 0.0f || (vw == g_con.css_vw && vh == g_con.css_vh)) return;
-    g_con.css_vw = vw;
-    g_con.css_vh = vh;
-    set_px(g_con.modal, "width", vw - 16.0f < 744.0f ? vw - 16.0f : 744.0f);
-    set_px(g_con.modal, "height", vh - 16.0f < 280.0f ? vh - 16.0f : 280.0f);
 }
 
 // The input's `input` listener: a typed toggle character ("`", "~" or the bind's) is
@@ -1994,7 +2281,6 @@ void ui_console_tick(Client *client) {
         if (!g_con.built) return;
     }
     ui_mods_tick(client);
-    apply_css_min_size();
     if (!g_con.visible) return;
     if (g_con.focus_pending) {
         g_con.focus_pending = 0;

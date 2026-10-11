@@ -69,6 +69,7 @@ extern "C" {
     X(FLOAT,                      "float",                      0, "none") \
     X(CLEAR,                      "clear",                      0, "none") \
     X(BOX_SIZING,                 "box-sizing",                 0, "content-box") \
+    X(TABLE_LAYOUT,               "table-layout",               0, "auto") \
     X(OVERFLOW_X,                 "overflow-x",                 0, "visible") \
     X(OVERFLOW_Y,                 "overflow-y",                 0, "visible") \
     X(APPEARANCE,                 "appearance",                 0, "auto") \
@@ -144,6 +145,10 @@ extern "C" {
     X(JUSTIFY_ITEMS,              "justify-items",              0, "legacy") \
     X(JUSTIFY_SELF,               "justify-self",               0, "auto") \
     X(ALIGN_SELF,                 "align-self",                 0, "auto") \
+    X(GRID_TEMPLATE_AREAS,        "grid-template-areas",        0, "none") \
+    X(GRID_AUTO_ROWS,             "grid-auto-rows",             0, "auto") \
+    X(GRID_AUTO_COLUMNS,          "grid-auto-columns",          0, "auto") \
+    X(GRID_AUTO_FLOW,             "grid-auto-flow",             0, "row") \
     X(ROW_GAP,                    "row-gap",                    0, "normal") \
     X(COLUMN_GAP,                 "column-gap",                 0, "normal") \
     X(ANIMATION_NAME,             "animation-name",             0, "none") \
@@ -194,7 +199,9 @@ extern "C" {
     X(GRID_ROW,             "grid-row") \
     X(GRID_COLUMN,          "grid-column") \
     X(GRID_AREA,            "grid-area") \
-    X(PLACE_SELF,           "place-self")
+    X(PLACE_SELF,           "place-self") \
+    X(GRID_TEMPLATE,        "grid-template") \
+    X(GRID,                 "grid")
 
 /* X(name, canonical_id) ------------------------------------------------- */
 #define CSS_ALIAS_LIST(X) \

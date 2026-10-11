@@ -182,9 +182,13 @@ EM_JS(void, kn_js_set_display, (int id, const char *value), {
 EM_JS(void, kn_js_set_style, (int id, const char *prop, const char *value), {
     var el = knEl(id);
     if (!el || !el.style) return;
-    var p = UTF8ToString(prop), v = UTF8ToString(value);
+    var p = UTF8ToString(prop), v = UTF8ToString(value), prio = "";
+    /* "x !important" (accepted natively by dom_set_style) -> setProperty priority.
+     * No regex: EM_JS bodies lose their backslashes. */
+    var t = v.trim(), bang = t.lastIndexOf("!");
+    if (bang >= 0 && t.slice(bang + 1).trim().toLowerCase() === "important") { v = t.slice(0, bang).trim(); prio = "important"; }
     if (v === "") el.style.removeProperty(p);
-    else el.style.setProperty(p, v);
+    else el.style.setProperty(p, v, prio);
 });
 
 EM_JS(char *, kn_js_get_style, (int id, const char *prop), {
@@ -666,6 +670,21 @@ EM_JS(int, kn_js_add_stylesheet, (const char *href_ptr), {
 
 int html_ui_backend_add_stylesheet(const char *href) {
     return href && *href && kn_js_add_stylesheet(href);
+}
+
+// <style id=knCustomCSS> at the end of <head> (after every <link>), replaced or removed.
+EM_JS(int, kn_js_set_custom_css, (const char *css_ptr), {
+    var css = css_ptr ? UTF8ToString(css_ptr) : '';
+    var el = document.getElementById('knCustomCSS');
+    if (!css) { if (el) el.remove(); return 1; }
+    if (!el) { el = document.createElement('style'); el.id = 'knCustomCSS'; }
+    el.textContent = css;
+    document.head.appendChild(el);
+    return 1;
+});
+
+int html_ui_backend_set_custom_css(const char *css) {
+    return kn_js_set_custom_css(css);
 }
 
 // ------------------------------------------------------------------ backend entry points

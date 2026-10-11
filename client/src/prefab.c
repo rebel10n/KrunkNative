@@ -1,3 +1,4 @@
+#include <player_accounts.h>
 #include <gl.h>
 #include <client.h>
 #include <render_settings.h>
@@ -166,7 +167,6 @@ static int prefab_hidden_in_game(const int prefab) {
         case PREFAB_CHECK_POINT:
         case PREFAB_WEAPON_PICKUP:
         case PREFAB_TELEPORTER:
-        case PREFAB_TRIGGER:
         case PREFAB_SPECTATE_CAM:
         case PREFAB_PLACEHOLDER:
         case PREFAB_SOUND_EMITTER:
@@ -301,6 +301,137 @@ static Geometry *prefab_upload_geo(const vertex *vertices, const int vertex_coun
     glEnableVertexAttribArray(1);
 
     geometry->index_count = index_count;
+    return geometry;
+}
+
+// ---- ladders: 94.js addLadder -> 55.js addCube (two rails) + addPlane (one per rung),
+// built as one geometry in the ladder's frame (origin = object->position, the rails' foot:
+// x + ladderScale * cos(d), y, z + ladderScale * sin(d)). The map loader passes texture
+// scale 0.02 (1 with "tsr") and 31.js w() turns that into u = 0.5 + a * size_u / worldUV *
+// scale, v = (b + 0.5) * size_v / worldUV * scale for plane coordinates a, b in
+// [-0.5, 0.5]: a few thousandths of the texture, i.e. one or two texels around u = 0.5 of
+// the bottom row (nearest filtering), so a v3.1.1 ladder is flat-coloured by its texture.
+// The colour comes from the vertex colours: rails getColor(colr) at the top and
+// getColor(colr, ambientVal) at the bottom (generateCube amb), rungs getColor(colr, dark)
+// with dark = 0.6 + i / n * 0.4 (generatePlane colorize).
+#define LADDER_RUNG_SPACING 6.0f
+
+typedef struct {
+    vertex *vertices;
+    vec3 *colors;
+    unsigned int *indices;
+    int vertex_count;
+    int index_count;
+} PrefabLadderBuild;
+
+// One THREE.PlaneGeometry(1, 1) quad: corner (a, b) at center + a * axis_u + b * axis_v
+// (already scaled), CCW from the axis_u x axis_v side; uv_size = size / worldUV * scale.
+static void prefab_ladder_quad(PrefabLadderBuild *b, const vec3 center, const vec3 axis_u, const vec3 axis_v,
+                               const vec2 uv_size, const vec3 color_top, const vec3 color_bottom) {
+    static const float corners[4][2] = {{-0.5f, 0.5f}, {0.5f, 0.5f}, {-0.5f, -0.5f}, {0.5f, -0.5f}};
+    static const unsigned int quad[6] = {0, 2, 1, 2, 3, 1}; // PlaneGeometry faces (a, c, b), (c, d, b)
+    const int base = b->vertex_count;
+
+    for (int i = 0; i < 4; i++) {
+        const float a = corners[i][0], c = corners[i][1];
+        vertex *v = &b->vertices[base + i];
+        v->position = (vec3) {
+            center.x + axis_u.x * a + axis_v.x * c,
+            center.y + axis_u.y * a + axis_v.y * c,
+            center.z + axis_u.z * a + axis_v.z * c,
+        };
+        v->tex_coord = (vec2) {0.5f + a * uv_size.x, (c + 0.5f) * uv_size.y};
+        b->colors[base + i] = c > 0.0f ? color_top : color_bottom;
+    }
+    for (int i = 0; i < 6; i++) b->indices[b->index_count + i] = (unsigned int) base + quad[i];
+    b->vertex_count += 4;
+    b->index_count += 6;
+}
+
+// 31.js generateCube(faces 1,1,1,1,1,1) scaled to size, foot at (x, y, z). Rails are never
+// rotated (addCube without xR/yR/zR) and never flipped (flipp needs a cube wider than tall).
+static void prefab_ladder_rail(PrefabLadderBuild *b, const float x, const float y, const float z, const vec3 size,
+                               const float uv_scale, const vec3 top, const vec3 bottom) {
+    const float hx = size.x * 0.5f, hz = size.z * 0.5f;
+    const vec3 mid = {x, y + size.y * 0.5f, z};
+    const float wu = game_constants.world_uv_scale;
+    const vec2 uv_xy = {size.x / wu * uv_scale, size.y / wu * uv_scale};
+    const vec2 uv_zy = {size.z / wu * uv_scale, size.y / wu * uv_scale};
+    const vec2 uv_xz = {size.x / wu * uv_scale, size.z / wu * uv_scale};
+
+    // sides: top vertices getColor(colr), bottom getColor(colr, amb); top face all top, bottom face all bottom
+    prefab_ladder_quad(b, (vec3) {x, mid.y, z + hz}, (vec3) {size.x, 0, 0}, (vec3) {0, size.y, 0}, uv_xy, top, bottom);  // +Z (face 4)
+    prefab_ladder_quad(b, (vec3) {x, mid.y, z - hz}, (vec3) {-size.x, 0, 0}, (vec3) {0, size.y, 0}, uv_xy, top, bottom); // -Z (face 5)
+    prefab_ladder_quad(b, (vec3) {x - hx, mid.y, z}, (vec3) {0, 0, size.z}, (vec3) {0, size.y, 0}, uv_zy, top, bottom);  // -X (face 1)
+    prefab_ladder_quad(b, (vec3) {x + hx, mid.y, z}, (vec3) {0, 0, -size.z}, (vec3) {0, size.y, 0}, uv_zy, top, bottom); // +X (face 0)
+    prefab_ladder_quad(b, (vec3) {x, y + size.y, z}, (vec3) {size.x, 0, 0}, (vec3) {0, 0, -size.z}, uv_xz, top, top);    // top (face 2)
+    prefab_ladder_quad(b, (vec3) {x, y, z}, (vec3) {size.x, 0, 0}, (vec3) {0, 0, size.z}, uv_xz, bottom, bottom);       // bottom (face 3)
+}
+
+static Geometry *prefab_ladder_geo(const float height, const float direction, const float uv_scale, const vec4 color) {
+    const float ladder_scale = game_constants.ladder_scale;
+    const float ladder_width = game_constants.ladder_width;
+    const int rungs = height > 0.0f ? (int) floorf(height / LADDER_RUNG_SPACING) : 0;
+    const int vertex_count = 2 * 24 + rungs * 4;
+    const int index_count = 2 * 36 + rungs * 6;
+
+    PrefabLadderBuild b = {
+        malloc((size_t) vertex_count * sizeof(vertex)),
+        malloc((size_t) vertex_count * sizeof(vec3)),
+        malloc((size_t) index_count * sizeof(unsigned int)),
+        0, 0,
+    };
+    Geometry *geometry = NULL;
+    if (!b.vertices || !b.colors || !b.indices) goto done;
+
+    const vec4 top4 = prefab_krunker_color(color, 1.0f);
+    const vec4 bottom4 = prefab_krunker_color(color, PREFAB_AMBIENT_VAL);
+    const vec3 top = {top4.x, top4.y, top4.z};
+    const vec3 bottom = {bottom4.x, bottom4.y, bottom4.z};
+
+    // addCube(x +- ladderWidth * sin(d), y, z +- ladderWidth * cos(d), ladderScale * 2, h + 2, ladderScale * 2)
+    const vec3 rail = {ladder_scale * 2.0f, height + 2.0f, ladder_scale * 2.0f};
+    const float sx = ladder_width * sinf(direction), sz = ladder_width * cosf(direction);
+    prefab_ladder_rail(&b, sx, 0.0f, sz, rail, uv_scale, top, bottom);
+    prefab_ladder_rail(&b, -sx, 0.0f, -sz, rail, uv_scale, top, bottom);
+
+    // addPlane(x, y + (i + 1) * 6 + randFloat(-1, 1), z, ladderWidth, ladderScale, ...,
+    // -d + PI/2, PI/2, randFloat(-0.1, 0.1)): rotateY(-d + PI/2), rotateX(0), rotateZ(r),
+    // scale(ladderWidth * 2, ladderScale * 2, 1); generatePlane(ladderScale, ladderWidth)
+    // scales u by ladderWidth and v by ladderScale. Front side faces (cos d, 0, sin d).
+    const float wu = game_constants.world_uv_scale;
+    const vec2 rung_uv = {ladder_width / wu * uv_scale, ladder_scale / wu * uv_scale};
+    const float yaw = (float) M_PI * 0.5f - direction;
+    for (int i = 0; i < rungs; i++) {
+        const float displace = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f;
+        const float roll = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * 0.1f;
+        const vec4 dark4 = prefab_krunker_color(color, 0.6f + (float) i / (float) rungs * 0.4f);
+        const vec3 dark = {dark4.x, dark4.y, dark4.z};
+
+        // Ry(yaw) * Rz(roll) applied to the local x (width) and y (height) axes
+        const float ux = cosf(roll), uy = sinf(roll);
+        const float vx = -sinf(roll), vy = cosf(roll);
+        const vec3 axis_u = {ux * cosf(yaw) * ladder_width * 2.0f, uy * ladder_width * 2.0f, -ux * sinf(yaw) * ladder_width * 2.0f};
+        const vec3 axis_v = {vx * cosf(yaw) * ladder_scale * 2.0f, vy * ladder_scale * 2.0f, -vx * sinf(yaw) * ladder_scale * 2.0f};
+        const vec3 center = {0.0f, (float) (i + 1) * LADDER_RUNG_SPACING + displace, 0.0f};
+        prefab_ladder_quad(&b, center, axis_u, axis_v, rung_uv, dark, dark);
+    }
+
+    geometry = prefab_upload_geo(b.vertices, b.vertex_count, b.indices, b.index_count);
+    if (geometry) {
+        unsigned int color_vbo;
+        glBindVertexArray(geometry->vao);
+        glGenBuffers(1, &color_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, color_vbo);
+        glBufferData(GL_ARRAY_BUFFER, (long) b.vertex_count * (long) sizeof(vec3), b.colors, GL_STATIC_DRAW);
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(vec3), NULL);
+        glEnableVertexAttribArray(2);
+    }
+
+done:
+    free(b.vertices);
+    free(b.colors);
+    free(b.indices);
     return geometry;
 }
 
@@ -535,15 +666,33 @@ static unsigned int prefab_sign_texture(const Object *object, const cJSON *raw_o
 
 // "sad" billboards show 2.js createCanvasAD(text, textCol, bgCol) instead of their poster:
 // a 2048x1024 canvas filled with bgCol and the text drawn by drawMultilineText at the
-// largest font that fits. Offline there is no server billboard config, so the defaults
-// ("Your Ad Here", #e3e3e3 on #000000) apply.
+// largest font that fits. The text and colours are the server's billboard config (init
+// "bill" -> game.updateBillboards, NET_PACKET_BILLBOARD, player_accounts.h); offline and on
+// servers without one the defaults ("Your Ad Here", #e3e3e3 on #000000) apply.
+static void prefab_hex_color(const char *hex, float out[3], const float def) {
+    unsigned int rgb = 0;
+    if (!hex || hex[0] != '#' || sscanf(hex + 1, "%6x", &rgb) != 1 || strlen(hex) != 7) {
+        out[0] = out[1] = out[2] = def;
+        return;
+    }
+    out[0] = (float) ((rgb >> 16) & 255u) / 255.0f;
+    out[1] = (float) ((rgb >> 8) & 255u) / 255.0f;
+    out[2] = (float) (rgb & 255u) / 255.0f;
+}
+
 static unsigned int prefab_ad_texture() {
-    static const char *text = "Your Ad Here";
+    const NetBillboardPacket *billboard = player_accounts_billboard();
+    const char *text = billboard->txt[0] ? billboard->txt : "Your Ad Here";
     const int width = 2048;
     const int height = 1024;
-    const vec4 fg = {227.0f / 255.0f, 227.0f / 255.0f, 227.0f / 255.0f, 1.0f};
+    float fg_rgb[3], bg_rgb[3];
+    prefab_hex_color(billboard->txt_col, fg_rgb, 227.0f / 255.0f);
+    prefab_hex_color(billboard->bg_col, bg_rgb, 0.0f);
+    const vec4 fg = {fg_rgb[0], fg_rgb[1], fg_rgb[2], 1.0f};
 
-    texture_cache_map_itr cached = vt_get(&g_texture_cache, "billboard-ad:Your Ad Here");
+    char key[128];
+    snprintf(key, sizeof(key), "billboard-ad:%s|%s|%s", text, billboard->txt_col, billboard->bg_col);
+    texture_cache_map_itr cached = vt_get(&g_texture_cache, key);
     if (!vt_is_end(cached)) return cached.data->val;
     if (!g_game_font) return 0;
 
@@ -605,7 +754,12 @@ static unsigned int prefab_ad_texture() {
 
     unsigned char *rgba = calloc((size_t) width * (size_t) height, 4);
     if (!rgba) return 0;
-    for (size_t i = 0; i < (size_t) width * (size_t) height; i++) rgba[i * 4 + 3] = 255; // #000000
+    for (size_t i = 0; i < (size_t) width * (size_t) height; i++) { // fillRect(bgCol)
+        rgba[i * 4 + 0] = (unsigned char) lroundf(bg_rgb[0] * 255.0f);
+        rgba[i * 4 + 1] = (unsigned char) lroundf(bg_rgb[1] * 255.0f);
+        rgba[i * 4 + 2] = (unsigned char) lroundf(bg_rgb[2] * 255.0f);
+        rgba[i * 4 + 3] = 255;
+    }
 
     // layout uses the size that failed (C), the glyphs the last size that fit (B)
     const float line_height = (float) size * 1.4f;
@@ -629,7 +783,7 @@ static unsigned int prefab_ad_texture() {
         y += line_height;
     }
 
-    const unsigned int texture_id = prefab_upload_canvas(rgba, width, height, "billboard-ad:Your Ad Here");
+    const unsigned int texture_id = prefab_upload_canvas(rgba, width, height, key);
     free(rgba);
     return texture_id;
 }
@@ -1034,9 +1188,13 @@ static void prefab_prefetch_map_assets(const cJSON *objects) {
 }
 #endif
 
-void prefab_begin_map(const cJSON *objects) {
+// map.colors (the "ci"/"ei" palette) of the map being built
+static const cJSON *g_prefab_palette;
+
+void prefab_begin_map(const cJSON *objects, const cJSON *colors) {
     memset(g_prefab_model_materials, 0, sizeof(g_prefab_model_materials));
     g_prefab_map_objects = objects;
+    g_prefab_palette = cJSON_IsArray(colors) ? colors : NULL;
     prefab_prefetch_map_assets(objects);
 }
 
@@ -1178,9 +1336,24 @@ static unsigned int prefab_load_texture_src(const char *src) {
     return texture_id;
 }
 
+// JS truthiness of a palette entry (ac[OBJECT.ci])
+static int prefab_palette_entry_set(const cJSON *entry) {
+    if (cJSON_IsString(entry)) return entry->valuestring[0] != 0;
+    if (cJSON_IsNumber(entry)) return cJSON_GetNumberValue(entry) != 0.0;
+    return cJSON_IsTrue(entry) || cJSON_IsArray(entry) || cJSON_IsObject(entry);
+}
+
 static vec4 prefab_json_color(const cJSON *raw_color, const cJSON *raw_color_idx, const vec4 *colors, const vec4 fallback) {
-    // 93.js: a "ci"/"ei" palette index replaces "c"/"e"
-    if (cJSON_IsNumber(raw_color_idx) && colors) return colors[(int) cJSON_GetNumberValue(raw_color_idx)];
+    // map.js generate: `if (OBJECT.ci != null && ac[OBJECT.ci]) OBJECT.c = ac[OBJECT.ci]` (same
+    // for ei/e): an index past the palette, or onto an empty entry, keeps the object's own "c"
+    if (cJSON_IsNumber(raw_color_idx) && colors && g_prefab_palette) {
+        const double index = cJSON_GetNumberValue(raw_color_idx);
+        const int count = cJSON_GetArraySize(g_prefab_palette);
+        if (index >= 0.0 && index < (double) count && index == (double) (int) index &&
+            prefab_palette_entry_set(cJSON_GetArrayItem(g_prefab_palette, (int) index))) {
+            return colors[(int) index];
+        }
+    }
 
     vec4 color = fallback;
     if (cJSON_IsString(raw_color)) parse_hex_color(cJSON_GetStringValue(raw_color), &color);
@@ -1368,9 +1541,15 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         return mesh;
     }
 
-    if (object->prefab == PREFAB_CUBE) {
-        int face_mask = prefab_face_mask(cJSON_GetObjectItem(raw_obj, "f"));
-        if (prefab_cube_rests_inside(raw_obj, object->position, object->scale)) face_mask &= ~(1 << 3);
+    // objects.js addGate / addBank / addTrigger / addTerminal: RENDER.addCube with all six
+    // faces ([1,1,1,1,1,1]), src || "wall_0", colr, emissive, opacity, texOff, scale 1 (no tsr)
+    // and the same vertex-colour ambient gradient as a block (unless noVis).
+    const int interface_cube = object->prefab == PREFAB_GATE || object->prefab == PREFAB_DEPOSIT_BOX ||
+                               object->prefab == PREFAB_TRIGGER || object->prefab == PREFAB_TERMINAL;
+
+    if (object->prefab == PREFAB_CUBE || interface_cube) {
+        int face_mask = interface_cube ? 0x3f : prefab_face_mask(cJSON_GetObjectItem(raw_obj, "f"));
+        if (!interface_cube && prefab_cube_rests_inside(raw_obj, object->position, object->scale)) face_mask &= ~(1 << 3);
 
         Geometry *geometry = prefab_cube_geo(face_mask);
         if (!geometry) return NULL;
@@ -1388,7 +1567,7 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         // floor_0 rotates its UVs on cubes wider than tall (flipp) / wider than deep (flippW)
         const int floor_texture = !strcmp(texture_src, "floor_0");
         material->uv_mode = BASIC_UV_CUBE;
-        material->uv_size = stretch_texture ? (vec3) {1.0f, 1.0f, 1.0f} : (vec3) {size.x / world_uv, size.y / world_uv, size.z / world_uv};
+        material->uv_size = stretch_texture && !interface_cube ? (vec3) {1.0f, 1.0f, 1.0f} : (vec3) {size.x / world_uv, size.y / world_uv, size.z / world_uv};
         material->uv_flip_sides = floor_texture && (size.x > size.y || size.z > size.y);
         material->uv_flip_top = floor_texture && size.x > size.z;
 
@@ -1550,21 +1729,30 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     }
 
     if (object->prefab == PREFAB_LADDER) {
-        Geometry *geometry = create_ladder_geo(object->scale.y);
+        // 93.js: scale = tsr == null ? 0.02 : 1 (see prefab_ladder_geo)
+        const float uv_scale = stretch_texture ? 1.0f : 0.02f;
+        const float direction = (float) M_PI * 0.5f * (float) object->direction;
+        Geometry *geometry = prefab_ladder_geo(object->scale.y, direction, uv_scale, color);
         if (!geometry) return NULL;
 
         BasicMaterial *material = basic_material_init();
         Mesh *mesh = mesh_init(geometry, (Material *) material);
 
         mesh->visible = visible;
-        mesh->transform.position = object->position;
-        mesh->transform.rotation.y = (float) M_PI * 0.5f * (float) (object->direction - 1);
+        mesh->transform.position = object->position; // the direction is in the geometry
 
-        // 94.js addLadder: rails are generateCube without a UV scale and the rungs are
-        // unscaled planes, so the texture is stretched over every face (vertex UVs as-is)
+        // 94.js addLadder: StrippedLambertMaterial (FrontSide) with vertexColors, the
+        // material colour stays white; transparent = link_0 || opacity != 1, link_0 also
+        // alphaTest 0.02 (depthWrite kept); noEmisTex: the emissive colour without a map
+        material->uv_mode = BASIC_UV_MESH;
+        material->use_vertex_color = 1;
+        material->color = (vec4) {1.0f, 1.0f, 1.0f, opacity};
         material->texture = texture_id;
-        material->color = prefab_krunker_color(color, 1.0f);
+        material->texture_base_offset = prefab_texture_offset(raw_obj);
         material->emissive = emissive;
+        material->base.transparent = link_texture || opacity != 1.0f;
+        material->alpha_test = link_texture && material->base.transparent ? 0.02f : 0.0f;
+        material->double_sided = 0;
         prefab_apply_lighting_controls(material, object);
 
         return mesh;

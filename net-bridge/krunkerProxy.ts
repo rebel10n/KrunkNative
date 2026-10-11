@@ -26,6 +26,8 @@ const NET_PACKET = Object.freeze({
   INPUT: 5,
   STATE: 6,
   CYCLE: 7,
+  RECON: 110, // NetReconPacket: Krunker "l"
+  INPUT_BATCH: 111, // NetInputBatchPacket: Krunker "q" (count byte + 24-byte NetInputPackets)
   CHAT_SEND: EV.NET_EVENT.CHAT_SEND,
   CHAT: EV.NET_EVENT.CHAT,
   KILL: EV.NET_EVENT.KILL,
@@ -311,6 +313,29 @@ function writeNativeState(session: NativeToKrunkerSession, state: NativeState): 
   session.lastStateByUid.set(state.uid, state);
 }
 
+// Krunker "l" -> NetReconPacket (58 bytes, shared/include/shared.h): the native client reconciles.
+function writeNativeRecon(session: NativeToKrunkerSession, l: unknown[]): void {
+  const payload = Buffer.alloc(58);
+  payload.writeInt32LE(Math.min(toInt(l[0]), 0x7fffffff), 0);
+  payload.writeFloatLE(toNumber(l[2]), 4);
+  payload.writeFloatLE(toNumber(l[3]), 8);
+  payload.writeFloatLE(toNumber(l[4]), 12);
+  payload.writeFloatLE(toNumber(l[6]), 16); // velX
+  payload.writeFloatLE(toNumber(l[5]), 20); // velY
+  payload.writeFloatLE(toNumber(l[7]), 24); // velZ
+  payload.writeFloatLE(toNumber(l[8]), 28); // yaw
+  payload.writeFloatLE(1 - toNumber(l[14], 1), 32); // Krunker aimVal 0 = aimed, KrunkNative 1
+  payload.writeFloatLE(toNumber(l[15]), 36);
+  payload.writeInt32LE(l[16] == null ? -1 : toInt(l[16]), 40);
+  payload.writeFloatLE(toNumber(l[17]) / 1000, 44); // slideTimer ms -> s
+  payload.writeFloatLE(toNumber(l[21]), 48);
+  payload.writeFloatLE(toNumber(l[22]), 52);
+  payload[56] = toInt(l[12]) & 7;
+  payload[57] = (l[9] ? 0x01 : 0) | (l[10] ? 0x02 : 0) | (l[11] ? 0x04 : 0) | (l[13] ? 0x08 : 0) |
+    (l[18] !== false ? 0x10 : 0) | (l[19] ? 0x20 : 0);
+  writeNativeFrame(session.tcp, NET_PACKET.RECON, payload);
+}
+
 function sendUpstream(session: NativeToKrunkerSession, label: string, ...args: unknown[]): void {
   if (!session.upstreamReady || !session.upstream || session.upstream.readyState !== WebSocket.OPEN) {
     session.pendingUpstreamPackets.push([label, args]);
@@ -472,7 +497,8 @@ function handleUpstreamPacket(session: NativeToKrunkerSession, label: string, ar
       const reconciliation = Array.isArray(args[0]) ? args[0] : null;
       if (!reconciliation) break;
       const state = stateFromL(session, reconciliation);
-      if (state) writeNativeState(session, state);
+      if (state) session.lastStateByUid.set(state.uid, state);
+      if (args[1]) writeNativeRecon(session, reconciliation);
       const ping = toInt(reconciliation[1], -1);
       if (ping >= 0 && ping !== session.pingMs) {
         session.pingMs = ping;
@@ -778,13 +804,15 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
       void connectUpstream(session, options);
       break;
     case NET_PACKET.ENT: {
-      if (payload.length < 4 || payload.length > EV.ENT_COSMETICS_SIZE + 1) break;
+      if (payload.length < 4 || payload.length > EV.ENT_SIZE) break;
       const classIndex = payload.readInt32LE(0);
       const secondary = payload.length >= 8 ? payload.readInt32LE(4) : -1;
       const c = EV.readCosmetics(payload, 8);
       const spectate = payload.length > EV.ENT_COSMETICS_SIZE && payload[EV.ENT_COSMETICS_SIZE] ? 1 : 0;
-      // gameserver.ts ent slots: 3 hat, 4 back, 5 secIndex, 6 toggleSpect, 10 skinColIndex, 14 dye, 17 waist, 18 hairCol, 21 face
-      const ent: unknown[] = [classIndex, 0, [-1, -1], c.hat, c.back, secondary >= 0 ? secondary : null, spectate, 0, 0, -1, 0, 0, 0, null, 0, false, 0, -1, 0, 0, 0, 0];
+      // slidCont ("Non FPS Sliding"): absent in older native ENTs = the setting's default (on)
+      const slidCont = payload.length > EV.ENT_COSMETICS_SIZE + 1 ? (payload[EV.ENT_COSMETICS_SIZE + 1] ? 1 : 0) : 1;
+      // gameserver.ts ent slots: 3 hat, 4 back, 5 secIndex, 6 toggleSpect, 10 skinColIndex, 14 dye, 15 slidCont, 17 waist, 18 hairCol, 21 face
+      const ent: unknown[] = [classIndex, 0, [-1, -1], c.hat, c.back, secondary >= 0 ? secondary : null, spectate, 0, 0, -1, 0, 0, 0, null, 0, slidCont, 0, -1, 0, 0, 0, 0];
       if (c.skinColor >= 0) ent[10] = EV.skinIndexFromColor(c.skinColor);
       if (c.dye >= 0) ent[14] = c.dye;
       ent[17] = c.waist;
@@ -796,6 +824,15 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
     case NET_PACKET.INPUT: {
       const input = parseNativeInput(payload);
       if (input) sendInputToUpstream(session, input);
+      break;
+    }
+    case NET_PACKET.INPUT_BATCH: { // one "i" per frame (the upstream accepts single frames)
+      const count = payload.length ? payload[0] : 0;
+      if (!count || payload.length !== 1 + count * 24) break;
+      for (let i = 0; i < count; i++) {
+        const input = parseNativeInput(payload.subarray(1 + i * 24, 1 + (i + 1) * 24));
+        if (input) sendInputToUpstream(session, input);
+      }
       break;
     }
     case NET_PACKET.CYCLE:

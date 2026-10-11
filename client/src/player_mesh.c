@@ -321,7 +321,7 @@ static void player_update_melee_arms(const Player *player, PlayerArms *arms, con
     if (arms->weapon_right) arms->weapon_right->visible = !!player->can_throw;
 
     if (player->aim_val > 0.0f && player->can_throw && player->weapon->can_throw) {
-        const float wind_up = player->swap_timer > 0.0f ? 0.0f : player->aim_val; // 1 - jKFi4
+        const float wind_up = player->is_you && player->swap_timer > 0.0f ? 0.0f : player->aim_val; // 1 - jKFi4 (swapTime: isYou only)
         arms->right->pivot.rotation.z -= wind_up * 1.3f;
         arms->right->pivot.position.x += wind_up * 1.7f;
         arms->right->pivot.position.z += wind_up * 1.8f;
@@ -754,7 +754,10 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float step_half_rotate = -cosf(2.0f * player->step_chase) * 0.5f * step_mlt;
     const float aim_val = third_person ? 0.0f : aim_val_mlt;
     const float aim_lean = (aim_val <= 0.5f ? aim_val : 0.5f - (aim_val - 0.5f)) * (player->weapon->aim_lean ? player->weapon->aim_lean : 0.5f); // (aimLean || 0.5)
-    const float swap_anim = player->weapon->swap_time > 0.0f ? player->swap_timer / player->weapon->swap_time : 0.0f;
+    // ao = swapTime / weapon.swapTime. players.js reload() only sets swapTime for isYou on a
+    // rendering client, so other players never show the swap dip (their swap_timer is set by
+    // player_spawn but only ticks down in procInputs, which they never run here).
+    const float swap_anim = player->is_you && player->weapon->swap_time > 0.0f ? player->swap_timer / player->weapon->swap_time : 0.0f;
     const float left_hand_mlt = player->left_handed ? -1.0f : 1.0f;
 
     const vec3 weapon_offset = {
@@ -995,4 +998,77 @@ void player_meshes_fini(Player *player) {
     free(player_mesh);
 
     player->mesh = NULL;
+}
+// ---------------------------------------------------------------- debug log
+// KRUNKNATIVE_PLAYER_LOG=<file>: one JSON line per frame per other player with its state and
+// the world matrices (row-major) of the model nodes, the same nodes tools/kref/players-ref.js
+// records from the real client: root (objInstances), lower (lowerBody), upper (upperBody),
+// wm (weaponMeshes[i]: the held arms anchor), the held arm part meshes (unit cubes, y 0..1)
+// and the weapon mesh. tools/kref/players-compare.py compares the two.
+static void player_log_matrix(FILE *file, const char *key, MeshTransform *node) {
+    Mesh probe = {0};
+    probe.transform.scale = (vec3) {1.0f, 1.0f, 1.0f};
+    probe.transform.parent = node;
+    mesh_update_transform_matrix(&probe);
+    fprintf(file, "\"%s\":[", key);
+    for (int i = 0; i < 16; i++) fprintf(file, "%s%.5f", i ? "," : "", probe.transform_matrix[i]);
+    fputs("]", file);
+}
+
+static void player_log_mesh(FILE *file, Mesh *mesh, int *first) {
+    if (!mesh) return;
+    mesh_update_transform_matrix(mesh);
+    fprintf(file, "%s{\"vis\":%d,\"m\":[", *first ? "" : ",", mesh->visible);
+    for (int i = 0; i < 16; i++) fprintf(file, "%s%.5f", i ? "," : "", mesh->transform_matrix[i]);
+    fputs("]}", file);
+    *first = 0;
+}
+
+void player_mesh_debug_log(Player *player, const double now) {
+    static FILE *file;
+    static int checked;
+    if (!checked) {
+        checked = 1;
+        const char *path = getenv("KRUNKNATIVE_PLAYER_LOG");
+        if (path && *path) file = fopen(path, "w");
+    }
+    if (!file || !player->mesh || player->render_you || !player->active) return;
+
+    PlayerMesh *pm = player->mesh;
+    fprintf(file, "{\"t\":%.2f,\"uid\":%d,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"yaw\":%.4f,\"pitch\":%.4f,\"cr\":%.4f,\"step\":%.4f,\"chase\":%.4f,\"g\":%d,\"wi\":%d,\"aim\":%.3f,\"interp\":%d,",
+            now * 1000.0, player->uid, player->position.x, player->position.y, player->position.z, player->direction.y, player->direction.x,
+            player->crouch_val, player->step_val, player->step_chase, player->on_ground, player->loadout_index, player->aim_val, player->interpolate);
+    player_log_matrix(file, "root", pm->anchor);
+    fputc(',', file);
+    player_log_matrix(file, "lower", pm->body_anchor);
+    fputc(',', file);
+    player_log_matrix(file, "upper", pm->upper_body_anchor);
+
+    PlayerArms *arms = player->loadout_index >= 0 && player->loadout_index < player->loadout_size ? pm->arms[player->loadout_index] : NULL;
+    if (arms) {
+        fputc(',', file);
+        player_log_matrix(file, "wm", &arms->anchor);
+        fputs(",\"arms\":[", file);
+        int first = 1;
+        for (int j = 0; j < 2; j++) {
+            PlayerArmMesh *arm = j ? arms->left : arms->right;
+            if (!arm) continue;
+            player_log_mesh(file, arm->extender, &first);
+            player_log_mesh(file, arm->upper, &first);
+            player_log_mesh(file, arm->joint, &first);
+            for (size_t k = 0; arm->lower && k < arm->lower->mesh_count; k++) player_log_mesh(file, arm->lower->meshes[k], &first);
+        }
+        fputs("],\"weapon\":[", file);
+        first = 1;
+        player_log_mesh(file, arms->weapon_right, &first);
+        player_log_mesh(file, arms->weapon_left, &first);
+        fputc(']', file);
+    }
+    fputs(",\"legs\":[", file);
+    for (int i = 0; i < 4; i++) {
+        const MeshTransform *leg = i < 2 ? (pm->legs[i] ? &pm->legs[i]->transform : NULL) : (pm->crouched_legs[i - 2] ? &pm->crouched_legs[i - 2]->anchor : NULL);
+        fprintf(file, "%s%.4f", i ? "," : "", leg ? leg->rotation.x : 0.0f);
+    }
+    fputs("]}\n", file);
+    fflush(file);
 }

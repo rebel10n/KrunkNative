@@ -12,6 +12,7 @@
 #include <html_ui.h>
 #include <GLFW/glfw3.h>
 #include <headless.h> // headless_swap_interval
+#include <client_settings.h> // Settings > Client "Resolution" (exclusive fullscreen mode)
 #include <ctype.h>
 #include <math.h>
 #include <stddef.h>
@@ -224,9 +225,11 @@ static void set_window_mode(Client *client, const int mode) {
     const GLFWvidmode *vid = monitor ? glfwGetVideoMode(monitor) : NULL;
 
     if (mode == RS_FULLSCREEN && vid) {
-        // exclusive fullscreen at the monitor's current mode
+        // exclusive fullscreen at the monitor's current mode, or the Client tab's Resolution
+        int fw = vid->width, fh = vid->height;
+        client_settings_fullscreen_size(&fw, &fh);
         glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
-        glfwSetWindowMonitor(window, monitor, 0, 0, vid->width, vid->height, vid->refreshRate);
+        glfwSetWindowMonitor(window, monitor, 0, 0, fw, fh, fw == vid->width && fh == vid->height ? vid->refreshRate : GLFW_DONT_CARE);
     } else if (mode == RS_BORDERLESS && vid) {
         // undecorated window covering the monitor (no video mode change)
         int mx = 0, my = 0;

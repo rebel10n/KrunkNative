@@ -6,18 +6,22 @@
 // sets player.isSpectating, i.e. "nametag visible") and g1() (the killer's tag),
 // src/data/game.js canSee, src/data/colors.js, src/config.js (nameOffset*, nameVisRate).
 //
-// Not ported (no data in KrunkNative): AI nametags (no AI), the K.P.D red name (no reports), the site mode's bomb pickup "warning" icon
+// Not ported (no data in KrunkNative): the K.P.D red name (no reports), the site mode's bomb pickup "warning" icon
 // (map objects keep no pickup id), Game.mode.teamSee (it compares team names with team
 // numbers in v3.1.1, so it never applies) and the terrain term of canSee (no terrain).
-// KrunkNative servers keep no accounts, so the level box, clan tag and badges only show
+// Level box, clan tag and premium / featured badges come from the account data a
+// brain-linked server sends (NET_PACKET_PLAYER_INFO, player_accounts.h); guests and
+// standalone servers have none. They also show
 // with KRUNKNATIVE_NAMETAG_DEMO=1 (test values on real players) or =2 (fixed demo tags;
 // ?nametagDemo=1/2 on the web), both for layout checks against the real game only.
 #include <client.h>
+#include <ai.h>
 #include <html_dom.h>
 #include <html_ui.h>
 #include <hud_modes.h>
 #include <menu_view.h>
 #include <nametags.h>
+#include <player_accounts.h>
 #include <render_settings.h>
 #include <spectate.h>
 #include <ui_logic.h>
@@ -86,6 +90,14 @@ typedef struct {
     StyleCache left, top, size, margin, transform, src;
 } Marker;
 
+// One AI's tag (overlay.render's Game.AI.ais block): name + health bar, Game.ai index = slot.
+typedef struct {
+    HtmlElem root, bar, hp, name;
+    int shown;
+    char text_name[GAME_AI_NAME_SIZE];
+    StyleCache left, top, transform, hp_w, hp_color, geometry;
+} AITag;
+
 static struct {
     HtmlElem layer;          // #knOverlayWorld (0 until created)
     unsigned serial;         // html_ui_page_serial() the layer belongs to
@@ -95,6 +107,7 @@ static struct {
     Marker flags[MODE_MAX_FLAGS];
     Marker objective;
     Marker sites[NT_MAX_SITES];
+    AITag ai_tags[GAME_AI_MAX];
     double next_vis;         // next nameVisRate pass (glfwGetTime seconds)
     double last_tick_ms;     // watchdog: last nametags_tick
     int watchdog;            // timer id armed
@@ -225,7 +238,7 @@ static double js_max(const double a, const double b) { return a != a || b != b ?
 static int nt_blocks_sight(const Object *object) {
     if (!object->active || object->no_shoot || object->collision_type == COLLISION_TYPE_NONE) return 0;
     if (object->kill || object->score_zone || object->team_zone || object->teleporter || object->checkpoint ||
-        object->pickup || object->flag || object->premium || object->verified || object->trigger ||
+        object->pickup || object->flag || object->premium || object->verified ||
         object->objective || object->bomb_site || object->ladder || object->ramp) return 0;
     switch (object->prefab) {
         case PREFAB_TEAM_ZONE:
@@ -290,6 +303,7 @@ static HtmlElem nt_layer(void) {
     memset(g_nt.flags, 0, sizeof(g_nt.flags));
     memset(&g_nt.objective, 0, sizeof(g_nt.objective));
     memset(g_nt.sites, 0, sizeof(g_nt.sites));
+    memset(g_nt.ai_tags, 0, sizeof(g_nt.ai_tags));
     for (int i = 0; i < NT_MAX_TAGS; i++) g_nt.tags[i].uid = -1;
     memset(&g_nt.layer_w, 0, sizeof(g_nt.layer_w));
     memset(&g_nt.layer_h, 0, sizeof(g_nt.layer_h));
@@ -555,6 +569,14 @@ static void nt_info(const Player *player, TagInfo *info) {
     memset(info, 0, sizeof(*info));
     if (client_render_settings()->stream_mode) snprintf(info->name, sizeof(info->name), "Player %d", player->uid);
     else snprintf(info->name, sizeof(info->name), "%s", player->name);
+    // account data from a brain-linked server (NET_PACKET_PLAYER_INFO): level box, clan, badges
+    const NetPlayerInfoPacket *account = player_accounts_get(player->uid);
+    if (account && account->account_id > 0) {
+        info->level = account->level > 0 ? account->level : 1;
+        if (!client_render_settings()->stream_mode && account->clan[0]) snprintf(info->clan, sizeof(info->clan), "%s", account->clan);
+        info->badge[NT_BADGE_PREMIUM] = (account->flags & NET_PLAYER_INFO_PREMIUM) != 0;
+        info->badge[NT_BADGE_FEATURED] = (account->flags & NET_PLAYER_INFO_VERIFIED) != 0;
+    }
     if (g_nt.demo == 1) { // KRUNKNATIVE_NAMETAG_DEMO=1: account fields KrunkNative does not have
         info->level = 10 + player->uid * 7 % 90;
         info->chall_level = player->uid * 6 % 25;
@@ -667,6 +689,92 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         nt_tag_hide(tag);
         tag->uid = -1;
         tag->visible = 0;
+    }
+}
+
+/* ------------------------------------------------------------------ AI */
+
+static int nt_ai_tag_create(AITag *tag, const int index) {
+    char id[32], html[512];
+    snprintf(id, sizeof(id), "knAiTag_%d", index);
+    // drawn before the players: first in the layer
+    snprintf(html, sizeof(html),
+        "<div id='%s' style='position:absolute;width:0;height:0;transform-origin:0 0;display:none'>"
+        "<div class='knAiBar' style='position:absolute;background:rgba(0,0,0,0.4)'></div>"
+        "<div class='knAiHp' style='position:absolute'></div>"
+        "<div class='knAiName' style='position:absolute;left:-500px;width:1000px;text-align:center;font-family:gamefont;"
+            "line-height:1.375;white-space:nowrap;color:white'></div></div>", id);
+    html_dom_insert_html(g_nt.layer, HTML_INSERT_AFTER_BEGIN, html);
+    tag->root = html_dom_by_id(id);
+    if (!tag->root) return 0;
+    tag->bar = nt_child(tag->root, "knAiBar");
+    tag->hp = nt_child(tag->root, "knAiHp");
+    tag->name = nt_child(tag->root, "knAiName");
+    tag->shown = 0;
+    return 1;
+}
+
+// overlay.render, Game.AI.ais (under !aA): active, canBSeen and a visible mesh; hidden at
+// full health unless alwaysName (scale >= 6). aG = 1 + scale / 30: name in aG * 20 px
+// GameFont centred with its baseline at -aV - aG * 7, the bar aG * 120 wide and
+// (1 + (aG - 1) * 0.3) * 16 high above the anchor (mesh position + scale * 2 + nameOffset + 1.5).
+static void nt_ais(Client *client, const vec3 camera, const int hidden) {
+    GameAIs *list = client->game.ai;
+    const ClientRenderSettings *rs = client_render_settings();
+    for (int i = 0; i < GAME_AI_MAX; i++) {
+        AITag *tag = &g_nt.ai_tags[i];
+        const GameAI *ai = list && i < list->count ? &list->ais[i] : NULL;
+        if (hidden || !ai || !ai->active || !ai->can_be_seen || !ai->shown ||
+            (!ai->always_name && ai->health && ai->health == ai->max_health)) {
+            if (tag->root) nt_display(tag->root, 0, &tag->shown);
+            continue;
+        }
+        const vec3 anchor = {ai->position.x, ai->position.y + sinf(ai->bob_val) * ai->bob_d + ai->scale * 2.0f + NT_NAME_OFFSET + 1.5f, ai->position.z};
+        double fx, fy;
+        if (!nt_project(&client->camera, anchor, &fx, &fy)) {
+            if (tag->root) nt_display(tag->root, 0, &tag->shown);
+            continue;
+        }
+        if (!tag->root && !nt_ai_tag_create(tag, i)) continue;
+
+        const double g = 1.0 + ai->scale / 30.0, bar_w = g * 120.0, bar_h = (1.0 + (g - 1.0) * 0.3) * 16.0;
+        char v[96];
+        snprintf(v, sizeof(v), "%.3f|%d", g, ai->max_health ? 1 : 0);
+        if (strcmp(tag->geometry.value, v)) {
+            snprintf(tag->geometry.value, sizeof(tag->geometry.value), "%s", v);
+            char px[32];
+            nt_px(px, sizeof(px), -bar_w / 2.0);
+            html_dom_set_style(tag->bar, "left", px);
+            html_dom_set_style(tag->hp, "left", px);
+            nt_px(px, sizeof(px), -bar_h);
+            html_dom_set_style(tag->bar, "top", px);
+            html_dom_set_style(tag->hp, "top", px);
+            nt_px(px, sizeof(px), bar_w);
+            html_dom_set_style(tag->bar, "width", px);
+            nt_px(px, sizeof(px), bar_h);
+            html_dom_set_style(tag->bar, "height", px);
+            html_dom_set_style(tag->hp, "height", px);
+            html_dom_set_display(tag->bar, ai->max_health ? "block" : "none");
+            html_dom_set_display(tag->hp, ai->max_health ? "block" : "none");
+            nt_px(px, sizeof(px), g * 20.0);
+            html_dom_set_style(tag->name, "font-size", px);
+            nt_px(px, sizeof(px), -bar_h - g * 7.0 - NT_GAMEFONT_ASCENT * g * 20.0); // canvas baseline -> box top
+            html_dom_set_style(tag->name, "top", px);
+        }
+        nt_text(tag->name, ai->name, tag->text_name, sizeof(tag->text_name));
+        if (ai->max_health) {
+            const double ratio = ai->health / ai->max_health;
+            snprintf(v, sizeof(v), "%.2fpx", (ratio > 0.0 ? ratio : 0.0) * bar_w);
+            nt_style(tag->hp, "width", v, &tag->hp_w);
+            nt_style(tag->hp, "background-color", rs->health_col_enemy, &tag->hp_color); // OVERLAY.healthColE
+        }
+        snprintf(v, sizeof(v), "%.4f%%", fx * 100.0);
+        nt_style(tag->root, "left", v, &tag->left);
+        snprintf(v, sizeof(v), "%.4f%%", fy * 100.0);
+        nt_style(tag->root, "top", v, &tag->top);
+        snprintf(v, sizeof(v), "scale(%.4f)", nt_distance_scale(camera, anchor));
+        nt_style(tag->root, "transform", v, &tag->transform);
+        nt_display(tag->root, 1, &tag->shown);
     }
 }
 
@@ -923,6 +1031,7 @@ void nametags_tick(Client *client) {
     // aA: #endUI or #menuHolder up; aB: also no kill card
     const int menu_up = nt_dom_shown("endUI") || nt_dom_shown("menuHolder");
     const int card_up = nt_dom_shown("killCardHolder");
+    nt_ais(client, client->camera.position, menu_up);
     nt_players(client, client->camera.position, menu_up);
 
     const GameModeConfig *mode = client->game.mode ? &client->game.mode->config : NULL;

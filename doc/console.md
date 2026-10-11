@@ -26,9 +26,8 @@ line raw ("ct"). They come from the reconstruction in the jail tree:
 Permissions match v3.1.1 PERMS: off by default, so everyone may run every command.
 `server_bin --perms` (or `PERMS=1`) restricts DEV commands to clients from 127.0.0.1 and
 clients `op`'d on the server CLI. The cheat commands (god/smite/noclip/kill) use the
-same rule, since KrunkNative has no premium accounts. v3.1.1 answers a denial with a
-`notify` packet the client ignores; KrunkNative sends the text ("DEV only") as a Server
-line.
+same rule, since KrunkNative has no premium accounts. A denial answers `notify` ("DEV
+only" / "DEV or premium custom host only"), as v3.1.1 does; the mod's toast shows it.
 
 ## Local console commands (devConsole.ts `registerLocal`)
 
@@ -73,11 +72,11 @@ always handled on the client.
 | ping | [name\|id] | any (dev for others) | "Your ping: N ms" / "calculating" / "X's ping: …" / "You can only view your own ping." | ✔ |
 | server | – | any | "Lobby … \| region … \| socket …" + "Map … \| mode … \| players … \| tick 30 Hz (33.33 ms)" | ✔ online (lobby "native", region "local"); **offline** = status |
 | players | – | any | "Players (n): a, b" / "No players." | ✔ |
-| ais | – | any | "AI (n): …" / "No AI." | ✔ "No AI." (no AI natively) |
+| ais | – | any | "AI (n): …" / "No AI." | ✔ every listed AI, dead ones too (shared/src/ai.c) |
 | team | red\|blue | any | sets the team and suicides; "Switched to red team." / "Already on red." / "Usage: /team red\|blue" / "/team only works in team modes." | ✔ online, ✔ **offline** |
 | teams | – | any | "Red (n): …", "Blue (n): …" / "Not a team mode." / "No players." | ✔ online, ✔ **offline** |
 | kick | name\|id | dev | close 4002; "Kicked X." / "Cannot kick yourself." / "Target socket not found." | ✔ (ERROR "Kicked" 004002, removed after the poll pass) |
-| ban | name\|id | dev | account ban + close 4003 | ✔ guest semantics: "Disconnected X, but no account id was available to persist a ban." (KrunkNative has no accounts) |
+| ban | name\|id | dev | account ban + close 4003 | ✔ "Banned X (account N)." when server_bin has accounts (the host's ban_account callback); guests: "Disconnected X, but no account id was available to persist a ban." |
 | unban | accountId\|name\|id | dev | "Unbanned account N." / "Account N was not banned." / "No valid account id to unban." | ✔ (the list is always empty) |
 | bans | – | dev | "Banned accounts (n): …" / "Ban list is empty." | ✔ "Ban list is empty." |
 | ip | name\|id | dev | "name: addr" / "(no address)" | ✔ |
@@ -97,15 +96,58 @@ always handled on the client.
 | god | [target] [on\|off] | cheat | godMode + refill; "God mode ON[ on X]" | ✔ (`Player.god_mode`, "h" sent); **offline** "God mode ON" |
 | smite | [target] [on\|off] | cheat | 10000 damage per hit | ✔ (`Player.smite`, applied in `player_change_health`); **offline** |
 | noclip | [target] [on\|off] | cheat | "noc" to the target | ✔ (`NET_CHEAT_NOCLIP` sets the client's `me->noclip`, chat "Noclip - Enabled"); **offline** |
-| kill | [target] | cheat | suicide / kills every match: "Killed N players: …" / "Kill target 'x' not found." | ✔ online (players only); **offline** "You killed yourself." / "Killed player X." |
+| kill | [target] | cheat | suicide / kills every match: "Killed N players + M AIs: …" / "Kill target 'x' not found." | ✔ online (players and AIs: name or sid, exact beats partial); **offline** "You killed yourself." / "Killed player X." |
 | forcehide | [target] [on\|off] | dev | "fh" to the target | ✔ (`NET_CHEAT_FORCE_HIDE`, chat "Hide - Enabled"); **offline** |
 | unlimitedammo | [target] [on\|off] | dev | "unl" + "uamo" | ✔ (`NET_CHEAT_UNLIMITED_AMMO` + loadout packet); **offline** |
 | score | [amount] | dev | "+N score (total T)." / "Usage: /score <amount> (default 100)." | ✔ online; **offline** "Usage: score <amount> (default 100)." |
-| summon | [name] | dev | spawns a Soul Sanctum AI | "Summon unavailable on this game instance." (v3.1.1's reply without AI support) |
+| summon | [name] | dev | spawns a Soul Sanctum AI | ✔ "Summonable: …" / "Unknown summon 'x'. Try: …" / "Summoned Soul Fiend (21)." (templates = the first BOT per name on soul_sanctum.json, game.ts aliases weep / wander / fiend / angered / gate / lord) |
 | bhop | [on\|off\|held] | client | "Bhop - Disabled" / "Bhop - Hold Jump/Crouch" in the console + notify | ✔ (`ui_bhop_set_mode` + `ui_notify`) |
 
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).
+
+## Argument completion (KrunkNative extension)
+
+devConsole.ts completes only the command name: Tab fills the longest common prefix, and
+the hints list the commands that start with what you typed. Past the first word it
+shows a single row with the command's signature and description. KrunkNative keeps both
+and adds completion for arguments:
+
+- The hints list the command's signature row followed by the candidates for the argument
+  under the caret, filtered by what is typed. Clicking a candidate fills it in.
+- Tab completes a single candidate (plus a space). With several, Tab steps through them
+  and Shift+Tab steps back, highlighting the current one (`.hintItem.isActive`) and
+  scrolling the 12-row list to keep it visible. Typing anything else ends the cycle.
+  Command names cycle the same way instead of stopping at the common prefix.
+- Candidates per command:
+
+| Command | Arguments completed |
+|---|---|
+| help, exec | command names (with aliases) |
+| alias | 1: existing aliases, 2: command names |
+| bind | 1: keys (bound keys, then `e.key` values a-z / 0-9 / F1-F12 / Space / Tab / Shift / Control / Alt, then `e.code` KeyA… / Digit0…), 2: command names |
+| unbind | bound keys |
+| toggle | the server toggles: god, noclip, smite, forcehide, unlimitedammo, borders, forcecol, endless, bhop |
+| god, noclip, smite, forcehide, unlimitedammo | 1: player names in the game, or on / off; 2: on / off |
+| borders, forcecol | on / off |
+| bhop | on / off / held |
+| kill | player names in the game and the active AIs' names |
+| summon | the summonable AI names (Angered Soul, Gatekeeper, Lord of Souls, Soul Fiend, Wandering Soul, Weeping Soul) |
+| ping, kick, ban, unban, ip, banip | player names in the game |
+| map | the v3.1.1 map catalogue (shared/include/map_catalog.h): official maps by name, community maps by file name |
+| mode | mode aliases (offline also `default` / `reset`) |
+| team | red / blue |
+| connect | local, the last server address |
+| score | 100, 250, 500, 1000, -100 (the signature row shows `amount: number?`) |
+
+The other commands take free text (echo, print, say, game, unbanip) or no
+argument; for those the signature row is the hint. No console command takes a class,
+weapon or setting name, so there are no such candidates. On the web, Shift reaches C
+through kn-shim (`x = 1` on key events).
+
+`/map` and `/maps` on the server use the same catalogue, as v3.1.1 cmd_map / cmd_maps do:
+`Maps: <official names>` then `Custom: <custom map names>`. A map outside the rotation is
+added to the game's list when it is picked.
 
 ## Verification (2026-10-10)
 
@@ -123,10 +165,18 @@ Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 
 ## Known differences
 
-- The native engine has no CSS `min()`. The modal's `min(744px, calc(100vw - 16px))` and
-  `min(280px, …)` are therefore computed in C and written inline until the grip or a
-  saved geometry sets a size.
-- The engine's font fallback has no glyph for the close button's "✕" (Chrome falls back
-  to a system font), and the grip's multi-stop `linear-gradient` stripes aren't drawn.
+- The autocomplete rows are lighter than in v3.1.1. There, main.css's
+  `* { color: #353535 }` overrides the colour `.hintItem` would inherit from `.hints`
+  (#d8d8d8), so the inactive rows are #353535 on #6f6f6f. Chrome and the native engine
+  render this the same way: the computed colour is rgb(53, 53, 53) in both. At the
+  user's request, an override at the end of `ui/css/devconsole.css` gives `.hintItem`
+  `color: inherit` (the mod's intended #d8d8d8) and makes `.hintMeta` (argument
+  signatures, candidate notes) #cccccc instead of #b8b8b8.
+- No hotkey fires while a text field has focus (`ui_text_input_focused()`: an input,
+  textarea, select or contenteditable element, #chatInput or #terminalInput). This covers
+  the mods.ts keys (F1, F4, F5, F6, T, B, F8, the console key binds), game binds, the
+  voice key, Ctrl TP clicks, gamepad presses and main.c's F11 / N. v3.1.1 still let F5
+  (reload) and F6 (editor) through. The console key (`) still closes the console from
+  its own input, as in v3.1.1.
 - devConsole mirrors the browser's `console.*` output into the log. KrunkNative has no
   JavaScript console, so only game lines appear.

@@ -1,0 +1,71 @@
+- name: Web build is present locally
+  ansible.builtin.stat:
+    path: "{{ kn_web_dist }}/client.wasm"
+  delegate_to: localhost
+  become: false
+  register: kn_web_local
+
+- name: Fail without a web build
+  ansible.builtin.fail:
+    msg: "{{ kn_web_dist }} has no client.wasm: run `make web` (or let CI build it) first."
+  when: not kn_web_local.stat.exists
+
+- name: Web base directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ kn_web_base }}/releases"
+    - "{{ kn_web_base }}/assets"
+
+# Seed the new release from the current one so rsync only sends what changed.
+- name: Seed release {{ kn_release_id }} from current
+  ansible.builtin.shell: |
+    set -eu
+    new={{ kn_web_base }}/releases/{{ kn_release_id | quote }}
+    [ -e "$new" ] && exit 0
+    if [ -d {{ kn_web_base }}/current/ ]; then cp -a {{ kn_web_base }}/current/. "$new"/ 2>/dev/null || cp -a {{ kn_web_base }}/current/ "$new"; else mkdir -p "$new"; fi
+    echo seeded
+  args:
+    executable: /bin/bash
+  register: kn_web_seed
+  changed_when: "'seeded' in kn_web_seed.stdout"
+
+- name: Upload dist/web (without assets/)
+  ansible.posix.synchronize:
+    src: "{{ kn_web_dist }}/"
+    dest: "{{ kn_web_base }}/releases/{{ kn_release_id }}/"
+    archive: false
+    recursive: true
+    checksum: true
+    times: true
+    delete: true
+    use_ssh_args: true
+    rsync_opts: ["--exclude=/assets", "--chmod=D755,F644", "--chown=root:root"]
+
+- name: Upload game assets (shared by all releases)
+  ansible.posix.synchronize:
+    src: "{{ kn_web_assets_src }}"
+    dest: "{{ kn_web_base }}/assets/"
+    archive: false
+    recursive: true
+    times: true
+    copy_links: true
+    use_ssh_args: true
+    rsync_opts: "{{ ['--chmod=D755,F644', '--chown=root:root', '--size-only'] + (kn_web_assets_exclude | map('regex_replace', '^', '--exclude=') | list) }}"
+  when: kn_web_sync_assets | bool
+
+- name: Flip current -> releases/{{ kn_release_id }}
+  ansible.builtin.file:
+    src: "{{ kn_web_base }}/releases/{{ kn_release_id }}"
+    dest: "{{ kn_web_base }}/current"
+    state: link
+    force: true
+
+- name: Prune old web releases (keep {{ kn_keep_releases }})
+  ansible.builtin.include_tasks: ../../kn_release/tasks/prune.yml
+  vars:
+    prune_dir: "{{ kn_web_base }}/releases"

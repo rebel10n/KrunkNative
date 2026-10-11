@@ -168,9 +168,8 @@ typedef enum {
     COLLISION_TYPE_NONE,
 } CollisionType;
 
-// Krunker triggers (70.js events / actions, map.js addTrigger): the subset ported so far.
-#define TRIGGER_EVENT_ON_ENTER 3        // triggers.events[3] "onEnter"
-#define TRIGGER_ACTION_REFILL_KNIFE 23  // triggers.actions[23] "Refill Player Knife": refillKnife + "rfl"
+// Krunker triggers (triggers.js events / actions): TriggerEvent, TriggerAction, TriggerData.
+#include <triggers.h>
 
 typedef struct {
     unsigned int prefab;
@@ -200,16 +199,41 @@ typedef struct {
     unsigned char penetrable:1; // map "pe": bullets pass through (wallbang), Krunker penetrable
     unsigned char no_shoot:1;   // Krunker noShoot: hitscan ignores the object
     unsigned char force_col:1;  // /forcecol made this non-colliding object collide (restored on OFF)
-    unsigned char trigger_on_enter:1;   // trigger "te" = onEnter (triggers.events[3])
-    unsigned char trigger_single_use:1; // trigger "su": fires once per map load
-    unsigned char triggered:1;          // a single-use trigger already fired
+    unsigned char terminal:1;           // TERMINAL prefab: "ot" opens #terminalHolder (objects.js addTerminal, tRadius 7)
+    unsigned char no_msg:1;             // terminal "nm": no "Open Terminal" interact prompt
+    // Map interfaces (objects.js GameObject, shared/src/triggers.c): destructibles, gates,
+    // deposit boxes, check points and teleporters.
+    unsigned char can_destroy:1;        // "cdy" (or a health): triggers / actions may destroy it
+    unsigned char start_destroyed:1;    // "sd" (canDestroy only): starts destroyed each round
+    unsigned char destroyed:1;          // Krunker destroyed (in destObjs while it waits to respawn)
+    unsigned char respawn_random:1;     // "rr": respawns after randInt(1, 5000) ms
+    unsigned char gate:1;               // GATE prefab: "gte" toggles active (players.interact, Toggle Interface Gate)
+    unsigned char closeable:1;          // gate "cl": an open gate can be closed again
+    unsigned char start_closed:1;       // gate "stc" (closeable only)
+    unsigned char bank:1;               // DEPOSIT_BOX prefab: "bnk" deposited score
+    unsigned char single_use:1;         // check point "su": only once per life of the player list
+    unsigned char stop_momentum:1;      // teleporter "m": telStopMo
+    unsigned char force_dir:1;          // teleporter "fd": the receiver sets the view direction
+    unsigned char no_vis:1;             // client: the mesh was created hidden (noVis "v"), interface state never shows it
 
     unsigned char direction:2;
 
     unsigned int team;
-    unsigned int score_points;
-    int trigger_action;   // trigger "ta": index into Krunker's triggers.actions (TRIGGER_ACTION_*)
-    int trigger_chance;   // trigger "cha": percent, 0 = always
+    unsigned int score_points;          // "sp": score zone points / gate price
+    int interface_id;                   // "in" (0 none): Krunker interface, listed in map interfaces
+    int gate_method;                    // gate "md": 0 score (paid), 1 score (kept), 2 kills
+    int channel;                        // teleporter "ch" 0..100
+    int node;                           // teleporter "n": 0 sending, 1 receiving, 2 both
+    float tel_cooldown;                 // telCooldown (ms) of a node-2 receiver
+    float health;                       // "h" / "hp": destructible health (0 none)
+    float start_health;
+    float respawn_time;                 // respawnT (ms) left / of the next respawn (0: stays destroyed)
+    float respawn_time_start;           // "rt" * 1000 (>= 100 when set)
+    int destroyed_by;                   // destroyedBy: player uid, -1 none
+    int deposited;                      // deposit box: deposited score
+    int withdraw_amount;                // "wd" (absent: 1000, 0 = all)
+    int deposit_amount;                 // "dp" (absent: 1000, 0 = all)
+    TriggerData *trig;                  // TRIGGER prefab: event / action / state (owned by the map)
 
     float spin;
     float bounce;
@@ -342,13 +366,23 @@ typedef struct {
     unsigned char jump:1;
     unsigned char crouch:1;
     unsigned char reload:1;
-    unsigned char swap:2;
+    // input[11] (CONTROLS.aba6): 1 swapSecondary, 2 swapMelee, 3 primary (slot 0), 4 swapEquipment.
+    unsigned char swap:3;
+    // input[10]: the wheel, wDG6 * scrollDirM (-1 / 0 / 1), only when no swap key was
+    // pressed; procInputs steps the weapon index with reload/pY2 (player_scroll_weapon).
+    signed char scroll;
+    // input.velObj (players.js shoot, client only, never sent): the physPow knockback this
+    // frame's shot gave the local player; a reconciliation replay (recon) applies it again,
+    // since replays skip shooting (index.js reconcilePlayer -> procInputs(recon = true)).
+    unsigned char has_vel_obj;
+    vec3 vel_obj;
 } Input;
 
 struct Game_t;
 
 #define PLAYER_NAME_SIZE 32
 #define PLAYER_DAMAGE_SLOTS 8
+#define PLAYER_CHECKPOINT_LIST_MAX 256 // single-use check points one player can remember
 
 typedef struct {
     int uid;      // dealer uid, -1 = free slot
@@ -460,6 +494,7 @@ typedef struct Player_t {
     unsigned char force_hide:1;
     unsigned char smite:1;      // /smite: every hit this player deals does 10000 damage (Krunker player.smite)
     unsigned char interpolate:1;
+    unsigned char force_pos:1;  // Krunker forcePos: the next remote state snaps instead of interpolating (spawn / first sighting)
     unsigned char inspecting:1;
 
     unsigned char is_hidden:1;
@@ -478,6 +513,11 @@ typedef struct Player_t {
     unsigned char can_slide:1;
     unsigned char can_throw:1;
     int in_object;                // Krunker inObject: map object index + 1 of the onEnter trigger stood in, 0 = none
+    unsigned char making_progress:1; // Krunker makingProg: an onInteract hold advanced this tick
+    unsigned char doing_interact:1;  // Krunker doingInter: holding M1 in an onInteract trigger (no weapon use)
+    int checkpoint;               // Krunker checkPoint: map object index + 1 of the last check point, 0 = none
+    int checkpoint_list_count;    // checkPointList: single-use check points already taken
+    int checkpoint_list[PLAYER_CHECKPOINT_LIST_MAX];
 
     unsigned int kills;
     unsigned int deaths;
@@ -488,6 +528,7 @@ typedef struct Player_t {
     int secondary_index;          // chosen secondary weapon id (Select Secondary), -1 = Pistol
     PlayerCosmetics cosmetics;    // skin colour + cosmetic items (ENT -> SPAWN), PLAYER_COSMETICS_NONE by default
     int score;                    // Krunker player.score
+    int reward;                   // Krunker player.reward: KR of the last endGame (END "reward" column)
     unsigned int assists;
     unsigned int streak;          // Krunker player.streak: multi-kill counter (reset after feedTimer)
     unsigned int kill_streak;     // Krunker player.killStreak: kills since the last death
@@ -501,7 +542,14 @@ typedef struct Player_t {
     PlayerDamage damage_received[PLAYER_DAMAGE_SLOTS]; // Krunker dmgReceived (assists)
     unsigned int shot_count;      // Krunker shotCntP: picks config.projSpreads for projectiles
 
-    int input_seq;
+    int input_seq;                // inputSN: the last input procInputs ran (-1 after a spawn: none this life)
+    // Reconciliation (net-recon): recon_snap asks the server for a NET_RECON_SEQ_ALL "l" this
+    // tick (io_tp's lastSNBySocketId override). shot_vel_obj is the client's input.velObj: the
+    // physPow knockback of this input's shot, copied onto the pending input for replays.
+    unsigned char recon_snap:1;
+    unsigned char recon_noclip:1; // the noclip the last "l" told the owner (a flip snaps at once)
+    unsigned char has_shot_vel_obj:1;
+    vec3 shot_vel_obj;
 
     float dt;
     float send_rate;
@@ -536,6 +584,7 @@ typedef struct Player_t {
     float slide_timer;
     float jump_timer;
     float interact_progress;
+    float last_interact;          // players.interact: game.now of the last "int" (config.interactTimer)
 
     float *ramp_fix;
 
@@ -627,12 +676,17 @@ typedef struct {
 Player *player_init(struct Game_t*);
 void player_spawn(Player*);
 void player_swap_weapon(Player*, int, int, int, int);
+void player_update_height(Player*); // players.updateHeight: height from crouch_val
 void player_kill(Player*, Player*, PlayerKillInfo*, int); // victim, killer (NULL = suicide/fall), info, skip_rewards
 int player_change_health(Player*, Player*, float, int); // victim, dealer, damage (<0 heals), crit; 1 = victim died (authority only)
 void player_score(Player*, int, int); // player, amount, is_kill_reward
 void player_queue_input(Player*, const Input*);
+int player_accept_input(Player*, Input*); // a network frame: v3.1.1 inputDecode checks (finite, delta clamp, seq floor, 240 cap); 1 = queued
 void player_proc_input(Player*, const Input*, int, int);
+float player_round3(float v); // JS v.round(3); procInputs rounds delta (ms), yaw and pitch (0.001 rad)
+void player_scroll_weapon(Player*, int dir, int recon); // manager.reload(player, +-1): wheel / melee on melee
 void player_update(Player*, float);
+float player_lerp_angle(float a, float b, float t); // index.js Math.lerpAngle (remote yaw/pitch interpolation)
 void player_reset_feel(Player*); // spawn: step/bob/lean/recoil animation state back to rest
 void player_inspect_weapon(Player*); // wInspect: toggle the weapon inspect (local player, inspKey)
 void player_cancel_inspect(Player*);
@@ -726,6 +780,10 @@ typedef struct {
     // local_game.c), whose game is also its render state, rebuilds that player's meshes
     // around it. NULL elsewhere (server, client mirror: the LOADOUT/TEAM events do it).
     void (*player_changing)(const struct Game_t*, Player*, int done);
+    // endGame(): player.reward, the KR this round earns (v3.1.1 game.js: accounts only,
+    // min(premiumT ? 40 : 30, floor(score * rewardMlt / 100)), none in hosted games). The
+    // server knows the accounts (server/src/accounts.c); NULL = 0 (guests / offline).
+    int (*reward)(struct Game_t*, const Player*);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -756,6 +814,7 @@ typedef struct {
     float yaw_dir;      // xD (yaw - PI) and yD (pitch) of the flight
     float pitch_dir;
     float range;
+    int ai_kind;        // projectiles.stored index of an AI shot (owner -1, "orb_0"), 0 = a player's weapon
     ProjectileConfig config;
 } GameProjectile;
 
@@ -812,6 +871,7 @@ typedef struct Game_t {
     unsigned char end_keep_players:1;
     GameHooks hooks;
     GameProjectile projectiles[GAME_MAX_PROJECTILES];
+    struct GameAIs_t *ai;         // Krunker game.AI (shared/include/ai.h): NULL until the first AI
 
     float nuke_timer;
     Player *nuke_player;
@@ -833,6 +893,8 @@ int game_is_authority(const Game*);      // server or local game: runs damage/ki
 // io_ent spawn rules: a ready round, not the end screen, not alive, config.deathDelay since
 // the last death, lives left (`player` NULL: first spawn). Server and offline client alike.
 int game_can_spawn(const Game*, const Player*);
+int game_end_late_spawn(const Game*, const Player*); // ENT while the round is over (vote window): spawn anyway
+void game_send_end_late(Game*, int uid);              // then the "end" with didWin -1 for that uid
 void game_player_changing(const Game*, Player*, int done); // GameHooks.player_changing, when set
 void game_send(Game*, int uid, int type, const void*, uint16_t); // through hooks.send
 Player *game_find_player(Game*, int uid);
@@ -840,6 +902,46 @@ void game_sync_leaders(Game*, int uid);  // LEADERBOARD to `uid` (or NET_TARGET_
 void game_start_round(Game*);            // fresh round timer + stats (after game_init)
 void game_end_round(Game*);              // Krunker endGame(3): END packets, players cleared
 void game_set_round_time(Game*, float seconds); // debug: seconds left in the running round (TIMER goes out next tick)
+// Interaction (shared/src/interact.c): players.interact / the terminal checks of Player.
+#define GAME_TERMINAL_RADIUS 7.0f      // addTerminal tRadius
+#define GAME_INTERACT_TIMER 0.1f       // config.interactTimer (s)
+int  game_terminal_in_range(const Game*, const Player*, int prompt); // map object index of a terminal the player can open, -1 none; prompt: skip noMsg ones
+void game_player_interact(Game*, Player*, int action, int secondary); // "int": sends NET_PACKET_TERMINAL for every terminal in range (authority)
+// players.js changeInteract priorities: the #interactMsg line the local player gets this tick.
+typedef enum {
+    GAME_INTERACT_NONE = -1,
+    GAME_INTERACT_GATE = 0,       // "Press [key] to Open/Close gate [price]"
+    GAME_INTERACT_BANK = 1,       // deposit box: deposit / withdraw
+    GAME_INTERACT_TERMINAL = 2,   // "Press [key] to Open Terminal"
+    GAME_INTERACT_TRIGGER = 4,    // onInteract trigger: "Press [M1] to Interact" (priority 1)
+} GameInteractType;
+#define GAME_INTERACT_RADIUS 7.0f      // addGate / addBank / addTerminal tRadius
+int game_interact_prompt(const Game*, const Player*, int *object_index); // GameInteractType, object index (or -1)
+
+// Map triggers, interfaces, check points, teleporters (shared/src/triggers.c).
+typedef enum {
+    GAME_HIT_SHOT,          // hitscan: onShoot / onDamage
+    GAME_HIT_MELEE,         // melee swing: onMelee / onDamage / onPunch (knife thrown)
+    GAME_HIT_PROJECTILE,    // projectile: onShoot / onDamage / onProjectile (+ onThrowingMelee for the knife)
+} GameHitKind;
+struct GameAI_t;
+void game_on_trigger(Game*, Player *source, Object *object, int *chain); // game.onTrigger (authority); chain NULL starts one
+void game_trigger_ai_death(Game*, Player *source, struct GameAI_t *ai); // AI.kill: onAIDeath -> game.onTrigger(source, ai)
+int  game_object_event(const Object*);                  // the object's TriggerEvent (TRIGGER_EVENT_NONE without one)
+void game_object_hit(Game*, Object*, Player *dealer, float damage, int thrown_melee, int kind); // a shot / swing / projectile reached a map object
+void game_destroy_object(Game*, Object*, Player *by);   // health 0: active = false, destObjs, "do"
+void game_respawn_object(Game*, Object*, int *chain);   // "ro": active again, onRespawn
+void game_set_gate(Game*, Object*, int active);         // "gte"
+void game_set_checkpoint(Game*, Player*, Object*);      // setCheckPoint ("chp" from the authority)
+void game_check_teleport(Game*, Player*, Object*);      // checkTeleport (client prediction and authority)
+// players.changePosition(player, x, y, z, recon, stopMomentum, dir): recon sends NET_PACKET_POSITION
+void game_change_position(Game*, Player*, vec3 feet, int recon, int stop_momentum, int has_direction, int direction);
+void game_tick_map_objects(Game*, float delta_ms);      // teleporter cooldowns; authority: onTimer triggers, destructible respawns
+void game_send_object_state(Game*, int uid);            // init dest / gates / banks for a joiner
+int  game_spawn_at_checkpoint(Game*, Player*);          // respawn at the player's check point (authority); 1 = moved
+// game.playSound -> "s" to every connection: `uid` >= 0 plays at that player (playerSound
+// sid), else at `position`. Names: config.emitterSounds / networkSounds, "asset:<id>" user assets.
+void game_play_sound(Game*, const char *name, int uid, vec3 position, float volume, float rate);
 void game_set_endless(Game*, int on);   // /endless: stop the round clock (TIMER 0) / resume it with a fresh round length
 void game_send_round_state(Game*, int uid); // TIMER (+ END while the end screen is up) for a joiner
 void game_player_left(Game*, Player*);   // drop references (nuke, damage) to a leaving player
@@ -891,6 +993,8 @@ typedef enum {
     NET_PACKET_ERROR = 30,       // S->C right before the server closes the connection: NetErrorPacket (Krunker "error")
     NET_PACKET_VOICE_SEND = 31,  // C->S: NetSocialChunk pieces of one voice clip, a data URL (Krunker "vc", shared/include/voice.h)
     NET_PACKET_VOICE = 32,       // S->C: NetSocialChunk pieces of one relayed clip + alias + sid (Krunker "vc")
+    NET_PACKET_BILLBOARD = 33,   // S->C before every INIT: NetBillboardPacket (Krunker init "bill" -> game.updateBillboards)
+    NET_PACKET_PLAYER_INFO = 34, // S->C after SPAWN: NetPlayerInfoPacket, a player's account (level, clan, flags) for HUD/nametags
     // Game mode packets (shared/src/modes, Krunker v3.1.1 modes.js), numbered from 40 so the
     // core protocol above can grow without colliding.
     NET_PACKET_MODE_STATE = 40,  // S->C: NetModeStatePacket, full mode snapshot (round start, joiners)
@@ -909,11 +1013,40 @@ typedef enum {
     NET_PACKET_REFILL = 53,      // S->C to the player, no payload: the thrown knife is back (Krunker "rfl" -> refillKnife)
     NET_PACKET_KILL_MEDALS = 54, // S->C to the killer: NetKillMedalsPacket, kills.js reward list (Krunker "6")
     NET_PACKET_ASSIST = 55,      // S->C to the assister, no payload: the "Assist" medal (Krunker "10")
+    NET_PACKET_KILL_STREAK = 56, // S->C to all: NetKillStreakPacket, a 5/10/15.. kill streak chat line (Krunker "kst")
     // Chat command effects (shared/src/chat_commands.c), numbered from 60.
     NET_PACKET_CHEAT = 60,       // S->C: NetCheatPacket (Krunker "noc" / "unl" / "fh" to the target, "borders" / "forcecol" to all)
+    // Interaction (shared/src/interact.c)
+    NET_PACKET_INTERACT = 61,    // C->S: NetInteractPacket (Krunker "int" action [, secondary])
+    NET_PACKET_TERMINAL = 62,    // S->C to the player: NetTerminalPacket (Krunker "ot" uid: openTerminal)
+    NET_PACKET_TERMINAL_MSG = 63,// C->S: NetTerminalMsgPacket (Krunker "tmc" uid, text)
     // Social hub (shared/include/social.h; Krunker's /api/ws socket + /api/* routes), numbered from 70.
     NET_PACKET_SOCIAL_REQUEST = 70, // C->S: NetSocialChunk pieces of one JSON request frame
     NET_PACKET_SOCIAL_REPLY = 71,   // S->C: NetSocialChunk pieces of one JSON array of reply frames
+    // Backend (doc/backend.md "Game server"): who is joining, sent by the client right after HELLO.
+    NET_PACKET_JOIN = 72,           // C->S: NetJoinPacket (brain seek-game key and/or session token; none = guest)
+    NET_PACKET_AUTH_CHALLENGE = 73, // S->C right after HELLO: NetAuthChallengePacket (online_mode join, shared/include/auth_join.h)
+    NET_PACKET_REDIRECT = 74,       // S->C: NetRedirectPacket, move to another server (doc/backend.md 8.10)
+    // The v3.1.1 offline build's developer-tool packets (mod/mods.ts keys, server/packetHandlers.ts), from 80.
+    NET_PACKET_TELEPORT = 80,      // C->S: NetTeleportPacket (Krunker "tp" x, y, z: Ctrl TP's camera-ray hit, y + player height)
+    NET_PACKET_TELEPORT_ACK = 81,  // S->C to the sender: NetTeleportPacket, the feet position io_tp moved it to (its "l" ack)
+    NET_PACKET_NOTIFY = 82,        // S->C: NetNotifyPacket (Krunker "notify": the mod's notify() toast, e.g. "DEV only")
+    NET_PACKET_CLEAR_LOG = 83,     // C->S, no payload (Krunker "clearLog", the mod's F1: the server clears its terminal)
+    NET_PACKET_PREMIUM_ACTION = 84, // C->S: uint8 index 0..3 (Krunker "prmA": premiumKeys noclip / god / kill / smite, requirePremiumCheatPerm)
+    NET_PACKET_FORWARDED = 85,     // C->S, first packet of a net-bridge connection only: NUL-terminated real peer address (NET_FORWARDED_ADDRESS_SIZE)
+    // AI (shared/src/ai.c, shared/include/ai.h), numbered from 90.
+    NET_PACKET_AI_ADD = 90,        // S->C: NetAIAddPacket (Krunker "aai": AI.cSpawn)
+    NET_PACKET_AI_SYNC = 91,       // S->C: NetAISyncPacket (Krunker "ai": AI.syncAll)
+    // Map triggers, interfaces, check points (shared/src/triggers.c), numbered from 100.
+    NET_PACKET_OBJECT_STATE = 100, // S->C: NetObjectStatePacket (Krunker "do" / "ro" / "gte" / "bnk", init dest/gates/banks)
+    NET_PACKET_CHECKPOINT = 101,   // S->C to the player, no payload (Krunker "chp" -> checkpointSet: "Checkpoint!")
+    NET_PACKET_SOUND = 102,        // S->C: NetSoundPacket (Krunker "s" from game.playSound: Broadcast Sound)
+    NET_PACKET_JUMP_SCARE = 103,   // S->C to the player: NetJumpScarePacket (Krunker "scr" -> jumpScare)
+    NET_PACKET_POSITION = 104,     // S->C to the player: NetPositionPacket (players.changePosition with doRecon)
+    NET_PACKET_POPUP = 105,        // S->C: NetPopupPacket (Krunker "am" [text, null] of Broadcast / Send Popup: 70 chars)
+    // Client prediction / server reconciliation (net-recon), numbered from 110.
+    NET_PACKET_RECON = 110,        // S->C to the player: NetReconPacket (Krunker "l" [lPacket, true]: reconcilePlayer)
+    NET_PACKET_INPUT_BATCH = 111,  // C->S: NetInputBatchPacket, the frames of one clientSendRate window (Krunker "q")
 } NetPacketType;
 
 #define NET_MAP_MAX_SIZE (4u * 1024u * 1024u) // largest map JSON streamed to clients
@@ -925,6 +1058,12 @@ typedef enum {
 #define NET_CHAT_BURST_WINDOW 1.0f  // seconds
 #define NET_CHAT_BURST_MAX 3        // messages per window; more closes the connection (4008)
 #define NET_PING_INTERVAL 5.0f      // seconds between ping probes (io_po setTimeout 5e3)
+#define NET_RECON_SEND_HZ 1         // v3.1.1 config.syncFrequency: the "l" reconciliation rate
+#define NET_RECON_SEQ_ALL INT32_MAX // "l" sn of a server-driven snap (MAX_SAFE_INTEGER): drop every pending input
+#define NET_INPUT_SEND_INTERVAL (1.0f / 30.0f) // v3.1.1 config.clientSendRate (1000 / 30 ms): one "q" per window
+#define NET_INPUT_BATCH_MAX 20      // frames per NetInputBatchPacket (a 1000+ fps window flushes early)
+#define NET_RECON_PENDING_MAX 2000  // reconcilePlayer: tmpInpts.length >= 2000 drops pending inputs
+#define NET_STATE_SEND_HZ 10        // v3.1.1 gameserver.ts K_PACKET_FREQUENCY ("k" sendRateA); not applied yet: STATE still goes out every tick
 #define NET_PING_EWMA_ALPHA 0.35f   // packetHandlers.ts PING_EWMA_ALPHA
 #define NET_PING_MAX_MS 5000        // PING_MAX_REASONABLE_MS
 
@@ -964,11 +1103,14 @@ typedef struct {
     int32_t secondary_index; // Krunker ent[5] selectedSecondaryIndex: weapon id, -1 = class default (optional: 4-byte ENT = class only)
     PlayerCosmetics cosmetics; // optional (8-byte ENT = class + secondary): none
     uint8_t spectate;          // Krunker ent[6] (toggleSpect): join as a spectator, no spawn (optional: only sent when 1)
+    uint8_t slid_cont;         // Krunker ent[15] settings.tmp.slidCont ("Non FPS Sliding"): 1 = the slide follows the
+                               // view (players.js procInputs). Optional: shorter ENTs read as 1 (the setting's default).
 } NetEntPacket;
 
 #define NET_ENT_PACKET_MIN_SIZE 4 // class_index only (older clients / bridges)
 #define NET_ENT_PACKET_V2_SIZE 8  // class_index + secondary_index (before cosmetics)
-#define NET_ENT_PACKET_V3_SIZE (offsetof(NetEntPacket, spectate)) // up to cosmetics: what a client sends to play
+#define NET_ENT_PACKET_V3_SIZE (offsetof(NetEntPacket, spectate)) // up to cosmetics (older clients)
+#define NET_ENT_PACKET_V4_SIZE (offsetof(NetEntPacket, slid_cont) + 1) // + spectate + slid_cont: what a client sends
 
 typedef struct {
     uint8_t spectating;      // 1: this connection spectates now (no player; every player's state is streamed to it)
@@ -1004,9 +1146,11 @@ typedef struct {
     uint8_t flags;
     uint8_t swap;
     uint8_t slowdown; // Input.slowdown in tenths, clamped to 0..10 (outside [0, 1] it scales like the bound)
+    int8_t scroll;    // Input.scroll (input[10]): -1 / 0 / 1; absent (22/23-byte senders) = 0
 } NetInputPacket;
 
 #define NET_INPUT_PACKET_V1_SIZE (offsetof(NetInputPacket, slowdown)) // 22 bytes: no slowdown (older senders, net-bridge)
+#define NET_INPUT_PACKET_V2_SIZE (offsetof(NetInputPacket, scroll)) // 23 bytes: no scroll
 
 typedef struct {
     int32_t uid;
@@ -1020,6 +1164,40 @@ typedef struct {
     float aim_val;
     float crouch_val;
 } NetStatePacket;
+
+// Krunker "l" (packetHandlers.ts buildLPacket, index.js reconcilePlayer): the owner's
+// authoritative movement state right after the server processed input `ack_seq`; the client
+// snaps to it and replays its pending (unacked) inputs. Sent at NET_RECON_SEND_HZ and right
+// after server-driven position changes (spawn, teleport, changePosition recon, noclip flips)
+// with ack_seq NET_RECON_SEQ_ALL. noclip is a KrunkNative field (v3.1.1 sends "noc" alone).
+#define NET_RECON_ON_GROUND  0x01
+#define NET_RECON_DID_JUMP   0x02
+#define NET_RECON_DID_JUMP_W 0x04
+#define NET_RECON_ON_LADDER  0x08
+#define NET_RECON_CAN_SLIDE  0x10
+#define NET_RECON_ON_TERRAIN 0x20
+#define NET_RECON_NOCLIP     0x40
+typedef struct {
+    int32_t ack_seq;        // [0] inputSN
+    float position[3];      // [2..4] feet
+    float velocity[3];      // [6] velX, [5] velY, [7] velZ
+    float yaw;              // [8]
+    float aim_val;          // [14]
+    float crouch_val;       // [15]
+    int32_t loadout_index;  // [16] weaponIndex (players.reload set)
+    float slide_timer;      // [17]
+    float x_vel_cylinder;   // [21] xVelC
+    float z_vel_cylinder;   // [22] zVelC
+    uint8_t on_wall;        // [12]
+    uint8_t flags;          // NET_RECON_*: [9] onGround [10] didJump [11] didJumpW [13] onLadder [18] canSlide [19] onTerrain
+} NetReconPacket;
+
+// Krunker "q": consecutive input frames (seq ascending) as whole NetInputPackets.
+typedef struct {
+    uint8_t count;
+    NetInputPacket frames[NET_INPUT_BATCH_MAX];
+} NetInputBatchPacket;
+_Static_assert(sizeof(NetInputBatchPacket) <= NET_MAX_PAYLOAD, "NetInputBatchPacket exceeds NET_MAX_PAYLOAD");
 
 typedef struct {
     char text[NET_CHAT_TEXT_SIZE];  // NUL-terminated UTF-8
@@ -1051,6 +1229,7 @@ typedef struct {
     int32_t damage;        // Math.round(dmg)
     uint8_t crit;          // headshot
     uint8_t kill;
+    uint8_t ai;            // target_uid is an AI sid (Krunker "4" fifth value isAI)
 } NetHitPacket;
 
 typedef struct {
@@ -1088,7 +1267,12 @@ typedef struct {
     int32_t next_round;    // seconds until the next round
     int32_t winner_uid;    // -1 none
     NetLeaderboardPacket board;
+    // endData.ed "reward" column (config.endStats): KR of board.entries[i], 0 = "NONE"
+    // (guests, hosted games, noReward modes). Optional: a NET_END_PACKET_V1_SIZE END has none.
+    int32_t rewards[GAME_LEADERBOARD_MAX];
 } NetEndPacket;
+
+#define NET_END_PACKET_V1_SIZE (offsetof(NetEndPacket, rewards))
 
 typedef struct {
     uint32_t seq;
@@ -1121,6 +1305,7 @@ typedef struct {
     float velocity[3];     // units/ms
     float gravity;         // units/ms^2
     float range;
+    uint8_t ai_kind;       // AI shot: projectiles.stored[ai_kind] drawn as "orb_0" (weapon_index unused), 0 none
 } NetProjectilePacket;
 
 typedef struct {
@@ -1159,6 +1344,72 @@ typedef struct {
     char code[8];          // Krunker error code ("000005" = idle kick)
 } NetErrorPacket;
 
+// NET_PACKET_BILLBOARD: the server's billboard config (v3.1.1 game.updateBillboards: txt,
+// txtCol, bgCol) painted on every "sad" BILLBOARD map object. Empty fields = the engine
+// defaults ("Your Ad Here", #e3e3e3, #000000).
+typedef struct {
+    char txt[64];
+    char txt_col[8];       // "#rrggbb"
+    char bg_col[8];
+} NetBillboardPacket;
+
+// NET_PACKET_PLAYER_INFO: account data of a player (uid) for the scoreboard, nametags
+// and kill feed. account_id / level 0 = guest.
+enum {
+    NET_PLAYER_INFO_PREMIUM = 1 << 0,
+    NET_PLAYER_INFO_VERIFIED = 1 << 1, // featured / verified account
+    NET_PLAYER_INFO_DEV = 1 << 2,
+    NET_PLAYER_INFO_MOD = 1 << 3,
+};
+
+typedef struct {
+    int32_t uid;
+    int32_t account_id;
+    int32_t level;
+    uint8_t flags;         // NET_PLAYER_INFO_*
+    char clan[8];          // clan tag, "" none
+} NetPlayerInfoPacket;
+
+// NET_PACKET_JOIN (C->S right after HELLO, before the first ENT). Every field is a
+// NUL-terminated string, "" = not given. game_id + client_key: what the brain's
+// /mm/seek-game returned (one-time key the brain also sent to this server); session:
+// the social login session token. No JOIN at all (offline, --connect, old clients) or
+// all empty = guest. name: guest nickname wish (ignored for accounts). A JOIN without
+// the trailing name (NET_JOIN_PACKET_V1_SIZE bytes) is accepted.
+typedef struct {
+    char game_id[48];
+    char client_key[352];  // the brain's signed join ticket (JWS HS256, ~250 chars)
+    char session[64];
+    char name[32];
+    char password[16];     // server password (gameserver.password / server.cfg sv_password), "" none
+} NetJoinPacket;           // 512 bytes = NET_MAX_PAYLOAD
+
+#define NET_JOIN_PACKET_V1_SIZE (offsetof(NetJoinPacket, name))
+#define NET_JOIN_PACKET_V2_SIZE (offsetof(NetJoinPacket, password)) // before the password field
+
+// NET_PACKET_REDIRECT (S->C, console `send`): leave this server for another one of the
+// network. game_id set (coordinator lobby id "<node>:<lobby>"): the client seeks it through
+// its matchmaker (/mm/seek-game?game=, a fresh ticket); else host:port is a direct connect.
+typedef struct {
+    char game_id[48];
+    char host[128];
+    uint16_t port;
+    char reason[64];       // shown while switching ("Moving to Sandstorm...")
+} NetRedirectPacket;
+
+// NET_PACKET_AUTH_CHALLENGE (S->C right after HELLO; online_mode servers always send it,
+// offline ones may). Mojang-style join (shared/include/auth_join.h): the client picks a
+// client nonce, POSTs <auth>/auth/join {token, serverHash = kn_server_hash(server_nonce,
+// public_key, client_nonce)} and then sends JOIN with name = account username and
+// client_key = "hj1:" + client nonce; the server asks <auth>/auth/hasJoined.
+// Strings NUL-terminated; public_key "" while the transport has no key.
+typedef struct {
+    char server_nonce[33];  // 32 lowercase hex, random per server boot
+    uint8_t online_mode;    // 1 = accounts verified through the auth service; 0 = guests
+    char public_key[65];    // lowercase hex of the transport public key, "" = none
+    char auth_url[128];     // auth service base the server verifies against ("" = its default)
+} NetAuthChallengePacket;   // 227 bytes
+
 // NET_PACKET_CHEAT: what a chat command changed (shared/src/chat_commands.c). The
 // client applies it to its mirror and prints Krunker's line ("Noclip - Enabled", ...).
 typedef enum {
@@ -1173,6 +1424,76 @@ typedef struct {
     uint8_t flag;   // NetCheatFlag
     uint8_t on;
 } NetCheatPacket;
+
+// "int": 0 spray, 1 interact (gates / pickups / terminals; secondary = interactSecKey), 2 drop.
+typedef struct {
+    uint8_t action;
+    uint8_t secondary;
+} NetInteractPacket;
+
+typedef struct {
+    int32_t uid;    // the terminal's map object index (Krunker GameObject uid)
+} NetTerminalPacket;
+
+typedef struct {
+    int32_t uid;
+    char text[NET_CHAT_TEXT_SIZE]; // #terminalInput value (maxlength 70), NUL-terminated
+} NetTerminalMsgPacket;
+
+// io_tp: callers pass eye-height coordinates; the feet go EYE_OFFSET_Y below (playerHeight
+// 11 - cameraHeight 1.5).
+#define NET_TELEPORT_EYE_OFFSET (11.0f - 1.5f)
+typedef struct {
+    float x, y, z;
+} NetTeleportPacket;
+
+// NET_PACKET_FORWARDED: net-bridge writes it before any byte of its browser peer, so the server
+// can tell a bridged web client (whose TCP peer is the bridge on 127.0.0.1) from a client on its
+// own machine. Honoured only as the very first packet of a loopback connection.
+#define NET_FORWARDED_ADDRESS_SIZE 48
+
+#define NET_NOTIFY_TEXT_SIZE 96
+typedef struct {
+    char text[NET_NOTIFY_TEXT_SIZE]; // NUL-terminated; the client shows it as notify() innerHTML
+} NetNotifyPacket;
+
+// ---- map trigger packets (shared/src/triggers.c builds them)
+typedef enum {
+    NET_OBJECT_DESTROY = 0,     // "do" uid: active = false, destroyed (mesh hidden)
+    NET_OBJECT_RESPAWN = 1,     // "ro" uid: active again, health back (mesh shown)
+    NET_OBJECT_GATE = 2,        // "gte" uid, active: a gate opened (0) / closed (1)
+    NET_OBJECT_BANK = 3,        // "bnk" uid, deposited
+} NetObjectStateKind;
+
+typedef struct {
+    int32_t uid;                // map object index (Krunker GameObject uid)
+    uint8_t kind;               // NetObjectStateKind
+    int32_t value;              // gate: active; bank: deposited
+} NetObjectStatePacket;
+
+#define NET_SOUND_NAME_SIZE 24
+typedef struct {
+    char name[NET_SOUND_NAME_SIZE]; // sound name (config.emitterSounds / networkSounds entry)
+    int32_t uid;                // playerSound sid: play at that player (-1: at the position)
+    float position[3];
+    float volume;
+    float rate;
+} NetSoundPacket;
+
+typedef struct {
+    int32_t index;              // jumpScares[index]: 0 = image + sound
+} NetJumpScarePacket;
+
+typedef struct {
+    char text[TRIGGER_TEXT_MAX + 1]; // medal popup text, no score
+} NetPopupPacket;
+
+typedef struct {
+    float x, y, z;              // feet position
+    uint8_t stop_momentum;      // changePosition U: velocities 0, stepVal 0
+    uint8_t has_direction;      // changePosition V != null: yaw = -(dir + 1) * PI / 2
+    int32_t direction;
+} NetPositionPacket;
 
 // ---- game mode packets (shared/src/modes/mode_net.c builds them)
 #define NET_MODE_TEXT_SIZE 32
@@ -1281,6 +1602,7 @@ typedef enum {
     NET_MODE_STAT_CONVS,
     NET_MODE_STAT_LIVES,
     NET_MODE_STAT_ASSISTS,
+    NET_MODE_STAT_TIME,         // endForm.time: player.timer in tenths of a second + 1, 0 = "DNF"
     NET_MODE_STAT_COUNT
 } NetModeStat;
 
@@ -1311,6 +1633,11 @@ typedef struct {
     int32_t kills;                 // the killer's kills (Krunker "6" third value)
 } NetKillMedalsPacket;
 _Static_assert(sizeof(NetKillMedalsPacket) <= NET_MAX_PAYLOAD, "NetKillMedalsPacket exceeds NET_MAX_PAYLOAD");
+
+typedef struct {
+    int32_t uid;                   // the killer
+    int32_t streak;                // killStreak, a multiple of 5
+} NetKillStreakPacket;
 #pragma pack(pop)
 
 typedef struct {
@@ -1329,9 +1656,18 @@ int net_buffer_push(NetPacketBuffer*, const void*, size_t);
 int net_buffer_next(NetPacketBuffer*, NetPacket*);
 void net_packet_from_input(NetInputPacket*, const Input*);
 void net_packet_to_input(Input*, const NetInputPacket*);
-int net_packet_read_input(NetInputPacket*, const NetPacket*); // full or 22-byte v1 INPUT; 0 = malformed
+int net_packet_read_input(NetInputPacket*, const NetPacket*); // full, 23-byte v2 or 22-byte v1 INPUT; 0 = malformed
 void net_packet_from_player(NetStatePacket*, const Player*);
 void net_packet_apply_player(Player*, const NetStatePacket*);
+void net_packet_from_recon(NetReconPacket*, const Player*, int32_t ack_seq); // buildLPacket
+void net_packet_apply_recon(Player*, const NetReconPacket*);                // reconcilePlayer's snap (no replay)
+int  net_packet_read_input_batch(NetInputBatchPacket*, const NetPacket*);
+size_t net_reconcile(Player*, const NetReconPacket*, Input *pending, size_t count, int move_lock); // snap + replay, returns pending left
+void net_recon_take_vel_obj(Player*, Input *pending, size_t count); // the last input's shot knockback -> its velObj
+int  net_recon_due(Player*, double now, double *next_at); // the server's "l" schedule: 1 = send one now
+// io_tp's ack state: feet at x/y/z, no velocity, on the ground, no jump/wall/ladder/crouch/
+// slide carry-over, canSlide (server, offline game and the client's own copy).
+void net_player_teleport(Player*, float x, float y, float z);
 // Chat helpers shared by the native and the local server.
 int net_chat_sanitize(char *out, size_t size, const char *in, size_t length); // 1 = non-empty message
 typedef struct {
@@ -1358,6 +1694,13 @@ int asset_prefetch(const char*);
 // arrived or failed, so a load step pays one round trip instead of one per file. Native: no-op.
 void asset_prefetch_wait(const char *const *paths, size_t count);
 int read_file(const char*, unsigned char**, size_t*);
+// Path redirect consulted by read_file() (and the client's texture loader): the client's
+// resource swapper (client/src/ui/ui_client_settings.c) maps a file to its swapped copy.
+// The hook returns 1 and writes the replacement path into `out` when it redirects. No
+// hook (the server, tools, tests): every path is read as given.
+typedef int (*FileRedirectFn)(const char *path, char *out, size_t n);
+void file_set_redirect(FileRedirectFn fn);
+const char *file_redirect(const char *path, char *buf, size_t n); // `buf` when redirected, else `path`
 int load_json_file(const char*, cJSON**);
 int parse_hex_color(const char*, vec4*);
 vec4 hex_to_vec(int);

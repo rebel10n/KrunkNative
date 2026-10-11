@@ -1,0 +1,55 @@
+# {{ ansible_managed }} (deploy/ansible role kn_gameserver)
+# KrunkNative dedicated server instance %i: {{ kn_etc_dir }}/server-%i.cfg.
+[Unit]
+Description=KrunkNative game server %i
+After=network-online.target
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User={{ kn_user }}
+Group={{ kn_group }}
+# server_bin resolves ./assets (maps) relative to the working directory.
+WorkingDirectory={{ kn_svc_current }}
+ExecStart={{ kn_svc_current }}/bin/server_bin --headless --no-cli --cfg {{ kn_etc_dir }}/server-%i.cfg
+# SIGTERM: drain the round (shutdown_grace), finder shutdown heartbeat, exit.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+StateDirectory=krunknative/gs-%i
+LogsDirectory=krunknative
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+ReadOnlyPaths={{ kn_svc_base }} {{ kn_etc_dir }}
+# Fair share with the host's other services.
+CPUWeight=80
+Nice=0
+
+[Install]
+WantedBy=krunknative.target

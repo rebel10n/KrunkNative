@@ -41,6 +41,7 @@ typedef struct EditorObject {
     unsigned int helper_geometry_owned:1;
     unsigned char highlighted:1; // group-selection pending
     cJSON *history;        // last serialized state seen by the history poll (initHistory)
+    cJSON *scratch;        // properties the object panel edits that ObjectInstance never serializes (aiName, canWallJump, AI behaviour, ...)
 } EditorObject;
 
 typedef struct {
@@ -132,6 +133,8 @@ typedef struct {
     int dirty_storage;     // autosave the map to storage
     double storage_next;
     char status[256];
+    double script_at;      // KRUNKNATIVE_EDITOR_SCRIPT (editor.c)
+    int script_done;
 } Editor;
 
 extern Editor g_ed;
@@ -171,6 +174,7 @@ void ed_obj_paste(void);
 void ed_obj_create(int prefab);                    // createObjects[i]()
 void ed_obj_create_placeholder(void);
 void ed_obj_toggle_prop(const char *prop);         // toggleProp (shift+C/V)
+void ed_obj_toggle_prop_group(const char *prop);   // the members of a selected group, else toggleProp
 void ed_obj_flip_xz(void);
 cJSON *ed_obj_serialize(const EditorObject *o);    // copy of data, normalised
 int ed_obj_count_class(const EditorObject *o);     // cntCheck
@@ -188,7 +192,17 @@ void ed_history_execute(int redo);
 void ed_history_poll(void);
 void ed_history_clear(void);
 
-void ed_group_create(void);                        // copyObjects(false, true): pending group -> placeholder
+void ed_group_create(void);                        // copyObjects(false, true): objects under the selected placeholder -> group
+void ed_group_from_pending(void);                  // updateGroupSelection: picked objects -> group
+// the editor.js methods with an explicit target (NULL = the selection; the Quick GUI passes its object)
+void ed_duplicate_object(EditorObject *e);
+void ed_duplicate_group(EditorObject *e);
+void ed_remove_group(EditorObject *e);
+void ed_copy_objects(int cut, int group, EditorObject *sel);
+cJSON *ed_copy_group(EditorObject *e);             // copyGroup: sets g_ed.copy (borrowed)
+void ed_paste_objects(EditorObject *e);
+int ed_is_grouped(uint32_t uuid);
+void ed_fix_hitbox(EditorObject *e);               // editor_quickgui.c: fixHitbox (Shift+F)
 void ed_group_stop(int all);
 void ed_groups_sync(void);                         // updateGroups: members follow their placeholder
 EditorGroup *ed_group_of(const EditorObject *owner);
@@ -323,3 +337,57 @@ void ed_json_set_bool(cJSON *obj, const char *key, int v);
 double ed_json_num(const cJSON *obj, const char *key, double fallback);
 const char *ed_json_str(const cJSON *obj, const char *key, const char *fallback);
 int ed_json_truthy(const cJSON *v);
+
+// ---- editor_prompt.c: window.prompt() / confirm() stand-ins (in-page #knPrompt dialog)
+typedef void (*EdPromptFn)(void *user, const char *value); // value NULL = cancelled
+void ed_prompt(const char *message, const char *def, EdPromptFn cb, void *user);
+void ed_confirm(const char *message, EdPromptFn cb, void *user); // value "1" = OK
+void ed_prompt_cancel(void);
+int ed_prompt_open(void);
+void ed_prompt_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+
+// ---- editor_net.c: asset / mod / texture browsers (windows 2, 5, 7), publishing (social socket)
+// "Select Custom" / "Select Sound" / "Select Mod" buttons; c->arg: 0 selectModel (BOT assetID),
+// 1 selectTexture, 2 selectAudio (assetSound), 3 selectDeath, 4 selectIdle, 5 selectAttack,
+// 6 selectAgro, 7 selectMod
+void ed_net_select(EdCtl *c);
+int ed_net_window_gen(int index, EdBuf *out);           // windows 2, 5, 7, 8 into out; 0 = not one of them
+void ed_net_view_assets(int type);                      // viewAssets(type): the Assets window for a CUSTOM_ASSET / BOT model
+void ed_net_publish(void);                              // toolbar Publish... (publishMap)
+void ed_net_frame(void);                                // page_tick after the 3D view is drawn (publish thumbnail)
+int ed_net_keydown(const HtmlEvent *ev);                // Enter in a browser search field; 1 = handled
+void ed_net_script_publish(const char *arg);             // KRUNKNATIVE_EDITOR_SCRIPT "publish[:category]"
+void ed_net_reset(void);                                // page leave: drop cached lists
+void ed_net_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+
+// ---- editor_terrain.c: Terrain / Zone panels, Editor.regenTerrain / regenZone (meshes in g_ed.scene)
+int ed_terrain_panel_show(const char *name);            // "terrain" "zone"; 0 = not one of them
+void ed_terrain_regen(void);
+void ed_zone_regen(void);
+void ed_terrain_fini(void);                              // page_leave: drop both before the scene
+
+// ---- editor_tools.c: Customize / Tools / Grouping panels, replaceObject, createGroup, loadFile
+int ed_panel_right_begin(EdBuild *b, const char *name);  // editor_panels.c: 0 = another panel is locked
+int ed_tools_panel_show(const char *name);              // "customize" "tools" "grouping"; 0 = not one of them
+void ed_find_center(const cJSON *arr, double out[6]);   // findCenter: [x, minY, z, w, h, d]
+void ed_merge_objects(cJSON *arr);                      // mergeObjects
+void ed_reflect_array(cJSON *arr, int axis);            // reflect(e, t, false)
+void ed_obj_replace(EditorObject *target, const char *json, const char *type, int group); // replaceObject
+void ed_create_group(EditorObject *replaced, EditorObject **members, size_t count, double rot_y, int remove);
+void ed_json_input(int file);                           // jsonInput(file)
+void ed_json_input_for(int file, EditorObject *target); // jsonInput(file, t) (NULL = selection)
+void ed_export_group(void);                             // exportGroup (Object > Group > Prefab > Export)
+
+// ---- editor_quickgui.c: right-click Quick GUI, hitbox fixer, object painter
+void ed_quickgui_show(EditorObject *o, double fb_x, double fb_y); // updateQuickGUI
+void ed_quickgui_hide(void);
+int ed_quickgui_hidden(void);
+void ed_quickgui_reset(void);                           // page leave
+int ed_quickgui_button(int glfw_button);                // the Open On button (settings.quickGUIOpen)
+void ed_quickgui_cursor(double fb_x, double fb_y);      // title bar drag
+void ed_quickgui_release(void);
+int ed_object_painter_click(vec3 hit);                  // shift+click painter; 1 = handled
+void ed_quickgui_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+typedef void (*EdFileFn)(void *user, const char *path);
+void ed_pick_file(const char *accept, EdFileFn fn, void *user); // loadFile: a picked file's path
+void ed_download(const char *text, const char *name);   // editor_io.c: download(text, name)

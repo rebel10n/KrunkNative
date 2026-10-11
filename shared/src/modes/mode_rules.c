@@ -2,6 +2,7 @@
 // winConditions, endSorts, gameStarts, onKills and the waitTimer triggers that pick
 // seekers / bosses / stalkers / traitors (106.js pickSeeker, infectRandom, ...).
 #include "mode_internal.h"
+#include <ai.h>
 #include <string.h>
 
 // ------------------------------------------------------------------ helpers
@@ -70,6 +71,8 @@ int mode_cond_race(const Game *game) {
 
         player->mode.finished = 1;
         player->mode.race_time = mode->round_clock;
+        player->mode.has_timer = 1;                 // c.players.list[d].timer = c.lastTimer
+        player->mode.timer = mode->round_clock;
 
         if (!mode->wait_timer_count) {
             const ModeWaitTimer end = {.time = 10.0f, .msg = "race ends in ", .trigger = mode_trigger_skip, .cont_time = 1};
@@ -136,13 +139,41 @@ int mode_cond_def(const Game *game) {
     return defenders >= 1 && attackers >= 1;
 }
 
-// raid: someone still has a life (the boss AI half is not ported: no AI in KrunkNative).
+// raid: someone still has a life; once the behavType 2 boss AI (Lord of Souls) is dead
+// and no wait timer runs, "raid ends in " 10 s ends the round (gameTimer = "skip").
+// Every player's "time" end stat becomes the round clock shown at that moment (lastTimer).
 int mode_cond_raid(const Game *game) {
-    for (size_t i = 0; i < game->player_count; i++) {
+    int alive = 0;
+    for (size_t i = 0; i < game->player_count && !alive; i++) {
         const Player *player = game->players[i];
-        if (player && player->mode.lives > 0) return 1;
+        alive = player && player->mode.lives > 0;
     }
-    return 0;
+    if (!alive) return 0;
+
+    for (int i = 0; game->ai && i < game->ai->count; i++) {
+        const GameAI *ai = &game->ai->ais[i];
+        if (!ai->active && ai->behaviour_type == 2 && !game->mode->wait_timer_count) {
+            for (size_t p = 0; p < game->player_count; p++) { // players.list[g].timer = c.lastTimer
+                Player *player = game->players[p];
+                if (!player) continue;
+                player->mode.has_timer = 1;
+                player->mode.timer = game->round_timer;
+            }
+            const ModeWaitTimer end = {.time = 10.0f, .msg = "raid ends in ", .trigger = mode_trigger_skip};
+            mode_push_wait_timer((Game *) game, &end, 1);
+        }
+    }
+    return 1;
+}
+
+// trai onKill: outside the wait timers, "<victim>'s Ghost" (AI kind 0) where they died.
+void mode_kill_trai(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) killer;
+    (void) weapon_id;
+    if (game->mode->wait_timer_count) return;
+    char name[GAME_AI_NAME_SIZE];
+    snprintf(name, sizeof(name), "%s's Ghost", victim->name);
+    game_ai_spawn(game, 0, 0, name, victim->position, NULL);
 }
 
 int mode_cond_lives_ffa(const Game *game) {

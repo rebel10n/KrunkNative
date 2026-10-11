@@ -1,0 +1,22 @@
+# KrunkNative multi-region inventory for deploy/deploy.sh (copy to deploy/inventory).
+#
+# One line per host:  <ssh host>  key=value ...
+#   region=<id>          v3.1.1 region id (us-nj, de-fra, sgp, ... see config.regionNames)
+#   brain=1              run kn_brain here (every region should run one: leader free,
+#                        game servers connect to their region's brain over plain ws://)
+#   gameservers=<n>      number of kn-gameserver@ instances (ports first_port..+n-1)
+#   first_port=21015     first game server TCP port (open it in the firewall)
+#   node_prefix=NY       node ids NY1, NY2, ... (shown as region label of custom games)
+#   public_host=<name>   what clients connect to (default: the ssh host)
+#   bridge=1             run net-bridge --web (web client + /native) behind nginx
+#   nginx=brain|node     render deploy/nginx/<x>.conf.template on this host
+#   brain_url=ws://...   brain for the game servers (default ws://127.0.0.1:<brain_port>/mm/internal/ws)
+#
+# All brains share ONE PostgreSQL (database.* in the deployed config.json); give it a
+# private address reachable from every brain host. Global settings are the DEPLOY_*
+# variables at the top of deploy/deploy.sh (override them in deploy/deploy.env).
+
+nj.example.com    region=us-nj   brain=1 gameservers=4 first_port=21015 node_prefix=NJ  bridge=1 nginx=brain
+ny.example.com    region=us-nj   gameservers=4 first_port=21015 node_prefix=NY  bridge=1 nginx=node brain_url=ws://10.0.0.2:5050/mm/internal/ws
+fra.example.com   region=de-fra  brain=1 gameservers=2 first_port=21015 node_prefix=FRA bridge=1 nginx=node
+sgp.example.com   region=sgp     brain=1 gameservers=2 first_port=21015 node_prefix=SGP bridge=1 nginx=node

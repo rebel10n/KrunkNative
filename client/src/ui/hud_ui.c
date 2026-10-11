@@ -26,6 +26,7 @@
 // client_enter_game() as soon as the page and the game are ready, so a headless
 // browser can screenshot the HUD without clicking Play; `?kn_hud_demo=1`
 // (KRUNKNATIVE_HUD_DEMO=1) adds kill-feed rows and hit markers on a loop.
+#include <player_accounts.h>
 #include <client.h>
 
 // Game-event entry points (prototypes belong in client/include/ui_logic.h):
@@ -377,15 +378,31 @@ static void hud_format_num(const int value, char *out, const size_t size) {
 // local player's row.
 static const char *g_board_prefix = "newL";
 
-static void hud_scoreboard_row_html(char *out, const size_t size, size_t *len, const int rank, const char *name, const int score, const int is_you) {
+// acc: the player's account (NET_PACKET_PLAYER_INFO from a brain-linked server), NULL for
+// guests: premiumT "beenhere" / featured "check_circle" icons and the " [clan]" tag.
+static void hud_scoreboard_row_html_acc(char *out, const size_t size, size_t *len, const int rank, const char *name, const int score, const int is_you,
+                                        const NetPlayerInfoPacket *acc) {
     char num[32];
     const char *pre = g_board_prefix;
     hud_format_num(score, num, sizeof(num));
-    hb_append(out, size, len, "<div class='%seaderItem'><div class='%seaderCounter'>%d.</div><div class='%seaderName%s'>", pre, pre, rank, pre,
-              is_you ? "M" : "");
+    hb_append(out, size, len, "<div class='%seaderItem'><div class='%seaderCounter'>%d.</div>", pre, pre, rank);
+    if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_PREMIUM))
+        hb_append(out, size, len, " <i class='material-icons' style='color:#FBC02D;margin-top:3px;font-size:23px;vertical-align:middle;'>beenhere</i>");
+    if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_VERIFIED))
+        hb_append(out, size, len, " <i class='material-icons' style='color:#40C4FF;margin-top:3px;font-size:23px;vertical-align:middle;'>check_circle</i>");
+    hb_append(out, size, len, "<div class='%seaderName%s'>", pre, is_you ? "M" : "");
     char shown[PLAYER_NAME_SIZE];
     hb_append_escaped(out, size, len, streamer_name(name && name[0] ? name : "Guest", shown, sizeof(shown))); // streamerModeEnabled ? scrambleS(alias)
+    if (acc && acc->account_id > 0 && acc->clan[0]) { // COLORS.getClanCol(clan, clanR, "#fff"): "DEV" is blue
+        hb_append(out, size, len, "<span class='' style='color:%s'> [", strcmp(acc->clan, "DEV") ? "#fff" : "#40C4FF");
+        hb_append_escaped(out, size, len, acc->clan);
+        hb_append(out, size, len, "]</span>");
+    }
     hb_append(out, size, len, "</div><div class='%seaderScore'>%s</div></div>", pre, num);
+}
+
+static void hud_scoreboard_row_html(char *out, const size_t size, size_t *len, const int rank, const char *name, const int score, const int is_you) {
+    hud_scoreboard_row_html_acc(out, size, len, rank, name, score, is_you, NULL);
 }
 
 // Scenario rows [{rank, name, score, me?}] (ui_scenario.c `state.scoreboard`).
@@ -455,7 +472,8 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
         return;
     }
     for (int i = 0; i < count && i < LEADER_MAX; i++) {
-        hud_scoreboard_row_html(out, size, &len, i + 1, hud_player_name(client, players[i]), players[i]->score, players[i] == client->me);
+        hud_scoreboard_row_html_acc(out, size, &len, i + 1, hud_player_name(client, players[i]), players[i]->score, players[i] == client->me,
+                                    player_accounts_get(players[i]->uid));
     }
 }
 
@@ -1441,6 +1459,30 @@ void hud_ui_add_killfeed_suicide(Client *client, const char *victim, const int v
     hud_feed_insert(chat, html, 0.0);
 }
 
+// killStreakMessage (g3, "kst"): gB(null, t("player.killstreak", who, fixStr(streak)), 1), a
+// plain game line (gy: chatItem + chatMsg, chatBGOp / chatTextOutline, chatListLength,
+// chatTimer). who = "You're" (#fff) or the alias (scrambled in streamer mode, ally/enemy
+// colour) + " is"; "{0} on a {1} Kill Streak".
+void hud_ui_kill_streak(Client *client, const int uid, const int streak) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    Player *player = game_find_player(&client->game, uid);
+    if (!player) return;
+    char html[768];
+    size_t len = 0;
+    html[0] = 0;
+    hud_feed_open(html, sizeof(html), &len, 1);
+    if (player == client->me) {
+        hb_append(html, sizeof(html), &len, "<span style='color:" FEED_COLOR_YOU "'>You're</span>");
+    } else {
+        const Player *me = client->me;
+        const int ally = me && me->team && client->game.mode && client->game.mode->config.teams && me->team == player->team;
+        hud_feed_name_span(html, sizeof(html), &len, hud_player_name(client, player), 0, ally);
+        hb_append(html, sizeof(html), &len, " is");
+    }
+    hb_append(html, sizeof(html), &len, " on a %d Kill Streak</span></div><br>", streak);
+    hud_feed_insert(1, html, 0.0);
+}
+
 /* ------------------------------------------------------------ chat */
 
 // gy(): appends one #chatMsg_N row (see hud_chat_row_html for the three kinds).
@@ -1882,11 +1924,60 @@ static const char *const END_TABS[4][2] = {{"leaderboard", "Leaderboard"}, {"per
 static int g_end_tab;                 // GUI.endScreen.currentTab (index into END_TABS)
 static const Client *g_end_client;    // the client the results describe (tab switches re-render)
 
+// config.endForm.reward: "<span style='color:#F8C55C'>+N</span> KR", "NONE" without one (the
+// server's endData.ed cell, shown as is by showEndTable and as the performance tab's funds).
+static const char *hud_reward_html(const int reward, char *out, const size_t size) {
+    if (reward) snprintf(out, size, "<span style='color:#F8C55C'>+%d</span> KR", reward);
+    else snprintf(out, size, "NONE");
+    return out;
+}
+
+// One showEndTable row: rank, the name link (colour per local / team / enemy), score,
+// kills, deaths, the endForm.reward cell and the empty actions cell (no account: no buttons).
+static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const char *name,
+                             const char *color, const int score, const int kills, const int deaths, const int reward) {
+    hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td><a class='endTableN' href='./social.html?p=profile&q=",
+        last ? "border-bottom:none" : "", rank);
+    hb_append_escaped(out, size, len, name);
+    hb_append(out, size, len, "' target='_blank' style='color:%s'>", color);
+    char shown[PLAYER_NAME_SIZE];
+    hb_append_escaped(out, size, len, streamer_name(name, shown, sizeof(shown))); // showEndTable: scrambleS(alias) text, real link
+    char cell[96];
+    hb_append(out, size, len, "</a></td><td>%d</td><td>%d</td><td>%d</td><td>%s</td>", score, kills, deaths,
+              hud_reward_html(reward, cell, sizeof(cell)));
+    hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
+}
+
+// Scenario rows (state.scoreboard [{name, score, kills?, deaths?, reward?, me?}]): FFA, so
+// every row but ours gets COLORS.teams[1] like a live FFA table.
+static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, char *out, const size_t size, size_t *len) {
+    const int count = cJSON_GetArraySize(rows);
+    const char *my_name = hud_my_name(client);
+    int index = 0;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, rows) {
+        const cJSON *n = cJSON_GetObjectItemCaseSensitive(row, "name");
+        const cJSON *me = cJSON_GetObjectItemCaseSensitive(row, "me");
+        const char *name = cJSON_IsString(n) ? n->valuestring : "";
+        const int is_you = cJSON_IsBool(me) ? cJSON_IsTrue(me) : count == 1 || (my_name[0] && !strcmp(name, my_name));
+#define ROW_INT(key) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, key)) ? cJSON_GetObjectItemCaseSensitive(row, key)->valueint : 0)
+        index++;
+        hud_end_row_html(out, size, len, index, index >= count, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
+                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"));
+#undef ROW_INT
+    }
+    return count;
+}
+
 // tabs.leaderboard: <table id="endTable"> filled like fu()'s showTable callback
 // (endStats sid, name, score, kills, deaths, reward).
 static void hud_end_leaderboard_html(const Client *client, char *out, const size_t size, size_t *len) {
     hb_append(out, size, len, "<table id=\"endTable\">");
     hb_append(out, size, len, "<tr><th>Rank</th><th>Name</th><th>Score</th><th>Kills</th><th>Deaths</th><th>Reward</th><th></th></tr>");
+    if (cJSON_IsArray(g_hud_override.scoreboard) && hud_end_scenario_rows_html(client, g_hud_override.scoreboard, out, size, len)) {
+        hb_append(out, size, len, "</table>");
+        return;
+    }
 
     const Player *players[HUD_BOARD_PLAYERS_MAX];
     int count = client->game.players ? hud_sorted_players(client, players, HUD_BOARD_PLAYERS_MAX) : 0;
@@ -1896,16 +1987,13 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
     }
     for (int i = 0; i < count; i++) {
         const Player *p = players[i];
-        const char *name = hud_player_name(client, p);
-        hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td><a class='endTableN' href='./social.html?p=profile&q=",
-            i + 1 >= count ? "border-bottom:none" : "", i + 1);
-        hb_append_escaped(out, size, len, name);
-        // FFA: the local row is white, everyone else (same "team" 0) rgba(255,255,255,0.6)
-        hb_append(out, size, len, "' target='_blank' style='color:%s'>", p == client->me ? "#fff" : "rgba(255,255,255,0.6)");
-        char shown[PLAYER_NAME_SIZE];
-        hb_append_escaped(out, size, len, streamer_name(name, shown, sizeof(shown))); // showEndTable: scrambleS(alias) text, real link
-        hb_append(out, size, len, "</a></td><td>%d</td><td>%u</td><td>%u</td><td>0</td>", p->score, p->kills, p->deaths); // reward: no KR in KrunkNative
-        hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
+        // showEndTable: the local row #fff, a team mate (localTeam == team) rgba(255,255,255,0.6),
+        // else COLORS.teams[1]. localTeam = player.team || (spectating ? 1 : 0); a teamless
+        // (FFA) player's team is null there, so `0 == null` makes every other FFA row red.
+        const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
+        const char *color = p == client->me ? "#fff" : p->team && p->team == local_team ? "rgba(255,255,255,0.6)" : FEED_COLOR_ENEMY;
+        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_player_name(client, p), color, p->score, (int) p->kills,
+                         (int) p->deaths, p->reward);
     }
     hb_append(out, size, len, "</table>");
 }
@@ -1932,7 +2020,9 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     // mode.getIcon(): ffa is one of the known ids (img/modes/ffa.png)
     hb_append(out, size, len, "</div> <div id=\"modeLayout\"><img src=\"img/modes/ffa.png\" class=\"modeIcon\"> <div class=\"modeStatus\" style=\"%s\"> %s</div></div>",
         q == -1 ? "color:var(--yellow)" : q ? "" : "color:var(--red)", q == -1 ? "DRAW" : q ? "VICTORY" : "DEFEAT");
-    hb_append(out, size, len, "</div><div class='gfSection'><div id=\"fundsLayout\" style=\"\"> <div class=\"fundsVal\">NONE</div></div></div></div></div>");
+    char reward[96];
+    hb_append(out, size, len, "</div><div class='gfSection'><div id=\"fundsLayout\" style=\"\"> <div class=\"fundsVal\">%s</div></div></div></div></div>",
+              hud_reward_html(me ? me->reward : 0, reward, sizeof(reward))); // fu(): funds = the reward cell
     hb_append(out, size, len, "<div class='endSection'><div class='endTitle'>Combat Record</div><div id='combatRecordLayout'>");
     hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>Score</div><div class='crVal'>%d</div></div>", score);
     hb_append(out, size, len, "<div id='kdLayout'><div class='crStat'><div class='crLabel'>Kills</div><div class='crVal'>%d</div></div>", kills);

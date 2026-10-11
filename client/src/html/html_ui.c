@@ -103,6 +103,11 @@ int html_ui_add_stylesheet(const char *href) {
     return html_ui_backend_add_stylesheet(href);
 }
 
+int html_ui_set_custom_css(const char *css) {
+    if (!g_initialized) return 0;
+    return html_ui_backend_set_custom_css(css);
+}
+
 int html_ui_load_page(const char *page) {
     if (!g_initialized || !page || !*page) return 0;
     const int base = !strcmp(page, "index.html");

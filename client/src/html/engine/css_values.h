@@ -204,6 +204,8 @@ int css_parse_transform(const CssToken *tokens, int n, CssTransform *out);      
 int css_parse_transform_origin(const CssToken *tokens, int n, CssLength *x, CssLength *y);
 int css_parse_position_xy(const CssToken *tokens, int n, CssLength *x, CssLength *y); /* <bg-position>: keywords, `right 8px center`, 1-4 values */
 int css_parse_box_shadow(const CssToken *tokens, int n, CssShadow *out, int *count);  /* keeps the first of a comma list; none -> 0 */
+/* The whole list (up to `max` kept, more are valid and dropped); none -> 0. */
+int css_parse_box_shadow_list(const CssToken *tokens, int n, CssShadow *out, int max, int *count);
 int css_parse_text_shadow(const CssToken *tokens, int n, CssShadowList *out);        /* up to CSS_MAX_TEXT_SHADOWS */
 int css_parse_shadow_item(const CssToken *tokens, int n, int allow_inset_spread, CssShadow *out, int *consumed);
 /* Base URL recorded into CssImage.base by css_parse_image() (atom or NULL =
@@ -221,6 +223,8 @@ int css_parse_filter(const CssToken *tokens, int n, CssFilterOp *out, int max, i
 int css_parse_clip_path(const CssToken *tokens, int n, CssClipPath *out);
 int css_parse_timing(const CssToken *tokens, int n, CssTiming *out, int *consumed);
 int css_parse_grid_tracks(const CssToken *tokens, int n, CssTrack *out, int max, int *count);
+/* As css_parse_grid_tracks plus [line names] and repeat(auto-fill | auto-fit, ...) (names may be NULL: auto repeat rejected). */
+int css_parse_grid_track_list(const CssToken *tokens, int n, CssTrack *out, int max, int *count, CssGridNames *names);
 int css_parse_border_width(const CssToken *tokens, int n, CssLength *out, int *consumed); /* thin/medium/thick + lengths */
 int css_parse_font_family(const CssToken *tokens, int n, const char **families, int max, int *count);
 int css_parse_font_weight(const CssToken *tokens, int n, int *out);

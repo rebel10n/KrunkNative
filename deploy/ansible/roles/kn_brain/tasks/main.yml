@@ -1,0 +1,94 @@
+- name: Release config directory
+  ansible.builtin.file:
+    path: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/config"
+    state: directory
+    mode: "0755"
+
+- name: Release config (no secrets)
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/config/config.json"
+    mode: "0644"
+  notify: Restart kn_brain
+
+# Until coord-store's SQLite adapter is in the shipped binary, a "sqlite" instance
+# would fail its migrations (it falls back to PostgreSQL on 127.0.0.1:5432, which
+# is not running here) and restart-loop. Detect it and fall back to --no-db.
+- name: Does this kn_brain build have the SQLite store
+  ansible.builtin.shell: grep -c -a -i 'sqlite3_open' {{ kn_svc_base }}/releases/{{ kn_release_id }}/bin/kn_brain || true
+  register: kn_brain_sqlite_probe
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Effective database per instance
+  ansible.builtin.set_fact:
+    kn_brain_effective: >-
+      {%- set out = [] -%}
+      {%- for i in kn_brain_instances -%}
+        {%- set db = i.db -%}
+        {%- if db == 'sqlite' and (kn_brain_sqlite_probe.stdout | default('0') | int) == 0 -%}{%- set db = 'none' -%}{%- endif -%}
+        {%- set _ = out.append(i | combine({'db': db})) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Warn about the --no-db fallback
+  ansible.builtin.debug:
+    msg: "kn_brain has no SQLite adapter yet: {{ item.name }} runs --no-db (accounts unavailable) until coord-store lands."
+  loop: "{{ kn_brain_effective }}"
+  when: item.db == 'none' and (kn_brain_instances | selectattr('name', 'equalto', item.name) | first).db != 'none'
+
+- name: Secrets env file exists (never overwritten)
+  ansible.builtin.shell: |
+    set -eu
+    f={{ kn_etc_dir }}/secrets.env
+    [ -s "$f" ] && exit 0
+    umask 027
+    s={{ (kn_brain_internal_secret | quote) if kn_brain_internal_secret else '$(head -c 32 /dev/urandom | od -An -tx1 | tr -d " \n")' }}
+    printf 'KN_BRAIN_INTERNAL_SECRET=%s\nKN_BRAIN_JOIN_SECRET=%s\n' "$s" "$s" > "$f"
+    chown root:{{ kn_group }} "$f"; chmod 0640 "$f"
+    echo created
+  args:
+    executable: /bin/bash
+  register: kn_secrets
+  changed_when: "'created' in kn_secrets.stdout"
+  no_log: true
+
+- name: Systemd target
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/krunknative.target
+    content: |
+      # Managed by KrunkNative deploy/ansible
+      [Unit]
+      Description=KrunkNative services
+      Wants=network-online.target
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+
+- name: Install kn_brain units
+  ansible.builtin.template:
+    src: kn-brain.service.j2
+    dest: "/etc/systemd/system/kn-brain-{{ item.name }}.service"
+    mode: "0644"
+  loop: "{{ kn_brain_effective }}"
+  loop_control:
+    label: "kn-brain-{{ item.name }} :{{ item.port }} {{ item.roles }} db={{ item.db }}"
+  notify: Restart kn_brain
+
+- name: Release changed -> restart
+  ansible.builtin.debug:
+    msg: "current -> {{ kn_release_id }}"
+  changed_when: kn_release_link is defined and kn_release_link.changed
+  notify: Restart kn_brain
+
+- name: Enable target and units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: "{{ ['krunknative.target'] + (kn_brain_instances | map(attribute='name') | map('regex_replace', '^', 'kn-brain-') | list) }}"
+  # --check on a fresh host: the unit files above were not really written.
+  ignore_errors: "{{ ansible_check_mode }}"

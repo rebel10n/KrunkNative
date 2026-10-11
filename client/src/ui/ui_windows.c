@@ -3,7 +3,10 @@
 // regex substitutions became literal-anchor splices over the same templates
 // (tpl_splice below), so the output stays byte-identical to the page's.
 #include <ui_logic.h>
+#include <backend_ui.h>
+#include <map_catalog.h>
 #include <ui_mobile.h>
+#include <client_settings.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -277,38 +280,13 @@ static int class_card_hidden(const char *name) {
     return name && !strcmp(name, "Deagler");
 }
 
-// Krunker's host window map cards: name -> thumb index, author, year, version.
-typedef struct {
-    const char *name;
-    int thumb;
-    const char *by, *year, *version;
-} HostMapMeta;
-
-static const HostMapMeta HOST_MAPS[] = {
-    {"Burg", 0, "", "2018", "v3.2"}, {"Littletown", 1, "", "2018", "v0.9"},
-    {"Sandstorm", 2, "CrispyCrust", "2019", "v2.3"}, {"Subzero", 3, "CrispyCrust", "2019", "v0.9"},
-    {"Undergrowth", 4, "CrispyCrust", "2019", "v1.2"}, {"Shipyard", 5, "Chwoubaka", "2019", "v1.0"},
-    {"Freight", 6, "", "2019", "v2.1"}, {"Lostworld", 7, "DasIstWalter", "2020", "v1.2"},
-    {"Citadel", 8, "", "2020", "v2.4"}, {"Oasis", 9, "DasIstWalter", "2020", "v0.2"},
-    {"Kanji", 10, "Arbiter", "2020", "v5.2"}, {"Newtown", 11, "Arbiter", "2020", "v0.1"},
-    {"Industry", 12, "CrispyCrust", "2020", "v1.0"}, {"Soul Sanctum", 13, "", "2020", ""},
-    {"Evacuation", 14, "Creationfier", "2020", "vTest"},
-};
-
-static const HostMapMeta *map_meta(const char *name) {
-    if (!name) return NULL;
-    for (size_t i = 0; i < sizeof(HOST_MAPS) / sizeof(HOST_MAPS[0]); i++) {
-        if (!strcmp(HOST_MAPS[i].name, name)) return &HOST_MAPS[i];
-    }
-    return NULL;
-}
-
+// mapThumb(): the official map's public/img/maps card, else img/noimg.png (map_image "").
 const char *ui_map_thumb(const char *name) {
     static char thumb[48];
-    const HostMapMeta *m = map_meta(name);
-    if (!m) return "img/noimg.png";
-    snprintf(thumb, sizeof(thumb), "img/maps/map_%d.png", m->thumb);
-    return thumb;
+    const int index = name ? map_catalog_find(name) : -1;
+    const char *src = index >= 0 && !strcmp(map_catalog_at((size_t) index)->name, name)
+                          ? map_catalog_thumb(map_catalog_at((size_t) index), thumb, sizeof(thumb)) : NULL;
+    return src ? src : "img/noimg.png";
 }
 
 // ---------------------------------------------------------------- generators
@@ -329,8 +307,21 @@ static char *gen_settings(void) {
         cur = hit + nlen;
     }
     sb_append(&out, cur);
+    // the desktop client's "Client" tab after Krunker's six (ui_client_settings.c)
+    char *head = ui_client_settings_head(out.data ? out.data : "", ui->settings_tab);
+    sb_free(&out);
+    sb_append(&out, head);
+    free(head);
     sb_append(&out, "<div id=\"settHolder\">");
-    sb_append(&out, ui_settings_tab_html(ui->settings_tab));
+    // acc && tabIndex == 0: the account's settings backup (social socket uploadS / getS)
+    if (account_get() && ui->settings_tab == 0) sb_append(&out, "<div class=\"settName\" style=\"margin-top:15px\">\n                Backup Settings\n                <div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"uploadSettings()\">Upload</div>\n                <div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"fetchSettings()\">Download</div>\n            </div>");
+    if (ui->settings_tab >= 0 && ui->settings_tab == ui_client_settings_tab()) {
+        char *client = ui_client_settings_tab_html(0);
+        sb_append(&out, client);
+        free(client);
+    } else {
+        sb_append(&out, ui_settings_tab_html(ui->settings_tab));
+    }
     sb_append(&out, "</div>");
     return sb_finish(&out);
 }
@@ -363,69 +354,39 @@ static char *gen_classes(void) {
 }
 
 // The Custom Games list is server data in Krunker (the `maps` popular request, rendered by
-// the client's genList into .mapListItem cards). KrunkNative has no map browser server, so
-// this is the list the v3.1.1 offline server returns to a guest (captured in
+// the client's genList into .mapListItem cards): the v3.1.1 offline server lists its
+// maps/ and custom_maps/ (publicRoutes.ts loadMaps), i.e. the map catalogue
+// (shared/src/map_catalog.c), in the orders it answered a guest (captured in
 // doc/ref/krunker-v3.1.1/windows/win-games.html): no thumbnails (map_image is empty, so
-// the card keeps ./img/noimg.png), 0 votes, Krunker's own maps first, then its
-// community/custom maps. Fields: map_name, map_id, creatorname, map_votes, mod_url.
-typedef struct {
-    const char *name;
-    const char *id;
-    const char *creator;
-    int votes;
-    const char *mod_url;
-} GameListEntry;
-
-static const GameListEntry GAME_LIST[] = {
-    {"Soul Sanctum", "2717856513", "Krunker", 0, ""},
-    {"Subzero", "1389891507", "Krunker", 0, ""},
-    {"Undergrowth", "2699178862", "Krunker", 0, ""},
-    {"Lostworld", "2026576977", "Krunker", 0, ""},
-    {"Newtown", "4056084657", "Krunker", 0, ""},
-    {"Oasis", "2101154094", "Krunker", 0, ""},
-    {"Sandstorm", "88334292", "Krunker", 0, ""},
-    {"Shipyard", "2613134335", "Krunker", 0, ""},
-    {"Freight", "1010451404", "Krunker", 0, ""},
-    {"Industry", "312130495", "Krunker", 0, ""},
-    {"Kanji", "1336255044", "Krunker", 0, ""},
-    {"Littletown", "3836435553", "Krunker", 0, ""},
-    {"Burg", "1257833875", "Krunker", 0, ""},
-    {"Citadel", "1963634499", "Krunker", 0, ""},
-    {"Evacuation", "4241009034", "Krunker", 0, ""},
-    {"Zombie_High", "569198284", "IamFiercer", 0, "https://user-assets.krunker.io/md23677/mod.zip"},
-    {"Sandstorm", "88334292", "Community", 0, ""},
-    {"Shipyard", "2613134335", "Community", 0, ""},
-    {"Subzero", "1389891507", "Community", 0, ""},
-    {"Undergrowth", "2699178862", "Community", 0, ""},
-    {"slide_moonlight", "3690042710", "Community", 0, ""},
-    {"Burg", "1257833875", "Community", 0, ""},
-    {"Freight", "1010451404", "Community", 0, ""},
-    {"Kanji", "1336255044", "Community", 0, ""},
-    {"Littletown", "3836435553", "Community", 0, ""},
-    {"Lostworld", "2026576977", "Community", 0, ""},
-    {"SniperRoyale2", "2800345118", "Community", 0, "https://www.dropbox.com/s/0h3mnvii1nua0h9/Logo.zip?dl=0"},
-    {"Test", "2949673445", "Community", 0, ""},
-    {"Verb_Arena", "682138864", "Community", 0, "https://www.dropbox.com/s/ejrn99ayvddiq45/Verb%20Mod%20Updated%207April2021.zip?dl=0"},
-    {"eterno_jump", "739315237", "Community", 0, ""},
-    {"Krunk_Plaza", "537274925", "Community", 0, ""},
-    {"Slide_Neon_Stage", "197077862", "R75", 0, ""},
-    {"Bhop_VIP", "3459552096", "eskrr", 0, ""},
-    {"ClashRoyale", "2789783172", "Community", 0, ""},
-    {"ESP_Parkour", "2793053018", "ImCriistian", 0, ""},
-    {"FortniteTiltedT", "563473844", "Community", 0, ""},
-};
-
-// The other tabs as the v3.1.1 offline server answers them for a guest (captured, indices
-// into GAME_LIST): Featured (no Load More), New, My Games (no Load More); Favorites is
-// empty ("No Games found!") and Search shows the search box (its request never answers).
-static const unsigned char GAMES_FEATURED[] = {9, 1, 3, 14, 2, 10, 7, 8, 6, 5, 11, 4, 0, 13, 12};
-static const unsigned char GAMES_NEW[] = {1, 2, 4, 5, 6, 7, 0, 9, 10, 11, 3, 13, 14, 8, 12, 17, 18, 19, 20, 15, 22, 23, 24, 25, 16, 27, 28, 29, 21, 31, 26, 33, 34, 35, 30, 32};
-static const unsigned char GAMES_MINE[] = {12, 13, 14, 8, 9, 10, 11, 3, 4, 5, 6, 7, 0, 1, 2, 32, 33, 34, 35, 30, 31, 26, 27, 28, 29, 21, 22, 23, 24, 25, 16, 17, 18, 19, 20, 15};
+// the card keeps ./img/noimg.png), 0 votes. Fields: map_name, map_id, creatorname,
+// map_votes, mod_url. Favorites is empty ("No Games found!") and Search shows the search
+// box (its request never answers).
 static int g_games_tab; // windows[9].tabIndex
 
 void ui_games_switch_tab(const int tab) {
     g_games_tab = tab >= 0 && tab <= 5 ? tab : 0;
     menu_rerender_if_open(10);
+}
+
+// One .mapListItem of the captured template (getCardsList) for a map row.
+static void games_item(StrBuf *out, const char *item, const char *name, const char *mod_url, const char *id, const char *creator, const int vote_count) {
+    char url[160], host_args[320], fav[48], votes[16];
+    snprintf(url, sizeof(url), "/social.html?p=map&amp;q=%s", name);
+    snprintf(host_args, sizeof(host_args), "%s&quot;,&quot;%s&quot;,&quot;%s&quot;,&quot;%s", name, mod_url, id, creator);
+    snprintf(fav, sizeof(fav), "0, this, %s", id);
+    snprintf(votes, sizeof(votes), "%d", vote_count);
+
+    Tpl t = {item};
+    tpl_splice(out, &t, "openURL(&quot;", "&quot;);", url, 0);             // mapInfoB
+    tpl_splice(out, &t, "playMap(&quot;", "&quot;);", name, 0);            // searchIcon
+    tpl_splice(out, &t, "favoriteM(", ");", fav, 0);                       // creationAction
+    tpl_splice(out, &t, "selectHostMap(&quot;", "&quot;)", host_args, 0);  // thumbnail
+    tpl_splice(out, &t, "selectHostMap(&quot;", "&quot;)", host_args, 0);  // anchor
+    tpl_splice(out, &t, "&quot;)\">", "</a>", name, 0);                   // anchor text
+    tpl_splice(out, &t, "profile&amp;q=", "\"", creator, 0);              // creator link
+    tpl_splice(out, &t, "\">", "</a>", creator, 0);                       // creator text
+    tpl_splice(out, &t, "flex-grow:1\">", "<", votes, 0);                 // votes
+    tpl_finish(out, &t);
 }
 
 // windows[9].gen() for the map tab: header markup + one .mapListItem per entry (genList).
@@ -458,35 +419,42 @@ static char *gen_games(void) {
         sb_append(&out, "<input type=\"text\" id=\"mpSrch\" class=\"smlInput\" placeholder=\"Game Name\" onkeydown=\"if(window.event.keyCode==13)windows[9].searchMaps()\"><div class=\"searchBtn\" onclick=\"windows[9].searchMaps()\">Search</div><div style=\"color:rgba(0,0,0,0.5);margin-top:10px\" id=\"searchResultsMA\"></div></div>");
         return sb_finish(&out);
     }
-    const unsigned char *order = NULL;
-    size_t count = sizeof(GAME_LIST) / sizeof(GAME_LIST[0]);
-    int paged = 1;
-    switch (g_games_tab) {
-        case 1: order = GAMES_FEATURED; count = sizeof(GAMES_FEATURED); paged = 0; break;
-        case 2: order = GAMES_NEW; count = sizeof(GAMES_NEW); break;
-        case 3: count = 0; break;
-        case 4: order = GAMES_MINE; count = sizeof(GAMES_MINE); paged = 0; break;
-        default: break;
+    // Featured / My Games come back whole (no Load More); Popular / New are paged
+    const int paged = g_games_tab == 0 || g_games_tab == 2;
+    // brain (servers_ui.c): the rows of GET /api/maps?index=<tab> (catalogue + published maps)
+    const cJSON *brain_rows = NULL;
+    const int brain = servers_games_tab_rows(g_games_tab, &brain_rows);
+    if (brain == 0) {
+        sb_append(&out, "<div class=\"loadMoreW\">Loading...</div></div>"); // API_CLIENT.listMaps pending
+        return sb_finish(&out);
     }
+    if (brain > 0) {
+        const cJSON *r;
+        size_t shown = 0;
+        cJSON_ArrayForEach(r, brain_rows) {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(r, "map_name"));
+            const char *creator = cJSON_GetStringValue(cJSON_GetObjectItem(r, "creatorname"));
+            const char *mod_url = cJSON_GetStringValue(cJSON_GetObjectItem(r, "mod_url"));
+            const cJSON *map_id = cJSON_GetObjectItem(r, "map_id");
+            const cJSON *votes = cJSON_GetObjectItem(r, "map_votes");
+            if (!name) continue;
+            char id[24];
+            snprintf(id, sizeof(id), "%.0f", cJSON_IsNumber(map_id) ? map_id->valuedouble : 0.0);
+            games_item(&out, item, name, mod_url ? mod_url : "", id, creator ? creator : "Krunker", cJSON_IsNumber(votes) ? votes->valueint : 0);
+            shown++;
+        }
+        if (!shown) sb_append(&out, "No Games found!");
+        else if (paged && servers_games_tab_more(g_games_tab)) sb_append(&out, "<div class=\"loadMoreD\" onclick=\"windows[9].loadMore(this)\">Load More</div>");
+        sb_append(&out, "</div>");
+        return sb_finish(&out);
+    }
+    int order[64];
+    const size_t count = map_catalog_games_tab(g_games_tab, order, sizeof(order) / sizeof(order[0]));
     for (size_t i = 0; i < count; i++) {
-        const GameListEntry *e = &GAME_LIST[order ? order[i] : i];
-        char url[160], host_args[320], fav[48], votes[16];
-        snprintf(url, sizeof(url), "/social.html?p=map&amp;q=%s", e->name);
-        snprintf(host_args, sizeof(host_args), "%s&quot;,&quot;%s&quot;,&quot;%s&quot;,&quot;%s", e->name, e->mod_url, e->id, e->creator);
-        snprintf(fav, sizeof(fav), "0, this, %s", e->id);
-        snprintf(votes, sizeof(votes), "%d", e->votes);
-
-        Tpl t = {item};
-        tpl_splice(&out, &t, "openURL(&quot;", "&quot;);", url, 0);             // mapInfoB
-        tpl_splice(&out, &t, "playMap(&quot;", "&quot;);", e->name, 0);         // searchIcon
-        tpl_splice(&out, &t, "favoriteM(", ");", fav, 0);                       // creationAction
-        tpl_splice(&out, &t, "selectHostMap(&quot;", "&quot;)", host_args, 0);  // thumbnail
-        tpl_splice(&out, &t, "selectHostMap(&quot;", "&quot;)", host_args, 0);  // anchor
-        tpl_splice(&out, &t, "&quot;)\">", "</a>", e->name, 0);                 // anchor text
-        tpl_splice(&out, &t, "profile&amp;q=", "\"", e->creator, 0);            // creator link
-        tpl_splice(&out, &t, "\">", "</a>", e->creator, 0);                     // creator text
-        tpl_splice(&out, &t, "flex-grow:1\">", "<", votes, 0);                  // votes
-        tpl_finish(&out, &t);
+        const MapCatalogEntry *e = map_catalog_at((size_t) order[i]);
+        char id[16];
+        snprintf(id, sizeof(id), "%u", (unsigned) map_catalog_map_id(e));
+        games_item(&out, item, e->name, e->mod_url, id, e->creator, 0);
     }
     if (!count) sb_append(&out, "No Games found!");
     // Popular / New are paged (no sendID/noPages): Krunker appends its Load More button
@@ -495,33 +463,33 @@ static char *gen_games(void) {
     return sb_finish(&out);
 }
 
-// Real genHost (windows[7]): every default map (Krunker's `bg` list, = g_maps) except
-// Soul Sanctum, unchecked, `gameMap<index>` ids and map_<index> thumbnails; the boxes are
-// read back by createPrivateRoom (ui_host_checked_map). No community game selected (eI).
+// Real genHost (windows[7]): every bundled map (Krunker's `bg` list = the official
+// catalogue maps) except Soul Sanctum, unchecked, `gameMap<mapIndex>` ids and
+// map_<mapIndex> thumbnails; the boxes are read back by createPrivateRoom
+// (ui_host_checked_map_index). No community game selected (eI).
 static char *gen_host(void) {
-    load_default_maps();
     StrBuf cards = {0};
-    for (size_t i = 0; i < sizeof(g_maps) / sizeof(g_maps[0]); i++) {
-        const cJSON *name_item = g_maps[i] ? cJSON_GetObjectItem(g_maps[i], "name") : NULL;
-        if (!cJSON_IsString(name_item)) continue;
-        const char *name = cJSON_GetStringValue(name_item);
-        if (!strcmp(name, "Soul Sanctum")) continue;
-        const HostMapMeta *meta = map_meta(name);
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (!e->hostable) continue;
+        const char *name = e->name;
+        char thumb[48];
         sb_append(&cards, "<label class=\"hostMap\"><div class=\"hostMapName blackShad\">");
         // aU.capFirst(name)
         char first[2] = {(char) toupper((unsigned char) name[0]), 0};
         sb_append_esc(&cards, first);
         if (name[0]) sb_append_esc(&cards, name + 1);
         sb_append(&cards, "</div>");
-        if (meta && meta->by[0]) {
+        if (e->host_by[0]) {
             sb_append(&cards, "<div class=\"hostMapBy blackShad\">by ");
-            sb_append_esc(&cards, meta->by);
+            sb_append_esc(&cards, e->host_by);
             sb_append(&cards, "</div>");
         }
-        if (meta && meta->year[0]) sb_appendf(&cards, "<div class=\"hostMapYear blackShad\">%s</div>", meta->year);
-        if (meta && meta->version[0]) sb_appendf(&cards, "<div class=\"hostMapVersion blackShad\">%s</div>", meta->version);
-        sb_appendf(&cards, "<div class=\"mapInfoT\" style=\"top:54px\">?</div><input id=\"gameMap%zu\" type=\"checkbox\">", i);
-        sb_appendf(&cards, "<img loading=\"lazy\" draggable=\"false\" class=\"hostMapImg\" src=\"img/maps/map_%zu.png\"></label>", i);
+        if (e->host_year[0]) sb_appendf(&cards, "<div class=\"hostMapYear blackShad\">%s</div>", e->host_year);
+        if (e->host_version[0]) sb_appendf(&cards, "<div class=\"hostMapVersion blackShad\">%s</div>", e->host_version);
+        sb_appendf(&cards, "<div class=\"mapInfoT\" style=\"top:54px\">?</div><input id=\"gameMap%d\" type=\"checkbox\">", e->index);
+        sb_appendf(&cards, "<img loading=\"lazy\" draggable=\"false\" class=\"hostMapImg\" src=\"%s\"></label>",
+                   map_catalog_thumb(e, thumb, sizeof(thumb)) ? thumb : "img/noimg.png");
     }
     // "Select Modes": every mode without preventCustomGames (shared mode table), capFirst
     // names, `gameMode<id>` ids, Free for All checked (no previous custom room).
@@ -579,19 +547,25 @@ int ui_host_checked_mode(void) {
     return -1;
 }
 
-// createPrivateRoom's map read-back: the first checked #gameMap<i> box of the host window
-// (Krunker sends every checked map; KrunkNative's local server plays one). Returns the
-// map's name, or NULL when none is checked.
-const char *ui_host_checked_map(void) {
-    for (size_t i = 0; i < sizeof(g_maps) / sizeof(g_maps[0]); i++) {
+// createPrivateRoom's map read-back: the first checked #gameMap<mapIndex> box of the host
+// window (Krunker sends every checked map; KrunkNative's local server plays one). Returns
+// its map catalogue index, -1 when none is checked.
+int ui_host_checked_map_index(void) {
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (!e->hostable) continue;
         char id[24];
-        snprintf(id, sizeof(id), "gameMap%zu", i);
+        snprintf(id, sizeof(id), "gameMap%d", e->index);
         HtmlElem box = html_dom_by_id(id);
-        if (!box || !html_dom_get_checked(box) || !g_maps[i]) continue;
-        const cJSON *name = cJSON_GetObjectItem(g_maps[i], "name");
-        if (cJSON_IsString(name)) return cJSON_GetStringValue(name);
+        if (box && html_dom_get_checked(box)) return (int) i;
     }
-    return NULL;
+    return -1;
+}
+
+// The same as a map name, NULL when none is checked.
+const char *ui_host_checked_map(void) {
+    const int index = ui_host_checked_map_index();
+    return index >= 0 ? map_catalog_at((size_t) index)->name : NULL;
 }
 
 static char *gen_servers(void) {
@@ -625,9 +599,41 @@ static char *gen_25(void) { return gen_static("25"); }
 static char *gen_27(void) { return gen_static("27"); }
 static char *gen_33(void) { return gen_static("33"); }
 static char *gen_join(void) { return gen_static("join"); }
-static char *gen_9(void) { return gen_static("9"); }   // Select Spray (guest: the default sprays)
+static char *gen_9(void) { // Select Spray: owned sprays signed in (ui_loadout.c), else the default sprays
+    char *owned = ui_loadout_generate(9, NULL);
+    return owned ? owned : gen_static("9");
+}
 static char *gen_21(void) { return gen_static("21"); } // Advertise (guest: "Please Login to Submit a Bid")
 static char *gen_29(void) { return gen_static("29"); } // Support
+static char *gen_30(void) { return strdup(""); }       // Krunker Mail: signed in only (account_ui.c)
+static char *gen_13(void) { return clan_window_gen(); } // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
+// windows[35] Premium ("Things you get with Premium:"), opened by the Store Premium tab's link.
+static char *gen_36(void) {
+    static const char *const perks[] = {
+        "Golden Badge on Profile",
+        "Custom Profile Pictures",
+        "Custom Display Name",
+        "Monthly giveaway entry: Chance to win 50,000 KR",
+        "Custom Skin Color",
+        "Custom Hair Color",
+        "Custom Chat Name Color",
+        "Custom Commands: /god /noclip /kill /smite",
+        "Can host 16 player lobbies",
+        "Can enter Limited Premium Areas on Custom Maps",
+        "Increased Object Limit in Customs",
+        "Increased Max KR per Round to 40",
+        "Increased Market Sale Limit to 40",
+        "Bigger Thumbnails for Maps",
+        "Increased Trade Limit to 10 items",
+        "Increased Asset File Size",
+        "Increased Asset Upload Limit",
+    };
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='font-size: 22px;margin-bottom:10px'>Things you get with Premium:</div><div style='background-color:#333;padding:15px;border-radius:6px;border:5px solid var(--yellow)'>");
+    for (size_t i = 0; i < sizeof(perks) / sizeof(perks[0]); i++) sb_appendf(&sb, "<div class='settNameSmall premText'><i class='material-icons'>grade</i> %s</div>", perks[i]);
+    sb_append(&sb, "</div>");
+    return sb_finish(&sb);
+}
 // Change Loadout and the windows it opens, Changelog: ui_loadout.c
 static char *gen_loadout(void) { return ui_loadout_gen(); }
 #define LOADOUT_GEN(n) static char *gen_##n(void) { return ui_loadout_generate(n, NULL); }
@@ -644,6 +650,7 @@ static const WindowDef WINDOWS[] = {
     {6, "6", "Select Class", 0, gen_classes},
     {7, "7", "Change Controls", 0, gen_7},
     {10, "10", "Custom Games", 0, gen_games},
+    {13, "13", "Clans", 0, gen_13},
     {14, "14", "Store", 0, gen_14},
     {25, "25", "Client", 0, gen_25},
     {27, "27", "Ranked", 0, gen_27},
@@ -656,10 +663,12 @@ static const WindowDef WINDOWS[] = {
     {21, "21", "Advertise", 0, gen_21},
     {26, "26", "Select Melee", 0, gen_26},
     {29, "29", "Support", 0, gen_29},
+    {30, "30", "Krunker Mail", 0, gen_30},
     {31, "31", "Select Attachment", 0, gen_31},
     {32, "32", "Select Reticle", 0, gen_32},
     {34, "34", "Select Dye", 0, gen_34},
     {35, "35", "Changelog", 0, gen_35},
+    {36, "36", "Premium", 0, gen_36},
     {38, "38", "Select Waist", 0, gen_38},
     {39, "39", "Select Face", 0, gen_39},
     {MENU_WINDOW_HOST, "host", "Host Custom Game", 0, gen_host},
@@ -696,6 +705,11 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     }
     if (header) *header = hdr;
     if (sticky) *sticky = stk;
+    // brain backend (backend_ui.h): the signed-in Account window and the live Servers
+    // list replace the guest captures; NULL keeps them (no brain, guest)
+    char *live = account_window_gen(id, header);
+    if (!live) live = servers_window_gen(id, header);
+    if (live) return live;
     return w->gen();
 }
 
@@ -707,4 +721,5 @@ void ui_window_post(const int id) {
         HtmlElem input = html_dom_by_id("accName");
         if (input) html_dom_set_value(input, ui->name_set ? ui->client->menu_name : "");
     }
+    account_window_post(id); // brain: the saved krunker_username instead of the nickname
 }

@@ -36,11 +36,15 @@ void glb_destroy(GlBackend *b);
 void glb_set_text_gamma(GlBackend *b, const uint8_t lut[8][256]);
 
 // Vector images (DL_IMAGE with `vector` set, i.e. SVG): draw_image asks the
-// resolver for a texture rasterised at dev_w x dev_h device pixels, the size
-// the whole image covers on the current target (dst / uv span x device scale
-// x transform scale), and draws it instead of `tex`. The resolver may create
-// textures (binding of the active unit preserved); 0 keeps `tex`.
-typedef unsigned (*GlbImageResolver)(void *user, const void *vector, int nearest, int dev_w, int dev_h);
+// resolver for a texture of the image covering dev_w x dev_h target pixels
+// (fractional) whose top-left lies at (frac_x, frac_y) inside its first
+// pixel. When the resolver reports *tex_w x *tex_h texels, the quad is drawn
+// texel-aligned on the target grid from that pixel (like Chrome drawing the
+// vector in place: crisp, no resampling); *tex_w = 0 means a plain texture
+// stretched over dst. The resolver may create textures (binding of the
+// active unit preserved); 0 keeps `tex`.
+typedef unsigned (*GlbImageResolver)(void *user, const void *vector, int nearest, float dev_w, float dev_h, float frac_x,
+                                     float frac_y, int *tex_w, int *tex_h);
 void glb_set_image_resolver(GlBackend *b, GlbImageResolver fn, void *user);
 
 // fb_w/fb_h: size of the currently bound framebuffer in pixels.

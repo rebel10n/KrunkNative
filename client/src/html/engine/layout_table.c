@@ -7,6 +7,9 @@
  * widths (Chrome's AutoTableLayout for these cases), cells of a row share the
  * row height, cell vertical-align top/middle/bottom (baseline ~ top),
  * border-collapse (spacing 0, cell borders halved) / border-spacing.
+ * table-layout: fixed (with a non-auto table width): column widths come from the
+ * first row's px / percentage cell widths, the rest is shared equally by the other
+ * columns (Chrome's FixedTableLayout; social.css .profileTabs, #mapTabsP).
  */
 #include "layout_internal.h"
 
@@ -93,6 +96,34 @@ static void distribute(ColInfo *cols, int nc, float avail)
     }
 }
 
+/* table-layout: fixed: first-row widths only, content ignored. */
+static int table_fixed(const Box *b)
+{
+    return b->style->table_layout == CSS_TABLE_LAYOUT_FIXED && b->style->width.kind == CSS_LEN_VALUE;
+}
+
+static void distribute_fixed(LayoutTree *t, Box *b, ColInfo *cols, int nc, float avail)
+{
+    (void)t;
+    Box *row = NULL;
+    for (Box *r = b->first_child; r && !row; r = r->next) if (r->type == BOX_TABLE_ROW) row = r;
+    float used = 0;
+    int autos = 0, ci = 0;
+    for (int i = 0; i < nc; i++) cols[i].w = -1;
+    for (Box *c = row ? row->first_child : NULL; c && ci < nc; c = c->next) {
+        if (c->type != BOX_TABLE_CELL) continue;
+        const CssLength *w = &c->style->width;
+        if (w->kind == CSS_LEN_VALUE && w->pct > 0) cols[ci].w = w->pct * 0.01f * avail;
+        else if (w->kind == CSS_LEN_VALUE) cols[ci].w = layout_box_sizing_w(c, w->px);
+        ci++;
+    }
+    for (int i = 0; i < nc; i++) { if (cols[i].w < 0) autos++; else used += cols[i].w; }
+    float share = autos ? kn_maxf(0, avail - used) / (float)autos : 0;
+    for (int i = 0; i < nc; i++) if (cols[i].w < 0) cols[i].w = share;
+    if (!autos && used > 0 && used < avail)
+        for (int i = 0; i < nc; i++) cols[i].w += (avail - used) * cols[i].w / used;
+}
+
 /* Shift a cell's in-flow content down by dy (local coordinates, pre-finalize). */
 static void shift_inline_frags(Box *container, Box *b, float dy)
 {
@@ -127,6 +158,23 @@ static void shift_contents(Box *cell, float dy)
     if (cell->baseline_offset >= 0) cell->baseline_offset += dy;
 }
 
+/* The cell's border-box height its in-flow content needs (line boxes and in-flow children,
+ * plus the end padding and border): vertical-align distributes row_h minus this, not
+ * minus c->h, which a specified `height` (Krunker's `td { height: 50px }`) already grew to
+ * the row height. */
+static float cell_content_h(const Box *c)
+{
+    float bottom = box_ct(c);
+    for (int i = 0; i < c->line_count; i++) bottom = kn_maxf(bottom, c->lines[i].y + c->lines[i].h);
+    for (const Box *k = c->first_child; k; k = k->next) {
+        if (k->flags & BOXF_OUT_OF_FLOW) continue;
+        if (k->type == BOX_TEXT || k->type == BOX_INLINE || k->type == BOX_LINEBREAK) continue;
+        if ((k->flags & BOXF_INLINE_LEVEL) && (c->flags & BOXF_HAS_LINES)) continue; /* in the line boxes */
+        bottom = kn_maxf(bottom, k->ly + k->h + k->margin[CSS_BOTTOM]);
+    }
+    return bottom + c->padding[CSS_BOTTOM] + c->border[CSS_BOTTOM];
+}
+
 static void layout_cell(LayoutTree *t, Box *c, float w, float h, float cb_w)
 {
     LayoutInput in;
@@ -146,7 +194,8 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
     int nc = table_columns(t, b, cols);
     float cx = box_cl(b), cy = box_ct(b), cw = box_cw(b);
     float avail = kn_maxf(0, cw - hs * (float)(nc + 1));
-    distribute(cols, nc, avail);
+    if (table_fixed(b)) distribute_fixed(t, b, cols, nc, avail);
+    else distribute(cols, nc, avail);
     float colx[TBL_MAX_COLS];
     float x = hs;
     for (int i = 0; i < nc; i++) { colx[i] = x; x += cols[i].w + hs; }
@@ -176,8 +225,8 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
         ci = 0;
         for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
             if (c->type != BOX_TABLE_CELL) continue;
-            float natural = c->h;
             layout_cell(t, c, cols[ci].w, row_h, cw);
+            const float natural = cell_content_h(c);
             float extra = row_h - natural;
             if (extra > 0) {
                 if (c->vertical_align == CSS_VERTICAL_ALIGN_MIDDLE) shift_contents(c, extra * 0.5f);

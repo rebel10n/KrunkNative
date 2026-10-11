@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <ai.h>
 #include <pcg_basic.h>
 #include <string.h>
 #include <math.h>
@@ -173,10 +174,13 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
         game->vote_kick = NULL;
     }
 
+    game_ai_reset(game); // game.init: AI.reset() (clients drop their mirrored AIs too)
+
     if (!game->mode || !game->map) return;
 
     game->ready = 1;
     game_start_round(game);
+    game_ai_spawn_map(game); // map.manager.addPendingAIs(AI): the map's BOT objects (authority)
 }
 
 // The index of mode `mode_id` in game->modes, appending it when the list lacks it (a
@@ -312,7 +316,7 @@ static void game_send_timer(Game *game, const int uid, const int seconds, const 
 
 // endGame(): didWin = (team && team == winner) || player == winner; "end" carries didWin
 // when there is a winner, else -1 (draw).
-static void game_send_end(Game *game, Player *player, const ModeWinner winner, const NetLeaderboardPacket *board) {
+static void game_send_end(Game *game, Player *player, const ModeWinner winner, const NetLeaderboardPacket *board, const int32_t *rewards) {
     NetEndPacket packet;
     memset(&packet, 0, sizeof(packet));
 
@@ -321,8 +325,49 @@ static void game_send_end(Game *game, Player *player, const ModeWinner winner, c
     packet.next_round = (int32_t) ceilf(game->end_timer);
     packet.winner_uid = winner.player ? winner.player->uid : -1;
     packet.board = *board;
+    memcpy(packet.rewards, rewards, sizeof(packet.rewards));
 
     game_send(game, player->uid, NET_PACKET_END, &packet, sizeof(packet));
+}
+
+// players.list.sort(mode.endSort || orderByScore), then the mode's winner.
+static size_t game_end_order(Game *game, Player **sorted, ModeWinner *winner) {
+    size_t count = 0;
+    for (size_t i = 0; i < game->player_count && count < GAME_LEADERBOARD_MAX; i++) {
+        if (game->players[i]) sorted[count++] = game->players[i];
+    }
+    if (game->mode) mode_sort_players(game, sorted, count);
+    else count = game_sorted_players(game, sorted, GAME_LEADERBOARD_MAX);
+
+    *winner = (ModeWinner) {0, NULL};
+    if (game->mode) *winner = mode_pick_winner(game);
+    else if (count) winner->player = sorted[0];
+    return count;
+}
+
+// io_ent during the vote window (v3.1.1 server/packetHandlers.ts): a player who enters
+// while the round is over still spawns (first spawn or respawn, no deathDelay check: the
+// client's menu enforced it), and then gets `ctx.send("end", false, -1, endData, ...)`.
+int game_end_late_spawn(const Game *game, const Player *player) {
+    return game->ready && game->end_timer > 0.0f && !(player && player->active);
+}
+
+// That late "end" (didWin -1) for one uid: the endData rows as they stand.
+void game_send_end_late(Game *game, const int uid) {
+    if (!game->ready || game->end_timer <= 0.0f) return;
+
+    Player *sorted[GAME_LEADERBOARD_MAX];
+    ModeWinner winner;
+    const size_t count = game_end_order(game, sorted, &winner);
+
+    NetEndPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.result = -1;
+    packet.next_round = (int32_t) ceilf(game->end_timer);
+    packet.winner_uid = winner.player ? winner.player->uid : -1;
+    game_fill_board_from((const Player *const *) sorted, count, &packet.board);
+    for (size_t i = 0; i < count; i++) packet.rewards[i] = sorted[i]->reward;
+    game_send(game, uid, NET_PACKET_END, &packet, sizeof(packet));
 }
 
 // game.endGame(3): the round clock ran out. Winner = best score, per-player "end"
@@ -336,21 +381,20 @@ void game_end_round(Game *game) {
     game->nuke_timer = 0.0f;
     game->nuke_player = NULL;
 
-    // players.list.sort(mode.endSort || orderByScore), then the mode's winner
     Player *sorted[GAME_LEADERBOARD_MAX];
-    size_t count = 0;
-    for (size_t i = 0; i < game->player_count && count < GAME_LEADERBOARD_MAX; i++) {
-        if (game->players[i]) sorted[count++] = game->players[i];
-    }
-    if (game->mode) mode_sort_players(game, sorted, count);
-    else count = game_sorted_players(game, sorted, GAME_LEADERBOARD_MAX);
+    ModeWinner winner;
+    const size_t count = game_end_order(game, sorted, &winner);
 
-    ModeWinner winner = {0, NULL};
-    if (game->mode) winner = mode_pick_winner(game);
-    else if (count) winner.player = sorted[0];
+    // endGame(): player.reward for every player (hooks.reward: accounts live in the server)
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (player) player->reward = game->hooks.reward ? game->hooks.reward(game, player) : 0;
+    }
 
     NetLeaderboardPacket board;
     game_fill_board_from((const Player *const *) sorted, count, &board);
+    int32_t rewards[GAME_LEADERBOARD_MAX] = {0};
+    for (size_t i = 0; i < count; i++) rewards[i] = sorted[i]->reward;
 
     // Spectators / menu clients see the end screen without a result (the v3.1.1 server's
     // vote-window "end" with didWin -1).
@@ -360,11 +404,12 @@ void game_end_round(Game *game) {
     watcher.next_round = (int32_t) ceilf(game->end_timer);
     watcher.winner_uid = winner.player ? winner.player->uid : -1;
     watcher.board = board;
+    memcpy(watcher.rewards, rewards, sizeof(rewards));
     game_send(game, NET_TARGET_NON_PLAYERS, NET_PACKET_END, &watcher, sizeof(watcher));
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
-        if (player) game_send_end(game, player, winner, &board);
+        if (player) game_send_end(game, player, winner, &board, rewards);
     }
 
     if (game->mode) mode_send_end(game, winner, sorted, count);
@@ -411,6 +456,8 @@ void game_set_endless(Game *game, const int on) {
 // What a client that connects mid-round needs: the clock, or the end screen.
 void game_send_round_state(Game *game, const int uid) {
     if (!game->ready || !game_is_authority(game)) return;
+
+    game_send_object_state(game, uid); // init dest / gates / banks (shared/src/triggers.c)
 
     if (game->end_timer > 0.0f) {
         game_send_timer(game, uid, (int) game->end_timer, 1);
@@ -582,13 +629,17 @@ void game_tick_world(Game *game, const float now, const float delta, const float
 
         game_tick_regen(game, player, delta);
 
-        if (player->position.y <= game->map->death_y) {
+        // KrunkNative (deliberate difference): v3.1.1 players.js update() kills at deathY even in
+        // noclip; a noclipping player (a dev/host tool) may fly under the map instead.
+        if (!player->noclip && player->position.y <= game->map->death_y) {
             // the CTF flag goes home in mode_on_kill (mode_in_kill_zone)
             player_kill(player, NULL, NULL, 0);
         }
     }
 
+    if (authority && !game->end_timer) game_ai_tick(game, world_delta * 1000.0f * game->config.delta_mlt); // AI.update(delta * deltaMlt) + AI.sync
     if (authority && !game->end_timer) game_tick_projectiles(game, delta);
+    game_tick_map_objects(game, delta * 1000.0f); // teleporter cooldowns; authority: onTimer triggers, destructible respawns
     if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn
     if (authority && game->leaders_dirty) game_sync_leaders(game, NET_TARGET_ALL);
 

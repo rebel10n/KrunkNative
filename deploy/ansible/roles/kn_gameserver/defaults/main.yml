@@ -1,0 +1,19 @@
+# server_bin instances on the edges (dedicated-server contract):
+#   count = vcpus - 1 (one core left for the host's other services), at least 1;
+#   instance n (1-based): port {{ kn_gameserver_first_port }}+n-1, TCP game + UDP
+#   server-info query on the same number; hostname <edge>-<n>.krunker.party.
+kn_gameserver_first_port: 21015
+kn_gameserver_count: "{{ [((ansible_processor_vcpus | default(ansible_processor_nproc) | int) - 1), 1] | max }}"
+kn_gameserver_hostname_fmt: "{{ kn_edge_name }}-%d.{{ kn_domain }}"
+# Units are installed but stay disabled/stopped until the finder heartbeat code
+# (server.cfg finder_url) lands in the shipped server_bin: flip to true then.
+kn_gameserver_enabled: false
+# False where the host firewall is owned by someone else and 21015.. is not open
+# yet (amph.ashburn): units stay down regardless of kn_gameserver_enabled.
+kn_gameserver_ports_open: true
+kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
+kn_gameserver_region: "{{ kn_edge_name }}"
+kn_gameserver_max_players: 8
+kn_gameserver_online_mode: 1
+kn_gameserver_finder_url: "{{ kn_matchmaker_url }}"
+kn_gameserver_auth_url: "{{ kn_coordinator_url }}"

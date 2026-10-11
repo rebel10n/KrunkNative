@@ -13,6 +13,10 @@
 // cards, exactly like the real page does for a logged-out player.
 #include <ui_logic.h>
 #include <audio.h>
+#include <backend_ui.h>
+#include <online_mode.h> // offline mode: every skin unlocked
+#include <render_settings.h>
+#include "../viewer/viewer_store.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -179,8 +183,137 @@ static void refresh_class_box(void) {
 
 static const char *spray_name(int index);
 
+// ---------------------------------------------------------------- Game.store.skins / acc.skins
+
+static const ViewerSkin *store_skin(const int index) { return index >= 0 ? viewer_skin(index) : NULL; }
+
+static const char *rarity_color(const ViewerSkin *s) {
+    return s && s->rarity >= 0 && s->rarity < g_viewer_rarity_count ? g_viewer_rarities[s->rarity].color : "#fff";
+}
+
+// aY.rarityAnim && store.rarities[r].animate: only Unobtainable (6) animates in v3.1.1
+static int rarity_anim(const ViewerSkin *s) {
+    return s && s->rarity == 6 && !client_render_settings()->disable_rarity_anim;
+}
+
+// skin.creator || "Krunker.io": the viewer table has no creator, so read assets/skins.json once.
+static const char *skin_creator(const int index) {
+    static cJSON *skins;
+    static int loaded;
+    if (!loaded) {
+        loaded = 1;
+        char *path = concat(assets_path(), "skins.json");
+        unsigned char *buf = NULL;
+        size_t len = 0;
+        if (path && ensure_asset_file(path) && !read_file(path, &buf, &len)) skins = cJSON_ParseWithLength((const char *) buf, len);
+        free(buf);
+        free(path);
+    }
+    const char *c = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(skins, index), "creator"));
+    return c && c[0] ? c : "Krunker.io";
+}
+
+typedef struct { int ind, cnt, pos; } OwnedSkin;
+static int g_owned_by_rarity_only; // the spray window sorts by rarity alone (stable)
+
+static int owned_rarity(const OwnedSkin *o) { const ViewerSkin *s = store_skin(o->ind); return s ? s->rarity : 0; }
+static int owned_season(const OwnedSkin *o) { const ViewerSkin *s = store_skin(o->ind); return s ? (s->seas ? s->seas : 1) : 0; }
+
+// [...acc.skins].sort(): rarity, then season, then index, all descending.
+static int owned_cmp(const void *pa, const void *pb) {
+    const OwnedSkin *a = pa, *b = pb;
+    const int ra = owned_rarity(a), rb = owned_rarity(b);
+    if (ra != rb) return rb - ra;
+    if (!g_owned_by_rarity_only) {
+        const int sa = owned_season(a), sb = owned_season(b);
+        if (sa != sb) return sb - sa;
+        if (a->ind != b->ind) return b->ind - a->ind;
+    }
+    return a->pos - b->pos;
+}
+
+// Offline mode (online_mode.h): no account, every store skin is unlocked and nothing is saved.
+static int all_skins_unlocked(void) { return !online_mode_online(); }
+
+// The loadout may show and wear store skins: signed in (acc.skins) or offline mode (all of them).
+static int has_inventory(void) { return account_get() || all_skins_unlocked(); }
+
+// acc.skins ({ind, cnt} entries, account data slot 10), sorted; NULL (count 0) for a guest.
+// Offline mode: one of every skin. Caller frees.
+static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
+    *count = 0;
+    if (all_skins_unlocked() && g_viewer_skin_count > 0) {
+        OwnedSkin *all = calloc((size_t) g_viewer_skin_count, sizeof(OwnedSkin));
+        if (!all) return NULL;
+        for (int i = 0; i < g_viewer_skin_count; i++) {
+            const ViewerSkin *s = viewer_skin(i);
+            if (!s || !s->name) continue;
+            all[*count] = (OwnedSkin) {i, 1, *count};
+            (*count)++;
+        }
+        g_owned_by_rarity_only = by_rarity_only;
+        qsort(all, (size_t) *count, sizeof(OwnedSkin), owned_cmp);
+        return all;
+    }
+    const AccountInfo *acc = account_get();
+    const cJSON *skins = acc ? cJSON_GetArrayItem(acc->data, 10) : NULL;
+    const int n = cJSON_GetArraySize(skins);
+    OwnedSkin *out = n > 0 ? calloc((size_t) n, sizeof(OwnedSkin)) : NULL;
+    if (!out) return NULL;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItem(e, "ind"), *cnt = cJSON_GetObjectItem(e, "cnt");
+        if (!cJSON_IsNumber(ind)) continue;
+        out[*count] = (OwnedSkin) {ind->valueint, cJSON_IsNumber(cnt) ? cnt->valueint : 1, *count};
+        (*count)++;
+    }
+    g_owned_by_rarity_only = by_rarity_only;
+    qsort(out, (size_t) *count, sizeof(OwnedSkin), owned_cmp);
+    return out;
+}
+
+// One owned item card of getItemsList / Select Skin (weapon: the selectSkin weapon, -1 = fn(ind)).
+static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, const char *fn, const char *img_class, const int with_season, const int weapon) {
+    const char *col = rarity_color(s);
+    char img[160];
+    store_skin_preview(o->ind, img, sizeof(img));
+    if (img[0] == '.' && img[1] == '/') memmove(img, img + 2, strlen(img + 2) + 1);
+    sb_appendf(out, "<div class=\"skinCard%s%s\" style=\"color:%s;border:5px solid%s\" onmouseenter=\"playTick()\" onclick=\"%s(%d",
+               s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col, fn, o->ind);
+    if (weapon >= 0) sb_appendf(out, ",%d", weapon);
+    sb_appendf(out, ")\"><div class=\"itemCnt\" data-badge=\"x%d\"></div>", o->cnt);
+    sb_append_esc(out, s->name ? s->name : "");
+    sb_append(out, "<div class=\"itemOwn\">by ");
+    sb_append_esc(out, skin_creator(o->ind));
+    sb_append(out, "</div>");
+    if (with_season) sb_appendf(out, "<div class=\"itemSea\">Season %d</div>", s->seas ? s->seas : 1);
+    sb_appendf(out, "<img loading=\"lazy\" %sclass=\"%s%s\" src=\"%s\"/><div class=\"selctInfoBtn\" onmouseenter=\"playTick()\" onclick=\"openSales(%d)\">?</div></div>",
+               weapon >= 0 ? "draggable=\"false\" " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img, o->ind);
+}
+
+// dz[weapon]: the saved weapon skin (localStorage "skins" {weapon: index}), -1 none.
+static int weapon_skin(const int weapon) {
+    char buf[1024] = "{}", key[16];
+    html_storage_get("skins", buf, sizeof(buf));
+    cJSON *skins = cJSON_Parse(buf);
+    snprintf(key, sizeof(key), "%d", weapon);
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(skins, key);
+    const int out = cJSON_IsNumber(v) ? v->valueint : -1;
+    cJSON_Delete(skins);
+    return out;
+}
+
+// The loadout row's name: store.skins[i].name, else Random / the default.
 static const char *cosmetic_name(const int index, const char *none) {
-    return index == -2 ? "Random" : none; // a guest owns no Game.store.skins
+    const ViewerSkin *s = store_skin(index);
+    if (s && s->name) return s->name;
+    return index == -2 ? "Random" : none;
+}
+
+// The loadout row's colour: the rarity colour of a selected item when signed in.
+static const char *cosmetic_color(const int index, const char *grey) {
+    const ViewerSkin *s = has_inventory() ? store_skin(index) : NULL;
+    return s ? rarity_color(s) : grey;
 }
 
 // genLoadouts(): the preset row (#loadoutHolder content).
@@ -204,6 +337,15 @@ static void gen_loadouts(StrBuf *out) {
 static void settname_row(StrBuf *out, const char *label, const char *onclick, const char *color, const char *value) {
     sb_appendf(out, "<div class=\"settName\">%s<span onclick=\"%s\" class=\"settText floatR\" style=\"color:%s\">", label, onclick, color);
     sb_append_esc(out, value);
+    sb_append(out, "</span></div>");
+}
+
+// A cosmetic row: name and rarity colour (rainbowText for an animated rarity) of the selected item.
+static void item_row(StrBuf *out, const char *label, const char *onclick, const int index, const char *none, const char *grey) {
+    const ViewerSkin *s = has_inventory() ? store_skin(index) : NULL;
+    sb_appendf(out, "<div class=\"settName\">%s<span onclick=\"%s\" class=\"settText floatR%s\" style=\"color:%s\">", label, onclick,
+               rarity_anim(s) ? " rainbowText" : "", cosmetic_color(index, grey));
+    sb_append_esc(out, cosmetic_name(index, none));
     sb_append(out, "</span></div>");
 }
 
@@ -232,8 +374,12 @@ char *ui_loadout_gen(void) {
 
     sb_append(&out, "<div class=\"settName\">Class<span class=\"settText floatR\" onclick=\"showWindow(6)\">");
     sb_append_esc(&out, mc && mc->name ? mc->name : "");
-    sb_appendf(&out, "</span></div><div class=\"settName\">Primary<span class=\"settLabel wepLink\" style=\"color:#2196F3\" onclick=\"skinSelector(%d)\">", lc->primary);
-    sb_append_esc(&out, primary_name);
+    // signed in, dz[weapon] names the weapon skin (rarity colour) or "Random"
+    const int pskin = has_inventory() ? weapon_skin(lc->primary) : -1;
+    const ViewerSkin *ps = store_skin(pskin);
+    sb_appendf(&out, "</span></div><div class=\"settName\">Primary<span class=\"settLabel wepLink%s\" style=\"color:%s\" onclick=\"skinSelector(%d)\">",
+               rarity_anim(ps) ? " rainbowText" : "", ps ? rarity_color(ps) : "#2196F3", lc->primary);
+    sb_append_esc(&out, ps && ps->name ? ps->name : pskin == -2 ? "Random" : primary_name);
     sb_append(&out, "</span></div>");
     if (has_attach) {
         const int a = sel(SEL_ATTACH);
@@ -245,18 +391,23 @@ char *ui_loadout_gen(void) {
         const char *name = r >= 0 && r < RETICLE_COUNT ? RETICLES[r] : r == -2 ? "Custom" : "None";
         sb_appendf(&out, "<div class=\"settName\">Reticle<span class=\"settLabel wepLink\" onclick=\"showWindow(32)\" style=\"color:%s\">%s</span></div>", grey, name);
     }
-    sb_appendf(&out, "<div class=\"settName\">Secondary<span class=\"settLabel%s\" %s style=\"color:%s\">",
-               lc->secondary ? " wepLink" : "", lc->secondary ? "onclick=\"showWindow(20)\"" : "", lc->secondary ? "#2196F3" : grey);
-    sb_append_esc(&out, lc->secondary ? secondary_name : "None");
+    const int sskin = has_inventory() && lc->secondary ? weapon_skin(sel(SEL_SECONDARY)) : -1;
+    const ViewerSkin *ss = store_skin(sskin);
+    sb_appendf(&out, "<div class=\"settName\">Secondary<span class=\"settLabel%s%s\" %s style=\"color:%s\">",
+               lc->secondary ? " wepLink" : "", lc->secondary && rarity_anim(ss) ? " rainbowText" : "", lc->secondary ? "onclick=\"showWindow(20)\"" : "",
+               ss ? rarity_color(ss) : lc->secondary ? "#2196F3" : grey);
+    sb_append_esc(&out, !lc->secondary ? "None" : ss && ss->name ? ss->name : sskin == -2 ? "Random" : secondary_name);
     sb_append(&out, "</span></div>");
-    settname_row(&out, "Melee", "showWindow(26)", grey, cosmetic_name(sel(SEL_MELEE), "Combat Knife"));
-    settname_row(&out, "Face", "showWindow(39)", grey, cosmetic_name(sel(SEL_FACE), "None"));
-    settname_row(&out, "Hat", "showWindow(16)", grey, cosmetic_name(sel(SEL_HAT), "None"));
-    settname_row(&out, "Body", "showWindow(17)", grey, cosmetic_name(sel(SEL_BACK), "None"));
-    settname_row(&out, "Waist", "showWindow(38)", grey, cosmetic_name(sel(SEL_WAIST), "None"));
-    settname_row(&out, "Dye", "showWindow(34)", grey, cosmetic_name(sel(SEL_DYE), "None"));
+    item_row(&out, "Melee", "showWindow(26)", sel(SEL_MELEE), "Combat Knife", grey);
+    item_row(&out, "Face", "showWindow(39)", sel(SEL_FACE), "None", grey);
+    item_row(&out, "Hat", "showWindow(16)", sel(SEL_HAT), "None", grey);
+    item_row(&out, "Body", "showWindow(17)", sel(SEL_BACK), "None", grey);
+    item_row(&out, "Waist", "showWindow(38)", sel(SEL_WAIST), "None", grey);
+    item_row(&out, "Dye", "showWindow(34)", sel(SEL_DYE), "None", grey);
     const int spray = sel(SEL_SPRAY);
-    settname_row(&out, "Spray", "showWindow(9)", "#2196F3", spray_name(spray) ? spray_name(spray) : spray == -2 ? "Random" : "None");
+    const ViewerSkin *spray_skin = spray_name(spray) ? NULL : store_skin(spray);
+    if (spray_skin && spray_skin->type == 4) item_row(&out, "Spray", "showWindow(9)", spray, "None", "#2196F3");
+    else settname_row(&out, "Spray", "showWindow(9)", "#2196F3", spray_name(spray) ? spray_name(spray) : spray == -2 ? "Random" : "None");
 
     // Skin Color: the premium "+" then config.skinColors from the last to the first.
     color_row_premium(&out, "Skin Color");
@@ -299,6 +450,13 @@ static char *gen_items_list(const char *fn, const int type) {
     StrBuf out = {0};
     sb_append(&out, "<div id=\"skinList\">");
     skin_card_none_random(&out, fn, img_class, img, type != 5, type == 3 ? "Combat Knife" : "None", "");
+    int n;
+    OwnedSkin *owned = owned_skins(&n, 0); // signed in: acc.skins of this type
+    for (int i = 0; i < n; i++) {
+        const ViewerSkin *s = store_skin(owned[i].ind);
+        if (s && s->type == type) owned_card(&out, &owned[i], s, fn, img_class, type != 5, -1);
+    }
+    free(owned);
     sb_append(&out, "</div>");
     return sb_finish(&out);
 }
@@ -312,6 +470,13 @@ static char *gen_skins(void) {
     sb_append(&out, "<div id=\"skinList\" style=\"margin-top: 8px;\">");
     sb_appendf(&out, "<div class=\"skinCard blackShad\" style=\"border:5px solid lightgrey\" onmouseenter=\"playTick()\" onclick=\"selectSkin(-1,%d)\">None<div class=\"itemOwn\">Default</div><div class=\"itemSea\" style=\"opacity:0;\">Season 1</div><img draggable=\"false\" class=\"skinImg\" src=\"%s\"></div>", g_skin_weapon, img);
     sb_appendf(&out, "<div class=\"skinCard blackShad\" style=\"border:5px solid lightgrey\" onmouseenter=\"playTick()\" onclick=\"selectSkin(-2,%d)\">Random<div class=\"itemOwn\" style=\"opacity:0;\">by \?\?\?</div><div class=\"itemSea\" style=\"opacity:0;\">All Seasons</div><img draggable=\"false\" class=\"skinImg skinSil\" onmouseenter=\"playTick()\" src=\"%s\"><div class=\"skinRandom blackShad\" style=\"top:68px\">?</div></div>", g_skin_weapon, img);
+    int n;
+    OwnedSkin *owned = owned_skins(&n, 0); // signed in: owned skins of weapon dC (b7.weapon == dC + 1)
+    for (int i = 0; i < n; i++) {
+        const ViewerSkin *s = store_skin(owned[i].ind);
+        if (s && !s->type && s->weapon == g_skin_weapon + 1) owned_card(&out, &owned[i], s, "selectSkin", "skinImg", 1, s->weapon - 1);
+    }
+    free(owned);
     sb_append(&out, "</div>");
     return sb_finish(&out);
 }
@@ -379,6 +544,54 @@ static const char *spray_name(const int index) {
     memcpy(name, gt + 1, (size_t) (end - gt - 1));
     name[end - gt - 1] = 0;
     return name;
+}
+
+// windows[8] Select Spray signed in: the owned type-4 skins (sorted by rarity) go between the
+// Random card and the default sprays of the captured window; NULL = keep the capture (guest).
+static char *gen_sprays(void) {
+    int n;
+    OwnedSkin *owned = owned_skins(&n, 1);
+    const char *base = ui_windows_html("9");
+    const char *at = strstr(base, "<div class=\"noBtnCard\" onclick=\"selectSpray(0)\"");
+    StrBuf cards = {0}, style = {0};
+    int frames_seen[16], frames_n = 0;
+    for (int i = 0; at && i < n; i++) {
+        const ViewerSkin *s = store_skin(owned[i].ind);
+        if (!s || s->type != 4) continue;
+        const char *col = rarity_color(s);
+        char img[160], anim[96] = "";
+        store_skin_preview(owned[i].ind, img, sizeof(img));
+        if (img[0] == '.' && img[1] == '/') memmove(img, img + 2, strlen(img + 2) + 1);
+        if (s->frames) { // UTILS.getFrameAnim(b7, "sprayAnm") and its @keyframes
+            snprintf(anim, sizeof(anim), "animation: sprayAnm%d %gs steps(%d) infinite;", s->frames, 1 + s->frame_t / 1000.0, s->frames);
+            int seen = 0;
+            for (int k = 0; k < frames_n; k++) seen |= frames_seen[k] == s->frames;
+            if (!seen && frames_n < 16) {
+                char kf[48];
+                snprintf(kf, sizeof(kf), "@keyframes sprayAnm%d ", s->frames);
+                if (!strstr(base, kf)) sb_appendf(&style, "%s{100%%{background-position:-%dpx}}", kf, s->frames * 110);
+                frames_seen[frames_n++] = s->frames;
+            }
+        }
+        sb_appendf(&cards, "<div class=\"noBtnCard%s\" style=\"color:%s;border: 5px solid %s\" onclick=\"selectSpray(%d)\">", rarity_anim(s) ? " rainbow" : "", col, col, owned[i].ind);
+        sb_append_esc(&cards, s->name ? s->name : "");
+        sb_appendf(&cards, "<div class=\"itemOwn\">Spray</div><div draggable=\"false\" class=\"sprayImg\" onmouseenter=\"playTick()\" style=\"background: url(&quot;%s&quot;) -1px;%s\"></div></div>", img, anim);
+    }
+    free(owned);
+    char *c = sb_finish(&cards), *st = sb_finish(&style);
+    if (!c || !c[0]) {
+        free(c);
+        free(st);
+        return NULL;
+    }
+    StrBuf out = {0};
+    if (st && st[0]) sb_appendf(&out, "<style>%s</style>", st);
+    sb_append_n(&out, base, (size_t) (at - base));
+    sb_append(&out, c);
+    sb_append(&out, at);
+    free(c);
+    free(st);
+    return sb_finish(&out);
 }
 
 // ---------------------------------------------------------------- windows[34] Changelog
@@ -510,6 +723,7 @@ char *ui_loadout_generate(const int id, const char **header) {
     char *html = NULL;
     switch (id) {
         case 3: h = "Change Loadout"; html = ui_loadout_gen(); break;
+        case 9: h = "Select Spray"; html = gen_sprays(); break; // NULL = the captured window
         case 15: h = "Select Skin"; html = gen_skins(); break;
         case 16: h = "Select Hat"; html = gen_items_list("selectHat", 1); break;
         case 17: h = "Select Back"; html = gen_items_list("selectBack", 2); break;
@@ -571,7 +785,7 @@ void ui_loadout_skin_selector(const int weapon, const int secondary) {
     menu_show_window(15, 0);
 }
 
-// selectSkin(index, weapon): a guest has no skins, so only -2 (Random) is remembered.
+// selectSkin(index, weapon): a store skin index or -2 (Random) is remembered, anything else clears it.
 void ui_loadout_select_skin(const int index, const int weapon) {
     char buf[1024] = "{}";
     html_storage_get("skins", buf, sizeof(buf));
@@ -583,7 +797,8 @@ void ui_loadout_select_skin(const int index, const int weapon) {
     char key[16];
     snprintf(key, sizeof(key), "%d", weapon);
     cJSON_DeleteItemFromObject(skins, key);
-    if (index == -2) cJSON_AddNumberToObject(skins, key, -2);
+    // dz[weapon] = store.skins[index] || index == -2 ? index : undefined
+    if (index == -2 || store_skin(index)) cJSON_AddNumberToObject(skins, key, index);
     char *text = cJSON_PrintUnformatted(skins);
     if (text) html_storage_set("skins", text);
     free(text);

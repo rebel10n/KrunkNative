@@ -1,0 +1,57 @@
+- name: Release directory
+  ansible.builtin.file:
+    path: "{{ kn_svc_base }}/releases/{{ kn_release_id }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Binaries ({{ kn_build_codename }} build)
+  ansible.posix.synchronize:
+    src: "{{ kn_artifact_root }}/{{ kn_build_codename }}/bin/"
+    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/bin/"
+    archive: false
+    recursive: true
+    checksum: true
+    times: true
+    perms: true
+    use_ssh_args: true
+    rsync_opts: "{{ ['--chmod=D755,F755', '--chown=root:root'] + (kn_release_bins | map('regex_replace', '^', '--include=') | list) + ['--exclude=*'] }}"
+
+- name: Service data files (maps, skins.json)
+  ansible.posix.synchronize:
+    src: "{{ kn_repo_root }}/assets/{{ item }}"
+    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/assets/"
+    archive: false
+    recursive: true
+    checksum: true
+    times: true
+    use_ssh_args: true
+    rsync_opts: ["--chmod=D755,F644", "--chown=root:root", "--mkpath"]
+  loop: "{{ kn_release_assets }}"
+
+- name: Database migrations
+  ansible.posix.synchronize:
+    src: "{{ kn_repo_root }}/services/db/migrations"
+    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/services/db/"
+    archive: false
+    recursive: true
+    checksum: true
+    times: true
+    delete: true
+    use_ssh_args: true
+    rsync_opts: ["--chmod=D755,F644", "--chown=root:root", "--mkpath"]
+  when: kn_release_migrations | default(false) | bool
+
+- name: Flip current -> releases/{{ kn_release_id }}
+  ansible.builtin.file:
+    src: "{{ kn_svc_base }}/releases/{{ kn_release_id }}"
+    dest: "{{ kn_svc_current }}"
+    state: link
+    force: true
+  register: kn_release_link
+
+- name: Prune old service releases (keep {{ kn_keep_releases }})
+  ansible.builtin.include_tasks: prune.yml
+  vars:
+    prune_dir: "{{ kn_svc_base }}/releases"

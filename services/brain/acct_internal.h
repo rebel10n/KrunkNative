@@ -1,0 +1,240 @@
+/*
+ * services/brain/acct_internal.h - shared internals of the accounts/social
+ * modules (accounts.c, social_ws.c, profiles.c, leaderboards.c, social_data.c).
+ * Not for other brain modules: they use accounts.h / social_ws.h.
+ */
+#ifndef KN_BRAIN_ACCT_INTERNAL_H
+#define KN_BRAIN_ACCT_INTERNAL_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "cJSON.h"
+#include "brain.h"
+#include "knsvc/db.h"
+#include "accounts.h"
+#include "social_ws.h"
+
+/* ---- config ("accounts" section, doc/backend.md) */
+typedef struct AcctConfig {
+    int name_min, name_max;         /* username length (3..16, v3.1.1 accounts.ts) */
+    int pass_min, pass_max;         /* password length (6..100) */
+    int alias_min, alias_max;       /* display name length (3..16) */
+    int64_t session_ttl_s;          /* sliding session lifetime (30 days) */
+    int max_sessions;               /* per account; oldest dropped (20) */
+    int64_t starting_kr;            /* KR on register (0) */
+    int free_premium;               /* everyone premium (v3.1.1 offline grants it: 1) */
+    int login_throttle_s;           /* per (name, ip) after a failure (5) */
+    int ip_block_failures;          /* IP blocked after this many failures ... (100) */
+    int ip_block_days;              /* ... within this many days (5) */
+    int register_per_ip_hour;       /* 0 = unlimited */
+    int max_match_kr;               /* cap of one stats commit's KR (500) */
+    double rank_var;                /* config.rankVar 0.03 */
+    int trade_min_level;            /* config.tradeMinLvl 20 */
+    int gift_min_level;             /* config.giftMinLVl 30 */
+    int gift_fee_percent;           /* KR gift fee (config.giftFee 0.1 -> 10) */
+    int market_fee_percent;         /* list fee (5, v3.1.1 sale fee 0.05) */
+    int64_t market_fee_bypass;      /* prices <= this pay no fee (config.marketFeeBypass) */
+    int64_t sale_max;               /* max listing price */
+    int max_listings;               /* open listings per player ("MAX") */
+    int trade_max_items;            /* per side (config.tradeMaxOutP 10) */
+    int clan_tag_max;               /* 4 (create input maxlength) */
+    int clan_max_members;           /* 0 = unlimited */
+    int post_max_len, comment_max_len, chat_max_len;
+    int page_size;                  /* leaderboards / lists (100) */
+    const char *dev_names[32];      /* accounts.developers: usernames with isDev */
+    size_t dev_count;
+    const char *mod_names[32];      /* accounts.moderators */
+    size_t mod_count;
+} AcctConfig;
+
+extern AcctConfig g_acct;
+extern Brain *g_acct_brain;
+
+void acct_config_load(Brain *b);
+
+/* ---- validation (v3.1.1 server/accounts.ts strings) */
+const char *acct_validate_name(const char *name);       /* NULL when valid */
+const char *acct_validate_password(const char *pass);
+const char *acct_validate_alias(const char *alias);
+int acct_level(int64_t score, int *prog);
+
+/* ---- DB helpers */
+/* User-facing error of a failed result: the MESSAGE of SQLSTATE P0001 raised by
+ * our functions, "Server error." otherwise (logged). */
+const char *acct_db_error(kn_db_result *res, const char *ctx);
+/* First column of the first row parsed as JSON (jsonb functions); NULL if none. */
+cJSON *acct_db_json(kn_db_result *res);
+/* Integer to decimal text in buf. */
+const char *acct_itoa(char buf[24], int64_t v);
+/* Patch config overrides (free premium, dev/mod names) into an account object. */
+void acct_decorate(cJSON *account);
+
+/* ---- password hashing off the loop thread (PBKDF2 is slow on purpose) */
+/* verify: encoded != NULL -> ok = kn_password_verify(); new_hash set when a rehash
+ *   is due. hash: encoded == NULL -> new_hash = kn_password_hash(). */
+typedef void (*AcctHashFn)(void *ud, int ok, const char *new_hash);
+int acct_hash_async(const char *password, const char *encoded, AcctHashFn cb, void *ud);
+
+/* ---- account operations shared by the social WS and the internal WS */
+typedef struct AcctAuthReq {
+    int action;                     /* 0 register, 1 login (password or token) */
+    const char *name, *pass, *token, *ref, *ip, *origin;
+    const char *twofa;              /* canonical 2FA pattern (acct_twofa_pattern), NULL = none given */
+} AcctAuthReq;
+
+/* acct_auth error of a password login whose account has 2FA and no pattern was given:
+ * the social socket answers ["c2fa", 1] and waits for ["2fa", 1, cells]. */
+#define ACCT_ERR_2FA "2FA required."
+#define ACCT_ERR_2FA_BAD "Invalid 2FA pattern."
+/* Canonical pattern of grid cells (0..24 -> config.alphabet letters, sorted, unique).
+ * Returns the length (0 when no valid cell). */
+size_t acct_twofa_pattern(const cJSON *cells, char out[32]);
+/* Enable 2FA with a fresh random 5-cell pattern -> data {pattern}. */
+void acct_twofa_enable(int64_t id, AcctReplyFn cb, void *ud);
+/* err NULL -> account object (with "token" set when one was issued). */
+void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud);
+void acct_get(int64_t id, AcctReplyFn cb, void *ud);
+void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud);
+/* -> {token}: new session, every other session of the account revoked. */
+void acct_change_password(int64_t id, const char *old_pass, const char *new_pass, AcctReplyFn cb, void *ud);
+/* Revoke one session token (logout). Fire and forget. */
+void acct_revoke_token(const char *token);
+
+/* ---- Krunker store data (store.c): assets/skins.json = src/data/store.js skins, by index */
+typedef struct SkinInfo {
+    int rarity, weapon, type, seas, min_rec;
+    unsigned char limited, blocked, no_spin, illicit, no_sale, no_quick_sell;
+    char lim_t[24];
+    char name[48];
+} SkinInfo;
+const SkinInfo *acct_skin(int64_t index);   /* NULL when unknown / no skins file */
+int acct_skin_count(void);
+
+/* ---- social socket sessions (social_ws.c) */
+struct kn_ws;
+
+typedef struct SocialSession {
+    struct kn_ws *ws;               /* NULL once the socket closed */
+    int refs;                       /* pending async work + 1 while open */
+    int json;                       /* client speaks JSON text frames: answer in JSON */
+    int64_t account_id;             /* 0 = guest */
+    char username[40];
+    char token[80];                 /* session token used/issued on this socket */
+    char ip[64];
+    char socket_id[20];
+    int auth_busy;                  /* an "a" request is in flight */
+    char *pending_name, *pending_pass; /* password login waiting for the 2FA pattern */
+    int busy;                       /* async work of the current frame in flight */
+    int draining;
+    struct SocialFrameQ *q_head, *q_tail; /* frames waiting for busy == 0 (per-socket order) */
+    int q_len;
+    double bucket;                  /* rate limit tokens */
+    uint64_t bucket_ms;
+    struct SocialSession *prev, *next;  /* presence list (authenticated sockets) */
+} SocialSession;
+
+typedef void (*SocialHandler)(SocialSession *s, const cJSON *frame);
+/* Called after a social_query() completes while the socket is still open. */
+typedef void (*SocialDbFn)(SocialSession *s, kn_db_result *res, void *extra);
+
+SocialSession *social_retain(SocialSession *s);
+void social_release(SocialSession *s);
+/* Async work on behalf of the socket's current frame: frames that arrive meanwhile
+ * wait, so each socket's requests run strictly in order (like v3.1.1's synchronous
+ * SQLite). hold = retain + busy++; unhold = busy--, run queued frames, release. */
+SocialSession *social_hold(SocialSession *s);
+void social_unhold(SocialSession *s);
+int social_open(const SocialSession *s);
+/* Sends ["label", ...] (consumes frame). */
+void social_send(SocialSession *s, cJSON *frame);
+/* New frame ["label"]; append args with cJSON_AddItemToArray. */
+cJSON *social_frame(const char *label);
+/* ["label", a1, ..., an]: consumes the n cJSON args (NULL arg -> null). */
+void social_send_n(SocialSession *s, const char *label, int n, ...);
+/* Error popup on the social page: ["po", null, msg] (io_po). */
+void social_error(SocialSession *s, const char *msg);
+/* 1 when logged in, else sends social_error("Must be logged in") and returns 0. */
+int social_require_auth(SocialSession *s);
+/* Push to the account's sockets; json_only: KrunkNative (JSON) clients only, for labels
+ * the v3.1.1 social page has no handler for ("gmc", "ua"). Consumes frame. */
+void social_push_account_ex(int64_t account_id, cJSON *frame, int json_only);
+/* {level, levelProg, alias, premium, funds, score, clan, dev, mod, banned} of an account object. */
+cJSON *social_account_info(const cJSON *account);
+/* ["ua", data40, info] (v3.1.1 updateAccount) to the account's JSON sockets, after
+ * stats commits and other server-side account changes. */
+void social_push_account_update(const cJSON *account);
+/* Unread mail count ["gmc", n] to every open socket of the account. */
+void social_push_mail_count(int64_t account_id);
+/* Async query bound to a session; extra is freed with free() after fn (NULL ok). */
+int social_query(SocialSession *s, const char *sql, int nparams, const char *const *params, SocialDbFn fn,
+                 void *extra);
+/* Frame argument accessors (index 1 = first argument after the label). */
+const cJSON *fa(const cJSON *frame, int i);
+int64_t fa_int(const cJSON *frame, int i, int64_t def);
+const char *fa_str(const cJSON *frame, int i);   /* NULL unless a string */
+/* Viewer id as text ("0" for guests). */
+const char *social_viewer(const SocialSession *s, char buf[24]);
+
+/* Social socket module hooks: social_ws.h. */
+
+/* ---- handlers (profiles.c, leaderboards.c, social_data.c) */
+void sh_page(SocialSession *s, const cJSON *f);        /* "r" */
+void sh_search(SocialSession *s, const cJSON *f);      /* "sp" */
+void sh_follow(SocialSession *s, const cJSON *f);      /* "f" */
+void sh_followers(SocialSession *s, const cJSON *f);   /* "gfs" */
+void sh_following(SocialSession *s, const cJSON *f);   /* "gfg" */
+void sh_profile_stats(SocialSession *s, const cJSON *f); /* "pst" */
+void sh_user_feed(SocialSession *s, const cJSON *f);   /* "guf" */
+void sh_reports(SocialSession *s, const cJSON *f);     /* "grp" */
+void sh_report(SocialSession *s, const cJSON *f);      /* "rpt" */
+void sh_flag(SocialSession *s, const cJSON *f);        /* "flg" */
+void sh_verify(SocialSession *s, const cJSON *f);      /* "ver" */
+void leaders_page(SocialSession *s, const char *sub, int64_t region);
+
+void sh_post(SocialSession *s, const cJSON *f);        /* "ps" */
+void sh_comment(SocialSession *s, const cJSON *f);     /* "com" */
+void sh_get_post(SocialSession *s, const cJSON *f);    /* "gps" */
+void sh_like_post(SocialSession *s, const cJSON *f);   /* "lps" */
+void sh_delete_post(SocialSession *s, const cJSON *f); /* "dps" */
+void sh_chat_blobs(SocialSession *s, const cJSON *f);  /* "chtb" */
+void sh_chat_thread(SocialSession *s, const cJSON *f); /* "ctd" */
+void sh_chat_send(SocialSession *s, const cJSON *f);   /* "ict" */
+void sh_gift(SocialSession *s, const cJSON *f);        /* "kr" */
+void sh_clan(SocialSession *s, const cJSON *f);        /* "cln" */
+void sh_clan_request(SocialSession *s, const cJSON *f);/* "clnR" */
+void sh_settings_up(SocialSession *s, const cJSON *f); /* "uploadS" */
+void sh_settings_get(SocialSession *s, const cJSON *f);/* "getS" */
+void sh_alias(SocialSession *s, const cJSON *f);       /* "nme" */
+void sh_password(SocialSession *s, const cJSON *f);    /* "upp" */
+void sh_mail_list(SocialSession *s, const cJSON *f);   /* "kml" */
+void sh_mail_read(SocialSession *s, const cJSON *f);   /* "rml" */
+void sh_market_list(SocialSession *s, const cJSON *f); /* "li" */
+void sh_market_unlist(SocialSession *s, const cJSON *f); /* "uli" */
+void sh_market_buy(SocialSession *s, const cJSON *f);  /* "pi" */
+void sh_market_filter(SocialSession *s, const cJSON *f); /* "fil" */
+void sh_inventory_sort(SocialSession *s, const cJSON *f); /* "srt" */
+void sh_quick_sell(SocialSession *s, const cJSON *f);  /* "qsi" */
+void sh_item_stats(SocialSession *s, const cJSON *f);  /* "st" */
+void sh_trade_inv(SocialSession *s, const cJSON *f);   /* "ri" */
+void sh_trade_create(SocialSession *s, const cJSON *f);/* "ctr" */
+void sh_trade_accept(SocialSession *s, const cJSON *f);/* "trA" */
+void sh_trade_cancel(SocialSession *s, const cJSON *f);/* "trC" */
+void sh_trade_clear(SocialSession *s, const cJSON *f); /* "trCA" */
+void sh_mail_read_all(SocialSession *s, const cJSON *f); /* "raml" */
+void sh_upload_map(SocialSession *s, const cJSON *f);    /* "uploadM" (creations.c) */
+void sh_edit_map(SocialSession *s, const cJSON *f);      /* "edMp" */
+void sh_fav_creation(SocialSession *s, const cJSON *f);  /* "fvM" */
+void sh_feature_creation(SocialSession *s, const cJSON *f); /* "ftC" */
+void sh_delete_creation(SocialSession *s, const cJSON *f);  /* "delC" */
+void sh_upload_files(SocialSession *s, const cJSON *f);  /* "uploadMo" / "uploadA" */
+void sh_spin(SocialSession *s, const cJSON *f);          /* "spin" (store.c) */
+void sh_free_kr(SocialSession *s, const cJSON *f);       /* "fkr" */
+void sh_claim(SocialSession *s, const cJSON *f);         /* "clm" */
+void sh_noop(SocialSession *s, const cJSON *f);          /* "unbx" */
+void market_page(SocialSession *s, const char *page, const cJSON *f);
+void creation_page(SocialSession *s, int kind, const char *name);
+/* After a login on the social socket: unread mail count etc. */
+void social_after_login(SocialSession *s);
+
+#endif

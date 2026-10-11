@@ -193,6 +193,7 @@ void anim_value_get(const CssComputed *cc, AnimProp prop, AnimValue *out)
     case ANIM_KIND_SHADOW:
         out->shadow.count = c->box_shadow_count;
         out->shadow.shadow = c->box_shadow;
+        memcpy(out->shadow.more, c->box_shadow_more, sizeof c->box_shadow_more);
         break;
     }
 }
@@ -211,6 +212,7 @@ void anim_value_set(CssComputed *c, AnimProp prop, const AnimValue *v)
     case ANIM_KIND_SHADOW:
         c->box_shadow_count = v->shadow.count;
         c->box_shadow = v->shadow.shadow;
+        memcpy(c->box_shadow_more, v->shadow.more, sizeof c->box_shadow_more);
         break;
     }
 }
@@ -426,6 +428,56 @@ static void shadow_lerp(const CssShadow *a, const CssShadow *b, float t, CssShad
     out->inset = a->inset;
 }
 
+static const CssShadow *shadow_at(const AnimShadow *s, int i)
+{
+    return i == 0 ? &s->shadow : &s->more[i - 1];
+}
+
+static CssShadow *shadow_at_mut(AnimShadow *s, int i)
+{
+    return i == 0 ? &s->shadow : &s->more[i - 1];
+}
+
+/* Shadow i of `a`, or the transparent padding shadow matching `other`'s. */
+static CssShadow shadow_or_pad(const AnimShadow *a, const AnimShadow *other, int i)
+{
+    CssShadow p;
+    if (i < a->count) return *shadow_at(a, i);
+    memset(&p, 0, sizeof p);
+    p.color.kind = CSS_COLOR_RGBA;            /* transparent black, 0 offsets */
+    p.inset = i < other->count ? shadow_at(other, i)->inset : 0;
+    return p;
+}
+
+static int shadow_list_equal(const AnimShadow *a, const AnimShadow *b)
+{
+    if (a->count != b->count) return 0;
+    for (int i = 0; i < a->count; i++)
+        if (!shadow_equal(shadow_at(a, i), shadow_at(b, i))) return 0;
+    return 1;
+}
+
+static int shadow_list_interpolable(const AnimShadow *a, const AnimShadow *b)
+{
+    const int n = a->count > b->count ? a->count : b->count;
+    for (int i = 0; i < n; i++) {
+        CssShadow x = shadow_or_pad(a, b, i), y = shadow_or_pad(b, a, i);
+        if (x.inset != y.inset || !color_interpolable(&x.color, &y.color)) return 0;
+    }
+    return 1;
+}
+
+static void shadow_list_lerp(const AnimShadow *a, const AnimShadow *b, float t, AnimShadow *out)
+{
+    const int n = a->count > b->count ? a->count : b->count;
+    memset(out, 0, sizeof *out);
+    for (int i = 0; i < n; i++) {
+        CssShadow x = shadow_or_pad(a, b, i), y = shadow_or_pad(b, a, i);
+        shadow_lerp(&x, &y, t, shadow_at_mut(out, i));
+    }
+    out->count = (uint8_t)n;
+}
+
 static int filter_op_equal(const CssFilterOp *a, const CssFilterOp *b)
 {
     if (a->kind != b->kind || a->amount != b->amount)
@@ -517,8 +569,7 @@ int anim_value_equal(AnimProp prop, const AnimValue *a, const AnimValue *b)
     case ANIM_KIND_TRANSFORM: return transform_equal(&a->transform, &b->transform);
     case ANIM_KIND_FILTER:    return filter_equal(&a->filter, &b->filter);
     default:
-        return a->shadow.count == b->shadow.count &&
-               (a->shadow.count == 0 || shadow_equal(&a->shadow.shadow, &b->shadow.shadow));
+        return shadow_list_equal(&a->shadow, &b->shadow);
     }
 }
 
@@ -531,9 +582,7 @@ int anim_value_interpolable(AnimProp prop, const AnimValue *a, const AnimValue *
     case ANIM_KIND_TRANSFORM: return transform_pairable(&a->transform, &b->transform);
     case ANIM_KIND_FILTER:    return filter_pairable(&a->filter, &b->filter);
     default:
-        return a->shadow.count == 1 && b->shadow.count == 1 &&
-               a->shadow.shadow.inset == b->shadow.shadow.inset &&
-               color_interpolable(&a->shadow.shadow.color, &b->shadow.shadow.color);
+        return shadow_list_interpolable(&a->shadow, &b->shadow);
     }
 }
 
@@ -557,8 +606,7 @@ void anim_value_lerp(AnimProp prop, const AnimValue *a, const AnimValue *b, floa
     case ANIM_KIND_FILTER:    filter_lerp(&a->filter, &b->filter, t, &tmp.filter); break;
     default:
         if (anim_value_interpolable(prop, a, b)) {
-            tmp.shadow.count = 1;
-            shadow_lerp(&a->shadow.shadow, &b->shadow.shadow, t, &tmp.shadow.shadow);
+            shadow_list_lerp(&a->shadow, &b->shadow, t, &tmp.shadow);
         } else {
             tmp.shadow = t < 0.5f ? a->shadow : b->shadow;
         }
@@ -805,11 +853,56 @@ typedef struct FrameRef {
 
 #define ANIM_MAX_REFS 66
 
-/* Value of `prop` at iteration progress p; implicit 0%/100% come from base. */
+/* Keyframe values are resolved once against the document root (unzoomed):
+ * multiply their absolute lengths by the element's effective zoom so they
+ * mix with the (zoomed) computed endpoints, like the cascade does. */
+static void value_zoom(AnimProp prop, AnimValue *v, float z)
+{
+    switch (PROPS[prop].kind) {
+    case ANIM_KIND_FLOAT:
+        if (prop != ANIM_OPACITY) v->f *= z;
+        break;
+    case ANIM_KIND_LENGTH:
+        if (v->len.kind == CSS_LEN_VALUE) v->len.px *= z;
+        break;
+    case ANIM_KIND_TRANSFORM:
+        for (int i = 0; i < v->transform.count && i < CSS_MAX_TRANSFORM_OPS; i++) {
+            CssTransformOp *op = &v->transform.ops[i];
+            if (op->kind == CSS_TRANSFORM_TRANSLATE) {
+                if (op->tx.kind == CSS_LEN_VALUE) op->tx.px *= z;
+                if (op->ty.kind == CSS_LEN_VALUE) op->ty.px *= z;
+            } else if (op->kind == CSS_TRANSFORM_MATRIX) {
+                op->m.e *= z; op->m.f *= z;
+            }
+        }
+        break;
+    case ANIM_KIND_FILTER:
+        for (int i = 0; i < v->filter.count && i < CSS_MAX_FILTER_OPS; i++) {
+            CssFilterOp *op = &v->filter.ops[i];
+            if (op->kind == CSS_FILTER_BLUR) op->amount *= z;
+            else if (op->kind == CSS_FILTER_DROP_SHADOW) {
+                op->shadow.x *= z; op->shadow.y *= z; op->shadow.blur *= z; op->shadow.spread *= z;
+            }
+        }
+        break;
+    case ANIM_KIND_SHADOW:
+        for (int i = 0; i < v->shadow.count; i++) {
+            CssShadow *sh = shadow_at_mut(&v->shadow, i);
+            sh->x *= z; sh->y *= z; sh->blur *= z; sh->spread *= z;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+/* Value of `prop` at iteration progress p; implicit 0%/100% come from base.
+ * `zoom`: the element's effective zoom (keyframe values are unzoomed). */
 static int set_sample_prop(const AnimKeyframeSet *set, AnimProp prop, float p,
-                           const CssTiming *anim_timing, const AnimValue *base, AnimValue *out)
+                           const CssTiming *anim_timing, const AnimValue *base, float zoom, AnimValue *out)
 {
     FrameRef refs[ANIM_MAX_REFS];
+    AnimValue zoomed[ANIM_MAX_REFS];
     int n = 0;
     refs[0].offset = 0.0f;   /* reserved slot for the implicit start frame */
     n = 1;
@@ -818,6 +911,11 @@ static int set_sample_prop(const AnimKeyframeSet *set, AnimProp prop, float p,
         if (!v)
             continue;
         refs[n].offset = set->frames[i].offset;
+        if (zoom != 1.0f) {
+            zoomed[n] = *v;
+            value_zoom(prop, &zoomed[n], zoom);
+            v = &zoomed[n];
+        }
         refs[n].value = v;
         refs[n].timing = set->frames[i].has_timing ? &set->frames[i].timing : NULL;
         n++;
@@ -1387,7 +1485,7 @@ const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed 
                 continue;
             AnimValue bv, v;
             anim_value_get(base, (AnimProp)prop, &bv);
-            if (!set_sample_prop(set, (AnimProp)prop, p, &r->timing, &bv, &v))
+            if (!set_sample_prop(set, (AnimProp)prop, p, &r->timing, &bv, base->zoom > 0.0f ? base->zoom : 1.0f, &v))
                 continue;
             if (!changed) {
                 *out = *base;

@@ -21,6 +21,7 @@ typedef enum {
     CHAT_PERM_ANY = 0,
     CHAT_PERM_DEV = 1,       // requireDev: DEV accounts
     CHAT_PERM_CHEAT = 2,     // requirePremiumCheatPerm: DEV or the premium host of a custom lobby
+    CHAT_PERM_DEV_CHEAT = 3, // requireDev, and a cheat (unlimited ammo, score, summon...): see cheats_open
 } ChatCommandPerm;
 
 typedef struct {
@@ -40,12 +41,19 @@ typedef struct {
     Player *player;          // NULL: still in the menu
     int spectating;
     int dev;                 // passes requireDev while perms are on
+    int premium_host;        // isPremiumCustomHost: the account that hosts this custom lobby (CHAT_PERM_CHEAT)
+    int account_id;          // player.account.id, 0 = guest (no account ban possible)
 } ChatPeer;
 
 typedef struct ChatCommandHost {
     Game *game;
     void *user;
     int perms;               // v3.1.1 PERMS: 0 = everyone may run every command
+    // KrunkNative (deliberate difference): with perms off, v3.1.1 lets everyone use the cheat
+    // commands (/god /noclip /tp ...). 0 (server_bin default, gameserver.cheats "auth") keeps
+    // them for DEV peers / the custom host even then; 1 ("all") = v3.1.1. Moderation commands
+    // still follow perms alone.
+    int cheats_open;
     const char *lobby;       // /server line 1 ("Lobby X | region Y | socket Z")
     const char *region;
     float tick_rate;         // Hz
@@ -58,6 +66,10 @@ typedef struct ChatCommandHost {
     void (*change_map)(void *user, int map_index, int mode_index);
     // Replies to CHAT_CMD_CONSOLE (and a copy of every broadcast) when set.
     void (*log)(void *user, const char *text);
+    // pnhBannedAccountIds (optional; NULL = every player is a guest, v3.1.1's guest replies):
+    int  (*ban_account)(void *user, int account_id, const char *name); // add (persisted), 1 = ok
+    int  (*unban_account)(void *user, int account_id);                 // 1 = it was banned
+    int  (*list_account_bans)(void *user, int *out, int max);          // ids into out, returns the total
 
     // per-server state (pnhBannedAddresses, forceCollideState)
     char ip_bans[CHAT_CMD_IP_BANS_MAX][CHAT_CMD_ADDRESS_SIZE];
@@ -68,6 +80,14 @@ typedef struct ChatCommandHost {
 // io_ct after the burst limit: 1 when `text` was a known "/" command (handled, not
 // broadcast), 0 when it is ordinary chat (unknown commands included).
 int chat_command_handle(ChatCommandHost*, int sender_id, const char *text);
+// io_prmA(index): the premiumKeys (and KrunkNative's N key, index 0): 0 noclip, 1 god,
+// 2 kill self, 3 smite, gated like /noclip (requirePremiumCheatPerm). The noclip toggle
+// reaches the client as NET_CHEAT_NOCLIP; denials as ["notify", ...].
+void chat_command_premium_action(ChatCommandHost*, int sender_id, int index);
+// The command gate (requireDev / requirePremiumCheatPerm) for the server's own packets
+// (io_tp: CHAT_PERM_DEV_CHEAT, io_cycle: CHAT_PERM_DEV): 1 = allowed, else the sender got
+// the notify. label names the action in the denial log.
+int chat_command_allowed(ChatCommandHost*, int sender_id, ChatCommandPerm, const char *label);
 // pnhBannedAddresses.has(address): connections from it are refused (close 4003).
 int chat_command_ip_banned(const ChatCommandHost*, const char *address);
 // The table (for help, completion and doc/console.md).

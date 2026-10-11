@@ -1,0 +1,85 @@
+- name: Apt keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+# Vendored key (fingerprint E522 18E7 0878 97DC 6DEA 6D6D 97DB 7443 D5ED EB74).
+- name: OpenResty signing key
+  ansible.builtin.copy:
+    src: openresty-pubkey.asc
+    dest: /etc/apt/keyrings/openresty.asc
+    mode: "0644"
+
+- name: OpenResty apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/openresty.list
+    content: |
+      # Managed by KrunkNative deploy/ansible (role openresty)
+      deb [signed-by=/etc/apt/keyrings/openresty.asc] {{ openresty_repo }} {{ ansible_distribution_release }} openresty
+    mode: "0644"
+    backup: true
+  register: openresty_repo_file
+
+- name: Pin the OpenResty version
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/openresty
+    content: |
+      # Managed by KrunkNative deploy/ansible (role openresty)
+      Package: openresty
+      Pin: version {{ openresty_version }}
+      Pin-Priority: 1001
+    mode: "0644"
+
+- name: Refresh apt cache after adding the repository
+  ansible.builtin.apt:
+    update_cache: true
+  when: openresty_repo_file.changed  # noqa: no-handler (needed before the install below)
+  check_mode: false
+  changed_when: false
+
+# The package's postinst starts the service at once; its stock nginx.conf listens
+# on :80 (taken by nginx here) and the start would fail the install. So the config
+# goes in first and dpkg keeps it (--force-confold).
+- name: OpenResty conf directory
+  ansible.builtin.file:
+    path: "{{ openresty_prefix }}/nginx/conf"
+    state: directory
+    mode: "0755"
+
+- name: OpenResty logs directory
+  ansible.builtin.file:
+    path: "{{ openresty_prefix }}/nginx/logs"
+    state: directory
+    mode: "0755"
+
+- name: Is OpenResty already installed
+  ansible.builtin.stat:
+    path: "{{ openresty_prefix }}/nginx/sbin/nginx"
+  register: openresty_bin
+
+- name: Install nginx.conf (loopback static site)
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ openresty_conf }}"
+    mode: "0644"
+    backup: true
+    validate: "{{ (openresty_prefix ~ '/nginx/sbin/nginx -t -q -p ' ~ openresty_prefix ~ '/nginx/ -c %s') if openresty_bin.stat.exists else omit }}"
+  notify: Reload openresty
+
+- name: Install OpenResty {{ openresty_version }}
+  ansible.builtin.apt:
+    name: "openresty={{ openresty_version }}"
+    state: present
+    install_recommends: false
+    dpkg_options: force-confold,force-confdef
+  register: openresty_pkg
+  # --check on a fresh host: the repo was not really added, so apt can't see it.
+  ignore_errors: "{{ ansible_check_mode and openresty_repo_file.changed }}"
+
+- name: OpenResty enabled and running
+  ansible.builtin.systemd_service:
+    name: openresty
+    enabled: true
+    state: started
+  ignore_errors: "{{ ansible_check_mode and not openresty_bin.stat.exists }}"

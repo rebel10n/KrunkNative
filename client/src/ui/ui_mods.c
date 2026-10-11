@@ -369,5 +369,8 @@ int ui_mods_key_event(Client *client, const int key, const int action, const int
         ui_bhop_toggle();
         return 1;
     }
-    return 0;
+    // mods.ts switch: F1 clearLog, F4 "/", F5 reload, F6 editor, T Ctrl TP. KrunkNative runs none of
+    // them while a text field has focus (v3.1.1 still let F5 / F6 through there).
+    if (typing || visible) return 0;
+    return ui_mod_keys_keydown(client, key, 0);
 }

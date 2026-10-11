@@ -1111,10 +1111,11 @@ static void test_paint(void)
         CHECK(t0 >= 0 && t1 >= 0, "chevron = two segments");
         if (t0 >= 0 && t1 >= 0) {
             const Mat2D *m0 = &dl.items[t0].u.transform.m, *m1 = &dl.items[t1].u.transform.m;
-            CHECK_NEAR(m0->e, 72.5f - 7.5f - 3.5f, 0.01f, "chevron left arm starts 7.5 + 3.5 from the right edge");
-            CHECK_NEAR(m0->f, 14.5f - 1.75f, 0.01f, "chevron top at centre - 1.75");
+            /* Chrome 152 chevron: 7.75 wide, 4.25 tall */
+            CHECK_NEAR(m0->e, 72.5f - 7.5f - 3.875f, 0.01f, "chevron left arm starts 7.5 + 3.875 from the right edge");
+            CHECK_NEAR(m0->f, 14.5f - 2.125f, 0.01f, "chevron top at centre - 2.125");
             CHECK_NEAR(m1->e, 72.5f - 7.5f, 0.01f, "chevron apex at the arrow box centre");
-            CHECK_NEAR(m1->f, 14.5f + 1.75f, 0.01f, "chevron apex at centre + 1.75");
+            CHECK_NEAR(m1->f, 14.5f + 2.125f, 0.01f, "chevron apex at centre + 2.125");
         }
     }
     /* text input: placeholder when empty, caret + blink when focused */

@@ -505,8 +505,9 @@ static const VfxWeaponFx *weapon_fx(const Weapon *weapon) {
 // pickups, flags) and inactive ones; KrunkNative has no noShoot flag, so the
 // equivalent prefab flags are filtered here.
 static int object_is_shootable(const Object *object) {
-    if (!object->active || object->collision_type == COLLISION_TYPE_NONE) return 0;
-    if (object->trigger || object->score_zone || object->team_zone || object->teleporter || object->checkpoint) return 0;
+    if (!object->active || object->no_shoot || object->collision_type == COLLISION_TYPE_NONE) return 0;
+    // TRIGGERs are shootable except onEnter ones (no_shoot), as in player.c combat_object_shootable
+    if (object->score_zone || object->team_zone || object->teleporter || object->checkpoint) return 0;
     if (object->pickup || object->flag || object->objective || object->bomb_site || object->kill) return 0;
     if (object->premium || object->verified) return 0;
     return 1;

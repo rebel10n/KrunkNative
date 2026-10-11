@@ -373,6 +373,69 @@ static void draw_tool_volumes(void) {
     glDepthMask(GL_TRUE);
 }
 
+static void draw_real_hitboxes(void) {
+    // ObjectInstance.realHitbox (Settings > Show Real Hitbox): the unrotated collision box
+    // (boundingMesh scale + position, no rotation) of rotated collidable objects, red at 0.2
+    if (!editor_setting_bool("showRealHitbox")) return;
+    glDepthMask(GL_FALSE);
+    for (size_t i = 0; i < g_ed.count; i++) {
+        const EditorObject *o = g_ed.objects[i];
+        const char *type = editor_prefabs[o->prefab].name;
+        if (!strcmp(type, "PLACEHOLDER") || !strcmp(type, "SIGN")) continue;
+        const vec3 r = ed_obj_vec(o, "r", v3(0, 0, 0));
+        if (r.x == 0 && r.y == 0 && r.z == 0) continue;
+        cJSON *c = ed_prop_get(o, "collidable");
+        const int col = cJSON_IsTrue(c);
+        cJSON_Delete(c);
+        if (!col) continue;
+        // realHitbox.position = boundingMesh.position (the box centre), scale = s
+        const vec3 p = ed_obj_vec(o, "p", v3(0, 0, 0)), s = ed_obj_vec(o, "s", v3(1, 1, 1));
+        const float m[16] = {s.x, 0, 0, p.x, 0, s.y, 0, p.y + s.y / 2, 0, 0, s.z, p.z, 0, 0, 0, 1};
+        push_box_tris(&g_tris, m);
+    }
+    flush(&g_tris, GL_TRIANGLES, hex_rgba(0xff0000, 0.2f), 1);
+    glDepthMask(GL_TRUE);
+}
+
+static vec3 box_centre(const EditorObject *o) {
+    float m[16];
+    ed_obj_world_box(o, m);
+    return v3(m[3], m[7], m[11]);
+}
+
+static void draw_trigger_connections(void) {
+    // Settings > Object > Trigger Connections: v3.1.1 calls e.checkConnections(), which
+    // its editor never defines (the switch only saves the setting). KrunkNative draws what
+    // the name promises: a line from every interface-targeting object (TRIGGER "Target",
+    // map key "tin") to each object whose interface ID ("in") matches, in the trigger's
+    // yellow, drawn over the geometry; the target end gets a small cross.
+    if (!editor_setting_bool("triggerCons")) return;
+    for (size_t i = 0; i < g_ed.count; i++) {
+        const EditorObject *src = g_ed.objects[i];
+        if (!(editor_prefabs[src->prefab].flags & EP_CANTARGETINTERFACE)) continue;
+        const int target = (int) ed_json_num(src->data, "tin", 0);
+        if (!target) continue;
+        const vec3 a = box_centre(src);
+        for (size_t j = 0; j < g_ed.count; j++) {
+            const EditorObject *dst = g_ed.objects[j];
+            if (dst == src || !(editor_prefabs[dst->prefab].flags & EP_CANINTERFACE)) continue;
+            if ((int) ed_json_num(dst->data, "in", 0) != target) continue;
+            const vec3 b = box_centre(dst);
+            vb_push(&g_lines, a);
+            vb_push(&g_lines, b);
+            for (int k = 0; k < 3; k++) {
+                vec3 d = v3(0, 0, 0);
+                (&d.x)[k] = 2.0f;
+                vb_push(&g_lines, vsub(b, d));
+                vb_push(&g_lines, vadd(b, d));
+            }
+        }
+    }
+    glDisable(GL_DEPTH_TEST);
+    flush(&g_lines, GL_LINES, hex_rgba(0xffff00, 1.0f), 0);
+    glEnable(GL_DEPTH_TEST);
+}
+
 static void draw_grid(void) {
     if (!editor_setting_bool("gridVisibility")) return;
     // THREE.GridHelper(size, size / spacing): lines every `spacing`, centre lines 0x444444,
@@ -651,7 +714,9 @@ void ed_render_overlays(void) {
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
     draw_tool_volumes();
+    draw_real_hitboxes();
     draw_object_boxes();
+    draw_trigger_connections();
     draw_arrows();
     draw_death_barrier();
     draw_sun();

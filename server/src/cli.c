@@ -1,4 +1,7 @@
 #include <server_cli.h>
+#include <server_accounts.h>
+#include <server_config.h>
+#include <brain.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -236,6 +239,10 @@ static void cli_cmd_op(const char *args);
 static void cli_cmd_deop(const char *args);
 static void cli_cmd_clear(const char *args);
 static void cli_cmd_quit(const char *args);
+static void cli_cmd_ban(const char *args);
+static void cli_cmd_drain(const char *args);
+static void cli_cmd_send(const char *args);
+static void cli_execute(const char *line);
 
 #define CLI_NAMES(...) ((const char *const[]) {__VA_ARGS__, NULL})
 
@@ -244,16 +251,19 @@ static const CliCommand g_cli_commands[] = {
     {CLI_NAMES("status"), "status", "Show version, port, map, mode, players, uptime and tick rate", CLI_ARG_NONE, cli_cmd_status},
     {CLI_NAMES("players", "list"), "players", "List connected players (id, slot, name, class, state, address)", CLI_ARG_NONE, cli_cmd_players},
     {CLI_NAMES("kick"), "kick <id|name>", "Disconnect a player (use the id shown by 'players')", CLI_ARG_PLAYER, cli_cmd_kick},
-    {CLI_NAMES("map", "maps"), "map [name|index]", "List the map rotation, or switch every client to another map", CLI_ARG_MAP, cli_cmd_map},
+    {CLI_NAMES("ban"), "ban <id|name>", "Kick a player and ban their account (guests: their IP); saved to bans_file", CLI_ARG_PLAYER, cli_cmd_ban},
+    {CLI_NAMES("map", "maps", "changelevel"), "map [name|index]", "List the map rotation, or switch every client to another map", CLI_ARG_MAP, cli_cmd_map},
     {CLI_NAMES("mode", "modes"), "mode [alias|index]", "List the game modes, or restart the map in another mode (kept for the next rounds)", CLI_ARG_MODE, cli_cmd_mode},
 #ifdef SERVER_HAVE_NET_CHAT
     {CLI_NAMES("say"), "say <message>", "Send a chat message to every player", CLI_ARG_TEXT, cli_cmd_say},
 #endif
     {CLI_NAMES("round"), "round [end | time <s> | length <s>]", "Show the round clock, end the round now, set the seconds left, or the length of later rounds (0 = mode default)", CLI_ARG_TEXT, cli_cmd_round},
-    {CLI_NAMES("op"), "op <id|name>", "Let a player run DEV chat commands while --perms is on", CLI_ARG_PLAYER, cli_cmd_op},
+    {CLI_NAMES("op"), "op <id|name>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
     {CLI_NAMES("deop"), "deop <id|name>", "Take op away again", CLI_ARG_PLAYER, cli_cmd_deop},
     {CLI_NAMES("clear", "cls"), "clear", "Clear the screen", CLI_ARG_NONE, cli_cmd_clear},
-    {CLI_NAMES("quit", "exit", "stop"), "quit", "Disconnect everyone and stop the server (also Ctrl+C / Ctrl+D)", CLI_ARG_NONE, cli_cmd_quit},
+    {CLI_NAMES("send", "move"), "send <id|name|*> <gameId|host:port> [reason]", "Move player(s) to another server of the network (lobby id from the coordinator, or a direct address)", CLI_ARG_PLAYER, cli_cmd_send},
+    {CLI_NAMES("drain"), "drain", "Refuse new players, finish the round, then stop (like SIGTERM)", CLI_ARG_NONE, cli_cmd_drain},
+    {CLI_NAMES("quit", "exit", "stop"), "quit", "Disconnect everyone and stop the server now (also Ctrl+C / Ctrl+D)", CLI_ARG_NONE, cli_cmd_quit},
 };
 
 #define CLI_COMMAND_COUNT (sizeof(g_cli_commands) / sizeof(g_cli_commands[0]))
@@ -355,6 +365,12 @@ static void cli_cmd_status(const char *args) {
     server_log("  tick rate  %u Hz target, %.1f Hz measured, slowest tick %.2f ms",
                (unsigned int) g_server->config.tick_rate, g_server_tick_stats.measured_tick_rate, g_server_tick_stats.max_tick_ms);
     server_log("  idle kick  %.0f s", g_server->config.idle_timeout);
+    server_log("  hostname   %s%s", g_gs_config.name, g_gs_config.password[0] ? " (password)" : "");
+    server_log("  auth       %s", g_gs_config.online_mode ? "online mode (accounts verified)" : "offline mode (guests)");
+    server_log("  network    %s%s%s", g_gs_config.brain_url[0] ? "coordinator " : "standalone",
+               g_gs_config.brain_url[0] ? (brain_linked() ? "linked" : "not linked") : "",
+               accounts_community_name()[0] ? ", community set" : "");
+    server_log("  listing    %s", g_gs_config.finder_url[0] ? g_gs_config.finder_url : "unlisted (direct connect only)");
 
     pthread_mutex_unlock(&g_server->lock);
 }
@@ -552,7 +568,8 @@ static void cli_set_op(const char *args, const int op) {
     } else {
         client->op = (unsigned char) op;
         server_log("%s %s (id %d)%s", op ? "Opped" : "De-opped", client->name, client->id,
-                   g_server->config.perms ? "" : " (perms are off: everyone may run every command)");
+                   g_server->config.perms ? "" : g_server->config.cheats_open ? " (perms are off: everyone may run every command)"
+                                                                                  : " (perms are off: ops only add the cheats)");
     }
     pthread_mutex_unlock(&g_server->lock);
 }
@@ -568,6 +585,81 @@ static void cli_cmd_clear(const char *args) {
 static void cli_cmd_quit(const char *args) {
     (void) args;
     server_request_stop(SERVER_STOP_COMMAND, NULL);
+}
+
+static void cli_cmd_drain(const char *args) {
+    (void) args;
+    server_request_drain("console drain");
+}
+
+// ban: the account (bans_file "accounts", /ban) and, for guests, the address (/banip).
+static void cli_cmd_ban(const char *args) {
+    if (!*args) {
+        server_log("Usage: ban <id|name>   (see 'players' for ids)");
+        return;
+    }
+    pthread_mutex_lock(&g_server->lock);
+    ClientConnection *client = cli_find_client(args);
+    if (!client) {
+        server_log("No player matches '%s'. Use 'players' to list ids.", args);
+        pthread_mutex_unlock(&g_server->lock);
+        return;
+    }
+    if (client->acct.account_id > 0) {
+        accounts_ban_account(client->acct.account_id, client->acct.username);
+        server_log("Banned %s (account %d)", client->name, client->acct.account_id);
+    } else { // a guest: its address (bans_file "ips", like /banip)
+        char chat[NET_CHAT_TEXT_SIZE];
+        snprintf(chat, sizeof(chat), "/banip %s", client->address);
+        chat_command_handle(net_chat_host(), CHAT_CMD_CONSOLE, chat);
+        server_log("Banned guest %s (ip %s)", client->name, client->address);
+    }
+    net_kick_client(client->id, "Banned", "004003");
+    pthread_mutex_unlock(&g_server->lock);
+}
+
+// send: NET_PACKET_REDIRECT. "NODE:lobby" = a coordinator lobby (the client seeks it and
+// gets a fresh ticket); anything with a port after the last ':' and no letters in the
+// lobby part is host:port (direct connect).
+static void cli_cmd_send(const char *args) {
+    char who[64] = "", target[160] = "", reason[64] = "";
+    if (sscanf(args, "%63s %159s %63[^\n]", who, target, reason) < 2) {
+        server_log("Usage: send <id|name|*> <gameId|host:port> [reason]");
+        return;
+    }
+    NetRedirectPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    const char *colon = strrchr(target, ':');
+    char *end = NULL;
+    const long port = colon ? strtol(colon + 1, &end, 10) : 0;
+    if (colon && end && !*end && port > 0 && port < 65536) {
+        snprintf(packet.host, sizeof(packet.host), "%.*s", (int) (colon - target), target);
+        packet.port = (uint16_t) port;
+    } else if (colon) {
+        snprintf(packet.game_id, sizeof(packet.game_id), "%s", target);
+    } else {
+        server_log("'%s' is neither a lobby id (NODE:lobby) nor host:port", target);
+        return;
+    }
+    snprintf(packet.reason, sizeof(packet.reason), "%s", reason[0] ? reason : "Moving to another server...");
+    pthread_mutex_lock(&g_server->lock);
+    int sent = 0;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        if (strcmp(who, "*") && client != cli_find_client(who)) continue;
+        net_send_packet(client->fd, NET_PACKET_REDIRECT, &packet, sizeof(packet));
+        sent++;
+    }
+    pthread_mutex_unlock(&g_server->lock);
+    if (!sent) server_log("No player matches '%s'.", who);
+    else server_log("Sent %d player(s) to %s", sent, target);
+}
+
+int cli_run_command(const char *line, char *out, const size_t size) {
+    server_log_capture_begin(out, size);
+    cli_execute(line);
+    server_log_capture_end();
+    return 0;
 }
 
 static void cli_execute(const char *line) {

@@ -10,6 +10,7 @@
 //   1. `?ws=<url>` query parameter
 //   2. `Module.krunkNativeWsUrl` set by the hosting page
 //   3. `(https: ? wss : ws)://<location.host>/native`
+// The brain matchmaker (servers_ui.c) overrides all of them with Client.net_ws_url.
 #include <client.h>
 #include <emscripten.h>
 #include <emscripten/websocket.h>
@@ -27,6 +28,7 @@ static EMSCRIPTEN_WEBSOCKET_T g_web_socket;
 static NetPacketBuffer g_web_read_buffer;
 static char g_web_url[512];          // resolved endpoint, for error messages
 static int g_web_reconnect_pending;  // an emscripten_async_call reconnect is scheduled
+static int g_web_switching;          // client_net_switch_server closed the socket: reconnect at once
 
 static void net_web_reconnect_later(void *user_data) {
     Client *client = user_data;
@@ -45,7 +47,9 @@ static void net_web_schedule_reconnect(Client *client) {
     emscripten_async_call(net_web_reconnect_later, client, NET_WEB_RETRY_MILLIS);
 }
 
-static char *net_web_resolve_url(void) {
+static char *net_web_resolve_url(Client *client) {
+    // 0. the brain matchmaker's target (servers_ui.c: seek webUrl or /native?target=host:port)
+    if (client->net_ws_url[0]) return strdup(client->net_ws_url);
     return (char *) EM_ASM_PTR({
         var url = null;
         try { url = new URLSearchParams(location.search).get('ws'); } catch (e) {}
@@ -76,6 +80,7 @@ static bool net_web_on_open(int event_type, const EmscriptenWebSocketOpenEvent *
 
     const NetHelloPacket hello = {1, 0, 0};
     client_net_send_packet(NET_WEB_FAKE_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
+    client_net_send_join(client, NET_WEB_FAKE_FD); // brain ticket / session / guest name (net_join.c)
 
     return true;
 }
@@ -108,6 +113,11 @@ static bool net_web_on_message(int event_type, const EmscriptenWebSocketMessageE
 
         while ((result = net_buffer_next(&g_web_read_buffer, &packet)) > 0) {
             client_net_log_packet("<=", packet.type, packet.payload, packet.length);
+            // "pi" -> "po" from onmessage like Krunker (not after the next frame's drain, net.c)
+            if (packet.type == NET_PACKET_PING && packet.length == sizeof(NetPingPacket)) {
+                client_net_send_packet(NET_WEB_FAKE_FD, NET_PACKET_PONG, packet.payload, packet.length);
+                continue;
+            }
             client_net_queue_packet(client, &packet);
         }
 
@@ -158,6 +168,12 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
         on_client_socket_failed(client, message);
     }
 
+    if (g_web_switching) {
+        // client_net_switch_server: the old session is gone, open the new one now
+        g_web_switching = 0;
+        net_web_connect(client);
+        return true;
+    }
     net_web_schedule_reconnect(client); // no-op once the embedded server runs or on quit
     return true;
 }
@@ -175,7 +191,7 @@ int net_web_connect(Client *client) {
         return 0;
     }
 
-    char *url = net_web_resolve_url();
+    char *url = net_web_resolve_url(client);
     if (!url) return 0;
 
     strncpy(g_web_url, url, sizeof(g_web_url) - 1);
@@ -241,4 +257,22 @@ int client_net_send_packet(const int socket, const NetPacketType type, const voi
     if (payload && length) memcpy(frame + NET_PACKET_HEADER_SIZE, payload, length);
 
     return emscripten_websocket_send_binary(g_web_socket, frame, NET_PACKET_HEADER_SIZE + length) == EMSCRIPTEN_RESULT_SUCCESS;
+}
+
+// Brain matchmaking: move the session to client->net_ws_url (servers_ui.c). An open
+// socket is closed and the new one opened from its close callback; an idle transport
+// (the brain startup seek) connects now.
+void client_net_switch_server(Client *client) {
+    if (client->offline) local_game_stop(client); // leave the in-process game
+    if (client->game.player_count) client_clear_players(client);
+    client->in_game = 0;
+    client->menu_play_pending = 0;
+    client->net_should_quit = 0;
+    client->net_hold_retry = 0;
+    if (g_web_socket) {
+        g_web_switching = 1;
+        emscripten_websocket_close(g_web_socket, 1000, "switch server");
+        return;
+    }
+    net_web_connect(client);
 }

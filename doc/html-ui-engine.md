@@ -132,14 +132,23 @@ the model viewer (`ui/viewer.html`, `client/src/viewer/`). The client's *app mod
   buttons (`window.open('/social.html')`, `/editor.html`, `/viewer.html`,
   `/social.html?p=profile&q=x`, the hub's KRUNKER logo `openLink('/')`) go through
   `ui_open_external()` -> `app_route_url_target()`; UI logic calls `app_set_mode()`.
-- **Native**: one window. `html_ui_load_page(page)` makes the engine show that document:
-  the game page's engine instance (`g_base` in `engine/engine.c`) stays alive with its DOM
-  state, any other page gets a fresh engine instance (`g_page`) that is destroyed when
-  left. `client_tick()` hands the frame to `app_mode_frame()` while a page is shown: the
-  game is frozen behind it (no net queue, game tick, menu/HUD logic or world render; net
-  packets queue up and are processed on return), app_mode.c swaps in its own GLFW
-  callbacks (pointer free, ESC does not toggle the game menu) and calls the page's
-  `AppPage` hooks (`enter`, `tick`, `leave`, input, `resize`).
+- **Native**: every page opens in its own window, like the v3.1.1 Electron client
+  (`electron . --social/--editor/--viewer`): `client/src/app_window.c` starts a
+  `client_bin --windowed [--offline] --hub|--editor|--viewer <query>` process per page kind
+  (Electron's window sizes: hub 1200x600, editor 1200x800, viewer 800x600; same working
+  directory and environment, so the same config dir and server settings) and leaves the
+  game window alone. Opening a page whose window exists reloads it with the new query and
+  raises it; a page's links to the game raise the game window (or open one, `--game`, when
+  the page was started on its own). The windows talk over a pipe pair (fds 3/4,
+  `KRUNKNATIVE_APP_IPC`); a window closes when the window that opened it closes. A process
+  per window instead of a second GLFW window: the client's state (the Client, the HTML
+  engine's documents and handler contexts, GL caches, audio) is process-wide. In a page
+  process `html_ui_load_page(page)` shows that document (a fresh engine instance, `g_page`
+  in `engine/engine.c`; the game page's instance `g_base` stays loaded but is never shown);
+  `client_tick()` hands the frame to `app_mode_frame()`, which calls the page's `AppPage`
+  hooks (`enter`, `tick`, `leave`, input, `resize`) with app_mode.c's own GLFW callbacks
+  (pointer free, ESC does not open the game menu). Editor and viewer windows do not connect
+  to the game server.
 - **Web**: every page is its own URL, like on Krunker: `dist/web/index.html`,
   `social.html`, `editor.html`, `viewer.html` all load `js/kn-shim.js`, `js/loader.js` and
   the same `client.js`, which boots in the mode its file name says (`location.pathname`;

@@ -431,6 +431,7 @@ export type Cosmetics = { skinColor: number; hairColor: number; hat: number; bac
 export const COSMETICS_NONE: Cosmetics = { skinColor: -1, hairColor: -1, hat: -1, back: -1, waist: -1, face: -1, dye: -1 };
 export const COSMETICS_SIZE = 28;
 export const ENT_COSMETICS_SIZE = 8 + COSMETICS_SIZE; // class, secondary, cosmetics (NET_ENT_PACKET_V3_SIZE)
+export const ENT_SIZE = ENT_COSMETICS_SIZE + 2; // + spectate (ent[6]) + slidCont (ent[15]) (NET_ENT_PACKET_V4_SIZE)
 export const SPAWN_V1_SIZE = 78;
 export const SPAWN_COSMETICS_SIZE = SPAWN_V1_SIZE + COSMETICS_SIZE;
 

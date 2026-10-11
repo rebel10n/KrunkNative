@@ -1,0 +1,10 @@
+# kn_* variables are shared across roles on purpose (group_vars/all.yml).
+skip_list:
+  - var-naming[no-role-prefix]
+  - name[template]
+  # ignore_errors is limited to --check runs on fresh hosts (units/packages not
+  # really installed), expressed as ignore_errors: "{{ ansible_check_mode ... }}".
+  - ignore-errors
+warn_list:
+  - yaml[line-length]
+  - jinja[spacing]

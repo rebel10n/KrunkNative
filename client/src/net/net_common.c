@@ -7,6 +7,7 @@
 #endif
 
 #include <client.h>
+#include <ai.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,19 +111,20 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_ENT: {
-            if (length != sizeof(NetEntPacket) && length != NET_ENT_PACKET_V3_SIZE && length != NET_ENT_PACKET_V2_SIZE && length != NET_ENT_PACKET_MIN_SIZE) {
+            if (length != NET_ENT_PACKET_V2_SIZE && length != NET_ENT_PACKET_MIN_SIZE && (length < NET_ENT_PACKET_V3_SIZE || length > sizeof(NetEntPacket))) {
                 client_net_log_bad_payload("ent", type, payload, length);
                 break;
             }
 
-            NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE};
+            NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1};
             memcpy(&packet, payload, length);
 
-            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u}",
+            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u}",
                    (unsigned int) type,
                    packet.class_index,
                    packet.secondary_index,
-                   (unsigned int) (length > NET_ENT_PACKET_V3_SIZE ? packet.spectate : 0));
+                   (unsigned int) (length > NET_ENT_PACKET_V3_SIZE ? packet.spectate : 0),
+                   (unsigned int) (length > offsetof(NetEntPacket, slid_cont) ? packet.slid_cont : 1));
             break;
         }
         case NET_PACKET_SPAWN: {
@@ -155,7 +157,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_INPUT: {
-            if (length != sizeof(NetInputPacket) && length != NET_INPUT_PACKET_V1_SIZE) {
+            if (length != sizeof(NetInputPacket) && length != NET_INPUT_PACKET_V2_SIZE && length != NET_INPUT_PACKET_V1_SIZE) {
                 client_net_log_bad_payload("input", type, payload, length);
                 break;
             }
@@ -163,7 +165,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             NetInputPacket packet = {0};
             memcpy(&packet, payload, length);
 
-            printf("{\"type\":\"input\",\"id\":%u,\"seq\":%d,\"move_dir\":%d,\"delta\":%g,\"x_dir\":%g,\"y_dir\":%g,\"flags\":%u,\"swap\":%u,\"slowdown\":%u}",
+            printf("{\"type\":\"input\",\"id\":%u,\"seq\":%d,\"move_dir\":%d,\"delta\":%g,\"x_dir\":%g,\"y_dir\":%g,\"flags\":%u,\"swap\":%u,\"slowdown\":%u,\"scroll\":%d}",
                    (unsigned int) type,
                    packet.seq,
                    packet.move_dir,
@@ -172,7 +174,8 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.y_dir,
                    (unsigned int) packet.flags,
                    (unsigned int) packet.swap,
-                   (unsigned int) packet.slowdown);
+                   (unsigned int) packet.slowdown,
+                   (int) packet.scroll);
             break;
         }
         case NET_PACKET_STATE: {
@@ -240,8 +243,8 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
         }
         case NET_PACKET_HIT: {
             LOG_READ(NetHitPacket, "hit");
-            printf("{\"type\":\"hit\",\"id\":%u,\"target\":%d,\"damage\":%d,\"crit\":%u,\"kill\":%u}",
-                   (unsigned int) type, packet.target_uid, packet.damage, (unsigned int) packet.crit, (unsigned int) packet.kill);
+            printf("{\"type\":\"hit\",\"id\":%u,\"target\":%d,\"damage\":%d,\"crit\":%u,\"kill\":%u,\"ai\":%u}",
+                   (unsigned int) type, packet.target_uid, packet.damage, (unsigned int) packet.crit, (unsigned int) packet.kill, (unsigned int) packet.ai);
             break;
         }
         case NET_PACKET_HEALTH: {
@@ -298,8 +301,8 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
         }
         case NET_PACKET_PROJECTILE: {
             LOG_READ(NetProjectilePacket, "projectile");
-            printf("{\"type\":\"projectile\",\"id\":%u,\"slot\":%d,\"owner\":%d,\"weapon\":%d,\"position\":[%g,%g,%g]}",
-                   (unsigned int) type, packet.id, packet.owner_uid, packet.weapon_index, packet.position[0], packet.position[1], packet.position[2]);
+            printf("{\"type\":\"projectile\",\"id\":%u,\"slot\":%d,\"owner\":%d,\"weapon\":%d,\"ai_kind\":%u,\"position\":[%g,%g,%g]}",
+                   (unsigned int) type, packet.id, packet.owner_uid, packet.weapon_index, (unsigned int) packet.ai_kind, packet.position[0], packet.position[1], packet.position[2]);
             break;
         }
         case NET_PACKET_PROJECTILE_END: {
@@ -312,6 +315,74 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             LOG_READ(NetExplosionPacket, "explosion");
             printf("{\"type\":\"explosion\",\"id\":%u,\"position\":[%g,%g,%g],\"radius\":%g}",
                    (unsigned int) type, packet.position[0], packet.position[1], packet.position[2], packet.radius);
+            break;
+        }
+        case NET_PACKET_AI_ADD: { // "aai": AI.getData
+            LOG_READ(NetAIAddPacket, "ai_add");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            packet.src[sizeof(packet.src) - 1] = 0;
+            printf("{\"type\":\"ai_add\",\"id\":%u,\"sid\":%d,\"index\":%d,\"name\":\"%s\",\"position\":[%g,%g,%g]",
+                   (unsigned int) type, packet.sid, packet.index, packet.name, packet.position[0], packet.position[1], packet.position[2]);
+            if (packet.has_data) {
+                printf(",\"data\":{\"health\":%g,\"mSize\":%g,\"asset\":%d,\"idl\":%d,\"src\":\"%s\"}", packet.max_health, packet.m_size,
+                       packet.asset, packet.idle_sound, packet.src);
+            }
+            printf("}");
+            break;
+        }
+        case NET_PACKET_AI_SYNC: { // "ai": [sid, x, y, z, xD, yD, health, tFrame] per AI
+            NetAISyncPacket packet;
+            memset(&packet, 0, sizeof(packet));
+            const size_t header = offsetof(NetAISyncPacket, entries);
+            if (length < header || length > sizeof(packet)) { client_net_log_bad_payload("ai_sync", type, payload, length); break; }
+            memcpy(&packet, payload, length);
+            if (packet.count > NET_AI_SYNC_MAX || length != header + packet.count * sizeof(NetAISyncEntry)) {
+                client_net_log_bad_payload("ai_sync", type, payload, length);
+                break;
+            }
+            printf("{\"type\":\"ai_sync\",\"id\":%u,\"first\":%u,\"ais\":[", (unsigned int) type, (unsigned int) packet.first);
+            for (int i = 0; i < packet.count; i++) {
+                const NetAISyncEntry *e = &packet.entries[i];
+                printf("%s[%d,%g,%g,%g,%g,%g,%d,%u]", i ? "," : "", e->sid, e->position[0], e->position[1], e->position[2], e->x_dir, e->y_dir,
+                       e->health, (unsigned int) e->frame);
+            }
+            printf("]}");
+            break;
+        }
+        // map triggers (shared/src/triggers.c)
+        case NET_PACKET_OBJECT_STATE: { // "do" / "ro" / "gte" / "bnk"
+            static const char *const kinds[] = {"destroy", "respawn", "gate", "bank"};
+            LOG_READ(NetObjectStatePacket, "object_state");
+            printf("{\"type\":\"object_state\",\"id\":%u,\"uid\":%d,\"kind\":\"%s\",\"value\":%d}", (unsigned int) type, packet.uid,
+                   packet.kind < 4 ? kinds[packet.kind] : "?", packet.value);
+            break;
+        }
+        case NET_PACKET_CHECKPOINT: // "chp"
+            if (length) { client_net_log_bad_payload("checkpoint", type, payload, length); break; }
+            printf("{\"type\":\"checkpoint\",\"id\":%u}", (unsigned int) type);
+            break;
+        case NET_PACKET_SOUND: { // "s"
+            LOG_READ(NetSoundPacket, "sound");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            printf("{\"type\":\"sound\",\"id\":%u,\"name\":\"%s\",\"uid\":%d,\"position\":[%g,%g,%g],\"volume\":%g,\"rate\":%g}",
+                   (unsigned int) type, packet.name, packet.uid, packet.position[0], packet.position[1], packet.position[2], packet.volume, packet.rate);
+            break;
+        }
+        case NET_PACKET_JUMP_SCARE: { // "scr"
+            LOG_READ(NetJumpScarePacket, "jump_scare");
+            printf("{\"type\":\"jump_scare\",\"id\":%u,\"index\":%d}", (unsigned int) type, packet.index);
+            break;
+        }
+        case NET_PACKET_POSITION: { // changePosition with doRecon
+            LOG_READ(NetPositionPacket, "position");
+            printf("{\"type\":\"position\",\"id\":%u,\"position\":[%g,%g,%g],\"stop_momentum\":%u,\"direction\":%d}", (unsigned int) type,
+                   packet.x, packet.y, packet.z, (unsigned int) packet.stop_momentum, packet.has_direction ? packet.direction : -1);
+            break;
+        }
+        case NET_PACKET_POPUP: { // "am" [text, null]
+            LOG_READ(NetPopupPacket, "popup");
+            packet.text[sizeof(packet.text) - 1] = 0;
+            printf("{\"type\":\"popup\",\"id\":%u,\"text\":\"%s\"}", (unsigned int) type, packet.text);
             break;
         }
 #undef LOG_READ

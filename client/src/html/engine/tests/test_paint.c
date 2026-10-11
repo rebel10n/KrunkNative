@@ -19,6 +19,7 @@
 
 static float g_last_glyph_size;
 static uint32_t g_atlas_gen = 1;
+static uint32_t g_reset_at_glyph;   /* nonzero: the atlas "fills up" at this glyph index (once) */
 
 int text_glyph_quad(TextSystem *ts, const Glyph *g, float device_size, unsigned synth, GlyphQuad *out)
 {
@@ -26,9 +27,12 @@ int text_glyph_quad(TextSystem *ts, const Glyph *g, float device_size, unsigned 
     g_last_glyph_size = device_size;
     memset(out, 0, sizeof *out);
     if (g->glyph_index == 0) return 0; /* space: no ink */
+    if (g_reset_at_glyph && g->glyph_index == g_reset_at_glyph) { g_atlas_gen++; g_reset_at_glyph = 0; }
     const float k = device_size / 20.0f;
     out->texture = 7;
-    out->u0 = 0.1f; out->v0 = 0.2f; out->u1 = 0.3f; out->v1 = 0.4f;
+    out->generation = g_atlas_gen;
+    out->u0 = 0.1f + 0.001f * (float) (g_atlas_gen & 63); /* where the glyph lives depends on the atlas */
+    out->v0 = 0.2f; out->u1 = 0.3f; out->v1 = 0.4f;
     out->x_off = 1 * k;
     out->y_off = -14 * k;
     out->w = 10 * k;
@@ -39,10 +43,10 @@ int text_glyph_quad(TextSystem *ts, const Glyph *g, float device_size, unsigned 
 uint32_t text_atlas_generation(const TextSystem *ts) { (void) ts; return g_atlas_gen; }
 int text_subpixel(const TextSystem *ts) { (void) ts; return 1; }
 
-static ImageEntry g_img_a = {1, 200, 80, 0, 101};   /* map thumb */
-static ImageEntry g_img_b = {2, 128, 128, 0, 102};  /* menu icon */
-static ImageEntry g_img_c = {3, 8, 8, 0, 103};      /* class icon */
-static ImageEntry g_img_fail = {0, 0, 0, 1, 0};
+static ImageEntry g_img_a = {1, 200, 80, 0, 101, 0};   /* map thumb */
+static ImageEntry g_img_b = {2, 128, 128, 0, 102, 0};  /* menu icon */
+static ImageEntry g_img_c = {3, 8, 8, 0, 103, 0};      /* class icon */
+static ImageEntry g_img_fail = {0, 0, 0, 1, 0, 0};
 
 static const char *g_last_image_base;
 
@@ -1106,6 +1110,118 @@ static void test_composited_origin_snap(void)
     if (found != 1) dump(&g_dl);
 }
 
+static void test_scaled_scroller_text_snap(void)
+{
+    printf("scaled body: text baselines rounded in layout space, composited scroller origin snapped\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    const float k = 0.5791855f;                                  /* the hub's body scale(1280 / 2210) */
+    Box *body = mk(root, BOX_BLOCK, 0, 0, 2210, 1243);
+    st(body)->transform.count = 1;
+    st(body)->transform.ops[0].kind = CSS_TRANSFORM_SCALE;
+    st(body)->transform.ops[0].sx = st(body)->transform.ops[0].sy = k;
+    st(body)->transform_origin_x = px(0);
+    st(body)->transform_origin_y = px(0);
+    /* #modsHolder: overflow-y auto with overflow, top 80 -> device 46.33 */
+    Box *sc = mk(body, BOX_BLOCK, 150, 80, 1910, 1013);
+    set_scroller(sc, 0, 1084, 0);
+    Box *line = mk(sc, BOX_BLOCK, 150, 80, 1910, 54);
+    mk_text(line, 300, 105.6f, "ab", 20);                        /* fractional layout baseline */
+    build(root);
+    const int so = find_op(&g_dl, DL_SCROLL_OFFSET, 0), gi = find_op(&g_dl, DL_GLYPHS, 0);
+    CHECK(so >= 0 && gi >= 0);
+    if (so >= 0 && gi >= 0) {
+        /* Chrome: the scroll contents layer is drawn at round(T): contents move by (46 - 46.33) / k */
+        CHECK_F(g_dl.items[so].u.scroll.dy, (roundf(80 * k) - 80 * k) / k);
+        CHECK_F(g_dl.items[so].u.scroll.dx, (roundf(150 * k) - 150 * k) / k);
+        /* baseline 105.6 rounds to 106 before the transform; y_off -14 at k */
+        CHECK_F(g_dl.items[gi].u.glyphs.quads[0].y, 106 - 14);
+    } else dump(&g_dl);
+    /* positioned descendants painted outside the scroller's clip get the same
+     * layer snap: an abs box (z-index auto) and a z-indexed one, both at y 300 */
+    Box *ab = mk(sc, BOX_BLOCK, 160, 300, 20, 20);
+    set_positioned(ab, 0);
+    st(ab)->z_index_auto = 1;
+    ab->z_auto = 1;
+    ab->flags &= ~(uint32_t) BOXF_STACKING_CONTEXT;
+    st(ab)->background_color = rgba(0, 0xff, 0, 255);
+    Box *az = mk(sc, BOX_BLOCK, 200, 300, 20, 20);
+    set_positioned(az, 3);
+    st(az)->background_color = rgba(0, 0, 0xff, 255);
+    sc->paint_dirty = 1;
+    build(root);
+    for (int want = 0; want < 2; want++) {
+        /* body-space y of the box: rect y + enclosing translations + scroll offsets */
+        float ty[32]; int sp = 0; float y = 0; int found = 0;
+        ty[0] = 0;
+        for (int i = 0; i < g_dl.n && !found; i++) {
+            const DlItem *it = &g_dl.items[i];
+            const float cur = sp ? ty[sp - 1] : 0;
+            /* transforms and clips both scope the in-list transform state */
+            if ((it->op == DL_PUSH_TRANSFORM || it->op == DL_PUSH_CLIP_RECT || it->op == DL_PUSH_CLIP_RRECT) && sp < 31)
+                ty[sp++] = cur + (it->op == DL_PUSH_TRANSFORM && it->u.transform.m.a == 1 ? it->u.transform.m.f : 0);
+            else if ((it->op == DL_POP_TRANSFORM || it->op == DL_POP_CLIP) && sp > 0) sp--;
+            else if (it->op == DL_SCROLL_OFFSET && sp > 0) ty[sp - 1] += it->u.scroll.dy;
+            else if (it->op == DL_RECT && it->u.rect.color.g == (want ? 0 : 0xff) && it->u.rect.color.b == (want ? 0xff : 0)) {
+                y = cur + it->u.rect.rect.y;
+                found = 1;
+            }
+        }
+        CHECK(found);
+        CHECK_F(y, 300 + (roundf(80 * k) - 80 * k) / k);
+        if (!found || fabsf(y - (300 + (roundf(80 * k) - 80 * k) / k)) > 1e-3f) dump(&g_dl);
+    }
+    ab->flags &= ~(uint32_t) BOXF_POSITIONED;   /* keep the next cases about the scroller only */
+    st(ab)->background_color = rgba(0, 0, 0, 0);
+    st(az)->background_color = rgba(0, 0, 0, 0);
+    /* no overflow -> stays in its parent layer: no snap, no scroll item */
+    sc->scroll_h = 1013;
+    sc->paint_dirty = 1;
+    build(root);
+    CHECK(find_op(&g_dl, DL_SCROLL_OFFSET, 0) < 0);
+    /* ...unless it holds a sticky box (win-servers' .serverHeader): layerized, snapped */
+    st(line)->position = CSS_POSITION_STICKY;
+    sc->paint_dirty = 1;
+    build(root);
+    {
+        const int so2 = find_op(&g_dl, DL_SCROLL_OFFSET, 0);
+        CHECK(so2 >= 0 && fabsf(g_dl.items[so2].u.scroll.dy - (roundf(80 * k) - 80 * k) / k) < 1e-3f);
+    }
+    st(line)->position = CSS_POSITION_STATIC;
+    /* overflow hidden is not composited either */
+    sc->scroll_h = 1084;
+    st(sc)->overflow_y = CSS_OVERFLOW_HIDDEN;
+    sc->paint_dirty = 1;
+    build(root);
+    CHECK(find_op(&g_dl, DL_SCROLL_OFFSET, 0) < 0);
+}
+
+static void test_atlas_reset_while_recording(void)
+{
+    printf("glyph atlas rebuilt mid-recording: no quad of the old generation survives\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    Box *line = mk(root, BOX_BLOCK, 0, 0, 200, 30);
+    mk_text(line, 10, 20, "abc", 20);
+    build(root);
+    CHECK(find_op(&g_dl, DL_GLYPHS, 0) >= 0);
+    /* the next paint's 'b' fills the atlas: 'a' was already resolved against the old one */
+    g_reset_at_glyph = 'b';
+    line->paint_dirty = 1;
+    const uint32_t before = g_atlas_gen;
+    build(root);
+    CHECK(g_atlas_gen == before + 1);
+    CHECK(g_ctx.atlas_generation == g_atlas_gen);
+    const int gi = find_op(&g_dl, DL_GLYPHS, 0);
+    CHECK(gi >= 0 && g_dl.items[gi].u.glyphs.n == 3);
+    /* 'a' was resolved before the reset: its uvs must be re-requested too */
+    for (int i = 0; gi >= 0 && i < g_dl.items[gi].u.glyphs.n; i++)
+        CHECK_F(g_dl.items[gi].u.glyphs.quads[i].uv[0], 0.1f + 0.001f * (float) (g_atlas_gen & 63));
+    /* nothing dirty: the list is current, no rebuild */
+    build(root);
+    CHECK(g_ctx.stats_rebuilt == 0);
+}
+
 static void test_url_base_and_cutout(void)
 {
     printf("per-layer url() base; viewport cut-out shadow on whole device px\n");
@@ -1257,6 +1373,8 @@ int main(void)
     test_viewport_overflow();
     test_anonymous_borrowed_style();
     test_composited_origin_snap();
+    test_scaled_scroller_text_snap();
+    test_atlas_reset_while_recording();
     test_url_base_and_cutout();
     test_three_dot_ellipsis();
     test_inline_context_in_scroller();

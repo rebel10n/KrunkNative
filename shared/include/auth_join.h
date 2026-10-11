@@ -1,0 +1,22 @@
+#pragma once
+// Online-mode join (Mojang-style, doc/backend.md "Central auth"): the serverHash both the
+// client and the game server derive, so a session's join only verifies on the server it
+// was meant for. Pure C, no OpenSSL (own SHA-256), shared by client and server.
+//
+//   serverHash = hex(SHA-256("kn-join-v1" 0x00 server_nonce 0x00 public_key 0x00 client_nonce))
+//
+// server_nonce: NetAuthChallengePacket.server_nonce (per boot), public_key: its public_key
+// ("" without a transport key), client_nonce: 32 hex chars the client picks per connection.
+// JOIN.client_key of such a join is AUTH_JOIN_KEY_PREFIX + client_nonce.
+#include <stddef.h>
+#include <stdint.h>
+
+#define AUTH_JOIN_KEY_PREFIX "hj1:"
+#define AUTH_JOIN_NONCE_LEN 32       // hex chars of server/client nonces
+#define AUTH_SERVER_HASH_LEN 64      // hex chars of a serverHash
+
+void kn_sha256_bytes(const void *data, size_t len, uint8_t out[32]);
+// out_hex: 65 bytes (64 hex + NUL). NULL strings count as "".
+void kn_server_hash(const char *server_nonce, const char *public_key, const char *client_nonce, char out_hex[65]);
+// 1 when s is 1..64 lowercase hex chars (nonce / hash validation).
+int kn_auth_is_hex(const char *s, size_t max_len);

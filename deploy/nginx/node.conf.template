@@ -1,0 +1,48 @@
+# KrunkNative region node - rendered by deploy/deploy.sh (do not edit on the host).
+# Mirrors the v3.1.1 jail's ansible/templates/nginx/node.conf.j2. Game servers
+# speak raw TCP on their own public ports (no nginx in the path); this vhost
+# serves the web client of the region and its /native WebSocket bridge, plus
+# /ping for the client's region latency probe (answered by the region's brain
+# when one runs here, else by net-bridge).
+#   https://${NODE_DOMAIN}/        -> net-bridge --web (dist/web)
+#   wss://${NODE_DOMAIN}/native    -> net-bridge /native -> 127.0.0.1:<game port>
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream kn_bridge { server 127.0.0.1:${BRIDGE_PORT}; keepalive 16; }
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${NODE_DOMAIN};
+    ssl_certificate     /etc/letsencrypt/live/${NODE_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${NODE_DOMAIN}/privkey.pem;
+    include /etc/nginx/snippets/cors.conf;
+
+    location = /ping {
+        default_type application/json;
+        return 200 '{"success":"true"}';
+    }
+
+    location / {
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin'  '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, Cache-Control' always;
+            add_header 'Access-Control-Max-Age'       '86400' always;
+            return 204;
+        }
+        proxy_pass http://kn_bridge;
+        include /etc/nginx/snippets/krunknative-proxy.conf;
+    }
+}
+
+server {
+    listen 80;
+    server_name ${NODE_DOMAIN};
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location / { return 301 https://$host$request_uri; }
+}

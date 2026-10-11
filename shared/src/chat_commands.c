@@ -2,7 +2,9 @@
 // cmd_* of the v3.1.1 offline server's packetHandlers.ts, with its reply strings. Native
 // differences are commented in place and listed in doc/console.md.
 #include <chat_commands.h>
+#include <ai.h>
 #include "modes/mode_internal.h"
+#include <map_catalog.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -22,6 +24,7 @@ typedef struct {
     int argc;
     char *argv[CHAT_ARGS_MAX];  // parts.slice(1) of text.split(" ") (empty parts kept)
     char rest[NET_CHAT_TEXT_SIZE]; // args.join(" ").trim()
+    const char *command;        // the command name (denial log)
 } ChatCtx;
 
 typedef struct {
@@ -105,12 +108,26 @@ static int peer_by_id(const ChatCommandHost *host, const int id, ChatPeer *out) 
     return 0;
 }
 
-// requireDev / requirePremiumCheatPerm. v3.1.1 answers a denial with ["notify", ...],
-// which the game client has no handler for; natively the text comes back as a Server line.
+// requireDev / requirePremiumCheatPerm: a denial answers ["notify", "DEV only"].
+// KrunkNative: cheats (CHAT_PERM_CHEAT / CHAT_PERM_DEV_CHEAT) stay gated with perms off unless
+// the host opened them (ChatCommandHost.cheats_open), so a public server is never a free-for-all.
 static int allowed(ChatCtx *c, const ChatCommandPerm perm) {
-    if (perm == CHAT_PERM_ANY || !c->host->perms || c->sender == CHAT_CMD_CONSOLE) return 1;
+    const int cheat = perm == CHAT_PERM_CHEAT || perm == CHAT_PERM_DEV_CHEAT;
+    if (perm == CHAT_PERM_ANY || c->sender == CHAT_CMD_CONSOLE) return 1;
+    if (!c->host->perms && (!cheat || c->host->cheats_open)) return 1;
     if (c->has_self && c->self.dev) return 1;
-    reply(c, "%s", perm == CHAT_PERM_DEV ? "DEV only" : "DEV or premium custom host only");
+    if (perm == CHAT_PERM_CHEAT && c->has_self && c->self.premium_host) return 1;
+    if (c->host->log) {
+        char line[160];
+        snprintf(line, sizeof(line), "[gameserver] %sperms denied: %s from %d (%s)", perm == CHAT_PERM_CHEAT ? "premium cheat " : "",
+                 c->command ? c->command : "?", c->sender, c->has_self && c->self.name ? c->self.name : "?");
+        c->host->log(c->host->user, line);
+    }
+    // ctx.send("notify", text): the client's mod shows it as a toast (ui_notify)
+    NetNotifyPacket notify;
+    memset(&notify, 0, sizeof(notify));
+    snprintf(notify.text, sizeof(notify.text), "%s", perm == CHAT_PERM_CHEAT ? "DEV or premium custom host only" : "DEV only");
+    game_send(c->host->game, c->sender, NET_PACKET_NOTIFY, &notify, sizeof(notify));
     return 0;
 }
 
@@ -305,9 +322,13 @@ static void cmd_kick_or_ban(ChatCtx *c, const int ban) {
     }
     char label[PLAYER_NAME_SIZE + 16];
     player_label(target, label, sizeof(label));
+    ChatPeer peer;
+    const int account = ban && peer_by_id(c->host, target->uid, &peer) && peer.account_id > 0 && c->host->ban_account
+                            ? peer.account_id : 0;
+    if (account) c->host->ban_account(c->host->user, account, label); // pnhBannedAccountIds.add(accountId)
     c->host->disconnect(c->host->user, target->uid, ban ? "Banned" : "Kicked", ban ? "004003" : "004002");
-    // KrunkNative has no accounts (every player is a guest): v3.1.1's guest ban reply.
-    if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", label);
+    if (ban && account) reply(c, "Banned %s (account %d).", label, account);
+    else if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", label); // a guest
     else reply(c, "Kicked %s.", label);
 }
 
@@ -326,17 +347,48 @@ static void cmd_unban(ChatCtx *c) {
         reply(c, "Usage: /unban <accountId|name|id>");
         return;
     }
+    int account = 0;
     if (all_digits(c->rest)) {
-        reply(c, "Account %s was not banned.", c->rest); // the account ban list is always empty
+        account = atoi(c->rest);
+    } else {
+        Player *target = resolve_or_reply(c, c->rest);
+        if (!target) return;
+        ChatPeer peer;
+        if (peer_by_id(c->host, target->uid, &peer)) account = peer.account_id;
+    }
+    if (account <= 0) {
+        reply(c, "No valid account id to unban.");
         return;
     }
-    if (!resolve_or_reply(c, c->rest)) return;
-    reply(c, "No valid account id to unban.");
+    const int removed = c->host->unban_account && c->host->unban_account(c->host->user, account);
+    if (removed) reply(c, "Unbanned account %d.", account);
+    else reply(c, "Account %d was not banned.", account);
+}
+
+static int compare_ints(const void *a, const void *b) {
+    const int x = *(const int *) a, y = *(const int *) b;
+    return (x > y) - (x < y);
 }
 
 static void cmd_bans(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_DEV)) return;
-    reply(c, "Ban list is empty.");
+    enum { BANS_MAX = 512 };
+    static int ids[BANS_MAX];
+    int total = c->host->list_account_bans ? c->host->list_account_bans(c->host->user, ids, BANS_MAX) : 0;
+    if (total <= 0) {
+        reply(c, "Ban list is empty.");
+        return;
+    }
+    const int have = total < BANS_MAX ? total : BANS_MAX;
+    qsort(ids, (size_t) have, sizeof(int), compare_ints); // .sort((a, b) => a - b)
+    char list[CHAT_TEXT_MAX] = "";
+    size_t len = 0;
+    const int shown = have < 30 ? have : 30;
+    for (int i = 0; i < shown && len < sizeof(list); i++) {
+        len += (size_t) snprintf(list + len, sizeof(list) - len, "%s%d", i ? ", " : "", ids[i]);
+    }
+    if (total > shown) reply(c, "Banned accounts (%d): %s (+%d more)", total, list, total - shown);
+    else reply(c, "Banned accounts (%d): %s", total, list);
 }
 
 static const char *peer_address(const ChatCtx *c, const Player *player) {
@@ -682,32 +734,28 @@ static void cmd_map(ChatCtx *c) {
     snprintf(arg, sizeof(arg), "%s", c->argv[0]);
     for (char *p = arg; *p; p++) *p = (char) tolower((unsigned char) *p);
 
-    // parts[0] === arg (split on " " / "_") || name.toLowerCase().startsWith(arg), first in order
-    for (size_t i = 0; i < game->map_count; i++) {
-        const char *name = map_name(game, (int) i);
-        if (!name) continue;
-        char lower[64];
-        snprintf(lower, sizeof(lower), "%s", name);
-        for (char *p = lower; *p; p++) *p = (char) tolower((unsigned char) *p);
-        const size_t first = strcspn(lower, " _");
-        const int match = (strlen(arg) == first && !strncmp(lower, arg, first)) || !strncmp(lower, arg, strlen(arg));
-        if (!match) continue;
-        if (c->host->change_map) c->host->change_map(c->host->user, (int) i, game->current_mode_index);
-        return; // cycleToMap: silent
+    // MAPS (first word / prefix), then custom_maps by name: the catalogue (map_catalog.c)
+    const int entry = map_catalog_find(arg);
+    if (entry >= 0) {
+        const int slot = map_catalog_slot(&game->maps, &game->map_count, (size_t) entry);
+        if (slot >= 0 && c->host->change_map) c->host->change_map(c->host->user, slot, game->current_mode_index);
+        return; // cycleToMap / loadCustomMapByName: silent
     }
     reply(c, "Unknown map '%s'. Try /maps", arg);
 }
 
 static void cmd_maps(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_DEV)) return;
-    const Game *game = c->host->game;
-    char list[CHAT_TEXT_MAX] = "";
-    size_t len = 0;
-    for (size_t i = 0; i < game->map_count && len < sizeof(list); i++) {
-        const char *name = map_name(game, (int) i);
-        if (name) len += (size_t) snprintf(list + len, sizeof(list) - len, "%s%s", len ? ", " : "", name);
+    char maps[CHAT_TEXT_MAX] = "", custom[CHAT_TEXT_MAX] = "";
+    size_t ml = 0, cl = 0;
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (!e) continue;
+        if (e->source == MAP_SOURCE_OFFICIAL && ml < sizeof(maps)) ml += (size_t) snprintf(maps + ml, sizeof(maps) - ml, "%s%s", ml ? ", " : "", e->name);
+        else if (e->source == MAP_SOURCE_CUSTOM && cl < sizeof(custom)) cl += (size_t) snprintf(custom + cl, sizeof(custom) - cl, "%s%s", cl ? ", " : "", e->key);
     }
-    reply(c, "Maps: %s", list);
+    reply(c, "Maps: %s", maps);
+    if (custom[0]) reply(c, "Custom: %s", custom);
 }
 
 static void cmd_cycle(ChatCtx *c) {
@@ -756,7 +804,7 @@ static void cmd_noclip(ChatCtx *c) {
 }
 
 static void cmd_forcehide(ChatCtx *c) {
-    if (!allowed(c, CHAT_PERM_DEV)) return;
+    if (!allowed(c, CHAT_PERM_DEV_CHEAT)) return;
     ToggleTarget t;
     if (!toggle_target(c, "Forcehide", &t)) return;
     const int next = chat_parse_toggle(t.mode_arg, t.player->force_hide);
@@ -767,7 +815,7 @@ static void cmd_forcehide(ChatCtx *c) {
 }
 
 static void cmd_unlimitedammo(ChatCtx *c) {
-    if (!allowed(c, CHAT_PERM_DEV)) return;
+    if (!allowed(c, CHAT_PERM_DEV_CHEAT)) return;
     ToggleTarget t;
     if (!toggle_target(c, "Unlimited ammo", &t)) return;
     const int next = chat_parse_toggle(t.mode_arg, t.player->unlimited_ammo);
@@ -798,7 +846,8 @@ static void cmd_kill(ChatCtx *c) {
         return;
     }
 
-    // collectKillTargets: every active player whose name/id equals the query, else contains it
+    // collectKillTargets: every active player (name/id) and active AI (name/sid) equal to the
+    // query, else (no exact match in either list) every one containing it
     char query[64];
     normalise(c->rest, query, sizeof(query));
     if (!query[0]) {
@@ -819,9 +868,24 @@ static void cmd_kill(ChatCtx *c) {
             if (partial_n < 64) partial[partial_n++] = p;
         }
     }
-    Player **targets = exact_n ? exact : partial;
-    const int n = exact_n ? exact_n : partial_n;
-    if (!n) {
+    GameAI *ai_exact[GAME_AI_MAX], *ai_partial[GAME_AI_MAX];
+    int ai_exact_n = 0, ai_partial_n = 0;
+    for (int i = 0; game->ai && i < game->ai->count; i++) {
+        GameAI *ai = &game->ai->ais[i];
+        if (!ai->active) continue;
+        char fields[2][64], sid[16];
+        normalise(ai->name, fields[0], sizeof(fields[0]));
+        snprintf(sid, sizeof(sid), "%d", ai->sid);
+        normalise(sid, fields[1], sizeof(fields[1]));
+        if (!strcmp(fields[0], query) || !strcmp(fields[1], query)) ai_exact[ai_exact_n++] = ai;
+        else if ((fields[0][0] && strstr(fields[0], query)) || strstr(fields[1], query)) ai_partial[ai_partial_n++] = ai;
+    }
+    const int has_exact = exact_n || ai_exact_n;
+    Player **targets = has_exact ? exact : partial;
+    const int n = has_exact ? exact_n : partial_n;
+    GameAI **ai_targets = has_exact ? ai_exact : ai_partial;
+    const int ai_n = has_exact ? ai_exact_n : ai_partial_n;
+    if (!n && !ai_n) {
         reply(c, "Kill target '%s' not found.", c->rest);
         return;
     }
@@ -833,7 +897,15 @@ static void cmd_kill(ChatCtx *c) {
         kill_player(targets[i], player);
         if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", i ? ", " : "", label);
     }
-    reply(c, "Killed %d player%s: %s.", n, n == 1 ? "" : "s", names); // no AI natively
+    for (int i = 0; i < ai_n; i++) { // killTargetAI: ai.kill(source), then AI.sync()
+        game_ai_kill(game, ai_targets[i], player);
+        game_ai_sync(game);
+        if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", n || i ? ", " : "", ai_targets[i]->name);
+    }
+    char parts[64] = "";
+    if (n) snprintf(parts, sizeof(parts), "%d player%s", n, n == 1 ? "" : "s");
+    if (ai_n) snprintf(parts + strlen(parts), sizeof(parts) - strlen(parts), "%s%d AI%s", n ? " + " : "", ai_n, ai_n == 1 ? "" : "s");
+    reply(c, "Killed %s: %s.", parts, names);
 }
 
 static void cmd_team(ChatCtx *c) {
@@ -899,7 +971,7 @@ static void cmd_teams(ChatCtx *c) {
 }
 
 static void cmd_score(ChatCtx *c) {
-    if (!allowed(c, CHAT_PERM_DEV)) return;
+    if (!allowed(c, CHAT_PERM_DEV_CHEAT)) return;
     Player *player = c->player;
     if (!player || !player->active) {
         reply(c, "Score command unavailable (no active player).");
@@ -919,9 +991,47 @@ static void cmd_score(ChatCtx *c) {
     reply(c, "%s%d score (total %d).", amount > 0 ? "+" : "", (int) amount, player->score);
 }
 
+// game.ts listSoulSanctumAIs, joined like `names.join(", ")`
+static void summon_names(char *out, const size_t size) {
+    int count = 0;
+    const GameAITemplate *templates = game_ai_templates(&count);
+    size_t len = 0;
+    out[0] = 0;
+    for (int i = 0; i < count && len < size; i++) len += (size_t) snprintf(out + len, size - len, "%s%s", i ? ", " : "", templates[i].name);
+}
+
+// cmd_summon: a Soul Sanctum BOT template by name or alias, at the caller (game.ts spawnSoulSanctumAI).
 static void cmd_summon(ChatCtx *c) {
-    if (!allowed(c, CHAT_PERM_DEV)) return;
-    reply(c, "Summon unavailable on this game instance."); // no Soul Sanctum AI natively
+    if (!allowed(c, CHAT_PERM_DEV_CHEAT)) return;
+    Game *game = c->host->game;
+    int count = 0;
+    game_ai_templates(&count);
+    if (!count || !game_is_authority(game)) {
+        reply(c, "Summon unavailable on this game instance.");
+        return;
+    }
+    Player *player = c->player;
+    if (!player || !player->active) {
+        reply(c, "Summon unavailable (no active player).");
+        return;
+    }
+    char names[CHAT_TEXT_MAX];
+    summon_names(names, sizeof(names));
+    if (!c->rest[0]) {
+        reply(c, "Summonable: %s", names);
+        return;
+    }
+    const GameAITemplate *template = game_ai_resolve_template(c->rest);
+    if (!template) {
+        reply(c, "Unknown summon '%s'. Try: %s", c->rest, names);
+        return;
+    }
+    const GameAI *ai = game_ai_summon(game, template, player);
+    if (!ai) {
+        reply(c, "Failed to summon %s.", template->name);
+        return;
+    }
+    reply(c, "Summoned %s (%d).", template->name, ai->sid);
 }
 
 static void cmd_players(ChatCtx *c) {
@@ -941,8 +1051,21 @@ static void cmd_players(ChatCtx *c) {
     else reply(c, "Players (%d): %s", count, names);
 }
 
+// cmd_ais: every listed AI (dead ones too), name or "(unnamed)"
 static void cmd_ais(ChatCtx *c) {
-    reply(c, "No AI."); // no AI entities natively
+    const Game *game = c->host->game;
+    const int count = game->ai ? game->ai->count : 0;
+    if (!count) {
+        reply(c, "No AI.");
+        return;
+    }
+    char names[CHAT_TEXT_MAX] = "";
+    size_t len = 0;
+    for (int i = 0; i < count && len < sizeof(names); i++) {
+        const char *name = game->ai->ais[i].name[0] ? game->ai->ais[i].name : "(unnamed)";
+        len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", i ? ", " : "", name);
+    }
+    reply(c, "AI (%d): %s", count, names);
 }
 
 // v3.1.1 `cmds`, in its order; descriptions from the v3.1.1 dev console mod.
@@ -975,10 +1098,10 @@ static const ChatCommand COMMANDS[] = {
     {{"kill", NULL, "[target]", "kill yourself or every matching player", CHAT_PERM_CHEAT}, cmd_kill},
     {{"team", NULL, "<red|blue>", "switch teams", CHAT_PERM_ANY}, cmd_team},
     {{"teams", NULL, "", "list teams and players", CHAT_PERM_ANY}, cmd_teams},
-    {{"forcehide", NULL, "[target] [on|off]", "toggle forcehide (self or target)", CHAT_PERM_DEV}, cmd_forcehide},
-    {{"unlimitedammo", NULL, "[target] [on|off]", "toggle unlimited ammo (self or target)", CHAT_PERM_DEV}, cmd_unlimitedammo},
-    {{"score", NULL, "[amount]", "add score (default +100)", CHAT_PERM_DEV}, cmd_score},
-    {{"summon", NULL, "[name]", "spawn a Soul Sanctum AI by name (no arg lists summonable names)", CHAT_PERM_DEV}, cmd_summon},
+    {{"forcehide", NULL, "[target] [on|off]", "toggle forcehide (self or target)", CHAT_PERM_DEV_CHEAT}, cmd_forcehide},
+    {{"unlimitedammo", NULL, "[target] [on|off]", "toggle unlimited ammo (self or target)", CHAT_PERM_DEV_CHEAT}, cmd_unlimitedammo},
+    {{"score", NULL, "[amount]", "add score (default +100)", CHAT_PERM_DEV_CHEAT}, cmd_score},
+    {{"summon", NULL, "[name]", "spawn a Soul Sanctum AI by name (no arg lists summonable names)", CHAT_PERM_DEV_CHEAT}, cmd_summon},
     {{"players", NULL, "", "list connected players (id, name, team)", CHAT_PERM_ANY}, cmd_players},
     {{"ais", NULL, "", "list active AI entities (sid, name)", CHAT_PERM_ANY}, cmd_ais},
 };
@@ -1031,6 +1154,7 @@ int chat_command_handle(ChatCommandHost *host, const int sender_id, const char *
     memset(&c, 0, sizeof(c));
     c.host = host;
     c.sender = sender_id;
+    c.command = command->info.name;
     if (sender_id != CHAT_CMD_CONSOLE && peer_by_id(host, sender_id, &c.self)) {
         c.has_self = 1;
         c.player = c.self.player;
@@ -1059,4 +1183,70 @@ int chat_command_handle(ChatCommandHost *host, const int sender_id, const char *
 
     command->run(&c);
     return 1;
+}
+
+// ---------------------------------------------------------------- cheat packets
+
+static void ctx_for_sender(ChatCtx *c, ChatCommandHost *host, const int sender_id, const char *label) {
+    memset(c, 0, sizeof(*c));
+    c->host = host;
+    c->sender = sender_id;
+    c->command = label;
+    if (sender_id != CHAT_CMD_CONSOLE && peer_by_id(host, sender_id, &c->self)) {
+        c->has_self = 1;
+        c->player = c->self.player;
+    }
+}
+
+int chat_command_allowed(ChatCommandHost *host, const int sender_id, const ChatCommandPerm perm, const char *label) {
+    if (!host || !host->game) return 0;
+    ChatCtx c;
+    ctx_for_sender(&c, host, sender_id, label);
+    return allowed(&c, perm);
+}
+
+// io_prmA (packetHandlers.ts): the four premium keys mirror /noclip, /god, /kill and /smite.
+void chat_command_premium_action(ChatCommandHost *host, const int sender_id, const int index) {
+    if (!host || !host->game || index < 0 || index > 3) return;
+    ChatCtx c;
+    ctx_for_sender(&c, host, sender_id, "prmA");
+    Player *player = c.player;
+    if (!player || !player->active) return;
+    if (!allowed(&c, CHAT_PERM_CHEAT)) return;
+
+    switch (index) {
+        case 0: { // io_noclip: ctx.send("noc", next)
+            const int next = !player->noclip;
+            player->noclip = (unsigned char) next;
+            send_cheat(&c, player->uid, NET_CHEAT_NOCLIP, next);
+            if (host->log) {
+                char line[64];
+                snprintf(line, sizeof(line), "[gameserver] noclip %d -> %s", sender_id, next ? "true" : "false");
+                host->log(host->user, line);
+            }
+            break;
+        }
+        case 1: { // cmd_god
+            const int next = !player->god_mode;
+            player->god_mode = (unsigned char) next;
+            if (next) {
+                player->health = (float) player->max_health;
+                mode_send_health(host->game, player);
+            }
+            reply(&c, "God mode %s", next ? "ON" : "OFF");
+            break;
+        }
+        case 2: // /kill with godMode lifted
+            kill_player(player, player);
+            reply(&c, "You killed yourself.");
+            break;
+        case 3: {
+            const int next = !player->smite;
+            player->smite = (unsigned char) next;
+            reply(&c, "Smite %s", next ? "ON" : "OFF");
+            break;
+        }
+        default:
+            break;
+    }
 }

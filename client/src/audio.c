@@ -134,11 +134,35 @@ static const struct {
 
 // ---------------------------------------------------------------- helpers
 
+static int strncasecmp_ascii(const char *a, const char *b, const size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        const int ca = a[i] >= 'A' && a[i] <= 'Z' ? a[i] + 32 : a[i];
+        const int cb = b[i] >= 'A' && b[i] <= 'Z' ? b[i] + 32 : b[i];
+        if (ca != cb || !ca) return ca - cb;
+    }
+    return 0;
+}
+
 static float clamp01(const float v) {
     return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
 }
 
+// User-asset sounds (sound.js getSound with the asset flag: userAssetsUrl(id + "/sound") +
+// ".mp3", Howl category 6 = assetVolume) are named "asset:<id>" (AI sounds, trigger "esa").
+#define AUDIO_ASSET_PREFIX "asset:"
+
+static int sound_is_asset(const char *name) {
+    return !strncmp(name, AUDIO_ASSET_PREFIX, sizeof(AUDIO_ASSET_PREFIX) - 1);
+}
+
+// The file of a clip under assets/: sound/<name>.mp3, or user-assets/<id>/sound.mp3.
+static void clip_relative_path(const char *name, char *out, const size_t size) {
+    if (sound_is_asset(name)) snprintf(out, size, "user-assets/%s/sound.mp3", name + sizeof(AUDIO_ASSET_PREFIX) - 1);
+    else snprintf(out, size, "sound/%s.mp3", name);
+}
+
 static int sound_category(const char *name) {
+    if (sound_is_asset(name)) return AUDIO_CAT_ASSET;
     for (size_t i = 0; i < sizeof(SOUND_CATS) / sizeof(SOUND_CATS[0]); i++) {
         if (!strcmp(SOUND_CATS[i].name, name)) return SOUND_CATS[i].category;
     }
@@ -171,8 +195,8 @@ static int clip_find(const char *name, const int create) {
 
 // 0 while assets/sound/<name>.mp3 is still downloading in the background (web).
 static int clip_prefetched(const AudioClip *clip) {
-    char relative[AUDIO_NAME_MAX + 16];
-    snprintf(relative, sizeof(relative), "sound/%s.mp3", clip->name);
+    char relative[AUDIO_NAME_MAX + 32];
+    clip_relative_path(clip->name, relative, sizeof(relative));
     char *path = concat(assets_path(), relative);
     const int state = path ? asset_prefetch(path) : -1;
     free(path);
@@ -185,8 +209,8 @@ static int clip_load(AudioClip *clip) {
     if (clip->state == CLIP_READY) return 1;
     if (clip->state == CLIP_FAILED) return 0;
 
-    char relative[AUDIO_NAME_MAX + 16];
-    snprintf(relative, sizeof(relative), "sound/%s.mp3", clip->name);
+    char relative[AUDIO_NAME_MAX + 32];
+    clip_relative_path(clip->name, relative, sizeof(relative));
     char *path = concat(assets_path(), relative);
 
     unsigned char *data = NULL;
@@ -483,10 +507,12 @@ int audio_init(void) {
     ma_engine_config config = ma_engine_config_init();
     config.listenerCount = 1;
 
-    const char *backend = getenv("KRUNKNATIVE_AUDIO_BACKEND");
-    if (backend && !strcmp(backend, "null")) {
-        const ma_backend backends[] = {ma_backend_null};
-        if (ma_context_init(backends, 1, NULL, &g_audio.context) != MA_SUCCESS) return 0;
+    int backend_list[16];
+    const int backend_count = audio_backends(backend_list, 16);
+    if (backend_count) {
+        ma_backend backends[16];
+        for (int i = 0; i < backend_count; i++) backends[i] = (ma_backend) backend_list[i];
+        if (ma_context_init(backends, (ma_uint32) backend_count, NULL, &g_audio.context) != MA_SUCCESS) return 0;
         g_audio.context_ready = 1;
         config.pContext = &g_audio.context;
     }
@@ -519,7 +545,9 @@ int audio_init(void) {
 #endif
 
     if (g_audio.log) {
-        printf("[audio] engine %u Hz, %u channels\n", ma_engine_get_sample_rate(&g_audio.engine), ma_engine_get_channels(&g_audio.engine));
+        const ma_device *device = ma_engine_get_device(&g_audio.engine);
+        printf("[audio] engine %u Hz, %u channels, %s: %s\n", ma_engine_get_sample_rate(&g_audio.engine), ma_engine_get_channels(&g_audio.engine),
+            device ? ma_get_backend_name(device->pContext->backend) : "?", device ? device->playback.name : "?");
     }
 
     return 1;
@@ -556,6 +584,36 @@ int audio_available(void) {
 
 void *audio_engine(void) {
     return g_audio.ready ? &g_audio.engine : NULL;
+}
+
+int audio_backends(int *out, const int max) {
+    static const struct {
+        const char *name;
+        ma_backend backend;
+    } NAMES[] = {
+        {"pulseaudio", ma_backend_pulseaudio}, {"pulse", ma_backend_pulseaudio}, {"pipewire", ma_backend_pulseaudio},
+        {"alsa", ma_backend_alsa}, {"jack", ma_backend_jack}, {"coreaudio", ma_backend_coreaudio},
+        {"wasapi", ma_backend_wasapi}, {"dsound", ma_backend_dsound}, {"directsound", ma_backend_dsound},
+        {"winmm", ma_backend_winmm}, {"sndio", ma_backend_sndio}, {"audio4", ma_backend_audio4},
+        {"oss", ma_backend_oss}, {"aaudio", ma_backend_aaudio}, {"opensl", ma_backend_opensl},
+        {"webaudio", ma_backend_webaudio}, {"null", ma_backend_null},
+    };
+    const char *list = getenv("KRUNKNATIVE_AUDIO_BACKEND");
+    int count = 0;
+    while (list && *list && count < max) {
+        const size_t len = strcspn(list, ", ");
+        int known = 0;
+        for (size_t i = 0; len && i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
+            if (strlen(NAMES[i].name) != len || strncasecmp_ascii(NAMES[i].name, list, len) != 0) continue;
+            known = 1;
+            if (ma_is_backend_enabled(NAMES[i].backend)) out[count++] = (int) NAMES[i].backend;
+            else fprintf(stderr, "[audio] backend %.*s is not available in this build\n", (int) len, list);
+        }
+        if (len && !known) fprintf(stderr, "[audio] unknown audio backend %.*s\n", (int) len, list);
+        list += len;
+        while (*list == ',' || *list == ' ') list++;
+    }
+    return count;
 }
 
 void audio_update(const vec3 listener_position, const float yaw, const float pitch) {

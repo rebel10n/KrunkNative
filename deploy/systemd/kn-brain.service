@@ -1,0 +1,32 @@
+# KrunkNative matchmaker brain (kn_brain). Installed by deploy/deploy.sh.
+# Config: /etc/krunknative/config.json (database credentials, "brain" section);
+# per-host overrides in /etc/krunknative/brain.env (KN_BRAIN_* variables).
+[Unit]
+Description=KrunkNative brain (matchmaker, social, accounts)
+After=network-online.target postgresql.service
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User=krunknative
+Group=krunknative
+WorkingDirectory=/opt/krunknative
+EnvironmentFile=-/etc/krunknative/brain.env
+ExecStartPre=/opt/krunknative/bin/kn_brain --config /etc/krunknative/config.json --migrate-only
+ExecStart=/opt/krunknative/bin/kn_brain --config /etc/krunknative/config.json
+# SIGTERM: stop accepting, close game-server links with 1001 (they reconnect to the
+# restarted brain), let rows expire by TTL if nobody takes them over.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/opt/krunknative /etc/krunknative
+
+[Install]
+WantedBy=krunknative.target

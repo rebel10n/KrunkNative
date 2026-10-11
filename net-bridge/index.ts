@@ -1,11 +1,12 @@
 "use strict";
 
-import { createServer } from "http";
+import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import fs from "fs";
 import path from "path";
 import type { AddressInfo, Socket } from "net";
 import version from "./version.json";
 import * as krunkerProxy from "./krunkerProxy";
+import * as brainProxy from "./brainProxy";
 import * as browserProxy from "./proxy";
 import * as publicRoutes from "./publicRoutes";
 import * as staticFiles from "./staticFiles";
@@ -28,6 +29,7 @@ type CliOptions = {
   region?: string;
   hostname?: string;
   gameId?: string;
+  brainUrl?: string;
 };
 
 function usage(): string {
@@ -41,6 +43,8 @@ function usage(): string {
     "  --browser-to-native       Run the old browser WS -> KrunkNative TCP mode",
     "  --web                     Serve the Emscripten web build over HTTP and bridge",
     "                            ws /native <-> native TCP (raw passthrough)",
+    "  --brain URL               kn_brain to proxy /mm /api /social to in web mode (default: KN_BRAIN_URL,",
+    "                            config/config.json brain, else http://127.0.0.1:5050)",
     "  --serve-web DIR           Same as --web, serving DIR (default ../dist/web,",
     "                            env KRUNK_NATIVE_WEB_DIR)",
     "  --krunker-origin URL      Matchmaker origin for native-to-krunker mode (default http://127.0.0.1:6767)",
@@ -54,6 +58,9 @@ function usage(): string {
     "Environment (web / browser-to-native):",
     "  KRUNK_NATIVE_BRIDGE_HOST / KRUNK_NATIVE_BRIDGE_PORT   HTTP listen address (127.0.0.1:8080)",
     "  KRUNK_NATIVE_HOST / KRUNK_NATIVE_PORT                 native TCP server (127.0.0.1:21015)",
+    "  KRUNK_NATIVE_TARGETS                                  /native?target=host:port allowlist (brain matchmaking),",
+    "                                                        host:port|host:lo-hi|host:* comma list",
+    "                                                        (default KRUNK_NATIVE_HOST:PORT..PORT+63)",
     "  KRUNK_NATIVE_WEB_DIR                                  web build dir for --web",
     "  KRUNK_NATIVE_WEB_COI=1                                add COOP/COEP headers (SharedArrayBuffer)",
   ].join("\n");
@@ -98,6 +105,13 @@ function parseArgs(argv: string[]): CliOptions {
       if (!value) throw new Error("--serve-web requires a directory");
       options.mode = "web";
       options.webDir = value;
+      i = nextIndex;
+      continue;
+    }
+    if (arg === "--brain" || arg.startsWith("--brain=")) {
+      const [value, nextIndex] = readFlagValue(argv, i, "--brain");
+      if (!value) throw new Error("--brain requires a URL");
+      options.brainUrl = value;
       i = nextIndex;
       continue;
     }
@@ -178,9 +192,36 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
     extraHeaders,
   };
 
+  // the brain's routes are proxied to kn_brain (same origin, like nginx); without a brain the
+  // bridge's own fallback routes answer (brainProxy.ts)
+  const brain = brainProxy.resolveBrain(options.brainUrl);
+  const localRoutes = async (req: IncomingMessage, res: ServerResponse) => {
+    if (
+      publicRoutes.handle(req, res, {
+        getStats: webBridge.getStats,
+      })
+    ) return;
+    if (await staticFiles.serve(req, res, serveOptions)) return;
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not_found", path: req.url }));
+  };
+
   const http = createServer(async (req, res) => {
     try {
-      if (publicRoutes.handle(req, res, { getStats: webBridge.getStats })) return;
+      const pathname = (req.url || "/").split("?")[0];
+      if (brainProxy.isBrainPath(pathname)) {
+        brainProxy.proxyHttp(brain, req, res, () => {
+          localRoutes(req, res).catch((err) => {
+            console.error("[net-bridge] fallback route threw:", err);
+          });
+        });
+        return;
+      }
+      if (
+        publicRoutes.handle(req, res, {
+          getStats: webBridge.getStats,
+        })
+      ) return;
       if (await staticFiles.serve(req, res, serveOptions)) return;
 
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -206,6 +247,10 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
       return;
     }
 
+    if (brainProxy.isBrainWsPath(url.pathname)) {
+      brainProxy.proxyUpgrade(brain, request, socket, head); // the social socket (kn_brain)
+      return;
+    }
     const wss =
       url.pathname === webBridge.WEB_WS_PATH
         ? nativeWss
@@ -226,7 +271,8 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
     const where = describeAddress(http) || "(unknown address)";
     console.info(
       `net-bridge ${version} web listening on ${where} ` +
-        `(static ${webDir}, ws ${webBridge.WEB_WS_PATH} -> tcp ${webBridge.NATIVE_HOST}:${webBridge.NATIVE_PORT}, ws ${browserProxy.WS_PATH})`,
+        `(static ${webDir}, ws ${webBridge.WEB_WS_PATH} -> tcp ${webBridge.NATIVE_HOST}:${webBridge.NATIVE_PORT}, ws ${browserProxy.WS_PATH}, ` +
+        `brain routes /mm /api /social -> ${brain.url})`,
     );
   });
 
@@ -237,7 +283,8 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
 function startBrowserToNative(): ReturnType<typeof createServer> {
   const http = createServer(async (req, res) => {
     try {
-      if (publicRoutes.handle(req, res, { getStats: browserProxy.getStats })) return;
+      // the v3.1.1 JS client plays through this bridge with no brain: its single-lobby matchmaker
+      if (publicRoutes.handle(req, res, { getStats: browserProxy.getStats, legacyMatchmaker: true })) return;
       if (await staticFiles.serve(req, res)) return;
 
       res.writeHead(404, { "Content-Type": "application/json" });

@@ -70,6 +70,11 @@ int html_ui_backend_add_stylesheet(const char *href) {
     return 0;
 }
 
+int html_ui_backend_set_custom_css(const char *css) {
+    (void) css;
+    return 0;
+}
+
 int html_ui_backend_available(void) {
     return 0;
 }

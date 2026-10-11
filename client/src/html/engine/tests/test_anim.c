@@ -605,6 +605,44 @@ static int sample(HtmlElem e, const CssComputed *base, CssComputed *out, double 
     return *res != base;
 }
 
+/* zoom: keyframe lengths (unzoomed) scale with the element's zoom; lists of
+ * box-shadows interpolate pairwise, padding with transparent shadows. */
+static void test_zoom_and_shadow_lists(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    base.zoom = 0.5f;
+    base.font_size = 16.0f;                     /* 32px under zoom .5 */
+    base.animations[0] = anim_decl("grow", 0.8f, 0, INFINITY, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    base.animation_count = 1;
+    HtmlElem e = 91;
+    CHECK(anim_update_elem(&g_sys, e, &base, 1000) == 1);
+    CHECK(sample(e, &base, &out, 1000, &r));
+    CHECK_NEAR(r->font_size, 15, 1e-4);         /* `from { font-size: 30px }` * 0.5 */
+    CHECK(sample(e, &base, &out, 1400, &r));
+    CHECK_NEAR(r->font_size, 15.5, 1e-4);       /* halfway to the zoomed base 16 */
+    anim_remove_elem(&g_sys, e);
+
+    AnimValue a, b, o;
+    memset(&a, 0, sizeof a); memset(&b, 0, sizeof b);
+    a.shadow.count = 2;
+    a.shadow.shadow.color = rgba(255, 0, 0, 255); a.shadow.shadow.x = 2;
+    a.shadow.more[0].color = rgba(0, 0, 255, 255); a.shadow.more[0].blur = 8;
+    b.shadow.count = 1;
+    b.shadow.shadow.color = rgba(255, 0, 0, 255); b.shadow.shadow.x = 6;
+    CHECK(anim_value_interpolable(ANIM_BOX_SHADOW, &a, &b));
+    anim_value_lerp(ANIM_BOX_SHADOW, &a, &b, 0.5f, &o);
+    CHECK(o.shadow.count == 2);
+    CHECK_NEAR(o.shadow.shadow.x, 4, 1e-6);
+    CHECK_NEAR(o.shadow.more[0].blur, 4, 1e-6);           /* towards the padding shadow */
+    CHECK(o.shadow.more[0].color.a == 128 || o.shadow.more[0].color.a == 127);
+    b.shadow.shadow.inset = 1;                              /* inset mismatch -> discrete */
+    CHECK(!anim_value_interpolable(ANIM_BOX_SHADOW, &a, &b));
+    memset(&b, 0, sizeof b);                                /* none -> list: interpolable */
+    CHECK(anim_value_interpolable(ANIM_BOX_SHADOW, &b, &a));
+}
+
 static void test_grow(void)
 {
     const AnimKeyframeSet *grow = anim_keyframes_find(&g_sys, kn_atom_cstr("grow"));
@@ -1191,6 +1229,7 @@ int main(int argc, char **argv)
     CHECK(anim_keyframes_find(&g_sys, kn_atom_cstr("sprayAnm")) == NULL);
 
     test_grow();
+    test_zoom_and_shadow_lists();
     test_scale_bob();
     test_lds_ring();
     test_rgb_hue();

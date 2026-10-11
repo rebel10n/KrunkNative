@@ -9,6 +9,15 @@ type RuntimeStats = {
 
 type PublicRouteContext = {
   getStats?: () => RuntimeStats;
+  /**
+   * Answer the matchmaker routes (/mm/*, player counts) with this bridge's single
+   * lobby. Only `--browser-to-native` sets it: the real v3.1.1 JS client plays through
+   * the bridge there, with no brain. Everywhere else matchmaking is kn_brain's job
+   * (doc/backend.md section 4): the bridge answers /mm/* like a v3.1.1 game node does
+   * behind the brain (gameserver.ts MM_NODE_MODE=node) and never answers /mm/status,
+   * which the KrunkNative client probes to find a brain.
+   */
+  legacyMatchmaker?: boolean;
 };
 
 type LobbyTuple = [
@@ -119,6 +128,16 @@ export function handle(
   const url = routeUrl(req);
   const pathname = url.pathname || "";
   const params = url.searchParams;
+
+  const matchmakerRoute =
+    pathname.startsWith("/mm/") || pathname === "/social/player-count" || pathname === "/api/player-count";
+  if (matchmakerRoute && !ctx.legacyMatchmaker) {
+    // gameserver.ts: "the matchmaker brain owns every /mm/* route ... 404 those locally
+    // so a misrouted request fails loudly"
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "mm_routes_disabled_on_node", path: pathname }));
+    return true;
+  }
 
   switch (pathname) {
     case "/ping":

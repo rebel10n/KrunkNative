@@ -51,7 +51,10 @@
  *    the other side's structure.  Otherwise discrete at 50%.
  *  - filter: same scheme (hue-rotate angle, brightness/contrast/... amounts,
  *    drop-shadow components); `none` -> per-function identity.
- *  - box-shadow: one shadow on both sides with equal inset flag -> lerp.
+ *  - box-shadow: lists paired index by index, the shorter one padded with
+ *    transparent 0 0 0 0 shadows of the other side's inset (CSS Backgrounds
+ *    3, Blink); every pair needs equal inset flags and RGBA colors, else the
+ *    whole list is discrete at 50%.  `none` is the empty list.
  *
  * Only the properties listed in AnimProp are animatable; animating anything
  * else is a no-op.  CssComputed hashes are copied from base unchanged.
@@ -120,8 +123,9 @@ typedef struct AnimFilterList {
 } AnimFilterList;
 
 typedef struct AnimShadow {
-    CssShadow shadow;
-    uint8_t count;         /* 0 or 1                                          */
+    CssShadow shadow;      /* the first shadow                                */
+    CssShadow more[CSS_MAX_BOX_SHADOWS - 1];
+    uint8_t count;         /* 0 .. CSS_MAX_BOX_SHADOWS                        */
 } AnimShadow;
 
 /* One animatable value; the active member follows anim_prop_kind(prop). */

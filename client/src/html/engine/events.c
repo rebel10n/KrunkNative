@@ -599,7 +599,9 @@ static int listener_policy(const char *type)
 {
     if (!strcmp(type, "mousedown")) return LISTEN_ELEMENTS;
     if (!strcmp(type, "click")) return LISTEN_DOCUMENT;
-    if (!strcmp(type, "keydown") || !strcmp(type, "keyup")) return LISTEN_DOCUMENT | LISTEN_CAPTURE_FIRST;
+    /* document capture first, then addEventListener("keyup") on the focused input and its
+     * ancestors (social.js searchPInput / chatBoxInput Enter) */
+    if (!strcmp(type, "keydown") || !strcmp(type, "keyup")) return LISTEN_DOCUMENT | LISTEN_CAPTURE_FIRST | LISTEN_ELEMENTS;
     return LISTEN_NONE;
 }
 

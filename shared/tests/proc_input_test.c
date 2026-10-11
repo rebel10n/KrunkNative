@@ -292,6 +292,129 @@ static int replay_main(const int argc, char **argv) {
     return g_failures ? 1 : 0;
 }
 
+#define RULE_CHECK(cond, ...) do { if (!(cond)) { printf("FAIL: " __VA_ARGS__); printf("\n"); g_failures++; } } while (0)
+
+// Replace the spawned loadout (player_spawn frees these on the next spawn).
+static void set_loadout(Player *player, const int *ids, const int count, const int index) {
+    free(player->loadout);
+    free(player->ammo);
+    free(player->reloads);
+    player->loadout = calloc((size_t) count, sizeof(int));
+    player->ammo = calloc((size_t) count, sizeof(int));
+    player->reloads = calloc((size_t) count, sizeof(float));
+    player->loadout_size = (size_t) count;
+    for (int i = 0; i < count; i++) {
+        player->loadout[i] = ids[i];
+        player->ammo[i] = (int) player->game->weapons[ids[i]]->ammo;
+    }
+    player_swap_weapon(player, index, 1, 1, 0);
+}
+
+static int rule_input(Player *player, const int swap, const int scroll) {
+    Input input = {0};
+    input.move_dir = -1;
+    input.delta = 0.016f;
+    input.x_dir = player->direction.x;
+    input.y_dir = player->direction.y;
+    input.swap = (unsigned char) swap;
+    input.scroll = (signed char) scroll;
+    player_proc_input(player, &input, 0, 1);
+    return player->loadout_index;
+}
+
+// 95.js pY2 / swapMelee / swapSecondary and the procInputs rounding (input-audit #3, #4, #6).
+static void run_input_rule_tests(Player *player) {
+    printf("Running input rule tests (swap / scroll / rounding)... \n");
+    const int failures = g_failures;
+    player_spawn(player);
+    player->direction = (vec2) {0.0f, 0.0f};
+
+    // scroll wrap: ammos.length - (length > 3 ? 3 : 2)
+    const int two[] = {1, WEAPON_ID_KNIFE};
+    set_loadout(player, two, 2, 0);
+    RULE_CHECK(rule_input(player, 0, 1) == 0, "2 weapons: scroll up from 0 wraps to 0 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, -1) == 1, "2 weapons: scroll down from 0 -> min(1, 2) = 1 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, -1) == 0, "2 weapons: scroll down from 1 -> 0 (got %d)", player->loadout_index);
+
+    const int three[] = {1, WEAPON_ID_PISTOL, WEAPON_ID_KNIFE};
+    set_loadout(player, three, 3, 0);
+    RULE_CHECK(rule_input(player, 0, 1) == 1, "3 weapons: scroll up 0 -> 1 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, 1) == 0, "3 weapons: scroll up 1 wraps to 0, melee skipped (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, -1) == 2, "3 weapons: scroll down 0 -> 2 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, -1) == 0, "3 weapons: scroll down 2 -> 0 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 1, 1) == 1, "3 weapons: a swap key wins over the wheel (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 1, 0) == 0, "3 weapons: secondary key on secondary -> 0 (got %d)", player->loadout_index);
+
+    const int four[] = {1, WEAPON_ID_PISTOL, 17 /* Bomb, equipment */, WEAPON_ID_KNIFE};
+    set_loadout(player, four, 4, 0);
+    RULE_CHECK(rule_input(player, 0, 1) == 1, "4 weapons: scroll up 0 -> 1 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, 1) == 0, "4 weapons: scroll up 1 wraps to 0 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, -1) == 2, "4 weapons: scroll down 0 -> min(3, 2) = 2 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 0, 1) == 0, "4 weapons: scroll up 2 wraps to 0 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 4, 0) == 2, "4 weapons: equipment key -> 2 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 4, 0) == 0, "4 weapons: equipment key on equipment -> 0 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 2, 0) == 3, "4 weapons: melee key -> 3 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 2, 0) == 0, "4 weapons: melee key on melee -> reload(+1) wraps to 0 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 3, 0) == 0 && rule_input(player, 1, 0) == 1 && rule_input(player, 3, 0) == 0, "4 weapons: primary key -> 0 (got %d)", player->loadout_index);
+
+    // melee key on melee steps to the next slot instead of going back to 0
+    const int melee_first[] = {WEAPON_ID_KNIFE, 1, WEAPON_ID_PISTOL};
+    set_loadout(player, melee_first, 3, 0);
+    RULE_CHECK(rule_input(player, 2, 0) == 1, "melee in slot 0: melee key on melee -> reload(+1) = 1 (got %d)", player->loadout_index);
+    RULE_CHECK(rule_input(player, 2, 0) == 0, "melee in slot 0: melee key from 1 -> 0 (got %d)", player->loadout_index);
+
+    const int one[] = {WEAPON_ID_KNIFE};
+    set_loadout(player, one, 1, 0);
+    RULE_CHECK(rule_input(player, 0, 1) == 0 && rule_input(player, 2, 0) == 0, "1 weapon: no scroll / swap (got %d)", player->loadout_index);
+
+    // rounding: yaw/pitch to 0.001 rad, delta to whole ms (crouchVal is rounded to 3 decimals after)
+    player_spawn(player);
+    Input input = {0};
+    input.move_dir = -1;
+    input.x_dir = 0.12345f;
+    input.y_dir = -2.71828f;
+    input.delta = 0.0166f;
+    input.crouch = 1;
+    player->crouch_val = 0.0f;
+    player_proc_input(player, &input, 0, 1);
+    RULE_CHECK(fabsf(player->direction.x - 0.123f) < 1e-6f && fabsf(player->direction.y - -2.718f) < 1e-6f,
+               "yaw/pitch round(3): got %.6f %.6f", player->direction.x, player->direction.y);
+    const float crouch_17 = player->crouch_val;
+    player->crouch_val = 0.0f;
+    input.delta = 0.017f;
+    player_proc_input(player, &input, 0, 1);
+    RULE_CHECK(player->crouch_val == crouch_17, "delta 16.6 ms runs as 17 ms: crouch %.6f vs %.6f", crouch_17, player->crouch_val);
+    RULE_CHECK(fabsf(crouch_17 - roundf(game_constants.crouch_speed * 0.017f * 1000.0f) / 1000.0f) < 1e-6f,
+               "crouchVal round(3): got %.6f", crouch_17);
+    player->crouch_val = 0.0f;
+    input.delta = -0.01f;
+    player_proc_input(player, &input, 0, 1);
+    RULE_CHECK(player->crouch_val == 0.0f, "negative delta runs as 0 (crouch %.6f)", player->crouch_val);
+    input.delta = 0.0164f; // 16 ms
+    input.x_dir = 0.0004f; // below 0.0005 rad: rounds to 0
+    player_proc_input(player, &input, 0, 1);
+    RULE_CHECK(player->direction.x == 0.0f, "pitch 0.0004 rounds to 0 (got %.6f)", player->direction.x);
+
+    // the wheel field survives the INPUT packet; shorter packets read as no scroll
+    NetInputPacket net = {0};
+    Input in = {0}, out = {0};
+    in.scroll = -1;
+    in.swap = 4;
+    net_packet_from_input(&net, &in);
+    NetPacket packet = {0};
+    packet.length = sizeof(net);
+    memcpy(packet.payload, &net, sizeof(net));
+    NetInputPacket read = {0};
+    RULE_CHECK(net_packet_read_input(&read, &packet), "24-byte INPUT reads");
+    net_packet_to_input(&out, &read);
+    RULE_CHECK(out.scroll == -1 && out.swap == 4, "INPUT scroll/swap round trip (got %d %d)", out.scroll, out.swap);
+    packet.length = NET_INPUT_PACKET_V2_SIZE;
+    RULE_CHECK(net_packet_read_input(&read, &packet) && read.scroll == 0, "23-byte INPUT reads with scroll 0");
+
+    player_spawn(player);
+    if (g_failures == failures) printf("Test OK\n");
+}
+
 int main(const int argc, char **argv) {
     if (argc > 2) return replay_main(argc, argv);
 
@@ -345,6 +468,9 @@ int main(const int argc, char **argv) {
         run_test(tests[i], player);
         printf("\n");
     }
+
+    run_input_rule_tests(player);
+    printf("\n");
 
     char *kanji_path = concat(get_project_root(), "assets/maps/kanji.json");
     const cJSON *kanji = load_json(kanji_path);

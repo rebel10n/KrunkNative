@@ -1,0 +1,7 @@
+# Everything KrunkNative on this host: `systemctl restart krunknative.target`.
+[Unit]
+Description=KrunkNative services
+Wants=network-online.target
+
+[Install]
+WantedBy=multi-user.target

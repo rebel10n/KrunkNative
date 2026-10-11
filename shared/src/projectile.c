@@ -3,6 +3,7 @@
 // damage with linear falloff, 0.2x self damage). Krunker speeds are units per
 // millisecond; the simulation keeps those units and converts the tick delta.
 #include <shared.h>
+#include <ai.h>
 #include <math.h>
 #include <string.h>
 
@@ -34,14 +35,15 @@ static void projectile_send_end(Game *game, const GameProjectile *projectile, co
     const NetProjectileEndPacket packet = {
         .id = projectile->id,
         .position = {projectile->position.x, projectile->position.y, projectile->position.z},
-        .impact = (uint8_t) (hit_object && !projectile->config.no_impact),
+        // "pre": others only see an impact when the projectile has an owner (AI shots never)
+        .impact = (uint8_t) (hit_object && !projectile->config.no_impact && projectile->owner_uid >= 0),
     };
     game_send(game, NET_TARGET_ALL, NET_PACKET_PROJECTILE_END, &packet, sizeof(packet));
 }
 
 // projectiles.init: the first free slot, Krunker's rounding of the launch values.
-void game_spawn_projectile(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config,
-                           const vec3 origin, const float yaw, const float pitch, const int thrown_melee) {
+static void projectile_spawn(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config,
+                             const vec3 origin, const float yaw, const float pitch, const int thrown_melee, const int ai_kind) {
     if (!game_is_authority(game) || !config) return;
 
     GameProjectile *projectile = NULL;
@@ -62,6 +64,7 @@ void game_spawn_projectile(Game *game, Player *owner, const int weapon_index, co
     projectile->active = 1;
     projectile->skip_move = 1;
     projectile->thrown_melee = (unsigned char) !!thrown_melee;
+    projectile->ai_kind = ai_kind;
     projectile->position = (vec3) {roundf(origin.x * 10.0f) / 10.0f, roundf(origin.y * 10.0f) / 10.0f, roundf(origin.z * 10.0f) / 10.0f};
     projectile->config = *config;
     projectile->speed = config->speed;
@@ -82,8 +85,19 @@ void game_spawn_projectile(Game *game, Player *owner, const int weapon_index, co
         .velocity = {projectile->velocity.x, projectile->velocity.y, projectile->velocity.z},
         .gravity = config->gravity,
         .range = config->range,
+        .ai_kind = (uint8_t) ai_kind,
     };
     game_send(game, NET_TARGET_ALL, NET_PACKET_PROJECTILE, &packet, sizeof(packet));
+}
+
+void game_spawn_projectile(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config,
+                           const vec3 origin, const float yaw, const float pitch, const int thrown_melee) {
+    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0);
+}
+
+// ai.js shots: projectiles.init(x, y, z, yaw, pitch, stored[kind], null, {}, true, "orb_0")
+void game_spawn_ai_projectile(Game *game, const int stored_kind, const vec3 origin, const float yaw, const float pitch) {
+    projectile_spawn(game, NULL, -1, game_ai_projectile_config(stored_kind), origin, yaw, pitch, 0, stored_kind);
 }
 
 // game.explosion(x, y, z, radius, dmg, owner): 1 - distance / radius of the damage,
@@ -111,18 +125,29 @@ void game_explosion(Game *game, const vec3 position, const float radius, const f
             player_kill(player, owner, &info, 0);
         }
     }
+
+    // game.explosion over AI.ais: only with an owner, changeHealth(-dmg * falloff, owner)
+    for (int i = 0; owner && game->ai && i < game->ai->count; i++) {
+        GameAI *ai = &game->ai->ais[i];
+        if (!ai->active) continue;
+        const float dx = ai->position.x - position.x, dy = ai->position.y - position.y, dz = ai->position.z - position.z;
+        const float falloff = 1.0f - sqrtf(dx * dx + dy * dy + dz * dz) / radius;
+        if (falloff > 0.0f) game_ai_damage(game, ai, owner, damage * falloff, 0);
+    }
 }
 
 typedef struct {
     Player *player;
+    GameAI *ai;
     float t;
+    Object *object;     // u[0].obj of a map object hit
 } ProjectileHit;
 
 static int projectile_object_blocks(const Object *object) {
     // Same filter as the hitscan (player.c combat_object_shootable): Krunker noShoot zones/helpers.
     if (!object->active || object->no_shoot || object->collision_type == COLLISION_TYPE_NONE) return 0;
     return !(object->kill || object->score_zone || object->team_zone || object->teleporter || object->checkpoint ||
-             object->pickup || object->flag || object->premium || object->verified || object->trigger ||
+             object->pickup || object->flag || object->premium || object->verified ||
              object->ladder || object->ramp || object->prefab == PREFAB_TEAM_ZONE || object->prefab == PREFAB_SPAWN_POINT ||
              object->prefab == PREFAB_CAMERA_POSITION || object->prefab == PREFAB_SPECTATE_CAM);
 }
@@ -130,7 +155,7 @@ static int projectile_object_blocks(const Object *object) {
 // Nearest hit along this tick's step (lineInRect against step = velocity * dt).
 static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectile, const float dt_ms, int *hit_any) {
     const vec3 step = {projectile->velocity.x * dt_ms, projectile->velocity.y * dt_ms, projectile->velocity.z * dt_ms};
-    ProjectileHit best = {NULL, 2.0f};
+    ProjectileHit best = {NULL, NULL, 2.0f};
     *hit_any = 0;
 
     for (size_t i = 0; i < game->map->object_count; i++) {
@@ -139,7 +164,7 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
 
         const float t = line_in_rect(projectile->position, step, object->position, object->scale);
         if (t > 0.0f && t <= 1.0f && t < best.t) {
-            best = (ProjectileHit) {NULL, t};
+            best = (ProjectileHit) {NULL, NULL, t, (Object *) object};
             *hit_any = 1;
         }
     }
@@ -165,7 +190,18 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         }
 
         if (t > 0.0f && t <= 1.0f && t < best.t) {
-            best = (ProjectileHit) {player, t};
+            best = (ProjectileHit) {player, NULL, t};
+            *hit_any = 1;
+        }
+    }
+
+    // projectile.js: AI boxes only for a player's projectile (m.owner)
+    for (int i = 0; projectile->owner_uid >= 0 && game->ai && i < game->ai->count; i++) {
+        GameAI *ai = &game->ai->ais[i];
+        if (!ai->active || step_length <= 0.0f) continue;
+        const float t = game_ai_line_hit(ai, projectile->position, step);
+        if (t > 0.0f && t <= 1.0f && t < best.t) {
+            best = (ProjectileHit) {NULL, ai, t};
             *hit_any = 1;
         }
     }
@@ -200,7 +236,12 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
 
         if (hit_any) {
             Player *owner = game_find_player(game, projectile->owner_uid);
-            hit_object = !hit.player;
+            hit_object = !hit.player && !hit.ai;
+
+            // u[0].ai: changeHealth(-dmg, owner, thrown knife), killScore, "4"
+            if (hit.ai) game_ai_damage(game, hit.ai, owner, owner && owner->smite ? 10000.0f : projectile->config.damage, projectile->thrown_melee);
+            // u[0].obj: destructible health and onShoot / onDamage / onProjectile / onThrowingMelee triggers
+            if (hit.object) game_object_hit(game, hit.object, owner, owner && owner->smite ? 10000.0f : projectile->config.damage, projectile->thrown_melee, GAME_HIT_PROJECTILE);
 
             if (hit.player && projectile->config.damage > 0.0f && player_change_health(hit.player, owner, projectile->config.damage, 0)) {
                 PlayerKillInfo info = {.weapon_id = projectile->weapon_index, .distance = 0.0f};

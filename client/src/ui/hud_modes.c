@@ -491,7 +491,10 @@ static void hud_modes_end_value(const Player *player, const NetModeEndEntry *ent
     else if (!strcmp(stat, "kills")) snprintf(out, size, "%u", player->kills);
     else if (!strcmp(stat, "deaths")) snprintf(out, size, "%u", player->deaths);
     else if (!strcmp(stat, "assists")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_ASSISTS] : (int) player->assists);
-    else if (!strcmp(stat, "reward")) snprintf(out, size, "NONE");        // endForm.reward: no KR natively
+    else if (!strcmp(stat, "reward")) {                                   // endForm.reward: player.reward (END rewards)
+        if (player->reward) snprintf(out, size, "<span style='color:#F8C55C'>+%d</span> KR", player->reward);
+        else snprintf(out, size, "NONE");
+    }
     else if (!strcmp(stat, "objective")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_OBJECTIVE] : 0);
     else if (!strcmp(stat, "caps")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_CAPS] : 0);
     else if (!strcmp(stat, "confirms")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_CONFIRMS] : 0);
@@ -500,7 +503,11 @@ static void hud_modes_end_value(const Player *player, const NetModeEndEntry *ent
     else if (!strcmp(stat, "melees")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_MELEES] : 0);
     else if (!strcmp(stat, "setbacks")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_SETBACKS] : 0);
     else if (!strcmp(stat, "infected") || !strcmp(stat, "found")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_CONVS] : 0);
-    else if (!strcmp(stat, "time")) snprintf(out, size, "DNF");          // endForm.time: timer || "DNF"
+    else if (!strcmp(stat, "time")) {                                     // endForm.time: timer || "DNF"
+        const int tenths = s ? s[NET_MODE_STAT_TIME] - 1 : -1;            // UTILS.getTime(lastTimer, showMS): Race / Raid
+        if (tenths < 0) snprintf(out, size, "DNF");
+        else snprintf(out, size, "%02d:%02d.%d", tenths / 600 % 60, tenths / 10 % 60, tenths % 10);
+    }
     else snprintf(out, size, "0");
 }
 

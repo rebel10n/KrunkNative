@@ -208,6 +208,8 @@ typedef struct {
     unsigned char no_regen:1; // a role with regen = 0 (Boss, Stalker)
     unsigned char finished:1; // Race: reached the target score
     float race_time;          // Race: game clock when finished (seconds)
+    unsigned char has_timer:1;// Krunker player.timer set (Race finish / Raid boss kill): the "time" end stat
+    float timer;              // player.timer = game.lastTimer: the round clock shown then (seconds)
     float respawn_timer;      // forceSpawn countdown (seconds, 0 none)
 } ModePlayerState;
 

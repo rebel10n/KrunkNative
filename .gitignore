@@ -21,3 +21,8 @@ platform/ios/build/
 
 # Local service credentials (see config/config.example.json)
 /config/config.json
+/config/bans.json
+
+# deploy/ (svc-matchmaker): operator inventory and secrets
+deploy/inventory
+deploy/deploy.env

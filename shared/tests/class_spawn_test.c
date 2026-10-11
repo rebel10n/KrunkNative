@@ -224,7 +224,18 @@ static void check_cosmetics_packets(void) {
         CHECK(read.class_index == 11, "ENT class");
         CHECK(read.secondary_index == (i ? 16 : -1), "ENT secondary for %u bytes", packet.length);
         CHECK(read.cosmetics.hat == (i == 2 ? 1890 : -1) && read.cosmetics.skin_color == (i == 2 ? 0xA77860 : -1), "ENT cosmetics for %u bytes", packet.length);
+        CHECK(read.slid_cont == (i == 2 ? 0 : 1), "ENT slidCont for %u bytes (absent = on)", packet.length); // ent.slid_cont = 0 above
     }
+    // ent[15] slidCont = 1 rides in the last byte; a V3 ENT (cosmetics, no tail) reads as on
+    ent.slid_cont = 1;
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V4_SIZE;
+    NetEntPacket full;
+    CHECK(net_packet_read_ent(&full, &packet) && full.slid_cont == 1 && !full.spectate, "V4 ENT slidCont");
+    packet.length = NET_ENT_PACKET_V3_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.slid_cont == 1, "V3 ENT slidCont default");
+    ent.slid_cont = 0;
+    memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = 6;
     NetEntPacket bad;
     CHECK(!net_packet_read_ent(&bad, &packet), "6-byte ENT accepted");

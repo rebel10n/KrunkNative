@@ -43,7 +43,7 @@ struct Popup {
     int shadow;              // strokeText lineWidth (0 = none)
     int disabled;
     // animateText / animateDiv state
-    char text[64];
+    char text[80];           // a trigger popup ("am" [tct, null]) is up to 70 characters
     char text2[32];
     double font_size, scale, min_scale, scale_speed, life, fade, opacity, delay;
     int display;
@@ -66,7 +66,7 @@ static Popup *const POPUPS[] = {&g_score, &g_check, &g_medal};
 static int g_order_seq;
 static int g_score_total;            // bN: accumulated while the "+N" is up
 static struct {
-    char text[NET_MODE_TEXT_SIZE];
+    char text[TRIGGER_TEXT_MAX + 1]; // medal names, trigger popup texts
     int score;
 } g_medals[MEDAL_QUEUE_MAX];         // gj (as pairs)
 static int g_medal_count;
@@ -295,6 +295,16 @@ void hud_popups_medals(const NetMedalPacket *medals, const int count) {
         g_medals[g_medal_count].score = medals[i].score;
         g_medal_count++;
     }
+    if (was_empty) medal_show(MEDAL_DELAY_MS);
+}
+
+// "am" [text, null] of a Broadcast / Send Popup trigger: one medal without score.
+void hud_popups_medal_text(const char *text) {
+    if (!text || !text[0] || g_medal_count >= MEDAL_QUEUE_MAX) return;
+    const int was_empty = g_medal_count == 0;
+    snprintf(g_medals[g_medal_count].text, sizeof(g_medals[0].text), "%s", text);
+    g_medals[g_medal_count].score = 0;
+    g_medal_count++;
     if (was_empty) medal_show(MEDAL_DELAY_MS);
 }
 

@@ -22,7 +22,10 @@
 //   KRUNKNATIVE_HTML_AUTOHINT=0|1          add FT_LOAD_FORCE_AUTOHINT
 //   KRUNKNATIVE_HTML_FALLBACK_FONT=path[:path...]   fallback faces for glyphs
 //       missing from the requested family (default: DejaVu Sans / Liberation
-//       Sans / Noto Sans, then Noto Sans CJK, whichever exist).
+//       Sans / Noto Sans, then Noto Sans CJK, whichever exist).  Always first:
+//       the bundled ui/css/fonts/kn-symbols.ttf (arrows, shapes, dingbats...),
+//       per-glyph only.  Generic `monospace` uses Noto Sans Mono / DejaVu Sans
+//       Mono / Liberation Mono when present (Chrome's fontconfig monospace).
 //   KRUNKNATIVE_HTML_OBLIQUE_SKEW=0.2      synthetic oblique shear (x += k*y).
 //   KRUNKNATIVE_HTML_FAKE_BOLD_DIVISOR=24  embolden strength = size / divisor
 //       (Skia kOutlineEmboldenDivisor).

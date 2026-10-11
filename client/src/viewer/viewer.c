@@ -19,6 +19,7 @@
 #include "viewer_internal.h"
 #include <app_mode.h>
 #include <html_ui.h>
+#include <ui_logic.h> // ui_text_input_focused
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
@@ -790,6 +791,7 @@ static int viewer_key(Client *client, const int key, const int scancode, const i
     (void) scancode;
     (void) mods;
     if (!g_ui.entered || action == GLFW_RELEASE || dialog_open()) return 0;
+    if (ui_text_input_focused()) return 0; // dat.GUI / OrbitControls skip keys typed into a field
     if (key == GLFW_KEY_H && action == GLFW_PRESS) vg_toggle_hide(); // dat.GUI.toggleHide (keyCode 72)
     if (!g_viewer.cosmetic_set) {
         switch (key) { // OrbitControls keys on window

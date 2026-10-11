@@ -9,7 +9,16 @@
 //
 // Debug environment (native):
 //   KRUNKNATIVE_AUDIO=0                 no audio at all
-//   KRUNKNATIVE_AUDIO_BACKEND=null      miniaudio's null device (no sound card; real-time clock)
+//   KRUNKNATIVE_AUDIO_BACKEND=<list>    miniaudio backends to try, in order, comma separated:
+//                                       pulseaudio (alias pulse, pipewire: PipeWire through its
+//                                       PulseAudio server), alsa, jack, coreaudio, wasapi, dsound,
+//                                       winmm, sndio, audio4, oss, aaudio, opensl, webaudio, null
+//                                       (no sound card; real-time clock). Unset: every backend
+//                                       built for the platform in miniaudio's order (Linux:
+//                                       PulseAudio/PipeWire, ALSA, JACK; BSD: sndio, audio(4),
+//                                       OSS; macOS: Core Audio; Windows: WASAPI, DirectSound,
+//                                       WinMM; Android: AAudio, OpenSL ES; web: Web Audio).
+//                                       Playback and voice capture use the same list.
 //   KRUNKNATIVE_AUDIO_CAPTURE=out.wav   also write the final mix to a 16-bit stereo WAV
 //   KRUNKNATIVE_AUDIO_LOG=1             print every play/stop with its effective volume
 #include <common.h>
@@ -40,6 +49,9 @@ int audio_available(void);
 // The ma_engine (void* keeps miniaudio out of this header) for voice chat playback
 // (client/src/voice.c), NULL without audio.
 void *audio_engine(void);
+// KRUNKNATIVE_AUDIO_BACKEND as ma_backend values (into `out`, at most `max`); 0 = unset or
+// nothing usable: miniaudio's default order.
+int audio_backends(int *out, int max);
 
 // Per frame: listener = camera (Howler.pos/orientation), finished voices are recycled and
 // deferred loads/plays are serviced (decoding never runs inside UI event handlers, which on

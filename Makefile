@@ -87,8 +87,21 @@ configure-release: ## Configure the release build
 all: build release web ## Build everything: debug, release and web
 
 .PHONY: run run-release server server-release
-run: build ## Run the debug client (ARGS="--offline" MAP=<name>)
-	cd $(DEBUG_DIR) && ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
+# make run starts the local backend (accounts, matchmaking) when config/config.json exists and
+# no brain answers on BRAIN_PORT; BACKEND=0 skips it (the client then plays on the default
+# server and shows "Failed to connect" for account actions).
+BACKEND    ?= 1
+BRAIN_PORT ?= 5050
+# the client never reads config/config.json (DB credentials): a non-default brain port reaches
+# it as KRUNKNATIVE_BRAIN_URL (5050 is the client's own probed default); an explicit
+# KRUNKNATIVE_BRAIN_URL in the environment wins
+RUN_BRAIN_ENV = $(if $(KRUNKNATIVE_BRAIN_URL),,$(if $(filter-out 5050,$(BRAIN_PORT)),KRUNKNATIVE_BRAIN_URL=http://127.0.0.1:$(BRAIN_PORT)))
+run: build ## Run the debug client (ARGS="--offline" MAP=<name>; starts the local backend unless BACKEND=0)
+	@if [ "$(BACKEND)" != 0 ] && [ -f config/config.json ] && ! curl -s -m 1 http://127.0.0.1:$(BRAIN_PORT)/mm/status 2>/dev/null | grep -q '"brain"'; then \
+	  echo "[run] no brain on 127.0.0.1:$(BRAIN_PORT): starting the local backend (make backend-up; BACKEND=0 skips)"; \
+	  $(MAKE) --no-print-directory backend-up BRAIN_PORT=$(BRAIN_PORT) || echo "[run] backend-up failed: accounts are unavailable (see make backend-status)"; \
+	fi
+	cd $(DEBUG_DIR) && $(RUN_BRAIN_ENV) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
 
 run-release: release ## Run the release client
 	cd $(RELEASE_DIR) && ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
@@ -198,6 +211,42 @@ bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck net-bridge
 $(BRIDGE_DIR)/node_modules: $(BRIDGE_DIR)/package.json $(BRIDGE_DIR)/package-lock.json
 	cd $(BRIDGE_DIR) && npm ci
 	@touch $@
+
+# --------------------------------------------------------------------------- backend
+# Backend services (services/, doc/backend.md): knsvc libraries, kn_migrate, kn_brain.
+# They are part of the normal debug build when OpenSSL (+ libpq for the DB parts) is
+# installed; config/config.json (copy config/config.example.json) holds the credentials.
+# GAMESERVERS=<n> game servers for backend-up; BACKEND_ARGS go to every service.
+
+GAMESERVERS  ?= 2
+BACKEND_ARGS ?=
+
+.PHONY: services brain db-migrate db-status services-test backend-up backend-down backend-status backend-run
+services: configure ## Build the backend libraries, tools and brain (services/)
+	$(call BUILD,$(DEBUG_DIR)) --target services_all
+
+brain: services ## Build kn_brain (the matchmaker)
+
+db-migrate: services ## Apply services/db/migrations to the configured database (config/config.json)
+	./$(DEBUG_DIR)/services/common/kn_migrate $(BACKEND_ARGS)
+
+db-status: services ## List applied/pending database migrations
+	./$(DEBUG_DIR)/services/common/kn_migrate --status $(BACKEND_ARGS)
+
+services-test: services ## Run the backend unit tests (ctest -L knsvc; DB tests use their own database)
+	cd $(DEBUG_DIR) && ctest -L knsvc --output-on-failure
+
+backend-up: build services ## Start the local backend in the background: migrate, brain, GAMESERVERS game servers, net-bridge
+	BUILD_DIR=$(DEBUG_DIR) GAMESERVERS=$(GAMESERVERS) BACKEND_ARGS="$(BACKEND_ARGS)" deploy/local/backend.sh up
+
+backend-down: ## Stop what backend-up started
+	deploy/local/backend.sh down
+
+backend-status: ## Show the local backend processes, brain status and game list
+	deploy/local/backend.sh status
+
+backend-run: build services ## Foreground variant of backend-up (ctrl-c stops all)
+	BUILD_DIR=$(DEBUG_DIR) GAMESERVERS=$(GAMESERVERS) services/scripts/backend-up.sh $(BACKEND_ARGS)
 
 # --------------------------------------------------------------------------- checks
 

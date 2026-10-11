@@ -13,6 +13,7 @@ const NATIVE_PORT =
   Number.parseInt(process.env.KRUNK_NATIVE_PORT || "21015", 10) || 21015;
 const LOBBY_ID = process.env.KRUNK_NATIVE_LOBBY_ID || "KN:local";
 const DEFAULT_TICK_RATE = 30;
+const STATE_SEND_HZ = 10; // NET_STATE_SEND_HZ: the "k" sendRate the client interpolates with
 const NET_MAX_PAYLOAD = 512;
 const NET_HEADER_SIZE = 3;
 const ANTIHACK_KEY = Number(antihackKey) || 0;
@@ -25,6 +26,7 @@ export const NET_PACKET = Object.freeze({
   INPUT: 5,
   STATE: 6,
   CYCLE: 7,
+  RECON: 110, // NetReconPacket: Krunker "l" (shared/include/shared.h)
   CHAT_SEND: EV.NET_EVENT.CHAT_SEND,
   PONG: EV.NET_EVENT.PONG,
 } as const);
@@ -182,7 +184,7 @@ function writeNativeHello(session: BridgeSession): void {
 function writeNativeEnt(session: BridgeSession, entData: unknown): void {
   const ent = Array.isArray(entData) ? entData : [];
   const spectate = ent[6] === 1 || ent[6] === true;
-  const payload = Buffer.alloc(EV.ENT_COSMETICS_SIZE + (spectate ? 1 : 0));
+  const payload = Buffer.alloc(EV.ENT_SIZE);
   const classIndex = Array.isArray(entData) ? Number(entData[0]) || 0 : 0;
   // ent[5] = selectedSecondaryIndex (null/undefined = class default)
   const secondary = Array.isArray(entData) && entData[5] != null && Number.isFinite(Number(entData[5])) ? Number(entData[5]) | 0 : -1;
@@ -190,6 +192,7 @@ function writeNativeEnt(session: BridgeSession, entData: unknown): void {
   payload.writeInt32LE(secondary, 4);
   EV.writeCosmetics(payload, 8, EV.cosmeticsFromEnt(ent));
   if (spectate) payload[EV.ENT_COSMETICS_SIZE] = 1; // ent[6] toggleSpect
+  payload[EV.ENT_COSMETICS_SIZE + 1] = ent[15] === undefined || ent[15] === null || ent[15] ? 1 : 0; // ent[15] slidCont
   writeNativePacket(session, NET_PACKET.ENT, payload);
 }
 
@@ -224,7 +227,7 @@ function krunkerMoveDirToNative(moveDir: number): number {
 function writeNativeInput(session: BridgeSession, frame: unknown[]): void {
   if (!Array.isArray(frame)) return;
 
-  const payload = Buffer.alloc(23); // NetInputPacket: 22-byte v1 + slowdown (input[12] in tenths)
+  const payload = Buffer.alloc(24); // NetInputPacket: 22-byte v1 + slowdown (input[12] in tenths) + scroll (input[10])
   const seq = Number(frame[0]) || 0;
   const deltaMs = Number(frame[1]) || 0;
   const yaw = (Number(frame[2]) || 0) / 1000.0;
@@ -238,10 +241,9 @@ function writeNativeInput(session: BridgeSession, frame: unknown[]): void {
   if (frame[8]) flags |= NET_INPUT.CROUCH;
   if (frame[9]) flags |= NET_INPUT.RELOAD;
 
-  const switchAction = Number(frame[11]) || 0;
+  // input[11] / input[10] as is: Input.swap uses Krunker's 1..4 codes, the wheel is its own field.
+  const swap = Number(frame[11]) || 0;
   const scroll = Number(frame[10]) || 0;
-  let swap = switchAction;
-  if (!swap && scroll) swap = scroll > 0 ? 1 : 2;
 
   payload.writeInt32LE(seq, 0);
   payload.writeInt32LE(moveDir, 4);
@@ -251,6 +253,7 @@ function writeNativeInput(session: BridgeSession, frame: unknown[]): void {
   payload[20] = flags;
   payload[21] = clampByte(swap);
   payload[22] = Math.max(0, Math.min(10, Math.round((Number(frame[12]) || 0) * 10))); // 1 - speedLmt.round(1)
+  payload.writeInt8(scroll > 0 ? 1 : scroll < 0 ? -1 : 0, 23);
 
   writeNativePacket(session, NET_PACKET.INPUT, payload);
 }
@@ -496,6 +499,38 @@ function buildLPacket(session: BridgeSession, state: NativeStatePacket): unknown
   ];
 }
 
+// NetReconPacket (58 bytes) -> buildLPacket's 23-slot array (packetHandlers.ts).
+function parseReconPacket(session: BridgeSession, payload: Buffer): unknown[] | null {
+  if (payload.length < 58) return null;
+  const f = payload[57];
+  return [
+    payload.readInt32LE(0),
+    session.pingMs || 25,
+    payload.readFloatLE(4),
+    payload.readFloatLE(8),
+    payload.readFloatLE(12),
+    payload.readFloatLE(20), // velY
+    payload.readFloatLE(16), // velX
+    payload.readFloatLE(24), // velZ
+    payload.readFloatLE(28), // yaw
+    !!(f & 0x01), // onGround
+    !!(f & 0x02), // didJump
+    !!(f & 0x04), // didJumpW
+    payload[56], // onWall
+    !!(f & 0x08), // onLadder
+    // KrunkNative aim_val 1 = aimed, Krunker aimVal 0 = aimed
+    1 - payload.readFloatLE(32),
+    payload.readFloatLE(36),
+    payload.readInt32LE(40),
+    payload.readFloatLE(44) * 1000, // slideTimer ms
+    !!(f & 0x10), // canSlide
+    !!(f & 0x20), // onTerrain
+    0,
+    payload.readFloatLE(48),
+    payload.readFloatLE(52),
+  ];
+}
+
 function buildKPayload(state: NativeStatePacket): unknown[] {
   return [
     state.uid,
@@ -583,11 +618,15 @@ function handleNativePacket(session: BridgeSession, type: number, payload: Buffe
       session.stateByUid.set(state.uid, state);
       sendHealthIfChanged(session, state.uid, state.health);
 
-      if (state.uid === session.nativeClientId) {
-        sendWs(session, "l", buildLPacket(session, state), true);
-      } else {
-        sendWs(session, "k", buildKPayload(state), session.tickRate || DEFAULT_TICK_RATE);
+      // Our own player is reconciled by RECON ("l") only; STATE is the 10 Hz "k" of the others.
+      if (state.uid !== session.nativeClientId) {
+        sendWs(session, "k", buildKPayload(state), STATE_SEND_HZ);
       }
+      break;
+    }
+    case NET_PACKET.RECON: {
+      const l = parseReconPacket(session, payload);
+      if (l) sendWs(session, "l", l, true);
       break;
     }
     default:
@@ -870,6 +909,7 @@ function connectNative(session: BridgeSession): void {
       sendWs(session, "load", 20000, session.id);
       sendWs(session, "io-init", session.id);
       sendWs(session, "inst-id", LOBBY_ID);
+      tcp.write(UTILS.forwardedFrame(UTILS.peerAddress(session.request))); // first frame: the browser's address
       writeNativeHello(session);
       flushPendingNativeFrames(session);
     },

@@ -88,6 +88,8 @@ void ed_map_clear(void) {
     g_ed.yaw = g_ed.pitch = 0;
     ed_map_defaults();
     editor_apply_lighting();
+    ed_terrain_regen(); // regenAll: regenTerrain / regenZone
+    ed_zone_regen();
     ed_panel_refresh_all();
     g_ed.dirty_counts = 1;
     g_ed.dirty_storage = 1;
@@ -501,6 +503,8 @@ static int import_doc(cJSON *e) {
         g->rot_y = ed_obj_vec(owner, "r", (vec3) {0}).y;
     }
     editor_apply_lighting();
+    ed_terrain_regen(); // regenAll: regenTerrain / regenZone
+    ed_zone_regen();
     ed_panel_refresh_all();
     g_ed.dirty_counts = 1;
     g_ed.dirty_panel = 1;
@@ -756,6 +760,33 @@ void ed_file_export(void) {
     editor_message(msg);
 #endif
     free(text);
+}
+
+// download(text, name, "text/plain"): the web build downloads the file; natively it is
+// written to the user maps directory under that name and copied to the clipboard
+void ed_download(const char *text, const char *name) {
+    if (!text) return;
+#ifdef __EMSCRIPTEN__
+    kn_editor_download(name, text);
+#else
+    char dir[600], safe[128], path[800], msg[900];
+    user_maps_dir(dir, sizeof(dir));
+    size_t j = 0;
+    for (size_t i = 0; name[i] && j + 1 < sizeof(safe); i++) {
+        const char c = name[i];
+        safe[j++] = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ? c : '_';
+    }
+    safe[j] = 0;
+    snprintf(path, sizeof(path), "%s/%s", dir, safe);
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        fwrite(text, 1, strlen(text), f);
+        fclose(f);
+    }
+    ed_clipboard_copy(text);
+    snprintf(msg, sizeof(msg), f ? "Saved %s (also copied to the clipboard)." : "Could not write %s (copied to the clipboard).", path);
+    editor_message(msg);
+#endif
 }
 
 void ed_file_save_as(void) {

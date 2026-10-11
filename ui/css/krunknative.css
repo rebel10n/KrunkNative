@@ -82,3 +82,32 @@ html:not(.kn-menu-open) #uiBase * {
 html.kn-preview-bg #canvas {
   background: radial-gradient(ellipse at 50% 40%, #6f8aa6 0%, #3c4a5c 55%, #1a2029 100%);
 }
+
+/* Desktop client chrome (client/src/ui/ui_client_settings.c).
+ *
+ * The Exit menu item: Krunker v7.1.4's #clientExit (public/index.html, hidden by
+ * its main.css until a desktop client shows it with display:flex), drawn with
+ * v3.1.1's own menu icon set: img/menu-icons/exit.png ships in the v3.1.1 site
+ * next to the other menu icons (no -white variant, so it stays red on hover).
+ * The native client shows it ("Exit Button" in the Client tab); the web build
+ * keeps it hidden, as krunker.io does in a browser. */
+#clientExit {
+  display: none;
+}
+.iconExit {
+  background-image: url(../img/menu-icons/exit.png);
+}
+
+/* The Settings window with the Client tab: seven tabs in one row, the
+ * override the v3.1.1 desktop client injects (main/preload.js) when it pushes
+ * its "Client" tab onto windows[0].tabs. Scoped to the client-tab layout so a
+ * six-tab window keeps main.css's grid. */
+#settingsTabLayout.knClientTabs {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  justify-content: space-around;
+}
+#settingsTabLayout.knClientTabs .settingTab {
+  width: 100%;
+}

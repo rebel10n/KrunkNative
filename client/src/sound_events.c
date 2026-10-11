@@ -12,6 +12,7 @@
 // other players get positional footsteps (Krunker computes those client-side as well).
 #include <sound_events.h>
 #include <audio.h>
+#include <client_settings.h> // Settings > Client "Always Play HS Sound on Kill"
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdint.h>
@@ -463,7 +464,8 @@ void sound_events_hitmarker(void) {
 
 void sound_events_kill(const int headshot) {
     // getKillSnd: headshot_0, else the weapon skin's sound (none for default skins).
-    if (headshot) audio_play("headshot_0", 1.0f, 0, 1.0f);
+    // glorp hsSound: every own kill plays headshot_0 when the Client tab asks for it
+    if (headshot || client_settings_hs_sound_always()) audio_play("headshot_0", 1.0f, 0, 1.0f);
 }
 
 void sound_events_remote_shot(Client *client, const Player *shooter) {

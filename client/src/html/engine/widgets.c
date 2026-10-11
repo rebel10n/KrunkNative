@@ -150,9 +150,9 @@ static const WidgetsTheme k_default_theme = {
     .menulist_pad_end = 1.0f,
     .menulist_pad_top = 1.0f,
     .menulist_pad_bottom = 1.0f,
-    .menulist_arrow_w = 7.0f,
-    .menulist_arrow_h = 3.5f,
-    .menulist_arrow_stroke = 2.0f,
+    .menulist_arrow_w = 7.75f,
+    .menulist_arrow_h = 4.25f,
+    .menulist_arrow_stroke = 1.6f,
     .popup_bg = {0xff, 0xff, 0xff, 0xff, CSS_COLOR_RGBA},
     .popup_border = {0x76, 0x76, 0x76, 0xff, CSS_COLOR_RGBA},
     .popup_hover_bg = {0x1e, 0x90, 0xff, 0xff, CSS_COLOR_RGBA},
@@ -2006,9 +2006,9 @@ static void paint_select(Widgets *w, WidgetState *s, const CssComputed *st, cons
         float acx = right - w->theme.menulist_arrow_box * z / 2;
         float acy = g->y + g->h / 2;
         float hw = w->theme.menulist_arrow_w * z / 2, hh = w->theme.menulist_arrow_h * z / 2;
-        float t = w->theme.menulist_arrow_stroke * z;
+        /* Chrome 152 strokes the chevron in device px: ~1.6 at zoom 1, ~2.1 at zoom 4 */
+        float t = w->theme.menulist_arrow_stroke + 0.15f * (z - 1.0f);
         CssColor ac = color;
-        if (dom_has_attr(w->dom, s->elem, "disabled")) ac = rgba(0x6d, 0x6d, 0x6d, 255);
         emit_segment(a, acx - hw, acy - hh, acx, acy + hh, t, ac);
         emit_segment(a, acx, acy + hh, acx + hw, acy - hh, t, ac);
     }

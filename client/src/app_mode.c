@@ -3,14 +3,23 @@
 // GLFW callbacks while a page is shown. doc/html-ui-engine.md "Pages".
 #include <gl.h> // glad natively, GLES3 on the web (before GLFW)
 #include <app_mode.h>
+#include <backend_ui.h>
 #include <debug_capture.h>
 #include <html_ui.h>
-#include <html_dom.h> // html_storage_get/set (knTestMap)
+#include <html_dom.h>
+#include <ui_logic.h> // menu_close_window (Test Map) // html_storage_get/set (knTestMap)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#elif defined(_WIN32)
+#include <process.h> // _execv
+#include <windows.h> // GetModuleFileNameA
+#else
+#include <fcntl.h>
+#include <limits.h>
+#include <unistd.h>
 #endif
 
 #define APP_QUERY_MAX 1024
@@ -62,6 +71,9 @@ static void web_navigate(AppMode mode, const char *query, int new_tab);
 
 // Startup page from the command line / URL (app_mode_parse_args).
 static AppMode g_start_mode = APP_MODE_GAME;
+#ifndef __EMSCRIPTEN__
+static char **g_exec_argv; // app_reload: argv after app_mode_parse_args, NULL-terminated
+#endif
 static char g_start_query[APP_QUERY_MAX];
 
 static const AppPage *page_for(const AppMode mode) {
@@ -144,13 +156,38 @@ int app_route_url_target(const char *url, const int new_tab) {
 #ifdef __EMSCRIPTEN__
     web_navigate(mode, query, new_tab);
 #else
-    (void) new_tab; // natively there is one window: the page replaces the current one
-    if (mode == APP_MODE_GAME && g_app.mode == APP_MODE_GAME && !g_app.pending) return 1; // already there
-    fprintf(stderr, "[app] %s -> %s page\n", url, app_mode_name(mode));
-    app_set_mode(g_app.client, mode, query);
+    (void) new_tab; // natively a page always opens in its own window (app_window.c)
+    fprintf(stderr, "[app] %s -> %s window\n", url, app_mode_name(mode));
+    app_mode_open_window(g_app.client, mode, query);
 #endif
     return 1;
 }
+
+#ifndef __EMSCRIPTEN__
+static void raise_window(Client *client) {
+    if (client && client->window) glfwFocusWindow(client->window);
+}
+
+static AppMode g_start_mode_fwd(void);
+
+void app_mode_open_window(Client *client, const AppMode mode, const char *query) {
+    if (mode == g_start_mode_fwd()) app_mode_navigate_self(client, query); // this window's own page
+    else app_window_open(client, mode, query);
+}
+
+// "loadURL" of this window: a page reloads with the new query, the game window takes
+// its query (testMap=1: the editor's Test Map) and comes to the front.
+void app_mode_navigate_self(Client *client, const char *query) {
+    const AppMode self = g_start_mode_fwd();
+    if (self == APP_MODE_GAME) {
+        if (query && strstr(query, "testMap=1")) g_app.test_pending = 1;
+        servers_ui_query(query); // ?play=<map> / ?game=<id> (hub Play / Join links; brain, backend_ui.h)
+    } else {
+        app_set_mode(client, self, query);
+    }
+    raise_window(client);
+}
+#endif
 
 int app_route_url(const char *url) {
     return app_route_url_target(url, 1);
@@ -175,8 +212,11 @@ static void test_map_host(Client *client) {
         fprintf(stderr, "[app] test map: stored map is not a JSON object\n");
         return;
     }
+    // Krunker reloads the game tab on the map (a fresh menu): no menu window stays open
+    if (menu_window_is_open()) menu_close_window();
 #ifdef LOCAL_GAME_HAVE_HOST_CUSTOM
     if (!local_game_host_custom(client, map)) fprintf(stderr, "[app] test map: hosting failed\n");
+    else fprintf(stderr, "[app] test map hosted in this window\n");
 #else
     (void) client;
     fprintf(stderr, "[app] test map: this build cannot host custom maps offline yet (LOCAL_GAME_HAVE_HOST_CUSTOM)\n");
@@ -195,8 +235,7 @@ void app_test_map(Client *client, cJSON *map, const AppMode return_to) {
     (void) client;
     web_navigate(APP_MODE_GAME, "offline=1&testMap=1", 0);
 #else
-    g_app.test_pending = 1;
-    app_set_mode(client, APP_MODE_GAME, NULL);
+    app_mode_open_window(client, APP_MODE_GAME, "testMap=1"); // the game window, like Krunker's
 #endif
 }
 
@@ -212,10 +251,13 @@ static AppMode mode_from_name(const char *name) {
 
 void app_mode_parse_args(int *argc, char **argv) {
     if (!argc || !argv) return;
+#ifndef __EMSCRIPTEN__
+    app_window_init(argv[0]); // the executable the page windows run
+#endif
     int out = 1;
     for (int i = 1; i < *argc; i++) {
         const char *arg = argv[i];
-        if (!strcmp(arg, "--hub") || !strcmp(arg, "--social") || !strcmp(arg, "--editor") || !strcmp(arg, "--viewer")) {
+        if (!strcmp(arg, "--game") || !strcmp(arg, "--hub") || !strcmp(arg, "--social") || !strcmp(arg, "--editor") || !strcmp(arg, "--viewer")) {
             g_start_mode = mode_from_name(arg + 2);
             g_start_query[0] = 0;
             // Optional query: the next argument unless it is a flag or a map file.
@@ -233,6 +275,44 @@ void app_mode_parse_args(int *argc, char **argv) {
     }
     argv[out] = NULL;
     *argc = out;
+#ifndef __EMSCRIPTEN__
+    // app_reload: the same command line minus the page switches (strings outlive main's argv use)
+    g_exec_argv = calloc((size_t) out + 1, sizeof(char *));
+    for (int i = 0; g_exec_argv && i < out; i++) g_exec_argv[i] = argv[i];
+#endif
+}
+
+void app_reload(const char *url) {
+#ifdef __EMSCRIPTEN__
+    if (url) EM_ASM({ location.href = UTF8ToString($0); }, url); // F4: location.href = "/"
+    else EM_ASM({ location.reload(); });                          // F5: location.reload()
+#else
+    (void) url;
+    if (!g_exec_argv || !g_exec_argv[0]) return;
+    char path[4096] = "";
+#ifdef _WIN32
+    if (!GetModuleFileNameA(NULL, path, sizeof(path))) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
+#else
+    const ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (n > 0) path[n] = 0;
+    else if (!realpath(g_exec_argv[0], path)) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
+#endif
+    fprintf(stderr, "[app] reload: restarting %s\n", path);
+    fflush(NULL);
+#ifdef _WIN32
+    _execv(path, (const char *const *) g_exec_argv);
+#else
+    // Sockets, files and the GL/X connection must not leak into the new image (a kept
+    // listening socket would block the offline server's port): close them on exec only,
+    // so a failed exec leaves this process intact.
+    for (int fd = 3; fd < 1024; fd++) {
+        const int flags = fcntl(fd, F_GETFD);
+        if (flags >= 0) fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+    }
+    execv(path, g_exec_argv);
+#endif
+    perror("[app] reload: exec");
+#endif
 }
 
 #ifdef __EMSCRIPTEN__
@@ -293,24 +373,29 @@ static void web_navigate(const AppMode mode, const char *query, const int new_ta
 
 void app_mode_start(Client *client) {
     g_app.client = client;
+#ifndef __EMSCRIPTEN__
+    app_window_place(client);
+#endif
 #ifdef __EMSCRIPTEN__
     web_start_page();
 #endif
     if (g_start_mode != APP_MODE_GAME) app_set_mode(client, g_start_mode, g_start_query);
-#ifdef __EMSCRIPTEN__
-    // index.html?offline=1&testMap=1: the editor's Test Map in a fresh game document
+    // index.html?offline=1&testMap=1 / --game "testMap=1": the editor's Test Map in a new game window
     if (g_start_mode == APP_MODE_GAME && strstr(g_start_query, "testMap=1")) g_app.test_pending = 1;
-#endif
+    if (g_start_mode == APP_MODE_GAME) servers_ui_query(g_start_query); // ?play= / ?game= (backend_ui.h)
     g_app.started = 1;
 }
 
 int app_mode_needs_server(void) {
-#ifdef __EMSCRIPTEN__
+    // the editor/viewer windows (web: pages) never show the game
     return g_start_mode != APP_MODE_EDITOR && g_start_mode != APP_MODE_VIEWER;
-#else
-    return 1;
-#endif
 }
+
+#ifndef __EMSCRIPTEN__
+static AppMode g_start_mode_fwd(void) {
+    return g_start_mode;
+}
+#endif
 
 // ------------------------------------------------------------------ input while a page is shown
 
@@ -429,6 +514,9 @@ static void apply_pending(Client *client) {
 
 int app_mode_frame(Client *client, const float now, const float delta) {
     g_app.client = client;
+#ifndef __EMSCRIPTEN__
+    app_window_poll(client);
+#endif
     if (g_app.pending) apply_pending(client);
 
     if (g_app.mode == APP_MODE_GAME) {
@@ -451,6 +539,12 @@ int app_mode_frame(Client *client, const float now, const float delta) {
         g_app.entered = 1;
         g_app.serial = html_ui_page_serial();
         g_app.page->enter(client, g_app.query);
+#ifndef __EMSCRIPTEN__
+        // the window takes the page's <title> ("Krunker Hub", ...), as Electron's windows do
+        const HtmlElem title = html_dom_query(0, "title");
+        char text[128] = "";
+        if (title && html_dom_get_text(title, text, sizeof(text)) > 0 && client->window) glfwSetWindowTitle(client->window, text);
+#endif
     }
 
     int fb_w, fb_h;

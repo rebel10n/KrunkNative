@@ -78,6 +78,7 @@
 typedef struct SavedScroll {
     HtmlElem elem;
     float x, y;
+    const void *box;   /* the box saved from: restore only when the element's box was rebuilt */
 } SavedScroll;
 
 typedef struct ProfStat {
@@ -131,6 +132,7 @@ struct Engine {
     uint32_t shadow_cap;
     int structure_dirty;                     /* DOM child lists changed: run post_restyle */
     int restore_scroll_pending;
+    int anim_scroll_saved;                   /* this anim tick already saved the scroll offsets */
 
     /* scroll offsets carried across box-tree rebuilds */
     SavedScroll *saved_scroll;
@@ -145,7 +147,7 @@ struct Engine {
     float mouse_x, mouse_y;
     int key_consumed;
     int cursor_shape;                        /* GLFW standard cursor id, 0 = default */
-    GLFWcursor *cursors[4];
+    GLFWcursor *cursors[9];
 
     /* pseudo-element computed styles handed to widgets (short-lived) */
     CssComputed pseudo_ring[HTML_ENGINE_PSEUDO_RING];
@@ -388,10 +390,11 @@ static void load_author_sheets(Engine *g)
 /* ------------------------------------------------------------------------- */
 
 /* gl_backend: SVG images (DL_IMAGE.vector = their ImageEntry) at device size. */
-static unsigned glb_image_resolver(void *user, const void *vector, int nearest, int dev_w, int dev_h)
+static unsigned glb_image_resolver(void *user, const void *vector, int nearest, float dev_w, float dev_h, float frac_x,
+                                   float frac_y, int *tex_w, int *tex_h)
 {
     (void)user;
-    return image_texture_sized((const ImageEntry *)vector, nearest, dev_w, dev_h);
+    return image_texture_sized((const ImageEntry *)vector, nearest, dev_w, dev_h, frac_x, frac_y, tex_w, tex_h);
 }
 
 static int lh_image_size(void *user, const char *url, const char *base, float *w, float *h)
@@ -630,6 +633,8 @@ static void account_layout_change(Engine *g, int r)
     }
 }
 
+static void save_scroll_offsets(Engine *g);
+
 /* Hands the element's current computed record to layout (old = shadow). */
 static void restyle_to_layout(Engine *g, HtmlElem e, ElemData *d)
 {
@@ -639,6 +644,13 @@ static void restyle_to_layout(Engine *g, HtmlElem e, ElemData *d)
     }
     CssComputed **slot = shadow_slot(g, e, 0);
     const CssComputed *old = slot ? *slot : NULL;
+    /* an animated property can rebuild a subtree (layout_restyled): keep the scroll
+     * offsets of the scrollers inside it, like post_restyle does (once per anim tick) */
+    if (!g->anim_scroll_saved) {
+        save_scroll_offsets(g);
+        g->anim_scroll_saved = 1;
+        if (g->saved_scroll_len) g->restore_scroll_pending = 1;
+    }
     account_layout_change(g, layout_restyled(g->tree, d->node, old));
     shadow_set(g, e, d->computed);
 }
@@ -658,15 +670,28 @@ static void anim_dirty_cb(void *user, HtmlElem e, unsigned flags)
 /* Restyle / layout                                                           */
 /* ------------------------------------------------------------------------- */
 
+static int scroll_saved(const Engine *g, const HtmlElem e)
+{
+    for (size_t i = 0; i < g->saved_scroll_len; i++) {
+        if (g->saved_scroll[i].elem == e) return 1;
+    }
+    return 0;
+}
+
+/* While a restore is pending (an earlier save in this frame, boxes possibly rebuilt
+ * since), a new save keeps those entries and only adds scrollers not saved yet: the
+ * earlier values are the ones from before the rebuild. */
 static void save_scroll_offsets(Engine *g)
 {
-    g->saved_scroll_len = 0;
+    const int merge = g->restore_scroll_pending && g->saved_scroll_len > 0;
+    if (!merge) g->saved_scroll_len = 0;
     if (!g->tree) return;
     for (HtmlElem e = dom_root(g->dom); e; e = dom_next_in_tree(g->dom, e, 0)) {
         ElemData *d = dom_elem_data(g->dom, e);
         Box *b = d ? d->box : NULL;
         if (!b || !(b->flags & BOXF_SCROLL_CONTAINER)) continue;
         if (b->scroll_x == 0.0f && b->scroll_y == 0.0f) continue;
+        if (merge && scroll_saved(g, e)) continue;
         if (g->saved_scroll_len == g->saved_scroll_cap) {
             const size_t cap = g->saved_scroll_cap ? g->saved_scroll_cap * 2 : 16;
             SavedScroll *grown = realloc(g->saved_scroll, cap * sizeof(*grown));
@@ -674,7 +699,7 @@ static void save_scroll_offsets(Engine *g)
             g->saved_scroll = grown;
             g->saved_scroll_cap = cap;
         }
-        g->saved_scroll[g->saved_scroll_len++] = (SavedScroll){e, b->scroll_x, b->scroll_y};
+        g->saved_scroll[g->saved_scroll_len++] = (SavedScroll){e, b->scroll_x, b->scroll_y, b};
     }
 }
 
@@ -686,6 +711,9 @@ static void restore_scroll_offsets(Engine *g)
         Box *b = engine_elem_box(g, g->saved_scroll[i].elem);
         if (!b || !(b->flags & BOXF_SCROLL_CONTAINER)) continue;
         if (b->scroll_x == g->saved_scroll[i].x && b->scroll_y == g->saved_scroll[i].y) continue;
+        /* the same box kept its own offset (scrolled since the save: wheel, scroll_to_bottom);
+         * a box reallocated at the same address starts unscrolled */
+        if ((const void *) b == g->saved_scroll[i].box && (b->scroll_x != 0.0f || b->scroll_y != 0.0f)) continue;
         layout_set_scroll(g->tree, b, g->saved_scroll[i].x, g->saved_scroll[i].y);
     }
     g->saved_scroll_len = 0;
@@ -792,7 +820,7 @@ static void post_restyle(Engine *g)
         }
     }
     if (saved && g->saved_scroll_len) g->restore_scroll_pending = 1;
-    else g->saved_scroll_len = 0;
+    else if (!g->restore_scroll_pending) g->saved_scroll_len = 0;
 }
 
 void engine_flush_style(Engine *g)
@@ -1221,6 +1249,9 @@ static void dump_display_list(const DisplayList *dl)
         const DlItem *it = &dl->items[i];
         fprintf(stderr, "  %4d %-16s", i, it->op < DL_OP_COUNT ? ops[it->op] : "?");
         switch (it->op) {
+            case DL_SCROLL_OFFSET:
+                fprintf(stderr, " %.1f,%.1f", it->u.scroll.dx, it->u.scroll.dy);
+                break;
             case DL_RECT: {
                 const DlRect r = it->u.rect.rect;
                 const CssColor c = it->u.rect.color;
@@ -1277,11 +1308,18 @@ static void update_cursor(Engine *g)
         case CSS_CURSOR_POINTER: shape = 1; break;
         case CSS_CURSOR_TEXT: shape = 2; break;
         case CSS_CURSOR_CROSSHAIR: shape = 3; break;
+        case CSS_CURSOR_EW_RESIZE: shape = 4; break;
+        case CSS_CURSOR_NS_RESIZE: shape = 5; break;
+        case CSS_CURSOR_NWSE_RESIZE: shape = 6; break;
+        case CSS_CURSOR_NESW_RESIZE: shape = 7; break;
+        case CSS_CURSOR_MOVE: shape = 8; break;
         default: shape = 0; break; /* auto, default, none (not hidden while the menu is open), ... */
     }
     if (shape == g->cursor_shape) return;
     g->cursor_shape = shape;
-    static const int ids[4] = {GLFW_ARROW_CURSOR, GLFW_HAND_CURSOR, GLFW_IBEAM_CURSOR, GLFW_CROSSHAIR_CURSOR};
+    static const int ids[9] = {GLFW_ARROW_CURSOR, GLFW_HAND_CURSOR, GLFW_IBEAM_CURSOR, GLFW_CROSSHAIR_CURSOR,
+                               GLFW_RESIZE_EW_CURSOR, GLFW_RESIZE_NS_CURSOR, GLFW_RESIZE_NWSE_CURSOR,
+                               GLFW_RESIZE_NESW_CURSOR, GLFW_RESIZE_ALL_CURSOR};
     if (!g->cursors[shape]) g->cursors[shape] = glfwCreateStandardCursor(ids[shape]);
     glfwSetCursor(window, shape ? g->cursors[shape] : NULL);
 }
@@ -1326,7 +1364,7 @@ static void engine_destroy(Engine *g)
     for (int i = 0; i < g->n_sheets; i++) css_sheet_destroy(g->sheets[i]);
     if (g->ua) css_sheet_destroy(g->ua);
     if (g->dom) dom_destroy(g->dom);
-    for (int i = 0; i < 4; i++) {
+    for (size_t i = 0; i < sizeof g->cursors / sizeof g->cursors[0]; i++) {
         if (g->cursors[i]) glfwDestroyCursor(g->cursors[i]);
     }
     free(g);
@@ -1347,6 +1385,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->fb_h = height > 0 ? height : 1;
     g->vw = (float) g->fb_w;
     g->vh = (float) g->fb_h;
+    css_values_set_viewport(g->vw, g->vh);
     g->display_hz = detect_display_hz();
 
     make_ui_dir(ui_dir, g->ui_dir, sizeof(g->ui_dir));
@@ -1532,6 +1571,36 @@ int html_ui_backend_add_stylesheet(const char *href)
     return 1;
 }
 
+/* The Client tab's custom CSS (html_ui_set_custom_css): one sheet named
+ * KN_CUSTOM_SHEET on the game page, kept last among its author sheets; replaced in
+ * place, removed for NULL/"". Named under css/ so its url()s resolve like main.css's. */
+#define KN_CUSTOM_SHEET "css/kn-custom.css"
+int html_ui_backend_set_custom_css(const char *css)
+{
+    Engine *g = g_base ? g_base : g_engine;
+    if (!g || !g->dom) return 0;
+    for (int i = 0; i < g->n_sheets; i++) {
+        const char *name = css_sheet_name(g->sheets[i]);
+        if (!name || strcmp(name, KN_CUSTOM_SHEET)) continue;
+        css_sheet_destroy(g->sheets[i]);
+        memmove(&g->sheets[i], &g->sheets[i + 1], (size_t) (g->n_sheets - i - 1) * sizeof(g->sheets[0]));
+        g->n_sheets--;
+        break;
+    }
+    if (css && *css) {
+        if (g->n_sheets >= HTML_ENGINE_MAX_SHEETS) return 0;
+        CssSheet *sheet = load_sheet_text(g, css, strlen(css), KN_CUSTOM_SHEET);
+        if (!sheet) return 0;
+        g->sheets[g->n_sheets++] = sheet;
+        register_font_faces(g, sheet);
+        register_keyframes(g, sheet);
+    }
+    dom_mark_all_dirty(g->dom);
+    g->need_layout = 1;
+    g->need_paint = 1;
+    return 1;
+}
+
 int html_ui_backend_load_page(const char *page)
 {
     if (!g_base || !page || !*page) return 0;
@@ -1582,6 +1651,9 @@ static int engine_set_size(Engine *g, const int width, const int height)
     g->fb_h = height;
     g->vw = (float) width;
     g->vh = (float) height;
+    /* vw/vh/vmin/vmax compute to px: restyle everything when a sheet used them */
+    css_values_set_viewport(g->vw, g->vh);
+    if (css_values_viewport_units_used() && g->dom) dom_mark_all_dirty(g->dom);
     g->paint.viewport_w = g->vw;
     g->paint.viewport_h = g->vh;
     if (g->widgets) widgets_set_viewport(g->widgets, g->vw, g->vh);
@@ -1625,7 +1697,10 @@ void html_ui_backend_update(void)
     if (!pace_due(&g->next_update, 1.0 / HTML_ENGINE_UPDATE_HZ, now)) return;
 
     html_timers_tick(engine_now_ms());
-    if (pace_due(&g->next_anim, 1.0 / g->display_hz, now)) anim_tick(&g->anim, engine_now_ms());
+    if (pace_due(&g->next_anim, 1.0 / g->display_hz, now)) {
+        g->anim_scroll_saved = 0;
+        anim_tick(&g->anim, engine_now_ms());
+    }
     if (g->observe_pending) run_after_layout(g);
 }
 
@@ -1647,17 +1722,23 @@ void html_ui_backend_render(UI *ui)
     if (g->need_paint && g->tree) {
         const double t0 = wall_ms();
         g->paint.body = engine_elem_box(g, dom_body(g->dom)); /* boxes are recycled on rebuilds */
-        paint_build(&g->paint, layout_tree_root(g->tree), &g->dl);
-        dl_clear(&g->overlay);
-        kn_arena_reset(&g->overlay_arena);
-        if (overlay_open) {
-            WidgetPaintArgs args;
-            args.out = &g->overlay;
-            args.alloc = overlay_alloc_cb;
-            args.alloc_user = &g->overlay_arena;
-            args.device_scale = g->paint.device_scale;
-            args.now_ms = engine_now_ms();
-            widgets_paint_overlay(g->widgets, &args);
+        /* the overlay's glyphs can rebuild a full atlas under g->dl (see paint_build):
+         * then paint both again against the new atlas */
+        for (int pass = 0; pass < 2; pass++) {
+            paint_build(&g->paint, layout_tree_root(g->tree), &g->dl);
+            const uint32_t atlas_gen = g->text ? text_atlas_generation(g->text) : 0;
+            dl_clear(&g->overlay);
+            kn_arena_reset(&g->overlay_arena);
+            if (overlay_open) {
+                WidgetPaintArgs args;
+                args.out = &g->overlay;
+                args.alloc = overlay_alloc_cb;
+                args.alloc_user = &g->overlay_arena;
+                args.device_scale = g->paint.device_scale;
+                args.now_ms = engine_now_ms();
+                widgets_paint_overlay(g->widgets, &args);
+            }
+            if (!g->text || text_atlas_generation(g->text) == atlas_gen) break;
         }
         g->need_paint = 0;
         if (g->dump_dl) dump_display_list(&g->dl);

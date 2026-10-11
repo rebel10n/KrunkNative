@@ -1,0 +1,34 @@
+# KrunkNative game server instance %i (server_bin, one lobby). Installed by deploy/deploy.sh.
+# /etc/krunknative/gameserver-%i.env sets the per-instance keys (KN_GAMESERVER_PORT,
+# KN_GAMESERVER_NODE_ID, KN_GAMESERVER_REGION, KN_GAMESERVER_PUBLIC_HOST, ...);
+# shared keys (brain_url, brain_secret, lobby sizes, rotation, billboards) live in
+# the "gameserver" section of /etc/krunknative/config.json.
+[Unit]
+Description=KrunkNative game server %i
+After=network-online.target kn-brain.service
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User=krunknative
+Group=krunknative
+# server_bin resolves ./assets relative to the working directory
+WorkingDirectory=/opt/krunknative
+EnvironmentFile=/etc/krunknative/gameserver-%i.env
+ExecStart=/opt/krunknative/bin/server_bin --headless --config /etc/krunknative/config.json
+# SIGTERM: the game server sends drain + lobby-down to the brain, then exits.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/opt/krunknative /etc/krunknative
+StateDirectory=krunknative/%i
+
+[Install]
+WantedBy=krunknative.target

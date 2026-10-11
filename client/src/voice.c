@@ -13,6 +13,7 @@
 #include <html_dom.h>
 #include <html_ui.h>
 #include <spectate.h>
+#include <ui_logic.h> // ui_scenario_active, ui_text_input_focused
 #include "audio_miniaudio.h"
 #include <ctype.h>
 #include <math.h>
@@ -1018,7 +1019,6 @@ static struct {
     ma_device device;
     int rb_ready;
     ma_pcm_rb rb;
-    int granted; // a microphone was opened (the page's getUserMedia permission)
     char opened_input[256]; // the input the open device was asked for
 } g_cap;
 
@@ -1046,13 +1046,17 @@ static void capture_callback(ma_device *device, void *output, const void *input,
     }
 }
 
+// Same backends as playback (audio_backends: KRUNKNATIVE_AUDIO_BACKEND, else every backend
+// of the platform in miniaudio's order, e.g. PulseAudio/PipeWire, ALSA, JACK on Linux).
 static int capture_context(void) {
     if (g_cap.context_ready) return 1;
-    const char *backend = getenv("KRUNKNATIVE_AUDIO_BACKEND");
-    const ma_backend null_backend[] = {ma_backend_null};
-    const int use_null = backend && !strcmp(backend, "null");
-    if (ma_context_init(use_null ? null_backend : NULL, use_null ? 1 : 0, NULL, &g_cap.context) != MA_SUCCESS) return 0;
+    int list[16];
+    ma_backend backends[16];
+    const int count = audio_backends(list, 16);
+    for (int i = 0; i < count; i++) backends[i] = (ma_backend) list[i];
+    if (ma_context_init(count ? backends : NULL, (ma_uint32) count, NULL, &g_cap.context) != MA_SUCCESS) return 0;
     g_cap.context_ready = 1;
+    voice_log("capture backend %s", ma_get_backend_name(g_cap.context.backend));
     return 1;
 }
 
@@ -1106,7 +1110,6 @@ static int capture_open(void) {
 
     if (ma_device_init(&g_cap.context, &config, &g_cap.device) != MA_SUCCESS) return 0;
     g_cap.device_open = 1;
-    g_cap.granted = 1;
     snprintf(g_cap.opened_input, sizeof(g_cap.opened_input), "%s", input);
     if (ma_device_start(&g_cap.device) != MA_SUCCESS) {
         capture_close();
@@ -1349,14 +1352,8 @@ static void session_refused(void) {
     voice_log("microphone unavailable");
 }
 
-static int input_focused(void) {
-    const HtmlElem el = html_dom_active_element();
-    char tag[16];
-    return el && html_dom_tag(el, tag, sizeof(tag)) > 0 && !strcmp(tag, "input");
-}
-
 void voice_toggle_record(Client *client, const int down) {
-    if (input_focused()) return;               // document.activeElement.tagName != "INPUT"
+    if (ui_text_input_focused()) return;       // document.activeElement.tagName != "INPUT" (+ any text field)
     if (!client || !(client->me || spectate_active())) return; // player || window.spectating
     if (down && !g_rec.recording && g_rec.ready) {
         if (g_rec.pending) return;
@@ -1383,6 +1380,11 @@ int voice_recording(void) {
 
 void voice_update(Client *client) {
 #ifdef __EMSCRIPTEN__
+    static int inputs_listed;
+    if (!inputs_listed) {
+        inputs_listed = 1;
+        free(voice_web_inputs()); // window.updateAudioInputs() on page load
+    }
     if (g_rec.pending) {
         const int state = voice_web_state();
         if (state == 2) session_opened();
@@ -1426,20 +1428,28 @@ char *voice_audio_inputs_json(void) {
 #ifdef __EMSCRIPTEN__
     return voice_web_inputs();
 #else
-    // enumerateDevices() before the microphone permission: every input has deviceId "" and
-    // label "" -> one {"": "Unknown Device"} entry; afterwards "default" plus each device.
-    if (!g_cap.granted) {
+    // Natively there is no permission gate: the backend's capture devices are listed (device
+    // name = option value, which audioInput persists, and label). Only the UI scenario renderer
+    // (tools/uidiff) shows what the reference Chrome captures show before any permission.
+#if defined(KRUNKNATIVE_HTML_ENGINE)
+    if (ui_scenario_active()) {
         static const char UNKNOWN[] = "{\"\":\"Unknown Device\"}";
         char *copy = malloc(sizeof(UNKNOWN));
         if (copy) memcpy(copy, UNKNOWN, sizeof(UNKNOWN));
         return copy;
     }
+#endif
     cJSON *options = cJSON_CreateObject();
     if (!options) return NULL;
     ma_device_info *infos = NULL;
     ma_uint32 count = 0;
     if (capture_context() && ma_context_get_devices(&g_cap.context, NULL, NULL, &infos, &count) == MA_SUCCESS && count) {
-        cJSON_AddStringToObject(options, "default", "Default");
+        // Chrome's "default" entry, labelled with the device it stands for.
+        char label[300] = "Default";
+        for (ma_uint32 i = 0; i < count; i++) {
+            if (infos[i].isDefault) snprintf(label, sizeof(label), "Default - %s", infos[i].name);
+        }
+        cJSON_AddStringToObject(options, "default", label);
         for (ma_uint32 i = 0; i < count; i++) {
             if (!cJSON_GetObjectItemCaseSensitive(options, infos[i].name)) cJSON_AddStringToObject(options, infos[i].name, infos[i].name);
         }

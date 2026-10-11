@@ -1,0 +1,56 @@
+# {{ ansible_managed }} (deploy/ansible role kn_brain)
+# kn_brain "{{ item.name }}": roles {{ item.roles }} on 127.0.0.1:{{ item.port }}
+# (cloudflared ingress {{ item.host }} -> localhost:{{ item.port }}).
+[Unit]
+Description=KrunkNative kn_brain {{ item.name }} ({{ item.roles }})
+After=network-online.target
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User={{ kn_user }}
+Group={{ kn_group }}
+WorkingDirectory={{ kn_state_dir }}
+# KN_BRAIN_INTERNAL_SECRET (+ KN_BRAIN_JOIN_SECRET): generated once, mode 0640 root:{{ kn_group }}.
+EnvironmentFile={{ kn_etc_dir }}/secrets.env
+ExecStart={{ kn_svc_current }}/bin/kn_brain --config {{ kn_brain_config }}{{ ' --no-db' if item.db == 'none' else ' --migrate' }} --brain.roles={{ item.roles }} --brain.host=127.0.0.1 --brain.port={{ item.port }} --brain.trust_proxy=true --brain.id={{ item.name }} --brain.public_url=https://{{ item.host }}{% if item.db == 'sqlite' %} --database.driver=sqlite --database.path={{ kn_state_dir }}/{{ item.name }}.db{% elif item.db == 'postgres' %} --database.driver=postgres{% endif %}
+
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+
+# Hardening. Writable: only the state dir.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# The finder polls game servers over UDP and the coordinator may reach out over
+# TCP: AF_INET/AF_INET6 outbound stays allowed.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+ReadWritePaths={{ kn_state_dir }}
+ReadOnlyPaths={{ kn_svc_base }} {{ kn_etc_dir }}
+
+[Install]
+WantedBy=krunknative.target

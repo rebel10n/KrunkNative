@@ -82,7 +82,8 @@
     var checked = target && target.checked ? 1 : 0;
     var key = ev && /^key/.test(ev.type || '') ? (ev.keyCode || ev.which || 0) : 0;
     var button = ev && typeof ev.button === 'number' ? ev.button : 0;
-    var x = ev && typeof ev.clientX === 'number' ? ev.clientX : 0;
+    // key events carry no position: x = 1 tells C that Shift is held (the console's Shift+Tab)
+    var x = ev && typeof ev.clientX === 'number' ? ev.clientX : (ev && ev.shiftKey ? 1 : 0);
     var y = ev && typeof ev.clientY === 'number' ? ev.clientY : 0;
     try {
       var r = global.Module.ccall('kn_ui_event', 'number',
@@ -140,7 +141,13 @@
       knListen('', 'click', a, e);
     });
     // Keydown in fields: see the window capture listener installed at load time below.
-    document.addEventListener('keyup', function (e) { if (isField(e.target)) e.stopPropagation(); }, true);
+    // Enter keyup in a field with an id goes to C's addEventListener('keyup') stand-in
+    // (social searchPInput / chatBoxInput).
+    document.addEventListener('keyup', function (e) {
+      if (!isField(e.target)) return;
+      e.stopPropagation();
+      if ((e.key === 'Enter' || e.keyCode === 13) && e.target.id) knListen(e.target.id, 'keyup', e.target, e);
+    }, true);
     // Escape/Enter anywhere else: C decides (close window / toggle menu / ...).
     global.addEventListener('keydown', function (e) {
       if (!isEscOrEnter(e)) return;
@@ -202,8 +209,11 @@
   // Pointer glue for elements marked data-kn-pointer (the dev console modal, mod bind rows):
   // the left button's down/move/up go to C as window listeners knpointer*; when C takes the
   // press (returns 0) the default is prevented and moves/up follow it until release.
+  // data-kn-pointer="2" (the editor page): moves/up always follow the press, C's answer
+  // only decides preventDefault (fields under it must still take focus).
   var knPointer = false;
   function inPointerZone(t) { return !!(t && t.closest && t.closest('[data-kn-pointer]')); }
+  function followZone(t) { var z = t && t.closest && t.closest('[data-kn-pointer]'); return !!(z && z.getAttribute('data-kn-pointer') === '2'); }
   global.addEventListener('mousemove', function (e) {
     if (active && knPointer) knListen('', 'knpointermove', e.target, e);
   }, true);
@@ -216,7 +226,9 @@
     if (!active) return;
     noNavigate(e);
     if (e.button === 0 && inPointerZone(e.target)) {
+      var follow = followZone(e.target);
       if (!knListen('', 'knpointerdown', e.target, e)) { e.preventDefault(); knPointer = true; }
+      else if (follow) knPointer = true;
       return;
     }
     if (e.button === 0 || e.button === 2 || isCanvas(e.target)) return;

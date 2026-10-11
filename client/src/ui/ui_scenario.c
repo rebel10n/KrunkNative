@@ -219,6 +219,7 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
+        "clientChrome",
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -323,6 +324,11 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
 }
 
 int ui_scenario_active(void) { return g_sc.active; }
+
+// state.clientChrome: the desktop client's additions (Exit menu item, Settings > Client
+// tab, custom CSS) are drawn; otherwise a scenario renders krunker.io's browser page,
+// which is what the v3.1.1 reference captures show.
+int ui_scenario_client_chrome(void) { return g_sc.active && st_bool("clientChrome", 0); }
 
 void ui_scenario_window_size(int *w, int *h) {
     *w = g_sc.w;

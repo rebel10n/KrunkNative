@@ -105,9 +105,9 @@ typedef struct WidgetsTheme {
     float menulist_pad_end;        /* 1  (+ arrow box)                          */
     float menulist_pad_top;        /* 1                                         */
     float menulist_pad_bottom;     /* 1                                         */
-    float menulist_arrow_w;        /* 7  chevron ink width (minus stroke)       */
-    float menulist_arrow_h;        /* 3.5 chevron drop                          */
-    float menulist_arrow_stroke;   /* 2                                         */
+    float menulist_arrow_w;        /* 7.75 chevron ink width (minus stroke)     */
+    float menulist_arrow_h;        /* 4.25 chevron drop                         */
+    float menulist_arrow_stroke;   /* 1.6 at zoom 1 (+0.15 per zoom step)       */
     /* popup list */
     CssColor popup_bg;             /* #ffffff                                   */
     CssColor popup_border;         /* #767676                                   */

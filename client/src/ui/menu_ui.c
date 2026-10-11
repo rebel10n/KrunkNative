@@ -10,11 +10,15 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <backend_ui.h>
 #include <html_ui.h>
 #include <weapons.h>
 #include <ui_mobile.h> // isMobile: lockless play (client/src/ui/ui_mobile.c)
 #include <gamepad.h> // Gamepad.active: "PRESS START" (client/src/gamepad.c)
+#include <spectate.h> // the Spectate switch: "CLICK TO SPECTATE" (client/src/spectate.c)
 #include <console.h> // developer console overlay (client/src/ui/ui_console.c)
+#include <ui_terminal.h> // map terminals (client/src/ui/ui_terminal.c)
+#include <client_settings.h> // Exit menu item + Settings > Client (client/src/ui/ui_client_settings.c)
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -143,16 +147,79 @@ static int client_pointer_locked(const Client *client) {
 #endif
 }
 
+#ifdef __EMSCRIPTEN__
+// Pointer lock on the web. Browsers grant it asynchronously and may refuse it: no user
+// activation (unless the page itself released the last lock), and Chrome refuses every
+// request for ~1.25 s after the user left the lock with Escape. A refusal fires
+// pointerlockerror (counted here) and rejects the promise Chrome returns, which is
+// swallowed instead of logging "Uncaught (in promise)". Used instead of emscripten's
+// glfwSetInputMode(GLFW_CURSOR_DISABLED), which requests the lock with no such handling.
+EM_JS(void, web_pointer_lock, (int on), {
+    var canvas = document.getElementById('canvas');
+    if (!Module.knLockWatch) {
+        Module.knLockWatch = true;
+        Module.knLockErrors = 0;
+        Module.knLockPending = 0;
+        document.addEventListener('pointerlockerror', function () { Module.knLockErrors++; Module.knLockPending = 0; });
+        document.addEventListener('pointerlockchange', function () { if (document.pointerLockElement) Module.knLockPending = 0; });
+    }
+    if (!on) {
+        Module.knLockPending = 0;
+        if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+        return;
+    }
+    if (!canvas || !canvas.requestPointerLock || document.pointerLockElement === canvas) return;
+    // one request at a time: a second one while the first is pending only fires a
+    // spurious pointerlockchange (pointerLockElement still null)
+    var now = performance.now();
+    if (Module.knLockPending && now - Module.knLockPending < 1500) return;
+    Module.knLockPending = now;
+    try {
+        var p = canvas.requestPointerLock();
+        if (p && p.catch) p.catch(function () {});
+    } catch (e) { Module.knLockErrors++; Module.knLockPending = 0; }
+});
+
+EM_JS(int, web_pointer_lock_errors, (void), { return Module.knLockErrors | 0; });
+
+// Krunker only enters the game from its pointerlockchange handler (CONTROLS: enabled ->
+// enterGame(), toggleControlUI(true)): Play leaves the menu up until the lock is held,
+// so a refused request (above) keeps the menu instead of showing a game whose mouse
+// does nothing until the lock-loss check reopens the menu a second later.
+#define MENU_LOCK_WAIT_SECONDS 5.0 // a request the browser never answers
+static struct {
+    int waiting;       // Play / Escape asked to leave the menu: close it once locked
+    int errors;        // knLockErrors when the request was made
+    double since;
+    int denied_seen;   // knLockErrors already acted on by client_menu_tick
+} g_lock;
+#endif
+
 static void request_pointer_lock_if_web(void) {
     if (ui_mobile_active()) { // no pointer lock on phones: fullscreen + landscape instead
         ui_mobile_play_gesture();
         return;
     }
 #ifdef __EMSCRIPTEN__
-    EM_ASM({
-        var canvas = document.getElementById('canvas');
-        try { if (canvas && canvas.requestPointerLock) canvas.requestPointerLock(); } catch (e) {}
-    });
+    if (!g_lock.waiting) g_lock.errors = web_pointer_lock_errors();
+    g_lock.since = glfwGetTime();
+    web_pointer_lock(1);
+#endif
+}
+
+// 1 when entering the game may proceed now (natively, on phones and once the web pointer
+// lock is held); a refused or unanswered web request drops the Play request instead.
+static int menu_lock_ready(Client *client) {
+#ifdef __EMSCRIPTEN__
+    if (client_pointer_locked(client)) return 1;
+    if (web_pointer_lock_errors() != g_lock.errors || glfwGetTime() - g_lock.since > MENU_LOCK_WAIT_SECONDS) {
+        client->menu_play_pending = 0;
+        g_lock.waiting = 0;
+    }
+    return 0;
+#else
+    (void) client;
+    return 1;
 #endif
 }
 
@@ -442,6 +509,15 @@ void menu_apply_open(const int open) {
 }
 
 void menu_request_open(const int open) {
+#ifdef __EMSCRIPTEN__
+    // Leaving the menu waits for the pointer lock (menu_lock_ready, client_menu_tick).
+    if (!open && html_ui_is_menu_open() && !client_pointer_locked(g_ui.client)) {
+        request_pointer_lock_if_web();
+        g_lock.waiting = 1;
+        return;
+    }
+    g_lock.waiting = 0;
+#endif
     client_set_menu_open(g_ui.client, open);
 }
 
@@ -462,13 +538,27 @@ void menu_update_instructions(void) {
     if (!g_ui.dom_ready) {
         sb_append(&sb, "LOADING...");
     } else if (can_play()) {
-        // gamepad.active ? "app.play.controller" : aM.isMobile ? "TAP TO PLAY" : "app.play"
-        sb_append(&sb, gamepad_active() ? "PRESS START" : ui_mobile_active() ? "TAP TO PLAY" : "CLICK TO PLAY");
+        // gamepad.active ? "app.play.controller" : aM.isMobile ? "TAP TO PLAY" : "app.play".
+        // KrunkNative addition (user request): with the menu's Spectate switch on the line
+        // says what a click does - "CLICK TO SPECTATE" / "TAP TO SPECTATE" (the controller
+        // keeps "PRESS START"); v3.1.1 keeps "CLICK TO PLAY" whatever the switch says.
+        const int spect = spectate_requested();
+        sb_append(&sb, gamepad_active() ? "PRESS START"
+                       : ui_mobile_active() ? (spect ? "TAP TO SPECTATE" : "TAP TO PLAY")
+                       : spect ? "CLICK TO SPECTATE" : "CLICK TO PLAY");
+        // updatePlayInstructions: the ranked queue status under it (ranked_ui.c)
+        if (ranked_ui_status()) {
+            sb_append(&sb, "<div id='instructionsSubtitle'>");
+            for (const char *p = ranked_ui_status(); *p; p++) sb_appendf(&sb, "%c", *p >= 'a' && *p <= 'z' ? *p - 32 : *p);
+            sb_append(&sb, "</div><div id='instructionsSubtitle'>");
+            sb_append_esc(&sb, ranked_ui_ready() ? ranked_ui_ready() : "");
+            sb_append(&sb, "</div>");
+        }
     } else if (g_ui.connect_error[0] && !g_ui.connected) {
         sb_append(&sb, "<span style='color: rgba(255, 255, 255, 0.6)'>");
         sb_append_esc(&sb, g_ui.connect_error);
         sb_append(&sb, "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'>Try seeking a new game by clicking <a href='#' onclick='return knRetry()'>here</a>.</span>"
-            "<br/><span style='color: rgba(255, 255, 255, 0.6)'>Or <a href='#' onclick='return knHostOffline()'>host an offline game</a>.</span>"
+            "<br/><span style='color: rgba(255, 255, 255, 0.6)'>Or <a href='#' onclick='return knHostOffline()'>play offline</a>.</span>"
             "<div style='margin-top:10px;font-size:20px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them (Error 0x");
         sb_append_esc(&sb, g_connect_code[0] ? g_connect_code : "000000");
         sb_append(&sb, ")</div>");
@@ -543,6 +633,30 @@ void menu_update_class_box(void) {
     }
     if (tag_el && ui_police_active()) {
         html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>");
+    } else if (tag_el && account_get()) {
+        // dJ() for an account: level box (challenge colour), name, [clan], partner / premium /
+        // featured badges
+        const AccountInfo *acc = account_get();
+        const int chal = acc->data ? (int) cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 25)) + 1 : 1;
+        const char *col = chal > 20 ? "#fb2d2d" : chal > 15 ? "#c12dfb" : chal > 10 ? "#fb942d" : "white";
+        StrBuf sb = {0};
+        sb_appendf(&sb, "<div class='menuClassLevelBox' style='color:%s;'>%d</div><span class='menuClassPlayerName'>", col, acc->level);
+        sb_append_esc(&sb, acc->premium && acc->alias[0] ? acc->alias : acc->name);
+        sb_append(&sb, "</span>");
+        if (acc->clan[0]) {
+            const int rank = acc->data ? (int) cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 37)) : 0;
+            const char *ccol = !strcmp(acc->clan, "DEV") ? "#40C4FF" : rank == 1 ? "rgb" : rank >= 2 && rank <= 5 ? "#eb3437" : rank >= 6 && rank <= 15 ? "#FBC02D"
+                             : rank >= 16 && rank <= 25 ? "#e834eb" : rank >= 26 && rank <= 50 ? "#349ceb" : "rgba(255,255,255,0.5)";
+            sb_appendf(&sb, "<span class='menuClassPlayerClan%s' style='color:%s'>[", rank == 1 ? " rainbowText" : "", ccol);
+            sb_append_esc(&sb, acc->clan);
+            sb_append(&sb, "]</span>");
+        }
+        if (acc->data && cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 19))) sb_append(&sb, "<i class='material-icons menuClassPlayerPartner'>verified</i>");
+        if (acc->premium) sb_append(&sb, "<i class='material-icons menuClassPlayerPremium'>check_circle</i>");
+        if (acc->featured) sb_append(&sb, "<i class='material-icons menuClassPlayerVerified'>check_circle</i>");
+        char *html = sb_finish(&sb);
+        html_dom_set_html(tag_el, html);
+        free(html);
     } else if (tag_el) {
         StrBuf sb = {0};
         sb_append(&sb, "<span class='menuClassPlayerName'>");
@@ -581,6 +695,7 @@ void menu_set_class_index(const int index, const int silent) {
     snprintf(text, sizeof(text), "%d", index);
     html_storage_set("classindex", text);
     menu_update_class_box();
+    ranked_ui_class_changed(index); // setClassIndex: client.queueUpdateClass when in a party
 }
 
 // window.selectClass(i): bubble, remember, back to the loadout window.
@@ -739,6 +854,7 @@ static void menu_try_play(Client *client) {
         client->menu_play_pending = 0;
         return;
     }
+    if (!menu_lock_ready(client)) return; // web: enterGame() runs on pointerlockchange
     client->menu_play_pending = 0;
     client_set_menu_open(client, 0);
     client_enter_game(client);
@@ -791,7 +907,9 @@ void menu_retry_connect(void) {
     g_ui.connect_error[0] = 0;
     arm_connect_timer();
     menu_update_instructions();
-    if (!client_is_connected(g_ui.client)) client_net_request_reconnect(g_ui.client);
+    if (client_is_connected(g_ui.client)) return;
+    if (servers_ui_retry()) return; // brain matchmaker: seek a new game (servers_ui.c)
+    client_net_request_reconnect(g_ui.client);
 }
 
 // Main-thread half of the connection events: consume the NetStatus the transport left
@@ -855,6 +973,7 @@ static int menu_state_changed(const Client *client) {
         g_ui.last.connected != client_is_connected(client) ||
         g_ui.last.ready != client->game.ready ||
         g_ui.last.map_index != client->game.current_map_index ||
+        g_ui.last.mode_id != game_mode_id(&client->game) || // same map, other mode (a hosted lobby): #mapInfo
         g_ui.last.class_index != client->menu_class_index ||
         g_ui.last.health != health;
 }
@@ -882,6 +1001,7 @@ static void menu_apply_state(Client *client) {
     g_ui.last.connected = g_ui.connected;
     g_ui.last.ready = client->game.ready;
     g_ui.last.map_index = client->game.current_map_index;
+    g_ui.last.mode_id = game_mode_id(&client->game);
     g_ui.last.class_index = client->menu_class_index;
     g_ui.last.health = health;
     g_ui.last.valid = 1;
@@ -927,6 +1047,14 @@ static void setup_dom(void) {
     const HtmlElem download = ui_scenario_active() ? 0 : html_dom_query(0, ".downloadClient");
     if (download) html_dom_remove(download);
 #endif
+    // Hosting is the dedicated server (server_bin, doc/backend.md 8.7): no Host Game button.
+    // Hidden, not removed, so the v3.1.1 #subLogoButtons markup stays; --render-scenario
+    // keeps it for uidiff.
+#ifdef UI_SCENARIO_SUPPORTED
+    if (!ui_scenario_active()) set_display("menuBtnHost", "none");
+#else
+    set_display("menuBtnHost", "none");
+#endif
 
     HtmlElem el;
     if ((el = by_id("classPreviewCanvas"))) html_dom_observe_resize(el, on_observed_resize, NULL);
@@ -964,6 +1092,7 @@ static void menu_dom_init(void) {
     g_ui.dom_ready = 1;
     if (!g_ui.connected && !g_ui.connect_error[0]) arm_connect_timer();
     ui_settings_push_saved();
+    ui_client_settings_dom_init(); // Exit button, custom CSS, auto spectate, Discord/auto-join timer
     menu_update_instructions();
     g_ui.last_rect[0] = 0;
     menu_send_preview_rect();
@@ -976,7 +1105,12 @@ void client_set_menu_open(Client *client, const int open) {
     menu_apply_open(open);
 
     // isMobile: no pointer lock (UsePointerLock false); emscripten's GLFW would request one.
+#ifdef __EMSCRIPTEN__
+    if (!ui_mobile_active()) web_pointer_lock(!open);
+    if (open) g_lock.waiting = 0;
+#else
     if (!ui_mobile_active()) glfwSetInputMode(client->window, GLFW_CURSOR, open ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+#endif
     client->mouse_state.locked = !open;
     client->menu_lock_grace_until = open ? 0.0 : glfwGetTime() + MENU_LOCK_GRACE_SECONDS;
 
@@ -1021,6 +1155,20 @@ void client_menu_tick(Client *client) {
     if (!g_ui.dom_ready && html_dom_by_id("uiBase")) menu_dom_init();
 
     menu_try_play(client);
+#ifdef __EMSCRIPTEN__
+    // Play / Escape waiting for the pointer lock: leave the menu once it is held; a
+    // refused or unanswered request keeps the menu (Krunker's pointerlockchange flow).
+    if (g_lock.waiting && html_ui_is_menu_open()) {
+        if (client_pointer_locked(client)) {
+            g_lock.waiting = 0;
+            client_set_menu_open(client, 0);
+        } else if (web_pointer_lock_errors() != g_lock.errors || glfwGetTime() - g_lock.since > MENU_LOCK_WAIT_SECONDS) {
+            g_lock.waiting = 0;
+        }
+    } else {
+        g_lock.waiting = 0;
+    }
+#endif
     menu_idle_tick(client);
 
     if (g_ui.dom_ready) {
@@ -1034,7 +1182,8 @@ void client_menu_tick(Client *client) {
     }
 
     client_hud_html_tick(client, (float) glfwGetTime()); // HTML HUD (hud_ui.c)
-    ui_console_tick(client); // developer console: overlay, autoexec, queued server commands, net_graph
+    ui_console_tick(client); // developer console (ui_console.c)
+    ui_terminal_tick(client); // map terminals: interact prompt, typewriter (ui_terminal.c)
 
     // Round end: the end screen frees the pointer (Krunker exits pointer lock so its
     // results can be clicked) and relocks when the next round starts.
@@ -1043,13 +1192,27 @@ void client_menu_tick(Client *client) {
     if (end_now != end_interactive) {
         end_interactive = end_now;
         if (!html_ui_is_menu_open()) {
+#ifdef __EMSCRIPTEN__
+            if (!ui_mobile_active()) web_pointer_lock(!end_now); // relock without a gesture: allowed after exitPointerLock()
+#else
             if (!ui_mobile_active()) glfwSetInputMode(client->window, GLFW_CURSOR, end_now ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+#endif
             client->mouse_state.locked = !end_now;
             client->menu_lock_grace_until = glfwGetTime() + MENU_LOCK_GRACE_SECONDS;
         }
     }
 
-    if (!end_now && !html_ui_is_menu_open() && glfwGetTime() >= client->menu_lock_grace_until && !client_pointer_locked(client)) {
+    // Web: a refused request (pointerlockerror) ends the grace at once, so the game is
+    // never shown with a dead mouse for the whole grace period.
+    int lock_denied = 0;
+#ifdef __EMSCRIPTEN__
+    const int lock_errors = web_pointer_lock_errors();
+    lock_denied = lock_errors != g_lock.denied_seen;
+    g_lock.denied_seen = lock_errors;
+#endif
+    const double grace_left = client->menu_lock_grace_until - glfwGetTime(); // tests park it far ahead (hud_autoplay)
+    if (!end_now && !html_ui_is_menu_open() && (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) &&
+        !client_pointer_locked(client)) {
         client_set_menu_open(client, 1);
     }
 }

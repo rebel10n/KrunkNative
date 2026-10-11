@@ -27,6 +27,31 @@ The Change Loadout pickers added `textures/previews/{weapons,cosmetics,attach}`
 source; kept next to the templates so the web build's preloaded package has it),
 and `pro_{crosshair,scope,ads}.png` (served at the v3.1.1 site root; the Pro
 settings preset points `crosshairImage` / `customScope` / `customADSDot` at them).
+The in-game HUD and kill feed added `textures/weapons/icon_*.png` for every weapon
+(`weaponConfig.icon`: icon_0..12 and icon_14..19, so the Crossbow, Famas, Sawed Off,
+Auto Pistol, Bomb and Blaster rows are not blank) and the name-tag layer the CTF flags
+and objective marker (`textures/{flag_r,flag_b,objective_1}.png`).
+
+`tools/ui-import/menu-assets.txt` is the complete list of these byte-identical copies
+(images, plus `css/main.css`, `css/material-icons.css`, the fonts and
+`windows/versions.txt`); `make ui-import` (`tools/ui-import/menu_assets.py`) recopies
+them from the v3.1.1 tree, so add a line there whenever C code starts generating a new
+image path. The social hub's images are listed in `tools/ui-import/social_page.py`.
+Known v3.1.1 404s, kept as in the original (the files do not exist in its `public/`):
+`textures/previews/weapons/undefined.png` (Select Skin of the knife, the Runner's
+primary), `img/modes/<mode>.png` (end screen Performance tab), `img/soldier_0.png`
+(hub Clan Wars) and the `css/main.css` / `css/social.css` urls of
+`img/{chals/icon_0.png,dropper_bg.svg,dropper_fg.svg,lock-icon-*.svg,world_0.png}`,
+`img/social-buttons/fandom-*.png` and the web-archive `water_0`/`world_0`.
+`KRUNKNATIVE_HTML_IMAGE_LOG=1|<file>` logs every image the native engine fails to load.
+
+KrunkNative addition: `css/fonts/kn-symbols.ttf`, a subset (arrows, technical, box
+drawing, blocks, geometric shapes, misc symbols, dingbats) of Adwaita Mono 34.1.0
+Regular made with `pyftsubset --unicodes=U+2190-21FF,U+2300-23FF,U+2500-25FF,U+2600-26FF,U+2700-27BF,U+2B00-2BFF`
+(SIL OFL 1.1, `css/fonts/kn-symbols-OFL.txt`). It is not referenced by the page: the
+native engine uses it as its first per-glyph fallback (client/src/html/engine/text.c),
+because Chrome draws these code points (e.g. the dev console's U+2715) from the
+system's Adwaita Mono on the reference machine.
 
 Transformations applied to the copied files:
 
@@ -104,8 +129,7 @@ added as the first body child and `js/kn-shim.js` + `js/loader.js` before `</bod
 glue, as in `index.html`). `css/editor.css`, `css/editor_dark.css`,
 `css/editor_custom.css` and `css/pickr.css` are byte-identical copies of the v3.1.1 files;
 `css/editor-kn.css` is ours (transparent page over the GL view, the web build's
-pointer-events so clicks on the 3D area reach `#canvas`, and a toolbar drop-down anchor
-the native engine still needs). Everything editor.js and libs/ObjectInstance.js /
+`#canvas`, and pointer-events so clicks on the 3D area reach it). Everything editor.js and libs/ObjectInstance.js /
 TransformControls.js / ui/editor.js did is C: `client/src/editor/` (the prefab and config
 tables in `client/src/editor/editor_data.c` are generated from the v3.1.1
 `editor.js.map` by `tools/editor/gen_editor_data.py`). The panels (QuickSettings-style

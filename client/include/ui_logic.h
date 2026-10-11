@@ -94,7 +94,7 @@ typedef struct {
 
     // state diffing (was menu_last / menu_emit_state)
     struct {
-        int valid, in_game, connected, ready, map_index, class_index, health;
+        int valid, in_game, connected, ready, map_index, mode_id, class_index, health;
     } last;
     const void *last_classes;
     size_t last_class_count;
@@ -168,6 +168,7 @@ const char *ui_window_key(int id);                        // "1".."33", "host", 
 const char *ui_map_thumb(const char *name);               // mapThumb()
 int         ui_host_checked_mode(void);                   // createPrivateRoom: first checked hostable #gameMode<id>, -1 none
 const char *ui_host_checked_map(void);                    // createPrivateRoom: first checked #gameMap<i>, NULL none
+int ui_host_checked_map_index(void);                       // the same as a map catalogue index (map_catalog.h), -1 none
 
 // ---- ui_settings.c
 void ui_settings_load(void);                     // loadSettings (knSettings)
@@ -181,6 +182,7 @@ void ui_settings_set(const char *key, const HtmlArg *value); // setSetting(key, 
 void ui_settings_set_string(const char *key, const char *value);
 void ui_settings_reset(void);                    // resetSettings
 void ui_settings_export(void);                   // exportSettings (log)
+char *ui_settings_export_text(void);             // exportSettings(true): the text, malloc'd (account settings upload)
 void ui_settings_apply_values(HtmlElem root);    // applySettingValues
 void ui_settings_push_saved(void);               // pushSavedSettings (CORE_SETTINGS first)
 void ui_settings_search(const char *query);      // windows[0].searchList body
@@ -254,6 +256,7 @@ void menu_set_game_name(const char *name);       // #mapInfo (mode alias + "_" +
 #define UI_SCENARIO_SUPPORTED 1
 int  ui_scenario_begin(const char *scenario_path, const char *out_png); // parse + isolate storage; 0 on error
 int  ui_scenario_active(void);
+int  ui_scenario_client_chrome(void);            // state.clientChrome: Exit item + Client tab (ui_client_settings.c)
 void ui_scenario_window_size(int *w, int *h);    // the scenario `size`
 const char *ui_scenario_map_path(void);          // map JSON for state.mapName, NULL = default rotation
 int  ui_scenario_run(Client*);                   // frames + state + PNG; process exit status
@@ -289,6 +292,7 @@ typedef struct {
     int show_weapon, show_weapon_sec, show_weapon_mel; // showWeapon* (first-person model)
     int shw_chat;           // shwChat: 0 all, 1 on focus, 2 off
     float master_volume, voice_volume, asset_volume; // sound, voiceVolume, assetVolume (stored)
+    int slid_cont;          // slidCont ("Non FPS Sliding", default on): sent in ENT (ent[15]), applies on the next spawn
 } UiInputSettings;
 
 void ui_controls_load(void);                     // binds + toggle sets from storage
@@ -310,6 +314,9 @@ int  ui_controls_mouse_event(Client*, int button, int action, int in_game);
 int  ui_controls_scroll_event(Client*, double dy, int in_game); // in game: 1 = the wheel is bound (no weapon swap)
 // Chat (#chatInput)
 void ui_controls_chat_focus(int focused);        // focusChat(on)
+// document.activeElement is an INPUT / TEXTAREA / SELECT / contenteditable (any page), or the
+// chat / terminal input owns the keyboard: no hotkey may fire (mods.ts isEditableTarget).
+int  ui_text_input_focused(void);
 int  ui_controls_chat_focused(void);
 int  ui_controls_chat_enter(Client*);            // Enter seen by the page in #chatInput
 void ui_controls_apply_chat_visibility(void);    // shwChat
@@ -345,7 +352,7 @@ void ui_controls_touch_shoot(int on);            // #mobileUI shoot buttons: UCU
 
 // BEGIN ui_loadout block (client/src/ui/ui_loadout.c): Change Loadout + item pickers,
 // K.P.D popup, Changelog (Krunker v3.1.1 guest state).
-char *ui_loadout_generate(int id, const char **header); // windows 3/15/16/17/20/26/31/32/34/35/38/39; NULL other ids
+char *ui_loadout_generate(int id, const char **header); // windows 3/9/15/16/17/20/26/31/32/34/35/38/39; NULL other ids
 char *ui_loadout_gen(void);                      // windows[2].gen()
 void ui_loadout_select(const char *fn, int value); // selectHat/Back/Waist/Melee/Dye/Face/Attachment/Reticle/Spray
 void ui_loadout_select_skin_color(int index);   // selectSkinColor
@@ -400,6 +407,10 @@ void ui_bhop_set_bind(const char *code);         // setBhopModeBind: stores krk_
 void ui_bhop_fill_input(Client*, Input*);        // patchInputs on this input frame (ui_controls_fill_input tail)
 void ui_notify(const char *html);                // notify.ts: top-right #0005 toast, `slide` 2 s
 void ui_notify_tick(double now_ms);              // hud_ui.c per frame: steps the notify animation
+// client/src/ui/ui_mod_keys.c: the rest of mods.ts' keys. ui_mods.c calls the keydown
+// switch after its bind matching (`input` = a text field has focus); 0 = not consumed.
+int  ui_mod_keys_keydown(Client*, int glfw_key, int input); // F1 clearLog, F4 "/", F5 reload, F6 editor, T Ctrl TP
+int  ui_mod_keys_ctrl_tp_mouse(Client*, int glfw_button, int action); // Ctrl TP canvas mouse wrapper; 1 = taken
 // END ui_bhop block
 
 // BEGIN hud_popups block (client/src/ui/hud_popups.c): the game-overlay canvas text popups
@@ -408,8 +419,10 @@ void hud_popups_score(int delta);                // gf(): "5" score popup (bN ac
 void hud_popups_checkpoint(void);                // gg(): "chp" Checkpoint! (showMedals)
 void hud_popups_medals(const NetMedalPacket *medals, int count); // gm(): "6" / "am" medal queue
 void hud_popups_assist(void);                    // gl(): "10" Assist medal
+void hud_popups_medal_text(const char *text);    // gm([text, null]): a trigger's Broadcast / Send Popup
 void hud_popups_on_spawn(void);                  // "start": medal queue cleared, overlay.reset()
 void hud_popups_on_init(void);                   // "init": bN = 0
 void hud_popups_page_reset(void);                // fresh page: elements gone
 void hud_popups_tick(double now_ms, int visible); // per frame: draw + age every popup
 // END hud_popups block
+void hud_ui_kill_streak(Client*, int uid, int streak); // killStreakMessage ("kst"): "<who> on a N Kill Streak" chat line

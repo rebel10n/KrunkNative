@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <client.h>
 #include <vfx.h>
+#include <ai_render.h>
 #include <nametags.h>
 #include <camera_feel.h>
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
@@ -28,7 +29,9 @@
 #include <gamepad.h> // game controllers: v3.1.1 gamepad.js + the controller half of CONTROLS (gamepad.c)
 #include <ui_mobile.h> // Krunker's #mobileUI touch controls (ui/ui_mobile.c)
 #include <app_mode.h> // game / social hub / editor / viewer pages (app_mode.c)
+#include <backend_ui.h> // brain backend: account, matchmaker, --brain / --connect (net/backend_startup.c)
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
+#include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
 
 #ifdef WIN32
 #include <direct.h>
@@ -90,6 +93,7 @@ void scroll_callback(GLFWwindow*, double, double);
 static void cursor_pos_callback(GLFWwindow*, double, double);
 static void mouse_button_callback(GLFWwindow*, int, int, int);
 static void key_callback(GLFWwindow*, int, int, int, int);
+static void window_focus_callback(GLFWwindow*, int);
 static void char_callback(GLFWwindow*, unsigned int);
 
 static vec4 json_color_or(const cJSON *json, const vec4 fallback) {
@@ -196,39 +200,25 @@ static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
     sky_load(mode_sky ? NULL : raw); // renderer.init: no sky dome when the mode sets skyCol
 }
 
-static int weapon_swap_category(const Player *player, const int loadout_index) {
-    if (!player || loadout_index < 0 || loadout_index >= player->loadout_size) return 0;
+// CONTROLS.skipScroll (index.js b9): an input frame that carried a wheel step swallows the
+// first wheel event before the next input frame (which clears it again).
+static int g_skip_scroll;
 
-    const int weapon_id = player->loadout[loadout_index];
-    const Weapon *weapon = player->game->weapons[weapon_id];
-    if (!weapon) return 0;
-
-    if (weapon->secondary) return 1;
-    if (weapon->melee) return 2;
-    if (weapon->equipment) return 3;
-    return 0;
-}
-
-static int weapon_scroll_swap(const Player *player, const int direction) {
-    if (!player || player->loadout_size <= 1 || !direction) return 0;
-
-    const int current = player->loadout_index;
-    const int next = (current + (direction > 0 ? 1 : player->loadout_size - 1)) % player->loadout_size;
-    const int next_category = weapon_swap_category(player, next);
-
-    if (next_category) return next_category;
-    return weapon_swap_category(player, current);
-}
+// The unrounded look the input frames are built from (client_tick, CONTROLS xDr/yDr).
+static vec2 g_look;
+static int g_look_valid;
 
 static void print_usage(const char *program) {
-    fprintf(stderr, "Usage: %s [--offline] [--headless] [--windowed|--fullscreen|--borderless] [--hub|--editor|--viewer [query]] [map.json]\n"
+    fprintf(stderr, "Usage: %s [--offline] [--headless] [--windowed|--fullscreen|--borderless] [--hub|--editor|--viewer [query]]\n"
+                    "          [--brain <url>] [--connect <host[:port]>] [map.json]\n"
                     "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n", program, program);
 }
 
 #ifdef __EMSCRIPTEN__
 
 // Query parameters replace command line arguments on the web:
-//   ?offline=1     run the in-process local server (same as --offline)
+//   ?offline=1     run the in-process local server (same as --offline), on Burg unless ?map
+//   ?sandbox       offline on v7.1.4's sandbox map (config.blankMap = maps/custom/Test.json)
 //   ?map=<name>    start on assets/maps/<name>.json
 //   social.html, editor.html, viewer.html boot in that page's app mode (app_mode.c)
 //   ?ws=<url>      WebSocket server URL (see net_web.c)
@@ -249,12 +239,28 @@ static char *web_query_string(const char *name) {
     }, name);
 }
 
-// The GL framebuffer follows the CSS size of the #canvas element.
+// The GL framebuffer follows the CSS size of the #canvas element as the stylesheet lays
+// it out (ui/css/krunknative.css: fixed, 100% x 100%). The HiDPI GLFW canvas pins inline
+// style.width/height to the last window size, so those are dropped while measuring;
+// otherwise the canvas would keep its first size forever (glfwSetWindowSize sets them
+// again right after).
 static void web_canvas_size(int *width, int *height) {
     double css_width = 0.0;
     double css_height = 0.0;
 
-    emscripten_get_element_css_size("#canvas", &css_width, &css_height);
+    EM_ASM({
+        var c = document.getElementById('canvas');
+        if (!c) return;
+        var w = c.style.width;
+        var h = c.style.height;
+        c.style.width = "";
+        c.style.height = "";
+        var r = c.getBoundingClientRect();
+        c.style.width = w;
+        c.style.height = h;
+        HEAPF64[$0 >> 3] = r.width;
+        HEAPF64[$1 >> 3] = r.height;
+    }, &css_width, &css_height);
 
     *width = css_width >= 1.0 ? (int) css_width : 1280;
     *height = css_height >= 1.0 ? (int) css_height : 720;
@@ -276,6 +282,29 @@ static bool web_on_resize(const int event_type, const EmscriptenUiEvent *event, 
 static void web_main_loop(void *user_data) {
     client_frame(user_data);
 }
+
+// Mouse look on the web, as v3.1.1 CONTROLS reads it: the canvas mousemove handler sums
+// movementX/Y while the canvas holds the pointer lock (a4/a5 in a8) and updateMouseInp
+// consumes the sums once per frame. Emscripten's GLFW cursor is no substitute: under the
+// lock it is the running sum of movementX, but the first move after the lock goes
+// (Escape, alt-tab) snaps it back to the absolute page position, and the game applied
+// that jump as one huge look delta before the menu came up. Returns the movement since
+// the last call (0 while unlocked).
+EM_JS(void, web_take_look, (double *dx, double *dy), {
+    var look = Module.knLook;
+    if (!look) {
+        look = Module.knLook = {x: 0, y: 0};
+        var canvas = document.getElementById('canvas');
+        if (canvas) canvas.addEventListener('mousemove', function (e) {
+            if (document.pointerLockElement !== canvas) return;
+            look.x += e.movementX || 0;
+            look.y += e.movementY || 0;
+        });
+    }
+    HEAPF64[dx >> 3] = look.x;
+    HEAPF64[dy >> 3] = look.y;
+    look.x = look.y = 0;
+});
 
 #endif
 
@@ -341,6 +370,7 @@ int main(int argc, char **argv) {
     const char *scenario_path = NULL;
     const char *scenario_out = NULL;
 
+    backend_parse_args(&argc, argv);  // --brain <url> / --connect <host[:port]> (net/backend_startup.c)
     app_mode_parse_args(&argc, argv); // --hub/--editor/--viewer [query] (app_mode.c)
     if (!parse_startup_args(argc, argv, &offline, &startup_map_path, &scenario_path, &scenario_out)) {
         return -1;
@@ -364,6 +394,14 @@ int main(int argc, char **argv) {
     if (web_query_flag("offline")) offline = 1;
 
     char *web_map_name = web_query_string("map");
+
+    // ?sandbox / ?offline without ?map: v7.1.4 loadSandbox(config.blankMap), else Burg
+    const int web_sandbox = web_query_flag("sandbox") || web_query_flag("test");
+    if (web_sandbox) offline = 1;
+    if (offline && !(web_map_name && web_map_name[0])) {
+        free(web_map_name);
+        web_map_name = strdup(web_sandbox ? "custom/Test" : "burg");
+    }
 
     if (web_map_name && web_map_name[0]) {
         const size_t name_length = strlen(web_map_name);
@@ -489,6 +527,9 @@ int main(int argc, char **argv) {
     glfwSetMouseButtonCallback(INSTANCE.window, mouse_button_callback);
     glfwSetKeyCallback(INSTANCE.window, key_callback);
     glfwSetCharCallback(INSTANCE.window, char_callback);
+#ifndef __EMSCRIPTEN__
+    glfwSetWindowFocusCallback(INSTANCE.window, window_focus_callback); // alt-tab = pointer lock lost
+#endif
     if (!SCENARIO_ACTIVE()) gamepad_init(&INSTANCE); // controller hotplug (GLFW joysticks / browser gamepads)
 
     if (glfwRawMouseMotionSupported()) {
@@ -517,6 +558,10 @@ int main(int argc, char **argv) {
     if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
 
     // Sound (client/src/audio.c); not for the scenario renderer. Failure leaves the game silent.
+    // Settings > Client startup options (audio backend env, priority, raw input, resolution,
+    // Start Offline, resource swapper, Discord RPC) before the audio device and the page.
+    if (!SCENARIO_ACTIVE()) client_settings_startup(&INSTANCE, &offline);
+
     if (!SCENARIO_ACTIVE()) audio_init();
 
     // HTML/CSS menu (doc/html-ui-engine.md). ui/ sits next to assets/; natively the
@@ -560,8 +605,12 @@ int main(int argc, char **argv) {
 
     NetMainArgs net_args = {
         .client = &INSTANCE,
-        .address = DEFAULT_SERVER_ADDRESS,
+        .address = INSTANCE.net_address, // DEFAULT_SERVER_ADDRESS unless --connect
     };
+
+    // brain backend (backend_ui.h): with a brain URL the matchmaker picks the game
+    // server (servers_ui.c starts the transport); offline / --connect / no brain: as before
+    const int brain_mode = backend_startup(&INSTANCE, offline, SCENARIO_ACTIVE());
 
     if (offline) {
         if (!local_game_start(&INSTANCE)) return -1; // singleplayer: client->game is the authority (net/local_game.c)
@@ -571,14 +620,16 @@ int main(int argc, char **argv) {
         // Not fatal: the failure is reported to the menu (connection error screen,
         // which can retry or host an offline game) and net_web.c keeps retrying.
         // editor.html / viewer.html need no game server (app_mode.c)
-        if (app_mode_needs_server() && !net_web_connect(&INSTANCE)) fprintf(stderr, "Failed to open websocket connection\n");
+        if (app_mode_needs_server() && !brain_mode && !net_web_connect(&INSTANCE)) fprintf(stderr, "Failed to open websocket connection\n");
 #else
-        if (pthread_create(&INSTANCE.net_thread, NULL, net_main, &net_args)) {
+        if (brain_mode) {
+            // the matchmaker starts the transport once seek-game answers (client_net_switch_server)
+        } else if (pthread_create(&INSTANCE.net_thread, NULL, net_main, &net_args)) {
             fprintf(stderr, "Failed to start network thread\n");
             return -1;
+        } else {
+            INSTANCE.net_thread_running = 1;
         }
-
-        INSTANCE.net_thread_running = 1;
 #endif
     }
 
@@ -621,6 +672,7 @@ int main(int argc, char **argv) {
     local_game_stop(&INSTANCE);
     client_class_preview_fini(&INSTANCE);
     vfx_fini();
+    ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
     sky_fini();    // sky dome VAO/buffers/program (sky.c)
     render_target_fini();
@@ -628,6 +680,7 @@ int main(int argc, char **argv) {
     voice_fini();
     audio_fini();
     headless_shutdown();
+    client_settings_exit(); // Discord RPC close; relaunch when a "*" setting asked for a restart
 
     return 0;
 #endif
@@ -707,7 +760,7 @@ void client_clear_players(Client *client) {
     client->me = NULL;
     client->in_game = 0;
     client->spawn_requested = 0;
-    client->net_next_input_seq = 0;
+    client_recon_reset(client); // net_next_input_seq 0, no pending inputs
     client->last_swap_key = 0;
     spectate_end(client); // new round / lost session: the server re-sends SPECTATE to spectators
 }
@@ -793,6 +846,8 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     player->direction.x = packet->direction[0];
     player->direction.y = packet->direction[1];
 
+    player->interpolate = 0; // players.js forcePos(): the first state after a spawn snaps
+    player->force_pos = 1;
     client_player_spawned(client, player, packet->is_you);
 }
 
@@ -802,6 +857,10 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
     if (is_you) {
         client->me = player;
         player->is_you = 1;
+        client_recon_reset(client); // "start" -> CONTROLS.reset(): tmpInpts emptied, isn = 0
+        // Online our prediction copy has to slide like the server's player (v3.1.1 reads it
+        // back from the spawn data, index.js serverSetting.slidCont); offline it is that player.
+        if (!client->offline) player->slid_cont = ui_controls_settings()->slid_cont ? 1 : 0;
         client_add_player_mesh(client, player, 1);
 
         // Our (re)spawn: in the game again, death card down (UI.toggleGameUI(true)).
@@ -841,16 +900,38 @@ static void client_remove_player(Client *client, const int uid) {
     }
 }
 
+// sendRateA: the rate remote states arrive at (NET_STATE_SEND_HZ, gameserver.ts K_PACKET_FREQUENCY)
+static float g_net_send_rate = 30.0f;
+
 void client_apply_state(Client *client, const NetStatePacket *packet) {
     Player *player = client_find_player(client, packet->uid);
     if (!player) return;
 
-    if (player == client->me) {
-        player->input_seq = packet->ack_seq;
+    // Our own player is predicted; the server corrects it with RECON ("l", net/recon.c) only.
+    if (player == client->me) return;
+
+    // index.js updatePlayerPositions ("k"): with forcePos the state snaps, otherwise
+    // x1/y1/z1 and xDir1/yDir1 are where the model is now and the packet is the target that
+    // players.js update() reaches in (1000 / sendRateA) * interpolation ms.
+    const vec3 position = player->position;
+    const vec2 direction = player->direction;
+    net_packet_apply_player(player, packet);
+    player->send_rate = g_net_send_rate;
+
+    if (player->force_pos) {
+        player->interpolate = 0;
+        player->force_pos = 0;
         return;
     }
 
-    net_packet_apply_player(player, packet);
+    player->dt = 0.0f;
+    player->interp_pos_start = position;
+    player->interp_pos_end = player->position;
+    player->interp_dir_start = direction;
+    player->interp_dir_end = player->direction;
+    player->position = position;
+    player->direction = direction;
+    player->interpolate = 1;
 }
 
 void client_send_cycle_packet(Client *client) {
@@ -866,6 +947,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
 
     // INIT carries the Krunker mode id (modes.js index), not a rotation index
     game_init(&client->game, init->map_index, game_mode_index_for(&client->game, init->mode_index), 0);
+    g_net_send_rate = NET_STATE_SEND_HZ; // remote state rate ("k" sendRateA, client_apply_state)
     client_load_map(client);
     client->map_loaded = client->game.ready;
 }
@@ -896,6 +978,14 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             NetStatePacket state;
             memcpy(&state, packet->payload, sizeof(state));
             client_apply_state(client, &state);
+            break;
+        }
+        case NET_PACKET_RECON: {
+            if (packet->length != sizeof(NetReconPacket) || !client->game.ready) break;
+
+            NetReconPacket recon;
+            memcpy(&recon, packet->payload, sizeof(recon));
+            client_recon_apply(client, &recon);
             break;
         }
         case NET_PACKET_LEAVE: {
@@ -934,7 +1024,10 @@ void client_tick_net(Client *client) {
 
     pthread_mutex_unlock(&client->net_lock);
 
-    for (size_t i = 0; i < packet_count; i++) client_handle_net_packet(client, &packets[i]);
+    for (size_t i = 0; i < packet_count; i++) {
+        if (!client_recon_delay_inbound(client, &packets[i])) client_handle_net_packet(client, &packets[i]);
+    }
+    client_recon_drain_delayed(client, client_handle_net_packet); // KRUNKNATIVE_NET_DELAY_MS (off by default)
 
     free(packets);
 }
@@ -1000,7 +1093,32 @@ void scroll_callback(GLFWwindow *window, const double xoffset, const double yoff
     if (!client || !yoffset) return;
     if (ui_controls_scroll_event(client, yoffset, 1)) return; // a bind uses the wheel: no weapon swap
 
+    if (g_skip_scroll) {
+        g_skip_scroll = 0;
+        return;
+    }
     client->mouse_state.scroll_delta = yoffset > 0.0 ? 1 : -1;
+}
+
+// Alt-tab / focus loss in game. In v3.1.1 the browser drops the pointer lock, and the
+// pointerlockchange handler (132.js) then runs toggleControlUI(false), which shows the menu,
+// and resetKeys(). GLFW keeps GLFW_CURSOR_DISABLED across focus loss, so the native lock
+// check (menu_ui.c client_pointer_locked) never sees it: do the same here. On the web the
+// browser's own pointer-lock loss already does this (client_menu_tick).
+void client_window_focus_lost(Client *client) {
+    if (!client || app_mode() != APP_MODE_GAME || SCENARIO_ACTIVE()) return;
+    if (!client->mouse_state.locked) return; // menu / end screen: the pointer is already free
+    ui_controls_reset_keys();
+    if (html_ui_available()) {
+        if (!html_ui_is_menu_open()) client_set_menu_open(client, 1);
+    } else {
+        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // no HTML menu: just free the pointer
+        client->mouse_state.locked = 0;
+    }
+}
+
+static void window_focus_callback(GLFWwindow *window, const int focused) {
+    if (!focused) client_window_focus_lost(glfwGetWindowUserPointer(window));
 }
 
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
@@ -1080,11 +1198,12 @@ void client_enter_game(Client *client) {
     const int leave_spectate = spectate_active() && !spectate_requested();
     if (spectate_active() && (!leave_spectate || client->spawn_requested)) return;
 
-    // Respawn after a death: one ENT at a time, not before config.deathDelay, and
-    // not on the end screen (the next round respawns everyone).
+    // Respawn after a death: one ENT at a time, not before config.deathDelay. During the
+    // round's end phase too: v3.1.1's io_ent spawns the player and sends a late "end"
+    // (events_end shows the end screen then); only the end screen itself never re-enters.
     const int respawn = client->in_game && client->me && !client->me->active;
     if (client->in_game && !respawn && !leave_spectate) return;
-    if (respawn && (client->spawn_requested || client->net_end_seconds >= 0)) return;
+    if (respawn && (client->spawn_requested || client->net_end_result != INT32_MIN)) return;
     if (respawn && client->net_death_time > 0.0 && glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;
 
     client->in_game = 1;
@@ -1092,9 +1211,10 @@ void client_enter_game(Client *client) {
     // setClass(classIndex, selectedSecondaryIndex): the Select Secondary pick (ui_loadout.c)
     NetEntPacket packet = {.class_index = client->menu_class_index, .secondary_index = ui_loadout_secondary(client->menu_class_index)};
     ui_loadout_cosmetics(&packet.cosmetics); // skin colour + cosmetic items, echoed back in SPAWN
-    // ent[6] = toggleSpect: the spectate byte only goes out when set (older servers take the short ENT).
+    // ent[6] = toggleSpect and ent[15] = slidCont ride after the cosmetics (NET_ENT_PACKET_V4_SIZE).
     packet.spectate = (uint8_t) spectate_requested();
-    const uint16_t ent_size = packet.spectate ? sizeof(packet) : (uint16_t) NET_ENT_PACKET_V3_SIZE;
+    packet.slid_cont = (uint8_t) (ui_controls_settings()->slid_cont ? 1 : 0); // ent[15] settings.tmp.slidCont ("Requires respawn")
+    const uint16_t ent_size = (uint16_t) NET_ENT_PACKET_V4_SIZE;
 
     if (client->offline && (packet.spectate || leave_spectate)) {
         // The offline game has no spectators: like v3.1.1's single player
@@ -1122,6 +1242,7 @@ static void client_tick_game(Client*, float, float);
 
 void client_tick(Client *client, const float now, const float delta) {
     html_ui_update(); // pumps the HTML engine and runs the bridge handlers (menu/play/...)
+    backend_frame(client); // brain HTTP / social socket delivery, account header, matchmaker (backend_startup.c)
     if (app_mode_frame(client, now, delta)) return; // hub/editor/viewer page: the game is frozen behind it (app_mode.c)
 
     // renderer.setClearColor(map.sky): the clear colour is GL state that other passes
@@ -1171,7 +1292,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // The scroll reset and the HUD-or-overlay choice below use the pointer lock as it was
     // before this frame's input sampling (as when the render ran first in the frame).
     const int was_locked = client->mouse_state.locked;
-    if (!was_locked) client->mouse_state.scroll_delta = 0;
+    if (!was_locked) client->mouse_state.scroll_delta = g_skip_scroll = 0;
 
 
     // v3.1.1 keeps the whole game loop running behind the menu (index.js gameLoop): the
@@ -1188,10 +1309,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
         client->mouse_state.last_pos.y = (float) menu_y;
     }
 
-    // KrunkNative dev hotkeys (F11, N) stay on fixed keys; not while typing in chat or the
+    // KrunkNative dev hotkeys (F11; N is premiumKeys[0] in ui_controls.c) stay on fixed keys; not while typing in chat or the
     // console. ` opens the developer console (ui_console.c); the map cycle packet it used
     // to send is the console command `cycle_packet`.
-    const int typing = menu_open || ui_controls_chat_focused();
+    const int typing = menu_open || ui_controls_chat_focused() || ui_text_input_focused();
 
     double x, y;
     glfwGetCursorPos(client->window, &x, &y);
@@ -1232,67 +1353,79 @@ static void client_tick_game(Client *client, const float now, const float frame_
         client_enter_game(client);
     }
 
-    const int noclip_key = !typing && glfwGetKey(client->window, GLFW_KEY_N);
+
+    // This frame's look movement: the cursor travel natively, the locked movement sums on the web.
+    float look_x = (float) x - client->mouse_state.last_pos.x;
+    float look_y = (float) y - client->mouse_state.last_pos.y;
+#ifdef __EMSCRIPTEN__
+    double web_x, web_y;
+    web_take_look(&web_x, &web_y);
+    look_x = (float) web_x;
+    look_y = (float) web_y;
+#endif
 
     if (client->me && client->me->active) {
         Input input = {0};
         vec2 mouse_delta = {0};
 
-        mouse_delta.x = (float) x - client->mouse_state.last_pos.x;
-        mouse_delta.y = (float) y - client->mouse_state.last_pos.y;
+        mouse_delta.x = look_x;
+        mouse_delta.y = look_y;
 
         input.move_dir = -1;
         input.delta = delta;
 
-        input.x_dir = client->me->direction.x;
-        input.y_dir = client->me->direction.y;
+        // Krunker's camera keeps the unrounded look (CONTROLS xDr/yDr) and only the input
+        // frame is rounded to 0.001 rad, so slow mouse movement still adds up.
+        // player_proc_input rounds, so build the input from a client-side copy. It resyncs
+        // whenever me->direction stops matching it (spawn, reconciliation, teleport, pose).
+        const Player *me = client->me;
+        const float look_pitch = CLAMP(player_round3(g_look.x), -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        if (!g_look_valid || fabsf(look_pitch - me->direction.x) > 1e-5f || fabsf(player_round3(g_look.y) - me->direction.y) > 1e-5f) {
+            g_look.x = me->direction.x;
+            g_look.y = me->direction.y;
+            g_look_valid = 1;
+        }
+        input.x_dir = g_look.x;
+        input.y_dir = g_look.y;
 
         if (client->mouse_state.locked && !menu_open) {
-            if (noclip_key && !client->last_noclip_key) client->me->noclip ^= 1;
 
             // Look (sensitivity/aim sensitivity/invertY), move binds, bound buttons and
             // the weapon keys (pressed this frame) from the keybind table (ui_controls.c).
             ui_controls_fill_input(client, &input, mouse_delta.x, mouse_delta.y);
             input_script_adjust_input(client, &input); // scripted look (tests)
 
+            // input[10] = wDG6 * scrollDirM: wheel up (wDG6 -1) steps back a slot, down forward;
+            // procInputs only scrolls when input[11] (a swap key) is 0. The wheel only reaches
+            // here when no bind uses it (bMoQ7, ui_controls_scroll_event).
             const int scroll_delta = client->mouse_state.scroll_delta;
-            if (!input.swap && scroll_delta) {
-                input.swap = weapon_scroll_swap(client->me, (scroll_delta > 0 ? -1 : 1) * ui_controls_scroll_dir());
-            }
+            input.scroll = (signed char) (scroll_delta ? (scroll_delta > 0 ? -1 : 1) * ui_controls_scroll_dir() : 0);
+            g_skip_scroll = scroll_delta != 0; // skipScroll: false before b9, then bMoQ7 when wDG6 was set
             client->mouse_state.scroll_delta = 0;
             client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
         }
+        g_look.x = CLAMP(input.x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        g_look.y = input.y_dir;
 
         input.seq = client->net_next_input_seq++;
-        player_queue_input(client->me, &input);
-
-        if (!client->game.is_local) { // offline the queued input above is all the authority needs
-            NetInputPacket packet;
-            net_packet_from_input(&packet, &input);
-
-            pthread_mutex_lock(&client->net_lock);
-            const int socket = client->net_socket;
-            pthread_mutex_unlock(&client->net_lock);
-
-            if (socket >= 0) client_net_send_packet(socket, NET_PACKET_INPUT, &packet, sizeof(packet));
-        }
+        player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame
+        client_recon_record(client, &input);    // tmpInpts + the "q" window (online only, net/recon.c)
 
         // The camera is posed after game_tick() below, once this input has moved the player.
     } else if (spectate_active()) {
         // window.Bf5: free cam / follow cams from the mouse and the move keys (spectate.c).
         // The branch runs every frame, so follow cams keep tracking behind the menu.
         const int look = client->mouse_state.locked && !menu_open;
-        spectate_tick(client, delta, look ? (float) x - client->mouse_state.last_pos.x : 0.0f,
-                      look ? (float) y - client->mouse_state.last_pos.y : 0.0f);
+        spectate_tick(client, delta, look ? look_x : 0.0f, look ? look_y : 0.0f);
     }
     ui_controls_end_frame(); // didPressed / aba6 / the wheel key last one input frame
 
     client->mouse_state.last_pos.x = (float) x;
     client->mouse_state.last_pos.y = (float) y;
-    client->last_noclip_key = noclip_key;
 
     // The world on the endAnim-scaled delta; the offline game's round/end clocks on real time.
     game_tick_world(&client->game, now, frame_delta, delta);
+    client_recon_after_tick(client); // this input's shot knockback, kept for replays (input.velObj)
 
     // Krunker poses the camera right after procInputs (index.js gameLoop: rotateCam with
     // recoil/landing bob/shake, moveCam, ADS zoom) and renders in the same frame, so this
@@ -1300,6 +1433,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (client->me && client->me->active) camera_feel_apply(client);
     menu_view_camera(client, delta); // no active player: pre-spawn menu camera / death chase cam
     camera_feel_update(MIN(delta, game_constants.max_delta)); // RENDER.updateShake(deltaMs)
+    for (size_t i = 0; i < client->game.player_count; i++) player_mesh_debug_log(client->game.players[i], now); // KRUNKNATIVE_PLAYER_LOG
 
     // World + first-person scene, then the native HUD / overlay (client_tick composites the page after).
     // resolution/antiAlias/aspectRatio/saturationn/hue: world + first-person passes go
@@ -1307,6 +1441,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     const int scene_target = !scenario && render_target_begin(client);
 
     if (!scenario) vfx_update(client, delta); // combat effects from this frame's game tick (vfx.c)
+    if (!scenario) ai_render_tick(client, delta); // AI meshes / orbs (ai_render.c), drawn by the world scene
 
     if (!scenario) {
         // textureAnim off: Krunker resets moving/framed textures to their first frame.

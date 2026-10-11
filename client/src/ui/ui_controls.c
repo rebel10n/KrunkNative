@@ -19,6 +19,7 @@
 #include <gamepad.h>  // Gamepad.active (controller: client/src/gamepad.c)
 #include <ui_mobile.h> // touch look (#mobileUI, client/src/ui/ui_mobile.c)
 #include <console.h>   // the developer console takes the keyboard while open (ui_console.c)
+#include <ui_terminal.h> // map terminals: "int" on the interact keys, #terminalInput typing (ui_terminal.c)
 #include <voice_chat.h> // voiceKey -> toggleRecord (client/src/voice.c)
 #include <GLFW/glfw3.h>
 #include <math.h>
@@ -198,7 +199,7 @@ static struct {
     float speed_lmt;         // speedLmt (gradSpeed); 1 = full speed
 } g_ctl = {
     .input_changer = -1,
-    .settings = {90.0f, 1, 1, 1, 1, 0, 0.8f, 1.0f, 1.0f},
+    .settings = {90.0f, 1, 1, 1, 1, 0, 0.8f, 1.0f, 1.0f, 1},
     // cntrlInput after the settings' set(): sensitivity*Cntrl x5, deadZoneL 0.3 (the
     // setting's val overrides cntrlInput's own 0.25), deadZoneR 0.25, triggerThres 0.1,
     // invertYCntrl off, vibration on, gradSpeed off.
@@ -615,9 +616,19 @@ void ui_controls_chat_focus(const int focused) {
     if (g_ctl.settings.shw_chat == 1) ui_controls_apply_chat_visibility();
 }
 
+int ui_text_input_focused(void) {
+    if (g_ctl.chat_focused || ui_terminal_focused()) return 1;
+    const HtmlElem el = html_dom_active_element();
+    if (!el) return 0;
+    char tag[16] = "", editable[16] = "";
+    html_dom_tag(el, tag, sizeof(tag));
+    if (!strcmp(tag, "input") || !strcmp(tag, "textarea") || !strcmp(tag, "select")) return 1;
+    return html_dom_get_attr(el, "contenteditable", editable, sizeof(editable)) >= 0 && strcmp(editable, "false");
+}
+
 // Typing in #chatInput or in the developer console (main.c: no hotkeys, chars to the page).
 int ui_controls_chat_focused(void) {
-    return g_ctl.chat_focused || ui_console_is_open();
+    return g_ctl.chat_focused || ui_console_is_open() || ui_terminal_focused();
 }
 
 static void chat_blur(void) {
@@ -703,7 +714,7 @@ static int pressed(const int id) {
 }
 
 int ui_controls_scoreboard_held(void) {
-    return !g_ctl.chat_focused && ui_controls_down(UI_CONTROL_BOARD);
+    return !ui_text_input_focused() && ui_controls_down(UI_CONTROL_BOARD);
 }
 
 // controls.keys[voiceKey]: -1 undefined (resetKeys empties keys), else the last state N()
@@ -751,8 +762,8 @@ static void press_button(Client *client, const int code) {
     Player *me = client ? client->me : NULL;
     if (!me || !me->active) return;
     if (bind_is(UI_CONTROL_SPRAY, code)) log_once(UI_CONTROL_SPRAY, "spray (int 0)");
-    if (bind_is(UI_CONTROL_INTERACT, code)) log_once(UI_CONTROL_INTERACT, "interact (int 1)");
-    if (bind_is(UI_CONTROL_INTERACT_SEC, code)) log_once(UI_CONTROL_INTERACT_SEC, "secondary interact (int 1, true)");
+    if (bind_is(UI_CONTROL_INTERACT, code)) ui_terminal_interact(client, 0);     // io.send("int", 1)
+    if (bind_is(UI_CONTROL_INTERACT_SEC, code)) ui_terminal_interact(client, 1); // io.send("int", 1, true)
     if (bind_is(UI_CONTROL_DROP, code)) log_once(UI_CONTROL_DROP, "drop (int 2)");
     if (bind_is(UI_CONTROL_INSPECT, code)) player_inspect_weapon(me); // Game.players.wInspect(player)
     for (int i = 0; i < 5; i++) {
@@ -766,12 +777,14 @@ static void press_button(Client *client, const int code) {
     for (int i = 0; i < TOGGLE_COUNT; i++) {
         if (bind_is(TOGGLE_FIRST + i, code)) flip_setting(g_ctl.toggle_sets[i]); // gG(i)
     }
-    if (bind_is(UI_CONTROL_PREMIUM0, code)) {
-        me->noclip ^= 1; // prmA 0 "Noclip": KrunkNative's own noclip toggle
-        printf("[controls] noclip %s\n", me->noclip ? "on" : "off");
-    }
-    for (int i = 1; i < 4; i++) {
-        if (bind_is(UI_CONTROL_PREMIUM0 + i, code)) log_once(UI_CONTROL_PREMIUM0 + i, "host action (prmA)");
+    // io.send("prmA", i): 0 noclip, 1 god, 2 kill, 3 smite. The server (or the offline game)
+    // decides and answers NET_CHEAT_NOCLIP / chat lines / notify; nothing flips locally, so the
+    // prediction and the authority always simulate the same flags. KrunkNative's N key
+    // (78, both GLFW and DOM keyCode) is an extra premiumKeys[0].
+    for (int i = 0; i < 4; i++) {
+        if (!bind_is(UI_CONTROL_PREMIUM0 + i, code) && !(i == 0 && code == 78)) continue;
+        const uint8_t index = (uint8_t) i;
+        client_net_send(client, NET_PACKET_PREMIUM_ACTION, &index, sizeof(index));
     }
 }
 
@@ -813,6 +826,7 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     }
 
     if (ui_console_key_event(client, key, scancode, action, mods)) return 1; // dev console + mods.ts keys (ui_console.c)
+    if (ui_terminal_focused()) return ui_terminal_key_event(client, key, scancode, action, mods, code >= 0 && bind_is(UI_CONTROL_CHAT, code));
 
     if (g_ctl.chat_focused) {
         if (press && code >= 0 && bind_is(UI_CONTROL_CHAT, code)) return chat_key(client);
@@ -837,6 +851,7 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
 
     if (action != GLFW_REPEAT) voice_key(client, code, press);
     if (menu || action == GLFW_REPEAT) return 0;
+    if (action == GLFW_PRESS && ui_text_input_focused()) return 0; // a field (any page) keeps the key: no game bind
     if (press && code >= 0 && bind_is(UI_CONTROL_CHAT, code) && chat_key(client)) return 1;
     if (press) press_code(client, code);
     else release_code(code);
@@ -856,6 +871,7 @@ int ui_controls_mouse_event(Client *client, const int button, const int action, 
         return 0;
     }
     if (action == GLFW_PRESS && ui_console_is_open()) return 1; // the console frees the pointer: no shot
+    if (ui_mod_keys_ctrl_tp_mouse(client, button, action)) return 1; // mods.ts Ctrl TP takes the left click
     if (action == GLFW_PRESS) {
         if (g_ctl.chat_focused) chat_blur(); // a click on the canvas leaves the chat
         // window.Bf5: left = spectMode(-1) (Prev [LM]), right = spectMode(1) (Next [RM])
@@ -932,11 +948,13 @@ void ui_controls_controller_key(Client *client, const int id, const int down) {
     if (!valid_id(id)) return;
     const int code = g_ctl.binds[id];
     if (down) {
+        const int typing = ui_text_input_focused();
         if (bind_is(UI_CONTROL_CHAT, code)) {
-            chat_key(client ? client : menu_ui()->client); // window.pressButton(chatKey)
+            // window.pressButton(chatKey): sends / blurs #chatInput; not from another field
+            if (!typing || g_ctl.chat_focused) chat_key(client ? client : menu_ui()->client);
             return;
         }
-        if (g_ctl.chat_focused) return; // document.activeElement == chatInput
+        if (typing) return; // document.activeElement == chatInput (KrunkNative: any text field)
     }
     controller_n(client, code, down);
 }
@@ -1015,22 +1033,11 @@ float ui_controls_speed_limit(void) {
 
 // ---------------------------------------------------------------- per-frame input
 
-// aba6 -> Input.swap (1 secondary, 2 melee, 3 equipment). KrunkNative's swap toggles a
-// category back to slot 0 when it is already in hand, so "primary" asks for the
-// category of the weapon in hand.
+// aba6 -> Input.swap, Krunker's input[11] codes as is: 1 swapSecondary, 2 swapMelee,
+// 3 primary (slot 0), 4 swapEquipment (player_proc_input).
 static int input_swap(const Player *me) {
-    switch (g_ctl.pending_swap) {
-        case 1: return 1;
-        case 2: return 2;
-        case 4: return 3;
-        case 3: {
-            if (!me || !me->game || me->loadout_index <= 0 || me->loadout_index >= me->loadout_size) return 0;
-            const Weapon *w = me->game->weapons[me->loadout[me->loadout_index]];
-            if (!w) return 0;
-            return w->secondary ? 1 : w->melee ? 2 : w->equipment ? 3 : 0;
-        }
-        default: return 0;
-    }
+    (void) me;
+    return g_ctl.pending_swap >= 1 && g_ctl.pending_swap <= 4 ? g_ctl.pending_swap : 0;
 }
 
 // The input-frame half of Krunker's loop (b9): look delta (CONTROLS.updateMouseInp:

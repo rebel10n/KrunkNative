@@ -4,6 +4,195 @@
     "port": 5432,
     "name": "krunknative",
     "user": "krunknative",
-    "password": "change-me"
+    "password": "change-me",
+    "pool_size": 4,
+    "connect_timeout_s": 5,
+    "statement_timeout_ms": 0,
+    "search_path": "",
+    "migrations_dir": "services/db/migrations"
+  },
+  "log": {
+    "level": "info",
+    "format": "text",
+    "file": ""
+  },
+  "brain": {
+    "host": "127.0.0.1",
+    "port": 5050,
+    "id": "",
+    "region": "local",
+    "public_url": "http://127.0.0.1:5050",
+    "internal_secret": "kn-dev-secret",
+    "join_secret": "",
+    "join_ttl_s": 30,
+    "cors_origins": [
+      "*"
+    ],
+    "trust_proxy": false,
+    "node_ttl_s": 30,
+    "heartbeat_s": 5,
+    "ping_interval_s": 10,
+    "host_timeout_s": 10,
+    "federation": true,
+    "regions": [
+      {
+        "id": "local",
+        "name": "Local"
+      },
+      {
+        "id": "us-nj",
+        "name": "New York"
+      },
+      {
+        "id": "de-fra",
+        "name": "Frankfurt"
+      },
+      {
+        "id": "sgp",
+        "name": "Singapore"
+      }
+    ],
+    "matchmaking": {
+      "cross_region": true,
+      "max_players": 8,
+      "soft_cap": 0,
+      "require_version": false,
+      "mode_caps": {}
+    },
+    "ranked": {
+      "enabled": true,
+      "min_level": 15,
+      "mode": 14,
+      "maps": [],
+      "rating_window": 150,
+      "window_growth": 10,
+      "window_max": 1000,
+      "k": 32,
+      "abandon_penalty": 30,
+      "cooldown_s": 7200,
+      "poll_timeout_s": 15,
+      "creating_timeout_s": 60,
+      "match_timeout_s": 1800,
+      "start_grace_s": 60
+    }
+  },
+  "accounts": {
+    "name_min": 3,
+    "name_max": 16,
+    "password_min": 6,
+    "password_max": 100,
+    "password_iterations": 600000,
+    "alias_min": 3,
+    "alias_max": 16,
+    "session_ttl_days": 30,
+    "max_sessions": 20,
+    "starting_kr": 0,
+    "free_premium": true,
+    "developers": [],
+    "moderators": [],
+    "login_throttle_s": 5,
+    "ip_block_failures": 100,
+    "ip_block_days": 5,
+    "register_per_ip_hour": 0,
+    "max_match_kr": 500,
+    "region_index": {
+      "local": 0,
+      "au-syd": 1,
+      "sgp": 2,
+      "jb-hnd": 2,
+      "blr": 2,
+      "de-fra": 3,
+      "us-nj": 4,
+      "us-ca-sv": 4,
+      "us-fl": 4
+    },
+    "rank_var": 0.03,
+    "trade_min_level": 20,
+    "trade_max_items": 10,
+    "gift_min_level": 30,
+    "gift_fee_percent": 10,
+    "market_fee_percent": 5,
+    "market_fee_bypass": 0,
+    "sale_max": 10000000,
+    "max_listings": 50,
+    "clan_tag_max": 4,
+    "clan_max_members": 0,
+    "post_max_len": 1024,
+    "comment_max_len": 500,
+    "chat_max_len": 300,
+    "page_size": 100,
+    "leaderboard_cache_s": 30,
+    "current_season": 3,
+    "reward_time_s": 21600,
+    "reward_min_level": 5,
+    "daily_reward_kr": 50,
+    "free_wheel_cooldown_s": 21600,
+    "skins_file": "assets/skins.json",
+    "assets_dir": "assets"
+  },
+  "gameserver": {
+    "region": "local",
+    "node_id": "LOC",
+    "name": "KrunkNative",
+    "listen_host": "0.0.0.0",
+    "listen_port": 21015,
+    "public_host": "127.0.0.1",
+    "public_port": 0,
+    "web_url": "",
+    "brain_http_url": "",
+    "brain_url": "",
+    "brain_secret": "kn-dev-secret",
+    "join_secret": "",
+    "require_ticket": false,
+    "allow_guests": true,
+    "join_timeout": 5,
+    "tick_rate": 30,
+    "max_players": 8,
+    "mode_max_players": {
+      "tdm": 10,
+      "ctf": 10
+    },
+    "team_size": 0,
+    "mode_team_size": {},
+    "maps": [],
+    "modes": [
+      "ffa"
+    ],
+    "custom_map_dirs": [],
+    "round_seconds": 0,
+    "mode_round_seconds": {},
+    "game": {
+      "gameTime": 4,
+      "lives": 0,
+      "scoreLimit": 0,
+      "gravMlt": 1,
+      "jumpMlt": 1,
+      "hpRegen": true,
+      "allowSpect": true
+    },
+    "custom_games": true,
+    "motd": [
+      "Welcome to KrunkNative, $!"
+    ],
+    "join_message": "$ joined the game",
+    "leave_message": "$ left the game",
+    "billboards": [
+      {
+        "txt": "Your Ad Here",
+        "txtCol": "#e3e3e3",
+        "bgCol": "#000000"
+      }
+    ],
+    "billboards_file": "",
+    "idle_kick_seconds": 60,
+    "idle_move_threshold": 1,
+    "perms": false,
+    "cheats": "auth",
+    "ops": [],
+    "bans_file": "config/bans.json",
+    "earn_kr": true,
+    "kr_cap": 30,
+    "kr_cap_premium": 40,
+    "kr_multiplier": 1
   }
 }

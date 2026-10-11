@@ -191,3 +191,18 @@
   background:
     linear-gradient(135deg, transparent 0 6px, #9a9a9a 6px 7px, transparent 7px 9px, #9a9a9a 9px 10px, transparent 10px 12px, #9a9a9a 12px 13px, transparent 13px);
 }
+
+/* KrunkNative tweak (not in devConsole.ts), at the user's request (doc/console.md): in
+ * v3.1.1 main.css's `* { color: #353535 }` beats the colour .hintItem would inherit from
+ * .hints, so the inactive autocomplete rows are #353535 on #6f6f6f (Chrome and the native
+ * engine alike). The rows take the mod's intended .hints colour instead, and the argument
+ * text (.hintMeta) is a little lighter than its #b8b8b8. */
+#devConsoleOverlay .hintItem { color: inherit; }
+#devConsoleOverlay .hintMeta { color: #cccccc; }
+
+/* KrunkNative: the row picked with Up/Down (ui_console.c hint_sel_*; Tab/Enter accept it)
+ * stands out from .isActive's default first-match highlight. */
+#devConsoleOverlay .hintItem.isSelected {
+  background: #2f6fb0;
+  color: #ffffff;
+}

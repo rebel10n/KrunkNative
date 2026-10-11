@@ -18,11 +18,65 @@
 import net from "net";
 import type { IncomingMessage } from "http";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import { forwardedFrame, peerAddress } from "./utils";
 
 export const WEB_WS_PATH = process.env.KRUNK_NATIVE_WEB_WS_PATH || "/native";
 export const NATIVE_HOST = process.env.KRUNK_NATIVE_HOST || "127.0.0.1";
 export const NATIVE_PORT =
   Number.parseInt(process.env.KRUNK_NATIVE_PORT || "21015", 10) || 21015;
+
+/**
+ * Brain matchmaking (KrunkNative backend): the page asks for a specific game server
+ * with `/native?target=host:port` (the native TCP endpoint the brain's /mm/seek-game
+ * returned). Only allowlisted targets are bridged, so the bridge is not an open TCP
+ * proxy: KRUNK_NATIVE_TARGETS is a comma list of `host:port`, `host:lo-hi` or
+ * `host:*`; the default is NATIVE_HOST with ports NATIVE_PORT .. NATIVE_PORT+63 (the
+ * local game servers `make backend-up` starts). No `target` = NATIVE_HOST:NATIVE_PORT.
+ */
+type TargetRule = { host: string; lo: number; hi: number };
+
+function parseTargetRules(spec: string): TargetRule[] {
+  const rules: TargetRule[] = [];
+  for (const raw of spec.split(",")) {
+    const item = raw.trim();
+    const colon = item.lastIndexOf(":");
+    if (colon <= 0) continue;
+    const host = item.slice(0, colon).toLowerCase();
+    const ports = item.slice(colon + 1);
+    if (ports === "*") {
+      rules.push({ host, lo: 1, hi: 65535 });
+      continue;
+    }
+    const [a, b] = ports.split("-");
+    const lo = Number.parseInt(a, 10);
+    const hi = b === undefined ? lo : Number.parseInt(b, 10);
+    if (Number.isFinite(lo) && Number.isFinite(hi) && lo > 0 && hi >= lo) rules.push({ host, lo, hi });
+  }
+  return rules;
+}
+
+const TARGET_RULES = parseTargetRules(
+  process.env.KRUNK_NATIVE_TARGETS || `${NATIVE_HOST}:${NATIVE_PORT}-${NATIVE_PORT + 63}`,
+);
+
+function resolveTarget(req: IncomingMessage): { host: string; port: number } | null {
+  let target: string | null = null;
+  try {
+    target = new URL(req.url || "/", "http://bridge").searchParams.get("target");
+  } catch (_err) {
+    target = null;
+  }
+  if (!target) return { host: NATIVE_HOST, port: NATIVE_PORT };
+  const colon = target.lastIndexOf(":");
+  if (colon <= 0) return null;
+  const host = target.slice(0, colon).replace(/^\[|\]$/g, "").toLowerCase();
+  const port = Number.parseInt(target.slice(colon + 1), 10);
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
+  for (const rule of TARGET_RULES) {
+    if (rule.host === host && port >= rule.lo && port <= rule.hi) return { host, port };
+  }
+  return null;
+}
 
 // Stop reading from TCP while the browser is this far behind, resume below it.
 const WS_HIGH_WATER = 1 << 20;
@@ -71,7 +125,13 @@ function endSession(session: PassthroughSession, why: string): void {
 
 function handleConnection(ws: WebSocket, req: IncomingMessage): void {
   const remote = `${req.socket.remoteAddress || "?"}:${req.socket.remotePort || "?"}`;
-  const tcp = net.createConnection({ host: NATIVE_HOST, port: NATIVE_PORT });
+  const target = resolveTarget(req);
+  if (!target) {
+    console.warn(`[web-bridge] ${remote} refused: target not allowed (${req.url})`);
+    closeWs(ws, 1008, "target not allowed");
+    return;
+  }
+  const tcp = net.createConnection({ host: target.host, port: target.port });
   const session: PassthroughSession = {
     id: nextSessionId++,
     ws,
@@ -82,13 +142,14 @@ function handleConnection(ws: WebSocket, req: IncomingMessage): void {
   };
   sessions.add(session);
   console.info(
-    `[web-bridge] #${session.id} ${remote} -> tcp ${NATIVE_HOST}:${NATIVE_PORT}`,
+    `[web-bridge] #${session.id} ${remote} -> tcp ${target.host}:${target.port}`,
   );
 
   tcp.setNoDelay(true);
 
   tcp.on("connect", () => {
     session.tcpConnected = true;
+    tcp.write(forwardedFrame(peerAddress(req))); // before any browser byte: who this really is
     for (const chunk of session.pending) tcp.write(chunk);
     session.pending.length = 0;
   });

@@ -178,7 +178,7 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .lives = 1, .teams = 1, .no_dead_chat = 1, .no_kill_feed = 1, .team_options = {"Innocent", "Traitor"},
         .team_colors = {"#37ad47", "#d13838"}, .show_team = 1, .no_regen = 1, .fake_names = 1, .no_score_k = 1,
         .dmg_team = 1, .win_condition = mode_win_lives, .condition = mode_cond_teams_alive, WAIT(k_wait_trai),
-        .no_reward = 1, .min_players = 3},
+        .no_reward = 1, .min_players = 3, .on_kill = mode_kill_trai},
     [MODE_ID_RAID] = {BASE, .id = MODE_ID_RAID, .key = "raid", .name = "Raid", .alias = "raid",
         .send_rate = 5, .end_stats = k_stats_raid, .prevent_custom = 1, .show_ms = 1, .no_regen = 1, .lives = 1,
         .game_time = 360.0f, .min_players = 1, WAIT(k_wait_raid), .condition = mode_cond_raid,

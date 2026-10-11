@@ -1,0 +1,5 @@
+# Edges: server_bin instances only. The hosts also run abulxt's relays (nginx on
+# 80/443/8080, wispurr :6001, OpenResty): nothing of theirs is managed here.
+kn_release_bins: [server_bin]
+kn_release_migrations: false
+kn_release_assets: [maps]

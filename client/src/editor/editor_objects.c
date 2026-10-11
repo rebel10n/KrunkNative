@@ -550,6 +550,7 @@ void ed_obj_free(EditorObject *o) {
     obj_drop_render(o);
     cJSON_Delete(o->data);
     cJSON_Delete(o->history);
+    cJSON_Delete(o->scratch);
     free(o);
 }
 
@@ -706,42 +707,77 @@ cJSON *ed_obj_serialize(const EditorObject *o) {
     return cJSON_Duplicate(o->data, 1);
 }
 
-void ed_obj_duplicate(void) {
-    EditorGroup *group = g_ed.selected ? ed_group_of(g_ed.selected) : NULL;
-    if (group) {
-        // duplicateGroup: copy the members and a new placeholder
-        ed_obj_copy(0, 1);
-        ed_obj_paste();
+void ed_duplicate_object(EditorObject *e) {
+    // duplicateObject(e): clone, add and select
+    if (!(e = e ? e : g_ed.selected)) return;
+    EditorObject *copy = ed_obj_new(e->data, 0);
+    ed_obj_add(copy, 0, 1);
+}
+
+void ed_duplicate_group(EditorObject *e) {
+    // duplicateGroup(e): copies of the members, a copy of the placeholder, then
+    // createGroup(<the new placeholder>, copies) fits a fresh placeholder around them
+    if (!g_ed.group_count) return;
+    if (!(e = e ? e : g_ed.selected) || !ed_group_of(e)) {
+        editor_message("You cant duplicate a group that doesnt exist");
         return;
     }
-    if (!g_ed.selected) return;
-    EditorObject *copy = ed_obj_new(g_ed.selected->data, 0);
-    ed_obj_add(copy, 0, 1);
+    const EditorGroup *g = ed_group_of(e);
+    EditorObject **copies = calloc(g->count ? g->count : 1, sizeof(EditorObject *));
+    if (!copies) return;
+    size_t n = 0;
+    for (size_t i = 0; i < g_ed.count; i++) {
+        EditorObject *m = g_ed.objects[i];
+        int member = 0;
+        for (size_t k = 0; k < g->count && !member; k++) member = g->objects[k] == m->uuid;
+        if (member && n < g->count) copies[n++] = m;
+    }
+    for (size_t i = 0; i < n; i++) {
+        copies[i] = ed_obj_new(copies[i]->data, 0);
+        ed_obj_add(copies[i], 1, 1);
+    }
+    ed_duplicate_object(e);
+    ed_create_group(g_ed.selected, copies, n, 0, 1);
+    free(copies);
+}
+
+void ed_obj_duplicate(void) {
+    if (g_ed.selected && ed_group_of(g_ed.selected)) ed_duplicate_group(NULL);
+    else ed_duplicate_object(NULL);
+}
+
+static void group_drop(EditorGroup *g) {
+    // delete this.objGroups[uuid]
+    free(g->objects);
+    const size_t index = (size_t) (g - g_ed.groups);
+    memmove(&g_ed.groups[index], &g_ed.groups[index + 1], (g_ed.group_count - index - 1) * sizeof(EditorGroup));
+    g_ed.group_count--;
+}
+
+void ed_remove_group(EditorObject *e) {
+    // removeGroup(e): the members and the placeholder
+    if (!g_ed.group_count || !(e = e ? e : g_ed.selected)) return;
+    EditorGroup *group = ed_group_of(e);
+    if (!group) return;
+    for (size_t i = 0; i < group->count; i++) {
+        EditorObject *m = ed_obj_find(group->objects[i]);
+        if (m) ed_obj_remove(m, 1, 1);
+    }
+    group_drop(group);
+    ed_obj_remove(e, 0, 1);
 }
 
 void ed_obj_delete_selected(void) {
     EditorObject *o = g_ed.selected;
     if (!o) return;
-    EditorGroup *group = ed_group_of(o);
-    if (group) {
-        // removeGroup: members first, then the placeholder
-        for (size_t i = 0; i < group->count; i++) {
-            EditorObject *m = ed_obj_find(group->objects[i]);
-            if (m) ed_obj_remove(m, 1, 1);
-        }
-        const uint32_t owner = group->owner;
-        ed_group_stop(0);
-        EditorObject *p = ed_obj_find(owner);
-        if (p) ed_obj_remove(p, 0, 1);
-        return;
-    }
-    ed_obj_remove(o, 0, 1);
+    if (ed_group_of(o)) ed_remove_group(o);
+    else ed_obj_remove(o, 0, 1);
 }
 
 void ed_obj_create(const int prefab) {
     if (prefab < 0 || prefab >= EDITOR_PREFAB_COUNT) return;
     if (prefab == ED_PREFAB_CUSTOM_ASSET) {
-        editor_message("Custom assets are loaded from the Krunker asset server, which KrunkNative does not use.");
+        ed_net_view_assets(0); // createObjects[CUSTOM_ASSET]: viewAssets() (editor_net.c)
         return;
     }
     const vec3 p = editor_setting_bool("createObjectNear") ? editor_near_position() : (vec3) {0};
@@ -754,14 +790,32 @@ void ed_obj_create(const int prefab) {
 }
 
 void ed_obj_create_placeholder(void) {
-    // createPlaceholder: a placeholder object at the near position (P key)
-    const vec3 p = editor_near_position();
+    // createPlaceholder: p = camera position - 10 on Y, s = [10, 10, 10] (P key)
+    const vec3 cam = g_ed.camera.position;
     cJSON *d = cJSON_CreateObject();
     cJSON_AddNumberToObject(d, "i", ED_PREFAB_PLACEHOLDER);
-    cJSON_AddItemToObject(d, "p", vec_json(p, 2));
+    cJSON_AddItemToObject(d, "p", vec_json((vec3) {cam.x, cam.y - 10, cam.z}, 2));
+    cJSON_AddItemToObject(d, "s", vec_json((vec3) {10, 10, 10}, 2));
     EditorObject *o = ed_obj_new(d, 0);
     cJSON_Delete(d);
     ed_obj_add(o, 0, 1);
+}
+
+void ed_obj_toggle_prop_group(const char *prop) {
+    // objectSelected(true) ? togglePropGroup(prop) : toggleProp(prop)
+    const EditorGroup *g = ed_group_of(g_ed.selected);
+    if (!g) {
+        ed_obj_toggle_prop(prop);
+        return;
+    }
+    EditorObject *keep = g_ed.selected;
+    for (size_t i = 0; i < g->count; i++) {
+        EditorObject *m = ed_obj_find(g->objects[i]);
+        if (!m) continue;
+        g_ed.selected = m;
+        ed_obj_toggle_prop(prop);
+    }
+    g_ed.selected = keep;
 }
 
 void ed_obj_toggle_prop(const char *prop) {
@@ -792,94 +846,121 @@ void ed_obj_flip_xz(void) {
 }
 
 // ---------------------------------------------------------------------------
-// copy / paste (copyObjects / pasteObjects): objects are stored relative to the
-// selection centre and pasted around the near position.
+// copy / paste / groups (copyObjects / copyGroup / pasteObjects / stopGroup): v3.1.1
+// works on a placeholder stretched over objects. copyObjects copies (or cuts, or groups)
+// every object whose bounding box intersects the selected one; the copy keeps absolute
+// positions and pasteObjects puts it in place of the selected object as a group
+// (replaceObject(e, copy, true, false, true)).
 
-static void bounds_center(cJSON *arr, vec3 *center) {
-    vec3 lo = {1e9f, 1e9f, 1e9f}, hi = {-1e9f, -1e9f, -1e9f};
-    const cJSON *it;
-    cJSON_ArrayForEach(it, arr) {
-        const cJSON *p = ed_json_path(it, "p");
-        if (cJSON_GetArraySize(p) < 3) continue;
-        const float x = (float) value_num(cJSON_GetArrayItem(p, 0)), y = (float) value_num(cJSON_GetArrayItem(p, 1)), z = (float) value_num(cJSON_GetArrayItem(p, 2));
-        lo.x = fminf(lo.x, x); lo.y = fminf(lo.y, y); lo.z = fminf(lo.z, z);
-        hi.x = fmaxf(hi.x, x); hi.y = fmaxf(hi.y, y); hi.z = fmaxf(hi.z, z);
+static void world_aabb(const EditorObject *o, vec3 *lo, vec3 *hi) {
+    // detectCollisionCubes: boundingBox.applyMatrix4(matrixWorld) (an AABB of the rotated box)
+    float m[16];
+    ed_obj_world_box(o, m);
+    *lo = (vec3) {1e30f, 1e30f, 1e30f};
+    *hi = (vec3) {-1e30f, -1e30f, -1e30f};
+    for (int i = 0; i < 8; i++) {
+        const float x = (i & 1) ? 0.5f : -0.5f, y = (i & 2) ? 0.5f : -0.5f, z = (i & 4) ? 0.5f : -0.5f;
+        const float w[3] = {m[0] * x + m[1] * y + m[2] * z + m[3], m[4] * x + m[5] * y + m[6] * z + m[7], m[8] * x + m[9] * y + m[10] * z + m[11]};
+        lo->x = fminf(lo->x, w[0]); lo->y = fminf(lo->y, w[1]); lo->z = fminf(lo->z, w[2]);
+        hi->x = fmaxf(hi->x, w[0]); hi->y = fmaxf(hi->y, w[1]); hi->z = fmaxf(hi->z, w[2]);
     }
-    *center = (vec3) {(lo.x + hi.x) / 2.0f, lo.y, (lo.z + hi.z) / 2.0f}; // findCenter: x/z centre, lowest y
+}
+
+static int boxes_intersect(const EditorObject *a, const EditorObject *b) {
+    vec3 al, ah, bl, bh;
+    world_aabb(a, &al, &ah);
+    world_aabb(b, &bl, &bh);
+    return !(ah.x < bl.x || al.x > bh.x || ah.y < bl.y || al.y > bh.y || ah.z < bl.z || al.z > bh.z);
+}
+
+int ed_is_grouped(const uint32_t uuid) {
+    // isGrouped: a member or the owner of any group
+    for (size_t i = 0; i < g_ed.group_count; i++) {
+        if (g_ed.groups[i].owner == uuid) return 1;
+        for (size_t k = 0; k < g_ed.groups[i].count; k++) if (g_ed.groups[i].objects[k] == uuid) return 1;
+    }
+    return 0;
+}
+
+static void set_copy(cJSON *arr) {
+    cJSON_Delete(g_ed.copy);
+    g_ed.copy = arr; // this.copy = JSON.stringify(r)
+}
+
+void ed_copy_objects(const int cut, const int group, EditorObject *sel) {
+    if (!(sel = sel ? sel : g_ed.selected)) {
+        editor_message("Stretch a cube over your objects then try again");
+        return;
+    }
+    if (group && ed_group_of(sel)) {
+        editor_message("You cant combine groups");
+        return;
+    }
+    EditorObject **hit = calloc(g_ed.count ? g_ed.count : 1, sizeof(EditorObject *));
+    if (!hit) return;
+    size_t n = 0;
+    for (size_t i = 0; i < g_ed.count; i++) {
+        EditorObject *o = g_ed.objects[i];
+        if (o == sel || !boxes_intersect(o, sel)) continue;
+        if (group && ed_is_grouped(o->uuid)) {
+            editor_message("You cant combine groups");
+            free(hit);
+            return;
+        }
+        hit[n++] = o;
+    }
+    if (group) {
+        ed_create_group(sel, hit, n, 0, 1); // createGroup(i, a)
+    } else {
+        cJSON *arr = cJSON_CreateArray();
+        for (size_t i = 0; i < n; i++) cJSON_AddItemToArray(arr, ed_obj_serialize(hit[i]));
+        if (cut) for (size_t i = 0; i < n; i++) ed_obj_remove(hit[i], 1, 1);
+        set_copy(arr);
+    }
+    free(hit);
+}
+
+cJSON *ed_copy_group(EditorObject *e) {
+    // copyGroup(e): the members of the selected group (returns the copy, borrowed)
+    if (!g_ed.group_count || !(e = e ? e : g_ed.selected)) return NULL;
+    const EditorGroup *g = ed_group_of(e);
+    if (!g) return NULL;
+    cJSON *arr = cJSON_CreateArray();
+    for (size_t i = 0; i < g_ed.count; i++) {
+        for (size_t k = 0; k < g->count; k++) {
+            if (g->objects[k] == g_ed.objects[i]->uuid) {
+                cJSON_AddItemToArray(arr, ed_obj_serialize(g_ed.objects[i]));
+                break;
+            }
+        }
+    }
+    set_copy(arr);
+    return arr;
 }
 
 void ed_obj_copy(const int cut, const int as_group) {
-    cJSON *arr = cJSON_CreateArray();
-    EditorObject *sel = g_ed.selected;
-    EditorGroup *group = sel ? ed_group_of(sel) : NULL;
-    if (as_group && !group && g_ed.pending_count) {
-        ed_group_create();
-        cJSON_Delete(arr);
-        return;
-    }
-    if (group) {
-        for (size_t i = 0; i < group->count; i++) {
-            EditorObject *m = ed_obj_find(group->objects[i]);
-            if (m) cJSON_AddItemToArray(arr, ed_obj_serialize(m));
-        }
-    } else if (g_ed.pending_count) {
-        for (size_t i = 0; i < g_ed.pending_count; i++) {
-            EditorObject *m = ed_obj_find(g_ed.pending_group[i]);
-            if (m) cJSON_AddItemToArray(arr, ed_obj_serialize(m));
-        }
-    } else if (sel) {
-        cJSON_AddItemToArray(arr, ed_obj_serialize(sel));
-    }
-    if (!cJSON_GetArraySize(arr)) {
-        cJSON_Delete(arr);
-        return;
-    }
-    vec3 c;
-    bounds_center(arr, &c);
-    cJSON *it;
-    cJSON_ArrayForEach(it, arr) {
-        cJSON *p = cJSON_GetObjectItemCaseSensitive(it, "p");
-        cJSON_SetNumberValue(cJSON_GetArrayItem(p, 0), ed_round(value_num(cJSON_GetArrayItem(p, 0)) - c.x, 2));
-        cJSON_SetNumberValue(cJSON_GetArrayItem(p, 1), ed_round(value_num(cJSON_GetArrayItem(p, 1)) - c.y, 2));
-        cJSON_SetNumberValue(cJSON_GetArrayItem(p, 2), ed_round(value_num(cJSON_GetArrayItem(p, 2)) - c.z, 2));
-    }
-    cJSON_Delete(g_ed.copy);
-    g_ed.copy = arr;
-    char *text = cJSON_PrintUnformatted(arr);
-    if (text) {
-        ed_clipboard_copy(text); // Krunker copies the JSON to the system clipboard too
-        free(text);
-    }
-    if (cut) {
-        if (group) ed_obj_delete_selected();
-        else if (g_ed.pending_count) {
-            for (size_t i = 0; i < g_ed.pending_count; i++) {
-                EditorObject *m = ed_obj_find(g_ed.pending_group[i]);
-                if (m) ed_obj_remove(m, 1, 1);
-            }
-            g_ed.pending_count = 0;
-        } else ed_obj_remove(sel, 0, 1);
-    }
+    // ctrl+C / advancedOptions.copy: objectSelected(true) ? copyGroup() : copyObjects();
+    // cut: copyObjects(true); create: copyObjects(false, true)
+    if (!cut && !as_group && g_ed.selected && ed_group_of(g_ed.selected)) ed_copy_group(NULL);
+    else ed_copy_objects(cut, as_group, NULL);
 }
 
-void ed_obj_paste(void) {
-    if (!g_ed.copy) return;
-    const vec3 at = g_ed.selected ? ed_obj_vec(g_ed.selected, "p", (vec3) {0}) : editor_near_position();
-    EditorObject *last = NULL;
-    const cJSON *it;
-    cJSON_ArrayForEach(it, g_ed.copy) {
-        EditorObject *o = ed_obj_new(it, 0);
-        if (!o) continue;
-        const vec3 p = ed_obj_vec(o, "p", (vec3) {0});
-        ed_obj_set_vec(o, "p", (vec3) {p.x + at.x, p.y + at.y, p.z + at.z});
-        ed_obj_add(o, 1, 1);
-        last = o;
+void ed_paste_objects(EditorObject *e) {
+    e = e ? e : g_ed.selected;
+    if (!g_ed.copy) {
+        editor_message("Please copy objects first");
+        return;
     }
-    if (last && cJSON_GetArraySize(g_ed.copy) == 1) ed_obj_select(last);
+    if (!e) {
+        editor_message("Select a object you would like to replace with your copied objects");
+        return;
+    }
+    char *text = cJSON_PrintUnformatted(g_ed.copy);
+    if (text) ed_obj_replace(e, text, NULL, 1);
+    free(text);
 }
 
-// ---------------------------------------------------------------------------
-// groups (placeholder owners, editor.js createGroup / updateGroups / stopGroup)
+void ed_obj_paste(void) { ed_paste_objects(NULL); }
 
 EditorGroup *ed_group_of(const EditorObject *owner) {
     if (!owner) return NULL;
@@ -889,69 +970,59 @@ EditorGroup *ed_group_of(const EditorObject *owner) {
     return NULL;
 }
 
-void ed_group_create(void) {
-    if (!g_ed.pending_count) {
-        editor_message("Select objects with Group Selection first (N).");
-        return;
-    }
-    vec3 lo = {1e9f, 1e9f, 1e9f}, hi = {-1e9f, -1e9f, -1e9f};
-    size_t members = 0;
-    for (size_t i = 0; i < g_ed.pending_count; i++) {
-        EditorObject *m = ed_obj_find(g_ed.pending_group[i]);
-        if (!m) continue;
-        const vec3 p = ed_obj_vec(m, "p", (vec3) {0});
-        const vec3 s = ed_obj_vec(m, "s", (vec3) {1, 1, 1});
-        lo.x = fminf(lo.x, p.x - s.x / 2); hi.x = fmaxf(hi.x, p.x + s.x / 2);
-        lo.y = fminf(lo.y, p.y); hi.y = fmaxf(hi.y, p.y + s.y);
-        lo.z = fminf(lo.z, p.z - s.z / 2); hi.z = fmaxf(hi.z, p.z + s.z / 2);
-        members++;
-    }
-    if (!members) return;
-    cJSON *d = cJSON_CreateObject();
-    cJSON_AddNumberToObject(d, "i", ED_PREFAB_PLACEHOLDER);
-    cJSON_AddItemToObject(d, "p", vec_json((vec3) {(lo.x + hi.x) / 2, lo.y, (lo.z + hi.z) / 2}, 2));
-    cJSON_AddItemToObject(d, "s", vec_json((vec3) {hi.x - lo.x, hi.y - lo.y, hi.z - lo.z}, 2));
-    EditorObject *owner = ed_obj_new(d, 0);
-    cJSON_Delete(d);
-    ed_obj_add(owner, 1, 1);
+void ed_group_create(void) { ed_copy_objects(0, 1, NULL); } // advancedOptions.create
 
-    EditorGroup *groups = realloc(g_ed.groups, (g_ed.group_count + 1) * sizeof(EditorGroup));
-    if (!groups) return;
-    g_ed.groups = groups;
-    EditorGroup *g = &g_ed.groups[g_ed.group_count++];
-    memset(g, 0, sizeof(*g));
-    g->owner = owner->uuid;
-    g->objects = calloc(members, sizeof(uint32_t));
-    for (size_t i = 0; i < g_ed.pending_count && g->objects; i++) {
-        EditorObject *m = ed_obj_find(g_ed.pending_group[i]);
-        if (m) {
-            g->objects[g->count++] = m->uuid;
-            m->highlighted = 0;
+void ed_group_from_pending(void) {
+    // updateGroupSelection (Group Selection turned off with picked objects):
+    // createGroup(null, picked, 0, false)
+    if (!g_ed.pending_count) return;
+    EditorObject **list = calloc(g_ed.pending_count, sizeof(EditorObject *));
+    if (!list) return;
+    size_t n = 0;
+    for (size_t i = 0; i < g_ed.count; i++) {
+        EditorObject *o = g_ed.objects[i];
+        int picked = 0;
+        for (size_t k = 0; k < g_ed.pending_count && !picked; k++) picked = g_ed.pending_group[k] == o->uuid;
+        if (!picked) continue;
+        o->highlighted = 0;
+        if (ed_is_grouped(o->uuid)) {
+            editor_message("You cant combine groups");
+            free(list);
+            return;
         }
+        list[n++] = o;
     }
-    g->pos = ed_obj_vec(owner, "p", (vec3) {0});
-    g->scale = ed_obj_vec(owner, "s", (vec3) {1, 1, 1});
-    g->rot_y = 0.0f;
     g_ed.pending_count = 0;
-    g_ed.group_selection = 0;
-    editor_update_group_selection();
-    ed_obj_select(owner);
+    if (!n) editor_message("Nothing to Group");
+    else ed_create_group(NULL, list, n, 0, 0);
+    free(list);
 }
 
 void ed_group_stop(const int all) {
-    if (all) {
-        for (size_t i = 0; i < g_ed.group_count; i++) free(g_ed.groups[i].objects);
-        free(g_ed.groups);
-        g_ed.groups = NULL;
-        g_ed.group_count = 0;
+    // stopGroup(e): the selected group's placeholder goes, its members stay; all: every
+    // placeholder that owns a group
+    if (!g_ed.group_count) {
+        editor_message("You cant stop a group that doesnt exist");
         return;
     }
-    EditorGroup *g = ed_group_of(g_ed.selected);
-    if (!g) return;
-    free(g->objects);
-    const size_t index = (size_t) (g - g_ed.groups);
-    memmove(&g_ed.groups[index], &g_ed.groups[index + 1], (g_ed.group_count - index - 1) * sizeof(EditorGroup));
-    g_ed.group_count--;
+    if (!all) {
+        EditorObject *sel = g_ed.selected;
+        EditorGroup *g = ed_group_of(sel);
+        if (!g) {
+            editor_message("You cant stop a group that doesnt exist");
+            return;
+        }
+        group_drop(g);
+        ed_obj_remove(sel, 0, 1);
+        return;
+    }
+    while (g_ed.group_count) {
+        EditorObject *owner = ed_obj_find(g_ed.groups[g_ed.group_count - 1].owner);
+        group_drop(&g_ed.groups[g_ed.group_count - 1]);
+        if (owner) ed_obj_remove(owner, 0, 1);
+    }
+    free(g_ed.groups);
+    g_ed.groups = NULL;
 }
 
 void ed_groups_sync(void) {

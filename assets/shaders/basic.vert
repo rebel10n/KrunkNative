@@ -1,6 +1,8 @@
 #version 450 core
 layout (location = 0) in vec3 v_pos;
 layout (location = 1) in vec2 v_tex_coord;
+// three.js vertexColors (ladders, prefab.c): only read when the material sets use_vertex_color
+layout (location = 2) in vec3 v_color;
 
 out vec2 tex_coord;
 out vec3 world_pos;
@@ -8,6 +10,7 @@ out vec3 local_pos;
 out float view_depth;
 out vec4 shadow_coord;
 out float vertex_shade;
+out vec3 vertex_color;
 flat out int face_idx;
 
 uniform mat4 transform;
@@ -22,6 +25,7 @@ uniform float liquid_value;  // liquidVal at the last 50 ms liquid update
 
 void main() {
     tex_coord = v_tex_coord;
+    vertex_color = v_color;
     local_pos = v_pos; // unit cube/plane position, for the Krunker UV modes in basic.frag
     face_idx = gl_VertexID / 4; // cube face (4 vertices per face, see loaders.c cube_vertices)
     // noise-plane bumps (31.js generatePlane noise): raised vertices (z >= 1) carry the darker colour

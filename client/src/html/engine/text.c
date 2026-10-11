@@ -224,7 +224,26 @@ static TextFace *text_add_face(TextSystem *ts, const char *family, const char *p
     return f;
 }
 
+/* Bundled symbol fallback (ui/css/fonts/kn-symbols.ttf, an OFL subset of
+ * Adwaita Mono Regular: arrows, misc technical, box drawing, blocks,
+ * geometric shapes, misc symbols, dingbats, misc symbols and arrows).  Chrome
+ * draws these from system fonts; on the reference machine its fontconfig
+ * fallback for e.g. U+2715 (the dev console close button) is Adwaita Mono
+ * (synthetic bold when bold).  Listed first so the glyph does not depend on
+ * which system fonts a machine has. */
+static void text_add_bundled_symbols(TextSystem *ts) {
+    char path[1024];
+    const size_t n = strlen(ts->ui_dir);
+    snprintf(path, sizeof path, "%s%scss/fonts/kn-symbols.ttf", ts->ui_dir, n && ts->ui_dir[n - 1] == '/' ? "" : "/");
+    if (ts->fallback_count < 8 && file_exists(path)) {
+        TextFace *f = text_add_face(ts, "fallback-symbols", path, 400, TEXT_STYLE_NORMAL, 1);
+        if (f) ts->fallback[ts->fallback_count++] = f;
+    }
+}
+
 static void text_add_fallbacks(TextSystem *ts) {
+    text_add_bundled_symbols(ts);
+    const int bundled = ts->fallback_count;
     const char *env = getenv("KRUNKNATIVE_HTML_FALLBACK_FONT");
     if (env && *env) {
         char *copy = text_strdup(env);
@@ -238,7 +257,7 @@ static void text_add_fallbacks(TextSystem *ts) {
             tok = sep ? sep + 1 : NULL;
         }
         free(copy);
-        if (ts->fallback_count) return;
+        if (ts->fallback_count > bundled) return;
     }
     static const char *const latin[] = {
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
@@ -268,6 +287,27 @@ static void text_add_fallbacks(TextSystem *ts) {
     for (size_t i = 0; i < sizeof cjk / sizeof *cjk; i++) {
         if (file_exists(cjk[i])) {
             TextFace *f = text_add_face(ts, "fallback-cjk", cjk[i], 400, TEXT_STYLE_NORMAL, 1);
+            if (f) ts->fallback[ts->fallback_count++] = f;
+            break;
+        }
+    }
+    /* generic `monospace` (text_resolve_family_list): Chrome on Linux uses
+     * fontconfig's monospace, Noto Sans Mono on the reference machine */
+    static const char *const mono[] = {
+        "/usr/share/fonts/google-noto-vf/NotoSansMono[wght].ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+        "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        "/System/Library/Fonts/Menlo.ttc",
+        "C:\\Windows\\Fonts\\consola.ttf",
+    };
+    for (size_t i = 0; i < sizeof mono / sizeof *mono && ts->fallback_count < 8; i++) {
+        if (file_exists(mono[i])) {
+            TextFace *f = text_add_face(ts, "fallback-mono", mono[i], 400, TEXT_STYLE_NORMAL, 1);
             if (f) ts->fallback[ts->fallback_count++] = f;
             break;
         }
@@ -433,8 +473,17 @@ static TextFace *text_match_family(TextSystem *ts, const char *lower, int weight
 }
 
 static TextFace *text_primary_fallback(TextSystem *ts) {
-    for (int i = 0; i < ts->fallback_count; i++)
+    for (int i = 0; i < ts->fallback_count; i++) {
+        if (!strcmp(ts->fallback[i]->family, "fallback-symbols") || !strcmp(ts->fallback[i]->family, "fallback-mono"))
+            continue; /* per-glyph / `monospace` only */
         if (face_load(ts, ts->fallback[i])) return ts->fallback[i];
+    }
+    return NULL;
+}
+
+static TextFace *text_mono_fallback(TextSystem *ts) {
+    for (int i = 0; i < ts->fallback_count; i++)
+        if (!strcmp(ts->fallback[i]->family, "fallback-mono") && face_load(ts, ts->fallback[i])) return ts->fallback[i];
     return NULL;
 }
 
@@ -451,7 +500,8 @@ static TextFace *text_resolve_family_list(TextSystem *ts, const char *list, int 
             char lower[TEXT_FAMILY_MAX];
             str_lower_copy(lower, sizeof lower, start, (size_t) (end - start));
             if (is_generic_family(lower)) {
-                TextFace *fb = text_primary_fallback(ts);
+                TextFace *fb = !strcmp(lower, "monospace") ? text_mono_fallback(ts) : NULL;
+                if (!fb) fb = text_primary_fallback(ts);
                 if (fb) return fb;
                 continue;
             }
@@ -464,10 +514,19 @@ static TextFace *text_resolve_family_list(TextSystem *ts, const char *list, int 
 
 // ---- metrics -----------------------------------------------------------------
 
-static float glyph_height_px(FT_Face ft, uint32_t cp) {
+/* Top of the glyph's outline box at the current size, loaded with the
+ * rendering flags like Skia's SkScalerContext_FreeType (fXHeight / fCapHeight
+ * without an OS/2 v2 value): under slight hinting the height is grid-fitted,
+ * which is what vertical-align: middle (x-height / 2) sees in Chrome. */
+static float glyph_height_px(FT_Face ft, uint32_t cp, FT_Int32 flags) {
     FT_UInt gi = FT_Get_Char_Index(ft, cp);
     if (!gi) return 0;
-    if (FT_Load_Glyph(ft, gi, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP)) return 0;
+    if (FT_Load_Glyph(ft, gi, flags)) return 0;
+    if (ft->glyph->format == FT_GLYPH_FORMAT_OUTLINE) {
+        FT_BBox bbox;
+        FT_Outline_Get_CBox(&ft->glyph->outline, &bbox);
+        return (float) bbox.yMax / 64.0f;
+    }
     return (float) ft->glyph->metrics.horiBearingY / 64.0f;
 }
 
@@ -495,8 +554,9 @@ static void text_compute_metrics(TextFont *font) {
         }
     }
     face_set_size(font->face, font->size64);
-    if (m->x_height <= 0) m->x_height = glyph_height_px(ft, 'x');
-    if (m->cap_height <= 0) m->cap_height = glyph_height_px(ft, 'H');
+    const FT_Int32 flags = text_load_flags(font->ts);
+    if (m->x_height <= 0) m->x_height = glyph_height_px(ft, 'x', flags);
+    if (m->cap_height <= 0) m->cap_height = glyph_height_px(ft, 'H', flags);
 }
 
 TextFont *text_font(TextSystem *ts, const char *family_list, float size_px, int weight, int italic) {

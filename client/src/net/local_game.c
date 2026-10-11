@@ -19,6 +19,7 @@
 #include <client.h>
 #include <chat_commands.h>
 #include <social.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,7 +87,7 @@ static void local_game_load(Client *client, const int map_index, const int mode_
 }
 
 // io_ent -> players.add / spawn on the authority, then what SPAWN does on the client.
-static void local_game_spawn(Client *client, const int class_index, const int secondary_index, const PlayerCosmetics cosmetics) {
+static void local_game_spawn(Client *client, const int class_index, const int secondary_index, const PlayerCosmetics cosmetics, const int slid_cont) {
     Game *game = &client->game;
     Player *player = local_game_player(client);
     const int first_spawn = !player;
@@ -105,6 +106,7 @@ static void local_game_spawn(Client *client, const int class_index, const int se
     player->class_index = class_index;
     player->secondary_index = secondary_index;
     player->cosmetics = cosmetics;
+    player->slid_cont = slid_cont; // gameserver.ts: player.slidCont = ent[15]
     player_spawn(player); // setClass, spawn point, the mode's loadout / outfit
     client->offline_joined = 1;
     client_player_spawned(client, player, 1);
@@ -126,9 +128,10 @@ static void local_game_change(Client *client, const int map_index, const int mod
     const int class_index = player ? player->class_index : 0;
     const int secondary_index = player ? player->secondary_index : -1;
     const PlayerCosmetics cosmetics = player ? player->cosmetics : PLAYER_COSMETICS_NONE;
+    const int slid_cont = player ? player->slid_cont : 1;
 
     local_game_load(client, map_index, mode_index);
-    if (respawn && client->game.ready) local_game_spawn(client, class_index, secondary_index, cosmetics);
+    if (respawn && client->game.ready) local_game_spawn(client, class_index, secondary_index, cosmetics, slid_cont);
 }
 
 // GameHooks.next_round: the end screen ran out (pickWinningMap without votes).
@@ -141,7 +144,7 @@ static void local_game_respawn(Game *game, const int uid) {
     Client *client = game->hooks.user;
     const Player *player = local_game_player(client);
     if (!player || player->uid != uid || player->active || game->end_timer > 0.0f) return;
-    local_game_spawn(client, player->class_index, player->secondary_index, player->cosmetics);
+    local_game_spawn(client, player->class_index, player->secondary_index, player->cosmetics, player->slid_cont);
 }
 
 void local_game_host(Client *client, const int map_index, const int mode_id) {
@@ -158,11 +161,14 @@ void local_game_host(Client *client, const int map_index, const int mode_id) {
 // ENT: the server's spawn rules (shared with server_bin). Spectating never gets here:
 // client_enter_game() spectates locally offline, like v3.1.1's single player.
 static void local_game_ent(Client *client, const void *payload, const uint16_t length) {
-    NetEntPacket ent = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE};
+    NetEntPacket ent = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1};
     memcpy(&ent, payload, length < sizeof(ent) ? length : sizeof(ent)); // the client's own struct, maybe without its tail
-    if (ent.spectate || !game_can_spawn(&client->game, local_game_player(client))) return;
+    if (ent.spectate) return;
+    const int late = game_end_late_spawn(&client->game, local_game_player(client)); // io_ent in the vote window
+    if (!late && !game_can_spawn(&client->game, local_game_player(client))) return;
 
-    local_game_spawn(client, ent.class_index, ent.secondary_index, ent.cosmetics);
+    local_game_spawn(client, ent.class_index, ent.secondary_index, ent.cosmetics, ent.slid_cont ? 1 : 0);
+    if (late) game_send_end_late(&client->game, client->offline_uid); // then "end" with didWin -1
 }
 
 // Krunker v3.1.1 "/" commands (shared/src/chat_commands.c) for the one local player, who
@@ -267,6 +273,47 @@ void local_game_receive(Client *client, const NetPacketType type, const void *pa
             break;
         case NET_PACKET_VOICE_SEND: // io_vc relays to every peer but the speaker: alone, nobody hears it
             break;
+        case NET_PACKET_INTERACT: { // io_int (console agent: map terminals)
+            NetInteractPacket interact = {0};
+            if (!payload || !length || length > sizeof(interact)) break;
+            memcpy(&interact, payload, length);
+            game_player_interact(&client->game, local_game_player(client), interact.action, interact.secondary);
+            break;
+        }
+        case NET_PACKET_PREMIUM_ACTION: // "prmA" (premiumKeys, the N key): the local player hosts, so it may
+            if (payload && length == 1) chat_command_premium_action(local_chat_host(client), client->offline_uid, *(const uint8_t *) payload);
+            break;
+        case NET_PACKET_TELEPORT: { // "tp" (the mod's Ctrl TP): io_tp; the local player is DEV (perms off)
+            NetTeleportPacket tp;
+            Player *player = local_game_player(client);
+            if (!payload || length != sizeof(tp) || !player) break;
+            memcpy(&tp, payload, sizeof(tp));
+            if (!isfinite(tp.x) || !isfinite(tp.y) || !isfinite(tp.z)) {
+                printf("[gameserver] tp invalid coords: %g %g %g\n", tp.x, tp.y, tp.z);
+                break;
+            }
+            const NetTeleportPacket ack = {tp.x, tp.y - NET_TELEPORT_EYE_OFFSET, tp.z};
+            net_player_teleport(player, ack.x, ack.y, ack.z);
+            local_game_send(&client->game, client->offline_uid, NET_PACKET_TELEPORT_ACK, &ack, sizeof(ack));
+            printf("[gameserver] tp %d -> %g %g %g\n", client->offline_uid, ack.x, ack.y, ack.z);
+            break;
+        }
+        case NET_PACKET_CLEAR_LOG: // "clearLog" (the mod's F1): io_clearLog clears the server's terminal = ours
+#ifndef __EMSCRIPTEN__ // on the web the in-page server's log is the browser console the client's F1 clears
+            if (!length) {
+                fputs("\x1B[2J\x1B[3J\x1B[H", stdout);
+                fflush(stdout);
+            }
+#endif
+            break;
+        case NET_PACKET_TERMINAL_MSG: // "tmc": no handler on the v3.1.1 server (io_default logs it)
+            if (payload && length > sizeof(int32_t)) {
+                NetTerminalMsgPacket msg = {0};
+                memcpy(&msg, payload, length < sizeof(msg) ? length : sizeof(msg));
+                msg.text[sizeof(msg.text) - 1] = 0;
+                printf("tmc %d,\"%s\"\n", (int) msg.uid, msg.text);
+            }
+            break;
         default:
             // INPUT is queued straight into the game; PONG / MAP_REQUEST / SPECTATE_TARGET /
             // HELLO have nothing to answer in-process.
@@ -310,9 +357,15 @@ static int local_game_begin(Client *client, const int map_index) {
 }
 
 int local_game_start(Client *client) {
-    // The startup map is the first of the client's map list (map_list_with_custom), else a
-    // random rotation map, like server_bin.
-    return local_game_begin(client, client->startup_map ? 0 : -1);
+    // Host Game's pick (offline_start_map, one load), else the startup map (the first of
+    // the client's map list, map_list_with_custom), else a random rotation map, like server_bin.
+    int map_index = client->startup_map ? 0 : -1;
+    const cJSON *pick = client->offline_start_map;
+    client->offline_start_map = NULL;
+    for (size_t i = 0; pick && i < client->game.map_count; i++) {
+        if (client->game.maps[i] == pick) map_index = (int) i;
+    }
+    return local_game_begin(client, map_index);
 }
 
 // The editor's Test Map: one map slot of the client's list holds our copy of the last

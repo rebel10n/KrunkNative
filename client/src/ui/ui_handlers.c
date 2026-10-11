@@ -6,9 +6,14 @@
 // as a ReferenceError in the real page is. Also installs the non-inline listeners
 // (setupDom's addEventListener calls).
 #include <ui_logic.h>
+#include <map_catalog.h>  // Host Game / Games window maps
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
 #include <spectate.h>     // spectate_set_requested (toggleSpect)
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
+#include <ui_terminal.h>  // #terminalInput keys (map terminals, ui_terminal.c)
+#include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
+#include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
+#include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,7 +135,15 @@ H(h_select_class) { UNUSED; menu_select_class(arg_int(args, argc, 0, 0)); return
 // the system browser natively, window.open on the web (ui_dialog.c, http(s) only).
 H(h_open_url) { UNUSED; ui_open_external(arg_str(ev, args, argc, 0, "")); return 1; }
 
-H(h_open_host_window) { UNUSED; menu_show_window(MENU_WINDOW_HOST, 0); return 1; }
+// Hosting is the dedicated server's job (doc/backend.md 8.7): the client no longer creates
+// servers or custom lobbies. Host Game (hidden outside --render-scenario) points there;
+// practice play on the embedded offline game stays (playMap / knHostOffline).
+H(h_open_host_window) {
+    UNUSED;
+    ui_alert("To host a server, run the dedicated server: server_bin (see \"Hosting a server\" in the README). "
+             "Players join it from the server list or by direct connect.");
+    return 1;
+}
 H(h_open_join_window) { UNUSED; menu_show_window(MENU_WINDOW_JOIN, 0); return 1; }
 
 static void invite_reset(void *user) {
@@ -178,6 +191,40 @@ H(h_check_terms) {
 }
 
 H(h_play) { UNUSED; menu_play(); return 1; }                       // quickJoinRegion / joinGame
+// Host a map of the catalogue (shared/src/map_catalog.c) on the embedded local server:
+// it joins the client's map list (map_catalog_slot: Shipyard, Soul Sanctum and the
+// community maps are not in the default rotation) and the offline game starts or reloads
+// on it with `mode` (Krunker mode id, -1 = keep). Connected to a server, Krunker's room
+// request has no native equivalent: the client plays there (menu_host_offline).
+static void host_catalog_map(const int catalog_index, const int mode) {
+    Client *client = menu_ui()->client;
+    const int slot = catalog_index >= 0 ? map_catalog_slot(&client->game.maps, &client->game.map_count, (size_t) catalog_index) : -1;
+    if (catalog_index >= 0 && slot < 0) menu_log("host: map %s could not be loaded", map_catalog_at((size_t) catalog_index)->key);
+    if (slot >= 0) menu_select_map(slot);
+    if (mode >= 0) client->net_mode_index = mode; // local_game_start reads it (Krunker mode id)
+    // Krunker creates a new room: a running offline game reloads on the picked map and
+    // mode; otherwise the offline game starts directly on it (offline_start_map).
+    if (client->offline && slot >= 0) local_game_host(client, slot, client->net_mode_index);
+    else if (slot >= 0) client->offline_start_map = client->game.maps[slot];
+    menu_host_offline();
+    client->offline_start_map = NULL; // not consumed when a server connection took the request
+}
+
+// A Games-window row (name, creatorname) -> catalogue index: rows by "Krunker" are the
+// official maps, the others community maps (old_burg is "Burg" by "Community"); a bare
+// name (playMap) prefers the official map, like the server's cmd_map. -1 = unknown.
+static int catalog_index_for_row(const char *name, const char *creator) {
+    const int want_custom = creator && creator[0] && strcmp(creator, "Krunker") != 0;
+    for (int pass = 0; pass < 2; pass++) {
+        for (size_t i = 0; i < map_catalog_count(); i++) {
+            const MapCatalogEntry *e = map_catalog_at(i);
+            if (pass == 0 && (e->source == MAP_SOURCE_CUSTOM) != want_custom) continue;
+            if (!strcmp(e->name, name)) return (int) i;
+        }
+    }
+    return map_catalog_find(name);
+}
+
 // createPrivateRoom(): Krunker collects the checked #gameMap<i> boxes and creates the room;
 // here the first checked map becomes the selection and the embedded server is started.
 H(h_create_private_room) {
@@ -185,11 +232,11 @@ H(h_create_private_room) {
     // createPrivateRoom's checks, in order, into #hostGameMsg: a map (or raw game data),
     // then at least one mode
     HtmlElem msg = html_dom_by_id("hostGameMsg");
-    const char *map_name = ui_host_checked_map();
+    const int catalog_index = ui_host_checked_map_index();
     char raw[64] = "";
     HtmlElem raw_el = html_dom_by_id("rawMapData");
     if (raw_el) html_dom_get_value(raw_el, raw, sizeof(raw));
-    if (!map_name && !raw[0]) {
+    if (catalog_index < 0 && !raw[0]) {
         if (msg) html_dom_set_html(msg, "<span class='error'>Select at least one Game or Map</span>");
         return 1;
     }
@@ -198,14 +245,9 @@ H(h_create_private_room) {
         if (msg) html_dom_set_html(msg, "<span class='error'>Select at least one Mode</span>");
         return 1;
     }
-    const MenuMap *m = menu_map_by_name(map_name);
-    if (m) menu_select_map(m->index);
-    Client *client = menu_ui()->client;
-    client->net_mode_index = mode; // local_game_start reads it (Krunker mode id)
-    // Krunker creates a new room: an already running offline game reloads on the
-    // picked map and mode (local_game_host), otherwise it starts with them.
-    if (client->offline) local_game_host(client, m ? m->index : -1, mode);
-    menu_host_offline();
+    // No brain /mm/host-game from the client any more (hosting = server_bin): the window
+    // (only reachable from --render-scenario / the console now) starts offline practice.
+    host_catalog_map(catalog_index, mode);
     return 1;
 }
 
@@ -221,7 +263,20 @@ H(h_host_toggle) {
     for (int i = 0; i < n; i++) html_dom_set_checked(found[i], !html_dom_get_checked(found[i]));
     return 1;
 }
-H(h_commit_account) { UNUSED; menu_commit_account_name(); return 1; } // registerAcc / loginAcc
+// registerAcc / loginAcc: the brain account (account_ui.c), else the guest nickname
+H(h_commit_account) {
+    UNUSED;
+    if (account_ui_handle(html_ui_current_handler(), ev, args, argc) >= 0) return 1;
+    menu_commit_account_name();
+    return 1;
+}
+// Servers window handlers (servers_ui.c); without a brain: Krunker's no-ops / play
+H(h_servers) {
+    UNUSED;
+    if (servers_ui_handle(html_ui_current_handler(), ev, args, argc) >= 0) return 1;
+    if (!strcmp(html_ui_current_handler(), "quickJoinRegion")) menu_play();
+    return 1;
+}
 // resetSettings(): confirm first; the confirmed path also resets the binds (ui_settings.c).
 H(h_reset_settings) { UNUSED; ui_settings_reset_confirm(); return 1; }
 // importSettings(text?): settings.import(text) or the "Copy Paste Settings Text Here" prompt.
@@ -239,24 +294,31 @@ H(h_select_setting_pre) {
 H(h_dialog) { UNUSED; ui_dialog_answer(arg_int(args, argc, 0, 0)); return 1; } // knDialog: the #confPop buttons
 H(h_export_settings) { UNUSED; ui_settings_export(); return 1; }
 
+// playMap(name): Krunker opens /?play=<name> and autoHostMap creates a room on that map;
+// natively the local server hosts the catalogue map (Free for All unless Host Game picked
+// another mode).
 H(h_play_map) {
     UNUSED;
     const char *name = arg_str(ev, args, argc, 0, "");
-    const MenuMap *m = menu_map_by_name(name);
-    if (!m) {
-        // Community maps from the Custom Games list are not playable in KrunkNative.
-        menu_log("playMap: %s is not available in KrunkNative", name);
+    const int index = catalog_index_for_row(name, NULL);
+    // brain: a lobby on that map, else /mm/host-game; a published map: its JSON (servers_ui.c)
+    if (servers_ui_play_map(name, index >= 0)) return 1;
+    if (index < 0) {
+        menu_log("playMap: %s is not in the map catalogue", name);
         return 1;
     }
-    menu_select_map(m->index);
-    menu_play();
+    host_catalog_map(index, -1);
     return 1;
 }
 
+// selectHostMap(name, modURL, id, creator): Krunker remembers the community game for the
+// Host Game window (selectedCustomMapId); KrunkNative selects the catalogue map.
 H(h_select_host_map) {
     UNUSED;
-    const MenuMap *m = menu_map_by_name(arg_str(ev, args, argc, 0, ""));
-    if (m) menu_select_map(m->index);
+    const int index = catalog_index_for_row(arg_str(ev, args, argc, 0, ""), arg_str(ev, args, argc, 3, ""));
+    Client *client = menu_ui()->client;
+    const int slot = index >= 0 ? map_catalog_slot(&client->game.maps, &client->game.map_count, (size_t) index) : -1;
+    if (slot >= 0) menu_select_map(slot);
     return 1;
 }
 
@@ -322,7 +384,12 @@ H(h_select_skin) { UNUSED; ui_loadout_select_skin(arg_int(args, argc, 0, -1), ar
 H(h_loadout_action) { UNUSED; ui_loadout_action(arg_int(args, argc, 0, 0)); return 1; }
 H(h_toggle_log) { UNUSED; ui_loadout_toggle_log(arg_elem(ev, args, argc, 0)); return 1; }
 // toggleSpect(this.checked): `co`, read by enterGame (client/src/spectate.c)
-H(h_toggle_spect) { UNUSED; spectate_set_requested(arg_bool(ev, args, argc, 0, 0)); return 1; }
+H(h_toggle_spect) {
+    UNUSED;
+    spectate_set_requested(arg_bool(ev, args, argc, 0, 0));
+    menu_update_instructions(); // KrunkNative: "CLICK TO SPECTATE" follows the switch at once (menu_ui.c)
+    return 1;
+}
 H(h_police_pop) { UNUSED; ui_loadout_show_police_pop(); return 1; }
 H(h_hide_police_pop) { UNUSED; ui_loadout_hide_police_pop(); return 1; }
 H(h_clear_pops) { UNUSED; ui_loadout_clear_pops(); return 1; }
@@ -335,9 +402,19 @@ H(h_search_maps) {
     return 1;
 }
 // windows[13].premium()/purchase(): showWindow(14, true); a guest gets the Store's LOGIN REQUIRED card.
-H(h_store_tab) { UNUSED; menu_show_window(14, 1); return 1; }
+H(h_store_tab) {
+    UNUSED;
+    if (account_ui_handle(html_ui_current_handler(), ev, args, argc) >= 0) return 1; // signed in: windows[13].tabIndex
+    menu_show_window(14, 1);
+    return 1;
+}
 // claimReward(): the v3.1.1 client only has alert("Ad Failed. Contact your Ad Provider").
-H(h_claim_reward) { UNUSED; ui_alert("Ad Failed. Contact your Ad Provider"); return 1; }
+H(h_claim_reward) {
+    UNUSED;
+    if (account_ui_handle("claimReward", ev, args, argc) >= 0) return 1; // signed in with a brain: ["clm"]
+    ui_alert("Ad Failed. Contact your Ad Provider");
+    return 1;
+}
 // updateWindow(id, force): re-render the open window when it is `id` (or any with force).
 H(h_update_window) {
     UNUSED;
@@ -359,6 +436,8 @@ H(h_change_cont_set) {
     return 1;
 }
 H(h_focus_chat) { UNUSED; ui_controls_chat_focus(arg_bool(ev, args, argc, 0, 0)); return 1; }
+// clientExitPopup / closeClient (v7.1.4 #clientExit) and the Client tab's knClientSet / knClientAction
+H(h_client) { (void) user; ui_client_settings_handle(html_ui_current_handler(), ev, args, argc); return 1; }
 
 static const HtmlHandlerEntry HANDLERS[] = {
     // settings inputs
@@ -382,7 +461,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"openTab", h_open_url},
     {"window.open", h_open_url},
     // play / host / join
-    {"quickJoinRegion", h_play},
+    {"quickJoinRegion", h_servers},
     {"joinGame", h_play},
     {"createPrivateRoom", h_create_private_room},
     {"playMap", h_play_map},
@@ -400,6 +479,12 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"importSettings", h_import_settings},
     {"selectSettingPre", h_select_setting_pre},
     {"knDialog", h_dialog},
+    // desktop client chrome (ui_client_settings.c)
+    {"clientExitPopup", h_client},
+    {"closeClient", h_client},
+    {"window.closeClient", h_client},
+    {"knClientSet", h_client},
+    {"knClientAction", h_client},
     // popups / misc page chrome
     {"bdayPlay", h_bday_play},
     {"kn.hideErrorNotification", h_hide_error_notification},
@@ -413,8 +498,8 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"focusChat", h_focus_chat},
     {"sendReaction", h_noop},
     {"closeTwitch", h_noop},
-    {"toggleHF", h_noop},
-    {"setExpandedRegion", h_noop},
+    {"toggleHF", h_servers},
+    {"setExpandedRegion", h_servers},
     // controls / loadout / customisation
     {"changeCont", h_change_cont},
     {"unbindCont", h_unbind_cont},
@@ -440,7 +525,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"windows.0.changeTab", h_settings_change_tab},
     {"windows.0.searchList", h_settings_search_list},
     {"windows.0.collapseFolder", h_settings_collapse_folder},
-    {"windows.1.searchList", h_noop},
+    {"windows.1.searchList", h_servers},
     {"windows.2.action", h_loadout_action},
     {"windows.3.switchTab", h_switch_tab},
     {"windows.7.toggle", h_host_toggle},
@@ -450,7 +535,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"windows.7.toggleWep", h_noop},  // undefined in Krunker's own JS
     {"windows.9.switchTab", h_games_tab},
     {"windows.9.searchMaps", h_search_maps},
-    {"windows.9.loadMore", h_noop},   // generated by the Custom Games list; the offline list has one page
+    {"windows.9.loadMore", h_servers}, // brain: the next /api/maps page (servers_ui.c); offline: one page
     {"windows.13.premium", h_store_tab},
     {"windows.13.purchase", h_store_tab},
     // the settings head writes `window.windows[0].x(...)`; accept the prefixed spelling too
@@ -461,22 +546,13 @@ static const HtmlHandlerEntry HANDLERS[] = {
 
 static int h_fallback(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     UNUSED;
+    const char *name = html_ui_current_handler(); // logoutAcc, windows[4].*, checkedSwitchServer, ...
+    if (account_ui_handle(name, ev, args, argc) >= 0 || servers_ui_handle(name, ev, args, argc) >= 0) return 1;
     menu_log("unhandled inline handler on %s event", ev && ev->type ? ev->type : "?");
     return 1;
 }
 
 // ---------------------------------------------------------------- listeners (setupDom)
-
-static void request_pointer_lock_if_web(void) {
-#ifdef __EMSCRIPTEN__
-    // Browsers only grant pointer lock inside a user gesture; the C side's request
-    // runs later from its frame loop, so ask here too.
-    EM_ASM({
-        var canvas = document.getElementById('canvas');
-        try { if (canvas && canvas.requestPointerLock) canvas.requestPointerLock(); } catch (e) {}
-    });
-#endif
-}
 
 // #instructionHolder is the click-to-play target (Krunker: mousedown on the renderer
 // canvas -> CONTROLS.toggle(true)); a click there with a window open just closes it.
@@ -555,6 +631,7 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
     // web: GLFW's keydown (window capture) already bound this key in the controls window
     if (ui_controls_take_swallowed_key()) return 0;
     if (ui_console_page_key(ev)) return 0; // Enter/Escape/Tab/arrows/` in the console input
+    if (ui_terminal_page_key(ev)) return 0; // Enter (tmc) / Escape in #terminalInput
     if (target_is_form_control(ev->target)) {
         // Enter in #chatInput (menu chat natively, every chat Enter on the web): send/blur.
         // Natively in game main.c routes the chat key before the page sees it.
@@ -572,7 +649,7 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
             html_dom_blur(ev->target);
             return 0;
         }
-        if (html_key_is_enter(ev->key) && ev->target == html_dom_by_id("accName")) menu_commit_account_name();
+        if (html_key_is_enter(ev->key) && ev->target == html_dom_by_id("accName")) account_ui_handle("loginAcc", ev, NULL, 0); // a real login (account_ui.c), never a fake nickname
         return 1;
     }
     if (html_key_is_escape(ev->key)) {
@@ -580,7 +657,15 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
             menu_toggle_window(0);
             return 0;
         }
-        if (ui->menu_open) request_pointer_lock_if_web();
+#ifdef __EMSCRIPTEN__
+        // Web: Escape never leaves the menu (v3.1.1 pressButton(27) only toggles the end
+        // screen). Escape is no user activation, and the browser ends a pointer lock taken
+        // during it on the same key, so the game showed with a dead mouse until the
+        // lock-loss check reopened the menu. Phones have no lock: CONTROLS.toggle(false).
+        if (ui->menu_open && !ui_mobile_active()) return 0;
+#endif
+        // menu_request_open(0) requests the pointer lock itself (no second raw request:
+        // two pending requests make Chrome answer pointerlockchange(null) and grant neither).
         menu_request_open(!ui->menu_open);
         return 0;
     }

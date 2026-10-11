@@ -1,0 +1,70 @@
+# The edges' firewalls are left alone: clara/angeles/chitown have no input filter,
+# amph.ashburn's nftables belongs to abulxt's Ansible (kn_gameserver_ports_open).
+- name: Instance plan
+  ansible.builtin.set_fact:
+    kn_gameserver_active: "{{ (kn_gameserver_enabled | bool) and (kn_gameserver_ports_open | bool) }}"
+
+- name: Planned instances
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ kn_gameserver_count }} instance(s)
+      (vcpus {{ ansible_processor_vcpus | default('?') }}), ports
+      {{ kn_gameserver_first_port }}..{{ kn_gameserver_first_port + (kn_gameserver_count | int) - 1 }} tcp+udp,
+      active={{ kn_gameserver_active }}
+
+- name: Per-instance server.cfg
+  ansible.builtin.template:
+    src: server.cfg.j2
+    dest: "{{ kn_etc_dir }}/server-{{ n }}.cfg"
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  loop: "{{ range(1, (kn_gameserver_count | int) + 1) | list }}"
+  loop_control:
+    loop_var: n
+    label: "server-{{ n }}.cfg :{{ kn_gameserver_first_port + n - 1 }} {{ kn_gameserver_hostname_fmt | format(n) }}"
+  notify: Restart game servers
+
+- name: Template unit
+  ansible.builtin.template:
+    src: kn-gameserver@.service.j2
+    dest: /etc/systemd/system/kn-gameserver@.service
+    mode: "0644"
+  notify: Restart game servers
+
+- name: Systemd target
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/krunknative.target
+    content: |
+      # Managed by KrunkNative deploy/ansible
+      [Unit]
+      Description=KrunkNative services
+      Wants=network-online.target
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+
+- name: Instances enabled/started (or disabled/stopped while inactive)
+  ansible.builtin.systemd_service:
+    name: "kn-gameserver@{{ n }}"
+    enabled: "{{ kn_gameserver_active }}"
+    state: "{{ 'started' if kn_gameserver_active else 'stopped' }}"
+    daemon_reload: true
+  loop: "{{ range(1, (kn_gameserver_count | int) + 1) | list }}"
+  loop_control:
+    loop_var: n
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# Instances beyond the current count (vcpus shrank or first_port changed).
+- name: Find stale instance configs
+  ansible.builtin.find:
+    paths: "{{ kn_etc_dir }}"
+    patterns: "server-*.cfg"
+  register: kn_gs_cfgs
+
+- name: Stop and remove stale instances
+  ansible.builtin.include_tasks: stale.yml
+  loop: "{{ kn_gs_cfgs.files | map(attribute='path') | map('regex_replace', '^.*/server-(\\d+)\\.cfg$', '\\1') | map('int') | select('gt', kn_gameserver_count | int) | list }}"
+  loop_control:
+    loop_var: stale_n

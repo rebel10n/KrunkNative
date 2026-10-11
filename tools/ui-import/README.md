@@ -26,6 +26,17 @@ content changed.
 falls back to an equivalent built-in writer otherwise. Saved TTFs use
 `SOURCE_DATE_EPOCH=0` (unless set) so re-conversions are reproducible.
 
+## Menu and HUD images
+
+`menu_assets.py` (step of `import.py`, skip with `--no-assets`) copies every file listed
+in `menu-assets.txt` from the v3.1.1 `public/` tree into `ui/` at the same path,
+byte-identical: every image the menu page, the window templates and the C UI logic
+(`client/src/ui/`, `client/src/nametags.c`) reference, plus the other byte-identical site
+files (`css/main.css`, `css/material-icons.css`, fonts, `windows/versions.txt =
+docs/versions.txt`). `{a..b}` and `{x,y}` expand like shell braces; a listed file the
+reference does not serve stops the import. Add a line when code starts generating a new
+image path (audit: `KRUNKNATIVE_HTML_IMAGE_LOG=<file>` while walking the UI natively).
+
 ## Model viewer page
 
 `viewer_page.py` (step of `import.py`, skip with `--no-viewer`) writes
@@ -64,4 +75,8 @@ ignores user site-packages), i.e. installed system-wide:
 --force             regenerate .ttf files even if present
 --no-fonts          skip font conversion and the liga table
 --no-windows        skip the window split
+--no-editor         skip the map editor page
+--no-social         skip the social hub page
+--no-viewer         skip the model viewer page
+--no-assets         skip the menu/HUD images (menu-assets.txt)
 ```

@@ -1,0 +1,11 @@
+# Edge game servers: vcpus-1 server_bin instances per host + their DNS records.
+# Units stay disabled until kn_gameserver_enabled=true (finder heartbeat landed)
+# and the host's ports are open (kn_gameserver_ports_open).
+- name: KrunkNative edges (dedicated servers)
+  hosts: edges
+  become: false
+  roles:
+    - { role: kn_user, tags: [user, gameserver] }
+    - { role: kn_release, tags: [release, gameserver] }
+    - { role: kn_gameserver, tags: [gameserver] }
+    - { role: cf_dns, tags: [dns] }

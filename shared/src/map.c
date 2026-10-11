@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <map_catalog.h>
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
@@ -25,25 +26,8 @@ const MapConfig g_default_map_config = {
     .infinite_jump = 0,
 };
 
-const char *default_map_names[] = {
-    "burg",
-    "littletown",
-    "sandstorm",
-    "subzero",
-    "undergrowth",
-    "shipyard",
-    "freight",
-    "lostworld",
-    "citadel",
-    "oasis",
-    "kanji",
-    "newtown",
-    "industry",
-    "soul_sanctum",
-    "evacuation",
-};
-
-const cJSON *g_maps[sizeof(default_map_names) / sizeof(default_map_names[0])];
+// The official maps (catalogue indices 0..14 = v3.1.1 mapIndex, shared/src/map_catalog.c)
+const cJSON *g_maps[MAP_CATALOG_OFFICIAL_COUNT];
 const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 14};
 
 static const char *prefab_names[] = {
@@ -133,48 +117,9 @@ static int map_int(const cJSON *obj, const char *key) {
     return 0;
 }
 
-// Starts every missing default map JSON downloading at once (web) and waits for the batch.
-static void prefetch_default_maps(void) {
-    const size_t count = sizeof(default_map_names) / sizeof(default_map_names[0]);
-    char *paths[sizeof(default_map_names) / sizeof(default_map_names[0])];
-    size_t path_count = 0;
-
-    for (size_t i = 0; i < count; i++) {
-        if (g_maps[i]) continue;
-        char relative[96];
-        snprintf(relative, sizeof(relative), "maps/%s.json", default_map_names[i]);
-        char *path = concat(assets_path(), relative);
-        if (path) paths[path_count++] = path;
-    }
-
-    asset_prefetch_wait((const char *const *) paths, path_count);
-    for (size_t i = 0; i < path_count; i++) free(paths[i]);
-}
-
 void load_default_maps() {
-    prefetch_default_maps();
-
-    for (size_t i = 0; i < sizeof(default_map_names) / sizeof(default_map_names[0]); i++) {
-        if (g_maps[i]) continue;
-
-        const size_t path_length = snprintf(NULL, 0, "maps/%s.json", default_map_names[i]);
-        char *path = malloc(path_length + 1);
-        if (!path) continue;
-
-        snprintf(path, path_length + 1, "maps/%s.json", default_map_names[i]);
-        char *full_path = concat(assets_path(), path);
-
-        size_t map_length;
-        unsigned char *map_buffer;
-
-        if (read_file(full_path, &map_buffer, &map_length)) continue;
-
-        g_maps[i] = cJSON_Parse((char *) map_buffer);
-
-        free(map_buffer);
-        free(full_path);
-        free(path);
-    }
+    map_catalog_load_official();
+    for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) g_maps[i] = map_catalog_json(i);
 }
 
 const cJSON **map_list_with_custom(const cJSON *custom_map, size_t *map_count) {
@@ -197,8 +142,151 @@ const cJSON **map_list_with_custom(const cJSON *custom_map, size_t *map_count) {
     return maps;
 }
 
+// parseFloat(value) || fallback
+static float map_float(const cJSON *obj, const char *key, const float fallback) {
+    const cJSON *item = cJSON_GetObjectItem(obj, key);
+    float value = 0.0f;
+    if (cJSON_IsNumber(item)) value = (float) cJSON_GetNumberValue(item);
+    else if (cJSON_IsString(item)) value = strtof(cJSON_GetStringValue(item), NULL);
+    return value == value && value != 0.0f ? value : fallback;
+}
+
+static int map_has(const cJSON *obj, const char *key) { // OBJECT.key != null
+    const cJSON *item = cJSON_GetObjectItem(obj, key);
+    return item && !cJSON_IsNull(item);
+}
+
+static int map_clamp(const int value, const int min, const int max) { // UTILS.limitMM
+    return value < min ? min : value > max ? max : value;
+}
+
+// map.js addTrigger options -> objects.js addTrigger / GameObject (shared/include/triggers.h).
+static TriggerData *map_parse_trigger(const cJSON *raw_obj, const int can_destroy) {
+    TriggerData *t = calloc(1, sizeof(TriggerData));
+    if (!t) return NULL;
+
+    const int te = map_int(raw_obj, "te");
+    // triggers.events[te || 0]; addTrigger drops the onAI events, unknown indexes name nothing
+    t->event = te >= 0 && te < TRIGGER_EVENT_COUNT && te != TRIGGER_EVENT_ON_AI_DEATH ? te : TRIGGER_EVENT_NONE;
+    t->action = map_int(raw_obj, "ta");
+    t->chance = map_clamp(map_int(raw_obj, "cha"), 0, 100);
+    t->constant = map_int(raw_obj, "tc");
+    t->constant_event = map_clamp(map_int(raw_obj, "tce"), 0, TRIGGER_CONSTANT_EVENT_MAX);
+    t->interface_target = map_int(raw_obj, "tin");
+    const cJSON *tct = cJSON_GetObjectItem(raw_obj, "tct");
+    if (cJSON_IsString(tct) && trigger_text_valid(cJSON_GetStringValue(tct))) snprintf(t->text, sizeof(t->text), "%s", cJSON_GetStringValue(tct));
+
+    // snd: parseInt(esa || es) || 0; assetSnd = esa != null; else emitterSounds[snd] || emitterSounds[0]
+    t->asset_sound = (unsigned char) map_has(raw_obj, "esa");
+    t->sound = map_flag_is_set(cJSON_GetObjectItem(raw_obj, "esa")) ? map_int(raw_obj, "esa") : map_int(raw_obj, "es");
+    if (!t->asset_sound && (t->sound < 0 || t->sound >= TRIGGER_EMITTER_SOUND_COUNT)) t->sound = 0;
+    t->volume = fminf(TRIGGER_EMITTER_VOLUME_MAX, fmaxf(TRIGGER_EMITTER_VOLUME_MIN, map_float(raw_obj, "ev", 1.0f)));
+    t->rate = fminf(TRIGGER_EMITTER_RATE_MAX, fmaxf(TRIGGER_EMITTER_RATE_MIN, map_float(raw_obj, "er", 1.0f)));
+    t->emit_from = map_int(raw_obj, "ef");
+
+    t->single_use = (unsigned char) map_has(raw_obj, "su");
+    t->self_destruct = (unsigned char) (map_has(raw_obj, "sfd") && t->single_use && can_destroy);
+    t->timer = (float) (t->constant_event ? t->constant_event : 1) * 1000.0f; // triggerTimer = (constantEvent || 1) * 1000
+    return t;
+}
+
+// The map.js / objects.js fields of the interface objects (Krunker GameObject health,
+// canDestroy, interface, gate, bank, check point, teleporter and trigger data).
+static void map_parse_interface(Object *object, const cJSON *raw_obj, const int prefab_id) {
+    int has_health = 0, has_interface = 0, clamp_interface = 0;
+
+    switch (prefab_id) {
+        case PREFAB_SPHERE: case PREFAB_POINT_LIGHT: case PREFAB_FLAG: case PREFAB_BOOST_PAD: case PREFAB_WEAPON_PICKUP:
+        case PREFAB_SHOWCASE: case PREFAB_PARTICLES: case PREFAB_LIQUID: case PREFAB_SIGN: case PREFAB_SPECTATE_CAM:
+        case PREFAB_RAMP: case PREFAB_PREMIUM_ZONE: case PREFAB_VERIFIED_ZONE: case PREFAB_TEAM_ZONE: case PREFAB_SCORE_ZONE:
+        case PREFAB_DEATH_ZONE: case PREFAB_LADDER: case PREFAB_RUNE: case PREFAB_LIGHT_CONE: case PREFAB_SOUND_EMITTER:
+        case PREFAB_OBJECTIVE: case PREFAB_BOMB_SITE: case PREFAB_SPAWN_POINT: case PREFAB_CAMERA_POSITION: case PREFAB_EVENT:
+            break;
+        case PREFAB_GATE:
+        case PREFAB_DEPOSIT_BOX:
+            has_interface = clamp_interface = 1;
+            break;
+        case PREFAB_CHECK_POINT:
+        case PREFAB_TELEPORTER:
+            break;
+        case PREFAB_CUBE: case PREFAB_CYLINDER: case PREFAB_PLANE: case PREFAB_BILLBOARD: case PREFAB_CUSTOM_ASSET:
+            has_health = has_interface = 1;
+            break;
+        default: // TRIGGER, TERMINAL and the addMesh models (crates, barrels, ...)
+            has_health = has_interface = clamp_interface = 1;
+            break;
+    }
+
+    // objects.js addBlock / addCylinder / addMesh / addAsset / addPlane make no GameObject for
+    // a noCol ("l" / "col") object: no health, no interface.
+    if (object->collision_type == COLLISION_TYPE_NONE) has_health = has_interface = 0;
+
+    if (has_health) {
+        // health: parseInt(h || hp) || 0; a health makes it destructible (canDestroy)
+        const int h = map_flag_is_set(cJSON_GetObjectItem(raw_obj, "h")) ? map_int(raw_obj, "h") : map_int(raw_obj, "hp");
+        object->health = object->start_health = (float) h;
+        object->can_destroy = (unsigned char) (map_has(raw_obj, "cdy") || h);
+        object->start_destroyed = (unsigned char) (object->can_destroy && map_has(raw_obj, "sd"));
+        // GameObject: respawnT under 100 ms (but set) becomes 100
+        float respawn = map_float(raw_obj, "rt", 0.0f) * 1000.0f;
+        if (respawn != 0.0f && respawn < 100.0f) respawn = 100.0f;
+        object->respawn_time = object->respawn_time_start = respawn;
+        object->respawn_random = (unsigned char) map_has(raw_obj, "rr");
+    }
+    if (has_interface) {
+        const int id = map_int(raw_obj, "in"); // parseInt(OBJECT.in) || null
+        object->interface_id = id && clamp_interface ? map_clamp(id, 0, TRIGGER_INTERFACE_MAX) : id;
+    }
+    object->destroyed_by = -1;
+
+    switch (prefab_id) {
+        case PREFAB_TRIGGER:
+            object->trig = map_parse_trigger(raw_obj, object->can_destroy);
+            if (object->trig && object->trig->event == TRIGGER_EVENT_ON_ENTER) object->no_shoot = 1; // noShoot: eventN == "onEnter"
+            break;
+        case PREFAB_GATE:
+            object->gate = 1;
+            object->score_points = (unsigned int) map_int(raw_obj, "sp");
+            object->no_msg = (unsigned char) map_has(raw_obj, "nm");
+            object->gate_method = map_int(raw_obj, "md");
+            object->closeable = (unsigned char) map_has(raw_obj, "cl");
+            object->start_closed = (unsigned char) (map_has(raw_obj, "stc") && object->closeable);
+            object->team = (unsigned int) map_int(raw_obj, "tm");
+            break;
+        case PREFAB_DEPOSIT_BOX: // withdraw / deposit: wd == null ? 1000 : parseInt(wd) || 0, then Math.abs
+            object->bank = 1;
+            object->withdraw_amount = abs(map_has(raw_obj, "wd") ? map_int(raw_obj, "wd") : 1000);
+            object->deposit_amount = abs(map_has(raw_obj, "dp") ? map_int(raw_obj, "dp") : 1000);
+            object->team = (unsigned int) map_int(raw_obj, "tm");
+            break;
+        case PREFAB_CHECK_POINT:
+            object->single_use = (unsigned char) map_has(raw_obj, "su");
+            object->direction = (unsigned char) (((map_int(raw_obj, "d") % 4) + 4) % 4);
+            object->team = (unsigned int) map_int(raw_obj, "tm");
+            break;
+        case PREFAB_TELEPORTER:
+            object->direction = (unsigned char) (((map_int(raw_obj, "d") % 4) + 4) % 4);
+            object->force_dir = (unsigned char) map_has(raw_obj, "fd");
+            object->channel = map_clamp(map_int(raw_obj, "ch"), 0, 100);
+            object->node = map_int(raw_obj, "n");
+            object->stop_momentum = (unsigned char) map_has(raw_obj, "m");
+            object->team = (unsigned int) map_int(raw_obj, "tm");
+            break;
+        default:
+            break;
+    }
+
+    // GameObject active = !startClosed && !startDestroyed (objects.js resetAll)
+    object->destroyed = object->start_destroyed;
+    if (object->start_closed || object->start_destroyed) object->active = 0;
+}
+
 Map *map_init(const cJSON *raw_data) {
     if (!cJSON_IsObject(raw_data)) return NULL;
+    // server/game.ts sanitizeCustomMapJson runs on every map before generate(): pooled
+    // "si" sizes become "s", objects without p / s go. Idempotent, and it has to edit the
+    // document itself because the renderer, shadows and modes read the raw objects too.
+    map_sanitize_json((cJSON *) raw_data);
 
     const cJSON *objects = cJSON_GetObjectItem(raw_data, "objects");
     const cJSON *spawns = cJSON_GetObjectItem(raw_data, "spawns");
@@ -285,7 +373,7 @@ Map *map_init(const cJSON *raw_data) {
     }
 
 #ifdef KRUNKNATIVE_CLIENT
-    prefab_begin_map(objects);
+    prefab_begin_map(objects, colors);
 #endif
 
     for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
@@ -308,7 +396,14 @@ Map *map_init(const cJSON *raw_data) {
             prefab_id = prefab_id_from_string(cJSON_GetStringValue(obj_id));
         }
 
+        // game.js customMap: prefabs.prefabs[i || id || 0] missing -> prefab 0 (CUBE)
+        // (Krunk_Plaza, Slide_Neon_Stage, zombie_high... carry ids from newer editors)
+        if (prefab_id < 0 || prefab_id >= (int) (sizeof(prefab_names) / sizeof(prefab_names[0]))) prefab_id = PREFAB_CUBE;
+
         if (!cJSON_IsArray(obj_pos) || cJSON_GetArraySize(obj_pos) < 3 || cJSON_GetArraySize(obj_scale) < 3) continue;
+        // map.js "BOT" -> objects.js addAI: a pending AI (shared/src/ai.c spawns it at game init),
+        // never a map object (no mesh, no collision box, no object uid).
+        if (prefab_id == PREFAB_BOT) continue;
 
         Object *object = calloc(1, sizeof(Object));
         if (!object) continue;
@@ -513,16 +608,8 @@ Map *map_init(const cJSON *raw_data) {
                 object->flag = 1;
                 break;
             case PREFAB_TRIGGER:
-                // map.js addTrigger: event te, action ta, team tm, chance cha, singleUse su;
-                // objects.js noShoot = eventN == "onEnter"
                 object->trigger = 1;
-                object->trigger_on_enter = map_int(raw_obj, "te") == TRIGGER_EVENT_ON_ENTER;
-                object->trigger_action = map_int(raw_obj, "ta");
-                object->trigger_chance = map_int(raw_obj, "cha");
-                const cJSON *su = cJSON_GetObjectItem(raw_obj, "su"); // OBJECT.su != null
-                object->trigger_single_use = su && !cJSON_IsNull(su);
                 object->team = (unsigned int) map_int(raw_obj, "tm");
-                if (object->trigger_on_enter) object->no_shoot = 1;
                 break;
             case PREFAB_DEATH_ZONE:
                 object->kill = 1;
@@ -533,13 +620,25 @@ Map *map_init(const cJSON *raw_data) {
             case PREFAB_BOMB_SITE:
                 object->bomb_site = 1;
                 break;
+            case PREFAB_TERMINAL: {
+                // map.js addTerminal: noMsg = OBJECT.nm != null, team = parseInt(OBJECT.tm || 0)
+                object->terminal = 1;
+                const cJSON *nm = cJSON_GetObjectItem(raw_obj, "nm");
+                object->no_msg = nm && !cJSON_IsNull(nm);
+                object->team = (unsigned int) map_int(raw_obj, "tm");
+                break;
+            }
             default:
                 break;
         }
 
+        map_parse_interface(object, raw_obj, prefab_id); // destructibles, interfaces, gates, banks, triggers, check points, teleporters
+
 #ifdef KRUNKNATIVE_CLIENT
         object->mesh = prefab_init(object, parsed_colors, raw_obj);
         client_animate_object_texture(object, 0.0f);
+        object->no_vis = object->mesh && !((Mesh *) object->mesh)->visible; // noVis (v), hidden objectives
+        if (object->mesh && !object->active && !object->no_vis) ((Mesh *) object->mesh)->visible = 0; // meshRef.visible = active
 #endif
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {
@@ -577,8 +676,29 @@ Map *map_init(const cJSON *raw_data) {
     return map;
 }
 
+// objects.js resetAll (+ game.js resetGates / resetBanks) for the next round on the same
+// map: start state of the destructibles, gates and banks, trigger storage / triggered.
 void map_reset(Map *map) {
+    for (size_t i = 0; map && i < map->object_count; i++) {
+        Object *object = map->objects[i];
+        if (!object->can_destroy && !object->start_health && !object->gate && !object->bank && !object->trig &&
+            !object->teleporter) continue;
 
+        object->active = !object->start_closed && !object->start_destroyed;
+        object->destroyed = object->start_destroyed;
+        object->destroyed_by = -1;
+        if (object->start_health) object->health = object->start_health;
+        object->respawn_time = object->respawn_time_start;
+        object->deposited = 0;
+        object->tel_cooldown = 0.0f;
+        if (object->trig) {
+            object->trig->storage = 0;
+            object->trig->triggered = 0;
+        }
+#ifdef KRUNKNATIVE_CLIENT
+        if (object->mesh && !object->no_vis) ((Mesh *) object->mesh)->visible = object->active;
+#endif
+    }
 }
 
 void map_fini(Map *map) {
@@ -597,6 +717,7 @@ void map_fini(Map *map) {
 
             if (object->tex_anim) free(object->tex_anim);
             if (object->ramp) free(object->ramp);
+            free(object->trig);
 
 #ifdef KRUNKNATIVE_CLIENT
             if (object->mesh) mesh_fini(object->mesh);

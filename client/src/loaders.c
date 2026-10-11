@@ -18,7 +18,8 @@ unsigned int load_texture(char *path) {
     stbi_set_flip_vertically_on_load_thread(1);
 
     int width, height, _;
-    unsigned char *texture = stbi_load(path, &width, &height, &_, 4);
+    char swapped[1024];
+    unsigned char *texture = stbi_load(file_redirect(path, swapped, sizeof(swapped)), &width, &height, &_, 4); // resource swapper
     stbi_set_flip_vertically_on_load_thread(0);
 
     if (!texture) {
@@ -489,90 +490,5 @@ Geometry *create_ramp_geo() {
 
     geometry_set_unit_bounds(geometry);
     g_ramp_geometry = geometry;
-    return geometry;
-}
-
-Geometry *create_ladder_geo(const float height) {
-    Geometry *geometry = calloc(1, sizeof(Geometry));
-    if (!geometry) return NULL;
-
-    const int steps = (int) (height / 6.0f);
-
-    vertex vertices[steps * 4 + 24 * 2];
-    int indices[steps * 6 + 36 * 2];
-
-    for (int i = 0; i < 2; i++) {
-        const int v_offset = 24 * i;
-        const int i_offset = 36 * i;
-
-        memcpy(vertices + v_offset, cube_vertices, sizeof(cube_vertices));
-        memcpy(indices + i_offset, cube_indices, sizeof(cube_indices));
-
-        for (int v = 0; v < 24; v++) {
-            vertices[v_offset + v].position.x *= game_constants.ladder_scale * 2.0f;
-            vertices[v_offset + v].position.z *= game_constants.ladder_scale * 2.0f;
-            vertices[v_offset + v].position.y *= height + 2.0f;
-
-            vertices[v_offset + v].position.x += game_constants.ladder_width * (i ? 1.0f : -1.0f);
-        }
-
-        for (int j = 0; j < 36; j++) indices[i_offset + j] += v_offset;
-    }
-
-    for (int i = 0; i < steps; i++) {
-        const int v_offset = 24 * 2 + i * 4;
-
-        vertex step_vertices[4];
-        memcpy(step_vertices, plane_vertices, sizeof(plane_vertices));
-
-        const float displace = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f;
-        const float rotate = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * 0.1f;
-
-        for (int v = 0; v < 4; v++) {
-            step_vertices[v].position.y -= 1.0f;
-            step_vertices[v].position.x *= game_constants.ladder_width * 2.0f;
-            step_vertices[v].position.z *= game_constants.ladder_scale * 2.0f;
-
-            vec3 tmp = step_vertices[v].position;
-
-            step_vertices[v].position.y = tmp.y * cosf((float) M_PI * 0.5f) + tmp.z * -sinf((float) M_PI * 0.5f);
-            step_vertices[v].position.z = tmp.y * sinf((float) M_PI * 0.5f) + tmp.z * cosf((float) M_PI * 0.5f);
-
-            tmp = step_vertices[v].position;
-
-            step_vertices[v].position.x = tmp.x * cosf(rotate) + tmp.y * -sinf(rotate);
-            step_vertices[v].position.y = tmp.x * sinf(rotate) + tmp.y * cosf(rotate);
-
-            step_vertices[v].position.y += (float) (i + 1) * 6.0f + displace;
-        }
-
-        const int step_indices[] = {v_offset, v_offset + 1, v_offset + 2, v_offset, v_offset + 3, v_offset + 1};
-
-        memcpy(vertices + 24 * 2 + i * 4, step_vertices, sizeof(step_vertices));
-        memcpy(indices + 36 * 2 + i * 6, step_indices, sizeof(step_indices));
-    }
-
-    unsigned int vbo;
-
-    glGenVertexArrays(1, &geometry->vao);
-    glGenBuffers(1, &geometry->ebo);
-    glGenBuffers(1, &vbo);
-
-    glBindVertexArray(geometry->vao);
-
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, (long long) sizeof(vertices), vertices, GL_STATIC_DRAW);
-    geometry_set_bounds(geometry, vertices, sizeof(vertices) / sizeof(vertices[0]));
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long long) sizeof(indices), indices, GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
-
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-
-    geometry->index_count = (int) (sizeof(indices) / sizeof(indices[0]));
     return geometry;
 }

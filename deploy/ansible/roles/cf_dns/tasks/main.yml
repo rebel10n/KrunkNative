@@ -1,0 +1,65 @@
+# Runs on the controller (delegate_to localhost) once per edge host.
+- name: Cloudflare token present
+  ansible.builtin.assert:
+    that: cf_api_token | length > 0
+    fail_msg: "CF_API_TOKEN is not set (source ~/.config/kn-secrets/cloudflare.env)."
+    quiet: true
+
+- name: A records {{ kn_edge_name }}-1..{{ kn_gameserver_count }}.{{ cf_zone }} -> {{ kn_public_ip }}
+  community.general.cloudflare_dns:
+    api_token: "{{ cf_api_token }}"
+    zone: "{{ cf_zone }}"
+    record: "{{ kn_edge_name }}-{{ n }}"
+    type: A
+    value: "{{ kn_public_ip }}"
+    proxied: false
+    ttl: "{{ cf_ttl }}"
+    solo: true
+    state: present
+  loop: "{{ range(1, (kn_gameserver_count | int) + 1) | list }}"
+  loop_control:
+    loop_var: n
+    label: "{{ kn_edge_name }}-{{ n }}.{{ cf_zone }}"
+  delegate_to: localhost
+  become: false
+  no_log: false
+
+- name: Existing records of this edge
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones?name={{ cf_zone }}"
+    headers: { Authorization: "Bearer {{ cf_api_token }}" }
+    return_content: true
+  register: cf_zone_info
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  when: cf_prune | bool
+
+- name: List A records
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cf_zone_info.json.result[0].id }}/dns_records?type=A&per_page=500"
+    headers: { Authorization: "Bearer {{ cf_api_token }}" }
+    return_content: true
+  register: cf_records
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  when: cf_prune | bool
+
+- name: Remove stale {{ kn_edge_name }}-<n> records
+  community.general.cloudflare_dns:
+    api_token: "{{ cf_api_token }}"
+    zone: "{{ cf_zone }}"
+    record: "{{ item.name | regex_replace('\\.' ~ (cf_zone | regex_escape) ~ '$', '') }}"
+    type: A
+    state: absent
+  loop: >-
+    {{ cf_records.json.result
+       | selectattr('name', 'match', '^' ~ (kn_edge_name | regex_escape) ~ '-\d+\.' ~ (cf_zone | regex_escape) ~ '$')
+       | rejectattr('name', 'in', range(1, (kn_gameserver_count | int) + 1) | map('string') | map('regex_replace', '^(.*)$', kn_edge_name ~ '-\1.' ~ cf_zone) | list)
+       | list }}
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  when: cf_prune | bool

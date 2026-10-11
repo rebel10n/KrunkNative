@@ -69,7 +69,7 @@ static const char KN_UA_CSS[] =
     "thead, tbody, tfoot { display: table-row-group; vertical-align: middle; border-color: inherit; }\n"
     "tr { display: table-row; vertical-align: inherit; border-color: inherit; }\n"
     "td, th { display: table-cell; vertical-align: inherit; padding: 1px; }\n"
-    "th { font-weight: bold; text-align: center; }\n"
+    "th { font-weight: bold; text-align: -internal-center; }\n"
 
     /* ---- replaced elements --------------------------------------------- */
     "img { display: inline; overflow: clip; overflow-clip-margin: content-box; }\n"
@@ -93,6 +93,8 @@ static const char KN_UA_CSS[] =
     "-webkit-rtl-ordering: logical; cursor: text; }\n"
     "input::placeholder { color: #757575; }\n"
     "input:disabled, select:disabled { color: #6d6d6d; background-color: #efefef; border-color: #a9a9a9; cursor: default; }\n"
+    /* Chrome 152's disabled menulist (measured): #fafafa face, #dddddd border, #a5a5a5 text and chevron */
+    "select:disabled { color: #a5a5a5; background-color: #fafafa; border-color: #dddddd; }\n"
     "input[type=\"hidden\"] { display: none; }\n"
     "input[type=\"checkbox\"], input[type=\"radio\"] { "
     "appearance: auto; box-sizing: border-box; width: 13px; height: 13px; "
