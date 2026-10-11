@@ -1,0 +1,11 @@
+- name: Stop kn-gameserver@{{ stale_n }}
+  ansible.builtin.systemd_service:
+    name: "kn-gameserver@{{ stale_n }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Remove server-{{ stale_n }}.cfg
+  ansible.builtin.file:
+    path: "{{ kn_etc_dir }}/server-{{ stale_n }}.cfg"
+    state: absent

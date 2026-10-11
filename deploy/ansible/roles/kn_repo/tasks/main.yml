@@ -1,0 +1,18 @@
+- name: Git is installed
+  ansible.builtin.apt:
+    name: git
+    state: present
+
+# Shallow, read-only for the service user. `force: false` keeps local edits an
+# operator made (the task then fails instead of discarding them).
+- name: Clone {{ kn_repo_url }} ({{ kn_repo_version }}) to {{ kn_repo_dest }}
+  ansible.builtin.git:
+    repo: "{{ kn_repo_url }}"
+    dest: "{{ kn_repo_dest }}"
+    version: "{{ kn_repo_version }}"
+    depth: 1
+    single_branch: true
+    force: false
+    update: true
+  # The commit diff can contain binary files (invalid UTF-8 for ansible --diff).
+  diff: false

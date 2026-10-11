@@ -1,0 +1,22 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/windows/win-profile-login.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": 5,
+    "settingsTab": 0,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "anim_time": 0.225
+  },
+  "frames": 3,
+  "note": "Account: two inputs with placeholders, two buttons; anim_time 0.225 = the reference's merch (scaleBob) phase"
+}

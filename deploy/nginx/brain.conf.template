@@ -1,0 +1,91 @@
+# KrunkNative brain host - rendered by deploy/deploy.sh (do not edit on the host).
+# Mirrors the v3.1.1 jail's ansible/templates/nginx/brain.conf.j2:
+#   https://${MM_DOMAIN}/<x>      -> kn_brain /mm/<x>   (matchmaker; also /internal/ws for game servers)
+#   https://${API_DOMAIN}/<x>     -> kn_brain /api/<x>
+#   https://${SOCIAL_DOMAIN}/<x>  -> kn_brain /social/<x> (social WebSocket /social/ws)
+#   https://${PLAY_DOMAIN}/       -> net-bridge --web (dist/web) + /native, and /mm /api /social
+#                                    on the same origin (no CORS needed for the web client)
+# TLS certificates: certbot (deploy.sh --certbot) into /etc/letsencrypt/live/<domain>/.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream kn_brain { server 127.0.0.1:${BRAIN_PORT}; keepalive 16; }
+upstream kn_bridge { server 127.0.0.1:${BRIDGE_PORT}; keepalive 16; }
+
+# ---------- matchmaker / api / social vhosts (prefix rewrite like the jail) ----------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${MM_DOMAIN};
+    ssl_certificate     /etc/letsencrypt/live/${MM_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${MM_DOMAIN}/privkey.pem;
+
+    location / {
+        proxy_pass http://kn_brain/mm/;
+        include /etc/nginx/snippets/krunknative-proxy.conf;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${API_DOMAIN};
+    ssl_certificate     /etc/letsencrypt/live/${API_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${API_DOMAIN}/privkey.pem;
+
+    location / {
+        proxy_pass http://kn_brain/api/;
+        include /etc/nginx/snippets/krunknative-proxy.conf;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${SOCIAL_DOMAIN};
+    ssl_certificate     /etc/letsencrypt/live/${SOCIAL_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${SOCIAL_DOMAIN}/privkey.pem;
+
+    location / {
+        proxy_pass http://kn_brain/social/;
+        include /etc/nginx/snippets/krunknative-proxy.conf;
+    }
+}
+
+# ---------- play: the web client + everything on one origin ----------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${PLAY_DOMAIN};
+    ssl_certificate     /etc/letsencrypt/live/${PLAY_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PLAY_DOMAIN}/privkey.pem;
+
+    location ~ ^/(mm|api|social)/ {
+        proxy_pass http://kn_brain;
+        include /etc/nginx/snippets/krunknative-proxy.conf;
+    }
+    location = /ping { proxy_pass http://kn_brain; include /etc/nginx/snippets/krunknative-proxy.conf; }
+
+    # Browser <-> native TCP game servers (net-bridge /native WebSocket)
+    location /native {
+        proxy_pass http://kn_bridge;
+        include /etc/nginx/snippets/krunknative-proxy.conf;
+    }
+
+    # dist/web (index.html, client.js/.wasm/.data, ui/, assets/)
+    location / {
+        proxy_pass http://kn_bridge;
+        include /etc/nginx/snippets/krunknative-proxy.conf;
+    }
+}
+
+# ---------- :80 -> :443 ----------
+server {
+    listen 80;
+    server_name ${MM_DOMAIN} ${API_DOMAIN} ${SOCIAL_DOMAIN} ${PLAY_DOMAIN};
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location / { return 301 https://$host$request_uri; }
+}

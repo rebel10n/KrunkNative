@@ -1,0 +1,37 @@
+# KrunkNative game server instance %i (server_bin, one lobby). Installed by deploy/deploy.sh.
+# /etc/krunknative/gameserver-%i.env sets the per-instance keys (KN_GAMESERVER_PORT,
+# KN_GAMESERVER_NODE_ID, KN_GAMESERVER_REGION, KN_GAMESERVER_PUBLIC_HOST, ...);
+# shared keys (brain_url, brain_secret, lobby sizes, rotation, billboards) live in
+# the "gameserver" section of /etc/krunknative/config.json.
+[Unit]
+Description=KrunkNative game server %i
+After=network-online.target kn-brain.service
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User=krunknative
+Group=krunknative
+# server_bin resolves ./assets relative to the working directory
+WorkingDirectory=/opt/krunknative
+EnvironmentFile=-/etc/krunknative/gameserver-%i.env
+# /etc/krunknative/server-%i.cfg (server.cfg syntax, config/server.cfg.example) layers over the
+# JSON "gameserver" section when it exists; "none" would skip it.
+ExecStart=/bin/sh -c 'cfg=/etc/krunknative/server-%i.cfg; [ -f "$cfg" ] || cfg=none; exec /opt/krunknative/bin/server_bin --headless --config /etc/krunknative/config.json --cfg "$cfg"'
+# SIGTERM: drain (no new players, the round finishes for up to shutdown_grace = 10 s, stats
+# are committed through the coordinator, lobby-down), then exit. A second signal stops at once.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/opt/krunknative /etc/krunknative
+StateDirectory=krunknative/%i
+
+[Install]
+WantedBy=krunknative.target

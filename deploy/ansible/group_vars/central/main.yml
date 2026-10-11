@@ -1,0 +1,6 @@
+# Central node (kru): OpenResty on 127.0.0.1:8081 (krunk.io), kn_brain finder
+# on :8082 (matchmaker.), auth+community on :8083 (coordinator.). The host's nginx
+# (:80/:443), cloudflared, the pm2 app krunkbox (:2025, kru.eli.gift) and the login
+# user `kru` are not managed here.
+kn_release_bins: [kn_brain, kn_migrate]
+kn_release_migrations: true

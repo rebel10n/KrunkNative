@@ -1,0 +1,44 @@
+#pragma once
+// KrunkNative client settings: the Settings window's "Client" tab and the menu's Exit
+// button (client/src/ui/ui_client_settings.c).
+//
+// References: the Krunker v3.1.1 desktop client (jail Krunker_v3.1.1/main/preload.js +
+// utilities.js: a "Client" tab pushed onto windows[0].tabs whose rows come from
+// getCSettings(), the #settingsTabLayout flex override, the #clientExit menu item),
+// Krunker v7.1.4 (public/index.html #clientExit, clientExitPopup() "Are you sure you
+// want to close krunker?" YES/NO, closeClient()) and glorp (src/cSettings.json +
+// frontend/settings.js: categories of switches/sliders/selects, "*" = needs a restart,
+// buttons that open the client's folders, Clear Cache & Storage).
+//
+// The values live in their own storage entry, `knClient` (html_storage_*: native
+// $XDG_CONFIG_HOME/krunknative/knClient.json, web localStorage), apart from the game's
+// `knSettings`, like glorp's settings.json / the v3.1.1 client's `utilities_*` keys: the
+// game's Reset / presets / import / export never touch them. Rows that surface a game
+// setting (window mode, V-Sync, frame cap, UI scale) keep using setSetting() and the
+// game store; the matchmaker URL is the `knBrainUrl` entry backend_native.c reads.
+#include <client.h>
+#include <html_dom.h>
+
+// ---- main.c
+// Before audio_init(): loads the store and applies the startup options (audio backend,
+// process priority, raw mouse input, window resolution, start offline, resource
+// swapper, Discord RPC). `offline` may be set to 1 ("Start Offline").
+void client_settings_startup(Client *client, int *offline);
+// After the native shutdown: closes Discord RPC and, when a restart was requested
+// (settings marked "*", Clear Cache & Storage), starts the client again.
+void client_settings_exit(void);
+
+// ---- game side
+int  client_settings_hs_sound_always(void);              // "Always Play HS Sound on Kill"
+void client_settings_fullscreen_size(int *w, int *h);    // "Resolution" for exclusive fullscreen (unchanged when unset)
+
+// ---- UI (client/src/ui)
+void  ui_client_settings_dom_init(void);                  // menu_dom_init: Exit button, custom CSS, auto spectate, timers
+int   ui_client_settings_tab(void);                       // settings tab index of "Client"; -1 when not shown
+char *ui_client_settings_head(const char *head, int active_tab); // the settings head with the Client tab added (malloc'd)
+char *ui_client_settings_tab_html(int searching);
+// A game settings tab with the client's rows added (the Sound tab's Audio Output); NULL =
+// unchanged (malloc'd otherwise).
+char *ui_client_settings_extend_tab(const char *tab);         // the tab body (malloc'd); searching: rows for windows[0].searchList
+// Inline handlers: clientExitPopup(), closeClient(), knClientSet(key, value), knClientAction(name).
+int   ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

@@ -1,0 +1,74 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/ingame/ingame-scoped.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Soul Sanctum",
+    "modeName": "Free for All",
+    "name": "Guest_1",
+    "region": "New Jersey",
+    "anim_time": 0.0,
+    "hud": {
+      "health": 100,
+      "maxHealth": 100,
+      "healthSegments": 6,
+      "ammo": 30,
+      "ammoMax": 30,
+      "ammoLimit": false,
+      "melee": false,
+      "reloading": false,
+      "reloadPercent": 0,
+      "timerText": "02:41",
+      "kills": 0,
+      "deaths": 0,
+      "score": 0,
+      "weaponName": "Assault Rifle",
+      "weaponIcon": "icon_2",
+      "classIndex": 0,
+      "scoped": false,
+      "fps": 0,
+      "aim": 1,
+      "spread": 100,
+      "scoreboard": false,
+      "ping": 2,
+      "loadout": [
+        {
+          "name": "Assault Rifle",
+          "icon": "icon_2",
+          "melee": false
+        },
+        {
+          "name": "Pistol",
+          "icon": "icon_3",
+          "melee": false
+        },
+        {
+          "name": "Combat Knife",
+          "icon": "icon_0",
+          "melee": true
+        }
+      ],
+      "loadoutIndex": 0
+    },
+    "chat": [
+      {
+        "text": "You have entered the Soul Sanctum",
+        "color": "#fc03ec"
+      },
+      {
+        "text": "Guest_1 joined the game",
+        "color": "#fc03ec"
+      }
+    ]
+  },
+  "frames": 3,
+  "note": "Aiming the Assault Rifle down its sight (no scope reticle; aim 1 hides the crosshair)."
+}

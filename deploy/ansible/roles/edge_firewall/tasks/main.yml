@@ -1,0 +1,110 @@
+---
+# edge-firewall-contract v1 (vendored role, see ../VERSION; byte-identical in
+# abulxt and KrunkNative deploy/ansible/roles/edge_firewall).
+#   /etc/nftables.conf                     base, only when edge_firewall_own_base
+#   /etc/nftables.d/<priority>-<name>.nft  one per edge_firewall_dropins entry
+# Changes are applied through apply.yml (nft -c, rollback timer, fresh-SSH check).
+- name: Edge firewall
+  when: edge_firewall_manage | bool
+  block:
+    - name: Validate base settings
+      ansible.builtin.assert:
+        that:
+          - not (edge_firewall_own_base | bool) or (edge_firewall_owner | length > 0)
+          - (edge_firewall_rollback_seconds | int) >= 90
+        fail_msg: edge_firewall_owner is required with edge_firewall_own_base; rollback needs >= 90s.
+        quiet: true
+
+    - name: Validate drop-ins
+      ansible.builtin.assert:
+        that:
+          - edge_firewall_dropin.name is match('^[a-z0-9][a-z0-9-]*$')
+          - (edge_firewall_dropin.priority | int) >= 10
+          - (edge_firewall_dropin.priority | int) <= 99
+          - >-
+            (edge_firewall_dropin.tcp | default([]) + edge_firewall_dropin.udp | default([]))
+            | map('string') | reject('match', '^[0-9]+(-[0-9]+)?$') | list | length == 0
+          - (edge_firewall_ssh_port | string) not in (edge_firewall_dropin.tcp | default([]) | map('string') | list)
+        fail_msg: >-
+          Drop-in {{ edge_firewall_dropin.name | default('?') }}: name [a-z0-9-], priority 10..99,
+          ports are numbers or "first-last" ranges, and the SSH port is already in the base.
+        quiet: true
+      loop: "{{ edge_firewall_dropins }}"
+      loop_control:
+        loop_var: edge_firewall_dropin
+        label: "{{ edge_firewall_dropin.name | default('?') }}"
+
+    - name: Install nftables
+      ansible.builtin.apt:
+        name: nftables
+        state: present
+
+    - name: Drop-in directory
+      ansible.builtin.file:
+        path: /etc/nftables.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Restored by apply.yml (and by the rollback timer) if the new files fail.
+    # Creates an archive (lint mistakes tar for an unarchive candidate).
+    - name: Snapshot current firewall files for rollback
+      ansible.builtin.command: tar -C / -czf /etc/nftables.rollback.tgz etc/nftables.conf etc/nftables.d  # noqa: command-instead-of-module
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Render base ruleset /etc/nftables.conf
+      ansible.builtin.template:
+        src: nftables.conf.j2
+        dest: /etc/nftables.conf
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+        validate: "nft -c -f %s"
+      register: edge_firewall_base
+      when: edge_firewall_own_base | bool
+
+    - name: Render drop-ins
+      ansible.builtin.template:
+        src: dropin.nft.j2
+        dest: "/etc/nftables.d/{{ '%02d' | format(edge_firewall_dropin.priority | int) }}-{{ edge_firewall_dropin.name }}.nft"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ edge_firewall_dropins }}"
+      loop_control:
+        loop_var: edge_firewall_dropin
+        label: "{{ '%02d' | format(edge_firewall_dropin.priority | int) }}-{{ edge_firewall_dropin.name }}.nft"
+      register: edge_firewall_dropin_files
+
+    - name: Is /etc/nftables.conf a contract base?
+      ansible.builtin.command: grep -q 'edge-firewall-contract v1' /etc/nftables.conf
+      register: edge_firewall_contract
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Base not installed yet - drop-ins written but not loaded
+      ansible.builtin.debug:
+        msg: >-
+          /etc/nftables.conf is not an edge-firewall-contract v1 base: the repo that
+          owns the base has not rendered it yet. Its firewall play loads these drop-ins.
+      when:
+        - edge_firewall_contract.rc != 0
+        - edge_firewall_base is not changed
+
+    - name: Apply the changed ruleset safely
+      ansible.builtin.include_tasks: apply.yml
+      when:
+        - not ansible_check_mode
+        - edge_firewall_contract.rc == 0
+        - (edge_firewall_base is changed) or (edge_firewall_dropin_files is changed)
+
+    - name: Keep nftables.service enabled and running
+      ansible.builtin.systemd:
+        name: nftables
+        enabled: true
+        state: started
+      when: edge_firewall_contract.rc == 0

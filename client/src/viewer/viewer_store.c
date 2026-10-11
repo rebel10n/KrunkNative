@@ -1,0 +1,69 @@
+// Lookups over the generated store tables (viewer_store_table.c).
+#include "viewer_store.h"
+#include <stdio.h>
+#include <string.h>
+
+const ViewerSkin *viewer_skin(const int index) {
+    return index >= 0 && index < g_viewer_skin_count ? &g_viewer_skins[index] : NULL;
+}
+
+const ViewerOptionList *viewer_option_list(const ViewerListKind kind, const int key, const int season) {
+    for (int i = 0; i < g_viewer_list_count; i++) {
+        const ViewerOptionList *list = &g_viewer_lists[i];
+        if (list->kind == kind && list->key == key && list->season == season) return list;
+    }
+    return NULL;
+}
+
+void viewer_option_label(const ViewerOptionList *list, const int i, char *buf, const size_t n) {
+    const ViewerSkin *skin = list && i >= 0 && i < list->count ? viewer_skin(list->pairs[i * 2]) : NULL;
+    if (!skin) {
+        snprintf(buf, n, "Default");
+        return;
+    }
+    const char *rarity = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? g_viewer_rarities[skin->rarity].name : "";
+    snprintf(buf, n, "%s [%s]", skin->name, rarity);
+}
+
+int viewer_option_value(const ViewerOptionList *list, const int i) {
+    return list && i >= 0 && i < list->count ? list->pairs[i * 2 + 1] : -1;
+}
+
+const ViewerPreview *viewer_preview(const int weapon) {
+    static const ViewerPreview none;
+    return weapon >= 0 && weapon < VIEWER_PREVIEW_SLOTS ? &g_viewer_previews[weapon] : &none;
+}
+
+int viewer_skin_tex_truthy(const ViewerSkin *skin) {
+    return skin->tex && skin->tex[0] && !((skin->flags & VS_TEX_NUM) && !strcmp(skin->tex, "0"));
+}
+
+// utils.js getPreview() then getPreviewExport(): the last path component of
+// textures/<sprays/<id> | previews/...>.png.
+void viewer_preview_export_name(const ViewerSkin *skin, char *buf, const size_t n) {
+    char path[256];
+    const char *types = skin->type >= 0 && skin->type < g_viewer_type_count ? g_viewer_types[skin->type] : "";
+
+    if (skin->type == 4 && !(skin->flags & VS_IS_3D)) {
+        snprintf(path, sizeof(path), "sprays/%d", skin->id);
+    } else if (skin->type && skin->type != 3) {
+        if (viewer_skin_tex_truthy(skin)) snprintf(path, sizeof(path), "previews/cosmetics/%d_%d_%s", skin->type, skin->id, skin->tex);
+        else snprintf(path, sizeof(path), "previews/cosmetics/%d_%d", skin->type, skin->id);
+    } else if (skin->type == 3) {
+        if (skin->pat >= 0) snprintf(path, sizeof(path), "previews/%s%d_c%d", types, skin->id, skin->pat);
+        else if (skin->tex) snprintf(path, sizeof(path), "previews/%s%d_%s", types, skin->id, skin->tex);
+        else snprintf(path, sizeof(path), "previews/%s%d", types, skin->id);
+    } else if (skin->mid >= 0) {
+        if (skin->mid_t >= 0) snprintf(path, sizeof(path), "previews/%s%d_m%d_%d", types, skin->weapon, skin->mid, skin->mid_t);
+        else snprintf(path, sizeof(path), "previews/%s%d_m%d", types, skin->weapon, skin->mid);
+    } else if (skin->pat >= 0) {
+        snprintf(path, sizeof(path), "previews/%s%d_c%d", types, skin->weapon, skin->pat);
+    } else if (viewer_skin_tex_truthy(skin)) {
+        snprintf(path, sizeof(path), "previews/%s%d_%s", types, skin->weapon, skin->tex);
+    } else {
+        snprintf(path, sizeof(path), "previews/%s%d_%d", types, skin->weapon, skin->id);
+    }
+
+    const char *slash = strrchr(path, '/');
+    snprintf(buf, n, "%s.png", slash ? slash + 1 : path);
+}

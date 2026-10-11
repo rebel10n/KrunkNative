@@ -1,0 +1,114 @@
+{
+  "scenario": "ingame-endscreen-results",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "victory-sub",
+      "rect": [
+        440,
+        10,
+        400,
+        90
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#victorySub img/def.png after the end animation"
+    },
+    {
+      "name": "end-timer",
+      "rect": [
+        515,
+        100,
+        250,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 16.0,
+      "note": "#endTimer `Next Round in 00:15`; italic 26px glyph edges differ from Chrome's rasterizer by ~1px (ink extents match: 525-758 both), so the allowance is for anti-aliasing, a misplaced line fails"
+    },
+    {
+      "name": "tab-headers",
+      "rect": [
+        335,
+        147,
+        615,
+        28
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#tabHolder: Leaderboard (selected, yellow underline), Performance, Clan Wars, Medals"
+    },
+    {
+      "name": "table-header-row",
+      "rect": [
+        341,
+        186,
+        603,
+        36
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 9.0,
+      "note": "th row (left-aligned: #endTable text-align left beats the UA -internal-center) + its 3px border; ink runs match Chrome's to 1px (348/429/546/639/713/821); the rest is 22px bold glyph AA, a vertical shift of the row fails"
+    },
+    {
+      "name": "table-row-1",
+      "rect": [
+        341,
+        221,
+        603,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "`1. Guest_1 0 0 0 NONE` (enemy red): td height 50px is the row height, vertical-align middle centres the text"
+    },
+    {
+      "name": "table-row-2",
+      "rect": [
+        341,
+        254,
+        603,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the local row (white name)"
+    },
+    {
+      "name": "table-row-3",
+      "rect": [
+        341,
+        286,
+        603,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "last row: border-bottom none"
+    },
+    {
+      "name": "below-table",
+      "rect": [
+        330,
+        330,
+        620,
+        200
+      ],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "expect": "background",
+      "note": "nothing under the table (no extra rows / padding)"
+    }
+  ]
+}

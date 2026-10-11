@@ -3127,7 +3127,9 @@ EGLNativeDisplayType _glfwGetEGLNativeDisplayX11(void)
 
 EGLNativeWindowType _glfwGetEGLNativeWindowX11(_GLFWwindow* window)
 {
-    if (_glfw.egl.platform)
+    // KrunkNative: ANGLE's surface goes through eglCreateWindowSurface (egl_context.c HACK),
+    // which takes the Window itself, not the pointer eglCreatePlatformWindowSurfaceEXT wants
+    if (_glfw.egl.platform && _glfw.egl.platform != EGL_PLATFORM_ANGLE_ANGLE)
         return &window->x11.handle;
     else
         return (EGLNativeWindowType) window->x11.handle;

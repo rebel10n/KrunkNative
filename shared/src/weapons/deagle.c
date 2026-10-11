@@ -1,16 +1,20 @@
 #include <weapons.h>
 
+// Krunker v3.1.1 weapon 10 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, minRec, noAo, transp, kill, type, muzOff, muzMlt, rumble, icnPad, expScale.
 const Weapon g_deagle = {
     .name = "Desert Eagle",
     .src = "weapon_11",
     .icon = "icon_11",
+
     .secondary = 1,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 1,
-    .melee = 0,
-    .equipment = 0,
+    .projectile = 1,
+    .projectile_disable = 1,
+
     .ammo = 6,
     .swap_time = 0.2f,
     .reload_time = 1.0f,
@@ -23,11 +27,36 @@ const Weapon g_deagle = {
     .damage_drop = 10.0f,
     .rate = 0.4f,
     .spread = 150.0f,
-    .recoil = 0.01f,
+    .recoil = 10.0f,
+    .recoil_r = 0.01f,
     .recover = 0.982f,
     .recover_y = 0.995f,
     .recover_f = 0.98f,
+    .physical_power = 0.0f,
+    .physical_range = 0.0f,
     .zoom = 1.4f,
+    .recoil_y_mlt = 0.62f,
+    .recoil_z = 4.8f,
+    .recoil_z_mlt = 0.2f,
+    .jump_y_mlt = 0.5f,
+    .aim_recoil_mlt = 0.23f,
+    .lean_mlt = 1.6f,
+    .inspect_rotation = 0.35f,
+    .inspect_mlt = 0.9f,
+    .crouch_lean = 0.3f,
+    .crouch_rotation = 0.3f,
+    .scale = 0.94f,
+    .hold_width = 1.1f,
+
+    .origin = {0.0f, -0.195f, -3.8f},
+    .offset = {1.0f, -0.5f, -4.1f},
+    .left_hold = {0.0f, -0.9f, -0.5f},
+    .right_hold = {0.0f, -0.7f, -0.5f},
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.24f,
+    .recoil_tween_y = 0.42f,
+    .recoil_anim_mask = 1,
 };
 
 // {
@@ -40,17 +69,17 @@ const Weapon g_deagle = {
 // secondary: true,
 // noAim: false,
 // projectile: {
-// disable: true,
-// mat: "BASIC",
-// color: 16777179,
-// dmg: 50,
-// spd: 2.3,
-// lookDir: true,
-// grav: 0.0001,
-// scale: 1.4,
-// length: 10,
-// range: 1500,
-// snd: 0
+//   disable: true,
+//   mat: "BASIC",
+//   color: 16777179,
+//   dmg: 50,
+//   spd: 2.3,
+//   lookDir: true,
+//   grav: 0.0001,
+//   scale: 1.4,
+//   length: 10,
+//   range: 1500,
+//   snd: 0
 // },
 // physRang: 0,
 // physPow: 0,
@@ -103,8 +132,8 @@ const Weapon g_deagle = {
 // recoilZ: 4.8,
 // recoilZM: 0.2,
 // recoilAnim: {
-// time: 240,
-// recoilTweenY: 0.42
+//   time: 240,
+//   recoilTweenY: 0.42
 // },
 // rumble: 0.8,
 // icnPad: -10,

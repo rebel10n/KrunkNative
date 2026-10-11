@@ -1,7 +1,8 @@
-#include <glad/glad.h>
+#include <gl.h>
 #include <client.h>
 #include <fast_obj.h>
 #include <math.h>
+#include <stdio.h>
 #include <stb_image.h>
 #include <pcg_basic.h>
 
@@ -9,17 +10,28 @@ unsigned int load_texture(char *path) {
     texture_cache_map_itr cached = vt_get(&g_texture_cache, path);
     if (!vt_is_end(cached)) return cached.data->val;
 
-    stbi_set_flip_vertically_on_load(1);
+    ensure_asset_file(path);
+
+    // GL wants the bottom row first. The HTML engine (html/engine/image.c) sets stb's
+    // thread-local flip flag to 0 on this thread, which overrides the global flag, so the
+    // flip must be set thread-locally too; restore stb's top-first default afterwards.
+    stbi_set_flip_vertically_on_load_thread(1);
 
     int width, height, _;
-    unsigned char *texture = stbi_load(path, &width, &height, &_, 4);
+    char swapped[1024];
+    unsigned char *texture = stbi_load(file_redirect(path, swapped, sizeof(swapped)), &width, &height, &_, 4); // resource swapper
+    stbi_set_flip_vertically_on_load_thread(0);
 
-    if (!texture) return 0;
-
+    if (!texture) {
+        fprintf(stderr, "failed to load texture %s: %s\n", path, stbi_failure_reason());
+        return 0;
+    }
     unsigned int texture_id;
 
     glGenTextures(1, &texture_id);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture_id);
+    g_active_texture = texture_id;
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -56,10 +68,12 @@ GlyphCacheEntry *load_glyph(const char c) {
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glGenTextures(1, &entry->texture);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, entry->texture);
+    g_active_texture = entry->texture;
 
     glTexImage2D(
-        GL_TEXTURE_2D, 0, GL_RED,
+        GL_TEXTURE_2D, 0, GL_R8,
         (int) g_game_font->glyph->bitmap.width,
         (int) g_game_font->glyph->bitmap.rows,
         0, GL_RED, GL_UNSIGNED_BYTE,
@@ -85,6 +99,36 @@ GlyphCacheEntry *load_glyph(const char c) {
     return entry;
 }
 
+void geometry_set_bounds(Geometry *geometry, const vertex *vertices, const size_t vertex_count) {
+    if (!geometry || !vertices || !vertex_count) return;
+
+    vec3 min = vertices[0].position;
+    vec3 max = vertices[0].position;
+    for (size_t i = 1; i < vertex_count; i++) {
+        const vec3 p = vertices[i].position;
+        if (p.x < min.x) min.x = p.x;
+        if (p.y < min.y) min.y = p.y;
+        if (p.z < min.z) min.z = p.z;
+        if (p.x > max.x) max.x = p.x;
+        if (p.y > max.y) max.y = p.y;
+        if (p.z > max.z) max.z = p.z;
+    }
+
+    const float cx = (min.x + max.x) * 0.5f, cy = (min.y + max.y) * 0.5f, cz = (min.z + max.z) * 0.5f;
+    float radius_sq = 0.0f;
+    for (size_t i = 0; i < vertex_count; i++) {
+        const vec3 p = vertices[i].position;
+        const float dx = p.x - cx, dy = p.y - cy, dz = p.z - cz;
+        const float d = dx * dx + dy * dy + dz * dz;
+        if (d > radius_sq) radius_sq = d;
+    }
+
+    geometry->bound_center[0] = cx;
+    geometry->bound_center[1] = cy;
+    geometry->bound_center[2] = cz;
+    geometry->bound_radius = sqrtf(radius_sq) * 1.001f + 1e-4f; // float slack: never cull a touching mesh
+}
+
 Geometry *load_obj_model(char *path, const int transform_y) {
     geometry_cache_map_itr cached = vt_get(&g_geometry_cache, path);
     if (!vt_is_end(cached)) return cached.data->val;
@@ -92,7 +136,15 @@ Geometry *load_obj_model(char *path, const int transform_y) {
     Geometry *geometry = calloc(1, sizeof(Geometry));
     if (!geometry) return NULL;
 
+    ensure_asset_file(path);
     fastObjMesh *mesh = fast_obj_read(path);
+
+    if (!mesh) {
+        fprintf(stderr, "failed to load model %s\n", path);
+        free(geometry);
+        return NULL;
+    }
+
     size_t idx = 0;
 
     size_t vertex_count = 0;
@@ -119,6 +171,13 @@ Geometry *load_obj_model(char *path, const int transform_y) {
 
     for (size_t f = 0; f < mesh->face_count; f++) {
         const unsigned int fv = mesh->face_vertices[f];
+
+        // Polylines (`l` records, e.g. weapon_14.obj) come through as faces with < 3 vertices; they were not
+        // counted above, so skip them here too instead of writing past the end of `vertices`.
+        if (fv < 3) {
+            idx += fv;
+            continue;
+        }
 
         const fastObjIndex anchor = mesh->indices[idx++];
         const size_t anchor_idx = alloc_vertex_count++;
@@ -205,6 +264,7 @@ Geometry *load_obj_model(char *path, const int transform_y) {
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, (int) (alloc_vertex_count * sizeof(vertex)), vertices, GL_STATIC_DRAW);
+    geometry_set_bounds(geometry, vertices, alloc_vertex_count);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (int) (alloc_index_count * sizeof(unsigned int)), indices, GL_STATIC_DRAW);
@@ -214,7 +274,6 @@ Geometry *load_obj_model(char *path, const int transform_y) {
 
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
-    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
     geometry->index_count = (int) alloc_index_count;
     fast_obj_destroy(mesh);
@@ -279,6 +338,14 @@ static const unsigned int cube_indices[] = {
     20, 21, 22, 20, 23, 21, // BOTTOM
 };
 
+// cube/plane/ramp vertices span x, z in [-0.5, 0.5] and y in [0, 1]
+static void geometry_set_unit_bounds(Geometry *geometry) {
+    geometry->bound_center[0] = 0.0f;
+    geometry->bound_center[1] = 0.5f;
+    geometry->bound_center[2] = 0.0f;
+    geometry->bound_radius = 0.867f; // >= sqrt(3 * 0.5^2), the corner distance
+}
+
 Geometry *create_cube_geo() {
     if (g_cube_geometry) return g_cube_geometry;
 
@@ -304,10 +371,10 @@ Geometry *create_cube_geo() {
 
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
-    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
     geometry->index_count = sizeof(cube_indices) / sizeof(cube_indices[0]);
 
+    geometry_set_unit_bounds(geometry);
     g_cube_geometry = geometry;
     return geometry;
 }
@@ -347,10 +414,10 @@ Geometry *create_plane_geo() {
 
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
-    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
     geometry->index_count = sizeof(plane_indices) / sizeof(plane_indices[0]);
 
+    geometry_set_unit_bounds(geometry);
     g_plane_geometry = geometry;
     return geometry;
 }
@@ -418,95 +485,10 @@ Geometry *create_ramp_geo() {
 
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
-    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
 
     geometry->index_count = sizeof(indices) / sizeof(indices[0]);
 
+    geometry_set_unit_bounds(geometry);
     g_ramp_geometry = geometry;
-    return geometry;
-}
-
-Geometry *create_ladder_geo(const float height) {
-    Geometry *geometry = calloc(1, sizeof(Geometry));
-    if (!geometry) return NULL;
-
-    const int steps = (int) (height / 6.0f);
-
-    vertex vertices[steps * 4 + 24 * 2];
-    int indices[steps * 6 + 36 * 2];
-
-    for (int i = 0; i < 2; i++) {
-        const int v_offset = 24 * i;
-        const int i_offset = 36 * i;
-
-        memcpy(vertices + v_offset, cube_vertices, sizeof(cube_vertices));
-        memcpy(indices + i_offset, cube_indices, sizeof(cube_indices));
-
-        for (int v = 0; v < 24; v++) {
-            vertices[v_offset + v].position.x *= game_constants.ladder_scale * 2.0f;
-            vertices[v_offset + v].position.z *= game_constants.ladder_scale * 2.0f;
-            vertices[v_offset + v].position.y *= height + 2.0f;
-
-            vertices[v_offset + v].position.x += game_constants.ladder_width * (i ? 1.0f : -1.0f);
-        }
-
-        for (int j = 0; j < 36; j++) indices[i_offset + j] += v_offset;
-    }
-
-    for (int i = 0; i < steps; i++) {
-        const int v_offset = 24 * 2 + i * 4;
-
-        vertex step_vertices[4];
-        memcpy(step_vertices, plane_vertices, sizeof(plane_vertices));
-
-        const float displace = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f;
-        const float rotate = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * 0.1f;
-
-        for (int v = 0; v < 4; v++) {
-            step_vertices[v].position.y -= 1.0f;
-            step_vertices[v].position.x *= game_constants.ladder_width * 2.0f;
-            step_vertices[v].position.z *= game_constants.ladder_scale * 2.0f;
-
-            vec3 tmp = step_vertices[v].position;
-
-            step_vertices[v].position.y = tmp.y * cosf((float) M_PI * 0.5f) + tmp.z * -sinf((float) M_PI * 0.5f);
-            step_vertices[v].position.z = tmp.y * sinf((float) M_PI * 0.5f) + tmp.z * cosf((float) M_PI * 0.5f);
-
-            tmp = step_vertices[v].position;
-
-            step_vertices[v].position.x = tmp.x * cosf(rotate) + tmp.y * -sinf(rotate);
-            step_vertices[v].position.y = tmp.x * sinf(rotate) + tmp.y * cosf(rotate);
-
-            step_vertices[v].position.y += (float) (i + 1) * 6.0f + displace;
-        }
-
-        const int step_indices[] = {v_offset, v_offset + 1, v_offset + 2, v_offset, v_offset + 3, v_offset + 1};
-
-        memcpy(vertices + 24 * 2 + i * 4, step_vertices, sizeof(step_vertices));
-        memcpy(indices + 36 * 2 + i * 6, step_indices, sizeof(step_indices));
-    }
-
-    unsigned int vbo;
-
-    glGenVertexArrays(1, &geometry->vao);
-    glGenBuffers(1, &geometry->ebo);
-    glGenBuffers(1, &vbo);
-
-    glBindVertexArray(geometry->vao);
-
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, (long long) sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long long) sizeof(indices), indices, GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
-
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-    glVertexArrayElementBuffer(geometry->vao, geometry->ebo);
-
-    geometry->index_count = (int) (sizeof(indices) / sizeof(indices[0]));
     return geometry;
 }

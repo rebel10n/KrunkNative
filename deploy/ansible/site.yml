@@ -1,0 +1,7 @@
+# Everything: ansible-playbook site.yml [--check --diff] [--limit kru|edges] [--tags ...]
+# Tags: user, openresty, repo, release, brain, web, gameserver, dns.
+- name: Central node
+  ansible.builtin.import_playbook: central.yml
+
+- name: Edges
+  ansible.builtin.import_playbook: edges.yml

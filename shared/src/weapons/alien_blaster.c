@@ -1,16 +1,18 @@
 #include <weapons.h>
 
+// Krunker v3.1.1 weapon 11 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, noAo, nRing, transp, nCase, minRec, kill, type, muzOff, muzOffY, muzID, muzMlt, rumble, icnPad, expScale.
 const Weapon g_alien_blaster = {
     .name = "Alien Blaster",
     .src = "weapon_12",
     .icon = "icon_12",
+
     .secondary = 1,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 1,
-    .melee = 0,
-    .equipment = 0,
+
     .ammo = 4,
     .swap_time = 0.2f,
     .reload_time = 1.5f,
@@ -23,11 +25,37 @@ const Weapon g_alien_blaster = {
     .damage_drop = 10.0f,
     .rate = 0.17f,
     .spread = 150.0f,
-    .recoil = 0.006f,
+    .recoil = 6.0f,
+    .recoil_r = 0.01f,
     .recover = 0.98f,
     .recover_y = 0.99f,
     .recover_f = 0.98f,
+    .physical_power = 0.0f,
+    .physical_range = 0.0f,
     .zoom = 1.4f,
+    .recoil_y_mlt = 0.2f,
+    .recoil_z = 2.2f,
+    .y_rotation = -0.01f,
+    .jump_y_mlt = 0.8f,
+    .aim_recoil_mlt = 0.3f,
+    .lean_mlt = 1.6f,
+    .inspect_rotation = 0.1f,
+    .inspect_mlt = 0.8f,
+    .crouch_lean = 0.2f,
+    .crouch_rotation = 0.2f,
+    .crouch_drop = 0.0f,
+    .scale = 1.1f,
+    .hold_width = 1.0f,
+
+    .origin = {0.0f, -0.53f, -3.8f},
+    .offset = {1.3f, -0.83f, -4.1f},
+    .left_hold = {0.0f, -1.0f, -0.2f},
+    .right_hold = {0.0f, -0.65f, -0.2f},
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.2f,
+    .recoil_tween_y = 0.32f,
+    .recoil_anim_mask = 1,
 };
 
 // {
@@ -95,8 +123,8 @@ const Weapon g_alien_blaster = {
 // recoilZ: 2.2,
 // aimRecMlt: 0.3,
 // recoilAnim: {
-// time: 200,
-// recoilTweenY: 0.32
+//   time: 200,
+//   recoilTweenY: 0.32
 // },
 // rumble: 0.4,
 // icnPad: -8,

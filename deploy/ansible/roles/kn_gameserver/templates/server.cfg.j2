@@ -1,0 +1,28 @@
+// {{ ansible_managed }} (deploy/ansible role kn_gameserver)
+// KrunkNative dedicated server instance {{ n }} of {{ kn_gameserver_count }} on {{ inventory_hostname }}.
+hostname        "{{ kn_gameserver_name_prefix }} #{{ n }}{{ ' (online)' if n in kn_gameserver_online_instances else '' }}"
+region          "{{ kn_gameserver_region }}"
+node_id         "{{ kn_edge_name | upper }}{{ n }}"
+port            {{ kn_gameserver_first_port + n - 1 }}
+query_port      0
+// Bind to the advertised address: on multi-IP hosts (ashburn: route src .85, DNS .87)
+// UDP replies from 0.0.0.0 leave with the route source and NATs drop them.
+// (Needs the server_bin with the whole-value cfg parse fix: "2.56.222.45" != 2.56.)
+listen_host     "{{ kn_gameserver_listen_host }}"
+public_host     "{{ kn_gameserver_hostname_fmt | format(n) }}"
+max_players     {{ kn_gameserver_max_players }}
+online_mode     {{ 1 if n in kn_gameserver_online_instances else 0 }}
+auth_url        "{{ kn_gameserver_auth_url }}"
+// Public listing (opt-in): heartbeat to the finder with host = public_host.
+finder_url      "{{ kn_gameserver_finder_url }}"
+rcon_port       0
+// Writable: StateDirectory=krunknative/gs-%i of the unit.
+bans_file       "{{ kn_state_dir }}/gs-{{ n }}/bans.json"
+// Coordinator link (matchmaking): wss:// through Cloudflare, certificate verified against
+// the system CA store; the brain hands clients public_host/port, not the TCP peer.
+{% set kn_gs_link = kn_gameserver_coordinator_url if (n not in kn_gameserver_online_instances or kn_gameserver_coordinator_online_instances | bool) else '' %}
+coordinator_url "{{ kn_gs_link }}"
+{% if kn_gs_link %}
+coordinator_secret "{{ kn_gs_internal_secret }}"
+join_secret     "{{ kn_gs_join_secret or kn_gs_internal_secret }}"
+{% endif %}

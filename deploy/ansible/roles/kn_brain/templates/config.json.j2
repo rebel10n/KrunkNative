@@ -1,0 +1,11 @@
+{
+  "_comment": "{{ ansible_managed }}. Lives in the release (releases/<id>/config/config.json) so kn_config's root = the release and relative defaults (assets/, services/db/migrations/<dialect>) resolve inside it. No secrets here: they come from {{ kn_etc_dir }}/secrets.env.",
+  "log": { "level": "{{ kn_brain_log_level }}", "format": "text", "file": "" },
+  "brain": {
+    "host": "127.0.0.1",
+    "trust_proxy": true,
+    "region": "us",
+    "federation": false,
+    "cors_origins": {{ (kn_web_origins + ["https://coordinator." ~ kn_domain, "https://matchmaker." ~ kn_domain]) | to_json }}
+  }
+}

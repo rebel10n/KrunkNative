@@ -1,0 +1,9 @@
+# Per-instance DNS for the edges: <edge>-<n>.krunk.io A <public ip>, DNS only
+# (not proxied: game TCP/UDP cannot go through the Cloudflare proxy).
+# Token: CF_API_TOKEN from the environment (source ~/.config/kn-secrets/cloudflare.env
+# before running; CI: a repository secret). Never put it in the repo or a vars file.
+cf_zone: "{{ kn_domain }}"
+cf_api_token: "{{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}"
+cf_ttl: 300
+# Remove <edge>-<n> records with n > instance count (only this edge's own names).
+cf_prune: true

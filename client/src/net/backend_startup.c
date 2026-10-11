@@ -1,0 +1,97 @@
+// Startup glue between main.c and the brain client (client/include/backend_ui.h):
+// command line (--brain, --connect), the brain-or-direct decision and the per-frame
+// pump. Kept out of main.c so the backend stays one include + three calls there.
+#include <backend.h>
+#include <backend_ui.h>
+#include <online_mode.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
+static const char *g_cli_brain;
+static const char *g_cli_connect;
+static const char *g_cli_mode, *g_cli_finder; // --mode online|offline, --finder <url> (online_mode.h)
+static int g_hub_page; // --hub / --social / social.html: the hub needs no game server with a brain
+
+void backend_parse_args(int *argc, char **argv) {
+    int out = 1;
+    for (int i = 1; i < *argc; i++) {
+        if (!strcmp(argv[i], "--hub") || !strcmp(argv[i], "--social")) g_hub_page = 1;
+        if ((!strcmp(argv[i], "--mode") || !strcmp(argv[i], "--finder")) && i + 1 < *argc) {
+            if (argv[i][2] == 'm') g_cli_mode = argv[i + 1];
+            else g_cli_finder = argv[i + 1];
+            i++;
+            continue;
+        }
+        if ((!strcmp(argv[i], "--brain") || !strcmp(argv[i], "--connect")) && i + 1 < *argc) {
+            if (argv[i][2] == 'b') g_cli_brain = argv[i + 1];
+            else g_cli_connect = argv[i + 1];
+            i++;
+            continue;
+        }
+        argv[out++] = argv[i];
+    }
+    *argc = out;
+    argv[out] = NULL;
+}
+
+int backend_startup(Client *client, const int offline, const int scenario) {
+    // --connect host[:port]: a direct server, no matchmaking (the brain still serves
+    // the account and the hub when configured)
+    int direct = 0;
+    if (g_cli_connect && g_cli_connect[0]) {
+        char host[sizeof(client->net_address)];
+        snprintf(host, sizeof(host), "%s", g_cli_connect);
+        char *colon = strrchr(host, ':');
+        if (colon) {
+            const long port = strtol(colon + 1, NULL, 10);
+            if (port > 0 && port < 65536) client->net_port = (unsigned short) port;
+            *colon = 0;
+        }
+        if (host[0]) snprintf(client->net_address, sizeof(client->net_address), "%s", host);
+        direct = 1;
+    }
+    if (getenv("KRUNKNATIVE_SERVER_PORT")) direct = 1;
+
+    if (scenario) {
+        // --render-scenario (uidiff) renders the guest page: never touch a backend
+        servers_ui_init(client, 0);
+        return 0;
+    }
+    online_mode_init(g_cli_mode, g_cli_finder); // offline mode: no account service at all
+    backend_init(online_mode_online() ? g_cli_brain : "");
+#ifdef __EMSCRIPTEN__
+    direct |= EM_ASM_INT({
+        try { return new URLSearchParams(location.search).get('ws') ? 1 : 0; } catch (e) { return 0; }
+    });
+    g_hub_page |= EM_ASM_INT({ return /social([.]html)?$/.test(location.pathname) ? 1 : 0; });
+#else
+    // the hub / editor windows are separate processes (app_window.c): they inherit an
+    // explicit URL; a default one (local config) is probed by each process itself
+    if (backend_enabled() && !backend_url_is_default()) setenv("KRUNKNATIVE_BRAIN_URL", backend_url(), 1);
+#endif
+    backend_probe_start(); // a default URL (page origin / local config) needs a kn_brain answer first
+    account_ui_init(client);
+    if (backend_enabled() && !backend_url_is_default() && g_hub_page && !direct) {
+        // the hub talks to the brain's social socket: no game server, no lobby slot (a
+        // default URL may have no brain behind it: the guest hub needs the game connection)
+        servers_ui_init(client, 0);
+        return 1;
+    }
+    // the hub never takes a lobby slot; with a default URL it keeps the classic connection for
+    // the guest stubs in case no brain answers the probe
+    const int brain_mode = backend_enabled() && !offline && !direct && !g_hub_page;
+    servers_ui_init(client, brain_mode);
+    if (brain_mode) printf("[mm] matchmaking through %s\n", backend_url());
+    return brain_mode;
+}
+
+void backend_frame(Client *client) {
+    backend_poll();
+    online_mode_tick(client);
+    account_ui_tick(client);
+    servers_ui_tick(client);
+}

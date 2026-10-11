@@ -1,14 +1,21 @@
 #include <weapons.h>
 
+// Krunker v3.1.1 weapon 1 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, noAo, type, caseZOff, caseYOff, muzOff, muzOffY, muzMlt, rumble, icnPad.
 const Weapon g_ak47 = {
     .name = "Assault Rifle",
     .src = "weapon_2",
     .icon = "icon_2",
+
     .secondary = 0,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 0,
+    .has_attach = 1,
+    .projectile = 1,
+    .projectile_disable = 1,
+
     .ammo = 30,
     .swap_time = 0.3f,
     .reload_time = 1.4f,
@@ -22,11 +29,14 @@ const Weapon g_ak47 = {
     .rate = 0.11f,
     .spread = 100.0f,
     .min_spread = 5.0f,
-    .zoom = 1.6f,
     .recoil = 3.0f,
+    .recoil_r = 0.05f,
     .recover = 0.978f,
     .recover_y = 0.995f,
     .recover_f = 0.975f,
+    .physical_power = 0.0f,
+    .physical_range = 0.0f,
+    .zoom = 1.6f,
     .recoil_y_mlt = 0.6f,
     .recoil_z = 4.3f,
     .recoil_z_mlt = -0.04f,
@@ -34,7 +44,9 @@ const Weapon g_ak47 = {
     .y_rotation = 0.0018f,
     .rotation_offset = -0.08f,
     .rotation_offset_aim = -0.035f,
-    .jump_y_mlt = 0.3f,
+    .aim_offset_y = 0.042f,
+    .jump_y_mlt = 0.9f,
+    .jump_bob_y_mlt = 0.3f,
     .aim_recoil_mlt = 0.65f,
     .lean_mlt = 1.5f,
     .inspect_rotation = 0.1f,
@@ -42,13 +54,22 @@ const Weapon g_ak47 = {
     .crouch_lean = 0.2f,
     .crouch_rotation = 0.1f,
     .crouch_drop = 0.1f,
-    .hold_width = 0.8f,
+    .attach_y_offset = -0.07f,
+    .attach_z_offset = -0.8f,
     .scale = 0.00095745145728643f,
+    .hold_width = 0.8f,
 
     .origin = {0.0f, -0.59f, -2.14f},
     .offset = {0.7f, -0.87f, -3.33f},
-    .right_hold = {0.0f, -0.6f, -1.2f},
     .left_hold = {0.0f, -0.41f, 0.5f},
+    .right_hold = {0.0f, -0.6f, -1.2f},
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .swap_wiggle = 0.3f,
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.16f,
+    .recoil_tween_y = 0.065f,
+    .recoil_tween_z = 0.1f,
+    .recoil_anim_mask = 9,
 };
 
 // {
@@ -57,17 +78,17 @@ const Weapon g_ak47 = {
 // icon: "icon_2",
 // sound: "weapon_2",
 // projectile: {
-// disable: true,
-// mat: "BASIC",
-// color: 16777179,
-// dmg: 23,
-// spd: 2.6,
-// lookDir: true,
-// grav: 0.00011,
-// scale: 1.4,
-// length: 10,
-// range: 3000,
-// snd: 0
+//   disable: true,
+//   mat: "BASIC",
+//   color: 16777179,
+//   dmg: 23,
+//   spd: 2.6,
+//   lookDir: true,
+//   grav: 0.00011,
+//   scale: 1.4,
+//   length: 10,
+//   range: 3000,
+//   snd: 0
 // },
 // secondary: false,
 // noSpread: false,
@@ -135,9 +156,9 @@ const Weapon g_ak47 = {
 // recoilZM: -0.04,
 // aimRecMlt: 0.65,
 // recoilAnim: {
-// time: 160,
-// recoilTweenY: 0.065,
-// recoilTweenZ: 0.1
+//   time: 160,
+//   recoilTweenY: 0.065,
+//   recoilTweenZ: 0.1
 // },
 // jumpYM: 0.3,
 // rumble: 0.5,

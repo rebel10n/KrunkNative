@@ -1,0 +1,9 @@
+- name: Restart kn_brain
+  ansible.builtin.systemd_service:
+    name: "kn-brain-{{ item.name }}"
+    state: restarted
+    daemon_reload: true
+  loop: "{{ kn_brain_instances }}"
+  loop_control:
+    label: "kn-brain-{{ item.name }}"
+  ignore_errors: "{{ ansible_check_mode }}"

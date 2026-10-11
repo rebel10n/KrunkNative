@@ -1,0 +1,22 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/menu/real-1920.png",
+  "size": [
+    1920,
+    1080
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": null,
+    "settingsTab": 0,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "anim_time": 0.435
+  },
+  "frames": 3,
+  "note": "Same as menu-1280 at 1920x1080 (#uiBase scale 1.129 = 1.5x the 1280 layout); anim_time 0.435 = `grow` phase."
+}

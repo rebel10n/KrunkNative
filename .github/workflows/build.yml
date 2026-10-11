@@ -7,15 +7,22 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+env:
+  # Emscripten release used by the `web` job (matches the local toolchain).
+  EM_VERSION: 6.0.12
+  EM_CACHE_FOLDER: emsdk-cache
+
 jobs:
   linux:
     name: Linux (GCC)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
+      # imagemagick + xvfb + the Mesa DRI drivers (llvmpipe) are for `make uidiff`;
+      # libegl-dev + libegl-mesa0 for the headless EGL mode (client/include/headless.h).
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -32,25 +39,53 @@ jobs:
             libxrandr-dev \
             libxi-dev \
             libgl1-mesa-dev \
+            libgl1-mesa-dri \
             libglu1-mesa-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev \
+            libxcb-present-dev \
+            libegl-dev \
+            libegl-mesa0 \
+            imagemagick \
+            xvfb
 
-      - name: Configure (Release)
-        run: cmake -G Ninja -B cmake-build-release -S . -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build cmake-build-release --config Release --parallel
+      # The in-house HTML/CSS engine is part of the default build (HTML_ENGINE=ON).
+      - name: Build (Release)
+        run: make release
 
       - name: Run tests
         run: ./cmake-build-release/proc_input_test
 
+      # Headless (EGL on Mesa llvmpipe, no window, no X server): the client boots offline,
+      # the C UI logic sets up the page and the menu frame is written to /tmp/smoke-native.png.
+      # Reuses the release build (-o build: no debug build).
+      - name: Native smoke run (headless)
+        run: make -o build smoke-native DEBUG_DIR=cmake-build-release EGL_DEVICE=mesa
+
+      # ui_test is built with the engine; the Lexbor smoke probe needs no display.
+      - name: HTML engine smoke probe
+        run: ./cmake-build-release/ui_test lexbor-probe
+
+      # Renders every tools/uidiff scenario through client_bin --render-scenario under
+      # Xvfb/llvmpipe and pixel-diffs it against the Krunker references.
+      # Advisory for now: becomes required once the diff baseline is green.
+      - name: UI pixel diff (make uidiff)
+        run: make uidiff
+        continue-on-error: true
+
+      - name: Stage Linux artifact
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          cp -v cmake-build-release/client_bin cmake-build-release/server_bin dist/
+          cp -r ui dist/ui
+          # shellcheck disable=SC2012
+          ls -laR dist | head -100
+
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: KrunkNative-linux-x86_64
-          path: |
-            cmake-build-release/client_bin
-            cmake-build-release/server_bin
+          path: dist/**
           if-no-files-found: error
 
   windows:
@@ -60,7 +95,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -76,14 +111,15 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkgconf
 
-      - name: Configure (Release)
-        run: cmake -G Ninja -B cmake-build-release -S . -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build cmake-build-release --config Release --parallel
+      # The HTML engine is pure C (Lexbor + FreeType), so MinGW builds it too.
+      - name: Build (Release)
+        run: make release
 
       - name: Run tests
         run: ./cmake-build-release/proc_input_test.exe
+
+      - name: HTML engine smoke probe
+        run: ./cmake-build-release/ui_test.exe lexbor-probe
 
       - name: Stage Windows artifact (exes + runtime DLLs)
         run: |
@@ -139,31 +175,47 @@ jobs:
           resolve_deps dist/server.exe dist/.seen
           rm -f dist/.seen
 
+          cp -r ui dist/ui
+
           echo "=== Final artifact contents ==="
           ls -la dist/
           echo "=== Bundled DLL count ==="
           ls -1 dist/*.dll 2>/dev/null | wc -l || true
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: KrunkNative-windows-x86_64-mingw
           path: dist/**
           if-no-files-found: error
 
+  # Native macOS renders through Metal via ANGLE (OpenGL ES 3.0, the KN_GLES path the web
+  # build shares; README.md "ANGLE / Metal (macOS)"). ANGLE is built from the commit pinned in
+  # tools/angle/build-angle.sh and cached per arch: the cache key is that script's hash, so
+  # bumping the pin rebuilds it (cold: ~30-60 min, then a cache restore). The `desktop` entry
+  # keeps Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
   macos:
-    name: macOS (Clang)
+    name: macOS (Clang, ${{ matrix.gl == 'angle' && 'ANGLE/Metal' || 'desktop GL 4.1' }}, ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: macos-latest
             arch: arm64
-          - runner: macos-13
+            gl: angle
+          # macos-13 (the last Intel "latest") was retired on 2025-12-04;
+          # macos-15-intel is the supported x86_64 label until ~Aug 2027.
+          - runner: macos-15-intel
             arch: x86_64
+            gl: angle
+          - runner: macos-latest
+            arch: arm64
+            gl: desktop
     runs-on: ${{ matrix.runner }}
+    env:
+      ANGLE_DIR: ${{ github.workspace }}/angle-dist
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -172,20 +224,295 @@ jobs:
           brew update
           brew install cmake ninja pkg-config
 
-      - name: Configure (Release)
-        run: cmake -G Ninja -B cmake-build-release -S . -DCMAKE_BUILD_TYPE=Release
+      - name: Cache ANGLE
+        if: matrix.gl == 'angle'
+        id: angle-cache
+        uses: actions/cache@v6
+        with:
+          path: angle-dist
+          key: angle-macos-${{ matrix.arch }}-${{ hashFiles('tools/angle/build-angle.sh') }}
 
-      - name: Build
-        run: cmake --build cmake-build-release --config Release --parallel
+      # depot_tools + gclient + gn, Metal and OpenGL backends only; the checkout (~9 GB) lives
+      # in RUNNER_TEMP and only lib/ + include/ (a few MB) are cached.
+      - name: Build ANGLE (pinned commit)
+        if: matrix.gl == 'angle' && steps.angle-cache.outputs.cache-hit != 'true'
+        run: tools/angle/build-angle.sh "$ANGLE_DIR" --work "$RUNNER_TEMP/angle-work"
+
+      - name: Build (Release)
+        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }}"
 
       - name: Run tests
         run: ./cmake-build-release/proc_input_test
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: HTML engine smoke probe
+        run: ./cmake-build-release/ui_test lexbor-probe
+
+      # client_bin links @rpath/libEGL.dylib with an @executable_path rpath, and the build copied
+      # ANGLE's dylibs next to it (GLFW dlopens @rpath/libEGL.dylib + @rpath/libGLESv2.dylib).
+      - name: Check ANGLE bundling
+        if: matrix.gl == 'angle'
+        run: |
+          set -euxo pipefail
+          otool -L cmake-build-release/client_bin | tee /dev/stderr | grep -q '@rpath/libEGL.dylib'
+          otool -l cmake-build-release/client_bin | grep -A2 LC_RPATH | grep -q '@executable_path'
+          for lib in libEGL.dylib libGLESv2.dylib; do
+            test -f "cmake-build-release/$lib"
+            otool -D "cmake-build-release/$lib" | grep -q "@rpath/$lib"
+          done
+
+      # Headless (client/include/headless.h on ANGLE's EGL: an OpenGL ES 3.0 pbuffer, no window):
+      # the menu over the default map and the uidiff menu scenario. The arm64 runner's
+      # paravirtual GPU must give the Metal backend; the Intel runner has no Metal device, so
+      # there the client falls back to ANGLE's OpenGL backend and the step is advisory.
+      - name: Smoke screenshots (headless ANGLE)
+        if: matrix.gl == 'angle'
+        continue-on-error: ${{ matrix.arch == 'x86_64' }}
+        run: |
+          set -uo pipefail
+          mkdir -p smoke
+          export KRUNKNATIVE_HEADLESS=1 XDG_CONFIG_HOME="$RUNNER_TEMP/kn-config"
+          # run <seconds> <log> <command...>: macOS has no timeout(1)
+          run() {
+            local seconds=$1 log=$2; shift 2
+            "$@" > "$log" 2>&1 &
+            local pid=$!
+            for _ in $(seq "$seconds"); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+            kill "$pid" 2>/dev/null
+            wait "$pid"
+          }
+          KRUNKNATIVE_SCREENSHOT="$PWD/smoke/menu-offline.png" KRUNKNATIVE_CAPTURE_FRAMES=60 \
+            run 180 smoke/menu-offline.log ./cmake-build-release/client_bin --offline
+          run 180 smoke/menu-1280.log ./cmake-build-release/client_bin \
+            --render-scenario tools/uidiff/scenarios/menu-1280.json "$PWD/smoke/menu-1280.png"
+          grep -h -E '^\[gl\]|GL_RENDERER' smoke/*.log | sort -u
+          status=0
+          for shot in menu-offline menu-1280; do
+            if [ ! -s "smoke/$shot.png" ]; then
+              echo "::error::no smoke/$shot.png"; tail -40 "smoke/$shot.log"; status=1
+            fi
+          done
+          if [ "${{ matrix.arch }}" = arm64 ] && ! grep -q 'ANGLE Metal Renderer' smoke/menu-offline.log; then
+            echo "::error::GL_RENDERER is not ANGLE's Metal renderer"; status=1
+          fi
+          exit $status
+
+      - name: Upload smoke screenshots
+        if: always() && matrix.gl == 'angle'
+        uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-macos-${{ matrix.arch }}
-          path: |
-            cmake-build-release/client_bin
-            cmake-build-release/server_bin
+          name: KrunkNative-macos-${{ matrix.arch }}-smoke
+          path: smoke/**
+          if-no-files-found: warn
+
+      - name: Stage macOS artifact
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          cp -v cmake-build-release/client_bin cmake-build-release/server_bin dist/
+          # ANGLE (Metal): client_bin loads them from its own directory (@executable_path rpath)
+          if [ "${{ matrix.gl }}" = angle ]; then cp -v cmake-build-release/libEGL.dylib cmake-build-release/libGLESv2.dylib dist/; fi
+          cp -R ui dist/ui
+          # shellcheck disable=SC2012
+          ls -laR dist | head -100
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: KrunkNative-macos-${{ matrix.arch }}${{ matrix.gl == 'desktop' && '-desktop-gl' || '' }}
+          path: dist/**
           if-no-files-found: error
+
+  web:
+    name: Web (Emscripten / WebGL2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build rsync
+
+      # setup-emsdk caches the SDK itself in EM_CACHE_FOLDER; the extra
+      # actions/cache step also keeps the system libraries Emscripten builds
+      # on first use (libc, libGL, ...) between runs.
+      - name: Cache emsdk
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.EM_CACHE_FOLDER }}
+          key: emsdk-${{ env.EM_VERSION }}-${{ runner.os }}
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: ${{ env.EM_VERSION }}
+          actions-cache-folder: ${{ env.EM_CACHE_FOLDER }}
+
+      - name: Verify toolchain
+        run: emcc -v
+
+      # The page is ui/ with only the web glue (js/kn-shim.js + js/loader.js); the C UI
+      # logic drives its DOM through client/src/html/web_dom.c.
+      - name: Build web client
+        run: make web
+
+      - name: Verify output
+        run: |
+          set -euxo pipefail
+          test -f dist/web/index.html
+          test -f dist/web/client.js
+          test -f dist/web/client.wasm
+          test -f dist/web/client.data
+          test -f dist/web/js/kn-shim.js
+          test -f dist/web/js/loader.js
+          ls -la dist/web
+
+      # dist/web/assets is a symlink/copy of the (gitignored, ~1.5 GB) game
+      # assets; it is never shipped in the artifact.
+      - name: Stage web artifact (without assets/)
+        run: |
+          set -euxo pipefail
+          mkdir -p stage
+          rsync -a --exclude='/assets' --exclude='/assets/' dist/web/ stage/web/
+          du -sh stage/web
+          find stage/web -maxdepth 2 | head -50
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: KrunkNative-web
+          path: stage/web/**
+          if-no-files-found: error
+
+  pages:
+    name: Deploy web build to GitHub Pages
+    needs: web
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Download web build
+        uses: actions/download-artifact@v8
+        with:
+          name: KrunkNative-web
+          path: stage/web
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      # The published page has no game assets (models/textures 404) and no
+      # /native bridge; only the `?offline=1` embedded-server path is usable.
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: stage/web
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  # Krunker's mobile apps wrapped the web game; platform/android does the same with
+  # the web client from the `web` job bundled into the APK (platform/README.md).
+  android:
+    name: Android (WebView app, debug APK)
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download web build
+        uses: actions/download-artifact@v8
+        with:
+          name: KrunkNative-web
+          path: dist/web
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        working-directory: platform/android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: KrunkNative-android-debug
+          path: platform/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  # platform/ios (WKWebView, XcodeGen spec): unsigned simulator build.
+  ios:
+    name: iOS (WKWebView app, simulator build)
+    needs: web
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download web build
+        uses: actions/download-artifact@v8
+        with:
+          name: KrunkNative-web
+          path: dist/web
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: platform/ios
+        run: |
+          ./prepare.sh ../../dist/web
+          xcodegen generate
+
+      - name: Build for the iOS simulator (unsigned)
+        working-directory: platform/ios
+        run: |
+          set -o pipefail
+          xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v7
+        with:
+          name: KrunkNative-ios-simulator
+          path: platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkNative.app
+          if-no-files-found: error
+
+  net-bridge:
+    name: net-bridge (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: net-bridge
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: net-bridge/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck

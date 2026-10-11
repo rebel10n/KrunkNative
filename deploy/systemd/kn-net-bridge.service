@@ -1,0 +1,24 @@
+# net-bridge --web: serves the Emscripten client (dist/web) and bridges the browser's
+# /native WebSocket to the native TCP game servers listed in KRUNK_NATIVE_TARGETS.
+[Unit]
+Description=KrunkNative web bridge (dist/web + /native)
+After=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User=krunknative
+Group=krunknative
+WorkingDirectory=/opt/krunknative/net-bridge
+EnvironmentFile=-/etc/krunknative/net-bridge.env
+Environment=KRUNK_NATIVE_BRIDGE_HOST=127.0.0.1 KRUNK_NATIVE_BRIDGE_PORT=8080
+ExecStart=/usr/bin/node -r ts-node/register/transpile-only index.ts --web
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=krunknative.target

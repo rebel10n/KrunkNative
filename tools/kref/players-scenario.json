@@ -1,0 +1,17 @@
+[
+  [300, "shot", "idle"],
+  [600, "look", 0, 0.7], [1300, "shot", "pitch-up"],
+  [1500, "look", 0, -1.4], [2200, "shot", "pitch-down"],
+  [2400, "look", 0, 0.7],
+  [2600, "down", "W"], [3000, "shot", "walk"], [3200, "up", "W"],
+  [3300, "down", "S"], [3700, "shot", "walk-back"], [3900, "up", "S"],
+  [4200, "down", "SHIFT"], [4900, "shot", "crouch"], [5000, "down", "W"], [5300, "shot", "crouch-walk"], [5600, "up", "W"],
+  [5700, "down", "S"], [6300, "up", "S"], [6400, "up", "SHIFT"],
+  [6700, "mdown", "right"], [7400, "shot", "aim"], [7500, "mup", "right"],
+  [7800, "look", 1.2, 0], [7840, "shot", "flick-40ms"], [7920, "shot", "flick-120ms"], [8400, "look", -1.2, 0],
+  [8800, "look", 0, 0.5], [8840, "shot", "pflick-40ms"], [8920, "shot", "pflick-120ms"], [9400, "look", 0, -0.5],
+  [9700, "down", "D"], [10000, "shot", "strafe"], [10100, "up", "D"], [10200, "down", "A"], [10600, "up", "A"],
+  [10900, "down", "2"], [10960, "up", "2"], [11300, "shot", "secondary"], [11800, "down", "1"], [11860, "up", "1"],
+  [12100, "down", "R"], [12160, "up", "R"], [12500, "shot", "reload"],
+  [13200, "end"]
+]

@@ -1,0 +1,131 @@
+/* KrunkNative additions to Krunker's editor page (ui/editor.html, imported by
+   tools/ui-import/editor_page.py). The 3D view is not a <canvas> inside #container
+   but the native GL scene (web: the full-window #canvas) under the page, drawn by
+   client/src/editor/ into #container's rectangle; the page is composited over it. */
+html,
+body {
+  background-color: transparent;
+}
+
+/* Web: events over the 3D area must fall through the page to #canvas (GLFW callbacks), so
+   the full-window layout boxes above it (#uiBase, #view, #center, #container, #editorUI,
+   #canvasUI) let them through and only the visible controls take them, as the three.js
+   canvas inside #container did in Krunker. Natively the editor hit-tests the page itself
+   (html_dom_element_at) and treats these boxes as the 3D view. */
+#uiBase,
+#view,
+#center,
+#container,
+#canvasUI,
+#editorUI {
+  pointer-events: none;
+}
+
+#hotbar,
+#view > .panel,
+#view > .restore,
+#canvasUI > .button,
+#canvasUI > #transform,
+#canvasInfo,
+#canvasAdd,
+#canvasObjEdit,
+#instructionHolder,
+#progress {
+  pointer-events: auto;
+}
+
+/* Web build: the WebGL canvas fills the window under the page (natively it is inert). */
+#canvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  display: block;
+  outline: none;
+}
+
+/* window.prompt() / confirm() stand-in (client/src/editor/editor_prompt.c), after
+   Chromium's dialog: a white box at the top centre of the window. */
+#knPrompt {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10000;
+  pointer-events: auto;
+}
+
+#knPrompt .knPromptBox {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  width: 420px;
+  margin-left: -226px;
+  padding: 20px 16px 16px 16px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  font-family: sans-serif;
+  font-size: 13px;
+  color: #202124;
+  text-align: left;
+}
+
+#knPrompt .knPromptTitle {
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+
+#knPrompt .knPromptMsg {
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#knPrompt .knPromptInput {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  font-size: 13px;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  outline: none;
+  color: #202124;
+  background-color: #fff;
+}
+
+#knPrompt .knPromptButtons {
+  margin-top: 16px;
+  text-align: right;
+}
+
+#knPrompt .knPromptBtn {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 7px 16px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  color: #1a73e8;
+  cursor: pointer;
+  user-select: none;
+}
+
+#knPrompt .knPromptOk {
+  background-color: #1a73e8;
+  border-color: #1a73e8;
+  color: #fff;
+}
+
+/* libs/quicksettings.js injectCSS() (QuickSettings 3.0.2, the rules the editor's Quick GUI
+   uses). Krunker appends it to <head> at runtime, after css/editor.css, like this file; the !important
+   overrides of editor.css / editor_dark.css still win. */
+.qs_main{background-color:#dddddd;text-align:left;position:absolute;width:200px;font:12px sans-serif;box-shadow:5px 5px 8px rgba(0,0,0,0.35);user-select:none;-webkit-user-select:none;color:#000000;border:none}
+.qs_content{background-color:#cccccc;overflow-y:auto}
+.qs_title_bar{background-color:#eeeeee;user-select:none;-webkit-user-select:none;cursor:pointer;padding:5px;font-weight:bold;border:none;color:#000000}
+.qs_container{margin:5px;padding:5px;background-color:#eeeeee;border:none;position:relative}
+.qs_textarea{-webkit-box-sizing:border-box;-moz-box-sizing:border-box;box-sizing:border-box;resize:vertical;width:100%;padding:3px 5px;border:1px inset #ffffff;background-color:#ffffff;color:#000000;font-size:12px}
+.qs_textarea:focus{outline:none;background:#ffffff;border:1px inset #ffffff}

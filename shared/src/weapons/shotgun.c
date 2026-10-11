@@ -1,17 +1,20 @@
 #include <weapons.h>
-#include <shared.h>
 
-// sex assault gun
+// Krunker v3.1.1 weapon 5 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, altSkin, noAo, nCase, nRing, shine, type, muzOff, muzMlt, rumble, icnPad, expScale.
 const Weapon g_shotgun = {
     .name = "Shotgun",
     .src = "weapon_6",
     .icon = "icon_6",
+
     .secondary = 0,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 1,
+
     .ammo = 2,
+    .shots = 5,
     .swap_time = 0.3f,
     .reload_time = 1.1f,
     .aim_speed = 0.12f,
@@ -23,23 +26,53 @@ const Weapon g_shotgun = {
     .rate = 0.45f,
     .spread = 180.0f,
     .min_spread = 20.0f,
-    .zoom = 1.25f,
+    .inaccuracy = 110.0f,
     .recoil = 20.0f,
+    .recoil_r = 0.015f,
     .recover = 0.99f,
     .recover_f = 0.97f,
+    .physical_power = 0.09f,
+    .physical_range = 35.0f,
+    .zoom = 1.25f,
+    .recoil_y_mlt = 0.65f,
+    .recoil_z = 2.1f,
+    .recoil_z_mlt = 0.2f,
+    .jump_y_mlt = 0.2f,
+    .jump_bob_y_mlt = 0.5f,
+    .aim_recoil_mlt = 0.67f,
+    .lean_mlt = 1.6f,
+    .inspect_rotation = 0.1f,
+    .inspect_mlt = 1.9f,
+    .crouch_lean = 0.2f,
+    .crouch_rotation = 0.2f,
+    .crouch_drop = 0.1f,
+    .scale = 0.00082934281407035f,
+    .hold_width = 1.0f,
+
+    .origin = {0.0f, -0.3f, -2.8f},
+    .offset = {0.95f, -0.6f, -3.8f},
+    .left_hold = {0.0f, -0.6f, 0.4f},
+    .right_hold = {0.1f, -0.6f, -1.3f},
+
+    .custom_spread_count = 10,
     .custom_spread = (const vec2[]) {
         {0.03f, 0.02f},
         {-0.27f, 0.02f},
         {0.03f, -0.31f},
         {0.3f, -0.01f},
         {0.01f, 0.28f},
-
         {0.01f, 0.02f},
         {-0.17f, -0.22f},
         {-0.3f, 0.31f},
         {0.32f, 0.28f},
         {0.3f, -0.2f},
     },
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .swap_wiggle = 0.4f,
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.34f,
+    .recoil_tween_y = 0.22f,
+    .recoil_anim_mask = 1,
 };
 
 // {
@@ -52,18 +85,18 @@ const Weapon g_shotgun = {
 // noAim: false,
 // akimbo: false,
 // altSkin: {
-// name: "Nova Pump",
-// mid: 0,
-// blocked: true,
-// noSale: true,
-// midT: 38,
-// scl: 0.9,
-// mScl: 1,
-// zOff: 0.28,
-// yOff: -0.5,
-// seas: 2,
-// weapon: 6,
-// rarity: 0
+//   name: "Nova Pump",
+//   mid: 0,
+//   blocked: true,
+//   noSale: true,
+//   midT: 38,
+//   scl: 0.9,
+//   mScl: 1,
+//   zOff: 0.28,
+//   yOff: -0.5,
+//   seas: 2,
+//   weapon: 6,
+//   rarity: 0
 // },
 // noAo: true,
 // nAuto: true,
@@ -121,8 +154,8 @@ const Weapon g_shotgun = {
 // aimRecMlt: 0.67,
 // recoilYM: 0.65,
 // recoilAnim: {
-// time: 340,
-// recoilTweenY: 0.22
+//   time: 340,
+//   recoilTweenY: 0.22
 // },
 // jumpYM: 0.5,
 // rumble: 0.8,

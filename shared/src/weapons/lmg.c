@@ -1,14 +1,22 @@
 #include <weapons.h>
 
+// Krunker v3.1.1 weapon 6 (27.js / src/data/weapons.js). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: sound, type, noAo, caseInd, caseZOff, caseYOff, muzOff, muzOffY, muzMlt, expScale, rumble, icnPad.
 const Weapon g_lmg = {
     .name = "Machine Gun",
-    .src = "weapon-7",
+    .src = "weapon_7",
     .icon = "icon_7",
+
     .secondary = 0,
     .no_spread = 0,
     .akimbo = 0,
     .no_aim = 0,
     .no_auto = 0,
+    .force_attach = 1,
+    .has_attach = 1,
+    .projectile = 1,
+    .projectile_disable = 1,
+
     .ammo = 60,
     .swap_time = 0.7f,
     .reload_time = 3.5f,
@@ -23,11 +31,44 @@ const Weapon g_lmg = {
     .rate = 0.13f,
     .spread = 300.0f,
     .min_spread = 10.0f,
-    .zoom = 1.3f,
     .recoil = 3.2f,
+    .recoil_r = 0.04f,
     .recover = 0.98f,
     .recover_y = 0.9975f,
     .recover_f = 0.975f,
+    .physical_power = 0.0f,
+    .physical_range = 0.0f,
+    .zoom = 1.3f,
+    .recoil_y_mlt = 0.25f,
+    .recoil_z = 3.0f,
+    .recoil_z_mlt = -0.1f,
+    .z_rotation = 0.75f,
+    .y_rotation = -0.01f,
+    .jump_y_mlt = 0.8f,
+    .jump_bob_y_mlt = 0.5f,
+    .aim_recoil_mlt = 0.5f,
+    .lean_mlt = 1.6f,
+    .inspect_rotation = 0.2f,
+    .inspect_mlt = 0.6f,
+    .crouch_lean = 0.1f,
+    .crouch_rotation = 0.1f,
+    .crouch_drop = 0.1f,
+    .attach_y_offset = -0.085f,
+    .attach_z_offset = -0.74f,
+    .scale = 0.0008856008924623108f,
+    .hold_width = 1.1f,
+
+    .origin = {0.0f, -0.6f, -1.8f},
+    .offset = {0.95f, -0.75f, -2.8f},
+    .left_hold = {0.4f, -0.85f, 1.1f},
+    .right_hold = {-0.1f, -0.79f, -0.2f},
+    // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
+    .swap_wiggle = 0.3f,
+    .has_recoil_anim = 1,
+    .recoil_anim_time = 0.2f,
+    .recoil_tween_y = 0.045f,
+    .recoil_tween_z = 0.12f,
+    .recoil_anim_mask = 9,
 };
 
 // {
@@ -41,17 +82,17 @@ const Weapon g_lmg = {
 // nAuto: false,
 // noSpread: false,
 // projectile: {
-// disable: true,
-// mat: "BASIC",
-// color: 16777179,
-// dmg: 18,
-// spd: 2.3,
-// lookDir: true,
-// grav: 0.0001,
-// scale: 1.4,
-// length: 10,
-// range: 3000,
-// snd: 0
+//   disable: true,
+//   mat: "BASIC",
+//   color: 16777179,
+//   dmg: 18,
+//   spd: 2.3,
+//   lookDir: true,
+//   grav: 0.0001,
+//   scale: 1.4,
+//   length: 10,
+//   range: 3000,
+//   snd: 0
 // },
 // physRang: 0,
 // physPow: 0,
@@ -116,9 +157,9 @@ const Weapon g_lmg = {
 // recoilZM: -0.1,
 // aimRecMlt: 0.5,
 // recoilAnim: {
-// time: 200,
-// recoilTweenY: 0.045,
-// recoilTweenZ: 0.12
+//   time: 200,
+//   recoilTweenY: 0.045,
+//   recoilTweenZ: 0.12
 // },
 // jumpYM: 0.5,
 // expScale: 0.85,

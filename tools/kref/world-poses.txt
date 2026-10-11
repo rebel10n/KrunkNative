@@ -1,0 +1,23 @@
+# name map(or .json path) pose(x,y,z,pitch,yaw) [v3.1.1 settings JSON] — Krunker units/radians, see doc/ref/krunker-v3.1.1/world/README.md
+burg-street burg -80,30,35,-0.1300,-1.5577
+burg-ramp burg 140,25,40,-0.2332,1.4667
+freight-yard freight 316,40,-156,-0.2531,1.5708
+freight-sign freight 270,50,-100,-0.0500,-3.1416
+freight-noise freight 281,30,-60,-0.4266,-0.0000
+freight-pumpkin freight 259,9,-48,-0.4182,-0.0000
+industry-windows industry 45,52,-26,-0.0540,1.5708
+industry-lightcone industry -130,48,38,-0.1544,-2.4942
+industry-ladder industry 255,22,135,-0.1371,-3.1416
+kanji-billboard kanji -440,-100,-406,-0.1019,1.5708
+kanji-neon kanji 297,154,-272,-0.25,2.3
+kanji-glass kanji -399,300,-930,-0.0983,-0.0000
+kanji-lighting0 kanji 297,154,-272,-0.25,2.3 {"lighting":0}
+oasis-fountain oasis 4,30,-205,-0.5266,-0.0000
+oasis-sea oasis 4,25,-380,-0.2934,0.0648
+sandstorm-billboard sandstorm 7,107,-60,0,0
+sandstorm-ad sandstorm -10,100,-52,-0.0634,-1.5708
+sandstorm-billboard-rot sandstorm 243,99,70,0,-3.1416
+sandstorm-lighting2 sandstorm 7,107,-60,0,0 {"lighting":2}
+shipyard-containers shipyard -77,46,45,-0.15,0.8
+shipyard-vehicle shipyard 58,18,158,-0.3753,-3.1416
+pltest-lighting2 world-maps/pltest.json 0,40,90,-0.2630,-0.0000 {"lighting":2}

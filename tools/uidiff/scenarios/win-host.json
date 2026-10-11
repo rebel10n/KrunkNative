@@ -1,0 +1,22 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/windows/win-host.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": "host",
+    "settingsTab": 0,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "anim_time": 0.275
+  },
+  "frames": 3,
+  "note": "Host Custom Game (138 KB window, map cards with thumbnails); anim_time 0.275 = the reference's merch (scaleBob) phase"
+}

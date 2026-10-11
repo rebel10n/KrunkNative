@@ -1,0 +1,81 @@
+#hotbar,
+.panel,
+.toolbarDropDown,
+.toolbarSubDropDown,
+.qs_textarea,
+.qs_title_bar,
+#menuWindow {
+  background-color: #242424 !important;
+}
+
+#playbar > div {
+  border-color: #555555;
+}
+
+.qs_content,
+.quickAddButton {
+  background-color: #333333 !important;
+}
+
+.material-icons,
+.toolbarItem,
+.toolbarDropDownItem,
+.panelLabel,
+.section,
+.header > a,
+.subheader > a,
+.qs_textarea,
+#versionTxt,
+.windowHeader > div,
+.menuTabsNew > div,
+.inlineLabel,
+.mapListItem > * > a {
+  color: #f0f0f0 !important;
+}
+
+.toolbarItem:hover,
+.toolbarDropDownItem:hover,
+.toolbarDropDownItem:hover,
+.button:hover,
+.publishAsset:hover {
+  background-color: #13677f;
+}
+
+.qs_title_bar,
+.header > i,
+.subheader > i,
+.hide > i,
+.restore > i {
+  color: #1d8eb9 !important;
+}
+
+input:checked + .slider {
+  background: linear-gradient(90deg, #1d8eb9, #0d3460);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  background: linear-gradient(#1d8eb9, #0d3460);
+}
+
+input[type="range"]::-moz-range-thumb {
+  background: linear-gradient(#1d8eb9, #0d3460);
+}
+
+.button,
+.publishAsset {
+  background: #444444;
+  color: #ffffff;
+}
+
+.tabANew {
+  box-shadow: inset 0 -5px #1d8eb9b2;
+}
+
+.menuTabsNew > div:hover {
+  box-shadow: inset 0 -5px #0d3460b2;
+}
+
+hr {
+  border-color: rgba(255, 255, 255, 0.3);
+}

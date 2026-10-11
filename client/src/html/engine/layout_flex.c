@@ -1,0 +1,458 @@
+/*
+ * layout_flex.c - flexbox subset used by the Krunker UI (inventory section 6):
+ * row/column (+reverse), nowrap/wrap, justify-content (start/end/center/
+ * space-between/space-around/space-evenly), align-items (stretch/start/end/
+ * center; baseline treated as start), flex-grow/flex-shrink/flex-basis,
+ * automatic minimum size (min-content), auto margins on the main axis,
+ * align-content stretch for wrapped lines with a definite cross size,
+ * align-self overriding align-items per item.
+ */
+#include "layout_internal.h"
+
+typedef struct FItem {
+    Box *b;
+    float base, hypo;          /* border-box main sizes                       */
+    float min_main, max_main;  /* border-box                                  */
+    float main;                /* final border-box main size                  */
+    float cross;               /* border-box cross size                       */
+    float mm0, mm1;            /* main-axis margins (start, end)              */
+    float cm0, cm1;            /* cross-axis margins                          */
+    uint8_t auto_m0, auto_m1;  /* auto main margins                           */
+    uint8_t auto_c0, auto_c1;
+    uint8_t frozen;
+    float target;
+    float pos_main, pos_cross;
+} FItem;
+
+typedef struct FLine { int first, count; float cross; float pos; } FLine;
+
+static int is_row(const Box *b) { return b->style->flex_direction == CSS_FLEX_DIRECTION_ROW || b->style->flex_direction == CSS_FLEX_DIRECTION_ROW_REVERSE; }
+static int is_reverse(const Box *b) { return b->style->flex_direction == CSS_FLEX_DIRECTION_ROW_REVERSE || b->style->flex_direction == CSS_FLEX_DIRECTION_COLUMN_REVERSE; }
+
+static int count_items(const Box *b)
+{
+    int n = 0;
+    for (Box *c = b->first_child; c; c = c->next) if (!(c->flags & BOXF_OUT_OF_FLOW)) n++;
+    return n;
+}
+
+/* Lay the item out with the given border-box sizes (-1: auto). */
+static void item_layout(LayoutTree *t, Box *c, float cw, float ch_def, float w, float h, int shrink, float avail)
+{
+    LayoutInput in;
+    memset(&in, 0, sizeof(in));
+    in.cb_w = cw; in.cb_h = ch_def; in.avail_w = avail;
+    in.override_w = w; in.override_h = h;
+    in.definite_h = h >= 0;
+    in.shrink_to_fit = shrink;
+    in.is_flex_item = 1;
+    LayoutOutput o;
+    layout_box(t, c, &in, &o);
+}
+
+/* The item's used cross-axis alignment: align-self, or the container's align-items when auto. */
+static int item_align(const CssComputed *s, const CssComputed *cs)
+{
+    return cs->align_self != CSS_ALIGN_ITEMS_AUTO ? cs->align_self : s->align_items;
+}
+
+static float clampf_mm(float v, float mn, float mx) { if (v > mx) v = mx; if (v < mn) v = mn; return v; }
+
+void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h)
+{
+    const CssComputed *s = b->style;
+    int row = is_row(b), rev = is_reverse(b);
+    int wrap = s->flex_wrap != CSS_FLEX_WRAP_NOWRAP;
+    float cx = box_cl(b), cy = box_ct(b);
+    float cw = box_cw(b);
+    float ch = in->cb_h;                      /* own content height, or -1 */
+    int n = count_items(b);
+
+    /* static position of abs children: as if each were the sole flex item
+     * (CSS Flexbox 4.1), aligned by justify-content / align-items once sized */
+    for (Box *c = b->first_child; c; c = c->next) {
+        if (!(c->flags & BOXF_OUT_OF_FLOW)) continue;
+        float fj, fa;
+        switch (s->justify_content) {
+        case CSS_JUSTIFY_CONTENT_FLEX_END: fj = 1; break;
+        case CSS_JUSTIFY_CONTENT_CENTER: case CSS_JUSTIFY_CONTENT_SPACE_AROUND: case CSS_JUSTIFY_CONTENT_SPACE_EVENLY: fj = 0.5f; break;
+        default: fj = 0; break;
+        }
+        if (rev) fj = 1 - fj;
+        switch (item_align(s, c->style)) {
+        case CSS_ALIGN_ITEMS_FLEX_END: fa = 1; break;
+        case CSS_ALIGN_ITEMS_CENTER: fa = 0.5f; break;
+        default: fa = 0; break;
+        }
+        if (s->flex_wrap == CSS_FLEX_WRAP_WRAP_REVERSE) fa = 1 - fa;
+        c->static_x = cx; c->static_y = cy;
+        c->static_fx = row ? fj : fa;
+        c->static_fy = row ? fa : fj;
+        c->static_aw = cw;
+        c->static_ah = -1;   /* filled below once the content height is known */
+    }
+    if (!n) {
+        *content_h = 0; b->baseline_offset = -1;
+        for (Box *c = b->first_child; c; c = c->next) if (c->flags & BOXF_OUT_OF_FLOW) c->static_ah = ch >= 0 ? ch : 0;
+        return;
+    }
+
+    FItem *items = calloc((size_t)n, sizeof(FItem));
+    FLine *lines = calloc((size_t)n, sizeof(FLine));
+    if (!items || !lines) { free(items); free(lines); *content_h = 0; return; }
+    int k = 0;
+    float main_avail = row ? cw : ch;         /* -1 when indefinite (column) */
+
+    for (Box *c = b->first_child; c; c = c->next) {
+        if (c->flags & BOXF_OUT_OF_FLOW) continue;
+        FItem *it = &items[k++];
+        it->b = c;
+        const CssComputed *cs = c->style;
+        layout_resolve_edges(t, c, cw);
+        int m0 = row ? CSS_LEFT : CSS_TOP, m1 = row ? CSS_RIGHT : CSS_BOTTOM;
+        int c0 = row ? CSS_TOP : CSS_LEFT, c1 = row ? CSS_BOTTOM : CSS_RIGHT;
+        it->auto_m0 = cs->margin[m0].kind == CSS_LEN_AUTO; it->auto_m1 = cs->margin[m1].kind == CSS_LEN_AUTO;
+        it->auto_c0 = cs->margin[c0].kind == CSS_LEN_AUTO; it->auto_c1 = cs->margin[c1].kind == CSS_LEN_AUTO;
+        it->mm0 = it->auto_m0 ? 0 : c->margin[m0]; it->mm1 = it->auto_m1 ? 0 : c->margin[m1];
+        it->cm0 = it->auto_c0 ? 0 : c->margin[c0]; it->cm1 = it->auto_c1 ? 0 : c->margin[c1];
+
+        /* content-based size (row: max-content width; column: laid-out height) */
+        float content_main;
+        float content_min;
+        if (row) {
+            content_main = layout_intrinsic_width(t, c, 1);
+            content_min = layout_intrinsic_width(t, c, 0);
+        } else {
+            int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
+            float ow = stretch ? kn_maxf(0, cw - it->cm0 - it->cm1) : -1;
+            item_layout(t, c, cw, LAYOUT_INDEFINITE, ow, -1, !stretch, cw);
+            content_main = c->h;
+            content_min = c->h;
+        }
+        /* flex base size */
+        const CssLength *basis = &cs->flex_basis;
+        const CssLength *msize = row ? &cs->width : &cs->height;
+        int have = 0;
+        float base = 0;
+        if (basis->kind == CSS_LEN_VALUE && !(basis->pct != 0 && main_avail < 0)) {
+            float v = layout_resolve_len(basis, main_avail, 0);
+            base = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
+            have = 1;
+        } else if (msize->kind == CSS_LEN_VALUE && !(msize->pct != 0 && main_avail < 0) && !box_is_replaced(c)) {
+            float v = layout_resolve_len(msize, main_avail, 0);
+            base = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
+            have = 1;
+        }
+        if (!have) base = content_main;
+        it->base = base;
+        /* min / max (border box) */
+        const CssLength *mn = row ? &cs->min_width : &cs->min_height;
+        const CssLength *mx = row ? &cs->max_width : &cs->max_height;
+        if (mn->kind == CSS_LEN_VALUE) {
+            float v = layout_resolve_len(mn, main_avail < 0 ? 0 : main_avail, 0);
+            it->min_main = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
+        } else if (!(c->flags & BOXF_SCROLL_CONTAINER)) {
+            /* automatic minimum size: content size suggestion, capped by a definite specified size */
+            float sugg = content_min;
+            if (msize->kind == CSS_LEN_VALUE && !(msize->pct != 0 && main_avail < 0)) {
+                float v = layout_resolve_len(msize, main_avail, 0);
+                float spec = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
+                if (spec < sugg) sugg = spec;
+            }
+            if (mx->kind == CSS_LEN_VALUE) {
+                float v = layout_resolve_len(mx, main_avail < 0 ? 0 : main_avail, LAYOUT_INF);
+                float cap = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
+                if (cap < sugg) sugg = cap;
+            }
+            it->min_main = sugg;
+        } else {
+            it->min_main = row ? box_border_padding_w(c) : box_border_padding_h(c);
+        }
+        it->max_main = LAYOUT_INF;
+        if (mx->kind == CSS_LEN_VALUE && !(mx->pct != 0 && main_avail < 0)) {
+            float v = layout_resolve_len(mx, main_avail, LAYOUT_INF);
+            it->max_main = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
+        }
+        it->hypo = clampf_mm(base, it->min_main, it->max_main);
+    }
+
+    /* ---- lines ---- */
+    int nl = 0;
+    {
+        int i = 0;
+        while (i < n) {
+            FLine *ln = &lines[nl++];
+            ln->first = i; ln->count = 0;
+            float used = 0;
+            while (i < n) {
+                FItem *it = &items[i];
+                float outer = it->hypo + it->mm0 + it->mm1;
+                if (wrap && ln->count > 0 && main_avail >= 0 && used + outer > main_avail + 0.001f) break;
+                used += outer; ln->count++; i++;
+            }
+        }
+    }
+
+    /* ---- resolve flexible lengths ---- */
+    float container_main = main_avail;
+    if (container_main < 0) {
+        /* indefinite column: content-sized, min/max-height of the container clamp later */
+        float mx = 0;
+        for (int l = 0; l < nl; l++) {
+            float sum = 0;
+            for (int j = 0; j < lines[l].count; j++) { FItem *it = &items[lines[l].first + j]; sum += it->hypo + it->mm0 + it->mm1; }
+            if (sum > mx) mx = sum;
+        }
+        /* max-height of the container gives a definite upper bound for shrinking */
+        float bh = mx + layout_vertical_extras(b);
+        float cbh = in->cb_h;
+        (void)cbh;
+        layout_apply_min_max_h(b, LAYOUT_INDEFINITE, &bh);
+        container_main = kn_maxf(0, bh - layout_vertical_extras(b));
+    }
+    for (int l = 0; l < nl; l++) {
+        FLine *ln = &lines[l];
+        float sum_hypo = 0;
+        for (int j = 0; j < ln->count; j++) { FItem *it = &items[ln->first + j]; sum_hypo += it->hypo + it->mm0 + it->mm1; }
+        int grow = sum_hypo < container_main;
+        for (int j = 0; j < ln->count; j++) {
+            FItem *it = &items[ln->first + j];
+            const CssComputed *cs = it->b->style;
+            it->target = it->base;
+            it->frozen = 0;
+            float f = grow ? cs->flex_grow : cs->flex_shrink;
+            if (f == 0 || (grow && it->base > it->hypo) || (!grow && it->base < it->hypo)) { it->frozen = 1; it->target = it->hypo; }
+        }
+        for (int iter = 0; iter < 16; iter++) {
+            float used = 0, sum_f = 0, sum_scaled = 0;
+            int unfrozen = 0;
+            for (int j = 0; j < ln->count; j++) {
+                FItem *it = &items[ln->first + j];
+                if (it->frozen) used += it->target + it->mm0 + it->mm1;
+                else {
+                    used += it->base + it->mm0 + it->mm1;
+                    unfrozen++;
+                    sum_f += grow ? it->b->style->flex_grow : it->b->style->flex_shrink;
+                    sum_scaled += it->b->style->flex_shrink * it->base;
+                }
+            }
+            if (!unfrozen) break;
+            float free_sp = container_main - used;
+            if (grow && sum_f < 1.0f && sum_f * (container_main - sum_hypo) < free_sp) free_sp = sum_f * (container_main - sum_hypo);
+            float total_violation = 0;
+            for (int j = 0; j < ln->count; j++) {
+                FItem *it = &items[ln->first + j];
+                if (it->frozen) continue;
+                float v;
+                if (grow) v = it->base + (sum_f > 0 ? free_sp * it->b->style->flex_grow / sum_f : 0);
+                else v = it->base + (sum_scaled > 0 ? free_sp * (it->b->style->flex_shrink * it->base) / sum_scaled : 0);
+                float cl = clampf_mm(v, it->min_main, it->max_main);
+                total_violation += cl - v;
+                it->target = cl;
+            }
+            int any = 0;
+            for (int j = 0; j < ln->count; j++) {
+                FItem *it = &items[ln->first + j];
+                if (it->frozen) continue;
+                float v_unclamped;
+                if (grow) v_unclamped = it->base + (sum_f > 0 ? free_sp * it->b->style->flex_grow / sum_f : 0);
+                else v_unclamped = it->base + (sum_scaled > 0 ? free_sp * (it->b->style->flex_shrink * it->base) / sum_scaled : 0);
+                float d = it->target - v_unclamped;
+                if (fabsf(total_violation) < 0.001f || (total_violation > 0 && d > 0) || (total_violation < 0 && d < 0)) { it->frozen = 1; any = 1; }
+            }
+            if (fabsf(total_violation) < 0.001f || !any) {
+                for (int j = 0; j < ln->count; j++) items[ln->first + j].frozen = 1;
+                break;
+            }
+        }
+        for (int j = 0; j < ln->count; j++) { FItem *it = &items[ln->first + j]; it->main = it->target; }
+    }
+
+    /* ---- cross sizes ---- */
+    float cross_avail = row ? ch : cw;           /* -1: indefinite (row with auto height) */
+    for (int i = 0; i < n; i++) {
+        FItem *it = &items[i];
+        Box *c = it->b;
+        const CssComputed *cs = c->style;
+        if (row) {
+            item_layout(t, c, cw, ch, it->main, -1, 0, cw);
+            it->cross = c->h;
+        } else {
+            int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
+            float ow = stretch ? kn_maxf(box_border_padding_w(c), cw - it->cm0 - it->cm1) : -1;
+            item_layout(t, c, cw, ch, ow, it->main, !stretch, cw);
+            it->cross = c->w;
+        }
+    }
+    float total_cross = 0;
+    for (int l = 0; l < nl; l++) {
+        FLine *ln = &lines[l];
+        float mx = 0;
+        for (int j = 0; j < ln->count; j++) { FItem *it = &items[ln->first + j]; mx = kn_maxf(mx, it->cross + it->cm0 + it->cm1); }
+        ln->cross = mx;
+        total_cross += mx;
+    }
+    if (nl == 1 && cross_avail >= 0) { total_cross = cross_avail; lines[0].cross = cross_avail; }
+    else if (cross_avail >= 0 && total_cross < cross_avail && nl > 1) {
+        float extra = (cross_avail - total_cross) / (float)nl;   /* align-content: normal (stretch) */
+        for (int l = 0; l < nl; l++) lines[l].cross += extra;
+        total_cross = cross_avail;
+    }
+    /* stretch (row: heights) */
+    if (row) {
+        for (int l = 0; l < nl; l++) {
+            FLine *ln = &lines[l];
+            for (int j = 0; j < ln->count; j++) {
+                FItem *it = &items[ln->first + j];
+                const CssComputed *cs = it->b->style;
+                if (item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->height.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1) {
+                    float hh = kn_maxf(0, ln->cross - it->cm0 - it->cm1);
+                    layout_apply_min_max_h(it->b, ch, &hh);
+                    if (fabsf(hh - it->cross) > 0.001f || 1) {
+                        item_layout(t, it->b, cw, ch, it->main, hh, 0, cw);
+                        it->cross = it->b->h;
+                    }
+                }
+            }
+        }
+    }
+
+    /* ---- main axis positions ---- */
+    for (int l = 0; l < nl; l++) {
+        FLine *ln = &lines[l];
+        float used = 0; int autos = 0;
+        for (int j = 0; j < ln->count; j++) {
+            FItem *it = &items[ln->first + j];
+            used += it->main + it->mm0 + it->mm1;
+            autos += it->auto_m0 + it->auto_m1;
+        }
+        float free_sp = container_main - used;
+        float lead = 0, between = 0;
+        if (free_sp > 0 && autos) {
+            float each = free_sp / (float)autos;
+            for (int j = 0; j < ln->count; j++) {
+                FItem *it = &items[ln->first + j];
+                if (it->auto_m0) it->mm0 = each;
+                if (it->auto_m1) it->mm1 = each;
+            }
+            free_sp = 0;
+        }
+        int jc = s->justify_content;
+        int cnt = ln->count;
+        switch (jc) {
+        case CSS_JUSTIFY_CONTENT_FLEX_END: lead = free_sp; break;
+        case CSS_JUSTIFY_CONTENT_CENTER: lead = free_sp * 0.5f; break;
+        case CSS_JUSTIFY_CONTENT_SPACE_BETWEEN:
+            if (cnt > 1 && free_sp > 0) between = free_sp / (float)(cnt - 1);
+            else if (free_sp < 0) lead = 0;
+            break;
+        case CSS_JUSTIFY_CONTENT_SPACE_AROUND:
+            if (free_sp > 0) { between = free_sp / (float)cnt; lead = between * 0.5f; }
+            else lead = free_sp * 0.5f;
+            break;
+        case CSS_JUSTIFY_CONTENT_SPACE_EVENLY:
+            if (free_sp > 0) { between = free_sp / (float)(cnt + 1); lead = between; }
+            else lead = free_sp * 0.5f;
+            break;
+        default: break;
+        }
+        float pos = lead;
+        for (int j = 0; j < cnt; j++) {
+            FItem *it = &items[ln->first + j];
+            pos += it->mm0;
+            it->pos_main = rev ? container_main - pos - it->main : pos;
+            pos += it->main + it->mm1 + between;
+        }
+    }
+
+    /* ---- cross axis positions ---- */
+    float cpos = 0;
+    for (int l = 0; l < nl; l++) {
+        FLine *ln = &lines[l];
+        ln->pos = cpos;
+        for (int j = 0; j < ln->count; j++) {
+            FItem *it = &items[ln->first + j];
+            float space = ln->cross - (it->cross + it->cm0 + it->cm1);
+            float off = 0;
+            if (it->auto_c0 && it->auto_c1) off = space * 0.5f;
+            else if (it->auto_c0) off = space;
+            else if (!it->auto_c1) {
+                switch (item_align(s, it->b->style)) {
+                case CSS_ALIGN_ITEMS_FLEX_END: off = space; break;
+                case CSS_ALIGN_ITEMS_CENTER: off = space * 0.5f; break;
+                default: off = 0; break;
+                }
+            }
+            it->pos_cross = cpos + off + it->cm0;
+        }
+        cpos += ln->cross;
+    }
+    if (s->flex_wrap == CSS_FLEX_WRAP_WRAP_REVERSE) {
+        for (int i = 0; i < n; i++) items[i].pos_cross = total_cross - items[i].pos_cross - items[i].cross;
+    }
+
+    /* ---- place ---- */
+    b->baseline_offset = -1; b->first_baseline = -1;
+    for (int i = 0; i < n; i++) {
+        FItem *it = &items[i];
+        Box *c = it->b;
+        if (row) { c->lx = cx + it->pos_main; c->ly = cy + it->pos_cross; }
+        else { c->lx = cx + it->pos_cross; c->ly = cy + it->pos_main; }
+        if (row) { c->margin[CSS_LEFT] = it->mm0; c->margin[CSS_RIGHT] = it->mm1; }
+        else { c->margin[CSS_TOP] = it->mm0; c->margin[CSS_BOTTOM] = it->mm1; }
+        layout_relative_offset(c, cw, ch);
+        if (b->first_baseline < 0) {
+            float bl = c->first_baseline >= 0 ? c->first_baseline : c->baseline_offset;
+            if (bl >= 0 && !(c->flags & BOXF_SCROLL_CONTAINER)) b->first_baseline = c->ly - c->rel_y + bl;
+        }
+    }
+    if (b->first_baseline < 0 && n) {
+        /* synthesized from the first item's border-box bottom */
+        b->first_baseline = items[0].b->ly + items[0].b->h;
+    }
+    b->baseline_offset = b->first_baseline;   /* flex containers export their first baseline */
+
+    *content_h = row ? total_cross : (main_avail >= 0 ? main_avail : container_main);
+    if (!row && main_avail < 0) {
+        float used = 0;
+        for (int l = 0; l < nl; l++) {
+            float sum = 0;
+            for (int j = 0; j < lines[l].count; j++) { FItem *it = &items[lines[l].first + j]; sum += it->main + it->mm0 + it->mm1; }
+            used = kn_maxf(used, sum);
+        }
+        *content_h = used;
+    }
+    for (Box *c = b->first_child; c; c = c->next)
+        if ((c->flags & BOXF_OUT_OF_FLOW) && c->static_ah < 0) c->static_ah = ch >= 0 ? ch : *content_h;
+    free(items);
+    free(lines);
+}
+
+void layout_flex_intrinsic(LayoutTree *t, Box *b, float *min_w, float *max_w)
+{
+    int row = is_row(b);
+    int wrap = b->style->flex_wrap != CSS_FLEX_WRAP_NOWRAP;
+    float mn = 0, mx = 0;
+    for (Box *c = b->first_child; c; c = c->next) {
+        if (c->flags & BOXF_OUT_OF_FLOW) continue;
+        float cmin = layout_intrinsic_margin_width(t, c, 0, 0.0f);
+        float cmax = layout_intrinsic_margin_width(t, c, 1, 0.0f);
+        if (row) {
+            /* a fixed flex-basis contributes like a width */
+            const CssLength *basis = &c->style->flex_basis;
+            if (basis->kind == CSS_LEN_VALUE && basis->pct == 0) {
+                float m = cmax - layout_intrinsic_width(t, c, 1);
+                float bw = layout_box_sizing_w(c, basis->px) + m;
+                if (c->style->flex_grow == 0) cmax = kn_maxf(cmax, bw); else cmax = kn_maxf(bw, cmax);
+                if (c->style->flex_shrink == 0) cmin = kn_maxf(cmin, bw);
+            }
+            mx += cmax;
+            if (wrap) mn = kn_maxf(mn, cmin); else mn += cmin;
+        } else {
+            mx = kn_maxf(mx, cmax);
+            mn = kn_maxf(mn, cmin);
+        }
+    }
+    *min_w = mn;
+    *max_w = kn_maxf(mx, mn);
+}

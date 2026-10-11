@@ -1,0 +1,6 @@
+# Full source checkout on the host (the "full server source ships" requirement and
+# a reference for operators). Deploys do not build from it: binaries come from
+# deploy/ansible/build.sh, so uncommitted work never reaches a host by accident.
+kn_repo_url: https://github.com/rebel10n/KrunkNative.git
+kn_repo_version: slop
+kn_repo_dest: /opt/krunknative

@@ -1,5 +1,7 @@
 #include <shared.h>
 
+// Krunker v3.1.1 classes (53.js / src/data/classes.js). loadout ids index g_weapons.
+
 const ClassConfig triggerman = {
     .name = "Triggerman",
     .icon_index = 0,
@@ -46,7 +48,7 @@ const ClassConfig spray_n_pray = {
     .name = "Spray N Pray",
     .icon_index = 3,
     .texts = (const char*[]) {"Calling in the Big Guns?", "Remember - No Russian.", "Pesky Snipers..."},
-    .loadout = (int[]) {3},
+    .loadout = (int[]) {6},
     .secondary = 0,
     .wall_jump = 0,
     .colors = {0xA77860, 0x586849, 0x49563C, 0x282828, 0x282828, 3160103},
@@ -140,7 +142,7 @@ const ClassConfig runner = {
     .speed = 1.0f,
 };
 
-const ClassConfig deagler = {
+const ClassConfig deagler = { // hide: true in v3.1.1 (not offered in the class picker)
     .name = "Deagler",
     .icon_index = 10,
     .texts = NULL,
@@ -161,7 +163,7 @@ const ClassConfig bowman = {
     .loadout = (int[]) {13},
     .secondary = 1,
     .wall_jump = 0,
-    .colors = {0xA77860, 0x916C52, 0x6043E2, 0x282828, 0x282828, 0x473527},
+    .colors = {0xA77860, 0x916C52, 0x60432E, 0x282828, 0x282828, 0x473527},
     .health = 100,
     .health_segments = 6,
     .regen = 0.1f,
@@ -188,7 +190,7 @@ const ClassConfig trooper = {
     .texts = NULL,
     .loadout = (int[]) {18},
     .secondary = 0,
-    .wall_jump = 0,
+    .wall_jump = 1,
     .colors = {0xA77860, 0xBDC2C9, 0xBDC2C9, 0x2E2E2E, 0x282828, 0x2E2E2E},
     .health = 100,
     .health_segments = 6,

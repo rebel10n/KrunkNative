@@ -1,0 +1,23 @@
+# kn_brain instances on the central node (contract: /tmp coord-auth "Production").
+# Each instance = one systemd unit kn-brain-<name>.service on loopback; the
+# Cloudflare tunnel maps the public hostnames to these ports.
+kn_brain_config: "{{ kn_svc_current }}/config/config.json"
+# Coordinator database: "sqlite" once coord-store's adapter lands (database.driver),
+# "none" runs --no-db (accounts unavailable), "postgres" uses kn_brain_pg_*.
+kn_coordinator_db: sqlite
+kn_brain_instances:
+  - name: finder
+    host: matchmaker.krunk.io
+    port: 8082
+    roles: finder
+    db: none
+  - name: coord
+    host: coordinator.krunk.io
+    port: 8083
+    roles: auth,community
+    db: "{{ kn_coordinator_db }}"
+kn_brain_log_level: info
+# Secrets: put them in an ansible-vault file (group_vars/central/vault.yml, see
+# README) or pass -e; generated once on the host when unset, then kept.
+kn_brain_internal_secret: ""
+kn_brain_runtime_packages: [libssl3, libcrypt1, libpq5, libsqlite3-0, libmariadb3]

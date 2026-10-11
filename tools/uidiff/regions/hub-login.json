@@ -1,0 +1,22 @@
+{
+  "scenario": "hub-login",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "login-pop",
+      "rect": [
+        528,
+        280,
+        224,
+        96
+      ],
+      "kind": "text",
+      "fuzz": 14,
+      "max_pct": 6.0,
+      "note": "#loginPop (loginPopup)"
+    }
+  ]
+}

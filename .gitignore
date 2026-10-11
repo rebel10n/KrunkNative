@@ -6,3 +6,56 @@ assets/*/*
 !assets/maps/*
 !assets/img/*
 !assets/shaders/*
+/AGENTS.md
+net-bridge/node_modules
+cmake-build-web/
+dist/
+# mobile app projects (platform/README.md): build outputs and generated files
+platform/android/local.properties
+platform/android/.gradle/
+platform/android/app/build/
+platform/android/build/
+platform/ios/web/
+platform/ios/KrunkNative.xcodeproj/
+platform/ios/build/
+
+# Local service credentials (see config/config.example.json)
+/config/config.json
+/config/bans.json
+
+# deploy/ (svc-matchmaker): operator inventory and secrets
+deploy/inventory
+deploy/deploy.env
+
+# Python / tooling artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+.ansible/
+*.retry
+.wrangler/
+
+# Build / profiling / editor artifacts
+build/
+/tmp/
+*.o
+*.obj
+gmon.out
+perf.data*
+*.swp
+*~
+.DS_Store
+.claude/
+
+# Local run artifacts: XDG_CONFIG_HOME dirs (pulse cookies), Chromium localstorage,
+# stray root screenshots and key scratch files
+/cfg-*/
+/default/
+/*.png
+/cfkey.txt
+/lmfao.txt
+
+# coordinator zero-config SQLite database (services, database.path)
+/data/coordinator.db*

@@ -1,0 +1,7 @@
+#postHolder {
+    display: flex;
+    flex-direction: column;
+}
+.mapListItem {
+    background-color: white;
+}

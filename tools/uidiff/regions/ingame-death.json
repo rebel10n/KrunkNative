@@ -1,0 +1,114 @@
+{
+  "scenario": "ingame-death",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "chat-rows",
+      "rect": [
+        14,
+        618,
+        180,
+        62
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#fc03ec"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "chat rows (HUD bottom-left hidden while dead)"
+    },
+    {
+      "name": "chat-input",
+      "rect": [
+        10,
+        683,
+        180,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#chatInput placeholder is rgba(255,255,255,.7) on rgba(0,0,0,.4): translucent only, double-blended over the reference background"
+    },
+    {
+      "name": "chat-mic",
+      "rect": [
+        195,
+        683,
+        45,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#voiceDisplay has opacity .5: translucent only"
+    },
+    {
+      "name": "killcard-text",
+      "rect": [
+        488,
+        600,
+        300,
+        110
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#ffffff",
+        "#ffea78"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "#killCardHolder: `Killed by`, killer name, `lvl 1`, `+125` (#ffea78); the weapon line is translucent"
+    },
+    {
+      "name": "killcard-icon",
+      "rect": [
+        500,
+        636,
+        62,
+        66
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "mask": "colors",
+      "mask_colors": [
+        "#3d3d3d",
+        "#72503e",
+        "#282828",
+        "#bc9c7a",
+        "#dfd7d4",
+        "#95381e",
+        "#cfbc8f",
+        "#a9785d",
+        "#b2acaa"
+      ],
+      "mask_color_fuzz": 2.5,
+      "note": "killer class image"
+    },
+    {
+      "name": "empty-top-left",
+      "rect": [
+        0,
+        0,
+        200,
+        100
+      ],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "expect": "background",
+      "note": "timer/ping/game-info hidden while dead"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+# Edges: server_bin instances only. The hosts also run abulxt's relays (nginx on
+# 80/443/8080, wispurr on loopback :6001, OpenResty): nothing of theirs is managed
+# here. The host firewall is shared (edge-firewall-contract v1, README "Edge
+# firewall"): kn_firewall (wrapper around the vendored edge_firewall role) adds
+# 60-krunknative.nft to abulxt's base ruleset.
+kn_release_bins: [server_bin]
+kn_release_migrations: false
+kn_release_assets: [maps]
+
+# Game ports, shared by kn_gameserver (instances) and kn_firewall (nftables):
+#   count = vcpus - 1 (one core left for the host's other services), at least 1;
+#   instance n (1-based) uses port kn_gameserver_first_port+n-1 for TCP game +
+#   UDP game transport (knet) + UDP server-info query.
+kn_gameserver_first_port: 21015
+kn_gameserver_count: "{{ [((ansible_facts.processor_vcpus | default(ansible_facts.processor_nproc) | int) - 1), 1] | max }}"
+
+# Host firewall base (/etc/nftables.conf): false while abulxt owns it, true after
+# the handover (together with abulxt edge_firewall_own_base=false).
+kn_firewall_own_base: false
+
+# Live since 2026-10-11 (go-live): a plain `ansible-playbook edges.yml` keeps the units
+# running. Set false (or -e kn_gameserver_enabled=false) to take the edges down.
+kn_gameserver_enabled: true

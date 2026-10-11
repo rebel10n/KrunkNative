@@ -1,0 +1,22 @@
+{
+  "ref": "doc/ref/krunker-v3.1.1/windows/win-settings-controls.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": 0,
+    "settingsTab": 1,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "anim_time": 0.0
+  },
+  "frames": 3,
+  "note": "Settings / Controls tab; anim_time 0.000 = the reference's merch (scaleBob) phase"
+}

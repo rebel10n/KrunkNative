@@ -1,10 +1,19 @@
-#include <glad/glad.h>
+#include <gl.h>
 #include <client.h>
+#include <html_ui.h>
 
 static unsigned int ammo_icon;
 static unsigned int timer_icon;
 
 void overlay_render(Client *client, const float delta) {
+    if (!client->me) return;
+
+    // With the HTML UI the page renders Krunker's #inGameUI (health, ammo, timer,
+    // counters, class icon, crosshair, scope reticle, hit marker), written by
+    // hud_ui.c; drawing it here too would duplicate the HUD. Without it (stub
+    // backend / KRUNKNATIVE_HTML_ENGINE=OFF) this native overlay is the HUD.
+    if (html_ui_available()) return;
+
     const vec4 white = {1.0f, 1.0f, 1.0f, 1.0f};
     const vec4 background_color = {0.0f, 0.0f, 0.0f, 0.4f};
 

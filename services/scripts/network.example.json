@@ -1,0 +1,18 @@
+{
+  "_doc": "services/scripts/kn-network: one coordinator per entry of coordinators[], N server_bin per entry of servers[]. All coordinators share config/config.json's database (federation, doc/backend.md section 6). Every servers[] key except count/coordinator/port is a server.cfg / gameserver key.",
+  "build_dir": "cmake-build-debug",
+  "log_dir": "/tmp/kn-network",
+  "migrate": true,
+  "coordinators": [
+    {"name": "us", "port": 5050, "region": "us-nj", "community": "My Network"},
+    {"name": "eu", "port": 5051, "region": "de-fra", "community": "My Network"}
+  ],
+  "servers": [
+    {"coordinator": "us", "count": 2, "port": 21015, "region": "us-nj", "node_id": "NJ", "hostname": "NJ Lobby",
+     "modes": ["ffa"], "maxplayers": 8},
+    {"coordinator": "us", "count": 1, "port": 21030, "region": "us-nj", "node_id": "NJT", "hostname": "NJ Team",
+     "modes": ["tdm", "ctf"], "maxplayers": 10},
+    {"coordinator": "eu", "count": 1, "port": 21045, "region": "de-fra", "node_id": "FRA", "hostname": "Frankfurt",
+     "modes": ["ffa"]}
+  ]
+}

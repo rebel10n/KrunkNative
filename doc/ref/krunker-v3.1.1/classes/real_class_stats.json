@@ -1,0 +1,260 @@
+{
+ "0": {
+  "cls": 0,
+  "name": "Triggerman",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1.05,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Assault Rifle",
+   "Pistol",
+   "Combat Knife"
+  ],
+  "weapon": "Assault Rifle",
+  "x": 236,
+  "y": 33,
+  "z": -13,
+  "height": 11
+ },
+ "1": {
+  "cls": 1,
+  "name": "Hunter",
+  "hp": 60,
+  "maxHp": 60,
+  "speed": 1.05,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Sniper Rifle",
+   "Pistol",
+   "Combat Knife"
+  ],
+  "weapon": "Sniper Rifle",
+  "x": 236,
+  "y": 33,
+  "z": -13,
+  "height": 11
+ },
+ "2": {
+  "cls": 2,
+  "name": "Run N Gun",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1.18,
+  "wallJump": true,
+  "regen": 0.1,
+  "loadout": [
+   "Submachine Gun",
+   "Combat Knife"
+  ],
+  "weapon": "Submachine Gun",
+  "x": 236,
+  "y": 33,
+  "z": -13,
+  "height": 11
+ },
+ "3": {
+  "cls": 3,
+  "name": "Spray N Pray",
+  "hp": 170,
+  "maxHp": 170,
+  "speed": 0.95,
+  "wallJump": 0,
+  "regen": 0.05,
+  "loadout": [
+   "Machine Gun",
+   "Combat Knife"
+  ],
+  "weapon": "Machine Gun",
+  "x": 236,
+  "y": 33,
+  "z": -13,
+  "height": 11
+ },
+ "4": {
+  "cls": 4,
+  "name": "Vince",
+  "hp": 90,
+  "maxHp": 90,
+  "speed": 1,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Shotgun",
+   "Pistol",
+   "Combat Knife"
+  ],
+  "weapon": "Shotgun",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "5": {
+  "cls": 5,
+  "name": "Detective",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Revolver",
+   "Combat Knife"
+  ],
+  "weapon": "Revolver",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "6": {
+  "cls": 6,
+  "name": "Marksman",
+  "hp": 90,
+  "maxHp": 90,
+  "speed": 1,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Semi Auto",
+   "Pistol",
+   "Combat Knife"
+  ],
+  "weapon": "Semi Auto",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "7": {
+  "cls": 7,
+  "name": "Rocketeer",
+  "hp": 130,
+  "maxHp": 130,
+  "speed": 0.86,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Rocket Launcher",
+   "Combat Knife"
+  ],
+  "weapon": "Rocket Launcher",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "8": {
+  "cls": 8,
+  "name": "Agent",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1.2,
+  "wallJump": true,
+  "regen": 0.1,
+  "loadout": [
+   "Akimbo Uzi",
+   "Combat Knife"
+  ],
+  "weapon": "Akimbo Uzi",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "9": {
+  "cls": 9,
+  "name": "Runner",
+  "hp": 120,
+  "maxHp": 120,
+  "speed": 1,
+  "wallJump": true,
+  "regen": 0.2,
+  "loadout": [
+   "Combat Knife"
+  ],
+  "weapon": "Combat Knife",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "10": {
+  "cls": 0,
+  "name": "Triggerman",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1.05,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Assault Rifle",
+   "Pistol",
+   "Combat Knife"
+  ],
+  "weapon": "Assault Rifle",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "11": {
+  "cls": 11,
+  "name": "Bowman",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Crossbow",
+   "Pistol",
+   "Combat Knife"
+  ],
+  "weapon": "Crossbow",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "12": {
+  "cls": 12,
+  "name": "Commando",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1,
+  "wallJump": 0,
+  "regen": 0.1,
+  "loadout": [
+   "Famas",
+   "Pistol",
+   "Combat Knife"
+  ],
+  "weapon": "Famas",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ },
+ "13": {
+  "cls": 13,
+  "name": "Trooper",
+  "hp": 100,
+  "maxHp": 100,
+  "speed": 1,
+  "wallJump": true,
+  "regen": 0.1,
+  "loadout": [
+   "Blaster",
+   "Combat Knife"
+  ],
+  "weapon": "Blaster",
+  "x": 102,
+  "y": 0,
+  "z": -365,
+  "height": 11
+ }
+}

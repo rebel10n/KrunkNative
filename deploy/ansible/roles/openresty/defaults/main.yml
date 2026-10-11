@@ -1,0 +1,20 @@
+# Official openresty.org apt repo, pinned version (bump deliberately).
+openresty_version: "1.29.2.5-1~{{ ansible_distribution_release }}1"
+openresty_repo: "https://openresty.org/package/debian"
+openresty_prefix: /usr/local/openresty
+openresty_conf: "{{ openresty_prefix }}/nginx/conf/nginx.conf"
+# Loopback only: nginx owns :80/:443 on the central node; the Cloudflare tunnel
+# (cloudflared ingress krunk.io -> localhost:8081) is the only way in.
+openresty_listen:
+  - "127.0.0.1:8081"
+  - "[::1]:8081"
+openresty_worker_processes: 1
+openresty_worker_user: nobody
+openresty_worker_group: nogroup
+openresty_web_root: /opt/krunknative-web/current
+openresty_assets_dir: /opt/krunknative-web/assets
+# Optional same-origin API routes (off: the page only serves the static build;
+# the client talks to coordinator./matchmaker. hostnames directly).
+openresty_api_routes: false
+openresty_coordinator_upstream: "127.0.0.1:8083"
+openresty_finder_upstream: "127.0.0.1:8082"

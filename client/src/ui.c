@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+#include <gl.h>
 #include <client.h>
 #include <stdio.h>
 #include <stdlib.h>

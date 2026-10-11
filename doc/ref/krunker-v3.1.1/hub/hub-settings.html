@@ -1,0 +1,611 @@
+<html lang="en"><head>
+<meta charset="UTF-8">
+<title>Krunker Hub</title>
+<link rel="shortcut icon" type="image/png" href="/img/favicon.png?build=jhiLQ">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0">
+<meta name="description" content="Krunker.io is a free io Multiplayer First Person Shooter. No Download! Free!">
+<meta name="keywords" content="FPS,Free,IO,roblox,fortnite,online,shooter">
+<meta property="og:title" content="Krunker Hub">
+<meta property="og:image" content="https://totallynotio.krunker.zip/promo/og.png">
+<meta property="og:description" content="Krunker.io is a free io Multiplayer First Person Shooter. No Download browser FPS! Free!">
+<link rel="stylesheet" href="/css/social.css?build=jhiLQ">
+<link rel="stylesheet" href="/css/flag.css?build=jhiLQ">
+<link rel="stylesheet" href="/css/social_custom.css?build=jhiLQ">
+<link rel="stylesheet" href="/css/google-secular-one.css?build=jhiLQ">
+<link rel="stylesheet" href="/css/material-icons.css?build=jhiLQ">
+<script type="text/javascript" async="" charset="utf-8" src="https://www.gstatic.com/recaptcha/releases/Br0hYqpfWeFzYCAXLD4UuCIV/recaptcha__en.js" crossorigin="anonymous" integrity="sha384-os1oE9riCJnxvhNQ7O/WqU9GwWx5mE1SEyqiRc2BLb3uEMbNuxEJKZIGYbcNwpF3"></script><script src="/js/hook.js?build=jhiLQ"></script><style>
+@font-face {
+  font-family: "LuconDevConsole";
+  src: url("/css/fonts/lucon.ttf") format("truetype");
+  font-display: block;
+}
+#devConsoleOverlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 999999;
+  background: transparent;
+  pointer-events: none;
+}
+#devConsoleOverlay * {
+  font-family: "LuconDevConsole", "Lucida Console", "Consolas", "Liberation Mono", "Courier New", monospace;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: never;
+  text-rendering: geometricPrecision;
+}
+#devConsoleOverlay .modal {
+  opacity: 0.95;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 7px;
+  border-radius: 5px;
+  width: min(744px, calc(100vw - 16px));
+  height: min(280px, calc(100vh - 16px));
+  background: #7a7a7a;
+  display: flex;
+  flex-direction: column;
+  color: #d0d0d0;
+  font-size: 12px;
+  pointer-events: auto;
+  min-width: 280px;
+  min-height: 160px;
+}
+#devConsoleOverlay .titlebar {
+  background: #7a7a7a;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: normal;
+  padding: 3px 6px;
+  user-select: none;
+  cursor: move;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 18px;
+  flex: 0 0 auto;
+}
+#devConsoleOverlay .titlebar span {
+  color: #fff;
+  font-weight: bold;
+}
+#devConsoleOverlay .titlebar .x {
+  width: 18px;
+  height: 16px;
+  background: transparent;
+  border: 0;
+  color: #d0d0d0;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+#devConsoleOverlay .titlebar .x:hover { color: #fff; }
+#devConsoleOverlay .body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 6px 5px;
+  gap: 2px;
+  overflow: hidden;
+  background: #7a7a7a;
+}
+#devConsoleOverlay .logs {
+  flex: 1 1 auto;
+  overflow-y: scroll;
+  background: #6a6a6a;
+  border: 1px #282828 inset;
+  padding: 3px 5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #e0e0e0;
+  line-height: 1.25;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+#devConsoleOverlay .logs, #devConsoleOverlay .logs * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+#devConsoleOverlay .logs ::selection,
+#devConsoleOverlay .logs::selection {
+  background: #f39c00;
+  color: #000000;
+}
+#devConsoleOverlay .logs::-webkit-scrollbar { width: 14px; }
+#devConsoleOverlay .logs::-webkit-scrollbar-track {
+  background: #4a4a4a;
+}
+#devConsoleOverlay .logs::-webkit-scrollbar-thumb {
+  background: #7a7a7a;
+  border: 1px solid #3a3a3a;
+}
+#devConsoleOverlay .hints {
+  position: absolute;
+  left: 0;
+  right: 70px;
+  bottom: calc(100% + 1px);
+  display: none;
+  max-height: 180px;
+  overflow-y: auto;
+  background: #6f6f6f;
+  border: 1px solid #4c4c4c;
+  color: #d8d8d8;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  z-index: 2;
+}
+#devConsoleOverlay .hints.isOpen { display: block; }
+#devConsoleOverlay .hintItem {
+  padding: 2px 6px;
+  cursor: default;
+}
+#devConsoleOverlay .hintItem.isActive {
+  background: #5f5f5f;
+  color: #ffffff;
+}
+#devConsoleOverlay .hintMeta {
+  color: #b8b8b8;
+}
+#devConsoleOverlay .inputShell {
+  position: relative;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+#devConsoleOverlay .row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+#devConsoleOverlay .row input {
+  flex: 1 1 auto;
+  background: #585858;
+  outline: 0;
+  color: #e0e0e0;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 5px;
+  min-width: 0;
+  border: 1px #282828 inset;
+}
+#devConsoleOverlay .row button[type="submit"] {
+  background-color: #7a7a7a;
+  width: 64px;
+  border: 1px #a2a2a2 outset;
+  font-size: 10px;
+}
+
+#devConsoleOverlay .row button {
+  background: #7a7a7a;
+  border: 1px solid #3a3a3a;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 0;
+  cursor: pointer;
+  color: #e0e0e0;
+}
+#devConsoleOverlay .row button:hover { background: #8a8a8a; }
+#devConsoleOverlay .row button:active { background: #6a6a6a; }
+#devConsoleOverlay .grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 0 6px, #9a9a9a 6px 7px, transparent 7px 9px, #9a9a9a 9px 10px, transparent 10px 12px, #9a9a9a 12px 13px, transparent 13px);
+}
+</style>
+<script src="/recaptcha_api.js?build=jhiLQ" defer=""></script>
+<script src="/js/social.js?build=jhiLQ" defer=""></script>
+</head>
+<body style="transform: scale(0.579); width: 2210px; height: 1243.12px;">
+
+<div id="backgroundImage"></div>
+
+<div id="aHolder">
+</div>
+
+<img id="androidDB" onclick="openLink(&quot;https://play.google.com/store/apps/details?id=ch.yendis.krunkerhub&quot;)" src="/img/android.png?build=jhiLQ">
+<img id="iosDB" onclick="openLink(&quot;https://apps.apple.com/app/id1515679115&quot;)" src="/img/ios.png?build=jhiLQ">
+<img id="steamDB" onclick="openLink(&quot;https://store.steampowered.com/app/1408720/Krunker/&quot;)" src="/img/steam.png?build=jhiLQ">
+
+<script>
+			window.captchaReady = false;
+			window.captchaCallback = function() {
+				window.captchaReady = true;
+			};
+			window.hcaptchaReady = false;
+			window.hcaptchaCallback = function() {
+				window.hcaptchaReady = true;
+			};
+		</script>
+
+<script src="/libs/howler.min.js?build=jhiLQ"></script>
+<script src="https://hcaptcha.com/1/api.js?onload=hcaptchaCallback&amp;render=explicit&amp;recaptchacompat=off" async="" defer=""></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.bundle.min.js"></script>
+
+<div id="errorDisplay" style="display: none">
+<div id="errorTitle"></div>
+<div id="errorReloadButton" onclick="location.reload()">Reload</div>
+</div>
+
+<div id="navBar">
+<div id="navTitle" onclick="openLink('/');">KRUNKER<div id="hubBox">Hub</div></div>
+<div id="profileInfo">
+<img id="profileImg" src="https://totallynotio.krunker.zip/textures/classes/icon_0.png" onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('profile')">
+<div id="profileName" onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('profile')"></div>
+<div id="profileLogin" class="button lgn" onclick="loginPopup()" style="display: inline-block;">Login</div>
+<div id="profileSearch">
+<input type="text" id="searchPInput" placeholder="Search User" onkeyup="if (window.event.keyCode==13) window.searchProfile();">
+<div id="searchBtn" onclick="window.searchProfile();">Search</div>
+</div>
+</div>
+<div id="navButtons">
+<div class="terms" onclick="openURL('./docs/terms.txt')" onmouseover="SOUND.play('tick_0',0.1)">Terms</div>
+<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('feed')" id="feed" class="material-icons mic1 menuBtn" style="margin-right: -4px; font-size: 42px; margin-top: 4px; opacity: 1;">public</div>
+<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('market',null,null,null,'store')" id="market" class="material-icons mic1 menuBtn" style="margin-right: -4px; opacity: 1;">store</div>
+<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('leaders')" id="leaders" class="material-icons mic1 menuBtn" style="opacity: 1;">poll</div>
+<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('maps')" id="maps" class="material-icons mic1 menuBtn" style="opacity: 0.5;">videogame_asset</div>
+<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('mods')" id="mods" class="material-icons mic1 menuBtn" style="font-size: 44px; margin-top: 3px; opacity: 1;">extension</div>
+<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('clanwars')" id="clanwars" class="material-icons mic1 menuBtn" style="opacity: 1;"><img src="/img/crossed_swords_0.svg?build=jhiLQ" style="margin-top:-4px;margin-left:-8px;margin-right:-8px;width:60px;image-rendering:auto;"></div>
+<div onmouseover="SOUND.play('tick_0',0.1)" onclick="openSettings()" id="settings" class="material-icons mic1 menuBtn" style="font-size: 43px;margin-top: 5px;">settings</div>
+</div>
+</div>
+
+<div id="loadMessage" style="display: none;">
+<div style="width:100%;text-align:center">
+<div class="lds-ring"><div></div><div></div>
+<div></div><div></div></div>
+<div style="font-size:22px;color:rgba(
+					255,255,255,0.6);margin-right:10px">LOADING</div>
+</div>
+</div>
+
+<div id="leaderHolder" class="centerHolder" style="display: none;">
+<div class="leaderNav2">
+<div class="leaderBtn2" onclick="updateWindow('leaders')">Level</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_kills')">Kills</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_wins')">Wins</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_timeplayed')">Time</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_funds')">Krunkies</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_clan')">Clans</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_elo')">1v1</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_elo2')">2v2</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_elo4')">4v4</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_chal')">Challenge</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_followed')">Followers</div>
+<div class="leaderBtn2" onclick="updateWindow('leaders','player_eventtime')">Raid</div>
+</div>
+<div id="leaderList" class="scrollView"></div>
+</div>
+
+<div id="mapsHolder" class="centerHolder" style="display: block;">
+<div class="leaderNav">
+<a class="leaderBtn tabSel" href="javascript:;" id="gTab_0" onclick="windows[0].switchTab(0)">Popular</a>
+<a class="leaderBtn" href="javascript:;" id="gTab_1" onclick="windows[0].switchTab(1)">Featured</a>
+<a class="leaderBtn" href="javascript:;" id="gTab_2" onclick="windows[0].switchTab(2)">New</a>
+<a class="leaderBtn" href="javascript:;" id="gTab_3" onclick="windows[0].switchTab(3)">KR</a>
+<a class="leaderBtn" href="javascript:;" id="gTab_4" onclick="windows[0].switchTab(4)">Favorites</a>
+<a class="leaderBtn" href="javascript:;" id="gTab_5" onclick="windows[0].switchTab(5)">My Games</a>
+<div id="searchBar">
+<input id="searchInput" placeholder="Game Name" style="width:180px">
+<a style="margin-left: 5px;font-size: 20px;line-height: 26px;background-color: #2196F3;padding: 8px;
+					padding-left: 15px;padding-right: 15px;border-radius: 6px;color:#fff" href="javascript:;" onclick="windows[0].searchMaps()">Search</a>
+</div>
+<a class="leaderBtn" href="javascript:;" onclick="publishPopup()" style="background-color: #993299!important;margin-left: 5px;">Publish</a>
+<img id="editorDB" onclick="openLink(&quot;/editor.html&quot;)" src="/img/editor.png?build=jhiLQ">
+</div>
+<div id="mapList" class="scrollView"><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Soul Sanctum&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2717856513);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Soul Sanctum" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Soul Sanctum&quot;,&quot;&quot;,&quot;&quot;)">Soul Sanctum</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Subzero&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1389891507);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Subzero" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Subzero&quot;,&quot;&quot;,&quot;&quot;)">Subzero</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Undergrowth&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2699178862);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Undergrowth" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Undergrowth&quot;,&quot;&quot;,&quot;&quot;)">Undergrowth</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Lostworld&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2026576977);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Lostworld" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Lostworld&quot;,&quot;&quot;,&quot;&quot;)">Lostworld</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Newtown&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 4056084657);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Newtown" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Newtown&quot;,&quot;&quot;,&quot;&quot;)">Newtown</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Oasis&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2101154094);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Oasis" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Oasis&quot;,&quot;&quot;,&quot;&quot;)">Oasis</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Sandstorm&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 88334292);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Sandstorm" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Sandstorm&quot;,&quot;&quot;,&quot;&quot;)">Sandstorm</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Shipyard&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2613134335);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Shipyard" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Shipyard&quot;,&quot;&quot;,&quot;&quot;)">Shipyard</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Freight&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1010451404);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Freight" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Freight&quot;,&quot;&quot;,&quot;&quot;)">Freight</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Industry&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 312130495);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Industry" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Industry&quot;,&quot;&quot;,&quot;&quot;)">Industry</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Kanji&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1336255044);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Kanji" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Kanji&quot;,&quot;&quot;,&quot;&quot;)">Kanji</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Littletown&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 3836435553);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Littletown" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Littletown&quot;,&quot;&quot;,&quot;&quot;)">Littletown</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Burg&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1257833875);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Burg" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Burg&quot;,&quot;&quot;,&quot;&quot;)">Burg</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Citadel&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1963634499);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Citadel" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Citadel&quot;,&quot;&quot;,&quot;&quot;)">Citadel</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Evacuation&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 4241009034);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Evacuation" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Evacuation&quot;,&quot;&quot;,&quot;&quot;)">Evacuation</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Krunker&quot;)" style="color: rgba(0, 0, 0, 0.6);">Krunker</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Zombie_High&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 569198284);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Zombie_High" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Zombie_High&quot;,&quot;https://user-assets.krunker.io/md23677/mod.zip&quot;,&quot;&quot;)">Zombie_High</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;IamFiercer&quot;)" style="color: rgba(0, 0, 0, 0.6);">IamFiercer</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Sandstorm&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 88334292);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Sandstorm" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Sandstorm&quot;,&quot;&quot;,&quot;&quot;)">Sandstorm</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Shipyard&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2613134335);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Shipyard" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Shipyard&quot;,&quot;&quot;,&quot;&quot;)">Shipyard</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Subzero&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1389891507);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Subzero" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Subzero&quot;,&quot;&quot;,&quot;&quot;)">Subzero</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Undergrowth&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2699178862);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Undergrowth" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Undergrowth&quot;,&quot;&quot;,&quot;&quot;)">Undergrowth</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;slide_moonlight&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 3690042710);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_slide_moonlight" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;slide_moonlight&quot;,&quot;&quot;,&quot;&quot;)">slide_moonlight</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Burg&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1257833875);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Burg" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Burg&quot;,&quot;&quot;,&quot;&quot;)">Burg</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Freight&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1010451404);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Freight" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Freight&quot;,&quot;&quot;,&quot;&quot;)">Freight</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Kanji&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 1336255044);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Kanji" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Kanji&quot;,&quot;&quot;,&quot;&quot;)">Kanji</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Littletown&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 3836435553);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Littletown" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Littletown&quot;,&quot;&quot;,&quot;&quot;)">Littletown</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Lostworld&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2026576977);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Lostworld" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Lostworld&quot;,&quot;&quot;,&quot;&quot;)">Lostworld</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;SniperRoyale2&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2800345118);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_SniperRoyale2" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;SniperRoyale2&quot;,&quot;https://www.dropbox.com/s/0h3mnvii1nua0h9/Logo.zip?dl=0&quot;,&quot;&quot;)">SniperRoyale2</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Test&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2949673445);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Test" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Test&quot;,&quot;&quot;,&quot;&quot;)">Test</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Verb_Arena&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 682138864);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Verb_Arena" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Verb_Arena&quot;,&quot;https://www.dropbox.com/s/ejrn99ayvddiq45/Verb%20Mod%20Updated%207April2021.zip?dl=0&quot;,&quot;&quot;)">Verb_Arena</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;eterno_jump&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 739315237);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_eterno_jump" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;eterno_jump&quot;,&quot;&quot;,&quot;&quot;)">eterno_jump</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Krunk_Plaza&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 537274925);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Krunk_Plaza" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Krunk_Plaza&quot;,&quot;&quot;,&quot;&quot;)">Krunk_Plaza</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Slide_Neon_Stage&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 197077862);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Slide_Neon_Stage" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Slide_Neon_Stage&quot;,&quot;&quot;,&quot;&quot;)">Slide_Neon_Stage</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;R75&quot;)" style="color: rgba(0, 0, 0, 0.6);">R75</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;Bhop_VIP&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 3459552096);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_Bhop_VIP" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;Bhop_VIP&quot;,&quot;&quot;,&quot;&quot;)">Bhop_VIP</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;eskrr&quot;)" style="color: rgba(0, 0, 0, 0.6);">eskrr</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;ClashRoyale&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2789783172);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_ClashRoyale" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;ClashRoyale&quot;,&quot;&quot;,&quot;&quot;)">ClashRoyale</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;ESP_Parkour&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 2793053018);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_ESP_Parkour" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;ESP_Parkour&quot;,&quot;&quot;,&quot;&quot;)">ESP_Parkour</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;ImCriistian&quot;)" style="color: rgba(0, 0, 0, 0.6);">ImCriistian</span></div></div><div class="mapListItem"><div class="creationActions"></div><div class="mapListThumbHolder"><img draggable="false" class="mapListThumb" loading="lazy" src="./img/noimg.png" onerror="this.onerror=null;this.src=&quot;./img/noimg.png&quot;;" onclick="openMap(&quot;FortniteTiltedT&quot;)"><span class="material-icons favIcon" onclick="favoriteM(0, this, 563473844);">grade</span><div class="mapsVotes" style="top: 51px;right: 9px;" title="KR Bank">0<span style="margin-left: 8px;color:#FBC02D;font-size: 12px;">KR</span></div><div class="mapsVotes" style="top: 75px" title="Total Likes">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">thumb_up</span></div><div class="mapsVotes" title="Total Plays">0<span class="material-icons" style="margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">videogame_asset</span></div><div class="mapsVotes" title="Live Players" id="pcnt_FortniteTiltedT" style="left: 10px;right:unset"><span class="material-icons" style="margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;">person</span>0</div></div><div style="margin-top:1px"><a href="javascript:;" onclick="openMap(&quot;FortniteTiltedT&quot;,&quot;&quot;,&quot;&quot;)">FortniteTiltedT</a></div><div style="margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;">by <span class="click" onclick="openProfile(&quot;Community&quot;)" style="color: rgba(0, 0, 0, 0.6);">Community</span></div></div><div class="loadMoreD" onclick="windows[0].loadMore(this)">Load More</div></div>
+</div>
+
+<div id="modsHolder" class="centerHolder" style="display: none;">
+<div class="leaderNav">
+<a class="leaderBtn tabSel" href="javascript:;" id="mTab_0" onclick="windows[1].switchTab(0)">Popular</a>
+<a class="leaderBtn" href="javascript:;" id="mTab_1" onclick="windows[1].switchTab(1)">Featured</a>
+<a class="leaderBtn" href="javascript:;" id="mTab_2" onclick="windows[1].switchTab(2)">New</a>
+<a class="leaderBtn" href="javascript:;" id="mTab_3" onclick="windows[1].switchTab(3)">Favorites</a>
+<a class="leaderBtn" href="javascript:;" id="mTab_4" onclick="windows[1].switchTab(4)">My Mods</a>
+<div id="searchBar">
+<input id="searchInputMO" placeholder="Mod Name" style="width:180px">
+<a style="margin-left: 5px;font-size: 20px;line-height: 26px;background-color: #2196F3;padding: 8px;
+					padding-left: 15px;padding-right: 15px;border-radius: 6px;color:#fff" href="javascript:;" onclick="windows[1].searchMods()">Search</a>
+</div>
+<a class="leaderBtn" href="javascript:;" onclick="publishModPopup()" style="background-color: #993299!important;margin-left: 5px;">Publish</a>
+</div>
+<div id="modList" class="scrollView"></div>
+</div>
+
+<div id="profileHolder" style="display: none;">
+<div class="scrollItemNew" style="box-shadow:none;-webkit-box-shadow:none;-moz-box-shadow:none;">
+<div id="hackText">HACKER</div>
+<div id="leftProfile">
+<img id="socialPic" class="profilePic">
+<span id="socialFlag"></span>
+</div>
+<div id="rightProfile"></div>
+</div>
+<div></div>
+<div class="profileNav">
+<div class="profileTabs">
+<div class="profileTab pTabA" id="pTab_about" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('about')">About</div>
+<div class="profileTab" id="pTab_activity" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('activity')">Activity</div>
+<div class="profileTab" id="pTab_creations" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('creations')">Creations</div>
+<div class="profileTab" id="pTab_reports" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('reports')">Reports</div>
+<div class="profileTab" id="pTab_inputs" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('inputs')">Inputs</div>
+</div>
+</div><div></div>
+<div class="pTabsContent selected" id="pTabContent_about"></div>
+<div class="pTabsContent" id="pTabContent_activity"></div>
+<div class="pTabsContent" id="pTabContent_creations"></div>
+<div class="pTabsContent" id="pTabContent_reports"></div>
+<div class="pTabsContent" id="pTabContent_inputs">
+<div class="scrollItemNew">
+<div style="margin-top:10px;margin-bottom:10px;">
+<canvas id="inputsChart"></canvas>
+</div>
+</div>
+<div></div>
+</div>
+</div>
+
+<div id="searchHolder" class="centerHolder" style="display: none;">
+<div id="searchInfo" style="height: auto;" class="scrollView"></div>
+<div id="searchList" class="scrollView"></div>
+</div>
+
+<div id="tourneyHolder" class="centerHolder" style="display: none;">
+<div id="tourneyList" class="scrollView"></div>
+</div>
+
+<div id="popupHolder" style="display: block;">
+<div id="popupBack" onclick="showPopup()"></div>
+<div id="filterPop" style="display: none;"></div>
+<div id="sortPop" style="display: none;"></div>
+<div id="popupContent" style="display: none;"></div>
+<div id="tradePop" style="display: none;"></div>
+<div id="followPop" style="display: none;"></div>
+<div id="offerPop" style="display: none;"></div>
+<div id="reportPop" style="display: none;"></div>
+<div id="giftPop" style="display: none;"></div>
+<div id="flagPop" style="display: none;"></div>
+<div id="verifyPop" style="display: none;"></div>
+<div id="confListPop" style="display: none;"></div>
+<div id="confQSPop" style="display: none;"></div>
+<div id="confOfferPop" style="display: none;"></div>
+<div id="confSubmitPop" style="display: none;"></div>
+<div id="publishPop" style="display: none;"></div>
+<div id="loginPop" style="display: none;"></div>
+<div id="settingsPop" style="display: block;"><div id="settHolder"><div class="settName" title="">Region Stats <select onchange="setSetting(&quot;region&quot;, this.value)" class="inputGrey2">
+                       <option value="0" selected="">All Regions</option>,<option value="1">Oceania</option>,<option value="2">Asia</option>,<option value="3">Europe</option>,<option value="4">Americas</option></select></div><div class="settName" title="">UI Scale <label class="switch" style="margin-left:10px"><input type="checkbox" onclick="setSetting(&quot;uiScaling&quot;, this.checked)" checked=""><span class="slider"></span></label><input type="number" class="sliderVal" id="slid_input_scaleUI" min="0.1" max="1" value="0.7" onkeypress="return delayExecute(&quot;scaleUI&quot;, this, undefined)" style="margin-right:0px;border-width:0px">
+                       <div class="slidecontainer" style="width: 180px;"><input type="range" id="slid_scaleUI" min="0.1" max="1" step="0.1" value="0.7" class="sliderM" oninput="setSetting(&quot;scaleUI&quot;, this.value)"></div></div><div class="settName" title="" id="uiScaling_div" style="display:none">UI Scale undefined</div><div class="settName" title="">Disable Rarity Animations <label class="switch" style="margin-left:10px"><input type="checkbox" onclick="setSetting(&quot;disableRarityAnim&quot;, this.checked)"><span class="slider"></span></label></div><div class="settName" title="">Show Profile Pictures <label class="switch" style="margin-left:10px"><input type="checkbox" onclick="setSetting(&quot;showPfp&quot;, this.checked)" checked=""><span class="slider"></span></label></div><div class="settName" title="">Master Volume <input type="number" class="sliderVal" id="slid_input_sound" min="0" max="1" value="1" onkeypress="return delayExecute(&quot;sound&quot;, this, undefined)" style="margin-right:0px;border-width:0px">
+                       <div class="slidecontainer" style=""><input type="range" id="slid_sound" min="0" max="1" step="0.1" value="1" class="sliderM" oninput="setSetting(&quot;sound&quot;, this.value)"></div></div></div></div>
+</div>
+
+<div id="adBox" style="display:none">
+<div id="leftAdHol">
+
+<div id="leftABox">
+<div class="sideBarHeader">Krunker News</div>
+<div class="sideBarItem"><a href="https://www.twitch.tv/krunkeresports" target="_blank" class="menuLink blueLink" style="font-size:14px;margin-right:4px">
+Krunker E-Sports</a> is back!
+Tune in every Saturday to watch the Action!
+</div>
+<div class="sideBarItem">Krunker is coming to <a href="https://store.steampowered.com/app/1408720/Krunker/" class="menuLink blueLink" style="font-size:14px" target="_blank">Steam!</a>
+The Browser version will always be available.</div>
+<div class="sideBarItem">Season 4 is in the works. 3 New Item Types &amp; over 500 Unique New Items!</div>
+</div>
+
+<div id="leftYTBox">
+<div class="sideBarHeader">Krunk TV</div>
+<iframe id="recYTVid">
+					</iframe>
+</div>
+</div>
+<div id="rightAdHol">
+<div id="rightABox"><div align="center" id="krunkerio_300x250_2">
+</div></div>
+<div id="rightFollBox">
+<div class="sideBarHeader">Who to Follow</div>
+<div id="whoToFolL"></div>
+</div>
+</div>
+</div>
+
+<div id="chatHolder">
+<div id="chatScroller"></div>
+<div id="chatBox" style="display: none;">
+<div id="postTopBar" class="chatTopBar"><span onclick="closeChat()" class="material-icons likeBtn" style="margin-right:30px;font-size:28px;color:#fff">
+arrow_back</span><span id="chatWithHead"></span>
+</div>
+<div id="chatBoxList">
+<div id="chatBoxFill"></div>
+</div>
+<div id="chatBoxInputH">
+<input id="chatBoxInput" placeholder="Enter Message">
+<div id="chatBoxButton" onclick="sendChat()">Send</div>
+</div>
+</div>
+</div>
+
+<div id="feedHolder" class="centerHolder" style="overflow-y: auto; bottom: 140px; display: none;">
+
+<div id="singlePost" style="display:none;overflow-y:hidden;" class="scrollItem">
+<div id="postTopBar"><span onclick="leavePost()" class="material-icons likeBtn" style="margin-right:30px;font-size:28px">
+arrow_back</span><b>Post</b>
+<span id="postTopStat" style="float:right"></span>
+</div>
+<div id="singlePostH"></div>
+</div>
+
+<div id="fpHolder">
+<div id="postEntryC" class="scrollItem">
+<div>
+<img src="/img/favicon.png?build=jhiLQ" id="postProf">
+<input id="postInput" placeholder="Say something...">
+</div>
+<div>
+<div style="text-align:right;display:none;margin-bottom:10px;" id="krInptHol">
+<input id="postKR" type="number" placeholder="KR Giveaway Amount">
+<div style="font-size:14px;color:rgba(0,0,0,0.4);margin-bottom:12px;margin-top:6px;
+								margin-right:3px">
+You will be charged a 10% KR Fee to post make a Giveaway Post
+</div>
+</div>
+<span class="postCFoll" style="margin-left:103px">
+<span style="color:#000000" id="postCFole">0</span> Followers</span>
+<span class="postCFoll"><span style="color:#000000" id="postCFoli">
+0</span> Following</span>
+<div style="float:right">
+<div id="givaButton" onclick="togglPos()"><span class="material-icons" style="color:#fff;vertical-align:middle;
+								margin-top:-6px;font-size:31px">local_atm</span></div>
+<div id="postButton" onclick="makePost()">Post</div>
+</div>
+</div>
+</div>
+<div style="width:100%"></div>
+<div id="feedTabs">
+<span class="feedTab feedTabA" id="feedTab1" style="width:140px" onclick="switchFeedTab(1)"> <span class="material-icons" style="vertical-align:middle;margin-top:-6px;font-size:29px">
+person</span> Following</span>
+<span class="feedTab" id="feedTab4" style="width:85px" onclick="switchFeedTab(4)"> <span class="material-icons" style="vertical-align:middle;margin-top:-6px;font-size:29px">
+whatshot</span> Hot</span>
+<span class="feedTab" id="feedTab0" style="width:110px" onclick="switchFeedTab(0)"> <span class="material-icons" style="vertical-align:middle;margin-top:-7px;font-size:29px">
+public</span> Global</span>
+<span class="feedTab" id="feedTab5" style="width:160px" onclick="switchFeedTab(5)"> <span class="material-icons" style="vertical-align:middle;margin-top:-4px;font-size:31px">
+local_atm</span> Giveaways</span>
+<span class="feedTab" id="feedTab2" style="width:100px" onclick="switchFeedTab(2)"> <span class="material-icons" style="vertical-align:middle;margin-top:-4px;font-size:31px">
+groups</span> Clan</span>
+</div>
+<div style="width:100%"></div>
+<div id="postList">
+<div id="postHolder"></div>
+</div>
+</div>
+</div>
+
+<div id="marketHolder" class="centerHolder" style="display: none;">
+<div class="leaderNav">
+<div id="invTrack"></div>
+<div id="m_blackm" onclick="updateWindow('market','blackm',null,null,'store')"><img src="/img/black_m.png?build=jhiLQ" style="margin-top:-3px;width:45px;image-rendering:auto;"></div>
+<div id="m_stats" onclick="updateWindow('market','stats',null,null,'store')"><i class="material-icons" style="font-size: 43px;color: #fff;">assessment</i></div>
+<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market',null,null,null,'store')" id="m_market" onmouseover="SOUND.play('tick_0',0.1)">Market</a>
+<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market','inventory',null,null,'store')" id="m_inventory" onmouseover="SOUND.play('tick_0',0.1)">Inventory</a>
+<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market','sales',null,null,'store')" id="m_sales" onmouseover="SOUND.play('tick_0',0.1)">My Sales</a>
+<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market','trades',null,null,'store')" id="m_trades" onmouseover="SOUND.play('tick_0',0.1)">Trades</a>
+<div id="marketSearchB" onclick="filterPopup(event)" onmouseover="SOUND.play('tick_0',0.1)">Search</div>
+<div id="invSortB" onclick="sortPopup(event)" onmouseover="SOUND.play('tick_0',0.1)">Sort</div>
+<div id="invValue"></div>
+</div>
+<div id="marketList" class="scrollView"></div>
+</div>
+
+<div id="itemsalesHolder" class="centerHolder" style="bottom: 150px; display: none;">
+<div id="itemsalesList" class="scrollView">
+<div class="scrollItem" style="position:relative;overflow-y:auto;padding-top: 20px;">
+<div id="weaponInfo"></div>
+<div>
+<a class="dateBtn" href="javascript:;" onclick="changeDateRange(this, 0)" onmouseover="SOUND.play('tick_0',0.1)">7d</a>
+<a class="dateBtn" href="javascript:;" style="background-color:rgba(0, 0, 0, 0.6)" onclick="changeDateRange(this, 1)" onmouseover="SOUND.play('tick_0',0.1)">30d</a>
+<a class="dateBtn" href="javascript:;" onclick="changeDateRange(this, 2)" onmouseover="SOUND.play('tick_0',0.1)">90d</a>
+<a class="dateBtn" href="javascript:;" onclick="changeDateRange(this, 3)" onmouseover="SOUND.play('tick_0',0.1)">120d</a>
+</div>
+<div class="menuTabsNew" style="margin-top: 10px;margin-bottom: 10px;">
+<div class="menuTabNew tabANew" style="width: 33%;" id="iTab_avg" onmouseover="SOUND.play('tick_0',0.1)" onclick="openItemTab('avg')">Average Sales</div>
+<div class="menuTabNew" style="width: 33%;" id="iTab_sold" onmouseover="SOUND.play('tick_0',0.1)" onclick="openItemTab('sold')">Units Sold</div>
+<div class="menuTabNew" style="width: 33%;" id="iTab_owners" onmouseover="SOUND.play('tick_0',0.1)" onclick="openItemTab('owners')">Owners</div>
+</div>
+<div class="iTabsContent selected" id="iTabContent_avg">
+<div class="graphHeader">
+<span class="graphHeaderTxt">Average Sale Price</span>
+<span id="averageCostTrending" class="graphHeaderTrend"></span>
+<span id="averageCostHeader" class="graphHeaderTotal">0</span>
+</div>
+<canvas id="averageCost" style="display: none;"></canvas>
+</div>
+<div class="iTabsContent" id="iTabContent_sold">
+<div class="graphHeader" style="margin-top: 5px;background-color:#fbc02d">
+<span class="graphHeaderTxt">Units Sold</span>
+<span id="totalSoldTrending" class="graphHeaderTrend"></span>
+<span id="totalSoldHeader" class="graphHeaderTotal">0</span>
+</div>
+<canvas id="totalSold" style="display: none;"></canvas>
+</div>
+<div class="iTabsContent" id="iTabContent_owners"></div>
+</div>
+</div>
+</div>
+
+<div id="clanHolder" class="centerHolder" style="display: none;">
+<div id="clanInfo" style="height: auto;" class="scrollView"></div>
+<div id="clanRoster" class="scrollView"></div>
+</div>
+
+<div id="clanwarsHolder" class="centerHolder" style="display: none;">
+<div class="scrollView" style="position: absolute;">
+<div style="text-align: left;position: absolute;width: 800px;left: 50%;transform: translateX(-50%);">
+<div id="sea"></div>
+<div id="clanwarsProg"></div>
+<div id="clanwarsInfo"></div>
+</div>
+</div>
+</div>
+
+<div id="mapHolder" class="centerHolder" style="bottom: 130px !important; display: none;">
+<div id="mapProfile" class="scrollView"></div>
+</div>
+
+<div id="modHolder" class="centerHolder" style="bottom: 130px !important; display: none;">
+<div id="modProfile" class="scrollView"></div>
+</div>
+
+<div id="virusHolder" style="display: none;">
+<div class="scrollItem" style="width:800px;padding-top:20px;padding-bottom:15px;overflow:hidden;max-height:unset;">
+<div>
+<a class="dateBtn" href="javascript:;" onclick="changeDateR(this, 0)" onmouseover="SOUND.play('tick_0',0.1)">7d</a>
+<a class="dateBtn" href="javascript:;" style="background-color:rgba(0, 0, 0, 0.6)" onclick="changeDateR(this, 1)" onmouseover="SOUND.play('tick_0',0.1)">30d</a>
+<a class="dateBtn" href="javascript:;" onclick="changeDateR(this, 2)" onmouseover="SOUND.play('tick_0',0.1)">90d</a>
+<a class="dateBtn" href="javascript:;" onclick="changeDateR(this, 3)" onmouseover="SOUND.play('tick_0',0.1)">120d</a>
+</div>
+<div style="width:790px;display:inline-block;">
+<div class="graphHeader">
+<span class="graphHeaderTxt">Krunkitis Infections</span>
+<span id="virusSpreadHeader" class="graphHeaderTotal">0</span>
+</div>
+<canvas id="virusSpread"></canvas>
+</div>
+</div>
+<div></div>
+<div class="scrollItem" style="width:800px;padding-top:20px;padding-bottom:15px;overflow:hidden;max-height:unset;">
+<div style="margin-bottom: 15px;font-size:16px;color: rgba(0,0,0,0.5);">Krunkitis is a fictional virus. Its meant to illustrate how fast a virus can spread if people are not careful. Please educate yourself on the current situation and follow the advice provided by your local governments and health organizations.</div>
+<!-- <img src="https://www.gc.cuny.edu/getmedia/df2dffcb-90cf-444a-9875-7e3656b08774/1overall.png?width=470&amp;height=470&amp;ext=.png" style="width: 100%;image-rendering: auto;"> -->
+<div style="font-size: 30px;margin-top: 10px;text-align: center;">
+Find more information
+<a style="text-decoration: underline;" href="https://www.who.int/emergencies/diseases/novel-coronavirus-2019">here</a>
+</div>
+</div>
+</div>
+
+
+<div style="position: absolute; z-index: 9999; top: 10px; right: 10px; transform: translateX(calc(100% + 20px)); padding: 10px; margin: 10px; box-sizing: border-box; border-radius: 5px; background: rgba(0, 0, 0, 0.333); color: rgb(255, 255, 255);"></div><style>
+  @keyframes slide {
+      0%, 100% {
+          transform: translateX(calc(100% + 20px));
+      }
+  
+      10%, 90% {
+          transform: translateX(0);
+      }
+  }
+  
+  .anim {
+      animation: slide 2s forwards;
+  }
+</style><div id="devConsoleOverlay"><div class="modal"><div class="titlebar"><span>Console</span><span class="x">✕</span></div><div class="body"><div class="logs" tabindex="-1" style="outline: none;"><div style="color: rgb(154, 200, 255);">Krunker developer console - type `help` for commands.</div><div style="color: rgb(176, 176, 176);">Press ~ to toggle, Esc to close, Tab to autocomplete.</div><div style="color: rgb(224, 224, 224);">recaptchacompat disabled</div></div><div class="inputShell"><div class="hints"></div><form class="row"><input type="text" autocomplete="off" spellcheck="false"><button type="submit">Submit</button></form></div></div><div class="grip"></div></div></div></body></html>

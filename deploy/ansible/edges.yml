@@ -1,0 +1,13 @@
+# Edge game servers: vcpus-1 server_bin instances per host + their DNS records.
+# kn_firewall runs first: it opens the game ports in the shared host nftables
+# (edge-firewall-contract v1, README "Edge firewall"; firewall.yml runs it alone).
+# Units run while kn_gameserver_enabled is true (group_vars/edges/main.yml; live since 2026-10-11).
+- name: KrunkNative edges (dedicated servers)
+  hosts: edges
+  become: false
+  roles:
+    - { role: kn_firewall, tags: [firewall] }
+    - { role: kn_user, tags: [user, gameserver] }
+    - { role: kn_release, tags: [release, gameserver] }
+    - { role: kn_gameserver, tags: [gameserver] }
+    - { role: cf_dns, tags: [dns] }
