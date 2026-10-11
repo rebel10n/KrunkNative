@@ -1,0 +1,9 @@
+# Prebuilt ANGLE (libEGL + libGLESv2 + include/) for -DKRUNKNATIVE_GL_BACKEND=angle, published as
+# GitHub release assets so CI never builds ANGLE (tools/angle/fetch-angle.sh downloads and
+# verifies them; the `angle` workflow or tools/angle/package-angle.sh produce them).
+#
+#   commit  the ANGLE commit; must equal ANGLE_COMMIT in build-angle.sh, else no prebuilt is used
+#   sha256  <platform> <sha256 of angle-<commit12>-<platform>.tar.gz in release angle-<commit12>>
+#
+# Bumping the pin: change build-angle.sh and `commit` here, drop the sha256 lines, then publish.
+commit b52e7ee002499a95cb740fb74ed729fd2ecb906d

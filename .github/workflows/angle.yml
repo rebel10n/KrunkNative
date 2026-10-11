@@ -1,0 +1,58 @@
+name: ANGLE prebuilt
+
+# Builds the ANGLE commit pinned in tools/angle/build-angle.sh (~10 min on arm64, ~65 min on
+# Intel) and publishes it as a release asset (release angle-<commit12>, asset
+# angle-<commit12>-macos-<arch>.tar.gz). The Build workflow only downloads it
+# (tools/angle/fetch-angle.sh) and never builds ANGLE. Run this once per pin bump and arch,
+# then commit the printed `sha256 ...` lines to tools/angle/angle.lock.
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: macOS architecture to build
+        type: choice
+        options: [arm64, x86_64, both]
+        default: arm64
+
+permissions:
+  contents: write # gh release create/upload
+
+jobs:
+  macos:
+    name: ANGLE (macOS ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(inputs.arch == 'both' && '["arm64","x86_64"]' || format('["{0}"]', inputs.arch)) }}
+    # macos-15-intel is the supported x86_64 label until ~Aug 2027
+    runs-on: ${{ matrix.arch == 'arm64' && 'macos-latest' || 'macos-15-intel' }}
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # depot_tools + gclient + gn, Metal and OpenGL backends only; the checkout (~9 GB)
+      # lives in RUNNER_TEMP.
+      - name: Build ANGLE (pinned commit)
+        run: tools/angle/build-angle.sh "$RUNNER_TEMP/angle" --work "$RUNNER_TEMP/angle-work"
+
+      - name: Package and publish
+        run: |
+          set -euo pipefail
+          platform="macos-${{ matrix.arch }}"
+          line="$(tools/angle/package-angle.sh "$RUNNER_TEMP/angle" "$platform" "$RUNNER_TEMP/out")"
+          asset="$(ls "$RUNNER_TEMP"/out/angle-*-"$platform".tar.gz)"
+          tag="$(basename "$asset" | sed "s/-$platform\.tar\.gz\$//")"
+          gh release view "$tag" > /dev/null 2>&1 || gh release create "$tag" --title "ANGLE ${tag#angle-} (prebuilt)" \
+            --notes "Prebuilt ANGLE (libEGL + libGLESv2 + include/) for KRUNKNATIVE_GL_BACKEND=angle, from tools/angle/build-angle.sh. Checksums: tools/angle/angle.lock." \
+            || gh release view "$tag" > /dev/null # the other arch's job created it first
+          gh release upload "$tag" "$asset" --clobber
+          echo "$line"
+          {
+            echo "### $platform"
+            echo "Put this line into \`tools/angle/angle.lock\`:"
+            echo '```'
+            echo "$line"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

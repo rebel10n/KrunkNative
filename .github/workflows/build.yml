@@ -176,12 +176,11 @@ jobs:
           if-no-files-found: error
 
   # Native macOS renders through Metal via ANGLE (OpenGL ES 3.0, the KN_GLES path the web
-  # build shares; README.md "ANGLE / Metal (macOS)"). ANGLE is built from the commit pinned in
-  # tools/angle/build-angle.sh and cached per arch: the cache key is that script's hash, so
-  # bumping the pin rebuilds it (cold: ~10 min on arm64, ~65 min on Intel, then a cache
-  # restore). The cache is saved right after the ANGLE build, so a later failing step does not
-  # throw a cold build away. The `desktop` entry keeps Apple's deprecated OpenGL 4.1 fallback
-  # (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
+  # build shares; README.md "ANGLE / Metal (macOS)"). CI never builds ANGLE: the ANGLE jobs
+  # download the prebuilt release asset pinned and checksummed in tools/angle/angle.lock
+  # (tools/angle/fetch-angle.sh; published by the dispatch-only `angle` workflow) and are
+  # skipped, with a warning, when there is none for their arch. The `desktop` entry keeps
+  # Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
   macos:
     name: macOS (Clang, ${{ matrix.gl == 'angle' && 'ANGLE/Metal' || 'desktop GL 4.1' }}, ${{ matrix.arch }})
     strategy:
@@ -200,8 +199,7 @@ jobs:
             arch: arm64
             gl: desktop
     runs-on: ${{ matrix.runner }}
-    # A cold ANGLE build on the Intel runner is ~65 min; warm runs take a few minutes.
-    timeout-minutes: ${{ matrix.gl == 'angle' && 180 || 60 }}
+    timeout-minutes: 45
     env:
       ANGLE_DIR: ${{ github.workspace }}/angle-dist
     steps:
@@ -209,10 +207,18 @@ jobs:
         with:
           submodules: recursive
 
+      # available=false when angle.lock has no asset for this arch: the job's build steps are
+      # skipped (the desktop entry still compiles the macOS code).
+      - name: Fetch prebuilt ANGLE
+        if: matrix.gl == 'angle'
+        id: angle
+        run: tools/angle/fetch-angle.sh "macos-${{ matrix.arch }}" "$ANGLE_DIR" >> "$GITHUB_OUTPUT"
+
       # The runner images ship cmake, ninja and pkg-config: install only what is missing and
       # never `brew update`/upgrade. Homebrew has no Intel bottles any more, so an upgrade
       # there compiles cmake from source (~45 min).
       - name: Install build dependencies
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_UPGRADE: 1
@@ -234,40 +240,22 @@ jobs:
             fi
           done
 
-      - name: Restore ANGLE
-        if: matrix.gl == 'angle'
-        id: angle-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: angle-dist
-          key: angle-macos-${{ matrix.arch }}-${{ hashFiles('tools/angle/build-angle.sh') }}
-
-      # depot_tools + gclient + gn, Metal and OpenGL backends only; the checkout (~9 GB) lives
-      # in RUNNER_TEMP and only lib/ + include/ (a few MB) are cached.
-      - name: Build ANGLE (pinned commit)
-        if: matrix.gl == 'angle' && steps.angle-cache.outputs.cache-hit != 'true'
-        run: tools/angle/build-angle.sh "$ANGLE_DIR" --work "$RUNNER_TEMP/angle-work"
-
-      - name: Save ANGLE
-        if: matrix.gl == 'angle' && steps.angle-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: angle-dist
-          key: ${{ steps.angle-cache.outputs.cache-primary-key }}
-
       - name: Build (Release)
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }}"
 
       - name: Run tests
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         run: ./cmake-build-release/proc_input_test
 
       - name: HTML engine smoke probe
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         run: ./cmake-build-release/ui_test lexbor-probe
 
       # client_bin links @rpath/libEGL.dylib with an @executable_path rpath, and the build copied
       # ANGLE's dylibs next to it (GLFW dlopens @rpath/libEGL.dylib + @rpath/libGLESv2.dylib).
       - name: Check ANGLE bundling
-        if: matrix.gl == 'angle'
+        if: matrix.gl == 'angle' && steps.angle.outputs.available == 'true'
         run: |
           set -euxo pipefail
           otool -L cmake-build-release/client_bin | tee /dev/stderr | grep -q '@rpath/libEGL.dylib'
@@ -281,6 +269,7 @@ jobs:
       # (fonts, models, textures). Run them locally with the assets (README.md "ANGLE / Metal").
 
       - name: Stage macOS artifact
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         run: |
           set -euxo pipefail
           mkdir -p dist
@@ -293,6 +282,7 @@ jobs:
           find dist -maxdepth 1 | sort
 
       - name: Upload artifacts
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: KrunkNative-macos-${{ matrix.arch }}${{ matrix.gl == 'desktop' && '-desktop-gl' || '' }}
