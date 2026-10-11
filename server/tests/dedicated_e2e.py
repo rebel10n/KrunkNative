@@ -9,12 +9,18 @@ coordinator (kn_brain) and two server_bin processes from generated server.cfg fi
   2. accounts: kn_register x2, give_skin (svc-accounts' kn_add_skin) to account A only
   3. matchmaking: /mm/seek-game with A's session -> ticket -> JOIN on that server
      -> the server learns A's inventory: A's owned hat stays, an unowned one is stripped;
-     B (session-only JOIN, no skins) wearing the same hat gets it stripped
+     B (session-only JOIN, no skins) wearing the same hat gets it stripped; the same for weapon
+     and melee skins (V6 ENT -> NET_PACKET_SKINS before each SPAWN, seen by the other player too)
   4. password-protected server refuses a wrong password
   5. rcon (local TCP): status, say, kick; `send` redirects a player to the other lobby
-  6. SIGTERM on the server: drain, partial stats commit lands in match_results
+  6. online_mode server linked to the coordinator: guests are never matched to it (nor to
+     the password one), a guest asking for it by id is moved / refused (AccountRequired);
+     a signed-in player is matched to it and spawns as the account (ticket JOIN, then the
+     client's hasJoined "hj1:" JOIN like client/src/net/online_mode.c)
+  7. SIGTERM on the server: drain, partial stats commit lands in match_results
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
+import hashlib
 import json
 import os
 import secrets
@@ -32,10 +38,14 @@ import kn_proto  # noqa: E402
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 DB = os.environ.get("KN_TEST_DB", f"kn_ds_e2e_{os.getpid()}")
 BRAIN_PORT = 5391
-PORTS = [22311, 22312]
+PORTS = [22311, 22312, 22313]
 RCON_PORT = 22399
 WORK = tempfile.mkdtemp(prefix="kn-ds-e2e-")
 HAT_OWNED, HAT_UNOWNED = 1890, 1487  # store.skins indices (class_preview.c defaults)
+# weapon skins: array positions in assets/skins.json (not the per-type "id"): Lykos (AK, the Triggerman
+# primary), Arctic AK, and the melee items Soul Fang / Dusk Fang
+AK_OWNED, AK_UNOWNED, MELEE_OWNED, MELEE_UNOWNED = 1877, 12, 447, 448
+CAROL = "ds_carol_with_a_very_long_name_x"  # 32 chars, accounts.username maximum
 results = []
 procs = []
 
@@ -156,7 +166,8 @@ def run():
     check("coordinator up", bool(wait_for(lambda: http("/mm/status")[0] == 200)))
     start_server(0, f"rcon_password rc-pw\nrcon_port {RCON_PORT}\n")
     start_server(1, "sv_password letmein\n")
-    for i in (0, 1):
+    start_server(2, f"online_mode 1\nauth_url http://127.0.0.1:{BRAIN_PORT}\n")
+    for i in (0, 1, 2):
         check(f"server {i} linked to the coordinator", bool(wait_for(lambda i=i: "welcomed" in log(f"s{i}.log"))))
 
     # 1. server-info query
@@ -175,6 +186,8 @@ def run():
     psql(f"SELECT kn_register('ds_bob', 'x', '127.0.0.1', '', 0, 0, '{tb}', 3600, 'e2e')")
     alice = int(psql("SELECT id FROM accounts WHERE username = 'ds_alice'"))
     psql(f"SELECT kn_add_skin({alice}, {HAT_OWNED}, 1, 'admin', 'e2e')")
+    psql(f"SELECT kn_add_skin({alice}, {AK_OWNED}, 1, 'admin', 'e2e')")
+    psql(f"SELECT kn_add_skin({alice}, {MELEE_OWNED}, 1, 'admin', 'e2e')")
     check("give_skin stored", psql(f"SELECT count FROM inventory WHERE account_id = {alice} AND skin_id = {HAT_OWNED}") == "1")
 
     # 3. matchmaking: seek-game with Alice's session -> ticket -> JOIN
@@ -183,7 +196,8 @@ def run():
     a = kn_proto.Conn("127.0.0.1", int(seek.get("port", PORTS[0])))
     a.hello()
     a.join(client_key=seek.get("clientId", ""), session=ta, game_id=seek.get("gameId", ""))
-    a.ent(cosmetics=(-1, -1, HAT_OWNED, HAT_UNOWNED, -1, -1, -1))  # skin, hair, hat, back, waist, face, dye
+    a.ent(cosmetics=(-1, -1, HAT_OWNED, HAT_UNOWNED, -1, -1, -1),  # skin, hair, hat, back, waist, face, dye
+          skins=(AK_OWNED, AK_UNOWNED, MELEE_OWNED))  # ent[2] primary / secondary, ent[9] melee (V6 ENT)
     sp = None
     while True:
         payload = a.read(until=kn_proto.SPAWN, timeout=6)
@@ -195,12 +209,18 @@ def run():
     check("ticket join spawns as the account", bool(sp) and sp["name"] == "ds_alice", str(sp))
     check("owned hat kept", bool(sp) and sp["cosmetics"][2] == HAT_OWNED, str(sp and sp["cosmetics"]))
     check("unowned back skin stripped", bool(sp) and sp["cosmetics"][3] == -1, str(sp and sp["cosmetics"]))
-    check("server logged the inventory", "ds_alice owns 1 skin(s)" in log("s0.log"))
+    check("server logged the inventory", "ds_alice owns 3 skin(s)" in log("s0.log"))
+    inits = [p for t, p in a.packets if t == kn_proto.INIT and len(p) >= 3]
+    check("INIT announces protocol 1.1 (clients send V5/V6 ENTs only then)", bool(inits) and inits[0][0] == 1 and inits[0][1] >= 1,
+          str(inits and list(inits[0][:3])))
+    alice_skins = kn_proto.skins_of(a, sp["uid"]) if sp else None
+    check("SKINS before Alice's SPAWN: owned weapon + melee skins kept, unowned one stripped",
+          alice_skins == [AK_OWNED, -1, MELEE_OWNED], str(alice_skins))
 
     b = kn_proto.Conn("127.0.0.1", PORTS[0])
     b.hello()
     b.join(session=tb)
-    b.ent(cosmetics=(-1, -1, HAT_OWNED, -1, -1, -1, -1))
+    b.ent(cosmetics=(-1, -1, HAT_OWNED, -1, -1, -1, -1), skins=(AK_OWNED, -1, MELEE_UNOWNED))
     spb = None
     while True:
         payload = b.read(until=kn_proto.SPAWN, timeout=6)
@@ -211,6 +231,13 @@ def run():
             break
     check("session join (no ticket) spawns as the account", bool(spb) and spb["name"] == "ds_bob", str(spb))
     check("Bob cannot wear Alice's hat", bool(spb) and spb["cosmetics"][2] == -1, str(spb and spb["cosmetics"]))
+    bob_skins = kn_proto.skins_of(b, spb["uid"]) if spb else None
+    check("Bob cannot wear Alice's weapon skin nor an unowned melee", bob_skins == [-1, -1, -1], str(bob_skins))
+    seen = kn_proto.skins_of(b, sp["uid"]) if sp else None
+    check("Bob sees Alice's weapon skins (SKINS with her existing SPAWN)", seen == [AK_OWNED, -1, MELEE_OWNED], str(seen))
+    a.read(timeout=1)
+    seen = kn_proto.skins_of(a, spb["uid"]) if spb else None
+    check("Alice sees Bob's stripped skins", seen == [-1, -1, -1], str(seen))
     info = wait_for(lambda: query(PORTS[0]) if query(PORTS[0]).get("players") == 2 else None, 3) or query(PORTS[0])
     check("info query counts players", info.get("players") == 2, json.dumps(info))
 
@@ -247,7 +274,9 @@ def run():
     rc, out = rcon(RCON_PORT, "changelevel", target)
     check("rcon changelevel", rc == 0 and wait_for(lambda: query(PORTS[0]).get("map") == target, 5) is True, out)
 
-    # 6. SIGTERM drain -> partial commit for Alice (she played since her spawn)
+    online_mode_matchmaking()
+
+    # 7. SIGTERM drain -> partial commit for Alice (she played since her spawn)
     time.sleep(1.5)
     procs[1].send_signal(signal.SIGTERM)  # server 0
     try:
@@ -259,6 +288,85 @@ def run():
     check("stats committed for the account", bool(rows))
     a.close()
     b.close()
+
+
+def read_spawn(conn):
+    sp = None
+    while True:
+        payload = conn.read(until=kn_proto.SPAWN, timeout=6)
+        if payload is None:
+            return sp
+        sp = kn_proto.spawn_info(payload)
+        if sp and sp["is_you"]:
+            return sp
+
+
+def online_mode_matchmaking():
+    # 6. online_mode node (E2E2) in the coordinator pool
+    st, status = http("/mm/status")
+    check("coordinator knows the online_mode node", st == 200 and status.get("onlineModeNodes") == 1, json.dumps(status))
+    online = wait_for(lambda: [g for g in http("/mm/game-list?hostname=krunknative")[1]["games"] if g[0].startswith("E2E2:")])
+    online_id = online[0][0] if online else "E2E2:x"
+    check("online_mode lobby flagged in the game list", bool(online) and online[0][4].get("onlineMode") is True,
+          json.dumps(online)[:300])
+    pw = [g for g in http("/mm/game-list?hostname=krunknative")[1]["games"] if g[0].startswith("E2E1:")]
+    check("password lobby flagged pr", bool(pw) and pw[0][4].get("pr") is True, json.dumps(pw)[:300])
+    picked = []
+    for _ in range(3):
+        st, seek = http("/mm/seek-game?hostname=krunknative&region=local")
+        picked.append(seek.get("gameId", f"HTTP {st}"))
+    check("guest seek-game never picks the online_mode or password node",
+          all(g.startswith("E2E0:") for g in picked), " ".join(picked))
+    st, seek = http(f"/mm/seek-game?hostname=krunknative&region=local&game={online_id}&autoChangeGame=false")
+    check("guest asking for the online_mode lobby: AccountRequired", st == 403 and seek.get("error") == "AccountRequired",
+          f"{st} {json.dumps(seek)}")
+    st, seek = http(f"/mm/seek-game?hostname=krunknative&region=local&game={online_id}&autoChangeGame=true")
+    check("guest asking for it with autoChangeGame is moved", st == 200 and seek.get("gameId", "").startswith("E2E0:")
+          and seek.get("changeReason") == "game_changed", json.dumps(seek)[:200])
+
+    tc = secrets.token_hex(16)  # a 32-char (maximum) username: the ticket must still fit client_key
+    psql(f"SELECT kn_register('{CAROL}', 'x', '127.0.0.1', '', 0, 0, '{tc}', 3600, 'e2e')")
+    st, seek = http(f"/mm/seek-game?hostname=krunknative&region=local&game={online_id}&autoChangeGame=false&token={tc}")
+    check("signed-in seek-game gets the online_mode lobby", st == 200 and seek.get("gameId") == online_id
+          and seek.get("port") == PORTS[2] and 0 < len(seek.get("clientId", "")) <= 351, json.dumps(seek)[:200])
+    # what the client does: JOIN (ticket + session) right after HELLO, then on the
+    # AUTH_CHALLENGE /auth/join + the "hj1:" JOIN (online_mode.c); the ticket already verifies
+    c = kn_proto.Conn("127.0.0.1", PORTS[2])
+    c.hello()
+    c.join(client_key=seek.get("clientId", ""), session=tc, game_id=seek.get("gameId", ""))
+    ch = c.read(until=kn_proto.AUTH_CHALLENGE, timeout=5)
+    check("online_mode node sends AUTH_CHALLENGE", ch is not None and ch[33] == 1)
+    if ch:
+        sn, pk, cn = kn_proto.uncstr(ch[:33]), kn_proto.uncstr(ch[34:99]), secrets.token_hex(16)
+        sh = hashlib.sha256(b"kn-join-v1\0" + sn.encode() + b"\0" + pk.encode() + b"\0" + cn.encode()).hexdigest()
+        st, j = http("/auth/join", "POST", {"token": tc, "serverHash": sh})
+        check("client /auth/join on the coordinator", st == 200 and j.get("ok"), json.dumps(j))
+        c.join(client_key="hj1:" + cn, name=CAROL)
+    c.ent()
+    sp = read_spawn(c)
+    check("signed-in player spawns on the online_mode node as the account", bool(sp) and CAROL.startswith(sp["name"]) and len(sp["name"]) >= 16, str(sp))
+
+    # hasJoined only (a finder / direct join of a signed-in client, through the coordinator link)
+    td = secrets.token_hex(16)
+    psql(f"SELECT kn_register('ds_dave', 'x', '127.0.0.1', '', 0, 0, '{td}', 3600, 'e2e')")
+    d = kn_proto.Conn("127.0.0.1", PORTS[2])
+    d.hello()
+    ch = d.read(until=kn_proto.AUTH_CHALLENGE, timeout=5)
+    sn, pk, cn = kn_proto.uncstr(ch[:33]), kn_proto.uncstr(ch[34:99]), secrets.token_hex(16)
+    sh = hashlib.sha256(b"kn-join-v1\0" + sn.encode() + b"\0" + pk.encode() + b"\0" + cn.encode()).hexdigest()
+    http("/auth/join", "POST", {"token": td, "serverHash": sh})
+    d.join(client_key="hj1:" + cn, name="ds_dave")
+    d.ent()
+    sp = read_spawn(d)
+    check("hasJoined through the coordinator spawns as the account", bool(sp) and sp["name"] == "ds_dave", str(sp))
+
+    g = kn_proto.Conn("127.0.0.1", PORTS[2])  # a guest that connects anyway
+    g.hello()
+    g.join(name="Guest")
+    err = g.read(until=kn_proto.ERROR, timeout=8)
+    check("guest refused by the online_mode node", err is not None, str(err and kn_proto.error_info(err)))
+    for x in (c, d, g):
+        x.close()
 
 
 if __name__ == "__main__":

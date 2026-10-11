@@ -365,6 +365,9 @@ void ui_loadout_toggle_log(HtmlElem obj);        // windows[34].toggleLog
 int  ui_loadout_secondary(int class_index);     // selected secondary weapon id (secondaryInd, default 2), -1 = class has none
 int  ui_loadout_skin_color(void);                // selected skin colour as 0xRRGGBB, -1 = class colour
 void ui_loadout_cosmetics(PlayerCosmetics *out); // skin colour + hat/back/waist/face/dye picks for ENT and the preview
+void ui_loadout_ent_look(int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins); // ENT: cosmetics + weapon/melee skins, Random resolved to owned items
+void ui_loadout_preview_skins(int class_index, PlayerSkins *out); // the class preview's weapon/melee skins (Random shows none)
+int  ui_loadout_spray(void);                    // ENT ent[1]: the selected spray (sprayindex), Random resolved, unowned -> 0
 void ui_loadout_class_bubble(int index);         // selectClass speech line
 void ui_loadout_show_police_pop(void);           // shoPolicePop
 void ui_loadout_hide_police_pop(void);           // hidePolicePop

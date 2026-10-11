@@ -1185,6 +1185,27 @@ static void t_container_scrollbars(void)
     fx_free(fx);
 }
 
+/* A restyled block's new font must be used when a shrink-to-fit ancestor measures it:
+ * layout_box() resolves the font later, and measuring with the stale one made the
+ * abs-pos card narrower than its text (the spin result's "by <creator>" wrapped). */
+static void t_intrinsic_font_restyle(void)
+{
+    Fx *fx = fx_html(
+        "<div id=icb style='position:absolute;width:2000px;height:400px'>"
+        "<div id=card style='position:absolute;left:50%;font-size:30px'>Ab<div id=sub style='font-size:10px'>by Krunker.io</div></div></div>",
+        NULL);
+    HtmlElem e = dom_by_id(fx->dom, "sub");
+    ElemData *ed = dom_elem_data(fx->dom, e);
+    CssComputed old = *ed->computed;
+    dom_set_style(fx->dom, e, "font-size", "20px");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    layout_restyled(fx->tree, dom_elem_node(fx->dom, e), &old);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    CHECK(count_lines(bx(fx, "sub")) == 1, "intrinsic after font restyle: text fits its shrink-to-fit card (%d lines)", count_lines(bx(fx, "sub")));
+    CHECK_NEAR(rc(fx, "card").w, tw("gamefont", 20.0f, "by Krunker.io"), 0.01, "intrinsic after font restyle: card width = new max-content");
+    fx_free(fx);
+}
+
 static void t_incremental(void)
 {
     Fx *fx = fx_html(
@@ -1501,6 +1522,7 @@ int main(int argc, char **argv)
     t_root_overflow();
     t_container_scrollbars();
     t_incremental();
+    t_intrinsic_font_restyle();
     t_menu();
 
     css_sheet_destroy(g_ua);

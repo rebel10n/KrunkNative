@@ -30,6 +30,7 @@ static int error_status(const char *name) {
     if (!strcmp(name, "InvalidGameId")) return 404;
     if (!strcmp(name, "GameFull")) return 409;
     if (!strcmp(name, "BadRequest")) return 400;
+    if (!strcmp(name, "AccountRequired")) return 403;
     return 503;
 }
 
@@ -292,12 +293,14 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         .auto_change = query_bool(req, "autoChangeGame", 1),
         .force = has_force_enter(req) || query_bool(req, "force", 0),
         .version = version[0] ? version : NULL,
+        .authed = account_id > 0, /* a valid session: online_mode lobbies verify accounts */
         .now_ms = kn_wall_ms(),
     };
     MmPick pick;
     MmPickError e = registry_pick(b->registry, &mm_settings()->policy, &q, &pick);
     if (e != MM_PICK_OK) {
-        static const char *names[] = {"", "InvalidGameId", "GameFull", "NoServersMatchQuery", "NoAvailableServers"};
+        static const char *names[] = {"", "InvalidGameId", "GameFull", "NoServersMatchQuery", "NoAvailableServers",
+                                      "AccountRequired"};
         reply_error(req, error_status(names[e]), names[e]);
         return;
     }
@@ -306,8 +309,9 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         reply_error(req, 500, "internal");
         return;
     }
-    KN_DEBUG("routes", "seek region=%s game=%s -> %s (%s:%d)", region, game, pick.lobby->game_id,
-             pick.node->public_host, pick.node->public_port);
+    KN_DEBUG("routes", "seek region=%s game=%s %s -> %s (%s:%d%s)", region, game, account_id > 0 ? "account" : "guest",
+             pick.lobby->game_id, pick.node->public_host, pick.node->public_port,
+             registry_lobby_needs_account(pick.node, pick.lobby) ? ", online_mode" : "");
     brain_reply_json(req, 200, reply);
     cJSON_Delete(reply);
 }
@@ -402,10 +406,14 @@ static void h_player_count(kn_http_req *req, void *ud) {
 static void h_status(kn_http_req *req, void *ud) {
     Brain *b = ud;
     Registry *r = b->registry;
-    int lobbies = 0, local = 0;
+    int lobbies = 0, local = 0, online = 0;
     for (size_t i = 0; i < r->node_count; i++) {
-        lobbies += (int) r->nodes[i]->lobby_count;
-        local += r->nodes[i]->local;
+        const MmNode *n = r->nodes[i];
+        lobbies += (int) n->lobby_count;
+        local += n->local;
+        int om = n->online_mode;
+        for (size_t j = 0; j < n->lobby_count && !om; j++) om = n->lobbies[j].online_mode;
+        online += om;
     }
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "brain", b->id);
@@ -414,6 +422,7 @@ static void h_status(kn_http_req *req, void *ud) {
     cJSON_AddBoolToObject(o, "federation", federation_active());
     cJSON_AddNumberToObject(o, "nodes", (double) r->node_count);
     cJSON_AddNumberToObject(o, "localNodes", local);
+    cJSON_AddNumberToObject(o, "onlineModeNodes", online);
     cJSON_AddNumberToObject(o, "lobbies", lobbies);
     cJSON_AddNumberToObject(o, "players", registry_player_count(b));
     cJSON_AddNumberToObject(o, "uptimeMs", (double) (kn_wall_ms() - b->started_ms));

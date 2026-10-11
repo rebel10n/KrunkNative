@@ -107,6 +107,7 @@ type BridgeSession = {
   lastHealthByUid: Map<number, number>;
   roundSeconds: number;
   nameByUid: Map<number, string>;
+  skinsByUid: Map<number, EV.WeaponSkins>; // NET_PACKET_SKINS, sent right before each SPAWN
   stateByUid: Map<number, NativeStatePacket>;
   pendingPingSeq: number | null;
   closed: boolean;
@@ -184,7 +185,7 @@ function writeNativeHello(session: BridgeSession): void {
 function writeNativeEnt(session: BridgeSession, entData: unknown): void {
   const ent = Array.isArray(entData) ? entData : [];
   const spectate = ent[6] === 1 || ent[6] === true;
-  const payload = Buffer.alloc(EV.ENT_SIZE);
+  const payload = Buffer.alloc(EV.ENT_SKINS_SIZE);
   const classIndex = Array.isArray(entData) ? Number(entData[0]) || 0 : 0;
   // ent[5] = selectedSecondaryIndex (null/undefined = class default)
   const secondary = Array.isArray(entData) && entData[5] != null && Number.isFinite(Number(entData[5])) ? Number(entData[5]) | 0 : -1;
@@ -193,6 +194,8 @@ function writeNativeEnt(session: BridgeSession, entData: unknown): void {
   EV.writeCosmetics(payload, 8, EV.cosmeticsFromEnt(ent));
   if (spectate) payload[EV.ENT_COSMETICS_SIZE] = 1; // ent[6] toggleSpect
   payload[EV.ENT_COSMETICS_SIZE + 1] = ent[15] === undefined || ent[15] === null || ent[15] ? 1 : 0; // ent[15] slidCont
+  payload.writeInt32LE(Number.isFinite(Number(ent[1])) ? Number(ent[1]) | 0 : 0, EV.ENT_SIZE); // ent[1] sprayIndex
+  EV.writeSkins(payload, EV.ENT_SPRAY_SIZE, EV.skinsFromKrunker(ent[2], ent[9])); // ent[2] weapon skins, ent[9] meleeIndex
   writeNativePacket(session, NET_PACKET.ENT, payload);
 }
 
@@ -427,6 +430,7 @@ function buildSyncData(): Record<string, unknown> {
 
 function buildSpawnPayload(session: BridgeSession, spawn: NativeSpawnPacket): unknown[] {
   const name = spawn.name || `Guest_${spawn.uid + 1}`;
+  const skins = session.skinsByUid.get(spawn.uid) ?? EV.SKINS_NONE;
   return [
     browserIdForUid(session, spawn.uid, spawn.isYou),
     spawn.uid,
@@ -440,14 +444,14 @@ function buildSpawnPayload(session: BridgeSession, spawn: NativeSpawnPacket): un
     spawn.team,
     100,
     null,
-    [-1, -1],
+    [skins.primary, skins.secondary], // 12 skins
     spawn.cosmetics.hat, // 13 hatIndex
     spawn.cosmetics.back, // 14 backIndex
     spawn.secondaryIndex >= 0 ? spawn.secondaryIndex : null, // secondaryIndex
     false,
     null,
     spawn.direction[1],
-    -1,
+    skins.melee, // 19 meleeIndex
     EV.skinIndexFromColor(spawn.cosmetics.skinColor), // 20 skinColIndex
     0,
     0,
@@ -583,6 +587,11 @@ function handleNativePacket(session: BridgeSession, type: number, payload: Buffe
     case NET_PACKET.INIT: {
       const init = parseInitPacket(payload);
       if (init) sendInit(session, init);
+      break;
+    }
+    case EV.NET_PACKET_SKINS: {
+      if (payload.length !== EV.SKINS_PACKET_SIZE) break;
+      session.skinsByUid.set(payload.readInt32LE(0), EV.readSkins(payload, 4));
       break;
     }
     case NET_PACKET.SPAWN: {
@@ -874,6 +883,7 @@ function createSession(ws: WebSocket, request: IncomingMessage): BridgeSession {
     lastHealthByUid: new Map(),
     roundSeconds: 0,
     nameByUid: new Map(),
+    skinsByUid: new Map(),
     stateByUid: new Map(),
     pendingPingSeq: null,
     closed: false,

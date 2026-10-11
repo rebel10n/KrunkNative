@@ -36,12 +36,14 @@ void server_request_stop(ServerStopReason reason, const char *detail);
 ServerStopReason server_stop_reason(const char **detail);
 
 // Start the console. interactive != 0 starts the replxx prompt thread (stdin and
-// stdout must be terminals); otherwise the server runs headless and the console
-// only logs. Returns 0 on success.
-int cli_start(int interactive);
+// stdout must be terminals); otherwise the server runs headless: with stdin_console
+// a plain line reader on stdin (pipes, docker attach), without it (--no-cli) stdin is
+// never read. Returns 0 on success.
+int cli_start(int interactive, int stdin_console);
 int cli_is_interactive(void);
 
-// Wake the prompt (if it is blocked in replxx_input) and join the CLI thread.
+// Wake the prompt (if it is blocked in replxx_input) or the headless stdin reader
+// (self-pipe) and join the CLI thread.
 // Safe to call more than once and in headless mode. The terminal is back in
 // cooked mode when this returns.
 void cli_stop(void);

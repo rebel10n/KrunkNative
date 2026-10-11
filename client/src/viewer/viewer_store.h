@@ -21,6 +21,7 @@ enum {
     VS_TEX_NUM = 1 << 13,    // tex is a number (texture variant "<model>_<tex>"), else a path
     VS_RGB = 1 << 14,
     VS_NO_SPIN = 1 << 15,
+    VS_NOT_IN_WHEEL = 1 << 16, // limited / illicit / limT: never in a prize wheel's pool (getSpnItems)
 };
 
 typedef struct {
@@ -46,6 +47,7 @@ typedef struct {
     float r_anim;        // rAnim: spin period, 0 = none
     char r_anim_axis;    // 'x' / 'y' / 'z'
     float mov_t, puls_t;
+    const char *creator; // skin.creator, NULL = "Krunker.io"
 } ViewerSkin;
 
 typedef struct { const char *name; const char *color; } ViewerRarity;
@@ -86,6 +88,9 @@ void viewer_option_label(const ViewerOptionList *list, int i, char *buf, size_t 
 int viewer_option_value(const ViewerOptionList *list, int i);
 // store.previews[weapon] (or an all-zero entry)
 const ViewerPreview *viewer_preview(int weapon);
+// UTILS.getPreview(skin, store) as an asset-relative path ("textures/previews/....png",
+// "textures/sprays/<id>.png"); the page URL is html_dom_asset_url() of it.
+void viewer_skin_preview_path(const ViewerSkin *skin, char *path, size_t n);
 // UTILS.getPreviewExport(skin, store): the file name the Render buttons download.
 void viewer_preview_export_name(const ViewerSkin *skin, char *buf, size_t n);
 // JS truthiness of skin.tex (a numeric 0 is falsy)

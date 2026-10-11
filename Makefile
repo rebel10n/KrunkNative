@@ -154,7 +154,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport test
 # These targets use the debug directory with HTML_ENGINE=ON (the default) so they also
 # work after a `make HTML_ENGINE=OFF`.
 
-.PHONY: ui-test ui-import uidiff
+.PHONY: ui-test ui-import assets-import uidiff
 ui-test: ## Build ui_test (HTML_ENGINE=ON) and run it: ARGS="lexbor-probe" (default: help)
 	@$(MAKE) --no-print-directory configure HTML_ENGINE=ON
 	$(call BUILD,$(DEBUG_DIR)) --target ui_test
@@ -162,6 +162,9 @@ ui-test: ## Build ui_test (HTML_ENGINE=ON) and run it: ARGS="lexbor-probe" (defa
 
 ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon ligatures) via tools/ui-import
 	$(PYTHON) -I tools/ui-import/import.py --ui ui
+
+assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
+	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
 # uidiff renders every scenario through the real client and its C UI logic
 # (`client_bin --render-scenario`, client/src/ui/ui_scenario.c) on llvmpipe inside one

@@ -26,6 +26,7 @@ const NET_PACKET = Object.freeze({
   INPUT: 5,
   STATE: 6,
   CYCLE: 7,
+  SKINS: 35, // NetSkinsPacket (EV.NET_PACKET_SKINS): Krunker spawn skins / meleeIndex, before SPAWN
   RECON: 110, // NetReconPacket: Krunker "l"
   INPUT_BATCH: 111, // NetInputBatchPacket: Krunker "q" (count byte + 24-byte NetInputPackets)
   CHAT_SEND: EV.NET_EVENT.CHAT_SEND,
@@ -102,6 +103,7 @@ type NativeSpawn = {
   name: string;
   secondaryIndex: number;
   cosmetics: EV.Cosmetics;
+  skins: EV.WeaponSkins;
 };
 
 type NativeState = {
@@ -257,7 +259,7 @@ function writeNativeInit(session: NativeToKrunkerSession, mapIndex: number, mode
 
   const payload = Buffer.alloc(17);
   payload[0] = 1;
-  payload[1] = 0;
+  payload[1] = 1; // protocol 1.1: this bridge reads ENT V5 / V6 (spray, weapon skins)
   payload[2] = 0;
   payload.writeInt32LE(session.mapIndex, 3);
   payload.writeInt32LE(session.modeIndex, 7);
@@ -267,6 +269,11 @@ function writeNativeInit(session: NativeToKrunkerSession, mapIndex: number, mode
 }
 
 function writeNativeSpawn(session: NativeToKrunkerSession, spawn: NativeSpawn): void {
+  const skins = Buffer.alloc(EV.SKINS_PACKET_SIZE); // the weapon skins go first: the client builds meshes on SPAWN
+  skins.writeInt32LE(spawn.uid, 0);
+  EV.writeSkins(skins, 4, spawn.skins);
+  writeNativeFrame(session.tcp, NET_PACKET.SKINS, skins);
+
   const payload = Buffer.alloc(EV.SPAWN_COSMETICS_SIZE);
   payload.writeInt32LE(spawn.uid, 0);
   payload[4] = spawn.isYou ? 1 : 0;
@@ -412,6 +419,7 @@ function parseSpawn(payload: unknown, session: NativeToKrunkerSession): NativeSp
     name: String(payload[5] || payload[31] || `Guest_${uid}`),
     secondaryIndex: toInt(payload[15], -1),
     cosmetics: EV.cosmeticsFromSpawn(payload),
+    skins: EV.skinsFromKrunker(payload[12], payload[19]),
   };
 }
 
@@ -804,7 +812,7 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
       void connectUpstream(session, options);
       break;
     case NET_PACKET.ENT: {
-      if (payload.length < 4 || payload.length > EV.ENT_SIZE) break;
+      if (payload.length < 4 || (payload.length > EV.ENT_SIZE && payload.length !== EV.ENT_SPRAY_SIZE && payload.length !== EV.ENT_SKINS_SIZE)) break;
       const classIndex = payload.readInt32LE(0);
       const secondary = payload.length >= 8 ? payload.readInt32LE(4) : -1;
       const c = EV.readCosmetics(payload, 8);
@@ -812,7 +820,9 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
       // slidCont ("Non FPS Sliding"): absent in older native ENTs = the setting's default (on)
       const slidCont = payload.length > EV.ENT_COSMETICS_SIZE + 1 ? (payload[EV.ENT_COSMETICS_SIZE + 1] ? 1 : 0) : 1;
       // gameserver.ts ent slots: 3 hat, 4 back, 5 secIndex, 6 toggleSpect, 10 skinColIndex, 14 dye, 15 slidCont, 17 waist, 18 hairCol, 21 face
-      const ent: unknown[] = [classIndex, 0, [-1, -1], c.hat, c.back, secondary >= 0 ? secondary : null, spectate, 0, 0, -1, 0, 0, 0, null, 0, slidCont, 0, -1, 0, 0, 0, 0];
+      const spray = payload.length >= EV.ENT_SPRAY_SIZE ? payload.readInt32LE(EV.ENT_SIZE) : 0; // ent[1] sprayIndex
+      const skins = payload.length >= EV.ENT_SKINS_SIZE ? EV.readSkins(payload, EV.ENT_SPRAY_SIZE) : EV.SKINS_NONE; // ent[2], ent[9]
+      const ent: unknown[] = [classIndex, spray, [skins.primary, skins.secondary], c.hat, c.back, secondary >= 0 ? secondary : null, spectate, 0, 0, skins.melee, 0, 0, 0, null, 0, slidCont, 0, -1, 0, 0, 0, 0];
       if (c.skinColor >= 0) ent[10] = EV.skinIndexFromColor(c.skinColor);
       if (c.dye >= 0) ent[14] = c.dye;
       ent[17] = c.waist;

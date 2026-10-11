@@ -432,6 +432,8 @@ export const COSMETICS_NONE: Cosmetics = { skinColor: -1, hairColor: -1, hat: -1
 export const COSMETICS_SIZE = 28;
 export const ENT_COSMETICS_SIZE = 8 + COSMETICS_SIZE; // class, secondary, cosmetics (NET_ENT_PACKET_V3_SIZE)
 export const ENT_SIZE = ENT_COSMETICS_SIZE + 2; // + spectate (ent[6]) + slidCont (ent[15]) (NET_ENT_PACKET_V4_SIZE)
+export const ENT_SPRAY_SIZE = ENT_SIZE + 4; // + int32 sprayIndex (ent[1]) (NET_ENT_PACKET_V5_SIZE)
+export const ENT_SKINS_SIZE = ENT_SPRAY_SIZE + 12; // + PlayerSkins: ent[2] weapon skins + ent[9] meleeIndex (NET_ENT_PACKET_V6_SIZE)
 export const SPAWN_V1_SIZE = 78;
 export const SPAWN_COSMETICS_SIZE = SPAWN_V1_SIZE + COSMETICS_SIZE;
 
@@ -489,6 +491,28 @@ export function cosmeticsFromSpawn(spawn: unknown[]): Cosmetics {
     face: cosmeticIndex(spawn[37]),
     dye: cosmeticIndex(spawn[25]),
   };
+}
+
+// ---- weapon skins (PlayerSkins at the end of ENT V6 and in NET_PACKET_SKINS after the uid)
+
+export const NET_PACKET_SKINS = 35; // S->C right before every SPAWN: int32 uid + PlayerSkins
+export type WeaponSkins = { primary: number; secondary: number; melee: number };
+export const SKINS_NONE: WeaponSkins = { primary: -1, secondary: -1, melee: -1 };
+export const SKINS_PACKET_SIZE = 4 + 12;
+
+// Krunker ent ([2] = [primary, secondary], [9] = meleeIndex) or spawn ([12] skins, [19] meleeIndex)
+export function skinsFromKrunker(skins: unknown, melee: unknown): WeaponSkins {
+  const pair = Array.isArray(skins) ? skins : [];
+  return { primary: cosmeticIndex(pair[0]), secondary: cosmeticIndex(pair[1]), melee: cosmeticIndex(melee) };
+}
+
+export function writeSkins(out: Buffer, offset: number, s: WeaponSkins): void {
+  [s.primary, s.secondary, s.melee].forEach((v, i) => out.writeInt32LE(v | 0, offset + i * 4));
+}
+
+export function readSkins(payload: Buffer, offset: number): WeaponSkins {
+  if (payload.length < offset + 12) return { ...SKINS_NONE };
+  return { primary: payload.readInt32LE(offset), secondary: payload.readInt32LE(offset + 4), melee: payload.readInt32LE(offset + 8) };
 }
 
 export function writeCosmetics(out: Buffer, offset: number, c: Cosmetics): void {

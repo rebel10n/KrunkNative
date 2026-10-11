@@ -1,7 +1,9 @@
 #include <client.h>
 #include <cosmetics.h>
 #include <render_settings.h>
+#include "viewer/viewer_store.h" // game.store.skins: weapon / melee skins
 #include <math.h>
+#include <stdio.h>
 
 typedef struct {
     int color;
@@ -300,10 +302,10 @@ static void player_update_melee_arms(const Player *player, PlayerArms *arms, con
     const float *ma = player->melee_anim;
     player_melee_arms_base_pose(arms);
 
-    // weaponGeos[i] back to its hold every frame (position xP/yP/zP, rotation yR/zR)
+    // weaponGeos[i] back to its hold every frame (position xP/yP/zP, rotation yR/zR; the skin's sxOff & co)
     if (arms->weapon_right) {
-        arms->weapon_right->transform.position = g_fp_melee_position;
-        arms->weapon_right->transform.rotation = g_fp_melee_rotation;
+        arms->weapon_right->transform.position = arms->melee_position;
+        arms->weapon_right->transform.rotation = arms->melee_rotation;
     }
 
     arms->left->pivot.position.z = step_anim;
@@ -390,6 +392,99 @@ static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachme
     mesh->transform.parent = parent;
 
     return mesh;
+}
+
+// ---------------------------------------------------------------- store skins on weapons
+
+static Geometry *skin_model(const char *key) {
+    char rel[192];
+    snprintf(rel, sizeof(rel), "models/%s.obj", key);
+    char *path = concat(assets_path(), rel);
+    Geometry *geometry = path ? load_obj_model(path, 0) : NULL;
+    free(path);
+    return geometry;
+}
+
+static unsigned int skin_texture(const char *key) {
+    char rel[256];
+    snprintf(rel, sizeof(rel), "textures/%s.png", key);
+    char *path = concat(assets_path(), rel);
+    const unsigned int texture = path ? load_texture(path) : 0;
+    free(path);
+    return texture;
+}
+
+static int skin_texture_exists(const char *key) {
+    char rel[256];
+    snprintf(rel, sizeof(rel), "textures/%s.png", key);
+    char *path = concat(assets_path(), rel);
+    if (!path) return 0;
+    ensure_asset_file(path);
+    FILE *file = fopen(path, "rb");
+    if (file) fclose(file);
+    free(path);
+    return file != NULL;
+}
+
+// generateMeshes `ae`: game.store.skins[weapon.melee ? meleeIndex : player.skins[slot]], {} (NULL) when
+// there is none or a weapon skin is for another weapon (ae.weapon - 1 != loadout[slot]).
+static const ViewerSkin *player_slot_skin(const Player *player, const int slot, const Weapon *weapon) {
+    if (weapon->melee) {
+        const ViewerSkin *skin = viewer_skin(player->skins.melee);
+        return skin && skin->type == 3 ? skin : NULL;
+    }
+    const ViewerSkin *skin = viewer_skin(slot == 0 ? player->skins.primary : slot == 1 ? player->skins.secondary : -1);
+    return skin && skin->type == 0 && skin->weapon - 1 == player->loadout[slot] ? skin : NULL;
+}
+
+// RENDER.loadMesh's material options of a store item (getMat): colour, opacity, side, alphaTest, wireframe,
+// tileS repeat, and the glow: emissive (emiss || white) with emissiveMap ((glowText && texSrc) || src) + "_e"
+// (sameGlow: the texture itself). TODO: frame / movT / pulsT / rgb animations (frames shows frame 0).
+static void skin_material(BasicMaterial *material, const ViewerSkin *skin, const char *texture_key, const char *model_key, const int glow_text, const int emissive) {
+    if (skin->color >= 0) {
+        const float alpha = material->color.w;
+        material->color = hex_to_vec(skin->color);
+        material->color.w = alpha;
+    }
+    if (skin->opac > 0.0f) {
+        material->color.w = skin->opac;
+        material->base.transparent = 1;
+    }
+    if (skin->flags & VS_TRANS) material->base.transparent = 1;
+    if (skin->side == 2) material->double_sided = 1;
+    if (skin->alpha > 0.0f) material->alpha_test = skin->alpha;
+    if (skin->flags & VS_WIRE) material->base.wireframe = 1;
+    if (skin->tile_s > 0.0f) material->texture_repeat = (vec2) {skin->tile_s, skin->tile_s};
+    if (skin->frames > 0) material->texture_repeat.x = 1.0f / (float) skin->frames;
+
+    if (emissive) {
+        char key[256];
+        snprintf(key, sizeof(key), "%s%s", glow_text && texture_key ? texture_key : model_key, (skin->flags & VS_SAME_GLOW) ? "" : "_e");
+        material->emissive_texture = skin_texture_exists(key) ? skin_texture(key) : 0;
+        material->emissive = material->emissive_texture ? hex_to_vec(skin->emiss >= 0 ? skin->emiss : 0xFFFFFF) : (vec4) {0};
+    }
+}
+
+// The weapon loadMesh src / texSrc: "weapons/<src>[_<mid>]", then UTILS.getReModel (a remodel), ae.tex,
+// "weapons/skins/<src>_<id>", else the model's own texture.
+static void weapon_skin_keys(const Weapon *weapon, const ViewerSkin *skin, char *model, const size_t model_n, char *texture, const size_t texture_n) {
+    if (skin && skin->mid >= 0) snprintf(model, model_n, "weapons/%s_%d", weapon->src, skin->mid);
+    else snprintf(model, model_n, "weapons/%s", weapon->src);
+
+    if (!skin) snprintf(texture, texture_n, "%s", model);
+    else if (skin->mid >= 0) snprintf(texture, texture_n, "weapons/weapon_%d_%d", skin->weapon, skin->mid_t > 0 ? skin->mid_t : skin->mid);
+    else if (viewer_skin_tex_truthy(skin)) snprintf(texture, texture_n, "%s", skin->tex);
+    else if (skin->id >= 0) snprintf(texture, texture_n, "weapons/skins/%s_%d", weapon->src, skin->id);
+    else snprintf(texture, texture_n, "%s", model);
+}
+
+// The melee loadMesh: src "melee/melee_<id || 0>", texSrc pat ? tex : tex ? "melee/melee_<id>_<tex>" : the model's.
+static void melee_skin_keys(const ViewerSkin *skin, char *model, const size_t model_n, char *texture, const size_t texture_n) {
+    const int id = skin && skin->id > 0 ? skin->id : 0;
+    snprintf(model, model_n, "melee/melee_%d", id);
+    if (skin && (skin->flags & VS_PAT) && skin->tex) snprintf(texture, texture_n, "%s", skin->tex);
+    else if (skin && viewer_skin_tex_truthy(skin)) snprintf(texture, texture_n, "melee/melee_%d_%s", id, skin->tex);
+    else snprintf(texture, texture_n, "%s", model);
 }
 
 // jLrR6: skinColIndex / hairCol replace the class's skin and hair colours, then a dye overrides any of
@@ -551,25 +646,31 @@ void player_generate_meshes(Player *player, const int render_you) {
                 arms->anchor.parent = player_mesh->upper_body_anchor;
                 player_mesh->arms[i] = arms;
 
-                // MELEE MESH
+                // MELEE MESH (the meleeIndex store item, else melee_0)
                 if (weapon->melee) {
-                    const char *model = "models/melee/melee_0.obj";
-                    const char *texture = "textures/melee/melee_0.png";
+                    const ViewerSkin *skin = player_slot_skin(player, i, weapon);
+                    char model[64], texture[192];
+                    melee_skin_keys(skin, model, sizeof(model), texture, sizeof(texture));
 
-                    char *model_path = concat(assets_path(), model);
-                    char *texture_path = concat(assets_path(), texture);
-
-                    Geometry *melee_geo = load_obj_model(model_path, 0);
-                    const unsigned int melee_texture = load_texture(texture_path);
-
-                    free(model_path);
-                    free(texture_path);
+                    Geometry *melee_geo = skin_model(model);
+                    unsigned int melee_texture = skin_texture(texture);
+                    if (!melee_texture && strcmp(texture, model) != 0) melee_texture = skin_texture(model);
+                    if (!melee_geo && skin) { // a skin model this build lacks: the default knife
+                        skin = NULL;
+                        melee_skin_keys(NULL, model, sizeof(model), texture, sizeof(texture));
+                        melee_geo = skin_model(model);
+                        melee_texture = skin_texture(texture);
+                    }
 
                     if (melee_geo && melee_texture) {
                         BasicMaterial *melee_mat = basic_material_init();
                         Mesh *melee = mesh_init(melee_geo, (Material *) melee_mat);
 
                         melee_mat->texture = melee_texture;
+                        if (skin) {
+                            const int glow = (skin->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+                            skin_material(melee_mat, skin, texture, model, glow, glow);
+                        }
                         melee->transform.parent = &arms->anchor;
 
                         // First person (no src + renderYou) builds the two arms as separate meshes with a base
@@ -580,51 +681,46 @@ void player_generate_meshes(Player *player, const int render_you) {
                             melee->transform.parent = &arms->right->pivot;
                         }
 
-                        // TODO: skin hold offsets
-                        melee->transform.position = render_you ? g_fp_melee_position : (vec3) {1.7f, -0.4f, 1.2f};
+                        // first person: + the skin's sxOff / syOff / szOff, flip (y + PI) and sxRot (z)
+                        arms->melee_position = g_fp_melee_position;
+                        arms->melee_rotation = g_fp_melee_rotation;
+                        if (skin) {
+                            arms->melee_position.x += skin->sx_off;
+                            arms->melee_position.y += skin->sy_off;
+                            arms->melee_position.z += skin->sz_off;
+                            if (skin->flags & VS_FLIP) arms->melee_rotation.y += (float) M_PI;
+                            arms->melee_rotation.z += skin->sx_rot;
+                        }
+                        melee->transform.position = render_you ? arms->melee_position : (vec3) {1.7f, -0.4f, 1.2f};
 
-                        // TODO: skin rotation
-                        melee->transform.rotation = g_fp_melee_rotation;
+                        melee->transform.rotation = render_you ? arms->melee_rotation : g_fp_melee_rotation;
                         if (!render_you) melee->transform.rotation.y = (float) M_PI * 0.5f;
 
-                        melee->transform.scale.x = melee->transform.scale.y = melee->transform.scale.z = 0.9f; // ae.sclMlt || 0.9
+                        const float melee_scale = skin && skin->scl_mlt ? skin->scl_mlt : 0.9f; // ae.sclMlt || 0.9
+                        melee->transform.scale.x = melee->transform.scale.y = melee->transform.scale.z = melee_scale;
 
                         arms->weapon_right = melee;
                     }
                 }
 
                 if (weapon->src) {
+                    // player.skins[slot]: remodel / texture, yOff / zOff, mScl and the glow (ai)
+                    const ViewerSkin *skin = player_slot_skin(player, i, weapon);
+                    char model[128], texture[192];
+                    weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
+                    Geometry *skin_geo = skin_model(model);
+                    if (!skin_geo && skin) { // a remodel this build lacks: the plain weapon
+                        skin = NULL;
+                        weapon_skin_keys(weapon, NULL, model, sizeof(model), texture, sizeof(texture));
+                        skin_geo = skin_model(model);
+                    }
+                    unsigned int skin_tex = skin_geo ? skin_texture(texture) : 0;
+                    if (!skin_tex && skin_geo && strcmp(texture, model) != 0) skin_tex = skin_texture(model);
+                    const int glow = skin && (skin->flags & (VS_GLOW | VS_SAME_GLOW));
+
                     for (int j = 0; j < 2; j++) {
-                        const size_t model_length = snprintf(NULL, 0, "models/weapons/%s.obj", weapon->src);
-                        char *model = malloc(model_length + 1);
-
-                        const size_t texture_length = snprintf(NULL, 0, "textures/weapons/%s.png", weapon->src);
-                        char *texture = malloc(texture_length + 1);
-
-                        char *model_path = NULL;
-                        char *texture_path = NULL;
-
-                        if (model) {
-                            snprintf(model, model_length + 1, "models/weapons/%s.obj", weapon->src);
-                            model_path = concat(assets_path(), model);
-
-                            free(model);
-                        }
-
-                        if (texture) {
-                            snprintf(texture, texture_length + 1, "textures/weapons/%s.png", weapon->src);
-                            texture_path = concat(assets_path(), texture);
-
-                            free(texture);
-                        }
-
-                        if (!model_path || !texture_path) continue;
-
-                        Geometry *weapon_geo = load_obj_model(model_path, 0);
-                        const unsigned int weapon_tex = load_texture(texture_path);
-
-                        free(texture_path);
-                        free(model_path);
+                        Geometry *weapon_geo = skin_geo;
+                        const unsigned int weapon_tex = skin_tex;
 
                         if (!weapon_geo) continue;
 
@@ -632,13 +728,14 @@ void player_generate_meshes(Player *player, const int render_you) {
                         Mesh *weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
 
                         weapon_mat->texture = weapon_tex;
+                        if (skin) skin_material(weapon_mat, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
 
                         weapon_mesh->transform.position.x = j ? weapon->offset.x * -2.0f : 0.0f;
-                        weapon_mesh->transform.position.y = 0.0f; // TODO: weapon skin y offset
-                        weapon_mesh->transform.position.z = 0.0f; // TODO: weapon skin z offset
+                        weapon_mesh->transform.position.y = skin ? skin->y_off : 0.0f; // ae.yOff || 0
+                        weapon_mesh->transform.position.z = skin ? skin->z_off : 0.0f; // ae.zOff || 0
 
                         // loadMesh(..., ad.rot || PI / 2, ae.mScl || ad.scale): scale falls back to 1, rot is a y angle or an [x, y, z] array.
-                        const float weapon_scale = weapon->scale ? weapon->scale : 1.0f;
+                        const float weapon_scale = skin && skin->m_scl ? skin->m_scl : weapon->scale ? weapon->scale : 1.0f;
                         weapon_mesh->transform.scale.x = weapon_mesh->transform.scale.y = weapon_mesh->transform.scale.z = weapon_scale;
 
                         if (weapon->has_rotation) weapon_mesh->transform.rotation = weapon->rotation;

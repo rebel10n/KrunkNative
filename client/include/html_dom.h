@@ -97,6 +97,14 @@ int  html_timer_add(double ms, void (*fn)(void *user), void *user);   // returns
 void html_timer_cancel(int id);
 void html_timers_tick(double now_ms);                                 // called by html_ui_update
 
+// ---- game content URLs
+// The URL of assets/<path> (e.g. "textures/previews/cosmetics/1_2.png") for an <img src> or a
+// CSS url() the C UI writes into the page: Krunker's UTILS.assetsUrl(), whose textures live on
+// the asset host, not next to the page. Native "/assets/<path>" (the engine reads it from
+// assets_path(), client/src/html/engine/image.c), web the asset host's versioned URL
+// (shared/src/utils.c asset_url: Module.krunkNativeAssetBase + assets/<path>?v=<version>).
+void html_dom_asset_url(const char *path, char *out, size_t n);
+
 // ---- storage (localStorage equivalent): native $XDG_CONFIG_HOME/krunknative/<key>.json, web localStorage
 int  html_storage_get(const char *key, char *buf, size_t n);          // -1 if absent
 void html_storage_set(const char *key, const char *value);

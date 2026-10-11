@@ -6,9 +6,11 @@
 // lives in shared/src/triggers.c. Weapon pickups are not ported yet.
 #include <shared.h>
 #include <modes.h>
+#include <math.h>
 #include <stdio.h>
 
 int player_collides(Player*, const Object*, float pad); // shared/src/player.c (collidesE)
+int game_object_shootable(const Object*);               // shared/src/player.c (the hitscan object filter)
 
 // Player.collides(other, pad) for a box (the borderH pad only applies to borders, which
 // terminals never are).
@@ -112,9 +114,96 @@ int game_terminal_in_range(const Game *game, const Player *player, const int pro
     return -1;
 }
 
+static float round2(const float v) {
+    return roundf(v * 100.0f) / 100.0f; // JS v.round(2)
+}
+
+// Krunker v3.1.1 players.spray (src/data/players.js): the view ray (sprayRange long, from the
+// eye) against map.manager.objects; on the nearest hit face the decal (sprayScale wide; no
+// sprays.js / type-4 store entry of v3.1.1 sets sizeReq) is pushed back inside the face, a
+// face too small for it is no spray. config.isComp (the competitive host) has no
+// KrunkNative counterpart. KrunkNative boxes are base-centred (position = bottom centre,
+// scale = full size): Krunker's G.y / G.height are the centre / half height.
+void game_player_spray(Game *game, Player *player) {
+    if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
+    if (game->now - player->last_spray < GAME_SPRAY_TIMER) return;
+
+    const float yaw = player->direction.y, pitch = player->direction.x;
+    const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
+    const vec3 dir = {
+        GAME_SPRAY_RANGE * sinf(yaw + (float) M_PI) * cosf(pitch),
+        GAME_SPRAY_RANGE * sinf(pitch),
+        GAME_SPRAY_RANGE * cosf(yaw + (float) M_PI) * cosf(pitch),
+    };
+    const Object *hit = NULL;
+    float best = 0.0f;
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *o = game->map->objects[i];
+        if (!game_object_shootable(o) || o->no_vis) continue; // !noShoot && !noVis && active
+        const float t = line_in_rect(eye, dir, o->position, o->scale);
+        if (t <= 0.0f || t > 1.0f || (hit && t >= best)) continue; // L.sort(orderByDst)[0]
+        hit = o;
+        best = t;
+    }
+    if (!hit) return;
+
+    const float w = hit->scale.x * 0.5f, h = hit->scale.y * 0.5f, l = hit->scale.z * 0.5f;
+    const float cx = hit->position.x, cy = hit->position.y + h, cz = hit->position.z;
+    const float range = GAME_SPRAY_RANGE * best - 0.1f;
+    float y = eye.y + range * sinf(pitch);
+    float x = eye.x + range * sinf(yaw + (float) M_PI) * cosf(pitch);
+    float z = eye.z + range * cosf(yaw + (float) M_PI) * cosf(pitch);
+    int x_dr = 0, y_dr = 0; // a0 (rotation.y) / a1 (rotation.x)
+    if (y >= cy + h) y_dr = -90;
+    else if (y <= cy - h) y_dr = 90;
+    else if (x <= cx - w) x_dr = -90;
+    else if (x >= cx + w) x_dr = 90;
+    else if (z <= cz - l) x_dr = 180;
+
+    const float half = GAME_SPRAY_SCALE / 2.0f;
+    if (y_dr) {
+        if (w < half || l < half) return;
+        if (z - half < cz - l) z = cz - l + half;
+        else if (z + half > cz + l) z = cz + l - half;
+        if (x - half < cx - w) x = cx - w + half;
+        else if (x + half > cx + w) x = cx + w - half;
+    } else {
+        if (h < half) return;
+        if (x_dr == 90 || x_dr == -90) {
+            if (l < half) return;
+            if (z - half < cz - l) z = cz - l + half;
+            else if (z + half > cz + l) z = cz + l - half;
+        } else {
+            if (w < half) return;
+            if (x - half < cx - w) x = cx - w + half;
+            else if (x + half > cx + w) x = cx + w - half;
+        }
+        if (y + half > cy + h) y = cy + h - half;
+    }
+
+    player->last_spray = game->now;
+    game_play_sound(game, "spray", player->uid, player->position, 0.4f, 0.0f); // playSound(networkSounds "spray", 0.4, sid, .., true)
+    const NetSprayPacket packet = {
+        .uid = player->uid,
+        .spray_index = player->spray_index,
+        .position = {round2(x), round2(y), round2(z)},
+        .y_rot = (int16_t) x_dr,
+        .x_rot = (int16_t) y_dr,
+    };
+    game_send(game, NET_TARGET_ALL, NET_PACKET_SPRAY, &packet, sizeof(packet)); // IO.broadcast("sp", ...)
+}
+
 void game_player_interact(Game *game, Player *player, const int action, const int secondary) {
     if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
-    if (action != 1) return; // spray (0) and drop (2) are not ported
+    // gameserver.ts io_int drains player.inputs first: the spray ray (and the interact /
+    // drop position) must use the look and position of the frames sent before the "int".
+    player_drain_inputs(player);
+    if (!player->active) return;
+    if (action == 0) { // io_int 0: players.spray (no interactTimer)
+        game_player_spray(game, player);
+        return;
+    }
+    if (action != 1) return; // drop (2) is not ported
     if (game->now - player->last_interact < GAME_INTERACT_TIMER) return;
     player->last_interact = game->now;
     if (!secondary) {

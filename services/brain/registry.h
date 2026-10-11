@@ -28,7 +28,8 @@ typedef struct MmLobby {
     int max_players;
     int reserved_remote;             /* live reservations made by other brains (from DB) */
     int custom;                      /* meta.cs */
-    int protect;                     /* meta.pr */
+    int protect;                     /* meta.pr: password protected, never quick-joined */
+    int online_mode;                 /* node online_mode (meta.onlineMode): signed-in players only */
     int draining;                    /* meta.draining or node draining */
     int mode_index;                  /* meta.mode (-1 unknown) */
     char mode[32];                   /* meta.modeName */
@@ -51,6 +52,8 @@ typedef struct MmNode {
     int max_players;
     int max_lobbies;
     int custom;                      /* can host custom games */
+    int online_mode;                 /* hello.onlineMode: verified accounts only (missing = 0) */
+    int password;                    /* hello.password: joining needs the server password */
     int draining;
     int local;                       /* connected to this brain */
     struct NodeConn *conn;           /* internal_ws connection (local only) */
@@ -138,7 +141,8 @@ typedef enum MmPickError {
     MM_PICK_INVALID_GAME,          /* requested id unknown and autoChangeGame off */
     MM_PICK_GAME_FULL,             /* requested id full and autoChangeGame off */
     MM_PICK_NO_MATCH,              /* lobbies exist but none matches the version query */
-    MM_PICK_NONE                   /* nothing with room */
+    MM_PICK_NONE,                  /* nothing with room */
+    MM_PICK_ACCOUNT_REQUIRED       /* requested lobby is online_mode, the player a guest, autoChangeGame off */
 } MmPickError;
 
 typedef struct MmPickQuery {
@@ -147,6 +151,7 @@ typedef struct MmPickQuery {
     int auto_change;               /* autoChangeGame (default 1) */
     int force;                     /* FORCE_ENTER */
     const char *version;           /* dataQuery.v (NULL = any) */
+    int authed;                    /* signed-in account: may be sent to online_mode lobbies */
     int64_t now_ms;
 } MmPickQuery;
 
@@ -158,10 +163,17 @@ typedef struct MmPick {
 
 MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, MmPick *out);
 
-/* Host target: custom-capable, non-draining node with spare capacity in region
- * (then anywhere when cross_region), preferring brain_id's own nodes. */
+/* Matchmaking eligibility of a lobby: online_mode lobbies take signed-in players
+ * only (a guest would be refused with "Failed to verify username"); password
+ * protected ones are never picked automatically. */
+int registry_lobby_needs_account(const MmNode *n, const MmLobby *l);
+int registry_lobby_protected(const MmNode *n, const MmLobby *l);
+
+/* Host target: custom-capable, non-draining, not password protected node with spare
+ * capacity in region (then anywhere when cross_region), preferring brain_id's own
+ * nodes; online_mode nodes only when authed. */
 MmNode *registry_pick_host_node(Registry *r, const char *region, const char *brain_id, int cross_region,
-                                int64_t now_ms);
+                                int authed, int64_t now_ms);
 
 /* Host a custom game (v3.1.1 game-socket "custom" / Host Game window): pick a
  * node (registry_pick_host_node), send it `host` (directly or through the

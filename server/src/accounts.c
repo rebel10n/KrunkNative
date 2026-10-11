@@ -184,7 +184,7 @@ static cJSON *acc_lobby_tuple(void) {
     cJSON_AddBoolToObject(meta, "cs", g_acc.custom);
     if (custom_map) cJSON_AddStringToObject(meta, "m", map);
     else cJSON_AddNullToObject(meta, "m");
-    cJSON_AddBoolToObject(meta, "pr", 0);
+    cJSON_AddBoolToObject(meta, "pr", g_gs_config.password[0] != 0); // password protected (never quick-joined)
     cJSON_AddBoolToObject(meta, "earnKR", g_gs_config.earn_kr && !g_acc.custom);
     cJSON_AddNumberToObject(meta, "mode", mode_id);
     cJSON_AddStringToObject(meta, "modeName", mode_name(mode_id));
@@ -240,6 +240,10 @@ static cJSON *acc_hello(void) {
     cJSON_AddNumberToObject(hello, "maxPlayers", g_server->config.max_players);
     cJSON_AddBoolToObject(hello, "custom", g_gs_config.custom_games);
     cJSON_AddNumberToObject(hello, "maxLobbies", 1);
+    // Matchmaking eligibility: the brain sends only signed-in players to online_mode nodes
+    // and never quick-joins password protected ones (services/brain/registry.c).
+    cJSON_AddNumberToObject(hello, "onlineMode", g_gs_config.online_mode ? 1 : 0);
+    cJSON_AddBoolToObject(hello, "password", g_gs_config.password[0] != 0);
     cJSON *modes = cJSON_AddArrayToObject(hello, "modes");
     for (size_t i = 0; i < g_server->game.mode_count; i++) cJSON_AddItemToArray(modes, cJSON_CreateNumber(g_server->game.modes[i]));
     cJSON *maps = cJSON_AddArrayToObject(hello, "maps");
@@ -811,6 +815,18 @@ int accounts_filter_cosmetics(const ClientConnection *client, PlayerCosmetics *c
     return stripped;
 }
 
+int accounts_filter_skins(const ClientConnection *client, PlayerSkins *s) {
+    int32_t *slots[3] = {&s->primary, &s->secondary, &s->melee};
+    int stripped = 0;
+    for (int i = 0; i < 3; i++) {
+        if (*slots[i] >= 0 && !accounts_owns_skin(client, *slots[i])) {
+            *slots[i] = -1;
+            stripped++;
+        }
+    }
+    return stripped;
+}
+
 // account.data[10] (Account.getData skins): [{ind, cnt}, ...] -> bitset
 static void acc_load_skins(ClientConnection *client, const cJSON *account) {
     memset(client->acct.skins_owned, 0, sizeof(client->acct.skins_owned));
@@ -846,9 +862,9 @@ int accounts_refuse_connect(const char *address, NetErrorPacket *error) {
 static void acc_reject(ClientConnection *client, const char *message, const char *code);
 
 // A client cannot wear a skin it does not own (the coordinator's inventory): unowned
-// cosmetic slots fall back to none before the spawn, with a chat notice once per ENT.
+// cosmetic, weapon and melee slots fall back to none before the spawn, with a chat notice once per ENT.
 static void acc_enforce_skins(ClientConnection *client) {
-    const int stripped = accounts_filter_cosmetics(client, &client->cosmetics);
+    const int stripped = accounts_filter_cosmetics(client, &client->cosmetics) + accounts_filter_skins(client, &client->skins);
     if (!stripped) return;
     server_log("%s: removed %d unowned cosmetic(s)", client->name, stripped);
     acc_chat_to(client, "You don't own some of the skins you equipped on this server");

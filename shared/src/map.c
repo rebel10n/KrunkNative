@@ -103,6 +103,36 @@ static int prefab_id_from_string(const char *name) {
     return 0;
 }
 
+int map_raw_object_prefab(const cJSON *raw_obj) {
+    const cJSON *obj_i = cJSON_GetObjectItem(raw_obj, "i");
+    const cJSON *obj_id = cJSON_GetObjectItem(raw_obj, "id");
+    int prefab_id = 0;
+
+    if (cJSON_IsNumber(obj_i)) {
+        prefab_id = (int) cJSON_GetNumberValue(obj_i);
+    } else if (cJSON_IsString(obj_i)) {
+        prefab_id = prefab_id_from_string(cJSON_GetStringValue(obj_i));
+    } else if (cJSON_IsNumber(obj_id)) {
+        prefab_id = (int) cJSON_GetNumberValue(obj_id);
+    } else if (cJSON_IsString(obj_id)) {
+        prefab_id = prefab_id_from_string(cJSON_GetStringValue(obj_id));
+    }
+
+    // game.js customMap: prefabs.prefabs[i || id || 0] missing -> prefab 0 (CUBE)
+    // (Krunk_Plaza, Slide_Neon_Stage, zombie_high... carry ids from newer editors)
+    if (prefab_id < 0 || prefab_id >= (int) (sizeof(prefab_names) / sizeof(prefab_names[0]))) prefab_id = PREFAB_CUBE;
+    return prefab_id;
+}
+
+int map_raw_object_kept(const cJSON *raw_obj) {
+    const cJSON *obj_pos = cJSON_GetObjectItem(raw_obj, "p");
+    const cJSON *obj_scale = cJSON_GetObjectItem(raw_obj, "s");
+    if (!cJSON_IsArray(obj_pos) || cJSON_GetArraySize(obj_pos) < 3 || cJSON_GetArraySize(obj_scale) < 3) return 0;
+    // map.js "BOT" -> objects.js addAI: a pending AI (shared/src/ai.c spawns it at game init),
+    // never a map object (no mesh, no collision box, no object uid).
+    return map_raw_object_prefab(raw_obj) != PREFAB_BOT;
+}
+
 static int map_flag_is_set(const cJSON *item) {
     if (!item || cJSON_IsNull(item) || cJSON_IsFalse(item)) return 0;
     if (cJSON_IsNumber(item)) return cJSON_GetNumberValue(item) != 0;
@@ -379,31 +409,11 @@ Map *map_init(const cJSON *raw_data) {
     for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
         const cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
 
-        const cJSON *obj_i = cJSON_GetObjectItem(raw_obj, "i");
-        const cJSON *obj_id = cJSON_GetObjectItem(raw_obj, "id");
         const cJSON *obj_pos = cJSON_GetObjectItem(raw_obj, "p");
         const cJSON *obj_scale = cJSON_GetObjectItem(raw_obj, "s");
+        const int prefab_id = map_raw_object_prefab(raw_obj);
 
-        int prefab_id = 0;
-
-        if (cJSON_IsNumber(obj_i)) {
-            prefab_id = (int) cJSON_GetNumberValue(obj_i);
-        } else if (cJSON_IsString(obj_i)) {
-            prefab_id = prefab_id_from_string(cJSON_GetStringValue(obj_i));
-        } else if (cJSON_IsNumber(obj_id)) {
-            prefab_id = (int) cJSON_GetNumberValue(obj_id);
-        } else if (cJSON_IsString(obj_id)) {
-            prefab_id = prefab_id_from_string(cJSON_GetStringValue(obj_id));
-        }
-
-        // game.js customMap: prefabs.prefabs[i || id || 0] missing -> prefab 0 (CUBE)
-        // (Krunk_Plaza, Slide_Neon_Stage, zombie_high... carry ids from newer editors)
-        if (prefab_id < 0 || prefab_id >= (int) (sizeof(prefab_names) / sizeof(prefab_names[0]))) prefab_id = PREFAB_CUBE;
-
-        if (!cJSON_IsArray(obj_pos) || cJSON_GetArraySize(obj_pos) < 3 || cJSON_GetArraySize(obj_scale) < 3) continue;
-        // map.js "BOT" -> objects.js addAI: a pending AI (shared/src/ai.c spawns it at game init),
-        // never a map object (no mesh, no collision box, no object uid).
-        if (prefab_id == PREFAB_BOT) continue;
+        if (!map_raw_object_kept(raw_obj)) continue;
 
         Object *object = calloc(1, sizeof(Object));
         if (!object) continue;

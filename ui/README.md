@@ -21,7 +21,8 @@ images, `img/menu-icons`, `img/social-buttons`, `img/maps/map_*.png` (host /
 games window thumbnails), `img/{noimg,windows,mac,linux}.png`, `favicon.*`, the
 few `textures/` the page uses and `textures/classes/icon_*.png`.
 The Change Loadout pickers added `textures/previews/{weapons,cosmetics,attach}`
-(only the previews those windows show), `textures/reticles/reticle_0..11.png`, the
+(only the default/base previews those windows show; every item's own preview
+comes from the asset tree via `html_dom_asset_url()`, imported by `make assets-import`), `textures/reticles/reticle_0..11.png`, the
 53 default `textures/sprays/*.png` of the Select Spray window, `img/ad_2.png`
 (Advertise) and `windows/versions.txt` (v3.1.1 `docs/versions.txt`, the Changelog
 source; kept next to the templates so the web build's preloaded package has it),

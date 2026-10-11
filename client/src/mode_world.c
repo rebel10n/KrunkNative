@@ -121,8 +121,7 @@ static Mesh *mode_world_mesh(Geometry *geometry, const unsigned int texture) {
 static void mode_world_drop_mesh(Mesh **mesh) {
     if (!*mesh) return;
     if (g_world.scene) scene_remove_mesh(g_world.scene, *mesh);
-    free((*mesh)->material);
-    mesh_fini(*mesh); // geometry is shared (kept)
+    mesh_fini(*mesh); // frees the material too (material_fini); geometry is shared (kept)
     *mesh = NULL;
 }
 

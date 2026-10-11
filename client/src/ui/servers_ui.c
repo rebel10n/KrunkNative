@@ -142,6 +142,8 @@ static const char *seek_error_text(const char *error) {
     if (!strcmp(error, "GameFull")) return "Game is full.";
     if (!strcmp(error, "NoServersMatchQuery") || !strcmp(error, "updating")) return "GAME UPDATING";
     if (!strcmp(error, "NoAvailableServers") || !strcmp(error, "no_lobbies")) return "Servers are at Max Capacity";
+    // KrunkNative: the requested lobby runs online_mode (verified accounts) and we seek as a guest
+    if (!strcmp(error, "AccountRequired")) return "Log in to join this game.";
     return error;
 }
 
@@ -1046,7 +1048,11 @@ void servers_ui_tick(Client *client) {
         char token[8] = "";
         const int has_token = html_storage_get("krunker_token", token, sizeof(token)) >= 0 && token[0];
         if (backend_available() < 0) return; // GET /mm/status still running (backend.h)
-        if (has_token && !account_get() && glfwGetTime() - g_start_time < RESTORE_WAIT_SECONDS) return;
+        // the restore needs the brain: count the wait from when it answered, not from startup
+        // (a slow /mm/status could use the whole window up, and the seek went out as a guest)
+        static double brain_ready_at = -1.0;
+        if (brain_ready_at < 0.0) brain_ready_at = glfwGetTime() > g_start_time ? glfwGetTime() : g_start_time;
+        if (has_token && !account_get() && glfwGetTime() - brain_ready_at < RESTORE_WAIT_SECONDS) return;
         g_started = 1;
         char *game = NULL;
 #ifdef __EMSCRIPTEN__

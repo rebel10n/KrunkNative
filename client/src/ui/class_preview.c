@@ -103,9 +103,17 @@ static PlayerCosmetics preview_cosmetics(void) {
     return cosmetics;
 }
 
+// dJ's hq / meleeIndex: the saved weapon skins of the class's slots and the melee pick (Random shows none).
+static PlayerSkins preview_skins(const int class_index) {
+    PlayerSkins skins;
+    ui_loadout_preview_skins(class_index, &skins);
+    return skins;
+}
+
 static int preview_cosmetics_changed(const Player *player) {
     const PlayerCosmetics want = preview_cosmetics();
-    return memcmp(&player->cosmetics, &want, sizeof(want)) != 0;
+    const PlayerSkins want_skins = preview_skins(player->class_index);
+    return memcmp(&player->cosmetics, &want, sizeof(want)) != 0 || memcmp(&player->skins, &want_skins, sizeof(want_skins)) != 0;
 }
 
 // A private third-person player of the menu class, like Krunker's preview `dF`
@@ -117,6 +125,7 @@ static Player *preview_player_new(Client *client, Scene *scene) {
     player->uid = -1; // player_update_meshes() anchors uid -1 (Krunker's preview sid) at player->position
     player->class_index = client->menu_class_index;
     player->cosmetics = preview_cosmetics();
+    player->skins = preview_skins(player->class_index);
     player_spawn(player); // loadout, ammo and weapon for the class (also picks a map spawn: reset below)
 
     if (!player->loadout_size || !player->weapon) {

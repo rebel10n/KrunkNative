@@ -390,6 +390,10 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
         return max_content ? b->max_content_w : b->min_content_w;
 
     layout_resolve_edges(t, b, 0.0f);   /* percentages -> 0 in intrinsic sizing */
+    /* a restyled box resolves its font in layout_box(), which for a shrink-to-fit
+     * ancestor runs after this measure: measuring with the stale font made the
+     * ancestor narrower than the text laid out next (a spurious wrap) */
+    if (b->dirty & BOX_DIRTY_SELF || !b->font) layout_resolve_font(t, b);
     float minw, maxw;
     if (box_is_replaced(b)) {
         float w, h;

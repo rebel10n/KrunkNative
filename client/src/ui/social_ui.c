@@ -1646,23 +1646,11 @@ static int rarity_animate(const ViewerSkin *s) {
     return s && s->rarity == 6; // store.rarities[6] (Unobtainable) is the only animated rarity
 }
 
-// UTILS.getPreview(skin, store): textures/<sprays/<id> | previews/...>.png
+// UTILS.getPreview(skin, store): textures/<sprays/<id> | previews/...>.png on the asset host
 static void skin_preview(char *out, const size_t n, const ViewerSkin *skin) {
-    const char *types = skin->type >= 0 && skin->type < g_viewer_type_count ? g_viewer_types[skin->type] : "";
-    if (skin->type == 4 && !(skin->flags & VS_IS_3D)) snprintf(out, n, "textures/sprays/%d.png", skin->id);
-    else if (skin->type && skin->type != 3) {
-        if (viewer_skin_tex_truthy(skin)) snprintf(out, n, "textures/previews/cosmetics/%d_%d_%s.png", skin->type, skin->id, skin->tex);
-        else snprintf(out, n, "textures/previews/cosmetics/%d_%d.png", skin->type, skin->id);
-    } else if (skin->type == 3) {
-        if (skin->pat >= 0) snprintf(out, n, "textures/previews/%s%d_c%d.png", types, skin->id, skin->pat);
-        else if (skin->tex) snprintf(out, n, "textures/previews/%s%d_%s.png", types, skin->id, skin->tex);
-        else snprintf(out, n, "textures/previews/%s%d.png", types, skin->id);
-    } else if (skin->mid >= 0) {
-        if (skin->mid_t >= 0) snprintf(out, n, "textures/previews/%s%d_m%d_%d.png", types, skin->weapon, skin->mid, skin->mid_t);
-        else snprintf(out, n, "textures/previews/%s%d_m%d.png", types, skin->weapon, skin->mid);
-    } else if (skin->pat >= 0) snprintf(out, n, "textures/previews/%s%d_c%d.png", types, skin->weapon, skin->pat);
-    else if (viewer_skin_tex_truthy(skin)) snprintf(out, n, "textures/previews/%s%d_%s.png", types, skin->weapon, skin->tex);
-    else snprintf(out, n, "textures/previews/%s%d_%d.png", types, skin->weapon, skin->id);
+    char path[256];
+    viewer_skin_preview_path(skin, path, sizeof(path));
+    html_dom_asset_url(path, out, n);
 }
 
 // me(skin): the item's type line

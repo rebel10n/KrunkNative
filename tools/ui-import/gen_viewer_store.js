@@ -50,6 +50,8 @@ const rows = store.skins.map((s, i) => {
   flag(s.lowR, 'VS_LOW_R'); flag(s.noHead, 'VS_NO_HEAD'); flag(s.noLegs, 'VS_NO_LEGS');
   flag(s.pat != null, 'VS_PAT'); flag(typeof s.tex === 'number', 'VS_TEX_NUM'); flag(s.rgb, 'VS_RGB');
   flag(s.noSpin, 'VS_NO_SPIN');
+  // store.getSpnItems: limited / illicit / limT (limType) items are never in a wheel's pool
+  flag(s.limited || s.illicit || s.limT, 'VS_NOT_IN_WHEEL');
   const fields = [
     `.name = ${cstr(s.name)}`,
     `.type = ${num(s.type, 0)}`, `.weapon = ${num(s.weapon, 0)}`, `.id = ${num(s.id, -1)}`,
@@ -57,6 +59,7 @@ const rows = store.skins.map((s, i) => {
     `.tex = ${cstr(tex)}`, `.pat = ${num(s.pat, -1)}`, `.mid = ${num(s.mid, -1)}`, `.mid_t = ${num(s.midT, -1)}`,
     `.flags = ${flags.length ? flags.join(' | ') : '0'}`,
   ];
+  if (s.creator) fields.push(`.creator = ${cstr(s.creator)}`);
   const opt = (key, cname, d) => { if (s[key] !== undefined && s[key] !== null && num(s[key], d) !== d) fields.push(`.${cname} = ${f(num(s[key], d))}`); };
   opt('xOff', 'x_off', 0); opt('yOff', 'y_off', 0); opt('zOff', 'z_off', 0);
   opt('mScl', 'm_scl', 0); opt('scl', 'scl', 0); opt('spnScl', 'spn_scl', 0);

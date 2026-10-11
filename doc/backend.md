@@ -500,7 +500,9 @@ seek-game details:
   picked (`autoChangeGame`), else `null`. With `autoChangeGame=false` and a full or
   unknown requested game the error is `GameFull` / `InvalidGameId`.
 * `token` (optional) = a svc-accounts session token; when valid the ticket carries
-  the account id + name so the game server can attach the account.
+  the account id + name so the game server can attach the account. Only such
+  signed-in players are matched to `onlineMode` nodes (6.2); a guest asking for one
+  by id with `autoChangeGame=false` gets 403 `AccountRequired`.
 * `FORCE_ENTER=1` cookie (or `&force=1`) bypasses the capacity check on the requested
   game (v3.1.1 `hasForceEnterCookie`).
 
@@ -576,7 +578,7 @@ Node -> brain:
 
 | type | fields | notes |
 | --- | --- | --- |
-| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version`, `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `modes`?, `maps`? | first frame |
+| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version`, `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `onlineMode`? (0/1, default 0: only signed-in players are matched to it), `password`? (bool: never quick-joined), `modes`?, `maps`? | first frame |
 | `snapshot` | `lobbies: [tuple...]` | full lobby set, every 5 s (replaces the node's set) |
 | `lobby-up` | `lobby: tuple` | upsert one lobby (joins/leaves, 250 ms debounce) |
 | `lobby-down` | `lobbyId` | lobby removed (local or namespaced id) |
@@ -612,11 +614,14 @@ The seek-game `clientId` is a compact JWS (`kn_signed_token`, HS256, key
 `brain.join_secret`), verifiable locally by the game server without a round trip:
 
 ```
-{"iss":"kn-brain","brn":"<brainId>","gid":"NY:ab12c","nid":"NY","lid":"ab12c",
- "reg":"us-nj","acc":12,"name":"bob","jti":"<16 random hex>","iat":...,"exp":iat+join_ttl_s}
+{"brn":"<brainId>","nid":"NY","lid":"ab12c","acc":12,"name":"bob",
+ "jti":"<16 random bytes, hex>","iat":...,"exp":iat+join_ttl_s}
 ```
 
-`acc` is 0 and `name` absent for guests. A game server should accept a ticket when
+`acc` is 0 and `name` absent for guests. The ticket travels in the 352-byte
+`NetJoinPacket.client_key`: only claims something reads are in it, and `name` is left
+out when the ticket would still be longer than 351 chars (the game server's `auth`
+with the ticket returns the account name anyway). A game server should accept a ticket when
 the signature is valid, `exp` is in the future, `nid` is its node id and `lid` one of
 its lobbies (or when `gameserver.require_ticket` is off, accept tickets-less joins
 as today). Each issued ticket reserves a slot for `join_ttl_s` (reservations count
@@ -688,7 +693,13 @@ live reservations of every brain; cap = min(maxPlayers, mode cap)
 1. `game=ID` requested: if it exists and has room (or `FORCE_ENTER`/`force=1`) -> it.
    Otherwise `autoChangeGame=false` -> `GameFull` / `InvalidGameId`; with
    `autoChangeGame` (default) continue and answer `changeReason: "game_changed"`.
-2. Public pool = non-custom lobbies (custom lobbies are only reachable by id).
+   KrunkNative: a guest (no valid `token`) asking for an `onlineMode` lobby is
+   treated like a full one, but with `AccountRequired` (403).
+2. Public pool = non-custom lobbies (custom lobbies are only reachable by id),
+   minus password protected ones (hello `password` or meta `pr`) and, for guests,
+   lobbies of `onlineMode` nodes (hello `onlineMode`, persisted for other brains as
+   meta `onlineMode: true` in the lobby tuple): the server would refuse them
+   ("Failed to verify username").
    In the requested region, the most populated lobby with room (first pass below
    `soft_cap`, if set).
 3. No room in the region and `cross_region`: the same rule over every region.
@@ -706,7 +717,8 @@ Admin / tooling only: the clients no longer call `/mm/host-game` (hosting = runn
 
 `/mm/host-game`, a node's `host-request` (game-socket `custom`), or the social WS
 via `brain_host_game()` (`registry.h`): pick, in the requested region (then any
-region when `cross_region`), a non-draining `custom`-capable node with spare
+region when `cross_region`), a non-draining `custom`-capable node (not password
+protected; `onlineMode` only for a signed-in host or ranked) with spare
 capacity (fewer lobbies than `maxLobbies`, or a non-custom lobby with no players and
 no seat reserved), preferring this brain's own nodes, then the least loaded. Own
 node -> `host` frame; another brain's node -> `mm_host_requests` row +
@@ -1524,7 +1536,7 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 | 2FA at login | twoFAres / pick2FAkey / sub2FA (#twoFAPop grid) | password login -> `["c2fa",1]`; `["2fa",1,[cells]]` -> `["c2fa",2]` + `a` |
 | 2FA enable | act2FA (no markup in the shipped page: KrunkNative adds a row to the Account window's Settings tab) | `["2fa"]` -> `["c2fa",null,null,pattern]` |
 | Daily reward (level >= 5) | cK / dd (#claimHolder timer, "Play 1 Game" until a round ended), claimReward (ad-gated upstream) | `["clm"]` -> `["clm",lastReward,funds]` |
-| Prize wheels (Store tab 0) | windows[13] tab 0, prizeWheel, spinButton/spinUI onclick, spinResponse | `["spin",i]` -> `["spin",null,rand,skin,funds,follow]`, `["unbx"]`. The canvas wheel is a white disc (no 2D canvas natively); the won item shows its preview PNG (most skin previews are not shipped in `ui/`: noimg fallback) |
+| Prize wheels (Store tab 0) | windows[13] tab 0, prizeWheel, spinButton/spinUI onclick, spinResponse | `["spin",i]` -> `["spin",null,rand,skin,funds,follow]`, `["unbx"]`. The canvas wheel is a white disc (no 2D canvas natively); the won item shows its preview PNG (`textures/previews/` from the asset tree, `make assets-import`; noimg fallback) |
 | Ranked (27) | windows[26], joinQueue / leaveQueue / updateQueueStatus, QueueManager | `/mm/queue/join` (token, region, queues, party, ready, classIndex), `/mm/queue/poll` every 1 s, update-ready / update-queues / update-class / kick / promote / leave; "Join" `{gameId,host,port,webUrl,clientId}` is joined with that ticket. Status under CLICK TO PLAY |
 | playMap / `?play=` / `?game=` | playMap -> `/?play=`, autoHostMap | brain: a public lobby whose `meta.map`/`meta.m` matches, else `/mm/host-game` (`customMap` for non-catalogue maps: the game server fetches `/api/map-data`); offline: published maps are fetched (`/api/map-data?name=`) and hosted in the local game |
 

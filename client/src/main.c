@@ -32,6 +32,7 @@
 #include <backend_ui.h> // brain backend: account, matchmaker, --brain / --connect (net/backend_startup.c)
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
+#include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
 
 #ifdef WIN32
 #include <direct.h>
@@ -657,6 +658,7 @@ int main(int argc, char **argv) {
         INSTANCE.net_should_quit = 1;
         local_game_stop(&INSTANCE);
         client_class_preview_fini(&INSTANCE);
+        spin_wheel_fini();
         ui_scenario_end();
         html_ui_fini();
         headless_shutdown();
@@ -687,6 +689,7 @@ int main(int argc, char **argv) {
 
     local_game_stop(&INSTANCE);
     client_class_preview_fini(&INSTANCE);
+    spin_wheel_fini();
     vfx_fini();
     ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
@@ -811,6 +814,29 @@ void client_drop_player_mesh(Client *client, Player *player) {
     player_meshes_fini(player);
 }
 
+// SKINS (sent right before every SPAWN): a player's validated weapon / melee skins, kept by uid
+// for its SPAWN (servers without SKINS: none). A full table recycles slot uid % CLIENT_SKINS_MAX.
+#define CLIENT_SKINS_MAX 256
+static NetSkinsPacket g_client_skins[CLIENT_SKINS_MAX];
+static int g_client_skins_count;
+
+static PlayerSkins client_skins_of(const int uid) {
+    for (int i = 0; i < g_client_skins_count; i++) {
+        if (g_client_skins[i].uid == uid) return g_client_skins[i].skins;
+    }
+    return PLAYER_SKINS_NONE;
+}
+
+static void client_apply_skins(const NetSkinsPacket *packet) {
+    int slot = 0;
+    while (slot < g_client_skins_count && g_client_skins[slot].uid != packet->uid) slot++;
+    if (slot == g_client_skins_count) {
+        if (g_client_skins_count < CLIENT_SKINS_MAX) g_client_skins_count++;
+        else slot = (int) ((unsigned) packet->uid % CLIENT_SKINS_MAX);
+    }
+    g_client_skins[slot] = *packet;
+}
+
 // SPAWN: a player (re)spawned, or (active = 0) a player the server knows who is
 // dead right now: kept without meshes so the scoreboard and kill feed have its name.
 void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
@@ -832,6 +858,7 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         return;
     }
 
+    const PlayerSkins skins = client_skins_of(packet->uid);
     if (!player) {
         player = player_init(&client->game);
         if (!player) return;
@@ -840,14 +867,17 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player->class_index = packet->class_index;
         player->secondary_index = packet->secondary_index;
         player->cosmetics = packet->cosmetics;
+        player->skins = skins;
         game_players_add(&client->game, player);
         player_spawn(player);
     } else if (!player->active || !player->loadout_size || player->class_index != packet->class_index || player->secondary_index != packet->secondary_index ||
-               memcmp(&player->cosmetics, &packet->cosmetics, sizeof(packet->cosmetics)) != 0) {
+               memcmp(&player->cosmetics, &packet->cosmetics, sizeof(packet->cosmetics)) != 0 ||
+               memcmp(&player->skins, &skins, sizeof(skins)) != 0) {
         client_drop_player_mesh(client, player); // respawn: fresh loadout, timers and meshes
         player->class_index = packet->class_index;
         player->secondary_index = packet->secondary_index;
         player->cosmetics = packet->cosmetics;
+        player->skins = skins;
         player_spawn(player);
     }
 
@@ -957,6 +987,7 @@ void client_send_cycle_packet(Client *client) {
 // INIT: a new session or round on map init->map_index (already resolved to the
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
+    client->net_ent_size = net_ent_size_for(init->major, init->minor);
     if (client->map_loaded) client_unload_map(client);
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
@@ -986,6 +1017,14 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             NetSpawnPacket spawn;
             if (!client->game.ready || !net_packet_read_spawn(&spawn, packet)) break;
             client_apply_spawn(client, &spawn);
+            break;
+        }
+        case NET_PACKET_SKINS: {
+            if (packet->length != sizeof(NetSkinsPacket)) break;
+
+            NetSkinsPacket skins;
+            memcpy(&skins, packet->payload, sizeof(skins));
+            client_apply_skins(&skins);
             break;
         }
         case NET_PACKET_STATE: {
@@ -1227,11 +1266,14 @@ void client_enter_game(Client *client) {
 
     // setClass(classIndex, selectedSecondaryIndex): the Select Secondary pick (ui_loadout.c)
     NetEntPacket packet = {.class_index = client->menu_class_index, .secondary_index = ui_loadout_secondary(client->menu_class_index)};
-    ui_loadout_cosmetics(&packet.cosmetics); // skin colour + cosmetic items, echoed back in SPAWN
+    // skin colour + cosmetic items (echoed back in SPAWN) and ent[2] / ent[9] weapon + melee skins (SKINS)
+    ui_loadout_ent_look(client->menu_class_index, &packet.cosmetics, &packet.skins);
     // ent[6] = toggleSpect and ent[15] = slidCont ride after the cosmetics (NET_ENT_PACKET_V4_SIZE).
     packet.spectate = (uint8_t) spectate_requested();
     packet.slid_cont = (uint8_t) (ui_controls_settings()->slid_cont ? 1 : 0); // ent[15] settings.tmp.slidCont ("Requires respawn")
-    const uint16_t ent_size = (uint16_t) NET_ENT_PACKET_V4_SIZE;
+    packet.spray_index = ui_loadout_spray(); // ent[1] selectedSprayIndex
+    // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn: no spray / skins there.
+    const uint16_t ent_size = client->offline ? (uint16_t) NET_ENT_PACKET_V6_SIZE : client->net_ent_size ? client->net_ent_size : (uint16_t) NET_ENT_PACKET_V4_SIZE;
 
     if (client->offline && (packet.spectate || leave_spectate)) {
         // The offline game has no spectators: like v3.1.1's single player
@@ -1293,7 +1335,11 @@ void client_tick(Client *client, const float now, const float delta) {
     else ui_scenario_preview_backdrop(client); // the preview's dimmed backdrop without the model
 #endif
     if (!SCENARIO_ACTIVE()) client_render_settings_tick(client); // DOM pieces the display settings control (after the HUD pass)
-    if (!debug_capture_hide_ui()) html_ui_render(client->ui); // last: composites the page over the scene and HUD
+    if (!debug_capture_hide_ui()) {
+        spin_wheel_render(client);           // the prize wheel's canvas under its #spinButton (ui/spin_wheel.c)
+        html_ui_render(client->ui);          // last: composites the page over the scene and HUD
+        spin_wheel_render_confetti(client);  // canvas-confetti draws above the page
+    }
     debug_capture_frame_end(client); // KRUNKNATIVE_SCREENSHOT: reads the finished frame
 }
 

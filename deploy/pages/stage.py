@@ -5,8 +5,8 @@ Copies the web build without assets/ (game content stays on the asset host: Page
 a deployment at 20k files / 25 MiB each), renames client.{js,wasm,data} to
 client.<hash>.* (one content hash over the three, so a page can never pair a stale
 client.js with a new wasm), fills in the loader.js <meta> knobs of every page and writes
-_headers (immutable hashed files; Pages revalidates everything else) and _redirects
-(/assets/* -> the asset host). --ga-id puts Google Analytics into every page (ga.py).
+_headers (immutable hashed files; Pages revalidates everything else), _redirects
+(/assets/* -> the asset host) and 404.html (unknown paths are 404s, not the SPA fallback). --ga-id puts Google Analytics into every page (ga.py).
 
 usage: stage.py <dist/web> <out dir> --asset-base URL --brain URL [--bridge URL] [--wt URL|off] [--ga-id G-...|off]
 """
@@ -26,6 +26,13 @@ KNOBS = ("kn-build", "kn-asset-base", "kn-brain", "kn-bridge", "kn-wt")
 # Pages' default for everything else (pages, js/, css/, img/, windows/) is
 # "public, max-age=0, must-revalidate" + ETag: always revalidated, never stale.
 HEADERS_HEAD = "# deploy/pages/stage.py: content-hashed client files never change\n"
+
+
+NOT_FOUND_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>404 Not Found</title></head>
+<body style="background:#000;color:#fff;font-family:sans-serif;text-align:center;margin-top:20vh">
+<h1>404 Not Found</h1><p><a href="/" style="color:#2196F3">krunk.io</a></p></body></html>
+"""
 
 
 def set_meta(page, name, value):
@@ -93,6 +100,12 @@ def main():
         for name in CLIENT_FILES:
             stem, ext = name.split(".", 1)
             f.write("/%s.%s.%s\n  Cache-Control: public, max-age=31536000, immutable\n" % (stem, build, ext))
+
+    # A missing file must be a 404, not a 200 index.html: without a top-level 404.html Pages
+    # serves the site as an SPA (index.html for every unknown path), so a missing <img> (e.g.
+    # an item preview the page asked this origin for) "loads" HTML instead of failing.
+    with open(os.path.join(args.out, "404.html"), "w", encoding="utf-8") as f:
+        f.write(NOT_FOUND_PAGE)
 
     # Anything still asking this origin for /assets/ (an old page, a relative URL) goes to
     # the asset host; 302 so the target can move.

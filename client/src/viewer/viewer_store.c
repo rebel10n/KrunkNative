@@ -38,32 +38,37 @@ int viewer_skin_tex_truthy(const ViewerSkin *skin) {
     return skin->tex && skin->tex[0] && !((skin->flags & VS_TEX_NUM) && !strcmp(skin->tex, "0"));
 }
 
-// utils.js getPreview() then getPreviewExport(): the last path component of
-// textures/<sprays/<id> | previews/...>.png.
-void viewer_preview_export_name(const ViewerSkin *skin, char *buf, const size_t n) {
-    char path[256];
+// utils.js getPreview(skin, store) without assetsUrl(): the asset-relative path
+// textures/<sprays/<id> | previews/<cosmetics/<type>_<id>[_<tex>] | <types[type]>...>>.png.
+void viewer_skin_preview_path(const ViewerSkin *skin, char *path, const size_t n) {
     const char *types = skin->type >= 0 && skin->type < g_viewer_type_count ? g_viewer_types[skin->type] : "";
 
     if (skin->type == 4 && !(skin->flags & VS_IS_3D)) {
-        snprintf(path, sizeof(path), "sprays/%d", skin->id);
+        snprintf(path, n, "textures/sprays/%d.png", skin->id);
     } else if (skin->type && skin->type != 3) {
-        if (viewer_skin_tex_truthy(skin)) snprintf(path, sizeof(path), "previews/cosmetics/%d_%d_%s", skin->type, skin->id, skin->tex);
-        else snprintf(path, sizeof(path), "previews/cosmetics/%d_%d", skin->type, skin->id);
+        if (viewer_skin_tex_truthy(skin)) snprintf(path, n, "textures/previews/cosmetics/%d_%d_%s.png", skin->type, skin->id, skin->tex);
+        else snprintf(path, n, "textures/previews/cosmetics/%d_%d.png", skin->type, skin->id);
     } else if (skin->type == 3) {
-        if (skin->pat >= 0) snprintf(path, sizeof(path), "previews/%s%d_c%d", types, skin->id, skin->pat);
-        else if (skin->tex) snprintf(path, sizeof(path), "previews/%s%d_%s", types, skin->id, skin->tex);
-        else snprintf(path, sizeof(path), "previews/%s%d", types, skin->id);
+        if (skin->pat >= 0) snprintf(path, n, "textures/previews/%s%d_c%d.png", types, skin->id, skin->pat);
+        else if (skin->tex) snprintf(path, n, "textures/previews/%s%d_%s.png", types, skin->id, skin->tex);
+        else snprintf(path, n, "textures/previews/%s%d.png", types, skin->id);
     } else if (skin->mid >= 0) {
-        if (skin->mid_t >= 0) snprintf(path, sizeof(path), "previews/%s%d_m%d_%d", types, skin->weapon, skin->mid, skin->mid_t);
-        else snprintf(path, sizeof(path), "previews/%s%d_m%d", types, skin->weapon, skin->mid);
+        if (skin->mid_t >= 0) snprintf(path, n, "textures/previews/%s%d_m%d_%d.png", types, skin->weapon, skin->mid, skin->mid_t);
+        else snprintf(path, n, "textures/previews/%s%d_m%d.png", types, skin->weapon, skin->mid);
     } else if (skin->pat >= 0) {
-        snprintf(path, sizeof(path), "previews/%s%d_c%d", types, skin->weapon, skin->pat);
+        snprintf(path, n, "textures/previews/%s%d_c%d.png", types, skin->weapon, skin->pat);
     } else if (viewer_skin_tex_truthy(skin)) {
-        snprintf(path, sizeof(path), "previews/%s%d_%s", types, skin->weapon, skin->tex);
+        snprintf(path, n, "textures/previews/%s%d_%s.png", types, skin->weapon, skin->tex);
     } else {
-        snprintf(path, sizeof(path), "previews/%s%d_%d", types, skin->weapon, skin->id);
+        snprintf(path, n, "textures/previews/%s%d_%d.png", types, skin->weapon, skin->id);
     }
+}
+
+// utils.js getPreviewExport(): the last path component of getPreview().
+void viewer_preview_export_name(const ViewerSkin *skin, char *buf, const size_t n) {
+    char path[256];
+    viewer_skin_preview_path(skin, path, sizeof(path));
 
     const char *slash = strrchr(path, '/');
-    snprintf(buf, n, "%s.png", slash ? slash + 1 : path);
+    snprintf(buf, n, "%s", slash ? slash + 1 : path);
 }

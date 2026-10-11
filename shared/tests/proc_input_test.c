@@ -490,6 +490,50 @@ int main(const int argc, char **argv) {
     run_test("kanji_jump_pad.json", player);
     printf("\n");
     run_test("v3_kanji_jump_pad_30fps.json", player);
+    printf("\n");
+
+    char *soul_path = concat(get_project_root(), "assets/maps/soul_sanctum.json");
+    const cJSON *soul = load_json(soul_path);
+
+    free(soul_path);
+
+    if (!soul) {
+        printf("Failed to load soul_sanctum! \n");
+        return 1;
+    }
+
+    game.map_count = 0; // see kanji above
+    game_configure(&game, NULL, &soul, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&game, 0, -1, 1);
+
+    // Soul Sanctum's spawn stands on a cylinder top (y 3): v3.1.1 collides with it inclusively,
+    // so the player stays grounded (no onGround flicker, no step sound every other tick).
+    run_test("v3_soul_spawn_60fps.json", player);
+    printf("\n");
+    run_test("v3_soul_spawn_30fps.json", player);
+    printf("\n");
+
+    printf("Running Soul Sanctum spawn landing test...\n");
+    const int failures = g_failures;
+    player_spawn(player);
+    player->position = (vec3) {1.0f, 4.0f, 0.0f};
+    player->velocity = (vec3) {0};
+    player->is_you = player->render_you = 1;
+    player->land_events = 0;
+    Input idle = {0};
+    idle.move_dir = -1;
+    idle.delta = 0.017f;
+    int grounded_since = -1, ungrounded_after = 0;
+    for (int i = 0; i < 180; i++) {
+        player_proc_input(player, &idle, 0, 0);
+        if (player->on_ground && grounded_since < 0) grounded_since = i;
+        else if (!player->on_ground && grounded_since >= 0) ungrounded_after++;
+    }
+    RULE_CHECK(grounded_since >= 0 && fabsf(player->position.y - 3.0f) < 1e-4f, "lands on the spawn disk (y %.4f)", player->position.y);
+    RULE_CHECK(ungrounded_after == 0, "stays grounded on the disk (%d airborne ticks after landing)", ungrounded_after);
+    RULE_CHECK(player->land_events == 1, "one landing, got %d", player->land_events);
+    player->is_you = player->render_you = 0;
+    if (g_failures == failures) printf("Test OK\n");
 
     return g_failures ? 1 : 0;
 }

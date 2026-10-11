@@ -22,6 +22,7 @@
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
 #include <ui_terminal.h> // NET_PACKET_TERMINAL: openTerminal (ui_terminal.c)
+#include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
 #include <map_triggers.h>  // map trigger events: "do"/"ro"/"gte"/"bnk", "chp", "s", "scr", "am" popups (client/src/map_triggers.c)
@@ -611,6 +612,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             ui_terminal_open(client, terminal.uid); // "ot": openTerminal
             return 1;
         }
+        case NET_PACKET_SPRAY: { // "sp": addSpray(sid, sprayIndex, x, y, z, xDr, yDr)
+            EVENTS_READ(NetSprayPacket, spray);
+            sprays_add(client, &spray);
+            return 1;
+        }
         case NET_PACKET_CHEAT: {
             EVENTS_READ(NetCheatPacket, cheat);
             events_cheat(client, &cheat);
@@ -694,6 +700,7 @@ void client_game_events_reset(Client *client) {
     client->net_death_menu_pending = 0;
     memset(client->net_projectiles, 0, sizeof(client->net_projectiles));
     projectiles_render_reset();
+    sprays_clear(client); // "init": RENDER.clearSprays()
     voice_reset_queues(); // initGame: voiceStreamQueues = {}
 }
 
@@ -745,6 +752,7 @@ void client_game_events_tick(Client *client) {
     events_test_aim(client);
     events_projectiles_step(client);
     hud_modes_tick(client); // team scores, flags, game message, lives, team pill
+    sprays_tick(client);    // framed / moving spray textures
     client_triggers_tick(client); // jump scare timeout
     if (!client->net_death_menu_pending) return;
     if (glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;

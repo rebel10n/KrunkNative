@@ -18,6 +18,10 @@ make pages                     # make web + deploy/pages/deploy.sh
 deploy/pages/deploy.sh         # an existing dist/web
 ```
 
+`stage.py` also writes a top-level `404.html`: without one Pages runs the site as an SPA and
+answers every unknown path with `index.html` (200, text/html), so a missing image "loads" HTML
+instead of failing. Pages links are real files (`/`, `/social`, `*.html`), nothing needs the fallback.
+
 `deploy.sh` runs `stage.py` (dist/web -> dist/pages) and `wrangler pages deploy` (pinned
 version). Credentials: `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`, else
 `~/.config/kn-secrets/cloudflare.env`. CI does not deploy Pages (deploy-kru.yml only runs

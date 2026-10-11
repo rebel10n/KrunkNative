@@ -1151,6 +1151,10 @@ static void prefab_prefetch_object(PrefabPrefetch *list, const cJSON *raw_obj, c
         prefab_prefetch_add(list, "textures/%s.png", cJSON_GetObjectItem(raw_obj, "fc") == NULL ? "lightcone_0" : "lightcone_1");
         return;
     }
+    if (prefab == PREFAB_RUNE) {
+        prefab_prefetch_add(list, "textures/%s.png", "rune_0");
+        return;
+    }
     if (prefab == PREFAB_BILLBOARD) {
         const cJSON *bb = cJSON_GetObjectItem(raw_obj, "bb");
         if (!prefab_json_present(cJSON_GetObjectItem(raw_obj, "sad")) && cJSON_IsNumber(bb) && cJSON_GetNumberValue(bb)) {
@@ -1477,6 +1481,8 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
     if (object->prefab == PREFAB_LIGHT_CONE) {
         texture_id = prefab_load_texture_src(cJSON_GetObjectItem(raw_obj, "fc") == NULL ? "lightcone_0" : "lightcone_1");
+    } else if (object->prefab == PREFAB_RUNE) {
+        texture_id = prefab_load_texture_src("rune_0"); // map.js RUNE: src "rune_0" (the "t" texture is ignored)
     } else if (object->prefab == PREFAB_BILLBOARD && prefab_json_present(cJSON_GetObjectItem(raw_obj, "sad"))) {
         texture_id = prefab_ad_texture();
     } else if (object->prefab == PREFAB_BILLBOARD) {
@@ -1587,8 +1593,12 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         return mesh;
     }
 
-    if (object->prefab == PREFAB_PLANE || object->prefab == PREFAB_BILLBOARD || object->prefab == PREFAB_SIGN || object->prefab == PREFAB_LIQUID) {
+    if (object->prefab == PREFAB_PLANE || object->prefab == PREFAB_BILLBOARD || object->prefab == PREFAB_SIGN || object->prefab == PREFAB_LIQUID ||
+        object->prefab == PREFAB_RUNE) {
         const int liquid = object->prefab == PREFAB_LIQUID;
+        // map.js RUNE: addPlane(x, y + 0.01, z, s[2] / 2, s[0] / 2) with no rotation, src rune_0,
+        // scale 0 (stretched), side 2, alphaTest prefabs[RUNE].alphaTest (0.9), no texOff, no shadows
+        const int rune = object->prefab == PREFAB_RUNE;
         // 93.js addLiquid: tilesX = parseInt(tx) || 10, tilesZ = parseInt(tz) || 10
         const int tiles_x = liquid ? (int) prefab_json_float(cJSON_GetObjectItem(raw_obj, "tx"), 0.0f) : 1;
         const int tiles_z = liquid ? (int) prefab_json_float(cJSON_GetObjectItem(raw_obj, "tz"), 0.0f) : 1;
@@ -1605,6 +1615,10 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         // scale(s[0], s[2], 1) on the XY unit plane.
         mesh->visible = visible;
         mesh->transform.position = object->position;
+        if (rune) {
+            mesh->transform.position.y += 0.01f;
+            rotation = (vec3) {0};
+        }
         mesh->transform.rotation_order = ROTATION_ORDER_YXZ;
         mesh->transform.rotation = (vec3) {rotation.x - (float) M_PI / 2.0f, sign ? -rotation.z : rotation.z, rotation.y};
         mesh->transform.scale = (vec3) {object->scale.x, object->scale.z, 1.0f};
@@ -1616,14 +1630,14 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
         material->uv_size = tex_scale ? (vec3) {object->scale.x * 0.5f / world_uv * tex_scale, object->scale.z * 0.5f / world_uv * tex_scale, 1.0f} : (vec3) {1.0f, 1.0f, 1.0f};
 
         material->texture = texture_id;
-        material->texture_base_offset = sign ? (vec2) {0} : prefab_texture_offset(raw_obj);
+        material->texture_base_offset = sign || rune ? (vec2) {0} : prefab_texture_offset(raw_obj);
         material->color = sign ? white : prefab_krunker_color(color, 1.0f);
         material->color.w = sign ? 1.0f : opacity;
         material->emissive = sign ? none : emissive;
         // 94.js addPlane/addCanvas/addLiquid: transparent, DoubleSide (signs alphaTest 0.02)
         material->base.transparent = 1;
         material->double_sided = 1;
-        material->alpha_test = sign ? 0.02f : 0.0f;
+        material->alpha_test = sign ? 0.02f : rune ? 0.9f : 0.0f;
 
         if (object->prefab == PREFAB_PLANE && prefab_json_float(cJSON_GetObjectItem(raw_obj, "en"), 0.0f) > 0.0f) {
             // noise plane bumps carry getColor(colr, 0.6) (map_post.c builds the geometry)

@@ -141,9 +141,7 @@ static void post_noise_planes(const Map *map) {
 
     const cJSON *raw;
     cJSON_ArrayForEach(raw, objects) {
-        const cJSON *p = cJSON_GetObjectItem(raw, "p");
-        const cJSON *s = cJSON_GetObjectItem(raw, "s");
-        if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) < 3 || cJSON_GetArraySize(s) < 3) continue;
+        if (!map_raw_object_kept(raw)) continue; // the same raw objects map.c skips
         if (object_index >= map->object_count) break;
 
         Object *object = map->objects[object_index++];
@@ -180,10 +178,9 @@ static void post_point_lights(const Map *map) {
 
     const cJSON *raw;
     cJSON_ArrayForEach(raw, objects) {
-        const cJSON *p = cJSON_GetObjectItem(raw, "p");
-        const cJSON *s = cJSON_GetObjectItem(raw, "s");
-        if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) < 3 || cJSON_GetArraySize(s) < 3) continue;
+        if (!map_raw_object_kept(raw)) continue; // the same raw objects map.c skips
         if (object_index >= map->object_count) break;
+        const cJSON *p = cJSON_GetObjectItem(raw, "p");
 
         const Object *object = map->objects[object_index++];
         if (object->prefab != PREFAB_POINT_LIGHT || count >= BASIC_MAX_POINT_LIGHTS) continue;

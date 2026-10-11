@@ -388,7 +388,7 @@ static int ao_prefab_no_detail(const int prefab) {
 // manager.objects (zones, ramps, ladders, ... included), for the noise planes.
 static AoBox *ao_collect_boxes(const Map *map, const cJSON *objects, const int map_details, const int all, size_t *out_count) {
     const int total = cJSON_GetArraySize(objects);
-    size_t object_index = 0; // map.c keeps the raw objects with p and s arrays, in order
+    size_t object_index = 0; // map.c keeps the raw objects map_raw_object_kept() accepts, in order
     AoBox *boxes = calloc(total > 0 ? (size_t) total : 1, sizeof(AoBox));
     size_t count = 0;
     if (!boxes) return NULL;
@@ -397,7 +397,7 @@ static AoBox *ao_collect_boxes(const Map *map, const cJSON *objects, const int m
         const cJSON *t = cJSON_GetArrayItem(objects, i);
         const cJSON *p = cJSON_GetObjectItem(t, "p");
         const cJSON *s = cJSON_GetObjectItem(t, "s");
-        if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) < 3 || cJSON_GetArraySize(s) < 3) continue;
+        if (!map_raw_object_kept(t)) continue;
         if (object_index >= map->object_count) break;
 
         // the prefab id as map.c resolved it (numeric or prefab name)

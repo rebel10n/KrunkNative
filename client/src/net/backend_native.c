@@ -94,6 +94,16 @@ static int parse_url(const char *url, BrainAddr *a) {
     return 1;
 }
 
+// The request target of an http(s) URL: everything from the first '/' after host[:port]
+// ("" for none). Not BrainAddr.base: that one is char[128] and cut a signed-in seek-game
+// (?game=...&token=<32 hex>) short by a character, so the brain saw a guest.
+static const char *url_target(const char *url) {
+    const char *p = strstr(url, "://");
+    p = p ? p + 3 : url;
+    while (*p && *p != '/') p++;
+    return p;
+}
+
 static int64_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -381,14 +391,15 @@ static void http_run(HttpJob *job) {
         free(req_body);
         return;
     }
-    // the path part of the URL after host[:port] (parse_url put it in base)
+    // the whole path + query of the URL after host[:port]
     Bytes req = {0};
     char head[640];
     const size_t body_len = req_body ? strlen(req_body) : 0;
+    const char *target = url_target(job->url);
     bytes_push(&req, job->method, strlen(job->method));
     bytes_push(&req, " ", 1);
-    if (!a.base[0]) bytes_push(&req, "/", 1);
-    bytes_push(&req, a.base, strlen(a.base));
+    if (!target[0]) bytes_push(&req, "/", 1);
+    bytes_push(&req, target, strlen(target));
     const int default_port = !strcmp(a.port, a.tls ? "443" : "80");
     snprintf(head, sizeof(head), " HTTP/1.1\r\nHost: %s%s%s\r\nUser-Agent: KrunkNative\r\nAccept: application/json\r\nConnection: close\r\n",
              a.host, default_port ? "" : ":", default_port ? "" : a.port);

@@ -301,6 +301,8 @@ typedef struct {
     Mesh *attachment; // sight attachment (Weapon.has_attach), first-person / preview models only
 
     int melee_pose;   // first-person melee: arms are posed per arm (pivots) and the melee mesh hangs off the right pivot
+    vec3 melee_position; // first-person melee mesh hold (weaponGeos xP/yP/zP incl. the skin's sxOff/syOff/szOff)
+    vec3 melee_rotation; // its rotation (yR/zR incl. the skin's flip and sxRot)
 } PlayerArms;
 
 typedef struct {
@@ -487,6 +489,7 @@ typedef struct {
 
     // Live match state from the server (client/src/net/game_events.c). Read by the HUD.
     int net_ping_ms;               // smoothed RTT from PING_RESULT, -1 = unknown (Krunker "-")
+    uint16_t net_ent_size;         // ENT size the server's INIT protocol accepts (net_ent_size_for): V6 from 1.1, else V4
     int net_round_seconds;         // round clock (TIMER), -1 = no round clock received yet
     int net_end_seconds;           // end screen "Next Round in" seconds, -1 = no end screen
     int net_end_result;            // END result: 1 victory, 0 defeat, -1 draw

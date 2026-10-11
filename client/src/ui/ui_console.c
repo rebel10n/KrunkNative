@@ -979,14 +979,10 @@ static void off_endless(const int argc, char **argv) {
     (void) argc; (void) argv;
     Game *game = &con_client()->game;
     if (!game->ready) return;
-    if (game->round_endless) {
-        game_set_endless(game, 0); // the mode's full game time again
-        append("Match timer resumed.", COL_INFO);
-        return;
-    }
-    game->round_endless = 1;       // endTimer = "inf": the clock stops where it is
-    game->round_seconds_sent = -1;
-    append("Match timer paused.", COL_INFO);
+    if (game->end_timer > 0.0f) return; // the end screen: game_set_endless ignores it too
+    const int was = game->round_endless;
+    game_set_endless(game, !was); // pause / resume the clock where it is (shared/src/game.c)
+    append(was ? "Match timer resumed." : "Match timer paused.", COL_INFO);
 }
 
 static void off_server(const int argc, char **argv) {

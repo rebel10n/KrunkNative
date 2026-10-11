@@ -60,6 +60,8 @@ int accounts_info_tags(char tags[][24], int max); // ranked / custom / draining 
 int accounts_owns_skin(const ClientConnection*, int skin);
 // Clears cosmetics the player does not own (ENT). Returns how many were stripped.
 int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*);
+// Same for the weapon skins and the melee skin (ENT ent[2] / ent[9]).
+int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 
 // net.c exports used here
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)

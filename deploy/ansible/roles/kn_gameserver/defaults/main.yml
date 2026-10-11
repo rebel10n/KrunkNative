@@ -31,7 +31,9 @@ kn_gameserver_coordinator_url: "wss://coordinator.{{ kn_domain }}/mm/internal/ws
 # {{ kn_etc_dir }}/secrets.env (role kn_brain) at deploy time, written only into the 0640
 # server-<n>.cfg. Never in git.
 kn_gameserver_secret_host: "{{ groups['central'] | first }}"
-# Online-mode instances stay out of the coordinator pool: kn_brain does not know a node's
-# online_mode yet (no hello field), so /mm/seek-game would send guests there and the
-# server rejects them ("Failed to verify username"). They stay standalone + finder-listed.
-kn_gameserver_coordinator_online_instances: false
+# Online-mode instances join the coordinator pool too: server_bin sends onlineMode in its
+# hello and kn_brain sends only signed-in players there (guests go to the offline-mode
+# instances, services/brain/registry.c). Escape hatch: false keeps them standalone +
+# finder-listed, e.g. when rolling an edge back to a server_bin from before the hello
+# field (the brain would treat it as offline-mode and send guests to it).
+kn_gameserver_coordinator_online_instances: true

@@ -1207,6 +1207,44 @@ static int test_round_reward(Game *game, const Player *player) {
     return reward > 30 ? 30 : reward;
 }
 
+// /endless pauses the round clock where it is and resumes from there (no reset, no drift).
+static void test_endless(Game *game) {
+    const int failures = g_failures;
+    printf("Running endless test...\n");
+
+    Player *a = game_find_player(game, 1);
+    const int score = a ? a->score : 0;
+    game->round_timer = 180.4f;
+    game->round_seconds_sent = -1;
+    game_tick(game, game->now + 0.1f, 0.1f); // 180.3
+
+    for (int pass = 0; pass < 3; pass++) {
+        const float before = game->round_timer;
+        g_sent_count = 0;
+        game_set_endless(game, 1);
+        const SentPacket *timer = find_sent(NET_PACKET_TIMER, NET_TARGET_ALL, 0);
+        CHECK(timer != NULL, "endless on: frozen TIMER broadcast");
+        if (timer) {
+            NetTimerPacket packet;
+            memcpy(&packet, timer->payload, sizeof(packet));
+            CHECK(packet.seconds == (int) before && !packet.end, "endless TIMER %d (want %d)", packet.seconds, (int) before);
+        }
+        for (int i = 0; i < 100; i++) game_tick(game, game->now + 0.1f, 0.1f); // 10 s
+        CHECK(near(game->round_timer, before, 0.001f), "endless: clock frozen %.2f (was %.2f)", game->round_timer, before);
+
+        game_set_endless(game, 0);
+        CHECK(near(game->round_timer, before, 0.001f) && !game->round_endless, "endless off: resumes from %.2f (got %.2f)", before, game->round_timer);
+        g_sent_count = 0;
+        for (int i = 0; i < 10; i++) game_tick(game, game->now + 0.1f, 0.1f); // 1 s
+        CHECK(near(game->round_timer, before - 1.0f, 0.01f), "counting down again: %.2f", game->round_timer);
+        CHECK(find_sent(NET_PACKET_TIMER, NET_TARGET_ALL, 0) != NULL, "TIMER resent after resume");
+    }
+    CHECK(near(game->round_timer, 177.3f, 0.02f), "no drift after 3 toggles: %.2f", game->round_timer);
+    CHECK(game->end_timer == 0.0f && (!a || a->score == score), "round and scores untouched");
+
+    printf("Endless test %s\n", g_failures != failures ? "FAILED" : "OK");
+}
+
 static void test_round(Game *game) {
     const int failures = g_failures;
     game->hooks.reward = test_round_reward;
@@ -1346,6 +1384,7 @@ int main(void) {
     test_checkpoints_teleporters(&game);
     test_trigger_map_parse();
     test_kill_medals(&game);
+    test_endless(&game);
     test_round(&game);
     test_chat();
 

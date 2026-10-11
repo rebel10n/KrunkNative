@@ -10,7 +10,7 @@
 //   0 play                       close the menu and enter the game (waits for the map)
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js)
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
-//   100 down W | up W            keys through the normal key path: W A S D SPACE SHIFT R E Q X 1 2 3 C N
+//   100 down W | up W            keys through the normal key path: W A S D SPACE SHIFT R E Q X 1 2 3 C N F G T
 //   100 mdown right | mup right  mouse buttons (left / right)
 //   100 look dyaw dpitch         turn the next input's look by these radians (CONTROLS rotation)
 //   5000 respawn                 Play again when dead, as soon as the death delay allows (retried
@@ -119,6 +119,7 @@ static int script_key(const char *name) {
         {"W", GLFW_KEY_W}, {"A", GLFW_KEY_A}, {"S", GLFW_KEY_S}, {"D", GLFW_KEY_D},
         {"SPACE", GLFW_KEY_SPACE}, {"SHIFT", GLFW_KEY_LEFT_SHIFT}, {"R", GLFW_KEY_R}, {"E", GLFW_KEY_E},
         {"Q", GLFW_KEY_Q}, {"C", GLFW_KEY_C}, {"X", GLFW_KEY_X}, {"1", GLFW_KEY_1}, {"2", GLFW_KEY_2}, {"3", GLFW_KEY_3}, {"N", GLFW_KEY_N},
+        {"F", GLFW_KEY_F}, {"G", GLFW_KEY_G}, {"T", GLFW_KEY_T},
     };
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(name, keys[i].name)) return keys[i].key;

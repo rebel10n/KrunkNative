@@ -38,7 +38,9 @@ Player *player_init(Game *game) {
     player->last_killer_uid = -1;
     player->secondary_index = -1;
     player->cosmetics = PLAYER_COSMETICS_NONE;
+    player->skins = PLAYER_SKINS_NONE;
     player->last_kill_time = -1e6f; // Krunker lastKill starts far in the past (no multi-kill on the first kill)
+    player->last_spray = -1e6f;     // lastSpray 0 against Date.now(): the first spray is never on cooldown
     for (int i = 0; i < PLAYER_DAMAGE_SLOTS; i++) player->damage_received[i].uid = -1;
 
     return player;
@@ -551,7 +553,11 @@ int player_collides(Player *player, const Object *object, const float pad) {
             return in_x && in_y && in_z;
         }
         case COLLISION_TYPE_CYLINDER: {
-            const int in_y = player->position.y + player->height > object->position.y && player->position.y < object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
+            // players.js collides (collT "cylinder"): y <= top && y + height >= bottom, inclusive like
+            // the box test. A strict top bound drops a player standing flush on the cylinder (y == top)
+            // out of the collision every other tick: onGround flickers, resetStep (step sound) fires
+            // at 30 Hz and air friction makes the player glide (Soul Sanctum's spawn disk).
+            const int in_y = player->position.y + player->height >= object->position.y && player->position.y <= object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
             return in_y && hypotf(player->position.x - object->position.x, player->position.z - object->position.z) <= object->scale.x * 0.5f + player->scale + pad;
         }
     }
@@ -1509,6 +1515,11 @@ static int combat_object_shootable(const Object *object) {
     }
 }
 
+// players.spray traces the same map.manager.objects as a shot (shared/src/interact.c).
+int game_object_shootable(const Object *object) {
+    return combat_object_shootable(object);
+}
+
 static int combat_can_damage(const Player *dealer, const Player *victim) {
     return !dealer->team || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team);
 }
@@ -2104,26 +2115,30 @@ float player_lerp_angle(float a, float b, const float t) {
     return v >= 0.0f && v <= pi2 ? v : fmodf(v, pi2);
 }
 
+// procInputs every queued network frame (the tick, and gameserver.ts io_int before its action).
+void player_drain_inputs(Player *player) {
+    if (!player->active || !player->input_queue_size) return;
+
+    // Detached first: an input can kill the player (kill objects, authority), and
+    // player_kill() drops the queue; the rest of a dead player's inputs are discarded.
+    Input *queue = player->input_queue;
+    const size_t count = player->input_queue_size;
+    player->input_queue = NULL;
+    player->input_queue_size = 0;
+
+    for (size_t i = 0; i < count && player->active; i++) {
+        player_proc_input(player, &queue[i], 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
+        player->input_seq = queue[i].seq;
+    }
+
+    free(queue);
+}
+
 void player_update(Player *player, const float delta) {
     if (!player->active) return;
 
     player_feel_update(player, delta);
-
-    if (player->input_queue_size) {
-        // Detached first: an input can kill the player (kill objects, authority), and
-        // player_kill() drops the queue; the rest of a dead player's inputs are discarded.
-        Input *queue = player->input_queue;
-        const size_t count = player->input_queue_size;
-        player->input_queue = NULL;
-        player->input_queue_size = 0;
-
-        for (size_t i = 0; i < count && player->active; i++) {
-            player_proc_input(player, &queue[i], 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
-            player->input_seq = queue[i].seq;
-        }
-
-        free(queue);
-    }
+    player_drain_inputs(player);
 
     player->idle_anim += game_constants.idle_anim_speed * delta;
 

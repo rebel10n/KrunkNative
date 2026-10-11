@@ -14,6 +14,9 @@
 #include <direct.h>
 #define CLI_PATH_SEPARATOR '\\'
 #else
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
 #define CLI_PATH_SEPARATOR '/'
 #endif
 
@@ -905,7 +908,85 @@ void cli_main() {
 
 // Headless (stdin not a terminal: a pipe, a FIFO, docker attach, systemd): read plain
 // command lines like srcds. EOF only ends the reader (systemd's /dev/null is EOF at once).
-// Detached: a blocking fgets must not hold up shutdown.
+#ifndef WIN32
+// poll(stdin, wake pipe) + read(2), never stdio: a thread blocked in fgets() holds the
+// stdin FILE lock, and glibc's exit() (_IO_cleanup -> _IO_flush_all) waits for every
+// stream lock, so the process hung after "server stopped" while stdin was an idle pipe
+// or tty. cli_stop() writes the wake pipe and joins the reader.
+static int g_stdin_wake[2] = {-1, -1};
+static pthread_t g_stdin_thread;
+static int g_stdin_thread_running;
+
+static void cli_stdin_line(char *line, const int discard) {
+    line[strcspn(line, "\r")] = 0;
+    if (!discard && !g_server->should_quit) cli_execute(line);
+}
+
+static void *cli_stdin_main(void *arg) {
+    (void) arg;
+    char buf[512];
+    size_t len = 0;
+    int discard = 0; // the rest of an over-long line
+    while (!g_server->should_quit) {
+        struct pollfd fds[2] = {{.fd = STDIN_FILENO, .events = POLLIN}, {.fd = g_stdin_wake[0], .events = POLLIN}};
+        if (poll(fds, 2, -1) < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (fds[1].revents) break; // cli_stop()
+        if (fds[0].revents & POLLNVAL) break;
+        if (!(fds[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+        const ssize_t got = read(STDIN_FILENO, buf + len, sizeof(buf) - 1 - len);
+        if (got < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+        if (got <= 0) break; // EOF (or the terminal went away)
+        len += (size_t) got;
+        size_t start = 0;
+        for (size_t i = 0; i < len; i++) {
+            if (buf[i] != '\n') continue;
+            buf[i] = 0;
+            cli_stdin_line(buf + start, discard);
+            discard = 0;
+            start = i + 1;
+        }
+        memmove(buf, buf + start, len - start);
+        len -= start;
+        if (len == sizeof(buf) - 1) { // no newline in 511 bytes: drop the line
+            discard = 1;
+            len = 0;
+        }
+    }
+    if (len && !g_server->should_quit) { // last line without a newline before EOF
+        buf[len] = 0;
+        cli_stdin_line(buf, discard);
+    }
+    return NULL;
+}
+
+static void cli_stdin_start(void) {
+    if (pipe(g_stdin_wake)) return;
+    for (int i = 0; i < 2; i++) fcntl(g_stdin_wake[i], F_SETFD, FD_CLOEXEC);
+    if (pthread_create(&g_stdin_thread, NULL, cli_stdin_main, NULL)) {
+        close(g_stdin_wake[0]);
+        close(g_stdin_wake[1]);
+        g_stdin_wake[0] = g_stdin_wake[1] = -1;
+        return;
+    }
+    g_stdin_thread_running = 1;
+}
+
+static void cli_stdin_stop(void) {
+    if (!g_stdin_thread_running) return;
+    const char wake = 1;
+    while (write(g_stdin_wake[1], &wake, 1) < 0 && errno == EINTR) {}
+    pthread_join(g_stdin_thread, NULL);
+    g_stdin_thread_running = 0;
+    close(g_stdin_wake[0]);
+    close(g_stdin_wake[1]);
+    g_stdin_wake[0] = g_stdin_wake[1] = -1;
+}
+#else
+// Windows: no poll() on console handles; the detached reader stays (its fgets may
+// outlive shutdown, the CRT does not wait for it).
 static void *cli_stdin_main(void *arg) {
     (void) arg;
     char line[512];
@@ -916,11 +997,19 @@ static void *cli_stdin_main(void *arg) {
     return NULL;
 }
 
-int cli_start(const int interactive) {
+static void cli_stdin_start(void) {
+    pthread_t reader;
+    if (!pthread_create(&reader, NULL, cli_stdin_main, NULL)) pthread_detach(reader);
+}
+
+static void cli_stdin_stop(void) {}
+#endif
+
+int cli_start(const int interactive, const int stdin_console) {
     g_cli_interactive = interactive && g_replxx;
     if (!g_cli_interactive) {
-        pthread_t reader;
-        if (!getenv("KN_NO_STDIN_CONSOLE") && !pthread_create(&reader, NULL, cli_stdin_main, NULL)) pthread_detach(reader);
+        // --no-cli (and KN_NO_STDIN_CONSOLE): no console at all, stdin is never read
+        if (stdin_console && !getenv("KN_NO_STDIN_CONSOLE")) cli_stdin_start();
         return 0;
     }
 
@@ -958,6 +1047,7 @@ int cli_is_interactive(void) {
 }
 
 void cli_stop(void) {
+    cli_stdin_stop();
     if (!g_cli_thread_running) return;
 
     g_server->should_quit = 1;

@@ -136,6 +136,7 @@ static void check_class(Game *game, const int class_index, const char *map_name)
     CHECK(player->max_health == expected->health && fabsf(player->health - (float) expected->health) < 1e-3f, "%s health %f/%d", expected->name, player->health, player->max_health);
     CHECK(fabsf(player->speed - expected->speed) < 1e-6f, "%s speed %f", expected->name, player->speed);
     CHECK(player->cosmetics.skin_color == -1 && player->cosmetics.hat == -1 && player->cosmetics.dye == -1, "%s default cosmetics", expected->name);
+    CHECK(player->skins.primary == -1 && player->skins.secondary == -1 && player->skins.melee == -1, "%s default weapon skins", expected->name);
     CHECK(player->wall_jump == expected->wall_jump, "%s player wall_jump", expected->name);
     for (int i = 0; i < player->loadout_size; i++) {
         CHECK(player->ammo[i] == (int) game->weapons[player->loadout[i]]->ammo, "%s ammo slot %d", expected->name, i);
@@ -234,6 +235,34 @@ static void check_cosmetics_packets(void) {
     CHECK(net_packet_read_ent(&full, &packet) && full.slid_cont == 1 && !full.spectate, "V4 ENT slidCont");
     packet.length = NET_ENT_PACKET_V3_SIZE;
     CHECK(net_packet_read_ent(&full, &packet) && full.slid_cont == 1, "V3 ENT slidCont default");
+    // ent[1] sprayIndex rides after slidCont; shorter ENTs read as the default spray 0
+    ent.spray_index = 870;
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V5_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 870, "V5 ENT sprayIndex");
+    packet.length = NET_ENT_PACKET_V4_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 0, "V4 ENT sprayIndex default");
+    packet.length = NET_ENT_PACKET_V4_SIZE + 2;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with a cut sprayIndex accepted");
+    // ent[2] weapon skins + ent[9] meleeIndex ride after sprayIndex (V6); shorter ENTs read as none
+    ent.skins = (PlayerSkins) {406, 1203, 1650};
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V6_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 870 && full.skins.primary == 406 && full.skins.secondary == 1203 &&
+          full.skins.melee == 1650, "V6 ENT weapon skins");
+    packet.length = NET_ENT_PACKET_V5_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 870 && full.skins.primary == -1 && full.skins.secondary == -1 &&
+          full.skins.melee == -1, "V5 ENT weapon skins default");
+    packet.length = NET_ENT_PACKET_V5_SIZE + 4;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with cut weapon skins accepted");
+    ent.skins = PLAYER_SKINS_NONE;
+    ent.spray_index = 0;
+    // a client sends the long ENT only to servers announcing protocol 1.1 (INIT major.minor): 1.0 servers
+    // (older server_bin builds, community servers) drop longer ENTs without a spawn
+    CHECK(net_ent_size_for(1, 0) == NET_ENT_PACKET_V4_SIZE, "ENT to a 1.0 server must stay V4 (%u)", net_ent_size_for(1, 0));
+    CHECK(net_ent_size_for(1, 1) == NET_ENT_PACKET_V6_SIZE && net_ent_size_for(1, 7) == NET_ENT_PACKET_V6_SIZE, "ENT to a 1.1+ server is V6");
+    CHECK(net_ent_size_for(2, 0) == NET_ENT_PACKET_V6_SIZE && net_ent_size_for(0, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
+    CHECK(NET_PROTOCOL_MAJOR == 1 && NET_PROTOCOL_MINOR >= 1, "server_bin announces protocol 1.1+");
     ent.slid_cont = 0;
     memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = 6;

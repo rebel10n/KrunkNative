@@ -5,6 +5,7 @@
 // Emscripten); both call html_ui_dispatch()/html_ui_dispatch_listener() when
 // the page produces an event and html_timers_tick() once per frame.
 #include <html_dom.h>
+#include <shared.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -392,3 +393,14 @@ void html_storage_set(const char *key, const char *value) {
 }
 
 #endif // !__EMSCRIPTEN__
+
+// --------------------------------------------------------------------------- game content URLs
+
+void html_dom_asset_url(const char *path, char *out, const size_t n) {
+    if (!out || !n) return;
+    char rel[512];
+    snprintf(rel, sizeof(rel), "/assets/%s", path ? path : "");
+    char *url = asset_url(rel);
+    snprintf(out, n, "%s", url ? url : rel);
+    free(url);
+}

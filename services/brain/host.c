@@ -86,8 +86,9 @@ int brain_host_game_ex(Brain *b, const char *region, const cJSON *config, int64_
         if (cb) cb(ud, "updating", NULL);
         return 0;
     }
+    /* ticket == 0: ranked (every player holds an account ticket) */
     MmNode *n = registry_pick_host_node(b->registry, region, b->id, mm_settings()->policy.cross_region,
-                                        kn_wall_ms());
+                                        account_id > 0 || !ticket, kn_wall_ms());
     if (!n) {
         if (cb) cb(ud, "NoAvailableServers", NULL);
         return 0;

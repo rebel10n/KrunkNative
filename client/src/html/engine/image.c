@@ -25,6 +25,11 @@
 
 #define IMAGE_KEY_MAX 512
 
+/* Keys below this prefix name files of the game asset tree (assets_path()), not of
+ * ui/: the URLs html_dom_asset_url() writes ("/assets/textures/previews/..."), the
+ * same layout dist/web serves next to the page. */
+#define IMAGE_ASSETS_PREFIX "assets/"
+
 /* SVG entries keep their document and the textures rasterised at the device
  * sizes they were last drawn at (image_texture_sized), least recently used
  * first out. */
@@ -288,6 +293,15 @@ static int image_fetch_web(const char *key, const char *path, unsigned char **by
 #endif
 
 static int image_read(const ImageCache *cache, const char *key, unsigned char **bytes, size_t *len) {
+    /* "/assets/<path>" (html_dom_asset_url): game content, read from the asset tree */
+    if (!strncmp(key, IMAGE_ASSETS_PREFIX, sizeof(IMAGE_ASSETS_PREFIX) - 1)) {
+        const char *assets = assets_path();
+        char *asset = assets ? concat(assets, key + sizeof(IMAGE_ASSETS_PREFIX) - 1) : NULL;
+        const int ok = asset && ensure_asset_file(asset) && read_file(asset, bytes, len) == 0;
+        free(asset);
+        return ok;
+    }
+
     char *path = concat(cache->root, key);
     if (!path) return 0;
 

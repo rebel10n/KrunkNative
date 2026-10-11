@@ -313,6 +313,11 @@ void load_default_maps();
 const cJSON **map_list_with_custom(const cJSON*, size_t*);
 
 Map *map_init(const cJSON*);
+// The prefab id of a raw map object (prefabs.prefabs[i || id || 0], unknown ids -> CUBE).
+int map_raw_object_prefab(const cJSON *raw_obj);
+// 1 when map_init makes a map->objects entry for this raw object (p and s arrays, not a BOT).
+// Code pairing raw_data objects with map->objects in order must skip exactly these.
+int map_raw_object_kept(const cJSON *raw_obj);
 void map_reset(Map*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
 
@@ -390,20 +395,17 @@ typedef struct {
     float time;   // game time of the last hit (seconds)
 } PlayerDamage;
 
+// The store items on a player's weapons (Krunker player.skins = [primary, secondary] and meleeIndex,
+// ENT ent[2] / ent[9]): store.skins indices (the array position in assets/skins.json), -1 = none.
+// A weapon skin only shows on the loadout slot whose weapon it is for (skin.weapon - 1), the melee
+// one only on a melee weapon. Only int32 members, so it embeds unchanged in the packed ENT / SKINS.
 typedef struct {
-    int primary;
-    int secondary;
-
-    int face;
-    int hat;
-    int back;
-    int waist;
-    int melee;
-    int dye;
-
-    int skin_color;
-    int hair_color;
+    int32_t primary;   // player.skins[0]: worn on loadout slot 0
+    int32_t secondary; // player.skins[1]: worn on loadout slot 1
+    int32_t melee;     // meleeIndex: a type-3 item on the melee weapon
 } PlayerSkins;
+
+#define PLAYER_SKINS_NONE ((PlayerSkins) {-1, -1, -1})
 
 // First-person feel tweens (Krunker v3.1.1 TWEEN.Tween on landBobY / jumpBobY / jumpRot,
 // started by players.js jump/resetStep/wall jump). Client-only animation state: only the
@@ -585,6 +587,8 @@ typedef struct Player_t {
     float jump_timer;
     float interact_progress;
     float last_interact;          // players.interact: game.now of the last "int" (config.interactTimer)
+    int spray_index;              // player.sprayIndex (ENT ent[1]): sprays.js index or a type-4 store.skins index
+    float last_spray;             // players.spray: game.now of the last spray (config.sprayTimer)
 
     float *ramp_fix;
 
@@ -657,7 +661,7 @@ typedef struct Player_t {
 
     const Weapon *weapon;
 
-    PlayerSkins skins;
+    PlayerSkins skins;            // weapon / melee store skins (ENT -> SKINS), PLAYER_SKINS_NONE by default
     void *mesh;
 
     ModePlayerState mode;         // game mode stats (lives, caps, tier, ...), shared/src/modes
@@ -682,6 +686,7 @@ int player_change_health(Player*, Player*, float, int); // victim, dealer, damag
 void player_score(Player*, int, int); // player, amount, is_kill_reward
 void player_queue_input(Player*, const Input*);
 int player_accept_input(Player*, Input*); // a network frame: v3.1.1 inputDecode checks (finite, delta clamp, seq floor, 240 cap); 1 = queued
+void player_drain_inputs(Player*);         // procInputs every queued frame now (player_update; io_int before its action)
 void player_proc_input(Player*, const Input*, int, int);
 float player_round3(float v); // JS v.round(3); procInputs rounds delta (ms), yaw and pitch (0.001 rad)
 void player_scroll_weapon(Player*, int dir, int recon); // manager.reload(player, +-1): wheel / melee on melee
@@ -863,7 +868,7 @@ typedef struct Game_t {
     int round_seconds_sent;       // last whole second broadcast (TIMER packet), -1 none
     int kill_count;               // Krunker game.kills (First Blood)
     float now;                    // game time of the current tick (seconds)
-    unsigned char round_endless:1;// /endless: Krunker endTimer = "inf", the round clock is stopped (game_set_endless)
+    unsigned char round_endless:1;// /endless: Krunker endTimer = "inf", the round clock is paused at round_timer (game_set_endless)
     unsigned char leaders_dirty:1;// Krunker leadersUpdated: LEADERBOARD due this tick
     // The in-process offline client's game (client/src/net/local_game.c): game_end_round()
     // keeps the players active behind the end screen (v3.1.1's client plays the endAnim slow
@@ -905,8 +910,12 @@ void game_set_round_time(Game*, float seconds); // debug: seconds left in the ru
 // Interaction (shared/src/interact.c): players.interact / the terminal checks of Player.
 #define GAME_TERMINAL_RADIUS 7.0f      // addTerminal tRadius
 #define GAME_INTERACT_TIMER 0.1f       // config.interactTimer (s)
+#define GAME_SPRAY_TIMER 1.0f          // config.sprayTimer (s)
+#define GAME_SPRAY_RANGE 25.0f         // config.sprayRange
+#define GAME_SPRAY_SCALE 15.0f         // config.sprayScale: the decal's width and height
 int  game_terminal_in_range(const Game*, const Player*, int prompt); // map object index of a terminal the player can open, -1 none; prompt: skip noMsg ones
-void game_player_interact(Game*, Player*, int action, int secondary); // "int": sends NET_PACKET_TERMINAL for every terminal in range (authority)
+void game_player_interact(Game*, Player*, int action, int secondary); // "int": 0 spray (game_player_spray), 1 terminals / gates / banks (authority)
+void game_player_spray(Game*, Player*); // players.spray: NET_PACKET_SPRAY + the "spray" sound when the view ray hits a wide enough face
 // players.js changeInteract priorities: the #interactMsg line the local player gets this tick.
 typedef enum {
     GAME_INTERACT_NONE = -1,
@@ -942,7 +951,7 @@ int  game_spawn_at_checkpoint(Game*, Player*);          // respawn at the player
 // game.playSound -> "s" to every connection: `uid` >= 0 plays at that player (playerSound
 // sid), else at `position`. Names: config.emitterSounds / networkSounds, "asset:<id>" user assets.
 void game_play_sound(Game*, const char *name, int uid, vec3 position, float volume, float rate);
-void game_set_endless(Game*, int on);   // /endless: stop the round clock (TIMER 0) / resume it with a fresh round length
+void game_set_endless(Game*, int on);   // /endless: pause the round clock (TIMER keeps the frozen value) / resume it from there
 void game_send_round_state(Game*, int uid); // TIMER (+ END while the end screen is up) for a joiner
 void game_player_left(Game*, Player*);   // drop references (nuke, damage) to a leaving player
 int game_pick_next_map(const Game*);     // next round's map: random rotation map (no map votes)
@@ -995,6 +1004,7 @@ typedef enum {
     NET_PACKET_VOICE = 32,       // S->C: NetSocialChunk pieces of one relayed clip + alias + sid (Krunker "vc")
     NET_PACKET_BILLBOARD = 33,   // S->C before every INIT: NetBillboardPacket (Krunker init "bill" -> game.updateBillboards)
     NET_PACKET_PLAYER_INFO = 34, // S->C after SPAWN: NetPlayerInfoPacket, a player's account (level, clan, flags) for HUD/nametags
+    NET_PACKET_SKINS = 35,       // S->C right before every SPAWN: NetSkinsPacket, the player's weapon / melee skins (Krunker spawn skins, meleeIndex)
     // Game mode packets (shared/src/modes, Krunker v3.1.1 modes.js), numbered from 40 so the
     // core protocol above can grow without colliding.
     NET_PACKET_MODE_STATE = 40,  // S->C: NetModeStatePacket, full mode snapshot (round start, joiners)
@@ -1020,6 +1030,7 @@ typedef enum {
     NET_PACKET_INTERACT = 61,    // C->S: NetInteractPacket (Krunker "int" action [, secondary])
     NET_PACKET_TERMINAL = 62,    // S->C to the player: NetTerminalPacket (Krunker "ot" uid: openTerminal)
     NET_PACKET_TERMINAL_MSG = 63,// C->S: NetTerminalMsgPacket (Krunker "tmc" uid, text)
+    NET_PACKET_SPRAY = 64,       // S->C to all: NetSprayPacket (Krunker "sp": players.spray -> addSpray)
     // Social hub (shared/include/social.h; Krunker's /api/ws socket + /api/* routes), numbered from 70.
     NET_PACKET_SOCIAL_REQUEST = 70, // C->S: NetSocialChunk pieces of one JSON request frame
     NET_PACKET_SOCIAL_REPLY = 71,   // S->C: NetSocialChunk pieces of one JSON array of reply frames
@@ -1098,6 +1109,13 @@ typedef struct {
     int32_t client_id;
 } NetInitPacket;
 
+// INIT major.minor: the protocol the server speaks. 1.0 servers drop ENTs longer than V4 (38 bytes)
+// without spawning anyone, so a client only sends the longer ENT (V5 spray, V6 weapon skins) to a
+// server that announces at least 1.1 (client_enter_game).
+#define NET_PROTOCOL_MAJOR 1
+#define NET_PROTOCOL_MINOR 1
+uint16_t net_ent_size_for(int major, int minor); // the ENT a client sends to an INIT major.minor server: V6 from 1.1, else V4
+
 typedef struct {
     int32_t class_index;
     int32_t secondary_index; // Krunker ent[5] selectedSecondaryIndex: weapon id, -1 = class default (optional: 4-byte ENT = class only)
@@ -1105,12 +1123,17 @@ typedef struct {
     uint8_t spectate;          // Krunker ent[6] (toggleSpect): join as a spectator, no spawn (optional: only sent when 1)
     uint8_t slid_cont;         // Krunker ent[15] settings.tmp.slidCont ("Non FPS Sliding"): 1 = the slide follows the
                                // view (players.js procInputs). Optional: shorter ENTs read as 1 (the setting's default).
+    int32_t spray_index;       // Krunker ent[1] selectedSprayIndex (-2 Random already resolved). Optional: shorter ENTs read as 0.
+    PlayerSkins skins;         // Krunker ent[2] [primary, secondary] weapon skins + ent[9] meleeIndex (Random resolved).
+                               // Optional: shorter ENTs read as PLAYER_SKINS_NONE.
 } NetEntPacket;
 
 #define NET_ENT_PACKET_MIN_SIZE 4 // class_index only (older clients / bridges)
 #define NET_ENT_PACKET_V2_SIZE 8  // class_index + secondary_index (before cosmetics)
 #define NET_ENT_PACKET_V3_SIZE (offsetof(NetEntPacket, spectate)) // up to cosmetics (older clients)
-#define NET_ENT_PACKET_V4_SIZE (offsetof(NetEntPacket, slid_cont) + 1) // + spectate + slid_cont: what a client sends
+#define NET_ENT_PACKET_V4_SIZE (offsetof(NetEntPacket, slid_cont) + 1) // + spectate + slid_cont
+#define NET_ENT_PACKET_V5_SIZE (offsetof(NetEntPacket, skins)) // + spray_index
+#define NET_ENT_PACKET_V6_SIZE (sizeof(NetEntPacket)) // + weapon / melee skins: what a client sends
 
 typedef struct {
     uint8_t spectating;      // 1: this connection spectates now (no player; every player's state is streamed to it)
@@ -1370,6 +1393,13 @@ typedef struct {
     char clan[8];          // clan tag, "" none
 } NetPlayerInfoPacket;
 
+// The validated (owned) weapon skins of a player, sent before its SPAWN: a separate packet so older
+// clients, which only accept the fixed SPAWN sizes, keep working (they ignore unknown types).
+typedef struct {
+    int32_t uid;
+    PlayerSkins skins;
+} NetSkinsPacket;
+
 // NET_PACKET_JOIN (C->S right after HELLO, before the first ENT). Every field is a
 // NUL-terminated string, "" = not given. game_id + client_key: what the brain's
 // /mm/seek-game returned (one-time key the brain also sent to this server); session:
@@ -1439,6 +1469,17 @@ typedef struct {
     int32_t uid;
     char text[NET_CHAT_TEXT_SIZE]; // #terminalInput value (maxlength 70), NUL-terminated
 } NetTerminalMsgPacket;
+
+// "sp" [sid, sprayIndex, x, y, z, xDr, yDr] (players.spray): the decal's centre (0.1 in front of
+// the face) and its plane rotation in degrees: y_rot (three.js rotation.y) 0 = +z face, 180 = -z,
+// -90 = -x, 90 = +x; x_rot (rotation.x) -90 = top face, 90 = bottom face.
+typedef struct {
+    int32_t uid;          // the sprayer (one spray per player: a new one moves it)
+    int32_t spray_index;  // player.sprayIndex: the client resolves it (sprays.js, store type 4, else spray 0)
+    float position[3];
+    int16_t y_rot;
+    int16_t x_rot;
+} NetSprayPacket;
 
 // io_tp: callers pass eye-height coordinates; the feet go EYE_OFFSET_Y below (playerHeight
 // 11 - cameraHeight 1.5).
@@ -1686,6 +1727,9 @@ uint32_t net_map_hash(const cJSON *map, char **json_out, size_t *size_out);
 char *concat(const char*, const char*);
 const char *assets_path();
 int ensure_asset_file(const char*); // web: fetch into MEMFS on demand, native: no-op returning 1
+// The URL an asset path ("/assets/textures/x.png") is downloaded from, malloc'd (caller frees):
+// web: web_asset_url (asset host + ?v=<version>), native: a copy of the path. NULL on OOM.
+char *asset_url(const char*);
 // web: starts a background download of the asset into MEMFS so a later ensure_asset_file()
 // does not block the frame on the network; 1 = present, 0 = still downloading, -1 = the
 // download failed (ensure_asset_file() reports it). Native: always 1.

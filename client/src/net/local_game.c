@@ -86,6 +86,11 @@ static void local_game_load(Client *client, const int map_index, const int mode_
     client->offline_joined = 0;
 }
 
+// player.sprayIndex from the last ENT (applyEntData ent[1]): kept across respawns and map changes.
+static int g_local_spray_index;
+// player.skins / meleeIndex from the last ENT (ent[2], ent[9]): offline every skin is owned.
+static PlayerSkins g_local_skins = {-1, -1, -1};
+
 // io_ent -> players.add / spawn on the authority, then what SPAWN does on the client.
 static void local_game_spawn(Client *client, const int class_index, const int secondary_index, const PlayerCosmetics cosmetics, const int slid_cont) {
     Game *game = &client->game;
@@ -107,6 +112,8 @@ static void local_game_spawn(Client *client, const int class_index, const int se
     player->secondary_index = secondary_index;
     player->cosmetics = cosmetics;
     player->slid_cont = slid_cont; // gameserver.ts: player.slidCont = ent[15]
+    player->spray_index = g_local_spray_index; // applyEntData: player.sprayIndex = ent[1]
+    player->skins = g_local_skins;             // applyEntData: player.skins = ent[2], meleeIndex = ent[9]
     player_spawn(player); // setClass, spawn point, the mode's loadout / outfit
     client->offline_joined = 1;
     client_player_spawned(client, player, 1);
@@ -164,6 +171,8 @@ static void local_game_ent(Client *client, const void *payload, const uint16_t l
     NetEntPacket ent = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1};
     memcpy(&ent, payload, length < sizeof(ent) ? length : sizeof(ent)); // the client's own struct, maybe without its tail
     if (ent.spectate) return;
+    g_local_spray_index = length >= NET_ENT_PACKET_V5_SIZE ? ent.spray_index : 0;
+    g_local_skins = length >= NET_ENT_PACKET_V6_SIZE ? ent.skins : PLAYER_SKINS_NONE;
     const int late = game_end_late_spawn(&client->game, local_game_player(client)); // io_ent in the vote window
     if (!late && !game_can_spawn(&client->game, local_game_player(client))) return;
 

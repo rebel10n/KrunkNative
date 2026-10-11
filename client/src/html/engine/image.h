@@ -23,6 +23,10 @@
  * decoded in place, see image_decode_data_url), or is
  * empty resolves to a failed entry.  The normalised root-relative path
  * ("img/logo_4.png") is both the cache key and the request URL on the web.
+ * Keys under "assets/" are read from the game asset tree (assets_path(),
+ * ensure_asset_file()) instead of ui/: "/assets/textures/previews/x.png" is
+ * what html_dom_asset_url() writes for Krunker's asset-host images, matching
+ * dist/web, which serves assets/ next to the page.
  *
  * Decoding and pixel format
  * -------------------------

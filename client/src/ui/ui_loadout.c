@@ -17,6 +17,7 @@
 #include <online_mode.h> // offline mode: every skin unlocked
 #include <render_settings.h>
 #include "../viewer/viewer_store.h"
+#include <sprays.h> // SPRAYS_BASE_COUNT
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -155,6 +156,47 @@ void ui_loadout_cosmetics(PlayerCosmetics *out) {
     for (int i = 0; i < 5; i++) *slot[i] = pick[i] >= 0 ? pick[i] : -1;
 }
 
+static int random_owned_skin(int weapon, int type);
+static int weapon_skin(int weapon);
+
+// enterGame's ent[3]/[4]/[14]/[17]/[21]: the same picks, but "Random" (-2) is getRandomOwnedSkin(null, type)
+// for every ENT (none for a guest, who owns nothing).
+static void ent_cosmetics(PlayerCosmetics *out) {
+    ui_loadout_cosmetics(out);
+    static const struct { int which, type; } SLOTS[5] = {
+        {SEL_HAT, 1}, {SEL_BACK, 2}, {SEL_WAIST, 6}, {SEL_FACE, 7}, {SEL_DYE, 5},
+    };
+    int32_t *slot[5] = {&out->hat, &out->back, &out->waist, &out->face, &out->dye};
+    for (int i = 0; i < 5; i++) {
+        if (sel(SLOTS[i].which) == -2) *slot[i] = random_owned_skin(0, SLOTS[i].type);
+    }
+}
+
+// selectedSkinsByWeapon[weapon] for a loadout slot: -1 none; Random (-2) resolves to an owned skin of
+// that weapon (getRandomOwnedSkin(weapon + 1)) for the ENT, and to none for the preview (dJ's hq).
+static int32_t slot_weapon_skin(const int weapon, const int resolve_random) {
+    if (weapon < 0) return -1;
+    const int pick = weapon_skin(weapon);
+    if (pick == -2) return resolve_random ? random_owned_skin(weapon + 1, -1) : -1;
+    return pick >= 0 ? pick : -1;
+}
+
+static void loadout_skins(const int class_index, PlayerSkins *out, const int resolve_random) {
+    const int secondary = ui_loadout_secondary(class_index);
+    out->primary = slot_weapon_skin(class_at(class_index).primary, resolve_random);
+    out->secondary = secondary >= 0 ? slot_weapon_skin(secondary, resolve_random) : -1;
+    const int melee = sel(SEL_MELEE);
+    out->melee = melee == -2 ? (resolve_random ? random_owned_skin(0, 3) : -1) : melee >= 0 ? melee : -1;
+}
+
+void ui_loadout_ent_look(const int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins) {
+    ent_cosmetics(cosmetics);
+    loadout_skins(class_index, skins, 1);
+}
+
+void ui_loadout_preview_skins(const int class_index, PlayerSkins *out) {
+    loadout_skins(class_index, out, 0);
+}
 
 // The secondary the player picked (selectedSecondaryIndex, localStorage "secondaryInd",
 // default 2 = Pistol) as a Krunker weapon id; -1 when the class has no secondary slot.
@@ -272,6 +314,37 @@ static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
     return out;
 }
 
+// ent[1]: selectedSprayIndex; Random (-2) is UTILS.randInt(0, Game.sprays.length - 1) per ENT.
+// Game.sprays are everyone's; a type-4 store spray only while it is owned (offline: all are),
+// anything else is the default spray 0 (addSpray's Game.sprays[0] fallback).
+int ui_loadout_spray(void) {
+    const int pick = sel(SEL_SPRAY);
+    if (pick == -2) return rand() % SPRAYS_BASE_COUNT;
+    if (pick >= 0 && pick < SPRAYS_BASE_COUNT) return pick;
+    const ViewerSkin *skin = store_skin(pick);
+    if (!skin || skin->type != 4) return 0;
+    if (all_skins_unlocked()) return pick;
+    int n = 0, owned = 0;
+    OwnedSkin *skins = owned_skins(&n, 0);
+    for (int i = 0; i < n && !owned; i++) owned = skins[i].ind == pick;
+    free(skins);
+    return owned ? pick : 0;
+}
+
+// getRandomOwnedSkin(weapon, type): a random owned weapon skin of `weapon` (1-based, type < 0) or item
+// of store type `type`; -1 when there is none (a guest owns nothing, offline mode owns everything).
+static int random_owned_skin(const int weapon, const int type) {
+    int n = 0, matches = 0, pick = -1;
+    OwnedSkin *owned = owned_skins(&n, 0);
+    for (int i = 0; i < n; i++) {
+        const ViewerSkin *s = store_skin(owned[i].ind);
+        if (!s || (type < 0 ? s->type != 0 || s->weapon != weapon : s->type != type)) continue;
+        if (rand() % ++matches == 0) pick = owned[i].ind; // reservoir sample: uniform over the matches
+    }
+    free(owned);
+    return pick;
+}
+
 // One owned item card of getItemsList / Select Skin (weapon: the selectSkin weapon, -1 = fn(ind)).
 static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, const char *fn, const char *img_class, const int with_season, const int weapon) {
     const char *col = rarity_color(s);
@@ -291,16 +364,29 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
                weapon >= 0 ? "draggable=\"false\" " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img, o->ind);
 }
 
+// localStorage "skins" parsed once (the class preview asks every frame); writers go through skins_store().
+static cJSON *g_skins_cache;
+static int g_skins_cached;
+
+static void skins_store(const char *text) {
+    html_storage_set("skins", text);
+    cJSON_Delete(g_skins_cache);
+    g_skins_cache = NULL;
+    g_skins_cached = 0;
+}
+
 // dz[weapon]: the saved weapon skin (localStorage "skins" {weapon: index}), -1 none.
 static int weapon_skin(const int weapon) {
-    char buf[1024] = "{}", key[16];
-    html_storage_get("skins", buf, sizeof(buf));
-    cJSON *skins = cJSON_Parse(buf);
+    if (!g_skins_cached) {
+        char buf[1024] = "{}";
+        html_storage_get("skins", buf, sizeof(buf));
+        g_skins_cache = cJSON_Parse(buf);
+        g_skins_cached = 1;
+    }
+    char key[16];
     snprintf(key, sizeof(key), "%d", weapon);
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive(skins, key);
-    const int out = cJSON_IsNumber(v) ? v->valueint : -1;
-    cJSON_Delete(skins);
-    return out;
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_skins_cache, key);
+    return cJSON_IsNumber(v) ? v->valueint : -1;
 }
 
 // The loadout row's name: store.skins[i].name, else Random / the default.
@@ -800,7 +886,7 @@ void ui_loadout_select_skin(const int index, const int weapon) {
     // dz[weapon] = store.skins[index] || index == -2 ? index : undefined
     if (index == -2 || store_skin(index)) cJSON_AddNumberToObject(skins, key, index);
     char *text = cJSON_PrintUnformatted(skins);
-    if (text) html_storage_set("skins", text);
+    if (text) skins_store(text);
     free(text);
     cJSON_Delete(skins);
     refresh_class_box();
@@ -854,7 +940,7 @@ void ui_loadout_action(const int action) {
             const cJSON *ci = cJSON_GetObjectItem(preset, "classindex");
             if (cJSON_IsNumber(ci)) menu_set_class_index(ci->valueint, 0);
             const cJSON *skins = cJSON_GetObjectItem(preset, "skins");
-            if (cJSON_IsString(skins)) html_storage_set("skins", cJSON_GetStringValue(skins));
+            if (cJSON_IsString(skins)) skins_store(cJSON_GetStringValue(skins));
             refresh_class_box();
             menu_rerender_if_open(3);
         }

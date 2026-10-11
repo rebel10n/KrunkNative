@@ -761,7 +761,10 @@ static void press_button(Client *client, const int code) {
     if (client && spectate_press_key(client, code)) return;
     Player *me = client ? client->me : NULL;
     if (!me || !me->active) return;
-    if (bind_is(UI_CONTROL_SPRAY, code)) log_once(UI_CONTROL_SPRAY, "spray (int 0)");
+    if (bind_is(UI_CONTROL_SPRAY, code)) { // io.send("int", 0): the authority places it (players.spray)
+        const NetInteractPacket spray = {.action = 0};
+        client_net_send(client, NET_PACKET_INTERACT, &spray, sizeof(spray));
+    }
     if (bind_is(UI_CONTROL_INTERACT, code)) ui_terminal_interact(client, 0);     // io.send("int", 1)
     if (bind_is(UI_CONTROL_INTERACT_SEC, code)) ui_terminal_interact(client, 1); // io.send("int", 1, true)
     if (bind_is(UI_CONTROL_DROP, code)) log_once(UI_CONTROL_DROP, "drop (int 2)");

@@ -392,8 +392,8 @@ static void net_send_init(ClientConnection *client) {
     net_send_map_info(client);
 
     const NetInitPacket packet = {
-        .major = 1,
-        .minor = 0,
+        .major = NET_PROTOCOL_MAJOR,
+        .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6 (client_enter_game sends them only then)
         .patch = 0,
         .map_index = g_server->game.current_map_index,
         .mode_index = game_mode_id(&g_server->game), // Krunker "init" modeIndex: the mode id
@@ -406,6 +406,10 @@ static void net_send_init(ClientConnection *client) {
 }
 
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
+    // The weapon / melee skins first: the client builds the player's meshes on SPAWN.
+    const NetSkinsPacket skins = {.uid = player->uid, .skins = player->skins};
+    net_send_packet(client->fd, NET_PACKET_SKINS, &skins, sizeof(skins));
+
     NetSpawnPacket packet = {
         .uid = player->uid,
         .is_you = (uint8_t) is_you,
@@ -497,6 +501,8 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->secondary_index = client->secondary_index;
     client->player->cosmetics = client->cosmetics;
     client->player->slid_cont = client->slid_cont; // gameserver.ts: player.slidCont = ent[15]
+    client->player->spray_index = client->spray_index; // applyEntData: player.sprayIndex = ent[1]
+    client->player->skins = client->skins;             // applyEntData: player.skins = ent[2], meleeIndex = ent[9]
     player_spawn(client->player);
     client->joined = 1;
     net_mark_client_spawned(client);
@@ -776,6 +782,8 @@ void net_add_client(ClientConnection *client) {
     client->secondary_index = -1;
     client->cosmetics = PLAYER_COSMETICS_NONE;
     client->slid_cont = 1;
+    client->spray_index = 0;
+    client->skins = PLAYER_SKINS_NONE;
     client->chat_limiter = (NetChatLimiter) {0};
     client->ping_seq = 0;
     client->ping_ms = -1;
@@ -1035,6 +1043,8 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             client->secondary_index = ent.secondary_index;
             client->cosmetics = ent.cosmetics;
             client->slid_cont = ent.slid_cont;
+            client->spray_index = ent.spray_index;
+            client->skins = ent.skins;
 
             // brain-linked: the first ENT waits for the JOIN / account lookup (server/src/accounts.c)
             if (accounts_gate_ent(client, ent.spectate)) net_resume_ent(client, ent.spectate);

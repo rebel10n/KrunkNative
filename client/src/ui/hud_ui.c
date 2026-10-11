@@ -40,6 +40,7 @@ void hud_ui_hit(Client*, int kill);
 #include <html_dom.h>
 #include <ui_logic.h>
 #include <render_settings.h>
+#include "../viewer/viewer_store.h" // store.skins: the melee skin icon
 #include <streamer.h>
 #include <spectate.h>
 #include <cJSON.h>
@@ -120,6 +121,7 @@ typedef struct {
     int loadout_size;
     const Weapon *loadout[HUD_UI_LOADOUT_MAX];
     int can_throw;                    // player.canThrow: melee slot shows the knife, else fists (thrown)
+    int melee_icon;                   // store.skins[meleeIndex].id || 0: melee/icon_<id> of the melee skin
 } HudUiExtra;
 
 // One gE() row (Krunker's bR entry): #feed_N in #killFeed, or #chatMsg_N in #chatList
@@ -309,26 +311,30 @@ static void hud_health_bar_html(int hp, int max, int segs, char *out, const size
 // weapDisplay icon: `canThrow && melee` -> the melee skin icon (default knife: melee/icon_0),
 // else weaponConfig.icon; a thrown knife (canThrow false) leaves the melee slot on the
 // Combat Knife's own icon_0, the fists, until refillKnife / respawn.
-static const char *hud_weapon_icon_src(const Weapon *slot, const int can_throw, char *out, const size_t size) {
-    if (slot && slot->melee && can_throw) snprintf(out, size, "textures/melee/icon_0.png");
+static const char *hud_weapon_icon_src(const Weapon *slot, const int can_throw, const int melee_icon, char *out, const size_t size) {
+    if (slot && slot->melee && can_throw && melee_icon > 0) {
+        char path[64]; // a skin's icon lives with the game assets, not in the page's textures/
+        snprintf(path, sizeof(path), "textures/melee/icon_%d.png", melee_icon);
+        html_dom_asset_url(path, out, size);
+    } else if (slot && slot->melee && can_throw) snprintf(out, size, "textures/melee/icon_0.png");
     else snprintf(out, size, "textures/weapons/%s.png", slot && slot->icon ? slot->icon : "icon_0");
     return out;
 }
 
 // weapDisplay.innerHTML (player manager, isYou branch): one .weapItem per slot, the held
 // one at full opacity, holstered ones at 0.7 with their swap key.
-static void hud_weapon_rack_html(const Weapon *const *loadout, const int count, const int index, const int can_throw, char *out,
+static void hud_weapon_rack_html(const Weapon *const *loadout, const int count, const int index, const int can_throw, const int melee_icon, char *out,
                                  const size_t size) {
     size_t len = 0;
     out[0] = 0;
 
     for (int i = 0; i < count && i < HUD_UI_LOADOUT_MAX; i++) {
-        char src[96];
+        char src[256];
         hb_append(out, size, &len, "<div class='weapItem' id='weapItem_%d'>", i);
         if (i) hb_append(out, size, &len, "<div class='weapKey'>%s</div>", WEAP_KEYS[i]);
         hb_append(out, size, &len, "<img style='opacity:%s%s' class='weapIcon' src='%s'%s></div>",
             i == index ? "1" : "0.7", i ? ";margin-right:25px" : "",
-            hud_weapon_icon_src(loadout[i], can_throw, src, sizeof(src)),
+            hud_weapon_icon_src(loadout[i], can_throw, melee_icon, src, sizeof(src)),
             loadout[i] && loadout[i]->melee ? " id='weapIconMel'" : "");
     }
 }
@@ -668,6 +674,8 @@ static void hud_loadout(const Player *me, HudUiExtra *extra) {
     extra->loadout_size = 0;
     extra->loadout_index = me->loadout_index;
     extra->can_throw = me->can_throw;
+    const ViewerSkin *melee = viewer_skin(me->skins.melee);
+    extra->melee_icon = melee && melee->type == 3 && melee->id > 0 ? melee->id : 0;
     for (int i = 0; i < me->loadout_size && i < HUD_UI_LOADOUT_MAX; i++) {
         const int id = me->loadout ? me->loadout[i] : -1;
         extra->loadout[extra->loadout_size++] = id >= 0 && (size_t) id < weapon_count ? weapons[id] : NULL;
@@ -1614,8 +1622,8 @@ static void hud_render_loadout(const HudUiExtra *extra, const int rebuild) {
     if (!host) return;
 
     if (rebuild) {
-        char html[1024];
-        hud_weapon_rack_html(extra->loadout, extra->loadout_size, extra->loadout_index, extra->can_throw, html, sizeof(html));
+        char html[2048];
+        hud_weapon_rack_html(extra->loadout, extra->loadout_size, extra->loadout_index, extra->can_throw, extra->melee_icon, html, sizeof(html));
         html_dom_set_html(host, html);
         g_hud_ui.rack_can_throw = extra->can_throw;
         return;
@@ -1633,8 +1641,8 @@ static void hud_render_loadout(const HudUiExtra *extra, const int rebuild) {
         for (HtmlElem next = img; next; next = html_dom_next(next)) img = next;
         if (img) html_dom_set_style(img, "opacity", i == extra->loadout_index ? "1" : "0.7");
         if (img && throw_changed && extra->loadout[i] && extra->loadout[i]->melee) {
-            char src[96];
-            html_dom_set_attr(img, "src", hud_weapon_icon_src(extra->loadout[i], extra->can_throw, src, sizeof(src)));
+            char src[256];
+            html_dom_set_attr(img, "src", hud_weapon_icon_src(extra->loadout[i], extra->can_throw, extra->melee_icon, src, sizeof(src)));
         }
     }
 }
@@ -2688,7 +2696,8 @@ void client_hud_html_tick(Client *client, const float now_f) {
     const int scope_changed = force || next.scoped != hud->scoped;
     const int aim_dot_changed = force || next.aim_dot != hud->aim_dot;
     const int loadout_rebuild = force || next_extra.loadout_size != ui->extra.loadout_size ||
-                                memcmp(next_extra.loadout, ui->extra.loadout, sizeof(next_extra.loadout)) != 0;
+                                memcmp(next_extra.loadout, ui->extra.loadout, sizeof(next_extra.loadout)) != 0 ||
+                                next_extra.melee_icon != ui->extra.melee_icon;
     const int loadout_changed = loadout_rebuild || next_extra.loadout_index != ui->extra.loadout_index || next.weapon != hud->weapon ||
                                 next_extra.can_throw != ui->extra.can_throw;
     char board_html[4096];

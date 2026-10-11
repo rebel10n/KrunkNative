@@ -37,6 +37,18 @@ docs/versions.txt`). `{a..b}` and `{x,y}` expand like shell braces; a listed fil
 reference does not serve stops the import. Add a line when code starts generating a new
 image path (audit: `KRUNKNATIVE_HTML_IMAGE_LOG=<file>` while walking the UI natively).
 
+## Game content mod.zip lacks
+
+`game_assets.py` (`make assets-import`, not part of `import.py`: `assets/` is not committed)
+copies whole directories of the v3.1.1 `public/` tree into `assets/`, byte-identical:
+`textures/previews/` (attach, cosmetics, melee, weapons), the item previews
+`UTILS.getPreview(skin, store)` loads from Krunker's asset host
+(`assetsUrl("/textures/previews/" ...)`). The C UI writes their URLs with
+`html_dom_asset_url()` (native `/assets/...`, read from `assets_path()` by the engine; web the
+asset host's versioned URL), so they are not copied into `ui/`. `--check` lists files that are
+missing or differ. Deploy: `ansible-playbook central.yml --tags web` (role kn_web syncs
+`assets/` and rehashes `assets/version.txt`).
+
 ## Model viewer page
 
 `viewer_page.py` (step of `import.py`, skip with `--no-viewer`) writes

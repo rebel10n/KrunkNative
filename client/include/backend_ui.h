@@ -51,7 +51,7 @@ int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns t
 void account_elo_icon_html(char *out, size_t n, double elo, const char *style); // UTILS.eloIconHTML
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)
-void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin) page path
+void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin): its asset-host URL (html_dom_asset_url)
 void store_wheels_html(StrBuf *sb);         // Store tab 0 cards
 int  store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void store_ui_frame(const cJSON *frame);    // "spin" replies

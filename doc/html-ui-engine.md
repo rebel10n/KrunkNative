@@ -110,6 +110,16 @@ window `resize` (`menu_scale_base`).
 Every dispatch is logged to stderr as `[ui] handler name(args) type target=N` or
 `[ui] listener ...` (hover events are not logged), which is what the smoke tests grep.
 
+### Game content URLs
+
+- `html_dom_asset_url(path, out, n)` is Krunker's `UTILS.assetsUrl()`: the URL of
+  `assets/<path>` for an `<img src>` / CSS `url()` the C UI writes (item previews
+  `textures/previews/...`, sprays; `store_skin_preview()`, `viewer_skin_preview_path()`).
+  Natively `/assets/<path>`, which the engine's image cache reads from `assets_path()`
+  (keys under `assets/`, `engine/image.c`); on the web the asset host's versioned URL
+  (`Module.krunkNativeAssetBase` + `assets/<path>?v=<assets/version.txt>`). Images that
+  ship in `ui/` keep page-relative URLs.
+
 ### Timers and storage
 
 - `html_timer_add(ms, fn, user)` / `html_timer_cancel(id)` replace `setTimeout`; the

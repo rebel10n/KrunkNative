@@ -119,12 +119,15 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1};
             memcpy(&packet, payload, length);
 
-            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u}",
+            const PlayerSkins skins = length >= NET_ENT_PACKET_V6_SIZE ? packet.skins : PLAYER_SKINS_NONE;
+            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u,\"spray_index\":%d,\"skins\":[%d,%d],\"melee\":%d}",
                    (unsigned int) type,
                    packet.class_index,
                    packet.secondary_index,
                    (unsigned int) (length > NET_ENT_PACKET_V3_SIZE ? packet.spectate : 0),
-                   (unsigned int) (length > offsetof(NetEntPacket, slid_cont) ? packet.slid_cont : 1));
+                   (unsigned int) (length > offsetof(NetEntPacket, slid_cont) ? packet.slid_cont : 1),
+                   length >= NET_ENT_PACKET_V5_SIZE ? packet.spray_index : 0,
+                   skins.primary, skins.secondary, skins.melee);
             break;
         }
         case NET_PACKET_SPAWN: {
@@ -383,6 +386,19 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             LOG_READ(NetPopupPacket, "popup");
             packet.text[sizeof(packet.text) - 1] = 0;
             printf("{\"type\":\"popup\",\"id\":%u,\"text\":\"%s\"}", (unsigned int) type, packet.text);
+            break;
+        }
+        case NET_PACKET_SPRAY: { // "sp"
+            LOG_READ(NetSprayPacket, "spray");
+            printf("{\"type\":\"spray\",\"id\":%u,\"uid\":%d,\"index\":%d,\"position\":[%g,%g,%g],\"y_rot\":%d,\"x_rot\":%d}",
+                   (unsigned int) type, packet.uid, packet.spray_index, packet.position[0], packet.position[1], packet.position[2],
+                   packet.y_rot, packet.x_rot);
+            break;
+        }
+        case NET_PACKET_SKINS: {
+            LOG_READ(NetSkinsPacket, "skins");
+            printf("{\"type\":\"skins\",\"id\":%u,\"uid\":%d,\"skins\":[%d,%d],\"melee\":%d}",
+                   (unsigned int) type, packet.uid, packet.skins.primary, packet.skins.secondary, packet.skins.melee);
             break;
         }
 #undef LOG_READ

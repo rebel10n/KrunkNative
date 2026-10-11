@@ -173,6 +173,7 @@ typedef struct {
     const char *map_path;
     unsigned short port;
     int headless;
+    int no_cli;         // --no-cli: no console thread, stdin is never read
     int help;
     const char *mode;   // --mode: a Krunker mode alias / name / id, or "rotation"
     float round_seconds; // --round-seconds: round length override (debug: quick end screen / rotation tests)
@@ -355,6 +356,7 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
 
         if (!strcmp(arg, "--headless") || !strcmp(arg, "--no-cli")) {
             args->headless = 1;
+            if (!strcmp(arg, "--no-cli")) args->no_cli = 1;
             continue;
         }
 
@@ -407,7 +409,9 @@ static void print_usage(FILE *stream, const char *argv0) {
             "  --open-cheats cheats (/noclip /god /tp, the noclip key ...) for everyone while perms are off,\n"
             "                like v3.1.1 (gameserver.cheats \"all\"); by default only DEV accounts, ops,\n"
             "                the custom host and clients on this machine get them\n"
-            "  --headless    no interactive console (implied when stdin/stdout is not a terminal)\n"
+            "  --headless    no interactive console (implied when stdin/stdout is not a terminal);\n"
+            "                console commands are still read line by line from stdin\n"
+            "  --no-cli      no console at all: stdin is never read (systemd, supervisors)\n"
             "\n"
             "Coordinator / config (config/config.json \"gameserver\", doc/backend.md section 8):\n"
             "  --config FILE        config file (default: $KN_CONFIG, else config/config.json)\n"
@@ -757,7 +761,7 @@ int main(int argc, char **argv) {
     } else if (!server_wait_for_net_startup()) {
         info_query_start(); // server-info query (UDP) + optional finder heartbeat
         rcon_start();       // local rcon (rcon_port + rcon_password)
-        if (cli_start(interactive)) server_log_error("Interactive console unavailable, running headless");
+        if (cli_start(interactive, !args.no_cli)) server_log_error("Interactive console unavailable, running headless");
         if (cli_is_interactive()) server_log("Type 'help' for commands, 'quit' or Ctrl+C to stop.");
     }
 

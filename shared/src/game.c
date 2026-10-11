@@ -436,21 +436,23 @@ void game_set_round_time(Game *game, const float seconds) {
     game->round_seconds_sent = -1;
 }
 
-// /endless (v3.1.1 server cmd_endless): endTimer = "inf" stops the clock and every
-// client gets "t" 00:00; turning it off restores a full round (gameTime) and resumes.
+// /endless (v3.1.1 dev cmd_endless, endTimer = "inf"). Intentional difference: the
+// reference zeroes gameTimer (every client gets "t" 00:00) and turning it off restores a
+// full gameTime round; KrunkNative pauses the clock instead. On: round_timer is kept and
+// every client gets the frozen value; off: the countdown resumes from exactly there.
+// Toggling never touches scores or restarts the round.
 void game_set_endless(Game *game, const int on) {
     if (!game->ready || game->end_timer > 0.0f) return;
+    if (game->round_endless == !!on) return;
 
     game->round_endless = (unsigned char) !!on;
-    game->round_seconds_sent = -1;
-    if (on) {
-        game->round_timer = 0.0f;
-        game_send_timer(game, NET_TARGET_ALL, 0, 0);
-        return;
-    }
+    game->round_seconds_sent = -1; // off: game_tick_round resends the clock on the next tick
 
-    const float minutes = (float) game->config.game_time;
-    game->round_timer = game->round_length > 0.0f ? game->round_length : minutes > 0.0f ? minutes * 60.0f : 240.0f;
+    const int clocked = !(game->mode && game->mode->config.timed) && game->round_timer > 0.0f;
+    if (on && clocked) {
+        game->round_seconds_sent = (int) game->round_timer;
+        game_send_timer(game, NET_TARGET_ALL, game->round_seconds_sent, 0); // the frozen clock
+    }
 }
 
 // What a client that connects mid-round needs: the clock, or the end screen.
