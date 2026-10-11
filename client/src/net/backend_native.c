@@ -4,7 +4,7 @@
 // results to the main thread through mutex-protected queues drained by backend_poll().
 // http:// and ws://, plus https:// and wss:// when the build found OpenSSL
 // (KRUNKNATIVE_HAVE_TLS: libssl, peer verified against the system CA store and the
-// host name; the online-mode defaults https://coordinator.krunker.party need it).
+// host name; the online-mode defaults https://coordinator.krunk.io need it).
 #ifndef __EMSCRIPTEN__
 #include <backend.h>
 #include <cJSON.h>
@@ -324,7 +324,7 @@ void backend_init(const char *cli_url) {
     if ((!url || !url[0]) && html_storage_get("knBrainUrl", saved, sizeof(saved)) > 0) url = saved; // client setting
     char local[256] = "";
     if (!url || !url[0]) {
-        // nothing configured: the mode's account service (online: coordinator.krunker.party), probed first
+        // nothing configured: the mode's account service (online: coordinator.krunk.io), probed first
         snprintf(local, sizeof(local), "%s", online_default_account_url());
         url = local;
         g_url_default = 1;

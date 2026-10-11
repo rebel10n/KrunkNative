@@ -158,6 +158,75 @@ else ()
     add_subdirectory(client/lib/glad)
     add_subdirectory(client/lib/glfw)
 
+    # GL BACKEND (client/include/gl.h; README.md "ANGLE / Metal (macOS)"):
+    #   desktop  OpenGL 4.5 core through client/lib/glad (4.1 core on macOS: Apple's deprecated GL)
+    #   angle    OpenGL ES 3.0 on ANGLE's libEGL/libGLESv2 through client/lib/glad_gles: Metal on
+    #            macOS, Vulkan/OpenGL on Linux (testing). Compiles the renderer with KN_GLES, the
+    #            same GL subset as the web build. ANGLE_DIR = tools/angle/build-angle.sh output
+    #            (lib/ + include/); its runtime libraries are copied next to client_bin, which
+    #            finds them through an @executable_path / $ORIGIN rpath.
+    #   auto     (default) angle on macOS when ANGLE_DIR holds an ANGLE build, else desktop
+    set(KRUNKNATIVE_GL_BACKEND auto CACHE STRING
+        "Client GL backend: auto (macOS: angle if ANGLE_DIR is set), desktop (OpenGL 4.5 / macOS 4.1 core) or angle (OpenGL ES 3.0 on ANGLE: Metal on macOS)")
+    set_property(CACHE KRUNKNATIVE_GL_BACKEND PROPERTY STRINGS auto desktop angle)
+    set(ANGLE_DIR "$ENV{ANGLE_DIR}" CACHE PATH "ANGLE build for KRUNKNATIVE_GL_BACKEND=angle (lib/libEGL, lib/libGLESv2, include/EGL)")
+    if (NOT ANGLE_DIR AND NOT "$ENV{ANGLE_DIR}" STREQUAL "") # `make angle` after a first configure
+        set(ANGLE_DIR "$ENV{ANGLE_DIR}" CACHE PATH "ANGLE build for KRUNKNATIVE_GL_BACKEND=angle" FORCE)
+    endif ()
+    set(KRUNKNATIVE_GL_ANGLE OFF)
+    if (KRUNKNATIVE_GL_BACKEND STREQUAL "angle" OR (KRUNKNATIVE_GL_BACKEND STREQUAL "auto" AND APPLE))
+        find_library(ANGLE_EGL_LIBRARY NAMES EGL PATHS ${ANGLE_DIR}/lib ${ANGLE_DIR} NO_DEFAULT_PATH)
+        find_library(ANGLE_GLESV2_LIBRARY NAMES GLESv2 PATHS ${ANGLE_DIR}/lib ${ANGLE_DIR} NO_DEFAULT_PATH)
+        find_path(ANGLE_INCLUDE_DIR EGL/eglext_angle.h PATHS ${ANGLE_DIR}/include NO_DEFAULT_PATH)
+        if (ANGLE_EGL_LIBRARY AND ANGLE_GLESV2_LIBRARY AND ANGLE_INCLUDE_DIR)
+            set(KRUNKNATIVE_GL_ANGLE ON)
+        elseif (KRUNKNATIVE_GL_BACKEND STREQUAL "angle")
+            message(FATAL_ERROR "KRUNKNATIVE_GL_BACKEND=angle needs -DANGLE_DIR=<dir> (or $ANGLE_DIR) holding "
+                "lib/libEGL, lib/libGLESv2 and include/EGL/eglext_angle.h: build one with "
+                "`make angle` / tools/angle/build-angle.sh <dir> (ANGLE_DIR='${ANGLE_DIR}')")
+        else ()
+            message(WARNING "macOS without ANGLE (ANGLE_DIR='${ANGLE_DIR}'): falling back to Apple's deprecated "
+                "OpenGL 4.1. Build ANGLE (Metal) with `make angle` and reconfigure with ANGLE_DIR=<dir>.")
+        endif ()
+    endif ()
+    if (KRUNKNATIVE_GL_ANGLE)
+        add_subdirectory(client/lib/glad_gles)
+        get_filename_component(ANGLE_LIB_DIR ${ANGLE_GLESV2_LIBRARY} DIRECTORY)
+        message(STATUS "GL backend: ANGLE (OpenGL ES 3.0) from ${ANGLE_LIB_DIR}")
+        # GLFW dlopens EGL/GLESv2 itself: point it at ANGLE's (already loaded through the client's
+        # link to libEGL), never the system libEGL.so.1.
+        if (APPLE)
+            target_compile_definitions(glfw PRIVATE _GLFW_EGL_LIBRARY="@rpath/libEGL.dylib" _GLFW_GLESV2_LIBRARY="@rpath/libGLESv2.dylib")
+            file(GLOB ANGLE_RUNTIME_FILES ${ANGLE_LIB_DIR}/*.dylib ${ANGLE_LIB_DIR}/*.json)
+        else ()
+            target_compile_definitions(glfw PRIVATE _GLFW_EGL_LIBRARY="libEGL.so" _GLFW_GLESV2_LIBRARY="libGLESv2.so")
+            file(GLOB ANGLE_RUNTIME_FILES ${ANGLE_LIB_DIR}/*.so ${ANGLE_LIB_DIR}/*.so.* ${ANGLE_LIB_DIR}/*.json)
+        endif ()
+        # ANGLE runtime (libEGL, libGLESv2, SwiftShader Vulkan ICD when built) next to the binaries.
+        add_custom_target(angle_runtime
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ANGLE_RUNTIME_FILES} ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Copying ANGLE runtime libraries next to the client")
+    else ()
+        message(STATUS "GL backend: desktop OpenGL")
+    endif ()
+    # Links `target` to the selected GL flavour: loader, KN_GLES defines, ANGLE libEGL + rpath.
+    function(krunknative_link_gl target)
+        if (KRUNKNATIVE_GL_ANGLE)
+            target_link_libraries(${target} PRIVATE glad_gles ${ANGLE_EGL_LIBRARY})
+            target_include_directories(${target} PRIVATE ${ANGLE_INCLUDE_DIR})
+            target_compile_definitions(${target} PRIVATE KRUNKNATIVE_GL_ANGLE=1)
+            add_dependencies(${target} angle_runtime)
+            # Only the binary's own directory: no absolute ANGLE_DIR path in shipped binaries.
+            if (APPLE)
+                set_target_properties(${target} PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "@executable_path")
+            else ()
+                set_target_properties(${target} PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")
+            endif ()
+        else ()
+            target_link_libraries(${target} PRIVATE glad)
+        endif ()
+    endfunction ()
+
     add_subdirectory(server/lib/replxx)
 
     add_subdirectory(shared/lib/cJSON)
@@ -177,7 +246,8 @@ else ()
     # Headless GPU mode (client/include/headless.h: KRUNKNATIVE_HEADLESS=1 / --headless):
     # an EGL context on a device display, no X11/Wayland window. Linux with libEGL only
     # (libglvnd: NVIDIA's and Mesa's EGL vendors); without it the mode reports itself unavailable.
-    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # With KRUNKNATIVE_GL_BACKEND=angle the EGL is ANGLE's on every platform (macOS included).
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT KRUNKNATIVE_GL_ANGLE)
         set(OpenGL_GL_PREFERENCE GLVND)
         find_package(OpenGL COMPONENTS EGL)
         if (NOT TARGET OpenGL::EGL)
@@ -185,7 +255,9 @@ else ()
         endif ()
     endif ()
     function(krunknative_link_headless target)
-        if (TARGET OpenGL::EGL)
+        if (KRUNKNATIVE_GL_ANGLE)
+            target_compile_definitions(${target} PRIVATE KRUNKNATIVE_HEADLESS_EGL=1) # libEGL: krunknative_link_gl
+        elseif (TARGET OpenGL::EGL)
             target_link_libraries(${target} PRIVATE OpenGL::EGL)
             target_compile_definitions(${target} PRIVATE KRUNKNATIVE_HEADLESS_EGL=1)
         endif ()
@@ -194,7 +266,8 @@ else ()
     # CLIENT
     add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
     target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
-    target_link_libraries(${CLIENT_BINARY} PRIVATE glfw glad freetype Threads::Threads m)
+    target_link_libraries(${CLIENT_BINARY} PRIVATE glfw freetype Threads::Threads m)
+    krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
     target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})
     krunknative_link_headless(${CLIENT_BINARY})
@@ -246,6 +319,9 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(proc_input_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+
+    # knet UDP transport (shared/src/knet.c only: no game code, no sockets)
+    add_executable(knet_test shared/include/knet.h shared/src/knet.c shared/tests/knet_test.c)
 
     add_executable(class_spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/class_spawn_test.c)
     target_link_libraries(class_spawn_test PRIVATE m)
@@ -301,7 +377,8 @@ else ()
             ${HTML_ENGINE_SOURCES} ${HTML_ENGINE_HEADERS}
             ${SHARED_HEADERS} ${SHARED_SOURCES})
         krunknative_add_html_sources(ui_test ENGINE SOURCES html_ui.c html_dom_core.c)
-        target_link_libraries(ui_test PRIVATE lexbor freetype glfw glad Threads::Threads m)
+        target_link_libraries(ui_test PRIVATE lexbor freetype glfw Threads::Threads m)
+        krunknative_link_gl(ui_test)
         krunknative_link_headless(ui_test)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
             target_link_libraries(ui_test PRIVATE ws2_32) # shared/src/net.c

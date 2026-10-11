@@ -586,8 +586,42 @@ static int resolve_offline_map(const Game *game, const char *raw, ResReason *rea
     return -1;
 }
 
+// A catalogue map by name (map_catalog_resolve: quotes, case, spaces/underscores, a unique
+// prefix), joined to the game's list like /map and Host Game (map_catalog_slot): the
+// offline list is the public rotation, which leaves out Shipyard and Soul Sanctum.
+// Numbers stay indices into the list /maps prints. -1 = not a catalogue map (or the
+// candidates of an ambiguous prefix were printed, *reason = RES_AMBIGUOUS).
+static int resolve_catalog_map(Game *game, const char *raw, ResReason *reason) {
+    double d;
+    if (js_number(raw, &d)) return -1;
+    int cands[64];
+    size_t cand_n = 0;
+    const int index = map_catalog_resolve(raw, cands, sizeof(cands) / sizeof(cands[0]), &cand_n);
+    if (index == -2) {
+        char list[CON_LINE_MAX] = "";
+        size_t len = 0;
+        for (size_t i = 0; i < cand_n && i < sizeof(cands) / sizeof(cands[0]) && len < sizeof(list); i++) {
+            const MapCatalogEntry *e = map_catalog_at((size_t) cands[i]);
+            len += (size_t) snprintf(list + len, sizeof(list) - len, "%s%s", i ? ", " : "",
+                                     e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key);
+        }
+        appendf(COL_ERROR, "Map '%s' is ambiguous (%d matches): %s", raw, (int) cand_n, list);
+        *reason = RES_AMBIGUOUS;
+        return -1;
+    }
+    if (index < 0) return -1;
+    const int slot = map_catalog_slot(&game->maps, &game->map_count, (size_t) index);
+    if (slot < 0) {
+        appendf(COL_ERROR, "Map '%s' could not be loaded.", map_catalog_at((size_t) index)->name);
+        *reason = RES_AMBIGUOUS; // reported
+        return -1;
+    }
+    *reason = RES_OK;
+    return slot;
+}
+
 static void off_map(const int argc, char **argv) {
-    const Game *game = &con_client()->game;
+    Game *game = &con_client()->game;
     if (!game->map_count) {
         append("No built-in map list available.", COL_ERROR);
         return;
@@ -601,8 +635,10 @@ static void off_map(const int argc, char **argv) {
         appendf(COL_INFO, "Current map: %s", label);
         return;
     }
-    ResReason reason;
-    const int index = resolve_offline_map(game, raw, &reason);
+    ResReason reason = RES_NOT_FOUND;
+    int index = resolve_catalog_map(game, raw, &reason);
+    if (index < 0 && reason == RES_AMBIGUOUS) return; // printed
+    if (index < 0) index = resolve_offline_map(game, raw, &reason); // indices, non-catalogue maps
     if (index < 0) {
         if (reason == RES_AMBIGUOUS) appendf(COL_ERROR, "Map '%s' is ambiguous. Use /maps to list choices.", raw);
         else appendf(COL_ERROR, "Map '%s' not found. Use /maps to list choices.", raw);
@@ -727,6 +763,22 @@ static void off_maps(const int argc, char **argv) {
         len += (size_t) snprintf(list + len, sizeof(list) - len, "%s%s", i ? ", " : "", name ? name : "");
     }
     append(list, COL_LOG);
+
+    // catalogue maps outside the list (rotation leaves out Shipyard / Soul Sanctum): `map` loads them
+    char more[CON_LINE_MAX * 2] = "";
+    size_t more_len = 0;
+    for (size_t i = 0; i < map_catalog_count() && more_len < sizeof(more); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        int listed = 0; // index_of_json: no map loads just to print the list
+        for (size_t j = 0; j < game->map_count && !listed; j++) listed = map_catalog_index_of_json(game->maps[j]) == (int) i;
+        if (listed) continue;
+        more_len += (size_t) snprintf(more + more_len, sizeof(more) - more_len, "%s%s", more_len ? ", " : "",
+                                      e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key);
+    }
+    if (more[0]) {
+        append("Also available (map <name>):", COL_INFO);
+        append(more, COL_LOG);
+    }
 }
 
 static void off_borders(const int argc, char **argv) {

@@ -10,9 +10,10 @@
  * /queue/update-ready, /queue/update-queues, /queue/update-class,
  * /queue/kick-party-member, /queue/promote-party-member (+ /queue/leave).
  *
- * State lives in PostgreSQL (0201_ranked.sql, plpgsql functions kn_rq_*) so
- * every brain serves the same queue. Each brain ticks every second; the one
- * that gets pg_try_advisory_xact_lock(kn_rq_lock()) forms matches (v3.1.1
+ * State lives in the shared database (<dialect>/0201_ranked.sql; kn_rq_* are
+ * plpgsql on PostgreSQL, C in db_mm.c elsewhere: P_RQ_*) so every brain serves
+ * the same queue. Each brain ticks every second; the one that gets the matcher
+ * lock (P_RQ_LOCK: pg_try_advisory_xact_lock(kn_rq_lock()) on PostgreSQL) forms matches (v3.1.1
  * config.queues r1v1/r2v2/r4v4 = 2 teams of 1/2/4, parties of up to
  * maxPartySize, rating window widening with wait time), hosts each on an idle
  * game server (brain_host_game_ex, "ranked" config) and moves the parties to
@@ -30,6 +31,7 @@
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/db.h"
+#include "db_procs.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
@@ -176,9 +178,7 @@ static void on_join_account(void *ud, const char *err, const cJSON *acc) {
         for (int i = 0; i < 6; i++) new_party[i] = cs[rnd[i] % (sizeof(cs) - 1)];
         new_party[6] = 0;
     }
-    kn_db_query(R.b->db,
-                "SELECT kn_rq_join($1::bigint, $2::text, $3::jsonb, $4::text, $5::text[], $6::text,"
-                " $7::boolean, $8::integer, $9::text, $10::text, $11::text, $12::integer)::text",
+    kn_db_call(R.b->db, &P_RQ_JOIN,
                 KN_DB_ARGS(acc_s, name, data_s, j->region, j->queues, j->party, j->ready ? "true" : "false", cls,
                            j->client_id, j->client_key, new_party, max_party),
                 on_joined, j);
@@ -282,15 +282,14 @@ static void h_poll(kn_http_req *req, void *ud) {
     (void) ud;
     char key[96];
     if (get_key(req, key, sizeof(key))) return;
-    kn_db_query(R.b->db, "SELECT kn_rq_state($1::text)::text", KN_DB_ARGS(key), on_state, req);
+    kn_db_call(R.b->db, &P_RQ_STATE, KN_DB_ARGS(key), on_state, req);
 }
 
 static void action(kn_http_req *req, const char *name, const char *param) {
     char key[96], arg[512] = "";
     if (get_key(req, key, sizeof(key))) return;
     if (param && kn_http_query_get(req, param, arg, sizeof(arg)) < 0) arg[0] = 0;
-    kn_db_query(R.b->db, "SELECT kn_rq_action($1::text, $2::text, $3::text, $4::text[])::text",
-                KN_DB_ARGS(key, name, arg, VALID_QUEUES), on_state, req);
+    kn_db_call(R.b->db, &P_RQ_ACTION, KN_DB_ARGS(key, name, arg, VALID_QUEUES), on_state, req);
 }
 
 static void h_ready(kn_http_req *req, void *ud) { (void) ud; action(req, "ready", "isReady"); }
@@ -462,7 +461,7 @@ static void on_ranked_hosted(void *ud, const char *err, const cJSON *reply) {
     if (err || !reply || !b->db) {
         KN_WARN(MOD, "match %s: hosting failed (%s); parties back in the queue", h->match_id, err ? err : "?");
         if (b->db)
-            kn_db_query(b->db, "SELECT kn_rq_match_failed($1::text, $2::text)",
+            kn_db_call(b->db, &P_RQ_MATCH_FAILED,
                         KN_DB_ARGS(h->match_id, err ? err : "host failed"), on_ignore, "match failed");
     } else {
         const char *gid = kn_json_str(reply, "gameId", "");
@@ -490,7 +489,7 @@ static void on_ranked_hosted(void *ud, const char *err, const cJSON *reply) {
         else cJSON_AddNullToObject(c, "webUrl");
         cJSON_AddStringToObject(c, "matchId", h->match_id);
         char *cs = kn_json_print(c), *ts = kn_json_print(tickets);
-        kn_db_query(b->db, "SELECT kn_rq_match_ready($1::text, $2::text, $3::jsonb, $4::jsonb)",
+        kn_db_call(b->db, &P_RQ_MATCH_READY,
                     KN_DB_ARGS(h->match_id, gid, cs, ts), on_ignore, "match ready");
         KN_INFO(MOD, "match %s (%s, %s) is live on %s", h->match_id, k_queues[h->queue].id, h->region, gid);
         free(cs);
@@ -581,7 +580,7 @@ static void on_candidates(kn_db_result *res, void *ud) {
         c->run = run;
         c->m = m;
         char *teams = kn_json_print(m->teams_parties);
-        kn_db_tx_query(run->tx, "SELECT kn_rq_match_create($1::text, $2::text, $3::text, $4::text, $5::jsonb)",
+        kn_db_tx_call(run->tx, &P_RQ_MATCH_CREATE,
                        KN_DB_ARGS(m->match_id, k_queues[m->queue].id, m->region, R.b->id, teams), on_match_created,
                        c);
         free(teams);
@@ -597,10 +596,7 @@ static void on_lock(kn_db_result *res, void *ud) {
         run_free(run);
         return;
     }
-    kn_db_tx_query(run->tx,
-                   "SELECT party_id, region, to_jsonb(queue_ids) AS queues, wait_s, members"
-                   " FROM mm_ranked_candidates WHERE $1::text IS NOT NULL",
-                   KN_DB_ARGS(R.b->id), on_candidates, run);
+    kn_db_tx_call(run->tx, &P_RQ_CANDIDATES, KN_DB_ARGS(R.b->id), on_candidates, run);
 }
 
 static void on_begin(kn_db_tx *tx, kn_db_result *res, void *ud) {
@@ -611,7 +607,7 @@ static void on_begin(kn_db_tx *tx, kn_db_result *res, void *ud) {
         return;
     }
     run->tx = tx;
-    kn_db_tx_query(tx, "SELECT pg_try_advisory_xact_lock(kn_rq_lock())", 0, NULL, on_lock, run);
+    kn_db_tx_call(tx, &P_RQ_LOCK, 0, NULL, on_lock, run);
 }
 
 static void on_expired(kn_db_result *res, void *ud) {
@@ -631,7 +627,7 @@ static void tick(kn_loop *loop, void *ud) {
         snprintf(creating, sizeof(creating), "%d", R.creating_timeout_s);
         snprintf(match, sizeof(match), "%d", R.match_timeout_s);
         R.expiring = 1;
-        kn_db_query(R.b->db, "SELECT kn_rq_expire($1::integer, $2::integer, $3::integer)",
+        kn_db_call(R.b->db, &P_RQ_EXPIRE,
                     KN_DB_ARGS(poll, creating, match), on_expired, NULL);
     }
     if (R.matching) return;
@@ -664,10 +660,7 @@ static void result_done(ResultCtx *r) {
     /* store the new ratings with the match */
     if (R.b->db) {
         char *s = kn_json_print(r->ratings);
-        kn_db_query(R.b->db,
-                    "UPDATE mm_ranked_match_players mp SET rating_after = (x ->> 'new')::integer"
-                    "  FROM jsonb_array_elements($2::jsonb) x"
-                    " WHERE mp.match_id = $1::text AND mp.account_id = (x ->> 'accountId')::bigint",
+        kn_db_call(R.b->db, &P_RQ_RATINGS,
                     KN_DB_ARGS(r->match_id, s ? s : "[]"), on_ignore, "match ratings");
         free(s);
     }
@@ -756,11 +749,15 @@ static void on_finished(kn_db_result *res, void *ud) {
             char a[32], secs[16];
             snprintf(a, sizeof(a), "%lld", (long long) acc);
             snprintf(secs, sizeof(secs), "%d", R.cooldown_s);
-            kn_db_query(R.b->db,
-                        "INSERT INTO mm_ranked_bans (account_id, until, reason)"
-                        " VALUES ($1::bigint, now() + make_interval(secs => $2::integer), 'abandon')"
-                        " ON CONFLICT (account_id) DO UPDATE SET until = EXCLUDED.until, reason = EXCLUDED.reason",
-                        KN_DB_ARGS(a, secs), on_ignore, "ranked ban");
+            static const kn_sql ban = {
+                .pg = "INSERT INTO mm_ranked_bans (account_id, until, reason)"
+                      " VALUES ($1::bigint, now() + make_interval(secs => $2::integer), 'abandon')"
+                      " ON CONFLICT (account_id) DO UPDATE SET until = EXCLUDED.until, reason = EXCLUDED.reason",
+                .sqlite = "INSERT INTO mm_ranked_bans (account_id, until, reason) VALUES ($1, {later:$2}, 'abandon')"
+                          " ON CONFLICT (account_id) DO UPDATE SET until = excluded.until, reason = excluded.reason",
+                .mysql = "INSERT INTO mm_ranked_bans (account_id, until, reason) VALUES ($1, {later:$2}, 'abandon')"
+                         " ON DUPLICATE KEY UPDATE until = VALUES(until), reason = VALUES(reason)"};
+            kn_db_query_sql(R.b->db, &ban, KN_DB_ARGS(a, secs), on_ignore, "ranked ban");
         }
         if (delta != 0 && acc > 0) {
             EloCtx *ec = calloc(1, sizeof(*ec));
@@ -800,7 +797,7 @@ void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud) {
     cJSON_DeleteItemFromObjectCaseSensitive(stored, "rid");
     char *s = kn_json_print(stored);
     cJSON_Delete(stored);
-    kn_db_query(b->db, "SELECT kn_rq_match_finish($1::text, $2::jsonb)::text", KN_DB_ARGS(r->match_id, s ? s : "{}"),
+    kn_db_call(b->db, &P_RQ_MATCH_FINISH, KN_DB_ARGS(r->match_id, s ? s : "{}"),
                 on_finished, r);
     free(s);
 }

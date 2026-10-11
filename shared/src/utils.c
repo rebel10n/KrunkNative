@@ -80,9 +80,21 @@ static void web_asset_mark_missing(const char *path) {
     if (web_missing_assets[web_missing_asset_count]) web_missing_asset_count++;
 }
 
-// Makes sure `path` exists in MEMFS, downloading it over HTTP when it does not.
-// The URL is the path without its leading slash, i.e. relative to the page
-// ("/assets/models/x.obj" -> "assets/models/x.obj"). The download is
+// The download URL of an asset path: the path without its leading slash below
+// Module.krunkNativeAssetBase ("" = relative to the page, else e.g.
+// "https://assets.krunk.io/"), plus "?v=<Module.krunkNativeAssetVersion>" when the
+// asset host published one (assets/version.txt, read by ui/js/loader.js): versioned
+// URLs are immutable, unversioned ones revalidate (deploy/README.md "Caching").
+// Returned string is malloc'd and owned by the caller.
+EM_JS(char *, web_asset_url, (const char *path_ptr), {
+    var path = UTF8ToString(path_ptr);
+    var url = (Module.krunkNativeAssetBase || '') + (path.charAt(0) === '/' ? path.substring(1) : path);
+    if (Module.krunkNativeAssetVersion) url += '?v=' + encodeURIComponent(Module.krunkNativeAssetVersion);
+    return stringToNewUTF8(url);
+});
+
+// Makes sure `path` exists in MEMFS, downloading it over HTTP when it does not
+// (URL: web_asset_url, "/assets/models/x.obj" -> "<base>assets/models/x.obj"). The download is
 // synchronous from the caller's point of view thanks to ASYNCIFY, so the
 // existing fopen()-based loaders keep working unchanged. Returns 1 when the
 // file is available, 0 otherwise (a missing file is reported once).
@@ -91,7 +103,7 @@ int ensure_asset_file(const char *path) {
     if (!access(path, F_OK)) return 1;
     if (web_asset_known_missing(path)) return 0;
 
-    const char *url = path[0] == '/' ? path + 1 : path;
+    char *url = web_asset_url(path);
 
     void *data = NULL;
     int size = 0;
@@ -102,9 +114,11 @@ int ensure_asset_file(const char *path) {
     if (error || !data) {
         fprintf(stderr, "failed to fetch asset %s (HTTP error or missing file)\n", url);
         web_asset_mark_missing(path);
+        free(url);
         free(data);
         return 0;
     }
+    free(url);
 
     int written = 0;
 
@@ -137,7 +151,9 @@ EM_JS(int, web_asset_prefetch, (const char *path_ptr), {
     if (state.failed[path]) return -1;
     if (state.pending[path]) return 0;
     state.pending[path] = 1;
-    fetch(path.charAt(0) === '/' ? path.substring(1) : path).then(function (r) {
+    var url = (Module.krunkNativeAssetBase || '') + (path.charAt(0) === '/' ? path.substring(1) : path);
+    if (Module.krunkNativeAssetVersion) url += '?v=' + encodeURIComponent(Module.krunkNativeAssetVersion);
+    fetch(url).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.arrayBuffer();
     }).then(function (buffer) {

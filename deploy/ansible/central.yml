@@ -1,4 +1,4 @@
-- name: KrunkNative central node (web + finder + coordinator)
+- name: KrunkNative central node (web + finder + coordinator + net-bridge)
   hosts: central
   become: false
   roles:
@@ -8,6 +8,7 @@
     - { role: kn_release, tags: [release, brain] }
     - { role: kn_brain, tags: [brain] }
     - { role: kn_web, tags: [web] }
+    - { role: kn_bridge, tags: [bridge] }
   post_tasks:
     - name: Health checks on loopback
       ansible.builtin.uri:
@@ -18,6 +19,7 @@
         - http://127.0.0.1:8081/
         - http://127.0.0.1:8082/servers
         - http://127.0.0.1:8083/mm/status
+        - http://127.0.0.1:8084/healthz
       register: kn_health
       retries: 5
       delay: 2

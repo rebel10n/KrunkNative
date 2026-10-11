@@ -20,6 +20,13 @@ kn_keep_releases: 3
 kn_artifact_root: "{{ kn_repo_root }}/dist/deploy"
 kn_web_dist: "{{ kn_repo_root }}/dist/web"
 
-kn_domain: krunker.party
+kn_domain: krunk.io
 kn_matchmaker_url: "https://matchmaker.{{ kn_domain }}"
 kn_coordinator_url: "https://coordinator.{{ kn_domain }}"
+# Page origins allowed to call the brains (CORS): the Pages front end (krunk.io, www.,
+# the pages.dev preview) and the legacy domain, whose subdomains stay up for old clients.
+kn_web_origins:
+  - "https://{{ kn_domain }}"
+  - "https://www.{{ kn_domain }}"
+  - "https://krunknative.pages.dev"
+  - "https://krunker.party"

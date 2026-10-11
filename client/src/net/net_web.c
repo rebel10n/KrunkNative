@@ -9,8 +9,11 @@
 // URL resolution (first match wins):
 //   1. `?ws=<url>` query parameter
 //   2. `Module.krunkNativeWsUrl` set by the hosting page
-//   3. `(https: ? wss : ws)://<location.host>/native`
-// The brain matchmaker (servers_ui.c) overrides all of them with Client.net_ws_url.
+//   3. `Module.krunkNativeBridgeUrl` (loader.js, <meta name="kn-bridge">: the deployed
+//      net-bridge, e.g. wss://play.krunk.io/native; deploy/pages/stage.py)
+//   4. `(https: ? wss : ws)://<location.host>/native`
+// The brain matchmaker (servers_ui.c) overrides all of them with Client.net_ws_url, built
+// by net_web_target_url() from the same chain plus `?target=host:port`.
 #include <client.h>
 #include <emscripten.h>
 #include <emscripten/websocket.h>
@@ -54,9 +57,28 @@ static char *net_web_resolve_url(Client *client) {
         var url = null;
         try { url = new URLSearchParams(location.search).get('ws'); } catch (e) {}
         if (!url && typeof Module !== 'undefined' && Module['krunkNativeWsUrl']) url = Module['krunkNativeWsUrl'];
+        if (!url && typeof Module !== 'undefined' && Module['krunkNativeBridgeUrl']) url = Module['krunkNativeBridgeUrl'];
         if (!url) url = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/native';
         return stringToNewUTF8(url);
     });
+}
+
+// The bridge URL for the game server host:port (brain matchmaking, direct connect): the
+// endpoint of the chain above with `target=host:port` added. A `?ws=` URL that already
+// names a target is used as it is (pins every session to that server).
+void net_web_target_url(char *out, const size_t size, const char *host, const int port) {
+    char *url = (char *) EM_ASM_PTR({
+        var base = null; // (no comma-separated declarations: EM_ASM is a macro)
+        var target = UTF8ToString($0) + ':' + $1;
+        try { base = new URLSearchParams(location.search).get('ws'); } catch (e) {}
+        if (base && /[?&]target=/.test(base)) return stringToNewUTF8(base);
+        if (!base && typeof Module !== 'undefined' && Module['krunkNativeWsUrl']) base = Module['krunkNativeWsUrl'];
+        if (!base && typeof Module !== 'undefined' && Module['krunkNativeBridgeUrl']) base = Module['krunkNativeBridgeUrl'];
+        if (!base) base = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/native';
+        return stringToNewUTF8(base + (base.indexOf('?') < 0 ? '?' : '&') + 'target=' + target);
+    }, host ? host : "", port);
+    snprintf(out, size, "%s", url ? url : "");
+    free(url);
 }
 
 static bool net_web_on_open(int event_type, const EmscriptenWebSocketOpenEvent *event, void *user_data) {
@@ -185,6 +207,7 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
 // Returns 0 only when the socket could not even be created.
 int net_web_connect(Client *client) {
     if (g_web_socket) return 1; // already connecting/connected
+    if (net_wt_connect(client)) return 1; // UDP-style transport first: knet over WebTransport (net_wt.c)
 
     if (!emscripten_websocket_is_supported()) {
         on_client_socket_failed(client, "WebSockets are not supported by this browser");
@@ -227,6 +250,7 @@ int net_web_connect(Client *client) {
 
 void net_web_disconnect(Client *client) {
     (void) client;
+    net_wt_close(0);
 
     if (!g_web_socket) return;
     emscripten_websocket_close(g_web_socket, 1000, "client quit");
@@ -235,7 +259,7 @@ void net_web_disconnect(Client *client) {
 // Page `reconnect`: skip the backoff and try again now (no-op while a socket is
 // open/connecting or the embedded server runs).
 void net_web_request_reconnect(Client *client) {
-    if (g_web_socket || client->net_should_quit || client->offline) return;
+    if (g_web_socket || net_wt_busy() || client->net_should_quit || client->offline) return;
     net_web_connect(client);
 }
 
@@ -245,6 +269,7 @@ void net_web_request_reconnect(Client *client) {
 int client_net_send_packet(const int socket, const NetPacketType type, const void *payload, const uint16_t length) {
     (void) socket;
 
+    if (net_wt_active()) return net_wt_send(type, payload, length);
     if (!g_web_socket || length > NET_MAX_PAYLOAD) return 0;
 
     client_net_log_packet("=>", type, payload, length);
@@ -269,6 +294,10 @@ void client_net_switch_server(Client *client) {
     client->menu_play_pending = 0;
     client->net_should_quit = 0;
     client->net_hold_retry = 0;
+    if (net_wt_busy()) {
+        net_wt_close(1); // and connect to the new target
+        return;
+    }
     if (g_web_socket) {
         g_web_switching = 1;
         emscripten_websocket_close(g_web_socket, 1000, "switch server");

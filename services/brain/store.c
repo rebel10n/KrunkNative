@@ -195,7 +195,7 @@ static void spin_account(SocialSession *s, kn_db_result *res, void *extra) {
         }
         next->index = roll_rarity(w->rarities, 7, next->pos);
         next->kr = k_free_kr[next->index][level >= 20];
-        social_query(s, "SELECT kn_daily_kr($1, $2, $3, $4, 'freekr')",
+        social_call(s, &P_DAILY_KR,
                      KN_DB_ARGS(acct_itoa(id, s->account_id), acct_itoa(a1, next->kr), acct_itoa(a2, reward_time_ms()),
                                 acct_itoa(a3, kn_wall_ms())),
                      free_kr_done, next);
@@ -221,7 +221,7 @@ static void spin_account(SocialSession *s, kn_db_result *res, void *extra) {
     }
     next->skin = items[kn_random_u64() % (uint64_t) n];
     const int64_t cooldown = w->free ? kn_config_int(g_acct_brain->cfg, "accounts.free_wheel_cooldown_s", 21600) * 1000 : 0;
-    social_query(s, "SELECT kn_spin($1, $2, $3, $4, $5, $6)",
+    social_call(s, &P_SPIN,
                  KN_DB_ARGS(acct_itoa(id, s->account_id), acct_itoa(a1, next->wheel), acct_itoa(a2, w->price),
                             acct_itoa(a3, next->skin), acct_itoa(a4, cooldown), acct_itoa(a5, kn_wall_ms())),
                  spin_done, next);
@@ -232,7 +232,7 @@ static void start_spin(SocialSession *s, int wheel) {
     if (!c) return;
     c->wheel = wheel;
     char id[24];
-    social_query(s, "SELECT player_score, player_funds FROM players WHERE player_id = $1",
+    social_query(s, SQL(.any = "SELECT player_score, player_funds FROM players WHERE player_id = $1"),
                  KN_DB_ARGS(acct_itoa(id, s->account_id)), spin_account, c);
 }
 
@@ -318,10 +318,7 @@ void sh_claim(SocialSession *s, const cJSON *f) {
     }
     char id[24], kr[24], cd[24], now[24], lvl[24], rv[32];
     snprintf(rv, sizeof rv, "%.17g", g_acct.rank_var);
-    social_query(s,
-                 "SELECT CASE WHEN kn_level(player_score, $6::float8) < $5::int "
-                 "THEN kn_fail('Must be level ' || $5::text)::text::jsonb "
-                 "ELSE kn_daily_kr($1, $2, $3, $4, 'daily') END FROM players WHERE player_id = $1",
+    social_call(s, &P_CLAIM_DAILY,
                  KN_DB_ARGS(acct_itoa(id, s->account_id),
                             acct_itoa(kr, kn_config_int(g_acct_brain->cfg, "accounts.daily_reward_kr", 50)),
                             acct_itoa(cd, reward_time_ms()), acct_itoa(now, kn_wall_ms()),

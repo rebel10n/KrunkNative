@@ -1,19 +1,37 @@
 # server_bin instances on the edges (dedicated-server contract):
 #   count = vcpus - 1 (one core left for the host's other services), at least 1;
 #   instance n (1-based): port {{ kn_gameserver_first_port }}+n-1, TCP game + UDP
-#   server-info query on the same number; hostname <edge>-<n>.krunker.party.
-kn_gameserver_first_port: 21015
-kn_gameserver_count: "{{ [((ansible_processor_vcpus | default(ansible_processor_nproc) | int) - 1), 1] | max }}"
+#   server-info query on the same number; hostname <edge>-<n>.krunk.io.
+# kn_gameserver_first_port / kn_gameserver_count live in group_vars/edges/main.yml
+# (shared with kn_firewall, which opens exactly those ports).
 kn_gameserver_hostname_fmt: "{{ kn_edge_name }}-%d.{{ kn_domain }}"
 # Units are installed but stay disabled/stopped until the finder heartbeat code
 # (server.cfg finder_url) lands in the shipped server_bin: flip to true then.
 kn_gameserver_enabled: false
-# False where the host firewall is owned by someone else and 21015.. is not open
-# yet (amph.ashburn): units stay down regardless of kn_gameserver_enabled.
+# Escape hatch: false keeps a host's units down regardless of kn_gameserver_enabled
+# (e.g. if its game ports cannot be opened). kn_firewall opens them on every edge.
 kn_gameserver_ports_open: true
 kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
-kn_gameserver_region: "{{ kn_edge_name }}"
+# v3.1.1 region id (config.regionNames / accounts.region_index); per host in the inventory.
+kn_gameserver_region: us-nj
 kn_gameserver_max_players: 8
-kn_gameserver_online_mode: 1
+# online_mode 1 (accounts verified via auth_url hasJoined) on these instances; the
+# rest are offline-mode (guests welcome, nothing saved).
+kn_gameserver_online_instances: [1]
 kn_gameserver_finder_url: "{{ kn_matchmaker_url }}"
 kn_gameserver_auth_url: "{{ kn_coordinator_url }}"
+# Address the game sockets bind to (= the A record of <edge>-<n>).
+kn_gameserver_listen_host: "{{ kn_public_ip }}"
+# Internal game-server <-> coordinator link (kn_brain internal_ws, matchmaking /mm/seek-game).
+# wss:// through Cloudflare to kn-brain-coord on the central node; server_bin verifies the
+# certificate against the system CA store. The node advertises public_host/port + region in
+# its hello (the TCP peer is the tunnel). "" = standalone (finder-listed only).
+kn_gameserver_coordinator_url: "wss://coordinator.{{ kn_domain }}/mm/internal/ws"
+# The secret is brain.internal_secret of that coordinator: read from the central node's
+# {{ kn_etc_dir }}/secrets.env (role kn_brain) at deploy time, written only into the 0640
+# server-<n>.cfg. Never in git.
+kn_gameserver_secret_host: "{{ groups['central'] | first }}"
+# Online-mode instances stay out of the coordinator pool: kn_brain does not know a node's
+# online_mode yet (no hello field), so /mm/seek-game would send guests there and the
+# server rejects them ("Failed to verify username"). They stay standalone + finder-listed.
+kn_gameserver_coordinator_online_instances: false

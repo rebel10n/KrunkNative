@@ -6,6 +6,6 @@
     "trust_proxy": true,
     "region": "us",
     "federation": false,
-    "cors_origins": ["https://{{ kn_domain }}", "https://coordinator.{{ kn_domain }}", "https://matchmaker.{{ kn_domain }}"]
+    "cors_origins": {{ (kn_web_origins + ["https://coordinator." ~ kn_domain, "https://matchmaker." ~ kn_domain]) | to_json }}
   }
 }

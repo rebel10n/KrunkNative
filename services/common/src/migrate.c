@@ -1,4 +1,5 @@
-/* knsvc/migrate.h: ordered, transactional, advisory-locked SQL migrations. */
+/* knsvc/migrate.h: ordered, transactional, locked SQL migrations for every store driver. */
+#include "store_internal.h"
 #include "knsvc/migrate.h"
 #include "knsvc/buf.h"
 #include "knsvc/config.h"
@@ -11,8 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
-#define MIGRATE_LOCK_KEY "7020896536452359" /* arbitrary constant shared by every runner */
+#define MIGRATE_LOCK "kn_migrate" /* postgres: the historic advisory key 7020896536452359 */
 #define DEFAULT_DIR "services/db/migrations"
 
 typedef struct mfile {
@@ -116,14 +119,29 @@ static int exec_ok(kn_dbconn *c, const char *sql, int n, const char *const *para
     return ok ? 0 : -1;
 }
 
+static const kn_sql SQL_TABLE = {
+    .pg = "CREATE TABLE IF NOT EXISTS kn_migrations ("
+          " version bigint PRIMARY KEY,"
+          " name text NOT NULL,"
+          " checksum text NOT NULL,"
+          " applied_at timestamptz NOT NULL DEFAULT now())",
+    .sqlite = "CREATE TABLE IF NOT EXISTS kn_migrations ("
+              " version INTEGER PRIMARY KEY,"
+              " name TEXT NOT NULL,"
+              " checksum TEXT NOT NULL,"
+              " applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')))",
+    .mysql = "CREATE TABLE IF NOT EXISTS kn_migrations ("
+             " version BIGINT PRIMARY KEY,"
+             " name VARCHAR(255) NOT NULL,"
+             " checksum CHAR(64) NOT NULL,"
+             " applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3))"};
+
 static int ensure_table(kn_dbconn *c, char *err, size_t errlen) {
-    return exec_ok(c,
-                   "CREATE TABLE IF NOT EXISTS kn_migrations ("
-                   " version bigint PRIMARY KEY,"
-                   " name text NOT NULL,"
-                   " checksum text NOT NULL,"
-                   " applied_at timestamptz NOT NULL DEFAULT now())",
-                   0, NULL, err, errlen);
+    kn_db_result *r = kn_dbconn_exec_sql(c, &SQL_TABLE, 0, NULL);
+    int ok = kn_db_ok(r);
+    if (!ok) set_err(err, errlen, "%s%s", kn_db_error(r), NULL);
+    kn_db_result_free(r);
+    return ok ? 0 : -1;
 }
 
 static int load_applied(kn_dbconn *c, applied **out, size_t *count, char *err, size_t errlen) {
@@ -155,18 +173,33 @@ static const applied *find_applied(const applied *a, size_t n, long long v) {
     return NULL;
 }
 
+/* Session lock serialising concurrent runners (drivers without one, sqlite,
+ * serialise through BEGIN IMMEDIATE + the re-check in apply_one). */
 static int lock(kn_dbconn *c, int on) {
-    kn_db_result *r = kn_dbconn_exec(c, on ? "SELECT pg_advisory_lock(" MIGRATE_LOCK_KEY ")"
-                                           : "SELECT pg_advisory_unlock(" MIGRATE_LOCK_KEY ")", 0, NULL);
-    int ok = kn_db_ok(r);
+    const kn_store_blocking_ops *b = c->drv->blocking;
+    return b->lock ? b->lock(c->conn, MIGRATE_LOCK, on) : 0;
+}
+
+/* 1 when version is already recorded (inside the file's transaction). */
+static int applied_now(kn_dbconn *c, long long version) {
+    char ver[32];
+    snprintf(ver, sizeof ver, "%lld", version);
+    kn_db_result *r = kn_dbconn_exec(c, "SELECT 1 FROM kn_migrations WHERE version = $1", KN_DB_ARGS(ver));
+    int yes = kn_db_ok(r) && kn_db_rows(r) > 0;
     kn_db_result_free(r);
-    return ok ? 0 : -1;
+    return yes;
 }
 
 /* Apply one file in its own transaction. */
+/* Returns 0 applied, 1 already applied by a concurrent runner, -1 error. */
 static int apply_one(kn_dbconn *c, const mfile *f, const char *sql, const char *sum, char *err, size_t errlen) {
     char e[1024] = "";
-    if (kn_dbconn_exec_script(c, "BEGIN", e, sizeof e) != 0) goto fail;
+    const char *begin = c->drv->blocking->begin_sql ? c->drv->blocking->begin_sql : "BEGIN";
+    if (kn_dbconn_exec_script(c, begin, e, sizeof e) != 0) goto fail;
+    if (!c->drv->blocking->lock && applied_now(c, f->version)) {
+        kn_dbconn_exec_script(c, "ROLLBACK", NULL, 0);
+        return 1;
+    }
     if (kn_dbconn_exec_script(c, sql, e, sizeof e) != 0) goto rollback;
     char ver[32];
     snprintf(ver, sizeof ver, "%lld", f->version);
@@ -182,8 +215,17 @@ fail:
     return -1;
 }
 
+/* <dir>/<dialect> when that directory exists (services/db/migrations/postgres ...),
+ * else dir itself (flat directories of one dialect). */
+static const char *dialect_dir(kn_dbconn *c, const char *dir, char *buf, size_t cap) {
+    struct stat st;
+    snprintf(buf, cap, "%s/%s", dir, kn_dbconn_dialect(c));
+    return stat(buf, &st) == 0 && S_ISDIR(st.st_mode) ? buf : dir;
+}
+
 int kn_migrate_run(kn_dbconn *c, const kn_migrate_opts *opts, char *err, size_t errlen) {
-    const char *dir = opts && opts->dir ? opts->dir : DEFAULT_DIR;
+    char dbuf[4200];
+    const char *dir = dialect_dir(c, opts && opts->dir ? opts->dir : DEFAULT_DIR, dbuf, sizeof dbuf);
     mfile *files;
     size_t nfiles;
     if (list_files(dir, &files, &nfiles, err, errlen) != 0) return -1;
@@ -225,11 +267,11 @@ int kn_migrate_run(kn_dbconn *c, const kn_migrate_opts *opts, char *err, size_t 
         if (opts && opts->verbose) KN_INFO("migrate", "applying %s", files[i].name);
         int rc = apply_one(c, &files[i], sql, sum, err, errlen);
         free(sql);
-        if (rc != 0) {
+        if (rc < 0) {
             count = -1;
             break;
         }
-        count++;
+        if (rc == 0) count++;
     }
 out:
     lock(c, 0);
@@ -239,7 +281,8 @@ out:
 }
 
 int kn_migrate_status(kn_dbconn *c, const char *dir, char *err, size_t errlen) {
-    if (!dir) dir = DEFAULT_DIR;
+    char dbuf[4200];
+    dir = dialect_dir(c, dir ? dir : DEFAULT_DIR, dbuf, sizeof dbuf);
     mfile *files;
     size_t nfiles;
     if (list_files(dir, &files, &nfiles, err, errlen) != 0) return -1;
@@ -263,6 +306,36 @@ int kn_migrate_status(kn_dbconn *c, const char *dir, char *err, size_t errlen) {
     return 0;
 }
 
+static int is_dir(const char *p) {
+    struct stat st;
+    return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+char *kn_migrate_resolve_dir(const kn_config *cfg, char *buf, size_t cap) {
+    const char *rel = kn_config_str(cfg, "database.migrations_dir", "");
+    if (rel && *rel) return kn_config_resolve_path(cfg, rel, buf, cap);
+    if (kn_config_resolve_path(cfg, DEFAULT_DIR, buf, cap) && is_dir(buf)) return buf;
+    char exe[4096];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (n > 0) {
+        exe[n] = 0;
+        for (int up = 0; up < 5; up++) {
+            char *slash = strrchr(exe, '/');
+            if (!slash) break;
+            *slash = 0;
+            snprintf(buf, cap, "%s/%s", exe, DEFAULT_DIR);
+            if (is_dir(buf)) return buf;
+        }
+    }
+#ifdef KN_SOURCE_MIGRATIONS_DIR /* development builds: the source tree */
+    if (is_dir(KN_SOURCE_MIGRATIONS_DIR)) {
+        snprintf(buf, cap, "%s", KN_SOURCE_MIGRATIONS_DIR);
+        return buf;
+    }
+#endif
+    return kn_config_resolve_path(cfg, DEFAULT_DIR, buf, cap);
+}
+
 int kn_migrate_main(const kn_config *cfg, int argc, char **argv) {
     kn_migrate_opts opts = {0};
     int status = 0;
@@ -276,8 +349,8 @@ int kn_migrate_main(const kn_config *cfg, int argc, char **argv) {
         else if (!strncmp(argv[i], "--dir=", 6)) dir_arg = argv[i] + 6;
     }
     char dir[4096];
-    const char *rel = dir_arg ? dir_arg : kn_config_str(cfg, "database.migrations_dir", DEFAULT_DIR);
-    if (!kn_config_resolve_path(cfg, rel, dir, sizeof dir)) return 2;
+    if (dir_arg ? !kn_config_resolve_path(cfg, dir_arg, dir, sizeof dir) : !kn_migrate_resolve_dir(cfg, dir, sizeof dir))
+        return 2;
     opts.dir = dir;
     opts.verbose = 1;
 
@@ -286,8 +359,11 @@ int kn_migrate_main(const kn_config *cfg, int argc, char **argv) {
     char err[1024];
     kn_dbconn *c = kn_dbconn_open(&dbc, err, sizeof err);
     if (!c) {
-        KN_ERROR("migrate", "cannot connect to %s@%s:%d/%s: %s", dbc.user ? dbc.user : "", dbc.host, dbc.port,
-                 dbc.name ? dbc.name : "", err);
+        if (dbc.driver && !strcmp(dbc.driver, "sqlite"))
+            KN_ERROR("migrate", "cannot open sqlite database %s: %s", dbc.path ? dbc.path : "", err);
+        else
+            KN_ERROR("migrate", "cannot connect to %s %s@%s:%d/%s: %s", dbc.driver ? dbc.driver : "",
+                     dbc.user ? dbc.user : "", dbc.host, dbc.port, dbc.name ? dbc.name : "", err);
         return 1;
     }
     int rc;

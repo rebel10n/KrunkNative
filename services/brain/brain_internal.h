@@ -22,7 +22,7 @@ typedef struct MmSettings {
     int heartbeat_s;
     int ping_interval_s;
     int host_timeout_s;
-    int federation;                  /* use PostgreSQL rows */
+    int federation;                  /* use the shared database's rows */
     MmPolicy policy;
     const cJSON *regions;            /* brain.regions (borrowed from cfg), may be NULL */
     int cors_any;                    /* brain.cors_origins contains "*" (or is absent) */

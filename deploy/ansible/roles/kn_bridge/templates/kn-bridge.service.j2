@@ -1,0 +1,56 @@
+# {{ ansible_managed }} (deploy/ansible role kn_bridge)
+# net-bridge --bridge-only on {{ kn_bridge_listen_host }}:{{ kn_bridge_port }}
+# (cloudflared ingress {{ kn_bridge_hostname }} -> localhost:{{ kn_bridge_port }}).
+[Unit]
+Description=KrunkNative net-bridge (wss://{{ kn_bridge_hostname }}/native -> edge game servers)
+After=network-online.target
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User={{ kn_user }}
+Group={{ kn_group }}
+WorkingDirectory={{ kn_bridge_base }}
+EnvironmentFile={{ kn_etc_dir }}/bridge.env
+# libuv's io_uring backend is not in the syscall filter below.
+Environment=UV_USE_IO_URING=0 NODE_ENV=production
+ExecStart={{ kn_bridge_node_dir }}/bin/node --no-deprecation {{ kn_bridge_base }}/net-bridge.js --bridge-only
+
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+
+# Hardening as the kn_brain units, except MemoryDenyWriteExecute (V8's JIT needs W+X
+# pages). Nothing writable: the bridge only logs to the journal.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+# Outbound TCP to the edges, inbound from cloudflared on loopback.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+ReadOnlyPaths={{ kn_bridge_base }} {{ kn_bridge_node_root }} {{ kn_etc_dir }}
+
+[Install]
+WantedBy=krunknative.target

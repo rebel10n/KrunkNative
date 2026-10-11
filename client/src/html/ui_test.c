@@ -265,6 +265,12 @@ static int ut_harness_init(UtHarness *h, int w, int hgt) {
         return 0;
     }
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+#ifdef KRUNKNATIVE_GL_ANGLE // OpenGL ES 3.0 on ANGLE, like main.c
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+    glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 #ifdef __APPLE__
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);  // macOS core profile cap; shader.c rewrites to 410 core
@@ -273,6 +279,7 @@ static int ut_harness_init(UtHarness *h, int w, int hgt) {
 #endif
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#endif
     headless_window_hints();
     h->window = glfwCreateWindow(64, 64, "ui_test", NULL, NULL);
     if (!h->window) {
@@ -285,7 +292,7 @@ static int ut_harness_init(UtHarness *h, int w, int hgt) {
         glfwTerminate();
         return 0;
     }
-    if (!gladLoadGLLoader(headless_get_proc_address)) {
+    if (!kn_gl_load(headless_get_proc_address)) {
         fprintf(stderr, "ui_test: glad failed\n");
         return 0;
     }

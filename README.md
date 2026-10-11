@@ -30,6 +30,43 @@ Please install the following Debian packages to build GLFW:
 
 Full command: `apt install -y libwayland-dev wayland-protocols pkg-config libx11-dev libxcursor-dev libxinerama-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev`
 
+## macOS: ANGLE / Metal
+
+Apple's OpenGL is deprecated and stuck at 4.1, so on macOS the client renders through **Metal via [ANGLE](https://chromium.googlesource.com/angle/angle)**. ANGLE is Chromium's OpenGL ES implementation (`libEGL.dylib` + `libGLESv2.dylib`), and Safari and Chrome use it to run WebGL on Metal. The client asks it for an OpenGL ES 3.0 context, which is the same GL subset the web build already uses (`KN_GLES`, see below). There is no separate Metal renderer.
+
+```sh
+xcode-select --install          # Command Line Tools are enough (full Xcode works too)
+brew install cmake ninja
+make angle                      # pinned ANGLE -> ~/.cache/krunknative/angle (ANGLE_DIR=...), ~9 GB checkout, ~30-60 min once
+make release                    # KRUNKNATIVE_GL_BACKEND=auto picks ANGLE from ANGLE_DIR
+```
+
+- `tools/angle/build-angle.sh <dir>` builds the ANGLE commit pinned in the script (depot_tools + gclient + gn, with the Metal and OpenGL backends) into `<dir>/lib` and `<dir>/include`. CI runs the same script and caches the result (`.github/workflows/build.yml`, macOS job).
+- The build copies `libEGL.dylib`/`libGLESv2.dylib` next to `client_bin`, which loads them through an `@executable_path` rpath. Ship them in the same directory as the binary.
+- At startup the client logs `[gl] ANGLE backend: metal` and `GL_RENDERER ANGLE (Apple, ANGLE Metal Renderer: ...)`. If there is no Metal device (a VM, for example), it falls back to ANGLE's OpenGL backend. `KRUNKNATIVE_ANGLE_BACKEND=metal|opengl|vulkan|swiftshader` forces a backend. `swiftshader` is CPU Vulkan, headless only, and needs ANGLE built with `--swiftshader`.
+- `KRUNKNATIVE_HEADLESS=1` also works on macOS in ANGLE builds: GLFW runs on its null platform and the client renders into an ANGLE EGL pbuffer, with no window.
+- Fallback: `make release CMAKE_FLAGS=-DKRUNKNATIVE_GL_BACKEND=desktop` builds against Apple's OpenGL 4.1 core instead. A macOS configure without an ANGLE build also falls back to it, with a warning.
+
+### The GL subset (`KN_GLES`)
+
+`client/include/gl.h` is the only GL include and has three flavours:
+
+| Flavour | When | GL | Loader |
+|---|---|---|---|
+| desktop | Linux/Windows default, `KRUNKNATIVE_GL_BACKEND=desktop` | OpenGL 4.5 core (4.1 on macOS) | `client/lib/glad` |
+| ANGLE | macOS default, `KRUNKNATIVE_GL_BACKEND=angle` | OpenGL ES 3.0 on ANGLE | `client/lib/glad_gles` |
+| web | Emscripten | WebGL2 (OpenGL ES 3.0) | none |
+
+`KN_GLES` is defined for the ANGLE and web flavours. Renderer code may only use calls that exist in **both** OpenGL 4.5 core and OpenGL ES 3.0. That rules out direct state access, `glPolygonMode`, `glGetTexImage`, `glDrawBuffer`, `glMapBuffer` and `GL_CLAMP_TO_BORDER`. Read back with `glReadPixels(GL_RGBA, GL_UNSIGNED_BYTE)`, and use sized internal formats (`GL_R8` with `GL_RED`, ...). A desktop-only call needs an `#ifndef KN_GLES` guard. An ANGLE build compiles against the GLES 3.0 headers, so a desktop-only symbol fails to compile there. Shaders stay `#version 450 core` on disk but must be valid GLSL ES 3.00; `shader.c` rewrites the version line to `#version 300 es` with default precisions whenever `KN_GLES` is set.
+
+To exercise the ANGLE path on Linux, point `ANGLE_DIR` at an ANGLE build. That can be `make angle` (Vulkan + OpenGL backends), or any `libEGL.so`/`libGLESv2.so` pair that exports its symbols (CEF ships one) plus ANGLE's `include/`:
+
+```sh
+cmake -S . -B /tmp/kn-angle -G Ninja -DKRUNKNATIVE_GL_BACKEND=angle -DANGLE_DIR=$HOME/.cache/krunknative/angle
+cmake --build /tmp/kn-angle --target client_bin
+env -u DISPLAY KRUNKNATIVE_HEADLESS=1 KRUNKNATIVE_SCREENSHOT=/tmp/angle.png /tmp/kn-angle/client_bin --offline assets/maps/kanji.json
+```
+
 # Running
 
 If you wish to run KrunkNative, you must first add game assets, please read [the assets readme](/assets/README.md) for more information. The client looks for the `assets` folder in the same directory in release mode, or in the parent directory in development mode (when the binary is inside the `cmake-build-release` or `cmake-build-debug` folder).
@@ -52,6 +89,29 @@ To play offline (single player: the client runs the game itself, no server), pas
 ```sh
 make run ARGS=--offline MAP=kanji
 ```
+
+## Hosting a server
+
+The client does not host games. To host, run the dedicated server, `server_bin`,
+the same way you would run a CS:Source dedicated server:
+
+```sh
+make server-dist                 # dist/server/: server_bin + maps + cfg/server.cfg
+cd dist/server
+$EDITOR cfg/server.cfg           # hostname, port, mapcycle, mode, maxplayers, sv_password, rcon_password, ...
+./server_bin                     # no flags needed; type "help" in its console
+```
+
+Players join through the server list, or directly with `client_bin --connect HOST:PORT`.
+Useful keys in `server.cfg` (see `config/server.cfg.example`):
+
+- `online_mode 1`: every player must be signed in to an account.
+- `coordinator_url`: join a community network that keeps accounts, skins and stats.
+- `finder_url`: opt in to the public server list.
+
+To run a whole network (coordinators plus many servers) from one file, use
+`make network` (`services/scripts/kn-network`). The details are in
+[doc/backend.md](doc/backend.md), sections 8.7 to 8.11.
 
 ## Packet Logging
 
@@ -139,6 +199,18 @@ only the `?offline=1` path is usable on the hosted page. It is meant as a
 smoke test of the build, not as a playable deployment. Pages must be set to
 "GitHub Actions" as the source in the repository settings for the deploy job
 to succeed.
+
+The playable deployment is **https://krunk.io**: the page on Cloudflare Pages
+(`make pages`), game content from `assets.krunk.io` and the services on the
+central node (`deploy/pages/README.md`, `deploy/ansible/README.md`). The old
+`krunker.party` site redirects there.
+
+Google Analytics is configured by one setting, `KN_GA_ID` (a GA4 measurement id
+`G-...`; empty or `off` disables it). The `ui/` pages never contain it (the native
+engine renders them); `deploy/pages/ga.py` puts Google's gtag.js snippet right after
+`<head>` of every page at web build/deploy time. `make pages` / `deploy/pages/deploy.sh`
+default to `G-6EGYKRF020` (krunk.io); `make web` is off unless asked
+(`make web KN_GA_ID=G-...`, then `make web-serve` or `make bridge` serve it with the tag).
 
 # HTML UI (in-house engine)
 

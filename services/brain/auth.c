@@ -19,6 +19,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <netdb.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #include "acct_internal.h"
 #include "auth_state.h"
@@ -311,6 +316,145 @@ static void h_has_joined(kn_http_req *req, void *ud) {
     cJSON_AddStringToObject(o, "username", kn_json_str(profile, "username", name));
     cJSON_AddItemToObject(o, "profile", cJSON_Duplicate(profile, 1));
     reply(req, 200, o);
+}
+
+/* ---------------------------------------------------------------- hasJoined for the community role */
+
+typedef struct RemoteHj {
+    Brain *b;
+    char url[768];
+    int status;
+    char *body;
+    AuthHasJoinedCb cb;
+    void *ud;
+} RemoteHj;
+
+static void remote_hj_done(kn_loop *loop, void *ud) {
+    (void) loop;
+    RemoteHj *r = ud;
+    cJSON *res = r->status == 200 ? cJSON_Parse(r->body ? r->body : "") : NULL;
+    if (r->status == 200 && cJSON_IsObject(res) && kn_json_int(res, "id", 0) > 0) {
+        cJSON *profile = cJSON_GetObjectItemCaseSensitive(res, "profile");
+        if (!cJSON_IsObject(profile)) profile = res;
+        r->cb(r->ud, NULL, profile);
+    } else {
+        r->cb(r->ud, r->status == 204 ? "Failed to verify username" : r->status ? "auth service error" : "Authentication servers are down", NULL);
+    }
+    cJSON_Delete(res);
+    free(r->body);
+    free(r);
+}
+
+#ifdef KN_HAVE_CURL
+#include <curl/curl.h>
+static size_t hj_write(char *data, size_t size, size_t n, void *ud) {
+    RemoteHj *r = ud;
+    const size_t len = size * n, have = r->body ? strlen(r->body) : 0;
+    if (have + len > 65536) return 0;
+    char *grown = realloc(r->body, have + len + 1);
+    if (!grown) return 0;
+    memcpy(grown + have, data, len);
+    grown[have + len] = 0;
+    r->body = grown;
+    return len;
+}
+#endif
+
+static void *remote_hj_thread(void *arg) {
+    RemoteHj *r = arg;
+#ifdef KN_HAVE_CURL
+    CURL *c = curl_easy_init();
+    if (c) {
+        curl_easy_setopt(c, CURLOPT_URL, r->url);
+        curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 8000L);
+        curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+        curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, hj_write);
+        curl_easy_setopt(c, CURLOPT_WRITEDATA, r);
+        curl_easy_setopt(c, CURLOPT_USERAGENT, "kn_brain");
+        if (curl_easy_perform(c) == CURLE_OK) {
+            long code = 0;
+            curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+            r->status = (int) code;
+        }
+        curl_easy_cleanup(c);
+    }
+#else
+    /* http:// only (TLS needs libcurl): one GET, Connection: close */
+    kn_url u;
+    if (!strncmp(r->url, "http://", 7) && kn_url_parse(r->url, &u) == 0) {
+        char port[8];
+        snprintf(port, sizeof(port), "%d", u.port ? u.port : 80);
+        struct addrinfo hints = {0}, *res = NULL;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(u.host, port, &hints, &res) == 0 && res) {
+            const int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+            struct timeval tv = {8, 0};
+            if (fd >= 0) {
+                setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+            }
+            if (fd >= 0 && connect(fd, res->ai_addr, res->ai_addrlen) == 0) {
+                const char *path = strchr(r->url + 7, '/');
+                char req[1024];
+                const int n = snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: kn_brain\r\n\r\n",
+                                       path ? path : "/", u.host);
+                if (n > 0 && send(fd, req, (size_t) n, MSG_NOSIGNAL) == n) {
+                    char buf[16384];
+                    size_t got = 0;
+                    ssize_t k;
+                    while (got + 1 < sizeof(buf) && (k = recv(fd, buf + got, sizeof(buf) - 1 - got, 0)) > 0) got += (size_t) k;
+                    buf[got] = 0;
+                    int status = 0;
+                    const char *bodyp = strstr(buf, "\r\n\r\n");
+                    if (sscanf(buf, "HTTP/%*s %d", &status) == 1 && bodyp) {
+                        r->status = status;
+                        r->body = strdup(bodyp + 4);
+                    }
+                }
+            }
+            if (fd >= 0) close(fd);
+            freeaddrinfo(res);
+        }
+    }
+#endif
+    kn_loop_post_threadsafe(r->b->loop, remote_hj_done, r);
+    return NULL;
+}
+
+void auth_has_joined_async(Brain *b, const char *username, const char *server_hash, const char *ip,
+                           AuthHasJoinedCb cb, void *ud) {
+    if (!username || !*username || !valid_hash(server_hash)) {
+        cb(ud, "Failed to verify username", NULL);
+        return;
+    }
+    if (g_auth.joins) { /* this process is the auth service too */
+        const cJSON *p = auth_joins_get(g_auth.joins, server_hash, username, ip, g_auth.check_ip, kn_now_ms());
+        cb(ud, p ? NULL : "Failed to verify username", p);
+        return;
+    }
+    const char *base = kn_config_str(b->cfg, "community.auth_url", "https://coordinator.krunk.io");
+    RemoteHj *r = calloc(1, sizeof(*r));
+    if (!r) {
+        cb(ud, "Server error.", NULL);
+        return;
+    }
+    char user[128], ipenc[128];
+    kn_url_encode(username, user, sizeof(user));
+    kn_url_encode(ip ? ip : "", ipenc, sizeof(ipenc));
+    size_t blen = strlen(base);
+    while (blen && base[blen - 1] == '/') blen--;
+    snprintf(r->url, sizeof(r->url), "%.*s/auth/hasJoined?username=%s&serverHash=%s%s%s", (int) blen, base, user,
+             server_hash, ip && *ip ? "&ip=" : "", ip && *ip ? ipenc : "");
+    r->b = b;
+    r->cb = cb;
+    r->ud = ud;
+    pthread_t t;
+    if (pthread_create(&t, NULL, remote_hj_thread, r) != 0) {
+        free(r);
+        cb(ud, "Server error.", NULL);
+        return;
+    }
+    pthread_detach(t);
 }
 
 /* ---------------------------------------------------------------- module */

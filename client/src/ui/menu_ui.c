@@ -1191,6 +1191,7 @@ void client_menu_tick(Client *client) {
     const int end_now = hud_ui_end_screen_interactive();
     if (end_now != end_interactive) {
         end_interactive = end_now;
+        html_dom_set_class(html_dom_root(), "kn-end-open", end_now); // lifts the HUD's pointer-events: none (krunknative.css)
         if (!html_ui_is_menu_open()) {
 #ifdef __EMSCRIPTEN__
             if (!ui_mobile_active()) web_pointer_lock(!end_now); // relock without a gesture: allowed after exitPointerLock()
@@ -1211,7 +1212,7 @@ void client_menu_tick(Client *client) {
     g_lock.denied_seen = lock_errors;
 #endif
     const double grace_left = client->menu_lock_grace_until - glfwGetTime(); // tests park it far ahead (hud_autoplay)
-    if (!end_now && !html_ui_is_menu_open() && (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) &&
+    if (!hud_ui_end_screen_up() && !html_ui_is_menu_open() && (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) &&
         !client_pointer_locked(client)) {
         client_set_menu_open(client, 1);
     }

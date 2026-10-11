@@ -52,7 +52,7 @@ void gs_config_defaults(GsConfig *cfg) {
     cfg->kr_cap_premium = 40;
     cfg->kr_multiplier = 1.0f;
     gs_copy(cfg->rcon_host, sizeof(cfg->rcon_host), "127.0.0.1");
-    gs_copy(cfg->auth_url, sizeof(cfg->auth_url), "https://coordinator.krunker.party"); // coord-auth contract
+    gs_copy(cfg->auth_url, sizeof(cfg->auth_url), "https://coordinator.krunk.io"); // coord-auth contract
     cfg->enforce_skins = -1;            // auto: on when linked to a coordinator
     cfg->shutdown_grace = 10.0f;
 }
@@ -505,7 +505,8 @@ static cJSON *gs_env_value(const char *text) {
     const char c = text[0];
     if (c == '{' || c == '[' || c == '"' || c == '-' || isdigit((unsigned char) c) || !strcmp(text, "true") || !strcmp(text, "false") ||
         !strcmp(text, "null")) {
-        cJSON *v = cJSON_Parse(text);
+        // Whole value only: plain cJSON_Parse accepts a prefix ("2.56.222.45" -> 2.56).
+        cJSON *v = cJSON_ParseWithOpts(text, NULL, 1);
         if (v) return v;
     }
     return cJSON_CreateString(text);
@@ -633,7 +634,9 @@ static int gs_cfg_token(const char **p, char *out, const size_t size, const int 
         if (*s == '"') s++;
     } else {
         // the value is the rest of the line (minus a trailing comment) so "say hi there" works
-        while (*s && !(rest_of_line ? (*s == '#' || (s[0] == '/' && s[1] == '/')) : (*s == ' ' || *s == '\t'))) {
+        // a comment starts with # or // after whitespace (so ws://host/path values survive)
+        while (*s && !(rest_of_line ? ((*s == '#' || (s[0] == '/' && s[1] == '/')) && n && (out[n - 1] == ' ' || out[n - 1] == '\t'))
+                                    : (*s == ' ' || *s == '\t'))) {
             if (n + 1 < size) out[n++] = *s;
             s++;
         }

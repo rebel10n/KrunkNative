@@ -14,8 +14,12 @@
 // context on a device display (EGL_EXT_platform_device) with a pbuffer surface at the
 // window's framebuffer size, which is the default framebuffer 0: glReadPixels/glReadBuffer
 // (GL_BACK) read-backs in debug_capture.c, input_script.c and ui_scenario.c work unchanged.
-// Linux builds with EGL only (KRUNKNATIVE_HEADLESS_EGL); elsewhere headless_enabled() fails
-// at startup with a message.
+// Linux builds with EGL, and every ANGLE build (KRUNKNATIVE_GL_BACKEND=angle, macOS included:
+// an OpenGL ES 3.0 context on an ANGLE display, see KRUNKNATIVE_ANGLE_BACKEND in headless.c)
+// define KRUNKNATIVE_HEADLESS_EGL; elsewhere headless_glfw_init() fails with a message.
+//
+// ANGLE builds also pick the ANGLE backend here for windowed runs (headless_glfw_init:
+// Metal on macOS, else ANGLE's OpenGL backend; GLFW_ANGLE_PLATFORM_TYPE) and log it.
 //
 // Every function below also works when headless mode is off: it then forwards to GLFW, so
 // callers use them unconditionally around window/context creation and presentation.
@@ -30,11 +34,11 @@ int headless_enabled(void);
 int headless_glfw_init(void);
 // Window hints after the caller's GL hints: GLFW_NO_API when headless (the context is EGL's).
 void headless_window_hints(void);
-// Makes a GL 4.5 core context current for `window`: glfwMakeContextCurrent, or (headless)
+// Makes a GL 4.5 core (ANGLE: OpenGL ES 3.0) context current for `window`: glfwMakeContextCurrent, or (headless)
 // creates the EGL context + pbuffer at the window's framebuffer size and logs GL_RENDERER.
 // Returns 0 on failure (message on stderr).
 int headless_make_context_current(GLFWwindow *window);
-// GL loader for gladLoadGLLoader: eglGetProcAddress when headless, else glfwGetProcAddress.
+// GL loader for kn_gl_load (gl.h): eglGetProcAddress when headless, else glfwGetProcAddress.
 void *headless_get_proc_address(const char *name);
 // The window whose context is current (glfwGetCurrentContext() is NULL when headless).
 GLFWwindow *headless_current_window(void);

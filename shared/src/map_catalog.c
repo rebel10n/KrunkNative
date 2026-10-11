@@ -142,6 +142,64 @@ int map_catalog_find(const char *query) {
     return -1;
 }
 
+// lowercase letters and digits only: "Soul Sanctum" == "soul_sanctum" == "\"soul sanctum\""
+static void resolve_normalize(const char *in, char *out, const size_t size) {
+    size_t n = 0;
+    for (; *in && n + 1 < size; in++) {
+        const unsigned char c = (unsigned char) *in;
+        if (isalnum(c)) out[n++] = (char) tolower(c);
+    }
+    out[n] = 0;
+}
+
+int map_catalog_resolve(const char *query, int *candidates, const size_t max, size_t *candidate_count) {
+    if (candidate_count) *candidate_count = 0;
+    char wanted[64];
+    resolve_normalize(query ? query : "", wanted, sizeof(wanted));
+    if (!wanted[0]) return -1;
+    const size_t wanted_len = strlen(wanted);
+
+    // 0: key, 1: official name, 2: community name (old_burg is also "Burg": burg's key wins)
+    char norm[64];
+    for (int pass = 0; pass < 3; pass++) {
+        int found = -1, found_n = 0;
+        for (size_t i = 0; i < CATALOG_COUNT; i++) {
+            const MapCatalogEntry *e = &k_catalog[i];
+            if (pass == 1 && e->source != MAP_SOURCE_OFFICIAL) continue;
+            if (pass == 2 && e->source != MAP_SOURCE_CUSTOM) continue;
+            resolve_normalize(pass == 0 ? e->key : e->name, norm, sizeof(norm));
+            if (!strcmp(norm, wanted)) {
+                if (candidates && (size_t) found_n < max) candidates[found_n] = (int) i;
+                found = (int) i;
+                found_n++;
+            }
+        }
+        if (found_n == 1) return found;
+        if (found_n > 1) {
+            if (candidate_count) *candidate_count = (size_t) found_n;
+            return -2;
+        }
+    }
+
+    // a unique prefix of the /maps label (official name, community key)
+    int found = -1;
+    size_t found_n = 0;
+    for (size_t i = 0; i < CATALOG_COUNT; i++) {
+        const MapCatalogEntry *e = &k_catalog[i];
+        resolve_normalize(e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key, norm, sizeof(norm));
+        if (strncmp(norm, wanted, wanted_len)) continue;
+        if (candidates && found_n < max) candidates[found_n] = (int) i;
+        found = (int) i;
+        found_n++;
+    }
+    if (found_n == 1) return found;
+    if (found_n > 1) {
+        if (candidate_count) *candidate_count = found_n;
+        return -2;
+    }
+    return -1;
+}
+
 uint32_t map_catalog_map_id(const MapCatalogEntry *entry) {
     uint32_t h = 0x811c9dc5u;
     if (!entry) return h;

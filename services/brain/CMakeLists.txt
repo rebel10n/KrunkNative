@@ -27,6 +27,11 @@ set(KN_BRAIN_SOURCES
     auth_state.c
     finder.c
     finder_table.c
+    # coord-store: multi-statement database operations (kn_procs, db_procs.h)
+    db_common.c
+    db_accounts.c
+    db_social.c
+    db_mm.c
     ../../shared/src/map_catalog.c  # relative: knsvc_existing() checks paths under this dir
 )
 
@@ -38,6 +43,12 @@ target_include_directories(kn_brain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # svc-accounts: shared/include for map_catalog.h (creations.c; shim in shared_shim.c)
 target_include_directories(kn_brain PRIVATE ${CMAKE_SOURCE_DIR}/shared/include)
 target_link_libraries(kn_brain PRIVATE knsvc_db)
+# coord-auth: community hasJoined over https:// (auth.c) needs libcurl; http:// works without
+find_package(CURL QUIET)
+if (CURL_FOUND)
+    target_link_libraries(kn_brain PRIVATE CURL::libcurl)
+    target_compile_definitions(kn_brain PRIVATE KN_HAVE_CURL=1)
+endif ()
 target_compile_options(kn_brain PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_compile_definitions(kn_brain PRIVATE _GNU_SOURCE)
 
@@ -73,6 +84,14 @@ add_test(NAME brain_federation
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_test.sh ${CMAKE_BINARY_DIR})
 set_tests_properties(brain_federation PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 
+# coord-auth: central auth + finder + community coordinator + 2 dedicated servers + headless
+# clients in online and offline mode (needs server_bin and client_bin; skip 77 without a DB).
+if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
+    add_test(NAME brain_auth_e2e
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_auth_e2e.sh ${CMAKE_BINARY_DIR})
+    set_tests_properties(brain_auth_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+endif ()
+
 # Ranked queue end to end (2 brains, fake game server, 4 accounts; per-run schema too).
 if (Python3_FOUND)
     add_test(NAME brain_ranked
@@ -80,6 +99,31 @@ if (Python3_FOUND)
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_ranked PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 endif ()
+
+# coord-store: the same three suites on the other store drivers (KN_TEST_DB_DRIVER,
+# tests/db_scratch.py). sqlite needs no server (temp file); mysql uses
+# KN_TEST_MYSQL_HOST/PORT/USER/PASSWORD (default 127.0.0.1:3306 root) and skips
+# (77) when no MySQL/MariaDB server answers. ctest -L sqlite / -L mysql.
+foreach (drv IN ITEMS sqlite mysql)
+    string(TOUPPER ${drv} DRV)
+    if (NOT KNSVC_STORE_${DRV})
+        continue()
+    endif ()
+    if (Python3_FOUND)
+        add_test(NAME brain_social_ws_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_ws_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_ranked_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ranked_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
+    endif ()
+    add_test(NAME brain_federation_${drv}
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_test.sh ${CMAKE_BINARY_DIR})
+    set_tests_properties(brain_federation_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+        ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
+endforeach ()
 
 # Fake game server node for integration tests (speaks the internal WS protocol).
 add_executable(kn_fakenode tools/kn_fakenode.c)

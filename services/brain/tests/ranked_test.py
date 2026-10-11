@@ -6,6 +6,8 @@ a fake game server on brain A, 4 accounts registered over the social socket.
 Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's
 database.name; every run uses its own schema (kn_test_rq_<pid>, dropped after)
 and ephemeral ports, so concurrent runs never interfere. 77 = skip (no PostgreSQL).
+KN_TEST_DB_DRIVER=sqlite|mysql runs both brains on that store driver instead
+(db_scratch.py: one temp sqlite file, or a scratch MySQL/MariaDB database).
 
 Covers /mm/queue/join on both brains, cross-brain matching + hosting (the node
 lives on brain A), Join tickets, the ranked "host" config, AccountAlreadyPlaying,
@@ -39,7 +41,7 @@ if not DB:
             DB = json.load(fp).get("database", {}).get("name", "")
     except (OSError, ValueError):
         DB = ""
-if not DB:
+if not DB and os.environ.get("KN_TEST_DB_DRIVER", "postgres") == "postgres":
     print("ranked test: no database configured; skipped")
     sys.exit(77)
 SCHEMA = "kn_test_rq_%d" % os.getpid()
@@ -266,12 +268,23 @@ async def scenario(pa, pb, node):
 
 
 def main():
-    pg = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "pg_schema.py"), ROOT, DB]
-    rc = subprocess.run(pg + ["create", SCHEMA]).returncode
-    if rc:
-        sys.exit(rc)
+    driver = os.environ.get("KN_TEST_DB_DRIVER", "postgres")
+    if driver == "postgres":
+        pg = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "pg_schema.py"), ROOT, DB]
+        rc = subprocess.run(pg + ["create", SCHEMA]).returncode
+        if rc:
+            sys.exit(rc)
+        dbenv = {"KN_DATABASE_NAME": DB, "KN_DATABASE_SEARCH_PATH": SCHEMA}
+    else:
+        pg = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
+        r = subprocess.run(pg + ["create", driver, SCHEMA], capture_output=True)
+        if r.returncode:
+            print("ranked test: %s unavailable: skipped" % driver)
+            sys.exit(r.returncode)
+        dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in json.loads(r.stdout).items()}
+        pg_drop = pg + ["drop", driver, SCHEMA]
     work = tempfile.mkdtemp(prefix="kn-ranked.")
-    env = dict(os.environ, KN_DATABASE_NAME=DB, KN_DATABASE_SEARCH_PATH=SCHEMA, KN_BRAIN_INTERNAL_SECRET=SECRET)
+    env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, **dbenv)
     subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)
     procs, logs, ports = [], [], []
@@ -298,7 +311,10 @@ def main():
             p.terminate()
         for p in procs:
             p.wait(5)
-        subprocess.run(pg + ["drop", SCHEMA])
+        if driver == "postgres":
+            subprocess.run(pg + ["drop", SCHEMA])
+        else:
+            subprocess.run(pg_drop)
     print("== brain logs")
     bad = []
     for path in logs:

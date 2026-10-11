@@ -639,6 +639,7 @@ EMSCRIPTEN_KEEPALIVE int kn_ui_event(const char *handler, const char *args_json,
 EM_JS(int, kn_js_is_document, (const char *page), {
     var f = '';
     try { f = location.pathname.substring(location.pathname.lastIndexOf('/') + 1); } catch (e) {}
+    if (f && f.indexOf('.') < 0) f += '.html'; // Cloudflare Pages serves social.html as /social
     return (f || 'index.html') === UTF8ToString(page) ? 1 : 0;
 });
 

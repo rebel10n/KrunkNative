@@ -119,22 +119,32 @@ void leaders_page(SocialSession *s, const char *query, int64_t region) {
     acct_itoa(reg, region);
     acct_itoa(lim, g_acct.page_size > 0 ? g_acct.page_size : 100);
     if (!q->column) {
+#define CLAN_LEADERS(region_test)                                                                          \
+    "SELECT c.clan_name AS player_clan, c.clan_name, c.clan_rank, c.clan_score, "                                 \
+    "(SELECT count(*) FROM clan_members m WHERE m.clan_id = c.clan_id) AS clan_membercount, "                     \
+    "(SELECT count(*) FROM clan_members m JOIN players p ON p.player_id = m.account_id "                          \
+    " WHERE m.clan_id = c.clan_id AND p.player_hack > 0) AS clan_hackcount, "                                     \
+    "a.username AS creatorname FROM clans c LEFT JOIN accounts a ON a.id = c.clan_playerid "                      \
+    "WHERE " region_test " ORDER BY c.clan_score DESC, c.clan_id LIMIT $2"
         social_query(s,
-                     "SELECT c.clan_name AS player_clan, c.clan_name, c.clan_rank, c.clan_score, "
-                     "(SELECT count(*) FROM clan_members m WHERE m.clan_id = c.clan_id) AS clan_membercount, "
-                     "(SELECT count(*) FROM clan_members m JOIN players p ON p.player_id = m.account_id "
-                     " WHERE m.clan_id = c.clan_id AND p.player_hack > 0) AS clan_hackcount, "
-                     "a.username AS creatorname FROM clans c LEFT JOIN accounts a ON a.id = c.clan_playerid "
-                     "WHERE $1::int = 0 OR c.clan_region = $1::int ORDER BY c.clan_score DESC, c.clan_id LIMIT $2",
+                     SQL(.pg = CLAN_LEADERS("$1::int = 0 OR c.clan_region = $1::int"),
+                         .any = CLAN_LEADERS("{int:$1} = 0 OR c.clan_region = {int:$1}")),
                      KN_DB_ARGS(reg, lim), leaders_done, c);
+#undef CLAN_LEADERS
         return;
     }
     /* column comes from the fixed table above, never from the request */
-    char sql[768];
+    char sql[768], any[768];
     snprintf(sql, sizeof sql,
              "SELECT player_id, player_name, player_featured, player_hack, player_premium, player_clan, clan_rank, %s "
              "FROM player_rows WHERE ($1::int = 0 OR player_region = $1::int) "
              "ORDER BY %s DESC, player_id LIMIT $2",
              q->column, q->column);
-    social_query(s, sql, KN_DB_ARGS(reg, lim), leaders_done, c);
+    snprintf(any, sizeof any,
+             "SELECT player_id, player_name, player_featured, player_hack, player_premium, player_clan, clan_rank, %s "
+             "FROM player_rows WHERE ({int:$1} = 0 OR player_region = {int:$1}) "
+             "ORDER BY %s DESC, player_id LIMIT $2",
+             q->column, q->column);
+    const kn_sql text = {.pg = sql, .any = any};
+    social_query(s, &text, KN_DB_ARGS(reg, lim), leaders_done, c);
 }

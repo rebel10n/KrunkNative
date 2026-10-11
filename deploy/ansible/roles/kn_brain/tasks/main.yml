@@ -1,3 +1,11 @@
+# kn_brain links every store adapter that was found at build time (postgres,
+# sqlite, mariadb): the runtime libraries must exist even if only one is used.
+- name: Runtime libraries for kn_brain
+  ansible.builtin.apt:
+    name: "{{ kn_brain_runtime_packages }}"
+    state: present
+    install_recommends: false
+
 - name: Release config directory
   ansible.builtin.file:
     path: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/config"
@@ -14,12 +22,16 @@
 # Until coord-store's SQLite adapter is in the shipped binary, a "sqlite" instance
 # would fail its migrations (it falls back to PostgreSQL on 127.0.0.1:5432, which
 # is not running here) and restart-loop. Detect it and fall back to --no-db.
+# Probe the local artifact being shipped (also right under --check, where the
+# release on the host is not written).
 - name: Does this kn_brain build have the SQLite store
-  ansible.builtin.shell: grep -c -a -i 'sqlite3_open' {{ kn_svc_base }}/releases/{{ kn_release_id }}/bin/kn_brain || true
+  ansible.builtin.shell: grep -c -a 'sqlite3_open' {{ (kn_artifact_root ~ '/' ~ kn_build_codename ~ '/bin/kn_brain') | quote }} || true
   register: kn_brain_sqlite_probe
   changed_when: false
   check_mode: false
   failed_when: false
+  delegate_to: localhost
+  become: false
 
 - name: Effective database per instance
   ansible.builtin.set_fact:
@@ -80,7 +92,7 @@
 - name: Release changed -> restart
   ansible.builtin.debug:
     msg: "current -> {{ kn_release_id }}"
-  changed_when: kn_release_link is defined and kn_release_link.changed
+  changed_when: kn_release_changed | default(false) | bool
   notify: Restart kn_brain
 
 - name: Enable target and units

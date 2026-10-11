@@ -26,7 +26,7 @@ Host com.chitown
   User root
   IdentityFile ~/.ssh/desktop_ed25519
 
-# Ashburn, US - Debian 12, 4 vCPU (nftables managed by abulxt's Ansible)
+# Ashburn, US - Debian 12, 4 vCPU
 Host amph.ashburn
   HostName 45.82.161.87
   User root

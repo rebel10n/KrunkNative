@@ -9,7 +9,9 @@ WebSocket like Krunker v3.1.1's social page / menu would (msgpack frames with th
 usage: social_ws_test.py <kn_brain> <repo_root>
 env:   KN_TEST_DB_NAME (default krunknative_svcacc), KN_TEST_SCHEMA (default
        kn_test_accounts_<pid>, dropped afterwards), config/config.json for host/user/password.
-Exit 77 (CTest skip) when PostgreSQL or python websockets is unavailable.
+       KN_TEST_DB_DRIVER=sqlite|mysql runs on that store driver instead (db_scratch.py:
+       a temp sqlite file, or a scratch database on KN_TEST_MYSQL_HOST/PORT/USER/PASSWORD).
+Exit 77 (CTest skip) when the database or python websockets is unavailable.
 """
 import asyncio
 import json
@@ -499,20 +501,32 @@ def main():
     dbname = os.environ.get("KN_TEST_DB_NAME", "krunknative_svcacc")
     # one schema per run: concurrent runs (several build dirs / agents) never share tables
     schema = os.environ.get("KN_TEST_SCHEMA", "kn_test_accounts_%d" % os.getpid())
-    env = dict(os.environ, PGPASSWORD=str(db.get("password", "")))
-    psql = ["psql", "-h", str(db.get("host", "127.0.0.1")), "-p", str(db.get("port", 5432)), "-U",
-            str(db.get("user", "krunknative")), "-d", dbname, "-v", "ON_ERROR_STOP=1", "-qAt"]
-    try:
-        subprocess.run(psql + ["-c", "DROP SCHEMA IF EXISTS %s CASCADE; CREATE SCHEMA %s" % (schema, schema)],
-                       env=env, check=True, capture_output=True, timeout=30)
-    except (OSError, subprocess.SubprocessError) as e:
-        print("PostgreSQL unavailable (%s): skip" % e)
-        return 77
+    driver = os.environ.get("KN_TEST_DB_DRIVER", "postgres")
+    if driver == "postgres":
+        env = dict(os.environ, PGPASSWORD=str(db.get("password", "")))
+        psql = ["psql", "-h", str(db.get("host", "127.0.0.1")), "-p", str(db.get("port", 5432)), "-U",
+                str(db.get("user", "krunknative")), "-d", dbname, "-v", "ON_ERROR_STOP=1", "-qAt"]
+        try:
+            subprocess.run(psql + ["-c", "DROP SCHEMA IF EXISTS %s CASCADE; CREATE SCHEMA %s" % (schema, schema)],
+                           env=env, check=True, capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as e:
+            print("PostgreSQL unavailable (%s): skip" % e)
+            return 77
+        dbcfg = dict(db, name=dbname, search_path=schema)
+        drop_db = lambda: subprocess.run(psql + ["-c", "DROP SCHEMA IF EXISTS %s CASCADE" % schema], env=env,
+                                         capture_output=True)
+    else:
+        scratch = [sys.executable, "-I", os.path.join(root, "services", "brain", "tests", "db_scratch.py"), root]
+        r = subprocess.run(scratch + ["create", driver, schema], capture_output=True)
+        if r.returncode:
+            print("%s unavailable (%s): skip" % (driver, r.stderr.decode(errors="replace").strip()))
+            return r.returncode
+        dbcfg = json.loads(r.stdout)
+        drop_db = lambda: subprocess.run(scratch + ["drop", driver, schema], capture_output=True)
 
     secret = "test-secret-" + str(os.getpid())
     cfg = {
-        "database": dict(db, name=dbname, search_path=schema,
-                         migrations_dir=os.path.join(root, "services", "db", "migrations")),
+        "database": dict(dbcfg, migrations_dir=os.path.join(root, "services", "db", "migrations")),
         "brain": {"host": "127.0.0.1", "port": 0, "internal_secret": secret, "federation": False},
         "accounts": {"password_iterations": 10000, "login_throttle_s": 1, "starting_kr": 1000,
                      "gift_fee_percent": 0, "gift_min_level": 0, "market_fee_bypass": 100, "skins_file": os.path.join(root, "assets", "skins.json"),
@@ -558,7 +572,7 @@ def main():
             print("---- brain log (%s) ----" % log_path)
             with open(log_path) as fp:
                 print(fp.read()[-6000:])
-        subprocess.run(psql + ["-c", "DROP SCHEMA IF EXISTS %s CASCADE" % schema], env=env, capture_output=True)
+        drop_db()
         if not rc:
             for f in os.listdir(tmp):
                 os.unlink(os.path.join(tmp, f))

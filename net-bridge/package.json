@@ -7,7 +7,9 @@
     "native-to-krunker": "node -r ts-node/register/transpile-only index.ts --native-to-krunker",
     "browser-to-native": "node -r ts-node/register/transpile-only index.ts --browser-to-native",
     "web": "node -r ts-node/register/transpile-only index.ts --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bridge-only": "node -r ts-node/register/transpile-only index.ts --bridge-only",
+    "bundle": "esbuild index.ts --bundle --platform=node --target=node22 --format=cjs --legal-comments=none --external:bufferutil --external:utf-8-validate --outfile=../dist/deploy/net-bridge/net-bridge.js"
   },
   "dependencies": {
     "msgpack-lite": "^0.1.26",
@@ -17,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^14.18.63",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "esbuild": "0.28.2"
   }
 }

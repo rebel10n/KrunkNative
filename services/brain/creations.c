@@ -142,19 +142,25 @@ static void db_rows_done(kn_db_result *res, void *ud) {
     free(a);
 }
 
-#define MAP_COLS \
-    "SELECT m.map_id, kn_html(m.map_name) AS map_name, m.map_date, m.map_initialdate, m.map_info::text AS map_info, " \
+/* H(x): kn_html(x) on postgres, {html:x} elsewhere; INFO(c): a JSON column as text */
+#define MAP_COLS_(H0, H1, INFO_M)                                                                                  \
+    "SELECT m.map_id, " H0 "m.map_name" H1 " AS map_name, m.map_date, m.map_initialdate, " INFO_M ", "             \
     "coalesce(m.map_image, '') AS map_image, m.map_votes, m.map_plays AS map_pl, m.map_updatecounter, " \
-    "m.map_featured, kn_html(m.map_description) AS map_description, coalesce(a.username, 'Community') AS creatorname, " \
+    "m.map_featured, " H0 "m.map_description" H1 " AS map_description, coalesce(a.username, 'Community') AS creatorname, " \
     "m.map_funds AS fund, (SELECT count(*) FROM creation_favs f WHERE f.kind = 0 AND f.creation_id = m.map_id) AS fav, " \
     "'' AS mod_url, '' AS mod_id FROM published_maps m LEFT JOIN accounts a ON a.id = m.creator_id "
 
-#define MOD_COLS \
-    "SELECT d.mod_id, kn_html(d.mod_name) AS mod_name, d.mod_date, d.mod_initialdate, d.mod_info::text AS mod_info, " \
+#define MAP_COLS MAP_COLS_("kn_html(", ")", "m.map_info::text AS map_info")
+#define MAP_COLS_ANY MAP_COLS_("{html:", "}", "m.map_info AS map_info__t")
+
+#define MOD_COLS_(H0, H1, INFO_D)                                                                                  \
+    "SELECT d.mod_id, " H0 "d.mod_name" H1 " AS mod_name, d.mod_date, d.mod_initialdate, " INFO_D ", "             \
     "coalesce(d.mod_image, '') AS mod_image, d.mod_votes, d.mod_plays AS mod_pl, d.mod_updatecounter, d.mod_featured, " \
-    "kn_html(d.mod_description) AS mod_description, d.mod_url, coalesce(a.username, 'Community') AS creatorname, " \
+    H0 "d.mod_description" H1 " AS mod_description, d.mod_url, coalesce(a.username, 'Community') AS creatorname, " \
     "0 AS fund, (SELECT count(*) FROM creation_favs f WHERE f.kind = 1 AND f.creation_id = d.mod_id) AS fav " \
     "FROM published_mods d LEFT JOIN accounts a ON a.id = d.creator_id "
+#define MOD_COLS MOD_COLS_("kn_html(", ")", "d.mod_info::text AS mod_info")
+#define MOD_COLS_ANY MOD_COLS_("{html:", "}", "d.mod_info AS mod_info__t")
 
 static void run(ApiReq *a) {
     Brain *b = g_acct_brain;
@@ -183,8 +189,8 @@ static void run(ApiReq *a) {
     else if (a->tab == 3) order = "AND x_fav ORDER BY 7 DESC LIMIT 2000";
     else if (a->tab == 4 && a->account > 0) order = "AND x_mine ORDER BY 3 DESC LIMIT 2000";
     else order = "ORDER BY 7 DESC, 3 DESC LIMIT 2000";
-    char sql[2048];
-    {
+    char sql[2048], any[2048];
+    for (int dialect = 0; dialect < 2; dialect++) {
         /* x_* placeholders select the tab filter on the right table */
         char filt[512];
         snprintf(filt, sizeof filt, "%s", order);
@@ -202,20 +208,25 @@ static void run(ApiReq *a) {
             } else if (!strncmp(src, "x_fav", 5)) {
                 r += (size_t) snprintf(repl + r, sizeof repl - r,
                                        "EXISTS (SELECT 1 FROM creation_favs f WHERE f.kind = %s AND f.creation_id = %s%s "
-                                       "AND f.account_id = $1::int)", kind, pfx, idc);
+                                       "AND f.account_id = %s)", kind, pfx, idc, dialect ? "{int:$1}" : "$1::int");
                 src += 5;
             } else if (!strncmp(src, "x_mine", 6)) {
-                r += (size_t) snprintf(repl + r, sizeof repl - r, "%screator_id = $1::int", pfx);
+                r += (size_t) snprintf(repl + r, sizeof repl - r, "%screator_id = %s", pfx, dialect ? "{int:$1}" : "$1::int");
                 src += 6;
             } else {
                 repl[r++] = *src++;
             }
         }
         repl[r] = 0;
-        snprintf(sql, sizeof sql, "%s WHERE %sdeleted_at IS NULL AND $1::int IS NOT NULL AND ($2 = '' OR %s%s_name ILIKE '%%' || $2 || '%%') %s",
-                 maps ? MAP_COLS : MOD_COLS, pfx, pfx, maps ? "map" : "mod", repl);
+        if (!dialect)
+            snprintf(sql, sizeof sql, "%s WHERE %sdeleted_at IS NULL AND $1::int IS NOT NULL AND ($2 = '' OR %s%s_name ILIKE '%%' || $2 || '%%') %s",
+                     maps ? MAP_COLS : MOD_COLS, pfx, pfx, maps ? "map" : "mod", repl);
+        else
+            snprintf(any, sizeof any, "%s WHERE %sdeleted_at IS NULL AND $1 IS NOT NULL AND ($2 = '' OR %s%s_name {ilike} '%%' || $2 || '%%' ESCAPE '\\') %s",
+                     maps ? MAP_COLS_ANY : MOD_COLS_ANY, pfx, pfx, maps ? "map" : "mod", repl);
     }
-    kn_db_query(b->db, sql, KN_DB_ARGS(acc, pat), db_rows_done, a);
+    const kn_sql text = {.pg = sql, .any = any};
+    kn_db_query_sql(b->db, &text, KN_DB_ARGS(acc, pat), db_rows_done, a);
 }
 
 static ApiReq *api_req(kn_http_req *req, int kind) {
@@ -263,12 +274,17 @@ static void h_assets(kn_http_req *req, void *ud) {
         pat[o++] = *p;
     }
     pat[o] = 0;
-    kn_db_query(g_acct_brain->db,
-                "SELECT x.id, kn_html(x.name) AS nm, x.data::text AS dat, x.created_at AS ini, a.username AS plrn, "
-                "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
-                "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name ILIKE '%' || $1 || '%') "
-                "AND ($2::int < 0 OR x.category = $2::int) AND ($3 = '' OR lower(a.username) = lower($3)) "
-                "ORDER BY x.id DESC LIMIT 500",
+    kn_db_query_sql(g_acct_brain->db,
+                SQL(.pg = "SELECT x.id, kn_html(x.name) AS nm, x.data::text AS dat, x.created_at AS ini, a.username AS plrn, "
+                          "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
+                          "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name ILIKE '%' || $1 || '%') "
+                          "AND ($2::int < 0 OR x.category = $2::int) AND ($3 = '' OR lower(a.username) = lower($3)) "
+                          "ORDER BY x.id DESC LIMIT 500",
+                    .any = "SELECT x.id, {html:x.name} AS nm, x.data AS dat__t, x.created_at AS ini, a.username AS plrn, "
+                           "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
+                           "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name {ilike} '%' || $1 || '%' ESCAPE '\\') "
+                           "AND ({int:$2} < 0 OR x.category = {int:$2}) AND ($3 = '' OR lower(a.username) = lower($3)) "
+                           "ORDER BY x.id DESC LIMIT 500"),
                 KN_DB_ARGS(pat, acct_itoa(cat, a->tab), user), db_rows_done, a);
 }
 
@@ -368,17 +384,7 @@ void sh_upload_map(SocialSession *s, const cJSON *f) {
         }
     }
     char me[24], c[24];
-    social_query(s,
-                 "WITH up AS (UPDATE published_maps SET map_data = $3, map_description = coalesce($4, ''), map_video = nullif($5, ''), "
-                 "  map_category = $6, map_image = coalesce($7, map_image), map_updatecounter = map_updatecounter + 1, map_date = now() "
-                 "  WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id = $1 RETURNING map_id), "
-                 "taken AS (SELECT 1 FROM published_maps WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id IS DISTINCT FROM $1), "
-                 "ins AS (INSERT INTO published_maps (map_name, creator_id, map_data, map_description, map_video, map_category, map_image) "
-                 "  SELECT $2, $1, $3, coalesce($4, ''), nullif($5, ''), $6, $7 "
-                 "  WHERE NOT EXISTS (SELECT 1 FROM up) AND NOT EXISTS (SELECT 1 FROM taken) RETURNING map_id) "
-                 "SELECT jsonb_build_object('updated', (SELECT count(*) FROM up), "
-                 "'id', coalesce((SELECT map_id FROM up), (SELECT map_id FROM ins)), "
-                 "'taken', CASE WHEN EXISTS (SELECT 1 FROM taken) THEN kn_fail('Map name taken')::text END)",
+    social_call(s, &P_PUBLISH_MAP,
                  KN_DB_ARGS(acct_itoa(me, s->account_id), nm, data, desc ? desc : "", video ? video : "",
                             acct_itoa(c, cat >= 0 && cat < 32 ? cat : 0), thumb),
                  publish_done, NULL);
@@ -395,8 +401,8 @@ void sh_edit_map(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24];
     social_query(s,
-                 "SELECT map_data FROM published_maps WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND (creator_id = $1 "
-                 "OR EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))",
+                 SQL(.any = "SELECT map_data FROM published_maps WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND (creator_id = $1 "
+                            "OR EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))"),
                  KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : ""), edit_map_done, NULL);
 }
 
@@ -412,10 +418,11 @@ void sh_fav_creation(SocialSession *s, const cJSON *f) {
     acct_itoa(id, fa_int(f, 1, 0));
     acct_itoa(kind, fa_int(f, 2, 0) ? 1 : 0);
     if (fa_int(f, 3, 1))
-        social_query(s, "INSERT INTO creation_favs (kind, creation_id, account_id) VALUES ($2, $3, $1) ON CONFLICT DO NOTHING",
+        social_query(s, SQL(.pg = "INSERT INTO creation_favs (kind, creation_id, account_id) VALUES ($2, $3, $1) ON CONFLICT DO NOTHING",
+                            .any = "{insert_ignore} INTO creation_favs (kind, creation_id, account_id) VALUES ($2, $3, $1) {ignore_conflicts}"),
                      KN_DB_ARGS(social_viewer(s, me), kind, id), silent_done, NULL);
     else
-        social_query(s, "DELETE FROM creation_favs WHERE kind = $2 AND creation_id = $3 AND account_id = $1",
+        social_query(s, SQL(.any = "DELETE FROM creation_favs WHERE kind = $2 AND creation_id = $3 AND account_id = $1"),
                      KN_DB_ARGS(social_viewer(s, me), kind, id), silent_done, NULL);
 }
 
@@ -426,7 +433,7 @@ void sh_feature_creation(SocialSession *s, const cJSON *f) {
     const char *sql = fa_int(f, 3, 0)
         ? "UPDATE published_mods SET mod_featured = $3 WHERE mod_id = $2 AND EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0)"
         : "UPDATE published_maps SET map_featured = $3 WHERE map_id = $2 AND EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0)";
-    social_query(s, sql, KN_DB_ARGS(social_viewer(s, me), acct_itoa(id, fa_int(f, 1, 0)), acct_itoa(on, fa_int(f, 2, 0) ? 1 : 0)),
+    social_query(s, SQL(.any = sql), KN_DB_ARGS(social_viewer(s, me), acct_itoa(id, fa_int(f, 1, 0)), acct_itoa(on, fa_int(f, 2, 0) ? 1 : 0)),
                  silent_done, NULL);
 }
 
@@ -443,14 +450,18 @@ void sh_delete_creation(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], id[24];
     const int64_t kind = fa_int(f, 2, 0);
-    const char *sql = kind == 1
-        ? "UPDATE published_mods SET deleted_at = now() WHERE mod_id = $2 AND deleted_at IS NULL AND (creator_id = $1 OR "
-          "EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))"
-        : kind == 2
-        ? "UPDATE published_assets SET deleted_at = now() WHERE id = $2 AND deleted_at IS NULL AND (creator_id = $1 OR "
-          "EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))"
-        : "UPDATE published_maps SET deleted_at = now() WHERE map_id = $2 AND deleted_at IS NULL AND (creator_id = $1 OR "
-          "EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))";
+    /* creator, devs, creation mods; NOW = now() on postgres, {now} elsewhere */
+#define DEL_SQL(TABLE, IDCOL, NOW)                                                                              \
+    "UPDATE " TABLE " SET deleted_at = " NOW " WHERE " IDCOL " = $2 AND deleted_at IS NULL AND (creator_id = $1 OR " \
+    "EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))"
+    static const kn_sql del_mod = {.pg = DEL_SQL("published_mods", "mod_id", "now()"),
+                                   .any = DEL_SQL("published_mods", "mod_id", "{now}")},
+                        del_asset = {.pg = DEL_SQL("published_assets", "id", "now()"),
+                                     .any = DEL_SQL("published_assets", "id", "{now}")},
+                        del_map = {.pg = DEL_SQL("published_maps", "map_id", "now()"),
+                                   .any = DEL_SQL("published_maps", "map_id", "{now}")};
+#undef DEL_SQL
+    const kn_sql *sql = kind == 1 ? &del_mod : kind == 2 ? &del_asset : &del_map;
     social_query(s, sql, KN_DB_ARGS(social_viewer(s, me), acct_itoa(id, fa_int(f, 1, 0))), delete_done, NULL);
 }
 
@@ -502,9 +513,11 @@ static void h_map_data(kn_http_req *req, void *ud) {
         kn_http_respond_error(req, 404, "not_found");
         return;
     }
-    kn_db_query(g_acct_brain->db,
-                "SELECT map_data FROM published_maps WHERE deleted_at IS NULL AND "
-                "(($1 <> '' AND lower(map_name) = lower($1)) OR ($2::int > 0 AND map_id = $2::int))",
+    kn_db_query_sql(g_acct_brain->db,
+                SQL(.pg = "SELECT map_data FROM published_maps WHERE deleted_at IS NULL AND "
+                          "(($1 <> '' AND lower(map_name) = lower($1)) OR ($2::int > 0 AND map_id = $2::int))",
+                    .any = "SELECT map_data FROM published_maps WHERE deleted_at IS NULL AND "
+                           "(($1 <> '' AND lower(map_name) = lower($1)) OR ({int:$2} > 0 AND map_id = {int:$2}))"),
                 KN_DB_ARGS(name, has_id ? id : "0"), map_data_done, req);
 }
 

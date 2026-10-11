@@ -1,0 +1,13 @@
+# edge-firewall-contract v1 drop-in: {{ edge_firewall_dropin.name }}{{ (' (inputs: ' ~ edge_firewall_dropin.source ~ ')') if edge_firewall_dropin.source | default('') else '' }}.
+# Rendered by the vendored edge_firewall role (deploy/ansible/roles/edge_firewall).
+{% for edge_firewall_line in edge_firewall_dropin.comment | default([]) %}
+# {{ edge_firewall_line }}
+{% endfor %}
+{% set edge_firewall_tcp = edge_firewall_dropin.tcp | default([]) | map('string') | unique | list %}
+{% set edge_firewall_udp = edge_firewall_dropin.udp | default([]) | map('string') | unique | list %}
+{% if edge_firewall_tcp | length > 0 %}
+add element inet filter tcp_accept { {{ edge_firewall_tcp | join(', ') }} }
+{% endif %}
+{% if edge_firewall_udp | length > 0 %}
+add element inet filter udp_accept { {{ edge_firewall_udp | join(', ') }} }
+{% endif %}

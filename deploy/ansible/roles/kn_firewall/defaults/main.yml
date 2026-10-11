@@ -1,0 +1,14 @@
+# KrunkNative inputs for the vendored edge_firewall role (README.md "Edge firewall").
+#
+# false: abulxt's Ansible owns /etc/nftables.conf (today); only
+# /etc/nftables.d/60-krunknative.nft is rendered here. true after the handover
+# (together with abulxt edge_firewall_own_base=false). Set in group_vars/edges.
+kn_firewall_own_base: false
+kn_firewall_ssh_port: 22
+# Seconds before the armed rollback restores the previous ruleset + files.
+kn_firewall_rollback_seconds: 120
+# server_bin game ports (kn_gameserver_first_port / kn_gameserver_count from
+# group_vars/edges, shared with kn_gameserver): one port per instance, tcp+udp.
+kn_firewall_game_ports: >-
+  {{ (kn_gameserver_first_port | int) if (kn_gameserver_count | int) == 1 else
+     ((kn_gameserver_first_port | string) ~ '-' ~ ((kn_gameserver_first_port | int) + (kn_gameserver_count | int) - 1)) }}

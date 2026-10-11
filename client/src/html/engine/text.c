@@ -1119,7 +1119,7 @@ float text_atlas_fill(const TextSystem *ts) {
 }
 
 int text_atlas_dump_pgm(TextSystem *ts, const char *path) {
-#ifdef __EMSCRIPTEN__
+#ifdef KN_GLES // no glGetTexImage in OpenGL ES
     (void) ts; (void) path;
     return -1;
 #else

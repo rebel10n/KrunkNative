@@ -27,10 +27,19 @@ for codename in "${codenames[@]}"; do
         -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e TARGETS="${targets[*]}" \
         "debian:$codename" bash -euo pipefail -c '
             export DEBIAN_FRONTEND=noninteractive
+            # bullseye is EOL: the deb.debian.org security pocket 404s. Use archive.debian.org
+            # (as com.clara does); security + updates too, since the image already has them.
+            if grep -q bullseye /etc/os-release; then
+                rm -f /etc/apt/sources.list.d/*
+                printf "%s\n" "deb http://archive.debian.org/debian bullseye main" \
+                    "deb http://archive.debian.org/debian bullseye-updates main" \
+                    "deb http://archive.debian.org/debian-security bullseye-security main" > /etc/apt/sources.list
+                echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
+            fi
             apt-get update -qq >/dev/null
             # libsqlite3-dev / libmariadb-dev: store adapters are AUTO (built when found).
             apt-get install -y -qq --no-install-recommends cmake ninja-build gcc g++ libc6-dev make \
-                pkg-config libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libcrypt-dev python3 >/dev/null
+                pkg-config libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libcrypt-dev libcurl4-openssl-dev python3 >/dev/null
             cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
                 -DKRUNKNATIVE_HTML_ENGINE=OFF -DGLFW_BUILD_X11=OFF -DGLFW_BUILD_WAYLAND=OFF >/build/configure.log
             cmake --build /build --target $TARGETS

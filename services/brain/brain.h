@@ -33,7 +33,7 @@ typedef struct Brain {
     struct kn_config *cfg;         /* config/config.json + env + CLI (read-only) */
     struct kn_loop *loop;
     struct kn_http_server *http;   /* public listener: /mm/..., /api/..., /social/..., ws */
-    struct kn_db *db;              /* PostgreSQL pool (NULL with --no-db: registry is local-only) */
+    struct kn_db *db;              /* database pool, any driver (NULL with --no-db: registry is local-only) */
 
     char id[64];                   /* brain id (config brain.id, default "<hostname>-<port>") */
     char region[64];               /* default region of this brain (brain.region) */

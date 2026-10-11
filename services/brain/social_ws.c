@@ -247,8 +247,8 @@ static void social_query_done(kn_db_result *res, void *ud) {
     social_unhold(s);
 }
 
-int social_query(SocialSession *s, const char *sql, int nparams, const char *const *params, SocialDbFn fn,
-                 void *extra) {
+static int social_db(SocialSession *s, const kn_sql *sql, const kn_proc *proc, int nparams,
+                     const char *const *params, SocialDbFn fn, void *extra) {
     if (!g_acct_brain || !g_acct_brain->db) {
         social_error(s, "Server unavailable");
         free(extra);
@@ -262,11 +262,26 @@ int social_query(SocialSession *s, const char *sql, int nparams, const char *con
     q->s = social_hold(s);
     q->fn = fn;
     q->extra = extra;
-    if (kn_db_query(g_acct_brain->db, sql, nparams, params, social_query_done, q) != 0) {
-        /* kn_db_query always calls back; a non-zero return only means the cb already ran */
+    int rc = proc ? kn_db_call(g_acct_brain->db, proc, nparams, params, social_query_done, q)
+                  : kn_db_query_sql(g_acct_brain->db, sql, nparams, params, social_query_done, q);
+    /* the db calls back on every path but a refused submit; a non-zero return means no callback */
+    if (rc != 0) {
+        free(q->extra);
+        free(q);
+        social_unhold(s);
         return -1;
     }
     return 0;
+}
+
+int social_query(SocialSession *s, const kn_sql *sql, int nparams, const char *const *params, SocialDbFn fn,
+                 void *extra) {
+    return social_db(s, sql, NULL, nparams, params, fn, extra);
+}
+
+int social_call(SocialSession *s, const kn_proc *proc, int nparams, const char *const *params, SocialDbFn fn,
+                void *extra) {
+    return social_db(s, NULL, proc, nparams, params, fn, extra);
 }
 
 /* ------------------------------------------------------------------ auth ("a") */
@@ -343,7 +358,8 @@ static void sh_auth(SocialSession *s, const cJSON *f) {
         /* logout: forget the account; the client drops its saved token, so revoke it */
         presence_remove(s);
         if (s->token[0])
-            social_query(s, "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))", KN_DB_ARGS(s->token),
+            social_query(s, SQL(.pg = "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))",
+                                .any = "DELETE FROM sessions WHERE token_hash = {hash:$1}"), KN_DB_ARGS(s->token),
                          revoke_done, NULL);
         s->account_id = 0;
         s->username[0] = 0;
@@ -433,7 +449,8 @@ static void sh_logout_all(SocialSession *s, const cJSON *f) {
     (void) f;
     if (!social_require_auth(s)) return;
     char me[24];
-    social_query(s, "DELETE FROM sessions WHERE account_id = $1 AND token_hash <> sha256(convert_to($2, 'UTF8'))",
+    social_query(s, SQL(.pg = "DELETE FROM sessions WHERE account_id = $1 AND token_hash <> sha256(convert_to($2, 'UTF8'))",
+                        .any = "DELETE FROM sessions WHERE account_id = $1 AND token_hash <> {hash:$2}"),
                  KN_DB_ARGS(social_viewer(s, me), s->token), las_done, NULL);
 }
 

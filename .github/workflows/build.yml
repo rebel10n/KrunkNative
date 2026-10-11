@@ -189,19 +189,31 @@ jobs:
           path: dist/**
           if-no-files-found: error
 
+  # Native macOS renders through Metal via ANGLE (OpenGL ES 3.0, the KN_GLES path the web
+  # build shares; README.md "ANGLE / Metal (macOS)"). ANGLE is built from the commit pinned in
+  # tools/angle/build-angle.sh and cached per arch: the cache key is that script's hash, so
+  # bumping the pin rebuilds it (cold: ~30-60 min, then a cache restore). The `desktop` entry
+  # keeps Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
   macos:
-    name: macOS (Clang)
+    name: macOS (Clang, ${{ matrix.gl == 'angle' && 'ANGLE/Metal' || 'desktop GL 4.1' }}, ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: macos-latest
             arch: arm64
+            gl: angle
           # macos-13 (the last Intel "latest") was retired on 2025-12-04;
           # macos-15-intel is the supported x86_64 label until ~Aug 2027.
           - runner: macos-15-intel
             arch: x86_64
+            gl: angle
+          - runner: macos-latest
+            arch: arm64
+            gl: desktop
     runs-on: ${{ matrix.runner }}
+    env:
+      ANGLE_DIR: ${{ github.workspace }}/angle-dist
     steps:
       - uses: actions/checkout@v7
         with:
@@ -212,8 +224,22 @@ jobs:
           brew update
           brew install cmake ninja pkg-config
 
+      - name: Cache ANGLE
+        if: matrix.gl == 'angle'
+        id: angle-cache
+        uses: actions/cache@v6
+        with:
+          path: angle-dist
+          key: angle-macos-${{ matrix.arch }}-${{ hashFiles('tools/angle/build-angle.sh') }}
+
+      # depot_tools + gclient + gn, Metal and OpenGL backends only; the checkout (~9 GB) lives
+      # in RUNNER_TEMP and only lib/ + include/ (a few MB) are cached.
+      - name: Build ANGLE (pinned commit)
+        if: matrix.gl == 'angle' && steps.angle-cache.outputs.cache-hit != 'true'
+        run: tools/angle/build-angle.sh "$ANGLE_DIR" --work "$RUNNER_TEMP/angle-work"
+
       - name: Build (Release)
-        run: make release
+        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }}"
 
       - name: Run tests
         run: ./cmake-build-release/proc_input_test
@@ -221,11 +247,70 @@ jobs:
       - name: HTML engine smoke probe
         run: ./cmake-build-release/ui_test lexbor-probe
 
+      # client_bin links @rpath/libEGL.dylib with an @executable_path rpath, and the build copied
+      # ANGLE's dylibs next to it (GLFW dlopens @rpath/libEGL.dylib + @rpath/libGLESv2.dylib).
+      - name: Check ANGLE bundling
+        if: matrix.gl == 'angle'
+        run: |
+          set -euxo pipefail
+          otool -L cmake-build-release/client_bin | tee /dev/stderr | grep -q '@rpath/libEGL.dylib'
+          otool -l cmake-build-release/client_bin | grep -A2 LC_RPATH | grep -q '@executable_path'
+          for lib in libEGL.dylib libGLESv2.dylib; do
+            test -f "cmake-build-release/$lib"
+            otool -D "cmake-build-release/$lib" | grep -q "@rpath/$lib"
+          done
+
+      # Headless (client/include/headless.h on ANGLE's EGL: an OpenGL ES 3.0 pbuffer, no window):
+      # the menu over the default map and the uidiff menu scenario. The arm64 runner's
+      # paravirtual GPU must give the Metal backend; the Intel runner has no Metal device, so
+      # there the client falls back to ANGLE's OpenGL backend and the step is advisory.
+      - name: Smoke screenshots (headless ANGLE)
+        if: matrix.gl == 'angle'
+        continue-on-error: ${{ matrix.arch == 'x86_64' }}
+        run: |
+          set -uo pipefail
+          mkdir -p smoke
+          export KRUNKNATIVE_HEADLESS=1 XDG_CONFIG_HOME="$RUNNER_TEMP/kn-config"
+          # run <seconds> <log> <command...>: macOS has no timeout(1)
+          run() {
+            local seconds=$1 log=$2; shift 2
+            "$@" > "$log" 2>&1 &
+            local pid=$!
+            for _ in $(seq "$seconds"); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+            kill "$pid" 2>/dev/null
+            wait "$pid"
+          }
+          KRUNKNATIVE_SCREENSHOT="$PWD/smoke/menu-offline.png" KRUNKNATIVE_CAPTURE_FRAMES=60 \
+            run 180 smoke/menu-offline.log ./cmake-build-release/client_bin --offline
+          run 180 smoke/menu-1280.log ./cmake-build-release/client_bin \
+            --render-scenario tools/uidiff/scenarios/menu-1280.json "$PWD/smoke/menu-1280.png"
+          grep -h -E '^\[gl\]|GL_RENDERER' smoke/*.log | sort -u
+          status=0
+          for shot in menu-offline menu-1280; do
+            if [ ! -s "smoke/$shot.png" ]; then
+              echo "::error::no smoke/$shot.png"; tail -40 "smoke/$shot.log"; status=1
+            fi
+          done
+          if [ "${{ matrix.arch }}" = arm64 ] && ! grep -q 'ANGLE Metal Renderer' smoke/menu-offline.log; then
+            echo "::error::GL_RENDERER is not ANGLE's Metal renderer"; status=1
+          fi
+          exit $status
+
+      - name: Upload smoke screenshots
+        if: always() && matrix.gl == 'angle'
+        uses: actions/upload-artifact@v7
+        with:
+          name: KrunkNative-macos-${{ matrix.arch }}-smoke
+          path: smoke/**
+          if-no-files-found: warn
+
       - name: Stage macOS artifact
         run: |
           set -euxo pipefail
           mkdir -p dist
           cp -v cmake-build-release/client_bin cmake-build-release/server_bin dist/
+          # ANGLE (Metal): client_bin loads them from its own directory (@executable_path rpath)
+          if [ "${{ matrix.gl }}" = angle ]; then cp -v cmake-build-release/libEGL.dylib cmake-build-release/libGLESv2.dylib dist/; fi
           cp -R ui dist/ui
           # shellcheck disable=SC2012
           ls -laR dist | head -100
@@ -233,7 +318,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-macos-${{ matrix.arch }}
+          name: KrunkNative-macos-${{ matrix.arch }}${{ matrix.gl == 'desktop' && '-desktop-gl' || '' }}
           path: dist/**
           if-no-files-found: error
 

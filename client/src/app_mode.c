@@ -323,6 +323,7 @@ static char *web_document_file(void) {
     return (char *) EM_ASM_PTR({
         var f = "";
         try { f = location.pathname.substring(location.pathname.lastIndexOf("/") + 1); } catch (e) {}
+        if (f && f.indexOf(".") < 0) f += ".html"; // Cloudflare Pages serves social.html as /social
         return stringToNewUTF8(f || "index.html");
     });
 }

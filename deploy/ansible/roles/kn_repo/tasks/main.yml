@@ -14,3 +14,5 @@
     single_branch: true
     force: false
     update: true
+  # The commit diff can contain binary files (invalid UTF-8 for ansible --diff).
+  diff: false

@@ -89,6 +89,13 @@ static struct {
     ma_context context;
     int context_ready;
     ma_engine engine;
+#ifndef __EMSCRIPTEN__
+    // The playback device is ours (ma_engine_config.pDevice), not the engine's, so the
+    // output can be re-opened under the running engine (audio_set_output_device).
+    ma_device device;
+    int device_ready;
+#endif
+    char output_device[AUDIO_DEVICE_NAME_MAX]; // requested playback device name, "" = default
     float volumes[AUDIO_CAT_COUNT];
     float rate_scale; // SOUND.rate (1 unless the round-end slow motion runs), see audio_set_rate
 
@@ -495,6 +502,95 @@ EM_JS(void, audio_web_install_unlock, (void), {
 });
 #endif
 
+#ifndef __EMSCRIPTEN__
+// The engine does not own the device (ma_engine_config.pDevice): its callback pulls the mix.
+static void output_data_callback(ma_device *device, void *out, const void *in, const ma_uint32 frame_count) {
+    (void) in;
+    ma_engine_read_pcm_frames((ma_engine *) device->pUserData, out, frame_count, NULL);
+}
+
+// Opens g_audio.device on g_audio.output_device (by name), falling back to the default
+// device when that one is not connected or fails to open. channels/sample_rate 0 = the
+// device's native format (first open); a re-open passes the engine's so its node graph
+// keeps working (miniaudio converts to the new device's format).
+static int output_device_open(const ma_uint32 channels, const ma_uint32 sample_rate) {
+    ma_device_id id;
+    memset(&id, 0, sizeof(id));
+    int have_id = 0;
+    if (g_audio.output_device[0]) {
+        ma_device_info *infos = NULL;
+        ma_uint32 count = 0;
+        if (ma_context_get_devices(&g_audio.context, &infos, &count, NULL, NULL) == MA_SUCCESS) {
+            for (ma_uint32 i = 0; i < count && !have_id; i++) {
+                if (strcmp(infos[i].name, g_audio.output_device)) continue;
+                id = infos[i].id;
+                have_id = 1;
+            }
+        }
+        if (!have_id) fprintf(stderr, "[audio] output device \"%s\" not found, using the default device\n", g_audio.output_device);
+    }
+    for (int attempt = have_id ? 0 : 1; attempt < 2; attempt++) {
+        ma_device_config dc = ma_device_config_init(ma_device_type_playback);
+        dc.playback.pDeviceID = attempt == 0 ? &id : NULL;
+        dc.playback.format = ma_format_f32;
+        dc.playback.channels = channels;
+        dc.sampleRate = sample_rate;
+        dc.dataCallback = output_data_callback;
+        dc.pUserData = &g_audio.engine;
+        dc.noPreSilencedOutputBuffer = MA_TRUE; // the engine writes every frame (ma_engine_init does the same)
+        dc.noClip = MA_TRUE;
+        const ma_result r = ma_device_init(&g_audio.context, &dc, &g_audio.device);
+        if (r == MA_SUCCESS) {
+            g_audio.device_ready = 1;
+            return 1;
+        }
+        fprintf(stderr, "[audio] %s: cannot open output device \"%s\": %s\n", ma_get_backend_name(g_audio.context.backend),
+                attempt == 0 ? g_audio.output_device : "default", ma_result_description(r));
+    }
+    return 0;
+}
+#endif
+
+int audio_output_devices(AudioDeviceInfo *out, const int max) {
+#ifdef __EMSCRIPTEN__
+    (void) out;
+    (void) max;
+    return 0;
+#else
+    if (!g_audio.context_ready || !out || max <= 0) return 0;
+    ma_device_info *infos = NULL;
+    ma_uint32 count = 0;
+    if (ma_context_get_devices(&g_audio.context, &infos, &count, NULL, NULL) != MA_SUCCESS) return 0;
+    int n = 0;
+    for (ma_uint32 i = 0; i < count && n < max; i++) {
+        snprintf(out[n].name, sizeof(out[n].name), "%s", infos[i].name);
+        out[n].is_default = infos[i].isDefault != 0;
+        n++;
+    }
+    return n;
+#endif
+}
+
+void audio_set_output_device(const char *name) {
+    if (!name) name = "";
+    if (!strcmp(name, g_audio.output_device)) return;
+    snprintf(g_audio.output_device, sizeof(g_audio.output_device), "%s", name);
+#ifndef __EMSCRIPTEN__
+    if (!g_audio.ready || !g_audio.device_ready) return; // audio_init opens it
+    // Re-open the output under the running engine: the node graph, voices and listener stay.
+    const ma_uint32 channels = ma_engine_get_channels(&g_audio.engine);
+    const ma_uint32 sample_rate = ma_engine_get_sample_rate(&g_audio.engine);
+    ma_device_uninit(&g_audio.device); // stops it: no callback runs past this point
+    g_audio.device_ready = 0;
+    if (!output_device_open(channels, sample_rate)) {
+        fprintf(stderr, "[audio] no output device, sound stopped\n");
+        return;
+    }
+    if (ma_device_start(&g_audio.device) != MA_SUCCESS) fprintf(stderr, "[audio] cannot start the output device\n");
+    printf("[audio] output device %s\n", g_audio.device.playback.name);
+#endif
+}
+
 int audio_init(void) {
     if (g_audio.ready) return 1;
 
@@ -508,14 +604,9 @@ int audio_init(void) {
     config.listenerCount = 1;
 
     int backend_list[16];
-    const int backend_count = audio_backends(backend_list, 16);
-    if (backend_count) {
-        ma_backend backends[16];
-        for (int i = 0; i < backend_count; i++) backends[i] = (ma_backend) backend_list[i];
-        if (ma_context_init(backends, (ma_uint32) backend_count, NULL, &g_audio.context) != MA_SUCCESS) return 0;
-        g_audio.context_ready = 1;
-        config.pContext = &g_audio.context;
-    }
+    int backend_count = audio_backends(backend_list, 16);
+    ma_backend backends[16];
+    for (int i = 0; i < backend_count; i++) backends[i] = (ma_backend) backend_list[i];
 
     const char *capture = getenv("KRUNKNATIVE_AUDIO_CAPTURE");
     if (capture && *capture) {
@@ -523,8 +614,50 @@ int audio_init(void) {
         config.onProcess = capture_process;
     }
 
+#ifdef __EMSCRIPTEN__
+    if (backend_count) {
+        if (ma_context_init(backends, (ma_uint32) backend_count, NULL, &g_audio.context) != MA_SUCCESS) return 0;
+        g_audio.context_ready = 1;
+        config.pContext = &g_audio.context;
+    }
+#else
+    // Natively the context and the device are ours (the device list, live re-open). Like
+    // ma_device_init_ex, a backend whose context comes up but whose device does not open
+    // (e.g. a PulseAudio server refusing clients) is skipped for the next one.
+    if (!backend_count) {
+        size_t n = 0;
+        ma_get_enabled_backends(backends, 16, &n);
+        backend_count = (int) n;
+    }
+    for (int tries = 0; tries < 16 && backend_count > 0 && !g_audio.device_ready; tries++) {
+        if (ma_context_init(backends, (ma_uint32) backend_count, NULL, &g_audio.context) != MA_SUCCESS) break;
+        g_audio.context_ready = 1;
+        if (output_device_open(config.channels, 0)) break;
+        const ma_backend failed = g_audio.context.backend;
+        ma_context_uninit(&g_audio.context);
+        g_audio.context_ready = 0;
+        int kept = 0;
+        for (int i = 0; i < backend_count; i++) {
+            if (backends[i] != failed) backends[kept++] = backends[i];
+        }
+        if (kept == backend_count) break; // the context reported a backend outside the list
+        backend_count = kept;
+    }
+    if (!g_audio.device_ready) {
+        fprintf(stderr, "[audio] no audio device, sound disabled\n");
+        if (g_audio.context_ready) ma_context_uninit(&g_audio.context);
+        g_audio.context_ready = 0;
+        return 0;
+    }
+    config.pContext = &g_audio.context;
+    config.pDevice = &g_audio.device;
+#endif
     if (ma_engine_init(&config, &g_audio.engine) != MA_SUCCESS) {
         fprintf(stderr, "[audio] no audio device, sound disabled\n");
+#ifndef __EMSCRIPTEN__
+        ma_device_uninit(&g_audio.device);
+        g_audio.device_ready = 0;
+#endif
         if (g_audio.context_ready) ma_context_uninit(&g_audio.context);
         g_audio.context_ready = 0;
         return 0;
@@ -562,6 +695,10 @@ void audio_fini(void) {
     voice_audio_fini(); // voice chat sounds (voice.c) live on this engine
     for (int i = 0; i < AUDIO_MAX_VOICES; i++) voice_release(&g_audio.voices[i]);
     ma_engine_uninit(&g_audio.engine);
+#ifndef __EMSCRIPTEN__
+    if (g_audio.device_ready) ma_device_uninit(&g_audio.device);
+    g_audio.device_ready = 0;
+#endif
     if (g_audio.context_ready) ma_context_uninit(&g_audio.context);
     g_audio.context_ready = 0;
 

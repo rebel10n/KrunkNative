@@ -4,9 +4,11 @@
 #   {{ kn_svc_base }}/current -> releases/<id>
 kn_svc_base: /opt/krunknative-svc
 kn_svc_current: "{{ kn_svc_base }}/current"
-# Which container build to ship (deploy/ansible/build.sh): bullseye for Debian 11,
-# bookworm for 12 and 13 (forward compatible glibc/OpenSSL 3).
-kn_build_codename: "{{ 'bullseye' if ansible_distribution_major_version | int <= 11 else 'bookworm' }}"
+# Which container build to ship (deploy/ansible/build.sh): one per Debian release
+# (11 bullseye: glibc 2.31 + OpenSSL 1.1, 12 bookworm, 13+ trixie).
+kn_build_codename: >-
+  {{ {11: 'bullseye', 12: 'bookworm'}.get(ansible_facts.distribution_major_version | int,
+     'bullseye' if (ansible_facts.distribution_major_version | int) < 11 else 'trixie') }}
 kn_release_bins: [kn_brain, kn_migrate, server_bin]
 # Small, tracked data the services read (map catalogue, skins); not the 1.5 GB tree.
 kn_release_assets: [maps, skins.json]

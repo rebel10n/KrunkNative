@@ -229,8 +229,8 @@ static void mesh_reskin(Mesh *mesh, Geometry *geometry, const unsigned int textu
 // ---------------------------------------------------------------- shaders
 
 static unsigned int compile_stage(const unsigned int type, const char *source) {
-#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
-#ifdef __EMSCRIPTEN__
+#if defined(KN_GLES) || defined(__APPLE__) // same version rewrite as shader.c
+#ifdef KN_GLES
     static const char header[] = "#version 300 es\nprecision highp float; precision highp int; precision highp sampler2D;\n";
 #else
     static const char header[] = "#version 410 core\n";

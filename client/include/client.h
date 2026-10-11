@@ -587,8 +587,15 @@ void client_net_switch_server(Client*);
 void client_net_send_join(Client*, int socket); // NET_PACKET_JOIN right after HELLO (net_join.c)
 #ifdef __EMSCRIPTEN__
 int net_web_connect(Client*); // WebSocket transport (net_web.c)
+void net_web_target_url(char *out, size_t size, const char *host, int port); // bridge URL for host:port
 void net_web_disconnect(Client*);
 void net_web_request_reconnect(Client*);
+// WebTransport + knet (net_wt.c): tried by net_web_connect before the WebSocket.
+int net_wt_connect(Client*);
+int net_wt_active(void);
+int net_wt_busy(void);
+int net_wt_send(NetPacketType, const void*, uint16_t);
+void net_wt_close(int reconnect);
 #endif
 void client_net_queue_packet(Client*, const NetPacket*);
 void client_net_log_packet(const char*, NetPacketType, const void*, uint16_t);

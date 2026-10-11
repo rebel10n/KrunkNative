@@ -969,6 +969,9 @@ void ui_controls_toggle(Client *client, const int on) {
         if (on) hud_ui_toggle_end_screen(client); // UI.hasEndScreen && on
         return;
     }
+    // Title animation (controls not locked yet): losing the lock shows no menu, hideUI() set
+    // UI.active = false (toggleControlUI); a click still takes the pointer back.
+    if (!on && hud_ui_end_screen_up()) return;
     if (html_ui_is_menu_open() && menu_window_is_open()) {
         if (on) menu_toggle_window(0); // UI.toggleWindow(false, gamepad.active)
         return;

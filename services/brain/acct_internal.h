@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include "brain.h"
 #include "knsvc/db.h"
+#include "db_procs.h"
 #include "accounts.h"
 #include "social_ws.h"
 
@@ -95,6 +96,10 @@ void acct_twofa_enable(int64_t id, AcctReplyFn cb, void *ud);
 /* err NULL -> account object (with "token" set when one was issued). */
 void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud);
 void acct_get(int64_t id, AcctReplyFn cb, void *ud);
+/* Community role: local row of an account of the central account service
+ * (id = central account id, no password); created or renamed as needed.
+ * cb gets the account object (like acct_get). */
+void acct_ensure_central(int64_t central_id, const char *username, AcctReplyFn cb, void *ud);
 void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud);
 /* -> {token}: new session, every other session of the account revoked. */
 void acct_change_password(int64_t id, const char *old_pass, const char *new_pass, AcctReplyFn cb, void *ud);
@@ -166,9 +171,14 @@ cJSON *social_account_info(const cJSON *account);
 void social_push_account_update(const cJSON *account);
 /* Unread mail count ["gmc", n] to every open socket of the account. */
 void social_push_mail_count(int64_t account_id);
-/* Async query bound to a session; extra is freed with free() after fn (NULL ok). */
-int social_query(SocialSession *s, const char *sql, int nparams, const char *const *params, SocialDbFn fn,
+/* Async query bound to a session; extra is freed with free() after fn (NULL ok).
+ * sql: one text per dialect (knsvc/db.h kn_sql; resolved before returning, so a
+ * compound literal SQL(...) from db_procs.h is fine). */
+int social_query(SocialSession *s, const kn_sql *sql, int nparams, const char *const *params, SocialDbFn fn,
                  void *extra);
+/* Same for a multi-statement operation (db_procs.h). */
+int social_call(SocialSession *s, const kn_proc *proc, int nparams, const char *const *params, SocialDbFn fn,
+                void *extra);
 /* Frame argument accessors (index 1 = first argument after the label). */
 const cJSON *fa(const cJSON *frame, int i);
 int64_t fa_int(const cJSON *frame, int i, int64_t def);

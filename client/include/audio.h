@@ -53,6 +53,20 @@ void *audio_engine(void);
 // nothing usable: miniaudio's default order.
 int audio_backends(int *out, int max);
 
+// Playback device selection (Settings > Sound > Audio Output, ui_client_settings.c). The
+// device is identified by its backend name; "" or NULL = the backend's default device.
+// Before audio_init() it only records the choice; afterwards the output device is re-opened
+// live under the running engine (sounds keep playing). A name that is not connected falls
+// back to the default device. No-op on the web (Web Audio has one output).
+#define AUDIO_DEVICE_NAME_MAX 256
+typedef struct {
+    char name[AUDIO_DEVICE_NAME_MAX];
+    int is_default;
+} AudioDeviceInfo;
+// The playback devices of the backend in use (at most `max`); 0 without audio or on the web.
+int audio_output_devices(AudioDeviceInfo *out, int max);
+void audio_set_output_device(const char *name);
+
 // Per frame: listener = camera (Howler.pos/orientation), finished voices are recycled and
 // deferred loads/plays are serviced (decoding never runs inside UI event handlers, which on
 // the web cannot block for an asset fetch).

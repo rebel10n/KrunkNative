@@ -761,6 +761,15 @@ static void test_dynamic(void)
     uint32_t n;
     double t0;
 
+    /* html.kn-end-open (end-screen results, menu_ui.c) lifts it too: the result tabs are clickable */
+    dom_add_class(g_dom, html, "kn-end-open");
+    restyle();
+    check("#endUI", "pointer-events", "all");                  /* main.css #endUI */
+    check("#menuWindow", "pointer-events", "auto");
+    dom_remove_class(g_dom, html, "kn-end-open");
+    restyle();
+    check("#endUI", "pointer-events", "none");
+
     /* html.kn-menu-open lifts the pointer-events: none !important */
     dom_add_class(g_dom, html, "kn-menu-open");
     n = restyle();

@@ -23,11 +23,22 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#ifdef KNSVC_HAVE_TLS
+#include <arpa/inet.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
+#include <pthread.h>
+#include <signal.h>
+#endif
+
 #define CLOSE_TIMEOUT_MS 5000
+#define TLS_WRITE_CHUNK 16384
 #define LINGER_MS 2000
 #define READ_CHUNK 16384
 
-enum { ST_CONNECTING, ST_HANDSHAKE, ST_OPEN, ST_CLOSING, ST_CLOSED };
+/* ST_TLS: wss:// client, TCP connected, TLS handshake in progress. */
+enum { ST_CONNECTING, ST_TLS, ST_HANDSHAKE, ST_OPEN, ST_CLOSING, ST_CLOSED };
 
 struct kn_ws {
     kn_loop *loop;
@@ -56,13 +67,30 @@ struct kn_ws {
     char client_key[32];
     char host_header[300];
     char *req_headers;        /* client: extra header block */
+    int tls;                  /* client: wss:// */
+    int tls_want_write;       /* an SSL_read needs the socket writable (renegotiation/key update) */
+    char tls_host[256];       /* certificate name / SNI */
+    struct addrinfo *ai_list; /* client: resolved addresses, ai_next = the next one to try */
+    struct addrinfo *ai_next;
+    kn_timer_id attempt_timer; /* client: per-address connect timeout while more addresses remain */
+#ifdef KNSVC_HAVE_TLS
+    SSL *ssl;
+#endif
 };
 
 static void ws_on_io(kn_loop *loop, int fd, unsigned ev, void *ud);
+static int connect_next(kn_ws *ws);
 
 /* ------------------------------------------------------------------ lifetime */
 
 static void ws_free(kn_ws *ws) {
+#ifdef KNSVC_HAVE_TLS
+    if (ws->ssl) {
+        if (ws->fd >= 0 && SSL_is_init_finished(ws->ssl)) SSL_shutdown(ws->ssl); /* best-effort close_notify */
+        SSL_free(ws->ssl);
+        ws->ssl = NULL;
+    }
+#endif
     if (ws->fd >= 0) {
         kn_loop_del_fd(ws->loop, ws->fd);
         close(ws->fd);
@@ -71,6 +99,8 @@ static void ws_free(kn_ws *ws) {
     kn_loop_cancel_timer(ws->loop, ws->close_timer);
     kn_loop_cancel_timer(ws->loop, ws->handshake_timer);
     kn_loop_cancel_timer(ws->loop, ws->linger_timer);
+    kn_loop_cancel_timer(ws->loop, ws->attempt_timer);
+    if (ws->ai_list) freeaddrinfo(ws->ai_list);
     kn_buf_free(&ws->in);
     kn_buf_free(&ws->out);
     kn_buf_free(&ws->msg);
@@ -109,7 +139,8 @@ static void ws_finish(kn_ws *ws, int code, const char *reason) {
     kn_loop_cancel_timer(ws->loop, ws->ping_timer);
     kn_loop_cancel_timer(ws->loop, ws->close_timer);
     kn_loop_cancel_timer(ws->loop, ws->handshake_timer);
-    ws->ping_timer = ws->close_timer = ws->handshake_timer = 0;
+    kn_loop_cancel_timer(ws->loop, ws->attempt_timer);
+    ws->ping_timer = ws->close_timer = ws->handshake_timer = ws->attempt_timer = 0;
     ws_enter(ws);
     if (ws->cb.on_close) ws->cb.on_close(ws, code, reason ? reason : "", ws->ud);
     if (ws->fd >= 0 && ws->out.len && code != KN_WS_CLOSE_ABNORMAL) {
@@ -144,18 +175,105 @@ static void ws_fail_later(kn_ws *ws, const char *why) {
     kn_loop_post(ws->loop, finish_task, ws);
 }
 
+/* ------------------------------------------------------------------ transport (plain TCP or TLS) */
+
+#ifdef KNSVC_HAVE_TLS
+static SSL_CTX *g_tls_ctx;
+static char g_tls_ctx_err[160];
+static pthread_once_t g_tls_once = PTHREAD_ONCE_INIT;
+
+/* One client context per process: system CA store (SSL_CERT_FILE/SSL_CERT_DIR honoured)
+ * plus KNSVC_TLS_CA_FILE (an extra PEM bundle, e.g. a test CA), TLS >= 1.2, peer
+ * verification required. */
+static void tls_ctx_init(void) {
+    struct sigaction sa;
+    if (sigaction(SIGPIPE, NULL, &sa) == 0 && sa.sa_handler == SIG_DFL) signal(SIGPIPE, SIG_IGN); /* SSL_write uses write(2) */
+    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx) {
+        snprintf(g_tls_ctx_err, sizeof g_tls_ctx_err, "SSL_CTX_new failed");
+        return;
+    }
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+    if (SSL_CTX_set_default_verify_paths(ctx) != 1) KN_WARN("ws", "tls: cannot load the system CA store");
+    const char *extra = getenv("KNSVC_TLS_CA_FILE");
+    if (extra && *extra) {
+        if (SSL_CTX_load_verify_locations(ctx, extra, NULL) == 1) KN_INFO("ws", "tls: extra CA file %s", extra);
+        else KN_WARN("ws", "tls: cannot load KNSVC_TLS_CA_FILE=%s", extra);
+    }
+    g_tls_ctx = ctx;
+}
+
+static const char *tls_err_text(kn_ws *ws, char *buf, size_t cap) {
+    long vr = ws->ssl ? SSL_get_verify_result(ws->ssl) : X509_V_OK;
+    unsigned long e = ERR_get_error();
+    if (vr != X509_V_OK) snprintf(buf, cap, "tls: certificate verify failed for %s: %s", ws->tls_host, X509_verify_cert_error_string(vr));
+    else if (e) snprintf(buf, cap, "tls: %s", ERR_reason_error_string(e) ? ERR_reason_error_string(e) : "handshake failed");
+    else snprintf(buf, cap, "tls: handshake failed (%s)", errno ? strerror(errno) : "connection closed");
+    ERR_clear_error();
+    return buf;
+}
+#endif
+
+/* send(2)-like: >0 bytes written, -1 with errno (EAGAIN = retry when writable/readable). */
+static ssize_t ws_io_send(kn_ws *ws, const void *data, size_t len) {
+#ifdef KNSVC_HAVE_TLS
+    if (ws->ssl) {
+        if (len > TLS_WRITE_CHUNK) len = TLS_WRITE_CHUNK; /* retries never shrink below the last attempt */
+        ERR_clear_error();
+        int n = SSL_write(ws->ssl, data, (int)len);
+        if (n > 0) return n;
+        int e = SSL_get_error(ws->ssl, n);
+        if (e == SSL_ERROR_WANT_WRITE || e == SSL_ERROR_WANT_READ) errno = EAGAIN;
+        else if (e != SSL_ERROR_SYSCALL || !errno) errno = EPIPE;
+        ERR_clear_error();
+        return -1;
+    }
+#endif
+    return send(ws->fd, data, len, MSG_NOSIGNAL);
+}
+
+/* recv(2)-like: >0 bytes, 0 = peer closed, -1 with errno. */
+static ssize_t ws_io_recv(kn_ws *ws, void *buf, size_t cap) {
+#ifdef KNSVC_HAVE_TLS
+    if (ws->ssl) {
+        ws->tls_want_write = 0;
+        ERR_clear_error();
+        int n = SSL_read(ws->ssl, buf, (int)cap);
+        if (n > 0) return n;
+        int e = SSL_get_error(ws->ssl, n);
+        ERR_clear_error();
+        if (e == SSL_ERROR_ZERO_RETURN) return 0;
+        if (e == SSL_ERROR_WANT_READ) {
+            errno = EAGAIN;
+            return -1;
+        }
+        if (e == SSL_ERROR_WANT_WRITE) {
+            ws->tls_want_write = 1;
+            errno = EAGAIN;
+            return -1;
+        }
+        if (e == SSL_ERROR_SYSCALL && !errno) return 0; /* EOF without close_notify */
+        if (e != SSL_ERROR_SYSCALL) errno = EPROTO;
+        return -1;
+    }
+#endif
+    return recv(ws->fd, buf, cap, 0);
+}
+
 /* ------------------------------------------------------------------ output */
 
 static void ws_update_events(kn_ws *ws) {
     if (ws->fd < 0) return;
     unsigned ev = ws->state == ST_CLOSED ? 0u : KN_EV_READ;
-    if (ws->out.len || ws->state == ST_CONNECTING) ev |= KN_EV_WRITE;
+    if (ws->out.len || ws->state == ST_CONNECTING || ws->tls_want_write) ev |= KN_EV_WRITE;
     kn_loop_mod_fd(ws->loop, ws->fd, ev);
 }
 
 static int ws_flush(kn_ws *ws) {
     while (ws->out.len) {
-        ssize_t n = send(ws->fd, ws->out.data, ws->out.len, MSG_NOSIGNAL);
+        ssize_t n = ws_io_send(ws, ws->out.data, ws->out.len);
         if (n > 0) {
             kn_buf_consume(&ws->out, (size_t)n);
             continue;
@@ -255,7 +373,7 @@ void kn_ws_close(kn_ws *ws, int code, const char *reason) {
         ws->state = ST_CLOSING;
         ws->close_timer = kn_loop_add_timer(ws->loop, CLOSE_TIMEOUT_MS, 0, close_timeout, ws);
         if (ws_flush(ws) != 0) ws_finish(ws, KN_WS_CLOSE_ABNORMAL, "write failed");
-    } else if (ws->state == ST_CONNECTING || ws->state == ST_HANDSHAKE) {
+    } else if (ws->state == ST_CONNECTING || ws->state == ST_TLS || ws->state == ST_HANDSHAKE) {
         ws_finish(ws, KN_WS_CLOSE_ABNORMAL, "closed before open");
     }
     ws_leave(ws);
@@ -528,6 +646,61 @@ static void handshake_timeout(kn_loop *loop, void *ud) {
     ws_leave(ws);
 }
 
+/* ------------------------------------------------------------------ client TLS */
+
+#ifdef KNSVC_HAVE_TLS
+/* TCP is up: start the TLS client handshake (SNI + certificate name/IP check). */
+static int tls_begin(kn_ws *ws) {
+    pthread_once(&g_tls_once, tls_ctx_init);
+    if (!g_tls_ctx) {
+        ws_fail_later(ws, g_tls_ctx_err[0] ? g_tls_ctx_err : "tls unavailable");
+        return -1;
+    }
+    ws->ssl = SSL_new(g_tls_ctx);
+    if (!ws->ssl || SSL_set_fd(ws->ssl, ws->fd) != 1) {
+        ws_fail_later(ws, "tls: SSL_new failed");
+        return -1;
+    }
+    unsigned char addr[16];
+    int is_ip = inet_pton(AF_INET, ws->tls_host, addr) == 1 || inet_pton(AF_INET6, ws->tls_host, addr) == 1;
+    X509_VERIFY_PARAM *vp = SSL_get0_param(ws->ssl);
+    if (is_ip) {
+        if (X509_VERIFY_PARAM_set1_ip_asc(vp, ws->tls_host) != 1) {
+            ws_fail_later(ws, "tls: bad IP address");
+            return -1;
+        }
+    } else {
+        X509_VERIFY_PARAM_set_hostflags(vp, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+        if (SSL_set1_host(ws->ssl, ws->tls_host) != 1 || SSL_set_tlsext_host_name(ws->ssl, ws->tls_host) != 1) {
+            ws_fail_later(ws, "tls: bad host name");
+            return -1;
+        }
+    }
+    SSL_set_connect_state(ws->ssl);
+    ws->state = ST_TLS;
+    return 0;
+}
+
+/* Drive SSL_do_handshake. 1 = done, 0 = in progress, -1 = failed (on_close follows). */
+static int tls_step(kn_ws *ws) {
+    ERR_clear_error();
+    errno = 0;
+    int r = SSL_do_handshake(ws->ssl);
+    if (r == 1) {
+        KN_DEBUG("ws", "%s: %s %s", ws->tls_host, SSL_get_version(ws->ssl), SSL_get_cipher_name(ws->ssl));
+        return 1;
+    }
+    int e = SSL_get_error(ws->ssl, r);
+    if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
+        kn_loop_mod_fd(ws->loop, ws->fd, KN_EV_READ | (e == SSL_ERROR_WANT_WRITE ? KN_EV_WRITE : 0u));
+        return 0;
+    }
+    char msg[300];
+    ws_fail_later(ws, tls_err_text(ws, msg, sizeof msg));
+    return -1;
+}
+#endif
+
 /* ------------------------------------------------------------------ I/O */
 
 static void ws_read(kn_ws *ws) {
@@ -536,7 +709,7 @@ static void ws_read(kn_ws *ws) {
             ws_fail(ws, KN_WS_CLOSE_INTERNAL, "out of memory");
             return;
         }
-        ssize_t n = recv(ws->fd, ws->in.data + ws->in.len, READ_CHUNK, 0);
+        ssize_t n = ws_io_recv(ws, ws->in.data + ws->in.len, READ_CHUNK);
         if (n > 0) {
             ws->in.len += (size_t)n;
             ws->in.data[ws->in.len] = 0;
@@ -573,20 +746,46 @@ static void ws_on_io(kn_loop *loop, int fd, unsigned ev, void *ud) {
         socklen_t el = sizeof err;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
         if (err || (ev & KN_EV_ERROR)) {
+            /* e.g. localhost -> ::1 refused, or a broken IPv6 route: try the next address */
+            if (ws->ai_next && connect_next(ws) == 0) {
+                ws_leave(ws);
+                return;
+            }
             ws_fail_later(ws, strerror(err ? err : ECONNREFUSED));
             ws_leave(ws);
             return;
         }
+        kn_loop_cancel_timer(ws->loop, ws->attempt_timer);
+        ws->attempt_timer = 0;
         if (!(ev & KN_EV_WRITE)) {
             ws_leave(ws);
             return;
         }
-        client_send_handshake(ws);
+#ifdef KNSVC_HAVE_TLS
+        if (ws->tls) {
+            if (tls_begin(ws) != 0) {
+                ws_leave(ws);
+                return;
+            }
+        } else
+#endif
+            client_send_handshake(ws);
     }
+#ifdef KNSVC_HAVE_TLS
+    if (ws->state == ST_TLS) {
+        if (tls_step(ws) != 1) {
+            ws_leave(ws);
+            return;
+        }
+        client_send_handshake(ws); /* -> ST_HANDSHAKE, flushed below */
+        ev |= KN_EV_WRITE;
+    }
+#endif
     if (ev & KN_EV_WRITE) {
         if (ws_flush(ws) != 0) ws_finish(ws, KN_WS_CLOSE_ABNORMAL, "write failed");
     }
-    if (!ws->on_close_done && (ev & (KN_EV_READ | KN_EV_HUP | KN_EV_ERROR))) ws_read(ws);
+    if (!ws->on_close_done && ((ev & (KN_EV_READ | KN_EV_HUP | KN_EV_ERROR)) || (ws->tls_want_write && (ev & KN_EV_WRITE))))
+        ws_read(ws);
     if (!ws->on_close_done && ws->out.len) {
         if (ws_flush(ws) != 0) ws_finish(ws, KN_WS_CLOSE_ABNORMAL, "write failed");
     }
@@ -702,60 +901,98 @@ kn_ws *kn_ws_accept(kn_http_req *req, const kn_ws_callbacks *cb, const kn_ws_opt
     return ret;
 }
 
-static int start_connect(kn_ws *ws, const kn_url *u) {
-    char port[16];
-    snprintf(port, sizeof port, "%d", u->port);
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    int rc = getaddrinfo(u->host, port, &hints, &res);
-    if (rc != 0) {
-        ws_fail_later(ws, gai_strerror(rc));
-        return 0;
+static void attempt_timeout(kn_loop *loop, void *ud) {
+    kn_ws *ws = ud;
+    ws->attempt_timer = 0;
+    if (ws->state != ST_CONNECTING) return;
+    ws_enter(ws);
+    if (connect_next(ws) != 0) ws_fail_later(ws, "connect timeout");
+    ws_leave(ws);
+}
+
+/* Connect (non-blocking) to the next resolved address; drops the current socket first.
+ * 0 = an attempt is in progress, -1 = no address left (on_close follows). */
+static int connect_next(kn_ws *ws) {
+    if (ws->fd >= 0) {
+        kn_loop_del_fd(ws->loop, ws->fd);
+        close(ws->fd);
+        ws->fd = -1;
     }
-    int fd = -1, err = 0;
-    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
-        fd = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, ai->ai_protocol);
+    kn_loop_cancel_timer(ws->loop, ws->attempt_timer);
+    ws->attempt_timer = 0;
+    int err = 0;
+    while (ws->ai_next) {
+        struct addrinfo *ai = ws->ai_next;
+        ws->ai_next = ai->ai_next;
+        int fd = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, ai->ai_protocol);
         if (fd < 0) {
             err = errno;
             continue;
         }
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0 || errno == EINPROGRESS) break;
-        err = errno;
-        close(fd);
-        fd = -1;
-    }
-    freeaddrinfo(res);
-    if (fd < 0) {
-        ws_fail_later(ws, strerror(err ? err : ECONNREFUSED));
+        if (connect(fd, ai->ai_addr, ai->ai_addrlen) != 0 && errno != EINPROGRESS) {
+            err = errno;
+            close(fd);
+            continue;
+        }
+        int one = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+        if (kn_loop_add_fd(ws->loop, fd, KN_EV_READ | KN_EV_WRITE, ws_on_io, ws) != 0) {
+            close(fd);
+            ws_fail_later(ws, "loop registration failed");
+            return -1;
+        }
+        ws->fd = fd;
+        /* more addresses left: give this one a third of the handshake budget */
+        if (ws->ai_next)
+            ws->attempt_timer = kn_loop_add_timer(ws->loop, (uint64_t)(ws->opts.handshake_timeout_ms / 3 + 1), 0, attempt_timeout, ws);
         return 0;
     }
-    int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    ws->fd = fd;
-    if (kn_loop_add_fd(ws->loop, fd, KN_EV_READ | KN_EV_WRITE, ws_on_io, ws) != 0) {
-        ws_fail_later(ws, "loop registration failed");
+    ws_fail_later(ws, strerror(err ? err : ECONNREFUSED));
+    return -1;
+}
+
+static int start_connect(kn_ws *ws, const kn_url *u) {
+    char port[16];
+    snprintf(port, sizeof port, "%d", u->port);
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int rc = getaddrinfo(u->host, port, &hints, &ws->ai_list);
+    if (rc != 0) {
+        ws->ai_list = NULL;
+        ws_fail_later(ws, gai_strerror(rc));
         return 0;
     }
+    ws->ai_next = ws->ai_list;
+    connect_next(ws);
     return 0;
 }
 
 kn_ws *kn_ws_connect(kn_loop *loop, const char *url, const kn_ws_callbacks *cb, const kn_ws_options *opts, void *ud) {
     kn_url u;
-    if (!url || kn_url_parse(url, &u) != 0 || strcmp(u.scheme, "ws") != 0) {
+    if (!url || kn_url_parse(url, &u) != 0 || (strcmp(u.scheme, "ws") != 0 && strcmp(u.scheme, "wss") != 0)) {
         KN_ERROR("ws", "unsupported websocket url: %s", url ? url : "(null)");
         return NULL;
     }
+    int tls = !strcmp(u.scheme, "wss");
+#ifndef KNSVC_HAVE_TLS
+    if (tls) {
+        KN_ERROR("ws", "wss:// needs knsvc built with OpenSSL libssl: %s", url);
+        return NULL;
+    }
+#endif
     kn_ws *ws = ws_new(loop, cb, opts, ud);
     if (!ws) return NULL;
     ws->client = 1;
+    ws->tls = tls;
+    snprintf(ws->tls_host, sizeof ws->tls_host, "%s", u.host);
     ws->state = ST_CONNECTING;
     ws->path = strdup(u.path);
     const char *q = strchr(u.path, '?');
     ws->query = strdup(q ? q + 1 : "");
     int v6 = strchr(u.host, ':') != NULL;
-    if (u.port == 80) snprintf(ws->host_header, sizeof ws->host_header, v6 ? "[%s]" : "%s", u.host);
+    if (u.port == (tls ? 443 : 80)) snprintf(ws->host_header, sizeof ws->host_header, v6 ? "[%s]" : "%s", u.host);
     else snprintf(ws->host_header, sizeof ws->host_header, v6 ? "[%s]:%d" : "%s:%d", u.host, u.port);
     snprintf(ws->remote, sizeof ws->remote, "%s", u.host);
     if (opts && opts->origin) {

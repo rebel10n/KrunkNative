@@ -1,0 +1,45 @@
+# net-bridge on the central node: the web client's WebSocket <-> native TCP passthrough
+# (net-bridge/webBridge.ts, `--bridge-only`). Browsers connect to
+#   wss://{{ kn_bridge_hostname }}/native?target=<edge>-<n>.krunk.io:<port>
+# (Cloudflare proxy -> tunnel -> 127.0.0.1:{{ kn_bridge_port }}) and the bridge opens TCP to
+# that edge game server. The page itself is on Cloudflare Pages (deploy/pages, kn-bridge).
+kn_bridge_hostname: "play.{{ kn_domain }}"
+kn_bridge_listen_host: 127.0.0.1
+kn_bridge_port: 8084
+kn_bridge_base: /opt/krunknative-bridge
+# Single-file esbuild bundle (net-bridge `npm run bundle`, built on the controller).
+kn_bridge_bundle: "{{ kn_artifact_root }}/net-bridge/net-bridge.js"
+
+# Private, pinned Node LTS for the bridge only (the host's /usr/local/bin/node 20 is EOL
+# and belongs to the pm2 app, so it is not used or touched). Bump version + sha256 together
+# (https://nodejs.org/dist/v<version>/SHASUMS256.txt, linux-x64.tar.xz).
+kn_bridge_node_version: "24.21.0"
+kn_bridge_node_sha256: fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6
+kn_bridge_node_root: /opt/krunknative-node
+kn_bridge_node_dir: "{{ kn_bridge_node_root }}/node-v{{ kn_bridge_node_version }}-linux-x64"
+
+# Allowlist (KRUNK_NATIVE_TARGETS): exactly the edge game servers, by name
+# <edge>-<n>.krunk.io and by public IP, ports kn_bridge_target_port_lo..hi. n runs over the
+# same range (instance n listens on first_port+n-1; kn_gameserver group_vars). Nothing else:
+# no loopback, no default target, so the bridge is not an open TCP proxy.
+kn_bridge_target_port_lo: 21015
+kn_bridge_target_port_hi: 21025
+kn_bridge_edge_hosts: "{{ groups['edges'] | default([]) }}"
+
+# Abuse limits (webBridge.ts). Cloudflare closes idle WebSockets after 100 s: the bridge
+# pings every 30 s; a session with no game byte either way for 90 s is closed.
+kn_bridge_max_per_ip: 8
+kn_bridge_max_sessions: 1024
+kn_bridge_idle_timeout_ms: 90000
+kn_bridge_ws_ping_ms: 30000
+kn_bridge_connect_timeout_ms: 10000
+# cloudflared connects from loopback; Cloudflare sets CF-Connecting-IP (overwriting any
+# client-supplied value), which keys the per-IP cap.
+kn_bridge_client_ip_header: cf-connecting-ip
+
+# Cloudflare (controller side, like cf_dns): DNS CNAME + tunnel ingress rule. Skipped with a
+# note when CF_API_TOKEN / CF_ACCOUNT_ID are not in the environment (CI).
+kn_bridge_cf_manage: true
+kn_bridge_cf_api_token: "{{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}"
+kn_bridge_cf_account_id: "{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}"
+kn_bridge_cf_tunnel_id: e6c3b632-03cd-409a-892c-a0cc37362e73

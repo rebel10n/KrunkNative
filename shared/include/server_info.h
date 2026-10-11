@@ -1,6 +1,6 @@
 #pragma once
 // Server-info query (doc/backend.md 8.8): a tiny, transport-independent request/response
-// that server lists (the finder at kru.eli.gift, the client's server browser, scripts)
+// that server lists (the central server finder, the client's server browser, scripts)
 // send to a game server to read its name, map, mode, players and tags. Source A2S style:
 //
 //   request:  FF FF FF FF "KNINFO" [00 <nonce, <= 32 bytes>]

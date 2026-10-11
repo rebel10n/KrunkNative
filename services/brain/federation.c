@@ -1,6 +1,9 @@
 /*
- * services/brain/federation.c - leader-free multi-brain registry over
- * PostgreSQL (doc/backend.md section 6, migration 0200_matchmaker.sql).
+ * services/brain/federation.c - leader-free multi-brain registry over the
+ * shared database (doc/backend.md section 6, migration <dialect>/0200_matchmaker.sql;
+ * multi-statement writes are kn_procs in db_mm.c). On drivers without native
+ * pub/sub (sqlite, mysql) the NOTIFYs below are kn_pubsub rows polled every
+ * database.notify_poll_ms (knsvc/db.h), and the 1 s refresh covers lost ones.
  *
  * - Each brain persists the nodes connected to it (mm_nodes + mm_lobbies) on
  *   every change and bumps their heartbeat every brain.heartbeat_s.
@@ -20,6 +23,7 @@
 
 #include "brain_internal.h"
 #include "knsvc/db.h"
+#include "db_procs.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
@@ -56,60 +60,10 @@ typedef struct PersistCtx {
     char node_id[MM_ID_MAX];
 } PersistCtx;
 
-/* Lobby tuples travel as json, not jsonb: jsonb reorders object keys, and the
- * game list must keep the game server's meta key order (0203_mm_tuple_json.sql). */
-/* connected_at = the registry's connected_ms (the internal WS hello), not now():
- * persists run on pooled connections and finish in any order, and the other
- * brains list nodes by connected_at like registry.ts lists them by hello order. */
-static const char *SQL_NODE_TAKEOVER =
-    "WITH n AS ("
-    " INSERT INTO mm_nodes (node_id, brain_id, region, name, public_host, public_port, web_url, version,"
-    "                       max_players, max_lobbies, custom, draining, connected_at, heartbeat_at)"
-    " VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::int, $7::text, $8::text, $9::int, $10::int, $11::boolean, $12::boolean, to_timestamp($14::double precision / 1000), now())"
-    " ON CONFLICT (node_id) DO UPDATE SET brain_id = EXCLUDED.brain_id, region = EXCLUDED.region,"
-    "   name = EXCLUDED.name, public_host = EXCLUDED.public_host, public_port = EXCLUDED.public_port,"
-    "   web_url = EXCLUDED.web_url, version = EXCLUDED.version, max_players = EXCLUDED.max_players,"
-    "   max_lobbies = EXCLUDED.max_lobbies, custom = EXCLUDED.custom, draining = EXCLUDED.draining,"
-    "   connected_at = EXCLUDED.connected_at, heartbeat_at = now()"
-    " RETURNING node_id),"
-    "x AS (SELECT * FROM json_to_recordset($13::json) AS x(gid text, lid text, region text, players int,"
-    "      max int, cs boolean, pr boolean, mode text, map text, v text, tuple json)),"
-    "del AS (DELETE FROM mm_lobbies WHERE node_id IN (SELECT node_id FROM n)"
-    "        AND game_id NOT IN (SELECT gid FROM x)),"
-    "ins AS (INSERT INTO mm_lobbies (game_id, node_id, local_id, region, players, max_players, custom,"
-    "        protected, mode, map, version, tuple, updated_at)"
-    "  SELECT gid, $1::text, lid, region, players, max, cs, pr, mode, map, v, tuple, now() FROM x"
-    "  WHERE EXISTS (SELECT 1 FROM n)"
-    "  ON CONFLICT (game_id) DO UPDATE SET node_id = EXCLUDED.node_id, local_id = EXCLUDED.local_id,"
-    "   region = EXCLUDED.region, players = EXCLUDED.players, max_players = EXCLUDED.max_players,"
-    "   custom = EXCLUDED.custom, protected = EXCLUDED.protected, mode = EXCLUDED.mode, map = EXCLUDED.map,"
-    "   version = EXCLUDED.version, tuple = EXCLUDED.tuple, updated_at = now()"
-    "  RETURNING 1)"
-    "SELECT (SELECT count(*) FROM n) AS owned";
-
-/* Same, but only while this brain still owns the row (never resurrects a
- * deleted node and never steals one another brain took over). */
-static const char *SQL_NODE_UPDATE =
-    "WITH n AS ("
-    " UPDATE mm_nodes SET region = $3::text, name = $4::text, public_host = $5::text, public_port = $6::int,"
-    "   web_url = $7::text,"
-    "   version = $8::text, max_players = $9::int, max_lobbies = $10::int, custom = $11::boolean,"
-    "   draining = $12::boolean, heartbeat_at = now()"
-    " WHERE node_id = $1::text AND brain_id = $2::text RETURNING node_id),"
-    "x AS (SELECT * FROM json_to_recordset($13::json) AS x(gid text, lid text, region text, players int,"
-    "      max int, cs boolean, pr boolean, mode text, map text, v text, tuple json)),"
-    "del AS (DELETE FROM mm_lobbies WHERE node_id IN (SELECT node_id FROM n)"
-    "        AND game_id NOT IN (SELECT gid FROM x)),"
-    "ins AS (INSERT INTO mm_lobbies (game_id, node_id, local_id, region, players, max_players, custom,"
-    "        protected, mode, map, version, tuple, updated_at)"
-    "  SELECT gid, $1::text, lid, region, players, max, cs, pr, mode, map, v, tuple, now() FROM x"
-    "  WHERE EXISTS (SELECT 1 FROM n)"
-    "  ON CONFLICT (game_id) DO UPDATE SET node_id = EXCLUDED.node_id, local_id = EXCLUDED.local_id,"
-    "   region = EXCLUDED.region, players = EXCLUDED.players, max_players = EXCLUDED.max_players,"
-    "   custom = EXCLUDED.custom, protected = EXCLUDED.protected, mode = EXCLUDED.mode, map = EXCLUDED.map,"
-    "   version = EXCLUDED.version, tuple = EXCLUDED.tuple, updated_at = now()"
-    "  RETURNING 1)"
-    "SELECT (SELECT count(*) FROM n) AS owned";
+/* node persist statements: P_MM_NODE_TAKEOVER / P_MM_NODE_UPDATE (db_mm.c, the
+ * lobby tuples keep their key order and connected_at is the hello time) */
+static const kn_sql SQL_NODE_DELETE = {.pg = "DELETE FROM mm_nodes WHERE node_id = $1::text AND brain_id = $2::text",
+                                       .any = "DELETE FROM mm_nodes WHERE node_id = $1 AND brain_id = $2"};
 
 static char *lobbies_json(const MmNode *n) {
     cJSON *arr = cJSON_CreateArray();
@@ -150,8 +104,7 @@ static void on_persist(kn_db_result *res, void *ud) {
         if (n->dirty) schedule_flush();
     } else if (kn_db_ok(res)) {
         /* removed while the write was in flight: make sure it stays gone */
-        kn_db_query(g_b->db, "DELETE FROM mm_nodes WHERE node_id = $1::text AND brain_id = $2::text",
-                    KN_DB_ARGS(p->node_id, g_b->id), on_ignore, "node delete");
+        kn_db_query_sql(g_b->db, &SQL_NODE_DELETE, KN_DB_ARGS(p->node_id, g_b->id), on_ignore, "node delete");
     }
     free(p);
     kn_db_notify(g_b->db, "kn_mm_lobby", g_b->id);
@@ -177,13 +130,13 @@ static void persist_node(MmNode *n) {
     n->dirty = 0;
     n->persisting = 1;
     if (takeover)
-        kn_db_query(g_b->db, SQL_NODE_TAKEOVER,
+        kn_db_call(g_b->db, &P_MM_NODE_TAKEOVER,
                     KN_DB_ARGS(n->node_id, g_b->id, n->region, n->name, n->public_host, port, n->web_url,
                                n->version, maxp, maxl, n->custom ? "true" : "false", n->draining ? "true" : "false",
                                lobbies, connected),
                     on_persist, p);
     else
-        kn_db_query(g_b->db, SQL_NODE_UPDATE,
+        kn_db_call(g_b->db, &P_MM_NODE_UPDATE,
                     KN_DB_ARGS(n->node_id, g_b->id, n->region, n->name, n->public_host, port, n->web_url,
                                n->version, maxp, maxl, n->custom ? "true" : "false", n->draining ? "true" : "false",
                                lobbies),
@@ -214,8 +167,7 @@ void federation_node_changed(Brain *b, MmNode *n) {
 
 void federation_node_gone(Brain *b, const char *node_id) {
     if (!g_active) return;
-    kn_db_query(b->db, "DELETE FROM mm_nodes WHERE node_id = $1::text AND brain_id = $2::text",
-                KN_DB_ARGS(node_id, b->id), on_ignore, "node delete");
+    kn_db_query_sql(b->db, &SQL_NODE_DELETE, KN_DB_ARGS(node_id, b->id), on_ignore, "node delete");
     kn_db_notify(b->db, "kn_mm_lobby", b->id);
 }
 
@@ -224,16 +176,20 @@ void federation_reserve(Brain *b, const char *jti, const char *game_id, int64_t 
     char acc[32], ttl[16];
     snprintf(acc, sizeof(acc), "%lld", (long long) account_id);
     snprintf(ttl, sizeof(ttl), "%d", ttl_s);
-    kn_db_query(b->db,
-                "INSERT INTO mm_reservations (jti, game_id, brain_id, account_id, expires_at)"
-                " VALUES ($1::text, $2::text, $3::text, NULLIF($4::bigint, 0), now() + make_interval(secs => $5::int))"
-                " ON CONFLICT (jti) DO NOTHING",
-                KN_DB_ARGS(jti, game_id, b->id, acc, ttl), on_ignore, "reserve");
+    static const kn_sql q = {
+        .pg = "INSERT INTO mm_reservations (jti, game_id, brain_id, account_id, expires_at)"
+              " VALUES ($1::text, $2::text, $3::text, NULLIF($4::bigint, 0), now() + make_interval(secs => $5::int))"
+              " ON CONFLICT (jti) DO NOTHING",
+        .any = "{insert_ignore} INTO mm_reservations (jti, game_id, brain_id, account_id, expires_at)"
+               " VALUES ($1, $2, $3, NULLIF({int:$4}, 0), {later:$5}) {ignore_conflicts}"};
+    kn_db_query_sql(b->db, &q, KN_DB_ARGS(jti, game_id, b->id, acc, ttl), on_ignore, "reserve");
 }
 
 void federation_release(Brain *b, const char *jti) {
     if (!g_active) return;
-    kn_db_query(b->db, "DELETE FROM mm_reservations WHERE jti = $1::text", KN_DB_ARGS(jti), on_ignore, "release");
+    static const kn_sql q = {.pg = "DELETE FROM mm_reservations WHERE jti = $1::text",
+                             .any = "DELETE FROM mm_reservations WHERE jti = $1"};
+    kn_db_query_sql(b->db, &q, KN_DB_ARGS(jti), on_ignore, "release");
 }
 
 /* ---------------------------------------------------------------- heartbeat + reaper */
@@ -244,11 +200,20 @@ static void heartbeat_tick(kn_loop *loop, void *ud) {
     Brain *b = g_b;
     char started[32];
     snprintf(started, sizeof(started), "%lld", (long long) b->started_ms);
-    kn_db_query(b->db,
-                "INSERT INTO mm_brains (brain_id, region, public_url, version, started_at, heartbeat_at)"
-                " VALUES ($1::text, $2::text, $3::text, $4::text, to_timestamp($5::double precision / 1000), now())"
-                " ON CONFLICT (brain_id) DO UPDATE SET region = EXCLUDED.region, public_url = EXCLUDED.public_url,"
-                "   version = EXCLUDED.version, started_at = EXCLUDED.started_at, heartbeat_at = now()",
+    static const kn_sql q = {
+        .pg = "INSERT INTO mm_brains (brain_id, region, public_url, version, started_at, heartbeat_at)"
+              " VALUES ($1::text, $2::text, $3::text, $4::text, to_timestamp($5::double precision / 1000), now())"
+              " ON CONFLICT (brain_id) DO UPDATE SET region = EXCLUDED.region, public_url = EXCLUDED.public_url,"
+              "   version = EXCLUDED.version, started_at = EXCLUDED.started_at, heartbeat_at = now()",
+        .sqlite = "INSERT INTO mm_brains (brain_id, region, public_url, version, started_at, heartbeat_at)"
+                  " VALUES ($1, $2, $3, $4, {from_ms:$5}, {now})"
+                  " ON CONFLICT (brain_id) DO UPDATE SET region = excluded.region, public_url = excluded.public_url,"
+                  "   version = excluded.version, started_at = excluded.started_at, heartbeat_at = excluded.heartbeat_at",
+        .mysql = "INSERT INTO mm_brains (brain_id, region, public_url, version, started_at, heartbeat_at)"
+                 " VALUES ($1, $2, $3, $4, {from_ms:$5}, {now})"
+                 " ON DUPLICATE KEY UPDATE region = VALUES(region), public_url = VALUES(public_url),"
+                 "   version = VALUES(version), started_at = VALUES(started_at), heartbeat_at = VALUES(heartbeat_at)"};
+    kn_db_query_sql(b->db, &q,
                 KN_DB_ARGS(b->id, b->region, mm_settings()->public_url, b->version, started),
                 on_ignore, "brain heartbeat");
     /* local nodes: one UPDATE for all; ids are [A-Za-z0-9_.-] so a plain array literal is safe */
@@ -264,19 +229,22 @@ static void heartbeat_tick(kn_loop *loop, void *ud) {
     }
     kn_buf_append_byte(&ids, '}');
     if (count) {
-        kn_db_query(b->db,
-                    "UPDATE mm_nodes SET heartbeat_at = now() WHERE brain_id = $1::text AND node_id = ANY($2::text[])",
-                    KN_DB_ARGS(b->id, ids.data), on_ignore, "node heartbeat");
+        kn_db_call(b->db, &P_MM_NODE_HEARTBEAT, KN_DB_ARGS(b->id, ids.data), on_ignore, "node heartbeat");
     }
     kn_buf_free(&ids);
     /* reaper (any brain; idempotent) */
-    kn_db_query(b->db, "DELETE FROM mm_nodes WHERE heartbeat_at < now() - make_interval(secs => 3 * $1::int)",
-                KN_DB_ARGS(g_ttl_s), on_ignore, "reap nodes");
-    kn_db_query(b->db, "DELETE FROM mm_reservations WHERE expires_at < now()", 0, NULL, on_ignore, "reap reservations");
-    kn_db_query(b->db,
-                "DELETE FROM mm_host_requests WHERE created_at < now() - interval '10 minutes'", 0, NULL, on_ignore, "reap host requests");
-    kn_db_query(b->db, "DELETE FROM mm_brains WHERE heartbeat_at < now() - interval '1 day'", 0, NULL, on_ignore,
-                "reap brains");
+    static const kn_sql reap_nodes = {.pg = "DELETE FROM mm_nodes WHERE heartbeat_at < now() - make_interval(secs => 3 * $1::int)",
+                                      .any = "DELETE FROM mm_nodes WHERE heartbeat_at < {ago:3 * {int:$1}}"},
+                        reap_res = {.pg = "DELETE FROM mm_reservations WHERE expires_at < now()",
+                                    .any = "DELETE FROM mm_reservations WHERE expires_at < {now}"},
+                        reap_host = {.pg = "DELETE FROM mm_host_requests WHERE created_at < now() - interval '10 minutes'",
+                                     .any = "DELETE FROM mm_host_requests WHERE created_at < {ago:600}"},
+                        reap_brains = {.pg = "DELETE FROM mm_brains WHERE heartbeat_at < now() - interval '1 day'",
+                                       .any = "DELETE FROM mm_brains WHERE heartbeat_at < {ago:86400}"};
+    kn_db_query_sql(b->db, &reap_nodes, KN_DB_ARGS(g_ttl_s), on_ignore, "reap nodes");
+    kn_db_query_sql(b->db, &reap_res, 0, NULL, on_ignore, "reap reservations");
+    kn_db_query_sql(b->db, &reap_host, 0, NULL, on_ignore, "reap host requests");
+    kn_db_query_sql(b->db, &reap_brains, 0, NULL, on_ignore, "reap brains");
 }
 
 /* ---------------------------------------------------------------- refresh (remote view) */
@@ -347,23 +315,20 @@ static void apply_brains(kn_db_result *res) {
     r->brain_count = (size_t) (rows > 0 ? rows : 0);
 }
 
-static const char *const REFRESH_SQL[3] = {
-    "SELECT n.node_id, n.brain_id, n.region, n.name, n.public_host, n.public_port, n.web_url, n.version,"
-    "       n.max_players, n.max_lobbies, n.custom, n.draining,"
-    "       (extract(epoch FROM n.heartbeat_at) * 1000)::bigint AS hb,"
-    "       coalesce((SELECT json_agg(l.tuple ORDER BY l.game_id) FROM mm_lobbies l"
-    "                 WHERE l.node_id = n.node_id), '[]'::json)::text AS lobbies"
-    "  FROM mm_nodes n"
-    " WHERE n.brain_id <> $1::text AND n.heartbeat_at > now() - make_interval(secs => $2::int)"
-    " ORDER BY n.connected_at, n.node_id", /* registry.ts lists nodes in registration order */
+/* step 0 (live nodes of the other brains + their lobby tuples) is P_MM_REFRESH_NODES */
+static const kn_sql REFRESH_SQL[3] = {
+    {.pg = NULL},
     /* every query of the refresh takes the same two parameters ($1 brain id,
      * $2 ttl seconds) and must USE both with an explicit type: an unused
      * parameter makes PostgreSQL fail with "could not determine data type of
      * parameter $n" (caught by tests/federation_test.sh's log check) */
-    "SELECT game_id, count(*) FROM mm_reservations"
-    " WHERE brain_id <> $1::text AND expires_at > now() - make_interval(secs => 0 * $2::int) GROUP BY game_id",
-    "SELECT brain_id, region, public_url, (extract(epoch FROM heartbeat_at) * 1000)::bigint FROM mm_brains"
-    " WHERE heartbeat_at > now() - make_interval(secs => $2::int) OR brain_id = $1::text ORDER BY brain_id"};
+    {.pg = "SELECT game_id, count(*) FROM mm_reservations"
+           " WHERE brain_id <> $1::text AND expires_at > now() - make_interval(secs => 0 * $2::int) GROUP BY game_id",
+     .any = "SELECT game_id, count(*) FROM mm_reservations WHERE brain_id <> $1 AND expires_at > {now} GROUP BY game_id"},
+    {.pg = "SELECT brain_id, region, public_url, (extract(epoch FROM heartbeat_at) * 1000)::bigint FROM mm_brains"
+           " WHERE heartbeat_at > now() - make_interval(secs => $2::int) OR brain_id = $1::text ORDER BY brain_id",
+     .any = "SELECT brain_id, region, public_url, {epoch_ms:heartbeat_at} FROM mm_brains"
+            " WHERE heartbeat_at > {ago:$2} OR brain_id = $1 ORDER BY brain_id"}};
 
 static void refresh_step(int step);
 
@@ -400,7 +365,8 @@ static void refresh_step(int step) {
         return;
     }
     c->step = step;
-    kn_db_query(g_b->db, REFRESH_SQL[step], KN_DB_ARGS(g_b->id, g_ttl_s), on_refresh, c);
+    if (step == 0) kn_db_call(g_b->db, &P_MM_REFRESH_NODES, KN_DB_ARGS(g_b->id, g_ttl_s), on_refresh, c);
+    else kn_db_query_sql(g_b->db, &REFRESH_SQL[step], KN_DB_ARGS(g_b->id, g_ttl_s), on_refresh, c);
 }
 
 static void refresh_start(void) {
@@ -516,10 +482,7 @@ int federation_host_remote(Brain *b, const MmNode *n, const char *region, const 
     char *cfg = config ? kn_json_print(config) : NULL;
     char acc[32];
     snprintf(acc, sizeof(acc), "%lld", (long long) account_id);
-    kn_db_query(b->db,
-                "INSERT INTO mm_host_requests (from_brain, target_brain, target_node, region, config,"
-                "                              host_account, host_name)"
-                " VALUES ($1::text, $2::text, $3::text, $4::text, coalesce($5::jsonb, '{}'::jsonb), NULLIF($6::bigint, 0), $7::text) RETURNING id",
+    kn_db_call(b->db, &P_MM_HOST_REQUEST,
                 KN_DB_ARGS(b->id, n->brain_id, n->node_id, region ? region : "", cfg, acc,
                            account_name ? account_name : ""),
                 on_host_inserted, hi);
@@ -549,8 +512,9 @@ static void check_wait(HostWait *w) {
     w->checking = 1;
     char id[32];
     snprintf(id, sizeof(id), "%lld", (long long) w->id);
-    kn_db_query(g_b->db, "SELECT status, coalesce(result::text, 'null') FROM mm_host_requests WHERE id = $1::bigint",
-                KN_DB_ARGS(id), on_wait_row, (void *) (intptr_t) w->id);
+    static const kn_sql q = {.pg = "SELECT status, coalesce(result::text, 'null') FROM mm_host_requests WHERE id = $1::bigint",
+                             .any = "SELECT status, coalesce(result, 'null') AS result__t FROM mm_host_requests WHERE id = $1"};
+    kn_db_query_sql(g_b->db, &q, KN_DB_ARGS(id), on_wait_row, (void *) (intptr_t) w->id);
 }
 
 /* target side: forward a claimed request to our node */
@@ -563,8 +527,10 @@ static void host_serve_store(HostServe *hs, const cJSON *result, int ok) {
     char id[32];
     snprintf(id, sizeof(id), "%lld", (long long) hs->id);
     char *res = kn_json_print(result);
-    kn_db_query(g_b->db,
-                "UPDATE mm_host_requests SET status = $2::text, result = $3::jsonb, updated_at = now() WHERE id = $1::bigint",
+    static const kn_sql q = {
+        .pg = "UPDATE mm_host_requests SET status = $2::text, result = $3::jsonb, updated_at = now() WHERE id = $1::bigint",
+        .any = "UPDATE mm_host_requests SET status = $2, result = $3, updated_at = {now} WHERE id = $1"};
+    kn_db_query_sql(g_b->db, &q,
                 KN_DB_ARGS(id, ok ? "done" : "failed", res ? res : "null"), on_ignore, "host request result");
     free(res);
     char payload[128];
@@ -612,11 +578,7 @@ static void on_host_claimed(kn_db_result *res, void *ud) {
 }
 
 static void claim_host_requests(void) {
-    kn_db_query(g_b->db,
-                "UPDATE mm_host_requests SET status = 'sent', updated_at = now()"
-                " WHERE target_brain = $1::text AND status = 'pending' AND created_at > now() - interval '1 minute'"
-                " RETURNING id, from_brain, target_node, config::text, host_account, coalesce(host_name, '')",
-                KN_DB_ARGS(g_b->id), on_host_claimed, NULL);
+    kn_db_call(g_b->db, &P_MM_HOST_CLAIM, KN_DB_ARGS(g_b->id), on_host_claimed, NULL);
 }
 
 static void on_notify_host(const char *channel, const char *payload, void *ud) {

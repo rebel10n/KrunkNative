@@ -360,7 +360,7 @@ void shadow_update(void) {
     glDepthMask(GL_TRUE);
     glClearDepthf(1.0f); // GLES3 has only the float variant
     glClear(GL_DEPTH_BUFFER_BIT);
-#ifndef __EMSCRIPTEN__
+#ifndef KN_GLES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
 

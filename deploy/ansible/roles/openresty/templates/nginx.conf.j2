@@ -1,6 +1,7 @@
 # {{ ansible_managed }} (deploy/ansible role openresty)
 # OpenResty for KrunkNative: the static web build on loopback only. The host's
-# nginx keeps :80/:443; cloudflared ingress maps krunker.party -> localhost:8081.
+# nginx keeps :80/:443; cloudflared ingress maps assets.krunk.io (and the legacy
+# krunk.io origin) -> localhost:8081. The page itself is on Cloudflare Pages (deploy/pages).
 user {{ openresty_worker_user }} {{ openresty_worker_group }};
 worker_processes {{ openresty_worker_processes }};
 pid logs/nginx.pid;
@@ -11,7 +12,7 @@ events {
 }
 
 http {
-    include       mime.types;
+    include       {{ openresty_prefix }}/nginx/conf/mime.types; # absolute: `validate` tests a temp copy
     default_type  application/octet-stream;
     server_tokens off;
     sendfile      on;
@@ -35,6 +36,14 @@ http {
     }
 {% endif %}
 
+    # /assets/ caching (deploy/pages/README.md "Caching"): the web client asks for
+    # ?v=<assets/version.txt>, which changes whenever the content does, so those URLs
+    # never go stale; anything unversioned revalidates (ETag / Last-Modified -> 304).
+    map $arg_v $kn_assets_cache {
+        ""      "no-cache";
+        default "public, max-age=31536000, immutable";
+    }
+
     server {
 {% for l in openresty_listen %}
         listen {{ l }};
@@ -47,10 +56,16 @@ http {
         disable_symlinks off;
 
         # Game content (~1.5 GB), shared by every release, fetched on demand.
+        # Also served cross-origin as assets.{{ kn_domain }} to the Pages front end.
         location /assets/ {
             alias {{ openresty_assets_dir }}/;
-            expires 1h;
-            add_header Cache-Control "public" always;
+            add_header Cache-Control $kn_assets_cache always;
+            add_header Access-Control-Allow-Origin "*" always;
+        }
+        location = /assets/version.txt {
+            alias {{ openresty_assets_dir }}/version.txt;
+            default_type text/plain;
+            add_header Cache-Control "no-store" always;
             add_header Access-Control-Allow-Origin "*" always;
         }
 

@@ -710,7 +710,7 @@ void ed_render_overlays(void) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_TRUE);
-#ifndef __EMSCRIPTEN__
+#ifndef KN_GLES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
     draw_tool_volumes();

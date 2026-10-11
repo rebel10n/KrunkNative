@@ -1,8 +1,10 @@
 name: Deploy kru
 
-# Push to slop: build the web client + services, then run deploy/ansible/central.yml
-# against the central node (krunker.party, matchmaker., coordinator.).
-# Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS.
+# Push to slop: build the web client + services, run deploy/ansible/central.yml against
+# the central node (assets., matchmaker., coordinator.krunk.io, play.krunk.io), then publish
+# the front end (krunk.io) to Cloudflare Pages (deploy/pages). `make pages` does the same by hand.
+# Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
+#          CLOUDFLARE_API_TOKEN (Pages: Edit), CLOUDFLARE_ACCOUNT_ID.
 on:
   push:
     branches: [slop]
@@ -77,6 +79,19 @@ jobs:
           ansible-playbook central.yml \
             -e "ansible_host=$KRU_HOST" -e "ansible_port=${KRU_PORT:-22}" \
             -e kn_web_sync_assets=false -e "kn_release_id=${GITHUB_SHA::12}"
+
+      # Front end: dist/web -> Cloudflare Pages project krunknative (krunk.io), after
+      # central.yml so the asset host (assets.krunk.io = kru) is current first.
+      # Secrets: CLOUDFLARE_API_TOKEN (Account > Cloudflare Pages > Edit), CLOUDFLARE_ACCOUNT_ID.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Deploy front end (Cloudflare Pages)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: deploy/pages/deploy.sh
 
       - name: Cleanup key
         if: always()

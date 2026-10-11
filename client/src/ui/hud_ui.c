@@ -2119,7 +2119,8 @@ static void hud_end_step(const Client *client, const double now_ms) {
         hud_end_results(client);
         return;
     }
-    if (ui->end_phase == 1) hud_end_title_draw(elapsed > 0.0 ? elapsed : 0.0);
+    if (ui->end_phase == 1 && html_ui_is_menu_open()) hud_end_title_hide(); // never under a menu
+    else if (ui->end_phase == 1) hud_end_title_draw(elapsed > 0.0 ? elapsed : 0.0);
 }
 
 void hud_ui_show_end_screen(Client *client, const int result, const char *next_round) {
@@ -2128,7 +2129,13 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
     g_end_result = result;
     snprintf(g_end_timer, sizeof(g_end_timer), "%s", next_round ? next_round : "");
     if (!ui->ended) {
-        // the END: showEndScreen + vicTitle.show; later calls only refresh the countdown
+        // the END: showEndScreen + vicTitle.show; later calls only refresh the countdown.
+        // hideUI(false) -> toggleMenu(false): a menu open at the END goes (UI.toggleWindow(false)
+        // first); the pointer stays as it was, like v3.1.1's CONTROLS.
+        if (html_ui_is_menu_open()) {
+            html_ui_set_menu_open(0);
+            menu_apply_open(0);
+        }
         ui->ended = 1;
         ui->end_phase = 1;
         ui->end_start_ms = hud_now_ms(client);
@@ -2148,6 +2155,14 @@ int hud_ui_end_screen_interactive(void) {
     return g_hud_ui.ended && g_hud_ui.end_phase == 2;
 }
 
+// 1 from the END to the next INIT (title animation or results): the end screen takes
+// precedence over the menu. showEndScreen -> hideUI() sets UI.active = false, so losing the
+// pointer lock (toggleControlUI(false)) shows no #instructionHolder; only toggleEndScreen
+// (Escape once the results show) brings the menu in front.
+int hud_ui_end_screen_up(void) {
+    return g_hud_ui.ended && g_hud_ui.end_phase != 0;
+}
+
 // UI.toggleEndScreen() (UI.js), reached through pressButton(27) (Escape) and
 // CONTROLS.toggle(true) while the controls are locked (controller Start). Only once the
 // results show (hasEndScreen && #endInfo block): with the menu over them (#endUI hidden)
@@ -2155,7 +2170,8 @@ int hud_ui_end_screen_interactive(void) {
 // visibility pass re-applies hud_end_screen_dom when the menu closes) and the pointer
 // stays free for the results; otherwise toggleMenu(true). Returns 1 when it acted.
 int hud_ui_toggle_end_screen(Client *client) {
-    if (!client || !hud_ui_end_screen_interactive()) return 0;
+    if (!client || !hud_ui_end_screen_up()) return 0;
+    if (!hud_ui_end_screen_interactive()) return 1; // title animation: #endInfo not shown yet, nothing toggles
     if (html_ui_is_menu_open()) {
         client_set_menu_open(client, 0);
         glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // CONTROLS stay disabled

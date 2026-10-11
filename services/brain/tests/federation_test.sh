@@ -10,7 +10,9 @@
 # Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's
 # database.name. Every run migrates into its own schema (kn_test_mm_<pid>,
 # dropped afterwards), so concurrent runs never share tables. Exit 77 (CTest
-# skip) when PostgreSQL is unreachable.
+# skip) when PostgreSQL is unreachable. KN_TEST_DB_DRIVER=sqlite|mysql runs the
+# brains on that store driver instead (db_scratch.py; sqlite = one shared temp
+# file, federation pub/sub then polls the kn_pubsub table).
 set -uo pipefail
 BUILD=${1:?build dir}
 cd "$(dirname "$0")/../../.." || exit 1
@@ -20,15 +22,23 @@ if [ -z "$DB" ]; then
     DB=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("database",{}).get("name",""))' \
          config/config.json 2>/dev/null)
 fi
-[ -n "$DB" ] || { echo "federation test: no database configured; skipped"; exit 77; }
+DRIVER=${KN_TEST_DB_DRIVER:-postgres}
+[ -n "$DB" ] || [ "$DRIVER" != postgres ] || { echo "federation test: no database configured; skipped"; exit 77; }
 BRAIN=$BUILD/services/brain/kn_brain
 FAKE=$BUILD/services/brain/kn_fakenode
 SCHEMA=kn_test_mm_$$
 TTL=6
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/kn-fedtest.XXXXXX")
-PG=(python3 -I "$ROOT/services/brain/tests/pg_schema.py" "$ROOT" "$DB")
-"${PG[@]}" create "$SCHEMA" || { rc=$?; rm -rf "$WORK"; echo "federation test: skipped"; exit "$rc"; }
-export KN_DATABASE_NAME=$DB KN_DATABASE_SEARCH_PATH=$SCHEMA KN_LOG_LEVEL=${KN_LOG_LEVEL:-info}
+if [ "$DRIVER" = postgres ]; then
+    PG=(python3 -I "$ROOT/services/brain/tests/pg_schema.py" "$ROOT" "$DB")
+    "${PG[@]}" create "$SCHEMA" || { rc=$?; rm -rf "$WORK"; echo "federation test: skipped"; exit "$rc"; }
+    export KN_DATABASE_NAME=$DB KN_DATABASE_SEARCH_PATH=$SCHEMA KN_LOG_LEVEL=${KN_LOG_LEVEL:-info}
+else
+    SCRATCH=(python3 -I "$ROOT/services/brain/tests/db_scratch.py" "$ROOT")
+    DBENV=$("${SCRATCH[@]}" create "$DRIVER" "$SCHEMA" --shell) || { rc=$?; rm -rf "$WORK"; echo "federation test: $DRIVER unavailable; skipped"; exit "$rc"; }
+    eval "$DBENV"
+    export KN_LOG_LEVEL=${KN_LOG_LEVEL:-info}
+fi
 export KN_BRAIN_INTERNAL_SECRET=fedtest-$$
 pids=()
 fails=0
@@ -38,7 +48,8 @@ cleanup() {
     sleep 0.3
     for p in "${pids[@]}"; do kill -9 "$p" 2>/dev/null; done
     wait 2>/dev/null
-    "${PG[@]}" drop "$SCHEMA" >/dev/null 2>&1
+    if [ "$DRIVER" = postgres ]; then "${PG[@]}" drop "$SCHEMA" >/dev/null 2>&1
+    else "${SCRATCH[@]}" drop "$DRIVER" "$SCHEMA" >/dev/null 2>&1; fi
     if [ "$fails" = 0 ]; then rm -rf "$WORK"; else echo "logs kept in $WORK"; fi
 }
 trap cleanup EXIT
@@ -105,6 +116,10 @@ echo "== hosting"
 h=$(curl -s "http://127.0.0.1:$PA/mm/host-game?region=de-fra&config=%7B%22maps%22%3A%5B0%5D%7D")
 hg=$(echo "$h" | json "d.get('gameId','') or d.get('error')")
 check "host-game on A for de-fra is routed to B's idle node TFRA2 ($hg)" test "${hg%%:*}" = TFRA2
+# without native pub/sub (sqlite, mysql) brain A learns B's new lobby within
+# database.notify_poll_ms + one refresh: wait for it before asking again
+lists_game() { games "$1" 2>/dev/null | grep -qw "$2"; }
+[ "$DRIVER" = postgres ] || wait_for 5 lists_game "$PA" "$hg"
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PA/mm/host-game?region=de-fra")
 check "second host-game: no idle custom-capable node left -> 503 ($code)" test "$code" = 503
 wait_for 4 sh -c "curl -fs http://127.0.0.1:$PA/mm/game-list | grep -q '\"$hg\".*\"cs\":true'"

@@ -12,7 +12,8 @@
 #   make help            everything else
 #
 # Overridable variables: GENERATOR, JOBS, HTML_ENGINE (ON/OFF; OFF = native client
-# without HTML UI), EMSDK, ARGS, MAP, PORT, CMAKE_FLAGS (extra -D flags).
+# without HTML UI), EMSDK, ARGS, MAP, PORT, CMAKE_FLAGS (extra -D flags), KN_GA_ID
+# (Google Analytics id for the web pages; off by default, deploy/pages/README.md).
 
 SHELL := bash
 .DEFAULT_GOAL := build
@@ -29,6 +30,7 @@ EMSDK       ?= $(HOME)/emsdk
 ARGS        ?=
 MAP         ?=
 PORT        ?= 8080
+KN_GA_ID    ?=
 
 DEBUG_DIR     := cmake-build-debug
 RELEASE_DIR   := cmake-build-release
@@ -86,7 +88,16 @@ configure-release: ## Configure the release build
 
 all: build release web ## Build everything: debug, release and web
 
-.PHONY: run run-release server server-release
+# ANGLE (libEGL + libGLESv2) for the OpenGL ES 3.0 backend: Metal on macOS (README.md
+# "ANGLE / Metal (macOS)"). The macOS configure picks ANGLE_DIR up automatically
+# (KRUNKNATIVE_GL_BACKEND=auto); elsewhere CMAKE_FLAGS=-DKRUNKNATIVE_GL_BACKEND=angle.
+ANGLE_DIR ?= $(HOME)/.cache/krunknative/angle
+export ANGLE_DIR
+.PHONY: angle
+angle: ## Build the pinned ANGLE (Metal on macOS; Vulkan/GL on Linux) into ANGLE_DIR (several GB of checkout in ANGLE_DIR.work)
+	tools/angle/build-angle.sh "$(ANGLE_DIR)"
+
+.PHONY: run run-release server server-release server-dist server-install network
 # make run starts the local backend (accounts, matchmaking) when config/config.json exists and
 # no brain answers on BRAIN_PORT; BACKEND=0 skips it (the client then plays on the default
 # server and shows "Failed to connect" for account actions).
@@ -112,9 +123,31 @@ server: build ## Run the debug server (ARGS=...)
 server-release: release ## Run the release server
 	cd $(RELEASE_DIR) && ./$(SERVER_BIN) $(ARGS)
 
+SERVER_DIST ?= dist/server
+PREFIX      ?= /opt/krunknative
+server-dist: release ## Dedicated server bundle in dist/server/ (server_bin + maps + server.cfg): copy it anywhere and run ./server_bin
+	@rm -rf $(SERVER_DIST) && mkdir -p $(SERVER_DIST)/assets $(SERVER_DIST)/cfg
+	cp $(RELEASE_DIR)/$(SERVER_BIN) $(SERVER_DIST)/
+	cp -r assets/maps $(SERVER_DIST)/assets/
+	cp assets/skins.json $(SERVER_DIST)/assets/ 2>/dev/null || true
+	[ -f $(SERVER_DIST)/cfg/server.cfg ] || cp config/server.cfg.example $(SERVER_DIST)/cfg/server.cfg
+	cp services/scripts/kn-query.py $(SERVER_DIST)/
+	@echo "dedicated server ready in $(SERVER_DIST)/: edit cfg/server.cfg, then cd $(SERVER_DIST) && ./$(SERVER_BIN)"
+
+server-install: server-dist ## Install the dedicated server bundle to PREFIX (default /opt/krunknative; keeps an existing cfg/server.cfg)
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/cfg
+	install -m 0755 $(SERVER_DIST)/$(SERVER_BIN) $(DESTDIR)$(PREFIX)/bin/
+	cp -r $(SERVER_DIST)/assets $(DESTDIR)$(PREFIX)/
+	[ -f $(DESTDIR)$(PREFIX)/cfg/server.cfg ] || install -m 0644 config/server.cfg.example $(DESTDIR)$(PREFIX)/cfg/server.cfg
+	@echo "installed to $(DESTDIR)$(PREFIX) (systemd: deploy/systemd/kn-gameserver@.service)"
+
+network: build services ## Coordinator + N dedicated servers from one file (NETWORK=services/scripts/network.example.json)
+	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
+
 .PHONY: test
-test: build ## Run the shared movement/collision test
+test: build ## Run the shared movement/collision test (+ the knet transport test)
 	./$(DEBUG_DIR)/$(TEST_BIN)
+	./$(DEBUG_DIR)/knet_test
 
 # --------------------------------------------------------------------------- html-engine
 # The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).
@@ -158,13 +191,18 @@ uidiff: ## Render tools/uidiff scenarios with client_bin --render-scenario (HTML
 
 # --------------------------------------------------------------------------- web
 
-.PHONY: web web-debug web-serve
-web: ## Build the Emscripten client into dist/web/ (release)
+.PHONY: web web-debug web-serve pages
+web: ## Build the Emscripten client into dist/web/ (release; KN_GA_ID=G-... adds Google Analytics)
 	@$(EMSDK_ACTIVATE); $(call CONFIGURE,web,$(WEB_DIR)) && $(call BUILD,$(WEB_DIR))
+	@$(PYTHON) -I deploy/pages/ga.py $(DIST_WEB) --id "$(KN_GA_ID)"
 	@echo "web client ready in $(DIST_WEB)/  (make web-serve, or: make bridge)"
 
 web-debug: ## Build the Emscripten client with debug info into dist/web/
 	@$(EMSDK_ACTIVATE); $(call CONFIGURE,web-debug,$(WEB_DEBUG_DIR)) && $(call BUILD,$(WEB_DEBUG_DIR))
+	@$(PYTHON) -I deploy/pages/ga.py $(DIST_WEB) --id "$(KN_GA_ID)"
+
+pages: web ## Build and deploy the web client to Cloudflare Pages (krunk.io, deploy/pages/README.md)
+	deploy/pages/deploy.sh
 
 web-serve: ## Serve dist/web/ for local testing (PORT=8080); use ?offline=1 without a server
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
@@ -207,6 +245,23 @@ bridge: $(BRIDGE_DIR)/node_modules ## Host dist/web/ and bridge /native WebSocke
 
 bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck net-bridge
 	cd $(BRIDGE_DIR) && npm run typecheck
+
+# WebTransport relay (net-bridge/wt, doc/transport.md): HTTP/3 on UDP WT_ADDR, datagrams 1:1 to
+# the game server's UDP port. Without WT_CERT/WT_KEY it makes a self-signed cert and writes its
+# hash to $(DIST_WEB)/wt.json (serverCertificateHashes; the web client fetches it).
+WT_BIN  := $(BRIDGE_DIR)/wt/kn-wt
+WT_ADDR ?= :8443
+.PHONY: wt wt-build
+wt-build: ## Build the WebTransport relay (net-bridge/wt/kn-wt, needs Go)
+	cd $(BRIDGE_DIR)/wt && go build -trimpath -o kn-wt .
+
+wt: wt-build ## Run the WebTransport <-> UDP relay on UDP $(WT_ADDR) (WT_CERT=/WT_KEY= for a real certificate)
+	$(WT_BIN) -addr $(WT_ADDR) -info-file $(DIST_WEB)/wt.json $(if $(WT_CERT),-cert $(WT_CERT) -key $(WT_KEY))
+
+test-net: build ## knet transport unit test (loss/dup/reorder) + 2-client UDP end-to-end (headless)
+	./$(DEBUG_DIR)/knet_test
+	server/tests/udp_e2e.sh $(DEBUG_DIR)
+	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
 
 $(BRIDGE_DIR)/node_modules: $(BRIDGE_DIR)/package.json $(BRIDGE_DIR)/package-lock.json
 	cd $(BRIDGE_DIR) && npm ci

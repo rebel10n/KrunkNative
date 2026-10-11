@@ -160,6 +160,30 @@ int main(const int argc, char **argv) {
     CHECK(map_catalog_find("5") == 5, "find 5");
     CHECK(map_catalog_find("nosuchmap") == -1, "find nosuchmap");
 
+    // console lookups (client `map`, server_bin `map`/`changelevel`): Soul Sanctum is not in
+    // the rotation, so these resolve against the catalogue
+    const char *const soul[] = {"Soul Sanctum", "soul sanctum", "SOUL SANCTUM", "\"Soul Sanctum\"", "soul_sanctum",
+                                "Soul_Sanctum", "  soul  ", "soul", "Sou", "soulsanctum", "'soul sanctum'"};
+    for (size_t i = 0; i < sizeof(soul) / sizeof(soul[0]); i++) CHECK(map_catalog_resolve(soul[i], NULL, 0, NULL) == 13, "resolve %s", soul[i]);
+    CHECK(map_catalog_resolve("burg", NULL, 0, NULL) == 0, "resolve burg (key beats old_burg's name)");
+    CHECK(map_catalog_resolve("Freight", NULL, 0, NULL) == 6, "resolve Freight");
+    CHECK(map_catalog_resolve("old burg", NULL, 0, NULL) == map_catalog_index_of_key("old_burg"), "resolve old burg");
+    CHECK(map_catalog_resolve("zombie", NULL, 0, NULL) == map_catalog_index_of_key("zombie_high"), "resolve zombie");
+    CHECK(map_catalog_resolve("sand", NULL, 0, NULL) == 2, "resolve sand (old_sandstorm's label is its key)");
+    CHECK(map_catalog_resolve("ship", NULL, 0, NULL) == 5, "resolve ship");
+    int cands[8];
+    size_t cand_n = 0;
+    // Sandstorm, Subzero, Shipyard, Soul Sanctum, SniperRoyale2, Slide_Neon_Stage, slide_moonlight;
+    // only `max` are written, the count is the total
+    CHECK(map_catalog_resolve("s", cands, 3, &cand_n) == -2 && cand_n == 7 && cands[0] == 2 && cands[2] == 5,
+          "resolve s ambiguous (%zu)", cand_n);
+    CHECK(map_catalog_resolve("slide", cands, 8, &cand_n) == -2 && cand_n == 2 &&
+          cands[0] == map_catalog_index_of_key("Slide_Neon_Stage") && cands[1] == map_catalog_index_of_key("slide_moonlight"),
+          "resolve slide candidates");
+    CHECK(map_catalog_resolve("lit", cands, 8, &cand_n) == 1, "resolve lit");
+    CHECK(map_catalog_resolve("nosuchmap", cands, 8, &cand_n) == -1 && cand_n == 0, "resolve nosuchmap");
+    CHECK(map_catalog_resolve("\"\"", NULL, 0, NULL) == -1, "resolve empty quotes");
+
     // Games window tabs (capture): Popular / New list all 36, Featured the 15 official ones
     int tab[64];
     CHECK(map_catalog_games_tab(0, tab, 64) == 36 && tab[0] == 13, "popular");

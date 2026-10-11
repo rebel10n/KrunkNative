@@ -12,9 +12,9 @@ import * as publicRoutes from "./publicRoutes";
 import * as staticFiles from "./staticFiles";
 import * as webBridge from "./webBridge";
 
-type BridgeMode = "native-to-krunker" | "browser-to-native" | "web";
+type BridgeMode = "native-to-krunker" | "browser-to-native" | "web" | "bridge-only";
 
-const BRIDGE_MODES: readonly BridgeMode[] = ["native-to-krunker", "browser-to-native", "web"];
+const BRIDGE_MODES: readonly BridgeMode[] = ["native-to-krunker", "browser-to-native", "web", "bridge-only"];
 
 // `npm run web:build` at the repo root writes the Emscripten client here.
 const DEFAULT_WEB_DIR = path.resolve(__dirname, "..", "dist", "web");
@@ -43,6 +43,8 @@ function usage(): string {
     "  --browser-to-native       Run the old browser WS -> KrunkNative TCP mode",
     "  --web                     Serve the Emscripten web build over HTTP and bridge",
     "                            ws /native <-> native TCP (raw passthrough)",
+    "  --bridge-only             Only the ws /native passthrough (+ GET /healthz): no static files,",
+    "                            no brain routes, no /ws (the deployed bridge, deploy/ansible kn_bridge)",
     "  --brain URL               kn_brain to proxy /mm /api /social to in web mode (default: KN_BRAIN_URL,",
     "                            config/config.json brain, else http://127.0.0.1:5050)",
     "  --serve-web DIR           Same as --web, serving DIR (default ../dist/web,",
@@ -61,6 +63,10 @@ function usage(): string {
     "  KRUNK_NATIVE_TARGETS                                  /native?target=host:port allowlist (brain matchmaking),",
     "                                                        host:port|host:lo-hi|host:* comma list",
     "                                                        (default KRUNK_NATIVE_HOST:PORT..PORT+63)",
+    "  KRUNK_NATIVE_MAX_PER_IP / KRUNK_NATIVE_MAX_SESSIONS    /native session caps (0 = off)",
+    "  KRUNK_NATIVE_IDLE_TIMEOUT_MS / KRUNK_NATIVE_WS_PING_MS  idle close (0 = off) / ws ping (30000)",
+    "  KRUNK_NATIVE_CLIENT_IP_HEADER                         client address header from a loopback proxy",
+    "                                                        (e.g. cf-connecting-ip; default X-Forwarded-For)",
     "  KRUNK_NATIVE_WEB_DIR                                  web build dir for --web",
     "  KRUNK_NATIVE_WEB_COI=1                                add COOP/COEP headers (SharedArrayBuffer)",
   ].join("\n");
@@ -98,6 +104,10 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--web") {
       options.mode = "web";
+      continue;
+    }
+    if (arg === "--bridge-only") {
+      options.mode = "bridge-only";
       continue;
     }
     if (arg === "--serve-web" || arg.startsWith("--serve-web=")) {
@@ -161,6 +171,69 @@ function describeAddress(http: ReturnType<typeof createServer>): string {
   if (!address || typeof address === "string") return "";
   const host = address.family === "IPv6" ? `[${address.address}]` : address.address;
   return `http://${host}:${address.port}`;
+}
+
+/** Hand a `/native` upgrade to the passthrough, or refuse it before the handshake. */
+function upgradeNative(
+  wss: ReturnType<typeof webBridge.createServer>,
+  request: IncomingMessage,
+  socket: Socket,
+  head: Buffer,
+): void {
+  const refused = webBridge.admit(request);
+  if (refused) {
+    console.warn(
+      `[web-bridge] ${request.socket.remoteAddress || "?"} upgrade refused ${refused.status}: ${refused.reason} (${request.url})`,
+    );
+    socket.end(
+      `HTTP/1.1 ${refused.status} ${refused.reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+    );
+    return;
+  }
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit("connection", ws, request);
+  });
+}
+
+/**
+ * `--bridge-only`: the deployed bridge (play.krunk.io behind the Cloudflare tunnel). Only
+ * the `/native` passthrough and a health check; the page, the assets and the brain are
+ * served elsewhere.
+ */
+function startBridgeOnly(): ReturnType<typeof createServer> {
+  const http = createServer((req, res) => {
+    const pathname = (req.url || "/").split("?")[0];
+    if (req.method === "GET" && pathname === "/healthz") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ ok: true, version, ...webBridge.getStats() }));
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not_found" }));
+  });
+  const nativeWss = webBridge.createServer();
+  http.on("upgrade", (request, socket: Socket, head) => {
+    let pathname = "";
+    try {
+      pathname = new URL(request.url || "/", "http://localhost").pathname;
+    } catch (_err) {
+      pathname = "";
+    }
+    if (pathname !== webBridge.WEB_WS_PATH) {
+      socket.destroy();
+      return;
+    }
+    upgradeNative(nativeWss, request, socket, head);
+  });
+  http.on("close", () => nativeWss.close());
+  http.on("listening", () => {
+    console.info(
+      `net-bridge ${version} bridge-only listening on ${describeAddress(http) || "(unknown address)"} ` +
+        `(ws ${webBridge.WEB_WS_PATH}, GET /healthz)`,
+    );
+  });
+  http.listen(bridgeListenAddress());
+  return http;
 }
 
 /**
@@ -251,12 +324,11 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
       brainProxy.proxyUpgrade(brain, request, socket, head); // the social socket (kn_brain)
       return;
     }
-    const wss =
-      url.pathname === webBridge.WEB_WS_PATH
-        ? nativeWss
-        : url.pathname === browserProxy.WS_PATH
-          ? legacyWss
-          : null;
+    if (url.pathname === webBridge.WEB_WS_PATH) {
+      upgradeNative(nativeWss, request, socket as Socket, head);
+      return;
+    }
+    const wss = url.pathname === browserProxy.WS_PATH ? legacyWss : null;
     if (!wss) {
       socket.destroy();
       return;
@@ -327,7 +399,9 @@ const options = parseArgs(process.argv.slice(2));
 const server =
   options.mode === "web"
     ? startWeb(options)
-    : options.mode === "browser-to-native"
+    : options.mode === "bridge-only"
+      ? startBridgeOnly()
+      : options.mode === "browser-to-native"
       ? startBrowserToNative()
       : startNativeToKrunker(options);
 const activeSockets = new Set<Socket>();
@@ -346,6 +420,8 @@ function closeBridgeSessions(force = false): void {
   if (options.mode === "web") {
     webBridge.closeAllSessions(force);
     browserProxy.closeAllSessions(force);
+  } else if (options.mode === "bridge-only") {
+    webBridge.closeAllSessions(force);
   } else if (options.mode === "browser-to-native") {
     browserProxy.closeAllSessions(force);
   } else {

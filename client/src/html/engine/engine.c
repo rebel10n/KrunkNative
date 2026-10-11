@@ -1215,8 +1215,9 @@ static void dump_box(DumpCtx *c, const Box *b, int depth)
     const int has_rect = b->type != BOX_TEXT && layout_box_rect_in_viewport(b, &r);
     if (len < (int) sizeof(line)) {
         if (has_rect) {
-            snprintf(line + len, sizeof(line) - (size_t) len, "  local(%.1f,%.1f %.1fx%.1f) vp(%.1f,%.1f %.1fx%.1f)%s%s", b->x, b->y, b->w, b->h,
-                     r.x, r.y, r.w, r.h, (b->flags & BOXF_HAS_TRANSFORM) ? " T" : "", (b->flags & BOXF_STACKING_CONTEXT) ? " SC" : "");
+            snprintf(line + len, sizeof(line) - (size_t) len, "  local(%.1f,%.1f %.1fx%.1f) vp(%.1f,%.1f %.1fx%.1f)%s%s%s%s", b->x, b->y, b->w, b->h,
+                     r.x, r.y, r.w, r.h, (b->flags & BOXF_HAS_TRANSFORM) ? " T" : "", (b->flags & BOXF_STACKING_CONTEXT) ? " SC" : "",
+                     (b->flags & BOXF_NO_POINTER) ? " PE-none" : "", (b->flags & BOXF_HIDDEN) ? " hidden" : "");
         } else {
             snprintf(line + len, sizeof(line) - (size_t) len, "  local(%.1f,%.1f %.1fx%.1f)", b->x, b->y, b->w, b->h);
         }
@@ -1817,3 +1818,4 @@ int html_ui_backend_available(void)
 #else
 typedef int html_engine_backend_not_compiled;
 #endif
+

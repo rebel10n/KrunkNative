@@ -1,4 +1,4 @@
-# Per-instance DNS for the edges: <edge>-<n>.krunker.party A <public ip>, DNS only
+# Per-instance DNS for the edges: <edge>-<n>.krunk.io A <public ip>, DNS only
 # (not proxied: game TCP/UDP cannot go through the Cloudflare proxy).
 # Token: CF_API_TOKEN from the environment (source ~/.config/kn-secrets/cloudflare.env
 # before running; CI: a repository secret). Never put it in the repo or a vars file.

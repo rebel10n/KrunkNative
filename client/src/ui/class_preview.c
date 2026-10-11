@@ -276,14 +276,18 @@ static void preview_world_dummy_tick(Client *client, const float delta) {
 }
 
 static void preview_dump(const char *path, const int width, const int height) {
-    unsigned char *pixels = malloc((size_t) width * height * 3);
+    // GL_RGBA/GL_UNSIGNED_BYTE: the one read-back format OpenGL ES guarantees (KN_GLES)
+    unsigned char *pixels = malloc((size_t) width * height * 4);
     FILE *file = pixels ? fopen(path, "wb") : NULL;
 
     if (file) {
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
         fprintf(file, "P6\n%d %d\n255\n", width, height);
-        for (int row = height - 1; row >= 0; row--) fwrite(pixels + (size_t) row * width * 3, 1, (size_t) width * 3, file);
+        for (int row = height - 1; row >= 0; row--) {
+            const unsigned char *src = pixels + (size_t) row * width * 4;
+            for (int x = 0; x < width; x++) fwrite(src + (size_t) x * 4, 1, 3, file);
+        }
         fclose(file);
         printf("[preview] framebuffer written to %s\n", path);
     }

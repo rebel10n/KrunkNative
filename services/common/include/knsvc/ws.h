@@ -6,8 +6,11 @@
  * optional keep-alive pings with a pong timeout), close handshake with codes,
  * UTF-8 validation of text messages and close reasons, message size limit
  * (1009), send-buffer backpressure. No extensions (permessage-deflate is
- * declined). TLS (wss://) is terminated by nginx in deployment; the client
- * speaks ws:// only.
+ * declined). Server side: TLS is terminated in front of knsvc (nginx /
+ * Cloudflare). Client side: ws:// and, when knsvc is built with libssl
+ * (KNSVC_HAVE_TLS), wss:// with certificate + host name verification against
+ * the system CA store (SSL_CERT_FILE / SSL_CERT_DIR are honoured) plus the
+ * optional extra PEM bundle in $KNSVC_TLS_CA_FILE, SNI, TLS >= 1.2.
  *
  * Lifetime: a kn_ws is created by kn_ws_accept/kn_ws_connect and freed by
  * knsvc right after on_close returns. on_close is called exactly once (also
@@ -73,7 +76,8 @@ typedef struct kn_ws_options {
  * calls nothing. opts may be NULL (defaults). on_open runs right after the 101. */
 kn_ws *kn_ws_accept(kn_http_req *req, const kn_ws_callbacks *cb, const kn_ws_options *opts, void *ud);
 
-/* Client: connect to ws://host[:port]/path?query. Returns NULL only for an
+/* Client: connect to ws[s]://host[:port]/path?query (wss:// fails with NULL
+ * when knsvc has no TLS; certificate errors arrive as on_close(1006, "tls: ...")). Returns NULL only for an
  * invalid URL / out of memory; network errors arrive as on_close(1006, reason).
  * DNS resolution is synchronous (getaddrinfo). */
 kn_ws *kn_ws_connect(kn_loop *loop, const char *url, const kn_ws_callbacks *cb,

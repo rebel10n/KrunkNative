@@ -67,7 +67,7 @@ int backend_startup(Client *client, const int offline, const int scenario) {
     direct |= EM_ASM_INT({
         try { return new URLSearchParams(location.search).get('ws') ? 1 : 0; } catch (e) { return 0; }
     });
-    g_hub_page |= EM_ASM_INT({ return /social[.]html$/.test(location.pathname) ? 1 : 0; });
+    g_hub_page |= EM_ASM_INT({ return /social([.]html)?$/.test(location.pathname) ? 1 : 0; });
 #else
     // the hub / editor windows are separate processes (app_window.c): they inherit an
     // explicit URL; a default one (local config) is probed by each process itself

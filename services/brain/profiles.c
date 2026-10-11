@@ -15,6 +15,9 @@
 
 #define MOD "social"
 
+/* kn_account_id($1) on every dialect */
+#define ACCOUNT_ID_OF_1 "(SELECT id FROM accounts WHERE lower(username) = lower($1))"
+
 /* ------------------------------------------------------------------ helpers */
 
 typedef struct PageCtx {
@@ -68,23 +71,7 @@ static void like_escape(const char *in, char *out, size_t cap) {
 
 /* ------------------------------------------------------------------ profile */
 
-#define PROFILE_SQL \
-    "SELECT jsonb_build_object(" \
-    " 'row', to_jsonb(r) - 'clan_role' - 'player_2fa' || jsonb_build_object('player_follow', 0)," \
-    " 'games', coalesce((SELECT jsonb_agg(jsonb_build_object(" \
-    "     'map_id', m.map_id, 'map_name', kn_html(m.map_name), 'map_date', m.map_date, 'map_info', m.map_info::text," \
-    "     'map_votes', m.map_votes, 'creatorname', r.player_name, 'map_image', m.map_image, 'map_player', m.map_plays)" \
-    "     ORDER BY m.map_votes DESC) FROM published_maps m WHERE m.creator_id = r.player_id AND m.deleted_at IS NULL), '[]'::jsonb)," \
-    " 'mods', coalesce((SELECT jsonb_agg(jsonb_build_object(" \
-    "     'mod_id', d.mod_id, 'mod_name', kn_html(d.mod_name), 'mod_date', d.mod_date, 'mod_info', d.mod_info::text," \
-    "     'mod_votes', d.mod_votes, 'mod_updatecounter', d.mod_updatecounter, 'mod_image', d.mod_image)" \
-    "     ORDER BY d.mod_votes DESC) FROM published_mods d WHERE d.creator_id = r.player_id AND d.deleted_at IS NULL), '[]'::jsonb)," \
-    " 'assets', coalesce((SELECT jsonb_agg(jsonb_build_object(" \
-    "     'id', x.id, 'nm', kn_html(x.name), 'dat', x.data::text, 'ini', x.created_at, 'plrn', r.player_name, 'siz', x.size_kb)" \
-    "     ORDER BY x.id DESC) FROM published_assets x WHERE x.creator_id = r.player_id AND x.deleted_at IS NULL), '[]'::jsonb)," \
-    " 'follow', CASE WHEN EXISTS (SELECT 1 FROM follows w WHERE w.follower_id = $2 AND w.followee_id = r.player_id)" \
-    "     THEN 1 ELSE 0 END)" \
-    " FROM player_rows r WHERE lower(r.player_name) = lower($1)"
+/* profile query: P_PROFILE (db_social.c) */
 
 static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     PageCtx *c = extra;
@@ -113,7 +100,7 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
 
 static void profile_page(SocialSession *s, PageCtx *c, const char *name) {
     char viewer[24];
-    social_query(s, PROFILE_SQL, KN_DB_ARGS(name, social_viewer(s, viewer)), profile_done, c);
+    social_call(s, &P_PROFILE, KN_DB_ARGS(name, social_viewer(s, viewer)), profile_done, c);
 }
 
 /* ------------------------------------------------------------------ "r" */
@@ -142,7 +129,7 @@ void sh_page(SocialSession *s, const cJSON *f) {
         return;
     }
     if (!strcmp(page, "feed")) {
-        social_query(s, "SELECT kn_feed($1, NULL, 50, 0)", KN_DB_ARGS(social_viewer(s, viewer)), page_json_done, c);
+        social_call(s, &P_FEED, KN_DB_ARGS(social_viewer(s, viewer), NULL, "50", "0"), page_json_done, c);
         return;
     }
     if (!strcmp(page, "clan")) {
@@ -151,7 +138,7 @@ void sh_page(SocialSession *s, const cJSON *f) {
             free(c);
             return;
         }
-        social_query(s, "SELECT kn_clan_page($1)", KN_DB_ARGS(c->sub), page_json_done, c);
+        social_call(s, &P_CLAN_PAGE, KN_DB_ARGS(c->sub), page_json_done, c);
         return;
     }
     if (!strcmp(page, "market") || !strcmp(page, "itemsales")) {
@@ -196,23 +183,10 @@ void creation_page(SocialSession *s, int kind, const char *name) {
         return;
     }
     if (kind == 0) {
-        social_query(s,
-                     "SELECT jsonb_build_object('map_id', m.map_id, 'map_name', kn_html(m.map_name), "
-                     "'map_creator', a.username, 'mi', m.map_info::text, 'map_updatecounter', m.map_updatecounter, "
-                     "'map_image', m.map_image, 'vt', m.map_votes, 'pl', m.map_plays, "
-                     "'map_description', kn_html(m.map_description), 'ca', m.map_category, "
-                     "'map_initialdate', m.map_initialdate, 'map_date', m.map_date, 'map_featured', m.map_featured, "
-                     "'vl', m.map_video) FROM published_maps m LEFT JOIN accounts a ON a.id = m.creator_id "
-                     "WHERE lower(m.map_name) = lower($1) AND m.deleted_at IS NULL",
+        social_call(s, &P_MAP_PAGE,
                      KN_DB_ARGS(name), creation_done, c);
     } else {
-        social_query(s,
-                     "SELECT jsonb_build_object('mod_id', d.mod_id, 'mod_name', kn_html(d.mod_name), "
-                     "'mod_creator', a.username, 'mod_info', d.mod_info::text, 'mod_updatecounter', d.mod_updatecounter, "
-                     "'mod_image', d.mod_image, 'vt', d.mod_votes, 'mod_description', kn_html(d.mod_description), "
-                     "'mod_initialdate', d.mod_initialdate, 'mod_date', d.mod_date, 'mod_featured', d.mod_featured, "
-                     "'mod_url', d.mod_url, 'vl', d.mod_video) FROM published_mods d LEFT JOIN accounts a ON a.id = d.creator_id "
-                     "WHERE lower(d.mod_name) = lower($1) AND d.deleted_at IS NULL",
+        social_call(s, &P_MOD_PAGE,
                      KN_DB_ARGS(name), creation_done, c);
     }
 }
@@ -243,9 +217,12 @@ void sh_search(SocialSession *s, const cJSON *f) {
     char pat[160];
     like_escape(q, pat, sizeof pat);
     social_query(s,
-                 "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score "
-                 "FROM player_rows WHERE player_name ILIKE '%' || $1 || '%' "
-                 "ORDER BY (lower(player_name) = lower($2)) DESC, player_score DESC LIMIT 50",
+                 SQL(.pg = "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score "
+                           "FROM player_rows WHERE player_name ILIKE '%' || $1 || '%' "
+                           "ORDER BY (lower(player_name) = lower($2)) DESC, player_score DESC LIMIT 50",
+                     .any = "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score "
+                            "FROM player_rows WHERE player_name {ilike} '%' || $1 || '%' ESCAPE '\\' "
+                            "ORDER BY (lower(player_name) = lower($2)) DESC, player_score DESC LIMIT 50"),
                  KN_DB_ARGS(pat, q), search_done, NULL);
 }
 
@@ -265,11 +242,15 @@ void sh_follow(SocialSession *s, const cJSON *f) {
     social_viewer(s, me);
     if (fa_int(f, 2, 1)) {
         social_query(s,
-                     "INSERT INTO follows (follower_id, followee_id) "
-                     "SELECT $1, id FROM accounts WHERE lower(username) = lower($2) AND id <> $1 ON CONFLICT DO NOTHING",
+                     SQL(.pg = "INSERT INTO follows (follower_id, followee_id) "
+                               "SELECT $1, id FROM accounts WHERE lower(username) = lower($2) AND id <> $1 ON CONFLICT DO NOTHING",
+                         .any = "{insert_ignore} INTO follows (follower_id, followee_id) "
+                                "SELECT $1, id FROM accounts WHERE lower(username) = lower($2) AND id <> $1 {ignore_conflicts}"),
                      KN_DB_ARGS(me, name), follow_done, NULL);
     } else {
-        social_query(s, "DELETE FROM follows WHERE follower_id = $1 AND followee_id = kn_account_id($2)",
+        social_query(s, SQL(.pg = "DELETE FROM follows WHERE follower_id = $1 AND followee_id = kn_account_id($2)",
+                            .any = "DELETE FROM follows WHERE follower_id = $1 AND followee_id = "
+                                   "(SELECT id FROM accounts WHERE lower(username) = lower($2))"),
                      KN_DB_ARGS(me, name), follow_done, NULL);
     }
 }
@@ -296,12 +277,12 @@ static void follow_list(SocialSession *s, const cJSON *f, int followers) {
         ? "SELECT r.player_name AS friendname, r.player_featured AS featured, "
           "CASE WHEN r.player_premium > 0 THEN 1 ELSE 0 END AS subscription, w.created_at AS date "
           "FROM follows w JOIN player_rows r ON r.player_id = w.follower_id "
-          "WHERE w.followee_id = kn_account_id($1) ORDER BY w.created_at DESC LIMIT 500"
+          "WHERE w.followee_id = " ACCOUNT_ID_OF_1 " ORDER BY w.created_at DESC LIMIT 500"
         : "SELECT r.player_name AS friendname, r.player_featured AS featured, "
           "CASE WHEN r.player_premium > 0 THEN 1 ELSE 0 END AS subscription, w.created_at AS date "
           "FROM follows w JOIN player_rows r ON r.player_id = w.followee_id "
-          "WHERE w.follower_id = kn_account_id($1) ORDER BY w.created_at DESC LIMIT 500";
-    social_query(s, sql, KN_DB_ARGS(c->name), follow_list_done, c);
+          "WHERE w.follower_id = " ACCOUNT_ID_OF_1 " ORDER BY w.created_at DESC LIMIT 500";
+    social_query(s, SQL(.any = sql), KN_DB_ARGS(c->name), follow_list_done, c);
 }
 
 /* ["gfs", name, id, count, captcha] -> ["fwsr", rows, name] (followers) */
@@ -333,9 +314,15 @@ void sh_profile_stats(SocialSession *s, const cJSON *f) {
     if (days > 366) days = 366;
     char d[24];
     social_query(s,
-                 "SELECT to_char(date_trunc('day', l.sold_at), 'YYYY-MM-DD') AS d, sum(l.price)::bigint AS f "
-                 "FROM market_listings l WHERE l.seller_id = kn_account_id($1) AND l.sold_at IS NOT NULL "
-                 "AND l.sold_at > now() - make_interval(days => $2::int) GROUP BY 1 ORDER BY 1",
+                 SQL(.pg = "SELECT to_char(date_trunc('day', l.sold_at), 'YYYY-MM-DD') AS d, sum(l.price)::bigint AS f "
+                           "FROM market_listings l WHERE l.seller_id = kn_account_id($1) AND l.sold_at IS NOT NULL "
+                           "AND l.sold_at > now() - make_interval(days => $2::int) GROUP BY 1 ORDER BY 1",
+                     .sqlite = "SELECT strftime('%Y-%m-%d', l.sold_at) AS d, sum(l.price) AS f__i "
+                               "FROM market_listings l WHERE l.seller_id = " ACCOUNT_ID_OF_1 " AND l.sold_at IS NOT NULL "
+                               "AND l.sold_at > {ago:$2 * 86400} GROUP BY 1 ORDER BY 1",
+                     .mysql = "SELECT DATE_FORMAT(l.sold_at, '%Y-%m-%d') AS d, sum(l.price) AS f__i "
+                              "FROM market_listings l WHERE l.seller_id = " ACCOUNT_ID_OF_1 " AND l.sold_at IS NOT NULL "
+                              "AND l.sold_at > {ago:$2 * 86400} GROUP BY 1 ORDER BY 1"),
                  KN_DB_ARGS(name ? name : "", acct_itoa(d, days)), rows_reply_done, strdup("psd"));
 }
 
@@ -347,7 +334,7 @@ void sh_user_feed(SocialSession *s, const cJSON *f) {
         social_send_n(s, "uf", 1, cJSON_CreateArray());
         return;
     }
-    social_query(s, "SELECT kn_feed($1, $2, 50, 0)", KN_DB_ARGS(social_viewer(s, viewer), acct_itoa(author, id)),
+    social_call(s, &P_FEED, KN_DB_ARGS(social_viewer(s, viewer), acct_itoa(author, id), "50", "0"),
                  json_reply_done, strdup("uf"));
 }
 
@@ -358,12 +345,18 @@ void sh_reports(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24];
     social_query(s,
-                 "SELECT rp.id AS rp_id, rp.created_at AS rp_date, a.username AS rp_reportername, "
+                 SQL(.pg = "SELECT rp.id AS rp_id, rp.created_at AS rp_date, a.username AS rp_reportername, "
                  "kn_html(rp.reason) AS rp_index, kn_html(rp.details) AS rp_text "
                  "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
                  "WHERE rp.target_id = kn_account_id($1) "
                  "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
                  "ORDER BY rp.id DESC LIMIT 100",
+                     .any = "SELECT rp.id AS rp_id, rp.created_at AS rp_date, a.username AS rp_reportername, "
+                 "{html:rp.reason} AS rp_index, {html:rp.details} AS rp_text "
+                 "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
+                 "WHERE rp.target_id = " ACCOUNT_ID_OF_1 " "
+                 "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
+                 "ORDER BY rp.id DESC LIMIT 100"),
                  KN_DB_ARGS(fa_str(f, 1) ? fa_str(f, 1) : "", social_viewer(s, me)), rows_reply_done, strdup("rps"));
 }
 
@@ -384,9 +377,12 @@ void sh_report(SocialSession *s, const cJSON *f) {
     }
     char me[24];
     social_query(s,
-                 "INSERT INTO reports (reporter_id, target_id, reason, details) "
-                 "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
-                 "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > now() - interval '1 hour') < 20",
+                 SQL(.pg = "INSERT INTO reports (reporter_id, target_id, reason, details) "
+                           "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
+                           "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > now() - interval '1 hour') < 20",
+                     .any = "INSERT INTO reports (reporter_id, target_id, reason, details) "
+                            "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
+                            "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > {ago:3600}) < 20"),
                  KN_DB_ARGS(social_viewer(s, me), name, reason, details), report_done, NULL);
 }
 
@@ -410,16 +406,8 @@ static void staff_set(SocialSession *s, const cJSON *f, int verify) {
     snprintf(c->label, sizeof c->label, "%s", verify ? "verr" : "fgr");
     char me[24], v[24];
     const int64_t on = fa_int(f, 2, 0) ? 1 : 0;
-    const char *sql = verify
-        ? "WITH ok AS (SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0), "
-          "u AS (UPDATE players SET player_featured = $3 WHERE player_id = kn_account_id($2) AND EXISTS (SELECT 1 FROM ok) RETURNING player_id), "
-          "l AS (INSERT INTO moderation_log (actor_id, target_id, action) SELECT $1, player_id, "
-          "CASE WHEN $3::int = 1 THEN 'verify' ELSE 'unverify' END FROM u) SELECT player_id FROM u"
-        : "WITH ok AS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_moderator > 0)), "
-          "u AS (UPDATE players SET player_hack = $3 WHERE player_id = kn_account_id($2) AND EXISTS (SELECT 1 FROM ok) RETURNING player_id), "
-          "l AS (INSERT INTO moderation_log (actor_id, target_id, action) SELECT $1, player_id, "
-          "CASE WHEN $3::int = 1 THEN 'flag' ELSE 'unflag' END FROM u) SELECT player_id FROM u";
-    social_query(s, sql, KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : "", acct_itoa(v, on)),
+    social_call(s, verify ? &P_SET_FEATURED : &P_SET_HACK,
+                KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : "", acct_itoa(v, on)),
                  flag_done, c);
 }
 

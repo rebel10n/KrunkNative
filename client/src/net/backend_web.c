@@ -49,7 +49,9 @@ void backend_init(const char *cli_url) {
         var url = null;
         var params = null;
         try { params = new URLSearchParams(location.search); } catch (e) {}
-        if (params && params.get('offline') && params.get('offline') !== '0') return 0;
+        // same truthiness as main.c web_query_flag: bare ?offline / ?sandbox count
+        var off = function (name) { var v = params ? params.get(name) : null; return v !== null && v !== '0' && v !== 'false'; };
+        if (off('offline') || off('sandbox') || off('test')) return 0;
         if (params) url = params.get('brain');
         if (url === null && typeof Module !== 'undefined' && Module['krunkNativeBrainUrl'] !== undefined) url = Module['krunkNativeBrainUrl'];
         if (url === null && location.protocol.indexOf('http') === 0) url = '\x01' + location.origin;

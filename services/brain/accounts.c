@@ -1,7 +1,8 @@
 /*
  * services/brain/accounts.c - accounts, sessions and stats commits (Krunker
  * v3.1.1 server/accounts.ts + the account dbOps of matchmaker/dbBroker.ts) on
- * PostgreSQL. Schema and SQL functions: services/db/migrations/010x_*.sql.
+ * any store driver (knsvc/db.h). Schema: services/db/migrations/<dialect>/010x_*.sql;
+ * multi-statement operations are kn_procs (db_procs.h, db_accounts.c).
  * Protocol: doc/backend.md "Accounts & social socket".
  */
 #include "acct_internal.h"
@@ -13,13 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <libpq-fe.h>
-
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
+#include "db_procs.h"
 
 #define MOD "accounts"
 
@@ -149,13 +149,10 @@ int accounts_level(int64_t score, int *prog_percent) {
 
 const char *acct_db_error(kn_db_result *res, const char *ctx) {
     static char msg[256];
-    if (!strcmp(kn_db_sqlstate(res), "P0001")) {
-        const PGresult *pg = kn_db_result_pg(res);
-        const char *primary = pg ? PQresultErrorField(pg, PG_DIAG_MESSAGE_PRIMARY) : NULL;
-        if (primary && *primary) {
-            snprintf(msg, sizeof msg, "%s", primary);
-            return msg;
-        }
+    const char *primary = kn_db_user_message(res); /* P0001 refusal: shown to the user */
+    if (primary && *primary) {
+        snprintf(msg, sizeof msg, "%s", primary);
+        return msg;
     }
     KN_ERROR(MOD, "%s: %s (%s)", ctx ? ctx : "query", kn_db_error(res), kn_db_sqlstate(res));
     return "Server error.";
@@ -331,13 +328,20 @@ static void trim_cb(kn_db_result *res, void *ud) {
     if (!kn_db_ok(res)) KN_WARN(MOD, "session trim: %s", kn_db_error(res));
 }
 
+static const kn_sql SQL_TRIM_SESSIONS = {
+    .pg = "DELETE FROM sessions WHERE account_id = $1 AND token_hash NOT IN "
+          "(SELECT token_hash FROM sessions WHERE account_id = $1 ORDER BY last_seen_at DESC LIMIT $2)",
+    .sqlite = "DELETE FROM sessions WHERE account_id = $1 AND token_hash NOT IN "
+              "(SELECT token_hash FROM sessions WHERE account_id = $1 ORDER BY last_seen_at DESC LIMIT $2)",
+    /* no LIMIT in IN subqueries: delete everything past the newest $2 */
+    .mysql = "DELETE s FROM sessions s JOIN (SELECT token_hash FROM sessions WHERE account_id = $1"
+             " ORDER BY last_seen_at DESC LIMIT 18446744073709551615 OFFSET $2) old USING (token_hash)"};
+
 static void trim_sessions(int account_id) {
     if (g_acct.max_sessions <= 0) return;
     char id[24], max[24];
-    kn_db_query(g_acct_brain->db,
-                "DELETE FROM sessions WHERE account_id = $1 AND token_hash NOT IN "
-                "(SELECT token_hash FROM sessions WHERE account_id = $1 ORDER BY last_seen_at DESC LIMIT $2)",
-                KN_DB_ARGS(acct_itoa(id, account_id), acct_itoa(max, g_acct.max_sessions)), trim_cb, NULL);
+    kn_db_query_sql(g_acct_brain->db, &SQL_TRIM_SESSIONS,
+                    KN_DB_ARGS(acct_itoa(id, account_id), acct_itoa(max, g_acct.max_sessions)), trim_cb, NULL);
 }
 
 static const char *ban_message(const cJSON *account) {
@@ -385,7 +389,7 @@ static void login_success(AuthCtx *c, const char *new_hash) {
         auth_fail(c, "Server error.");
         return;
     }
-    kn_db_query(g_acct_brain->db, "SELECT kn_login_success($1, $2, $3, $4, $5, $6, $7)",
+    kn_db_call(g_acct_brain->db, &P_LOGIN_SUCCESS,
                 KN_DB_ARGS(acct_itoa(id, c->account_id), ip_param(c), "password", c->token,
                            acct_itoa(ttl, g_acct.session_ttl_s), c->origin, new_hash),
                 auth_done, c);
@@ -400,7 +404,7 @@ static void login_failed_cb(kn_db_result *res, void *ud) {
 
 static void login_failed(AuthCtx *c, const char *msg) {
     c->fail_msg = msg;
-    kn_db_query(g_acct_brain->db, "SELECT kn_login_failed($1, $2)", KN_DB_ARGS(c->name, ip_param(c)), login_failed_cb, c);
+    kn_db_call(g_acct_brain->db, &P_LOGIN_FAILED, KN_DB_ARGS(c->name, ip_param(c)), login_failed_cb, c);
 }
 
 static void twofa_verified(void *ud, int ok, const char *new_hash) {
@@ -515,7 +519,7 @@ static void register_hashed(void *ud, int ok, const char *new_hash) {
         auth_fail(c, "Server error.");
         return;
     }
-    kn_db_query(g_acct_brain->db, "SELECT kn_register($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    kn_db_call(g_acct_brain->db, &P_REGISTER,
                 KN_DB_ARGS(c->name, new_hash, ip_param(c), c->ref[0] ? c->ref : NULL,
                            acct_itoa(kr, g_acct.starting_kr), acct_itoa(prem, g_acct.free_premium ? 1 : 0),
                            c->token, acct_itoa(ttl, g_acct.session_ttl_s), c->origin),
@@ -571,11 +575,7 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
         }
         c->pass = strdup(rq->pass);
         char lim[24];
-        kn_db_query(g_acct_brain->db,
-                    "SELECT EXISTS (SELECT 1 FROM accounts WHERE lower(username) = lower($1)) AS taken, "
-                    "($2::text IS NOT NULL AND EXISTS (SELECT 1 FROM kn_active_ban(NULL, $2) b WHERE b.reason IS NOT NULL OR b.expires_at IS NOT NULL)) AS banned, "
-                    "($2::text IS NOT NULL AND $3::int > 0 AND (SELECT count(*) FROM accounts WHERE created_ip = $2 "
-                    "AND created_at > now() - interval '1 hour') >= $3::int) AS limited",
+        kn_db_call(g_acct_brain->db, &P_REGISTER_PRECHECK,
                     KN_DB_ARGS(c->name, ip_param(c), acct_itoa(lim, g_acct.register_per_ip_hour)),
                     register_precheck_done, c);
         return;
@@ -592,7 +592,7 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
         }
         c->pass = strdup(rq->pass);
         char th[24], bm[24], bd[24];
-        kn_db_query(g_acct_brain->db, "SELECT * FROM kn_login_lookup($1, $2, $3, $4, $5)",
+        kn_db_call(g_acct_brain->db, &P_LOGIN_LOOKUP,
                     KN_DB_ARGS(c->name, ip_param(c), acct_itoa(th, g_acct.login_throttle_s),
                                acct_itoa(bm, g_acct.ip_block_failures), acct_itoa(bd, g_acct.ip_block_days)),
                     login_lookup_done, c);
@@ -602,7 +602,7 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
     if (rq->token && *rq->token && strlen(rq->token) < sizeof c->token) {
         snprintf(c->token, sizeof c->token, "%s", rq->token);
         char ttl[24];
-        kn_db_query(g_acct_brain->db, "SELECT kn_account_json(kn_session_account($1, $2))",
+        kn_db_call(g_acct_brain->db, &P_SESSION_ACCOUNT,
                     KN_DB_ARGS(c->token, acct_itoa(ttl, g_acct.session_ttl_s)), token_lookup_done, c);
         return;
     }
@@ -616,8 +616,9 @@ static void revoke_cb(kn_db_result *res, void *ud) {
 
 void acct_revoke_token(const char *token) {
     if (!token || !*token || !g_acct_brain || !g_acct_brain->db) return;
-    kn_db_query(g_acct_brain->db, "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))",
-                KN_DB_ARGS(token), revoke_cb, NULL);
+    static const kn_sql q = {.pg = "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))",
+                             .any = "DELETE FROM sessions WHERE token_hash = {hash:$1}"};
+    kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(token), revoke_cb, NULL);
 }
 
 /* ------------------------------------------------------------------ 2FA (v3.1.1 menu pattern grid) */
@@ -650,7 +651,7 @@ static void twofa_stored(kn_db_result *res, void *ud) {
     TwofaCtx *t = ud;
     if (!kn_db_ok(res)) {
         t->cb(t->ud, acct_db_error(res, "2fa"), NULL);
-    } else if (kn_db_rows(res) < 1) {
+    } else if (kn_db_affected(res) < 1) {
         t->cb(t->ud, "2FA is already enabled", NULL);
     } else {
         cJSON *data = cJSON_CreateObject();
@@ -670,8 +671,10 @@ static void twofa_hashed(void *ud, int ok, const char *hash) {
         free(t);
         return;
     }
-    kn_db_query(g_acct_brain->db, "UPDATE accounts SET twofa_secret = $2 WHERE id = $1 AND twofa_secret IS NULL RETURNING id",
-                KN_DB_ARGS(acct_itoa(id, t->id), hash), twofa_stored, t);
+    static const kn_sql q = {
+        .pg = "UPDATE accounts SET twofa_secret = $2 WHERE id = $1 AND twofa_secret IS NULL RETURNING id",
+        .any = "UPDATE accounts SET twofa_secret = $2 WHERE id = $1 AND twofa_secret IS NULL"};
+    kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(acct_itoa(id, t->id), hash), twofa_stored, t);
 }
 
 void acct_twofa_enable(int64_t id, AcctReplyFn cb, void *ud) {
@@ -827,12 +830,7 @@ static void password_rehashed(void *ud, int ok, const char *new_hash) {
         return;
     }
     /* new hash, every other session revoked, one fresh session returned */
-    kn_db_query(g_acct_brain->db,
-                "WITH u AS (UPDATE accounts SET password_hash = $2 WHERE id = $1 RETURNING id), "
-                "d AS (DELETE FROM sessions WHERE account_id IN (SELECT id FROM u)), "
-                "s AS (INSERT INTO sessions (token_hash, account_id, expires_at, origin) "
-                "SELECT sha256(convert_to($3, 'UTF8')), id, now() + make_interval(secs => $4), 'password' FROM u) "
-                "SELECT jsonb_build_object('token', $3::text) FROM u",
+    kn_db_call(g_acct_brain->db, &P_SET_PASSWORD,
                 KN_DB_ARGS(acct_itoa(id, o->id), new_hash, o->token, acct_itoa(ttl, g_acct.session_ttl_s)),
                 op_json_done, o);
 }
@@ -874,8 +872,8 @@ void acct_change_password(int64_t id, const char *old_pass, const char *new_pass
     o->pass_old = strdup(old_pass);
     o->pass_new = strdup(new_pass);
     char ids[24];
-    kn_db_query(g_acct_brain->db, "SELECT password_hash FROM accounts WHERE id = $1", KN_DB_ARGS(acct_itoa(ids, id)),
-                password_lookup_done, o);
+    static const kn_sql q = {.any = "SELECT password_hash FROM accounts WHERE id = $1"};
+    kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(acct_itoa(ids, id)), password_lookup_done, o);
 }
 
 void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud) {
@@ -891,15 +889,29 @@ void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud) {
     OpCtx *o = op_new(cb, ud, "alias");
     if (!o) return;
     char ids[24];
-    kn_db_query(g_acct_brain->db, "SELECT kn_set_alias($1, $2)", KN_DB_ARGS(acct_itoa(ids, id), trimmed),
-                op_account_done, o);
+    kn_db_call(g_acct_brain->db, &P_SET_ALIAS, KN_DB_ARGS(acct_itoa(ids, id), trimmed), op_account_done, o);
 }
 
 void acct_get(int64_t id, AcctReplyFn cb, void *ud) {
     OpCtx *o = op_new(cb, ud, "get");
     if (!o) return;
     char ids[24];
-    kn_db_query(g_acct_brain->db, "SELECT kn_account_json($1)", KN_DB_ARGS(acct_itoa(ids, id)), op_account_done, o);
+    kn_db_call(g_acct_brain->db, &P_ACCOUNT_JSON, KN_DB_ARGS(acct_itoa(ids, id)), op_account_done, o);
+}
+
+void acct_ensure_central(int64_t central_id, const char *username, AcctReplyFn cb, void *ud) {
+    if (!g_acct_brain || !g_acct_brain->db) {
+        cb(ud, "Accounts are unavailable.", NULL);
+        return;
+    }
+    if (central_id <= 0 || central_id > INT32_MAX || acct_validate_name(username)) {
+        cb(ud, "Invalid account.", NULL);
+        return;
+    }
+    OpCtx *o = op_new(cb, ud, "ensure_central");
+    if (!o) return;
+    char ids[24];
+    kn_db_call(g_acct_brain->db, &P_ENSURE_CENTRAL, KN_DB_ARGS(acct_itoa(ids, central_id), username), op_account_done, o);
 }
 
 /* Normalise the two stats spellings (gameserver / matchmaker) into kn_commit_stats' input. */
@@ -978,7 +990,7 @@ static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
     char *text = kn_json_print(p);
     cJSON_Delete(p);
     char maxkr[24];
-    kn_db_query(g_acct_brain->db, "SELECT kn_commit_stats($1::jsonb, $2)",
+    kn_db_call(g_acct_brain->db, &P_COMMIT_STATS,
                 KN_DB_ARGS(text, acct_itoa(maxkr, g_acct.max_match_kr)), op_stats_done, o);
     free(text);
     return 0;
@@ -1002,13 +1014,7 @@ static int op_rewards(const cJSON *args, AcctReplyFn cb, void *ud) {
     cJSON_Delete(krs);
     OpCtx *o = op_new(cb, ud, "rewards");
     if (o) {
-        kn_db_query(g_acct_brain->db,
-                    "SELECT jsonb_build_object('funds', coalesce(jsonb_agg(f ORDER BY n), '[]'::jsonb)) FROM ("
-                    "SELECT n, kn_add_funds(i::int, k::bigint, 'reward', NULL) AS f "
-                    "FROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS a(i, n) "
-                    "JOIN jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS b(k, m) ON n = m "
-                    "WHERE EXISTS (SELECT 1 FROM players WHERE player_id = i::int)) q",
-                    KN_DB_ARGS(ids_t, krs_t), op_json_done, o);
+        kn_db_call(g_acct_brain->db, &P_REWARDS, KN_DB_ARGS(ids_t, krs_t), op_json_done, o);
     }
     free(ids_t);
     free(krs_t);
@@ -1078,8 +1084,7 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         OpCtx *o = op_new(cb, ud, "give_skin");
         if (!o) return -1;
         const int64_t skin = kn_json_int(args, "skin", -1);
-        kn_db_query(g_acct_brain->db,
-                    "SELECT jsonb_build_object('skin', $2::int, 'count', kn_add_skin($1, $2, 1, $3, NULL))",
+        kn_db_call(g_acct_brain->db, &P_GIVE_SKIN,
                     KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, skin), kn_json_str(args, "source", "spin")),
                     op_json_done, o);
         return 0;
@@ -1087,25 +1092,22 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
     if (!strcmp(op, "elo") && cJSON_HasObjectItem(args, "delta")) {
         /* atomic ranked update: {id, mode, delta} -> {elo} (clamped at 0) */
         const int64_t mode = kn_json_int(args, "mode", 1);
-        const char *col = mode == 4 ? "player_elo4" : mode == 2 ? "player_elo2" : "player_elo";
-        char sql[256];
-        snprintf(sql, sizeof sql,
-                 "UPDATE players SET %s = greatest(0, %s + $2::int) WHERE player_id = $1 "
-                 "RETURNING jsonb_build_object('elo', %s)", col, col, col);
+        const kn_proc *proc = mode == 4 ? &P_ELO_DELTA_4 : mode == 2 ? &P_ELO_DELTA_2 : &P_ELO_DELTA_1;
         OpCtx *o = op_new(cb, ud, "elo");
         if (!o) return -1;
-        kn_db_query(g_acct_brain->db, sql, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "delta", 0))),
+        kn_db_call(g_acct_brain->db, proc, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "delta", 0))),
                     op_json_done, o);
         return 0;
     }
     if (!strcmp(op, "elo")) {
         const int64_t mode = kn_json_int(args, "mode", 1);
-        const char *sql = mode == 4 ? "UPDATE players SET player_elo4 = $2 WHERE player_id = $1"
-                        : mode == 2 ? "UPDATE players SET player_elo2 = $2 WHERE player_id = $1"
-                                    : "UPDATE players SET player_elo = $2 WHERE player_id = $1";
+        static const kn_sql set4 = {.any = "UPDATE players SET player_elo4 = $2 WHERE player_id = $1"},
+                            set2 = {.any = "UPDATE players SET player_elo2 = $2 WHERE player_id = $1"},
+                            set1 = {.any = "UPDATE players SET player_elo = $2 WHERE player_id = $1"};
+        const kn_sql *sql = mode == 4 ? &set4 : mode == 2 ? &set2 : &set1;
         OpCtx *o = op_new(cb, ud, "elo");
         if (!o) return -1;
-        kn_db_query(g_acct_brain->db, sql, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "elo", 0))),
+        kn_db_query_sql(g_acct_brain->db, sql, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "elo", 0))),
                     op_empty_done, o);
         return 0;
     }
@@ -1115,10 +1117,7 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         int64_t kr = kn_json_int(args, "kr", 0);
         if (kr < 0) kr = 0;
         if (kr > g_acct.max_match_kr) kr = g_acct.max_match_kr;
-        kn_db_query(g_acct_brain->db,
-                    "WITH u AS (UPDATE players SET player_chal = greatest(player_chal, $2) WHERE player_id = $1 RETURNING player_chal) "
-                    "SELECT jsonb_build_object('chal', (SELECT player_chal FROM u), "
-                    "'funds', kn_add_funds($1, $3, 'challenge', $2::text))",
+        kn_db_call(g_acct_brain->db, &P_CHALLENGE,
                     KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "chal", 0)), acct_itoa(v2, kr)),
                     op_json_done, o);
         return 0;
@@ -1126,10 +1125,7 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
     if (!strcmp(op, "ban_check")) {
         OpCtx *o = op_new(cb, ud, "ban_check");
         if (!o) return -1;
-        kn_db_query(g_acct_brain->db,
-                    "SELECT jsonb_build_object('banned', CASE WHEN b.reason IS NOT NULL OR b.expires_at IS NOT NULL THEN 1 ELSE 0 END, "
-                    "'reason', b.reason, 'expires', coalesce(extract(epoch FROM b.expires_at)::bigint, 0)) "
-                    "FROM kn_active_ban(nullif($1, '0')::int, $2) b",
+        kn_db_call(g_acct_brain->db, &P_BAN_CHECK,
                     KN_DB_ARGS(acct_itoa(ids, id), kn_json_str(args, "ip", NULL)), op_json_done, o);
         return 0;
     }
@@ -1148,9 +1144,12 @@ static void cleanup_tick(kn_loop *loop, void *ud) {
     (void) loop;
     (void) ud;
     if (!g_acct_brain || !g_acct_brain->db) return;
-    kn_db_query(g_acct_brain->db, "DELETE FROM sessions WHERE expires_at < now()", 0, NULL, cleanup_cb, NULL);
-    kn_db_query(g_acct_brain->db, "DELETE FROM login_failures WHERE at < now() - interval '1 day'", 0, NULL,
-                cleanup_cb, NULL);
+    static const kn_sql q_sessions = {.pg = "DELETE FROM sessions WHERE expires_at < now()",
+                                      .any = "DELETE FROM sessions WHERE expires_at < {now}"},
+                        q_failures = {.pg = "DELETE FROM login_failures WHERE at < now() - interval '1 day'",
+                                      .any = "DELETE FROM login_failures WHERE at < {ago:86400}"};
+    kn_db_query_sql(g_acct_brain->db, &q_sessions, 0, NULL, cleanup_cb, NULL);
+    kn_db_query_sql(g_acct_brain->db, &q_failures, 0, NULL, cleanup_cb, NULL);
 }
 
 /* accounts.developers / accounts.moderators -> players flags (staff checks run in SQL). */
@@ -1163,12 +1162,7 @@ static void staff_flags_apply(void) {
         char *text = kn_json_print(names);
         cJSON_Delete(names);
         if (n && text) {
-            kn_db_query(g_acct_brain->db,
-                        dev ? "UPDATE players SET player_developer = 1, player_moderator = 1 FROM accounts a "
-                              "WHERE a.id = player_id AND lower(a.username) IN (SELECT lower(x) FROM jsonb_array_elements_text($1::jsonb) x)"
-                            : "UPDATE players SET player_moderator = 1 FROM accounts a "
-                              "WHERE a.id = player_id AND lower(a.username) IN (SELECT lower(x) FROM jsonb_array_elements_text($1::jsonb) x)",
-                        KN_DB_ARGS(text), cleanup_cb, NULL);
+            kn_db_call(g_acct_brain->db, dev ? &P_STAFF_DEV : &P_STAFF_MOD, KN_DB_ARGS(text), cleanup_cb, NULL);
         }
         free(text);
     }

@@ -185,7 +185,7 @@ void knet_conn_free(KnetConn *conn) {
 
 static double knet_rto(const KnetConn *conn) {
     if (!conn->rtt_samples) return KNET_RTO_INITIAL;
-    double rto = conn->srtt + 4.0 * conn->rttvar + KNET_ACK_DELAY;
+    double rto = conn->raw_srtt + 4.0 * conn->raw_rttvar + KNET_ACK_DELAY;
     if (rto < KNET_RTO_MIN) rto = KNET_RTO_MIN;
     if (rto > KNET_RTO_MAX) rto = KNET_RTO_MAX;
     return rto;
@@ -385,20 +385,27 @@ static size_t knet_find_segment(const KnetConn *conn, const uint32_t offset) {
     return lo < conn->segment_count && conn->segments[lo].offset == offset ? lo : SIZE_MAX;
 }
 
-static void knet_ack_record(KnetConn *conn, const uint16_t seq, const double now, const int sample_rtt) {
+static void knet_ack_record(KnetConn *conn, const uint16_t seq, const double now, const int sample_rtt, const double ack_delay) {
     KnetSentRecord *record = &conn->sent[seq % KNET_SENT_RING];
     if (!record->valid || record->seq != seq) return;
     record->valid = 0;
     if (sample_rtt && record->eliciting) {
-        const double rtt = now - record->sent_at;
-        if (rtt >= 0.0) {
+        const double raw = now - record->sent_at;
+        double rtt = raw;
+        if (rtt - ack_delay >= 0.0005) rtt -= ack_delay; // like QUIC: never below a plausible floor
+        if (raw >= 0.0) {
             if (!conn->rtt_samples) {
                 conn->srtt = rtt;
                 conn->rttvar = rtt / 2.0;
+                conn->raw_srtt = raw;
+                conn->raw_rttvar = raw / 2.0;
             } else {
                 const double err = rtt > conn->srtt ? rtt - conn->srtt : conn->srtt - rtt;
                 conn->rttvar = 0.75 * conn->rttvar + 0.25 * err;
                 conn->srtt = 0.875 * conn->srtt + 0.125 * rtt;
+                const double raw_err = raw > conn->raw_srtt ? raw - conn->raw_srtt : conn->raw_srtt - raw;
+                conn->raw_rttvar = 0.75 * conn->raw_rttvar + 0.25 * raw_err;
+                conn->raw_srtt = 0.875 * conn->raw_srtt + 0.125 * raw;
             }
             conn->rtt_samples++;
         }
@@ -439,6 +446,7 @@ int knet_conn_receive(KnetConn *conn, const uint8_t *in, const size_t length, co
     const uint16_t seq = get16(in + 5);
     const uint16_t ack = get16(in + 7);
     const uint32_t ack_bits = get32(in + 9);
+    const double ack_delay = get16(in + 13) / 10000.0;
 
     // our acks of their datagrams
     // A datagram seen before (duplicated by the network) still carries acks, but its
@@ -448,12 +456,14 @@ int knet_conn_receive(KnetConn *conn, const uint8_t *in, const size_t length, co
     if (!conn->remote_any) {
         conn->remote_any = 1;
         conn->remote_seq = seq;
+        conn->remote_seq_at = now;
         conn->remote_bits = 0;
     } else {
         const int d = seq_diff(seq, conn->remote_seq);
         if (d > 0) {
             conn->remote_bits = d >= 32 ? 0 : (conn->remote_bits << d) | (1u << (d - 1));
             conn->remote_seq = seq;
+            conn->remote_seq_at = now;
         } else if (d == 0) {
             duplicate = 1;
         } else if (-d <= 32) {
@@ -463,9 +473,9 @@ int knet_conn_receive(KnetConn *conn, const uint8_t *in, const size_t length, co
     }
 
     // their acks of ours
-    knet_ack_record(conn, ack, now, 1);
+    knet_ack_record(conn, ack, now, 1, ack_delay);
     for (int i = 0; i < 32; i++) {
-        if (ack_bits & (1u << i)) knet_ack_record(conn, (uint16_t) (ack - 1 - i), now, 0);
+        if (ack_bits & (1u << i)) knet_ack_record(conn, (uint16_t) (ack - 1 - i), now, 0, 0.0);
     }
     if (!conn->highest_acked_any || seq_diff(ack, conn->highest_acked) > 0) {
         conn->highest_acked = ack;
@@ -526,6 +536,7 @@ static void knet_builder_begin(KnetBuilder *b) {
     put16(b->data + 5, conn->next_seq);
     put16(b->data + 7, conn->remote_any ? conn->remote_seq : (uint16_t) (conn->next_seq - 1000));
     put32(b->data + 9, conn->remote_any ? conn->remote_bits : 0);
+    put16(b->data + 13, 0); // ack_delay: set by knet_builder_finish
     b->length = KNET_DATA_HEADER;
     b->eliciting = 0;
     b->segment_count = 0;
@@ -535,6 +546,9 @@ static void knet_builder_finish(KnetBuilder *b) {
     KnetConn *conn = b->conn;
     const uint16_t seq = conn->next_seq++;
     if (!conn->next_seq) conn->next_seq = 1;
+    double delay = conn->remote_any ? (b->now - conn->remote_seq_at) * 10000.0 : 0.0;
+    if (delay < 0.0) delay = 0.0;
+    put16(b->data + 13, (uint16_t) (delay > 65535.0 ? 65535.0 : delay));
     KnetSentRecord *record = &conn->sent[seq % KNET_SENT_RING];
     record->valid = 1; // a never-acked record it overwrites leaves its segments to the RTO
     record->seq = seq;
@@ -622,7 +636,7 @@ void knet_conn_flush(KnetConn *conn, const double now, const KnetEmitFn emit, vo
         KnetSegment *segment = &conn->segments[i];
         if (segment->acked || !segment->sends) continue;
         const int fast = conn->highest_acked_any && seq_diff(conn->highest_acked, segment->last_seq) >= KNET_FAST_RESEND_GAP &&
-                         now - segment->sent_at >= (conn->rtt_samples ? conn->srtt : 0.0);
+                         now - segment->sent_at >= (conn->rtt_samples ? conn->raw_srtt : 0.0);
         const double backoff = rto * (double) (1u << (segment->sends > 4 ? 4 : segment->sends - 1));
         if (fast || now - segment->sent_at >= (backoff > KNET_RTO_MAX ? KNET_RTO_MAX : backoff)) knet_builder_segment(builder, segment);
     }

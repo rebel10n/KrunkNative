@@ -7,7 +7,8 @@
 //
 // Joining: /mm/seek-game returns the game server's native TCP host/port, the lobby
 // id and a join ticket (clientId). The native client connects over TCP, the web
-// client through net-bridge (/native?target=host:port, or the node's webUrl) and
+// client through net-bridge (<bridge>/native?target=host:port, net_web_target_url, or the
+// node's webUrl) and
 // both send NET_PACKET_JOIN {game_id, client_key = ticket, session, name} right
 // after HELLO (net.c / net_web.c). v3.1.1's switchServer reloads the page with
 // ?game=<id>: the web build does exactly that, the native client re-seeks in place.
@@ -93,11 +94,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
     if (web_url && web_url[0]) {
         snprintf(ws, sizeof(ws), "%s", web_url);
     } else {
-        char *origin = (char *) EM_ASM_PTR({
-            return stringToNewUTF8((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-        });
-        snprintf(ws, sizeof(ws), "%s/native?target=%s:%d", origin ? origin : "", host, port);
-        free(origin);
+        net_web_target_url(ws, sizeof(ws), host, port); // the deployed bridge (kn-bridge) or this origin's /native
     }
 #else
     (void) web_url;
@@ -494,11 +491,7 @@ static void direct_join(const char *host, const int port) {
     snprintf(g_client->net_address, sizeof(g_client->net_address), "%s", host);
     g_client->net_port = (unsigned short) port;
 #ifdef __EMSCRIPTEN__
-    char *origin = (char *) EM_ASM_PTR({
-        return stringToNewUTF8((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-    });
-    snprintf(g_client->net_ws_url, sizeof(g_client->net_ws_url), "%s/native?target=%s:%d", origin ? origin : "", host, port);
-    free(origin);
+    net_web_target_url(g_client->net_ws_url, sizeof(g_client->net_ws_url), host, port);
 #endif
     pthread_mutex_unlock(&g_client->net_lock);
     printf("[mm] direct connect %s:%d (%s mode)\n", host, port, online_mode_name());

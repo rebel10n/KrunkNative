@@ -1497,7 +1497,7 @@ static void batch_flush(Camera *camera, const int screen_space) {
 
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW); // batch_box/batch_sprite_quad emit counter-clockwise front faces
-#ifndef __EMSCRIPTEN__
+#ifndef KN_GLES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
     if (screen_space) glDisable(GL_DEPTH_TEST);

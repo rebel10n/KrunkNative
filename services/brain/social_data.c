@@ -3,8 +3,8 @@
  * display name / password, mail, market and trades of the social socket
  * (Krunker v3.1.1 src/social.js + the menu account/clan/mail windows of
  * src/index.js; offline server matchmaker/socialWs.ts + server/social.ts).
- * Multi-statement operations are SQL functions in
- * services/db/migrations/0104_social_functions.sql.
+ * Multi-statement operations are kn_procs (db_procs.h, db_social.c): the SQL
+ * functions of postgres/0104_social_functions.sql or their C versions.
  */
 #include "acct_internal.h"
 
@@ -88,8 +88,11 @@ void sh_post(SocialSession *s, const cJSON *f) {
     if (cJSON_IsString(lnk2)) snprintf(l2, sizeof l2, "%s", lnk2->valuestring);
     /* at most 20 posts an hour */
     social_query(s,
-                 "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, $3, nullif($4, ''), nullif($5, '') "
-                 "WHERE (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > now() - interval '1 hour') < 20",
+                 SQL(.pg = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, $3, nullif($4, ''), nullif($5, '') "
+                           "WHERE (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > now() - interval '1 hour') < 20",
+                     .any = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, $3, nullif($4, ''), nullif($5, '') "
+                            "FROM accounts WHERE id = $1 "
+                            "AND (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > {ago:3600}) < 20"),
                  KN_DB_ARGS(me_str(s, me), text, acct_itoa(typ, type >= 0 && type < 16 ? type : 0), l1, l2), post_done, c);
 }
 
@@ -107,8 +110,8 @@ void sh_comment(SocialSession *s, const cJSON *f) {
     char text[2048], me[24], pid[24];
     snprintf(text, sizeof text, "%.*s", g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500, txt);
     social_query(s,
-                 "INSERT INTO feed_comments (post_id, author_id, body) SELECT id, $1, $3 FROM feed_posts "
-                 "WHERE id = $2 AND deleted_at IS NULL",
+                 SQL(.any = "INSERT INTO feed_comments (post_id, author_id, body) SELECT id, $1, $3 FROM feed_posts "
+                            "WHERE id = $2 AND deleted_at IS NULL"),
                  KN_DB_ARGS(me_str(s, me), acct_itoa(pid, fa_int(f, 1, 0)), text), post_done, ctx_new("com", 2, 0));
 }
 
@@ -126,7 +129,7 @@ static void get_post_done(SocialSession *s, kn_db_result *res, void *extra) {
 /* ["gps", postId] -> ["psr", {p, c}, null, 1] */
 void sh_get_post(SocialSession *s, const cJSON *f) {
     char me[24], pid[24];
-    social_query(s, "SELECT kn_post_full($1, $2)", KN_DB_ARGS(acct_itoa(pid, fa_int(f, 1, 0)), me_str(s, me)),
+    social_call(s, &P_POST_FULL, KN_DB_ARGS(acct_itoa(pid, fa_int(f, 1, 0)), me_str(s, me)),
                  get_post_done, NULL);
 }
 
@@ -136,11 +139,13 @@ void sh_like_post(SocialSession *s, const cJSON *f) {
     char me[24], pid[24];
     if (fa_int(f, 2, 1)) {
         social_query(s,
-                     "INSERT INTO feed_likes (post_id, account_id) SELECT id, $1 FROM feed_posts WHERE id = $2 "
-                     "AND deleted_at IS NULL ON CONFLICT DO NOTHING",
+                     SQL(.pg = "INSERT INTO feed_likes (post_id, account_id) SELECT id, $1 FROM feed_posts WHERE id = $2 "
+                               "AND deleted_at IS NULL ON CONFLICT DO NOTHING",
+                         .any = "{insert_ignore} INTO feed_likes (post_id, account_id) SELECT id, $1 FROM feed_posts WHERE id = $2 "
+                                "AND deleted_at IS NULL {ignore_conflicts}"),
                      KN_DB_ARGS(me_str(s, me), acct_itoa(pid, fa_int(f, 1, 0))), popup_error_done, NULL);
     } else {
-        social_query(s, "DELETE FROM feed_likes WHERE account_id = $1 AND post_id = $2",
+        social_query(s, SQL(.any = "DELETE FROM feed_likes WHERE account_id = $1 AND post_id = $2"),
                      KN_DB_ARGS(me_str(s, me), acct_itoa(pid, fa_int(f, 1, 0))), popup_error_done, NULL);
     }
 }
@@ -150,8 +155,10 @@ void sh_delete_post(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24], pid[24];
     social_query(s,
-                 "UPDATE feed_posts SET deleted_at = now() WHERE id = $2 AND deleted_at IS NULL AND (author_id = $1 OR "
-                 "EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_moderator > 0 OR player_developer > 0)))",
+                 SQL(.pg = "UPDATE feed_posts SET deleted_at = now() WHERE id = $2 AND deleted_at IS NULL AND (author_id = $1 OR "
+                           "EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_moderator > 0 OR player_developer > 0)))",
+                     .any = "UPDATE feed_posts SET deleted_at = {now} WHERE id = $2 AND deleted_at IS NULL AND (author_id = $1 OR "
+                            "EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_moderator > 0 OR player_developer > 0)))"),
                  KN_DB_ARGS(me_str(s, me), acct_itoa(pid, fa_int(f, 1, 0))), popup_error_done, NULL);
 }
 
@@ -170,11 +177,11 @@ void sh_chat_blobs(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24];
     social_query(s,
-                 "SELECT peer AS fid, a.username AS fna, "
-                 "(SELECT count(*) FROM chat_messages m WHERE m.sender_id = peer AND m.receiver_id = $1 AND m.read_at IS NULL) AS cht "
-                 "FROM (SELECT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS peer, max(id) AS last "
-                 "      FROM chat_messages WHERE sender_id = $1 OR receiver_id = $1 GROUP BY 1) t "
-                 "JOIN accounts a ON a.id = t.peer ORDER BY t.last DESC LIMIT 50",
+                 SQL(.any = "SELECT peer AS fid, a.username AS fna, "
+                            "(SELECT count(*) FROM chat_messages m WHERE m.sender_id = peer AND m.receiver_id = $1 AND m.read_at IS NULL) AS cht "
+                            "FROM (SELECT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS peer, max(id) AS last "
+                            "      FROM chat_messages WHERE sender_id = $1 OR receiver_id = $1 GROUP BY 1) t "
+                            "JOIN accounts a ON a.id = t.peer ORDER BY t.last DESC LIMIT 50"),
                  KN_DB_ARGS(me_str(s, me)), rows_done, ctx_new("chtb", 0, 0));
 }
 
@@ -187,19 +194,13 @@ void sh_chat_thread(SocialSession *s, const cJSON *f) {
         social_send_n(s, "chtl", 1, cJSON_CreateArray());
         return;
     }
-    social_query(s,
-                 "WITH r AS (UPDATE chat_messages SET read_at = now() WHERE sender_id = $2 AND receiver_id = $1 AND read_at IS NULL) "
-                 "SELECT m.sender_id AS fid, a.username AS fna, kn_html(m.body) AS txt, "
-                 "floor(extract(epoch FROM m.created_at) * 1000)::bigint AS tim "
-                 "FROM chat_messages m JOIN accounts a ON a.id = m.sender_id "
-                 "WHERE (m.sender_id = $1 AND m.receiver_id = $2) OR (m.sender_id = $2 AND m.receiver_id = $1) "
-                 "ORDER BY m.id DESC LIMIT 100",
+    social_call(s, &P_CHAT_THREAD,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(peer, peer_id)), rows_done, ctx_new("chtl", 0, 0));
 }
 
 static void chat_sent(SocialSession *s, kn_db_result *res, void *extra) {
     Ctx *c = extra;
-    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
+    if (!kn_db_ok(res) || kn_db_affected(res) < 1) {
         social_send_n(s, "chf", 2, cJSON_CreateFalse(),
                       cJSON_CreateString(kn_db_ok(res) ? "Message not Sent" : acct_db_error(res, "ict")));
         return;
@@ -227,9 +228,11 @@ void sh_chat_send(SocialSession *s, const cJSON *f) {
     }
     char me[24], p[24];
     social_query(s,
-                 "INSERT INTO chat_messages (sender_id, receiver_id, body) SELECT $1, id, $3 FROM accounts WHERE id = $2 "
-                 "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > now() - interval '1 minute') < 30 "
-                 "RETURNING id",
+                 SQL(.pg = "INSERT INTO chat_messages (sender_id, receiver_id, body) SELECT $1, id, $3 FROM accounts WHERE id = $2 "
+                           "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > now() - interval '1 minute') < 30 "
+                           "RETURNING id",
+                     .any = "INSERT INTO chat_messages (sender_id, receiver_id, body) SELECT $1, id, $3 FROM accounts WHERE id = $2 "
+                            "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > {ago:60}) < 30"),
                  KN_DB_ARGS(me_str(s, me), acct_itoa(p, peer), txt), chat_sent, ctx_new("ict", peer, 0));
 }
 
@@ -261,7 +264,7 @@ void sh_gift(SocialSession *s, const cJSON *f) {
     }
     char me[24], amt[24], fee[24], lvl[24];
     const char *msg = fa_str(f, 3);
-    social_query(s, "SELECT kn_gift($1, $2, $3, $4, $5, $6)",
+    social_call(s, &P_GIFT,
                  KN_DB_ARGS(me_str(s, me), name, acct_itoa(amt, amount), acct_itoa(fee, g_acct.gift_fee_percent),
                             acct_itoa(lvl, g_acct.gift_min_level), msg ? msg : ""),
                  gift_done, NULL);
@@ -309,7 +312,7 @@ void sh_clan(SocialSession *s, const cJSON *f) {
     char me[24], v1[24], v2[24], v3[24];
     if (cJSON_IsString(fa(f, 1))) {
         if (!social_require_auth(s)) return;
-        social_query(s, "SELECT kn_clan_request($1, $2)", KN_DB_ARGS(me_str(s, me), fa_str(f, 1)), clan_social_done, NULL);
+        social_call(s, &P_CLAN_REQUEST, KN_DB_ARGS(me_str(s, me), fa_str(f, 1)), clan_social_done, NULL);
         return;
     }
     const int64_t action = fa_int(f, 1, 0);
@@ -321,29 +324,29 @@ void sh_clan(SocialSession *s, const cJSON *f) {
     Ctx *c = ctx_new("cln", action, 0);
     switch (action) {
     case 1:
-        social_query(s, "SELECT kn_clan_create($1, $2, $3)",
+        social_call(s, &P_CLAN_CREATE,
                      KN_DB_ARGS(me, fa_str(f, 2) ? fa_str(f, 2) : "", acct_itoa(v1, g_acct.clan_tag_max)), clan_menu_done, c);
         return;
     case 2:
-        social_query(s, "SELECT kn_clan_request($1, $2)", KN_DB_ARGS(me, fa_str(f, 2) ? fa_str(f, 2) : ""),
+        social_call(s, &P_CLAN_REQUEST, KN_DB_ARGS(me, fa_str(f, 2) ? fa_str(f, 2) : ""),
                      clan_menu_done, c);
         return;
     case 3:
-        social_query(s, "SELECT kn_clan_data(kn_clan_of($1))", KN_DB_ARGS(me), clan_menu_done, c);
+        social_call(s, &P_CLAN_DATA_OF, KN_DB_ARGS(me), clan_menu_done, c);
         return;
     case 4:
-        social_query(s, "SELECT kn_clan_leave($1)", KN_DB_ARGS(me), clan_menu_done, c);
+        social_call(s, &P_CLAN_LEAVE, KN_DB_ARGS(me), clan_menu_done, c);
         return;
     case 5:
-        social_query(s, "SELECT kn_clan_kick($1, $2)", KN_DB_ARGS(me, acct_itoa(v1, fa_int(f, 2, 0))), clan_menu_done, c);
+        social_call(s, &P_CLAN_KICK, KN_DB_ARGS(me, acct_itoa(v1, fa_int(f, 2, 0))), clan_menu_done, c);
         return;
     case 6:
-        social_query(s, "SELECT kn_clan_role($1, $2, $3)",
+        social_call(s, &P_CLAN_ROLE,
                      KN_DB_ARGS(me, acct_itoa(v1, fa_int(f, 2, 0)), acct_itoa(v2, kn_json_int(fa(f, 3), "r", 0))),
                      clan_menu_done, c);
         return;
     case 7:
-        social_query(s, "SELECT kn_clan_funds($1, $2, $3)",
+        social_call(s, &P_CLAN_FUNDS,
                      KN_DB_ARGS(me, acct_itoa(v1, fa_int(f, 2, 0)), kn_json_int(fa(f, 3), "wd", 0) ? "true" : "false"),
                      clan_menu_done, c);
         return;
@@ -359,7 +362,7 @@ void sh_clan(SocialSession *s, const cJSON *f) {
 void sh_clan_request(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24], who[24], max[24];
-    social_query(s, "SELECT kn_clan_answer($1, $2, $3, $4)",
+    social_call(s, &P_CLAN_ANSWER,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(who, fa_int(f, 1, 0)), fa_int(f, 2, 0) == 1 ? "true" : "false",
                             acct_itoa(max, g_acct.clan_max_members)),
                  clan_menu_done, ctx_new("clnR", 9, 0));
@@ -390,7 +393,8 @@ void sh_settings_up(SocialSession *s, const cJSON *f) {
         return;
     }
     char me[24];
-    social_query(s, "UPDATE accounts SET settings = $2, settings_at = now() WHERE id = $1",
+    social_query(s, SQL(.pg = "UPDATE accounts SET settings = $2, settings_at = now() WHERE id = $1",
+                        .any = "UPDATE accounts SET settings = $2, settings_at = {now} WHERE id = $1"),
                  KN_DB_ARGS(me_str(s, me), text), settings_up_done, NULL);
     free(text);
 }
@@ -412,7 +416,7 @@ void sh_settings_get(SocialSession *s, const cJSON *f) {
         return;
     }
     char me[24];
-    social_query(s, "SELECT settings FROM accounts WHERE id = $1", KN_DB_ARGS(me_str(s, me)), settings_get_done, NULL);
+    social_query(s, SQL(.any = "SELECT settings FROM accounts WHERE id = $1"), KN_DB_ARGS(me_str(s, me)), settings_get_done, NULL);
 }
 
 typedef struct OpWait {
@@ -481,16 +485,18 @@ static void mail_list_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "kml", 2, cJSON_CreateNumber((double) c->a), rows ? rows : cJSON_CreateArray());
 }
 
-#define MAIL_COLS \
-    "SELECT id AS km_id, created_at AS km_datesent, kn_html(sender) AS km_playerfrom, kn_html(subject) AS km_subject, " \
-    "kn_html(body) AS km_text, CASE WHEN read_at IS NULL THEN 0 ELSE 1 END AS km_archive, kr AS km_kr FROM mail "
+#define MAIL_COLS(html_l, html_r) \
+    "SELECT id AS km_id, created_at AS km_datesent, " html_l "sender" html_r " AS km_playerfrom, " html_l "subject" html_r " AS km_subject, " \
+    html_l "body" html_r " AS km_text, CASE WHEN read_at IS NULL THEN 0 ELSE 1 END AS km_archive, kr AS km_kr FROM mail "
 
 /* ["kml", tab] -> ["kml", tab, rows] (windows[29].onData; tab 0 unread, 1 read) */
 void sh_mail_list(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24];
     const int64_t tab = fa_int(f, 1, 0) ? 1 : 0;
-    social_query(s, MAIL_COLS "WHERE account_id = $1 ORDER BY id DESC LIMIT 100", KN_DB_ARGS(me_str(s, me)),
+    social_query(s, SQL(.pg = MAIL_COLS("kn_html(", ")") "WHERE account_id = $1 ORDER BY id DESC LIMIT 100",
+                        .any = MAIL_COLS("{html:", "}") "WHERE account_id = $1 ORDER BY id DESC LIMIT 100"),
+                 KN_DB_ARGS(me_str(s, me)),
                  mail_list_done, ctx_new("kml", tab, 0));
 }
 
@@ -505,12 +511,7 @@ static void mail_read_done(SocialSession *s, kn_db_result *res, void *extra) {
 void sh_mail_read(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24], id[24];
-    social_query(s,
-                 "WITH m AS (UPDATE mail SET read_at = coalesce(read_at, now()) WHERE id = $2 AND account_id = $1 "
-                 "  RETURNING *, (read_at = now() AND kr > 0) AS credit), "
-                 "k AS (SELECT kn_add_funds($1, kr, 'mail', id::text) FROM m WHERE credit) "
-                 "SELECT id AS km_id, created_at AS km_datesent, kn_html(sender) AS km_playerfrom, kn_html(subject) AS km_subject, "
-                 "kn_html(body) AS km_text, 1 AS km_archive, (SELECT count(*) FROM k) AS km_credited FROM m",
+    social_call(s, &P_MAIL_READ,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(id, fa_int(f, 1, 0))), mail_read_done, NULL);
 }
 
@@ -519,7 +520,8 @@ void sh_mail_read_all(SocialSession *s, const cJSON *f) {
     (void) f;
     if (s->account_id <= 0) return;
     char me[24];
-    social_query(s, "UPDATE mail SET read_at = now() WHERE account_id = $1 AND read_at IS NULL",
+    social_query(s, SQL(.pg = "UPDATE mail SET read_at = now() WHERE account_id = $1 AND read_at IS NULL",
+                        .any = "UPDATE mail SET read_at = {now} WHERE account_id = $1 AND read_at IS NULL"),
                  KN_DB_ARGS(me_str(s, me)), popup_error_done, NULL);
 }
 
@@ -544,14 +546,14 @@ void social_push_mail_count(int64_t account_id) {
     if (!id) return;
     *id = account_id;
     char ids[24];
-    kn_db_query(g_acct_brain->db, "SELECT count(*) FROM mail WHERE account_id = $1 AND read_at IS NULL",
-                KN_DB_ARGS(acct_itoa(ids, account_id)), push_count_done, id);
+    kn_db_query_sql(g_acct_brain->db, SQL(.any = "SELECT count(*) FROM mail WHERE account_id = $1 AND read_at IS NULL"),
+                    KN_DB_ARGS(acct_itoa(ids, account_id)), push_count_done, id);
 }
 
 void social_after_login(SocialSession *s) {
     if (!s->json) return; /* "gmc" is a menu label: the v3.1.1 social page has no handler */
     char me[24];
-    social_query(s, "SELECT count(*) FROM mail WHERE account_id = $1 AND read_at IS NULL", KN_DB_ARGS(me_str(s, me)),
+    social_query(s, SQL(.any = "SELECT count(*) FROM mail WHERE account_id = $1 AND read_at IS NULL"), KN_DB_ARGS(me_str(s, me)),
                  mail_count_done, NULL);
 }
 
@@ -632,32 +634,27 @@ static void market_query(SocialSession *s, MarketCtx *c) {
     me_str(s, me);
     if (!strcmp(c->page, "itemsales")) {
         char item[24];
-        social_query(s,
-                     "SELECT jsonb_build_object('ind', $1::int, "
-                     "'high', (SELECT max(price) FROM market_listings WHERE skin_id = $1::int AND sold_at IS NOT NULL), "
-                     "'low', (SELECT min(price) FROM market_listings WHERE skin_id = $1::int AND sold_at IS NULL AND cancelled_at IS NULL), "
-                     "'owners', coalesce((SELECT jsonb_agg(jsonb_build_object('nm', r.player_name, 'ct', i.count, "
-                     "  'su', CASE WHEN r.player_premium > 0 THEN 1 ELSE 0 END, 'ft', r.player_featured) ORDER BY i.count DESC) "
-                     "  FROM (SELECT * FROM inventory WHERE skin_id = $1::int AND count > 0 ORDER BY count DESC LIMIT 100) i "
-                     "  JOIN player_rows r ON r.player_id = i.account_id), '[]'::jsonb))",
+        social_call(s, &P_MARKET_ITEM,
                      KN_DB_ARGS(acct_itoa(item, c->item >= 0 ? c->item : 0)), market_done, c);
         return;
     }
     if (!strcmp(c->sub, "inventory")) {
-        social_query(s, "SELECT skin_id AS i, skin_id AS s, count AS c FROM inventory WHERE account_id = $1 AND count > 0 ORDER BY skin_id",
+        social_query(s, SQL(.any = "SELECT skin_id AS i, skin_id AS s, count AS c FROM inventory WHERE account_id = $1 AND count > 0 ORDER BY skin_id"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "sales")) {
-        social_query(s, LISTING_COLS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC",
+        social_query(s, SQL(.any = LISTING_COLS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "stats")) {
-        social_query(s, "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c FROM inventory "
-                        "WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50",
+        social_query(s, SQL(.pg = "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c FROM inventory "
+                                  "WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50",
+                            .any = "SELECT skin_id AS ski, sum(count) AS cnt__i, sum(count) AS c__i FROM inventory "
+                                   "WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50"),
                      0, NULL, market_done, c);
     } else if (!strcmp(c->sub, "trades")) {
-        social_query(s, "SELECT jsonb_build_array(kn_trade_rows($1, true), kn_trade_rows($1, false))", KN_DB_ARGS(me),
+        social_call(s, &P_TRADE_PAGE, KN_DB_ARGS(me),
                      market_done, c);
     } else { /* market: cheapest open listing first */
-        social_query(s, LISTING_COLS "WHERE l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.price ASC, l.id LIMIT 1000",
+        social_query(s, SQL(.any = LISTING_COLS "WHERE l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.price ASC, l.id LIMIT 1000"),
                      0, NULL, market_done, c);
     }
 }
@@ -744,7 +741,7 @@ static void list_done(SocialSession *s, kn_db_result *res, void *extra) {
 void sh_market_list(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], sk[24], pr[24], fee[24], byp[24], mx[24], ml[24];
-    social_query(s, "SELECT kn_market_list($1, $2, $3, $4, $5, $6, $7)",
+    social_call(s, &P_MARKET_LIST,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(sk, fa_int(f, 1, -1)), acct_itoa(pr, fa_int(f, 4, 0)),
                             acct_itoa(fee, g_acct.market_fee_percent), acct_itoa(byp, g_acct.market_fee_bypass),
                             acct_itoa(mx, g_acct.sale_max), acct_itoa(ml, g_acct.max_listings)),
@@ -765,7 +762,7 @@ static void unlist_done(SocialSession *s, kn_db_result *res, void *extra) {
 void sh_market_unlist(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], id[24];
-    social_query(s, "SELECT kn_market_unlist($1, $2)", KN_DB_ARGS(me_str(s, me), acct_itoa(id, fa_int(f, 2, 0))),
+    social_call(s, &P_MARKET_UNLIST, KN_DB_ARGS(me_str(s, me), acct_itoa(id, fa_int(f, 2, 0))),
                  unlist_done, ctx_new("uli", fa_int(f, 3, 0), 0));
 }
 
@@ -784,7 +781,7 @@ static void buy_done(SocialSession *s, kn_db_result *res, void *extra) {
 void sh_market_buy(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], id[24];
-    social_query(s, "SELECT kn_market_buy($1, $2)", KN_DB_ARGS(me_str(s, me), acct_itoa(id, fa_int(f, 1, 0))), buy_done,
+    social_call(s, &P_MARKET_BUY, KN_DB_ARGS(me_str(s, me), acct_itoa(id, fa_int(f, 1, 0))), buy_done,
                  ctx_new("pi", fa_int(f, 2, 0), 0));
 }
 
@@ -813,7 +810,7 @@ void sh_quick_sell(SocialSession *s, const cJSON *f) {
     if (count < 1) count = 1;
     if (count > 1000) count = 1000;
     char me[24], sk[24], ct[24], kr[24];
-    social_query(s, "SELECT kn_quick_sell($1, $2, $3, $4)",
+    social_call(s, &P_QUICK_SELL,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(sk, id), acct_itoa(ct, count), acct_itoa(kr, k_rarity_sell[k->rarity])),
                  quick_sell_done, ctx_new("qsi", fa_int(f, 2, 0), 0));
 }
@@ -824,9 +821,13 @@ void sh_item_stats(SocialSession *s, const cJSON *f) {
     int64_t d = fa_int(f, 2, 30);
     if (d < 1 || d > 366) d = 30;
     social_query(s,
-                 "SELECT to_char(date_trunc('day', sold_at), 'YYYY-MM-DD') AS d, round(avg(price))::bigint AS f, count(*) AS t "
-                 "FROM market_listings WHERE skin_id = $1 AND sold_at > now() - make_interval(days => $2::int) "
-                 "GROUP BY 1 ORDER BY 1",
+                 SQL(.pg = "SELECT to_char(date_trunc('day', sold_at), 'YYYY-MM-DD') AS d, round(avg(price))::bigint AS f, count(*) AS t "
+                           "FROM market_listings WHERE skin_id = $1 AND sold_at > now() - make_interval(days => $2::int) "
+                           "GROUP BY 1 ORDER BY 1",
+                     .sqlite = "SELECT strftime('%Y-%m-%d', sold_at) AS d, CAST(round(avg(price)) AS INTEGER) AS f, count(*) AS t "
+                               "FROM market_listings WHERE skin_id = $1 AND sold_at > {ago:$2 * 86400} GROUP BY 1 ORDER BY 1",
+                     .mysql = "SELECT DATE_FORMAT(sold_at, '%Y-%m-%d') AS d, CAST(ROUND(AVG(price)) AS SIGNED) AS f, count(*) AS t "
+                              "FROM market_listings WHERE skin_id = $1 AND sold_at > {ago:$2 * 86400} GROUP BY 1 ORDER BY 1"),
                  KN_DB_ARGS(acct_itoa(sk, fa_int(f, 1, -1)), acct_itoa(days, d)), rows_done, ctx_new("gd", 0, 0));
 }
 
@@ -851,11 +852,7 @@ void sh_trade_inv(SocialSession *s, const cJSON *f) {
     if (!c) return;
     snprintf(c->text, sizeof c->text, "%s", name ? name : "");
     char me[24], them[24];
-    social_query(s,
-                 "SELECT jsonb_build_array("
-                 "coalesce((SELECT jsonb_agg(jsonb_build_object('i', skin_id, 'c', count) ORDER BY skin_id) FROM inventory WHERE account_id = $1 AND count > 0), '[]'::jsonb), "
-                 "coalesce((SELECT jsonb_agg(jsonb_build_object('i', skin_id, 'c', count) ORDER BY skin_id) FROM inventory WHERE account_id = $2 AND count > 0), '[]'::jsonb)) "
-                 "WHERE EXISTS (SELECT 1 FROM accounts WHERE id = $2)",
+    social_call(s, &P_TRADE_INVENTORIES,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(them, c->a)), trade_inv_done, c);
 }
 
@@ -911,9 +908,7 @@ void sh_trade_create(SocialSession *s, const cJSON *f) {
     cJSON_Delete(take);
     char me[24], to[24], mx[24], lvl[24];
     const char *msg = fa_str(f, 4);
-    social_query(s,
-                 "SELECT kn_trade_create($1, $2, ARRAY(SELECT jsonb_array_elements_text($3::jsonb)::int), "
-                 "ARRAY(SELECT jsonb_array_elements_text($4::jsonb)::int), $5, $6, $7)",
+    social_call(s, &P_TRADE_CREATE,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(to, fa_int(f, 1, 0)), g, t, msg ? msg : "",
                             acct_itoa(mx, g_acct.trade_max_items), acct_itoa(lvl, g_acct.trade_min_level)),
                  trade_done, ctx_new("ctr", 0, 0));
@@ -926,7 +921,7 @@ void sh_trade_accept(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], id[24];
     const int64_t trade = fa_int(f, 1, 0);
-    social_query(s, "SELECT kn_trade_accept($1, $2)", KN_DB_ARGS(me_str(s, me), acct_itoa(id, trade)), trade_done,
+    social_call(s, &P_TRADE_ACCEPT, KN_DB_ARGS(me_str(s, me), acct_itoa(id, trade)), trade_done,
                  ctx_new("trA", trade, 0));
 }
 
@@ -935,7 +930,7 @@ void sh_trade_cancel(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], id[24];
     const int64_t trade = fa_int(f, 1, 0);
-    social_query(s, "SELECT kn_trade_close($1, $2)", KN_DB_ARGS(me_str(s, me), acct_itoa(id, trade)), trade_done,
+    social_call(s, &P_TRADE_CLOSE, KN_DB_ARGS(me_str(s, me), acct_itoa(id, trade)), trade_done,
                  ctx_new("trC", trade, 0));
 }
 
@@ -953,6 +948,7 @@ void sh_trade_clear(SocialSession *s, const cJSON *f) {
     (void) f;
     if (!social_require_auth(s)) return;
     char me[24];
-    social_query(s, "UPDATE trades SET status = 'declined', closed_at = now() WHERE receiver_id = $1 AND status = 'open'",
+    social_query(s, SQL(.pg = "UPDATE trades SET status = 'declined', closed_at = now() WHERE receiver_id = $1 AND status = 'open'",
+                        .any = "UPDATE trades SET status = 'declined', closed_at = {now} WHERE receiver_id = $1 AND status = 'open'"),
                  KN_DB_ARGS(me_str(s, me)), trade_clear_done, NULL);
 }

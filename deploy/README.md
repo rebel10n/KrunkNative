@@ -11,7 +11,7 @@ script instead of ansible.
 | `deploy.sh` | multi-host deploy: `build`, `push [host..]`, `status`, `render <host> <dir>`, `drain <host> <instance>` |
 | `inventory.example` | hosts with `region=`, `brain=1`, `gameservers=N`, `bridge=1`, `nginx=brain\|node` (copy to `deploy/inventory`, gitignored) |
 | `systemd/kn-brain.service` | the brain (`--migrate-only` in ExecStartPre, then serve) |
-| `systemd/kn-gameserver@.service` | one `server_bin` lobby per instance; `/etc/krunknative/gameserver-<instance>.env` |
+| `systemd/kn-gameserver@.service` | one `server_bin` lobby per instance; optional `/etc/krunknative/server-<instance>.cfg` (server.cfg syntax, doc/backend.md 8.7) over the JSON config, optional `gameserver-<instance>.env`; SIGTERM drains (TimeoutStopSec 30) |
 | `systemd/kn-net-bridge.service` | `net-bridge --web`: web client + `/native` WebSocket -> game server TCP |
 | `systemd/krunknative.target` | groups the units of a host |
 | `nginx/brain.conf.template` | `matchmaker.<domain>` -> `/mm/`, `api.` -> `/api/`, `social.` -> `/social/`, `play.` = web client + all routes on one origin |

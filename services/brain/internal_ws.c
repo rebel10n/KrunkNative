@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "brain_internal.h"
+#include "roles.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
@@ -235,6 +236,42 @@ static void on_auth_account(void *ud, const char *err, const cJSON *data) {
     auth_finish(a, err, err ? NULL : data);
 }
 
+/* coord-auth: community role. A central account (auth service id + username) -> this
+ * community's account row (inventory data[10], stats), created on first join and renamed
+ * with the central account by coord-store's acct_ensure_central() (accounts.c). */
+void acct_ensure_central(int64_t central_id, const char *username, AcctReplyFn cb, void *ud);
+
+static void community_account(NodeConn *c, AuthCtx *a, int64_t central_id, const char *username) {
+    if (central_id <= 0) {
+        auth_finish(a, "Failed to verify username", NULL);
+        return;
+    }
+    if (!brain_has_role(BRAIN_ROLE_COMMUNITY)) {
+        auth_finish(a, "not a community coordinator", NULL);
+        return;
+    }
+    (void) c;
+    acct_ensure_central(central_id, username, on_auth_account, a);
+}
+
+typedef struct HjCtx {
+    NodeConn *c;     /* may be gone by the reply: only conn_id (in a->r) is used to answer */
+    uint64_t conn_id;
+    AuthCtx *a;
+} HjCtx;
+
+
+static void on_has_joined(void *ud, const char *err, const cJSON *profile) {
+    HjCtx *h = ud;
+    NodeConn *c = conn_by_id(h->conn_id);
+    if (err || !profile || !c) {
+        auth_finish(h->a, err ? err : "Failed to verify username", NULL);
+    } else {
+        community_account(c, h->a, kn_json_int(profile, "id", 0), kn_json_str(profile, "username", ""));
+    }
+    free(h);
+}
+
 static void handle_auth(NodeConn *c, const cJSON *frame) {
     AuthCtx *a = calloc(1, sizeof(*a));
     if (!a) return;
@@ -247,6 +284,25 @@ static void handle_auth(NodeConn *c, const cJSON *frame) {
     free(rc);
     const char *ticket = kn_json_str(frame, "ticket", NULL);
     const char *token = kn_json_str(frame, "token", NULL);
+    const cJSON *hj = cJSON_GetObjectItemCaseSensitive(frame, "hasJoined");
+    const cJSON *central = cJSON_GetObjectItemCaseSensitive(frame, "central");
+    if (cJSON_IsObject(hj)) { /* online_mode server: verify with the auth service, then the community row */
+        HjCtx *h = calloc(1, sizeof(*h));
+        if (!h) {
+            auth_finish(a, "Server error.", NULL);
+            return;
+        }
+        h->c = c;
+        h->conn_id = c->id;
+        h->a = a;
+        auth_has_joined_async(c->b, kn_json_str(hj, "username", ""), kn_json_str(hj, "serverHash", ""),
+                              kn_json_str(hj, "ip", ""), on_has_joined, h);
+        return;
+    }
+    if (cJSON_IsObject(central)) { /* the game server verified it with hasJoined itself */
+        community_account(c, a, kn_json_int(central, "id", 0), kn_json_str(central, "username", ""));
+        return;
+    }
     if (ticket && *ticket) {
         char err[128] = "";
         a->claims = kn_signed_token_verify(mm_settings()->join_secret, ticket, 0, err, sizeof(err));
@@ -520,7 +576,7 @@ static void handle_frame(NodeConn *c, const cJSON *frame) {
         handle_host_request(c, frame);
         return;
     }
-    if (!strcmp(type, "host-reply") || !strcmp(type, "reply")) {
+    if (!strcmp(type, "host-reply") || !strcmp(type, "reply") || !strcmp(type, "rcon-reply")) {
         pending_resolve(c, frame);
         return;
     }

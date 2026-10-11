@@ -34,11 +34,12 @@ enum {
     KNET_CONNECT_RESPONSE = 0x03, // C->S [type][salt4][cookie8][fwd_len1][fwd bytes]
     KNET_ACCEPT = 0x04,           // S->C [type][salt4][token4]
     KNET_DENY = 0x05,             // S->C [type][salt4][len1][reason]
-    KNET_DATA = 0x06,             // both [type][token4][seq2][ack2][ack_bits4] messages...
+    KNET_DATA = 0x06,             // both [type][token4][seq2][ack2][ack_bits4][ack_delay2] messages...
+                                  //   ack_delay = 1/10 ms since `ack` arrived (RTT samples subtract it)
     KNET_DISCONNECT = 0x07,       // both [type][token4]
 };
 
-#define KNET_DATA_HEADER 13
+#define KNET_DATA_HEADER 15
 #define KNET_MSG_RELIABLE 0x10    // [0x10][offset4][len2][bytes]
 #define KNET_MSG_UNRELIABLE 0x20  // [0x20][flags1][id2][len2][type1][payload], flags bit0 = sequenced
 #define KNET_RELIABLE_HEADER 7
@@ -109,14 +110,16 @@ typedef struct {
     // packet acks
     uint16_t next_seq;
     uint16_t remote_seq;       // newest DATA seq received
+    double remote_seq_at;      // when it arrived
     uint32_t remote_bits;      // bit i = remote_seq - 1 - i received
     int remote_any;
     uint16_t highest_acked;    // newest of our seqs the peer acked
     int highest_acked_any;
     KnetSentRecord sent[KNET_SENT_RING];
 
-    // RTT (seconds)
+    // RTT (seconds): srtt without the peer's ack delay (reported ping); raw_* with it (RTO)
     double srtt, rttvar;
+    double raw_srtt, raw_rttvar;
     int rtt_samples;
 
     // reliable send

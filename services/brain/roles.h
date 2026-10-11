@@ -36,4 +36,12 @@ int brain_module_enabled(const char *name);
 int auth_init(Brain *b);
 void auth_shutdown(Brain *b);
 
+/* hasJoined for the community role (internal WS "auth" {hasJoined}): answered from this
+ * process's join records when it also has the auth role, else GET <community.auth_url>
+ * /auth/hasJoined on a worker thread (libcurl when built with it; http:// otherwise).
+ * cb runs on the loop thread once: profile {id, username, ...} or NULL + err. */
+typedef void (*AuthHasJoinedCb)(void *ud, const char *err, const cJSON *profile);
+void auth_has_joined_async(Brain *b, const char *username, const char *server_hash, const char *ip,
+                           AuthHasJoinedCb cb, void *ud);
+
 #endif

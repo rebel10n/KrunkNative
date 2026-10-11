@@ -7,6 +7,7 @@
     mode: "0755"
 
 - name: Binaries ({{ kn_build_codename }} build)
+  register: kn_release_bin_sync
   ansible.posix.synchronize:
     src: "{{ kn_artifact_root }}/{{ kn_build_codename }}/bin/"
     dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/bin/"
@@ -19,6 +20,7 @@
     rsync_opts: "{{ ['--chmod=D755,F755', '--chown=root:root'] + (kn_release_bins | map('regex_replace', '^', '--include=') | list) + ['--exclude=*'] }}"
 
 - name: Service data files (maps, skins.json)
+  register: kn_release_data_sync
   ansible.posix.synchronize:
     src: "{{ kn_repo_root }}/assets/{{ item }}"
     dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/assets/"
@@ -31,6 +33,7 @@
   loop: "{{ kn_release_assets }}"
 
 - name: Database migrations
+  register: kn_release_mig_sync
   ansible.posix.synchronize:
     src: "{{ kn_repo_root }}/services/db/migrations"
     dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/services/db/"
@@ -50,6 +53,16 @@
     state: link
     force: true
   register: kn_release_link
+
+# Services restart when anything of the running release changed: a new release id,
+# or the same id (dirty tree redeployed) with new binaries/data.
+- name: Did the release change
+  ansible.builtin.set_fact:
+    kn_release_changed: >-
+      {{ (kn_release_link.changed | default(false))
+         or (kn_release_bin_sync.changed | default(false))
+         or (kn_release_data_sync.changed | default(false))
+         or (kn_release_mig_sync.changed | default(false)) }}
 
 - name: Prune old service releases (keep {{ kn_keep_releases }})
   ansible.builtin.include_tasks: prune.yml

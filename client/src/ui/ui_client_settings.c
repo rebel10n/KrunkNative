@@ -19,6 +19,7 @@
 #include <discord_rpc.h>
 #include <render_settings.h>
 #include <html_ui.h>
+#include <audio.h>
 #include <spectate.h>
 #include <shared.h>
 #include <GLFW/glfw3.h>
@@ -67,6 +68,7 @@ enum {
     CS_WEB = 2,         // generated in the web build
     CS_RESTART = 4,     // needsRestart: red "*", applied on the next launch (restart offered)
     CS_GAME = 8,        // a game setting (knSettings, setSetting) surfaced here
+    CS_SOUND_TAB = 16,  // generated in the game's Sound tab (ui_client_settings_extend_tab), not in Client
 };
 
 typedef enum { CS_SWITCH, CS_SELECT, CS_TEXT, CS_SLIDER, CS_UISCALE, CS_BUTTON } CsKind;
@@ -119,6 +121,9 @@ static const ClientSetting SETTINGS[] = {
     {"rawInput", "Raw Input", "System", CS_SWITCH, CS_NATIVE, "true", "Unaccelerated mouse motion while the pointer is locked"},
     {"audioBackend", "Audio Backend", "System", CS_SELECT, CS_NATIVE | CS_RESTART, "",
      "Sound output (and voice chat input); Auto tries every backend of this build in order"},
+    // ---- Sound tab: after Audio/Mic Input (audio_set_output_device; "" = the backend's default)
+    {"audioOutput", "Audio Output", "Sound", CS_SELECT, CS_NATIVE | CS_SOUND_TAB, "",
+     "Select hardware device for audio output"},
     {"priority", "Process Priority", "System", CS_SELECT, CS_NATIVE | CS_RESTART, "Normal",
      "CPU scheduling priority of the client process", PRIORITIES, COUNT(PRIORITIES)},
     // ---- Client (glorp "Exit Button", "Discord Rich Presence", "Resource Swapper"; custom CSS)
@@ -137,9 +142,9 @@ static const ClientSetting SETTINGS[] = {
      "Online: log in at the account service, inventory and stats are saved. Offline: guest, every skin unlocked, nothing saved",
      ACCOUNT_MODES, COUNT(ACCOUNT_MODES)},
     {"brainUrl", "Account Service URL", "Startup", CS_TEXT, CS_NATIVE | CS_RESTART, "",
-     "Account service / community coordinator (kn_brain); empty = https://coordinator.krunker.party"},
+     "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io"},
     {"finderUrl", "Server Finder URL", "Startup", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
-     "Public server list; empty = https://matchmaker.krunker.party/servers, off = none"},
+     "Public server list; empty = https://matchmaker.krunk.io/servers, off = none"},
     // ---- Game (glorp "Auto Spectate", "Always Play HS Sound on Kill")
     {"autoSpec", "Auto Spectate", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Turn Spectate on when the game loads"},
     {"hsSound", "Always Play HS Sound on Kill", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
@@ -693,6 +698,9 @@ void client_settings_startup(Client *client, int *offline) {
         g_cs.audio_env_set = 1;
         printf("[client] audio backend %s\n", backend);
     }
+    char output[AUDIO_DEVICE_NAME_MAX];
+    cs_string("audioOutput", output, sizeof(output));
+    audio_set_output_device(output); // before audio_init: opened there (default when missing)
     apply_priority();
     apply_raw_input();
     const char *size = getenv("KRUNKNATIVE_WINDOW_SIZE");
@@ -847,6 +855,29 @@ static void audio_backend_options(StrBuf *sb, const char *current) {
 #endif
 }
 
+// The backend's playback devices; a saved device that is not connected stays listed (audio
+// plays on the default device meanwhile, audio.c) so the choice is not lost.
+static void audio_output_options(StrBuf *sb, const char *current) {
+    append_option(sb, "", "Default", current);
+#ifndef __EMSCRIPTEN__
+    AudioDeviceInfo devices[32];
+    const int count = audio_output_devices(devices, COUNT(devices));
+    int listed_current = !current[0];
+    for (int i = 0; i < count; i++) {
+        int dup = 0;
+        for (int j = 0; j < i && !dup; j++) dup = !strcmp(devices[j].name, devices[i].name);
+        if (dup) continue;
+        append_option(sb, devices[i].name, devices[i].name, current);
+        if (!strcmp(devices[i].name, current)) listed_current = 1;
+    }
+    if (!listed_current) {
+        char label[AUDIO_DEVICE_NAME_MAX + 32];
+        snprintf(label, sizeof(label), "%s (not connected)", current);
+        append_option(sb, current, label, current);
+    }
+#endif
+}
+
 // "<div class='settName' title='info'>Name <span style='color: #eb5656'>*</span> " (134.js genSettings)
 static void row_begin(StrBuf *sb, const ClientSetting *s) {
     sb_append(sb, "<div class=\"settName\" title=\"");
@@ -898,13 +929,15 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
                 resolution_options(sb, value);
             } else if (!strcmp(s->key, "audioBackend")) {
                 audio_backend_options(sb, value);
+            } else if (!strcmp(s->key, "audioOutput")) {
+                audio_output_options(sb, value);
             }
             sb_append(sb, "</select>");
             break;
         case CS_TEXT:
             sb_appendf(sb, "<input type=\"text\" name=\"text\" id=\"knClient_%s\" class=\"inputGrey2\" placeholder=\"", s->key);
-            append_attr_escaped(sb, !strcmp(s->key, "brainUrl") ? "https://coordinator.krunker.party"
-                                    : !strcmp(s->key, "finderUrl") ? "https://matchmaker.krunker.party/servers" : s->name);
+            append_attr_escaped(sb, !strcmp(s->key, "brainUrl") ? "https://coordinator.krunk.io"
+                                    : !strcmp(s->key, "finderUrl") ? "https://matchmaker.krunk.io/servers" : s->name);
             sb_append(sb, "\" value=\"");
             append_attr_escaped(sb, value);
             sb_appendf(sb, "\" onchange=\"knClientSet(&quot;%s&quot;, this.value)\">", s->key);
@@ -934,7 +967,7 @@ char *ui_client_settings_tab_html(const int searching) {
     const char *cat = NULL;
     for (int i = 0; i < COUNT(SETTINGS); i++) {
         const ClientSetting *s = &SETTINGS[i];
-        if (!setting_shown(s)) continue;
+        if (!setting_shown(s) || (s->flags & CS_SOUND_TAB)) continue; // Sound tab rows: ui_client_settings_extend_tab
         if (searching && (s->flags & CS_GAME)) continue; // the game's own tab lists it (one id per page)
         if (!cat || strcmp(cat, s->cat)) {
             if (cat) sb_append(&sb, "</div>");
@@ -948,6 +981,23 @@ char *ui_client_settings_tab_html(const int searching) {
         append_row(&sb, s);
     }
     if (cat) sb_append(&sb, "</div>");
+    return sb_finish(&sb);
+}
+
+// The game's Sound tab (ui/windows/settings-tab-5.html) with the client's rows after its
+// Audio/Mic Input row; NULL when `tab` is another tab or nothing is added.
+char *ui_client_settings_extend_tab(const char *tab) {
+    if (!tab || !chrome_visible()) return NULL;
+    const char *row = strstr(tab, "setSetting(&quot;audioInput&quot;");
+    const char *end = row ? strstr(row, "</select></div>") : NULL;
+    if (!end) return NULL;
+    end += strlen("</select></div>");
+    StrBuf sb = {0};
+    sb_append_n(&sb, tab, (size_t) (end - tab));
+    for (int i = 0; i < COUNT(SETTINGS); i++) {
+        if ((SETTINGS[i].flags & CS_SOUND_TAB) && setting_shown(&SETTINGS[i])) append_row(&sb, &SETTINGS[i]);
+    }
+    sb_append(&sb, end);
     return sb_finish(&sb);
 }
 
@@ -966,6 +1016,11 @@ static void apply_setting(const ClientSetting *s) {
     else if (!strcmp(k, "resolution")) apply_resolution();
     else if (!strcmp(k, "autoSpec")) apply_auto_spectate();
     else if (!strcmp(k, "hsSound")) g_cs.hs_sound = cs_bool("hsSound");
+    else if (!strcmp(k, "audioOutput")) {
+        char output[AUDIO_DEVICE_NAME_MAX];
+        cs_string("audioOutput", output, sizeof(output));
+        audio_set_output_device(output); // re-opens the device live
+    }
 }
 
 static void set_client_setting(const char *key, const char *value) {

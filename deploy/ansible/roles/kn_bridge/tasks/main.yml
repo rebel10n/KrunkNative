@@ -1,0 +1,208 @@
+# net-bridge --bridge-only on the central node (defaults/main.yml). Layout:
+#   {{ kn_bridge_node_dir }}/bin/node        pinned Node LTS (only the binary)
+#   {{ kn_bridge_base }}/net-bridge.js       esbuild bundle (ws + msgpack-lite inlined)
+#   {{ kn_etc_dir }}/bridge.env              listen address, allowlist, limits
+#   kn-bridge.service                        user {{ kn_user }}, 127.0.0.1:{{ kn_bridge_port }}
+
+- name: Bridge allowlist (edge game servers by name and IP)
+  ansible.builtin.set_fact:
+    kn_bridge_targets: >-
+      {%- set out = [] -%}
+      {%- set ports = kn_bridge_target_port_lo ~ '-' ~ kn_bridge_target_port_hi -%}
+      {%- for h in kn_bridge_edge_hosts -%}
+        {%- for n in range(1, (kn_bridge_target_port_hi | int) - (kn_bridge_target_port_lo | int) + 2) -%}
+          {%- set _ = out.append(hostvars[h].kn_edge_name ~ '-' ~ n ~ '.' ~ kn_domain ~ ':' ~ ports) -%}
+        {%- endfor -%}
+        {%- set _ = out.append(hostvars[h].kn_public_ip ~ ':' ~ ports) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: The allowlist is not empty
+  ansible.builtin.assert:
+    that: kn_bridge_targets | length > 0
+    fail_msg: "No edges in the inventory: the bridge would have nothing to connect to."
+    quiet: true
+
+# Deterministic output: an unchanged source gives a byte-identical bundle (no copy, no restart).
+- name: Bundle net-bridge on the controller (npm run bundle)
+  ansible.builtin.shell: |
+    set -eu
+    cd {{ (kn_repo_root ~ '/net-bridge') | quote }}
+    [ -x node_modules/.bin/esbuild ] || npm ci --no-audit --no-fund
+    npm run --silent bundle
+  args:
+    executable: /bin/bash
+  environment:
+    npm_config_update_notifier: "false"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  check_mode: false
+
+# ------------------------------------------------------------------ Node
+
+- name: Pinned Node present
+  ansible.builtin.stat:
+    path: "{{ kn_bridge_node_dir }}/bin/node"
+  register: kn_bridge_node
+
+- name: Install Node v{{ kn_bridge_node_version }} (binary only)
+  when: not kn_bridge_node.stat.exists
+  block:
+    - name: Node directory
+      ansible.builtin.file:
+        path: "{{ kn_bridge_node_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download Node v{{ kn_bridge_node_version }}
+      ansible.builtin.get_url:
+        url: "https://nodejs.org/dist/v{{ kn_bridge_node_version }}/node-v{{ kn_bridge_node_version }}-linux-x64.tar.xz"
+        dest: "/root/node-v{{ kn_bridge_node_version }}-linux-x64.tar.xz"
+        checksum: "sha256:{{ kn_bridge_node_sha256 }}"
+        mode: "0600"
+
+    - name: Unpack bin/node + LICENSE
+      ansible.builtin.unarchive:
+        src: "/root/node-v{{ kn_bridge_node_version }}-linux-x64.tar.xz"
+        dest: "{{ kn_bridge_node_root }}"
+        remote_src: true
+        owner: root
+        group: root
+        include:
+          - "node-v{{ kn_bridge_node_version }}-linux-x64/bin/node"
+          - "node-v{{ kn_bridge_node_version }}-linux-x64/LICENSE"
+      notify: Restart kn_bridge
+      # --check on a fresh host: nothing was downloaded.
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: Remove the Node tarball
+      ansible.builtin.file:
+        path: "/root/node-v{{ kn_bridge_node_version }}-linux-x64.tar.xz"
+        state: absent
+
+# ------------------------------------------------------------------ bridge
+
+- name: Bridge directory
+  ansible.builtin.file:
+    path: "{{ kn_bridge_base }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Bridge bundle
+  ansible.builtin.copy:
+    src: "{{ kn_bridge_bundle }}"
+    dest: "{{ kn_bridge_base }}/net-bridge.js"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart kn_bridge
+
+- name: Bridge settings
+  ansible.builtin.template:
+    src: bridge.env.j2
+    dest: "{{ kn_etc_dir }}/bridge.env"
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  notify: Restart kn_bridge
+
+- name: Bridge unit
+  ansible.builtin.template:
+    src: kn-bridge.service.j2
+    dest: /etc/systemd/system/kn-bridge.service
+    mode: "0644"
+  notify: Restart kn_bridge
+
+- name: Enable kn-bridge
+  ansible.builtin.systemd_service:
+    name: kn-bridge
+    enabled: true
+    state: started
+    daemon_reload: true
+  # --check on a fresh host: the unit file above was not really written.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Restart now if anything changed (before the health check)
+  ansible.builtin.meta: flush_handlers
+
+- name: Bridge answers on loopback
+  ansible.builtin.uri:
+    url: "http://{{ kn_bridge_listen_host }}:{{ kn_bridge_port }}/healthz"
+    status_code: [200]
+  register: kn_bridge_health
+  retries: 5
+  delay: 2
+  until: kn_bridge_health.status == 200
+  when: not ansible_check_mode
+
+# ------------------------------------------------------------------ Cloudflare
+# The tunnel is remote-managed (cloudflared runs with a token; the ingress lives in
+# Cloudflare): the rule is edited through the API, like assets.krunk.io was.
+
+- name: Cloudflare routing for {{ kn_bridge_hostname }}
+  when: kn_bridge_cf_manage | bool and kn_bridge_cf_api_token | length > 0 and kn_bridge_cf_account_id | length > 0
+  delegate_to: localhost
+  become: false
+  run_once: true
+  block:
+    - name: DNS {{ kn_bridge_hostname }} CNAME -> tunnel (proxied)
+      community.general.cloudflare_dns:
+        api_token: "{{ kn_bridge_cf_api_token }}"
+        zone: "{{ kn_domain }}"
+        record: "{{ kn_bridge_hostname | regex_replace('\\.' ~ (kn_domain | regex_escape) ~ '$', '') }}"
+        type: CNAME
+        value: "{{ kn_bridge_cf_tunnel_id }}.cfargotunnel.com"
+        proxied: true
+        ttl: 1
+        comment: "KrunkNative net-bridge (kn-bridge :{{ kn_bridge_port }} via tunnel, deploy/ansible kn_bridge)"
+        solo: true
+        state: present
+
+    - name: Tunnel configuration
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/accounts/{{ kn_bridge_cf_account_id }}/cfd_tunnel/{{ kn_bridge_cf_tunnel_id }}/configurations"
+        headers: { Authorization: "Bearer {{ kn_bridge_cf_api_token }}" }
+        return_content: true
+      register: kn_bridge_tunnel
+      check_mode: false
+      no_log: true
+
+    - name: Ingress with {{ kn_bridge_hostname }} before the catch-all (every other rule kept)
+      ansible.builtin.set_fact:
+        kn_bridge_tunnel_config: "{{ kn_bridge_tunnel.json.result.config }}"
+        kn_bridge_ingress_new: >-
+          {%- set rule = {'hostname': kn_bridge_hostname, 'service': 'http://localhost:' ~ kn_bridge_port} -%}
+          {%- set ns = namespace(out=[], done=false) -%}
+          {%- for r in kn_bridge_tunnel.json.result.config.ingress -%}
+            {%- if r.hostname is defined and r.hostname == kn_bridge_hostname -%}
+              {%- if not ns.done -%}{%- set ns.out = ns.out + [r | combine(rule)] -%}{%- set ns.done = true -%}{%- endif -%}
+            {%- elif loop.last and r.hostname is not defined and not ns.done -%}
+              {%- set ns.out = ns.out + [rule, r] -%}{%- set ns.done = true -%}
+            {%- else -%}
+              {%- set ns.out = ns.out + [r] -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ ns.out if ns.done else ns.out + [rule] }}
+
+    - name: Update the tunnel ingress
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/accounts/{{ kn_bridge_cf_account_id }}/cfd_tunnel/{{ kn_bridge_cf_tunnel_id }}/configurations"
+        method: PUT
+        headers: { Authorization: "Bearer {{ kn_bridge_cf_api_token }}" }
+        body_format: json
+        body:
+          config: "{{ kn_bridge_tunnel_config | combine({'ingress': kn_bridge_ingress_new}) }}"
+      when: kn_bridge_ingress_new != kn_bridge_tunnel_config.ingress
+      changed_when: true
+      no_log: true
+
+- name: Cloudflare routing skipped
+  ansible.builtin.debug:
+    msg: "CF_API_TOKEN / CF_ACCOUNT_ID not set: {{ kn_bridge_hostname }} DNS + tunnel ingress not checked (source ~/.config/kn-secrets/cloudflare.env)."
+  when: kn_bridge_cf_manage | bool and (kn_bridge_cf_api_token | length == 0 or kn_bridge_cf_account_id | length == 0)

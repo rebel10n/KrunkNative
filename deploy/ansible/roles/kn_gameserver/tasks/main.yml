@@ -1,5 +1,16 @@
-# The edges' firewalls are left alone: clara/angeles/chitown have no input filter,
-# amph.ashburn's nftables belongs to abulxt's Ansible (kn_gameserver_ports_open).
+# server_bin links libcrypto (knsvc), libcrypt and libcurl (https finder/auth);
+# package names differ per release (t64 from trixie on).
+- name: Runtime libraries for server_bin
+  ansible.builtin.apt:
+    name:
+      - libcrypt1
+      - "{{ {'bullseye': 'libssl1.1', 'bookworm': 'libssl3'}.get(ansible_facts.distribution_release, 'libssl3t64') }}"
+      - "{{ 'libcurl4' if ansible_facts.distribution_release in ['bullseye', 'bookworm'] else 'libcurl4t64' }}"
+    state: present
+    install_recommends: false
+
+# The game ports are opened by kn_firewall (60-krunknative.nft in the shared
+# edge-firewall-contract v1 nftables, same kn_gameserver_first_port/count).
 - name: Instance plan
   ansible.builtin.set_fact:
     kn_gameserver_active: "{{ (kn_gameserver_enabled | bool) and (kn_gameserver_ports_open | bool) }}"
@@ -12,6 +23,31 @@
       {{ kn_gameserver_first_port }}..{{ kn_gameserver_first_port + (kn_gameserver_count | int) - 1 }} tcp+udp,
       active={{ kn_gameserver_active }}
 
+# coordinator_secret / join_secret = KN_BRAIN_INTERNAL_SECRET / KN_BRAIN_JOIN_SECRET of the
+# coordinator (role kn_brain generated them once on the central node).
+- name: Coordinator secrets from the central node
+  ansible.builtin.slurp:
+    src: "{{ kn_etc_dir }}/secrets.env"
+  delegate_to: "{{ kn_gameserver_secret_host }}"
+  run_once: true
+  register: kn_gs_secrets_env
+  when: kn_gameserver_coordinator_url | length > 0
+  no_log: true
+
+- name: Coordinator secrets
+  ansible.builtin.set_fact:
+    kn_gs_internal_secret: "{{ kn_gs_env | select('match', '^KN_BRAIN_INTERNAL_SECRET=') | map('regex_replace', '^[^=]*=', '') | first | default('') }}"
+    kn_gs_join_secret: "{{ kn_gs_env | select('match', '^KN_BRAIN_JOIN_SECRET=') | map('regex_replace', '^[^=]*=', '') | first | default('') }}"
+  vars:
+    kn_gs_env: "{{ (kn_gs_secrets_env.content | b64decode).splitlines() if kn_gs_secrets_env.content is defined else [] }}"
+  no_log: true
+
+- name: Coordinator link needs the secret
+  ansible.builtin.assert:
+    that: kn_gameserver_coordinator_url | length == 0 or kn_gs_internal_secret | length >= 16
+    fail_msg: "no KN_BRAIN_INTERNAL_SECRET in {{ kn_gameserver_secret_host }}:{{ kn_etc_dir }}/secrets.env"
+    quiet: true
+
 - name: Per-instance server.cfg
   ansible.builtin.template:
     src: server.cfg.j2
@@ -23,6 +59,13 @@
   loop_control:
     loop_var: n
     label: "server-{{ n }}.cfg :{{ kn_gameserver_first_port + n - 1 }} {{ kn_gameserver_hostname_fmt | format(n) }}"
+  notify: Restart game servers
+  diff: false # carries the coordinator secret
+
+- name: Release changed -> restart
+  ansible.builtin.debug:
+    msg: "current -> {{ kn_release_id }}"
+  changed_when: kn_release_changed | default(false) | bool
   notify: Restart game servers
 
 - name: Template unit

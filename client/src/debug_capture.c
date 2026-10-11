@@ -13,6 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <unistd.h> // mkdtemp (macOS declares it here, not in stdlib.h)
+#endif
 
 typedef struct {
     int initialized;
@@ -156,6 +159,7 @@ void debug_capture_frame_end(Client *client) {
 //   con <line>                          developer console line (ui_console_exec)
 //   shot <out.png>                      write this frame (world + page) to a PNG
 //   rect <id>                           print #id's rect to stderr
+//   at x y                              print the elementFromPoint chain at (x, y) to stderr
 //   quit                                close the window
 static struct {
     long offset;
@@ -233,6 +237,7 @@ static void ui_cmds_click(GLFWwindow *w, const double x, const double y) {
     glfwSetCursorPosCallback(w, pos);
     GLFWmousebuttonfun btn = glfwSetMouseButtonCallback(w, NULL);
     glfwSetMouseButtonCallback(w, btn);
+    glfwSetCursorPos(w, x, y); // mouse_button_callback re-reads glfwGetCursorPos (stale on the headless null platform otherwise)
     if (pos) pos(w, x, y);
     if (btn) {
         btn(w, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);

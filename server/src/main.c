@@ -385,7 +385,7 @@ static void print_usage(FILE *stream, const char *argv0) {
             "  rcon_password \"change-me\"       rcon_port 27015     region us-nj\n"
             "  online_mode 1                     // verify accounts with the central auth service\n"
             "  coordinator_url ws://coord.example:5050/mm/internal/ws   coordinator_secret \"...\"\n"
-            "  finder_url https://matchmaker.krunker.party   // opt-in public listing\n"
+            "  finder_url https://matchmaker.krunk.io   // opt-in public listing\n"
             "  public_ip 203.0.113.7   public_port 21015    log_file logs/server.log\n"
             "\n"
             "Dedicated server:\n"
@@ -743,6 +743,7 @@ int main(int argc, char **argv) {
     // backend: lobby id, bans file, per-mode lobby size / round length, brain thread
     pthread_mutex_lock(&g_server->lock);
     accounts_init();
+    info_query_update(0.0f); // the query snapshot exists before any transport can answer queries
     pthread_mutex_unlock(&g_server->lock);
     gs_config_log_summary(cfg);
 

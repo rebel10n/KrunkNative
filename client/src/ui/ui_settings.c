@@ -854,7 +854,11 @@ void ui_settings_search(const char *query) {
     }
 
     StrBuf all = {0};
-    for (int tab = 0; tab < ui_settings_tab_count(); tab++) sb_append(&all, ui_settings_tab_html(tab));
+    for (int tab = 0; tab < ui_settings_tab_count(); tab++) {
+        char *extended = ui_client_settings_extend_tab(ui_settings_tab_html(tab)); // + Sound > Audio Output
+        sb_append(&all, extended ? extended : ui_settings_tab_html(tab));
+        free(extended);
+    }
     char *client_rows = ui_client_settings_tab_html(1); // Settings > Client (ui_client_settings.c)
     sb_append(&all, client_rows);
     free(client_rows);

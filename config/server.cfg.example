@@ -1,0 +1,43 @@
+// KrunkNative dedicated server config (server_bin, doc/backend.md 8.7).
+// Copy to server.cfg next to server_bin (or cfg/server.cfg) and run `server_bin`.
+// One "key value" per line; // or # comments; quote values with spaces.
+// Every gameserver key of config/config.example.json works here too.
+
+// ---- identity
+hostname        "My KrunkNative Server"
+region          us-nj              // config.regionNames id shown in server lists
+community       ""                 // network / community name in lists ("" = the coordinator's)
+tags            "fun,casual"       // extra info-query tags
+
+// ---- network
+port            21015              // game port (TCP today; the info query answers on UDP of the same number)
+// public_ip    203.0.113.7        // what clients connect to (default 127.0.0.1: set it on a public box)
+public_port     0                  // 0 = port
+maxplayers      8
+sv_password     ""                 // players need this to join ("" = open)
+
+// ---- game
+mapcycle        Burg,Sandstorm,Kanji,Littletown
+mode            ffa                // ffa | tdm | ctf | point | ... | rotation (a list rotates)
+round_seconds   0                  // 0 = the mode's game time
+// game.gravMlt  1                 // any v3.1.1 host config var: game.<var> value
+motd            "Welcome to $'s new home"
+
+// ---- accounts
+online_mode     0                  // 1: every player is verified by the central auth service (hasJoined)
+auth_url        https://coordinator.krunk.io
+
+// ---- coordinator (accounts, skins, stats, matchmaking of a community network)
+coordinator_url ""                 // ws://coord.example:5050/mm/internal/ws ("" = standalone)
+coordinator_secret ""              // = the coordinator's brain.internal_secret
+
+// ---- public listing (opt-in)
+finder_url      ""                 // https://matchmaker.krunk.io to be listed
+
+// ---- admin
+rcon_password   ""                 // set it and rcon_port to enable local rcon
+rcon_port       0                  // TCP, bound to rcon_ip (127.0.0.1)
+ops             ""                 // account ids / usernames that are DEV on join
+bans_file       config/bans.json
+log_file        ""                 // also append the console log here
+shutdown_grace  10                 // SIGTERM: seconds to finish the round before exiting

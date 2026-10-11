@@ -122,6 +122,60 @@ static void r_close(kn_ws *ws, int code, const char *reason, void *ud) {
     if (in_connect) c_refused_inside_connect = 1;
 }
 
+/* wss:// against the plain server: the TLS handshake must fail cleanly (1006 "tls: ..."). */
+static int t_code;
+static char t_reason[256];
+static void t_close(kn_ws *ws, int code, const char *reason, void *ud) {
+    t_code = code;
+    snprintf(t_reason, sizeof t_reason, "%s", reason);
+}
+
+static void *plain_http_peer(void *arg) {
+    int lfd = *(int *)arg;
+    int fd = accept(lfd, NULL, NULL);
+    if (fd >= 0) {
+        char buf[512];
+        (void)!recv(fd, buf, sizeof buf, 0); /* the ClientHello */
+        send_all(fd, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", 47);
+        close(fd);
+    }
+    return NULL;
+}
+
+static void stop_when_tls_closed(kn_loop *l, void *ud) {
+    if (t_code) kn_loop_stop(l);
+}
+
+static void test_tls_handshake_failure(void) {
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in a;
+    socklen_t al = sizeof a;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    CHECK(bind(lfd, (struct sockaddr *)&a, sizeof a) == 0 && listen(lfd, 1) == 0);
+    getsockname(lfd, (struct sockaddr *)&a, &al);
+    pthread_t th;
+    pthread_create(&th, NULL, plain_http_peer, &lfd);
+    char wss[128];
+    snprintf(wss, sizeof wss, "wss://127.0.0.1:%d/ws", ntohs(a.sin_port));
+    kn_ws_callbacks tcb = {NULL, NULL, t_close, NULL, NULL};
+    if (kn_ws_connect(loop, wss, &tcb, NULL, NULL)) {
+        kn_timer_id poll_t = kn_loop_add_timer(loop, 10, 10, stop_when_tls_closed, NULL);
+        kn_timer_id guard = kn_loop_add_timer(loop, 5000, 0, (kn_timer_cb)kn_loop_stop, NULL);
+        kn_loop_run(loop);
+        kn_loop_cancel_timer(loop, guard);
+        kn_loop_cancel_timer(loop, poll_t);
+        CHECK_EQ_INT(t_code, KN_WS_CLOSE_ABNORMAL);
+        CHECK(strncmp(t_reason, "tls:", 4) == 0);
+    } else {
+        int fd = tcp_connect(ntohs(a.sin_port)); /* knsvc without libssl: release the peer thread */
+        if (fd >= 0) close(fd);
+    }
+    pthread_join(th, NULL);
+    close(lfd);
+}
+
 static void test_client_server(void) {
     for (size_t i = 0; i < sizeof big; i++) big[i] = (char)(i * 7);
     kn_ws_callbacks cb = {c_open, c_message, c_close, NULL, c_pong};
@@ -137,7 +191,7 @@ static void test_client_server(void) {
     in_connect = 1;
     CHECK(kn_ws_connect(loop, "ws://127.0.0.1:1/x", &rcb, NULL, NULL) != NULL); /* refused */
     in_connect = 0;
-    CHECK(kn_ws_connect(loop, "wss://127.0.0.1/x", &rcb, NULL, NULL) == NULL);
+    CHECK(kn_ws_connect(loop, "http://127.0.0.1/x", &rcb, NULL, NULL) == NULL);
     CHECK(kn_ws_connect(loop, "not a url", &rcb, NULL, NULL) == NULL);
     kn_timer_id guard = kn_loop_add_timer(loop, 5000, 0, (kn_timer_cb)kn_loop_stop, NULL);
     kn_loop_run(loop);
@@ -426,6 +480,7 @@ int main(int argc, char **argv) {
     }
 
     test_client_server();
+    test_tls_handshake_failure();
 
     pthread_t th;
     pthread_create(&th, NULL, raw_main, NULL);

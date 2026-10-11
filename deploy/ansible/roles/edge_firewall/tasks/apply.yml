@@ -1,0 +1,92 @@
+---
+# edge-firewall-contract v1: safe apply (vendored role, see ../VERSION).
+# Included by main.yml only when a rendered file changed and /etc/nftables.conf
+# is a contract base. Input: edge_firewall_rollback_seconds. Note: the
+# include's `when` is inherited by the meta task below; Ansible ignores it
+# there (warning only).
+#
+#   1. nft -c the whole tree; on failure put the old files back and stop.
+#   2. snapshot the LIVE ruleset to /etc/nftables.rollback.nft.
+#   3. arm a transient timer that restores ruleset + files after N seconds.
+#   4. enable + reload nftables.service.
+#   5. drop the multiplexed SSH socket and log in again on a fresh connection.
+#   6. disarm the timer. If step 5 fails the play fails and the timer rolls back.
+
+- name: Check the full ruleset (nft -c)
+  ansible.builtin.command: nft -c -f /etc/nftables.conf
+  register: edge_firewall_check
+  changed_when: false
+  failed_when: false
+
+- name: Rejected ruleset - restore previous files and stop
+  when: edge_firewall_check.rc != 0
+  block:
+    - name: Restore /etc/nftables.conf and drop-ins from the pre-render snapshot
+      ansible.builtin.shell: rm -f /etc/nftables.d/*.nft && tar -C / -xpzf /etc/nftables.rollback.tgz
+      changed_when: true
+    - name: Fail loudly
+      ansible.builtin.fail:
+        msg: "nft -c rejected the new ruleset (files restored, live ruleset untouched): {{ edge_firewall_check.stderr }}"
+
+- name: Snapshot the live ruleset for rollback
+  ansible.builtin.shell: |
+    set -e
+    { echo 'flush ruleset'; nft list ruleset; } > /etc/nftables.rollback.nft.tmp
+    nft -c -f /etc/nftables.rollback.nft.tmp
+    mv /etc/nftables.rollback.nft.tmp /etc/nftables.rollback.nft
+    chmod 0600 /etc/nftables.rollback.nft
+  changed_when: true
+
+# systemd module can't reset-failed or ignore a unit that doesn't exist.
+- name: Clear any leftover rollback unit  # noqa: command-instead-of-module
+  ansible.builtin.shell: |
+    systemctl stop edge-firewall-rollback.timer edge-firewall-rollback.service 2>/dev/null
+    systemctl reset-failed edge-firewall-rollback.timer edge-firewall-rollback.service 2>/dev/null
+    true
+  changed_when: false
+
+- name: Arm the rollback timer, seconds = {{ edge_firewall_rollback_seconds }}
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --unit=edge-firewall-rollback
+      - --description=edge firewall rollback (armed by Ansible)
+      - "--on-active={{ edge_firewall_rollback_seconds }}"
+      - /bin/sh
+      - -c
+      - nft -f /etc/nftables.rollback.nft; rm -f /etc/nftables.d/*.nft; tar -C / -xpzf /etc/nftables.rollback.tgz
+  changed_when: true
+
+- name: Enable nftables.service
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+
+# `reloaded` starts the unit when it is inactive (fresh hosts).
+- name: Load the new ruleset
+  ansible.builtin.systemd:
+    name: nftables
+    state: reloaded
+
+- name: Drop the multiplexed SSH connection
+  ansible.builtin.meta: reset_connection
+
+- name: Log in again on a fresh SSH connection (rollback fires if this fails)
+  ansible.builtin.wait_for_connection:
+    delay: 2
+    timeout: "{{ (edge_firewall_rollback_seconds | int) - 45 }}"
+
+- name: Confirm the contract sets are live
+  ansible.builtin.command: nft list set inet filter tcp_accept
+  changed_when: false
+
+- name: Disarm the rollback timer
+  ansible.builtin.shell: |
+    set -e
+    if ! systemctl is-active --quiet edge-firewall-rollback.timer; then
+      echo "rollback timer is gone: it already fired (or never armed); the old ruleset is back" >&2
+      exit 1
+    fi
+    systemctl stop edge-firewall-rollback.timer
+    systemctl reset-failed edge-firewall-rollback.timer edge-firewall-rollback.service 2>/dev/null || true
+  changed_when: true

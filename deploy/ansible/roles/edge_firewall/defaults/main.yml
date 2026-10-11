@@ -1,0 +1,22 @@
+---
+# edge-firewall-contract v1 (vendored role, see ../VERSION). Each repo sets these
+# from its own inventory or wrapper role; nothing repo-specific lives here.
+
+# Off = the role does nothing on the host.
+edge_firewall_manage: true
+# Render the base /etc/nftables.conf. Exactly ONE repo sets this per host.
+edge_firewall_own_base: false
+# Shown in the base's "# Owner:" line (required when edge_firewall_own_base).
+edge_firewall_owner: ""
+edge_firewall_ssh_port: 22
+# Seconds before the armed rollback restores the previous ruleset + files.
+edge_firewall_rollback_seconds: 120
+# This repo's drop-ins, rendered to /etc/nftables.d/<priority>-<name>.nft:
+#   - name: abulxt          # [a-z0-9-]
+#     priority: 50          # 10..99, orders the include glob
+#     source: "..."         # optional: where the inputs live (header line)
+#     comment: ["..."]      # optional extra "# " header lines
+#     tcp: [80, 443]        # ports or "first-last" ranges; empty = no line
+#     udp: ["21015-21017"]
+# Ports must not overlap between drop-ins (nft 0.9.8 rejects duplicates).
+edge_firewall_dropins: []

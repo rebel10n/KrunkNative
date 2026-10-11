@@ -36,6 +36,9 @@ void client_settings_fullscreen_size(int *w, int *h);    // "Resolution" for exc
 void  ui_client_settings_dom_init(void);                  // menu_dom_init: Exit button, custom CSS, auto spectate, timers
 int   ui_client_settings_tab(void);                       // settings tab index of "Client"; -1 when not shown
 char *ui_client_settings_head(const char *head, int active_tab); // the settings head with the Client tab added (malloc'd)
-char *ui_client_settings_tab_html(int searching);         // the tab body (malloc'd); searching: rows for windows[0].searchList
+char *ui_client_settings_tab_html(int searching);
+// A game settings tab with the client's rows added (the Sound tab's Audio Output); NULL =
+// unchanged (malloc'd otherwise).
+char *ui_client_settings_extend_tab(const char *tab);         // the tab body (malloc'd); searching: rows for windows[0].searchList
 // Inline handlers: clientExitPopup(), closeClient(), knClientSet(key, value), knClientAction(name).
 int   ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

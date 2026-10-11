@@ -34,6 +34,9 @@ int headless_enabled(void) {
 #define EGL_NO_X11 // no Xlib types in eglplatform.h: headless never touches X
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#ifdef KRUNKNATIVE_GL_ANGLE
+#include <EGL/eglext_angle.h>
+#endif
 
 #define HEADLESS_MAX_DEVICES 16
 
@@ -54,9 +57,11 @@ static struct {
     int width, height;
 } g_egl = {EGL_NO_DISPLAY, NULL, EGL_NO_CONTEXT, EGL_NO_SURFACE, NULL, 0, 0};
 
+static PFNEGLGETPLATFORMDISPLAYEXTPROC p_eglGetPlatformDisplayEXT;
+
+#ifndef KRUNKNATIVE_GL_ANGLE // desktop GL: EGL device enumeration (KRUNKNATIVE_EGL_DEVICE)
 static PFNEGLQUERYDEVICESEXTPROC p_eglQueryDevicesEXT;
 static PFNEGLQUERYDEVICESTRINGEXTPROC p_eglQueryDeviceStringEXT;
-static PFNEGLGETPLATFORMDISPLAYEXTPROC p_eglGetPlatformDisplayEXT;
 
 static int has_extension(const char *list, const char *name) {
     const size_t length = strlen(name);
@@ -187,6 +192,121 @@ static int open_display(void) {
     fprintf(stderr, "[headless] no EGL device matches KRUNKNATIVE_EGL_DEVICE=%s (%d enumerated)\n", want[0] ? want : "(default)", count);
     return 0;
 }
+#endif // !KRUNKNATIVE_GL_ANGLE
+
+#ifdef KRUNKNATIVE_GL_ANGLE
+// ANGLE backends (KRUNKNATIVE_GL_BACKEND=angle, gl.h KN_GLES). KRUNKNATIVE_ANGLE_BACKEND=<name>
+// forces one; otherwise the platform's list is tried in order and the first whose EGL display
+// initializes wins: macOS Metal, then ANGLE's OpenGL (CGL) backend, which also runs where no
+// Metal device exists (VMs: Apple's software renderer); Linux Vulkan, then OpenGL. SwiftShader
+// (CPU Vulkan, only in ANGLE builds with --swiftshader) is the last resort and headless only:
+// GLFW cannot ask for it. ANGLE_PREFERRED_DEVICE=nvidia|amd|intel picks ANGLE's Vulkan GPU.
+typedef struct {
+    const char *name;
+    EGLint type;        // EGL_PLATFORM_ANGLE_TYPE_ANGLE
+    EGLint device_type; // EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE, 0 = ANGLE's default (hardware)
+    int glfw_type;      // GLFW_ANGLE_PLATFORM_TYPE for windows, 0 = headless only
+} AngleBackend;
+
+static const AngleBackend ANGLE_BACKENDS[] = {
+#ifdef __APPLE__
+    {"metal", EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE, 0, GLFW_ANGLE_PLATFORM_TYPE_METAL},
+    {"opengl", EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, GLFW_ANGLE_PLATFORM_TYPE_OPENGL},
+    {"vulkan", EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE, 0, 0}, // forced only (MoltenVK-less builds fail)
+#else
+    {"vulkan", EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE, 0, GLFW_ANGLE_PLATFORM_TYPE_VULKAN},
+    {"opengl", EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, 0, GLFW_ANGLE_PLATFORM_TYPE_OPENGL},
+    {"opengles", EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE, 0, GLFW_ANGLE_PLATFORM_TYPE_OPENGLES},
+#endif
+    {"swiftshader", EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE, EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE, 0},
+};
+#define ANGLE_BACKEND_COUNT ((int) (sizeof(ANGLE_BACKENDS) / sizeof(ANGLE_BACKENDS[0])))
+
+static const AngleBackend *g_angle_backend; // the one that initialized (logged, kept for headless)
+
+// Default order: every backend except the forced-only ones (vulkan on Apple).
+static int angle_backend_default(const AngleBackend *b) {
+#ifdef __APPLE__
+    if (!strcmp(b->name, "vulkan")) return 0;
+#endif
+    return 1;
+}
+
+// Opens + initializes an ANGLE display for `b` (EGL_NO_DISPLAY + *error on failure). Headless
+// Linux displays are surfaceless (no X11/Wayland connection); windows use the default native
+// display, as GLFW does.
+static EGLDisplay angle_open(const AngleBackend *b, const int headless, EGLint *error) {
+    *error = EGL_SUCCESS;
+    if (!p_eglGetPlatformDisplayEXT) {
+        p_eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC) eglGetProcAddress("eglGetPlatformDisplayEXT");
+        if (!p_eglGetPlatformDisplayEXT) return EGL_NO_DISPLAY;
+    }
+    EGLint attribs[8];
+    int n = 0;
+    attribs[n++] = EGL_PLATFORM_ANGLE_TYPE_ANGLE;
+    attribs[n++] = b->type;
+    if (b->device_type) {
+        attribs[n++] = EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE;
+        attribs[n++] = b->device_type;
+    }
+#ifndef __APPLE__
+    if (headless) {
+        attribs[n++] = EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE;
+        attribs[n++] = EGL_PLATFORM_SURFACELESS_MESA;
+    }
+#else
+    (void) headless;
+#endif
+    attribs[n] = EGL_NONE;
+    EGLDisplay display = p_eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE, NULL /* EGL_DEFAULT_DISPLAY, an int on Apple */, attribs);
+    if (display == EGL_NO_DISPLAY || !eglInitialize(display, NULL, NULL)) {
+        *error = eglGetError();
+        return EGL_NO_DISPLAY;
+    }
+    return display;
+}
+
+// Picks the first ANGLE backend that initializes (see ANGLE_BACKENDS). `headless` = 0 skips the
+// headless-only ones (GLFW then opens its own display on the winner); 1 keeps it in g_egl.
+static int angle_select_backend(const int headless) {
+    const char *want = getenv("KRUNKNATIVE_ANGLE_BACKEND");
+    if (want && !*want) want = NULL;
+    int matched = 0;
+    for (int i = 0; i < ANGLE_BACKEND_COUNT; i++) {
+        const AngleBackend *b = &ANGLE_BACKENDS[i];
+        if (want ? strcmp(want, b->name) != 0 : !angle_backend_default(b)) continue;
+        matched = 1;
+        if (!headless && !b->glfw_type) {
+            if (want) fprintf(stderr, "[gl] ANGLE backend %s is headless-only (GLFW cannot create it); use KRUNKNATIVE_HEADLESS=1\n", b->name);
+            continue;
+        }
+        EGLint error;
+        const EGLDisplay display = angle_open(b, headless, &error);
+        if (display == EGL_NO_DISPLAY) {
+            char code[32] = ""; // ANGLE leaves EGL_SUCCESS when a backend has no device (Metal in a VM)
+            if (error != EGL_SUCCESS) snprintf(code, sizeof(code), " (EGL error 0x%x)", error);
+            fprintf(stderr, "[gl] ANGLE %s backend unavailable%s%s\n", b->name, code,
+                    !strcmp(b->name, "metal") ? ": no Metal device, or an ANGLE build without Metal" : "");
+            continue;
+        }
+        g_angle_backend = b;
+        fprintf(stderr, "[gl] ANGLE backend: %s (%s)\n", b->name, eglQueryString(display, EGL_VERSION));
+        // Windows: GLFW opens its own display on this backend. The probe display stays
+        // initialized: ANGLE keeps displays for the process lifetime anyway, and terminating
+        // its OpenGL-backend display broke GLFW's XOpenDisplay right after (Linux/X11).
+        if (headless) g_egl.display = display;
+        return 1;
+    }
+    if (want && !matched) {
+        fprintf(stderr, "[gl] KRUNKNATIVE_ANGLE_BACKEND=%s: unknown; expected one of", want);
+        for (int i = 0; i < ANGLE_BACKEND_COUNT; i++) fprintf(stderr, " %s", ANGLE_BACKENDS[i].name);
+        fprintf(stderr, "\n");
+    } else {
+        fprintf(stderr, "[gl] no ANGLE backend initialized: nothing to render with (KRUNKNATIVE_ANGLE_BACKEND to force one)\n");
+    }
+    return 0;
+}
+#endif
 
 static EGLSurface create_pbuffer(const int width, const int height) {
     const EGLint attribs[] = {EGL_WIDTH, width > 0 ? width : 1, EGL_HEIGHT, height > 0 ? height : 1, EGL_NONE};
@@ -194,17 +314,39 @@ static EGLSurface create_pbuffer(const int width, const int height) {
 }
 
 static int create_context(const int width, const int height) {
+#ifdef KRUNKNATIVE_GL_ANGLE
+    // OpenGL ES 3.0 on ANGLE (gl.h KN_GLES), same as the windowed GLFW context.
+    if (!angle_select_backend(1)) return 0;
+    const EGLenum api = EGL_OPENGL_ES_API;
+    const EGLint renderable = EGL_OPENGL_ES3_BIT;
+    const char *api_name = "OpenGL ES 3.0";
+    const EGLint context_attribs[] = {
+        EGL_CONTEXT_MAJOR_VERSION, 3,
+        EGL_CONTEXT_MINOR_VERSION, 0,
+        EGL_NONE,
+    };
+#else
     if (!open_display()) return 0;
+    const EGLenum api = EGL_OPENGL_API;
+    const EGLint renderable = EGL_OPENGL_BIT;
+    const char *api_name = "OpenGL 4.5 core";
+    const EGLint context_attribs[] = {
+        EGL_CONTEXT_MAJOR_VERSION, 4,
+        EGL_CONTEXT_MINOR_VERSION, 5,
+        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        EGL_NONE,
+    };
+#endif
 
-    if (!eglBindAPI(EGL_OPENGL_API)) {
-        fprintf(stderr, "[headless] eglBindAPI(EGL_OPENGL_API) failed (0x%x)\n", eglGetError());
+    if (!eglBindAPI(api)) {
+        fprintf(stderr, "[headless] eglBindAPI(%s) failed (0x%x)\n", api_name, eglGetError());
         return 0;
     }
 
     // What GLFW asks a window system for by default: RGBA8, depth 24, stencil 8, no MSAA.
     const EGLint config_attribs[] = {
         EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+        EGL_RENDERABLE_TYPE, renderable,
         EGL_COLOR_BUFFER_TYPE, EGL_RGB_BUFFER,
         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
         EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
@@ -212,19 +354,13 @@ static int create_context(const int width, const int height) {
     };
     EGLint config_count = 0;
     if (!eglChooseConfig(g_egl.display, config_attribs, &g_egl.config, 1, &config_count) || config_count < 1) {
-        fprintf(stderr, "[headless] no RGBA8/D24S8 pbuffer EGLConfig with desktop OpenGL\n");
+        fprintf(stderr, "[headless] no RGBA8/D24S8 pbuffer EGLConfig with %s\n", api_name);
         return 0;
     }
 
-    const EGLint context_attribs[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 4,
-        EGL_CONTEXT_MINOR_VERSION, 5,
-        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-        EGL_NONE,
-    };
     g_egl.context = eglCreateContext(g_egl.display, g_egl.config, EGL_NO_CONTEXT, context_attribs);
     if (g_egl.context == EGL_NO_CONTEXT) {
-        fprintf(stderr, "[headless] eglCreateContext (OpenGL 4.5 core) failed (0x%x)\n", eglGetError());
+        fprintf(stderr, "[headless] eglCreateContext (%s) failed (0x%x)\n", api_name, eglGetError());
         return 0;
     }
 
@@ -252,7 +388,20 @@ static int create_context(const int width, const int height) {
 
 int headless_glfw_init(void) {
     if (g_headless) glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_NULL);
-    return glfwInit();
+#ifdef KRUNKNATIVE_GL_ANGLE
+    // Windows: probe the ANGLE backend now (Metal on macOS, falling back to ANGLE's OpenGL)
+    // and hand it to GLFW, which creates the EGL context on it. Headless picks its own in
+    // create_context (it may also fall back to SwiftShader).
+    if (!g_headless) {
+        if (!angle_select_backend(0)) return 0;
+        glfwInitHint(GLFW_ANGLE_PLATFORM_TYPE, g_angle_backend->glfw_type);
+    }
+#endif
+    if (glfwInit()) return 1;
+    const char *reason = NULL;
+    glfwGetError(&reason);
+    fprintf(stderr, "glfwInit failed: %s\n", reason ? reason : "unknown error");
+    return 0;
 }
 
 void headless_window_hints(void) {
@@ -336,11 +485,11 @@ void headless_shutdown(void) {
     g_egl.window = NULL;
 }
 
-#else // no EGL (web, macOS, Windows, or Linux without libEGL): GLFW only
+#else // no EGL (web, macOS/Windows desktop GL, or Linux without libEGL): GLFW only
 
 int headless_glfw_init(void) {
     if (g_headless) {
-        fprintf(stderr, "[headless] KRUNKNATIVE_HEADLESS needs a Linux build with EGL (KRUNKNATIVE_HEADLESS_EGL)\n");
+        fprintf(stderr, "[headless] KRUNKNATIVE_HEADLESS needs EGL: a Linux build with libEGL or an ANGLE build (KRUNKNATIVE_HEADLESS_EGL)\n");
         return 0;
     }
     return glfwInit();

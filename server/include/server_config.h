@@ -87,7 +87,7 @@ typedef struct {
     unsigned short rcon_port;            // local rcon TCP port, 0 = off
     unsigned short query_port;           // UDP server-info query port, 0 = the game port
     int online_mode;                     // 1: every player verified by the central auth service (hasJoined)
-    char auth_url[GS_STR_LARGE];         // central auth base (https://coordinator.krunker.party)
+    char auth_url[GS_STR_LARGE];         // central auth base (https://coordinator.krunk.io)
     char finder_url[GS_STR_LARGE];       // server finder base, "" = not listed (opt-in heartbeat)
     char community[GS_STR_SMALL];        // community / network name shown in server lists
     char tags[GS_STR_SMALL * 2];         // extra comma-separated info-query tags

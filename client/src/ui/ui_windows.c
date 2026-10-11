@@ -320,7 +320,10 @@ static char *gen_settings(void) {
         sb_append(&out, client);
         free(client);
     } else {
-        sb_append(&out, ui_settings_tab_html(ui->settings_tab));
+        // the Sound tab gains the client's Audio Output row (ui_client_settings.c)
+        char *tab = ui_client_settings_extend_tab(ui_settings_tab_html(ui->settings_tab));
+        sb_append(&out, tab ? tab : ui_settings_tab_html(ui->settings_tab));
+        free(tab);
     }
     sb_append(&out, "</div>");
     return sb_finish(&out);

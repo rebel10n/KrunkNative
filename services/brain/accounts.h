@@ -1,7 +1,7 @@
 /*
  * services/brain/accounts.h - accounts, sessions, profiles and stats of the
  * brain (Krunker v3.1.1 server/accounts.ts + the account dbOps of
- * matchmaker/dbBroker.ts), on PostgreSQL (services/db/migrations/01xx_*.sql).
+ * matchmaker/dbBroker.ts), on any store driver (services/db/migrations/<dialect>/01xx_*.sql).
  *
  * Two entry points:
  *   - the social WebSocket (social_ws.h) for clients (login/register/...),

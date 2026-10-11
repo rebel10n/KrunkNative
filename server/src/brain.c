@@ -14,6 +14,11 @@
 
 #define BRAIN_RECONNECT_MIN_MS 1000   // brainClient.ts RECONNECT_MIN_MS
 #define BRAIN_RECONNECT_MAX_MS 30000  // RECONNECT_MAX_MS
+// WebSocket-level keepalive on top of the brain's JSON pings (brain.ping_interval_s, 10 s):
+// keeps proxies (Cloudflare drops idle websockets after 100 s) from idling the link out and
+// detects half-open links when the coordinator vanishes without a FIN.
+#define BRAIN_WS_PING_MS 25000
+#define BRAIN_WS_PONG_TIMEOUT_MS 60000
 #define BRAIN_EVENT_MAX 1024
 #define BRAIN_RELIABLE_MAX 512
 
@@ -41,6 +46,7 @@ static struct {
 
     char url[GS_STR_LARGE];
     char auth_header[GS_STR_LARGE];
+    char origin[GS_STR_LARGE];     // https://<coordinator host> (wss) / http://... (ws)
     char join_secret[GS_STR_SMALL * 2];
     char *hello;                   // hello frame text (sent on every open)
 
@@ -122,7 +128,6 @@ static void brain_on_open(kn_ws *ws, void *ud) {
     (void) ws;
     (void) ud;
     g_brain.connected = 1;
-    g_brain.reconnect_ms = BRAIN_RECONNECT_MIN_MS;
     server_log("[brain] connected to %s", g_brain.url);
     if (g_brain.hello) brain_send_text(g_brain.hello);
 }
@@ -154,6 +159,7 @@ static void brain_on_message(kn_ws *ws, const void *data, const size_t len, cons
     if (!strcmp(t, "welcome")) {
         g_brain.welcomed = 1;
         g_brain.linked = 1;
+        g_brain.reconnect_ms = BRAIN_RECONNECT_MIN_MS; // only a welcomed link resets the backoff
         const cJSON *region = cJSON_GetObjectItemCaseSensitive(frame, "assignedRegion");
         server_log("[brain] welcomed (region=%s); pushing snapshot", cJSON_IsString(region) ? region->valuestring : "?");
         brain_resend_reliable(); // commits that were in flight when the last link dropped
@@ -182,7 +188,10 @@ static void brain_reconnect_cb(kn_loop *loop, void *ud) {
 
 static void brain_schedule_reconnect(void) {
     if (g_brain.stopping || g_brain.reconnect_timer) return;
-    const uint64_t delay = g_brain.reconnect_ms;
+    // +-20% jitter: a coordinator restart must not get every game server back in the same millisecond
+    uint8_t rnd = 0;
+    kn_random_bytes(&rnd, 1);
+    const uint64_t delay = g_brain.reconnect_ms * (80u + (uint64_t) rnd % 41u) / 100u;
     g_brain.reconnect_ms = g_brain.reconnect_ms * 2 > BRAIN_RECONNECT_MAX_MS ? BRAIN_RECONNECT_MAX_MS : g_brain.reconnect_ms * 2;
     g_brain.reconnect_timer = kn_loop_add_timer(g_brain.loop, delay, 0, brain_reconnect_cb, NULL);
 }
@@ -213,8 +222,11 @@ static void brain_connect(void) {
     const kn_ws_options options = {
         .max_message_bytes = 4u << 20,
         .handshake_timeout_ms = 10000,
+        .ping_interval_ms = BRAIN_WS_PING_MS,
+        .pong_timeout_ms = BRAIN_WS_PONG_TIMEOUT_MS,
         .headers = headers,
         .header_count = g_brain.auth_header[0] ? 1 : 0,
+        .origin = g_brain.origin[0] ? g_brain.origin : NULL,
     };
     g_brain.ws = kn_ws_connect(g_brain.loop, g_brain.url, &callbacks, &options, NULL);
     if (!g_brain.ws) {
@@ -300,6 +312,12 @@ int brain_start(const GsConfig *cfg) {
     if (cfg->brain_secret[0]) snprintf(g_brain.auth_header, sizeof(g_brain.auth_header), "Authorization: Bearer %s", cfg->brain_secret);
     snprintf(g_brain.join_secret, sizeof(g_brain.join_secret), "%s", cfg->join_secret[0] ? cfg->join_secret : cfg->brain_secret);
     g_brain.reconnect_ms = BRAIN_RECONNECT_MIN_MS;
+    // Origin for proxies in front of the coordinator (wss://coordinator.krunk.io via Cloudflare)
+    const int tls = !strncmp(g_brain.url, "wss://", 6);
+    if (tls || !strncmp(g_brain.url, "ws://", 5)) {
+        const char *host = g_brain.url + (tls ? 6 : 5);
+        snprintf(g_brain.origin, sizeof(g_brain.origin), "%s://%.*s", tls ? "https" : "http", (int) strcspn(host, "/?#"), host);
+    }
 
     g_brain.loop = kn_loop_new();
     if (!g_brain.loop) {
@@ -381,6 +399,7 @@ void brain_stop(const int wait_ms) {
 // The result arrives on the main thread as a BRAIN_EV_FRAME
 // {"type":"map-data","rid":n,"ok":bool,"map":{...},"err":"..."}.
 
+#include <http_client.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -498,18 +517,65 @@ void brain_set_http_base(const GsConfig *cfg) {
         snprintf(g_http_base, sizeof(g_http_base), "%s", cfg->brain_http_url);
         return;
     }
-    // ws://host:port/mm/internal/ws -> http://host:port
+    // ws://host:port/mm/internal/ws -> http://host:port, wss://host/... -> https://host
     const char *url = cfg->brain_url;
-    const char *rest = !strncmp(url, "ws://", 5) ? url + 5 : !strncmp(url, "wss://", 6) ? url + 6 : url;
+    const int tls = !strncmp(url, "wss://", 6);
+    const char *rest = !strncmp(url, "ws://", 5) ? url + 5 : tls ? url + 6 : url;
     const size_t host_len = strcspn(rest, "/");
-    snprintf(g_http_base, sizeof(g_http_base), "http://%.*s", (int) host_len, rest);
+    snprintf(g_http_base, sizeof(g_http_base), "%s://%.*s", tls ? "https" : "http", (int) host_len, rest);
+}
+
+// https:// base: the blocking http_client (libcurl) on a worker thread instead.
+typedef struct {
+    uint32_t rid;
+    char url[GS_STR_LARGE + 320];
+} BrainFetchHttps;
+
+static void *brain_fetch_https_thread(void *arg) {
+    BrainFetchHttps *f = arg;
+    HttpResult res;
+    cJSON *map = NULL;
+    const char *err = NULL;
+    if (http_request("GET", f->url, NULL, NULL, 10000, BRAIN_MAP_FETCH_MAX, &res) != 0) err = res.error[0] ? res.error : "cannot reach the brain";
+    else if (res.status == 404) err = "map not found";
+    else if (res.status != 200) err = "map service error";
+    else {
+        map = res.body ? cJSON_Parse(res.body) : NULL;
+        if (!cJSON_IsObject(map) || !cJSON_IsArray(cJSON_GetObjectItem(map, "objects"))) {
+            cJSON_Delete(map);
+            map = NULL;
+            err = "not a Krunker map";
+        }
+    }
+    char err_copy[128];
+    snprintf(err_copy, sizeof(err_copy), "%s", err ? err : "");
+    http_result_free(&res);
+    brain_fetch_done(f->rid, map, err ? err_copy : NULL);
+    free(f);
+    return NULL;
 }
 
 int brain_fetch_map(const uint32_t rid, const char *name) {
     if (!g_brain.enabled || !name || !name[0]) return -1;
+    if (!strncmp(g_http_base, "https://", 8)) {
+        BrainFetchHttps *f = calloc(1, sizeof(*f));
+        if (!f) return -1;
+        f->rid = rid;
+        char encoded[256];
+        brain_url_encode(encoded, sizeof(encoded), name);
+        snprintf(f->url, sizeof(f->url), "%s/api/map-data?name=%s", g_http_base, encoded);
+        server_log("[brain] fetching published map '%s' from %s", name, g_http_base);
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, brain_fetch_https_thread, f)) {
+            free(f);
+            return -1;
+        }
+        pthread_detach(thread);
+        return 0;
+    }
     const char *rest = !strncmp(g_http_base, "http://", 7) ? g_http_base + 7 : NULL;
     if (!rest) {
-        server_log_error("[brain] published maps need an http:// gameserver.brain_http_url (got '%s')", g_http_base);
+        server_log_error("[brain] published maps need an http(s):// gameserver.brain_http_url (got '%s')", g_http_base);
         return -1;
     }
     BrainFetch *f = calloc(1, sizeof(*f));

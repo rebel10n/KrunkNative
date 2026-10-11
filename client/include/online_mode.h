@@ -3,7 +3,7 @@
 // client/src/net/online_mode.c).
 //
 //   ONLINE   accounts live at the central auth service (default
-//            https://coordinator.krunker.party, which also runs the community
+//            https://coordinator.krunk.io, which also runs the community
 //            coordinator): login / register, inventory and stats are saved. Joining an
 //            online_mode server runs the Mojang-style handshake: the server's
 //            NET_PACKET_AUTH_CHALLENGE -> POST <account service>/auth/join {token,
@@ -20,8 +20,8 @@
 // No client.h / shared.h here: backend_native.c includes this next to OpenSSL, whose
 // `UI` typedef clashes with client.h's. Client / NetAuthChallengePacket are passed as void *.
 
-#define ONLINE_DEFAULT_ACCOUNT_URL "https://coordinator.krunker.party"
-#define ONLINE_DEFAULT_FINDER_URL "https://matchmaker.krunker.party/servers"
+#define ONLINE_DEFAULT_ACCOUNT_URL "https://coordinator.krunk.io"
+#define ONLINE_DEFAULT_FINDER_URL "https://matchmaker.krunk.io/servers"
 
 // Before backend_init(): the CLI values (NULL = not given).
 void online_mode_init(const char *cli_mode, const char *cli_finder);

@@ -4,7 +4,7 @@
  *
  * Nodes are either LOCAL (connected to this brain over the internal WS; the
  * brain is the authority and writes their rows) or REMOTE (owned by another
- * brain; replaced wholesale on every federation refresh from PostgreSQL).
+ * brain; replaced wholesale on every federation refresh from the shared database).
  * Pure in-memory and single threaded; no I/O here (federation.c persists,
  * internal_ws.c feeds it), so it is unit tested on its own.
  */

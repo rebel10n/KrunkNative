@@ -4,7 +4,7 @@ openresty_repo: "https://openresty.org/package/debian"
 openresty_prefix: /usr/local/openresty
 openresty_conf: "{{ openresty_prefix }}/nginx/conf/nginx.conf"
 # Loopback only: nginx owns :80/:443 on the central node; the Cloudflare tunnel
-# (cloudflared ingress krunker.party -> localhost:8081) is the only way in.
+# (cloudflared ingress krunk.io -> localhost:8081) is the only way in.
 openresty_listen:
   - "127.0.0.1:8081"
   - "[::1]:8081"

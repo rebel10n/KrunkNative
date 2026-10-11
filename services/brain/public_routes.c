@@ -486,6 +486,65 @@ static void h_admin_drain(kn_http_req *req, void *ud) {
     cJSON_Delete(o);
 }
 
+/* coord-auth: admin rcon relay. POST /mm/admin/rcon?node=<id> {command} (Bearer
+ * brain.internal_secret) -> internal WS {"type":"rcon","rid","command"} to that game server
+ * -> {"type":"rcon-reply","rid","ok","output"} -> {success, node, output}. Local nodes only
+ * (a node connected to another brain: ask that brain). */
+typedef struct RconReq {
+    kn_http_req *req;
+    char node[MM_ID_MAX];
+} RconReq;
+
+static void on_rcon_reply(void *ud, const cJSON *reply, const char *err) {
+    RconReq *r = ud;
+    if (!reply) {
+        reply_error(r->req, 504, err ? err : "timeout");
+    } else {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddBoolToObject(o, "success", kn_json_bool(reply, "ok", 0));
+        cJSON_AddStringToObject(o, "node", r->node);
+        cJSON_AddStringToObject(o, "output", kn_json_str(reply, "output", ""));
+        brain_reply_json(r->req, 200, o);
+        cJSON_Delete(o);
+    }
+    free(r);
+}
+
+static void h_admin_rcon(kn_http_req *req, void *ud) {
+    Brain *b = ud;
+    const char *bearer = kn_http_bearer(req);
+    if (!bearer || !kn_ct_streq(bearer, mm_settings()->internal_secret)) {
+        reply_error(req, 401, "unauthorized");
+        return;
+    }
+    char node[MM_ID_MAX] = "", command[512] = "";
+    kn_http_query_get(req, "node", node, sizeof(node));
+    cJSON *body = kn_http_body_json(req);
+    snprintf(command, sizeof(command), "%s", kn_json_str(body, "command", ""));
+    if (!node[0]) snprintf(node, sizeof(node), "%s", kn_json_str(body, "node", ""));
+    cJSON_Delete(body);
+    if (!command[0]) kn_http_query_get(req, "command", command, sizeof(command));
+    if (!node[0] || !command[0]) {
+        reply_error(req, 400, "BadRequest");
+        return;
+    }
+    RconReq *r = calloc(1, sizeof(*r));
+    if (!r) {
+        reply_error(req, 503, "NoMemory");
+        return;
+    }
+    r->req = req;
+    snprintf(r->node, sizeof(r->node), "%s", node);
+    cJSON *f = cJSON_CreateObject();
+    cJSON_AddStringToObject(f, "type", "rcon");
+    cJSON_AddStringToObject(f, "command", command);
+    KN_INFO("routes", "admin rcon -> %s: %s", node, command);
+    if (internal_ws_request(b, node, f, 10000, on_rcon_reply, r) != 0) {
+        free(r);
+        reply_error(req, 404, "NodeNotLocal");
+    }
+}
+
 /* index.ts: anything no route matched (the brain has no static site here):
  * 404 {"error":"not_found","path":req.url}, bare JSON content type. */
 static void h_not_found(kn_http_req *req, void *ud) {
@@ -511,6 +570,7 @@ int public_routes_init(Brain *b) {
     route2(b, NULL, "status", h_status);
     route2(b, NULL, "brains", h_brains);
     kn_http_route(b->http, "POST", "/mm/admin/drain", h_admin_drain, b);
+    kn_http_route(b->http, "POST", "/mm/admin/rcon", h_admin_rcon, b);
     kn_http_route(b->http, NULL, "/api/player-count", h_player_count, b);
     kn_http_route(b->http, NULL, "/social/player-count", h_player_count, b);
     kn_http_route(b->http, NULL, "/mm/player-count", h_player_count, b);

@@ -4,13 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
+#if defined(KN_GLES) || defined(__APPLE__)
 // The shader sources on disk are written for `#version 450 core`, restricted to
-// the subset that is also valid GLSL ES 3.00 and GLSL 4.10. WebGL2 only accepts
-// GLSL ES (the mandatory default precisions are injected after the version
-// line); macOS caps core profiles at OpenGL 4.1, so there the version line
-// becomes `410 core`. The returned buffer replaces the original source.
-#ifdef __EMSCRIPTEN__
+// the subset that is also valid GLSL ES 3.00 and GLSL 4.10. OpenGL ES contexts
+// (KN_GLES: WebGL2 and ANGLE, gl.h) only accept GLSL ES (the mandatory default
+// precisions are injected after the version line); macOS's desktop GL fallback
+// (KRUNKNATIVE_GL_BACKEND=desktop) caps core profiles at OpenGL 4.1, so there the
+// version line becomes `410 core`. The returned buffer replaces the original source.
+#ifdef KN_GLES
 static const char es_header[] = "#version 300 es\nprecision highp float; precision highp int; precision highp sampler2D;\n";
 #else
 static const char es_header[] = "#version 410 core\n";
@@ -80,7 +81,7 @@ unsigned int shader_compile(const char *vertex_shader_path, const char *fragment
         read_file(fragment_shader_path, &fragment_shader, &fragment_shader_length)
     ) return 0;
 
-#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
+#if defined(KN_GLES) || defined(__APPLE__)
     vertex_shader = shader_source_for_webgl(vertex_shader);
     fragment_shader = shader_source_for_webgl(fragment_shader);
 #endif

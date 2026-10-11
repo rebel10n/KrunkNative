@@ -6,7 +6,7 @@
  *   - public matchmaker routes /mm/... (+ prefix-less aliases) public_routes.c
  *   - the internal WebSocket for game servers /mm/internal/ws   internal_ws.c
  *   - the social WebSocket + accounts routes                    (svc-accounts)
- * and a PostgreSQL-backed registry shared by every brain       federation.c
+ * and a database-backed registry shared by every brain        federation.c
  *
  * Usage: kn_brain [--config FILE] [--migrate] [--migrate-only] [--no-db]
  *                 [--brain.port=N ...any config override] (doc/backend.md)
@@ -93,7 +93,7 @@ static void usage(const char *argv0) {
     printf("Usage: %s [--config FILE] [--migrate] [--migrate-only] [--no-db] [--<section.key>=VALUE ...]\n"
            "  --migrate        apply pending services/db/migrations before starting\n"
            "  --migrate-only   apply migrations and exit (same as kn_migrate)\n"
-           "  --no-db          run without PostgreSQL (registry is local to this brain)\n"
+           "  --no-db          run without a database (registry is local to this brain)\n"
            "  --role R[,R]     auth, community, finder (brain.roles; default all three)\n"
            "  --brain.port=N   any config key can be overridden like this (or KN_BRAIN_PORT=N)\n"
            "Config: config/config.json (\"brain\" section, doc/backend.md).\n",
@@ -111,8 +111,7 @@ static int run_migrations(const kn_config *cfg) {
     }
     kn_migrate_opts mo = {0};
     char dir[1024];
-    const char *rel = kn_config_str(cfg, "database.migrations_dir", "");
-    if (kn_config_resolve_path(cfg, rel && *rel ? rel : "services/db/migrations", dir, sizeof(dir))) mo.dir = dir;
+    if (kn_migrate_resolve_dir(cfg, dir, sizeof(dir))) mo.dir = dir;
     int n = kn_migrate_run(c, &mo, err, sizeof(err));
     kn_dbconn_close(c);
     if (n < 0) {
@@ -162,6 +161,13 @@ int main(int argc, char **argv) {
     }
     KN_INFO("brain", "kn_brain %s, config %s", KN_BRAIN_VERSION,
             kn_config_path(cfg)[0] ? kn_config_path(cfg) : "(none, defaults)");
+    /* database.auto_migrate (default: on for the zero-config sqlite file) applies
+     * pending migrations at every start, like --migrate (coord-store) */
+    if (!migrate && !no_db) {
+        kn_db_config adc;
+        kn_db_config_from(cfg, &adc);
+        migrate = kn_config_bool(cfg, "database.auto_migrate", adc.driver && !strcmp(adc.driver, "sqlite"));
+    }
     if ((migrate || migrate_only) && !no_db) {
         if (run_migrations(cfg)) {
             kn_config_free(cfg);

@@ -478,7 +478,15 @@ int main(int argc, char **argv) {
     // px); render_target.c then scales the scene by `resolution` on top of it.
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
     web_canvas_size(&window_width, &window_height);
+#elif defined(KRUNKNATIVE_GL_ANGLE)
+    // OpenGL ES 3.0 on ANGLE (gl.h KN_GLES; the macOS default, rendering through Metal):
+    // GLFW's EGL backend on the ANGLE display headless_glfw_init picked (GLFW_ANGLE_PLATFORM_TYPE).
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+    glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 #elif defined(__APPLE__)
+    // KRUNKNATIVE_GL_BACKEND=desktop on macOS (fallback to Apple's deprecated OpenGL):
     // macOS only offers forward-compatible core profiles up to 4.1; shader.c
     // rewrites the shaders' `#version 450 core` line to `410 core` there.
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -502,7 +510,14 @@ int main(int argc, char **argv) {
 
     headless_window_hints(); // headless: no GLFW context (headless_make_context_current creates it)
     INSTANCE.window = glfwCreateWindow(window_width, window_height, "KrunkNative", NULL, NULL);
-    if (!INSTANCE.window) return -1;
+    if (!INSTANCE.window) {
+        const char *reason = NULL;
+#ifndef __EMSCRIPTEN__ // emscripten's GLFW port has no glfwGetError
+        glfwGetError(&reason);
+#endif
+        fprintf(stderr, "glfwCreateWindow failed: %s\n", reason ? reason : "unknown error");
+        return -1;
+    }
 
 #ifndef __EMSCRIPTEN__ // browsers have no window icon
     GLFWimage icon = {0};
@@ -538,7 +553,8 @@ int main(int argc, char **argv) {
 
 #ifndef __EMSCRIPTEN__
     // On the web GL functions are provided by the WebGL binding, no loader needed.
-    if (!gladLoadGLLoader(headless_get_proc_address)) return -1;
+    if (!kn_gl_load(headless_get_proc_address)) return -1;
+    fprintf(stderr, "[gl] GL_RENDERER %s | GL_VERSION %s\n", (const char *) glGetString(GL_RENDERER), (const char *) glGetString(GL_VERSION));
 
     // emscripten's glfwSwapInterval(0) would switch the main loop from
     // requestAnimationFrame to setTimeout(0); keep vsync-paced frames there.
@@ -1140,6 +1156,7 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
             html_ui_key(key, scancode, action, mods);
             return;
         }
+        if (hud_ui_end_screen_up()) return; // the end screen keeps precedence (e.g. Escape blurring the chat)
         client_set_menu_open(client, !html_ui_is_menu_open());
         return;
     }

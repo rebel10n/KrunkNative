@@ -1,0 +1,49 @@
+#!/usr/sbin/nft -f
+# edge-firewall-contract v1 -- base ruleset, loaded by nftables.service.
+# Owner: {{ edge_firewall_owner }}. Managed by Ansible; local edits are overwritten.
+#
+# Rendered by the vendored edge_firewall role, shipped byte-identical in abulxt
+# and KrunkNative at deploy/ansible/roles/edge_firewall (VERSION and
+# check-vendored.sh there). Exactly ONE repo renders this base
+# (edge_firewall_own_base). Every repo, base owner included, opens its ports in
+# its own drop-in, /etc/nftables.d/<priority>-<name>.nft, which only adds
+# elements to tcp_accept / udp_accept (or adds its own chain +
+# `add rule inet filter input jump ...`).
+# Port sets must not overlap between drop-ins: nft 0.9.8 rejects duplicate
+# interval elements. Never write `{ }` (empty sets are a syntax error).
+flush ruleset
+
+table inet filter {
+	set tcp_accept {
+		type inet_service
+		flags interval
+		auto-merge
+	}
+
+	set udp_accept {
+		type inet_service
+		flags interval
+		auto-merge
+	}
+
+	chain input {
+		type filter hook input priority 0; policy drop;
+		iifname "lo" accept
+		ct state established,related accept
+		meta l4proto icmp accept
+		meta l4proto ipv6-icmp accept
+		tcp dport {{ edge_firewall_ssh_port }} accept
+		tcp dport @tcp_accept accept
+		udp dport @udp_accept accept
+	}
+
+	chain forward {
+		type filter hook forward priority 0; policy drop;
+	}
+
+	chain output {
+		type filter hook output priority 0; policy accept;
+	}
+}
+
+include "/etc/nftables.d/*.nft"

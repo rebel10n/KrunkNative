@@ -58,7 +58,11 @@ int http_request(const char *method, const char *url, const char *content_type, 
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long) timeout_ms);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, (long) timeout_ms);
+#if LIBCURL_VERSION_NUM >= 0x075500 // 7.85: CURLOPT_PROTOCOLS_STR (Debian 11 ships 7.74)
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, (long) (CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_curl_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
     if (body) curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);

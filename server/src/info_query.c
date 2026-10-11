@@ -50,7 +50,7 @@ static void iq_add_tag(ServerInfo *info, const char *tag) {
 
 void info_query_update(const float now) {
     if (now < g_iq.next_update && g_iq.next_update - now < 2.0f) return;
-    g_iq.next_update = now + 1.0f;
+    g_iq.next_update = now + 0.25f;
     const GsConfig *cfg = &g_gs_config;
     const Game *game = &g_server->game;
     ServerInfo info;

@@ -2,6 +2,7 @@
 #include <server_accounts.h>
 #include <server_config.h>
 #include <brain.h>
+#include <map_catalog.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -156,10 +157,30 @@ static const char *cli_class_name(const int class_index) {
     return game->classes[class_index].name ? game->classes[class_index].name : "?";
 }
 
+// A rotation index, else a catalogue map by name (map_catalog_resolve: quotes, case,
+// spaces/underscores, unique prefix) joined to the game's list like the chat /map command
+// (map_catalog_slot; the rotation leaves out Shipyard and Soul Sanctum), else a list map by
+// name (custom_map_dirs). -1 = none, -2 = ambiguous (the candidates were logged).
 static int cli_find_map(const char *query) {
     long index;
     if (cli_parse_int(query, &index)) {
         return index >= 0 && (size_t) index < g_server->game.map_count ? (int) index : -1;
+    }
+
+    int cands[64];
+    size_t cand_n = 0;
+    const int entry = map_catalog_resolve(query, cands, sizeof(cands) / sizeof(cands[0]), &cand_n);
+    if (entry == -2) {
+        server_log("Map '%s' is ambiguous (%lu matches):", query, (unsigned long) cand_n);
+        for (size_t i = 0; i < cand_n && i < sizeof(cands) / sizeof(cands[0]); i++) {
+            const MapCatalogEntry *e = map_catalog_at((size_t) cands[i]);
+            server_log("  %s", e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key);
+        }
+        return -2;
+    }
+    if (entry >= 0) {
+        const int slot = map_catalog_slot(&g_server->game.maps, &g_server->game.map_count, (size_t) entry);
+        if (slot >= 0) return slot;
     }
 
     char wanted[64];
@@ -499,6 +520,10 @@ static void cli_cmd_map(const char *args) {
 
     const int index = cli_find_map(args);
 
+    if (index == -2) {
+        pthread_mutex_unlock(&g_server->lock);
+        return;
+    }
     if (index < 0) {
         server_log("No unique map matches '%s'. Type 'map' to list them.", args);
         pthread_mutex_unlock(&g_server->lock);
@@ -878,9 +903,26 @@ void cli_main() {
     cli_thread_main(NULL);
 }
 
+// Headless (stdin not a terminal: a pipe, a FIFO, docker attach, systemd): read plain
+// command lines like srcds. EOF only ends the reader (systemd's /dev/null is EOF at once).
+// Detached: a blocking fgets must not hold up shutdown.
+static void *cli_stdin_main(void *arg) {
+    (void) arg;
+    char line[512];
+    while (!g_server->should_quit && fgets(line, sizeof(line), stdin)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!g_server->should_quit) cli_execute(line);
+    }
+    return NULL;
+}
+
 int cli_start(const int interactive) {
     g_cli_interactive = interactive && g_replxx;
-    if (!g_cli_interactive) return 0;
+    if (!g_cli_interactive) {
+        pthread_t reader;
+        if (!getenv("KN_NO_STDIN_CONSOLE") && !pthread_create(&reader, NULL, cli_stdin_main, NULL)) pthread_detach(reader);
+        return 0;
+    }
 
     replxx_set_completion_callback(g_replxx, cli_complete, NULL);
     replxx_set_ignore_case(g_replxx, 1);

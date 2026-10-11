@@ -353,8 +353,8 @@ void scene_render(const Scene *scene, Camera *camera) {
         gl_uniform_mat4(&u_camera_projection, program, GL_TRUE, camera->projection_matrix);
         gl_uniform_3f(&u_camera_position, program, camera->position.x, camera->position.y, camera->position.z); // Phong view vector
 
-#ifndef __EMSCRIPTEN__
-        // OpenGL ES / WebGL2 has no glPolygonMode; wireframe materials render filled on the web.
+#ifndef KN_GLES
+        // OpenGL ES (WebGL2, ANGLE) has no glPolygonMode; wireframe materials render filled there.
         if (mesh->material->wireframe) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         } else {

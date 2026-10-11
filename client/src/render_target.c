@@ -234,7 +234,7 @@ void render_target_end(Client *client) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
-#ifndef __EMSCRIPTEN__
+#ifndef KN_GLES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
 

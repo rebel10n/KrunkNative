@@ -48,6 +48,16 @@ int map_catalog_index_of_key(const char *key);       // exact key (case-sensitiv
 // exact key. Returns the catalogue index, -1 = no match.
 int map_catalog_find(const char *query);
 
+// Console lookup (client dev console `map`, server_bin `map`/`changelevel`); not a v3.1.1
+// port. Surrounding quotes and whitespace are stripped and names compare case-insensitively
+// on their letters and digits only, so "Soul Sanctum", "soul_sanctum" and "soulsanctum" are
+// equal. Order: an exact key, an exact official name, an exact community name, then a unique
+// prefix of the label /maps shows (official name, community key). Numbers are not indices
+// here (callers own their list's numbering). Returns the catalogue index, -1 = no match,
+// -2 = ambiguous: the matching catalogue indices go to `candidates` (up to `max`) and their
+// total to `*candidate_count`. `candidates` / `candidate_count` may be NULL.
+int map_catalog_resolve(const char *query, int *candidates, size_t max, size_t *candidate_count);
+
 // publicRoutes.ts map_id: fnv1a(name.toLowerCase()) (old_burg shares Burg's id, as in v3.1.1)
 uint32_t map_catalog_map_id(const MapCatalogEntry *entry);
 // "img/maps/map_<index>.png" for official maps (public/img/maps), NULL for community maps

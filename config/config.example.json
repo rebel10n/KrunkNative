@@ -1,5 +1,8 @@
 {
   "database": {
+    "_driver": "postgres | sqlite (no server: path data/coordinator.db, the default without a database section) | mysql (MariaDB); doc/backend.md 3.6",
+    "driver": "postgres",
+    "path": "data/coordinator.db",
     "host": "127.0.0.1",
     "port": 5432,
     "name": "krunknative",
@@ -17,6 +20,7 @@
     "file": ""
   },
   "brain": {
+    "roles": ["auth", "community", "finder"],
     "host": "127.0.0.1",
     "port": 5050,
     "id": "",
@@ -75,6 +79,25 @@
       "match_timeout_s": 1800,
       "start_grace_s": 60
     }
+  },
+  "auth": {
+    "login_per_min": 10,
+    "register_per_hour": 5,
+    "join_per_min": 60,
+    "has_joined_per_min": 1200,
+    "check_ip": false
+  },
+  "community": {
+    "auth_url": "https://coordinator.krunk.io"
+  },
+  "finder": {
+    "poll_interval_s": 30,
+    "poll_timeout_s": 3,
+    "expire_s": 180,
+    "max_failures": 3,
+    "max_per_ip": 64,
+    "submit_per_min": 30,
+    "heartbeat_interval_s": 60
   },
   "accounts": {
     "name_min": 3,
@@ -193,6 +216,19 @@
     "earn_kr": true,
     "kr_cap": 30,
     "kr_cap_premium": 40,
-    "kr_multiplier": 1
+    "kr_multiplier": 1,
+    "password": "",
+    "rcon_password": "",
+    "rcon_host": "127.0.0.1",
+    "rcon_port": 0,
+    "query_port": 0,
+    "online_mode": false,
+    "auth_url": "https://coordinator.krunk.io",
+    "finder_url": "",
+    "community": "",
+    "tags": [],
+    "enforce_skins": "auto",
+    "shutdown_grace": 10,
+    "log_file": ""
   }
 }

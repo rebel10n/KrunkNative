@@ -2,7 +2,8 @@
 
 Loosely based on the Krunker v3.1.1 offline reconstruction's backend
 (`/home/user/jails/kru/src/Krunker_v3.1.1/{matchmaker,server,ansible}`), ported to
-C11 + PostgreSQL. Each owner writes its own section; edit other sections only with
+C11 on any database through the store drivers of 3.6 (PostgreSQL, SQLite,
+MySQL/MariaDB). Each owner writes its own section; edit other sections only with
 anchored, minimal edits.
 
 <!-- section index (keep in this order) -->
@@ -26,7 +27,7 @@ anchored, minimal edits.
      ▼                                     server_bin (game server, 1 lobby)
   kn_brain (region A) ◄──WS /mm/internal/ws── server_bin ... (region A)
      │  ▲                                    
-     │  │ PostgreSQL: mm_* registry rows (heartbeat + TTL), accounts, ...
+     │  │ shared database (3.6): mm_* registry rows (heartbeat + TTL), accounts, ...
      ▼  │
   kn_brain (region B) ◄──WS /mm/internal/ws── server_bin ... (region B)
 ```
@@ -35,9 +36,9 @@ anchored, minimal edits.
   HTTP listener serving the public matchmaker routes, the social WebSocket and the
   internal WebSocket for game servers.
 * Game servers (`server_bin`) connect to the brain of their region and push their
-  lobby state; they never touch PostgreSQL.
+  lobby state; they never touch the database.
 * Brains are leader free: each brain owns the game servers connected to it and
-  writes their rows (with heartbeats) to PostgreSQL; every read (game list, quick
+  writes their rows (with heartbeats) to the shared database; every read (game list, quick
   join, game info) is global over all live rows, so any brain can answer for every
   region. A brain or game server that dies simply stops heartbeating; its rows
   expire after the TTL.
@@ -66,17 +67,22 @@ Every service (`kn_brain`, `server_bin`, `kn_migrate`) loads the same file with
 
 | key | default | meaning |
 | --- | --- | --- |
-| `database.host` | `127.0.0.1` | PostgreSQL host |
-| `database.port` | `5432` | |
+| `database.driver` | see below | store driver (3.6): `postgres` (aliases `postgresql`, `pg`), `sqlite` (`sqlite3`), `mysql` (`mariadb`). Absent: `postgres` when `database.host`, `.name` or `.user` is configured (and the postgres driver is built in), else `sqlite`, so a coordinator with no config at all runs on a local SQLite file |
+| `database.path` | `data/coordinator.db` | sqlite: database file (relative to the config root; directories are created; `:memory:` for tests) |
+| `database.host` | `127.0.0.1` | postgres / mysql server (mysql: an absolute path = Unix socket) |
+| `database.port` | `5432` / `3306` | default per driver |
 | `database.name` | `krunknative` | database |
-| `database.user` | `krunknative` | role |
+| `database.user` | `krunknative` | role / user |
 | `database.password` | `""` | password (prefer `KN_DATABASE_PASSWORD` in deployment) |
-| `database.search_path` | (server default) | schema list set on every connection (test isolation, multi-tenant) |
-| `database.pool_size` | `4` | connections per process |
+| `database.search_path` | (server default) | postgres: schema list set on every connection (test isolation, multi-tenant) |
+| `database.pool_size` | `4` (sqlite `2`) | connections per process (worker threads for sqlite/mysql) |
 | `database.connect_timeout_s` | `5` | |
-| `database.statement_timeout_ms` | `0` | server-side statement timeout (0 = PostgreSQL default) |
-| `database.application_name` | `knsvc` | shows in `pg_stat_activity` |
-| `database.migrations_dir` | `services/db/migrations` | directory of `NNNN_name.sql` files |
+| `database.statement_timeout_ms` | `0` | server-side statement timeout (postgres `statement_timeout`, MariaDB `max_statement_time`; 0 = server default) |
+| `database.busy_timeout_ms` | `5000` | sqlite: wait this long for the write lock before failing with 40001 (retried) |
+| `database.notify_poll_ms` | `100` | sqlite/mysql: poll interval of the pub/sub emulation (`kn_pubsub` table, 3.6) |
+| `database.application_name` | `knsvc` | postgres: shows in `pg_stat_activity` |
+| `database.migrations_dir` | `services/db/migrations` | migrations root; the driver's `<dialect>/` subdirectory is used when present (3.7). Unset: the config root's, else the one next to / above the executable |
+| `database.auto_migrate` | on for sqlite, else off | `kn_brain` applies pending migrations at start (like `--migrate`) |
 | `log.level` | `info` | `trace` `debug` `info` `warn` `error` (env `KN_LOG_LEVEL`) |
 | `log.format` | `text` | `text` or `json` (one object per line; env `KN_LOG_FORMAT`) |
 | `log.file` | stderr | append log lines to this file (env `KN_LOG_FILE`) |
@@ -101,7 +107,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.heartbeat_s` | `5` | how often the owning brain refreshes its rows |
 | `brain.ping_interval_s` | `10` | internal WS ping interval (v3.1.1 `PING_INTERVAL_MS`) |
 | `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are v3.1.1 `regionNames` ids (`us-nj`, `de-fra`, ...) |
-| `brain.federation` | `true` | use PostgreSQL rows (false or no DB = in-memory, this brain only) |
+| `brain.federation` | `true` | use the shared database's rows (false or no DB = in-memory, this brain only) |
 | `brain.matchmaking.cross_region` | `true` | quick join falls back to other regions when the requested one has no room |
 | `brain.matchmaking.max_players` | `8` | cap when a lobby reports none |
 | `brain.matchmaking.mode_caps` | `{}` | per-mode quick-join caps, by mode name or index (`{"ffa":8,"tdm":10}`) |
@@ -119,15 +125,18 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 `services/common/` builds two static libraries; the headers in
 `services/common/include/knsvc/` are the specification (every function is documented
 there). C11, no C++; dependencies: cJSON (`shared/lib/cJSON`), OpenSSL libcrypto,
-optionally libcrypt, and libpq for `knsvc_db` only.
+optionally libcrypt, and for `knsvc_db` only the client library of each store driver
+that is built in (libpq, libsqlite3, libmariadb / libmysqlclient; 3.6).
 
 | library | headers | links | used by |
 | --- | --- | --- | --- |
 | `knsvc` | `buf.h log.h config.h json.h loop.h http.h ws.h crypto.h msgpack.h` (umbrella `knsvc.h`) | cJSON, libcrypto, libm, pthreads | `kn_brain`, `server_bin` (brain client), tools |
-| `knsvc_db` | `db.h migrate.h` | `knsvc` + libpq | `kn_brain`, `kn_migrate` |
+| `knsvc_db` | `db.h store.h migrate.h` | `knsvc` + the built-in drivers' client libraries | `kn_brain`, `kn_migrate` |
 
 Build: part of the normal native build when OpenSSL is found (`knsvc_db`, `kn_migrate`
-and the brain additionally need libpq); `-DKRUNKNATIVE_SERVICES=OFF` skips `services/`
+and the brain additionally need at least one store driver: options
+`KNSVC_STORE_POSTGRES` / `KNSVC_STORE_SQLITE` / `KNSVC_STORE_MYSQL`, each ON by default
+when its library is found); `-DKRUNKNATIVE_SERVICES=OFF` skips `services/`
 entirely, and the game targets never depend on it except `server_bin`'s optional brain
 client (`if (TARGET knsvc)`). Make: `make services` (all backend targets),
 `make db-migrate`, `make db-status`, `make services-test` (`ctest -L knsvc`).
@@ -237,48 +246,157 @@ states which.
   `iat`/`exp`; `kn_signed_token_verify()` checks the algorithm, the signature (constant
   time) and `exp`, and returns the claims. Standard JWT libraries can read them.
 
-### 3.6 PostgreSQL (`db.h`, `knsvc_db`)
+### 3.6 Database store layer (`db.h`, `store.h`, `knsvc_db`)
 
-* Pool: `kn_db_new(loop, &cfg)` opens `pool_size` non-blocking libpq connections
-  (`PQconnectStartParams` + `PQconnectPoll` on the loop; `search_path` and
-  `statement_timeout` are passed as connection options, so there is no setup query).
-  Lost connections reconnect with exponential backoff (250 ms .. 10 s).
-* Parameterized queries only: `kn_db_query(db, "... WHERE name = $1", KN_DB_ARGS(name),
-  cb, ud)` (text parameters, NULL element = SQL NULL; `0, NULL` for none). Queries queue
-  when every connection is busy and run concurrently on different connections: there is
-  no ordering between two `kn_db_query` calls, so chain dependent statements in
-  callbacks or use a transaction.
-* Every call delivers exactly one callback with a `kn_db_result` that lives until the
-  callback returns: `kn_db_ok`, `kn_db_error`, `kn_db_sqlstate`
-  (`kn_db_is_unique_violation` = 23505), `kn_db_rows/cols/col/get/get_by/get_int64/
-  get_double/get_bool/isnull/affected`, `kn_db_result_to_json` / `kn_db_row_to_json`
-  (bool, int, float/numeric, json/jsonb typed; int8 beyond 2^53 as text). Synthetic
-  errors: `08006` connection lost mid-query, `08003` pool freed, `26000` unknown prepared
-  statement, `40000` COMMIT of a transaction in which a statement failed (PostgreSQL rolls
-  back but reports success; knsvc reports the failure).
-* Transactions: `kn_db_begin(db, cb, ud)` pins a connection and calls back with a
-  `kn_db_tx`; `kn_db_tx_query` / `kn_db_tx_exec_prepared` run in order on it;
-  `kn_db_tx_commit` / `kn_db_tx_rollback` release it. If the pinned connection dies, the
-  remaining statements fail with 08006 and commit reports the failure.
-* Prepared statements: `kn_db_prepare(db, name, sql)` once, `kn_db_exec_prepared(db, name,
-  ...)`; each connection prepares lazily on first use and again after reconnecting.
-* LISTEN/NOTIFY on a dedicated connection: `kn_db_listen(db, channel, cb, ud)` (channels
-  are re-LISTENed after reconnects), `kn_db_notify(db, channel, payload)` (`pg_notify`).
-  Used for cross-brain events.
-* Synchronous API for tools and tests: `kn_dbconn_open/exec/exec_script/close`.
+The coordinator (kn_brain) sits in front of any database through one driver
+interface. Applications use `knsvc/db.h`; drivers implement `knsvc/store.h`.
+
+| driver (`database.driver`) | library (Fedora / Debian package) | shape | pub/sub | notes |
+| --- | --- | --- | --- | --- |
+| `postgres` | libpq (`libpq-devel` / `libpq-dev`); tested with PostgreSQL 18 | async on the loop | native `LISTEN/NOTIFY` | server-side SQL functions (`migrations/postgres/0103`, `0104`, `0106`, `0201`) |
+| `sqlite` | libsqlite3 >= 3.38 (`sqlite-devel` / `libsqlite3-dev`); tested 3.51.2 | worker threads | polled table | zero config: one file, WAL, `BEGIN IMMEDIATE`; several coordinator processes may share it |
+| `mysql` | MariaDB Connector/C (`mariadb-connector-c-devel` / `libmariadb-dev`) or libmysqlclient; tested Connector/C 3.4.8 + MariaDB 11.8.6 | worker threads | polled table | MariaDB >= 10.6; MySQL >= 8.0.13 should work (untested) |
+
+* **Choosing**: `database.driver` (section 2). Without it a configured server means
+  `postgres`, otherwise the coordinator runs on `data/coordinator.db` (`sqlite`) and
+  migrates it at start (`database.auto_migrate`), so a small community needs no setup.
+  Everything (accounts, inventory, stats, the federation registry) is scoped to that
+  database: each coordinator network owns its economy.
+* **Pool**: `kn_db_new(loop, &cfg)`. postgres: `pool_size` non-blocking libpq
+  connections (`PQconnectStartParams` + `PQconnectPoll` on the loop; `search_path` and
+  `statement_timeout` are connection options). sqlite/mysql: `pool_size` worker threads,
+  one blocking connection each, results handed to the loop through a pipe; the loop
+  never blocks. Lost connections reconnect with exponential backoff (250 ms .. 10 s);
+  queued queries wait for them. Statements and procs outside a caller's transaction are
+  retried up to 3 times on deadlock / serialization / busy (class `KN_DB_E_RETRY`).
+* **Queries** are parameterized only: `$1..$n` placeholders, text values, NULL element =
+  SQL NULL (`KN_DB_ARGS(...)`, `0, NULL` for none). Drivers rewrite placeholders (sqlite
+  `?n`, binding canonical integers as INTEGER; mysql escaped literals, bare integers
+  after `LIMIT`/`OFFSET`). No ordering between two pool queries; chain dependent
+  statements in callbacks, use a transaction, or a kn_proc.
+* **`kn_db_query(db, sql, ...)`** sends `sql` as is to whatever driver is configured.
+  Code that must run everywhere uses **`kn_sql`** with one text per dialect:
+  `{.pg, .sqlite, .mysql, .any}`; the driver's own text wins, else `.any`. `.pg` is sent
+  verbatim (every PostgreSQL statement of the brain is unchanged); `.any` and the other
+  texts expand `{macros}` (outside string literals):
+
+  | macro | postgres | sqlite | mysql |
+  | --- | --- | --- | --- |
+  | `{now}` | `now()` | `strftime('%Y-%m-%d %H:%M:%f','now')` (UTC text) | `NOW(3)` (session UTC) |
+  | `{ago:s}` / `{later:s}` | `now() -/+ make_interval(secs => s)` | `strftime(..., '-/+' \|\| s \|\| ' seconds')` | `NOW(3) -/+ INTERVAL s SECOND` |
+  | `{epoch_ms:ts}` / `{from_ms:ms}` | `extract(epoch ...)*1000` / `to_timestamp(ms/1000)` | julianday / `unixepoch` | `UNIX_TIMESTAMP` / `FROM_UNIXTIME` |
+  | `{int:x}` `{float:x}` `{text:x}` `{bool:x}` `{json:x}` | casts | `CAST(...)`, `json()` | `CAST(...)`, `JSON_EXTRACT(x,'$')` |
+  | `{jagg:x}` | `jsonb_agg` | `json_group_array` | `JSON_ARRAYAGG` |
+  | `{html:x}` | inline `replace()` chain = `kn_html` | same | same |
+  | `{hash:x}` (session token hash) | `sha256(convert_to(x,'UTF8'))` (bytea) | `kn_sha256(x)` (hex, registered C function) | `SHA2(x,256)` (hex) |
+  | `{greatest:a,b}` `{least:a,b}` | `greatest` / `least` | `max` / `min` | `GREATEST` / `LEAST` |
+  | `{insert_ignore} ... {ignore_conflicts}` | `INSERT ... ON CONFLICT DO NOTHING` | `INSERT OR IGNORE ...` | `INSERT IGNORE ...` |
+  | `{for_update}` | `FOR UPDATE` | (nothing: the transaction holds the write lock) | `FOR UPDATE` |
+  | `{serial_pk}` `{bigserial_pk}` | identity column | `INTEGER PRIMARY KEY AUTOINCREMENT` | `AUTO_INCREMENT PRIMARY KEY` |
+  | `{ilike}` `{true}` `{false}` | `ILIKE` `true` `false` | `LIKE` `1` `0` | `LIKE` `1` `0` |
+
+  `kn_db_query_sql(db, &sql, ...)`, `kn_db_tx_query_sql`, `kn_dbconn_exec_sql`. In the
+  brain `SQL(.pg = "...", .any = "...")` (`services/brain/db_procs.h`) builds one inline.
+  The mysql session runs with `ANSI_QUOTES,PIPES_AS_CONCAT,NO_BACKSLASH_ESCAPES` so
+  `"identifiers"`, `||` and `'...'` mean the same as in PostgreSQL and SQLite.
+* **`kn_proc`** for multi-statement operations: `{name, pg, run}`. On postgres the `.pg`
+  text runs (the existing plpgsql function call); everywhere else (and on postgres when
+  `.pg` is NULL, e.g. `P_ENSURE_CENTRAL`) the C `run(kn_dbconn *, n, params)` executes on
+  a worker connection inside its own transaction (rolled back when it returns an error)
+  and returns a result shaped like the `.pg` query's: `kn_db_call` / `kn_db_tx_call`
+  (inside a sqlite/mysql transaction; C procs cannot join a libpq transaction). `run`
+  executes on a database thread: only its parameters and read-only data. The brain's
+  procs are in `services/brain/db_accounts.c`, `db_social.c`, `db_mm.c`; the shared C
+  versions of `kn_account_json`, `kn_add_funds`, `kn_add_skin`, `kn_active_ban`,
+  `kn_html`, `kn_level` in `db_common.c`. User-facing refusals are SQLSTATE `P0001` with
+  the message in `kn_db_user_message()` (plpgsql `RAISE`, `kn_db_result_user_error()` in
+  C, sqlite trigger `RAISE(ABORT, msg)`, mysql `SIGNAL SQLSTATE '45000'`).
+* **Results**: one `kn_db_result` per callback (lives until the callback returns):
+  `kn_db_ok`, `kn_db_error`, `kn_db_sqlstate`, `kn_db_errclass_of` (`UNIQUE`,
+  `CONSTRAINT`, `USER`, `CONNECTION`, `RETRY`, `TX_ABORTED`, `TIMEOUT`, `SYNTAX`; native
+  codes are mapped: sqlite `SQLITE_CONSTRAINT_UNIQUE` / mysql 1062 -> 23505, mysql
+  2006/2013 -> 08006, 1213 -> 40P01 ...), `kn_db_rows/cols/col/colname/coltype/get/
+  get_by/get_int64/get_double/get_bool/isnull/affected/last_id`, `kn_db_result_to_json` /
+  `kn_db_row_to_json`. Column types come from the driver (postgres OIDs; sqlite declared
+  type `BOOLEAN` / `JSON TEXT` / `INTEGER` / `REAL`, else the value's storage class; mysql
+  field types, `TINYINT(1)` = bool, JSON format metadata) and can be forced with an alias
+  suffix: `AS name__j` json, `__b` bool, `__i` int, `__f` float, `__t` text (the suffix is
+  stripped; works on postgres too). Synthetic errors: `08006` connection lost
+  mid-query, `08003` pool freed, `26000` unknown prepared statement, `25P02` statement in
+  a failed transaction, `40000` COMMIT of a transaction in which a statement failed.
+* **Transactions**: `kn_db_begin(db, cb, ud)` pins a connection and calls back with a
+  `kn_db_tx`; `kn_db_tx_query[_sql]` / `kn_db_tx_call` / `kn_db_tx_exec_prepared` run in
+  order on it; `kn_db_tx_commit` / `kn_db_tx_rollback` release it. Every driver follows
+  PostgreSQL's rule: after a failed statement the transaction only fails (25P02) and
+  COMMIT rolls back and reports 40000. If the pinned connection dies, the remaining
+  statements fail with 08006. sqlite begins with `BEGIN IMMEDIATE` (writers serialise
+  across processes; `busy_timeout_ms`), mysql with `START TRANSACTION` at READ COMMITTED
+  (PostgreSQL's level).
+* **Prepared statements**: `kn_db_prepare(db, name, sql)` once, `kn_db_exec_prepared(db,
+  name, ...)`; postgres prepares lazily per connection (again after reconnecting); sqlite
+  keeps a per-connection statement cache for every statement; mysql runs the text.
+* **Publish/subscribe**: `kn_db_listen(db, channel, cb, ud)`, `kn_db_notify(db, channel,
+  payload)` (payload <= 7900 bytes). postgres: `LISTEN`/`pg_notify` on a dedicated
+  connection (re-LISTENed after reconnects). Drivers without it (`KN_DB_CAP_NOTIFY`
+  unset: sqlite, mysql) get rows in table `kn_pubsub(id, channel, payload, at_ms)`
+  (created on first use) that every listener polls every `database.notify_poll_ms`
+  (default 100 ms; delivered once per process, rows older than a minute are pruned).
+  **Latency**: a cross-coordinator event arrives within `notify_poll_ms` plus one query
+  instead of ~1 ms, so the federation's view of another coordinator's lobbies, host
+  requests and `assign` heads-ups lags by up to ~0.1-0.3 s (the 1 s registry refresh
+  and the 500 ms host-request poll stay as the fallback, as on postgres).
+* **Synchronous API** for tools, tests and procs: `kn_dbconn_open/exec/exec_sql/call/
+  exec_script/close`, `kn_dbconn_driver_name/dialect/native` (`kn_dbconn_pg`,
+  `kn_db_result_pg` remain for postgres-only code).
+
+#### Writing a new adapter
+
+1. `services/common/src/drivers/store_<name>.c` defining
+   `const kn_store_driver kn_store_driver_<name>` (`knsvc/store.h`): `name`, `dialect`
+   (a new dialect name makes `kn_sql` fall back to `.any`), `caps`, `default_port`,
+   `default_pool`, a `{macro}` table for `.any` texts (every macro of the table above),
+   and `kn_store_blocking_ops`: `connect` / `disconnect`, `exec` (one statement with
+   `$n` parameters -> `kn_db_result`; use `kn_store_sql_numbered`, `kn_store_sql_qmark` or
+   `kn_store_sql_inline` for placeholders and `kn_db_result_new` / `kn_db_result_add_row`
+   for rows, `kn_db_result_error` with a mapped SQLSTATE for failures), `exec_script`,
+   `broken`, optional `lock` (migrations) and `interrupt`, `native`, `begin_sql`. That is
+   all a blocking driver needs: the core runs it on worker threads with pooling,
+   transactions, kn_procs and pub/sub emulation. An async driver additionally fills
+   `kn_store_async_ops` (see `store_postgres.c`).
+2. One registration line in `services/common/CMakeLists.txt`:
+   `knsvc_store_driver(<OPTION> <name> src/drivers/store_<name>.c <library target>)`.
+   It builds the file when `KNSVC_STORE_<OPTION>` is ON and lists the driver in the
+   generated `knsvc_store_drivers.h` that `src/store_drivers.c` includes (no core edit).
+   Add the `option(KNSVC_STORE_<OPTION> ...)` and its `find_package` /
+   `pkg_check_modules` next to the others in `services/CMakeLists.txt`. Applications
+   can also link a driver of their own and call `kn_store_driver_register()`.
+3. Nothing else in knsvc: `database.driver = "<name>"` selects it.
+4. `services/db/migrations/<dialect>/` with the same version numbers as the other
+   dialects; `.sqlite`/`.mysql`-style texts in `kn_sql` only where the `.any` text cannot
+   express a statement.
+5. Run `knsvc_test_store <name>` (add it to the `foreach` in `services/common/CMakeLists.txt`)
+   and the brain suites with `KN_TEST_DB_DRIVER=<name>` (teach `tests/db_scratch.py` to
+   create a scratch database).
 
 ### 3.7 Migrations (`migrate.h`)
 
-* Files: `services/db/migrations/NNNN_name.sql` (4+ digits), applied in numeric order.
+* Files: `services/db/migrations/<dialect>/NNNN_name.sql` (`postgres/`, `sqlite/`,
+  `mysql/`; 4+ digits), applied in numeric order. The runner uses the connection's
+  dialect subdirectory when it exists, else the directory itself (flat test dirs).
   Version ranges: `0001-0099` core, `0100-0199` accounts/social (svc-accounts),
   `0200-0299` matchmaker/registry (svc-matchmaker), `0300-0399` game servers/stats.
-  Files must not contain `BEGIN`/`COMMIT`; dollar-quoted function bodies are fine.
+  A schema change gets the **same version in every dialect directory**; the sqlite and
+  mysql histories start from the consolidated current schema (their 0100-0201 equal
+  postgres 0100-0203; the postgres SQL functions of 0103/0104/0106/0201 are C kn_procs
+  there, 3.6). Files must not contain `BEGIN`/`COMMIT`; dollar-quoted function bodies
+  (postgres) and `BEGIN ... END` trigger bodies (sqlite/mysql) are fine.
 * Each file runs in its own transaction together with its row in
-  `kn_migrations(version bigint primary key, name, checksum sha256 hex, applied_at)`, so a
-  failing file leaves nothing behind and the error names the file. A session advisory
-  lock serialises concurrent runners (several brains starting at once). Applied files
-  are never re-run; an applied file whose checksum changed is reported as a warning.
-  Duplicate versions are an error.
+  `kn_migrations(version primary key, name, checksum sha256 hex, applied_at)`, so a
+  failing file leaves nothing behind and the error names the file (MySQL commits DDL
+  implicitly: only the bookkeeping row is atomic there). Concurrent runners (several
+  brains starting at once) serialise on a postgres advisory lock / MySQL `GET_LOCK` /
+  sqlite `BEGIN IMMEDIATE` plus a re-check. Applied files are never re-run; an applied
+  file whose checksum changed is reported as a warning. Duplicate versions are an error.
 * Entry points: `kn_migrate [--config F] [--status] [--dry-run] [--dir D] [--set
   database.name=...]` (`make db-migrate`, `make db-status`), `kn_brain --migrate`
   (`kn_migrate_main()`), or `kn_migrate_run()` on a `kn_dbconn`.
@@ -306,9 +424,16 @@ states which.
 | `knsvc_ws_interop` | python `websockets` client against the knsvc server (UTF-8, 51 KB binary, fragmented text/binary, ping, 200 ordered messages, close code echo, 1009, deflate declined) and the knsvc client against a python server; skipped without `websockets` |
 | `knsvc_db` | real PostgreSQL in database `krunknative_svccore` (`KN_TEST_DATABASE`), own schema: typed results/JSON, SQL-injection-shaped params, unique violation, syntax error, 40 concurrent queries, prepared statements, commit/rollback/failed-commit, LISTEN/NOTIFY, `pg_terminate_backend` of every pool connection -> reconnect + NOTIFY again, free with queued queries |
 | `knsvc_migrate` | order, idempotence, atomic failure, checksum warning, duplicates, dry run, status, and the repository's own migrations into a fresh schema twice |
+| `knsvc_store_sqlite` / `_mysql` / `_postgres` | the store layer on each driver (`tests/test_store.c`): typed results + alias suffixes, injection-shaped params, unique/syntax error classes, the `{macros}`, 60 concurrent inserts, prepared statements, commit / rollback / aborted-transaction rule, kn_proc commit + rollback on a user refusal + inside a transaction, pub/sub, `kn_dbconn` + dialect-directory migrations with atomic failure, free with queued work |
+| `brain_social_ws_sqlite` / `_mysql`, `brain_federation_*`, `brain_ranked_*` | the brain suites (6, 7.7) on sqlite (temp file, always runs) and MySQL/MariaDB |
 
-DB tests skip (exit 77) when PostgreSQL is unreachable. Create the test database once
-with `sudo -u postgres createdb -O krunknative krunknative_svccore`. The suite also runs
+DB tests skip (exit 77) when their server is unreachable. PostgreSQL: create the test
+database once with `sudo -u postgres createdb -O krunknative krunknative_svccore`.
+MySQL/MariaDB: `KN_TEST_MYSQL_HOST` / `_PORT` / `_USER` / `_PASSWORD` (default
+`127.0.0.1:3306 root`) must be allowed to create and drop databases (`kn_test_*`).
+`ctest -L sqlite` / `ctest -L mysql` run one driver; the brain scripts take
+`KN_TEST_DB_DRIVER=sqlite|mysql` directly (`services/brain/tests/db_scratch.py` makes the
+per-run database). The suite also runs
 clean under clang `-fsanitize=address,undefined` with leak detection.
 
 ## 4. Brain: public HTTP routes
@@ -513,7 +638,7 @@ ephemeral ports (`brain.port=0`, port read from the "listening on" log line), so
 concurrent runs never interfere. `kn_fakenode`
 (`services/brain/tools/`) is a scriptable fake game server.
 
-### 6.1 Tables (`services/db/migrations/0200_matchmaker.sql`)
+### 6.1 Tables (`services/db/migrations/<dialect>/0200_matchmaker.sql`)
 
 * `mm_brains(brain_id PK, region, public_url, version, started_at, heartbeat_at)`
 * `mm_nodes(node_id PK, brain_id, region, name, public_host, public_port, web_url,
@@ -576,6 +701,9 @@ in `mm_reservations`); `player-join` (or an `auth` with the ticket) releases it.
 
 ### 6.3 Hosting custom games
 
+Admin / tooling only: the clients no longer call `/mm/host-game` (hosting = running
+`server_bin`, section 8.7/8.11).
+
 `/mm/host-game`, a node's `host-request` (game-socket `custom`), or the social WS
 via `brain_host_game()` (`registry.h`): pick, in the requested region (then any
 region when `cross_region`), a non-draining `custom`-capable node with spare
@@ -602,9 +730,11 @@ ClientManager's `QueueManager`, `config.queues`, `minRankedLevel`, `eloK`,
 `rankedDeduction`, `rankedCooldown`). The reconstruction leaves it unimplemented
 (`UPDATE_ELO` is a no-op), so the routes and shapes follow the v3.1.1 client.
 
-State is in PostgreSQL (`mm_ranked_parties`, `mm_ranked_members`,
+State is in the shared database (`mm_ranked_parties`, `mm_ranked_members`,
 `mm_ranked_matches`, `mm_ranked_match_players`, `mm_ranked_bans`; logic in the
-plpgsql functions `kn_rq_*`), so any brain serves any client. Ratings are
+plpgsql functions `kn_rq_*` on PostgreSQL, the `P_RQ_*` kn_procs of `db_mm.c`
+elsewhere; the matcher lock is `pg_try_advisory_xact_lock`, the sqlite write lock
+or `SELECT ... FOR UPDATE NOWAIT` on `mm_ranked_lock`), so any brain serves any client. Ratings are
 svc-accounts' `players.player_elo/elo2/elo4` (read from the session's account,
 written with the accounts op `"elo"` `{id, mode: 1|2|4, delta}`).
 
@@ -663,10 +793,12 @@ ops, password hashing worker), `social_ws.c` (socket, sessions, dispatch, presen
 `creations.c` (hub HTTP catalogue, map publishing), `store.c` (store skins, prize
 wheels, Free KR wheel, daily reward). Private header `acct_internal.h`; public
 `accounts.h` (internal ops, used by `internal_ws.c` / `public_routes.c`) and
-`social_ws.h`. Schema: `services/db/migrations/0100_accounts.sql`,
+`social_ws.h`. Schema: `services/db/migrations/postgres/0100_accounts.sql`,
 `0101_social.sql`, `0102_items_creations.sql`, `0103_account_functions.sql`,
 `0104_social_functions.sql`, `0105_twofa.sql`, `0106_store.sql` (applied migrations are never edited:
-changes go into a new 01xx file). Port of v3.1.1 `matchmaker/socialWs.ts`,
+changes go into a new 01xx file in every dialect directory; `sqlite/` and `mysql/`
+hold the same tables, the SQL functions are C kn_procs in `db_accounts.c` /
+`db_social.c`, 3.6). Port of v3.1.1 `matchmaker/socialWs.ts`,
 `server/accounts.ts`, `server/social.ts`, `server/schema.ts`; message labels and
 shapes are what the real client (`src/social.js`, `src/index.js`) sends and reads.
 
@@ -700,7 +832,7 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 | `reward_time_s` / `reward_min_level` / `daily_reward_kr` | `21600` / `5` / `50` | `config.rewardTime` between Free KR spins / daily rewards (shared `lastReward`), `config.rewardMinLvl`, KR of `clm` |
 | `free_wheel_cooldown_s` | `21600` | the "Free" wheel (index 4) once per this |
 
-### 7.2 Schema (PostgreSQL)
+### 7.2 Schema (PostgreSQL names; same tables on sqlite / mysql)
 
 * `accounts` (credentials, unique `lower(username)`, PHC password hash, email,
   birthday, referral, created/last-login IP, `twofa_secret`, synced `settings`);
@@ -1135,6 +1267,167 @@ game socket: the native client logs in over the social WS), `host-request` from 
 player inside a lobby (the native protocol has no `custom` packet yet), ELO /
 challenges / class score stats (svc-accounts `elo` / `challenge` ops exist).
 
+### 8.7 Hosting a server (dedicated server exe)
+
+Hosting is running `server_bin`, like a CS:Source dedicated server. The client has no
+Host Game flow any more (section 8.11). One process is one lobby; a network is many
+processes (8.10).
+
+```sh
+make server-dist            # dist/server/: server_bin + assets/maps + cfg/server.cfg + kn-query.py
+cd dist/server && ./server_bin          # reads ./server.cfg, else ./cfg/server.cfg
+make server-install PREFIX=/opt/krunknative   # + deploy/systemd/kn-gameserver@.service
+```
+
+**server.cfg** (`config/server.cfg.example`): one `key value` per line, `//` or `#`
+comments (at line start or after whitespace, so `ws://` values survive), values
+optionally `"quoted"`. Every `gameserver` key of 8.1 works, plus the classic names
+`hostname`, `sv_password`, `maxplayers`, `mapcycle`/`map` (comma list), `mode`
+(comma list), `public_ip`, `rcon_ip`, `coordinator_url` / `coordinator_secret` /
+`coordinator_http_url` (= `brain_url` / `brain_secret` / `brain_http_url`), `sv_tags`,
+`tickrate`, `logfile`, `sv_lan 1` (unlisted + offline mode), `game.<var> value` (host
+config vars). Lookup: `--cfg FILE` (must exist; `none` skips), else `$KN_SERVER_CFG`,
+else `./server.cfg`, else `./cfg/server.cfg`. Precedence: defaults < config.json
+`"gameserver"` < server.cfg < `KN_GAMESERVER_*` env < CLI.
+
+New keys (also in config.example.json):
+
+| key | default | meaning |
+| --- | --- | --- |
+| `password` (`sv_password`) | `""` | JOIN.password must match; wrong/missing -> `ERROR 004005` |
+| `rcon_password` / `rcon_port` / `rcon_host` | `""` / `0` / `127.0.0.1` | local TCP rcon (off unless both set) |
+| `query_port` | `0` (= game port) | UDP server-info query (8.8) |
+| `online_mode` | `false` | verify every player with central auth (8.9); guests refused |
+| `auth_url` | `https://coordinator.krunk.io` | central auth base (`/auth/hasJoined`) |
+| `finder_url` | `""` | opt-in public listing heartbeat (8.8), e.g. `https://matchmaker.krunk.io` |
+| `community` | `""` | community name in lists (`""` = the coordinator's welcome `community`, else its brainId) |
+| `tags` | `[]` | extra info-query tags |
+| `enforce_skins` | `auto` | cosmetics must be owned (8.9); auto = on while linked to a coordinator |
+| `shutdown_grace` | `10` | seconds a SIGTERM/SIGINT drain lets the round finish |
+| `log_file` | `""` | also append every console line (timestamped) here |
+
+CLI additions: `--cfg FILE`, `--hostname`, `--password`, `--online-mode` /
+`--offline-mode`, `--log FILE`, `--version`, and the rcon client
+`server_bin --rcon [HOST:]PORT --rcon-password PW [command ...]` (no command = one per
+stdin line; `KN_RCON_PASSWORD`). `server_bin --help` shows a sample server.cfg.
+
+**Console** (stdin; replxx with history/completion on a terminal, plain lines from a pipe
+or FIFO, EOF only ends the reader): `status` (hostname, map, mode, players, tick rate,
+auth mode, coordinator link, listing), `players`, `kick`, `ban` (account ban into
+`bans_file`, guests by IP), `map`/`changelevel`, `mode`, `say`, `round`, `op`/`deop`,
+`send` (8.10), `drain`, `quit`, `help`, and every Krunker chat command without the slash.
+
+**rcon**: the same commands, their output captured per command
+(`cli_run_command`). Local TCP: line 1 = password (`OK` / `ERR bad password`, 1 s delay),
+then one command per line, output lines, then a line `.`; bound to 127.0.0.1 unless
+`rcon_host` says otherwise (no TLS: tunnel it). Through the coordinator: internal-WS
+frame `{"type":"rcon","rid","command"}` -> `{"type":"rcon-reply","rid","ok","output"}`
+(the coordinator authenticates its admin; no brain route sends it yet).
+
+**Shutdown**: SIGINT/SIGTERM/SIGHUP/`drain` = drain: refuse new connections
+(`GAME UPDATING`), `drain` to the coordinator (stops offering the lobby), chat notice,
+wait until the round ends or nobody is left (at most `shutdown_grace`), then the 8.5
+shutdown (partial commits, lobby-down, final finder heartbeat). A second signal or
+`quit` stops at once. Ctrl+C at the interactive prompt still quits immediately.
+
+### 8.8 Server-info query and finder heartbeat
+
+Transport-independent, A2S-style; wire format and encode/decode in
+`shared/include/server_info.h` / `shared/src/server_info.c` (pure byte buffers), socket
+glue in `server/src/info_query.c` (`server_info_handle_datagram()`; the UDP game socket
+demuxes the `FF FF FF FF` prefix, which no game datagram starts with).
+
+* request: `FF FF FF FF "KNINFO" [00 <nonce <= 32 printable bytes>]`
+* reply: `FF FF FF FF "KNinfo" 00 <JSON <= 1200 bytes>`:
+  `{"v":1,"game":"krunknative","name","map","mode","modeId","players","max","bots",
+  "tags":[...],"community","online_mode","password","region","version","port","nonce"}`.
+  Tags: `online`/`offline`, `password`, `ranked`, `custom`, `draining`, `community`
+  (linked to a coordinator), then `tags`. Snapshot refreshed 4x a second by the tick.
+* `services/scripts/kn-query.py HOST[:PORT] ...` prints it.
+* Finder (opt-in, `finder_url`): `POST <finder_url>/servers/heartbeat`
+  `{"v":1,"host","port","query_port","name","community","online_mode"[,"shutdown":true]}`
+  every `interval` s from the reply `{"ok":true,"interval":N}` (default 60), plus one with
+  `shutdown` on exit. `host` is `""` (= the request's source IP) while `public_host` is
+  loopback. The finder lists only what it verified by polling the query. HTTPS needs
+  libcurl in the build (linked when found; else http:// only).
+
+### 8.9 Accounts on a dedicated server: online mode and skins
+
+* **Standalone, offline mode** (default): guests (`Guest_N`), as always; `password` still
+  applies (a JOIN with the password, then the ENT).
+* **Online mode** (`online_mode 1`, Mojang-style, contract with the auth role): after
+  HELLO the server sends `NET_PACKET_AUTH_CHALLENGE` `{server_nonce (per boot),
+  online_mode 1, public_key "", auth_url}`. The client posts `/auth/join {token,
+  serverHash}` to central and JOINs with `client_key = "hj1:<client nonce>"`, `name` =
+  username (a JOIN without `hj1:` is ignored: the client's first JOIN goes out before it
+  saw the challenge). `serverHash = hex(SHA-256("kn-join-v1" 0 server_nonce 0 public_key 0
+  client_nonce))` (`shared/include/auth_join.h`). Without a coordinator server_bin calls
+  `GET <auth_url>/auth/hasJoined?username=&serverHash=&ip=` itself on a worker thread
+  (`server/src/central_auth.c`): 200 -> that account id/profile (stats are session-only:
+  nothing is committed without a coordinator); 204 -> `ERROR "Failed to verify username"`;
+  unreachable -> `"Authentication servers are down"`. Guests are refused.
+* **Linked to a coordinator**: joins as 8.3 (seek-game ticket and/or session token). In
+  online mode the `hj1:` JOIN goes to the coordinator as `{"type":"auth","rid",
+  "hasJoined":{"username","serverHash","ip"}}`; it verifies with central, creates the
+  community account on first join and answers the normal `auth-reply`.
+* **Skins**: the `auth-reply` account's `data[10]` (`Account.getData` skins,
+  `[{ind,cnt}]` from `inventory`) is loaded into a per-connection bitset
+  (`ServerAccount.skins_owned`, 4096 store indices). With `enforce_skins` on (auto: linked)
+  every ENT's hat / back / waist / face / dye that the account does not own is reset to
+  none before the spawn (the SPAWN all players see carries the filtered look) and the
+  player gets a chat notice; guests own nothing. Skin colour / hair colour are free.
+  Skins come from the coordinator's DB (`give_skin` op, store spins, market); a skin only
+  has value inside its community network.
+* Verified: `server/tests/dedicated_e2e.py BUILD` (own DB; coordinator + 2 servers: info
+  query, ticket + session joins, `kn_add_skin` -> owned hat kept / unowned stripped /
+  another account's hat stripped, password, rcon status/say/players/kick/changelevel,
+  `send` redirect, SIGTERM drain + partial commit in `match_results`) and
+  `server/tests/online_mode_e2e.py BUILD` (auth role + standalone online server:
+  challenge, `/auth/join` + `hj1:` join, unannounced hash and guests refused).
+
+### 8.10 A network of servers
+
+Many small servers (Hypixel style): N `server_bin` in one or more regions, each linked to
+a coordinator of its region; coordinators share one database and federate through it
+(section 6), so every coordinator's game list, quick join and seek-game cover every
+server. Players and their skins/stats follow them because they live in that shared DB.
+
+```sh
+make network NETWORK=services/scripts/network.example.json
+services/scripts/kn-network status services/scripts/network.example.json
+```
+
+`services/scripts/kn-network` (Python, foreground) migrates the DB, starts each
+`coordinators[]` entry (`kn_brain --set brain.port/region/id/community`), writes one
+server.cfg per server of each `servers[]` group (`count` processes on `port`, `port+1`,
+..., node ids `<node_id><i>`, `coordinator_url` of the group's coordinator; any other
+group key goes into the server.cfg), waits for them to answer queries, and on Ctrl+C
+drains the servers (stats commit) before stopping the coordinators. `backend-up.sh` /
+`make backend-up` (one brain + `GAMESERVERS` servers via `KN_GAMESERVER_INDEX`) still work.
+
+**Moving players between servers**: console/rcon `send <id|name|*> <target> [reason]`
+sends `NET_PACKET_REDIRECT {game_id[48], host[128], port, reason[64]}`. A coordinator
+lobby id (`NODE:lobby`) makes the client seek it through its matchmaker
+(`/mm/seek-game?game=`: a new ticket and seat reservation, same account), a `host:port`
+is a direct connect (guest, or online-mode join again). The client
+(`servers_ui_redirect`, `game_events.c`) shows `reason` as a toast and switches; the
+web build reloads with `?game=`. Lobby-to-lobby moves therefore always go through a
+fresh seek-game ticket; there is no server-to-server state hand-off (the stats of the
+old server are committed as a partial on disconnect).
+
+### 8.11 No hosting from the client
+
+Removed: the menu's Host Game button (`#menuBtnHost` hidden with `display:none`, kept in
+the DOM for v3.1.1 parity; `--render-scenario` keeps it visible for uidiff), the
+`openHostWindow` handler (now an alert "run the dedicated server: server_bin"),
+`createPrivateRoom` -> `/mm/host-game`, `playMap` -> `/mm/host-game` (a map no server
+runs is played offline), and `servers_ui_host_game()` returns 0 (debug only:
+`KRUNKNATIVE_ALLOW_CLIENT_HOST=1`). The Servers window's "+ Host Game" link is replaced by
+direct connect / community servers (coord-auth). Kept: offline / practice play
+(`local_game.c`, "play offline" on the error screen, editor Test Map), the server
+browser and join. `/mm/host-game` and node `host-request` stay on the coordinator for
+admin tooling (6.3); clients never call them.
+
 ## 9. Client integration (client-integration)
 
 The native and web clients use the brain for the account, matchmaking and the social
@@ -1241,6 +1534,80 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 it matches `KRUNK_NATIVE_TARGETS` (comma list of `host:port`, `host:lo-hi`, `host:*`;
 default `KRUNK_NATIVE_HOST:KRUNK_NATIVE_PORT..+63`); other targets are refused (1008).
 No `target` = `KRUNK_NATIVE_HOST:KRUNK_NATIVE_PORT` as before.
+
+### 9.7 Coordinator roles, central auth, server finder, client modes (coord-auth)
+
+**Roles** (`services/brain/roles.c`): `brain.roles` = list or `"a,b"` of `auth`, `community`,
+`finder` (CLI `--role auth,community` / `--brain.roles=`, env `KN_BRAIN_ROLES`); unset = all
+three (one local process, as before). Modules outside a process's roles are not started, so
+their routes 404. Production: `--role auth,community` on 127.0.0.1:8083
+(coordinator.krunk.io) and `--role finder --no-db` on 127.0.0.1:8082 (matchmaker.krunk.io).
+
+**Central auth** (`auth.c`, `auth_state.c`; reuses accounts.c `acct_auth` / `acct_revoke_token`,
+no new tables). JSON in/out, errors `{"ok":false,"error"}` (401 bad login, 409 taken, 403
+banned, 429 rate limit):
+
+| route | body / query | reply |
+| --- | --- | --- |
+| `POST /auth/register`, `/auth/login` | `{username, password}` | `{ok, token, expiresAt, account}` |
+| `POST /auth/refresh` | `{token}` or Bearer | same (sliding expiry, token kept) |
+| `POST /auth/logout` | `{token}` or Bearer | `{ok}` (revoked) |
+| `GET /auth/me` | Bearer / `?token=` | `{ok, account}` |
+| `POST /auth/join` | `{token, serverHash}` | `{ok, ttl: 30}` |
+| `GET /auth/hasJoined` | `?username=&serverHash=[&ip=]` | `{id, username, profile}` or 204 |
+
+`account`/`profile` = `{id, username, alias, premium, dev, mod, banned, ban_reason}`. Join
+records live in memory for 30 s, keyed by serverHash. `auth.*`: `login_per_min` (10),
+`register_per_hour` (5), `join_per_min` (60), `has_joined_per_min` (1200) per IP, `check_ip`
+(false: also match the joining IP).
+
+**Join handshake** (`shared/include/auth_join.h`): `serverHash = hex(SHA-256("kn-join-v1" 00
+server_nonce 00 public_key 00 client_nonce))`. An online_mode `server_bin` sends
+`NET_PACKET_AUTH_CHALLENGE` (73, `NetAuthChallengePacket {server_nonce[33], online_mode,
+public_key[65], auth_url[128]}`) after HELLO; the client POSTs `/auth/join` to its own account
+service, then sends JOIN `{name = username, client_key = "hj1:" + client_nonce}` (no session
+token: tokens never reach game servers outside brain matchmaking). The server verifies with
+`hasJoined` itself (standalone) or through its coordinator: internal WS `{"type":"auth","rid",
+"hasJoined":{username, serverHash, ip}}` -> the community brain calls hasJoined (in process when
+it also has the auth role, else `GET <community.auth_url>/auth/hasJoined`, libcurl for https) and
+answers the normal `auth-reply` with its account row (inventory `data[10]`).
+`{"type":"auth","central":{id, username}}` = the server already verified it. The community row
+comes from `acct_ensure_central()` (accounts.c): upserted with the central id and username on
+first join (a local account holding that name is renamed `<name>~<id>`), renamed with central.
+
+**Coordinator rcon**: `POST /mm/admin/rcon?node=<id>` `{command}` (Bearer
+`brain.internal_secret`) -> internal WS `{"type":"rcon","rid","command"}` ->
+`rcon-reply {ok, output}` -> `{success, node, output}`; 404 `NodeNotLocal`, 504 timeout.
+
+**Server finder** (`finder.c`, `finder_table.c`, in memory). `POST /servers/heartbeat` (alias
+`/servers/submit`, both also under `/finder`) `{v, host, port, query_port, name, community,
+online_mode, shutdown?}` -> `{ok, interval: 60, verified}`; `host` empty = the request IP;
+`shutdown: true` removes the entry (same submitter only). The finder polls KNINFO over UDP with a
+random nonce on submit and every `finder.poll_interval_s` (30); only entries whose last reply
+echoed the nonce (and is younger than two intervals) are listed, with every field from the query
+(heartbeat name/community are ignored). Dropped after `finder.expire_s` (180) without a heartbeat
+or `finder.max_failures` (3) failed polls. Limits: `finder.submit_per_min` (30) per IP,
+`finder.max_per_ip` (64) entries. `GET /servers?map=&mode=&tag=&space=1&online_mode=0|1&
+community=&region=&q=&limit=` -> `{ok, servers:[{host, port, query_port, name, map, mode, modeId,
+players, max, tags, community, online_mode, password, region, version, ping_ms, last_seen}]}`.
+
+**Client modes** (`client/include/online_mode.h`, `client/src/net/online_mode.c`). `--mode
+online|offline`, `KRUNKNATIVE_MODE`, web `?mode=`, storage `knMode` (Settings > Client > Account
+Mode), default online. Online: the account service is `--brain` / `KRUNKNATIVE_BRAIN_URL` /
+`knBrainUrl`, else `https://coordinator.krunk.io` (probed via `/mm/status`). Offline: no account
+service at all; the header shows "Offline Mode", the loadout owns every store skin, nothing is
+saved. The Servers window lists the finder (`--finder`, `KRUNKNATIVE_FINDER_URL`, web `?finder=`,
+`knFinderUrl`, default `https://matchmaker.krunk.io/servers`; `off` disables) as "Community
+Servers" (offline mode hides online_mode servers) and has a Direct Connect `host[:port]` field in
+place of "+ Host Game". Native https/wss use OpenSSL libssl when CMake finds it
+(`KRUNKNATIVE_HAVE_TLS`, system CA store, host name verified); web uses `fetch()`
+(`backend_http_request`).
+
+**Tests**: `brain_auth_finder` (unit: SHA-256 vectors, serverHash construction, join TTL /
+user / hash / IP checks, limiter windows, finder nonce verification, filters, per-IP cap, poll
+failures and heartbeat expiry); `brain_auth_e2e` = `services/brain/tests/federation_auth_e2e.sh
+<build>` (auth+community, finder, a third-party community coordinator, an online_mode server linked
+to it and an offline standalone one, headless clients in both modes, rcon relay, replay check).
 
 ## 10. Deployment
 

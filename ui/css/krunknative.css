@@ -70,9 +70,11 @@ iframe[src*="captcha"] {
 }
 
 /* Menu closed: the page is a transparent HUD layer and must not swallow the
- * game's pointer (menu_ui.c toggles html.kn-menu-open). */
-html:not(.kn-menu-open) #uiBase,
-html:not(.kn-menu-open) #uiBase * {
+ * game's pointer (menu_ui.c toggles html.kn-menu-open). The end-screen results
+ * free the pointer like the menu does (html.kn-end-open, menu_ui.c), so their
+ * tabs stay clickable. */
+html:not(.kn-menu-open):not(.kn-end-open) #uiBase,
+html:not(.kn-menu-open):not(.kn-end-open) #uiBase * {
   pointer-events: none !important;
 }
 
@@ -110,4 +112,15 @@ html.kn-preview-bg #canvas {
 }
 #settingsTabLayout.knClientTabs .settingTab {
   width: 100%;
+}
+
+/* Settings selects whose options are this machine's devices (Sound > Audio/Mic
+ * Input, Audio Output; Client > Audio Backend): a select is as wide as its widest
+ * option, and real device names ("Monitor of ... Digital Stereo (IEC958)") make it
+ * wider than the row beside the label, so the float drops under the label (Chrome
+ * does the same). Krunker's captures only ever show "Unknown Device"; capped at
+ * the slider column's width (.slidecontainer 250px + the 70px value box) so every
+ * row stays on one line, the selected label is clipped like Chrome clips it. */
+.settName > select.inputGrey2 {
+  max-width: 320px;
 }

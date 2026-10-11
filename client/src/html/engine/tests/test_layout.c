@@ -938,6 +938,25 @@ static void t_html_table(void)
     Box *tr = bx(fx, "tr0");
     CHECK(tr && tr->type == BOX_TABLE_ROW && tr->parent == bx(fx, "et"), "<tr> rows are direct rows of the table (tbody hoisted)");
     fx_free(fx);
+
+    /* Krunker's `td { height: 50px }` (main.css): the specified height already makes the cell
+     * as tall as the row, so vertical-align: middle (UA tbody) must centre by the content's
+     * height, not by c->h - row_h (= 0): Chrome puts the text (row 50px) 50/2 - line/2 down. */
+    fx = fx_html("<table style='border-spacing:0'><tr><td id=hc style='height:50px;padding:1px;font-size:20px'>1.</td>"
+                 "<td id=hn style='padding:1px;font-size:20px'>Guest</td></tr></table>", NULL);
+    Box *hc = bx(fx, "hc"), *hn = bx(fx, "hn");
+    const TextRun *rh = hc ? first_run(hc) : NULL, *rn = hn ? first_run(hn) : NULL;
+    HtmlRect hcr = rc(fx, "hc");
+    CHECK_NEAR(hcr.h, 52, 0.01, "td height:50px + padding is the row height");
+    if (rh && rn && hc) {
+        const float line = hc->line_count ? hc->lines[0].h : 0;
+        const float top = hc->line_count ? hc->lines[0].y : -1; /* the line box, cell-local */
+        CHECK(NEAR(top, (52 - line) * 0.5f, 0.6f), "height:50px cell centres its text (line top %.2f, line %.2f)", top, line);
+        CHECK(NEAR(rn->y, rh->y, 0.01), "the auto-height cell of the row centres the same (%.2f %.2f)", rn->y, rh->y);
+    } else {
+        CHECK(0, "height:50px cells have text runs");
+    }
+    fx_free(fx);
 }
 
 static void t_ellipsis_owner(void)
