@@ -63,8 +63,9 @@ jobs:
           mkdir -p dist
           cp -v cmake-build-release/client_bin cmake-build-release/server_bin dist/
           cp -r ui dist/ui
-          # shellcheck disable=SC2012
-          ls -laR dist | head -100
+          # no `| head` under pipefail: ls/find die of SIGPIPE once head has its lines
+          du -sh dist
+          find dist -maxdepth 1 | sort
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -221,7 +222,7 @@ jobs:
           missing=()
           for tool in cmake ninja pkg-config; do command -v "$tool" > /dev/null || missing+=("$tool"); done
           if [ ${#missing[@]} -gt 0 ]; then brew install "${missing[@]}"; fi
-          cmake --version | head -1
+          cmake --version | sed -n 1p
           echo "ninja $(ninja --version), pkg-config $(pkg-config --version)"
           # services/ (knsvc, linked by server_bin) needs libcrypto: Homebrew's keg-only OpenSSL
           for formula in openssl@3 openssl@4; do
@@ -287,8 +288,9 @@ jobs:
           # ANGLE (Metal): client_bin loads them from its own directory (@executable_path rpath)
           if [ "${{ matrix.gl }}" = angle ]; then cp -v cmake-build-release/libEGL.dylib cmake-build-release/libGLESv2.dylib dist/; fi
           cp -R ui dist/ui
-          # shellcheck disable=SC2012
-          ls -laR dist | head -100
+          # no `| head` under pipefail: ls/find die of SIGPIPE once head has its lines
+          du -sh dist
+          find dist -maxdepth 1 | sort
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -356,7 +358,7 @@ jobs:
           mkdir -p stage
           rsync -a --exclude='/assets' --exclude='/assets/' dist/web/ stage/web/
           du -sh stage/web
-          find stage/web -maxdepth 2 | head -50
+          find stage/web -maxdepth 1 | sort
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
