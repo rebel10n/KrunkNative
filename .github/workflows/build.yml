@@ -422,8 +422,9 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # v3 installs the long-removed `tools` package by default and fails in sdkmanager.
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Build debug APK
         working-directory: platform/android
