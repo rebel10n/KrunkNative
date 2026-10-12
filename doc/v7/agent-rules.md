@@ -30,3 +30,7 @@ The shared checkout /home/user/src/KrunkNative is the integration tree: it must 
 10. Many agents run the e2e scripts at once. New or changed e2e tests take their ports from
     `kn_proto.free_ports()` (server/tests/kn_proto.py), never fixed numbers, and must not kill processes
     they didn't start.
+11. Before generating your patch: `git fetch origin && git rebase origin/main` in your worktree (or regenerate the
+    patch from a fresh worktree of origin/main with your changes applied), then `git diff --binary origin/main`.
+    A patch made from a stale base silently reverts other people's commits (it happened: 557c53e put back the
+    push trigger of Deploy kru). State the exact base commit in your report.
