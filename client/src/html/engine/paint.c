@@ -1108,6 +1108,11 @@ static void paint_background(Painter *p, const Box *b, DlRect border_rect, DlRad
 
 static void paint_decorations_rect(Painter *p, const Box *b, DlRect rect, unsigned edge_mask)
 {
+    /* A cut-out box (#knFadeHole) also paints its background inside the hole:
+     * same device-pixel rect as the shadow's hole, or the two leave a seam. */
+    const CssComputed *cs = b->style;
+    if (cs && cs->box_shadow_count && !cs->box_shadow.inset && cs->box_shadow.spread >= PAINT_CUTOUT_SPREAD && !box_is_inline(b))
+        rect = cutout_rect(p, b, rect);
     DlRadii radii = radii_for_rect(b->style, rect.w, rect.h);
     if (radii_zero(radii) && edge_mask == 0xfu && text_field_themed(b)) radii = dl_radii_all(2.0f * style_zoom(b->style));
     paint_box_shadow(p, b, rect, radii, 0);

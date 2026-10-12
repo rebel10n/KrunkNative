@@ -341,13 +341,6 @@ void client_class_preview_render(Client *client) {
 
     if (!html_ui_is_menu_open() || !preview->has_rect || !preview->visible) return;
     if (preview->width <= 0.0f || preview->height <= 0.0f) return;
-    if (!client->game.ready || !client->game.map) return; // meshes need map config and weapons
-
-    if (preview->player && (preview->class_index != client->menu_class_index || preview->map != client->game.map || preview_cosmetics_changed(preview->player))) {
-        preview_player_destroy(client);
-    }
-
-    if (!preview->player && !preview_player_create(client)) return;
 
     // CSS px -> framebuffer px. Natively CSS px == window px (the page is rendered at
     // the framebuffer size), so scale by framebuffer/window for HiDPI; on the web
@@ -377,12 +370,13 @@ void client_class_preview_render(Client *client) {
 
     if (rect_width <= 0 || rect_height <= 0) return;
 
-    preview_animate(preview->player, &preview->step_dir, delta);
-    preview_frame(client);
-    player_update_meshes(preview->player, 1);
-
     // Dim the world inside the box like Krunker's menu backdrop does (UI coords are
     // framebuffer pixels from the top-left; ui_update() ran with the full viewport).
+    // The page cuts its hole into #instructionHolder whenever the rect is visible
+    // (menu_ui.c update_preview_hole), so this backdrop must be drawn from then on,
+    // also while the model can't be built yet (map/assets still loading, the web's
+    // on-demand fetches): otherwise the box shows the world undimmed, a lighter inset
+    // panel in the menu's shadow until the preview player exists.
     // Leave the destination alpha alone: on the web the WebGL canvas has an alpha
     // channel that the browser composites (premultiplied) over the page, so a
     // blended quad writing alpha 0.75 would let the page background through and
@@ -392,6 +386,18 @@ void client_class_preview_render(Client *client) {
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
     ui_fill_rect(client->ui, (vec4) {0.0f, 0.0f, 0.0f, menu_preview_backdrop_alpha()}, (float) rect_x, (float) rect_top, (float) rect_width, (float) rect_height);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    if (!client->game.ready || !client->game.map) return; // meshes need map config and weapons
+
+    if (preview->player && (preview->class_index != client->menu_class_index || preview->map != client->game.map || preview_cosmetics_changed(preview->player))) {
+        preview_player_destroy(client);
+    }
+
+    if (!preview->player && !preview_player_create(client)) return;
+
+    preview_animate(preview->player, &preview->step_dir, delta);
+    preview_frame(client);
+    player_update_meshes(preview->player, 1);
 
     // Draw into the rectangle only: viewport gives the projection its aspect (660/350 in Krunker),
     // scissor keeps the depth clear and the draws inside the box.

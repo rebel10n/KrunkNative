@@ -400,11 +400,21 @@ static int popup_open(void) {
 static void update_preview_hole(const int visible, const float x, const float y, const float w, const float h) {
     HtmlElem holder = by_id("instructionHolder");
     if (!holder) return;
+    // #instructionsFadeBG (#222, faded out by menu_dom_init's opacity 0 over 0.7s; on the
+    // web it stays up while the game loads) lies below #instructionHolder, i.e. above the
+    // preview's own backdrop: in the hole it must show #222 already dimmed by the holder's
+    // 50% (#111), or the box reads as a lighter inset panel until the fade is over.
+    HtmlElem fade = by_id("instructionsFadeBG");
     if (!visible) {
         html_dom_set_class(holder, "kn-hole", 0);
+        if (fade) html_dom_set_class(fade, "kn-hole", 0);
     } else {
         place_hole("instructionHolder", "knPreviewHole", NULL, 1, x, y, w, h);
         html_dom_set_class(holder, "kn-hole", 1);
+        if (fade) {
+            place_hole("instructionsFadeBG", "knFadeHole", NULL, 1, x, y, w, h);
+            html_dom_set_class(fade, "kn-hole", 1);
+        }
     }
     const int police = visible && popup_open();
     HtmlElem back = by_id("popupBack");
