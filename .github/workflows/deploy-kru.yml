@@ -1,13 +1,13 @@
 name: Deploy kru
 
-# Push to slop: build the web client + services, run deploy/ansible/central.yml against
+# Push to main: build the web client + services, run deploy/ansible/central.yml against
 # the central node (assets., matchmaker., coordinator.krunk.io, play.krunk.io), then publish
 # the front end (krunk.io) to Cloudflare Pages (deploy/pages). `make pages` does the same by hand.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
 #          CLOUDFLARE_API_TOKEN (Pages: Edit + Zone Read/Cache Purge on krunk.io), CLOUDFLARE_ACCOUNT_ID.
 on:
   push:
-    branches: [slop]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -27,6 +27,7 @@ env:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main' # deploys only from main
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

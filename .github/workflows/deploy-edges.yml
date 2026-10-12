@@ -34,6 +34,7 @@ permissions:
 jobs:
   plan:
     name: Plan
+    if: github.ref == 'refs/heads/main' # deploys only from main
     runs-on: ubuntu-latest
     outputs:
       first: ${{ steps.plan.outputs.first }}

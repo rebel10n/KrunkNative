@@ -1,12 +1,12 @@
 name: Build
 
-# Pushes to slop/main also publish the native clients to the rolling prerelease
+# Pushes to main also publish the native clients to the rolling prerelease
 # `client-latest` (job client-latest); the dedicated servers are release.yml's.
 on:
   push:
-    branches: [main, master, slop]
+    branches: [main]
   pull_request:
-    branches: [main, master, slop]
+    branches: [main]
   workflow_dispatch:
 
 # One running + one pending run per branch (superseded pushes are skipped, a running build is
@@ -28,6 +28,7 @@ jobs:
   # history and tags, the build jobs check out shallow and get it as -DKRUNKNATIVE_VERSION_*.
   meta:
     name: Version
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
     runs-on: ubuntu-latest
     outputs:
       cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
@@ -328,6 +329,7 @@ jobs:
 
   web:
     name: Web (Emscripten / WebGL2)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -509,6 +511,7 @@ jobs:
   # shellcheck of the CI/deploy scripts.
   check:
     name: make check (tests, lint, net-bridge typecheck)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -549,7 +552,7 @@ jobs:
         run: shellcheck -S warning tools/release/*.sh tools/angle/*.sh deploy/ansible/build.sh
 
   # Rolling prerelease `client-latest`: the linux/windows/macos artifacts above (binaries +
-  # ui/, no game content: assets/ is not in git) zipped per platform, on pushes to slop/main
+  # ui/, no game content: assets/ is not in git) zipped per platform, on pushes to main
   # and dispatches. Needs Linux; a platform whose build failed is left out of that run. Same rules as server-latest (tools/release/publish.sh): never "Latest",
   # only moves forward.
   client-latest:
@@ -558,7 +561,7 @@ jobs:
     if: >-
       !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
       github.event_name != 'pull_request' &&
-      (github.ref == 'refs/heads/slop' || github.ref == 'refs/heads/main')
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release create/upload, moving the client-latest tag
@@ -617,7 +620,7 @@ jobs:
           done
           ls -la client-pkg
           {
-            echo "Rolling build of the KrunkNative native client, replaced on every push to \`slop\`/\`main\`. Binaries and \`ui/\` only: the game content (\`assets/\`) comes from the [v1.0.0](https://github.com/$GH_REPO/releases/tag/v1.0.0) package."
+            echo "Rolling build of the KrunkNative native client, replaced on every push to \`main\`. Binaries and \`ui/\` only: the game content (\`assets/\`) comes from the [v1.0.0](https://github.com/$GH_REPO/releases/tag/v1.0.0) package."
             echo
             echo "| | |"
             echo "|---|---|"

@@ -25,6 +25,7 @@ jobs:
       matrix:
         arch: ${{ fromJSON(inputs.arch == 'both' && '["arm64","x86_64"]' || format('["{0}"]', inputs.arch)) }}
     # macos-15-intel is the supported x86_64 label until ~Aug 2027
+    if: github.ref == 'refs/heads/main' # CI runs on main only
     runs-on: ${{ matrix.arch == 'arm64' && 'macos-latest' || 'macos-15-intel' }}
     timeout-minutes: 150
     env:
