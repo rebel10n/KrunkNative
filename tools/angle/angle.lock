@@ -7,3 +7,5 @@
 #
 # Bumping the pin: change build-angle.sh and `commit` here, drop the sha256 lines, then publish.
 commit b52e7ee002499a95cb740fb74ed729fd2ecb906d
+sha256 macos-x86_64 0793ffc046a13220efbb386313045d1c67bfd3773551c87749c895b805d5004d
+sha256 macos-arm64 7df4143b6b5ca24aea4a1ad8821a0f43490346abdbcc37e8c1bb54a863e41fdc

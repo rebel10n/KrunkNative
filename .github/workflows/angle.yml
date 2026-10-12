@@ -44,7 +44,7 @@ jobs:
           line="$(tools/angle/package-angle.sh "$RUNNER_TEMP/angle" "$platform" "$RUNNER_TEMP/out")"
           asset="$(ls "$RUNNER_TEMP"/out/angle-*-"$platform".tar.gz)"
           tag="$(basename "$asset" | sed "s/-$platform\.tar\.gz\$//")"
-          gh release view "$tag" > /dev/null 2>&1 || gh release create "$tag" --title "ANGLE ${tag#angle-} (prebuilt)" \
+          gh release view "$tag" > /dev/null 2>&1 || gh release create "$tag" --latest=false --title "ANGLE ${tag#angle-} (prebuilt)" \
             --notes "Prebuilt ANGLE (libEGL + libGLESv2 + include/) for KRUNKNATIVE_GL_BACKEND=angle, from tools/angle/build-angle.sh. Checksums: tools/angle/angle.lock." \
             || gh release view "$tag" > /dev/null # the other arch's job created it first
           gh release upload "$tag" "$asset" --clobber
