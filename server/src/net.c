@@ -1480,7 +1480,14 @@ static void net_broadcast_states_tick(void) {
     static NetSendBatch batch; // main thread only
     for (size_t i = 0; i < g_server->client_count; i++) {
         const ClientConnection *client = &g_server->clients[i];
-        const Player *viewer = net_is_spectating(client) ? NULL : client->player; // spectators see everyone
+        const int spectating = net_is_spectating(client);
+        // v7.1.4 game.js updateState: "k" only to `(player.active || player.spectating) &&
+        // !player.locked`. A dead player (death screen and menu until its next SPAWN), one that
+        // never spawned and a locked one (lockPlayer, the blindfolded seeker) get no player
+        // positions: the kill cam looked at the killer once at death (io_killPlayer camLookAt,
+        // killer.interpolate = false) and the killer holds still there.
+        if (!spectating && (!client->player || !client->player->active || client->player->mode.locked)) continue;
+        const Player *viewer = spectating ? NULL : client->player; // spectators see everyone
         batch.length = 0;
         for (size_t j = 0; j < state_count; j++) {
             if (!game_network_relevant(&g_server->game, viewer, state_players[j])) continue; // WP-E mode.viewDis

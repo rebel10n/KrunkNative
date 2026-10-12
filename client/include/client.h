@@ -830,6 +830,7 @@ void client_unload_map(Client*);
 void client_add_player_mesh(Client*, Player*, int render_you);
 void client_drop_player_mesh(Client*, Player*);
 void client_player_spawned(Client*, Player*, int is_you); // meshes + (is_you) in-game state after a spawn
+void client_force_player_positions(Client*); // players.js forcePos(): every remote player's next STATE snaps
 int client_map_prepare_init(Client*, NetInitPacket*);   // 1: apply now (map_index resolved), 0: map download started
 int client_map_hold(Client*, const NetPacket*);         // 1: packet queued until the streamed map is in
 int client_map_take_ready(Client*, NetInitPacket*, NetPacket**, size_t*); // 1: download done (INIT + held packets, caller frees)

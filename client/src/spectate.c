@@ -141,6 +141,7 @@ void spectate_begin(Client *client) {
     client->camera.zoom = 1.0f;
     hud_ui_hide_death(client); // toggleGameUI(true): the death card goes away
     hud_spectate_reset();
+    client_force_player_positions(client); // resetGameSessionState: no STATE came while we were dead
     printf("[spectate] spectating\n");
 }
 

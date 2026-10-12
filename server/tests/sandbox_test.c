@@ -4,6 +4,7 @@
 // moves, runs chat commands, interacts and leaves; the sandbox restarts cleanly.
 // Run from the repository root: ./<build>/sandbox_test
 #include <server_sandbox.h>
+#include <server.h>
 #include <shared.h>
 #include <map_catalog.h>
 #include <knet.h>
@@ -36,8 +37,8 @@ static void client_send(TestClient *c, const NetPacketType type, const void *pay
 
 // What client/src/net/offline.c does every frame: step, then drain into packets (PING -> PONG).
 static void pump(TestClient *c, const int frames) {
-    for (int f = 0; f < frames; f++) {
-        sandbox_step(1.0 / 60.0);
+    for (int f = 0; f < (frames ? frames : 1); f++) {
+        if (frames) sandbox_step(1.0 / 60.0); // 0: only drain what is waiting
         uint8_t bytes[2048];
         int n;
         while ((n = sandbox_receive(c->fd, bytes, sizeof(bytes))) > 0) {
@@ -370,9 +371,121 @@ static void test_wpc_peer_mix(void) {
     sandbox_stop();
 }
 
+// STATE packets in c->packets[from..] about `uid` (-1: any)
+static int states_about(const TestClient *c, const int from, const int uid) {
+    int n = 0;
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_STATE || c->packets[i].length != sizeof(NetStatePacket)) continue;
+        NetStatePacket state;
+        memcpy(&state, c->packets[i].payload, sizeof(state));
+        n += uid < 0 || state.uid == uid;
+    }
+    return n;
+}
+
+static int index_of_kill(const TestClient *c, const int from, const int victim_uid, NetKillPacket *out) {
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_KILL || c->packets[i].length != sizeof(NetKillPacket)) continue;
+        memcpy(out, c->packets[i].payload, sizeof(*out));
+        if (out->victim_uid == victim_uid) return i;
+    }
+    return -1;
+}
+
+static int index_of_spawn(const TestClient *c, const int from, const int uid) {
+    for (int i = from; i < c->count; i++) {
+        NetSpawnPacket spawn;
+        if (c->packets[i].type == NET_PACKET_SPAWN && net_packet_read_spawn(&spawn, &c->packets[i]) && spawn.uid == uid && spawn.active) return i;
+    }
+    return -1;
+}
+
+static const Player *server_player(const int uid) {
+    for (size_t i = 0; i < g_server->game.player_count; i++) {
+        if (g_server->game.players[i] && g_server->game.players[i]->uid == uid) return g_server->game.players[i];
+    }
+    return NULL;
+}
+
+// v7.1.4 game.js updateState: the "k" player sync goes only to a connection whose player is
+// active or that spectates (and is not locked), and lists only active players. Between its
+// death ("3") and its respawn a player gets no player positions at all, and nobody gets the
+// dead player's; the server drops the dead player's inputs (net_handle_input_frame).
+static void test_dead_player_sync(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "sandbox_start (dead sync)");
+
+    static TestClient a, b;
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR_V7, 0}; // 1.3.0: ENT V7
+    const NetEntPacket ent = {.class_index = 0, .secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+    mix_join(&a, &hello, sizeof(hello), &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    pump(&a, 30);
+    mix_join(&b, &hello, sizeof(hello), &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    for (int f = 0; f < 60; f++) {
+        pump(&a, 1);
+        pump(&b, 0);
+    }
+
+    NetSpawnPacket me_a = {0}, me_b = {0};
+    CHECK(spawn_of(&a, 1, &me_a) && spawn_of(&b, 1, &me_b) && me_a.uid != me_b.uid, "both spawned (%d, %d)", me_a.uid, me_b.uid);
+    CHECK(states_about(&b, 0, me_a.uid) > 5, "alive: B gets A's position (%d)", states_about(&b, 0, me_a.uid));
+    CHECK(states_about(&a, 0, me_b.uid) > 5, "alive: A gets B's position (%d)", states_about(&a, 0, me_b.uid));
+
+    chat(&b, "/kill");
+    for (int f = 0; f < 10; f++) {
+        pump(&a, 1);
+        pump(&b, 0);
+    }
+    NetKillPacket kill = {0};
+    const int kill_a = index_of_kill(&a, 0, me_b.uid, &kill);
+    const int kill_b = index_of_kill(&b, 0, me_b.uid, &kill);
+    CHECK(kill_a >= 0 && kill_b >= 0, "KILL of B reaches both (%d, %d)", kill_a, kill_b);
+    const Player *dead = server_player(me_b.uid);
+    CHECK(dead && !dead->active, "B is dead on the server");
+    const vec3 corpse = dead ? dead->position : (vec3) {0};
+
+    // the death screen until the respawn delay is over; B's client keeps sending movement (an
+    // old client, or a stale batch): the server must not move the dead player
+    const int dead_frames = (int) fmaxf(120.0f, (kill.respawn_delay + 0.5f) * 60.0f);
+    for (int f = 0; f < dead_frames; f++) {
+        const NetInputPacket input = {.seq = 1000 + f, .move_dir = 0, .delta = 1.0f / 60.0f, .y_dir = me_b.direction[1]};
+        client_send(&b, NET_PACKET_INPUT, &input, sizeof(input));
+        pump(&a, 1);
+        pump(&b, 0);
+    }
+    if (kill_a >= 0 && kill_b >= 0) {
+        CHECK(states_about(&b, kill_b + 1, -1) == 0, "dead: B gets no player positions (%d STATE)", states_about(&b, kill_b + 1, -1));
+        CHECK(states_about(&a, kill_a + 1, me_b.uid) == 0, "dead: nobody gets B's position (%d STATE)", states_about(&a, kill_a + 1, me_b.uid));
+        CHECK(states_about(&a, kill_a + 1, me_a.uid) > 5, "alive: A's sync goes on (%d)", states_about(&a, kill_a + 1, me_a.uid));
+        int recon = 0;
+        for (int i = kill_b + 1; i < b.count; i++) recon += b.packets[i].type == NET_PACKET_RECON;
+        CHECK(recon == 0, "dead: no RECON to B (%d)", recon);
+    }
+    dead = server_player(me_b.uid);
+    CHECK(dead && !dead->active && dead->position.x == corpse.x && dead->position.y == corpse.y && dead->position.z == corpse.z,
+          "dead: B's inputs are ignored");
+
+    // respawn (ENT after the death delay): the sync resumes both ways
+    const int before_a = a.count, before_b = b.count;
+    client_send(&b, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    for (int f = 0; f < 60; f++) {
+        pump(&a, 1);
+        pump(&b, 0);
+    }
+    const int spawn_b = index_of_spawn(&b, before_b, me_b.uid);
+    CHECK(spawn_b >= 0, "B respawned");
+    CHECK(spawn_b >= 0 && states_about(&b, spawn_b, me_a.uid) > 5, "respawned: B gets A's position again");
+    CHECK(states_about(&a, before_a, me_b.uid) > 5, "respawned: A gets B's position again (%d)", states_about(&a, before_a, me_b.uid));
+    CHECK(!a.closed && !b.closed, "nobody dropped (dead sync)");
+    sandbox_stop();
+}
+
 int main(void) {
     test_join_move_leave();
     test_wpc_peer_mix();
+    test_dead_player_sync();
     test_restart_and_disconnect();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);

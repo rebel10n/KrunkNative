@@ -997,6 +997,17 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     client_player_spawned(client, player, packet->is_you);
 }
 
+// players.js forcePos() (index.js resetGameSessionState on "start": our spawn, spectating):
+// the server sends no player positions while we are dead or in the menu (net.c
+// net_broadcast_states_tick), so every remote player snaps to its next STATE instead of
+// gliding from where it was when we died.
+void client_force_player_positions(Client *client) {
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        Player *player = client->game.players[i];
+        if (player && player != client->me) player->force_pos = 1;
+    }
+}
+
 // A player just (re)spawned in client->game (SPAWN above, or a bot of the client's own game):
 // its meshes, and for us the in-game state.
 void client_player_spawned(Client *client, Player *player, const int is_you) {
@@ -1004,6 +1015,7 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
         client->me = player;
         player->is_you = 1;
         client_recon_reset(client); // "start" -> CONTROLS.reset(): tmpInpts emptied, isn = 0
+        client_force_player_positions(client);
         // Our prediction copy has to slide like the server's player (v3.1.1 reads it back from
         // the spawn data, index.js serverSetting.slidCont); the offline sandbox server too.
         player->slid_cont = ui_controls_settings()->slid_cont ? 1 : 0;
