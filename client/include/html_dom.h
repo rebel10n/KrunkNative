@@ -105,6 +105,17 @@ void html_timers_tick(double now_ms);                                 // called 
 // (shared/src/utils.c asset_url: Module.krunkNativeAssetBase + assets/<path>?v=<version>).
 void html_dom_asset_url(const char *path, char *out, size_t n);
 
+// ---- page address + clipboard
+#ifndef KN_PUBLIC_ORIGIN
+#define KN_PUBLIC_ORIGIN "https://krunk.io" // the public web client (native invite links point there)
+#endif
+// The page URL is web only (window.location / window.history): the native window has no
+// address bar, so html_page_query() answers -1 and html_page_set_url() does nothing there.
+int  html_page_query(char *buf, size_t n);              // location.search without the '?'; -1 natively
+void html_page_set_url(const char *href, int push);     // history.replaceState / pushState(document.title, document.title, href)
+void html_page_origin(char *buf, size_t n);             // location.protocol + "//" + location.host; native: the public site (KN_PUBLIC_ORIGIN)
+void html_clipboard_write(const char *text);            // UTILS.copyToClipboard: web navigator.clipboard, native the OS clipboard
+
 // ---- storage (localStorage equivalent): native $XDG_CONFIG_HOME/krunknative/<key>.json, web localStorage
 int  html_storage_get(const char *key, char *buf, size_t n);          // -1 if absent
 void html_storage_set(const char *key, const char *value);

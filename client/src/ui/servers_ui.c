@@ -31,15 +31,15 @@
 #define SERVER_BROWSER_RATE_MS 10000.0 // config.serverBrowserRate
 #define RESTORE_WAIT_SECONDS 2.0       // startup seek waits this long for the saved session
 
-// config.regionNames
+// config.regionNames. KrunkNative's regions are its edge locations, and the id the game
+// servers announce (server.cfg `region`, deploy/ansible kn_gameserver_region) is the 2-letter
+// code shown everywhere (server browser groups, the menu's region label, the region pickers);
+// the place name is only a tooltip.
 static const struct {
-    const char *id, *name;
+    const char *id, *code, *name;
 } k_regions[] = {
-    {"local", "Local"}, {"us-nj", "New York"}, {"us-il", "Chicago"}, {"us-tx", "Dallas"}, {"us-wa", "Seattle"},
-    {"us-ca-la", "Los Angeles"}, {"us-ga", "Atlanta"}, {"nl-ams", "Amsterdam"}, {"gb-lon", "London"},
-    {"de-fra", "Frankfurt"}, {"us-ca-sv", "Silicon Valley"}, {"au-syd", "Sydney"}, {"fr-par", "Paris"},
-    {"jb-hnd", "Tokyo"}, {"us-fl", "Miami"}, {"sgp", "Singapore"}, {"blr", "India"}, {"brz", "Brazil"},
-    {"me-bhn", "Middle East"}, {"af-ct", "South Africa"},
+    {"SV", "SV", "Santa Clara"}, {"LA", "LA", "Los Angeles"}, {"CH", "CH", "Chicago"}, {"VA", "VA", "Ashburn, Virginia"},
+    {"local", "LO", "Local"},
 };
 
 static Client *g_client;
@@ -49,6 +49,9 @@ static double g_start_time;
 static char g_region[32];        // region id the client seeks in
 static char g_game_id[160];      // gameId: the lobby this client is in (or joining)
 static int g_seek_inflight;
+static char g_seek_game[160];    // the game id the running seek asked for ("" = any)
+static char g_account_game[160]; // AccountRequired: the online-mode lobby a guest asked for (joined after login)
+static void page_game_url(const char *id);
 // Source-console style pinning: a server the user picked by hand (console `connect`, Direct
 // Connect, the finder list) or a console `disconnect` is never overridden by automatic
 // matchmaking (the startup seek, the account-change reseek, a late seek answer). Only an
@@ -72,11 +75,46 @@ static int g_hide_full = -1;     // dK (krk_hideFull), -1 = not read yet
 
 static double now_ms(void) { return glfwGetTime() * 1000.0; }
 
+// The region's display code ("SV"); an id the table does not know shows as itself.
 static const char *region_name(const char *id) {
+    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
+        if (id && !strcmp(k_regions[i].id, id)) return k_regions[i].code;
+    }
+    return id && id[0] ? id : "?";
+}
+
+// The place name, for tooltips ("" unknown).
+static const char *region_full_name(const char *id) {
     for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
         if (id && !strcmp(k_regions[i].id, id)) return k_regions[i].name;
     }
-    return id && id[0] ? id : "Unknown";
+    return "";
+}
+
+// <option>s of the region pickers (Settings > Default Region, the ranked queue): every known
+// region plus the ones the matchmaker lists, `selected` marked.
+static cJSON *g_ping_regions;    // the last /mm/ping-list answer (owned)
+char *servers_ui_region_options(const char *selected) {
+    StrBuf sb = {0};
+    const char *seen[64];
+    int count = 0;
+    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]) && count < 64; i++) seen[count++] = k_regions[i].id;
+    const cJSON *r;
+    cJSON_ArrayForEach(r, g_ping_regions) {
+        int known = 0;
+        for (int i = 0; i < count; i++) known |= r->string && !strcmp(seen[i], r->string);
+        if (!known && r->string && count < 64) seen[count++] = r->string;
+    }
+    for (int i = 0; i < count; i++) {
+        sb_append(&sb, "<option value='");
+        sb_append_esc(&sb, seen[i]);
+        sb_append(&sb, "' title='");
+        sb_append_esc(&sb, region_full_name(seen[i]));
+        sb_appendf(&sb, "'%s>", selected && !strcmp(selected, seen[i]) ? " selected" : "");
+        sb_append_esc(&sb, region_name(seen[i]));
+        sb_append(&sb, "</option>");
+    }
+    return sb_finish(&sb);
 }
 
 // A brain-assigned lobby (net_join.c sends the session token only there): matchmaking on
@@ -125,6 +163,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
     pthread_mutex_unlock(&client->net_lock);
 
     printf("[mm] joining %s at %s:%d\n", g_game_id, host, port);
+    page_game_url(g_game_id);
     client_net_switch_server(client);
 }
 
@@ -150,6 +189,7 @@ void servers_ui_redirect(const char *game_id, const char *host, const int port, 
 void servers_ui_join_ticket(const char *host, const int port, const char *game_id, const char *ticket, const char *web_url) {
     if (!g_client || !host) return;
     join_server(host, port, game_id, ticket, web_url);
+    page_game_url(NULL); // a ranked match (gameConfig.isFromQueue): the link is "/"
 }
 
 // v3.1.1 matchmaker error names -> i18n matchmaker.* texts (the startup seek's catch)
@@ -159,9 +199,108 @@ static const char *seek_error_text(const char *error) {
     if (!strcmp(error, "GameFull")) return "Game is full.";
     if (!strcmp(error, "NoServersMatchQuery") || !strcmp(error, "updating")) return "GAME UPDATING";
     if (!strcmp(error, "NoAvailableServers") || !strcmp(error, "no_lobbies")) return "Servers are at Max Capacity";
-    // KrunkNative: the requested lobby runs online_mode (verified accounts) and we seek as a guest
-    if (!strcmp(error, "AccountRequired")) return "Log in to join this game.";
+    // KrunkNative: the requested lobby runs online_mode (verified accounts) and we seek as a
+    // guest; the error screen adds a "Log in" link (servers_ui_account_required)
+    if (!strcmp(error, "AccountRequired")) return "This game requires an account.";
     return error;
+}
+
+// The error screen of a failed seek for an online-mode lobby offers "Log in" (menu_ui.c).
+int servers_ui_account_required(void) { return g_account_game[0] && !account_get(); }
+
+// ------------------------------------------------------------------ game links
+// v3.1.1 ClientManager.generateHref(id) = "/?game=" + id, the id unescaped: the address bar
+// and invite links read ?game=CHITOWN2:kz862. Only what would break the query is escaped
+// (% & # + space, quotes, controls). Readers accept both forms: servers_ui_query and
+// URLSearchParams decode %3A. The page URL is web only (html_page_set_url: no-op natively).
+static char g_link_game[160];    // the lobby the address bar / Invite name ("" = none)
+
+static size_t link_escape(char *out, const size_t n, const char *id) {
+    size_t len = 0;
+    for (const unsigned char *p = (const unsigned char *) (id ? id : ""); *p && len + 4 < n; p++) {
+        if (*p <= ' ' || *p >= 0x7f || strchr("%&#+\"'<>", *p)) len += (size_t) snprintf(out + len, n - len, "%%%02X", *p);
+        else out[len++] = (char) *p;
+    }
+    if (n) out[len < n ? len : n - 1] = 0;
+    return len;
+}
+
+// The address bar follows the lobby (ClientManager.seek replaceState; "/" when there is none,
+// like devConsole's disconnect). The page's other parameters stay; offline / sandbox pages
+// (?offline=1 ...) are not touched.
+static void page_write_game(const char *id) {
+    snprintf(g_link_game, sizeof(g_link_game), "%s", id ? id : "");
+    char query[512];
+    if (html_page_query(query, sizeof(query)) < 0) return; // native: no address bar
+    char href[768] = "/", esc[480];
+    size_t len = 1;
+    if (id && id[0]) {
+        link_escape(esc, sizeof(esc), id);
+        len += (size_t) snprintf(href + len, sizeof(href) - len, "?game=%s", esc);
+    }
+    for (char *tok = strtok(query, "&"); tok && len < sizeof(href); tok = strtok(NULL, "&")) {
+        if (!tok[0] || !strncmp(tok, "game=", 5) || !strcmp(tok, "game")) continue;
+        len += (size_t) snprintf(href + len, sizeof(href) - len, "%c%s", len == 1 ? '?' : '&', tok);
+    }
+    html_page_set_url(href, 0);
+}
+
+static void page_game_url(const char *id) {
+    if (g_client && g_client->offline) return;
+    page_write_game(id);
+}
+
+// Sessions without a matchmade lobby id: a direct server (console connect, Direct Connect,
+// a finder row) the brain lists gets its lobby id from the game list, so the address bar and
+// Invite name it; switching to the offline game drops ?game= (v3.1.1: the offline page has
+// no game link). Natively console connect resolves to an IP, which the brain's hostnames do
+// not match: no link there (and no address bar).
+static char g_link_lookup[200];  // "host:port" looked up for the current direct session
+static void on_link_list(void *user, const int status, const char *body, const size_t length) {
+    (void) user;
+    (void) length;
+    if (status != 200 || !g_client || g_pin != PIN_DIRECT) return;
+    cJSON *res = cJSON_Parse(body);
+    const cJSON *t;
+    cJSON_ArrayForEach(t, cJSON_GetObjectItem(res, "games")) {
+        const cJSON *meta = cJSON_GetArrayItem(t, 4);
+        const char *h = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host"));
+        const cJSON *p = cJSON_GetObjectItem(meta, "port");
+        const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
+        if (id && h && cJSON_IsNumber(p) && p->valueint == g_client->net_port && !strcasecmp(h, g_client->net_address)) {
+            printf("[mm] direct server %s:%d is lobby %s\n", h, p->valueint, id);
+            page_game_url(id);
+            break;
+        }
+    }
+    cJSON_Delete(res);
+}
+
+static void link_tick(Client *client) {
+    static int was_offline = -1;
+    if (was_offline < 0) was_offline = client->offline;
+    if (client->offline != was_offline) {
+        was_offline = client->offline;
+        if (client->offline && g_link_game[0]) page_write_game(NULL); // left for the offline game
+    }
+    if (g_pin != PIN_DIRECT || !client->net_connected || client->offline) {
+        if (g_pin != PIN_DIRECT) g_link_lookup[0] = 0;
+        return;
+    }
+    char key[sizeof(g_link_lookup)];
+    snprintf(key, sizeof(key), "%s:%u", client->net_address, (unsigned int) client->net_port);
+    if (!strcmp(key, g_link_lookup) || backend_available() != 1) return;
+    snprintf(g_link_lookup, sizeof(g_link_lookup), "%s", key);
+    backend_http_get("/mm/game-list?hostname=krunknative", on_link_list, NULL);
+}
+
+// copyInviteLink: location.protocol + "//" + location.host + "/?game=" + gameId (native: the
+// public web client's origin).
+void servers_ui_invite_link(char *out, const size_t n) {
+    char origin[256], esc[480];
+    html_page_origin(origin, sizeof(origin));
+    link_escape(esc, sizeof(esc), g_link_game);
+    snprintf(out, n, "%s/?game=%s", origin, esc);
 }
 
 // fatalError(message): the connection error screen (retry link = seek again)
@@ -188,6 +327,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         const cJSON *region = cJSON_GetObjectItem(res, "region");
         if (cJSON_IsString(region)) snprintf(g_region, sizeof(g_region), "%s", region->valuestring);
         g_quick_join_left = 0;
+        g_account_game[0] = 0;
         join_server(host->valuestring, port->valueint, cJSON_IsString(game) ? game->valuestring : "",
                     cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL);
     } else if (quiet && g_quick_join_left > 0) {
@@ -196,6 +336,9 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     } else {
         const cJSON *err = cJSON_GetObjectItem(res, "error");
         fprintf(stderr, "[mm] seek failed (HTTP %d): %s\n", status, cJSON_IsString(err) ? err->valuestring : "no response");
+        if (cJSON_IsString(err) && !strcmp(err->valuestring, "AccountRequired") && g_seek_game[0]) {
+            snprintf(g_account_game, sizeof(g_account_game), "%s", g_seek_game); // log in -> join it
+        }
         fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameFull" : NULL));
     }
     cJSON_Delete(res);
@@ -207,6 +350,8 @@ static void on_seek(void *user, const int status, const char *body, const size_t
 static void seek(const char *game_id, const int auto_change, void *quiet) {
     char path[1024], enc[512];
     g_pin = PIN_NONE;
+    snprintf(g_seek_game, sizeof(g_seek_game), "%s", game_id ? game_id : "");
+    g_account_game[0] = 0;
     backend_url_encode(enc, sizeof(enc), g_region);
     int n = snprintf(path, sizeof(path), "/mm/seek-game?hostname=krunknative&region=%s&autoChangeGame=%s", enc, auto_change ? "true" : "false");
     if (game_id && game_id[0]) {
@@ -243,9 +388,17 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     }
     if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", cached[0] ? cached : "local");
     html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
+    if (cJSON_IsObject(list)) {
+        cJSON_Delete(g_ping_regions);
+        g_ping_regions = list; // the region pickers' options
+        list = NULL;
+    }
     cJSON_Delete(list);
     if (g_pin != PIN_NONE) printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
-    else seek(requested_game, 1, NULL);
+    // v3.1.1's startup seek sends autoChangeGame: false - a ?game= that is gone, full or needs
+    // an account shows its error (Game not found. / ...) with the "seek a new game" link
+    // instead of quietly landing somewhere else
+    else seek(requested_game, !requested_game, NULL);
     free((void *) requested_game);
 }
 
@@ -273,6 +426,52 @@ static void switch_server(const char *id) {
 #endif
 }
 
+// v3.1.1 f9(text) - the Join window (joinGame: gameURL.value) and openJoinWindow's clipboard:
+// a game link "[http(s)://][www.]<site>/?game=<id>" (any of our sites; %3A or a bare ':')
+// or a bare lobby id "NODE:lobby" switches to that game; anything else (re)opens the Join
+// window (showWindow(24)). Party links are not ported (no parties): the window again.
+int servers_ui_join_link(const char *text) {
+    char buf[512], id[160];
+    while (text && (*text == ' ' || *text == '\t')) text++;
+    snprintf(buf, sizeof(buf), "%s", text ? text : "");
+    size_t n = strlen(buf);
+    while (n && (buf[n - 1] == ' ' || buf[n - 1] == '\t' || buf[n - 1] == '\r' || buf[n - 1] == '\n')) buf[--n] = 0;
+    id[0] = 0;
+    const char *q = strstr(buf, "/?");
+    if (q && (strncmp(buf, "http", 4) == 0 || strchr(buf, '.') < q || strchr(buf, ':') < q)) {
+        // a link: its query's game= (the page's ?game= reader decodes %XX / '+')
+        const char *g = strstr(q + 1, "game=");
+        if (g && (g[-1] == '?' || g[-1] == '&')) {
+            size_t len = 0;
+            for (g += 5; *g && *g != '&' && *g != '#' && len + 1 < sizeof(id); g++) {
+                if (*g == '%' && isxdigit((unsigned char) g[1]) && isxdigit((unsigned char) g[2])) {
+                    char hex[3] = {g[1], g[2], 0};
+                    id[len++] = (char) strtol(hex, NULL, 16);
+                    g += 2;
+                } else {
+                    id[len++] = *g == '+' ? ' ' : *g;
+                }
+            }
+            id[len] = 0;
+        }
+    } else {
+        // /^([A-Z]+):(\w+)$/ - KrunkNative node ids carry digits (CHITOWN2:kz862)
+        const char *colon = strchr(buf, ':');
+        int ok = colon && colon > buf && colon[1];
+        for (const char *p = buf; ok && p < colon; p++) ok = isupper((unsigned char) *p) || (p > buf && isdigit((unsigned char) *p));
+        for (const char *p = colon ? colon + 1 : buf; ok && *p; p++) ok = isalnum((unsigned char) *p) || *p == '_';
+        if (ok) snprintf(id, sizeof(id), "%s", buf);
+    }
+    if (!id[0] || !g_brain_mode || backend_available() != 1) {
+        menu_show_window(MENU_WINDOW_JOIN, 0);
+        return 0;
+    }
+    printf("[mm] join link: %s\n", id);
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    switch_server(id); // web: location -> ?game=<id> (f9: location.href = link); native: seek it
+    return 1;
+}
+
 // setGameInstanceId: fetchGameInfo(id) -> menuRegionLabel = regionNames[regionId]
 static void on_game_info(void *user, const int status, const char *body, const size_t length) {
     (void) user;
@@ -288,17 +487,35 @@ static void on_game_info(void *user, const int status, const char *body, const s
 
 // ------------------------------------------------------------------ windows[1]
 
-static int search_matches(const cJSON *tuple) {
-    const cJSON *meta = cJSON_GetArrayItem(tuple, 4);
-    const cJSON *label = cJSON_GetObjectItem(meta, "i");
-    if (!cJSON_IsObject(meta)) return 0;
-    if (!g_search[0]) return 1;
+// The server finder (online_mode.h: GET <finder>?..., services/brain/finder.c) lists dedicated
+// servers it verified with the KNINFO query. Its entries join the brain's lobbies in the same
+// region groups (one list, v3.1.1's markup): a finder entry for a host:port the brain already
+// lists is the same server and is dropped; the rest become game-list style tuples
+//   ["host:port", region, players, max, {i: map, n: name, host, port, onlineMode, finder: true}]
+// Their row joins the host directly (finderJoin): no lobby, no ticket.
+static cJSON *g_finder_servers;   // GET <finder> "servers" (owned)
+static cJSON *g_finder_rows;      // the finder-only entries as tuples (owned, rebuilt by build_groups)
+static double g_finder_players;   // players on finder-only servers (the "In Game" total)
+static int g_finder_loading;
+static double g_finder_loaded_ms = -1e18;
+
+static int logged_in(void) { return account_get() && account_session_token()[0]; }
+
+static int search_has(const char *hay_in, const char *needle_in) {
     char hay[160], needle[64];
-    snprintf(hay, sizeof(hay), "%s", cJSON_IsString(label) ? label->valuestring : "");
-    snprintf(needle, sizeof(needle), "%s", g_search);
+    snprintf(hay, sizeof(hay), "%s", hay_in ? hay_in : "");
+    snprintf(needle, sizeof(needle), "%s", needle_in);
     for (char *p = hay; *p; p++) *p = (char) tolower((unsigned char) *p);
     for (char *p = needle; *p; p++) *p = (char) tolower((unsigned char) *p);
     return strstr(hay, needle) != NULL;
+}
+
+static int search_matches(const cJSON *tuple) {
+    const cJSON *meta = cJSON_GetArrayItem(tuple, 4);
+    if (!cJSON_IsObject(meta)) return 0;
+    if (!g_search[0]) return 1;
+    return search_has(cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i")), g_search) ||
+           search_has(cJSON_GetStringValue(cJSON_GetObjectItem(meta, "n")), g_search);
 }
 
 typedef struct {
@@ -332,7 +549,82 @@ static int cmp_groups(const void *a, const void *b) {
     return (y->order ? y->order : -1) - (x->order ? x->order : -1);
 }
 
-// getServers(regionIndex): builds the region groups; returns the group count.
+// The brain lobbies the list shows (only while the brain answers).
+static const cJSON *brain_games(void) { return backend_available() == 1 ? g_games : NULL; }
+
+// A brain lobby runs on host:port (the game-list meta carries both).
+static int brain_lists(const char *host, const int port) {
+    const cJSON *t;
+    cJSON_ArrayForEach(t, brain_games()) {
+        const cJSON *meta = cJSON_GetArrayItem(t, 4);
+        const char *h = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host"));
+        const cJSON *p = cJSON_GetObjectItem(meta, "port");
+        if (h && cJSON_IsNumber(p) && p->valueint == port && !strcasecmp(h, host)) return 1;
+    }
+    return 0;
+}
+
+// g_finder_servers minus the brain's own servers, as tuples (g_finder_rows).
+static void rebuild_finder_rows(void) {
+    cJSON_Delete(g_finder_rows);
+    g_finder_rows = cJSON_CreateArray();
+    g_finder_players = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, g_finder_servers) {
+        const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(e, "host"));
+        const cJSON *port = cJSON_GetObjectItem(e, "port");
+        if (!host || !host[0] || !cJSON_IsNumber(port)) continue;
+        const int online = cJSON_IsTrue(cJSON_GetObjectItem(e, "online_mode"));
+        if (online && !online_mode_online()) continue; // offline mode cannot join online_mode servers
+        if (brain_lists(host, port->valueint)) continue;  // the same server as a brain lobby
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(e, "name"));
+        const char *map = cJSON_GetStringValue(cJSON_GetObjectItem(e, "map"));
+        const char *region = cJSON_GetStringValue(cJSON_GetObjectItem(e, "region"));
+        const int players = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "players"));
+        const int max = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "max"));
+        char id[192];
+        snprintf(id, sizeof(id), "%s:%d", host, port->valueint);
+        cJSON *t = cJSON_CreateArray();
+        cJSON_AddItemToArray(t, cJSON_CreateString(id));
+        cJSON_AddItemToArray(t, cJSON_CreateString(region ? region : "")); // "" = unknown: its own "?" group
+        cJSON_AddItemToArray(t, cJSON_CreateNumber(players > 0 ? players : 0));
+        cJSON_AddItemToArray(t, cJSON_CreateNumber(max > 0 ? max : 0));
+        cJSON *meta = cJSON_CreateObject();
+        cJSON_AddStringToObject(meta, "i", map && map[0] ? map : name && name[0] ? name : host);
+        cJSON_AddStringToObject(meta, "n", name && name[0] ? name : host);
+        cJSON_AddStringToObject(meta, "host", host);
+        cJSON_AddNumberToObject(meta, "port", port->valueint);
+        if (online) cJSON_AddTrueToObject(meta, "onlineMode");
+        cJSON_AddTrueToObject(meta, "finder");
+        cJSON_AddItemToArray(t, meta);
+        cJSON_AddItemToArray(g_finder_rows, t);
+        g_finder_players += players > 0 ? players : 0;
+    }
+}
+
+static void group_add(ServerGroup *groups, int *count, const int max, const char *preferred, const cJSON *t) {
+    const cJSON *meta = cJSON_GetArrayItem(t, 4);
+    const cJSON *region = cJSON_GetArrayItem(t, 1);
+    if (!cJSON_IsObject(meta) || !cJSON_IsString(region)) return;
+    int gi = -1;
+    for (int i = 1; i < *count; i++) {
+        if (!strcmp(groups[i].key, region->valuestring)) gi = i;
+    }
+    if (gi < 0 && *count < max) {
+        gi = (*count)++;
+        snprintf(groups[gi].key, sizeof(groups[gi].key), "%s", region->valuestring);
+        groups[gi].name = region_name(region->valuestring);
+        if (!strcmp(preferred, region->valuestring)) groups[gi].order = 1;
+    }
+    if (gi < 0) return;
+    const int target = meta_flag(t, "cs") ? 0 : gi;
+    const int players = tuple_int(t, 2), max_players = tuple_int(t, 3);
+    if (!g_search[0] || search_matches(t)) groups[target].players += players < max_players ? players : max_players;
+    if (groups[target].game_count < 256) groups[target].games[groups[target].game_count++] = t;
+}
+
+// getServers(regionIndex): builds the region groups (brain lobbies + finder-only servers);
+// returns the group count.
 static int build_groups(ServerGroup *groups, const int max) {
     char preferred[32] = "";
     if (html_storage_get("pingRegion7", preferred, sizeof(preferred)) < 0) preferred[0] = 0;
@@ -342,27 +634,10 @@ static int build_groups(ServerGroup *groups, const int max) {
     groups[0].name = "Custom Games";
     groups[0].order = 1;
     count = 1;
+    rebuild_finder_rows();
     const cJSON *t;
-    cJSON_ArrayForEach(t, g_games) {
-        const cJSON *meta = cJSON_GetArrayItem(t, 4);
-        const cJSON *region = cJSON_GetArrayItem(t, 1);
-        if (!cJSON_IsObject(meta) || !cJSON_IsString(region)) continue;
-        int gi = -1;
-        for (int i = 1; i < count; i++) {
-            if (!strcmp(groups[i].key, region->valuestring)) gi = i;
-        }
-        if (gi < 0 && count < max) {
-            gi = count++;
-            snprintf(groups[gi].key, sizeof(groups[gi].key), "%s", region->valuestring);
-            groups[gi].name = region_name(region->valuestring);
-            if (!strcmp(preferred, region->valuestring)) groups[gi].order = 1;
-        }
-        if (gi < 0) continue;
-        const int target = meta_flag(t, "cs") ? 0 : gi;
-        const int players = tuple_int(t, 2), max_players = tuple_int(t, 3);
-        if (!g_search[0] || search_matches(t)) groups[target].players += players < max_players ? players : max_players;
-        if (groups[target].game_count < 256) groups[target].games[groups[target].game_count++] = t;
-    }
+    cJSON_ArrayForEach(t, brain_games()) group_add(groups, &count, max, preferred, t);
+    cJSON_ArrayForEach(t, g_finder_rows) group_add(groups, &count, max, preferred, t);
     qsort(groups, (size_t) count, sizeof(*groups), cmp_groups);
     g_sort_groups = groups;
     for (int i = 0; i < count; i++) qsort((void *) groups[i].games, (size_t) groups[i].game_count, sizeof(groups[i].games[0]), cmp_games);
@@ -372,12 +647,14 @@ static int build_groups(ServerGroup *groups, const int max) {
 static char *get_servers(void) {
     static ServerGroup groups[24];
     const int count = build_groups(groups, 24);
+    const int guest = !logged_in();
     StrBuf sb = {0};
     for (int h = 0; h < count; h++) {
         const ServerGroup *g = &groups[h];
         const int open = g_expanded == h;
-        sb_appendf(&sb, "<div class='menuSelectorHeader' onclick='setExpandedRegion(%d)' style='cursor: pointer;'><span class='material-icons plusOrMinus'>%s</span> ",
-                   open ? -1 : h, open ? "expand_more" : "navigate_next");
+        sb_appendf(&sb, "<div class='menuSelectorHeader' onclick='setExpandedRegion(%d)' style='cursor: pointer;' title='", open ? -1 : h);
+        sb_append_esc(&sb, strcmp(g->key, "custom") ? region_full_name(g->key) : "");
+        sb_appendf(&sb, "'><span class='material-icons plusOrMinus'>%s</span> ", open ? "expand_more" : "navigate_next");
         sb_append_esc(&sb, g->name);
         sb_appendf(&sb, "<span style='float:right'>%.0f online</span></div><div class='quickJoin' onclick='quickJoinRegion(%d)'>Quick Join</div>", g->players, h);
         if (!open) continue;
@@ -389,18 +666,37 @@ static char *get_servers(void) {
             if (hide_full() && players >= max_players) continue;
             if (g_search[0] && !search_matches(t)) continue;
             shown++;
+            const cJSON *meta = cJSON_GetArrayItem(t, 4);
             const cJSON *id = cJSON_GetArrayItem(t, 0);
-            const cJSON *label = cJSON_GetObjectItem(cJSON_GetArrayItem(t, 4), "i");
+            const cJSON *label = cJSON_GetObjectItem(meta, "i");
             const char *ids = cJSON_IsString(id) ? id->valuestring : "";
-            const int selected = g_game_id[0] && !strcmp(g_game_id, ids);
-            sb_appendf(&sb, "<div class='menuSelector%s' onclick='checkedSwitchServer(\"", selected ? " selectedMenuSelector" : "");
-            sb_append_esc(&sb, ids);
-            sb_append(&sb, "\", this)'>"); // v3.1.1: this.querySelector(".serverPCount") (resolved in C)
+            const int finder = meta_flag(t, "finder");
+            const int selected = !finder && g_game_id[0] && !strcmp(g_game_id, ids);
+            if (finder) {
+                // a finder-only server: joined directly (finderJoin(host, port))
+                sb_append(&sb, "<div class='menuSelector' onclick='finderJoin(\"");
+                sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host")));
+                sb_appendf(&sb, "\", %d)'>", (int) cJSON_GetNumberValue(cJSON_GetObjectItem(meta, "port")));
+            } else {
+                sb_appendf(&sb, "<div class='menuSelector%s' onclick='checkedSwitchServer(\"", selected ? " selectedMenuSelector" : "");
+                sb_append_esc(&sb, ids);
+                sb_append(&sb, "\", this)'>"); // v3.1.1: this.querySelector(".serverPCount") (resolved in C)
+            }
             sb_append_esc(&sb, cJSON_IsString(label) ? label->valuestring : ids);
             if (meta_flag(t, "pr")) sb_append(&sb, " <span class='material-icons' style='color:#FBC02D;vertical-align:middle'>star</span> ");
             if (meta_flag(t, "earnKR")) sb_append(&sb, " <i class='material-icons' style='color:#2196F3;font-size:33px;vertical-align:bottom;'>check_circle</i>");
+            // KrunkNative: online-mode lobbies verify accounts; a guest is told before trying
+            if (meta_flag(t, "onlineMode")) {
+                sb_append(&sb, " <span class='material-icons' style='color:rgba(0,0,0,0.4);font-size:22px;vertical-align:middle' title='Online mode: verified accounts'>lock</span>");
+                if (guest) sb_append(&sb, "<span class='grey' style='font-size:16px'> Account required</span>");
+            }
             sb_appendf(&sb, "<div class='serverPCount'>%d/%d</div>", players < max_players ? players : max_players, max_players);
-            if (meta_flag(t, "cs")) {
+            if (finder) {
+                // like a custom game's node id: the server's own name
+                sb_append(&sb, "<div class='serverRegion'>");
+                sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "n")));
+                sb_append(&sb, " -&nbsp;</div>");
+            } else if (meta_flag(t, "cs")) {
                 char node[64];
                 snprintf(node, sizeof(node), "%s", ids);
                 char *colon = strchr(node, ':');
@@ -418,13 +714,9 @@ static char *get_servers(void) {
 }
 
 // ------------------------------------------------------------------ server finder + direct connect
-// The central finder (online_mode.h: GET <finder>?..., services/brain/finder.c) lists
-// dedicated servers it verified with the KNINFO query; any server is also reachable
-// directly by host:port. Both join without the brain: plain connect, the server's
-// AUTH_CHALLENGE decides between the online-mode handshake and a guest join.
-static cJSON *g_finder_servers;   // GET <finder> "servers" (owned)
-static int g_finder_loading;
-static double g_finder_loaded_ms = -1e18;
+// Any server is also reachable directly by host:port. Finder rows and Direct Connect join
+// without the brain: plain connect, the server's AUTH_CHALLENGE decides between the
+// online-mode handshake and a guest join.
 
 static void on_finder(void *user, const int status, const char *body, const size_t length) {
     (void) user;
@@ -450,63 +742,23 @@ static void finder_refresh(void) {
     g_finder_loading = backend_http_request("GET", url, NULL, on_finder, NULL);
 }
 
-// The Community Servers group (finder rows, filtered by the window's search / Hide Full).
-static void finder_servers_html(StrBuf *sb) {
-    if (!online_finder_url()[0]) return;
-    sb_append(sb, "<div class='menuSelectorHeader'><span class='material-icons plusOrMinus'>public</span> Community Servers");
-    sb_appendf(sb, "<span style='float:right'>%d listed</span></div><div class='menuSelectorHolder'>", cJSON_GetArraySize(g_finder_servers));
-    int shown = 0;
+// The finder entry for host:port is an online-mode server.
+static int finder_online_mode(const char *host, const int port) {
     const cJSON *e;
     cJSON_ArrayForEach(e, g_finder_servers) {
-        const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(e, "host"));
-        const cJSON *port = cJSON_GetObjectItem(e, "port");
-        if (!host || !cJSON_IsNumber(port)) continue;
-        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(e, "name"));
-        const char *map = cJSON_GetStringValue(cJSON_GetObjectItem(e, "map"));
-        const char *mode = cJSON_GetStringValue(cJSON_GetObjectItem(e, "mode"));
-        const char *community = cJSON_GetStringValue(cJSON_GetObjectItem(e, "community"));
-        const int players = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "players"));
-        const int max = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "max"));
-        const int online = cJSON_IsTrue(cJSON_GetObjectItem(e, "online_mode"));
-        if (hide_full() && max > 0 && players >= max) continue;
-        if (g_search[0]) {
-            char hay[256], needle[64];
-            snprintf(hay, sizeof(hay), "%s %s %s", name ? name : "", map ? map : "", community ? community : "");
-            snprintf(needle, sizeof(needle), "%s", g_search);
-            for (char *p = hay; *p; p++) *p = (char) tolower((unsigned char) *p);
-            for (char *p = needle; *p; p++) *p = (char) tolower((unsigned char) *p);
-            if (!strstr(hay, needle)) continue;
-        }
-        if (online && !online_mode_online()) continue; // offline mode cannot join online_mode servers
-        shown++;
-        sb_append(sb, "<div class='menuSelector' onclick='finderJoin(\"");
-        sb_append_esc(sb, host);
-        sb_appendf(sb, "\", %d)'>", port->valueint);
-        sb_append_esc(sb, name && name[0] ? name : host);
-        sb_append(sb, " <span class='grey'>");
-        sb_append_esc(sb, map ? map : "");
-        if (mode && mode[0]) {
-            sb_append(sb, " - ");
-            sb_append_esc(sb, mode);
-        }
-        const cJSON *tag;
-        cJSON_ArrayForEach(tag, cJSON_GetObjectItem(e, "tags")) {
-            if (!cJSON_IsString(tag)) continue;
-            sb_append(sb, " [");
-            sb_append_esc(sb, tag->valuestring);
-            sb_append(sb, "]");
-        }
-        if (community && community[0]) {
-            sb_append(sb, " &middot; ");
-            sb_append_esc(sb, community);
-        }
-        sb_append(sb, "</span>");
-        if (online) sb_append(sb, " <i class='material-icons' style='color:#2196F3;font-size:28px;vertical-align:bottom;' title='Online mode: accounts verified'>verified_user</i>");
-        sb_appendf(sb, "<div class='serverPCount'>%d/%d</div></div>", players, max);
+        const char *h = cJSON_GetStringValue(cJSON_GetObjectItem(e, "host"));
+        const cJSON *p = cJSON_GetObjectItem(e, "port");
+        if (h && host && cJSON_IsNumber(p) && p->valueint == port && !strcasecmp(h, host)) return cJSON_IsTrue(cJSON_GetObjectItem(e, "online_mode"));
     }
-    if (!shown) sb_append(sb, g_finder_loading && !g_finder_servers ? "<div style='margin-left: 30px;margin-top: -5px;margin-bottom: 2px;'>Loading...</div>"
-                                                                   : "<div style='margin-left: 30px;margin-top: -5px;margin-bottom: 2px;'>No Joinable Games Found...</div>");
-    sb_append(sb, "</div>");
+    return 0;
+}
+
+// A guest picked an online-mode server: say so in its count cell and open Login (v3.1.1
+// showWindow(5)); the lobby is joined once the account is in (servers_ui_tick).
+static void need_account(const HtmlElem cell, const char *game_id) {
+    if (cell) html_dom_set_text(cell, "LOG IN");
+    snprintf(g_account_game, sizeof(g_account_game), "%s", game_id ? game_id : "");
+    menu_show_window(5, 0);
 }
 
 // Leave the brain's lobby (if any) and connect straight to host:port.
@@ -517,6 +769,8 @@ static void direct_join(const char *host, const int port) {
     g_pin = PIN_DIRECT;
     g_last_direct = 1;
     g_game_id[0] = 0;
+    g_account_game[0] = 0;
+    page_game_url(NULL); // the lobby id (if a brain lists host:port) follows once connected
     pthread_mutex_lock(&g_client->net_lock);
     memset(&g_client->net_join, 0, sizeof(g_client->net_join));
     snprintf(g_client->net_address, sizeof(g_client->net_address), "%s", host);
@@ -540,6 +794,7 @@ void servers_ui_disconnect(void) {
     if (g_pin != PIN_IDLE) g_last_direct = g_pin == PIN_DIRECT || !g_brain_mode || !g_game_id[0];
     g_pin = PIN_IDLE;
     printf("[mm] disconnected by the user (reconnect: %s)\n", g_last_direct ? "same server" : g_game_id);
+    page_game_url(NULL); // devConsole disconnect: "/"
     if (g_client->offline) local_game_stop(g_client);
     client_net_stop(g_client, "Disconnected");
 }
@@ -599,10 +854,10 @@ static char *gen_list(void) {
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
     // the custom-games carousel (customsInfo.length >= 3) needs user-assets thumbnails: not shown
     sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
-    char *servers = backend_available() == 1 ? get_servers() : NULL;
+    char *servers = backend_available() == 1 || online_finder_url()[0] ? get_servers() : NULL;
     if (servers) sb_append(&sb, servers);
     free(servers);
-    finder_servers_html(&sb);
+    snprintf(total, sizeof(total), "%.0f", (backend_available() == 1 ? g_total_players : 0) + g_finder_players); // after get_servers: + finder-only
     sb_appendf(&sb, "</div><div style='height:10px'></div><b style='color:rgba(0,0,0,0.6)'>%s In Game<span style='float:right;color:rgba(0,0,0,0.6)'>%s on Social</span></b></div>", total, social);
     return sb_finish(&sb);
 }
@@ -657,10 +912,9 @@ static void refresh_holder(void) {
     HtmlElem holder = html_dom_by_id("serverHolder");
     if (!holder) return;
     StrBuf sb = {0};
-    char *html = backend_available() == 1 ? get_servers() : NULL;
+    char *html = backend_available() == 1 || online_finder_url()[0] ? get_servers() : NULL;
     if (html) sb_append(&sb, html);
     free(html);
-    finder_servers_html(&sb);
     html = sb_finish(&sb);
     html_dom_set_html(holder, html);
     free(html);
@@ -693,15 +947,29 @@ static void quick_join_region(const int index) {
     if (index < 0 || index >= count) return;
     const ServerGroup *g = &groups[index];
     g_quick_join = calloc((size_t) g->game_count + 1, sizeof(char *));
+    int brain_rows = 0;
+    const cJSON *finder_pick = NULL; // the fullest joinable finder-only server (rows are sorted)
     for (int i = 0; g_quick_join && i < g->game_count; i++) {
         const cJSON *t = g->games[i];
         const int players = tuple_int(t, 2), max_players = tuple_int(t, 3);
-        if (!(players < max_players && players > 0)) continue; // regionID.games.filter(p < max && p > 0)
         if (g_search[0] && !search_matches(t)) continue;
+        if (!meta_flag(t, "finder")) brain_rows++;
+        if (meta_flag(t, "onlineMode") && !logged_in()) continue; // AccountRequired for a guest
+        if (meta_flag(t, "finder")) {
+            if (!finder_pick && players < max_players) finder_pick = t;
+            continue;
+        }
+        if (!(players < max_players && players > 0)) continue; // regionID.games.filter(p < max && p > 0)
         const cJSON *id = cJSON_GetArrayItem(t, 0);
         if (cJSON_IsString(id)) g_quick_join[g_quick_join_count++] = strdup(id->valuestring);
     }
-    if (!g_quick_join_count && strcmp(g->key, "custom")) {
+    if (!g_quick_join_count && finder_pick && !(brain_rows && backend_available() == 1 && strcmp(g->key, "custom"))) {
+        // a region only finder-listed servers run in (or no brain): join the best one directly
+        const cJSON *meta = cJSON_GetArrayItem(finder_pick, 4);
+        direct_join(cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host")), (int) cJSON_GetNumberValue(cJSON_GetObjectItem(meta, "port")));
+        return;
+    }
+    if (!g_quick_join_count && strcmp(g->key, "custom") && brain_rows && backend_available() == 1) {
         // no populated public lobby: seek the region (the brain picks or spawns one)
         snprintf(g_region, sizeof(g_region), "%s", g->key);
         menu_show_window(MENU_WINDOW_NONE, 0);
@@ -731,6 +999,8 @@ static void on_checked_info(void *user, const int status, const char *body, cons
         if (cell) html_dom_set_text(cell, "ERROR");
     } else if (tuple_int(t, 2) >= tuple_int(t, 3)) {
         if (cell) html_dom_set_text(cell, "FULL");
+    } else if (meta_flag(t, "onlineMode") && !logged_in()) {
+        need_account(cell, g_checked_id); // the seek would answer AccountRequired
     } else {
         menu_show_window(MENU_WINDOW_NONE, 0);
         switch_server(g_checked_id);
@@ -751,12 +1021,19 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "finderJoin")) {
-        if (argc > 1 && args[0].kind == HTML_ARG_STR && args[1].kind == HTML_ARG_NUM) direct_join(args[0].str, (int) args[1].num);
+        if (argc > 1 && args[0].kind == HTML_ARG_STR && args[1].kind == HTML_ARG_NUM) {
+            if (finder_online_mode(args[0].str, (int) args[1].num) && !logged_in()) {
+                need_account(ev && ev->target ? html_dom_query(ev->target, ".serverPCount") : 0, NULL);
+            } else {
+                direct_join(args[0].str, (int) args[1].num);
+            }
+        }
         return 1;
     }
     if (backend_available() != 1 && online_finder_url()[0] &&
-        (!strcmp(name, "windows.1.searchList") || !strcmp(name, "toggleHF"))) {
-        // no brain, but the finder list is up: search / Hide Full still filter it
+        (!strcmp(name, "windows.1.searchList") || !strcmp(name, "toggleHF") || !strcmp(name, "setExpandedRegion") ||
+         !strcmp(name, "quickJoinRegion"))) {
+        // no brain, but the finder list is up: its region groups still filter, expand and quick join
     } else if (backend_available() != 1) {
         return -1;
     }
@@ -1087,12 +1364,16 @@ static void direct_account_tick(Client *client, const int direct) {
 }
 
 void servers_ui_tick(Client *client) {
+    link_tick(client);
     if (backend_enabled()) direct_account_tick(client, !g_brain_mode || g_pin == PIN_DIRECT); // tracks the account either way
     if (g_pin != PIN_NONE) g_started = 1; // connected / disconnected by hand first: no startup seek
     // ?play= / ?game= requests once the startup seek is done (or right away without one)
     if ((g_pending_play[0] || g_pending_game[0]) && (!g_brain_mode || (g_started && !g_seek_inflight && client->net_connected))) {
-        if (g_pending_game[0] && g_brain_mode) switch_server(g_pending_game);
-        else if (g_pending_play[0]) {
+        // (the startup seek took the page's own ?game=; a later one, e.g. a hub Join link,
+        // switches unless it names the lobby we are in: on the web a switch reloads the page)
+        if (g_pending_game[0] && g_brain_mode) {
+            if (strcmp(g_pending_game, g_game_id)) switch_server(g_pending_game);
+        } else if (g_pending_play[0]) {
             const MapCatalogEntry *e = NULL;
             const int idx = map_catalog_find(g_pending_play);
             if (idx >= 0) e = map_catalog_at((size_t) idx);
@@ -1123,6 +1404,13 @@ void servers_ui_tick(Client *client) {
         if (has_token && !account_get() && glfwGetTime() - brain_ready_at < RESTORE_WAIT_SECONDS) return;
         g_started = 1;
         char *game = NULL;
+        if (g_pending_game[0]) {
+            // the page's ?game= / --game "game=<id>" (servers_ui_query) is this startup seek's
+            // game: consumed here, so the pending-switch above never re-requests it (on the web
+            // that switch reloads the page with ?game=, which used to loop forever)
+            game = strdup(g_pending_game);
+            g_pending_game[0] = 0;
+        } else {
 #ifdef __EMSCRIPTEN__
         game = (char *) EM_ASM_PTR({
             var g = null;
@@ -1132,6 +1420,7 @@ void servers_ui_tick(Client *client) {
 #else
         game = getenv("KRUNKNATIVE_GAME") ? strdup(getenv("KRUNKNATIVE_GAME")) : NULL;
 #endif
+        }
         start_seek(game);
         free(game);
         return;
@@ -1153,6 +1442,15 @@ void servers_ui_tick(Client *client) {
     if (last_account < 0) last_account = account_id;
     if (account_id != last_account) {
         last_account = account_id;
-        if (g_pin == PIN_NONE && g_game_id[0] && !client->in_game && !g_seek_inflight) seek(g_game_id, 1, NULL);
+        if (account_id && g_account_game[0] && g_pin == PIN_NONE && !client->in_game && !g_seek_inflight) {
+            // logged in after an online-mode lobby turned a guest away: join that lobby now
+            char id[sizeof(g_account_game)];
+            snprintf(id, sizeof(id), "%s", g_account_game);
+            printf("[mm] logged in: joining %s\n", id);
+            menu_show_window(MENU_WINDOW_NONE, 0);
+            seek(id, 0, NULL);
+        } else if (g_pin == PIN_NONE && g_game_id[0] && !client->in_game && !g_seek_inflight) {
+            seek(g_game_id, 1, NULL);
+        }
     }
 }

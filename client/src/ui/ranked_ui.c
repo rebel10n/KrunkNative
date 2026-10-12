@@ -393,15 +393,15 @@ char *ranked_window_gen(void) {
         sb_append_esc(&sb, region ? region : "");
         sb_append(&sb, "</div>");
     } else {
-        static const char *const regions[][2] = {{"de-fra", "Frankfurt"}, {"us-ca-sv", "Silicon Valley"}, {"au-syd", "Sydney"}, {"jb-hnd", "Tokyo"},
-            {"us-fl", "Miami"}, {"sgp", "Singapore"}, {"us-nj", "New York"}, {"blr", "India"}, {"us-tx", "Dallas"}, {"brz", "Brazil"},
-            {"me-bhn", "Middle East"}, {"af-ct", "South Africa"}, {"local", "Local"}};
         char saved[32] = "";
         if (html_storage_get("krunker_rankedRegion", saved, sizeof(saved)) < 0 || !saved[0]) {
             if (html_storage_get("pingRegion7", saved, sizeof(saved)) < 0) saved[0] = 0;
         }
+        // KrunkNative's regions (servers_ui.c: 2-letter codes, the place name as tooltip)
+        char *options = servers_ui_region_options(saved);
         sb_append(&sb, "<select id='queueRegionSelect' class='inputGrey'>");
-        for (size_t i = 0; i < sizeof(regions) / sizeof(regions[0]); i++) sb_appendf(&sb, "<option value='%s' %s>%s", regions[i][0], strcmp(regions[i][0], saved) ? "" : "selected", regions[i][1]);
+        if (options) sb_append(&sb, options);
+        free(options);
         sb_append(&sb, "</select>");
     }
     const int leader = party_is_leader();

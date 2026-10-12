@@ -106,7 +106,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.node_ttl_s` | `30` | node/lobby row TTL (v3.1.1 `STALE_AFTER_MS`) |
 | `brain.heartbeat_s` | `5` | how often the owning brain refreshes its rows |
 | `brain.ping_interval_s` | `10` | internal WS ping interval (v3.1.1 `PING_INTERVAL_MS`) |
-| `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are v3.1.1 `regionNames` ids (`us-nj`, `de-fra`, ...) |
+| `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are the 2-letter region codes the client shows (`SV`, `LA`, `CH`, `VA`) |
 | `brain.federation` | `true` | use the shared database's rows (false or no DB = in-memory, this brain only) |
 | `brain.matchmaking.cross_region` | `true` | quick join falls back to other regions when the requested one has no room |
 | `brain.matchmaking.max_players` | `8` | cap when a lobby reports none |
@@ -1105,7 +1105,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 
 | key | default | meaning |
 | --- | --- | --- |
-| `region` | `local` | brain region id (v3.1.1 `MM_NODE_REGION`, a `config.regionNames` id such as `us-nj`) |
+| `region` | `local` | brain region id (v3.1.1 `MM_NODE_REGION`): the 2-letter code shown in the server browser (`SV`, `LA`, `CH`, `VA`) |
 | `node_id` | `LOC` | node id (v3.1.1 `MM_NODE_ID`), prefix of the lobby id `"<node_id>:<5 chars>"`; no `:` |
 | `name` | `KrunkNative` | server name (hello, lobby meta `name`) |
 | `listen_host` / `listen_port` (alias `port`) | `0.0.0.0` / `21015` | TCP bind address / port |

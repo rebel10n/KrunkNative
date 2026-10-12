@@ -557,6 +557,9 @@ void menu_update_instructions(void) {
     } else if (g_ui.connect_error[0] && !g_ui.connected) {
         sb_append(&sb, "<span style='color: rgba(255, 255, 255, 0.6)'>");
         sb_append_esc(&sb, g_ui.connect_error);
+        // KrunkNative: an online-mode lobby turned a guest away (AccountRequired): log in (the
+        // lobby is joined right after, servers_ui.c) or seek another game with the link below
+        if (servers_ui_account_required()) sb_append(&sb, "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'><a href='#' onclick='showWindow(5);return false'>Log in</a> to join it.");
         sb_append(&sb, servers_ui_pinned() ? "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'>Try reconnecting by clicking " // console connect / Direct Connect
                                            : "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'>Try seeking a new game by clicking ");
         sb_append(&sb, "<a href='#' onclick='return knRetry()'>here</a>.</span>"

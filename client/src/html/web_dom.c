@@ -481,6 +481,63 @@ static void flush_resize_queue(void) {
     }
 }
 
+// ---- page address + clipboard (html_dom.h)
+
+EM_JS(char *, kn_js_page_query, (void), {
+    var q = "";
+    try { q = location.search.replace(/^[?]/, ""); } catch (e) {}
+    return stringToNewUTF8(q);
+});
+
+// v3.1.1 ClientManager.seek / toggleStrm: history.replaceState|pushState(document.title, document.title, href)
+EM_JS(void, kn_js_page_set_url, (const char *href, int push), {
+    try {
+        var h = UTF8ToString(href);
+        var cur = location.pathname + location.search + location.hash;
+        if (h === cur) return;
+        if (push) history.pushState(document.title, document.title, h);
+        else history.replaceState(document.title, document.title, h);
+    } catch (e) {}
+});
+
+EM_JS(char *, kn_js_page_origin, (void), {
+    var o = "";
+    try { o = location.protocol + "//" + location.host; } catch (e) {}
+    return stringToNewUTF8(o);
+});
+
+// UTILS.copyToClipboard: navigator.clipboard, else the hidden-textarea execCommand fallback
+EM_JS(void, kn_js_clipboard_write, (const char *text), {
+    var t = UTF8ToString(text);
+    var fallback = function () {
+        try {
+            var a = document.createElement("textarea");
+            a.value = t;
+            a.style.position = "fixed";
+            a.style.opacity = "0";
+            document.body.appendChild(a);
+            a.select();
+            document.execCommand("copy");
+            document.body.removeChild(a);
+        } catch (e) {}
+    };
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(fallback);
+        else fallback();
+    } catch (e) { fallback(); }
+});
+
+int html_page_query(char *buf, const size_t n) { return take_string(kn_js_page_query(), buf, n); }
+void html_page_set_url(const char *href, const int push) {
+    if (href && *href) kn_js_page_set_url(href, push);
+}
+void html_page_origin(char *buf, const size_t n) {
+    if (buf && n) take_string(kn_js_page_origin(), buf, n);
+}
+void html_clipboard_write(const char *text) {
+    if (text) kn_js_clipboard_write(text);
+}
+
 // ---- storage
 
 int html_storage_get(const char *key, char *buf, const size_t n) {

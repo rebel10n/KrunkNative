@@ -1,5 +1,5 @@
-// Brain client, web transports (client/include/backend.h): XMLHttpRequest through
-// emscripten_async_wget2_data and the browser WebSocket (emscripten/websocket.h, the
+// Brain client, web transports (client/include/backend.h): the browser fetch() (status
+// and body for every answer, errors included) and the browser WebSocket (emscripten/websocket.h, the
 // same library net_web.c uses). Callbacks already run on the main thread; HTTP
 // completions and social frames are still delivered from backend_poll() so both
 // platforms call back at the same point of the frame.
@@ -89,59 +89,6 @@ typedef struct {
     void *user;
 } WebReq;
 
-static void http_onload(unsigned handle, void *arg, void *data, unsigned size) {
-    (void) handle;
-    WebReq *req = arg;
-    WebItem *item = calloc(1, sizeof(*item));
-    if (item) {
-        item->fn = req->fn;
-        item->user = req->user;
-        item->status = 200;
-        item->body = malloc(size + 1);
-        if (item->body) {
-            memcpy(item->body, data, size);
-            item->body[size] = 0;
-            item->length = size;
-        } else {
-            item->status = 0;
-        }
-        ready_push(item);
-    }
-    free(req);
-}
-
-static void http_onerror(unsigned handle, void *arg, int status, const char *text) {
-    (void) handle;
-    (void) text;
-    WebReq *req = arg;
-    WebItem *item = calloc(1, sizeof(*item));
-    if (item) {
-        item->fn = req->fn;
-        item->user = req->user;
-        item->status = status; // 0 = network error; the body is not available here
-        ready_push(item);
-    }
-    free(req);
-}
-
-int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
-    if (!backend_enabled() || !path) return 0;
-    WebReq *req = calloc(1, sizeof(*req));
-    if (!req) return 0;
-    req->fn = fn;
-    req->user = user;
-    const size_t n = strlen(backend_url()) + strlen(path) + 1;
-    char *url = malloc(n);
-    if (!url) {
-        free(req);
-        return 0;
-    }
-    snprintf(url, n, "%s%s", backend_url(), path);
-    emscripten_async_wget2_data(url, "GET", "", req, 1, http_onload, http_onerror, NULL);
-    free(url);
-    return 1;
-}
-
 // Any URL / method with a JSON body (auth service, server finder): the browser fetch()
 // (wget2 cannot send a body). The completion comes back through backend_web_fetch_done.
 EMSCRIPTEN_KEEPALIVE void backend_web_fetch_done(WebReq *req, const int status, char *body, const int length) {
@@ -182,6 +129,20 @@ int backend_http_request(const char *method, const char *url, const char *json_b
     req->user = user;
     backend_web_fetch(method && method[0] ? method : "GET", url, json_body, req);
     return 1;
+}
+
+// The brain's own routes. fetch() like backend_http_request: wget2's error callback carries
+// no body, so a 403 {"error":"AccountRequired"} / 404 InvalidGameId reached the matchmaker as
+// a bare status (shown as "Game is full.").
+int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
+    if (!backend_enabled() || !path) return 0;
+    const size_t n = strlen(backend_url()) + strlen(path) + 1;
+    char *url = malloc(n);
+    if (!url) return 0;
+    snprintf(url, n, "%s%s", backend_url(), path);
+    const int ok = backend_http_request("GET", url, NULL, fn, user);
+    free(url);
+    return ok;
 }
 
 // ------------------------------------------------------------------ social socket

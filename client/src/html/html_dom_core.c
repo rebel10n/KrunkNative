@@ -11,6 +11,7 @@
 #include <string.h>
 
 #ifndef __EMSCRIPTEN__
+#include <GLFW/glfw3.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
@@ -390,6 +391,29 @@ void html_storage_set(const char *key, const char *value) {
     }
     fwrite(value, 1, strlen(value), f);
     fclose(f);
+}
+
+// --------------------------------------------------------------------------- page address + clipboard (native)
+// No address bar natively: the URL calls are no-ops (web_dom.c has the browser's).
+
+int html_page_query(char *buf, const size_t n) {
+    if (buf && n) buf[0] = 0;
+    return -1;
+}
+
+void html_page_set_url(const char *href, const int push) {
+    (void) href;
+    (void) push;
+}
+
+// Links copied from the native client point at the public web client.
+void html_page_origin(char *buf, const size_t n) {
+    if (buf && n) snprintf(buf, n, "%s", KN_PUBLIC_ORIGIN);
+}
+
+void html_clipboard_write(const char *text) {
+    GLFWwindow *window = glfwGetCurrentContext();
+    if (window && text) glfwSetClipboardString(window, text);
 }
 
 #endif // !__EMSCRIPTEN__

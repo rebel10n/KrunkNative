@@ -7,6 +7,7 @@
 // (setupDom's addEventListener calls).
 #include <ui_logic.h>
 #include <map_catalog.h>  // Host Game / Games window maps
+#include <modes.h>        // copyInviteLink: Game.mode.isRanked
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
 #include <spectate.h>     // spectate_set_requested (toggleSpect)
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
@@ -157,6 +158,11 @@ H(h_copy_invite_link) {
     UNUSED;
     HtmlElem b = html_dom_by_id("inviteButton");
     if (!b) return 1;
+    const GameModeConfig *mode = mode_config(game_mode_id(&menu_ui()->client->game));
+    if (mode && mode->is_ranked) return 1; // v3.1.1: !Game.mode || !Game.mode.isRanked
+    char link[512];
+    servers_ui_invite_link(link, sizeof(link)); // location.protocol + "//" + location.host + "/?game=" + gameId
+    html_clipboard_write(link);
     html_dom_set_text(b, "Copied");
     MenuUi *ui = menu_ui();
     if (ui->invite_timer) html_timer_cancel(ui->invite_timer);
@@ -190,7 +196,16 @@ H(h_check_terms) {
     return 1;
 }
 
-H(h_play) { UNUSED; menu_play(); return 1; }                       // quickJoinRegion / joinGame
+H(h_play) { UNUSED; menu_play(); return 1; }                       // quickJoinRegion
+// joinGame(): f9(gameURL.value || "") - a game link or lobby id (servers_ui.c)
+H(h_join_game) {
+    UNUSED;
+    char text[512] = "";
+    HtmlElem input = html_dom_by_id("gameURL");
+    if (input) html_dom_get_value(input, text, sizeof(text));
+    servers_ui_join_link(text);
+    return 1;
+}
 // Host a map of the catalogue (shared/src/map_catalog.c) on the embedded local server:
 // it joins the client's map list (map_catalog_slot: Shipyard, Soul Sanctum and the
 // community maps are not in the default rotation) and the offline game starts or reloads
@@ -462,7 +477,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"window.open", h_open_url},
     // play / host / join
     {"quickJoinRegion", h_servers},
-    {"joinGame", h_play},
+    {"joinGame", h_join_game},
     {"createPrivateRoom", h_create_private_room},
     {"playMap", h_play_map},
     {"selectHostMap", h_select_host_map},

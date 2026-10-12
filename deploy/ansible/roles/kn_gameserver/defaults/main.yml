@@ -12,8 +12,9 @@ kn_gameserver_enabled: false
 # (e.g. if its game ports cannot be opened). edge_firewall opens them on every edge.
 kn_gameserver_ports_open: true
 kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
-# v3.1.1 region id (config.regionNames / accounts.region_index); per host in the inventory.
-kn_gameserver_region: us-nj
+# Region id = the 2-letter code the client shows (SV LA CH VA: client/src/ui/servers_ui.c
+# k_regions; accounts.region_index); per host in the inventory.
+kn_gameserver_region: local
 kn_gameserver_max_players: 8
 # In-map billboard text (server.cfg billboard); empty = the engine default "Your Ad Here".
 kn_gameserver_billboard: ""

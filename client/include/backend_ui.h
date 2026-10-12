@@ -66,6 +66,10 @@ void servers_ui_disconnect(void);           // console `disconnect`: stay discon
 int  servers_ui_reconnect(void);            // console `reconnect`: the last server (lobby: sought again); 1 = started
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
+int  servers_ui_join_link(const char *text);  // Join window / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining
+void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?game=<id>, the id unescaped
+int  servers_ui_account_required(void);     // 1 = the last seek was an online-mode lobby a guest may not join (error screen: Log in)
+char *servers_ui_region_options(const char *selected); // region <option>s (2-letter codes, place name as title); malloc'd
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 char *servers_window_gen(int id, const char **header);
 int  servers_ui_host_game(const char *config_json); // /mm/host-game: disabled (hosting = server_bin), 0 unless KRUNKNATIVE_ALLOW_CLIENT_HOST

@@ -5,7 +5,7 @@
 
 // ---- identity
 hostname        "My KrunkNative Server"
-region          us-nj              // config.regionNames id shown in server lists
+region          CH                 // region code shown in server lists (SV LA CH VA, local)
 community       ""                 // network / community name in lists ("" = the coordinator's)
 tags            "fun,casual"       // extra info-query tags
 

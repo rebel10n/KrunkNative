@@ -16,6 +16,7 @@
 // shutdown. The web build keeps the item hidden, like krunker.io in a browser.
 #include <client_settings.h>
 #include <ui_logic.h>
+#include <backend_ui.h> // servers_ui_region_options (Default Region)
 #include <discord_rpc.h>
 #include <render_settings.h>
 #include <html_ui.h>
@@ -986,7 +987,7 @@ char *ui_client_settings_tab_html(const int searching) {
 
 // The game's Sound tab (ui/windows/settings-tab-5.html) with the client's rows after its
 // Audio/Mic Input row; NULL when `tab` is another tab or nothing is added.
-char *ui_client_settings_extend_tab(const char *tab) {
+static char *extend_sound_tab(const char *tab) {
     if (!tab || !chrome_visible()) return NULL;
     const char *row = strstr(tab, "setSetting(&quot;audioInput&quot;");
     const char *end = row ? strstr(row, "</select></div>") : NULL;
@@ -999,6 +1000,33 @@ char *ui_client_settings_extend_tab(const char *tab) {
     }
     sb_append(&sb, end);
     return sb_finish(&sb);
+}
+
+// A settings tab as shown: Localization > Default Region lists the matchmaker's regions (the
+// static capture only has "Local"; servers_ui_region_options), the Sound tab gains the
+// client's rows. NULL = `tab` unchanged.
+char *ui_client_settings_extend_tab(const char *tab) {
+    if (!tab) return NULL;
+    char *regions = NULL;
+    const char *row = strstr(tab, "setSetting(&quot;defaultRegion&quot;");
+    const char *open = row ? strchr(row, '>') : NULL;
+    const char *close = open ? strstr(open, "</select>") : NULL;
+    if (close) {
+        const cJSON *saved = ui_setting_saved("defaultRegion");
+        char *options = servers_ui_region_options(cJSON_IsString(saved) ? saved->valuestring : "local");
+        StrBuf sb = {0};
+        sb_append_n(&sb, tab, (size_t) (open + 1 - tab));
+        if (options) sb_append(&sb, options);
+        sb_append(&sb, close);
+        free(options);
+        regions = sb_finish(&sb);
+    }
+    char *sound = extend_sound_tab(regions ? regions : tab);
+    if (sound) {
+        free(regions);
+        return sound;
+    }
+    return regions;
 }
 
 // ---------------------------------------------------------------- handlers
