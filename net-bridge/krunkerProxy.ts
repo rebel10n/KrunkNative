@@ -259,7 +259,7 @@ function writeNativeInit(session: NativeToKrunkerSession, mapIndex: number, mode
 
   const payload = Buffer.alloc(17);
   payload[0] = 1;
-  payload[1] = 1; // protocol 1.1: this bridge reads ENT V5 / V6 (spray, weapon skins)
+  payload[1] = 2; // protocol 1.2: this bridge reads ENT V5 / V6 (spray, weapon skins) and V7 (lagComp)
   payload[2] = 0;
   payload.writeInt32LE(session.mapIndex, 3);
   payload.writeInt32LE(session.modeIndex, 7);
@@ -812,7 +812,8 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
       void connectUpstream(session, options);
       break;
     case NET_PACKET.ENT: {
-      if (payload.length < 4 || (payload.length > EV.ENT_SIZE && payload.length !== EV.ENT_SPRAY_SIZE && payload.length !== EV.ENT_SKINS_SIZE)) break;
+      if (payload.length < 4 || (payload.length > EV.ENT_SIZE && payload.length !== EV.ENT_SPRAY_SIZE && payload.length !== EV.ENT_SKINS_SIZE &&
+          payload.length !== EV.ENT_LAG_COMP_SIZE)) break;
       const classIndex = payload.readInt32LE(0);
       const secondary = payload.length >= 8 ? payload.readInt32LE(4) : -1;
       const c = EV.readCosmetics(payload, 8);
@@ -822,7 +823,9 @@ function handleNativePacket(session: NativeToKrunkerSession, type: number, paylo
       // gameserver.ts ent slots: 3 hat, 4 back, 5 secIndex, 6 toggleSpect, 10 skinColIndex, 14 dye, 15 slidCont, 17 waist, 18 hairCol, 21 face
       const spray = payload.length >= EV.ENT_SPRAY_SIZE ? payload.readInt32LE(EV.ENT_SIZE) : 0; // ent[1] sprayIndex
       const skins = payload.length >= EV.ENT_SKINS_SIZE ? EV.readSkins(payload, EV.ENT_SPRAY_SIZE) : EV.SKINS_NONE; // ent[2], ent[9]
-      const ent: unknown[] = [classIndex, spray, [skins.primary, skins.secondary], c.hat, c.back, secondary >= 0 ? secondary : null, spectate, 0, 0, skins.melee, 0, 0, 0, null, 0, slidCont, 0, -1, 0, 0, 0, 0];
+      // ent[11] lagCompensation (Settings > Network slider): V7, older native ENTs = the default 1
+      const lagComp = payload.length >= EV.ENT_LAG_COMP_SIZE ? EV.lagCompFromEnt(payload.readFloatLE(EV.ENT_SKINS_SIZE)) : 1;
+      const ent: unknown[] = [classIndex, spray, [skins.primary, skins.secondary], c.hat, c.back, secondary >= 0 ? secondary : null, spectate, 0, 0, skins.melee, 0, lagComp, 0, null, 0, slidCont, 0, -1, 0, 0, 0, 0];
       if (c.skinColor >= 0) ent[10] = EV.skinIndexFromColor(c.skinColor);
       if (c.dye >= 0) ent[14] = c.dye;
       ent[17] = c.waist;

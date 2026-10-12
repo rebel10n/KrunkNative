@@ -22,7 +22,7 @@ mode            ffa                // ffa | tdm | ctf | point | ... | rotation (
 round_seconds   0                  // 0 = the mode's game time
 lag_comp        1                  // hits rewind targets to where the shooter saw them (v3.1.1 fetchState)
 lag_comp_anchor 1                  // 1: from the shot input's arrival + ping; 0: v3.1.1 ping * 2 at processing
-lag_comp_scale  1                  // v3.1.1 lagComp (0.1..1) scaling the ping part of the rewind
+lag_comp_scale  1                  // 0.1..1, times each player's Lag Compensation slider (v3.1.1 lagComp)
 // game.gravMlt  1                 // any v3.1.1 host config var: game.<var> value
 motd            "Welcome to $'s new home"
 

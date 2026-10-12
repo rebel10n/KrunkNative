@@ -110,6 +110,7 @@ type BridgeSession = {
   skinsByUid: Map<number, EV.WeaponSkins>; // NET_PACKET_SKINS, sent right before each SPAWN
   stateByUid: Map<number, NativeStatePacket>;
   pendingPingSeq: number | null;
+  entSize: number; // EV.entSizeFor(INIT major.minor) of the native server (V6 until its INIT arrived)
   closed: boolean;
 };
 
@@ -185,7 +186,7 @@ function writeNativeHello(session: BridgeSession): void {
 function writeNativeEnt(session: BridgeSession, entData: unknown): void {
   const ent = Array.isArray(entData) ? entData : [];
   const spectate = ent[6] === 1 || ent[6] === true;
-  const payload = Buffer.alloc(EV.ENT_SKINS_SIZE);
+  const payload = Buffer.alloc(Math.max(session.entSize, EV.ENT_SKINS_SIZE));
   const classIndex = Array.isArray(entData) ? Number(entData[0]) || 0 : 0;
   // ent[5] = selectedSecondaryIndex (null/undefined = class default)
   const secondary = Array.isArray(entData) && entData[5] != null && Number.isFinite(Number(entData[5])) ? Number(entData[5]) | 0 : -1;
@@ -196,7 +197,9 @@ function writeNativeEnt(session: BridgeSession, entData: unknown): void {
   payload[EV.ENT_COSMETICS_SIZE + 1] = ent[15] === undefined || ent[15] === null || ent[15] ? 1 : 0; // ent[15] slidCont
   payload.writeInt32LE(Number.isFinite(Number(ent[1])) ? Number(ent[1]) | 0 : 0, EV.ENT_SIZE); // ent[1] sprayIndex
   EV.writeSkins(payload, EV.ENT_SPRAY_SIZE, EV.skinsFromKrunker(ent[2], ent[9])); // ent[2] weapon skins, ent[9] meleeIndex
-  writeNativePacket(session, NET_PACKET.ENT, payload);
+  if (payload.length >= EV.ENT_LAG_COMP_SIZE) payload.writeFloatLE(EV.lagCompFromEnt(ent[11]), EV.ENT_SKINS_SIZE); // ent[11] lagCompensation
+  // the ENT the server's INIT protocol reads: 1.0 up to V4, 1.1 V6, 1.2 V7 (lagComp)
+  writeNativePacket(session, NET_PACKET.ENT, payload.subarray(0, session.entSize));
 }
 
 function writeNativeCycle(session: BridgeSession): void {
@@ -560,6 +563,7 @@ function sendHealthIfChanged(session: BridgeSession, uid: number, health: number
 
 function sendInit(session: BridgeSession, init: NativeInitPacket): void {
   session.nativeClientId = init.clientId;
+  session.entSize = EV.entSizeFor(init.major, init.minor);
   session.tickRate = init.tickRate || DEFAULT_TICK_RATE;
   session.mapIndex = Math.max(0, init.mapIndex);
   session.modeIndex = Math.max(0, init.modeIndex);
@@ -886,6 +890,7 @@ function createSession(ws: WebSocket, request: IncomingMessage): BridgeSession {
     skinsByUid: new Map(),
     stateByUid: new Map(),
     pendingPingSeq: null,
+    entSize: EV.ENT_SKINS_SIZE,
     closed: false,
   };
 }

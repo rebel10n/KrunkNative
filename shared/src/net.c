@@ -8,7 +8,8 @@
 _Static_assert(offsetof(NetEntPacket, cosmetics) == NET_ENT_PACKET_V2_SIZE, "ENT cosmetics must follow secondary_index");
 _Static_assert(offsetof(NetSpawnPacket, cosmetics) == NET_SPAWN_PACKET_V1_SIZE, "SPAWN cosmetics must follow secondary_index");
 _Static_assert(NET_ENT_PACKET_V4_SIZE == NET_ENT_PACKET_V3_SIZE + 2 && NET_ENT_PACKET_V5_SIZE == NET_ENT_PACKET_V4_SIZE + 4, "ENT spectate, slid_cont then spray_index must follow the cosmetics");
-_Static_assert(NET_ENT_PACKET_V6_SIZE == NET_ENT_PACKET_V5_SIZE + sizeof(PlayerSkins) && sizeof(PlayerSkins) == 12, "ENT weapon skins must be the last bytes");
+_Static_assert(NET_ENT_PACKET_V6_SIZE == NET_ENT_PACKET_V5_SIZE + sizeof(PlayerSkins) && sizeof(PlayerSkins) == 12, "ENT weapon skins must follow spray_index");
+_Static_assert(NET_ENT_PACKET_V7_SIZE == NET_ENT_PACKET_V6_SIZE + sizeof(float), "ENT lag_comp must be the last bytes");
 _Static_assert(NET_INPUT_PACKET_V1_SIZE == 22 && NET_INPUT_PACKET_V2_SIZE == 23 && sizeof(NetInputPacket) == 24, "INPUT slowdown then scroll must be the last bytes");
 
 #ifdef WIN32
@@ -433,9 +434,10 @@ int net_packet_read_input(NetInputPacket *input, const NetPacket *packet) {
 
 int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
     // 4 / 8 bytes, or cosmetics followed by the optional spectate and slid_cont bytes (36..38),
-    // or with spray_index (42), or all of it with the weapon skins (54)
+    // or with spray_index (42), with the weapon skins (54), or all of it with lag_comp (58)
     if (packet->length != NET_ENT_PACKET_V2_SIZE && packet->length != NET_ENT_PACKET_MIN_SIZE &&
         packet->length != NET_ENT_PACKET_V5_SIZE && packet->length != NET_ENT_PACKET_V6_SIZE &&
+        packet->length != NET_ENT_PACKET_V7_SIZE &&
         (packet->length < NET_ENT_PACKET_V3_SIZE || packet->length > NET_ENT_PACKET_V4_SIZE)) return 0;
 
     ent->secondary_index = -1;
@@ -444,6 +446,7 @@ int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
     ent->slid_cont = 1; // absent: settings.js slidCont default (true)
     ent->spray_index = 0; // absent: selectedSprayIndex default (0, "Krunker")
     ent->skins = PLAYER_SKINS_NONE; // absent: no weapon / melee skins
+    ent->lag_comp = 1.0f; // absent: settings.js lagCompensation default (1)
     memcpy(ent, packet->payload, packet->length);
     ent->spectate = ent->spectate ? 1 : 0;
     ent->slid_cont = ent->slid_cont ? 1 : 0;
@@ -451,8 +454,9 @@ int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
 }
 
 uint16_t net_ent_size_for(const int major, const int minor) {
-    const int long_ent = major > NET_PROTOCOL_MAJOR || (major == NET_PROTOCOL_MAJOR && minor >= 1);
-    return (uint16_t) (long_ent ? NET_ENT_PACKET_V6_SIZE : NET_ENT_PACKET_V4_SIZE);
+    if (major > NET_PROTOCOL_MAJOR || (major == NET_PROTOCOL_MAJOR && minor >= 2)) return (uint16_t) NET_ENT_PACKET_V7_SIZE;
+    if (major == NET_PROTOCOL_MAJOR && minor == 1) return (uint16_t) NET_ENT_PACKET_V6_SIZE;
+    return (uint16_t) NET_ENT_PACKET_V4_SIZE;
 }
 
 int net_packet_read_spawn(NetSpawnPacket *spawn, const NetPacket *packet) {

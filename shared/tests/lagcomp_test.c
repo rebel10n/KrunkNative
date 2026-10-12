@@ -164,6 +164,32 @@ static void test_history(Game *game, Player *target, Player *shooter) {
     CHECK(fabsf(player_get_state_const(shooter) - 175.0f) < 1e-2f, "anchored: 25 ms queued + 150 ms ping (%.3f)", player_get_state_const(shooter));
     shooter->input_arrival = 0.0;
     CHECK(fabsf(player_get_state_const(shooter) - 150.0f) < 1e-3f, "anchored without an arrival: one ping");
+
+    // per-player lagComp (Settings > Network slider, ENT ent[11]) x the server's lag_comp_scale
+    game->lag_comp_anchor = 0;
+    shooter->lag_comp = 1.0f;
+    const float full = player_get_state_const(shooter);
+    shooter->lag_comp = 0.5f;
+    CHECK(fabsf(player_get_state_const(shooter) - full * 0.5f) < 1e-3f, "a player's lagComp 0.5 halves the stateConst (%.1f of %.1f)",
+          player_get_state_const(shooter), full);
+    PlayerStoredState half_state, full_state;
+    players_fetch_state(target, player_get_state_const(shooter), &half_state); // 150 + 110 ms back
+    players_fetch_state(target, full, &full_state);                            // 300 + 110 ms back
+    CHECK(half_state.time == game->state_now - 9 * DT && full_state.time == game->state_now - 14 * DT,
+          "lagComp 0.5 picks the state 260 ms back instead of 410 ms (ages %.4f / %.4f)",
+          game->state_now - half_state.time, game->state_now - full_state.time);
+    game->lag_comp_scale = 0.5f;
+    CHECK(fabsf(player_get_state_const(shooter) - full * 0.25f) < 1e-3f, "lag_comp_scale multiplies the player's lagComp");
+    shooter->lag_comp = 1.0f;
+    CHECK(fabsf(player_get_state_const(shooter) - full * 0.5f) < 1e-3f, "lag_comp_scale 0.5 with the default slider");
+    game->lag_comp_scale = 0.0f; // unset (offline, tests): 1
+    CHECK(fabsf(player_get_state_const(shooter) - full) < 1e-3f, "unset lag_comp_scale counts as 1");
+    game->lag_comp_anchor = 1;
+    shooter->lag_comp = 0.5f;
+    shooter->input_arrival = game->state_now - 0.025;
+    CHECK(fabsf(player_get_state_const(shooter) - 100.0f) < 1e-2f, "anchored: lagComp scales the ping, not the measured queue time");
+    shooter->input_arrival = 0.0;
+    shooter->lag_comp = 1.0f;
     shooter->ping = 0.0f;
 }
 

@@ -582,19 +582,21 @@ static void cli_cmd_lagcomp(const char *args) {
         game->lag_comp_anchor = (unsigned char) on;
     } else if (!strcmp(word, "scale") && parsed == 2 && atof(value) >= 0.1 && atof(value) <= 1.0) {
         g_gs_config.lag_comp_scale = (float) atof(value);
-        for (size_t i = 0; i < game->player_count; i++) {
-            if (game->players[i]) game->players[i]->lag_comp = g_gs_config.lag_comp_scale;
-        }
+        game->lag_comp_scale = g_gs_config.lag_comp_scale; // times each player's ENT lagComp
     } else {
         ok = 0;
         server_log("Usage: lagcomp [on | off | anchor on|off | scale <0.1-1>]");
     }
 
     if (ok) {
-        server_log("Lag compensation %s: %s rewind (%s), lagComp %.2f, %.0f ms history",
+        server_log("Lag compensation %s: %s rewind (%s), lagComp scale %.2f (x each player's slider), %.0f ms history",
                    game->lag_comp ? "on" : "off", game->lag_comp_anchor ? "anchored" : "v3.1.1",
                    game->lag_comp_anchor ? "input arrival + ping" : "ping * 2", g_gs_config.lag_comp_scale,
                    GAME_STATE_HISTORY * 1000.0f);
+        for (size_t i = 0; i < g_server->client_count; i++) { // each player's ENT lagComp (Settings > Network slider)
+            const ClientConnection *client = &g_server->clients[i];
+            if (client->player) server_log("  %s: lagComp %.2f, ping %d ms", client->name, client->player->lag_comp, client->ping_ms);
+        }
     }
     pthread_mutex_unlock(&g_server->lock);
 }

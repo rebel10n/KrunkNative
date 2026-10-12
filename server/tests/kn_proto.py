@@ -37,13 +37,17 @@ class Conn:
     def join(self, client_key="", session="", name="", password="", game_id=""):
         self.send(JOIN, cstr(game_id, 48) + cstr(client_key, 352) + cstr(session, 64) + cstr(name, 32) + cstr(password, 16))
 
-    def ent(self, class_index=0, secondary=-1, cosmetics=(-1, -1, -1, -1, -1, -1, -1), spectate=0, slid=1, spray=None, skins=None):
-        """V4 ENT, + spray_index (V5) when spray is given, + weapon skins (primary, secondary, melee) (V6)."""
+    def ent(self, class_index=0, secondary=-1, cosmetics=(-1, -1, -1, -1, -1, -1, -1), spectate=0, slid=1, spray=None, skins=None,
+            lag_comp=None):
+        """V4 ENT, + spray_index (V5) when spray is given, + weapon skins (primary, secondary, melee) (V6),
+        + float lagComp (ent[11], V7, protocol 1.2) when lag_comp is given."""
         payload = struct.pack("<ii7iBB", class_index, secondary, *cosmetics, spectate, slid)
-        if spray is not None or skins is not None:
+        if spray is not None or skins is not None or lag_comp is not None:
             payload += struct.pack("<i", spray or 0)
-        if skins is not None:
-            payload += struct.pack("<3i", *skins)
+        if skins is not None or lag_comp is not None:
+            payload += struct.pack("<3i", *(skins if skins is not None else (-1, -1, -1)))
+        if lag_comp is not None:
+            payload += struct.pack("<f", lag_comp)
         self.send(ENT, payload)
 
     def read(self, until=None, timeout=5.0):

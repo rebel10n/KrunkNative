@@ -255,14 +255,29 @@ static void check_cosmetics_packets(void) {
           full.skins.melee == -1, "V5 ENT weapon skins default");
     packet.length = NET_ENT_PACKET_V5_SIZE + 4;
     CHECK(!net_packet_read_ent(&full, &packet), "ENT with cut weapon skins accepted");
+    // ent[11] lagComp (Settings > Network slider) rides after the weapon skins (V7); shorter ENTs read as 1
+    ent.lag_comp = 0.3f;
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V7_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.lag_comp == 0.3f && full.skins.melee == 1650, "V7 ENT lagComp");
+    packet.length = NET_ENT_PACKET_V6_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.lag_comp == 1.0f && full.skins.melee == 1650, "V6 ENT lagComp default 1");
+    packet.length = NET_ENT_PACKET_V6_SIZE + 2;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with a cut lagComp accepted");
+    packet.length = NET_ENT_PACKET_V7_SIZE + 1;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT longer than V7 accepted");
+    ent.lag_comp = 1.0f;
     ent.skins = PLAYER_SKINS_NONE;
     ent.spray_index = 0;
-    // a client sends the long ENT only to servers announcing protocol 1.1 (INIT major.minor): 1.0 servers
-    // (older server_bin builds, community servers) drop longer ENTs without a spawn
+    // a client sends the long ENT only to servers announcing the protocol that reads it (INIT major.minor):
+    // 1.0 servers (older server_bin builds, community servers) drop anything past V4 without a spawn,
+    // 1.1 servers anything past V6
     CHECK(net_ent_size_for(1, 0) == NET_ENT_PACKET_V4_SIZE, "ENT to a 1.0 server must stay V4 (%u)", net_ent_size_for(1, 0));
-    CHECK(net_ent_size_for(1, 1) == NET_ENT_PACKET_V6_SIZE && net_ent_size_for(1, 7) == NET_ENT_PACKET_V6_SIZE, "ENT to a 1.1+ server is V6");
-    CHECK(net_ent_size_for(2, 0) == NET_ENT_PACKET_V6_SIZE && net_ent_size_for(0, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
-    CHECK(NET_PROTOCOL_MAJOR == 1 && NET_PROTOCOL_MINOR >= 1, "server_bin announces protocol 1.1+");
+    CHECK(net_ent_size_for(1, 1) == NET_ENT_PACKET_V6_SIZE, "ENT to a 1.1 server must stay V6 (%u)", net_ent_size_for(1, 1));
+    CHECK(net_ent_size_for(1, 2) == NET_ENT_PACKET_V7_SIZE && net_ent_size_for(1, 7) == NET_ENT_PACKET_V7_SIZE, "ENT to a 1.2+ server is V7");
+    CHECK(net_ent_size_for(2, 0) == NET_ENT_PACKET_V7_SIZE && net_ent_size_for(0, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
+    CHECK(NET_PROTOCOL_MAJOR == 1 && NET_PROTOCOL_MINOR >= 2, "server_bin announces protocol 1.2+");
+    CHECK(NET_ENT_PACKET_V7_SIZE == 58 && NET_ENT_PACKET_V6_SIZE == 54, "ENT V6 / V7 sizes (net-bridge, kn_proto.py)");
     ent.slid_cont = 0;
     memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = 6;

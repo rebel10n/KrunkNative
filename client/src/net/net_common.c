@@ -116,18 +116,19 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                 break;
             }
 
-            NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1};
+            NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
             memcpy(&packet, payload, length);
 
             const PlayerSkins skins = length >= NET_ENT_PACKET_V6_SIZE ? packet.skins : PLAYER_SKINS_NONE;
-            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u,\"spray_index\":%d,\"skins\":[%d,%d],\"melee\":%d}",
+            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u,\"spray_index\":%d,\"skins\":[%d,%d],\"melee\":%d,\"lag_comp\":%g}",
                    (unsigned int) type,
                    packet.class_index,
                    packet.secondary_index,
                    (unsigned int) (length > NET_ENT_PACKET_V3_SIZE ? packet.spectate : 0),
                    (unsigned int) (length > offsetof(NetEntPacket, slid_cont) ? packet.slid_cont : 1),
                    length >= NET_ENT_PACKET_V5_SIZE ? packet.spray_index : 0,
-                   skins.primary, skins.secondary, skins.melee);
+                   skins.primary, skins.secondary, skins.melee,
+                   length >= NET_ENT_PACKET_V7_SIZE ? (double) packet.lag_comp : 1.0);
             break;
         }
         case NET_PACKET_SPAWN: {

@@ -1528,10 +1528,14 @@ void player_store_state(Player *player) {
 }
 
 // players.js getStateConst: ping * 2 * lagComp (a lagComp <= 0 counts as 1); anchored: the
-// time since the running input arrived plus one ping (see above).
+// time since the running input arrived plus one ping (see above). lagComp is the player's
+// Settings > Network slider (ENT lag_comp, ent[11]; the server clamps it to 0.1..1 like
+// gameserver.ts applyLagCompFromEnt, so the <= 0 rule only catches a never-set value) times
+// the server's lag_comp_scale (KrunkNative; 1 = v3.1.1).
 float player_get_state_const(const Player *player) {
     const Game *game = player->game;
-    const float lag_comp = player->lag_comp > 0.0f ? player->lag_comp : 1.0f;
+    const float scale = game->lag_comp_scale > 0.0f ? game->lag_comp_scale : 1.0f;
+    const float lag_comp = (player->lag_comp > 0.0f ? player->lag_comp : 1.0f) * scale; // parity: lc <= 0 -> 1
     const float ping = player->ping > 0.0f ? player->ping : 0.0f;
     if (!game->lag_comp_anchor) return ping * 2.0f * lag_comp;
 

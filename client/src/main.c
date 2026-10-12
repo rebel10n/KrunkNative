@@ -1272,8 +1272,10 @@ void client_enter_game(Client *client) {
     packet.spectate = (uint8_t) spectate_requested();
     packet.slid_cont = (uint8_t) (ui_controls_settings()->slid_cont ? 1 : 0); // ent[15] settings.tmp.slidCont ("Requires respawn")
     packet.spray_index = ui_loadout_spray(); // ent[1] selectedSprayIndex
-    // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn: no spray / skins there.
-    const uint16_t ent_size = client->offline ? (uint16_t) NET_ENT_PACKET_V6_SIZE : client->net_ent_size ? client->net_ent_size : (uint16_t) NET_ENT_PACKET_V4_SIZE;
+    packet.lag_comp = client_render_settings()->lag_comp; // ent[11] parseFloat(settings.tmp.lagCompensation)
+    // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
+    // a 1.1 server anything longer than V6 (no lagComp): net_ent_size_for.
+    const uint16_t ent_size = client->offline ? (uint16_t) NET_ENT_PACKET_V7_SIZE : client->net_ent_size ? client->net_ent_size : (uint16_t) NET_ENT_PACKET_V4_SIZE;
 
     if (client->offline && (packet.spectate || leave_spectate)) {
         // The offline game has no spectators: like v3.1.1's single player

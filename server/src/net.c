@@ -394,7 +394,7 @@ static void net_send_init(ClientConnection *client) {
 
     const NetInitPacket packet = {
         .major = NET_PROTOCOL_MAJOR,
-        .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6 (client_enter_game sends them only then)
+        .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6, 1.2: V7 (client_enter_game sends them only then)
         .patch = 0,
         .map_index = g_server->game.current_map_index,
         .mode_index = game_mode_id(&g_server->game), // Krunker "init" modeIndex: the mode id
@@ -494,7 +494,6 @@ static void net_spawn_client(ClientConnection *client) {
         player->uid = client->id;
         player->team = accounts_assigned_team(client); // ranked roster team (players.setTeam isFromQueue), 0 = mode picks
         player->ping = client->ping_ms > 0 ? (float) client->ping_ms : 0.0f; // lag compensation (getStateConst)
-        player->lag_comp = g_gs_config.lag_comp_scale;                        // v3.1.1 lagComp (ent[11]) for everyone
         client->player = player;
         game_players_add(&g_server->game, player);
     }
@@ -506,6 +505,7 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->slid_cont = client->slid_cont; // gameserver.ts: player.slidCont = ent[15]
     client->player->spray_index = client->spray_index; // applyEntData: player.sprayIndex = ent[1]
     client->player->skins = client->skins;             // applyEntData: player.skins = ent[2], meleeIndex = ent[9]
+    client->player->lag_comp = client->lag_comp;       // applyLagCompFromEnt: player.lagComp = ent[11]
     player_spawn(client->player);
     client->joined = 1;
     net_mark_client_spawned(client);
@@ -787,6 +787,7 @@ void net_add_client(ClientConnection *client) {
     client->slid_cont = 1;
     client->spray_index = 0;
     client->skins = PLAYER_SKINS_NONE;
+    client->lag_comp = 1.0f;
     client->chat_limiter = (NetChatLimiter) {0};
     client->ping_seq = 0;
     client->ping_ms = -1;
@@ -1071,6 +1072,10 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             client->slid_cont = ent.slid_cont;
             client->spray_index = ent.spray_index;
             client->skins = ent.skins;
+            // gameserver.ts applyLagCompFromEnt: a finite ent[11] clamped to 0.1..1 (never 0: a client
+            // must not turn off the rewind of its targets); otherwise the previous value stays
+            if (isfinite(ent.lag_comp)) client->lag_comp = fminf(1.0f, fmaxf(0.1f, ent.lag_comp));
+            if (client->player) client->player->lag_comp = client->lag_comp;
 
             // brain-linked: the first ENT waits for the JOIN / account lookup (server/src/accounts.c)
             if (accounts_gate_ent(client, ent.spectate)) net_resume_ent(client, ent.spectate);

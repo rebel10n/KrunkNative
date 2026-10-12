@@ -489,7 +489,7 @@ typedef struct {
 
     // Live match state from the server (client/src/net/game_events.c). Read by the HUD.
     int net_ping_ms;               // smoothed RTT from PING_RESULT, -1 = unknown (Krunker "-")
-    uint16_t net_ent_size;         // ENT size the server's INIT protocol accepts (net_ent_size_for): V6 from 1.1, else V4
+    uint16_t net_ent_size;         // ENT size the server's INIT protocol accepts (net_ent_size_for): V7 from 1.2, V6 for 1.1, else V4
     int net_round_seconds;         // round clock (TIMER), -1 = no round clock received yet
     int net_end_seconds;           // end screen "Next Round in" seconds, -1 = no end screen
     int net_end_result;            // END result: 1 victory, 0 defeat, -1 draw

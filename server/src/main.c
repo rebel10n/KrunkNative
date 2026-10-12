@@ -697,6 +697,7 @@ int main(int argc, char **argv) {
     g_server->config.cheats_open = cfg->cheats_open;
     g_server->game.lag_comp = (unsigned char) !!cfg->lag_comp; // players.js fetchState (shared/src/player.c)
     g_server->game.lag_comp_anchor = (unsigned char) !!cfg->lag_comp_anchor;
+    g_server->game.lag_comp_scale = cfg->lag_comp_scale; // times each player's ENT lagComp
     pthread_mutex_init(&g_server->lock, NULL);
 
     // --mode: one mode for every round (Krunker config.modes = [id]), or the public rotation;

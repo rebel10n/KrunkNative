@@ -10,7 +10,8 @@ coordinator (kn_brain) and two server_bin processes from generated server.cfg fi
   3. matchmaking: /mm/seek-game with A's session -> ticket -> JOIN on that server
      -> the server learns A's inventory: A's owned hat stays, an unowned one is stripped;
      B (session-only JOIN, no skins) wearing the same hat gets it stripped; the same for weapon
-     and melee skins (V6 ENT -> NET_PACKET_SKINS before each SPAWN, seen by the other player too)
+     and melee skins (V6 ENT -> NET_PACKET_SKINS before each SPAWN, seen by the other player too);
+     the V7 ENT lagComp (ent[11] slider) per player, 0 clamped to 0.1 (rcon `lagcomp`)
   4. password-protected server refuses a wrong password
   5. rcon (local TCP): status, say, kick; `send` redirects a player to the other lobby
   6. online_mode server linked to the coordinator: guests are never matched to it (nor to
@@ -197,7 +198,8 @@ def run():
     a.hello()
     a.join(client_key=seek.get("clientId", ""), session=ta, game_id=seek.get("gameId", ""))
     a.ent(cosmetics=(-1, -1, HAT_OWNED, HAT_UNOWNED, -1, -1, -1),  # skin, hair, hat, back, waist, face, dye
-          skins=(AK_OWNED, AK_UNOWNED, MELEE_OWNED))  # ent[2] primary / secondary, ent[9] melee (V6 ENT)
+          skins=(AK_OWNED, AK_UNOWNED, MELEE_OWNED),  # ent[2] primary / secondary, ent[9] melee
+          lag_comp=0.3)  # ent[11] Settings > Network "Lag Compensation" slider (V7 ENT)
     sp = None
     while True:
         payload = a.read(until=kn_proto.SPAWN, timeout=6)
@@ -211,7 +213,7 @@ def run():
     check("unowned back skin stripped", bool(sp) and sp["cosmetics"][3] == -1, str(sp and sp["cosmetics"]))
     check("server logged the inventory", "ds_alice owns 3 skin(s)" in log("s0.log"))
     inits = [p for t, p in a.packets if t == kn_proto.INIT and len(p) >= 3]
-    check("INIT announces protocol 1.1 (clients send V5/V6 ENTs only then)", bool(inits) and inits[0][0] == 1 and inits[0][1] >= 1,
+    check("INIT announces protocol 1.2 (clients send V5/V6 ENTs from 1.1, V7 from 1.2)", bool(inits) and inits[0][0] == 1 and inits[0][1] >= 2,
           str(inits and list(inits[0][:3])))
     alice_skins = kn_proto.skins_of(a, sp["uid"]) if sp else None
     check("SKINS before Alice's SPAWN: owned weapon + melee skins kept, unowned one stripped",
@@ -220,7 +222,7 @@ def run():
     b = kn_proto.Conn("127.0.0.1", PORTS[0])
     b.hello()
     b.join(session=tb)
-    b.ent(cosmetics=(-1, -1, HAT_OWNED, -1, -1, -1, -1), skins=(AK_OWNED, -1, MELEE_UNOWNED))
+    b.ent(cosmetics=(-1, -1, HAT_OWNED, -1, -1, -1, -1), skins=(AK_OWNED, -1, MELEE_UNOWNED), lag_comp=0.0)  # slider at 0
     spb = None
     while True:
         payload = b.read(until=kn_proto.SPAWN, timeout=6)
@@ -264,6 +266,9 @@ def run():
     check("rcon say", rc == 0 and "hello from rcon" in out)
     rc, out = rcon(RCON_PORT, "players")
     check("rcon players", rc == 0 and "ds_alice" in out and "ds_bob" in out, out[-300:])
+    rc, out = rcon(RCON_PORT, "lagcomp")
+    check("ENT V7 lagComp stored per player (0.3 kept, 0 clamped to 0.1 like gameserver.ts applyLagCompFromEnt)",
+          rc == 0 and "ds_alice: lagComp 0.30" in out and "ds_bob: lagComp 0.10" in out, out[-400:])
     other = [g for g in http("/mm/game-list?hostname=krunknative")[1]["games"] if g[0].startswith("E2E1:")]
     rc, out = rcon(RCON_PORT, "send", "ds_bob", other[0][0] if other else "E2E1:x", "Moving you to E2E #1")
     red = b.read(until=kn_proto.REDIRECT, timeout=4)

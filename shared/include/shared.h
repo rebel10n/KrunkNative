@@ -685,7 +685,7 @@ typedef struct Player_t {
 
     // Lag compensation (players.js storeState / fetchState / getStateConst, player.c).
     float ping;                   // player.ping: smoothed RTT in ms (server: ClientConnection.ping_ms)
-    float lag_comp;               // player.lagComp (ent[11], 0.1..1; KrunkNative: server.cfg lag_comp_scale)
+    float lag_comp;               // player.lagComp: ENT lag_comp (ent[11] slider, server-clamped to 0.1..1), default 1
     float c_send_rate;            // player.cSendRate (ent[16] servSendR: 20, else 10)
     double input_arrival;         // Input.arrival of the input procInputs is running (0 = now)
     PlayerStoredState state_history[PLAYER_STATE_HISTORY_MAX]; // stateHistory ring, newest at state_history_head
@@ -916,6 +916,7 @@ typedef struct Game_t {
     // shows its players without interpolation, so the current state is what the shooter saw.
     unsigned char lag_comp:1;
     unsigned char lag_comp_anchor:1; // getStateConst from the shot input's arrival (player.c)
+    float lag_comp_scale;         // server.cfg lag_comp_scale: multiplies every player's lagComp (0 = 1)
     double state_now;             // Krunker game.now for stateHistory (s); double: `now` is a float
                                   // that loses millisecond precision after a day of server uptime
     GameHooks hooks;
@@ -1157,8 +1158,9 @@ typedef struct {
 // without spawning anyone, so a client only sends the longer ENT (V5 spray, V6 weapon skins) to a
 // server that announces at least 1.1 (client_enter_game).
 #define NET_PROTOCOL_MAJOR 1
-#define NET_PROTOCOL_MINOR 1
-uint16_t net_ent_size_for(int major, int minor); // the ENT a client sends to an INIT major.minor server: V6 from 1.1, else V4
+// 1.1 servers accept ENTs up to V6 and drop V7 (1.2: + lagComp) the same way.
+#define NET_PROTOCOL_MINOR 2
+uint16_t net_ent_size_for(int major, int minor); // the ENT a client sends to an INIT major.minor server: V7 from 1.2, V6 for 1.1, else V4
 
 typedef struct {
     int32_t class_index;
@@ -1170,6 +1172,8 @@ typedef struct {
     int32_t spray_index;       // Krunker ent[1] selectedSprayIndex (-2 Random already resolved). Optional: shorter ENTs read as 0.
     PlayerSkins skins;         // Krunker ent[2] [primary, secondary] weapon skins + ent[9] meleeIndex (Random resolved).
                                // Optional: shorter ENTs read as PLAYER_SKINS_NONE.
+    float lag_comp;            // Krunker ent[11] settings.tmp.lagCompensation (Settings > Network "Lag Compensation"
+                               // slider, 0..1): player.lagComp. Optional: shorter ENTs read as 1 (the setting's default).
 } NetEntPacket;
 
 #define NET_ENT_PACKET_MIN_SIZE 4 // class_index only (older clients / bridges)
@@ -1177,7 +1181,8 @@ typedef struct {
 #define NET_ENT_PACKET_V3_SIZE (offsetof(NetEntPacket, spectate)) // up to cosmetics (older clients)
 #define NET_ENT_PACKET_V4_SIZE (offsetof(NetEntPacket, slid_cont) + 1) // + spectate + slid_cont
 #define NET_ENT_PACKET_V5_SIZE (offsetof(NetEntPacket, skins)) // + spray_index
-#define NET_ENT_PACKET_V6_SIZE (sizeof(NetEntPacket)) // + weapon / melee skins: what a client sends
+#define NET_ENT_PACKET_V6_SIZE (offsetof(NetEntPacket, lag_comp)) // + weapon / melee skins (protocol 1.1)
+#define NET_ENT_PACKET_V7_SIZE (sizeof(NetEntPacket)) // + lagComp (protocol 1.2): what a client sends
 
 typedef struct {
     uint8_t spectating;      // 1: this connection spectates now (no player; every player's state is streamed to it)

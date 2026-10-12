@@ -1318,7 +1318,7 @@ New keys (also in config.example.json):
 | `shutdown_grace` | `10` | seconds a SIGTERM/SIGINT drain lets the round finish |
 | `lag_comp` | `true` | hits test targets where the shooter saw them (v3.1.1 storeState / fetchState, 500 ms history); console `lagcomp` |
 | `lag_comp_anchor` | `true` | rewind from the shot input's arrival + 1 ping; `false` = v3.1.1 `ping * 2 * lagComp` from processing |
-| `lag_comp_scale` | `1` | v3.1.1 `player.lagComp` (0.1..1) for every player: scales the ping part of the rewind |
+| `lag_comp_scale` | `1` | 0.1..1, multiplies each player's v3.1.1 `player.lagComp` (the Settings > Network "Lag Compensation" slider, ENT V7, server-clamped to 0.1..1): scales the ping part of the rewind |
 | `log_file` | `""` | also append every console line (timestamped) here |
 
 CLI additions: `--cfg FILE`, `--hostname`, `--password`, `--online-mode` /

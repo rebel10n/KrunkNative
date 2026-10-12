@@ -434,6 +434,22 @@ export const ENT_COSMETICS_SIZE = 8 + COSMETICS_SIZE; // class, secondary, cosme
 export const ENT_SIZE = ENT_COSMETICS_SIZE + 2; // + spectate (ent[6]) + slidCont (ent[15]) (NET_ENT_PACKET_V4_SIZE)
 export const ENT_SPRAY_SIZE = ENT_SIZE + 4; // + int32 sprayIndex (ent[1]) (NET_ENT_PACKET_V5_SIZE)
 export const ENT_SKINS_SIZE = ENT_SPRAY_SIZE + 12; // + PlayerSkins: ent[2] weapon skins + ent[9] meleeIndex (NET_ENT_PACKET_V6_SIZE)
+export const ENT_LAG_COMP_SIZE = ENT_SKINS_SIZE + 4; // + float32 lagComp: ent[11] lagCompensation slider (NET_ENT_PACKET_V7_SIZE)
+
+// net_ent_size_for: the ENT a native server announcing INIT major.minor reads (1.0 drops anything past
+// V4, 1.1 anything past V6).
+export function entSizeFor(major: number, minor: number): number {
+  if (major > 1 || (major === 1 && minor >= 2)) return ENT_LAG_COMP_SIZE;
+  if (major === 1 && minor === 1) return ENT_SKINS_SIZE;
+  return ENT_SIZE;
+}
+
+// ent[11] parseFloat(settings.tmp.lagCompensation): 1 (the setting's default) when missing or not a number.
+// The server clamps it (0.1..1, gameserver.ts applyLagCompFromEnt).
+export function lagCompFromEnt(value: unknown): number {
+  const lc = typeof value === "string" ? parseFloat(value) : Number(value);
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(lc) ? lc : 1;
+}
 export const SPAWN_V1_SIZE = 78;
 export const SPAWN_COSMETICS_SIZE = SPAWN_V1_SIZE + COSMETICS_SIZE;
 

@@ -118,7 +118,7 @@ typedef struct {
     char custom_damage[RS_URL_MAX];
 
     // ---- General tab (cat "local"/"network"/"experimental")
-    float lag_comp;          // lagComp (client interpolation; flag)
+    float lag_comp;          // lagComp slider (settings.tmp.lagCompensation, 0..1): ENT ent[11], the server's player.lagComp
     int net_rerouting, serv_send_r, shader_rendering; // restart-only flags (shaderRendering is set(){} in v3.1.1)
 
     // ---- KrunkNative-only (no v3.1.1 row; persisted in the same store)
