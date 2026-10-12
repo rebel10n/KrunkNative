@@ -28,6 +28,7 @@
 #include <math.h>
 #include <sky.h>
 #include <ui_logic.h> // ui_text_input_focused
+#include <backend_ui.h> // account_ui_twofa_handler: the 2FA popup of a password login
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -740,8 +741,10 @@ static int h_transform(void *u, const HtmlEvent *ev, const HtmlArg *a, const int
 
 
 static int h_fallback(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
-    (void) u; (void) ev; (void) a; (void) n;
+    (void) u;
     const char *name = html_ui_current_handler();
+    // v7.1.4 editor.html's #twoFAPop (a 2FA account's password login): account_ui.c owns it
+    if (account_ui_twofa_handler(name)) return account_ui_handle(name, ev, a, n) != 0;
     if (name) fprintf(stderr, "[editor] unhandled %s\n", name);
     return 1;
 }

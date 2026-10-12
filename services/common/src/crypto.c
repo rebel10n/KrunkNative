@@ -91,6 +91,94 @@ int kn_hmac_sha256(const void *key, size_t keylen, const void *data, size_t len,
     return HMAC(EVP_sha256(), key, (int)keylen, data, len, out, &olen) ? 0 : -1;
 }
 
+int kn_hmac_sha1(const void *key, size_t keylen, const void *data, size_t len, uint8_t out[KN_SHA1_LEN]) {
+    unsigned int olen = 0;
+    static const uint8_t empty = 0;
+    if (!key) key = &empty;
+    if (!data) data = &empty;
+    return HMAC(EVP_sha1(), key, (int)keylen, data, len, out, &olen) ? 0 : -1;
+}
+
+/* ---- base32 (RFC 4648) and TOTP (RFC 6238) */
+
+int kn_base32_encode(const void *in, size_t len, char *out, size_t cap) {
+    static const char alpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    const uint8_t *p = in;
+    size_t o = 0;
+    uint32_t acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < len; i++) {
+        acc = (acc << 8) | p[i];
+        bits += 8;
+        while (bits >= 5) {
+            if (o + 1 >= cap) return -1;
+            out[o++] = alpha[(acc >> (bits - 5)) & 31];
+            bits -= 5;
+        }
+    }
+    if (bits > 0) {
+        if (o + 1 >= cap) return -1;
+        out[o++] = alpha[(acc << (5 - bits)) & 31];
+    }
+    if (o >= cap) return -1;
+    out[o] = 0;
+    return (int)o;
+}
+
+int kn_base32_decode(const char *in, size_t len, uint8_t *out, size_t cap) {
+    uint32_t acc = 0;
+    int bits = 0;
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        const char c = in[i];
+        int v;
+        if (c >= 'A' && c <= 'Z') v = c - 'A';
+        else if (c >= 'a' && c <= 'z') v = c - 'a';
+        else if (c >= '2' && c <= '7') v = c - '2' + 26;
+        else if (c == ' ' || c == '-' || c == '=') continue;
+        else return -1;
+        acc = (acc << 5) | (uint32_t)v;
+        bits += 5;
+        if (bits >= 8) {
+            if (o >= cap) return -1;
+            out[o++] = (uint8_t)(acc >> (bits - 8));
+            bits -= 8;
+        }
+    }
+    return (int)o;
+}
+
+int kn_totp_code(const uint8_t *secret, size_t secret_len, int64_t step, char *out, size_t cap) {
+    uint8_t msg[8], mac[KN_SHA1_LEN];
+    if (cap < KN_TOTP_DIGITS + 1 || step < 0) return -1;
+    for (int i = 7; i >= 0; i--) {
+        msg[i] = (uint8_t)(step & 0xff);
+        step >>= 8;
+    }
+    if (kn_hmac_sha1(secret, secret_len, msg, sizeof msg, mac) != 0) return -1;
+    const int off = mac[KN_SHA1_LEN - 1] & 15;
+    const uint32_t bin = ((uint32_t)(mac[off] & 0x7f) << 24) | ((uint32_t)mac[off + 1] << 16) |
+                         ((uint32_t)mac[off + 2] << 8) | mac[off + 3];
+    snprintf(out, cap, "%06u", (unsigned)(bin % 1000000u));
+    return 0;
+}
+
+int kn_totp_check(const uint8_t *secret, size_t secret_len, const char *code, int64_t now_s, int window,
+                  int64_t *last_step) {
+    if (!secret || !code || strlen(code) != KN_TOTP_DIGITS || strspn(code, "0123456789") != KN_TOTP_DIGITS) return 0;
+    if (now_s <= 0) now_s = (int64_t)time(NULL);
+    const int64_t now_step = now_s / KN_TOTP_PERIOD;
+    int64_t hit = -1;
+    for (int d = -window; d <= window; d++) { /* every candidate, so timing does not reveal which one matched */
+        char want[16];
+        if (kn_totp_code(secret, secret_len, now_step + d, want, sizeof want) != 0) continue;
+        if (kn_ct_streq(want, code) && hit < 0) hit = now_step + d;
+    }
+    if (hit < 0 || (last_step && hit <= *last_step)) return 0;
+    if (last_step) *last_step = hit;
+    return 1;
+}
+
 int kn_hmac_sha256_hex(const char *key, const void *data, size_t len, char out[65]) {
     uint8_t mac[KN_SHA256_LEN];
     if (kn_hmac_sha256(key, key ? strlen(key) : 0, data, len, mac) != 0) return -1;

@@ -25,6 +25,9 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import base64
+import hashlib
+import hmac
 
 try:
     import websockets
@@ -133,6 +136,15 @@ def _map(b, i, n):
 
 
 # ---------------------------------------------------------------- client
+
+
+
+def totp(key_b32, offset=0):
+    """RFC 6238 code of the current 30 s step + offset (SHA-1, 6 digits)."""
+    key = base64.b32decode(key_b32 + "=" * (-len(key_b32) % 8))
+    mac = hmac.new(key, struct.pack(">Q", int(time.time() // 30) + offset), hashlib.sha1).digest()
+    o = mac[-1] & 15
+    return "%06d" % ((struct.unpack(">I", mac[o:o + 4])[0] & 0x7FFFFFFF) % 1000000)
 
 
 class Social:
@@ -471,32 +483,46 @@ async def scenario(base, internal_url, secret):
         err, data = await g.op("elo", id=carol_id, mode=2, delta=-100)
         check(err is None and data["elo"] == 0, "elo delta clamps at 0")
 
-    # v3.1.1 menu 2FA (pattern grid)
+    # v7.1.4 2FA: authenticator app (TOTP), index.js act2FA / sub2FA / twoFAres
     async with Social(ws_url, json_mode=True) as b:
         await b.call("a", "a", 1, [bob, None, bob_token])
-        r = await b.call("c2fa", "2fa")
-        pattern = r[3]
-        check(r[1] is None and isinstance(pattern, str) and len(pattern) == 5, "2FA enabled: %r" % r[1:])
-        r = await b.call("c2fa", "2fa")
-        check(r[2] == "2FA is already enabled", "2FA enable twice refused")
+        r = await b.call("c2fa", "a2FA")
+        uri = r[3] or ""
+        m = re.match(r"otpauth://totp/Krunker:(\w+)\?secret=([A-Z2-7]+)&issuer=Krunker", uri)
+        check(r[1] == 0 and r[2] == "a2FAc" and m and m.group(1) == bob, "a2FA offers an otpauth URI: %r" % r[1:])
+        key = m.group(2) if m else "AAAA"
+        r = await b.call("c2fa", "a2FAc", totp(key, 5))
+        check(r[1] == 0 and r[2] == "a2FAc" and r[5] == "Invalid Code", "wrong code asks again: %r" % r[1:])
+        r = await b.call("c2fa", "a2FAc", totp(key, -1))
+        check(r[1] == 2 and r[4] is True, "2FA enabled with the first code: %r" % r[1:])
+        r = await b.call("c2fa", "a2FA")
+        check(r[1] == 2 and r[4] is True, "a2FA when enabled only refreshes the state")
+        async with Social(ws_url, json_mode=True) as b2:  # b stays logged in by token
+            r = await b2.call("c2fa", "a", 1, [bob, "new_pass1", None], "c")
+            check(r[1] == 0 and r[2] == "2fa", "password login asks for the code: %r" % r[1:])
+            r = await b2.call("c2fa", "2fa", "12345x")
+            check(r[1] == 0 and r[5] == "Invalid Code", "wrong code refused: %r" % r[1:])
+            code = totp(key, 0)
+            await b2.send("2fa", code)  # no (name, ip) throttle after a wrong code: the password was right
+            r = await b2.recv("c2fa")
+            check(r[1] == 1, "popup hidden after the right code")
+            r = await b2.recv("a")
+            check(r[1] is None and r[3] == bob, "2FA login completes")
+            check(r[4][28] == 1, "has2FA slot set")
+            await b2.send("a", -1)
+            await b2.call("c2fa", "a", 1, [bob, "new_pass1", None], "c")
+            r = await b2.call("c2fa", "2fa", code)
+            check(r[1] == 0 and r[5] == "Invalid Code", "a used code is never accepted again")
+        async with Internal(internal_url, secret) as g:
+            err, _ = await g.op("login", name=bob, **{"pass": "new_pass1"})
+            check(err == "2FA required.", "internal password login refused for 2FA accounts")
+        r = await b.call("c2fa", "d2FA")
+        check(r[1] == 0 and r[2] == "d2FAc" and r[3] is None, "d2FA asks for a code")
+        r = await b.call("c2fa", "d2FAc", totp(key, 1))
+        check(r[1] == 2 and r[4] is False, "2FA disabled with a code: %r" % r[1:])
         await b.send("a", -1)
-        r = await b.call("c2fa", "a", 1, [bob, "new_pass1", None], "c")
-        check(r[1] == 1, "password login asks for the 2FA grid")
-        cells = [ord(ch) - 65 for ch in pattern]
-        wrong = [i for i in range(25) if i not in cells][:5]
-        r = await b.call("a", "2fa", 1, wrong)
-        check(r[1] == "Invalid 2FA pattern.", "wrong pattern refused: %r" % r[1])
-        await b.recv("c2fa")
-        await asyncio.sleep(1.5)  # the failure throttles (name, ip) for login_throttle_s
-        await b.send("2fa", 1, list(reversed(cells)))
-        r = await b.recv("c2fa")
-        check(r[1] == 2, "grid hidden after the right pattern")
-        r = await b.recv("a")
-        check(r[1] is None and r[3] == bob, "2FA login completes")
-        check(r[4][28] == 1, "has2FA slot set")
-    async with Internal(internal_url, secret) as g:
-        err, _ = await g.op("login", name=bob, **{"pass": "new_pass1"})
-        check(err == "2FA required.", "internal password login refused for 2FA accounts")
+        r = await b.call("a", "a", 1, [bob, "new_pass1", None], "c")
+        check(r[1] is None and r[4][28] == 0, "password login without 2FA again")
 
 
 def main():
@@ -550,9 +576,10 @@ def main():
                             env=dict(os.environ, KN_LOG_LEVEL="debug"), cwd=root)
     rc = 1
     try:
-        # brain.port 0: the kernel picks a free port, the brain logs it (no bind/close race)
+        # brain.port 0: the kernel picks a free port, the brain logs it (no bind/close race).
+        # 60 s: --migrate runs every migration first (MySQL DDL alone takes ~15 s on a cold server)
         port = None
-        for _ in range(300):
+        for _ in range(1200):
             if proc.poll() is not None:
                 raise RuntimeError("kn_brain exited early")
             with open(log_path) as fp:

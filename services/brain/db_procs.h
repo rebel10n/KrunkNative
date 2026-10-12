@@ -106,6 +106,9 @@ cJSON *db_season_check_badges(Dbx *x, int64_t id, int season, int64_t now_s, con
 cJSON *db_season_match(Dbx *x, int64_t id, int season, int64_t now_s, const cJSON *payload, int64_t challenge_bpp,
                        cJSON **progress);
 
+/* ---- account security: v7.1.4 2FA (TOTP), email verification (db_security.c, 0109) */
+extern const kn_proc P_EMAIL_STATE, P_EMAIL_REQUEST, P_EMAIL_VERIFY, P_TWOFA_CONFIRM, P_TWOFA_DISABLE, P_TWOFA_LOGIN;
+
 /* ---- matchmaking (db_mm.c) */
 extern const kn_proc P_RQ_JOIN, P_RQ_STATE, P_RQ_ACTION, P_RQ_EXPIRE, P_RQ_LOCK, P_RQ_CANDIDATES, P_RQ_MATCH_CREATE,
     P_RQ_MATCH_READY, P_RQ_MATCH_FAILED, P_RQ_MATCH_FINISH, P_RQ_RATINGS, P_MM_NODE_TAKEOVER, P_MM_NODE_UPDATE,

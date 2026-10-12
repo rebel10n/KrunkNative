@@ -1076,6 +1076,37 @@ static int attr_size(Dom *dom, HtmlElem e, int def)
 
 static float range_intrinsic_h(Widgets *w, HtmlElem e, const CssComputed *st);
 
+/* Blink NumberInputType::SizeShouldIncludeDecoration: without a size attribute a number input
+ * with a finite min and max is as wide as its longest bound (the integer digits, a minus sign
+ * included) plus the most fraction digits of min / max / step and the point, not the default
+ * 20 characters (v7.1.4's 2FA popup: six <input type=number min=0 max=9> in one row). */
+static int number_size(Dom *dom, HtmlElem e, int def)
+{
+    double lo, hi, step = 1;
+    size_t len = 0;
+    if (dom_get_attr(dom, e, "size", &len)) return attr_size(dom, e, def);
+    const char *sv = dom_get_attr(dom, e, "step", &len);
+    if (sv) {
+        sv = kn_str_trim(sv, &len);
+        if (len == 3 && (sv[0] | 32) == 'a' && (sv[1] | 32) == 'n' && (sv[2] | 32) == 'y') return def;
+    }
+    if (!attr_number(dom, e, "min", &lo) || !attr_number(dom, e, "max", &hi)) return def;
+    if (!attr_number(dom, e, "step", &step) || step <= 0) step = 1;
+    int left = 0, right = 0;
+    for (int i = 0; i < 3; i++) { /* integer digits of min / max, fraction digits of all three */
+        const double v = i == 0 ? lo : i == 1 ? hi : step;
+        char buf[64];
+        snprintf(buf, sizeof buf, "%.10g", v);
+        if (strchr(buf, 'e')) return def;
+        const char *dot = strchr(buf, '.');
+        const int l = dot ? (int)(dot - buf) : (int)strlen(buf), r = dot ? (int)strlen(dot + 1) : 0;
+        if (i < 2 && l > left) left = l;
+        if (r > right) right = r;
+    }
+    const int n = left + (right ? right + 1 : 0);
+    return n > 0 && n < 1000 ? n : def;
+}
+
 int widgets_intrinsic_size(Widgets *w, HtmlElem e, const CssComputed *st, float *out_w, float *out_h)
 {
     WidgetKind k = widgets_kind(w, e);
@@ -1090,7 +1121,8 @@ int widgets_intrinsic_size(Widgets *w, HtmlElem e, const CssComputed *st, float 
     case WIDGET_PASSWORD:
     case WIDGET_NUMBER: {
         float avg, max;
-        int size = attr_size(w->dom, e, w->theme.default_size_attr);
+        int size = k == WIDGET_NUMBER ? number_size(w->dom, e, w->theme.default_size_attr)
+                                      : attr_size(w->dom, e, w->theme.default_size_attr);
         char_widths(w, &f, &avg, &max);
         *out_w = ceilf(avg * (float)size) + (max - avg);
         *out_h = resolved_line_height(st, &f);

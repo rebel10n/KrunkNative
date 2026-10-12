@@ -4718,7 +4718,9 @@ static const HtmlHandlerEntry k_handlers[] = {
 // Krunker functions that need an account (follow, trade, post, chat, filters, ...): no-ops
 // for a guest, logged like any other dispatch.
 static int fallback_handler(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    UNUSED;
+    (void) user;
+    // v7.1.4 social.html's #twoFAPop (a 2FA account's password login): account_ui.c owns it
+    if (account_ui_twofa_handler(html_ui_current_handler())) return account_ui_handle(html_ui_current_handler(), ev, args, argc) != 0;
     return 1;
 }
 

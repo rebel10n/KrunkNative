@@ -653,6 +653,13 @@ else ()
     target_link_libraries(update_test PRIVATE cJSON m)
     add_test(NAME update_test COMMAND update_test)
 
+    # qr_code_test (email-verify): the v7.1.4 2FA popup's QR code encoder (client/src/ui/qr_code.c)
+    # against python-qrcode goldens (client/tests/data/qr_golden.json)
+    add_executable(qr_code_test client/tests/qr_code_test.c client/src/ui/qr_code.c)
+    target_include_directories(qr_code_test PRIVATE client/src/ui)
+    target_link_libraries(qr_code_test PRIVATE cJSON)
+    add_test(NAME qr_code_test COMMAND qr_code_test ${CMAKE_SOURCE_DIR})
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 

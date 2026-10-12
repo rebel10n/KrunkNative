@@ -32,6 +32,7 @@
 #include <map_catalog.h> // WP-E part 2c: the Map Challenges cards
 #include <weapons.h>
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
+#include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT "Please wait..." // generic.wait
@@ -55,9 +56,15 @@ static int g_mail_tab;           // the kml request / answer: 0 unread, 1 archiv
 static int g_mail_view;          // windows[29].tabIndex (v7: Followers, Clan, Hub, Inbox, Archive)
 static cJSON *g_mail_rows;       // mailData.d (owned), NULL = not loaded
 static int g_mail_loaded;        // mailData != null
-// 2FA: d3 picked cells of the login grid
-static int g_2fa_cells[25];
-static int g_2fa_count;
+// v7.1.4 2FA (authenticator app): v10808, the label sub2FA sends the code with ("2fa" = the
+// login step, "a2FAc" / "d2FAc" = confirm enabling / disabling)
+#define TWOFA_KEY_LEN 6 // config.twoFAKeyLen
+static char g_2fa_label[8];
+// KrunkNative email verification (kn_brain "emailS" / "cemail" / "emailv"; v7.1.4 has none)
+static struct {
+    int known, verified, pending, wait, mail;
+    char addr[256];
+} g_email;
 static double g_auth_sent_at;    // a login/register is waiting for its "a" reply (glfwGetTime), 0 none
 // player-viewer WP-E part 2c: v7 challenges (windows[32]) and the account's medal counts
 static cJSON *g_chal;            // account.activeChallenges from kn_brain's "chgL" (owned), NULL = not loaded
@@ -66,6 +73,7 @@ static char g_chal_typ[12];      // windows[32].openChallenge.typ ("" = home)
 static int g_chal_ind;           // windows[32].openChallenge.ind
 static cJSON *g_medal_counts;    // "mdl" {medal: count} (owned), NULL = not loaded
 static int g_scenario;           // account_ui_scenario: a stand-in account (no kn_brain)
+static cJSON *g_scenario_c2fa;   // account.c2fa: a "c2fa" frame replayed after the window (the 2FA popup)
 #define AUTH_TIMEOUT_SECONDS 8.0
 
 // ------------------------------------------------------------------ helpers
@@ -334,8 +342,9 @@ static void rerender_windows(void) {
 
 // ------------------------------------------------------------------ requests
 
-// sendAccountRequest(action, payload)
-static void send_account_request(const int action, const char *name, const char *pass, const char *third) {
+// sendAccountRequest(action, payload); email: KrunkNative's optional 4th payload element (register)
+static void send_account_request_email(const int action, const char *name, const char *pass, const char *third,
+                                       const char *email) {
     if (action >= 0) show_acc_resp(ACC_STR_WAIT);
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("a"));
@@ -345,11 +354,16 @@ static void send_account_request(const int action, const char *name, const char 
         cJSON_AddItemToArray(payload, cJSON_CreateString(name ? name : ""));
         cJSON_AddItemToArray(payload, pass ? cJSON_CreateString(pass) : cJSON_CreateNull());
         cJSON_AddItemToArray(payload, third ? cJSON_CreateString(third) : cJSON_CreateNull());
+        if (email && email[0]) cJSON_AddItemToArray(payload, cJSON_CreateString(email));
         cJSON_AddItemToArray(frame, payload);
         cJSON_AddItemToArray(frame, cJSON_CreateNull()); // captcha key (no captcha in KrunkNative)
     }
     backend_social_send(frame);
     cJSON_Delete(frame);
+}
+
+static void send_account_request(const int action, const char *name, const char *pass, const char *third) {
+    send_account_request_email(action, name, pass, third, NULL);
 }
 
 // readyLoad(): krunker_token + krunker_username -> sendAccountRequest(1, [name, null, token])
@@ -386,6 +400,7 @@ static void clear_account(void) {
     cJSON_Delete(g_medal_counts);
     g_medal_counts = NULL;
     battlepass_ui_reset(); // windows[5].data / account.BP
+    memset(&g_email, 0, sizeof(g_email));
 }
 
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices)
@@ -513,6 +528,7 @@ static void badge_url(int index, char *out, size_t n);
 static void mail_count(int count);
 static void mail_read_data(const cJSON *rows);
 static void twofa_res(const cJSON *frame);
+static void email_frame(const char *label, const cJSON *frame);
 
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
@@ -559,6 +575,8 @@ static void on_social(void *user, const cJSON *frame) {
         mail_read_data(cJSON_GetArrayItem(frame, 1));
     } else if (!strcmp(label, "c2fa")) {
         twofa_res(frame);
+    } else if (!strcmp(label, "emailS") || !strcmp(label, "cemail") || !strcmp(label, "emailv")) {
+        email_frame(label, frame);
     } else if (!strcmp(label, "clm")) { // claimRewardResponse(lastReward, funds)
         if (g_logged_in && g_acc.data) {
             cJSON_ReplaceItemInArray(g_acc.data, 11, cJSON_CreateNumber(num_at(frame, 1)));
@@ -755,63 +773,232 @@ static void mail_read_data(const cJSON *rows) {
     mail_count(g_acc.mail_unread - 1);
 }
 
-// ---- 2FA (index.js d4 / pick2FAkey / twoFAres / sub2FA / act2FA)
+// ---- 2FA: v7.1.4 index.js twoFAres / f1789 / onInput2FA / onKeyDown2FA / sub2FA / act2FA / dact2FA
 
-static char *twofa_grid(const char *pattern) {
+// f1789(config.twoFAKeyLen): one digit input per code character
+static char *twofa_inputs(void) {
     StrBuf sb = {0};
-    sb_append(&sb, "<table class='twoFATable'><tbody>");
-    for (int cell = 0, r = 0; r < 5; r++) {
-        sb_append(&sb, "<tr>");
-        for (int c = 0; c < 5; c++, cell++) {
-            int on = pattern && strchr(pattern, 'A' + cell) != NULL;
-            for (int i = 0; i < g_2fa_count && !on; i++) on = g_2fa_cells[i] == cell;
-            sb_appendf(&sb, "<td %s", on ? "class='twoFAkeyg'" : "");
-            if (!pattern) sb_appendf(&sb, " onclick='pick2FAkey(%d)'", cell);
-            sb_append(&sb, "><span style='opacity:0;padding-left:7px'>10</span></td>");
-        }
-        sb_append(&sb, "</tr>");
-    }
-    sb_append(&sb, "</tbody></table>");
+    for (int i = 0; i < TWOFA_KEY_LEN; i++)
+        sb_appendf(&sb, "<input class='twoFAIn' type='number' min='0' max='9' maxlength='1' placeholder=' ' oninput='onInput2FA(this);' onkeydown='onKeyDown2FA(this);' %s>",
+                   i == 0 ? "autofocus" : "");
     return sb_finish(&sb);
 }
 
-static void twofa_res(const cJSON *frame) {
-    const cJSON *kind = cJSON_GetArrayItem(frame, 1);
-    const int k = cJSON_IsNumber(kind) ? kind->valueint : 0;
-    if (k == 1) { // the login needs the pattern
-        set_display("twoFAPop", "block");
-        HtmlElem btn = html_dom_by_id("twoFAbtn");
-        if (btn) {
-            html_dom_set_html(btn, "Submit");
-            html_dom_set_attr(btn, "class", "");
-        }
-        g_2fa_count = 0;
-        char *grid = twofa_grid(NULL);
-        HtmlElem holder = html_dom_by_id("twoFAGholder");
-        if (holder) html_dom_set_html(holder, grid);
-        free(grid);
-    } else if (k == 2) {
-        set_display("twoFAPop", "none");
-    } else { // act2FA reply: the new pattern, or an error
-        HtmlElem b = html_dom_by_id("twoFAB");
-        const char *pattern = str_at(frame, 3);
-        if (b) html_dom_set_attr(b, "class", "menuLinkD floatR");
-        if (pattern) {
-            if (b) html_dom_set_text(b, "Enabled");
-            g_acc.has_2fa = 1;
-            HtmlElem grid_el = html_dom_by_id("twoFGridR");
-            char *grid = twofa_grid(pattern);
-            if (grid_el) {
-                html_dom_set_display(grid_el, "block");
-                html_dom_set_html(grid_el, grid);
-            }
-            free(grid);
-            HtmlElem prom = html_dom_by_id("twoFAprom");
-            if (prom) html_dom_set_html(prom, "Make sure to <b>take a picture</b> of the above pattern and to save it securely. You will need it to login again.");
-        } else if (b) {
-            html_dom_set_html(b, str_at(frame, 2) ? str_at(frame, 2) : "Error");
-        }
+// QrCode.toDataURL(otpUri): an SVG data URL (the HTML engine rasterises SVG with nanosvg)
+static char *qr_data_url(const char *text) {
+    static QrCode qr;
+    if (qr_encode((const unsigned char *) text, strlen(text), QR_ECC_M, -1, &qr) != 0) return NULL;
+    static char svg[48 * 1024];
+    const int n = qr_svg(&qr, svg, sizeof(svg));
+    if (n <= 0) return NULL;
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const size_t len = (size_t) n, cap = 32 + (len + 2) / 3 * 4;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+    size_t o = (size_t) snprintf(out, cap, "data:image/svg+xml;base64,");
+    for (size_t i = 0; i < len; i += 3) {
+        const unsigned v = (unsigned char) svg[i] << 16 | (i + 1 < len ? (unsigned char) svg[i + 1] << 8 : 0) |
+                           (i + 2 < len ? (unsigned char) svg[i + 2] : 0);
+        out[o++] = b64[v >> 18 & 63];
+        out[o++] = b64[v >> 12 & 63];
+        out[o++] = i + 1 < len ? b64[v >> 6 & 63] : '=';
+        out[o++] = i + 2 < len ? b64[v & 63] : '=';
     }
+    out[o] = 0;
+    return out;
+}
+
+// The popup's "Enter Verification Code" line (the second #twoFAmsg of the page)
+static HtmlElem twofa_msg_el(void) {
+    HtmlElem all[4];
+    const int n = html_dom_query_all(0, "#twoFAmsg", all, 4);
+    return n > 0 ? all[n - 1] : 0;
+}
+
+// twoFAres(status, nextLabel, otpUri, twoFAVal) + KrunkNative's message (6th element)
+static void twofa_res(const cJSON *frame) {
+    const int status = (int) num_at(frame, 1);
+    const char *label = str_at(frame, 2);
+    const char *uri = str_at(frame, 3);
+    const char *msg = str_at(frame, 5);
+    copy_str(g_2fa_label, sizeof(g_2fa_label), label);
+    ui_loadout_clear_pops(); // clearPops()
+    if (status) {
+        if (status == 1) {
+            set_display("twoFAPop", "none");
+        } else if (status == 2 && g_logged_in) {
+            const cJSON *val = cJSON_GetArrayItem(frame, 4);
+            g_acc.has_2fa = cJSON_IsTrue(val) || (cJSON_IsNumber(val) && val->valuedouble != 0);
+            set_display("twoFAPop", "none"); // KrunkNative: the confirm popup closes too
+            menu_rerender_if_open(5);         // updateWindow(5)
+        }
+        return;
+    }
+    set_display("twoFAPop", "block");
+    HtmlElem btn = html_dom_by_id("twoFAbtn");
+    if (btn) {
+        html_dom_set_html(btn, "Submit");
+        html_dom_set_attr(btn, "class", "twoFAbtn");
+    }
+    HtmlElem form = html_dom_by_id("twoFAForm");
+    char *inputs = twofa_inputs();
+    if (form) html_dom_set_html(form, inputs);
+    free(inputs);
+    HtmlElem first = form ? html_dom_query(form, ".twoFAIn") : 0;
+    if (first) html_dom_focus(first);
+    HtmlElem qr = html_dom_by_id("twoFAqr");
+    if (uri && qr) {
+        char *url = qr_data_url(uri);
+        HtmlElem img = html_dom_query(qr, "img");
+        if (url && img) {
+            html_dom_set_attr(img, "src", url);
+            html_dom_set_display(qr, "block");
+        }
+        free(url);
+    } else if (qr && (!label || strcmp(label, "a2FAc") != 0)) {
+        html_dom_set_display(qr, "none"); // v7 leaves the setup QR up for later prompts; KrunkNative hides it
+    }
+    HtmlElem m = twofa_msg_el();
+    if (m) {
+        html_dom_set_text(m, msg && msg[0] ? msg : "Enter Verification Code");
+        html_dom_set_style(m, "color", msg && msg[0] ? "#e33b3b" : "");
+    }
+}
+
+// The code typed so far (only single digits count, like sub2FA)
+static int twofa_code(char out[TWOFA_KEY_LEN + 1]) {
+    HtmlElem ins[TWOFA_KEY_LEN];
+    const int n = html_dom_query_all(0, ".twoFAIn", ins, TWOFA_KEY_LEN);
+    int len = 0;
+    for (int i = 0; i < n && i < TWOFA_KEY_LEN; i++) {
+        char v[16] = "";
+        html_dom_get_value(ins[i], v, sizeof(v));
+        if (strlen(v) == 1 && isdigit((unsigned char) v[0])) out[len++] = v[0];
+    }
+    out[len] = 0;
+    return len;
+}
+
+// sub2FA(): io.send(v10808 || "2fa", code) once every digit is there
+static void twofa_submit(void) {
+    char code[TWOFA_KEY_LEN + 1];
+    if (twofa_code(code) != TWOFA_KEY_LEN) return;
+    HtmlElem btn = html_dom_by_id("twoFAbtn");
+    if (btn) {
+        html_dom_set_html(btn, "...");
+        html_dom_set_attr(btn, "class", "twoFAbtnN");
+    }
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString(g_2fa_label[0] ? g_2fa_label : "2fa"));
+    cJSON_AddItemToArray(frame, cJSON_CreateString(code));
+    backend_social_send(frame);
+    cJSON_Delete(frame);
+}
+
+// previousElementSibling / nextElementSibling among the popup's inputs
+static HtmlElem twofa_sibling(const HtmlElem el, const int dir) {
+    HtmlElem ins[TWOFA_KEY_LEN];
+    const int n = html_dom_query_all(0, ".twoFAIn", ins, TWOFA_KEY_LEN);
+    for (int i = 0; i < n; i++)
+        if (ins[i] == el) return i + dir >= 0 && i + dir < n ? ins[i + dir] : 0;
+    return 0;
+}
+
+// onInput2FA(this): one digit per box, the caret moves on; the last box submits
+static void twofa_on_input(const HtmlElem el) {
+    if (!el) return;
+    char v[32] = "";
+    html_dom_get_value(el, v, sizeof(v));
+    const size_t len = strlen(v);
+    if (len == 0) {
+        const HtmlElem prev = twofa_sibling(el, -1);
+        if (prev) html_dom_focus(prev);
+        return;
+    }
+    if (len > 1) {
+        const char last[2] = {v[len - 1], 0};
+        html_dom_set_value(el, last);
+    }
+    const HtmlElem next = twofa_sibling(el, 1);
+    if (next) html_dom_focus(next);
+    else twofa_submit(); // twoFAbtn.click()
+}
+
+// onKeyDown2FA(this): Enter submits a complete code; Backspace clears and steps back
+static int twofa_on_keydown(const HtmlElem el, const int key) {
+    if (html_key_is_enter(key)) {
+        char code[TWOFA_KEY_LEN + 1];
+        if (twofa_code(code) >= TWOFA_KEY_LEN) twofa_submit();
+        return 0;
+    }
+    if (key == 259 || key == 8) { // GLFW_KEY_BACKSPACE natively, keyCode 8 on the web
+        char v[16] = "";
+        if (el) html_dom_get_value(el, v, sizeof(v));
+        const HtmlElem prev = el ? twofa_sibling(el, -1) : 0;
+        if (!v[0] && prev) {
+            html_dom_focus(prev);
+            html_dom_set_value(prev, "");
+        } else if (el) {
+            html_dom_set_value(el, "");
+        }
+        return 0;
+    }
+    return 1;
+}
+
+// ---- KrunkNative email verification (Account Security)
+
+static void email_res(const char *text, const int error) {
+    HtmlElem el = html_dom_by_id("emailRes");
+    if (!el) return;
+    html_dom_set_text(el, text ? text : "");
+    html_dom_set_style(el, "color", error ? "#e33b3b" : "rgba(255,255,255,0.5)");
+}
+
+static void email_state(const cJSON *st) {
+    if (!cJSON_IsObject(st)) return;
+    const char *addr = cJSON_GetStringValue(cJSON_GetObjectItem(st, "email"));
+    copy_str(g_email.addr, sizeof(g_email.addr), addr);
+    g_email.verified = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(st, "verified"));
+    g_email.pending = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(st, "pending"));
+    g_email.wait = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(st, "wait"));
+    g_email.mail = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(st, "mail"));
+    g_email.known = 1;
+}
+
+// ["emailS", state] / ["cemail" | "emailv", error, message, state]
+static void email_frame(const char *label, const cJSON *frame) {
+    if (!g_logged_in) return;
+    if (!strcmp(label, "emailS")) {
+        email_state(cJSON_GetArrayItem(frame, 1));
+        if (g_tab_index == 3) menu_rerender_if_open(5);
+        return;
+    }
+    const char *err = str_at(frame, 1), *msg = str_at(frame, 2);
+    email_state(cJSON_GetArrayItem(frame, 3));
+    if (g_tab_index == 3) menu_rerender_if_open(5);
+    email_res(err ? err : msg, err != NULL);
+}
+
+// The Account Security block: the address, its state, change / resend
+static void email_html(StrBuf *sb) {
+    sb_append(sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>");
+    if (g_email.addr[0]) {
+        sb_append(sb, "Email: <span style='color:#fff'>");
+        sb_append_esc(sb, g_email.addr);
+        sb_appendf(sb, "</span> <span style='color:%s'>%s</span>", g_email.verified ? "#3be354" : "#e33b3b",
+                   g_email.verified ? "Verified" : "Not verified");
+        if (!g_email.verified && g_email.mail)
+            sb_append(sb, "<div class='subPassChg' onclick='resendEmail()' style='float: right;margin-top: -8px;'>Resend</div>");
+    } else {
+        sb_append(sb, "Add an <span style='color:#fff'>Email</span> to verify your account");
+    }
+    sb_append(sb, "</div><input type='email' id='accEmailNew' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='");
+    sb_append(sb, g_email.addr[0] ? "New Email" : "Email");
+    sb_append(sb, "' /><div class='subPassChg' onclick='changeEmail()'>Submit</div><div id='emailRes' style='color:rgba(255,255,255,0.5)'>");
+    if (!g_email.mail && g_email.known) sb_append(sb, "Verification emails are unavailable on this server");
+    else if (!g_email.verified && g_email.pending) sb_append(sb, "Check your inbox for the verification link");
+    sb_append(sb, "</div>");
 }
 
 void account_ui_tick(Client *client) {
@@ -864,6 +1051,10 @@ static void auth_unreachable(void) {
     g_auth_sent_at = 0;
 }
 
+int account_ui_twofa_handler(const char *name) {
+    return name && (!strcmp(name, "sub2FA") || !strcmp(name, "onInput2FA") || !strcmp(name, "onKeyDown2FA"));
+}
+
 int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     if (name && (!strcmp(name, "registerAcc") || !strcmp(name, "loginAcc")) && (!backend_enabled() || !backend_social_is_open())) {
@@ -881,7 +1072,9 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         char user[64], pass[128];
         read_input("accName", user, sizeof(user));
         read_input("accPass", pass, sizeof(pass));
-        if (!strcmp(name, "registerAcc")) send_account_request(0, user, pass, NULL); // [name, pass, referralCode]
+        char mail[256] = "";
+        read_input("accEmail", mail, sizeof(mail)); // KrunkNative: optional, register only
+        if (!strcmp(name, "registerAcc")) send_account_request_email(0, user, pass, NULL, mail); // [name, pass, referralCode, email]
         else send_account_request(1, user, pass, NULL);
         g_auth_sent_at = glfwGetTime();
         return 1;
@@ -961,46 +1154,41 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         menu_show_window(30, 1);
         return 1;
     }
-    if (!strcmp(name, "pick2FAkey")) {
-        HtmlElem btn = html_dom_by_id("twoFAbtn");
-        char t[32] = "";
-        if (btn) html_dom_get_text(btn, t, sizeof(t));
-        if (!strcmp(t, "Loading...")) return 1;
-        const int cell = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
-        if (cell < 0 || cell >= 25) return 1;
-        int at = -1;
-        for (int i = 0; i < g_2fa_count; i++) if (g_2fa_cells[i] == cell) at = i;
-        if (at >= 0) g_2fa_cells[at] = g_2fa_cells[--g_2fa_count];
-        else g_2fa_cells[g_2fa_count++] = cell;
-        char *grid = twofa_grid(NULL);
-        HtmlElem holder = html_dom_by_id("twoFAGholder");
-        if (holder) html_dom_set_html(holder, grid);
-        free(grid);
+    if (!strcmp(name, "onInput2FA")) {
+        twofa_on_input(ev ? ev->target : 0);
         return 1;
     }
-    if (!strcmp(name, "sub2FA")) { // io.send("2fa", 1, d3)
-        HtmlElem btn = html_dom_by_id("twoFAbtn");
-        if (btn) {
-            html_dom_set_html(btn, "Loading...");
-            html_dom_set_attr(btn, "class", "twoFAbtnN");
+    if (!strcmp(name, "onKeyDown2FA")) return twofa_on_keydown(ev ? ev->target : 0, ev ? ev->key : 0);
+    if (!strcmp(name, "sub2FA")) {
+        twofa_submit();
+        return 1;
+    }
+    if (!strcmp(name, "act2FA") && g_logged_in) { // io.send("a2FA")
+        backend_social_send_text("[\"a2FA\"]");
+        return 1;
+    }
+    if (!strcmp(name, "dact2FA") && g_logged_in) { // io.send("d2FA")
+        backend_social_send_text("[\"d2FA\"]");
+        return 1;
+    }
+    if (!strcmp(name, "changeEmail") && g_logged_in) { // KrunkNative: ["cemail", email]
+        char addr[256];
+        read_input("accEmailNew", addr, sizeof(addr));
+        if (!addr[0]) {
+            email_res("Enter an Email", 1);
+            return 1;
         }
+        email_res(ACC_STR_WAIT, 0);
         cJSON *frame = cJSON_CreateArray();
-        cJSON_AddItemToArray(frame, cJSON_CreateString("2fa"));
-        cJSON_AddItemToArray(frame, cJSON_CreateNumber(1));
-        cJSON *cells = cJSON_CreateArray();
-        for (int i = 0; i < g_2fa_count; i++) cJSON_AddItemToArray(cells, cJSON_CreateNumber(g_2fa_cells[i]));
-        cJSON_AddItemToArray(frame, cells);
+        cJSON_AddItemToArray(frame, cJSON_CreateString("cemail"));
+        cJSON_AddItemToArray(frame, cJSON_CreateString(addr));
         backend_social_send(frame);
         cJSON_Delete(frame);
         return 1;
     }
-    if (!strcmp(name, "act2FA") && g_logged_in) { // io.send("2fa")
-        HtmlElem b = html_dom_by_id("twoFAB");
-        if (b) {
-            html_dom_set_html(b, "Please wait...");
-            html_dom_set_attr(b, "class", "menuLinkD floatR");
-        }
-        backend_social_send_text("[\"2fa\"]");
+    if (!strcmp(name, "resendEmail") && g_logged_in) { // KrunkNative: ["emailv"]
+        email_res(ACC_STR_WAIT, 0);
+        backend_social_send_text("[\"emailv\"]");
         return 1;
     }
     if (!strcmp(name, "uploadSettings") || !strcmp(name, "fetchSettings")) {
@@ -1263,7 +1451,8 @@ static char *gen_account(void) {
         if (!g_acc.hack) {
             sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>Submit</div><div id='newPRes' style='color:rgba(255,255,255,0.5)'></div>");
             // 2FA: v7 offers it from level 20 (or dev / partner / featured); KrunkNative always does
-            sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>To further protect your account, you can add enable <span style='color:#fff'>2FA</span>:<div class='subPassChg' onclick='%s' style='float: right;margin-top: -8px;'>%s</div></div><div id='twoFGridR' class='twoFAGrid' style='display:none'></div><div id='twoFAprom' style='font-size:17px;color:rgba(255,255,255,0.4)'></div></div>",
+            if (backend_enabled() || g_scenario) email_html(&sb); // KrunkNative email verification (v7.1.4 has none)
+            sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>To further protect your account, you can add enable <span style='color:#fff'>2FA</span>:<div class='subPassChg' onclick='%s' style='float: right;margin-top: -8px;'>%s</div></div></div>",
                        g_acc.has_2fa ? "dact2FA()" : "act2FA()", g_acc.has_2fa ? "Disable" : "Enable");
         }
         sb_append(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed.</div><div style='height:10px;'></div><div style='margin-top:10px'>Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>");
@@ -1744,8 +1933,21 @@ void account_ui_scenario(const cJSON *account) {
     g_chal = cJSON_IsArray(chal) ? cJSON_Duplicate(chal, 1) : NULL;
     g_medal_counts = cJSON_IsObject(medals) ? cJSON_Duplicate(medals, 1) : NULL;
     battlepass_ui_scenario(cJSON_GetObjectItem(account, "battlepass")); // {data, progress, tab, end, now}
+    email_state(cJSON_GetObjectItem(account, "email")); // {email, verified, pending, mail}
+    g_acc.has_2fa = cnum(account, "twofa") != 0.0;
+    g_tab_index = (int) cnum(account, "tab"); // windows[4].tabIndex
+    const cJSON *c2fa = cJSON_GetObjectItem(account, "c2fa"); // ["c2fa", 0, "a2FAc", "otpauth://..."]
+    cJSON_Delete(g_scenario_c2fa);
+    g_scenario_c2fa = cJSON_IsArray(c2fa) ? cJSON_Duplicate(c2fa, 1) : NULL;
     mark_header();
     menu_update_class_box();
+}
+
+void account_ui_scenario_post(void) {
+    if (!g_scenario_c2fa) return;
+    twofa_res(g_scenario_c2fa);
+    cJSON_Delete(g_scenario_c2fa);
+    g_scenario_c2fa = NULL;
 }
 
 char *account_window_gen(const int id, const char **header) {
@@ -1764,4 +1966,9 @@ void account_window_post(const int id) {
     storage_get("krunker_username", name, sizeof(name));
     HtmlElem input = html_dom_by_id("accName");
     if (input) html_dom_set_value(input, name);
+    // KrunkNative: an optional email for Register (kn_brain mails a verification link)
+    HtmlElem pass = html_dom_by_id("accPass");
+    if (pass && !html_dom_by_id("accEmail"))
+        html_dom_insert_html(pass, HTML_INSERT_AFTER_END,
+                             "<input id='accEmail' type='email' placeholder='Enter Email (optional, Register only)' class='accountInput'>");
 }

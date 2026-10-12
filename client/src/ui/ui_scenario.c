@@ -848,6 +848,7 @@ static int ui_scenario_apply(Client *client) {
     ranked_ui_scenario(st("ranked"));   // the Ranked window's rank card / party (ranked_ui.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);
+    account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window
     if (menu_open && st_has("spin")) {
         store_ui_scenario_wheel(st_int("spin", 0));
         const cJSON *result = st("spinResult");

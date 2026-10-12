@@ -201,6 +201,16 @@ void social_push_account_update(const cJSON *account) {
     social_push_account_ex(id, f, 1);
 }
 
+void social_email_state_push(int64_t account_id, const cJSON *state, SocialSession *except) {
+    const int verified = (int) kn_json_int(state, "verified", 0);
+    for (SocialSession *s = s_online; s; s = s->next) {
+        if (s->account_id != account_id || !social_open(s)) continue;
+        s->email_verified = verified;
+        s->email_state_known = 1;
+        if (s != except && s->json) social_send_n(s, "emailS", 1, cJSON_Duplicate(state, 1));
+    }
+}
+
 int social_ws_online(void) {
     int n = 0;
     for (SocialSession *s = s_online; s; s = s->next) n++;
@@ -289,7 +299,9 @@ int social_call(SocialSession *s, const kn_proc *proc, int nparams, const char *
 typedef struct AuthWait {
     SocialSession *s;
     char *name, *pass;    /* password logins: kept for the 2FA step */
-    int twofa;            /* this request carried a 2FA pattern */
+    int twofa;            /* this request carried a 2FA code */
+    int action;
+    char email[256];      /* register: the optional address (KrunkNative), "" none */
 } AuthWait;
 
 static void auth_wait_free(AuthWait *w) {
@@ -297,6 +309,12 @@ static void auth_wait_free(AuthWait *w) {
     free(w->pass);
     free(w->name);
     free(w);
+}
+
+/* index.js twoFAres(0, "2fa", null, null, message): the code prompt of a password login */
+static void twofa_login_prompt(SocialSession *s, const char *msg) {
+    social_send_n(s, "c2fa", 5, cJSON_CreateNumber(0), cJSON_CreateString("2fa"), cJSON_CreateNull(), cJSON_CreateNull(),
+                  msg ? cJSON_CreateString(msg) : cJSON_CreateNull());
 }
 
 static void send_auth_error(SocialSession *s, const char *err) {
@@ -314,24 +332,26 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
         return;
     }
     if (err && (!strcmp(err, ACCT_ERR_2FA) || (w->twofa && !strcmp(err, ACCT_ERR_2FA_BAD))) && w->name && w->pass) {
-        /* index.js twoFAres(1): show the pattern grid; ["2fa", 1, cells] continues the login */
+        /* v7.1.4 twoFAres(0, "2fa"): the code popup; ["2fa", code] continues the login */
         clear_pending(s);
         s->pending_name = w->name;
         s->pending_pass = w->pass;
         w->name = w->pass = NULL;
         auth_wait_free(w);
-        if (!strcmp(err, ACCT_ERR_2FA_BAD)) send_auth_error(s, err);
-        social_send_n(s, "c2fa", 1, cJSON_CreateNumber(1));
+        twofa_login_prompt(s, !strcmp(err, ACCT_ERR_2FA_BAD) ? err : NULL);
         social_unhold(s);
         return;
     }
-    if (w->twofa && !err) social_send_n(s, "c2fa", 1, cJSON_CreateNumber(2)); /* hide the grid */
+    if (w->twofa) social_send_n(s, "c2fa", 1, cJSON_CreateNumber(1)); /* twoFAres(1): hide the popup */
+    char reg_email[256];
+    snprintf(reg_email, sizeof reg_email, "%s", !err && account && w->action == 0 ? w->email : "");
     auth_wait_free(w);
     if (err || !account) {
         send_auth_error(s, err ? err : "Invalid login.");
         social_unhold(s);
         return;
     }
+    if (s->account_id != kn_json_int(account, "id", 0)) s->email_verified = s->email_state_known = 0;
     s->account_id = kn_json_int(account, "id", 0);
     snprintf(s->username, sizeof s->username, "%s", kn_json_str(account, "username", ""));
     snprintf(s->token, sizeof s->token, "%s", kn_json_str(account, "token", ""));
@@ -343,6 +363,8 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
                   s->token[0] ? cJSON_CreateString(s->token) : cJSON_CreateNull(), info);
     KN_DEBUG(MOD, "%s logged in as %s", s->socket_id, s->username);
     social_after_login(s);
+    if (reg_email[0]) acct_email_after_register(s->account_id, reg_email, s->ip); /* pushes "emailS" when done */
+    else sh_email_state(s, NULL);
     social_unhold(s);
 }
 
@@ -363,6 +385,7 @@ static void sh_auth(SocialSession *s, const cJSON *f) {
                          revoke_done, NULL);
         s->account_id = 0;
         s->username[0] = 0;
+        s->email_verified = s->email_state_known = 0;
         clear_pending(s);
         memset(s->token, 0, sizeof s->token);
         return;
@@ -386,9 +409,24 @@ static void sh_auth(SocialSession *s, const cJSON *f) {
         send_auth_error(s, "Invalid credentials.");
         return;
     }
+    /* KrunkNative: register takes an optional email as the payload's 4th element (v7.1.4: none) */
+    const cJSON *p3 = cJSON_GetArrayItem(payload, 3);
+    char email[256] = "";
+    if (action == 0 && cJSON_IsString(p3) && p3->valuestring[0]) {
+        const char *eerr = acct_validate_email(p3->valuestring, email, sizeof email);
+        if (eerr) {
+            send_auth_error(s, eerr);
+            return;
+        }
+    } else if (action == 0 && acct_email_required()) {
+        send_auth_error(s, "Email Required");
+        return;
+    }
     AuthWait *w = calloc(1, sizeof *w);
     if (!w) return;
     w->s = social_hold(s);
+    w->action = (int) action;
+    snprintf(w->email, sizeof w->email, "%s", email);
     if (action == 1 && pass) {
         w->name = strdup(name);
         w->pass = strdup(pass);
@@ -407,35 +445,25 @@ static void sh_auth(SocialSession *s, const cJSON *f) {
     acct_auth(&rq, auth_reply, w);
 }
 
-static void twofa_enabled(void *ud, const char *err, const cJSON *data) {
-    SocialSession *s = ud;
-    /* twoFAres(null, err, pattern) */
-    if (err) social_send_n(s, "c2fa", 2, cJSON_CreateNull(), cJSON_CreateString(err));
-    else social_send_n(s, "c2fa", 3, cJSON_CreateNull(), cJSON_CreateNull(), cJSON_CreateString(kn_json_str(data, "pattern", "")));
-    social_unhold(s);
-}
-
-/* ["2fa"] enable (menu act2FA) -> ["c2fa", null, null, pattern];
- * ["2fa", 1, cells] answer the grid of a pending login (sub2FA) -> ["c2fa", 2] + "a" */
+/* ["2fa", code]: the authenticator code of a pending password login (v7.1.4 sub2FA with
+ * nextLabel "2fa") -> ["c2fa", 1] + the "a" reply, or the prompt again with the reason. */
 static void sh_twofa(SocialSession *s, const cJSON *f) {
-    if (fa_int(f, 1, 0) != 1) {
-        if (!social_require_auth(s)) return;
-        acct_twofa_enable(s->account_id, twofa_enabled, social_hold(s));
-        return;
-    }
     if (!s->pending_name || !s->pending_pass || s->auth_busy) return;
-    char pattern[32];
-    acct_twofa_pattern(fa(f, 2), pattern);
+    char code[16] = "";
+    const char *str = fa_str(f, 1);
+    if (str) snprintf(code, sizeof code, "%s", str);
+    else if (cJSON_IsNumber(fa(f, 1))) snprintf(code, sizeof code, "%06lld", (long long) fa_int(f, 1, 0));
     AuthWait *w = calloc(1, sizeof *w);
     if (!w) return;
     w->s = social_hold(s);
     w->name = s->pending_name;
     w->pass = s->pending_pass;
     w->twofa = 1;
+    w->action = 1;
     s->pending_name = s->pending_pass = NULL;
     s->auth_busy = 1;
     AcctAuthReq rq = {.action = 1, .name = w->name, .pass = w->pass, .ip = s->ip, .origin = "social",
-                      .twofa = pattern[0] ? pattern : "-"};
+                      .twofa = code[0] ? code : "-"};
     acct_auth(&rq, auth_reply, w);
 }
 
@@ -470,6 +498,13 @@ static const SocialRoute k_routes[] = {
     {"a", sh_auth},
     {"po", sh_pong},
     {"2fa", sh_twofa},
+    {"a2FA", sh_twofa_enable},          /* v7.1.4 act2FA (account_security.c) */
+    {"a2FAc", sh_twofa_enable_confirm},
+    {"d2FA", sh_twofa_disable},         /* dact2FA */
+    {"d2FAc", sh_twofa_disable_confirm},
+    {"cemail", sh_email_set},           /* KrunkNative email verification */
+    {"emailv", sh_email_resend},
+    {"emailS", sh_email_state},
     {"las", sh_logout_all},
     {"r", sh_page},
     {"sp", sh_search},
@@ -553,6 +588,7 @@ static void dispatch(SocialSession *s, const cJSON *frame) {
     if (!cJSON_IsArray(frame) || !cJSON_IsString(label)) return;
     for (size_t i = 0; i < sizeof k_routes / sizeof k_routes[0]; i++) {
         if (!strcmp(k_routes[i].label, label->valuestring)) {
+            if (!social_email_gate(s, label->valuestring, frame)) return; /* accounts.email.require_verified */
             k_routes[i].fn(s, frame);
             return;
         }

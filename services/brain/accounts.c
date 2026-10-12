@@ -298,8 +298,8 @@ typedef struct AuthCtx {
     char ip[64];
     char origin[16];
     int account_id;
-    char *twofa_hash;   /* stored 2FA pattern hash, NULL = no 2FA */
-    char twofa[32];     /* pattern the client gave */
+    char *twofa_hash;   /* the account's 2FA (TOTP) secret, NULL = no 2FA */
+    char twofa[32];     /* code the client gave */
     char *rehash;       /* password rehash pending until 2FA passes */
     const char *fail_msg;
     AcctReplyFn cb;
@@ -308,6 +308,7 @@ typedef struct AuthCtx {
 
 static void auth_ctx_free(AuthCtx *c) {
     if (!c) return;
+    if (c->twofa_hash) memset(c->twofa_hash, 0, strlen(c->twofa_hash));
     free(c->twofa_hash);
     free(c->rehash);
     if (c->pass) {
@@ -409,11 +410,20 @@ static void login_failed(AuthCtx *c, const char *msg) {
     kn_db_call(g_acct_brain->db, &P_LOGIN_FAILED, KN_DB_ARGS(c->name, ip_param(c)), login_failed_cb, c);
 }
 
-static void twofa_verified(void *ud, int ok, const char *new_hash) {
-    (void) new_hash;
+/* P_TWOFA_LOGIN: a wrong code is counted on the account (10 within 15 minutes lock the 2FA
+ * step), not as a login failure: the password was right, so the (name, IP) throttle would only
+ * make the player wait before typing the code again. */
+static void twofa_checked(kn_db_result *res, void *ud) {
     AuthCtx *c = ud;
+    if (!kn_db_ok(res)) {
+        auth_fail(c, acct_db_error(res, "2fa"));
+        return;
+    }
+    cJSON *o = acct_db_json(res);
+    const int ok = (int) kn_json_int(o, "ok", 0);
+    cJSON_Delete(o);
     if (!ok) {
-        login_failed(c, ACCT_ERR_2FA_BAD);
+        auth_fail(c, ACCT_ERR_2FA_BAD);
         return;
     }
     login_success(c, c->rehash);
@@ -426,13 +436,15 @@ static void login_verified(void *ud, int ok, const char *new_hash) {
         return;
     }
     if (c->twofa_hash) {
-        /* v3.1.1 menu 2FA: the pattern grid comes after a correct password */
+        /* v7.1.4 2FA: the authenticator code comes after a correct password */
         if (!c->twofa[0]) {
             auth_fail(c, ACCT_ERR_2FA);
             return;
         }
         if (new_hash) c->rehash = strdup(new_hash);
-        if (acct_hash_async(c->twofa, c->twofa_hash, twofa_verified, c) != 0) auth_fail(c, "Server busy, try again.");
+        char id[24], now[24];
+        kn_db_call(g_acct_brain->db, &P_TWOFA_LOGIN,
+                   KN_DB_ARGS(acct_itoa(id, c->account_id), c->twofa, acct_itoa(now, (int64_t) time(NULL))), twofa_checked, c);
         return;
     }
     login_success(c, new_hash);
@@ -621,89 +633,6 @@ void acct_revoke_token(const char *token) {
     static const kn_sql q = {.pg = "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))",
                              .any = "DELETE FROM sessions WHERE token_hash = {hash:$1}"};
     kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(token), revoke_cb, NULL);
-}
-
-/* ------------------------------------------------------------------ 2FA (v3.1.1 menu pattern grid) */
-
-#define TWOFA_CELLS 25
-#define TWOFA_PICK 5
-
-size_t acct_twofa_pattern(const cJSON *cells, char out[32]) {
-    int on[TWOFA_CELLS] = {0};
-    const cJSON *it;
-    cJSON_ArrayForEach(it, cells) {
-        const int i = cJSON_IsNumber(it) ? (int) it->valuedouble : -1;
-        if (i >= 0 && i < TWOFA_CELLS) on[i] = 1;
-    }
-    size_t n = 0;
-    for (int i = 0; i < TWOFA_CELLS && n < 31; i++)
-        if (on[i]) out[n++] = (char) ('A' + i); /* config.alphabet */
-    out[n] = 0;
-    return n;
-}
-
-typedef struct TwofaCtx {
-    AcctReplyFn cb;
-    void *ud;
-    int64_t id;
-    char pattern[32];
-} TwofaCtx;
-
-static void twofa_stored(kn_db_result *res, void *ud) {
-    TwofaCtx *t = ud;
-    if (!kn_db_ok(res)) {
-        t->cb(t->ud, acct_db_error(res, "2fa"), NULL);
-    } else if (kn_db_affected(res) < 1) {
-        t->cb(t->ud, "2FA is already enabled", NULL);
-    } else {
-        cJSON *data = cJSON_CreateObject();
-        cJSON_AddStringToObject(data, "pattern", t->pattern);
-        t->cb(t->ud, NULL, data);
-        cJSON_Delete(data);
-    }
-    memset(t->pattern, 0, sizeof t->pattern);
-    free(t);
-}
-
-static void twofa_hashed(void *ud, int ok, const char *hash) {
-    TwofaCtx *t = ud;
-    char id[24];
-    if (!ok || !hash) {
-        t->cb(t->ud, "Server error.", NULL);
-        free(t);
-        return;
-    }
-    static const kn_sql q = {
-        .pg = "UPDATE accounts SET twofa_secret = $2 WHERE id = $1 AND twofa_secret IS NULL RETURNING id",
-        .any = "UPDATE accounts SET twofa_secret = $2 WHERE id = $1 AND twofa_secret IS NULL"};
-    kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(acct_itoa(id, t->id), hash), twofa_stored, t);
-}
-
-void acct_twofa_enable(int64_t id, AcctReplyFn cb, void *ud) {
-    TwofaCtx *t = calloc(1, sizeof *t);
-    if (!t) {
-        cb(ud, "Server error.", NULL);
-        return;
-    }
-    t->cb = cb;
-    t->ud = ud;
-    t->id = id;
-    /* TWOFA_PICK distinct random cells */
-    cJSON *cells = cJSON_CreateArray();
-    int picked[TWOFA_CELLS] = {0}, count = 0;
-    while (count < TWOFA_PICK) {
-        const int i = (int) (kn_random_u64() % TWOFA_CELLS);
-        if (picked[i]) continue;
-        picked[i] = 1;
-        count++;
-        cJSON_AddItemToArray(cells, cJSON_CreateNumber(i));
-    }
-    acct_twofa_pattern(cells, t->pattern);
-    cJSON_Delete(cells);
-    if (acct_hash_async(t->pattern, NULL, twofa_hashed, t) != 0) {
-        free(t);
-        cb(ud, "Server busy, try again.", NULL);
-    }
 }
 
 /* ------------------------------------------------------------------ internal ops (game servers) */
@@ -1287,7 +1216,9 @@ static void cleanup_tick(kn_loop *loop, void *ud) {
                                       .any = "DELETE FROM sessions WHERE expires_at < {now}"},
                         q_failures = {.pg = "DELETE FROM login_failures WHERE at < now() - interval '1 day'",
                                       .any = "DELETE FROM login_failures WHERE at < {ago:86400}"};
+    static const kn_sql q_email_tokens = {.any = "DELETE FROM email_tokens WHERE expires_at < {ago:604800}"};
     kn_db_query_sql(g_acct_brain->db, &q_sessions, 0, NULL, cleanup_cb, NULL);
+    kn_db_query_sql(g_acct_brain->db, &q_email_tokens, 0, NULL, cleanup_cb, NULL);
     kn_db_query_sql(g_acct_brain->db, &q_failures, 0, NULL, cleanup_cb, NULL);
 }
 
@@ -1317,12 +1248,14 @@ int accounts_init(Brain *b) {
     s_cleanup_timer = kn_loop_add_timer(b->loop, 60 * 1000, 3600 * 1000, cleanup_tick, NULL);
     staff_flags_apply();
     season_init(); /* v7.1.4 seasons: the accounts.current_season row (season.c) */
+    acct_security_init(b); /* 2FA, email verification, outbound mail (account_security.c) */
     KN_INFO(MOD, "ready (names %d-%d, sessions %lld days, password iterations %u)", g_acct.name_min,
             g_acct.name_max, (long long) (g_acct.session_ttl_s / 86400), kn_password_get_iterations());
     return 0;
 }
 
 void accounts_shutdown(Brain *b) {
+    acct_security_shutdown(b);
     if (s_cleanup_timer) kn_loop_cancel_timer(b->loop, s_cleanup_timer);
     s_cleanup_timer = 0;
 }

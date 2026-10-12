@@ -4,7 +4,9 @@ name: Deploy kru
 # the central node (assets., matchmaker., coordinator.krunk.io, play.krunk.io), then publish
 # the front end (krunk.io) to Cloudflare Pages (deploy/pages). `make pages` does the same by hand.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
-#          CLOUDFLARE_API_TOKEN (Pages: Edit + Zone Read/Cache Purge on krunk.io), CLOUDFLARE_ACCOUNT_ID.
+#          CLOUDFLARE_API_TOKEN (Pages: Edit + Zone Read/Cache Purge on krunk.io), CLOUDFLARE_ACCOUNT_ID,
+#          optional KN_SMTP_HOST, KN_SMTP_PORT, KN_SMTP_TLS, KN_SMTP_USER, KN_SMTP_PASSWORD, KN_SMTP_FROM
+#          (kn_brain's outbound mail -> /etc/krunknative/smtp.env; deploy/ansible/README.md).
 # kn-brain runs --migrate, so a deploy applies new DB migrations. A successful run starts
 # Deploy edges (workflow_run), so the game servers follow the services.
 on:
@@ -104,6 +106,12 @@ jobs:
         env:
           KRU_HOST: ${{ secrets.KRU_HOST }}
           KRU_PORT: ${{ secrets.KRU_PORT }}
+          KN_SMTP_HOST: ${{ secrets.KN_SMTP_HOST }}
+          KN_SMTP_PORT: ${{ secrets.KN_SMTP_PORT }}
+          KN_SMTP_TLS: ${{ secrets.KN_SMTP_TLS }}
+          KN_SMTP_USER: ${{ secrets.KN_SMTP_USER }}
+          KN_SMTP_PASSWORD: ${{ secrets.KN_SMTP_PASSWORD }}
+          KN_SMTP_FROM: ${{ secrets.KN_SMTP_FROM }}
         run: |
           # Overrides ansible.cfg's `-F ssh_config` (the runner has no host aliases).
           export ANSIBLE_SSH_ARGS="-F /dev/null -i $HOME/.ssh/id_kru -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ControlMaster=auto -o ControlPersist=60s"

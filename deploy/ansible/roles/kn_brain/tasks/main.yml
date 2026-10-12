@@ -66,6 +66,29 @@
   changed_when: "'created' in kn_secrets.stdout"
   no_log: true
 
+# EnvironmentFile syntax: JSON-quoted values (= double quotes with \\ and \" escapes, which systemd reads).
+- name: SMTP env file (outbound mail, never logged)
+  ansible.builtin.copy:
+    dest: "{{ kn_etc_dir }}/smtp.env"
+    content: |
+      # Managed by KrunkNative deploy/ansible (role kn_brain): kn_brain's outbound mail. Never commit.
+      {% for k, v in {'KN_SMTP_HOST': kn_brain_smtp_host, 'KN_SMTP_PORT': kn_brain_smtp_port, 'KN_SMTP_TLS': kn_brain_smtp_tls,
+                      'KN_SMTP_USER': kn_brain_smtp_user, 'KN_SMTP_PASSWORD': kn_brain_smtp_password,
+                      'KN_SMTP_FROM': kn_brain_smtp_from} | dictsort -%}
+      {{ k }}={{ v | string | to_json(ensure_ascii=False) }}
+      {% endfor %}
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  when: (kn_brain_smtp_host | length > 0) and (kn_brain_smtp_password | length > 0)
+  no_log: true
+  notify: Restart kn_brain
+
+- name: Note when no SMTP settings were given
+  ansible.builtin.debug:
+    msg: "KN_SMTP_HOST / KN_SMTP_PASSWORD not set: {{ kn_etc_dir }}/smtp.env left as it is (kn_brain sends no mail without it). Source ~/.config/kn-secrets/smtp.env or set the KN_SMTP_* CI secrets."
+  when: (kn_brain_smtp_host | length == 0) or (kn_brain_smtp_password | length == 0)
+
 - name: Systemd target
   ansible.builtin.copy:
     dest: /etc/systemd/system/krunknative.target

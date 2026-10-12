@@ -46,6 +46,7 @@ int kn_sha1(const void *data, size_t len, uint8_t out[KN_SHA1_LEN]);
 int kn_hmac_sha256(const void *key, size_t keylen, const void *data, size_t len, uint8_t out[KN_SHA256_LEN]);
 /* HMAC as lowercase hex (out >= 65 bytes). */
 int kn_hmac_sha256_hex(const char *key, const void *data, size_t len, char out[65]);
+int kn_hmac_sha1(const void *key, size_t keylen, const void *data, size_t len, uint8_t out[KN_SHA1_LEN]);
 int kn_pbkdf2_sha256(const char *password, size_t pwlen, const uint8_t *salt, size_t saltlen,
                      unsigned iterations, uint8_t *out, size_t outlen);
 
@@ -55,6 +56,21 @@ int kn_hex_encode(const void *in, size_t len, char *out, size_t cap);
 int kn_hex_decode(const char *in, size_t len, uint8_t *out, size_t cap);
 int kn_base64_encode(const void *in, size_t len, char *out, size_t cap, int url, int pad);
 int kn_base64_decode(const char *in, size_t len, uint8_t *out, size_t cap); /* std or url, padding optional */
+
+/* RFC 4648 base32 (A-Z2-7), no padding on encode; decode accepts lower case, padding, spaces and
+ * dashes (what authenticator apps show). */
+int kn_base32_encode(const void *in, size_t len, char *out, size_t cap);
+int kn_base32_decode(const char *in, size_t len, uint8_t *out, size_t cap);
+
+/* TOTP (RFC 6238, HMAC-SHA1, 6 digits, 30 s steps; Google Authenticator / Authy defaults).
+ * kn_totp_code: the code of time step `step` (= unix seconds / 30) as digits text (out >= 9).
+ * kn_totp_check: 1 when `code` matches a step within +-window of now_s / 30 and that step is
+ * greater than *last_step (replay protection; *last_step is updated), else 0. */
+#define KN_TOTP_PERIOD 30
+#define KN_TOTP_DIGITS 6
+int kn_totp_code(const uint8_t *secret, size_t secret_len, int64_t step, char *out, size_t cap);
+int kn_totp_check(const uint8_t *secret, size_t secret_len, const char *code, int64_t now_s, int window,
+                  int64_t *last_step);
 
 /* Signed tokens. claims is not consumed. ttl_s <= 0 = no "exp". Returns malloc'd string. */
 char *kn_signed_token_create(const char *secret, const cJSON *claims, int64_t ttl_s);

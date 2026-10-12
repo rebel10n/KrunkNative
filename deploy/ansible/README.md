@@ -45,6 +45,31 @@ release config), `/opt/krunknative-web/{releases/<id>,current,assets}`, state
 `/var/lib/krunknative`, secrets `/etc/krunknative/secrets.env` (generated once, root:kn 0640;
 set `kn_brain_internal_secret` from an ansible-vault file to pin it). The last 3 releases are kept.
 
+Outbound mail (kn_brain's email verification, `doc/backend.md` 7.9): `KN_SMTP_HOST`, `KN_SMTP_PORT`,
+`KN_SMTP_TLS` (`implicit` for 465, `starttls`, `auto`), `KN_SMTP_USER`, `KN_SMTP_PASSWORD`, `KN_SMTP_FROM`
+(default `Krunker <noreply@caan.edu>`) in the controller's environment become
+`/etc/krunknative/smtp.env` (root:kn 0640, written with `no_log`, an optional `EnvironmentFile` of
+the kn-brain units). Locally they live in `~/.config/kn-secrets/smtp.env` (mode 600):
+
+```sh
+set -a; . ~/.config/kn-secrets/smtp.env; set +a
+ansible-playbook central.yml
+```
+
+In CI they are repository secrets of the same names (deploy-kru.yml); set them from that file
+without printing anything:
+
+```sh
+set -a; . ~/.config/kn-secrets/smtp.env; set +a
+for k in KN_SMTP_HOST KN_SMTP_PORT KN_SMTP_TLS KN_SMTP_USER KN_SMTP_PASSWORD KN_SMTP_FROM; do
+  printf '%s' "${!k}" | gh secret set "$k" --repo <owner>/<repo>
+done
+```
+
+Unset (no host or password): the file is left as it is and kn_brain sends no mail.
+`kn_brain_email_require_verified` (default `[]`, v7.1.4 parity) lists the social features that
+need a verified email.
+
 Switches: `kn_coordinator_db` (`sqlite` | `none` | `postgres`; sqlite falls back to `--no-db`
 while the shipped kn_brain has no SQLite store), `kn_gameserver_enabled` (edges stay down until
 true), `kn_gameserver_ports_open` (escape hatch, true everywhere: edge_firewall opens the ports),

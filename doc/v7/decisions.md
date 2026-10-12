@@ -21,6 +21,7 @@ editor.md, player-viewer.md (this directory).
 | Footer "Experiments" link | Dropped with its separator (v7's `abTestsPopup()` A/B test opt-in; KN runs no A/B tests). tools/ui-import removes it, so a re-import keeps it out. |
 | Editor one-sided scaling | Keep Ctrl-hold to disable snapping, except while dragging an X/Z scale handle on prefabs that support one-sided scaling. |
 | Seasons | The season system, Battle Pass and challenges are in scope at full v7.1.4 parity (user, 2026-10-12). Crafting and trading stay out of scope until requested. |
+| Account security | 2FA is v7.1.4's authenticator app (TOTP, the QR popup, `a2FA` / `d2FA` / `2fa`), replacing v3.1.1's pattern grid (0109 switches grid secrets off). Email verification is a KrunkNative addition (user, 2026-10-12): v7.1.4 has no email flow, so it uses v7's reserved `cemail` / `emailv` labels, mails from `Krunker <noreply@caan.edu>`, gates nothing by default (`accounts.email.require_verified`), and adds no password reset or 2FA recovery by email (v7 has neither). doc/backend.md 7.9. |
 
 ## Packet id blocks
 

@@ -152,7 +152,29 @@
     "daily_reward_kr": 50,
     "free_wheel_cooldown_s": 21600,
     "skins_file": "assets/skins.json",
-    "assets_dir": "assets"
+    "assets_dir": "assets",
+    "twofa_issuer": "Krunker",
+    "email": {
+      "required": false,
+      "require_verified": [],
+      "link_base": "",
+      "verify_ttl_h": 24,
+      "resend_cooldown_s": 60,
+      "max_per_account_day": 5,
+      "max_per_address_day": 5,
+      "max_per_ip_hour": 10
+    }
+  },
+  "smtp": {
+    "_comment": "Outbound mail (email verification, doc/backend.md 7.9). Placeholders: put real values only in your gitignored config.json or the KN_SMTP_* environment (KN_SMTP_PASSWORD). No host = no mail.",
+    "host": "",
+    "port": 465,
+    "tls": "implicit",
+    "user": "noreply@example.com",
+    "password": "",
+    "from": "Krunker <noreply@caan.edu>",
+    "verify_peer": true,
+    "timeout_ms": 20000
   },
   "gameserver": {
     "region": "local",

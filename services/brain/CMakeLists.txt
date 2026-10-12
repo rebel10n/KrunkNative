@@ -53,6 +53,9 @@ set(KN_BRAIN_SOURCES
     db_season.c
     season.c
     ../../shared/src/season.c
+    # email-verify: v7.1.4 2FA (TOTP), email verification and outbound mail (0109_account_security)
+    account_security.c
+    db_security.c
 )
 
 # Sources another agent has listed but not landed yet must not break configure
@@ -159,6 +162,15 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/season_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_season PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # email-verify: verification mails through a fake SMTP server, links, rate limits, gates, 2FA lock
+    add_test(NAME brain_account_security
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_account_security PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;smtp")
+    # the same through the web client in headless Chromium (needs KN_WEB_DIST = a `make web` dist dir; else skips 77)
+    add_test(NAME brain_email_web_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/email_verify_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_email_web_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;smtp;e2e;web")
 endif ()
 
 # coord-store: the same three suites on the other store drivers (KN_TEST_DB_DRIVER,
@@ -186,7 +198,11 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_season_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/season_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_account_security_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_storage_${drv} brain_progress_${drv} brain_season_${drv}
+            brain_account_security_${drv}
             PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
     endif ()

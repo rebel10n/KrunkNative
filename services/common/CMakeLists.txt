@@ -4,7 +4,7 @@
 set(KNSVC_CORE_SOURCES
     src/buf.c src/log.c src/json.c src/config.c src/loop.c
     src/http.c src/http_parse.c src/url.c
-    src/ws.c src/ws_frame.c src/crypto.c src/msgpack.c)
+    src/ws.c src/ws_frame.c src/crypto.c src/msgpack.c src/smtp.c)
 
 # Only files that exist are compiled, so a module or test that is being added
 # never breaks configuring the whole repository.
@@ -123,10 +123,24 @@ if (KNSVC_DB_AVAILABLE AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_store.c
     endforeach ()
 endif ()
 
+# SMTP client + kn_mailer against tests/fake_smtp.py (STARTTLS / implicit TLS with a self-signed
+# certificate made by the openssl CLI; skips 77 without it). Free ports, no network.
+if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_smtp.c)
+    add_executable(knsvc_test_smtp tests/test_smtp.c)
+    target_link_libraries(knsvc_test_smtp PRIVATE knsvc Threads::Threads)
+    target_compile_definitions(knsvc_test_smtp PRIVATE _GNU_SOURCE)
+endif ()
+
 # WebSocket interop against python3 `websockets` (skips when the module is missing)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_FOUND AND TARGET knsvc_test_ws AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/ws_interop.py)
     add_test(NAME knsvc_ws_interop
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ws_interop.py $<TARGET_FILE:knsvc_test_ws>)
     set_tests_properties(knsvc_ws_interop PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 LABELS knsvc)
+endif ()
+
+if (Python3_FOUND AND TARGET knsvc_test_smtp)
+    add_test(NAME knsvc_smtp
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/smtp_test.py $<TARGET_FILE:knsvc_test_smtp>)
+    set_tests_properties(knsvc_smtp PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;smtp")
 endif ()

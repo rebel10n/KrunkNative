@@ -29,4 +29,17 @@ kn_brain_current_season: 7
 # Secrets: put them in an ansible-vault file (group_vars/central/vault.yml, see
 # README) or pass -e; generated once on the host when unset, then kept.
 kn_brain_internal_secret: ""
+# Outbound mail (email verification links, doc/backend.md 7.9) from the controller's environment:
+# `set -a; . ~/.config/kn-secrets/smtp.env; set +a` locally, the KN_SMTP_* secrets in deploy-kru.yml
+# in CI. Written to {{ kn_etc_dir }}/smtp.env (root:kn 0640, no_log) only when host and password are
+# set; an existing file is kept otherwise. Without it kn_brain sends no mail (accounts still work).
+kn_brain_smtp_host: "{{ lookup('ansible.builtin.env', 'KN_SMTP_HOST') }}"
+kn_brain_smtp_port: "{{ lookup('ansible.builtin.env', 'KN_SMTP_PORT') | default('465', true) }}"
+kn_brain_smtp_tls: "{{ lookup('ansible.builtin.env', 'KN_SMTP_TLS') | default('auto', true) }}"
+kn_brain_smtp_user: "{{ lookup('ansible.builtin.env', 'KN_SMTP_USER') }}"
+kn_brain_smtp_password: "{{ lookup('ansible.builtin.env', 'KN_SMTP_PASSWORD') }}"
+kn_brain_smtp_from: "{{ lookup('ansible.builtin.env', 'KN_SMTP_FROM') | default('Krunker <noreply@caan.edu>', true) }}"
+# accounts.email.require_verified: social features that need a verified email (chat, post, gift,
+# market, trade, clan, publish). Krunker v7.1.4 gates nothing on email: [].
+kn_brain_email_require_verified: []
 kn_brain_runtime_packages: [libssl3, libcrypt1, libpq5, libsqlite3-0, libmariadb3]

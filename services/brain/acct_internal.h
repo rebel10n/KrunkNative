@@ -81,18 +81,14 @@ int acct_hash_async(const char *password, const char *encoded, AcctHashFn cb, vo
 typedef struct AcctAuthReq {
     int action;                     /* 0 register, 1 login (password or token) */
     const char *name, *pass, *token, *ref, *ip, *origin;
-    const char *twofa;              /* canonical 2FA pattern (acct_twofa_pattern), NULL = none given */
+    const char *twofa;              /* the 6-digit 2FA code of a password login, NULL = none given */
 } AcctAuthReq;
 
-/* acct_auth error of a password login whose account has 2FA and no pattern was given:
- * the social socket answers ["c2fa", 1] and waits for ["2fa", 1, cells]. */
+/* acct_auth error of a password login whose account has 2FA (v7.1.4: an authenticator app)
+ * and no code was given: the social socket answers ["c2fa", 0, "2fa"] and waits for
+ * ["2fa", code]. A wrong code: ACCT_ERR_2FA_BAD (asked again); too many: P_TWOFA_LOGIN's refusal. */
 #define ACCT_ERR_2FA "2FA required."
-#define ACCT_ERR_2FA_BAD "Invalid 2FA pattern."
-/* Canonical pattern of grid cells (0..24 -> config.alphabet letters, sorted, unique).
- * Returns the length (0 when no valid cell). */
-size_t acct_twofa_pattern(const cJSON *cells, char out[32]);
-/* Enable 2FA with a fresh random 5-cell pattern -> data {pattern}. */
-void acct_twofa_enable(int64_t id, AcctReplyFn cb, void *ud);
+#define ACCT_ERR_2FA_BAD "Invalid Code"
 /* err NULL -> account object (with "token" set when one was issued). */
 void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud);
 void acct_get(int64_t id, AcctReplyFn cb, void *ud);
@@ -129,6 +125,8 @@ typedef struct SocialSession {
     char ip[64];
     char socket_id[20];
     int auth_busy;                  /* an "a" request is in flight */
+    int email_verified;             /* the account's email is verified (P_EMAIL_STATE after login) */
+    int email_state_known;
     char *pending_name, *pending_pass; /* password login waiting for the 2FA pattern */
     int busy;                       /* async work of the current frame in flight */
     int draining;
@@ -259,6 +257,27 @@ void season_init(void);
 void sh_noop(SocialSession *s, const cJSON *f);          /* "unbx" */
 void market_page(SocialSession *s, const char *page, const cJSON *f);
 void creation_page(SocialSession *s, int kind, const char *name);
+/* ---- account security (account_security.c, db_security.c, 0109_account_security) */
+void acct_security_init(Brain *b);
+void acct_security_shutdown(Brain *b);
+int acct_email_enabled(void);           /* smtp configured: verification mails go out */
+int acct_email_required(void);          /* accounts.email.required: registering needs an email */
+/* NULL when valid (norm = trimmed, lower case), else the user-facing message. */
+const char *acct_validate_email(const char *email, char *norm, size_t cap);
+/* Store a new account's email and mail the verification link (fire and forget). */
+void acct_email_after_register(int64_t account_id, const char *email, const char *ip);
+/* 1 = go on; 0 = the frame needs a verified email (accounts.email.require_verified): error sent. */
+int social_email_gate(SocialSession *s, const char *label, const cJSON *f);
+/* ["emailS", state] to the account's JSON sockets except `except`; sets their email_verified. */
+void social_email_state_push(int64_t account_id, const cJSON *state, SocialSession *except);
+void sh_email_set(SocialSession *s, const cJSON *f);           /* "cemail" */
+void sh_email_resend(SocialSession *s, const cJSON *f);        /* "emailv" */
+void sh_email_state(SocialSession *s, const cJSON *f);         /* "emailS" */
+void sh_twofa_enable(SocialSession *s, const cJSON *f);        /* "a2FA" */
+void sh_twofa_enable_confirm(SocialSession *s, const cJSON *f);/* "a2FAc" */
+void sh_twofa_disable(SocialSession *s, const cJSON *f);       /* "d2FA" */
+void sh_twofa_disable_confirm(SocialSession *s, const cJSON *f);/* "d2FAc" */
+
 /* After a login on the social socket: unread mail count etc. */
 void social_after_login(SocialSession *s);
 

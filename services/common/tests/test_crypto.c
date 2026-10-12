@@ -164,11 +164,46 @@ static void test_tokens(void) {
     cJSON_Delete(claims);
 }
 
+/* RFC 4648 base32, RFC 2202 HMAC-SHA1, RFC 6238 TOTP (SHA-1 vectors, last 6 of the 8 digits) */
+static void test_totp(void) {
+    char out[64];
+    uint8_t raw[64];
+    CHECK(kn_base32_encode("foobar", 6, out, sizeof out) == 10);
+    CHECK_EQ_STR(out, "MZXW6YTBOI");
+    CHECK(kn_base32_encode("f", 1, out, sizeof out) == 2);
+    CHECK_EQ_STR(out, "MY");
+    CHECK(kn_base32_decode("mzxw-6ytb oi======", 18, raw, sizeof raw) == 6 && !memcmp(raw, "foobar", 6));
+    CHECK(kn_base32_decode("MZ1W", 4, raw, sizeof raw) == -1);
+    uint8_t d[KN_SHA1_LEN];
+    char hx[41];
+    CHECK(kn_hmac_sha1("Jefe", 4, "what do ya want for nothing?", 28, d) == 0);
+    kn_hex_encode(d, sizeof d, hx, sizeof hx);
+    CHECK_EQ_STR(hx, "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
+    const uint8_t *key = (const uint8_t *)"12345678901234567890";
+    static const struct { long long t; const char *code; } v[] = {
+        {59, "287082"}, {1111111109, "081804"}, {1111111111, "050471"}, {1234567890, "005924"}, {2000000000, "279037"}};
+    for (size_t i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CHECK(kn_totp_code(key, 20, v[i].t / 30, out, sizeof out) == 0);
+        CHECK_EQ_STR(out, v[i].code);
+    }
+    int64_t last = 0;
+    CHECK(kn_totp_check(key, 20, "005924", 1234567890, 1, &last) == 1);
+    CHECK_EQ_INT(last, 1234567890 / 30);
+    CHECK(kn_totp_check(key, 20, "005924", 1234567890, 1, &last) == 0);      /* replay */
+    last = 0;
+    CHECK(kn_totp_check(key, 20, "005924", 1234567890 + 30, 1, &last) == 1); /* one step late: ok */
+    last = 0;
+    CHECK(kn_totp_check(key, 20, "005924", 1234567890 + 90, 1, &last) == 0); /* too late */
+    CHECK(kn_totp_check(key, 20, "00592", 1234567890, 1, NULL) == 0);
+    CHECK(kn_totp_check(key, 20, "00592a", 1234567890, 1, NULL) == 0);
+}
+
 int main(void) {
     test_digests();
     test_encodings();
     test_random();
     test_passwords();
     test_tokens();
+    test_totp();
     TEST_DONE("knsvc_crypto");
 }

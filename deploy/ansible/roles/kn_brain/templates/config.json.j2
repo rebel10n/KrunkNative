@@ -11,6 +11,7 @@
   "accounts": {
     "developers": {{ kn_brain_developers | to_json }},
     "moderators": {{ kn_brain_moderators | to_json }},
-    "current_season": {{ kn_brain_current_season | int }}
+    "current_season": {{ kn_brain_current_season | int }},
+    "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
   }
 }

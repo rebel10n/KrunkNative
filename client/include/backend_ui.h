@@ -38,6 +38,7 @@ const AccountInfo *account_get(void);       // NULL = guest (Krunker `acc == nul
 const char *account_session_token(void);    // saved social session token, "" none
 void account_ui_tick(Client*);              // per frame: header bar once the page exists
 int  account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
+int  account_ui_twofa_handler(const char *name); // 1 for the 2FA popup's handlers (sub2FA, onInput2FA, onKeyDown2FA): every page has #twoFAPop
 // Window markup when the account changes what v3.1.1 shows; NULL = keep the static capture.
 char *account_window_gen(int id, const char **header);
 void account_window_post(int id);
@@ -48,6 +49,7 @@ void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / ""
 // customBadge privacy setting shows it, else -1 (menu header, v7 updateClassPreview).
 int account_custom_badge(void);
 void account_ui_scenario(const cJSON *account); // --render-scenario: state.account stands in for a login
+void account_ui_scenario_post(void);             // after the scenario's window: account.c2fa (the 2FA popup)
 int account_owns_badge(int badge);
 void account_popup(int kind, const char *error, const char *text); // popupResponse: 0 error, 1 success, 2 loading
 void account_readable_time(char *out, size_t n, double ms);         // UTILS.getReadableTime

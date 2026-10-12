@@ -130,7 +130,7 @@ that is built in (libpq, libsqlite3, libmariadb / libmysqlclient; 3.6).
 
 | library | headers | links | used by |
 | --- | --- | --- | --- |
-| `knsvc` | `buf.h log.h config.h json.h loop.h http.h ws.h crypto.h msgpack.h` (umbrella `knsvc.h`) | cJSON, libcrypto, libm, pthreads | `kn_brain`, `server_bin` (brain client), tools |
+| `knsvc` | `buf.h log.h config.h json.h loop.h http.h ws.h crypto.h msgpack.h smtp.h` (umbrella `knsvc.h`) | cJSON, libcrypto (+ libssl: wss://, SMTP TLS), libm, pthreads | `kn_brain`, `server_bin` (brain client), tools |
 | `knsvc_db` | `db.h store.h migrate.h` | `knsvc` + the built-in drivers' client libraries | `kn_brain`, `kn_migrate` |
 
 Build: part of the normal native build when OpenSSL is found (`knsvc_db`, `kn_migrate`
@@ -238,8 +238,11 @@ states which.
 * Randomness: `kn_random_bytes/hex/token(base64url)/u64` from OpenSSL's CSPRNG (no
   fallback; failure is an error).
 * `kn_ct_equal`/`kn_ct_streq` constant-time compares (use for secrets and tokens),
-  `kn_sha256`, `kn_sha1`, `kn_hmac_sha256[_hex]`, `kn_pbkdf2_sha256`, hex and base64
-  (standard/url, padded or not; strict decoding).
+  `kn_sha256`, `kn_sha1`, `kn_hmac_sha256[_hex]`, `kn_hmac_sha1`, `kn_pbkdf2_sha256`, hex,
+  base64 (standard/url, padded or not; strict decoding) and base32 (RFC 4648).
+* TOTP (RFC 6238, SHA-1, 6 digits, 30 s): `kn_totp_code(secret, step)`,
+  `kn_totp_check(secret, code, now, window, &last_step)` (constant time over the window,
+  refuses steps <= `last_step`: a code is accepted once).
 * Signed tokens (brain -> game server join tickets, sessions): compact JWS HS256
   (`base64url(header).base64url(claims).base64url(HMAC-SHA256)`, header
   `{"alg":"HS256","typ":"JWT"}`), `kn_signed_token_create(secret, claims, ttl_s)` adds
@@ -435,6 +438,30 @@ MySQL/MariaDB: `KN_TEST_MYSQL_HOST` / `_PORT` / `_USER` / `_PASSWORD` (default
 `KN_TEST_DB_DRIVER=sqlite|mysql` directly (`services/brain/tests/db_scratch.py` makes the
 per-run database). The suite also runs
 clean under clang `-fsanitize=address,undefined` with leak detection.
+
+### 3.10 Outbound mail (`smtp.h`)
+
+* `kn_smtp_send(cfg, mail, ...)` (blocking): TCP with a connect timeout, implicit TLS (port 465,
+  `tls: implicit`) or STARTTLS (required when configured; bytes pipelined after the 220 are
+  refused), TLS >= 1.2 with the system CA store (+ `ca_file` / `KNSVC_TLS_CA_FILE`) and host name
+  verification, EHLO, AUTH PLAIN (else LOGIN; `auth` forces one; never over clear text unless
+  `allow_plain_auth`), MAIL / RCPT / DATA with dot-stuffing, QUIT. Returns `KN_SMTP_OK`,
+  `KN_SMTP_ETEMP` (network, TLS, timeout, 4xx) or `KN_SMTP_EPERM` (5xx, invalid message) and a
+  credential-free reason (the server's reply line).
+* `kn_mail_build`: RFC 5322 + MIME: `Date`, `From` (display name quoted or RFC 2047 encoded),
+  `To`, `Subject` (encoded words when not ASCII), `Message-ID` (`<random@from-domain>`),
+  `MIME-Version`, `Auto-Submitted: auto-generated`, multipart/alternative text + HTML (or text
+  only), UTF-8 quoted-printable bodies (7-bit clean, CRLF, <= 76 columns); CR/LF in any header
+  field is refused (header injection).
+* `kn_mailer` (what event-loop code uses): `kn_mailer_send` copies the mail into a queue drained
+  by one worker thread; the result (status, Message-ID, error) is posted back to the loop
+  (`kn_loop_post_threadsafe`), so DNS, TCP, TLS and the server never block it. Temporary failures
+  are retried (`retries`, `retry_delay_ms` doubling); `queue_max` bounds the backlog;
+  `kn_mailer_free` stops the worker and drops undelivered callbacks.
+* Test: `knsvc_smtp` (`tests/smtp_test.py` + `tests/test_smtp.c` against `tests/fake_smtp.py`
+  on a free port: STARTTLS / implicit TLS with a self-signed certificate, AUTH PLAIN / LOGIN,
+  5xx and 4xx paths, STARTTLS injection, the parsed MIME message, no credentials in the
+  transcript, the queue with retries while a loop timer keeps ticking).
 
 ## 4. Brain: public HTTP routes
 
@@ -850,7 +877,7 @@ wheels, Free KR wheel, daily reward). Private header `acct_internal.h`; public
 `accounts.h` (internal ops, used by `internal_ws.c` / `public_routes.c`) and
 `social_ws.h`. Schema: `services/db/migrations/postgres/0100_accounts.sql`,
 `0101_social.sql`, `0102_items_creations.sql`, `0103_account_functions.sql`,
-`0104_social_functions.sql`, `0105_twofa.sql`, `0106_store.sql` (applied migrations are never edited:
+`0104_social_functions.sql`, `0105_twofa.sql`, `0106_store.sql`, `0109_account_security.sql` (applied migrations are never edited:
 changes go into a new 01xx file in every dialect directory; `sqlite/` and `mysql/`
 hold the same tables, the SQL functions are C kn_procs in `db_accounts.c` /
 `db_social.c`, 3.6). Port of v3.1.1 `matchmaker/socialWs.ts`,
@@ -913,6 +940,10 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
   qs_battlepass: one pass per season, `itemdata` "id,tier,col,sk", KR prices),
   `battlepass_progress` (account.BP per pass: `bpp`, `tier`, `items_claimed`, `tier_at`),
   `season_stats` (per-season totals of counted matches): `0108_seasons.sql`, 7.8.
+* `accounts.email_verified_at`, `twofa_pending`, `twofa_last_step`, `twofa_failures`,
+  `twofa_failed_at`; `email_tokens` (sha256 of each emailed token, address, expiry, use) and
+  `mail_log` (every mail: account, kind, address, IP, status, Message-ID, the server's error):
+  `0109_account_security.sql`, 7.9.
 * `inventory` (skin index -> count), `skin_transactions`, `market_listings`,
   `trades` + `trade_items`, `published_maps`, `published_mods`, `published_assets`,
   `creation_votes`, `creation_favs`.
@@ -976,7 +1007,7 @@ Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 
 | request | reply |
 | --- | --- |
-| `["a", 0, [name, pass, ref], captcha]` register | `["a", null, id, username, data40, token, info]` or `["a", "error", null, null, null, null]` |
+| `["a", 0, [name, pass, ref, email?], captcha]` register (email: KrunkNative, optional; 7.9) | `["a", null, id, username, data40, token, info]` or `["a", "error", null, null, null, null]` |
 | `["a", 1, [name, pass, null], captcha]` login | same |
 | `["a", 1, [name, null, token]]` token resume | same (token unchanged) |
 | `["a", -1]` logout | none (session token revoked) |
@@ -987,7 +1018,8 @@ Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 underscores.`, `Password must be ≥ 6 characters.`, `Password is too long.`,
 `Username already taken.`, `Invalid login.`, `Invalid credentials.`, `Please Try
 Later`, `Too many failed logins for this IP`, `Banned: <reason>` / `Account banned.`,
-`Too many accounts created from this IP. Please Try Later`.
+`Too many accounts created from this IP. Please Try Later`, `Invalid Email`, `Email Required`.
+After every login the brain pushes `["emailS", state]` (JSON clients; 7.9).
 
 Pages: `["r", page, sub, myId, myName, s, region, item, captcha]` ->
 `["0", page, sub, data, ...]` (`sub` echoed: the page's `io_0` gate):
@@ -1037,8 +1069,9 @@ Other labels (request -> reply):
 | `["ri", name, id, captcha]` | `["trD", name, id, [myInventory, theirInventory]]` |
 | `["ctr", receiverId, giveIds, takeIds, msg, captcha]` / `["trA", tradeId]` / `["trC", tradeId]` | `["trR", result, tradeId\|null, msg]`; the other party gets `["pRes", "SUCCESS", null, msg]` |
 | `["trCA"]` | decline every open incoming offer |
-| `["2fa"]` (logged in) | `["c2fa", null, null, pattern]` / `["c2fa", null, err]`: enables v3.1.1's 2FA (5 random cells of the 5x5 grid, letters of `config.alphabet`; stored as a password hash) |
-| password login of a 2FA account | `["c2fa", 1]` (show the grid); then `["2fa", 1, [cells]]` -> `["c2fa", 2]` + the `a` reply, or `["a", "Invalid 2FA pattern.", ...]` + `["c2fa", 1]`. Token resumes skip 2FA; internal `login` answers `2FA required.` |
+| `["a2FA"]` / `["a2FAc", code]` / `["d2FA"]` / `["d2FAc", code]` | v7.1.4 2FA (authenticator app, 7.9): `["c2fa", 0, "a2FAc", otpauthUri]` -> `["c2fa", 2, null, null, true]`; `["c2fa", 0, "d2FAc"]` -> `["c2fa", 2, null, null, false]`; a wrong code: `["c2fa", 0, label, null, null, "Invalid Code"]` |
+| password login of a 2FA account | `["c2fa", 0, "2fa"]` (the code popup); then `["2fa", code]` -> `["c2fa", 1]` + the `a` reply, or `["c2fa", 0, "2fa", null, null, "Invalid Code"]`. Token resumes skip 2FA; internal `login` answers `2FA required.` |
+| `["cemail", email]` / `["emailv"]` / `["emailS"]` | KrunkNative email verification (7.9): `["cemail" \| "emailv", error, message, state]`, `["emailS", state]` |
 | `["las"]` | log out every other session of the account |
 | `["uploadM", mapJson, thumbDataUrl, description, videoId, category]` | `["pubMR", "Map Published!" \| "Map Updated!"]` / `["upMp", err]`: publishes the map under its JSON `name` (3-30 chars; v3.1.1 catalogue names reserved; republishing your own map bumps `map_updatecounter`); a PNG data URL thumbnail (<= 200 KB) becomes `map_image` |
 | `["edMp", name]` | `["edMp", mapJson \| null]` (own maps; devs / creation mods any) |
@@ -1148,6 +1181,17 @@ and `kills` / `deaths` / `won` / `games` / `score` / `timePlayed` into `season_s
   challenge list and its daily / weekly rotation, a commit with tallies -> the match-end pushes,
   duplicate and partial commits, badge select / claim refusals and the auto-awarded Nuclear I,
   medal counts, `badges` in the account object (WP-E part 2c).
+* `ctest -R brain_account_security` (`services/brain/tests/account_security_test.py`, every
+  driver, `tests/fake_smtp.py` on a free port): register with an email -> the mail (STARTTLS,
+  AUTH, From, Message-ID, text + HTML) -> its link verifies (`emailS` push, gated features open),
+  link reuse / expiry / a replaced address, the resend cooldown and daily cap, `mail_log` (sent
+  with the Message-ID, a 550 recipient as failed, no tokens), the 2FA lock after 10 wrong codes.
+  `ctest -R brain_social_ws` covers the TOTP flows (`a2FA` .. `d2FAc`, the login step, replay).
+* `ctest -R brain_email_web_e2e` (`services/brain/tests/email_verify_web_e2e.py`, needs
+  `KN_WEB_DIST` = a `make web` dist dir, else skipped): the real web client in headless Chromium
+  registers with an email in the account window, the fake SMTP server gets the mail, its link
+  turns the open Account Security block "Verified", and Enable 2FA -> v7's popup with the QR code
+  -> six typed digits enable 2FA.
 * `ctest -R brain_season` (`services/brain/tests/season_test.py`, every driver): the pass and
   account.BP, claims and their refusals, the match BPP and the daily cap (`bpEnd`), duplicate /
   left commits, the VIP tier and level skips in KR (`kr_transactions` rows, refusals without KR),
@@ -1203,6 +1247,78 @@ Migration and API summary: `0108_seasons` (postgres / sqlite / mysql) creates `s
 the season part of `P_PROGRESS`; social labels `bpdl`, `bpclm`, `xstbp`, `xstbpl`, `sst` and the
 pushes `bppd`, `bpEnd`, `purbp`, `purbpl`, `bpclmr`; commit fields `bpp` and the `prog` item
 column; leaderboard queries `season_*`.
+
+### 7.9 Account security: 2FA, email verification, outbound mail (`account_security.c`, `db_security.c`, `0109_account_security.sql`)
+
+What Krunker v7.1.4 has (src/index.js, i18n, packets.json): register / login by username and
+password only, the password change (`upp`), "Logout of all Sessions" (`las`), and 2FA with an
+authenticator app (index.js `twoFAres` / `act2FA` / `dact2FA` / `sub2FA`, `config.twoFAKeyLen` 6,
+the popup's QR code of an `otpauth://` URI, "Scan QR code with Authy or Google Authenticator").
+It has no email flow at all: no email field, no verification, no reset by email, no 2FA recovery
+(lost passwords: "contact recovery@yendis.ch"); `Account.email` (data[40]) is never shown and
+`packets.json` reserves `cemail` / `emailv` without code. Nothing is gated on an email.
+
+* **2FA (v7.1.4 parity)**: TOTP (RFC 6238: SHA-1, 6 digits, 30 s, +-1 step) replaces v3.1.1's
+  pattern grid; 0109 switches existing grid secrets off. `["a2FA"]` stores a fresh 160-bit secret
+  in `twofa_pending` and answers `["c2fa", 0, "a2FAc", "otpauth://totp/<issuer>:<name>?secret=
+  ..&issuer=..&algorithm=SHA1&digits=6&period=30"]`; the first valid `["a2FAc", code]` makes it
+  `twofa_secret` (`["c2fa", 2, null, null, true]`, data[28] = 1). `["d2FA"]` asks for a code,
+  `["d2FAc", code]` turns it off. A password login of a 2FA account gets `["c2fa", 0, "2fa"]`;
+  `["2fa", code]` finishes it. Every accepted code moves `twofa_last_step` (never accepted twice);
+  10 wrong codes within 15 minutes lock the code step for 15 minutes ("Too many attempts. Please
+  Try Later"); a wrong code is not a login failure (no `(name, IP)` throttle: the password was
+  right). The reason of a repeated prompt rides as a 6th element (`"Invalid Code"`): KrunkNative
+  shows it in the popup (v7 shows nothing). Token resumes skip 2FA (as v7). Procs
+  `P_TWOFA_CONFIRM`, `P_TWOFA_DISABLE`, `P_TWOFA_LOGIN`.
+* **Email verification (KrunkNative)**: an optional email at register (`["a", 0, [name, pass, ref,
+  email]]`) or later in the menu (`["cemail", email]`; a new address is stored unverified and
+  voids older links) mails a link `<link_base>/auth/verify-email?token=<43 chars>` (GET, also
+  `/api/verify-email`, an HTML page; tokens stored as sha256, 24 h, one use; the address must
+  still be the account's). Verifying sets `email_verified_at` and pushes `["emailS", {email,
+  verified, pending, wait, mail}]` to the account's sockets. `["emailv"]` resends; limits: one
+  mail per `resend_cooldown_s` (60 = v7's unused `config.accValidationTime`), `max_per_account_day`,
+  `max_per_address_day`, `max_per_ip_hour` (from `mail_log`). Replies `["cemail" | "emailv",
+  error, message, state]`: "Verification email sent to <address>", "Please wait N seconds before
+  requesting another email", "Too many emails today. Please Try Later", "Email already verified",
+  "No email on this account", "Email is unavailable on this server", "Invalid Email". Procs
+  `P_EMAIL_STATE`, `P_EMAIL_REQUEST`, `P_EMAIL_VERIFY`.
+* **Gates**: `accounts.email.require_verified` lists social features that need a verified email
+  (`chat` ict, `post` ps / com, `gift` kr, `market` li / pi, `trade` ctr / trA, `clan` create,
+  `publish` uploadM) -> `["po", null, "Verify your email to use this feature"]`. Default none
+  (v7.1.4 parity).
+* **Not implemented (v7.1.4 has neither)**: password reset by email and 2FA recovery by email.
+* **Mail**: `knsvc/smtp.h`'s `kn_mailer` (3.10): "Verify your Krunker email", text + HTML, From
+  `smtp.from`. Every mail is a `mail_log` row (queued -> sent with the Message-ID, or failed with
+  the server's reply); log lines mask the address (`p***@example.org`); credentials and tokens are
+  never logged or stored.
+* **Client**: `client/src/ui/account_ui.c`: v7's 2FA popup (QR code: `client/src/ui/qr_code.c`,
+  an SVG data URL; six digit inputs, `onInput2FA` / `onKeyDown2FA`, also on the hub and editor
+  pages' login popups), the account window's optional email input (Register), and an Email block
+  in Settings > Account Security (address, Verified / Not verified, Resend, change). The HTML
+  engine sizes `<input type=number min max>` like Blink (the six digit boxes in one row).
+
+| key | default | meaning |
+| --- | --- | --- |
+| `smtp.host` | `""` | SMTP submission server; empty = no mail (accounts work, emails stay unverified) |
+| `smtp.port` | 465 implicit / 587 | |
+| `smtp.tls` | `auto` | `implicit` (465), `starttls`, `none` (no AUTH then), `auto` = by port |
+| `smtp.user` / `smtp.password` | | AUTH PLAIN / LOGIN (`smtp.auth`: `auto`, `plain`, `login`); prefer `KN_SMTP_PASSWORD` |
+| `smtp.from` | `Krunker <noreply@caan.edu>` | From header and envelope sender (`smtp.reply_to` optional) |
+| `smtp.verify_peer` / `smtp.ca_file` | `true` / | certificate checks |
+| `smtp.timeout_ms`, `smtp.retries`, `smtp.retry_delay_ms`, `smtp.queue_max` | 20000, 2, 5000, 256 | |
+| `accounts.email.link_base` | `brain.public_url` | base of the verify link |
+| `accounts.email.verify_ttl_h` | 24 | link lifetime |
+| `accounts.email.resend_cooldown_s` / `max_per_account_day` / `max_per_address_day` / `max_per_ip_hour` | 60 / 5 / 5 / 10 | |
+| `accounts.email.required` | false | register needs an email ("Email Required") |
+| `accounts.email.require_verified` | `[]` | gated features, list or `a,b` |
+| `accounts.twofa_issuer` | `Krunker` | the otpauth issuer |
+
+Deployment: `KN_SMTP_*` from `~/.config/kn-secrets/smtp.env` or the deploy-kru CI secrets become
+`/etc/krunknative/smtp.env` (`deploy/ansible/README.md`).
+
+Migration and API summary: `0109_account_security` (postgres / sqlite / mysql); procs above (C on
+every driver); social labels `a2FA`, `a2FAc`, `d2FA`, `d2FAc`, `2fa` (code), `cemail`, `emailv`,
+`emailS`, register's 4th payload element; routes `GET /auth/verify-email`, `GET /api/verify-email`.
 
 ## 8. Game server (`server_bin`): config, brain client, accounts
 
@@ -1966,6 +2082,9 @@ Optional: a Cloudflare cache rule making `assets.krunk.io/updates/client/builds/
   `make backend-status`, `make backend-down`; `make backend-run` is svc-core's
   foreground variant. Knobs: `BRAIN_PORT GAME_PORT BRIDGE_PORT REGION BRIDGE
   FAKE_NODES KN_RUN_DIR BACKEND_ARGS`.
+* Outbound mail: `deploy/ansible` writes `KN_SMTP_*` (7.9) to `/etc/krunknative/smtp.env`
+  (0640, `no_log`), an optional `EnvironmentFile` of the kn-brain units; CI secrets `KN_SMTP_HOST`,
+  `KN_SMTP_PORT`, `KN_SMTP_TLS`, `KN_SMTP_USER`, `KN_SMTP_PASSWORD`, `KN_SMTP_FROM` (deploy-kru.yml).
 * systemd: `kn-brain.service` (migrations in ExecStartPre), `kn-gameserver@<NODE>`
   (`/etc/krunknative/gameserver-<NODE>.env` = `KN_GAMESERVER_*`), `kn-net-bridge`,
   `krunknative.target`.

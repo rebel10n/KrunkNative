@@ -14,6 +14,8 @@ Group={{ kn_group }}
 WorkingDirectory={{ kn_state_dir }}
 # KN_BRAIN_INTERNAL_SECRET (+ KN_BRAIN_JOIN_SECRET): generated once, mode 0640 root:{{ kn_group }}.
 EnvironmentFile={{ kn_etc_dir }}/secrets.env
+# KN_SMTP_* (outbound mail: email verification), optional; written from the controller's env.
+EnvironmentFile=-{{ kn_etc_dir }}/smtp.env
 ExecStart={{ kn_svc_current }}/bin/kn_brain --config {{ kn_brain_config }}{{ ' --no-db' if item.db == 'none' else ' --migrate' }} --brain.roles={{ item.roles }} --brain.host=127.0.0.1 --brain.port={{ item.port }} --brain.trust_proxy=true --brain.id={{ item.name }} --brain.public_url=https://{{ item.host }}{% if item.db == 'sqlite' %} --database.driver=sqlite --database.path={{ kn_state_dir }}/{{ item.name }}.db{% elif item.db == 'postgres' %} --database.driver=postgres{% endif %}
 
 KillSignal=SIGTERM
