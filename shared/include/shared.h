@@ -1488,6 +1488,16 @@ typedef struct {
     // WP-C: KR-cost triggers (tam 0 + tac, v7 DB call 138): spend `amount` KR of the player's
     // account; 1 = spent. NULL (offline, no kn_brain wallet): KR-cost triggers are unaffordable.
     int (*spend_kr)(struct Game_t*, const Player*, int amount);
+    // WP6 (KrunkScript persistence & services): the account backends of map triggers, NULL = none
+    // (the actions do nothing: decisions.md "Backend-only triggers"). The server routes them to
+    // kn_brain or the offline sandbox's file store (server/src/ks_storage.c).
+    // Save Data (49): storageUpdt(account, null, type, "private", raw "key,value") of the player.
+    void (*storage_save)(struct Game_t*, const Player*, const char *key, int type, const char *value);
+    // Load Data (57): getStoragePlayer(account, null); the rows arrive later through
+    // trigger_load_data_apply.
+    void (*storage_load)(struct Game_t*, const Player*);
+    // Reward KR (32): game.rewardKR(player, amount) (the callee checks game.krRewards).
+    void (*reward_kr)(struct Game_t*, const Player*, int amount);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second

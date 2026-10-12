@@ -61,6 +61,11 @@ const TriggerValueSet *trigger_object_values(const Game *game, const Object *obj
 // Client mirrors (no packets): "gv" / the "gbl" join list (reset clears first) and "cv".
 void trigger_mirror_global_value(Game *game, const char *key, double value, int reset);
 void trigger_mirror_custom_value(Player *player, const char *key, double value);
+// WP6: the rows of a Load Data (57) request (getStoragePlayer's callback, triggers.js:1357-1371),
+// on the authority: each stored key goes into the player's custVals with parseFloat(value) and a
+// "cv"; a key the set does not have yet needs room (a full set ends the copy, custValLimit).
+// [KN] custVals hold numbers: a value that is not a number is skipped (v7 kept the string).
+void trigger_load_data_apply(Game *game, Player *player, const char *const *keys, const char *const *values, int count);
 
 // game.addPlayerSound / removePlayerSound (looping sounds that follow a player: Juggernaut,
 // KrunkScript). Authority: kept for joiners ("asnd" in the sync data) and broadcast.

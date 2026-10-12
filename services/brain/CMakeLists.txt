@@ -35,6 +35,10 @@ set(KN_BRAIN_SOURCES
     db_accounts.c
     db_social.c
     db_mm.c
+    # ks-6 (WP6): KrunkScript storage + map KR rewards; the value rules are the game server's
+    db_storage.c
+    ../../shared/src/ks_storage_data.c
+    ../../shared/src/ks/ks_number.c
     ../../shared/src/map_catalog.c  # relative: knsvc_existing() checks paths under this dir
 )
 
@@ -100,6 +104,13 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
     add_test(NAME brain_auth_e2e
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_auth_e2e.sh ${CMAKE_BINARY_DIR})
     set_tests_properties(brain_auth_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # ks-6 (KrunkScript WP6): GAME.STORAGE of a hosted published map through server_bin + kn_brain
+    if (Python3_FOUND)
+        add_test(NAME brain_ks_storage_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/ks_storage_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_ks_storage_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    endif ()
 endif ()
 
 # Ranked queue end to end (2 brains, fake game server, 4 accounts; per-run schema too).
@@ -108,6 +119,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ranked_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_ranked PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # ks-6 (KrunkScript WP6): game-server storage / map KR reward ops on the database
+    add_test(NAME brain_storage
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_storage PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 endif ()
 
 # coord-store: the same three suites on the other store drivers (KN_TEST_DB_DRIVER,
@@ -126,7 +142,10 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_ranked_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ranked_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
-        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+        add_test(NAME brain_storage_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_storage_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
     endif ()
     add_test(NAME brain_federation_${drv}

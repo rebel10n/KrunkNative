@@ -8,6 +8,7 @@
 // shared/src/triggers_conditions.c, the 72 actions in shared/src/triggers_actions.c.
 #include <shared.h>
 #include "triggers_internal.h"
+#include <ks_storage_data.h> // WP6: Load Data values (parseFloat)
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -178,6 +179,15 @@ void trigger_mirror_custom_value(Player *player, const char *key, const double v
 double player_custom_value_get(const Player *player, const char *key) {
     const TriggerValue *v = player ? trigger_values_find(&player->custom_values, key) : NULL;
     return v ? v->value : 0.0;
+}
+
+void trigger_load_data_apply(Game *game, Player *player, const char *const *keys, const char *const *values, const int count) {
+    for (int i = 0; game && player && i < count; i++) {
+        if (!keys[i] || !keys[i][0]) continue;
+        if (!trigger_values_find(&player->custom_values, keys[i]) && player->custom_values.count > TRIGGER_V7_CUSTOM_VALUE_LIMIT) return;
+        const double value = ks_storage_parse_number(values[i]);
+        if (value == value) player_custom_value_set(game, player, keys[i], value);
+    }
 }
 
 void player_custom_value_set(Game *game, Player *player, const char *key, const double value) {

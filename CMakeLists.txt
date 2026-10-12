@@ -97,6 +97,7 @@ set(SERVER_CORE_SOURCES
     server/src/server_core.c
     server/src/sandbox.c
     server/src/ks_server_host.c
+    server/src/ks_storage.c
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -490,6 +491,14 @@ else ()
     target_link_libraries(ks_server_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(ks_server_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # ks_storage_test (KrunkScript WP6): GAME.STORAGE / Save / Load Data on the offline store, the
+    # kn_brain frames, KR rewards, ADMIN.ban
+    add_executable(ks_storage_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/ks_storage_test.c)
+    target_link_libraries(ks_storage_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(ks_storage_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # triggers_test: the v7.1.4 trigger runtime (WP-C): events, conditions, actions, values, delays, chains,

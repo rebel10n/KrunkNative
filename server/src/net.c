@@ -9,6 +9,7 @@
 #include <ai.h>
 #include <bots.h>            // Krunker v7.1.4 bot players (shared/src/bots.c)
 #include <ks_server.h>       // KrunkScript server host (server/src/ks_server_host.c)
+#include <ks_storage.h>      // WP6: trigger storage / KR reward hooks (server/src/ks_storage.c)
 #include <ks_game.h>
 #include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
 #include <errno.h>
@@ -1208,6 +1209,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
+    ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
 }
 
 // kickIdleSocket: ["error", "Kicked for inactivity", "000005"], then close.

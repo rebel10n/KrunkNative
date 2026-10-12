@@ -10,6 +10,7 @@ Networking" + "Triggers & Scripts" server code plus logging hooks, then:
   3. client A: NETWORK.send("check", {age: 20}) -> SCRIPT_MSG "check" {status: "Passed"} to A only
   4. client A: "relay" -> broadcast to both v7 clients (two-client message test)
   5. chat -> onChatMessage; the server half of `scripts` is never streamed (MAP_DATA)
+  5b. GAME.STORAGE on a standalone server (no kn_brain, not the sandbox): "Error", callback false
   6. bots playing under onPlayerUpdate / onPlayerDamage / onPlayerDeath: no runtime errors
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -52,7 +53,9 @@ public action onNetworkMessage(str id, obj data, str playerID) {
         GAME.NETWORK.send("check", { status: valid ? "Passed" : "Failed" }, playerID);
     }
     if (id == "relay") { GAME.NETWORK.broadcast("relayed", {from: playerID, text: (str) data.text}); }
+    if (id == "store") { GAME.STORAGE.set("someone", {a: 1}, "private", stored); }
 }
+action stored(obj data, bool ok, str name) { GAME.log("stored", toStr ok, name); }
 public action onPlayerLeave(str playerID) { GAME.log("leave", playerID); }
 """
 
@@ -213,6 +216,10 @@ def main():
         a.send(CHAT_SEND, b"hi there\x00")
         a.read(timeout=1.0)
         check("onChatMessage", any(line.startswith("chat hi there ") for line in logs(a)), str(logs(a)[-3:]))
+
+        send_msg(a, "store", {})
+        a.read(timeout=1.0)
+        check("STORAGE without a backend: Error", "Error" in logs(a) and "stored false someone" in logs(a), str(logs(a)[-3:]))
 
         info = [p for t, p in a.packets if t == MAP_INFO]
         if info:

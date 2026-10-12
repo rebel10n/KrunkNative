@@ -825,10 +825,16 @@ limits exist) [KN]: drop client `"sd"` messages beyond **20 per second per playe
 * Callbacks run later (asynchronously) as a fresh host entry with `(data obj, success bool, accountName str)`
   (`VER:1550`); `data` maps keys to **string** values.
 * `STORAGE.transact` always logs `Transactions disabled for now` (`API:2287-2289`).
-* KN backend [KN]: the server forwards storage ops to kn_brain (`doc/backend.md`; client never talks to
-  the DB). Offline/in-process server: a JSON file per map under `$XDG_DATA_HOME/krunknative/ks-storage/
-  <map-hash>/<account>.json`, same validation and semantics. Guests (no account) get `"Player not connected"`
-  semantics only if absent; an offline guest uses account name `"local"` [KN].
+* KN backend [KN] (WP6, `server/src/ks_storage.c`, rules shared with kn_brain in `shared/src/ks_storage_data.c`):
+  the server forwards storage ops to kn_brain (`doc/backend.md` 7.6 ops `storage` / `storage_load` /
+  `map_reward`, table `ks_storage`; the client never talks to the DB). Online, storage needs a lobby hosting a
+  published map (`config.customMap`: v7's customMap + defaultSetts); other lobbies get `"Storage only supported
+  on published maps"`. A standalone server_bin (no brain) answers v7's no-database `"Error"`. Offline sandbox: one
+  JSON document per map, `ks-storage-<fnv1a32 of the map name>` in the client's storage
+  (`$XDG_CONFIG_HOME/krunknative/<key>.json`, web localStorage), same validation and semantics; the sandbox player
+  counts as an account named `"local"` (accountID `"0"`). Script keys are stored with v7's `V_` prefix (the 20-char
+  key limit counts it); trigger keys (Save Data) are not, and both read back un-prefixed. Set / update callbacks get
+  the touched keys as stored after the operation; load rows come in key order.
 
 **GAME.COOKIES** (client only, `API:2325-2370`): `localStorage` keys `krkcst_<mapId>_<key>`. Values are
 `ToString`ed by `localStorage` (arrays become `"a,b"`). `load` returns `getSavedVal(...) + ""` i.e.

@@ -160,6 +160,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/zombies_test
 	./$(DEBUG_DIR)/config_test
 	./$(DEBUG_DIR)/sandbox_config_test
+	./$(DEBUG_DIR)/ks_storage_test
 
 # --------------------------------------------------------------------------- html-engine
 # The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).

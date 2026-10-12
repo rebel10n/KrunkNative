@@ -41,6 +41,11 @@ int accounts_reward(const Player*);
 int accounts_assigned_team(const ClientConnection*);
 // The account hosting the current custom lobby (requirePremiumCheatPerm's custom host).
 int accounts_is_custom_host(const ClientConnection*);
+// WP6: the published map (config.customMap) the current custom lobby hosts, NULL none:
+// GAME.STORAGE and Save / Load Data need one online (v7 customMap + defaultSetts).
+const char *accounts_published_map(void);
+// WP6: v7 game.krRewards: the host option krRewards on a hosted published map.
+int accounts_kr_rewards(void);
 
 // Templates of config.serverMessages[0/1] ("" = off).
 const char *accounts_join_message(void);

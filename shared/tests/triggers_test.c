@@ -789,6 +789,85 @@ static void test_map(const char *path, const int expect_triggers) {
     printf("%-48s %3d triggers, %3d actions, %3d fired (KR-cost ones need a wallet)\n", path, triggers, actions, fired);
 }
 
+// ---------------------------------------------------------------- WP6 account backends
+
+static char g_saved_key[64], g_saved_value[64];
+static int g_saved_type, g_saves, g_loads, g_rewards, g_reward_amount;
+static void hook_save(Game *game, const Player *p, const char *key, const int type, const char *value) {
+    (void) game; (void) p;
+    g_saves++;
+    g_saved_type = type;
+    snprintf(g_saved_key, sizeof(g_saved_key), "%s", key);
+    snprintf(g_saved_value, sizeof(g_saved_value), "%s", value);
+}
+static void hook_load(Game *game, const Player *p) { (void) game; (void) p; g_loads++; }
+static void hook_reward(Game *game, const Player *p, const int amount) { (void) game; (void) p; g_rewards++; g_reward_amount = amount; }
+
+static void test_backend_actions(void) {
+    Game g;
+    // 0 Save Data "My,Score_Long_Name" type 9 (-> 5), 1 Save Data "Coins" from the player value "coins",
+    // 2 Save Data "time", 3 Load Data, 4 Reward KR 25, 5 Save Data without a name
+    make_game(&g, "{\"name\":\"t\"," SPAWNS ",\"objects\":["
+        "{\"i\":29,\"p\":[0,0,0],\"s\":[10,10,10],\"te\":0,\"tas\":[{\"ta\":49,\"tct\":\"My,Score_Long_Name\",\"tc2\":9}]},"
+        "{\"i\":29,\"p\":[50,0,0],\"s\":[10,10,10],\"te\":0,\"tas\":[{\"ta\":49,\"tct\":\"Coins\",\"tce\":2,\"tcc\":\"coins\",\"tc2\":3}]},"
+        "{\"i\":29,\"p\":[100,0,0],\"s\":[10,10,10],\"te\":0,\"tas\":[{\"ta\":49,\"tct\":\"TIME\",\"tc2\":2}]},"
+        "{\"i\":29,\"p\":[150,0,0],\"s\":[10,10,10],\"te\":0,\"tas\":[{\"ta\":57}]},"
+        "{\"i\":29,\"p\":[200,0,0],\"s\":[10,10,10],\"te\":0,\"tas\":[{\"ta\":32,\"tc\":25}]},"
+        "{\"i\":29,\"p\":[250,0,0],\"s\":[10,10,10],\"te\":0,\"tas\":[{\"ta\":49,\"tc\":3}]}"
+        "]}");
+    Player *a = add_player(&g, 1);
+    g_has_account = 1;
+    // no backend: nothing happens (and nothing crashes)
+    for (int i = 0; i < 6; i++) fire(&g, a, i);
+    g.hooks.storage_save = hook_save;
+    g.hooks.storage_load = hook_load;
+    g.hooks.reward_kr = hook_reward;
+    fire(&g, a, 0);
+    CHECK(g_saves == 1 && !strcmp(g_saved_key, "myscore_long") && !strcmp(g_saved_value, "1") && g_saved_type == 5,
+          "Save Data: lowercased, 12 chars, , removed, trigConst || 1, type clamped (%s %s %d)", g_saved_key, g_saved_value, g_saved_type);
+    fire(&g, a, 1);
+    CHECK(g_saves == 1, "Save Data: an undefined value saves nothing");
+    player_custom_value_set(&g, a, "coins", 12);
+    fire(&g, a, 1);
+    CHECK(g_saves == 2 && !strcmp(g_saved_key, "coins") && !strcmp(g_saved_value, "12") && g_saved_type == 3, "Save Data: a player value");
+    a->game_time = 0.0f;
+    g.round_timer = 12.5f;
+    fire(&g, a, 2);
+    CHECK(g_saves == 3 && !strcmp(g_saved_key, "time") && !strcmp(g_saved_value, "12500"), "Save Data time: the round clock (%s)", g_saved_value);
+    a->game_time = 4321.5f;
+    fire(&g, a, 2);
+    CHECK(g_saves == 4 && !strcmp(g_saved_value, "4321.5"), "Save Data time: the player's gameTime (%s)", g_saved_value);
+    fire(&g, a, 5);
+    CHECK(g_saves == 4, "Save Data without a name: nothing");
+    fire(&g, a, 3);
+    CHECK(g_loads == 1, "Load Data");
+    fire(&g, a, 4);
+    CHECK(g_rewards == 1 && g_reward_amount == 25, "Reward KR");
+    g_has_account = 0;
+    fire(&g, a, 0);
+    fire(&g, a, 3);
+    CHECK(g_saves == 4 && g_loads == 1, "no account: no Save / Load Data");
+    g_has_account = 1;
+
+    // the Load Data rows: numbers into custVals (+ "cv"), strings skipped, a full set stops the copy
+    clear_sent();
+    const char *keys[] = {"V_coins", "word", "trig"};
+    const char *values[] = {"9", "abc", "2.5"};
+    trigger_load_data_apply(&g, a, keys, values, 3);
+    CHECK(cv(a, "V_coins") == 9.0 && cv(a, "trig") == 2.5 && !trigger_values_find(&a->custom_values, "word"), "Load Data rows");
+    CHECK(count_sent(NET_PACKET_CUSTOM_VALUE) == 2, "cv sent per value: %d", count_sent(NET_PACKET_CUSTOM_VALUE));
+    for (int i = 0; a->custom_values.count <= TRIGGER_V7_CUSTOM_VALUE_LIMIT; i++) {
+        char k[16];
+        snprintf(k, sizeof(k), "f%d", i);
+        player_custom_value_set(&g, a, k, 1);
+    }
+    const char *more_keys[] = {"new1", "V_coins"};
+    const char *more_values[] = {"1", "10"};
+    trigger_load_data_apply(&g, a, more_keys, more_values, 2);
+    CHECK(!trigger_values_find(&a->custom_values, "new1") && cv(a, "V_coins") == 9.0, "a full set ends the copy (custValLimit)");
+    printf("backend actions done\n");
+}
+
 int main(void) {
     test_basic_actions();
     test_values_and_conditions();
@@ -796,6 +875,7 @@ int main(void) {
     test_events();
     test_pickups();
     test_legacy();
+    test_backend_actions();
 
     static const struct { const char *path; int triggers; } maps[] = {
         {"assets/maps/custom/ESP_Parkour.json", 95}, {"assets/maps/custom/Bhop_VIP.json", 54},

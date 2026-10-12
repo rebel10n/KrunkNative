@@ -87,6 +87,9 @@ extern const kn_proc P_POST_FULL, P_FEED, P_GIFT, P_CLAN_CREATE, P_CLAN_REQUEST,
     P_TRADE_ACCEPT, P_TRADE_CLOSE, P_CHAT_THREAD, P_PROFILE, P_MAP_PAGE, P_MOD_PAGE, P_PUBLISH_MAP, P_SET_HACK,
     P_SET_FEATURED;
 
+/* ---- KrunkScript storage and map KR rewards for game servers (db_storage.c) */
+extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;
+
 /* ---- matchmaking (db_mm.c) */
 extern const kn_proc P_RQ_JOIN, P_RQ_STATE, P_RQ_ACTION, P_RQ_EXPIRE, P_RQ_LOCK, P_RQ_CANDIDATES, P_RQ_MATCH_CREATE,
     P_RQ_MATCH_READY, P_RQ_MATCH_FAILED, P_RQ_MATCH_FINISH, P_RQ_RATINGS, P_MM_NODE_TAKEOVER, P_MM_NODE_UPDATE,

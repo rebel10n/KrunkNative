@@ -1039,6 +1039,17 @@ servers hosting community maps; 404 `{"error":"not_found"}`.
 | `elo` | `{id, mode: 1\|2\|4, elo}` / `{id, mode, delta}` (atomic, clamped at 0) | `{}` / `{elo}` |
 | `challenge` | `{id, chal, kr}` | `{chal, funds}` |
 | `ban_check` | `{ip, id?}` | `{banned, reason, expires}` |
+| `storage` | `{id, name, map, type: 0-5, scope: 0\|1, data: [[key, value]...]}` | `{rows: [[key, value]...]}` (the touched keys after the operation) |
+| `storage_load` | `{name, map, from?}` | `{rows: [[key, value]...]}` (`from` = another map of the same creator: its global rows) |
+| `map_reward` | `{id, amount, map}` | `{rsp: "Success", funds}` or `{rsp: <refusal>}` |
+
+`storage` / `storage_load` / `map_reward` are KrunkScript's `GAME.STORAGE`, the Save / Load Data
+triggers and `GAME.PAYMENTS.giveKR` / Reward KR of a game server hosting a published map
+(doc/v7/krunkscript.md 2.6, WP6; `db_storage.c`, migration `0300_ks_storage.sql`): rows of table
+`ks_storage (account_id, map_id, skey, svalue, scope)`, the map resolved by `published_maps.map_name`
+(unknown: `"Storage only supported on published maps"`), the v7 data checks again; KR rewards come out of
+`published_maps.map_funds`. Tests: `ctest -R brain_storage` (ops, every driver), `ctest -R
+brain_ks_storage_e2e` (server_bin + kn_brain + a hosted published map).
 
 `stats` is idempotent per `(match, id)` (`match_results` primary key; a retry
 returns `duplicate: 1` and changes nothing), adds XP to the per-class `c<class>`

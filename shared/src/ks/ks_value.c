@@ -1026,6 +1026,21 @@ KsValue ks_obj_get(KsScript *s, KsValue obj, const char *key)
     return out;
 }
 
+size_t ks_obj_count(KsValue obj)
+{
+    return obj.tag == KS_OBJ ? KS_AS_OBJ(obj)->count : 0;
+}
+
+int ks_obj_entry(KsScript *s, KsValue obj, size_t i, KsValue *key, KsValue *value)
+{
+    (void)s;
+    if (obj.tag != KS_OBJ || i >= KS_AS_OBJ(obj)->count) return 0;
+    const KsProp *p = &KS_AS_OBJ(obj)->props[i];
+    if (key) *key = ks_str_value(p->key);
+    if (value) *value = p->val;
+    return 1;
+}
+
 void ks_arr_push(KsScript *s, KsValue arr, KsValue v)
 {
     if (arr.tag == KS_ARR) ks_array_push(s, KS_AS_ARR(arr), v);

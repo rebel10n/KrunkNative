@@ -125,6 +125,10 @@ KsValue ks_str(KsScript *, const char *utf8, size_t len);
 KsValue ks_obj_new(KsScript *);  KsValue ks_arr_new(KsScript *);
 void    ks_obj_set(KsScript *, KsValue obj, const char *key, KsValue v);
 KsValue ks_obj_get(KsScript *, KsValue obj, const char *key);
+// Own properties of a script object (KS_OBJ) in iteration order (insertion order, 1.10): the
+// i-th key (un-prefixed, as scripts see it) and value; 0 past the end or for other values.
+size_t  ks_obj_count(KsValue obj);
+int     ks_obj_entry(KsScript *, KsValue obj, size_t i, KsValue *key, KsValue *value);
 void    ks_arr_push(KsScript *, KsValue arr, KsValue v);
 KsValue ks_arr_get(KsScript *, KsValue arr, size_t i);
 size_t  ks_arr_len(KsValue arr);

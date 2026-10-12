@@ -10,6 +10,7 @@
 #include <map_catalog.h>
 #include <map_validate.h>
 #include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
+#include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,8 @@ static struct {
     cJSON *pending_host;       // "host" waiting for its published map (/api/map-data)
     uint32_t pending_rid;
     cJSON *hosted_map;         // the fetched published map of the current custom game (owned)
+    char published_map[128];   // WP6: config.customMap of the current custom game ("" none)
+    int kr_rewards;            // WP6: host option krRewards on that published map
 
     // bans file
     int ban_accounts[256];
@@ -644,6 +647,14 @@ static void acc_ranked_setup(const cJSON *config) {
 // isPremiumCustomHost: this connection's account hosts the current custom lobby (brain "host").
 // v3.1.1 also needs premiumT > 0, but every account has premium while accounts.free_premium
 // is on, so the host account alone decides.
+const char *accounts_published_map(void) {
+    return g_acc.custom && g_acc.published_map[0] ? g_acc.published_map : NULL;
+}
+
+int accounts_kr_rewards(void) {
+    return accounts_published_map() && g_acc.kr_rewards;
+}
+
 int accounts_is_custom_host(const ClientConnection *client) {
     return g_acc.custom && g_acc.host_account_id && client->acct.account_id == g_acc.host_account_id;
 }
@@ -1292,6 +1303,8 @@ static void acc_revert_custom(const char *why) {
     g_rk.active = 0;
     g_acc.custom = 0;
     g_acc.host_account_id = 0;
+    g_acc.published_map[0] = 0;
+    g_acc.kr_rewards = 0;
     accounts_configure_public(&g_server->game, g_acc.cli_map);
     net_change_map(-1, -1);
 }
@@ -1483,6 +1496,12 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     g_acc.custom = 1;
     g_acc.custom_since = g_server->now;
+    // WP6: a hosted published map is v7's customMap played with defaultSetts: GAME.STORAGE, Save /
+    // Load Data and (host option krRewards, customGameConfig.js:438-445) KR rewards use its name.
+    // [KN] defaultSetts is not modelled: every hosted published map counts.
+    const char *published = custom_map ? acc_str(cJSON_GetObjectItem(config, "customMap"), acc_str(cJSON_GetObjectItem(config, "mapName"), "")) : "";
+    snprintf(g_acc.published_map, sizeof(g_acc.published_map), "%s", published);
+    g_acc.kr_rewards = g_acc.published_map[0] && cJSON_IsTrue(cJSON_GetObjectItem(config, "krRewards"));
     g_acc.custom_had_players = 0;
     const cJSON *host_id = cJSON_GetObjectItem(frame, "hostAccountId");
     g_acc.host_account_id = cJSON_IsNumber(host_id) ? host_id->valueint : 0;
@@ -1586,12 +1605,15 @@ static void acc_handle_frame(cJSON *frame) {
         // best-effort heads-up; the ticket itself is verified on JOIN
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "jti"));
         server_log("[brain] assignment %s for lobby %s", jti ? jti : "?", acc_str(cJSON_GetObjectItem(frame, "lobbyId"), "?"));
+    } else if (!strcmp(type, "acct-r") && ks_storage_on_brain_frame(frame)) {
+        // WP6: GAME.STORAGE / Save / Load Data / KR rewards (server/src/ks_storage.c)
     } else if (!strcmp(type, "acct-r") || !strcmp(type, "host-request-reply")) {
         // no game-socket account ops / host requests on the native protocol yet
     }
 }
 
 static void acc_link_down(void) {
+    ks_storage_link_down(); // their replies never come
     // pending auths will never be answered: ticket holders keep the ticket identity,
     // session-only joins become guests (or are refused)
     for (size_t i = 0; i < g_server->client_count; i++) {

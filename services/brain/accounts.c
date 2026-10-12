@@ -1122,6 +1122,35 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
                     op_json_done, o);
         return 0;
     }
+    /* WP6 (doc/v7/krunkscript.md 2.6): GAME.STORAGE, the Save / Load Data triggers and
+     * GAME.PAYMENTS.giveKR / Reward KR of a game server's published map (db_storage.c) */
+    if (!strcmp(op, "storage")) {
+        OpCtx *o = op_new(cb, ud, "storage");
+        if (!o) return -1;
+        char *data = kn_json_print(cJSON_GetObjectItemCaseSensitive(args, "data"));
+        kn_db_call(g_acct_brain->db, &P_STORAGE_UPDATE,
+                   KN_DB_ARGS(acct_itoa(ids, id), kn_json_str(args, "name", ""), kn_json_str(args, "map", ""),
+                              acct_itoa(v1, kn_json_int(args, "type", 0)), acct_itoa(v2, kn_json_int(args, "scope", 0)), data),
+                   op_json_done, o);
+        free(data);
+        return 0;
+    }
+    if (!strcmp(op, "storage_load")) {
+        OpCtx *o = op_new(cb, ud, "storage_load");
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_STORAGE_LOAD,
+                   KN_DB_ARGS(kn_json_str(args, "name", ""), kn_json_str(args, "map", ""), kn_json_str(args, "from", NULL)),
+                   op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "map_reward")) {
+        OpCtx *o = op_new(cb, ud, "map_reward");
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_MAP_REWARD,
+                   KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "amount", 0)), kn_json_str(args, "map", "")),
+                   op_json_done, o);
+        return 0;
+    }
     if (!strcmp(op, "ban_check")) {
         OpCtx *o = op_new(cb, ud, "ban_check");
         if (!o) return -1;

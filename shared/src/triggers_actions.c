@@ -5,9 +5,11 @@
 // uid order) with (j.isAI || d != j) && d.interface != j.interface && d.interface == j.interfaceT,
 // iterated while triggerChains[chain] > 0. The value of a hasCust action is getActionValue
 // (trigger_action_value): an undefined value skips the action (or that target).
-// Backend-only actions (32 Reward KR, 49 Save Data, 57 Load Data, 59 Reward Junk, 60 Reward
-// Skin, 62 / 65 challenges, 67 video ads) do nothing: KN has no KR / storage / store backend in
-// the game server (doc/v7/decisions.md "Backend-only triggers").
+// Backend-only actions (doc/v7/decisions.md "Backend-only triggers"): 32 Reward KR, 49 Save Data
+// and 57 Load Data go to the account backends of GameHooks (reward_kr, storage_save,
+// storage_load: kn_brain or the offline sandbox's file store, server/src/ks_storage.c; NULL =
+// nothing); 59 Reward Junk, 60 Reward Skin, 62 / 65 challenges and 67 video ads do nothing (no
+// store backend in the game server).
 // Select-index actions (47, 50, 51, 61, 64) index the runtime tables directly with the raw value,
 // as v7 does (§3.7 "Select-index quirk").
 #include <shared.h>
@@ -16,6 +18,7 @@
 #include <modes_v7.h>
 #include <spawnables.h>
 #include <world.h>
+#include <ks_storage_data.h> // WP6: Save Data keys / values
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,6 +53,44 @@ static void send_popup(Game *game, const int target, const char *text) {
     memset(&packet, 0, sizeof(packet));
     snprintf(packet.text, sizeof(packet.text), "%s", text); // "am" [text, null, 0, 1]
     game_send(game, target, NET_PACKET_POPUP, &packet, sizeof(packet));
+}
+
+static int has_account(const Game *game, const Player *player) {
+    AccountInfo account;
+    return player && trigger_account(game, player, &account) && account.has_account;
+}
+
+// 49 Save Data (triggers.js:1178-1204): a player with an account, the "Data Name" lowercased and
+// cut to 12 characters, the Save Type option (trigConst2 clamped to 0..5) and the value
+// (getActionValue, default trigConst || 1); the name "time" saves the player's gameTime, else the
+// round clock (gameTimerP, ms). Sent as storageUpdt's raw "key,value" (private scope).
+// [KN] v7's sandbox skipped it; KN's sandbox has the offline file store, so it saves there. The
+// key also loses , ' " (v7 put it into the comma-separated raw data as is, which split it).
+static void save_data(Game *game, Player *h, const TriggerSource *j, const TriggerActionData *a) {
+    const char *text = action_text(a);
+    if (!game->hooks.storage_save || !text || !has_account(game, h)) return;
+    char key[KS_STORAGE_TRIGGER_KEY_MAX + 1];
+    size_t n = 0;
+    for (const char *c = text; *c && n < KS_STORAGE_TRIGGER_KEY_MAX; c++) { // tct is ASCII (MMG:1992-2003)
+        if (*c == ',' || *c == '\'' || *c == '"') continue;
+        key[n++] = (char) (*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
+    }
+    key[n] = 0;
+    if (!n) return;
+    const int type = a->constant2 < 0 ? 0 : a->constant2 > 5 ? 5 : a->constant2; // UTILS.limitMM(.., 0, 5)
+    double number;
+    if (!strcmp(key, "time")) {
+        const double t = h->game_time != 0.0f ? (double) h->game_time : (double) game->round_timer * 1000.0;
+        if (!(t == t) || t == 0.0) return; // v7: 0 / not a number -> undefined: nothing saved
+        number = t;
+    } else {
+        int value;
+        if (!trigger_action_value(game, h, j, NULL, a, a->constant ? a->constant : 1, &value)) return;
+        number = value;
+    }
+    char value[40];
+    ks_storage_format_number(number, value);
+    game->hooks.storage_save(game, h, key, type, value);
 }
 
 static const Weapon *weapon_at(const Game *game, const int id) {
@@ -581,9 +622,15 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
         case TRIGGER_ACTION_MODE_SPECIFIC:
             mode_v7_on_trigger(game, h, j->uid); // game.mode.onTrigger(game, j): the trigger's uid
             break;
-        case TRIGGER_ACTION_REWARD_KR:      // rewardKR: published custom maps through the KR backend
-        case TRIGGER_ACTION_SAVE_DATA:      // storageUpdt: DB private storage (not in sandboxes either)
-        case TRIGGER_ACTION_LOAD_DATA:      // getStoragePlayer: DB private storage
+        case TRIGGER_ACTION_REWARD_KR: // rewardKR(h, parseInt(trigConst || 0)) when game.krRewards (the hook checks it)
+            if (h && game->hooks.reward_kr) game->hooks.reward_kr(game, h, a->constant);
+            break;
+        case TRIGGER_ACTION_SAVE_DATA:
+            save_data(game, h, j, a);
+            break;
+        case TRIGGER_ACTION_LOAD_DATA: // getStoragePlayer(account, null) -> trigger_load_data_apply (triggers.js:1353-1375)
+            if (game->hooks.storage_load && has_account(game, h)) game->hooks.storage_load(game, h);
+            break;
         case TRIGGER_ACTION_REWARD_JUNK:    // public games only
         case TRIGGER_ACTION_REWARD_SKIN:    // public games only
         case TRIGGER_ACTION_CHALLENGE:      // challenges.update, public games only

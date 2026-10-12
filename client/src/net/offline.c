@@ -20,6 +20,8 @@
 // applies (WP-E, decisions.md "Embedded map config") and reaches this client as GAME_CONFIG.
 #include <client.h>
 #include <server_sandbox.h>
+#include <ks_storage.h> // WP6: the sandbox's offline GAME.STORAGE / Save Data store
+#include <html_dom.h>   // html_storage_get / set
 #include <knet.h>
 #include <modes.h>
 #include <stdio.h>
@@ -162,6 +164,9 @@ static int offline_begin(Client *client, const int map_index) {
         .host_request = g_host_request,
         .host_type = g_host_type,
     };
+    // GAME.STORAGE / Save / Load Data offline go where the client keeps its own data:
+    // $XDG_CONFIG_HOME/krunknative natively, localStorage on the web (the page's MEMFS is lost)
+    ks_storage_set_offline_io(html_storage_get, html_storage_set);
     if (!sandbox_start(&cfg)) {
         fprintf(stderr, "offline: could not start the sandbox server\n");
         return 0;
