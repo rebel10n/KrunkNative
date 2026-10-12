@@ -68,6 +68,13 @@ jobs:
 
       # Assets are only in the checkout as the tracked subset (maps, shaders, skins):
       # the 1.5 GB content tree already on kru is left as is (kn_web_sync_assets=false).
+      # Go for the WebTransport relay and the WebRTC gateway (net-bridge/wt, net-bridge/rtc),
+      # which central.yml builds: pinned here instead of the runner's preinstalled Go.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: net-bridge/wt/go.mod
+          cache-dependency-path: net-bridge/*/go.sum
+
       - name: Deploy (ansible central.yml)
         working-directory: deploy/ansible
         env:
