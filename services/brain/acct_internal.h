@@ -164,7 +164,7 @@ int social_require_auth(SocialSession *s);
 /* Push to the account's sockets; json_only: KrunkNative (JSON) clients only, for labels
  * the v3.1.1 social page has no handler for ("gmc", "ua"). Consumes frame. */
 void social_push_account_ex(int64_t account_id, cJSON *frame, int json_only);
-/* {level, levelProg, alias, premium, funds, score, clan, dev, mod, banned} of an account object. */
+/* {level, levelProg, alias, premium, funds, score, clan, dev, mod, banned, badges} of an account object. */
 cJSON *social_account_info(const cJSON *account);
 /* ["ua", data40, info] (v3.1.1 updateAccount) to the account's JSON sockets, after
  * stats commits and other server-side account changes. */
@@ -241,6 +241,11 @@ void sh_upload_files(SocialSession *s, const cJSON *f);  /* "uploadMo" / "upload
 void sh_spin(SocialSession *s, const cJSON *f);          /* "spin" (store.c) */
 void sh_free_kr(SocialSession *s, const cJSON *f);       /* "fkr" */
 void sh_claim(SocialSession *s, const cJSON *f);         /* "clm" */
+/* player-viewer WP-E part 2c (progress.c): badges, v7 challenges, medal counts */
+void sh_challenges(SocialSession *s, const cJSON *f);    /* "chg" */
+void sh_badge_select(SocialSession *s, const cJSON *f);  /* "bdg" */
+void sh_badge_claim(SocialSession *s, const cJSON *f);   /* "cbdg" */
+void sh_medals(SocialSession *s, const cJSON *f);        /* "mdl" */
 void sh_noop(SocialSession *s, const cJSON *f);          /* "unbx" */
 void market_page(SocialSession *s, const char *page, const cJSON *f);
 void creation_page(SocialSession *s, int kind, const char *name);

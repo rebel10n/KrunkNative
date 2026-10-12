@@ -26,6 +26,7 @@
 #include <spectate.h>
 #include <ui_logic.h>
 #include <voice_chat.h>
+#include <badges.h> // WP-E part 2c: the custom badge image
 
 #include <math.h>
 #include <stdio.h>
@@ -62,10 +63,9 @@ enum { NT_BADGE_PARTNER, NT_BADGE_PREMIUM, NT_BADGE_FEATURED, NT_BADGES };
 typedef struct {
     char name[64];       // hideNames (streamer mode) ? "Player " + sid : premiumT ? alias : name
     char clan[16];       // "" none
-    int clan_rank;       // clanR
     int level;           // 0: no level box
-    int chall_level;     // challLvl
     int badge[NT_BADGES];
+    int custom_badge;    // WP-E part 2c: badgeIndex (badges.js), -1 none
     int demo_voice;      // KRUNKNATIVE_NAMETAG_DEMO=2: show the speaker icon without a voice queue
 } TagInfo;
 
@@ -74,6 +74,9 @@ typedef struct { char value[48]; } StyleCache;
 
 typedef struct {
     HtmlElem root, bar, chase, hp, num, lvl, lvl_text, row, name, clan, badge[NT_BADGES], voice;
+    HtmlElem custom;          // WP-E part 2c: the custom badge image
+    int custom_index;         // its badge, -1 hidden
+    char custom_ml[16];       // its margin-left
     int uid;                 // player sid, -1 = free slot, <= NT_DEMO_UID demo tags
     int visible;             // player.isSpectating (nameVisRate result)
     int shown;               // last written root display
@@ -111,8 +114,6 @@ static struct {
     double next_vis;         // next nameVisRate pass (glfwGetTime seconds)
     double last_tick_ms;     // watchdog: last nametags_tick
     int watchdog;            // timer id armed
-    float rainbow_hue;       // overlay.rainbow.val
-    double rainbow_last;
     int demo;                // KRUNKNATIVE_NAMETAG_DEMO: -1 unread, 0 off, 1 account fields, 2 fixed tags
 } g_nt = {.demo = -1};
 
@@ -160,33 +161,13 @@ static void nt_jitter_color(const char *color, char *out, const size_t n) {
     if (len > 1) out[len - 1] = (char) ('A' + rand() % 6);
 }
 
-// UTILS.hexFromHue: the rainbow clan colour (clanR == 1 / "rgb").
-static void nt_hex_from_hue(const float hue, char *out, const size_t n) {
-    const float m = hue / 60.0f;
-    const float p = (1.0f - fabsf(fmodf(m, 2.0f) - 1.0f)) * 255.0f;
-    const int q = (int) floorf(m);
-    const float r = q < 1 || q > 4 ? 255.0f : q == 1 || q == 4 ? p : 0.0f;
-    const float g = q == 0 || q == 3 ? p : q == 1 || q == 2 ? 255.0f : 0.0f;
-    const float b = q == 0 || q == 1 ? 0.0f : q == 3 || q == 4 ? 255.0f : p;
-    snprintf(out, n, "#%02x%02x%02x", (int) roundf(r), (int) roundf(g), (int) roundf(b));
-}
-
-// COLORS.getChallCol(challLvl) (false -> white).
-static const char *nt_chall_color(const int level) {
-    if (level > 20) return "#fb2d2d";
-    if (level > 15) return "#c12dfb";
-    if (level > 10) return "#fb942d";
-    return "white";
-}
-
-// COLORS.getClanCol(clan, clanR, null): NULL = no special colour.
-static const char *nt_clan_color(const char *clan, const int rank) {
+// COLORS.getClanCol(clan, null) (v7.1.4 src/data/colors.js): only the DEV / VIP / CMD tags keep
+// a colour; v7 removed v3.1.1's clan war rank colours (clanR: rainbow, red, gold, pink, blue)
+// and the challenge level colour of the level box (getChallCol) (WP-E part 2c).
+static const char *nt_clan_color(const char *clan) {
     if (!strcmp(clan, "DEV")) return "#40C4FF";
-    if (rank == 1) return "rgb";
-    if (rank >= 2 && rank <= 5) return "#eb3437";
-    if (rank >= 6 && rank <= 15) return "#FBC02D";
-    if (rank >= 16 && rank <= 25) return "#e834eb";
-    if (rank >= 26 && rank <= 50) return "#349ceb";
+    if (!strcmp(clan, "VIP")) return "#11D445";
+    if (!strcmp(clan, "CMD")) return "#993299";
     return NULL;
 }
 
@@ -366,6 +347,7 @@ static int nt_tag_create(Tag *tag, const int index) {
             "<span class='knNtB0 material-icons' style='display:none;line-height:0;font-size:" NT_ICON_FONT ";position:relative;top:1px;color:" NT_PARTNER_COLOR "'>verified</span>"
             "<span class='knNtB1 material-icons' style='display:none;line-height:0;font-size:" NT_ICON_FONT ";position:relative;top:1px;color:" NT_PREMIUM_COLOR "'>beenhere</span>"
             "<span class='knNtB2 material-icons' style='display:none;line-height:0;font-size:" NT_ICON_FONT ";color:" NT_FEATURED_COLOR "'>check_circle</span>"
+            "<img class='knNtBdg' style='display:none;width:23px;height:23px;vertical-align:top;position:relative;top:-1.5px'>"
         "</div>"
         "<span class='knNtVoice material-icons' style='position:absolute;left:-25px;font-size:55px;line-height:1;"
             "color:#FFF;display:none'>volume_down</span>");
@@ -381,6 +363,8 @@ static int nt_tag_create(Tag *tag, const int index) {
     tag->badge[0] = nt_child(tag->root, "knNtB0");
     tag->badge[1] = nt_child(tag->root, "knNtB1");
     tag->badge[2] = nt_child(tag->root, "knNtB2");
+    tag->custom = nt_child(tag->root, "knNtBdg");
+    tag->custom_index = -1;
     tag->voice = nt_child(tag->root, "knNtVoice");
     html_dom_append(g_nt.layer, tag->root);
     tag->shown = 0;
@@ -425,11 +409,12 @@ static void nt_tag_geometry(Tag *tag, const int style, const int has_level) {
 }
 
 // The name row: name, clan (+5 px), then the partner / premium / featured badges with
-// v3.1.1's offsets (b8 = name + 5, b9 = clan + 3, +b7 + 1, +b6 + 1; b0's width is unused).
-static void nt_tag_row(Tag *tag, const TagInfo *info, const float opacity, const char *rainbow) {
+// v3.1.1's offsets (b8 = name + 5, b9 = clan + 3, +b7 + 1, +b6 + 1; b0's width is unused) and
+// v7's custom badge image, 23 px, 3 px after the featured icon's place (game-overlay.js:1101).
+static void nt_tag_row(Tag *tag, const TagInfo *info, const float opacity) {
     nt_text(tag->name, info->name, tag->text_name, sizeof(tag->text_name));
 
-    const int any_badge = info->badge[0] || info->badge[1] || info->badge[2];
+    const int any_badge = info->badge[0] || info->badge[1] || info->badge[2] || info->custom_badge >= 0;
     const int extras = info->clan[0] || any_badge;
     double gap = extras ? 5.0 : 0.0;
     char v[64];
@@ -438,8 +423,8 @@ static void nt_tag_row(Tag *tag, const TagInfo *info, const float opacity, const
         char clan[24];
         snprintf(clan, sizeof(clan), "[%s]", info->clan);
         nt_text(tag->clan, clan, tag->text_clan, sizeof(tag->text_clan));
-        const char *col = nt_clan_color(info->clan, info->clan_rank);
-        const char *fill = col ? (!strcmp(col, "rgb") || info->clan_rank == 1 ? rainbow : col) : "white";
+        const char *col = nt_clan_color(info->clan);
+        const char *fill = col ? col : "white";
         snprintf(v, sizeof(v), "inline;margin-left:%.0fpx;color:%s;opacity:%.3f", gap, fill, (col ? 1.0f : 0.4f) * opacity);
         if (strcmp(tag->clan_style.value, v)) {
             snprintf(tag->clan_style.value, sizeof(tag->clan_style.value), "%s", v);
@@ -473,6 +458,25 @@ static void nt_tag_row(Tag *tag, const TagInfo *info, const float opacity, const
             gap += 1.0;
         }
     }
+
+    if (info->custom_badge >= 0) {
+        if (tag->custom_index != info->custom_badge) {
+            char tex[96], url[256];
+            html_dom_asset_url(badge_texture(info->custom_badge, tex, sizeof(tex)), url, sizeof(url)); // Game.badges[i].url
+            html_dom_set_attr(tag->custom, "src", url);
+            tag->custom_index = info->custom_badge;
+            tag->custom_ml[0] = 0;
+        }
+        snprintf(v, sizeof(v), "%.0fpx", gap + 2.0); // the featured icon's +1 replaced by v7's +3
+        if (strcmp(tag->custom_ml, v)) {
+            snprintf(tag->custom_ml, sizeof(tag->custom_ml), "%s", v);
+            html_dom_set_style(tag->custom, "margin-left", v);
+            html_dom_set_display(tag->custom, "inline-block");
+        }
+    } else if (tag->custom_index >= 0) {
+        tag->custom_index = -1;
+        html_dom_set_display(tag->custom, "none");
+    }
 }
 
 static void nt_tag_hide(Tag *tag) {
@@ -481,7 +485,7 @@ static void nt_tag_hide(Tag *tag) {
 
 // overlay.render's player block for one visible tag at viewport fraction (fx, fy).
 static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, const double fx, const double fy,
-                          const float scale, const int teammate, const char *rainbow) {
+                          const float scale, const int teammate) {
     const ClientRenderSettings *rs = client_render_settings();
     const int style = rs->nametag_style < 0 || rs->nametag_style > 3 ? 0 : rs->nametag_style;
     const float opacity = rs->nametag_opacity;
@@ -506,6 +510,7 @@ static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, c
         html_dom_set_style(tag->lvl, "opacity", v);
         html_dom_set_style(tag->name, "opacity", v);
         for (int b = 0; b < NT_BADGES; b++) html_dom_set_style(tag->badge[b], "opacity", v);
+        html_dom_set_style(tag->custom, "opacity", v);
         html_dom_set_style(tag->voice, "opacity", v);
         tag->clan_style.value[0] = 0; // clan alpha is relative to it
     }
@@ -537,9 +542,8 @@ static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, c
         if (info->level > 0 && style != 1) {
             snprintf(v, sizeof(v), "%d", info->level);
             nt_text(tag->lvl_text, v, tag->text_level, sizeof(tag->text_level));
-            html_dom_set_style(tag->lvl_text, "color", nt_chall_color(info->chall_level));
         }
-        nt_tag_row(tag, info, opacity, rainbow);
+        nt_tag_row(tag, info, opacity);
     }
     // voiceStreamQueues[aX] && .length: the speaker icon ai[ag] ("volume_down" / "volume_up",
     // flipped every 300 ms) above the name, keyed by the name the tag shows
@@ -551,7 +555,7 @@ static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, c
 
 /* ------------------------------------------------------------------ players */
 
-static void nt_demo_tags(Client *client, const char *rainbow);
+static void nt_demo_tags(Client *client);
 
 static Tag *nt_tag_for(const int uid, const int create) {
     Tag *free_tag = NULL;
@@ -567,6 +571,7 @@ static Tag *nt_tag_for(const int uid, const int create) {
 
 static void nt_info(const Player *player, TagInfo *info) {
     memset(info, 0, sizeof(*info));
+    info->custom_badge = -1;
     if (client_render_settings()->stream_mode) snprintf(info->name, sizeof(info->name), "Player %d", player->uid);
     else snprintf(info->name, sizeof(info->name), "%s", player->name);
     // account data from a brain-linked server (NET_PACKET_PLAYER_INFO): level box, clan, badges
@@ -577,11 +582,12 @@ static void nt_info(const Player *player, TagInfo *info) {
         info->badge[NT_BADGE_PREMIUM] = (account->flags & NET_PLAYER_INFO_PREMIUM) != 0;
         info->badge[NT_BADGE_FEATURED] = (account->flags & NET_PLAYER_INFO_VERIFIED) != 0;
     }
+    // v7 badgeIndex from the SPAWN (-1 unless the player shows its custom badge, server/src/net.c)
+    if (badge_get(player->cosmetics_v7.badge)) info->custom_badge = player->cosmetics_v7.badge;
     if (g_nt.demo == 1) { // KRUNKNATIVE_NAMETAG_DEMO=1: account fields KrunkNative does not have
         info->level = 10 + player->uid * 7 % 90;
-        info->chall_level = player->uid * 6 % 25;
         if (!client_render_settings()->stream_mode) snprintf(info->clan, sizeof(info->clan), "%s", player->uid % 2 ? "KN" : "DEV");
-        info->clan_rank = player->uid % 3 == 0 ? 1 : 0;
+        info->custom_badge = player->uid % 3 == 0 ? 11 : -1;
         info->badge[NT_BADGE_PARTNER] = player->uid % 2;
         info->badge[NT_BADGE_PREMIUM] = 1;
         info->badge[NT_BADGE_FEATURED] = player->uid % 3 != 1;
@@ -647,9 +653,6 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         if (tag) tag->visible = 1;
     }
 
-    char rainbow[16];
-    nt_hex_from_hue(g_nt.rainbow_hue, rainbow, sizeof(rainbow));
-
     for (int i = 0; i < NT_MAX_TAGS; i++) g_nt.tags[i].seen = 0;
 
     for (size_t i = 0; i < game->player_count; i++) {
@@ -681,11 +684,11 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         TagInfo info;
         nt_info(player, &info);
         const int teammate = (player->team && local_team == player->team) || (mode && mode->fake_names && local_team != 2);
-        nt_tag_update(tag, player, &info, fx, fy, nt_distance_scale(camera, anchor), teammate, rainbow);
+        nt_tag_update(tag, player, &info, fx, fy, nt_distance_scale(camera, anchor), teammate);
     }
 
     if (g_nt.demo == 2) {
-        if (!hidden) nt_demo_tags(client, rainbow);
+        if (!hidden) nt_demo_tags(client);
         else for (int i = 0; i < NT_DEMO_TAGS; i++) nt_tag_hide(&g_nt.tags[NT_MAX_TAGS - 1 - i]);
     }
 
@@ -929,7 +932,7 @@ static void nt_sites(Client *client) {
 // compared with v3.1.1's overlay.render fed the same points (style, opacity, healthNum
 // and streamer mode come from the settings as usual). Index 2 carries a level, a clan
 // and all three badges, index 0 the voice speaker icon; 1 and 4 are teammates.
-static void nt_demo_tags(Client *client, const char *rainbow) {
+static void nt_demo_tags(Client *client) {
     static const float spec[NT_DEMO_TAGS][6] = { // right, up, forward, health, hpChase, teammate
         {-7.0f, -1.0f, 14.0f, 100.0f, 1.0f, 0.0f}, {6.0f, 1.0f, 24.0f, 45.0f, 0.8f, 1.0f},
         {-12.0f, 3.0f, 60.0f, 100.0f, 1.0f, 0.0f}, {25.0f, 6.0f, 150.0f, 70.0f, 0.7f, 0.0f},
@@ -951,12 +954,13 @@ static void nt_demo_tags(Client *client, const char *rainbow) {
         fake.max_health = 100;
         fake.hp_chase = s[4];
         TagInfo info = {0};
+        info.custom_badge = -1;
         if (client_render_settings()->stream_mode) snprintf(info.name, sizeof(info.name), "Player %d", fake.uid);
         else snprintf(info.name, sizeof(info.name), "Guest_%d", i + 2);
         info.demo_voice = i == 0;
         if (i == 2) {
             info.level = 57;
-            info.chall_level = 12;
+            info.custom_badge = 11; // WP-E part 2c: Nuclear I
             if (!client_render_settings()->stream_mode) snprintf(info.clan, sizeof(info.clan), "KN");
             info.badge[NT_BADGE_PARTNER] = info.badge[NT_BADGE_PREMIUM] = info.badge[NT_BADGE_FEATURED] = 1;
         }
@@ -966,7 +970,7 @@ static void nt_demo_tags(Client *client, const char *rainbow) {
             continue;
         }
         if (!tag->root && !nt_tag_create(tag, NT_MAX_TAGS - 1 - i)) continue;
-        nt_tag_update(tag, &fake, &info, fx, fy, nt_distance_scale(client->camera.position, anchor), s[5] != 0.0f, rainbow);
+        nt_tag_update(tag, &fake, &info, fx, fy, nt_distance_scale(client->camera.position, anchor), s[5] != 0.0f);
     }
 }
 
@@ -1011,11 +1015,6 @@ void nametags_tick(Client *client) {
     g_nt.last_tick_ms = now * 1000.0;
     if (!g_nt.watchdog) g_nt.watchdog = html_timer_add(NT_WATCHDOG_MS, nt_watchdog, NULL);
     if (g_nt.demo < 0) g_nt.demo = nt_demo_setting();
-
-    // overlay.rainbow: hue += deltaMs * 0.3 (the colour itself refreshes at 60 Hz)
-    if (g_nt.rainbow_last > 0.0) g_nt.rainbow_hue += (float) ((now - g_nt.rainbow_last) * 1000.0 * 0.3);
-    if (g_nt.rainbow_hue >= 360.0f) g_nt.rainbow_hue = 0.0f;
-    g_nt.rainbow_last = now;
 
     if (!client->game.ready || !client->game.map) {
         nt_hide_all();

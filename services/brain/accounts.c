@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
@@ -20,6 +21,7 @@
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
 #include "db_procs.h"
+#include "progression.h" /* WP-E part 2c: v7 level progress */
 
 #define MOD "accounts"
 
@@ -133,11 +135,11 @@ const char *acct_validate_alias(const char *alias) {
     return NULL;
 }
 
+/* Account.updateLevel; levelProg is v7.1.4's getLevelProg (linear in score between the level's
+ * bounds, WP-E part 2c; v3.1.1 took the fraction of rankVar * sqrt(score)), truncated here. */
 int acct_level(int64_t score, int *prog) {
-    const double v = g_acct.rank_var * sqrt((double) (score > 0 ? score : 0));
-    int level = (int) floor(v);
-    if (prog) *prog = (int) lround((v - level) * 100.0);
-    return level < 1 ? 1 : level;
+    if (prog) *prog = (int) progression_level_prog((double) score, g_acct.rank_var);
+    return progression_level((double) score, g_acct.rank_var);
 }
 
 int accounts_level(int64_t score, int *prog_percent) {
@@ -197,12 +199,12 @@ void acct_decorate(cJSON *account) {
         cJSON_ReplaceItemInObject(account, "mod", cJSON_CreateNumber(1));
         set_data_slot(data, 21, cJSON_CreateNumber(1));
     }
-    int prog = 0;
-    const int level = acct_level(kn_json_int(account, "score", 0), &prog);
+    const int64_t score = kn_json_int(account, "score", 0);
+    const int level = acct_level(score, NULL);
     cJSON_DeleteItemFromObject(account, "level");
     cJSON_DeleteItemFromObject(account, "levelProg");
     cJSON_AddNumberToObject(account, "level", level);
-    cJSON_AddNumberToObject(account, "levelProg", prog);
+    cJSON_AddNumberToObject(account, "levelProg", progression_level_prog((double) score, g_acct.rank_var)); /* v7: a float */
     /* JSON booleans -> 0/1 like the rest of the Krunker fields */
     cJSON *banned = cJSON_GetObjectItemCaseSensitive(account, "banned");
     if (cJSON_IsBool(banned)) cJSON_ReplaceItemInObject(account, "banned", cJSON_CreateNumber(cJSON_IsTrue(banned)));
@@ -713,6 +715,7 @@ typedef struct OpCtx {
     int64_t id;
     char *pass_old, *pass_new;
     char token[80];
+    char *progress; /* WP-E part 2c: the commit's P_PROGRESS payload (op "stats") */
 } OpCtx;
 
 static void op_ctx_free(OpCtx *o) {
@@ -725,6 +728,7 @@ static void op_ctx_free(OpCtx *o) {
         memset(o->pass_new, 0, strlen(o->pass_new));
         free(o->pass_new);
     }
+    free(o->progress);
     free(o);
 }
 
@@ -954,12 +958,88 @@ static cJSON *stats_args(const cJSON *a) {
         cJSON *clean = cJSON_CreateObject();
         const cJSON *it;
         cJSON_ArrayForEach(it, st) {
-            if (cJSON_IsNumber(it) && it->string && strlen(it->string) < 16 && it->string[0] != 'c')
+            /* not the class XP keys c<n> (the commit's class / xp set them); v7's crc, cad, ...
+             * are counters (WP-E part 2c) */
+            const int class_key = it->string && it->string[0] == 'c' && it->string[1] &&
+                                  strspn(it->string + 1, "0123456789") == strlen(it->string + 1);
+            if (cJSON_IsNumber(it) && it->string && strlen(it->string) < 16 && !class_key && it->valuedouble >= 0)
                 cJSON_AddNumberToObject(clean, it->string, it->valuedouble);
         }
         cJSON_AddItemToObject(p, "stats", clean);
     }
     return p;
+}
+
+/* WP-E part 2c: P_PROGRESS after a commit -> the account's social sockets get v7's match-end
+ * frames: ["chg", [done, CI, PV, ...]], ["chgC", [challenge...]] (KrunkNative: the completed
+ * challenge objects, v7 sends one index per frame), ["chlR", skins, funds, junk, jnk, kr] and
+ * ["nbdgr", [badge...]]. */
+typedef struct {
+    int64_t id;
+} ProgressCtx;
+
+static void progress_done(kn_db_result *res, void *ud) {
+    ProgressCtx *c = ud;
+    cJSON *out = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!kn_db_ok(res)) KN_WARN("accounts", "progress for account %lld: %s", (long long) c->id, acct_db_error(res, "progress"));
+    const cJSON *results = cJSON_GetObjectItemCaseSensitive(out, "results");
+    const cJSON *completed = cJSON_GetObjectItemCaseSensitive(out, "completed");
+    const cJSON *reward = cJSON_GetObjectItemCaseSensitive(out, "reward");
+    const cJSON *badges = cJSON_GetObjectItemCaseSensitive(out, "newBadges");
+    if (cJSON_GetArraySize(results) > 0) {
+        cJSON *f = social_frame("chg");
+        cJSON_AddItemToArray(f, cJSON_Duplicate(results, 1));
+        social_push_account(c->id, f);
+    }
+    if (cJSON_GetArraySize(completed) > 0) {
+        cJSON *f = social_frame("chgC");
+        cJSON_AddItemToArray(f, cJSON_Duplicate(completed, 1));
+        social_push_account(c->id, f);
+    }
+    const cJSON *skins = cJSON_GetObjectItemCaseSensitive(reward, "skins");
+    const double kr = kn_json_int(reward, "kr", 0);
+    if (kr > 0 || cJSON_GetArraySize(skins) > 0) {
+        cJSON *f = social_frame("chlR");
+        cJSON_AddItemToArray(f, skins ? cJSON_Duplicate(skins, 1) : cJSON_CreateArray());
+        cJSON_AddItemToArray(f, cJSON_CreateNumber((double) kn_json_int(out, "funds", 0)));
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(0)); /* junk: not in KrunkNative's economy */
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(kr));
+        social_push_account(c->id, f);
+    }
+    if (cJSON_GetArraySize(badges) > 0) {
+        cJSON *f = social_frame("nbdgr");
+        cJSON_AddItemToArray(f, cJSON_Duplicate(badges, 1));
+        social_push_account(c->id, f);
+    }
+    cJSON_Delete(out);
+    free(c);
+}
+
+static void progress_run(int64_t id, const char *payload) {
+    ProgressCtx *c = calloc(1, sizeof *c);
+    if (!c) return;
+    c->id = id;
+    char now[24];
+    kn_db_call(g_acct_brain->db, &P_PROGRESS, KN_DB_ARGS(payload, acct_itoa(now, (int64_t) time(NULL))), progress_done, c);
+}
+
+/* The P_PROGRESS payload of a commit from a v7 game server ("prog" / "medals" present), NULL else. */
+static char *progress_payload(const cJSON *a) {
+    const cJSON *prog = cJSON_GetObjectItemCaseSensitive(a, "prog"), *medals = cJSON_GetObjectItemCaseSensitive(a, "medals");
+    if (!cJSON_IsArray(prog) && !cJSON_IsObject(medals)) return NULL;
+    cJSON *p = cJSON_CreateObject();
+    cJSON_AddNumberToObject(p, "id", (double) kn_json_int(a, "id", 0));
+    const char *keys[] = {"prog", "medals", "mapIndex", "mapId", "mode", "classIndex", "ranked", "final", "match"};
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(a, keys[i]);
+        if (v) cJSON_AddItemToObject(p, keys[i], cJSON_Duplicate(v, 1));
+    }
+    if (!cJSON_HasObjectItem(p, "classIndex") && cJSON_HasObjectItem(a, "class"))
+        cJSON_AddNumberToObject(p, "classIndex", (double) kn_json_int(a, "class", -1));
+    char *text = kn_json_print(p);
+    cJSON_Delete(p);
+    return text;
 }
 
 static void op_stats_done(kn_db_result *res, void *ud) {
@@ -974,9 +1054,15 @@ static void op_stats_done(kn_db_result *res, void *ud) {
         return;
     }
     acct_decorate(account);
-    if (!kn_json_int(account, "duplicate", 0)) social_push_account_update(account); /* live header KR / level */
+    const int duplicate = (int) kn_json_int(account, "duplicate", 0);
+    if (!duplicate) social_push_account_update(account); /* live header KR / level */
+    char *progress = o->progress;
+    o->progress = NULL;
+    const int64_t id = o->id;
     op_reply(o, NULL, account);
     cJSON_Delete(account);
+    if (progress && !duplicate) progress_run(id, progress); /* WP-E part 2c: challenges, medals, badges */
+    free(progress);
 }
 
 static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
@@ -986,6 +1072,8 @@ static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
     }
     OpCtx *o = op_new(cb, ud, "stats");
     if (!o) return -1;
+    o->id = kn_json_int(args, "id", 0);
+    o->progress = progress_payload(args);
     cJSON *p = stats_args(args);
     char *text = kn_json_print(p);
     cJSON_Delete(p);

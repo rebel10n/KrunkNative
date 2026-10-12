@@ -8,6 +8,7 @@
 #include <shared.h>
 #include <spawnables.h>
 #include <player_card.h>
+#include <progression.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -1403,6 +1404,126 @@ static void test_death_info(Game *game) {
     CHECK(!strcmp(v, "0%"), "no shots: 0%%");
 }
 
+// WP-E part 2c: v7 stat / challenge events (GameHooks.progress), incMedal counts and the end
+// screen's NET_PACKET_END_MEDALS, the level progress curve and challenges.finalize.
+#define PROG_EVENTS_MAX 64
+static struct {
+    int uid, stat, value, weapon, streak;
+    char key[8];
+} g_prog[PROG_EVENTS_MAX];
+static int g_prog_count;
+
+static void test_progress_hook(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak) {
+    (void) game;
+    if (g_prog_count >= PROG_EVENTS_MAX) return;
+    g_prog[g_prog_count].uid = player->uid;
+    g_prog[g_prog_count].stat = stat;
+    g_prog[g_prog_count].value = value;
+    g_prog[g_prog_count].weapon = weapon;
+    g_prog[g_prog_count].streak = streak;
+    snprintf(g_prog[g_prog_count].key, sizeof(g_prog[0].key), "%s", key);
+    g_prog_count++;
+}
+
+static int prog_has(const int uid, const int stat, const char *key, const int value, const int weapon) {
+    for (int i = 0; i < g_prog_count; i++)
+        if (g_prog[i].uid == uid && g_prog[i].stat == stat && !strcmp(g_prog[i].key, key) && g_prog[i].value == value && g_prog[i].weapon == weapon) return 1;
+    return 0;
+}
+
+static void test_progression(Game *game) {
+    printf("Running progression test...\n");
+    CHECK(NET_PACKET_END_MEDALS == NET_PACKET_BLOCK_SOCIAL + 3 && sizeof(NetEndMedalsPacket) <= NET_MAX_PAYLOAD, "END_MEDALS: id 243, fits a frame");
+    CHECK(PLAYER_MEDAL_SLOTS == PROGRESSION_MEDAL_COUNT && progression_medal_index("Headshot") == 9 && progression_medal_index("Cycled") == 55 &&
+          progression_medal_index("Nuke") == -1, "overlay.medalsList");
+
+    start_mode(game, MODE_ID_FFA);
+    game->hooks.progress = test_progress_hook;
+    g_prog_count = 0;
+    Player *killer = add_player(game, 1, 0);
+    Player *victim = add_player(game, 2, 0);
+    killer->has_account = 1; // the server's player.account
+    PlayerKillInfo info = {.weapon_id = 1, .headshot = 1};
+    player_kill(victim, killer, &info, 0);
+    CHECK(prog_has(2, 0, "d", 1, -1), "challenges.update(\"d\") for the victim");
+    CHECK(prog_has(1, 0, "k", 1, 1) && prog_has(1, 0, "kstk", 1, -1) && prog_has(1, 0, "kstk", 1, 1), "\"k\" and \"kstk\" (kill / weapon streak)");
+    CHECK(prog_has(1, 1, "hs", 1, -1) && prog_has(1, 0, "hs", 1, 1), "headshot kill: incStat + challenge");
+    CHECK(prog_has(1, 0, "fb", 1, 1), "First Blood: \"fb\"");
+    int score_events = 0;
+    for (int i = 0; i < g_prog_count; i++) score_events += g_prog[i].uid == 1 && !strcmp(g_prog[i].key, "score") && g_prog[i].value == killer->score;
+    CHECK(score_events == 1, "challenges.update(\"score\") with the kill's score (%d)", killer->score);
+    CHECK(killer->medal_counts[progression_medal_index("First Blood")] == 1 && killer->medal_counts[progression_medal_index("Headshot")] == 1,
+          "incMedal: First Blood + Headshot");
+    game_inc_medal(game, victim, "Assist");
+    CHECK(!victim->medal_counts[progression_medal_index("Assist")], "no medals without an account");
+    game_inc_medal(game, killer, "Not A Medal");
+    game->hooks.progress = NULL;
+
+    g_sent_count = 0;
+    game_end_round(game);
+    int medals_at = -1, end_at = -1;
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].type == NET_PACKET_END_MEDALS && g_sent[i].uid == 1 && medals_at < 0) medals_at = i;
+        if (g_sent[i].type == NET_PACKET_END && g_sent[i].uid == 1 && end_at < 0) end_at = i;
+    }
+    CHECK(medals_at >= 0 && end_at > medals_at, "END_MEDALS before the player's END");
+    NetEndMedalsPacket medals;
+    memset(&medals, 0, sizeof(medals));
+    if (medals_at >= 0 && g_sent[medals_at].length == sizeof(medals)) memcpy(&medals, g_sent[medals_at].payload, sizeof(medals));
+    CHECK(medals.count == 2 && medals.medals[0].index == 2 && medals.medals[0].count == 1 && medals.medals[1].index == 9,
+          "endData.mdls in list order (%d entries)", medals.count);
+
+    // getLevelProg (v7): linear in score between the level bounds
+    CHECK(progression_level(0, 0.03) == 1 && progression_level(10000, 0.03) == 3, "levels");
+    const double prog = progression_level_prog(7222, 0.03);
+    CHECK(prog > 49.9 && prog < 50.0 && progression_level_prog(10000, 0.03) == 0.0 && progression_level_prog(2222, 0.03) == 50.0,
+          "level progress %.3f", prog);
+
+    // challenges.finalize
+    cJSON *active = cJSON_Parse("["
+        "{\"CI\":1,\"T\":\"map\",\"DAT\":{\"ky\":\"k\",\"val\":10,\"mp\":0},\"REW\":{\"kr\":5,\"sk\":[7,8]},\"PV\":4,\"PT\":0},"
+        "{\"CI\":2,\"T\":\"weapon\",\"DAT\":{\"ky\":\"k\",\"val\":50,\"wep\":1},\"REW\":{\"kr\":5},\"PV\":0,\"PT\":0},"
+        "{\"CI\":3,\"T\":\"map\",\"DAT\":{\"ky\":\"k\",\"val\":10,\"mp\":3},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":4,\"T\":\"daily\",\"DAT\":{\"ky\":\"kstk\",\"val\":5},\"REW\":{\"kr\":1},\"PV\":0,\"PT\":0},"
+        "{\"CI\":5,\"T\":\"daily\",\"DAT\":{\"ky\":\"kstk\",\"val\":3,\"wep\":1},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":6,\"T\":\"nightmare\",\"DAT\":{\"ky\":\"score\",\"val\":1000,\"sm\":1},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":7,\"T\":\"map\",\"DAT\":{\"ky\":\"chall\",\"val\":1},\"REW\":{\"kr\":2},\"PV\":0,\"PT\":0},"
+        "{\"CI\":8,\"T\":\"daily\",\"DAT\":{\"ky\":\"uwk\",\"val\":9},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":9,\"T\":\"ranked\",\"DAT\":{\"ky\":\"w\",\"val\":1},\"REW\":{},\"PV\":0,\"PT\":0}]");
+    cJSON *events = cJSON_Parse("[[\"k\",3,-1,-1],[\"k\",4,1,-1],[\"kstk\",6,-1,-1],[\"kstk\",2,1,-1],[\"score\",400,-1,-1],[\"uwk\",3,-1,-1],[\"w\",1,-1,-1]]");
+    cJSON *results = cJSON_CreateArray(), *completed = cJSON_CreateArray(), *reward = cJSON_CreateObject();
+    const ChallengeMatch match = {.map_index = 0, .map_id = -1, .mode = 0, .class_index = 0};
+    challenges_finalize(active, events, &match, results, completed, reward);
+    char *text = cJSON_PrintUnformatted(results);
+    // 1: 4 + 7 = 11 >= 10 done; 2: 4 with the weapon; 3 other map; 4: nonWep streak 6 >= 5 done; 5: weapon
+    // streak 2 < 3 (a SET/MAX key below its value is not saved); 6: single match 400 < 1000 (reset);
+    // 7: one completed map challenge; 8: MAX below its value; 9: not a ranked game
+    CHECK(text && !strcmp(text, "[1,1,11,0,2,4,1,4,6,1,7,1]"), "chg triples %s", text ? text : "");
+    free(text);
+    CHECK(cJSON_GetArraySize(completed) == 3 && cJSON_GetNumberValue(cJSON_GetObjectItem(reward, "kr")) == 8 &&
+          cJSON_GetArraySize(cJSON_GetObjectItem(reward, "skins")) == 2, "completed 1, 4, 7; reward 8 KR + 2 skins");
+    CHECK(cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetArrayItem(active, 0), "PT")) == 1, "PT set in place");
+    // a player who left mid-match keeps only DAT.nem challenges
+    cJSON *results2 = cJSON_CreateArray();
+    const ChallengeMatch quit = {.map_index = 0, .map_id = -1, .quit = 1};
+    CHECK(challenges_finalize(active, events, &quit, results2, NULL, NULL) == 0 && cJSON_GetArraySize(results2) == 0, "quit: nothing");
+    char name[96];
+    cJSON *daily = cJSON_Parse("{\"T\":\"daily\",\"N\":\"\",\"DAT\":{\"ky\":\"hs\",\"val\":5,\"wep\":0}}");
+    challenge_name(daily, NULL, name, sizeof(name));
+    CHECK(!strcmp(name, "Get 5 headshots "), "updateNames without weapon names: \"%s\"", name);
+    cJSON *stats = cJSON_Parse("{\"n\":760}");
+    CHECK(badge_requirement_met(11, stats) && badge_requirement_met(13, stats) && !badge_requirement_met(14, stats) &&
+          !badge_requirement_met(22, stats), "Nuclear badge rules");
+    cJSON_Delete(stats);
+    cJSON_Delete(daily);
+    cJSON_Delete(results2);
+    cJSON_Delete(active);
+    cJSON_Delete(events);
+    cJSON_Delete(results);
+    cJSON_Delete(completed);
+    cJSON_Delete(reward);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *sandstorm = NULL;
@@ -1450,6 +1571,7 @@ int main(void) {
     test_net_v7(&game);
     test_leader_stats(&game);
     test_death_info(&game);
+    test_progression(&game);
 
     if (g_failures) {
         printf("modes_test: %d of %d check(s) failed\n", g_failures, g_checks);

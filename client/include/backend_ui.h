@@ -23,12 +23,14 @@ typedef struct {
     char clan[16];        // "" = none
     double kills, deaths, wins, games, funds, score, time_played;
     double elo, elo2, elo4;
-    int level, level_prog;
+    int level;
+    double level_prog;    // v7.1.4 getLevelProg(): percent, linear in score (WP-E part 2c)
     int premium, featured, is_dev, is_mod, hack, has_2fa;
     int following, followers;
     int mail_unread;
     cJSON *stats;         // acc.stats (object, owned)
     cJSON *data;          // the raw 40-slot data array (owned)
+    cJSON *badges;        // acc.badges: earned badges.js indices (array, owned; kn_brain info "badges")
 } AccountInfo;
 
 void account_ui_init(Client*);              // listens on the social socket; restores the saved session
@@ -42,6 +44,11 @@ void account_window_post(int id);
 double account_reward_ms(void);             // daily free KR: ms left, 0 claimable, -1 no account / level too low
 void account_set_funds(double funds);       // updateFunds(funds): header + windows
 void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / "" = none)
+// WP-E part 2c: the account's selected custom badge (stats.bdg) when it owns it and the
+// customBadge privacy setting shows it, else -1 (menu header, v7 updateClassPreview).
+int account_custom_badge(void);
+void account_ui_scenario(const cJSON *account); // --render-scenario: state.account stands in for a login
+int account_owns_badge(int badge);
 
 // ---- clan_ui.c (windows[12], the menu Clans window = showWindow(13))
 char *clan_window_gen(void);                // guest: LOGIN REQUIRED; member: the clan page

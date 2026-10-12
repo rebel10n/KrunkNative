@@ -377,6 +377,8 @@ static void spray_place(Game *game, Player *player, const int skin) {
     }
 
     player->last_spray = game->now;
+    game_inc_stat(game, player, "spry"); // WP-E part 2c: players.spray incStat / challenges.update("spry")
+    game_challenge(game, player, "spry", 1, -1, -1);
     char sound[32] = "spray"; // "spray" + (spraySnd ? "_" + spraySnd : "")
     if (item && item->spray_snd) snprintf(sound, sizeof(sound), "spray_%d", item->spray_snd);
     game_play_sound(game, sound, player->uid, player->position, 0.4f, 0.0f); // playSound(networkSounds, 0.4, sid, .., true)

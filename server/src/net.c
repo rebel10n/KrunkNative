@@ -170,6 +170,13 @@ static int net_game_reward(Game *game, const Player *player) {
     return accounts_reward(player);
 }
 
+// GameHooks.progress (WP-E part 2c): v7 incStat / challenge events of account players (accounts.c).
+static void net_game_progress(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon,
+                              const int streak) {
+    (void) game;
+    accounts_progress(player, stat, key, value, weapon, streak);
+}
+
 // GameHooks.respawn: a mode respawns a dead player itself (forceSpawn, Krunker "frs").
 static void net_game_respawn(Game *game, const int uid) {
     (void) game;
@@ -1329,6 +1336,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
+    g_server->game.hooks.progress = net_game_progress; // WP-E part 2c: stats / challenge tallies (accounts.c)
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
 }

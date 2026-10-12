@@ -545,6 +545,11 @@ int player_use_streak(Player *player, const int streak) {
     if (!game_is_authority(game) || game->end_timer > 0.0f) return 0;
     if (streak < 0 || streak >= STREAK_COUNT || !player->streaks_owned[streak]) return 0;
     if (!streak_activate(player, streak)) return 0;
+    // WP-E part 2c: streaks.js incStat (n / ad / sl / jg / wm) and challenges.update("stk", {stk})
+    static const char *const stats[STREAK_COUNT] = {[STREAK_NUKE] = "n", [STREAK_AIRDROP] = "ad", [STREAK_SLIMER] = "sl",
+                                                    [STREAK_JUGGERNAUT] = "jg", [STREAK_WAR_MACHINE] = "wm"};
+    if (stats[streak]) game_inc_stat(game, player, stats[streak]);
+    game_challenge(game, player, "stk", 1, -1, streak);
     player->streaks_owned[streak]--;
     streak_send(player, streak);
     return 1;

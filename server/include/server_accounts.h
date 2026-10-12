@@ -39,6 +39,9 @@ int accounts_list_account_bans(int *out, int max);
 
 // GameHooks.reward: KR of this player's round (v3.1.1 endGame rules + gameserver.kr_*).
 int accounts_reward(const Player*);
+// GameHooks.progress (WP-E part 2c): game.incStat (stat 1) / challenges.update (stat 0) of an
+// account's player, tallied for the next stats commit.
+void accounts_progress(const Player*, int stat, const char *key, int value, int weapon, int streak);
 
 // Ranked lobbies (brain queue): the account's team (1 / 2) from the roster, 0 = mode picks.
 int accounts_assigned_team(const ClientConnection*);

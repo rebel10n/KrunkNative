@@ -35,6 +35,7 @@
 #include <render_settings.h>
 #include <audio.h>
 #include <cJSON.h>
+#include <progression.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -286,14 +287,9 @@ void hud_popups_checkpoint(void) {
 }
 
 // overlay.medalsList (game-overlay.js:141): the icon medals, img/medals/medal_<index>.png
-static const char *const MEDALS[] = {
-    "Humiliation", "Promotion", "First Blood", "Revenge", "Bullseye", "Beatdown", "Execution", "No Scope", "Quick Scope",
-    "Headshot", "Wallbang", "Longshot", "Snatched", "Close Call", "Comeback", "Buzzkill", "Driftkill", "Mid Air", "Turbo Kill",
-    "Bomb Planted", "Secured", "Team Work", "Capture", "Return", "Pickup", "Defender", "Attacker", "Clock Work", "Recharge",
-    "Denied", "Confirmed", "Assist", "Double Kill", "Triple Kill", "Quad Kill", "Multi Kill", "Mega Kill", "Ultra Kill",
-    "Super Kill", "Leveled Up", "Nuked", "Boosted", "Sleight of Hand", "Rapid Fire", "Siphon", "Rooted", "Dizzy", "Poisoned",
-    "Collected", "Deposited", "Bombed", "Jump Boost", "Zapped", "Strength", "Scavenger", "Cycled"};
-#define MEDAL_COUNT ((int) (sizeof(MEDALS) / sizeof(MEDALS[0])))
+// (shared/src/progression.c: the game counts the same names for the end screen, WP-E part 2c)
+#define MEDALS g_progression_medals
+#define MEDAL_COUNT PROGRESSION_MEDAL_COUNT
 
 static int medal_index(const char *name) {
     for (int i = 0; i < MEDAL_COUNT; i++)

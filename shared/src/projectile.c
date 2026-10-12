@@ -279,13 +279,13 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
                 // v7.1.4: a player's direct hit takes the weapon's hsMlt / lsMlt (1 / 1 on every stock
                 // projectile weapon). v7 bugs fixed: it tests the head band against the target's live
                 // y and plain headScale; here the rewound box and headScale * headMlt, like hitscan.
-                int head = 0;
+                int head = 0, leg = 0;
                 const Weapon *weapon = owner && projectile->weapon_index >= 0 && (size_t) projectile->weapon_index < game->weapon_count
                     ? game->weapons[projectile->weapon_index] : NULL;
                 if (weapon) {
                     const float hit_y = projectile->position.y + projectile->velocity.y * dt_ms * hit.t;
                     head = player_hit_is_head(hit.player, hit.state.position.y, hit.state.adjusted_height, hit_y);
-                    const int leg = player_hit_is_leg(hit.player, hit.state.position.y, hit_y);
+                    leg = player_hit_is_leg(hit.player, hit.state.position.y, hit_y);
                     damage = player_hit_damage(game, weapon, damage, head, leg);
                 }
                 // effectInd (Zapper): Zapped stacks, credited to the owner, unless a teammate
@@ -298,6 +298,7 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
                     PlayerKillInfo info = {.weapon_id = projectile->weapon_index, .distance = 0.0f};
                     info.thrown = projectile->thrown_melee;
                     info.headshot = (unsigned char) head;
+                    info.legshot = (unsigned char) (leg && !head); // WP-E part 2c: the "ls" stat
                     player_kill(hit.player, owner, &info, 0);
                 }
             }

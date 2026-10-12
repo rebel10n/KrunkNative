@@ -2397,6 +2397,7 @@ void player_score(Player *player, int amount, const int is_kill) {
     const int gain = mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
     player->score += gain;
     if (player->active) player->life_score += gain; // WP-E: scoreL (the death screen's "Score")
+    if (gain) game_challenge(game, player, "score", gain, -1, -1); // WP-E part 2c: challenges.update(game, "score")
     const int cap = mode_score_cap(game); // v7 noScrLimit: no cap (WP-D)
     if (cap && player->score > cap) {
         player->score = cap;
@@ -2491,6 +2492,45 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     return victim->health <= 0.0f;
 }
 
+// WP-E part 2c: the stats and challenge events of one kill (v7 players.kill, kills.js reward and
+// the melee / hitscan / projectile kill sites): "k" and "kstk" with the killing weapon (none for
+// a weaponless nuke kill: v7's stk kills), mk / fk / tmk, hs / ls / wb, then the kill's medals
+// (incMedal) and their challenge keys (kills.js vA742). v7 counts hs / ls / wb on hitscan and
+// projectile kills only; the kill info carries them for those (a melee headshot medal adds no
+// stat there either).
+static void combat_kill_progress(Game *game, Player *killer, const PlayerKillInfo *info, const int weapon_index,
+                                 const NetKillMedalsPacket *medals) {
+    const int wep = info && info->weapon_id >= 0 ? weapon_index : -1;
+    game_challenge(game, killer, "k", 1, wep, -1);
+    game_challenge(game, killer, "kstk", (int) killer->kill_streak, -1, -1); // nonWep: the kill streak
+    if (wep >= 0) game_challenge(game, killer, "kstk", (int) killer->weapon_streak, wep, -1);
+    const Weapon *weapon = combat_weapon_at(game, weapon_index);
+    const int melee = weapon && weapon->melee;
+    if (melee) {
+        const char *key = info && info->thrown ? "tmk" : info && info->fists ? "fk" : "mk";
+        game_inc_stat(game, killer, key);
+        game_challenge(game, killer, key, 1, wep, -1);
+    }
+    if (info && !melee) {
+        static const char *const keys[3] = {"hs", "wb", "ls"};
+        const int on[3] = {info->headshot, info->wallbang, info->legshot};
+        for (int i = 0; i < 3; i++) {
+            if (!on[i]) continue;
+            game_inc_stat(game, killer, keys[i]);
+            game_challenge(game, killer, keys[i], 1, wep, -1);
+        }
+    }
+    static const char *const medal_keys[][2] = {{"First Blood", "fb"}, {"Revenge", "rk"}, {"Mid Air", "airk"}, {"Turbo Kill", "tk"},
+                                                {"No Scope", "ns"},    {"Quick Scope", "qs"}, {"Longshot", "lns"}, {"Close Call", "cc"},
+                                                {"Buzzkill", "bzk"},   {"Driftkill", "drk"}};
+    for (int m = 0; medals && m < medals->count; m++) {
+        const char *name = medals->medals[m].text;
+        game_inc_medal(game, killer, name);
+        for (size_t k = 0; k < sizeof(medal_keys) / sizeof(*medal_keys); k++)
+            if (!strcmp(medal_keys[k][0], name)) game_challenge(game, killer, medal_keys[k][1], 1, wep, -1);
+    }
+}
+
 // players.kill(player, killer, info, skipRewards). The victim stops playing on
 // every peer; the authority also does the bookkeeping and announces the kill.
 void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, const int skip_rewards) {
@@ -2511,6 +2551,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     if (streaks) player->death_streak++;
 
     game->kill_count++;
+    game_challenge(game, player, "d", 1, -1, -1); // WP-E part 2c: challenges.update(game, "d", 1)
 
     const int weapon_index = killer ? (kill_info && kill_info->weapon_id >= 0 ? kill_info->weapon_id : combat_weapon_index(killer)) : -1;
     int reward = 0;
@@ -2540,14 +2581,15 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
 
         killer->last_kill_time = game->now;
 
+        NetKillMedalsPacket medals;
+        memset(&medals, 0, sizeof(medals));
         if (!skip_rewards && game->config.kill_rewards) {
-            NetKillMedalsPacket medals;
-            memset(&medals, 0, sizeof(medals));
             reward = combat_kill_reward(game, killer, player, kill_info, combat_weapon_at(game, weapon_index), &medals);
             medals.kills = (int32_t) killer->kills;
             if (medals.count) game_send(game, killer->uid, NET_PACKET_KILL_MEDALS, &medals, sizeof(medals)); // IO.send(Q.id, "6", W, ..)
-            player_score(killer, reward, 1);
         }
+        combat_kill_progress(game, killer, kill_info, weapon_index, &medals); // WP-E part 2c
+        if (!skip_rewards && game->config.kill_rewards) player_score(killer, reward, 1);
     }
 
     // Assists: config.assistMin damage within config.assistTime.
@@ -2560,6 +2602,9 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
             if (damage->uid != other->uid || damage->value < GAME_ASSIST_MIN || game->now - damage->time > GAME_ASSIST_TIME) continue;
 
             other->assists++;
+            game_inc_stat(game, other, "ast"); // WP-E part 2c: giveAssist's incStat / challenge / incMedal
+            game_challenge(game, other, "ast", 1, -1, -1);
+            game_inc_medal(game, other, "Assist");
             player_score(other, GAME_ASSIST_SCORE, 1);
             game_send(game, other->uid, NET_PACKET_ASSIST, NULL, 0); // IO.send(id, "10")
             break;
@@ -2735,6 +2780,7 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     const float range = ray < 0 ? weapon->physical_range : weapon->range;
     if (range <= 0.0f || (!authority && ray >= 0)) return;
     if (authority && ray >= 0 && player->active) player->life_shots++; // WP-E: totShotsL (the death screen's "Shots Fired")
+    if (authority && ray >= 0) game_inc_stat(game, player, "s");      // WP-E part 2c: incStat("s")
 
     const vec3 origin = {player->position.x, shot_height, player->position.z};
     const vec3 dir = combat_shot_vector(range, pitch, yaw);
@@ -2811,6 +2857,7 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
 
         // WP-E: hitShotsL counts a ray whose first hit is a player or an AI (players.js vLN02370 == 0)
         if (i == 0 && (hit->player || hit->ai) && player->active) player->life_hits++;
+        if (i == 0 && (hit->player || hit->ai)) game_inc_stat(game, player, "h"); // WP-E part 2c: incStat("h")
         const float drop = fminf(1.0f, 1.0f - (1.0f - hit->t) * range / (range - weapon->drop_start));
         // v7.1.4: falloff clamps at 0 and a 0 bullet stops (v3.1.1 could go negative)
         float dealt = fmaxf(0.0f, damage - weapon->damage_drop * drop);
@@ -2839,6 +2886,7 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
                     .weapon_id = combat_weapon_index(player),
                     .headshot = (unsigned char) head,
                     .wallbang = (unsigned char) wallbang,
+                    .legshot = (unsigned char) (leg && !head), // WP-E part 2c: the "ls" stat
                     .distance = hit->t,
                 };
                 player_kill(victim, player, &info, 0);

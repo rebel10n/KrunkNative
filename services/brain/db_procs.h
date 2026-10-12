@@ -90,6 +90,9 @@ extern const kn_proc P_POST_FULL, P_FEED, P_GIFT, P_CLAN_CREATE, P_CLAN_REQUEST,
 /* ---- KrunkScript storage and map KR rewards for game servers (db_storage.c) */
 extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;
 
+/* ---- player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c) */
+extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_MEDALS;
+
 /* ---- matchmaking (db_mm.c) */
 extern const kn_proc P_RQ_JOIN, P_RQ_STATE, P_RQ_ACTION, P_RQ_EXPIRE, P_RQ_LOCK, P_RQ_CANDIDATES, P_RQ_MATCH_CREATE,
     P_RQ_MATCH_READY, P_RQ_MATCH_FAILED, P_RQ_MATCH_FINISH, P_RQ_RATINGS, P_MM_NODE_TAKEOVER, P_MM_NODE_UPDATE,

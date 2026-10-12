@@ -293,6 +293,10 @@ def run():
     check("SIGTERM drains and exits 0", procs[1].returncode == 0 and "drained" in log("s0.log"), log("s0.log")[-400:])
     rows = wait_for(lambda: int(psql(f"SELECT count(*) FROM match_results WHERE account_id = {alice}")) > 0, 8)
     check("stats committed for the account", bool(rows))
+    # WP-E part 2c: the commit carries the v7 progression fields; a partial (drained) commit is a
+    # "quit" (no challenge progress) and the medal / badge tables exist (0107_progression)
+    check("0107_progression: the starting challenges", psql("SELECT count(*) FROM challenges").strip() == "26")
+    check("partial commit: no challenge progress", psql(f"SELECT count(*) FROM player_challenges WHERE account_id = {alice}").strip() == "0")
     a.close()
     b.close()
 

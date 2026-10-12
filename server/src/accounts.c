@@ -478,6 +478,84 @@ int accounts_reward(const Player *player) {
     return client ? acc_reward(client, player) : 0;
 }
 
+// ------------------------------------------------------------------ WP-E part 2c: progression
+
+// GameHooks.progress: game.incStat / challenges.update of an account's player, tallied for the
+// stats commit (doc/backend.md 8.4). Guests and hack-flagged accounts keep nothing.
+void accounts_progress(const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak) {
+    ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
+    if (!client || client->acct.account_id <= 0 || client->acct.hack || !key || !key[0] || strlen(key) >= sizeof(client->acct.tallies[0].key)) return;
+    ServerAccount *a = &client->acct;
+    if (stat) {
+        const int index = progression_stat_index(key);
+        if (index >= 0 && a->stat_counts[index] < UINT32_MAX) a->stat_counts[index]++;
+        return;
+    }
+    const ChallengeKeyKind kind = challenge_key_kind(key);
+    if (kind == CHALLENGE_KEY_UNKNOWN || kind == CHALLENGE_KEY_META) return;
+    ServerChallengeTally *t = NULL;
+    for (int i = 0; i < a->tally_count; i++) {
+        ServerChallengeTally *c = &a->tallies[i];
+        if (c->weapon == weapon && c->streak == streak && !strcmp(c->key, key)) t = c;
+    }
+    if (!t) {
+        if (a->tally_count >= SERVER_TALLY_MAX) return;
+        t = &a->tallies[a->tally_count++];
+        memset(t, 0, sizeof(*t));
+        snprintf(t->key, sizeof(t->key), "%s", key);
+        t->weapon = (int16_t) weapon;
+        t->streak = (int16_t) streak;
+        t->value = kind == CHALLENGE_KEY_ADD ? 0 : value;
+    }
+    if (kind == CHALLENGE_KEY_ADD) t->value += value;
+    else if (kind == CHALLENGE_KEY_MAX || !strcmp(key, "kstk")) t->value = value > t->value ? value : t->value;
+    else t->value = value; // SET
+}
+
+static void acc_progress_clear(ServerAccount *a) {
+    memset(a->stat_counts, 0, sizeof(a->stat_counts));
+    a->tally_count = 0;
+}
+
+// The commit's progression fields: "stats" (incStat deltas, transferStats), "prog" (the challenge
+// tallies [key, value, weapon, streak], plus game.js endGame's "w" / "gp"), "medals" ({name:
+// count}, player.medals) and the match context of checkChallenge (mapIndex, mapId, ranked).
+static void acc_add_progress(cJSON *p, const ClientConnection *client, const Player *player, const int final, const int won) {
+    const ServerAccount *a = &client->acct;
+    cJSON *stats = cJSON_AddObjectToObject(p, "stats");
+    for (int i = 0; i < PROGRESSION_STAT_COUNT; i++)
+        if (a->stat_counts[i]) cJSON_AddNumberToObject(stats, g_progression_stats[i], a->stat_counts[i]);
+    cJSON *prog = cJSON_AddArrayToObject(p, "prog");
+    for (int i = 0; i < a->tally_count; i++) {
+        const ServerChallengeTally *t = &a->tallies[i];
+        cJSON *row = cJSON_CreateArray();
+        cJSON_AddItemToArray(row, cJSON_CreateString(t->key));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->value));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->weapon));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->streak));
+        cJSON_AddItemToArray(prog, row);
+    }
+    if (final) { // game.js endGame: challenges.update(game, "w") for the winners, "gp" for everyone
+        const char *keys[2] = {"w", "gp"};
+        for (int i = won ? 0 : 1; i < 2; i++) {
+            cJSON *row = cJSON_CreateArray();
+            cJSON_AddItemToArray(row, cJSON_CreateString(keys[i]));
+            cJSON_AddItemToArray(row, cJSON_CreateNumber(1));
+            cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
+            cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
+            cJSON_AddItemToArray(prog, row);
+        }
+    }
+    cJSON *medals = cJSON_AddObjectToObject(p, "medals");
+    for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
+        if (player->medal_counts[i]) cJSON_AddNumberToObject(medals, g_progression_medals[i], player->medal_counts[i]);
+    const Game *game = &g_server->game;
+    const int catalogue = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
+                              ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
+    cJSON_AddNumberToObject(p, "mapIndex", catalogue >= 0 && catalogue < MAP_CATALOG_OFFICIAL_COUNT ? catalogue : -1);
+    cJSON_AddBoolToObject(p, "ranked", g_rk.active);
+}
+
 static cJSON *acc_player_stats(const ClientConnection *client, const int final) {
     const Player *player = client->player;
     const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
@@ -498,6 +576,7 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     cJSON_AddNumberToObject(p, "kr", final && player ? player->reward : 0); // game_end_round -> accounts_reward
     cJSON_AddNumberToObject(p, "xp", counts && player && player->score > 0 ? player->score : 0);
     cJSON_AddNumberToObject(p, "classIndex", player ? player->class_index : client->class_index);
+    if (counts) acc_add_progress(p, client, player, final, won); // WP-E part 2c (v7 updateAccounts / checkChallenges)
     return p;
 }
 
@@ -517,6 +596,7 @@ static void acc_commit(ClientConnection **clients, const int count, const int fi
     cJSON *players = cJSON_AddArrayToObject(frame, "players");
     for (int i = 0; i < count; i++) {
         cJSON_AddItemToArray(players, acc_player_stats(clients[i], final));
+        acc_progress_clear(&clients[i]->acct);
         clients[i]->acct.committed = 1;
         server_log("[stats] %s %s (account %d): K %u D %u S %d%s", final ? "final" : "partial", clients[i]->name, clients[i]->acct.account_id,
                    clients[i]->player ? clients[i]->player->kills : 0, clients[i]->player ? clients[i]->player->deaths : 0,
@@ -591,6 +671,7 @@ void accounts_round_changed(void) {
         a->match_since = 0.0f;
         a->round_result = -1;
         a->committed = 0;
+        acc_progress_clear(a); // WP-E part 2c: a new round's tallies
     }
     acc_queue_push();
 
@@ -1234,6 +1315,14 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     const cJSON *stats = cJSON_GetObjectItem(account, "stats");
     const cJSON *bdg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "bdg") : cJSON_GetObjectItem(account, "badge");
     client->acct.badge = cJSON_IsNumber(bdg) && bdg->valueint >= 0 ? bdg->valueint : -1;
+    // WP-E part 2c: only a badge the account owns (kn_brain's account "badges", badges.js indices)
+    const cJSON *owned = cJSON_GetObjectItem(account, "badges");
+    if (client->acct.badge >= 0 && cJSON_IsArray(owned)) {
+        int found = 0;
+        const cJSON *b;
+        cJSON_ArrayForEach(b, owned) found |= cJSON_IsNumber(b) && b->valueint == client->acct.badge;
+        if (!found) client->acct.badge = -1;
+    }
     acc_load_skins(client, account);
     // WP-E: the death screen's account values (class levels, config.playerCardStats)
     client->acct.has_stats = 1;

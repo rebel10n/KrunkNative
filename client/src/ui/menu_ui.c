@@ -12,6 +12,7 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <badges.h> // WP-E part 2c: the custom badge in the class box
 #include <ks_client.h> // ks_client_pointer_free
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -753,23 +754,30 @@ void menu_update_class_box(void) {
     if (tag_el && ui_police_active()) {
         html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>"); // vO349: no lvl / clan
     } else if (tag_el && account_get()) {
-        // account: level box, name, [clan], partner / premium / featured badges
+        // account: level box, name, [clan], partner / premium / featured badges and the custom
+        // badge, each behind its v7 privacy setting (partnerBadge / premiumBadge / verifiedBadge /
+        // customBadge); the clan colour is v7's getClanCol (DEV / VIP / CMD only, WP-E part 2c)
         const AccountInfo *acc = account_get();
+        const int premium = acc->premium && !ui_setting_is_false("premiumBadge");
         StrBuf sb = {0};
         sb_appendf(&sb, "<div class='menuClassLevelBox' style='color:white;'>%d</div><span class='menuClassPlayerName'>", acc->level);
-        sb_append_esc(&sb, acc->premium && acc->alias[0] ? acc->alias : acc->name);
+        sb_append_esc(&sb, premium && acc->alias[0] ? acc->alias : acc->name);
         sb_append(&sb, "</span>");
         if (acc->clan[0]) {
-            const int rank = acc->data ? (int) cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 37)) : 0;
-            const char *ccol = !strcmp(acc->clan, "DEV") ? "#40C4FF" : rank == 1 ? "rgb" : rank >= 2 && rank <= 5 ? "#eb3437" : rank >= 6 && rank <= 15 ? "#FBC02D"
-                             : rank >= 16 && rank <= 25 ? "#e834eb" : rank >= 26 && rank <= 50 ? "#349ceb" : "rgba(255,255,255,0.5)";
+            const char *ccol = !strcmp(acc->clan, "DEV") ? "#40C4FF" : !strcmp(acc->clan, "VIP") ? "#11D445" : !strcmp(acc->clan, "CMD") ? "#993299" : "rgba(255,255,255,0.5)";
             sb_appendf(&sb, "<span class='menuClassPlayerClan' style='color:%s'>[", ccol);
             sb_append_esc(&sb, acc->clan);
             sb_append(&sb, "]</span>");
         }
-        if (acc->data && cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 19))) sb_append(&sb, "<i class='material-icons menuClassPlayerPartner'>verified</i>");
-        if (acc->premium) sb_append(&sb, "<i class='material-icons menuClassPlayerPremium'>beenhere</i>");
-        if (acc->featured) sb_append(&sb, "<i class='material-icons menuClassPlayerVerified'>check_circle</i>");
+        if (acc->data && cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 19)) && !ui_setting_is_false("partnerBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerPartner'>verified</i>");
+        if (premium) sb_append(&sb, "<i class='material-icons menuClassPlayerPremium'>beenhere</i>");
+        if (acc->featured && !ui_setting_is_false("verifiedBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerVerified'>check_circle</i>");
+        const int badge = account_custom_badge();
+        if (badge >= 0) {
+            char tex[96], url[256];
+            html_dom_asset_url(badge_texture(badge, tex, sizeof(tex)), url, sizeof(url));
+            sb_appendf(&sb, "<img src='%s' class='menuClassPlayerCustom'>", url);
+        }
         char *html = sb_finish(&sb);
         html_dom_set_html(tag_el, html);
         free(html);

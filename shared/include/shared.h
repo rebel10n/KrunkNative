@@ -851,6 +851,7 @@ struct Game_t;
 
 #define PLAYER_NAME_SIZE 32
 #define PLAYER_DAMAGE_SLOTS 8
+#define PLAYER_MEDAL_SLOTS 56 // overlay.medalsList (PROGRESSION_MEDAL_COUNT, shared/include/progression.h)
 #define PLAYER_CHECKPOINT_LIST_MAX 256 // single-use check points one player can remember
 #define PLAYER_SCORE_OBJS_MAX 256      // map-logic WP-B: score zones one player can have taken (scoreObjs)
 #define PLAYER_COLLIDING_OBJS_MAX 64   // map-logic WP-B: enter / exit trigger objects a player is inside (collidingObjs)
@@ -1282,6 +1283,10 @@ typedef struct Player_t {
     int pc_stat_index;                 // pcStatIndex (NET_PACKET_PC_STAT), -1 none / no account
     char pc_stat_value[16];            // config.playerCardStats[pc_stat_index].stat(player), as v7 prints it
     // ---- end WP-E
+    // player-viewer WP-E part 2c: v7 player.medals (game.incMedal) of this match, by
+    // overlay.medalsList index (progression.h): the end screen's Medals tab (NET_PACKET_END_MEDALS)
+    // and the account's medal counts (the stats commit).
+    uint16_t medal_counts[PLAYER_MEDAL_SLOTS];
 } Player;
 
 typedef struct {
@@ -1291,6 +1296,7 @@ typedef struct {
     unsigned char wallbang:1;
     unsigned char fists:1;  // Krunker fs: melee without the knife
     unsigned char thrown:1; // Krunker pj: projectile kill (thrown knife -> Bullseye)
+    unsigned char legshot:1; // WP-E part 2c: Krunker ls (the "ls" stat / challenge of a killing hit)
     float distance;     // Krunker dst: fraction of the weapon range
 } PlayerKillInfo;
 
@@ -1539,6 +1545,11 @@ typedef struct {
     void (*storage_load)(struct Game_t*, const Player*);
     // Reward KR (32): game.rewardKR(player, amount) (the callee checks game.krRewards).
     void (*reward_kr)(struct Game_t*, const Player*, int amount);
+    // player-viewer WP-E part 2c: v7 game.incStat (stat = 1: key is a progression.h stat key,
+    // value 1) and challenges.update (stat = 0: a challenge key, its value, the weapon and streak
+    // context, -1 none) in public games. The server tallies them per account for the stats
+    // commit (server/src/accounts.c); NULL = nothing (offline, guests).
+    void (*progress)(struct Game_t*, const Player*, int stat, const char *key, int value, int weapon, int streak);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -1779,6 +1790,14 @@ int game_end_late_spawn(const Game*, const Player*); // ENT while the round is o
 void game_send_end_late(Game*, int uid);              // then the "end" with didWin -1 for that uid
 void game_player_changing(const Game*, Player*, int done); // GameHooks.player_changing, when set
 void game_send(Game*, int uid, int type, const void*, uint16_t); // through hooks.send
+// player-viewer WP-E part 2c (shared/src/game.c): v7 game.isPubType() (no host, or mimicPubs; the
+// offline sandbox counts), game.incStat(key, player), challenges.update(game, key, value,
+// {wep, stk}, player) through GameHooks.progress, and game.incMedal(name, player) (accounts and
+// the sandbox: Player.medal_counts, icon medals only).
+int game_is_pub_type(const Game*);
+void game_inc_stat(Game*, const Player*, const char *key);
+void game_challenge(Game*, const Player*, const char *key, int value, int weapon, int streak);
+void game_inc_medal(Game*, Player*, const char *name);
 Player *game_find_player(Game*, int uid);
 void game_sync_leaders(Game*, int uid);  // LEADERBOARD to `uid` (or NET_TARGET_ALL)
 void game_start_round(Game*);            // fresh round timer + stats (after game_init)
@@ -2765,7 +2784,17 @@ typedef struct {
 // for every peer. A client that gets no DEATH_INFO (an older server) samples what it can itself.
 #define NET_PACKET_DEATH_INFO (NET_PACKET_BLOCK_SOCIAL + 1) // S->C to the victim: NetDeathInfoPacket ("3" [wid, classStat, pcStat, stats])
 #define NET_PACKET_PC_STAT (NET_PACKET_BLOCK_SOCIAL + 2)    // C->S before ENT: NetPcStatPacket (v7 ENT pcStatIndex)
-// NET_PACKET_BLOCK_SOCIAL + 3, + 4: reserved for player-viewer WP-E part 2a (unused); + 5..9 are WP-E part 2b's.
+// Part 2c: v7's endData.mdls (game.js:4693, the end screen's Medals tab): the player's
+// player.medals, sent to it right before its END. + 4 stays reserved; + 5..9 are WP-E part 2b's.
+#define NET_PACKET_END_MEDALS (NET_PACKET_BLOCK_SOCIAL + 3) // S->C: NetEndMedalsPacket
+
+typedef struct {
+    uint8_t count;                                // entries used, in overlay.medalsList order
+    struct {
+        uint8_t index;                            // overlay.medalsList index (progression.h)
+        uint16_t count;                           // times earned this match
+    } medals[PLAYER_MEDAL_SLOTS];
+} NetEndMedalsPacket;
 
 typedef struct {
     int32_t victim_uid;

@@ -351,6 +351,9 @@ void mode_sort_leaders(const Game *game, Player **players, const size_t count) {
 }
 
 void mode_send_medal(Game *game, const Player *player, const char *text, const int score) {
+    // WP-E part 2c: the mode medals' game.incMedal (Confirmed, Denied, Capture, Defender, ...).
+    // The players are the game's own (non-const) ones.
+    game_inc_medal(game, (Player *) player, text);
     NetMedalPacket packet;
     memset(&packet, 0, sizeof(packet));
     copy_text(packet.text, sizeof(packet.text), text);

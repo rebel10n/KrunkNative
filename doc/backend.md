@@ -864,6 +864,10 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
   (one clan per player, role 0 Recruit .. 3 Commander, clan XP/kills/deaths),
   `clan_requests`, `clan_messages`, `chat_messages`, `feed_posts` / `feed_comments`
   / `feed_likes`, `mail`, `reports`, `moderation_log`.
+* `player_badges` (earned badges.js indices), `challenges` (v7 challenge definitions: type,
+  DAT / REW JSON, icon, name; seeded with a starting set), `player_challenges` (PV / PT per
+  account, challenge and period: UTC day / week for daily / weekly), `player_medals` (medal
+  counts per account): `0107_progression.sql`, player-viewer WP-E part 2c.
 * `inventory` (skin index -> count), `skin_transactions`, `market_listings`,
   `trades` + `trade_items`, `published_maps`, `published_mods`, `published_assets`,
   `creation_votes`, `creation_favs`.
@@ -884,7 +888,7 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 {id, username, alias, level, levelProg, score, funds, clan, clan_rank, clan_role,
  premium, dev, mod, hack, featured, elo, elo2, elo4, chal,
  banned (0/1), ban_reason, ban_expires (unix s, 0 = none/permanent),
- data: [40 slots], token?}
+ badges: [earned badges.js indices], data: [40 slots], token?}
 ```
 
 `data` is `Account.getData()` of `src/data/account.js` in its order: 0 id, 1 kills,
@@ -894,7 +898,8 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 20 regionInd, 21 isMod, 22 elo, 23 elo2, 24 elo4, 25 chal, 26 virus, 27 premiumT,
 28 has2FA, 29 alias, 30 createDate, 31 twitch, 32 isCreationMod, 33 clanDeaths,
 34 clanKills, 35 clanCon, 36 clanRegion, 37 clanRank, 38 jobRating, 39 jobRatingPos.
-Level: `max(1, floor(0.03*sqrt(score)))`, `levelProg = round(frac*100)` (XP = score).
+Level: `max(1, floor(0.03*sqrt(score)))`; `levelProg` is v7.1.4's getLevelProg, a float percent
+linear in score between `(level/0.03)^2` (0 at level 1) and `((level+1)/0.03)^2` (XP = score).
 
 Session token: 32 lowercase hex (16 random bytes, as v3.1.1), stored as sha256,
 sliding `session_ttl_days`. Issued by password login and register; a token resume
@@ -931,7 +936,7 @@ Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 | `["a", 1, [name, null, token]]` token resume | same (token unchanged) |
 | `["a", -1]` logout | none (session token revoked) |
 
-`info` = `{level, levelProg, alias, premium, funds, score, clan, dev, mod, banned}`
+`info` = `{level, levelProg, alias, premium, funds, score, clan, dev, mod, banned, badges}`
 (ignored by v3.1.1). Then `["gmc", unreadMail]` (JSON clients). Error strings:
 `Username must be 3–16 characters.`, `Username may only contain letters, digits, and
 underscores.`, `Password must be ≥ 6 characters.`, `Password is too long.`,
@@ -998,10 +1003,17 @@ Other labels (request -> reply):
 | `["fkr", captcha]` | `["spinKR", lastReward, randNum, rewardIndex, funds]` / `["spinKR", null, null, null, null, err]`: `store.freeKR[i].kr[level >= 20]`, once per `reward_time_s` |
 | `["clm"]` | `["clm", lastReward, funds]` / `["pRes", null, err]`: daily reward (level >= `reward_min_level`, `daily_reward_kr`, same clock as `fkr`); `["unbx"]` is accepted |
 | `["rpt", name, reason, details]` / `["grp", name]` | `["rpr", ok]` / `["rps", rows]` (staff) |
+| `["chg"]` | `["chgL", activeChallenges]`: `[{CI, T, DAT, REW, IC, N, PV, PT, TR?, PER}]` (v7 `account.activeChallenges`; TR = ms left of a daily / weekly one; 3 daily + 3 weekly rotate per account and UTC day / week) (WP-E part 2c, `progress.c`) |
+| `["bdg", badge]` | `["bdgr", badge]` / `["po", null, "You dont own this badge"]`: `player_stats.bdg` (-1 clears; v7 io_badgeUpdate) |
+| `["cbdg", badge]` | `["cbdgr", badge]` / `["po", null, err]` ("Badge not claimable", "Requirements not met", "Badge already claimed"): a claimable badge whose rule holds (Nuclear I-IV: `stats.n`) |
+| `["mdl"]` | `["mdl", {medal: count}]`: the account's medal counts (KrunkNative) |
 | `["flg", name, 0\|1]` / `["ver", name, 0\|1]` | `["fgr", ok]` (mods) / `["verr", ok]` (devs) |
 
 Server pushes: `["ua", data40, info]` (v3.1.1 `updateAccount`) after a stats commit
-of that account; `["gmc", n]` unread mail.
+of that account; `["gmc", n]` unread mail. After a commit with v7 progression fields (7.6):
+`["chg", [done, CI, PV, ...]]` (v7 io_updateChallenges), `["chgC", [challenge...]]` (the
+completed challenge objects: the end screen's cards and reward skins), `["chlR", skins, funds,
+0, 0, kr]` (io_updateChallengeRewards) and `["nbdgr", [badge...]]` (checkBadges).
 
 ### 7.5 Hub HTTP catalogue (`creations.c`, v3.1.1 `publicRoutes.ts`)
 
@@ -1033,7 +1045,7 @@ servers hosting community maps; 404 `{"error":"not_found"}`.
 | `logout` | `{token}` | `{}` |
 | `alias` | `{id, alias}` | account |
 | `password` | `{id, old, new}` | `{token}` |
-| `stats` | `{id, match, kills, deaths, score, won, games, time_ms\|timePlayed, kr, xp?, class\|classIndex, mode, map, region, region_index?, server, stats{}}` (deltas of one match) | account + `{kr_awarded, duplicate}` |
+| `stats` | `{id, match, kills, deaths, score, won, games, time_ms\|timePlayed, kr, xp?, class\|classIndex, mode, map, region, region_index?, server, stats{}, prog?, medals?, mapIndex?, mapId?, ranked?, final?}` (deltas of one match) | account + `{kr_awarded, duplicate}` |
 | `rewards` | `{items: [[id, kr], ...]}` | `{funds: [...]}` |
 | `give_skin` | `{id, skin, source?}` | `{skin, count}` |
 | `elo` | `{id, mode: 1\|2\|4, elo}` / `{id, mode, delta}` (atomic, clamped at 0) | `{}` / `{elo}` |
@@ -1054,6 +1066,14 @@ brain_ks_storage_e2e` (server_bin + kn_brain + a hosted published map).
 `stats` is idempotent per `(match, id)` (`match_results` primary key; a retry
 returns `duplicate: 1` and changes nothing), adds XP to the per-class `c<class>`
 stat and the clan's score, clamps KR to `max_match_kr`, writes a ledger row.
+`stats{}` holds v7's incStat counters (`s, h, hs, ls, wb, mk, fk, tmk, ast, spry, crc, n, ad,
+sad, cad, sl, jg, kjg, jgk, wm`), added to `player_stats`. player-viewer WP-E part 2c: when
+`prog` (`[[key, value, weapon, streak], ...]`, the match's challenge tallies) or `medals`
+(`{name: count}`) is present and the commit is not a duplicate, kn_brain then runs
+`P_PROGRESS` (`db_progress.c`): v7's challenges.finalize on the account's active challenges
+(`final: false` = a player who left: only `DAT.nem` ones), KR / skin rewards (`kr_transactions`
+source `challenge`), the medal counts, and checkBadges (claimable badges whose rule holds), then
+pushes 7.4's match-end frames.
 
 ### 7.7 Tests
 
@@ -1069,6 +1089,10 @@ stat and the clan's score, clamps KR to `max_match_kr`, writes a ledger row.
   brain on an ephemeral port (read from its "listening on" log line), no sleeps
   except the login throttle window: 50/50 sequential and concurrent runs pass.
   Skips (77) without PostgreSQL or python `websockets`.
+* `ctest -R brain_progress` (`services/brain/tests/progress_test.py`, every driver): the
+  challenge list and its daily / weekly rotation, a commit with tallies -> the match-end pushes,
+  duplicate and partial commits, badge select / claim refusals and the auto-awarded Nuclear I,
+  medal counts, `badges` in the account object (WP-E part 2c).
 * Real v3.1.1 client: `services/brain/tests/v311_site_proxy.js <port> <brainPort>
   <v3.1.1 public dir>` (same-origin front like nginx) +
   `v311_social_client.js <port> <cdpPort> <user> <pass> <outDir>` against headless
@@ -1222,7 +1246,9 @@ logged in elsewhere; `004003` banned; `004004` server draining (`"GAME UPDATING"
   `matchId` = `<round matchId>#c<connection id>` so svc-accounts' `(match, id)`
   idempotency never swallows a rejoin). Per player: `accountId, name, kills, deaths,
   score, won, timePlayed` (ms since the player's first spawn of the round), `games,
-  kr, xp` (= score), `classIndex`. Like v3.1.1 `updateAccounts`, hosted (custom)
+  kr, xp` (= score), `classIndex`, and (WP-E part 2c, GameHooks.progress) `stats` (v7 incStat
+  counts), `prog` (challenge tallies per key, weapon and streak, plus `w` / `gp` at the round
+  end), `medals` (player.medals), `mapIndex` (v7 official map index, -1 custom) and `ranked`. Like v3.1.1 `updateAccounts`, hosted (custom)
   games and `noReward` modes only add time played, and hack-flagged accounts get
   nothing. Guests are never sent.
 * KR: `min(premium ? kr_cap_premium : kr_cap, floor(score × mode.rewardMlt ×

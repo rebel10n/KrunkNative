@@ -258,6 +258,12 @@ void hud_ui_show_end_screen(Client*, int result, const char *next_round);
 void hud_ui_hide_end_screen(Client*);
 // GUI.endScreen.changeTab(id): "leaderboard", "performance", "clanwar" or "medals".
 void hud_ui_end_screen_tab(const char *tab);
+// WP-E part 2c: the end screen's Medals tab (NET_PACKET_END_MEDALS: endData.mdls), the Rewards tab
+// (matchRewardSummary.skins of completed challenges) and #endChals' completed challenge cards
+// (io_challengeCompleted). All reset when the end screen goes (a new game).
+void hud_ui_set_end_medals(const NetEndMedalsPacket *packet);
+void hud_ui_add_reward_skin(int skin);
+void hud_ui_end_challenge_completed(int icon, const char *name);
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled
 int  hud_ui_end_screen_interactive(void);   // end-screen results up: pointer free, mouse goes to the page
 int  hud_ui_toggle_end_screen(Client*);     // UI.toggleEndScreen: results <-> menu (Escape, controller Start); 1 = acted

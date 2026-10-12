@@ -2478,6 +2478,18 @@ its tests, and the [GAMEPLAY] items that break existing tests.
   - `make smoke-native` / `make web smoke-web`.
 - **Breaks:** every existing uidiff baseline that shows the HUD. They are regenerated
   from v7 references; the v3 baselines stay on the `v3.1.1` tag.
+- **Part 2c (landed):** badges on nametags and the menu class tag (privacy settings), the badge
+  collection popup, select / claim and the auto-awarded Nuclear badges; v7 challenges (window 33
+  with KrunkNative's Daily / Weekly sections, map / weapon / nightmare categories, the end
+  screen's completed cards and reward skins); v7's getLevelProg; v7's getClanCol (no rank /
+  challenge colours); per-match medal counts (`NET_PACKET_END_MEDALS` 243, the end screen's
+  Medals tab) and per-account medal counts (profile "Medals" stat tab). The game server tallies
+  v7's incStat / challenge events (`GameHooks.progress`, `server/src/accounts.c`) into the stats
+  commit; kn_brain evaluates the challenges at the commit (`shared/src/progression.c`,
+  `services/brain/db_progress.c`, migration `0107_progression`), so a challenge completes at
+  the end of the match (no in-match "Finish the game to complete" line). Not ported: the KPD
+  review flow (no KPD system), item / store-item challenge contexts, `uwk` and `kjg` / `jgk` /
+  `crc` events, the season badges (Battle Pass rules).
 
 ### WP-F: Cosmetics, player mesh, skin effects, pets, viewer (client)
 
@@ -2590,8 +2602,8 @@ its tests, and the [GAMEPLAY] items that break existing tests.
 | Auto Pistol `noHeadShot` ignored: headshots do 1.5x instead of 1x | `shared/src/player.c:2258` | B |
 | Weapon `movSpread` not modelled: Akimbo Uzi moving spread is wrong | `shared/src/player.c:1359`, `shared/include/weapons.h` | B |
 | Jump-pad box sized from the map scale (matches neither v3's fixed extents nor v7 exactly) | `shared/src/player.c:634-640`, `shared/src/map.c:468-477` | A |
-| Challenges window hangs on "Loading": kn_brain has no `chg` handler | `client/src/ui/account_ui.c:1171-1176`, `services/brain/accounts.c` | E |
-| Game server commits no per-stat keys (hs, n, wb, ...), so v7 challenges and badges cannot work | `server/src/accounts.c:439-461` | E |
+| Challenges window hangs on "Loading": kn_brain has no `chg` handler (fixed, part 2c: `["chg"]` -> `["chgL", list]`) | `client/src/ui/account_ui.c:1171-1176`, `services/brain/accounts.c` | E |
+| Game server commits no per-stat keys (hs, n, wb, ...), so v7 challenges and badges cannot work (fixed, part 2c: `stats` / `prog` / `medals`) | `server/src/accounts.c:439-461` | E |
 | `challMode`/`anonMode` stored but never sent in ENT | `client/src/main.c` ENT build | C |
 | Nuke can detonate but nothing starts it | `shared/src/game.c`, `shared/src/player.c` | B |
 | Viewer header comment names an `index.html?page=viewer` route that `app_mode.c` lacks | `client/src/viewer/viewer.c:3` | F |

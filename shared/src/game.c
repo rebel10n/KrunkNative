@@ -8,6 +8,8 @@
 #include <spawnables.h>
 #include <game_config.h> // WP-E: v7 custom game config, map config, match votes
 #include <zombies.h> // map-logic WP-H: machines, power-ups, airdrops
+#include <account.h>     // WP-E part 2c: incMedal (accounts and the sandbox)
+#include <progression.h> // WP-E part 2c: overlay.medalsList
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
@@ -258,6 +260,48 @@ void game_send(Game *game, const int uid, const int type, const void *payload, c
     if (game->hooks.send) game->hooks.send(game, uid, type, payload, length);
 }
 
+// ------------------------------------------------------------------ WP-E part 2c: progression
+
+// game.isPubType(): !hasHost() || mimicPubs. The offline sandbox is v7's host-less sandbox.
+int game_is_pub_type(const Game *game) {
+    return game && (game->is_sandbox || !game_config_is_custom(game) || game->config.mimic_pubs);
+}
+
+// game.incStat(stat, player): mode.skipStats is not ported (no v7 mode lists one KrunkNative runs).
+void game_inc_stat(Game *game, const Player *player, const char *key) {
+    if (!game || !player || player->is_bot || !game->hooks.progress || !game_is_authority(game) || !game_is_pub_type(game)) return;
+    game->hooks.progress(game, player, 1, key, 1, -1, -1);
+}
+
+// challenges.update(game, key, value, {wep, stk}, player) / updateMulti
+void game_challenge(Game *game, const Player *player, const char *key, const int value, const int weapon, const int streak) {
+    if (!game || !player || player->is_bot || !game->hooks.progress || !game_is_authority(game) || !game_is_pub_type(game)) return;
+    game->hooks.progress(game, player, 0, key, value, weapon, streak);
+}
+
+// game.incMedal(medal, player): player && (game.isSandbox || player.account) && isPubType()
+void game_inc_medal(Game *game, Player *player, const char *name) {
+    if (!game || !player || player->is_bot || !game_is_authority(game) || !game_is_pub_type(game)) return;
+    AccountInfo account; // player.account: Player.has_account (the server's spawn) or the account hook
+    if (!game->is_sandbox && !player->has_account && !(game_account_info(game, player, &account) && account.has_account)) return;
+    const int index = progression_medal_index(name);
+    if (index >= 0 && index < PLAYER_MEDAL_SLOTS && player->medal_counts[index] < UINT16_MAX) player->medal_counts[index]++;
+}
+
+// endData.mdls of one player: its medals in list order, right before its END.
+static void game_send_end_medals(Game *game, const Player *player) {
+    if (player->is_bot) return;
+    NetEndMedalsPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    for (int i = 0; i < PLAYER_MEDAL_SLOTS; i++) {
+        if (!player->medal_counts[i]) continue;
+        packet.medals[packet.count].index = (uint8_t) i;
+        packet.medals[packet.count].count = player->medal_counts[i];
+        packet.count++;
+    }
+    game_send(game, player->uid, NET_PACKET_END_MEDALS, &packet, sizeof(packet));
+}
+
 Player *game_find_player(Game *game, const int uid) {
     for (size_t i = 0; i < game->player_count; i++) {
         if (game->players[i] && game->players[i]->uid == uid) return game->players[i];
@@ -459,7 +503,9 @@ void game_end_round(Game *game) {
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
-        if (player) game_send_end(game, player, winner, &board, rewards);
+        if (!player) continue;
+        game_send_end_medals(game, player); // WP-E part 2c: endData.mdls
+        game_send_end(game, player, winner, &board, rewards);
     }
 
     if (game->mode) mode_send_end(game, winner, sorted, count);

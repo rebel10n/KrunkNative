@@ -9,6 +9,7 @@
 #include <voice.h> // voice chat relay (io_vc)
 #include <chat_commands.h>
 #include <player_card.h> // WP-E: PLAYER_CARD_STAT_COUNT (ServerAccount)
+#include <progression.h> // WP-E part 2c: PROGRESSION_STAT_COUNT (ServerAccount)
 #include <pthread.h>
 
 #ifdef WIN32
@@ -48,6 +49,15 @@ typedef enum {
 } ServerJoinState;
 
 #define SERVER_CLASS_STATS_MAX 32 // account.stats c0..c31 (v7.1.4 has 16 classes)
+#define SERVER_TALLY_MAX 96       // challenge tallies of one round (key x weapon x streak)
+
+// WP-E part 2c: one challenges.update tally (shared/include/progression.h)
+typedef struct {
+    char key[8];
+    int16_t weapon;            // -1 none
+    int16_t streak;            // -1 none
+    int value;                 // ADD keys: the sum; MAX / SET keys: the highest / last value
+} ServerChallengeTally;
 
 typedef struct {
     int account_id;            // 0 guest
@@ -82,6 +92,11 @@ typedef struct {
     unsigned char has_stats:1;
     int class_stats[SERVER_CLASS_STATS_MAX];
     char pc_stats[PLAYER_CARD_STAT_COUNT][16];
+    // player-viewer WP-E part 2c: this round's game.incStat counts (progression.h stat keys) and
+    // challenges.update tallies per (key, weapon, streak), committed with the stats and then cleared
+    uint32_t stat_counts[PROGRESSION_STAT_COUNT];
+    ServerChallengeTally tallies[SERVER_TALLY_MAX];
+    int tally_count;
 } ServerAccount;
 
 struct ServerTransport;

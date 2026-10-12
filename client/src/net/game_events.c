@@ -737,6 +737,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             g_death_info_valid = 1;
             return 1;
         }
+        case NET_PACKET_END_MEDALS: { // WP-E part 2c: endData.mdls, right before this player's END
+            EVENTS_READ(NetEndMedalsPacket, medals);
+            hud_ui_set_end_medals(&medals);
+            return 1;
+        }
         case NET_PACKET_LEADER_STATS: { // WP-E: v7 "7" columns (mode.leaderStats) in the server's board order
             EVENTS_READ(NetLeaderStatsPacket, stats);
             hud_ui_set_leader_stats(&stats);

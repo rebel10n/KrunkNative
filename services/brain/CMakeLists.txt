@@ -40,6 +40,12 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/ks_storage_data.c
     ../../shared/src/ks/ks_number.c
     ../../shared/src/map_catalog.c  # relative: knsvc_existing() checks paths under this dir
+    # player-viewer WP-E part 2c: badges, v7 challenges, medal counts (0107_progression); the
+    # challenge / badge rules are the game's (shared/src/progression.c, badges.c)
+    db_progress.c
+    progress.c
+    ../../shared/src/progression.c
+    ../../shared/src/badges.c
 )
 
 # Sources another agent has listed but not landed yet must not break configure
@@ -130,6 +136,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_storage PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c, 0107_progression)
+    add_test(NAME brain_progress
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_progress PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 endif ()
 
 # coord-store: the same three suites on the other store drivers (KN_TEST_DB_DRIVER,
@@ -151,7 +162,10 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_storage_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
-        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_storage_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+        add_test(NAME brain_progress_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_storage_${drv} brain_progress_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
     endif ()
     add_test(NAME brain_federation_${drv}

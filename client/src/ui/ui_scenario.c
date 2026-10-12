@@ -24,6 +24,7 @@
 #include <GLFW/glfw3.h>
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
+#include <backend_ui.h> // WP-E part 2c: state.account
 #include <app_mode.h> // state.page: hub / editor / viewer pages
 #include <debug_capture.h> // state.pageActions calls with arguments
 #include <html_ui.h>
@@ -226,6 +227,7 @@ static void warn_unknown_keys(void) {
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
+        "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -814,6 +816,7 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open != html_ui_is_menu_open()) client_set_menu_open(client, menu_open);
     if (in_game) client->menu_lock_grace_until = 1e18;
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
+    account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
     if (menu_open) apply_window(client);
 
     run_frames(client, 2);

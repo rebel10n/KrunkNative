@@ -52,6 +52,7 @@ void hud_ui_hit(Client*, int kill);
 #include <hud_gui.h> // map-G: the map's custom GUI (hud_gui.c)
 #include <lobby_ui.h> // WP-E: the end screen's match vote cards (net/lobby_events.c)
 #include <badges.h>   // WP-E: v7 badges on the boards
+#include <progression.h> // WP-E part 2c: overlay.medalsList (the Medals tab)
 #include <hud_social.h> // WP-E part 2b: mute lists, chat channels
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
 #include <cJSON.h>
@@ -453,11 +454,12 @@ void hud_ui_set_leader_stats(const NetLeaderStatsPacket *packet) {
     g_leader_stats_valid = 1;
 }
 
-// The " [clan]" tag of a board row: COLORS.getClanCol(clan, fallback) ("DEV" is blue;
-// KrunkNative has no clan ranks, so no rainbow / rank colours).
+// The " [clan]" tag of a board row: COLORS.getClanCol(clan, fallback) (v7.1.4: DEV, VIP and CMD
+// keep a colour; the clan war rank colours are gone).
 static void hb_append_clan(char *out, const size_t size, size_t *len, const char *clan, const char *fallback) {
     if (!clan || !clan[0]) return;
-    hb_append(out, size, len, "<span style='color:%s'> [", strcmp(clan, "DEV") ? fallback : "#40C4FF");
+    const char *col = !strcmp(clan, "DEV") ? "#40C4FF" : !strcmp(clan, "VIP") ? "#11D445" : !strcmp(clan, "CMD") ? "#993299" : fallback;
+    hb_append(out, size, len, "<span style='color:%s'> [", col);
     hb_append_escaped(out, size, len, clan);
     hb_append(out, size, len, "]</span>");
 }
@@ -690,7 +692,9 @@ static int hud_plist_matches(const Player *p, const char *name) {
 
 static void hud_plist_clan(StrBuf *sb, const char *clan) {
     if (!clan || !clan[0]) return;
-    sb_appendf(sb, "<span style='color:%s'> [", strcmp(clan, "DEV") ? "#353535" : "#40C4FF");
+    // COLORS.getClanCol(clan, "#353535"): DEV / VIP / CMD (v7.1.4)
+    const char *col = !strcmp(clan, "DEV") ? "#40C4FF" : !strcmp(clan, "VIP") ? "#11D445" : !strcmp(clan, "CMD") ? "#993299" : "#353535";
+    sb_appendf(sb, "<span style='color:%s'> [", col);
     sb_append_esc(sb, clan);
     sb_append(sb, "]</span>");
 }
@@ -2609,6 +2613,84 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     hb_append(out, size, len, "</div></div></div>");
 }
 
+// ---- WP-E part 2c: the Medals and Rewards tabs, the completed challenge cards
+
+static NetEndMedalsPacket g_end_medals; // endData.mdls of this end (NET_PACKET_END_MEDALS)
+static void hud_end_card_render(const Client *client);
+#define END_REWARD_SKINS_MAX 16
+static int g_end_skins[END_REWARD_SKINS_MAX][2]; // matchRewardSummary.skins [{i, c}]
+static int g_end_skin_count;
+
+void hud_ui_set_end_medals(const NetEndMedalsPacket *packet) {
+    if (packet) g_end_medals = *packet;
+    if (g_end_medals.count > PLAYER_MEDAL_SLOTS) g_end_medals.count = PLAYER_MEDAL_SLOTS;
+    if (g_hud_ui.ended && g_hud_ui.end_phase == 2 && g_end_tab == 2 && g_end_client) hud_end_card_render(g_end_client);
+}
+
+// io_challengeCompleted: a challenge's skins go to matchRewardSummary.skins (counted)
+void hud_ui_add_reward_skin(const int skin) {
+    for (int i = 0; i < g_end_skin_count; i++) {
+        if (g_end_skins[i][0] == skin) {
+            g_end_skins[i][1]++;
+            return;
+        }
+    }
+    if (g_end_skin_count >= END_REWARD_SKINS_MAX) return;
+    g_end_skins[g_end_skin_count][0] = skin;
+    g_end_skins[g_end_skin_count][1] = 1;
+    g_end_skin_count++;
+}
+
+// io_challengeCompleted(index) at the end: a .endChalCard into #endChals ("Completed!")
+void hud_ui_end_challenge_completed(const int icon, const char *name) {
+    const HtmlElem holder = html_dom_by_id("endChals");
+    if (!holder) return;
+    char html[512];
+    size_t len = 0;
+    html[0] = 0;
+    hb_append(html, sizeof(html), &len, "<div class='endChalCard' onclick='showWindow(33, true)' onmouseenter='playTick()'><img class='endChalImg' src='./img/chals/icon_%d.png' /><div class='endChalRight'>", icon);
+    hb_append_escaped(html, sizeof(html), &len, name ? name : "");
+    hb_append(html, sizeof(html), &len, "<div class='endChalDesc'>Completed!</div></div></div>");
+    html_dom_insert_html(holder, HTML_INSERT_BEFORE_END, html);
+}
+
+// tabs.medals.gen(): medal_<i> on badge_0, the name and "x<count>"
+static void hud_end_medals_html(char *out, const size_t size, size_t *len) {
+    if (!g_end_medals.count) {
+        hb_append(out, size, len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any medals this game!</div>");
+        return;
+    }
+    hb_append(out, size, len, "<div id='medalTable'>");
+    for (int i = 0; i < g_end_medals.count; i++) {
+        const int index = g_end_medals.medals[i].index;
+        if (index >= PROGRESSION_MEDAL_COUNT) continue;
+        hb_append(out, size, len, "<div class='medalCard'><div class='medalImg' style='background-image: url(./img/medals/medal_%d.png), url(./img/medals/badge_0.svg)'></div>"
+                                  "<div class='medalTxt'>%s</div><div class='medalTxt'>x%d</div></div>", index, g_progression_medals[index], g_end_medals.medals[i].count);
+    }
+    hb_append(out, size, len, "</div>");
+}
+
+// tabs.rewards.gen(): matchRewardSummary (skins; KrunkNative has no junk)
+static void hud_end_rewards_html(char *out, const size_t size, size_t *len) {
+    if (!g_end_skin_count) {
+        hb_append(out, size, len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any rewards this game!</div>");
+        return;
+    }
+    hb_append(out, size, len, "<div id='rewardTable'>");
+    for (int i = 0; i < g_end_skin_count; i++) {
+        const ViewerSkin *skin = viewer_skin(g_end_skins[i][0]);
+        if (!skin) continue;
+        char url[256];
+        store_skin_preview(g_end_skins[i][0], url, sizeof(url));
+        const int rarity = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
+        hb_append(out, size, len, "<div class='rewItemHolder' style='border: 2px solid %s;' onclick='viewItem(%d)'><img draggable='false' class='rewItemImg' loading='lazy' src='%s'><div class='rewItemN'>",
+                  g_viewer_rarities[rarity].color, g_end_skins[i][0], url);
+        hb_append_escaped(out, size, len, skin->name ? skin->name : "");
+        hb_append(out, size, len, "</div><div class='rewItemCnt'>x%d</div></div>", g_end_skins[i][1]);
+    }
+    hb_append(out, size, len, "</div>");
+}
+
 // GUI.endScreen.show(): .endCard with the tab headers (not spectating) and the current tab.
 static void hud_end_card_html(const Client *client, char *out, const size_t size) {
     size_t len = 0;
@@ -2631,11 +2713,11 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
         case 1:
             hud_end_performance_html(client, out, size, &len);
             break;
-        case 2: // tabs.medals: the end packet's mdls (KrunkNative's END has none yet)
-            hb_append(out, size, &len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any medals this game!</div>");
+        case 2: // tabs.medals: endData.mdls (NET_PACKET_END_MEDALS, WP-E part 2c)
+            hud_end_medals_html(out, size, &len);
             break;
-        case 3: // tabs.rewards: matchRewardSummary (junk / skins; none without an account)
-            hb_append(out, size, &len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any rewards this game!</div>");
+        case 3: // tabs.rewards: matchRewardSummary (challenge skins; none without an account)
+            hud_end_rewards_html(out, size, &len);
             break;
         default:
             hud_end_leaderboard_html(client, out, size, &len);
@@ -2796,7 +2878,12 @@ void hud_ui_hide_end_screen(Client *client) {
     ui->ended = 0;
     ui->end_phase = 0;
     g_end_timer[0] = 0;
+    // WP-E part 2c: a new game: endData.mdls, matchRewardSummary = {} and endChals.innerHTML = ""
+    memset(&g_end_medals, 0, sizeof(g_end_medals));
+    g_end_skin_count = 0;
     if (!html_ui_available() || !html_ui_is_ready()) return;
+    const HtmlElem chals = html_dom_by_id("endChals");
+    if (chals) html_dom_set_html(chals, "");
 
     dom_display("endUI", "none");
     dom_display("endInfo", "none");
