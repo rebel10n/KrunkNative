@@ -46,6 +46,22 @@ CI: `.github/workflows/deploy-kru.yml` (push to slop) builds and runs `central.y
 secrets `KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS`. That includes `kn_bridge` (the bundle is
 built on the runner with its Node; the Cloudflare DNS/tunnel step is skipped without CF secrets).
 
+`.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` or e.g. `chitown,clara`,
+`dry_run` = `--check --diff`) builds server_bin for bullseye/bookworm/trixie and runs
+`edges.yml --tags release,gameserver`, chitown first, the others only once chitown-1 answers the
+server-info query again. It restarts the selected edges' game servers. Secrets: `EDGES_SSH_KEY`
+(a CI-only ed25519 key, private half in `~/.config/kn-secrets/github-ci/edges_ci_ed25519`; in each
+edge's root `authorized_keys` as
+`no-agent-forwarding,no-X11-forwarding,no-port-forwarding ssh-ed25519 ... krunknative-github-ci-edges`,
+installed next to the other keys, the old file kept as `authorized_keys.bak.krunknative-ci.<time>`),
+`EDGES_KNOWN_HOSTS` (the edges' host keys) and the `KRU_*` ones: the coordinator secrets for
+`server-<n>.cfg` are read from kru's `secrets.env` at deploy time, as locally. The runner's ssh
+config is `ssh_config` with kru -> `KRU_HOST:KRU_PORT` and the edges -> the CI key. Revoke: delete
+the `krunknative-github-ci-edges` line on the edges and the secret.
+
+Release builds (`.github/workflows/release.yml`) use the same `build.sh` (bookworm + bullseye,
+`TARGETS=server_bin`); `KN_CMAKE_ARGS` passes the build version (`tools/release/version-meta.sh`).
+
 ## net-bridge (play.krunk.io)
 
 Browsers cannot open TCP, so the web client (Pages, `kn-bridge` meta, deploy/pages) reaches the
