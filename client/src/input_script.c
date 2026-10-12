@@ -43,6 +43,7 @@
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,7 +125,7 @@ static void script_load(void) {
             fprintf(g_script.log, "t,delta,x,y,z,vx,vy,vz,on_ground,on_ladder,crouch,aim,height,slide,step_val,step_chase,"
                 "land_bob_y,land_bob_yr,jump_bob_y,jump_rotate,jump_rotate_mlt,bob_y,bob_z,lean_x,lean_y,lean_z,recoil_anim_y,"
                 "cam_x,cam_y,cam_z,cam_pitch,cam_yaw,zoom,recoil_tween_y,recoil_tween_z,inspect_x,step_events,land_events,"
-                "fov,wp_x,wp_y,wp_z,wr_x,wr_y,wr_z,ubp_y,ubr_x,obj_y,can_slide,idle_anim\n");
+                "fov,wp_x,wp_y,wp_z,wr_x,wr_y,wr_z,ubp_y,ubr_x,obj_y,can_slide,idle_anim,arm_yaw_off,arm_pitch_off\n");
         }
     }
 
@@ -336,9 +337,17 @@ void input_script_frame_end(Client *client, const float delta, const float frame
         const MeshTransform *vm = pm && p->loadout_index >= 0 && pm->arms[p->loadout_index] ? &pm->arms[p->loadout_index]->anchor : NULL;
         const MeshTransform *ub = pm ? pm->upper_body_anchor : NULL;
         const MeshTransform *an = pm ? pm->anchor : NULL;
+        // The viewmodel's look against the camera's: the arms turn with objInstances (anchor yaw)
+        // and pitch with the upper body (direction.x), the camera adds shake, recoil and the
+        // landing bob (camera_feel_apply). 0 = locked to the camera, as Krunker draws them.
+        float shake_pitch, shake_yaw;
+        camera_feel_shake_offset(&shake_pitch, &shake_yaw);
+        const float yaw_off = an ? an->rotation.y - (c->rotation.y - shake_yaw) : 0.0f;
+        const float arm_yaw_off = atan2f(sinf(yaw_off), cosf(yaw_off));
+        const float arm_pitch_off = p->direction.x - (c->rotation.x - shake_pitch - p->recoil_anim_y * game_constants.recoil_mlt - p->land_bob_y * 0.1f);
         fprintf(g_script.log, "%.3f,%.3f,%.5f,%.5f,%.5f,%.6f,%.6f,%.6f,%d,%d,%.4f,%.4f,%.4f,%.4f,%.5f,%.5f,"
             "%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.4f,%.4f,%.4f,%.5f,%.5f,%.4f,%.5f,%.5f,%.5f,%u,%u,"
-            "%.4f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%.5f\n",
+            "%.4f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%.5f,%.6f,%.6f\n",
             g_script.time, delta * 1000.0f, p->position.x, p->position.y, p->position.z,
             p->velocity.x, p->velocity.y, p->velocity.z, p->on_ground, p->on_ladder, p->crouch_val, p->aim_val, p->height,
             p->slide_timer, p->step_val, p->step_chase, p->land_bob_y, p->land_bob_yr, p->jump_bob_y, p->jump_rotate,
@@ -347,7 +356,7 @@ void input_script_frame_end(Client *client, const float delta, const float frame
             p->recoil_tween[0], p->recoil_tween[3], p->inspect_x, (unsigned) p->step_events, (unsigned) p->land_events,
             c->fov, vm ? vm->position.x : 0.0f, vm ? vm->position.y : 0.0f, vm ? vm->position.z : 0.0f,
             vm ? vm->rotation.x : 0.0f, vm ? vm->rotation.y : 0.0f, vm ? vm->rotation.z : 0.0f,
-            ub ? ub->position.y : 0.0f, ub ? ub->rotation.x : 0.0f, an ? an->position.y : 0.0f, p->can_slide, p->idle_anim);
+            ub ? ub->position.y : 0.0f, ub ? ub->rotation.x : 0.0f, an ? an->position.y : 0.0f, p->can_slide, p->idle_anim, arm_yaw_off, arm_pitch_off);
     }
 
     write_pending_shot(client);

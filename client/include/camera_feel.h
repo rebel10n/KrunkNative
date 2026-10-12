@@ -14,3 +14,5 @@ void camera_feel_explosion(const Camera*, vec3 position);
 void camera_feel_apply(Client*);
 // RENDER.updateShake(delta): once per rendered frame; delta in seconds (clamped like Krunker's).
 void camera_feel_update(float delta);
+// The current shake offsets (RENDER.shakeX / shakeY) camera_feel_apply adds to the look.
+void camera_feel_shake_offset(float *pitch, float *yaw);

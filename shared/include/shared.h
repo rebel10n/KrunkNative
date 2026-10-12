@@ -1317,6 +1317,7 @@ void player_proc_input(Player*, const Input*, int, int);
 float player_round3(float v); // JS v.round(3); procInputs rounds delta (ms), yaw and pitch (0.001 rad)
 float player_wrap_yaw(float yaw); // controls.js xDr = rotation.y % Math.PI2: (-2pi, 2pi), non-finite -> 0
 float player_clamp_pitch(float pitch); // controls.js pitchObj clamp [-pi/2, pi/2], non-finite -> 0
+int player_look_follows_camera(const Player*); // class (movSch || 0) == 0 && trnSp == 1: frames without an input frame turn it with the camera
 void player_scroll_weapon(Player*, int dir, int recon); // manager.reload(player, +-1): wheel / melee on melee
 void player_update(Player*, float);
 float player_lerp_angle(float a, float b, float t); // index.js Math.lerpAngle (remote yaw/pitch interpolation), shortest arc

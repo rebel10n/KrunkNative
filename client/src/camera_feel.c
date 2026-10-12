@@ -38,6 +38,11 @@ void camera_feel_explosion(const Camera *camera, const vec3 position) {
     if (strength > 0.0f) camera_feel_shake(strength * CAMERA_EXPLOSION_SHAKE);
 }
 
+void camera_feel_shake_offset(float *pitch, float *yaw) {
+    if (pitch) *pitch = g_shake.pitch;
+    if (yaw) *yaw = g_shake.yaw;
+}
+
 void camera_feel_update(const float delta) {
     const int enabled = client_render_settings()->screen_shake;
 

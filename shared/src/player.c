@@ -1295,6 +1295,14 @@ void player_inspect_weapon(Player *player) {
     }
 }
 
+// v7.1.4 index.js gameLoop, a frame that samples no input frame (netRate): `if ((tmpPlayer.config.movSch
+// || 0) == 0 && tmpPlayer.config.trnSp == 1) { yDire = CONTROLS.yDr; xDire = cameraYaw;
+// updateMshClient }`. Other schemes and turn speeds keep the look of the last input frame.
+int player_look_follows_camera(const Player *player) {
+    const ClassMovement *knobs = movement_knobs(player);
+    return knobs->scheme == 0 && MOVEMENT_OR(knobs->turn_rate, 1.0f) == 1.0f;
+}
+
 // JS Number.prototype.round(3) (2.js): Math.round(v * 1000) / 1000, halves toward +inf.
 float player_round3(const float v) {
     // Past 2^23 / 1000 a float has no thousandths left to round, and v * 1000 must not

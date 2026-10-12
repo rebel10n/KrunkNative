@@ -234,6 +234,8 @@ static vec2 g_look;
 static vec2 g_look_sent;      // WP-C: g_look as the last sampled input frame took it (me->direction after it)
 static int g_look_unsampled;  // WP-C: this frame sampled no input frame (netRate), the camera shows g_look
 static int g_look_valid;
+static vec2 g_look_shown;     // the look an unsampled frame put on me->direction (player_look_follows_camera)
+static int g_look_shown_valid;
 
 static void print_usage_to(FILE *out, const char *program) {
     fprintf(out, "Usage: %s [--offline|--sandbox] [--map <name>] [--headless] [--windowed|--fullscreen|--borderless]\n"
@@ -1658,12 +1660,16 @@ static void client_tick_game(Client *client, const float now, const float frame_
         // whenever me->direction stops matching the look of the last sampled frame (spawn,
         // reconciliation, teleport, pose); between samples the look keeps turning (netRate).
         const Player *me = client->me;
+        // An unsampled frame's own look on me->direction (below) is in sync too.
         const float look_pitch = CLAMP(player_round3(g_look_sent.x), -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
-        if (!g_look_valid || fabsf(look_pitch - me->direction.x) > 1e-5f || fabsf(player_round3(g_look_sent.y) - me->direction.y) > 1e-5f) {
+        const int look_sent = fabsf(look_pitch - me->direction.x) <= 1e-5f && fabsf(player_round3(g_look_sent.y) - me->direction.y) <= 1e-5f;
+        const int look_shown = g_look_shown_valid && me->direction.x == g_look_shown.x && me->direction.y == g_look_shown.y;
+        if (!g_look_valid || (!look_sent && !look_shown)) {
             g_look.x = g_look_sent.x = me->direction.x;
             g_look.y = g_look_sent.y = me->direction.y;
             g_look_valid = 1;
         }
+        g_look_shown_valid = 0;
         input.x_dir = g_look.x;
         input.y_dir = g_look.y;
 
@@ -1714,6 +1720,19 @@ static void client_tick_game(Client *client, const float now, const float frame_
             if (!ks_client_inputs_disabled()) client_recon_record(client, &input); // tmpInpts + the "q" window (online only, net/recon.c)
         } else {
             g_look_unsampled = 1; // the camera shows g_look (camera_feel_apply below poses me->direction)
+            // v7.1.4 gameLoop, no input frame this frame: tmpPlayer.yDire = CONTROLS.yDr; xDire =
+            // cameraYaw; updateMshClient. The player (so its first-person arms, posed in the world
+            // tick below) turns with the camera between input frames. Without it the arms kept the
+            // last sampled look while the camera turned on: in the round-end slow motion the
+            // scaled delta samples ever fewer frames (none at all once it reaches 0, for the whole
+            // results screen), so the viewmodel fell behind the camera and stayed off.
+            if (player_look_follows_camera(client->me)) {
+                client->me->direction.x = input.x_dir;
+                client->me->direction.y = input.y_dir;
+                g_look_shown.x = input.x_dir;
+                g_look_shown.y = input.y_dir;
+                g_look_shown_valid = 1;
+            }
         }
 
         // The camera is posed after game_tick() below, once this input has moved the player.
