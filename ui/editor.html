@@ -1,110 +1,112 @@
-
 <!doctype html>
 <html lang="en">
-<head><meta charset="UTF-8">
+<head>
+<meta charset="UTF-8">
 <title>Krunker Editor</title>
-<link rel="shortcut icon" type="image/png" href="favicon.png"/>
-<link rel="stylesheet" href="css/editor.css"/>
-<link rel="stylesheet" title="dark" href="css/editor_dark.css"/>
-<link rel="stylesheet" href="css/editor_custom.css"/>
-<link rel="stylesheet" href="css/pickr.css"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0">
+<link rel="shortcut icon" type="image/png" href="img/favicon.png">
+<link rel="stylesheet" href="css/editor.css">
+<link rel="stylesheet" title="dark" href="css/editor_dark.css">
+<link rel="stylesheet" href="css/editor_custom.css">
+<link rel="stylesheet" href="css/pickr.css">
+<link rel="stylesheet" href="libs/codemirror/5.61.0/codemirror.min.css">
+<link rel="stylesheet" href="libs/codemirror/5.61.0/theme/monokai.min.css">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=0">
 <meta name="description" content="">
 <meta name="keywords" content="">
-<link rel="stylesheet" href="css/google-secular-one.css"/>
-<link rel="stylesheet" href="css/material-icons.css"/>
+<style>
+#onetrust-consent-sdk{display:none}
+</style>
+<link rel="stylesheet" href="css/google-secular-one.css">
+<link rel="stylesheet" href="css/material-icons.css">
 <link rel="stylesheet" href="css/editor-kn.css"/>
 </head>
-<body oncontextmenu="return false;">
+<body oncontextmenu="return!1">
 <canvas id="canvas" tabindex="-1"></canvas>
-
 <div id="vignette"></div>
-
 <div id="uiBase">
-
+<div id="twoFAPop" style="display:none">
+<div id="twoFAWindow">
+<div class="twoFAHeader">2-Factor Authentication</div>
+<div id="twoFAmsg">Enter Verification Code</div>
+<form id="twoFAForm"></form>
+<div id="twoFAbtn" onclick="sub2FA()">Submit</div>
+</div>
+</div>
+<div id="popupHolder">
+<div id="popupBack" onclick="clearPops()"></div>
+<div id="popupContent"></div>
+<div id="genericPop"></div>
+</div>
 <div id="menuHolder">
-
-<div id="menuHider" style="display: none;">
-
+<div id="menuHider" style="display:none">
 <div id="windowHolder" style="display:none">
 <div id="windowHeader"></div>
 <div id="menuWindow"></div>
 </div>
 </div>
 </div>
-
 <div id="hotbar">
-
 <div id="_toolbar"></div>
-
 <div id="playbar">
-<div class="playbarItemL" onclick="KE.testMap()"><i class="material-icons" style="color: #202020; font-size: 25px">play_arrow</i></div>
-<div class="playbarItemR" onclick="KE.testMap(true)"><i class="material-icons" style="color: #202020; font-size: 25px">publish</i></div>
+<div class="playbarItemL" onclick="KE.testMap()" oncontextmenu="KE.testMap(!1,!0)"><i class="material-icons" style="color:#202020;font-size:25px">play_arrow</i></div>
+<div class="playbarItemR" onclick="KE.testMap(!0)"><i class="material-icons" style="color:#202020;font-size:25px">video_settings</i></div>
+<div class="playbarItemR" onclick="KE.teleportPopup()"><i class="material-icons" style="color:#202020;font-size:25px">explore</i></div>
 </div>
-
 <div id="rightMenu">
 <div id="versionTxt"></div>
 </div>
 </div>
-
 <div id="view">
-
-<div class="left restore" style="left: 0" onclick="KE.resizable.restore(this)"><i class="material-icons">keyboard_arrow_right</i></div>
+<div class="left restore" style="left:0" onclick="KE.resizable.restore(this)"><i class="material-icons">keyboard_arrow_right</i></div>
 <div class="left panel" onscroll="GUI.update.color.pickr.hide()">
-<div class="resize" style="left: calc(100% - 5px)"></div>
+<div class="resize" style="left:calc(100% - 5px)"></div>
 <div class="list"></div>
 </div>
-
 <div id="center">
-
+<canvas id="editor-overlay" oncontextmenu="return!1" style="position:absolute;pointer-events:none;z-index:1"></canvas>
 <div id="container"></div>
-
 <div id="canvasUI">
-
 <div id="transform">
-<div id="translateOption" class="button"><i class="material-icons" style="transform: rotate(45deg);font-size: 20px;margin: -1px">zoom_out_map</i></div>
-<div id="rotateOption" class="button"><i class="material-icons">loop</i></div>
-<div id="scaleOption" class="button"><i class="material-icons">zoom_out_map</i></div>
+<div id="translateOption" class="eButton"><i class="material-icons" style="transform:rotate(45deg);font-size:20px;margin:-1px">zoom_out_map</i></div>
+<div id="rotateOption" class="eButton"><i class="material-icons">loop</i></div>
+<div id="scaleOption" class="eButton"><i class="material-icons">zoom_out_map</i></div>
 </div>
-
-<div id="spaceOption" class="button">World</div>
-
-<div id="faceOption" class="button">Face Selection: OFF</div>
-
-<div id="groupOption" class="button">Group Selection: OFF</div>
-
+<div id="spaceOption" class="eButton">World</div>
+<div id="faceOption" class="eButton">Face Selection: OFF</div>
+<div id="groupOption" class="eButton">Group Selection: OFF</div>
+<div id="wireframeOption" class="eButton">Wireframe: OFF</div>
+<div id="snappingOption" class="eButton">Snapping: OFF</div>
 <div id="chatHolder">
 <div id="chatList"></div>
 </div>
- </div>
-
+</div>
 <div id="canvasInfo">
 <div class="statTitle">Spawn Points</div><div id="spawnCount" class="stat">0 / 20</div>
-<div class="statTitle">Collidable Objects</div><div id="objectCount" class="stat">0</div>
+<div class="statTitle">Collidable Objects</div><div id="objectColCount" class="stat">0</div>
 <div class="statTitle">Non-Collidable Objects</div><div id="objectNoColCount" class="stat">0</div>
+<div class="statTitle" id="eventHolder" style="display:none">Event Objects</div>
+<div id="eventCount" class="stat" style="display:none">0 / 10</div>
+<div class="statTitle" id="serverNodeHolder">Server Nodes</div>
+<div id="serverNodeCount" class="stat">0</div>
+<div class="statTitle">Total Objects</div><div id="objectCount" class="stat">0</div>
 </div>
-
 <div id="canvasAdd"><div>+</div></div>
-
 <div id="canvasObjEdit">
-<div id="deleteOption" class="button">Delete</div>
-<div id="duplicateOption" class="button">Duplicate</div>
+<div id="deleteOption" class="eButton">Delete</div>
+<div id="duplicateOption" class="eButton">Duplicate</div>
 </div>
 </div>
-
 <div class="right restore" onclick="KE.resizable.restore(this)"><i class="material-icons">keyboard_arrow_left</i></div>
 <div class="right panel" onscroll="GUI.update.color.pickr.hide()">
 <div class="resize"></div>
 <div class="list"></div>
 </div>
 </div>
-
 <div id="editorUI">
 <div id="progress"></div>
 <div id="instructionHolder" onclick="closeWindow()"></div>
 </div>
 </div>
-
 <script src="js/kn-shim.js"></script>
 <script src="js/loader.js"></script>
 </body>

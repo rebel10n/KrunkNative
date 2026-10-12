@@ -1,0 +1,20 @@
+P Showcase
+L[] Visible : switch=1
+L[] Spin : sval=0 range[-20,20,0.1]=0
+L[] Spin Axis : select#2[Y..X]=Y
+L[] Model Scale : sval=1 range[0.01,100,0.01]=1
+L[] Item : select#4096[Arctic Hunt [Sniper Rifle]..Celebrations [Famas]]=Arctic Hunt [Sniper Rifle]
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-
+F Style closed
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+L[] Opacity : sval=1 range[0,1,0.1]=1
+-

@@ -1,0 +1,24 @@
+H Settings
+X Settings
+X Reset All
+T General
+T Display *
+T Object
+T Quick GUI
+L[] Show FPS : switch=0
+L[] Dark Mode : switch=1
+-
+F Grid open
+-
+L[] Visible : switch=1
+L[subsection] Opacity : sval=0.25 range[0.05,1,0.05]=0.25
+L[subsection] Size : number()=250
+L[subsection] Spacing : number()=10
+L[] Reset Grid : button:Reset
+-
+F Death Barrier open
+-
+L[] Visible : switch=0
+L[subsection] Opacity : sval=0.5 range[0.05,1,0.05]=0.5
+L[] Reset Barrier : button:Reset
+-

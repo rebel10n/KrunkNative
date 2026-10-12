@@ -242,6 +242,15 @@ static void line_begin(EdBuild *b, const char *name, const int sub) {
 
 static void line_end(EdBuild *b) { edb_add(&b->html, "</div></div>\n"); }
 
+// _html.line.switch (v7): the switch rows use an 85% / 15% grid
+static void line_switch_begin(EdBuild *b, const char *name, const int sub) {
+    static const char *subs[] = {"", "subsection", "subsubsection"};
+    edb_addf(&b->html, "<div class=\"inlineItem\" style=\"grid-template-columns: calc(85%% - 5px) calc(15%% - 5px);\">\n"
+                       "                  <div class=\"section %s\">", sub >= 1 && sub <= 2 ? subs[sub] : "");
+    edb_add_escaped(&b->html, name);
+    edb_add(&b->html, "</div>\n                  <div>");
+}
+
 typedef struct { double min, max, step; } SliderArgs;
 static SliderArgs g_slider_args[ED_PANELS][ED_MAX_CTLS];
 static const EdOption *g_select_opts[ED_PANELS][ED_MAX_CTLS];
@@ -301,7 +310,7 @@ EdCtl *ed_gui_button(EdBuild *b, const char *label, const EdActionFn fn) {
     EdCtl *c = ed_gui_ctl(b->panel, EG_BUTTON);
     c->action = fn;
     // line "wide": <div>button</div>
-    edb_addf(&b->html, "<div><div class=\"button\" onclick=\"GUI.action(%d, this)\">", c->id);
+    edb_addf(&b->html, "<div><div class=\"eButton\" onclick=\"GUI.action(%d, this)\">", c->id); // v7: eButton (v3: button)
     edb_add_escaped(&b->html, label);
     edb_add(&b->html, "</div></div>\n");
     return c;
@@ -312,7 +321,7 @@ EdCtl *ed_gui_button_line(EdBuild *b, const char *name, const char *label, const
     EdCtl *c = ed_gui_ctl(b->panel, EG_BUTTON);
     c->action = fn;
     line_begin(b, name, sub);
-    edb_addf(&b->html, "<div class=\"button\" onclick=\"GUI.action(%d, this)\">", c->id);
+    edb_addf(&b->html, "<div class=\"eButton\" onclick=\"GUI.action(%d, this)\">", c->id);
     edb_add_escaped(&b->html, label);
     edb_add(&b->html, "</div>");
     line_end(b);
@@ -411,7 +420,7 @@ void ed_gui_emit_value(EdBuild *b, EdCtl *c) {
             break;
         }
         case EG_SWITCH:
-            line_begin(b, name, sub);
+            line_switch_begin(b, name, sub);
             edb_addf(&b->html, "<label class=\"switch\" style=\"margin-top: 10px\"><input type=\"checkbox\"\n"
                                "                     onclick=\"GUI.action(%d, this)\" %s><span class=\"slider\"></span></label>",
                      c->id, ed_json_truthy(v) ? "checked" : "");

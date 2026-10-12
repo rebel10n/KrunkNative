@@ -1,0 +1,10 @@
+P Prefabs
+-
+L[] Auto Group : switch=1
+L[] Rotation : sval=0 range[0,359,1]=0
+Fs Import open
+L[subsection] Json : button:Import
+L[subsection] File : button:Import
+L[] Object Painter : switch=0
+L[subsection] JSON : text(JSON)=
+L[subsection] Type : select#9[JSON..Frog]=JSON

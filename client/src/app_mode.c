@@ -5,6 +5,7 @@
 #include <app_mode.h>
 #include <backend_ui.h>
 #include <debug_capture.h>
+#include <input_script.h>
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h> // menu_close_window (Test Map) // html_storage_get/set (knTestMap)
@@ -525,6 +526,11 @@ static void apply_pending(Client *client) {
     }
 }
 
+int app_mode_page_ready(Client *client) {
+    if (g_app.mode == APP_MODE_GAME || !g_app.page || !g_app.entered) return 0;
+    return g_app.page->ready ? g_app.page->ready(client) : 1;
+}
+
 int app_mode_frame(Client *client, const float now, const float delta) {
     g_app.client = client;
 #ifndef __EMSCRIPTEN__
@@ -565,8 +571,10 @@ int app_mode_frame(Client *client, const float now, const float delta) {
     glViewport(0, 0, fb_w, fb_h);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    input_script_page_tick(client); // KRUNKNATIVE_INPUT_SCRIPT on a page (keys / mouse / shot)
     if (g_app.entered && g_app.page && g_app.page->tick) g_app.page->tick(client, now, delta);
     if (!debug_capture_hide_ui()) html_ui_render(client->ui);
+    input_script_page_frame_end(client, delta);
     debug_capture_frame_end(client);
     return 1;
 }

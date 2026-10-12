@@ -4,7 +4,8 @@
 // such dialog natively, so both platforms show the same small in-page dialog (#knPrompt,
 // styled like Chromium's in ui/css/editor-kn.css) and call back asynchronously: OK passes
 // the field's text (confirm: "1"), Cancel / Escape passes NULL. One dialog at a time; a new
-// request cancels the open one.
+// request cancels the open one. Also Krunker's own popups (genericPopup / clearPops: teleport,
+// Import Project) in editor.html's #popupHolder.
 #include "editor_internal.h"
 #include <html_ui.h>
 #include <stdio.h>
@@ -172,6 +173,53 @@ static void accept(void) {
     free(v);
 }
 
+// ---------------------------------------------------------------------------
+// window.genericPopup / resetPops / clearPops (E:1101-1128): Krunker's own popups (teleport,
+// import, ...) in #popupHolder > #genericPop, closed by a click on #popupBack
+
+static char g_popup_class[64];
+
+static void reset_pops(void) {
+    html_dom_set_display(html_dom_by_id("popupHolder"), "block");
+    const HtmlElem content = html_dom_by_id("popupContent");
+    html_dom_set_display(content, "none");
+    html_dom_set_style(content, "background-color", "rgba(0, 0, 0, 0.75)");
+    const HtmlElem pop = html_dom_by_id("genericPop");
+    html_dom_set_display(pop, "none");
+    html_dom_remove_attr(pop, "class");
+    html_dom_set_html(pop, "");
+    g_popup_class[0] = 0;
+}
+
+HtmlElem ed_generic_popup(const char *html, const char *cls) {
+    reset_pops();
+    const HtmlElem pop = html_dom_by_id("genericPop");
+    if (!pop) return 0;
+    if (cls && cls[0]) html_dom_set_attr(pop, "class", cls);
+    snprintf(g_popup_class, sizeof(g_popup_class), "%s", cls ? cls : "");
+    html_dom_set_attr(pop, "style", "");
+    html_dom_set_html(pop, html ? html : "");
+    html_dom_set_display(pop, "block");
+    return pop;
+}
+
+void ed_clear_pops(void) {
+    reset_pops();
+    html_dom_set_display(html_dom_by_id("popupHolder"), "none");
+}
+
+int ed_popup_is(const char *cls) {
+    char d[16] = "";
+    html_dom_get_style(html_dom_by_id("popupHolder"), "display", d, sizeof(d));
+    return !strcmp(d, "block") && !strcmp(g_popup_class, cls);
+}
+
+static int h_clear_pops(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
+    (void) u; (void) ev; (void) a; (void) n;
+    ed_clear_pops();
+    return 1;
+}
+
 static int h_prompt(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
     (void) u; (void) a; (void) n;
     const char *name = html_ui_current_handler();
@@ -195,6 +243,7 @@ void ed_prompt_install(HtmlHandlerEntry *table, size_t *count, const size_t max)
         {"KE.kn.promptCancel", h_prompt},
         {"KE.kn.promptKey", h_prompt},
         {"KE.kn.choice", h_prompt},
+        {"clearPops", h_clear_pops},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]) && *count < max; i++) table[(*count)++] = entries[i];
 }

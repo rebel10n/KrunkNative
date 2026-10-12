@@ -328,6 +328,61 @@ for name, query, actions in HUB:
         regs)
 
 
+# --------------------------------------------------------------------------- editor
+# v7's editor.html at 1920x937 (#uiBase scale 1), captured by tools/editor/v7ref.js
+# (doc/ref/krunker-v7.1.4/editor/). The 3D view (three.js grid and sky vs the native GL view)
+# is skipped; the chrome over it (canvas buttons, stats box) is compared with a loose budget.
+EW, EH = 1920, 937
+
+
+def editor_chrome(rc, dimmed=False):
+    k = "dimmed under the window backdrop; " if dimmed else ""
+    regs = []
+
+    def opt(name, key, kind, note, **kw):
+        if key in rc:
+            regs.append(R(name, pad(rc[key], 2, EW, EH), kind, k + note, **kw))
+
+    opt("toolbar", "_toolbar", "text", "#_toolbar: File .. Documentation")
+    opt("playbar", "playbar", "image", "#playbar: test / host / teleport icons")
+    opt("version", "versionTxt", "text", "#versionTxt: Krunker Editor v2.0.0 - Yendis Entertainment")
+    if "transform" in rc and "wireframeOption" in rc:
+        x0, y0 = rc["transform"][0], rc["transform"][1]
+        x1 = rc["wireframeOption"][0] + rc["wireframeOption"][2]
+        regs.append(R("canvas-buttons", pad([x0, y0, x1 - x0, 30], 2, EW, EH), "text",
+                      k + "#canvasUI buttons over the 3D view (translate .. Wireframe: OFF)", max_pct=6.0))
+    # KrunkNative's label reads "Snapping: ON" at boot (snapping is on; v7's label says OFF:
+    # an intentional difference, client/src/editor/editor.c)
+    opt("snapping", "snappingOption", "text", "#snappingOption: ON natively (intentional), OFF in v7", skip=True)
+    opt("canvas-info", "canvasInfo", "text", "#canvasInfo stats over the 3D view", max_pct=6.0)
+    opt("canvas-objedit", "canvasObjEdit", "text", "#canvasObjEdit Delete / Duplicate", max_pct=6.0)
+    opt("canvas-add", "canvasAdd", "image", "#canvasAdd +", max_pct=6.0)
+    # the v7 Essential panel (Force Old AO, Minimap AssetId, Class / Effect Config) is editor WP4
+    # (editor_gameconfig.c); skipped until it lands
+    opt("left-panel", "left-panel", "text", "left panel: Essential (map config), editor WP4", max_pct=4.0, skip=True)
+    opt("right-panel", "right-panel", "flat", "right panel: blank")
+    if "container" in rc:
+        regs.append(R("view-3d", rc["container"], "scene", "3D view: v7 three.js vs the native GL view", skip=True))
+    return regs
+
+
+rc = rects("editor/editor-1920")
+add("editor-1920", {"ref": REF + "/editor/editor-1920.png", "size": [EW, EH], "background": "#000000",
+                    "state": {"page": "editor", "pageQuery": "new", "pageActions": ["closeWindow"], "anim_time": ANIM},
+                    "frames": 3, "note": "Map editor (ui/editor.html), new map, Welcome window closed."},
+    editor_chrome(rc))
+for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3)", "Settings window, General tab"),
+                                ("editor-win-controls", "window1", "showWindow(1)", "Controls window, Default tab")):
+    rc = rects("editor/" + ref)
+    regs = [r for r in editor_chrome(rc, True) if r["name"] in ("toolbar", "version", "left-panel")]
+    # Secular One rasterises about 1 px higher natively (FreeType vs Chromium): 4 %
+    regs.append(R("window", pad(rc["menuWindow"], 2, EW, EH), "text", "#menuWindow: " + note, max_pct=4.0))
+    add(name, {"ref": "%s/editor/%s.png" % (REF, ref), "size": [EW, EH], "background": "#000000",
+               "state": {"page": "editor", "pageQuery": "new", "pageActions": [action], "anim_time": ANIM},
+               "frames": 3, "note": "Map editor, new map, %s (%s)." % (note, action)},
+        regs)
+
+
 def main():
     for d in ("scenarios", "regions"):
         os.makedirs(os.path.join(HERE, d), exist_ok=True)

@@ -1,0 +1,10 @@
+P Camera Position
+L[] Static Cam : switch=0
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-

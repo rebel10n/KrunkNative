@@ -1,0 +1,21 @@
+P Directional Light
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-
+F Style closed
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+-
+F Lighting open
+-
+L[] Intensity : sval=1 range[0,15,0.1]=1
+S Target
+V 0/,0/,0/
+-
+-

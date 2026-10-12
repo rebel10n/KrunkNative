@@ -1,0 +1,9 @@
+H Settings
+X Settings
+X Reset All
+T General
+T Display
+T Object
+T Quick GUI *
+L[] Enabled : switch=1
+L[subsection] Open On : select#2[Middle Click..Right Click]=Middle Click

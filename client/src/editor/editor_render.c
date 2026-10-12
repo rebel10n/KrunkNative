@@ -331,12 +331,14 @@ static VertBuf *box_batch(const int hex) {
     return &g_box_batches[g_box_batch_count++].lines;
 }
 
+static int toggled_hidden(const EditorObject *o);
+
 static void draw_object_boxes(void) {
     const EditorObject *sel = g_ed.proj->selected;
     for (size_t i = 0; i < g_ed.proj->count; i++) {
         const EditorObject *o = g_ed.proj->objects[i];
         const EditorPrefab *p = &editor_prefabs[o->prefab];
-        if (p->flags & EP_HIDEBOUNDINGBOX) continue;
+        if ((p->flags & EP_HIDEBOUNDINGBOX) || toggled_hidden(o)) continue;
         float m[16];
         ed_obj_world_box(o, m);
         int hex;
@@ -520,13 +522,97 @@ static void draw_sun(void) {
     flush(&g_lines, GL_LINES, col, 0);
 }
 
+// light helpers (ObjectInstance lightHelper, OI:404-418 / 872-892): three.js
+// DirectionalLightHelper (a unit square facing the target + the line to it), SpotLightHelper
+// (the cone to the target, opening `angle`) and RectAreaLightHelper (the light's rectangle), in
+// the light's colour. The light sits at the box centre and points at lightTarget ("lt", world
+// space, default [0, 0, 0]).
+static vec3 light_target(const EditorObject *o) {
+    const cJSON *lt = cJSON_GetObjectItemCaseSensitive(o->data, "lt");
+    vec3 t = v3(0, 0, 0);
+    for (int i = 0; i < 3 && cJSON_IsArray(lt); i++) {
+        const cJSON *v = cJSON_GetArrayItem(lt, i);
+        if (cJSON_IsNumber(v)) (&t.x)[i] = (float) v->valuedouble;
+    }
+    return t;
+}
+
+static void basis_towards(const vec3 dir, vec3 *u, vec3 *v) {
+    const vec3 up = fabsf(dir.y) > 0.99f ? v3(1, 0, 0) : v3(0, 1, 0);
+    *u = vnorm(vcross(up, dir));
+    *v = vcross(dir, *u);
+}
+
+static void draw_light_helpers(void) {
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *o = g_ed.proj->objects[i];
+        const char *name = editor_prefabs[o->prefab].name;
+        const int dir_l = !strcmp(name, "DIRECTIONAL_LIGHT"), spot = !strcmp(name, "SPOT_LIGHT"), rect = !strcmp(name, "RECTAREA_LIGHT");
+        if (!dir_l && !spot && !rect) continue;
+        const vec3 s = ed_obj_vec(o, "s", v3(1, 1, 1)), r = ed_obj_vec(o, "r", v3(0, 0, 0));
+        float rm[9];
+        ed_euler_matrix(r, rm);
+        vec3 pos = ed_obj_vec(o, "p", v3(0, 0, 0));
+        pos = vadd(pos, rmul(rm, v3(0, s.y / 2, 0))); // no light prefab sets noOffset
+        if (rect) {
+            // a width x height rectangle in the light's rotated XY plane
+            const vec3 ax = rmul(rm, v3(s.x / 2, 0, 0)), ay = rmul(rm, v3(0, s.y / 2, 0));
+            const vec3 c[4] = {vadd(vadd(pos, ax), ay), vadd(vsub(pos, ax), ay), vsub(vsub(pos, ax), ay), vsub(vadd(pos, ax), ay)};
+            for (int k = 0; k < 4; k++) {
+                vb_push(&g_lines, c[k]);
+                vb_push(&g_lines, c[(k + 1) % 4]);
+            }
+        } else {
+            const vec3 target = light_target(o);
+            vec3 d = vsub(target, pos);
+            const float len = vlen(d);
+            d = len > 1e-4f ? vmul(d, 1.0f / len) : v3(0, -1, 0);
+            vec3 u, v;
+            basis_towards(d, &u, &v);
+            if (dir_l) {
+                const vec3 c[4] = {vadd(vadd(pos, vmul(u, 0.5f)), vmul(v, 0.5f)), vadd(vsub(pos, vmul(u, 0.5f)), vmul(v, 0.5f)),
+                                   vsub(vsub(pos, vmul(u, 0.5f)), vmul(v, 0.5f)), vsub(vadd(pos, vmul(u, 0.5f)), vmul(v, 0.5f))};
+                for (int k = 0; k < 4; k++) {
+                    vb_push(&g_lines, c[k]);
+                    vb_push(&g_lines, c[(k + 1) % 4]);
+                }
+                vb_push(&g_lines, pos);
+                vb_push(&g_lines, target);
+            } else {
+                cJSON *ang = ed_prop_get(o, "angle");
+                const float angle = (float) (cJSON_IsNumber(ang) ? ang->valuedouble : 45) * (float) M_PI / 180.0f;
+                cJSON_Delete(ang);
+                const float cone_len = len > 1e-4f ? len : 1000.0f; // light.distance || 1000
+                const float w = cone_len * tanf(angle);
+                const vec3 base = vadd(pos, vmul(d, cone_len));
+                const vec3 rim[4] = {vadd(base, vmul(u, w)), vsub(base, vmul(u, w)), vadd(base, vmul(v, w)), vsub(base, vmul(v, w))};
+                for (int k = 0; k < 4; k++) {
+                    vb_push(&g_lines, pos);
+                    vb_push(&g_lines, rim[k]);
+                }
+                vb_push(&g_lines, pos);
+                vb_push(&g_lines, base);
+                push_circle(&g_lines, base, u, v, w, 32);
+            }
+        }
+        cJSON *col = ed_prop_get(o, "color");
+        vec4 c = {1, 1, 1, 1};
+        if (cJSON_IsString(col)) parse_hex_color(col->valuestring, &c);
+        cJSON_Delete(col);
+        c.w = 1.0f;
+        flush(&g_lines, GL_LINES, c, 0);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // gizmo (TransformControls)
 
 static vec3 gizmo_origin(void) { return ed_obj_vec(g_ed.proj->selected, "p", v3(0, 0, 0)); }
 
 static float gizmo_scale(void) {
-    return vlen(vsub(gizmo_origin(), g_ed.proj->camera.position)) / 6.0f; // distanceTo(camera) / 6 * size
+    // distanceTo(camera) / 6 * size; size is the user factor of the +/- keys (v7 transformControl.size)
+    const float size = g_ed.gizmo_size > 0 ? g_ed.gizmo_size : 1.0f;
+    return vlen(vsub(gizmo_origin(), g_ed.proj->camera.position)) / 6.0f * size;
 }
 
 static void gizmo_axes(vec3 axes[3]) {
@@ -687,6 +773,38 @@ static void draw_gizmo(void) {
 
 // Before the map meshes: three.js draws the (transparent, depth-writing) GridHelper first, so
 // coplanar map faces at y = 0 cover it (LessEqual) and it only shows where nothing is built.
+// Settings > Object toggles (toggleLightCones / toggleModels, E:5100-5114): LIGHT_CONE helpers,
+// and CUSTOM_ASSET / gen (model) meshes with their boxes, hidden while the toggle is off
+static int toggled_hidden(const EditorObject *o) {
+    const EditorPrefab *p = &editor_prefabs[o->prefab];
+    if (g_ed.hide_light_cones && !strcmp(p->name, "LIGHT_CONE")) return 1;
+    return g_ed.hide_models && (o->prefab == ED_PREFAB_CUSTOM_ASSET || (p->flags & EP_GEN));
+}
+
+// Per frame before the scene renders: ObjectInstance.forceWire (the Wireframe toggle /
+// wireframe key) on every object material, and the bounding box toggles' mesh visibility.
+// scene.c draws wireframe materials with glPolygonMode; OpenGL ES (web, ANGLE) has none and
+// keeps them filled there (scene.c's documented limitation).
+void ed_render_apply_wireframe(EditorProject *p, const int on) {
+    for (size_t i = 0; p && i < p->count; i++) {
+        EditorObject *o = p->objects[i];
+        const Map *m = o->render_map;
+        const int hide = toggled_hidden(o);
+        for (size_t k = 0; m && k < m->object_count; k++) {
+            Mesh *mesh = m->objects[k] ? (Mesh *) m->objects[k]->mesh : NULL;
+            if (!mesh) continue;
+            if (mesh->material) mesh->material->wireframe = on ? 1 : 0;
+            if (hide && mesh->visible) {
+                mesh->visible = 0;
+                o->toggle_hidden = 1;
+            } else if (!hide && o->toggle_hidden) {
+                mesh->visible = 1;
+            }
+        }
+        if (!hide) o->toggle_hidden = 0;
+    }
+}
+
 void ed_render_grid(void) {
     ed_render_init();
     if (!g_program) return;
@@ -720,6 +838,7 @@ void ed_render_overlays(void) {
     draw_arrows();
     draw_death_barrier();
     draw_sun();
+    draw_light_helpers();
     if (g_ed.proj->selected && !(editor_prefabs[g_ed.proj->selected->prefab].flags & EP_HIDEBOUNDINGBOX)) {
         float m[16];
         ed_obj_world_box(g_ed.proj->selected, m);
@@ -775,6 +894,9 @@ void ed_gizmo_begin(const double fb_x, const double fb_y, const int axis) {
     g->start_pos = ed_obj_vec(o, "p", v3(0, 0, 0));
     g->start_size = ed_obj_vec(o, "s", v3(1, 1, 1));
     g->start_rot = ed_obj_vec(o, "r", v3(0, 0, 0));
+    cJSON *ms = ed_prop_get(o, "mSize");
+    g->start_msize = cJSON_IsNumber(ms) ? (float) ms->valuedouble : 1.0f;
+    cJSON_Delete(ms);
     g->plane_normal = drag_plane_normal(axis, axes);
     vec3 ro, rd;
     ed_view_ray(fb_x, fb_y, &ro, &rd);
@@ -795,9 +917,24 @@ void ed_gizmo_drag(const double fb_x, const double fb_y) {
     if (!plane_hit(ro, rd, g->start_pos, g->plane_normal, &hit)) return;
     vec3 axes[3];
     gizmo_axes(axes);
-    const int snapping = g_ed.snapping && !(g_ed.mods & GLFW_MOD_CONTROL);
+    const int shift = (g_ed.mods & GLFW_MOD_SHIFT) != 0, ctrl = (g_ed.mods & GLFW_MOD_CONTROL) != 0;
     const vec3 delta = vsub(hit, g->start_hit);
     const int a = single_axis(g->axis);
+    // attachTransform: modelScale (gen prefabs without genGeo, or with an assetID: any handle
+    // scales mSize), directionalScale (canDirectionalScale, not modelScale: Shift/Ctrl one-sided
+    // X/Z scaling), fakeScale 1 (X/Z linked) / 2 (Y/Z linked)
+    const EditorPrefab *pf = &editor_prefabs[o->prefab];
+    int model_scale = 0;
+    if (pf->flags & EP_GEN) {
+        cJSON *aid = ed_prop_get(o, "assetID");
+        model_scale = !(pf->flags & EP_GENGEO) || (aid && !cJSON_IsNull(aid) && !(cJSON_IsNumber(aid) && aid->valuedouble == 0) &&
+                                                     !(cJSON_IsString(aid) && !aid->valuestring[0]));
+        cJSON_Delete(aid);
+    }
+    const int directional = !model_scale && (pf->flags & EP_CANDIRECTIONALSCALE) && (a == 0 || a == 2);
+    // KrunkNative: holding Ctrl disables snapping (decisions.md "Editor one-sided scaling"),
+    // except while Ctrl one-sided scales an X/Z handle (v7's directionalScale)
+    const int snapping = g_ed.snapping && (!ctrl || (g_ed.transform_type == ED_SCALE && directional));
     if (g_ed.transform_type == ED_TRANSLATE) {
         vec3 move = delta;
         if (a >= 0) move = vmul(axes[a], vdot(delta, axes[a]));
@@ -807,23 +944,52 @@ void ed_gizmo_drag(const double fb_x, const double fb_y) {
             p = v3(snap(p.x, t), snap(p.y, t), snap(p.z, t));
         }
         ed_obj_set_vec(o, "p", p);
+    } else if (g_ed.transform_type == ED_SCALE && model_scale) {
+        // TransformControls modelScale: mSize * (1 + d / size), 2 decimals, 0.01..100
+        float k = 1.0f;
+        if (g->axis == 8) {
+            const float mx = fmaxf(g->start_size.x, fmaxf(g->start_size.y, g->start_size.z));
+            k = 1.0f + vdot(delta, axes[1]) / (mx > 0 ? mx : 1);
+        } else if (a >= 0) {
+            const float sz = (&g->start_size.x)[a];
+            k = 1.0f + vdot(delta, axes[a]) / (sz != 0 ? sz : 1);
+        }
+        const double m = fmax(0.01, fmin(100.0, ed_round(g->start_msize * k, 2)));
+        cJSON *v = cJSON_CreateNumber(m);
+        ed_prop_set(o, "mSize", v);
+        cJSON_Delete(v);
     } else if (g_ed.transform_type == ED_SCALE) {
         vec3 s = g->start_size;
+        int one_sided = 0;
         if (g->axis == 8) {
             // XYZ: T = 1 + b.y / max(j): uniform scale from the vertical movement
             const float mx = fmaxf(s.x, fmaxf(s.y, s.z));
             const float k = 1.0f + vdot(delta, axes[1]) / (mx > 0 ? mx : 1);
             s = vmul(s, k);
         } else if (a >= 0) {
-            const float d = vdot(delta, axes[a]);
-            (&s.x)[a] += d;
-            if (editor_prefabs[o->prefab].flags & EP_FAKESCALE && a != 1) {
-                // fakeScale: X or Z drags scale both horizontal axes
-                s.x = s.z = (&g->start_size.x)[a] + d;
+            float d = vdot(delta, axes[a]);
+            if (directional && ctrl) d = -d; // Ctrl: the other face moves
+            const vec3 s0 = g->start_size;
+            if (pf->fake_scale == 2) {
+                if (a == 1) s.y = s.z = s0.y + d;
+                else if (a == 0) s.x = s0.x + d;
+                else s.y = s.z = s0.z + d;
+            } else if (pf->fake_scale) {
+                if (a == 0) s.x = s.z = s0.x + d;
+                else if (a == 1) s.y = s0.y + d;
+                else s.x = s.z = s0.z + d;
+            } else {
+                (&s.x)[a] += d;
+                one_sided = a != 1;
             }
             if (snapping) {
                 const float t = (float) editor_setting_num("scaleSnapping", 1);
                 (&s.x)[a] = snap((&s.x)[a], t);
+            }
+            if (directional && (shift || ctrl) && one_sided) {
+                // the opposite face stays: the position moves by half the size change
+                const float change = (&s0.x)[a] - (&s.x)[a];
+                ed_obj_set_vec(o, "p", vadd(g->start_pos, vmul(axes[a], change * (ctrl ? 1.0f : -1.0f) / 2.0f)));
             }
         }
         ed_obj_set_vec(o, "s", s);

@@ -1,0 +1,11 @@
+P Camera
+L[] Camera Type : select#2[Spectate Camera..Player Camera]=Spectate Camera
+L[] Objective Link : sval=0 range[-1,10,1]=0
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-

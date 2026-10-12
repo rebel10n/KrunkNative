@@ -1,0 +1,155 @@
+{
+  "scenario": "editor-1920",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "toolbar",
+      "rect": [
+        0,
+        0,
+        866,
+        33
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#_toolbar: File .. Documentation"
+    },
+    {
+      "name": "playbar",
+      "rect": [
+        862,
+        0,
+        100,
+        33
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#playbar: test / host / teleport icons"
+    },
+    {
+      "name": "version",
+      "rect": [
+        1613,
+        0,
+        307,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#versionTxt: Krunker Editor v2.0.0 - Yendis Entertainment"
+    },
+    {
+      "name": "canvas-buttons",
+      "rect": [
+        308,
+        38,
+        673,
+        34
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "#canvasUI buttons over the 3D view (translate .. Wireframe: OFF)"
+    },
+    {
+      "name": "snapping",
+      "rect": [
+        995,
+        38,
+        106,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#snappingOption: ON natively (intentional), OFF in v7"
+    },
+    {
+      "name": "canvas-info",
+      "rect": [
+        1395,
+        38,
+        217,
+        124
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "#canvasInfo stats over the 3D view"
+    },
+    {
+      "name": "canvas-objedit",
+      "rect": [
+        318,
+        879,
+        147,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "#canvasObjEdit Delete / Duplicate"
+    },
+    {
+      "name": "canvas-add",
+      "rect": [
+        1548,
+        865,
+        54,
+        54
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 6.0,
+      "note": "#canvasAdd +"
+    },
+    {
+      "name": "left-panel",
+      "rect": [
+        0,
+        28,
+        302,
+        909
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "skip": true,
+      "note": "left panel: Essential (map config), editor WP4"
+    },
+    {
+      "name": "right-panel",
+      "rect": [
+        1618,
+        28,
+        302,
+        909
+      ],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "right panel: blank"
+    },
+    {
+      "name": "view-3d",
+      "rect": [
+        300,
+        30,
+        1320,
+        907
+      ],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "3D view: v7 three.js vs the native GL view"
+    }
+  ]
+}

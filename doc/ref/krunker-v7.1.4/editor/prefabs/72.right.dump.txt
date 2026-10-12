@@ -1,0 +1,38 @@
+P Leaderboard
+L[] Leader Type : select#2[Score..Time]=Score
+L[] Leader Type Custom : text()=
+L[] Leader Order : select#2[ASC..DESC]=ASC
+L[] Leader Results : sval=25 range[1,50,1]=25
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 40/0,0.01/0,10/0
+-
+F Style closed
+-
+Fs Texture closed
+Fss Movement closed
+L[subsubsection] Speed : sval=0 range[-20,20,0.1]=0
+L[subsubsection] Axis : select#2[X..Y]=X
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Mimic Sprite : switch=0
+-
+F Text open
+-
+Fs Font open
+L[subsection] Size : sval=10 range[1,240,1]=10
+L[subsection] Dont Scale Font : switch=0
+L[subsection] Color : color=#000000
+L[subsection] Outline Color : color=#111111
+L[subsection] Outline Thickness : sval=1 range[1,50,1]=1
+Fs Background open
+L[subsection] Color : color=#FFFFFF
+L[subsection] Visible : switch=1
+-
+-

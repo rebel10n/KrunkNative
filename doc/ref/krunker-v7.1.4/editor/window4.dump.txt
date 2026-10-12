@@ -1,0 +1,16 @@
+H Quick Add
+X Quick Add
+I text(Search)=null
+X Customize
+X Basic building block
+X delete_forever
+X Cube
+X Allows you to place where the player spawns
+X delete_forever
+X Spawn Point
+X Import community made assets
+X delete_forever
+X Custom Asset
+X Stretch over objects to form a group
+X delete_forever
+X Placeholder

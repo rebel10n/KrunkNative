@@ -1,0 +1,35 @@
+H Settings
+X Settings
+X Reset All
+T General *
+T Display
+T Object
+T Quick GUI
+L[] Controls : button:Open Controls
+L[] Auto Backup : switch=1
+L[] Backup Timer (Minutes) : sval=10 range[1,30,1]=10
+L[] UI Scale : sval=1 range[0.5,1.5,0.1]=1
+L[] Pointer Lock : switch=1
+L[] Disable Warnings : switch=0
+L[] Test Map in Editor : switch=0
+L[] Autologin : switch=1
+-
+F Render closed
+-
+L[] Resolution : sval=0.6 range[0.1,2,0.1]=0.6
+L[] Anti-aliasing : switch=1
+L[] Render Distance : sval=20000 range[100,20000,50]=20000
+-
+F History closed
+-
+L[] Disable : switch=0
+L[subsection] Limit : sval=1000 range[0,1000,1]=1000
+-
+F Game closed
+-
+L[] Show Real Hitbox : switch=0
+-
+F Scripting closed
+-
+L[] Scripting Font Size : sval=13 range[5,30,1]=13
+-

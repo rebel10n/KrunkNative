@@ -1,0 +1,110 @@
+H Quick Add Customize
+X call_made
+X Quick Add Customize
+-
+F General open
+-
+L[] Custom Asset : button:Add
+L[] Placeholder : button:Add
+-
+F Basic open
+-
+L[] Cube : button:Add
+L[] Ladder : button:Add
+L[] Plane : button:Add
+L[] Ramp : button:Add
+L[] Billboard : button:Add
+L[] Light Cone : button:Add
+L[] Sphere : button:Add
+L[] Liquid : button:Add
+L[] Cylinder : button:Add
+L[] Rune : button:Add
+L[] Light Bar : button:Add
+L[] Sprite : button:Add
+L[] Rope Ladder : button:Add
+-
+F Models open
+-
+L[] Crate : button:Add
+L[] Barrel : button:Add
+L[] Vehicle : button:Add
+L[] Stack : button:Add
+L[] Tree : button:Add
+L[] Cone : button:Add
+L[] Container : button:Add
+L[] Grass : button:Add
+L[] Containerr : button:Add
+L[] Acidbarrel : button:Add
+L[] Door : button:Add
+L[] Window : button:Add
+L[] Teddy : button:Add
+L[] Cardb : button:Add
+L[] Pallet : button:Add
+L[] Police : button:Add
+L[] Cage : button:Add
+L[] Ebarrel : button:Add
+L[] Showcase : button:Add
+L[] Ghost : button:Add
+L[] Pumpkin : button:Add
+L[] Skeleton : button:Add
+L[] Knight : button:Add
+L[] Gift : button:Add
+L[] Christmastree : button:Add
+L[] Cane : button:Add
+L[] Tiles : button:Add
+L[] Clouds : button:Add
+L[] Dumpster : button:Add
+L[] Lamp : button:Add
+L[] Water Tower : button:Add
+L[] Ac Unit : button:Add
+L[] Sheet Metal : button:Add
+L[] Antenna : button:Add
+L[] Satellite Dish : button:Add
+L[] Weaponbox : button:Add
+-
+F Tools open
+-
+L[] Spawn Point : button:Add
+L[] Camera Position : button:Add
+L[] Score Zone : button:Add
+L[] Death Zone : button:Add
+L[] Particles : button:Add
+L[] Objective : button:Add
+L[] Flag : button:Add
+L[] Gate : button:Add
+L[] Check Point : button:Add
+L[] Weapon Pickup : button:Add
+L[] Teleporter : button:Add
+L[] Trigger : button:Add
+L[] Sign : button:Add
+L[] Deposit Box : button:Add
+L[] Camera : button:Add
+L[] Sound Emitter : button:Add
+L[] Premium Zone : button:Add
+L[] Verified Zone : button:Add
+L[] Bomb Site : button:Add
+L[] Boost Pad : button:Add
+L[] Team Zone : button:Add
+L[] Point Light : button:Add
+L[] Ai Spawner : button:Add
+L[] Path Node : button:Add
+L[] Directional Light : button:Add
+L[] Rectarea Light : button:Add
+L[] Spot Light : button:Add
+L[] Prize Wheel : button:Add
+L[] Kr Zone : button:Add
+L[] Nopvp Zone : button:Add
+L[] Pvp Zone : button:Add
+L[] Leaderboard : button:Add
+L[] Partner Zone : button:Add
+L[] Domination Zone : button:Add
+L[] Environment Zone : button:Add
+L[] Kpd Zone : button:Add
+L[] Server Node : button:Add
+L[] Spray : button:Add
+L[] Mystery Box : button:Add
+L[] Perk Machine : button:Add
+L[] Ai Redirection : button:Add
+L[] Krum Machine : button:Add
+L[] Map Anchor : button:Add
+-

@@ -1,8 +1,8 @@
 """Krunker map editor page import (v7.1.4 with ``v7=True``, else v3.1.1) (``make ui-import`` step, loaded by import.py).
 
-Copies ``public/editor.html`` and the stylesheets it links from the v3.1.1
-reference tree into ``ui/``, applying the same transformations as the menu page
-(``ui/README.md``):
+Copies ``public/editor.html`` and the stylesheets it links from the reference tree (v7.1.4
+since editor WP2, doc/v7/editor.md) into ``ui/``, applying the same transformations as the
+menu page (``ui/README.md``):
 
 - ``<script>`` elements (hook.js, quicksettings.js, pickr.min.js, editor.js and the
   inline ``onbeforeunload`` script) and ``og:`` metas are removed: the editor's

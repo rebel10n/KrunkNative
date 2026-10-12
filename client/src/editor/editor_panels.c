@@ -1,9 +1,12 @@
-// Map editor panels: Krunker v3.1.1 ui/editor.js `_toolbar`, `panel.right.blank`, the right panel
-// switch and `_window`, built with editor_gui.c, plus the control helpers every panel file uses
-// (editor_panel_kit.h). The object panel is editor_inspector.c, the environment / terrain / zone
+// Map editor panels: Krunker v7.1.4 ui/editor.js `_toolbar`, `panel.right.blank` /
+// `objectList` (Scene Graph), the right panel switch and `_window` (windows 1-15 of editor.js),
+// built with editor_gui.c, plus the control helpers every panel file uses (editor_panel_kit.h). The object panel is editor_inspector.c, the environment / terrain / zone
 // panels editor_env.c and the left Essential panel editor_gameconfig.c.
 #include "editor_internal.h"
 #include "editor_panel_kit.h"
+#include <app_mode.h>    // app_route_url (Documentation, links)
+#include <backend_ui.h>  // account_get (the Account menu)
+#include <html_ui.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -198,14 +201,18 @@ void edp_div_begin(EdBuild *b, const char *id, const int show) {
 }
 
 // ---------------------------------------------------------------------------
-// toolbar (_toolbar.show)
+// toolbar (_toolbar.show, UI:543-688)
 
 enum {
-    TB_IMPORT, TB_EXPORT, TB_EXPORT_GLTF, TB_PUBLISH, TB_SAVE_AS, TB_NEW, TB_COPY,
+    TB_IMPORT, TB_NEW, TB_SAVE, TB_LOAD_BACKUP, TB_EXPORT, TB_COPY_EXPORT, TB_EXPORT_GLTF, TB_EXPORT_MTL,
     TB_UNDO, TB_REDO, TB_DELETE, TB_DUPLICATE, TB_SETTINGS,
-    TB_PLACEHOLDER, TB_GROUP_CREATE, TB_GROUP_STOP, TB_GROUP_STOP_ALL, TB_GROUP_COPY, TB_GROUP_CUT, TB_GROUP_PASTE,
-    TB_PREFAB_JSON, TB_PREFAB_FILE, TB_PREFAB_EXPORT, TB_GROUP_EDIT, TB_CUSTOM,
-    TB_ENVIRONMENT, TB_TERRAIN, TB_ZONE, TB_TOOLS, TB_TEST, TB_HOST, TB_QUICK_START, TB_CUSTOMIZE, TB_CONTROLS,
+    TB_SCENE_GRAPH, TB_PLACEHOLDER, TB_GROUP_CREATE, TB_GROUP_STOP, TB_GROUP_STOP_ALL, TB_GROUP_COPY, TB_GROUP_CUT, TB_GROUP_PASTE,
+    TB_PREFAB_JSON, TB_PREFAB_FILE, TB_PREFAB_EXPORT, TB_PREFAB_TOOLS, TB_CUSTOM,
+    TB_ENVIRONMENT, TB_TERRAIN, TB_ZONE, TB_OCEAN, TB_GUI, TB_SCRIPTING,
+    TB_TEST, TB_HOST, TB_QUICK_START, TB_TEMPLATES, TB_TOOLS,
+    TB_PUBLISH_GAME, TB_PUBLISH_ASSET, TB_PUBLISH_GUIDE,
+    TB_LOGIN, TB_ACCOUNT_NAME, TB_MY_GAMES, TB_MY_ASSETS,
+    TB_CONTROLS, TB_GUIDE, TB_DOCUMENTATION,
     TB_PROJECT = 900, // + ED_PM_* (editor_project.c)
     TB_CREATE = 1000, // + prefab id
 };
@@ -216,11 +223,62 @@ static void toolbar_close_menus(void) {
     for (int i = 0; i < n; i++) html_dom_set_display(drops[i], "");
 }
 
+static void new_project_confirmed(void *user, const char *value) {
+    (void) user;
+    if (value) ed_map_clear(); // clearMap
+}
+
+void ed_import_map_popup(void) {
+    // importMapPopup (E:3891): a paste box; importMapData imports it and clears the popup
+    ed_generic_popup("<div class='pubHed'>Import Map</div><div style='color:rgba(255,255,255,0.7);font-size:19px;text-align:center;margin-bottom:15px;margin-top: -10px;'>Copy Paste Map Text Here</div><textarea id='importTxt' rows='3' onkeydown='importMapKey()'></textarea><div class='mapFndB' onclick='importMapData()' style='margin-left: 0px;margin-top: 10px;background-color:#4ca9f5;width: 380px;'>Import</div>",
+                     "importPop");
+    const HtmlElem t = html_dom_by_id("importTxt");
+    if (t) html_dom_focus(t);
+}
+
+static void import_map_data(void) {
+    // importMapData: KE.importMap(importTxt.value) when not empty, then clearPops
+    const HtmlElem t = html_dom_by_id("importTxt");
+    const int n = t ? html_dom_get_value(t, NULL, 0) : 0;
+    char *v = n > 0 ? malloc((size_t) n + 1) : NULL;
+    if (v) {
+        html_dom_get_value(t, v, (size_t) n + 1);
+        ed_map_import(v);
+        free(v);
+    }
+    ed_clear_pops();
+}
+
+static void open_documentation(void) {
+    // window.open("//docs.krunker.io", "_blank")
+    if (!app_route_url("https://docs.krunker.io")) editor_message("Documentation: https://docs.krunker.io");
+}
+
+// reuseSelected(i) (E:5954): defaultFromType(i, selected.pos, selected.size), else createObjects[i]
+static void reuse_selected(const int prefab) {
+    const EditorObject *sel = g_ed.proj->selected;
+    if (!sel || prefab == ED_PREFAB_CUSTOM_ASSET) {
+        ed_obj_create(prefab);
+        return;
+    }
+    cJSON *d = cJSON_CreateObject();
+    if (prefab) cJSON_AddNumberToObject(d, "i", prefab);
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(sel->data, "p"), *s = cJSON_GetObjectItemCaseSensitive(sel->data, "s");
+    if (p) cJSON_AddItemToObject(d, "p", cJSON_Duplicate(p, 1));
+    if (s) cJSON_AddItemToObject(d, "s", cJSON_Duplicate(s, 1));
+    EditorObject *o = ed_obj_new(d, 0);
+    cJSON_Delete(d);
+    ed_obj_add(o, 0, 1);
+}
+
 static void toolbar_action(EdCtl *c) {
     toolbar_close_menus();
     const int a = c->arg;
+    const int shift = (g_ed.mods & GLFW_MOD_SHIFT) != 0;
     if (a >= TB_CREATE) {
-        ed_obj_create(a - TB_CREATE);
+        // Shift+click: reuseSelected(i) (E:5954): the new prefab takes the selection's pos and size
+        if (shift && g_ed.proj->selected) reuse_selected(a - TB_CREATE);
+        else ed_obj_create(a - TB_CREATE);
         return;
     }
     if (a >= TB_PROJECT) {
@@ -228,13 +286,15 @@ static void toolbar_action(EdCtl *c) {
         return;
     }
     switch (a) {
-        case TB_IMPORT: ed_file_import(); break;
-        case TB_EXPORT: ed_file_export(); break;
-        case TB_EXPORT_GLTF: editor_message("GLTF export is not available in KrunkNative."); break;
-        case TB_PUBLISH: ed_net_publish(); break; // editor_net.c
-        case TB_SAVE_AS: ed_file_save_as(); break;
-        case TB_NEW: ed_map_clear(); break; // confirm("Are you sure you want to reset the map?")
-        case TB_COPY: {
+        case TB_IMPORT: // shift: loadFile("importMap")
+            if (shift) ed_file_import();
+            else ed_import_map_popup();
+            break;
+        case TB_NEW: ed_confirm("Are you sure you want to reset the map?", new_project_confirmed, NULL); break;
+        case TB_SAVE: ed_file_save_as(); break; // save(): "<name>_save.txt"
+        case TB_LOAD_BACKUP: editor_show_window(15); break;
+        case TB_EXPORT: ed_file_export(); break; // exportMap (KrunkNative also copies it, shift or not)
+        case TB_COPY_EXPORT: {
             char *text = ed_map_export_string();
             if (text) {
                 ed_clipboard_copy(text);
@@ -243,11 +303,14 @@ static void toolbar_action(EdCtl *c) {
             }
             break;
         }
+        case TB_EXPORT_GLTF: // exportScene / exportScene2: WP6 (doc/v7/editor.md, editor_export.c)
+        case TB_EXPORT_MTL: editor_message("This export is not available yet."); break;
         case TB_UNDO: ed_history_execute(0); break;
         case TB_REDO: ed_history_execute(1); break;
         case TB_DELETE: ed_obj_delete_selected(); break;
         case TB_DUPLICATE: ed_obj_duplicate(); break;
         case TB_SETTINGS: editor_show_window(3); break;
+        case TB_SCENE_GRAPH: ed_panel_right_show("objectList"); break;
         case TB_PLACEHOLDER: ed_obj_create_placeholder(); break;
         case TB_GROUP_CREATE: ed_group_create(); break;
         case TB_GROUP_STOP: ed_group_stop(0); break;
@@ -258,153 +321,256 @@ static void toolbar_action(EdCtl *c) {
         case TB_PREFAB_JSON: ed_json_input(0); break; // advancedOptions.json: jsonInput()
         case TB_PREFAB_FILE: ed_json_input(1); break; // advancedOptions.file: jsonInput(true)
         case TB_PREFAB_EXPORT: ed_export_group(); break;
-        case TB_GROUP_EDIT: ed_panel_right_show("grouping"); break;
+        case TB_PREFAB_TOOLS: ed_panel_right_show("prefab"); break;
         case TB_CUSTOM: ed_obj_create(ED_PREFAB_CUSTOM_ASSET); break;
         case TB_ENVIRONMENT: ed_panel_right_show("environment"); break;
         case TB_TERRAIN: ed_panel_right_show("terrain"); break;
         case TB_ZONE: ed_panel_right_show("zone"); break;
-        case TB_TOOLS: ed_panel_right_show("tools"); break;
-        case TB_CUSTOMIZE: ed_panel_right_show("customize"); break;
-        case TB_TEST: editor_test_map(0); break;
-        case TB_HOST: editor_test_map(1); break;
+        case TB_OCEAN: ed_panel_right_show("ocean"); break;
+        case TB_GUI: ed_panel_right_show("gui"); break;
+        case TB_SCRIPTING: editor_script_popup(); break;
+        case TB_TEST: editor_test_map(0, 0); break;
+        case TB_HOST: editor_test_map(1, 0); break;
         case TB_QUICK_START: ed_quick_start(); break;
+        case TB_TEMPLATES: editor_show_window(10); break;
+        case TB_TOOLS: ed_panel_right_show("tools"); break;
+        case TB_PUBLISH_GAME: ed_net_publish(); break; // publishMap (editor_net.c)
+        case TB_PUBLISH_ASSET: editor_message("Asset publishing is not available yet."); break; // publishAssetPopup: WP6
+        case TB_PUBLISH_GUIDE: editor_show_window(11); break;
+        case TB_LOGIN: // loginPopup: KrunkNative signs in through the hub (account_ui.c keeps the session)
+            if (!app_route_url("/social.html")) editor_message("Log in from the Krunker Hub.");
+            break;
+        case TB_MY_GAMES: editor_show_window(14); break;
+        case TB_MY_ASSETS: editor_show_window(2); break; // myAssets: windows[1] tab 1 (editor_net.c)
         case TB_CONTROLS: editor_show_window(1); break;
+        case TB_GUIDE: editor_show_window(8); break;
+        case TB_DOCUMENTATION: open_documentation(); break;
         default: break;
     }
 }
 
-static void tb_option(EdBuild *b, const char *name, const int action) {
-    EdCtl *c = ed_gui_ctl(b->panel, EG_TOOLBAR_OPTION);
+// Krunker's toolbar markup (GUI._build "toolbar"): siblings joined with "\n"
+typedef struct {
+    EdBuild *b;
+    int first[8];
+    int depth;
+} TbBuild;
+
+static void tb_sep(TbBuild *t) {
+    if (!t->first[t->depth]) edb_add(&t->b->html, "\n");
+    t->first[t->depth] = 0;
+}
+
+static void tb_option(TbBuild *t, const char *name, const int action) {
+    tb_sep(t);
+    EdCtl *c = ed_gui_ctl(t->b->panel, EG_TOOLBAR_OPTION);
     c->arg = action;
     c->action = toolbar_action;
-    edb_addf(&b->html, "<div class=\"toolbarDropDownItem\" onclick=\";GUI.action(%d, this)\">", c->id);
-    edb_add_escaped(&b->html, name);
-    edb_add(&b->html, "</div>");
+    edb_addf(&t->b->html, "<div class=\"toolbarDropDownItem\" onclick=\";GUI.action(%d, this)\">", c->id);
+    edb_add_escaped(&t->b->html, name);
+    edb_add(&t->b->html, "</div>");
 }
 
-static void tb_sep(EdBuild *b) { edb_add(&b->html, "\n"); }
-static void tb_rule(EdBuild *b) { edb_add(&b->html, "<hr>"); }
-
-static void tb_root_begin(EdBuild *b, const char *name) {
-    edb_addf(&b->html, "<div class=\"toolbarItem\" onmouseover=\"GUI.update.toolbar(this, true)\" onmouseout=\"GUI.update.toolbar(this)\">\n                  %s<div class=\"toolbarDropDown\">", name);
+static void tb_rule(TbBuild *t) {
+    tb_sep(t);
+    edb_add(&t->b->html, "<hr>");
 }
 
-static void tb_menu_begin(EdBuild *b, const char *name) {
-    edb_addf(&b->html, "<div class=\"toolbarDropDownItem\" onmouseover=\"GUI.update.toolbar(this, true)\" onmouseout=\"GUI.update.toolbar(this)\">\n                  %s<div class=\"toolbarSubDropDown\" style=\"top: this.offsetTop\">", name);
+static void tb_push(TbBuild *t) {
+    t->depth++;
+    t->first[t->depth] = 1;
 }
 
-static void tb_end(EdBuild *b) { edb_add(&b->html, "</div></div>"); }
+static void tb_root_begin(TbBuild *t, const char *name) {
+    tb_sep(t);
+    edb_addf(&t->b->html, "<div class=\"toolbarItem\" onmouseover=\"GUI.update.toolbar(this, true)\" onmouseout=\"GUI.update.toolbar(this)\">\n\t\t\t\t\t\t%s<div class=\"toolbarDropDown\">", name);
+    tb_push(t);
+}
+
+static void tb_menu_begin(TbBuild *t, const char *name) {
+    tb_sep(t);
+    edb_addf(&t->b->html, "<div class=\"toolbarDropDownItem\" onmouseover=\"GUI.update.toolbar(this, true)\" onmouseout=\"GUI.update.toolbar(this)\">\n\t\t\t\t\t\t%s<div class=\"toolbarSubDropDown\" style=\"top: this.offsetTop\">", name);
+    tb_push(t);
+}
+
+static void tb_end(TbBuild *t) {
+    edb_add(&t->b->html, "</div></div>");
+    t->depth--;
+}
+
+// the prefab menus of the Object menu: Lights (edCat "lights"), Zones (zone), Tools (tool /
+// tool2), Models (gen), Basic (the rest); Models and Tools in 12-row columns ("chunktoolbar")
+enum { CAT_BASIC, CAT_MODELS, CAT_TOOLS, CAT_LIGHTS, CAT_ZONES };
+
+static int prefab_listed(const EditorPrefab *p) {
+    // (!localOnly || !config.isProd) && !custom && !noExport && name != "": the page is
+    // production (krunker.io), so localOnly prefabs (Event, Terminal, Bot Spawner, ...) are not
+    // offered, as on the public v7 editor
+    return !(p->flags & (EP_CUSTOM | EP_NOEXPORT | EP_LOCALONLY)) && p->name[0];
+}
+
+static int prefab_menu(const EditorPrefab *p) {
+    if (p->ed_cat && !strcmp(p->ed_cat, "lights")) return CAT_LIGHTS;
+    if (p->flags & EP_ZONE) return CAT_ZONES;
+    if (p->flags & (EP_TOOL | EP_TOOL2)) return CAT_TOOLS;
+    if (p->flags & EP_GEN) return CAT_MODELS;
+    return CAT_BASIC;
+}
+
+static void tb_prefab_menu(TbBuild *t, const char *name, const int cat, const int chunked) {
+    tb_menu_begin(t, name);
+    int n = 0;
+    for (int i = 0; i < EDITOR_PREFAB_COUNT; i++) {
+        const EditorPrefab *p = &editor_prefabs[i];
+        if (!prefab_listed(p) || prefab_menu(p) != cat) continue;
+        if (chunked && n % 12 == 0) {
+            if (n) edb_add(&t->b->html, "</div>");
+            edb_add(&t->b->html, "<div class=\"toolbarChunkSubDropDown\">");
+            t->first[t->depth] = 1;
+        }
+        tb_option(t, p->label, TB_CREATE + i);
+        n++;
+    }
+    if (chunked && n) edb_add(&t->b->html, "</div>");
+    tb_end(t);
+}
+
+static int g_toolbar_account = -1; // the account id the toolbar shows (0 = none)
+
+void ed_toolbar_account_check(void) {
+    const AccountInfo *acc = account_get();
+    if ((acc ? acc->id : 0) != g_toolbar_account) ed_toolbar_show();
+}
 
 void ed_toolbar_show(void) {
+    g_toolbar_account = account_get() ? account_get()->id : 0;
     EdBuild b;
     ed_gui_begin(&b, PANEL_TOOLBAR);
-    tb_root_begin(&b, "File");
-    tb_option(&b, "Import...", TB_IMPORT); tb_sep(&b);
-    tb_option(&b, "Export...", TB_EXPORT); tb_sep(&b);
-    tb_option(&b, "Export GLTF", TB_EXPORT_GLTF); tb_sep(&b);
-    tb_option(&b, "Publish...", TB_PUBLISH); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Save As", TB_SAVE_AS); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "New", TB_NEW); tb_sep(&b);
-    tb_option(&b, "Copy", TB_COPY); tb_sep(&b);
+    TbBuild tb = {.b = &b, .first = {1}, .depth = 0};
+    TbBuild *t = &tb;
+    tb_root_begin(t, "File");
+    tb_option(t, "Import Project", TB_IMPORT);
+    // "Import Old Project" is dev-only (KE.dev) in v7
+    tb_option(t, "New Project", TB_NEW);
+    tb_option(t, "Save Project", TB_SAVE);
+    tb_option(t, "Load Backup", TB_LOAD_BACKUP);
+    tb_rule(t);
+    tb_option(t, "Export", TB_EXPORT);
+    tb_option(t, "Copy Export", TB_COPY_EXPORT);
+    tb_rule(t);
+    tb_option(t, "Export GLTF", TB_EXPORT_GLTF);
+    tb_option(t, "Export MTL", TB_EXPORT_MTL);
     // KrunkNative: several maps open at once (editor_project.c), detached views and the
     // editor bus (editor_view.c, editor_bus_link.c)
-    tb_rule(&b); tb_sep(&b);
-    tb_menu_begin(&b, "Projects");
-    tb_option(&b, "New Project", TB_PROJECT + ED_PM_NEW); tb_sep(&b);
-    tb_option(&b, "Open Project...", TB_PROJECT + ED_PM_OPEN); tb_sep(&b);
-    tb_option(&b, "Save", TB_PROJECT + ED_PM_SAVE); tb_sep(&b);
-    tb_option(&b, "Save All", TB_PROJECT + ED_PM_SAVE_ALL); tb_sep(&b);
-    tb_option(&b, "Close", TB_PROJECT + ED_PM_CLOSE); tb_sep(&b);
-    tb_option(&b, "Next Project", TB_PROJECT + ED_PM_NEXT); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
+    tb_rule(t);
+    tb_menu_begin(t, "Projects");
+    tb_option(t, "New Project", TB_PROJECT + ED_PM_NEW);
+    tb_option(t, "Open Project...", TB_PROJECT + ED_PM_OPEN);
+    tb_option(t, "Save", TB_PROJECT + ED_PM_SAVE);
+    tb_option(t, "Save All", TB_PROJECT + ED_PM_SAVE_ALL);
+    tb_option(t, "Close", TB_PROJECT + ED_PM_CLOSE);
+    tb_option(t, "Next Project", TB_PROJECT + ED_PM_NEXT);
+    tb_rule(t);
 #ifndef __EMSCRIPTEN__
-    tb_option(&b, "Detach View", TB_PROJECT + ED_PM_DETACH); tb_sep(&b);
-    tb_option(&b, "Open in New Window", TB_PROJECT + ED_PM_NEW_WINDOW); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, ed_bus_active() ? "Editor Bus: On" : "Editor Bus: Off", TB_PROJECT + ED_PM_BUS); tb_sep(&b);
-    tb_option(&b, "MCP Access...", TB_PROJECT + ED_PM_ACCESS);
+    tb_option(t, "Detach View", TB_PROJECT + ED_PM_DETACH);
+    tb_option(t, "Open in New Window", TB_PROJECT + ED_PM_NEW_WINDOW);
+    tb_rule(t);
+    tb_option(t, ed_bus_active() ? "Editor Bus: On" : "Editor Bus: Off", TB_PROJECT + ED_PM_BUS);
+    tb_option(t, "MCP Access...", TB_PROJECT + ED_PM_ACCESS);
 #else
-    tb_option(&b, "Open in New Tab", TB_PROJECT + ED_PM_NEW_WINDOW);
+    tb_option(t, "Open in New Tab", TB_PROJECT + ED_PM_NEW_WINDOW);
 #endif
-    tb_end(&b);
-    tb_end(&b); tb_sep(&b);
+    tb_end(t);
+    tb_end(t);
 
-    tb_root_begin(&b, "Edit");
-    tb_option(&b, "Undo", TB_UNDO); tb_sep(&b);
-    tb_option(&b, "Redo", TB_REDO); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Delete", TB_DELETE); tb_sep(&b);
-    tb_option(&b, "Duplicate", TB_DUPLICATE); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Settings...", TB_SETTINGS);
-    tb_end(&b); tb_sep(&b);
+    tb_root_begin(t, "Edit");
+    tb_option(t, "Undo (Ctrl + Z)", TB_UNDO);
+    tb_option(t, "Redo (Ctrl + Y)", TB_REDO);
+    tb_rule(t);
+    tb_option(t, "Delete (Del)", TB_DELETE);
+    tb_option(t, "Duplicate (Shift + R)", TB_DUPLICATE);
+    tb_rule(t);
+    tb_option(t, "Settings...", TB_SETTINGS);
+    tb_end(t);
 
-    tb_root_begin(&b, "Object");
-    // Basic / Models / Tools / AI: every exportable prefab (not localOnly in production)
-    static const char *menus[4] = {"Basic", "Models", "Tools", "AI"};
-    for (int m = 0; m < 4; m++) {
-        tb_menu_begin(&b, menus[m]);
-        int first = 1;
-        for (int i = 0; i < EDITOR_PREFAB_COUNT; i++) {
-            const EditorPrefab *p = &editor_prefabs[i];
-            // `!localOnly || !config.isProd`: the v3.1.1 server build is not isProd, so localOnly
-            // prefabs (Terminal) are listed like the reference editor lists them
-            if ((p->flags & (EP_CUSTOM | EP_NOEXPORT)) || !p->name[0]) continue;
-            const int cat = (p->flags & EP_AI) ? 3 : (p->flags & (EP_TOOL | EP_TOOL2)) ? 2 : (p->flags & EP_GEN) ? 1 : 0;
-            if (cat != m) continue;
-            if (!first) tb_sep(&b);
-            first = 0;
-            tb_option(&b, p->label, TB_CREATE + i);
-        }
-        tb_end(&b); tb_sep(&b);
+    tb_root_begin(t, "Object");
+    tb_option(t, "Scene Graph", TB_SCENE_GRAPH);
+    tb_rule(t);
+    tb_prefab_menu(t, "Basic", CAT_BASIC, 0);
+    tb_prefab_menu(t, "Models", CAT_MODELS, 1);
+    tb_prefab_menu(t, "Tools", CAT_TOOLS, 1);
+    tb_prefab_menu(t, "Lights", CAT_LIGHTS, 0);
+    tb_prefab_menu(t, "Zones", CAT_ZONES, 0);
+    tb_rule(t);
+    tb_option(t, "Placeholder", TB_PLACEHOLDER);
+    tb_menu_begin(t, "Group");
+    tb_option(t, "Create", TB_GROUP_CREATE);
+    tb_option(t, "Stop", TB_GROUP_STOP);
+    tb_option(t, "Stop All", TB_GROUP_STOP_ALL);
+    tb_rule(t);
+    tb_option(t, "Copy", TB_GROUP_COPY);
+    tb_option(t, "Cut", TB_GROUP_CUT);
+    tb_option(t, "Paste", TB_GROUP_PASTE);
+    tb_rule(t);
+    tb_menu_begin(t, "Prefab");
+    tb_menu_begin(t, "Import");
+    tb_option(t, "JSON", TB_PREFAB_JSON);
+    tb_option(t, "File", TB_PREFAB_FILE);
+    tb_end(t);
+    tb_option(t, "Export", TB_PREFAB_EXPORT);
+    tb_option(t, "Tools", TB_PREFAB_TOOLS);
+    tb_end(t);
+    tb_end(t);
+    tb_rule(t);
+    tb_option(t, "Custom...", TB_CUSTOM);
+    tb_end(t);
+
+    tb_root_begin(t, "Components");
+    tb_option(t, "Environment", TB_ENVIRONMENT);
+    tb_option(t, "Terrain", TB_TERRAIN);
+    tb_option(t, "Zone", TB_ZONE);
+    tb_option(t, "Ocean", TB_OCEAN);
+    tb_option(t, "GUI", TB_GUI);
+    tb_end(t);
+
+    tb_option(t, "Scripting", TB_SCRIPTING);
+
+    tb_root_begin(t, "Game");
+    tb_option(t, "Test Game", TB_TEST);
+    tb_option(t, "Host Game", TB_HOST);
+    tb_rule(t);
+    tb_option(t, "Quick Start", TB_QUICK_START);
+    tb_option(t, "Templates", TB_TEMPLATES);
+    tb_rule(t);
+    tb_option(t, "Tools", TB_TOOLS);
+    tb_end(t);
+
+    tb_root_begin(t, "Publish");
+    tb_option(t, "Game", TB_PUBLISH_GAME);
+    tb_option(t, "Asset", TB_PUBLISH_ASSET);
+    tb_rule(t);
+    tb_option(t, "Publishing Guide", TB_PUBLISH_GUIDE);
+    tb_end(t);
+
+    tb_root_begin(t, "Account");
+    const AccountInfo *acc = account_get();
+    if (acc) {
+        char name[64];
+        snprintf(name, sizeof(name), "Username: %s", acc->name);
+        tb_option(t, name, TB_ACCOUNT_NAME);
+        tb_option(t, "My Games", TB_MY_GAMES);
+        tb_option(t, "My Assets", TB_MY_ASSETS);
+    } else {
+        tb_option(t, "Login", TB_LOGIN);
     }
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Placeholder", TB_PLACEHOLDER); tb_sep(&b);
-    tb_menu_begin(&b, "Group");
-    tb_option(&b, "Create", TB_GROUP_CREATE); tb_sep(&b);
-    tb_option(&b, "Stop", TB_GROUP_STOP); tb_sep(&b);
-    tb_option(&b, "Stop All", TB_GROUP_STOP_ALL); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Copy", TB_GROUP_COPY); tb_sep(&b);
-    tb_option(&b, "Cut", TB_GROUP_CUT); tb_sep(&b);
-    tb_option(&b, "Paste", TB_GROUP_PASTE); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_menu_begin(&b, "Prefab");
-    tb_menu_begin(&b, "Import");
-    tb_option(&b, "JSON", TB_PREFAB_JSON); tb_sep(&b);
-    tb_option(&b, "File", TB_PREFAB_FILE);
-    tb_end(&b); tb_sep(&b);
-    tb_option(&b, "Export", TB_PREFAB_EXPORT);
-    tb_end(&b); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Edit", TB_GROUP_EDIT);
-    tb_end(&b); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Custom...", TB_CUSTOM);
-    tb_end(&b); tb_sep(&b);
+    tb_end(t);
 
-    tb_root_begin(&b, "Component");
-    tb_option(&b, "Environment", TB_ENVIRONMENT); tb_sep(&b);
-    tb_option(&b, "Terrain", TB_TERRAIN); tb_sep(&b);
-    tb_option(&b, "Zone", TB_ZONE); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Tools", TB_TOOLS);
-    tb_end(&b); tb_sep(&b);
+    tb_root_begin(t, "Help");
+    tb_option(t, "Controls", TB_CONTROLS);
+    tb_option(t, "Guide", TB_GUIDE);
+    tb_end(t);
 
-    tb_root_begin(&b, "Map");
-    tb_option(&b, "Test Map", TB_TEST); tb_sep(&b);
-    tb_option(&b, "Host Map", TB_HOST); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Quick Start", TB_QUICK_START); tb_sep(&b);
-    tb_rule(&b); tb_sep(&b);
-    tb_option(&b, "Customize", TB_CUSTOMIZE);
-    tb_end(&b); tb_sep(&b);
-
-    tb_root_begin(&b, "Help");
-    tb_option(&b, "Controls...", TB_CONTROLS);
-    tb_end(&b);
+    tb_option(t, "Documentation", TB_DOCUMENTATION);
     ed_gui_end(&b, html_dom_by_id("_toolbar"));
 }
 
@@ -439,6 +605,29 @@ void ed_panel_right_blank(void) {
     ed_gui_end(&b, g_ed.el_right_list);
 }
 
+// panel.right.objectList ("Scene Graph", UI:6258): a Focus button per object (focusObject)
+static void object_focus(EdCtl *c) {
+    if (c->arg >= 0 && (size_t) c->arg < g_ed.proj->count) editor_frame_object(g_ed.proj->objects[c->arg]);
+}
+
+void ed_panel_right_object_list(void) {
+    if (ed_project_background()) {
+        g_ed.ui_stale = 1;
+        return;
+    }
+    g_ed.panel_hidden[1] = 0;
+    if (!edp_right_can_show("objectList")) return;
+    EdBuild b;
+    edp_right_begin(&b, "objectList");
+    ed_gui_panel_buttons(&b, 1, "Objects", 0);
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        char label[64];
+        edp_const_name(editor_prefabs[g_ed.proj->objects[i]->prefab].name, label, sizeof(label)); // formatConstName(objInsts[i].name)
+        ed_gui_button_line(&b, label, "Focus", object_focus, 0)->arg = (int) i;
+    }
+    ed_gui_end(&b, g_ed.el_right_list);
+}
+
 void ed_panel_right_show(const char *name) {
     if (ed_project_background()) { // working on another project: rebuild once it is shown again
         g_ed.ui_stale = 1;
@@ -448,6 +637,7 @@ void ed_panel_right_show(const char *name) {
     g_ed.panel_hidden[1] = 0;
     if (!strcmp(name, "environment")) ed_panel_right_environment();
     else if (!strcmp(name, "object")) ed_panel_right_object();
+    else if (!strcmp(name, "objectList")) ed_panel_right_object_list();
     else if (ed_tools_panel_show(name)) return;
     else if (ed_terrain_panel_show(name)) return;
     else ed_panel_right_blank();
@@ -464,10 +654,33 @@ void ed_panel_refresh_all(void) {
 }
 
 // ---------------------------------------------------------------------------
-// windows (window.windows[n].gen into #menuWindow)
+// windows (window.windows[n].gen into #menuWindow, E:373-985; blueprints UI:6562-7632)
 
 static void win_settings_changed(EdCtl *c, const cJSON *v) {
     (void) c; (void) v;
+    editor_settings_save();
+}
+
+// GUI._window keys: onChange(value) = setSettings(key, value.toUpperCase())
+static void win_key_changed(EdCtl *c, const cJSON *v) {
+    if (cJSON_IsString(v) && c->json) {
+        char up[16];
+        size_t i = 0;
+        for (; v->valuestring[i] && i + 1 < sizeof(up); i++) up[i] = (char) toupper((unsigned char) v->valuestring[i]);
+        up[i] = 0;
+        ed_json_set_str(c->json, c->key, up);
+    }
+    editor_settings_save();
+    // faceModeKey / groupModeKey / wireframeKey also refresh their toggles
+    if (!strcmp(c->key, "faceModeKey")) editor_update_face_selection();
+    else if (!strcmp(c->key, "groupModeKey")) editor_update_group_selection();
+    else if (!strcmp(c->key, "wireframeKey")) editor_update_wireframe();
+}
+
+// speedNormal / speedSprint: Math.abs(value) || the default
+static void win_speed_changed(EdCtl *c, const cJSON *v) {
+    const double x = fabs(cJSON_IsNumber(v) ? v->valuedouble : cJSON_IsString(v) ? atof(v->valuestring) : 0);
+    ed_json_set_num(g_ed.settings, c->key, x > 0 ? x : !strcmp(c->key, "speedSprint") ? 180 : 70);
     editor_settings_save();
 }
 
@@ -479,63 +692,66 @@ static void win_reset_speed(EdCtl *c) {
     ed_window_show(1);
 }
 
-static void win_header(EdBuild *b, const char *title, const int back) {
-    edb_add(&b->html, "<div class=\"windowHeader\">\n");
-    if (back) edb_add(&b->html, "                <div style=\"cursor: pointer; margin-right:5px\"onclick=\"showWindow(3)\">\n"
-                                "                    <i class=\"material-icons\" style=\"font-weight:bold; transform:rotate(-135deg);\">call_made</i>\n"
-                                "                </div>\n");
-    edb_addf(&b->html, "                <div>%s</div>\n            </div>", title);
-}
-
 static int g_controls_tab;
 
+static void key_bind(EdBuild *b, const char *name, const char *key, const char *extra) {
+    edp_json_key_extra(b, name, g_ed.settings, key, 1, 0, win_key_changed, extra);
+}
+
 static void window_controls(EdBuild *b) {
-    edb_add(&b->html, "<div style='margin-bottom:15px'>");
-    win_header(b, "Controls", 1);
-    edb_add(&b->html, "\n            <div class='menuTabsNew'>");
+    edb_add(&b->html, "<div style='margin-bottom:15px'><div class=\"windowHeader\">\n"
+                      "\t\t\t\t<div style=\"cursor: pointer; margin-right:5px\"onclick=\"showWindow(3)\">\n"
+                      "\t\t\t\t\t<i class=\"material-icons\" style=\"font-weight:bold; transform:rotate(-135deg);\">call_made</i>\n"
+                      "\t\t\t\t</div>\n\t\t\t\t<div>Controls</div>\n\t\t\t</div>\n\t\t\t<div class='menuTabsNew'>");
     static const char *tabs[2] = {"Default", "Advanced"};
     for (int i = 0; i < 2; i++) edb_addf(&b->html, "<div class=\"menuTabNew %s\" onclick=\"windows[0].switchTab(%d)\">%s</div>", g_controls_tab == i ? " tabANew" : "", i, tabs[i]);
-    edb_add(&b->html, "</div></div>\n            <div class=\"windowBody\">");
-    if (g_controls_tab == 0) ed_gui_rule(b);
+    edb_add(&b->html, "</div></div>\n\t\t\t<div class=\"windowBody\">");
     cJSON *s = g_ed.settings;
     if (g_controls_tab == 0) {
+        ed_gui_rule(b);
         ed_gui_folder_begin(b, "Movement", 0, 0, 0, "controls.movement");
-        edp_json_key_extra(b, "Fly forward", s, "fowardKey", 1, 0, win_settings_changed, arrow_html("up"));
-        edp_json_key_extra(b, "Fly backwards", s, "backwardKey", 1, 0, win_settings_changed, arrow_html("down"));
-        edp_json_key_extra(b, "Fly left", s, "leftKey", 1, 0, win_settings_changed, arrow_html("left"));
-        edp_json_key_extra(b, "Fly right", s, "rightKey", 1, 0, win_settings_changed, arrow_html("right"));
-        edp_json_key(b, "Fly up", s, "upKey", 1, 0, win_settings_changed);
-        edp_json_key(b, "Fly down", s, "downKey", 1, 0, win_settings_changed);
+        key_bind(b, "Fly forward", "fowardKey", arrow_html("up"));
+        key_bind(b, "Fly backwards", "backwardKey", arrow_html("down"));
+        key_bind(b, "Fly left", "leftKey", arrow_html("left"));
+        key_bind(b, "Fly right", "rightKey", arrow_html("right"));
+        key_bind(b, "Fly up", "upKey", NULL);
+        key_bind(b, "Fly down", "downKey", NULL);
         key_line(b, "Hold to fly faster", "Shift");
         ed_gui_folder_begin(b, "Speed", 1, 0, 0, "controls.speed");
-        edp_json_number(b, "Normal", s, "speedNormal", "", 1, win_settings_changed);
-        edp_json_number(b, "Sprinting", s, "speedSprint", "", 1, win_settings_changed);
+        edp_json_number(b, "Normal", s, "speedNormal", "", 1, win_speed_changed);
+        edp_json_number(b, "Sprinting", s, "speedSprint", "", 1, win_speed_changed);
         ed_gui_button_line(b, "Reset Speed", "Reset", win_reset_speed, 1);
         ed_gui_folder_end(b, 1);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Transform", 0, 0, 0, "controls.transform");
-        key_line(b, "Translate", "1");
-        key_line(b, "Rotate", "2");
-        key_line(b, "Scale", "3");
-        key_line(b, "Toggle World / Local space", "`");
+        key_bind(b, "Translate", "translateKey", NULL);
+        key_bind(b, "Rotate", "rotateKey", NULL);
+        key_bind(b, "Scale", "scaleKey", NULL);
+        key_bind(b, "Toggle World / Local space", "transformSpaceKey", NULL);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Edit", 0, 0, 0, "controls.edit");
         key_line(b, "Undo", "Ctrl + Z");
         key_line(b, "Redo", "Ctrl + Y or Shift + Ctrl + Z");
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Object", 0, 0, 0, "controls.object");
-        edp_json_key(b, "Face Selection Mode", s, "faceModeKey", 1, 0, win_settings_changed);
-        edp_json_key(b, "Group Selection Mode", s, "groupModeKey", 1, 0, win_settings_changed);
+        key_bind(b, "Face Selection Mode", "faceModeKey", NULL);
+        key_bind(b, "Group Selection Mode", "groupModeKey", NULL);
+        key_bind(b, "Wireframe Mode", "wireframeKey", NULL);
         key_line(b, "Delete element", "Del or Backspace");
         key_line(b, "Toggle snapping", "Control");
         key_line(b, "Toggle collidable", "Shift + C");
         key_line(b, "Toggle visibilty", "Shift + V");
         ed_gui_folder_end(b, 0);
     } else {
-        key_line(b, "Create placeholder", "P");
+        key_bind(b, "Open Texture/Model List", "textureKey", NULL);
+        key_bind(b, "Open Scripting Window", "scriptingKey", NULL);
+        key_bind(b, "Create placeholder", "placeHolderKey", NULL);
+        key_bind(b, "Create Cube", "createCubeKey", NULL);
+        key_bind(b, "Create Gate", "createGateKey", NULL);
+        key_bind(b, "Create Trigger", "createTriggerKey", NULL);
         key_line(b, "Hitbox fixer", "Shift + F");
         key_line(b, "Flip x/z size", "F");
-        key_line(b, "Quick Add", "X");
+        key_bind(b, "Quick Add", "quickAddKey", NULL);
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Group", 0, 0, 0, "controls.group");
         key_line(b, "Remove all groups", "Shift + Alt + G");
@@ -544,7 +760,7 @@ static void window_controls(EdBuild *b) {
         key_line(b, "Copy group", "Ctrl + C");
         key_line(b, "Paste group", "Ctrl + V");
         ed_gui_folder_end(b, 0);
-        // blueprint.file is assigned twice in v3.1.1: only the second File folder survives
+        // blueprint.file is assigned twice in v7.1.4: only the second File folder survives
         ed_gui_folder_begin(b, "File", 0, 0, 0, "controls.file");
         key_line(b, "Paste preset JSON", "Shift + Click (w/ Objectpainter)");
         ed_gui_folder_end(b, 0);
@@ -552,11 +768,37 @@ static void window_controls(EdBuild *b) {
     edb_add(&b->html, "</div>");
 }
 
-static void on_grid(EdCtl *c, const cJSON *v) { (void) c; (void) v; editor_settings_save(); }
+static void on_setting(EdCtl *c, const cJSON *v) { (void) c; (void) v; editor_settings_save(); }
+
+static void on_ui_scale(EdCtl *c, const cJSON *v) {
+    (void) c; (void) v;
+    editor_settings_save();
+    editor_scale_ui(); // scaleUI
+}
+
+static void on_auto_backups(EdCtl *c, const cJSON *v) {
+    (void) c;
+    if (c->bind == EB_JSON) ed_json_set_bool(g_ed.settings, "autoBackups", ed_json_truthy(v));
+    editor_settings_save();
+    ed_backup_reset_timer(g_ed.now); // initAutoBackup
+}
+
+static void on_backup_timer(EdCtl *c, const cJSON *v) {
+    (void) c;
+    ed_json_set_num(g_ed.settings, "backupTimer", fabs(cJSON_IsNumber(v) ? v->valuedouble : 10));
+    editor_settings_save();
+    ed_backup_reset_timer(g_ed.now);
+}
+
+static void on_disable_warnings(EdCtl *c, const cJSON *v) {
+    (void) c; (void) v;
+    editor_settings_save();
+    editor_clear_warnings(); // clearWarnings
+    g_ed.dirty_counts = 1;
+}
 
 static void on_anti_alias(EdCtl *c, const cJSON *v) {
-    (void) c;
-    ed_json_set_bool(g_ed.settings, "antiAlias", ed_json_truthy(v));
+    (void) c; (void) v;
     editor_settings_save();
     editor_message("This change will occur after you refresh");
 }
@@ -602,7 +844,22 @@ static void reset_all(EdCtl *c) {
     cJSON_Delete(g_ed.settings);
     g_ed.settings = cJSON_Parse(editor_default_settings());
     editor_settings_save();
+    editor_scale_ui();
     editor_show_window(3);
+}
+
+// Settings > Object: Lightcone / Model & Asset bounding box toggles (toggleLightCones /
+// toggleModels, E:5100-5114): the notices; the helpers' visibility is editor_render.c's
+static void toggle_light_cones(EdCtl *c) {
+    (void) c;
+    g_ed.hide_light_cones = !g_ed.hide_light_cones;
+    editor_warning("lightconeabuse", g_ed.hide_light_cones, "Light Cones are hidden", NULL);
+}
+
+static void toggle_models(EdCtl *c) {
+    (void) c;
+    g_ed.hide_models = !g_ed.hide_models;
+    editor_warning("showModels", g_ed.hide_models, "Models & Assets are hidden", NULL);
 }
 
 static int g_settings_tab;
@@ -620,83 +877,84 @@ static void window_settings(EdBuild *b) {
     EdCtl *reset = ed_gui_ctl(b->panel, EG_BUTTON);
     reset->action = reset_all;
     edb_addf(&b->html, "<div style='margin-bottom:15px'><div class=\"windowHeader\"><div>Settings</div>\n"
-                       "            <div style=\"cursor:pointer;margin-top:5px;font-size:14px;float:right;color:#FFF;user-select:none\" onclick=\"GUI.action(%d, this)\">Reset All</div>\n"
-                       "            </div><div class='menuTabsNew'>\n            ", reset->id);
+                       "\t\t\t<div style=\"cursor:pointer;margin-top:5px;font-size:14px;float:right;color:#FFF;user-select:none\" onclick=\"GUI.action(%d, this)\">Reset All</div>\n"
+                       "\t\t\t</div><div class='menuTabsNew'>\n\t\t\t", reset->id);
     for (int i = 0; i < 4; i++) edb_addf(&b->html, "<div class=\"menuShortTabNew %s\" onclick=\"windows[2].switchTab(%d)\">%s</div>", g_settings_tab == i ? " tabANew" : "", i, tabs[i]);
-    edb_add(&b->html, "</div></div>\n            <div class=\"windowBody\">");
+    edb_add(&b->html, "</div></div>\n\t\t\t<div class=\"windowBody\">");
     cJSON *s = g_ed.settings;
     if (g_settings_tab == 0) {
         ed_gui_button_line(b, "Controls", "Open Controls", open_controls, 0);
-        edp_json_slider(b, "Auto Backup", s, "autoBackup", 0, 25, 1, 0, on_grid);
-        edp_json_slider(b, "UI Scale", s, "uiScale", 0.5, 1.5, 0.1, 0, on_grid);
-        edp_json_switch(b, "Pointer Lock", s, "pointerLock", 0, on_grid);
-        edp_json_switch(b, "Disable Warnings", s, "disableWarnings", 0, on_grid);
+        edp_json_switch(b, "Auto Backup", s, "autoBackups", 0, on_auto_backups);
+        edp_json_slider(b, "Backup Timer (Minutes)", s, "backupTimer", 1, 30, 1, 0, on_backup_timer);
+        edp_json_slider(b, "UI Scale", s, "uiScale", 0.5, 1.5, 0.1, 0, on_ui_scale);
+        edp_json_switch(b, "Pointer Lock", s, "pointerLock", 0, on_setting);
+        edp_json_switch(b, "Disable Warnings", s, "disableWarnings", 0, on_disable_warnings);
+        edp_json_switch(b, "Test Map in Editor", s, "testInEditor", 0, on_setting);
+        edp_json_switch(b, "Autologin", s, "autoLog", 0, on_setting);
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Render", 0, 1, 0, "settings.render");
-        edp_json_slider(b, "Resolution", s, "resMltV", 0.1, 2, 0.1, 0, on_grid);
-        // v3.1.1 binds this switch to key "resMltV" (a Krunker bug): it shows the resolution
-        // value's truthiness and its onChange stores antiAlias. GUI.action also writes the
-        // checkbox into settings.resMltV; that part is not copied (it would break Resolution).
-        {
-            cJSON *tmp = cJSON_CreateObject();
-            cJSON_AddBoolToObject(tmp, "aa", ed_json_truthy(cJSON_GetObjectItemCaseSensitive(s, "resMltV")));
-            EdCtl *aa = edp_json_switch(b, "Anti-aliasing", tmp, "aa", 0, on_anti_alias);
-            aa->bind = EB_NONE;
-            aa->json = NULL;
-            cJSON_Delete(tmp);
-        }
+        edp_json_slider(b, "Resolution", s, "resMltV", 0.1, 2, 0.1, 0, on_setting);
+        // v7.1.4 binds this switch to "resMltV" and stores antiAlias on change; here it shows
+        // and stores antiAlias (intentional difference from v7.1.4, doc/v7/editor.md 1.13)
+        edp_json_switch(b, "Anti-aliasing", s, "antiAlias", 0, on_anti_alias);
+        edp_json_slider(b, "Render Distance", s, "renderDist", 100, 20000, 50, 0, on_setting);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "History", 0, 1, 0, "settings.history");
         div_switch(b, "Disable", "disableHistory", "grid", 1);
         edp_div_begin(b, "grid", !editor_setting_bool("disableHistory"));
-        edp_json_slider(b, "Limit", s, "historyLimit", 0, 1000, 1, 1, on_grid);
+        edp_json_slider(b, "Limit", s, "historyLimit", 0, 1000, 1, 1, on_setting);
         edb_add(&b->html, "</div>\n");
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Game", 0, 1, 0, "settings.game");
-        edp_json_switch(b, "Show Real Hitbox", s, "showRealHitbox", 0, on_grid);
+        edp_json_switch(b, "Show Real Hitbox", s, "showRealHitbox", 0, on_setting);
+        ed_gui_folder_end(b, 0);
+        ed_gui_folder_begin(b, "Scripting", 0, 1, 0, "settings.scripting");
+        edp_json_slider(b, "Scripting Font Size", s, "scriptFont", 5, 30, 1, 0, on_setting);
         ed_gui_folder_end(b, 0);
     } else if (g_settings_tab == 1) {
-        edp_json_switch(b, "Dark Mode", s, "darkMode", 0, on_grid);
+        edp_json_switch(b, "Show FPS", s, "showFPS", 0, on_setting);
+        edp_json_switch(b, "Dark Mode", s, "darkMode", 0, on_setting);
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Grid", 0, 0, 0, "settings.grid");
         div_switch(b, "Visible", "gridVisibility", "grid", 0);
         edp_div_begin(b, "grid", editor_setting_bool("gridVisibility"));
-        edp_json_slider(b, "Opacity", s, "gridOpacity", 0.05, 1, 0.05, 1, on_grid);
-        edp_json_number(b, "Size", s, "gridSize", "", 1, on_grid);
-        edp_json_number(b, "Spacing", s, "gridSpacing", "", 1, on_grid);
+        edp_json_slider(b, "Opacity", s, "gridOpacity", 0.05, 1, 0.05, 1, on_setting);
+        edp_json_number(b, "Size", s, "gridSize", "", 1, on_setting);
+        edp_json_number(b, "Spacing", s, "gridSpacing", "", 1, on_setting);
         edb_add(&b->html, "</div>\n");
         ed_gui_button_line(b, "Reset Grid", "Reset", grid_reset, 0);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Death Barrier", 0, 0, 0, "settings.db");
         div_switch(b, "Visible", "dbVisibility", "deathBarrier", 0);
         edp_div_begin(b, "deathBarrier", editor_setting_bool("dbVisibility"));
-        edp_json_slider(b, "Opacity", s, "dbOpacity", 0.05, 1, 0.05, 1, on_grid);
+        edp_json_slider(b, "Opacity", s, "dbOpacity", 0.05, 1, 0.05, 1, on_setting);
         edb_add(&b->html, "</div>\n");
         ed_gui_button_line(b, "Reset Barrier", "Reset", db_reset, 0);
         ed_gui_folder_end(b, 0);
     } else if (g_settings_tab == 2) {
-        edp_json_switch(b, "Trigger Connections", s, "triggerCons", 0, on_grid);
-        edp_json_switch(b, "Select through invisible objects [ALT]", s, "selectThroughInvis", 0, on_grid);
-        edp_json_switch(b, "Object Border Visuals", s, "borderVisuals", 0, on_grid);
-        edp_json_switch(b, "Highlight", s, "objectHighlight", 0, on_grid);
-        edp_json_switch(b, "Create Near", s, "createObjectNear", 0, on_grid);
-        ed_gui_button_line(b, "Lightcone Boundingbox", "Toggle", NULL, 0);
+        edp_json_switch(b, "Object Connections", s, "triggerCons", 0, on_setting);
+        edp_json_switch(b, "Select through invisible objects [ALT]", s, "selectThroughInvis", 0, on_setting);
+        edp_json_switch(b, "Object Border Visuals", s, "borderVisuals", 0, on_setting);
+        edp_json_switch(b, "Highlight", s, "objectHighlight", 0, on_setting);
+        edp_json_switch(b, "Create Near", s, "createObjectNear", 0, on_setting);
+        ed_gui_button_line(b, "Lightcone Boundingbox", "Toggle", toggle_light_cones, 0);
+        ed_gui_button_line(b, "Model & Asset Boundingbox", "Toggle", toggle_models, 0);
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Config", 0, 0, 0, "settings.config");
-        edp_json_switch(b, "Anti Radians", s, "degToRad", 0, on_grid);
-        edp_json_switch(b, "Preserve Folders", s, "preserveFolderState", 0, on_grid);
+        edp_json_switch(b, "Anti Radians", s, "degToRad", 0, on_setting);
+        edp_json_switch(b, "Preserve Folders", s, "preserveFolderState", 0, on_setting);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Snapping", 0, 0, 0, "settings.snapping");
-        edp_json_slider(b, "Translation", s, "translationSnapping", 0.001, 25, 0.001, 0, on_grid);
-        edp_json_slider(b, "Rotation", s, "rotationSnapping", 0.001, 45, 0.001, 0, on_grid);
-        edp_json_slider(b, "Scale", s, "scaleSnapping", 0.001, 25, 0.001, 0, on_grid);
+        edp_json_slider(b, "Translation", s, "translationSnapping", 0.001, 25, 0.001, 0, on_setting);
+        edp_json_slider(b, "Rotation", s, "rotationSnapping", 0.001, 45, 0.001, 0, on_setting);
+        edp_json_slider(b, "Scale", s, "scaleSnapping", 0.001, 25, 0.001, 0, on_setting);
         ed_gui_button_line(b, "Reset Snapping", "Reset", snapping_reset, 0);
         ed_gui_folder_end(b, 0);
     } else {
         static const EdOption open_on[] = {{"Middle Click", 0, NULL}, {"Right Click", 1, NULL}};
-        div_switch(b, "Enabled", "quickGUI", "quickGUISettings", 0);
-        edp_div_begin(b, "quickGUISettings", editor_setting_bool("quickGUI"));
-        edp_json_select(b, "Open On", s, "quickGUIOpen", open_on, 2, 1, on_grid);
+        div_switch(b, "Enabled", "quickGUI", "quickgui", 0);
+        edp_div_begin(b, "quickgui", editor_setting_bool("quickGUI"));
+        edp_json_select(b, "Open On", s, "quickGUIOpen", open_on, 2, 1, on_setting);
         edb_add(&b->html, "</div>\n");
     }
     edb_add(&b->html, "</div>");
@@ -740,7 +998,7 @@ static void quick_grid(EdBuf *h, const char *search) {
         size_t n = 0;
         for (; search[n] && n + 1 < sizeof(lower); n++) lower[n] = (char) tolower((unsigned char) search[n]);
         lower[n] = 0;
-        // filter by formatted name, sorted by name length (stable)
+        // every prefab whose formatted name contains it, sorted by name length (stable)
         int order[EDITOR_PREFAB_COUNT], count = 0;
         for (int i = 0; i < EDITOR_PREFAB_COUNT; i++) {
             char l[64];
@@ -763,6 +1021,7 @@ static void quick_grid(EdBuf *h, const char *search) {
             cJSON_AddStringToObject(o, "name", editor_prefabs[order[a]].label);
             cJSON_AddStringToObject(o, "desc", "");
             cJSON_AddNumberToObject(o, "item", order[a]);
+            cJSON_AddNumberToObject(o, "size", 0.5);
             cJSON_AddItemToArray(results, o);
         }
         g_quick_current = results;
@@ -774,33 +1033,34 @@ static void quick_grid(EdBuf *h, const char *search) {
     int first = 1;
     cJSON_ArrayForEach(e, g_quick_current) {
         const int blank = !strcmp(ed_json_str(e, "type", ""), "blank");
-        if (!blank || g_quick_edit) {
-            const char *name = ed_json_str(e, "name", "");
-            char img[96];
-            size_t k = 0;
-            for (const char *p = name; *p && k + 1 < sizeof(img); p++) if (*p != ' ') img[k++] = (char) tolower((unsigned char) *p);
-            img[k] = 0;
-            if (!first) edb_add(h, "\n");
-            edb_addf(h, "<div class='quickAddButton'><div class='previewDesc' onclick='windows[3].%s(%d)'><div>", g_quick_edit ? "showCustomize" : "clickButton", t);
-            const char *desc = ed_json_str(e, "desc", "");
-            edb_add_escaped(h, g_quick_edit ? "Click to change item" : desc[0] ? desc : "Click to add");
-            edb_addf(h, "</div></div><div class='previewDeleteIcon'%sonclick='windows[3].deleteButton(%d)'><i class='material-icons'>delete_forever</i></div><div class='previewImg'",
-                     g_quick_edit && !blank ? "" : "style='display:none'", t);
-            if (!blank) edb_addf(h, "style='background-size:%d%%;background-image:url(img/%s.png)'", ed_json_truthy(cJSON_GetObjectItemCaseSensitive(e, "cust")) ? 80 : 50, img);
-            edb_addf(h, "><div %s>", blank ? "style='margin-top:50%;transform:translateY(-50%)'" : "");
-            if (blank) edb_add(h, "<i class='material-icons' style='font-size:65px;color:#FFF'>add</i>");
-            else edb_add_escaped(h, name);
-            edb_add(h, "</div></div></div>");
-        } else if (!first) {
-            edb_add(h, "\n");
-        }
+        if (!first) edb_add(h, "\n");
         first = 0;
+        if (blank && !g_quick_edit) {
+            t++;
+            continue;
+        }
+        const char *name = ed_json_str(e, "name", "");
+        char img[96];
+        size_t k = 0;
+        for (const char *p = name; *p && k + 1 < sizeof(img); p++) if (*p != ' ') img[k++] = (char) tolower((unsigned char) *p);
+        img[k] = 0;
+        if (g_quick_edit) edb_addf(h, "<div class='quickAddButton'><div class='previewDesc' onclick='windows[3].showCustomize(%d)'><div>", t);
+        else edb_addf(h, "<div class='quickAddButton'><div class='previewDesc' onclick='windows[3].clickButton(%d)'><div>", t);
+        const char *desc = ed_json_str(e, "desc", "");
+        edb_add_escaped(h, g_quick_edit ? "Click to change item" : desc[0] ? desc : "Click to add");
+        edb_addf(h, "</div></div><div class='previewDeleteIcon'%sonclick='windows[3].deleteButton(%d)'><i class='material-icons'>delete_forever</i></div><div class='previewImg'",
+                 g_quick_edit && !blank ? "" : "style='display:none'", t);
+        if (!blank) edb_addf(h, "style='background-size:%d%%;background-image:url(img/%s.png)'", ed_json_truthy(cJSON_GetObjectItemCaseSensitive(e, "cust")) ? 80 : 50, img);
+        edb_addf(h, "><div %s>", blank ? "style='margin-top:50%;transform:translateY(-50%)'" : "");
+        if (blank) edb_add(h, "<i class='material-icons' style='font-size:65px;color:#FFF'>add</i>");
+        else edb_add_escaped(h, name);
+        edb_add(h, "</div></div></div>");
         t++;
     }
 }
 
 static void window_quick_add(EdBuild *b) {
-    edb_addf(&b->html, "<div class='windowHeader'><div>Quick Add</div><input type='text' id='quickSearch' class='smlInput' autofocus='' placeholder='Search' onkeyup='windows[3].search()'><div style='cursor:pointer;margin-top:5px;font-size:14px;float:right;color:#FFF;user-select:none' onclick='windows[3].toggleEditMode()'>%s</div></div><div class='windowBody'><div id='buttonGrid' class='buttonGrid'>",
+    edb_addf(&b->html, "<div class='windowHeader'><div>Quick Add</div><input type='text' id='quickSearch' class='smlInput' placeholder='Search' onkeyup='windows[3].search()'><div id='toglEditBtn' onclick='windows[3].toggleEditMode()'>%s</div></div><div class='windowBody'><div id='buttonGrid' class='buttonGrid'>",
              g_quick_edit ? "Done" : "Customize");
     quick_grid(&b->html, NULL);
     edb_add(&b->html, "</div></div>");
@@ -847,9 +1107,7 @@ static void window_quick_customize(EdBuild *b) {
         ed_gui_folder_begin(b, folders[f], 0, 0, 0, f == 0 ? "quickadd.basic" : f == 1 ? "quickadd.models" : "quickadd.tools");
         for (int i = 0; i < EDITOR_PREFAB_COUNT; i++) {
             const EditorPrefab *p = &editor_prefabs[i];
-            // `!localOnly || !config.isProd`: the v3.1.1 server build is not isProd, so localOnly
-            // prefabs (Terminal) are listed like the reference editor lists them
-            if ((p->flags & (EP_CUSTOM | EP_NOEXPORT)) || !p->name[0]) continue;
+            if (!prefab_listed(p)) continue;
             const int cat = (p->flags & (EP_TOOL | EP_TOOL2)) ? 2 : (p->flags & EP_GEN) ? 1 : 0;
             if (cat != f) continue;
             ed_gui_button_line(b, p->label, "Add", quick_cust_add, 0)->arg = i;
@@ -857,6 +1115,22 @@ static void window_quick_customize(EdBuild *b) {
         ed_gui_folder_end(b, 0);
     }
     edb_add(&b->html, "</div>");
+}
+
+static void quick_click(const int idx) {
+    // windows[3].clickButton(i)
+    const cJSON *b = cJSON_GetArrayItem(g_quick_current, idx);
+    if (!b) return;
+    if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(b, "cust"))) {
+        ed_obj_create(ED_PREFAB_CUSTOM_ASSET); // createObjects[44]: the asset browser
+    } else if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(b, "place"))) {
+        ed_obj_create_placeholder();
+        editor_close_window();
+    } else {
+        const int item = (int) ed_json_num(b, "item", 0);
+        ed_obj_create(item);
+        if (item != ED_PREFAB_CUSTOM_ASSET) editor_close_window();
+    }
 }
 
 static int h_quick(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -868,18 +1142,7 @@ static int h_quick(void *user, const HtmlEvent *ev, const HtmlArg *args, const i
         g_quick_edit = !g_quick_edit;
         editor_show_window(4);
     } else if (!strcmp(name, "windows.3.clickButton")) {
-        const cJSON *b = cJSON_GetArrayItem(g_quick_current, idx);
-        if (!b) return 1;
-        if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(b, "cust"))) {
-            editor_show_window(2); // clickButton: cust -> showWindow(2) (editor_net.c)
-        } else if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(b, "place"))) {
-            editor_close_window();
-            ed_obj_create_placeholder();
-        } else {
-            const int item = (int) ed_json_num(b, "item", 0);
-            editor_close_window();
-            ed_obj_create(item);
-        }
+        quick_click(idx);
     } else if (!strcmp(name, "windows.3.deleteButton")) {
         cJSON *b = cJSON_GetArrayItem(quick_buttons(), idx);
         if (b) ed_json_set_str(b, "type", "blank");
@@ -897,28 +1160,259 @@ static int h_quick(void *user, const HtmlEvent *ev, const HtmlArg *args, const i
         quick_grid(&h, v);
         html_dom_set_html(html_dom_by_id("buttonGrid"), h.buf ? h.buf : "");
         edb_free(&h);
-        if (html_key_is_enter(ev->key) && cJSON_GetArraySize(g_quick_current)) {
-            HtmlArg a = {HTML_ARG_NUM, 0, NULL};
-            (void) a;
-            const cJSON *b = cJSON_GetArrayItem(g_quick_current, 0);
-            const int item = (int) ed_json_num(b, "item", 0);
-            editor_close_window();
-            ed_obj_create(item);
-        }
+        if (html_key_is_enter(ev->key) && cJSON_GetArraySize(g_quick_current)) quick_click(0);
     }
     return 1;
+}
+
+// windows[7] "Welcome": the animated counters (vA499) run in ed_window_tick
+static struct { const char *id; double max, t, val; } g_counters[3];
+
+static void window_welcome(EdBuild *b) {
+    EdBuf *h = &b->html;
+    edb_add(h, "<div id='welcomeVideoHolder'>\n\t\t\t<div id='welcomeHeader'>\n\t\t\t\t<div id='welcomeTitle'>Welcome to the Krunker Editor</div>\n"
+               "\t\t\t\t<div id='welcomeSubTitle'>Design, Create & Publish for multiple platforms and earn real money!</div>\n"
+               "\t\t\t\t<div id='welcomeButtons'>\n\t\t\t\t\t<div class='welcomeButton' onclick='KE.quickStart()'>Quick Start</div>\n"
+               "\t\t\t\t\t<div class='welcomeButton' onclick='showWindow(14)'>My Games</div>\n"
+               "\t\t\t\t\t<div class='welcomeButton' onclick='showWindow(10)'>Templates</div>\n"
+               "\t\t\t\t\t<div class='welcomeButton' onclick='showWindow(11)'>Publishing</div>\n"
+               "\t\t\t\t\t<div class='welcomeButton' onclick='openLink(\"//docs.krunker.io\", \"_blank\")'>Documentation</div>\n"
+               "\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
+    g_counters[0].id = "animVl0", g_counters[0].max = 160000000, g_counters[0].t = 11000;
+    g_counters[1].id = "animVl1", g_counters[1].max = 12, g_counters[1].t = 5000;
+    g_counters[2].id = "animVl2", g_counters[2].max = 750000, g_counters[2].t = 9000;
+    for (int i = 0; i < 3; i++) g_counters[i].val = 0;
+    edb_add(h, "<div style='padding: 50px; background-color: #383838; transform: translateY(0); user-select: none'>\n"
+               "\t\t\t<div id='editInfoBody' class='editInfoTable'>\n\t\t\t\t<div class='editInfoItem'>\n"
+               "\t\t\t\t\t<div class='editInHedr'><span id='animVl0' class='editInAvl'></span>+ Users since 2018</div>\n"
+               "\t\t\t\t\t<div>The Krunker Editor allows you to create <b>Cross-Platform Games</b> quickly and easily to share with <b>\n"
+               "\t\t\t\t\tmillions of players</b> without prior knowledge on Game Development</div>\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='editInfoItem'>\n\t\t\t\t\t<div class='editInHedr'><span id='animVl1' class='editInAvl'></span> Dedicated Server Regions</div>\n"
+               "\t\t\t\t\t<div>Using Krunker as a Platform to Create &amp; Publish your game, allows you to <b>bypass the hassle\n"
+               "\t\t\t\t\tof hosting servers</b> or worrying about monetization.</div>\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='editInfoItem'>\n\t\t\t\t\t<div class='editInHedr'>$<span id='animVl2' class='editInAvl'></span>+ paid to developers *</div>\n"
+               "\t\t\t\t\t<div>Publishing your Game is the first step to becoming a Krunker Partner and <b>earning money</b> from\n"
+               "\t\t\t\t\tyour game. Partners may also receive direct funding from Yendis.</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
+    edb_add(h, "<div id='welcomeVideoHolder' class='welcomeBG2'>\n\t\t\t<div id='welcomeHeader' style='height:100%;'>\n"
+               "\t\t\t\t<div id='welcomeTitle' style='position:absolute;top:20px;left:50px;'>\n\t\t\t\t\tKrunker in the Classroom\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div id='welcomeSubTitle' style='position:absolute;\n\t\t\t\t\tleft:50px;text-align:left;top:120px;width:800px;'>\n"
+               "\t\t\t\t\tFollow along in customizable coding lessons. Create & prototype\n\t\t\t\t\twithin minutes and share with the whole class!\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='learnMorLnk'>\n\t\t\t\t\t<a href='./edu.html' style='color:#2196F3;'>Learn more</a>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
+    edb_add(h, "<div style='padding: 50px 50px 60px; background-color: #222; transform: translateY(0); user-select: none'>\n"
+               "\t\t\t<div class='editInfoTable'>\n\t\t\t\t<div class='editInfoItem'>\n"
+               "\t\t\t\t\t<div class='edInfHeader' style='color:#db4f6b !important;font-size:80px;margin-bottom:-10px;'>Learn</div>\n"
+               "\t\t\t\t\t<div class='edInfBody'>Combine Maths, Arts, Programming, Geometry and Design to create fun & simple experiences</div>\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='editInfoItem'>\n\t\t\t\t\t<div class='edInfHeader' style='font-size:80px;margin-bottom:-10px;'>Share</div>\n"
+               "\t\t\t\t\t<div class='edInfBody'>Share your creation easily with your class or thousands of other students.</div>\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='editInfoItem'>\n\t\t\t\t\t<div class='edInfHeader' style='color:#f2a82c !important;font-size:80px;margin-bottom:-10px;'>Reward</div>\n"
+               "\t\t\t\t\t<div class='edInfBody'>Teachers can create custom lessons with unique reward systems for their students</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
+    // the community banner's background is assets.krunker.io/img/menu-bg/4.png in v7: the
+    // imported menu background (ui/img/menu-bg/) here
+    edb_add(h, "<div style='height:250px;position:relative;background-color:#3a3a3a;user-select:none;\n"
+               "\t\t\tbackground-image:linear-gradient(#48484869,#48484869),\n\t\t\turl(img/menu-bg/4.png) !important;background-position-y:-200px;\n"
+               "\t\t\tbackground-size:cover;'>\n\t\t\t<div id='communityTable'>\n\t\t\t\t<div style='position:absolute;left:50%;top:50%;\n"
+               "\t\t\t\t\ttransform:translate(-50%,-50%);width:100%;'>\n\t\t\t\t\t<div style='display:inline-block;'>\n"
+               "\t\t\t\t\t\t<div id='communityIcon'></div>\n\t\t\t\t\t\t<div id='communityInfo'>Mapping Community<div></div>\n"
+               "\t\t\t\t\t\t<a target='_blank' href='https://discord.gg/Kfypyp5' class='popupLink'>Join Now!</a></div>\n\t\t\t\t\t</div>\n"
+               "\t\t\t\t\t<div style='display:inline-block;margin-left:50px;'>\n\t\t\t\t\t\t<div id='communityIcon'></div>\n"
+               "\t\t\t\t\t\t<div id='communityInfo'>Scripting Community<div></div>\n"
+               "\t\t\t\t\t\t<a target='_blank' href='https://discord.gg/gjZUdgTA6K' class='popupLink'>Join Now!</a></div>\n"
+               "\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
+}
+
+// UTILS.commaFormatNum
+static void comma_format(const double v, char *out, const size_t n) {
+    char digits[32];
+    snprintf(digits, sizeof(digits), "%.0f", v);
+    const size_t len = strlen(digits);
+    size_t j = 0;
+    for (size_t i = 0; i < len && j + 2 < n; i++) {
+        if (i && (len - i) % 3 == 0) out[j++] = ',';
+        out[j++] = digits[i];
+    }
+    out[j] = 0;
+}
+
+void ed_window_tick(const float dt) {
+    // Editor.render: each counter rises to its max in t ms
+    for (int i = 0; i < 3; i++) {
+        if (!g_counters[i].id) continue;
+        const HtmlElem e = html_dom_by_id(g_counters[i].id);
+        if (!e) continue;
+        g_counters[i].val += dt * 1000.0 / g_counters[i].t * g_counters[i].max;
+        if (g_counters[i].val >= g_counters[i].max) g_counters[i].val = g_counters[i].max;
+        char text[32];
+        comma_format(round(g_counters[i].val), text, sizeof(text));
+        html_dom_set_text(e, text);
+    }
+}
+
+// windows[8] "Sounds" (asset category 17): the list itself is editor_net.c's (WP6); offline
+// it shows what v7 shows before its API answers
+static int g_sounds_tab;
+
+static void window_sounds(EdBuild *b) {
+    static const char *tabs[3] = {"New", "My Sounds", "Search"};
+    edb_add(&b->html, "<div style='margin-bottom:15px'><div class=\"windowHeader\">\n\t\t\t\t<div style='display: block;'>Sounds <div class='publishAsset' onclick='KE.publishAssetPopup()'>Publish</div></div>\n\t\t\t</div>\n\t\t\t<div class='menuTabsNew'>\n\t\t\t\t");
+    for (int i = 0; i < 3; i++) edb_addf(&b->html, "<div class=\"menuTabNew %s\" onclick=\"windows[8].switchTab(%d)\">%s</div>", g_sounds_tab == i ? " tabANew" : "", i, tabs[i]);
+    edb_add(&b->html, "\n\t\t\t</div></div>\n\t\t\t<div style='color:rgba(0,0,0,0.3)' id='assetSList'>");
+    if (g_sounds_tab == 2) {
+        edb_add(&b->html, "<input type='text' id='assSrch' class='smlInput' placeholder='Sound Name' onkeydown='windows[8].searchKey()' />"
+                          "<div class='searchBtn' onclick='windows[8].searchAssets()'>Search</div><div style='color:rgba(0,0,0,0.5);margin-top:10px' id='searchResultsS'></div>");
+    } else {
+        edb_add(&b->html, "<div class='loadMoreW'>Loading...</div>");
+    }
+    edb_add(&b->html, "</div>");
+}
+
+// windows[9] "Templates": script templates, game templates, default maps (loadQuick), then
+// the Import / Load / New / Guide tiles
+static void templ_pairs(EdBuf *h, const cJSON *list, const int script, const int map) {
+    const int n = cJSON_GetArraySize(list), pairs = (n + 1) / 2;
+    for (int i = 0; i < pairs; i++) {
+        for (int k = 0; k < 2; k++) {
+            const int idx = i * 2 + k;
+            const cJSON *t = cJSON_GetArrayItem(list, idx);
+            if (!t) break;
+            char img[160];
+            if (map) snprintf(img, sizeof(img), "img/maps/map_%d.png", idx);
+            else if (script) snprintf(img, sizeof(img), "img/templates/scripts/%d.png", idx);
+            else snprintf(img, sizeof(img), "img/templates/%s.png", ed_json_str(t, "icon", ""));
+            if (!k) edb_addf(h, "<div class='editInfoPair'%s>", i == pairs - 1 && map ? "" : "style='margin-right: 10px'");
+            edb_addf(h, "<div class='editInfoView' style='background-image:url(%s);%s%s' onclick='loadQuick(%d,%s,%s)'><div class='editInfoText'>", img,
+                     k ? "margin-top: 10px;" : "", map ? "background-size: cover;" : "", idx, script ? "true" : "false", map ? "true" : "undefined");
+            edb_add_escaped(h, ed_json_str(t, "name", ""));
+            edb_addf(h, "</div>%s</div>", map ? "<div class='tempITag'>Default Map</div>" : script ? "<div class='tempITag'>KrunkScript</div>" : "");
+        }
+        edb_add(h, "</div>");
+    }
+}
+
+static void window_templates(EdBuild *b) {
+    EdBuf *h = &b->html;
+    edb_add(h, "<div style='text-align:center;font-size:50px;color:#fff;\n\t\t\tmargin-top:20px'>Basic Game Templates\n\t\t</div>\n"
+               "\t\t<div style='text-align:center;color:rgba(255, 255, 255, 0.3);margin-bottom:20px;\n\t\t\tmargin-top: 5px;font-size:23px'>\n"
+               "\t\t\tUse these templates to Quickstart your Project\n\t\t</div>");
+    edb_add(h, "<div class='editInfoScroll'>");
+    const cJSON *t = ed_templates_get();
+    templ_pairs(h, cJSON_GetObjectItemCaseSensitive(t, "script"), 1, 0);
+    templ_pairs(h, cJSON_GetObjectItemCaseSensitive(t, "game"), 0, 0);
+    templ_pairs(h, cJSON_GetObjectItemCaseSensitive(t, "defaultMaps"), 0, 1);
+    edb_add(h, "</div>");
+    // v7.1.4's Load tile quotes 'importMap' inside a single-quoted attribute (the click is a
+    // syntax error there); fixed here (intentional difference)
+    edb_add(h, "<div style='user-select: none;'>\n\t\t\t<div class='editInfoTable' style='grid-template-columns: auto auto auto auto;\n\t\t\t\t\tmargin-bottom:20px;'>\n"
+               "\t\t\t\t<div class='editInfoItem templates' onclick='closeWindow();KE.importMapPopup()'>\n"
+               "\t\t\t\t\t<span class='material-icons templates'>file_copy</span>\n\t\t\t\t\t<div class='edInfHeader templates'>Import</div>\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='editInfoItem templates' onclick='closeWindow();KE.loadFile(&quot;importMap&quot;)'>\n"
+               "\t\t\t\t\t<span class='material-icons templates'>folder_open</span>\n\t\t\t\t\t<div class='edInfHeader templates'>Load</div>\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='editInfoItem templates' onclick='closeWindow()'>\n"
+               "\t\t\t\t\t<span class='material-icons templates'>create_new_folder</span>\n\t\t\t\t\t<div class='edInfHeader templates'>New</div>\n\t\t\t\t</div>\n"
+               "\t\t\t\t<div class='editInfoItem templates' onclick='showWindow(8)'>\n"
+               "\t\t\t\t<span class='material-icons templates'>menu_book</span>\n\t\t\t\t<div class='edInfHeader templates'>Guide</div>\n\t\t\t</div>\n"
+               "\t\t\t</div>\n\t\t</div>");
+}
+
+// windows[10] "Publishing": the static guide (images from v7's asset host, img/publishing/)
+static void window_publishing(EdBuild *b) {
+    edb_add(&b->html,
+            "<div style='text-align:center;font-size:30px;color:#fff;margin-bottom:20px'>Publishing Guide</div>"
+            "<div class='pubGIt'><span style='color:#fff'>1.</span> Create a Thumbnail</div>"
+            "<div class='pubGItSub'>Tip: Use bright colors and include the name of your Game to help it stand out</div><div class='pubGRule'></div>"
+            "<div class='pubGImgSplit'><div><img class='pubGImg' src='img/publishing/1_bad.png'/><div class='material-icons' style='color:red !important'>clear</div></div>"
+            "<div><img class='pubGImg' src='img/publishing/1_good.png'/><div class='material-icons' style='color:#09c709 !important'>done</div></div><div></div></div>"
+            "<div class='pubGIt'><span style='color:#fff'>2.</span> Click <a class='popupLink' onclick='KE.publishMap()'>here</a> to publish your Game</div><div class='pubGRule'></div>"
+            "<div class='pubGImgArrow material-icons' style='transform:translate(498px, 97px);color:rgba(255, 255, 255, 0.1) !important'>arrow_right_alt</div>"
+            "<img class='pubGImg' style='display:inline-block;margin-bottom:40px;margin-left:100px' src='img/publishing/2_main.png'/>"
+            "<img class='pubGImg' style='display:inline-block;margin-left:20px;margin-left:90px' src='img/publishing/2_options.png'/>"
+            "<div class='pubGIt'><span style='color:#fff'>3.</span> Once published you can share the game link to invite new players.</div>"
+            "<div class='pubGItSub'>If you want your own custom URL. You can register one <a class='popupLink' target='_blank' href='https://www.namecheap.com/'>here</a> and iFrame your game link</div><div class='pubGRule'></div>"
+            "<div class='pubGImgArrow material-icons' style='transform:translate(438px, 0px);color:rgba(255, 255, 255, 0.1) !important'>arrow_right_alt</div>"
+            "<div class='pubGImgArrow material-icons' style='transform:translate(393px, 200px);color:rgba(255, 255, 255, 0.1) !important'>arrow_right_alt</div>"
+            "<img class='pubGImg' style='max-width:45%;display:inline-block;margin-left:20px' src='img/publishing/3_main.png'/>"
+            "<div style='max-width:45%;display:inline-block;margin-left:50px'><img class='pubGImg' style='max-width:100%;display:block;margin-left:45px'src='img/publishing/3_search.png'/>"
+            "<img class='pubGImg' style='max-width:100%;display:block;margin-top:33px' src='img/publishing/3_share.png'/></div>"
+            "<div class='pubGIt'><span style='color:#fff'>4.</span> To help <b>increase plays on your game</b>, we recommend that you publish your game to Online Game Sites like "
+            "<a target='_blank' class='popupLink' href='https://developer.crazygames.com/'>Crazy Games</a>. Sharing your game with "
+            "<a class='popupLink' target='_blank' href='https://www.twitch.tv/directory/game/Krunker'>Content Creators</a> is also a great way to get additional feedback and exposure."
+            "<div style=''><img class='pubGImg' style='max-width:100%;display:block;margin-top:33px' src='img/publishing/4_promo.png'/></div></div>"
+            "<div class='pubGIt'><span style='color:#fff'>5.</span> Once your game hits <b>50,000</b> Plays in 30 days you can apply to become a Partner and start earning Revenue.</div><div class='pubGRule'></div>");
+}
+
+// windows[11] / [12] "Tutorials" / "Tips & Tricks": YouTube iframes in v7 (config.tutorials /
+// tipsAndTricks). The engine has no iframes: each card is a link to the video instead
+// (intentional difference from v7.1.4, doc/v7/editor.md open question 3).
+static const struct { const char *name, *code; } k_tutorials[] = {
+    {"Editor Basics", "Ewtb2rBvg9g"}, {"Basic Controls", "1_HixIbbCM0"}, {"Promotion", "SxGLXklICb8"}, {"Common Issues", "0nT8kdpAi7g"},
+    {"Importing Models", "E8JWupugj4s"}, {"Testing & Hosting", "SxM2684Us5I"}, {"Groups & Prefabs", "qPR7EuWXM3A"},
+};
+static const struct { const char *name, *code; } k_tips[] = {
+    {"Decals", "36-oUcgoyd4"}, {"Slippery Ice Effect", "hc4qZD0fJYk"}, {"How to make No-Teleport (better) Ramps", "eP3Kt5HdVeo"},
+    {"Fake Mirror", "yVjZGsy74Ao"}, {"Better Glass", "EOaVlaOmgLw"}, {"How to make Objects Fade to Black", "22945ymW_Vs"},
+    {"Texture Merging", "4DuWCrdt_6Y"}, {"Angled Rooves", "VZTtKefBk70"}, {"No Kill (safe) Spawns", "99BNfVl8ybI"},
+    {"No Glitch Ledges", "hLoeU9tcwg4"}, {"Moving Fabric", "bk6MJiYqp28"}, {"Fire", "xcy8rF9P2jU"}, {"Face Rendering", "KcI12XLM73E"},
+    {"Moving Water", "nMoz5AtCXkM"}, {"Bevelled Edges", "Qr_H-f-WgJk"},
+};
+
+static void video_card(EdBuf *h, const char *name, const char *code) {
+    edb_addf(h, "<div class='editHlpCrd'><a class='editVideo popupLink' target='_blank' href='https://www.youtube.com/watch?v=%s' "
+                "style='display:flex;align-items:center;justify-content:center;font-size:20px'>youtube.com/watch?v=%s</a><div class='editVidHeader'>", code, code);
+    edb_add_escaped(h, name);
+    edb_add(h, "</div></div>");
+}
+
+static void window_videos(EdBuild *b, const int tips) {
+    edb_addf(&b->html, "<div style='text-align:center;font-size:30px;color:#fff;margin-bottom:20px'>%s</div><div class='editVidHolder'>", tips ? "Tips & Tricks" : "Editor Tutorials");
+    if (tips) for (size_t i = 0; i < sizeof(k_tips) / sizeof(k_tips[0]); i++) video_card(&b->html, k_tips[i].name, k_tips[i].code);
+    else for (size_t i = 0; i < sizeof(k_tutorials) / sizeof(k_tutorials[0]); i++) video_card(&b->html, k_tutorials[i].name, k_tutorials[i].code);
+    edb_add(&b->html, "</div>");
+}
+
+// windows[13] "Maps" (My Games): the list is WP6's (listMaps over kn_brain); until then what
+// v7 shows while API_CLIENT.listMaps has not answered
+static void window_maps(EdBuild *b) {
+    edb_add(&b->html, "<div style='color:rgba(0,0,0,0.3)' id='mapList'><div class='loadMoreW'>Loading...</div></div>");
+}
+
+// windows[14] "Load Backup": newest first, "date - name"; click to import; Clear All
+static void window_backups(EdBuild *b) {
+    EdBuf *h = &b->html;
+    edb_add(h, "<div style='margin-bottom:15px'><div class=\"windowHeader\">\n\t\t\t\t<div style='display: block;'>Load Backup<div class=\"publishAsset\" onclick=\"windows[14].clear()\">Clear All</div></div>\n\t\t\t</div></div>\n\t\t\t<div class=\"windowBody\">");
+    cJSON *list = ed_backup_list();
+    const int n = cJSON_GetArraySize(list);
+    if (!n) edb_add(h, "No Backups found");
+    for (int i = n - 1; i >= 0; i--) {
+        const cJSON *e = cJSON_GetArrayItem(list, i);
+        const double ts = ed_json_num(e, "timestamp", 0);
+        char date[64];
+        ed_backup_date(ts, date, sizeof(date));
+        edb_addf(h, "<div class='eButton' onclick='KE.importMapBackup(%.0f);closeWindow()'>%s - ", ts, date);
+        edb_add_escaped(h, ed_json_str(e, "name", ""));
+        edb_add(h, "</div>");
+    }
+    cJSON_Delete(list);
+    edb_add(h, "</div>");
 }
 
 void ed_window_show(const int index) {
     EdBuild b;
     ed_gui_begin(&b, PANEL_WINDOW);
+    for (int i = 0; i < 3; i++) g_counters[i].id = NULL;
     switch (index) {
         case 1: window_controls(&b); break;
         case 3: window_settings(&b); break;
         case 4: window_quick_add(&b); break;
         case 6: window_quick_customize(&b); break;
-        case 2: case 5: case 7: case 8: ed_net_window_gen(index, &b.html); break; // editor_net.c
-        default: edb_add(&b.html, "<div class='windowHeader'><div>Unavailable</div></div>"); break;
+        case 8: window_welcome(&b); break;
+        case 9: window_sounds(&b); break;
+        case 10: window_templates(&b); break;
+        case 11: window_publishing(&b); break;
+        case 12: window_videos(&b, 0); break;
+        case 13: window_videos(&b, 1); break;
+        case 14: window_maps(&b); break;
+        case 15: window_backups(&b); break;
+        case 2: case 5: case 7: ed_net_window_gen(index, &b.html); break; // editor_net.c (Assets, Mods, Textures)
+        default: break;
     }
     ed_gui_end(&b, g_ed.el_menu_window);
 }
@@ -938,7 +1432,78 @@ static int h_switch_tab(void *user, const HtmlEvent *ev, const HtmlArg *args, co
     const int tab = argc >= 1 ? (int) args[0].num : 0;
     if (tab != g_controls_tab) {
         g_controls_tab = tab;
-        ed_window_show(1);
+        editor_show_window(1);
+    }
+    return 1;
+}
+
+static int h_sounds_tab(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user; (void) ev;
+    const int tab = argc >= 1 ? (int) args[0].num : 0;
+    if (tab != g_sounds_tab) {
+        g_sounds_tab = tab;
+        editor_show_window(9);
+    }
+    return 1;
+}
+
+static int h_sounds_search(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user; (void) args; (void) argc;
+    const char *name = html_ui_current_handler();
+    if (name && !strcmp(name, "windows.8.searchKey") && !html_key_is_enter(ev->key)) return 1;
+    const HtmlElem r = html_dom_by_id("searchResultsS");
+    if (r) html_dom_set_text(r, "No Sounds found"); // the sound search is WP6's (editor_net.c)
+    return 1;
+}
+
+static int h_backup(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user; (void) ev;
+    const char *name = html_ui_current_handler();
+    if (!name) return 1;
+    if (!strcmp(name, "windows.14.clear")) {
+        // LocalDB.clear: io_po("SUCCESS", null, "Backups Cleared") (a #chatList notice here)
+        editor_message(ed_backup_clear() ? "Backups Cleared" : "Failed to clear Backups");
+        editor_show_window(15);
+    } else if (!strcmp(name, "KE.importMapBackup") && argc >= 1 && args[0].kind == HTML_ARG_NUM) {
+        ed_backup_load(args[0].num);
+    }
+    return 1;
+}
+
+static int arg_flag(const HtmlArg *a, const int n, const int i) {
+    return n > i && (a[i].kind == HTML_ARG_BOOL || a[i].kind == HTML_ARG_NUM) && a[i].num != 0;
+}
+
+static int h_page_calls(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user;
+    const char *name = html_ui_current_handler();
+    if (!name) return 1;
+    if (!strcmp(name, "loadQuick")) {
+        // window.loadQuick(i, script, defaultMap): closeWindow + importMap (editor_io.c)
+        if (argc >= 1 && args[0].kind == HTML_ARG_NUM) ed_load_quick((int) args[0].num, arg_flag(args, argc, 1), arg_flag(args, argc, 2));
+    } else if (!strcmp(name, "KE.quickStart")) {
+        ed_quick_start();
+    } else if (!strcmp(name, "KE.importMapPopup")) {
+        ed_import_map_popup();
+    } else if (!strcmp(name, "importMapData")) {
+        import_map_data();
+    } else if (!strcmp(name, "importMapKey")) {
+        if (html_key_is_enter(ev->key)) import_map_data(); // onkeydown: keyCode 13
+    } else if (!strcmp(name, "KE.loadFile")) {
+        g_ed.mods |= GLFW_MOD_SHIFT;
+        ed_file_import(); // loadFile("importMap"): a file (web) / the clipboard (native)
+        g_ed.mods &= ~GLFW_MOD_SHIFT;
+    } else if (!strcmp(name, "KE.publishMap")) {
+        ed_net_publish();
+    } else if (!strcmp(name, "KE.publishAssetPopup")) {
+        editor_message("Asset publishing is not available yet.");
+    } else if (!strcmp(name, "openLink")) {
+        // openLink(url, target): //docs.krunker.io, ...
+        if (argc >= 1 && args[0].kind == HTML_ARG_STR) {
+            char url[512];
+            snprintf(url, sizeof(url), "%s%s", !strncmp(args[0].str, "//", 2) ? "https:" : "", args[0].str);
+            if (!app_route_url(url)) editor_message(url);
+        }
     }
     return 1;
 }
@@ -953,6 +1518,20 @@ void ed_panels_install(HtmlHandlerEntry *table, size_t *count, const size_t max)
         {"windows.3.deleteButton", h_quick},
         {"windows.3.showCustomize", h_quick},
         {"windows.3.search", h_quick},
+        {"windows.8.switchTab", h_sounds_tab},
+        {"windows.8.searchAssets", h_sounds_search},
+        {"windows.8.searchKey", h_sounds_search},
+        {"windows.14.clear", h_backup},
+        {"KE.importMapBackup", h_backup},
+        {"loadQuick", h_page_calls},
+        {"KE.quickStart", h_page_calls},
+        {"KE.importMapPopup", h_page_calls},
+        {"importMapData", h_page_calls},
+        {"importMapKey", h_page_calls},
+        {"KE.loadFile", h_page_calls},
+        {"KE.publishMap", h_page_calls},
+        {"KE.publishAssetPopup", h_page_calls},
+        {"openLink", h_page_calls},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]) && *count < max; i++) table[(*count)++] = entries[i];
 }

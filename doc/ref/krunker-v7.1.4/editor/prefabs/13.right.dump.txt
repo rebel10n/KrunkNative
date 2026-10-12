@@ -1,0 +1,31 @@
+P Particles
+L[] Direction : sval=0 range[0,3,1]=0
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 20/0,20/0,20/0
+-
+F Style closed
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+-
+F Particles open
+-
+L[] Texture : select#4[Default..Ember]=Default
+L[] Blending : select#5[None..Multiply]=None
+L[] Count : sval=0 range[0,300,1]=0
+L[] Size : sval=0 range[0,30,0.1]=0
+L[] Scale : sval=0 range[-10,10,0.1]=0
+Fs Movement open
+L[subsection] Speed : sval=0 range[-10,10,0.1]=0
+L[subsection] Deceleration : sval=0 range[-1,1,0.1]=0
+L[subsection] Gravity : sval=0 range[-10,10,0.1]=0
+-
+-
+-

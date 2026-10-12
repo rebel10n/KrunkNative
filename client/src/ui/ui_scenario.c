@@ -25,6 +25,7 @@
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
 #include <app_mode.h> // state.page: hub / editor / viewer pages
+#include <debug_capture.h> // state.pageActions calls with arguments
 #include <html_ui.h>
 #include <html_dom.h>
 #include <png_write.h>
@@ -680,7 +681,8 @@ static void apply_timed(Client *client, const double capture_ms) {
 
 // state.page ("hub" | "editor" | "viewer") + state.pageQuery: show that page (app_mode.h)
 // like `client_bin --hub "<query>"`; state.pageActions: handler names dispatched once the
-// page is up (e.g. "openSettings", "loginPopup"), as the page's inline handlers would.
+// page is up (e.g. "openSettings", "loginPopup"), or calls with literal arguments
+// ("showWindow(3)"), as the page's inline handlers would.
 static int page_entered(const Client *c) {
     (void) c;
     return app_mode() != APP_MODE_GAME && html_ui_is_ready();
@@ -704,8 +706,12 @@ static int apply_page(Client *client) {
     const cJSON *action;
     cJSON_ArrayForEach(action, actions) {
         if (!cJSON_IsString(action)) continue;
-        HtmlEvent ev = {.type = "click", .value = ""};
-        html_ui_dispatch(action->valuestring, &ev, NULL, 0);
+        if (strchr(action->valuestring, '(')) {
+            debug_capture_dispatch(action->valuestring); // "showWindow(3)": a call with arguments
+        } else {
+            HtmlEvent ev = {.type = "click", .value = ""};
+            html_ui_dispatch(action->valuestring, &ev, NULL, 0);
+        }
         run_frames(client, 2);
     }
     return 1;

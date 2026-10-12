@@ -117,25 +117,27 @@ imports are C: `client/src/viewer/` (the store tables in
 
 ## Map editor page (`editor.html`)
 
-Still Krunker v3.1.1's page until the editor port switches over (`import.py --editor-page`
-imports v7.1.4's `editor.html` + editor CSS + CodeMirror CSS; doc/v7/editor.md).
-Krunker v3.1.1's `public/editor.html` ("Krunker Editor"), imported by
-`tools/ui-import/editor_page.py` (`make ui-import`): scripts removed (hook.js,
-quicksettings.js, pickr.min.js, editor.js and the inline `onbeforeunload` script), `og:`
-metas dropped, `?build=` stripped, root-relative URLs made relative, `<canvas id="canvas">`
-added as the first body child and `js/kn-shim.js` + `js/loader.js` before `</body>` (web
-glue, as in `index.html`). `css/editor.css`, `css/editor_dark.css`,
-`css/editor_custom.css` and `css/pickr.css` are byte-identical copies of the v3.1.1 files;
-`css/editor-kn.css` is ours (transparent page over the GL view, the web build's
-`#canvas`, and pointer-events so clicks on the 3D area reach it). Everything editor.js and libs/ObjectInstance.js /
-TransformControls.js / ui/editor.js did is C: `client/src/editor/` (the prefab and config
-tables in `client/src/editor/editor_data.c` are generated from the v3.1.1
-`editor.js.map` by `tools/editor/gen_editor_data.py`). The panels (QuickSettings-style
-blueprints) and the Pickr colour picker are rebuilt as Krunker's own markup by
-`client/src/editor/editor_gui.c`. Shown by `client_bin --editor "<query>"` (`map=<name>`
-opens `assets/maps/<name>.json`, `new` starts empty, otherwise the autosave in storage key
-`knEditorMap` or the hub's `mapToEdit`), web `editor.html?<query>` (its own URL), and links
-to `/editor.html` (`client/include/app_mode.h`).
+Krunker v7.1.4's `public/editor.html` ("Krunker Editor", since editor WP2 of
+doc/v7/editor.md), imported by `tools/ui-import/editor_page.py` (`make ui-import`): scripts
+removed (hook.js, mithril, CodeMirror, quicksettings.js, pickr.min.js, jszip, editor.js, the
+captcha loaders), `og:` metas dropped, `?build=` stripped, root-relative URLs made relative,
+`<canvas id="canvas">` added as the first body child and `js/kn-shim.js` + `js/loader.js`
+before `</body>` (web glue, as in `index.html`). `css/editor.css`, `css/editor_dark.css`,
+`css/editor_custom.css`, `css/pickr.css` and `libs/codemirror/5.61.0/` (codemirror.min.css,
+theme/monokai.min.css) are v7's files (the CSS through the importer's v7 URL rewrite);
+`css/editor-kn.css` is ours (transparent page over the GL view, the web build's `#canvas`,
+pointer-events so clicks on the 3D area reach it, and the `#knPrompt` prompt/confirm dialog).
+Everything editor.js and libs/ObjectInstance.js / TransformControls.js / EditorOverlay.js /
+ui/editor.js did is C: `client/src/editor/` (the prefab and config tables in
+`client/src/editor/editor_data.c` are generated from v7's `src/` by
+`tools/editor/gen_editor_data.py`). The panels (QuickSettings-style blueprints) and the Pickr
+colour picker are rebuilt as Krunker's own markup by `client/src/editor/editor_gui.c`; the
+`#editor-overlay` canvas (FPS counter) is drawn with Canvas2D (`editor_overlay.c`). Shown by
+`client_bin --editor "<query>"` (`map=<name>` opens `assets/maps/<name>.json`, `new` starts
+empty, otherwise the autosave in storage key `knEditorMap` or the hub's `mapToEdit`; the
+Welcome window opens unless a map came with the page), web `editor.html?<query>` (its own
+URL), and links to `/editor.html` (`client/include/app_mode.h`). Reference captures:
+`doc/ref/krunker-v7.1.4/editor/` (`tools/editor/v7ref.js`).
 
 ## Social hub page (`social.html`)
 

@@ -1,0 +1,41 @@
+P Ac Unit
+L[] Visible : switch=1
+L[] Collidable : switch=1
+L[] Bullet Collisions : switch=1
+L[] AI Collisions : switch=1
+L[] Wall Jumpable : switch=1
+L[] Can Grapple : switch=1
+L[] Can Impulse : switch=1
+L[] Spin : sval=0 range[-20,20,0.1]=0
+L[] Spin Axis : select#2[Y..X]=Y
+L[] Model Scale : sval=5 range[0.01,100,0.01]=5
+L[] Step Sound : select#5[Default..Snow]=Default
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-
+F Style closed
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+L[] Opacity : sval=1 range[0,1,0.1]=1
+L[] Shading : switch=1
+-
+F Technical & Logic closed
+-
+L[] Destructible : switch=0
+L[] Start Destroyed : switch=0
+L[] Spawn Chance : sval=0 range[0,100,0.01]=0
+L[] Health : sval=0 range[0,50000,10]=0
+-
+Fs Respawn closed
+L[subsection] Timer (s) : sval=0 range[0,3600,0.1]=0
+L[subsection] Random : switch=0
+-
+Fs Interface closed
+L[subsection] ID : sval=0 range[0,2000,1]=0
+-

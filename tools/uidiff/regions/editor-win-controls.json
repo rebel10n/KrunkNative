@@ -1,0 +1,62 @@
+{
+  "scenario": "editor-win-controls",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "toolbar",
+      "rect": [
+        0,
+        0,
+        866,
+        33
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "dimmed under the window backdrop; #_toolbar: File .. Documentation"
+    },
+    {
+      "name": "version",
+      "rect": [
+        1613,
+        0,
+        307,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "dimmed under the window backdrop; #versionTxt: Krunker Editor v2.0.0 - Yendis Entertainment"
+    },
+    {
+      "name": "left-panel",
+      "rect": [
+        0,
+        28,
+        302,
+        909
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "skip": true,
+      "note": "dimmed under the window backdrop; left panel: Essential (map config), editor WP4"
+    },
+    {
+      "name": "window",
+      "rect": [
+        638,
+        128,
+        644,
+        681
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#menuWindow: Controls window, Default tab"
+    }
+  ]
+}

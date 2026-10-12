@@ -29,6 +29,7 @@
 // sampled, so a key held from t=0 to t=1500 is down for the inputs of [0, 1500).
 #include <gl.h>
 #include <input_script.h>
+#include <app_mode.h>
 #include <camera_feel.h>
 #include <ui_logic.h>
 #include <html_ui.h>
@@ -268,6 +269,29 @@ void input_script_adjust_input(Client *client, Input *input) {
     g_script.look_yaw = g_script.look_pitch = 0.0f;
 }
 
+static void write_pending_shot(Client *client) {
+    if (!g_script.shot[0]) return;
+    int width, height;
+    glfwGetFramebufferSize(client->window, &width, &height);
+    unsigned char *pixels = malloc((size_t) width * height * 4);
+    unsigned char *flipped = malloc((size_t) width * height * 4);
+
+    if (pixels && flipped) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+        const size_t row = (size_t) width * 4;
+        for (int y = 0; y < height; y++) memcpy(flipped + (size_t) y * row, pixels + (size_t) (height - 1 - y) * row, row);
+        for (size_t i = 3; i < row * (size_t) height; i += 4) flipped[i] = 255;
+        png_write_rgba(g_script.shot, flipped, width, height);
+    }
+
+    free(pixels);
+    free(flipped);
+    g_script.shot[0] = 0;
+}
+
 void input_script_frame_end(Client *client, const float delta, const float frame_delta) {
     if (!g_script.active || !g_script.playing) return;
 
@@ -293,29 +317,34 @@ void input_script_frame_end(Client *client, const float delta, const float frame
             ub ? ub->position.y : 0.0f, ub ? ub->rotation.x : 0.0f, an ? an->position.y : 0.0f, p->can_slide, p->idle_anim);
     }
 
-    if (g_script.shot[0]) {
-        int width, height;
-        glfwGetFramebufferSize(client->window, &width, &height);
-        unsigned char *pixels = malloc((size_t) width * height * 4);
-        unsigned char *flipped = malloc((size_t) width * height * 4);
-
-        if (pixels && flipped) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glPixelStorei(GL_PACK_ALIGNMENT, 1);
-            glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-
-            const size_t row = (size_t) width * 4;
-            for (int y = 0; y < height; y++) memcpy(flipped + (size_t) y * row, pixels + (size_t) (height - 1 - y) * row, row);
-            for (size_t i = 3; i < row * (size_t) height; i += 4) flipped[i] = 255;
-            png_write_rgba(g_script.shot, flipped, width, height);
-        }
-
-        free(pixels);
-        free(flipped);
-        g_script.shot[0] = 0;
-    }
+    write_pending_shot(client);
 
     // The frame time, not the world's: the end-of-round slow motion scales the world delta
     // down to 0 for the whole results screen, which would hold every later event back.
+    g_script.time += frame_delta * 1000.0f;
+}
+
+// Page windows (app_mode.c): the clock starts once the page is ready; game-only commands
+// (play, pose, tp, look, respawn) are skipped.
+void input_script_page_tick(Client *client) {
+    script_load();
+    if (!g_script.active) return;
+    if (!g_script.playing) {
+        if (!app_mode_page_ready(client)) return;
+        g_script.playing = 1;
+        g_script.time = 0.0f;
+    }
+    while (g_script.next < g_script.count && g_script.events[g_script.next].t <= g_script.time + 1e-3f) {
+        const ScriptEvent *e = &g_script.events[g_script.next++];
+        static const char *const GAME_ONLY[] = {"play", "pose", "tp", "look", "respawn"};
+        int skip = 0;
+        for (size_t i = 0; i < sizeof(GAME_ONLY) / sizeof(GAME_ONLY[0]); i++) skip |= !strcmp(e->cmd, GAME_ONLY[i]);
+        if (!skip) script_run(client, e);
+    }
+}
+
+void input_script_page_frame_end(Client *client, const float frame_delta) {
+    if (!g_script.active || !g_script.playing) return;
+    write_pending_shot(client);
     g_script.time += frame_delta * 1000.0f;
 }

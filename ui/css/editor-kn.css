@@ -30,7 +30,9 @@ body {
 #canvasAdd,
 #canvasObjEdit,
 #instructionHolder,
-#progress {
+#progress,
+#popupHolder,
+#canvasUI > .eButton {
   pointer-events: auto;
 }
 

@@ -397,7 +397,7 @@ def main(argv):
     ap.add_argument("--no-windows", action="store_true", help="skip the window split")
     ap.add_argument("--no-editor", action="store_true", help="skip the map editor page (editor_page.py)")
     ap.add_argument("--editor-page", action="store_true",
-                    help="--ref v7: also import v7's editor.html + editor CSS (off by default: client/src/editor/ still drives the v3.1.1 page)")
+                    help="(no-op, kept for old scripts: the v7 editor page is imported by default since editor WP2)")
     ap.add_argument("--no-social", action="store_true", help="skip the social hub page (social_page.py)")
     ap.add_argument("--no-viewer", action="store_true", help="skip the model viewer page (viewer_page.py)")
     ap.add_argument("--no-assets", action="store_true", help="skip the menu/HUD images (menu_assets.py, menu-assets.txt)")
@@ -465,7 +465,7 @@ def main(argv):
         for name, size in files:
             log("  %-24s %8d bytes" % (name, size))
 
-    if not args.no_editor and (not v7 or args.editor_page):
+    if not args.no_editor:
         import editor_page  # Krunker's editor.html + its stylesheets (tools/ui-import/editor_page.py)
         editor_page.import_editor(ui_dir, write_if_changed, log, public, v7)
     if not args.no_social:

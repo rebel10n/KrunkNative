@@ -1,0 +1,140 @@
+H Templates
+X Basic Game Templates
+X Use these templates to Quickstart your Project
+X Simple .io Game
+X KrunkScript
+X 2D Car Game
+X KrunkScript
+X Moving Objects
+X KrunkScript
+X Bouncing Ball
+X KrunkScript
+X Popup Window
+X KrunkScript
+X Flashlight
+X KrunkScript
+X 3D Pong
+X KrunkScript
+X Basic Collisions
+X KrunkScript
+X Snake Demo
+X KrunkScript
+X Basic Networking
+X KrunkScript
+X Networking Objects
+X KrunkScript
+X Converting 3D to 2D
+X KrunkScript
+X Jetpacks
+X KrunkScript
+X Sprinting
+X KrunkScript
+X Triggers & Scripts
+X KrunkScript
+X Game of Life
+X KrunkScript
+X Custom Geometry
+X KrunkScript
+X Attaching
+X KrunkScript
+X Quickstart
+X Ocean
+X Vehicle
+X SRM Template
+X Pirate Template
+X Character Animation
+X Flappy Bird
+X Battle Royale
+X Advanced Triggers
+X Parkour
+X Zombie Infected
+X City Template
+X Top Down Game
+X Trading
+X Defuse
+X Spleef
+X 2D Platformer
+X Basic .io Game
+X Racing
+X Mining
+X Moba
+X Aim Trainer
+X Dog Fight
+X Trivia Game
+X Sniper VS Runner
+X Puzzle Game
+X Sniper Arena
+X Raid
+X Brawl
+X Burg
+X Default Map
+X Littletown
+X Default Map
+X Sandstorm
+X Default Map
+X Subzero
+X Default Map
+X Undergrowth
+X Default Map
+X Shipment
+X Default Map
+X Freight
+X Default Map
+X Lostworld
+X Default Map
+X Citadel
+X Default Map
+X Oasis
+X Default Map
+X Kanji
+X Default Map
+X Industry
+X Default Map
+X Lumber
+X Default Map
+X Evacuation
+X Default Map
+X Site
+X Default Map
+X SkyTemple
+X Default Map
+X Lagoon
+X Default Map
+X Bureau
+X Default Map
+X Tortuga
+X Default Map
+X Tropicano
+X Default Map
+X Krunk_Plaza
+X Default Map
+X Arena
+X Default Map
+X Habitat
+X Default Map
+X Atomic
+X Default Map
+X Old_Burg
+X Default Map
+X Throwback
+X Default Map
+X Stockade
+X Default Map
+X Facility
+X Default Map
+X Clockwork
+X Default Map
+X Laboratory
+X Default Map
+X Shipyard
+X Default Map
+X Soul Sanctum
+X Default Map
+X file_copy
+X Import
+X folder_open
+X Load
+X create_new_folder
+X New
+X menu_book
+X Guide

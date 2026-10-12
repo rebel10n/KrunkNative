@@ -490,9 +490,6 @@ int ed_net_window_gen(const int index, EdBuf *out) {
         case 2: gen_list_window(out, LW_ASSETS); return 1;
         case 5: gen_list_window(out, LW_MODS); return 1;
         case 7: gen_list_window(out, LW_TEXTURES); return 1;
-        case 8:
-            edb_add(out, "<div style='text-align:center;font-size:30px;color:#fff'>Welcome to the Krunker Editor</div><img src='./img/map_show.png' class='introImg' />");
-            return 1;
         default: return 0;
     }
 }

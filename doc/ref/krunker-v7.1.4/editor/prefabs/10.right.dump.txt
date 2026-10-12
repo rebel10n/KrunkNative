@@ -1,0 +1,15 @@
+P Score Zone
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 10/0,10/0,10/0
+-
+F Technical & Logic closed
+-
+L[] Score : sval=1 range[1,10000,1]=1
+-

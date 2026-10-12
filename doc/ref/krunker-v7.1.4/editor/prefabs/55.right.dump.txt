@@ -1,0 +1,159 @@
+P Ai Spawner
+L[] AI Name : text(BOT)=
+L[] Visible : switch=1
+L[] Collidable : switch=1
+L[] Spin : sval=0 range[-20,20,0.1]=0
+L[] Spin Axis : select#2[Y..X]=Y
+L[] Team : select#5[Default..Delta]=Default
+L[] Model Scale : sval=4 range[0.01,100,0.01]=4
+L[] Model Y Offset : sval=0 range[-100,100,0.1]=0
+L[] Model Direction : sval=0 range[0,360,1]=0
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-
+F Style closed
+-
+Fs Texture closed
+L[subsection] Force Transparency : switch=0
+Fss Frame Animation closed
+L[subsubsection] Frame Count : sval=0 range[0,100,1]=0
+L[subsubsection] Frame Speed : sval=0 range[0,10,0.1]=0
+-
+L[subsection] Asset ID : text(ID)=
+B Select Custom
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+L[] Opacity : sval=1 range[0,1,0.1]=1
+L[] Texture Smoothing : switch=1
+L[] Fog : switch=1
+L[] AlphaTest : sval=0 range[0,1,0.01]=0
+L[] Render Side : select#4[Game Default..Double]=Game Default
+L[] Bob Distance : sval=0 range[0,10,0.01]=0
+L[] Bob Speed : sval=0 range[0,10,0.01]=0
+-
+F Technical & Logic closed
+-
+L[] Score : sval=0 range[0,10000,1]=0
+L[] Single Use : switch=0
+L[] Destructible : switch=0
+L[] Start Destroyed : switch=0
+L[] Spawn Chance : sval=0 range[0,100,0.01]=0
+L[] Health : sval=0 range[0,50000,10]=0
+-
+Fs Respawn closed
+L[subsection] Timer (s) : sval=0 range[0,3600,0.1]=0
+L[subsection] Random : switch=0
+-
+Fs Hitbox closed
+L[subsection] Width Mlt : sval=1 range[0.1,10,0.1]=1
+L[subsection] Height Mlt : sval=1 range[0.1,20,0.1]=1
+L[subsection] Crit Damage Mlt : sval=0 range[0,5,0.01]=0
+-
+Fs Behavior closed
+L[subsection] Ignore When Stuck : switch=0
+L[subsection] Drift When Stuck : switch=0
+L[subsection] Invincible When Stuck : switch=0
+L[subsection] Friendly : switch=0
+L[subsection] Target Players : switch=1
+L[subsection] Target other AI : switch=0
+L[subsection] Behavior Type : sval=0 range[0,20,1]=0
+L[subsection] Chase Distance : sval=10 range[0,2000,1]=10
+L[subsection] Roam Radius : sval=0 range[0,500,1]=0
+L[subsection] Roam Time : sval=1000 range[1000,10000,1]=1000
+L[subsection] Path Type : select#4[Loop..Random]=Loop
+L[subsection] Path Input : text(id,id,id)=
+-
+Fs Movement closed
+L[subsection] Speed : sval=1 range[0,10,0.1]=1
+L[subsection] Turn Speed : sval=1 range[0,30,0.1]=1
+L[subsection] Gravity : sval=1 range[0,1,0.1]=1
+L[subsection] Velocity Movement : switch=0
+-
+Fs Vision closed
+L[subsection] Vision Distance : sval=120 range[10,1000,10]=120
+L[subsection] Xray Vision : switch=0
+-
+Fs Melee closed
+L[subsection] Can Melee : switch=0
+L[subsection] Melee Dmg : sval=10 range[1,200,1]=10
+L[subsection] Melee Rate : sval=800 range[200,10000,50]=800
+L[subsection] Melee Range : sval=10 range[10,100,1]=10
+L[subsection] Melee Delay (ms) : sval=400 range[0,5000,1]=400
+L[subsection] Melee Shake : sval=0 range[0,1,0.1]=0
+L[subsection] Effect On Hit : select#11[None..Strength]=None
+-
+Fs Shooting closed
+L[subsection] Can Shoot : switch=0
+L[subsection] Firerate : sval=2000 range[200,10000,50]=2000
+L[subsection] Spread : sval=0 range[0,1,0.001]=0
+L[subsection] Shot Break (ms) : sval=400 range[0,5000,1]=400
+L[subsection] Offset Shot : switch=0
+L[subsection] Shot Arch Y : sval=0 range[-90,90,1]=0
+L[subsection] Shot Delay (ms) : sval=0 range[0,5000,1]=0
+L[subsection] Shot Shake : sval=0 range[0,1,0.1]=0
+L[subsection] Effect On Shot : select#11[None..Strength]=None
+Fss Projectile closed
+L[subsection] Projectile Asset : text(ID)=
+B Select Custom
+L[subsection] Projectile Dmg : sval=100 range[0,1000,1]=100
+L[subsection] Projectile Speed : sval=1 range[0,20,0.01]=1
+L[subsection] Projectile Size : sval=1 range[0.1,10,0.1]=1
+L[subsection] Projectile Mesh Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Projectile Spin : sval=1 range[0,2,0.01]=1
+L[subsection] Projectile Gravity : sval=0 range[-2,2,0.01]=0
+L[subsection] Projectile Glow : switch=0
+L[subsection] Projectile Transparency : switch=0
+L[subsection] Explode : switch=0
+-
+Fs Rewards closed
+L[subsection] Skin Rewards : text(id,id,id)=
+L[subsection] Reward Method : select#3[Auto..Drop on Node]=Auto
+L[subsection] Reward Requirements : select#3[Player Active..Player Killed]=Player Active
+L[subsection] Reward Node Id : sval=0 range[0,1000,1]=0
+-
+Fs Nametag closed
+L[subsection] Level : sval=0 range[0,999,1]=0
+L[subsection] Health Scale : sval=1 range[0,10,0.1]=1
+-
+Fs Trigger Actions closed
+L[] Action Chance (%) : sval=0 range[0,100,1]=0
+B Add Action
+Fss Action 0 closed
+L[subsection] Action : select#66[Give Player Score..Mode Specific]=Give Player Score
+L[] Value Type : select#4[Input Value..Global Value]=Input Value
+L[] Action Value : sval=0 range[-10000,10000,1]=0
+L[] Delay : sval=0 range[0,60,0.1]=0
+Fss Condition closed
+L[] Condition : select#12[None..Player Inventory Value]=None
+-
+Fs Interface closed
+L[subsection] ID : sval=0 range[0,2000,1]=0
+L[subsection] Target : sval=0 range[0,2000,1]=0
+-
+F Sound closed
+-
+L[] Death Sound ID : number(Sound Asset ID)=0
+B Select Sound
+L[] Idle Sound ID : number(Sound Asset ID)=0
+B Select Sound
+L[] Shoot Sound ID : number(Sound Asset ID)=0
+B Select Sound
+L[] Shoot-Hit Sound ID : number(Sound Asset ID)=0
+B Select Sound
+L[] Melee Sound ID : number(Sound Asset ID)=0
+B Select Sound
+L[] Melee-Hit Sound ID : number(Sound Asset ID)=0
+B Select Sound
+L[] Agro Sound ID : number(Sound Asset ID)=0
+B Select Sound
+-
+F Animations closed
+-
+L[] Animation Speed : sval=1 range[0.01,10,0.01]=1
+L[] Start Animation : text()=
+-

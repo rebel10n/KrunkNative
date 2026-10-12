@@ -1,0 +1,26 @@
+P Light Cone
+L[] Visible : switch=1
+L[] Sides : sval=12 range[3,64,1]=12
+L[] Theta Length : sval=360 range[0.1,360,0.1]=360
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 10/0,10/0,10/0
+-
+F Style closed
+-
+Fs Texture closed
+Fss Movement closed
+L[subsubsection] Speed : sval=0 range[-20,20,0.1]=0
+L[subsubsection] Axis : select#2[X..Y]=X
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+L[] Opacity : sval=1 range[0,1,0.1]=1
+L[] Full Cone : switch=0
+-

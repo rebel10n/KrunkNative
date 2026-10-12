@@ -1,0 +1,64 @@
+P Environment Zone
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 100/0,100/0,100/0
+-
+F Environment open
+-
+L[] Sky : select#2[Solid..Gradient]=Solid
+L[subsection] Color : color=#dce8ed
+Fss Color open
+L[subsubsection] Top : color=#74a4b9
+L[subsubsection] Middle : color=#dce8ed
+L[subsubsection] Bottom : color=#dce8ed
+L[subsection] Cloud Texture : switch=0
+L[subsubsection] Emissive : color=#ffffff
+L[subsubsection] Emissive Asset ID : text(Emissive Asset ID)=0
+B Select Emissive
+L[subsubsection] Speed : sval=0 range[-20,20,0.1]=0
+L[subsubsection] Axis : select#2[X..Y]=X
+L[subsubsection] Asset ID : text(Texture Asset ID)=0
+B Select Custom
+-
+F Ambient closed
+-
+L[] Sound : select#14[Default..Festive]=Default
+L[] Custom Sound ID : number(Sound Asset ID)=0
+B Select Sound
+L[] Intensity : sval=1 range[0.1,3,0.1]=1
+L[] Color : color=#97a0a8
+-
+F Light closed
+-
+L[] Color : color=#f2f8fc
+L[] Distance : sval=500 range[10,5000,1]=500
+L[] Intensity : sval=1.3 range[0.1,3,0.1]=1.3
+Fss Angle open
+L[] X : sval=90 range[0,360,1]=90
+L[] Y : sval=54 range[0,360,1]=54
+-
+F Shadows closed
+-
+L[] Resolution : sval=1024 range[128,4096,1]=1024
+L[] Distance : sval=1200 range[128,4096,1]=1200
+-
+F Weather closed
+-
+Fss Fog open
+L[] Color : color=#8d9aa0
+L[] Distance : sval=2000 range[0,15000,1]=2000
+-
+F Render closed
+-
+L[] ToneMapping : select#5[NoToneMapping..ACESFilmicToneMapping]=NoToneMapping
+L[] ToneMapping Exposure : sval=1 range[0,10,0.1]=1
+L[] Output Encoding : select#3[Default..LinearEncoding]=Default
+L[] Physically Correct Lights : switch=0
+-
+-

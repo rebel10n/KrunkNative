@@ -1,0 +1,10 @@
+P Map Anchor
+L[] Anchor Type : select#2[Corner..Center]=Corner
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-

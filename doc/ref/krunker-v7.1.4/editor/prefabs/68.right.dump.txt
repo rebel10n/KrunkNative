@@ -1,0 +1,17 @@
+P Prize Wheel
+L[] Visible : switch=1
+L[] Direction : sval=0 range[0,7,1]=0
+L[] Spin Type : select#3[Starter..Heroic]=Starter
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Size
+V 0.01/0,10/0,10/0
+-
+F Style closed
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Shading : switch=1
+-

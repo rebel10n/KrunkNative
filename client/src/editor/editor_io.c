@@ -211,6 +211,8 @@ static cJSON *save_doc(void) {
     return n;
 }
 
+cJSON *ed_save_doc(void) { return save_doc(); }
+
 void ed_map_store(void) {
     if (!g_ed.proj->map_config) return;
     cJSON *doc = save_doc();

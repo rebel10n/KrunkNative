@@ -438,8 +438,11 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
         minw = cmin + extras;
         maxw = cmax + extras;
     }
-    layout_apply_min_max_w(b, 0.0f, &minw);
-    layout_apply_min_max_w(b, 0.0f, &maxw);
+    /* percentage min/max-width: cyclic in an intrinsic size contribution, so they behave as
+     * auto / none here (cb -1) and clamp in layout (v7 editor #welcomeSubTitle: an
+     * inline-block with max-width: 60% came out 0 px wide) */
+    layout_apply_min_max_w(b, -1.0f, &minw);
+    layout_apply_min_max_w(b, -1.0f, &maxw);
     if (maxw < minw) maxw = minw;
     b->min_content_w = minw;
     b->max_content_w = maxw;

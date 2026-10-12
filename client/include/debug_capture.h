@@ -22,3 +22,6 @@ void debug_capture_apply_camera(Client *client);
 int debug_capture_hide_ui(void);
 // After everything for the frame is drawn, before buffers swap: counts frames and writes the PNG.
 void debug_capture_frame_end(Client *client);
+// "showWindow(3);KE.closeWindow()": inline-handler calls (name + literal args) dispatched on
+// the shown page, as the KRUNKNATIVE_UI_CMDS `ui` command does (ui_scenario.c pageActions).
+void debug_capture_dispatch(const char *calls);

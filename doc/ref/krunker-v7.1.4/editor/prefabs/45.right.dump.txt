@@ -1,0 +1,11 @@
+P Bomb Site
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 25/0,25/0,25/0
+-

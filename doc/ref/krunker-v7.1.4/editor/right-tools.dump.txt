@@ -1,0 +1,76 @@
+P Tools
+-
+F Optimizations open
+-
+L[] Optimize Faces : button:Execute
+-
+F Color Merging open
+-
+L[] Color Range : sval=1500 range[500,50000,100]=1500
+B Merge Colors
+-
+-
+F Text Generator closed
+-
+L[] Enter Text : button:Open
+-
+F Image Converter closed
+-
+L[] Size : number()=1
+L[] Depth : number()=1
+L[] Collidable : switch=1
+L[] Convert : button:Convert
+L[] Import : button:Import
+-
+F Voxel Manager closed
+-
+L[] Merge : switch=0
+L[] Size : number()=10
+L[] Convert : button:Convert
+L[] Import : button:Import
+-
+F Layout Planner closed
+-
+L[] Merge : switch=0
+L[] Size : number()=10
+L[] Color : color=#460050
+S Cubes in XYZ
+V 0/,0/,0/
+S Space in XYZ
+V 0/,0/,0/
+B Execute
+-
+F Timelapse closed
+-
+L[] Timer : sval=500 range[100,5000,1]=500
+L[] Follow Objects : switch=1
+B Execute
+-
+F Transform closed
+-
+S Scale
+V 1/,1/,1/
+B Scale
+L[] Reflection : select#3[X..Z]=X
+B Reflect
+-
+F Frame closed
+-
+L[] Wall Thickness : number(Thickness)=10
+L[] Has Ceiling : switch=1
+L[] Has Floor : switch=0
+B Frame It
+-
+F Breakable closed
+-
+L[] Health : sval=1 range[1,500,1]=1
+L[] Force Collision : switch=0
+B Execute
+-
+F Colorize closed
+-
+L[] Random : button:Execute
+L[] Gold : button:Execute
+L[] Input : button:Execute
+-
+L[] Drunk Map : button:Execute

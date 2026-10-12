@@ -1,0 +1,28 @@
+H Quick Add
+X Quick Add
+I text(Search)=null
+X Done
+X Click to change item
+X delete_forever
+X Cube
+X Click to change item
+X delete_forever
+X Spawn Point
+X Click to change item
+X delete_forever
+X Custom Asset
+X Click to change item
+X delete_forever
+X Placeholder
+X Click to change item
+X delete_forever
+X add
+X Click to change item
+X delete_forever
+X add
+X Click to change item
+X delete_forever
+X add
+X Click to change item
+X delete_forever
+X add

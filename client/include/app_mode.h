@@ -55,6 +55,10 @@ typedef struct AppPage {
     int (*key)(Client *client, int key, int scancode, int action, int mods);
     int (*chr)(Client *client, unsigned int codepoint);
     void (*resize)(Client *client, int fb_width, int fb_height);
+    // Optional: 1 once the page has settled (its startup test scripts ran), so
+    // KRUNKNATIVE_SCREENSHOT / KRUNKNATIVE_INPUT_SCRIPT start on it (debug_capture.c,
+    // input_script.c). NULL = settled as soon as it is entered.
+    int (*ready)(Client *client);
 } AppPage;
 
 // Page providers (one per page module; the table is in app_mode.c).
@@ -63,6 +67,9 @@ const AppPage *editor_app_page(void);
 const AppPage *viewer_app_page(void);
 
 AppMode app_mode(void);
+// 1 when this window shows a page (not the game) that was entered and reports ready
+// (AppPage.ready): page-mode screenshots and input scripts wait for it.
+int app_mode_page_ready(Client *client);
 const char *app_mode_name(AppMode mode); // "game", "hub", "editor", "viewer"
 // Switch THIS window's page at the start of the next frame (safe from handlers); `query`
 // as for enter(), NULL = "". Natively used for the startup page and in-place reloads; to

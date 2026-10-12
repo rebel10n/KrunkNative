@@ -1,6 +1,7 @@
 // KrunkNative map editor: internal state shared by client/src/editor/*.c.
-// Port of Krunker v3.1.1 public/js/editor.js (Editor), libs/ObjectInstance.js,
-// libs/TransformControls.js and ui/editor.js (GUI) to C over html_dom.h.
+// Port of Krunker v7.1.4 src/editor.js (Editor), libs/ObjectInstance.js,
+// libs/TransformControls.js and ui/editor.js (GUI) to C over html_dom.h (the shell, WP2 of
+// doc/v7/editor.md, is v7; panels not yet ported keep their v3.1.1 shape).
 // Module map:
 //   editor.c          AppPage hooks, frame tick, free-fly camera, keyboard/mouse, toolbar buttons
 //   editor_objects.c  ObjectInstance: serialized JSON per object, property get/set, meshes,
@@ -8,13 +9,18 @@
 //   editor_io.c       getMapExport / importMap / save, storage, files, clipboard, test map
 //   editor_gui.c      GUI._build: blueprint controls -> Krunker markup, GUI.action dispatch,
 //                     folders, sliders, numbers, the colour picker (Pickr "nano")
-//   editor_panels.c   toolbar, right panel switch, blank panel, windows (Controls, Settings,
-//                     Quick Add); the panel control kit (editor_panel_kit.h)
+//   editor_panels.c   toolbar, right panel switch, blank / Scene Graph panels, windows 1-15
+//                     (Controls, Settings, Quick Add, Welcome, Templates, ...); the panel
+//                     control kit (editor_panel_kit.h)
 //   editor_inspector.c the right object panel (the inspector)
 //   editor_env.c      the right environment / terrain / zone panels
 //   editor_gameconfig.c the left "Essential" map panel (map, game, server, weapon config)
 //   editor_render.c   editor GL: bounding boxes, helper volumes, grid, death barrier,
-//                     sun marker, transform gizmo; ray picking; gizmo drag math
+//                     sun marker, light helpers, wireframe, transform gizmo; ray picking;
+//                     gizmo drag math (modelScale / fakeScale / one-sided scaling)
+//   editor_overlay.c  EditorOverlay: the 2D layer over the view (FPS counter)
+//   editor_backup.c   timed backups (initAutoBackup / LocalDB) and window 15's list
+//   editor_prompt.c   prompt() / confirm() stand-ins and Krunker's genericPopup / clearPops
 //   editor_data.c     generated Krunker data tables (tools/editor/gen_editor_data.py)
 //   editor_project.c  open maps (EditorProject): tabs, new/open/close/save, switching (KrunkNative)
 //   editor_view.c     offscreen project renders, detached 3D view windows (KrunkNative)
@@ -35,6 +41,8 @@
 // Krunker prefab ids the editor refers to by number (data/prefabs.js order)
 #define ED_PREFAB_CUBE 0
 #define ED_PREFAB_SPAWN_POINT 5
+#define ED_PREFAB_GATE 24
+#define ED_PREFAB_TRIGGER 29
 #define ED_PREFAB_CAMERA_POSITION 6
 #define ED_PREFAB_PLACEHOLDER 35
 #define ED_PREFAB_CUSTOM_ASSET 44
@@ -50,6 +58,7 @@ typedef struct EditorObject {
     Mesh *helper;          // editor-only model (spawn arrow), owned here
     unsigned int helper_geometry_owned:1;
     unsigned char highlighted:1; // group-selection pending
+    unsigned char toggle_hidden:1; // mesh hidden by a Settings > Object bounding box toggle (editor_render.c)
     cJSON *history;        // last serialized state seen by the history poll (initHistory)
     cJSON *scratch;        // properties the object panel edits that ObjectInstance never serializes (aiName, canWallJump, AI behaviour, ...)
 } EditorObject;
@@ -80,6 +89,7 @@ typedef struct {
     vec3 start_pos, start_size, start_rot;
     vec3 start_hit;        // world point where the drag started (translate/scale)
     float start_angle;     // rotate
+    float start_msize;     // modelScale: mSize at the start of the drag
     vec3 plane_normal;
 } EditorGizmo;
 
@@ -167,7 +177,9 @@ typedef struct {
     double mouse_x, mouse_y; // framebuffer px
     int mods;
     int transform_type, transform_space;
-    int face_selection, group_selection, snapping;
+    int face_selection, group_selection, snapping, wireframe;
+    int hide_light_cones, hide_models; // Settings > Object bounding box toggles (lightConeAbuse / showModels off)
+    float gizmo_size;      // transformControl.size: +/- keys, 0.1 steps (1 = default)
     EditorGizmo gizmo;
     double last_click_time; double last_click_x, last_click_y;
 
@@ -271,13 +283,23 @@ void editor_close_window(void);
 void editor_frame_object(EditorObject *o);
 void editor_camera_dir(vec3 *forward, vec3 *right, vec3 *up);
 vec3 editor_near_position(void);
-void editor_test_map(int host);
+void editor_test_map(int host, int at_camera);        // testMap(host, atCamera)
+void editor_update_wireframe(void);
+void editor_update_snapping(void);
+void editor_warning(const char *id, int on, const char *text, const char *icon); // doWarning (icon NULL = "warning")
+void editor_clear_warnings(void);
+void editor_teleport_popup(void);
+void editor_teleport(int reset, float x, float y, float z);
+void editor_script_popup(void);          // scriptPopup (key 0, Scripting menu): WP5's KrunkScript window
+void editor_texture_list(void);          // textureKey (T): viewModelList / viewTextureList (WP3 pickers)
+#define ED_WINDOW_COUNT 15                // window.windows[] (showWindow 1..15)
 void editor_message(const char *text);   // chatList info line (Krunker uses alert())
 double editor_setting_num(const char *key, double fallback);
 int editor_setting_bool(const char *key);
 void editor_settings_save(void);
 const char *editor_default_settings(void);  // Editor.defaultSettings (JSON)
-void editor_apply_lighting(void);        // initScene/regenAll: map lighting -> g_render_lighting, sky
+void editor_apply_lighting(void);
+void editor_scale_ui(void);              // scaleUI (window resize, UI Scale)        // initScene/regenAll: map lighting -> g_render_lighting, sky
 
 // ---- editor_objects.c
 EditorObject *ed_obj_new(const cJSON *serialized, int keep_uuid);  // deserialize (copies)
@@ -341,6 +363,7 @@ cJSON *ed_map_export_flags(int flags);             // ED_EXPORT_* (editor_model.
 char *ed_map_export_string(void);
 int ed_map_import(const char *text);               // importMap; 0 on failure (message shown)
 void ed_map_clear(void);
+cJSON *ed_save_doc(void);                          // Editor.save(true): {map, groups, selected, cam, history}
 void ed_map_store(void);                           // autosave to storage "knEditorMap"
 int ed_map_restore(void);
 void ed_file_export(void);
@@ -434,14 +457,18 @@ int ed_gui_key_capture(int key, int action);      // GUI.update.key.keydown
 
 // ---- editor_panels.c
 void ed_toolbar_show(void);
+void ed_toolbar_account_check(void);             // per frame: rebuild on login / account change
 void ed_panel_left_show(void);
 void ed_panel_right_blank(void);
 void ed_panel_right_object(void);
 void ed_panel_right_environment(void);
+void ed_panel_right_object_list(void);             // Object > Scene Graph (panel.right.objectList)
+void ed_import_map_popup(void);                    // importMapPopup (File > Import Project)
 void ed_panel_right_show(const char *name);        // "environment" "terrain" "zone" "customize" "tools" "grouping"
 void ed_panel_refresh_all(void);
 const char *ed_panel_right_active(void);
 void ed_window_show(int index);                    // windows[n].gen() into #menuWindow
+void ed_window_tick(float dt);                     // Editor.render: the Welcome window's counters (vA499)
 void ed_panels_install(HtmlHandlerEntry *table, size_t *count, size_t max);
 
 // ---- editor_render.c
@@ -449,6 +476,7 @@ void ed_render_init(void);
 void ed_render_fini(void);
 void ed_render_grid(void);                         // before scene_render (GridHelper)
 void ed_render_overlays(void);                     // after scene_render, inside the view viewport
+void ed_render_apply_wireframe(EditorProject *p, int on); // ObjectInstance.forceWire on p's object materials
 int  ed_pick(double fb_x, double fb_y, int skip_invisible, EditorObject **out, vec3 *hit, int *face);
 void ed_view_ray(double fb_x, double fb_y, vec3 *origin, vec3 *dir);
 int  ed_gizmo_hit(double fb_x, double fb_y);       // axis mask under the cursor, 0 = none
@@ -457,6 +485,12 @@ void ed_gizmo_drag(double fb_x, double fb_y);
 void ed_gizmo_end(void);
 void ed_obj_world_box(const EditorObject *o, float m[16]); // bounding box matrix (unit box -0.5..0.5)
 void ed_euler_matrix(vec3 r, float m[9]);          // three.js Euler XYZ rotation matrix (row major)
+
+// ---- editor_overlay.c: EditorOverlay (#editor-overlay): FPS counter (+ custom GUI preview, WP4)
+struct Canvas2D;
+struct Canvas2D *ed_overlay_canvas(void);          // NULL until the first overlay frame
+void ed_overlay_render(double now_s);              // inside the 3D view viewport, after the overlays
+void ed_overlay_fini(void);
 
 // ---- small helpers (editor_objects.c)
 double ed_round(double v, int decimals);
@@ -467,6 +501,15 @@ void ed_json_set_bool(cJSON *obj, const char *key, int v);
 double ed_json_num(const cJSON *obj, const char *key, double fallback);
 const char *ed_json_str(const cJSON *obj, const char *key, const char *fallback);
 int ed_json_truthy(const cJSON *v);
+
+// ---- editor_backup.c: timed backups (initAutoBackup / doBackup / LocalDB, window 15)
+void ed_backup_tick(double now);                   // every frame: a backup every backupTimer minutes (autoBackups)
+void ed_backup_reset_timer(double now);            // initAutoBackup: restart the interval
+void ed_backup_do(void);                           // doBackup: KE.localDB.insert(KE.save(true))
+cJSON *ed_backup_list(void);                       // [{timestamp, name}], oldest first (owned)
+int ed_backup_load(double timestamp);              // importMapBackup; 0 = missing
+int ed_backup_clear(void);                         // LocalDB.clear; 1 = ok
+void ed_backup_date(double timestamp, char *out, size_t n); // new Date(t).toLocaleString() (en-US)
 
 // ---- editor_prompt.c: window.prompt() / confirm() stand-ins (in-page #knPrompt dialog)
 typedef void (*EdPromptFn)(void *user, const char *value); // value NULL = cancelled
@@ -480,6 +523,10 @@ void ed_prompt_cancel(void);
 void ed_prompt_reset(void);                        // page leave: drop open / queued dialogs
 int ed_prompt_open(void);
 void ed_prompt_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+// window.genericPopup(html, class) / clearPops (#popupHolder > #genericPop of editor.html)
+HtmlElem ed_generic_popup(const char *html, const char *cls);
+void ed_clear_pops(void);
+int ed_popup_is(const char *cls);                   // the generic popup is open with that class
 
 // ---- editor_net.c: asset / mod / texture browsers (windows 2, 5, 7), publishing (social socket)
 // "Select Custom" / "Select Sound" / "Select Mod" buttons; c->arg: 0 selectModel (BOT assetID),

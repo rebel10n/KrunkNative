@@ -1,0 +1,19 @@
+P Zone
+L[] Enabled : switch=0
+L[] Speed : sval=1 range[1,50,0.1]=1
+L[] Stages : sval=0 range[0,10,1]=0
+L[] Wait Timer (s) : sval=5 range[5,500,1]=5
+L[] Random Endpoint : switch=0
+-
+F Dimensions open
+-
+L[] Size : sval=500 range[0,10000,10]=500
+L[] Height : sval=1000 range[100,10000,10]=1000
+-
+F Style open
+-
+Fs Color open
+L[subsection] Top : color=#c542d9
+L[subsection] Middle : color=#c542d9
+L[subsection] Bottom : color=#c542d9
+-

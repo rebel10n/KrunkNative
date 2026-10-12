@@ -1,0 +1,41 @@
+{
+ "p": [
+  0,
+  0,
+  0
+ ],
+ "s": [
+  100,
+  100,
+  100
+ ],
+ "i": 79,
+ "ambInd": 1,
+ "ambIndC": 0,
+ "skyDome": false,
+ "skyDomeCol0": "#74a4b9",
+ "skyDomeCol1": "#dce8ed",
+ "skyDomeCol2": "#dce8ed",
+ "skyDomeEmis": "#000000",
+ "skyDomeEmisTex": 0,
+ "skyDomeTex": false,
+ "skyDomeTexA": 0,
+ "skyDomeMovD": 0,
+ "skyDomeMovT": 0,
+ "shadowR": 1024,
+ "shadowD": 1200,
+ "ambientC": "#97a0a8",
+ "ambientI": 1,
+ "light": "#f2f8fc",
+ "lightD": 500,
+ "lightI": 1.3,
+ "sunAngX": 90,
+ "sunAngY": 54,
+ "sky": "#dce8ed",
+ "fogC": "#8d9aa0",
+ "fogD": 2000,
+ "correctLights": false,
+ "toneMapping": 0,
+ "toneMappingExposure": 1,
+ "outputEncoding": 0
+}

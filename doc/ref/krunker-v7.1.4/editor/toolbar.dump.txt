@@ -1,0 +1,169 @@
+M File
+  O Import Project
+  O New Project
+  O Save Project
+  O Load Backup
+  -
+  O Export
+  O Copy Export
+  -
+  O Export GLTF
+  O Export MTL
+M Edit
+  O Undo (Ctrl + Z)
+  O Redo (Ctrl + Y)
+  -
+  O Delete (Del)
+  O Duplicate (Shift + R)
+  -
+  O Settings...
+M Object
+  O Scene Graph
+  -
+  M Basic
+    O Cube
+    O Ladder
+    O Plane
+    O Ramp
+    O Billboard
+    O Sphere
+    O Liquid
+    O Cylinder
+    O Rune
+    O Sprite
+    O Rope Ladder
+  M Models
+    C
+    O Crate
+    O Barrel
+    O Vehicle
+    O Stack
+    O Tree
+    O Cone
+    O Container
+    O Grass
+    O Containerr
+    O Acidbarrel
+    O Door
+    O Window
+    C
+    O Teddy
+    O Cardb
+    O Pallet
+    O Police
+    O Cage
+    O Ebarrel
+    O Showcase
+    O Ghost
+    O Pumpkin
+    O Skeleton
+    O Knight
+    O Gift
+    C
+    O Christmastree
+    O Cane
+    O Tiles
+    O Clouds
+    O Dumpster
+    O Lamp
+    O Water Tower
+    O Ac Unit
+    O Sheet Metal
+    O Antenna
+    O Satellite Dish
+    O Weaponbox
+  M Tools
+    C
+    O Camera Position
+    O Particles
+    O Flag
+    O Gate
+    O Weapon Pickup
+    O Trigger
+    O Sign
+    O Deposit Box
+    O Camera
+    O Sound Emitter
+    O Boost Pad
+    O Ai Spawner
+    C
+    O Path Node
+    O Prize Wheel
+    O Leaderboard
+    O Server Node
+    O Spray
+    O Mystery Box
+    O Perk Machine
+    O Ai Redirection
+    O Krum Machine
+    O Map Anchor
+  M Lights
+    O Light Cone
+    O Point Light
+    O Light Bar
+    O Directional Light
+    O Rectarea Light
+    O Spot Light
+  M Zones
+    O Spawn Point
+    O Score Zone
+    O Death Zone
+    O Objective
+    O Check Point
+    O Teleporter
+    O Premium Zone
+    O Verified Zone
+    O Bomb Site
+    O Team Zone
+    O Kr Zone
+    O Nopvp Zone
+    O Pvp Zone
+    O Partner Zone
+    O Domination Zone
+    O Environment Zone
+    O Kpd Zone
+  -
+  O Placeholder
+  M Group
+    O Create
+    O Stop
+    O Stop All
+    -
+    O Copy
+    O Cut
+    O Paste
+    -
+    M Prefab
+      M Import
+        O JSON
+        O File
+      O Export
+      O Tools
+  -
+  O Custom...
+M Components
+  O Environment
+  O Terrain
+  O Zone
+  O Ocean
+  O GUI
+O Scripting
+M Game
+  O Test Game
+  O Host Game
+  -
+  O Quick Start
+  O Templates
+  -
+  O Tools
+M Publish
+  O Game
+  O Asset
+  -
+  O Publishing Guide
+M Account
+  O Login
+M Help
+  O Controls
+  O Guide
+O Documentation

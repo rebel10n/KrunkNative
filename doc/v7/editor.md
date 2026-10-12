@@ -1251,6 +1251,15 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | `camPos` / `spawns` export the exact transform, objects the rounded one | keep: the editor holds exact transforms (`ED_MODEL_EXACT_TRANSFORM`), the export rounds objects |
 | The left panel's v3 "Game" folder (no v7 equivalent until WP4's Class Config) | interim: it shows class 0 and a change writes every class's `cls` entry, as v7's import of a `game` block does |
 | Group members follow the owner's scale (KrunkNative) | **removed**: translation and Y rotation only, as v7 (the scale branch is disabled) |
+| `config.isProd` (the counters' Event row, `localOnly` prefabs in the menus) | the page is production, as krunker.io: Event Objects stay hidden and Event / Terminal / Bot Spawner are not offered (the v7 reference capture is production too) |
+| Rebinding a key stores `e.key` (`","`), which never equals the `keyCode` (188) it is compared with | **fix**: binds match by key code and by character (`editor.c:key_is`) |
+| Templates window: the Load tile quotes `'importMap'` inside a single-quoted attribute (a syntax error) | **fix** (`editor_panels.c`) |
+| Tutorials / Tips & Tricks are YouTube iframes | link cards to the videos (no iframes in the engine; open question 3) |
+| Backups in IndexedDB, never pruned | `html_storage` (`knEditorBackups` + one key per backup), the newest 20 kept (`editor_backup.c`) |
+| Account ▸ Login opens `loginPopup` (socket `a`) | opens the hub, which owns login (open question 1); the editor shows the hub session's name |
+| Wireframe (`forceWire`) | desktop GL only: OpenGL ES (web, ANGLE) has no `glPolygonMode` and draws filled (`scene.c`) |
+| Drag & drop import | native only (GLFW drop); the web build has no drop glue yet |
+| File menu | gains KrunkNative's **Projects** submenu (several maps, detached views, the editor bus) |
 
 ---
 
@@ -1612,6 +1621,27 @@ effect values, and `EditorPrefab.variants` / `.fake_scale` / `.ed_cat`.
   then diff `/tmp/o.json`.
 
 ### WP2: Editor shell (page, menus, windows, viewport chrome, camera/keys, settings, stats)
+
+**Status (landed):** `ui/editor.html` and its CSS are v7's (`import.py` imports the editor page by
+default). `editor_panels.c` builds v7's toolbar (File .. Documentation, Lights / Zones menus,
+12-row Models / Tools columns, Shift+click `reuseSelected`), the Scene Graph panel and windows
+1-15 (Controls / Settings / Quick Add / Welcome / Templates / Publishing / Load Backup in full;
+2 / 5 / 7 stay editor_net.c's (WP6), 9 / 14 show v7's offline state until WP6's data). `editor.c`
+has v7's keys (rebindable via `kro_editor`, C / G / R / T / 0 / `,` / `+` / `-`), the Wireframe and
+Snapping toggles, the six counters and v7's limit warnings, the teleport popup (900 ms tween),
+right-click Test (`player:{pos,rot}`), timed backups (`editor_backup.c`) and native drag & drop;
+`editor_prompt.c` ports `genericPopup` / `clearPops`; `editor_render.c` the gizmo's modelScale /
+fakeScale 2 / one-sided scaling / size factor, the light helpers and the bounding-box toggles;
+`editor_overlay.c` the FPS counter. WP0: `tools/editor/v7ref.js` writes
+`doc/ref/krunker-v7.1.4/editor/` (window / panel / toolbar dumps, PNGs, per-prefab right-panel
+dumps and `serialize()` goldens); the native `dump:` script command writes the same format
+(`window`, `popup`, `toolbar` modes). `KRUNKNATIVE_SCREENSHOT`, `KRUNKNATIVE_INPUT_SCRIPT` and
+`KRUNKNATIVE_UI_CMDS` work in page windows (they start once `AppPage.ready`), `wait:S` and
+`ui:CALL` extend `KRUNKNATIVE_EDITOR_SCRIPT`, and `KE.kn.script('cmd:arg')` runs a script command
+from a UI-cmds `ui` line. WP3-6 build on: the v7 widget markup (`eButton`, switch rows),
+`editor_warning()`, `ed_generic_popup()`, `editor_script_popup()` (WP5's key 0 / menu hook),
+`editor_texture_list()` (WP3's T-key hook), `ed_overlay_canvas()` (WP4's GUI preview),
+`ed_backup_*` and the window shells of 9 / 14 (WP6).
 
 **Owns:**
 - `ui/editor.html` and `ui/css/editor-kn.css`, by re-importing v7 `editor.html` + `editor.css` + `editor_dark.css` via `tools/ui-import/editor_page.py`.

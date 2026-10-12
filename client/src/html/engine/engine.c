@@ -35,6 +35,7 @@
 
 #include <math.h>
 #include <stdarg.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -311,6 +312,39 @@ static char *read_ui_file(Engine *g, const char *rel, size_t *len_out)
 /* Stylesheets, fonts, keyframes                                              */
 /* ------------------------------------------------------------------------- */
 
+/* unicode-range covers U+0041 ("A")? NULL / unparsable = yes. The text system keeps one face
+ * per family, weight and style, so of Google's per-script @font-face splits (hebrew, latin-ext,
+ * latin: google-secular-one.css) only the one with the Latin letters is registered. */
+static int range_covers_latin(const char *r)
+{
+    if (!r) return 1;
+    int any = 0;
+    while (*r) {
+        while (*r == ' ' || *r == ',' || *r == '\t') r++;
+        if ((r[0] != 'U' && r[0] != 'u') || r[1] != '+') {
+            if (*r) r++;
+            continue;
+        }
+        r += 2;
+        char lo[16] = "", hi[16] = "";
+        size_t k = 0;
+        while ((isxdigit((unsigned char) *r) || *r == '?') && k + 1 < sizeof lo) lo[k++] = *r++;
+        lo[k] = 0;
+        snprintf(hi, sizeof hi, "%s", lo);
+        for (char *q = lo; *q; q++) if (*q == '?') *q = '0';
+        for (char *q = hi; *q; q++) if (*q == '?') *q = 'F';
+        if (*r == '-') {
+            r++;
+            k = 0;
+            while (isxdigit((unsigned char) *r) && k + 1 < sizeof hi) hi[k++] = *r++;
+            hi[k] = 0;
+        }
+        any = 1;
+        if (strtol(lo, NULL, 16) <= 0x41 && strtol(hi, NULL, 16) >= 0x41) return 1;
+    }
+    return !any;
+}
+
 static void register_font_faces(Engine *g, const CssSheet *sheet)
 {
     uint32_t count = 0;
@@ -318,7 +352,7 @@ static void register_font_faces(Engine *g, const CssSheet *sheet)
     const char *base = css_sheet_name(sheet);
     for (uint32_t i = 0; i < count; i++) {
         const CssFontFace *f = &faces[i];
-        if (!f->family) continue;
+        if (!f->family || !range_covers_latin(f->unicode_range)) continue;
         int ok = 0;
         for (int s = 0; s < f->src_count && !ok; s++) {
             char key[512];
