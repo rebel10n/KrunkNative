@@ -155,6 +155,19 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
     /* meta.proto "M.m" (server_bin with build info); absent = a 1.x server */
     const char *proto = kn_json_str(meta, "proto", "");
     l->proto_major = proto[0] >= '0' && proto[0] <= '9' ? atoi(proto) : -1;
+    const cJSON *tl = cJSON_GetObjectItemCaseSensitive(meta, "timeLeft");
+    l->time_left = cJSON_IsNumber(tl) && tl->valuedouble >= 0 ? (int) tl->valuedouble : -1;
+    /* v7.1.4 ServerManager.seek skips !meta.sk (AUTO_SEEK off); absent = seekable */
+    l->no_seek = cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(meta, "sk"));
+}
+
+/* A node's report of a lobby counts every player whose player-join came before it (frames
+ * of one node arrive in order): their seats stop counting (registry_arrive). */
+static void settle_arrived(Registry *r, const char *game_id) {
+    for (size_t i = 0; i < r->res_count; i++) {
+        MmReservation *e = &r->res[i];
+        if (e->arrived && !e->settled && !strcmp(e->game_id, game_id)) e->settled = 1;
+    }
 }
 
 /* o[key] = value with JS assignment semantics: replaced in place, else appended. */
@@ -209,7 +222,6 @@ static MmLobby *node_lobby(MmNode *n, const char *game_id) {
 }
 
 int registry_lobby_upsert(Registry *r, MmNode *n, const cJSON *tuple) {
-    (void) r;
     cJSON *ns = namespace_tuple(n, tuple);
     if (!ns) return -1;
     const char *gid = cJSON_GetArrayItem(ns, 0)->valuestring;
@@ -229,6 +241,7 @@ int registry_lobby_upsert(Registry *r, MmNode *n, const cJSON *tuple) {
         memset(l, 0, sizeof(*l));
     }
     lobby_from_tuple(l, n, ns);
+    if (n->local) settle_arrived(r, l->game_id);
     n->dirty = 1;
     return 0;
 }
@@ -334,18 +347,65 @@ void registry_remote_end(Registry *r) {
 
 /* ---- reservations */
 
-void registry_reserve(Registry *r, const char *jti, const char *game_id, int64_t expires_ms) {
+static MmReservation *res_add(Registry *r, const char *jti, const char *game_id, int64_t expires_ms) {
     if (r->res_count == r->res_cap) {
         size_t cap = r->res_cap ? r->res_cap * 2 : 32;
         MmReservation *nr = realloc(r->res, cap * sizeof(*nr));
-        if (!nr) return;
+        if (!nr) return NULL;
         r->res = nr;
         r->res_cap = cap;
     }
     MmReservation *e = &r->res[r->res_count++];
+    memset(e, 0, sizeof(*e));
     copy_str(e->jti, sizeof(e->jti), jti);
     copy_str(e->game_id, sizeof(e->game_id), game_id);
     e->expires_ms = expires_ms;
+    return e;
+}
+
+static MmReservation *res_find(Registry *r, const char *jti) {
+    if (!jti || !*jti) return NULL;
+    for (size_t i = 0; i < r->res_count; i++) {
+        if (!strcmp(r->res[i].jti, jti)) return &r->res[i];
+    }
+    return NULL;
+}
+
+void registry_reserve(Registry *r, const char *jti, const char *game_id, int64_t expires_ms) {
+    res_add(r, jti, game_id, expires_ms);
+}
+
+void registry_ticket_authed(Registry *r, const char *jti, int64_t until_ms) {
+    MmReservation *e = res_find(r, jti);
+    if (e && !e->arrived && e->expires_ms > until_ms) e->expires_ms = until_ms;
+}
+
+void registry_arrive(Registry *r, const char *jti, const char *game_id, int64_t now_ms, int64_t grace_ms) {
+    MmReservation *e = res_find(r, jti);
+    if (!e) {
+        if (!jti || !*jti || !game_id || !*game_id) return;
+        e = res_add(r, jti, game_id, now_ms + grace_ms);
+        if (!e) return;
+        e->foreign = 1;
+    }
+    if (e->arrived) return;
+    e->arrived = 1;
+    if (e->expires_ms > now_ms + grace_ms) e->expires_ms = now_ms + grace_ms;
+}
+
+size_t registry_take_settled(Registry *r, const char *node_id, char jtis[][40], size_t max) {
+    size_t c = 0, len = node_id ? strlen(node_id) : 0;
+    if (!len) return 0;
+    for (size_t i = 0; i < r->res_count && c < max;) {
+        const MmReservation *e = &r->res[i];
+        if (e->settled && !strncmp(e->game_id, node_id, len) && e->game_id[len] == ':') {
+            copy_str(jtis[c++], 40, e->jti);
+            r->res[i] = r->res[--r->res_count];
+        } else {
+            i++;
+        }
+    }
+    return c;
 }
 
 void registry_release(Registry *r, const char *jti) {
@@ -368,7 +428,8 @@ void registry_expire(Registry *r, int64_t now_ms) {
 int registry_reserved(const Registry *r, const char *game_id, int64_t now_ms) {
     int c = 0;
     for (size_t i = 0; i < r->res_count; i++) {
-        if (r->res[i].expires_ms > now_ms && !strcmp(r->res[i].game_id, game_id)) c++;
+        const MmReservation *e = &r->res[i];
+        if (e->expires_ms > now_ms && !e->settled && !e->foreign && !strcmp(e->game_id, game_id)) c++;
     }
     return c;
 }
@@ -453,31 +514,54 @@ static int region_eq(const MmNode *n, const char *region) {
     return !region || !*region || !strcmp(n->region, region);
 }
 
+/* Taken seats over every lobby of a node (players + live reservations). */
+static int node_taken(const Registry *r, const MmNode *n, int64_t now_ms) {
+    int t = 0;
+    for (size_t j = 0; j < n->lobby_count; j++) t += registry_lobby_taken(r, &n->lobbies[j], now_ms);
+    return t;
+}
+
+/* Quick-join rank of a candidate (registry.h registry_pick): compared field by field. */
+typedef struct PickRank {
+    int outdated;                  /* lower first */
+    int taken;                     /* higher first */
+    int time_left;                 /* higher first (unknown = a full round: not penalised) */
+    int node_load;                 /* lower first */
+} PickRank;
+
+static int rank_better(const PickRank *a, const PickRank *b) {
+    if (a->outdated != b->outdated) return a->outdated < b->outdated;
+    if (a->taken != b->taken) return a->taken > b->taken;
+    if (a->time_left != b->time_left) return a->time_left > b->time_left;
+    return a->node_load < b->node_load;
+}
+
 /* Steps 2-4 of pickBestLobby over the public pool (optionally one region). */
 static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, const char *region,
                        int use_soft_cap, MmPick *out) {
     MmNode *best_n = NULL;
     MmLobby *best = NULL;
-    int best_taken = -1, best_outdated = 1;
+    PickRank best_rank = {0};
     for (size_t i = 0; i < r->node_count; i++) {
         MmNode *n = r->nodes[i];
         if (!region_eq(n, region)) continue;
+        int load = -1; /* computed once per node, when one of its lobbies qualifies */
         for (size_t j = 0; j < n->lobby_count; j++) {
             MmLobby *l = &n->lobbies[j];
-            if (l->custom || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) || !version_ok(l, q->version) ||
-                !proto_ok(l, q))
+            if (l->custom || l->no_seek || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) ||
+                !version_ok(l, q->version) || !proto_ok(l, q))
                 continue;
             int taken = registry_lobby_taken(r, l, q->now_ms);
             int cap = registry_lobby_cap(l, p);
             if (use_soft_cap && p->soft_cap > 0 && p->soft_cap < cap) cap = p->soft_cap;
             if (taken >= cap) continue;
-            /* up-to-date before outdated, then the most populated */
-            const int outdated = lobby_outdated(l, q);
-            if (!best || outdated < best_outdated || (outdated == best_outdated && taken > best_taken)) {
+            if (load < 0) load = node_taken(r, n, q->now_ms);
+            const PickRank rank = {.outdated = lobby_outdated(l, q), .taken = taken,
+                                   .time_left = l->time_left < 0 ? 1 << 30 : l->time_left, .node_load = load};
+            if (!best || rank_better(&rank, &best_rank)) {
                 best = l;
                 best_n = n;
-                best_taken = taken;
-                best_outdated = outdated;
+                best_rank = rank;
             }
         }
     }
@@ -512,7 +596,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
         }
         out->changed = 1;
     }
-    /* 2./3. most populated public lobby with room: region first, then all */
+    /* 2./3. the best public lobby with room (registry.h): region first, then all */
     int soft = p->soft_cap > 0;
     for (int pass = soft ? 0 : 1; pass < 2; pass++) {
         int use_soft = pass == 0;
@@ -526,7 +610,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     for (size_t i = 0; i < r->node_count; i++) {
         for (size_t j = 0; j < r->nodes[i]->lobby_count; j++) {
             const MmLobby *l = &r->nodes[i]->lobbies[j];
-            if (l->custom || !lobby_auto_ok(r->nodes[i], l, q)) continue;
+            if (l->custom || l->no_seek || !lobby_auto_ok(r->nodes[i], l, q)) continue;
             any = 1;
             if (version_ok(l, q->version) && proto_ok(l, q)) any_version = 1;
         }

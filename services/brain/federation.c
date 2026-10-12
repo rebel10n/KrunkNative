@@ -56,8 +56,14 @@ static void on_ignore(kn_db_result *res, void *ud) {
 
 static void schedule_flush(void);
 
+/* Settled seats whose mm_reservations rows go once a persist carries the node's new counts
+ * (registry.h MmReservation); more wait for the next persist or expire with their rows. */
+#define PERSIST_SETTLED_MAX 64
+
 typedef struct PersistCtx {
     char node_id[MM_ID_MAX];
+    size_t settled_count;
+    char settled[PERSIST_SETTLED_MAX][40];
 } PersistCtx;
 
 /* node persist statements: P_MM_NODE_TAKEOVER / P_MM_NODE_UPDATE (db_mm.c, the
@@ -98,6 +104,9 @@ static void on_persist(kn_db_result *res, void *ud) {
     } else if (n && n->local && kn_db_get_int64(res, 0, 0, 0) == 0) {
         KN_WARN("federation", "node \"%s\" is now owned by another brain; dropping our link", p->node_id);
         internal_ws_kick(g_b, p->node_id, 4003, "replaced");
+    } else {
+        /* the persisted counts include these players: their seats' rows can go */
+        for (size_t i = 0; i < p->settled_count; i++) federation_release(g_b, p->settled[i]);
     }
     if (n) {
         n->persisting = 0;
@@ -119,6 +128,7 @@ static void persist_node(MmNode *n) {
         return;
     }
     snprintf(p->node_id, sizeof(p->node_id), "%s", n->node_id);
+    p->settled_count = registry_take_settled(g_b->registry, n->node_id, p->settled, PERSIST_SETTLED_MAX);
     char port[16], maxp[16], maxl[16];
     snprintf(port, sizeof(port), "%d", n->public_port);
     snprintf(maxp, sizeof(maxp), "%d", n->max_players);
@@ -171,6 +181,14 @@ void federation_node_gone(Brain *b, const char *node_id) {
     kn_db_notify(b->db, "kn_mm_lobby", b->id);
 }
 
+/* The other brains count the seat at once (their refresh on kn_mm_lobby) rather than at their
+ * next 1 s refresh: concurrent seekers on different brains of a region land together too. */
+static void on_reserved(kn_db_result *res, void *ud) {
+    (void) ud;
+    if (!kn_db_ok(res)) log_db_error("reserve", res);
+    else if (g_active) kn_db_notify(g_b->db, "kn_mm_lobby", g_b->id);
+}
+
 void federation_reserve(Brain *b, const char *jti, const char *game_id, int64_t account_id, int ttl_s) {
     if (!g_active) return;
     char acc[32], ttl[16];
@@ -182,7 +200,7 @@ void federation_reserve(Brain *b, const char *jti, const char *game_id, int64_t 
               " ON CONFLICT (jti) DO NOTHING",
         .any = "{insert_ignore} INTO mm_reservations (jti, game_id, brain_id, account_id, expires_at)"
                " VALUES ($1, $2, $3, NULLIF({int:$4}, 0), {later:$5}) {ignore_conflicts}"};
-    kn_db_query_sql(b->db, &q, KN_DB_ARGS(jti, game_id, b->id, acc, ttl), on_ignore, "reserve");
+    kn_db_query_sql(b->db, &q, KN_DB_ARGS(jti, game_id, b->id, acc, ttl), on_reserved, NULL);
 }
 
 void federation_release(Brain *b, const char *jti) {

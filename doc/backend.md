@@ -637,8 +637,13 @@ with the ticket returns the account name anyway). A game server should accept a 
 the signature is valid, `exp` is in the future, `nid` is its node id and `lid` one of
 its lobbies (or when `gameserver.require_ticket` is off, accept tickets-less joins
 as today). Each issued ticket reserves a slot for `join_ttl_s` (reservations count
-towards fill in quick join so parallel seeks do not overfill); `player-join` with
-the `jti` releases the reservation early. Session-token auth (`auth` with `token`)
+towards fill in quick join so parallel seeks do not overfill nor scatter). The seat counts
+until the node's own count includes the player: an `auth` with the ticket shortens it to 10 s
+(a refused player frees it), `player-join` keeps it for at most 5 s more, and the node's next
+`lobby-up`/`snapshot` of that lobby (sent after the `player-join`, so it counts the player)
+settles it; its `mm_reservations` row is deleted once that count is persisted. Releasing it at
+`auth`/`player-join` left the lobby looking empty for the node's 250 ms lobby-up debounce, so
+seekers in that window were sent to empty lobbies. Session-token auth (`auth` with `token`)
 is the path for players that connect without the brain (direct connect).
 
 ## 6. Brain: registry, federation and matchmaking
@@ -712,15 +717,23 @@ live reservations of every brain; cap = min(maxPlayers, mode cap)
    lobbies of `onlineMode` nodes (hello `onlineMode`, persisted for other brains as
    meta `onlineMode: true` in the lobby tuple): the server would refuse them
    ("Failed to verify username").
-   In the requested region, the most populated lobby with room (first pass below
-   `soft_cap`, if set).
+   Also skipped: v7.1.4 `meta.sk === false` (AUTO_SEEK off: by id only).
+   In the requested region, the best lobby with room (first pass below `soft_cap`, if set):
+   up-to-date before outdated, then the most taken seats (players + live reservations, so
+   populated lobbies fill before an empty one is used: v3.1.1 `pickBestLobby`, v7.1.4
+   `ServerManager.seek`), then the most round time left (`meta.timeLeft`, the end screen
+   last), then the least loaded node. Neither reference has a round-end, party or
+   max-player-buffer rule (the buffer is `soft_cap`).
 3. No room in the region and `cross_region`: the same rule over every region.
 4. Nothing with room -> `NoAvailableServers` (`NoServersMatchQuery` when lobbies
    exist but none matches the version). v3.1.1's "least populated" overflow would
    send the player into a full lobby the game server refuses, so it is reported.
 
 Each answer issues a ticket and reserves its seat for `join_ttl_s` (in memory and
-in `mm_reservations`); `player-join` (or an `auth` with the ticket) releases it.
+in `mm_reservations`, with a `kn_mm_lobby` NOTIFY so the other brains count it at once); it
+counts until the node reports the player (5.3). Tests: `brain_registry`,
+`brain_mm_fill_e2e` (`server/tests/mm_fill_e2e.py`: 3 `server_bin` nodes, sequential seekers
+inside the lobby-up debounce and concurrent seekers all land in one lobby).
 
 ### 6.3 Hosting custom games
 

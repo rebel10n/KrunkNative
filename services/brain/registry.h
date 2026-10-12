@@ -36,6 +36,8 @@ typedef struct MmLobby {
     char map[64];
     char version[32];                /* meta.v */
     int proto_major;                 /* meta.proto "M.m" major (-1 = not announced: a 1.x server) */
+    int time_left;                   /* meta.timeLeft: seconds left in the round (0 = end screen, -1 unknown) */
+    int no_seek;                     /* v7.1.4 meta.sk === false (AUTO_SEEK off): joined by id only */
     cJSON *tuple;                    /* owned: [gameId, region, players, max, meta] */
 } MmLobby;
 
@@ -67,11 +69,27 @@ typedef struct MmNode {
     size_t lobby_count, lobby_cap;
 } MmNode;
 
+/* A join ticket's seat. It counts towards its lobby until the node's own player count
+ * includes the player: issued (seek) -> authed (ticket auth: kept, expiry shortened) ->
+ * arrived (player-join) -> settled by the node's next report of that lobby, which the node
+ * sends after the player-join and therefore counts the player. Settled seats no longer count;
+ * federation deletes their mm_reservations rows once that count is persisted
+ * (registry_take_settled): no brain ever sees a lobby without both the seat and the player,
+ * which used to send concurrent seekers to empty lobbies. */
 typedef struct MmReservation {
     char jti[40];
     char game_id[MM_GAME_ID_MAX];
     int64_t expires_ms;
+    int arrived;                     /* player-join seen: settles on the lobby's next report */
+    int settled;                     /* the node's count includes the player: not counted */
+    int foreign;                     /* issued by another brain (its mm_reservations row counts it):
+                                      * kept only to release that row after the report */
 } MmReservation;
+
+/* Ticket auth -> the player is READY on the node within a few seconds (or refused). */
+#define MM_AUTH_GRACE_MS 10000
+/* player-join -> the node's next lobby report (server_bin: 250 ms debounce). */
+#define MM_ARRIVE_GRACE_MS 5000
 
 typedef struct MmBrainInfo {
     char brain_id[64];
@@ -128,7 +146,18 @@ void registry_remote_end(Registry *r);        /* remove still-marked remote node
 void registry_reserve(Registry *r, const char *jti, const char *game_id, int64_t expires_ms);
 void registry_release(Registry *r, const char *jti);
 void registry_expire(Registry *r, int64_t now_ms);
+/* Seats of game_id still counted (issued, authed or arrived; not settled nor foreign). */
 int registry_reserved(const Registry *r, const char *game_id, int64_t now_ms);
+/* The ticket's player authenticated on its node: the node does not count it yet, so the seat
+ * stays, but expires at until_ms at the latest (a refused player frees it soon). */
+void registry_ticket_authed(Registry *r, const char *jti, int64_t until_ms);
+/* player-join: the seat stays counted until the node's next report of the lobby settles it
+ * (registry_lobby_upsert), or for grace_ms at most. An unknown jti with a game_id (a ticket of
+ * another brain, federation) is recorded as foreign: never counted, only released later. */
+void registry_arrive(Registry *r, const char *jti, const char *game_id, int64_t now_ms, int64_t grace_ms);
+/* Removes up to max settled seats of node_id's lobbies, copying their jtis; returns the count
+ * (federation: their mm_reservations rows go once the node's new counts are persisted). */
+size_t registry_take_settled(Registry *r, const char *node_id, char jtis[][40], size_t max);
 
 /* Effective seats taken (players + local + remote reservations). */
 int registry_lobby_taken(const Registry *r, const MmLobby *l, int64_t now_ms);
@@ -172,6 +201,15 @@ typedef struct MmPick {
     int changed;                   /* requested game replaced (changeReason game_changed) */
 } MmPick;
 
+/* Quick join (doc/backend.md 6.2): a requested ?game= with room, else the public pool (not
+ * custom, private, password protected, v7 sk:false, draining, wrong version / protocol, or
+ * online_mode for a guest), in the requested region first, then (cross_region) anywhere:
+ *   1. up-to-date before outdated (releases.c)
+ *   2. the most taken seats (players + live reservations): populated lobbies fill up before an
+ *      empty one is used (v3.1.1 pickBestLobby, v7.1.4 ServerManager.seek "fuller-but-not-full")
+ *   3. the most round time left (meta.timeLeft; end screen last)
+ *   4. the least loaded node (taken seats over all its lobbies)
+ * With soft_cap set, a first pass treats lobbies at the soft cap as full. */
 MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, MmPick *out);
 
 /* Matchmaking eligibility of a lobby: online_mode lobbies take signed-in players

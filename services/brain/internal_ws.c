@@ -310,7 +310,9 @@ static void handle_auth(NodeConn *c, const cJSON *frame) {
             auth_finish(a, err[0] ? err : "invalid ticket", NULL);
             return;
         }
-        registry_release(c->b->registry, kn_json_str(a->claims, "jti", ""));
+        /* the node counts the player from its READY (player-join) on: the seat stays until then,
+         * shortened so a refused player frees it soon (registry.h MmReservation) */
+        registry_ticket_authed(c->b->registry, kn_json_str(a->claims, "jti", ""), kn_wall_ms() + MM_AUTH_GRACE_MS);
         int64_t acc = kn_json_int(a->claims, "acc", 0);
         if (acc <= 0) {
             auth_finish(a, NULL, NULL);
@@ -543,10 +545,17 @@ static void handle_frame(NodeConn *c, const cJSON *frame) {
         return;
     }
     if (!strcmp(type, "player-join")) {
+        /* The seat counts until the node's next report of the lobby (sent after this frame, so
+         * it counts the player); federation deletes its mm_reservations row once that count is
+         * persisted (federation.c persist_node). Releasing it here left the lobby looking empty
+         * for the node's 250 ms lobby-up debounce: seekers in that window went to empty lobbies. */
         const char *jti = kn_json_str(frame, "clientId", kn_json_str(frame, "jti", NULL));
-        if (jti) {
-            registry_release(b->registry, jti);
-            federation_release(b, jti);
+        if (jti && *jti) {
+            char game_id[MM_GAME_ID_MAX] = "";
+            const char *lobby = kn_json_str(frame, "lobbyId", "");
+            if (federation_active() && strchr(lobby, ':')) snprintf(game_id, sizeof(game_id), "%s", lobby);
+            else if (federation_active() && *lobby) snprintf(game_id, sizeof(game_id), "%s:%s", n->node_id, lobby);
+            registry_arrive(b->registry, jti, game_id[0] ? game_id : NULL, kn_wall_ms(), MM_ARRIVE_GRACE_MS);
         }
         return;
     }

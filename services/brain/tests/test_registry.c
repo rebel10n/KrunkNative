@@ -296,6 +296,153 @@ int main(void) {
         registry_free(s);
     }
 
+    /* mm-fill: populated lobbies fill before empty ones; ties on round time, then node load */
+    {
+        Registry *f = registry_new();
+        MmPolicy pf = {.cross_region = 1, .default_max_players = 8};
+        MmNode *e1 = add_node(f, "E1", "eu", 0), *e2 = add_node(f, "E2", "eu", 0), *e3 = add_node(f, "E3", "eu", 0);
+        MmNode *us = add_node(f, "US", "us", 0);
+        add_lobby(f, e1, "a", 0, 8, 0, "1.0");
+        add_lobby(f, e2, "b", 0, 8, 0, "1.0");
+        add_lobby(f, e3, "c", 2, 8, 0, "1.0");
+        add_lobby(f, us, "d", 6, 8, 0, "1.0");
+        MmPickQuery qe = {.region = "eu", .auto_change = 1, .now_ms = 2000};
+        /* the populated lobby (2 players, last in order) over the empty ones; never the fuller one
+         * of another region while the region has room */
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E3:c"));
+        /* a lobby one seat from full is still preferred, a full one is skipped */
+        add_lobby(f, e3, "c", 7, 8, 0, "1.0");
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E3:c"));
+        add_lobby(f, e3, "c", 8, 8, 0, "1.0");
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E1:a"));
+        /* the region full: the fullest lobby with room anywhere (cross_region) */
+        add_lobby(f, e1, "a", 8, 8, 0, "1.0");
+        add_lobby(f, e2, "b", 8, 8, 0, "1.0");
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "US:d"));
+
+        /* equal population: more round time left wins (the end screen last), unknown is not penalised */
+        cJSON *t;
+        t = cJSON_Parse("[\"a\",\"eu\",3,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"timeLeft\":40}]");
+        registry_lobby_upsert(f, e1, t);
+        cJSON_Delete(t);
+        t = cJSON_Parse("[\"b\",\"eu\",3,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"timeLeft\":200}]");
+        registry_lobby_upsert(f, e2, t);
+        cJSON_Delete(t);
+        t = cJSON_Parse("[\"c\",\"eu\",3,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"timeLeft\":0}]");
+        registry_lobby_upsert(f, e3, t);
+        cJSON_Delete(t);
+        CHECK(registry_lobby(f, "E2:b", NULL)->time_left == 200 && registry_lobby(f, "E1:a", NULL)->time_left == 40);
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E2:b"));
+        /* population beats round time: one more player in the lobby about to end */
+        t = cJSON_Parse("[\"c\",\"eu\",4,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"timeLeft\":0}]");
+        registry_lobby_upsert(f, e3, t);
+        cJSON_Delete(t);
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E3:c"));
+        /* equal population and time: the less loaded node (E1 also runs a busy lobby) */
+        add_lobby(f, e1, "a", 3, 8, 0, "1.0");
+        add_lobby(f, e2, "b", 3, 8, 0, "1.0");
+        add_lobby(f, e3, "c", 8, 8, 0, "1.0");
+        add_lobby(f, e1, "a2", 8, 8, 0, "1.0");
+        CHECK(registry_lobby(f, "E1:a", NULL)->time_left == -1);
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E2:b"));
+        registry_lobby_remove(f, e1, "a2");
+        /* all equal: the first in order (stable) */
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E1:a"));
+
+        /* v7.1.4 ServerManager.seek: sk === false (AUTO_SEEK off) is never quick-joined, only by id */
+        t = cJSON_Parse("[\"a\",\"eu\",5,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"sk\":false}]");
+        registry_lobby_upsert(f, e1, t);
+        cJSON_Delete(t);
+        CHECK(registry_lobby(f, "E1:a", NULL)->no_seek);
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E2:b"));
+        MmPickQuery qid = {.region = "eu", .game_id = "E1:a", .auto_change = 0, .now_ms = 2000};
+        CHECK(registry_pick(f, &pf, &qid, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E1:a"));
+        add_lobby(f, e1, "a", 0, 8, 0, "1.0");
+        add_lobby(f, e2, "b", 0, 8, 0, "1.0");
+        add_lobby(f, e3, "c", 0, 8, 0, "1.0");
+        CHECK(!registry_lobby(f, "E1:a", NULL)->no_seek);
+
+        /* concurrent seekers (no report in between): each issued seat counts, so all of them
+         * land together until the lobby is full, then the next empty one fills */
+        for (int i = 0; i < 8; i++) {
+            char jti[16];
+            snprintf(jti, sizeof(jti), "c%d", i);
+            CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E1:a"));
+            registry_reserve(f, jti, pick.lobby->game_id, 30000);
+        }
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E2:b"));
+        for (int i = 0; i < 8; i++) {
+            char jti[16];
+            snprintf(jti, sizeof(jti), "c%d", i);
+            registry_release(f, jti);
+        }
+
+        /* stale counts: a player is in E3:c (joined by id), the node has not reported it yet */
+        registry_reserve(f, "s1", "E3:c", 30000);
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E3:c"));
+        /* ticket auth: the node does not count the player yet; the seat stays (shortened) */
+        registry_ticket_authed(f, "s1", 2000 + MM_AUTH_GRACE_MS);
+        CHECK(registry_reserved(f, "E3:c", 2000) == 1);
+        CHECK(registry_reserved(f, "E3:c", 2000 + MM_AUTH_GRACE_MS) == 0); /* refused: freed soon */
+        /* player-join: still counted until the node reports the lobby (debounced lobby-up) */
+        registry_arrive(f, "s1", NULL, 2100, MM_ARRIVE_GRACE_MS);
+        CHECK(registry_reserved(f, "E3:c", 2200) == 1);
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E3:c"));
+        /* a second seeker within the same second: lands there too, before any report */
+        registry_reserve(f, "s2", "E3:c", 30000);
+        CHECK(registry_lobby_taken(f, registry_lobby(f, "E3:c", NULL), 2200) == 2);
+        /* a report of another lobby settles nothing */
+        add_lobby(f, e1, "a", 0, 8, 0, "1.0");
+        CHECK(registry_reserved(f, "E3:c", 2200) == 2);
+        /* the report counting s1: s1 settles (no double count), s2 is still in flight */
+        add_lobby(f, e3, "c", 1, 8, 0, "1.0");
+        CHECK(registry_reserved(f, "E3:c", 2300) == 1);
+        CHECK(registry_lobby_taken(f, registry_lobby(f, "E3:c", NULL), 2300) == 2);
+        CHECK(registry_pick(f, &pf, &qe, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "E3:c"));
+        /* no report after a player-join: the seat counts for the arrival grace only */
+        registry_arrive(f, "s2", NULL, 2400, MM_ARRIVE_GRACE_MS);
+        CHECK(registry_reserved(f, "E3:c", 2400 + MM_ARRIVE_GRACE_MS - 1) == 1);
+        CHECK(registry_reserved(f, "E3:c", 2400 + MM_ARRIVE_GRACE_MS) == 0);
+        /* a later report does not settle an already counted seat twice */
+        registry_arrive(f, "s2", NULL, 2500, MM_ARRIVE_GRACE_MS);
+        add_lobby(f, e3, "c", 2, 8, 0, "1.0");
+        CHECK(registry_reserved(f, "E3:c", 2600) == 0);
+        /* federation: settled seats of a node are handed over once (their rows go after the persist) */
+        char jtis[4][40];
+        CHECK(registry_take_settled(f, "E1", jtis, 4) == 0);
+        size_t ns = registry_take_settled(f, "E3", jtis, 4);
+        CHECK(ns == 2 && ((!strcmp(jtis[0], "s1") && !strcmp(jtis[1], "s2")) || (!strcmp(jtis[0], "s2") && !strcmp(jtis[1], "s1"))));
+        CHECK(registry_take_settled(f, "E3", jtis, 4) == 0);
+        /* a ticket another brain issued (its row counts the seat there): recorded, never counted
+         * here, released after the report */
+        registry_arrive(f, "far", "E2:b", 3000, MM_ARRIVE_GRACE_MS);
+        CHECK(registry_reserved(f, "E2:b", 3000) == 0);
+        registry_arrive(f, "nogame", NULL, 3000, MM_ARRIVE_GRACE_MS); /* no federation: nothing */
+        CHECK(registry_take_settled(f, "E2", jtis, 4) == 0);
+        add_lobby(f, e2, "b", 1, 8, 0, "1.0");
+        CHECK(registry_take_settled(f, "E2", jtis, 4) == 1 && !strcmp(jtis[0], "far"));
+        /* node ids that prefix each other ("E1" / "E1X") stay apart */
+        MmNode *e1x = add_node(f, "E1X", "eu", 0);
+        add_lobby(f, e1x, "x", 0, 8, 0, "1.0");
+        registry_reserve(f, "x1", "E1X:x", 30000);
+        registry_arrive(f, "x1", NULL, 3000, MM_ARRIVE_GRACE_MS);
+        add_lobby(f, e1x, "x", 1, 8, 0, "1.0");
+        CHECK(registry_take_settled(f, "E1", jtis, 4) == 0 && registry_take_settled(f, "E1X", jtis, 4) == 1);
+        /* a remote (federated) copy of a lobby never settles this brain's seats */
+        registry_reserve(f, "r1", "FAR:z", 30000);
+        registry_arrive(f, "r1", NULL, 3000, MM_ARRIVE_GRACE_MS);
+        registry_remote_begin(f);
+        MmNode *far = registry_remote_node(f, "FAR");
+        cJSON *rt = cJSON_Parse("[\"FAR:z\",\"eu\",0,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false}]");
+        CHECK(far && registry_lobby_upsert(f, far, rt) == 0);
+        cJSON_Delete(rt);
+        registry_remote_end(f);
+        CHECK(registry_reserved(f, "FAR:z", 3000) == 1);
+        registry_expire(f, 100000);
+        CHECK(f->res_count == 0);
+        registry_free(f);
+    }
+
     /* remote refresh */
     registry_remote_begin(r);
     MmNode *rm = registry_remote_node(r, "SGP");

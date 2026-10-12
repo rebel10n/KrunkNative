@@ -119,6 +119,12 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/ks_storage_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_ks_storage_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # mm-fill: quick join fills the populated lobby (3 server_bin nodes; sequential seekers
+        # inside the lobby-up debounce and concurrent seekers all land together)
+        add_test(NAME brain_mm_fill_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/mm_fill_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_mm_fill_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # editor WP6: the map editor's publishing, My Games and asset windows (headless client_bin
         # --editor against kn_brain; skips 77 without a database, websockets or client_bin)
         add_test(NAME brain_editor_publish_e2e
