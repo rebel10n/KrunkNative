@@ -1,0 +1,110 @@
+P Trigger
+L[] Visible : switch=1
+L[] Player Collidable : switch=1
+L[] Bullet Collisions : switch=1
+L[] AI Collisions : switch=1
+L[] Wall Jumpable : switch=1
+L[] Can Grapple : switch=1
+L[] Can Impulse : switch=1
+L[] Show On Minimap : switch=1
+L[] Spin : sval=0 range[-20,20,0.1]=0
+L[] Spin Axis : select#2[Y..X]=Y
+L[] Team : select#5[Default..Delta]=Default
+L[] Model Scale : sval=1 range[0.01,100,0.01]=1
+L[] Step Sound : select#5[Default..Snow]=Default
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 10/0,10/0,10/0
+-
+F Style closed
+-
+Fs Texture closed
+L[subsection] Type : select#20[Default..Snow]=Stone
+L[subsection] Variant : select#8[Default..Light Cobble]=Default
+L[subsection] Asset ID : text(Texture Asset ID)=0
+B Select Custom
+L[subsection] Stretch : switch=0
+L[subsection] Scale : sval=0 range[0,10,0.01]=0
+L[subsection] Force Transparency : switch=0
+L[subsection] Rotation : sval=0 range[0,360,1]=0
+Fss Offset closed
+L[subsubsection] X : sval=0 range[0,1,0.01]=0
+L[subsubsection] Y : sval=0 range[0,1,0.01]=0
+Fss Movement closed
+L[subsubsection] Speed : sval=0 range[-20,20,0.1]=0
+L[subsubsection] Axis : select#2[X..Y]=X
+Fss Frame Animation closed
+L[subsubsection] Frame Count : sval=0 range[0,100,1]=0
+L[subsubsection] Frame Speed : sval=0 range[0,10,0.1]=0
+-
+L[subsection] Asset ID : text(ID)=
+B Select Custom
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+L[] Emissive : color=#000000
+L[] Opacity : sval=1 range[0,1,0.1]=1
+L[] Texture Smoothing : switch=1
+L[] Fog : switch=1
+L[] Cast Shadows : switch=1
+L[] Receive Shadows : switch=1
+L[] Force Render : switch=0
+L[] AlphaTest : sval=0 range[0,1,0.01]=0
+L[] Render Side : select#4[Game Default..Double]=Game Default
+-
+F Technical & Logic closed
+-
+L[] Single Use : switch=0
+L[] Once Per Player : switch=0
+L[] Destructible : switch=0
+L[] Start Destroyed : switch=0
+L[] Spawn Chance : sval=0 range[0,100,0.01]=0
+L[] Destroy On Use : switch=0
+L[] Health : sval=0 range[0,50000,10]=0
+-
+Fs Respawn closed
+L[subsection] Timer (s) : sval=0 range[0,3600,0.1]=0
+L[subsection] Random : switch=0
+-
+Fs Hitbox closed
+L[subsection] Width Mlt : sval=1 range[0.1,10,0.1]=1
+L[subsection] Height Mlt : sval=1 range[0.1,20,0.1]=1
+-
+Fs Trigger Event closed
+L[] Event : select#28[onShoot..onCustomValGreater]=onShoot
+L[] Event Value : sval=0 range[0,10000,1]=0
+Fs Trigger Actions closed
+L[] Action Chance (%) : sval=0 range[0,100,1]=0
+B Add Action
+Fss Action 0 closed
+L[subsection] Action : select#66[Give Player Score..Mode Specific]=Give Player Score
+L[] Value Type : select#4[Input Value..Global Value]=Input Value
+L[] Action Value : sval=0 range[-10000,10000,1]=0
+L[] Delay : sval=0 range[0,60,0.1]=0
+Fss Condition closed
+L[] Condition : select#12[None..Player Inventory Value]=None
+-
+Fs Interface closed
+L[subsection] ID : sval=0 range[0,2000,1]=0
+L[subsection] Target : sval=0 range[0,2000,1]=0
+L[] Script # : text()=
+-
+F Render Faces closed
+-
+L[] Right : switch=1
+L[] Left : switch=1
+L[] Top : switch=1
+L[] Bottom : switch=1
+L[] Back : switch=1
+L[] Front : switch=1
+-
+F Animations closed
+-
+L[] Animation Speed : sval=1 range[0.01,10,0.01]=1
+L[] Start Animation : text()=
+-

@@ -7,6 +7,7 @@
 // The Pickr colour picker (libs/pickr.min.js, theme "nano", hue only, no opacity) is
 // rebuilt here as markup with Pickr's class names so css/pickr.css styles it.
 #include "editor_internal.h"
+#include "editor_model.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -15,7 +16,7 @@
 #include <string.h>
 
 #define ED_PANELS 4
-#define ED_MAX_CTLS 2048
+#define ED_MAX_CTLS 4096 // v7's left panel (map / server / weapon / class / effect config) has ~3000 controls
 
 typedef struct {
     EdCtl ctls[ED_MAX_CTLS];
@@ -86,21 +87,20 @@ void edb_add_escaped(EdBuf *b, const char *s) {
     }
 }
 
-// JS Number -> string (`"" + n`): integers without a fraction, otherwise the shortest
-// form that reads back the same (good enough at 12 significant digits for the GUI).
+// JS Number -> string (`"" + n`): Number#toString (editor_model.c), so a step of 0.00001 reads
+// "0.00001" as in v7's markup, not "1e-05"
 static void num_str(const double v, char *out, const size_t n) {
     if (isnan(v)) {
         snprintf(out, n, "NaN");
         return;
     }
-    if (v == floor(v) && fabs(v) < 1e15) {
-        snprintf(out, n, "%.0f", v);
+    if (isinf(v)) {
+        snprintf(out, n, v > 0 ? "Infinity" : "-Infinity");
         return;
     }
-    for (int p = 1; p <= 17; p++) {
-        snprintf(out, n, "%.*g", p, v);
-        if (strtod(out, NULL) == v || p >= 12) break;
-    }
+    char buf[64];
+    ed_model_number(v, buf, sizeof(buf));
+    snprintf(out, n, "%s", buf);
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +475,13 @@ void ed_gui_emit_value(EdBuild *b, EdCtl *c) {
                 char val[64];
                 const char *value = o->svalue ? o->svalue : (num_str(o->value, val, sizeof(val)), val);
                 int sel;
-                if (o->svalue) sel = cJSON_IsString(v) && !strcmp(v->valuestring, o->svalue);
+                if (o->svalue) {
+                    // v7: `value == option.value` (loose: a number matches a numeric option string)
+                    char *end = NULL;
+                    const double num = strtod(o->svalue, &end);
+                    sel = (cJSON_IsString(v) && !strcmp(v->valuestring, o->svalue)) ||
+                          (cJSON_IsNumber(v) && o->svalue[0] && end && !*end && num == v->valuedouble);
+                }
                 else sel = value_double(v) == o->value;
                 if (i) edb_add(&b->html, ",");
                 edb_add(&b->html, "<option value=\"");
@@ -544,14 +550,32 @@ static int h_update_field(void *user, const HtmlEvent *ev, const HtmlArg *args, 
     return 1;
 }
 
+// the first descendant of `root` (document order) whose id is `id`
+static HtmlElem find_id_in(const HtmlElem root, const char *id) {
+    for (HtmlElem e = html_dom_first_child(root); e; e = html_dom_next(e)) {
+        char v[128];
+        if (html_dom_get_attr(e, "id", v, sizeof(v)) > 0 && !strcmp(v, id)) return e;
+        const HtmlElem in = find_id_in(e, id);
+        if (in) return in;
+    }
+    return 0;
+}
+
+// A folder header's body: v7's GUI.update.folder looks it up inside the header's parent
+// (`parentElement.querySelector("[id='<name>B']")`), so folders that share a name (Class
+// Config's Camera / Movement / ... per class, the Condition / Sound folders per trigger action)
+// each toggle their own body; a document-wide getElementById would always find the first one.
+static HtmlElem folder_body(const HtmlElem header) {
+    char id[128];
+    if (html_dom_get_attr(header, "id", id, sizeof(id)) <= 0) return 0;
+    id[strlen(id) - 1] = 'B';
+    return find_id_in(html_dom_parent(header), id);
+}
+
 static int h_update_folder(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) args; (void) argc;
-    char id[128];
-    if (html_dom_get_attr(ev->target, "id", id, sizeof(id)) < 0) return 1;
-    const size_t len = strlen(id);
-    if (!len) return 1;
-    id[len - 1] = 'B';
-    const HtmlElem body = html_dom_by_id(id);
+    const HtmlElem body = folder_body(ev->target);
+    if (!body) return 1;
     char display[32] = "";
     html_dom_get_style(body, "display", display, sizeof(display));
     const int was_closed = !strcmp(display, "none");
@@ -1060,11 +1084,10 @@ static int h_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
     switch (c->kind) {
         case EG_FOLDER_STANDARD:
         case EG_FOLDER_SMALL: {
-            char id[128];
-            if (html_dom_get_attr(ev->target, "id", id, sizeof(id)) > 0) {
-                id[strlen(id) - 1] = 'B';
+            const HtmlElem body = folder_body(ev->target);
+            if (body) {
                 char display[16] = "";
-                html_dom_get_style(html_dom_by_id(id), "display", display, sizeof(display));
+                html_dom_get_style(body, "display", display, sizeof(display));
                 ed_json_set_bool(g_folder_store, c->path, !strcmp(display, "none"));
             }
             return 1;
@@ -1112,8 +1135,9 @@ static int h_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
             break;
     }
     if (c->bind == EB_JSON && c->json) {
-        cJSON_DeleteItemFromObjectCaseSensitive(c->json, c->key);
-        cJSON_AddItemToObject(c->json, c->key, cJSON_Duplicate(value, 1));
+        // `object[key] = value`: an existing key keeps its place (the export's key order is v7's)
+        if (cJSON_GetObjectItemCaseSensitive(c->json, c->key)) cJSON_ReplaceItemInObjectCaseSensitive(c->json, c->key, cJSON_Duplicate(value, 1));
+        else cJSON_AddItemToObject(c->json, c->key, cJSON_Duplicate(value, 1));
     } else if (c->bind == EB_OBJ && g_ed.proj->selected) {
         EditorObject *o = g_ed.proj->selected;
         const int before = ed_obj_count_class(o);

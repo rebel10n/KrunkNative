@@ -18,6 +18,7 @@ rasterise fonts differently. Everything here is regenerated, never hand-edited.
 | `teleport.{png,dump.txt}` | `KE.teleportPopup()` (`#genericPop`) |
 | `left-essential.dump.txt` | the left panel (map config) |
 | `right-<name>.{png,dump.txt}` | `GUI.panel.right.<name>.show()`: environment, terrain, zone, ocean, tools, prefab, objectList, gui, blank |
+| `logic/<case>.json`, `logic/<case>.dump.txt` | `tools/editor/logic_cases.json` replayed by GUI.action on the panel blueprints (editor WP4): a trigger case's object `serialize()` and right panel, a GUI / config case's `{config, gui}` of `getMapExport()` and its right / left panel; captured without `js/hook.js` (below) |
 | `prefabs/<id>.json`, `prefabs/<id>.right.dump.txt` | after `KE.clearMap()`: `KE.createObjects[id]()`, the new object's `serialize()` and the right (object) panel; `prefabs/skipped.txt` lists the ids not created |
 
 ## Dump format
@@ -61,5 +62,10 @@ over CDP (`tools/kref/cdp.js`) on another free port. Determinism:
 The page's host is not `127.0.0.1:8080`, so v7's `config.isProd` is true, as on krunker.io: the
 `localOnly` prefabs (40 EVENT, 41 TERMINAL, 95 BOT_SPAWNER) are neither listed in the menus nor
 created, and the Event Objects counter stays hidden. 44 CUSTOM_ASSET opens the asset browser
-and has no object. Windows that need Krunker's API (2 Assets, 5 Mods, 7 Textures, 9 Sounds,
+and has no object. `prefabs/29.right.dump.txt` (TRIGGER) and `prefabs/55.right.dump.txt` (AI_SPAWNER)
+lack v7's "Trigger Event" folder: a capture artifact, not v7. The served `public/js/hook.js` defines
+an `Object.prototype.events` accessor, so `vO234.events = {...}` (UI:4081) never becomes an own key
+of the Technical blueprint and `_build` skips it; the real editor shows the folder (Can Trigger,
+Event, Event Value) between Hitbox and Trigger Actions, and so does the native panel
+(`client/src/editor/editor_triggers.c`). Windows that need Krunker's API (2 Assets, 5 Mods, 7 Textures, 9 Sounds,
 14 Maps) show their offline `Loading...` state.

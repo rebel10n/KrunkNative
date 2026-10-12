@@ -14,7 +14,10 @@
 //                     control kit (editor_panel_kit.h)
 //   editor_inspector.c the right object panel (the inspector)
 //   editor_env.c      the right environment / terrain / zone panels
-//   editor_gameconfig.c the left "Essential" map panel (map, game, server, weapon config)
+//   editor_gameconfig.c the left "Essential" map panel (map, modes, server, weapon, class and effect
+//                     config) and the asset-selection targets of its buttons
+//   editor_triggers.c the logic UI of TRIGGER / AI_SPAWNER (Trigger Event / Trigger Actions folders)
+//   editor_customgui.c the Custom GUI panel (Components > GUI) and its overlay preview
 //   editor_render.c   editor GL: bounding boxes, helper volumes, grid, death barrier,
 //                     sun marker, light helpers, wireframe, transform gizmo; ray picking;
 //                     gizmo drag math (modelScale / fakeScale / one-sided scaling)
@@ -461,6 +464,27 @@ int ed_gui_key_capture(int key, int action);      // GUI.update.key.keydown
 void ed_toolbar_show(void);
 void ed_toolbar_account_check(void);             // per frame: rebuild on login / account change
 void ed_panel_left_show(void);
+void ed_select_mod(EdCtl *c);                         // advancedOptions.selectMod (editor_gameconfig.c)
+// KE.viewTextures / viewModels / viewSounds([kind, index]) of the logic / config UI: opens the
+// asset window; KE.selectAsset then applies the chosen id to the target (editor_gameconfig.c).
+// editor_show_window drops a pending target.
+enum {
+    ED_ASSET_NONE, ED_ASSET_CROSSHAIR, ED_ASSET_CROSSHAIR_C, ED_ASSET_PLAYER_TYPE, ED_ASSET_WEAPON_ICON,
+    ED_ASSET_WEAPON_ASSET, ED_ASSET_GUI_IMAGE, ED_ASSET_ACTION_AUDIO,
+};
+void ed_asset_target_open(int kind, int index);
+void ed_asset_target_clear(void);
+int ed_asset_target_apply(const char *id);            // 1 = the id went to the pending target
+// ---- editor_triggers.c: KRUNKNATIVE_EDITOR_SCRIPT "trig:add|remove:N|set:<prop>:<json>" (1 = handled)
+int ed_triggers_script(const char *cmd, const char *arg);
+int ed_gameconfig_script(const char *cmd, const char *arg); // cfg:... (editor_gameconfig.c)
+int ed_customgui_script(const char *cmd, const char *arg);  // gui:... (editor_customgui.c)
+// ---- editor_customgui.c: Components > GUI (EditorOverlay.customGUIs = EditorProject.gui)
+struct Canvas2D;
+void ed_panel_right_gui(void);                        // GUI.panel.right.gui.show
+void ed_customgui_set_image(int index, const char *id); // KE.selectAsset "selectImage"
+void ed_customgui_draw(struct Canvas2D *canvas, int width, int height); // EditorOverlay.render's custom GUI
+int ed_customgui_enabled(void);                       // EditorOverlay.enabled ("Show GUI")
 void ed_panel_right_blank(void);
 void ed_panel_right_object(void);
 void ed_inspector_install(HtmlHandlerEntry *table, size_t *count, size_t max); // editor_inspector.c: KE.selectTex / .. / searchItems

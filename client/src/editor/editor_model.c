@@ -2366,9 +2366,28 @@ static const PropDef K_PROPS[] = {
 #undef PC
 #undef PA
 
-static const PropDef *prop_def(const char *prop) {
-    for (int i = 0; K_PROPS[i].prop; i++) if (!strcmp(K_PROPS[i].prop, prop)) return &K_PROPS[i];
+// A property name, optionally with a trigger action index: "constant@2" is tas[2]'s "constant"
+// (the multi-action list of the logic UI, editor_triggers.c); a plain action prop is tas[0].
+// *index = -1 without a suffix.
+static const PropDef *prop_def_at(const char *prop, int *index) {
+    *index = -1;
+    const char *at = prop ? strchr(prop, '@') : NULL;
+    const size_t n = at ? (size_t) (at - prop) : (prop ? strlen(prop) : 0);
+    if (at) {
+        char *end = NULL;
+        const long i = strtol(at + 1, &end, 10);
+        if (end == at + 1 || *end || i < 0 || i >= 64) return NULL;
+        *index = (int) i;
+    }
+    for (int i = 0; prop && K_PROPS[i].prop; i++) {
+        if (strlen(K_PROPS[i].prop) == n && !strncmp(K_PROPS[i].prop, prop, n)) return at && !K_PROPS[i].action ? NULL : &K_PROPS[i];
+    }
     return NULL;
+}
+
+static const PropDef *prop_def(const char *prop) {
+    int index;
+    return prop_def_at(prop, &index);
 }
 
 const char *ed_model_prop_key(const char *prop) {
@@ -2376,11 +2395,16 @@ const char *ed_model_prop_key(const char *prop) {
     return d ? d->key : NULL;
 }
 
-// where a property lives: the object, or its first trigger action (created on demand when `create`)
-static cJSON *prop_holder(cJSON *data, const int prefab, const PropDef *d, const int create) {
+// where a property lives: the object, or trigger action `index` (-1 = the first; tas[0] is created
+// on demand when `create`, a later index must exist)
+static cJSON *prop_holder(cJSON *data, const int prefab, const PropDef *d, const int index, const int create) {
     if (!d->action || !(prefab >= 0 && prefab < EDITOR_PREFAB_COUNT) ||
-        !(!strcmp(editor_prefabs[prefab].name, "TRIGGER") || editor_prefab_has(prefab, EP_AI))) return data;
+        !(!strcmp(editor_prefabs[prefab].name, "TRIGGER") || editor_prefab_has(prefab, EP_AI))) return index > 0 ? NULL : data;
     cJSON *tas = cJSON_GetObjectItemCaseSensitive(data, "tas");
+    if (index > 0) {
+        cJSON *a = cJSON_GetArrayItem(tas, index);
+        return cJSON_IsObject(a) ? a : NULL;
+    }
     if (!cJSON_IsArray(tas)) {
         if (!create) return NULL;
         cJSON_DeleteItemFromObjectCaseSensitive(data, "tas");
@@ -2403,9 +2427,10 @@ static double prop_default(const PropDef *d, const int prefab) {
 }
 
 cJSON *ed_model_prop_get(const cJSON *data, const int prefab, const char *prop) {
-    const PropDef *d = prop_def(prop);
+    int index;
+    const PropDef *d = prop_def_at(prop, &index);
     if (!d) return NULL;
-    const cJSON *h = prop_holder((cJSON *) data, prefab, d, 0);
+    const cJSON *h = prop_holder((cJSON *) data, prefab, d, index, 0);
     const cJSON *v = h ? G(h, d->key) : NULL;
     const double def = prop_default(d, prefab);
     char buf[64];
@@ -2434,9 +2459,10 @@ cJSON *ed_model_prop_get(const cJSON *data, const int prefab, const char *prop) 
 }
 
 int ed_model_prop_set(cJSON **data, const int prefab, const char *prop, const cJSON *value) {
-    const PropDef *d = prop_def(prop);
+    int index;
+    const PropDef *d = prop_def_at(prop, &index);
     if (!d || !data || !*data) return 0;
-    cJSON *h = prop_holder(*data, prefab, d, 1);
+    cJSON *h = prop_holder(*data, prefab, d, index, 1);
     if (!h) return 0;
     const double def = prop_default(d, prefab);
     cJSON *nv = NULL;
@@ -2455,7 +2481,11 @@ int ed_model_prop_set(cJSON **data, const int prefab, const char *prop, const cJ
             if (cJSON_IsString(value) && strcmp(value->valuestring, d->sdef)) nv = cJSON_CreateString(value->valuestring);
             else if (cJSON_IsNumber(value)) nv = cJSON_Duplicate(value, 1);
             break;
-        case PK_RAW: if (!js_nullish(value) && !(cJSON_IsNumber(value) && value->valuedouble == def)) nv = cJSON_Duplicate(value, 1); break;
+        case PK_RAW:
+            // an indexed condition value is stored as given, like v7's GUI.action (serialize writes
+            // cv0..2 whenever they are not null, 0 included)
+            if (!js_nullish(value) && (index >= 0 || !(cJSON_IsNumber(value) && value->valuedouble == def))) nv = cJSON_Duplicate(value, 1);
+            break;
         default: {
             double v = cJSON_IsString(value) ? parse_float_str(value->valuestring) : js_number(value);
             if (d->kind == PK_INT || d->kind == PK_INTN) v = js_parse_int_d(v);

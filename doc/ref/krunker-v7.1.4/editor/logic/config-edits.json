@@ -1,0 +1,103 @@
+{
+ "config": {
+  "modes": [
+   0,
+   1
+  ],
+  "classes": [
+   0,
+   1,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15
+  ],
+  "settings": {
+   "maxPlayers": 8,
+   "gravMlt": 0.5
+  },
+  "weps": {
+   "0": {
+    "name": "Longshot",
+    "dmg": 90
+   }
+  },
+  "cls": {
+   "0": {
+    "camType": "2",
+    "speed": 1.5,
+    "health": 150
+   },
+   "1": {
+    "speed": 1.5
+   },
+   "2": {
+    "speed": 1.5,
+    "wallJ": false,
+    "wallJM": 0
+   },
+   "3": {
+    "name": "Tank",
+    "speed": 1.5,
+    "slA": 1
+   },
+   "5": {
+    "speed": 1.5
+   },
+   "6": {
+    "speed": 1.5
+   },
+   "7": {
+    "speed": 1.5
+   },
+   "8": {
+    "speed": 1.5,
+    "wallJ": false,
+    "wallJM": 0
+   },
+   "9": {
+    "speed": 1.5,
+    "wallJ": false,
+    "wallJM": 0
+   },
+   "10": {
+    "speed": 1.5
+   },
+   "11": {
+    "speed": 1.5
+   },
+   "12": {
+    "speed": 1.5
+   },
+   "13": {
+    "speed": 1.5,
+    "slT": 1,
+    "wallJ": false,
+    "wallJM": 0
+   },
+   "14": {
+    "speed": 1.5,
+    "wallJ": false,
+    "wallJM": 0
+   },
+   "15": {
+    "speed": 1.5
+   }
+  },
+  "prks": {
+   "4": {
+    "max": 3
+   }
+  }
+ },
+ "gui": null
+}

@@ -42,7 +42,6 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 4.0,
-      "skip": true,
       "note": "dimmed under the window backdrop; left panel: Essential (map config), editor WP4"
     },
     {

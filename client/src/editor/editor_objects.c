@@ -209,6 +209,7 @@ int ed_prop_needs_rebuild(const char *prop) {
                                         "constantTxt", "constantCust", "constantEvent", "chance", "interfaceId", "interfaceIdT",
                                         "withdraw", "deposit", "respawnT", "respawnR", "snd", "assetSound", "vol", "rate",
                                         "emitfrom", "dist", "distM", "roll", "delay", "condition", "actionCost", "actionMethod", NULL};
+    if (strchr(prop, '@')) return 0; // "<prop>@N": trigger action N (logic only)
     for (int i = 0; logic[i]; i++) if (!strcmp(logic[i], prop)) return 0;
     return 1;
 }

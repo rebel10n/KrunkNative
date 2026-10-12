@@ -361,6 +361,7 @@ void editor_show_window(const int index) {
     // window.showWindow(n): KE.toggleWindow(false); toggleMenu(true); toggle(false); gen;
     // menuWindow styles; windowHeader = header; toggleWindow(true); post()
     if (index < 1 || index > ED_WINDOW_COUNT) return;
+    ed_asset_target_clear(); // a pending Select Asset target belongs to the window it opened
     html_dom_set_display(g_ed.el_window_holder, "none");
     editor_toggle_menu(1);
     g_ed.window_index = index;
@@ -1345,6 +1346,7 @@ static void run_script_text(const char *text) {
                 if (!ed_gui_set_by_label(g_ed.el_right_list, arg, nth, eq + 1)) fprintf(stderr, "[editor] set: no control \"%s\" #%d\n", arg, nth);
             }
         }
+        else if (ed_triggers_script(cmd, arg) || ed_gameconfig_script(cmd, arg) || ed_customgui_script(cmd, arg)) {} // trig: / cfg: / gui: (logic UI tests)
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c

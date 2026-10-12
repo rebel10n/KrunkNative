@@ -396,6 +396,90 @@ state('edits', async (c) => {
     cases.filter((x) => x.miss).map((x) => x.name + ' ' + x.miss.join('/')).join('; ') : ''));
 });
 
+// ---------------------------------------------------------------- logic (editor WP4)
+// tools/editor/logic_cases.json replayed in v7: trigger edits through GUI.action on the object
+// panel's blueprint (the same handlers a click runs), the Custom GUI panel's blueprint, and the
+// left panel's values / Editor methods. Writes logic/<case>.json (the edited object's serialize(),
+// or {config, gui} of getMapExport) and logic/<case>.dump.txt (the right or left panel).
+// public/js/hook.js defines a non-configurable Object.prototype.events accessor, which hides the
+// "Trigger Event" folder (vO234.events never becomes an own key of the blueprint): this state
+// loads the page without it (the editor does not need the hook).
+const LOGIC_LIB = `(() => {
+  const fake = (kind, v) => kind === 'switch' ? {type: 'checkbox', checked: !!v} : kind === 'select' ? {type: 'select-one', value: String(v)}
+    : kind === 'text' || kind === 'color' ? {type: 'text', value: String(v)} : {type: kind === 'number' ? 'number' : 'range', value: String(v)};
+  const objPath = (prop) => {
+    const m = /^(\\w+?)(?:@(\\d+))?$/.exec(prop), name = m[1], i = m[2];
+    const top = {canTrigger: ['events', 'children', 'canTrigger'], event: ['events', 'children', 'event'], constantEvent: ['events', 'children', 'constE'],
+      actionMethod: ['actions', 'children', 'actionMethod'], actionCost: ['actions', 'children', 'actionCost'], chance: ['actions', 'children', 'chance']};
+    if (top[name]) return top[name];
+    const a = ['actions', 'children', 'action' + i, 'children'];
+    if (['action', 'constantType', 'constantCust', 'constantTxt', 'constant', 'constant2', 'delay'].includes(name)) return [...a, name];
+    if (name === 'condition') return [...a, 'conditions', 'children', 'type'];
+    const cv = /^conditionVal(\\d)$/.exec(name);
+    if (cv) { const ch = GUI.panel.right.object.blueprint.technical.children.actions.children['action' + i].children.conditions.children;
+      return [...a, 'conditions', 'children', Object.keys(ch)[1 + +cv[1]]]; }
+    return [...a, 'sound', 'children', {snd: 'type', assetSound: 'custom', vol: 'volume', rate: 'rate', emitfrom: 'emitfrom'}[name]];
+  };
+  const guiKey = {lbl: 'elementLabel', t: 'type', vt: 'valueType', v: 'text', f: 'fontsize', s: 'img', c: 'color', o: 'opacity', x: 'x', y: 'y',
+    w: 'width', h: 'height', z: 'zIndex', nv: 'hide', id: 'elementId'};
+  const setPath = (root, path, value) => { const keys = path.split('.'); let o = root;
+    for (const k of keys.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {}; o[keys[keys.length - 1]] = value; };
+  window.__knLogic = {
+    run(c) {
+      closeWindow(); clearPops(); KE.clearMap();
+      let o = null;
+      if (c.prefab != null) { KE.createObjects[c.prefab](); o = KE.objInsts[KE.objInsts.length - 1]; }
+      for (const s of c.steps) {
+        if (s.set != null) GUI.action(['panel', 'right', 'object', 'blueprint', 'technical', 'children', ...objPath(s.set)], fake(s.kind, s.value));
+        else if (s.add != null) o.addAction();
+        else if (s.remove != null) o.removeAction(null, {id: s.remove});
+        else if (s.gui_add != null) { GUI.panel.right.gui.show(); KE.addGUIElement(); }
+        else if (s.gui_remove != null) KE.removeGUIElement(null, {id: s.gui_remove});
+        else if (s.gui_dup != null) KE.duplicateGUIElement(null, {id: s.gui_dup});
+        else if (s.gui_set != null) { GUI.panel.right.gui.show();
+          GUI.action(['panel', 'right', 'gui', 'blueprint', 'element' + s.gui_set, 'children', guiKey[s.key]], fake(s.kind, s.value)); }
+        else if (s.cfg_set != null) { if (s.cfg_set.startsWith('map.')) KE.mapConfig[s.cfg_set.slice(4)] = s.value; else setPath(KE.serverConfig, s.cfg_set, s.value);
+          GUI.panel.left.essential.show(); }
+        else if (s.cfg_copy != null) KE.copyPlayerConfig(null, {id: s.cfg_copy});
+        else if (s.cfg_copycat != null) KE.copyPlayerConfigCat(null, {id: s.cfg_copycat, cat: s.sub});
+        else if (s.cfg_reset != null) (s.cfg_reset === 'cls' ? KE.resetPlayerConfig : KE.resetEffectConfig).call(KE, null, {id: s.index});
+      }
+      if (o) { KE.updateObjConfigGUI(); return {json: JSON.stringify(o.serialize(), null, 1), dump: __knDump.panel('right')}; }
+      let e = KE.getMapExport(); if (typeof e === 'string') e = JSON.parse(e);
+      const gui = c.steps.some((s) => s.gui_add != null);
+      if (gui) GUI.panel.right.gui.show(); else GUI.panel.left.essential.show();
+      return {json: JSON.stringify({config: e.config || null, gui: e.gui || null}, null, 1), dump: __knDump.panel(gui ? 'right' : 'left')};
+    },
+  };
+  return 1; })()`;
+
+state('logic', async (c) => {
+  await reset(c);
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'logic_cases.json'), 'utf8')).cases;
+  await c.send('Network.setBlockedURLs', { urls: ['https://*', 'wss://*', '*/js/hook.js*'] });
+  for (const k of cases) {
+    // every case starts from a fresh page (the server / map config and the GUI list are page state)
+    console.error('[v7ref] logic ' + k.name);
+    await c.eval('(() => { window.onbeforeunload = null; return 1; })()'); // "You have unsaved changes!" would block the reload
+    await c.send('Page.reload', {});
+    await c.waitFor('typeof KE === "object" && typeof GUI === "object" && !!document.getElementById("_toolbar").children.length', 60000);
+    await sleep(2500);
+    await c.eval(DUMP_LIB);
+    if (await c.eval(`Object.prototype.hasOwnProperty('events')`)) throw new Error('logic: hook.js still loaded');
+    await c.eval(LOGIC_LIB);
+    const r = await c.eval(`__knLogic.run(${JSON.stringify(k)})`);
+    write(`logic/${k.name}.json`, r.json + '\n');
+    write(`logic/${k.name}.dump.txt`, r.dump);
+  }
+  // back to the page the other states capture (with the hook)
+  await c.send('Network.setBlockedURLs', { urls: ['https://*', 'wss://*'] });
+  await c.eval('(() => { window.onbeforeunload = null; return 1; })()');
+  await c.send('Page.reload', {});
+  await c.waitFor('typeof KE === "object" && typeof GUI === "object" && !!document.getElementById("_toolbar").children.length', 60000);
+  await sleep(2500);
+  await c.eval(DUMP_LIB);
+});
+
 // ---------------------------------------------------------------- main
 
 (async () => {

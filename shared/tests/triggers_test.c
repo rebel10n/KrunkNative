@@ -789,6 +789,83 @@ static void test_map(const char *path, const int expect_triggers) {
     printf("%-48s %3d triggers, %3d actions, %3d fired (KR-cost ones need a wallet)\n", path, triggers, actions, fired);
 }
 
+// ---------------------------------------------------------------- editor WP4 output
+
+// The triggers v7.1.4's editor wrote after the logic UI edits of tools/editor/logic_cases.json
+// (doc/ref/krunker-v7.1.4/editor/logic/, which the native editor reproduces: editor_serialize_test,
+// tools/editor/logic_parity.py) load into the runtime with every action field as edited.
+static void test_editor_goldens(void) {
+    static const char *const cases[] = {"trigger-actions", "trigger-value-type-reset", "trigger-default"};
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+        char path[256];
+        snprintf(path, sizeof(path), "doc/ref/krunker-v7.1.4/editor/logic/%s.json", cases[c]);
+        cJSON *golden = NULL;
+        if (load_json_file(path, &golden) || !golden) {
+            CHECK(0, "%s: load", path);
+            continue;
+        }
+        cJSON *map = cJSON_Parse("{\"name\":\"t\"," SPAWNS ",\"objects\":[]}");
+        cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(map, "objects"), cJSON_Duplicate(golden, 1));
+        char *text = cJSON_PrintUnformatted(map);
+        cJSON_Delete(map);
+        Game g;
+        make_game(&g, text);
+        free(text);
+        const Object *o = obj(&g, 0);
+        const TriggerData *t = o ? o->trig : NULL;
+        CHECK(t != NULL, "%s: a trigger", cases[c]);
+        if (!t) {
+            cJSON_Delete(golden);
+            continue;
+        }
+        const cJSON *tas = cJSON_GetObjectItemCaseSensitive(golden, "tas");
+#define GI(obj, k) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(obj, k)) ? (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(obj, k)) : 0)
+        CHECK(t->event == GI(golden, "te") && t->constant_event == GI(golden, "tce") && t->chance == GI(golden, "cha"),
+              "%s: te %d tce %d cha %d", cases[c], t->event, t->constant_event, t->chance);
+        CHECK(t->action_method == GI(golden, "tam") && t->action_cost == GI(golden, "tac"), "%s: tam %d tac %d", cases[c], t->action_method, t->action_cost);
+        CHECK(t->action_count == cJSON_GetArraySize(tas), "%s: %d actions (%d)", cases[c], t->action_count, cJSON_GetArraySize(tas));
+        for (int i = 0; i < t->action_count && i < cJSON_GetArraySize(tas); i++) {
+            const cJSON *a = cJSON_GetArrayItem(tas, i);
+            const TriggerActionData *d = &t->actions[i];
+            const char *tct = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "tct"));
+            const char *tcc = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "tcc"));
+            CHECK(d->action == GI(a, "ta") && d->constant == GI(a, "tc") && d->constant2 == GI(a, "tc2") && d->value_type == GI(a, "tce"),
+                  "%s action %d: ta %d tc %d tc2 %d tce %d", cases[c], i, d->action, d->constant, d->constant2, d->value_type);
+            CHECK(fabsf(d->delay - (float) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(a, "tad"))) < 1e-4f || (!cJSON_GetObjectItemCaseSensitive(a, "tad") && d->delay == 0),
+                  "%s action %d: tad %g", cases[c], i, (double) d->delay);
+            CHECK(!tct || (d->has_text && !strcmp(d->text, tct)), "%s action %d: tct \"%s\"", cases[c], i, d->text);
+            CHECK(!strcmp(d->value_key, tcc ? tcc : ""), "%s action %d: tcc \"%s\"", cases[c], i, d->value_key);
+            CHECK(d->condition == GI(a, "cd"), "%s action %d: cd %d", cases[c], i, d->condition);
+            for (int k = 0; k < 3; k++) {
+                char key[8];
+                snprintf(key, sizeof(key), "cv%d", k);
+                CHECK((d->condition_values[k] != NULL) == (cJSON_GetObjectItemCaseSensitive(a, key) != NULL), "%s action %d: %s", cases[c], i, key);
+            }
+            if (d->action == 14) {
+                CHECK(d->sound == GI(a, "es") && fabsf(d->volume - 0.5f) < 1e-4f && fabsf(d->rate - 2.0f) < 1e-4f && d->emit_from == GI(a, "ef"),
+                      "%s action %d: sound %d vol %g rate %g from %d", cases[c], i, d->sound, (double) d->volume, (double) d->rate, d->emit_from);
+            }
+        }
+#undef GI
+        if (!strcmp(cases[c], "trigger-actions")) {
+            // fire it: Require Score (tam 2, cost 50) passes at 100; action 0 gives 25 after 1.5 s;
+            // action 2's value type (player value "kills") is missing, so it skips; action 3's
+            // condition (Spectating players > 2) is false
+            Player *a = add_player(&g, 1);
+            a->score = 100;
+            obj(&g, 0)->trig->chance = 0; // (40 %: drawn per fire)
+            clear_sent();
+            fire(&g, a, 0);
+            CHECK(a->score == 100, "editor trigger: action 0 waits for its delay (%d)", a->score);
+            for (int s = 0; s < 16; s++) trigger_queue_update(&g, 0.1f);
+            CHECK(a->score == 125, "editor trigger: Give Player Score 25 after 1.5 s (%d)", a->score);
+            CHECK(a->class_index != 5, "editor trigger: Change Class held back by its Player Count condition");
+        }
+        cJSON_Delete(golden);
+    }
+    printf("editor goldens done\n");
+}
+
 // ---------------------------------------------------------------- WP6 account backends
 
 static char g_saved_key[64], g_saved_value[64];
@@ -876,6 +953,7 @@ int main(void) {
     test_pickups();
     test_legacy();
     test_backend_actions();
+    test_editor_goldens();
 
     static const struct { const char *path; int triggers; } maps[] = {
         {"assets/maps/custom/ESP_Parkour.json", 95}, {"assets/maps/custom/Bhop_VIP.json", 54},

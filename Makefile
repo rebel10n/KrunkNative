@@ -389,6 +389,10 @@ EDITOR_MCP_PREFIX ?= $(HOME)/.local
 editor-mcp: configure ## Build kn_editor_mcp (debug: cmake-build-debug/tools/editor-mcp/kn_editor_mcp)
 	$(call BUILD,$(DEBUG_DIR)) --target kn_editor_mcp
 
+.PHONY: editor-logic-test
+editor-logic-test: build ## Editor logic UI / game config / custom GUI vs v7.1.4 (headless client_bin; tools/editor/logic_parity.py)
+	$(PYTHON) -I tools/editor/logic_parity.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 editor-mcp-test: build ## kn_editor_mcp test suite over MCP stdio (every tool, round trips, undo, validation, renders)
 	$(PYTHON) -I tools/editor-mcp/tests/mcp_test.py --bin $(DEBUG_DIR)/tools/editor-mcp/kn_editor_mcp $(EDITOR_MCP_TEST_ARGS)
 

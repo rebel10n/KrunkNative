@@ -1249,7 +1249,12 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | `botPaths` import as CUBE objects (no BOT_PATH_NODE prefab; `getPrefabIdByName` returns 0) | **drop** them (never produced by v7) |
 | A legacy trigger's object-level `ta` 14/34/54 writes the sound keys next to `tas` once (the next export drops them) | keep (v7's export; the round-trip test checks the second export as the fixed point) |
 | `camPos` / `spawns` export the exact transform, objects the rounded one | keep: the editor holds exact transforms (`ED_MODEL_EXACT_TRANSFORM`), the export rounds objects |
-| The left panel's v3 "Game" folder (no v7 equivalent until WP4's Class Config) | interim: it shows class 0 and a change writes every class's `cls` entry, as v7's import of a `game` block does |
+| The left panel's v3 "Game" folder (no v7 equivalent until WP4's Class Config) | **removed**: v7's Class Config edits each class (`editor_gameconfig.c`); a legacy `game` block is still copied into every class on import |
+| The v7 reference dumps of TRIGGER / AI_SPAWNER (`prefabs/29`, `55`) lack the "Trigger Event" folder | a capture artifact of the served `public/js/hook.js` (an `Object.prototype.events` accessor), not v7: the native panel shows it; `v7ref.js logic` captures without the hook (`doc/ref/.../editor/README.md`) |
+| Teleporter connection lines take the hue of the node 0 end's `node` (always red) | **fix**: hue `channel × 3.6` (`editor_render.c`) |
+| A folder header finds its body with `getElementById` in KN's first port | v7 looks inside the header's parent (`querySelector("[id='xB']")`); KN does the same, so Class Config's repeated Camera / Movement / ... folders open their own body (`editor_gui.c`) |
+| "Element Label" has two `onChange` handlers; only the delayed refresh survives | keep: the label is stored as typed and sanitised by the export |
+| Pending Select Asset / Icon / Image / Custom targets | dropped when another window opens (v7 keeps the last viewModels / KE.activeAction argument) |
 | Group members follow the owner's scale (KrunkNative) | **removed**: translation and Y rotation only, as v7 (the scale branch is disabled) |
 | `config.isProd` (the counters' Event row, `localOnly` prefabs in the menus) | the page is production, as krunker.io: Event Objects stay hidden and Event / Terminal / Bot Spawner are not offered (the v7 reference capture is production too) |
 | Rebinding a key stores `e.key` (`","`), which never equals the `keyCode` (188) it is compared with | **fix**: binds match by key code and by character (`editor.c:key_is`) |
@@ -1714,6 +1719,22 @@ cases of `tools/editor/inspector_edits.json` (v7 golden `inspector-edits.json`, 
 - Screenshot the Sandstorm and Kanji maps in the editor viewport to catch regressions in normal geometry.
 
 ### WP4: Logic UI (triggers, conditions, links), game config, custom GUI
+
+**Status (landed):** `editor_gameconfig.c` is v7's Essential panel (Force Old AO, Minimap AssetId,
+Game Modes / Classes with `[ID: n]`, Server Preset grouped by `sub`, Weapon Config with Select
+Icon / Asset, Class Config with Copy to All / Reset / per-group Copy, Effect Config); its
+`dump:left` is identical to `left-essential.dump.txt` and the uidiff `left-panel` region is no
+longer skipped. The v3 "write every class" Game folder is gone. `editor_triggers.c` builds the
+Trigger Event / Trigger Actions folders (`ed_triggers_panel`, called by the inspector; per-action
+controls bind `"<prop>@N"` properties, which `editor_model.c` stores in `tas[N]`).
+`editor_customgui.c` is Components ▸ GUI and the overlay preview (v7's `overlayHelpers.customGUI`
+on `ed_overlay_canvas()`). `editor_render.c` draws v7's connection lines (`in × 18` hue,
+teleporter channels). Asset buttons (Select Asset / Icon / Image / Custom) go through
+`ed_asset_target_open` / `KE.selectAsset`. Tests: `tools/editor/logic_cases.json` replayed in v7
+(`tools/editor/v7ref.js logic` → `doc/ref/krunker-v7.1.4/editor/logic/`) and natively
+(`tools/editor/logic_parity.py`, `editor_serialize_test`; `triggers_test` loads the v7 output);
+`kn_editor_mcp` gains `actions` (the v7 list) on `triggers_create` / `_update` and
+`config.cls / prks / weps` on `map_settings_set`.
 
 **Owns:**
 - A new `editor_triggers.c`: the Trigger Event and Trigger Actions folders, the multi-action list, value types, conditions, sound sub-folder, method/cost. `editor_inspector.c` calls into it through one function.

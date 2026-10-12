@@ -37,3 +37,11 @@ void edp_div_begin(EdBuild *b, const char *id, int show);      // _build "div" (
 int edp_right_can_show(const char *name);
 void edp_right_begin(EdBuild *b, const char *name);
 int ed_panel_locked(int right);
+
+// ---- editor_triggers.c (doc/v7/editor.md WP4): the logic UI of TRIGGER / AI_SPAWNER objects.
+// ed_triggers_panel emits v7's "Trigger Event" and "Trigger Actions" folders (ui/editor.js
+// UI:4080-4500) into the object panel; editor_inspector.c calls it inside "Technical & Logic".
+#define ED_HAVE_TRIGGERS_PANEL 1
+void ed_triggers_panel(EdBuild *b, EditorObject *o);
+// v7's Custom Message gate: the TRIGGER's event is `event_name` ("onInteractKey", "onHoldMouse")
+int ed_triggers_event_is(const EditorObject *o, const char *event_name);

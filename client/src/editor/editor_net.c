@@ -513,6 +513,9 @@ void ed_net_select(EdCtl *c) {
 }
 
 static void select_asset(const char *id, const int type) {
+    // a Select Asset / Icon / Image / Custom button of the config, GUI or trigger panels (v7's
+    // viewTextures / viewModels / viewSounds([kind, index]) cases, editor_gameconfig.c)
+    if (ed_asset_target_apply(id)) return;
     editor_close_window();
     if (type == 3) {
         // prefab: fetched from user-assets.krunker.io/<id>/data.json, not hosted here
@@ -527,11 +530,9 @@ static void select_asset(const char *id, const int type) {
             ed_mark_changed();
         }
     } else if (type) {
-        // the Game folder's player model: every class's "aID" (the v3 map-wide game config)
-        cJSON *v = cJSON_CreateString(id);
-        ed_map_set_all_classes("aID", v);
-        cJSON_Delete(v);
-        ed_panel_left_show();
+        // a model for a target that is gone (the Class / Weapon Config buttons go through
+        // ed_asset_target_apply above): v7's selectAsset default case
+        editor_message("Unknown Asset");
     } else {
         // new ObjectInstance({i: 44, aid: e, p: near or [0,0,0]}, true)
         const vec3 p = editor_setting_bool("createObjectNear") ? editor_near_position() : (vec3) {0};

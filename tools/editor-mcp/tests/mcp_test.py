@@ -428,6 +428,27 @@ def triggers(c):
     check(str(link["interface_id"]) in ifs["interfaces"] and ifs["dangling_targets"] == [], "interfaces")
     m.call("triggers_create", {"project": pid, "triggers": [{"event": "onNothing"}]}, ok=False)
     m.call("triggers_update", {"project": pid, "updates": [{"id": gate, "value": 1}]}, ok=False)
+    # v7 action lists (tas, editor WP4): written as ObjectInstance.serialize() writes them
+    v7 = m.sc("triggers_create", {"project": pid, "triggers": [{"p": [40, 0, 0], "event": "onInteractKey", "action_method": 2, "action_cost": 50, "actions": [
+        {"action": "Give Player Score", "value": 25, "delay": 1.5},
+        {"action": "Broadcast Sound", "sound": 5, "volume": 0.5, "rate": 2, "emit_from": 2},
+        {"action": 0, "value_type": "Player Value", "key": "kills", "condition": "Player Value", "condition_values": ["score", "3", 7]},
+        {"action": "Change Class", "value": 5, "condition": 4, "condition_values": ["2", "1", 3]},
+        {"action": "Custom Action", "text": "door:open", "value2": 9}]}]})["created"]
+    raw = m.sc("object_get", {"project": pid, "id": v7[0]})["raw"]
+    check(raw["tas"] == [{"tc": 25, "tad": 1.5}, {"es": 5, "ev": 0.5, "er": 2, "ef": 2, "ta": 14},
+                         {"tce": 2, "tcc": "kills", "cd": 1, "cv0": "score", "cv1": "3", "cv2": 7},
+                         {"ta": 47, "tc": 5, "cd": 4, "cv0": "2", "cv1": "1", "cv2": 3}, {"ta": 58, "tc2": 9, "tct": "door:open"}]
+          and raw["tam"] == 2 and raw["tac"] == 50 and "ta" not in raw, "actions -> tas (v7 trigger-actions golden)")
+    lst = m.sc("triggers_list", {"project": pid})
+    dec = [t for t in lst["triggers"] if t["id"] == v7[0]][0]["actions"]
+    check(len(dec) == 5 and dec[2]["condition"]["name"] == "Player Value" and dec[2]["value_type"] == "Player Value" and dec[1]["sound"]["volume"] == 0.5,
+          "triggers_list decodes the v7 list")
+    m.sc("triggers_update", {"project": pid, "updates": [{"id": v7[0], "action": "Kill Player", "value": 3}]})
+    raw = m.sc("object_get", {"project": pid, "id": v7[0]})["raw"]
+    check(raw["tas"][0] == {"ta": 1, "tc": 3, "tad": 1.5} and len(raw["tas"]) == 5 and "ta" not in raw, "action / value edit tas[0] of a v7 trigger")
+    m.call("triggers_update", {"project": pid, "updates": [{"id": v7[0], "actions": [{"action": 0}] * 6}]}, ok=False)
+    m.call("triggers_update", {"project": pid, "updates": [{"id": v7[0], "actions": [{"condition": "Nope"}]}]}, ok=False)
 
 
 @test
@@ -444,6 +465,17 @@ def settings(c):
     m.call("map_settings_set", {"project": pid, "set": {"objects": []}}, ok=False)
     m.sc("map_settings_set", {"project": pid, "set": {"notAKey": 1}, "force": True})
     check(m.sc("map_settings_get", {"project": pid, "group": "fog"})["values"].get("fogD") == 900, "group filter")
+    # class / effect / weapon overrides (v7 Class / Effect / Weapon Config, editor WP4)
+    m.sc("map_settings_set", {"project": pid, "config": {"cls": {"0": {"speed": 1.5, "camType": "Platformer (X)", "health": 100}, "Hunter": None},
+                                                         "prks": {"Rooted": {"max": 3}}, "weps": {"Sniper Rifle": {"name": "Longshot", "dmg": 90}}}})
+    cfg = m.sc("map_settings_get", {"project": pid})["values"]["config"]
+    check(cfg["cls"] == {"0": {"speed": 1.5, "camType": "2"}} and cfg["prks"] == {"4": {"max": 3}} and cfg["weps"] == {"0": {"name": "Longshot", "dmg": 90}},
+          "class / effect / weapon overrides (stock values dropped)")
+    m.sc("map_settings_set", {"project": pid, "config": {"cls": {"Triggerman": None}, "prks": {"4": {"max": None}}}})
+    cfg = m.sc("map_settings_get", {"project": pid})["values"]["config"]
+    check("cls" not in cfg and "prks" not in cfg and "weps" in cfg, "null resets overrides")
+    m.call("map_settings_set", {"project": pid, "config": {"cls": {"0": {"speed": 99}}}}, ok=False)
+    m.call("map_settings_set", {"project": pid, "config": {"cls": {"0": {"nope": 1}}}}, ok=False)
 
 
 # ---------------------------------------------------------------- build

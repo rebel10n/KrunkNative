@@ -399,43 +399,55 @@ static void draw_real_hitboxes(void) {
     glDepthMask(GL_TRUE);
 }
 
-static vec3 box_centre(const EditorObject *o) {
-    float m[16];
-    ed_obj_world_box(o, m);
-    return v3(m[3], m[7], m[11]);
+// UTILS.hexFromHue(h) -> UTILS.rgbToHex(r, g, b): a hue past 360 is not wrapped (h / 60 >= 6 gives
+// red plus the ramp in blue), and rgbToHex truncates the channels (<< / |)
+static int hex_from_hue(const double hue) {
+    const double h = hue / 60.0;
+    const double x = (1.0 - fabs(fmod(h, 2.0) - 1.0)) * 255.0;
+    const int k = (int) floor(h);
+    const double r = k < 1 || k > 4 ? 255 : k == 1 || k == 4 ? x : 0;
+    const double g = k == 0 || k == 3 ? x : k == 1 || k == 2 ? 255 : 0;
+    const double b = k == 0 || k == 1 ? 0 : k == 3 || k == 4 ? 255 : x;
+    return ((int) r << 16 | (int) g << 8 | (int) b) & 0xffffff;
+}
+
+static void connection_line(const EditorObject *from, const EditorObject *to, const double hue) {
+    // new C282(from, to, hue): a THREE.Line between the bounding meshes' positions (the objects'
+    // "p"), LineBasicMaterial(hexFromHue(hue)), renderOrder Infinity (depth tested, drawn last)
+    vb_push(&g_lines, ed_obj_vec(to, "p", v3(0, 0, 0)));
+    vb_push(&g_lines, ed_obj_vec(from, "p", v3(0, 0, 0)));
+    flush(&g_lines, GL_LINES, hex_rgba(hex_from_hue(hue), 1.0f), 0);
 }
 
 static void draw_trigger_connections(void) {
-    // Settings > Object > Trigger Connections: v3.1.1 calls e.checkConnections(), which
-    // its editor never defines (the switch only saves the setting). KrunkNative draws what
-    // the name promises: a line from every interface-targeting object (TRIGGER "Target",
-    // map key "tin") to each object whose interface ID ("in") matches, in the trigger's
-    // yellow, drawn over the geometry; the target end gets a small cross.
+    // Editor.checkConnections (E:2576-2640, settings.triggerCons): every object with an interface
+    // ID ("in" > 0) to every other object targeting it ("tin" == in), hue in * 18; teleporters of a
+    // channel from each node 0 (Sending) to the other nodes. v7's bot path chains need a
+    // BOT_PATH_NODE prefab that does not exist (dead code).
+    // Intentional difference from v7.1.4: a teleporter line's hue is channel * 3.6; v7 passes the
+    // node 0 end's node, so every teleporter line is red.
     if (!editor_setting_bool("triggerCons")) return;
     for (size_t i = 0; i < g_ed.proj->count; i++) {
-        const EditorObject *src = g_ed.proj->objects[i];
-        if (!(editor_prefabs[src->prefab].flags & EP_CANTARGETINTERFACE)) continue;
-        const int target = (int) ed_json_num(src->data, "tin", 0);
-        if (!target) continue;
-        const vec3 a = box_centre(src);
+        const EditorObject *t = g_ed.proj->objects[i];
+        const int target = (int) ed_json_num(t->data, "tin", 0);
+        if (target <= 0) continue;
         for (size_t j = 0; j < g_ed.proj->count; j++) {
-            const EditorObject *dst = g_ed.proj->objects[j];
-            if (dst == src || !(editor_prefabs[dst->prefab].flags & EP_CANINTERFACE)) continue;
-            if ((int) ed_json_num(dst->data, "in", 0) != target) continue;
-            const vec3 b = box_centre(dst);
-            vb_push(&g_lines, a);
-            vb_push(&g_lines, b);
-            for (int k = 0; k < 3; k++) {
-                vec3 d = v3(0, 0, 0);
-                (&d.x)[k] = 2.0f;
-                vb_push(&g_lines, vsub(b, d));
-                vb_push(&g_lines, vadd(b, d));
-            }
+            const EditorObject *o = g_ed.proj->objects[j];
+            const int id = (int) ed_json_num(o->data, "in", 0);
+            if (o != t && id > 0 && id == target) connection_line(o, t, id * 18.0);
         }
     }
-    glDisable(GL_DEPTH_TEST);
-    flush(&g_lines, GL_LINES, hex_rgba(0xffff00, 1.0f), 0);
-    glEnable(GL_DEPTH_TEST);
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *a = g_ed.proj->objects[i];
+        if (strcmp(editor_prefabs[a->prefab].name, "TELEPORTER") || !(int) ed_json_num(a->data, "n", 0)) continue;
+        const int channel = (int) ed_json_num(a->data, "ch", 0);
+        for (size_t j = 0; j < g_ed.proj->count; j++) {
+            const EditorObject *b = g_ed.proj->objects[j];
+            if (b == a || strcmp(editor_prefabs[b->prefab].name, "TELEPORTER") || (int) ed_json_num(b->data, "n", 0) != 0 ||
+                (int) ed_json_num(b->data, "ch", 0) != channel) continue;
+            connection_line(a, b, channel * 3.6);
+        }
+    }
 }
 
 static void draw_grid(void) {

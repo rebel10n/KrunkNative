@@ -357,9 +357,8 @@ def editor_chrome(rc, dimmed=False):
     opt("canvas-info", "canvasInfo", "text", "#canvasInfo stats over the 3D view", max_pct=6.0)
     opt("canvas-objedit", "canvasObjEdit", "text", "#canvasObjEdit Delete / Duplicate", max_pct=6.0)
     opt("canvas-add", "canvasAdd", "image", "#canvasAdd +", max_pct=6.0)
-    # the v7 Essential panel (Force Old AO, Minimap AssetId, Class / Effect Config) is editor WP4
-    # (editor_gameconfig.c); skipped until it lands
-    opt("left-panel", "left-panel", "text", "left panel: Essential (map config), editor WP4", max_pct=4.0, skip=True)
+    # the v7 Essential panel (editor WP4, editor_gameconfig.c)
+    opt("left-panel", "left-panel", "text", "left panel: Essential (map config), editor WP4", max_pct=4.0)
     opt("right-panel", "right-panel", "flat", "right panel: blank")
     if "container" in rc:
         regs.append(R("view-3d", rc["container"], "scene", "3D view: v7 three.js vs the native GL view", skip=True))

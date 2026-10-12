@@ -13,6 +13,11 @@
 //    the source must be kept, and the complex-collision "tris" the editor bakes must match the
 //    triangles the map was exported with (as a set; v7 bakes them in the same order).
 // 3. Unit checks: legacy v3.1.1 keys, the multi-action list, scripts, GUI, properties.
+// 4. Logic edits (doc/v7/editor.md WP4): the trigger cases of tools/editor/logic_cases.json
+//    replayed through ed_model_prop_set ("<prop>@N") / ed_model_action_add / _remove must give
+//    the object v7's editor serialized after the same GUI.action sequence
+//    (doc/ref/krunker-v7.1.4/editor/logic/<case>.json, tools/editor/v7ref.js state "logic"), key
+//    order included, and survive a load (ed_model_object) unchanged.
 #include "editor_model.h"
 #include <dirent.h>
 #include <math.h>
@@ -418,6 +423,155 @@ static void unit_checks(void) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 4. logic edits
+
+// a step's value as the native control stores it: a select gives a number, except a condition
+// value's select (the option's string, as v7's GUI.action); text a string; switch a boolean
+static cJSON *step_value(const cJSON *step) {
+    const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(step, "kind"));
+    const char *prop = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(step, "set"));
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(step, "value");
+    char buf[64];
+    if (kind && !strcmp(kind, "select") && prop && !strncmp(prop, "conditionVal", 12)) {
+        if (cJSON_IsString(v)) return cJSON_CreateString(v->valuestring);
+        ed_model_number(cJSON_GetNumberValue(v), buf, sizeof(buf));
+        return cJSON_CreateString(buf);
+    }
+    if (kind && !strcmp(kind, "switch")) return cJSON_CreateBool(cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble != 0));
+    return cJSON_Duplicate(v, 1);
+}
+
+static int has_cust(const int action) {
+    const cJSON *a = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(editor_data_get("triggers"), "actions"), action);
+    return a && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a, "hasCust"));
+}
+
+static void logic_cases(const char *repo) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/tools/editor/logic_cases.json", repo);
+    cJSON *doc = read_json(path);
+    CHECK(doc != NULL, "%s unreadable", path);
+    int n = 0;
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(doc, "cases")) {
+        const cJSON *pf = cJSON_GetObjectItemCaseSensitive(c, "prefab");
+        if (!cJSON_IsNumber(pf)) continue; // GUI / config cases: tools/editor/logic_parity.py
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(c, "name"));
+        const int prefab = (int) pf->valuedouble;
+        snprintf(path, sizeof(path), "%s/doc/ref/krunker-v7.1.4/editor/logic/%s.json", repo, name);
+        cJSON *want = read_json(path);
+        CHECK(want != NULL, "%s unreadable", path);
+        if (!want) continue;
+        char init[64];
+        snprintf(init, sizeof(init), "{\"i\":%d,\"p\":[0,0,0]}", prefab);
+        cJSON *in = cJSON_Parse(init);
+        cJSON *o = ed_model_object(in, ED_MODEL_EXACT_TRANSFORM);
+        cJSON_Delete(in);
+        const cJSON *step;
+        cJSON_ArrayForEach(step, cJSON_GetObjectItemCaseSensitive(c, "steps")) {
+            const cJSON *set = cJSON_GetObjectItemCaseSensitive(step, "set");
+            if (cJSON_IsString(set)) {
+                cJSON *v = step_value(step);
+                CHECK(ed_model_prop_set(&o, prefab, set->valuestring, v), "%s: set %s", name, set->valuestring);
+                cJSON_Delete(v);
+                if (!strncmp(set->valuestring, "action@", 7)) {
+                    // the panel's rule (editor_triggers.c normalize_value_type): constantType
+                    // goes back to 0 for an action without hasCust
+                    char ct[32];
+                    snprintf(ct, sizeof(ct), "constantType@%s", set->valuestring + 7);
+                    cJSON *a = ed_model_prop_get(o, prefab, set->valuestring);
+                    cJSON *t = ed_model_prop_get(o, prefab, ct);
+                    if (!has_cust((int) cJSON_GetNumberValue(a)) && cJSON_GetNumberValue(t) != 0) {
+                        cJSON *zero = cJSON_CreateNumber(0);
+                        ed_model_prop_set(&o, prefab, ct, zero);
+                        cJSON_Delete(zero);
+                    }
+                    cJSON_Delete(a);
+                    cJSON_Delete(t);
+                }
+            } else if (cJSON_GetObjectItemCaseSensitive(step, "add")) {
+                ed_model_action_add(&o); // (the 6th is refused: v7 hides the button)
+            } else if (cJSON_GetObjectItemCaseSensitive(step, "remove")) {
+                ed_model_action_remove(&o, (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(step, "remove")));
+            }
+        }
+        // a new model prefab takes the generator's OBJ bounds (v7: the loaded model's): "s" of AI
+        // objects is not compared (doc/v7/editor.md 1.13)
+        if (prefab == 55) {
+            const cJSON *s = cJSON_GetObjectItemCaseSensitive(o, "s");
+            if (s) cJSON_ReplaceItemInObjectCaseSensitive(want, "s", cJSON_Duplicate(s, 1));
+        }
+        char *got_text = ed_model_print(o), *want_text = ed_model_print(want);
+        CHECK(got_text && want_text && !strcmp(got_text, want_text), "logic %s: serialize differs\n    got:  %s\n    want: %s", name, got_text ? got_text : "-",
+              want_text ? want_text : "-");
+        cJSON *again = ed_model_object(o, ED_MODEL_EXACT_TRANSFORM);
+        char *again_text = again ? ed_model_print(again) : NULL;
+        CHECK(again_text && got_text && !strcmp(again_text, got_text), "logic %s: a reload changes the object", name);
+        free(again_text);
+        cJSON_Delete(again);
+        free(got_text);
+        free(want_text);
+        cJSON_Delete(o);
+        cJSON_Delete(want);
+        n++;
+    }
+    CHECK(n >= 4, "logic cases: %d trigger cases", n);
+    printf("logic cases: %d trigger cases\n", n);
+    cJSON_Delete(doc);
+}
+
+// v7's game / script templates (assets/editor/templates.json): an import and export keeps every
+// trigger's action list ("tas") as v7 serializes it (e.g. "Triggers & Scripts", "Advanced
+// Triggers"; a source "cd": 0 with cv values loses them, as in v7's serialize())
+static void template_tas(const char *repo) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/assets/editor/templates.json", repo);
+    cJSON *t = read_json(path);
+    if (!t) {
+        printf("templates: %s missing, skipped\n", path);
+        return;
+    }
+    int maps = 0, lists = 0;
+    static const char *const kinds[2] = {"game", "script"};
+    for (int k = 0; k < 2; k++) {
+        const cJSON *tpl;
+        cJSON_ArrayForEach(tpl, cJSON_GetObjectItemCaseSensitive(t, kinds[k])) {
+            const char *data = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tpl, "data"));
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tpl, "name"));
+            cJSON *src = data ? cJSON_Parse(data) : NULL;
+            if (!src) {
+                cJSON_Delete(src);
+                continue;
+            }
+            int count = 0;
+            char *text = NULL;
+            cJSON *e = export_of(src, &text, &count);
+            free(text);
+            const cJSON *so = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(src, "map") ? cJSON_GetObjectItemCaseSensitive(src, "map") : src, "objects");
+            const cJSON *eo = cJSON_GetObjectItemCaseSensitive(e, "objects");
+            // the source triggers' lists in order against the exported ones
+            const cJSON *a = so ? so->child : NULL, *b = eo ? eo->child : NULL;
+            for (; a; a = a->next) {
+                const cJSON *tas = cJSON_GetObjectItemCaseSensitive(a, "tas");
+                if (!cJSON_IsArray(tas)) continue;
+                while (b && !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(b, "tas"))) b = b->next;
+                cJSON *canon = ed_model_object(a, 0);
+                const cJSON *want = canon ? cJSON_GetObjectItemCaseSensitive(canon, "tas") : tas;
+                CHECK(b && json_eq(want, cJSON_GetObjectItemCaseSensitive(b, "tas")), "template %s: a trigger's tas changed on import / export", name ? name : "?");
+                cJSON_Delete(canon);
+                if (b) b = b->next;
+                lists++;
+            }
+            cJSON_Delete(e);
+            cJSON_Delete(src);
+            maps++;
+        }
+    }
+    printf("templates: %d maps, %d action lists kept\n", maps, lists);
+    cJSON_Delete(t);
+}
+
 int main(int argc, char **argv) {
     const char *repo = argc > 1 ? argv[1] : ".";
     char path[1024];
@@ -426,6 +580,8 @@ int main(int argc, char **argv) {
     check_golden(path);
     for (int i = 2; i + 1 < argc; i++) if (!strcmp(argv[i], "--golden")) check_golden(argv[++i]);
     unit_checks();
+    logic_cases(repo);
+    template_tas(repo);
     static const char *const dirs[3] = {"assets/maps", "assets/maps/custom", "assets/maps/v7"};
     for (int i = 0; i < 3; i++) {
         snprintf(path, sizeof(path), "%s/%s", repo, dirs[i]);

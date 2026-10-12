@@ -84,7 +84,9 @@ int ed_model_import(const cJSON *doc, EdMapState *s, cJSON **objects, const cJSO
 // ---- properties by ObjectInstance name ("visible", "canWallJump", "aiName", ...): read with the
 // constructor's load rule; a set writes the key and re-derives the object with ed_model_object(),
 // so serialize()'s gates and rounding apply. Props marked as action props ("action", "constant",
-// "constantTxt", "snd", "vol", ...) live in tas[0] on TRIGGER / AI_SPAWNER. The transform, texture,
+// "constantTxt", "snd", "vol", ...) live in tas[0] on TRIGGER / AI_SPAWNER; "<prop>@N" names
+// action N's ("constant@2" = tas[2].tc; NULL / 0 when tas[N] does not exist, an indexed condition
+// value "conditionVal0@N" is written as given, 0 included). The transform, texture,
 // faces, collidable, health, weaponId, mSize and bounce are handled by editor_objects.c.
 cJSON *ed_model_prop_get(const cJSON *data, int prefab, const char *prop); // NULL = unknown prop
 int ed_model_prop_set(cJSON **data, int prefab, const char *prop, const cJSON *value); // *data replaced; 0 = unknown

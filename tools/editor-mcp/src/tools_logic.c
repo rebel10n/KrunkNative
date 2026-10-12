@@ -5,6 +5,7 @@
 #include "schema.h"
 #include "util.h"
 #include "validate.h"
+#include "editor_model.h" // client/src/editor: tas canonicalisation (ObjectInstance.serialize) and the trigger tables
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -261,9 +262,10 @@ static int t_spawns_delete(Ctx *ctx, const cJSON *args, ToolResult *r) {
     const int count = spawns_read(p->doc, &cur);
     for (int i = 0; i < n; i++) {
         if (idx[i] < 0 || idx[i] >= count) {
+            const int bad = idx[i];
             free(idx);
             free(cur);
-            return tr_error(r, "spawn index %d does not exist", idx[i]);
+            return tr_error(r, "spawn index %d does not exist", bad);
         }
     }
     char err[512];
@@ -314,6 +316,65 @@ static cJSON *action_json(const int ta) {
     return e;
 }
 
+static const cJSON *trigger_table(const char *key) { return cJSON_GetObjectItemCaseSensitive(editor_data_get("triggers"), key); }
+
+// a name in a list of names / {name} objects, or an index: -1 when unknown
+static int name_index(const cJSON *list, const cJSON *v) {
+    const int n = cJSON_GetArraySize(list);
+    if (cJSON_IsNumber(v)) return v->valuedouble >= 0 && (int) v->valuedouble < n ? (int) v->valuedouble : -1;
+    if (!cJSON_IsString(v)) return -1;
+    for (int i = 0; i < n; i++) {
+        const cJSON *it = cJSON_GetArrayItem(list, i);
+        const char *name = cJSON_IsString(it) ? it->valuestring : js_str(it, "name", "");
+        if (!strcasecmp(name, v->valuestring)) return i;
+    }
+    return -1;
+}
+
+// editor_data string list entry, "?" when out of range
+static const char *list_name(const char *key, const int index) {
+    const char *v = cJSON_GetStringValue(cJSON_GetArrayItem(editor_data_get(key), index));
+    return v ? v : "?";
+}
+
+// one tas entry decoded (v7 TriggerAction fields, doc/v7/editor.md 1.7)
+static cJSON *tas_action_json(const cJSON *a) {
+    cJSON *e = action_json(js_int(a, "ta", 0));
+    if (js_get(a, "tc")) cJSON_AddNumberToObject(e, "value", js_num(a, "tc", 0));
+    if (js_get(a, "tc2")) cJSON_AddNumberToObject(e, "value2", js_num(a, "tc2", 0));
+    if (js_get(a, "tct")) cJSON_AddStringToObject(e, "text", js_str(a, "tct", ""));
+    if (js_int(a, "tce", 0)) {
+        cJSON_AddStringToObject(e, "value_type", list_name("inputTypes", js_int(a, "tce", 0)));
+        if (js_get(a, "tcc")) cJSON_AddStringToObject(e, "key", js_str(a, "tcc", ""));
+    }
+    if (js_get(a, "tad")) cJSON_AddNumberToObject(e, "delay", js_num(a, "tad", 0));
+    if (js_int(a, "cd", 0)) {
+        const cJSON *cd = cJSON_GetArrayItem(trigger_table("conditions"), js_int(a, "cd", 0));
+        cJSON *c = cJSON_AddObjectToObject(e, "condition");
+        cJSON_AddNumberToObject(c, "id", js_int(a, "cd", 0));
+        cJSON_AddStringToObject(c, "name", js_str(cd, "name", "?"));
+        cJSON *vals = cJSON_AddArrayToObject(c, "values");
+        for (int k = 0; k < 3; k++) {
+            char key[8];
+            snprintf(key, sizeof(key), "cv%d", k);
+            const cJSON *v = js_get(a, key);
+            if (k < cJSON_GetArraySize(js_get(cd, "vals"))) cJSON_AddItemToArray(vals, v ? cJSON_Duplicate(v, 1) : cJSON_CreateNull());
+        }
+    }
+    if (js_get(a, "es") || js_get(a, "esa")) {
+        cJSON *snd = cJSON_AddObjectToObject(e, "sound");
+        if (js_get(a, "esa")) cJSON_AddNumberToObject(snd, "asset", js_int(a, "esa", 0));
+        else {
+            cJSON_AddNumberToObject(snd, "id", js_int(a, "es", 0));
+            cJSON_AddStringToObject(snd, "name", list_name("emitterSounds", js_int(a, "es", 0)));
+        }
+        cJSON_AddNumberToObject(snd, "volume", js_num(a, "ev", 1));
+        cJSON_AddNumberToObject(snd, "rate", js_num(a, "er", 1));
+        cJSON_AddNumberToObject(snd, "emit_from", js_int(a, "ef", 0));
+    }
+    return e;
+}
+
 static cJSON *trigger_json(Doc *doc, const cJSON *o, const int index) {
     cJSON *t = doc_object_json(doc, o, index, 0);
     cJSON_AddItemToObject(t, "event", event_json(js_int(o, "te", 0)));
@@ -322,12 +383,10 @@ static cJSON *trigger_json(Doc *doc, const cJSON *o, const int index) {
     if (cJSON_IsArray(tas)) {
         cJSON *acts = cJSON_AddArrayToObject(t, "actions");
         const cJSON *a;
-        cJSON_ArrayForEach(a, tas) {
-            cJSON *e = action_json(js_int(a, "ta", 0));
-            if (js_get(a, "tc")) cJSON_AddNumberToObject(e, "value", js_num(a, "tc", 0));
-            if (js_get(a, "tct")) cJSON_AddStringToObject(e, "text", js_str(a, "tct", ""));
-            if (js_get(a, "cd")) cJSON_AddNumberToObject(e, "condition", js_int(a, "cd", 0));
-            cJSON_AddItemToArray(acts, e);
+        cJSON_ArrayForEach(a, tas) cJSON_AddItemToArray(acts, tas_action_json(a));
+        if (js_get(o, "tam") || js_get(o, "tac")) {
+            cJSON_AddNumberToObject(t, "action_method", js_int(o, "tam", 0));
+            cJSON_AddNumberToObject(t, "action_cost", js_int(o, "tac", 0));
         }
     } else {
         cJSON *e = action_json(js_int(o, "ta", 0));
@@ -379,6 +438,101 @@ static int t_triggers_catalog(Ctx *ctx, const cJSON *args, ToolResult *r) {
     return 0;
 }
 
+// spec.actions -> obj.tas (the v7 action list, <= triggerActionLimit): every entry built from
+// {action, value, value2, text, key, value_type, delay, condition, condition_values, sound,
+// asset_sound, volume, rate, emit_from} and then written as ObjectInstance.serialize() writes it
+// (editor_model.c: the sound keys only on 14 / 34 / 54, cv0..2 only with a condition, ...).
+// Legacy object-level ta / tc / tc2 / tct go (v7 reads tas when present).
+static int apply_actions(cJSON *obj, const cJSON *list, char *err, const size_t errsz) {
+    const int n = cJSON_GetArraySize(list), limit = (int) schema_limit("triggerActionLimit", 5);
+    if (!cJSON_IsArray(list) || n < 1 || n > limit) {
+        snprintf(err, errsz, "actions needs 1..%d entries", limit);
+        return -1;
+    }
+    cJSON *tas = cJSON_CreateArray();
+    int i = 0;
+    const cJSON *a;
+    cJSON_ArrayForEach(a, list) {
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddItemToArray(tas, e);
+        const cJSON *ac = js_get(a, "action");
+        const int ta = !ac ? 0 : cJSON_IsNumber(ac) ? (int) ac->valuedouble : schema_action_find(cJSON_IsString(ac) ? ac->valuestring : "");
+        if (ta < 0 || ta >= schema_action_count()) {
+            snprintf(err, errsz, "actions[%d]: unknown action (triggers_catalog lists %d)", i, schema_action_count());
+            cJSON_Delete(tas);
+            return -1;
+        }
+        if (ta) cJSON_AddNumberToObject(e, "ta", ta);
+        static const struct { const char *spec, *key; } nums[] = {{"value", "tc"}, {"value2", "tc2"}, {"delay", "tad"}, {"sound", "es"},
+                                                                  {"asset_sound", "esa"}, {"volume", "ev"}, {"rate", "er"}, {"emit_from", "ef"}, {NULL, NULL}};
+        for (int k = 0; nums[k].spec; k++) {
+            const cJSON *v = js_get(a, nums[k].spec);
+            if (!v) continue;
+            if (!cJSON_IsNumber(v)) {
+                snprintf(err, errsz, "actions[%d].%s needs a number", i, nums[k].spec);
+                cJSON_Delete(tas);
+                return -1;
+            }
+            cJSON_AddNumberToObject(e, nums[k].key, v->valuedouble);
+        }
+        const cJSON *text = js_get(a, "text"), *key = js_get(a, "key");
+        if (text) {
+            if (!cJSON_IsString(text) || !trigger_text_valid(text->valuestring)) {
+                snprintf(err, errsz, "actions[%d].text: <= 70 characters of the trigger charset", i);
+                cJSON_Delete(tas);
+                return -1;
+            }
+            cJSON_AddStringToObject(e, "tct", text->valuestring);
+        }
+        if (key) {
+            if (!cJSON_IsString(key) || !trigger_text_valid(key->valuestring)) {
+                snprintf(err, errsz, "actions[%d].key: a value key ([a-z0-9_])", i);
+                cJSON_Delete(tas);
+                return -1;
+            }
+            cJSON_AddStringToObject(e, "tcc", key->valuestring);
+        }
+        const cJSON *vt = js_get(a, "value_type");
+        if (vt) {
+            const int t = name_index(editor_data_get("inputTypes"), vt);
+            if (t < 0) {
+                snprintf(err, errsz, "actions[%d].value_type: Input Value, Trigger Value, Player Value or Global Value (0..3)", i);
+                cJSON_Delete(tas);
+                return -1;
+            }
+            if (t) cJSON_AddNumberToObject(e, "tce", t);
+        }
+        const cJSON *cd = js_get(a, "condition");
+        if (cd) {
+            const int c = name_index(trigger_table("conditions"), cd);
+            if (c < 0) {
+                snprintf(err, errsz, "actions[%d].condition: unknown (triggers_catalog conditions)", i);
+                cJSON_Delete(tas);
+                return -1;
+            }
+            if (c) cJSON_AddNumberToObject(e, "cd", c);
+            const cJSON *vals = js_get(a, "condition_values");
+            for (int k = 0; k < 3 && k < cJSON_GetArraySize(vals); k++) {
+                const cJSON *v = cJSON_GetArrayItem(vals, k);
+                char cv[8];
+                snprintf(cv, sizeof(cv), "cv%d", k);
+                if (!cJSON_IsNull(v)) cJSON_AddItemToObject(e, cv, cJSON_Duplicate(v, 1));
+            }
+        }
+        i++;
+    }
+    static const char *const legacy[] = {"ta", "tc", "tc2", "tct", "es", "esa", "ev", "er", "ef", NULL};
+    for (int k = 0; legacy[k]; k++) cJSON_DeleteItemFromObjectCaseSensitive(obj, legacy[k]);
+    if (cJSON_GetObjectItemCaseSensitive(obj, "tas")) cJSON_ReplaceItemInObjectCaseSensitive(obj, "tas", tas);
+    else cJSON_AddItemToObject(obj, "tas", tas);
+    // serialize()'s form of the list (the rest of the object is left as it is)
+    cJSON *canon = ed_model_object(obj, ED_MODEL_KEEP_UUID | ED_MODEL_EXACT_TRANSFORM);
+    const cJSON *ct = canon ? cJSON_GetObjectItemCaseSensitive(canon, "tas") : NULL;
+    if (ct) cJSON_ReplaceItemInObjectCaseSensitive(obj, "tas", cJSON_Duplicate(ct, 1));
+    cJSON_Delete(canon);
+    return 0;
+}
+
 // trigger spec -> props on obj
 static int apply_trigger_spec(Doc *doc, cJSON *obj, const cJSON *spec, const int flags, char *err, const size_t errsz) {
     const cJSON *ev = js_get(spec, "event");
@@ -393,8 +547,43 @@ static int apply_trigger_spec(Doc *doc, cJSON *obj, const cJSON *spec, const int
         cJSON_Delete(v);
         if (rc) return -1;
     }
+    const cJSON *actions = js_get(spec, "actions");
+    if (actions && apply_actions(obj, actions, err, errsz) != 0) return -1;
     const cJSON *ac = js_get(spec, "action");
     int ta = js_int(obj, "ta", 0);
+    int first_action = actions != NULL; // value / text went to tas[0] (or the actions list)
+    if (!actions && cJSON_IsArray(js_get(obj, "tas")) && (ac || js_get(spec, "value") || js_get(spec, "text"))) {
+        // a v7 trigger (tas): action / value / text are its first action's ("action@0", ... of
+        // editor_model.c's property table, so serialize()'s rules apply)
+        cJSON *copy = cJSON_Duplicate(obj, 1);
+        const int prefab = obj_prefab(obj);
+        if (ac) {
+            const int id = cJSON_IsNumber(ac) ? (int) ac->valuedouble : schema_action_find(cJSON_IsString(ac) ? ac->valuestring : "");
+            if (id < 0 || id >= schema_action_count()) {
+                cJSON_Delete(copy);
+                snprintf(err, errsz, "unknown action (triggers_catalog lists %d)", schema_action_count());
+                return -1;
+            }
+            cJSON *v = cJSON_CreateNumber(id);
+            ed_model_prop_set(&copy, prefab, "action@0", v);
+            cJSON_Delete(v);
+        }
+        const cJSON *value = js_get(spec, "value"), *text = js_get(spec, "text");
+        if (value) ed_model_prop_set(&copy, prefab, "constant@0", value);
+        if (text) {
+            if (!cJSON_IsString(text) || !trigger_text_valid(text->valuestring)) {
+                cJSON_Delete(copy);
+                snprintf(err, errsz, "text: <= 70 characters of the trigger charset");
+                return -1;
+            }
+            ed_model_prop_set(&copy, prefab, "constantTxt@0", text);
+        }
+        const cJSON *tas = copy ? cJSON_GetObjectItemCaseSensitive(copy, "tas") : NULL;
+        if (tas) cJSON_ReplaceItemInObjectCaseSensitive(obj, "tas", cJSON_Duplicate(tas, 1));
+        cJSON_Delete(copy);
+        ac = NULL;
+        first_action = 1;
+    }
     if (ac) {
         ta = cJSON_IsNumber(ac) ? (int) ac->valuedouble : schema_action_find(cJSON_IsString(ac) ? ac->valuestring : "");
         if (ta < 0 || ta >= schema_action_count()) {
@@ -407,11 +596,12 @@ static int apply_trigger_spec(Doc *doc, cJSON *obj, const cJSON *spec, const int
     static const struct { const char *spec, *prop; } map[] = {
         {"event_value", "tce"}, {"value", "tc"}, {"text", "tct"}, {"chance", "cha"}, {"target", "tin"}, {"target_interface", "tin"},
         {"interface_id", "in"}, {"single_use", "su"}, {"team", "tm"}, {"sound", "es"}, {"volume", "ev"}, {"rate", "er"},
-        {"emit_from", "ef"}, {"self_destruct", "sfd"}, {NULL, NULL},
+        {"emit_from", "ef"}, {"self_destruct", "sfd"}, {"action_method", "tam"}, {"action_cost", "tac"}, {"once_per_player", "sup"},
+        {NULL, NULL},
     };
     for (int i = 0; map[i].spec; i++) {
         const cJSON *v = js_get(spec, map[i].spec);
-        if (!v) continue;
+        if (!v || (first_action && (!strcmp(map[i].spec, "value") || !strcmp(map[i].spec, "text")))) continue;
         if (doc_set_prop(doc, obj, map[i].prop, v, flags | SET_FORCE, err, errsz) != 0) return -1;
     }
     return 0;
@@ -541,10 +731,11 @@ static int t_triggers_link(Ctx *ctx, const cJSON *args, ToolResult *r) {
     for (int i = 0; i < n; i++) {
         cJSON *o = doc_object_by_id(p->doc, targets[i], NULL);
         if (doc_set_prop(p->doc, o, "in", v, js_bool(args, "force", 0) ? SET_FORCE : 0, err, sizeof(err)) != 0) {
+            const int bad = targets[i];
             cJSON_Delete(v);
             free(targets);
             edit_abort(&e);
-            return tr_error(r, "target %d: %s (pass force:true to set it anyway)", targets[i], err);
+            return tr_error(r, "target %d: %s (pass force:true to set it anyway)", bad, err);
         }
     }
     doc_set_prop(p->doc, t, "tin", v, SET_FORCE, err, sizeof(err));
@@ -619,10 +810,14 @@ const ToolDef g_tools_logic[] = {
     {"triggers_create", "Create triggers",
      "Create TRIGGER objects (one undo step): [{p, s (default 10^3), event (name or id, e.g. \"onEnter\"), event_value, action "
      "(name or id, e.g. \"Give Player Score\"), value | text, chance, target (interface id), interface_id, single_use, team, "
-     "sound / volume / rate / emit_from, props}].",
-     S({"type":"object","properties":{PROJECT_ARG,"triggers":{"type":"array","items":{"type":"object","properties":{"p":{"type":"array"},"s":{"type":"array"},"event":{"type":["string","integer"]},"event_value":{"type":"integer"},"action":{"type":["string","integer"]},"value":{"type":"number"},"text":{"type":"string"},"chance":{"type":"integer"},"target":{"type":"integer"},"interface_id":{"type":"integer"},"single_use":{"type":"boolean"},"team":{"type":"integer"},"props":{"type":"object"}}}},"force":{"type":"boolean"},"clamp":{"type":"boolean"}},"required":["triggers"]}),
+     "sound / volume / rate / emit_from, action_method / action_cost (onInteractKey), once_per_player, props}]. actions: the v7 "
+     "list (<= 5) [{action, value, value2, text, key, value_type (Input / Trigger / Player / Global Value), delay, condition "
+     "(name or id), condition_values [..], sound, asset_sound, volume, rate, emit_from}] replaces action / value / text.",
+     S({"type":"object","properties":{PROJECT_ARG,"triggers":{"type":"array","items":{"type":"object","properties":{"p":{"type":"array"},"s":{"type":"array"},"event":{"type":["string","integer"]},"event_value":{"type":"integer"},"action":{"type":["string","integer"]},"value":{"type":"number"},"text":{"type":"string"},"chance":{"type":"integer"},"target":{"type":"integer"},"interface_id":{"type":"integer"},"single_use":{"type":"boolean"},"team":{"type":"integer"},"actions":{"type":"array","maxItems":5,"items":{"type":"object"}},"props":{"type":"object"}}}},"force":{"type":"boolean"},"clamp":{"type":"boolean"}},"required":["triggers"]}),
      0, 0, 0, 0, t_triggers_create},
-    {"triggers_update", "Update triggers", "Change triggers: [{id, event?, event_value?, action?, value?, text?, chance?, target?, ...}].",
+    {"triggers_update", "Update triggers",
+     "Change triggers: [{id, event?, event_value?, action?, value?, text?, chance?, target?, actions?, ...}] (the fields of "
+     "triggers_create; on a v7 trigger action / value / text edit its first action, actions replaces the whole list).",
      S({"type":"object","properties":{PROJECT_ARG,"updates":{"type":"array","items":{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"]}}},"required":["updates"]}),
      0, 0, 0, 0, t_triggers_update},
     {"triggers_link", "Link trigger to objects",

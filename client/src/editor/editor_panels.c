@@ -638,6 +638,7 @@ void ed_panel_right_show(const char *name) {
     if (!strcmp(name, "environment")) ed_panel_right_environment();
     else if (!strcmp(name, "object")) ed_panel_right_object();
     else if (!strcmp(name, "objectList")) ed_panel_right_object_list();
+    else if (!strcmp(name, "gui")) ed_panel_right_gui(); // editor_customgui.c
     else if (ed_tools_panel_show(name)) return;
     else if (ed_terrain_panel_show(name)) return;
     else ed_panel_right_blank();

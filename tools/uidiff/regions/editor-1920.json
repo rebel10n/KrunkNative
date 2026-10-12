@@ -121,7 +121,6 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 4.0,
-      "skip": true,
       "note": "left panel: Essential (map config), editor WP4"
     },
     {

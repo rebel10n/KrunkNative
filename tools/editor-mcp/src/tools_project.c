@@ -4,6 +4,7 @@
 #include "mcp.h"
 #include "schema.h"
 #include "util.h"
+#include "editor_model.h" // client/src/editor: the v7 class / effect / weapon tables (editor_data.c)
 #include <map_catalog.h>
 #include <math.h>
 #include <stdio.h>
@@ -535,6 +536,128 @@ static int index_of_named(const cJSON *list, const cJSON *v) {
     return -1;
 }
 
+// JS loose equality of two config values (a select's "2" and 2, true and 1)
+static int loose_eq(const cJSON *a, const cJSON *b) {
+    if (!a || !b) return 0;
+    if (cJSON_IsString(a) && cJSON_IsString(b)) return !strcmp(a->valuestring, b->valuestring);
+    double x, y;
+    char *end;
+    if (cJSON_IsString(a)) { x = strtod(a->valuestring, &end); if (!a->valuestring[0] || *end) return 0; }
+    else if (cJSON_IsBool(a)) x = cJSON_IsTrue(a);
+    else if (cJSON_IsNumber(a)) x = a->valuedouble;
+    else return 0;
+    if (cJSON_IsString(b)) { y = strtod(b->valuestring, &end); if (!b->valuestring[0] || *end) return 0; }
+    else if (cJSON_IsBool(b)) y = cJSON_IsTrue(b);
+    else if (cJSON_IsNumber(b)) y = b->valuedouble;
+    else return 0;
+    return x == y;
+}
+
+// config.cls / prks / weps (v7's Class / Effect / Weapon Config, editor_gameconfig.c): {"<index or
+// name>": {varN: value | null} | null}. Values are checked against classConfig / effectConfig /
+// weaponConfig and written the way v7's panel stores them (switch: boolean, text: string, select:
+// the option index as a string, slider: a number in range); a value equal to the stock one is
+// dropped, as getMapExport does; null removes a value, a null entry resets the class / effect.
+static int set_overrides(cJSON *config, const cJSON *spec, const char *key, const char *stock_key, const char *fields_key, char *err,
+                         const size_t errsz) {
+    if (!cJSON_IsObject(spec)) {
+        snprintf(err, errsz, "config.%s needs {index or name: {field: value}}", key);
+        return -1;
+    }
+    const cJSON *stock = editor_data_get(stock_key), *fields = editor_data_get(fields_key);
+    cJSON *list = cJSON_GetObjectItemCaseSensitive(config, key);
+    if (!cJSON_IsObject(list)) {
+        cJSON_DeleteItemFromObjectCaseSensitive(config, key);
+        list = cJSON_AddObjectToObject(config, key);
+    }
+    for (const cJSON *e = spec->child; e; e = e->next) {
+        char *end;
+        long idx = strtol(e->string, &end, 10);
+        if (!e->string[0] || *end) {
+            idx = -1;
+            int i = 0;
+            const cJSON *it;
+            cJSON_ArrayForEach(it, stock) {
+                if (!strcasecmp(js_str(it, "name", ""), e->string)) idx = i;
+                i++;
+            }
+        }
+        const cJSON *def = cJSON_GetArrayItem(stock, (int) idx);
+        if (idx < 0 || !def) {
+            snprintf(err, errsz, "config.%s: unknown entry '%s' (krunker://config lists them)", key, e->string);
+            return -1;
+        }
+        char ikey[24];
+        snprintf(ikey, sizeof(ikey), "%d", (int) idx);
+        if (cJSON_IsNull(e)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(list, ikey);
+            continue;
+        }
+        if (!cJSON_IsObject(e)) {
+            snprintf(err, errsz, "config.%s.%s needs {field: value}", key, e->string);
+            return -1;
+        }
+        cJSON *dst = cJSON_GetObjectItemCaseSensitive(list, ikey);
+        if (!cJSON_IsObject(dst)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(list, ikey);
+            dst = cJSON_AddObjectToObject(list, ikey);
+        }
+        for (const cJSON *f = e->child; f; f = f->next) {
+            const cJSON *w = NULL, *x;
+            cJSON_ArrayForEach(x, fields) if (!strcmp(js_str(x, "varN", ""), f->string)) w = x;
+            const cJSON *stock_v = cJSON_GetObjectItemCaseSensitive(def, f->string);
+            if (!w || !stock_v || cJSON_IsNull(stock_v)) {
+                snprintf(err, errsz, "config.%s.%s: '%s' is not a field of this entry (krunker://config %s)", key, e->string, f->string, fields_key);
+                return -1;
+            }
+            cJSON *v = NULL;
+            if (cJSON_IsNull(f)) v = NULL;
+            else if (js_bool(w, "bool", 0)) v = cJSON_CreateBool(js_truthy(f));
+            else if (js_bool(w, "input", 0)) {
+                if (!cJSON_IsString(f) || (int) strlen(f->valuestring) > (int) js_num(w, "len", 64)) {
+                    snprintf(err, errsz, "config.%s.%s.%s needs a string of <= %d characters", key, e->string, f->string, (int) js_num(w, "len", 64));
+                    return -1;
+                }
+                v = cJSON_CreateString(f->valuestring);
+            } else if (js_bool(w, "select", 0) && strcmp(key, "weps")) {
+                const int n = cJSON_GetArraySize(js_get(w, "options"));
+                int opt = -1;
+                if (cJSON_IsNumber(f)) opt = (int) f->valuedouble;
+                else if (cJSON_IsString(f)) {
+                    opt = (int) strtol(f->valuestring, &end, 10);
+                    if (!f->valuestring[0] || *end) {
+                        opt = -1;
+                        for (int i = 0; i < n; i++) if (!strcasecmp(cJSON_GetStringValue(cJSON_GetArrayItem(js_get(w, "options"), i)), f->valuestring)) opt = i;
+                    }
+                }
+                if (opt < 0 || opt >= n) {
+                    snprintf(err, errsz, "config.%s.%s.%s: an option index 0..%d or name", key, e->string, f->string, n - 1);
+                    return -1;
+                }
+                char o[16];
+                snprintf(o, sizeof(o), "%d", opt);
+                v = cJSON_CreateString(o);
+            } else {
+                const double lo = js_num(w, "min", -1e30);
+                const double hi = strcmp(key, "weps") ? js_num(w, "maxF", js_num(w, "maxP", js_num(w, "max", 1e30))) : js_num(w, "max", 1e30);
+                if (!cJSON_IsNumber(f) || f->valuedouble < lo || f->valuedouble > hi) {
+                    snprintf(err, errsz, "config.%s.%s.%s needs a number within [%g, %g]", key, e->string, f->string, lo, hi);
+                    return -1;
+                }
+                v = cJSON_CreateNumber(f->valuedouble);
+            }
+            if (!v || loose_eq(v, stock_v)) {
+                cJSON_Delete(v);
+                cJSON_DeleteItemFromObjectCaseSensitive(dst, f->string);
+            } else if (cJSON_GetObjectItemCaseSensitive(dst, f->string)) cJSON_ReplaceItemInObjectCaseSensitive(dst, f->string, v);
+            else cJSON_AddItemToObject(dst, f->string, v);
+        }
+        if (!cJSON_GetArraySize(dst)) cJSON_DeleteItemFromObjectCaseSensitive(list, ikey);
+    }
+    if (!cJSON_GetArraySize(list)) cJSON_DeleteItemFromObjectCaseSensitive(config, key);
+    return 0;
+}
+
 static int set_config(Doc *doc, const cJSON *cfg, char *err, const size_t errsz) {
     cJSON *config = cJSON_GetObjectItemCaseSensitive(doc->root, "config");
     if (!cJSON_IsObject(config)) {
@@ -597,6 +720,11 @@ static int set_config(Doc *doc, const cJSON *cfg, char *err, const size_t errsz)
             cJSON_AddItemToObject(dst, s->string, v);
         }
     }
+    static const char *const overrides[3][3] = {{"cls", "classes", "classConfig"}, {"prks", "effects", "effectConfig"}, {"weps", "weapons", "weaponConfig"}};
+    for (int l = 0; l < 3; l++) {
+        const cJSON *v = js_get(cfg, overrides[l][0]);
+        if (v && set_overrides(config, v, overrides[l][0], overrides[l][1], overrides[l][2], err, errsz) != 0) return -1;
+    }
     if (!cJSON_GetArraySize(config)) cJSON_DeleteItemFromObjectCaseSensitive(doc->root, "config");
     return 0;
 }
@@ -633,7 +761,7 @@ static int t_settings_set(Ctx *ctx, const cJSON *args, ToolResult *r) {
     }
     if (!changed) {
         edit_abort(&e);
-        return tr_error(r, "nothing to change: pass set {key: value}, unset [keys] or config {modes, classes, settings}");
+        return tr_error(r, "nothing to change: pass set {key: value}, unset [keys] or config {modes, classes, settings, cls, prks, weps}");
     }
     if (edit_commit(&e, err, sizeof(err)) != 0) return tr_error(r, "%s", err);
     edit_end(&e);
@@ -819,8 +947,10 @@ const ToolDef g_tools_project[] = {
      1, 0, 1, 0, t_settings_get},
     {"map_settings_set", "Set map settings",
      "Change map settings in one undo step: set {key: value} (colours as \"#rrggbb\"; keys from krunker://config), unset [keys], "
-     "config {modes: [names|ids], classes: [names|ids], settings: {varN: value}} (server config, validated against its ranges).",
-     S({"type":"object","properties":{PROJECT_ARG,"set":{"type":"object"},"unset":{"type":"array","items":{"type":"string"}},"config":{"type":"object","properties":{"modes":{"type":"array"},"classes":{"type":"array"},"settings":{"type":"object"}}},"force":{"type":"boolean"}}}),
+     "config {modes: [names|ids], classes: [names|ids], settings: {varN: value}, cls / prks / weps: {index|name: {varN: value|null} | null}} "
+     "(server config; per-class, per-effect and per-weapon overrides of v7's Class / Effect / Weapon Config; validated against their "
+     "ranges, values equal to the stock ones dropped, null resets).",
+     S({"type":"object","properties":{PROJECT_ARG,"set":{"type":"object"},"unset":{"type":"array","items":{"type":"string"}},"config":{"type":"object","properties":{"modes":{"type":"array"},"classes":{"type":"array"},"settings":{"type":"object"},"cls":{"type":"object"},"prks":{"type":"object"},"weps":{"type":"object"}}},"force":{"type":"boolean"}}}),
      0, 0, 1, 0, t_settings_set},
     {"undo", "Undo", "Undo the last edit(s) of a project (live projects: the editor's own undo stack).",
      S({"type":"object","properties":{PROJECT_ARG,"steps":{"type":"integer","minimum":1,"default":1}}}), 0, 0, 0, 0, t_undo},
