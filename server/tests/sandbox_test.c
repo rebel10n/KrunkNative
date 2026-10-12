@@ -162,7 +162,7 @@ static void test_join_move_leave(void) {
     }
     pump(&c, 60);
     const NetPacket *recon_packet = last(&c, NET_PACKET_RECON);
-    CHECK(recon_packet && recon_packet->length == sizeof(NetReconPacket), "RECON");
+    CHECK(recon_packet && recon_packet->length == NET_RECON_PACKET_V1_SIZE, "RECON (a 1.0 peer: V1)");
     NetReconPacket recon = {0};
     if (recon_packet) memcpy(&recon, recon_packet->payload, sizeof(recon));
     const float moved = hypotf(recon.position[0] - start.x, recon.position[2] - start.z);
@@ -270,8 +270,104 @@ static void test_restart_and_disconnect(void) {
     }
 }
 
+// WP-C protocol 1.3.1 (NET_PROTOCOL_PATCH) on the offline path: a 1.3.0 peer (and a 2-byte HELLO,
+// patch 0) keeps the V7 ENT, V2 SPAWN and V1 RECON it reads; a 1.3.1 peer sends ENT V8 and gets
+// SPAWN V3 (attachIndex, headMlt) and RECON V2 (wallJumpC, canSlideT, slide ms), also about others.
+static const NetPacket *spawn_of(const TestClient *c, const int is_you, NetSpawnPacket *out) {
+    for (int i = c->count - 1; i >= 0; i--) {
+        const NetPacket *packet = &c->packets[i];
+        if (packet->type != NET_PACKET_SPAWN || !net_packet_read_spawn(out, packet) || out->is_you != is_you || !out->active) continue;
+        return packet;
+    }
+    return NULL;
+}
+
+static void mix_join(TestClient *c, const NetHelloPacket *hello, const uint16_t hello_size, const NetEntPacket *ent, const uint16_t ent_size) {
+    memset(c, 0, sizeof(*c));
+    c->fd = sandbox_connect();
+    client_send(c, NET_PACKET_HELLO, hello, hello_size);
+    NetJoinPacket join_packet;
+    memset(&join_packet, 0, sizeof(join_packet));
+    client_send(c, NET_PACKET_JOIN, &join_packet, (uint16_t) NET_JOIN_PACKET_V2_SIZE);
+    client_send(c, NET_PACKET_ENT, ent, ent_size);
+}
+
+static void mix_move(TestClient *c, const NetSpawnPacket *me) {
+    for (int seq = 0; seq < 30; seq++) {
+        const NetInputPacket input = {.seq = seq, .move_dir = 0, .delta = 1.0f / 60.0f, .y_dir = me->direction[1]};
+        client_send(c, NET_PACKET_INPUT, &input, sizeof(input));
+    }
+}
+
+static void test_wpc_peer_mix(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = -1};
+    CHECK(sandbox_start(&cfg), "sandbox_start (peer mix)");
+
+    static TestClient old, bare, now;
+    const NetHelloPacket hello_old = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR_V7, 0};
+    const NetHelloPacket hello_new = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH};
+    const NetEntPacket ent_old = {.class_index = 0, .secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+    NetEntPacket ent_new = ent_old;
+    ent_new.attach_index = 1;
+    ent_new.chall_mode = 1;
+    ent_new.anon_mode = 1;
+    mix_join(&old, &hello_old, sizeof(hello_old), &ent_old, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    mix_join(&bare, &hello_old, 2, &ent_old, (uint16_t) NET_ENT_PACKET_V7_SIZE); // major.minor only: patch 0
+    mix_join(&now, &hello_new, sizeof(hello_new), &ent_new, (uint16_t) NET_ENT_PACKET_V8_SIZE);
+    for (int f = 0; f < 30; f++) {
+        pump(&old, 1);
+        pump(&bare, 1);
+        pump(&now, 1);
+    }
+
+    const NetPacket *init = last(&now, NET_PACKET_INIT);
+    NetInitPacket init_now = {0};
+    CHECK(init && net_packet_read_init(&init_now, init) && init_now.minor == NET_PROTOCOL_MINOR && init_now.patch == NET_PROTOCOL_PATCH, "INIT announces 1.%d.%d", init_now.minor, init_now.patch);
+    CHECK(net_ent_size_for(init_now.major, init_now.minor, init_now.patch) == NET_ENT_PACKET_V8_SIZE, "a 1.3.1 server reads ENT V8");
+
+    NetSpawnPacket me_old, me_bare, me_now, seen;
+    const NetPacket *packet = spawn_of(&old, 1, &me_old);
+    CHECK(packet && packet->length == NET_SPAWN_PACKET_V2_SIZE, "1.3.0 peer: its V7 ENT spawns it, SPAWN V2 (%u)", packet ? packet->length : 0);
+    packet = spawn_of(&bare, 1, &me_bare);
+    CHECK(packet && packet->length == NET_SPAWN_PACKET_V2_SIZE, "2-byte HELLO: patch 0, SPAWN V2 (%u)", packet ? packet->length : 0);
+    packet = spawn_of(&now, 1, &me_now);
+    CHECK(packet && packet->length == NET_SPAWN_PACKET_V3_SIZE && me_now.attach_index == 1 && me_now.head_mlt == 1.0f,
+          "1.3.1 peer: SPAWN V3 with its ENT V8 attachIndex %d, headMlt %.2f", packet ? me_now.attach_index : -9, (double) me_now.head_mlt);
+    // the 1.3.0 peer sees the 1.3.1 player's SPAWN as V2; the 1.3.1 peer the 1.3.0 one's as V3 (attachIndex 0)
+    int old_sees_new = 0, new_sees_old = 0;
+    for (int i = 0; i < old.count; i++) {
+        if (old.packets[i].type == NET_PACKET_SPAWN && net_packet_read_spawn(&seen, &old.packets[i]) && seen.uid == me_now.uid && seen.active)
+            old_sees_new = old.packets[i].length == NET_SPAWN_PACKET_V2_SIZE;
+    }
+    for (int i = 0; i < now.count; i++) {
+        if (now.packets[i].type == NET_PACKET_SPAWN && net_packet_read_spawn(&seen, &now.packets[i]) && seen.uid == me_old.uid && seen.active)
+            new_sees_old = now.packets[i].length == NET_SPAWN_PACKET_V3_SIZE && seen.attach_index == DEFAULT_ATTACHMENT_INDEX;
+    }
+    CHECK(old_sees_new && new_sees_old, "SPAWN of the other peer by the receiver's protocol (old %d new %d)", old_sees_new, new_sees_old);
+
+    mix_move(&old, &me_old);
+    mix_move(&now, &me_now);
+    for (int f = 0; f < 90; f++) {
+        pump(&old, 1);
+        pump(&bare, 1);
+        pump(&now, 1);
+    }
+    const NetPacket *recon_old = last(&old, NET_PACKET_RECON);
+    const NetPacket *recon_now = last(&now, NET_PACKET_RECON);
+    CHECK(recon_old && recon_old->length == NET_RECON_PACKET_V1_SIZE, "1.3.0 peer: RECON V1 (%u)", recon_old ? recon_old->length : 0);
+    CHECK(recon_now && recon_now->length == NET_RECON_PACKET_V2_SIZE, "1.3.1 peer: RECON V2 (%u)", recon_now ? recon_now->length : 0);
+    NetReconPacket recon;
+    CHECK(recon_now && net_packet_read_recon(&recon, recon_now, NULL) && recon.ack_seq == 29 && recon.wall_jump_count == 0 &&
+          recon.can_slide_timer == 0.0f && (float) (recon.slide_ms / 1000.0) == recon.slide_timer, "RECON V2 movement locks");
+    CHECK(!old.closed && !bare.closed && !now.closed, "nobody dropped");
+    sandbox_stop();
+}
+
 int main(void) {
     test_join_move_leave();
+    test_wpc_peer_mix();
     test_restart_and_disconnect();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);

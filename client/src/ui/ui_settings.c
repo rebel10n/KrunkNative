@@ -989,6 +989,7 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
     else if (!strcmp(key, "fpsFOV")) in->fps_fov = parse_float(value, in->fps_fov);
     else if (!strcmp(key, "scrollDir")) in->scroll_dir = parse_bool(value);
     else if (!strcmp(key, "slidCont")) in->slid_cont = parse_bool(value); // settings.tmp.slidCont, sent in the next ENT
+    else if (!strcmp(key, "challMode")) in->chall_mode = parse_bool(value); // WP-C: settings.tmp.challMode, sent in the next ENT
     else if (!strcmp(key, "showWeapon")) in->show_weapon = parse_bool(value);
     else if (!strcmp(key, "showWeaponSec")) in->show_weapon_sec = parse_bool(value);
     else if (!strcmp(key, "showWeaponMel")) in->show_weapon_mel = parse_bool(value);

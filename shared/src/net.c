@@ -9,7 +9,10 @@ _Static_assert(offsetof(NetEntPacket, cosmetics) == NET_ENT_PACKET_V2_SIZE, "ENT
 _Static_assert(offsetof(NetSpawnPacket, cosmetics) == NET_SPAWN_PACKET_V1_SIZE, "SPAWN cosmetics must follow secondary_index");
 _Static_assert(NET_ENT_PACKET_V4_SIZE == NET_ENT_PACKET_V3_SIZE + 2 && NET_ENT_PACKET_V5_SIZE == NET_ENT_PACKET_V4_SIZE + 4, "ENT spectate, slid_cont then spray_index must follow the cosmetics");
 _Static_assert(NET_ENT_PACKET_V6_SIZE == NET_ENT_PACKET_V5_SIZE + sizeof(PlayerSkins) && sizeof(PlayerSkins) == 12, "ENT weapon skins must follow spray_index");
-_Static_assert(NET_ENT_PACKET_V7_SIZE == NET_ENT_PACKET_V6_SIZE + sizeof(float), "ENT lag_comp must be the last bytes");
+_Static_assert(NET_ENT_PACKET_V7_SIZE == NET_ENT_PACKET_V6_SIZE + sizeof(float) && NET_ENT_PACKET_V7_SIZE == 58, "ENT lag_comp must follow the skins");
+_Static_assert(NET_ENT_PACKET_V8_SIZE == NET_ENT_PACKET_V7_SIZE + 6, "ENT attach_index, chall_mode, anon_mode must be the last bytes (WP-C)");
+_Static_assert(NET_SPAWN_PACKET_V3_SIZE == NET_SPAWN_PACKET_V2_SIZE + 8, "SPAWN attach_index, head_mlt must be the last bytes (WP-C)");
+_Static_assert(NET_RECON_PACKET_V1_SIZE == 58 && NET_RECON_PACKET_V2_SIZE == 72, "RECON v7 locks must be the last bytes (WP-C; net-bridge reads 58)");
 _Static_assert(NET_INPUT_PACKET_V1_SIZE == 22 && NET_INPUT_PACKET_V2_SIZE == 23 && sizeof(NetInputPacket) == 24, "INPUT slowdown then scroll must be the last bytes");
 
 #ifdef WIN32
@@ -227,6 +230,10 @@ void net_packet_from_recon(NetReconPacket *packet, const Player *player, const i
     if (player->can_slide) packet->flags |= NET_RECON_CAN_SLIDE;
     if (player->on_terrain) packet->flags |= NET_RECON_ON_TERRAIN;
     if (player->noclip) packet->flags |= NET_RECON_NOCLIP;
+    packet->wall_jump_count = (uint16_t) (player->wall_jump_count <= 0 ? 0 : player->wall_jump_count >= UINT16_MAX ? UINT16_MAX : player->wall_jump_count);
+    packet->can_slide_timer = player->can_slide_timer;
+    // slideTimer as the physics counts it (player.c movement_slide_ms: slide_ms unless slide_timer moved)
+    packet->slide_ms = (float) (player->slide_ms / 1000.0) == player->slide_timer ? player->slide_ms : (double) player->slide_timer * 1000.0;
 }
 
 // index.js reconcilePlayer(l, true) up to the replay: every field of the "l" packet is
@@ -240,6 +247,11 @@ void net_packet_apply_recon(Player *player, const NetReconPacket *packet) {
     player->crouch_val = packet->crouch_val;
     player_update_height(player);
     player->slide_timer = packet->slide_timer;
+    // v7.1.4 io_syncPlayer [12] wallJumpC, [24] canSlideT; the exact slide ms when it is this
+    // slide_timer (a V1 RECON read through net_packet_read_recon carries slide_timer * 1000)
+    player->wall_jump_count = packet->wall_jump_count;
+    player->can_slide_timer = isfinite(packet->can_slide_timer) ? packet->can_slide_timer : 0.0f;
+    if (isfinite(packet->slide_ms) && (float) (packet->slide_ms / 1000.0) == packet->slide_timer) player->slide_ms = packet->slide_ms;
     player->x_vel_cylinder = packet->x_vel_cylinder;
     player->z_vel_cylinder = packet->z_vel_cylinder;
     player->on_wall = packet->on_wall & 7;
@@ -439,6 +451,53 @@ uint32_t net_map_hash(const cJSON *map, char **json_out, size_t *size_out) {
     return hash;
 }
 
+int net_peer_has_wpc(const int minor, const int patch) {
+    return minor > NET_PROTOCOL_MINOR_V7 || (minor == NET_PROTOCOL_MINOR_V7 && patch >= 1);
+}
+
+int net_packet_read_hello(NetHelloPacket *hello, const NetPacket *packet) {
+    if (packet->length < offsetof(NetHelloPacket, patch)) return 0;
+    memset(hello, 0, sizeof(*hello));
+    memcpy(hello, packet->payload, packet->length < sizeof(*hello) ? packet->length : sizeof(*hello));
+    return 1;
+}
+
+int net_packet_read_init(NetInitPacket *init, const NetPacket *packet) {
+    if (packet->length < sizeof(*init)) return 0;
+    memcpy(init, packet->payload, sizeof(*init));
+    return 1;
+}
+
+int net_packet_read_recon(NetReconPacket *recon, const NetPacket *packet, const Player *keep) {
+    if (packet->length < NET_RECON_PACKET_V1_SIZE || (packet->length > NET_RECON_PACKET_V1_SIZE && packet->length < NET_RECON_PACKET_V2_SIZE)) return 0;
+    memset(recon, 0, sizeof(*recon));
+    memcpy(recon, packet->payload, packet->length < sizeof(*recon) ? packet->length : sizeof(*recon));
+    if (packet->length < NET_RECON_PACKET_V2_SIZE) { // a 1.3.0 server / net-bridge: these stay as predicted
+        recon->wall_jump_count = (uint16_t) (keep && keep->wall_jump_count > 0 ? MIN(keep->wall_jump_count, UINT16_MAX) : 0);
+        recon->can_slide_timer = keep ? keep->can_slide_timer : 0.0f;
+        recon->slide_ms = (double) recon->slide_timer * 1000.0;
+    }
+    return 1;
+}
+
+int net_rate_hz(const int index) {
+    static const int rates[NET_RATE_COUNT] = {30, 60, 120, 144, 240, 360};
+    return rates[index >= 0 && index < NET_RATE_COUNT ? index : NET_RATE_DEFAULT_INDEX];
+}
+
+// index.js gameLoop: inputFrameDelta += gameTimeDiff; shouldSampleInput =
+// roundToClos(inputFrameDelta, 1000 / netRate) >= 1000 / netRate (p * Math.round(x / p) >= p, so
+// x / p >= 0.5); the frame then takes Math.round(inputFrameDelta * deltaMlt) and inputFrameDelta = 0.
+float net_input_rate_take(float *accum, const float frame_delta, const int rate_hz) {
+    if (isfinite(frame_delta) && frame_delta > 0.0f) *accum += frame_delta;
+    const double period_ms = 1000.0 / (double) (rate_hz > 0 ? rate_hz : net_rate_hz(NET_RATE_DEFAULT_INDEX));
+    const double accum_ms = (double) *accum * 1000.0;
+    if (period_ms * floor(accum_ms / period_ms + 0.5) < period_ms) return -1.0f;
+    const float delta = *accum;
+    *accum = 0.0f;
+    return delta;
+}
+
 int net_packet_read_input(NetInputPacket *input, const NetPacket *packet) {
     if (packet->length != sizeof(NetInputPacket) && packet->length != NET_INPUT_PACKET_V2_SIZE &&
         packet->length != NET_INPUT_PACKET_V1_SIZE) return 0;
@@ -451,10 +510,11 @@ int net_packet_read_input(NetInputPacket *input, const NetPacket *packet) {
 
 int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
     // 4 / 8 bytes, or cosmetics followed by the optional spectate and slid_cont bytes (36..38),
-    // or with spray_index (42), with the weapon skins (54), or all of it with lag_comp (58)
+    // or with spray_index (42), with the weapon skins (54), with lag_comp (58), or all of it with
+    // attachIndex / challMode / anonMode (64, WP-C). Longer ENTs (a newer peer) read the V8 prefix.
     if (packet->length != NET_ENT_PACKET_V2_SIZE && packet->length != NET_ENT_PACKET_MIN_SIZE &&
         packet->length != NET_ENT_PACKET_V5_SIZE && packet->length != NET_ENT_PACKET_V6_SIZE &&
-        packet->length != NET_ENT_PACKET_V7_SIZE &&
+        packet->length != NET_ENT_PACKET_V7_SIZE && packet->length < NET_ENT_PACKET_V8_SIZE &&
         (packet->length < NET_ENT_PACKET_V3_SIZE || packet->length > NET_ENT_PACKET_V4_SIZE)) return 0;
 
     ent->secondary_index = -1;
@@ -464,23 +524,34 @@ int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
     ent->spray_index = 0; // absent: selectedSprayIndex default (0, "Krunker")
     ent->skins = PLAYER_SKINS_NONE; // absent: no weapon / melee skins
     ent->lag_comp = 1.0f; // absent: settings.js lagCompensation default (1)
-    memcpy(ent, packet->payload, packet->length);
+    ent->attach_index = DEFAULT_ATTACHMENT_INDEX; // absent: parseEnterData integer(data[12], 0)
+    ent->chall_mode = 0;
+    ent->anon_mode = 0;
+    memcpy(ent, packet->payload, packet->length < sizeof(*ent) ? packet->length : sizeof(*ent));
     ent->spectate = ent->spectate ? 1 : 0;
     ent->slid_cont = ent->slid_cont ? 1 : 0;
+    ent->chall_mode = ent->chall_mode ? 1 : 0;
+    ent->anon_mode = ent->anon_mode ? 1 : 0;
     return 1;
 }
 
-uint16_t net_ent_size_for(const int major, const int minor) {
-    if (major > NET_PROTOCOL_MAJOR || (major == NET_PROTOCOL_MAJOR && minor >= 2)) return (uint16_t) NET_ENT_PACKET_V7_SIZE;
+uint16_t net_ent_size_for(const int major, const int minor, const int patch) {
+    if (major > NET_PROTOCOL_MAJOR || (major == NET_PROTOCOL_MAJOR && net_peer_has_wpc(minor, patch))) return (uint16_t) NET_ENT_PACKET_V8_SIZE;
+    if (major == NET_PROTOCOL_MAJOR && minor >= 2) return (uint16_t) NET_ENT_PACKET_V7_SIZE;
     if (major == NET_PROTOCOL_MAJOR && minor == 1) return (uint16_t) NET_ENT_PACKET_V6_SIZE;
     return (uint16_t) NET_ENT_PACKET_V4_SIZE;
 }
 
 int net_packet_read_spawn(NetSpawnPacket *spawn, const NetPacket *packet) {
-    if (packet->length != sizeof(NetSpawnPacket) && packet->length != NET_SPAWN_PACKET_V1_SIZE) return 0;
+    // 78 (no cosmetics), V2 (cosmetics), V3 (+ attachIndex / headMlt, WP-C) or longer (V3 prefix)
+    if (packet->length != NET_SPAWN_PACKET_V1_SIZE && packet->length != NET_SPAWN_PACKET_V2_SIZE &&
+        packet->length < NET_SPAWN_PACKET_V3_SIZE) return 0;
 
     spawn->cosmetics = PLAYER_COSMETICS_NONE;
-    memcpy(spawn, packet->payload, packet->length);
+    spawn->attach_index = DEFAULT_ATTACHMENT_INDEX;
+    spawn->head_mlt = 1.0f;
+    memcpy(spawn, packet->payload, packet->length < sizeof(*spawn) ? packet->length : sizeof(*spawn));
+    if (!isfinite(spawn->head_mlt) || spawn->head_mlt <= 0.0f) spawn->head_mlt = 1.0f;
     return 1;
 }
 

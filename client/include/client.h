@@ -557,6 +557,8 @@ typedef struct {
     int net_ping_ms;               // smoothed RTT from PING_RESULT, -1 = unknown (Krunker "-")
     uint16_t net_ent_size;         // ENT size the server's INIT protocol accepts (net_ent_size_for): V7 from 1.2, V6 for 1.1, else V4
     uint8_t net_server_minor;      // WP-B: INIT minor (NET_PROTOCOL_MINOR_V7 servers take the v7 combat packets)
+    uint8_t net_server_patch;      // WP-C: INIT patch (net_peer_has_wpc: the server reads ENT V8)
+    float net_input_accum;         // WP-C: frame time (s) since the last sampled input frame (index.js inputFrameDelta, netRate)
     int net_round_seconds;         // round clock (TIMER), -1 = no round clock received yet
     int net_end_seconds;           // end screen "Next Round in" seconds, -1 = no end screen
     int net_end_result;            // END result: 1 victory, 0 defeat, -1 draw
@@ -724,6 +726,7 @@ void combat_call_in_streak(Client*, int slot); // window.callInStreak(slot): the
 // The sight a player's weapons take (attach.js index): the local player's saved attachIndex,
 // others' Player.attach_index (0 Reflex until the v7 SPAWN carries attachIndex, WP-C).
 int player_attach_index(const Player*);
+int client_saved_attach_index(void); // getSavedVal("attachIndex") || 0: our pick (ENT V8 ent[12])
 // window.updateScope(scopeIndex, savedScope) (v7.1.4 aimRecticles.js): the #recticleImg source for
 // the saved scopeIndex (getSavedVal, 0 Default) into buf; NULL when scopeIndex is -1 (no overlay).
 // A custom (-2) image must be an http(s) URL and not .svg, else scope_0.
@@ -731,6 +734,7 @@ const char *combat_scope_overlay_src(char *buf, size_t n);
 void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the socket, or offline the sandbox connection
 // Prediction / reconciliation (client/src/net/recon.c, Krunker tmpInpts / "q" / reconcilePlayer).
 void client_recon_reset(Client*);                                 // CONTROLS.reset(): our spawn, a new session
+float client_recon_sample(Client*, float frame_delta);            // WP-C netRate: this frame's input delta (s), -1 = no input frame
 void client_recon_record(Client*, const Input*);                  // a predicted input: pending + the "q" batch
 int  client_recon_sending(const Client*);                         // inputs may leave: alive, round not over (net/recon.c)
 int  client_round_ended(const Client*);                           // END seen while playing, until the next INIT (net/recon.c)

@@ -78,6 +78,13 @@ typedef struct {
     // negative controls: snap without replaying (no prediction kept), replays without velObj
     int control_no_replay, control_no_vel_obj;
 
+    // WP-C v7.1.4 netRate (client/src/net/recon.c client_recon_sample): 0 = an input every frame
+    int net_rate;
+    float input_accum;
+    int fixed_frames;           // frames exactly 1 / fps long (no +-30%)
+    unsigned int frames, sampled;
+    float min_input_delta, input_time;
+
     // measurements
     unsigned int recons;
     float max_correction, last_correction;
@@ -185,9 +192,8 @@ static void client_frame(Sim *sim, Input input, const float delta) {
 static void client_receive(Sim *sim) {
     NetPacket packet;
     while (link_take(&sim->down, sim->now, &packet)) {
-        if (packet.type != NET_PACKET_RECON || packet.length != sizeof(NetReconPacket)) continue;
         NetReconPacket recon;
-        memcpy(&recon, packet.payload, sizeof(recon));
+        if (packet.type != NET_PACKET_RECON || !net_packet_read_recon(&recon, &packet, sim->c)) continue;
         const vec3 before = sim->c->position;
         if (sim->control_no_vel_obj) {
             for (size_t i = 0; i < sim->pending_count; i++) sim->pending[i].has_vel_obj = 0;
@@ -224,14 +230,30 @@ static void server_tick(Sim *sim) {
 static void sim_step(Sim *sim, const Input *input, const float fps) {
     sim->frame_rng = sim->frame_rng * 1664525u + 1013904223u;
     const float r = (float) ((sim->frame_rng >> 8) & 0xffff) / 65535.0f;
-    const float delta = (1.0f / fps) * (0.7f + 0.6f * r);
+    const float delta = (1.0f / fps) * (sim->fixed_frames ? 1.0f : 0.7f + 0.6f * r);
     sim->now += delta;
     while (sim->server_next_tick <= sim->now) {
         server_tick(sim);
         sim->server_next_tick += 1.0 / 30.0;
     }
     client_receive(sim);
-    if (sim->c->active) client_frame(sim, *input, delta);
+    if (!sim->c->active) return;
+    sim->frames++;
+    if (!sim->net_rate) {
+        client_frame(sim, *input, delta);
+        return;
+    }
+    // netRate: an input frame only once half a period has passed, carrying the summed time;
+    // the other frames tick the world only (main.c)
+    const float input_delta = net_input_rate_take(&sim->input_accum, delta, sim->net_rate);
+    if (input_delta < 0.0f) {
+        game_tick(&sim->client, (float) sim->now, delta);
+        return;
+    }
+    if (!sim->sampled || input_delta < sim->min_input_delta) sim->min_input_delta = input_delta;
+    sim->sampled++;
+    sim->input_time += input_delta;
+    client_frame(sim, *input, input_delta);
 }
 
 // Idle frames until everything in flight was processed and acked (then client == server).
@@ -679,6 +701,132 @@ static void case_bad_rotation(void) {
     free(sim);
 }
 
+// ---------------------------------------------------------------- WP-C: netRate, held jump, v7 RECON
+
+// v7.1.4 netRate sampling (index.js gameLoop): at 144 Hz the input rate follows the render rate up to
+// ~288 fps (a frame of at least half a period samples), every input frame carries the time since the
+// previous one, and prediction + reconciliation stay exact.
+static void case_net_rate(const float fps, const int rate, const unsigned int want_per_second) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
+    sim->net_rate = rate;
+    sim->fixed_frames = 1;
+    const double start = sim->now;
+    while (sim->now - start < 4.0 && sim->c->active) {
+        const Input input = script_input(sim, sim->now - start);
+        sim_step(sim, &input, fps);
+    }
+    const double elapsed = sim->now - start;
+    const float per_second = (float) sim->sampled / (float) elapsed;
+    const float period = 1.0f / (float) rate;
+    printf("  netRate %3d Hz @%3.0f fps: %u of %u frames sampled (%.1f/s), min input %.2f ms\n", rate, fps, sim->sampled, sim->frames,
+           per_second, sim->min_input_delta * 1000.0f);
+    CHECK(fabsf(per_second - (float) want_per_second) <= 2.0f, "netRate %d @%.0f fps: %.1f inputs/s, want %u", rate, fps, per_second, want_per_second);
+    CHECK(sim->min_input_delta >= period * 0.5f - 1e-4f, "an input frame shorter than half a period (%.3f ms)", sim->min_input_delta * 1000.0f);
+    CHECK(fabsf(sim->input_time + sim->input_accum - (float) elapsed) < 1e-3f, "input time %.4f + %.4f pending != %.4f elapsed", sim->input_time,
+          sim->input_accum, elapsed);
+    sim->fixed_frames = 0; // +-30% frames for the rest
+    walk(sim, 3.0, 2, fps);
+    sim_settle(sim, fps);
+    CHECK(sim->max_correction < 1e-3f, "netRate %d @%.0f fps: rubber-banding %f", rate, fps, sim->max_correction);
+    CHECK(dist3(sim->c->position, sim->s->position) < 1e-3f, "netRate %d @%.0f fps: final %f", rate, fps, dist3(sim->c->position, sim->s->position));
+    free(sim);
+}
+
+static void case_net_rate_math(void) {
+    static const int rates[NET_RATE_COUNT] = {30, 60, 120, 144, 240, 360};
+    for (int i = 0; i < NET_RATE_COUNT; i++) CHECK(net_rate_hz(i) == rates[i], "netRate option %d", i);
+    CHECK(net_rate_hz(-1) == 144 && net_rate_hz(NET_RATE_COUNT) == 144, "netRate default 144 Hz");
+    float accum = 0.0f;
+    CHECK(net_input_rate_take(&accum, 0.0f, 144) < 0.0f && accum == 0.0f, "a zero frame samples nothing");
+    CHECK(net_input_rate_take(&accum, 0.003f, 144) < 0.0f && fabsf(accum - 0.003f) < 1e-7f, "3 ms < half of 6.94 ms");
+    CHECK(fabsf(net_input_rate_take(&accum, 0.0005f, 144) - 0.0035f) < 1e-7f && accum == 0.0f, "3.5 ms rounds up to one period");
+    CHECK(fabsf(net_input_rate_take(&accum, 0.1f, 30) - 0.1f) < 1e-7f, "a long frame is one input frame");
+    CHECK(net_input_rate_take(&accum, NAN, 30) < 0.0f && accum == 0.0f, "NaN frame time ignored");
+}
+
+// v7.1.4 jump input is held (J4): without autoJump one jump per press (tryJump waits for a release),
+// with autoJump a jump on every landing while held; both predicted exactly.
+static void case_held_jump(const int auto_jump) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
+    sim->server.config.auto_jump = sim->client.config.auto_jump = (unsigned char) auto_jump;
+    sim->net_rate = 144;
+    walk(sim, 1.0, -1, 120.0f);
+    int jumps = 0, was_ground = sim->s->on_ground;
+    const double until = sim->now + 3.0;
+    while (sim->now < until) {
+        const Input input = {.move_dir = -1, .jump = 1, .x_dir = sim->c->direction.x, .y_dir = sim->c->direction.y};
+        sim_step(sim, &input, 120.0f);
+        if (was_ground && !sim->c->on_ground && sim->c->velocity.y > 0.0f) jumps++;
+        was_ground = sim->c->on_ground;
+    }
+    sim_settle(sim, 120.0f);
+    printf("  held jump (autoJump %d): %d jumps in 3 s, max correction %.6f\n", auto_jump, jumps, sim->max_correction);
+    CHECK(auto_jump ? jumps >= 3 : jumps == 1, "held jump, autoJump %d: %d jumps", auto_jump, jumps);
+    CHECK(sim->max_correction < 1e-3f, "held jump: rubber-banding %f", sim->max_correction);
+    CHECK(dist3(sim->c->position, sim->s->position) < 1e-3f, "held jump: final %f", dist3(sim->c->position, sim->s->position));
+    free(sim);
+}
+
+// RECON V2 carries wallJumpC / canSlideT / the exact slide ms (v7.1.4 io_syncPlayer [12] / [24]); a
+// V1 RECON (a 1.3.0 server, net-bridge) keeps the client's own values. Input reset / interact ride
+// in the input flags (map-logic WP-B's input[13] / [14]).
+static void case_v7_recon_packets(void) {
+    Player s = {0}, c = {0};
+    s.position = (vec3) {1.0f, 2.0f, 3.0f};
+    s.wall_jump_count = 3;
+    s.can_slide_timer = 0.07f;
+    s.slide_ms = 312.3456789;
+    s.slide_timer = (float) (s.slide_ms / 1000.0);
+    NetReconPacket out;
+    net_packet_from_recon(&out, &s, 42);
+    NetPacket packet = {.type = NET_PACKET_RECON, .length = (uint16_t) NET_RECON_PACKET_V2_SIZE};
+    memcpy(packet.payload, &out, sizeof(out));
+    NetReconPacket in;
+    CHECK(net_packet_read_recon(&in, &packet, NULL), "RECON V2 read");
+    net_packet_apply_recon(&c, &in);
+    CHECK(c.wall_jump_count == 3 && c.can_slide_timer == 0.07f && c.slide_ms == s.slide_ms && c.slide_timer == s.slide_timer,
+          "RECON V2: wallJumpC %d canSlideT %f slide %.7f ms", c.wall_jump_count, (double) c.can_slide_timer, c.slide_ms);
+    // a 1.3.0 server: 58 bytes, the client's own locks stay
+    Player keep = {0};
+    keep.wall_jump_count = 1;
+    keep.can_slide_timer = 0.02f;
+    packet.length = (uint16_t) NET_RECON_PACKET_V1_SIZE;
+    CHECK(net_packet_read_recon(&in, &packet, &keep), "RECON V1 read");
+    net_packet_apply_recon(&keep, &in);
+    CHECK(keep.wall_jump_count == 1 && keep.can_slide_timer == 0.02f && keep.slide_timer == s.slide_timer, "RECON V1 keeps the client's locks");
+    packet.length = (uint16_t) NET_RECON_PACKET_V1_SIZE + 3;
+    CHECK(!net_packet_read_recon(&in, &packet, NULL), "RECON with a cut v7 tail accepted");
+    packet.length = (uint16_t) NET_RECON_PACKET_V2_SIZE + 8;
+    CHECK(net_packet_read_recon(&in, &packet, NULL) && in.wall_jump_count == 3, "RECON longer than V2 reads its prefix");
+    packet.length = 20;
+    CHECK(!net_packet_read_recon(&in, &packet, NULL), "short RECON accepted");
+
+    for (int reset = 0; reset <= 2; reset++) {
+        for (int interact = 0; interact <= 1; interact++) {
+            const Input input = {.seq = 9, .move_dir = 3, .delta = 0.007f, .jump = 1, .reset = (unsigned char) reset, .interact_held = (unsigned char) interact};
+            NetInputPacket wire;
+            net_packet_from_input(&wire, &input);
+            Input back;
+            net_packet_to_input(&back, &wire);
+            CHECK(back.reset == reset && back.interact_held == interact && back.jump && back.seq == 9, "input reset %d interact %d", reset, interact);
+        }
+    }
+
+    // a client that predicted wall jumps the server did not see is reset by the next "l"
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
+    walk(sim, 1.0, 2, 60.0f);
+    sim->c->wall_jump_count = 99;
+    sim->c->can_slide_timer = 0.09f;
+    const unsigned int recons = sim->recons;
+    walk(sim, 1.5, 2, 60.0f);
+    CHECK(sim->recons > recons && sim->c->wall_jump_count == sim->s->wall_jump_count, "the next \"l\" resets wallJumpC (%d, server %d)",
+          sim->c->wall_jump_count, sim->s->wall_jump_count);
+    free(sim);
+}
+
 int main(void) {
     printf("Running reconciliation tests...\n");
     case_packets();
@@ -697,6 +845,16 @@ int main(void) {
         case_noclip(latencies[i], jitter);
     }
     case_respawn();
+    case_net_rate_math();
+    case_v7_recon_packets();
+    case_net_rate(30.0f, 144, 30);   // a sample every frame
+    case_net_rate(60.0f, 144, 60);
+    case_net_rate(144.0f, 144, 144);
+    case_net_rate(240.0f, 144, 240); // 4.17 ms >= 3.47 ms: still every frame (v7 roundToClos)
+    case_net_rate(360.0f, 144, 180); // every other frame
+    case_net_rate(144.0f, 30, 48);   // 30 Hz: every third 6.94 ms frame (20.8 ms >= 16.7 ms)
+    case_held_jump(0);
+    case_held_jump(1);
     case_control_no_replay(50.0f, 15.0f);
     case_control_no_replay(150.0f, 45.0f);
     // Last: these games draw from the shared spawn RNG, and the cases above expect its sequence.

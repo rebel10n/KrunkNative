@@ -77,9 +77,8 @@ static KsConn *conn_get(const int id)
 
 void ks_server_on_hello(ClientConnection *client, const NetPacket *packet)
 {
-    if (!client || !packet || packet->length < sizeof(NetHelloPacket)) return;
     NetHelloPacket hello;
-    memcpy(&hello, packet->payload, sizeof(hello));
+    if (!client || !packet || !net_packet_read_hello(&hello, packet)) return; // WP-C: a 2-byte HELLO is patch 0
     KsConn *c = conn_get(client->id);
     if (c) c->minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;
 }

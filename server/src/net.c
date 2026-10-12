@@ -353,7 +353,7 @@ static void net_send_init(ClientConnection *client) {
     const NetInitPacket packet = {
         .major = NET_PROTOCOL_MAJOR,
         .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6, 1.2: V7 (client_enter_game sends them only then)
-        .patch = 0,
+        .patch = NET_PROTOCOL_PATCH, // 1.3.1: ENT V8 (WP-C)
         .map_index = g_server->game.current_map_index,
         .mode_index = game_mode_id(&g_server->game), // Krunker "init" modeIndex: the mode id
         .tick_rate = g_server->config.tick_rate,
@@ -381,11 +381,16 @@ static void net_send_spawn(ClientConnection *client, const Player *player, const
         .max_health = player->max_health,
         .position = {player->position.x, player->position.y, player->position.z},
         .direction = {player->direction.x, player->direction.y},
+        .attach_index = player->attach_index, // WP-C: v7.1.4 sync attachIndex, headMlt
+        // the player's own headMlt; Bighead FFA's mode.head_mlt rides in "bh" (NET_MODE_COUNTER_HEAD)
+        .head_mlt = player->head_mlt > 0.0f ? player->head_mlt : 1.0f,
     };
 
     strncpy(packet.name, player->name, sizeof(packet.name) - 1);
 
-    net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, sizeof(packet));
+    // WP-C: 1.3.0 and older peers only take the V2 SPAWN
+    const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_SPAWN_PACKET_V3_SIZE : NET_SPAWN_PACKET_V2_SIZE;
+    net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, size);
 }
 
 static void net_broadcast_spawn(const Player *player) {
@@ -467,6 +472,9 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->spray_index = client->spray_index; // applyEntData: player.sprayIndex = ent[1]
     client->player->skins = client->skins;             // applyEntData: player.skins = ent[2], meleeIndex = ent[9]
     client->player->lag_comp = client->lag_comp;       // applyLagCompFromEnt: player.lagComp = ent[11]
+    client->player->attach_index = client->attach_index; // WP-C: player.attachIndex = ent[12] (sent in SPAWN)
+    client->player->chall_mode = client->chall_mode;     // WP-C: player.challMode = ent[7]
+    client->player->anon_mode = client->anon_mode;       // WP-C: player.anonMode = ent[19]
     // WP-B: v7 player.streakIndexs (ENT) and player.account for reqAccount streaks: a backend
     // account, or the host's own machine (the offline sandbox counts as an account, decisions.md)
     player_set_streak_indexes(client->player, client->streak_indexes_set ? client->streak_indexes : NULL);
@@ -756,6 +764,9 @@ void net_add_client(ClientConnection *client) {
     client->spray_index = 0;
     client->skins = PLAYER_SKINS_NONE;
     client->lag_comp = 1.0f;
+    client->attach_index = DEFAULT_ATTACHMENT_INDEX;
+    client->chall_mode = 0;
+    client->anon_mode = 0;
     client->chat_limiter = (NetChatLimiter) {0};
     client->ping_seq = 0;
     client->ping_ms = -1;
@@ -1036,10 +1047,10 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     switch (packet->type) {
         case NET_PACKET_HELLO:
-            if (packet->length >= sizeof(NetHelloPacket)) { // the peer's protocol minor (v7 AI packet gate)
-                NetHelloPacket hello;
-                memcpy(&hello, packet->payload, sizeof(hello));
+            NetHelloPacket hello;
+            if (net_packet_read_hello(&hello, packet)) { // the peer's protocol minor.patch (v7 AI / WP-C gates)
                 client->peer_minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;
+                client->peer_patch = hello.major == NET_PROTOCOL_MAJOR ? hello.patch : 0;
             }
             ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
             if (client->peer_minor >= NET_PROTOCOL_MINOR_V7 && g_server->game.ready) { // WP-E: its INIT went out before the HELLO
@@ -1078,6 +1089,10 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             // must not turn off the rewind of its targets); otherwise the previous value stays
             if (isfinite(ent.lag_comp)) client->lag_comp = fminf(1.0f, fmaxf(0.1f, ent.lag_comp));
             if (client->player) client->player->lag_comp = client->lag_comp;
+            // WP-C (ENT V8): attachIndex, challengeMode, anonMode (server/index.ts parseEnterData), applied at the spawn
+            client->attach_index = ent.attach_index >= -1 && ent.attach_index < 256 ? ent.attach_index : DEFAULT_ATTACHMENT_INDEX;
+            client->chall_mode = ent.chall_mode;
+            client->anon_mode = ent.anon_mode;
 
             // brain-linked: the first ENT waits for the JOIN / account lookup (server/src/accounts.c)
             if (accounts_gate_ent(client, ent.spectate)) net_resume_ent(client, ent.spectate);
@@ -1288,7 +1303,9 @@ static void net_send_reconciliation(void) {
 
         NetReconPacket packet;
         net_packet_from_recon(&packet, player, player->input_seq);
-        net_send_packet(client->fd, NET_PACKET_RECON, &packet, sizeof(packet));
+        // WP-C: the v7 movement locks only to 1.3.1+ peers (1.3.0 / net-bridge read exactly 58 bytes)
+        const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_RECON_PACKET_V2_SIZE : NET_RECON_PACKET_V1_SIZE;
+        net_send_packet(client->fd, NET_PACKET_RECON, &packet, size);
     }
 }
 

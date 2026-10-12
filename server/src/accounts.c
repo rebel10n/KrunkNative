@@ -401,9 +401,15 @@ void accounts_configure_public(Game *game, const cJSON *cli_map) {
 
 // ------------------------------------------------------------------ PLAYER_INFO
 
-static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *info) {
+static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *info, const ClientConnection *to) {
     memset(info, 0, sizeof(*info));
     info->uid = client->player ? client->player->uid : client->id;
+    // WP-C: v7.1.4 players.js sync with anonMode: a random level, no clan, account or badges for
+    // everyone but the player and dev viewers
+    if (client->player && client->player->anon_mode && to != client && !(to && (to->acct.flags & NET_PLAYER_INFO_DEV))) {
+        info->level = 1 + rand() % 100; // fakeLevel || UTILS.randInt(1, 100)
+        return;
+    }
     info->account_id = client->acct.account_id;
     info->level = client->acct.level;
     info->flags = client->acct.flags;
@@ -413,8 +419,10 @@ static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *i
 static void acc_broadcast_info(const ClientConnection *client) {
     if (!g_acc.brain || !client->player) return;
     NetPlayerInfoPacket info;
-    acc_fill_info(client, &info);
-    for (size_t i = 0; i < g_server->client_count; i++) net_send_packet(g_server->clients[i].fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        acc_fill_info(client, &info, &g_server->clients[i]);
+        net_send_packet(g_server->clients[i].fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
+    }
 }
 
 void accounts_send_infos_to(ClientConnection *target) {
@@ -423,7 +431,7 @@ void accounts_send_infos_to(ClientConnection *target) {
         const ClientConnection *client = &g_server->clients[i];
         if (!client->player || client == target) continue;
         NetPlayerInfoPacket info;
-        acc_fill_info(client, &info);
+        acc_fill_info(client, &info, target);
         net_send_packet(target->fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
     }
 }

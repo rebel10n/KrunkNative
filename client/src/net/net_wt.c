@@ -329,7 +329,7 @@ static void wt_handshake_datagram(const uint8_t *data, const size_t length) {
     client_net_note(NET_NOTE_INFO, "%s session established (token %08x) in %.0f ms: game transport %s", wt_name(), token,
                     (g_wt.up_at - g_wt.opened_at) * 1000.0, wt_label_of(g_wt.backend));
     on_client_socket_connect(client);
-    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, 0}; // the minor gates the v7 packets (KrunkScript 200-203)
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH}; // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes
     client_net_send_packet(WT_FAKE_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
     client_net_send_join(client, WT_FAKE_FD); // brain ticket / session / guest name (net_join.c)
 }

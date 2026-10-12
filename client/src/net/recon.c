@@ -15,6 +15,8 @@
 // that long (order kept, like TCP). KRUNKNATIVE_RECON_LOG=1 prints each correction.
 #include <client.h>
 #include <ks_client.h> // ks_client_no_prediction
+#include <ui_logic.h>  // ui_setting_number ("netRate")
+#include <ui_mobile.h> // ui_mobile_active (netRate's mobile default)
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -113,10 +115,26 @@ void client_recon_drain_delayed(Client *client, void (*handle)(Client*, const Ne
 
 // CONTROLS.reset() on our (re)spawn and on a new session: no pending inputs, a fresh batch.
 void client_recon_reset(Client *client) {
+    client->net_input_accum = 0.0f; // index.js "start": inputFrameDelta = 0
     client->net_pending_count = 0;
     client->net_batch_count = 0;
     client->net_batch_time = 0.0f;
     client->net_next_input_seq = 0;
+}
+
+// v7.1.4 SETTINGS.tmp.netRate: Settings > General > Network Rate (select index 0-5, default 3 =
+// 144 Hz, mobile 1 = 60 Hz). WP-D owns the row; until it exists the default applies.
+static int recon_net_rate_hz(void) {
+    double index = ui_mobile_active() ? 1 : NET_RATE_DEFAULT_INDEX;
+    ui_setting_number("netRate", &index);
+    return net_rate_hz((int) index);
+}
+
+// index.js gameLoop: inputFrameDelta += gameTimeDiff, then shouldSampleInput (net_input_rate_take).
+// Online and offline alike (v7's sandbox player samples the same frames). Returns the delta (s) of
+// the input frame to build this frame, or -1 when this frame samples none.
+float client_recon_sample(Client *client, const float frame_delta) {
+    return net_input_rate_take(&client->net_input_accum, frame_delta, recon_net_rate_hz());
 }
 
 static void batch_flush(Client *client) {

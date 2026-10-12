@@ -217,6 +217,8 @@ static int g_skip_scroll;
 
 // The unrounded look the input frames are built from (client_tick, CONTROLS xDr/yDr).
 static vec2 g_look;
+static vec2 g_look_sent;      // WP-C: g_look as the last sampled input frame took it (me->direction after it)
+static int g_look_unsampled;  // WP-C: this frame sampled no input frame (netRate), the camera shows g_look
 static int g_look_valid;
 
 static void print_usage_to(FILE *out, const char *program) {
@@ -906,7 +908,7 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player_spawn(player);
     } else if (!player->active || !player->loadout_size || player->class_index != packet->class_index || player->secondary_index != packet->secondary_index ||
                memcmp(&player->cosmetics, &packet->cosmetics, sizeof(packet->cosmetics)) != 0 ||
-               memcmp(&player->skins, &skins, sizeof(skins)) != 0) {
+               memcmp(&player->skins, &skins, sizeof(skins)) != 0 || player->attach_index != packet->attach_index) {
         client_drop_player_mesh(client, player); // respawn: fresh loadout, timers and meshes
         player->class_index = packet->class_index;
         player->secondary_index = packet->secondary_index;
@@ -918,6 +920,8 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     snprintf(player->name, sizeof(player->name), "%.*s", (int) sizeof(packet->name) - 1, packet->name);
     player->active = packet->active;
     player->team = packet->team;
+    player->attach_index = packet->attach_index; // WP-C: SPAWN V3 attachIndex / headMlt (V2: 0 / 1)
+    player->head_mlt = packet->head_mlt;
     player->health = packet->health;
     player->max_health = packet->max_health;
     player->position.x = packet->position[0];
@@ -1019,8 +1023,9 @@ void client_send_cycle_packet(Client *client) {
 // INIT: a new session or round on map init->map_index (already resolved to the
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
-    client->net_ent_size = net_ent_size_for(init->major, init->minor);
+    client->net_ent_size = net_ent_size_for(init->major, init->minor, init->patch);
     client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
+    client->net_server_patch = init->major == NET_PROTOCOL_MAJOR ? init->patch : 0; // WP-C (ENT V8)
     if (client->map_loaded) client_unload_map(client);
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
@@ -1043,10 +1048,8 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
 
     switch (packet->type) {
         case NET_PACKET_INIT: {
-            if (packet->length != sizeof(NetInitPacket)) break;
-
             NetInitPacket init;
-            memcpy(&init, packet->payload, sizeof(init));
+            if (!net_packet_read_init(&init, packet)) break;
             if (client_map_prepare_init(client, &init)) client_apply_init(client, &init);
             break;
         }
@@ -1073,10 +1076,8 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             break;
         }
         case NET_PACKET_RECON: {
-            if (packet->length != sizeof(NetReconPacket) || !client->game.ready) break;
-
-            NetReconPacket recon;
-            memcpy(&recon, packet->payload, sizeof(recon));
+            NetReconPacket recon; // V1 (1.3.0 servers, net-bridge) keeps our own v7 movement locks
+            if (!client->game.ready || !net_packet_read_recon(&recon, packet, client->me)) break;
             client_recon_apply(client, &recon);
             break;
         }
@@ -1326,8 +1327,14 @@ void client_enter_game(Client *client) {
     packet.slid_cont = (uint8_t) (ui_controls_settings()->slid_cont ? 1 : 0); // ent[15] settings.tmp.slidCont ("Requires respawn")
     packet.spray_index = ui_loadout_spray(); // ent[1] selectedSprayIndex
     packet.lag_comp = client_render_settings()->lag_comp; // ent[11] parseFloat(settings.tmp.lagCompensation)
+    // WP-C ENT V8 (v7.1.4 io.send("en")): ent[12] parseInt(attachIndex), ent[7] challengeModeEnabled,
+    // ent[19] SETTINGS.tmp.anonMode
+    packet.attach_index = client_saved_attach_index();
+    packet.chall_mode = (uint8_t) (ui_controls_settings()->chall_mode ? 1 : 0);
+    packet.anon_mode = (uint8_t) (client_render_settings()->anon_mode ? 1 : 0);
     // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
-    // a 1.1 server anything longer than V6 (no lagComp): net_ent_size_for.
+    // a 1.1 server anything longer than V6 (no lagComp), a 1.3.0 server anything longer than V7
+    // (no attachIndex / challMode / anonMode): net_ent_size_for.
     const uint16_t ent_size = client->net_ent_size ? client->net_ent_size : (uint16_t) NET_ENT_PACKET_V4_SIZE;
 
     pthread_mutex_lock(&client->net_lock);
@@ -1476,6 +1483,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
     look_y = (float) web_y;
 #endif
 
+    // WP-C v7.1.4 netRate: an input frame is sampled (predicted, sent) only once the frame time since
+    // the last one reaches half a netRate period; it carries that summed delta (net/recon.c).
+    int input_sampled = 0;
+    g_look_unsampled = 0;
     if (client->me && client->me->active) {
         Input input = {0};
         vec2 mouse_delta = {0};
@@ -1483,38 +1494,46 @@ static void client_tick_game(Client *client, const float now, const float frame_
         mouse_delta.x = look_x;
         mouse_delta.y = look_y;
 
+        const float input_delta = client_recon_sample(client, delta);
+        input_sampled = input_delta >= 0.0f;
         input.move_dir = -1;
-        input.delta = delta;
+        input.delta = input_sampled ? input_delta : 0.0f;
 
         // Krunker's camera keeps the unrounded look (CONTROLS xDr/yDr) and only the input
         // frame is rounded to 0.001 rad, so slow mouse movement still adds up.
         // player_proc_input rounds, so build the input from a client-side copy. It resyncs
-        // whenever me->direction stops matching it (spawn, reconciliation, teleport, pose).
+        // whenever me->direction stops matching the look of the last sampled frame (spawn,
+        // reconciliation, teleport, pose); between samples the look keeps turning (netRate).
         const Player *me = client->me;
-        const float look_pitch = CLAMP(player_round3(g_look.x), -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
-        if (!g_look_valid || fabsf(look_pitch - me->direction.x) > 1e-5f || fabsf(player_round3(g_look.y) - me->direction.y) > 1e-5f) {
-            g_look.x = me->direction.x;
-            g_look.y = me->direction.y;
+        const float look_pitch = CLAMP(player_round3(g_look_sent.x), -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        if (!g_look_valid || fabsf(look_pitch - me->direction.x) > 1e-5f || fabsf(player_round3(g_look_sent.y) - me->direction.y) > 1e-5f) {
+            g_look.x = g_look_sent.x = me->direction.x;
+            g_look.y = g_look_sent.y = me->direction.y;
             g_look_valid = 1;
         }
         input.x_dir = g_look.x;
         input.y_dir = g_look.y;
 
         if (client->mouse_state.locked && !menu_open) {
+            if (!input_sampled) {
+                // CONTROLS.updateMouseInp runs every frame: only the look turns, keys wait for the sample
+                ui_controls_fill_look(client, &input, mouse_delta.x, mouse_delta.y);
+                input_script_adjust_input(client, &input); // scripted look (tests)
+            } else {
+                // Look (sensitivity/aim sensitivity/invertY), move binds, bound buttons and
+                // the weapon keys (pressed this frame) from the keybind table (ui_controls.c).
+                ui_controls_fill_input(client, &input, mouse_delta.x, mouse_delta.y);
+                input_script_adjust_input(client, &input); // scripted look (tests)
 
-            // Look (sensitivity/aim sensitivity/invertY), move binds, bound buttons and
-            // the weapon keys (pressed this frame) from the keybind table (ui_controls.c).
-            ui_controls_fill_input(client, &input, mouse_delta.x, mouse_delta.y);
-            input_script_adjust_input(client, &input); // scripted look (tests)
-
-            // input[10] = wDG6 * scrollDirM: wheel up (wDG6 -1) steps back a slot, down forward;
-            // procInputs only scrolls when input[11] (a swap key) is 0. The wheel only reaches
-            // here when no bind uses it (bMoQ7, ui_controls_scroll_event).
-            const int scroll_delta = client->mouse_state.scroll_delta;
-            input.scroll = (signed char) (scroll_delta ? (scroll_delta > 0 ? -1 : 1) * ui_controls_scroll_dir() : 0);
-            g_skip_scroll = scroll_delta != 0; // skipScroll: false before b9, then bMoQ7 when wDG6 was set
-            client->mouse_state.scroll_delta = 0;
-            client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
+                // input[10] = wDG6 * scrollDirM: wheel up (wDG6 -1) steps back a slot, down forward;
+                // procInputs only scrolls when input[11] (a swap key) is 0. The wheel only reaches
+                // here when no bind uses it (bMoQ7, ui_controls_scroll_event).
+                const int scroll_delta = client->mouse_state.scroll_delta;
+                input.scroll = (signed char) (scroll_delta ? (scroll_delta > 0 ? -1 : 1) * ui_controls_scroll_dir() : 0);
+                g_skip_scroll = scroll_delta != 0; // skipScroll: false before b9, then bMoQ7 when wDG6 was set
+                client->mouse_state.scroll_delta = 0;
+                client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
+            }
         }
         // Round over, v3.1.1 parity (index.js endGame / gameLoop): through the endAnim title the
         // controls stay enabled, so WASD/jump/shots/ADS still act locally in the shrinking slow
@@ -1533,11 +1552,16 @@ static void client_tick_game(Client *client, const float now, const float frame_
         g_look.x = input.x_dir;
         g_look.y = input.y_dir;
 
-        input.seq = client->net_next_input_seq++;
-        // KrunkScript: INPUTS.disableDefault (dontSendInputs) neither predicts nor sends,
-        // DEFAULT.disablePrediction (noPred) sends without predicting (index.js:16840-16847)
-        if (!ks_client_inputs_disabled() && !ks_client_no_prediction()) player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame
-        if (!ks_client_inputs_disabled()) client_recon_record(client, &input); // tmpInpts + the "q" window (online only, net/recon.c)
+        if (input_sampled) {
+            g_look_sent = g_look;
+            input.seq = client->net_next_input_seq++;
+            // KrunkScript: INPUTS.disableDefault (dontSendInputs) neither predicts nor sends,
+            // DEFAULT.disablePrediction (noPred) sends without predicting (index.js:16840-16847)
+            if (!ks_client_inputs_disabled() && !ks_client_no_prediction()) player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame
+            if (!ks_client_inputs_disabled()) client_recon_record(client, &input); // tmpInpts + the "q" window (online only, net/recon.c)
+        } else {
+            g_look_unsampled = 1; // the camera shows g_look (camera_feel_apply below poses me->direction)
+        }
 
         // The camera is posed after game_tick() below, once this input has moved the player.
     } else if (spectate_active()) {
@@ -1546,7 +1570,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
         const int look = client->mouse_state.locked && !menu_open;
         spectate_tick(client, delta, look ? look_x : 0.0f, look ? look_y : 0.0f);
     }
-    ui_controls_end_frame(); // didPressed / aba6 / the wheel key last one input frame
+    // didPressed / aba6 / the wheel key last one input frame (v7: wSwap and scrollDelta are cleared
+    // when a frame is sampled, so a press between samples reaches the next one)
+    if (input_sampled || !client->me || !client->me->active) ui_controls_end_frame();
 
     client->mouse_state.last_pos.x = (float) x;
     client->mouse_state.last_pos.y = (float) y;
@@ -1559,7 +1585,14 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // Krunker poses the camera right after procInputs (index.js gameLoop: rotateCam with
     // recoil/landing bob/shake, moveCam, ADS zoom) and renders in the same frame, so this
     // frame shows this frame's input.
-    if (client->me && client->me->active) camera_feel_apply(client);
+    if (client->me && client->me->active) {
+        camera_feel_apply(client);
+        if (g_look_unsampled) { // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS)
+            client->camera.rotation.x += player_clamp_pitch(g_look.x) - client->me->direction.x;
+            const float yaw = g_look.y - client->me->direction.y;
+            client->camera.rotation.y += yaw - 2.0f * (float) M_PI * roundf(yaw / (2.0f * (float) M_PI));
+        }
+    }
     menu_view_camera(client, delta); // no active player: pre-spawn menu camera / death chase cam
     ks_client_camera(client); // KrunkScript GAME.CAMERA: a detached camera replaces the pose
     camera_feel_update(MIN(delta, game_constants.max_delta)); // RENDER.updateShake(deltaMs)

@@ -140,6 +140,7 @@ static const ControlRow ROWS[] = {
     {"Melee Weapon", 6, NULL}, {"Secondary Weapon", 7, NULL}, {"Equipment", 33, NULL}, {"Inspect", 14, NULL},
     {"Spray", 9, NULL},
     {"Interact", 16, "Interaction"}, {"Secondary Interact", 23, NULL}, {"Drop", 17, NULL},
+    {"Reset Position", 38, NULL}, {"Reset To Last Checkpoint", 39, NULL}, // WP-C: v7.1.4 reset / resetLast
     {"Chat", 11, "Interface & Audio"}, {"Voice", 12, NULL}, {"Player List", 15, NULL}, {"Leaderboard", 26, NULL},
     {"Streak 1", 18, "Killstreaks & Prop Hunt"}, {"Streak 2", 19, NULL}, {"Streak 3", 20, NULL},
     {"Streak 4", 21, NULL}, {"Streak 5", 22, NULL},
@@ -156,6 +157,7 @@ static const char *const KEY_INFO[UI_CONTROL_COUNT] = {
     "aimKey", "chatKey", "voiceKey", "primKey", "inspKey", "pListKey", "interactKey", "dropKey",
     NULL, NULL, NULL, NULL, NULL, "interactSecKey", "wepVisKey", "shootKey", "sBoardKey",
     NULL, NULL, NULL, NULL, NULL, NULL, "equipKey", NULL, NULL, NULL, NULL,
+    "resetKey", "resetLastKey", // WP-C (v7.1.4 controls.js)
 };
 
 // CONTROLS.binds.*.def by id (DOM keyCodes).
@@ -169,6 +171,7 @@ static const int DEFAULT_BINDS[UI_CONTROL_COUNT] = {
     -1, -1, -1, -1, -1, -1,      // toggles
     67,                          // equip C
     -1, -1, -1, -1,              // premium
+    66, 78,                      // WP-C: reset B, resetLast N (v7.1.4 controls.js)
 };
 
 
@@ -391,7 +394,7 @@ static const BindGroup BIND_GROUPS[] = {
     {"chatKey", 11, 0}, {"voiceKey", 12, 0}, {"pListKey", 15, 0}, {"interactKey", 16, 0},
     {"interactSecKey", 23, 0}, {"dropKey", 17, 0}, {"wepVisKey", 24, 0}, {"sBoardKey", 26, 0},
     {"streakKeys", 18, 5}, {"moveKeys", 0, 4}, {"toggleKeys", 27, 6}, {"equipKey", 33, 0},
-    {"premiumKeys", 34, 4},
+    {"premiumKeys", 34, 4}, {"resetKey", 38, 0}, {"resetLastKey", 39, 0},
 };
 
 // CONTROLS.export(): binds that differ from their default; array binds as arrays whose
@@ -713,11 +716,6 @@ int ui_controls_code_down(const int code) {
 int ui_controls_down(const int id) {
     ensure_loaded();
     return valid_id(id) && code_down(g_ctl.binds[id]);
-}
-
-static int pressed(const int id) {
-    const int slot = key_slot(g_ctl.binds[id]);
-    return slot >= 0 && g_ctl.did_pressed[slot];
 }
 
 int ui_controls_scoreboard_held(void) {
@@ -1075,7 +1073,7 @@ static int input_swap(const Player *me) {
 // The input-frame half of Krunker's loop (b9): look delta (CONTROLS.updateMouseInp:
 // mouseSens * sens * camera.fov / fov, aim sensitivities while the right button is
 // held, invertY), move direction from the move binds, and the bound buttons.
-void ui_controls_fill_input(Client *client, Input *input, const float dx, const float dy) {
+void ui_controls_fill_look(Client *client, Input *input, const float dx, const float dy) {
     ensure_loaded();
     const ClientSettings *s = &menu_ui()->settings;
     const float zoom = client && client->camera.zoom > 0.0f ? client->camera.zoom : 1.0f;
@@ -1098,6 +1096,10 @@ void ui_controls_fill_input(Client *client, Input *input, const float dx, const 
         input->x_dir -= touch_y * base;
         input->y_dir -= touch_x * base;
     }
+}
+
+void ui_controls_fill_input(Client *client, Input *input, const float dx, const float dy) {
+    ui_controls_fill_look(client, input, dx, dy);
 
     const int forward = ui_controls_down(UI_CONTROL_FORWARD);
     const int back = ui_controls_down(UI_CONTROL_BACKWARD);
@@ -1111,13 +1113,18 @@ void ui_controls_fill_input(Client *client, Input *input, const float dx, const 
         input->move_dir += right ? 3 : 7;
     }
 
-    input->jump = pressed(UI_CONTROL_JUMP); // v3.1.1 sends jump on the press frame only (holding Space = one jump)
+    // v7.1.4 sends jump while held (index.js gameLoop: CONTROLS.isPressed("jump")); tryJump still wants
+    // a release between jumps unless autoJump (v3.1.1: the press frame only)
+    input->jump = ui_controls_down(UI_CONTROL_JUMP);
     input->crouch = ui_controls_down(UI_CONTROL_CROUCH);
     input->reload = ui_controls_down(UI_CONTROL_RELOAD);
     input->shoot = g_ctl.shoot || ui_controls_down(UI_CONTROL_SHOOT);
     input->scope = g_ctl.aim || ui_controls_down(UI_CONTROL_AIM);
     input->swap = input_swap(client ? client->me : NULL);
     input->slowdown = 1.0f - roundf(g_ctl.speed_lmt * 10.0f) / 10.0f; // b9[12]: 1 - speedLmt.round(1)
+    // WP-C v7.1.4 input[13] isPressed("resetLast") ? 2 : isPressed("reset") ? 1 : 0, input[14] isPressed("interact")
+    input->reset = ui_controls_down(UI_CONTROL_RESET_LAST) ? 2 : ui_controls_down(UI_CONTROL_RESET) ? 1 : 0;
+    input->interact_held = ui_controls_down(UI_CONTROL_INTERACT) ? 1 : 0;
     ui_bhop_fill_input(client, input); // v3.1.1 mod patchInputs: bhop jump/crouch slots (ui_bhop.c)
 }
 

@@ -274,19 +274,35 @@ static void check_cosmetics_packets(void) {
     packet.length = NET_ENT_PACKET_V6_SIZE + 2;
     CHECK(!net_packet_read_ent(&full, &packet), "ENT with a cut lagComp accepted");
     packet.length = NET_ENT_PACKET_V7_SIZE + 1;
-    CHECK(!net_packet_read_ent(&full, &packet), "ENT longer than V7 accepted");
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with a cut attachIndex accepted");
+    // WP-C: ent[12] attachIndex, ent[7] challMode, ent[19] anonMode ride after lagComp (V8, 1.3.1);
+    // shorter ENTs read as 0 / off / off, longer ones (a newer peer) as their V8 prefix
+    packet.length = NET_ENT_PACKET_V7_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == DEFAULT_ATTACHMENT_INDEX && !full.chall_mode && !full.anon_mode, "V7 ENT v7 flags default");
+    ent.attach_index = 1;
+    ent.chall_mode = 1;
+    ent.anon_mode = 7; // any non-zero byte reads as on
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V8_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == 1 && full.chall_mode == 1 && full.anon_mode == 1 && full.lag_comp == 0.3f, "V8 ENT attachIndex / challMode / anonMode");
+    packet.length = NET_ENT_PACKET_V8_SIZE + 9;
+    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == 1 && full.anon_mode == 1, "ENT longer than V8 reads its prefix");
+    ent.attach_index = 0;
+    ent.chall_mode = ent.anon_mode = 0;
     ent.lag_comp = 1.0f;
     ent.skins = PLAYER_SKINS_NONE;
     ent.spray_index = 0;
     // a client sends the long ENT only to servers announcing the protocol that reads it (INIT major.minor):
     // 1.0 servers (older server_bin builds, community servers) drop anything past V4 without a spawn,
     // 1.1 servers anything past V6
-    CHECK(net_ent_size_for(1, 0) == NET_ENT_PACKET_V4_SIZE, "ENT to a 1.0 server must stay V4 (%u)", net_ent_size_for(1, 0));
-    CHECK(net_ent_size_for(1, 1) == NET_ENT_PACKET_V6_SIZE, "ENT to a 1.1 server must stay V6 (%u)", net_ent_size_for(1, 1));
-    CHECK(net_ent_size_for(1, 2) == NET_ENT_PACKET_V7_SIZE && net_ent_size_for(1, 7) == NET_ENT_PACKET_V7_SIZE, "ENT to a 1.2+ server is V7");
-    CHECK(net_ent_size_for(2, 0) == NET_ENT_PACKET_V7_SIZE && net_ent_size_for(0, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
+    CHECK(net_ent_size_for(1, 0, 0) == NET_ENT_PACKET_V4_SIZE, "ENT to a 1.0 server must stay V4 (%u)", net_ent_size_for(1, 0, 0));
+    CHECK(net_ent_size_for(1, 1, 5) == NET_ENT_PACKET_V6_SIZE, "ENT to a 1.1 server must stay V6 (%u)", net_ent_size_for(1, 1, 5));
+    CHECK(net_ent_size_for(1, 2, 1) == NET_ENT_PACKET_V7_SIZE && net_ent_size_for(1, 3, 0) == NET_ENT_PACKET_V7_SIZE, "ENT to a 1.2 / 1.3.0 server is V7");
+    CHECK(net_ent_size_for(1, 3, 1) == NET_ENT_PACKET_V8_SIZE && net_ent_size_for(1, 4, 0) == NET_ENT_PACKET_V8_SIZE, "ENT to a 1.3.1+ server is V8");
+    CHECK(net_ent_size_for(2, 0, 0) == NET_ENT_PACKET_V8_SIZE && net_ent_size_for(0, 9, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
     CHECK(NET_PROTOCOL_MAJOR == 1 && NET_PROTOCOL_MINOR >= 2, "server_bin announces protocol 1.2+");
-    CHECK(NET_ENT_PACKET_V7_SIZE == 58 && NET_ENT_PACKET_V6_SIZE == 54, "ENT V6 / V7 sizes (net-bridge, kn_proto.py)");
+    CHECK(net_peer_has_wpc(NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH), "this build takes its own WP-C sizes");
+    CHECK(NET_ENT_PACKET_V7_SIZE == 58 && NET_ENT_PACKET_V6_SIZE == 54 && NET_ENT_PACKET_V8_SIZE == 64, "ENT V6 / V7 / V8 sizes (net-bridge, kn_proto.py)");
     ent.slid_cont = 0;
     memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = 6;
@@ -295,15 +311,23 @@ static void check_cosmetics_packets(void) {
 
     NetSpawnPacket spawn = {.uid = 3, .class_index = 5, .secondary_index = -1, .cosmetics = {-1, -1, 1890, -1, -1, -1, 1891}};
     memcpy(packet.payload, &spawn, sizeof(spawn));
-    const uint16_t spawn_sizes[] = {NET_SPAWN_PACKET_V1_SIZE, sizeof(NetSpawnPacket)};
-    for (int i = 0; i < 2; i++) {
+    spawn.attach_index = 1;
+    spawn.head_mlt = 1.5f;
+    memcpy(packet.payload, &spawn, sizeof(spawn));
+    // V1, V2 (1.0 - 1.3.0 servers), V3 (WP-C: attachIndex, headMlt) and a longer one (V3 prefix)
+    const uint16_t spawn_sizes[] = {NET_SPAWN_PACKET_V1_SIZE, NET_SPAWN_PACKET_V2_SIZE, NET_SPAWN_PACKET_V3_SIZE, NET_SPAWN_PACKET_V3_SIZE + 4};
+    for (int i = 0; i < 4; i++) {
         NetSpawnPacket read;
         memset(&read, 0x55, sizeof(read));
         packet.length = spawn_sizes[i];
         CHECK(net_packet_read_spawn(&read, &packet), "SPAWN of %u bytes rejected", packet.length);
         CHECK(read.uid == 3 && read.class_index == 5, "SPAWN fields");
         CHECK(read.cosmetics.hat == (i ? 1890 : -1) && read.cosmetics.dye == (i ? 1891 : -1), "SPAWN cosmetics for %u bytes", packet.length);
+        CHECK(read.attach_index == (i >= 2 ? 1 : DEFAULT_ATTACHMENT_INDEX) && read.head_mlt == (i >= 2 ? 1.5f : 1.0f), "SPAWN attachIndex / headMlt for %u bytes", packet.length);
     }
+    packet.length = NET_SPAWN_PACKET_V2_SIZE + 4;
+    NetSpawnPacket cut;
+    CHECK(!net_packet_read_spawn(&cut, &packet), "SPAWN with a cut headMlt accepted");
 }
 
 int main(void) {

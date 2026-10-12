@@ -312,7 +312,7 @@ void *net_main(void *user_data) {
 
         on_client_socket_connect(client);
 
-        const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, 0}; // the minor gates the v7 packets (KrunkScript 200-203)
+        const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH}; // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes
         client_net_send_packet(client_socket, NET_PACKET_HELLO, &hello, sizeof(hello));
         client_net_send_join(client, client_socket); // brain ticket / session / guest name (net_join.c)
 

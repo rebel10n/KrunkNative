@@ -67,9 +67,13 @@ const char *combat_scope_overlay_src(char *buf, const size_t n) {
     return buf;
 }
 
+int client_saved_attach_index(void) {
+    return setting_int("attachIndex", DEFAULT_ATTACHMENT_INDEX); // getSavedVal("attachIndex") || 0
+}
+
 int player_attach_index(const Player *player) {
     if (!player) return DEFAULT_ATTACHMENT_INDEX;
-    if (player->is_you) return setting_int("attachIndex", DEFAULT_ATTACHMENT_INDEX); // getSavedVal("attachIndex") || 0
+    if (player->is_you) return client_saved_attach_index();
     return player->attach_index;
 }
 

@@ -607,8 +607,8 @@ static void game_tick_regen(Game *game, Player *player, const float delta) {
     if (player->regen_ticker <= 0.0f) {
         player->regen_ticker = GAME_REGEN_TICK;
         player->regen_tick_count++; // v7.1.4 tickerC
-        // v7.1.4: no regen while a Juggernaut
-        const int regen_on = player->hit_timer <= 0.0f && !player->is_juggernaut && game->config.health_regen &&
+        // v7.1.4: no regen while a Juggernaut, nor in challenge mode (WP-C: ENT challMode)
+        const int regen_on = player->hit_timer <= 0.0f && !player->chall_mode && !player->is_juggernaut && game->config.health_regen &&
                              !(game->mode && game->mode->config.no_regen) && !player->mode.no_regen &&
                              game->classes && player->class_index >= 0 && player->class_index < (int) game->class_count;
         const float regen = regen_on ? game->classes[player->class_index].regen : 0.0f;

@@ -111,7 +111,7 @@ static bool net_web_on_open(int event_type, const EmscriptenWebSocketOpenEvent *
     g_web_opened_at = emscripten_get_now();
     on_client_socket_connect(client);
 
-    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, 0}; // the minor gates the v7 packets (KrunkScript 200-203)
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH}; // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes
     client_net_send_packet(NET_WEB_FAKE_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
     client_net_send_join(client, NET_WEB_FAKE_FD); // brain ticket / session / guest name (net_join.c)
 

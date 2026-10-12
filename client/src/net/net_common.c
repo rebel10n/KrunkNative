@@ -75,13 +75,13 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
 
     switch (type) {
         case NET_PACKET_HELLO: {
-            if (length != sizeof(NetHelloPacket)) {
+            if (length < offsetof(NetHelloPacket, patch)) { // WP-C: a 2-byte HELLO is patch 0
                 client_net_log_bad_payload("hello", type, payload, length);
                 break;
             }
 
-            NetHelloPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
+            NetHelloPacket packet = {0};
+            memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
 
             printf("{\"type\":\"hello\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u}",
                    (unsigned int) type,
@@ -91,7 +91,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_INIT: {
-            if (length != sizeof(NetInitPacket)) {
+            if (length < sizeof(NetInitPacket)) { // longer: a newer server (prefix)
                 client_net_log_bad_payload("init", type, payload, length);
                 break;
             }
@@ -111,13 +111,13 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_ENT: {
-            if (length != NET_ENT_PACKET_V2_SIZE && length != NET_ENT_PACKET_MIN_SIZE && (length < NET_ENT_PACKET_V3_SIZE || length > sizeof(NetEntPacket))) {
+            if (length != NET_ENT_PACKET_V2_SIZE && length != NET_ENT_PACKET_MIN_SIZE && length < NET_ENT_PACKET_V3_SIZE) {
                 client_net_log_bad_payload("ent", type, payload, length);
                 break;
             }
 
             NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
-            memcpy(&packet, payload, length);
+            memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
 
             const PlayerSkins skins = length >= NET_ENT_PACKET_V6_SIZE ? packet.skins : PLAYER_SKINS_NONE;
             printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u,\"spray_index\":%d,\"skins\":[%d,%d],\"melee\":%d,\"lag_comp\":%g}",
@@ -132,13 +132,13 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_SPAWN: {
-            if (length != sizeof(NetSpawnPacket) && length != NET_SPAWN_PACKET_V1_SIZE) {
+            if (length != NET_SPAWN_PACKET_V2_SIZE && length != NET_SPAWN_PACKET_V1_SIZE && length < NET_SPAWN_PACKET_V3_SIZE) {
                 client_net_log_bad_payload("spawn", type, payload, length);
                 break;
             }
 
             NetSpawnPacket packet = {.cosmetics = PLAYER_COSMETICS_NONE};
-            memcpy(&packet, payload, length);
+            memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
             packet.name[sizeof(packet.name) - 1] = '\0';
 
             printf("{\"type\":\"spawn\",\"id\":%u,\"uid\":%d,\"is_you\":%u,\"active\":%u,\"class_index\":%d,\"team\":%d,\"health\":%g,\"max_health\":%d,\"name\":\"%s\",\"position\":[%g,%g,%g],\"direction\":[%g,%g],\"skin\":%d,\"hat\":%d,\"back\":%d,\"waist\":%d,\"face\":%d,\"dye\":%d}",

@@ -46,7 +46,7 @@ void client_offline_send(Client *client, const NetPacketType type, const void *p
 
 // HELLO + a guest JOIN with the menu nickname (no brain ticket or session: nothing to verify).
 static void offline_hello(Client *client) {
-    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, 0}; // the minor gates the v7 packets (KrunkScript 200-203)
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH}; // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes
     client_offline_send(client, NET_PACKET_HELLO, &hello, sizeof(hello));
     NetJoinPacket join;
     memset(&join, 0, sizeof(join));

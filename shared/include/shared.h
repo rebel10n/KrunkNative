@@ -1165,6 +1165,8 @@ typedef struct Player_t {
     // Lag compensation (players.js storeState / fetchState / getStateConst, player.c).
     float ping;                   // player.ping: smoothed RTT in ms (server: ClientConnection.ping_ms)
     float lag_comp;               // player.lagComp: ENT lag_comp (ent[11] slider, server-clamped to 0.1..1), default 1
+    unsigned char chall_mode:1;   // WP-C player.challMode (ENT V8 ent[7]): no health regen (game_tick_regen)
+    unsigned char anon_mode:1;    // WP-C player.anonMode (ENT V8 ent[19]): PLAYER_INFO hides the account from others
     float c_send_rate;            // player.cSendRate (ent[16] servSendR: 20, else 10)
     double input_arrival;         // Input.arrival of the input procInputs is running (0 = now)
     Input input_running;          // a copy of that input (exact anchored lag compensation reads its clock fields)
@@ -1921,6 +1923,13 @@ typedef struct {
 // are only sent to peers that announced at least NET_PROTOCOL_MINOR_V7.
 #define NET_PROTOCOL_MINOR 3
 #define NET_PROTOCOL_MINOR_V7 3
+// HELLO / INIT patch (player-viewer WP-C, doc/v7/decisions.md): 1.3.1 peers read and send the longer
+// ENT V8 (attachIndex, challMode, anonMode), SPAWN V3 (attachIndex, headMlt) and RECON V2 (wallJumpC,
+// canSlideT, the exact slide ms). A 1.3.0 peer checks exact sizes and drops those, so they only go
+// to peers net_peer_has_wpc accepts; every reader takes the shorter and longer forms (prefix read).
+// A missing patch byte (2-byte HELLO) reads as 0.
+#define NET_PROTOCOL_PATCH 1
+int net_peer_has_wpc(int minor, int patch); // the peer's HELLO / INIT minor.patch (same major) takes WP-C sizes
 
 // Packet id blocks of the v7.1.4 upgrade (doc/v7/decisions.md "Packet id blocks", map-logic.md
 // §5.3). Each block is owned by one work package; ids inside a block are the owner's to assign.
@@ -1936,7 +1945,7 @@ typedef struct {
 #define NET_PACKET_BLOCK_PROTOCOL 195   // 195-199 player-viewer WP-C: protocol / input
 #define NET_PACKET_BLOCK_KRUNKSCRIPT 200 // 200-239 KrunkScript (doc/v7/krunkscript.md)
 #define NET_PACKET_BLOCK_END 240
-uint16_t net_ent_size_for(int major, int minor); // the ENT a client sends to an INIT major.minor server: V7 from 1.2, V6 for 1.1, else V4
+uint16_t net_ent_size_for(int major, int minor, int patch); // the ENT a client sends to an INIT major.minor.patch server: V8 from 1.3.1, V7 from 1.2, V6 for 1.1, else V4
 
 typedef struct {
     int32_t class_index;
@@ -1950,6 +1959,11 @@ typedef struct {
                                // Optional: shorter ENTs read as PLAYER_SKINS_NONE.
     float lag_comp;            // Krunker ent[11] settings.tmp.lagCompensation (Settings > Network "Lag Compensation"
                                // slider, 0..1): player.lagComp. Optional: shorter ENTs read as 1 (the setting's default).
+    // ---- WP-C (protocol 1.3.1, NET_ENT_PACKET_V8_SIZE): v7.1.4 ent[12] attachIndex, ent[7] challengeMode,
+    // ent[19] anonMode (server/index.ts parseEnterData). Shorter ENTs read as 0 / 0 / 0.
+    int32_t attach_index;      // the sight on attach weapons: 0 Reflex, 1 Acog, -1 none
+    uint8_t chall_mode;        // settings challMode: no health regen (players.js tickPlayer), x1.5 KR reward
+    uint8_t anon_mode;         // settings anonMode: others see no account, clan, level or badges
 } NetEntPacket;
 
 #define NET_ENT_PACKET_MIN_SIZE 4 // class_index only (older clients / bridges)
@@ -1958,7 +1972,8 @@ typedef struct {
 #define NET_ENT_PACKET_V4_SIZE (offsetof(NetEntPacket, slid_cont) + 1) // + spectate + slid_cont
 #define NET_ENT_PACKET_V5_SIZE (offsetof(NetEntPacket, skins)) // + spray_index
 #define NET_ENT_PACKET_V6_SIZE (offsetof(NetEntPacket, lag_comp)) // + weapon / melee skins (protocol 1.1)
-#define NET_ENT_PACKET_V7_SIZE (sizeof(NetEntPacket)) // + lagComp (protocol 1.2): what a client sends
+#define NET_ENT_PACKET_V7_SIZE (offsetof(NetEntPacket, attach_index)) // + lagComp (protocol 1.2)
+#define NET_ENT_PACKET_V8_SIZE (sizeof(NetEntPacket)) // + attachIndex, challMode, anonMode (1.3.1): what a client sends
 
 typedef struct {
     uint8_t spectating;      // 1: this connection spectates now (no player; every player's state is streamed to it)
@@ -1981,9 +1996,15 @@ typedef struct {
     char name[32];
     int32_t secondary_index; // the spawned loadout's secondary weapon id, -1 class default
     PlayerCosmetics cosmetics; // optional: a 78-byte SPAWN (older servers / net-bridge) means none
+    // ---- WP-C (protocol 1.3.1, sent to net_peer_has_wpc peers): v7.1.4 players.js sync attachIndex and
+    // headMlt (players.js:5002). Shorter SPAWNs read as DEFAULT_ATTACHMENT_INDEX and 1.
+    int32_t attach_index;
+    float head_mlt;
 } NetSpawnPacket;
 
 #define NET_SPAWN_PACKET_V1_SIZE 78 // up to secondary_index (before cosmetics)
+#define NET_SPAWN_PACKET_V2_SIZE (offsetof(NetSpawnPacket, attach_index)) // + cosmetics (1.0 - 1.3.0)
+#define NET_SPAWN_PACKET_V3_SIZE (sizeof(NetSpawnPacket))                // + attachIndex, headMlt (1.3.1)
 
 typedef struct {
     int32_t seq;
@@ -2038,7 +2059,16 @@ typedef struct {
     float z_vel_cylinder;   // [22] zVelC
     uint8_t on_wall;        // [12]
     uint8_t flags;          // NET_RECON_*: [9] onGround [10] didJump [11] didJumpW [13] onLadder [18] canSlide [19] onTerrain
+    // ---- WP-C (protocol 1.3.1, sent to net_peer_has_wpc peers): v7.1.4 io_syncPlayer [12] wallJumpC and
+    // [24] canSlideT, plus slideTimer as v7's double ms ([18] is a JS number; slide_timer above is its
+    // float s). A V1 RECON keeps the client's own values (net_packet_read_recon).
+    uint16_t wall_jump_count; // wallJumpC
+    float can_slide_timer;    // canSlideT (s)
+    double slide_ms;          // slideTimer (ms, exact)
 } NetReconPacket;
+
+#define NET_RECON_PACKET_V1_SIZE (offsetof(NetReconPacket, wall_jump_count)) // 58 bytes (1.0 - 1.3.0, net-bridge)
+#define NET_RECON_PACKET_V2_SIZE (sizeof(NetReconPacket))                    // + the v7 movement locks (1.3.1)
 
 // Krunker "q": consecutive input frames (seq ascending) as whole NetInputPackets.
 typedef struct {
@@ -2859,6 +2889,18 @@ void net_packet_from_player(NetStatePacket*, const Player*);
 void net_packet_apply_player(Player*, const NetStatePacket*);
 void net_packet_from_recon(NetReconPacket*, const Player*, int32_t ack_seq); // buildLPacket
 void net_packet_apply_recon(Player*, const NetReconPacket*);                // reconcilePlayer's snap (no replay)
+// WP-C: a V1 (58-byte) or V2+ RECON; the v7 fields a V1 lacks come from `keep` (the client's own
+// player: no change), or 0 without one. 0 = malformed.
+int  net_packet_read_recon(NetReconPacket*, const NetPacket*, const Player *keep);
+int  net_packet_read_hello(NetHelloPacket*, const NetPacket*); // 2-byte (no patch: 0) or longer HELLO; 0 = malformed
+int  net_packet_read_init(NetInitPacket*, const NetPacket*);   // the full INIT or longer (prefix); 0 = malformed
+// WP-C v7.1.4 netRate (settings.js network.netRate, index.js gameLoop): the client samples one input
+// frame when UTILS.roundToClos(inputFrameDelta, 1000 / netRate) >= 1000 / netRate, i.e. once the
+// frame time summed since the last sample reaches half a period; the frame's delta is that sum.
+#define NET_RATE_COUNT 6
+#define NET_RATE_DEFAULT_INDEX 3        // 144 Hz (mobile: 1, 60 Hz)
+int   net_rate_hz(int index);           // options {30, 60, 120, 144, 240, 360}; out of range: the default
+float net_input_rate_take(float *accum, float frame_delta, int rate_hz); // adds frame_delta (s); the input delta (s) to sample now, or -1
 int  net_packet_read_input_batch(NetInputBatchPacket*, const NetPacket*);
 size_t net_reconcile(Player*, const NetReconPacket*, Input *pending, size_t count, int move_lock); // snap + replay, returns pending left
 void net_recon_take_vel_obj(Player*, Input *pending, size_t count); // the last input's shot knockback -> its velObj
@@ -2876,7 +2918,7 @@ int net_chat_allow(NetChatLimiter*, float now); // 0 = burst exceeded (Krunker c
 void net_packet_chat(NetChatPacket*, int uid, NetChatKind, const char *name, const char *text);
 int net_ping_update(int previous_ms, float rtt_seconds); // EWMA smoothing, previous < 0 = first sample
 int net_packet_read_ent(NetEntPacket*, const NetPacket*); // 4-byte (class only), 8-byte (no cosmetics) or full ENT; 0 = malformed
-int net_packet_read_spawn(NetSpawnPacket*, const NetPacket*); // 78-byte (no cosmetics) or full SPAWN; 0 = malformed
+int net_packet_read_spawn(NetSpawnPacket*, const NetPacket*); // 78-byte (no cosmetics), V2, V3 or longer SPAWN; 0 = malformed
 // FNV-1a of cJSON_PrintUnformatted(map) (cached per map object); json_out/size_out
 // optionally receive a malloc'd copy of that text. 0 when the map cannot be printed.
 uint32_t net_map_hash(const cJSON *map, char **json_out, size_t *size_out);

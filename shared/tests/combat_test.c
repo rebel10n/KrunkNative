@@ -501,6 +501,20 @@ static void test_mode_multipliers(Game *game) {
     victim->mode.head_mlt = 0.0f;
 }
 
+// WP-C: ENT V8 challMode (v7.1.4 players.js tickPlayer: no regen while challMode)
+static void test_chall_mode(Game *game) {
+    Player *p = add_player(game, 9, 0);
+    float now = 0.0f;
+    p->health = 50.0f;
+    p->hit_timer = 0.0f;
+    p->chall_mode = 1;
+    for (int i = 0; i < 120; i++) game_tick(game, now += 1.0f / 60.0f, 1.0f / 60.0f);
+    CHECK(p->health == 50.0f, "challMode: no regen (%.1f)", (double) p->health);
+    p->chall_mode = 0;
+    for (int i = 0; i < 120; i++) game_tick(game, now += 1.0f / 60.0f, 1.0f / 60.0f);
+    CHECK(p->health > 50.0f, "without challMode the class regen heals (%.1f)", (double) p->health);
+}
+
 int main(void) {
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/sandstorm.json", &sandstorm) && load_json_file("../assets/maps/sandstorm.json", &sandstorm)) {
@@ -525,6 +539,7 @@ int main(void) {
     test_streaks(&game);
     test_upgrades(&game);
     test_mode_multipliers(&game);
+    test_chall_mode(&game);
 
     if (g_failures) {
         printf("combat_test: %d of %d checks failed\n", g_failures, g_checks);

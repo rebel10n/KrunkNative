@@ -91,6 +91,9 @@ typedef struct {
     int spray_index;               // ENT sprayIndex (gameserver.ts ent[1]: player.sprayIndex), 0 for older ENTs
     PlayerSkins skins;             // ENT weapon skins + meleeIndex (ent[2], ent[9]), owned ones only once enforced
     float lag_comp;                // ENT lagComp (ent[11] slider) clamped to 0.1..1, 1 for older ENTs
+    int attach_index;              // WP-C ENT V8 attachIndex (ent[12]), DEFAULT_ATTACHMENT_INDEX for older ENTs
+    unsigned char chall_mode:1;    // WP-C ENT V8 challengeMode (ent[7])
+    unsigned char anon_mode:1;     // WP-C ENT V8 anonMode (ent[19])
     int streak_indexes[3];         // WP-B: STREAK_SLOTS (v7 ENT streakIndexes), applied at spawn
     unsigned char streak_indexes_set:1; // 0: the default pick (Nuke only)
     char name[SERVER_PLAYER_NAME_MAX];
@@ -101,6 +104,7 @@ typedef struct {
     unsigned char local:1;
     unsigned char first_packet_seen:1; // NET_PACKET_FORWARDED counts only as the first packet
     unsigned char peer_minor;      // HELLO minor of a NET_PROTOCOL_MAJOR peer (0 before / other majors): per-peer packet gates
+    unsigned char peer_patch;      // WP-C: its HELLO patch (0 for a 2-byte HELLO): net_peer_has_wpc(peer_minor, peer_patch)
 
     float connected_at;
     float spawned_at;

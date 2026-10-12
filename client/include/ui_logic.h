@@ -285,7 +285,10 @@ enum {
     UI_CONTROL_INTERACT = 16, UI_CONTROL_DROP = 17, UI_CONTROL_STREAK0 = 18, /* 18..22 */
     UI_CONTROL_INTERACT_SEC = 23, UI_CONTROL_WEAPON_VIS = 24, UI_CONTROL_SHOOT = 25, UI_CONTROL_BOARD = 26,
     UI_CONTROL_TOGGLE0 = 27, /* 27..32 */ UI_CONTROL_EQUIP = 33, UI_CONTROL_PREMIUM0 = 34, /* 34..37 */
-    UI_CONTROL_COUNT = 38
+    // WP-C: v7.1.4 binds.reset / binds.resetLast (input[13]); KrunkNative ids, stored as cont_resetKey /
+    // cont_resetLastKey like v7
+    UI_CONTROL_RESET = 38, UI_CONTROL_RESET_LAST = 39,
+    UI_CONTROL_COUNT = 40
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).
@@ -296,6 +299,7 @@ typedef struct {
     int shw_chat;           // shwChat: 0 all, 1 on focus, 2 off
     float master_volume, voice_volume, asset_volume; // sound, voiceVolume, assetVolume (stored)
     int slid_cont;          // slidCont ("Non FPS Sliding", default on): sent in ENT (ent[15]), applies on the next spawn
+    int chall_mode;         // challMode ("Challenge Mode", default off): sent in ENT V8 (ent[7]), applies on the next spawn
 } UiInputSettings;
 
 void ui_controls_load(void);                     // binds + toggle sets from storage
@@ -328,6 +332,9 @@ void ui_controls_apply_chat_visibility(void);    // shwChat
 int  ui_controls_down(int id);                   // the bound key/button is held
 int  ui_controls_scoreboard_held(void);          // sBoardKey held (Tab), not while typing
 void ui_controls_fill_input(Client*, Input*, float mouse_dx, float mouse_dy);
+// WP-C netRate: a frame that samples no input frame still turns the look (CONTROLS.updateMouseInp
+// runs every frame); the keys and one-frame events wait for the next sampled frame.
+void ui_controls_fill_look(Client*, Input*, float mouse_dx, float mouse_dy);
 void ui_controls_end_frame(void);
 void ui_controls_reset_keys(void);               // CONTROLS.resetKeys (menu opened / lock lost)
 int  ui_controls_scroll_dir(void);               // scrollDirM: 1 / -1
