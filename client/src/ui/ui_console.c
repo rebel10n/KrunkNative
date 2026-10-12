@@ -1242,6 +1242,8 @@ static void register_commands(void) {
     register_server("bot_config", ARGS(A_BOT_CONFIG), "show or update default bot options");
     register_server("bot_mimic", ARGS(A_ON_OFF), "toggle bots mimicking their target inputs");
     register_server("bot_stop", ARGS(A_ON_OFF), "toggle bot movement and attacking");
+    register_server("bot_start", NO_ARGS, "resume bots after bot_stop");
+    register_server("bot_resume", NO_ARGS, "alias for bot_start");
     register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
 }
 

@@ -1254,16 +1254,27 @@ static void cmd_bot_mimic(ChatCtx *c) {
     reply(c, "%s mode set (%d live bot%s updated).", enabled ? "Mimic-style follow" : "Combat follow", updated, plural(updated));
 }
 
-// bot_stop [on|off]: BOT_STOP_CONFIG / BOT_RESUME_CONFIG
-static void cmd_bot_stop(ChatCtx *c) {
-    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
-    const int stopping = chat_parse_toggle(c->argc ? c->argv[0] : NULL, 0);
+// bot_stop [on|off]: BOT_STOP_CONFIG / BOT_RESUME_CONFIG. With no argument it toggles (v7 always
+// stopped again, so a bare bot_stop could never resume); bot_start resumes.
+static void bots_set_stopped(ChatCtx *c, const int stopping) {
     char *argv_stop[] = {"attackTarget=off", "followTarget=off", "watchTarget=off", "roam=off"};
     char *argv_resume[] = {"attackTarget=on", "followTarget=on", "watchTarget=off", "roam=on"};
     BotAssignments a;
     bot_parse_assignments(4, stopping ? argv_stop : argv_resume, &a);
     const int updated = game_bots_configure(c->host->game, &a);
+    c->host->game->bots->stopped = stopping ? 1 : 0;
     reply(c, "%s %d live bot%s; applies to future bot_add.", stopping ? "Stopped" : "Resumed", updated, plural(updated));
+}
+
+static void cmd_bot_stop(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    bots_set_stopped(c, chat_parse_toggle(c->argc ? c->argv[0] : NULL, c->host->game->bots->stopped));
+}
+
+// bot_start (KrunkNative addition, alias bot_resume): undo bot_stop.
+static void cmd_bot_start(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    bots_set_stopped(c, 0);
 }
 
 static void js_number(char *out, const size_t size, const double v) {
@@ -1339,6 +1350,8 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_config", NULL, "[key=value]", "show or update default bot options", CHAT_PERM_HOST_DEV}, cmd_bot_config},
     {{"bot_mimic", NULL, "[on|off]", "toggle bots mimicking their target inputs", CHAT_PERM_HOST_DEV}, cmd_bot_mimic},
     {{"bot_stop", NULL, "[on|off]", "toggle bot movement and attacking", CHAT_PERM_HOST_DEV}, cmd_bot_stop},
+    {{"bot_start", NULL, "", "resume bots after bot_stop", CHAT_PERM_HOST_DEV}, cmd_bot_start},
+    {{"bot_resume", "bot_start", "", "alias for bot_start", CHAT_PERM_HOST_DEV}, cmd_bot_start},
     {{"bot_difficulty", NULL, "<value>", "set default bot difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
     {{"bot_diff", "bot_difficulty", "<value>", "alias for bot_difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
 };

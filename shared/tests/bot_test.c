@@ -278,6 +278,23 @@ static void test_commands(Game *game) {
     }
     run("/bot_stop off");
     CHECK(!strcmp(g_reply, "Resumed 3 live bots; applies to future bot_add."), "bot_stop off (%s)", g_reply);
+    // a bare bot_stop toggles, and bot_start / bot_resume undo it
+    run("/bot_stop");
+    run("/bot_stop");
+    CHECK(!strcmp(g_reply, "Resumed 3 live bots; applies to future bot_add."), "bot_stop toggles back (%s)", g_reply);
+    run("/bot_stop");
+    run("/bot_start");
+    CHECK(!strcmp(g_reply, "Resumed 3 live bots; applies to future bot_add."), "bot_start (%s)", g_reply);
+    CHECK(bots->list[0].config.attack_target && !bots->stopped, "bot_start resumes attacking");
+    tick(game, 0.5f, 30.0f);
+    for (int i = 0; i < 3; i++) before[i] = bots->list[i].player->position;
+    tick(game, 3.0f, 30.0f);
+    float moved = 0.0f;
+    for (int i = 0; i < 3; i++) moved += hypotf(bots->list[i].player->position.x - before[i].x, bots->list[i].player->position.z - before[i].z);
+    CHECK(moved > 0.5f, "resumed bots move again (%.2f)", moved);
+    run("/bot_stop");
+    run("/bot_resume");
+    CHECK(!strcmp(g_reply, "Resumed 3 live bots; applies to future bot_add."), "bot_resume alias (%s)", g_reply);
 
     run("/bot_mimic on");
     CHECK(!strcmp(g_reply, "Mimic-style follow mode set (3 live bots updated)."), "bot_mimic (%s)", g_reply);

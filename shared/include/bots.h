@@ -185,6 +185,7 @@ typedef struct GameBots_t {
     BotNav *nav;                    // the current map's grid (built on first use)
     const void *nav_failed_key;     // a map the grid could not be built for
     int path_budget;                // A* searches left this tick
+    unsigned char stopped:1;        // bot_stop is in effect (bot_start / bot_stop off resume)
 } GameBots;
 
 GameBots *game_bots(Game*);                      // lazily allocated manager (NULL on OOM)

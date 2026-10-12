@@ -125,7 +125,8 @@ custom host; the console and rcon always; offline always), with perms on **or** 
 | bot_kill | [all\|index\|name] | "Killed N bots." / "Matched bots are not spawned yet." (players.kill, skipRewards) |
 | bot_config | [key=value …] | "Bot config: accuracy=100 attackTarget=true …" / "Bot config updated (k=v); N live bots updated." |
 | bot_difficulty, bot_diff | easy\|normal\|hard\|max\|number | "Bot difficulty: 3" / "Bot difficulty set to 1.8 (N live bots updated; applies to future bot_add)." (botDifficultyConfig: accuracy 25/50/85/100, targetDistance 1200/1200/1800/5000) |
-| bot_stop | [on\|off] | "Stopped N live bots; applies to future bot_add." / "Resumed …" (BOT_STOP_CONFIG / BOT_RESUME_CONFIG) |
+| bot_stop | [on\|off] | "Stopped N live bots; applies to future bot_add." / "Resumed …" (BOT_STOP_CONFIG / BOT_RESUME_CONFIG). No argument toggles. |
+| bot_start (bot_resume) | | KrunkNative: resumes bots after bot_stop ("Resumed N live bots; …") |
 | bot_mimic | [on\|off] | "Mimic-style follow mode set (N live bots updated)." / "Combat follow mode set (…)." (+ devConsole's mimicTarget: the bot copies its target's input frames) |
 
 The key=value options are BOT_CONFIG_TYPES with its aliases (`god`, `hp`, `skill`, `bhop`, …):
