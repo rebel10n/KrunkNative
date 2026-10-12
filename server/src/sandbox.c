@@ -10,6 +10,8 @@
 #include <bots.h>
 #include <ai.h>
 #include <modes.h>
+#include <game_config.h> // WP-E: embedded map config offline
+#include <account.h>     // WP-E: the offline player counts as having an account
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -184,6 +186,16 @@ static void sandbox_log_write(void *user, const char *text, const int length) {
 
 // ------------------------------------------------------------------ lifecycle
 
+// GameHooks.account_info offline (decisions.md "Offline account"): every sandbox player counts as
+// having an account, so account-locked classes (Hunter, Vince, Detective, Bowman) and reqAccount
+// streaks unlock, as in v7's sandbox and custom games. Nothing else: no level, premium or KR.
+static int sandbox_account_info(const Game *game, const Player *player, AccountInfo *out) {
+    (void) game;
+    (void) player;
+    out->has_account = 1;
+    return 1;
+}
+
 int sandbox_running(void) {
     return g_sb.running;
 }
@@ -242,11 +254,15 @@ int sandbox_start(const SandboxConfig *cfg) {
 
     g_server->game.server = g_server; // the authority, built without meshes (game_init: map_init_ex)
     game_configure(&g_server->game, NULL, maps, cfg->map_count, modes, 1, NULL, 0, NULL, 0);
+    // WP-E: offline is a sandbox of the real server, played as a hosted game: every map's embedded
+    // "config" applies (decisions.md "Embedded map config"; v7's sandbox discards its settings).
+    game_config_host(&g_server->game, NULL, GAME_HOST_CUSTOM);
     const int map_index = cfg->map_index >= 0 && (size_t) cfg->map_index < cfg->map_count ? cfg->map_index : -1;
     game_init(&g_server->game, map_index, 0, 0);
 
     pthread_mutex_lock(&g_server->lock);
     net_install_game_hooks();
+    g_server->game.hooks.account_info = sandbox_account_info;
     ks_server_round_init(); // KrunkScript: the map's server script runs in the sandbox too
     accounts_init(); // standalone: lobby id, first round's lobby size / round length
     pthread_mutex_unlock(&g_server->lock);
@@ -292,6 +308,7 @@ void sandbox_stop(void) {
     free(game->vote_kick);
     free((void *) game->maps);
     free(game->modes);
+    game_config_free(game); // WP-E: back on the base tables before they are freed
     free(game->weapons);
     free(game->classes);
 

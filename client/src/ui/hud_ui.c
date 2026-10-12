@@ -44,6 +44,7 @@ void hud_ui_hit(Client*, int kill);
 #include "../viewer/viewer_store.h" // store.skins: the melee skin icon
 #include <streamer.h>
 #include <spectate.h>
+#include <lobby_ui.h> // WP-E: the end screen's match vote cards (net/lobby_events.c)
 #include <cJSON.h>
 #include <limits.h>
 #include <math.h>
@@ -2179,10 +2180,9 @@ static void hud_end_results(const Client *client) {
     dom_style("endAHolderR", "opacity", "1");
     dom_display("endAHolderL", "inline-block");
     dom_style("endAHolderL", "opacity", "1");
-    dom_display("matchVoteHolder", "none");     // no next-map vote (mts) in KrunkNative
     dom_display("teamTotal0", "none");          // FFA
     dom_display("teamTotal1", "none");
-    dom_style("endMidHolder", "top", "205px");
+    if (!lobby_vote_show()) dom_style("endMidHolder", "top", "205px"); // WP-E: f1915 endData.mts cards (lobby_events.c)
     dom_display("endMidHolder", "inline-block");
 
     g_end_client = client;

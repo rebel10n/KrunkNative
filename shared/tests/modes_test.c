@@ -1129,6 +1129,7 @@ static void test_rounds(Game *game) {
     printf("Running rounds / best of / overtime test...\n");
     start_mode(game, MODE_ID_TDM);
     GameMode *mode = game->mode;
+    game->config.intermission_time = 10.0f; // WP-E: intermTmr (the serverConfig default is 30 s)
     mode->game_rounds = 3;
     mode->round_count = 2;
     mode->best_of = 1;

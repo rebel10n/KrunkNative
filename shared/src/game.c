@@ -6,6 +6,7 @@
 #include <triggers_v7.h>
 #include <ks_game.h> // KrunkScript hook points (onGameEnd, TIME.freeze)
 #include <spawnables.h>
+#include <game_config.h> // WP-E: v7 custom game config, map config, match votes
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
@@ -46,13 +47,27 @@ const GameConfig g_default_game_config = {
     .allow_spectate = 1,
     .third_person = 0,
     .hide_nametags = 0,
-    .team1_name = "Team 1",
-    .team2_name = "Team 2",
+    .team1_name = "Alpha", // v7 config.teamNames (v3 "Team 1" / "Team 2")
+    .team2_name = "Bravo",
     .team1_damage = 1.0f,
     .team2_damage = 1.0f,
     .health_mlt = 1.0f,
     .fire_rate = 1.0f,
-    .reload_speed = 1.0f
+    .reload_speed = 1.0f,
+    .hitbox_pad = 0.6f, // hitBoxPad def (hitbox_pad_set 0: Ranked keeps defC 0.1, effects.c)
+    // WP-E: the other v7.1.4 serverConfig defaults (shared/src/game_config.c holds the full table)
+    .game_rounds = 1,
+    .intermission_time = 30.0f,
+    .objective_time = 1.0f,
+    .force_classes = 1,
+    .log_time = 1,
+    .kill_cams = 1,
+    .allow_anonymous = 1,
+    .spec_slots = 2,
+    .team_size = 3,
+    .minimaps = 1,
+    .team_names = {"", "Alpha", "Bravo", "Charlie", "Delta", "Echo"},
+    .team_damage = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
 };
 
 void game_clear_players(Game *game) {
@@ -71,6 +86,8 @@ void game_configure(
 ) {
     if (config) game->config = *config;
     else game->config = g_default_game_config;
+    game_config_sync_teams(&game->config); // WP-E: team1/2_name point at this copy's team_names
+    game_config_free(game);                // WP-E: a new configuration drops the host request / overrides
 
     if (game->map_count) {
         free(game->maps);
@@ -186,6 +203,10 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
     game_bots_on_init(game); // v7.1.4 bots: the host freed their players; they rejoin next tick (shared/src/bots.c)
 
     if (!game->mode || !game->map) return;
+
+    // WP-E: a hosted game / the sandbox plays each map with its embedded "config" (and the host's
+    // settings); the round clock below reads the result.
+    if (game_is_authority(game)) game_apply_map_config(game, game->map);
 
     game->ready = 1;
     game_start_round(game);
@@ -379,6 +400,7 @@ void game_send_end_late(Game *game, const int uid) {
     game_fill_board_from((const Player *const *) sorted, count, &packet.board);
     for (size_t i = 0; i < count; i++) packet.rewards[i] = sorted[i]->reward;
     game_send(game, uid, NET_PACKET_END, &packet, sizeof(packet));
+    game_send_match_votes(game, uid); // WP-E: the vote cards of this end screen
 }
 
 // game.endGame(3): the round clock ran out. Winner = best score, per-player "end"
@@ -429,6 +451,7 @@ void game_end_round(Game *game) {
 
     if (game->mode) mode_send_end(game, winner, sorted, count);
     ks_game_on_game_end(game); // KrunkScript onGameEnd(), after mode.onEnd (GJS:4665-4667)
+    if (game_is_authority(game)) game_match_list_build(game); // WP-E: endData.mts + MATCH_VOTE_STATE
 
     memset(game->projectiles, 0, sizeof(game->projectiles));
 
@@ -480,6 +503,7 @@ void game_send_round_state(Game *game, const int uid) {
 
     if (game->end_timer > 0.0f) {
         game_send_timer(game, uid, (int) game->end_timer, 1);
+        game_send_match_votes(game, uid); // WP-E
         return;
     }
 

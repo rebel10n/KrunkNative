@@ -12,9 +12,12 @@
 //
 // No thread on either platform: client_offline_pump() steps the sandbox on the main loop
 // (the frame's delta, at most one server tick per frame at 30 Hz) and drains what it sent.
-// The offline conveniences are sandbox server config (server_sandbox.h): no accounts, every
-// skin owned, perms off and the local player is the host (DEV: dev console / chat commands,
-// bot_* and the cheats), no idle kicks.
+// The offline conveniences are sandbox server config (server_sandbox.h): no backend accounts,
+// but the player counts as having one (GameHooks.account_info has_account = 1, decisions.md
+// "Offline account": account-locked classes and reqAccount streaks unlock), every skin owned,
+// perms off and the local player is the host (DEV: dev console / chat commands, bot_* and the
+// cheats), no idle kicks. The sandbox plays as a hosted game, so every map's embedded "config"
+// applies (WP-E, decisions.md "Embedded map config") and reaches this client as GAME_CONFIG.
 #include <client.h>
 #include <server_sandbox.h>
 #include <knet.h>

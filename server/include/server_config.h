@@ -50,8 +50,15 @@ typedef struct {
     int custom_map_dir_count;
     float round_seconds;                 // all modes, 0 = the mode's game time
     float mode_round_seconds[MODE_COUNT];
-    GameConfig game;                     // v3.1.1 host config ("game": maxPlayers, gameTime, lives, gravMlt, ...)
+    GameConfig game;                     // "game": v7.1.4 serverConfig keys (maxPlayers, gameTime, lives, gravMlt, ...)
     int has_game;
+    // WP-E server presets: host_type plays the rotation as that config.hostTypes entry (0 custom,
+    // 1 comp, 2 rent, 3 zombies, 4 raid; -1 a public game) and map_config applies each map's
+    // embedded "config" under the "game" keys (both make it a hosted game: setupGameConfig +
+    // applyConfig per round, random vote picks). game_request is the "game" object as given.
+    int host_type;
+    int map_config;
+    char game_request[4096];
     int custom_games;                    // accept hosted custom games from the brain
 
     // ---- messages
@@ -128,7 +135,7 @@ int gs_config_apply_env(GsConfig*);
 int gs_config_set_cli(const char *key, const char *value);
 // "gameserver" object -> config (also used for hot reload / tests). Returns 0 or fills err.
 int gs_config_from_json(GsConfig*, const cJSON *section, char *err, size_t err_size);
-// v3.1.1 host config object (applyConfig keys) -> GameConfig, clamped like serverConfig.
+// gameserver.game / server.cfg game.<varN>: the v7.1.4 serverConfig keys present, clamped (WP-E).
 void gs_game_config_from_json(GameConfig*, const cJSON*);
 
 // Lobby size / round length for a mode id (team sizes and per-mode overrides applied).

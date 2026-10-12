@@ -28,7 +28,9 @@ lag_comp_scale  1                  // 0.1..1, times each player's Lag Compensati
 bots            0                  // keep N Krunker v7.1.4 bot players in the lobby (0..16, config.botLimit)
 bot_quota       0                  // or fill the lobby up to N players with bots that leave as humans join (wins over bots)
 bot_difficulty  normal             // easy | normal | hard | max | a number (like the console's bot_difficulty)
-// game.gravMlt  1                 // any v3.1.1 host config var: game.<var> value
+// game.gravMlt  1                 // any Krunker v7.1.4 serverConfig var: game.<varN> value (clamped like v7)
+// host_type    comp               // play the rotation as a v7 host type: custom | comp | rent | zombies | raid
+// map_config   1                  // each map's embedded "config" applies (game.* keys on top), as in a hosted game
 motd            "Welcome to $'s new home"
 
 // ---- accounts

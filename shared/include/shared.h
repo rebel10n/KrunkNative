@@ -591,6 +591,55 @@ typedef struct ClassMovement {
     unsigned char lock_pitch:1;       // lckCmYR: input pitch forced to 0
 } ClassMovement;
 
+// ---- WP-E: the v7.1.4 classConfig keys (doc/v7/map-logic.md §4.3.3) that neither ClassConfig nor
+// its movement block holds. A map's or a host's cls[id] sets them (shared/src/game_config.c).
+// `set` = 0 means untouched: read them through class_overrides() (game_config.h), which then
+// returns the v7 defaults. ----
+typedef struct {
+    unsigned char set;            // 1 once a cls[id] override wrote this class
+    char name[25];                // name (len 24): ClassConfig.name points here when overridden
+    int cam_type;                 // camType: 0 FPS, 1 3rd person, 2 platformer X, 3 platformer Z, 4 orthographic
+    float cam_offset[3];          // camOffX/Y/Z 0..500
+    float ortho_f;                // orthoF 1..1000 (50)
+    float lock_cam_pitch;         // lockCamP 0..1
+    float y_cam_limit;            // yCmLim 0..1
+    unsigned char cam_rotation;   // camRot (1)
+    unsigned char fp_lock;        // fPLock
+    int model;                    // mdl: 0 default, 1 sprite, 2 model
+    char asset_id[13];            // aID (len 12)
+    unsigned char model_fp;       // mdlFP (1)
+    float anim_speed;             // animS 0.1..10 (1)
+    float model_scale;            // mdlS 0.1..100 (1)
+    float model_pos_scale;        // mdPS 0.01..10 (1)
+    float model_pos_y;            // mdPY -50..50
+    float model_dir;              // mdlDr 0..360 (degrees)
+    float model_y_offset;         // mdlYO -50..50
+    float speed_length;           // spdLnTh 1..500 (500)
+    float step_sd;                // stpSD 0..1 (step sound dynamic)
+    float vehicle_drag;           // vhdr 0.001..0.999 (.97)
+    float vehicle_air_drag;       // vhaDr 0.001..0.999 (.94)
+    float vehicle_tilt;           // vhtL -100..100 (-2.7)
+    float vehicle_turn_h;         // vhtrsh 0..0.01 (.0025)
+    float vehicle_turn_v;         // vhtrsv 0..1 (0)
+    float vehicle_move_power;     // vhmP 0..1 (.12)
+    float vehicle_power_f;        // vhpF 0..0.1 (.0012)
+    float vehicle_move_rot;       // vhmR 0..1 (.0375)
+    float vehicle_rot_f;          // vhrF 0..0.1 (.0005)
+    float jump_cooldown;          // jpC 0.1..3 (1)
+    unsigned char can_shoot;      // canShoot (1)
+    unsigned char shoot_to_cam;   // shtToCam
+    float shoot_drag;             // shtDrg 0.01..1 (1)
+    float shot_x, shot_y;         // shotX / shotY 0..360
+    unsigned char hip_fire;       // hipF (1)
+    unsigned char crouch_shoot;   // croSh (1)
+    unsigned char air_shoot;      // airSh (1)
+    unsigned char can_melee;      // canMelee (1)
+    char crosshair_id[13];        // cID (len 12)
+    char crosshair_color_id[13];  // ccID (len 12)
+    float regen_delay;            // regenDelay (s; v7 ms 0..10000), 0 = config.regenDelay
+} ClassOverrides;
+// ---- end WP-E ClassOverrides ----
+
 // Krunker v7.1.4 class (src/data/classes.js, shared/src/classes.c). Fields marked "0 = 1" read
 // as 1 when unset, so custom/mode classes only set what they change.
 typedef struct {
@@ -622,6 +671,7 @@ typedef struct {
     float hitbox_pad_w;    // hbS: added to the game's hitBoxPad sideways (player.hitboxPadW)
     float hitbox_pad_h;    // hbH: added to the game's hitBoxPad on top (player.hitboxPadH)
     ClassMovement movement; // WP-A
+    ClassOverrides ext;    // WP-E: the other cls[id] keys (camera, model, vehicle, shooting), read via class_overrides()
 } ClassConfig;
 
 #define CLASS_COUNT 16
@@ -1256,6 +1306,12 @@ int player_hit_is_leg(const Player *target, float base_y, float hit_y);
 float player_hit_damage(const struct Game_t*, const Weapon*, float damage, int head, int leg);
 // ---- end WP-B ----
 
+// WP-E: GameConfig carries every v7.1.4 serverConfig key (GAME_CONFIG_V7, shared/include/game_config.h).
+#define GAME_CONFIG_V7 1
+#define GAME_CONFIG_HAS_LOG_TIME 1      // log_time / last_checkpoint_time (map-B)
+#define GAME_CONFIG_TEAMS 6             // team 0 + config.teamLimit (5) teams
+#define GAME_CONFIG_CLASS_LIMITS 16     // classLim0..15, config.classes
+
 typedef struct {
     int max_players;
     int min_players;
@@ -1305,6 +1361,44 @@ typedef struct {
     float hitbox_pad;
     unsigned int hitbox_pad_set:1;
     unsigned int no_charge_weapons:1; // !chrgWeps
+
+    // ---- WP-E: the rest of the v7.1.4 serverConfig (doc/v7/map-logic.md §4.3.1). shared/src/
+    // game_config.c fills every field (v7 def, defC on comp hosts, clamps) from host settings, a
+    // map's "config" or server.cfg game.<varN>. New bools are unsigned char (addressable). ----
+    int host_type;                    // hostTypes index ("override"): GAME_HOST_* (game_config.h), 0 custom
+    unsigned char comp;               // isComp: a comp host (hostTypes[1].comp)
+    unsigned char mimic_pubs;         // mimicPubs (zombies / raid hosts)
+    unsigned char is_private;         // private
+    int game_rounds;                  // gamRounds 1..10 (def 1, comp 3)
+    float intermission_time;          // intermTmr (s) 5..120 (30)
+    float objective_time;             // objtvTime (min) 0.1..10 (1)
+    unsigned char keep_team_score;    // keepTScore
+    unsigned char no_assists;         // noAssists
+    unsigned char force_classes;      // forceC (1): the mode's noWeap / forceClass / teamClass apply
+    unsigned char log_time;           // logTim (1): Race / Parkour log their times
+    unsigned char last_checkpoint_time; // lstChkT: a checkpoint reset rewinds the time
+    unsigned char friendly_fire;      // frFire
+    unsigned char hide_nametags_allies; // nameTagsFR (nameTags = hide_nametags: enemies)
+    unsigned char kill_cams;          // kCams (1)
+    unsigned char allow_anonymous;    // aAnon (1; nothing reads it in v7)
+    int spec_slots;                   // specSlots 0..4 (2)
+    int team_size;                    // tmSize: select 0..3 = 1v1..4v4 (3)
+    unsigned char no_cosmetics;       // noCosm (comp 1)
+    unsigned char test_mode;          // tstCmp (comp 1)
+    unsigned char no_draws;           // noDraws (comp 1)
+    unsigned char best_of;            // bstOfR (comp 1)
+    unsigned char minimaps;           // minimaps (1)
+    unsigned char limit_classes;      // limitClasses (comp 1)
+    int class_limits[GAME_CONFIG_CLASS_LIMITS]; // classLim0..15 0..20 (comp: 1 for config.rankedClasses)
+    // nameTeam1..5 / t1Dmg..t5Dmg by team ([0] unused). team1_name / team2_name point at [1] / [2]
+    // and team1_damage / team2_damage equal [1] / [2] (game_config.c and game_configure keep them so).
+    char team_names[GAME_CONFIG_TEAMS][17];
+    float team_damage[GAME_CONFIG_TEAMS];
+    // config.classes: the classes a player may pick, classes[0] the fallback (setClass). 0 = every
+    // class (v7 resetClasses).
+    int class_list[GAME_CONFIG_CLASS_LIMITS];
+    int class_list_count;
+    // ---- end WP-E ----
 
     int *maps;
     int map_count;
@@ -1513,6 +1607,9 @@ typedef struct Game_t {
     struct GameBots_t *bots;      // Krunker v7.1.4 game.bots (shared/include/bots.h): NULL until the first bot
 
     const EffectConfig *effects;  // WP-B: per-game effects.js table (custom-game prks overrides), NULL = g_effects
+    // WP-E (shared/src/game_config.c): host request, weps / prks override copies, match votes,
+    // network rates. Created on demand, freed by game_config_free(); NULL = public defaults.
+    struct GameConfigState *config_state;
     float nuke_timer;
     Player *nuke_player;
 
@@ -2570,6 +2667,51 @@ typedef struct {
     int32_t objective_ms;       // obj[1]
 } NetModeSyncV7Packet;
 // ---- end WP-D
+
+// ---- WP-E lobby packets (map-logic.md §5.3 block 180-189; shared/src/game_config.c builds them).
+// Only sent to / accepted from peers that announced NET_PROTOCOL_MINOR_V7. The server sends
+// GAME_CONFIG and NETWORK_DATA right before every INIT. ----
+#define NET_PACKET_MATCH_VOTE (NET_PACKET_BLOCK_LOBBY + 0)       // C->S: NetMatchVotePacket ("maVote" "mode,map")
+#define NET_PACKET_MATCH_VOTE_STATE (NET_PACKET_BLOCK_LOBBY + 1) // S->C: NetMatchVoteStatePacket (endData.mts + "mv" totals)
+#define NET_PACKET_NETWORK_DATA (NET_PACKET_BLOCK_LOBBY + 2)     // S->C: NetNetworkDataPacket (init networkData)
+#define NET_PACKET_GAME_CONFIG (NET_PACKET_BLOCK_LOBBY + 3)      // S->C: NetGameConfigChunk (init config + customData, JSON)
+
+#define NET_MATCH_PICKS 4 // config.matchPicks
+
+typedef struct {
+    int32_t mode_id;   // Krunker mode id
+    int32_t map_index; // index in the server's map list (as INIT map_index)
+} NetMatchVotePacket;
+
+typedef struct {
+    int32_t mode_id;
+    int32_t map_index;
+    uint16_t votes;    // summed vote weights
+    char map_name[32];
+} NetMatchVoteEntry;
+
+typedef struct {
+    uint8_t count;     // entries in use; 0 = no vote (clears the vote cards)
+    int8_t voted;      // the receiving connection's vote (entry index), -1 none
+    NetMatchVoteEntry entries[NET_MATCH_PICKS];
+} NetMatchVoteStatePacket;
+
+typedef struct {
+    uint16_t send_hz;    // snf: player states ("k") per second (config.serverSendFrequency 10, mode.sendR)
+    uint16_t tick_hz;    // tf: server ticks per second
+    uint16_t sync_hz;    // sf: reconciliation ("l") per second
+    float view_distance; // mode.viewDis: players further away are not streamed to a player, 0 = all
+} NetNetworkDataPacket;
+
+#define NET_GAME_CONFIG_HEADER_SIZE 8
+#define NET_GAME_CONFIG_CHUNK_SIZE (NET_MAX_PAYLOAD - NET_GAME_CONFIG_HEADER_SIZE)
+#define NET_GAME_CONFIG_MAX (64 * 1024)
+typedef struct {
+    uint32_t total;    // length of the whole JSON text
+    uint32_t offset;   // of this chunk; offset 0 starts a new config
+    uint8_t data[NET_GAME_CONFIG_CHUNK_SIZE];
+} NetGameConfigChunk;
+// ---- end WP-E lobby packets ----
 #pragma pack(pop)
 
 typedef struct {

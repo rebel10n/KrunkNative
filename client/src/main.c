@@ -35,6 +35,8 @@
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
 #include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
 #include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
+#include <lobby_ui.h> // WP-E: lobby packets, match vote cards (net/lobby_events.c)
+#include <game_config.h> // WP-E: GAME_CONFIG on INIT, the round's networkData
 #include <ks_client.h> // KrunkScript client host: the map's client script (ks/ks_client_host.c)
 #include <ks_game.h> // ks_game_free
 
@@ -973,9 +975,6 @@ static void client_remove_player(Client *client, const int uid) {
     }
 }
 
-// sendRateA: the rate remote states arrive at (NET_STATE_SEND_HZ, gameserver.ts K_PACKET_FREQUENCY)
-static float g_net_send_rate = 30.0f;
-
 void client_apply_state(Client *client, const NetStatePacket *packet) {
     Player *player = client_find_player(client, packet->uid);
     if (!player) return;
@@ -989,7 +988,7 @@ void client_apply_state(Client *client, const NetStatePacket *packet) {
     const vec3 position = player->position;
     const vec2 direction = player->direction;
     net_packet_apply_player(player, packet);
-    player->send_rate = g_net_send_rate;
+    player->send_rate = (float) game_network_data(&client->game)->send_hz; // WP-E: the round's networkData (sendRateA)
 
     if (player->force_pos) {
         player->interpolate = 0;
@@ -1020,9 +1019,10 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
 
+    game_config_on_init(&client->game); // WP-E: no GAME_CONFIG before this INIT (older server): the defaults
+    lobby_vote_reset();                 // WP-E: the end screen's vote cards go
     // INIT carries the Krunker mode id (modes.js index), not a rotation index
     game_init(&client->game, init->map_index, game_mode_index_for(&client->game, init->mode_index), 0);
-    g_net_send_rate = NET_STATE_SEND_HZ; // remote state rate ("k" sendRateA, client_apply_state)
     client_load_map(client);
     client->map_loaded = client->game.ready;
     // KrunkScript: the map's client script, reloaded every INIT, then start(); script packets

@@ -10,6 +10,7 @@
 #include <bots.h>            // Krunker v7.1.4 bot players (shared/src/bots.c)
 #include <ks_server.h>       // KrunkScript server host (server/src/ks_server_host.c)
 #include <ks_game.h>
+#include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -108,9 +109,11 @@ void net_broadcast_chat(const char *from, const char *msg) {
 
 // Game hooks (GameHooks.send): player uid == ClientConnection.id.
 // WP-D: the v7 mode packets (NET_PACKET_BLOCK_MODES, 140-149) only go to peers that announced
-// NET_PROTOCOL_MINOR_V7 in their HELLO.
+// NET_PROTOCOL_MINOR_V7 in their HELLO. WP-E: the lobby packets (NET_PACKET_BLOCK_LOBBY, 180-189:
+// match votes, network data, game config) too.
 static int net_peer_takes(const ClientConnection *client, const int type) {
     if (!game_ai_packet_for_peer(type, client->peer_minor)) return 0; // v3.1.1 vs v7 AI packets (shared/src/ai.c)
+    if (type >= NET_PACKET_BLOCK_LOBBY && type < NET_PACKET_BLOCK_LOBBY + 10) return client->peer_minor >= NET_PROTOCOL_MINOR_V7;
     return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
 }
 
@@ -137,10 +140,16 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
 
 static void net_change_map_internal(int map_index, int mode_index, int respawn_joined);
 
-// GameHooks.next_round: the end screen ran out, start the next round on a map from
-// the rotation (pickWinningMap without votes) and respawn everyone who played.
+// GameHooks.next_round: the end screen ran out, start the next round on the voted match
+// (WP-E game_next_match: endData.mts tally) and respawn everyone who played. No picks (no
+// map list): a random rotation map, as before.
 static void net_game_next_round(Game *game) {
-    net_change_map_internal(game_pick_next_map(game), game_pick_next_mode(game), 1);
+    int map_index, mode_index;
+    if (!game_next_match(game, &map_index, &mode_index)) {
+        map_index = game_pick_next_map(game);
+        mode_index = game_pick_next_mode(game);
+    }
+    net_change_map_internal(map_index, mode_index, 1);
 }
 
 static ClientConnection *net_client_by_id(int id);
@@ -337,6 +346,9 @@ static void net_handle_map_request(ClientConnection *client, const NetPacket *pa
 static void net_send_init(ClientConnection *client) {
     accounts_send_billboard(client); // init "bill" (config gameserver.billboards), before the map loads
     net_send_map_info(client);
+    // WP-E: init's config / customData / networkData, before the INIT that uses them. A peer whose
+    // HELLO is still on its way gets them when it arrives (NET_PACKET_HELLO below).
+    if (client->peer_minor >= NET_PROTOCOL_MINOR_V7) game_config_send(&g_server->game, client->id);
 
     const NetInitPacket packet = {
         .major = NET_PROTOCOL_MAJOR,
@@ -1027,7 +1039,18 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 client->peer_minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;
             }
             ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
+            if (client->peer_minor >= NET_PROTOCOL_MINOR_V7 && g_server->game.ready) { // WP-E: its INIT went out before the HELLO
+                game_config_send(&g_server->game, client->id);
+                if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
+            }
             break;
+        case NET_PACKET_MATCH_VOTE: { // WP-E "maVote" "mode,map" (end screen; players and spectators)
+            NetMatchVotePacket vote;
+            if (packet->length != sizeof(vote) || client->peer_minor < NET_PROTOCOL_MINOR_V7) break;
+            memcpy(&vote, packet->payload, sizeof(vote));
+            game_vote_match(&g_server->game, client->id, vote.mode_id, vote.map_index);
+            break;
+        }
         case NET_PACKET_SCRIPT_MSG: // KrunkScript GAME.NETWORK.send from the client script
             ks_server_on_script_msg(client, packet);
             break;
@@ -1281,21 +1304,28 @@ static void net_broadcast_states_tick(void) {
     static double next_state_at; // gameserver.ts K_PACKET_INTERVAL_MS
     const double state_now = net_time();
     if (state_now < next_state_at) return;
-    next_state_at = state_now + 1.0 / NET_STATE_SEND_HZ;
+    // WP-E: the round's networkData send rate (config.serverSendFrequency 10, mode.sendR)
+    const NetNetworkDataPacket *rates = game_network_data(&g_server->game);
+    next_state_at = state_now + 1.0 / (rates->send_hz ? rates->send_hz : NET_STATE_SEND_HZ);
 
     NetStatePacket states[256];
+    const Player *state_players[256];
     size_t state_count = 0;
     for (size_t j = 0; j < g_server->game.player_count && state_count < sizeof(states) / sizeof(states[0]); j++) {
         Player *player = g_server->game.players[j];
-        if (player && player->active) net_packet_from_player(&states[state_count++], player);
+        if (!player || !player->active) continue;
+        state_players[state_count] = player;
+        net_packet_from_player(&states[state_count++], player);
     }
     if (!state_count) return;
 
     static NetSendBatch batch; // main thread only
     for (size_t i = 0; i < g_server->client_count; i++) {
         const ClientConnection *client = &g_server->clients[i];
+        const Player *viewer = net_is_spectating(client) ? NULL : client->player; // spectators see everyone
         batch.length = 0;
         for (size_t j = 0; j < state_count; j++) {
+            if (!game_network_relevant(&g_server->game, viewer, state_players[j])) continue; // WP-E mode.viewDis
             if (net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]))) continue;
             net_batch_flush(client, &batch); // full (> ~140 players): send and start the next batch
             net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]));

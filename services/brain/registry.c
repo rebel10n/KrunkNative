@@ -140,7 +140,9 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
     l->max_players = cJSON_IsNumber(mx) && mx->valuedouble > 0 ? (int) mx->valuedouble : n->max_players;
     const cJSON *meta = cJSON_GetArrayItem(tuple, 4);
     l->custom = kn_json_bool(meta, "cs", 0) || kn_json_bool(meta, "isCustom", 0);
-    l->protect = kn_json_bool(meta, "pr", 0);
+    /* pr: password protected; private (v7 host config "private", server_bin WP-E): a private
+     * custom game is joined by id only, never quick-joined (older servers never send it) */
+    l->protect = kn_json_bool(meta, "pr", 0) || kn_json_bool(meta, "private", 0);
     l->online_mode = n->online_mode || kn_json_bool(meta, "onlineMode", 0);
     l->draining = kn_json_bool(meta, "draining", 0);
     const cJSON *mode = cJSON_GetObjectItemCaseSensitive(meta, "mode");

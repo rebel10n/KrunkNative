@@ -6,6 +6,7 @@
 // as a ReferenceError in the real page is. Also installs the non-inline listeners
 // (setupDom's addEventListener calls).
 #include <ui_logic.h>
+#include <lobby_ui.h> // WP-E voteOnMatch
 #include <map_catalog.h>  // Host Game / Games window maps
 #include <modes.h>        // copyInviteLink: Game.mode.isRanked
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
@@ -131,6 +132,8 @@ H(h_delay_execute) {
 H(h_show_window) { UNUSED; menu_show_window(arg_int(args, argc, 0, 0), 0); return 1; }
 H(h_close_window) { UNUSED; menu_close_window(); return 1; }
 H(h_select_class) { UNUSED; menu_select_class(arg_int(args, argc, 0, 0)); return 1; }
+// WP-E voteOnMatch("mode,map"): the end screen's match vote cards (client/src/net/lobby_events.c)
+H(h_vote_on_match) { (void) user; return lobby_vote_handler(menu_ui()->client, ev, args, argc); }
 
 // openURL(url) / openTab(url) / window.open(url, "_blank"): a new browser tab in Krunker;
 // the system browser natively, window.open on the web (ui_dialog.c, http(s) only).
@@ -466,6 +469,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"showWindow", h_show_window},
     {"closeWindow", h_close_window},
     {"selectClass", h_select_class},
+    {"voteOnMatch", h_vote_on_match}, // WP-E
     {"openHostWindow", h_open_host_window},
     {"openJoinWindow", h_open_join_window},
     // sounds

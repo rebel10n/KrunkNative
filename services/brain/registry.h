@@ -28,7 +28,7 @@ typedef struct MmLobby {
     int max_players;
     int reserved_remote;             /* live reservations made by other brains (from DB) */
     int custom;                      /* meta.cs */
-    int protect;                     /* meta.pr: password protected, never quick-joined */
+    int protect;                     /* meta.pr / meta.private: password protected or private, never quick-joined */
     int online_mode;                 /* node online_mode (meta.onlineMode): signed-in players only */
     int draining;                    /* meta.draining or node draining */
     int mode_index;                  /* meta.mode (-1 unknown) */

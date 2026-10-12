@@ -390,6 +390,14 @@ else ()
         target_link_libraries(editor_bus_test PRIVATE ws2_32)
     endif ()
 
+    # config_test (map-logic WP-E): v7.1.4 custom game config against v7's own setupGameConfig /
+    # applyConfig results (shared/tests/data/v7/config_cases.json), map config, sync, match votes
+    add_executable(config_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/config_test.c)
+    target_link_libraries(config_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(config_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     add_executable(class_spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/class_spawn_test.c)
     target_link_libraries(class_spawn_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -460,6 +468,14 @@ else ()
     target_link_libraries(sandbox_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(sandbox_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # sandbox_config_test (map-logic WP-E): the offline sandbox plays a map's embedded config, its
+    # players count as having an account; GAME_CONFIG / NETWORK_DATA only to protocol-1.3 peers
+    add_executable(sandbox_config_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/sandbox_config_test.c)
+    target_link_libraries(sandbox_config_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(sandbox_config_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # ks_server_test: the KrunkScript server host (server/src/ks_server_host.c) over the sandbox

@@ -26,6 +26,7 @@
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
+#include <lobby_ui.h>      // WP-E: GAME_CONFIG / NETWORK_DATA / MATCH_VOTE_STATE (client/src/net/lobby_events.c)
 #include <world_events.h>  // map-logic WP-B: NET_PACKET_ZONE / BUILD / LOG_TIME / OBJECT_ANIM
 #include <map_triggers.h>  // map trigger events: "do"/"ro"/"gte"/"bnk", "chp", "s", "scr", "am" popups (client/src/map_triggers.c)
 #include <math.h>
@@ -734,6 +735,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_UPGRADES:
         case NET_PACKET_WEAPON_STREAK:
             return combat_events_handle(client, type, payload, length); // WP-B (client/src/net/combat_events.c)
+        case NET_PACKET_GAME_CONFIG:
+        case NET_PACKET_NETWORK_DATA:
+        case NET_PACKET_MATCH_VOTE_STATE:
+            return lobby_events_handle(client, type, payload, length); // WP-E
         case NET_PACKET_ZONE:
         case NET_PACKET_BUILD:
         case NET_PACKET_LOG_TIME:

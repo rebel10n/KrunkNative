@@ -171,6 +171,11 @@ int main(void) {
         registry_lobby_upsert(o, off, t);
         cJSON_Delete(t);
         CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_NONE);
+        /* a private game (v7 host config "private") too */
+        t = cJSON_Parse("[\"off\",\"us-nj\",2,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"private\":true}]");
+        registry_lobby_upsert(o, off, t);
+        cJSON_Delete(t);
+        CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_NONE);
         add_lobby(o, off, "off", 2, 8, 0, "1.0");
         /* remote copy (federation): the flag comes from the tuple meta only */
         registry_remote_begin(o);

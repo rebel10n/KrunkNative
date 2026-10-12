@@ -9,6 +9,7 @@
 #include <auth_join.h>
 #include <map_catalog.h>
 #include <map_validate.h>
+#include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -203,6 +204,10 @@ static cJSON *acc_lobby_tuple(void) {
     if (g_gs_config.web_url[0]) cJSON_AddStringToObject(meta, "webUrl", g_gs_config.web_url);
     cJSON_AddNumberToObject(meta, "timeLeft", game->end_timer > 0.0f ? 0 : (int) ceilf(game->round_timer > 0.0f ? game->round_timer : 0.0f));
     cJSON_AddBoolToObject(meta, "draining", g_acc.draining);
+    // WP-E: a hosted game's config.hostTypes index (comp / zombies / raid) and its privacy, for the
+    // custom games list; the brain passes meta through, older brains and clients ignore them
+    if (game->config.host_type > 0) cJSON_AddNumberToObject(meta, "hostType", game->config.host_type);
+    if (game->config.is_private) cJSON_AddBoolToObject(meta, "private", 1);
     if (g_rk.active) {
         cJSON_AddBoolToObject(meta, "ranked", 1);
         cJSON_AddStringToObject(meta, "matchId", g_rk.match_id);
@@ -386,6 +391,12 @@ void accounts_configure_public(Game *game, const cJSON *cli_map) {
     size_t mode_count = 0;
     int *modes = gs_build_mode_list(&g_gs_config, &mode_count);
     game_configure(game, g_gs_config.has_game ? &g_gs_config.game : NULL, maps, map_count, modes, mode_count, NULL, 0, NULL, 0);
+    // WP-E server presets (gameserver.host_type / map_config): the rotation plays as a hosted game
+    if (g_gs_config.host_type >= 0 || g_gs_config.map_config) {
+        cJSON *request = g_gs_config.game_request[0] ? cJSON_Parse(g_gs_config.game_request) : NULL;
+        game_config_host(game, request, g_gs_config.host_type >= 0 ? g_gs_config.host_type : GAME_HOST_CUSTOM);
+        cJSON_Delete(request);
+    }
 }
 
 // ------------------------------------------------------------------ PLAYER_INFO
@@ -537,6 +548,7 @@ void accounts_round_ending(void) {
 void accounts_round_changed(void) {
     Game *game = &g_server->game;
     const int mode_id = game_mode_id(game);
+    game_network_apply(game, g_server->config.tick_rate); // WP-E: the round's networkData (applyNetworking, mode.sendR)
 
     // per-mode lobby size and round length (config, CLI --round-seconds)
     g_server->config.max_players = (unsigned short) (g_acc.custom && game->config.max_players > 0 ? game->config.max_players
@@ -1377,24 +1389,34 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     cJSON_AddStringToObject(reply, "type", "host-reply");
     if (cJSON_IsNumber(rid)) cJSON_AddNumberToObject(reply, "rid", rid->valuedouble);
 
-    GameConfig game_config = g_default_game_config;
-    gs_game_config_from_json(&game_config, config);
+    // WP-E: the request is a v7 host config: "override" picks the host type (config.hostTypes);
+    // every round then runs setupGameConfig(override, map config + request) -> applyConfig(cfg, 3)
+    // (game_apply_map_config). The setup below only decides the forced maps / modes.
+    cJSON *request = cJSON_IsObject(config) ? cJSON_Duplicate(config, 1) : cJSON_CreateObject();
+    const cJSON *override = cJSON_GetObjectItem(config, "override");
+    const int host_index = cJSON_IsNumber(override) && override->valueint >= 0 && override->valueint < GAME_HOST_TYPE_COUNT ? override->valueint : GAME_HOST_CUSTOM;
 
     const int ranked = cJSON_IsTrue(cJSON_GetObjectItem(config, "ranked"));
-    if (ranked) {
+    if (ranked && request) {
         // ranked (doc/backend.md 6.5): the roster's size is the lobby, everyone must be in
         // before the countdown (v3.1.1 needAll + minPlayers), one round (infEndTimer)
         const cJSON *team_size = cJSON_GetObjectItem(config, "teamSize");
         const int size = cJSON_IsNumber(team_size) && team_size->valueint > 0 ? team_size->valueint : 1;
-        game_config.max_players = size * 2;
-        game_config.min_players = size * 2;
+        cJSON_DeleteItemFromObjectCaseSensitive(request, "maxPlayers");
+        cJSON_DeleteItemFromObjectCaseSensitive(request, "minPlayers");
+        cJSON_AddNumberToObject(request, "maxPlayers", size * 2);
+        cJSON_AddNumberToObject(request, "minPlayers", size * 2);
     }
+    // Zombies / Raid hosts force their maps and modes (forceDat / allowedDat)
+    cJSON *forced = host_index == GAME_HOST_ZOMBIES || host_index == GAME_HOST_RAID ? game_config_setup(host_index, request, NULL, ranked) : NULL;
+    GameConfig game_config = g_default_game_config;
+    game_config_read(&game_config, forced ? forced : request, GAME_CONFIG_CLAMP_HOSTED, host_index); // round 1 before its map loads
 
     // maps: catalogue indices, or names (this server's own maps first: custom dirs / the
     // command line map), else the public rotation
     const cJSON *chosen[GS_MAX_LIST];
     size_t map_count = 0;
-    cJSON *map_names = cJSON_Duplicate(cJSON_GetObjectItem(config, "maps"), 1);
+    cJSON *map_names = cJSON_Duplicate(cJSON_GetObjectItem(forced ? forced : config, "maps"), 1);
     const cJSON *single_map = cJSON_GetObjectItem(config, "map");
     if (!cJSON_IsArray(map_names) && cJSON_IsString(single_map)) {
         cJSON_Delete(map_names);
@@ -1426,7 +1448,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     int *modes = NULL;
     size_t mode_count = 0;
-    cJSON *mode_list = cJSON_Duplicate(cJSON_GetObjectItem(config, "modes"), 1);
+    cJSON *mode_list = cJSON_Duplicate(cJSON_GetObjectItem(forced ? forced : config, "modes"), 1);
     const cJSON *single_mode = cJSON_GetObjectItem(config, "mode");
     if (!cJSON_GetArraySize(mode_list) && cJSON_IsNumber(single_mode)) {
         cJSON_Delete(mode_list);
@@ -1438,7 +1460,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
         cJSON_ArrayForEach(entry, mode_list) {
             const int id = cJSON_IsNumber(entry) ? entry->valueint : cJSON_IsString(entry) ? mode_find(entry->valuestring) : -1;
             // ranked modes are preventCustomGames: only the brain's ranked lobbies get them
-            if (modes && mode_config(id) && (mode_hostable(id) || (ranked && mode_config(id)->is_ranked))) modes[mode_count++] = id;
+            if (modes && mode_config(id) && (mode_hostable(id) || forced || (ranked && mode_config(id)->is_ranked))) modes[mode_count++] = id;
         }
         if (!mode_count) {
             free(modes);
@@ -1460,6 +1482,9 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     if (ranked) acc_ranked_setup(config);
     game_configure(&g_server->game, &game_config, maps, map_count, modes, mode_count, NULL, 0, NULL, 0);
+    game_config_host(&g_server->game, request, host_index); // WP-E: every round's map config + this request
+    cJSON_Delete(request);
+    cJSON_Delete(forced);
     net_change_map(0, 0);
     server_log("[brain] hosting a custom game for %s (account %d): %zu map(s), %zu mode(s), %d players", g_acc.host_name[0] ? g_acc.host_name : "?",
                g_acc.host_account_id, g_server->game.map_count, g_server->game.mode_count, g_server->config.max_players);

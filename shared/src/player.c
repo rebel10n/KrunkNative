@@ -2,6 +2,7 @@
 #include <world.h> // map-logic WP-B: tris, zones, score zones, terrain, resets
 #include <ai.h>
 #include <spawnables.h>
+#include <game_config.h> // WP-E: config.classes, forceC
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
 #include <math.h>
 #include <pcg_basic.h>
@@ -89,7 +90,10 @@ void player_spawn(Player *player) {
     Weapon **weapons = player->game->weapons ? player->game->weapons : (Weapon**) g_weapons;
 
     // setClass (v3.1.1 src/data/players.js): mode overrides, then primary + optional secondary + knife.
-    if (player->game->mode) {
+    // WP-E (v7 player.js:649-664): config.classes first (classes[0] when not listed), and the
+    // mode's classes only with forceC.
+    player->class_index = game_config_class_for(player->game, player->class_index);
+    if (player->game->mode && player->game->config.force_classes) {
         const GameModeConfig *mode_config = &player->game->mode->config;
         if (mode_config->no_weapons) player->class_index = 9;
         if (mode_config->force_class >= 0) player->class_index = mode_config->force_class;
