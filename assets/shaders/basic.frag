@@ -95,9 +95,9 @@ uniform sampler2D emissive_map;
 vec3 emissive_radiance;
 
 // WP-F store-item effects (client/src/skin_fx.c). env: the skin's "<tex>_env" equirectangular map
-// (texture unit 4) sampled along the world-space reflection, combined like three.js
-// MultiplyOperation (outgoing *= envColor, the Lambert / Phong / Basic default). The Physical
-// lighting mode's PMREM / envMapIntensity specular is approximated by the same multiply.
+// (texture unit 4) sampled along the world-space reflection. Every v7.1.4 item with `env` is a GLTF
+// model (MeshStandardMaterial, metalness 1): its look is the reflection, albedo * env *
+// envMapIntensity, plus its emission; the PMREM roughness blur and the Fresnel term are not modelled.
 // projection_uv: screen-space texture coordinates (render.js projection: vTexCoords.xy / w / 2 + 0.5).
 uniform bool use_env_map;
 uniform sampler2D env_map;
@@ -389,6 +389,7 @@ void main() {
     emissive_radiance = emissive.rgb * emissive.a;
     if (use_emissive_map) emissive_radiance *= texture(emissive_map, t_tex_coord.xy).rgb;
 
+    vec3 albedo = base_color.rgb;
     bool basic_material = lighting_mode == 0 || (lighting_mode == 1 && unlit) || sprite;
     if (lighting_enabled && !basic_material) {
         vec3 normal;
@@ -411,7 +412,7 @@ void main() {
         vec3 n = use_flat_normal ? normalize(flat_normal) : normalize(cross(dFdx(world_pos), dFdy(world_pos)));
         vec3 r = reflect(normalize(world_pos - camera_position), n);
         vec2 env_uv = vec2(atan(r.z, r.x) * 0.15915494309189535 + 0.5, asin(clamp(r.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
-        base_color.rgb *= texture(env_map, env_uv).rgb;
+        base_color.rgb = albedo * texture(env_map, env_uv).rgb * env_map_intensity + emissive_radiance;
     }
 
     // three.js r150 fragment tail: tonemapping_fragment, encodings_fragment, then fog_fragment

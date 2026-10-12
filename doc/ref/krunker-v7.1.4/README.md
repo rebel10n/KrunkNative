@@ -14,6 +14,12 @@ these images. The v3.1.1 references stay in `doc/ref/krunker-v3.1.1/`.
 - `ingame/`: HUD states in v7's sandbox game (`ingame-*`): plain, scoped, reloading, scoreboard
   (Tab), chat open, kill feed, death screen (killed by a bot / no killer), end screen, ESC pause.
 - `hub/`: the social hub (`hub-*`) as a guest: views loading, login and settings popups.
+- `viewer/`: the model viewer `public/viewer.html?<query>` at 800x600 (WP-F): showcase item views,
+  cosmetic render pages, a player wearing every slot and `dev-*` edits through the dev config
+  folders (dat.gui actions after the load), with the clock frozen and only
+  `#container` shown (`tools/kref/viewer-ref.js`, scenarios in `tools/kref/viewer-scenarios.txt`,
+  recaptured with `REFS=1 tools/kref/viewer-diff.sh`). `make viewer-diff` renders the same queries
+  with `client_bin --viewer` (headless, `KRUNKNATIVE_VIEWER_FREEZE=1`) and checks the RMSE.
 
 Each capture is `<name>.png`, `<name>.html.gz` (the DOM after the capture) and `<name>.rects.json`
 (viewport rects of the page elements `tools/uidiff/gen_scenarios.py` builds the regions from).

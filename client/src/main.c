@@ -37,6 +37,7 @@
 #include <gamepad.h> // game controllers: v3.1.1 gamepad.js + the controller half of CONTROLS (gamepad.c)
 #include <ui_mobile.h> // Krunker's #mobileUI touch controls (ui/ui_mobile.c)
 #include <app_mode.h> // game / social hub / editor / viewer pages (app_mode.c)
+#include <viewer_embed.h> // the store item view's 3D showcase (viewer/viewer.c)
 #include <backend_ui.h> // brain backend: account, matchmaker, --brain / --connect (net/backend_startup.c)
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
@@ -695,6 +696,7 @@ int main(int argc, char **argv) {
         INSTANCE.net_should_quit = 1;
         local_game_stop(&INSTANCE);
         client_class_preview_fini(&INSTANCE);
+        viewer_embed_fini();
         spin_wheel_fini();
         ui_scenario_end();
         html_ui_fini();
@@ -728,6 +730,7 @@ int main(int argc, char **argv) {
     ks_client_unload(&INSTANCE); // KrunkScript: script objects / DIVs / sounds
     ks_game_free(&INSTANCE.game);
     client_class_preview_fini(&INSTANCE);
+    viewer_embed_fini();
     spin_wheel_fini();
     vfx_fini();
     ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
@@ -1419,6 +1422,7 @@ void client_tick(Client *client, const float now, const float delta) {
         spin_wheel_render(client);           // the prize wheel's canvas under its #spinButton (ui/spin_wheel.c)
         ks_client_ui_late(client);           // KrunkScript UI.hideDefault / hideCrosshair over the HUD's writes
         html_ui_render(client->ui);          // last: composites the page over the scene and HUD
+        viewer_embed_frame(client, delta);   // the item view's 3D showcase over its iframe box (viewer_embed.h)
         spin_wheel_render_confetti(client);  // canvas-confetti draws above the page
     }
     debug_capture_frame_end(client); // KRUNKNATIVE_SCREENSHOT: reads the finished frame

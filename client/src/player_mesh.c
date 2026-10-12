@@ -9,21 +9,40 @@
 #include <math.h>
 #include <stdio.h>
 
-typedef struct {
-    int color;
-    float height;
-    float scale;
-} ColorCubeSegment;
-
-// genColorCube(width, height, length, segments, yOffset): the segments stack down from
-// top = 0.5 + yOffset (in units of height); a segment of height 0 is skipped (v7 segment[5]).
-static ColorCube *generate_color_cube_at(const float width, const float height, const float length, const ColorCubeSegment *segments, const size_t segment_count, const float top);
+// geos.js getColor(colr): THREE.Color(colr) with its HSL saturation raised 1.5 times (clamped). Every
+// genColorCube / genCube segment colours its vertices with it (v3.1.1 did the same), so the player's
+// body parts are more saturated than their config colours.
+vec4 krunker_get_color(const int hex) {
+    const float r = (float) ((hex >> 16) & 255) / 255.0f, g = (float) ((hex >> 8) & 255) / 255.0f, b = (float) (hex & 255) / 255.0f;
+    const float max = fmaxf(r, fmaxf(g, b)), min = fminf(r, fminf(g, b));
+    const float l = (min + max) * 0.5f;
+    if (max == min) return (vec4) {r, g, b, 1.0f};
+    const float delta = max - min;
+    float s = l <= 0.5f ? delta / (max + min) : delta / (2.0f - max - min);
+    float h;
+    if (max == r) h = (g - b) / delta + (g < b ? 6.0f : 0.0f);
+    else if (max == g) h = (b - r) / delta + 2.0f;
+    else h = (r - g) / delta + 4.0f;
+    h /= 6.0f;
+    s = fminf(1.0f, s * 1.5f);
+    // setHSL
+    const float q = l <= 0.5f ? l * (1.0f + s) : l + s - l * s;
+    const float p = 2.0f * l - q;
+    float out[3];
+    for (int i = 0; i < 3; i++) {
+        float t = h + (1.0f - (float) i) / 3.0f;
+        if (t < 0.0f) t += 1.0f;
+        if (t > 1.0f) t -= 1.0f;
+        out[i] = t < 1.0f / 6.0f ? p + (q - p) * 6.0f * t : t < 0.5f ? q : t < 2.0f / 3.0f ? p + (q - p) * 6.0f * (2.0f / 3.0f - t) : p;
+    }
+    return (vec4) {out[0], out[1], out[2], 1.0f};
+}
 
 ColorCube *generate_color_cube(const float width, const float height, const float length, const ColorCubeSegment *segments, const size_t segment_count) {
     return generate_color_cube_at(width, height, length, segments, segment_count, 0.5f);
 }
 
-static ColorCube *generate_color_cube_at(const float width, const float height, const float length, const ColorCubeSegment *segments, const size_t segment_count, const float top) {
+ColorCube *generate_color_cube_at(const float width, const float height, const float length, const ColorCubeSegment *segments, const size_t segment_count, const float top) {
     ColorCube *color_cube = calloc(1, sizeof(ColorCube));
     if (!color_cube) return NULL;
 
@@ -50,7 +69,7 @@ static ColorCube *generate_color_cube_at(const float width, const float height, 
 
         Mesh *mesh = mesh_init(geo, (Material *) material);
 
-        material->color = hex_to_vec(segments[i].color);
+        material->color = krunker_get_color(segments[i].color);
 
         mesh->transform.scale.x = segment->scale;
         mesh->transform.scale.z = segment->scale;
@@ -64,6 +83,16 @@ static ColorCube *generate_color_cube_at(const float width, const float height, 
     }
 
     return color_cube;
+}
+
+void color_cube_fini(ColorCube *cube) {
+    if (!cube) return;
+    for (size_t i = 0; i < cube->mesh_count; i++) {
+        skin_fx_forget(cube->meshes[i]);
+        mesh_fini(cube->meshes[i]);
+    }
+    free(cube->meshes);
+    free(cube);
 }
 
 PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, const int is_left, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed) {
@@ -92,7 +121,7 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
         BasicMaterial *upper_material = basic_material_init();
         BasicMaterial *joint_material = basic_material_init();
 
-        upper_material->color = joint_material->color = hex_to_vec(shirt_color);
+        upper_material->color = joint_material->color = krunker_get_color(shirt_color);
 
         arm->upper = mesh_init(create_cube_geo(), (Material *) upper_material);
         arm->joint = mesh_init(create_cube_geo(), (Material *) joint_material);
@@ -118,7 +147,7 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
         arm->joint->transform.parent = &arm->anchor;
     } else {
         BasicMaterial *material = basic_material_init();
-        material->color = hex_to_vec(shirt_color);
+        material->color = krunker_get_color(shirt_color);
 
         arm->extender = mesh_init(create_cube_geo(), (Material *) material);
         arm->extender->transform.parent = &arm->anchor;
@@ -247,7 +276,7 @@ PlayerCrouchedLeg *generate_crouched_leg(const int is_left, const int pants_colo
     BasicMaterial *upper_material = basic_material_init();
     BasicMaterial *joint_material = basic_material_init();
 
-    upper_material->color = joint_material->color = hex_to_vec(pants_color);
+    upper_material->color = joint_material->color = krunker_get_color(pants_color);
 
     leg->upper = mesh_init(create_cube_geo(), (Material *) upper_material);
     leg->joint = mesh_init(create_cube_geo(), (Material *) joint_material);
@@ -1105,7 +1134,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const ViewerSkin *charm = player->game->config.no_cosmetics ? NULL : cosmetic_item(player->cosmetics_v7.charms[i], ITEM_CHARM);
                     player_generate_charm(arms, player->loadout[i], player_slot_skin(player, i, weapon), charm);
                 }
-                if (look.wrist && player->is_you) player_generate_wrist(arms, look.wrist, arms->melee_pose);
+                // v7 builds it for isYou only, so the viewer's preview never showed its Wrist pick: KrunkNative also
+                // dresses preview players (uid -1)
+                if (look.wrist && (player->is_you || player->uid == -1)) player_generate_wrist(arms, look.wrist, arms->melee_pose);
 
                 // Sight attachment: only on the first-person (U) and preview (V) models, like jLrR6.
                 // v7.1.4: the player's pick (Reflex / Acog), the Acog's per-weapon yOff and its zOff.

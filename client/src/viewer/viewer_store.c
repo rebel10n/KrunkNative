@@ -3,11 +3,66 @@
 #include <stdio.h>
 #include <string.h>
 
-const ViewerSkin *viewer_skin(const int index) {
+// The viewer's dev config folders edit store.skins entries in place (viewer.js f453 / f454): a
+// skin being edited is a mutable copy every lookup returns instead of the table row.
+#define VIEWER_MAX_EDITS 32
+static struct {
+    int count;
+    int skin_index[VIEWER_MAX_EDITS];
+    ViewerSkin skin[VIEWER_MAX_EDITS];
+    int dye_count;
+    ViewerDye dye[VIEWER_MAX_EDITS];
+} g_edits;
+
+static const ViewerSkin *table_skin(const int index) {
     return index >= 0 && index < g_viewer_skin_count ? &g_viewer_skins[index] : NULL;
 }
 
+const ViewerSkin *viewer_skin(const int index) {
+    for (int i = 0; i < g_edits.count; i++) {
+        if (g_edits.skin_index[i] == index) return &g_edits.skin[i];
+    }
+    return table_skin(index);
+}
+
+ViewerSkin *viewer_skin_edit(const int index) {
+    for (int i = 0; i < g_edits.count; i++) {
+        if (g_edits.skin_index[i] == index) return &g_edits.skin[i];
+    }
+    const ViewerSkin *row = table_skin(index);
+    if (!row || g_edits.count >= VIEWER_MAX_EDITS) return NULL;
+    g_edits.skin_index[g_edits.count] = index;
+    g_edits.skin[g_edits.count] = *row;
+    return &g_edits.skin[g_edits.count++];
+}
+
+static const ViewerDye *table_dye(const int index);
+
 const ViewerDye *viewer_dye(const int index) {
+    for (int i = 0; i < g_edits.dye_count; i++) {
+        if (g_edits.dye[i].index == index) return &g_edits.dye[i];
+    }
+    return table_dye(index);
+}
+
+ViewerDye *viewer_dye_edit(const int index) {
+    for (int i = 0; i < g_edits.dye_count; i++) {
+        if (g_edits.dye[i].index == index) return &g_edits.dye[i];
+    }
+    const ViewerSkin *row = table_skin(index);
+    if (!row || row->type != 5 || g_edits.dye_count >= VIEWER_MAX_EDITS) return NULL;
+    ViewerDye *dye = &g_edits.dye[g_edits.dye_count++];
+    const ViewerDye *base = table_dye(index);
+    if (base) *dye = *base;
+    else *dye = (ViewerDye) {.index = index};
+    return dye;
+}
+
+void viewer_skin_edits_clear(void) {
+    memset(&g_edits, 0, sizeof(g_edits));
+}
+
+static const ViewerDye *table_dye(const int index) {
     int lo = 0, hi = g_viewer_dye_count;
     while (lo < hi) {
         const int mid = lo + (hi - lo) / 2;

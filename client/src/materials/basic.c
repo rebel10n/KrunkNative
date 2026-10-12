@@ -33,6 +33,15 @@ void basic_lights_update(const int handle, const BasicLight *light) {
     g_lights[handle - 1] = *light;
 }
 
+static BasicLight g_lights_override[BASIC_MAX_LIGHTS];
+static int g_lights_override_count = -1;
+
+void basic_lights_override(const BasicLight *lights, int count) {
+    if (count > BASIC_MAX_LIGHTS) count = BASIC_MAX_LIGHTS;
+    if (count > 0 && lights) memcpy(g_lights_override, lights, (size_t) count * sizeof(BasicLight));
+    g_lights_override_count = lights || count <= 0 ? count : -1;
+}
+
 void basic_lights_remove(const int handle) {
     if (handle < 1 || handle > BASIC_MAX_LIGHTS) return;
     g_lights_used[handle - 1] = 0;
@@ -159,9 +168,10 @@ static void basic_upload_lights(const unsigned int program, const int lighting) 
     const float scale = g_render_lighting.correct_lights ? 1.0f : (float) M_PI;
     int count = 0;
 
-    for (int i = 0; i < BASIC_MAX_LIGHTS && lighting > 0; i++) {
-        const BasicLight *light = &g_lights[i];
-        if (!g_lights_used[i] || !light->visible) continue;
+    const int overridden = g_lights_override_count >= 0;
+    for (int i = 0; i < (overridden ? g_lights_override_count : BASIC_MAX_LIGHTS) && lighting > 0; i++) {
+        const BasicLight *light = overridden ? &g_lights_override[i] : &g_lights[i];
+        if ((!overridden && !g_lights_used[i]) || !light->visible) continue;
         if (light->type == BASIC_LIGHT_RECT && lighting != 3) continue; // only MeshStandardMaterial takes rect-area lights
 
         const float s = light->type == BASIC_LIGHT_RECT ? 1.0f : scale;

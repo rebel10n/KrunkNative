@@ -221,6 +221,7 @@ static uint8_t replaced_type_for_tag(int tag)
     case LXB_TAG_IMG: return BOX_IMAGE;
     case LXB_TAG_CANVAS: return BOX_CANVAS;
     case LXB_TAG_VIDEO: return BOX_VIDEO;
+    case LXB_TAG_IFRAME: return BOX_VIDEO;     /* no nested browsing context: an empty 300x150 box */
     case LXB_TAG_INPUT: return BOX_INPUT;
     case LXB_TAG_TEXTAREA: return BOX_INPUT;   /* widgets.c WIDGET_TEXTAREA paints the text */
     case LXB_TAG_SELECT: return BOX_SELECT;
@@ -282,7 +283,7 @@ static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b)
         b->intrinsic_w = b->attr_w >= 0 ? b->attr_w : ctx->ua_canvas_w;
         b->intrinsic_h = b->attr_h >= 0 ? b->attr_h : ctx->ua_canvas_h;
         b->attr_w = b->attr_h = -1.0f;   /* canvas attributes are the bitmap size, not presentational hints */
-    } else if (tag == LXB_TAG_VIDEO) {
+    } else if (tag == LXB_TAG_VIDEO || tag == LXB_TAG_IFRAME) {
         b->intrinsic_w = ctx->ua_canvas_w;
         b->intrinsic_h = ctx->ua_canvas_h;
     } else if (tag == LXB_TAG_INPUT) {

@@ -150,6 +150,12 @@ extern const int g_viewer_list_count;
 const ViewerSkin *viewer_skin(int index);
 // The dye entry of a type-5 store index, NULL for others
 const ViewerDye *viewer_dye(int index);
+// The viewer's dev config editors (viewer.js f453 / f454 mutate store.skins[i]): a writable copy
+// of the entry that viewer_skin() / viewer_dye() return from then on, until
+// viewer_skin_edits_clear(). NULL when out of range / not a dye / out of edit slots.
+ViewerSkin *viewer_skin_edit(int index);
+ViewerDye *viewer_dye_edit(int index);
+void viewer_skin_edits_clear(void);
 // weapons.js charm mount of a weapon id, NULL when the weapon takes no charm
 const ViewerCharmMount *viewer_charm_mount(int weapon_id);
 // The option list of a dropdown, NULL when there is none (e.g. a weapon without skins).

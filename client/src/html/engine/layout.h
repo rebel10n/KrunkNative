@@ -96,7 +96,7 @@ typedef enum BoxType {
     BOX_LINEBREAK,     /* <br>                                                 */
     BOX_IMAGE,         /* <img>  (replaced)                                    */
     BOX_CANVAS,        /* <canvas> (replaced)                                  */
-    BOX_VIDEO,         /* <video> (replaced)                                   */
+    BOX_VIDEO,         /* <video>, <iframe> (replaced; the iframe stays empty) */
     BOX_INPUT,         /* <input> (replaced; widgets.c paints it)              */
     BOX_SELECT,        /* <select> (replaced)                                  */
     BOX_FLEX,          /* flex container                                       */

@@ -3,10 +3,12 @@
 //
 // Q(): a picked or dropped file is
 //   *.zip  a mod pack: every textures/<key>.png goes to RENDER.updateTexture(key), every
-//          models/<key>.obj to RENDER.updateMesh(key), then Z() (zip.js; here a small reader
+//          models/<key>.obj / .gltf / .glb to RENDER.updateMesh(key), then Z() (zip.js; here a small reader
 //          over stb_image's inflate),
-//   *.obj  the model of the selected cosmetic (Load Custom Face / Hat / Back / Waist: key
-//          <type dir><id>[_<tex>]) or of the current weapon ("weapons/<src>"),
+//   *.obj / *.gltf / *.glb  the model of the selected cosmetic (Load Custom <slot>: key
+//          <type dir><id>[_<tex>]) or of the current weapon ("weapons/<src>"); a GLTF / GLB
+//          replaces the animated model of a hasAnim item ("<key>.<fileExt>"); FBX is not
+//          supported (v7's FBXLoader),
 //   else   an image: the texture of that cosmetic, of the melee skin, or of the weapon skin.
 // Load buttons open a file dialog (native: zenity / kdialog when installed; web: <input
 // type=file>); files dropped on the window take the same path (container "drop" listener).
@@ -14,6 +16,7 @@
 // Downloads land in $XDG_DOWNLOAD_DIR, else ~/Downloads, else the working directory natively
 // (like ui_settings_export), and as a browser download on the web.
 #include "viewer_internal.h"
+#include <cosmetics.h>
 #include <html_ui.h>
 #include <png_write.h>
 #include <stb_image.h>
@@ -159,15 +162,20 @@ static int ends_with(const char *s, const char *suffix) {
     return a >= b && !strcmp(s + a - b, suffix);
 }
 
-// the store item of a cosmetic slot (n: 1 hat, 2 back, 6 waist, else face) and its key
+// vO204: the store item of a Load Custom target (store type: hat 1, head 15, body 2, back 14, waist 6,
+// face 7, shoes 8, pet 9, dye 5, wrist) and its key: store.types[assetType || type] + id + (tex ? "_" + tex : "")
 static int cosmetic_key(const int target, char *key, const size_t n) {
     const ViewerState *e = &g_viewer.e;
-    const int index = target == 1 ? e->hat.num : target == 2 ? e->back.num : target == 6 ? e->waist.num : e->face.num;
-    const ViewerSkin *skin = viewer_skin(index);
+    const VgValue *value = target == ITEM_HAT ? &e->hat : target == ITEM_HEAD ? &e->head : target == ITEM_BODY ? &e->body :
+                           target == ITEM_BACK ? &e->back : target == ITEM_WAIST ? &e->waist : target == ITEM_FACE ? &e->face :
+                           target == ITEM_SHOE ? &e->shoe : target == ITEM_PET ? &e->pet : target == ITEM_DYE ? &e->dye :
+                           target == ITEM_WRIST ? &e->wrist : NULL;
+    const ViewerSkin *skin = value ? viewer_skin(value->num) : NULL;
     if (!skin) return 0;
-    // game.store.types[n] + t.id + (t.tex ? "_" + t.tex : "")
-    if (viewer_skin_tex_truthy(skin)) snprintf(key, n, "%s%d_%s", g_viewer_types[target], skin->id, skin->tex);
-    else snprintf(key, n, "%s%d", g_viewer_types[target], skin->id);
+    const int dir = skin->asset_type ? skin->asset_type : skin->type;
+    if (dir < 0 || dir >= g_viewer_type_count) return 0;
+    if (viewer_skin_tex_truthy(skin)) snprintf(key, n, "%s%d_%s", g_viewer_types[dir], skin->id, skin->tex);
+    else snprintf(key, n, "%s%d", g_viewer_types[dir], skin->id);
     return 1;
 }
 
@@ -239,13 +247,20 @@ static void import_zip_entry(const char *name, const unsigned char *data, const 
             stbi_image_free(rgba);
         }
     } else if (top == 6 && !strncmp(name, "models", 6)) {
-        // te: updateMesh(filename.replace("models/", "").replace(".obj", ""))
+        // te: updateMesh(filename.replace(/models\/|\.obj|\.gltf|\.glb|\.fbx/gim, ""), data, ext)
         snprintf(key, sizeof(key), "%s", slash + 1);
-        char *ext = strstr(key, ".obj");
-        if (ext) memmove(ext, ext + 4, strlen(ext + 4) + 1);
+        const char *dot = strrchr(slash + 1, '.');
+        const char *ext = dot ? dot + 1 : "";
+        static const char *const strip[] = {".obj", ".gltf", ".glb", ".fbx"};
+        for (size_t i = 0; i < sizeof(strip) / sizeof(strip[0]); i++) {
+            char *at;
+            while ((at = strstr(key, strip[i]))) memmove(at, at + strlen(strip[i]), strlen(at + strlen(strip[i])) + 1);
+        }
         char temp[512];
         if (write_temp(name, data, length, temp, sizeof(temp))) {
-            vscene_update_mesh_obj(key, temp);
+            if (!strcmp(ext, "gltf") || !strcmp(ext, "glb")) vscene_update_mesh_gltf(key, temp, ext);
+            else if (!strcmp(ext, "obj")) vscene_update_mesh_obj(key, temp);
+            else fprintf(stderr, "[viewer] %s: FBX models are not supported\n", name); // v7 FBXLoader
             remove(temp);
         }
     }
@@ -326,15 +341,20 @@ void viewer_import_path(const char *path, const int target) {
         if (!import_zip(data, length)) viewer_alert("Issues loading mode zip");
         if (g_import.rebuild_timer) html_timer_cancel(g_import.rebuild_timer);
         g_import.rebuild_timer = html_timer_add(IMPORT_REBUILD_DELAY_MS, rebuild_now, NULL);
-    } else if (ends_with(path, ".obj")) {
+    } else if (ends_with(path, ".obj") || ends_with(path, ".gltf") || ends_with(path, ".glb") || ends_with(path, ".fbx")) {
+        // updateMesh(<cosmetic key> or "weapons/<src>", data, ext), then f458()
+        const char *ext = strrchr(path, '.') + 1;
+        int have = 0;
         if (target) {
-            if (cosmetic_key(target, key, sizeof(key))) {
-                vscene_update_mesh_obj(key, path);
-                vscene_rebuild_player();
-            }
+            have = cosmetic_key(target, key, sizeof(key));
         } else if (vscene_player_weapon()) {
             snprintf(key, sizeof(key), "weapons/%s", vscene_player_weapon()->src ? vscene_player_weapon()->src : "undefined");
-            vscene_update_mesh_obj(key, path);
+            have = 1;
+        }
+        if (have) {
+            if (!strcmp(ext, "obj")) vscene_update_mesh_obj(key, path);
+            else if (!strcmp(ext, "fbx")) fprintf(stderr, "[viewer] %s: FBX models are not supported\n", path); // v7 FBXLoader
+            else vscene_update_mesh_gltf(key, path, ext);
             vscene_rebuild_player();
         }
     } else {

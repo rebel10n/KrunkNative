@@ -346,9 +346,11 @@ void skin_fx_apply(Mesh *mesh, const ViewerSkin *skin, const char *texture_key, 
         // emissive: emiss || #fff, emissiveMap ((glowText && texSrc) || src) + (sameGlow ? "" : "_e")
         char key[256];
         snprintf(key, sizeof(key), "%s%s", glow_text && texture_key ? texture_key : model_key, (skin->flags & VS_SAME_GLOW) ? "" : "_e");
+        // render.js loadTexture never sets emissiveMap when that file is missing: the colour then
+        // glows over the whole item (one AK skin in the v7 data, and any glow the dev config adds)
         material->emissive_texture = fx_texture(key);
-        material->emissive = material->emissive_texture ? fx_color(skin->emiss >= 0 ? skin->emiss : 0xFFFFFF, 1.0f) : (vec4) {0};
-        if (material->emissive_texture && skin->glow_int > 0.0f) material->emissive.w = skin->glow_int; // emissInt
+        material->emissive = fx_color(skin->emiss >= 0 ? skin->emiss : 0xFFFFFF, 1.0f);
+        if (skin->glow_int > 0.0f) material->emissive.w = skin->glow_int; // emissInt
     }
     if (skin->flags2 & VS2_PROJECTION) {
         material->projection_uv = 1;
@@ -415,8 +417,8 @@ void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
     if ((dye->flags & (VS_GLOW | VS_SAME_GLOW)) && dye->tex && !(dye->flags & VS_TEX_NUM)) {
         char key[256];
         snprintf(key, sizeof(key), "%s%s", dye->tex, (dye->flags & VS_SAME_GLOW) ? "" : "_e");
-        material->emissive_texture = fx_texture(key);
-        material->emissive = material->emissive_texture ? fx_color(dye->emiss >= 0 ? dye->emiss : 0xFFFFFF, 1.0f) : (vec4) {0};
+        material->emissive_texture = fx_texture(key); // missing: the colour glows unmapped (as above)
+        material->emissive = fx_color(dye->emiss >= 0 ? dye->emiss : 0xFFFFFF, 1.0f);
     }
     if (dye->flags2 & VS2_PROJECTION) material->projection_uv = 1;
     if (dye->flags & VS_RGB) {

@@ -1,17 +1,29 @@
-// The viewer page's three.js scene (Krunker v3.1.1 src/viewer.js), on KrunkNative's renderer:
+// The viewer page's three.js scene (Krunker v7.1.4 src/viewer.js), on KrunkNative's renderer:
 //
-// - Z(): a preview Player (new Player(...), init, setClass, generateMeshes(d, false, true))
-//   built with player_generate_meshes(), then the parts players.js generateMeshes gives a
-//   preview player and player_mesh.c does not (weapon skins incl. remodels and glow, melee
-//   skins, the picked sight attachment, cosmetic glow / spin / frame animation) applied to
-//   its meshes here;
-// - F(C): one weapon / melee item on its own (cosmetic=<index>), showcase=<index>;
-// - U(): the "Viewer" (six spot lights on the axes) and "In-game" (sun) lighting plus the
-//   ambient light, through a variant of basic.frag patched at load time (see
-//   viewer_program_create) so the basic material can take those lights;
+// - f458(): a preview Player (new Player(-1), init(.., "preview"), every slot, setClass,
+//   generateMeshes(player, false, true)) built by player_generate_meshes(): v7 slots, weapon and
+//   melee skins, the sight, charms, the wrist, the preview pet and the items' material effects
+//   (skin_fx.c) all come from player_mesh.c;
+// - f447(C): one store item on its own (cosmetic=<index>, the 512 x 512 render page): a mesh, or a
+//   class-9 preview Player wearing it (hat, head, face, dye, shoes: vO203 poses);
+// - showcase=<index>: the item view the store embeds (dye player / spray plane / face on a head /
+//   hat or head on a head / any other model), auto-rotating;
+// - f448(): the "Viewer" (six SpotLights at +-150 on the axes) and "In-game" (the sun) lighting,
+//   the ambient light, and the cosmetic / showcase fill light, through basic.c's light list
+//   (basic_lights_override) so the map's lights never reach the viewer;
 // - the OrbitControls camera (PerspectiveCamera(60, aspect, 0.01, 50));
 // - the #container background linear-gradient(#7d8fa3, #1b1c1e), drawn here under the scene
 //   because the page is composited over the GL canvas (the page's container stays clear).
+//
+// KRUNKNATIVE_VIEWER_FREEZE=1 (g_viewer.freeze) stops the clock for reference captures: render
+// deltas are 0 (skin animations, clips and pets stay at their first frame) and the showcase does
+// not auto-rotate, like tools/kref/viewer-ref.js does to the v7 page.
+//
+// Fixed v7.1.4 viewer bugs (doc/v7/player-viewer.md 5.1 item 3): "Show Body" toggles the body item
+// (v7 reads vO201.bodyMesh), "Show Pet" the pet (v7: no effect), "Show Player" / "Show Arms" hide the
+// head, body and arms (v7 toggles lowerBody.children by position: v7 moved the head first, so only
+// the head follows Show Player and Show Arms does nothing), and the Wrist pick shows (v7 only builds
+// it for isYou).
 //
 // Every GL object made here is freed here; the private Game / Map / Player never touch the
 // client's game.
@@ -19,6 +31,9 @@
 #include "viewer_internal.h"
 #include <cosmetics.h>
 #include <gltf.h>
+#include <pets.h>
+#include <render_settings.h>
+#include <skin_fx.h>
 #include <fast_obj.h>
 #include <stb_image.h>
 #include <math.h>
@@ -26,7 +41,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// ---- viewer.js constants
+// ---- viewer.js / config.js constants
 #define VIEWER_FOV_DEG 60.0f                 // new PerspectiveCamera(60, aspect, 0.01, 50)
 #define VIEWER_NEAR 0.01f
 #define VIEWER_FAR 50.0f
@@ -37,36 +52,28 @@
 #define AMBIENT_COLOR 0x97A0A8               // new AmbientLight(9937064)
 #define SUN_COLOR 0xF2F7FC                   // new DirectionalLight(15923452, 1.2)
 #define SUN_INTENSITY 1.2f
-#define SUN_PITCH (-0.3f * (float) M_PI)     // e = PI * -0.3, t = PI * 2 * -0.25, at lightDistance
+#define SUN_PITCH (-0.3f * (float) M_PI)     // v5734 = PI * -0.3, v5735 = PI * 2 * -0.25, at lightDistance
 #define SUN_YAW (2.0f * (float) M_PI * -0.25f)
-#define FILL_INTENSITY 0.5f                  // cosmetic page: DirectionalLight(0xffffff, 0.5) at (3, 1, 0)
+#define LIGHT_DISTANCE 500.0f                // config.lightDistance
+#define FILL_INTENSITY 0.5f                  // cosmetic / showcase: DirectionalLight("#ffffff", 0.5) at (3, 1, 0)
+#define SPOT_DISTANCE 150.0f                 // vA351: SpotLights at +-150 on each axis
+#define SPOT_ANGLE ((float) M_PI / 3.0f)     // THREE.SpotLight default angle
 #define GRADIENT_TOP 0x7d8fa3                // linear-gradient(#7d8fa3, #1b1c1e)
 #define GRADIENT_BOTTOM 0x1b1c1e
 #define ORBIT_EPS 0.000001f                  // Spherical.makeSafe
 #define ORBIT_ZOOM 0.95f                     // Math.pow(0.95, zoomSpeed)
 #define ORBIT_KEY_PAN 7.0f                   // keyPanSpeed
-#define PULSE_SPEED 0.003f                   // render.js: pulsVal += delta * 0.003
+// OrbitControls.autoRotate: rotateLeft(2 PI / 60 / 60 * autoRotateSpeed 2) per update, 120 updates a second
+#define ORBIT_AUTO_ROTATE_SPEED (2.0f * (float) M_PI / 60.0f / 60.0f * 2.0f * 120.0f / 1000.0f) // rad per ms
 #define ANIM_STEP_SPEED (0.015f * 0.25f)     // playerStep(d, delta * 0.015): stepVal += dt * stepMlt
-#define VIEWER_MAX_ANIMS 64
+#define HAIR_COLOR 0x6C5042                  // 7098434: the showcase head cube's hair
+#define HEAD_SKIN_COLOR 0xA77860             // 10975328: its skin
 #define VIEWER_MAX_ITEMS 16
 #define VIEWER_MAX_OVERRIDES 64
 
 typedef struct {
-    Mesh *mesh;
-    BasicMaterial *material;
-    int frames;
-    float frame_t, frame_left;
-    int frame;
-    float mov_t;
-    int mov_d;
-    float puls_t;
-    float r_anim;
-    char r_axis;
-} ViewerAnim;
-
-typedef struct {
     char *path;        // texture / model cache key (full asset path)
-    int is_model;
+    int is_model;      // 0 texture, 1 OBJ geometry, 2 GLTF / GLB model
 } ViewerOverride;
 
 static struct {
@@ -78,35 +85,37 @@ static struct {
     Player *player;
     int step_dir;
 
-    // F() / showcase items: meshes and their holder transforms
+    // f447 / showcase items: meshes, GLTF models, colour cubes and their holder transforms
     Mesh *items[VIEWER_MAX_ITEMS];
     int item_count;
+    GltfInstance *models[VIEWER_MAX_ITEMS];
+    int model_count;
+    ColorCube *cubes[VIEWER_MAX_ITEMS];
+    int cube_count;
     MeshTransform *holders[VIEWER_MAX_ITEMS];
     int holder_count;
-    Player *showcase_player;
-
-    ViewerAnim anims[VIEWER_MAX_ANIMS];
-    int anim_count;
-    float puls_val;
+    Player *item_player;           // v5621: the showcase dye / cosmetic-page preview Player
 
     // orbit controls
     vec3 target;
     int orbit_state;   // -1 none, 0 rotate, 1 dolly, 2 pan
     float last_x, last_y;
+    int auto_rotate;   // showcase: OrbitControls.autoRotate
 
-    // lights (U)
-    int light_mode;    // 0 sun, 1 six axis spot lights
-    int fill_light;    // cosmetic page fill light
+    // lights (f448)
+    int light_mode;    // 0 sun ("In-game"), 1 six axis spot lights ("Viewer")
+    int fill_light;    // cosmetic page / showcase fill light
+    float sun_x;       // the sun's x (a cosmetic-page face pose moves it to 100)
 
-    unsigned int program;          // patched basic program, 0 = use the stock one
     unsigned int gradient_program;
     unsigned int empty_vao;
 
     ViewerOverride overrides[VIEWER_MAX_OVERRIDES];
     int override_count;
 
-    float render_rotation;         // renderHat & co: d.objInstances.rotation.y
-    int hide_primary_geo;          // d.weaponGeos[0].visible = false
+    float render_rotation;         // renderHat & co: player.objInstances.rotation.y
+    vec3 render_offset;            // renderShoes: player.objInstances.position (0, 2, -2)
+    int hide_primary_geo;          // player.weaponGeos[0].visible = false
 } vs;
 
 // ---------------------------------------------------------------- small helpers
@@ -132,16 +141,6 @@ static Geometry *model_for(const char *key) {
     return geometry;
 }
 
-static int file_exists(const char *dir, const char *key, const char *ext) {
-    char *path = asset(dir, key, ext);
-    if (!path) return 0;
-    ensure_asset_file(path);
-    FILE *file = fopen(path, "rb");
-    if (file) fclose(file);
-    free(path);
-    return file != NULL;
-}
-
 // x of the model's bounding-box centre (loadMesh centerZ: holder.translateZ(center.x * scale))
 static float model_center_x(const char *key) {
     char *path = asset("models", key, ".obj");
@@ -165,70 +164,12 @@ static vec4 color_vec(const int hex, const float alpha) {
     return (vec4) {(float) ((hex >> 16) & 255) / 255.0f, (float) ((hex >> 8) & 255) / 255.0f, (float) (hex & 255) / 255.0f, alpha};
 }
 
-static int skin_has_glow(const ViewerSkin *skin) {
-    return skin && (skin->flags & (VS_GLOW | VS_SAME_GLOW));
+static vec3 vec3_normalize(vec3 v) {
+    const float length = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+    return length > 0.0f ? (vec3) {v.x / length, v.y / length, v.z / length} : (vec3) {0.0f, 1.0f, 0.0f};
 }
 
-static void anim_add(Mesh *mesh, const ViewerSkin *skin) {
-    if (!skin || vs.anim_count >= VIEWER_MAX_ANIMS) return;
-    if (!skin->frames && !skin->mov_t && !skin->puls_t && !skin->r_anim) return;
-
-    ViewerAnim *anim = &vs.anims[vs.anim_count++];
-    memset(anim, 0, sizeof(*anim));
-    anim->mesh = mesh;
-    anim->material = (BasicMaterial *) mesh->material;
-    anim->frames = skin->frames;
-    anim->frame_t = anim->frame_left = (float) skin->frame_t;
-    anim->mov_t = skin->mov_t;
-    anim->puls_t = skin->puls_t;
-    anim->r_anim = skin->r_anim;
-    anim->r_axis = skin->r_anim_axis ? skin->r_anim_axis : 'y';
-
-    if (anim->frames > 0) anim->material->texture_repeat.x = 1.0f / (float) anim->frames; // repeat.x = 1 / frames
-    if (anim->r_anim) mesh->transform.rotation_order = ROTATION_ORDER_YXZ; // rotateX/Z after the y turn
-}
-
-// getMat(): the material options a store item carries (glow, opacity, side, colour, wireframe)
-static void material_apply_skin(BasicMaterial *material, const ViewerSkin *skin, const char *texture_key, const char *model_key, const int glow_text, const int emissive) {
-    if (!skin) return;
-
-    if (skin->color >= 0) material->color = color_vec(skin->color, material->color.w);
-    if (skin->opac > 0.0f) {
-        material->color.w = skin->opac;
-        material->base.transparent = 1;
-    }
-    if (skin->flags & VS_TRANS) material->base.transparent = 1;
-    if (skin->side == 2) material->double_sided = 1;
-    if (skin->alpha > 0.0f) material->alpha_test = skin->alpha;
-    if (skin->flags & VS_WIRE) material->base.wireframe = 1;
-    if (skin->tile_s > 0.0f) material->texture_repeat = (vec2) {skin->tile_s, skin->tile_s};
-
-    if (emissive) {
-        // emissive: emiss || 0xffffff, emissiveMap = ((glowText && texSrc) || src) + (sameGlow ? "" : "_e")
-        material->emissive = color_vec(skin->emiss >= 0 ? skin->emiss : 0xFFFFFF, 1.0f);
-        char key[256];
-        snprintf(key, sizeof(key), "%s%s", glow_text && texture_key ? texture_key : model_key, (skin->flags & VS_SAME_GLOW) ? "" : "_e");
-        material->emissive_texture = file_exists("textures", key, ".png") ? texture_for(key) : 0;
-        if (!material->emissive_texture) material->emissive = (vec4) {0};
-    }
-}
-
-static Mesh *mesh_new(Geometry *geometry, const unsigned int texture) {
-    BasicMaterial *material = basic_material_init();
-    if (!material) return NULL;
-    material->texture = texture;
-    if (vs.program) material->base.program = vs.program;
-    return mesh_init(geometry, (Material *) material);
-}
-
-// replace a player mesh's model + texture in place (its transform and parent stay)
-static void mesh_reskin(Mesh *mesh, Geometry *geometry, const unsigned int texture) {
-    if (!mesh || !geometry) return;
-    mesh->geometry = geometry;
-    ((BasicMaterial *) mesh->material)->texture = texture;
-}
-
-// ---------------------------------------------------------------- shaders
+// ---------------------------------------------------------------- shaders (the background gradient)
 
 static unsigned int compile_stage(const unsigned int type, const char *source) {
 #if defined(KN_GLES) || defined(__APPLE__) // same version rewrite as shader.c
@@ -286,81 +227,6 @@ static unsigned int link_program(const char *vertex, const char *fragment) {
     return program;
 }
 
-static char *read_asset_text(const char *rel) {
-    char *path = concat(assets_path(), rel);
-    if (!path) return NULL;
-    ensure_asset_file(path);
-    unsigned char *data = NULL;
-    size_t length = 0;
-    const int failed = read_file(path, &data, &length);
-    free(path);
-    if (failed || !data) return NULL;
-    char *text = malloc(length + 1);
-    if (text) {
-        memcpy(text, data, length);
-        text[length] = 0;
-    }
-    free(data);
-    return text;
-}
-
-// Replace the first `from` in *text with `to` (realloc'd). 0 when `from` is missing.
-static int text_replace(char **text, const char *from, const char *to) {
-    char *at = strstr(*text, from);
-    if (!at) return 0;
-    const size_t head = (size_t) (at - *text), from_n = strlen(from), to_n = strlen(to), total = strlen(*text);
-    char *out = malloc(total - from_n + to_n + 1);
-    if (!out) return 0;
-    memcpy(out, *text, head);
-    memcpy(out + head, to, to_n);
-    memcpy(out + head + to_n, at + from_n, total - head - from_n + 1);
-    free(*text);
-    *text = out;
-    return 1;
-}
-
-static int text_replace_all(char **text, const char *from, const char *to) {
-    int count = 0;
-    char marker[] = "\x01";
-    while (text_replace(text, from, marker)) count++;
-    while (text_replace(text, marker, to)) {}
-    return count;
-}
-
-// basic.frag with the viewer's lights: viewer_light_mode 1 = the six "Viewer" spot lights on
-// the axes (cone 60 degrees, no falloff: each lights the faces turned to it, so the direct
-// term is |n.x| + |n.y| + |n.z|), 2 = the sun plus the cosmetic page's fill light; and the
-// material model (viewer_lm: 1 Lambert, 2 Phong) chosen per draw instead of by the lighting
-// setting. The map's point lights never reach the viewer.
-static unsigned int viewer_program_create(void) {
-    char *vert = read_asset_text("shaders/basic.vert");
-    char *frag = read_asset_text("shaders/basic.frag");
-    unsigned int program = 0;
-
-    if (vert && frag) {
-        int ok = 1;
-        ok &= text_replace_all(&frag, "lighting_mode ==", "viewer_lm ==") > 0;
-        ok &= text_replace(&frag, "uniform float light_intensity;",
-                           "uniform float light_intensity;\nuniform int viewer_lm;\nuniform int viewer_light_mode;\n"
-                           "uniform vec3 viewer_light2_direction;\nuniform vec3 viewer_light2_color;");
-        ok &= text_replace(&frag, "vec3 direct = light * dot_nl;",
-                           "vec3 direct = viewer_light_mode == 1 ? light * (abs(normal.x) + abs(normal.y) + abs(normal.z)) : light * dot_nl;\n"
-                           "    vec3 viewer_l2 = normalize(viewer_light2_direction);\n"
-                           "    float viewer_nl2 = viewer_light_mode == 2 ? clamp(dot(normal, viewer_l2), 0.0, 1.0) : 0.0;\n"
-                           "    direct += viewer_light2_color * viewer_nl2;");
-        ok &= text_replace(&frag, "outgoing += light * dot_nl * krunker_blinn_phong(light_dir, normal, view_dir);",
-                           "outgoing += light * dot_nl * krunker_blinn_phong(light_dir, normal, view_dir);\n"
-                           "        if (viewer_light_mode == 2) outgoing += viewer_light2_color * viewer_nl2 * krunker_blinn_phong(viewer_l2, normal, view_dir);");
-        text_replace(&frag, "i < point_light_count", "i < 0 * point_light_count");
-        if (ok) program = link_program(vert, frag);
-        else fprintf(stderr, "[viewer] basic.frag changed: viewer lights unavailable (stock basic program)\n");
-    }
-
-    free(vert);
-    free(frag);
-    return program;
-}
-
 static const char *const GRADIENT_VERT =
     "#version 450 core\n"
     "void main() {\n"
@@ -399,46 +265,61 @@ static void draw_gradient(const int fb_h, const float y0, const float y1) {
     glBindVertexArray(0);
 }
 
-// ---------------------------------------------------------------- lights (U)
+// ---------------------------------------------------------------- lights (f448)
 
 void vscene_update_lights(void) {
-    // "Viewer" (and not the cosmetic page): six SpotLights; "In-game" or the cosmetic page: the sun
+    // "Viewer" (and not the cosmetic page): six SpotLights; "In-game" or the cosmetic page: the sun.
+    // The cosmetic page and the showcase add the fill light.
     vs.light_mode = !strcmp(g_viewer.e.lighting.str, "Viewer") && !g_viewer.cosmetic_set ? 1 : 0;
-    vs.fill_light = g_viewer.cosmetic_set;
+    vs.fill_light = g_viewer.cosmetic_set || g_viewer.showcase_set;
+    vs.sun_x = LIGHT_DISTANCE * cosf(SUN_YAW);
 }
 
-static void lights_apply(RenderLighting *saved, const int phong) {
+// The page's lights for one draw: the ambient light and the sun in g_render_lighting (the
+// renderer's three.js defaults: legacy lights, no tone mapping, linear output, no fog), the spot
+// and fill lights as basic.c's light list. Restored by lights_restore.
+static void lights_apply(RenderLighting *saved) {
     *saved = g_render_lighting;
 
     g_render_lighting.ambient_color = color_vec(AMBIENT_COLOR, 1.0f);
     g_render_lighting.ambient_intensity = 1.0f;
     g_render_lighting.enabled = 1;
     g_render_lighting.fog_enabled = 0;
+    g_render_lighting.correct_lights = 0;
+    g_render_lighting.tone_mapping = 0;
+    g_render_lighting.tone_mapping_exposure = 1.0f;
+    g_render_lighting.output_encoding = 0;
 
+    BasicLight lights[8];
+    int count = 0;
     if (vs.light_mode == 1) {
-        g_render_lighting.light_color = color_vec(0xFFFFFF, 1.0f);
-        g_render_lighting.light_intensity = 1.0f;
-        g_render_lighting.light_direction = (vec3) {0.0f, 1.0f, 0.0f};
+        g_render_lighting.light_intensity = 0.0f; // no sun: the six white SpotLights aimed at the origin
+        static const vec3 axes[3] = {{0.0f, SPOT_DISTANCE, 0.0f}, {SPOT_DISTANCE, 0.0f, 0.0f}, {0.0f, 0.0f, SPOT_DISTANCE}};
+        for (int i = 0; i < 3; i++) {
+            for (int side = 0; side < 2; side++) {
+                const vec3 p = side ? (vec3) {-fabsf(axes[i].x), -fabsf(axes[i].y), -fabsf(axes[i].z)} : axes[i];
+                lights[count++] = (BasicLight) {.type = BASIC_LIGHT_SPOT, .visible = 1, .color = {1.0f, 1.0f, 1.0f}, .intensity = 1.0f,
+                                                .angle = SPOT_ANGLE, .position = p, .target = {0.0f, 0.0f, 0.0f}};
+            }
+        }
     } else {
-        // DirectionalLight position (lightDistance * cos t, * sin t * sin e, * sin t * cos e), target the origin
-        vec3 dir = {cosf(SUN_YAW), sinf(SUN_YAW) * sinf(SUN_PITCH), sinf(SUN_YAW) * cosf(SUN_PITCH)};
-        const float length = sqrtf(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
-        dir.x /= length;
-        dir.y /= length;
-        dir.z /= length;
-        g_render_lighting.light_color = color_vec(SUN_COLOR, 1.0f);
+        // DirectionalLight at (lightDistance * cos t, * sin t * sin e, * sin t * cos e), target the origin
+        const vec3 position = {vs.sun_x, LIGHT_DISTANCE * sinf(SUN_YAW) * sinf(SUN_PITCH), LIGHT_DISTANCE * sinf(SUN_YAW) * cosf(SUN_PITCH)};
+        const vec4 sun = color_vec(SUN_COLOR, 1.0f);
+        g_render_lighting.light_color = sun;
         g_render_lighting.light_intensity = SUN_INTENSITY;
-        g_render_lighting.light_direction = dir;
+        g_render_lighting.light_direction = vec3_normalize(position);
     }
+    if (vs.fill_light) {
+        lights[count++] = (BasicLight) {.type = BASIC_LIGHT_DIRECTIONAL, .visible = 1, .color = {1.0f, 1.0f, 1.0f}, .intensity = FILL_INTENSITY,
+                                        .position = {3.0f, 1.0f, 0.0f}, .target = {0.0f, 0.0f, 0.0f}};
+    }
+    basic_lights_override(lights, count);
+}
 
-    if (vs.program) {
-        glUseProgram(vs.program);
-        g_active_shader = vs.program;
-        glUniform1i(glGetUniformLocation(vs.program, "viewer_lm"), phong ? 2 : 1);
-        glUniform1i(glGetUniformLocation(vs.program, "viewer_light_mode"), vs.light_mode == 1 ? 1 : vs.fill_light ? 2 : 0);
-        glUniform3f(glGetUniformLocation(vs.program, "viewer_light2_direction"), 3.0f, 1.0f, 0.0f);
-        glUniform3f(glGetUniformLocation(vs.program, "viewer_light2_color"), FILL_INTENSITY, FILL_INTENSITY, FILL_INTENSITY);
-    }
+static void lights_restore(const RenderLighting *saved) {
+    g_render_lighting = *saved;
+    basic_lights_override(NULL, -1);
 }
 
 // ---------------------------------------------------------------- camera / orbit controls
@@ -593,9 +474,21 @@ void vscene_orbit_key(const int key) {
 static void items_clear(void) {
     for (int i = 0; i < vs.item_count; i++) {
         scene_remove_mesh(vs.scene, vs.items[i]);
+        skin_fx_forget(vs.items[i]);
         mesh_fini(vs.items[i]);
     }
     vs.item_count = 0;
+    for (int i = 0; i < vs.model_count; i++) {
+        scene_remove_gltf(vs.scene, vs.models[i]);
+        skin_fx_forget_gltf(vs.models[i]);
+        gltf_instance_fini(vs.models[i]);
+    }
+    vs.model_count = 0;
+    for (int i = 0; i < vs.cube_count; i++) {
+        for (size_t k = 0; k < vs.cubes[i]->mesh_count; k++) scene_remove_mesh(vs.scene, vs.cubes[i]->meshes[k]);
+        color_cube_fini(vs.cubes[i]);
+    }
+    vs.cube_count = 0;
     for (int i = 0; i < vs.holder_count; i++) free(vs.holders[i]);
     vs.holder_count = 0;
 }
@@ -611,14 +504,115 @@ static MeshTransform *holder_new(MeshTransform *parent) {
 }
 
 static void item_add(Mesh *mesh) {
-    if (!mesh || vs.item_count >= VIEWER_MAX_ITEMS) return;
+    if (!mesh) return;
+    if (vs.item_count >= VIEWER_MAX_ITEMS) {
+        mesh_fini(mesh);
+        return;
+    }
     vs.items[vs.item_count++] = mesh;
     scene_add_mesh(vs.scene, mesh);
 }
 
+static void cube_add(ColorCube *cube) {
+    if (!cube) return;
+    if (vs.cube_count >= VIEWER_MAX_ITEMS) {
+        color_cube_fini(cube);
+        return;
+    }
+    vs.cubes[vs.cube_count++] = cube;
+    for (size_t k = 0; k < cube->mesh_count; k++) scene_add_mesh(vs.scene, cube->meshes[k]);
+}
+
+// rotateX, rotateY, rotateZ from identity: Euler XYZ (three.js Object3D order "XYZ")
+static void holder_rotate(MeshTransform *holder, const float rx, const float ry, const float rz) {
+    holder->rotation = (vec3) {rx, ry, rz};
+    holder->rotation_order = ROTATION_ORDER_INTRINSIC;
+}
+
+// translateZ: along the holder's own z axis, R(XYZ) * (0, 0, 1) = (sy, -sx cy, cx cy)
+static void holder_translate_z(MeshTransform *holder, const float d) {
+    const float cx = cosf(holder->rotation.x), sx = sinf(holder->rotation.x);
+    const float cy = cosf(holder->rotation.y), sy = sinf(holder->rotation.y);
+    holder->position.x += sy * d;
+    holder->position.y += -sx * cy * d;
+    holder->position.z += cx * cy * d;
+}
+
+// A store item's model src and texSrc as the showcase / cosmetic page load them:
+//   src    store.types[assetType || type || 0] + (assetType || type ? id : weapon) + (mid ? "_" + mid : "")
+//   texSrc mid ? getReModel : melee ? (pat ? tex : "melee/melee_<id>[_<tex>]") : type ? (tex ? "<src>_<tex>" : null)
+//          : tex || "weapons/skins/weapon_<weapon>_<id>"
+static void item_keys(const ViewerSkin *n, char *model, const size_t model_n, char *texture, const size_t texture_n) {
+    const int dir = n->asset_type ? n->asset_type : n->type;
+    const char *types = g_viewer_types[dir >= 0 && dir < g_viewer_type_count ? dir : 0];
+    if (n->mid >= 0) snprintf(model, model_n, "%s%d_%d", types, dir ? n->id : n->weapon, n->mid);
+    else snprintf(model, model_n, "%s%d", types, dir ? n->id : n->weapon);
+
+    texture[0] = 0;
+    if (n->mid >= 0) {
+        snprintf(texture, texture_n, "weapons/weapon_%d_%d", n->weapon, n->mid_t > 0 ? n->mid_t : n->mid); // getReModel
+    } else if (n->type == ITEM_MELEE) {
+        const int id = n->id > 0 ? n->id : 0;
+        if ((n->flags & VS_PAT) && n->tex) snprintf(texture, texture_n, "%s", n->tex);
+        else if (viewer_skin_tex_truthy(n)) snprintf(texture, texture_n, "melee/melee_%d_%s", id, n->tex);
+        else snprintf(texture, texture_n, "melee/melee_%d", id);
+    } else if (n->type) {
+        if (viewer_skin_tex_truthy(n)) snprintf(texture, texture_n, "%s%d_%s", types, n->id, n->tex);
+    } else if (viewer_skin_tex_truthy(n)) {
+        snprintf(texture, texture_n, "%s", n->tex);
+    } else {
+        snprintf(texture, texture_n, "weapons/skins/weapon_%d_%d", n->weapon, n->id);
+    }
+}
+
+// RENDER.loadMesh / loadAnimMesh of a store item into `holder` at `position`, turned rot_y about y,
+// scaled `scale`, with its material options and animations (skin_fx.c); the OBJ falls back to the
+// model's own texture (or none with noTex).
+static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 position, const float rot_y, const float scale,
+                       const int glow_text, const int emissive) {
+    char model[128], texture[192];
+    item_keys(n, model, sizeof(model), texture, sizeof(texture));
+
+    if ((n->flags & VS_HAS_ANIM) && vs.model_count < VIEWER_MAX_ITEMS) {
+        char rel[192];
+        snprintf(rel, sizeof(rel), "models/%s.%s", model, n->file_ext ? n->file_ext : "gltf");
+        char *path = concat(assets_path(), rel);
+        GltfInstance *instance = path ? gltf_instance_create(gltf_model_load(path), n->anim_s > 0.0f ? n->anim_s : 1.0f) : NULL;
+        free(path);
+        if (instance) {
+            instance->root.position = position;
+            instance->root.rotation.y = rot_y;
+            instance->root.scale = (vec3) {scale, scale, scale};
+            instance->root.parent = holder;
+            skin_fx_apply_gltf(instance, n, model);
+            vs.models[vs.model_count++] = instance;
+            scene_add_gltf(vs.scene, instance);
+            return;
+        }
+    }
+
+    Geometry *geometry = model_for(model);
+    if (!geometry) return;
+    unsigned int tex = 0;
+    if (!g_viewer.no_tex) {
+        tex = texture[0] ? texture_for(texture) : 0;
+        if (!tex) tex = texture_for(model);
+    }
+    BasicMaterial *material = basic_material_init();
+    if (!material) return;
+    material->texture = tex;
+    Mesh *mesh = mesh_init(geometry, (Material *) material);
+    mesh->transform.position = position;
+    mesh->transform.rotation.y = rot_y;
+    mesh->transform.scale = (vec3) {scale, scale, scale};
+    mesh->transform.parent = holder;
+    skin_fx_apply(mesh, n, texture[0] ? texture : NULL, model, glow_text, emissive);
+    item_add(mesh);
+}
+
 // player_update_meshes() (third person) poses legs[0..1] / crouched_legs[0..1] without checking
-// them, but a noLegs waist item (AP Rally, ...) builds none: give such a model empty stand-ins
-// (owned here, detached again before player_meshes_fini()).
+// them, but a noLegs waist item builds none: give such a model empty stand-ins (owned here,
+// detached again before player_meshes_fini()).
 static ColorCube g_no_legs[2];
 static ColorCube g_no_lower_legs[2];
 static Mesh g_no_leg_parts[4];
@@ -638,8 +632,8 @@ static void player_legs_stand_in(PlayerMesh *mesh, const int attach) {
 
 static void player_free(Player *player) {
     if (!player) return;
-    if (player->mesh) player_legs_stand_in(player->mesh, 0);
     if (player->mesh) {
+        player_legs_stand_in(player->mesh, 0);
         scene_remove_player_mesh(vs.scene, player->mesh, player->loadout_size);
         player_meshes_fini(player);
     }
@@ -653,176 +647,89 @@ static void player_free(Player *player) {
 static void scene_clear(void) {
     player_free(vs.player);
     vs.player = NULL;
-    player_free(vs.showcase_player);
-    vs.showcase_player = NULL;
+    player_free(vs.item_player);
+    vs.item_player = NULL;
     items_clear();
-    vs.anim_count = 0;
     vs.render_rotation = 0.0f;
+    vs.render_offset = (vec3) {0};
     vs.hide_primary_geo = 0;
+    vs.auto_rotate = 0;
 }
 
-// Every basic material in the scene draws with the viewer program (player_mesh.c makes them
-// with the stock one).
-static void scene_use_viewer_program(void) {
-    if (!vs.program) return;
-    for (size_t i = 0; i < vs.scene->mesh_count; i++) {
-        Material *material = vs.scene->meshes[i]->material;
-        if (material && material->vtable == &basic_material_vtable) material->program = vs.program;
+// A preview Player (new Player(-1), init(z, x, y, "preview"), the slots, setClass, generateMeshes(p,
+// false, true), swapWeapon(0), swapTime 0, updateMshClient) at `position`, its model added to the scene.
+static Player *preview_player(const int class_index, const int secondary, const PlayerCosmetics *cosmetics, const PlayerCosmeticsV7 *v7,
+                              const PlayerSkins skins, const int attach, const vec3 position, const float yaw) {
+    Player *player = player_init(&vs.game);
+    if (!player) return NULL;
+    player->uid = -1;
+    player->class_index = class_index >= 0 && class_index < (int) vs.game.class_count ? class_index : 0;
+    player->secondary_index = secondary;
+    player->cosmetics = *cosmetics;
+    player->cosmetics_v7 = *v7;
+    player->skins = skins;
+    player->attach_index = attach;
+    player_spawn(player); // loadout (also picks a spawn: the position is set below)
+    if (!player->loadout_size || !player->weapon) {
+        player_free(player);
+        return NULL;
     }
-}
-
-// the store item a loadout slot shows (generateMeshes: ae), NULL for {}
-static const ViewerSkin *slot_skin(const Player *player, const int slot, const int skins[2], const int melee_index) {
-    const Weapon *weapon = player->game->weapons[player->loadout[slot]];
-    const ViewerSkin *skin = viewer_skin(weapon->melee ? melee_index : slot < 2 ? skins[slot] : -1);
-    if (skin && !weapon->melee && skin->weapon - 1 != player->loadout[slot]) skin = NULL;
-    return skin;
-}
-
-// generateMeshes weapon loadMesh: src "weapons/<src>[_mid]", texSrc tex | weapons/skins/<src>_<id> |
-// getReModel, at (akimbo xOff * -2, yOff, zOff), scale mScl || weapon.scale, emissive for glow skins
-static void player_weapon_skin(Player *player, PlayerArms *arms, const Weapon *weapon, const ViewerSkin *skin, const int skin_index) {
-    if (skin->flags & VS_HAS_ANIM) return; // a GLTF remodel: player_mesh.c built it
-    char model[128], texture[192];
-    if (skin->mid >= 0) snprintf(model, sizeof(model), "weapons/%s_%d", weapon->src, skin->mid);
-    else snprintf(model, sizeof(model), "weapons/%s", weapon->src);
-
-    if (skin->mid >= 0) snprintf(texture, sizeof(texture), "weapons/weapon_%d_%d", skin->weapon, skin->mid_t > 0 ? skin->mid_t : skin->mid);
-    else if (viewer_skin_tex_truthy(skin)) snprintf(texture, sizeof(texture), "%s", skin->tex);
-    else if (skin->id >= 0) snprintf(texture, sizeof(texture), "weapons/skins/%s_%d", weapon->src, skin->id);
-    else snprintf(texture, sizeof(texture), "%s", model);
-
-    Geometry *geometry = model_for(model);
-    const unsigned int tex = g_viewer.no_tex ? 0 : texture_for(texture);
-    const int glow = skin_index >= 0 && skin_has_glow(skin);
-    const int emissive = glow && !(skin->flags & VS_NO_EMIS);
-    const float scale = skin->m_scl ? skin->m_scl : weapon->scale ? weapon->scale : 1.0f;
-
-    Mesh *meshes[2] = {arms->weapon_right, arms->weapon_left};
-    for (int j = 0; j < 2; j++) {
-        Mesh *mesh = meshes[j];
-        if (!mesh || !geometry) continue;
-        mesh_reskin(mesh, geometry, tex);
-        mesh->transform.position.y = skin->y_off;
-        mesh->transform.position.z = skin->z_off;
-        mesh->transform.scale = (vec3) {scale, scale, scale};
-        material_apply_skin((BasicMaterial *) mesh->material, skin, texture, model, glow, emissive);
-        anim_add(mesh, skin);
+    player->position = position;
+    player->last_position = position;
+    player->velocity = (vec3) {0};
+    player->direction = (vec2) {0.0f, yaw}; // v7 xDire is the yaw (objInstances.rotation.y)
+    player_generate_meshes(player, 0);
+    if (!player->mesh) {
+        player_free(player);
+        return NULL;
     }
-    (void) player;
+    scene_add_player_mesh(vs.scene, player->mesh, player->loadout_size);
+    player_legs_stand_in(player->mesh, 1);
+    player_swap_weapon(player, 0, 1, 1, 1);
+    player->swap_timer = 0.0f;
+    player_update_meshes(player, 1);
+    return player;
 }
 
-// the melee loadMesh: src melee/melee_<id>, texSrc pat ? tex : tex ? melee_<id>_<tex> : "", scale sclMlt || 0.9
-static void player_melee_skin(PlayerArms *arms, const ViewerSkin *skin) {
-    Mesh *mesh = arms->weapon_right;
-    if (!mesh || (skin->flags & VS_HAS_ANIM)) return; // a GLTF remodel: player_mesh.c built it
-
-    char model[64], texture[192];
-    const int id = skin->id > 0 ? skin->id : 0;
-    snprintf(model, sizeof(model), "melee/melee_%d", id);
-    if ((skin->flags & VS_PAT) && skin->tex) snprintf(texture, sizeof(texture), "%s", skin->tex);
-    else if (viewer_skin_tex_truthy(skin)) snprintf(texture, sizeof(texture), "melee/melee_%d_%s", id, skin->tex);
-    else snprintf(texture, sizeof(texture), "%s", model);
-
-    Geometry *geometry = model_for(model);
-    if (!geometry) return;
-    mesh_reskin(mesh, geometry, g_viewer.no_tex ? 0 : texture_for(texture));
-    const float scale = skin->scl_mlt ? skin->scl_mlt : 0.9f;
-    mesh->transform.scale = (vec3) {scale, scale, scale};
-    const int glow = skin_has_glow(skin);
-    material_apply_skin((BasicMaterial *) mesh->material, skin, texture, model, glow, glow);
-    anim_add(mesh, skin);
-}
-
-// back / waist / hat / face: what player_mesh.c leaves out of the store item (glow, spin, frames)
-static void player_cosmetic_extras(Player *player) {
-    static const int slots[4] = {PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BODY, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_FACE};
-    const int index[4] = {player->cosmetics.hat, player->cosmetics.body, player->cosmetics.waist, player->cosmetics.face};
-
-    for (int i = 0; i < 4; i++) {
-        Mesh *mesh = ((PlayerMesh *) player->mesh)->cosmetics[slots[i]];
-        const ViewerSkin *skin = viewer_skin(index[i]);
-        if (!mesh || !skin) continue;
-
-        char model[96], texture[128];
-        cosmetic_asset_keys(skin, model, sizeof(model), texture, sizeof(texture));
-
-        BasicMaterial *material = (BasicMaterial *) mesh->material;
-        const int glow = (skin->flags & VS_GLOW) != 0;
-        if (skin_has_glow(skin)) material_apply_skin(material, skin, texture, model, glow, 1);
-        if (g_viewer.no_tex) material->texture = 0;
-        anim_add(mesh, skin);
-    }
-}
-
-// Z(): a fresh preview player from the panel's values
+// f458(): a fresh preview player from the panel's values
 void vscene_rebuild_player(void) {
     if (!vs.ready) return;
     scene_clear();
 
     const ViewerState *e = &g_viewer.e;
-    Player *player = player_init(&vs.game);
-    if (!player) return;
-
-    player->uid = -1;
-    player->class_index = e->class_index.num;
-    if (player->class_index < 0 || player->class_index >= (int) vs.game.class_count) player->class_index = 0;
-    player->secondary_index = e->secondary.num;
-
     PlayerCosmetics cosmetics = PLAYER_COSMETICS_NONE;
+    PlayerCosmeticsV7 v7 = PLAYER_COSMETICS_V7_NONE;
     cosmetics.hat = e->hat.num;
-    cosmetics.body = e->back.num; // v3.1.1 viewer "Back" = store type 2 (v7 BODY)
+    cosmetics.body = e->body.num;
     cosmetics.waist = e->waist.num;
     cosmetics.face = e->face.num;
     cosmetics.dye = e->dye.num;
     for (int i = 0; i < g_viewer_skin_color_count; i++) {
         if (g_viewer_skin_colors[i].id == e->skin_col.num) cosmetics.skin_color = g_viewer_skin_colors[i].col;
     }
-    player->cosmetics = cosmetics;
+    v7.head = e->head.num;
+    v7.back = e->back.num;
+    v7.shoe = e->shoe.num;
+    v7.pet = e->pet.num;
+    v7.wrist = e->wrist.num;
+    // player.skins = [skinPrim, skinSec] (a blocked primary skin falls back to 0), meleeIndex
+    PlayerSkins skins = {e->skin_prim.num, e->skin_sec.num, e->melee.num};
+    const ViewerSkin *prim = viewer_skin(skins.primary);
+    if (prim && (prim->flags & VS_BLOCKED)) skins.primary = 0;
 
-    player_spawn(player);
-    if (!player->loadout_size || !player->weapon) {
-        player_free(player);
-        return;
-    }
-
-    // d.init(showPlayer ? 0 : 3, showPlayer ? 0 : -3, 3): init(z, x, y)
-    player->position = (vec3) {e->show_player ? 0.0f : -3.0f, 3.0f, e->show_player ? 0.0f : 3.0f};
-    player->last_position = player->position;
-    player->direction = (vec2) {0.0f, 0.0f};
-    // v7 hasAnim (GLTF) weapon / melee skins: player_mesh.c builds the remodel from player->skins;
-    // player_weapon_skin / player_melee_skin below (the OBJ reskin) leave them alone
-    const ViewerSkin *anim_skins[3] = {viewer_skin(e->skin_prim.num), viewer_skin(e->skin_sec.num), viewer_skin(e->melee.num)};
-    if (anim_skins[0] && (anim_skins[0]->flags & VS_HAS_ANIM)) player->skins.primary = e->skin_prim.num;
-    if (anim_skins[1] && (anim_skins[1]->flags & VS_HAS_ANIM)) player->skins.secondary = e->skin_sec.num;
-    if (anim_skins[2] && (anim_skins[2]->flags & VS_HAS_ANIM)) player->skins.melee = e->melee.num;
-    player_generate_meshes(player, 0);
-    if (!player->mesh) {
-        player_free(player);
-        return;
-    }
-
-    // d.skins = [skinPrim, skinSec] (a blocked primary skin falls back to 0)
-    int skins[2] = {e->skin_prim.num, e->skin_sec.num};
-    const ViewerSkin *prim = viewer_skin(skins[0]);
-    if (prim && (prim->flags & VS_BLOCKED)) skins[0] = 0;
-
-    for (int slot = 0; slot < player->loadout_size; slot++) {
-        PlayerArms *arms = ((PlayerMesh *) player->mesh)->arms ? ((PlayerMesh *) player->mesh)->arms[slot] : NULL;
-        if (!arms) continue;
-        const Weapon *weapon = vs.game.weapons[player->loadout[slot]];
-        const ViewerSkin *skin = slot_skin(player, slot, skins, e->melee.num);
-        if (skin && weapon->melee) player_melee_skin(arms, skin);
-        else if (skin && weapon->src) player_weapon_skin(player, arms, weapon, skin, slot < 2 ? skins[slot] : -1);
-    }
-    player_cosmetic_extras(player);
-
+    // init(showPlayer ? 0 : 3, showPlayer ? 0 : -3, 3): z, x, y
+    const vec3 position = {e->show_player ? 0.0f : -3.0f, 3.0f, e->show_player ? 0.0f : 3.0f};
+    Player *player = preview_player(e->class_index.num, e->secondary.num, &cosmetics, &v7, skins, e->attach.num, position, 0.0f);
+    if (!player) return;
     vs.player = player;
-    scene_add_player_mesh(vs.scene, player->mesh, player->loadout_size);
-    player_legs_stand_in(player->mesh, 1);
-    scene_use_viewer_program();
+    if (g_viewer.no_tex) {
+        for (size_t i = 0; i < vs.scene->mesh_count; i++) {
+            Material *material = vs.scene->meshes[i]->material;
+            if (material && material->vtable == &basic_material_vtable) ((BasicMaterial *) material)->texture = 0;
+        }
+    }
 
-    // swapWeapon(d, 0); swapTime = 0; T == -1: swapSecondary, T == 1: swapMelee
+    // swapWeapon(0); v5631 == -1: swapSecondary, == 1: swapMelee
     int slot = 0;
     if (g_viewer.swap == -1 && player->loadout_size > 2) slot = 1;
     if (g_viewer.swap == 1) slot = player->loadout_size - 1;
@@ -846,42 +753,46 @@ int vscene_player_is_melee(void) {
     return vs.player && vs.player->weapon && vs.player->weapon->melee;
 }
 
-// Krunker's lowerBody children: [0] body, [1] upperBody, then whichever of back / waist / hat /
-// face exist, in that order; the loop toggles children[2..5] with showBack / showWaist / showHat /
-// showFace by position, not by item (a missing back hands its flag to the next item).
+static void mesh_show(Mesh *mesh, const int visible) {
+    if (mesh) mesh->visible = visible;
+}
+
+static void cube_show(ColorCube *cube, const int visible) {
+    for (size_t k = 0; cube && k < cube->mesh_count; k++) cube->meshes[k]->visible = visible;
+}
+
+static void cosmetic_show(PlayerMesh *mesh, const int slot, const int visible) {
+    mesh_show(mesh->cosmetics[slot], visible);
+    if (mesh->cosmetic_models[slot]) gltf_instance_set_visible(mesh->cosmetic_models[slot], visible);
+}
+
+// f456's visibility pass, with the toggles doing what their names say (see the header)
 static void player_visibility(Player *player) {
     const ViewerState *e = &g_viewer.e;
     PlayerMesh *mesh = player->mesh;
     const int show = e->show_player;
 
     for (int i = 0; i < 2; i++) {
-        ColorCube *leg = mesh->legs[i];
-        for (size_t k = 0; leg && k < leg->mesh_count; k++) leg->meshes[k]->visible = show && e->show_legs && !e->crouch;
+        cube_show(mesh->legs[i], show && e->show_legs && !e->crouch);
         PlayerCrouchedLeg *crouched = mesh->crouched_legs[i];
         if (crouched) {
             const int v = show && e->show_legs && e->crouch;
-            if (crouched->upper) crouched->upper->visible = v;
-            if (crouched->joint) crouched->joint->visible = v;
-            for (size_t k = 0; crouched->lower && k < crouched->lower->mesh_count; k++) crouched->lower->meshes[k]->visible = v;
+            mesh_show(crouched->upper, v);
+            mesh_show(crouched->joint, v);
+            cube_show(crouched->lower, v);
         }
+        cosmetic_show(mesh, PLAYER_COSMETIC_SHOE_R + i, show && e->show_legs && !e->crouch && !mesh->shoe_hidden[i]);
     }
+    cube_show(mesh->body, show);
+    cube_show(mesh->head, show);
 
-    ColorCube *parts[2] = {mesh->body, mesh->head};
-    for (int p = 0; p < 2; p++) {
-        for (size_t k = 0; parts[p] && k < parts[p]->mesh_count; k++) parts[p]->meshes[k]->visible = show;
-    }
-
-    static const int order[4] = {PLAYER_COSMETIC_BODY, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_FACE};
-    const int flags[4] = {e->show_back, e->show_waist, e->show_hat, e->show_face};
-    int child = 0;
-    for (int i = 0; i < 4; i++) {
-        Mesh *item = mesh->cosmetics[order[i]];
-        GltfInstance *model = mesh->cosmetic_models[order[i]]; // v7 animated (GLTF) item
-        if (!item && !model) continue;
-        const int visible = show && flags[child++];
-        if (item) item->visible = visible;
-        gltf_instance_set_visible(model, visible);
-    }
+    cosmetic_show(mesh, PLAYER_COSMETIC_BODY, show && e->show_body);
+    cosmetic_show(mesh, PLAYER_COSMETIC_BACK, show && e->show_back);
+    cosmetic_show(mesh, PLAYER_COSMETIC_WAIST, show && e->show_waist);
+    cosmetic_show(mesh, PLAYER_COSMETIC_HAT, show && e->show_hat);
+    cosmetic_show(mesh, PLAYER_COSMETIC_HEAD, show && e->show_head);
+    cosmetic_show(mesh, PLAYER_COSMETIC_FACE, show && e->show_face);
+    pet_set_visible(mesh->pet, e->show_pet);
 
     for (int slot = 0; slot < player->loadout_size; slot++) {
         PlayerArms *arms = mesh->arms ? mesh->arms[slot] : NULL;
@@ -893,138 +804,183 @@ static void player_visibility(Player *player) {
         for (int j = 0; j < 2; j++) {
             PlayerArmMesh *arm = j ? arms->left : arms->right;
             if (!arm) continue;
-            if (arm->extender) arm->extender->visible = arm_parts;
-            if (arm->upper) arm->upper->visible = arm_parts;
-            if (arm->joint) arm->joint->visible = arm_parts;
-            for (size_t k = 0; arm->lower && k < arm->lower->mesh_count; k++) arm->lower->meshes[k]->visible = arm_parts;
+            mesh_show(arm->extender, arm_parts);
+            mesh_show(arm->upper, arm_parts);
+            mesh_show(arm->joint, arm_parts);
+            cube_show(arm->lower, arm_parts);
         }
-        if (arms->weapon_right) arms->weapon_right->visible = group && !(slot == 0 && vs.hide_primary_geo);
-        if (arms->weapon_left) arms->weapon_left->visible = group;
-        if (arms->attachment) {
-            const Weapon *weapon = vs.game.weapons[player->loadout[slot]];
-            arms->attachment->visible = group && weapon->has_attach && g_viewer.e.attach.num == 0;
+        const int weapon_visible = group && !(slot == 0 && vs.hide_primary_geo);
+        mesh_show(arms->weapon_right, weapon_visible);
+        mesh_show(arms->weapon_left, group);
+        for (int k = 0; k < 2; k++) {
+            if (arms->weapon_models[k]) gltf_instance_set_visible(arms->weapon_models[k], k ? group : weapon_visible);
         }
+        mesh_show(arms->charm_mount, group);
+        mesh_show(arms->charm, group);
+        mesh_show(arms->attachment, group);
+        mesh_show(arms->wrist, group && show && e->show_wrist);
+        if (arms->wrist_model) gltf_instance_set_visible(arms->wrist_model, group && show && e->show_wrist);
     }
 }
 
-// ---- F(C): a weapon skin or melee item on its own (the cosmetic=<index> render page)
+// ---- f447(C): one store item on its own (the cosmetic=<index> render page)
 
-static void item_holder_rotate(MeshTransform *holder, const float rx, const float ry, const float rz) {
-    holder->rotation = (vec3) {rx, ry, rz}; // rotateX, rotateY, rotateZ from identity = Euler XYZ
-    holder->rotation_order = ROTATION_ORDER_INTRINSIC;
+// vO203: the types the page shows on a class-9 preview Player wearing just that item:
+// [slot, camera x, xDire (the yaw), x offset, z rotation, sun x]
+typedef struct { int type; float camera_x, yaw, x_offset, z_rotation, sun_x; int has_sun_x; } CosmeticPose;
+static const CosmeticPose k_cosmetic_poses[] = {
+    {ITEM_HAT, 12.0f, (float) (-M_PI / 2 + M_PI / 6.5), 0.0f, 0.0f, 0.0f, 0},
+    {ITEM_HEAD, 12.0f, (float) (-M_PI / 2 + M_PI / 6.5), 0.0f, 0.0f, 0.0f, 0},
+    {ITEM_DYE, 26.0f, (float) (-M_PI / 4), 0.0f, 0.0f, 0.0f, 0},
+    {ITEM_FACE, 9.5f, (float) (-M_PI / 2), 0.15f, 0.0f, 100.0f, 1},
+    {ITEM_SHOE, 12.0f, (float) (-M_PI / 4), 6.5f, -0.3f, 0.0f, 0},
+};
+
+static const CosmeticPose *cosmetic_pose(const int type) {
+    for (size_t i = 0; i < sizeof(k_cosmetic_poses) / sizeof(k_cosmetic_poses[0]); i++) {
+        if (k_cosmetic_poses[i].type == type) return &k_cosmetic_poses[i];
+    }
+    return NULL;
 }
 
-static void holder_translate_z(MeshTransform *holder, const float d) {
-    // translateZ: along the holder's own z axis, R(XYZ) * (0, 0, 1)
-    const float cx = cosf(holder->rotation.x), sx = sinf(holder->rotation.x);
-    const float cy = cosf(holder->rotation.y), sy = sinf(holder->rotation.y);
-    const float cz = cosf(holder->rotation.z), sz = sinf(holder->rotation.z);
-    (void) cz;
-    (void) sz;
-    // Rx * Ry * Rz * (0,0,1): Rz leaves z, Ry -> (sy, 0, cy), Rx -> (sy, -sx*cy, cx*cy)
-    holder->position.x += sy * d;
-    holder->position.y += -sx * cy * d;
-    holder->position.z += cx * cy * d;
-}
-
-static void item_texture_key(const ViewerSkin *n, char *texture, const size_t size, const int full_store_types) {
-    const char *types = g_viewer_types[n->type >= 0 && n->type < g_viewer_type_count ? n->type : 0];
-    texture[0] = 0;
-    if (n->mid >= 0) {
-        snprintf(texture, size, "weapons/weapon_%d_%d", n->weapon, n->mid_t > 0 ? n->mid_t : n->mid); // getReModel
-    } else if (n->type == 3) {
-        if ((n->flags & VS_PAT) && n->tex) snprintf(texture, size, "%s", n->tex);
-        else if (viewer_skin_tex_truthy(n)) snprintf(texture, size, "melee/melee_%d_%s", n->id > 0 ? n->id : 0, n->tex);
-        else snprintf(texture, size, "melee/melee_%d", n->id > 0 ? n->id : 0);
-    } else if (n->type) {
-        if (viewer_skin_tex_truthy(n)) {
-            if (full_store_types) snprintf(texture, size, "%s%d_%s", types, n->id, n->tex);
-            else snprintf(texture, size, "%s%d_%s", n->type == 1 ? "hats/hat_" : "body/body_", n->id, n->tex);
-        }
-    } else if (viewer_skin_tex_truthy(n)) {
-        snprintf(texture, size, "%s", n->tex);
-    } else {
-        snprintf(texture, size, "weapons/skins/weapon_%d_%d", n->weapon, n->id);
+int vscene_cosmetic_shown(const int index) {
+    const ViewerSkin *n = viewer_skin(index);
+    if (!n) return 0;
+    if (n->weapon) return 1;
+    switch (n->type) {
+        case ITEM_TICKET: case ITEM_CHARM: case ITEM_PET: case ITEM_COLLECTIBLE: case ITEM_MELEE:
+        case ITEM_HAT: case ITEM_HEAD: case ITEM_FACE: case ITEM_DYE: case ITEM_SHOE:
+            return 1;
+        default:
+            return 0;
     }
 }
 
-static Mesh *item_mesh(const ViewerSkin *n, const char *model, const char *texture, MeshTransform *holder, const float rot_y, const float scale, const int phong) {
-    Geometry *geometry = model_for(model);
-    if (!geometry) return NULL;
-    const unsigned int tex = texture[0] && !g_viewer.no_tex ? texture_for(texture) : g_viewer.no_tex ? 0 : texture_for(model);
-    Mesh *mesh = mesh_new(geometry, tex);
-    if (!mesh) return NULL;
-
-    mesh->transform.rotation.y = rot_y;
-    mesh->transform.scale = (vec3) {scale, scale, scale};
-    mesh->transform.parent = holder;
-    const int glow = skin_has_glow(n);
-    const int glow_text = (!n->type || !(n->type < 3)) && glow;
-    material_apply_skin((BasicMaterial *) mesh->material, n, texture[0] ? texture : NULL, model, glow_text, glow);
-    anim_add(mesh, n);
-    (void) phong;
-    item_add(mesh);
-    return mesh;
-}
-
-static int item_shown(const ViewerSkin *n) {
-    return n && (n->weapon || n->type == 3 || (n->type == 4 && (n->flags & VS_IS_3D)));
-}
-
-void vscene_build_cosmetic(int index) {
+void vscene_build_cosmetic(const int index) {
     if (!vs.ready) return;
     scene_clear();
+    vscene_update_lights();
 
     const ViewerSkin *n = viewer_skin(index);
-    if (!item_shown(n)) return;
+    if (!vscene_cosmetic_shown(index)) return;
 
-    const int weapon_index = (n->weapon ? n->weapon : 1) - 1; // game.weapons[(n.weapon || 1) - 1]
+    // r = game.weapons[(weapon || 1) - 1] (expScale), i = type ? the item : store.previews[weapon]
     const ViewerPreview *preview = viewer_preview(n->weapon);
     float y_off = n->type ? n->y_off : preview->y_off;
     float x_off = n->type ? n->x_off : preview->x_off;
-    const float z_rota = n->type ? n->z_rota : preview->z_rota;
-    const float x_rot = n->type ? n->x_rot : preview->x_rot;
+    float z_rota = n->type ? n->z_rota : preview->z_rota;
+    float x_rot = n->type ? n->x_rot : preview->x_rot;
     const float i_scl = n->type ? n->scl : preview->scl;
-    float exp_scale = 1.0f;
+    float exp_scale = 0.0f; // r.expScale, 0 = none
 
-    if (n->type == 3) { // r.expScale per melee model and the item offsets F() adjusts
-        exp_scale = n->id == 8 ? 0.875f : n->id == 3 ? 0.8461538461538461f : n->id == 2 ? 0.875f : n->id == 1 ? 0.9f : 1.2f;
-        if (n->id == 3) {
+    if (n->type == ITEM_MELEE) {
+        const int id = n->id;
+        exp_scale = id == 8 ? 0.875f : id == 3 ? 0.8461538461538461f : id == 2 ? 0.875f : id == 1 ? 0.9f : 1.2f;
+        if (id == 3) {
             y_off = -2.0f;
             x_off = 0.0f;
         }
-        if (n->id == 12) x_off = -0.5f;
-        if (n->id >= 9 && n->id <= 12) y_off = -2.0f;
-        if (n->id == 0) exp_scale = 1.0f;
+        if (id == 12) x_off = -0.5f;
+        if (id >= 9 && id <= 12) y_off = -2.0f;
+        if (id == 33 || id == 34) y_off = -4.0f;
+        if (id == 65) y_off = -2.0f;
+        if (id == 67 || id == 71 || id == 70 || id == 76 || id == 77 || id == 78 || id == 80 || id == 84 || id == 85 || id == 92) exp_scale = 0.85f;
+        if (id == 86) exp_scale = 0.65f;
+        if (id == 93 || id == 95) exp_scale = 0.8f;
+        if (id == 82) x_off = 4.0f;
+        if (id == 59) {
+            exp_scale = 0.7f;
+            y_off = 1.5f;
+            x_off = -1.0f;
+            z_rota = 5.0f;
+            x_rot = 3.0f;
+        }
     }
-    (void) weapon_index;
+    if (n->weapon == 2 && n->mid == 2) { x_off += 1.5f; y_off += 0.5f; }
+    if (n->weapon == 2 && (n->mid == 5 || n->mid == 7)) { x_off -= 1.5f; y_off -= 0.5f; }
+    if (n->weapon == 22 && n->mid == 1) { exp_scale = 1.2f; x_off -= 4.5f; }
+    if (n->type == ITEM_COLLECTIBLE || n->type == ITEM_WRIST) { exp_scale = 1.4f; y_off -= 0.5f; }
+    if (n->weapon == 1 && n->mid == 15) { x_off -= 1.5f; y_off -= 0.5f; }
+    if (n->weapon == 1 && n->mid == 16) y_off -= 0.5f;
+    if (n->weapon == 11 && n->mid == 7) y_off = -1.0f;
+    if (n->weapon == 4 && n->mid == 11) x_off += 2.0f;
 
+    const CosmeticPose *pose = cosmetic_pose(n->type);
     MeshTransform *holder = holder_new(NULL);
     if (!holder) return;
-    holder->position = (vec3) {0.0f, 1.0f + y_off, x_off}; // genObj3D(0, 1 + yOff, xOff)
-    const int is3d = (n->flags & VS_IS_3D) != 0;
-    item_holder_rotate(holder,
-                       is3d ? 0.0f : (n->type == 3 ? 2.5f : 1.0f) * -0.25f,
-                       is3d ? 0.0f : (float) M_PI + 0.5f + z_rota,
-                       n->weapon == 6 || is3d ? 0.0f : -0.25f);
+    if (!pose) holder->position = (vec3) {0.0f, 1.0f + y_off, x_off}; // genObj3D(0, 1 + yOff, xOff)
 
-    char model[96], texture[192];
-    const char *types = g_viewer_types[n->type >= 0 && n->type < g_viewer_type_count ? n->type : 0];
-    if (n->mid >= 0) snprintf(model, sizeof(model), "%s%d_%d", types, n->type ? n->id : n->weapon, n->mid);
-    else snprintf(model, sizeof(model), "%s%d", types, n->type ? n->id : n->weapon);
-    item_texture_key(n, texture, sizeof(texture), 0);
+    if (n->type == ITEM_PET) {
+        holder_rotate(holder, 0.0f, (float) M_PI, 0.0f);
+    } else if (n->type == ITEM_WRIST) {
+        holder_rotate(holder, 0.0f, (float) M_PI + 0.5f + z_rota, 1.25f);
+    } else if (n->type == ITEM_CHARM) {
+        holder_rotate(holder, 0.0f, (float) M_PI * 1.75f, 0.0f);
+    } else if (!pose) {
+        holder_rotate(holder, (n->type == ITEM_MELEE ? 2.5f : 1.0f) * -0.25f, (float) M_PI + 0.5f + z_rota, n->weapon == 6 ? 0.0f : -0.25f);
+        if (n->type == ITEM_TICKET) {
+            // rotateX(-1) rotateY(-0.5) rotateZ(-0.15) on top: a child holder
+            holder = holder_new(holder);
+            if (!holder) return;
+            holder_rotate(holder, -1.0f, -0.5f, -0.15f);
+            exp_scale = 2.5f;
+        }
+    }
 
-    const float scale = (n->spn_scl ? n->spn_scl : i_scl ? i_scl : 1.0f) * 2.2f * exp_scale;
-    holder_translate_z(holder, model_center_x(model) * scale); // centerZ
-    item_mesh(n, model, texture, holder, (n->type && n->type != 3 ? (float) M_PI : (float) M_PI / 2.0f) + x_rot, scale, 1);
-    scene_use_viewer_program();
+    vec3 camera = {30.0f, 0.0f, 0.0f};
+    if (pose) {
+        // a class-9 preview Player wearing the item: init(0, -9.6 + pose x, 0), turned xDire, weaponGeos[0] hidden
+        if (pose->has_sun_x) vs.sun_x = pose->sun_x;
+        PlayerCosmetics cosmetics = PLAYER_COSMETICS_NONE;
+        PlayerCosmeticsV7 v7 = PLAYER_COSMETICS_V7_NONE;
+        if (n->type == ITEM_HAT) cosmetics.hat = index;
+        else if (n->type == ITEM_HEAD) v7.head = index;
+        else if (n->type == ITEM_DYE) cosmetics.dye = index;
+        else if (n->type == ITEM_FACE) cosmetics.face = index;
+        else if (n->type == ITEM_SHOE) v7.shoe = index;
+        vs.item_player = preview_player(9, 2, &cosmetics, &v7, PLAYER_SKINS_NONE, -1, (vec3) {-9.6f + pose->x_offset, 0.0f, 0.0f}, pose->yaw);
+        if (vs.item_player) ((PlayerMesh *) vs.item_player->mesh)->anchor->parent = holder;
+        holder->rotation.z = pose->z_rotation;
+        camera.x = pose->camera_x;
+    } else {
+        const float scale = (n->spn_scl ? n->spn_scl : i_scl ? i_scl : 1.0f) * 2.2f * (exp_scale > 0.0f ? exp_scale : 1.0f);
+        char model[128], texture[192];
+        item_keys(n, model, sizeof(model), texture, sizeof(texture));
+        if (!(n->flags & VS_HAS_ANIM)) holder_translate_z(holder, model_center_x(model) * scale); // centerZ
+        const int glow = (n->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+        item_build(n, holder, (vec3) {0}, (n->type && n->type != ITEM_MELEE ? (float) M_PI : (float) M_PI / 2.0f) + x_rot, scale,
+                   (!n->type || n->type >= 3) && glow, glow);
+    }
+
+    // the camera was aimed at the scene origin from x 30 at init; f447 only moves it along x
+    vs.camera.position = camera;
+    vs.camera.rotation = (vec3) {0.0f, (float) M_PI / 2.0f, 0.0f};
+    vs.target = (vec3) {0};
 }
 
-// ---- showcase=<index>
+// ---- showcase=<index>: the store's item view
+
+// genColorCube(1, 1, 1, [[hair, 0.2], [skin, 0.8]], 0) with the geometry scaled headScale and moved
+// down headScale / 2, the mesh scaled 2: a 4 x 4 x 4 head whose top is the holder's origin
+static MeshTransform *showcase_head(MeshTransform *holder, const int no_hair) {
+    MeshTransform *frame = holder_new(holder);
+    if (!frame) return NULL;
+    frame->scale = (vec3) {2.0f, 2.0f, 2.0f};
+    const float hs = game_constants.head_scale;
+    const ColorCubeSegment segments[2] = {{HAIR_COLOR, no_hair ? 0.0f : 0.2f, 1.0f}, {HEAD_SKIN_COLOR, 0.8f, 1.0f}};
+    ColorCube *cube = generate_color_cube_at(hs, hs, hs, segments, 2, no_hair ? 0.3f : 0.5f);
+    if (cube) {
+        cube->transform.position.y = -hs / 2.0f;
+        cube->transform.parent = frame;
+        cube_add(cube);
+    }
+    return frame;
+}
 
 void vscene_build_showcase(int index) {
     if (!vs.ready) return;
     scene_clear();
+    vscene_update_lights();
 
     const ViewerSkin *t = viewer_skin(index > 0 ? index : 0);
     if (!t) return;
@@ -1035,88 +991,131 @@ void vscene_build_showcase(int index) {
     const float x_rot = t->type ? t->x_rot : preview->x_rot;
     const float n_scl = t->type ? t->scl : preview->scl;
 
+    // v5797 = genObj3D(0, 1 + (HAT ? 0 : yOff), FACE / HAT ? 0 : xOff), turned PI + 0.5 + zRota (a dye -PI / 2)
     MeshTransform *holder = holder_new(NULL);
     if (!holder) return;
-    holder->position = (vec3) {0.0f, 1.0f + y_off, x_off};
-    if (t->type != 5) item_holder_rotate(holder, (float) -M_PI / 9.0f, (float) M_PI + 0.5f + z_rota, 0.0f);
+    holder->position = (vec3) {0.0f, 1.0f + (t->type == ITEM_HAT ? 0.0f : y_off), t->type != ITEM_FACE && t->type != ITEM_HAT ? x_off : 0.0f};
+    float yaw = t->type == ITEM_DYE ? (float) -M_PI / 2.0f : (float) M_PI + 0.5f + z_rota;
+    if (t->type == ITEM_FACE || t->type == ITEM_HAT || t->type == ITEM_HEAD) yaw += (float) M_PI / 2.0f; // rotateY(PI / 2) after
+    holder_rotate(holder, 0.0f, yaw, 0.0f);
 
     vec3 look = {0.0f, 0.0f, 0.0f};
-    if (t->type == 5) {
-        // a Runner (class 9) wearing the dye, init(0, -7, 0), its melee hidden
-        Player *player = player_init(&vs.game);
-        if (player) {
-            player->uid = -1;
-            player->class_index = 9;
-            player->secondary_index = 2;
-            player->cosmetics = PLAYER_COSMETICS_NONE;
-            player->cosmetics.dye = index;
-            player_spawn(player);
-            player->position = (vec3) {-7.0f, 0.0f, 0.0f}; // init(z 0, x -7, y 0)
-            player->direction = (vec2) {0.0f, 0.0f};
-            if (player->loadout_size) player_generate_meshes(player, 0);
-            if (player->mesh) {
-                ((PlayerMesh *) player->mesh)->anchor->parent = holder;
-                scene_add_player_mesh(vs.scene, player->mesh, player->loadout_size);
-                player_swap_weapon(player, 0, 1, 1, 1);
-                player->swap_timer = 0.0f;
-                player_update_meshes(player, 1);
-                PlayerArms *arms = ((PlayerMesh *) player->mesh)->arms ? ((PlayerMesh *) player->mesh)->arms[0] : NULL;
-                if (arms && arms->weapon_right) arms->weapon_right->visible = 0;
-                vs.showcase_player = player;
-                look = (vec3) {player->position.x, 0.0f, player->position.z};
-            } else {
-                player_free(player);
-            }
+    vs.auto_rotate = 1;
+    if (t->type == ITEM_DYE) {
+        // a class-9 preview Player wearing the dye, init(0, -7, 0), its melee hidden. v7.1.4 throws
+        // there (v5621.weaponGeos[0] is undefined: class 9's first weapon has no melee mesh), so its dye
+        // view is empty, and its camera would aim at the player's local position anyway. KrunkNative
+        // shows the player: the camera faces its middle from 12 units away and orbits it.
+        PlayerCosmetics cosmetics = PLAYER_COSMETICS_NONE;
+        const PlayerCosmeticsV7 v7 = PLAYER_COSMETICS_V7_NONE;
+        cosmetics.dye = index;
+        vs.item_player = preview_player(9, 2, &cosmetics, &v7, PLAYER_SKINS_NONE, -1, (vec3) {-7.0f, 0.0f, 0.0f}, 0.0f);
+        if (vs.item_player) {
+            ((PlayerMesh *) vs.item_player->mesh)->anchor->parent = holder;
+            // the holder turns -PI / 2 about y: local (-7, 0, 0) is (0, 0, -7) from its origin
+            const vec3 middle = {holder->position.x, holder->position.y + game_constants.player_height / 2.0f, holder->position.z - 7.0f};
+            camera_place((vec3) {middle.x + 12.0f, middle.y, middle.z}, middle);
+            return;
         }
-    } else if (t->type == 4) {
-        // a 9 x 7.2 plane with the spray, turned PI * 1.1
-        char key[64];
-        snprintf(key, sizeof(key), "sprays/%d", t->id > 0 ? t->id : 0);
-        Mesh *mesh = mesh_new(create_plane_geo(), texture_for(key));
-        if (mesh) {
-            BasicMaterial *material = (BasicMaterial *) mesh->material;
+    } else if (t->type == ITEM_SPRAY) {
+        // a 9 x 9 plane with the spray (depthWrite false, transparent, its effects), on a brick_0_3
+        // backing 0.1 deep, turned PI * 1.1
+        MeshTransform *plane = holder_new(holder);
+        if (!plane) return;
+        plane->scale = (vec3) {9.0f, 9.0f, 1.0f};
+        plane->rotation.y = (float) M_PI * 1.1f;
+        BasicMaterial *material = basic_material_init();
+        if (material) {
+            char key[64];
+            snprintf(key, sizeof(key), "sprays/%d", t->id > 0 ? t->id : 0);
+            material->texture = texture_for(key);
             material->base.transparent = 1;
             material->no_depth_write = 1;
-            material->uv_mode = BASIC_UV_MESH;
-            mesh->transform.scale = (vec3) {9.0f, 7.2f, 1.0f};
-            mesh->transform.rotation.y = (float) M_PI * 1.1f;
-            mesh->transform.parent = holder;
-            anim_add(mesh, t);
-            item_add(mesh);
+            material->double_sided = 0; // FrontSide: the cube's back face (mirrored UVs) is culled
+            if (t->opacity > 0.0f) material->color.w = t->opacity;
+            Mesh *quad = mesh_init(create_cube_geo(), (Material *) material); // the unit quad: a cube's front face, 0 deep
+            quad->transform.scale = (vec3) {1.0f, 1.0f, 0.0001f};
+            quad->transform.position.y = -0.5f;
+            quad->transform.parent = plane;
+            skin_fx_apply(quad, t, key, key, (t->flags & (VS_GLOW | VS_SAME_GLOW)) != 0, (t->flags & (VS_GLOW | VS_SAME_GLOW)) != 0);
+            item_add(quad);
         }
+        BasicMaterial *brick = basic_material_init();
+        if (brick) {
+            brick->texture = texture_for("brick_0_3");
+            Mesh *backing = mesh_init(create_cube_geo(), (Material *) brick);
+            backing->transform.scale = (vec3) {1.0f, 1.0f, 0.01f};
+            backing->transform.position = (vec3) {0.0f, -0.5f, -0.1f};
+            backing->transform.parent = plane;
+            item_add(backing);
+        }
+    } else if (t->type == ITEM_FACE) {
+        // a 4 x 4 x 4 head (genColorCube(headScale * 2, ...)) with the face at (0, 0, -sitOffZ), scale
+        // sclMlt * 0.5 inside it; no auto-rotation
+        MeshTransform *head = holder_new(holder);
+        if (!head) return;
+        const float size = game_constants.head_scale * 2.0f;
+        head->scale = (vec3) {size, size, size};
+        const ColorCubeSegment segments[2] = {{HAIR_COLOR, 0.2f, 1.0f}, {HEAD_SKIN_COLOR, 0.8f, 1.0f}};
+        ColorCube *cube = generate_color_cube_at(1.0f, 1.0f, 1.0f, segments, 2, 0.5f);
+        if (cube) {
+            cube->transform.parent = head;
+            cube_add(cube);
+        }
+        const int glow = (t->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+        item_build(t, head, (vec3) {0.0f, 0.0f, -t->sit_off_z}, (float) M_PI / 2.0f, (t->scl_mlt ? t->scl_mlt : 1.0f) * 0.5f,
+                   (t->flags & VS_GLOW) != 0, glow);
+        vs.auto_rotate = 0;
+    } else if (t->type == ITEM_HAT || t->type == ITEM_HEAD) {
+        // noHead: the item alone, scale (spnScl || scl || 1) * 2; else on the head at (0, -sitOff, -sitOffZ),
+        // scale sclMlt * 2.1
+        const int no_head = (t->flags & VS_NO_HEAD) != 0;
+        MeshTransform *frame = no_head ? holder : showcase_head(holder, (t->flags2 & VS2_NO_HAIR) != 0);
+        if (!frame) return;
+        const vec3 at = no_head ? (vec3) {0} : (vec3) {0.0f, -t->sit_off, -t->sit_off_z};
+        const float scale = no_head ? (t->spn_scl ? t->spn_scl : n_scl ? n_scl : 1.0f) * 2.0f : (t->scl_mlt ? t->scl_mlt : 1.0f) * 2.1f;
+        const int glow = (t->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+        item_build(t, frame, at, (float) M_PI / 2.0f, scale, (t->flags & VS_GLOW) != 0, glow);
     } else {
-        char model[96], texture[192];
-        const char *types = g_viewer_types[t->type >= 0 && t->type < g_viewer_type_count ? t->type : 0];
-        if (t->mid >= 0) snprintf(model, sizeof(model), "%s%d_%d", types, t->type ? t->id : t->weapon, t->mid);
-        else snprintf(model, sizeof(model), "%s%d", types, t->type ? t->id : t->weapon);
-        item_texture_key(t, texture, sizeof(texture), 1);
-        item_mesh(t, model, texture, holder, (t->type && t->type != 3 ? (float) M_PI : (float) M_PI / 4.0f) + x_rot,
-                  (t->spn_scl ? t->spn_scl : n_scl ? n_scl : 1.0f) * 2.0f, 1);
+        // any other model at the holder's origin, turned (type && !melee ? PI : PI / 4) + xRot, scale
+        // (spnScl || scl || 1) * 2; glowText = emissive = glow || sameGlow (emissive #fff)
+        const int glow = (t->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+        item_build(t, holder, (vec3) {0}, (t->type && t->type != ITEM_MELEE ? (float) M_PI : (float) M_PI / 4.0f) + x_rot,
+                   (t->spn_scl ? t->spn_scl : n_scl ? n_scl : 1.0f) * 2.0f, glow, glow);
     }
 
-    scene_use_viewer_program();
     camera_place((vec3) {12.0f, 0.0f, 0.0f}, look);
 }
 
-// renderHat / renderFace / renderBack / renderWaist / renderDye: camera (0, 10|11, -15) looking
-// at (0, 6, 0), the model turned, the primary weapon mesh hidden
+// renderHat / Head / Face / Body / Back / Waist / Shoes / Dye / Pet: camera (0, 10, -15) looking at
+// (0, 6, 0) (dye: from y 11; shoes: (0, 6, -11) at the origin with the model at (0, 2, -2)), the
+// model turned, the primary weapon's melee mesh hidden
 void vscene_camera_render_pose(const int what) {
     const ViewerSkin *skin = NULL;
     float rotation = 0.0f;
-    float camera_y = 10.0f;
+    vec3 camera = {0.0f, 10.0f, -15.0f}, target = {0.0f, 6.0f, 0.0f};
+    vs.render_offset = (vec3) {0};
     switch (what) {
-        case 1: rotation = (float) M_PI / 6.5f; break;                                       // hat
-        case 7: rotation = 0.0f; break;                                                      // face
-        case 2: skin = viewer_skin(g_viewer.e.back.num);                                     // back
-            rotation = (float) M_PI / (skin && skin->prev_rot ? skin->prev_rot : 1.0f); break;
-        case 6: skin = viewer_skin(g_viewer.e.waist.num);                                    // waist
+        case ITEM_HAT: case ITEM_HEAD: case ITEM_PET: rotation = (float) M_PI / 6.5f; break;
+        case ITEM_FACE: rotation = 0.0f; break;
+        case ITEM_BODY: case ITEM_BACK: // PI / (prevRot == null ? 1 : prevRot) (the table has no prevRot 0 on these)
+            skin = viewer_skin(what == ITEM_BODY ? g_viewer.e.body.num : g_viewer.e.back.num);
+            rotation = (float) M_PI / (skin && skin->prev_rot != 0.0f ? skin->prev_rot : 1.0f);
+            break;
+        case ITEM_WAIST: skin = viewer_skin(g_viewer.e.waist.num);
             rotation = (float) M_PI / (skin ? (skin->prev_rot ? skin->prev_rot : 1.0f) : 4.0f); break;
-        case 5: rotation = (float) M_PI / 4.0f; camera_y = 11.0f; break;                     // dye
+        case ITEM_SHOE:
+            rotation = (float) M_PI / 4.0f;
+            vs.render_offset = (vec3) {0.0f, 2.0f, -2.0f};
+            camera = (vec3) {0.0f, 6.0f, -11.0f};
+            target = (vec3) {0};
+            break;
+        case ITEM_DYE: rotation = (float) M_PI / 4.0f; camera.y = 11.0f; break;
         default: break;
     }
     vs.render_rotation = rotation;
     vs.hide_primary_geo = 1;
-    camera_place((vec3) {0.0f, camera_y, -15.0f}, (vec3) {0.0f, 6.0f, 0.0f});
+    camera_place(camera, target);
 }
 
 void vscene_canvas_rect(float *x, float *y, float *w, float *h) {
@@ -1130,36 +1129,9 @@ void vscene_canvas_rect(float *x, float *y, float *w, float *h) {
 
 // ---------------------------------------------------------------- per frame
 
-static void anims_tick(const float dt) {
-    vs.puls_val += dt * PULSE_SPEED;
-    for (int i = 0; i < vs.anim_count; i++) {
-        ViewerAnim *anim = &vs.anims[i];
-        if (anim->frames > 0 && anim->frame_t > 0.0f) {
-            anim->frame_left -= dt;
-            if (anim->frame_left <= 0.0f) {
-                anim->frame_left = anim->frame_t;
-                anim->frame = (anim->frame + 1) % anim->frames;
-                anim->material->texture_offset.x = (float) anim->frame; // offset.x = cur / num (repeat units)
-            }
-        }
-        if (anim->mov_t) {
-            const float repeat = anim->material->texture_repeat.x ? anim->material->texture_repeat.x : 1.0f;
-            anim->material->texture_offset.x += anim->mov_t * dt / repeat;
-        }
-        if (anim->puls_t) {
-            anim->material->emissive.w = (sinf(vs.puls_val) / 2.0f + 0.5f) * 1.5f;
-        }
-        if (anim->r_anim) {
-            vec3 *rotation = &anim->mesh->transform.rotation;
-            if (anim->r_axis == 'x') rotation->x += anim->r_anim * dt;
-            else if (anim->r_axis == 'z') rotation->z += anim->r_anim * dt;
-            else rotation->y += anim->r_anim * dt;
-        }
-    }
-}
-
-void vscene_tick(const float dt) {
+void vscene_tick(float dt) {
     if (!vs.ready) return;
+    if (g_viewer.freeze) dt = 0.0f;
     Player *player = vs.player;
 
     if (player && player->mesh) {
@@ -1174,16 +1146,24 @@ void vscene_tick(const float dt) {
         }
         player->crouch_val = g_viewer.e.crouch ? 1.0f : 0.0f;
         player->direction.y = vs.render_rotation;
+        const vec3 base = {g_viewer.e.show_player ? 0.0f : -3.0f, 3.0f, g_viewer.e.show_player ? 0.0f : 3.0f};
+        player->position = (vec3) {base.x + vs.render_offset.x, base.y + vs.render_offset.y, base.z + vs.render_offset.z};
         player_update_meshes(player, 1);
         player_visibility(player);
     }
-    if (vs.showcase_player && vs.showcase_player->mesh) {
-        player_update_meshes(vs.showcase_player, 1);
-        const PlayerMesh *showcase_mesh = vs.showcase_player->mesh;
-        PlayerArms *arms = showcase_mesh->arms ? showcase_mesh->arms[0] : NULL;
-        if (arms && arms->weapon_right) arms->weapon_right->visible = 0;
+    if (vs.item_player && vs.item_player->mesh) {
+        player_update_meshes(vs.item_player, 1);
+        const PlayerMesh *item_mesh = vs.item_player->mesh;
+        PlayerArms *arms = item_mesh->arms ? item_mesh->arms[0] : NULL;
+        if (arms && arms->weapon_right) arms->weapon_right->visible = 0; // weaponGeos[0].visible = false
+        if (arms && arms->weapon_models[0]) gltf_instance_set_visible(arms->weapon_models[0], 0);
     }
-    anims_tick(dt);
+    const double now = gltf_clock();
+    for (int i = 0; i < vs.model_count; i++) gltf_instance_update(vs.models[i], now);
+    // Game.update -> RENDER.render(delta): the material animations (textureAnim is on in the viewer)
+    skin_fx_tick(dt, 1, client_render_settings()->lighting == 0);
+    // OrbitControls.autoRotate (the showcase's 120 Hz update)
+    if (vs.auto_rotate && g_viewer.showcase_set && dt > 0.0f && vs.orbit_state < 0) orbit_apply(-ORBIT_AUTO_ROTATE_SPEED * dt, 0.0f, 1.0f, (vec3) {0});
 }
 
 static void scene_draw(const int x, const int y, const int w, const int h) {
@@ -1201,9 +1181,9 @@ static void scene_draw(const int x, const int y, const int w, const int h) {
     glEnable(GL_BLEND);
 
     RenderLighting saved;
-    lights_apply(&saved, g_viewer.cosmetic_set || g_viewer.showcase_set);
+    lights_apply(&saved);
     scene_render(vs.scene, &vs.camera);
-    g_render_lighting = saved;
+    lights_restore(&saved);
 
     glDisable(GL_SCISSOR_TEST);
 }
@@ -1231,6 +1211,18 @@ void vscene_render(const int fb_w, const int fb_h) {
     const int y = fb_h - (int) lroundf(cy * scale) - h;
     scene_draw(x, y, w, h);
 
+    glViewport(0, 0, fb_w, fb_h);
+    glEnable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+}
+
+void vscene_render_rect(const int x, const int y, const int w, const int h, const int fb_w, const int fb_h) {
+    if (!vs.ready || w <= 0 || h <= 0) return;
+    // over the composited page with a transparent background (setClearColor(0, 0)); the
+    // framebuffer's alpha stays the page's (as client_class_preview_render keeps it)
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    scene_draw(x, y, w, h);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glViewport(0, 0, fb_w, fb_h);
     glEnable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
@@ -1386,11 +1378,29 @@ int vscene_update_mesh_obj(const char *key, const char *obj_path) {
     return ok;
 }
 
+// updateMesh(key, data, "gltf" | "glb"): the animated model loadAnimMesh("<key>.<ext>") finds
+// next (v7 parses into its vA331[key + ext] cache). v7 reads a picked .glb as text, which
+// breaks it; here GLB works too.
+int vscene_update_mesh_gltf(const char *key, const char *file_path, const char *ext) {
+    if (!strncmp(key, "event_0", 7)) return 0;
+    char dotted[16];
+    snprintf(dotted, sizeof(dotted), ".%s", ext);
+    char *path = asset("models", key, dotted);
+    if (!path) return 0;
+    const int ok = gltf_model_override(path, file_path);
+    if (ok) override_note(path, 2);
+    printf("[viewer] updateMesh %s.%s %s\n", key, ext, ok ? "ok" : "failed");
+    free(path);
+    return ok;
+}
+
 // RENDER.reset(): drop the caches, so the next build loads the files again
 void vscene_reset_overrides(void) {
     for (int i = 0; i < vs.override_count; i++) {
         ViewerOverride *o = &vs.overrides[i];
-        if (o->is_model) {
+        if (o->is_model == 2) {
+            gltf_model_restore(o->path);
+        } else if (o->is_model) {
             ensure_asset_file(o->path);
             FILE *file = fopen(o->path, "rb");
             if (file) {
@@ -1453,13 +1463,14 @@ int vscene_init(void) {
         return 0;
     }
 
-    vs.program = viewer_program_create();
     vs.gradient_program = link_program(GRADIENT_VERT, GRADIENT_FRAG);
     glGenVertexArrays(1, &vs.empty_vao);
+    if (g_viewer.freeze) gltf_set_clock_override(0.0); // clips, pets and ShaderToy time at their start
 
     vs.camera.zoom = 1.0f;
+    vscene_update_lights();
     vscene_camera_player(1);
-    if (g_viewer.cosmetic_set) camera_place((vec3) {30.0f, 0.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.0f}); // g.lookAt(v.position)
+    if (g_viewer.cosmetic_set) camera_place((vec3) {30.0f, 0.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.0f}); // lookAt(scene.position)
     vs.ready = 1;
     return 1;
 }
@@ -1476,15 +1487,11 @@ void vscene_fini(void) {
     free(vs.game.weapons);
     free(vs.game.classes);
     cJSON_Delete(vs.map_json);
-    if (vs.program) {
-        if (g_active_shader == vs.program) g_active_shader = 0;
-        gl_uniform_forget_program(vs.program);
-        glDeleteProgram(vs.program);
-    }
     if (vs.gradient_program) {
         if (g_active_shader == vs.gradient_program) g_active_shader = 0;
         glDeleteProgram(vs.gradient_program);
     }
     if (vs.empty_vao) glDeleteVertexArrays(1, &vs.empty_vao);
+    if (g_viewer.freeze) gltf_set_clock_override(-1.0);
     memset(&vs, 0, sizeof(vs));
 }

@@ -54,6 +54,12 @@ typedef struct GltfInstance {
 // NULL when the file is missing or cannot be used. Models stay cached for the process.
 GltfModel *gltf_model_load(const char *path);
 int gltf_model_animated(const GltfModel*); // has animations (clips)
+// The viewer's imports (v7 RENDER.updateMesh(key, data, "gltf" | "glb")): from now on
+// gltf_model_load(path) answers the model parsed from `source`; the model `path` had stays alive
+// for the instances that use it. 0 when `source` cannot be loaded (nothing changes).
+// gltf_model_restore(path) brings the file's own model back (RENDER.reset()).
+int gltf_model_override(const char *path, const char *source);
+void gltf_model_restore(const char *path);
 
 // A new copy of the model's scene: meshes, node transforms and animation state.
 // time_scale: animS (1 = the clips' own speed). NULL on failure.

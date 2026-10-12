@@ -1,0 +1,24 @@
+# Viewer render scenarios (WP-F): name | viewer.html query | max RMSE (0..1) against
+# doc/ref/krunker-v7.1.4/viewer/<name>.png (tools/kref/viewer-ref.js, 800x600, frozen clock)
+# [| dat.gui actions after the load: viewer-ref.js GUI_ACTIONS / client_bin KRUNKNATIVE_VIEWER_GUI].
+# The v7.1.4 dye showcase throws (weaponGeos[0] undefined) and renders nothing: dyes are checked
+# on the cosmetic page instead.
+showcase-pet|showcase=2964|0.03
+showcase-hat|nobg&showcase=111|0.04
+showcase-head|showcase=116|0.03
+showcase-face|showcase=6438|0.04
+showcase-spray|showcase=2482|0.04
+showcase-back|showcase=246|0.03
+showcase-wrist-gltf|showcase=4249|0.05
+showcase-weapon|showcase=13|0.04
+cosmetic-hat|cosmetic=111|0.03
+cosmetic-head|cosmetic=116|0.03
+cosmetic-face|cosmetic=6438|0.03
+cosmetic-dye|cosmetic=1069|0.03
+cosmetic-shoe|cosmetic=2083|0.03
+cosmetic-pet|cosmetic=2964|0.03
+cosmetic-melee|cosmetic=1402|0.03
+cosmetic-weapon|cosmetic=13|0.04
+player-all-slots|hat=244&body=250&back=246&waist=6407&shoe=2083&pet=2964&face=6439&dye=1024&wrist=4249|0.05
+dev-hat-config|dev&hideWep|0.04|Hat=6343;Hat Config/sitOff=2.5;Hat Config/sclMlt=0.9;Hat Config/Glow=true
+dev-dye-config|dev|0.05|Dye=6437;Dye Config/Shirt=#00ff00;Dye Config/Pants=#2040c0;Primary Skin=6000;Primary Config/Glow=true

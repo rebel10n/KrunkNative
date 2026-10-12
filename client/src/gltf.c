@@ -45,6 +45,8 @@ typedef struct {
 
 struct GltfModel {
     char *path;
+    int shadowed;    // a gltf_model_override replaced it: lookups skip it (instances keep it)
+    int is_override; // loaded by gltf_model_override for another file's path
     cgltf_data *data;
     GltfPrimitive *primitives;
     size_t primitive_count;
@@ -562,7 +564,7 @@ static int extension_supported(const char *name) {
 GltfModel *gltf_model_load(const char *path) {
     if (!path) return NULL;
     for (GltfModel *m = g_gltf_models; m; m = m->next)
-        if (!strcmp(m->path, path)) return m->data ? m : NULL;
+        if (!m->shadowed && !strcmp(m->path, path)) return m->data ? m : NULL;
 
     GltfModel *model = calloc(1, sizeof(GltfModel));
     if (!model) return NULL;
@@ -657,6 +659,34 @@ GltfModel *gltf_model_load(const char *path) {
     }
     glBindVertexArray(0);
     return model;
+}
+
+int gltf_model_override(const char *path, const char *source) {
+    if (!path || !source) return 0;
+    // a fresh parse of `source` (a cached copy of it would be the model of an earlier import)
+    for (GltfModel *m = g_gltf_models; m; m = m->next)
+        if (!m->shadowed && !strcmp(m->path, source)) m->shadowed = 1;
+    GltfModel *fresh = gltf_model_load(source);
+    if (!fresh) return 0;
+
+    const size_t length = strlen(path);
+    char *renamed = malloc(length + 1);
+    if (!renamed) return 0;
+    memcpy(renamed, path, length + 1);
+    for (GltfModel *m = g_gltf_models; m; m = m->next)
+        if (m != fresh && !m->shadowed && !strcmp(m->path, path)) m->shadowed = 1;
+    free(fresh->path);
+    fresh->path = renamed;
+    fresh->is_override = 1;
+    return 1;
+}
+
+void gltf_model_restore(const char *path) {
+    if (!path) return;
+    for (GltfModel *m = g_gltf_models; m; m = m->next) {
+        if (strcmp(m->path, path) != 0) continue;
+        m->shadowed = m->is_override; // overrides out of the way for good, the original back
+    }
 }
 
 int gltf_model_animated(const GltfModel *model) {

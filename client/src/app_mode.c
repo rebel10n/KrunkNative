@@ -9,6 +9,7 @@
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h> // menu_close_window (Test Map) // html_storage_get/set (knTestMap)
+#include <viewer_embed.h> // the hub's item view showcase
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -573,7 +574,10 @@ int app_mode_frame(Client *client, const float now, const float delta) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     input_script_page_tick(client); // KRUNKNATIVE_INPUT_SCRIPT on a page (keys / mouse / shot)
     if (g_app.entered && g_app.page && g_app.page->tick) g_app.page->tick(client, now, delta);
-    if (!debug_capture_hide_ui()) html_ui_render(client->ui);
+    if (!debug_capture_hide_ui()) {
+        html_ui_render(client->ui);
+        viewer_embed_frame(client, delta); // the hub's item view showcase iframe (no-op on the viewer page)
+    }
     input_script_page_frame_end(client, delta);
     debug_capture_frame_end(client);
     return 1;

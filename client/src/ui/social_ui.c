@@ -4197,8 +4197,9 @@ H(h_switch_names) {
     return 1;
 }
 
-// viewItem(index, mode): the item popup. The 3D showcase iframe
-// (viewer.html?nobg&showcase=<i>) has no embedded viewer natively: its 2D preview instead.
+// viewItem(index, mode): the item popup with v7's 3D showcase iframe
+// (viewer.html?nobg&showcase=<i>; natively drawn into the iframe's box by viewer_embed.h),
+// a player card's thumbnail instead.
 H(h_view_item) {
     UNUSED;
     const int index = (int) arg_n(args, argc, 0, -1);
@@ -4227,7 +4228,8 @@ H(h_view_item) {
     sb_append(&sb, "</div>");
     if ((sk->seas ? sk->seas : 1) != g_viewer_current_season) sb_append(&sb, "<div class='itemViewSea'>Vaulted</div>");
     else if (sk->flags & VS_BLOCKED) sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
-    sb_appendf(&sb, "<img style='width: 100%%;height: 450px;border:none;margin-top:10px;object-fit:contain;' src='%s'>", url);
+    if (sk->type == 16) sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url); // PLAYER_CARD thumbnail
+    else sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d'></iframe>", index);
     if ((int) arg_n(args, argc, 1, 0) == 2) sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openViewer(%d)'>Open Model Viewer</div>", index);
     else sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openSales(%d)'>More Information</div>", index);
     char *html = sb_finish(&sb);

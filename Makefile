@@ -168,6 +168,9 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 # work after a `make HTML_ENGINE=OFF`.
 
 .PHONY: ui-test ui-import assets-import uidiff
+viewer-diff: build ## Viewer render scenarios vs the v7.1.4 viewer captures (doc/ref/krunker-v7.1.4/viewer, headless; EGL_DEVICE=)
+	EGL_DEVICE=$(or $(EGL_DEVICE),nvidia) tools/kref/viewer-diff.sh $(DEBUG_DIR)
+
 gltf-test: build ## GLTF loader on v7 animated store models via the pet path, pets.js follow AI, skin animations (headless GL)
 	env -u DISPLAY -u WAYLAND_DISPLAY ./$(DEBUG_DIR)/gltf_test --headless
 
@@ -182,7 +185,7 @@ ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon li
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: assets-import-v7 assets-check-v7 gltf-test
+.PHONY: assets-import-v7 assets-check-v7 gltf-test viewer-diff
 assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js

@@ -288,6 +288,9 @@ int basic_lights_add(const BasicLight *light);              // handle > 0, 0 = l
 // Water's oblique near plane), fragments with dot(n, p) + d < 0 are discarded; NULL = off.
 void basic_material_set_clip_plane(const float plane[4]);
 void basic_lights_update(int handle, const BasicLight *light);
+// WP-F (the viewer page): while count >= 0, draws take exactly `lights` (copied, up to
+// BASIC_MAX_LIGHTS) instead of the registered map lights; count < 0 goes back to the list.
+void basic_lights_override(const BasicLight *lights, int count);
 void basic_lights_remove(int handle);
 
 typedef enum {
@@ -328,6 +331,18 @@ typedef struct {
     size_t mesh_count;
     Mesh **meshes;
 } ColorCube;
+
+// playerMesh.js genCube / render.js genColorCube: a width x height x length box of stacked colour
+// segments (heights in units of `height`) stacking down from top = 0.5 + yOffset (genColorCube's
+// offset); a segment of height 0 is skipped (v7 segment[5]: noHair, noBody, legLen). player_mesh.c
+typedef struct {
+    int color;
+    float height;
+    float scale;
+} ColorCubeSegment;
+ColorCube *generate_color_cube_at(float width, float height, float length, const ColorCubeSegment *segments, size_t segment_count, float top);
+void color_cube_fini(ColorCube *cube); // its meshes (and their skin effects), the cube
+vec4 krunker_get_color(int hex); // geos.js getColor(colr): the colour with its HSL saturation x1.5 (player_mesh.c)
 
 typedef struct {
     MeshTransform anchor;

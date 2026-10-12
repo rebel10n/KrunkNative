@@ -19,6 +19,7 @@
 #include <audio.h>
 #include <backend_ui.h>
 #include <online_mode.h> // offline mode: every skin unlocked
+#include <app_mode.h> // app_route_url_target (openSales)
 #include <render_settings.h>
 #include "../viewer/viewer_store.h"
 #include <sprays.h> // SPRAYS_BASE_COUNT
@@ -370,8 +371,9 @@ static int rarity_anim(const ViewerSkin *s) {
     return s && s->rarity == 6 && !client_render_settings()->disable_rarity_anim;
 }
 
-// skin.creator || "Krunker.io": the viewer table has no creator, so read assets/skins.json once.
-static const char *skin_creator(const int index) {
+// store.skins[index] as assets/skins.json has it (the fields the viewer table leaves out:
+// creator, blackM, limT, limited, itemShop, noSpin), read once.
+static const cJSON *skin_json(const int index) {
     static cJSON *skins;
     static int loaded;
     if (!loaded) {
@@ -383,7 +385,12 @@ static const char *skin_creator(const int index) {
         free(buf);
         free(path);
     }
-    const char *c = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(skins, index), "creator"));
+    return cJSON_GetArrayItem(skins, index);
+}
+
+// skin.creator || "Krunker.io"
+static const char *skin_creator(const int index) {
+    const char *c = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(skin_json(index), "creator"));
     return c && c[0] ? c : "Krunker.io";
 }
 
@@ -1581,6 +1588,7 @@ void ui_loadout_switch_tab(const int tab) {
 // opens a picker: they act at once and stop the event (html_ui_stop_propagation), so the
 // container's handler never runs.
 typedef enum { DEFER_SHOW, DEFER_CLEAR } DeferKind;
+static void view_item(int index, int mode);
 static struct { DeferKind kind; int a, b; } g_defer;
 
 static void deferred(void *user) {
@@ -1772,6 +1780,10 @@ int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         }
         return -1;
     }
+    if (!strcmp(name, "viewItem")) {
+        view_item(harg_int(args, argc, 0, -1), harg_int(args, argc, 1, 0));
+        return 1;
+    }
     if (!strcmp(name, "charmSelector")) { // f1822 + vLN01715 = slot; showWindow(46)
         g_charm_slot = harg_int(args, argc, 0, 0) ? 1 : 0;
         defer(DEFER_SHOW, 46);
@@ -1904,6 +1916,99 @@ void ui_loadout_clear_pops(void) {
     if (holder) html_dom_set_style(holder, "z-index", "2147483647");
     set_disp("popupHolder", "none");
     menu_schedule_rect();
+}
+
+// store.tags: the limT badge colours (null ones fall back to #41c300)
+static const char *store_tag_color(const char *tag) {
+    static const struct { const char *name, *color; } tags[] = {
+        {"Debug", "#000000"}, {"Twitch", "#6441a5"}, {"Charity", "#6441a5"}, {"Raid", "#eb347a"}, {"Canteen", "#fe4002"},
+        {"Burg", "#ADE4F9"}, {"Sandstorm", "#ADE4F9"}, {"Littletown", "#ADE4F9"}, {"Site", "#ADE4F9"}, {"Industry", "#ADE4F9"},
+        {"Subzero", "#ADE4F9"}, {"Freight", "#ADE4F9"}, {"Undergrowth", "#ADE4F9"}, {"Lostworld", "#ADE4F9"}, {"Kanji", "#ADE4F9"},
+        {"Citadel", "#ADE4F9"}, {"Oasis", "#ADE4F9"}, {"Evacuation", "#ADE4F9"}, {"Craftable", "#cc51f8"}, {"NFT", "#f3b8ff"},
+        {"Ranked", "#ff5500"}, {"Halloween", "#ff5500"},
+        {"FRVR", "linear-gradient(132deg, rgba(0,189,255,1) 0%, rgba(155,0,255,1) 25%, rgba(255,0,41,1) 50%, rgba(255,150,3,1) 75%, rgba(255,199,0,1) 100%)"},
+    };
+    for (size_t i = 0; tag && i < sizeof(tags) / sizeof(tags[0]); i++) {
+        if (!strcmp(tags[i].name, tag)) return tags[i].color;
+    }
+    return "#41c300";
+}
+
+// account.getSkinCount(index): the cnt of acc.skins' entry (0 for a guest / offline)
+static int account_skin_count(const int index) {
+    const AccountInfo *acc = account_get();
+    const cJSON *skins = acc ? cJSON_GetArrayItem(acc->data, 10) : NULL;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItem(e, "ind"), *cnt = cJSON_GetObjectItem(e, "cnt");
+        if (cJSON_IsNumber(ind) && ind->valueint == index) return cJSON_IsNumber(cnt) ? cnt->valueint : 1;
+    }
+    return 0;
+}
+
+static int json_truthy(const cJSON *item) {
+    return item && !cJSON_IsFalse(item) && !cJSON_IsNull(item) && !(cJSON_IsNumber(item) && item->valuedouble == 0.0) &&
+           !(cJSON_IsString(item) && !item->valuestring[0]);
+}
+
+// viewItem(index, mode) (v7 index.js): the item popup over the menu; its 3D showcase is the
+// viewer page's in an iframe (viewer.html?nobg&showcase=<index>, drawn natively by
+// viewer_embed.h); a mode or an unknown item opens the sales page instead.
+static void view_item(const int index, const int mode) {
+    html_ui_stop_propagation(); // f1822(window.event)
+    const ViewerSkin *skin = store_skin(index);
+    if (!skin || mode) {
+        char url[96];
+        snprintf(url, sizeof(url), "/social.html?p=itemsales&i=%d", index);
+        if (!app_route_url_target(url, 1)) ui_open_external(url); // openSales
+        return;
+    }
+    const int count = account_skin_count(index);
+    reset_pops();
+    const HtmlElem pop = html_dom_by_id("itemViewPop");
+    if (!pop) return;
+    const int animate = skin->rarity == 6; // store.rarities[r].animate (Unobtainable)
+    const char *color = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? g_viewer_rarities[skin->rarity].color : NULL;
+    char border[96];
+    snprintf(border, sizeof(border), "5px solid %s", color ? color : "lightgrey");
+    html_dom_set_display(pop, "block");
+    html_dom_set_style(pop, "border", border);
+    html_dom_set_class(pop, "rainbow", animate);
+
+    const cJSON *json = skin_json(index);
+    const char *lim_t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "limT"));
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class='itemViewName%s%s' style='color:%s;'>", skin->rarity == 5 ? "" : " blackShad",
+               rarity_anim(skin) ? " rainbow" : "", color ? color : "#fff"); // 5: CONTRABAND
+    sb_append_esc(&sb, skin->name ? skin->name : "");
+    sb_append(&sb, "</div>");
+    const int vaulted = (skin->seas ? skin->seas : 1) != g_viewer_current_season ||
+                        (json_truthy(cJSON_GetObjectItemCaseSensitive(json, "limited")) && json_truthy(cJSON_GetObjectItemCaseSensitive(json, "noSpin")) &&
+                         !json_truthy(cJSON_GetObjectItemCaseSensitive(json, "itemShop")));
+    if (json_truthy(cJSON_GetObjectItemCaseSensitive(json, "blackM"))) {
+        sb_append(&sb, "<div class='itemViewSea' style='background:#00ffff'>Black Market</div>");
+    } else if (lim_t && lim_t[0]) {
+        sb_appendf(&sb, "<div class='itemViewSea' style='background:%s'>", store_tag_color(lim_t));
+        sb_append_esc(&sb, lim_t);
+        sb_append(&sb, "</div>");
+    } else if (vaulted) {
+        sb_append(&sb, "<div class='itemViewSea'>Vaulted</div>");
+    } else if (json_truthy(cJSON_GetObjectItemCaseSensitive(json, "limited")) || (skin->flags & VS_BLOCKED)) {
+        sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
+    }
+    if (skin->type == 16) { // PLAYER_CARD: its thumbnail (UTILS.getPreview)
+        char path[256], url[320];
+        viewer_skin_preview_path(skin, path, sizeof(path));
+        html_dom_asset_url(path, url, sizeof(url));
+        sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url);
+    } else {
+        sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d'></iframe>", index);
+    }
+    sb_appendf(&sb, "<div class='itemViewCnt'>x%d <span style='color:#ffffff8f;'>Owned</span></div><div id='itemInfoBtn' onclick='openSales(%d)'>More Information</div>", count, index);
+    char *html = sb_finish(&sb);
+    html_dom_set_html(pop, html);
+    free(html);
+    menu_schedule_rect(); // the class preview's hole follows the popup backdrop
 }
 
 // shoPolicePop() (v7.1.4): Officer Buddy in the class preview (classN "Officer"), the speech
