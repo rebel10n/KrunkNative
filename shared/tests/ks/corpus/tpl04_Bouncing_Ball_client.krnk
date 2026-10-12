@@ -1,0 +1,91 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 4 "Bouncing Ball", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+
+obj ball = {};
+num ballScale = 5; # play around with this
+num ballVelocity = 0;
+num gravity = 0.01; # play around with this
+num dropHeight = 100; # play around with this
+num squishiness = 0.5; # play around with this
+
+# Runs when the game starts
+public action start() {
+
+	# detach camera
+	GAME.CAMERA.detach();
+
+	# hide player
+	GAME.PLAYERS.disableMeshes();
+	GAME.DEFAULT.disablePlayerBehaviour();
+	
+	# hide ui
+	GAME.UI.hideDefault();
+	GAME.UI.hideCrosshair();
+	
+	# add ball to scene
+	ball = GAME.SCENE.addSphere('', '#ff0000', 0, dropHeight, 0, 
+		ballScale, ballScale, ballScale);
+	
+	# add custom UI
+	str divID = GAME.UI.addDIV('infoText', true,
+		'color:#f1f1f1;position:absolute;top:90%;left:50%;' +
+		'transform: translate(-50%,-50%);font-size: 24px;' +
+		'border:solid 2px #fff;border-radius:4px;' +
+		'padding:10px 30px 10px 30px;background-color: rgba(0,0,0,0.2);'
+	);
+	
+	# add text to div
+	GAME.UI.updateDIVText(divID, 'Press R to Reset Ball');
+	
+}
+
+# custom reset ball action
+action resetBall() {
+	ball.position.y = dropHeight;
+	ballVelocity = 0;
+	ball.scale.y = ballScale;
+}
+
+
+# Runs every game tick
+public action update(num delta) {
+	
+	# Update Gravity 
+	ballVelocity = ballVelocity - (gravity * delta);
+	
+	# Move Ball
+	(num) ball.position.y += ballVelocity;
+	
+	# Check if on Floor
+	if ((num) ball.position.y - ballScale <= 0) {
+		ball.position.y = ballScale;
+		ballVelocity = ballVelocity * -1;
+		(num) ball.scale.y -= ballVelocity * squishiness;
+	}
+	
+	# Squish Animation
+	if ((num) ball.scale.y <= ballScale) {
+		(num) ball.scale.y += 0.01 * delta;
+		if ((num) ball.scale.y > ballScale) {
+			ball.scale.y = ballScale;
+		}
+		num scaleDiff = (ballScale - (num) ball.scale.y);
+		ball.scale.x = (ballScale + scaleDiff);
+		ball.scale.z = (ballScale + scaleDiff);
+		
+	}
+	
+	# update camera
+	GAME.CAMERA.move(0, 40, 90);
+	GAME.CAMERA.rotate(0, 0, 0);
+	
+}
+
+# User pressed a key
+public action onKeyPress(str key, num code) {
+	GAME.log(key, toStr code);
+	if (key == 'r') {
+		resetBall();
+	}
+}

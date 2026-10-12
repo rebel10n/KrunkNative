@@ -1,0 +1,60 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 3 "Moving Objects", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+
+# Light Object
+obj redLamp = {};
+obj blueLamp = {};
+
+# Position
+num distance = 18;
+num yPos = 12;
+
+# Angle
+num angle = 0;
+num angularVelocity = 0.006;
+
+# Create a new lamp
+obj action createLamp(str color) {
+	obj light = GAME.SCENE.addPointLight(color, distance, yPos, 0, 100, 1);
+    obj ball = GAME.SCENE.addSphere('', color, distance, yPos, 0, 5, 5, 5);
+    ball.emissive = color;
+    return {
+        light: light,
+        ball: ball
+    };
+}
+
+# Runs when the game starts
+public action start() {
+    # force lighting
+	GAME.SETTINGS.set('lighting', 2); 
+
+    # create lamps
+    redLamp = createLamp('#ff0000');
+    blueLamp = createLamp('#0000ff');
+}
+
+# Rotate angle
+action rotateAngle(num delta) {
+    angle = angle + (angularVelocity * delta);
+    angle = angle % Math.PI2;
+}
+
+# Update lamp position
+action updateLamp(obj lamp, num offset) {
+    lamp.light.position.x = distance * Math.cos(angle + offset);
+	lamp.light.position.z = distance * Math.sin(angle + offset);
+	lamp.ball.position.x = lamp.light.position.x;
+	lamp.ball.position.z = lamp.light.position.z;
+}
+
+# Runs every game tick
+public action update(num delta) {
+	# rotate angle
+	rotateAngle(delta);
+	
+	# update lamp positions
+    updateLamp(blueLamp, Math.PI);
+	updateLamp(redLamp, 0);
+}

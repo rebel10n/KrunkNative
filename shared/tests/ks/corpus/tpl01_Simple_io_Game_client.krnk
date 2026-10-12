@@ -1,0 +1,196 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 1 "Simple .io Game", scripts.client (base64-decoded)
+# INIT:
+obj window = {};
+obj ball = {
+    x: 0,
+    y: 0,
+    scale: 30,
+    speed: 0.4
+};
+
+# PEBBLES
+obj[] pebbles = obj[];
+num pebbleCount = 70; # number of pebbles
+
+# SPIKES:
+obj[] spikes = obj[];
+num spikePowerDivisor = 2;
+num spikeCount = 5; # number of spikes
+
+# WORLD:
+num worldScale = 2000;
+num gridSize = 60;
+
+# IDEAS:
+# Randomize Pebble Colors
+# Add Multiplayer using NETWORK object
+# Add Spike Objects
+
+# PEBBLE:
+obj action genPebble() {
+	num hue = UTILS.randInt(0, 360);
+	num scale = UTILS.randFloat(17, 20);
+	return {
+		x: UTILS.randInt(-worldScale, worldScale),
+		y: UTILS.randInt(-worldScale, worldScale),
+		scale: scale,
+		power: 3,
+		innerCol: UTILS.hexFromHue(hue),
+		outerCol: UTILS.hexFromHue(Math.max(0, hue - 10))
+	};
+}
+
+# SPIKE:
+obj action genSpike() {
+	num scale = UTILS.randFloat(150, 200);
+	return {
+		x: UTILS.randInt(-worldScale, worldScale),
+		y: UTILS.randInt(-worldScale, worldScale),
+		scale: scale,
+		power: scale / spikePowerDivisor,
+		color: '#90ff21'
+	};
+}
+
+# PLAYER:
+action resetBall() {
+	ball.x = UTILS.randInt(-worldScale, worldScale);
+	ball.y = UTILS.randInt(-worldScale, worldScale);
+	ball.scale = 30;
+	ball.speed = 0.2;
+}
+
+# GAME:
+public action start() {
+    
+    # SETUP
+	window = GAME.OVERLAY.getSize();
+    GAME.INPUTS.freeMouse();
+    GAME.UI.hideDefault();
+    GAME.DEFAULT.disable3D();
+    GAME.DEFAULT.disablePlayerBehaviour();
+    GAME.DEFAULT.disableServerSync();
+    
+    # INIT PEBBLES
+    for (num i = 0; i < pebbleCount; i++) {
+        addTo pebbles genPebble();
+    }
+
+    # SPIKES:
+    for (num i = 0; i < spikeCount; i++) {
+        addTo spikes genSpike();
+    }
+
+}
+
+# GAME:
+public action update(num delta) {
+    
+    # GET POSITION:
+    obj mousePos = GAME.INPUTS.mousePosOverlay();
+    
+    # DIRECTION:
+    num movDir = UTILS.getDir2D(mousePos.x, mousePos.y, ((num) window.width/2), ((num) window.height/2));
+
+    # BALL:
+    (num) ball.x += ((num) ball.speed * delta) * Math.cos(movDir);
+    (num) ball.y += ((num) ball.speed * delta) * Math.sin(movDir);
+
+    # PEBBLE CHECKS:
+    for (num i = 0; i < lengthOf pebbles; i++) {
+        obj tmpObj = pebbles[i];
+        num distance = UTILS.getDist2D(ball.x, ball.y, tmpObj.x, tmpObj.y);
+        if (distance <= ((num) tmpObj.scale + (num) ball.scale)) {
+           	(num) ball.scale += (num) tmpObj.power;
+            pebbles[i] = genPebble();
+        }
+    }
+
+    # SPIKE CHECKS:
+    for (num i = 0; i < lengthOf spikes; i++) {
+        obj tmpObj = spikes[i];
+        num distance = UTILS.getDist2D(ball.x, ball.y, tmpObj.x, tmpObj.y) * 2;
+        if (distance <= ((num) tmpObj.scale + (num) ball.scale)) {
+			if ((num) ball.scale >= (num) tmpObj.scale) {
+				(num) ball.scale += (num) tmpObj.power;
+				spikes[i] = genSpike();
+			} else {
+           		resetBall();
+			}
+        }
+    }
+
+	# BORDER CHECKS:
+	if (((num) ball.x - (num) ball.scale) <= -worldScale) {
+		ball.x = (num) ball.scale + -worldScale;
+	}
+	if (((num) ball.x + (num) ball.scale) >= worldScale) {
+		ball.x = worldScale - (num) ball.scale;
+	}
+	if (((num) ball.y - (num) ball.scale) <= -worldScale) {
+		ball.y = (num) ball.scale + -worldScale;
+	}
+	if (((num) ball.y + (num) ball.scale) >= worldScale) {
+		ball.y = worldScale - (num) ball.scale;
+	}
+    
+}
+
+# SPIKES:
+action drawSpike(num x, num y, num scale, str color) {
+	for (num i = 0; i < 7; i++) {
+        GAME.OVERLAY.drawRect(x, y, scale, scale, i * 15, color, 1, true);
+    }
+}
+
+# RENDER:
+public action render(num delta) {
+    
+    # SETUP:
+    GAME.OVERLAY.clear();
+    window = GAME.OVERLAY.getSize();
+    
+    # BACKGROUND:
+    GAME.OVERLAY.drawRect(0, 0, window.width, window.height, 0, '#fafafa', 1);
+
+	# GRID:
+	num xPos = (-((num) ball.x) % gridSize) - gridSize;
+	while (xPos < (num) window.width) {
+		xPos = xPos + gridSize;	
+		if (xPos > 0) {
+			GAME.OVERLAY.drawLine(xPos, 0, xPos, window.height, 3, '#000000', 0.1);
+		}
+	}
+	num yPos = (-((num) ball.y) % gridSize) - gridSize;
+	while (yPos < (num) window.height) {
+		yPos = yPos + gridSize;
+		if (yPos > 0) {
+			GAME.OVERLAY.drawLine(0, yPos, window.width, yPos, 3, '#000000', 0.1);
+		}
+	}
+
+ 	# CAMERA:
+   	GAME.OVERLAY.offset(-((num) ball.x) + ((num) window.width/2), -((num) ball.y) + ((num) window.height/2));
+
+    # PEBBLES:
+    for (num i = 0; i < lengthOf pebbles; i++) {
+        obj tmpObj = pebbles[i];
+        GAME.OVERLAY.drawCircle(tmpObj.x, tmpObj.y, tmpObj.scale, 
+            tmpObj.scale, 0, tmpObj.outerCol, 1);
+        GAME.OVERLAY.drawCircle(tmpObj.x, tmpObj.y, (num) tmpObj.scale * 0.7, 
+            (num) tmpObj.scale * 0.7, 0, tmpObj.innerCol, 1);
+    }
+
+    # SPIKES:
+    for (num i = 0; i < lengthOf spikes; i++) {
+        obj tmpObj = spikes[i];
+		drawSpike((num) tmpObj.x, (num) tmpObj.y, (num) tmpObj.scale, (str) tmpObj.color);
+    }
+
+    # BALL:
+    GAME.OVERLAY.drawCircle((num) ball.x, (num) ball.y, (num) ball.scale + 10, 
+        (num) ball.scale + 10, 0, '#db3532', 1);
+	GAME.OVERLAY.drawCircle((num) ball.x, (num) ball.y, (num) ball.scale, 
+        (num) ball.scale, 0, '#ff3b38', 1);
+    
+}

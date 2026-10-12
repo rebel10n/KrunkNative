@@ -1,0 +1,4 @@
+action f(num a, num b) {}
+public action start() {
+    f(1);
+}

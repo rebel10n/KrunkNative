@@ -1,0 +1,629 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 16 "Game of Life", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+
+obj window = GAME.OVERLAY.getSize();
+obj oldWindow = window;
+obj pos = GAME.INPUTS.mousePosOverlay(); 
+bool mouseReleased = true;           
+bool initialized = false;
+bool first = false;                      
+bool pauseState = true;
+num oldTime = GAME.TIME.now();
+num track = 0;
+num timerDelay = 250;                 # Initial timer (0.25s)
+num timerStepper = 50;         	      # Defines the step count for the timer in ms
+num gridStepper = 1;                  # Defines the step count for tile size in px
+num maxGrid = 100;                    # Maximum tile size amount in px
+num minGrid = 20;                     # Minimum tile size amount in px
+obj grid = {
+	x: 0,
+	y: 0,
+	w: 0,
+	h: 0,
+	scale: 30,                    # Initial tile size (lower = more tiles)
+	tileColor: "#3e4240",
+	backgroundColor: "#000000",
+	borderColor: "#707070",
+	hoverColor: "#464a48",
+	lifeColor: "#5dde6c"
+};
+
+obj ui = {
+	height: 99
+};
+
+num[][] tiles = num[][];
+
+
+# Counts how many live neighors each tile has
+num action neighbors(num x, num y){
+num neighborCount = 0;
+# top
+if(y != 0 && tiles[x][y - 1] == 1){
+neighborCount++;
+};
+# bottom
+if(y != (num) grid.h - 1 && tiles[x][y + 1] == 1){
+neighborCount++;
+};
+# left
+if(x != 0  && tiles[x - 1][y] == 1){
+neighborCount++;
+};
+# right
+if(x != (num) grid.w - 1  && tiles[x + 1][y] == 1){
+neighborCount++;
+};
+# top left
+if(y != 0 && x != 0  && tiles[x - 1][y - 1] == 1){
+neighborCount++;
+};
+# top right
+if(y != 0 && x != (num) grid.w - 1  && tiles[x + 1][y - 1] == 1){
+neighborCount++;
+};
+# bottom left
+if(y != (num) grid.h - 1 && x != 0 && tiles[x - 1][y + 1] == 1){
+neighborCount++;
+};
+# bottom right
+if(y != (num) grid.h - 1 && x != (num) grid.w - 1 && tiles[x + 1][y + 1] == 1){
+neighborCount++;
+};
+
+return neighborCount;
+}
+
+# Advances to the next generation -- Updates board
+action tick(){
+		obj[] buffer = obj[];
+		for(num i = 0; i < (num) grid.w; i++){
+			for(num j = 0; j < (num) grid.h; j++){
+			num count = neighbors(i, j);
+            if((count == 2 || count == 3) && tiles[i][j] == 1){
+				addTo buffer {x: i, y: j, val: 1};
+            };
+            if(count == 3 && tiles[i][j] == 0){
+				addTo buffer {x: i, y: j, val: 1};
+            };
+            if(count < 2 && tiles[i][j] == 1) {
+				addTo buffer {x: i, y: j, val: 0};
+            };
+            if(count > 3 && tiles[i][j] == 1) {
+				addTo buffer {x: i, y: j, val: 0};
+            };
+	
+}
+}
+
+# Prevents neighbors from changing while updating -- Updates all changes at once
+for(num i = 0; i < lengthOf buffer; i++){
+	tiles[(num) buffer[i].x][(num) buffer[i].y] = (num) buffer[i].val;
+}
+
+}
+
+
+
+# Creates the grid array according to screen size
+action makeGrid(){
+window = GAME.OVERLAY.getSize();
+(num) window.height -= (num) ui.height;
+
+grid.w = Math.floor((num) window.width / (num) grid.scale);
+grid.h = Math.floor((num) window.height / (num) grid.scale);
+
+grid.x = ((num) window.width - (num) grid.scale * Math.floor((num) window.width / (num) grid.scale))/2;   # Always center board in the center
+grid.y = ((num) window.height - (num) grid.scale * Math.floor((num) window.height / (num) grid.scale))/2; 
+
+
+# Grid is defined as a nested array -- tiles[x][y]
+
+
+tiles = num[][];
+for(num i = 0; i < (num) grid.w; i++) {
+    num[] tempArray = num[];
+	
+    for(num j = 0; j < (num) grid.h; j++) {
+        addTo tempArray 0;
+    }
+	
+    addTo tiles tempArray;
+}
+
+# tiles[
+# [0,0,0,0],
+# [0,0,0,0],
+# [0,0,0,0]
+# ]
+
+	
+}
+
+
+
+
+# Saves previous live tiles in buffer and re-adjusts grid on scale/window change
+action updateGrid(){
+obj[] buffer = obj[];
+	
+window = GAME.OVERLAY.getSize();
+(num) window.height -= (num) ui.height;
+
+grid.w = Math.floor((num) window.width / (num) grid.scale);
+grid.h = Math.floor((num) window.height / (num) grid.scale);
+grid.x = ((num) window.width - (num) grid.scale * Math.floor((num) window.width / (num) grid.scale))/2;
+grid.y = ((num) window.height - (num) grid.scale * Math.floor((num) window.height / (num) grid.scale))/2;
+
+
+for(num i = 0; i < lengthOf tiles; i++){
+	for(num j = 0; j < lengthOf tiles[i]; j++){
+		if(tiles[i][j] == 1){
+			addTo buffer {x: i, y: j};
+		}
+	}
+}
+
+tiles = num[][];
+
+for(num i = 0; i < (num) grid.w; i++) {
+    num[] tempArray = num[];
+	
+    for(num j = 0; j < (num) grid.h; j++) {
+        addTo tempArray 0;
+    }
+	
+    addTo tiles tempArray;
+}
+
+
+# Load old live tiles
+for(num i = 0; i < lengthOf buffer; i++){
+	tiles[(num) buffer[i].x][(num) buffer[i].y] = 1;
+}
+
+
+		
+
+}
+
+
+
+
+
+# Create GUI and set custom controls
+
+public action start() {
+GAME.DEFAULT.disablePlayerBehaviour(); 
+GAME.INPUTS.disableDefault();
+GAME.UI.hideDefault(); 
+GAME.UI.hideCrosshair(); 
+GAME.INPUTS.freeMouse();
+
+
+str defaultBackground = "background-color: black;width: 30px;height: 30px;border-radius: 15px;margin: 5px;font-family: sans-serif;color: white;";
+str customValues = "color: white;background: black;font-family: sans-serif;font-weight: bold;font-size: 18px;width: 50px;height: fit-content;padding: 11px;border-radius: 10px;display: inline-grid;";
+
+str startMenu = GAME.UI.addDIV(
+    "startMenu",
+    true,
+    "position: absolute;background: #2b2b2b;width: 100%;height: 100%;display: grid;justify-content: center;align-items: center;justify-items: center;z-index:1000;"
+);
+
+str title = GAME.UI.addDIV(
+    "title",
+    true,
+    "text-align: center;font-size: 70px;color: white;font-family: monospace;",
+	"startMenu"
+);
+
+str startBtn = GAME.UI.addDIV(
+    "startBtn",
+    true,
+    "color: black;font-size: 65px;font-family: sans-serif;border: 1px solid white;border-radius: 19px;padding: 10px;background: white;font-weight: bold;user-select: none;width: fit-content;height: fit-content;",
+	"startMenu"
+);
+
+str ruleText = GAME.UI.addDIV(
+    "ruleText",
+    true,
+    "text-align: center; color: white;width: 900px;font-size: 25px;white-space: break-spaces;font-family: sans-serif;",
+	"startMenu"
+);
+
+GAME.UI.updateDIVText(
+    "title",
+    "Conways Game of Life" 
+);
+
+GAME.UI.updateDIVText(
+    "startBtn",
+    "START" 
+);
+
+GAME.UI.updateDIVText(
+    "ruleText",
+    "Any live cell with fewer than two live neighbours dies, as if by underpopulation. Any live cell with two or three live neighbours lives on to the next generation. Any live cell with more than three live neighbours dies, as if by overpopulation. Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction." 
+);
+
+str ui = GAME.UI.addDIV(
+    "ui",
+    true,
+    "height: 100px;width: 100%;background: #2f2f2f;position: absolute;bottom: 0px;display: grid;justify-content: center;align-content: center;grid-auto-flow: column;gap: 9px;align-items: center;user-select: none;"
+);
+
+str backgroundClear = GAME.UI.addDIV(
+    "backgroundClear",
+    true,
+    "background-color: black;width: 70px;height: 70px;border-radius: 15px;margin: 5px;float: right;",
+	"ui"
+);
+
+str startGui = GAME.UI.addDIV(
+    "startGui",
+    true,
+    "color: white;background: black;font-family: sans-serif;font-weight: bold;font-size: 40px;width: 137px;height: fit-content;padding: 11px;border-radius: 10px;display: inline-grid;",
+	"ui"
+);
+
+GAME.UI.updateDIVText(
+    "startGui",
+    "START" 
+);
+
+str backgroundNext = GAME.UI.addDIV(
+    "backgroundNext",
+    true,
+    "background-color: black;width: 70px;height: 70px;border-radius: 15px;margin: 5px;float: right;",
+	"ui"
+);
+
+str next = GAME.UI.addDIV(
+    "next",
+    true,
+    "background-color: #ffffff;clip-path: polygon(100% 50%, 0 100%, 25% 49%, 0 0);width: 50%;height: 50%;position: relative;top: 23%;left: 32%;",
+	"backgroundNext"
+);
+
+str clear = GAME.UI.addDIV(
+    "clear",
+    true,
+    "background-color: #ffffff;clip-path: polygon(20% 0%, 0% 20%, 30% 50%, 0% 80%, 20% 100%, 50% 70%, 80% 100%, 100% 80%, 70% 50%, 100% 20%, 80% 0%, 50% 30%);width: 50%;height: 50%;position: relative;top: 24%;left: 26%;",
+	"backgroundClear"
+);
+
+str backgroundRemove = GAME.UI.addDIV(
+    "backgroundRemove",
+    true,
+    defaultBackground + "font-size: 23px;",
+	"ui"
+);
+
+str timer = GAME.UI.addDIV(
+    "timer",
+    true,
+    customValues,
+	"ui"
+);
+
+GAME.UI.updateDIVText(
+    "timer",
+    toStr (timerDelay / 1000) + "s"
+);
+
+str backgroundAdd = GAME.UI.addDIV(
+    "backgroundAdd",
+    true,
+    defaultBackground + "font-size: 27px;",
+	"ui"
+);
+
+GAME.UI.updateDIVText(
+    "backgroundAdd",
+    "+"
+);
+
+GAME.UI.updateDIVText(
+    "backgroundRemove",
+    "-"
+);
+
+str backgroundRemoveScale = GAME.UI.addDIV(
+    "backgroundRemoveScale",
+    true,
+    defaultBackground + "font-size: 23px;",
+	"ui"
+);
+
+str scale = GAME.UI.addDIV(
+    "scale",
+    true,
+    customValues,
+	"ui"
+);
+
+str backgroundAddScale = GAME.UI.addDIV(
+    "backgroundAddScale",
+    true,
+    defaultBackground + "font-size: 27px;",
+	"ui"
+);
+
+GAME.UI.updateDIVText(
+    "backgroundAddScale",
+    "+"
+);
+
+GAME.UI.updateDIVText(
+    "scale",
+    toStr grid.scale + "px"
+);
+
+GAME.UI.updateDIVText(
+    "backgroundRemoveScale",
+    "-"
+);
+}
+
+
+# Function manager for GUI and keybinds
+action guiFunction(str function){
+
+if(function == "addTime"){
+	if(timerDelay < 10000){
+		timerDelay += timerStepper;
+		GAME.UI.updateDIVText("timer", toStr (timerDelay / 1000) + "s");
+	}
+};
+	
+if(function == "removeTime"){
+	if(timerDelay > timerStepper){
+		timerDelay -= timerStepper;
+		GAME.UI.updateDIVText("timer", toStr (timerDelay / 1000) + "s");
+	}
+};
+
+if(function == "toggleTimer"){
+		if(pauseState == false){
+			GAME.UI.updateDIVText("startGui","START");
+			pauseState = true;
+		} else {
+			GAME.UI.updateDIVText("startGui","STOP");
+			pauseState = false;
+		};
+};
+
+if(function == "scaleIncrease"){
+	if((num) grid.scale < maxGrid){
+		(num) grid.scale += gridStepper;
+		GAME.UI.updateDIVText("scale", toStr grid.scale + "px");
+		updateGrid();
+	}
+};
+
+if(function == "scaleDecrease"){
+	if((num) grid.scale > minGrid){
+		(num) grid.scale -= gridStepper;
+		GAME.UI.updateDIVText("scale", toStr grid.scale + "px");
+		updateGrid();
+	}
+};
+	
+if(function == "clearGrid"){
+	GAME.UI.updateDIVText("startGui","START");
+	pauseState = true;
+	makeGrid();
+};
+
+}
+
+
+
+
+
+
+
+public action update(num delta) {
+
+	# Runs evolution timer
+	if	(pauseState == false && GAME.TIME.now() - oldTime > timerDelay){
+			tick();
+		oldTime = GAME.TIME.now();
+	}
+
+	# Right-click and hold function
+	if(mouseReleased == false) {
+		for(num i = 0; i < (num) grid.w; i++){
+			for(num j = 0; j < (num) grid.h + 1; j++){
+				if((num) pos.x >  (((num) grid.scale * i) + (num) grid.x) && (num) pos.x < (((num) grid.scale * i)) + (num) grid.scale  + (num) grid.x && (num) pos.y >  (((num) grid.scale * j)  + (num) grid.y) && (num) pos.y < (((num) grid.scale * j)) + (num) grid.scale  + (num) grid.y){
+						if(first == false){
+							track = tiles[i][j];
+							first = true;
+						};
+
+						if(tiles[i][j] != track){
+							tiles[i][j] = track;
+						}
+
+						if(pauseState == false) {
+							guiFunction("toggleTimer");
+						};
+				}
+			}
+		}
+	}
+}
+
+
+
+# Updates all overlay elements -- Makes board visible
+public action render(num delta) {
+window = GAME.OVERLAY.getSize();
+(num) window.height -= (num) ui.height;
+if ((Math.floor((num) window.width) != Math.floor((num) oldWindow.width) || Math.floor((num) window.height) != Math.floor((num) oldWindow.height)) && initialized == true){
+GAME.log(Math.floor((num) window.height), Math.floor((num) oldWindow.height));
+GAME.log("updateWindow");
+updateGrid();
+oldWindow.width = (num) window.width;
+oldWindow.height = (num) window.height;
+}
+
+pos = GAME.INPUTS.mousePosOverlay();
+
+
+
+GAME.OVERLAY.drawRect(
+	0,
+	0,
+	window.width,
+	window.height,
+	false,
+	grid.backgroundColor, 
+	1
+);
+
+
+for(num i = 0; i < lengthOf tiles; i++){
+	for(num j = 0; j < lengthOf tiles[i]; j++){
+		if((num) pos.x >  (((num) grid.scale * i) + (num) grid.x) && (num) pos.x < (((num) grid.scale * i)) + (num) grid.scale  + (num) grid.x && (num) pos.y >  (((num) grid.scale * j)  + (num) grid.y) && (num) pos.y < (((num) grid.scale * j)) + (num) grid.scale  + (num) grid.y){
+			GAME.OVERLAY.drawRect(((num) grid.scale * i) + (num) grid.x, (j * (num) grid.scale) + (num) grid.y, (num) grid.scale, (num) grid.scale, 0, (str) grid.hoverColor, 1);
+		}
+		if(tiles[i][j] == 1){
+			GAME.OVERLAY.drawRect(((num) grid.scale * i) + (num) grid.x, (j * (num) grid.scale) + (num) grid.y, (num) grid.scale, (num) grid.scale, 0, (str) grid.lifeColor, 1);
+		} else {
+			GAME.OVERLAY.drawRect(((num) grid.scale * i) + (num) grid.x, (j * (num) grid.scale) + (num) grid.y, (num) grid.scale, (num) grid.scale, 0, (str) grid.tileColor, 1);	
+		}
+	}
+}
+
+
+for(num i = 0; i < (num) grid.w + 1; i++){
+		for(num j = 0; j < (num) grid.h + 1; j++){
+			GAME.OVERLAY.drawLine((num) grid.scale * i + (num) grid.x, (num) grid.y, (num) grid.scale * i + (num) grid.x, (num) window.height - (num) grid.y, 1, (str) grid.borderColor, 1);
+			GAME.OVERLAY.drawLine((num) grid.x, j * (num) grid.scale + (num) grid.y, (num) window.width - (num) grid.x, j * (num) grid.scale + (num) grid.y, 1, (str) grid.borderColor, 1);
+		};
+	}
+}
+
+
+# Checks if GUI element was clicked -- Timer prevents propagation
+
+public action onDIVClicked(str id) {
+if(GAME.TIME.now() - oldTime > 10){
+    if (id == "startBtn") {
+	GAME.UI.updateDIV(
+		"startMenu", 
+		"display", 
+		"none"
+	);
+		makeGrid();
+		initialized = true;
+};
+	
+    if (id == "backgroundNext" || id == "next") {
+		tick();
+	};
+
+    if (id == "backgroundClear" || id == "clear") {
+		guiFunction("clearGrid");
+	};
+
+    if (id == "backgroundAddScale") {
+		guiFunction("scaleIncrease");
+	};
+
+    if (id == "backgroundRemoveScale") {
+		guiFunction("scaleDecrease");
+	};
+
+    if (id == "backgroundAdd") {
+		guiFunction("addTime");
+	};
+
+    if (id == "backgroundRemove") {
+		guiFunction("removeTime");
+	};
+
+    if (id == "startGui") {
+		guiFunction("toggleTimer");
+	};	
+
+
+oldTime = GAME.TIME.now();
+}
+
+}
+
+
+# Toggles tile alive or empty
+public action onMouseClick(num button, num x, num y) {
+	if(button == 1) {
+		for(num i = 0; i < (num) grid.w; i++){
+			for(num j = 0; j < (num) grid.h + 1; j++){
+				if((num) pos.x >  (((num) grid.scale * i) + (num) grid.x) && (num) pos.x < (((num) grid.scale * i)) + (num) grid.scale  + (num) grid.x && (num) pos.y >  (((num) grid.scale * j)  + (num) grid.y) && (num) pos.y < (((num) grid.scale * j)) + (num) grid.scale  + (num) grid.y){
+					if(tiles[i][j] == 1){
+						tiles[i][j] = 0;
+					}	else	{
+						tiles[i][j] = 1;
+					};
+					
+					if(pauseState == false) {
+						guiFunction("toggleTimer");  # Stops timer if grid is clicked
+					};
+				}
+			}
+		}
+	}
+
+	if (button == 3){
+		mouseReleased = false;
+	}
+}
+
+
+public action onMouseUp(num button, num x, num y) {
+	mouseReleased = true;
+	first = false;
+}
+
+
+public action onKeyPress(str key, num code) {
+	if(code == 39 || code == 68){   # D or Right Arrow
+		tick();
+	};
+
+	if(code == 32){                 # Space
+		guiFunction("toggleTimer");
+	};
+
+	if(code == 8){ # Backspace
+		guiFunction("clearGrid");
+	};
+
+	if(code == 38 || code == 87){   # W or Up Arrow
+		guiFunction("addTime");
+	};
+
+	if(code == 40 || code == 83){   # S or Down Arrow
+		guiFunction("removeTime");
+	};
+}
+
+
+
+
+public action onMouseScroll(num dir) {
+if (dir == 1){ # Scroll up -- Zoom in
+		guiFunction("scaleIncrease");
+	}
+if (dir == -1){ # Scroll up -- Zoom out
+	guiFunction("scaleDecrease");
+}
+	
+}
+
+
+public action onKeyHeld(str key, num code) {}
+public action onKeyUp(str key, num code) {}
+public action onNetworkMessage(str id, obj data) {}

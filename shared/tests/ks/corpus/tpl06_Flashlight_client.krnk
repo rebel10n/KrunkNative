@@ -1,0 +1,77 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 6 "Flashlight", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+obj torch = {};
+
+# Runs when the game starts
+public action start() {
+   
+	# Hide defaults:
+	GAME.UI.hideCrosshair();
+	GAME.UI.hideDefault();
+	GAME.PLAYERS.disableMeshes();
+	
+	# Add light object:
+	torch = GAME.SCENE.addSpotLight("#fff", 0, 0, 0, 0, 0, 0, 60, 1, 1, 60, 0.5);
+    
+}
+
+# Runs every game tick
+public action update(num delta) {
+	obj plr = GAME.PLAYERS.getSelf();
+	if (notEmpty plr) {
+		num yPos = ((num) plr.position.y + 10);
+		torch.move(
+			plr.position.x, 
+			yPos, 
+			plr.position.z
+		);	
+		torch.lookAt(
+			((num) plr.position.x + (1000 * Math.sin((num) plr.rotation.x + Math.PI) * Math.cos((num) plr.rotation.y))), 
+			(yPos + (1000 * Math.sin((num) plr.rotation.y))), 
+			((num) plr.position.z + (1000 * Math.cos((num) plr.rotation.x + Math.PI) * Math.cos((num) plr.rotation.y)))
+		);
+	}
+}
+
+# Add rendering logic in here
+public action render(num delta) {
+
+}
+
+# User pressed a key
+public action onKeyPress(str key, num code) {
+
+}
+
+# User released a key
+public action onKeyUp(str key, num code) {
+
+}
+
+# User held a key
+public action onKeyHeld(str key, num code) {
+
+}
+
+# User clicked on screen
+public action onMouseClick(num button, num x, num y) {
+
+}
+
+# User scrolled on screen
+public action onMouseScroll(num dir) {
+
+}
+
+# User clicked a DIV (ID)
+public action onDIVClicked(str id) {
+
+}
+
+# Client receives network message
+public action onNetworkMessage(str id, obj data) {
+
+}

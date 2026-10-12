@@ -1,0 +1,20 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 1 "Simple .io Game", scripts.server (base64-decoded)
+# Server Script runs only on Hosted server & not in test mode
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+
+# Runs when the game starts
+public action start() {
+
+}
+
+# Runs every game tick
+public action update(num delta) {
+
+}
+
+# Server receives network message
+public action onNetworkMessage(str id, obj data, str playerID) {
+
+}

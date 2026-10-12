@@ -1,0 +1,12 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 12 "Converting 3D to 2D", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+
+# Add rendering logic in here
+public action render(num delta) {
+	obj coords = GAME.SCENE.posToScreen(0, 10, 0);
+ 	if ((bool) coords.onScreen) {
+		GAME.OVERLAY.drawCircle(coords.x, coords.y, 80, 80, 0, "#ff0000", 1);	
+		GAME.OVERLAY.drawText("1", coords.x, (num) coords.y+40, 0, 70, "center", "#fff", 1);
+	}
+}

@@ -1,0 +1,127 @@
+# Krunker v7.1.4 content: public/maps/kanji.json scripts.client (base64-decoded; identical in laboratory, lostworld_s6, sanctum, subzero_new)
+bool inInteraction = false;
+bool interactionToggle = false;
+num interactionTimer = 0;
+str interactionText = "";
+num interactionIteration = 0;
+num interactionType = 0;
+
+action generateInteractionWindow() {
+	obj css = {
+		mainHolder: "position: absolute; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;",
+		chatHolder: "position: absolute; bottom: 20vh; width: 40vw; height: 20vh; padding: 15px; background-color: black; border: 4px solid #ffffff;",
+		nameHolder: "position: absolute; bottom: 45vh; margin-left: -30vw; width: 10vw; padding: 15px; color: white; background-color: black; border: 4px solid #ffffff;",
+		exitHolder: "position: absolute; bottom: 45vh; width: 2vw; margin-right: -38vw; padding: 15px; color: white; background-color: black; border: 4px solid #ffffff;",
+		chat: "text-align: left; color: white;",
+		instructions: "position: absolute; left: 0; bottom: 0; padding: 15px; text-align: left; color: rgba(255, 255, 255, 0.5);",
+	};
+	
+ 	str mainHolder = GAME.UI.addDIV('customHolder', false, css.mainHolder, "inGameUI");
+	str chatHolder = GAME.UI.addDIV('customChatHolder', false, css.chatHolder, "customHolder");
+	str nameHolder = GAME.UI.addDIV('customNameHolder', false, css.nameHolder, "customHolder");
+	str exitHolder = GAME.UI.addDIV('customExitHolder', false, css.exitHolder, "customHolder");
+	GAME.UI.updateDIVText("customExitHolder", 'X');
+	str chat = GAME.UI.addDIV('customChat', false, css.chat, 'customChatHolder');
+	str instructions = GAME.UI.addDIV('customInstructions', false, css.instructions, 'customChatHolder');
+}
+
+action showInteraction(bool toggle, str name) {
+	if (!toggle) {
+		GAME.UI.updateDIV('customHolder', 'display', 'none');
+		GAME.UI.updateDIV('customChatHolder', 'display', 'none');
+		GAME.UI.updateDIV('customNameHolder', 'display', 'none');
+		GAME.UI.updateDIV('customExitHolder', 'display', 'none');
+		GAME.UI.updateDIV('customChat', 'display', 'none');
+		return;
+	} else {
+		GAME.UI.updateDIV('customHolder', 'display', 'flex');
+		GAME.UI.updateDIVText('customNameHolder', name);
+
+		GAME.UI.updateDIV('customChatHolder', 'display', 'block');
+		GAME.UI.updateDIV('customNameHolder', 'display', 'block');
+		GAME.UI.updateDIV('customExitHolder', 'display', 'block');
+		GAME.UI.updateDIV('customChat', 'display', 'block');
+	}
+}
+
+action showInstructions(bool toggle, num state) {
+	if (toggle == false) {
+		GAME.UI.updateDIV('customInstructions', 'display', 'none');
+		return;
+	} else {
+		if (state == 0) {
+			GAME.UI.updateDIVText('customInstructions', 'Click to continue...');
+		} else if (state == 1) {
+			GAME.UI.updateDIVText('customInstructions', 'Type the answer in chat...');
+		}
+		
+		GAME.UI.updateDIV('customInstructions', 'display', 'block');
+	}
+}
+
+public action start() {
+	generateInteractionWindow();
+}
+
+public action onNetworkMessage(str id, obj data) {
+	if (id == "startInteraction") {
+		GAME.INPUTS.unlockMouse();
+
+		interactionText = (str)data.text;
+		interactionType = (num)data.type;
+		interactionToggle = true;
+		inInteraction = true;
+	
+		showInteraction(true, (str)data.name);
+	} else if (id == 'updateInteraction') {
+		interactionText = (str)data.text;
+		interactionType = (num)data.type;
+		interactionIteration = 0;
+		interactionToggle = true;
+		
+		showInstructions(false, 0);
+	} else if (id == 'endInteraction') {
+		GAME.INPUTS.lockMouse();
+
+		interactionText = "";
+		interactionType = 0;
+		interactionIteration = 0;
+		interactionToggle = false;
+		inInteraction = false;
+
+		showInteraction(false, "");
+		showInstructions(false, 0);
+	}
+}
+
+public action onDIVClicked(str id) {
+	if (id == 'customChat' || id == 'customChatHolder' || id == 'customHolder' || id == 'customInstructions' || id == 'customNameHolder') {
+		if (inInteraction && interactionType == 0) {
+			GAME.NETWORK.send('progressInteraction', {}, GAME.PLAYERS.getSelf());
+		}
+	} else if (id == 'customExitHolder') {
+		GAME.NETWORK.send('endInteraction', {}, GAME.PLAYERS.getSelf());
+	}
+}
+
+public action update(num delta) {
+	if (interactionToggle) {
+		interactionTimer += delta;
+		if (interactionTimer >= 50) {
+			interactionTimer = 0;
+			if (interactionIteration == lengthOf interactionText + 1) {
+				
+				interactionToggle = false;
+				interactionIteration = 0;
+				
+				showInstructions(true, interactionType);
+				return;
+			}
+			
+			str currentString = UTILS.truncateTxt(interactionText, interactionIteration, true);
+			GAME.UI.updateDIVText('customChat', currentString);
+			interactionIteration++;
+		} 
+	}
+}
+

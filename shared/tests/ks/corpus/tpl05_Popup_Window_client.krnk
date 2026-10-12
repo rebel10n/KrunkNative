@@ -1,0 +1,74 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 5 "Popup Window", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+
+# Runs when the game starts
+public action start() {
+	
+	# create popup div
+	str popupDiv = GAME.UI.addDIV(
+		'popupTemp', 
+		false, 
+		'width:400px;height:225px;position:absolute;' +
+		'top:40%;left:50%;transform: translate(-50%, -50%);' +
+		'background-color:grey;cursor:pointer;border-radius:4px;' +
+		'border:solid 2px black;'
+	);
+	
+	# add text to popup div
+	GAME.UI.updateDIVText(popupDiv, 'Hello World');
+	
+	# create close button & add to popup
+	str closeDiv = GAME.UI.addDIV(
+		'popupTempClose', 
+		true, 
+		'width:30px;height:30px;position:absolute;' +
+		'top:10px;left:10px;background-color:white;' +
+		'cursor:pointer;border-radius:4px;',
+		popupDiv
+	);
+	
+	# add text to close div
+	GAME.UI.updateDIVText(closeDiv, 'x');
+	
+	# add custom UI
+	str divID = GAME.UI.addDIV(
+		'infoText', 
+		true,
+		'color:#f1f1f1;position:absolute;top:90%;left:50%;' +
+		'transform: translate(-50%,-50%);font-size: 24px;' +
+		'border:solid 2px #fff;border-radius:4px;' +
+		'padding:10px 30px 10px 30px;background-color: rgba(0,0,0,0.2);'
+	);
+	
+	# add text to div
+	GAME.UI.updateDIVText(divID, 'Press G to Open Popup');
+}
+
+# User pressed a key
+public action onKeyPress(str key, num code) {
+	
+	# check if pressed correct key
+	if (key == 'g') {
+		# show popup
+		GAME.UI.updateDIV('popupTemp', 'display', 'block');
+		
+		# unlock mouse so users can click popup
+		GAME.INPUTS.unlockMouse();
+	}
+}
+
+# User clicked a DIV (ID)
+public action onDIVClicked(str id) {
+	
+	# check if clicked on close div
+	if (id == 'popupTempClose') {
+		# hide popup
+		GAME.UI.updateDIV('popupTemp', 'display', 'none');
+		
+		# lock mouse so users can continue;
+		GAME.INPUTS.lockMouse();
+	}
+}

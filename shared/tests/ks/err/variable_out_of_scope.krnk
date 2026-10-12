@@ -1,0 +1,4 @@
+public action start() {
+    if (true) { num a = 1; }
+    a = 2;
+}

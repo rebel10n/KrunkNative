@@ -1,0 +1,5 @@
+﻿# BOM, CRLF and CR line endings, NBSP, UTF-8 in strings and comments ✓
+str s = "é😀";
+num x = 1;public action start() {
+    GAME.log(s, x); # 漢字
+}

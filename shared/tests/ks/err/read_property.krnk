@@ -1,0 +1,4 @@
+num n = 1;
+public action start() {
+    GAME.log(n.x);
+}

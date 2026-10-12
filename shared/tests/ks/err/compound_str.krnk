@@ -1,0 +1,4 @@
+public action start() {
+    str s = "a";
+    s -= "b";
+}

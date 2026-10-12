@@ -1,0 +1,117 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 9 "Snake Demo", scripts.client (base64-decoded)
+# SCREEN
+obj bounds = GAME.OVERLAY.getSize();
+num width = (num) bounds.width;
+num height = (num) bounds.height;
+
+# TIMER
+num tick = 0;
+num tickRate = 50;
+num clock = 0;
+
+# PLAYER
+obj player = {
+	size: 20,
+	color: 0,
+	
+	pos: num[] [num [(width - 40) / 2, (height - 40) / 2]],
+	tail: 1,
+	
+	horz: 0,
+	vert: -1
+};
+
+
+public action start() {
+	# SETTINGS
+	GAME.SETTINGS.set('scaleUI', 1);
+	GAME.SETTINGS.set('showUI', false);
+
+	# DEFAULT
+	GAME.DEFAULT.disablePlayerBehaviour();
+	GAME.DEFAULT.disable3D();
+	GAME.DEFAULT.disableServerSync();
+	GAME.DEFAULT.disablePrediction();
+}
+
+# DRAW BACKGROUND
+action drawBackground() {
+	GAME.OVERLAY.drawRect(
+		0,
+		0,
+		width,
+		height,
+	0, '#000000', 1);
+}
+
+# DRAW PLAYER
+action drawPlayer() {
+	for (num i = 0; i < lengthOf (num[][]) player.pos; i++) {
+		GAME.OVERLAY.drawRect(
+			(num) player.pos[i][0],
+			(num) player.pos[i][1],
+			(num) player.size,
+			(num) player.size,
+		0, GAME.UTILS.hexFromHue((num) player.color), 1);	
+	}
+}
+
+public action render(num delta) {
+	drawBackground();
+	drawPlayer();
+}
+
+# MOVE PLAYER
+action movePlayer() {
+	
+	num[] old = (num[]) player.pos[(lengthOf (num[][]) player.pos) - 1];
+	num[] new = num [old[0] + (num) player.horz * (num) player.size, old[1] + (num) player.vert * (num) player.size];
+	
+	new[0] = (new[0] + width) % width;
+	new[1] = (new[1] + height) % height;
+	
+	addTo (num[][]) player.pos new;
+	
+	if (lengthOf (num[][]) player.pos > (num) player.tail) {
+		remove player.pos[0];
+	}
+}
+
+public action update(num delta) {
+	if (tick > tickRate) {
+		tick = 0;
+		clock++;
+
+		if (clock % 1 == 0) {
+			movePlayer();
+		}
+	
+	
+		if (clock % 10 == 0) {
+			(num) player.tail++;
+		}
+	}
+	
+	(num) player.color += 0.1 * delta;
+	tick += delta;
+}
+
+
+public action onKeyPress(str key, num code) {
+    if (key == 'w') {
+		player.vert = -1;
+		player.horz = 0;
+    }
+    if (key == 's') {
+		player.vert = 1;
+		player.horz = 0;
+    }
+    if (key == 'a') {
+		player.vert = 0;
+		player.horz = -1;
+    }
+    if (key == 'd') {
+		player.vert = 0;
+		player.horz = 1;
+    }
+}

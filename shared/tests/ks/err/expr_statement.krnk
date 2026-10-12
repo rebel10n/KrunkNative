@@ -1,0 +1,4 @@
+public action start() {
+    num x = 1;
+    x;
+}

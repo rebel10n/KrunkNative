@@ -1,0 +1,2 @@
+public action start() {
+    GAME.log(1);

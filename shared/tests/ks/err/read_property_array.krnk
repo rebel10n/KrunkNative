@@ -1,0 +1,4 @@
+obj[] a = obj[];
+public action start() {
+    GAME.log(a.length);
+}

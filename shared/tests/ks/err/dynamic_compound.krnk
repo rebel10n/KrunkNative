@@ -1,0 +1,4 @@
+obj ball = {x: 1};
+public action update(num delta) {
+    ball.x += delta;
+}

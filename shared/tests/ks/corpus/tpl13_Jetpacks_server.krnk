@@ -1,0 +1,17 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 13 "Jetpacks", scripts.server (base64-decoded)
+# Server Script runs only on Hosted server & not in test mode
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+
+# Player update
+public action onPlayerUpdate(str id, num delta, static obj inputs) {
+	obj tPlr = GAME.PLAYERS.findByID(id);
+    if (!!tPlr && (num) tPlr.classIndex == 1) { # Hunter Only
+		tPlr.disableDefault("jump");
+        if (inputs.jump) {
+           	(num) tPlr.velocity.y += 0.0003 * delta;
+			if ((num) tPlr.velocity.y > 0.03) {
+				tPlr.velocity.y = 0.03;
+			}
+        }
+    }
+}

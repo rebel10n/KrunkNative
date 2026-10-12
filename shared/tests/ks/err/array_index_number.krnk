@@ -1,0 +1,4 @@
+num[] a = num[1];
+public action start() {
+    num x = a["0"];
+}

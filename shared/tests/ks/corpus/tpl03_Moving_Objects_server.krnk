@@ -1,0 +1,40 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 3 "Moving Objects", scripts.server (base64-decoded)
+# Server Script runs only on Hosted server & not in test mode
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+
+# Runs when the game starts
+public action start() {
+
+}
+
+# Runs every game tick
+public action update(num delta) {
+
+}
+
+# Player spawns in
+public action onPlayerSpawn(str id) {
+
+}
+
+# Player update
+public action onPlayerUpdate(str id, num delta, static obj inputs) {
+
+}
+
+# Called from Custom Trigger Action
+public action onCustomTrigger(str playerID, str customParam) {
+
+}
+
+# Server receives network message
+public action onNetworkMessage(str id, obj data, str playerID) {
+
+}
+
+# When a player leaves the server
+public action onPlayerLeave(str playerID) {
+
+}

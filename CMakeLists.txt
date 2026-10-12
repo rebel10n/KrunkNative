@@ -427,6 +427,16 @@ else ()
         target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
+    # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
+    file(GLOB KS_SOURCES shared/src/ks/*.c)
+    add_executable(ksc tools/ks/ksc.c ${KS_SOURCES})
+    target_link_libraries(ksc PRIVATE m)
+    set(KS_FRONT_SOURCES shared/src/ks/ks_lex.c shared/src/ks/ks_parse.c shared/src/ks/ks_check.c shared/src/ks/ks_api_table.c)
+    add_executable(ks_front_test shared/tests/ks_front_test.c ${KS_FRONT_SOURCES})
+    enable_testing()
+    add_test(NAME ks_front_test COMMAND ks_front_test ${CMAKE_SOURCE_DIR}/shared/tests/ks)
+
     # ui_test: engine driver for dumps, probes, renders and benchmarks
     # (client/src/html/ui_test.c holds the subcommand table). It is the engine plus
     # the minimum of the client it needs: shader.c (shader_compile) and the shared
