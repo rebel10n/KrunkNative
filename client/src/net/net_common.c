@@ -371,6 +371,52 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             printf("]}");
             break;
         }
+        case NET_PACKET_AI_ADD_V7: { // "aai" v7
+            LOG_READ(NetAIAddV7Packet, "ai_add_v7");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            packet.asset[sizeof(packet.asset) - 1] = 0;
+            printf("{\"type\":\"ai_add_v7\",\"id\":%u,\"sid\":%d,\"index\":%d,\"name\":\"%s\",\"position\":[%g,%g,%g],\"team\":%d,"
+                   "\"health\":%g,\"mSize\":%g,\"asset\":\"%s\",\"hasAnim\":%u}",
+                   (unsigned int) type, packet.sid, packet.index, packet.name, packet.position[0], packet.position[1], packet.position[2],
+                   packet.team, packet.max_health, packet.m_size, packet.asset, (unsigned int) packet.has_anim);
+            break;
+        }
+        case NET_PACKET_AI_SYNC_V7: { // "ai" v7: [sid, x, y, z, xD, yD, health, didMov, team] per AI
+            NetAISyncV7Packet packet;
+            memset(&packet, 0, sizeof(packet));
+            const size_t header = offsetof(NetAISyncV7Packet, entries);
+            if (length < header || length > sizeof(packet)) { client_net_log_bad_payload("ai_sync_v7", type, payload, length); break; }
+            memcpy(&packet, payload, length);
+            if (packet.count > NET_AI_SYNC_V7_MAX || length != header + packet.count * sizeof(NetAISyncV7Entry)) {
+                client_net_log_bad_payload("ai_sync_v7", type, payload, length);
+                break;
+            }
+            printf("{\"type\":\"ai_sync_v7\",\"id\":%u,\"first\":%u,\"ais\":[", (unsigned int) type, (unsigned int) packet.first);
+            for (int i = 0; i < packet.count; i++) {
+                const NetAISyncV7Entry *e = &packet.entries[i];
+                printf("%s[%d,%g,%g,%g,%g,%g,%d,%u,%d]", i ? "," : "", e->sid, e->position[0], e->position[1], e->position[2], e->x_dir,
+                       e->y_dir, e->health, (unsigned int) e->did_move, e->team);
+            }
+            printf("]}");
+            break;
+        }
+        case NET_PACKET_AI_REMOVE: { // "rai"
+            LOG_READ(NetAIRemovePacket, "ai_remove");
+            printf("{\"type\":\"ai_remove\",\"id\":%u,\"sid\":%d}", (unsigned int) type, packet.sid);
+            break;
+        }
+        case NET_PACKET_AI_ANIM: { // "ana"
+            LOG_READ(NetAIAnimPacket, "ai_anim");
+            packet.clip[sizeof(packet.clip) - 1] = 0;
+            printf("{\"type\":\"ai_anim\",\"id\":%u,\"sid\":%d,\"clip\":\"%s\",\"raw\":%u}", (unsigned int) type, packet.sid, packet.clip,
+                   (unsigned int) packet.raw);
+            break;
+        }
+        case NET_PACKET_AI_SHOT: {
+            LOG_READ(NetAIShotPacket, "ai_shot");
+            printf("{\"type\":\"ai_shot\",\"id\":%u,\"projectile\":%d,\"sid\":%d}", (unsigned int) type, packet.projectile, packet.sid);
+            break;
+        }
         // map triggers (shared/src/triggers.c)
         case NET_PACKET_OBJECT_STATE: { // "do" / "ro" / "gte" / "bnk"
             static const char *const kinds[] = {"destroy", "respawn", "gate", "bank"};

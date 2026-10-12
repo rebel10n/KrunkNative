@@ -1,5 +1,6 @@
 #include <shared.h>
 #include <ai.h>
+#include <map_ai.h>
 #include <bots.h>
 #include <world.h>
 #include <triggers_v7.h>
@@ -188,7 +189,8 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
 
     game->ready = 1;
     game_start_round(game);
-    game_ai_spawn_map(game); // map.manager.addPendingAIs(AI): the map's BOT objects (authority)
+    map_ai_spawn_pending(game); // map.manager.addPendingAIs(AI): the map's AI_SPAWNERs (authority, WP-F)
+    map_bots_spawn_pending(game); // addPendingBots(bots): the map's BOT_SPAWNERs (authority, WP-F)
 }
 
 // The index of mode `mode_id` in game->modes, appending it when the list lacks it (a

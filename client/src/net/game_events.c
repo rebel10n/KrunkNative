@@ -537,6 +537,36 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             if (!game_is_authority(&client->game)) game_ai_apply_sync(&client->game, &sync);
             return 1;
         }
+        // WP-F: the v7.1.4 AI packets (servers send them to clients that announced NET_PROTOCOL_MINOR_V7)
+        case NET_PACKET_AI_ADD_V7: { // "aai" v7: AI.cSpawn(getData)
+            EVENTS_READ(NetAIAddV7Packet, add);
+            if (!game_is_authority(&client->game)) game_ai_apply_add_v7(&client->game, &add);
+            return 1;
+        }
+        case NET_PACKET_AI_SYNC_V7: { // "ai" v7, stride 9: AI.syncAll
+            NetAISyncV7Packet sync;
+            memset(&sync, 0, sizeof(sync));
+            if (length < offsetof(NetAISyncV7Packet, entries) || length > sizeof(sync)) return 1;
+            memcpy(&sync, payload, length);
+            if (sync.count > NET_AI_SYNC_V7_MAX || length < offsetof(NetAISyncV7Packet, entries) + sync.count * sizeof(NetAISyncV7Entry)) return 1;
+            if (!game_is_authority(&client->game)) game_ai_apply_sync_v7(&client->game, &sync);
+            return 1;
+        }
+        case NET_PACKET_AI_REMOVE: { // "rai": AI.removeBySid
+            EVENTS_READ(NetAIRemovePacket, remove);
+            if (!game_is_authority(&client->game)) game_ai_apply_remove(&client->game, &remove);
+            return 1;
+        }
+        case NET_PACKET_AI_ANIM: { // "ana" sid, clip, raw: AI.servAnim
+            EVENTS_READ(NetAIAnimPacket, anim);
+            if (!game_is_authority(&client->game)) game_ai_apply_anim(&client->game, &anim);
+            return 1;
+        }
+        case NET_PACKET_AI_SHOT: { // the AI that fired the last "pr": its projOb visuals
+            EVENTS_READ(NetAIShotPacket, shot);
+            ai_render_ai_shot(client, &shot);
+            return 1;
+        }
         case NET_PACKET_SHOT: {
             EVENTS_READ(NetShotPacket, shot);
             events_shot(client, &shot);

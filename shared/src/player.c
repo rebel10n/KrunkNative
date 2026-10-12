@@ -2232,10 +2232,10 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
         hit_list_push(hits, (Hit) {NULL, other, t, NULL, state});
     }
 
-    // game.AI.ais: x/z +-scale, y .. y + 2 * scale (no hitBoxPad)
+    // game.AI.ais: x/z +-scale, y .. y + 2 * height (no hitBoxPad); v7: not the shooter's team AIs
     for (int i = 0; game->ai && i < game->ai->count; i++) {
         GameAI *ai = &game->ai->ais[i];
-        if (!ai->active) continue;
+        if (!ai->active || (shooter->team && shooter->team == ai->team && !(game->mode && game->mode->config.dmg_team))) continue;
         const float t = game_ai_line_hit(ai, origin, dir);
         if (t <= 0.0f || t > 1.0f) continue;
         hit_list_push(hits, (Hit) {NULL, NULL, t, ai});
@@ -2740,7 +2740,11 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             damage -= weapon->pierce ? base * COMBAT_DENSITY_FLESH * weapon->pierce : damage;
         } else if (hit->ai) {
             // G.ai: changeHealth(-dmg, player), killScore, "4"; the bullet goes on like a wall it pierces
-            game_ai_damage(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0);
+            // v7 players.js: the crit band (crd / crh) and the weapon's effectOnHit (floor(charge * 10) stacks)
+            const float hit_y = shot_height + range * hit->t * sinf(pitch);
+            const int ai_effect_count = (int) floorf(charge * 10.0f);
+            game_ai_damage_ex(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0, hit_y,
+                              weapon->effect_on_hit > 0 && ai_effect_count > 0 ? weapon->effect_on_hit - 1 : -1, ai_effect_count);
             damage -= weapon->pierce ? base * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         } else {
             // G.obj: destructible health ("4", "do", onDestroy) and onShoot / onDamage triggers

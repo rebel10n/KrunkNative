@@ -286,7 +286,7 @@ void sandbox_stop(void) {
     game->players = NULL;
     game->player_count = 0;
     game_bots_free(game);
-    free(game->ai);
+    game_ai_free(game); // the AI list and its data records (shared/src/ai.c)
     if (game->map) map_fini(game->map);
     if (game->mode) mode_fini(game->mode);
     free(game->vote_kick);

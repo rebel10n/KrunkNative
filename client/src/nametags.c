@@ -714,22 +714,23 @@ static int nt_ai_tag_create(AITag *tag, const int index) {
     return 1;
 }
 
-// overlay.render, Game.AI.ais (under !aA): active, canBSeen and a visible mesh; hidden at
-// full health unless alwaysName (scale >= 6). aG = 1 + scale / 30: name in aG * 20 px
-// GameFont centred with its baseline at -aV - aG * 7, the bar aG * 120 wide and
-// (1 + (aG - 1) * 0.3) * 16 high above the anchor (mesh position + scale * 2 + nameOffset + 1.5).
+// overlay.render, Game.AI.ais (under !aA): active, canBSeen and a visible mesh (v7.1.4: at any
+// health). aG = 1 + scale / 30: name in aG * 20 px GameFont centred with its baseline at
+// -aV - aG * 7, the bar aG * 120 * tagScale wide and (1 + (aG - 1) * 0.3) * 16 high above the anchor
+// (mesh position + height * (assetID ? 4 : 2) + nameOffset + 1.5); a teammate AI's bar is healthColT.
+// Not ported: the level box (ail) and the skull above level 60.
 static void nt_ais(Client *client, const vec3 camera, const int hidden) {
     GameAIs *list = client->game.ai;
     const ClientRenderSettings *rs = client_render_settings();
     for (int i = 0; i < GAME_AI_MAX; i++) {
         AITag *tag = &g_nt.ai_tags[i];
         const GameAI *ai = list && i < list->count ? &list->ais[i] : NULL;
-        if (hidden || !ai || !ai->active || !ai->can_be_seen || !ai->shown ||
-            (!ai->always_name && ai->health && ai->health == ai->max_health)) {
+        if (hidden || !ai || !ai->active || ai->removed || !ai->can_be_seen || !ai->shown || ai->data.no_vis) {
             if (tag->root) nt_display(tag->root, 0, &tag->shown);
             continue;
         }
-        const vec3 anchor = {ai->position.x, ai->position.y + sinf(ai->bob_val) * ai->bob_d + ai->scale * 2.0f + NT_NAME_OFFSET + 1.5f, ai->position.z};
+        const float top = ai->height * (ai->data.asset ? 4.0f : 2.0f);
+        const vec3 anchor = {ai->position.x, ai->position.y + sinf(ai->bob_val) * ai->bob_d + top + NT_NAME_OFFSET + 1.5f, ai->position.z};
         double fx, fy;
         if (!nt_project(&client->camera, anchor, &fx, &fy)) {
             if (tag->root) nt_display(tag->root, 0, &tag->shown);
@@ -737,9 +738,10 @@ static void nt_ais(Client *client, const vec3 camera, const int hidden) {
         }
         if (!tag->root && !nt_ai_tag_create(tag, i)) continue;
 
-        const double g = 1.0 + ai->scale / 30.0, bar_w = g * 120.0, bar_h = (1.0 + (g - 1.0) * 0.3) * 16.0;
+        const double tag_scale = ai->data.tag_scale ? ai->data.tag_scale : 1.0;
+        const double g = 1.0 + ai->scale / 30.0, bar_w = g * 120.0 * tag_scale, bar_h = (1.0 + (g - 1.0) * 0.3) * 16.0;
         char v[96];
-        snprintf(v, sizeof(v), "%.3f|%d", g, ai->max_health ? 1 : 0);
+        snprintf(v, sizeof(v), "%.3f|%.3f|%d", g, tag_scale, ai->max_health ? 1 : 0);
         if (strcmp(tag->geometry.value, v)) {
             snprintf(tag->geometry.value, sizeof(tag->geometry.value), "%s", v);
             char px[32];
@@ -766,7 +768,11 @@ static void nt_ais(Client *client, const vec3 camera, const int hidden) {
             const double ratio = ai->health / ai->max_health;
             snprintf(v, sizeof(v), "%.2fpx", (ratio > 0.0 ? ratio : 0.0) * bar_w);
             nt_style(tag->hp, "width", v, &tag->hp_w);
-            nt_style(tag->hp, "background-color", rs->health_col_enemy, &tag->hp_color); // OVERLAY.healthColE
+            // (!ai.team || !mode.teams || ai.team != your team) && (!mode.friendly || ai.team != 1): healthColE
+            const GameModeConfig *mode = client->game.mode ? &client->game.mode->config : NULL;
+            const int my_team = client->me ? client->me->team : 0;
+            const int enemy = (!ai->team || !mode || !mode->teams || ai->team != my_team) && (!mode || !mode->friendly || ai->team != 1);
+            nt_style(tag->hp, "background-color", enemy ? rs->health_col_enemy : rs->health_col_team, &tag->hp_color);
         }
         snprintf(v, sizeof(v), "%.4f%%", fx * 100.0);
         nt_style(tag->root, "left", v, &tag->left);

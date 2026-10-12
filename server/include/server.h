@@ -100,6 +100,7 @@ typedef struct {
     // browser whose forwarded address is loopback too). Such a player hosts the server: DEV.
     unsigned char local:1;
     unsigned char first_packet_seen:1; // NET_PACKET_FORWARDED counts only as the first packet
+    unsigned char peer_minor;      // HELLO minor of a NET_PROTOCOL_MAJOR peer (0 before / other majors): per-peer packet gates
 
     float connected_at;
     float spawned_at;

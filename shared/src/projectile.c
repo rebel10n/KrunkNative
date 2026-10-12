@@ -170,6 +170,7 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
     for (size_t i = 0; i < game->map->object_count; i++) {
         const Object *object = game->map->objects[i];
         if (!projectile_object_blocks(object)) continue;
+        if (game_ai_projectile_skips_objects(game, projectile)) break; // projOb.noObjC (WP-F, shared/src/ai.c)
 
         const float t = line_in_rect(projectile->position, step, object->position, object->scale);
         if (t > 0.0f && t <= 1.0f && t < best.t) {
@@ -209,10 +210,10 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         }
     }
 
-    // projectile.js: AI boxes only for a player's projectile (m.owner)
-    for (int i = 0; projectile->owner_uid >= 0 && game->ai && i < game->ai->count; i++) {
+    // projectiles.js: AI boxes for a player's projectile or another AI's shot (team-checked, never the shooter)
+    for (int i = 0; game->ai && i < game->ai->count; i++) {
         GameAI *ai = &game->ai->ais[i];
-        if (!ai->active || step_length <= 0.0f) continue;
+        if (step_length <= 0.0f || !game_ai_projectile_can_hit(game, projectile, ai)) continue;
         const float t = game_ai_line_hit(ai, projectile->position, step);
         if (t > 0.0f && t <= 1.0f && t < best.t) {
             best = (ProjectileHit) {NULL, ai, t};
@@ -257,7 +258,8 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
             if (owner) damage *= player_attr_damage(owner);
 
             // u[0].ai: changeHealth(-dmg, owner, thrown knife), killScore, "4"
-            if (hit.ai) game_ai_damage(game, hit.ai, owner, damage, projectile->thrown_melee);
+            if (hit.ai) game_ai_projectile_hit_ai(game, projectile, hit.ai, owner, damage); // WP-F: player or AI shooter rules
+            if (hit.player && !owner) game_ai_projectile_hit_player(game, projectile, hit.player); // an AI shot's effectInd (WP-F)
             // u[0].obj: destructible health and onShoot / onDamage / onProjectile / onThrowingMelee triggers
             if (hit.object) game_object_hit(game, hit.object, owner, damage, projectile->thrown_melee, GAME_HIT_PROJECTILE);
 

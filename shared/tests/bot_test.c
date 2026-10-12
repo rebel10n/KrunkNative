@@ -2,13 +2,17 @@
 // (parseBotConfigAssignments), names.js, the bot_* console commands and their replies, bots as
 // real players (SKINS / SPAWN / PLAYER_INFO / LEAVE, leaderboard, kills), the AI fighting,
 // bot_stop / bot_kill / respawn, teams, map changes, the server.cfg quota and the per-tick cost.
+// Map bots (BOT_SPAWNER, shared/src/map_ai.c): the bt* keys, the 16 limit, re-init, Spawn Bot at Node.
 // Run from the repository root: ./<build>/bot_test
 #include <shared.h>
 #include <bots.h>
+#include <map_ai.h>
+#include <ai.h>
 #include <chat_commands.h>
 #include <map_catalog.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -468,6 +472,94 @@ static void test_cost(Game *game, const int sandstorm) {
     run("/bot_kick all");
 }
 
+static cJSON *load_json(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    const long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *text = malloc((size_t) size + 1);
+    if (!text) {
+        fclose(f);
+        return NULL;
+    }
+    const size_t n = fread(text, 1, (size_t) size, f);
+    fclose(f);
+    text[n] = 0;
+    cJSON *json = cJSON_Parse(text);
+    free(text);
+    return json;
+}
+
+static Player *bot_named(Game *game, const char *name) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i]->is_bot && !strcmp(game->players[i]->name, name)) return game->players[i];
+    }
+    return NULL;
+}
+
+// BOT_SPAWNER (v7 MapManager.addBot / addPendingBots): shared/tests/maps/v7_ai_paths.json has two.
+static void test_map_bots(void) {
+    printf("Running map bot (BOT_SPAWNER) test...\n");
+    cJSON *map = load_json("shared/tests/maps/v7_ai_paths.json");
+    CHECK(map != NULL, "v7_ai_paths.json");
+    if (!map) return;
+    static const cJSON *maps[1];
+    maps[0] = map;
+    static int modes[1] = {MODE_ID_FFA};
+    Game game = {0};
+    game_configure(&game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game.hooks.send = test_send;
+    game_init(&game, 0, 0, 1);
+
+    CHECK(game_bots_count(&game) == 2 && count_bots(&game, 1) == 2, "2 map bots (%d)", game_bots_count(&game));
+    Player *a = bot_named(&game, "MapBotA"), *b = bot_named(&game, "MapBotB");
+    CHECK(a && b, "btn names");
+    if (a) {
+        CHECK(a->class_index == 1 && game_bot_of(&game, a) && game_bot_of(&game, a)->team == 1, "MapBotA: btfc + btc 1, btt 1 (class %d)", a->class_index);
+        CHECK(fabsf(a->position.x) < 0.01f && fabsf(a->position.z + 1500.0f) < 0.01f, "at its BOT_SPAWNER (%.1f %.1f)", a->position.x, a->position.z);
+        CHECK(fabsf(a->direction.y + 3.0f * (float) M_PI / 2.0f) < 1e-4f, "d 2 faces -(d + 1) PI / 2 (%f)", a->direction.y);
+    }
+    // btt: the bot's team (players only take it in team modes: validTeam; this round is FFA)
+    if (b) CHECK(game_bot_of(&game, b) && game_bot_of(&game, b)->team == 2 && b->god_mode, "MapBotB: btt 2, btgm");
+
+    // a new round: last round's map bots leave, the map's join again (still 2)
+    free_players(&game);
+    game_init(&game, 0, 0, 1);
+    tick(&game, 1.0f, 30.0f);
+    CHECK(game_bots_count(&game) == 2, "re-init keeps 2 map bots (%d)", game_bots_count(&game));
+
+    // trigger action 69: Uncle Joe at PATH_NODE 1 (-1000, 0, 0), 1000 HP
+    CHECK(map_bot_spawn_at_node(&game, 1, 1) == 1, "Spawn Bot at Node");
+    Player *joe = bot_named(&game, "Uncle Joe");
+    CHECK(joe && joe->max_health == 1000 && fabsf(joe->position.x + 1000.0f) < 0.01f, "Uncle Joe at node 1 with 1000 HP");
+    CHECK(map_bot_spawn_at_node(&game, 99, 1) == 0, "no such node");
+    game_bots_remove_all(&game);
+    free_players(&game);
+    game_ai_free(&game);
+    game_bots_free(&game);
+
+    // config.botLimit: 20 BOT_SPAWNERs -> 16 bots
+    char *text = malloc(16 * 1024);
+    int n = snprintf(text, 16 * 1024, "{\"name\":\"bots\",\"spawns\":[[0,0,0,0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[4000,10,4000]}");
+    for (int i = 0; i < 20; i++) n += snprintf(text + n, (size_t) (16 * 1024 - n), ",{\"i\":95,\"p\":[%d,0,300],\"s\":[5,10,5]}", i * 20);
+    snprintf(text + n, (size_t) (16 * 1024 - n), "]}");
+    cJSON *many = cJSON_Parse(text);
+    free(text);
+    maps[0] = many;
+    Game game2 = {0};
+    game_configure(&game2, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game2.hooks.send = test_send;
+    game_init(&game2, 0, 0, 1);
+    CHECK(game_bots_count(&game2) == 16, "botLimit 16 (%d)", game_bots_count(&game2));
+    game_bots_remove_all(&game2);
+    free_players(&game2);
+    game_ai_free(&game2);
+    game_bots_free(&game2);
+    cJSON_Delete(many);
+    cJSON_Delete(map);
+}
+
 int main(void) {
     test_parse();
 
@@ -503,6 +595,7 @@ int main(void) {
     test_quota(&game);
     test_nav(&game, 1);
     test_cost(&game, 1);
+    test_map_bots();
 
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

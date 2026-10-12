@@ -117,6 +117,7 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
             const ClientConnection *client = &g_server->clients[i];
             if (uid == NET_TARGET_NON_PLAYERS && client->player) continue;
             if (skip >= 0 && client->id == skip) continue;
+            if (!game_ai_packet_for_peer(type, client->peer_minor)) continue; // v3.1.1 vs v7 AI packets (shared/src/ai.c)
             net_send_packet(client->fd, (NetPacketType) type, payload, length);
         }
         return;
@@ -124,7 +125,7 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
 
     ClientConnection *client = net_client_by_id(uid);
     if (client && type == NET_PACKET_END && length == sizeof(NetEndPacket)) accounts_on_end_packet(uid, payload); // didWin for the commit
-    if (client) net_send_packet(client->fd, (NetPacketType) type, payload, length);
+    if (client && game_ai_packet_for_peer(type, client->peer_minor)) net_send_packet(client->fd, (NetPacketType) type, payload, length);
 }
 
 static void net_change_map_internal(int map_index, int mode_index, int respawn_joined);
@@ -1013,6 +1014,11 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     switch (packet->type) {
         case NET_PACKET_HELLO:
+            if (packet->length >= sizeof(NetHelloPacket)) { // the peer's protocol minor (v7 AI packet gate)
+                NetHelloPacket hello;
+                memcpy(&hello, packet->payload, sizeof(hello));
+                client->peer_minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;
+            }
             ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
             break;
         case NET_PACKET_SCRIPT_MSG: // KrunkScript GAME.NETWORK.send from the client script
