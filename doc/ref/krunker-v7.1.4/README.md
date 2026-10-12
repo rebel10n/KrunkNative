@@ -12,7 +12,12 @@ these images. The v3.1.1 references stay in `doc/ref/krunker-v3.1.1/`.
   Custom Game, Select Spray, Custom Games, Store, Join, Client, Ranked, Select Attachment / Reticle,
   Challenges, Changelog, the Host Game and Server Finder type pickers.
 - `ingame/`: HUD states in v7's sandbox game (`ingame-*`): plain, scoped, reloading, scoreboard
-  (Tab), chat open, kill feed, death screen (killed by a bot / no killer), end screen, ESC pause.
+  (Tab), chat open, kill feed, death screen (killed by a bot / no killer), end screen, ESC pause;
+  and (WP-E part 2a) `ingame-death-v7` (the death screen with the killer's class level, player card
+  stat and the life's stats, set on the sandbox server's players before its `players.kill`),
+  `ingame-spectate` (`setSpect(true)` before the pointer lock: the free cam's `#spectateUI`) and
+  `ingame-minimap` (v7's `customsData` cleared and `toggleMinimap(true)`: production hides the
+  minimap on custom maps, and the captures load Kanji as one).
 - `hub/`: the social hub (`hub-*`) as a guest: views loading, login and settings popups.
 - `viewer/`: the model viewer `public/viewer.html?<query>` at 800x600 (WP-F): showcase item views,
   cosmetic render pages, a player wearing every slot and `dev-*` edits through the dev config

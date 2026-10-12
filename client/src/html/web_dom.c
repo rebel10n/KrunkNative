@@ -144,6 +144,18 @@ EM_JS(char *, kn_js_get_text, (int id), {
     return stringToNewUTF8(el ? (el.textContent || "") : "");
 });
 
+// html_dom_canvas_put: canvas.width/height = w/h (only when they differ: assigning clears the
+// bitmap) and putImageData of a copy of the C pixels.
+EM_JS(void, kn_js_canvas_put, (int id, const unsigned char *rgba, int w, int h), {
+    var el = knEl(id);
+    if (!el || !el.getContext) return;
+    if (el.width !== w) el.width = w;
+    if (el.height !== h) el.height = h;
+    var ctx = el.getContext('2d');
+    if (!ctx) return;
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(HEAPU8.buffer, rgba, w * h * 4).slice(), w, h), 0, 0);
+});
+
 EM_JS(void, kn_js_set_attr, (int id, const char *name, const char *value), {
     var el = knEl(id);
     if (!el || !el.setAttribute) return;
@@ -650,6 +662,10 @@ int html_dom_get_text(const HtmlElem e, char *buf, const size_t n) {
 
 void html_dom_set_attr(const HtmlElem e, const char *name, const char *value) {
     if (e && name) kn_js_set_attr((int) e, name, value ? value : "");
+}
+
+void html_dom_canvas_put(const HtmlElem e, const unsigned char *rgba, const int w, const int h) {
+    if (e && rgba && w > 0 && h > 0) kn_js_canvas_put((int) e, rgba, w, h);
 }
 
 void html_dom_remove_attr(const HtmlElem e, const char *name) { if (e && name) kn_js_remove_attr((int) e, name); }

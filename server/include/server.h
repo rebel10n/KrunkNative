@@ -8,6 +8,7 @@
 #include <social.h> // social hub requests (SocialAssembly)
 #include <voice.h> // voice chat relay (io_vc)
 #include <chat_commands.h>
+#include <player_card.h> // WP-E: PLAYER_CARD_STAT_COUNT (ServerAccount)
 #include <pthread.h>
 
 #ifdef WIN32
@@ -46,6 +47,8 @@ typedef enum {
     SERVER_JOIN_AUTH,          // JOIN received, waiting for the brain's auth-reply
 } ServerJoinState;
 
+#define SERVER_CLASS_STATS_MAX 32 // account.stats c0..c31 (v7.1.4 has 16 classes)
+
 typedef struct {
     int account_id;            // 0 guest
     char username[32];
@@ -74,6 +77,11 @@ typedef struct {
     unsigned char password_ok:1;       // a JOIN carried the right server password
     uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v7.1.4 has 6448), enforced on ENT
     int badge;                         // badgeIndex (v7 account stats.bdg, badges.js), -1 none
+    // player-viewer WP-E part 2a: the death screen's account values (players.js:4860), read from the
+    // brain account at auth: stats["c" + classIndex] and every config.playerCardStats value
+    unsigned char has_stats:1;
+    int class_stats[SERVER_CLASS_STATS_MAX];
+    char pc_stats[PLAYER_CARD_STAT_COUNT][16];
 } ServerAccount;
 
 struct ServerTransport;
@@ -99,6 +107,7 @@ typedef struct {
     unsigned char show_badges;     // WP-F ENT V9 showBadges (PLAYER_SHOW_BADGE_*), all for older ENTs
     int streak_indexes[3];         // WP-B: STREAK_SLOTS (v7 ENT streakIndexes), applied at spawn
     unsigned char streak_indexes_set:1; // 0: the default pick (Nuke only)
+    int pc_stat_index;             // WP-E: NET_PACKET_PC_STAT (v7 ENT pcStatIndex), -1 none
     char name[SERVER_PLAYER_NAME_MAX];
     char address[CHAT_CMD_ADDRESS_SIZE]; // dotted peer address (chat /ip, /banip)
     unsigned char op:1;            // CLI `op`: passes the DEV checks of chat commands while perms are on

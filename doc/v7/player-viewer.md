@@ -2556,6 +2556,17 @@ its tests, and the [GAMEPLAY] items that break existing tests.
 
    Recommendation: fix them and document each deviation in code (AGENTS.md allows
    intentional, documented differences).
+
+   Decided (WP-E part 2a, fixed and documented in `client/src/ui/hud_map.c` and
+   `client/src/spectate.c`):
+   - Death markers: `deathMarkerDur` is read as seconds ("Death Marker Duration (s)"): a
+     marker lasts `deathMarkerDur * 1000` ms of overlay time, v7's 7 s default included.
+     Other players' markers use `img/death_0_1.png` too: v7's `death_2_1.png` is not in the
+     v7.1.4 public tree, so v7 never draws them.
+   - `specMiniMap` hides / shows the minimap while spectating (a session toggle like
+     `showSpectatorNameTags`) instead of setting the missing `specMiniMap` setting.
+   - Related, also fixed in part 2a: v7's `io_addMedal` queues a repeated medal with count 1
+     whatever count it came with; KrunkNative keeps the count (`client/src/ui/hud_popups.c`).
 4. **GLTF dependency and v7 assets.** 22 animated items and the pets are GLTF/GLB/FBX.
    Recommendation: adopt `cgltf` (single header, MIT) for GLTF/GLB only, and skip FBX
    unless an item needs it. The v7 model set (hats 510, body 305, back 171, waist 92,

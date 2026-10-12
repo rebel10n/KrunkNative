@@ -5,11 +5,22 @@
 //             branch (first-person follow: cm.crouch / cm.aim easing, zoom, Vp8 hidden)
 //   132.js    spect {speed 1, followDis = minD 10, maxD 160}, followCam, bPZ1, ZZms7
 //             (free cam), the wheel handler and updateMouseInp (look, pitch clamp)
-// KrunkNative has no objective spectate cams (SPECTATE_CAM prefabs): H and 0 do nothing,
-// exactly like v3.1.1 in modes without objectives.
+// player-viewer WP-E part 2a, the v7.1.4 additions (index.js 2085-2206, 11136-11172,
+// 16354-16430, the game loop's objective camera):
+//   - the keys are binds (specFree F, specObj H, specFirst R, specNames M, specFocus ".",
+//     specMiniMap "-"); every matching bind acts, like v7's separate `if`s;
+//   - objective cams: in objective modes, specObj cycles the map's spectate cameras (CAMERA
+//     objects of camera type 0, `obl` = the objective they watch, MapManager.addCamera) of the
+//     active objective, 1-9 pick one and 0 the camera linked to -1; the view sits at the camera
+//     (y + 5) with its rotation, no mouse look;
+//   - focus: specFocus focuses the followed player ("Focusing - name") or clears it ("Focus
+//     Cleared"); a focused player is followed again when it respawns, and leaving clears it;
+//   - specNames toggles showSpectatorNameTags (nametags.c), next / previous skip bots that
+//     count as AI (mode.botsAsAI).
 #include <spectate.h>
 #include <ui_logic.h>
 #include <html_ui.h>
+#include <hud_map.h> // specMiniMap
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,7 +51,15 @@ static struct {
     float crouch;        // cm.crouch
     float aim;           // cm.aim, Krunker convention (1 = not aimed); < 0 unset
     Player *hidden;      // player whose meshes spectate_render_begin took out of the scene
+    int obj_cam;         // spectatingObjectiveCamera
+    int cam_object;      // the followed spectate camera: index into Map.objects, -1 none
+    int cam_placed;      // spectateCameraInitialized
+    int focused_uid;     // focusedPlayerId, -1 none
+    int show_names;      // showSpectatorNameTags
 } g_spect = {
+    .cam_object = -1,
+    .focused_uid = -1,
+    .show_names = 1,
     .target_uid = -1,
     .person = 1,
     .speed = 1.0f,
@@ -54,6 +73,9 @@ void spectate_set_requested(const int on) {
 }
 
 int spectate_requested(void) { return g_spect.requested; }
+int spectate_show_names(void) { return g_spect.show_names; }
+int spectate_focused_uid(void) { return g_spect.focused_uid; }
+int spectate_objective_cam(void) { return g_spect.active && g_spect.obj_cam && g_spect.cam_object >= 0; }
 int spectate_active(void) { return g_spect.active; }
 int spectate_target_uid(void) { return g_spect.active ? g_spect.target_uid : -1; }
 int spectate_first_person(void) { return g_spect.person; }
@@ -109,6 +131,8 @@ void spectate_begin(Client *client) {
     g_spect.pitch = 0.0f;
     g_spect.crouch = 0.0f;
     g_spect.aim = -1.0f; // spect.speed / followDis carry over (b4.reset() keeps them)
+    g_spect.obj_cam = 0;  // io_initGame: spectatingObjectiveCamera = false
+    g_spect.cam_object = -1;
 
     client->in_game = 1;
     client->spawn_requested = 0;
@@ -135,37 +159,101 @@ static void spectate_free_from_camera(const Client *client) {
     g_spect.position = client->camera.position;
 }
 
+// Map.spectateCams[link]: the spectate cameras (CAMERA, camera type 0) watching objective `link`.
+static int spectate_cams(const Client *client, const int link, int *out, const int max) {
+    const Map *map = client->game.map;
+    int n = 0;
+    for (size_t i = 0; map && i < map->object_count && n < max; i++) {
+        const Object *o = map->objects[i];
+        if (o && o->prefab == PREFAB_CAMERA && o->camera_type == 0 && o->obj_link == link) out[n++] = (int) i;
+    }
+    return n;
+}
+
+static int spectate_active_objective(const Client *client) {
+    const GameMode *mode = client->game.mode;
+    return mode && mode->active_objective > 0 ? mode->active_objective : 0; // Game.activeObjective || 0
+}
+
+// Object.keys(spectateCams).length && mode.objective: the objective cam is offered
+int spectate_has_objective_cams(const Client *client) {
+    const Map *map = client->game.map;
+    if (!client->game.mode || !client->game.mode->config.objective || !map) return 0;
+    for (size_t i = 0; i < map->object_count; i++) {
+        const Object *o = map->objects[i];
+        if (o && o->prefab == PREFAB_CAMERA && o->camera_type == 0) return 1;
+    }
+    return 0;
+}
+
+// spectMode's player test: active and not a bot that counts as AI (mode.botsAsAI)
+static int spectate_followable(const Client *client, const Player *player) {
+    return player && player->active && player != client->me &&
+           !(player->is_bot && client->game.mode && client->game.mode->config.bots_as_ai);
+}
+
+static void spectate_follow_cam(const int object) {
+    g_spect.target_uid = -1;
+    g_spect.cam_object = object;
+    g_spect.cam_placed = 0;
+}
+
 void spectate_mode(Client *client, const int dir) {
     if (!g_spect.active) return;
 
     if (dir) {
-        // Cycle aW.players.list from the current target (index 0 without one) to the next active player.
-        const int count = (int) client->game.player_count;
-        int index = 0;
-        int pick = -1;
-
-        for (int i = 0; i < count; i++) {
-            const Player *player = client->game.players[i];
-            if (player && g_spect.target_uid >= 0 && player->uid == g_spect.target_uid) index = i;
-        }
-
-        for (int i = 0; i < count; i++) {
-            index += dir;
-            if (index >= count) index = 0;
-            else if (index < 0) index = count - 1;
-
-            const Player *player = client->game.players[index];
-            if (player && player->active && player != client->me) {
-                pick = player->uid;
+        if (g_spect.obj_cam) {
+            // cycle Map.spectateCams[activeObjective || 0] from the current camera
+            int cams[64];
+            const int count = spectate_cams(client, spectate_active_objective(client), cams, 64);
+            int index = 0, pick = -1;
+            for (int i = 0; i < count; i++) {
+                if (cams[i] == g_spect.cam_object) index = i;
+            }
+            for (int i = 0; i < count; i++) {
+                index += dir;
+                if (index >= count) index = 0;
+                else if (index < 0) index = count - 1;
+                pick = cams[index];
                 break;
             }
-        }
+            if (pick != g_spect.cam_object) spectate_follow_cam(pick);
+        } else {
+            // Cycle the players from the current target (index 0 without one) to the next active one.
+            const int count = (int) client->game.player_count;
+            int index = 0;
+            int pick = -1;
 
-        if (pick != g_spect.target_uid) {
-            g_spect.target_uid = pick;
-            spectate_send_target(client, pick);
+            for (int i = 0; i < count; i++) {
+                const Player *player = client->game.players[i];
+                if (player && g_spect.target_uid >= 0 && player->uid == g_spect.target_uid) index = i;
+            }
+
+            for (int i = 0; i < count; i++) {
+                index += dir;
+                if (index >= count) index = 0;
+                else if (index < 0) index = count - 1;
+
+                const Player *player = client->game.players[index];
+                if (spectate_followable(client, player)) {
+                    pick = player->uid;
+                    break;
+                }
+            }
+
+            if (pick != g_spect.target_uid) {
+                g_spect.target_uid = pick;
+                g_spect.cam_object = -1;
+                spectate_send_target(client, pick);
+            }
         }
     } else {
+        if (g_spect.obj_cam) { // the rig's rotation back to 0
+            g_spect.yaw = 0.0f;
+            g_spect.pitch = 0.0f;
+        }
+        g_spect.obj_cam = 0;
+        g_spect.cam_object = -1;
         g_spect.target_uid = -1;
         g_spect.crouch = 0.0f; // cm = {}
         g_spect.aim = -1.0f;
@@ -177,6 +265,49 @@ void spectate_mode(Client *client, const int dir) {
     hud_spectate_refresh();
 }
 
+// focusPlayer(id, true) / clearFocus(): the chat says what changed (io_addChat type 2)
+static void spectate_focus(Client *client, const int uid) {
+    const Player *player = client_find_player(client, uid);
+    if (g_spect.focused_uid == uid) { // focusPlayer of the focused player: clearFocus
+        g_spect.focused_uid = -1;
+        hud_ui_add_chat(NULL, "Focus Cleared", "#fc03ec");
+        return;
+    }
+    if (player) {
+        char line[96];
+        snprintf(line, sizeof(line), "Focusing - %s", player->name);
+        hud_ui_add_chat(NULL, line, "#fc03ec");
+    }
+    g_spect.focused_uid = uid;
+    if (player && player->active) {
+        g_spect.obj_cam = 0;
+        g_spect.cam_object = -1;
+        g_spect.target_uid = uid;
+        spectate_send_target(client, uid);
+        hud_spectate_refresh();
+    }
+}
+
+static void spectate_clear_focus(void) {
+    if (g_spect.focused_uid < 0) return;
+    g_spect.focused_uid = -1;
+    hud_ui_add_chat(NULL, "Focus Cleared", "#fc03ec");
+}
+
+void spectate_on_player_spawn(Client *client, const int uid) {
+    // io_spawn: a focused player is followed again (focusPlayer without the chat line)
+    if (!g_spect.active || uid < 0 || uid != g_spect.focused_uid) return;
+    g_spect.obj_cam = 0;
+    g_spect.cam_object = -1;
+    g_spect.target_uid = uid;
+    spectate_send_target(client, uid);
+    hud_spectate_refresh();
+}
+
+void spectate_on_player_leave(const int uid) {
+    if (uid >= 0 && uid == g_spect.focused_uid) spectate_clear_focus(); // io_removePlayer: clearFocus(true)
+}
+
 static void spectate_toggle_person(Client *client) {
     g_spect.person = !g_spect.person;
     g_spect.toggled = 1;
@@ -184,34 +315,68 @@ static void spectate_toggle_person(Client *client) {
     hud_spectate_refresh();
 }
 
+static int spectate_bind_is(const char *bind, const int code) {
+    const int val = ui_controls_v7_bind(bind, -1, 0), alt = ui_controls_v7_bind(bind, -1, 1);
+    return code >= 0 && ((val >= 0 && code == val) || (alt >= 0 && code == alt));
+}
+
+// pressButton's window.spectating block (v7 index.js:16354-16430)
 int spectate_press_key(Client *client, const int code) {
     if (!g_spect.active) return 0;
+    int used = 0;
 
-    if (code == 70) { // F: free cam
+    if (spectate_bind_is("specMiniMap", code)) { // v7 bug fixed (hud_map.c): hides / shows the minimap
+        hud_minimap_spectator_toggle();
+        used = 1;
+    }
+    if (spectate_bind_is("specFree", code)) { // spectMode(): free cam
         spectate_mode(client, 0);
-        return 1;
+        used = 1;
     }
-
-    if (code == 72 || code == 48) return 1; // H / 0: objective cams, none in KrunkNative's modes
-
-    if (code > 48 && code < 58) { // 1-9: the player in that #specTeam slot
-        const int uid = hud_spectate_slot_uid(code - 49);
-        const Player *player = uid >= 0 ? client_find_player(client, uid) : NULL;
-
-        if (player && player->active) {
-            g_spect.target_uid = uid;
-            spectate_send_target(client, uid);
-            hud_spectate_refresh();
+    if (spectate_bind_is("specNames", code)) { // showSpectatorNameTags = !showSpectatorNameTags
+        g_spect.show_names = !g_spect.show_names;
+        used = 1;
+    }
+    if (spectate_bind_is("specObj", code)) { // objective modes with spectate cams only
+        if (!spectate_has_objective_cams(client)) return 1;
+        g_spect.obj_cam = 1;
+        g_spect.cam_placed = 0;
+        spectate_mode(client, -1);
+        used = 1;
+    }
+    if (code == 48 && g_spect.obj_cam) { // 0: the camera linked to -1
+        int cams[1];
+        if (spectate_cams(client, -1, cams, 1)) spectate_follow_cam(cams[0]);
+        g_spect.cam_placed = 0;
+        used = 1;
+    }
+    if (code > 48 && code < 58) { // 1-9: that objective cam, or the player in that #specTeam slot
+        used = 1;
+        if (g_spect.obj_cam) {
+            int cams[16];
+            const int count = spectate_cams(client, spectate_active_objective(client), cams, 16);
+            if (code - 49 < count) spectate_follow_cam(cams[code - 49]);
+        } else {
+            const int uid = hud_spectate_slot_uid(code - 49);
+            const Player *player = uid >= 0 ? client_find_player(client, uid) : NULL;
+            if (spectate_followable(client, player)) {
+                g_spect.target_uid = uid;
+                g_spect.cam_object = -1;
+                spectate_send_target(client, uid);
+                hud_spectate_refresh();
+            }
         }
-        return 1;
     }
-
-    if (code == 82) { // R: first / third person
+    if (spectate_bind_is("specFirst", code)) { // first / third person
         spectate_toggle_person(client);
-        return 1;
+        used = 1;
     }
-
-    return 0;
+    if (spectate_bind_is("specFocus", code)) {
+        if (g_spect.target_uid >= 0 && g_spect.target_uid != g_spect.focused_uid) spectate_focus(client, g_spect.target_uid);
+        else spectate_clear_focus();
+        used = 1;
+    }
+    return used;
 }
 
 int spectate_mouse_press(Client *client, const int which) {
@@ -310,6 +475,26 @@ void spectate_tick(Client *client, const float delta, const float mouse_dx, cons
     if (!g_spect.active || !client->game.ready) return;
 
     const float ms = MIN(delta, 0.1f) * 1000.0f;
+    if (g_spect.obj_cam && g_spect.cam_object >= 0) {
+        // the objective camera: at the camera object (addCamera: y + 5) with its rotation
+        // (rotation.x = yR, rotation.y = xR), no mouse look (window.noMouseInp)
+        const Map *map = client->game.map;
+        const Object *cam = map && (size_t) g_spect.cam_object < map->object_count ? map->objects[g_spect.cam_object] : NULL;
+        if (cam) {
+            if (!g_spect.cam_placed) {
+                g_spect.cam_placed = 1;
+                g_spect.position = (vec3) {cam->position.x, cam->position.y + 5.0f, cam->position.z};
+                g_spect.pitch = cam->rotation.y;
+                g_spect.yaw = cam->rotation.x;
+            }
+            client->camera.position = g_spect.position;
+            client->camera.rotation.x = g_spect.pitch;
+            client->camera.rotation.y = g_spect.yaw;
+            client->camera.rotation.z = cam->rotation.z;
+            return;
+        }
+        g_spect.cam_object = -1;
+    }
     const Player *target = g_spect.target_uid >= 0 ? client_find_player(client, g_spect.target_uid) : NULL;
 
     if (g_spect.target_uid >= 0 && (!target || !target->active)) {

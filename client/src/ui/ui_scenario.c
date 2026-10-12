@@ -48,6 +48,9 @@
 #endif
 #include "../html/engine/engine.h"
 #include <gltf.h> // gltf_set_clock_override: animated GLTF items follow the pinned clock
+#include <spectate.h> // state.spectate
+#include <hud_map.h>  // state.customMap (the minimap of custom-map games)
+#include <backend_ui.h> // store_skin_preview: killcard player card banners
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -222,7 +225,7 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
-        "clientChrome", "settingsView", "windowActions", "after_ms",
+        "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -301,8 +304,13 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     // `client_bin <map.json>` (the map list becomes [that map] + the rotation). Without
     // it the client keeps its default rotation list (what the host/games windows show)
     // and the seeded RNG below makes its random map pick repeatable.
+    // state.mapFile (part 2a): an explicit map JSON under assets/ ("maps/v7/kanji.json": v7's own
+    // Kanji, the map v7's references load) instead of the mapName lookup
     const char *map_name = st_str("mapName");
-    if (map_name && map_name[0] && !find_map(map_name, g_sc.map_path, sizeof(g_sc.map_path))) {
+    const char *map_file = st_str("mapFile");
+    if (map_file && map_file[0]) {
+        snprintf(g_sc.map_path, sizeof(g_sc.map_path), "%s%s", assets, map_file);
+    } else if (map_name && map_name[0] && !find_map(map_name, g_sc.map_path, sizeof(g_sc.map_path))) {
         fprintf(stderr, "[scenario] warning: no map named '%s' in %smaps, using the rotation\n", map_name, assets);
         g_sc.map_path[0] = 0;
     }
@@ -502,6 +510,34 @@ static int spawned(const Client *c) {
     return c->in_game && c->me && c->me->active;
 }
 
+static void run_frames(Client *client, int n);
+
+static int spectating(const Client *c) {
+    return c->in_game && spectate_active();
+}
+
+// state.pose [x, y, z, yaw, pitch]: the input script's `pose` (the player at rest there, the
+// offline sandbox server's player too), so position-dependent HUD parts (minimap) repeat.
+static void apply_pose(Client *client) {
+    const cJSON *pose = st("pose");
+    if (!cJSON_IsArray(pose) || cJSON_GetArraySize(pose) < 5 || !client->me) return;
+    double v[5];
+    for (int i = 0; i < 5; i++) v[i] = cJSON_GetNumberValue(cJSON_GetArrayItem(pose, i));
+    if (client->offline) {
+        const NetTeleportPacket tp = {(float) v[0], (float) v[1] + client->me->height, (float) v[2]};
+        client_net_send(client, NET_PACKET_TELEPORT, &tp, sizeof(tp));
+    }
+    // held while the server's teleport comes back (its corrections would move the view)
+    for (int i = 0; i < 30 && client->me; i++) {
+        Player *me = client->me;
+        me->position = (vec3) {(float) v[0], (float) v[1], (float) v[2]};
+        me->last_position = me->position;
+        me->velocity = (vec3) {0};
+        me->direction = (vec2) {(float) v[4], (float) v[3]};
+        run_frames(client, 1);
+    }
+}
+
 // Runs frames until `done(client)` (or the frame / wall-clock cap). Returns 1 when done.
 static int run_until(Client *client, int (*done)(const Client*), const int max_frames, const char *what) {
     const double wall0 = glfwGetTime();
@@ -641,6 +677,19 @@ static void apply_killcard(Client *client) {
         // v7 death screen: weaponIcon / myLevel and the life's stats [timeAlive ms, shots, "acc%", kills, score]
         card.weapon_icon = obj_str(kc, "weaponIcon");
         card.my_level = (int) obj_num(kc, "myLevel", 0);
+        // part 2a: the killer's player card stat ["KDR", "2.50"], banners (store.skins indices of
+        // player cards: Game.store.skins[playerCardIndex].thumbnail) and the report prompt
+        const cJSON *pc = cJSON_GetObjectItemCaseSensitive(kc, "pcStat");
+        if (cJSON_IsArray(pc) && cJSON_GetArraySize(pc) >= 2) {
+            card.pc_stat_name = cJSON_GetStringValue(cJSON_GetArrayItem(pc, 0));
+            card.pc_stat_value = cJSON_GetStringValue(cJSON_GetArrayItem(pc, 1));
+        }
+        static char killer_card[256], my_card[256];
+        const cJSON *kcard = cJSON_GetObjectItemCaseSensitive(kc, "killerCard"), *mcard = cJSON_GetObjectItemCaseSensitive(kc, "myCard");
+        if (cJSON_IsNumber(kcard)) { store_skin_preview(kcard->valueint, killer_card, sizeof(killer_card)); card.killer_card_url = killer_card; }
+        if (cJSON_IsNumber(mcard)) { store_skin_preview(mcard->valueint, my_card, sizeof(my_card)); card.my_card_url = my_card; }
+        card.report = (int) obj_num(kc, "report", 0);
+        card.weapon_color = obj_str(kc, "weaponColor");
         const cJSON *stats = cJSON_GetObjectItemCaseSensitive(kc, "stats");
         if (cJSON_IsArray(stats) && cJSON_GetArraySize(stats) >= 5) {
             card.stats = 1;
@@ -740,12 +789,23 @@ static int ui_scenario_apply(Client *client) {
     const cJSON *board = st("scoreboard");
     if (cJSON_IsArray(board)) hud_ui_set_override_scoreboard(board);
 
+    // v7's reference captures load Kanji as a custom map (customsData): no minimap unless the
+    // scenario says otherwise (WP-E part 2a, client/src/ui/hud_map.c)
+    hud_minimap_set_custom_override(st_bool("customMap", 1));
     if (in_game) {
-        // what `play` does: close the menu, ENT -> SPAWN through the local server
+        // what `play` does: close the menu, ENT -> SPAWN through the local server (or, with
+        // state.spectate, the spectate toggle on: ENT spectate -> SPECTATE)
+        const int spectate = st_bool("spectate", 0);
+        if (spectate) spectate_set_requested(1);
         client_set_menu_open(client, 0);
         client_enter_game(client);
         client->menu_lock_grace_until = 1e18; // a hidden window never holds the pointer lock
-        if (!run_until(client, spawned, SCENARIO_SPAWN_MAX_FRAMES, "the local player to spawn")) return 0;
+        if (spectate) {
+            if (!run_until(client, spectating, SCENARIO_SPAWN_MAX_FRAMES, "spectating")) return 0;
+        } else if (!run_until(client, spawned, SCENARIO_SPAWN_MAX_FRAMES, "the local player to spawn")) {
+            return 0;
+        }
+        apply_pose(client);
         run_frames(client, 2); // HUD visible + first value write (session edge seeds chat)
         apply_chat();
     }

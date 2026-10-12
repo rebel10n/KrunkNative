@@ -122,6 +122,7 @@ void html_dom_set_text(const HtmlElem e, const char *text) { (void) e; (void) te
 int html_dom_get_text(const HtmlElem e, char *buf, const size_t n) { (void) e; clear_buf(buf, n); return 0; }
 
 void html_dom_set_attr(const HtmlElem e, const char *name, const char *value) { (void) e; (void) name; (void) value; }
+void html_dom_canvas_put(const HtmlElem e, const unsigned char *rgba, const int w, const int h) { (void) e; (void) rgba; (void) w; (void) h; }
 void html_dom_remove_attr(const HtmlElem e, const char *name) { (void) e; (void) name; }
 int html_dom_get_attr(const HtmlElem e, const char *name, char *buf, const size_t n) { (void) e; (void) name; clear_buf(buf, n); return -1; }
 void html_dom_set_class(const HtmlElem e, const char *cls, const int on) { (void) e; (void) cls; (void) on; }

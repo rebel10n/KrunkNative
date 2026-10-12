@@ -785,6 +785,7 @@ int combat_events_handle(Client*, int type, const void *payload, uint16_t length
 // map-logic WP-H zombies / airdrop packets (client/src/net/zombie_events.c)
 int zombie_events_handle(Client*, int type, const void *payload, uint16_t length); // 1 = handled
 void combat_send_streak_slots(Client*);      // the streakIndex1..3 loadout, right before every ENT
+void client_send_pc_stat(Client*);           // WP-E (net/game_events.c): pcStatIndex, right before every ENT
 void combat_call_in_streak(Client*, int slot); // window.callInStreak(slot): the streak keys
 // The sight a player's weapons take (attach.js index): the local player's saved attachIndex,
 // others' Player.attach_index (0 Reflex until the v7 SPAWN carries attachIndex, WP-C).

@@ -36,6 +36,7 @@
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
 #include <menu_view.h> // the world behind the menu: menu/death cameras, end slow motion (menu_view.c)
 #include <spectate.h> // Krunker spectating (window.Bf5): cameras, controls, #spectateUI (spectate.c, ui/hud_spectate.c)
+#include <hud_map.h>  // WP-E part 2a: minimap + death markers
 #include <gamepad.h> // game controllers: v3.1.1 gamepad.js + the controller half of CONTROLS (gamepad.c)
 #include <ui_mobile.h> // Krunker's #mobileUI touch controls (ui/ui_mobile.c)
 #include <app_mode.h> // game / social hub / editor / viewer pages (app_mode.c)
@@ -1085,6 +1086,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             NetSpawnPacket spawn;
             if (!client->game.ready || !net_packet_read_spawn(&spawn, packet)) break;
             client_apply_spawn(client, &spawn);
+            spectate_on_player_spawn(client, spawn.uid); // WP-E: a focused player is followed again
             break;
         }
         case NET_PACKET_SKINS: {
@@ -1114,6 +1116,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
 
             NetLeavePacket leave;
             memcpy(&leave, packet->payload, sizeof(leave));
+            spectate_on_player_leave(leave.uid); // WP-E: the focused player left
             client_remove_player(client, leave.uid);
             break;
         }
@@ -1377,6 +1380,7 @@ void client_enter_game(Client *client) {
     if (client->offline || socket >= 0) {
         client->spawn_requested = 1; // SPAWN clears it
         combat_send_streak_slots(client); // WP-B: v7 ENT streakIndexes, ahead of the ENT (1.3+ servers)
+        client_send_pc_stat(client);      // WP-E: v7 ENT pcStatIndex, ahead of the ENT (1.3+ servers)
         client_net_send(client, NET_PACKET_ENT, &packet, ent_size);
     } else {
         client->in_game = 0;
@@ -1412,6 +1416,7 @@ void client_tick(Client *client, const float now, const float delta) {
 
     client_menu_tick(client);
     hud_spectate_tick(client); // #spectateUI while spectating (after hud_ui.c's pass in client_menu_tick)
+    hud_map_tick(client);      // WP-E part 2a: minimap + death markers (client/src/ui/hud_map.c)
     ui_mobile_tick(client);    // #mobileUI touch controls on phones (client/src/ui/ui_mobile.c)
     if (debug_capture_hide_ui()) {
         // KRUNKNATIVE_HIDE_UI (debug_capture.c): world only, no page/preview

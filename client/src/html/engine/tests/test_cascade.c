@@ -1124,8 +1124,10 @@ static void test_dynamic(void)
     check_pe("#tbadge", c, "after", "top", "146px");
     check_pe("#tbadge", c, "after", "font-size", "12px");
     check_pe("#tbadge", c, "after", "color", "rgb(255, 255, 255)");
-    check("#tcanvas", "width", "300px");
-    check("#tcanvas", "height", "150px");
+    /* a canvas has no UA size: Chrome's getComputedStyle shows the used 300 x 150 (a resolved
+     * value), the cascade keeps auto and layout sizes it from the bitmap (test_layout "zn") */
+    check("#tcanvas", "width", "auto");
+    check("#tcanvas", "height", "auto");
     check("#telo", "width", "30px");                                   /* 1.5em at font-size 20px */
     check("#telo", "height", "30px");
     check("#tcolor", "width", "66px");                                 /* author over UA 50px */

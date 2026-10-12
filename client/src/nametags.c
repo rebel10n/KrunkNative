@@ -609,10 +609,16 @@ static void nt_visibility_pass(Client *client) {
         if (!tag) continue;
 
         int visible = !spectating || player->uid != target_uid;
-        // latestData: the native server sends every active player each tick
-        if (!spectating && me &&
-            (!local_team || local_team != player->team || (mode && mode->fake_names)) &&
-            (game->config.hide_nametags || (mode && mode->hide_names) || !nt_can_see(game, me, player->position))) {
+        // latestData: the native server sends every active player each tick.
+        // v7.1.4: spectators see every tag only with showSpectatorNameTags (specNames toggles it);
+        // without, the rules are the followed player's (its team, its line of sight); with no one
+        // followed the tags of the view are kept (Game.canSee(null) finds nothing in the way).
+        const Player *viewer = spectating ? client_find_player(client, target_uid) : me;
+        const int view_team = spectating ? (viewer ? viewer->team : 0) : local_team;
+        const int forced = spectating && spectate_show_names();
+        if (!forced && (spectating || me) &&
+            (!view_team || view_team != player->team || (mode && mode->fake_names)) &&
+            (game->config.hide_nametags || (mode && mode->hide_names) || (viewer && !nt_can_see(game, viewer, player->position)))) {
             visible = 0;
         }
         if ((rs->hide_names == 1 && (!(mode && mode->teams) || (local_team && local_team != player->team))) ||

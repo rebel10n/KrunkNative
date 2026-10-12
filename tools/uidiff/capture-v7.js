@@ -70,7 +70,10 @@ const RECT_IDS = ['windowHeader', 'menuWindow', 'windowHolder', 'signedOutHeader
   'bottomLeftHolder', 'bottomLeftPlayer', 'bottomLeftHealth', 'bottomLeftHealthBar', 'bottomLeftClassImg', 'weapHolder',
   'ammoHolder', 'killFeed', 'centerLeaderDisplay', 'leaderContainerD', 'deathUIHolder', 'endUI', 'victorySub', 'endInfo',
   'endTimer', 'endTabbedView', 'endMidHolder', 'reloadMsg', 'aimDot', 'navBar', 'navTitle', 'profileInfo', 'navButtons',
-  'loadMessage', 'genericPop', 'popupHolder', 'editrDB', 'steamDB', 'iosDB', 'androidDB'];
+  'loadMessage', 'genericPop', 'popupHolder', 'editrDB', 'steamDB', 'iosDB', 'androidDB',
+  // player-viewer WP-E part 2a: spectating and the minimap
+  'spectateHUD', 'specNames', 'specTimer', 'specGameInfo', 'specTeam0', 'specTeam1', 'specControlHolder', 'miniMapOverlay',
+  'topLeftMain'];
 const RECTS = `(() => { const o = {}; for (const id of ${JSON.stringify(RECT_IDS)}) { const e = document.getElementById(id);
   if (!e) continue; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
   const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
@@ -244,6 +247,52 @@ scenario('ingame-scoped', 'ingame', async (c) => {
   await c.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 640, y: 360, button: 'right', buttons: 2, clickCount: 1 });
   await settle(c, 900);
 });
+// player-viewer WP-E part 2a. The death screen with what an account brings: the killer's class
+// level ("3" [1]: account.stats["c" + classIndex]), its player card stat ("3" [2]: pcStatIndex 3,
+// KDR from the account's kills / deaths) and this life's stats ("3" [3]), set on the sandbox
+// server's players before its real players.kill. The player card banners are left out (their
+// thumbnails are WebP, which KrunkNative's native HTML engine does not decode yet).
+scenario('ingame-death-v7', 'ingame', async (c) => {
+  await withBot(c);
+  const r = await c.eval(`(() => { const bot = ${SERVER_BOT};
+    bot.account = Object.assign({activeChallenges: []}, bot.account || {}, {kills: 300, deaths: 120, games: 40, wins: 25, score: 45000});
+    bot.account.stats = Object.assign({}, (bot.account && bot.account.stats) || {}, {['c' + bot.classIndex]: 2500});
+    bot.anonMode = false; bot.pcStatIndex = 3;
+    sandboxPlayer.totShotsL = 42; sandboxPlayer.hitShotsL = 16; sandboxPlayer.killsL = 3; sandboxPlayer.scoreL = 450;
+    sandboxPlayer.spawnTime = Date.now() - 65000;
+    try { sandboxGame.players.kill(sandboxPlayer, bot, {}); } catch (e) { return String(e.stack); } return 1; })()`);
+  if (r !== 1) console.error('[capture-v7] ingame-death-v7 kill: ' + r);
+  await settle(c, 800);
+  console.error('[capture-v7] ingame-death-v7 killer: ' + JSON.stringify(await c.eval(`(() => { const b = ${SERVER_BOT};
+    return {cls: b.classIndex, weapon: b.weapon && b.weapon.name, icon: b.weapon && b.weapon.icon, name: b.name}; })()`)));
+});
+// Spectating the sandbox (setSpect(true) before the pointer lock: io "ent" with the spectate
+// flag): the free cam's #spectateUI with #specControlHolder and the player list.
+scenario('ingame-spectate', 'ingame', async (c) => {
+  await c.eval(CONNECTED_MENU);
+  await c.eval(SPAWN_BOT);
+  await sleep(800);
+  await c.eval('setSpect(true), 1');
+  await c.eval(LOCK_SHIM);
+  await c.eval('RENDER.renderer.domElement.requestPointerLock(), 1');
+  await sleep(2500);
+  await c.eval(flatPage('#000000'));
+  await c.eval(PIN_TIMER);
+  await settle(c, 800);
+});
+// The minimap (Minimap.js): v7 production hides it on custom maps (customsData && isProd), and
+// the captures load Kanji as one, so customsData is cleared and the minimap reset as for an
+// official map. The view is pinned at a known pose (the scenario's `pose`).
+const MM_POSE = [0, 0, 0, 0, 0];
+scenario('ingame-minimap', 'ingame', async (c) => {
+  await enterGame(c);
+  await c.eval(`(() => { Game.customsData = null; toggleMinimap(true); return 1; })()`);
+  await settle(c, 800);
+  console.error('[capture-v7] ingame-minimap pose: ' + JSON.stringify(await c.eval(`(() => { const p = Game.players.list.find(q => q.isYou);
+    return p ? [p.x, p.y, p.z, CONTROLS.xDr, CONTROLS.yDr, CONTROLS.object.position.x, CONTROLS.object.position.z] : null; })()`)));
+  void MM_POSE;
+});
+
 // the sandbox's own game end (game.js endGame(): the "end" packet, v7's end animation)
 scenario('ingame-endscreen', 'ingame', async (c) => {
   await enterGame(c);
@@ -307,7 +356,10 @@ async function openPage(o) {
 }
 
 async function capture(sc, idx) {
-  const { c, close, errors } = await openPage({ w: sc.size[0], h: sc.size[1], port: 9500 + (idx % 8), httpPort: 6900 + (idx % 8),
+  // KN_CAPTURE_PORT_BASE moves the Chromium debug ports (base + 0..7) and the static server
+  // (base + 1000 + 0..7) off the defaults, for parallel runs.
+  const base = +process.env.KN_CAPTURE_PORT_BASE || 0;
+  const { c, close, errors } = await openPage({ w: sc.size[0], h: sc.size[1], port: (base || 9500) + (idx % 8), httpPort: (base ? base + 1000 : 6900) + (idx % 8),
     page: sc.page, query: sc.query || '', settle: 12000 });
   try {
     await sc.run(c);

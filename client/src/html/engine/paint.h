@@ -98,6 +98,8 @@ typedef struct PaintHost {
     /* Paints control internals of an input/select box (widgets_paint).  When
      * NULL, inputs are painted as plain boxes (background + border only). */
     void (*widget_paint)(void *user, const PaintWidgetArgs *args);
+    /* The bitmap of a <canvas> box (premultiplied texture, size in px); 0 = paint nothing. */
+    int (*canvas_image)(void *user, const Box *box, uint32_t *tex, float *w, float *h);
 } PaintHost;
 
 struct PaintCtx {

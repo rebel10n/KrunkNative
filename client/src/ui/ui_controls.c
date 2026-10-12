@@ -41,7 +41,10 @@
 #define SETTING_KEY_MAX 48
 #define CHAT_MAX 256
 
-// aU.keyboardMap (2.js): Krunker's DOM keyCode -> name table, 256 entries.
+// UTILS.keyboardMap (v7.1.4 src/libs/utils.js:5): DOM keyCode -> name, 223 entries (NULL past
+// them: getKeyName gives "undefined"). Byte-exact, tabs included ("F24\t\t", "TILDE\t", ...).
+// v7 differs from v3.1.1's table from keyCode 136 on (v3 padded F24 with empty names; 186-191 are
+// ";", "=", ",", "-", ".", "/" in v7).
 static const char *const KEYBOARD_MAP[256] = {
     "", "", "", "CANCEL", "", "", "HELP", "", "BACK_SPACE", "TAB", "", "", "CLEAR", "ENTER", "ENTER_SPECIAL", "",
     "SHIFT", "CONTROL", "ALT", "PAUSE", "CAPS_LOCK", "KANA", "EISU", "JUNJA", "FINAL", "HANJA", "", "ESCAPE",
@@ -52,17 +55,18 @@ static const char *const KEYBOARD_MAP[256] = {
     "W", "X", "Y", "Z", "OS_KEY", "", "CONTEXT_MENU", "", "SLEEP", "NUMPAD0", "NUMPAD1", "NUMPAD2", "NUMPAD3",
     "NUMPAD4", "NUMPAD5", "NUMPAD6", "NUMPAD7", "NUMPAD8", "NUMPAD9", "MULTIPLY", "ADD", "SEPARATOR", "SUBTRACT",
     "DECIMAL", "DIVIDE", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14",
-    "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "", "", "", "", "", "", "", "",
-    "NUM_LOCK", "SCROLL_LOCK", "WIN_OEM_FJ_JISHO", "WIN_OEM_FJ_MASSHOU", "WIN_OEM_FJ_TOUROKU", "WIN_OEM_FJ_LOYA",
-    "WIN_OEM_FJ_ROYA", "", "", "", "", "", "", "", "", "", "CIRCUMFLEX", "EXCLAMATION", "DOUBLE_QUOTE", "HASH",
-    "DOLLAR", "PERCENT", "AMPERSAND", "UNDERSCORE", "OPEN_PAREN", "CLOSE_PAREN", "ASTERISK", "PLUS", "PIPE",
-    "HYPHEN_MINUS", "OPEN_CURLY_BRACKET", "CLOSE_CURLY_BRACKET", "TILDE", "", "", "", "", "VOLUME_MUTE",
-    "VOLUME_DOWN", "VOLUME_UP", "", "", ";", "=", ",", "MINUS", "PERIOD", "SLASH", "BACK_QUOTE", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "[", "\\", "]", "QUOTE", "",
-    "META", "ALTGR", "", "WIN_ICO_HELP", "WIN_ICO_00", "", "WIN_ICO_CLEAR", "", "", "WIN_OEM_RESET", "WIN_OEM_JUMP",
-    "WIN_OEM_PA1", "WIN_OEM_PA2", "WIN_OEM_PA3", "WIN_OEM_WSCTRL", "WIN_OEM_CUSEL", "WIN_OEM_ATTN",
-    "WIN_OEM_FINISH", "WIN_OEM_COPY", "WIN_OEM_AUTO", "WIN_OEM_ENLW", "WIN_OEM_BACKTAB", "ATTN", "CRSEL", "EXSEL",
-    "EREOF", "PLAY", "ZOOM", "", "PA1", "WIN_OEM_CLEAR", "",
+    "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24\t\t", "NUM_LOCK", "SCROLL_LOCK",
+    "WIN_OEM_FJ_JISHO", "WIN_OEM_FJ_MASSHOU", "WIN_OEM_FJ_TOUROKU", "WIN_OEM_FJ_LOYA", "WIN_OEM_FJ_ROYA\t\t", "",
+    "CIRCUMFLEX", "EXCLAMATION", "DOUBLE_QUOTE", "HASH", "DOLLAR", "PERCENT", "AMPERSAND", "UNDERSCORE",
+    "OPEN_PAREN", "CLOSE_PAREN", "ASTERISK", "PLUS", "PIPE", "HYPHEN_MINUS", "OPEN_CURLY_BRACKET",
+    "CLOSE_CURLY_BRACKET", "TILDE\t", "VOLUME_MUTE", "VOLUME_DOWN", "VOLUME_UP", "", "", ";", "=", ",", "MINUS",
+    "PERIOD", "SLASH", "BACK_QUOTE\t\t\t\t\t\t", "", "", "[", "\\", "]", "QUOTE", "", "META", "ALTGR", "",
+    "WIN_ICO_HELP", "WIN_ICO_00", "", ";", "=", ",", "-", ".", "/", "~", "WIN_OEM_PA3", "WIN_OEM_WSCTRL",
+    "WIN_OEM_CUSEL", "WIN_OEM_ATTN", "WIN_OEM_FINISH", "WIN_OEM_COPY", "WIN_OEM_AUTO", "WIN_OEM_ENLW",
+    "WIN_OEM_BACKTAB", "ATTN", "CRSEL", "EXSEL", "EREOF", "PLAY", "ZOOM", "", "PA1", "WIN_OEM_CLEAR", "", "", "",
+    "", "", "", "", "", "[", "\\", "]", "'", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL,
 };
 // The `toggle: true` settings of v7.1.4's SETTINGS.list (settings.js order) offered by the
 // Toggle rows: value, "name [category header]" (windows[6].gen). v7 also lists the hidden
@@ -442,7 +446,7 @@ const char *ui_controls_key_name(const int code, char *buf, const size_t n) {
     if (code < 0) snprintf(buf, n, "UNBOUND");
     else if (code == KEY_SCROLL) snprintf(buf, n, "SCROLL");
     else if (code > KEY_MOUSE_BASE) snprintf(buf, n, "M%d", code - KEY_MOUSE_BASE);
-    else if (code < (int) (sizeof(KEYBOARD_MAP) / sizeof(KEYBOARD_MAP[0]))) snprintf(buf, n, "%s", KEYBOARD_MAP[code]);
+    else if (code < (int) (sizeof(KEYBOARD_MAP) / sizeof(KEYBOARD_MAP[0])) && KEYBOARD_MAP[code]) snprintf(buf, n, "%s", KEYBOARD_MAP[code]);
     else snprintf(buf, n, "undefined"); // keyboardMap[l] past the table
     return buf;
 }
@@ -1426,7 +1430,7 @@ void ui_controls_fake_mouse(Client *client, const int type, const float dx, cons
         if (!ui_controls_enabled(client)) return;
         // window.noMouseInp: the first-person spectator view takes no look input. The
         // other spectator cams turn with these sums (spectate_tick -> ui_controls_fill_input).
-        if (spectate_active() && spectate_first_person() && spectate_target_uid() >= 0) return;
+        if (spectate_active() && ((spectate_first_person() && spectate_target_uid() >= 0) || spectate_objective_cam())) return;
         g_ctl.input_cntrl = 1;              // inputType = "cntrlInput"
         g_ctl.look_x += dx;                 // a4 += movementX
         g_ctl.look_y += dy;                 // a5 += movementY

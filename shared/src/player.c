@@ -6,6 +6,7 @@
 #include <game_config.h> // WP-E: config.classes, forceC
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
 #include <triggers_v7.h> // WP-C: onPlayerSpawn / Damage / Die / Kill map triggers
+#include <player_card.h> // WP-E: the death screen's life accuracy
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -57,6 +58,7 @@ Player *player_init(Game *game) {
     player->c_send_rate = GAME_LAG_COMP_SEND_RATE;  // this.cSendRate = 10
     player->head_mlt = 1.0f;                        // v7.1.4 headMlt
     player_set_streak_indexes(player, NULL);        // v7.1.4 streakIndex1..3 defaults (Nuke only)
+    player->pc_stat_index = -1;                     // WP-E: no player card stat until the server sets one
     effects_reset(player);
 
     return player;
@@ -87,6 +89,9 @@ void player_spawn(Player *player) {
     lag_comp_clock_reset(&player->lag_clock); // a new life restarts its input seq at 0
 
     player->active = 1;
+    // WP-E death screen: player.js reset() of the life counters, spawnTime = Date.now()
+    player->life_start = player->game->now;
+    player->life_shots = player->life_hits = player->life_kills = player->life_score = 0;
 
     const size_t class_count = player->game->class_count ? player->game->class_count : sizeof(g_classes) / sizeof(g_classes[0]);
     const ClassConfig *classes = player->game->classes ? player->game->classes : g_classes;
@@ -2389,7 +2394,9 @@ void player_score(Player *player, int amount, const int is_kill) {
 
     amount = mode_score_scale(game, player, amount, is_kill); // v7 killMlt / oneflag carrier multipliers (WP-D)
     if (amount > 0 && zombies_double_points(game)) amount *= 2; // WP-H: doublePointsTimer
-    player->score += mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
+    const int gain = mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
+    player->score += gain;
+    if (player->active) player->life_score += gain; // WP-E: scoreL (the death screen's "Score")
     const int cap = mode_score_cap(game); // v7 noScrLimit: no cap (WP-D)
     if (cap && player->score > cap) {
         player->score = cap;
@@ -2512,6 +2519,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     if (killer && killer != player) {
         player->last_killer_uid = killer->uid;
         killer->kills++;
+        if (killer->active) killer->life_kills++; // WP-E: killsL
 
         if (streaks) {
             killer->streak++;
@@ -2560,6 +2568,25 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
 
     for (int k = 0; k < PLAYER_DAMAGE_SLOTS; k++) player->damage_received[k] = (PlayerDamage) {-1, 0.0f, 0.0f};
     player->kill_streak = 0;
+
+    // WP-E: the victim's "3" extras (players.js:4860) right before its KILL: the killing weapon,
+    // the killer's class stat and player card stat, and this life's stats
+    NetDeathInfoPacket death = {
+        .victim_uid = player->uid,
+        .killer_uid = killer ? killer->uid : -1,
+        .weapon_index = weapon_index,
+        .class_stat = killer && killer != player ? killer->class_stat : 0,
+        .pc_stat_index = (int8_t) (killer && killer != player && killer->pc_stat_index >= 0 ? killer->pc_stat_index : -1),
+        .thrown = (uint8_t) (kill_info && kill_info->thrown),
+        .fists = (uint8_t) (kill_info && kill_info->fists),
+        .time_alive_ms = (int32_t) fmaxf(0.0f, (game->now - player->life_start) * 1000.0f),
+        .shots = player->life_shots,
+        .kills = player->life_kills,
+        .score = player->life_score,
+    };
+    if (death.pc_stat_index >= 0) snprintf(death.pc_stat_value, sizeof(death.pc_stat_value), "%s", killer->pc_stat_value);
+    player_card_accuracy(player->life_shots, player->life_hits, death.accuracy, sizeof(death.accuracy));
+    game_send(game, player->uid, NET_PACKET_DEATH_INFO, &death, sizeof(death));
 
     const NetKillPacket packet = {
         .victim_uid = player->uid,
@@ -2707,6 +2734,7 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     const int authority = game_is_authority(game);
     const float range = ray < 0 ? weapon->physical_range : weapon->range;
     if (range <= 0.0f || (!authority && ray >= 0)) return;
+    if (authority && ray >= 0 && player->active) player->life_shots++; // WP-E: totShotsL (the death screen's "Shots Fired")
 
     const vec3 origin = {player->position.x, shot_height, player->position.z};
     const vec3 dir = combat_shot_vector(range, pitch, yaw);
@@ -2781,6 +2809,8 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             break;
         }
 
+        // WP-E: hitShotsL counts a ray whose first hit is a player or an AI (players.js vLN02370 == 0)
+        if (i == 0 && (hit->player || hit->ai) && player->active) player->life_hits++;
         const float drop = fminf(1.0f, 1.0f - (1.0f - hit->t) * range / (range - weapon->drop_start));
         // v7.1.4: falloff clamps at 0 and a 0 bullet stops (v3.1.1 could go negative)
         float dealt = fmaxf(0.0f, damage - weapon->damage_drop * drop);

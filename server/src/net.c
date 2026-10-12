@@ -509,6 +509,7 @@ static void net_spawn_client(ClientConnection *client) {
     player_set_streak_indexes(client->player, client->streak_indexes_set ? client->streak_indexes : NULL);
     client->player->has_account = (unsigned char) (client->acct.account_id > 0 || client->local);
     player_spawn(client->player);
+    accounts_player_card(client, client->player); // WP-E: class stat of the spawned class + pcStatIndex value
     client->joined = 1;
     net_mark_client_spawned(client);
     if (first_spawn) net_send_existing_spawns(client);
@@ -798,6 +799,7 @@ void net_add_client(ClientConnection *client) {
     client->anon_mode = 0;
     client->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
     client->show_badges = PLAYER_SHOW_BADGES_ALL;
+    client->pc_stat_index = -1;
     client->chat_limiter = (NetChatLimiter) {0};
     client->ping_seq = 0;
     client->ping_ms = -1;
@@ -1235,6 +1237,12 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             if (client->player) player_set_streak_indexes(client->player, client->streak_indexes);
             break;
         }
+        case NET_PACKET_PC_STAT: // WP-E: v7 ENT pcStatIndex (the killer's player card stat on the death screen), before the ENT
+            if (packet->length != sizeof(NetPcStatPacket)) break;
+            client->pc_stat_index = (int8_t) packet->payload[0];
+            if (client->pc_stat_index < -1 || client->pc_stat_index >= PLAYER_CARD_STAT_COUNT) client->pc_stat_index = -1;
+            if (client->player) accounts_player_card(client, client->player);
+            break;
         case NET_PACKET_USE_STREAK: // WP-B: "k<slot>" -> players.checkStreak (v7.1.4 sandbox semantics)
             if (client->player && packet->length == sizeof(NetUseStreakPacket)) player_check_streak(client->player, packet->payload[0]);
             break;

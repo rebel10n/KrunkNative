@@ -84,6 +84,9 @@ void     html_dom_code_spans(HtmlElem, const HtmlCodeSpan *spans, int n);
 void     html_dom_code_lines(HtmlElem, const HtmlCodeLine *lines, int n);
 
 // ---- geometry (valid after layout; 0/false when display:none)
+// <canvas> bitmap (getContext("2d").putImageData after width = w / height = h): straight
+// RGBA8, row 0 on top, w x h px. The C UI draws on the CPU (client/src/ui/canvas2d.c).
+void     html_dom_canvas_put(HtmlElem canvas, const unsigned char *rgba, int w, int h);
 int      html_dom_get_rect(HtmlElem, HtmlRect *out);
 float    html_dom_offset_width(HtmlElem);
 float    html_dom_offset_height(HtmlElem);

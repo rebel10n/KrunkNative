@@ -20,6 +20,7 @@
 #include <ai_render.h> // AI shots ("pr" with an AI stored kind)
 #include <camera_feel.h>
 #include <spectate.h> // NET_PACKET_SPECTATE -> spectate_begin / spectate_end
+#include <hud_map.h>  // WP-E part 2a: death markers, minimap blips
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
@@ -29,6 +30,10 @@
 #include <lobby_ui.h>      // WP-E: GAME_CONFIG / NETWORK_DATA / MATCH_VOTE_STATE (client/src/net/lobby_events.c)
 #include <world_events.h>  // map-logic WP-B: NET_PACKET_ZONE / BUILD / LOG_TIME / OBJECT_ANIM
 #include <map_triggers.h>  // map trigger events: "do"/"ro"/"gte"/"bnk", "chp", "s", "scr", "am" popups (client/src/map_triggers.c)
+#include <player_card.h>   // WP-E part 2a: death screen class levels / player card stats
+#include <cosmetics.h>     // player card items (cosmetic_item)
+#include "../viewer/viewer_store.h" // store skins / rarities (the killer's weapon skin)
+#include <game_config.h>   // game_config_is_custom (the report prompt)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,6 +102,52 @@ static void events_player_dead(Client *client, Player *player) {
     }
 }
 
+// WP-E part 2a: the victim's "3" extras (NET_PACKET_DEATH_INFO), sent right before its KILL.
+static NetDeathInfoPacket g_death_info;
+static int g_death_info_valid;
+
+// store.skins[index].thumbnail of a player card (Game.store.skins[playerCardIndex] ? .thumbnail : null).
+static const char *events_card_url(const int index, char *out, const size_t n) {
+    out[0] = 0;
+    if (index < 0 || !cosmetic_item(index, ITEM_PLAYER_CARD)) return NULL;
+    store_skin_preview(index, out, n);
+    return out[0] ? out : NULL;
+}
+
+// f1975: the killer's weapon [name] = its skin's name in the rarity colour (the skin on the
+// loadout slot of the killing weapon, the melee skin on a melee kill, "Fists" on a fist kill).
+static const char *events_weapon_label(const Player *killer, const Weapon *weapon, const int weapon_index, const int fists,
+                                       const char **color) {
+    *color = NULL;
+    if (!weapon) return fists ? "Fists" : "";
+    if (weapon->melee && fists) return "Fists";
+    const ViewerSkin *skin = NULL;
+    if (weapon->melee) {
+        skin = killer->skins.melee >= 0 ? viewer_skin(killer->skins.melee) : NULL;
+    } else {
+        int slot = -1;
+        for (int i = 0; i < killer->loadout_size && slot < 0; i++)
+            if (killer->loadout && killer->loadout[i] == weapon_index) slot = i;
+        const int index = slot == 0 ? killer->skins.primary : slot == 1 ? killer->skins.secondary : -1;
+        skin = index >= 0 ? viewer_skin(index) : NULL;
+        if (skin && (skin->type != 0 || skin->weapon - 1 != weapon_index)) skin = NULL; // skin.weapon - 1 != loadout[slot]
+    }
+    if (!skin || !skin->name) return weapon->name ? weapon->name : "";
+    if (skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count) *color = g_viewer_rarities[skin->rarity].color;
+    return skin->name;
+}
+
+// v7 ENT pcStatIndex (getSavedVal("pcStatIndex"), Change Loadout's player card stat), right before
+// every ENT to v7 servers: the stat the server shows on our victims' death screens.
+void client_send_pc_stat(Client *client) {
+    if (!client->offline && client->net_server_minor < NET_PROTOCOL_MINOR_V7) return;
+    char buf[16];
+    long index = -1;
+    if (html_storage_get("pcStatIndex", buf, sizeof(buf)) >= 0 && buf[0]) index = strtol(buf, NULL, 10);
+    const NetPcStatPacket packet = {.index = (int8_t) (index >= 0 && index < PLAYER_CARD_STAT_COUNT ? index : -1)};
+    client_net_send(client, NET_PACKET_PC_STAT, &packet, sizeof(packet));
+}
+
 // g1(): kill feed for everyone, death card + respawn delay for the victim.
 static void events_kill(Client *client, const NetKillPacket *packet) {
     Player *victim = events_find_player(client, packet->victim_uid);
@@ -104,6 +155,10 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     const Weapon *weapon = events_weapon(client, packet->weapon_index);
 
     if (victim) {
+        // io_killPlayer: overlay.addDeathMarker for a teammate, ourselves or anyone while spectating
+        const Player *me = client->me;
+        if (victim == me || spectate_active() || (me && me->team && me->team == victim->team))
+            hud_death_marker_add(victim->position, victim == me);
         victim->deaths = (unsigned int) packet->victim_deaths;
         events_player_dead(client, victim);
     }
@@ -128,15 +183,52 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     client_recon_on_death(client); // no movement input leaves until the respawn (net/recon.c)
     HudKillCard card = {0};
     const int by_other = killer && killer != victim;
+    const NetDeathInfoPacket *death = g_death_info_valid && g_death_info.victim_uid == packet->victim_uid ? &g_death_info : NULL;
+    g_death_info_valid = 0;
     client->camera.zoom = 1.0f; // kill(): toggleAim(player, 0) -> resetAim() -> RENDER.zoom(1); hud_ui_show_death the DOM half
-    menu_view_death_cam(client, by_other ? killer : NULL); // CONTROLS.camLookAt(killer.x, y + height / 1.5, z)
+    // CONTROLS.camLookAt(killer.x, y + height / 1.5, z) only with the game config's Kill Cams (kCams, default on)
+    menu_view_death_cam(client, by_other && client->game.config.kill_cams ? killer : NULL);
 
+    char killer_card[256], my_card[256], pc_value[sizeof(g_death_info.pc_stat_value) + 1];
     if (by_other) {
+        const int weapon_index = death && death->weapon_index >= 0 ? death->weapon_index : packet->weapon_index;
+        const Weapon *killer_weapon = death && death->weapon_index >= 0 ? events_weapon(client, death->weapon_index) : weapon;
         card.killer = events_name(killer);
-        card.weapon = packet->fists ? "Fists" : weapon && weapon->name ? weapon->name : "";
-        const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
-        card.level = info && info->level > 1 ? info->level : 1; // guests: Krunker shows lvl 1 for fresh players
+        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, packet->fists || (death && death->fists), &card.weapon_color);
         card.class_index = packet->killer_class >= 0 ? packet->killer_class : 0;
+        if (death) {
+            card.level = player_card_class_level(death->class_stat); // f1975: the killer's class level from "3" [1]
+            card.thrown = killer_weapon && killer_weapon->melee && death->thrown;
+            if (death->pc_stat_index >= 0 && player_card_stat_name(death->pc_stat_index)) {
+                card.pc_stat_name = player_card_stat_name(death->pc_stat_index);
+                snprintf(pc_value, sizeof(pc_value), "%.*s", (int) sizeof(death->pc_stat_value), death->pc_stat_value);
+                card.pc_stat_value = pc_value;
+            }
+        } else { // an older server: the account level stands in (guests show lvl 1)
+            const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
+            card.level = info && info->level > 1 ? info->level : 1;
+        }
+        card.killer_card_url = events_card_url(killer->cosmetics_v7.player_card, killer_card, sizeof(killer_card));
+        card.my_card_url = events_card_url(victim->cosmetics_v7.player_card, my_card, sizeof(my_card));
+        // (otherPlayer.level <= 10 || !level) && account && !Game.isCustom: "[key] to Report"
+        const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
+        card.report = account_get() && !game_config_is_custom(&client->game) && (!info || info->level <= 10);
+        // our "lvl": account.stats["c" + classIndex] (guests: lvl 1)
+        const AccountInfo *acc = account_get();
+        char key[8];
+        snprintf(key, sizeof(key), "c%d", victim->class_index);
+        const cJSON *cls = acc && acc->stats ? cJSON_GetObjectItemCaseSensitive(acc->stats, key) : NULL;
+        card.my_level = player_card_class_level(cJSON_IsNumber(cls) ? cls->valuedouble : 0.0);
+    }
+    if (death) { // "3" [3]: [timeAlive, shots, accuracy, kills, score]
+        card.stats = 1;
+        card.time_alive_ms = death->time_alive_ms;
+        card.shots = death->shots;
+        static char accuracy[sizeof(g_death_info.accuracy) + 1];
+        snprintf(accuracy, sizeof(accuracy), "%.*s", (int) sizeof(death->accuracy), death->accuracy);
+        card.accuracy = accuracy;
+        card.kills = death->kills;
+        card.life_score = death->score;
     }
     card.score = packet->score;
 
@@ -585,11 +677,13 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         }
         case NET_PACKET_SHOT: {
             EVENTS_READ(NetShotPacket, shot);
+            hud_minimap_on_shot(client, shot.uid); // f1988: the shooter blips on the minimap
             events_shot(client, &shot);
             return 1;
         }
         case NET_PACKET_PROJECTILE: {
             EVENTS_READ(NetProjectilePacket, projectile);
+            hud_minimap_on_shot(client, projectile.owner_uid); // f1988 (io_addProjectile's sid)
             events_projectile(client, &projectile);
             return 1;
         }
@@ -635,6 +729,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_LEADERBOARD: {
             EVENTS_READ(NetLeaderboardPacket, board);
             events_apply_board(client, &board);
+            return 1;
+        }
+        case NET_PACKET_DEATH_INFO: { // WP-E part 2a: the victim's "3" extras, ahead of its KILL
+            EVENTS_READ(NetDeathInfoPacket, death);
+            g_death_info = death;
+            g_death_info_valid = 1;
             return 1;
         }
         case NET_PACKET_LEADER_STATS: { // WP-E: v7 "7" columns (mode.leaderStats) in the server's board order
@@ -806,6 +906,8 @@ void client_game_events_reset(Client *client) {
     hud_modes_reset(client);
     hud_popups_on_init(); // "init": bN = 0
     hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt
+    hud_map_on_init(client); // part 2a: overlay.miniMap.reset + overlay.resetAll (no death markers)
+    g_death_info_valid = 0;
 #ifdef HUD_UI_HAVE_HIDE_END_SCREEN
     hud_ui_hide_end_screen(client); // no-op unless the end screen is up
 #endif

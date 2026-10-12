@@ -20,6 +20,9 @@ void accounts_on_connect(ClientConnection*);
 void accounts_handle_join(ClientConnection*, const NetPacket*);
 int  accounts_gate_ent(ClientConnection*, int spectate);   // 0 = deferred until the identity is settled
 void accounts_on_spawn(ClientConnection*, int first_spawn);
+// WP-E: the death screen's account values on the player (players.js:4860): class_stat of its
+// class (0 for guests and anonMode) and its pcStatIndex value (-1 for guests / none picked).
+void accounts_player_card(const ClientConnection*, Player*);
 void accounts_send_infos_to(ClientConnection*);           // every player's PLAYER_INFO to a joiner
 void accounts_on_disconnect(ClientConnection*);
 void accounts_on_end_packet(int uid, const NetEndPacket*);

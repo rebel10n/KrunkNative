@@ -83,6 +83,12 @@ elements stay valid. All geometry is in CSS px from the viewport's top-left.
   underline) and `code_lines` (per-line backgrounds and gutter markers). Natively the widget
   paints it (`widgets.c`); on the web `web_dom.c` lays a `<pre>` overlay under the textarea,
   whose own text is transparent. Used by the editor's KrunkScript window.
+- **Canvas bitmap**: `canvas_put(el, rgba, w, h)` is `canvas.width = w; canvas.height = h`
+  (only when they change) + `putImageData` of straight RGBA8 pixels (row 0 on top). The C UI
+  draws on the CPU (`client/src/ui/cpu_canvas.c`, e.g. the minimap); natively the engine
+  uploads a texture that the canvas box paints (an untouched canvas paints nothing), on the web
+  `web_dom.c` writes the page's real canvas. Like Chrome, a canvas has no UA size: its natural
+  size is the bitmap's (300 x 150 by default).
 - **Geometry** (valid after layout; 0 while `display:none`): `get_rect`
   (getBoundingClientRect), `offset_width/height`, `viewport(w, h, dpr)`,
   `observe_resize(el, fn, user)` (ResizeObserver equivalent, coalesced per frame),

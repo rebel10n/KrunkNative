@@ -291,6 +291,42 @@ game("ingame-death-self",
       R("death-stats", [705, 595, 150, 90], "text", "Shots Fired / Accuracy / Kills / Score rows"),
       R("empty-top-left", [0, 0, 300, 100], "flat", "HUD hidden", expect="background")],
      "Killed with no killer: `You Died` + stats.", frames=DEATH_FRAMES)
+# player-viewer WP-E part 2a. The v7 death screen with an account's data on the killer (class
+# level from its class stat, the KDR player card stat) and this life's stats; the killer's class
+# and weapon are what the sandbox bot had in the capture (capture-v7.js prints them).
+rc = rects("ingame/ingame-death-v7")
+game("ingame-death-v7",
+     game_state(hud(health=0, deaths=1), chat=BOT_CHAT, dead=True, after_ms=DEATH_AFTER_MS,
+                killcard={"killer": "Bot", "weapon": "Shotgun", "weaponIcon": "icon_6", "level": 2, "myLevel": 1,
+                          "score": 0, "classIndex": 4, "pcStat": ["KDR", "2.50"], "stats": [65000, 42, "38.1%", 3, 450]}),
+     [R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder (moves right while dead)"),
+      R("death-weapons", [400, 565, 440, 65], "text", "[Shotgun] icon, kills 1 - 0, [Assault Rifle] icon"),
+      R("death-cards", [365, 655, 450, 55], "image", "class images + lvl 2 / lvl 1, Bot + `2.50 KDR` VS Local User"),
+      R("death-stats", [945, 565, 180, 125], "text", "Time Survived 1m 5s / Shots Fired 42 / Accuracy 38.1% / Kills 3 / Score 450"),
+      R("killer-tag", [1080, 330, 80, 30], "scene", "the kill cam turns to the bot: its 3D nametag (not drawn by "
+        "--render-scenario)", skip=True),
+      R("empty-top-left", [0, 0, 300, 100], "flat", "HUD hidden on the death screen", expect="background")],
+     "v7 death screen: class level, player card stat and life stats from the \"3\" packet (NET_PACKET_DEATH_INFO).",
+     frames=DEATH_FRAMES)
+rc = rects("ingame/ingame-spectate")
+game("ingame-spectate",
+     game_state(hud(timerText="03:44"), chat=BOT_CHAT, spectate=True),
+     [R("spec-names", pad(rc["specNames"], 2), "text", "#specNames: Spectating (free cam)"),
+      R("spec-info", pad([591, 12, 98, 52], 2), "text", "#specTimer 03:44 + #specGameInfo Free For All"),
+      R("spec-team", pad(rc["specTeam0"], 2), "image", "#specTeam0: the sandbox bot's row (class / name differ)",
+        skip=True),
+      R("spec-controls", pad(rc["specControlHolder"], 2), "text",
+        "#specControlHolder: Prev / Next / Free Cam [F] / Player/Cam / First Person [R] / Focus [.] / Force "
+        "Nametags [M] / Minimap [-] (no Objective Cam row in FFA)"),
+      R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder"),
+      R("empty-bottom-left", [300, 600, 700, 100], "flat", "no player HUD while spectating", expect="background")],
+     "Spectating the sandbox (Spectate toggle on): free cam, v7's #spectateUI.")
+rc = rects("ingame/ingame-minimap")
+game("ingame-minimap",
+     game_state(hud(), customMap=False, mapFile="maps/v7/kanji.json", pose=[144, -139, -182, -1.5707963267948966, 0]),
+     hud_regions(rc, [R("minimap", pad(rc["miniMapOverlay"], 2), "text",
+                        "#miniMapCanvas: Kanji's mmId image turned with the view, the N/E/S/W ring, our arrow")]),
+     "The minimap on Kanji (an official map in KrunkNative; the reference clears v7's customsData) at a fixed pose.")
 rc = rects("ingame/ingame-endscreen")
 game("ingame-endscreen", game_state(hud(), endscreen={"place": 1, "result": 1, "text": "#1 VICTORY", "nextRound": "00:00"}),
      [R("victory-text", [420, 300, 440, 100], "text", "`#1 VICTORY` is drawn on v7's overlay canvas (vicTitle)", skip=True),

@@ -73,7 +73,9 @@ static const char KN_UA_CSS[] =
 
     /* ---- replaced elements --------------------------------------------- */
     "img { display: inline; overflow: clip; overflow-clip-margin: content-box; }\n"
-    "canvas { display: inline; width: 300px; height: 150px; }\n"
+    /* canvas: no UA size (Chrome): its natural size is the bitmap's (width / height attributes,
+     * 300 x 150 by default, layout_build.c), so html_dom_canvas_put's size takes effect */
+    "canvas { display: inline; }\n"
     "video { display: inline; object-fit: contain; width: 300px; height: 150px; }\n"
     "iframe { display: inline; border: 2px inset; width: 300px; height: 150px; }\n"
 

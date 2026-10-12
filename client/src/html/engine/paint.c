@@ -1342,12 +1342,18 @@ static void paint_replaced_content(Painter *p, const Box *b)
     const CssComputed *s = b->style;
     DlItem it;
     PbImage img;
-    if (!s || !box_visible(b) || !box_is_image(b)) return; /* canvas / video: nothing */
+    if (!s || !box_visible(b) || (!box_is_image(b) && b->type != BOX_CANVAS)) return; /* video: nothing */
     const PaintHost *h = &p->ctx->host;
-    const char *src = h->image_src ? h->image_src(h->user, b) : b->src;
     const int nearest = s->image_rendering == CSS_IMAGE_RENDERING_PIXELATED ||
                         s->image_rendering == CSS_IMAGE_RENDERING_CRISP_EDGES;
-    if (!lookup_image(p->ctx, src, p->ctx->doc_base_url, nearest, &img)) return;
+    if (b->type == BOX_CANVAS) { /* html_dom_canvas_put's bitmap, none until the page draws */
+        memset(&img, 0, sizeof img);
+        if (!h->canvas_image || !h->canvas_image(h->user, b, &img.tex, &img.w, &img.h)) return;
+        img.premultiplied = 1;
+    } else {
+        const char *src = h->image_src ? h->image_src(h->user, b) : b->src;
+        if (!lookup_image(p->ctx, src, p->ctx->doc_base_url, nearest, &img)) return;
+    }
     const DlRect border = box_rect(p, b);
     const DlRect content = content_rect_of(border, b);
     DlRect dst;

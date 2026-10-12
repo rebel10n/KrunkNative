@@ -239,6 +239,13 @@ typedef struct {
     int stats;           // the life's stats below are set (else the HUD samples time alive / kills / score)
     int time_alive_ms, shots, kills, life_score; // shots < 0 = "Unknown"
     const char *accuracy; // "47%"; NULL = "Unknown"
+    // part 2a: the rest of f1975 (NET_PACKET_DEATH_INFO / the killer's and our SPAWN data)
+    const char *weapon_color;    // the killer's weapon skin rarity colour ("[name]"), NULL = rgba(255,255,255,0.7)
+    const char *killer_card_url; // .death-row-bottom-bg banners: Game.store.skins[playerCardIndex].thumbnail, NULL none
+    const char *my_card_url;
+    const char *pc_stat_name;    // the killer's player card stat: config.playerCardStats[i].name, NULL = none ("3" [2] null)
+    const char *pc_stat_value;
+    int report;                  // "[<playerList key>] to Report" (killer level <= 10, signed in, public game)
 } HudKillCard;
 // v7 io_killPlayer for the local player: #deathUIHolder (f1975) + UI.toggleGameUI(false).
 void hud_ui_show_death(Client*, const HudKillCard *card);
@@ -288,6 +295,10 @@ void hud_ui_set_override_scoreboard(const cJSON *rows);
 // WP-E: NET_PACKET_LEADER_STATS (v7 "7" leaderStats columns, board order); NULL forgets it (new round).
 void hud_ui_set_leader_stats(const NetLeaderStatsPacket *packet);
 void hud_ui_set_clock(double now_s);             // HUD clock (hit marker, 20 Hz pacing); < 0 = GLFW clock
+const char *hud_ui_override_timer(void);        // scenario hud.timerText (also #specTimer), NULL none
+double hud_ui_now_ms(const Client*);            // the HUD clock in ms (hud_ui_set_clock or GLFW)
+// World point -> #uiBase fraction (0..1, y down) through the scene camera; 0 outside the frustum.
+int hud_ui_project(const Client*, float x, float y, float z, double *sx, double *sy);
 
 // ---- menu_ui.c
 void menu_set_region_label(const char *name);    // #menuRegionLabel text when connected; NULL = MENU_REGION_NAME
@@ -491,6 +502,7 @@ void hud_popups_on_spawn(void);                  // "start": medal queue cleared
 void hud_popups_on_init(void);                   // "init": bN = 0
 void hud_popups_page_reset(void);                // fresh page: elements gone
 void hud_popups_tick(double now_ms, int visible); // per frame: draw + age every popup
+void hud_popups_set_comp(int comp);              // Game.isComp: io_addMedal shows nothing
 // map-logic WP-H zombies HUD (hud_zombies.c): #powerUpHolder timers, the finiteAmmo reserve in
 // #ammoMax / #reloadMsg, #roundMessage. Every frame after client_hud_html_tick().
 void hud_zombies_tick(Client*);

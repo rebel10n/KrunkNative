@@ -6,7 +6,9 @@
 //             name, slot number for the 1-9 keys, eye on the target)
 //   io_updateTimer #specTimer = the round clock; map.js #specGameInfo = mode name; spec0/spec1
 //             team scores (team modes only); #specControlHolder (objective cam row only with
-//             objective cams, KPD Vision row hidden)
+//             objective cams, KPD Vision row hidden), its key labels from the binds
+//             (updateKeybindUI: #specObjCam, #specFreeCam, #specNamesF, #specFirstP, #specFocus,
+//             #specMinimap)
 //   UI.js     toggleGameUI / toggleControlUI with window.spectating: #spectateUI shown, the
 //             player HUD holders hidden, #topLeftMain + #topRight + chat kept
 //   game-overlay fakeCross: the small four-bar crosshair drawn while following in first person
@@ -47,7 +49,9 @@ static struct {
     char teams_key[160];
     char recticle[16];
     int cross;                  // fake crosshair shown, -1 unknown
-} g_hs = {.shown = -1, .cross = -1};
+    char keys_key[160];         // the bind labels written into #specControlHolder
+    int obj_row;                // the Objective Cam row shown, -1 unknown
+} g_hs = {.shown = -1, .cross = -1, .obj_row = -1};
 
 /* ------------------------------------------------------------ helpers */
 
@@ -152,6 +156,8 @@ void hud_spectate_reset(void) {
     g_hs.timer[0] = g_hs.info[0] = g_hs.message[0] = g_hs.person[0] = g_hs.teams_key[0] = g_hs.recticle[0] = 0;
     g_hs.cross = -1;
     g_hs.dirty = 1;
+    g_hs.keys_key[0] = 0;
+    g_hs.obj_row = -1;
 }
 
 int hud_spectate_slot_uid(const int index) {
@@ -337,6 +343,7 @@ static void hs_update_info(const Client *client) {
                                                        : (client->game.config.game_time > 0 ? client->game.config.game_time * 60 : 0);
     char timer[16];
     snprintf(timer, sizeof(timer), "%02d:%02d", seconds / 60, seconds % 60);
+    if (hud_ui_override_timer()) snprintf(timer, sizeof(timer), "%s", hud_ui_override_timer()); // #timerVal's text
     hs_set_text("specTimer", g_hs.timer, sizeof(g_hs.timer), timer);
 
     const char *mode = client->game.mode && client->game.mode->config.name ? client->game.mode->config.name : "Free for All";
@@ -376,14 +383,36 @@ static void hs_update_info(const Client *client) {
             snprintf(score, sizeof(score), "%d", mode_team_score(&client->game, 2));
             if ((el = html_dom_by_id("specScoreTm1"))) html_dom_set_text(el, score);
         }
-        const HtmlElem contr = html_dom_by_id("specControlHolder");
-        HtmlElem objective = 0;
-        if (contr) {
-            HtmlElem items[12];
-            if (html_dom_query_all(contr, ".specControl", items, 12) >= 3) objective = items[2];
-        }
-        if (objective) html_dom_set_display(objective, "none");
         hs_set_display("specKPDContr", "none");
+    }
+
+    // io_startGame: the Objective Cam row only with objective cams (mode.objective && spectateCams)
+    const int obj_row = spectate_has_objective_cams(client);
+    if (obj_row != g_hs.obj_row) {
+        g_hs.obj_row = obj_row;
+        const HtmlElem contr = html_dom_by_id("specControlHolder");
+        HtmlElem items[12];
+        if (contr && html_dom_query_all(contr, ".specControl", items, 12) >= 3) html_dom_set_display(items[2], obj_row ? "" : "none");
+    }
+
+    // updateKeybindUI: "[" + UTILS.getKeyName(CONTROLS.binds.<bind>.val) + "]"
+    static const char *const labels[][2] = {{"specObjCam", "specObj"}, {"specFreeCam", "specFree"}, {"specNamesF", "specNames"},
+                                           {"specFirstP", "specFirst"}, {"specFocus", "specFocus"}, {"specMinimap", "specMiniMap"}};
+    char keys[160], names[6][24];
+    size_t len = 0;
+    keys[0] = 0;
+    for (int i = 0; i < 6; i++) {
+        char name[24];
+        ui_controls_key_name(ui_controls_v7_bind(labels[i][1], -1, 0), name, sizeof(name));
+        snprintf(names[i], sizeof(names[i]), "[%s]", name);
+        len += (size_t) snprintf(keys + len, len < sizeof(keys) ? sizeof(keys) - len : 0, "%s|", names[i]);
+    }
+    if (strcmp(keys, g_hs.keys_key)) {
+        snprintf(g_hs.keys_key, sizeof(g_hs.keys_key), "%s", keys);
+        for (int i = 0; i < 6; i++) {
+            const HtmlElem el = html_dom_by_id(labels[i][0]);
+            if (el) html_dom_set_text(el, names[i]);
+        }
     }
 }
 

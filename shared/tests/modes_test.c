@@ -7,6 +7,7 @@
 // the shared game hooks (no sockets). Run from the repository root: ./<build>/modes_test
 #include <shared.h>
 #include <spawnables.h>
+#include <player_card.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -1343,6 +1344,65 @@ static void test_leader_stats(Game *game) {
     CHECK(found && stats.count == 1 && stats.uid[0] == 1 && stats.stat_count == 1, "Raid: no bots, [\"score\"] (%d rows)", stats.count);
 }
 
+// WP-E part 2a: the victim's "3" extras (NET_PACKET_DEATH_INFO) ahead of its KILL, and the
+// config.playerCardStats / class level formulas.
+static void test_death_info(Game *game) {
+    printf("Running death info test...\n");
+    CHECK(NET_PACKET_DEATH_INFO == NET_PACKET_BLOCK_SOCIAL + 1 && NET_PACKET_PC_STAT == NET_PACKET_BLOCK_SOCIAL + 2, "WP-E part 2a ids 241 / 242");
+    CHECK(sizeof(NetDeathInfoPacket) <= NET_MAX_PAYLOAD, "DEATH_INFO fits a frame");
+
+    start_mode(game, MODE_ID_FFA);
+    game->now = 2.0f;
+    Player *killer = add_player(game, 1, 0);
+    Player *victim = add_player(game, 2, 0);
+    CHECK(victim->life_start == 2.0f && !victim->life_shots && !victim->life_hits && !victim->life_kills && !victim->life_score,
+          "spawn resets the life counters");
+    CHECK(killer->pc_stat_index == -1 && !killer->class_stat, "no account values by default");
+    player_score(victim, 40, 0);
+    CHECK(victim->life_score == 40, "scoreL follows the score (%d)", victim->life_score);
+    victim->life_shots = 8;
+    victim->life_hits = 3;
+    killer->class_stat = 2500;
+    killer->pc_stat_index = 3;
+    snprintf(killer->pc_stat_value, sizeof(killer->pc_stat_value), "1.52");
+    game->now = 7.25f;
+    g_sent_count = 0;
+    PlayerKillInfo info = {.weapon_id = 1};
+    player_kill(victim, killer, &info, 1);
+    int death_at = -1, kill_at = -1;
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].type == NET_PACKET_DEATH_INFO && death_at < 0) death_at = i;
+        if (g_sent[i].type == NET_PACKET_KILL && kill_at < 0) kill_at = i;
+    }
+    CHECK(death_at >= 0 && kill_at > death_at && g_sent[death_at].uid == 2, "DEATH_INFO to the victim, before the KILL");
+    NetDeathInfoPacket death;
+    memset(&death, 0, sizeof(death));
+    if (death_at >= 0 && g_sent[death_at].length == sizeof(death)) memcpy(&death, g_sent[death_at].payload, sizeof(death));
+    CHECK(death.victim_uid == 2 && death.killer_uid == 1 && death.weapon_index == 1, "victim / killer / weapon");
+    CHECK(death.class_stat == 2500 && death.pc_stat_index == 3 && !strcmp(death.pc_stat_value, "1.52"), "the killer's class and card stat");
+    CHECK(death.time_alive_ms == 5250 && death.shots == 8 && !strcmp(death.accuracy, "37.5%") && death.score == 40,
+          "life stats (%d ms, %d shots, %s, score %d)", death.time_alive_ms, death.shots, death.accuracy, death.score);
+    CHECK(killer->life_kills == 1, "killsL counts the kill");
+
+    // config.playerCardStats and f1975's class level
+    cJSON *account = cJSON_Parse("{\"kills\":300,\"deaths\":120,\"games\":40,\"wins\":25,\"score\":45000,\"funds\":12,"
+                                 "\"stats\":{\"s\":1000,\"h\":381,\"hs\":77,\"c2\":10000}}");
+    char v[16];
+    CHECK(player_card_stat_format(0, account, v, sizeof(v)) && !strcmp(v, "150.00"), "SPK %s", v);
+    CHECK(player_card_stat_format(3, account, v, sizeof(v)) && !strcmp(v, "2.50"), "KDR %s", v);
+    CHECK(player_card_stat_format(7, account, v, sizeof(v)) && !strcmp(v, "1.67"), "W/L %s", v);
+    CHECK(player_card_stat_format(10, account, v, sizeof(v)) && !strcmp(v, "38.1%"), "Accuracy %s", v);
+    CHECK(player_card_stat_format(12, account, v, sizeof(v)) && !strcmp(v, "77"), "Headshots %s", v);
+    CHECK(player_card_stat_format(13, account, v, sizeof(v)) && !strcmp(v, "15"), "Losses %s", v);
+    CHECK(player_card_stat_format(23, account, v, sizeof(v)) && !strcmp(v, "619"), "Misses %s", v);
+    CHECK(!player_card_stat_format(PLAYER_CARD_STAT_COUNT, account, v, sizeof(v)) && !player_card_stat_format(0, NULL, v, sizeof(v)), "no stat");
+    CHECK(!strcmp(player_card_stat_name(27), "War Machines"), "28 stats");
+    cJSON_Delete(account);
+    CHECK(player_card_class_level(0) == 1 && player_card_class_level(10000) == 4 && player_card_class_level(2500) == 2, "class levels");
+    player_card_accuracy(0, 0, v, sizeof(v));
+    CHECK(!strcmp(v, "0%"), "no shots: 0%%");
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *sandstorm = NULL;
@@ -1389,6 +1449,7 @@ int main(void) {
     test_zombies_raid(&game);
     test_net_v7(&game);
     test_leader_stats(&game);
+    test_death_info(&game);
 
     if (g_failures) {
         printf("modes_test: %d of %d check(s) failed\n", g_failures, g_checks);

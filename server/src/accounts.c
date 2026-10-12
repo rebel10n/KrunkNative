@@ -1235,6 +1235,25 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     const cJSON *bdg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "bdg") : cJSON_GetObjectItem(account, "badge");
     client->acct.badge = cJSON_IsNumber(bdg) && bdg->valueint >= 0 ? bdg->valueint : -1;
     acc_load_skins(client, account);
+    // WP-E: the death screen's account values (class levels, config.playerCardStats)
+    client->acct.has_stats = 1;
+    for (int i = 0; i < SERVER_CLASS_STATS_MAX; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "c%d", i);
+        const cJSON *c = cJSON_IsObject(stats) ? cJSON_GetObjectItemCaseSensitive(stats, key) : NULL;
+        client->acct.class_stats[i] = cJSON_IsNumber(c) && c->valuedouble > 0.0 ? (int) c->valuedouble : 0;
+    }
+    for (int i = 0; i < PLAYER_CARD_STAT_COUNT; i++) player_card_stat_format(i, account, client->acct.pc_stats[i], sizeof(client->acct.pc_stats[i]));
+}
+
+void accounts_player_card(const ClientConnection *client, Player *player) {
+    const int account = client->acct.account_id > 0 && client->acct.has_stats;
+    const int cls = player->class_index;
+    // players.js:4860: account.stats["c" + classIndex] unless anonMode; [pcStatIndex, stat] with an account
+    player->class_stat = account && !player->anon_mode && cls >= 0 && cls < SERVER_CLASS_STATS_MAX ? client->acct.class_stats[cls] : 0;
+    player->pc_stat_index = account && client->pc_stat_index >= 0 && client->pc_stat_index < PLAYER_CARD_STAT_COUNT ? client->pc_stat_index : -1;
+    if (player->pc_stat_index >= 0) snprintf(player->pc_stat_value, sizeof(player->pc_stat_value), "%s", client->acct.pc_stats[player->pc_stat_index]);
+    else player->pc_stat_value[0] = 0;
 }
 
 static void acc_handle_auth_reply(const cJSON *frame) {

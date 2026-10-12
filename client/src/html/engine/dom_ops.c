@@ -14,6 +14,7 @@
 #if defined(KRUNKNATIVE_HTML_ENGINE) && !defined(__EMSCRIPTEN__)
 
 #include <html_dom.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -297,6 +298,24 @@ void html_dom_set_attr(const HtmlElem e, const char *name, const char *value)
     if (!alive(dom, e) || !name || !*name) return;
     dom_set_attr(dom, e, name, value ? value : "");
     if (attr_affects_boxes(name)) engine_children_changed(g, dom_parent(dom, e) ? dom_parent(dom, e) : e);
+}
+
+void html_dom_canvas_put(const HtmlElem e, const unsigned char *rgba, const int w, const int h)
+{
+    Engine *g = engine_get();
+    Dom *dom = engine_dom(g);
+    if (!alive(dom, e) || !rgba || w <= 0 || h <= 0) return;
+    /* canvas.width / height = the bitmap size: the canvas's natural size (layout) */
+    char want[16], have[16];
+    snprintf(want, sizeof want, "%d", w);
+    const char *v = dom_get_attr(dom, e, "width", NULL);
+    snprintf(have, sizeof have, "%s", v ? v : "");
+    if (strcmp(want, have)) html_dom_set_attr(e, "width", want);
+    snprintf(want, sizeof want, "%d", h);
+    v = dom_get_attr(dom, e, "height", NULL);
+    snprintf(have, sizeof have, "%s", v ? v : "");
+    if (strcmp(want, have)) html_dom_set_attr(e, "height", want);
+    engine_canvas_put(g, e, rgba, w, h);
 }
 
 void html_dom_remove_attr(const HtmlElem e, const char *name)

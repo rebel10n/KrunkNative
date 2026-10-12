@@ -123,6 +123,10 @@ struct Engine {
     int in_flush;
     int in_after_layout;
 
+    /* <canvas> bitmaps written by html_dom_canvas_put (premultiplied RGBA8, MAX_LEVEL 0) */
+    struct EngineCanvas { HtmlElem e; unsigned tex; int w, h; } *canvases;
+    int n_canvases, cap_canvases;
+
     /* animation side table: base (un-animated) computed style per element */
     CssComputed **anim_base;
     uint32_t anim_base_cap;
@@ -516,6 +520,99 @@ static const char *paint_image_src_hook(void *user, const Box *box)
 {
     (void) user;
     return box ? box->src : NULL;
+}
+
+/* ------------------------------------------------------------------------- */
+/* <canvas> bitmaps (html_dom_canvas_put)                                      */
+/* ------------------------------------------------------------------------- */
+
+static struct EngineCanvas *canvas_find(Engine *g, const HtmlElem e)
+{
+    for (int i = 0; i < g->n_canvases; i++)
+        if (g->canvases[i].e == e) return &g->canvases[i];
+    return NULL;
+}
+
+static void canvas_drop(Engine *g, const int i)
+{
+    if (g->canvases[i].tex) {
+        GLuint tex = g->canvases[i].tex;
+        glDeleteTextures(1, &tex);
+    }
+    g->canvases[i] = g->canvases[--g->n_canvases];
+}
+
+/* The bitmap of a <canvas> box: what the page drew with html_dom_canvas_put, 0 = none
+ * (an untouched canvas paints nothing, like a fresh transparent bitmap). */
+static int paint_canvas_image_hook(void *user, const Box *box, uint32_t *tex, float *w, float *h)
+{
+    Engine *g = user;
+    if (!g || !box || !box->node) return 0;
+    const HtmlElem e = dom_node_elem(g->dom, box->node);
+    const struct EngineCanvas *c = e ? canvas_find(g, e) : NULL;
+    if (!c || !c->tex) return 0;
+    *tex = c->tex;
+    *w = (float) c->w;
+    *h = (float) c->h;
+    return 1;
+}
+
+int engine_canvas_put(Engine *g, const HtmlElem e, const unsigned char *rgba, const int w, const int h)
+{
+    if (!g || !e || !rgba || w <= 0 || h <= 0) return 0;
+    struct EngineCanvas *c = canvas_find(g, e);
+    int created = 0;
+    if (!c) {
+        if (g->n_canvases == g->cap_canvases) {
+            const int cap = g->cap_canvases ? g->cap_canvases * 2 : 4;
+            struct EngineCanvas *grown = realloc(g->canvases, (size_t) cap * sizeof(*grown));
+            if (!grown) return 0;
+            g->canvases = grown;
+            g->cap_canvases = cap;
+        }
+        c = &g->canvases[g->n_canvases++];
+        memset(c, 0, sizeof(*c));
+        c->e = e;
+        created = 1;
+    }
+    /* the engine composites premultiplied (image.h) */
+    unsigned char *px = malloc((size_t) w * (size_t) h * 4);
+    if (!px) return 0;
+    for (size_t i = 0, n = (size_t) w * (size_t) h; i < n; i++) {
+        const unsigned a = rgba[i * 4 + 3];
+        px[i * 4 + 0] = (unsigned char) ((rgba[i * 4 + 0] * a + 127) / 255);
+        px[i * 4 + 1] = (unsigned char) ((rgba[i * 4 + 1] * a + 127) / 255);
+        px[i * 4 + 2] = (unsigned char) ((rgba[i * 4 + 2] * a + 127) / 255);
+        px[i * 4 + 3] = (unsigned char) a;
+    }
+    GLint prev_tex = 0, prev_align = 4;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &prev_align);
+    if (!c->tex) {
+        GLuint tex = 0;
+        glGenTextures(1, &tex);
+        c->tex = tex;
+    }
+    glBindTexture(GL_TEXTURE_2D, c->tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    if (created || c->w != w || c->h != h) {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); /* level 0 alone is complete for any MIN_FILTER */
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, prev_align);
+    glBindTexture(GL_TEXTURE_2D, (GLuint) prev_tex);
+    free(px);
+    const int changed = created || c->w != w || c->h != h;
+    c->w = w;
+    c->h = h;
+    if (changed) engine_mark_paint(g, e); /* the display list gains / resizes the image */
+    return 1;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1152,6 +1249,13 @@ void engine_mark_paint(Engine *g, HtmlElem e)
 void engine_before_remove(Engine *g, HtmlElem e, int include_root)
 {
     if (!g || !e) return;
+    /* canvas bitmaps of the removed elements go with them */
+    for (int i = g->n_canvases - 1; i >= 0; i--) {
+        HtmlElem a = g->canvases[i].e;
+        if (!include_root && a == e) continue;
+        while (a && a != e) a = dom_parent(g->dom, a);
+        if (a == e) canvas_drop(g, i);
+    }
     /* Boxes point at the nodes about to be destroyed (text nodes included). */
     detach_boxes(g, e, include_root, 0);
     if (include_root) {
@@ -1393,6 +1497,8 @@ static void engine_destroy(Engine *g)
     free(g->shadow);
     free(g->anim_base);
     free(g->saved_scroll);
+    while (g->n_canvases) canvas_drop(g, g->n_canvases - 1);
+    free(g->canvases);
     if (g->glb) glb_destroy(g->glb);
     if (g->images) image_cache_destroy(g->images);
     if (g->text) text_destroy(g->text);
@@ -1523,6 +1629,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->paint.doc_base_url = g->page;
     g->paint.host.user = g;
     g->paint.host.image_src = paint_image_src_hook;
+    g->paint.host.canvas_image = paint_canvas_image_hook;
     g->paint.host.scrollbar_style = paint_scrollbar_style_hook;
     g->paint.host.widget_paint = paint_widget_hook;
     kn_arena_init(&g->overlay_arena, 16 * 1024);

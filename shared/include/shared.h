@@ -1271,6 +1271,17 @@ typedef struct Player_t {
     int shared_boxes;                  // sharedBoxes: mystery box weapons shared with a melee hit
     unsigned char sharing_is_caring:1; // sharingIsCaring (5 shared): half price boxes, no teddy
     // ---- end WP-H
+    // ---- player-viewer WP-E: the v7.1.4 death screen ("3" death stats, NET_PACKET_DEATH_INFO).
+    // The life counters reset at every spawn (player.js reset: totShotsL, hitShotsL, killsL, scoreL)
+    // and count only while active, like v7; the account values are the server's (accounts.c), set
+    // at spawn: guests and bots keep class_stat 0 and pc_stat_index -1.
+    float life_start;                  // spawnTime (game->now of the spawn, seconds)
+    int life_shots, life_hits;         // totShotsL / hitShotsL: hitscan rays fired, rays that hit a player / AI first
+    int life_kills, life_score;        // killsL / scoreL
+    int class_stat;                    // account.stats["c" + classIndex] (0 hidden by anonMode / no account)
+    int pc_stat_index;                 // pcStatIndex (NET_PACKET_PC_STAT), -1 none / no account
+    char pc_stat_value[16];            // config.playerCardStats[pc_stat_index].stat(player), as v7 prints it
+    // ---- end WP-E
 } Player;
 
 typedef struct {
@@ -2748,6 +2759,33 @@ typedef struct {
     int32_t uid[GAME_LEADERBOARD_MAX];
     int32_t values[GAME_LEADERBOARD_MAX][NET_LEADER_STATS_MAX];
 } NetLeaderStatsPacket;
+
+// Part 2a: the death screen. v7's victim-only "3" extras (players.js:4860) ride in DEATH_INFO,
+// which the server sends to the victim right before the KILL packet; the KILL stays the same
+// for every peer. A client that gets no DEATH_INFO (an older server) samples what it can itself.
+#define NET_PACKET_DEATH_INFO (NET_PACKET_BLOCK_SOCIAL + 1) // S->C to the victim: NetDeathInfoPacket ("3" [wid, classStat, pcStat, stats])
+#define NET_PACKET_PC_STAT (NET_PACKET_BLOCK_SOCIAL + 2)    // C->S before ENT: NetPcStatPacket (v7 ENT pcStatIndex)
+// NET_PACKET_BLOCK_SOCIAL + 3, + 4: reserved for player-viewer WP-E part 2a (unused); + 5..9 are WP-E part 2b's.
+
+typedef struct {
+    int32_t victim_uid;
+    int32_t killer_uid;            // -1: no killer ("You Died")
+    int32_t weapon_index;          // the killing weapon ("3" [0]), -1 none
+    int32_t class_stat;            // the killer's account.stats["c" + classIndex] ("3" [1]): its class level
+    int8_t pc_stat_index;          // "3" [2][0]: config.playerCardStats index, -1 = null (no account / none picked)
+    char pc_stat_value[16];        // "3" [2][1] as v7 prints it ("1.52", "38.1%", "1203")
+    uint8_t thrown;                // a thrown melee (info.pj): "Thrown [name]"
+    uint8_t fists;                 // info.fs: "Fists"
+    int32_t time_alive_ms;         // "3" [3]: Date.now() - spawnTime
+    int32_t shots;                 // totShotsL
+    char accuracy[8];              // min(totShotsL, hitShotsL) / totShotsL * 100, .round(1) + "%"
+    int32_t kills;                 // killsL
+    int32_t score;                 // scoreL
+} NetDeathInfoPacket;
+
+typedef struct {
+    int8_t index;                  // pcStatIndex (Change Loadout > Player Card stat), -1 none
+} NetPcStatPacket;
 
 typedef struct {
     uint8_t effect;                // EffectId

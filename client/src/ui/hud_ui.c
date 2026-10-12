@@ -43,6 +43,7 @@ void hud_ui_hit(Client*, int kill);
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h>
+#include <hud_map.h> // part 2a: minimap layout
 #include <render_settings.h>
 #include "../viewer/viewer_store.h" // store.skins: the melee skin icon
 #include <streamer.h>
@@ -2193,10 +2194,20 @@ static void hud_readable_time(const int ms, char *out, const size_t size) {
 }
 
 // f1975: the death screen (#deathUIHolder). With a killer: the VS layout, the killer's card
-// left (weapon [skin] name and art, his kills on us, class icon, "lvl N", alias) and ours
-// right; without one "You Died". Below, the life's stats (Time Survived, Shots Fired,
-// Accuracy, Kills, Score; KrunkNative does not count shots: "Unknown", v7's own text for a
-// missing value).
+// left (weapon [skin] name in its rarity colour and art, his kills on us, the player card
+// banner, class icon, "lvl N" from the "3" class stat, alias and the picked player card stat)
+// and ours right (banner, class level of our account, name), "[key] to Report" in between;
+// without one "You Died". Below, the life's stats (Time Survived, Shots Fired, Accuracy, Kills,
+// Score) from NET_PACKET_DEATH_INFO; a value the server did not send shows v7's "Unknown".
+// Not ported: the rainbowText class of animated rarities (KrunkNative's store table has no
+// rarity animate flag).
+static void hud_death_banner(char *out, const size_t size, size_t *len, const char *url) {
+    if (!url || !url[0]) return;
+    hb_append(out, size, len, "<img class=\"death-row-bottom-bg\" src=\"");
+    hb_append_escaped(out, size, len, url);
+    hb_append(out, size, len, "\">");
+}
+
 static void hud_death_html(const Client *client, const HudKillCard *card, char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
@@ -2213,8 +2224,10 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
         snprintf(vals[3], sizeof(vals[3]), "%d", card->kills);
         snprintf(vals[4], sizeof(vals[4]), "%d", card->life_score);
         for (int i = 0; i < 5; i++) {
-            hb_append(stats, sizeof(stats), &slen, "<div class=\"death-stats-row\">\n\t\t\t%s : <span style=\"color:rgba(255, 255, 255, 0.7)\">%s</span>\n\t\t</div>",
-                      names[i], i == 0 && !vals[0][0] ? "Unknown" : vals[i]);
+            hb_append(stats, sizeof(stats), &slen, "<div class=\"death-stats-row\">\n\t\t\t%s : <span style=\"color:rgba(255, 255, 255, 0.7)\">",
+                      names[i]);
+            hb_append_escaped(stats, sizeof(stats), &slen, i == 0 && !vals[0][0] ? "Unknown" : vals[i]);
+            hb_append(stats, sizeof(stats), &slen, "</span>\n\t\t</div>");
         }
     }
     const int by = card && card->killer && card->killer[0];
@@ -2231,32 +2244,53 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
     hud_death_weapon_img(my_weapon, NULL, my_img, sizeof(my_img));
     const int h2h = hud_h2h_find(card->killer, 0);
     const int my_class = me ? me->class_index : client->menu_class_index;
+    const char *color = card->weapon_color && card->weapon_color[0] ? card->weapon_color : "rgba(255,255,255,0.7)";
     hb_append(out, size, &len, "\n\t\t\t<div class=\"death-ui-bottom\" id='deathUIBottom'>\n\t\t\t\t<div class=\"death-column-empty\"></div>"
                                "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: end;\">\n\t\t\t\t\t<div class=\"death-row-left\">"
-                               "\n\t\t\t\t\t\t<div class=\"death-row-weapon\">\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:rgba(255,255,255,0.7)\">%s[",
-              card->thrown ? "Thrown " : "");
+                               "\n\t\t\t\t\t\t<div class=\"death-row-weapon\">\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:");
+    hb_append_escaped(out, size, &len, color);
+    hb_append(out, size, &len, "\">%s[", card->thrown ? "Thrown " : "");
     hb_append_escaped(out, size, &len, card->weapon ? card->weapon : "");
     hb_append(out, size, &len, "]</div>\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-img\" style=\"background-image:url(%s)\"></div>\n\t\t\t\t\t\t</div>"
-                               "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t"
-                               "\n\t\t\t\t\t\t<div class=\"death-row-class\">\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">"
+                               "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t",
+              killer_img, h2h >= 0 ? g_h2h[h2h].they_killed_me : 0);
+    hud_death_banner(out, size, &len, card->killer_card_url);
+    hb_append(out, size, &len, "\n\t\t\t\t\t\t<div class=\"death-row-class\">\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">"
                                "\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">lvl %d</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">"
                                "\n\t\t\t\t\t\t\t<div class=\"death-row-user-text\">",
-              killer_img, h2h >= 0 ? g_h2h[h2h].they_killed_me : 0, card->class_index < 0 ? 0 : card->class_index, card->level > 1 ? card->level : 1);
+              card->class_index < 0 ? 0 : card->class_index, card->level > 1 ? card->level : 1);
     hb_append_escaped(out, size, &len, streamer_name(card->killer, shown, sizeof(shown))); // streamMode ? scrambleS(alias)
-    hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>"
+    hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t\t");
+    if (card->pc_stat_name && card->pc_stat_name[0]) { // "3" [2]: [pcStatIndex, value]
+        hb_append(out, size, &len, "<div class=\"death-row-user-stat\">\n\t\t\t\t\t\t\t\t");
+        hb_append_escaped(out, size, &len, card->pc_stat_value ? card->pc_stat_value : "");
+        hb_append(out, size, &len, " <span style=\"color:#fff\">");
+        hb_append_escaped(out, size, &len, card->pc_stat_name);
+        hb_append(out, size, &len, "</span>\n\t\t\t\t\t\t\t</div>");
+    }
+    hb_append(out, size, &len, "\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>"
                                "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: center;\">\n\t\t\t\t\t<div class=\"death-row-center\">-</div>"
                                "\n\t\t\t\t\t<div class=\"death-row-center death-row-center-bottom\">VS</div>\n\t\t\t\t</div>"
-                               "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: start;\">\n\t\t\t\t\t\n\t\t\t\t\t<div class=\"death-row-right\">"
+                               "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: start;\">\n\t\t\t\t\t");
+    if (card->report) { // "[" + UTILS.getKeyName(CONTROLS.binds.playerList.val) + "] to Report"
+        char key[32];
+        hb_append(out, size, &len, "<div class=\"death-report\">\n\t\t\t\t\t\t<span class=\"death-report-text\">[");
+        hb_append_escaped(out, size, &len, ui_controls_key_name(ui_controls_bind(UI_CONTROL_PLAYER_LIST), key, sizeof(key)));
+        hb_append(out, size, &len, "]</span> to Report\n\t\t\t\t\t</div>");
+    }
+    hb_append(out, size, &len, "\n\t\t\t\t\t<div class=\"death-row-right\">"
                                "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t\t<div class=\"death-row-weapon\">"
                                "\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:rgba(255,255,255,0.7)\">[",
               h2h >= 0 ? g_h2h[h2h].i_killed_them : 0);
     hb_append_escaped(out, size, &len, my_weapon && my_weapon->name ? my_weapon->name : "");
     const AccountInfo *acc = account_get();
     hb_append(out, size, &len, "]</div>\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-img-right\" style=\"background-image:url(%s)\"></div>\n\t\t\t\t\t\t</div>"
-                               "\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t\n\t\t\t\t\t\t<div class=\"death-row-class\">"
+                               "\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t", my_img);
+    hud_death_banner(out, size, &len, card->my_card_url);
+    hb_append(out, size, &len, "\n\t\t\t\t\t\t<div class=\"death-row-class\">"
                                "\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">lvl %d</div>"
                                "\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">\n\t\t\t\t\t\t\t<div class=\"death-row-user-text\">",
-              my_img, my_class < 0 ? 0 : my_class, card->my_level > 1 ? card->my_level : 1);
+              my_class < 0 ? 0 : my_class, card->my_level > 1 ? card->my_level : 1);
     hb_append_escaped(out, size, &len, acc ? (acc->premium && acc->alias[0] ? acc->alias : acc->name) : hud_my_name(client));
     hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t\t<div class=\"death-stats\">%s</div>\n\t\t\t</div>\n\t\t", stats);
 }
@@ -2371,6 +2405,12 @@ static void hud_end_screen_dom(void) {
 static double hud_now_ms(const Client *client) {
     if (g_hud_clock_s >= 0.0) return g_hud_clock_s * 1000.0;
     return client && client->window ? glfwGetTime() * 1000.0 : 0.0;
+}
+
+double hud_ui_now_ms(const Client *client) { return hud_now_ms(client); }
+
+int hud_ui_project(const Client *client, const float x, const float y, const float z, double *sx, double *sy) {
+    return hud_project(client, x, y, z, sx, sy);
 }
 
 // #knVicTitle: aV.vicTitle on the #game-overlay canvas (below #uiBase): a full-screen
@@ -2845,6 +2885,12 @@ static void hud_apply_override(const Client *client, HtmlHudState *next, HudUiEx
     extra->can_throw = hud_json_int(h, "canThrow", extra->can_throw);
 }
 
+// The scenario's hud.timerText (io_updateTimer writes #specTimer with #timerVal's text), NULL none.
+const char *hud_ui_override_timer(void) {
+    const cJSON *t = g_hud_override.hud ? cJSON_GetObjectItemCaseSensitive(g_hud_override.hud, "timerText") : NULL;
+    return cJSON_IsString(t) ? t->valuestring : NULL;
+}
+
 void hud_ui_set_override(const cJSON *hud) {
     cJSON_Delete(g_hud_override.hud);
     g_hud_override.hud = hud ? cJSON_Duplicate(hud, 1) : NULL;
@@ -2876,15 +2922,9 @@ static int hud_setting_on(const char *key) {
     return cJSON_IsString(v) && v->valuestring && !strcmp(v->valuestring, "true");
 }
 
-// Minimap.toggle(game, false): KrunkNative has no minimap, so the top-left always shows the
-// minimap-less layout (#miniMapOverlay hidden, .topLeftOld on the timer and match info).
-static void hud_minimap_off(void) {
-    static const char *const ids[] = {"timerHolder", "timerIcon", "timerVal", "timerInner", "matchInfo", "specNames", "specStats", "specSUS"};
-    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
-        const HtmlElem el = html_dom_by_id(ids[i]);
-        if (el) html_dom_set_class(el, "topLeftOld", 1);
-    }
-    dom_display("miniMapOverlay", "none");
+// Minimap.toggle(game, on): the top-left layout of the minimap's state (hud_map.c).
+static void hud_minimap_layout(void) {
+    hud_minimap_apply_layout();
     dom_display("timerHolder", "block");
 }
 
@@ -2955,7 +2995,7 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     dom_display("bottomRight", block);
     dom_display("deathUIHolder", "none");
     dom_style("speakerDisplay", "right", visible ? "380px" : "20px");
-    hud_minimap_off();
+    hud_minimap_layout();
 
     // Pieces the Display settings own (settings.js `set`s; ui_render_settings.c applies live
     // changes) are written from the same values, so this pass never undoes a setting.
@@ -3347,6 +3387,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     hud_end_step(client, now * 1000.0);
     hud_feed_step(now * 1000.0);
     // game-overlay text popups (client/src/ui/hud_popups.c): drawn while playing (no kill card / menu)
+    hud_popups_set_comp(client->game.config.comp);
     hud_popups_tick(now * 1000.0, hud_in_game(client) && !html_ui_is_menu_open());
 
     // hud.js state.inGame came from the `state` event (client->in_game); the values
