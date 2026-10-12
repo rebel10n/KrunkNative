@@ -325,6 +325,13 @@ static const ConArg A_BANIP[] = {{"name|id|ip", ARG_STRING, 1}};
 static const ConArg A_IP[] = {{"ip", ARG_STRING, 1}};
 static const ConArg A_AMOUNT[] = {{"amount", ARG_NUMBER, 1}};
 static const ConArg A_GAME[] = {{"text", ARG_STRING, 1}};
+// Krunker v7.1.4 bots (mod/devConsole.ts registrations; shared/src/chat_commands.c runs them)
+static const ConArg A_BOT_ADD[] = {{"count", ARG_NUMBER, 1}, {"tfue|autoRespawn|key=value", ARG_STRING, 1}};
+static const ConArg A_BOT_TYPE[] = {{"nextbot|tfue", ARG_STRING, 1}};
+static const ConArg A_BOT_PLACE[] = {{"tfue|autoRespawn|key=value", ARG_STRING, 1}};
+static const ConArg A_BOT_QUERY[] = {{"all|index|name", ARG_STRING, 1}};
+static const ConArg A_BOT_CONFIG[] = {{"key=value", ARG_STRING, 1}};
+static const ConArg A_BOT_DIFF[] = {{"value", ARG_NUMBER, 0}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -1424,6 +1431,17 @@ static void register_commands(void) {
     register_server("score", ARGS(A_AMOUNT), "add score (default +100)");
     register_server("summon", ARGS(A_NAME), "spawn a Soul Sanctum AI by name (no arg lists summonable names)");
     register_server("game", ARGS(A_GAME), "send a game command");
+    register_server("bot", ARGS(A_BOT_ADD), "spawn player-targeting auto-respawn bots (tfue=off for full-strength bots)");
+    register_server("bot_add", ARGS(A_BOT_ADD), "alias for bot");
+    register_server("bot_type", ARGS(A_BOT_TYPE), "show or switch bot manager type (switching removes old bots)");
+    register_server("bot_place", ARGS(A_BOT_PLACE), "spawn a bot at your current position");
+    register_server("bot_kick", ARGS(A_BOT_QUERY), "remove bots by name/index or all bots");
+    register_server("bot_kill", ARGS(A_BOT_QUERY), "kill bots by name/index or all bots");
+    register_server("bot_list", NO_ARGS, "list spawned bots");
+    register_server("bot_config", ARGS(A_BOT_CONFIG), "show or update default bot options");
+    register_server("bot_mimic", ARGS(A_ON_OFF), "toggle bots mimicking their target inputs");
+    register_server("bot_stop", ARGS(A_ON_OFF), "toggle bot movement and attacking");
+    register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
 }
 
 // ---------------------------------------------------------------- execution
@@ -1707,6 +1725,22 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
                 if (client->game.ai->ais[i].active) cand_add(c, client->game.ai->ais[i].name, prefix);
             }
         }
+    } else if (cmd_is(cmd, WORDS("bot_kick", "bot_kill"))) {
+        const Client *client = con_client(); // the bots of the in-process game (servers: names from the scoreboard)
+        if (arg == 0) cand_add(c, "all", prefix);
+        for (size_t i = 0; client && arg == 0 && i < client->game.player_count; i++) {
+            const Player *p = client->game.players[i];
+            if (p && p->is_bot) cand_add(c, p->name, prefix);
+        }
+    } else if (!strcmp(cmd, "bot_type")) {
+        if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
+    } else if (cmd_is(cmd, WORDS("bot_mimic", "bot_stop"))) {
+        if (arg == 0) con_words(c, prefix, ON_OFF);
+    } else if (!strcmp(cmd, "bot_difficulty")) {
+        if (arg == 0) con_words(c, prefix, WORDS("easy", "normal", "hard", "max"));
+    } else if (cmd_is(cmd, WORDS("bot", "bot_add", "bot_place", "bot_config"))) {
+        con_words(c, prefix, WORDS("tfue", "autoRespawn", "difficulty=", "accuracy=", "name=", "class=", "team=", "level=", "clan=",
+                                   "dmgMlt=", "targetBots=", "randomCosmetics=", "persistent="));
     } else if (!strcmp(cmd, "summon")) {
         int count = 0;
         const GameAITemplate *templates = game_ai_templates(&count);

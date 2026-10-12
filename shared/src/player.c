@@ -1847,6 +1847,7 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     if (!game_is_authority(game) || !victim->active) return 0;
     if (damage < 0.0f && victim->health == (float) victim->max_health) return 0;
     if (dealer && damage > 0.0f && dealer != victim && !combat_can_damage(dealer, victim)) return 0;
+    if (dealer && damage > 0.0f && dealer->dmg_mlt > 0.0f) damage *= dealer->dmg_mlt; // v7.1.4 bots: player.dmgMlt
     if (dealer && dealer->smite && damage > 0.0f) damage = 10000.0f; // /smite: weapon/melee/explosion dmg = 10000
 
     if (dealer && dealer->team == 1) damage *= game->config.team1_damage;

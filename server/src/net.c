@@ -4,6 +4,7 @@
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
 #include <server_net_udp.h>  // UDP game transport: virtual client fds (net-udp)
 #include <ai.h>
+#include <bots.h>            // Krunker v7.1.4 bot players (shared/src/bots.c)
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -169,6 +170,13 @@ static void net_game_respawn(Game *game, const int uid) {
     (void) game;
     ClientConnection *client = net_client_by_id(uid);
     if (client && client->player && !client->player->active && g_server->game.end_timer <= 0.0f) net_spawn_client(client);
+}
+
+// GameHooks.alloc_uid: a bot player's uid comes from the connection id counter, so no
+// connection ever gets the same one.
+static int net_game_alloc_uid(Game *game) {
+    (void) game;
+    return g_server->next_client_id++;
 }
 
 static int net_alloc_player_number() {
@@ -453,6 +461,7 @@ static void net_send_spectate_state(ClientConnection *client) {
     net_send_packet(client->fd, NET_PACKET_SPECTATE, &ack, sizeof(ack));
     net_send_existing_spawns(client);
     accounts_send_infos_to(client);
+    game_bots_send_infos(&g_server->game, client->id); // bot players' account-style PLAYER_INFO
     game_sync_leaders(&g_server->game, client->id);
     game_send_round_state(&g_server->game, client->id);
     game_ai_sync_non_players(&g_server->game); // AI.sync sends spectators every AI ("aai" first)
@@ -526,6 +535,7 @@ static void net_spawn_client(ClientConnection *client) {
     }
 
     accounts_on_spawn(client, first_spawn); // PLAYER_INFO (account level / clan), MOTD on the first spawn
+    if (first_spawn) game_bots_send_infos(&g_server->game, client->id); // the bots' level / clan, like accounts_send_infos_to
 }
 
 // ENT from a client: (re)spawn unless the round is over, the player is alive, or
@@ -1257,6 +1267,7 @@ void net_main() {
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
+    g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
     pthread_mutex_unlock(&g_server->lock);
 
     struct sockaddr_in listen_addr;

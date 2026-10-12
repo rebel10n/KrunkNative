@@ -3,6 +3,7 @@
 // differences are commented in place and listed in doc/console.md.
 #include <chat_commands.h>
 #include <ai.h>
+#include <bots.h>
 #include "modes/mode_internal.h"
 #include <map_catalog.h>
 #include <ctype.h>
@@ -10,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #define CHAT_REPLY_MAX 280      // bytes per Server line (NET_CHAT_TEXT_SIZE - NUL, with room)
 #define CHAT_ARGS_MAX 24
@@ -114,9 +116,9 @@ static int peer_by_id(const ChatCommandHost *host, const int id, ChatPeer *out) 
 static int allowed(ChatCtx *c, const ChatCommandPerm perm) {
     const int cheat = perm == CHAT_PERM_CHEAT || perm == CHAT_PERM_DEV_CHEAT;
     if (perm == CHAT_PERM_ANY || c->sender == CHAT_CMD_CONSOLE) return 1;
-    if (!c->host->perms && (!cheat || c->host->cheats_open)) return 1;
+    if (perm != CHAT_PERM_HOST_DEV && !c->host->perms && (!cheat || c->host->cheats_open)) return 1;
     if (c->has_self && c->self.dev) return 1;
-    if (perm == CHAT_PERM_CHEAT && c->has_self && c->self.premium_host) return 1;
+    if ((perm == CHAT_PERM_CHEAT || perm == CHAT_PERM_HOST_DEV) && c->has_self && c->self.premium_host) return 1;
     if (c->host->log) {
         char line[160];
         snprintf(line, sizeof(line), "[gameserver] %sperms denied: %s from %d (%s)", perm == CHAT_PERM_CHEAT ? "premium cheat " : "",
@@ -126,7 +128,8 @@ static int allowed(ChatCtx *c, const ChatCommandPerm perm) {
     // ctx.send("notify", text): the client's mod shows it as a toast (ui_notify)
     NetNotifyPacket notify;
     memset(&notify, 0, sizeof(notify));
-    snprintf(notify.text, sizeof(notify.text), "%s", perm == CHAT_PERM_CHEAT ? "DEV or premium custom host only" : "DEV only");
+    snprintf(notify.text, sizeof(notify.text), "%s", perm == CHAT_PERM_CHEAT ? "DEV or premium custom host only"
+                                                     : perm == CHAT_PERM_HOST_DEV ? "Host or developer required" : "DEV only");
     game_send(c->host->game, c->sender, NET_PACKET_NOTIFY, &notify, sizeof(notify));
     return 0;
 }
@@ -314,6 +317,15 @@ static void cmd_kick_or_ban(ChatCtx *c, const int ban) {
     if (!target) return;
     if (target == c->player) {
         reply(c, ban ? "Cannot ban yourself." : "Cannot kick yourself.");
+        return;
+    }
+    GameBot *bot = game_bot_of(c->host->game, target);
+    if (bot) { // a v7.1.4 bot player leaves like a kicked guest (BotManager.remove)
+        char name[PLAYER_NAME_SIZE + 16];
+        player_label(target, name, sizeof(name));
+        game_bots_remove(c->host->game, bot);
+        if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", name);
+        else reply(c, "Kicked %s.", name);
         return;
     }
     if (!peer_by_id(c->host, target->uid, NULL) || !c->host->disconnect) {
@@ -1068,6 +1080,218 @@ static void cmd_ais(ChatCtx *c) {
     reply(c, "AI (%d): %s", count, names);
 }
 
+// ---------------------------------------------------------------- bots (Krunker v7.1.4)
+// server/index.ts handleDevConsoleBotCommand over shared/src/bots.c, with its reply strings;
+// gated like v7 (`bot` / `bot_*`: requireHostOrDev). Offline the local player hosts.
+
+static int bot_manager_ready(ChatCtx *c) {
+    if (game_is_authority(c->host->game) && game_bots(c->host->game)) return 1;
+    reply(c, "Bot manager is not installed for this lobby.");
+    return 0;
+}
+
+static const char *plural(const int n) { return n == 1 ? "" : "s"; }
+
+// bot / bot_add / bot_place [count] [tfue|autoRespawn|key=value]
+static void bot_spawn_command(ChatCtx *c, const int place) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    BotAssignments a;
+    bot_parse_assignments(c->argc, c->argv, &a);
+    if (a.error[0]) {
+        reply(c, "%s", a.error);
+        return;
+    }
+    Game *game = c->host->game;
+    // bot_place: at the caller (the offline devConsole's semantics; v7's server ignores it)
+    const Player *at = place && c->player && c->player->active ? c->player : NULL;
+    if (place && !at && c->sender != CHAT_CMD_CONSOLE) {
+        reply(c, "Bot placement unavailable. Spawn first.");
+        return;
+    }
+    const int requested = place ? 1 : a.count ? a.count : 1;
+    int spawned = 0;
+    for (int i = 0; i < requested; i++) spawned += game_bots_add(game, &a, at ? &at->position : NULL, at ? at->direction.y : 0.0f) != NULL;
+    const char *type = bot_type_name(game->bots->type);
+    if (!spawned) reply(c, "Bot limit reached (%d).", GAME_BOTS_MAX);
+    else if (at) reply(c, "Spawned %d %s bot%s at your position.", spawned, type, plural(spawned));
+    else reply(c, "Spawned %d %s bot%s.", spawned, type, plural(spawned));
+}
+
+static void cmd_bot(ChatCtx *c) { bot_spawn_command(c, 0); }
+static void cmd_bot_place(ChatCtx *c) { bot_spawn_command(c, 1); }
+
+static void cmd_bot_type(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
+    BotType next;
+    if (!c->argc || !bot_parse_type(c->argv[0], &next)) {
+        reply(c, "Bot type: %s (use bot_type nextbot|tfue)", bot_type_name(game->bots->type));
+        return;
+    }
+    const BotType previous = game->bots->type;
+    const int removed = game_bots_set_type(game, next);
+    reply(c, "Bot type set to %s; removed %d %s bot%s.", bot_type_name(next), removed, bot_type_name(previous), plural(removed));
+}
+
+// botMatchesQuery: all / * / "" = every bot, a number = position, bot id or player sid,
+// else the normalised name / socket id / sid (exact or prefix).
+static int bot_matches(const GameBot *bot, const int position, const char *query) {
+    char needle[64];
+    normalise(query, needle, sizeof(needle));
+    if (!needle[0] || !strcmp(needle, "all") || !strcmp(query, "*")) return 1;
+    char *end = NULL;
+    const long n = strtol(query, &end, 10);
+    if (end && !*end && end != query && (n == position || n == bot->id || n == bot->uid)) return 1;
+    char keys[3][64], sid[16];
+    normalise(bot->name, keys[0], sizeof(keys[0]));
+    normalise(bot->socket_id, keys[1], sizeof(keys[1]));
+    snprintf(sid, sizeof(sid), "%d", bot->uid);
+    normalise(sid, keys[2], sizeof(keys[2]));
+    for (int i = 0; i < 3; i++) {
+        if (keys[i][0] && !strncmp(keys[i], needle, strlen(needle))) return 1;
+    }
+    return 0;
+}
+
+static void cmd_bot_list(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    const GameBots *bots = c->host->game->bots;
+    if (!bots->count) {
+        reply(c, "No bots.");
+        return;
+    }
+    char label[CHAT_TEXT_MAX] = "";
+    size_t len = 0;
+    for (int i = 0; i < bots->count && len < sizeof(label); i++) {
+        const GameBot *bot = &bots->list[i];
+        char sid[24];
+        if (bot->player) snprintf(sid, sizeof(sid), "#%d", bot->uid);
+        else snprintf(sid, sizeof(sid), "(unspawned)");
+        len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%s:%d:%s%s", i ? ", " : "", bot_type_name(bot->type), bot->id, bot->name, sid);
+    }
+    reply(c, "Bots (%d): %s", bots->count, label);
+}
+
+static void cmd_bot_kick(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
+    if (!c->rest[0] || !strcasecmp(c->rest, "all") || !strcmp(c->rest, "*")) {
+        const int removed = game_bots_remove_all(game);
+        if (removed) reply(c, "Removing %d bot%s.", removed, plural(removed));
+        else reply(c, "No bots.");
+        return;
+    }
+    int removed = 0;
+    for (int i = game->bots->count - 1; i >= 0; i--) {
+        if (!bot_matches(&game->bots->list[i], i, c->rest)) continue;
+        game_bots_remove(game, &game->bots->list[i]);
+        removed++;
+    }
+    if (removed) reply(c, "Removing %d bot%s.", removed, plural(removed));
+    else reply(c, "No bots matched '%s'.", c->rest);
+}
+
+static void cmd_bot_kill(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
+    const char *query = c->rest[0] ? c->rest : "all";
+    int matched = 0, killed = 0, missing = 0;
+    for (int i = 0; i < game->bots->count; i++) {
+        GameBot *bot = &game->bots->list[i];
+        if (!bot_matches(bot, i, query)) continue;
+        matched++;
+        if (!bot->player || !bot->player->active) {
+            missing++;
+            continue;
+        }
+        // players.kill(target, player || null, undefined, true): skipRewards
+        const int had_god = bot->player->god_mode;
+        bot->player->god_mode = 0;
+        player_kill(bot->player, c->player && c->player != bot->player ? c->player : NULL, NULL, 1);
+        bot->player->god_mode = (unsigned char) had_god;
+        killed++;
+    }
+    if (!matched) reply(c, "No bots matched '%s'.", query);
+    else if (killed) reply(c, "Killed %d bot%s.", killed, plural(killed));
+    else if (missing) reply(c, "Matched bots are not spawned yet.");
+    else reply(c, "No bots matched '%s'.", query);
+}
+
+static void cmd_bot_config(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
+    char text[CHAT_TEXT_MAX];
+    int given = 0;
+    for (int i = 0; i < c->argc; i++) given += c->argv[i][0] != 0;
+    if (!given) {
+        BotAssignments current;
+        memset(&current, 0, sizeof(current));
+        current.config = game->bots->config[game->bots->type];
+        bot_describe_config(&current, 1, text, sizeof(text));
+        reply(c, "Bot config: %s", text);
+        return;
+    }
+    BotAssignments a;
+    bot_parse_assignments(c->argc, c->argv, &a);
+    if (a.error[0]) {
+        reply(c, "%s", a.error);
+        return;
+    }
+    const int updated = game_bots_configure(game, &a);
+    bot_describe_config(&a, 0, text, sizeof(text));
+    reply(c, "Bot config updated (%s); %d live bot%s updated.", text, updated, plural(updated));
+}
+
+// bot_mimic [on|off]: mimicTarget (the devConsole's toggle) with v7 server's follow config.
+static void cmd_bot_mimic(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    const int enabled = chat_parse_toggle(c->argc ? c->argv[0] : NULL, 0);
+    char *argv_on[] = {"mimicTarget=on", "attackTarget=off", "followTarget=on", "watchTarget=on", "roam=off"};
+    char *argv_off[] = {"mimicTarget=off", "attackTarget=on", "followTarget=on", "watchTarget=off", "roam=on"};
+    BotAssignments a;
+    bot_parse_assignments(5, enabled ? argv_on : argv_off, &a);
+    const int updated = game_bots_configure(c->host->game, &a);
+    reply(c, "%s mode set (%d live bot%s updated).", enabled ? "Mimic-style follow" : "Combat follow", updated, plural(updated));
+}
+
+// bot_stop [on|off]: BOT_STOP_CONFIG / BOT_RESUME_CONFIG
+static void cmd_bot_stop(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    const int stopping = chat_parse_toggle(c->argc ? c->argv[0] : NULL, 0);
+    char *argv_stop[] = {"attackTarget=off", "followTarget=off", "watchTarget=off", "roam=off"};
+    char *argv_resume[] = {"attackTarget=on", "followTarget=on", "watchTarget=off", "roam=on"};
+    BotAssignments a;
+    bot_parse_assignments(4, stopping ? argv_stop : argv_resume, &a);
+    const int updated = game_bots_configure(c->host->game, &a);
+    reply(c, "%s %d live bot%s; applies to future bot_add.", stopping ? "Stopped" : "Resumed", updated, plural(updated));
+}
+
+static void js_number(char *out, const size_t size, const double v) {
+    if (v == (double) (long long) v) snprintf(out, size, "%lld", (long long) v);
+    else snprintf(out, size, "%.6g", v);
+}
+
+static void cmd_bot_difficulty(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
+    char value[32];
+    if (!c->argc || !c->argv[0][0]) {
+        js_number(value, sizeof(value), game->bots->config[game->bots->type].difficulty);
+        reply(c, "Bot difficulty: %s", value);
+        return;
+    }
+    float difficulty;
+    if (!bot_parse_difficulty(c->argv[0], &difficulty)) {
+        reply(c, "Usage: bot_difficulty <easy|normal|hard|max|number>");
+        return;
+    }
+    BotAssignments a;
+    bot_difficulty_assignments(difficulty, &a);
+    const int updated = game_bots_configure(game, &a);
+    js_number(value, sizeof(value), difficulty);
+    reply(c, "Bot difficulty set to %s (%d live bot%s updated; applies to future bot_add).", value, updated, plural(updated));
+}
+
 // v3.1.1 `cmds`, in its order; descriptions from the v3.1.1 dev console mod.
 static const ChatCommand COMMANDS[] = {
     {{"c", NULL, "", "show connected players and menu count", CHAT_PERM_ANY}, cmd_c},
@@ -1104,6 +1328,19 @@ static const ChatCommand COMMANDS[] = {
     {{"summon", NULL, "[name]", "spawn a Soul Sanctum AI by name (no arg lists summonable names)", CHAT_PERM_DEV_CHEAT}, cmd_summon},
     {{"players", NULL, "", "list connected players (id, name, team)", CHAT_PERM_ANY}, cmd_players},
     {{"ais", NULL, "", "list active AI entities (sid, name)", CHAT_PERM_ANY}, cmd_ais},
+    // Krunker v7.1.4 bots (mod/devConsole.ts registrations, server/index.ts handlers)
+    {{"bot", NULL, "[count] [tfue|autoRespawn|key=value]", "spawn player-targeting auto-respawn bots (tfue=off for full-strength bots)", CHAT_PERM_HOST_DEV}, cmd_bot},
+    {{"bot_add", "bot", "[count] [tfue|autoRespawn|key=value]", "alias for bot", CHAT_PERM_HOST_DEV}, cmd_bot},
+    {{"bot_type", NULL, "[nextbot|tfue]", "show or switch bot manager type (switching removes old bots)", CHAT_PERM_HOST_DEV}, cmd_bot_type},
+    {{"bot_place", NULL, "[tfue|autoRespawn|key=value]", "spawn a bot at your current position", CHAT_PERM_HOST_DEV}, cmd_bot_place},
+    {{"bot_kick", NULL, "[all|index|name]", "remove bots by name/index or all bots", CHAT_PERM_HOST_DEV}, cmd_bot_kick},
+    {{"bot_kill", NULL, "[all|index|name]", "kill bots by name/index or all bots", CHAT_PERM_HOST_DEV}, cmd_bot_kill},
+    {{"bot_list", NULL, "", "list spawned bots", CHAT_PERM_HOST_DEV}, cmd_bot_list},
+    {{"bot_config", NULL, "[key=value]", "show or update default bot options", CHAT_PERM_HOST_DEV}, cmd_bot_config},
+    {{"bot_mimic", NULL, "[on|off]", "toggle bots mimicking their target inputs", CHAT_PERM_HOST_DEV}, cmd_bot_mimic},
+    {{"bot_stop", NULL, "[on|off]", "toggle bot movement and attacking", CHAT_PERM_HOST_DEV}, cmd_bot_stop},
+    {{"bot_difficulty", NULL, "<value>", "set default bot difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
+    {{"bot_diff", "bot_difficulty", "<value>", "alias for bot_difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
 };
 
 #define COMMAND_COUNT ((int) (sizeof(COMMANDS) / sizeof(COMMANDS[0])))

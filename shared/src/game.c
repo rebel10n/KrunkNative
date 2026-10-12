@@ -1,5 +1,6 @@
 #include <shared.h>
 #include <ai.h>
+#include <bots.h>
 #include <pcg_basic.h>
 #include <string.h>
 #include <math.h>
@@ -175,6 +176,7 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
     }
 
     game_ai_reset(game); // game.init: AI.reset() (clients drop their mirrored AIs too)
+    game_bots_on_init(game); // v7.1.4 bots: the host freed their players; they rejoin next tick (shared/src/bots.c)
 
     if (!game->mode || !game->map) return;
 
@@ -616,6 +618,9 @@ void game_tick_world(Game *game, const float now, const float delta, const float
             }
         }
     }
+
+    // v7.1.4 game.update: bots.update(delta * deltaMlt) before players.update (their input frames)
+    if (authority && !game->end_timer) game_bots_tick(game, world_delta);
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];

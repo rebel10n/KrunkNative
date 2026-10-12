@@ -11,7 +11,7 @@
 //   0 play                       close the menu and enter the game (waits for the map)
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js)
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
-//   100 down W | up W            keys through the normal key path: W A S D SPACE SHIFT R E Q X 1 2 3 C N F G T
+//   100 down W | up W            keys through the normal key path: W A S D SPACE SHIFT R E Q X 1 2 3 C N F G T TAB
 //   100 mdown right | mup right  mouse buttons (left / right)
 //   100 look dyaw dpitch         turn the next input's look by these radians (CONTROLS rotation)
 //   5000 respawn                 Play again when dead, as soon as the death delay allows (retried
@@ -19,7 +19,7 @@
 //   100 wheel 1 | wheel -1       one mouse wheel event (up / down) through the scroll callback
 //   100 blur                     the window loses focus (alt-tab)
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended
-//   100 con end                  a one-word developer console command
+//   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
 //   3000 quit                    close the window
 // Events run at the start of the first frame whose time is >= t, before the input is
@@ -93,6 +93,11 @@ static void script_load(void) {
             sscanf(rest, "%f %f %f %f %f", &e->v[0], &e->v[1], &e->v[2], &e->v[3], &e->v[4]);
         }
         (void) b;
+        if (!strcmp(e->cmd, "con")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            while (*rest == ' ' || *rest == '\t') rest++;
+            snprintf(e->arg, sizeof(e->arg), "%s", rest);
+            for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
+        }
         g_script.count++;
     }
     fclose(file);
@@ -122,7 +127,7 @@ static int script_key(const char *name) {
         {"W", GLFW_KEY_W}, {"A", GLFW_KEY_A}, {"S", GLFW_KEY_S}, {"D", GLFW_KEY_D},
         {"SPACE", GLFW_KEY_SPACE}, {"SHIFT", GLFW_KEY_LEFT_SHIFT}, {"R", GLFW_KEY_R}, {"E", GLFW_KEY_E},
         {"Q", GLFW_KEY_Q}, {"C", GLFW_KEY_C}, {"X", GLFW_KEY_X}, {"1", GLFW_KEY_1}, {"2", GLFW_KEY_2}, {"3", GLFW_KEY_3}, {"N", GLFW_KEY_N},
-        {"F", GLFW_KEY_F}, {"G", GLFW_KEY_G}, {"T", GLFW_KEY_T},
+        {"F", GLFW_KEY_F}, {"G", GLFW_KEY_G}, {"T", GLFW_KEY_T}, {"TAB", GLFW_KEY_TAB},
     };
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(name, keys[i].name)) return keys[i].key;

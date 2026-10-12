@@ -233,6 +233,9 @@
     "lag_comp": true,
     "lag_comp_anchor": true,
     "lag_comp_scale": 1,
+    "bots": 0,
+    "bot_quota": 0,
+    "bot_difficulty": "normal",
     "log_file": ""
   }
 }

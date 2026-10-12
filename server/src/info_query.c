@@ -1,4 +1,5 @@
 // Server-info query responder and finder heartbeat (server/include/info_query.h).
+#include <bots.h>
 #include <info_query.h>
 #include <http_client.h>
 #include <server_cli.h>
@@ -64,6 +65,7 @@ void info_query_update(const float now) {
     snprintf(info.mode, sizeof(info.mode), "%s", info.mode_id >= 0 ? mode_name(info.mode_id) : "");
     info.players = accounts_player_count();
     info.max_players = g_server->config.max_players;
+    info.bots = game_bots_count(game); // v7.1.4 bot players: not in `players` (connections only)
     info.online_mode = cfg->online_mode;
     info.password = cfg->password[0] != 0;
     snprintf(info.community, sizeof(info.community), "%s", accounts_community_name());

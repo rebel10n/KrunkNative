@@ -96,6 +96,13 @@ typedef struct {
     int lag_comp;                        // 1: hits rewind targets (v3.1.1 storeState / fetchState), 0 = current positions
     int lag_comp_anchor;                 // 1: rewind from the shot input's arrival + ping (default); 0: v3.1.1 ping * 2 from processing
     float lag_comp_scale;                // 0.1..1 (default 1) times each player's lagComp (ENT ent[11] slider)
+    // Krunker v7.1.4 bot players (shared/src/bots.c; KrunkNative addition: v7 only has the dev
+    // console). bots: keep N bots in the lobby; bot_quota: fill the lobby up to N players with
+    // bots that leave as humans join (wins over bots). Both capped at config.botLimit (16) and
+    // the lobby size. bot_difficulty: easy | normal | hard | max | a number (botDifficultyConfig).
+    int bots;
+    int bot_quota;
+    char bot_difficulty[16];
     char log_file[GS_STR_LARGE];         // append every log line here too ("" = stdout/stderr only)
     char cfg_path[GS_STR_LARGE];         // server.cfg actually loaded ("" none)
 

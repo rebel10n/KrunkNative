@@ -18,6 +18,7 @@
 // b3.send dropped, the spawn / leaderboard / kill handlers called directly).
 #include <client.h>
 #include <chat_commands.h>
+#include <bots.h>
 #include <social.h>
 #include <math.h>
 #include <stdio.h>
@@ -55,6 +56,19 @@ static void local_game_player_changing(const Game *game, Player *player, const i
     if (rebuilding != player) return;
     rebuilding = NULL;
     if (player->active) client_add_player_mesh(client, player, player == client->me);
+}
+
+// GameHooks.bot_spawning / bot_removing: v7.1.4 bot players (shared/src/bots.c) live in this
+// game, which is also the render state; their SPAWN / LEAVE only reach remote clients, so
+// their meshes are built and dropped here, like any other player's (no AI render path).
+static void local_game_bot_spawning(Game *game, Player *player, const int done) {
+    Client *client = game->hooks.user;
+    if (!done) client_drop_player_mesh(client, player);
+    else if (player->active) client_player_spawned(client, player, 0);
+}
+
+static void local_game_bot_removing(Game *game, Player *player) {
+    client_drop_player_mesh(game->hooks.user, player);
 }
 
 // ---------------------------------------------------------------- session
@@ -346,6 +360,8 @@ static int local_game_begin(Client *client, const int map_index) {
         .next_round = local_game_next_round,
         .respawn = local_game_respawn,
         .player_changing = local_game_player_changing,
+        .bot_spawning = local_game_bot_spawning,
+        .bot_removing = local_game_bot_removing,
     };
     game->end_keep_players = 1; // v3.1.1's client keeps playing the endAnim with its players
 
@@ -423,6 +439,7 @@ void local_game_stop(Client *client) {
 
     client->offline = 0;
     client->net_ping_ms = -1;
+    game_bots_free(&client->game); // the offline lobby's bots end with it (their players go with the next INIT)
     client->game.hooks = (GameHooks) {0};
     client->game.is_local = 0; // a plain mirror until the next INIT
     client->game.end_keep_players = 0;

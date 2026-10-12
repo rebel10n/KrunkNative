@@ -688,6 +688,9 @@ typedef struct Player_t {
     float lag_comp;               // player.lagComp: ENT lag_comp (ent[11] slider, server-clamped to 0.1..1), default 1
     float c_send_rate;            // player.cSendRate (ent[16] servSendR: 20, else 10)
     double input_arrival;         // Input.arrival of the input procInputs is running (0 = now)
+    // Bot players (shared/src/bots.c, v7.1.4 bots.js): players.add isBot, player.dmgMlt (0 = 1).
+    unsigned char is_bot:1;
+    float dmg_mlt;
     PlayerStoredState state_history[PLAYER_STATE_HISTORY_MAX]; // stateHistory ring, newest at state_history_head
     int state_history_head;
     int state_history_count;
@@ -824,6 +827,15 @@ typedef struct {
     // min(premiumT ? 40 : 30, floor(score * rewardMlt / 100)), none in hosted games). The
     // server knows the accounts (server/src/accounts.c); NULL = 0 (guests / offline).
     int (*reward)(struct Game_t*, const Player*);
+    // Bot players (shared/src/bots.c): the game sends their SKINS / SPAWN / PLAYER_INFO / LEAVE
+    // itself through `send`. The in-process offline client, whose game is its render state,
+    // also needs their meshes: bot_spawning(done = 0) right before player_spawn (drop the old
+    // ones), (done = 1) right after (build them); bot_removing before the Player is freed.
+    void (*bot_spawning)(struct Game_t*, Player*, int done);
+    void (*bot_removing)(struct Game_t*, Player*);
+    // A uid for a new bot that no connection will ever get (server: its connection id
+    // counter). NULL: the game counts from GAME_BOT_UID_BASE past every uid in use.
+    int (*alloc_uid)(struct Game_t*);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -922,6 +934,7 @@ typedef struct Game_t {
     GameHooks hooks;
     GameProjectile projectiles[GAME_MAX_PROJECTILES];
     struct GameAIs_t *ai;         // Krunker game.AI (shared/include/ai.h): NULL until the first AI
+    struct GameBots_t *bots;      // Krunker v7.1.4 game.bots (shared/include/bots.h): NULL until the first bot
 
     float nuke_timer;
     Player *nuke_player;

@@ -103,6 +103,64 @@ always handled on the client.
 | summon | [name] | dev | spawns a Soul Sanctum AI | ✔ "Summonable: …" / "Unknown summon 'x'. Try: …" / "Summoned Soul Fiend (21)." (templates = the first BOT per name on soul_sanctum.json, game.ts aliases weep / wander / fiend / angered / gate / lord) |
 | bhop | [on\|off\|held] | client | "Bhop - Disabled" / "Bhop - Hold Jump/Crouch" in the console + notify | ✔ (`ui_bhop_set_mode` + `ui_notify`) |
 
+## Bots (Krunker v7.1.4 `bot_*`)
+
+v3.1.1 has no bot commands. They are ported from Krunker v7.1.4 (jails/kru/src/Krunker_v7.1.4):
+the registrations and help text of `mod/devConsole.ts`, the replies of `server/index.ts`
+`handleDevConsoleBotCommand`, the legacy FTUE `BotManager` of `src/data/bots.js` (+ `names.js`)
+and the NextBot manager / AI of `server/NextBotManager.ts` and `bot/nextbot/`. They run in
+`shared/src/chat_commands.c` over `shared/src/bots.c` (+ `bot_nav.c`, `bot_names.c`), so the
+server console, rcon, `/bot_*` chat and the offline dev console share them. Gate: v7
+`requireHostOrDev` = `CHAT_PERM_HOST_DEV` (DEV accounts, ops, the server's own machine, the
+custom host; the console and rcon always; offline always), with perms on **or** off.
+
+| Command | Args | Reply (v7 server wording) |
+|---|---|---|
+| bot, bot_add | [count] [tfue\|autoRespawn\|key=value] | "Spawned N nextbot bots." (count capped at 32; `tfue` = dmgMlt 0.01 like the sandbox Spawn Bot key; errors "Expected key=value, got 'x'", "Unknown bot option 'k'", "Invalid boolean for 'k'") |
+| bot_place | [tfue\|autoRespawn\|key=value] | at the caller's feet: "Spawned 1 nextbot bot at your position." (v7's server ignores the position; the console: at a spawn) |
+| bot_type | [nextbot\|tfue] | "Bot type: nextbot (use bot_type nextbot\|tfue)" / "Bot type set to tfue; removed N nextbot bots." |
+| bot_list | – | "Bots (N): nextbot:1:Name#uid, …" / "No bots." |
+| bot_kick | [all\|index\|name] | "Removing N bots." / "No bots matched 'x'." / "No bots." (LEAVE to everyone) |
+| bot_kill | [all\|index\|name] | "Killed N bots." / "Matched bots are not spawned yet." (players.kill, skipRewards) |
+| bot_config | [key=value …] | "Bot config: accuracy=100 attackTarget=true …" / "Bot config updated (k=v); N live bots updated." |
+| bot_difficulty, bot_diff | easy\|normal\|hard\|max\|number | "Bot difficulty: 3" / "Bot difficulty set to 1.8 (N live bots updated; applies to future bot_add)." (botDifficultyConfig: accuracy 25/50/85/100, targetDistance 1200/1200/1800/5000) |
+| bot_stop | [on\|off] | "Stopped N live bots; applies to future bot_add." / "Resumed …" (BOT_STOP_CONFIG / BOT_RESUME_CONFIG) |
+| bot_mimic | [on\|off] | "Mimic-style follow mode set (N live bots updated)." / "Combat follow mode set (…)." (+ devConsole's mimicTarget: the bot copies its target's input frames) |
+
+The key=value options are BOT_CONFIG_TYPES with its aliases (`god`, `hp`, `skill`, `bhop`, …):
+accuracy, attackTarget, autoRespawn, back/body, canRespawn, class, clan, cosmeticRarity,
+difficulty, dmgMlt, dye, face, featured, followTarget, forceClass, forceCrouch, godMode,
+hairColor, hat, healthMlt, joinMessage, leaveMessage, level, lives, melee, mimicTarget, name,
+noRecoil, nodNo, nodYes, premium, persistent, primSkin, randomCosmetics, randomJump, rangeMlt,
+removeOnDeath, retreat, roam, scoreOnDeath, secondary, skinColor, slideHop, speedMlt,
+spreadMlt, targetBots, targetDistance, targetTeam, team, tfue, useSpawnDelay, voiceChat,
+waist, watchTarget (head, pet, shoes, wrist have no v3.1.1 slot). Not in v7.1.4 although
+sometimes quoted: bot_attack / bot_hide / bot_statemachine (file names of the CS bot code
+NextBot mirrors), bot_profile (a backlog idea) and bot_ftue_v (the FTUE map `bot_ftue_v2.json`).
+
+Bots are players: `players.add` with `isBot`, SKINS + SPAWN + an account-style PLAYER_INFO
+(account id 2000000 + id like NextBot's createAccount, a level, a clan tag over level 25, a
+featured / premium chance), states, kills, leaderboard rows. Names come from names.js (80%
+handles, else colour + separator + noun), classes at random (no Rocketeer / Runner), a
+secondary, weapon / cosmetic skins from `assets/skins.json` (array index) under a rarity cap,
+lower rarities likelier. server.cfg `bots` / `bot_quota` / `bot_difficulty` (KrunkNative
+addition; config.botLimit 16) keep or fill the lobby; the info query reports them as `bots`,
+never as `players`, and the coordinator only counts connections. Ranked lobbies get none.
+
+AI (`bot_type nextbot`, the default): Idle / Hunt / Attack / Hide with the BotProfile presets
+(reaction time, aim focus, dodge, chase timeout, coward / retreat), aim-down-sights and recoil
+control by skill, reloads and the secondary on an empty primary. `bot_type tfue` runs bots.js
+Bot.update (turnSpd, roam circle, 2 s re-target, fire inside half the range). Both walk over a
+nav grid built from the map (`bot_nav.c`, v7 navmesh.ts idea: walkable tops, headroom, walk /
+jump / drop links, A*, no edges / jump pads / kill volumes).
+
+Intentional differences: bots survive round and map changes (v7 game.init removes
+non-persistent ones); every bot rolls a realistic identity unless level= / clan= / … are
+given (v7 bot_add bots are level 0); cosmetics per slot with a chance; a bot keeps its class
+(10% switch per respawn); class= implies forceClass; voiceChat, noRecoil, spreadMlt and
+scoreOnDeath are parsed but have no native effect; the sandbox Spawn Bot / Clear Bots keys
+(numpad + / -) are not bound.
+
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).
 
@@ -139,6 +197,11 @@ and adds completion for arguments:
 | team | red / blue |
 | connect | local, the last server address |
 | score | 100, 250, 500, 1000, -100 (the signature row shows `amount: number?`) |
+| bot_kick, bot_kill | all, the bots' names |
+| bot_type | nextbot / tfue |
+| bot_mimic, bot_stop | on / off |
+| bot_difficulty | easy / normal / hard / max |
+| bot, bot_add, bot_place, bot_config | tfue, autoRespawn and common `key=` options |
 
 The other commands take free text (echo, print, say, game, unbanip) or no
 argument; for those the signature row is the hint. No console command takes a class,

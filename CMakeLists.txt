@@ -364,6 +364,13 @@ else ()
         target_link_libraries(ai_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # bot_test: Krunker v7.1.4 bot players (shared/src/bots.c) and the bot_* console commands
+    add_executable(bot_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/bot_test.c)
+    target_link_libraries(bot_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(bot_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # spawn_test: v3.1.1 getSpawnPoint rules, distinct points for players spawning in one tick
     add_executable(spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/spawn_test.c)
     target_link_libraries(spawn_test PRIVATE m)

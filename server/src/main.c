@@ -3,6 +3,7 @@
 #include <brain.h>
 #include <info_query.h>
 #include <rcon.h>
+#include <bots.h>
 #include <pthread.h>
 #include <pcg_basic.h>
 #include <errno.h>
@@ -126,6 +127,32 @@ void server_request_drain(const char *why) {
     }
     snprintf(g_drain_why, sizeof(g_drain_why), "%s", why ? why : "");
     g_drain_requested = 1;
+}
+
+// server.cfg bots / bot_quota / bot_difficulty: the v7.1.4 bot manager (shared/src/bots.c)
+// keeps that many bot players in the lobby. The difficulty applies like `bot_difficulty`.
+static void server_configure_bots(const GsConfig *cfg) {
+    const int quota = cfg->bot_quota > 0 ? cfg->bot_quota : cfg->bots;
+    if (quota <= 0) return;
+    float difficulty = BOT_DIFFICULTY_NORMAL;
+    if (!bot_parse_difficulty(cfg->bot_difficulty, &difficulty)) {
+        server_log("bot_difficulty '%s' is not easy|normal|hard|max|<number>: normal", cfg->bot_difficulty);
+        difficulty = BOT_DIFFICULTY_NORMAL;
+    }
+    BotAssignments preset;
+    bot_difficulty_assignments(difficulty, &preset);
+    game_bots_configure(&g_server->game, &preset);
+    game_bots_set_quota(&g_server->game, quota, cfg->bot_quota > 0);
+    server_log("Bots: %s %d, difficulty %g (%s)", cfg->bot_quota > 0 ? "fill to" : "keep", quota, (double) difficulty, cfg->bot_difficulty);
+}
+
+// The quota's lobby size: the round's max players; ranked matches get no quota bots.
+static void server_bot_slots(void) {
+    char tags[4][24];
+    const int n = accounts_info_tags(tags, 4);
+    int ranked = 0;
+    for (int i = 0; i < n; i++) ranked |= !strcmp(tags[i], "ranked");
+    g_server->game.bots->slots = ranked ? -1 : g_server->config.max_players;
 }
 
 static void server_tick_drain(void) {
@@ -551,6 +578,7 @@ static void server_run_tick_loop(void) {
         pthread_mutex_lock(&g_server->lock);
         g_server->now = now;
         g_server->tick_wall = tick_start; // net_input_arrival: wall clock -> game.state_now
+        if (g_server->game.bots) server_bot_slots(); // bot quota: the lobby size (per mode), none in ranked
         game_tick(&g_server->game, now, delta);
         accounts_tick(now); // brain events, join timeouts, stats commits, lobby pushes
         net_check_idle_clients(now);
@@ -725,6 +753,7 @@ int main(int argc, char **argv) {
     g_server->game.server = g_server;
     accounts_configure_public(&g_server->game, startup_map);
     game_init(&g_server->game, startup_map ? 0 : -1, -1, 0);
+    server_configure_bots(cfg); // server.cfg bots / bot_quota / bot_difficulty (Krunker v7.1.4 bot players)
 
     // Interactive only when a human is on both ends; pipes, /dev/null, systemd
     // and redirected logs run headless (no raw mode, no escape sequences).

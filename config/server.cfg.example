@@ -23,6 +23,9 @@ round_seconds   0                  // 0 = the mode's game time
 lag_comp        1                  // hits rewind targets to where the shooter saw them (v3.1.1 fetchState)
 lag_comp_anchor 1                  // 1: from the shot input's arrival + ping; 0: v3.1.1 ping * 2 at processing
 lag_comp_scale  1                  // 0.1..1, times each player's Lag Compensation slider (v3.1.1 lagComp)
+bots            0                  // keep N Krunker v7.1.4 bot players in the lobby (0..16, config.botLimit)
+bot_quota       0                  // or fill the lobby up to N players with bots that leave as humans join (wins over bots)
+bot_difficulty  normal             // easy | normal | hard | max | a number (like the console's bot_difficulty)
 // game.gravMlt  1                 // any v3.1.1 host config var: game.<var> value
 motd            "Welcome to $'s new home"
 
