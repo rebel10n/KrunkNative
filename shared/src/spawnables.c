@@ -4,9 +4,9 @@
 // packets (NET_PACKET_SPAWNABLE_V7). Clients mirror them into game->mode->spawnables.
 //
 // KN notes:
-// - Account rewards (Gift / Golden Egg / Frog / Krunkanium / Loot Drop skins, challenges, medal
-//   counters) have no inventory to go to: their pickups only remove the spawnable (decisions.md
-//   "Backend-only triggers" spirit). Golden Egg needs the Egg Basket melee skin: nobody qualifies.
+// - Account rewards: Frog and Krunkanium give their skin through game_give_skin (kn_brain, servers
+//   with rewards only); Gift (event rarity tables) and Loot Drop (dropSkin, never dropped here)
+//   pickups only remove the spawnable. Golden Egg needs the Egg Basket melee skin: nobody qualifies.
 // - v7.1.4 bug fixed: a KR Tag / Diamond Egg stack picked up only partly (tagHoldLimit) was left
 //   inactive but not destroyed (pickupSpawnable sets active = false before onPickup, dontDestroy
 //   then skips the "dsp"), so the rest could never be collected and never despawned. KN keeps
@@ -270,7 +270,13 @@ static void spawnable_pickup(Game *game, Player *player, const int slot) {
         case SPAWNABLE_FREE_UPGRADE:
             mode_zombies_spawnable(game, player, NULL, spawnable->type); // Zombies power-ups (WP-H)
             break;
-        default: // Gift, Frog, Krunkanium, Loot Drop: account rewards (see the header)
+        case SPAWNABLE_FROG: // onPickup: giveSkin(5366, "zombies")
+            game_give_skin(game, player, 5366, "zombies");
+            break;
+        case SPAWNABLE_KRUNKANIUM: // onPickup: giveSkin(4222, "killdrops")
+            game_give_skin(game, player, 4222, "killdrops");
+            break;
+        default: // Gift, Loot Drop: account rewards (see the header)
             break;
     }
 

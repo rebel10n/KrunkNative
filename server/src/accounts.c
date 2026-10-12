@@ -12,6 +12,8 @@
 #include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
 #include <ranked.h>      // RANKED_TEAM_SIZE
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
+#include <season.h>       // v7 endGame BPP of the commit (bp_match_points), map rewards
+#include <pcg_basic.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -487,7 +489,8 @@ int accounts_reward(const Player *player) {
 
 // GameHooks.progress: game.incStat / challenges.update of an account's player, tallied for the
 // stats commit (doc/backend.md 8.4). Guests and hack-flagged accounts keep nothing.
-void accounts_progress(const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak) {
+void accounts_progress(const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak,
+                       const int item) {
     ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
     if (!client || client->acct.account_id <= 0 || client->acct.hack || !key || !key[0] || strlen(key) >= sizeof(client->acct.tallies[0].key)) return;
     ServerAccount *a = &client->acct;
@@ -501,7 +504,7 @@ void accounts_progress(const Player *player, const int stat, const char *key, co
     ServerChallengeTally *t = NULL;
     for (int i = 0; i < a->tally_count; i++) {
         ServerChallengeTally *c = &a->tallies[i];
-        if (c->weapon == weapon && c->streak == streak && !strcmp(c->key, key)) t = c;
+        if (c->weapon == weapon && c->streak == streak && c->item == item && !strcmp(c->key, key)) t = c;
     }
     if (!t) {
         if (a->tally_count >= SERVER_TALLY_MAX) return;
@@ -510,11 +513,74 @@ void accounts_progress(const Player *player, const int stat, const char *key, co
         snprintf(t->key, sizeof(t->key), "%s", key);
         t->weapon = (int16_t) weapon;
         t->streak = (int16_t) streak;
+        t->item = item;
         t->value = kind == CHALLENGE_KEY_ADD ? 0 : value;
     }
     if (kind == CHALLENGE_KEY_ADD) t->value += value;
     else if (kind == CHALLENGE_KEY_MAX || !strcmp(key, "kstk")) t->value = value > t->value ? value : t->value;
     else t->value = value; // SET
+}
+
+// ------------------------------------------------------------------ season-system: found skins
+
+// v7 game.giveSkin -> sendUserSkin (proc 176 with the skin): kn_brain's give_skin op for an
+// account in a game with rewards (the KR gate of acc_reward: earn_kr, not a hosted custom game,
+// not hack-flagged). On success: challenges.update("find", 1, {item: skin}), "skin" to the
+// finder and "skinF" to everyone else (NET_PACKET_SKIN_FOUND).
+#define ACC_SKIN_PENDING 32
+static ClientConnection *acc_client_by_account(int account_id);
+static struct {
+    uint32_t rid;
+    int account_id;
+    int skin;
+} g_skin_pending[ACC_SKIN_PENDING];
+
+void accounts_give_skin(const Player *player, const int skin, const char *reason) {
+    const ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
+    if (!g_acc.brain || !brain_linked() || !g_gs_config.earn_kr || g_acc.custom || !client || client->acct.account_id <= 0 ||
+        client->acct.hack || skin <= 0)
+        return;
+    int slot = -1;
+    for (int i = 0; i < ACC_SKIN_PENDING && slot < 0; i++)
+        if (!g_skin_pending[i].rid) slot = i;
+    if (slot < 0) return;
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "give_skin");
+    cJSON *args = cJSON_AddObjectToObject(frame, "args");
+    cJSON_AddNumberToObject(args, "id", client->acct.account_id);
+    cJSON_AddNumberToObject(args, "skin", skin);
+    cJSON_AddStringToObject(args, "source", reason ? reason : "raid");
+    if (brain_post(frame, 0) != 0) return; // brain_post consumed the frame
+    g_skin_pending[slot].rid = rid;
+    g_skin_pending[slot].account_id = client->acct.account_id;
+    g_skin_pending[slot].skin = skin;
+}
+
+static int acc_handle_skin_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    if (!cJSON_IsNumber(rid)) return 0;
+    for (int i = 0; i < ACC_SKIN_PENDING; i++) {
+        if (!g_skin_pending[i].rid || g_skin_pending[i].rid != (uint32_t) rid->valuedouble) continue;
+        const int account_id = g_skin_pending[i].account_id, skin = g_skin_pending[i].skin;
+        g_skin_pending[i].rid = 0;
+        const cJSON *err = cJSON_GetObjectItem(frame, "err");
+        if (cJSON_IsString(err) && err->valuestring[0]) {
+            server_log("[accounts] skin %d for account %d refused: %s", skin, account_id, err->valuestring);
+            return 1;
+        }
+        const ClientConnection *client = acc_client_by_account(account_id);
+        const Player *player = client ? client->player : NULL;
+        if (!player) return 1;
+        accounts_progress(player, 0, "find", 1, -1, -1, skin); // challenges.update(game, "find", 1, {item})
+        const NetSkinFoundPacket found = {.uid = player->uid, .skin = skin};
+        game_send(&g_server->game, player->uid, NET_PACKET_SKIN_FOUND, &found, sizeof(found));                     // "skin"
+        game_send(&g_server->game, NET_TARGET_EXCEPT(player->uid), NET_PACKET_SKIN_FOUND, &found, sizeof(found)); // broadcastEx "skinF"
+        return 1;
+    }
+    return 0;
 }
 
 static void acc_progress_clear(ServerAccount *a) {
@@ -538,6 +604,7 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
         cJSON_AddItemToArray(row, cJSON_CreateNumber(t->value));
         cJSON_AddItemToArray(row, cJSON_CreateNumber(t->weapon));
         cJSON_AddItemToArray(row, cJSON_CreateNumber(t->streak));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->item));
         cJSON_AddItemToArray(prog, row);
     }
     if (final) { // game.js endGame: challenges.update(game, "w") for the winners, "gp" for everyone
@@ -548,8 +615,26 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
             cJSON_AddItemToArray(row, cJSON_CreateNumber(1));
             cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
             cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
+            cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
             cJSON_AddItemToArray(prog, row);
         }
+        // endGame's tmpBPData before the cap (unbpp): min(20, floor(score * rewardMlt * 0.01)),
+        // +30 for playing at least half of the match (playTime >= (gameTime - gameTimerP) / 2).
+        // kn_brain applies the daily cap and the pass (db_season.c).
+        const Game *g = &g_server->game;
+        const GameModeConfig *mode = mode_config(game_mode_id(g));
+        const float minutes = (float) g->config.game_time;
+        const float total = g->round_length > 0.0f ? g->round_length : minutes > 0.0f ? minutes * 60.0f : 240.0f;
+        const float elapsed = total - (g->round_timer > 0.0f ? g->round_timer : 0.0f);
+        const float played = client->acct.match_since > 0.0f ? g_server->now - client->acct.match_since : 0.0f;
+        const double mlt = mode && mode->reward_mlt ? mode->reward_mlt : 1.0;
+        cJSON_AddNumberToObject(p, "bpp", bp_match_points(player ? player->score : 0, mlt, played >= elapsed / 2.0f));
+        // endGame: a 1 in 100 chance of the official map's current-season reward skin
+        const int map_index = g->current_map_index >= 0 && (size_t) g->current_map_index < g->map_count
+                                  ? map_catalog_index_of_json(g->maps[g->current_map_index]) : -1;
+        const int reward_skin = map_index >= 0 && map_index < MAP_CATALOG_OFFICIAL_COUNT ? season_map_reward(SEASON_CURRENT, map_index) : 0;
+        if (reward_skin && player && pcg32_boundedrand(SEASON_MAP_REWARD_CHANCE) == SEASON_MAP_REWARD_CHANCE - 1)
+            accounts_give_skin(player, reward_skin, "mapreward");
     }
     cJSON *medals = cJSON_AddObjectToObject(p, "medals");
     for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
@@ -1757,6 +1842,8 @@ static void acc_handle_frame(cJSON *frame) {
         // best-effort heads-up; the ticket itself is verified on JOIN
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "jti"));
         server_log("[brain] assignment %s for lobby %s", jti ? jti : "?", acc_str(cJSON_GetObjectItem(frame, "lobbyId"), "?"));
+    } else if (!strcmp(type, "acct-r") && acc_handle_skin_reply(frame)) {
+        // season-system: give_skin replies (found skins)
     } else if (!strcmp(type, "acct-r") && ks_storage_on_brain_frame(frame)) {
         // WP6: GAME.STORAGE / Save / Load Data / KR rewards (server/src/ks_storage.c)
     } else if (!strcmp(type, "acct-r") || !strcmp(type, "host-request-reply")) {

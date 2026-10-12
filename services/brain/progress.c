@@ -64,8 +64,11 @@ void sh_badge_select(SocialSession *s, const cJSON *f) {
 
 void sh_badge_claim(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
-    char me[24], badge[24];
-    social_call(s, &P_BADGE_CLAIM, KN_DB_ARGS(social_viewer(s, me), acct_itoa(badge, fa_int(f, 1, -1))), prog_done, prog_reply("cbdgr"));
+    char me[24], badge[24], season[24], now[24];
+    social_call(s, &P_BADGE_CLAIM,
+                KN_DB_ARGS(social_viewer(s, me), acct_itoa(badge, fa_int(f, 1, -1)), acct_itoa(season, acct_current_season()),
+                           acct_itoa(now, (int64_t) time(NULL))),
+                prog_done, prog_reply("cbdgr"));
 }
 
 void sh_medals(SocialSession *s, const cJSON *f) {

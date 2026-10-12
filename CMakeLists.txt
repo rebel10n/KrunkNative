@@ -461,6 +461,14 @@ else ()
         target_link_libraries(comp_ranked_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # season_test: v7.1.4 seasons, the Battle Pass (levels, daily BPP cap, claims, skips), season
+    # badges and the challenge contexts (shared/src/season.c, progression.c)
+    add_executable(season_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/season_test.c)
+    target_link_libraries(season_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(season_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # ai_test: v3.1.1 AI (map BOTs, behaviour, damage, sync, /summon /ais /kill, Traitor ghosts)
     add_executable(ai_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/ai_test.c)
     target_link_libraries(ai_test PRIVATE m)

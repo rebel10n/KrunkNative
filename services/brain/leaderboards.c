@@ -6,6 +6,10 @@
  * <query> is a qs_player column (player_score, player_kills, ...) or player_clan
  * (clan rows). region = config.socialRegions index (0 = all). Results are cached
  * for accounts.leaderboard_cache_s seconds (default 30) per (query, region).
+ *
+ * KrunkNative (v7.1.4 seasons, season.c): season_score / season_kills / season_wins /
+ * season_games / season_timeplayed rank the current season's season_stats (0108_seasons); the
+ * rows carry the value under the query's name.
  */
 #include "acct_internal.h"
 
@@ -30,6 +34,12 @@ static const LeaderQuery k_queries[] = {
     {"player_chal", "player_chal"},         {"player_followed", "player_followed"},
     {"player_deaths", "player_deaths"},     {"player_games_played", "player_games_played"},
     {"player_clan", NULL},                  {"clans", NULL},
+};
+
+/* v7.1.4 seasons: season_stats columns of accounts.current_season */
+static const LeaderQuery k_season_queries[] = {
+    {"season_score", "score"}, {"season_kills", "kills"}, {"season_wins", "wins"},
+    {"season_games", "games"}, {"season_timeplayed", "time_played"},
 };
 
 #define CACHE_SLOTS 32
@@ -97,10 +107,44 @@ static void leaders_done(SocialSession *s, kn_db_result *res, void *extra) {
     send_rows(s, c->query, rows);
 }
 
+static void season_page(SocialSession *s, const LeaderQuery *q, int64_t region) {
+    LeaderCtx *c = calloc(1, sizeof *c);
+    if (!c) return;
+    snprintf(c->query, sizeof c->query, "%s", q->name);
+    c->region = region;
+    char reg[24], lim[24], season[24];
+    acct_itoa(reg, region);
+    acct_itoa(lim, g_acct.page_size > 0 ? g_acct.page_size : 100);
+    acct_itoa(season, acct_current_season());
+    /* column and alias come from the fixed table above, never from the request */
+    char any[1024];
+    snprintf(any, sizeof any,
+             "SELECT r.player_id, r.player_name, r.player_featured, r.player_hack, r.player_premium, r.player_clan, r.clan_rank,"
+             " ss.%s AS %s FROM season_stats ss JOIN player_rows r ON r.player_id = ss.account_id"
+             " WHERE ss.season = {int:$3} AND ({int:$1} = 0 OR r.player_region = {int:$1}) AND ss.%s > 0"
+             " ORDER BY ss.%s DESC, r.player_id LIMIT $2",
+             q->column, q->name, q->column, q->column);
+    const kn_sql text = {.any = any};
+    social_query(s, &text, KN_DB_ARGS(reg, lim, season), leaders_done, c);
+}
+
 void leaders_page(SocialSession *s, const char *query, int64_t region) {
     const LeaderQuery *q = NULL;
     for (size_t i = 0; i < sizeof k_queries / sizeof k_queries[0]; i++)
         if (!strcmp(k_queries[i].name, query)) q = &k_queries[i];
+    const LeaderQuery *sq = NULL;
+    for (size_t i = 0; i < sizeof k_season_queries / sizeof k_season_queries[0]; i++)
+        if (!strcmp(k_season_queries[i].name, query)) sq = &k_season_queries[i];
+    if (sq) {
+        if (region < 0 || region > 16) region = 0;
+        CacheEntry *e = cache_find(sq->name, region);
+        if (e && kn_now_ms() - e->at_ms < (uint64_t) cache_ttl_ms()) {
+            send_rows(s, sq->name, cJSON_Duplicate(e->rows, 1));
+            return;
+        }
+        season_page(s, sq, region);
+        return;
+    }
     if (!q) {
         send_rows(s, query, NULL);
         return;

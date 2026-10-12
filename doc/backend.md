@@ -883,7 +883,7 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 | `post_max_len` / `comment_max_len` / `chat_max_len` | `1024` / `500` / `300` | text limits |
 | `page_size` / `leaderboard_cache_s` | `100` / `30` | leaderboard rows / per (query, region) cache |
 | `skins_file` / `assets_dir` | `assets/skins.json` / `assets` | store skins in `store.skins` index order (wheels, quick sell, market filters) / map catalogue JSON |
-| `current_season` | `3` | `config.currentSeason`: wheels only roll skins of this season |
+| `current_season` | `7` | `config.currentSeason`: the Battle Pass, season stats / leaderboards and season badges of this season, and wheels only roll skins of it; raising it rolls the season over at the next start (7.8) |
 | `reward_time_s` / `reward_min_level` / `daily_reward_kr` | `21600` / `5` / `50` | `config.rewardTime` between Free KR spins / daily rewards (shared `lastReward`), `config.rewardMinLvl`, KR of `clm` |
 | `free_wheel_cooldown_s` | `21600` | the "Free" wheel (index 4) once per this |
 
@@ -909,6 +909,10 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
   DAT / REW JSON, icon, name; seeded with a starting set), `player_challenges` (PV / PT per
   account, challenge and period: UTC day / week for daily / weekly), `player_medals` (medal
   counts per account): `0107_progression.sql`, player-viewer WP-E part 2c.
+* `seasons` (one row per season, `ends_at` set by the rollover), `battlepasses` (v7's
+  qs_battlepass: one pass per season, `itemdata` "id,tier,col,sk", KR prices),
+  `battlepass_progress` (account.BP per pass: `bpp`, `tier`, `items_claimed`, `tier_at`),
+  `season_stats` (per-season totals of counted matches): `0108_seasons.sql`, 7.8.
 * `inventory` (skin index -> count), `skin_transactions`, `market_listings`,
   `trades` + `trade_items`, `published_maps`, `published_mods`, `published_assets`,
   `creation_votes`, `creation_favs`.
@@ -1048,13 +1052,20 @@ Other labels (request -> reply):
 | `["bdg", badge]` | `["bdgr", badge]` / `["po", null, "You dont own this badge"]`: `player_stats.bdg` (-1 clears; v7 io_badgeUpdate) |
 | `["cbdg", badge]` | `["cbdgr", badge]` / `["po", null, err]` ("Badge not claimable", "Requirements not met", "Badge already claimed"): a claimable badge whose rule holds (Nuclear I-IV: `stats.n`) |
 | `["mdl"]` | `["mdl", {medal: count}]`: the account's medal counts (KrunkNative) |
+| `["bpdl"]` | `["bpdl", pass \| null]` then (signed in) `["bppd", {id, bpp, tier, items_claimed}]`: v7 io_dataLoaded / io_syncBpProg (7.8) |
+| `["bpclm", itemId]` | `["bpclmr", null, null, skin, null, null, {id, tier, col, sk}]` + `bppd` / `["po", null, err]` ("Item not found", "Level not reached", "VIP Tier required", "Item already claimed") |
+| `["xstbp", tier, code]` | `["purbp", "kr", null, null, tier, price, "KR", txid, null]` + `bppd` (+ `nbdgr`) + `ua` / `["purbp", "kr", {err}, "1"]`: the VIP tier for `tier1_price_kr` KR |
+| `["xstbpl", levels]` | `["purbpl", "kr", null, null, levels, bpp, price, "KR", txid, null, badge]` + `bppd` + `ua` / `["purbpl", "kr", {err}, null, levels]`: skipped levels for `skip_price_kr` KR each |
+| `["sst", name?, season?]` | `["sst", {season, name, kills, deaths, wins, games, score, timePlayed, bpp, tier, level, levels} \| null]`: the profile's season block (KrunkNative) |
 | `["flg", name, 0\|1]` / `["ver", name, 0\|1]` | `["fgr", ok]` (mods) / `["verr", ok]` (devs) |
 
 Server pushes: `["ua", data40, info]` (v3.1.1 `updateAccount`) after a stats commit
 of that account; `["gmc", n]` unread mail. After a commit with v7 progression fields (7.6):
 `["chg", [done, CI, PV, ...]]` (v7 io_updateChallenges), `["chgC", [challenge...]]` (the
 completed challenge objects: the end screen's cards and reward skins), `["chlR", skins, funds,
-0, 0, kr]` (io_updateChallengeRewards) and `["nbdgr", [badge...]]` (checkBadges).
+0, 0, kr]` (io_updateChallengeRewards) and `["nbdgr", [badge...]]` (checkBadges); with the
+season (7.8) `["bppd", account.BP]` (battlePass.progress) and `["bpEnd", tmpBPData]` (the end
+screen's Battle Pass section: `{bpp, pbpp, gn, cbp, bbpp, unbpp, rbpp, mx, ml, id, re}`).
 
 ### 7.5 Hub HTTP catalogue (`creations.c`, v3.1.1 `publicRoutes.ts`)
 
@@ -1109,12 +1120,15 @@ returns `duplicate: 1` and changes nothing), adds XP to the per-class `c<class>`
 stat and the clan's score, clamps KR to `max_match_kr`, writes a ledger row.
 `stats{}` holds v7's incStat counters (`s, h, hs, ls, wb, mk, fk, tmk, ast, spry, crc, n, ad,
 sad, cad, sl, jg, kjg, jgk, wm`), added to `player_stats`. player-viewer WP-E part 2c: when
-`prog` (`[[key, value, weapon, streak], ...]`, the match's challenge tallies) or `medals`
+`prog` (`[[key, value, weapon, streak, item], ...]`, the match's challenge tallies; item = the
+spray / found skin of v7's `{item}` contexts, -1 none) or `medals`
 (`{name: count}`) is present and the commit is not a duplicate, kn_brain then runs
 `P_PROGRESS` (`db_progress.c`): v7's challenges.finalize on the account's active challenges
 (`final: false` = a player who left: only `DAT.nem` ones), KR / skin rewards (`kr_transactions`
 source `challenge`), the medal counts, and checkBadges (claimable badges whose rule holds), then
-pushes 7.4's match-end frames.
+pushes 7.4's match-end frames. The season part of the same run (7.8): the commit's `bpp` (v7
+endGame's per-match BPP before the cap, final matches only), the completed challenges' `REW.bpp`,
+and `kills` / `deaths` / `won` / `games` / `score` / `timePlayed` into `season_stats`.
 
 ### 7.7 Tests
 
@@ -1134,6 +1148,11 @@ pushes 7.4's match-end frames.
   challenge list and its daily / weekly rotation, a commit with tallies -> the match-end pushes,
   duplicate and partial commits, badge select / claim refusals and the auto-awarded Nuclear I,
   medal counts, `badges` in the account object (WP-E part 2c).
+* `ctest -R brain_season` (`services/brain/tests/season_test.py`, every driver): the pass and
+  account.BP, claims and their refusals, the match BPP and the daily cap (`bpEnd`), duplicate /
+  left commits, the VIP tier and level skips in KR (`kr_transactions` rows, refusals without KR),
+  the season badges, `sst` and the season leaderboard, a restart (the season row kept) and the
+  rollover to season 8.
 * Real v3.1.1 client: `services/brain/tests/v311_site_proxy.js <port> <brainPort>
   <v3.1.1 public dir>` (same-origin front like nginx) +
   `v311_social_client.js <port> <cdpPort> <user> <pass> <outDir>` against headless
@@ -1142,6 +1161,48 @@ pushes 7.4's match-end frames.
   catalogue from the brain.
 * KrunkNative web client: client-integration's build (`?brain=<brain url>`)
   registers and logs in through the menu's account window in headless Chromium.
+
+### 7.8 Seasons and the Battle Pass (`season.c`, `db_season.c`, `0108_seasons.sql`)
+
+Krunker v7.1.4's `config.currentSeason` (7) and `currentBattlepass` (2), windows[5] (the Battle
+Pass window), endGame's `tmpBPData` and challenges.finalize's `REW.bpp`, with the rules in
+`shared/src/season.c` (client, kn_brain and tests share them):
+
+* **Season**: `accounts.current_season` (default 7). At start kn_brain runs `P_SEASON_ENSURE`:
+  it inserts the season's `seasons` row when missing (insert only: an existing row and older
+  data stay as they are) and, when it inserted one, sets `ends_at` of older open seasons (the
+  rollover). `season_stats` and the season leaderboards (`["r", "leaders", "season_score" |
+  "season_kills" | "season_wins" | "season_games" | "season_timeplayed", ...]`, the value under
+  the query's name) are per season; lifetime totals stay in `players`.
+* **Pass**: the active `battlepasses` row of the season (status 1); `bpdl` sends it in v7's
+  `BattlePassPayload` shape (`id, name, descr, bpp_perlevel, itemcount, tier0name/price,
+  tier1name/price, itemdata, startdate, enddate`) plus `season` and `skipprice`. Seeded: the
+  Season 7 pass as it shipped (id 2, 50 levels x 300 BPP, the Krunker wiki's 100 rewards: season-7 "battlepass" skins and Season 7 tickets).
+* **BPP**: a finished public match's commit carries `bpp` = min(20, floor(score * rewardMlt *
+  0.01)) + 30 when the player played half of the match (the game server); kn_brain awards it
+  under the daily cap ((days since startdate + 1) * 300, `config.bppCapDay`) and the pass total,
+  adds the completed challenges' `REW.bpp` on top, and pushes `bppd` + `bpEnd`. Nothing after
+  `enddate`.
+* **Claims**: a card's skin goes to the inventory (`skin_transactions` source `battlepass`,
+  ref `bp:<pass>:<item>`) when its level is reached, its track is free or the account has the
+  VIP tier, and it is not in `items_claimed`.
+* **KR purchases** (KrunkNative: v7 sold them for USD through Xsolla / Steam): the VIP tier
+  (`tier1_price_kr`, default 1200) and skipped levels (`skip_price_kr` each, default 200; at most
+  up to the last level) are debited through `db_add_funds` (`kr_transactions` sources
+  `battlepass` / `battlepass-skip`, ref `bp:<pass>:tier1` / `bp:<pass>:skip<n>`) in the same
+  transaction as the change; not enough KR refuses with "Not enough KR".
+* **Season badges** (badges.js 22..28, `season_badge_rule`): Founder = the VIP tier bought
+  within 7 days of the pass's startdate (v7: fixed 2022 / 2023 dates), Battle Pass Master =
+  VIP + bpp >= 15000, Badge Master = the season's other badges, S6 Map Master = the 17 Season 6
+  map reward skins; only in their season. Checked at every commit, VIP purchase and level skip,
+  and on `cbdg`.
+
+Migration and API summary: `0108_seasons` (postgres / sqlite / mysql) creates `seasons` (row 7),
+`battlepasses` (pass 2), `battlepass_progress`, `season_stats`; procs `P_SEASON_ENSURE`,
+`P_BP_DATA`, `P_BP_CLAIM`, `P_BP_BUY`, `P_BP_SKIP`, `P_SEASON_STATS` (C on every driver) and
+the season part of `P_PROGRESS`; social labels `bpdl`, `bpclm`, `xstbp`, `xstbpl`, `sst` and the
+pushes `bppd`, `bpEnd`, `purbp`, `purbpl`, `bpclmr`; commit fields `bpp` and the `prog` item
+column; leaderboard queries `season_*`.
 
 ## 8. Game server (`server_bin`): config, brain client, accounts
 
@@ -1685,6 +1746,8 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 | Daily reward (level >= 5) | cK / dd (#claimHolder timer, "Play 1 Game" until a round ended), claimReward (ad-gated upstream) | `["clm"]` -> `["clm",lastReward,funds]` |
 | Prize wheels (Store tab 0) | windows[13] tab 0, prizeWheel, spinButton/spinUI onclick, spinResponse | `["spin",i]` -> `["spin",null,rand,skin,funds,follow]`, `["unbx"]`. The canvas wheel is a white disc (no 2D canvas natively); the won item shows its preview PNG (`textures/previews/` from the asset tree, `make assets-import`; noimg fallback) |
 | Ranked (27), from the menu bar's Ranked button (after Server Finder) | v7.1.4 windows[26] (tabs, justCopied, region; gen() empty in v7: the body is KrunkNative's in v7's window classes), joinQueue / leaveQueue / updateQueueStatus, QueueManager | `/mm/queue/rating` (the Season tab's rank card), `/mm/queue/join` (token, region, party, ready, classIndex), `/mm/queue/poll` every 1 s, update-ready / update-class / kick / promote / leave; "Join" `{gameId,host,port,webUrl,clientId}` is joined with that ticket; Host Game refuses while queued or in a ranked match (`custom.host.ranked`). Status under CLICK TO PLAY. In the match: the comp menu (`#mMenuHolComp`, `client/src/ui/comp_ui.c`) |
+| Battle Pass (6) | v7.1.4 windows[5] (home / Challenges tabs, claims, purchasePop, skipLevelPop), the end screen's #endBPLayout (`client/src/ui/battlepass_ui.c`) | `["bpdl"]` -> `bpdl` + `bppd`, `["bpclm",id]` -> `bpclmr`, `["xstbp",1,code]` -> `purbp`, `["xstbpl",n]` -> `purbpl`; push `["bpEnd",tmpBPData]` after a commit (7.8). The daily (and weekly) challenges are its Challenges tab; the Challenges window (33) keeps map / weapon / nightmare |
+| Season stats | KrunkNative: the hub profile's "Season 7" stat tab, the leaderboards' Season / S7 Kills / S7 Wins buttons (`social_ui.c`) | `["sst",name]` -> `sst`; `["r","leaders","season_score"\|"season_kills"\|"season_wins",...]` |
 | playMap / `?play=` / `?game=` | playMap -> `/?play=`, autoHostMap | brain: a public lobby whose `meta.map`/`meta.m` matches, else `/mm/host-game` (`customMap` for non-catalogue maps: the game server fetches `/api/map-data`); offline: published maps are fetched (`/api/map-data?name=`) and hosted in the local game |
 
 ### 9.6 net-bridge `/native?target=`

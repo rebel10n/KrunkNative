@@ -1012,6 +1012,21 @@ static void progress_done(kn_db_result *res, void *ud) {
         cJSON_AddItemToArray(f, cJSON_Duplicate(badges, 1));
         social_push_account(c->id, f);
     }
+    /* v7.1.4 Battle Pass: battlePass.progress -> "bppd" (account.BP) and endGame's tmpBPData
+     * (v7 sends it with the "end" packet; KrunkNative's game server does not hold the pass, so
+     * the end screen's #endBPLayout gets it from here: ["bpEnd", tmpBPData]) */
+    const cJSON *bp_progress = cJSON_GetObjectItemCaseSensitive(out, "bpProgress");
+    if (cJSON_IsObject(bp_progress)) {
+        cJSON *f = social_frame("bppd");
+        cJSON_AddItemToArray(f, cJSON_Duplicate(bp_progress, 1));
+        social_push_account(c->id, f);
+    }
+    const cJSON *bp = cJSON_GetObjectItemCaseSensitive(out, "bp");
+    if (cJSON_IsObject(bp)) {
+        cJSON *f = social_frame("bpEnd");
+        cJSON_AddItemToArray(f, cJSON_Duplicate(bp, 1));
+        social_push_account(c->id, f);
+    }
     cJSON_Delete(out);
     free(c);
 }
@@ -1020,8 +1035,9 @@ static void progress_run(int64_t id, const char *payload) {
     ProgressCtx *c = calloc(1, sizeof *c);
     if (!c) return;
     c->id = id;
-    char now[24];
-    kn_db_call(g_acct_brain->db, &P_PROGRESS, KN_DB_ARGS(payload, acct_itoa(now, (int64_t) time(NULL))), progress_done, c);
+    char now[24], season[24];
+    kn_db_call(g_acct_brain->db, &P_PROGRESS,
+               KN_DB_ARGS(payload, acct_itoa(now, (int64_t) time(NULL)), acct_itoa(season, acct_current_season())), progress_done, c);
 }
 
 /* The P_PROGRESS payload of a commit from a v7 game server ("prog" / "medals" present), NULL else. */
@@ -1030,7 +1046,9 @@ static char *progress_payload(const cJSON *a) {
     if (!cJSON_IsArray(prog) && !cJSON_IsObject(medals)) return NULL;
     cJSON *p = cJSON_CreateObject();
     cJSON_AddNumberToObject(p, "id", (double) kn_json_int(a, "id", 0));
-    const char *keys[] = {"prog", "medals", "mapIndex", "mapId", "mode", "classIndex", "ranked", "final", "match"};
+    /* + the season part (db_season.c): the match BPP and the season_stats totals */
+    const char *keys[] = {"prog", "medals", "mapIndex", "mapId", "mode", "classIndex", "ranked", "final", "match",
+                          "bpp", "kills", "deaths", "score", "won", "games", "timePlayed"};
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(a, keys[i]);
         if (v) cJSON_AddItemToObject(p, keys[i], cJSON_Duplicate(v, 1));
@@ -1172,6 +1190,10 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         OpCtx *o = op_new(cb, ud, "give_skin");
         if (!o) return -1;
         const int64_t skin = kn_json_int(args, "skin", -1);
+        if (skin <= 0 || (acct_skin_count() > 0 && skin >= acct_skin_count())) { /* store.skins[skin] must exist */
+            op_reply(o, "Unknown skin.", NULL);
+            return -1;
+        }
         kn_db_call(g_acct_brain->db, &P_GIVE_SKIN,
                     KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, skin), kn_json_str(args, "source", "spin")),
                     op_json_done, o);
@@ -1294,6 +1316,7 @@ int accounts_init(Brain *b) {
     }
     s_cleanup_timer = kn_loop_add_timer(b->loop, 60 * 1000, 3600 * 1000, cleanup_tick, NULL);
     staff_flags_apply();
+    season_init(); /* v7.1.4 seasons: the accounts.current_season row (season.c) */
     KN_INFO(MOD, "ready (names %d-%d, sessions %lld days, password iterations %u)", g_acct.name_min,
             g_acct.name_max, (long long) (g_acct.session_ttl_s / 86400), kn_password_get_iterations());
     return 0;

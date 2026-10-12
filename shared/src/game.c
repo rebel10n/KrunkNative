@@ -272,13 +272,23 @@ int game_is_pub_type(const Game *game) {
 // game.incStat(stat, player): mode.skipStats is not ported (no v7 mode lists one KrunkNative runs).
 void game_inc_stat(Game *game, const Player *player, const char *key) {
     if (!game || !player || player->is_bot || !game->hooks.progress || !game_is_authority(game) || !game_is_pub_type(game)) return;
-    game->hooks.progress(game, player, 1, key, 1, -1, -1);
+    game->hooks.progress(game, player, 1, key, 1, -1, -1, -1);
 }
 
 // challenges.update(game, key, value, {wep, stk}, player) / updateMulti
 void game_challenge(Game *game, const Player *player, const char *key, const int value, const int weapon, const int streak) {
     if (!game || !player || player->is_bot || !game->hooks.progress || !game_is_authority(game) || !game_is_pub_type(game)) return;
-    game->hooks.progress(game, player, 0, key, value, weapon, streak);
+    game->hooks.progress(game, player, 0, key, value, weapon, streak, -1);
+}
+
+void game_give_skin(Game *game, const Player *player, const int skin, const char *reason) {
+    if (!game || !player || player->is_bot || skin <= 0 || !game->hooks.give_skin || !game_is_authority(game) || !game_is_pub_type(game)) return;
+    game->hooks.give_skin(game, player, skin, reason ? reason : "raid");
+}
+
+void game_challenge_item(Game *game, const Player *player, const char *key, const int value, const int item) {
+    if (!game || !player || player->is_bot || !game->hooks.progress || !game_is_authority(game) || !game_is_pub_type(game)) return;
+    game->hooks.progress(game, player, 0, key, value, -1, -1, item);
 }
 
 // game.incMedal(medal, player): player && (game.isSandbox || player.account) && isPubType()
@@ -729,6 +739,8 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                 // v7 streaks.js: findTriggers("onNukeEnd", nukePlayer) in custom games; KN fires it on
                 // every map (official maps have no nuke triggers)
                 trigger_multi_event(game, TRIGGER_EVENT_ON_NUKE_END, game->nuke_player);
+                // nukePlayer.account && isPubType() && randInt(1, 140) == 140: giveSkin(4040, "streak")
+                if (game->nuke_player && game->hooks.give_skin && pcg32_boundedrand(140) == 139) game_give_skin(game, game->nuke_player, 4040, "streak");
             }
         }
 

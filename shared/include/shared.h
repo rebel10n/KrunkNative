@@ -1233,6 +1233,7 @@ typedef struct Player_t {
     int attach_index;             // attachIndex (ENT / spawn): the sight on attach weapons, 0 Reflex, 1 Acog, -1 none
     unsigned char upgraded_slots; // player.upgrades: bit per loadout slot holding its upgradeWeapons entry (krumMachine)
     int weapon_streak;            // weaponStreak: kills in a row with streak_weapon ("wstk")
+    uint64_t unique_weapon_kills; // uniqueWeaponKills: bit = a weapon id this player killed with ("uwk"; v7 keeps it for the player's lifetime)
     int streak_weapon;            // currentStreakWeapon, -1 none
     unsigned char has_account:1;  // player.account (server: a backend account or the host's own machine,
                                   // which covers the offline sandbox, decisions.md): reqAccount streaks
@@ -1548,9 +1549,14 @@ typedef struct {
     void (*reward_kr)(struct Game_t*, const Player*, int amount);
     // player-viewer WP-E part 2c: v7 game.incStat (stat = 1: key is a progression.h stat key,
     // value 1) and challenges.update (stat = 0: a challenge key, its value, the weapon and streak
-    // context, -1 none) in public games. The server tallies them per account for the stats
-    // commit (server/src/accounts.c); NULL = nothing (offline, guests).
-    void (*progress)(struct Game_t*, const Player*, int stat, const char *key, int value, int weapon, int streak);
+    // context, -1 none; item: the {item} context of "spry" / "find", -1 none) in public games. The
+    // server tallies them per account for the stats commit (server/src/accounts.c); NULL =
+    // nothing (offline, guests).
+    void (*progress)(struct Game_t*, const Player*, int stat, const char *key, int value, int weapon, int streak, int item);
+    // season-system: v7 game.giveSkin(player, skin, reason) -> sendUserSkin (the account backend
+    // gives the skin; the server then tallies "find" {item} and sends NET_PACKET_SKIN_FOUND).
+    // NULL = nothing (offline, servers without rewards).
+    void (*give_skin)(struct Game_t*, const Player*, int skin, const char *reason);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -1800,6 +1806,10 @@ void game_send(Game*, int uid, int type, const void*, uint16_t); // through hook
 int game_is_pub_type(const Game*);
 void game_inc_stat(Game*, const Player*, const char *key);
 void game_challenge(Game*, const Player*, const char *key, int value, int weapon, int streak);
+// challenges.update(game, key, value, {item}, player): "spry" (the spray), "find" (a found skin)
+void game_challenge_item(Game*, const Player*, const char *key, int value, int item);
+// game.giveSkin(player, skin, reason): an account's found skin (GameHooks.give_skin), public games
+void game_give_skin(Game*, const Player*, int skin, const char *reason);
 void game_inc_medal(Game*, Player*, const char *name);
 Player *game_find_player(Game*, int uid);
 void game_sync_leaders(Game*, int uid);  // LEADERBOARD to `uid` (or NET_TARGET_ALL)
@@ -2788,8 +2798,16 @@ typedef struct {
 #define NET_PACKET_DEATH_INFO (NET_PACKET_BLOCK_SOCIAL + 1) // S->C to the victim: NetDeathInfoPacket ("3" [wid, classStat, pcStat, stats])
 #define NET_PACKET_PC_STAT (NET_PACKET_BLOCK_SOCIAL + 2)    // C->S before ENT: NetPcStatPacket (v7 ENT pcStatIndex)
 // Part 2c: v7's endData.mdls (game.js:4693, the end screen's Medals tab): the player's
-// player.medals, sent to it right before its END. + 4 stays reserved; + 5..9 are WP-E part 2b's.
+// player.medals, sent to it right before its END. + 5..9 are WP-E part 2b's.
 #define NET_PACKET_END_MEDALS (NET_PACKET_BLOCK_SOCIAL + 3) // S->C: NetEndMedalsPacket
+// season-system (doc/v7/decisions.md): a skin game.giveSkin gave (sendUserSkin's success): v7
+// "skin" (io_skinReward) to the finder and "skinF" (io_skinFoundMessage) to everyone else.
+#define NET_PACKET_SKIN_FOUND (NET_PACKET_BLOCK_SOCIAL + 4) // S->C: NetSkinFoundPacket
+
+typedef struct {
+    int32_t uid;  // the finder
+    int32_t skin; // store.skins index
+} NetSkinFoundPacket;
 
 typedef struct {
     uint8_t count;                                // entries used, in overlay.medalsList order

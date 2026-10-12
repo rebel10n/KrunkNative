@@ -1407,8 +1407,10 @@ static struct {
 } g_prog[PROG_EVENTS_MAX];
 static int g_prog_count;
 
-static void test_progress_hook(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak) {
+static void test_progress_hook(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak,
+                               const int item) {
     (void) game;
+    (void) item;
     if (g_prog_count >= PROG_EVENTS_MAX) return;
     g_prog[g_prog_count].uid = player->uid;
     g_prog[g_prog_count].stat = stat;
@@ -1518,6 +1520,39 @@ static void test_progression(Game *game) {
     cJSON_Delete(reward);
 }
 
+// v7.1.4 challenge contexts the 2c port skipped: "uwk" (uniqueWeaponKills), incStat "kjg" / "jgk"
+static void test_progression_contexts(Game *game) {
+    printf("Running progression contexts test...\n");
+    start_mode(game, MODE_ID_FFA);
+    game->hooks.progress = test_progress_hook;
+    g_prog_count = 0;
+    Player *killer = add_player(game, 1, 0);
+    Player *victim = add_player(game, 2, 0);
+    killer->has_account = 1;
+    PlayerKillInfo info = {.weapon_id = 1};
+    player_kill(victim, killer, &info, 0);
+    CHECK(prog_has(1, 0, "uwk", 1, -1), "uniqueWeaponKills: \"uwk\" 1");
+    Player *jugg = add_player(game, 3, 0);
+    jugg->is_juggernaut = 1;
+    PlayerKillInfo info2 = {.weapon_id = 3};
+    player_kill(jugg, killer, &info2, 0);
+    CHECK(prog_has(1, 0, "uwk", 2, -1), "a second weapon: \"uwk\" 2");
+    CHECK(prog_has(1, 1, "kjg", 1, -1) && !prog_has(1, 1, "jgk", 1, -1), "incStat(\"kjg\") for killing a Juggernaut");
+    int uwk_events = 0;
+    Player *third = add_player(game, 4, 0);
+    PlayerKillInfo info3 = {.weapon_id = 3};
+    player_kill(third, killer, &info3, 0);
+    for (int i = 0; i < g_prog_count; i++) uwk_events += g_prog[i].uid == 1 && !strcmp(g_prog[i].key, "uwk");
+    CHECK(uwk_events == 2, "the same weapon again: no \"uwk\" (%d events)", uwk_events);
+    killer->is_juggernaut = 1;
+    Player *fourth = add_player(game, 5, 0);
+    PlayerKillInfo info4 = {.weapon_id = 3};
+    player_kill(fourth, killer, &info4, 0);
+    CHECK(prog_has(1, 1, "jgk", 1, -1), "incStat(\"jgk\") for a kill as a Juggernaut");
+    killer->is_juggernaut = 0;
+    game->hooks.progress = NULL;
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *sandstorm = NULL;
@@ -1566,6 +1601,7 @@ int main(void) {
     test_leader_stats(&game);
     test_death_info(&game);
     test_progression(&game);
+    test_progression_contexts(&game);
 
     if (g_failures) {
         printf("modes_test: %d of %d check(s) failed\n", g_failures, g_checks);

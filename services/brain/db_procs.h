@@ -93,6 +93,19 @@ extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;
 /* ---- player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c) */
 extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_MEDALS;
 
+/* ---- Krunker v7.1.4 seasons and the Battle Pass (db_season.c, 0108_seasons) */
+extern const kn_proc P_SEASON_ENSURE, P_BP_DATA, P_BP_CLAIM, P_BP_BUY, P_BP_SKIP, P_SEASON_STATS;
+/* The season's active pass (malloc'd; NULL when none / on failure); *row: its battlepasses row. */
+struct BattlePass *db_bp_load(Dbx *x, int season, cJSON **row);
+/* checkBadges with the season badges: adds every claimable badge whose rule holds (stats =
+ * players.player_stats); returns the added indices. */
+cJSON *db_season_check_badges(Dbx *x, int64_t id, int season, int64_t now_s, const cJSON *stats);
+/* P_PROGRESS's season part for one committed match: season_stats, the match BPP (payload "bpp",
+ * capped) and the challenges' REW.bpp. Returns tmpBPData (NULL without a pass / BPP) and the new
+ * account.BP in *progress (bppd). */
+cJSON *db_season_match(Dbx *x, int64_t id, int season, int64_t now_s, const cJSON *payload, int64_t challenge_bpp,
+                       cJSON **progress);
+
 /* ---- matchmaking (db_mm.c) */
 extern const kn_proc P_RQ_JOIN, P_RQ_STATE, P_RQ_ACTION, P_RQ_EXPIRE, P_RQ_LOCK, P_RQ_CANDIDATES, P_RQ_MATCH_CREATE,
     P_RQ_MATCH_READY, P_RQ_MATCH_FAILED, P_RQ_MATCH_FINISH, P_RQ_RATINGS, P_MM_NODE_TAKEOVER, P_MM_NODE_UPDATE,

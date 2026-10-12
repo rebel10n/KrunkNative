@@ -49,6 +49,10 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/badges.c
     # server-names: game ids and their short link form (registry_lobby_find)
     ../../shared/src/server_names.c
+    # v7.1.4 seasons and the Battle Pass (0108_seasons); the rules are shared/src/season.c
+    db_season.c
+    season.c
+    ../../shared/src/season.c
 )
 
 # Sources another agent has listed but not landed yet must not break configure
@@ -150,6 +154,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_progress PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v7.1.4 seasons and the Battle Pass (db_season.c, season.c, 0108_seasons)
+    add_test(NAME brain_season
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/season_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_season PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 endif ()
 
 # coord-store: the same three suites on the other store drivers (KN_TEST_DB_DRIVER,
@@ -174,7 +183,11 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_progress_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
-        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_storage_${drv} brain_progress_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+        add_test(NAME brain_season_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/season_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_storage_${drv} brain_progress_${drv} brain_season_${drv}
+            PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
     endif ()
     add_test(NAME brain_federation_${drv}

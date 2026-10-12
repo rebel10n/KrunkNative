@@ -16,6 +16,7 @@
 // so v7's in-match "Finish the game to complete" chat line is not sent.
 #include <stddef.h>
 #include <cJSON.h>
+#include <season.h>
 
 // ------------------------------------------------------------------ level (src/data/account.js)
 
@@ -55,7 +56,7 @@ typedef enum {
     CHALLENGE_KEY_SET,     // vA755: progVal = value; kstk (max, see below), tower, pkr, island, time
     CHALLENGE_KEY_MAX,     // vA756: progVal = max(progVal, value): amc, uwk, rnd
     CHALLENGE_KEY_META,    // "chall": complete N other challenges (finalize)
-    CHALLENGE_KEY_UNKNOWN, // never progresses
+    CHALLENGE_KEY_UNKNOWN, // NULL / "": never progresses (any other key is ADD, as in v7)
 } ChallengeKeyKind;
 
 ChallengeKeyKind challenge_key_kind(const char *key);
@@ -74,14 +75,16 @@ typedef struct {
 //   active:  the account's activeChallenges, objects {CI, T, DAT{ky, val, wep, cls, mp, mid, md,
 //            stk, item, lesser, sm, nem, evt, seas}, REW{kr, jnk, sk, bpp}, PV, PT}; PV / PT are
 //            updated in place.
-//   events:  the match's tallies [[key, value, weapon, streak], ...]: one row per (key, weapon,
-//            streak), weapon / streak -1 for none. ADD keys carry the sum, MAX / SET keys the
+//   events:  the match's tallies [[key, value, weapon, streak, item], ...]: one row per (key,
+//            weapon, streak, item), -1 for none (item: the spray of "spry", the skin of "find";
+//            a row without the 5th column has no item). ADD keys carry the sum, MAX / SET keys the
 //            highest / last value. "kstk" rows with weapon -1 carry the kill streak (v7's
 //            nonWep), with a weapon the weapon streak.
 //   results: appended v7's chg triples [done, CI, PV] (vA759).
 //   completed: appended the challenge objects completed by this match (chgC).
-//   reward:  {kr, skins[]} summed over the completed challenges' REW (junk and Battle Pass
-//            points are not part of KrunkNative's economy and are left out).
+//   reward:  {kr, skins[], bpp} summed over the completed challenges' REW (Battle Pass points:
+//            vLN02439, account.BP.bpp; junk is not part of KrunkNative's economy and is left
+//            out).
 // Returns the number of challenges whose progress changed.
 int challenges_finalize(cJSON *active, const cJSON *events, const ChallengeMatch *match, cJSON *results, cJSON *completed,
                         cJSON *reward);
@@ -96,5 +99,8 @@ void challenge_name(const cJSON *challenge, const char *(*weapon_name)(int index
 
 // badges[index].claimable && badges[index].req(account) for an account whose stats object is
 // `stats` (account.stats): Nuclear I-IV need stats.n >= 500 / 750 / 1000 / 1500. The season
-// badges need a Battle Pass (out of scope, doc/v7/decisions.md): never.
+// badges (22..28) follow season_badge_rule() (shared/include/season.h) on `season`, the
+// account's Battle Pass and badges; without it (NULL) they are never met.
+int badge_rule_met(int index, const cJSON *stats, const SeasonBadgeAccount *season);
+// badge_rule_met(index, stats, NULL)
 int badge_requirement_met(int index, const cJSON *stats);

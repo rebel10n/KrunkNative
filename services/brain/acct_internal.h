@@ -246,6 +246,16 @@ void sh_challenges(SocialSession *s, const cJSON *f);    /* "chg" */
 void sh_badge_select(SocialSession *s, const cJSON *f);  /* "bdg" */
 void sh_badge_claim(SocialSession *s, const cJSON *f);   /* "cbdg" */
 void sh_medals(SocialSession *s, const cJSON *f);        /* "mdl" */
+/* v7.1.4 seasons and the Battle Pass (season.c) */
+void sh_bp_data(SocialSession *s, const cJSON *f);       /* "bpdl" */
+void sh_bp_claim(SocialSession *s, const cJSON *f);      /* "bpclm" */
+void sh_bp_buy(SocialSession *s, const cJSON *f);        /* "xstbp" (KR) */
+void sh_bp_skip(SocialSession *s, const cJSON *f);       /* "xstbpl" (KR) */
+void sh_season_stats(SocialSession *s, const cJSON *f);  /* "sst" */
+/* config accounts.current_season (config.currentSeason, default 7) */
+int acct_current_season(void);
+/* records the current season in `seasons` (kn_brain start) */
+void season_init(void);
 void sh_noop(SocialSession *s, const cJSON *f);          /* "unbx" */
 void market_page(SocialSession *s, const char *page, const cJSON *f);
 void creation_page(SocialSession *s, int kind, const char *name);

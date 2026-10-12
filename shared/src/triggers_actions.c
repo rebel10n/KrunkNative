@@ -8,8 +8,9 @@
 // Backend-only actions (doc/v7/decisions.md "Backend-only triggers"): 32 Reward KR, 49 Save Data
 // and 57 Load Data go to the account backends of GameHooks (reward_kr, storage_save,
 // storage_load: kn_brain or the offline sandbox's file store, server/src/ks_storage.c; NULL =
-// nothing); 59 Reward Junk, 60 Reward Skin, 62 / 65 challenges and 67 video ads do nothing (no
-// store backend in the game server).
+// nothing); 62 / 65 Give Challenge Progress tally the map's key for the account's challenges
+// (GameHooks.progress -> the stats commit); 59 Reward Junk, 60 Reward Skin and 67 video ads do
+// nothing (no store backend in the game server).
 // Select-index actions (47, 50, 51, 61, 64) index the runtime tables directly with the raw value,
 // as v7 does (§3.7 "Select-index quirk").
 #include <shared.h>
@@ -631,10 +632,20 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
         case TRIGGER_ACTION_LOAD_DATA: // getStoragePlayer(account, null) -> trigger_load_data_apply (triggers.js:1353-1375)
             if (game->hooks.storage_load && has_account(game, h)) game->hooks.storage_load(game, h);
             break;
+        case TRIGGER_ACTION_CHALLENGE: // 62 Give Challenge Progress: (!isSandbox && isPubType && h.account)
+            // challenges.update(game, trigConstTx, parseInt(trigConst || 0), null, h)
+            if (!game->is_sandbox && h && action_text(a) && has_account(game, h)) game_challenge(game, h, a->text, (int) a->constant, -1, -1);
+            break;
+        case TRIGGER_ACTION_CHALLENGE_ALL: // 65 Give Challenge Progress (All): every active player
+            if (!game->is_sandbox && h && action_text(a) && has_account(game, h)) {
+                for (size_t i = 0; i < game->player_count; i++) {
+                    const Player *p = game->players[i];
+                    if (p && p->active) game_challenge(game, p, a->text, (int) a->constant, -1, -1);
+                }
+            }
+            break;
         case TRIGGER_ACTION_REWARD_JUNK:    // public games only
         case TRIGGER_ACTION_REWARD_SKIN:    // public games only
-        case TRIGGER_ACTION_CHALLENGE:      // challenges.update, public games only
-        case TRIGGER_ACTION_CHALLENGE_ALL:
         case TRIGGER_ACTION_VIDEO_AD:       // "vad": no ads natively
         default:
             break;

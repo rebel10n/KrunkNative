@@ -146,7 +146,7 @@
     "chat_max_len": 300,
     "page_size": 100,
     "leaderboard_cache_s": 30,
-    "current_season": 3,
+    "current_season": 7,
     "reward_time_s": 21600,
     "reward_min_level": 5,
     "daily_reward_kr": 50,

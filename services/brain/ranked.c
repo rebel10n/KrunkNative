@@ -78,7 +78,8 @@ static struct {
     unsigned ticks;
 } R;
 
-/* The season ranked ratings count for. TODO(season-system): acct_current_season() once it lands. */
+/* The season ranked ratings count for: accounts.current_season (default 7), the value
+ * season-system's acct_current_season() (season.c) reads too. */
 static int ranked_season(void) {
     return R.season;
 }

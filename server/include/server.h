@@ -49,13 +49,14 @@ typedef enum {
 } ServerJoinState;
 
 #define SERVER_CLASS_STATS_MAX 32 // account.stats c0..c31 (v7.1.4 has 16 classes)
-#define SERVER_TALLY_MAX 96       // challenge tallies of one round (key x weapon x streak)
+#define SERVER_TALLY_MAX 128      // challenge tallies of one round (key x weapon x streak x item)
 
 // WP-E part 2c: one challenges.update tally (shared/include/progression.h)
 typedef struct {
-    char key[8];
+    char key[24];              // v7 keys, or a map's own ("Give Challenge Progress" triggers)
     int16_t weapon;            // -1 none
     int16_t streak;            // -1 none
+    int32_t item;              // -1 none: the spray ("spry") / found skin ("find")
     int value;                 // ADD keys: the sum; MAX / SET keys: the highest / last value
 } ServerChallengeTally;
 

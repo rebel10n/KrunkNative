@@ -124,7 +124,7 @@ static int roll_rarity(const double *rar, int n, double roll) {
     return 0;
 }
 
-static int current_season(void) { return (int) kn_config_int(g_acct_brain->cfg, "accounts.current_season", 3); }
+static int current_season(void) { return acct_current_season(); }
 static int64_t reward_time_ms(void) { return kn_config_int(g_acct_brain->cfg, "accounts.reward_time_s", 21600) * 1000; }
 
 /* store.getSpnItems(wheel, rarity, account, config) */

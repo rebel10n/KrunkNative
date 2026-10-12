@@ -1524,6 +1524,8 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && !player->was_stop_crouch) { // defaultMovement
         if (crouch && player->crouch_val < 1.0f && !player->on_ladder) {
             player->crouch_val = MIN(1.0f, player->crouch_val + game_constants.crouch_speed * delta);
+            // v7.1.4 player.js: crouchVal reaching 1 -> if (manager.isServer) game.incStat("crc", this)
+            if (player->crouch_val >= 1.0f && !recon) game_inc_stat(player->game, player, "crc");
 
             if (player->on_ground) {
                 if (!recon && player->render_you) player->bob_anim.y -= game_constants.crouch_anim * 1.4f * delta;
@@ -2502,6 +2504,13 @@ static void combat_kill_progress(Game *game, Player *killer, const PlayerKillInf
                                  const NetKillMedalsPacket *medals) {
     const int wep = info && info->weapon_id >= 0 ? weapon_index : -1;
     game_challenge(game, killer, "k", 1, wep, -1);
+    // players.kill: a weapon kill adds the weapon to uniqueWeaponKills -> challenges.update("uwk", length)
+    if (wep >= 0 && wep < 64 && !(killer->unique_weapon_kills & (1ull << wep))) {
+        killer->unique_weapon_kills |= 1ull << wep;
+        int unique = 0;
+        for (uint64_t m = killer->unique_weapon_kills; m; m &= m - 1) unique++;
+        game_challenge(game, killer, "uwk", unique, -1, -1);
+    }
     game_challenge(game, killer, "kstk", (int) killer->kill_streak, -1, -1); // nonWep: the kill streak
     if (wep >= 0) game_challenge(game, killer, "kstk", (int) killer->weapon_streak, wep, -1);
     const Weapon *weapon = combat_weapon_at(game, weapon_index);
@@ -2590,6 +2599,9 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         }
         combat_kill_progress(game, killer, kill_info, weapon_index, &medals); // WP-E part 2c
         if (!skip_rewards && game->config.kill_rewards) player_score(killer, reward, 1);
+        // players.kill: incStat("kjg") for killing a Juggernaut, incStat("jgk") for a kill as one
+        if (player->is_juggernaut) game_inc_stat(game, killer, "kjg");
+        if (killer->is_juggernaut) game_inc_stat(game, killer, "jgk");
     }
 
     // Assists: config.assistMin damage within config.assistTime.

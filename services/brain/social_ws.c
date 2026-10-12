@@ -520,6 +520,11 @@ static const SocialRoute k_routes[] = {
     {"bdg", sh_badge_select},
     {"cbdg", sh_badge_claim},
     {"mdl", sh_medals},
+    {"bpdl", sh_bp_data},     /* v7.1.4 seasons / Battle Pass (season.c) */
+    {"bpclm", sh_bp_claim},
+    {"xstbp", sh_bp_buy},
+    {"xstbpl", sh_bp_skip},
+    {"sst", sh_season_stats},
     {"unbx", sh_noop},
     {"edMp", sh_edit_map},
     {"fvM", sh_fav_creation},

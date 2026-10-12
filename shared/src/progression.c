@@ -68,7 +68,9 @@ ChallengeKeyKind challenge_key_kind(const char *key) {
     if (in_list(key, ADD_KEYS, sizeof(ADD_KEYS) / sizeof(*ADD_KEYS))) return CHALLENGE_KEY_ADD;
     if (in_list(key, SET_KEYS, sizeof(SET_KEYS) / sizeof(*SET_KEYS))) return CHALLENGE_KEY_SET;
     if (in_list(key, MAX_KEYS, sizeof(MAX_KEYS) / sizeof(*MAX_KEYS))) return CHALLENGE_KEY_MAX;
-    return CHALLENGE_KEY_UNKNOWN;
+    // checkChallenge: every other key accumulates (vA755.indexOf(key) == -1), the keys outside
+    // vA754 too: "dym", "gifts", "dep", "crc"-style trigger keys ("Give Challenge Progress")
+    return key[0] ? CHALLENGE_KEY_ADD : CHALLENGE_KEY_UNKNOWN;
 }
 
 // A DAT / REW field as a number: numbers and numeric strings; *has = 0 for null / missing.
@@ -136,8 +138,7 @@ static int check_challenge(const cJSON *c, const cJSON *events, const ChallengeM
     if (!match_ok(c, dat, m)) return 0;
     int has_wep = 0, has_stk = 0, has_item = 0;
     const double wep = field_num(dat, "wep", &has_wep), stk = field_num(dat, "stk", &has_stk);
-    field_num(dat, "item", &has_item);
-    if (has_item) return 0; // item events (store items used in a match) are not tallied
+    const double item = field_num(dat, "item", &has_item); // spry {item: spray}, find {item: skin}
     const int kstk = !strcmp(key, "kstk");
     double value = field_num(c, "PV", NULL);
     int touched = 0;
@@ -146,12 +147,14 @@ static int check_challenge(const cJSON *c, const cJSON *events, const ChallengeM
         const cJSON *k = cJSON_GetArrayItem(ev, 0);
         if (!cJSON_IsString(k) || strcmp(k->valuestring, key) != 0) continue;
         const double v = cJSON_GetNumberValue(cJSON_GetArrayItem(ev, 1));
-        const cJSON *w = cJSON_GetArrayItem(ev, 2), *s = cJSON_GetArrayItem(ev, 3);
+        const cJSON *w = cJSON_GetArrayItem(ev, 2), *s = cJSON_GetArrayItem(ev, 3), *it = cJSON_GetArrayItem(ev, 4);
         const int ev_wep = cJSON_IsNumber(w) ? w->valueint : -1, ev_stk = cJSON_IsNumber(s) ? s->valueint : -1;
+        const int ev_item = cJSON_IsNumber(it) ? it->valueint : -1;
         if (isnan(v)) continue;
         // kstk: DAT.wep == null takes the kill streak (nonWep, the weapon -1 rows)
         if (kstk ? (has_wep ? ev_wep != (int) wep : ev_wep >= 0) : (has_wep && ev_wep != (int) wep)) continue;
         if (has_stk && ev_stk != (int) stk) continue;
+        if (has_item && ev_item != (int) item) continue;
         if (kind == CHALLENGE_KEY_ADD) value += v;
         else if (kind == CHALLENGE_KEY_MAX || kstk) value = v > value ? v : value;
         else value = v; // SET
@@ -171,6 +174,8 @@ static void add_reward(cJSON *reward, const cJSON *rew) {
     if (!reward || !rew) return;
     const double kr = field_num(rew, "kr", NULL);
     if (kr > 0.0) set_num(reward, "kr", field_num(reward, "kr", NULL) + kr);
+    const double bpp = field_num(rew, "bpp", NULL); // vLN02439: REW.bpp -> account.BP.bpp
+    if (bpp > 0.0) set_num(reward, "bpp", field_num(reward, "bpp", NULL) + bpp);
     cJSON *skins = cJSON_GetObjectItemCaseSensitive(reward, "skins");
     if (!skins) skins = cJSON_AddArrayToObject(reward, "skins");
     const cJSON *sk = cJSON_GetObjectItemCaseSensitive(rew, "sk");
@@ -236,6 +241,7 @@ int challenges_finalize(cJSON *active, const cJSON *events, const ChallengeMatch
     int changed = 0;
     if (reward && !cJSON_GetObjectItemCaseSensitive(reward, "kr")) cJSON_AddNumberToObject(reward, "kr", 0);
     if (reward && !cJSON_GetObjectItemCaseSensitive(reward, "skins")) cJSON_AddArrayToObject(reward, "skins");
+    if (reward && !cJSON_GetObjectItemCaseSensitive(reward, "bpp")) cJSON_AddNumberToObject(reward, "bpp", 0);
     cJSON *c;
     cJSON_ArrayForEach(c, active) {
         const cJSON *dat = cJSON_GetObjectItemCaseSensitive(c, "DAT");
@@ -318,7 +324,9 @@ void challenge_name(const cJSON *challenge, const char *(*weapon_name)(int index
 
 // ------------------------------------------------------------------ badges
 
-int badge_requirement_met(const int index, const cJSON *stats) {
+int badge_rule_met(const int index, const cJSON *stats, const SeasonBadgeAccount *season) {
+    const int rule = season_badge_rule(index, season);
+    if (rule >= 0) return rule; // season badges: Founder, Map / Battle Pass / Badge Master
     int has = 0;
     const double nukes = field_num(stats, "n", &has);
     switch (index) {
@@ -326,6 +334,10 @@ int badge_requirement_met(const int index, const cJSON *stats) {
         case 13: return nukes >= 750;  // Nuclear II
         case 14: return nukes >= 1000; // Nuclear III
         case 15: return nukes >= 1500; // Nuclear IV
-        default: return 0;             // season badges: Battle Pass rules (not in KrunkNative)
+        default: return 0;
     }
+}
+
+int badge_requirement_met(const int index, const cJSON *stats) {
+    return badge_rule_met(index, stats, NULL);
 }

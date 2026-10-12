@@ -5,11 +5,15 @@
  * challenge rules are shared/src/progression.c, the same code the tests drive.
  *
  *   P_CHALLENGES  (id, now_s)            -> [activeChallenges]   the "chg" window list
- *   P_PROGRESS    (payload json, now_s)  -> {results, completed, reward, newBadges, funds}
+ *   P_PROGRESS    (payload json, now_s, season) -> {results, completed, reward, newBadges, funds,
+ *                 bp, bpProgress}
  *                 v7 game.js checkChallenges (challenges.finalize + procs 175 / 176) and
- *                 checkBadges (proc 181) after a stats commit, plus the medal counts
+ *                 checkBadges (proc 181) after a stats commit, the medal counts, and the
+ *                 season part (db_season.c db_season_match: season_stats, the match BPP and
+ *                 REW.bpp -> bp = endGame's tmpBPData, bpProgress = account.BP)
  *   P_BADGE_SELECT (id, badge)           -> {bdg}   v7 "bdg": stats.bdg (-1 clears)
- *   P_BADGE_CLAIM  (id, badge)           -> {badge} v7 "cbdg": a claimable badge whose rule holds
+ *   P_BADGE_CLAIM  (id, badge, season, now_s) -> {badge} v7 "cbdg": a claimable badge whose rule
+ *                 holds (the season badges read the account's Battle Pass)
  *   P_MEDALS       (id)                  -> {name: count}
  */
 #include "db_procs.h"
@@ -21,6 +25,7 @@
 #include "badges.h"
 #include "knsvc/json.h"
 #include "progression.h"
+#include "season.h"
 
 #define P(i) (n > (i) ? p[i] : NULL)
 #define PI(i) pint(P(i))
@@ -178,26 +183,27 @@ static void add_badge(Dbx *x, const int64_t id, const int badge) {
              KN_DB_ARGS(I64S(id), I64S(badge)));
 }
 
-/* checkBadges: every claimable badge whose rule holds and the account lacks; returns them. */
-static cJSON *check_badges(Dbx *x, const int64_t id) {
-    cJSON *added = cJSON_CreateArray();
-    cJSON *stats = stats_object(x, id);
-    for (int i = 0; i < BADGE_COUNT && !dbx_failed(x); i++) {
-        if (!g_badges[i].claimable || !badge_requirement_met(i, stats) || owns_badge(x, id, i)) continue;
-        add_badge(x, id, i);
-        cJSON_AddItemToArray(added, cJSON_CreateNumber(i));
-    }
-    cJSON_Delete(stats);
-    return added;
+/* The SeasonBadgeAccount of a claim: the account's badges and the season's pass progress. */
+typedef struct {
+    Dbx *x;
+    int64_t id;
+} ClaimSkins;
+
+static int claim_has_skin(void *ud, const int skin) {
+    ClaimSkins *c = ud;
+    return dbx_exists(c->x, SQL(.any = "SELECT 1 FROM inventory WHERE account_id = $1 AND skin_id = {int:$2} AND count > 0"),
+                      KN_DB_ARGS(I64S(c->id), I64S(skin)));
 }
 
-/* ({id, final, prog: [[key, value, weapon, streak]...], medals: {name: count}, mapIndex, mapId,
- *   mode, classIndex, ranked, match}, now unix s) -> {results, completed, reward {kr, skins},
- *   newBadges, funds}. Runs after the match's kn_commit_stats (the badge rules read its stats). */
+/* ({id, final, prog: [[key, value, weapon, streak, item]...], medals: {name: count}, mapIndex,
+ *   mapId, mode, classIndex, ranked, match, bpp, kills, deaths, score, won, games, timePlayed},
+ *   now unix s, season) -> {results, completed, reward {kr, skins, bpp}, newBadges, funds, bp,
+ *   bpProgress}. Runs after the match's kn_commit_stats (the badge rules read its stats). */
 static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     cJSON *in = P(0) ? cJSON_Parse(P(0)) : NULL;
     const int64_t id = (int64_t) jnum(in, "id"), now_s = PI(1);
+    const int season = (int) PI(2);
     if (!in || id <= 0 || !dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)))) {
         cJSON_Delete(in);
         if (!dbx_failed(&x)) dbx_refuse(&x, "Account not found.");
@@ -240,8 +246,8 @@ static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
                                " updated_at = now()"),
                  5, args);
     }
-    /* challenge rewards (proc 176 "chall"): KR and skins; junk / Battle Pass points have no
-     * KrunkNative economy (doc/v7/decisions.md, store economy out of scope) */
+    /* challenge rewards (proc 176 "chall"): KR, skins and Battle Pass points (db_season_match);
+     * junk has no KrunkNative economy */
     const int64_t kr = (int64_t) jnum(reward, "kr");
     if (kr > 0) db_add_funds(&x, id, kr, "challenge", ref, NULL);
     const cJSON *sk;
@@ -249,6 +255,12 @@ static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
         if (cJSON_IsNumber(sk) && sk->valueint >= 0) db_add_skin(&x, id, sk->valueint, 1, "challenge", ref, NULL);
     }
     cJSON_Delete(active);
+
+    /* the season: season_stats, endGame's match BPP + the challenges' REW.bpp (tmpBPData) */
+    cJSON *bp_progress = NULL;
+    cJSON *bp = season > 0 && !dbx_failed(&x) ? db_season_match(&x, id, season, now_s, in, (int64_t) jnum(reward, "bpp"), &bp_progress) : NULL;
+    cJSON_AddItemToObject(out, "bp", bp ? bp : cJSON_CreateNull());
+    cJSON_AddItemToObject(out, "bpProgress", bp_progress ? bp_progress : cJSON_CreateNull());
 
     /* per-account medal counts (player.medals of the match) */
     const cJSON *m;
@@ -264,7 +276,9 @@ static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
     }
 
     /* checkBadges (public matches, not hack-flagged: the game server only commits those) */
-    cJSON_AddItemToObject(out, "newBadges", check_badges(&x, id));
+    cJSON *stats = stats_object(&x, id);
+    cJSON_AddItemToObject(out, "newBadges", db_season_check_badges(&x, id, season, now_s, stats));
+    cJSON_Delete(stats);
     cJSON_AddNumberToObject(out, "funds",
                             (double) dbx_int(&x, SQL(.any = "SELECT player_funds FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0));
     cJSON_Delete(in);
@@ -307,16 +321,37 @@ static kn_db_result *run_badge_select(kn_dbconn *c, int n, const char *const *p)
 }
 const kn_proc P_BADGE_SELECT = {"badge_select", NULL, run_badge_select};
 
-/* (account id, badge) -> {badge}: claimBadge of a claimable badge whose rule holds */
+/* (account id, badge, season, now_s) -> {badge}: claimBadge of a claimable badge whose rule holds */
 static kn_db_result *run_badge_claim(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
-    const int64_t id = PI(0), badge = PI(1);
+    const int64_t id = PI(0), badge = PI(1), now_s = PI(3);
+    const int season = (int) PI(2);
     if (badge < 0 || badge >= BADGE_COUNT || !g_badges[badge].claimable) {
         dbx_refuse(&x, "Badge not claimable");
         return dbx_finish(&x, NULL);
     }
     cJSON *stats = stats_object(&x, id);
-    const int met = badge_requirement_met((int) badge, stats);
+    int owned[BADGE_COUNT], owned_count = 0;
+    cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT badge AS b__i FROM player_badges WHERE account_id = $1"), KN_DB_ARGS(I64S(id)));
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) if (owned_count < BADGE_COUNT) owned[owned_count++] = (int) jnum(r, "b");
+    cJSON_Delete(rows);
+    ClaimSkins skins = {&x, id};
+    SeasonBadgeAccount a = {.season = season, .now_s = now_s, .badges = owned, .badge_count = owned_count,
+                            .has_skin = claim_has_skin, .ud = &skins};
+    BattlePass *bp = dbx_failed(&x) || season <= 0 ? NULL : db_bp_load(&x, season, NULL);
+    if (bp) {
+        cJSON *pr = dbx_row(&x, SQL(.any = "SELECT bpp AS bpp__i, tier AS tier__i, {epoch_ms:tier_at} AS tier_ms__f"
+                                           " FROM battlepass_progress WHERE account_id = $1 AND bp_id = {int:$2}"),
+                            KN_DB_ARGS(I64S(id), I64S(bp->id)));
+        a.bpp = (int64_t) jnum(pr, "bpp");
+        a.bp_tier = (int) jnum(pr, "tier");
+        a.bp_tier_at_s = (int64_t) (jnum(pr, "tier_ms") / 1000.0);
+        a.bp_start_s = bp->start_s;
+        cJSON_Delete(pr);
+        free(bp);
+    }
+    const int met = badge_rule_met((int) badge, stats, &a);
     cJSON_Delete(stats);
     if (!dbx_failed(&x) && !met) dbx_refuse(&x, "Requirements not met");
     else if (!dbx_failed(&x) && owns_badge(&x, id, (int) badge)) dbx_refuse(&x, "Badge already claimed");
