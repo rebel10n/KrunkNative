@@ -56,7 +56,7 @@ void gs_config_defaults(GsConfig *cfg) {
     cfg->enforce_skins = -1;            // auto: on when linked to a coordinator
     cfg->shutdown_grace = 10.0f;
     cfg->lag_comp = 1;
-    cfg->lag_comp_anchor = 1;
+    cfg->lag_comp_anchor = LAG_COMP_ANCHOR_EXACT;
     cfg->lag_comp_scale = 1.0f;         // x each player's lagComp (ENT slider): 1 = v3.1.1
     gs_copy(cfg->bot_difficulty, sizeof(cfg->bot_difficulty), "normal"); // bots / bot_quota: 0 = no bots
 }
@@ -494,7 +494,15 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     }
     gs_read_float(s, "shutdown_grace", &cfg->shutdown_grace, 0.0f, 3600.0f);
     gs_read_bool(s, "lag_comp", &cfg->lag_comp);
-    gs_read_bool(s, "lag_comp_anchor", &cfg->lag_comp_anchor);
+    {
+        const cJSON *item = gs_item(s, "lag_comp_anchor"); // true / false (older configs), 0 / 1 / 2, or a mode name
+        int anchor = -1;
+        if (cJSON_IsBool(item)) anchor = cJSON_IsTrue(item) ? LAG_COMP_ANCHOR_EXACT : LAG_COMP_ANCHOR_V3;
+        else if (cJSON_IsNumber(item)) anchor = item->valueint >= 0 && item->valueint <= 2 ? item->valueint : -1;
+        else if (cJSON_IsString(item)) anchor = lag_comp_anchor_parse(item->valuestring);
+        if (anchor >= 0) cfg->lag_comp_anchor = anchor;
+        else if (item) server_log_error("config: gameserver.lag_comp_anchor: expected 0 (v3.1.1), 1 (exact) or 2 (arrival)");
+    }
     gs_read_float(s, "lag_comp_scale", &cfg->lag_comp_scale, 0.1f, 1.0f); // the range of the per-player lagComp
     gs_read_int(s, "bots", &cfg->bots, 0, 16);            // config.botLimit
     gs_read_int(s, "bot_quota", &cfg->bot_quota, 0, 16);
@@ -1038,5 +1046,7 @@ void gs_config_log_summary(const GsConfig *cfg) {
                cfg->community[0] ? " | community set" : "");
     if (!cfg->lag_comp) server_log("Lag compensation: off");
     else server_log("Lag compensation: %s, lagComp scale %.2f (x each player's slider), %.0f ms history",
-                    cfg->lag_comp_anchor ? "anchored (input arrival + ping)" : "v3.1.1 (ping * 2)", cfg->lag_comp_scale, GAME_STATE_HISTORY * 1000.0f);
+                    cfg->lag_comp_anchor == LAG_COMP_ANCHOR_EXACT ? "exact (client input time + ping)" :
+                    cfg->lag_comp_anchor == LAG_COMP_ANCHOR_ARRIVAL ? "arrival (input arrival + ping)" : "v3.1.1 (ping * 2)",
+                    cfg->lag_comp_scale, GAME_STATE_HISTORY * 1000.0f);
 }

@@ -386,7 +386,39 @@ typedef struct {
     // generated it that much earlier). The anchor of anchored lag compensation
     // (player_get_state_const); 0 = unknown (offline, tests): the shot counts as arriving now.
     double arrival;
+    // Server only, never sent: exact anchored lag compensation (LagCompClock, player.c).
+    // received: when the frame's packet reached the server (state_now clock, not pulled back);
+    // client_time: the client's own clock for this frame (the running sum of the deltas of its
+    // timeline, s), -1 = none; clock_epoch: the LagCompClock timeline it belongs to.
+    double received;
+    double client_time;
+    unsigned short clock_epoch;
 } Input;
+
+// Exact anchored lag compensation (server.cfg lag_comp_anchor 1, shared/src/player.c): the
+// client's input timeline (the summed frame deltas) mapped onto the server clock with a
+// min-filtered offset, per connection, rebuilt at every new life / seq restart / lost frame.
+#define LAG_COMP_CLOCK_SAMPLES 256
+typedef struct {
+    double client_time;        // running sum of the accepted frames' (clamped) deltas, s
+    int last_seq;              // seq of the last frame fed, -1 none
+    unsigned short epoch;      // bumps at every timeline break (Input.clock_epoch must match)
+    int head, count;           // packet samples, newest at head
+    double sample_received[LAG_COMP_CLOCK_SAMPLES];
+    double sample_skew[LAG_COMP_CLOCK_SAMPLES]; // received - client_time (the least of one packet's frames)
+    double begin;              // received of the timeline's first sample
+    double baseline;           // the least skew of the calibration (anomaly reference)
+    double offset;             // the least skew of the window: client_time -> server time of a least-delayed packet
+    double excess;             // the window's median skew - offset: the typical uplink delay above the least
+    unsigned char calibrated:1;
+    unsigned char anomaly:1;      // this life's client clock ran faster / slower than real time: arrival fallback
+    unsigned char anomaly_new:1;  // set with anomaly, cleared by whoever logs it (the server)
+} LagCompClock;
+const char *lag_comp_anchor_name(int anchor);                          // "v3.1.1" / "exact" / "arrival"
+int lag_comp_anchor_parse(const char *text);                          // 0/1/2, on/off/true/false, names; -1 = unknown
+void lag_comp_clock_reset(LagCompClock*);                              // a new life: empty, no anomaly
+void lag_comp_clock_frame(LagCompClock*, Input*, float raw_delta);   // an accepted frame (received > 0): sets client_time / clock_epoch
+double lag_comp_clock_shot_time(const LagCompClock*, const Input*, double *excess); // server time the frame was sent, 0 = fall back
 
 struct Game_t;
 
@@ -490,6 +522,9 @@ typedef struct {
 // config.stateHistory are dropped. The ring holds 500 ms at the 240 Hz tick_rate maximum.
 #define PLAYER_STATE_HISTORY_MAX 128
 #define GAME_STATE_HISTORY 0.5f       // config.stateHistory (500 ms)
+#define LAG_COMP_ANCHOR_V3 0      // server.cfg lag_comp_anchor 0: v3.1.1 ping * 2 * lagComp from processing
+#define LAG_COMP_ANCHOR_EXACT 1   // 1 (default): the shot input's client time on the server clock + 1 ping
+#define LAG_COMP_ANCHOR_ARRIVAL 2 // 2: the shot input's arrival + 1 ping (the exact mode's fallback)
 #define GAME_LAG_COMP_SEND_RATE 10.0f // player.cSendRate default (ent[16] servSendR off; = NET_STATE_SEND_HZ)
 typedef struct {
     double time;       // Game.state_now when stored
@@ -688,6 +723,8 @@ typedef struct Player_t {
     float lag_comp;               // player.lagComp: ENT lag_comp (ent[11] slider, server-clamped to 0.1..1), default 1
     float c_send_rate;            // player.cSendRate (ent[16] servSendR: 20, else 10)
     double input_arrival;         // Input.arrival of the input procInputs is running (0 = now)
+    Input input_running;          // a copy of that input (exact anchored lag compensation reads its clock fields)
+    LagCompClock lag_clock;       // the connection's input timeline (server; reset by player_spawn)
     // Bot players (shared/src/bots.c, v7.1.4 bots.js): players.add isBot, player.dmgMlt (0 = 1).
     unsigned char is_bot:1;
     float dmg_mlt;
@@ -927,7 +964,7 @@ typedef struct Game_t {
     // lag_comp, lag_comp_anchor). Off in the offline local game, which has no network delay and
     // shows its players without interpolation, so the current state is what the shooter saw.
     unsigned char lag_comp:1;
-    unsigned char lag_comp_anchor:1; // getStateConst from the shot input's arrival (player.c)
+    unsigned char lag_comp_anchor:2; // LAG_COMP_ANCHOR_*: getStateConst from the shot input's time (player.c)
     float lag_comp_scale;         // server.cfg lag_comp_scale: multiplies every player's lagComp (0 = 1)
     double state_now;             // Krunker game.now for stateHistory (s); double: `now` is a float
                                   // that loses millisecond precision after a day of server uptime

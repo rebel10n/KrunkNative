@@ -1008,13 +1008,23 @@ static void net_handle_teleport(ClientConnection *client, const NetPacket *packe
 // (non-finite fields dropped, delta clamped, seq floor, 240-frame cap). Physics only ever runs
 // from these inputs: the server never takes a position from the client, so a client-side
 // noclip flag or position jump has no effect on the authoritative player.
-static void net_handle_input_frame(ClientConnection *client, const NetInputPacket *net_input, const double arrival) {
+static void net_handle_input_frame(ClientConnection *client, const NetInputPacket *net_input, const double arrival,
+                                   const double received) {
     Input input;
     if (!client->player || !client->player->active) return;
     if (g_server->game.end_timer > 0.0f) return; // io_q: isVoteWindow drops the batch
     net_packet_to_input(&input, net_input);
     input.arrival = arrival;
+    input.received = received; // the packet's arrival: exact lag compensation's input clock (LagCompClock)
     player_accept_input(client->player, &input);
+
+    LagCompClock *clock = &client->player->lag_clock;
+    if (clock->anomaly_new) {
+        clock->anomaly_new = 0;
+        server_log("[lagcomp] %s: input clock ran %s real time (summed deltas vs arrivals); arrival-anchored lag "
+                   "compensation for the rest of this life", client->name,
+                   clock->offset + clock->excess > clock->baseline ? "slower than" : "faster than");
+    }
 }
 
 // When this client's packet reached the server, on the game.state_now clock that stamps the
@@ -1042,7 +1052,8 @@ static void net_handle_input_batch(ClientConnection *client, const NetPacket *pa
         const float delta = batch.frames[i].delta;
         if (isfinite(delta) && delta > 0.0f) at -= MIN(delta, game_constants.max_delta);
     }
-    for (int i = 0; i < batch.count; i++) net_handle_input_frame(client, &batch.frames[i], arrival[i]);
+    const double received = arrival[batch.count ? batch.count - 1 : 0];
+    for (int i = 0; i < batch.count; i++) net_handle_input_frame(client, &batch.frames[i], arrival[i], received);
 }
 
 // ENT after its fields were stored (also replayed by accounts.c once a deferred join settled).
@@ -1132,7 +1143,10 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             break;
         case NET_PACKET_INPUT: {
             NetInputPacket net_input;
-            if (net_packet_read_input(&net_input, packet)) net_handle_input_frame(client, &net_input, net_input_arrival(client));
+            if (net_packet_read_input(&net_input, packet)) {
+                const double at = net_input_arrival(client);
+                net_handle_input_frame(client, &net_input, at, at);
+            }
             break;
         }
         case NET_PACKET_INPUT_BATCH: // "q"

@@ -312,6 +312,205 @@ static void test_projectile_state_const(Game *game, Player *shooter) {
     shooter->ping = 0.0f;
 }
 
+
+// ---------------------------------------------------------------- exact anchored mode (input clock)
+// A client on a 60 Hz frame timeline sends its frames in "q" batches over an uplink with constant,
+// jittered (+-30 ms) or spiked (one 200 ms stall) delay; the server keeps a 64 Hz history of a
+// target strafing at 100 u/s and resolves every frame as a shot. A shot "hits" when the rewound
+// box is within the hitbox half width (scale + hitBoxPad) of where the client saw the target:
+// fired at f, the client showed the target as of f - downlink - interpolation.
+#define SIM_TICK (1.0 / 64.0)
+#define SIM_UP 0.075
+#define SIM_DOWN 0.075
+#define SIM_SPEED 100.0f
+#define SIM_SECONDS 10.0
+#define SIM_MAX_FRAMES 7000
+
+typedef enum { SIM_CONSTANT, SIM_JITTER, SIM_SPIKE } SimNet;
+
+typedef struct {
+    int shots, exact_hits, arrival_hits, spiked, spiked_exact_hits, spiked_arrival_hits;
+    double exact_err_max, arrival_err_max; // s of rewind error (|rewound - seen| / speed)
+    double extra_max;                      // ms: the most an exact stateConst exceeded the arrival one
+    int extra_shots;                       // shots it exceeded it by more than 20 ms
+    int anomaly;
+} SimResult;
+
+static uint32_t g_sim_rng;
+static double sim_random(void) { // deterministic uniform [0, 1)
+    g_sim_rng = g_sim_rng * 1664525u + 1013904223u;
+    return (g_sim_rng >> 8) / 16777216.0;
+}
+
+static double sim_x_origin;
+static float sim_x(const double t) { return (float) (SIM_SPEED * (t - sim_x_origin)); }
+
+// hz client frames; a "q" batch leaves every 2 frames at 60 Hz, every per_packet frames otherwise
+// (client_recon_record: clientSendRate or NET_INPUT_BATCH_MAX frames)
+static SimResult simulate(Game *game, Player *shooter, Player *target, const SimNet net, const double hz, const int per_packet,
+                          const float delta_scale) {
+    SimResult r = {0};
+    const double frame_dt = 1.0 / hz;
+    const int frames = (int) (SIM_SECONDS * hz) < SIM_MAX_FRAMES ? (int) (SIM_SECONDS * hz) : SIM_MAX_FRAMES;
+    g_sim_rng = 12345u;
+    game->lag_comp = 1;
+    player_spawn(shooter); // a new life: the input clock starts over
+    player_spawn(target);
+    place(shooter, 0.0f, 0.0f);
+    place(target, 0.0f, -DISTANCE);
+    shooter->ping = (float) ((SIM_UP + SIM_DOWN) * 1000.0);
+    shooter->lag_comp = 1.0f;
+
+    const double start = game->state_now + 0.2;
+    sim_x_origin = start + frames * frame_dt * 0.5;
+    const double spike_at = start + 5.0; // packets sent in [spike_at, spike_at + 0.2) wait for its end
+
+    static double fired[SIM_MAX_FRAMES], received[SIM_MAX_FRAMES], arrival[SIM_MAX_FRAMES];
+    double last = 0.0;
+    for (int first = 0; first < frames; first += per_packet) {
+        const int end = first + per_packet < frames ? first + per_packet : frames;
+        for (int k = first; k < end; k++) fired[k] = start + k * frame_dt;
+        const double sent = fired[end - 1]; // flushed right after its last frame
+        double at = sent + SIM_UP;
+        if (net == SIM_JITTER) at += (sim_random() - 0.5) * 0.06;
+        if (net == SIM_SPIKE && sent >= spike_at && sent < spike_at + 0.2) at = spike_at + 0.2 + SIM_UP;
+        if (at < last) at = last; // one ordered stream
+        last = at;
+        for (int k = first; k < end; k++) {
+            received[k] = at;
+            arrival[k] = at - (end - 1 - k) * frame_dt * delta_scale; // net.c: pulled back by the later deltas
+        }
+    }
+
+    int next = 0; // the next frame to arrive
+    for (double tick = start; next < frames; tick += SIM_TICK) {
+        game->state_now = tick;
+        const int from = next;
+        while (next < frames && received[next] <= tick) next++;
+
+        for (int k = from; k < next; k++) {
+            Input input = {.seq = k, .move_dir = -1, .delta = (float) (frame_dt * delta_scale),
+                           .received = received[k], .arrival = arrival[k]};
+            CHECK(player_accept_input(shooter, &input), "frame %d accepted", k);
+        }
+        // drained this tick (player_drain_inputs): every frame is a shot
+        for (int k = from; k < next; k++) {
+            const Input input = shooter->input_queue[k - from];
+            shooter->input_running = input;
+            shooter->input_arrival = input.arrival;
+            shooter->input_seq = k;
+            if (fired[k] < start + 1.0) continue; // warm-up: calibration + a full history
+
+            game->lag_comp_anchor = LAG_COMP_ANCHOR_EXACT;
+            const float exact = player_get_state_const(shooter);
+            game->lag_comp_anchor = LAG_COMP_ANCHOR_ARRIVAL;
+            const float by_arrival = player_get_state_const(shooter);
+            if (exact - by_arrival > r.extra_max) r.extra_max = exact - by_arrival;
+            r.extra_shots += exact - by_arrival > 20.0f;
+
+            const float seen = sim_x(fired[k] - SIM_DOWN - INTERP_S);
+            const float half = target->scale + 1.0f; // hitBoxPad
+            PlayerStoredState a, b;
+            players_fetch_state(target, exact, &a);
+            players_fetch_state(target, by_arrival, &b);
+            const double ea = fabs(a.position.x - seen) / SIM_SPEED, eb = fabs(b.position.x - seen) / SIM_SPEED;
+            const int spiked = received[k] - fired[k] > SIM_UP + 0.1;
+            r.shots++;
+            r.exact_hits += fabsf(a.position.x - seen) < half;
+            r.arrival_hits += fabsf(b.position.x - seen) < half;
+            r.spiked += spiked;
+            r.spiked_exact_hits += spiked && fabsf(a.position.x - seen) < half;
+            r.spiked_arrival_hits += spiked && fabsf(b.position.x - seen) < half;
+            if (ea > r.exact_err_max) r.exact_err_max = ea;
+            if (eb > r.arrival_err_max) r.arrival_err_max = eb;
+        }
+        shooter->input_queue_size = 0;
+        shooter->input_running.received = 0.0;
+        shooter->input_arrival = 0.0;
+
+        target->position.x = sim_x(tick); // players.js update: move, then storeState
+        player_store_state(target);
+        player_store_state(shooter);
+    }
+    r.anomaly = shooter->lag_clock.anomaly;
+    shooter->lag_clock.anomaly_new = 0;
+    shooter->ping = 0.0f;
+    game->lag_comp_anchor = LAG_COMP_ANCHOR_EXACT;
+    return r;
+}
+
+static void sim_print(const char *name, const SimResult *r) {
+    printf("  %-22s shots %d | exact %3d hit, err max %5.1f ms | arrival %3d hit, err max %5.1f ms | spiked %d (exact %d, arrival %d) | extra %.1f ms (%d shots)%s\n",
+           name, r->shots, r->exact_hits, r->exact_err_max * 1000.0, r->arrival_hits, r->arrival_err_max * 1000.0,
+           r->spiked, r->spiked_exact_hits, r->spiked_arrival_hits, r->extra_max, r->extra_shots, r->anomaly ? " | ANOMALY" : "");
+}
+
+static void test_exact_clock(Game *game, Player *target, Player *shooter) {
+    printf("Running exact anchored lag compensation (client input clock) test...\n");
+    const double tick_err = SIM_TICK + 0.002; // fetchState picks the update at or before: up to one tick
+
+    SimResult r = simulate(game, shooter, target, SIM_CONSTANT, 60.0, 2, 1.0f);
+    sim_print("constant 75/75 ms", &r);
+    CHECK(r.exact_hits == r.shots && r.arrival_hits == r.shots, "constant latency: both anchors hit every shot");
+    CHECK(r.exact_err_max <= tick_err, "constant latency: exact error %.1f ms within a tick", r.exact_err_max * 1000.0);
+    CHECK(!r.anomaly, "an honest clock is no anomaly");
+
+    r = simulate(game, shooter, target, SIM_JITTER, 60.0, 2, 1.0f);
+    sim_print("jitter +-30 ms", &r);
+    CHECK(r.exact_hits == r.shots, "jitter: exact hits every shot (%d of %d)", r.exact_hits, r.shots);
+    CHECK(r.arrival_hits < r.shots, "jitter: arrival-anchored misses some (%d of %d hit)", r.arrival_hits, r.shots);
+    CHECK(r.exact_err_max < 0.025 && r.arrival_err_max > 0.035, "jitter: exact error %.1f ms, arrival %.1f ms",
+          r.exact_err_max * 1000.0, r.arrival_err_max * 1000.0);
+    CHECK(!r.anomaly, "jitter is no anomaly");
+
+    r = simulate(game, shooter, target, SIM_SPIKE, 60.0, 2, 1.0f);
+    sim_print("200 ms spike", &r);
+    CHECK(r.spiked > 5 && r.spiked_exact_hits == r.spiked, "spike: exact hits the delayed shots (%d of %d)", r.spiked_exact_hits, r.spiked);
+    CHECK(r.spiked_arrival_hits == 0, "spike: arrival-anchored misses them (%d)", r.spiked_arrival_hits);
+    CHECK(!r.anomaly, "a one-off spike is no anomaly");
+
+    r = simulate(game, shooter, target, SIM_CONSTANT, 180.0, 6, 1.0f);
+    sim_print("180 fps, batches of 6", &r);
+    CHECK(r.exact_hits == r.shots && r.exact_err_max <= tick_err, "batching: every frame of a batch on its own client time");
+    r = simulate(game, shooter, target, SIM_JITTER, 600.0, 20, 1.0f);
+    sim_print("600 fps, 20, jitter", &r);
+    CHECK(r.exact_hits == r.shots, "600 fps (batches of 20) + jitter: exact hits every shot");
+    CHECK(r.exact_err_max < r.arrival_err_max, "600 fps + jitter: exact error below arrival error");
+
+    // a sped-up client clock (deltas x1.5, frames still at 60 Hz): no extra rewind, flagged
+    r = simulate(game, shooter, target, SIM_CONSTANT, 60.0, 2, 1.5f);
+    sim_print("cheat: clock x1.5", &r);
+    CHECK(r.extra_max <= 0.5, "a sped-up clock gains no rewind over arrival-anchored (%.2f ms)", r.extra_max);
+    CHECK(r.anomaly, "a sped-up clock is an anomaly");
+    // a slowed-down clock (deltas x0.8) gains at most LAG_COMP_CLOCK_MAX_EARLY before it is flagged
+    r = simulate(game, shooter, target, SIM_CONSTANT, 60.0, 2, 0.8f);
+    sim_print("cheat: clock x0.8", &r);
+    CHECK(r.extra_max <= 250.5, "a slowed-down clock gains at most 250 ms (%.1f ms)", r.extra_max);
+    CHECK(r.extra_shots <= 10, "...and only until it is flagged (%d of %d shots over-rewound)", r.extra_shots, r.shots);
+    CHECK(r.anomaly, "a slowed-down clock is an anomaly");
+
+    // a frame longer than the delta clamp (a hitch) or a seq gap starts a new timeline: the
+    // shots fall back to arrival until it calibrated again
+    LagCompClock clock;
+    lag_comp_clock_reset(&clock);
+    double excess;
+    for (int k = 0; k < 60; k++) {
+        Input in = {.seq = k, .delta = (float) (1.0 / 60.0), .received = 100.0 + k * (1.0 / 60.0) + 0.075};
+        lag_comp_clock_frame(&clock, &in, (float) (1.0 / 60.0));
+    }
+    Input in = {.seq = 60, .delta = (float) (1.0 / 60.0), .received = 101.0 + 0.075};
+    lag_comp_clock_frame(&clock, &in, (float) (1.0 / 60.0));
+    CHECK(clock.calibrated && lag_comp_clock_shot_time(&clock, &in, &excess) > 0.0, "calibrated after 1 s");
+    const unsigned short epoch = clock.epoch;
+    Input hitch = {.seq = 61, .delta = game_constants.max_delta, .received = 101.2};
+    lag_comp_clock_frame(&clock, &hitch, 0.2f);
+    CHECK(clock.epoch != epoch && !clock.calibrated && lag_comp_clock_shot_time(&clock, &hitch, &excess) == 0.0, "a 200 ms frame breaks the timeline");
+    CHECK(lag_comp_clock_shot_time(&clock, &in, &excess) == 0.0, "frames of the old timeline fall back");
+    Input gap = {.seq = 70, .delta = (float) (1.0 / 60.0), .received = 101.3};
+    lag_comp_clock_frame(&clock, &gap, (float) (1.0 / 60.0));
+    CHECK(clock.count == 1 && gap.clock_epoch == clock.epoch, "a seq gap breaks it too");
+}
+
 int main(void) {
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/sandstorm.json", &sandstorm) && load_json_file("../assets/maps/sandstorm.json", &sandstorm)) {
@@ -341,6 +540,7 @@ int main(void) {
     test_dead_and_spawn(&game, target, shooter);
     test_shotgun_melee(&game, target);
     test_projectile_state_const(&game, shooter);
+    test_exact_clock(&game, target, shooter);
 
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

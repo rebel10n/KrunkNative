@@ -283,7 +283,7 @@ static const CliCommand g_cli_commands[] = {
     {CLI_NAMES("say"), "say <message>", "Send a chat message to every player", CLI_ARG_TEXT, cli_cmd_say},
 #endif
     {CLI_NAMES("round"), "round [end | time <s> | length <s>]", "Show the round clock, end the round now, set the seconds left, or the length of later rounds (0 = mode default)", CLI_ARG_TEXT, cli_cmd_round},
-    {CLI_NAMES("lagcomp", "lag_comp"), "lagcomp [on | off | anchor on|off | scale <0.1-1>]", "Show or change lag compensation (server.cfg lag_comp, lag_comp_anchor, lag_comp_scale)", CLI_ARG_TEXT, cli_cmd_lagcomp},
+    {CLI_NAMES("lagcomp", "lag_comp"), "lagcomp [on | off | anchor exact|arrival|v3 | scale <0.1-1>]", "Show or change lag compensation (server.cfg lag_comp, lag_comp_anchor, lag_comp_scale)", CLI_ARG_TEXT, cli_cmd_lagcomp},
     {CLI_NAMES("op"), "op <id|name>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
     {CLI_NAMES("deop"), "deop <id|name>", "Take op away again", CLI_ARG_PLAYER, cli_cmd_deop},
     {CLI_NAMES("clear", "cls"), "clear", "Clear the screen", CLI_ARG_NONE, cli_cmd_clear},
@@ -578,24 +578,30 @@ static void cli_cmd_lagcomp(const char *args) {
     if (parsed <= 0) {
     } else if (cli_parse_switch(word, &on)) {
         game->lag_comp = (unsigned char) on;
-    } else if (!strcmp(word, "anchor") && parsed == 2 && cli_parse_switch(value, &on)) {
-        game->lag_comp_anchor = (unsigned char) on;
+    } else if (!strcmp(word, "anchor") && parsed == 2 && lag_comp_anchor_parse(value) >= 0) {
+        game->lag_comp_anchor = (unsigned char) lag_comp_anchor_parse(value);
     } else if (!strcmp(word, "scale") && parsed == 2 && atof(value) >= 0.1 && atof(value) <= 1.0) {
         g_gs_config.lag_comp_scale = (float) atof(value);
         game->lag_comp_scale = g_gs_config.lag_comp_scale; // times each player's ENT lagComp
     } else {
         ok = 0;
-        server_log("Usage: lagcomp [on | off | anchor on|off | scale <0.1-1>]");
+        server_log("Usage: lagcomp [on | off | anchor exact|arrival|v3 | scale <0.1-1>]");
     }
 
     if (ok) {
         server_log("Lag compensation %s: %s rewind (%s), lagComp scale %.2f (x each player's slider), %.0f ms history",
-                   game->lag_comp ? "on" : "off", game->lag_comp_anchor ? "anchored" : "v3.1.1",
-                   game->lag_comp_anchor ? "input arrival + ping" : "ping * 2", g_gs_config.lag_comp_scale,
+                   game->lag_comp ? "on" : "off", lag_comp_anchor_name(game->lag_comp_anchor),
+                   game->lag_comp_anchor == LAG_COMP_ANCHOR_EXACT ? "client input time + ping" :
+                   game->lag_comp_anchor == LAG_COMP_ANCHOR_ARRIVAL ? "input arrival + ping" : "ping * 2", g_gs_config.lag_comp_scale,
                    GAME_STATE_HISTORY * 1000.0f);
         for (size_t i = 0; i < g_server->client_count; i++) { // each player's ENT lagComp (Settings > Network slider)
             const ClientConnection *client = &g_server->clients[i];
-            if (client->player) server_log("  %s: lagComp %.2f, ping %d ms", client->name, client->player->lag_comp, client->ping_ms);
+            if (!client->player) continue;
+            const LagCompClock *clock = &client->player->lag_clock;
+            server_log("  %s: lagComp %.2f, ping %d ms, input clock %s (excess %.0f ms, %d samples)", client->name,
+                       client->player->lag_comp, client->ping_ms,
+                       clock->anomaly ? "anomaly (arrival fallback)" : clock->calibrated ? "calibrated" : "calibrating",
+                       clock->excess * 1000.0, clock->count);
         }
     }
     pthread_mutex_unlock(&g_server->lock);

@@ -70,6 +70,7 @@ void player_spawn(Player *player) {
     player->has_shot_vel_obj = 0;
     player->state_history_count = 0; // players.js init: this.stateHistory.length = 0
     player->state_history_head = 0;
+    lag_comp_clock_reset(&player->lag_clock); // a new life restarts its input seq at 0
 
     player->active = 1;
 
@@ -210,6 +211,7 @@ void player_queue_input(Player *player, const Input *input) {
 int player_accept_input(Player *player, Input *input) {
     if (!player || !input) return 0;
     if (!isfinite(input->delta) || !isfinite(input->x_dir) || !isfinite(input->y_dir) || !isfinite(input->slowdown)) return 0;
+    const float raw_delta = input->delta; // before the clamp: a longer frame breaks the lag comp clock
     input->delta = input->delta < 0.0f ? 0.0f : MIN(input->delta, game_constants.max_delta);
     input->x_dir = player_clamp_pitch(input->x_dir); // a v3.1.1 client never sends more (controls.js)
     input->y_dir = player_wrap_yaw(input->y_dir);
@@ -234,6 +236,10 @@ int player_accept_input(Player *player, Input *input) {
         player->input_queue_size -= drop;
     }
     player_queue_input(player, input);
+    if (player->input_queue_size && player->input_queue[player->input_queue_size - 1].seq == input->seq) {
+        lag_comp_clock_frame(&player->lag_clock, &player->input_queue[player->input_queue_size - 1], raw_delta);
+        *input = player->input_queue[player->input_queue_size - 1];
+    }
     return 1;
 }
 
@@ -1497,15 +1503,148 @@ void player_step(Player *player, float distance) {
 //  - literal (server.cfg lag_comp_anchor 0): v3.1.1 getStateConst = ping * 2 * lagComp,
 //    counted back from game.now when the shot is processed. player.ping is the smoothed RTT
 //    (packetHandlers.ts io_po), so this goes back two RTTs, about one more than the client saw.
-//  - anchored (lag_comp_anchor 1, the default; intentional difference from v3.1.1): the shot
-//    is resolved at the time its input was fired, not at the later tick that processed it.
+//  - arrival-anchored (lag_comp_anchor 2; intentional difference from v3.1.1): the shot is
+//    resolved at the time its input was fired, not at the later tick that processed it.
 //    Input.arrival is when the input reached the server on the state_now clock, minus the
 //    deltas of the later frames of its batch. The client fired it RTT/2 (uplink) before that,
 //    and was showing targets as they were RTT/2 (downlink) plus the interpolation delay earlier.
 //    So stateConst = (game.now - arrival) + ping * lagComp (lagComp 1: one RTT), and
 //    fetchState still adds the interpolation delay as in v3.1.1. The time an input waited for
 //    its tick (or a batch that arrived at once) is measured instead of folded into "ping * 2".
-// The 500 ms stateHistory window bounds the rewind in both modes: the oldest entry is the limit.
+//    A shot whose packet was delayed (jitter, a lag spike) is rewound that much too little.
+//  - exact (lag_comp_anchor 1, the default; intentional difference from v3.1.1): the shot's time
+//    comes from the client's own input timeline, so a delayed packet costs nothing. No packet
+//    change: every frame carries its delta, so client_time(frame) = the running sum of the
+//    (clamped) deltas of the connection's timeline (LagCompClock below). Per packet, skew =
+//    received - client_time; offset = the least skew of the last LAG_COMP_CLOCK_WINDOW s (the
+//    least-delayed packets set it), so offset + client_time(shot frame) is when that frame
+//    would have arrived over the fastest path. The client fired it the least uplink delay
+//    before that and saw targets the downlink delay + interpolation earlier: the network part
+//    is the least uplink + the typical downlink = ping - excess, where excess = the window's
+//    median skew - offset (ping is a smoothed RTT, so it holds the typical uplink delay).
+//    stateConst = (game.now - (offset + client_time)) + (ping - excess) * lagComp.
+//    Guards: the shot time is never after the frame's arrival (causal) nor more than
+//    LAG_COMP_CLOCK_MAX_EARLY before it; until a timeline has LAG_COMP_CLOCK_CALIBRATION s of
+//    samples, and for the rest of a life whose client clock ran faster or slower than real time
+//    (an anomaly: summed deltas growing faster than arrivals, or the offset drifting), the shot
+//    falls back to the arrival-anchored estimate. A client cannot gain rewind by speeding up its
+//    clock (the shot time stays <= its arrival, and the excess only lowers the ping part); one
+//    holding back or slowing down frames gains at most LAG_COMP_CLOCK_MAX_EARLY, like a real lag
+//    spike, inside the same 500 ms window v3.1.1 allows a client that delays its pongs.
+// The 500 ms stateHistory window bounds the rewind in every mode: the oldest entry is the limit.
+
+#define LAG_COMP_CLOCK_WINDOW 5.0          // s of packet samples behind offset / excess
+#define LAG_COMP_CLOCK_CALIBRATION 0.5     // s of samples (and LAG_COMP_CLOCK_MIN_SAMPLES) before a timeline is used
+#define LAG_COMP_CLOCK_MIN_SAMPLES 8
+#define LAG_COMP_CLOCK_MAX_EARLY 0.25      // s a shot may be credited before its packet's arrival
+#define LAG_COMP_CLOCK_LOST_DELTA 0.005    // s a clamped frame may lose before its timeline breaks
+#define LAG_COMP_CLOCK_DRIFT_TOLERANCE 0.1 // s the skew may leave the calibration baseline (route changes)...
+#define LAG_COMP_CLOCK_DRIFT_RATE 0.005    // ...plus 0.5 % of the timeline's age (clock rate differences)
+
+const char *lag_comp_anchor_name(const int anchor) {
+    return anchor == LAG_COMP_ANCHOR_EXACT ? "exact" : anchor == LAG_COMP_ANCHOR_ARRIVAL ? "arrival" : "v3.1.1";
+}
+
+int lag_comp_anchor_parse(const char *text) {
+    if (!text) return -1;
+    if (!strcmp(text, "1") || !strcmp(text, "exact") || !strcmp(text, "on") || !strcmp(text, "true")) return LAG_COMP_ANCHOR_EXACT;
+    if (!strcmp(text, "2") || !strcmp(text, "arrival")) return LAG_COMP_ANCHOR_ARRIVAL;
+    if (!strcmp(text, "0") || !strcmp(text, "v3") || !strcmp(text, "v3.1.1") || !strcmp(text, "literal") ||
+        !strcmp(text, "off") || !strcmp(text, "false")) return LAG_COMP_ANCHOR_V3;
+    return -1;
+}
+
+void lag_comp_clock_reset(LagCompClock *clock) {
+    const unsigned short epoch = clock->epoch;
+    memset(clock, 0, sizeof(*clock));
+    clock->epoch = (unsigned short) (epoch + 1);
+    clock->last_seq = -1;
+}
+
+// A frame whose time the client clock cannot account for (seq restart / gap, a frame longer than
+// the delta clamp): a new timeline. Its samples start over; the anomaly flag stays for the life.
+static void lag_comp_clock_break(LagCompClock *clock) {
+    clock->epoch++;
+    clock->count = 0;
+    clock->head = 0;
+    clock->calibrated = 0;
+    clock->client_time = 0.0;
+}
+
+static int lag_comp_compare_double(const void *a, const void *b) {
+    const double x = *(const double *) a, y = *(const double *) b;
+    return x < y ? -1 : x > y;
+}
+
+void lag_comp_clock_frame(LagCompClock *clock, Input *input, const float raw_delta) {
+    input->client_time = -1.0;
+    input->clock_epoch = 0;
+    if (!(input->received > 0.0)) return; // not from the network (bots, tests, offline)
+
+    const int fresh = clock->last_seq < 0 || input->seq != clock->last_seq + 1 ||
+                      !isfinite(raw_delta) || raw_delta > game_constants.max_delta + LAG_COMP_CLOCK_LOST_DELTA;
+    if (fresh) lag_comp_clock_break(clock);
+    else clock->client_time += input->delta; // the frame is generated `delta` after the previous one
+    clock->last_seq = input->seq;
+    input->client_time = clock->client_time;
+    input->clock_epoch = clock->epoch;
+
+    // one sample per packet: its frames share `received`, the last one (the least skew) counts
+    const double skew = input->received - clock->client_time;
+    if (clock->count && input->received == clock->sample_received[clock->head]) {
+        if (skew < clock->sample_skew[clock->head]) clock->sample_skew[clock->head] = skew;
+    } else {
+        if (clock->count && input->received < clock->sample_received[clock->head]) return; // non-causal stamp
+        clock->head = (clock->head + 1) % LAG_COMP_CLOCK_SAMPLES;
+        clock->sample_received[clock->head] = input->received;
+        clock->sample_skew[clock->head] = skew;
+        if (clock->count < LAG_COMP_CLOCK_SAMPLES) clock->count++;
+        if (clock->count == 1) {
+            clock->begin = input->received;
+            clock->baseline = skew;
+        }
+    }
+
+    // offset = the least skew of the window, excess = its median skew above that
+    static double window[LAG_COMP_CLOCK_SAMPLES];
+    int n = 0;
+    double offset = 0.0;
+    for (int i = 0; i < clock->count; i++) {
+        const int at = (clock->head - i + LAG_COMP_CLOCK_SAMPLES) % LAG_COMP_CLOCK_SAMPLES;
+        if (clock->sample_received[at] < input->received - LAG_COMP_CLOCK_WINDOW) break;
+        window[n] = clock->sample_skew[at];
+        offset = n ? fmin(offset, window[n]) : window[n];
+        n++;
+    }
+    qsort(window, (size_t) n, sizeof(window[0]), lag_comp_compare_double);
+    clock->offset = offset;
+    clock->excess = (n % 2 ? window[n / 2] : (window[n / 2 - 1] + window[n / 2]) * 0.5) - offset;
+
+    const double age = input->received - clock->begin;
+    if (!clock->calibrated) {
+        clock->baseline = fmin(clock->baseline, skew);
+        clock->calibrated = age >= LAG_COMP_CLOCK_CALIBRATION && clock->count >= LAG_COMP_CLOCK_MIN_SAMPLES;
+        return;
+    }
+    // client_time may only grow as fast as real time: a skew below the baseline means the summed
+    // deltas outran the arrivals (a sped-up clock); a window median above it (spikes do not move a
+    // median), that they fell behind (a slowed-down clock, which would earn rewind)
+    const double tolerance = LAG_COMP_CLOCK_DRIFT_TOLERANCE + LAG_COMP_CLOCK_DRIFT_RATE * age;
+    if (!clock->anomaly && (skew < clock->baseline - tolerance || clock->offset + clock->excess > clock->baseline + tolerance)) {
+        clock->anomaly = 1;
+        clock->anomaly_new = 1;
+    }
+}
+
+double lag_comp_clock_shot_time(const LagCompClock *clock, const Input *input, double *excess) {
+    if (!clock->calibrated || clock->anomaly || input->client_time < 0.0 || input->clock_epoch != clock->epoch ||
+        !(input->received > 0.0)) return 0.0;
+    double sent = clock->offset + input->client_time;
+    if (sent > input->received) sent = input->received; // causal: never after it arrived
+    if (sent < input->received - LAG_COMP_CLOCK_MAX_EARLY) sent = input->received - LAG_COMP_CLOCK_MAX_EARLY;
+    *excess = clock->excess;
+    return sent;
+}
 
 static const PlayerStoredState *player_state_entry(const Player *player, const int newest_first) {
     const int index = (player->state_history_head - newest_first + PLAYER_STATE_HISTORY_MAX) % PLAYER_STATE_HISTORY_MAX;
@@ -1537,7 +1676,17 @@ float player_get_state_const(const Player *player) {
     const float scale = game->lag_comp_scale > 0.0f ? game->lag_comp_scale : 1.0f;
     const float lag_comp = (player->lag_comp > 0.0f ? player->lag_comp : 1.0f) * scale; // parity: lc <= 0 -> 1
     const float ping = player->ping > 0.0f ? player->ping : 0.0f;
-    if (!game->lag_comp_anchor) return ping * 2.0f * lag_comp;
+    if (game->lag_comp_anchor == LAG_COMP_ANCHOR_V3) return ping * 2.0f * lag_comp;
+
+    if (game->lag_comp_anchor == LAG_COMP_ANCHOR_EXACT && player->input_arrival > 0.0) {
+        double excess = 0.0;
+        const double sent = lag_comp_clock_shot_time(&player->lag_clock, &player->input_running, &excess);
+        if (sent > 0.0) {
+            const double age = game->state_now > sent ? game->state_now - sent : 0.0;
+            const float network = fmaxf(0.0f, ping - (float) (excess * 1000.0));
+            return (float) (age * 1000.0) + network * lag_comp;
+        }
+    }
 
     const double age = player->input_arrival > 0.0 && game->state_now > player->input_arrival ? game->state_now - player->input_arrival : 0.0;
     return (float) (age * 1000.0) + ping * lag_comp;
@@ -2254,10 +2403,12 @@ void player_drain_inputs(Player *player) {
 
     for (size_t i = 0; i < count && player->active; i++) {
         player->input_arrival = queue[i].arrival; // anchored lag compensation: this input's shots
+        player->input_running = queue[i];
         player_proc_input(player, &queue[i], 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
         player->input_seq = queue[i].seq;
     }
     player->input_arrival = 0.0;
+    player->input_running.received = 0.0;
 
     free(queue);
 }

@@ -1317,7 +1317,7 @@ New keys (also in config.example.json):
 | `enforce_skins` | `auto` | cosmetics must be owned (8.9); auto = on while linked to a coordinator |
 | `shutdown_grace` | `10` | seconds a SIGTERM/SIGINT drain lets the round finish |
 | `lag_comp` | `true` | hits test targets where the shooter saw them (v3.1.1 storeState / fetchState, 500 ms history); console `lagcomp` |
-| `lag_comp_anchor` | `true` | rewind from the shot input's arrival + 1 ping; `false` = v3.1.1 `ping * 2 * lagComp` from processing |
+| `lag_comp_anchor` | `1` | `1` exact: the shot input's client time (the running sum of its timeline's frame deltas, no packet change) mapped onto the server clock by a min-filtered per-connection offset, + 1 ping; a delayed packet (jitter, a lag spike) costs nothing. Falls back to `2` while a timeline calibrates (0.5 s after a spawn / seq gap / hitch) and for the rest of a life whose summed deltas run faster or slower than real time (logged `[lagcomp]`); a shot is credited at most 250 ms before its arrival and never after it. `2`: the shot input's arrival + 1 ping. `0`: v3.1.1 `ping * 2 * lagComp` from processing. `true`/`false` read as `1`/`0`. Console: `lagcomp anchor exact\|arrival\|v3` |
 | `lag_comp_scale` | `1` | 0.1..1, multiplies each player's v3.1.1 `player.lagComp` (the Settings > Network "Lag Compensation" slider, ENT V7, server-clamped to 0.1..1): scales the ping part of the rewind |
 | `log_file` | `""` | also append every console line (timestamped) here |
 

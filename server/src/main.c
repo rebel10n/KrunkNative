@@ -724,7 +724,7 @@ int main(int argc, char **argv) {
     g_server->config.perms = cfg->perms; // --perms, PERMS=1 or gameserver.perms
     g_server->config.cheats_open = cfg->cheats_open;
     g_server->game.lag_comp = (unsigned char) !!cfg->lag_comp; // players.js fetchState (shared/src/player.c)
-    g_server->game.lag_comp_anchor = (unsigned char) !!cfg->lag_comp_anchor;
+    g_server->game.lag_comp_anchor = (unsigned char) (cfg->lag_comp_anchor & 3); // LAG_COMP_ANCHOR_*
     g_server->game.lag_comp_scale = cfg->lag_comp_scale; // times each player's ENT lagComp
     pthread_mutex_init(&g_server->lock, NULL);
 

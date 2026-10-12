@@ -231,7 +231,7 @@
     "enforce_skins": "auto",
     "shutdown_grace": 10,
     "lag_comp": true,
-    "lag_comp_anchor": true,
+    "lag_comp_anchor": 1,
     "lag_comp_scale": 1,
     "bots": 0,
     "bot_quota": 0,

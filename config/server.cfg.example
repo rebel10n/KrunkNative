@@ -21,7 +21,9 @@ mapcycle        Burg,Sandstorm,Kanji,Littletown
 mode            ffa                // ffa | tdm | ctf | point | ... | rotation (a list rotates)
 round_seconds   0                  // 0 = the mode's game time
 lag_comp        1                  // hits rewind targets to where the shooter saw them (v3.1.1 fetchState)
-lag_comp_anchor 1                  // 1: from the shot input's arrival + ping; 0: v3.1.1 ping * 2 at processing
+lag_comp_anchor 1                  // 1 exact: the shot input's own client time (summed frame deltas) on the server
+                                   //   clock + ping, immune to jitter / lag spikes; 2: its arrival + ping;
+                                   //   0: v3.1.1 ping * 2 at processing (console: lagcomp anchor exact|arrival|v3)
 lag_comp_scale  1                  // 0.1..1, times each player's Lag Compensation slider (v3.1.1 lagComp)
 bots            0                  // keep N Krunker v7.1.4 bot players in the lobby (0..16, config.botLimit)
 bot_quota       0                  // or fill the lobby up to N players with bots that leave as humans join (wins over bots)

@@ -94,7 +94,7 @@ typedef struct {
     int enforce_skins;                   // -1 auto (on with a coordinator), 0 off, 1 on
     float shutdown_grace;                // seconds a SIGTERM/SIGINT drain waits for players (0 = immediate)
     int lag_comp;                        // 1: hits rewind targets (v3.1.1 storeState / fetchState), 0 = current positions
-    int lag_comp_anchor;                 // 1: rewind from the shot input's arrival + ping (default); 0: v3.1.1 ping * 2 from processing
+    int lag_comp_anchor;                 // LAG_COMP_ANCHOR_*: 1 exact (client input timeline, default), 2 arrival + ping, 0 v3.1.1 ping * 2
     float lag_comp_scale;                // 0.1..1 (default 1) times each player's lagComp (ENT ent[11] slider)
     // Krunker v7.1.4 bot players (shared/src/bots.c; KrunkNative addition: v7 only has the dev
     // console). bots: keep N bots in the lobby; bot_quota: fill the lobby up to N players with
