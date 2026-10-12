@@ -270,6 +270,10 @@ GameAI *game_ai_spawn(Game *game, int sid, const int index, const char *name, co
 }
 
 // objects.js addAI (pendingAIs, at most config.aiLimit) + addPendingAIs at game.init.
+// addAI is gated on !RENDER, so v3.1.1 only has map AIs on the server: its single-player
+// client (playCustomMap) never spawns them. Intentional difference: KrunkNative's offline
+// game is an authority too and keeps the map's BOTs playable; ai_render.c hides them until
+// the local player has spawned, as AI.sync would (nothing reaches a menu connection).
 void game_ai_spawn_map(Game *game) {
     if (!game_is_authority(game) || !game->map || !game->map->raw_data) return;
 

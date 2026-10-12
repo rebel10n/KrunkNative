@@ -168,10 +168,17 @@ static AIFrameKey *air_key(const char *key) {
 
 static int air_visible(const Client *client, const GameAI *ai) {
     if (!ai->active) return 0;
-    if (!game_is_authority(&client->game)) return ai->shown; // syncAll: in the last "ai" list
-    // the in-process game: what AI.sync would send this player (in range, or spectating)
+    // v3.1.1 AI.sync only walks players.list (active or spectating players): a connection in
+    // the menu that never spawned gets no "aai" / "ai", so the map's BOTs are not drawn behind
+    // the menu (Soul Sanctum's Weeping Soul sits on camPos). The native server also streams
+    // AIs to menu connections (NET_TARGET_NON_PLAYERS); keep them hidden until we spawn.
+    if (!game_is_authority(&client->game)) return (client->me || spectate_active()) && ai->shown; // syncAll: in the last "ai" list
+    // the in-process game: what AI.sync would send this player. It only reaches players that
+    // are active (AIs within 600) or spectating (all); in the menu or dead nothing arrives and
+    // the meshes keep their last syncAll state (fresh AIs: hidden until the first spawn).
+    if (spectate_active()) return 1;
     const Player *me = client->me;
-    if (spectate_active() || !me) return 1;
+    if (!me || !me->active) return ai->shown;
     const float dx = me->position.x - ai->position.x, dy = me->position.y - ai->position.y, dz = me->position.z - ai->position.z;
     return sqrtf(dx * dx + dy * dy + dz * dz) <= GAME_AI_SYNC_RANGE;
 }
