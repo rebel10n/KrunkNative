@@ -1026,6 +1026,7 @@ static void ai_kill(Game *game, GameAI *ai, Player *source, const int silent) {
     ai->path_dir = 1;
     ai->respawn_timer = 0.0f;
     if (!silent) {
+        if (source) source->mode.ai_kills++; // aiKills (Zombies endStats "zombies", map-logic WP-H)
         ai_emit_sound(game, ai, ai->data.death_sound, 0.0f, NULL);
         ai->respawn_timer = ai->data.respawn_r ? (float) ai_rand_int(100, ai->respawn_t ? (int) ai->respawn_t : 5000) : ai->respawn_t;
         ai_trigger(game, ai, 15, source); // onAIDeath

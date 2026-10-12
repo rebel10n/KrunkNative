@@ -1378,6 +1378,7 @@ void client_menu_tick(Client *client) {
     }
 
     client_hud_html_tick(client, (float) glfwGetTime()); // HTML HUD (hud_ui.c)
+    hud_zombies_tick(client); // power-up timers, finiteAmmo reserve, zombie round (hud_zombies.c)
     ui_console_tick(client); // developer console (ui_console.c)
     ui_interact_tick(client); // the interact prompt and hold progress (ui_interact.c)
 

@@ -17,6 +17,7 @@
 #include <shadow.h>
 #include <map_environment.h> // v7 environment zones, tone mapping, ocean (map_environment.c)
 #include <ocean.h>
+#include <zombies_render.h> // map-logic WP-H in-world (zombies_render.c)
 #include <hud_gui.h> // map "gui" custom HUD (ui/hud_gui.c)
 #include <math.h>
 #include <stdio.h>
@@ -777,6 +778,7 @@ void client_load_map(Client *client) {
 
     shadow_load_map(client->game.map); // caster/receiver flags + light camera (shadow.c)
     map_post_load(client->scene, client->game.map); // AO planes, noise planes, point lights (map_post.c)
+    zombies_render_load(client->scene, client->game.map); // WP-H machine weapons, beams, airdrops (zombies_render.c)
 }
 
 void client_unload_map(Client *client) {
@@ -784,6 +786,7 @@ void client_unload_map(Client *client) {
 
     shadow_unload_map();
     map_post_unload(client->scene);
+    zombies_render_unload();
     map_environment_unload(); // ocean, v7 output state (map_environment.c)
     hud_gui_clear();          // map "gui" elements (ui/hud_gui.c)
 
@@ -1620,6 +1623,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         debug_capture_apply_camera(client); // KRUNKNATIVE_CAMERA pose (debug_capture.c)
         map_environment_update(client->game.map, client->camera.position); // v7 ENVIRONMENT_ZONE swaps (map_environment.c)
         map_post_frame(client->scene, &client->game, &client->camera, delta * 1000.0f); // spin, sign distance, GLTF assets, builds, zone (map_post.c)
+        zombies_render_frame(client, delta * 1000.0f); // WP-H: mystery box / krum weapons, beams, airdrops (zombies_render.c)
         shadow_update(); // static sun shadow map, re-rendered after a map load (shadow.c)
         ocean_update(client->scene, &client->camera, delta * 1000.0f); // v7 ocean: time + mirror reflection pass (ocean.c)
         sky_tick(delta * 1000.0f);

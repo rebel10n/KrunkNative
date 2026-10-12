@@ -22,6 +22,7 @@ struct GameAI_t;
 #define NET_PACKET_ZOMBIE_WAVE (NET_PACKET_BLOCK_ZOMBIES + 3)     // S->C all: NetZombieWavePacket ("upz wave, specialName")
 #define NET_PACKET_RESERVE_AMMO (NET_PACKET_BLOCK_ZOMBIES + 4)    // S->C to the player: NetReserveAmmoPacket ("uamo" reserves)
 #define NET_PACKET_SHARING (NET_PACKET_BLOCK_ZOMBIES + 5)         // S->C to the player: NetSharingPacket ("sic")
+#define NET_PACKET_ZOMBIE_STATS (NET_PACKET_BLOCK_ZOMBIES + 6)    // S->C all: NetZombieStatsPacket (endData aiKills / rounds)
 #define NET_PACKET_AIRDROP (NET_PACKET_BLOCK_AIRDROP + 0)         // S->C per viewer: NetAirDropPacket ("ad")
 #define NET_PACKET_AIRDROP_REMOVE (NET_PACKET_BLOCK_AIRDROP + 1)  // S->C all: NetAirDropRemovePacket ("rad")
 #define NET_PACKET_AIRDROP_CLAIM (NET_PACKET_BLOCK_AIRDROP + 2)   // S->C all: NetAirDropClaimPacket ("krp owner, claimer")
@@ -72,6 +73,21 @@ typedef struct {
     uint8_t on;
 } NetSharingPacket;
 
+// zom.js endStats "zombies" (endForm: aiKills) and "rounds" (player.rounds) of every player,
+// sent with the end of a Zombies game, before NET_PACKET_MODE_END (whose stats array has no room
+// left under NET_MAX_PAYLOAD). "downs" is the deaths every client already has.
+typedef struct {
+    int32_t uid;
+    int16_t zombies;            // aiKills
+    int16_t rounds;
+} NetZombieStatsEntry;
+
+typedef struct {
+    uint8_t count;
+    NetZombieStatsEntry entries[NET_MODE_END_MAX];
+} NetZombieStatsPacket;
+_Static_assert(sizeof(NetZombieStatsPacket) <= NET_MAX_PAYLOAD, "NetZombieStatsPacket exceeds NET_MAX_PAYLOAD");
+
 typedef struct {
     int32_t sid;
     float fall;                 // fallDist left
@@ -105,6 +121,7 @@ extern const char *const g_zombie_perk_names[ZOMBIES_PERK_COUNT]; // config.zomb
 void zombies_round_start(Game*);           // finishInit: machines from the map, power-ups off, airdrops gone, switchMysteryBox (authority)
 void zombies_tick(Game*, float delta);     // seconds: updatePowerups (#8), airDrop.update / sync (#14), mystery boxes / krum machines (#21-22)
 void zombies_send_state(Game*, int uid);   // init syncData pwup / mybx / krm, the wave and the airdrops for a joiner
+void zombies_send_end_stats(Game*);        // NET_PACKET_ZOMBIE_STATS of every player (authority, game end)
 // Client mirror of every WP-H packet; `me` (the local player, may be NULL) takes the reserves /
 // sharing ones. 1 = a WP-H packet.
 int zombies_apply_packet(Game*, Player *me, int type, const void *payload, uint16_t length);

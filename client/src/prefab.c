@@ -1991,20 +1991,38 @@ Mesh *prefab_canvas_mesh(Object *object, const cJSON *raw_obj, const unsigned in
     return mesh;
 }
 
+// "weapons/<src>" with the weapon's own texture (no altSkin: KN's weapon table has none), front
+// faces only; the scale and pose are the caller's. NULL without a model.
+Mesh *prefab_weapon_mesh(const Weapon *weapon, const int no_texture) {
+    if (!weapon || !weapon->src) return NULL;
+    char model[96];
+    snprintf(model, sizeof(model), "weapons/%s", weapon->src);
+    Mesh *mesh = prefab_model_mesh(model, model, no_texture || client_render_settings()->no_textures);
+    if (!mesh) return NULL;
+    ((BasicMaterial *) mesh->material)->double_sided = 0;
+    return mesh;
+}
+
 // MapManager.addWeapon -> genWeaponMeshData(weapons[id]): "weapons/<src>" with its own texture
 // (noTex "ntx": the default texture), loadMesh scale weapon.scale * (equipment ? 2 : 1). The
 // pose (y + pickupOff, rotateY / X / Z) is the caller's (map_post.c). NULL for an unknown id.
 // Weapon transparency / glow flags (seeThrough, transp) are not in KN's weapon table (documented).
 Mesh *prefab_pickup_mesh(const int weapon_id, const int no_texture, float *scale) {
-    if (weapon_id < 0 || weapon_id >= WEAPON_COUNT || !g_weapons[weapon_id] || !g_weapons[weapon_id]->src) return NULL;
+    if (weapon_id < 0 || weapon_id >= WEAPON_COUNT || !g_weapons[weapon_id]) return NULL;
     const Weapon *weapon = g_weapons[weapon_id];
-    char model[96];
-    snprintf(model, sizeof(model), "weapons/%s", weapon->src);
-    Mesh *mesh = prefab_model_mesh(model, model, no_texture || client_render_settings()->no_textures);
-    if (!mesh) return NULL;
-    if (scale) *scale = (weapon->scale != 0.0f ? weapon->scale : 1.0f) * (weapon->equipment ? 2.0f : 1.0f);
-    ((BasicMaterial *) mesh->material)->double_sided = 0;
+    Mesh *mesh = prefab_weapon_mesh(weapon, no_texture);
+    if (mesh && scale) *scale = (weapon->scale != 0.0f ? weapon->scale : 1.0f) * (weapon->equipment ? 2.0f : 1.0f);
     return mesh;
+}
+
+// render.js loadMesh({src, texSrc}) outside the map builder: models/<model>.obj with
+// textures/<texture>.png (the noTex setting drops the texture). The caller owns the mesh.
+Mesh *prefab_asset_mesh(const char *model, const char *texture) {
+    return model ? prefab_model_mesh(model, texture ? texture : model, client_render_settings()->no_textures) : NULL;
+}
+
+unsigned int prefab_asset_texture(const char *src) {
+    return src ? prefab_load_texture_src(src) : 0;
 }
 
 // A player build (shared/src/build.c, Object.dynamic): v7 draws them through ShaderMesh.addBuild

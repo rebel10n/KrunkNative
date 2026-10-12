@@ -486,6 +486,9 @@ void hud_popups_on_spawn(void);                  // "start": medal queue cleared
 void hud_popups_on_init(void);                   // "init": bN = 0
 void hud_popups_page_reset(void);                // fresh page: elements gone
 void hud_popups_tick(double now_ms, int visible); // per frame: draw + age every popup
+// map-logic WP-H zombies HUD (hud_zombies.c): #powerUpHolder timers, the finiteAmmo reserve in
+// #ammoMax / #reloadMsg, #roundMessage. Every frame after client_hud_html_tick().
+void hud_zombies_tick(Client*);
 // END hud_popups block
 void hud_ui_kill_streak(Client*, int uid, int streak); // killStreakMessage ("kst"): "<who> on a N Kill Streak" chat line
 // KrunkScript game.ui hideDefault() (v7): hides #gameUIHider and #fullMenHider (0 = shows them

@@ -17,6 +17,7 @@
 #include <mode_world.h>
 #include <hud_modes.h>
 #include <spawnables.h>
+#include <audio.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,11 +37,42 @@ typedef struct {
 
 typedef struct {
     Mesh *mesh;
+    Mesh *outline;           // loadMesh outlineMesh (medals.js outline), child of mesh
+    int sound;               // onSpawn play3DL("egg_0") voice, 0 none
     int sid;
     int type;                // medals.js index the mesh was built for
     float bob;
     float spin;
 } ModeWorldTag;
+
+// map-logic WP-H (zombies power-up drops), medals.js per type: outline (the outline material + 1,
+// 0 none: materials 0 cyan 65535, 1 gold 13938487, 2 purple 11299257, a BackSide
+// MeshBasicMaterial copy of the model), outlineScale (|| 1.025), onSpawn vF85 (play3DL "egg_0"
+// 0.8 until the spawnable goes, onDestroy vF86), rotAxis "z" (getRotation [PI/2, 0, 0]).
+static const struct {
+    unsigned char outline;
+    float outline_scale;
+    unsigned char egg_sound:1;
+    unsigned char spin_z:1;
+} k_world_spawnables[SPAWNABLE_COUNT] = {
+    [SPAWNABLE_AMMO_PACK] = {1, 1.025f},
+    [SPAWNABLE_MELEE_PICKUP] = {1, 1.025f},
+    [SPAWNABLE_AMMO_CACHE] = {2, 1.1f, 1},
+    [SPAWNABLE_NUKE] = {2, 1.1f, 1, 1},
+    [SPAWNABLE_MINIGUN] = {2, 1.025f, 1},
+    [SPAWNABLE_INSTA_KILL] = {2, 1.1f, 1},
+    [SPAWNABLE_DISCOUNT] = {2, 1.1f, 1},
+    [SPAWNABLE_DOUBLE_POINTS] = {2, 1.1f, 1},
+    [SPAWNABLE_GRENADE_LAUNCHER] = {2, 1.025f, 1},
+    [SPAWNABLE_JOE_TAG] = {2, 1.025f, 1},
+    [SPAWNABLE_FROG] = {2, 1.025f, 1},
+    [SPAWNABLE_PERK_BOTTLE] = {2, 1.025f, 1},
+    [SPAWNABLE_ZOMBIE_PORTAL] = {0, 0.0f, 1},
+    [SPAWNABLE_FREE_UPGRADE] = {2, 1.025f, 1},
+    [SPAWNABLE_LOOT_DROP] = {1, 1.025f},
+};
+static const int k_world_outline_colors[3] = {65535, 13938487, 11299257};
+#define MODE_WORLD_MINIGUN_SCALE 0.0026568026773869323f // Minigun getScale()
 
 static struct {
     const Map *map;
@@ -133,12 +165,19 @@ static void mode_world_drop_mesh(Mesh **mesh) {
     *mesh = NULL;
 }
 
+static void mode_world_drop_tag(ModeWorldTag *tag) {
+    mode_world_drop_mesh(&tag->outline);
+    mode_world_drop_mesh(&tag->mesh);
+    if (tag->sound) audio_handle_stop(tag->sound); // onDestroy vF86: the egg_0 loop stops
+    tag->sound = 0;
+}
+
 static void mode_world_clear(void) {
     for (int f = 0; f < MODE_MAX_FLAGS; f++) {
         mode_world_drop_mesh(&g_world.flags[f].crystal);
         mode_world_drop_mesh(&g_world.flags[f].zone);
     }
-    for (int t = 0; t < MODE_MAX_SPAWNABLES; t++) mode_world_drop_mesh(&g_world.tags[t].mesh);
+    for (int t = 0; t < MODE_MAX_SPAWNABLES; t++) mode_world_drop_tag(&g_world.tags[t]);
     for (int z = 0; z < MODE_MAX_DOM_ZONES; z++) mode_world_drop_mesh(&g_world.dom_zones[z]);
     g_world.flag_count = 0;
     g_world.map = NULL;
@@ -281,13 +320,13 @@ static void mode_world_tick_tags(Client *client, const float delta_ms) {
         int team = 0, data_c = 0;
 
         if (!hud_modes_spawnable(t, &position, &team)) {
-            mode_world_drop_mesh(&tag->mesh);
+            mode_world_drop_tag(tag);
             continue;
         }
         const int type = hud_modes_spawnable_type(t, &data_c);
         const SpawnableInfo *info = spawnable_info(type);
         if (!info) continue;
-        if (tag->mesh && tag->type != type) mode_world_drop_mesh(&tag->mesh);
+        if (tag->mesh && tag->type != type) mode_world_drop_tag(tag);
 
         if (!tag->mesh) {
             tag->mesh = mode_world_mesh(mode_world_spawnable_geometry(type), mode_world_texture(info->model));
@@ -297,10 +336,28 @@ static void mode_world_tick_tags(Client *client, const float delta_ms) {
             tag->bob = 0.0f;
             tag->spin = 0.0f;
             scene_add_mesh(client->scene, tag->mesh);
+            if (k_world_spawnables[type].outline) { // outlineMesh: same geometry, BackSide, scaled about the model
+                BasicMaterial *material = basic_material_init();
+                if (material) {
+                    material->unlit = 1;
+                    material->double_sided = 0;
+                    material->cull_front = 1;
+                    material->fog_enabled = 0;
+                    material->color = hex_to_vec(k_world_outline_colors[k_world_spawnables[type].outline - 1]);
+                    tag->outline = mesh_init(tag->mesh->geometry, (Material *) material);
+                    const float k = k_world_spawnables[type].outline_scale;
+                    tag->outline->transform.parent = &tag->mesh->transform;
+                    tag->outline->transform.scale = (vec3) {k, k, k};
+                    tag->outline->no_shadow_receive = 1;
+                    scene_add_mesh(client->scene, tag->outline);
+                }
+            }
+            if (k_world_spawnables[type].egg_sound) tag->sound = audio_handle_play("egg_0", 0.8f, 1, 1.0f, 1, position, 0.0f, 0.0f);
         }
 
         // getScale(data): KR Tags / Diamond Eggs grow with their count
-        const float scale = type == SPAWNABLE_KR_TAG || type == SPAWNABLE_DIAMOND_EGG ? info->scale + (float) (data_c ? data_c : 1) * 0.5f : info->scale;
+        const float scale = type == SPAWNABLE_KR_TAG || type == SPAWNABLE_DIAMOND_EGG ? info->scale + (float) (data_c ? data_c : 1) * 0.5f
+                          : type == SPAWNABLE_MINIGUN ? MODE_WORLD_MINIGUN_SCALE : info->scale;
         tag->mesh->transform.scale = (vec3) {scale, scale, scale};
         if (type == SPAWNABLE_TAG || type == SPAWNABLE_KR_TAG) {
             ((BasicMaterial *) tag->mesh->material)->emissive = hex_to_vec(local_team && team == local_team ? MODE_WORLD_EMISSIVE_ENEMY : MODE_WORLD_EMISSIVE_ALLY);
@@ -310,7 +367,8 @@ static void mode_world_tick_tags(Client *client, const float delta_ms) {
             tag->spin += delta_ms * 0.002f;
         }
         tag->mesh->transform.position = (vec3) {position.x, position.y + (info->no_anim ? 0.0f : cosf(tag->bob)), position.z};
-        tag->mesh->transform.rotation = (vec3) {0.0f, tag->spin, 0.0f};
+        // rotAxis "z" (the Nuke): getRotation [PI/2, 0, 0], the spin on z
+        tag->mesh->transform.rotation = k_world_spawnables[type].spin_z ? (vec3) {(float) M_PI / 2.0f, 0.0f, tag->spin} : (vec3) {0.0f, tag->spin, 0.0f};
     }
 }
 

@@ -337,6 +337,9 @@ typedef struct {
     float head_mlt;           // bhffa headMlt (0 = 1)
     vec3 last_ground;         // players.setOnGround lastGround (kill drop points), tracked by mode_tick
     unsigned char has_last_ground:1;
+    // ---- map-logic WP-H: Zombies endStats
+    int ai_kills;             // aiKills: AIs this player killed (AI.kill, not silent)
+    int rounds;               // rounds: waves that ended while this player was in the game
 } ModePlayerState;
 
 typedef struct {

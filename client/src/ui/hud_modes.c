@@ -679,6 +679,9 @@ static void hud_modes_end_value(const Player *player, const NetModeEndEntry *ent
     else if (!strcmp(stat, "obj")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_OBJECTIVE] : 0);   // v7 endForm.obj: objectiveScore
     else if (!strcmp(stat, "deposits")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_DEPOSITS] : 0); // v7 Deposit (WP-D)
     else if (!strcmp(stat, "pickups")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_PICKUPS] : 0);   // v7 Mag Dump (WP-D)
+    else if (!strcmp(stat, "zombies")) snprintf(out, size, "%d", player->mode.ai_kills); // endForm.zombies: aiKills (NET_PACKET_ZOMBIE_STATS)
+    else if (!strcmp(stat, "downs")) snprintf(out, size, "%u", player->deaths);         // endForm.downs: deaths
+    else if (!strcmp(stat, "rounds")) snprintf(out, size, "%d", player->mode.rounds);   // player.rounds (NET_PACKET_ZOMBIE_STATS)
     else if (!strcmp(stat, "time")) {                                     // endForm.time: timer || "DNF"
         const int tenths = s ? s[NET_MODE_STAT_TIME] - 1 : -1;            // UTILS.getTime(lastTimer, showMS): Race / Raid
         if (tenths < 0) snprintf(out, size, "DNF");

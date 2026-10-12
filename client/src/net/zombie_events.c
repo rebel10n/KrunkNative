@@ -2,8 +2,9 @@
 // The state goes into Game.zombies / the local Player through zombies_apply_packet (shared, so
 // prediction and the interact prompts read the same data); here are the v7 client's HUD bits:
 // io_updateZombieRound ("upz": the "Round N" popup), io_krPackage ("krp": the chat line) and the
-// power-up sounds of io_updatePowerUp. The machine / airdrop meshes and the power-up icons
-// (#powerUpHolder) read Game.zombies (renderer / HUD: map-logic WP-G).
+// power-up sounds of io_updatePowerUp. The machine / airdrop meshes (client/src/zombies_render.c)
+// and the HUD (#powerUpHolder, the finiteAmmo reserve, #roundMessage: client/src/ui/hud_zombies.c)
+// read Game.zombies.
 #include <client.h>
 #include <audio.h>
 #include <spectate.h>
@@ -48,8 +49,18 @@ int zombie_events_handle(Client *client, const int type, const void *payload, co
     } else if (type == NET_PACKET_POWERUP && length == sizeof(NetPowerupPacket)) {
         NetPowerupPacket powerup;
         memcpy(&powerup, payload, sizeof(powerup));
-        if (powerup.ms > 0 && powerup.index == ZOMBIES_POWERUP_INSTA_KILL) audio_play("instantkill_0", 0.5f, 0, 1.0f);
-        if (powerup.ms > 0 && powerup.index == ZOMBIES_POWERUP_FIRE_SALE) audio_play("firesale_0", 0.5f, 0, 1.0f);
+        if (powerup.index == ZOMBIES_POWERUP_INSTA_KILL) { // stop + play again (a new pickup restarts it)
+            audio_stop("instantkill_0");
+            if (powerup.ms > 0) audio_play("instantkill_0", 0.5f, 0, 1.0f);
+        }
+        if (powerup.index == ZOMBIES_POWERUP_FIRE_SALE) { // the jingle and its 0.1 loop until the sale ends
+            audio_stop("firesale_0");
+            audio_stop("firesale_1");
+            if (powerup.ms > 0) {
+                audio_play("firesale_0", 0.5f, 0, 1.0f);
+                audio_play("firesale_1", 0.1f, 1, 1.0f);
+            }
+        }
     } else if (type == NET_PACKET_AIRDROP && length == sizeof(NetAirDropPacket)) {
         NetAirDropPacket drop;
         memcpy(&drop, payload, sizeof(drop));

@@ -744,6 +744,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_BLOCK_ZOMBIES + 3:
         case NET_PACKET_BLOCK_ZOMBIES + 4:
         case NET_PACKET_BLOCK_ZOMBIES + 5:
+        case NET_PACKET_BLOCK_ZOMBIES + 6: // zombies end stats (aiKills / rounds)
         case NET_PACKET_BLOCK_AIRDROP + 0: // ad, rad, krp
         case NET_PACKET_BLOCK_AIRDROP + 1:
         case NET_PACKET_BLOCK_AIRDROP + 2:

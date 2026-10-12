@@ -12,6 +12,9 @@ void map_post_unload(Scene *scene);
 void map_post_frame(Scene *scene, const Game *game, const Camera *camera, float delta_ms);
 Mesh *prefab_build_dynamic(const Object *object); // prefab.c: the mesh of a player build (caller owns it)
 Mesh *prefab_pickup_mesh(int weapon_id, int no_texture, float *scale); // prefab.c: a weapon pickup's model (caller owns it)
+Mesh *prefab_weapon_mesh(const Weapon *weapon, int no_texture);   // prefab.c: a weapon's model, unposed (caller owns it)
+Mesh *prefab_asset_mesh(const char *model, const char *texture);   // prefab.c: models/<model>.obj + textures/<texture>.png (caller owns it)
+unsigned int prefab_asset_texture(const char *src);               // prefab.c: textures/<src>.png (cached; the missing-texture checker)
 
 // prefab.c canvas helpers (utils.js createCanvasText / ctxText on canvas2d.h), for the
 // leaderboard canvases: begin a width x height canvas, draw, end -> a cached RGBA texture.

@@ -135,6 +135,7 @@ static void next_wave(Game *game) {
     z->spawn_timer = 7500.0f;
     for (size_t i = 0; i < game->player_count; i++) { // the downed come back with half their score
         Player *p = game->players[i];
+        if (p) p->mode.rounds++; // endStats "rounds" (every player in the list, as zom.js)
         if (!p || p->active) continue;
         p->mode.lives = 1;
         mode_send_lives(game, p);
@@ -233,6 +234,7 @@ void mode_zombies_on_pre_end(Game *game) {
         Player *player = game->players[i];
         if (player) player->score = wave * 100;
     }
+    zombies_send_end_stats(game); // endStats zombies / rounds (map-logic WP-H client side)
 }
 
 // zom.js onAIDeath: the Ammo Cache on the last kill of every 5th wave; for a player's kill a

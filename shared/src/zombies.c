@@ -637,6 +637,23 @@ void zombies_send_state(Game *game, const int uid) {
     airdrop_send_all(game, uid);
 }
 
+// zom.js endStats zombies / rounds: every player's aiKills and rounds, sent before the end table
+// (NET_PACKET_MODE_END's stats array is full, see NetZombieStatsPacket)
+void zombies_send_end_stats(Game *game) {
+    if (!game || !game_is_authority(game)) return;
+    NetZombieStatsPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    for (size_t i = 0; i < game->player_count && packet.count < NET_MODE_END_MAX; i++) {
+        const Player *p = game->players[i];
+        if (!p) continue;
+        NetZombieStatsEntry *e = &packet.entries[packet.count++];
+        e->uid = p->uid;
+        e->zombies = (int16_t) (p->mode.ai_kills > 32767 ? 32767 : p->mode.ai_kills);
+        e->rounds = (int16_t) (p->mode.rounds > 32767 ? 32767 : p->mode.rounds);
+    }
+    game_send(game, NET_TARGET_ALL, NET_PACKET_ZOMBIE_STATS, &packet, sizeof(packet));
+}
+
 // ------------------------------------------------------------------ client mirror
 
 #define ZREAD(type, var) \
@@ -690,6 +707,19 @@ int zombies_apply_packet(Game *game, Player *me, const int type, const void *pay
         case NET_PACKET_SHARING: {
             ZREAD(NetSharingPacket, packet);
             if (me) me->sharing_is_caring = !!packet.on;
+            return 1;
+        }
+        case NET_PACKET_ZOMBIE_STATS: { // the end table's zombies / rounds columns
+            ZREAD(NetZombieStatsPacket, packet);
+            if (game_is_authority(game)) return 1;
+            for (int i = 0; i < packet.count && i < NET_MODE_END_MAX; i++) {
+                for (size_t k = 0; k < game->player_count; k++) {
+                    Player *p = game->players[k];
+                    if (!p || p->uid != packet.entries[i].uid) continue;
+                    p->mode.ai_kills = packet.entries[i].zombies;
+                    p->mode.rounds = packet.entries[i].rounds;
+                }
+            }
             return 1;
         }
         case NET_PACKET_AIRDROP:

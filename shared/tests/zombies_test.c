@@ -200,6 +200,15 @@ static void test_waves(Game *game) {
 
     mode_on_game_end(game);
     CHECK(a->score == 500, "onPreEnd: score = wave x 100 (%d)", a->score);
+    // endStats zombies (aiKills) / rounds (one per zWave++ for everyone in the list)
+    CHECK(a->mode.rounds == 5 && b->mode.rounds == 5, "rounds: 5 waves (%d / %d)", a->mode.rounds, b->mode.rounds);
+    CHECK(a->mode.ai_kills >= 11 && b->mode.ai_kills == 0, "aiKills of the killer only (%d / %d)", a->mode.ai_kills, b->mode.ai_kills);
+    NetZombieStatsPacket stats;
+    memcpy(&stats, g_last[NET_PACKET_ZOMBIE_STATS], sizeof(stats));
+    int stats_a = -1;
+    for (int i = 0; i < stats.count; i++) stats_a = stats.entries[i].uid == a->uid ? i : stats_a;
+    CHECK(g_count[NET_PACKET_ZOMBIE_STATS] == 1 && stats.count == 2 && stats_a >= 0 && stats.entries[stats_a].zombies == a->mode.ai_kills &&
+          stats.entries[stats_a].rounds == 5, "onPreEnd sends the zombies / rounds end stats");
 }
 
 // ------------------------------------------------------------------ drops
