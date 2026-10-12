@@ -45,7 +45,11 @@ else
     gh release upload "$tag" "$@" --clobber
     gh release edit "$tag" --title "$title" --notes-file "$notes"
     if [ "$rolling" = 1 ]; then
-        gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$COMMIT" -F force=true > /dev/null
+        # GITHUB_TOKEN may not move a ref onto a commit whose .github/workflows differ ("Resource
+        # not accessible by integration"); the assets and the kn-build notes are already updated,
+        # so a tag left behind is only cosmetic.
+        gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$COMMIT" -F force=true > /dev/null \
+            || echo "::warning::could not move tag $tag to ${COMMIT:0:12} (workflow files changed); assets and notes are updated"
         # drop assets this build no longer produces (renamed / removed platforms)
         keep=" "
         for f in "$@"; do keep+="$(basename "$f") "; done
