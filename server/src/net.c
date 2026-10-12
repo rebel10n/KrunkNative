@@ -107,6 +107,13 @@ void net_broadcast_chat(const char *from, const char *msg) {
 }
 
 // Game hooks (GameHooks.send): player uid == ClientConnection.id.
+// WP-D: the v7 mode packets (NET_PACKET_BLOCK_MODES, 140-149) only go to peers that announced
+// NET_PROTOCOL_MINOR_V7 in their HELLO.
+static int net_peer_takes(const ClientConnection *client, const int type) {
+    if (!game_ai_packet_for_peer(type, client->peer_minor)) return 0; // v3.1.1 vs v7 AI packets (shared/src/ai.c)
+    return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
+}
+
 static void net_game_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
 
@@ -117,7 +124,7 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
             const ClientConnection *client = &g_server->clients[i];
             if (uid == NET_TARGET_NON_PLAYERS && client->player) continue;
             if (skip >= 0 && client->id == skip) continue;
-            if (!game_ai_packet_for_peer(type, client->peer_minor)) continue; // v3.1.1 vs v7 AI packets (shared/src/ai.c)
+            if (!net_peer_takes(client, type)) continue;
             net_send_packet(client->fd, (NetPacketType) type, payload, length);
         }
         return;
@@ -125,7 +132,7 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
 
     ClientConnection *client = net_client_by_id(uid);
     if (client && type == NET_PACKET_END && length == sizeof(NetEndPacket)) accounts_on_end_packet(uid, payload); // didWin for the commit
-    if (client && game_ai_packet_for_peer(type, client->peer_minor)) net_send_packet(client->fd, (NetPacketType) type, payload, length);
+    if (client && net_peer_takes(client, type)) net_send_packet(client->fd, (NetPacketType) type, payload, length);
 }
 
 static void net_change_map_internal(int map_index, int mode_index, int respawn_joined);

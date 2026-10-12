@@ -818,9 +818,8 @@ int ranked_init(Brain *b) {
     R.b = b;
     R.enabled = kn_config_bool(cfg, "brain.ranked.enabled", 1);
     R.min_level = (int) kn_config_int(cfg, "brain.ranked.min_level", 15);          /* config.minRankedLevel */
-    /* the Ranked mode id from the shared mode table: 14 in the v3.1.1 table, MODE_V7_RANKED (38)
-     * once map-logic WP-D re-indexes GameModeId to v7.1.4 (shared/include/modes_v7.h), where
-     * 13 / 14 are Classic FFA / Deposit (doc/v7/decisions.md "Ranked") */
+    /* the Ranked mode id from the shared mode table: MODE_ID_RANKED, 38 on the v7.1.4 table where
+     * 13 / 14 are Classic FFA / Deposit (v3.1.1 had Ranked on 14; doc/v7/decisions.md "Ranked") */
     R.mode = (int) kn_config_int(cfg, "brain.ranked.mode", MODE_ID_RANKED);
     const cJSON *maps = kn_config_get(cfg, "brain.ranked.maps");
     R.maps = cJSON_IsArray(maps) ? maps : NULL;

@@ -223,7 +223,7 @@ static void run_map(Game *game, const char *name, const cJSON *json) {
         if (server) check_rule(game, label, 2, 1);
 
         // useCompSpawns (waitTimers[0].comp, e.g. warmup) in a team mode: your team's comp
-        // spawn, spread up to 30 units by getPointSpread(.., 40)
+        // spawn, spread up to 30 units by getPointSpread(.., 40) (v7 rounds x / z: + sqrt(0.5))
         start(game, json, MODE_ID_TDM, server);
         GameMode *mode = game->mode;
         mode->wait_timers[0] = (ModeWaitTimer) {.time = 10.0f, .msg = "warmup ends ", .comp = 1};
@@ -237,7 +237,7 @@ static void run_map(Game *game, const char *name, const cJSON *json) {
             player_spawn(player);
             if (!comp) continue;
             const float dx = player->position.x - comp->position.x, dz = player->position.z - comp->position.z;
-            CHECK(sqrtf(dx * dx + dz * dz) <= 30.0f + 1e-3f && fabsf(player->position.y - comp->position.y) < 1e-3f,
+            CHECK(sqrtf(dx * dx + dz * dz) <= 30.0f + 0.7072f && fabsf(player->position.y - comp->position.y) < 1e-3f,
                   "%s %s comp: team %d spawned %.1f from its comp spawn", name, side, team, sqrtf(dx * dx + dz * dz));
         }
     }

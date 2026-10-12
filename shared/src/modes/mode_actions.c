@@ -1,7 +1,8 @@
-// Game actions the modes trigger (Krunker.Unpacked-v3.1.1/106.js updateTeam, lockPlayer,
-// lockMove, nextObjective, nextWeapon, increaseWeapon / decreaseWeapon and the players.js
+// Game actions the modes trigger (Krunker v7.1.4 game.js updateTeam, lockPlayer, lockMove,
+// nextObjective / randObjective, nextWeapon, increaseWeapon / decreaseWeapon and the player.js
 // updateLoadout they end in).
 #include "mode_internal.h"
+#include <triggers_v7.h>
 #include <pcg_basic.h>
 #include <string.h>
 #include <math.h>
@@ -75,33 +76,68 @@ void mode_push_wait_timer(Game *game, const ModeWaitTimer *timer, const int repl
     if (mode->wait_timer_count < MODE_MAX_WAIT_TIMERS) mode->wait_timers[mode->wait_timer_count++] = *timer;
 }
 
-// nextObjective(overflow, initial): the next hardpoint, "obj", and with more than one
-// objective a 60 s "next objective " timer that keeps the round clock running.
-void mode_next_objective(Game *game, const float overflow, const int initial) {
+float mode_cfg_objective_time(const Game *game) {
+#ifdef GAME_CONFIG_V7 // WP-E: config.objtvTime (minutes, 0.1..10)
+    if (game->config.objective_time > 0.0f) return game->config.objective_time;
+#else
+    (void) game;
+#endif
+    return 1.0f; // (config.objtvTime || 1)
+}
+
+// game.js getNextObjective(forceUid): the objective with uid forceUid (or activeObjective + 1),
+// else uid 0.
+static int mode_next_objective_uid(const Game *game, const int force_uid) {
+    const int want = force_uid >= 0 ? force_uid : game->mode->active_objective + 1;
+    for (int i = 0; i < game->mode->objective_count; i++) {
+        if (game->mode->objectives[i].uid == want) return want;
+    }
+    return 0;
+}
+
+// nextObjective(time, push, forceUid): the next (or forced) objective for objtvTime minutes,
+// "obj uid, ms, initial", and with more than one objective a rotation timer that keeps the
+// round clock running; onObjectiveSwitch fires.
+void mode_next_objective(Game *game, const float overflow, const int initial, const int push, const int force_uid) {
     GameMode *mode = game->mode;
 
-    mode->active_objective++;
-    if (mode->active_objective >= mode->objective_count) mode->active_objective = 0;
-    mode_send_objective(game, NET_OBJECTIVE_POINT, mode->objective_count ? mode->active_objective : -1);
+    mode->active_objective = mode_next_objective_uid(game, force_uid);
+    const float time = fmaxf(0.001f, mode_cfg_objective_time(game) * MODE_OBJECTIVE_ROTATE - overflow);
+    mode->objective_time = time;
+    for (int i = 0; i < mode->objective_count; i++) mode->objectives[i].on_zone = 0; // setObjective
+    mode_send_objective_v7(game, mode->active_objective, initial);
 
     if (mode->objective_count > 1) {
         const ModeWaitTimer timer = {
-            .time = MODE_OBJECTIVE_ROTATE - overflow,
+            .time = time,
             .msg = "next objective ",
-            .trigger = mode_trigger_next_objective,
+            .trigger = force_uid < 0 ? mode_trigger_next_objective : mode_trigger_rand_objective,
             .cont_time = 1,
         };
-        mode_push_wait_timer(game, &timer, !(initial && mode->wait_timer_count));
+        mode_push_wait_timer(game, &timer, !(push && mode->wait_timer_count));
     }
+
+    trigger_multi_event(game, 27, NULL); // multiObjectTrigger("onObjectiveSwitch")
 }
 
-// weapons.onlyWeapons: neither melee nor equipment.
+// randObjective(time, push): nextObjective with a random objective's uid (0 without objectives)
+void mode_rand_objective(Game *game, const float overflow, const int initial, const int push) {
+    const GameMode *mode = game->mode;
+    const int uid = mode->objective_count ? mode->objectives[mode_rand_int(0, mode->objective_count - 1)].uid : 0;
+    mode_next_objective(game, overflow, initial, push, uid);
+}
+
+// weapons.onlyGoodWeapons: neither melee, equipment nor customOnly, and not weapon 15.
 static int mode_random_weapon(const Game *game) {
     int ids[64];
     int count = 0;
     for (size_t i = 0; i < game->weapon_count && count < 64; i++) {
         const Weapon *weapon = game->weapons[i];
-        if (weapon && !weapon->melee && !weapon->equipment) ids[count++] = (int) i;
+        if (!weapon || weapon->melee || weapon->equipment || i == 15) continue;
+#ifdef PLAYER_EFFECTS_V7 // player-viewer WP-B weapons table: customOnly
+        if (weapon->custom_only) continue;
+#endif
+        ids[count++] = (int) i;
     }
     return count ? ids[mode_rand_int(0, count - 1)] : 0;
 }
@@ -170,10 +206,11 @@ void mode_decrease_weapon(Game *game, Player *player) {
     mode_send_loadout(game, player);
 }
 
-// The loadout a mode forces on (re)spawn, before the knife: Gun Game keeps the tier's
-// weapon (startingLoadout / keepLoadout), Sharp Shooter the objective weapon, the
-// Stalker its knife. Same on the server and on the clients (they mirror tier,
-// objective weapon and teams), so the predicted loadout matches.
+// The loadout a mode forces on (re)spawn, before the knife: Gun Game keeps the tier's weapon
+// (startingLoadout / keepLoadout), Sharp Shooter the objective weapon, the Stalker its knife,
+// and the v7 startingLoadout modes (aon, md, chs, imp, zom) their list (players.js:1566).
+// Same on the server and on the clients (they mirror tier, objective weapon and teams), so the
+// predicted loadout matches. Returns the weapon count written to `out` (NET_LOADOUT_MAX room).
 int mode_gun_loadout(const Game *game, const Player *player, int *out) {
     if (!game->mode) return 0;
     const GameModeConfig *config = &game->mode->config;
@@ -194,11 +231,18 @@ int mode_gun_loadout(const Game *game, const Player *player, int *out) {
         return 1;
     }
 
+    if (config->starting_loadout_size) {
+        const int count = config->starting_loadout_size < NET_LOADOUT_MAX ? config->starting_loadout_size : NET_LOADOUT_MAX;
+        for (int i = 0; i < count; i++) out[i] = config->starting_loadout[i];
+        return count;
+    }
+
     return 0;
 }
 
-// players.updateLoadout(game, index, true, ...weapons): the weapons plus the knife,
-// fresh ammo (weapon ammo, not ammoLimit) and no pending reloads.
+// player.updateLoadout(game, index, true, weapons): the weapons plus the knife (not with
+// noMelee), fresh ammo (ammoLimit when the mode sets one) and no pending reloads; canThrow is
+// !noKnives (player.js:376, 591-598).
 void mode_set_player_loadout(Player *player, const int *weapons, const int count, const int keep_index) {
     Game *game = player->game;
     const size_t weapon_count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
@@ -213,7 +257,7 @@ void mode_set_player_loadout(Player *player, const int *weapons, const int count
 
     int has_knife = 0;
     for (int i = 0; i < size; i++) has_knife |= loadout[i] == WEAPON_ID_KNIFE;
-    if (!has_knife && (size_t) WEAPON_ID_KNIFE < weapon_count) loadout[size++] = WEAPON_ID_KNIFE;
+    if (!has_knife && !mode_no_melee(game) && (size_t) WEAPON_ID_KNIFE < weapon_count) loadout[size++] = WEAPON_ID_KNIFE;
     if (!size) return;
 
     int *new_loadout = calloc((size_t) size, sizeof(int));
@@ -229,7 +273,7 @@ void mode_set_player_loadout(Player *player, const int *weapons, const int count
 
     for (int i = 0; i < size; i++) {
         new_loadout[i] = loadout[i];
-        new_ammo[i] = all[loadout[i]]->ammo;
+        new_ammo[i] = (unsigned int) mode_ammo_limit(game, (int) all[loadout[i]]->ammo);
     }
 
     game_player_changing(game, player, 0); // the offline client drops the meshes of the old loadout
@@ -240,7 +284,7 @@ void mode_set_player_loadout(Player *player, const int *weapons, const int count
     player->ammo = new_ammo;
     player->reloads = new_reloads;
     player->loadout_size = size;
-    player->can_throw = 1;
+    player->can_throw = !mode_no_knives(game);
     player->upgraded_slots = 0; // v7.1.4 updateLoadout without upgrades[]: no krumMachine slots (WP-B)
 
     const int index = keep_index && player->loadout_index < size ? player->loadout_index : 0;
@@ -255,9 +299,9 @@ static int mode_team_is(const Game *game, const Player *player, const char *opti
            !strcmp(config->team_options[player->team - 1], option);
 }
 
-// players.js jLrR6: Infected players get modeSpecific.infected.skin and hat 122; the
-// Stalker is black (modeSpecific.stalker skin/body) without hat, back, waist, face or
-// melee skin. Server side the result rides in SPAWN; clients apply it again on "tm".
+// players.js:699 modelOverrides[teamOptions[team - 1]]: Infected {headIndex 122, skinColor},
+// Stalker {noCosmetics, every colour 0}. Server side the result rides in SPAWN; clients apply it
+// again on "tm".
 int mode_apply_outfit(const Game *game, Player *player) {
     PlayerCosmetics outfit = player->cosmetics;
 

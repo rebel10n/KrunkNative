@@ -11,6 +11,7 @@
 #include <ui_logic.h>
 #include <stdio.h>
 #include <string.h>
+#include <spawnables.h>
 
 Player *client_find_player(Client*, int uid);                      // client/src/main.c
 void client_add_player_mesh(Client*, Player*, int render_you);      // client/src/main.c
@@ -31,6 +32,8 @@ void player_meshes_fini(Player*);
 typedef struct {
     int sid;
     int team;
+    int type;                    // WP-D: medals.js index (spawnables.h SpawnableType)
+    int data_c;                  // data.c (KR Tag count)
     vec3 position;
     unsigned char active:1;
 } HudModesTag;
@@ -49,6 +52,16 @@ typedef struct {
     NetModeEndPacket end;
     int end_valid;
     int end_applied;
+
+    // ---- WP-D: v7.1.4 mode state for the HUD (ui-v7 owns the DOM that shows it)
+    int team_scores_v7[MODE_TEAMS]; // teams 1..5 (sdm)
+    int rounds_left;                // "rds" roundCount, -1 none
+    int team_round_wins[MODE_TEAMS];
+    int lockout_ms;                 // "lkt"
+    int dog_tags;                   // "krt": the local player's KR Tags
+    char popup_title[NET_MODE_TEXT_SIZE]; // "tx" (Overtime)
+    char popup_text[NET_MODE_TEXT_SIZE];
+    int popup_seq;
 
     // what the DOM shows (rebuilt when these differ)
     char shown_scores[512];
@@ -185,6 +198,163 @@ static void hud_modes_apply_state(Client *client, const NetModeStatePacket *pack
     }
 }
 
+// ---- WP-D: the v7.1.4 mode packets (block 140-149) into the client's GameMode mirror
+static int hud_modes_spawnable_slot(const int sid) {
+    for (int i = 0; i < MODE_MAX_SPAWNABLES; i++) {
+        if (g_modes.tags[i].active && g_modes.tags[i].sid == sid) return i;
+    }
+    return -1;
+}
+
+static int hud_modes_handle_v7(Client *client, const int packet_type, const void *payload, const uint16_t length) {
+#define V7_READ(type, var) \
+    type var; \
+    if (length != sizeof(type)) return 1; \
+    memcpy(&var, payload, sizeof(var))
+
+    Game *game = &client->game;
+    GameMode *mode = game->mode;
+
+    switch (packet_type) {
+        case NET_PACKET_OBJECTIVE_V7: { // setObjective(uid, time)
+            V7_READ(NetObjectiveV7Packet, obj);
+            if (mode) {
+                mode->active_objective = obj.uid;
+                mode->objective_time = (float) obj.time_ms / 1000.0f;
+                for (int i = 0; i < mode->objective_count; i++) mode->objectives[i].on_zone = 0;
+            }
+            return 1;
+        }
+        case NET_PACKET_OBJECTIVE_OCCUPANCY: { // updateObjective(uid, onZone)
+            V7_READ(NetObjectiveOccupancyPacket, occupancy);
+            for (int i = 0; mode && i < mode->objective_count; i++) {
+                if (mode->objectives[i].uid == occupancy.uid) mode->objectives[i].on_zone = occupancy.on_zone;
+            }
+            return 1;
+        }
+        case NET_PACKET_DOM_UPDATE: { // updateDomZone(...) per zone
+            V7_READ(NetDomUpdatePacket, update);
+            for (int i = 0; mode && i < update.count && i < MODE_MAX_DOM_ZONES; i++) {
+                const NetDomZoneState *in = &update.zones[i];
+                if (in->uid < 0 || in->uid >= mode->dom_zone_count) continue;
+                ModeDomZone *zone = &mode->dom_zones[in->uid];
+                zone->captured_by = in->captured_by;
+                zone->capture_t = in->capture_t / 1000.0f;
+                zone->last_team_on = in->last_team_on;
+                zone->teams_on_count = in->teams_on_count < MODE_TEAMS ? in->teams_on_count : MODE_TEAMS;
+                for (int t = 0; t < zone->teams_on_count; t++) zone->teams_on[t] = in->teams_on[t];
+                zone->mlt = in->mlt > 0.0f ? in->mlt : 1.0f;
+            }
+            return 1;
+        }
+        case NET_PACKET_DOM_CAPTURE: {
+            V7_READ(NetDomCapturePacket, capture);
+            if (mode && capture.uid >= 0 && capture.uid < mode->dom_zone_count) {
+                mode->dom_zones[capture.uid].captured_by = capture.team;
+                mode->dom_zones[capture.uid].capture_t = 0.0f;
+            }
+            return 1;
+        }
+        case NET_PACKET_ROUNDS: { // io_updateRoundsDis: "Switching Sides" + the lead
+            V7_READ(NetRoundsPacket, rounds);
+            g_modes.rounds_left = rounds.rounds_left;
+            for (int t = 0; t < MODE_TEAMS; t++) g_modes.team_round_wins[t] = rounds.team_round_wins[t];
+            if (mode) {
+                mode->round_count = rounds.rounds_left;
+                mode->has_round_wins = rounds.has_round_wins;
+                for (int t = 0; t < MODE_TEAMS; t++) mode->team_round_wins[t] = rounds.team_round_wins[t];
+                mode->objective_time = 0.0f;
+                mode->flipped_spawns = !mode->flipped_spawns;
+            }
+            char lead[64];
+            if (rounds.win_team > 0) snprintf(lead, sizeof(lead), "%s is in the Lead!", mode_team_name(game, rounds.win_team));
+            else snprintf(lead, sizeof(lead), "Both Teams are Equal!");
+            snprintf(g_modes.popup_title, sizeof(g_modes.popup_title), "Switching Sides");
+            snprintf(g_modes.popup_text, sizeof(g_modes.popup_text), "%s", lead);
+            g_modes.popup_seq++;
+            hud_popups_medal_text("Switching Sides. Prepare for the next Round"); // modes.round.switch
+            return 1;
+        }
+        case NET_PACKET_LOCKOUT: {
+            V7_READ(NetLockoutPacket, lockout);
+            g_modes.lockout_ms = lockout.ms;
+            if (mode) mode->lockout_timer = (float) lockout.ms / 1000.0f;
+            return 1;
+        }
+        case NET_PACKET_TEXT_POPUP: { // io_textPopup(title, text)
+            V7_READ(NetTextPopupPacket, popup);
+            memcpy(g_modes.popup_title, popup.title, sizeof(g_modes.popup_title));
+            memcpy(g_modes.popup_text, popup.text, sizeof(g_modes.popup_text));
+            g_modes.popup_title[sizeof(g_modes.popup_title) - 1] = 0;
+            g_modes.popup_text[sizeof(g_modes.popup_text) - 1] = 0;
+            g_modes.popup_seq++;
+            char line[NET_MODE_TEXT_SIZE * 2 + 2];
+            snprintf(line, sizeof(line), "%s %s", g_modes.popup_title, g_modes.popup_text);
+            hud_popups_medal_text(line);
+            return 1;
+        }
+        case NET_PACKET_MODE_COUNTER: {
+            V7_READ(NetModeCounterPacket, counter);
+            Player *player = client_find_player(client, counter.uid);
+            if (counter.kind == NET_MODE_COUNTER_KR_TAGS) {
+                g_modes.dog_tags = (int) counter.value;
+                if (player) player->mode.dog_tags = (int) counter.value;
+            } else if (counter.kind == NET_MODE_COUNTER_CHARGE && player) { // "chrg": the kranked timer (game-overlay)
+                player->mode.is_kranked = counter.value > 0.0f;
+                player->mode.kranked_timer = counter.value / 1000.0f;
+            } else if (counter.kind == NET_MODE_COUNTER_HEAD && player) { // "bh": updateHeadSize
+                player->mode.head_mlt = counter.value;
+            }
+            return 1;
+        }
+        case NET_PACKET_SPAWNABLE_V7: { // createSpawnable / disposeSpawnable
+            V7_READ(NetSpawnableV7Packet, spawnable);
+            int slot = hud_modes_spawnable_slot(spawnable.sid);
+            if (!spawnable.active) {
+                if (slot >= 0) g_modes.tags[slot].active = 0;
+                return 1;
+            }
+            for (int i = 0; slot < 0 && i < MODE_MAX_SPAWNABLES; i++) {
+                if (!g_modes.tags[i].active) slot = i;
+            }
+            if (slot >= 0) {
+                g_modes.tags[slot] = (HudModesTag) {
+                    .sid = spawnable.sid, .team = spawnable.team, .type = spawnable.type, .data_c = spawnable.data_c, .active = 1,
+                    .position = {spawnable.position[0], spawnable.position[1], spawnable.position[2]},
+                };
+            }
+            return 1;
+        }
+        case NET_PACKET_MODE_SYNC_V7: { // init teamScores 1..5, roundC, lockT, obj
+            V7_READ(NetModeSyncV7Packet, sync);
+            for (int t = 1; t < MODE_TEAMS; t++) {
+                g_modes.team_scores_v7[t] = sync.team_scores[t];
+                g_modes.team_round_wins[t] = sync.team_round_wins[t];
+                if (t <= 2) g_modes.team_scores[t - 1] = sync.team_scores[t];
+            }
+            g_modes.rounds_left = sync.rounds_left;
+            g_modes.lockout_ms = sync.lockout_ms;
+            if (mode) {
+                for (int t = 1; t < MODE_TEAMS; t++) {
+                    mode->team_scores[t] = sync.team_scores[t];
+                    mode->team_round_wins[t] = sync.team_round_wins[t];
+                }
+                mode->round_count = sync.rounds_left;
+                mode->has_round_wins = sync.has_round_wins;
+                mode->lockout_timer = (float) sync.lockout_ms / 1000.0f;
+                if (mode->config.objective) {
+                    mode->active_objective = sync.objective_uid;
+                    mode->objective_time = (float) sync.objective_ms / 1000.0f;
+                }
+            }
+            return 1;
+        }
+        default:
+            return 0;
+    }
+#undef V7_READ
+}
+
 int hud_modes_handle_packet(Client *client, const NetPacket *packet) {
     return hud_modes_handle_event(client, packet->type, packet->payload, packet->length);
 }
@@ -230,8 +400,9 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
         }
         case NET_PACKET_TEAM_SCORE: {
             MODES_READ(NetTeamScorePacket, score);
-            if (score.team >= 1 && score.team <= 2) {
-                g_modes.team_scores[score.team - 1] = score.score;
+            if (score.team >= 1 && score.team <= 2) g_modes.team_scores[score.team - 1] = score.score;
+            if (score.team >= 1 && score.team < MODE_TEAMS) { // v7: sdm teams 3..5 too
+                g_modes.team_scores_v7[score.team] = score.score;
                 if (game->mode) game->mode->team_scores[score.team] = score.score;
             }
             return 1;
@@ -315,7 +486,7 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
             return 1;
         }
         default:
-            return 0;
+            return hud_modes_handle_v7(client, packet_type, payload, length);
     }
 #undef MODES_READ
 }
@@ -326,6 +497,7 @@ void hud_modes_reset(Client *client) {
     memset(&g_modes, 0, sizeof(g_modes));
     g_modes.mode_id = -1;
     g_modes.lives = -1;
+    g_modes.rounds_left = -1;
     g_modes.shown_blocker = -1;
     g_modes.chat_seq = chat_seq;
     snprintf(g_modes.flag_info[0], NET_MODE_TEXT_SIZE, "AT BASE");
@@ -503,6 +675,9 @@ static void hud_modes_end_value(const Player *player, const NetModeEndEntry *ent
     else if (!strcmp(stat, "melees")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_MELEES] : 0);
     else if (!strcmp(stat, "setbacks")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_SETBACKS] : 0);
     else if (!strcmp(stat, "infected") || !strcmp(stat, "found")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_CONVS] : 0);
+    else if (!strcmp(stat, "obj")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_OBJECTIVE] : 0);   // v7 endForm.obj: objectiveScore
+    else if (!strcmp(stat, "deposits")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_DEPOSITS] : 0); // v7 Deposit (WP-D)
+    else if (!strcmp(stat, "pickups")) snprintf(out, size, "%d", s ? s[NET_MODE_STAT_PICKUPS] : 0);   // v7 Mag Dump (WP-D)
     else if (!strcmp(stat, "time")) {                                     // endForm.time: timer || "DNF"
         const int tenths = s ? s[NET_MODE_STAT_TIME] - 1 : -1;            // UTILS.getTime(lastTimer, showMS): Race / Raid
         if (tenths < 0) snprintf(out, size, "DNF");
@@ -617,11 +792,12 @@ int hud_modes_flag(const int index, vec3 *position, int *team, int *carrier_uid)
     return 1;
 }
 
+// v7: activeObjective is the objective's uid
 int hud_modes_active_objective(const Client *client, vec3 *center, vec3 *half) {
     const GameMode *mode = client->game.mode;
     if (!mode || !mode->config.objective) return 0;
-    if (mode->active_objective < 0 || mode->active_objective >= mode->objective_count) return 0;
-    const ModeObjective *objective = &mode->objectives[mode->active_objective];
+    const ModeObjective *objective = mode_objective_by_uid(&client->game, mode->active_objective);
+    if (!objective) return 0;
     if (center) *center = objective->position;
     if (half) *half = objective->half;
     return 1;
@@ -632,4 +808,27 @@ int hud_modes_spawnable(const int index, vec3 *position, int *team) {
     if (position) *position = g_modes.tags[index].position;
     if (team) *team = g_modes.tags[index].team;
     return 1;
+}
+
+int hud_modes_spawnable_type(const int index, int *data_c) {
+    if (index < 0 || index >= MODE_MAX_SPAWNABLES || !g_modes.tags[index].active) return -1;
+    if (data_c) *data_c = g_modes.tags[index].data_c;
+    return g_modes.tags[index].type;
+}
+
+const HudModesV7 *hud_modes_v7(void) {
+    static HudModesV7 state;
+    for (int t = 0; t < MODE_TEAMS; t++) {
+        state.team_scores[t] = g_modes.team_scores_v7[t];
+        state.team_round_wins[t] = g_modes.team_round_wins[t];
+    }
+    state.team_scores[1] = g_modes.team_scores[0];
+    state.team_scores[2] = g_modes.team_scores[1];
+    state.rounds_left = g_modes.rounds_left;
+    state.lockout_ms = g_modes.lockout_ms;
+    state.dog_tags = g_modes.dog_tags;
+    state.popup_title = g_modes.popup_title;
+    state.popup_text = g_modes.popup_text;
+    state.popup_seq = g_modes.popup_seq;
+    return &state;
 }

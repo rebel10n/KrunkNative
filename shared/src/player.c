@@ -581,15 +581,22 @@ typedef struct {
 } MovementModeKeys;
 
 static MovementModeKeys movement_mode(const Player *player) {
-    // TODO (WP-D): read the mode keys through modes.h's accessors when they land:
-    //   .gravity_mlt = mode_grav_mlt(game), .jump_mlt = mode_jump_mlt(game),
-    //   .ground_accel = mode_ground_accel(game), .free_slide = mode_fr_slid(game),
-    //   .no_sliding = mode_no_sliding(game), .no_wall_jump = mode_no_wall_jump(game), and
-    //   mode_wall_jump(game, &wall_jump, &wall_jump_max, &.wall_jump_decel, &.wall_jump_vel,
-    //   &.wall_jump_y_vel) setting .wall_jump_set / .wall_jump / .wall_jump_max.
-    // No mode KrunkNative ships today sets any of them.
-    (void) player;
-    const MovementModeKeys keys = {.gravity_mlt = 1.0f, .jump_mlt = 1.0f, .ground_accel = 1.0f, .wall_jump_y_vel = 1.0f};
+    const Game *game = player->game;
+    MovementModeKeys keys = {
+        .gravity_mlt = mode_grav_mlt(game),
+        .jump_mlt = mode_jump_mlt(game),
+        .ground_accel = mode_ground_accel(game),
+        .wall_jump_y_vel = 1.0f,
+        .free_slide = mode_fr_slid(game),
+        .no_sliding = mode_no_sliding(game),
+        .no_wall_jump = mode_no_wall_jump(game),
+    };
+    float wall_jump = 0.0f, wall_jump_max = 0.0f; // modes.h WP-D accessors (chs / imp / clas / zom)
+    if (mode_wall_jump(game, &wall_jump, &wall_jump_max, &keys.wall_jump_decel, &keys.wall_jump_vel, &keys.wall_jump_y_vel)) {
+        keys.wall_jump_set = 1;
+        keys.wall_jump = (int) wall_jump;
+        keys.wall_jump_max = (int) wall_jump_max;
+    }
     return keys;
 }
 
@@ -1597,7 +1604,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // speedBoost (admin) is not in KrunkNative yet
         accel *= player_attr_speed(player);
         accel *= player_attr_rooted(player);
-        // TODO (WP-D): Kranked bonuses.speed, mode_speed_mlt(game, player)
+        accel *= mode_speed_mlt(player->game, player); // Kranked bonuses.speed (player.js:1236, WP-D)
         accel *= player_has_perk(player, PERK_SPEED) ? 1.15f : 1.0f;
 
         // movement.js[0].mov (defaultMovement): diagonal movDirs get config.strafeSpd unless realMov
@@ -2358,9 +2365,11 @@ void player_score(Player *player, int amount, const int is_kill) {
     Game *game = player->game;
     if (!game_is_authority(game) || !amount) return;
 
+    amount = mode_score_scale(game, player, amount, is_kill); // v7 killMlt / oneflag carrier multipliers (WP-D)
     player->score += mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
-    if (player->score > GAME_SCORE_CAP) {
-        player->score = GAME_SCORE_CAP;
+    const int cap = mode_score_cap(game); // v7 noScrLimit: no cap (WP-D)
+    if (cap && player->score > cap) {
+        player->score = cap;
         amount = 0;
     }
 
@@ -2543,7 +2552,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     game_send(game, NET_TARGET_ALL, NET_PACKET_KILL, &packet, sizeof(packet));
     game->leaders_dirty = 1;
 
-    mode_on_kill(game, player, killer, weapon_index); // lives, mode.onKill (flags, Gun Game, tags, ...)
+    mode_on_kill(game, player, killer, kill_info && kill_info->weapon_id < 0 ? -1 : weapon_index); // lives, mode.onKill; -1: a weaponless (streak) kill (WP-D: gun.js info.stk)
     // v7.1.4 Siphon: the killer heals attributes.siphon
     if (killer && killer != player && killer->active && killer->attributes.siphon > 0.0f) player_change_health(killer, NULL, -killer->attributes.siphon, 0);
     if (streak_message && killer) { // IO.broadcast("kst", Q.sid, X): killStreakMessage on every client

@@ -2377,6 +2377,8 @@ typedef enum {
     NET_MODE_STAT_LIVES,
     NET_MODE_STAT_ASSISTS,
     NET_MODE_STAT_TIME,         // endForm.time: player.timer in tenths of a second + 1, 0 = "DNF"
+    NET_MODE_STAT_DEPOSITS,     // WP-D v7.1.4 endStats "deposits" (Deposit / Deposit FFA)
+    NET_MODE_STAT_PICKUPS,      // WP-D v7.1.4 endStats "pickups" (Mag Dump)
     NET_MODE_STAT_COUNT
 } NetModeStat;
 
@@ -2473,6 +2475,101 @@ typedef struct {
     int32_t ammo[NET_LOADOUT_MAX]; // the slots' ammo after the upgrade
 } NetUpgradesPacket;
 // ---- end WP-B combat packets ----
+
+// ---- WP-D: Krunker v7.1.4 mode packets (doc/v7/map-logic.md §4.1, §5.3 block 140-149; built in
+// shared/src/modes/mode_net.c). The server sends them only to connections whose HELLO announced
+// NET_PROTOCOL_MINOR_V7 (server/src/net.c); the offline sandbox client always gets them.
+#define NET_PACKET_OBJECTIVE_V7 (NET_PACKET_BLOCK_MODES + 0)        // S->C: NetObjectiveV7Packet ("obj uid, objtvTime, initial")
+#define NET_PACKET_OBJECTIVE_OCCUPANCY (NET_PACKET_BLOCK_MODES + 1) // S->C: NetObjectiveOccupancyPacket ("uobj uid, onZone")
+#define NET_PACKET_DOM_UPDATE (NET_PACKET_BLOCK_MODES + 2)          // S->C: NetDomUpdatePacket ("uct", sync.doms)
+#define NET_PACKET_DOM_CAPTURE (NET_PACKET_BLOCK_MODES + 3)         // S->C: NetDomCapturePacket ("cct uid, team")
+#define NET_PACKET_ROUNDS (NET_PACKET_BLOCK_MODES + 4)              // S->C: NetRoundsPacket ("rds roundsLeft, false, winTeam, teamRoundWins")
+#define NET_PACKET_LOCKOUT (NET_PACKET_BLOCK_MODES + 5)             // S->C: NetLockoutPacket ("lkt")
+#define NET_PACKET_TEXT_POPUP (NET_PACKET_BLOCK_MODES + 6)          // S->C: NetTextPopupPacket ("tx": "Overtime", "+60 Seconds")
+#define NET_PACKET_MODE_COUNTER (NET_PACKET_BLOCK_MODES + 7)        // S->C: NetModeCounterPacket ("krt" / "chrg" / "bh")
+#define NET_PACKET_SPAWNABLE_V7 (NET_PACKET_BLOCK_MODES + 8)        // S->C: NetSpawnableV7Packet ("crsp type, sid, x, y, z, team, data" / "dsp sid")
+#define NET_PACKET_MODE_SYNC_V7 (NET_PACKET_BLOCK_MODES + 9)        // S->C: NetModeSyncV7Packet (init teamScores 1..5, roundC, lockT, obj)
+
+typedef struct {
+    int32_t uid;                // objective uid, -1 none
+    int32_t time_ms;            // objtvTime: ms until the next objective
+    uint8_t initial;            // time == null (gameStart / a new round)
+} NetObjectiveV7Packet;
+
+typedef struct {
+    int32_t uid;
+    int32_t on_zone;            // players on the hill
+} NetObjectiveOccupancyPacket;
+
+typedef struct {
+    int32_t uid;                // zone index (map->dom_zones order)
+    int32_t captured_by;        // team, 0 none
+    float capture_t;            // ms of capture progress
+    int32_t last_team_on;       // 0 none
+    uint8_t teams_on_count;
+    int8_t teams_on[MODE_TEAMS];
+    float mlt;                  // capture speed
+} NetDomZoneState;
+
+typedef struct {
+    uint8_t count;
+    NetDomZoneState zones[MODE_MAX_DOM_ZONES];
+} NetDomUpdatePacket;
+
+typedef struct {
+    int32_t uid;
+    int32_t team;
+} NetDomCapturePacket;
+
+typedef struct {
+    int32_t rounds_left;        // roundCount after this round
+    int32_t win_team;           // getWinTeam(): 0 none
+    uint8_t has_round_wins;     // teamRoundWins != null (best of)
+    int32_t team_round_wins[MODE_TEAMS];
+} NetRoundsPacket;
+
+typedef struct {
+    int32_t ms;                 // lockoutTimer, 0 = over
+} NetLockoutPacket;
+
+typedef struct {
+    char title[NET_MODE_TEXT_SIZE]; // "Overtime"
+    char text[NET_MODE_TEXT_SIZE];  // "+60 Seconds"
+} NetTextPopupPacket;
+
+typedef enum {
+    NET_MODE_COUNTER_KR_TAGS = 0, // "krt dogTags" to the carrier
+    NET_MODE_COUNTER_CHARGE = 1,  // "chrg sid, krankedTimer ms" (Kranked)
+    NET_MODE_COUNTER_HEAD = 2,    // "bh sid, headMlt" (Bighead FFA)
+} NetModeCounterKind;
+
+typedef struct {
+    uint8_t kind;               // NetModeCounterKind
+    int32_t uid;
+    float value;
+} NetModeCounterPacket;
+
+typedef struct {
+    int32_t sid;
+    uint8_t type;               // medals.js index (spawnables.h SpawnableType)
+    uint8_t active;             // 0: "dsp" dispose
+    int32_t team;
+    float position[3];          // centre (yOff included)
+    int32_t data_c;             // data.c (KR Tag count, ammo), 0 none
+    int32_t data_w;             // data.wId (Weapon Box), -1 none
+    float data_xd, data_zd;     // data.xD / zD rotation
+} NetSpawnableV7Packet;
+
+typedef struct {
+    int32_t team_scores[MODE_TEAMS]; // teamScores 1..5 (sdm)
+    int32_t rounds_left;        // roundC
+    uint8_t has_round_wins;
+    int32_t team_round_wins[MODE_TEAMS];
+    int32_t lockout_ms;         // lockT
+    int32_t objective_uid;      // obj[0], -1 none
+    int32_t objective_ms;       // obj[1]
+} NetModeSyncV7Packet;
+// ---- end WP-D
 #pragma pack(pop)
 
 typedef struct {

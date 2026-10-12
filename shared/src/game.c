@@ -394,7 +394,11 @@ void game_end_round(Game *game) {
 
     Player *sorted[GAME_LEADERBOARD_MAX];
     ModeWinner winner;
-    const size_t count = game_end_order(game, sorted, &winner);
+    size_t count = game_end_order(game, sorted, &winner);
+    if (game->mode) { // v7 mode.onPreEnd / onEnd (Zombies wave score, Raid times), then the end order again (WP-D)
+        mode_on_game_end(game);
+        count = game_end_order(game, sorted, &winner);
+    }
 
     // endGame(): player.reward for every player (hooks.reward: accounts live in the server)
     for (size_t i = 0; i < game->player_count; i++) {
@@ -529,7 +533,8 @@ static int game_tick_round(Game *game, const float delta) {
     // the mode's waitTimers and conditions (106.js update); HOLD stops the clock
     const int state = game->mode ? mode_tick_round(game, delta) : MODE_ROUND_RUN;
     if (state == MODE_ROUND_END) {
-        game_end_round(game);
+        if (game->mode && mode_end_game(game)) game->round_seconds_sent = -1; // v7 rounds / overtime go on (WP-D)
+        else game_end_round(game);
         return 0;
     }
     if (state == MODE_ROUND_HOLD) return 0;
@@ -550,7 +555,8 @@ static int game_tick_round(Game *game, const float delta) {
     game->round_timer -= delta;
 
     if (game->round_timer <= 0.0f) {
-        game_end_round(game);
+        if (game->mode && mode_end_game(game)) game->round_seconds_sent = -1; // v7 rounds / overtime go on (WP-D)
+        else game_end_round(game);
         return 0;
     }
 
@@ -689,6 +695,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
     game_tick_map_objects(game, delta * 1000.0f); // teleporter cooldowns; authority: onTimer triggers, destructible respawns
     if (authority && !game->end_timer) spawnables_update(game, delta); // #19 (WP-D)
     if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn
+    if (!authority && !game->end_timer && game->mode) mode_dom_client_tick(game, delta); // v7 dom captureT interpolation (WP-D)
     if (authority && !game->end_timer) zone_update(game, delta); // #24 (WP-B)
     world_tick(game, delta); // WP-B: ownTime clocks (players.tickPlayer), the client zone tween
     if (authority && game->leaders_dirty) game_sync_leaders(game, NET_TARGET_ALL);

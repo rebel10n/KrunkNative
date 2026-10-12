@@ -780,7 +780,7 @@ parties whose members are all ready, per region and queue (r4v4, r2v2, r1v1 =
 longest-waiting party anchors; parties within `rating_window + window_growth x
 wait` (max `window_max`) of its average rating fill team 0, then team 1. The match
 is hosted with `host` (config `{"ranked":true, "matchId", "queue", "teamSize",
-"maxPlayers", "mode": brain.ranked.mode (14), "modes", "maps"/"map" (random from
+"maxPlayers", "mode": brain.ranked.mode (38, MODE_ID_RANKED), "modes", "maps"/"map" (random from
 brain.ranked.maps, if set), "private":true, "startGraceS", "teams":[[{accountId,
 name}],[...]]}`); hosting failure puts the parties back (10 s back-off).
 
@@ -792,7 +792,7 @@ abandoners, and replies `{"type":"ranked-result-reply","rid","ok":true,"ratings"
 [{accountId,name,team,key,old,new,delta,abandoned?}]}`. Matches without a result
 are aborted after `match_timeout_s`.
 
-Config `brain.ranked.*`: `enabled`, `min_level` (15), `mode` (14), `maps`,
+Config `brain.ranked.*`: `enabled`, `min_level` (15), `mode` (38: KN Ranked on the v7.1.4 mode table), `maps`,
 `rating_window`, `window_growth`, `window_max`, `k`, `abandon_penalty`,
 `cooldown_s`, `poll_timeout_s`, `creating_timeout_s`, `match_timeout_s`,
 `start_grace_s`. Test: `ctest -R brain_ranked` (`tests/ranked_test.py`). The matcher's
