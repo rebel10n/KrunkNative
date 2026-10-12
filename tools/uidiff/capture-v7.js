@@ -135,6 +135,24 @@ function scenario(name, dir, run, opts = {}) { S[name] = Object.assign({ name, d
 scenario('menu-1280', 'menu', async (c) => { await menuBase(c); await settle(c); });
 scenario('menu-1920', 'menu', async (c) => { await menuBase(c); await settle(c); }, { size: [1920, 1080] });
 
+// The Lost Connection screen: io_error's UI steps (showWindow(0), CONTROLS.disable(),
+// UI.hideUI(), UI.hideDiscon(), then f2040: #menuHolder hidden, #instructionsUpdate with the
+// error and the instructionsTabs row) without its f2039(0) reload. The error text is
+// KrunkNative's connect error (menu_ui.c CONNECT_ERROR_DEFAULT).
+const DISCONNECT_SIZES = { '1280': [1280, 720], '1920': [1920, 1080], '1024': [1024, 768] };
+for (const [tag, size] of Object.entries(DISCONNECT_SIZES)) {
+  scenario('menu-disconnected-' + tag, 'menu', async (c) => {
+    await menuBase(c);
+    const ex = await exposeBundle(c, ['f2040', 'UI', 'CONTROLS']);
+    if (ex !== 1) console.error('[capture-v7] menu-disconnected: the bundle scope was not reached');
+    const r = await c.eval(`(() => { try { showWindow(0); __kn.CONTROLS.disable(); __kn.UI.hideUI(); __kn.UI.hideDiscon();
+      __kn.f2040('Could not connect to the game server', '000000'); return 1; } catch (e) { return String(e.stack); } })()`);
+    if (r !== 1) console.error('[capture-v7] menu-disconnected: ' + r);
+    await c.eval(flatPage(MENU_BG));
+    await settle(c, 900);
+  }, { size });
+}
+
 // windows: showWindow(id) [+ the window's own tab call]
 function win(name, id, extra) {
   scenario(name, 'windows', async (c) => {
@@ -198,7 +216,7 @@ async function exposeBundle(c, names) {
   await c.send('Debugger.pause');
   const p = await paused;
   const frame = p.callFrames.find((f) => /\/js\/index\.js/.test(f.url)) || p.callFrames[0];
-  const expr = `(window.__kn = {${names.map((n) => `${n}: typeof ${n} === 'function' ? ${n} : null`).join(', ')}}, 1)`;
+  const expr = `(window.__kn = {${names.map((n) => `${n}: typeof ${n} !== 'undefined' ? ${n} : null`).join(', ')}}, 1)`;
   const r = await c.send('Debugger.evaluateOnCallFrame', { callFrameId: frame.callFrameId, expression: expr, returnByValue: true });
   await c.send('Debugger.resume');
   await c.send('Debugger.disable');

@@ -52,6 +52,7 @@ static MenuUi g_ui;
 // Region name override (ui_scenario.c `state.region`); "" = MENU_REGION_NAME.
 static char g_region_label[64];
 static char g_connect_code[8]; // Krunker's error code on the connection error screen ("000000")
+static int g_error_screen;      // the Lost Connection screen shows (menu_apply_error_screen)
 
 // Krunker v7.1.4 idle kick (index.js gameLoop + config.kickTimer 120000): while the menu is
 // up (menuHolder shown), not spectating, on a production page, not the game host
@@ -531,6 +532,26 @@ void menu_scale_base(void) {
 // UI.toggleMenu(j) + UI.toggleMenuHider(j), inline styles included.
 static void menu_update_info_holder(void);
 
+// The menu chrome of toggleMenu(j) + toggleMenuHider(j); the Lost Connection screen keeps it
+// hidden (menu_apply_error_screen).
+static void menu_apply_chrome(void) {
+    const int on = g_ui.menu_open;
+    const int chrome = on && !g_error_screen;
+    // UI.toggleMenu(j)
+    set_display("menuHolder", chrome ? "block" : "none");
+    set_display("speakerDisplay", on || g_error_screen ? "none" : "block");
+    // UI.toggleMenuHider(j)
+    set_display("menuHider", chrome ? "block" : "none");
+    HtmlElem base = by_id("uiBase");
+    if (base) {
+        html_dom_set_class(base, "onMenu", chrome);
+        html_dom_set_class(base, "onDeathScrn", 0);
+        html_dom_set_class(base, "onSpect", spectate_active() && !on);
+    }
+    set_display("gameNameHolder", chrome ? "" : "none");
+    set_display("spectButton", chrome ? "" : "none");
+}
+
 void menu_apply_open(const int open) {
     if (!!open != g_ui.menu_open) menu_idle_reset(); // showMenu() / entering the game
     g_ui.menu_open = !!open;
@@ -538,19 +559,8 @@ void menu_apply_open(const int open) {
     const int on = g_ui.menu_open;
 
     html_dom_set_class(html_dom_root(), "kn-menu-open", on);
-    // UI.toggleMenu(j)
-    set_display("menuHolder", on ? "block" : "none");
-    set_display("speakerDisplay", on ? "none" : "block");
-    // UI.toggleMenuHider(j)
-    set_display("menuHider", on ? "block" : "none");
+    menu_apply_chrome();
     HtmlElem base = by_id("uiBase");
-    if (base) {
-        html_dom_set_class(base, "onMenu", on);
-        html_dom_set_class(base, "onDeathScrn", 0);
-        html_dom_set_class(base, "onSpect", spectate_active() && !on);
-    }
-    set_display("gameNameHolder", on ? "" : "none");
-    set_display("spectButton", on ? "" : "none");
     if (on) {
         set_display("spinUI", "none");
         set_display("spinUIBtns", "none");
@@ -597,6 +607,25 @@ static int can_play(void) {
 // hidden and #instructionsUpdate = "Lost Connection", the error, the ID / region lines and the
 // instructionsTabs row (Find a Game / Servers / Settings / Changelog); KrunkNative adds one
 // tab that plays offline (knHostOffline).
+// The Lost Connection screen comes and goes: v7's io_error / io_disconnect run UI.hideUI()
+// (toggleMenu(false): #menuHolder, toggleMenuHider(false): #menuHider, .onMenu,
+// #gameNameHolder, the Spectate switch #spectButton) and UI.hideDiscon() (#chatHolder,
+// #speakerDisplay, #purchaseHolder), then f2040 shows #instructionHolder with the error box
+// and hides #menuHolder again, so the box stands alone over the scene. KrunkNative leaves the
+// screen without a reload (Find a Game / Reconnect show CONNECTING..., a reconnect clears it),
+// so leaving it puts the menu chrome back. Intentional difference: v7's showWindow() runs
+// toggleMenu(true), which brings the whole menu (Spectate switch included) back over the error
+// box when Servers / Settings / Changelog open; KrunkNative keeps the chrome hidden while the
+// error box shows (the windows sit outside #menuHolder).
+static void menu_apply_error_screen(const int on) {
+    if (on == g_error_screen) return;
+    g_error_screen = on;
+    if (on) set_display("purchaseHolder", "none");
+    set_display("chatHolder", on ? "none" : "");
+    menu_apply_chrome();
+    menu_schedule_rect(); // the class preview goes with #menuHolder
+}
+
 #define MENU_LOAD_SPINNER "<div style='width:100%;text-align:center;transform:scale(1.3);'><div class='lds-ring'><div></div><div></div><div></div><div></div></div></div>"
 void menu_update_instructions(void) {
     HtmlElem el = by_id("instructions");
@@ -639,8 +668,12 @@ void menu_update_instructions(void) {
         sb_append(&eb, " | Code: 0 | Reason: 0</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>Region: ");
         sb_append_esc(&eb, g_region_label[0] ? g_region_label : MENU_REGION_NAME);
         sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them</div>");
-        // Find a Game: seek a new game (or retry a pinned server: console connect / Direct Connect)
-        sb_appendf(&eb, "<div class=\"instructionsTabs\">\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knRetry()\">%s</div>"
+        // Find a Game: seek a new game (or retry a pinned server: console connect / Direct Connect).
+        // v7's row is table-layout: fixed, four equal cells of the box's 610px; KrunkNative's fifth
+        // tab (Play Offline) leaves 112px of text per cell, less than "Find a Game" / "Play
+        // Offline" take at 16px, so they wrapped onto two lines. The row sizes its cells by their
+        // text instead (auto layout, no wrapping); the five labels fit the box with room to spare.
+        sb_appendf(&eb, "<div class=\"instructionsTabs\" style=\"table-layout:auto;white-space:nowrap\">\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knRetry()\">%s</div>"
                         "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knHostOffline()\">Play Offline</div>"
                         "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(2)\">Servers</div>"
                         "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(1)\">Settings</div>"
@@ -663,6 +696,7 @@ void menu_update_instructions(void) {
     }
     free(html);
     free(update);
+    menu_apply_error_screen(error);
     set_style("instructionHolder", "pointer-events", "all");
 }
 

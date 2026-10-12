@@ -231,6 +231,7 @@ static void warn_unknown_keys(void) {
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "ranked",  // the Ranked window's state: {rating: /mm/queue/rating, party: a poll response, tab}
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
+        "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -640,6 +641,8 @@ static void apply_net_state(void) {
     MenuUi *ui = menu_ui();
     if (st_has("connected")) ui->connected = st_bool("connected", ui->connected);
     if (st_has("ready")) ui->ready = st_bool("ready", ui->ready);
+    const char *error = st_str("connectError");
+    if (error) snprintf(ui->connect_error, sizeof(ui->connect_error), "%s", error);
     menu_update_top_bar();
     menu_update_instructions();
 }

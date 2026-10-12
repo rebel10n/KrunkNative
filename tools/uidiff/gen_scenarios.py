@@ -148,6 +148,44 @@ add("menu-1920", {"ref": REF + "/menu/menu-1920.png", "size": [1920, 1080], "bac
                   "state": dict(scen["menu-1280"]["state"]), "frames": 3, "note": "Same as menu-1280 at 1920x1080."},
     regs)
 
+# The Lost Connection screen (capture-v7.js: io_error's UI steps + f2040): #menuHolder and the
+# chat hidden, only the #instructionsUpdate error box and #termsInfo over the background. The
+# box's tab row is not compared: KrunkNative adds a fifth tab (Play Offline) and sizes the cells
+# by their text (menu_ui.c). Its "Region:" line is not either (v7 prints "0" with no region).
+# Where the menu chrome was (logo, menu items, the bottom buttons, the class box, the chat) the
+# reference is the flat background; the Spectate switch's place lies inside the box.
+DISCONNECT_ERROR = "Could not connect to the game server"
+for tag, (w, h) in (("1280", (1280, 720)), ("1920", (1920, 1080)), ("1024", (1024, 768))):
+    rc = rects("menu/menu-disconnected-" + tag)
+    menu_rc = rects("menu/menu-" + tag)
+    x, y, bw, bh = rc["instructionsUpdate"]
+    regs = [R("error-head", pad([x, y, bw, int(bh * 0.585)], 2, w, h), "text",
+              "#instructionsUpdate: Lost Connection header, the error, the ID / Code / Reason line (the 30 / 28 px "
+              "lines sit up to 1 px off Chromium's: 3.6% at 1280x720; 29% with the menu chrome over the box)", max_pct=5.0),
+            R("error-extensions", [x, y + int(bh * 0.69), bw, int(bh * 0.08)], "text",
+              "#instructionsUpdate: If you have any extensions, disable them"),
+            R("error-tabs", [x, y + int(bh * 0.81), bw, bh - int(bh * 0.81)], "text",
+              "the instructionsTabs row: KrunkNative's five tabs (Play Offline) vs v7's four", skip=True),
+            R("no-spectate", pad(menu_rc["spectButton"], 2, w, h), "text",
+              "the menu's Spectate switch place: inside the error box, no switch (hideUI: toggleMenuHider(false)); "
+              "a small rect on the 28 px error line, whose 1 px offset alone is up to 13%; the switch is 58-65%",
+              max_pct=20.0)]
+    for name, key in (("no-logo", "mainLogo"), ("no-menu-items", "menuItemContainer"), ("no-bottom-buttons", "subLogoButtons"),
+                      ("no-customize", "customizeButton"), ("no-chat", "chatHolder"), ("no-top-left", "tlInfHold")):
+        regs.append(R(name, pad(menu_rc[key], 2, w, h), "flat", "#%s's place: #menuHolder / #chatHolder hidden" % key))
+    if "termsInfo" in rc:
+        tx, ty, tw, th = rc["termsInfo"]
+        part = int(round(tw * 150 / 320))
+        regs.append(R("terms", pad([tx + tw - part, ty, part, th], 2, w, h), "text",
+                      "#termsInfo right part: | Terms | Changelog (KN has no Experiments link)"))
+    add("menu-disconnected-" + tag, {"ref": "%s/menu/menu-disconnected-%s.png" % (REF, tag), "size": [w, h],
+                                     "background": MENU_BG,
+                                     "state": dict(scen["menu-1280"]["state"], connected=False, ready=False,
+                                                   connectError=DISCONNECT_ERROR), "frames": 3,
+                                     "note": "The Lost Connection screen at %dx%d (connect error): the error box alone, "
+                                             "no menu chrome and no Spectate switch; Find a Game / Play Offline on one line." % (w, h)},
+        regs)
+
 # --------------------------------------------------------------------------- windows
 # name, window, extra state, note
 WINDOWS = [

@@ -7,6 +7,8 @@ renders the scenarios of `tools/uidiff/scenarios/` with the native client and di
 these images. The v3.1.1 references stay in `doc/ref/krunker-v3.1.1/`.
 
 - `menu/`: the loaded menu of a returning guest (`menu-1280`, `menu-1920`).
+- `menu/menu-disconnected-{1280,1920,1024}`: the Lost Connection screen (io_error's UI steps and
+  `f2040` from the bundle scope: the error box alone, `#menuHolder` and the chat hidden).
 - `windows/`: menu windows (`win-*`): Game Settings tabs (advanced view, plus `win-settings-basic`),
   Servers, Change Loadout (Loadout and Class tabs), Mod Manager, Account, Change Controls, Host
   Custom Game, Select Spray, Custom Games, Store, Join, Client, Ranked, Select Attachment / Reticle,
