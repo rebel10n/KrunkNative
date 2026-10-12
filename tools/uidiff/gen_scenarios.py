@@ -264,6 +264,51 @@ for name, win, extra, note in WINDOWS:
     add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [1280, 720], "background": MENU_BG,
                "state": dict(scen["menu-1280"]["state"], **st), "frames": 3, "note": note}, regs)
 
+# ------------------------------------------------------------------- prize wheel
+# The store's Starter wheel (state.spin: prizeWheel(0) with noAnim, the wheel at its full size;
+# the reference calls v7's prizeWheel(0, null, false, false, true)). #spinWindow is a 1240px
+# canvas in #uiBase's scale; the wheel drawn on it has radius width / 2 * 0.5 (v7.1.4), so the
+# region is the disc's bounding square, not the canvas. The four preview icons are random picks.
+# win-spin-item*: signed in (season_fixture.json), the spin's reply (state.spinResult: roll 40,
+# skin 15 "Digital AK") and the reveal: the name card and buttons are compared; v7 renders the item
+# in 3D (three.js), KrunkNative shows its preview image in the same box (skipped).
+def text_column(rect, share=0.42):
+    x, y, w, h = rect
+    return [x + w * (1 - share) / 2, y, w * share, h]
+
+
+SPIN_SIZES = (("", (1280, 720)), ("-1920", (1920, 1080)), ("-1024", (1024, 768)), ("-portrait", (720, 1280)))
+for tag, (sw, sh) in SPIN_SIZES:
+    name = "win-spin" + tag
+    rc = rects("windows/" + name)
+    x, y, w, h = rc["spinWindow"]
+    r = w / 4.0
+    cx, cy = x + w / 2.0, y + h / 2.0
+    disc = pad([cx - r, cy - r, 2 * r, 2 * r], 4, sw, sh)
+    regs = [R("wheel", disc, "image",
+              "the disc (#2b2b2b rim, slices at 0.95 R, pointer, centre disc) + #spinButton SPIN -50KR", fuzz=12, max_pct=3.0),
+            R("spin-info", pad(rc["spinInfo"], 2, sw, sh), "text", "#spinInfo: STARTER and the rarity odds (v7 lists 0% rows)"),
+            R("spin-items", pad(rc["spinItems"], 2, sw, sh), "image", "#spinItems: four random previews + More", skip=True)]
+    if "spinHistoryBtn" in rc:
+        regs.append(R("spin-history", pad(rc["spinHistoryBtn"], 2, sw, sh), "text",
+                      "#spinHistoryBtn: KrunkNative has no spin history (no button)", skip=True))
+    add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [sw, sh], "background": MENU_BG,
+               "state": dict(scen["menu-1280"]["state"], window=None, spin=0), "frames": 3,
+               "note": "Store prize wheel (Starter), %dx%d" % (sw, sh)}, regs)
+
+    name = "win-spin-item" + tag
+    rc = rects("windows/" + name)
+    regs = [R("item", disc, "scene", "the won item over the wheel: v7's three.js model vs KrunkNative's preview image", skip=True),
+            # the card's text column only: the item (3D in v7, an image here) shows through the card's sides
+            R("item-name", pad(text_column(rc["spinItemName"]), 2, sw, sh), "text", "#spinItemName text: Digital AK / Assault Rifle / NEW"
+              + ("; at 720 px the subtitle is a 7px font whose glyphs land 1px apart" if sw < 1000 else ""),
+              max_pct=6.5 if sw < 1000 else None),
+            R("item-buttons", pad(rc["spinUIBtns"], 2, sw, sh), "text", "#spinUIBtns: respin 50 KR, ?, Equip Item")]
+    add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [sw, sh], "background": MENU_BG,
+               "state": dict(scen["menu-1280"]["state"], window=None, spin=0, spinResult={"rand": 40, "item": 15},
+                             name="Player", account=season_account("free")), "frames": 3,
+               "note": "Store prize wheel (Starter): the won item's reveal, %dx%d" % (sw, sh)}, regs)
+
 # ------------------------------------------------------------------------ in-game
 # In-game references are v7's sandbox (Free for All on Kanji, local player "Local User") with the
 # 3D canvas hidden over flat black, so the render compares over the same flat black. The

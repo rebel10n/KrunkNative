@@ -82,6 +82,8 @@ char *store_window_gen(void);               // windows[13].gen(): the v7.1.4 Sto
 int  store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void store_ui_frame(const cJSON *frame);    // "spin" replies
 void store_ui_tick(void);                   // per frame: spin screen geometry + reveal
+void store_ui_scenario_wheel(int index);    // --render-scenario state.spin: prizeWheel(index) with noAnim
+void store_ui_scenario_result(double rand_num, int item); // state.spinResult: the spin's reply, the spin skipped
 
 // ---- servers_ui.c (ClientManager + windows[1])
 void servers_ui_init(Client*, int brain_mode); // brain_mode: matchmake at startup instead of the default server

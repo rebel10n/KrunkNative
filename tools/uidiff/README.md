@@ -188,6 +188,8 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `endscreen` | `{place, text, nextRound}` | end screen (`#endUI`), HUD hidden |
 | `hit` | `{elapsed_ms, kill}` | hit marker `elapsed_ms` after the hit |
 | `ranked` | `{rating, party, clientId, tab, cooldownMs}` | the Ranked window (27) without a brain (with `account`): `rating` = a `/mm/queue/rating` answer, `party` = a `/mm/queue/poll` answer, `clientId` = our member, `tab` 0 Play / 1 Season (`ranked_ui_scenario`) |
+| `spin`, `spinResult` | int, `{rand, item}` | the store's prize wheel screen without a brain: `prizeWheel(spin)` with noAnim (the wheel at its full size), then optionally the spin's reply (roll `rand`, skin `item`) with the spin itself skipped: the won item's reveal (`store_ui_scenario_wheel` / `_result`; the reveal needs `account`) |
+| `matchVotes` | array of `{mode, map, name, votes}` | the end screen's vote cards (a `MATCH_VOTE_STATE` packet through `lobby_events_handle`), with `endscreen` |
 
 ### Regions JSON
 
@@ -239,6 +241,11 @@ has no Select Class window), `win-mods`, `win-profile-login`, `win-keybinds`, `w
 scenarios compare the dimmed login button, menu items and logo, the window's top 82 px (tabs,
 search) and its body. Bodies whose content comes from a server (Servers rows, the Custom Games list)
 are skipped.
+
+Prize wheel (`state.spin`): `win-spin` (1280x720), `win-spin-1920`, `win-spin-1024` (1024x768),
+`win-spin-portrait` (720x1280) compare the wheel's disc and the odds box (`#spinInfo`); the
+`win-spin-item*` variants are the won item's reveal (signed in, Digital AK), comparing its name card
+and buttons (v7 draws the item in 3D: skipped).
 
 In-game (v7's sandbox, Free for All on Kanji, local player `Local User`): `ingame-plain`,
 `ingame-scoped`, `ingame-reloading`, `ingame-scoreboard`, `ingame-chat-open`, `ingame-killfeed`,

@@ -73,7 +73,10 @@ const RECT_IDS = ['windowHeader', 'menuWindow', 'windowHolder', 'signedOutHeader
   'loadMessage', 'genericPop', 'popupHolder', 'editrDB', 'steamDB', 'iosDB', 'androidDB',
   // player-viewer WP-E part 2a: spectating and the minimap
   'spectateHUD', 'specNames', 'specTimer', 'specGameInfo', 'specTeam0', 'specTeam1', 'specControlHolder', 'miniMapOverlay',
-  'topLeftMain'];
+  'topLeftMain',
+  // the prize wheel screen (win-spin*)
+  'spinWindow', 'spinInfo', 'spinItems', 'spinButton', 'spinKR', 'spinHistoryBtn', 'spinItem', 'spinItemCanvas',
+  'spinItemName', 'spinUIBtns'];
 const RECTS = `(() => { const o = {}; for (const id of ${JSON.stringify(RECT_IDS)}) { const e = document.getElementById(id);
   if (!e) continue; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
   const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
@@ -192,6 +195,39 @@ win('win-host', 8);
 win('win-spray', 9);
 win('win-games', 10);
 win('win-shop', 14);
+// the store's Starter prize wheel as a guest (no KR box): prizeWheel(index, skin, multi, autoSpin,
+// noAnim) with noAnim, so the wheel is at its full size at once (spinWhlMlt = 1); the four
+// preview icons are random picks (seeded here, rand() in KrunkNative)
+// win-spin-item*: the won item's reveal, signed in (season_fixture.json's account, as the
+// win-battlepass captures) so the spin can land: v7's own io_spinResponse(null, randNum 40,
+// skin 15 "Digital AK" (Uncommon), funds) after the wheel opened, then the ~7 s spin, the reveal
+// and the item's fly-in (the 3D item keeps bobbing: sin(t) * 0.55 units).
+const SPIN_SIZES = [['', [1280, 720]], ['-1920', [1920, 1080]], ['-1024', [1024, 768]], ['-portrait', [720, 1280]]];
+for (const [tag, size] of SPIN_SIZES) {
+  scenario('win-spin' + tag, 'windows', async (c) => {
+    await menuBase(c);
+    await c.eval('(() => { closWind(); prizeWheel(0, null, false, false, true); return 1; })()');
+    await settle(c, 1200);
+  }, { size });
+  scenario('win-spin-item' + tag, 'windows', async (c) => {
+    const acc = seasonAccount('free');
+    await menuBase(c);
+    const tuple = new Array(49).fill(null);
+    Object.assign(tuple, { 0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: acc.funds || 0, 6: acc.score || 0, 7: null, 8: 0, 9: 0, 10: [], 11: 0,
+      12: 0, 13: 0, 14: 0, 15: acc.stats || {}, 16: 0, 21: 0, 23: acc.name, 44: [], 45: [], 47: 0 });
+    const ex = await exposeBundle(c, ['io_accountResponse', 'io_spinResponse']);
+    if (ex !== 1) console.error('[capture-v7] win-spin-item: the bundle scope was not reached');
+    const r = await c.eval(`(() => { try { closWind();
+      __kn.io_accountResponse(null, 1, ${JSON.stringify(acc.name)}, ${JSON.stringify(tuple)}, null);
+      prizeWheel(0, null, false, false, true); __kn.io_spinResponse(null, 40, 15, ${(acc.funds || 0) - 50}, null);
+      return 1; } catch (e) { return String(e.stack); } })()`);
+    if (r !== 1) console.error('[capture-v7] win-spin-item: ' + r);
+    // the pointer approaches its target by a fixed share per frame (~430 frames): poll for the reveal
+    for (let i = 0; i < 120 && await c.eval('spinItem.style.display') !== 'block'; i++) await sleep(1000);
+    await sleep(3000); // the fly-in
+    await settle(c, 600);
+  }, { size });
+}
 win('win-join', 24);
 win('win-download', 25);
 win('win-ranked', 27);

@@ -27,7 +27,7 @@ static struct {
     unsigned program, vao, vbo;
     int failed;
     int u_mode, u_center, u_radius, u_slice_rotation, u_slice_count, u_slice_from, u_slice_to, u_slice_rgb;
-    int u_pointer_rotation, u_pointer_scale, u_pointer_hover, u_shadow_sigma;
+    int u_pointer_rotation, u_pointer_scale, u_shadow_sigma;
     Confetto confetti[CONFETTI_MAX];
     int confetti_count;
     double confetti_time; // glfwGetTime of the last confetti step
@@ -61,7 +61,6 @@ static int ensure_program(void) {
     g_sw.u_slice_rgb = glGetUniformLocation(p, "slice_rgb");
     g_sw.u_pointer_rotation = glGetUniformLocation(p, "pointer_rotation");
     g_sw.u_pointer_scale = glGetUniformLocation(p, "pointer_scale");
-    g_sw.u_pointer_hover = glGetUniformLocation(p, "pointer_hover");
     g_sw.u_shadow_sigma = glGetUniformLocation(p, "shadow_sigma");
 
     glGenVertexArrays(1, &g_sw.vao);
@@ -161,7 +160,6 @@ void spin_wheel_render(Client *client) {
     glUniform3fv(g_sw.u_slice_rgb, SPIN_WHEEL_MAX_SLICES, &d->slice_rgb[0][0]);
     glUniform1f(g_sw.u_pointer_rotation, d->pointer_rotation);
     glUniform1f(g_sw.u_pointer_scale, d->pointer_scale);
-    glUniform1f(g_sw.u_pointer_hover, d->pointer_hover);
     glUniform1f(g_sw.u_shadow_sigma, SHADOW_SIGMA);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (6 * VERTEX_FLOATS * sizeof(float)), v, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -250,6 +248,11 @@ void spin_wheel_render_confetti(Client *client) {
     size_t n = 0;
     for (int i = 0; i < g_sw.confetti_count; i++) {
         const Confetto *c = &g_sw.confetti[i];
+        // canvas-confetti draws a piece only after its first update (updateFetti steps, then
+        // draws): before it, wobbleX/wobbleY are 0 and its quad reaches the page's top-left
+        // corner. A fast frame right after confetti() (no 1/60 s tick yet: NVIDIA, not
+        // llvmpipe) drew every piece that way, as a huge white/rarity-coloured fan.
+        if (c->tick == 0) continue;
         // the frame drawn is the state after the step, progress = tick / totalTicks (pre-increment)
         const float rgba[4] = {c->rgb[0], c->rgb[1], c->rgb[2], 1.0f - (float) (c->tick - 1) / (float) c->total_ticks};
         const float x1 = c->x + c->random * c->tilt_cos, y1 = c->y + c->random * c->tilt_sin;
@@ -274,6 +277,7 @@ void spin_wheel_render_confetti(Client *client) {
             for (int k = 0; k < 6; k++) put_vertex(v + n++ * VERTEX_FLOATS, m, qx[tri[k]], qy[tri[k]], 0, 0, rgba);
         }
     }
+    if (!n) return;
     pass_begin(client);
     glUniform1i(g_sw.u_mode, 1);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (n * VERTEX_FLOATS * sizeof(float)), v, GL_STREAM_DRAW);

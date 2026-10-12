@@ -815,6 +815,7 @@ static void twofa_res(const cJSON *frame) {
 }
 
 void account_ui_tick(Client *client) {
+    store_ui_tick(); // the wheel screen; also without a brain (a --render-scenario's state.spin)
     if (!backend_enabled()) return;
     // a match ended (Krunker "end": canClaimReward) -> dc
     static int reward_end = -1;
@@ -826,7 +827,6 @@ void account_ui_tick(Client *client) {
     reward_end = end_now;
     reward_tick(0);
     if (g_auth_sent_at > 0 && glfwGetTime() - g_auth_sent_at > AUTH_TIMEOUT_SECONDS) auth_unreachable();
-    store_ui_tick();
     if (g_header_dirty) update_header();
     // A round ended: the game server reported the match to the brain. Refresh the
     // account (KR, score, level) with a token login a moment later, like v3.1.1's

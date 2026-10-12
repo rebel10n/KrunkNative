@@ -1,0 +1,49 @@
+{
+  "scenario": "win-spin-item-1024",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "item",
+      "rect": [
+        364,
+        245,
+        295,
+        295
+      ],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "the won item over the wheel: v7's three.js model vs KrunkNative's preview image"
+    },
+    {
+      "name": "item-name",
+      "rect": [
+        438,
+        438,
+        147,
+        81
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#spinItemName text: Digital AK / Assault Rifle / NEW"
+    },
+    {
+      "name": "item-buttons",
+      "rect": [
+        405,
+        671,
+        213,
+        33
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#spinUIBtns: respin 50 KR, ?, Equip Item"
+    }
+  ]
+}

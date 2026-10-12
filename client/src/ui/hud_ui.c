@@ -2856,7 +2856,11 @@ static void hud_end_results(const Client *client) {
         dom_display("endAHolderL", "none");
         dom_display("endAHolderR", "none");
     }
-    if (!lobby_vote_show()) dom_style("endMidHolder", "top", "205px"); // WP-E: f1915 endData.mts cards (lobby_events.c)
+    // WP-E: f1915 endData.mts cards (lobby_events.c), then f1916's
+    // `endMidHolder.style.top = mts.length <= 1 ? "205px" : "310px"`: the results start right below
+    // the vote cards (#matchVoteHolder, top 220px + 100px). Without a top, #endMidHolder hangs from
+    // its `bottom: 150px` and a short leaderboard leaves a wide gap under the votes.
+    dom_style("endMidHolder", "top", lobby_vote_show() ? "310px" : "205px");
     // f1916: the team totals of a team mode
     const GameMode *mode = client->game.mode;
     if (mode && mode->config.teams) {

@@ -1,10 +1,10 @@
 #version 450 core
-// v3.1.1's prize wheel canvas (index.js render loop), evaluated per fragment in canvas px:
-//   fill #fff arc(center, R)                                   outer disc
+// v7.1.4's prize wheel canvas (index.js updateSpinUi), evaluated per fragment in canvas px:
+//   fill #2b2b2b arc(center, R)                                outer disc
 //   rotate(sliceRotation); per rarity fill colour arc(0.95 R)  pie slices sized by the odds
 //   shadowColor black, shadowBlur 20 (kept for the rest of the frame):
-//   rotate(spinRotation); fill #F44336 triangle                the pointer
-//   fill #fff arc(center, 0.6 R)                               centre disc (under #spinButton)
+//   rotate(spinRotation); fill #F44336 triangle                the pointer (half width 0.7 x 0.6 R)
+//   fill #2b2b2b arc(center, 0.6 R)                            centre disc (under #spinButton)
 // Edges are 3x3 supersampled like the canvas's antialiasing; the shadows are analytic Gaussians
 // (shadowBlur 20 = sigma 10). Output is premultiplied (blend ONE, ONE_MINUS_SRC_ALPHA).
 // mode 1 draws the confetti triangles with their vertex colour instead.
@@ -22,10 +22,10 @@ uniform float slice_to[8];
 uniform vec3 slice_rgb[8];
 uniform float pointer_rotation;
 uniform float pointer_scale;
-uniform float pointer_hover;
 uniform float shadow_sigma;
 
 const float TAU = 6.28318530718;
+const vec3 DISC = vec3(0.168627, 0.168627, 0.168627); // #2b2b2b
 
 vec4 over(vec4 dst, vec3 rgb, float a) {
     return vec4(rgb * a + dst.rgb * (1.0 - a), a + dst.a * (1.0 - a));
@@ -67,7 +67,7 @@ vec4 wheel_sample(vec2 p) {
     vec2 d = p - center;
     float r = length(d);
     vec4 dst = vec4(0.0);
-    if (r < radius) dst = over(dst, vec3(1.0), 1.0);
+    if (r < radius) dst = over(dst, DISC, 1.0);
     if (r < radius * 0.95) {
         float angle = mod(atan(d.y, d.x) - slice_rotation, TAU);
         float covered;
@@ -78,9 +78,9 @@ vec4 wheel_sample(vec2 p) {
     float cs = cos(pointer_rotation), sn = sin(pointer_rotation);
     vec2 q = vec2(cs * d.x + sn * d.y, -sn * d.x + cs * d.y);
     float inner = radius * 0.6;
-    vec2 tip = vec2(0.0, (inner * -1.2 - pointer_hover) * pointer_scale);
-    vec2 right = vec2(inner * pointer_scale, 0.0);
-    vec2 left = vec2(-inner * pointer_scale, 0.0);
+    vec2 tip = vec2(0.0, inner * -1.2 * pointer_scale);
+    vec2 right = vec2(inner * 0.7 * pointer_scale, 0.0);
+    vec2 left = vec2(-inner * 0.7 * pointer_scale, 0.0);
     if (pointer_scale > 0.0) {
         float sd = triangle_sdf(q, tip, right, left);
         float shadow = gauss_cdf(-sd / shadow_sigma) * smoothstep(0.0, 0.15, pointer_scale);
@@ -88,7 +88,7 @@ vec4 wheel_sample(vec2 p) {
         if (sd < 0.0) dst = over(dst, vec3(0.956863, 0.262745, 0.211765), 1.0); // #F44336
     }
     dst = over(dst, vec3(0.0), gauss_cdf((inner - r) / shadow_sigma));
-    if (r < inner) dst = over(dst, vec3(1.0), 1.0);
+    if (r < inner) dst = over(dst, DISC, 1.0);
     return dst;
 }
 

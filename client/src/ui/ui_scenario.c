@@ -53,6 +53,7 @@
 #include <hud_map.h>  // state.customMap (the minimap of custom-map games)
 #include <backend_ui.h> // store_skin_preview: killcard player card banners
 #include <update_ui.h> // state.update: the Outdated box
+#include <lobby_ui.h> // state.matchVotes: the end screen's vote cards
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -232,6 +233,9 @@ static void warn_unknown_keys(void) {
         "ranked",  // the Ranked window's state: {rating: /mm/queue/rating, party: a poll response, tab}
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
+        "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
+        "spinResult", // {rand, item}: the wheel's spin reply (the won item's reveal)
+        "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -715,6 +719,22 @@ static void apply_killcard(Client *client) {
 static void apply_endscreen(Client *client) {
     const cJSON *end = st("endscreen");
     if (!cJSON_IsObject(end)) return;
+    const cJSON *votes = st("matchVotes");
+    if (cJSON_IsArray(votes)) { // what the server sends with endData.mts (lobby_events.c)
+        NetMatchVoteStatePacket packet;
+        memset(&packet, 0, sizeof(packet));
+        packet.voted = -1;
+        const cJSON *v;
+        cJSON_ArrayForEach(v, votes) {
+            if (packet.count >= NET_MATCH_PICKS) break;
+            NetMatchVoteEntry *e = &packet.entries[packet.count++];
+            e->mode_id = (int32_t) obj_num(v, "mode", 0);
+            e->map_index = (int32_t) obj_num(v, "map", 0);
+            e->votes = (uint16_t) obj_num(v, "votes", 0);
+            snprintf(e->map_name, sizeof(e->map_name), "%s", obj_str(v, "name") ? obj_str(v, "name") : "");
+        }
+        lobby_events_handle(client, NET_PACKET_MATCH_VOTE_STATE, &packet, (uint16_t) sizeof(packet));
+    }
     // FFA: first place wins. `text` ("#1 VICTORY") is the overlay-canvas title of the end
     // animation (aV.vicTitle), not page markup: the reference background carries it.
     const int place = (int) obj_num(end, "place", 1);
@@ -828,6 +848,15 @@ static int ui_scenario_apply(Client *client) {
     ranked_ui_scenario(st("ranked"));   // the Ranked window's rank card / party (ranked_ui.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);
+    if (menu_open && st_has("spin")) {
+        store_ui_scenario_wheel(st_int("spin", 0));
+        const cJSON *result = st("spinResult");
+        if (cJSON_IsObject(result)) {
+            run_frames(client, 2); // the wheel's geometry first (store_ui_tick)
+            store_ui_scenario_result(cJSON_GetNumberValue(cJSON_GetObjectItem(result, "rand")),
+                                     (int) cJSON_GetNumberValue(cJSON_GetObjectItem(result, "item")));
+        }
+    }
 
     run_frames(client, 2);
     apply_killcard(client);

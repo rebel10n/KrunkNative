@@ -1,0 +1,63 @@
+{
+  "scenario": "win-spin-1024",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "wheel",
+      "rect": [
+        364,
+        245,
+        295,
+        295
+      ],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the disc (#2b2b2b rim, slices at 0.95 R, pointer, centre disc) + #spinButton SPIN -50KR"
+    },
+    {
+      "name": "spin-info",
+      "rect": [
+        845,
+        10,
+        171,
+        178
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#spinInfo: STARTER and the rarity odds (v7 lists 0% rows)"
+    },
+    {
+      "name": "spin-items",
+      "rect": [
+        381,
+        12,
+        261,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "skip": true,
+      "note": "#spinItems: four random previews + More"
+    },
+    {
+      "name": "spin-history",
+      "rect": [
+        845,
+        187,
+        170,
+        30
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "#spinHistoryBtn: KrunkNative has no spin history (no button)"
+    }
+  ]
+}

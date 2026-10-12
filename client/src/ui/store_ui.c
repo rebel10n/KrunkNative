@@ -16,6 +16,7 @@
 #include <audio.h>
 #include <spin_wheel.h>
 #include "../viewer/viewer_store.h"
+#include <weapons.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,8 +162,9 @@ static void open_item_sales(const int skin) {
     if (!app_route_url_target(url, 1)) ui_open_external(url);
 }
 
-// prizeWheel(i, autoSpin): the spin screen
-static void prize_wheel(const int index, const int auto_spin) {
+// prizeWheel(i, skin, multi, autoSpin, noAnim): the spin screen; noAnim shows the wheel at its
+// full size at once (spinWhlMlt = 1: the respin, and the uidiff win-spin scenarios)
+static void prize_wheel(const int index, const int auto_spin, const int no_anim) {
     if (index < 0 || index >= WHEEL_COUNT) return;
     const StoreWheel *w = &k_wheels[index];
     if (w->open_url) ui_open_external("https://www.youtube.com/channel/UCivv7CI0mzjeBiz8E-z5YPw"); // config.followURLS
@@ -173,7 +175,7 @@ static void prize_wheel(const int index, const int auto_spin) {
     set_display("spinNextBtn", "none"); // no multi-spins (v7 `multi`) in KrunkNative's wheels
     g_spin_index = index;
     menu_show_window(MENU_WINDOW_NONE, 0); // showWindow(0)
-    g_wheel.whl_mlt = 0;
+    g_wheel.whl_mlt = no_anim ? 1 : 0;
     g_can_spin = !g_spinning;
     g_can_respin = 0;
     g_wheel.val = g_wheel.rotation = g_wheel.tick_counter = 0;
@@ -206,8 +208,8 @@ static void prize_wheel(const int index, const int auto_spin) {
     if ((el = html_dom_by_id("spinInfoBtn"))) html_dom_set_attr(el, "onclick", "knSpinRespinInfo()");
     if ((el = html_dom_by_id("spinEquipBtn"))) html_dom_set_attr(el, "onclick", "knSpinEquip()");
 
-    // #spinInfo: every rarity the wheel can roll with its chance (no store.rarities entry is
-    // noSpin in v3.1.1: Heroic lists Contraband 0.5%)
+    // #spinInfo: every rarity but the noSpin NFT one (the first 7) with its chance, 0% included
+    // (v7.1.4 skips those only on KR wheels). No Spin History button: KrunkNative keeps no history.
     StrBuf sb = {0};
     char upper[32];
     snprintf(upper, sizeof(upper), "%s", w->name);
@@ -215,8 +217,8 @@ static void prize_wheel(const int index, const int auto_spin) {
     sb_appendf(&sb, "<div style='font-size:50px;color:#fff'>%s</div>", upper);
     int last_rarity = 0;
     for (int r = 0; r < g_viewer_rarity_count && r < 7; r++) {
-        if (!wheel_rarity(w, r)) continue;
-        last_rarity = r;
+        if (wheel_rarity(w, r)) last_rarity = r;
+        else if (w->kr) continue;
         char pct[16];
         snprintf(pct, sizeof(pct), "%g", wheel_rarity(w, r)); // JS number -> string (48, 2.5, 0.5)
         sb_appendf(&sb, "<div style='margin-top:5px;color:#fff'><div class='colCub' style='background-color:%s'></div>%s<span style='color:rgba(255,255,255,0.5);float:right'>&emsp;%s%%</span></div>",
@@ -245,6 +247,16 @@ static void prize_wheel(const int index, const int auto_spin) {
     }
 }
 
+// UTILS.getItemDesc(item) without " Item": the type's market label, a weapon skin's weapon name
+static const char *item_desc(const ViewerSkin *skin) {
+    static const char *const k_types[17] = {NULL, "Hat", "Body", "Melee", "Spray", "Dye", "Waist", "Face", "Shoe", "Pet",
+                                            "Collectible", "Wrist", "Charm", "Spin Ticket", "Back", "Head", "Player Card"};
+    if (!skin) return "";
+    if (skin->type > 0 && skin->type < 17) return k_types[skin->type];
+    const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= WEAPON_COUNT ? g_weapons[skin->weapon - 1] : NULL;
+    return weapon && weapon->name ? weapon->name : "";
+}
+
 // spinResponse(error, randNum, itemID, funds, follow): the item is loaded now, the wheel
 // turns to randNum (the server's roll in [0, 100), which picked the rarity) and the render
 // loop reveals it once the pointer stops
@@ -261,7 +273,7 @@ static void spin_response(const cJSON *frame) {
         ui_alert(err ? err : "Spin Error 3");
         HtmlElem ui = html_dom_by_id("spinUI");
         char disp[16] = "";
-        if (g_spin_index >= 0 && ui && html_dom_get_style(ui, "display", disp, sizeof(disp)) >= 0 && !strcmp(disp, "block")) prize_wheel(g_spin_index, 0);
+        if (g_spin_index >= 0 && ui && html_dom_get_style(ui, "display", disp, sizeof(disp)) >= 0 && !strcmp(disp, "block")) prize_wheel(g_spin_index, 0, 0);
         return;
     }
     const double rand_num = cJSON_GetNumberValue(cJSON_GetArrayItem(frame, 2));
@@ -270,10 +282,11 @@ static void spin_response(const cJSON *frame) {
     const int owned = account_add_skin(item);
     spin_kr();
     const ViewerSkin *skin = viewer_skin(item);
+    // f1840: name, UTILS.getItemDesc(item).replace(" Item", "") and the owned count
     StrBuf sb = {0};
     sb_append_esc(&sb, skin ? skin->name : "?");
-    sb_append(&sb, "<div style='color:rgba(255,255,255,0.5)'>by ");
-    sb_append_esc(&sb, skin && skin->creator ? skin->creator : "Krunker.io");
+    sb_append(&sb, "<div style='color:rgba(255,255,255,0.5)'>");
+    sb_append_esc(&sb, item_desc(skin));
     sb_append(&sb, "</div><div style='color:rgba(255,255,255,0.5)'>");
     if (owned > 1) sb_appendf(&sb, "<span style='color:#fff'>x%d</span> Owned", owned);
     else sb_append(&sb, "<span style='color:#fff'>NEW</span>");
@@ -298,6 +311,12 @@ static void spin_response(const cJSON *frame) {
     html = sb_finish(&img);
     set_html("spinItemCanvas", html);
     free(html);
+    HtmlElem item_canvas = html_dom_by_id("spinItemCanvas"); // f1840: the rarity's glow around the item
+    if (item_canvas && skin && skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count) {
+        char filter[64];
+        snprintf(filter, sizeof(filter), "drop-shadow(0 0 20px %s)", g_viewer_rarities[skin->rarity].color);
+        html_dom_set_style(item_canvas, "filter", filter);
+    }
     printf("[store] unboxing %s (skin %d, roll %.2f, %d owned)\n", skin ? skin->name : "?", item, rand_num, owned);
 }
 
@@ -626,7 +645,7 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     if (r >= 0) return r;
     if (!backend_enabled() || !account_get()) return -1;
     if (!strcmp(name, "prizeWheel")) {
-        prize_wheel(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1, argc > 1 && args[1].kind == HTML_ARG_BOOL ? args[1].num != 0 : 0);
+        prize_wheel(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1, argc > 1 && args[1].kind == HTML_ARG_BOOL ? args[1].num != 0 : 0, 0);
         return 1;
     }
     if (!strcmp(name, "openSales")) { // openURL("/social.html?p=itemsales&i=" + i)
@@ -663,7 +682,7 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     }
     if (!strcmp(name, "knSpinRespin")) {
         g_spin_button_time = glfwGetTime();
-        if (g_can_respin) prize_wheel(g_spin_index, 1);
+        if (g_can_respin) prize_wheel(g_spin_index, 1, 1);
         return 0;
     }
     if (!strcmp(name, "knSpinEquip")) { // spinEquipBtn: select the won item in its slot
@@ -694,6 +713,28 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
 
 const SpinWheelDraw *store_ui_wheel_draw(void) { return &g_wheel_draw; }
 
+// --render-scenario state.spin: the wheel screen without the backend (prizeWheel(i, null,
+// false, false, true) in capture-v7.js)
+void store_ui_scenario_wheel(const int index) { prize_wheel(index, 0, 1); }
+
+// state.spinResult {rand, item}: the brain's spin reply, then the spin itself skipped (the
+// pointer at its target: the reveal runs on the next tick, the item already flown in)
+void store_ui_scenario_result(const double rand_num, const int item) {
+    const AccountInfo *acc = account_get();
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString("spin"));
+    cJSON_AddItemToArray(frame, cJSON_CreateNull());
+    cJSON_AddItemToArray(frame, cJSON_CreateNumber(rand_num));
+    cJSON_AddItemToArray(frame, cJSON_CreateNumber(item));
+    cJSON_AddItemToArray(frame, cJSON_CreateNumber(acc ? acc->funds - (current_wheel() ? current_wheel()->price : 0) : 0));
+    spin_response(frame);
+    cJSON_Delete(frame);
+    g_wheel.rotation = g_wheel.val;
+    spin_finished();
+    g_wheel.end_val = g_wheel.end_target * 0.999999; // the next tick ends the slice fill: button gone, item shown
+    g_wheel.cam_x = 30;
+}
+
 static void set_px(HtmlElem el, const char *prop, const double px) {
     if (!el) return;
     char v[32];
@@ -705,8 +746,15 @@ static void set_px(HtmlElem el, const char *prop, const double px) {
 // Krunker, so the wheel canvas inside #spinUI is drawn undimmed above it. Our wheel is drawn
 // under the whole page (spin_wheel.c), so while it shows the holder's background is swapped for
 // a circular hole over the wheel disc whose spread shadow dims everything else, the way
-// menu_ui.c keeps the class preview bright (#knPreviewHole).
+// menu_ui.c keeps the class preview bright (#knPreviewHole). The holder's own content
+// (#instructionHider: CLICK TO PLAY / the loading ring, centred under the disc) is hidden
+// meanwhile: Krunker's wheel canvas covers it, ours would show it through the disc.
 static int g_hole_on;
+
+static void set_hider_visibility(const char *v) {
+    HtmlElem hider = html_dom_by_id("instructionHider");
+    if (hider) html_dom_set_style(hider, "visibility", v);
+}
 
 static void spin_hole(const int on, const float cx, const float cy, const float r) {
     HtmlElem holder = html_dom_by_id("instructionHolder");
@@ -716,6 +764,7 @@ static void spin_hole(const int on, const float cx, const float cy, const float 
         if (!g_hole_on) return;
         g_hole_on = 0;
         if (hole) html_dom_set_display(hole, "none");
+        set_hider_visibility("");
         html_dom_set_style(holder, "background-color", "");
         html_dom_set_style(holder, "overflow", "");
         return;
@@ -730,6 +779,7 @@ static void spin_hole(const int on, const float cx, const float cy, const float 
         html_dom_set_style(hole, "box-shadow", "0 0 0 4000px rgba(0, 0, 0, 0.5)");
     }
     g_hole_on = 1;
+    set_hider_visibility("hidden");
     html_dom_set_style(holder, "background-color", "transparent");
     html_dom_set_style(holder, "overflow", "hidden");
     HtmlRect pr = {0};
@@ -763,9 +813,13 @@ void store_ui_tick(void) {
     const StoreWheel *wheel = current_wheel();
     HtmlElem canvas = html_dom_by_id("spinWindow");
     const float w = canvas ? html_dom_offset_width(canvas) : 0.0f;
-    HtmlElem item_canvas = html_dom_by_id("spinItemCanvas"); // spinItemCanvas = 2.1 x the wheel canvas
-    set_px(item_canvas, "width", w * 2.1);
-    set_px(item_canvas, "height", w * 2.1);
+    // v7.1.4 doubled #spinWindow (620px -> 1240px in main.css) and halved what is drawn on it:
+    // the item canvas is clientWidth * 2.1 / 2 and the wheel's radius width / 2 * 0.5 (v3.1.1:
+    // 2.1 x and 0.95, which on v7's canvas made everything twice v7's size)
+    const double item_w = w * 2.1 / 2;
+    HtmlElem item_canvas = html_dom_by_id("spinItemCanvas");
+    set_px(item_canvas, "width", item_w);
+    set_px(item_canvas, "height", item_w);
     if (!wheel || w <= 0) {
         g_wheel.step_time = now;
         return;
@@ -801,7 +855,7 @@ void store_ui_tick(void) {
     }
 
     const double opacity = 1 - (g_wheel.end_target ? g_wheel.end_val / g_wheel.end_target : 0); // spinButtonOpacity
-    const double radius = w / 2.0 * 0.95 * g_wheel.whl_mlt;
+    const double radius = w / 2.0 * 0.5 * g_wheel.whl_mlt; // spinWindow.width / 2 * 0.5 * spinWhlMlt
     const double hw = radius * 0.3 * (1 - opacity);
     HtmlElem button = html_dom_by_id("spinButton");
     if (button) {
@@ -863,10 +917,6 @@ void store_ui_tick(void) {
     }
     d->pointer_rotation = (float) g_wheel.rotation;
     d->pointer_scale = (float) opacity;
-    // (getBoundingClientRect().width / offsetWidth - 1): the :hover / :active scale
-    HtmlRect brect;
-    const float bw = button ? html_dom_offset_width(button) : 0.0f;
-    d->pointer_hover = button && bw > 0 && html_dom_get_rect(button, &brect) ? (float) ((brect.w / bw - 1) * (radius * 0.6) * 0.3) : 0.0f;
     d->visible = 1;
 
     // the won item and its name card
@@ -886,8 +936,8 @@ void store_ui_tick(void) {
             if (html_dom_tag(ch, tag, sizeof(tag)) > 0 && !strcmp(tag, "div")) set_px(ch, "font-size", radius / 12 * focus);
         }
         set_px(name, "padding", radius / 20 * focus);
-        set_px(name, "padding-left", radius / 2 * focus);
-        set_px(name, "padding-right", radius / 2 * focus);
+        set_px(name, "padding-left", radius / 1.4 * focus);
+        set_px(name, "padding-right", radius / 1.4 * focus);
     }
     for (int i = 0; i < steps && g_wheel.cam_x != 30; i++) {
         g_wheel.cam_x -= (g_wheel.cam_x - 30) * 0.24;
@@ -899,7 +949,7 @@ void store_ui_tick(void) {
     HtmlElem img = html_dom_by_id("knSpinItemImg");
     if (img) {
         const double scale = sqrt(30.0 * 30.0 + 100.0) / sqrt(g_wheel.cam_x * g_wheel.cam_x + 100.0);
-        const double bob = -sin(g_wheel.bob_time) * 0.55 * (w * 2.1) / 26.2;
+        const double bob = -sin(g_wheel.bob_time) * 0.55 * item_w / 26.2;
         char v[64];
         snprintf(v, sizeof(v), "translateY(%.2fpx) scale(%.4f)", bob, scale);
         html_dom_set_style(img, "transform", v);
