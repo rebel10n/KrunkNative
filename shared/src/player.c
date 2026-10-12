@@ -174,16 +174,16 @@ void player_spawn(Player *player) {
     player_update_height(player);
     player_swap_weapon(player, 0, 1, 0, 0);
 
-    if (player->game->map && player->game->map->spawn_count) {
-        const Spawn *spawn = player->game->map->spawns[pcg32_boundedrand(player->game->map->spawn_count)];
-
-        player->position = spawn->position;
+    // getSpawnPoint(player.team, player): every mode, offline and server, bots included.
+    vec3 spawn_position;
+    int spawn_direction;
+    if (game_get_spawn_point(player->game, player, &spawn_position, &spawn_direction)) {
+        player->position = spawn_position;
         player->direction.x = 0.0f;
-        player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn->direction);
+        player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn_direction);
     }
 
-    // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker) and,
-    // on the authority, the team spawn point (getSpawnPoint(team)).
+    // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker).
     mode_player_spawned(player->game, player);
 
     // A player that reached a check point respawns there (shared/src/triggers.c).

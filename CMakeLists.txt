@@ -364,6 +364,13 @@ else ()
         target_link_libraries(ai_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # spawn_test: v3.1.1 getSpawnPoint rules, distinct points for players spawning in one tick
+    add_executable(spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/spawn_test.c)
+    target_link_libraries(spawn_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(spawn_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # map_catalog_test: every v3.1.1 map (15 official + 21 community) loads, parses and plays
     add_executable(map_catalog_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_catalog_test.c)
     target_link_libraries(map_catalog_test PRIVATE m)

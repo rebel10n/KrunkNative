@@ -125,6 +125,18 @@ static int sim_init(Sim *sim, const char *map, const int class_index, const floa
     player_spawn(sim->c);
     sim->c->is_you = 1;
 
+    // A fixed start, independent of the spawn pick and its RNG use: the scripted walks stay
+    // on the map from these spawns (from others, e.g. Kanji's spawns[0] / [1], they walk off
+    // an edge and the server kills the player at deathY).
+    const int start = strstr(map, "kanji") ? 5 : strstr(map, "sandstorm") ? 4 : -1; // (-128 -144 -108), (241 33 -322)
+    const Map *spawn_map = sim->server.map;
+    if (spawn_map && start >= 0 && (size_t) start < spawn_map->spawn_count) {
+        const Spawn *spawn = spawn_map->spawns[start];
+        sim->s->position = sim->s->last_position = spawn->position;
+        sim->s->direction.x = 0.0f;
+        sim->s->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn->direction);
+    }
+
     // SPAWN: the client takes the server's spawn point
     sim->c->position = sim->c->last_position = sim->s->position;
     sim->c->direction = sim->s->direction;

@@ -193,18 +193,11 @@ void game_change_position(Game *game, Player *player, const vec3 feet, const int
     }
 }
 
-// getSpawnPoint(player.team, player): a random spawn, the mode's team spawn when teamed.
+// getSpawnPoint(player.team, player) (only the point: changePosition keeps the view).
 static vec3 spawn_point(Game *game, Player *player) {
-    const vec3 saved_position = player->position;
-    const vec2 saved_direction = player->direction;
     vec3 point = player->position;
-    if (game->map && game->map->spawn_count) {
-        player->position = game->map->spawns[pcg32_boundedrand((uint32_t) game->map->spawn_count)]->position;
-        mode_pick_spawn(game, player);
-        point = player->position;
-    }
-    player->position = saved_position;
-    player->direction = saved_direction;
+    int direction;
+    game_get_spawn_point(game, player, &point, &direction);
     return point;
 }
 

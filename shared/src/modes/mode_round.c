@@ -1,7 +1,9 @@
 // Round flow and player hooks of the modes (Krunker.Unpacked-v3.1.1/106.js finishInit,
 // update and endGame; 95.js players.setTeam / add / score / kill / Player.lives).
 #include "mode_internal.h"
+#include <ai.h>
 #include <pcg_basic.h>
+#include <limits.h>
 #include <math.h>
 #include <string.h>
 
@@ -300,59 +302,158 @@ void mode_player_left(Game *game, Player *player) {
     if (player->mode.flag) mode_drop_flag(game, player);
 }
 
-// Krunker getSpawnPoint(team): the spawns of your team (or teamless ones), furthest
-// from the enemies (and in CTF from the enemy flags). Line of sight is not checked.
-void mode_pick_spawn(Game *game, Player *player) {
+// ------------------------------------------------------------------ getSpawnPoint
+
+#define SPAWN_SPREAD_RADIUS 40.0f // getPointSpread(x, z, y, 40, dir): the comp spawn spread
+
+// game.js getPointSpread(x, z, y, 40, dir): a random direction, cut short by the first
+// object the 40-unit ray (1 above the feet) enters, then 10 units back from it. Objects
+// the ray starts inside do not count (line_in_rect only reports entries ahead).
+static vec3 spawn_point_spread(const Game *game, const Spawn *spawn) {
+    const float angle = (float) M_PI * (2.0f * (float) ldexp((double) pcg32_random(), -32) - 1.0f) + (float) M_PI;
+    const vec3 origin = {spawn->position.x, spawn->position.y + 1.0f, spawn->position.z};
+    const vec3 ray = {SPAWN_SPREAD_RADIUS * sinf(angle), 1.0f, SPAWN_SPREAD_RADIUS * cosf(angle)};
+    float reach = 1.0f;
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *object = game->map->objects[i];
+        if (!object->active || object->collision_type == COLLISION_TYPE_NONE) continue;
+        const float t = line_in_rect(origin, ray, object->position, object->scale);
+        if (t > 0.0f && t <= reach) reach = t;
+    }
+    const float distance = (SPAWN_SPREAD_RADIUS - 10.0f) * reach;
+    return (vec3) {spawn->position.x + distance * sinf(angle), spawn->position.y, spawn->position.z + distance * cosf(angle)};
+}
+
+// The players getSpawnPoint weighs a spawn against: active, not the spawning player, and
+// enemies only when teamed (`!team || player.team != team`).
+static int spawn_counts_player(const Player *player, const Player *other, const int team) {
+    return other && other->active && other != player && (!team || other->team != team);
+}
+
+// KrunkNative (not in v3.1.1): an active player of any team (bots included, and players
+// placed earlier in the same tick) stands on the spawn, i.e. the two bodies would overlap.
+// v3.1.1 never checks this, so teammates respawning together all got the same point.
+static int spawn_occupied(const Game *game, const Player *player, const Spawn *spawn) {
+    const float radius = 2.0f * game_constants.player_scale;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *other = game->players[i];
+        if (!other || !other->active || other == player) continue;
+        const float dx = other->position.x - spawn->position.x;
+        const float dz = other->position.z - spawn->position.z;
+        if (dx * dx + dz * dz < radius * radius && fabsf(other->position.y - spawn->position.y) < game_constants.player_height) return 1;
+    }
+    return 0;
+}
+
+// Candidate tiers: 0 = the spawns getSpawnPoint may return (no comp ones unless useCompSpawns;
+// your team's or teamless) that nobody stands on, 1 = the same occupied or not, 2 = any spawn
+// (v3.1.1's `X[0] || this.map.spawns[0]` fallback).
+static int spawn_candidate(const Game *game, const Player *player, const Spawn *spawn, const int team, const int use_comp, const int tier) {
+    if (tier >= 2) return 1;
+    if (spawn->comp && !use_comp) return 0;
+    if (spawn->team && spawn->team != team) return 0;
+    return tier == 1 || !spawn_occupied(game, player, spawn);
+}
+
+// Krunker v3.1.1 game.js getSpawnPoint(team, player, false, false) (the respawn in
+// packetHandlers.ts io_ent, gameserver.ts addPlayer, the Respawn triggers):
+// - useCompSpawns (waitTimers[0].comp: warmup, Defuse's "match starting in") in a team
+//   mode: your team's comp spawn, spread by getPointSpread(.., 40);
+// - otherwise the spawns seen by the fewest counted players (canSee to y + playerHeight),
+//   then of those the one with the largest summed distance to them (plus, in flag modes,
+//   to the flags not of your team). Counted players: active, not you, enemies when teamed.
+// KrunkNative differences: spawns someone already stands on are skipped while a free one
+// is left (spawn_occupied), the minimum sight count is taken over the candidates only (v3.1.1
+// takes it over every spawn and then falls back to the sorted spawns[0], which can be the
+// enemy base), ties are broken at random, a team without a comp spawn gets the regular pick,
+// and sight is only checked on the authority (clients take the server's SPAWN position).
+// canSee here also lets transparent objects block (game_ai_player_can_see).
+int game_get_spawn_point(Game *game, const Player *player, vec3 *position, int *direction) {
     const Map *map = game->map;
-    if (!map || !map->spawn_count || !player->team) return;
+    if (!map || !map->spawn_count) return 0;
 
-    const Spawn *best = NULL;
-    float best_distance = -1.0f;
-    int ties = 0;
+    const GameMode *mode = game->mode;
+    const int team = player ? player->team : 0;
+    const int use_comp = mode && mode->wait_timer_count && mode->wait_timers[0].comp;
 
-    for (size_t s = 0; s < map->spawn_count; s++) {
-        const Spawn *spawn = map->spawns[s];
-        if (spawn->comp || (spawn->team && spawn->team != player->team)) continue;
-
-        float distance = 0.0f;
-        for (size_t i = 0; i < game->player_count; i++) {
-            const Player *other = game->players[i];
-            if (!other || !other->active || other == player || other->team == player->team) continue;
-            const float dx = spawn->position.x - other->position.x;
-            const float dy = spawn->position.y - other->position.y;
-            const float dz = spawn->position.z - other->position.z;
-            distance += sqrtf(dx * dx + dy * dy + dz * dz);
-        }
-
-        if (game->mode->config.flags) {
-            for (int f = 0; f < game->mode->flag_count; f++) {
-                const ModeFlag *flag = &game->mode->flags[f];
-                if (flag->team == player->team) continue;
-                const float dx = spawn->position.x - flag->position.x;
-                const float dy = spawn->position.y - flag->position.y;
-                const float dz = spawn->position.z - flag->position.z;
-                distance += sqrtf(dx * dx + dy * dy + dz * dz);
-            }
-        }
-
-        if (distance > best_distance + 1e-3f) {
-            best = spawn;
-            best_distance = distance;
-            ties = 1;
-        } else if (fabsf(distance - best_distance) <= 1e-3f && pcg32_boundedrand((uint32_t) ++ties) == 0) {
-            best = spawn;
+    if (use_comp && mode->config.teams && team) {
+        for (size_t s = 0; s < map->spawn_count; s++) {
+            const Spawn *spawn = map->spawns[s];
+            if (!spawn->comp || spawn->team != team) continue;
+            *position = spawn_point_spread(game, spawn);
+            *direction = spawn->direction;
+            return 1;
         }
     }
 
-    if (!best) return;
+    const int check_sight = game_is_authority(game);
+    int *sight = calloc(map->spawn_count, sizeof(int));
+    const Spawn *best = NULL;
 
-    player->position = best->position;
-    player->direction.x = 0.0f;
-    player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) best->direction);
+    for (int tier = 0; tier < 3 && !best; tier++) {
+        int min_sight = INT_MAX;
+        for (size_t s = 0; s < map->spawn_count; s++) {
+            const Spawn *spawn = map->spawns[s];
+            if (!spawn_candidate(game, player, spawn, team, use_comp, tier)) continue;
+            int seen = 0;
+            if (check_sight) {
+                const vec3 target = {spawn->position.x, spawn->position.y + game_constants.player_height, spawn->position.z};
+                for (size_t i = 0; i < game->player_count; i++) {
+                    const Player *other = game->players[i];
+                    if (spawn_counts_player(player, other, team) && game_ai_player_can_see(game, other, target)) seen++;
+                }
+            }
+            if (sight) sight[s] = seen;
+            if (seen < min_sight) min_sight = seen;
+        }
+        if (min_sight == INT_MAX) continue; // no candidate in this tier
+
+        float best_distance = -1.0f;
+        int ties = 0;
+        for (size_t s = 0; s < map->spawn_count; s++) {
+            const Spawn *spawn = map->spawns[s];
+            if (!spawn_candidate(game, player, spawn, team, use_comp, tier) || (sight && sight[s] != min_sight)) continue;
+
+            float distance = 0.0f;
+            for (size_t i = 0; i < game->player_count; i++) {
+                const Player *other = game->players[i];
+                if (!spawn_counts_player(player, other, team)) continue;
+                const float dx = spawn->position.x - other->position.x;
+                const float dy = spawn->position.y - other->position.y;
+                const float dz = spawn->position.z - other->position.z;
+                distance += sqrtf(dx * dx + dy * dy + dz * dz);
+            }
+
+            if (mode && mode->config.flags) {
+                for (int f = 0; f < mode->flag_count; f++) {
+                    const ModeFlag *flag = &mode->flags[f];
+                    if (flag->team == team) continue;
+                    const float dx = spawn->position.x - flag->position.x;
+                    const float dy = spawn->position.y - flag->position.y;
+                    const float dz = spawn->position.z - flag->position.z;
+                    distance += sqrtf(dx * dx + dy * dy + dz * dz);
+                }
+            }
+
+            if (distance > best_distance + 1e-3f) {
+                best = spawn;
+                best_distance = distance;
+                ties = 1;
+            } else if (fabsf(distance - best_distance) <= 1e-3f && pcg32_boundedrand((uint32_t) ++ties) == 0) {
+                best = spawn;
+            }
+        }
+    }
+
+    free(sight);
+    if (!best) return 0;
+    *position = best->position;
+    *direction = best->direction;
+    return 1;
 }
 
-// After player_spawn built the class loadout: the mode's loadout (Gun Game tier,
-// Sharp Shooter weapon, Stalker knife) and, on the authority, a team spawn point.
+// After player_spawn built the class loadout (and picked the spawn point, game_get_spawn_point):
+// the mode's loadout (Gun Game tier, Sharp Shooter weapon, Stalker knife).
 void mode_player_spawned(Game *game, Player *player) {
     if (!game->mode) return;
 
@@ -364,7 +465,6 @@ void mode_player_spawned(Game *game, Player *player) {
     player->mode.flag = 0;
     player->mode.respawn_timer = 0.0f;
     mode_apply_outfit(game, player); // the SPAWN that follows carries the outfit
-    mode_pick_spawn(game, player);
 }
 
 void mode_on_kill(Game *game, Player *victim, Player *killer, const int weapon_id) {

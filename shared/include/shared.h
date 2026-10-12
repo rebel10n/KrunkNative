@@ -938,6 +938,9 @@ void game_tick(Game*, float, float);
 // client slows its world for the endAnim while the round/end clocks keep real time.
 void game_tick_world(Game*, float now, float delta, float world_delta);
 void game_players_add(Game*, Player*);
+// game.js getSpawnPoint(player.team, player): the point a (re)spawning player is placed at
+// (shared/src/modes/mode_round.c). 0: the map has no spawns.
+int game_get_spawn_point(Game*, const Player*, vec3 *position, int *direction);
 void game_broadcast();
 int game_is_authority(const Game*);      // server or local game: runs damage/kills/score
 // io_ent spawn rules: a ready round, not the end screen, not alive, config.deathDelay since

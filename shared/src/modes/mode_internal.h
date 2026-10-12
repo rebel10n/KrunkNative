@@ -71,7 +71,6 @@ void mode_trigger_skip(Game*, float);
 
 // ---- game actions (mode_actions.c)
 void mode_update_team(Game*, Player*, int team);         // updateTeam ("tm")
-void mode_pick_spawn(Game*, Player*);                    // getSpawnPoint(team): sets position + direction (team players only)
 void mode_set_role_health(Game*, Player*, int health);   // aK3 = health, health = aK3, regen off ("h")
 void mode_lock_player(Game*, Player*, int locked);       // lockPlayer ("lock")
 void mode_lock_move(Game*);                              // lockMove ("lm")
