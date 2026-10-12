@@ -2,6 +2,9 @@
 #include <cosmetics.h>
 #include <gltf.h>
 #include <render_settings.h>
+#include <skin_fx.h>
+#include <pets.h>
+#include <vfx.h>
 #include "viewer/viewer_store.h" // game.store.skins: weapon / melee skins
 #include <math.h>
 #include <stdio.h>
@@ -452,32 +455,19 @@ static const ViewerSkin *player_slot_skin(const Player *player, const int slot, 
     return skin && skin->type == 0 && skin->weapon - 1 == player->loadout[slot] ? skin : NULL;
 }
 
-// RENDER.loadMesh's material options of a store item (getMat): colour, opacity, side, alphaTest, wireframe,
-// tileS repeat, and the glow: emissive (emiss || white) with emissiveMap ((glowText && texSrc) || src) + "_e"
-// (sameGlow: the texture itself). TODO: frame / movT / pulsT / rgb animations (frames shows frame 0).
-static void skin_material(BasicMaterial *material, const ViewerSkin *skin, const char *texture_key, const char *model_key, const int glow_text, const int emissive) {
-    if (skin->color >= 0) {
-        const float alpha = material->color.w;
-        material->color = hex_to_vec(skin->color);
-        material->color.w = alpha;
-    }
-    if (skin->opac > 0.0f) {
-        material->color.w = skin->opac;
-        material->base.transparent = 1;
-    }
-    if (skin->flags & VS_TRANS) material->base.transparent = 1;
-    if (skin->side == 2) material->double_sided = 1;
-    if (skin->alpha > 0.0f) material->alpha_test = skin->alpha;
-    if (skin->flags & VS_WIRE) material->base.wireframe = 1;
-    if (skin->tile_s > 0.0f) material->texture_repeat = (vec2) {skin->tile_s, skin->tile_s};
-    if (skin->frames > 0) material->texture_repeat.x = 1.0f / (float) skin->frames;
+// getMat for store items: client/src/skin_fx.c (skin_fx_apply / skin_fx_apply_gltf / skin_fx_apply_dye)
 
-    if (emissive) {
-        char key[256];
-        snprintf(key, sizeof(key), "%s%s", glow_text && texture_key ? texture_key : model_key, (skin->flags & VS_SAME_GLOW) ? "" : "_e");
-        material->emissive_texture = skin_texture_exists(key) ? skin_texture(key) : 0;
-        material->emissive = material->emissive_texture ? hex_to_vec(skin->emiss >= 0 ? skin->emiss : 0xFFFFFF) : (vec4) {0};
-    }
+// mesh_fini / gltf_instance_fini, after dropping the skin animations registered on them
+static void fx_mesh_fini(Mesh *mesh) {
+    if (!mesh) return;
+    skin_fx_forget(mesh);
+    mesh_fini(mesh);
+}
+
+static void fx_gltf_fini(GltfInstance *model) {
+    if (!model) return;
+    skin_fx_forget_gltf(model);
+    gltf_instance_fini(model);
 }
 
 // The weapon loadMesh src / texSrc: "weapons/<src>[_<mid>]", then UTILS.getReModel (a remodel), ae.tex,
@@ -515,6 +505,7 @@ static Mesh *gltf_skin_carrier(const ViewerSkin *skin, const char *model_key, Gl
         return NULL;
     }
     instance->root.parent = &carrier->transform;
+    skin_fx_apply_gltf(instance, skin, model_key);
     *out = instance;
     return carrier;
 }
@@ -572,7 +563,7 @@ static void melee_skin_keys(const ViewerSkin *skin, char *model, const size_t mo
 // The items the model wears (players.js generateMeshes): the routed slots (cosmetics_route), with
 // game.config.noCosm, the Prop team's petIndex and the Juggernaut outfit applied.
 typedef struct {
-    const ViewerSkin *hat, *head, *face, *body, *back, *waist, *shoe, *wrist;
+    const ViewerSkin *hat, *head, *face, *body, *back, *waist, *shoe, *wrist, *pet;
     const ViewerDye *dye;
     const ViewerSkin *dye_item;
     int skin_color, hair_color; // ENT skinColIndex colour / hairCol, -1 = the class's
@@ -603,6 +594,7 @@ static void player_look(const Player *player, PlayerLook *look) {
     look->waist = cosmetic_item(c.waist, ITEM_WAIST);
     look->shoe = cosmetic_item(v7.shoe, ITEM_SHOE);
     look->wrist = cosmetic_item(v7.wrist, ITEM_WRIST);
+    look->pet = cosmetic_item(v7.pet, ITEM_PET);
     look->dye_item = cosmetic_item(c.dye, ITEM_DYE);
     look->dye = look->dye_item ? viewer_dye(c.dye) : NULL;
     look->skin_color = c.skin_color;
@@ -655,15 +647,15 @@ static Mesh *generate_item_mesh(const ViewerSkin *item, const float y, const vec
 
     BasicMaterial *material = basic_material_init();
     material->texture = texture_id;
-    const int glow = (item->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
-    skin_material(material, item, viewer_skin_tex_truthy(item) ? texture : NULL, model, (item->flags & VS_GLOW) != 0, glow && !(item->flags & VS_NO_EMIS));
-    if (item->opac > 0.0f || (item->flags & VS_TRANS)) material->base.transparent = 1;
-
     Mesh *mesh = mesh_init(geometry, (Material *) material);
     mesh->transform.position = (vec3) {0.0f, y, 0.0f};
     mesh->transform.rotation = rotation;
     mesh->transform.scale = (vec3) {scale, scale, scale};
     mesh->transform.parent = holder;
+
+    // generateMeshData: glowText = glow, emissive = (glow || sameGlow) && !noEmis
+    const int glow = (item->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+    skin_fx_apply(mesh, item, viewer_skin_tex_truthy(item) ? texture : NULL, model, (item->flags & VS_GLOW) != 0, glow && !(item->flags & VS_NO_EMIS));
     return mesh;
 }
 
@@ -683,6 +675,7 @@ static struct GltfInstance *generate_item_model(const ViewerSkin *item, const fl
     instance->root.rotation = rotation;
     instance->root.scale = (vec3) {scale, scale, scale};
     instance->root.parent = holder;
+    skin_fx_apply_gltf(instance, item, model);
     return instance;
 }
 
@@ -784,6 +777,36 @@ static void player_generate_charm(PlayerArms *arms, const int weapon_id, const V
     }
 }
 
+static void dye_color_cube(ColorCube *cube, const ViewerSkin *dye) {
+    for (size_t k = 0; cube && k < cube->mesh_count; k++) skin_fx_apply_dye(cube->meshes[k], dye);
+}
+
+static void player_dye_meshes(PlayerMesh *player_mesh, const size_t loadout_size, const ViewerSkin *dye) {
+    if (!(dye->flags & VS_RGB) && dye->color < 0 && dye->opac <= 0.0f && !(dye->tex && !(dye->flags & VS_TEX_NUM)) && !(dye->flags2 & VS2_PROJECTION)) return;
+    dye_color_cube(player_mesh->head, dye);
+    dye_color_cube(player_mesh->body, dye);
+    for (int i = 0; i < 2; i++) {
+        dye_color_cube(player_mesh->legs[i], dye);
+        PlayerCrouchedLeg *leg = player_mesh->crouched_legs[i];
+        if (!leg) continue;
+        skin_fx_apply_dye(leg->upper, dye);
+        skin_fx_apply_dye(leg->joint, dye);
+        dye_color_cube(leg->lower, dye);
+    }
+    for (size_t w = 0; player_mesh->arms && w < loadout_size; w++) {
+        const PlayerArms *arms = player_mesh->arms[w];
+        if (!arms) continue;
+        for (int j = 0; j < 2; j++) {
+            const PlayerArmMesh *arm = j ? arms->left : arms->right;
+            if (!arm) continue;
+            skin_fx_apply_dye(arm->extender, dye);
+            skin_fx_apply_dye(arm->upper, dye);
+            skin_fx_apply_dye(arm->joint, dye);
+            dye_color_cube(arm->lower, dye);
+        }
+    }
+}
+
 // updateHeadSize(player, headMlt): the head cube scales by headMlt about lowerBody's origin and
 // drops 0.48 per mode headMlt step (0.1); the face / hat / head holders scale with it and sit on
 // the scaled head (face sitOff / headMlt).
@@ -807,6 +830,43 @@ static void player_apply_head_mlt(PlayerMesh *player_mesh, const PlayerLook *loo
         MeshTransform *holder = &player_mesh->cosmetic_holders[heads[i].slot];
         holder->scale = (vec3) {mlt, mlt, mlt};
         holder->position.y = top - heads[i].sit;
+    }
+}
+
+// The pet follows its holder (pets.update) and the item particles spawn (players.js itemEffects:
+// every 500 ms a body / back / dye / shoes item with `particle` emits PARTICLES.effect at the player:
+// shoes at its feet, the others around its middle), on the frame clock (gltf_clock)
+static void player_update_pet_and_effects(const Player *player, PlayerMesh *player_mesh) {
+    const double now = gltf_clock();
+    float dt_ms = player_mesh->pet_clock < 0.0 ? 0.0f : (float) ((now - player_mesh->pet_clock) * 1000.0);
+    player_mesh->pet_clock = now;
+    if (dt_ms > 100.0f) dt_ms = 100.0f; // a stalled frame / menu: no teleport
+
+    if (player_mesh->pet) {
+        // petHolder.getWorldPosition: the anchor turned by its yaw
+        const MeshTransform *anchor = player_mesh->anchor;
+        const float yaw = anchor->rotation.y;
+        const vec3 local = player_mesh->pet_holder.position;
+        const vec3 target = {anchor->position.x + local.x * cosf(yaw) + local.z * sinf(yaw), anchor->position.y + local.y,
+                             anchor->position.z - local.x * sinf(yaw) + local.z * cosf(yaw)};
+        pet_update(player_mesh->pet, target, dt_ms);
+        pet_set_visible(player_mesh->pet, player->active || player->uid == -1);
+    }
+
+    if (player->uid == -1 || !player->active || dt_ms <= 0.0f) return; // previews: no world particles
+    player_mesh->effect_timer -= dt_ms;
+    if (player_mesh->effect_timer > 0.0f) return;
+    player_mesh->effect_timer = 500.0f;
+    PlayerLook look;
+    player_look(player, &look);
+    const ViewerSkin *items[4] = {look.body, look.back, look.dye_item, look.shoe};
+    for (int i = 0; i < 4; i++) {
+        if (!items[i] || !(items[i]->flags2 & VS2_PARTICLE)) continue;
+        const float spread_y = i == 2 ? 4.0f : 2.0f; // dye: randInt(-4, 4) on y
+        const vec3 at = {player->position.x + (float) (rand() % 5 - 2),
+                         i == 3 ? player->position.y + 0.1f : player->position.y + player->height / 2.0f + (float) (rand() % (int) (spread_y * 2 + 1)) - spread_y,
+                         player->position.z + (float) (rand() % 5 - 2)};
+        vfx_item_effect(at, items[i]->particle);
     }
 }
 
@@ -851,6 +911,20 @@ void player_generate_meshes(Player *player, const int render_you) {
 
     player_mesh->anchor->scale = player_mesh->body_anchor->scale = player_mesh->upper_body_anchor->scale = (vec3) {1.0f, 1.0f, 1.0f};
     player->mesh = player_mesh;
+    player_mesh->render_you = render_you;
+    player_mesh->pet_clock = -1.0;
+
+    // generateMeshes: petHolder = genObj3D(3, player.height, 0) on objInstances; regenMeshes / players.add:
+    // game.pets.add(player) (a preview pet for the menu / viewer model, uid -1)
+    const float holder_height = player->height > 0.0f ? player->height : game_constants.player_height;
+    player_mesh->pet_holder.position = (vec3) {PET_HOLDER_X, holder_height, 0.0f};
+    player_mesh->pet_holder.scale = (vec3) {1.0f, 1.0f, 1.0f};
+    player_mesh->pet_holder.parent = player_mesh->anchor;
+    if (look.pet && player->game->map->config.model != MODEL_TYPE_SPRITE) {
+        const float yaw = player->direction.y;
+        const vec3 target = {player->position.x + PET_HOLDER_X * cosf(yaw), player->position.y + holder_height, player->position.z - PET_HOLDER_X * sinf(yaw)};
+        player_mesh->pet = pet_create(look.pet, target, player->uid == -1);
+    }
 
     if (player->game->map->config.model == MODEL_TYPE_SPRITE) {
 
@@ -936,9 +1010,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                         }
                         arms->weapon_models[0] = melee_model;
                         if (skin && !melee_carrier) {
-                            BasicMaterial *melee_mat = (BasicMaterial *) melee->material;
+                            // melee loadMesh: glowText = glow || sameGlow, emissive (glow || sameGlow), seeThrough transparent
                             const int glow = (skin->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
-                            skin_material(melee_mat, skin, texture, model, glow, glow);
+                            skin_fx_apply(melee, skin, texture, model, glow, glow);
                         }
                         melee->transform.parent = &arms->anchor;
 
@@ -1003,7 +1077,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                             BasicMaterial *weapon_mat = basic_material_init();
                             weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
                             weapon_mat->texture = weapon_tex;
-                            if (skin) skin_material(weapon_mat, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
+                            if (skin) skin_fx_apply(weapon_mesh, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
                         }
                         arms->weapon_models[j] = weapon_model;
 
@@ -1047,6 +1121,10 @@ void player_generate_meshes(Player *player, const int render_you) {
                 // TODO: flaps
             }
         }
+
+        // the dye's material (tex, colour, opacity, glow, rgb) on every body part (genHead / genBody /
+        // genLeg / genArms getMat)
+        if (look.dye_item) player_dye_meshes(player_mesh, player->loadout_size, look.dye_item);
     }
 }
 
@@ -1096,6 +1174,8 @@ void player_update_meshes(Player *player, const int is_preview) {
 
     // v7 animated cosmetics: RENDER's mixers advance with the frame clock
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) gltf_instance_update(player_mesh->cosmetic_models[i], gltf_clock());
+
+    player_update_pet_and_effects(player, player_mesh);
 
     // headMlt changes (Bighead FFA kills): updateHeadSize
     const float head_mlt = player_head_mlt(player);
@@ -1345,7 +1425,7 @@ void player_meshes_fini(Player *player) {
 
     if (player_mesh->body) {
         for (size_t i = 0; i < player_mesh->body->mesh_count; i++) {
-            mesh_fini(player_mesh->body->meshes[i]);
+            fx_mesh_fini(player_mesh->body->meshes[i]);
         }
 
         free(player_mesh->body);
@@ -1353,7 +1433,7 @@ void player_meshes_fini(Player *player) {
 
     if (player_mesh->head) {
         for (size_t i = 0; i < player_mesh->head->mesh_count; i++) {
-            mesh_fini(player_mesh->head->meshes[i]);
+            fx_mesh_fini(player_mesh->head->meshes[i]);
         }
 
         free(player_mesh->head);
@@ -1364,25 +1444,25 @@ void player_meshes_fini(Player *player) {
             PlayerArms *arms = player_mesh->arms[i];
             if (!arms) continue;
 
-            if (arms->weapon_right) mesh_fini(arms->weapon_right);
-            if (arms->weapon_left) mesh_fini(arms->weapon_left);
-            for (int k = 0; k < 2; k++) gltf_instance_fini(arms->weapon_models[k]);
-            if (arms->charm) mesh_fini(arms->charm);
-            if (arms->charm_mount) mesh_fini(arms->charm_mount);
-            if (arms->wrist) mesh_fini(arms->wrist);
-            gltf_instance_fini(arms->wrist_model);
-            if (arms->attachment) mesh_fini(arms->attachment);
+            if (arms->weapon_right) fx_mesh_fini(arms->weapon_right);
+            if (arms->weapon_left) fx_mesh_fini(arms->weapon_left);
+            for (int k = 0; k < 2; k++) fx_gltf_fini(arms->weapon_models[k]);
+            if (arms->charm) fx_mesh_fini(arms->charm);
+            if (arms->charm_mount) fx_mesh_fini(arms->charm_mount);
+            if (arms->wrist) fx_mesh_fini(arms->wrist);
+            fx_gltf_fini(arms->wrist_model);
+            if (arms->attachment) fx_mesh_fini(arms->attachment);
 
             for (int j = 0; j < 2; j++) {
                 const PlayerArmMesh *arm = j ? arms->left : arms->right;
 
-                if (arm->extender) mesh_fini(arm->extender);
+                if (arm->extender) fx_mesh_fini(arm->extender);
 
-                if (arm->upper) mesh_fini(arm->upper);
-                if (arm->joint) mesh_fini(arm->joint);
+                if (arm->upper) fx_mesh_fini(arm->upper);
+                if (arm->joint) fx_mesh_fini(arm->joint);
 
                 for (size_t k = 0; k < arm->lower->mesh_count; k++) {
-                    mesh_fini(arm->lower->meshes[k]);
+                    fx_mesh_fini(arm->lower->meshes[k]);
                 }
             }
 
@@ -1397,7 +1477,7 @@ void player_meshes_fini(Player *player) {
         if (!leg) continue;
 
         for (size_t j = 0; j < leg->mesh_count; j++) {
-            mesh_fini(leg->meshes[j]);
+            fx_mesh_fini(leg->meshes[j]);
         }
 
         free(leg);
@@ -1407,21 +1487,22 @@ void player_meshes_fini(Player *player) {
         PlayerCrouchedLeg *leg = player_mesh->crouched_legs[i];
         if (!leg) continue;
 
-        mesh_fini(leg->upper);
-        mesh_fini(leg->joint);
+        fx_mesh_fini(leg->upper);
+        fx_mesh_fini(leg->joint);
 
         for (size_t j = 0; j < leg->lower->mesh_count; j++) {
-            mesh_fini(leg->lower->meshes[j]);
+            fx_mesh_fini(leg->lower->meshes[j]);
         }
 
         free(leg);
     }
 
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
-        if (player_mesh->cosmetics[i]) mesh_fini(player_mesh->cosmetics[i]);
-        gltf_instance_fini(player_mesh->cosmetic_models[i]);
+        fx_mesh_fini(player_mesh->cosmetics[i]);
+        fx_gltf_fini(player_mesh->cosmetic_models[i]);
     }
 
+    pet_free(player_mesh->pet);
     free(player_mesh->upper_body_anchor);
     free(player_mesh->body_anchor);
     free(player_mesh->anchor);

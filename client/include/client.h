@@ -225,6 +225,11 @@ typedef struct {
     int sprite;               // THREE.Sprite / "msp": the XY unit quad always faces the camera (basic.vert)
     unsigned int light_map;   // three.js lightMap (user asset "l" flag, "<asset>_l"), read with the mesh UVs
     float light_map_intensity; // lightMapIntensity (1.5)
+
+    // WP-F: v7.1.4 store-item material effects (skin_fx.c)
+    unsigned int env_map;     // envMap "<tex>_env" (EquirectangularReflectionMapping), texture unit 4, 0 = none
+    float env_map_intensity;  // envMapIntensity (skin env || 3)
+    int projection_uv;        // skin `projection`: screen-space texture coordinates (render.js vTexCoords)
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
@@ -233,6 +238,7 @@ BasicMaterial *basic_material_init();
 // Texture unit of BasicMaterial.emissive_texture (unit 0: base map, 1: shadow map).
 #define BASIC_EMISSIVE_TEXTURE_UNIT 2
 #define BASIC_LIGHT_MAP_TEXTURE_UNIT 3 // BasicMaterial.light_map (map-G)
+#define BASIC_ENV_MAP_TEXTURE_UNIT 4   // BasicMaterial.env_map (WP-F skin env)
 #define BASIC_MAX_POINT_LIGHTS 16 // basic.frag MAX_POINT_LIGHTS
 
 // v3.1.1 POINT_LIGHT objects (94.js addPointLight -> THREE.PointLight), lit only with the
@@ -397,6 +403,14 @@ typedef struct {
     MeshTransform cosmetic_holders[8];
     unsigned char shoe_hidden[2]; // randomLeg: the shoe of the other leg is hidden
     float head_mlt;               // the headMlt the head / face / hat / head holders are scaled for
+    int render_you;               // built as the local first-person model (the pet goes to the world scene)
+
+    // v7.1.4 pet (pets.h): the follower of petIndex, in world space, toward pet_holder (petHolder:
+    // (3, player.height, 0) on the anchor); NULL when none
+    struct PlayerPet *pet;
+    MeshTransform pet_holder;
+    double pet_clock;             // gltf_clock() of the last pet / item-effect update, < 0 before the first
+    float effect_timer;           // players.js itemEffects effectTimer (ms)
 } PlayerMesh;
 
 enum {

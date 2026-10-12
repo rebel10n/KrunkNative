@@ -1,5 +1,4 @@
 #include <cosmetics.h>
-#include <ui_logic.h>
 #include "viewer/viewer_store.h"
 #include <stdio.h>
 #include <string.h>
@@ -59,16 +58,4 @@ void cosmetics_route(PlayerCosmetics *c, PlayerCosmeticsV7 *v7) {
     for (int k = 0; k < 2; k++) out_v7.charms[k] = cosmetic_item(v7->charms[k], ITEM_CHARM) ? v7->charms[k] : -1;
     *c = out;
     *v7 = out_v7;
-}
-
-void cosmetics_ent_v7(const int class_index, PlayerCosmetics *c, PlayerCosmeticsV7 *v7, uint8_t *show_badges) {
-    ui_loadout_cosmetics_v7(class_index, v7, 1);
-    cosmetics_route(c, v7);
-
-    // ent[22..25] SETTINGS.tmp.verifiedBadge / premiumBadge / partnerBadge / customBadge (default on)
-    static const char *const keys[4] = {"verifiedBadge", "premiumBadge", "partnerBadge", "customBadge"};
-    *show_badges = 0;
-    for (int i = 0; i < 4; i++) {
-        if (!ui_setting_is_false(keys[i])) *show_badges |= (uint8_t) (1u << i);
-    }
 }

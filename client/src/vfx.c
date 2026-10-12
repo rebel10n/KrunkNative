@@ -79,6 +79,9 @@ typedef enum {
     VFX_TEX_GRASS,        // particles/grass_0.png
     VFX_TEX_FOG,          // particles/fog_0.png
     VFX_TEX_EMBER,        // particles/ember_0.png
+    VFX_TEX_FEATHER,      // particles/feather.png (v7 item effect 5)
+    VFX_TEX_GLOW,         // particles/glow_0.png  (v7 item effect 6)
+    VFX_TEX_STAR,         // particles/star_0.png  (v7 item effect 7)
     VFX_TEX_SCREEN_FLASH, // img/muzflash.png
     VFX_TEX_BLOOD,        // img/blood.png
     VFX_TEX_COUNT,
@@ -93,6 +96,9 @@ static const char *const vfx_texture_paths[VFX_TEX_COUNT] = {
     "textures/particles/grass_0.png",
     "textures/particles/fog_0.png",
     "textures/particles/ember_0.png",
+    "textures/particles/feather.png",
+    "textures/particles/glow_0.png",
+    "textures/particles/star_0.png",
     "img/muzflash.png",
     "img/blood.png",
 };
@@ -602,6 +608,39 @@ static void spawn_impact(const vec3 position, const float yaw, const float pitch
 void vfx_impact(Client *client, const vec3 position, const float yaw, const float pitch) {
     (void) client;
     spawn_impact(position, yaw, pitch);
+}
+
+// v7.1.4 particles.js effects 5-7 (store items' `particle`: Moonfeather 5, Ember Slides 6): count
+// sprites of src, speed 0.005-0.007 per ms in a random direction (spread -PI..PI on yaw and pitch),
+// no gravity, colour picked from colr, life 1000-1800 ms. dstVis 70 (visible within particlesDist * 70)
+// keeps them on at any distance a map allows.
+typedef struct {
+    int texture, count;
+    VfxBlend blend;
+    float scale[2];
+    int colors[7], color_count;
+} VfxItemEffect;
+
+static const VfxItemEffect vfx_item_effects[3] = {
+    {VFX_TEX_FEATHER, 1, VFX_BLEND_NORMAL, {2.0f, 3.0f}, {0x764CAD, 0xffffc2, 0x51ff99, 0xffa0b3}, 4},
+    {VFX_TEX_GLOW, 2, VFX_BLEND_ADDITIVE, {0.5f, 0.8f}, {0xffd666, 0xffbd66}, 2},
+    {VFX_TEX_STAR, 5, VFX_BLEND_ADDITIVE, {0.2f, 1.0f}, {0x0A0068, 0x26007B, 0x42008D, 0x5E00A0, 0x7A00B2, 0xffffff, 0x000000}, 7},
+};
+
+void vfx_item_effect(const vec3 position, const int effect) {
+    if (!vfx.settings.particles || effect < 5 || effect > 7) return;
+    const VfxItemEffect *e = &vfx_item_effects[effect - 5];
+    for (int i = 0; i < e->count; i++) {
+        const float speed = rand_float(0.005f, 0.007f);
+        const float u = rand_float((float) -M_PI, (float) M_PI);
+        const float v = rand_float((float) -M_PI, (float) M_PI);
+        const vec3 velocity = {speed * sinf(u) * cosf(v), speed * sinf(v), speed * cosf(u) * cosf(v)};
+        VfxSprite *sprite = sprite_add(position, e->texture, e->blend, rand_float(e->scale[0], e->scale[1]), velocity, 0.0f,
+                                       rand_int(1000.0f, 1800.0f), 1);
+        if (!sprite) break;
+        const int col = e->colors[(int) rand_int(0.0f, (float) (e->color_count - 1))];
+        sprite->color = (vec4) {(float) ((col >> 16) & 255) / 255.0f, (float) ((col >> 8) & 255) / 255.0f, (float) (col & 255) / 255.0f, 1.0f};
+    }
 }
 
 static VfxBox *box_alloc(void) {

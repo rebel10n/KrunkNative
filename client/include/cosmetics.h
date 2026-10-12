@@ -35,8 +35,3 @@ void cosmetics_route(PlayerCosmetics *cosmetics, PlayerCosmeticsV7 *v7);
 #define COSMETIC_JUGGERNAUT_HEAD 4909
 #define COSMETIC_JUGGERNAUT_SHOES 4910
 #define COSMETIC_JUGGERNAUT_WAIST 4911
-
-// ENT V9 (index.js enterGame io.send("en")): the v7 slot picks of the Customize tab
-// (ui_loadout_cosmetics_v7, Random resolved to owned items), routed together with the v3.1.1
-// slots in `cosmetics` (cosmetics_route), and ent[22..25] showBadges from the settings.
-void cosmetics_ent_v7(int class_index, PlayerCosmetics *cosmetics, PlayerCosmeticsV7 *v7, uint8_t *show_badges);

@@ -119,6 +119,14 @@ U(u_light_map, "light_map");
 U(u_light_map_intensity, "light_map_intensity");
 #undef U
 
+// WP-F store-item effects (skin_fx.c): env map and projected texture coordinates
+#define U(var, name) static GlUniform var = GL_UNIFORM_INIT(name)
+U(u_use_env_map, "use_env_map");
+U(u_env_map, "env_map");
+U(u_env_map_intensity, "env_map_intensity");
+U(u_projection_uv, "projection_uv");
+#undef U
+
 // basic.frag light arrays (MAX_LIGHTS): lt_type 0 point, 1 spot, 2 directional, 3 rect
 enum { LU_TYPE, LU_POSITION, LU_DIRECTION, LU_COLOR, LU_PARAMS, LU_HALF_WIDTH, LU_HALF_HEIGHT, LU_COUNT };
 static GlUniform u_lights[LU_COUNT][BASIC_MAX_LIGHTS];
@@ -290,6 +298,17 @@ void basic_material_update_uniforms(BasicMaterial *material) {
         glBindTexture(GL_TEXTURE_2D, material->light_map);
         glActiveTexture(GL_TEXTURE0);
     }
+
+    // WP-F: skin env map (texture unit 4) and projection
+    gl_uniform_1i(&u_use_env_map, program, material->env_map != 0);
+    if (material->env_map) {
+        gl_uniform_1i(&u_env_map, program, BASIC_ENV_MAP_TEXTURE_UNIT);
+        gl_uniform_1f(&u_env_map_intensity, program, material->env_map_intensity);
+        glActiveTexture(GL_TEXTURE0 + BASIC_ENV_MAP_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, material->env_map);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    gl_uniform_1i(&u_projection_uv, program, material->projection_uv);
 
     if (material->texture && g_active_texture == material->texture || !material->texture && g_blank_texture && g_active_texture == g_blank_texture) return;
 

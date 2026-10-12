@@ -11,6 +11,7 @@ out float view_depth;
 out vec4 shadow_coord;
 out float vertex_shade;
 out vec3 vertex_color;
+out vec4 clip_pos; // WP-F skin projection (render.js vTexCoords): the clip-space position
 flat out int face_idx;
 
 uniform mat4 transform;
@@ -49,4 +50,5 @@ void main() {
     shadow_coord = shadow_matrix * transformed_pos;
     view_depth = -view_pos.z; // three.js fogDepth = -mvPosition.z (view-space depth, not distance)
     gl_Position = camera_projection * view_pos;
+    clip_pos = gl_Position;
 }

@@ -83,6 +83,9 @@ void gltf_instance_stop_clips(GltfInstance*);
 // (mesh extras.targetNames) contain `target_name`, applied at once.
 void gltf_instance_set_morph(GltfInstance*, const char *target_name, float weight);
 void gltf_instance_set_time_scale(GltfInstance*, float time_scale); // mixer.timeScale
+// The current morph target weights of every node, in node order (up to `max` into out; NULL: count
+// only). Returns how many the model has. (WP-F gltf_test, the viewer's inspector.)
+int gltf_instance_morph_weights(const GltfInstance*, float *out, int max);
 // Set every mesh's visibility.
 void gltf_instance_set_visible(GltfInstance*, int visible);
 void scene_add_gltf(Scene*, const GltfInstance*);

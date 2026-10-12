@@ -2,6 +2,8 @@
 #include <GLFW/glfw3.h>
 #include <client.h>
 #include <cosmetics.h>
+#include <skin_fx.h>
+#include <pets.h>
 #include <build_info.h>
 #include <vfx.h>
 #include <ai_render.h>
@@ -604,6 +606,7 @@ int main(int argc, char **argv) {
 
     INSTANCE.scene = scene_init();
     INSTANCE.fps_scene = scene_init();
+    g_pet_world_scene = INSTANCE.scene; // the local player's pet flies in the world (pets.h)
     INSTANCE.ui = ui_init();
 
     if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
@@ -831,6 +834,16 @@ Player *client_find_player(Client *client, const int uid) {
     }
 
     return NULL;
+}
+
+// ENT ent[22..25]: SETTINGS.tmp.verifiedBadge / premiumBadge / partnerBadge / customBadge (default on)
+static uint8_t client_show_badges(void) {
+    static const char *const keys[4] = {"verifiedBadge", "premiumBadge", "partnerBadge", "customBadge"};
+    uint8_t show = 0;
+    for (int i = 0; i < 4; i++) {
+        if (!ui_setting_is_false(keys[i])) show |= (uint8_t) (1u << i);
+    }
+    return show;
 }
 
 void client_add_player_mesh(Client *client, Player *player, const int render_you) {
@@ -1342,7 +1355,9 @@ void client_enter_game(Client *client) {
     packet.anon_mode = (uint8_t) (client_render_settings()->anon_mode ? 1 : 0);
     // WP-F ENT V9: ent[15] shoeIndex, [21] petIndex, [26] wristIndex, [30] charms, [31] backIndex,
     // [32] headIndex, [33] playerCardIndex and ent[22..25] showBadges (cosmetics.c)
-    cosmetics_ent_v7(client->menu_class_index, &packet.cosmetics, &packet.cosmetics_v7, &packet.show_badges);
+    ui_loadout_cosmetics_v7(client->menu_class_index, &packet.cosmetics_v7, 1); // the Customize picks, Random resolved
+    cosmetics_route(&packet.cosmetics, &packet.cosmetics_v7);                 // v3.1.1 placements to their v7 slots
+    packet.show_badges = client_show_badges();
     // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
     // a 1.1 server anything longer than V6 (no lagComp), a 1.3.0 server anything longer than V7
     // (no attachIndex / challMode / anonMode): net_ent_size_for.
@@ -1615,6 +1630,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
     const int scene_target = !scenario && render_target_begin(client);
 
     if (!scenario) vfx_update(client, delta); // combat effects from this frame's game tick (vfx.c)
+    // store-item material animations: frames, movT, pulsT, rgb, rAnim (skin_fx.c), with textureAnim
+    skin_fx_tick(delta * 1000.0f, client_render_settings()->texture_anim, client_render_settings()->lighting == 0);
     if (!scenario) ai_render_tick(client, delta); // AI meshes / orbs (ai_render.c), drawn by the world scene
 
     if (!scenario && !ks_client_3d_disabled()) { // KrunkScript DEFAULT.disable3D: RENDER.disable()

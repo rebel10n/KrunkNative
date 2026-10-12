@@ -8,6 +8,7 @@ in float view_depth;
 in vec4 shadow_coord;
 in float vertex_shade;
 in vec3 vertex_color;
+in vec4 clip_pos;
 flat in int face_idx;
 
 // BasicMaterial uv_mode (client.h BasicUvMode): 0 vertex UVs, 1 Krunker cube, 2 Krunker plane
@@ -92,6 +93,16 @@ uniform float light_map_intensity;
 uniform bool use_emissive_map;
 uniform sampler2D emissive_map;
 vec3 emissive_radiance;
+
+// WP-F store-item effects (client/src/skin_fx.c). env: the skin's "<tex>_env" equirectangular map
+// (texture unit 4) sampled along the world-space reflection, combined like three.js
+// MultiplyOperation (outgoing *= envColor, the Lambert / Phong / Basic default). The Physical
+// lighting mode's PMREM / envMapIntensity specular is approximated by the same multiply.
+// projection_uv: screen-space texture coordinates (render.js projection: vTexCoords.xy / w / 2 + 0.5).
+uniform bool use_env_map;
+uniform sampler2D env_map;
+uniform float env_map_intensity;
+uniform bool projection_uv;
 
 const float PI = 3.141592653589793;
 const float RECIPROCAL_PI = 0.3183098861837907;
@@ -366,6 +377,7 @@ void main() {
     } else {
         scaled_tex_coord = tex_coord;
     }
+    if (projection_uv) scaled_tex_coord = clip_pos.xy / clip_pos.w * 0.5 + 0.5;
     if (use_vertex_color) object_color.rgb *= vertex_color;
 
     vec3 t_tex_coord = tex_transform * vec3(scaled_tex_coord, 1.0);
@@ -393,6 +405,13 @@ void main() {
         }
 
         base_color.rgb = krunker_lambert(base_color.rgb, normal);
+    }
+
+    if (use_env_map) {
+        vec3 n = use_flat_normal ? normalize(flat_normal) : normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+        vec3 r = reflect(normalize(world_pos - camera_position), n);
+        vec2 env_uv = vec2(atan(r.z, r.x) * 0.15915494309189535 + 0.5, asin(clamp(r.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
+        base_color.rgb *= texture(env_map, env_uv).rgb;
     }
 
     // three.js r150 fragment tail: tonemapping_fragment, encodings_fragment, then fog_fragment

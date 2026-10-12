@@ -614,6 +614,33 @@ else ()
         target_link_libraries(canvas2d_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # gltf_test: the GLTF loader (client/src/gltf.c) on v7.1.4 animated store models through the
+    # pet path (client/src/pets.c), the pets.js follow AI and the skin animations (skin_fx.c).
+    # Headless GL (--headless); run from the repo root (WP-F, doc/v7/player-viewer.md).
+    add_executable(gltf_test
+        tools/gltf_test/gltf_test.c
+        client/src/gltf.c
+        client/src/pets.c
+        client/src/skin_fx.c
+        client/src/cosmetics.c
+        client/src/viewer/viewer_store.c
+        client/src/viewer/viewer_store_table.c
+        client/src/mesh.c
+        client/src/loaders.c
+        client/src/fast_obj.c
+        client/src/shader.c
+        client/src/materials/basic.c
+        client/src/headless.c
+        client/src/stb_image.c
+        ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(gltf_test PRIVATE client/include client/lib)
+    target_link_libraries(gltf_test PRIVATE freetype glfw Threads::Threads m)
+    krunknative_link_gl(gltf_test)
+    krunknative_link_headless(gltf_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(gltf_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the
     # brain when libpq is available). Optional; never affects the game targets. Tests: ctest.
     option(KRUNKNATIVE_SERVICES "Build the backend services (services/; needs OpenSSL, libpq for the DB parts)" ON)

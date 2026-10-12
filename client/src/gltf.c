@@ -1092,6 +1092,19 @@ void gltf_instance_stop_clips(GltfInstance *instance) {
     if (instance) instance->clip_mode = GLTF_CLIPS_STOPPED;
 }
 
+int gltf_instance_morph_weights(const GltfInstance *instance, float *out, const int max) {
+    if (!instance || !instance->model || !instance->model->data) return 0;
+    int count = 0;
+    for (size_t n = 0; n < instance->model->data->nodes_count; n++) {
+        const GltfInstanceNode *node = &instance->nodes[n];
+        for (int w = 0; node->weights && w < node->weight_count; w++) {
+            if (out && count < max) out[count] = node->weights[w];
+            count++;
+        }
+    }
+    return count;
+}
+
 void gltf_instance_set_morph(GltfInstance *instance, const char *target_name, float weight) {
     if (!instance || !target_name || !instance->model || !instance->model->data) return;
     weight = weight < 0.0f ? 0.0f : weight > 1.0f ? 1.0f : weight; // UTILS.limitMM(value, 0, 1)

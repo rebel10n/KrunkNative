@@ -1,6 +1,7 @@
 #include <gl.h>
 #include <client.h>
 #include <gltf.h>
+#include <pets.h>
 #include <shadow.h>
 #include <math.h>
 #include <stdlib.h>
@@ -12,6 +13,7 @@ Scene *scene_init() {
 }
 
 void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
+    scene_add_pet(scene, player_mesh->pet, player_mesh->render_you);
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_add_mesh(scene, player_mesh->cosmetics[i]);
         scene_add_gltf(scene, player_mesh->cosmetic_models[i]);
@@ -83,6 +85,7 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
 // NOTE: probably should optimize - scene_remove_mesh iterates over scene children until it finds the target mesh!
 void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
     if (!player_mesh) return;
+    scene_remove_pet(player_mesh->pet);
 
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_remove_mesh(scene, player_mesh->cosmetics[i]);

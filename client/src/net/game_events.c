@@ -101,7 +101,7 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     }
 
     if (killer && killer != victim) killer->kills = (unsigned int) packet->killer_kills;
-    if (killer && killer != victim && killer == client->me) sound_events_kill(packet->headshot); // gk: kill sound
+    if (killer && killer != victim && killer == client->me) sound_events_kill(packet->headshot, killer, packet->weapon_index); // gk: kill sound (getKillSnd)
 
     const char *victim_name = events_name(victim);
 
