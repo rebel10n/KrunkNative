@@ -341,7 +341,7 @@ static cJSON *ctl_value(const EdCtl *c) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(c->json, c->key);
         return v ? cJSON_Duplicate(v, 1) : cJSON_CreateNull();
     }
-    if (c->bind == EB_OBJ && g_ed.selected) return ed_prop_get(g_ed.selected, c->key);
+    if (c->bind == EB_OBJ && g_ed.proj->selected) return ed_prop_get(g_ed.proj->selected, c->key);
     return cJSON_CreateNull();
 }
 
@@ -1010,16 +1010,16 @@ static int h_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
     if (c->bind == EB_JSON && c->json) {
         cJSON_DeleteItemFromObjectCaseSensitive(c->json, c->key);
         cJSON_AddItemToObject(c->json, c->key, cJSON_Duplicate(value, 1));
-    } else if (c->bind == EB_OBJ && g_ed.selected) {
-        EditorObject *o = g_ed.selected;
+    } else if (c->bind == EB_OBJ && g_ed.proj->selected) {
+        EditorObject *o = g_ed.proj->selected;
         const int before = ed_obj_count_class(o);
         ed_prop_set(o, c->key, value);
-        g_ed.obj_count[before]--;
-        g_ed.obj_count[ed_obj_count_class(o)]++;
+        g_ed.proj->obj_count[before]--;
+        g_ed.proj->obj_count[ed_obj_count_class(o)]++;
         g_ed.dirty_counts = 1;
         if (ed_prop_needs_rebuild(c->key)) ed_obj_rebuild(o);
     }
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
     if (c->on_change) c->on_change(c, value);
     cJSON_Delete(value);
     return 1;

@@ -13,6 +13,13 @@
 //   editor_render.c   editor GL: bounding boxes, helper volumes, grid, death barrier,
 //                     sun marker, transform gizmo; ray picking; gizmo drag math
 //   editor_data.c     generated Krunker data tables (tools/editor/gen_editor_data.py)
+//   editor_project.c  open maps (EditorProject): tabs, new/open/close/save, switching (KrunkNative)
+//   editor_view.c     offscreen project renders, detached 3D view windows (KrunkNative)
+//   editor_bus_link.c the editor bus: other editor processes and MCP tools (KrunkNative)
+//
+// State split: EditorProject holds one map (objects, history, selection, camera, file, dirty);
+// Editor (g_ed) holds the page, input, settings, clipboard and the list of projects. Every
+// function that edits "the map" works on g_ed.proj (see editor_project.c for switching).
 #pragma once
 #include <gl.h> // glad natively, GLES3 on the web (before GLFW)
 #include <client.h>
@@ -45,9 +52,11 @@ typedef struct EditorObject {
 } EditorObject;
 
 typedef struct {
-    int action;            // 'a' add, 'r' remove, 'u' update
+    int action;            // 'a' add, 'r' remove, 'u' update, 'm' map config (editor_project.c batches)
     uint32_t uuid;
-    cJSON *state;          // add/remove: the object; update: the state before
+    cJSON *state;          // add/remove: the object; update: the state before; 'm': {map,game,server} before
+    uint32_t batch;        // entries with the same nonzero batch undo/redo as one step (bus edits)
+    char *label;           // the batch label (on the newest entry of a batch), NULL = derived
 } EditorHistoryEntry;
 
 typedef struct {
@@ -71,10 +80,32 @@ typedef struct {
     vec3 plane_normal;
 } EditorGizmo;
 
+// Terrain / clutter / zone meshes of one project (editor_terrain.c)
 typedef struct {
-    Client *client;
-    int active;
-    Scene *scene;
+    Geometry *geometry;
+    unsigned int vbo, cbo;
+    Mesh *mesh;
+} EdTerrPart;
+
+typedef struct {
+    uint32_t uuid;
+    EditorObject *object;
+} EdGraveyard;
+
+// One open map ("project"). Everything the v3.1.1 Editor kept per map lives here; the page,
+// input and UI state stays in Editor (g_ed). g_ed.proj is the project shown in the editor;
+// code that works on "the map" reads g_ed.proj, and editor_project.c switches it (fully
+// with ed_project_activate, or for one bus/background operation with ed_project_enter /
+// ed_project_leave, which keeps the page UI on the shown project).
+typedef struct EditorProject {
+    int id;                // local id, 1.. (bus id "<instance>.<id>")
+    char path[1024];       // the map file it was opened from / saved to ("" = untitled)
+    char name[128];        // tab title: file basename, else the map name
+    int dirty;             // unsaved changes since open/save
+    unsigned revision;     // bumps on every change (bus "revision")
+    unsigned saved_revision;
+
+    Scene *scene;          // object meshes, helpers and terrain of this map
     Camera camera;
     float yaw, pitch;      // PointerLockControls: yawObject.rotation.y, pitchObject.rotation.x
 
@@ -85,21 +116,45 @@ typedef struct {
     EditorObject *selected;
     uint32_t *pending_group; size_t pending_count, pending_cap; // group selection
     EditorGroup *groups; size_t group_count;
-    cJSON *copy;           // copyObjects clipboard (array of serialized objects, relative)
     int obj_count[3];      // objCount: [non-collidable, collidable, spawns]
 
-    // map-level state (mapConfig / gameConfig / serverConfig / settings / advancedOptions)
+    // map-level state (mapConfig / gameConfig / serverConfig)
     cJSON *map_config;
     cJSON *game_config;
     cJSON *server_config;  // {modes:{}, classes:{}, settings:{}, weps:{}}
-    cJSON *settings;       // editor settings, stored as "kro_editor"
-    cJSON *advanced;       // advancedOptions values (rotation, scaleMapX, ...)
     cJSON *extra_map;      // imported map fields the editor does not model (kept for export)
 
     // history
     EditorHistoryEntry *undos; size_t undo_count, undo_cap;
     EditorHistoryEntry *redos; size_t redo_count, redo_cap;
     double history_next;
+    EdGraveyard *graveyard; size_t graveyard_count; // removed objects that undo can revive
+    uint32_t batch;        // open history batch (ed_history_batch_begin), 0 = none
+    uint32_t next_batch;
+    const char *batch_label;
+
+    EdTerrPart terrain, clutter, zone;
+    unsigned bus_revision; // last revision / selection announced on the editor bus
+    uint32_t bus_selected;
+} EditorProject;
+
+typedef struct {
+    Client *client;
+    int active;
+
+    // projects (editor_project.c): the open maps; `shown` is the one on screen, `proj` the one
+    // every ed_* function works on (== shown except inside ed_project_enter/leave)
+    EditorProject *shown;
+    int ui_stale;          // a panel rebuild was asked for while working on another project
+    EditorProject *proj;
+    EditorProject **projects;
+    size_t project_count;
+    int next_project_id;
+    EditorProject *lighting_owner; // whose map lighting g_render_lighting / the sky hold
+
+    cJSON *copy;           // copyObjects clipboard (array of serialized objects); shared by every project
+    cJSON *settings;       // editor settings, stored as "kro_editor"
+    cJSON *advanced;       // advancedOptions values (rotation, scaleMapX, ...)
 
     // input / controls
     int move_forward, move_backward, move_left, move_right, move_up, move_down, move_sprint;
@@ -131,6 +186,7 @@ typedef struct {
     int dirty_left;
     int dirty_counts;
     int dirty_storage;     // autosave the map to storage
+    int dirty_tabs;        // rebuild the project tab strip
     double storage_next;
     char status[256];
     double script_at;      // KRUNKNATIVE_EDITOR_SCRIPT (editor.c)
@@ -138,6 +194,66 @@ typedef struct {
 } Editor;
 
 extern Editor g_ed;
+
+// ---- editor_project.c: open maps, tabs, new/open/close/save (header comment there)
+enum { ED_PM_NEW, ED_PM_OPEN, ED_PM_SAVE, ED_PM_SAVE_ALL, ED_PM_CLOSE, ED_PM_NEXT, ED_PM_DETACH, ED_PM_NEW_WINDOW, ED_PM_BUS, ED_PM_ACCESS };
+int editor_cli_file_count(void);
+const char *editor_cli_file(int i);
+void editor_cli_add_file(const char *path);
+EditorProject *ed_project_create(void);              // empty map (defaults), not shown
+EditorProject *ed_project_new(int activate);
+EditorProject *ed_project_open_file(const char *path, int activate); // NULL on failure (message shown)
+EditorProject *ed_project_open_text(const char *text, const char *path, int activate);
+EditorProject *ed_project_find(int id);
+EditorProject *ed_project_resolve(const char *ref);  // id / "<inst>.<id>" / path / basename / map name
+const char *ed_project_title(const EditorProject *p);
+int ed_abs_path(const char *in, char *out, size_t n);  // absolute path of an existing file
+const char *ed_project_map_name(const EditorProject *p);
+void ed_project_activate(EditorProject *p);
+void ed_project_enter(EditorProject *p, EditorProject **prev);
+void ed_project_leave(EditorProject *prev);
+int ed_project_background(void);                     // g_ed.proj is not the shown project
+long ed_project_save(EditorProject *p, const char *path, int adopt, int pretty); // bytes, -1 failure
+void ed_project_save_ui(EditorProject *p);
+void ed_project_save_all(void);
+int ed_project_close(EditorProject *p, int force);   // 0: dirty and not forced
+void ed_project_request_close(EditorProject *p);     // asks when dirty
+int ed_project_confirm_quit(void);                   // 1 = nothing unsaved
+int ed_projects_dirty(void);
+void ed_project_open_ui(void);
+void ed_project_cycle(int dir);
+void ed_projects_fini(void);
+void ed_tabs_render(void);
+void ed_project_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+int ed_project_key(int key, int mods);
+void ed_project_menu(int action);
+void ed_mark_changed(void);                          // the map of g_ed.proj changed (dirty, revision, autosave, bus)
+
+// ---- editor_view.c: detached 3D views (native: extra GLFW windows sharing the GL context)
+void ed_view_open(EditorProject *p);
+void ed_view_new_process(EditorProject *p);          // `client_bin --editor <file>` joining the bus
+void ed_view_project_closed(EditorProject *p);
+void ed_view_frame(float now, float dt);             // every editor frame (renders + presents the views)
+void ed_views_fini(void);
+int ed_view_count(void);
+// Renders project p from `cam` into an RGBA buffer (w*h*4, rows top-down, malloc'd). Used by
+// the views and the bus render tool. flags: ED_RENDER_*.
+enum { ED_RENDER_NO_HELPERS = 1, ED_RENDER_NO_FOG = 2, ED_RENDER_ORTHO = 4 };
+unsigned char *ed_render_project(EditorProject *p, const Camera *cam, float yaw, float pitch, float ortho_half_h, int w, int h, int flags);
+
+// ---- editor_bus_link.c: the editor bus (shared/include/editor_bus.h) in the editor
+int editor_bus_parse_arg(int argc, char **argv, int *i); // app_mode_parse_args: 1 = consumed
+void ed_bus_start(void);                              // page enter (when asked for on the CLI)
+void ed_bus_poll(void);
+void ed_bus_stop(void);
+int ed_bus_active(void);
+void ed_bus_toggle(void);
+void ed_bus_notify_projects(void);
+void ed_bus_notify_change(EditorProject *p);
+void ed_bus_notify_selection(EditorProject *p);
+void ed_bus_clipboard_set(const cJSON *objects);       // UI copy: share with the other windows
+void ed_bus_manage_access(void);                      // remembered MCP grants: list + revoke
+void ed_log_line(const char *line);                   // console ring for the bus "log" tool
 
 // ---- editor.c
 void editor_set_transform_type(int type);
@@ -188,6 +304,12 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value);
 int ed_prop_needs_rebuild(const char *prop);
 
 void ed_history_add(int action, EditorObject *o, cJSON *state);
+void ed_history_add_map(void);                     // 'm': the map config before a bus map_set
+uint32_t ed_history_batch_begin(const char *label);  // following entries form one undo step (0 = nested)
+void ed_history_batch_end(uint32_t id);
+int ed_history_step(int redo);                     // one step (an entry or a whole batch); 0 = none
+size_t ed_history_steps(int redo);
+cJSON *ed_history_labels(int redo, int limit);     // newest first
 void ed_history_execute(int redo);
 void ed_history_poll(void);
 void ed_history_clear(void);
@@ -342,7 +464,12 @@ int ed_json_truthy(const cJSON *v);
 typedef void (*EdPromptFn)(void *user, const char *value); // value NULL = cancelled
 void ed_prompt(const char *message, const char *def, EdPromptFn cb, void *user);
 void ed_confirm(const char *message, EdPromptFn cb, void *user); // value "1" = OK
+// a dialog with several buttons: cb(user, index), -1 = dismissed (Escape). Queued behind an
+// open dialog instead of replacing it.
+typedef void (*EdChoiceFn)(void *user, int choice);
+void ed_choice(const char *title, const char *message, const char *const *buttons, int count, EdChoiceFn cb, void *user);
 void ed_prompt_cancel(void);
+void ed_prompt_reset(void);                        // page leave: drop open / queued dialogs
 int ed_prompt_open(void);
 void ed_prompt_install(HtmlHandlerEntry *table, size_t *count, size_t max);
 

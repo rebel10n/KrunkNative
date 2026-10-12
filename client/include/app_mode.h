@@ -13,12 +13,18 @@
 // stays free and app_mode.c's GLFW callbacks replace main.c's. Links to the page's own
 // kind reload it in place.
 //
+// The editor is the exception inside its own window: it opens several maps at once (project
+// tabs), detached 3D views of them as extra GLFW windows sharing its GL context, and joins
+// other editor processes and tools over the editor bus (client/src/editor/editor_project.c,
+// editor_view.c, editor_bus_link.c; `--editor [flags] [maps...]`, `--help`).
+//
 // Entry points: `client_bin --hub|--editor|--viewer [query]` (`--game [query]` for a game
 // window); the web pages' URLs; Krunker's links to /social.html, /editor.html,
 // /viewer.html, / (app_route_url, from ui_open_external) and app_set_mode() /
 // app_mode_open_window() from any UI logic.
 #include <client.h>
 #include <cJSON.h>
+#include <stdio.h>
 
 typedef enum {
     APP_MODE_GAME,
@@ -109,6 +115,12 @@ void app_mode_navigate_self(Client *client, const char *query);
 // Removes --game/--hub/--editor/--viewer [query] from argv (before the normal parsing); the web
 // build boots in the mode of its page URL (social.html, editor.html, viewer.html).
 void app_mode_parse_args(int *argc, char **argv);
+// The editor's command line (client/src/editor): `--editor [flags] [maps...]` hands each map
+// file to editor_cli_add_file (one project each) and the bus flags to editor_bus_parse_arg
+// (returns 1 and advances *i past what it consumed). editor_usage() prints them.
+void editor_cli_add_file(const char *path);
+int editor_bus_parse_arg(int argc, char **argv, int *i);
+void editor_usage(FILE *out);
 // Once, after html_ui_init(): enters the startup page, if any.
 void app_mode_start(Client *client);
 // 0 when this window's page has no use for the game server: the editor and the viewer

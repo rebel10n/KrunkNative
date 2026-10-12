@@ -129,3 +129,70 @@ body {
 .qs_container{margin:5px;padding:5px;background-color:#eeeeee;border:none;position:relative}
 .qs_textarea{-webkit-box-sizing:border-box;-moz-box-sizing:border-box;box-sizing:border-box;resize:vertical;width:100%;padding:3px 5px;border:1px inset #ffffff;background-color:#ffffff;color:#000000;font-size:12px}
 .qs_textarea:focus{outline:none;background:#ffffff;border:1px inset #ffffff}
+
+/* Project tabs (client/src/editor/editor_project.c): one per open map, at the bottom of the
+   3D view; shown with two or more projects. */
+#knTabs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 24px;
+  display: flex;
+  flex-direction: row;
+  background-color: rgba(30, 30, 30, 0.75);
+  pointer-events: auto;
+  z-index: 3;
+  overflow: hidden;
+  font-size: 11px;
+  user-select: none;
+}
+
+#knTabs .knTab {
+  display: flex;
+  align-items: center;
+  max-width: 220px;
+  padding: 0 6px 0 10px;
+  color: #ccc;
+  border-right: 1px solid rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#knTabs .knTab:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+#knTabs .knTabActive {
+  background-color: #999;
+  color: #202020;
+}
+
+#knTabs .knTabName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#knTabs .knTabClose {
+  margin-left: 6px;
+  padding: 0 3px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+#knTabs .knTabClose:hover {
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.25);
+}
+
+#knTabs .knTabNew {
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+/* ed_choice() dialogs (editor_prompt.c): MCP access requests, unsaved-changes prompts */
+#knPrompt .knChoiceBox {
+  width: 540px;
+  margin-left: -286px;
+}

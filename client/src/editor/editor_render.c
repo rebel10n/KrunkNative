@@ -134,7 +134,7 @@ static vec3 m4_point(const float m[16], const vec3 v) {
 
 static void camera_basis(vec3 *right, vec3 *up, vec3 *back) {
     // camera world rotation = Ry(yaw) * Rx(pitch)
-    const float cy = cosf(g_ed.yaw), sy = sinf(g_ed.yaw), cp = cosf(g_ed.pitch), sp = sinf(g_ed.pitch);
+    const float cy = cosf(g_ed.proj->yaw), sy = sinf(g_ed.proj->yaw), cp = cosf(g_ed.proj->pitch), sp = sinf(g_ed.proj->pitch);
     *right = v3(cy, 0, -sy);
     *up = v3(sy * sp, cp, cy * sp);
     *back = v3(sy * cp, -sp, cy * cp);
@@ -154,10 +154,10 @@ void ed_view_ray(const double fb_x, const double fb_y, vec3 *origin, vec3 *dir) 
     const float top = (float) (g_ed.fb_h - g_ed.view_y - g_ed.view_h);
     const float nx = ((float) fb_x - (float) g_ed.view_x) / w * 2.0f - 1.0f;
     const float ny = -(((float) fb_y - top) / h * 2.0f - 1.0f);
-    const float t = tanf(g_ed.camera.fov / g_ed.camera.zoom / 2.0f);
+    const float t = tanf(g_ed.proj->camera.fov / g_ed.proj->camera.zoom / 2.0f);
     vec3 r, u, b;
     camera_basis(&r, &u, &b);
-    *origin = g_ed.camera.position;
+    *origin = g_ed.proj->camera.position;
     *dir = vnorm(vadd(vadd(vmul(r, nx * t * w / h), vmul(u, ny * t)), vmul(b, -1)));
 }
 
@@ -201,8 +201,8 @@ int ed_pick(const double fb_x, const double fb_y, const int skip_invisible, Edit
     float best = 1e30f;
     EditorObject *best_obj = NULL;
     int best_face = 0;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *obj = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *obj = g_ed.proj->objects[i];
         if (skip_invisible && editor_setting_bool("selectThroughInvis")) {
             const int invisible = ed_json_path(obj->data, "v") != NULL;
             if (invisible || obj->prefab == ED_PREFAB_PLACEHOLDER) continue;
@@ -332,9 +332,9 @@ static VertBuf *box_batch(const int hex) {
 }
 
 static void draw_object_boxes(void) {
-    const EditorObject *sel = g_ed.selected;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        const EditorObject *o = g_ed.objects[i];
+    const EditorObject *sel = g_ed.proj->selected;
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *o = g_ed.proj->objects[i];
         const EditorPrefab *p = &editor_prefabs[o->prefab];
         if (p->flags & EP_HIDEBOUNDINGBOX) continue;
         float m[16];
@@ -358,8 +358,8 @@ static void draw_tool_volumes(void) {
     // tool / zone prefabs: their generated cube at prefab.opacity in the line colour (the
     // game hides them; the editor shows where they are)
     glDepthMask(GL_FALSE);
-    for (size_t i = 0; i < g_ed.count; i++) {
-        const EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *o = g_ed.proj->objects[i];
         const EditorPrefab *p = &editor_prefabs[o->prefab];
         // generateCube(..., {transparent}) with white vertex colours at prefab.opacity: the
         // faint zone volumes (objectives 0.2, score/death/... zones 0.3, pickups 0.1)
@@ -378,8 +378,8 @@ static void draw_real_hitboxes(void) {
     // (boundingMesh scale + position, no rotation) of rotated collidable objects, red at 0.2
     if (!editor_setting_bool("showRealHitbox")) return;
     glDepthMask(GL_FALSE);
-    for (size_t i = 0; i < g_ed.count; i++) {
-        const EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *o = g_ed.proj->objects[i];
         const char *type = editor_prefabs[o->prefab].name;
         if (!strcmp(type, "PLACEHOLDER") || !strcmp(type, "SIGN")) continue;
         const vec3 r = ed_obj_vec(o, "r", v3(0, 0, 0));
@@ -410,14 +410,14 @@ static void draw_trigger_connections(void) {
     // map key "tin") to each object whose interface ID ("in") matches, in the trigger's
     // yellow, drawn over the geometry; the target end gets a small cross.
     if (!editor_setting_bool("triggerCons")) return;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        const EditorObject *src = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *src = g_ed.proj->objects[i];
         if (!(editor_prefabs[src->prefab].flags & EP_CANTARGETINTERFACE)) continue;
         const int target = (int) ed_json_num(src->data, "tin", 0);
         if (!target) continue;
         const vec3 a = box_centre(src);
-        for (size_t j = 0; j < g_ed.count; j++) {
-            const EditorObject *dst = g_ed.objects[j];
+        for (size_t j = 0; j < g_ed.proj->count; j++) {
+            const EditorObject *dst = g_ed.proj->objects[j];
             if (dst == src || !(editor_prefabs[dst->prefab].flags & EP_CANINTERFACE)) continue;
             if ((int) ed_json_num(dst->data, "in", 0) != target) continue;
             const vec3 b = box_centre(dst);
@@ -466,8 +466,8 @@ static void push_cone(VertBuf *b, vec3 base, vec3 dir, float len, float radius, 
 static void draw_arrows(void) {
     // ObjectInstance.arrowHelper (customDirection prefabs): ArrowHelper(dir, origin, 10,
     // 0xff00ff, 5, 4) at the box position + (0, s.y + 5, 0), dir (cos(d PI/2), 0, sin(d PI/2))
-    for (size_t i = 0; i < g_ed.count; i++) {
-        const EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *o = g_ed.proj->objects[i];
         if (!editor_prefab_has(o->prefab, EP_CUSTOMDIRECTION)) continue;
         const vec3 p = ed_obj_vec(o, "p", v3(0, 0, 0));
         const vec3 s = ed_obj_vec(o, "s", v3(1, 1, 1));
@@ -484,7 +484,7 @@ static void draw_arrows(void) {
 
 static void draw_death_barrier(void) {
     if (!editor_setting_bool("dbVisibility")) return;
-    const float y = (float) ed_json_num(g_ed.map_config, "dthY", -100);
+    const float y = (float) ed_json_num(g_ed.proj->map_config, "dthY", -100);
     const float h = 5000.0f;
     vb_push(&g_tris, v3(-h, y, -h)); vb_push(&g_tris, v3(h, y, -h)); vb_push(&g_tris, v3(h, y, h));
     vb_push(&g_tris, v3(-h, y, -h)); vb_push(&g_tris, v3(h, y, h)); vb_push(&g_tris, v3(-h, y, h));
@@ -503,9 +503,9 @@ static void push_circle(VertBuf *b, const vec3 c, const vec3 u, const vec3 v, co
 
 static void draw_sun(void) {
     // Editor.sun: wireframe sphere (radius 5, scale 4) at the light position, in the light colour
-    const float u = (float) M_PI * ((float) ed_json_num(g_ed.map_config, "sunAngY", 54) / -180.0f);
-    const float t = (float) M_PI * ((float) ed_json_num(g_ed.map_config, "sunAngX", 90) / -180.0f);
-    const float d = (float) ed_json_num(g_ed.map_config, "lightD", 500);
+    const float u = (float) M_PI * ((float) ed_json_num(g_ed.proj->map_config, "sunAngY", 54) / -180.0f);
+    const float t = (float) M_PI * ((float) ed_json_num(g_ed.proj->map_config, "sunAngX", 90) / -180.0f);
+    const float d = (float) ed_json_num(g_ed.proj->map_config, "lightD", 500);
     const vec3 c = v3(d * cosf(t), d * sinf(t) * sinf(u), d * sinf(t) * cosf(u));
     for (int i = 0; i < 3; i++) {
         const float a = (float) i * (float) M_PI / 3.0f;
@@ -513,7 +513,7 @@ static void draw_sun(void) {
     }
     push_circle(&g_lines, c, v3(1, 0, 0), v3(0, 0, 1), 20.0f, 6);
     vec4 col = g_render_lighting.light_color;
-    const cJSON *light = ed_json_path(g_ed.map_config, "light");
+    const cJSON *light = ed_json_path(g_ed.proj->map_config, "light");
     if (cJSON_IsString(light)) parse_hex_color(light->valuestring, &col);
     else if (cJSON_IsNumber(light)) col = hex_to_vec((int) cJSON_GetNumberValue(light));
     col.w = 1.0f;
@@ -523,10 +523,10 @@ static void draw_sun(void) {
 // ---------------------------------------------------------------------------
 // gizmo (TransformControls)
 
-static vec3 gizmo_origin(void) { return ed_obj_vec(g_ed.selected, "p", v3(0, 0, 0)); }
+static vec3 gizmo_origin(void) { return ed_obj_vec(g_ed.proj->selected, "p", v3(0, 0, 0)); }
 
 static float gizmo_scale(void) {
-    return vlen(vsub(gizmo_origin(), g_ed.camera.position)) / 6.0f; // distanceTo(camera) / 6 * size
+    return vlen(vsub(gizmo_origin(), g_ed.proj->camera.position)) / 6.0f; // distanceTo(camera) / 6 * size
 }
 
 static void gizmo_axes(vec3 axes[3]) {
@@ -534,9 +534,9 @@ static void gizmo_axes(vec3 axes[3]) {
     axes[1] = v3(0, 1, 0);
     axes[2] = v3(0, 0, 1);
     const int local = g_ed.transform_space == ED_SPACE_LOCAL || g_ed.transform_type == ED_SCALE;
-    if (local && g_ed.selected) {
+    if (local && g_ed.proj->selected) {
         float m[9];
-        ed_euler_matrix(ed_obj_vec(g_ed.selected, "r", v3(0, 0, 0)), m);
+        ed_euler_matrix(ed_obj_vec(g_ed.proj->selected, "r", v3(0, 0, 0)), m);
         for (int i = 0; i < 3; i++) axes[i] = rmul(m, axes[i]);
     }
 }
@@ -564,7 +564,7 @@ static float seg_dist(const float px, const float py, const float ax, const floa
 }
 
 int ed_gizmo_hit(const double fb_x, const double fb_y) {
-    if (!g_ed.selected) return 0;
+    if (!g_ed.proj->selected) return 0;
     vec3 axes[3];
     gizmo_axes(axes);
     const vec3 c = gizmo_origin();
@@ -639,7 +639,7 @@ static void push_cube(VertBuf *b, const vec3 c, const vec3 axes[3], const float 
 }
 
 static void draw_gizmo(void) {
-    if (!g_ed.selected) return;
+    if (!g_ed.proj->selected) return;
     vec3 axes[3];
     gizmo_axes(axes);
     const vec3 c = gizmo_origin();
@@ -690,7 +690,7 @@ static void draw_gizmo(void) {
 void ed_render_grid(void) {
     ed_render_init();
     if (!g_program) return;
-    mat4x4(g_ed.camera.projection_matrix, g_ed.camera.world_inverse_matrix, g_vp);
+    mat4x4(g_ed.proj->camera.projection_matrix, g_ed.proj->camera.world_inverse_matrix, g_vp);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDisable(GL_CULL_FACE);
@@ -703,7 +703,7 @@ void ed_render_grid(void) {
 void ed_render_overlays(void) {
     ed_render_init();
     if (!g_program) return;
-    mat4x4(g_ed.camera.projection_matrix, g_ed.camera.world_inverse_matrix, g_vp);
+    mat4x4(g_ed.proj->camera.projection_matrix, g_ed.proj->camera.world_inverse_matrix, g_vp);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDisable(GL_CULL_FACE);
@@ -720,12 +720,12 @@ void ed_render_overlays(void) {
     draw_arrows();
     draw_death_barrier();
     draw_sun();
-    if (g_ed.selected && !(editor_prefabs[g_ed.selected->prefab].flags & EP_HIDEBOUNDINGBOX)) {
+    if (g_ed.proj->selected && !(editor_prefabs[g_ed.proj->selected->prefab].flags & EP_HIDEBOUNDINGBOX)) {
         float m[16];
-        ed_obj_world_box(g_ed.selected, m);
+        ed_obj_world_box(g_ed.proj->selected, m);
         push_box_lines(&g_lines, m);
-        cJSON *c = ed_prop_get(g_ed.selected, "collidable");
-        const EditorPrefab *p = &editor_prefabs[g_ed.selected->prefab];
+        cJSON *c = ed_prop_get(g_ed.proj->selected, "collidable");
+        const EditorPrefab *p = &editor_prefabs[g_ed.proj->selected->prefab];
         const int hex = p->line_col >= 0 ? p->line_col : (p->flags & EP_TOOL) || cJSON_IsTrue(c) ? 0x00ff00 : 0x0000ff;
         cJSON_Delete(c);
         flush(&g_lines, GL_LINES, hex_rgba(hex, 1.0f), 0);
@@ -766,7 +766,7 @@ static vec3 drag_plane_normal(const int mask, const vec3 axes[3]) {
 }
 
 void ed_gizmo_begin(const double fb_x, const double fb_y, const int axis) {
-    EditorObject *o = g_ed.selected;
+    EditorObject *o = g_ed.proj->selected;
     if (!o || !axis) return;
     vec3 axes[3];
     gizmo_axes(axes);
@@ -788,7 +788,7 @@ static float snap(const float v, const float step) {
 
 void ed_gizmo_drag(const double fb_x, const double fb_y) {
     EditorGizmo *g = &g_ed.gizmo;
-    EditorObject *o = g_ed.selected;
+    EditorObject *o = g_ed.proj->selected;
     if (!g->active || !o) return;
     vec3 ro, rd, hit;
     ed_view_ray(fb_x, fb_y, &ro, &rd);
@@ -847,7 +847,7 @@ void ed_gizmo_drag(const double fb_x, const double fb_y) {
         ed_obj_set_vec(o, "r", euler_from_matrix(out));
     }
     ed_obj_rebuild(o);
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
     (void) rmul_t;
 }
 

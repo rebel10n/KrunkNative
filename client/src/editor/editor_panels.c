@@ -215,6 +215,7 @@ enum {
     TB_PLACEHOLDER, TB_GROUP_CREATE, TB_GROUP_STOP, TB_GROUP_STOP_ALL, TB_GROUP_COPY, TB_GROUP_CUT, TB_GROUP_PASTE,
     TB_PREFAB_JSON, TB_PREFAB_FILE, TB_PREFAB_EXPORT, TB_GROUP_EDIT, TB_CUSTOM,
     TB_ENVIRONMENT, TB_TERRAIN, TB_ZONE, TB_TOOLS, TB_TEST, TB_HOST, TB_QUICK_START, TB_CUSTOMIZE, TB_CONTROLS,
+    TB_PROJECT = 900, // + ED_PM_* (editor_project.c)
     TB_CREATE = 1000, // + prefab id
 };
 
@@ -229,6 +230,10 @@ static void toolbar_action(EdCtl *c) {
     const int a = c->arg;
     if (a >= TB_CREATE) {
         ed_obj_create(a - TB_CREATE);
+        return;
+    }
+    if (a >= TB_PROJECT) {
+        ed_project_menu(a - TB_PROJECT);
         return;
     }
     switch (a) {
@@ -311,7 +316,28 @@ void ed_toolbar_show(void) {
     tb_option(&b, "Save As", TB_SAVE_AS); tb_sep(&b);
     tb_rule(&b); tb_sep(&b);
     tb_option(&b, "New", TB_NEW); tb_sep(&b);
-    tb_option(&b, "Copy", TB_COPY);
+    tb_option(&b, "Copy", TB_COPY); tb_sep(&b);
+    // KrunkNative: several maps open at once (editor_project.c), detached views and the
+    // editor bus (editor_view.c, editor_bus_link.c)
+    tb_rule(&b); tb_sep(&b);
+    tb_menu_begin(&b, "Projects");
+    tb_option(&b, "New Project", TB_PROJECT + ED_PM_NEW); tb_sep(&b);
+    tb_option(&b, "Open Project...", TB_PROJECT + ED_PM_OPEN); tb_sep(&b);
+    tb_option(&b, "Save", TB_PROJECT + ED_PM_SAVE); tb_sep(&b);
+    tb_option(&b, "Save All", TB_PROJECT + ED_PM_SAVE_ALL); tb_sep(&b);
+    tb_option(&b, "Close", TB_PROJECT + ED_PM_CLOSE); tb_sep(&b);
+    tb_option(&b, "Next Project", TB_PROJECT + ED_PM_NEXT); tb_sep(&b);
+    tb_rule(&b); tb_sep(&b);
+#ifndef __EMSCRIPTEN__
+    tb_option(&b, "Detach View", TB_PROJECT + ED_PM_DETACH); tb_sep(&b);
+    tb_option(&b, "Open in New Window", TB_PROJECT + ED_PM_NEW_WINDOW); tb_sep(&b);
+    tb_rule(&b); tb_sep(&b);
+    tb_option(&b, ed_bus_active() ? "Editor Bus: On" : "Editor Bus: Off", TB_PROJECT + ED_PM_BUS); tb_sep(&b);
+    tb_option(&b, "MCP Access...", TB_PROJECT + ED_PM_ACCESS);
+#else
+    tb_option(&b, "Open in New Tab", TB_PROJECT + ED_PM_NEW_WINDOW);
+#endif
+    tb_end(&b);
     tb_end(&b); tb_sep(&b);
 
     tb_root_begin(&b, "Edit");
@@ -419,17 +445,21 @@ static void add_config_ctl(EdBuild *b, cJSON *target, const cJSON *w, const int 
 }
 
 void ed_panel_left_show(void) {
+    if (ed_project_background()) { // working on another project: rebuild once it is shown again
+        g_ed.ui_stale = 1;
+        return;
+    }
     if (g_locked[0] && strcmp(g_left_active, "essential")) return;
     snprintf(g_left_active, sizeof(g_left_active), "essential");
     EdBuild b;
     ed_gui_begin(&b, PANEL_LEFT);
     ed_gui_panel_buttons(&b, 0, "Essential", 0);
-    json_text(&b, "Name", g_ed.map_config, "name", "Name", 0, NULL);
-    json_text(&b, "Welcome Msg", g_ed.map_config, "welMsg", "Welcome", 0, NULL);
-    json_text(&b, "Mod URL", g_ed.map_config, "modURL", "Mod URL", 0, NULL);
+    json_text(&b, "Name", g_ed.proj->map_config, "name", "Name", 0, NULL);
+    json_text(&b, "Welcome Msg", g_ed.proj->map_config, "welMsg", "Welcome", 0, NULL);
+    json_text(&b, "Mod URL", g_ed.proj->map_config, "modURL", "Mod URL", 0, NULL);
     extern void ed_select_mod(EdCtl *);
     ed_gui_button(&b, "Select Mod", ed_select_mod);
-    json_slider(&b, "Death Height", g_ed.map_config, "dthY", -1000, 3000, 1, 0, on_death_height);
+    json_slider(&b, "Death Height", g_ed.proj->map_config, "dthY", -1000, 3000, 1, 0, on_death_height);
     ed_gui_rule(&b);
 
     ed_gui_folder_begin(&b, "Game", 0, 0, 0, "game");
@@ -440,11 +470,11 @@ void ed_panel_left_show(void) {
         cJSON_ArrayForEach(w, game) {
             if (cJSON_GetObjectItemCaseSensitive(w, "cost")) continue;
             if ((int) ed_json_num(w, "cat", 0) != cat) continue;
-            add_config_ctl(&b, g_ed.game_config, w, 1);
+            add_config_ctl(&b, g_ed.proj->game_config, w, 1);
         }
         ed_gui_folder_end(&b, 1);
     }
-    cJSON *modes = child_obj(g_ed.server_config, "modes");
+    cJSON *modes = child_obj(g_ed.proj->server_config, "modes");
     ed_gui_folder_begin(&b, "Modes", 1, 1, 0, "game.modes");
     int index = 0;
     const cJSON *m;
@@ -458,7 +488,7 @@ void ed_panel_left_show(void) {
         index++;
     }
     ed_gui_folder_end(&b, 1);
-    cJSON *classes = child_obj(g_ed.server_config, "classes");
+    cJSON *classes = child_obj(g_ed.proj->server_config, "classes");
     ed_gui_folder_begin(&b, "Classes", 1, 1, 0, "game.classes");
     index = 0;
     cJSON_ArrayForEach(m, editor_data_get("classes")) {
@@ -471,7 +501,7 @@ void ed_panel_left_show(void) {
         index++;
     }
     ed_gui_folder_end(&b, 1);
-    cJSON *settings = child_obj(g_ed.server_config, "settings");
+    cJSON *settings = child_obj(g_ed.proj->server_config, "settings");
     ed_gui_folder_begin(&b, "Settings", 1, 1, 0, "game.settings");
     cJSON_ArrayForEach(m, editor_data_get("serverConfig")) {
         if (cJSON_GetObjectItemCaseSensitive(m, "cost") || ed_json_truthy(cJSON_GetObjectItemCaseSensitive(m, "hideE"))) continue;
@@ -481,7 +511,7 @@ void ed_panel_left_show(void) {
     ed_gui_folder_end(&b, 0);
 
     ed_gui_folder_begin(&b, "Weapon Config", 0, 1, 0, "weapons");
-    cJSON *weps = child_obj(g_ed.server_config, "weps");
+    cJSON *weps = child_obj(g_ed.proj->server_config, "weps");
     index = 0;
     const cJSON *weapon;
     cJSON_ArrayForEach(weapon, editor_data_get("weapons")) {
@@ -531,6 +561,10 @@ int ed_panel_right_begin(EdBuild *b, const char *name) {
 }
 
 void ed_panel_right_blank(void) {
+    if (ed_project_background()) { // working on another project: rebuild once it is shown again
+        g_ed.ui_stale = 1;
+        return;
+    }
     if (!right_can_show("blank")) return;
     EdBuild b;
     right_begin(&b, "blank");
@@ -539,11 +573,11 @@ void ed_panel_right_blank(void) {
 }
 
 static void refresh_panel(EdCtl *c, const cJSON *v) { (void) c; (void) v; g_ed.dirty_panel = 1; }
-static void rebuild_sel(EdCtl *c, const cJSON *v) { (void) c; (void) v; if (g_ed.selected) ed_obj_rebuild(g_ed.selected); }
+static void rebuild_sel(EdCtl *c, const cJSON *v) { (void) c; (void) v; if (g_ed.proj->selected) ed_obj_rebuild(g_ed.proj->selected); }
 
 static void on_faces(EdCtl *c, const cJSON *v) {
     // object: e.objConfig.faces, key: index -> A.faces = objConfig.faces; A.regen()
-    EditorObject *o = g_ed.selected;
+    EditorObject *o = g_ed.proj->selected;
     if (!o) return;
     cJSON *faces = ed_prop_get(o, "faces");
     const int index = c->arg;
@@ -606,7 +640,7 @@ static const EdOption *skin_options(int *count) {
 
 static void regen_sel_panel(EdCtl *c, const cJSON *v) {
     (void) c; (void) v;
-    if (g_ed.selected) ed_obj_rebuild(g_ed.selected);
+    if (g_ed.proj->selected) ed_obj_rebuild(g_ed.proj->selected);
     g_ed.dirty_panel = 1;
 }
 
@@ -626,8 +660,12 @@ static void on_trigger_action(EdCtl *c, const cJSON *v) {
 }
 
 void ed_panel_right_object(void) {
+    if (ed_project_background()) { // working on another project: rebuild once it is shown again
+        g_ed.ui_stale = 1;
+        return;
+    }
     if (g_locked[1] && strcmp(g_right_active, "object")) return;
-    EditorObject *o = g_ed.selected;
+    EditorObject *o = g_ed.proj->selected;
     if (!o) {
         g_locked[1] = g_locked[1] && strcmp(g_right_active, "object") ? g_locked[1] : g_locked[1];
         ed_panel_right_blank();
@@ -1010,7 +1048,7 @@ static void env_changed(EdCtl *c, const cJSON *v) {
 static void env_color(EdBuild *b, const char *name, const char *key, const int sub) {
     // A[C] getters: stringifyColor(mapConfig[C]); setters store parseColor (a number)
     cJSON *tmp = cJSON_CreateObject();
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_ed.map_config, key);
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_ed.proj->map_config, key);
     char hex[16] = "#000000";
     if (cJSON_IsNumber(v)) snprintf(hex, sizeof(hex), "#%06x", (int) cJSON_GetNumberValue(v) & 0xffffff);
     else if (cJSON_IsString(v)) snprintf(hex, sizeof(hex), "%s", v->valuestring);
@@ -1030,14 +1068,14 @@ static void env_color(EdBuild *b, const char *name, const char *key, const int s
 void ed_env_color_changed(EdCtl *c, const cJSON *v) {
     if (!cJSON_IsString(v)) return;
     const int color = (int) strtol(v->valuestring + (v->valuestring[0] == '#'), NULL, 16);
-    ed_json_set_num(g_ed.map_config, c->path, color);
+    ed_json_set_num(g_ed.proj->map_config, c->path, color);
     editor_apply_lighting();
 }
 
 static void on_sky_mode(EdCtl *c, const cJSON *v) {
     (void) c;
     const int dome = (int) cJSON_GetNumberValue(v) != 0;
-    ed_json_set_bool(g_ed.map_config, "skyDome", dome);
+    ed_json_set_bool(g_ed.proj->map_config, "skyDome", dome);
     html_dom_set_display(html_dom_by_id("sky_0"), dome ? "none" : "");
     html_dom_set_display(html_dom_by_id("sky_1"), dome ? "" : "none");
     editor_apply_lighting();
@@ -1055,11 +1093,15 @@ static void div_begin(EdBuild *b, const char *id, const int show) {
 }
 
 void ed_panel_right_environment(void) {
+    if (ed_project_background()) { // working on another project: rebuild once it is shown again
+        g_ed.ui_stale = 1;
+        return;
+    }
     if (!right_can_show("environment")) return;
     EdBuild b;
     right_begin(&b, "environment");
     ed_gui_panel_buttons(&b, 1, "Environment", 0);
-    cJSON *mc = g_ed.map_config;
+    cJSON *mc = g_ed.proj->map_config;
     const int dome = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(mc, "skyDome"));
     static const EdOption sky[] = {{"Solid", 0, NULL}, {"Gradient", 1, NULL}};
     cJSON *tmp = cJSON_CreateObject();
@@ -1120,6 +1162,10 @@ void ed_panel_right_environment(void) {
 }
 
 void ed_panel_right_show(const char *name) {
+    if (ed_project_background()) { // working on another project: rebuild once it is shown again
+        g_ed.ui_stale = 1;
+        return;
+    }
     // e.resizable.restore(panel.right.restore)
     g_ed.panel_hidden[1] = 0;
     if (!strcmp(name, "environment")) ed_panel_right_environment();
@@ -1130,6 +1176,10 @@ void ed_panel_right_show(const char *name) {
 }
 
 void ed_panel_refresh_all(void) {
+    if (ed_project_background()) { // working on another project: rebuild once it is shown again
+        g_ed.ui_stale = 1;
+        return;
+    }
     ed_panel_left_show();
     if (!strcmp(g_right_active, "object")) ed_panel_right_object();
     else ed_panel_right_show(g_right_active);

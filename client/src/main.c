@@ -210,10 +210,17 @@ static int g_skip_scroll;
 static vec2 g_look;
 static int g_look_valid;
 
+static void print_usage_to(FILE *out, const char *program) {
+    fprintf(out, "Usage: %s [--offline] [--headless] [--windowed|--fullscreen|--borderless] [--hub|--viewer [query]]\n"
+                 "          [--brain <url>] [--connect <host[:port]>] [map.json]\n"
+                 "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
+                 "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
+                 "       %s --help\n", program, program, program, program);
+    editor_usage(out); // client/src/editor/editor_bus_link.c
+}
+
 static void print_usage(const char *program) {
-    fprintf(stderr, "Usage: %s [--offline] [--headless] [--windowed|--fullscreen|--borderless] [--hub|--editor|--viewer [query]]\n"
-                    "          [--brain <url>] [--connect <host[:port]>] [map.json]\n"
-                    "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n", program, program);
+    print_usage_to(stderr, program);
 }
 
 #ifdef __EMSCRIPTEN__
@@ -317,6 +324,10 @@ static int parse_startup_args(int argc, char **argv, int *offline, const char **
     *scenario_out = NULL;
 
     for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+            print_usage_to(stdout, argv[0]);
+            exit(0);
+        }
         if (!strcmp(argv[i], "--offline")) {
             *offline = 1;
         } else if (!strcmp(argv[i], "--windowed") || !strcmp(argv[i], "--fullscreen") || !strcmp(argv[i], "--borderless")) {

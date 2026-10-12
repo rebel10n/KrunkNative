@@ -94,7 +94,7 @@ int editor_setting_bool(const char *key) { return ed_json_truthy(cJSON_GetObject
 // lighting (render.js initScene with the editor's mapConfig; same formulas as main.c)
 
 static vec4 config_color(const char *key, const vec4 fallback) {
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_ed.map_config, key);
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_ed.proj->map_config, key);
     vec4 c = fallback;
     if (cJSON_IsNumber(v)) c = hex_to_vec((int) cJSON_GetNumberValue(v));
     else if (cJSON_IsString(v)) parse_hex_color(v->valuestring, &c);
@@ -105,23 +105,24 @@ void editor_apply_lighting(void) {
     RenderLighting *l = &g_render_lighting;
     const vec4 black = {0, 0, 0, 1};
     l->ambient_color = config_color("ambient", black);
-    l->ambient_intensity = (float) ed_json_num(g_ed.map_config, "ambientI", 1.0);
+    l->ambient_intensity = (float) ed_json_num(g_ed.proj->map_config, "ambientI", 1.0);
     l->light_color = config_color("light", black);
-    l->light_intensity = (float) ed_json_num(g_ed.map_config, "lightI", 1.3);
+    l->light_intensity = (float) ed_json_num(g_ed.proj->map_config, "lightI", 1.3);
     l->sky_color = config_color("sky", (vec4) {0.863f, 0.910f, 0.929f, 1});
     l->fog_color = config_color("fog", (vec4) {1, 1, 1, 1});
     l->fog_near = 1.0f;
-    l->fog_far = (float) ed_json_num(g_ed.map_config, "fogD", 2000);
+    l->fog_far = (float) ed_json_num(g_ed.proj->map_config, "fogD", 2000);
     l->fog_enabled = l->fog_far > l->fog_near;
     l->enabled = 1;
-    const float u = (float) M_PI * ((float) ed_json_num(g_ed.map_config, "sunAngY", 54) / -180.0f);
-    const float v = (float) M_PI * ((float) ed_json_num(g_ed.map_config, "sunAngX", 90) / -180.0f);
+    const float u = (float) M_PI * ((float) ed_json_num(g_ed.proj->map_config, "sunAngY", 54) / -180.0f);
+    const float v = (float) M_PI * ((float) ed_json_num(g_ed.proj->map_config, "sunAngX", 90) / -180.0f);
     vec3 d = {cosf(v), sinf(v) * sinf(u), sinf(v) * cosf(u)};
     const float len = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
     if (len > 0) d = (vec3) {d.x / len, d.y / len, d.z / len};
     l->light_direction = d;
+    g_ed.lighting_owner = g_ed.proj;
     // the sky dome reads the same keys (skyDome, skyDomeCol0..2, ...) as a map does
-    sky_load(ed_json_truthy(cJSON_GetObjectItemCaseSensitive(g_ed.map_config, "skyDome")) ? g_ed.map_config : NULL);
+    sky_load(ed_json_truthy(cJSON_GetObjectItemCaseSensitive(g_ed.proj->map_config, "skyDome")) ? g_ed.proj->map_config : NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +132,9 @@ void editor_message(const char *text) {
     // doWarning-style line in #chatList (Krunker would alert())
     const HtmlElem list = html_dom_by_id("chatList");
     fprintf(stderr, "[editor] %s\n", text);
+    char line[600];
+    snprintf(line, sizeof(line), "[editor] %s", text);
+    ed_log_line(line);
     if (!list) return;
     EdBuf b;
     edb_init(&b);
@@ -169,7 +173,7 @@ static void warning_check_objects(void) {
     const cJSON *limits = editor_data_get("limits");
     const int col_limit = (int) ed_json_num(limits, "objectColLimit", 3500), limit = (int) ed_json_num(limits, "objectLimit", 5000);
     const int col_limit_f = 6000, limit_f = 7500; // config.objectColLimitF / objectLimitF
-    const int col = g_ed.obj_count[1], all = g_ed.obj_count[0] + g_ed.obj_count[1];
+    const int col = g_ed.proj->obj_count[1], all = g_ed.proj->obj_count[0] + g_ed.proj->obj_count[1];
     char text[160];
     snprintf(text, sizeof(text), "Collidable Object limit of %d exceeded (Current: %d)", col_limit, col);
     do_warning("objects_col", col > col_limit, text);
@@ -185,11 +189,11 @@ void editor_update_object_count(void) {
     warning_check_objects();
     char buf[32];
     const cJSON *limits = editor_data_get("limits");
-    snprintf(buf, sizeof(buf), "%d / %d", g_ed.obj_count[2], (int) ed_json_num(limits, "spawnLimit", 20));
+    snprintf(buf, sizeof(buf), "%d / %d", g_ed.proj->obj_count[2], (int) ed_json_num(limits, "spawnLimit", 20));
     html_dom_set_text(html_dom_by_id("spawnCount"), buf);
-    snprintf(buf, sizeof(buf), "%d", g_ed.obj_count[1]);
+    snprintf(buf, sizeof(buf), "%d", g_ed.proj->obj_count[1]);
     html_dom_set_text(html_dom_by_id("objectCount"), buf);
-    snprintf(buf, sizeof(buf), "%d", g_ed.obj_count[0]);
+    snprintf(buf, sizeof(buf), "%d", g_ed.proj->obj_count[0]);
     html_dom_set_text(html_dom_by_id("objectNoColCount"), buf);
 }
 
@@ -220,8 +224,8 @@ void editor_update_group_selection(void) {
     option_toggle("groupOption", "Group Selection", g_ed.group_selection);
     if (!g_ed.group_selection) {
         ed_group_from_pending(); // the picked objects become a group
-        for (size_t i = 0; i < g_ed.count; i++) g_ed.objects[i]->highlighted = 0;
-        g_ed.pending_count = 0;
+        for (size_t i = 0; i < g_ed.proj->count; i++) g_ed.proj->objects[i]->highlighted = 0;
+        g_ed.proj->pending_count = 0;
     }
 }
 
@@ -262,14 +266,14 @@ void editor_frame_object(EditorObject *o) {
     const float r = sqrtf(s.x * s.x + s.y * s.y + s.z * s.z) / 2.0f;
     vec3 f;
     editor_camera_dir(&f, NULL, NULL);
-    g_ed.camera.position = (vec3) {c.x - f.x * r * 2, c.y - f.y * r * 2, c.z - f.z * r * 2};
+    g_ed.proj->camera.position = (vec3) {c.x - f.x * r * 2, c.y - f.y * r * 2, c.z - f.z * r * 2};
 }
 
 vec3 editor_near_position(void) {
     // getNearPosition: camera position + (0, -5, -30) rotated by the camera, rounded
     vec3 f, r, u;
     editor_camera_dir(&f, &r, &u);
-    const vec3 p = g_ed.camera.position;
+    const vec3 p = g_ed.proj->camera.position;
     return (vec3) {roundf(p.x - u.x * 5 + f.x * 30), roundf(p.y - u.y * 5 + f.y * 30), roundf(p.z - u.z * 5 + f.z * 30)};
 }
 
@@ -287,9 +291,9 @@ void editor_test_map(const int host) {
         // camera at [0, 0, 0] (usually inside the floor: a flat fog-grey menu). For Test
         // Map only, use the editor's camera instead; exports stay as Krunker writes them.
         cJSON *cam = cJSON_CreateArray();
-        cJSON_AddItemToArray(cam, cJSON_CreateNumber(ed_round(g_ed.camera.position.x, 2)));
-        cJSON_AddItemToArray(cam, cJSON_CreateNumber(ed_round(g_ed.camera.position.y, 2)));
-        cJSON_AddItemToArray(cam, cJSON_CreateNumber(ed_round(g_ed.camera.position.z, 2)));
+        cJSON_AddItemToArray(cam, cJSON_CreateNumber(ed_round(g_ed.proj->camera.position.x, 2)));
+        cJSON_AddItemToArray(cam, cJSON_CreateNumber(ed_round(g_ed.proj->camera.position.y, 2)));
+        cJSON_AddItemToArray(cam, cJSON_CreateNumber(ed_round(g_ed.proj->camera.position.z, 2)));
         cJSON_AddItemToObject(map, "camPos", cam);
     }
     if (map) app_test_map(g_ed.client, map, APP_MODE_EDITOR);
@@ -550,6 +554,7 @@ static void install_handlers(void) {
     ed_prompt_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_net_install(table, &count, sizeof(table) / sizeof(table[0])); // after the own entries: openPub
     ed_quickgui_install(table, &count, sizeof(table) / sizeof(table[0]));
+    ed_project_install(table, &count, sizeof(table) / sizeof(table[0]));
     html_ui_set_handlers(table, count, NULL, h_fallback);
     html_ui_set_listener(NULL, "keydown", h_keydown);
     html_ui_set_listener(NULL, "knpointerdown", l_page_pointer);
@@ -573,18 +578,73 @@ static void wire_canvas_buttons(void) {
 // ---------------------------------------------------------------------------
 // AppPage hooks
 
+#ifndef __EMSCRIPTEN__
+// window close with unsaved projects: ask first (the answer closes the window)
+static GLFWwindowclosefun g_prev_close;
+
+static void window_close_cb(GLFWwindow *window) {
+    if (g_ed.active && !ed_project_confirm_quit()) glfwSetWindowShouldClose(window, GLFW_FALSE);
+    else if (g_prev_close) g_prev_close(window);
+}
+#endif
+
+// the map(s) to start with: `--editor a.json b.json`, ?map=<name>, else the autosave
+static void open_start_projects(const char *query) {
+    int opened = 0;
+    for (int i = 0; i < editor_cli_file_count(); i++) {
+        if (ed_project_open_file(editor_cli_file(i), !opened)) opened++;
+    }
+    const char *map = query ? strstr(query, "map=") : NULL;
+    if (map) {
+        char name[128];
+        size_t i = 0;
+        for (map += 4; *map && *map != '&' && i + 1 < sizeof(name); map++) name[i++] = *map;
+        name[i] = 0;
+        char rel[192];
+        snprintf(rel, sizeof(rel), "maps/%s%s", name, strstr(name, ".json") ? "" : ".json");
+        char *path = concat(assets_path(), rel);
+        EditorProject *p = path ? ed_project_open_file(path, !opened) : NULL;
+        free(path);
+        if (p) {
+            // a hub/URL map edits a copy: Save asks where (never over the game's assets)
+            p->path[0] = 0;
+            p->name[0] = 0;
+            opened++;
+        }
+    }
+#ifdef __EMSCRIPTEN__
+    // web "Open in New Tab": the map came through storage (editor_view.c)
+    if (query && strstr(query, "handoff=1")) {
+        const int n = html_storage_get("knEditorHandoff", NULL, 0);
+        char *text = n > 0 ? malloc((size_t) n + 1) : NULL;
+        if (text) {
+            html_storage_get("knEditorHandoff", text, (size_t) n + 1);
+            html_storage_set("knEditorHandoff", NULL);
+            if (ed_project_open_text(text, NULL, !opened)) opened++;
+            free(text);
+        }
+    }
+#endif
+    if (opened) return;
+    EditorProject *p = ed_project_create();
+    ed_project_activate(p);
+    if (!(query && strstr(query, "new")) && ed_map_restore()) {
+        ed_history_clear();
+    } else {
+        editor_apply_lighting();
+        ed_terrain_regen();
+        ed_zone_regen();
+    }
+    p->dirty = 0;
+    p->saved_revision = p->revision;
+}
+
 static void page_enter(Client *client, const char *query) {
     memset(&g_ed, 0, sizeof(g_ed));
     g_ed.client = client;
     g_ed.active = 1;
     g_ed.window_index = -1;
     g_ed.snapping = 1;
-    g_ed.scene = scene_init();
-    g_ed.camera.zoom = 1.0f;
-    g_ed.camera.fov = 70.0f * (float) M_PI / 180.0f; // PerspectiveCamera(70, aspect, 1, 10000)
-    g_ed.camera.near = 1.0f;
-    g_ed.camera.far = 10000.0f;
-    g_ed.camera.position = (vec3) {0, 50, 100};
     g_ed.el_container = html_dom_by_id("container");
     g_ed.el_center = html_dom_by_id("center");
     // web: page drags (resize handles, number fields, colour picker, Quick GUI title) come
@@ -604,7 +664,6 @@ static void page_enter(Client *client, const char *query) {
                                 "\"breakableCollision\":false,\"plannerXDir\":0,\"plannerYDir\":0,\"plannerZDir\":0,"
                                 "\"plannerXSpace\":0,\"plannerYSpace\":0,\"plannerZSpace\":0,\"plannerSize\":10,"
                                 "\"plannerColor\":\"#460050\",\"objectPainter\":false,\"objectPainterJson\":\"\",\"groupReflectDir\":0}");
-    ed_map_defaults();
     install_handlers();
     wire_canvas_buttons();
 
@@ -613,37 +672,8 @@ static void page_enter(Client *client, const char *query) {
     html_dom_set_text(html_dom_by_id("versionTxt"), version);
     editor_toggle_menu(0);
 
-    // the map: ?map=<name> (assets/maps), ?new, else the autosave (knEditorMap / mapToEdit)
-    const char *map = query ? strstr(query, "map=") : NULL;
-    int loaded = 0;
-    if (map) {
-        char name[128];
-        size_t i = 0;
-        for (map += 4; *map && *map != '&' && i + 1 < sizeof(name); map++) name[i++] = *map;
-        name[i] = 0;
-        char rel[192];
-        snprintf(rel, sizeof(rel), "maps/%s%s", name, strstr(name, ".json") ? "" : ".json");
-        char *path = concat(assets_path(), rel);
-        unsigned char *buf = NULL;
-        size_t len = 0;
-        if (path && ensure_asset_file(path) && !read_file(path, &buf, &len)) {
-            char *text = malloc(len + 1);
-            if (text) {
-                memcpy(text, buf, len);
-                text[len] = 0;
-                loaded = ed_map_import(text);
-                free(text);
-            }
-            free(buf);
-        }
-        free(path);
-    }
-    if (!loaded && !(query && strstr(query, "new"))) loaded = ed_map_restore();
-    if (!loaded) {
-        editor_apply_lighting();
-        ed_terrain_regen();
-        ed_zone_regen();
-    }
+    open_start_projects(query);
+    if (g_ed.project_count) ed_project_activate(g_ed.projects[0]);
 
     ed_toolbar_show();
     ed_panel_left_show();
@@ -656,32 +686,35 @@ static void page_enter(Client *client, const char *query) {
     editor_update_object_count();
     scale_ui();
     relayout_center();
-    fprintf(stderr, "[editor] entered (query \"%s\"), %zu objects\n", query ? query : "", g_ed.count);
+    g_ed.dirty_tabs = 1;
+#ifndef __EMSCRIPTEN__
+    if (client && client->window) g_prev_close = glfwSetWindowCloseCallback(client->window, window_close_cb);
+#endif
+    ed_bus_start(); // --mcp-bus / --editor-mcp (editor_bus_link.c)
+    fprintf(stderr, "[editor] entered (query \"%s\"), %zu project%s, %zu objects\n", query ? query : "", g_ed.project_count,
+            g_ed.project_count == 1 ? "" : "s", g_ed.proj ? g_ed.proj->count : 0);
 }
 
 static void page_leave(Client *client) {
     (void) client;
     if (!g_ed.active) return;
-    ed_map_store();
+    ed_bus_stop();
+    ed_views_fini();
+#ifndef __EMSCRIPTEN__
+    if (g_ed.client && g_ed.client->window) glfwSetWindowCloseCallback(g_ed.client->window, g_prev_close);
+    g_prev_close = NULL;
+#endif
+    if (g_ed.proj) ed_map_store();
     ed_quickgui_reset();
     ed_net_reset();
+    ed_prompt_reset();
     if (g_ed.looking) glfwSetInputMode(g_ed.client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    ed_objects_clear();
-    ed_history_clear();
-    ed_terrain_fini();
+    g_ed.active = 0;
+    ed_projects_fini();
     ed_render_fini();
-    free(g_ed.scene ? g_ed.scene->meshes : NULL);
-    free(g_ed.scene);
-    cJSON_Delete(g_ed.map_config);
-    cJSON_Delete(g_ed.game_config);
-    cJSON_Delete(g_ed.server_config);
     cJSON_Delete(g_ed.settings);
     cJSON_Delete(g_ed.advanced);
-    cJSON_Delete(g_ed.extra_map);
     cJSON_Delete(g_ed.copy);
-    free(g_ed.pending_group);
-    free(g_ed.undos);
-    free(g_ed.redos);
     sky_load(NULL);
     memset(&g_ed, 0, sizeof(g_ed));
 }
@@ -699,14 +732,15 @@ static void move_camera(const float dt) {
     const float speed = (float) editor_setting_num(g_ed.move_sprint ? "speedSprint" : "speedNormal", g_ed.move_sprint ? 180 : 70);
     vec3 f, r, u;
     editor_camera_dir(&f, &r, &u);
-    vec3 *p = &g_ed.camera.position;
+    vec3 *p = &g_ed.proj->camera.position;
     p->x += (r.x * x + u.x * y - f.x * z) * speed * dt;
     p->y += (r.y * x + u.y * y - f.y * z) * speed * dt;
     p->z += (r.z * x + u.z * y - f.z * z) * speed * dt;
 }
 
 // KRUNKNATIVE_EDITOR_SCRIPT="cmd;cmd;..." (screenshot parity tests, like input_script.c):
-// run once ~1 s after the page is entered. Commands: window:N (showWindow), ctab:N /
+// run once ~1 s after the page is entered. Commands: tab:I, newproject, detach, bus (projects,
+// views and the editor bus), window:N (showWindow), ctab:N /
 // stab:N (Controls / Settings tab), quickedit, select:I (object index), panel:NAME (right
 // panel), menu:I[:J] (open toolbar root I and its sub-menu J), open:ID (folder header id).
 void ed_window_set_tabs(int controls, int settings, int quick_edit);
@@ -873,7 +907,15 @@ static void run_script(void) {
     for (char *cmd = strtok(buf, ";"); cmd; cmd = strtok(NULL, ";")) {
         char *arg = strchr(cmd, ':');
         if (arg) *arg++ = 0;
-        if (!strcmp(cmd, "ctab")) ed_window_set_tabs(atoi(arg), -1, -1);
+        // projects / views (editor_project.c, editor_view.c): tab:I shows project index I,
+        // newproject, detach (a view of the shown project), bus (toggle the editor bus)
+        if (!strcmp(cmd, "tab") && arg) {
+            const size_t i = (size_t) atoi(arg);
+            if (i < g_ed.project_count) ed_project_activate(g_ed.projects[i]);
+        } else if (!strcmp(cmd, "newproject")) ed_project_new(1);
+        else if (!strcmp(cmd, "detach")) ed_view_open(g_ed.shown);
+        else if (!strcmp(cmd, "bus")) ed_bus_toggle();
+        else if (!strcmp(cmd, "ctab")) ed_window_set_tabs(atoi(arg), -1, -1);
         else if (!strcmp(cmd, "stab")) ed_window_set_tabs(-1, atoi(arg), -1);
         else if (!strcmp(cmd, "quickedit")) ed_window_set_tabs(-1, -1, 1);
         else if (!strcmp(cmd, "window")) editor_show_window(atoi(arg));
@@ -887,7 +929,7 @@ static void run_script(void) {
         }
         else if (!strcmp(cmd, "select")) {
             const size_t i = (size_t) atoi(arg);
-            if (i < g_ed.count) ed_obj_select(g_ed.objects[i]);
+            if (i < g_ed.proj->count) ed_obj_select(g_ed.proj->objects[i]);
             g_ed.dirty_panel = 0;
             ed_panel_right_object();
         } else if (!strcmp(cmd, "panel")) ed_panel_right_show(arg);
@@ -896,14 +938,14 @@ static void run_script(void) {
             int i = 0;
             float qx = 0, qy = 0;
             const float s = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
-            if (sscanf(arg, "%d:%f:%f", &i, &qx, &qy) == 3 && i >= 0 && (size_t) i < g_ed.count) ed_quickgui_show(g_ed.objects[i], qx * s, qy * s);
+            if (sscanf(arg, "%d:%f:%f", &i, &qx, &qy) == 3 && i >= 0 && (size_t) i < g_ed.proj->count) ed_quickgui_show(g_ed.proj->objects[i], qx * s, qy * s);
         } else if (!strcmp(cmd, "qgaction") && arg) {
             HtmlArg a = {HTML_ARG_NUM, atof(arg), NULL};
             HtmlEvent ev = {.type = "click"};
             html_ui_dispatch("KE.quickGUI.action", &ev, &a, 1);
         } else if (!strcmp(cmd, "fix") && arg) {
             const size_t i = (size_t) atoi(arg);
-            if (i < g_ed.count) ed_fix_hitbox(g_ed.objects[i]);
+            if (i < g_ed.proj->count) ed_fix_hitbox(g_ed.proj->objects[i]);
         } else if (!strcmp(cmd, "setting") && arg) {
             // setting:key:json
             char *v = strchr(arg, ':');
@@ -918,17 +960,17 @@ static void run_script(void) {
         } else if (!strcmp(cmd, "objdump") && arg) {
             // objdump:<file>: every object's serialization, one per line
             FILE *f = fopen(arg, "w");
-            for (size_t i = 0; f && i < g_ed.count; i++) {
-                char *t = cJSON_PrintUnformatted(g_ed.objects[i]->data);
-                fprintf(f, "%s %s\n", editor_prefabs[g_ed.objects[i]->prefab].name, t ? t : "");
+            for (size_t i = 0; f && i < g_ed.proj->count; i++) {
+                char *t = cJSON_PrintUnformatted(g_ed.proj->objects[i]->data);
+                fprintf(f, "%s %s\n", editor_prefabs[g_ed.proj->objects[i]->prefab].name, t ? t : "");
                 free(t);
             }
-            for (size_t i = 0; f && i < g_ed.group_count; i++) fprintf(f, "GROUP owner=%u members=%zu\n", g_ed.groups[i].owner, g_ed.groups[i].count);
+            for (size_t i = 0; f && i < g_ed.proj->group_count; i++) fprintf(f, "GROUP owner=%u members=%zu\n", g_ed.proj->groups[i].owner, g_ed.proj->groups[i].count);
             if (f) fclose(f);
         } else if (!strcmp(cmd, "copyobjs") && arg) {
             // copyobjs:I:cut:group (copyObjects with object I as the placeholder)
             int i = 0, cut = 0, grp = 0;
-            if (sscanf(arg, "%d:%d:%d", &i, &cut, &grp) >= 1 && i >= 0 && (size_t) i < g_ed.count) ed_copy_objects(cut, grp, g_ed.objects[i]);
+            if (sscanf(arg, "%d:%d:%d", &i, &cut, &grp) >= 1 && i >= 0 && (size_t) i < g_ed.proj->count) ed_copy_objects(cut, grp, g_ed.proj->objects[i]);
         }
         else if (!strcmp(cmd, "open")) {
             const HtmlElem h = html_dom_by_id(arg);
@@ -962,6 +1004,8 @@ static void page_tick(Client *client, const float now, const float dt) {
     (void) client;
     if (!g_ed.active) return;
     g_ed.now = now;
+    if (!g_ed.proj) ed_project_new(1);
+    ed_bus_poll(); // bus requests run between frames, on whichever project they name
     if (!g_ed.script_done && g_ed.script_at == 0.0) g_ed.script_at = now + 1.0;
     if (!g_ed.script_done && now >= g_ed.script_at) {
         g_ed.script_done = 1;
@@ -969,26 +1013,28 @@ static void page_tick(Client *client, const float now, const float dt) {
     }
     update_view_rect();
     move_camera(fminf(dt, 0.1f));
-    if (now >= g_ed.history_next) {
+    if (now >= g_ed.proj->history_next) {
         ed_history_poll(); // initHistory: once a second
-        g_ed.history_next = now + 1.0;
+        g_ed.proj->history_next = now + 1.0;
     }
     ed_groups_sync();
     if (g_ed.dirty_panel) {
         g_ed.dirty_panel = 0;
-        if (g_ed.selected) ed_panel_right_object();
+        if (g_ed.proj->selected) ed_panel_right_object();
         else if (!strcmp(ed_panel_right_active(), "object")) ed_panel_right_blank();
     }
     if (g_ed.dirty_counts) {
         g_ed.dirty_counts = 0;
         editor_update_object_count();
     }
+    if (g_ed.dirty_tabs) ed_tabs_render();
     if (g_ed.dirty_storage && now >= g_ed.storage_next) {
         g_ed.dirty_storage = 0;
         g_ed.storage_next = now + 2.0;
         ed_map_store();
     }
 
+    ed_view_frame(now, dt); // detached views (editor_view.c); restores the main window's context
     // body: rgba(0, 0, 0, 0.7) over the browser's white page outside the panels
     glClearColor(0.302f, 0.302f, 0.302f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1001,17 +1047,17 @@ static void page_tick(Client *client, const float now, const float dt) {
     glClearColor(sky.x, sky.y, sky.z, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    g_ed.camera.rotation = (vec3) {g_ed.pitch, g_ed.yaw, 0.0f};
-    camera_update_projection_matrix(&g_ed.camera, (float) g_ed.view_w / (float) g_ed.view_h);
-    camera_update_world_inverse_matrix(&g_ed.camera);
-    for (size_t i = 0; i < g_ed.count; i++) {
-        Object *o = g_ed.objects[i]->render_map && g_ed.objects[i]->render_map->object_count ? g_ed.objects[i]->render_map->objects[0] : NULL;
+    g_ed.proj->camera.rotation = (vec3) {g_ed.proj->pitch, g_ed.proj->yaw, 0.0f};
+    camera_update_projection_matrix(&g_ed.proj->camera, (float) g_ed.view_w / (float) g_ed.view_h);
+    camera_update_world_inverse_matrix(&g_ed.proj->camera);
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        Object *o = g_ed.proj->objects[i]->render_map && g_ed.proj->objects[i]->render_map->object_count ? g_ed.proj->objects[i]->render_map->objects[0] : NULL;
         if (o) client_animate_object_texture(o, now);
     }
     sky_tick(dt * 1000.0f);
-    sky_render(&g_ed.camera);
+    sky_render(&g_ed.proj->camera);
     ed_render_grid();
-    scene_render(g_ed.scene, &g_ed.camera);
+    scene_render(g_ed.proj->scene, &g_ed.proj->camera);
     ed_render_overlays();
     ed_net_frame(); // publish thumbnail: the view just drawn
 
@@ -1029,7 +1075,7 @@ static void start_look(const int on) {
 static void canvas_click(const double x, const double y, const int quick) {
     // container mousedown, left button (or the Quick GUI button: quick): face toggle /
     // group pick / Quick GUI / object painter / select / deselect
-    if (g_ed.selected && !quick) {
+    if (g_ed.proj->selected && !quick) {
         const int axis = ed_gizmo_hit(x, y);
         if (axis) {
             ed_gizmo_begin(x, y, axis);
@@ -1055,19 +1101,19 @@ static void canvas_click(const double x, const double y, const int quick) {
     }
     if (g_ed.group_selection) {
         size_t i = 0;
-        for (; i < g_ed.pending_count; i++) if (g_ed.pending_group[i] == o->uuid) break;
-        if (i < g_ed.pending_count) {
-            g_ed.pending_group[i] = g_ed.pending_group[--g_ed.pending_count];
+        for (; i < g_ed.proj->pending_count; i++) if (g_ed.proj->pending_group[i] == o->uuid) break;
+        if (i < g_ed.proj->pending_count) {
+            g_ed.proj->pending_group[i] = g_ed.proj->pending_group[--g_ed.proj->pending_count];
             o->highlighted = 0;
         } else {
-            if (g_ed.pending_count == g_ed.pending_cap) {
-                const size_t cap = g_ed.pending_cap ? g_ed.pending_cap * 2 : 32;
-                uint32_t *n = realloc(g_ed.pending_group, cap * sizeof(uint32_t));
+            if (g_ed.proj->pending_count == g_ed.proj->pending_cap) {
+                const size_t cap = g_ed.proj->pending_cap ? g_ed.proj->pending_cap * 2 : 32;
+                uint32_t *n = realloc(g_ed.proj->pending_group, cap * sizeof(uint32_t));
                 if (!n) return;
-                g_ed.pending_group = n;
-                g_ed.pending_cap = cap;
+                g_ed.proj->pending_group = n;
+                g_ed.proj->pending_cap = cap;
             }
-            g_ed.pending_group[g_ed.pending_count++] = o->uuid;
+            g_ed.proj->pending_group[g_ed.proj->pending_count++] = o->uuid;
             o->highlighted = 1;
         }
     }
@@ -1152,17 +1198,17 @@ static int page_cursor(Client *client, const double x, const double y) {
     if (g_ed.looking) {
         // PointerLockControls: movementX/Y * 0.002 (CSS px)
         const float s = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
-        g_ed.yaw -= (float) (dx / s) * 0.002f;
-        g_ed.pitch -= (float) (dy / s) * 0.002f;
+        g_ed.proj->yaw -= (float) (dx / s) * 0.002f;
+        g_ed.proj->pitch -= (float) (dy / s) * 0.002f;
         const float lim = (float) M_PI / 2.0f;
-        g_ed.pitch = fmaxf(-lim, fminf(lim, g_ed.pitch));
+        g_ed.proj->pitch = fmaxf(-lim, fminf(lim, g_ed.proj->pitch));
         return 1;
     }
     if (g_ed.gizmo.active) {
         ed_gizmo_drag(x, y);
         return 1;
     }
-    g_ed.gizmo.hover = g_ed.selected && in_view(x, y) ? ed_gizmo_hit(x, y) : 0;
+    g_ed.gizmo.hover = g_ed.proj->selected && in_view(x, y) ? ed_gizmo_hit(x, y) : 0;
     return 0;
 }
 
@@ -1173,9 +1219,9 @@ static int page_scroll(Client *client, const double dx, const double dy) {
     vec3 f;
     editor_camera_dir(&f, NULL, NULL);
     const float step = (float) editor_setting_num("speedNormal", 70) * (1.0f / 60.0f) * 5.0f * (dy > 0 ? 1.0f : -1.0f);
-    g_ed.camera.position.x += f.x * step;
-    g_ed.camera.position.y += f.y * step;
-    g_ed.camera.position.z += f.z * step;
+    g_ed.proj->camera.position.x += f.x * step;
+    g_ed.proj->camera.position.y += f.y * step;
+    g_ed.proj->camera.position.z += f.z * step;
     return 1;
 }
 
@@ -1202,6 +1248,7 @@ static int page_key(Client *client, const int key, const int scancode, const int
         set_move(key, mods, 0);
         return 0;
     }
+    if (action == GLFW_PRESS && ed_project_key(key, mods)) return 1; // Ctrl+Tab, Ctrl+S, ... (editor_project.c)
     if (key == GLFW_KEY_ESCAPE) {
         if (ed_prompt_open()) {
             ed_prompt_cancel();
@@ -1251,7 +1298,7 @@ static int page_key(Client *client, const int key, const int scancode, const int
         case GLFW_KEY_G:
             if (shift) {
                 if (mods & GLFW_MOD_ALT) ed_group_stop(1);
-                else if (g_ed.selected && ed_group_of(g_ed.selected)) ed_group_stop(0);
+                else if (g_ed.proj->selected && ed_group_of(g_ed.proj->selected)) ed_group_stop(0);
                 else ed_group_create();
             }
             break;

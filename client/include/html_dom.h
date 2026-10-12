@@ -116,6 +116,13 @@ void html_page_set_url(const char *href, int push);     // history.replaceState 
 void html_page_origin(char *buf, size_t n);             // location.protocol + "//" + location.host; native: the public site (KN_PUBLIC_ORIGIN)
 void html_clipboard_write(const char *text);            // UTILS.copyToClipboard: web navigator.clipboard, native the OS clipboard
 
+// ---- cross-window channel: web, a BroadcastChannel between same-origin tabs (the editor's
+// tabs share their clipboard and project lists over it); natively unavailable (0 / NULL):
+// native editor windows talk over the editor bus (shared/include/editor_bus.h). Text messages.
+int   html_channel_open(const char *name);                  // 1 when available
+void  html_channel_post(const char *name, const char *text); // to every other tab on the channel
+char *html_channel_take(const char *name);                  // next received message (malloc'd) or NULL
+
 // ---- storage (localStorage equivalent): native $XDG_CONFIG_HOME/krunknative/<key>.json, web localStorage
 int  html_storage_get(const char *key, char *buf, size_t n);          // -1 if absent
 void html_storage_set(const char *key, const char *value);

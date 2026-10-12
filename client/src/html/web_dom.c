@@ -266,6 +266,34 @@ EM_JS(char *, kn_js_storage_get, (const char *key), {
     } catch (e) { return 0; }
 });
 
+// cross-tab channel (html_channel_*): one BroadcastChannel per name, received messages queued
+// for C to take
+EM_JS(int, kn_js_channel_open, (const char *name), {
+    try {
+        var n = UTF8ToString(name);
+        var all = Module.knChannels || (Module.knChannels = {});
+        if (all[n]) return 1;
+        if (typeof BroadcastChannel === "undefined") return 0;
+        var c = {bc: new BroadcastChannel(n), q: []};
+        c.bc.onmessage = function (e) { if (typeof e.data === "string" && c.q.length < 1024) c.q.push(e.data); };
+        all[n] = c;
+        return 1;
+    } catch (e) { return 0; }
+});
+
+EM_JS(void, kn_js_channel_post, (const char *name, const char *text), {
+    try {
+        var c = (Module.knChannels || {})[UTF8ToString(name)];
+        if (c) c.bc.postMessage(UTF8ToString(text));
+    } catch (e) {}
+});
+
+EM_JS(char *, kn_js_channel_take, (const char *name), {
+    var c = (Module.knChannels || {})[UTF8ToString(name)];
+    var m = c ? c.q.shift() : undefined;
+    return m === undefined ? 0 : stringToNewUTF8(m);
+});
+
 EM_JS(void, kn_js_storage_set, (const char *key, const char *value), {
     try {
         if (value) window.localStorage.setItem(UTF8ToString(key), UTF8ToString(value));
@@ -537,6 +565,14 @@ void html_page_origin(char *buf, const size_t n) {
 void html_clipboard_write(const char *text) {
     if (text) kn_js_clipboard_write(text);
 }
+
+// ---- cross-tab channel
+
+int html_channel_open(const char *name) { return name && *name ? kn_js_channel_open(name) : 0; }
+void html_channel_post(const char *name, const char *text) {
+    if (name && text) kn_js_channel_post(name, text);
+}
+char *html_channel_take(const char *name) { return name ? kn_js_channel_take(name) : NULL; }
 
 // ---- storage
 

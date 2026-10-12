@@ -75,6 +75,7 @@ typedef struct {
     float far;
     float fov;
     float zoom;
+    float ortho; // > 0: orthographic projection, half the view height in world units (editor renders); 0 = perspective
 
     vec3 position;
     vec3 rotation;

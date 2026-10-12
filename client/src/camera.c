@@ -3,6 +3,20 @@
 #include <string.h>
 
 void camera_update_projection_matrix(Camera *camera, const float aspect) {
+    if (camera->ortho > 0.0f) {
+        // orthographic (row-major like the perspective matrix below): x/y to the half extents,
+        // z from near..far to -1..1
+        const float hh = camera->ortho, hw = hh * aspect;
+        const float n = camera->near, f = camera->far;
+        const float ortho[] = {
+            1.0f / hw, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f / hh, 0.0f, 0.0f,
+            0.0f, 0.0f, -2.0f / (f - n), -(f + n) / (f - n),
+            0.0f, 0.0f, 0.0f, 1.0f,
+        };
+        memcpy(camera->projection_matrix, ortho, sizeof(ortho));
+        return;
+    }
     const float half_height = tanf(camera->fov / camera->zoom / 2.0f) * camera->near;
     const float half_width = half_height * aspect;
 

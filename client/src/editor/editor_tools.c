@@ -175,14 +175,14 @@ void ed_merge_objects(cJSON *e) {
 
 static EditorObject *selected_group(void) {
     // objectSelected(true): the selection when it is a group placeholder
-    return g_ed.selected && ed_group_of(g_ed.selected) ? g_ed.selected : NULL;
+    return g_ed.proj->selected && ed_group_of(g_ed.proj->selected) ? g_ed.proj->selected : NULL;
 }
 
 static EditorGroup *group_add(EditorObject *owner, EditorObject **members, const size_t count) {
-    EditorGroup *groups = realloc(g_ed.groups, (g_ed.group_count + 1) * sizeof(EditorGroup));
+    EditorGroup *groups = realloc(g_ed.proj->groups, (g_ed.proj->group_count + 1) * sizeof(EditorGroup));
     if (!groups) return NULL;
-    g_ed.groups = groups;
-    EditorGroup *g = &g_ed.groups[g_ed.group_count++];
+    g_ed.proj->groups = groups;
+    EditorGroup *g = &g_ed.proj->groups[g_ed.proj->group_count++];
     memset(g, 0, sizeof(*g));
     g->owner = owner->uuid;
     g->objects = count ? calloc(count, sizeof(uint32_t)) : NULL;
@@ -226,7 +226,7 @@ void ed_create_group(EditorObject *replaced, EditorObject **members, const size_
     if (!owner) return;
     ed_obj_add(owner, 1, 1);
     group_add(owner, members, count);
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
 }
 
 static int str_in(const char *s, const char *const *list, const size_t n) {
@@ -306,7 +306,7 @@ void ed_obj_replace(EditorObject *e, const char *text, const char *type, const i
     cJSON_Delete(root);
     ed_json_set_num(g_ed.advanced, "rotation", 0);
     if (!strcmp(ed_panel_right_active(), "grouping")) ed_panel_right_show("grouping");
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +435,7 @@ static void settings_changed(EdCtl *c, const cJSON *v) {
 
 static void apply_object_change(EditorObject *o) {
     ed_obj_rebuild(o);
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
 }
 
 static void set_prop_num(EditorObject *o, const char *prop, const double v) {
@@ -451,8 +451,8 @@ static void set_prop_str(EditorObject *o, const char *prop, const char *v) {
 }
 
 static void refresh_counts(void) {
-    for (int i = 0; i < 3; i++) g_ed.obj_count[i] = 0;
-    for (size_t i = 0; i < g_ed.count; i++) g_ed.obj_count[ed_obj_count_class(g_ed.objects[i])]++;
+    for (int i = 0; i < 3; i++) g_ed.proj->obj_count[i] = 0;
+    for (size_t i = 0; i < g_ed.proj->count; i++) g_ed.proj->obj_count[ed_obj_count_class(g_ed.proj->objects[i])]++;
     g_ed.dirty_counts = 1;
 }
 
@@ -463,8 +463,8 @@ static void do_drunk(void *user, const char *ok) {
     (void) user;
     if (!ok) return;
     // drunkMap: every object gets a random texture movement
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
         set_prop_num(o, "movingSpeed", (double) (rand() % 41 - 20)); // UTILS.getRandom([-20, 20])
         set_prop_num(o, "movingAxis", (double) (rand() % 2));
         apply_object_change(o);
@@ -540,8 +540,8 @@ static void act_scale_map(EdCtl *c) {
     (void) c;
     // scaleMap: positions and sizes times scaleMap[XYZ] (size only where the setter takes it)
     const double k[3] = {ed_json_num(g_ed.advanced, "scaleMapX", 1), ed_json_num(g_ed.advanced, "scaleMapY", 1), ed_json_num(g_ed.advanced, "scaleMapZ", 1)};
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
         const vec3 p = ed_obj_vec(o, "p", (vec3) {0});
         cJSON *size = ed_prop_get(o, "size");
         cJSON *ns = cJSON_CreateArray();
@@ -557,8 +557,8 @@ static void act_scale_map(EdCtl *c) {
 
 // reflectObjects(group): mirror the map (or the selected group) across its centre
 static void reflect_objects(const int group) {
-    EditorObject **list = g_ed.objects;
-    size_t count = g_ed.count;
+    EditorObject **list = g_ed.proj->objects;
+    size_t count = g_ed.proj->count;
     EditorObject **members = NULL;
     int dir;
     if (group) {
@@ -647,7 +647,7 @@ static void add_box(const double px, const double py, const double pz, const dou
 static void act_frame(EdCtl *c) {
     (void) c;
     // frameObject: four walls (+ ceiling / floor) around the selected box
-    EditorObject *e = g_ed.selected;
+    EditorObject *e = g_ed.proj->selected;
     if (!e) {
         editor_message("Please Select a object");
         return;
@@ -682,8 +682,8 @@ static void do_breakable(void *user, const char *ok) {
     if (!ok) return;
     const double hp = ed_json_num(g_ed.advanced, "breakableHealth", 1);
     const int col = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "breakableCollision"));
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
         set_prop_num(o, "health", hp);
         if (col) {
             cJSON *t = cJSON_CreateTrue();
@@ -718,8 +718,8 @@ static void colorize(const char *list, const int random) {
             tok = comma ? comma + 1 : NULL;
         }
     }
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
         if (n) set_prop_str(o, "color", n > 1 ? colors[rand() % n] : colors[0]);
         if (random) {
             char hex[16];
@@ -847,7 +847,7 @@ static void text_input(void *user, const char *value) {
     cJSON_Delete(font);
     char *text = cJSON_PrintUnformatted(out);
     cJSON_Delete(out);
-    ed_obj_replace(g_ed.selected, text, NULL, 1);
+    ed_obj_replace(g_ed.proj->selected, text, NULL, 1);
     free(text);
 }
 
@@ -863,7 +863,7 @@ static void deliver(cJSON *objects, const int replace, const char *map_name, con
     // convert*(…, n): replace the selection, else download the map
     if (replace) {
         char *text = cJSON_PrintUnformatted(objects);
-        ed_obj_replace(g_ed.selected, text, NULL, 1);
+        ed_obj_replace(g_ed.proj->selected, text, NULL, 1);
         free(text);
         cJSON_Delete(objects);
         return;
@@ -881,7 +881,7 @@ static void deliver(cJSON *objects, const int replace, const char *map_name, con
 static void convert_image(void *user, const char *path) {
     // convertImage(e, img, n): one box per opaque pixel, merged and centred
     const int replace = (int) (intptr_t) user;
-    if (replace && !g_ed.selected) {
+    if (replace && !g_ed.proj->selected) {
         editor_message("Select a object to replace first");
         return;
     }
@@ -932,7 +932,7 @@ static void convert_image(void *user, const char *path) {
 static void convert_voxel(void *user, const char *path) {
     // convertVoxel(e, json, n): {voxels: [{x, y, z}]} -> voxelSize boxes
     const int replace = (int) (intptr_t) user;
-    if (replace && !g_ed.selected) {
+    if (replace && !g_ed.proj->selected) {
         editor_message("Select a object to replace first");
         return;
     }
@@ -1070,7 +1070,7 @@ static void panel_tools(void) {
 static void edit_group(const char *key, const cJSON *value) {
     // editGroup(key, value): set one property on every member of the selected group
     EditorObject *n = selected_group();
-    if (!g_ed.group_count || !n) {
+    if (!g_ed.proj->group_count || !n) {
         editor_message("You cant edit a group that doesnt exist");
         return;
     }
@@ -1128,7 +1128,7 @@ static void act_group_reflect(EdCtl *c) { (void) c; reflect_objects(1); }
 // 0 = the selection
 static EditorObject *json_target(void *user) {
     const uint32_t uuid = (uint32_t) (uintptr_t) user;
-    return uuid ? ed_obj_find(uuid) : g_ed.selected;
+    return uuid ? ed_obj_find(uuid) : g_ed.proj->selected;
 }
 
 static void json_text_in(void *user, const char *value) {

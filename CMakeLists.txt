@@ -358,6 +358,12 @@ else ()
     # knet UDP transport (shared/src/knet.c only: no game code, no sockets)
     add_executable(knet_test shared/include/knet.h shared/src/knet.c shared/tests/knet_test.c)
 
+    # editor bus (shared/src/editor_bus.c: framing, scopes, tokens, unix socket + TCP fallback)
+    add_executable(editor_bus_test shared/include/editor_bus.h shared/src/editor_bus.c shared/tests/editor_bus_test.c)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(editor_bus_test PRIVATE ws2_32)
+    endif ()
+
     add_executable(class_spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/class_spawn_test.c)
     target_link_libraries(class_spawn_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

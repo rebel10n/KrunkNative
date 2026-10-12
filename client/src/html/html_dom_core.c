@@ -356,6 +356,11 @@ static int storage_path(const char *key, char *out, const size_t n, const int cr
     return written > 0 && (size_t) written < n;
 }
 
+// native builds have no BroadcastChannel (html_dom.h): the editor bus connects windows
+int html_channel_open(const char *name) { (void) name; return 0; }
+void html_channel_post(const char *name, const char *text) { (void) name; (void) text; }
+char *html_channel_take(const char *name) { (void) name; return NULL; }
+
 int html_storage_get(const char *key, char *buf, const size_t n) {
     char path[640];
     if (!storage_path(key, path, sizeof(path), 0)) return -1;

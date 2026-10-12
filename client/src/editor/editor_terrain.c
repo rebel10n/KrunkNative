@@ -2,7 +2,7 @@
 // and what they generate in the 3D view: Editor.regenTerrain (libs/Terrain.js, the
 // simplex-noise 2.4.0 heightmap with biome colours and the terrainTSeed clutter of
 // data/prefabs.js addTerrObj) and Editor.regenZone (libs/Zone.js, the battle-royale
-// cylinder). Both live in g_ed.scene as ordinary BasicMaterial meshes owned here.
+// cylinder). Both live in g_ed.proj->scene as ordinary BasicMaterial meshes owned here.
 //
 // Parity notes (intentional differences from v3.1.1):
 // - The terrain is lit with per-face normals (basic.frag dFdx/dFdy); three.js merged the
@@ -703,13 +703,7 @@ static void clutter_add(TerrBuf *b, const int type, const TerrObj *n) {
     }
 }
 
-typedef struct {
-    Geometry *geometry;
-    unsigned int vbo, cbo;
-    Mesh *mesh;
-} TerrPart;
-
-static TerrPart g_terrain, g_clutter, g_zone;
+typedef EdTerrPart TerrPart; // per project: g_ed.proj->terrain / clutter / zone
 
 static Geometry *upload(const TerrBuf *b, unsigned int *vbo, unsigned int *cbo) {
     if (!b->nv || !b->ni) return NULL;
@@ -740,7 +734,7 @@ static Geometry *upload(const TerrBuf *b, unsigned int *vbo, unsigned int *cbo) 
 
 static void part_drop(TerrPart *p) {
     if (p->mesh) {
-        if (g_ed.scene) scene_remove_mesh(g_ed.scene, p->mesh);
+        if (g_ed.proj->scene) scene_remove_mesh(g_ed.proj->scene, p->mesh);
         mesh_fini(p->mesh); // frees the material
     }
     if (p->geometry) {
@@ -762,14 +756,14 @@ static void part_set(TerrPart *p, const TerrBuf *b, BasicMaterial *m) {
     }
     p->mesh = mesh_init(p->geometry, (Material *) m);
     p->mesh->no_shadow_receive = 1;
-    if (p->mesh && g_ed.scene) scene_add_mesh(g_ed.scene, p->mesh);
+    if (p->mesh && g_ed.proj->scene) scene_add_mesh(g_ed.proj->scene, p->mesh);
 }
 
 // Editor.regenTerrain: remove the old terrain; mapConfig.terrainSeed set -> a new one
 void ed_terrain_regen(void) {
-    part_drop(&g_terrain);
-    part_drop(&g_clutter);
-    const cJSON *mc = g_ed.map_config;
+    part_drop(&g_ed.proj->terrain);
+    part_drop(&g_ed.proj->clutter);
+    const cJSON *mc = g_ed.proj->map_config;
     if (!mc || !ed_json_str(mc, "terrainSeed", "")[0]) return;
     TerrGen *g = terr_generate(mc);
     if (!g) return;
@@ -788,7 +782,7 @@ void ed_terrain_regen(void) {
             m->color = (vec4) {0x8c / 255.0f, 0x8c / 255.0f, 0x8c / 255.0f, 1};
             m->use_vertex_color = 1;
         }
-        part_set(&g_terrain, &b, m);
+        part_set(&g_ed.proj->terrain, &b, m);
     }
     tb_free(&b);
     if (g->gen_objs) {
@@ -796,7 +790,7 @@ void ed_terrain_regen(void) {
             for (int k = 0; k < g->obj_count[o]; k++) clutter_add(&b, o, &g->objs[o][k]);
         BasicMaterial *m = basic_material_init(); // new THREE.Mesh(geometry): white MeshBasicMaterial
         if (m) m->unlit = 1;
-        part_set(&g_clutter, &b, m);
+        part_set(&g_ed.proj->clutter, &b, m);
         tb_free(&b);
     }
     terr_gen_free(g);
@@ -810,8 +804,8 @@ static void zone_color(const char *s, const char *fallback, float out[3]) {
 
 // Editor.regenZone: Zone.fromConfig(mapConfig, true) when mapConfig.zone
 void ed_zone_regen(void) {
-    part_drop(&g_zone);
-    const cJSON *mc = g_ed.map_config;
+    part_drop(&g_ed.proj->zone);
+    const cJSON *mc = g_ed.proj->map_config;
     if (!mc || !ed_json_truthy(cJSON_GetObjectItemCaseSensitive(mc, "zone"))) return;
     double size = ed_json_num(mc, "zoneSize", 0);
     if (!size) size = 50; // zoneSize || 50
@@ -855,22 +849,22 @@ void ed_zone_regen(void) {
             m->no_depth_write = 1;
             m->base.transparent = 1;
         }
-        part_set(&g_zone, &b, m);
+        part_set(&g_ed.proj->zone, &b, m);
     }
     tb_free(&b);
 }
 
 void ed_terrain_fini(void) {
-    part_drop(&g_terrain);
-    part_drop(&g_clutter);
-    part_drop(&g_zone);
+    part_drop(&g_ed.proj->terrain);
+    part_drop(&g_ed.proj->clutter);
+    part_drop(&g_ed.proj->zone);
 }
 
 // ---------------------------------------------------------------------------
 // panels (ui/editor.js panel.right.terrain / panel.right.zone)
 
 static EdCtl *bound(EdBuild *b, EdCtl *c, const char *key, const EdChangeFn fn) {
-    ed_ctl_bind_json(c, g_ed.map_config, key);
+    ed_ctl_bind_json(c, g_ed.proj->map_config, key);
     c->on_change = fn;
     ed_gui_emit_value(b, c);
     return c;
@@ -897,8 +891,8 @@ static void random_seed(const char *key) {
         if (i >= 2) s[n++] = "0123456789abcdefghijklmnopqrstuvwxyz"[d];
     }
     s[n] = 0;
-    ed_json_set_str(g_ed.map_config, key, s);
-    g_ed.dirty_storage = 1;
+    ed_json_set_str(g_ed.proj->map_config, key, s);
+    ed_mark_changed();
     ed_panel_right_show("terrain");
     ed_terrain_regen();
 }

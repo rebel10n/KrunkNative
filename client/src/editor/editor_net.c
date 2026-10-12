@@ -521,16 +521,16 @@ static void select_asset(const char *id, const int type) {
         // prefab: fetched from user-assets.krunker.io/<id>/data.json, not hosted here
         editor_message("Error loading Prefab");
     } else if (type == 4) {
-        if (g_ed.selected) {
+        if (g_ed.proj->selected) {
             cJSON *v = cJSON_CreateNumber(atoi(id));
-            ed_prop_set(g_ed.selected, "assetTexture", v);
+            ed_prop_set(g_ed.proj->selected, "assetTexture", v);
             cJSON_Delete(v);
-            ed_obj_rebuild(g_ed.selected);
+            ed_obj_rebuild(g_ed.proj->selected);
             g_ed.dirty_panel = 1;
-            g_ed.dirty_storage = 1;
+            ed_mark_changed();
         }
     } else if (type) {
-        ed_json_set_str(g_ed.game_config, "aID", id);
+        ed_json_set_str(g_ed.proj->game_config, "aID", id);
         ed_panel_left_show();
     } else {
         // new ObjectInstance({i: 44, aid: e, p: near or [0,0,0]}, true)
@@ -550,8 +550,8 @@ static void select_asset(const char *id, const int type) {
 
 static void select_mod(const char *url) {
     editor_close_window();
-    ed_json_set_str(g_ed.map_config, "modURL", url ? url : "");
-    g_ed.dirty_storage = 1;
+    ed_json_set_str(g_ed.proj->map_config, "modURL", url ? url : "");
+    ed_mark_changed();
     ed_panel_left_show();
 }
 

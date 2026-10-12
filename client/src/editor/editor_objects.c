@@ -507,8 +507,8 @@ EditorObject *ed_obj_new(const cJSON *serialized, const int keep_uuid) {
     }
     o->prefab = prefab_from_json(o->data);
     const cJSON *uuid = ed_json_path(o->data, "objUUID");
-    o->uuid = keep_uuid && cJSON_IsNumber(uuid) ? (uint32_t) cJSON_GetNumberValue(uuid) : ++g_ed.next_uuid;
-    if (o->uuid > g_ed.next_uuid) g_ed.next_uuid = o->uuid;
+    o->uuid = keep_uuid && cJSON_IsNumber(uuid) ? (uint32_t) cJSON_GetNumberValue(uuid) : ++g_ed.proj->next_uuid;
+    if (o->uuid > g_ed.proj->next_uuid) g_ed.proj->next_uuid = o->uuid;
     cJSON_DeleteItemFromObjectCaseSensitive(o->data, "objUUID");
     cJSON_DeleteItemFromObjectCaseSensitive(o->data, "meshUUID");
 
@@ -531,8 +531,8 @@ EditorObject *ed_obj_new(const cJSON *serialized, const int keep_uuid) {
 }
 
 static void obj_drop_render(EditorObject *o) {
-    if (o->mesh && g_ed.scene) scene_remove_mesh(g_ed.scene, o->mesh);
-    if (o->helper && g_ed.scene) scene_remove_mesh(g_ed.scene, o->helper);
+    if (o->mesh && g_ed.proj->scene) scene_remove_mesh(g_ed.proj->scene, o->mesh);
+    if (o->helper && g_ed.proj->scene) scene_remove_mesh(g_ed.proj->scene, o->helper);
     if (o->render_map) {
         map_fini(o->render_map);
         free(o->render_map);
@@ -598,7 +598,7 @@ void ed_obj_rebuild(EditorObject *o) {
     obj_drop_render(o);
     if (o->prefab == ED_PREFAB_SPAWN_POINT) {
         o->helper = spawn_helper(o);
-        if (o->helper && g_ed.scene) scene_add_mesh(g_ed.scene, o->helper);
+        if (o->helper && g_ed.proj->scene) scene_add_mesh(g_ed.proj->scene, o->helper);
         return;
     }
     if (editor_prefab_has(o->prefab, EP_TOOL) && !editor_prefab_has(o->prefab, EP_BOUNCE)) return; // editor helpers only
@@ -613,7 +613,7 @@ void ed_obj_rebuild(EditorObject *o) {
     o->render_map = map_init(o->render_doc);
     if (o->render_map && o->render_map->object_count) {
         o->mesh = o->render_map->objects[0]->mesh;
-        if (o->mesh && g_ed.scene) scene_add_mesh(g_ed.scene, o->mesh);
+        if (o->mesh && g_ed.proj->scene) scene_add_mesh(g_ed.proj->scene, o->mesh);
     }
 }
 
@@ -621,8 +621,8 @@ void ed_obj_rebuild(EditorObject *o) {
 // the object list
 
 EditorObject *ed_obj_find(const uint32_t uuid) {
-    for (size_t i = 0; i < g_ed.count; i++) {
-        if (g_ed.objects[i]->uuid == uuid) return g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        if (g_ed.proj->objects[i]->uuid == uuid) return g_ed.proj->objects[i];
     }
     return NULL;
 }
@@ -639,17 +639,17 @@ int ed_obj_count_class(const EditorObject *o) {
 
 void ed_obj_add(EditorObject *o, const int no_select, const int history) {
     if (!o) return;
-    if (g_ed.count == g_ed.cap) {
-        const size_t cap = g_ed.cap ? g_ed.cap * 2 : 256;
-        EditorObject **objects = realloc(g_ed.objects, cap * sizeof(EditorObject *));
+    if (g_ed.proj->count == g_ed.proj->cap) {
+        const size_t cap = g_ed.proj->cap ? g_ed.proj->cap * 2 : 256;
+        EditorObject **objects = realloc(g_ed.proj->objects, cap * sizeof(EditorObject *));
         if (!objects) return;
-        g_ed.objects = objects;
-        g_ed.cap = cap;
+        g_ed.proj->objects = objects;
+        g_ed.proj->cap = cap;
     }
-    g_ed.objects[g_ed.count++] = o;
-    g_ed.obj_count[ed_obj_count_class(o)]++;
+    g_ed.proj->objects[g_ed.proj->count++] = o;
+    g_ed.proj->obj_count[ed_obj_count_class(o)]++;
     g_ed.dirty_counts = 1;
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
     ed_obj_rebuild(o);
     cJSON_Delete(o->history);
     o->history = cJSON_Duplicate(o->data, 1);
@@ -658,47 +658,47 @@ void ed_obj_add(EditorObject *o, const int no_select, const int history) {
 }
 
 void ed_obj_remove(EditorObject *o, const int keep_selection, const int history) {
-    if (!o) o = g_ed.selected;
+    if (!o) o = g_ed.proj->selected;
     if (!o) return;
-    size_t index = g_ed.count;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        if (g_ed.objects[i] == o) index = i;
+    size_t index = g_ed.proj->count;
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        if (g_ed.proj->objects[i] == o) index = i;
     }
-    if (index == g_ed.count) return;
-    memmove(&g_ed.objects[index], &g_ed.objects[index + 1], (g_ed.count - index - 1) * sizeof(EditorObject *));
-    g_ed.count--;
-    g_ed.obj_count[ed_obj_count_class(o)]--;
+    if (index == g_ed.proj->count) return;
+    memmove(&g_ed.proj->objects[index], &g_ed.proj->objects[index + 1], (g_ed.proj->count - index - 1) * sizeof(EditorObject *));
+    g_ed.proj->count--;
+    g_ed.proj->obj_count[ed_obj_count_class(o)]--;
     g_ed.dirty_counts = 1;
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
     obj_drop_render(o);
-    if (g_ed.selected == o) {
-        g_ed.selected = NULL;
+    if (g_ed.proj->selected == o) {
+        g_ed.proj->selected = NULL;
         if (!keep_selection) g_ed.dirty_panel = 1;
     }
-    for (size_t i = 0; i < g_ed.pending_count; i++) {
-        if (g_ed.pending_group[i] == o->uuid) g_ed.pending_group[i] = 0;
+    for (size_t i = 0; i < g_ed.proj->pending_count; i++) {
+        if (g_ed.proj->pending_group[i] == o->uuid) g_ed.proj->pending_group[i] = 0;
     }
     if (history) ed_history_add('r', o, NULL); // the entry owns the object now
     else ed_obj_free(o);
 }
 
 void ed_objects_clear(void) {
-    while (g_ed.count) ed_obj_remove(g_ed.objects[g_ed.count - 1], 1, 0);
-    free(g_ed.objects);
-    g_ed.objects = NULL;
-    g_ed.cap = 0;
-    memset(g_ed.obj_count, 0, sizeof(g_ed.obj_count));
-    g_ed.selected = NULL;
-    g_ed.pending_count = 0;
-    for (size_t i = 0; i < g_ed.group_count; i++) free(g_ed.groups[i].objects);
-    free(g_ed.groups);
-    g_ed.groups = NULL;
-    g_ed.group_count = 0;
+    while (g_ed.proj->count) ed_obj_remove(g_ed.proj->objects[g_ed.proj->count - 1], 1, 0);
+    free(g_ed.proj->objects);
+    g_ed.proj->objects = NULL;
+    g_ed.proj->cap = 0;
+    memset(g_ed.proj->obj_count, 0, sizeof(g_ed.proj->obj_count));
+    g_ed.proj->selected = NULL;
+    g_ed.proj->pending_count = 0;
+    for (size_t i = 0; i < g_ed.proj->group_count; i++) free(g_ed.proj->groups[i].objects);
+    free(g_ed.proj->groups);
+    g_ed.proj->groups = NULL;
+    g_ed.proj->group_count = 0;
     g_ed.dirty_counts = 1;
 }
 
 void ed_obj_select(EditorObject *o) {
-    g_ed.selected = o;
+    g_ed.proj->selected = o;
     g_ed.gizmo.active = 0;
     g_ed.dirty_panel = 1; // updateObjConfigGUI
 }
@@ -709,7 +709,7 @@ cJSON *ed_obj_serialize(const EditorObject *o) {
 
 void ed_duplicate_object(EditorObject *e) {
     // duplicateObject(e): clone, add and select
-    if (!(e = e ? e : g_ed.selected)) return;
+    if (!(e = e ? e : g_ed.proj->selected)) return;
     EditorObject *copy = ed_obj_new(e->data, 0);
     ed_obj_add(copy, 0, 1);
 }
@@ -717,8 +717,8 @@ void ed_duplicate_object(EditorObject *e) {
 void ed_duplicate_group(EditorObject *e) {
     // duplicateGroup(e): copies of the members, a copy of the placeholder, then
     // createGroup(<the new placeholder>, copies) fits a fresh placeholder around them
-    if (!g_ed.group_count) return;
-    if (!(e = e ? e : g_ed.selected) || !ed_group_of(e)) {
+    if (!g_ed.proj->group_count) return;
+    if (!(e = e ? e : g_ed.proj->selected) || !ed_group_of(e)) {
         editor_message("You cant duplicate a group that doesnt exist");
         return;
     }
@@ -726,8 +726,8 @@ void ed_duplicate_group(EditorObject *e) {
     EditorObject **copies = calloc(g->count ? g->count : 1, sizeof(EditorObject *));
     if (!copies) return;
     size_t n = 0;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *m = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *m = g_ed.proj->objects[i];
         int member = 0;
         for (size_t k = 0; k < g->count && !member; k++) member = g->objects[k] == m->uuid;
         if (member && n < g->count) copies[n++] = m;
@@ -737,26 +737,26 @@ void ed_duplicate_group(EditorObject *e) {
         ed_obj_add(copies[i], 1, 1);
     }
     ed_duplicate_object(e);
-    ed_create_group(g_ed.selected, copies, n, 0, 1);
+    ed_create_group(g_ed.proj->selected, copies, n, 0, 1);
     free(copies);
 }
 
 void ed_obj_duplicate(void) {
-    if (g_ed.selected && ed_group_of(g_ed.selected)) ed_duplicate_group(NULL);
+    if (g_ed.proj->selected && ed_group_of(g_ed.proj->selected)) ed_duplicate_group(NULL);
     else ed_duplicate_object(NULL);
 }
 
 static void group_drop(EditorGroup *g) {
     // delete this.objGroups[uuid]
     free(g->objects);
-    const size_t index = (size_t) (g - g_ed.groups);
-    memmove(&g_ed.groups[index], &g_ed.groups[index + 1], (g_ed.group_count - index - 1) * sizeof(EditorGroup));
-    g_ed.group_count--;
+    const size_t index = (size_t) (g - g_ed.proj->groups);
+    memmove(&g_ed.proj->groups[index], &g_ed.proj->groups[index + 1], (g_ed.proj->group_count - index - 1) * sizeof(EditorGroup));
+    g_ed.proj->group_count--;
 }
 
 void ed_remove_group(EditorObject *e) {
     // removeGroup(e): the members and the placeholder
-    if (!g_ed.group_count || !(e = e ? e : g_ed.selected)) return;
+    if (!g_ed.proj->group_count || !(e = e ? e : g_ed.proj->selected)) return;
     EditorGroup *group = ed_group_of(e);
     if (!group) return;
     for (size_t i = 0; i < group->count; i++) {
@@ -768,7 +768,7 @@ void ed_remove_group(EditorObject *e) {
 }
 
 void ed_obj_delete_selected(void) {
-    EditorObject *o = g_ed.selected;
+    EditorObject *o = g_ed.proj->selected;
     if (!o) return;
     if (ed_group_of(o)) ed_remove_group(o);
     else ed_obj_remove(o, 0, 1);
@@ -791,7 +791,7 @@ void ed_obj_create(const int prefab) {
 
 void ed_obj_create_placeholder(void) {
     // createPlaceholder: p = camera position - 10 on Y, s = [10, 10, 10] (P key)
-    const vec3 cam = g_ed.camera.position;
+    const vec3 cam = g_ed.proj->camera.position;
     cJSON *d = cJSON_CreateObject();
     cJSON_AddNumberToObject(d, "i", ED_PREFAB_PLACEHOLDER);
     cJSON_AddItemToObject(d, "p", vec_json((vec3) {cam.x, cam.y - 10, cam.z}, 2));
@@ -803,46 +803,46 @@ void ed_obj_create_placeholder(void) {
 
 void ed_obj_toggle_prop_group(const char *prop) {
     // objectSelected(true) ? togglePropGroup(prop) : toggleProp(prop)
-    const EditorGroup *g = ed_group_of(g_ed.selected);
+    const EditorGroup *g = ed_group_of(g_ed.proj->selected);
     if (!g) {
         ed_obj_toggle_prop(prop);
         return;
     }
-    EditorObject *keep = g_ed.selected;
+    EditorObject *keep = g_ed.proj->selected;
     for (size_t i = 0; i < g->count; i++) {
         EditorObject *m = ed_obj_find(g->objects[i]);
         if (!m) continue;
-        g_ed.selected = m;
+        g_ed.proj->selected = m;
         ed_obj_toggle_prop(prop);
     }
-    g_ed.selected = keep;
+    g_ed.proj->selected = keep;
 }
 
 void ed_obj_toggle_prop(const char *prop) {
-    EditorObject *o = g_ed.selected;
+    EditorObject *o = g_ed.proj->selected;
     if (!o) return;
     cJSON *v = ed_prop_get(o, prop);
     cJSON *nv = cJSON_CreateBool(!cJSON_IsTrue(v));
     const int before = ed_obj_count_class(o);
     ed_prop_set(o, prop, nv);
-    g_ed.obj_count[before]--;
-    g_ed.obj_count[ed_obj_count_class(o)]++;
+    g_ed.proj->obj_count[before]--;
+    g_ed.proj->obj_count[ed_obj_count_class(o)]++;
     cJSON_Delete(v);
     cJSON_Delete(nv);
     ed_obj_rebuild(o);
     g_ed.dirty_counts = 1;
     g_ed.dirty_panel = 1;
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
 }
 
 void ed_obj_flip_xz(void) {
-    EditorObject *o = g_ed.selected;
+    EditorObject *o = g_ed.proj->selected;
     if (!o) return;
     const vec3 s = ed_obj_vec(o, "s", (vec3) {1, 1, 1});
     ed_obj_set_vec(o, "s", (vec3) {s.z, s.y, s.x});
     ed_obj_rebuild(o);
     g_ed.dirty_panel = 1;
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
 }
 
 // ---------------------------------------------------------------------------
@@ -875,9 +875,9 @@ static int boxes_intersect(const EditorObject *a, const EditorObject *b) {
 
 int ed_is_grouped(const uint32_t uuid) {
     // isGrouped: a member or the owner of any group
-    for (size_t i = 0; i < g_ed.group_count; i++) {
-        if (g_ed.groups[i].owner == uuid) return 1;
-        for (size_t k = 0; k < g_ed.groups[i].count; k++) if (g_ed.groups[i].objects[k] == uuid) return 1;
+    for (size_t i = 0; i < g_ed.proj->group_count; i++) {
+        if (g_ed.proj->groups[i].owner == uuid) return 1;
+        for (size_t k = 0; k < g_ed.proj->groups[i].count; k++) if (g_ed.proj->groups[i].objects[k] == uuid) return 1;
     }
     return 0;
 }
@@ -885,10 +885,11 @@ int ed_is_grouped(const uint32_t uuid) {
 static void set_copy(cJSON *arr) {
     cJSON_Delete(g_ed.copy);
     g_ed.copy = arr; // this.copy = JSON.stringify(r)
+    ed_bus_clipboard_set(arr); // every project and editor window pastes it (editor_bus_link.c)
 }
 
 void ed_copy_objects(const int cut, const int group, EditorObject *sel) {
-    if (!(sel = sel ? sel : g_ed.selected)) {
+    if (!(sel = sel ? sel : g_ed.proj->selected)) {
         editor_message("Stretch a cube over your objects then try again");
         return;
     }
@@ -896,11 +897,11 @@ void ed_copy_objects(const int cut, const int group, EditorObject *sel) {
         editor_message("You cant combine groups");
         return;
     }
-    EditorObject **hit = calloc(g_ed.count ? g_ed.count : 1, sizeof(EditorObject *));
+    EditorObject **hit = calloc(g_ed.proj->count ? g_ed.proj->count : 1, sizeof(EditorObject *));
     if (!hit) return;
     size_t n = 0;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
         if (o == sel || !boxes_intersect(o, sel)) continue;
         if (group && ed_is_grouped(o->uuid)) {
             editor_message("You cant combine groups");
@@ -922,14 +923,14 @@ void ed_copy_objects(const int cut, const int group, EditorObject *sel) {
 
 cJSON *ed_copy_group(EditorObject *e) {
     // copyGroup(e): the members of the selected group (returns the copy, borrowed)
-    if (!g_ed.group_count || !(e = e ? e : g_ed.selected)) return NULL;
+    if (!g_ed.proj->group_count || !(e = e ? e : g_ed.proj->selected)) return NULL;
     const EditorGroup *g = ed_group_of(e);
     if (!g) return NULL;
     cJSON *arr = cJSON_CreateArray();
-    for (size_t i = 0; i < g_ed.count; i++) {
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
         for (size_t k = 0; k < g->count; k++) {
-            if (g->objects[k] == g_ed.objects[i]->uuid) {
-                cJSON_AddItemToArray(arr, ed_obj_serialize(g_ed.objects[i]));
+            if (g->objects[k] == g_ed.proj->objects[i]->uuid) {
+                cJSON_AddItemToArray(arr, ed_obj_serialize(g_ed.proj->objects[i]));
                 break;
             }
         }
@@ -941,12 +942,12 @@ cJSON *ed_copy_group(EditorObject *e) {
 void ed_obj_copy(const int cut, const int as_group) {
     // ctrl+C / advancedOptions.copy: objectSelected(true) ? copyGroup() : copyObjects();
     // cut: copyObjects(true); create: copyObjects(false, true)
-    if (!cut && !as_group && g_ed.selected && ed_group_of(g_ed.selected)) ed_copy_group(NULL);
+    if (!cut && !as_group && g_ed.proj->selected && ed_group_of(g_ed.proj->selected)) ed_copy_group(NULL);
     else ed_copy_objects(cut, as_group, NULL);
 }
 
 void ed_paste_objects(EditorObject *e) {
-    e = e ? e : g_ed.selected;
+    e = e ? e : g_ed.proj->selected;
     if (!g_ed.copy) {
         editor_message("Please copy objects first");
         return;
@@ -964,8 +965,8 @@ void ed_obj_paste(void) { ed_paste_objects(NULL); }
 
 EditorGroup *ed_group_of(const EditorObject *owner) {
     if (!owner) return NULL;
-    for (size_t i = 0; i < g_ed.group_count; i++) {
-        if (g_ed.groups[i].owner == owner->uuid) return &g_ed.groups[i];
+    for (size_t i = 0; i < g_ed.proj->group_count; i++) {
+        if (g_ed.proj->groups[i].owner == owner->uuid) return &g_ed.proj->groups[i];
     }
     return NULL;
 }
@@ -975,14 +976,14 @@ void ed_group_create(void) { ed_copy_objects(0, 1, NULL); } // advancedOptions.c
 void ed_group_from_pending(void) {
     // updateGroupSelection (Group Selection turned off with picked objects):
     // createGroup(null, picked, 0, false)
-    if (!g_ed.pending_count) return;
-    EditorObject **list = calloc(g_ed.pending_count, sizeof(EditorObject *));
+    if (!g_ed.proj->pending_count) return;
+    EditorObject **list = calloc(g_ed.proj->pending_count, sizeof(EditorObject *));
     if (!list) return;
     size_t n = 0;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
         int picked = 0;
-        for (size_t k = 0; k < g_ed.pending_count && !picked; k++) picked = g_ed.pending_group[k] == o->uuid;
+        for (size_t k = 0; k < g_ed.proj->pending_count && !picked; k++) picked = g_ed.proj->pending_group[k] == o->uuid;
         if (!picked) continue;
         o->highlighted = 0;
         if (ed_is_grouped(o->uuid)) {
@@ -992,7 +993,7 @@ void ed_group_from_pending(void) {
         }
         list[n++] = o;
     }
-    g_ed.pending_count = 0;
+    g_ed.proj->pending_count = 0;
     if (!n) editor_message("Nothing to Group");
     else ed_create_group(NULL, list, n, 0, 0);
     free(list);
@@ -1001,12 +1002,12 @@ void ed_group_from_pending(void) {
 void ed_group_stop(const int all) {
     // stopGroup(e): the selected group's placeholder goes, its members stay; all: every
     // placeholder that owns a group
-    if (!g_ed.group_count) {
+    if (!g_ed.proj->group_count) {
         editor_message("You cant stop a group that doesnt exist");
         return;
     }
     if (!all) {
-        EditorObject *sel = g_ed.selected;
+        EditorObject *sel = g_ed.proj->selected;
         EditorGroup *g = ed_group_of(sel);
         if (!g) {
             editor_message("You cant stop a group that doesnt exist");
@@ -1016,19 +1017,19 @@ void ed_group_stop(const int all) {
         ed_obj_remove(sel, 0, 1);
         return;
     }
-    while (g_ed.group_count) {
-        EditorObject *owner = ed_obj_find(g_ed.groups[g_ed.group_count - 1].owner);
-        group_drop(&g_ed.groups[g_ed.group_count - 1]);
+    while (g_ed.proj->group_count) {
+        EditorObject *owner = ed_obj_find(g_ed.proj->groups[g_ed.proj->group_count - 1].owner);
+        group_drop(&g_ed.proj->groups[g_ed.proj->group_count - 1]);
         if (owner) ed_obj_remove(owner, 0, 1);
     }
-    free(g_ed.groups);
-    g_ed.groups = NULL;
+    free(g_ed.proj->groups);
+    g_ed.proj->groups = NULL;
 }
 
 void ed_groups_sync(void) {
     // updateGroups: members follow the placeholder's translation, Y rotation and scale
-    for (size_t gi = 0; gi < g_ed.group_count; gi++) {
-        EditorGroup *g = &g_ed.groups[gi];
+    for (size_t gi = 0; gi < g_ed.proj->group_count; gi++) {
+        EditorGroup *g = &g_ed.proj->groups[gi];
         EditorObject *owner = ed_obj_find(g->owner);
         if (!owner) continue;
         const vec3 p = ed_obj_vec(owner, "p", (vec3) {0});
@@ -1059,7 +1060,7 @@ void ed_groups_sync(void) {
         g->pos = p;
         g->scale = s;
         g->rot_y = r.y;
-        g_ed.dirty_storage = 1;
+        ed_mark_changed();
     }
 }
 
@@ -1067,66 +1068,121 @@ void ed_groups_sync(void) {
 // history: editor.js initHistory polls every object once a second and records an
 // "update" with the previous serialization; add/remove are recorded immediately.
 
+static void entry_free(EditorHistoryEntry *e) {
+    cJSON_Delete(e->state);
+    free(e->label);
+    e->state = NULL;
+    e->label = NULL;
+}
+
 static void history_push(EditorHistoryEntry **list, size_t *count, size_t *cap, const EditorHistoryEntry e) {
     const size_t limit = (size_t) editor_setting_num("historyLimit", 1000);
     if (*count == *cap) {
         const size_t ncap = *cap ? *cap * 2 : 64;
         EditorHistoryEntry *n = realloc(*list, ncap * sizeof(EditorHistoryEntry));
-        if (!n) return;
+        if (!n) {
+            EditorHistoryEntry lost = e;
+            entry_free(&lost);
+            return;
+        }
         *list = n;
         *cap = ncap;
     }
     (*list)[(*count)++] = e;
-    if (limit && *count > limit) {
-        // Krunker drops the newest entry (undos.pop()) once over the limit
-        EditorHistoryEntry *last = &(*list)[--(*count)];
-        if (last->action == 'r' && last->state == NULL) {
-            // removal entries own the removed object through state == NULL + uuid lookup (not reachable)
-        }
-        cJSON_Delete(last->state);
-    }
+    // Krunker drops the newest entry (undos.pop()) once over the limit; a bus batch is
+    // never cut in half by it (the limit counts steps of the UI, batches are one step)
+    if (limit && *count > limit && !e.batch) entry_free(&(*list)[--(*count)]);
 }
 
-static EditorObject *g_removed_objects_dummy;
-
-typedef struct { uint32_t uuid; EditorObject *object; } Graveyard;
-static Graveyard *g_graveyard;
-static size_t g_graveyard_count;
-
+// removed objects that undo can revive keep their uuid and meshes (per project)
 static void graveyard_add(EditorObject *o) {
-    Graveyard *n = realloc(g_graveyard, (g_graveyard_count + 1) * sizeof(Graveyard));
+    EditorProject *p = g_ed.proj;
+    EdGraveyard *n = realloc(p->graveyard, (p->graveyard_count + 1) * sizeof(EdGraveyard));
     if (!n) {
         ed_obj_free(o);
         return;
     }
-    g_graveyard = n;
-    g_graveyard[g_graveyard_count++] = (Graveyard) {o->uuid, o};
+    p->graveyard = n;
+    p->graveyard[p->graveyard_count++] = (EdGraveyard) {o->uuid, o};
 }
 
 static EditorObject *graveyard_take(const uint32_t uuid) {
-    for (size_t i = 0; i < g_graveyard_count; i++) {
-        if (g_graveyard[i].uuid == uuid) {
-            EditorObject *o = g_graveyard[i].object;
-            g_graveyard[i] = g_graveyard[--g_graveyard_count];
+    EditorProject *p = g_ed.proj;
+    for (size_t i = 0; i < p->graveyard_count; i++) {
+        if (p->graveyard[i].uuid == uuid) {
+            EditorObject *o = p->graveyard[i].object;
+            p->graveyard[i] = p->graveyard[--p->graveyard_count];
             return o;
         }
     }
     return NULL;
 }
 
+static EditorHistoryEntry new_entry(const int action, const uint32_t uuid, cJSON *state) {
+    EditorProject *p = g_ed.proj;
+    EditorHistoryEntry e = {action, uuid, state, p->batch, NULL};
+    if (p->batch && p->batch_label) e.label = strdup(p->batch_label);
+    return e;
+}
+
 void ed_history_add(const int action, EditorObject *o, cJSON *state) {
-    (void) g_removed_objects_dummy;
     if (editor_setting_bool("disableHistory")) {
         if (action == 'r') ed_obj_free(o);
         cJSON_Delete(state);
         return;
     }
-    EditorHistoryEntry e = {action, o->uuid, NULL};
+    EditorHistoryEntry e = new_entry(action, o->uuid, NULL);
     if (action == 'a' || action == 'r') e.state = cJSON_Duplicate(o->data, 1);
     else e.state = state;
     if (action == 'r') graveyard_add(o); // removed objects can come back with their uuid
-    history_push(&g_ed.undos, &g_ed.undo_count, &g_ed.undo_cap, e);
+    history_push(&g_ed.proj->undos, &g_ed.proj->undo_count, &g_ed.proj->undo_cap, e);
     // a new action invalidates the redo list only implicitly in Krunker (it keeps it); keep parity
+}
+
+// map config snapshot for 'm' entries (bus map_set / map_unset)
+static cJSON *map_snapshot(void) {
+    cJSON *s = cJSON_CreateObject();
+    cJSON_AddItemToObject(s, "map", cJSON_Duplicate(g_ed.proj->map_config, 1));
+    cJSON_AddItemToObject(s, "game", cJSON_Duplicate(g_ed.proj->game_config, 1));
+    cJSON_AddItemToObject(s, "server", cJSON_Duplicate(g_ed.proj->server_config, 1));
+    cJSON_AddItemToObject(s, "extra", cJSON_Duplicate(g_ed.proj->extra_map, 1));
+    return s;
+}
+
+static void map_restore(const cJSON *s) {
+    EditorProject *p = g_ed.proj;
+    static const char *const keys[4] = {"map", "game", "server", "extra"};
+    cJSON **dst[4] = {&p->map_config, &p->game_config, &p->server_config, &p->extra_map};
+    for (int i = 0; i < 4; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(s, keys[i]);
+        if (!v) continue;
+        cJSON_Delete(*dst[i]);
+        *dst[i] = cJSON_IsNull(v) ? NULL : cJSON_Duplicate(v, 1);
+    }
+    editor_apply_lighting();
+    ed_terrain_regen();
+    ed_zone_regen();
+    ed_panel_refresh_all();
+}
+
+void ed_history_add_map(void) {
+    if (editor_setting_bool("disableHistory")) return;
+    history_push(&g_ed.proj->undos, &g_ed.proj->undo_count, &g_ed.proj->undo_cap, new_entry('m', 0, map_snapshot()));
+}
+
+uint32_t ed_history_batch_begin(const char *label) {
+    EditorProject *p = g_ed.proj;
+    if (p->batch) return 0; // nested: the outer batch owns the step
+    p->batch = ++p->next_batch ? p->next_batch : ++p->next_batch;
+    p->batch_label = label;
+    return p->batch;
+}
+
+void ed_history_batch_end(const uint32_t id) {
+    EditorProject *p = g_ed.proj;
+    if (!id || p->batch != id) return;
+    p->batch = 0;
+    p->batch_label = NULL;
 }
 
 static EditorObject *revive(const EditorHistoryEntry *e) {
@@ -1140,17 +1196,15 @@ static EditorObject *revive(const EditorHistoryEntry *e) {
     return o;
 }
 
-void ed_history_execute(const int redo) {
-    EditorHistoryEntry *list = redo ? g_ed.redos : g_ed.undos;
-    size_t *count = redo ? &g_ed.redo_count : &g_ed.undo_count;
-    if (!*count) return;
-    EditorHistoryEntry e = list[--(*count)];
-    EditorObject *o = ed_obj_find(e.uuid);
+static void history_execute_one(const int redo, EditorHistoryEntry e) {
+    EditorProject *p = g_ed.proj;
+    EditorObject *o = e.action == 'm' ? NULL : ed_obj_find(e.uuid);
     switch (e.action) {
         case 'a':
             if (!redo) {
                 if (o) ed_obj_remove(o, 0, 0);
-                history_push(&g_ed.redos, &g_ed.redo_count, &g_ed.redo_cap, e);
+                history_push(&p->redos, &p->redo_count, &p->redo_cap, e);
+                ed_mark_changed();
                 return;
             }
             ed_obj_add(revive(&e), 0, 0);
@@ -1158,7 +1212,8 @@ void ed_history_execute(const int redo) {
         case 'r':
             if (!redo) {
                 ed_obj_add(revive(&e), 0, 0);
-                history_push(&g_ed.redos, &g_ed.redo_count, &g_ed.redo_cap, e);
+                history_push(&p->redos, &p->redo_count, &p->redo_cap, e);
+                ed_mark_changed();
                 return;
             }
             if (o) ed_obj_remove(o, 0, 0);
@@ -1167,45 +1222,123 @@ void ed_history_execute(const int redo) {
             if (o && e.state) {
                 if (!redo) {
                     // the redo entry restores the state we are leaving
-                    EditorHistoryEntry back = {'u', o->uuid, cJSON_Duplicate(o->data, 1)};
-                    history_push(&g_ed.redos, &g_ed.redo_count, &g_ed.redo_cap, back);
+                    EditorHistoryEntry back = {'u', o->uuid, cJSON_Duplicate(o->data, 1), e.batch, e.label ? strdup(e.label) : NULL};
+                    history_push(&p->redos, &p->redo_count, &p->redo_cap, back);
                 }
                 const int before = ed_obj_count_class(o);
                 cJSON_Delete(o->data);
                 o->data = cJSON_Duplicate(e.state, 1);
-                g_ed.obj_count[before]--;
-                g_ed.obj_count[ed_obj_count_class(o)]++;
+                p->obj_count[before]--;
+                p->obj_count[ed_obj_count_class(o)]++;
                 ed_obj_rebuild(o);
                 cJSON_Delete(o->history);
                 o->history = cJSON_Duplicate(o->data, 1);
                 g_ed.dirty_counts = 1;
-                if (o == g_ed.selected) g_ed.dirty_panel = 1;
+                if (o == p->selected) g_ed.dirty_panel = 1;
+            }
+            break;
+        case 'm':
+            if (e.state) {
+                if (!redo) {
+                    EditorHistoryEntry back = {'m', 0, map_snapshot(), e.batch, e.label ? strdup(e.label) : NULL};
+                    history_push(&p->redos, &p->redo_count, &p->redo_cap, back);
+                }
+                map_restore(e.state);
             }
             break;
     }
-    cJSON_Delete(e.state);
-    g_ed.dirty_storage = 1;
+    entry_free(&e);
+    ed_mark_changed();
 }
+
+int ed_history_step(const int redo) {
+    // one step: a single entry, or every entry of the newest batch
+    EditorProject *p = g_ed.proj;
+    EditorHistoryEntry *list = redo ? p->redos : p->undos;
+    size_t *count = redo ? &p->redo_count : &p->undo_count;
+    if (!*count) return 0;
+    const uint32_t batch = list[*count - 1].batch;
+    do {
+        // list may move (history_push into the other list never reallocates this one)
+        list = redo ? p->redos : p->undos;
+        const EditorHistoryEntry e = list[--(*count)];
+        history_execute_one(redo, e);
+    } while (batch && *count && (redo ? p->redos : p->undos)[*count - 1].batch == batch);
+    return 1;
+}
+
+void ed_history_execute(const int redo) { ed_history_step(redo); }
 
 void ed_history_poll(void) {
     if (editor_setting_bool("disableHistory") || !editor_setting_num("historyLimit", 1000)) return;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
         if (o->history && !cJSON_Compare(o->history, o->data, 1)) {
             ed_history_add('u', o, o->history);
             o->history = NULL;
-            g_ed.dirty_storage = 1;
+            ed_mark_changed();
         }
         if (!o->history) o->history = cJSON_Duplicate(o->data, 1);
     }
 }
 
+// the label of the step ending at list[i] (newest first listing)
+static void step_label(const EditorHistoryEntry *list, const size_t i, size_t first, char *out, const size_t n) {
+    const EditorHistoryEntry *e = &list[i];
+    if (e->label) {
+        snprintf(out, n, "%s", e->label);
+        return;
+    }
+    const size_t steps = i - first + 1;
+    const char *verb = e->action == 'a' ? "add" : e->action == 'r' ? "remove" : e->action == 'm' ? "map settings" : "edit";
+    if (e->action == 'm') {
+        snprintf(out, n, "%s", verb);
+        return;
+    }
+    int prefab = -1;
+    const cJSON *pi = e->state ? cJSON_GetObjectItemCaseSensitive(e->state, "i") : NULL;
+    prefab = cJSON_IsNumber(pi) ? (int) cJSON_GetNumberValue(pi) : 0;
+    const char *name = prefab >= 0 && prefab < EDITOR_PREFAB_COUNT ? editor_prefabs[prefab].label : "object";
+    if (steps > 1) snprintf(out, n, "%s %zu objects", verb, steps);
+    else snprintf(out, n, "%s %s", verb, name);
+}
+
+cJSON *ed_history_labels(const int redo, const int limit) {
+    const EditorProject *p = g_ed.proj;
+    const EditorHistoryEntry *list = redo ? p->redos : p->undos;
+    size_t i = redo ? p->redo_count : p->undo_count;
+    cJSON *out = cJSON_CreateArray();
+    while (i > 0 && (limit <= 0 || cJSON_GetArraySize(out) < limit)) {
+        size_t first = i - 1;
+        const uint32_t batch = list[i - 1].batch;
+        while (batch && first > 0 && list[first - 1].batch == batch) first--;
+        char label[160];
+        step_label(list, i - 1, first, label, sizeof(label));
+        cJSON_AddItemToArray(out, cJSON_CreateString(label));
+        i = first;
+    }
+    return out;
+}
+
+size_t ed_history_steps(const int redo) {
+    const EditorProject *p = g_ed.proj;
+    const EditorHistoryEntry *list = redo ? p->redos : p->undos;
+    size_t i = redo ? p->redo_count : p->undo_count, steps = 0;
+    while (i > 0) {
+        const uint32_t batch = list[--i].batch;
+        while (batch && i > 0 && list[i - 1].batch == batch) i--;
+        steps++;
+    }
+    return steps;
+}
+
 void ed_history_clear(void) {
-    for (size_t i = 0; i < g_ed.undo_count; i++) cJSON_Delete(g_ed.undos[i].state);
-    for (size_t i = 0; i < g_ed.redo_count; i++) cJSON_Delete(g_ed.redos[i].state);
-    g_ed.undo_count = g_ed.redo_count = 0;
-    for (size_t i = 0; i < g_graveyard_count; i++) ed_obj_free(g_graveyard[i].object);
-    free(g_graveyard);
-    g_graveyard = NULL;
-    g_graveyard_count = 0;
+    EditorProject *p = g_ed.proj;
+    for (size_t i = 0; i < p->undo_count; i++) entry_free(&p->undos[i]);
+    for (size_t i = 0; i < p->redo_count; i++) entry_free(&p->redos[i]);
+    p->undo_count = p->redo_count = 0;
+    for (size_t i = 0; i < p->graveyard_count; i++) ed_obj_free(p->graveyard[i].object);
+    free(p->graveyard);
+    p->graveyard = NULL;
+    p->graveyard_count = 0;
 }

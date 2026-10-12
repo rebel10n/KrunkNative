@@ -92,7 +92,7 @@ static const char k_fix_containerr[] =
 
 void ed_fix_hitbox(EditorObject *e) {
     // fixHitbox(e = objectSelected()): replaceObject(e, hitbox JSON, true, objType)
-    if (!(e = e ? e : g_ed.selected)) return;
+    if (!(e = e ? e : g_ed.proj->selected)) return;
     const char *type = editor_prefabs[e->prefab].name;
     if (!strcmp(type, "VEHICLE")) ed_obj_replace(e, k_fix_vehicle, type, 0);
     else if (!strcmp(type, "TREE")) ed_obj_replace(e, k_fix_tree, type, 0);
@@ -235,10 +235,10 @@ void ed_quickgui_show(EditorObject *o, const double fb_x, const double fb_y) {
     cJSON *arr = cJSON_CreateArray();
     const EditorGroup *g = ed_group_of(o);
     if (g) {
-        for (size_t i = 0; i < g_ed.count; i++) {
+        for (size_t i = 0; i < g_ed.proj->count; i++) {
             for (size_t k = 0; k < g->count; k++) {
-                if (g->objects[k] == g_ed.objects[i]->uuid) {
-                    cJSON_AddItemToArray(arr, ed_obj_serialize(g_ed.objects[i]));
+                if (g->objects[k] == g_ed.proj->objects[i]->uuid) {
+                    cJSON_AddItemToArray(arr, ed_obj_serialize(g_ed.proj->objects[i]));
                     break;
                 }
             }

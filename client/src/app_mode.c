@@ -254,9 +254,21 @@ void app_mode_parse_args(int *argc, char **argv) {
 #ifndef __EMSCRIPTEN__
     app_window_init(argv[0]); // the executable the page windows run
 #endif
+    // `--editor [flags] [map files...]`: every map file opens as an editor project and the
+    // editor's own flags (--mcp-bus, --bus-dir, --mcp-auto-accept, ...) are taken here
+    int editor = 0;
+    for (int i = 1; i < *argc; i++) editor |= !strcmp(argv[i], "--editor");
     int out = 1;
     for (int i = 1; i < *argc; i++) {
         const char *arg = argv[i];
+        if (editor && editor_bus_parse_arg(*argc, argv, &i)) continue;
+        if (editor && arg[0] != '-') {
+            const size_t len = strlen(arg);
+            if ((len > 5 && !strcmp(arg + len - 5, ".json")) || (len > 4 && !strcmp(arg + len - 4, ".txt"))) {
+                editor_cli_add_file(arg);
+                continue;
+            }
+        }
         if (!strcmp(arg, "--game") || !strcmp(arg, "--hub") || !strcmp(arg, "--social") || !strcmp(arg, "--editor") || !strcmp(arg, "--viewer")) {
             g_start_mode = mode_from_name(arg + 2);
             g_start_query[0] = 0;
@@ -264,7 +276,7 @@ void app_mode_parse_args(int *argc, char **argv) {
             if (i + 1 < *argc && argv[i + 1][0] != '-') {
                 const char *next = argv[i + 1];
                 const size_t len = strlen(next);
-                if (len < 5 || strcmp(next + len - 5, ".json") != 0) {
+                if ((len < 5 || strcmp(next + len - 5, ".json") != 0) && (len < 4 || strcmp(next + len - 4, ".txt") != 0)) {
                     snprintf(g_start_query, sizeof(g_start_query), "%s", next[0] == '?' ? next + 1 : next);
                     i++;
                 }

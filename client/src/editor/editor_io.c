@@ -23,10 +23,10 @@
 // defaults (Editor.initialize mapConfig)
 
 void ed_map_defaults(void) {
-    cJSON_Delete(g_ed.map_config);
+    cJSON_Delete(g_ed.proj->map_config);
     const cJSON *d = editor_data_get("defaults");
-    g_ed.map_config = cJSON_CreateObject();
-    cJSON *m = g_ed.map_config;
+    g_ed.proj->map_config = cJSON_CreateObject();
+    cJSON *m = g_ed.proj->map_config;
     cJSON_AddStringToObject(m, "name", "New Krunker Map");
     cJSON_AddNumberToObject(m, "ambInd", 1);
     cJSON_AddStringToObject(m, "modURL", "");
@@ -72,10 +72,10 @@ void ed_map_defaults(void) {
     cJSON_AddNumberToObject(m, "fogD", 2000);
     cJSON_AddNumberToObject(m, "dthY", -100);
 
-    cJSON_Delete(g_ed.server_config);
-    g_ed.server_config = cJSON_Parse("{\"modes\":{},\"classes\":{},\"settings\":{},\"weps\":{}}");
-    cJSON_Delete(g_ed.game_config);
-    g_ed.game_config = cJSON_CreateObject();
+    cJSON_Delete(g_ed.proj->server_config);
+    g_ed.proj->server_config = cJSON_Parse("{\"modes\":{},\"classes\":{},\"settings\":{},\"weps\":{}}");
+    cJSON_Delete(g_ed.proj->game_config);
+    g_ed.proj->game_config = cJSON_CreateObject();
 }
 
 void ed_map_clear(void) {
@@ -84,15 +84,15 @@ void ed_map_clear(void) {
     ed_history_clear();
     cJSON_Delete(g_ed.copy);
     g_ed.copy = NULL;
-    g_ed.camera.position = (vec3) {0, 50, 100};
-    g_ed.yaw = g_ed.pitch = 0;
+    g_ed.proj->camera.position = (vec3) {0, 50, 100};
+    g_ed.proj->yaw = g_ed.proj->pitch = 0;
     ed_map_defaults();
     editor_apply_lighting();
     ed_terrain_regen(); // regenAll: regenTerrain / regenZone
     ed_zone_regen();
     ed_panel_refresh_all();
     g_ed.dirty_counts = 1;
-    g_ed.dirty_storage = 1;
+    ed_mark_changed();
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ static int fold_color(cJSON *o, const char *key, cJSON *palette) {
 }
 
 static int keep_map_key(const char *p, const cJSON *v) {
-    const cJSON *mc = g_ed.map_config;
+    const cJSON *mc = g_ed.proj->map_config;
     const cJSON *d = editor_data_get("defaults");
     const int zone = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(mc, "zone"));
     const char *seed = ed_json_str(mc, "terrainSeed", "");
@@ -203,22 +203,22 @@ cJSON *ed_map_export(const int full) {
     cJSON *out = cJSON_CreateObject();
     // ...u: the map config
     const cJSON *it;
-    cJSON_ArrayForEach(it, g_ed.map_config) {
+    cJSON_ArrayForEach(it, g_ed.proj->map_config) {
         if (!keep_map_key(it->string, it)) continue;
         cJSON *v = cJSON_Duplicate(it, 1);
         if ((!strcmp(it->string, "fogD") || !strcmp(it->string, "shadowD")) && cJSON_IsNumber(v)) cJSON_SetNumberValue(v, round(cJSON_GetNumberValue(v)));
         cJSON_AddItemToObject(out, it->string, v);
     }
     // fields of an imported map the editor does not model (kept so maps round-trip)
-    cJSON_ArrayForEach(it, g_ed.extra_map) {
+    cJSON_ArrayForEach(it, g_ed.proj->extra_map) {
         if (!cJSON_GetObjectItemCaseSensitive(out, it->string)) cJSON_AddItemToObject(out, it->string, cJSON_Duplicate(it, 1));
     }
     cJSON *objects = cJSON_AddArrayToObject(out, "objects");
     cJSON *palette = cJSON_CreateArray();
     cJSON *spawns = cJSON_CreateArray();
     cJSON *cam = NULL;
-    for (size_t i = 0; i < g_ed.count; i++) {
-        const EditorObject *o = g_ed.objects[i];
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *o = g_ed.proj->objects[i];
         if (!full && editor_prefab_has(o->prefab, EP_NOEXPORT)) continue;
         if (!full && o->prefab == ED_PREFAB_SPAWN_POINT) {
             const vec3 p = ed_obj_vec(o, "p", (vec3) {0});
@@ -247,7 +247,7 @@ cJSON *ed_map_export(const int full) {
     else cJSON_Delete(palette);
 
     // config: modes / classes / settings / weps
-    cJSON *a = cJSON_Duplicate(g_ed.server_config, 1);
+    cJSON *a = cJSON_Duplicate(g_ed.proj->server_config, 1);
     cJSON *modes = cJSON_CreateArray();
     int count = 0, only_zero = 1;
     cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(a, "modes")) {
@@ -296,7 +296,7 @@ cJSON *ed_map_export(const int full) {
     if (cJSON_GetArraySize(a)) cJSON_AddItemToObject(out, "config", a);
     else cJSON_Delete(a);
 
-    cJSON *game = cJSON_Duplicate(g_ed.game_config, 1);
+    cJSON *game = cJSON_Duplicate(g_ed.proj->game_config, 1);
     export_config_list(game, editor_data_get("gameConfig"), 0);
     if (cJSON_GetArraySize(game)) cJSON_AddItemToObject(out, "game", game);
     else cJSON_Delete(game);
@@ -334,7 +334,7 @@ static int known_map_key(const char *k) {
 static void import_config(const cJSON *config) {
     const cJSON *modes = cJSON_GetObjectItemCaseSensitive(config, "modes");
     if (cJSON_GetArraySize(modes)) {
-        cJSON *m = cJSON_GetObjectItemCaseSensitive(g_ed.server_config, "modes");
+        cJSON *m = cJSON_GetObjectItemCaseSensitive(g_ed.proj->server_config, "modes");
         const int n = cJSON_GetArraySize(editor_data_get("modes"));
         for (int r = 0; r < n; r++) {
             int on = 0;
@@ -347,7 +347,7 @@ static void import_config(const cJSON *config) {
     }
     const cJSON *classes = cJSON_GetObjectItemCaseSensitive(config, "classes");
     if (cJSON_GetArraySize(classes)) {
-        cJSON *c = cJSON_GetObjectItemCaseSensitive(g_ed.server_config, "classes");
+        cJSON *c = cJSON_GetObjectItemCaseSensitive(g_ed.proj->server_config, "classes");
         const int n = cJSON_GetArraySize(editor_data_get("classes"));
         for (int r = 0; r < n; r++) {
             int on = 0;
@@ -365,12 +365,12 @@ static void import_config(const cJSON *config) {
         const char *var = ed_json_str(w, "varN", "");
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(settings, var);
         if (!v || cJSON_IsNull(v)) continue;
-        cJSON *s = cJSON_GetObjectItemCaseSensitive(g_ed.server_config, "settings");
+        cJSON *s = cJSON_GetObjectItemCaseSensitive(g_ed.proj->server_config, "settings");
         cJSON_DeleteItemFromObjectCaseSensitive(s, var);
         cJSON_AddItemToObject(s, var, cJSON_Duplicate(v, 1));
     }
     const cJSON *weps = cJSON_GetObjectItemCaseSensitive(config, "weps");
-    cJSON *ws = cJSON_GetObjectItemCaseSensitive(g_ed.server_config, "weps");
+    cJSON *ws = cJSON_GetObjectItemCaseSensitive(g_ed.proj->server_config, "weps");
     const cJSON *it;
     cJSON_ArrayForEach(it, weps) {
         if (!cJSON_IsObject(it)) continue;
@@ -416,10 +416,10 @@ static int import_doc(cJSON *e) {
     ed_objects_clear();
     ed_history_clear();
     ed_map_defaults();
-    cJSON_Delete(g_ed.extra_map);
-    g_ed.extra_map = cJSON_CreateObject();
-    g_ed.camera.position = (vec3) {0, 50, 100};
-    g_ed.yaw = g_ed.pitch = 0;
+    cJSON_Delete(g_ed.proj->extra_map);
+    g_ed.proj->extra_map = cJSON_CreateObject();
+    g_ed.proj->camera.position = (vec3) {0, 50, 100};
+    g_ed.proj->yaw = g_ed.proj->pitch = 0;
 
     // loadObjects: palette colours back inline
     const cJSON *colors = cJSON_GetObjectItemCaseSensitive(map, "colors");
@@ -460,15 +460,15 @@ static int import_doc(cJSON *e) {
         const char *var = ed_json_str(w, "varN", "");
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(game, var);
         if (!v || cJSON_IsNull(v)) continue;
-        cJSON_DeleteItemFromObjectCaseSensitive(g_ed.game_config, var);
-        cJSON_AddItemToObject(g_ed.game_config, var, cJSON_Duplicate(v, 1));
+        cJSON_DeleteItemFromObjectCaseSensitive(g_ed.proj->game_config, var);
+        cJSON_AddItemToObject(g_ed.proj->game_config, var, cJSON_Duplicate(v, 1));
     }
     // Object.assign(mapConfig, importedMap) without objects/camPos/spawns/config/game
     const cJSON *it;
     cJSON_ArrayForEach(it, map) {
         const char *k = it->string;
         if (!strcmp(k, "objects") || !strcmp(k, "camPos") || !strcmp(k, "spawns") || !strcmp(k, "config") || !strcmp(k, "game") || !strcmp(k, "colors")) continue;
-        cJSON *target = known_map_key(k) ? g_ed.map_config : g_ed.extra_map;
+        cJSON *target = known_map_key(k) ? g_ed.proj->map_config : g_ed.proj->extra_map;
         cJSON_DeleteItemFromObjectCaseSensitive(target, k);
         cJSON_AddItemToObject(target, k, cJSON_Duplicate(it, 1));
     }
@@ -476,10 +476,10 @@ static int import_doc(cJSON *e) {
     const cJSON *ecam = cJSON_GetObjectItemCaseSensitive(e, "cam");
     if (ecam) {
         const cJSON *p = cJSON_GetObjectItemCaseSensitive(ecam, "p"), *r = cJSON_GetObjectItemCaseSensitive(ecam, "r");
-        if (cJSON_GetArraySize(p) >= 3) g_ed.camera.position = (vec3) {(float) num_of(cJSON_GetArrayItem(p, 0)), (float) num_of(cJSON_GetArrayItem(p, 1)), (float) num_of(cJSON_GetArrayItem(p, 2))};
+        if (cJSON_GetArraySize(p) >= 3) g_ed.proj->camera.position = (vec3) {(float) num_of(cJSON_GetArrayItem(p, 0)), (float) num_of(cJSON_GetArrayItem(p, 1)), (float) num_of(cJSON_GetArrayItem(p, 2))};
         if (cJSON_GetArraySize(r) >= 2) {
-            g_ed.yaw = (float) num_of(cJSON_GetArrayItem(r, 0));
-            g_ed.pitch = (float) num_of(cJSON_GetArrayItem(r, 1));
+            g_ed.proj->yaw = (float) num_of(cJSON_GetArrayItem(r, 0));
+            g_ed.proj->pitch = (float) num_of(cJSON_GetArrayItem(r, 1));
         }
     }
     const cJSON *selected = cJSON_GetObjectItemCaseSensitive(e, "selected");
@@ -489,10 +489,10 @@ static int import_doc(cJSON *e) {
         EditorObject *owner = ed_obj_find((uint32_t) strtoul(it->string, NULL, 10));
         const cJSON *ids = cJSON_GetObjectItemCaseSensitive(it, "ids");
         if (!owner || !cJSON_GetArraySize(ids)) continue;
-        EditorGroup *gs = realloc(g_ed.groups, (g_ed.group_count + 1) * sizeof(EditorGroup));
+        EditorGroup *gs = realloc(g_ed.proj->groups, (g_ed.proj->group_count + 1) * sizeof(EditorGroup));
         if (!gs) break;
-        g_ed.groups = gs;
-        EditorGroup *g = &g_ed.groups[g_ed.group_count++];
+        g_ed.proj->groups = gs;
+        EditorGroup *g = &g_ed.proj->groups[g_ed.proj->group_count++];
         memset(g, 0, sizeof(*g));
         g->owner = owner->uuid;
         g->objects = calloc((size_t) cJSON_GetArraySize(ids), sizeof(uint32_t));
@@ -531,29 +531,29 @@ static cJSON *save_doc(void) {
     cJSON *n = cJSON_CreateObject();
     cJSON_AddItemToObject(n, "map", ed_map_export(1));
     cJSON *groups = cJSON_AddObjectToObject(n, "groups");
-    for (size_t i = 0; i < g_ed.group_count; i++) {
+    for (size_t i = 0; i < g_ed.proj->group_count; i++) {
         char key[16];
-        snprintf(key, sizeof(key), "%u", g_ed.groups[i].owner);
+        snprintf(key, sizeof(key), "%u", g_ed.proj->groups[i].owner);
         cJSON *g = cJSON_AddObjectToObject(groups, key);
         cJSON *ids = cJSON_AddArrayToObject(g, "ids");
-        for (size_t j = 0; j < g_ed.groups[i].count; j++) cJSON_AddItemToArray(ids, cJSON_CreateNumber(g_ed.groups[i].objects[j]));
+        for (size_t j = 0; j < g_ed.proj->groups[i].count; j++) cJSON_AddItemToArray(ids, cJSON_CreateNumber(g_ed.proj->groups[i].objects[j]));
     }
-    if (g_ed.selected) cJSON_AddNumberToObject(n, "selected", g_ed.selected->uuid);
+    if (g_ed.proj->selected) cJSON_AddNumberToObject(n, "selected", g_ed.proj->selected->uuid);
     cJSON *cam = cJSON_AddObjectToObject(n, "cam");
     cJSON *p = cJSON_AddArrayToObject(cam, "p");
-    cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.camera.position.x));
-    cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.camera.position.y));
-    cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.camera.position.z));
+    cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.proj->camera.position.x));
+    cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.proj->camera.position.y));
+    cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.proj->camera.position.z));
     cJSON *r = cJSON_AddArrayToObject(cam, "r");
-    cJSON_AddItemToArray(r, cJSON_CreateNumber(g_ed.yaw));
-    cJSON_AddItemToArray(r, cJSON_CreateNumber(g_ed.pitch));
+    cJSON_AddItemToArray(r, cJSON_CreateNumber(g_ed.proj->yaw));
+    cJSON_AddItemToArray(r, cJSON_CreateNumber(g_ed.proj->pitch));
     cJSON_AddItemToArray(r, cJSON_CreateNumber(0));
     cJSON_AddArrayToObject(n, "history");
     return n;
 }
 
 void ed_map_store(void) {
-    if (!g_ed.map_config) return;
+    if (!g_ed.proj->map_config) return;
     cJSON *doc = save_doc();
     char *text = cJSON_PrintUnformatted(doc);
     cJSON_Delete(doc);
@@ -713,7 +713,7 @@ static void safe_name(const char *in, char *out, const size_t n) {
 static int write_user_file(const char *suffix, const char *text, char *path_out, const size_t n) {
     char dir[600], name[128];
     user_maps_dir(dir, sizeof(dir));
-    safe_name(ed_json_str(g_ed.map_config, "name", "map"), name, sizeof(name));
+    safe_name(ed_json_str(g_ed.proj->map_config, "name", "map"), name, sizeof(name));
     snprintf(path_out, n, "%s/%s%s", dir, name, suffix);
     FILE *f = fopen(path_out, "wb");
     if (!f) return 0;
@@ -750,7 +750,7 @@ void ed_file_export(void) {
     ed_clipboard_copy(text);
 #ifdef __EMSCRIPTEN__
     char name[160];
-    snprintf(name, sizeof(name), "%s_export", ed_json_str(g_ed.map_config, "name", "map"));
+    snprintf(name, sizeof(name), "%s_export", ed_json_str(g_ed.proj->map_config, "name", "map"));
     kn_editor_download(name, text);
     editor_message("Map exported (download) and copied to the clipboard.");
 #else
@@ -797,7 +797,7 @@ void ed_file_save_as(void) {
     if (!text) return;
 #ifdef __EMSCRIPTEN__
     char name[160];
-    snprintf(name, sizeof(name), "%s_save.txt", ed_json_str(g_ed.map_config, "name", "map"));
+    snprintf(name, sizeof(name), "%s_save.txt", ed_json_str(g_ed.proj->map_config, "name", "map"));
     kn_editor_download(name, text);
 #else
     char path[800], msg[900];
@@ -826,7 +826,7 @@ void ed_file_import(void) {
     // no map on the clipboard: load the last export of a map with this name from the user dir
     char dir[600], name[128], path[800];
     user_maps_dir(dir, sizeof(dir));
-    safe_name(ed_json_str(g_ed.map_config, "name", "map"), name, sizeof(name));
+    safe_name(ed_json_str(g_ed.proj->map_config, "name", "map"), name, sizeof(name));
     snprintf(path, sizeof(path), "%s/%s_export.json", dir, name);
     unsigned char *buf = NULL;
     size_t len = 0;

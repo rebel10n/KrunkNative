@@ -145,10 +145,11 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport and lag compensation tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation and editor bus tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/lagcomp_test
+	./$(DEBUG_DIR)/editor_bus_test
 
 # --------------------------------------------------------------------------- html-engine
 # The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).
