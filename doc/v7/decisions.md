@@ -30,6 +30,7 @@ editor.md, player-viewer.md (this directory).
 | 190-194 | player-viewer WP-B: 190 PERKS (upk; map-logic's zombies block must not add a second one), 191 UPGRADES, 192 WEAPON_STREAK |
 | 195-199 | player-viewer WP-C: protocol/input |
 | 200-239 | KrunkScript |
+| 240-249 | player-viewer WP-E: HUD, death screen, social (`NET_PACKET_BLOCK_SOCIAL`; `NET_PACKET_BLOCK_END` moves to 250) |
 
 New packets are gated on `NET_PROTOCOL_MINOR` (3 = `NET_PROTOCOL_MINOR_V7`, set by map-A; don't bump it again without asking the coordinator). The client negotiates per server, from the INIT version.
 
