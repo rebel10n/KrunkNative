@@ -1467,14 +1467,14 @@ static void client_tick_game(Client *client, const float now, const float frame_
             client->mouse_state.scroll_delta = 0;
             client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
         }
-        // Round over (victory/defeat title, slow motion, results): only the look stays.
-        // KrunkNative (deliberate difference): v3.1.1 keeps its controls enabled through the
-        // endAnim title, so WASD/jump/shots still predict locally in shrinking slow motion
-        // (nothing is sent: !endAnimationTimeLeft) until CONTROLS.disable() after endAnim.
-        // Here the end screen takes every action at once: no move, jump, crouch/slide,
-        // shoot, reload, ADS, swap or wheel; physics still settles (a jump in the air lands).
-        // Nothing is kept for later: didPressed/aba6 are per frame, INIT resets the keys.
-        if (client_round_ended(client)) {
+        // Round over, v3.1.1 parity (index.js endGame / gameLoop): through the endAnim title the
+        // controls stay enabled, so WASD/jump/shots/ADS still act locally in the shrinking slow
+        // motion; nothing is sent (the "q" batch needs !endAnimationTimeLeft, recon.c). Once
+        // endAnim ran out, CONTROLS.disable() (toggle(false) -> resetKeys, locked) frees the
+        // pointer for the results (hud_ui_end_screen_interactive above resets the keys) and
+        // the world stands still (deltaMs * 0). Without the HTML end screen this keeps the
+        // frozen results input empty too. INIT resets the keys: nothing reaches the next round.
+        if (client_round_ended(client) && menu_view_time_scale() <= 0.0f) {
             input = (Input) {.move_dir = -1, .delta = input.delta, .x_dir = input.x_dir, .y_dir = input.y_dir};
         }
         // controls.js: the pitch is clamped and xDr = rotation.y % Math.PI2 before the input
