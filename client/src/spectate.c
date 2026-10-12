@@ -63,9 +63,8 @@ const char *spectate_person_label(void) {
     return g_spect.toggled && g_spect.person ? "Third Person" : "First Person";
 }
 
-// "fpSp": tell the server who we follow (informational; the offline game has no spectators).
+// "fpSp": tell the server who we follow (informational).
 static void spectate_send_target(Client *client, const int uid) {
-    if (client->offline) return;
     const NetSpectateTargetPacket packet = {.uid = uid};
     client_net_send(client, NET_PACKET_SPECTATE_TARGET, &packet, sizeof(packet));
 }
@@ -74,12 +73,6 @@ static void spectate_send_target(Client *client, const int uid) {
 static void spectate_drop_me(Client *client) {
     Player *me = client->me;
     if (!me) return;
-
-    // Offline the game is the authority: leave it like a server's spectator does (net_start_spectating).
-    if (client->offline) {
-        me->active = 0;
-        game_player_left(&client->game, me);
-    }
 
     for (size_t i = 0; i < client->game.player_count; i++) {
         if (client->game.players[i] != me) continue;

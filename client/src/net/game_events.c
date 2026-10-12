@@ -35,7 +35,7 @@
 
 void client_net_send(Client *client, const NetPacketType type, const void *payload, const uint16_t length) {
     if (client->offline) {
-        local_game_receive(client, type, payload, length); // a direct call into the offline game (net/local_game.c)
+        client_offline_send(client, type, payload, length); // the sandbox server's connection (net/offline.c)
         return;
     }
 
@@ -480,8 +480,8 @@ int client_handle_game_packet(Client *client, const NetPacket *packet) {
     return client_handle_game_event(client, packet->type, packet->payload, packet->length);
 }
 
-// One server event as its struct: from a received packet above, or straight from the
-// offline client's own authoritative game (GameHooks.send in net/local_game.c).
+// One server event as its struct, from a received packet above (the offline sandbox
+// server's arrive the same way, net/offline.c).
 int client_handle_game_event(Client *client, const int type, const void *payload, const uint16_t length) {
     switch (type) {
         case NET_PACKET_CHAT: {

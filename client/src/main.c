@@ -630,7 +630,7 @@ int main(int argc, char **argv) {
     const int brain_mode = backend_startup(&INSTANCE, offline, SCENARIO_ACTIVE());
 
     if (offline) {
-        if (!local_game_start(&INSTANCE)) return -1; // singleplayer: client->game is the authority (net/local_game.c)
+        if (!local_game_start(&INSTANCE)) return -1; // the in-process sandbox server, joined like any server (net/offline.c)
     } else {
 #ifdef __EMSCRIPTEN__
         (void) net_args;
@@ -706,8 +706,8 @@ int main(int argc, char **argv) {
 }
 
 // One main-loop iteration, shared by the native while loop and the emscripten
-// main loop callback: advance time, tick/render (offline included: the game is
-// the authority, net/local_game.c), present and poll input.
+// main loop callback: advance time, tick/render (offline included: the sandbox server
+// steps inside the frame, net/offline.c), present and poll input.
 void client_frame(Client *client) {
     // updateRate on the web: Krunker skips whole animation frames (index.js gP); the
     // canvas keeps the last frame. Natively the cap sleeps in client_render_frame_end.
@@ -897,16 +897,16 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     client_player_spawned(client, player, packet->is_you);
 }
 
-// A player just (re)spawned in client->game (SPAWN above, or the offline game's own spawn in
-// net/local_game.c): its meshes, and for us the in-game state.
+// A player just (re)spawned in client->game (SPAWN above, or a bot of the client's own game):
+// its meshes, and for us the in-game state.
 void client_player_spawned(Client *client, Player *player, const int is_you) {
     if (is_you) {
         client->me = player;
         player->is_you = 1;
         client_recon_reset(client); // "start" -> CONTROLS.reset(): tmpInpts emptied, isn = 0
-        // Online our prediction copy has to slide like the server's player (v3.1.1 reads it
-        // back from the spawn data, index.js serverSetting.slidCont); offline it is that player.
-        if (!client->offline) player->slid_cont = ui_controls_settings()->slid_cont ? 1 : 0;
+        // Our prediction copy has to slide like the server's player (v3.1.1 reads it back from
+        // the spawn data, index.js serverSetting.slidCont); the offline sandbox server too.
+        player->slid_cont = ui_controls_settings()->slid_cont ? 1 : 0;
         client_add_player_mesh(client, player, 1);
 
         // Our (re)spawn: in the game again, death card down (UI.toggleGameUI(true)).
@@ -981,7 +981,7 @@ void client_apply_state(Client *client, const NetStatePacket *packet) {
 }
 
 void client_send_cycle_packet(Client *client) {
-    client_net_send(client, NET_PACKET_CYCLE, NULL, 0); // offline: the next map right away (net/local_game.c)
+    client_net_send(client, NET_PACKET_CYCLE, NULL, 0); // io_cycle (offline: the sandbox server's)
 }
 
 // INIT: a new session or round on map init->map_index (already resolved to the
@@ -1275,24 +1275,14 @@ void client_enter_game(Client *client) {
     packet.lag_comp = client_render_settings()->lag_comp; // ent[11] parseFloat(settings.tmp.lagCompensation)
     // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
     // a 1.1 server anything longer than V6 (no lagComp): net_ent_size_for.
-    const uint16_t ent_size = client->offline ? (uint16_t) NET_ENT_PACKET_V7_SIZE : client->net_ent_size ? client->net_ent_size : (uint16_t) NET_ENT_PACKET_V4_SIZE;
-
-    if (client->offline && (packet.spectate || leave_spectate)) {
-        // The offline game has no spectators: like v3.1.1's single player
-        // (enterGame without a server player), spectate locally / stop and spawn.
-        if (packet.spectate) {
-            spectate_begin(client);
-            return;
-        }
-        spectate_end(client);
-    }
+    const uint16_t ent_size = client->net_ent_size ? client->net_ent_size : (uint16_t) NET_ENT_PACKET_V4_SIZE;
 
     pthread_mutex_lock(&client->net_lock);
     const int socket = client->net_socket;
     pthread_mutex_unlock(&client->net_lock);
 
     if (client->offline || socket >= 0) {
-        client->spawn_requested = 1; // offline the spawn happens inside this call (SPAWN clears it)
+        client->spawn_requested = 1; // SPAWN clears it
         client_net_send(client, NET_PACKET_ENT, &packet, ent_size);
     } else {
         client->in_game = 0;
@@ -1316,6 +1306,7 @@ void client_tick(Client *client, const float now, const float delta) {
     ui_scenario_draw_background(); // scenario mode: its background replaces the world
 #endif
 
+    client_offline_pump(client, delta); // offline: the sandbox server's step on this frame (net/offline.c)
     client_tick_net(client);
     client_game_events_tick(client); // death delay -> menu (net/game_events.c)
 

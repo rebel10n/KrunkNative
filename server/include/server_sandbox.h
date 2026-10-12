@@ -46,8 +46,7 @@ void sandbox_step(double seconds);
 
 // Host controls (Host Game, the editor's Test Map, console `map` offline): every round on
 // mode_id (-1 keeps the current modes) and this map now, the players who are alive respawn
-// on it (net_change_map). add_map appends a map to the server's list (copy kept by the
-// caller) and returns its index there, -1 on failure; replace_map swaps one entry.
+// on it (net_change_map). set_maps replaces the server's map list with a copy of `maps` (the
+// cJSON maps stay the caller's: keep the one the round plays alive until the next INIT).
 void sandbox_host(int map_index, int mode_id);
-int sandbox_add_map(const cJSON *map);
-void sandbox_replace_map(int map_index, const cJSON *map);
+int sandbox_set_maps(const cJSON **maps, size_t count);

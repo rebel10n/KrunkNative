@@ -2411,8 +2411,8 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
         ui->show_ui = show_ui;
         ui->visible = -1;
     }
-    // A map / mode change with no hidden frame in between (the offline game reloads and
-    // respawns inside one frame, net/local_game.c): curGameInfo follows it.
+    // A map / mode change with no hidden frame in between (the offline sandbox reloads and
+    // respawns inside one frame, net/offline.c): curGameInfo follows it.
     static int info_key = -1;
     const int key = client->game.ready ? client->game.current_map_index * 1024 + game_mode_id(&client->game) + 1 : -1;
     if (key != info_key) {

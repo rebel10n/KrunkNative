@@ -594,7 +594,7 @@ static void nt_visibility_pass(Client *client) {
     const Game *game = &client->game;
     const Player *me = client->me;
     const int spectating = spectate_active();
-    if (game->is_local) return;                         // !Game.singlePlayer
+    if (client->offline) return;                        // !Game.singlePlayer (the offline sandbox game)
     if (!((me && me->active) || spectating)) return;    // dead: states (and the killer's tag) stay
 
     const ClientRenderSettings *rs = client_render_settings();

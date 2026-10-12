@@ -385,17 +385,17 @@ void sandbox_host(const int map_index, const int mode_id) {
     pthread_mutex_unlock(&g_server->lock);
 }
 
-int sandbox_add_map(const cJSON *map) {
-    if (!g_sb.running || !map) return -1;
+int sandbox_set_maps(const cJSON **maps, const size_t count) {
+    if (!g_sb.running || !maps || !count) return 0;
+    const cJSON **copy = malloc(count * sizeof(*copy));
+    if (!copy) return 0;
+    memcpy(copy, maps, count * sizeof(*copy));
+    pthread_mutex_lock(&g_server->lock);
     Game *game = &g_server->game;
-    const cJSON **maps = realloc((void *) game->maps, (game->map_count + 1) * sizeof(*maps));
-    if (!maps) return -1;
-    maps[game->map_count] = map;
-    game->maps = maps;
-    return (int) game->map_count++;
-}
-
-void sandbox_replace_map(const int map_index, const cJSON *map) {
-    if (!g_sb.running || !map || map_index < 0 || (size_t) map_index >= g_server->game.map_count) return;
-    g_server->game.maps[map_index] = map;
+    free((void *) game->maps);
+    game->maps = copy;
+    game->map_count = count;
+    if (game->current_map_index >= (int) count) game->current_map_index = 0; // the next cycle starts over
+    pthread_mutex_unlock(&g_server->lock);
+    return 1;
 }

@@ -458,8 +458,8 @@ typedef struct {
     unsigned char map_loaded:1;
     unsigned char net_connected:1;
     unsigned char net_thread_running:1;
-    // Singleplayer (client/src/net/local_game.c): `game` itself is the authoritative game
-    // (game.is_local), driven by direct calls on the main thread. No server, thread or packets.
+    // Offline (client/src/net/offline.c): connected to the in-process sandbox server
+    // (server/include/server_sandbox.h) over its loopback transport; `game` is a normal client game.
     unsigned char offline:1;
 
     pthread_t net_thread;
@@ -522,8 +522,6 @@ typedef struct {
     cJSON **net_map_cache;         // maps received from servers (owned, kept for later rounds)
     size_t net_map_cache_count;
     double last_frame_time;        // glfwGetTime() of the previous client_frame()
-    int offline_uid;               // offline: the local player's uid (Krunker socketId; "Guest_<uid + 1>")
-    int offline_joined;            // offline: the local player spawned this round (the next round respawns it)
 
     size_t net_packet_count;
     NetPacket *net_packets;
@@ -619,14 +617,14 @@ void client_net_queue_packet(Client*, const NetPacket*);
 void client_net_log_packet(const char*, NetPacketType, const void*, uint16_t);
 int client_net_send_packet(int, NetPacketType, const void*, uint16_t);
 
-// Singleplayer (client/src/net/local_game.c): client->game becomes the one authoritative
-// game, run in-process like v3.1.1's single player (index.js aW.singlePlayer). Server-side
-// rules live in shared/ (as on server_bin); what a server would send reaches the event
-// handlers below directly as structs (GameHooks.send), what the client would send
-// (client_net_send) arrives in local_game_receive() as a function call.
-int local_game_start(Client*);   // load the offline game: offline_start_map, else the startup map, else a random rotation map; mode net_mode_index / KRUNKNATIVE_MODE
-void local_game_stop(Client*);   // leave offline mode; the game stays loaded as a plain mirror
-void local_game_receive(Client*, NetPacketType, const void *payload, uint16_t length); // a client->server message, typed payload
+// Offline (client/src/net/offline.c): the in-process sandbox server (server_sandbox.h, the
+// real server core) joined over its loopback transport like any server, stepped by the main
+// loop. client->game is a normal predicted client game.
+int local_game_start(Client*);   // start the sandbox and join it: offline_start_map, else the startup map, else a random rotation map; mode net_mode_index / KRUNKNATIVE_MODE
+void local_game_stop(Client*);   // leave offline mode (the sandbox stops); the game stays loaded as a plain mirror
+void client_offline_pump(Client*, float delta);  // main loop, before client_tick_net: step the sandbox, queue what it sent
+void client_offline_send(Client*, NetPacketType, const void *payload, uint16_t length); // client_net_send offline
+void client_tick_net(Client*);   // handle the queued packets (main.c)
 // Host Game / console `map`: reload on `map_index` (-1 current) in Krunker mode `mode_id`,
 // the only mode of the next rounds.
 void local_game_host(Client*, int map_index, int mode_id);
@@ -644,7 +642,7 @@ void client_frame(Client*); // one iteration of the main loop: tick, swap, poll 
 void client_chat_send(Client*, const char *text); // Enter-to-chat: sends one line (trimmed, max 70 chars)
 int client_handle_game_packet(Client*, const NetPacket*); // 1 = handled (KILL/HIT/HEALTH/CHAT/...)
 int client_handle_game_event(Client*, int type, const void *payload, uint16_t length); // same, typed payload
-void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the socket, or offline local_game_receive()
+void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the socket, or offline the sandbox connection
 // Prediction / reconciliation (client/src/net/recon.c, Krunker tmpInpts / "q" / reconcilePlayer).
 void client_recon_reset(Client*);                                 // CONTROLS.reset(): our spawn, a new session
 void client_recon_record(Client*, const Input*);                  // a predicted input: pending + the "q" batch

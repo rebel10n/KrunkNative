@@ -420,6 +420,13 @@ else ()
         target_link_libraries(sandbox_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # trigger_authority_test: map triggers / interact fire on an authority game only (is_local or a server)
+    add_executable(trigger_authority_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/trigger_authority_test.c)
+    target_link_libraries(trigger_authority_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(trigger_authority_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # map_catalog_test: every v3.1.1 map (15 official + 21 community) loads, parses and plays
     add_executable(map_catalog_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_catalog_test.c)
     target_link_libraries(map_catalog_test PRIVATE m)

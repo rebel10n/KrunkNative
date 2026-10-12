@@ -897,8 +897,8 @@ static void menu_try_play(Client *client) {
 static void menu_request_play(const int offline) {
     Client *client = g_ui.client;
 
-    // `offline:true` (Host Game -> Start Server) with no server: play the offline game
-    // in-process for this session (net/local_game.c) and stop the transport from retrying.
+    // `offline:true` (Host Game -> Start Server) with no server: play on the in-process
+    // sandbox server for this session (net/offline.c) and stop the transport from retrying.
     if (offline && !client_is_connected(client)) {
         client->net_should_quit = 1;
         if (!local_game_start(client)) {

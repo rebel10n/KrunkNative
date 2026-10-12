@@ -11,9 +11,10 @@
 // switch are mods.ts (ui_mods.c).
 //
 // Commands: the local ones run here; server ones go out as "/cmd" chat ("ct"), answered
-// by shared/src/chat_commands.c on server_bin. In singleplayer devConsole runs its own
-// offline versions of some of them (offlineServerCommands, ported below against the
-// in-process game, client/src/net/local_game.c); the rest reach that game's chat handler.
+// by shared/src/chat_commands.c on server_bin. Offline that server is the in-process
+// sandbox (client/src/net/offline.c), so they work there exactly as online; devConsole's
+// offline map / mode / cycle versions (offlineServerCommands, below) stay local because
+// they are the sandbox host's controls (local_game_host).
 #include <console.h>
 #include <ui_mods.h>
 #include <ui_logic.h>
@@ -462,67 +463,6 @@ static void print_server_details(void) {
 
 // ---------------------------------------------------------------- offline server commands
 
-// parseToggleArg
-static int parse_toggle_arg(const char *value, const int current) {
-    if (!value || !*value) return !current;
-    char v[16];
-    snprintf(v, sizeof(v), "%s", value);
-    lower(v);
-    if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true")) return 1;
-    if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false")) return 0;
-    return !current;
-}
-
-static void normalise(const char *in, char *out, const size_t n) {
-    size_t len = 0;
-    for (; in && *in && len + 1 < n; in++) {
-        if (isalnum((unsigned char) *in)) out[len++] = (char) tolower((unsigned char) *in);
-    }
-    out[len] = 0;
-}
-
-// killOfflinePlayer: players.kill(target, source, {}) with godMode lifted
-static void kill_offline_player(Player *source, Player *target) {
-    if (!target) return;
-    const int had_god = target->god_mode;
-    target->god_mode = 0;
-    PlayerKillInfo info = {0};
-    info.weapon_id = -1;
-    player_kill(target, source == target ? NULL : source, &info, 0);
-    target->god_mode = (unsigned char) had_god;
-}
-
-// offlineBoolCommand
-typedef enum { FLAG_GOD, FLAG_NOCLIP, FLAG_SMITE, FLAG_FORCE_HIDE, FLAG_UNLIMITED } OfflineFlag;
-
-static void offline_bool(const OfflineFlag flag, const char *label, const int argc, char **argv) {
-    Player *p = con_player();
-    if (!p) return;
-    int current = 0;
-    switch (flag) {
-        case FLAG_GOD: current = p->god_mode; break;
-        case FLAG_NOCLIP: current = p->noclip; break;
-        case FLAG_SMITE: current = p->smite; break;
-        case FLAG_FORCE_HIDE: current = p->force_hide; break;
-        case FLAG_UNLIMITED: current = p->unlimited_ammo; break;
-    }
-    const int next = parse_toggle_arg(argc ? argv[0] : NULL, current);
-    switch (flag) {
-        case FLAG_GOD:
-            p->god_mode = (unsigned char) next;
-            if (next) p->health = (float) p->max_health;
-            break;
-        case FLAG_NOCLIP: p->noclip = (unsigned char) next; break;
-        case FLAG_SMITE: p->smite = (unsigned char) next; break;
-        case FLAG_FORCE_HIDE: p->force_hide = (unsigned char) next; break;
-        case FLAG_UNLIMITED:
-            p->unlimited_ammo = (unsigned char) next;
-            if (next) p->can_throw = 1;
-            break;
-    }
-    appendf(COL_INFO, "%s %s", label, next ? "ON" : "OFF");
-}
-
 static int offline_mode_for_change(const Game *game) {
     const int current = game_mode_id(game);
     return g_con.mode_override >= 0 ? g_con.mode_override : current >= 0 ? current : 0;
@@ -789,210 +729,6 @@ static void off_maps(const int argc, char **argv) {
     }
 }
 
-static void off_borders(const int argc, char **argv) {
-    Game *game = &con_client()->game;
-    if (!game->ready) {
-        append("Offline borders unavailable: game is not ready.", COL_ERROR);
-        return;
-    }
-    const int current = !game->config.disable_borders;
-    const int next = parse_toggle_arg(argc ? argv[0] : NULL, current);
-    if (next == current) {
-        appendf(COL_INFO, "Borders already %s", current ? "ON" : "OFF");
-        return;
-    }
-    game->config.disable_borders = (unsigned int) !next; // applyBordersFromServer
-    appendf(COL_INFO, "Borders %s", next ? "ON" : "OFF");
-}
-
-static void off_god(const int argc, char **argv) { offline_bool(FLAG_GOD, "God mode", argc, argv); }
-static void off_noclip(const int argc, char **argv) { offline_bool(FLAG_NOCLIP, "Noclip", argc, argv); }
-static void off_smite(const int argc, char **argv) { offline_bool(FLAG_SMITE, "Smite", argc, argv); }
-static void off_forcehide(const int argc, char **argv) { offline_bool(FLAG_FORCE_HIDE, "Forcehide", argc, argv); }
-static void off_unlimitedammo(const int argc, char **argv) { offline_bool(FLAG_UNLIMITED, "Unlimited ammo", argc, argv); }
-
-// resolveOfflineKillTarget: active players by name/id and AIs by name/sid; one exact
-// match wins, else one prefix match.
-typedef struct {
-    Player *player;
-    GameAI *ai;
-} KillTarget;
-
-static int key_match(const char *value, const char *needle, int *exact) {
-    char key[96];
-    normalise(value, key, sizeof(key));
-    if (!key[0]) return 0;
-    if (!strcmp(key, needle)) { *exact = 1; return 1; }
-    return starts_with(key, needle);
-}
-
-static KillTarget resolve_kill_target(const char *query, ResReason *reason) {
-    KillTarget none = {0}, exact_p = {0}, exact_a = {0}, any_p = {0}, any_a = {0};
-    char needle[96];
-    normalise(query, needle, sizeof(needle));
-    if (!needle[0]) { *reason = RES_EMPTY; return none; }
-    Game *game = &con_client()->game;
-    int ep = 0, ea = 0, pp = 0, pa = 0;
-    for (size_t i = 0; i < game->player_count; i++) {
-        Player *p = game->players[i];
-        if (!p || !p->active) continue;
-        char id[16];
-        snprintf(id, sizeof(id), "%d", p->uid);
-        int exact = 0;
-        if (!key_match(p->name, needle, &exact) && !key_match(id, needle, &exact)) continue;
-        pp++;
-        any_p.player = p;
-        if (exact) { ep++; exact_p.player = p; }
-    }
-    for (int i = 0; game->ai && i < game->ai->count; i++) {
-        GameAI *ai = &game->ai->ais[i];
-        if (!ai->active) continue;
-        char sid[16];
-        snprintf(sid, sizeof(sid), "%d", ai->sid);
-        int exact = 0;
-        if (!key_match(ai->name, needle, &exact) && !key_match(sid, needle, &exact)) continue;
-        pa++;
-        any_a.ai = ai;
-        if (exact) { ea++; exact_a.ai = ai; }
-    }
-    *reason = RES_OK;
-    if (ep == 1 && ea == 0) return exact_p;
-    if (ea == 1 && ep == 0) return exact_a;
-    if (ep + ea > 1) { *reason = RES_AMBIGUOUS; return none; }
-    if (pp == 1 && pa == 0) return any_p;
-    if (pa == 1 && pp == 0) return any_a;
-    *reason = pp + pa > 1 ? RES_AMBIGUOUS : RES_NOT_FOUND;
-    return none;
-}
-
-static void off_kill(const int argc, char **argv) {
-    Player *p = con_player();
-    if (!p) return;
-    char query[CON_TEXT_MAX];
-    join_args(argc, argv, 0, query, sizeof(query));
-    trim(query);
-    if (!query[0]) {
-        kill_offline_player(p, p);
-        append("You killed yourself.", COL_INFO);
-        return;
-    }
-    ResReason reason;
-    const KillTarget target = resolve_kill_target(query, &reason);
-    if (!target.player && !target.ai) {
-        if (reason == RES_AMBIGUOUS) appendf(COL_ERROR, "Kill target '%s' is ambiguous.", query);
-        else appendf(COL_ERROR, "Kill target '%s' not found.", query);
-        return;
-    }
-    if (target.ai) { // killOfflineAI: ai.kill(source) + AI.sync()
-        char label[GAME_AI_NAME_SIZE + 16];
-        if (target.ai->name[0]) snprintf(label, sizeof(label), "%s", target.ai->name);
-        else snprintf(label, sizeof(label), "%d", target.ai->sid);
-        Game *game = &con_client()->game;
-        game_ai_kill(game, target.ai, p);
-        game_ai_sync(game);
-        appendf(COL_INFO, "Killed AI %s.", label);
-        return;
-    }
-    char label[PLAYER_NAME_SIZE + 16];
-    if (target.player->name[0]) snprintf(label, sizeof(label), "%s", target.player->name);
-    else snprintf(label, sizeof(label), "%d", target.player->uid);
-    kill_offline_player(p, target.player);
-    appendf(COL_INFO, "Killed player %s.", label);
-}
-
-static void off_score(const int argc, char **argv) {
-    Player *p = con_player();
-    if (!p) return;
-    double amount = 100.0;
-    if (argc && !js_number(argv[0], &amount)) amount = 0.0;
-    if (amount == 0.0) {
-        append("Usage: score <amount> (default 100).", COL_ERROR);
-        return;
-    }
-    player_score(p, (int) amount, 0);
-    char num[32];
-    if (amount == floor(amount)) snprintf(num, sizeof(num), "%.0f", amount);
-    else snprintf(num, sizeof(num), "%g", amount);
-    appendf(COL_INFO, "%s%s score (total %d).", amount > 0 ? "+" : "", num, p->score);
-}
-
-static void off_team(const int argc, char **argv) {
-    Player *p = con_player();
-    const Game *game = &con_client()->game;
-    if (!p || !game->ready) return;
-    const GameModeConfig *mode = game->mode ? &game->mode->config : NULL;
-    if (!mode || !mode->teams || mode->friendly || mode->clan_war || mode->convert_team) {
-        append("/team only works in team modes.", COL_ERROR);
-        return;
-    }
-    char arg[32] = "";
-    if (argc) snprintf(arg, sizeof(arg), "%s", argv[0]);
-    lower(arg);
-    const int next = !strcmp(arg, "red") || !strcmp(arg, "1") ? 1 : !strcmp(arg, "blue") || !strcmp(arg, "2") ? 2 : 0;
-    if (!next) {
-        append("Usage: /team red|blue", COL_ERROR);
-        return;
-    }
-    if (p->team == next) {
-        appendf(COL_INFO, "Already on %s.", arg);
-        return;
-    }
-    p->team = next;
-    kill_offline_player(p, p);
-    appendf(COL_INFO, "Switched to %s team.", arg);
-}
-
-static void off_teams(const int argc, char **argv) {
-    (void) argc; (void) argv;
-    const Game *game = &con_client()->game;
-    int any = 0;
-    for (size_t i = 0; i < game->player_count; i++) if (game->players[i]) any = 1;
-    if (!any) {
-        append("No players.", COL_INFO);
-        return;
-    }
-    if (!game->mode || !game->mode->config.teams || game->mode->config.convert_team) {
-        append("Not a team mode.", COL_INFO);
-        return;
-    }
-    for (int team = 0; team < MODE_TEAMS; team++) {
-        char names[CON_LINE_MAX] = "";
-        size_t len = 0;
-        int count = 0;
-        for (size_t i = 0; i < game->player_count; i++) {
-            const Player *p = game->players[i];
-            if (!p || p->team != team) continue;
-            char label[PLAYER_NAME_SIZE + 16];
-            if (p->name[0]) snprintf(label, sizeof(label), "%s", p->name);
-            else snprintf(label, sizeof(label), "Guest_%d", p->uid);
-            if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", count ? ", " : "", label);
-            count++;
-        }
-        if (!count) continue;
-        if (team == 1) appendf(COL_INFO, "Red (%d): %s", count, names);
-        else if (team == 2) appendf(COL_INFO, "Blue (%d): %s", count, names);
-        else appendf(COL_INFO, "Team %d (%d): %s", team, count, names);
-    }
-}
-
-static void off_end(const int argc, char **argv) {
-    (void) argc; (void) argv;
-    Game *game = &con_client()->game;
-    if (!game->ready) return;
-    game_set_round_time(game, 3.0f); // endTimer = 0, gameTimer = 3e3
-    append("Match timer set to 3 seconds.", COL_INFO);
-}
-
-static void off_endless(const int argc, char **argv) {
-    (void) argc; (void) argv;
-    Game *game = &con_client()->game;
-    if (!game->ready) return;
-    if (game->end_timer > 0.0f) return; // the end screen: game_set_endless ignores it too
-    const int was = game->round_endless;
-    game_set_endless(game, !was); // pause / resume the clock where it is (shared/src/game.c)
-    append(was ? "Match timer resumed." : "Match timer paused.", COL_INFO);
-}
-
 static void off_server(const int argc, char **argv) {
     (void) argc; (void) argv;
     print_server_details();
@@ -1002,11 +738,9 @@ static void off_server(const int argc, char **argv) {
 static const struct {
     const char *name;
     void (*run)(int, char **);
-} OFFLINE_COMMANDS[] = {
+} OFFLINE_COMMANDS[] = { // the player / round cheats (god, noclip, kill, score, team, end, endless, borders, ...) go to the sandbox server
     {"server", off_server}, {"cycle", off_cycle}, {"map", off_map}, {"mode", off_mode}, {"modes", off_modes},
-    {"maps", off_maps}, {"borders", off_borders}, {"god", off_god}, {"noclip", off_noclip}, {"smite", off_smite},
-    {"forcehide", off_forcehide}, {"unlimitedammo", off_unlimitedammo}, {"kill", off_kill}, {"score", off_score},
-    {"team", off_team}, {"teams", off_teams}, {"end", off_end}, {"endless", off_endless},
+    {"maps", off_maps},
 };
 
 static int parse_args(const char *rest, char *work, size_t n, char **argv);

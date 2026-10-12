@@ -9,7 +9,8 @@
 // summed frame deltas (the round-end slow motion does not stretch them) from the frame the
 // local player became active after `play`.
 //   0 play                       close the menu and enter the game (waits for the map)
-//   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js)
+//   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
+//                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
 //   100 down W | up W            keys through the normal key path: W A S D SPACE SHIFT R E Q X 1 2 3 C N F G T TAB
 //   100 mdown right | mup right  mouse buttons (left / right)
@@ -152,6 +153,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
         me->velocity = (vec3) {0};
         me->direction = (vec2) {e->v[4], e->v[3]};
         me->on_ground = 1;
+        if (client->offline) { // the sandbox server's player follows (the dev "tp": we host it)
+            const NetTeleportPacket tp = {e->v[0], e->v[1] + me->height, e->v[2]};
+            client_net_send(client, NET_PACKET_TELEPORT, &tp, sizeof(tp));
+        }
     } else if (!strcmp(e->cmd, "tp") && client->me) {
         // tp x y z yaw pitch: the dev "tp" (feet at x/y/z, like the mod's Ctrl TP) and a look
         // direction, so online runs (server_bin) can place both players (tools/kref/players-native.sh).
