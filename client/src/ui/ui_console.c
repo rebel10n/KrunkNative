@@ -1100,6 +1100,19 @@ static void cmd_ping_local(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "Ping: %dms", client && client->net_ping_ms > 0 ? client->net_ping_ms : 0);
 }
 
+// the game transport (WebRTC / WebTransport / WebSocket, UDP / TCP), its session counters and
+// why a transport was skipped (net_notes.c client_net_info)
+static void cmd_netinfo(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    char info[2048];
+    client_net_info(con_client(), info, sizeof(info));
+    for (char *line = info, *end; line && *line; line = end ? end + 1 : NULL) {
+        end = strchr(line, '\n');
+        if (end) *end = 0;
+        append(line, COL_INFO);
+    }
+}
+
 static void register_commands(void) {
     if (g_con.cmd_count) return;
     register_local("help", ARGS(A_CMD), "list commands", cmd_help);
@@ -1128,6 +1141,7 @@ static void register_commands(void) {
     register_local("rot", NO_ARGS, "show local player rotation", cmd_rot);
     register_local("rotation", NO_ARGS, "alias for rot", cmd_rot);
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
+    register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     // Server commands (mirror server/packetHandlers.ts cmds table)
     register_server("god", ARGS(A_TOGGLE), "toggle god mode (self or target)");
     register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self or target)");
@@ -2064,6 +2078,13 @@ void ui_console_tick(Client *client) {
         g_con.banner = 1;
         append("Krunker developer console - type `help` for commands.", COL_INFO);
         append("Press ~ to toggle, Esc to close, Tab to autocomplete.", COL_HINT);
+    }
+    { // game transport notes (net_notes.c): which transport, why one failed, the fallback taken
+        char note[320];
+        int level = NET_NOTE_INFO;
+        while (client_net_note_next(&level, note, sizeof(note))) {
+            appendf(level == NET_NOTE_ERROR ? COL_ERROR : level == NET_NOTE_WARN ? COL_WARN : COL_INFO, "[net] %s", note);
+        }
     }
     if (!html_ui_available() || !html_ui_is_ready() || strcmp(html_ui_current_page(), "index.html")) {
         g_con.built = 0;

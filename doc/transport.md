@@ -81,13 +81,50 @@ datagram API, one backend at a time, in this order (`net_web_connect`):
    same way. It needs a certificate for the relay and a direct UDP path.
 3. **WebSocket** (`net_web.c`, net-bridge `/native`): the TCP byte stream, as before.
 
-A backend that fails before the knet handshake completes is skipped until the next server
-switch. The failure can be a refused or unreachable gateway, a session that does not open
-within 6 s, or no knet answer within 3 s. A session that drops after it was up retries the
-same order after 2 s. The HUD and menu ping is the server's PING/PONG measurement over the
-active transport, so over WebRTC it is the RTT through the gateway. The knet RTT of the
-session is in `_kn_wt_stats()` (JSON, with the transport name) and in the console line when
-the session ends.
+A backend that fails before the knet handshake completes is skipped for 20 s, then 40 s, 80 s
+and so on up to 5 minutes. The count of consecutive failures resets once a session comes up.
+After that pause the backend is tried again on the next connect: a reconnect, a server switch
+or the page's retry link. A session that was up and drops is reopened over the same transport
+first, after 2 s. WebRTC opening has three budgets (`net_rtc.c`):
+
+- 6 s for the signaling POST.
+- 3 s after the answer for at least one ICE check to be answered. If none is, UDP to the
+  gateway is blocked on that network, and the client falls back without waiting for the rest.
+  Chrome and Safari count the checks; for Firefox the test is that no candidate pair succeeded.
+- 6 s after the answer for ICE + DTLS + SCTP + the channel.
+
+Measured opens take 0.3-0.4 s in total from a nearby network, and 80-300 ms on loopback.
+WebTransport keeps the 14 s outer guard of `net_wt.c`.
+
+Diagnostics:
+
+- Every attempt, failure reason and fallback is a transport note (`net_notes.c`). It is
+  printed to the browser console (and stdout natively) and appears in the in-game console as
+  `[net] ...`. The native UDP to TCP fallback is noted too.
+- Every WebRTC failure, and a session lost later, also prints one browser-console line
+  `[rtc] could not open: <reason> -- ...` or `[rtc] session lost: ...`. It carries the
+  connection, ICE, DTLS, SCTP and channel states, the gateway candidates from the answer, the
+  local candidate types, the candidate pairs and checks, the timings and the event log.
+- A successful open prints `[rtc] open in N ms (answer, ICE, DTLS, channel)` and the selected
+  path.
+- The console command `netinfo` shows the transport, the server, the knet counters, the
+  WebRTC states and path, and each backend's failures and pause.
+- The menu ping has a tooltip, `Game transport: WebRTC|WebTransport|WebSocket|UDP|TCP`.
+- The gateway logs each session with the browser family and version, the open timings
+  (answer, ICE, DTLS, channel), and a specific close reason. The close reason says who ended
+  the knet session (server or browser), or that ICE consent was lost (tab closed, sleep or
+  network change). For a failed open it gives the ICE state and the number of checks that
+  arrived: 0 means the browser's UDP never reached the port.
+
+Not to be confused with the game transport: the matchmaker and social WebSocket
+(`wss://coordinator.krunk.io/social/ws`) is always open next to it. A server kick also ends
+the session; for example the v3.1.1 idle kick, "Kicked for inactivity", after 60 s without
+moving, counted from the connect in the menu. Both browser and gateway log it as the server
+ending the session.
+
+The HUD and menu ping is the server's PING/PONG measurement over the active transport, so
+over WebRTC it is the RTT through the gateway. The knet RTT of the session is in `netinfo`,
+in `_kn_wt_stats()` (JSON, with the transport name) and in the note when the session ends.
 
 Both gateways fill the knet `CONNECT_RESPONSE` forwarded-address field with the browser's
 address. For kn-rtc this is the ICE peer's real UDP source. server_bin trusts that field only
@@ -98,9 +135,27 @@ on kru, the edges see the gateway's address.
 sends its checks from behind any NAT, including symmetric NAT and CGNAT, and the gateway
 answers the source address it saw (ICE-lite: it never sends checks to the browser's own
 candidates). Only networks that block outbound UDP to that port fail, such as some corporate
-or school firewalls. They fall back to the next transport after the open timeout. A gateway
-behind a 1:1 NAT advertises its public address with `-public-ip`. A gateway behind a port
-forward must forward the same port number.
+or school firewalls. They fall back to the next transport after about 3 s (no ICE check
+answered). A gateway behind a 1:1 NAT advertises its public address with `-public-ip`. A
+gateway behind a port forward must forward the same port number.
+
+Clients on kru's own network (egress 5.188.124.57, hairpinned by the Proxmox host to .56)
+work over the public candidate: ICE consent holds and the conntrack entry stays fresh (UDP
+stream timeout 120 s). They need no LAN candidate.
+
+Browsers: Chrome and Chromium (desktop, headless), and Firefox 157, are tested against the
+ICE-lite gateway with its single host candidate (opens in 0.1-0.4 s). Safari/WebKit is not
+tested here. Its libwebrtc stack talks to ICE-lite servers the same way, and on a failure the
+console line gives the states, not a silent fallback.
+
+TURN over TLS/443 for UDP-blocked networks is not built. A TURN-over-TCP/TLS leg is TCP on the
+lossy first hop, much like the WebSocket fallback through Cloudflare, so it would mainly help
+networks that block only some UDP ports. The gateway's "0 checks received" log lines measure
+how many users that is. If it is worth it, Cloudflare's TURN service ($0.05/GB to the client,
+1,000 GB a month free, shared with their SFU) fits better than coturn on kru, whose port 443
+belongs to the host nginx. The design: kn-rtc mints short-lived credentials (Cloudflare
+`generate-ice-servers`), and the client retries WebRTC once with `iceTransportPolicy: "relay"`
+after a "no ICE answer" failure, before the WebSocket.
 
 **Phase 2** (not built): one kn-rtc per edge, next to its game servers. The DTLS path is then
 browser → edge directly (one hop less than via kru), and the forwarded address comes from

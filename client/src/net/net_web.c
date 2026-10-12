@@ -191,7 +191,8 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
         g_web_socket = 0;
     }
 
-    printf("websocket closed (code %d%s%s)\n", event->code, event->reason[0] ? ": " : "", event->reason);
+    client_net_note(client->net_should_quit || g_web_switching ? NET_NOTE_INFO : NET_NOTE_WARN, "websocket closed (code %d%s%s)", event->code,
+                    event->reason[0] ? ": " : "", event->reason);
 
     if (client->net_session_connected) {
         if (emscripten_get_now() - g_web_opened_at >= NET_WEB_SESSION_STABLE_MILLIS) g_web_failures = 0; // a session that lasted
@@ -239,7 +240,7 @@ int net_web_connect(Client *client) {
     attributes.createOnMainThread = true;
 
     g_web_socket = emscripten_websocket_new(&attributes);
-    printf("connecting to %s\n", g_web_url);
+    client_net_note(NET_NOTE_INFO, "connecting to %s (game transport WebSocket)", g_web_url); // (wt-e2e.js: "connecting to ws")
 
     if (g_web_socket <= 0) {
         char message[160];

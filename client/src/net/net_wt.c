@@ -3,8 +3,11 @@
 //   webrtc        unordered, unreliable DataChannel to net-bridge/rtc (net_rtc.c)
 //   webtransport  WebTransport datagrams to net-bridge/wt (this file)
 // net_web.c tries them in that order and falls back to its WebSocket path when a backend is
-// not configured / not supported, or its session or knet handshake does not come up (a
-// failed backend is skipped for the rest of the page's life, until a server switch).
+// not configured / not supported, or its session or knet handshake does not come up. A backend
+// that failed to open is skipped for a while (WT_BACKOFF_*, doubling per consecutive failure)
+// and tried again on the next connect after that; a session that came up and dropped is
+// re-opened over the same transport first. Every attempt, failure (with its reason) and
+// fallback is a client_net_note (browser console + in-game console).
 // ?transport=ws (or an explicit ?ws=) skips both; ?transport=rtc / ?transport=wt keeps only
 // that one (also with ?ws=, whose ?target= is reused; without one the gateway's default target).
 //
@@ -20,9 +23,11 @@
 #include <string.h>
 
 #define WT_FAKE_FD 1                 // client->net_socket while the session is up (like net_web.c)
-#define WT_OPEN_TIMEOUT 6000.0       // ms for the browser session (ICE + DTLS / QUIC) to open
+#define WT_OPEN_TIMEOUT 14000.0      // ms guard for the browser session to open (net_rtc.c has its own phase budgets)
 #define WT_HANDSHAKE_TIMEOUT 3000.0  // ms for the knet handshake once the session is open
 #define WT_RETRY_MILLIS 2000
+#define WT_BACKOFF_FIRST 20.0        // s before a backend that failed to open is tried again
+#define WT_BACKOFF_MAX 300.0         // ... doubling per consecutive failure up to this
 
 enum { WT_IDLE, WT_OPENING, WT_HANDSHAKE, WT_UP };
 
@@ -35,8 +40,14 @@ static struct {
     int state;
     const NetDgramBackend *backend; // the session's (or the attempt's) transport
     int gen;                        // id of the current browser session (stale callbacks are ignored)
-    int disabled[WT_BACKEND_COUNT]; // a failed attempt: skipped until the next server switch
-    double opened_at;
+    struct {
+        int failures;               // consecutive failed opens (0 once a session came up)
+        double failed_at, retry_at; // wt_now() of the last failure / before which it is skipped
+        char reason[192];           // why the last open failed
+        int skip_noted;             // the "skipped" note was printed for this failure
+    } health[WT_BACKEND_COUNT];
+    char fail_reason[192];          // kn_dg_on_fail's reason for the wt_finish that follows
+    double opened_at, up_at;
     Client *client;
     uint32_t salt;
     double handshake_started, handshake_sent;
@@ -110,8 +121,8 @@ EM_JS(void, kn_wt_send, (const uint8_t *data, int length), {
 
 // The page's ?ws= parameter ("" when absent), malloc'd.
 EM_JS(char *, kn_page_ws_param, (void), {
-    let ws = '';
-    try { ws = new URLSearchParams(location.search).get('ws') || ''; } catch (e) {}
+    let ws = "";
+    try { ws = new URLSearchParams(location.search).get('ws') || ""; } catch (e) {}
     return stringToNewUTF8(ws);
 });
 
@@ -125,7 +136,7 @@ static int wt_wanted(void) { return kn_wt_wanted(); }
 static void wt_open(const char *target, const int gen) { kn_wt_open(target, gen); }
 static void wt_send(const uint8_t *data, const int length) { kn_wt_send(data, length); }
 static void wt_close(void) { kn_wt_close(); }
-static const NetDgramBackend wt_backend = {"webtransport", wt_wanted, wt_open, wt_send, wt_close};
+static const NetDgramBackend wt_backend = {"webtransport", wt_wanted, wt_open, wt_send, wt_close, NULL};
 
 // ------------------------------------------------------------------ knet glue
 static void wt_emit(void *user, const uint8_t *data, const size_t length) {
@@ -134,6 +145,10 @@ static void wt_emit(void *user, const uint8_t *data, const size_t length) {
 }
 
 static const char *wt_name(void) { return g_wt.backend ? g_wt.backend->name : "datagram transport"; }
+
+static const char *wt_label_of(const NetDgramBackend *backend) {
+    return backend == &net_rtc_backend ? "WebRTC" : backend == &wt_backend ? "WebTransport" : "datagram transport";
+}
 
 static void wt_backend_close(void) {
     if (g_wt.backend) g_wt.backend->close();
@@ -185,9 +200,11 @@ static void wt_finish(const char *why) {
     if (was_up) {
         uint8_t bye[8];
         wt_emit(NULL, bye, knet_build_disconnect(bye, g_wt.conn.token));
-        printf("%s session ended (%s; sent %llu / received %llu datagrams, %llu resent segments, rtt %d ms)\n", wt_name(), why,
-               (unsigned long long) g_wt.conn.stats.datagrams_sent, (unsigned long long) g_wt.conn.stats.datagrams_received,
-               (unsigned long long) g_wt.conn.stats.segments_resent, knet_conn_rtt_ms(&g_wt.conn));
+        client_net_note(g_wt.closing ? NET_NOTE_INFO : NET_NOTE_WARN,
+                        "%s session ended after %.0f s (%s; sent %llu / received %llu datagrams, %llu resent segments, rtt %d ms)", wt_name(),
+                        wt_now() - g_wt.up_at, why, (unsigned long long) g_wt.conn.stats.datagrams_sent,
+                        (unsigned long long) g_wt.conn.stats.datagrams_received, (unsigned long long) g_wt.conn.stats.segments_resent,
+                        knet_conn_rtt_ms(&g_wt.conn));
         knet_conn_free(&g_wt.conn);
     }
     g_wt.state = WT_IDLE;
@@ -208,13 +225,25 @@ static void wt_finish(const char *why) {
         pthread_mutex_unlock(&client->net_lock);
         on_client_socket_disconnect(client);
         if (!g_wt.reconnect_pending && !client->net_should_quit && !client->offline && !client->net_hold_retry) {
-            g_wt.reconnect_pending = 1;
+            g_wt.reconnect_pending = 1; // the same transport first (net_wt_connect: it is healthy)
+            client_net_note(NET_NOTE_INFO, "reconnecting in %d s (%s first)", WT_RETRY_MILLIS / 1000, wt_label_of(g_wt.backend));
             emscripten_async_call(wt_reconnect_later, client, WT_RETRY_MILLIS);
         }
     } else if (was_attempt) {
-        printf("%s unavailable (%s), trying the next transport\n", wt_name(), why);
         const int index = wt_backend_index(g_wt.backend);
-        if (index >= 0) g_wt.disabled[index] = 1;
+        double wait = WT_BACKOFF_FIRST;
+        if (index >= 0) {
+            g_wt.health[index].failures++;
+            for (int i = 1; i < g_wt.health[index].failures && wait < WT_BACKOFF_MAX; i++) wait *= 2.0;
+            if (wait > WT_BACKOFF_MAX) wait = WT_BACKOFF_MAX;
+            g_wt.health[index].failed_at = wt_now();
+            g_wt.health[index].retry_at = wt_now() + wait;
+            snprintf(g_wt.health[index].reason, sizeof(g_wt.health[index].reason), "%s", why);
+            g_wt.health[index].skip_noted = 1; // this note says it already
+        }
+        // (wt-e2e.js counts "unavailable (...), trying the next transport")
+        client_net_note(NET_NOTE_WARN, "%s unavailable (%s), trying the next transport; %s again in %.0f s", wt_name(), why, wt_label_of(g_wt.backend),
+                        wait);
         if (!client->net_should_quit && !client->offline) net_web_connect(client); // next backend, else the WebSocket
     }
 }
@@ -223,12 +252,12 @@ static void wt_tick(void *user) {
     (void) user;
     const double now = wt_now();
     if (g_wt.state == WT_OPENING) {
-        if ((now - g_wt.opened_at) * 1000.0 > WT_OPEN_TIMEOUT) wt_finish("the session did not open in time");
+        if ((now - g_wt.opened_at) * 1000.0 > WT_OPEN_TIMEOUT) wt_finish("the browser session did not open in time");
         return;
     }
     if (g_wt.state == WT_HANDSHAKE) {
         if ((now - g_wt.handshake_started) * 1000.0 > WT_HANDSHAKE_TIMEOUT) {
-            wt_finish("no knet handshake answer through the gateway");
+            wt_finish("no knet handshake answer from the game server through the gateway");
             return;
         }
         if (now - g_wt.handshake_sent >= KNET_HANDSHAKE_RESEND) {
@@ -239,7 +268,7 @@ static void wt_tick(void *user) {
     }
     if (g_wt.state != WT_UP) return;
     if (knet_conn_timed_out(&g_wt.conn, now)) {
-        wt_finish("timed out");
+        wt_finish("no datagram from the server for 10 s");
         return;
     }
     if (g_wt.conn.failed) {
@@ -290,10 +319,15 @@ static void wt_handshake_datagram(const uint8_t *data, const size_t length) {
     knet_conn_init(&g_wt.conn, token, wt_now());
     knet_sim_from_env(&g_wt.sim, ((uint64_t) token << 32) | g_wt.salt);
     g_wt.state = WT_UP;
+    g_wt.up_at = wt_now();
+    const int index = wt_backend_index(g_wt.backend);
+    if (index >= 0) g_wt.health[index].failures = 0;
     pthread_mutex_lock(&client->net_lock);
     client->net_socket = WT_FAKE_FD;
     pthread_mutex_unlock(&client->net_lock);
-    printf("%s session established (token %08x)\n", wt_name(), token);
+    // (tests grep "<name> session established")
+    client_net_note(NET_NOTE_INFO, "%s session established (token %08x) in %.0f ms: game transport %s", wt_name(), token,
+                    (g_wt.up_at - g_wt.opened_at) * 1000.0, wt_label_of(g_wt.backend));
     on_client_socket_connect(client);
     const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, 0}; // the minor gates the v7 packets (KrunkScript 200-203)
     client_net_send_packet(WT_FAKE_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
@@ -323,6 +357,21 @@ EMSCRIPTEN_KEEPALIVE void kn_dg_on_close(const int gen) {
     wt_finish(g_wt.state == WT_OPENING ? "could not open a session" : "the gateway closed the session");
 }
 
+// The backend's own verdict (net_rtc.c: signaling refused, UDP blocked, ICE lost, ...), as a
+// malloc'd string; the browser console already has the full diagnostics.
+EMSCRIPTEN_KEEPALIVE void kn_dg_on_fail(const int gen, char *reason) {
+    snprintf(g_wt.fail_reason, sizeof(g_wt.fail_reason), "%s", reason ? reason : "failed");
+    free(reason);
+    if (gen != g_wt.gen) return;
+    wt_finish(g_wt.fail_reason);
+}
+
+// A progress line from the backend (malloc'd), for the in-game console.
+EMSCRIPTEN_KEEPALIVE void kn_dg_note(const int gen, const int level, char *text) {
+    if (gen == g_wt.gen && text) client_net_note(level, "%s", text);
+    free(text);
+}
+
 // ------------------------------------------------------------------ net_web.c hooks
 // The brain's /native?target=host:port pick, reused as the relay's target.
 static void wt_target_from(const char *ws_url, char *out, const size_t size) {
@@ -347,8 +396,17 @@ static void wt_target_from(const char *ws_url, char *out, const size_t size) {
 int net_wt_connect(Client *client) {
     if (g_wt.state != WT_IDLE) return 1;
     const NetDgramBackend *backend = NULL;
+    const double now = wt_now();
     for (int i = 0; i < WT_BACKEND_COUNT && !backend; i++) {
-        if (!g_wt.disabled[i] && g_backends[i]->wanted()) backend = g_backends[i];
+        if (!g_backends[i]->wanted()) continue;
+        if (now < g_wt.health[i].retry_at) {
+            if (!g_wt.health[i].skip_noted)
+                client_net_note(NET_NOTE_INFO, "%s skipped: it failed %.0f s ago (%s); next try in %.0f s", g_backends[i]->name,
+                                now - g_wt.health[i].failed_at, g_wt.health[i].reason, g_wt.health[i].retry_at - now);
+            g_wt.health[i].skip_noted = 1;
+            continue;
+        }
+        backend = g_backends[i];
     }
     if (!backend) return 0;
     g_wt.client = client;
@@ -364,7 +422,7 @@ int net_wt_connect(Client *client) {
         wt_target_from(page_ws, target, sizeof(target));
         free(page_ws);
     }
-    printf("trying the %s transport\n", backend->name);
+    client_net_note(NET_NOTE_INFO, "trying the %s transport%s%s", backend->name, target[0] ? " to " : "", target);
     backend->open(target, g_wt.gen);
     return 1;
 }
@@ -400,9 +458,35 @@ void net_wt_close(const int reconnect) {
     g_wt.closing = 1; // no WebSocket fallback / delayed retry from wt_finish
     wt_finish("closed by the client");
     g_wt.closing = 0;
-    if (reconnect && client) {
-        memset(g_wt.disabled, 0, sizeof(g_wt.disabled)); // the next server may be reachable over them
-        net_web_connect(client);
+    if (reconnect && client) net_web_connect(client); // (a backend in its backoff stays skipped)
+}
+
+const char *net_wt_transport_label(void) { return g_wt.state == WT_UP ? wt_label_of(g_wt.backend) : NULL; }
+
+void net_wt_info(char *out, const size_t size) {
+    size_t n = 0;
+    const double now = wt_now();
+    out[0] = 0;
+    if (g_wt.state == WT_UP) {
+        const KnetStats *st = &g_wt.conn.stats;
+        n += (size_t) snprintf(out + n, size - n, "knet over %s: up %.0f s, rtt %d ms, sent %llu / received %llu datagrams, %llu resent segments\n",
+                               wt_label_of(g_wt.backend), now - g_wt.up_at, knet_conn_rtt_ms(&g_wt.conn),
+                               (unsigned long long) st->datagrams_sent, (unsigned long long) st->datagrams_received,
+                               (unsigned long long) st->segments_resent);
+    } else if (g_wt.state != WT_IDLE) {
+        n += (size_t) snprintf(out + n, size - n, "%s: opening for %.0f ms\n", wt_name(), (now - g_wt.opened_at) * 1000.0);
+    }
+    if (g_wt.state != WT_IDLE && g_wt.backend && g_wt.backend->describe && n < size) {
+        g_wt.backend->describe(out + n, size - n);
+        n += strlen(out + n);
+    }
+    for (int i = 0; i < WT_BACKEND_COUNT && n < size; i++) {
+        if (!g_backends[i]->wanted()) n += (size_t) snprintf(out + n, size - n, "%s: not configured or not supported here\n", g_backends[i]->name);
+        else if (g_wt.health[i].failures)
+            n += (size_t) snprintf(out + n, size - n, "%s: %d failed open(s), last %.0f s ago (%s)%s\n", g_backends[i]->name,
+                                   g_wt.health[i].failures, now - g_wt.health[i].failed_at, g_wt.health[i].reason,
+                                   now < g_wt.health[i].retry_at ? ", skipped for now" : ", tried on the next connect");
+        else n += (size_t) snprintf(out + n, size - n, "%s: ok\n", g_backends[i]->name);
     }
 }
 #endif

@@ -277,6 +277,7 @@ void *net_main(void *user_data) {
                 if (!client->net_should_quit) failures = net_retry_sleep(client, failures);
                 continue;
             }
+            client_net_note(NET_NOTE_WARN, "no UDP (knet) answer from %s:%u, using TCP", client->net_address, (unsigned int) client->net_port);
         }
 
         const int client_socket = (int) socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

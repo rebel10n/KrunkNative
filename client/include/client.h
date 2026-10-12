@@ -595,6 +595,7 @@ int net_udp_client_session(Client*, const struct sockaddr_in *address); // 1 ran
 int net_udp_client_mode(void);              // KRUNKNATIVE_NET_TRANSPORT: 0 auto, 1 udp, -1 tcp
 int net_udp_client_is_virtual(int socket);
 void net_udp_client_request_close(void);
+void net_udp_client_info(char *out, size_t size); // netinfo: the knet session's counters ("" without one)
 // Brain matchmaking (servers_ui.c): connect to client->net_address:net_port (web: net_ws_url)
 // with client->net_join, replacing the current session (starts the transport when idle,
 // leaves an offline game). net.c natively, net_web.c on the web.
@@ -610,9 +611,10 @@ void net_web_request_reconnect(Client*);
 typedef struct {
     const char *name;                            // "webrtc" / "webtransport" (logs, stats)
     int (*wanted)(void);                         // configured for this page and supported by the browser
-    void (*open)(const char *target, int gen);   // async; reports through kn_dg_on_open/_datagram/_close(gen)
+    void (*open)(const char *target, int gen);   // async; reports through kn_dg_on_open/_datagram/_close/_fail(gen)
     void (*send)(const uint8_t *data, int length);
     void (*close)(void);
+    void (*describe)(char *out, size_t size); // netinfo lines about the browser session (may be NULL)
 } NetDgramBackend;
 extern const NetDgramBackend net_rtc_backend;
 int net_wt_connect(Client*);
@@ -620,7 +622,16 @@ int net_wt_active(void);
 int net_wt_busy(void);
 int net_wt_send(NetPacketType, const void*, uint16_t);
 void net_wt_close(int reconnect);
+const char *net_wt_transport_label(void); // "WebRTC" / "WebTransport" while a session is up, else NULL
+void net_wt_info(char *out, size_t size); // netinfo lines: knet session, ICE path, per-transport retry state
 #endif
+// Transport notes (net_notes.c): printed at once and queued for the in-game console
+// (ui_console_tick drains them on the main thread), so the net thread may call it natively.
+enum { NET_NOTE_INFO, NET_NOTE_WARN, NET_NOTE_ERROR };
+void client_net_note(int level, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+int client_net_note_next(int *level, char *out, size_t size); // 1 = one line taken (main thread)
+const char *client_net_transport_name(const Client*);         // "WebRTC", "WebSocket", "UDP", "TCP", "offline", "-"
+void client_net_info(const Client*, char *out, size_t size);  // the console's `netinfo`
 void client_net_queue_packet(Client*, const NetPacket*);
 void client_net_log_packet(const char*, NetPacketType, const void*, uint16_t);
 int client_net_send_packet(int, NetPacketType, const void*, uint16_t);

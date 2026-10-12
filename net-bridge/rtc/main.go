@@ -278,6 +278,57 @@ type session struct {
 	toBrw   atomic.Int64 // ... relayed to the browser
 	dropped atomic.Int64
 	started time.Time
+	ua      string // browser family/version from the signaling request (logs)
+	// timings since the POST (ms, 0 = not reached) and the ICE state history, for the logs
+	tAnswer, tICE, tDTLS, tOpen atomic.Int64
+	iceState                    atomic.Value // string: the last ICE connection state
+	iceLost                     atomic.Bool  // ICE went disconnected/failed after connecting
+	knetBye                     atomic.Value // string: who sent the knet DISCONNECT ("server" / "browser")
+}
+
+func (s *session) since() int64 { return max(time.Since(s.started).Milliseconds(), 1) }
+
+// knetDisconnect: a knet DISCONNECT datagram ([0x07][token4]).
+func knetDisconnect(b []byte) bool { return len(b) == 5 && b[0] == 0x07 }
+
+// browserFamily: "Chrome/153", "Firefox/131", "Safari/18.1", "Edge/140" or "?" (logs only).
+func browserFamily(ua string) string {
+	field := func(key string) string {
+		i := strings.Index(ua, key)
+		if i < 0 {
+			return ""
+		}
+		v := ua[i+len(key):]
+		if j := strings.IndexAny(v, " ;)"); j >= 0 {
+			v = v[:j]
+		}
+		if j := strings.Index(v, "."); j >= 0 && key != "Version/" {
+			v = v[:j]
+		}
+		return v
+	}
+	switch {
+	case field("Edg/") != "":
+		return "Edge/" + field("Edg/")
+	case field("Firefox/") != "":
+		return "Firefox/" + field("Firefox/")
+	case field("Chrome/") != "":
+		return "Chrome/" + field("Chrome/")
+	case field("Version/") != "" && strings.Contains(ua, "Safari/"):
+		return "Safari/" + field("Version/")
+	}
+	return "?"
+}
+
+// closeReason: what the close callbacks saw, made specific with the session's history.
+func (s *session) closeReason(event string) string {
+	if who, _ := s.knetBye.Load().(string); who != "" {
+		return event + " after the " + who + " ended the knet session"
+	}
+	if s.iceLost.Load() {
+		return event + ": ICE consent lost (the browser went silent: tab closed, sleep or network change)"
+	}
+	return event
 }
 
 func (s *session) drop() bool {
@@ -291,8 +342,8 @@ func (s *session) close(why string) {
 	s.udp.Close()
 	s.g.release(s.client)
 	s.g.live.Delete(s.id)
-	log.Printf("[rtc] #%d %s closed: %s (datagrams: %d/%d browser->server, %d/%d server->browser relayed/received, %d buffer drops, %s)",
-		s.id, s.client, why, s.toSrv.Load(), s.fromBrw.Load(), s.toBrw.Load(), s.fromSrv.Load(), s.dropped.Load(),
+	log.Printf("[rtc] #%d %s %s closed: %s (datagrams: %d/%d browser->server, %d/%d server->browser relayed/received, %d buffer drops, %s)",
+		s.id, s.client, s.ua, why, s.toSrv.Load(), s.fromBrw.Load(), s.toBrw.Load(), s.fromSrv.Load(), s.dropped.Load(),
 		time.Since(s.started).Round(time.Second))
 	s.pc.Close()
 }
@@ -322,7 +373,9 @@ func (s *session) onDataChannel(dc *webrtc.DataChannel) {
 		log.Printf("[rtc] #%d note: channel is ordered=%v maxRetransmits=%v (want unordered, 0)", s.id, dc.Ordered(), dc.MaxRetransmits())
 	}
 	dc.OnOpen(func() {
-		log.Printf("[rtc] #%d %s (ice %s) -> udp %s", s.id, s.client, s.peerHost(), s.target)
+		s.tOpen.Store(s.since())
+		log.Printf("[rtc] #%d %s (ice %s) %s -> udp %s; open in %d ms (answer %d, ICE %d, DTLS %d)", s.id, s.client, s.peerHost(), s.ua, s.target,
+			s.tOpen.Load(), s.tAnswer.Load(), s.tICE.Load(), s.tDTLS.Load())
 		go s.serverToBrowser(dc)
 	})
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -330,11 +383,14 @@ func (s *session) onDataChannel(dc *webrtc.DataChannel) {
 		if len(msg.Data) == 0 || len(msg.Data) > maxDatagram || s.drop() {
 			return
 		}
+		if knetDisconnect(msg.Data) {
+			s.knetBye.CompareAndSwap(nil, "browser")
+		}
 		if _, err := s.udp.Write(withForwarded(msg.Data, s.peerHost())); err == nil {
 			s.toSrv.Add(1)
 		}
 	})
-	dc.OnClose(func() { s.close("data channel closed") })
+	dc.OnClose(func() { s.close(s.closeReason("data channel closed")) })
 }
 
 func (s *session) serverToBrowser(dc *webrtc.DataChannel) {
@@ -345,12 +401,15 @@ func (s *session) serverToBrowser(dc *webrtc.DataChannel) {
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				s.close(fmt.Sprintf("no datagram from %s for %s", s.target, s.g.idleTimeout))
-			} else {
-				s.close("udp closed")
+			} else if !s.closed.Load() {
+				s.close(s.closeReason("udp from " + s.target + ": " + err.Error())) // e.g. connection refused: the game server is down
 			}
 			return
 		}
 		s.fromSrv.Add(1)
+		if knetDisconnect(buf[:n]) {
+			s.knetBye.CompareAndSwap(nil, "server")
+		}
 		if n > maxDatagram || s.drop() {
 			continue
 		}
@@ -399,7 +458,7 @@ func (g *gateway) handle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	s := &session{g: g, id: g.nextID.Add(1), client: client, target: target, started: time.Now()}
+	s := &session{g: g, id: g.nextID.Add(1), client: client, target: target, started: time.Now(), ua: browserFamily(req.UserAgent())}
 	g.live.Store(s.id, s)
 	fail := func(status int, msg string, err error) {
 		log.Printf("[rtc] #%d %s: %s: %v", s.id, client, msg, err)
@@ -427,9 +486,23 @@ func (g *gateway) handle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	s.pc.OnDataChannel(s.onDataChannel)
+	s.pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		s.iceState.Store(state.String())
+		switch state {
+		case webrtc.ICEConnectionStateConnected:
+			s.tICE.CompareAndSwap(0, s.since())
+		case webrtc.ICEConnectionStateDisconnected, webrtc.ICEConnectionStateFailed:
+			if s.tICE.Load() > 0 {
+				s.iceLost.Store(true)
+			}
+		}
+	})
 	s.pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		if state == webrtc.PeerConnectionStateConnected {
+			s.tDTLS.CompareAndSwap(0, s.since())
+		}
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-			s.close("peer connection " + state.String())
+			s.close(s.closeReason("peer connection " + state.String()))
 		}
 	})
 	if err = s.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: string(offer)}); err != nil {
@@ -452,11 +525,32 @@ func (g *gateway) handle(w http.ResponseWriter, req *http.Request) {
 		fail(http.StatusInternalServerError, "candidate gathering", fmt.Errorf("timed out"))
 		return
 	}
-	// ICE + DTLS + the data channel have connectTimeout to come up.
+	s.tAnswer.Store(s.since())
+	// ICE + DTLS + the data channel have connectTimeout to come up. The log says how far it got:
+	// no ICE check at all means UDP from the browser never reached this port.
 	time.AfterFunc(g.connectTimeout, func() {
-		if !s.opened.Load() {
-			s.close("no data channel within " + g.connectTimeout.String())
+		if s.opened.Load() {
+			return
 		}
+		checks := 0
+		for _, st := range s.pc.GetStats() {
+			if p, ok := st.(webrtc.ICECandidatePairStats); ok {
+				checks += int(p.RequestsReceived)
+			}
+		}
+		ice, _ := s.iceState.Load().(string)
+		why := fmt.Sprintf("no data channel within %s (ICE %s, %d checks received", g.connectTimeout, ice, checks)
+		switch {
+		case checks == 0:
+			why += ": no UDP from the browser reached the gateway; blocked on its network, or it gave up)"
+		case s.tICE.Load() == 0:
+			why += ": checks arrived but ICE did not complete)"
+		case s.tDTLS.Load() == 0:
+			why += fmt.Sprintf(": ICE up at %d ms, DTLS did not complete)", s.tICE.Load())
+		default:
+			why += fmt.Sprintf(": DTLS up at %d ms, no data channel)", s.tDTLS.Load())
+		}
+		s.close(why)
 	})
 	w.Header().Set("Content-Type", "application/sdp")
 	w.WriteHeader(http.StatusCreated)

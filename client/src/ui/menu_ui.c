@@ -611,6 +611,17 @@ static void menu_update_ping(const Client *client) {
 #endif
     if (!html_ui_is_menu_open()) return;
     const int ping = client->offline || client->game.is_local || !client->net_connected || client->net_ping_ms < 0 ? -1 : client->net_ping_ms;
+    // KrunkNative: the tooltip names the game transport (net_notes.c), e.g. "Ping 41 ms over WebRTC"
+    static const char *menu_transport;
+    const char *transport = client_net_transport_name(client);
+    if (transport != menu_transport) {
+        menu_transport = transport;
+        char title[64];
+        if (ping >= 0 || strcmp(transport, "-")) snprintf(title, sizeof(title), "Game transport: %s", transport);
+        else title[0] = 0;
+        const HtmlElem holder = by_id("menuPingDisplay");
+        if (holder) html_dom_set_attr(holder, "title", title);
+    }
     if (ping == g_menu_ping) return;
     g_menu_ping = ping;
 
