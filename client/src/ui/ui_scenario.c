@@ -848,4 +848,24 @@ int ui_scenario_run(Client *client) {
     return ok ? 0 : 1;
 }
 
+#elif !defined(__EMSCRIPTEN__)
+// KRUNKNATIVE_HTML_ENGINE=OFF: no page to render, so no scenario is ever active (ui_logic.h
+// still declares the API for the native callers).
+#include <ui_logic.h>
+#include <stdio.h>
+
+int ui_scenario_begin(const char *scenario_path, const char *out_png) {
+    (void) out_png;
+    fprintf(stderr, "[scenario] %s: this client was built without the HTML engine\n", scenario_path ? scenario_path : "");
+    return 0;
+}
+int ui_scenario_active(void) { return 0; }
+int ui_scenario_client_chrome(void) { return 0; }
+void ui_scenario_window_size(int *w, int *h) { (void) w; (void) h; }
+const char *ui_scenario_map_path(void) { return NULL; }
+int ui_scenario_run(Client *client) { (void) client; return 1; }
+void ui_scenario_end(void) {}
+void ui_scenario_draw_background(void) {}
+int ui_scenario_draws_preview(void) { return 0; }
+void ui_scenario_preview_backdrop(Client *client) { (void) client; }
 #endif // KRUNKNATIVE_HTML_ENGINE && !__EMSCRIPTEN__
