@@ -399,7 +399,9 @@ jobs:
   pages:
     name: Deploy web build to GitHub Pages
     needs: web
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # krunk.io is served from Cloudflare Pages (deploy/pages); this GitHub Pages mirror only runs
+    # once Pages is enabled for the repository and the variable GH_PAGES is "1".
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GH_PAGES == '1'
     runs-on: ubuntu-latest
     continue-on-error: false
     permissions:
