@@ -103,3 +103,17 @@ void audio_play_3d_fade(const char *name, vec3 position, float range, float volu
 void audio_stop(const char *name);
 void audio_stop_3d_loops(void);
 void audio_stop_all(void);
+
+// Voice handles (KrunkScript GAME.SOUND sound objects, client/src/ks/ks_sound.c): one play
+// returns a handle (0 = not played) that later calls address; a finished one-shot or a stopped
+// voice makes the handle inert. `volume` is Howl's vol (before the category factor).
+int  audio_handle_play(const char *name, float volume, int loop, float rate, int positional, vec3 position,
+                       float ref_distance, float rolloff);
+void audio_handle_volume(int handle, float volume);
+void audio_handle_rate(int handle, float rate);
+void audio_handle_fade(int handle, float from, float to, float ms);
+void audio_handle_mute(int handle, int muted);
+int  audio_handle_resume(int handle);  // play(): resumes a paused voice, restarts a finished one
+void audio_handle_pause(int handle);
+void audio_handle_stop(int handle);
+int  audio_handle_active(int handle);

@@ -295,7 +295,7 @@ static void wt_handshake_datagram(const uint8_t *data, const size_t length) {
     pthread_mutex_unlock(&client->net_lock);
     printf("%s session established (token %08x)\n", wt_name(), token);
     on_client_socket_connect(client);
-    const NetHelloPacket hello = {1, 0, 0};
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, 0}; // the minor gates the v7 packets (KrunkScript 200-203)
     client_net_send_packet(WT_FAKE_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
     client_net_send_join(client, WT_FAKE_FD); // brain ticket / session / guest name (net_join.c)
 }

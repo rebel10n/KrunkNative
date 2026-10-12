@@ -6,6 +6,7 @@
 //
 // Runs on the main thread from client_tick_net(); the transports only queue packets.
 #include <player_accounts.h> // PLAYER_INFO / BILLBOARD (doc/backend.md section 8)
+#include <ks_client.h> // KrunkScript client host: hooks and script packets
 #include <backend_ui.h>      // NET_PACKET_REDIRECT: servers_ui_redirect
 #include <online_mode.h>     // NET_PACKET_AUTH_CHALLENGE: online-mode join (net/online_mode.c)
 #include <client.h>
@@ -491,7 +492,20 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         }
         case NET_PACKET_KILL: {
             EVENTS_READ(NetKillPacket, kill);
-            if (client->game.ready) events_kill(client, &kill);
+            if (client->game.ready) {
+                events_kill(client, &kill);
+                // KrunkScript onPlayerDeath(id, killerID or ""), index.js:15238-15240
+                ks_client_player_killed(client, kill.victim_uid, events_find_player(client, kill.killer_uid) ? kill.killer_uid : -1);
+            }
+            return 1;
+        }
+        case NET_PACKET_SCRIPT_MSG:  // KrunkScript (client/src/ks/ks_client_host.c): onNetworkMessage
+        case NET_PACKET_SCRIPT_LOG:  // the server script's GAME.log / errors
+        case NET_PACKET_SCRIPT_SYNC: // registerSyncValues
+            return ks_client_handle_packet(client, type, payload, length);
+        case NET_PACKET_SCRIPT_CHAT: { // GAME.CHAT.send / broadcast: a server chat line (its colour is not shown)
+            EVENTS_READ(NetScriptChatPacket, script_chat);
+            events_chat(&script_chat.chat);
             return 1;
         }
         case NET_PACKET_HIT: {

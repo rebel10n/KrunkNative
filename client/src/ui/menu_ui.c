@@ -10,6 +10,7 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <ks_client.h> // ks_client_pointer_free
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <weapons.h>
@@ -1253,8 +1254,9 @@ void client_menu_tick(Client *client) {
     g_lock.denied_seen = lock_errors;
 #endif
     const double grace_left = client->menu_lock_grace_until - glfwGetTime(); // tests park it far ahead (hud_autoplay)
-    if (!hud_ui_end_screen_up() && !html_ui_is_menu_open() && (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) &&
-        !client_pointer_locked(client)) {
+    // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse released the lock on purpose
+    if (!hud_ui_end_screen_up() && !html_ui_is_menu_open() && !ks_client_pointer_free() &&
+        (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) && !client_pointer_locked(client)) {
         client_set_menu_open(client, 1);
     }
 }

@@ -35,6 +35,8 @@
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
 #include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
 #include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
+#include <ks_client.h> // KrunkScript client host: the map's client script (ks/ks_client_host.c)
+#include <ks_game.h> // ks_game_free
 
 #ifdef WIN32
 #include <direct.h>
@@ -568,6 +570,7 @@ int main(int argc, char **argv) {
     glfwSetWindowFocusCallback(INSTANCE.window, window_focus_callback); // alt-tab = pointer lock lost
 #endif
     if (!SCENARIO_ACTIVE()) gamepad_init(&INSTANCE); // controller hotplug (GLFW joysticks / browser gamepads)
+    ks_client_init(&INSTANCE); // KrunkScript client host (scripts load per INIT: ks_client_round)
 
     if (glfwRawMouseMotionSupported()) {
         glfwSetInputMode(INSTANCE.window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
@@ -709,6 +712,8 @@ int main(int argc, char **argv) {
     }
 
     local_game_stop(&INSTANCE);
+    ks_client_unload(&INSTANCE); // KrunkScript: script objects / DIVs / sounds
+    ks_game_free(&INSTANCE.game);
     client_class_preview_fini(&INSTANCE);
     spin_wheel_fini();
     vfx_fini();
@@ -944,6 +949,7 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
     } else {
         client_add_player_mesh(client, player, 0);
     }
+    ks_client_player_spawned(client, player); // KrunkScript onPlayerSpawn (index.js:14700)
 }
 
 // LEAVE (Krunker "2"): the player disconnected; forget it entirely.
@@ -1018,6 +1024,9 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     g_net_send_rate = NET_STATE_SEND_HZ; // remote state rate ("k" sendRateA, client_apply_state)
     client_load_map(client);
     client->map_loaded = client->game.ready;
+    // KrunkScript: the map's client script, reloaded every INIT, then start(); script packets
+    // only exist on servers of protocol minor >= NET_PROTOCOL_MINOR_V7
+    ks_client_round(client, init->major == NET_PROTOCOL_MAJOR ? init->minor : 0);
 }
 
 static void client_handle_net_packet(Client *client, const NetPacket *packet) {
@@ -1130,10 +1139,12 @@ static void html_cursor_scale(GLFWwindow *window, double *x, double *y) {
 
 // The page takes pointer input while the menu is open or the end-screen results are up.
 static int html_pointer_input(void) {
-    return html_ui_is_menu_open() || hud_ui_end_screen_interactive();
+    // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse (clicks reach script DIVs)
+    return html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ks_client_pointer_free();
 }
 
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
+    ks_client_cursor(glfwGetWindowUserPointer(window), x, y); // KrunkScript INPUTS.mousePos / mouseMovement
     if (!html_pointer_input()) return;
     html_cursor_scale(window, &x, &y);
     if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
@@ -1142,6 +1153,7 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
 
 static void mouse_button_callback(GLFWwindow *window, const int button, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
+    if (ks_client_mouse_button(client, button, action)) return; // KrunkScript onMouseClick / onMouseUp, re-lock after unlockMouse
     if (!html_pointer_input()) {
         // In game: Krunker's canvas mousedown/mouseup (left shoots, right aims, the
         // other buttons are bindable keys M2/M4/M5), sampled by client_tick_game.
@@ -1167,6 +1179,7 @@ void scroll_callback(GLFWwindow *window, const double xoffset, const double yoff
     }
 
     if (!client || !yoffset) return;
+    ks_client_scroll(client, yoffset); // KrunkScript onMouseScroll
     if (ui_controls_scroll_event(client, yoffset, 1)) return; // a bind uses the wheel: no weapon swap
 
     if (g_skip_scroll) {
@@ -1199,6 +1212,8 @@ static void window_focus_callback(GLFWwindow *window, const int focused) {
 
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
+
+    ks_client_key(client, key, scancode, action, mods); // KrunkScript onKeyPress / onKeyUp / onKeyHeld (observes only)
 
     // Keybinds first (ui_controls.c): the "Press any Key" capture, typing in #chatInput
     // and the bound game keys / hotkeys (chat key, leaderboard, toggles, ...).
@@ -1351,6 +1366,7 @@ void client_tick(Client *client, const float now, const float delta) {
     if (!SCENARIO_ACTIVE()) client_render_settings_tick(client); // DOM pieces the display settings control (after the HUD pass)
     if (!debug_capture_hide_ui()) {
         spin_wheel_render(client);           // the prize wheel's canvas under its #spinButton (ui/spin_wheel.c)
+        ks_client_ui_late(client);           // KrunkScript UI.hideDefault / hideCrosshair over the HUD's writes
         html_ui_render(client->ui);          // last: composites the page over the scene and HUD
         spin_wheel_render_confetti(client);  // canvas-confetti draws above the page
     }
@@ -1406,8 +1422,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (menu_open) {
         // client_set_menu_open freed the pointer; nothing to lock or enter here.
     } else if (html_menu) {
-        // Menu closed: the game owns the mouse (client_set_menu_open locked it).
-        client->mouse_state.locked = 1;
+        // Menu closed: the game owns the mouse (client_set_menu_open locked it), unless a
+        // KrunkScript INPUTS.unlockMouse freed it until lockMouse / a click on the game view.
+        client->mouse_state.locked = !ks_client_input_unlocked();
     } else {
         client->mouse_state.locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
 
@@ -1499,8 +1516,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
         g_look.y = input.y_dir;
 
         input.seq = client->net_next_input_seq++;
-        player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame
-        client_recon_record(client, &input);    // tmpInpts + the "q" window (online only, net/recon.c)
+        // KrunkScript: INPUTS.disableDefault (dontSendInputs) neither predicts nor sends,
+        // DEFAULT.disablePrediction (noPred) sends without predicting (index.js:16840-16847)
+        if (!ks_client_inputs_disabled() && !ks_client_no_prediction()) player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame
+        if (!ks_client_inputs_disabled()) client_recon_record(client, &input); // tmpInpts + the "q" window (online only, net/recon.c)
 
         // The camera is posed after game_tick() below, once this input has moved the player.
     } else if (spectate_active()) {
@@ -1517,12 +1536,14 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // The world on the endAnim-scaled delta; the offline game's round/end clocks on real time.
     game_tick_world(&client->game, now, frame_delta, delta);
     client_recon_after_tick(client); // this input's shot knockback, kept for replays (input.velObj)
+    ks_client_frame(client, delta, frame_delta); // KrunkScript update(delta) + script scene objects (game.js:4960)
 
     // Krunker poses the camera right after procInputs (index.js gameLoop: rotateCam with
     // recoil/landing bob/shake, moveCam, ADS zoom) and renders in the same frame, so this
     // frame shows this frame's input.
     if (client->me && client->me->active) camera_feel_apply(client);
     menu_view_camera(client, delta); // no active player: pre-spawn menu camera / death chase cam
+    ks_client_camera(client); // KrunkScript GAME.CAMERA: a detached camera replaces the pose
     camera_feel_update(MIN(delta, game_constants.max_delta)); // RENDER.updateShake(deltaMs)
     for (size_t i = 0; i < client->game.player_count; i++) player_mesh_debug_log(client->game.players[i], now); // KRUNKNATIVE_PLAYER_LOG
 
@@ -1534,7 +1555,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (!scenario) vfx_update(client, delta); // combat effects from this frame's game tick (vfx.c)
     if (!scenario) ai_render_tick(client, delta); // AI meshes / orbs (ai_render.c), drawn by the world scene
 
-    if (!scenario) {
+    if (!scenario && !ks_client_3d_disabled()) { // KrunkScript DEFAULT.disable3D: RENDER.disable()
         // textureAnim off: Krunker resets moving/framed textures to their first frame.
         client_tick_textures(client, client_render_settings()->texture_anim ? now : 0.0f);
         debug_capture_apply_camera(client); // KRUNKNATIVE_CAMERA pose (debug_capture.c)
@@ -1549,7 +1570,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
     }
 
-    if (!scenario || SCENARIO_PREVIEW()) {
+    if ((!scenario || SCENARIO_PREVIEW()) && !ks_client_3d_disabled()) {
         glClear(GL_DEPTH_BUFFER_BIT);
         // fpsFOV: the first-person camera has its own fov (Krunker fpsCamera, zoomed alike);
         // showWeapon/Sec/Mel hide the model of the weapon in hand.

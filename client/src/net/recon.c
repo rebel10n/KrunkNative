@@ -14,6 +14,7 @@
 // KRUNKNATIVE_NET_JITTER_MS=<+- ms> hold every received packet and every sent input batch
 // that long (order kept, like TCP). KRUNKNATIVE_RECON_LOG=1 prints each correction.
 #include <client.h>
+#include <ks_client.h> // ks_client_no_prediction
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -201,6 +202,8 @@ void client_recon_apply(Client *client, const NetReconPacket *packet) {
     if (client->game.is_local || !me || !me->active) return;
 
     const vec3 predicted = me->position;
+    // KrunkScript DEFAULT.disablePrediction (Game.noPred): the snap applies, nothing is replayed
+    if (ks_client_no_prediction()) client->net_pending_count = 0;
     const size_t before = client->net_pending_count;
     const int move_lock = client->game.move_lock || mode_input_locked(me);
     client->net_pending_count = net_reconcile(me, packet, client->net_pending_inputs, client->net_pending_count, move_lock);

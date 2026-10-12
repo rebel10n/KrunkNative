@@ -83,6 +83,10 @@ typedef struct { HtmlArgKind kind; double num; const char *str; } HtmlArg;
 typedef int (*HtmlHandlerFn)(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc);
 typedef struct { const char *name; HtmlHandlerFn fn; } HtmlHandlerEntry;
 void html_ui_set_handlers(const HtmlHandlerEntry *table, size_t count, void *user, HtmlHandlerFn fallback);
+// A handler for markup another module inserts at run time (KrunkScript GAME.UI elements carry
+// onclick="knScriptClick()", client/src/ks/ks_ui.c): looked up before the page's table, on the
+// game page only. fn NULL removes it.
+void html_ui_add_handler(const char *name, HtmlHandlerFn fn);
 // Normalised name of the handler being dispatched ("showWindow", "windows.0.changeTab"); NULL outside a
 // dispatch. Lets the fallback tell calls apart (its signature carries no name).
 const char *html_ui_current_handler(void);

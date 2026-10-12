@@ -108,7 +108,33 @@ static void normalise_handler_name(const char *name, char *out, const size_t n) 
     out[len] = 0;
 }
 
+// html_ui_add_handler: run-time handlers of the game page (context 0)
+#define HTML_MAX_ADDED_HANDLERS 8
+static HtmlHandlerEntry g_added_handlers[HTML_MAX_ADDED_HANDLERS];
+static char g_added_names[HTML_MAX_ADDED_HANDLERS][48];
+
+void html_ui_add_handler(const char *name, const HtmlHandlerFn fn) {
+    if (!name || !*name) return;
+    int free_slot = -1;
+    for (int i = 0; i < HTML_MAX_ADDED_HANDLERS; i++) {
+        if (g_added_handlers[i].name && !strcmp(g_added_handlers[i].name, name)) {
+            g_added_handlers[i].fn = fn;
+            if (!fn) g_added_handlers[i].name = NULL;
+            return;
+        }
+        if (!g_added_handlers[i].name && free_slot < 0) free_slot = i;
+    }
+    if (!fn || free_slot < 0) return;
+    snprintf(g_added_names[free_slot], sizeof(g_added_names[free_slot]), "%s", name);
+    g_added_handlers[free_slot] = (HtmlHandlerEntry) {g_added_names[free_slot], fn};
+}
+
 static const HtmlHandlerEntry *find_handler(const char *name) {
+    if (g_ctx == &g_contexts[0]) {
+        for (int i = 0; i < HTML_MAX_ADDED_HANDLERS; i++) {
+            if (g_added_handlers[i].name && g_added_handlers[i].fn && !strcmp(g_added_handlers[i].name, name)) return &g_added_handlers[i];
+        }
+    }
     for (size_t i = 0; i < g_ctx->handler_count; i++) {
         if (g_ctx->handlers[i].name && !strcmp(g_ctx->handlers[i].name, name)) return &g_ctx->handlers[i];
     }

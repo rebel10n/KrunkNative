@@ -12,8 +12,10 @@
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
 //                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
-//   100 down W | up W            keys through the normal key path: W A S D SPACE SHIFT R E Q X 1 2 3 C N F G T TAB
-//   100 mdown right | mup right  mouse buttons (left / right)
+//   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER, any A-Z / 0-9
+//   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
+//   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
+//   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
 //   100 look dyaw dpitch         turn the next input's look by these radians (CONTROLS rotation)
 //   5000 respawn                 Play again when dead, as soon as the death delay allows (retried
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
@@ -133,16 +135,47 @@ static int script_key(const char *name) {
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(name, keys[i].name)) return keys[i].key;
     }
+    // any other letter / digit, ESC and ENTER (KrunkScript key hooks)
+    if (name[0] >= 'A' && name[0] <= 'Z' && !name[1]) return GLFW_KEY_A + (name[0] - 'A');
+    if (name[0] >= '0' && name[0] <= '9' && !name[1]) return GLFW_KEY_0 + (name[0] - '0');
+    if (!strcmp(name, "ESC")) return GLFW_KEY_ESCAPE;
+    if (!strcmp(name, "ENTER")) return GLFW_KEY_ENTER;
     return GLFW_KEY_UNKNOWN;
 }
 
 static void script_run(Client *client, const ScriptEvent *e) {
     if (!strcmp(e->cmd, "down") || !strcmp(e->cmd, "up")) {
+        // through the window's key callback (main.c: KrunkScript key hooks, then the binds)
         const int key = script_key(e->arg);
-        if (key != GLFW_KEY_UNKNOWN) ui_controls_key_event(client, key, 0, e->cmd[0] == 'd' ? GLFW_PRESS : GLFW_RELEASE, 0);
+        const int action = e->cmd[0] == 'd' ? GLFW_PRESS : GLFW_RELEASE;
+        GLFWkeyfun cb = glfwSetKeyCallback(client->window, NULL);
+        glfwSetKeyCallback(client->window, cb);
+        if (key != GLFW_KEY_UNKNOWN) {
+            if (cb) cb(client->window, key, 0, action, 0);
+            else ui_controls_key_event(client, key, 0, action, 0);
+        }
     } else if (!strcmp(e->cmd, "mdown") || !strcmp(e->cmd, "mup")) {
         const int button = !strcmp(e->arg, "right") ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
-        ui_controls_mouse_event(client, button, e->cmd[1] == 'd' ? GLFW_PRESS : GLFW_RELEASE, 1);
+        const int action = e->cmd[1] == 'd' ? GLFW_PRESS : GLFW_RELEASE;
+        GLFWmousebuttonfun cb = glfwSetMouseButtonCallback(client->window, NULL);
+        glfwSetMouseButtonCallback(client->window, cb);
+        if (cb) cb(client->window, button, action, 0);
+        else ui_controls_mouse_event(client, button, action, 1);
+    } else if (!strcmp(e->cmd, "cursor") || !strcmp(e->cmd, "click")) {
+        // cursor x y / click x y: move the cursor (window coordinates) through the cursor
+        // callback; click also presses and releases the left button there
+        glfwSetCursorPos(client->window, e->v[0], e->v[1]);
+        GLFWcursorposfun pos = glfwSetCursorPosCallback(client->window, NULL);
+        glfwSetCursorPosCallback(client->window, pos);
+        if (pos) pos(client->window, e->v[0], e->v[1]);
+        if (e->cmd[1] == 'l') {
+            GLFWmousebuttonfun cb = glfwSetMouseButtonCallback(client->window, NULL);
+            glfwSetMouseButtonCallback(client->window, cb);
+            if (cb) {
+                cb(client->window, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);
+                cb(client->window, GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
+            }
+        }
     } else if (!strcmp(e->cmd, "look")) {
         g_script.look_yaw += e->v[0];
         g_script.look_pitch += e->v[1];

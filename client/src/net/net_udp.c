@@ -237,7 +237,7 @@ int net_udp_client_session(Client *client, const struct sockaddr_in *address) {
     printf("udp session established (token %08x)\n", token);
     on_client_socket_connect(client);
 
-    const NetHelloPacket hello = {1, 0, 0};
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, 0}; // the minor gates the v7 packets (KrunkScript 200-203)
     client_net_send_packet(CU_VIRTUAL_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
     client_net_send_join(client, CU_VIRTUAL_FD); // brain ticket / session / guest name (net_join.c)
 
