@@ -1,0 +1,156 @@
+[
+ {
+  "name": "Type",
+  "varN": "camType",
+  "cat": 0,
+  "def": 0,
+  "options": [
+   "Normal",
+   "Top Down",
+   "Platformer (X)",
+   "Platformer (Z)"
+  ],
+  "select": true
+ },
+ {
+  "name": "X Offset",
+  "varN": "camOffX",
+  "cat": 0,
+  "def": 0,
+  "max": 500,
+  "min": 0,
+  "step": 1
+ },
+ {
+  "name": "Y Offset",
+  "varN": "camOffY",
+  "cat": 0,
+  "def": 0,
+  "max": 500,
+  "min": 0,
+  "step": 1
+ },
+ {
+  "name": "Z Offset",
+  "varN": "camOffZ",
+  "cat": 0,
+  "def": 0,
+  "max": 500,
+  "min": 0,
+  "step": 1
+ },
+ {
+  "name": "Enable Rotation",
+  "varN": "camRot",
+  "cat": 0,
+  "def": true,
+  "bool": true
+ },
+ {
+  "name": "Model",
+  "varN": "mdl",
+  "cat": 1,
+  "def": 0,
+  "options": [
+   "Normal",
+   "Sprite",
+   "Custom Asset"
+  ],
+  "select": true
+ },
+ {
+  "name": "Custom Asset",
+  "varN": "aID",
+  "cat": 1,
+  "def": "",
+  "input": true
+ },
+ {
+  "name": "Custom Asset Scale",
+  "varN": "mdlS",
+  "cat": 1,
+  "def": 1,
+  "max": 100,
+  "min": 0.1,
+  "step": 0.1
+ },
+ {
+  "name": "Speed X",
+  "varN": "speedX",
+  "cat": 1,
+  "def": 1,
+  "max": 3,
+  "min": 0,
+  "step": 0.1
+ },
+ {
+  "name": "Speed Y",
+  "varN": "speedY",
+  "cat": 1,
+  "def": 1,
+  "max": 3,
+  "min": 0,
+  "step": 0.1
+ },
+ {
+  "name": "Speed Z",
+  "varN": "speedZ",
+  "cat": 1,
+  "def": 1,
+  "max": 3,
+  "min": 0,
+  "step": 0.1
+ },
+ {
+  "name": "Ladder Accel",
+  "varN": "ldA",
+  "cat": 1,
+  "def": 1,
+  "max": 5,
+  "min": 0.1,
+  "step": 0.1
+ },
+ {
+  "name": "Air Accel",
+  "varN": "arA",
+  "cat": 1,
+  "def": 1,
+  "max": 3,
+  "min": 0.1,
+  "step": 0.1
+ },
+ {
+  "name": "Slide Time",
+  "varN": "slT",
+  "cat": 1,
+  "def": 1,
+  "max": 3,
+  "min": 0.1,
+  "step": 0.1
+ },
+ {
+  "name": "Slide Accel",
+  "varN": "slA",
+  "cat": 1,
+  "def": 1,
+  "max": 1.5,
+  "min": 0.1,
+  "step": 0.1
+ },
+ {
+  "name": "Jump Cooldown",
+  "varN": "jpC",
+  "cat": 1,
+  "def": 1,
+  "max": 3,
+  "min": 0.1,
+  "step": 0.1
+ },
+ {
+  "name": "Infinite Jump",
+  "varN": "infJ",
+  "cat": 1,
+  "def": false,
+  "bool": true
+ }
+]

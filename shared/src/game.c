@@ -1,6 +1,9 @@
 #include <shared.h>
 #include <ai.h>
 #include <bots.h>
+#include <world.h>
+#include <triggers_v7.h>
+#include <spawnables.h>
 #include <pcg_basic.h>
 #include <string.h>
 #include <math.h>
@@ -619,6 +622,15 @@ void game_tick_world(Game *game, const float now, const float delta, const float
         }
     }
 
+    // v7.1.4 game.update order (doc/v7/map-logic.md §2.0): 1 timers, 2 streaks, 3 vote-kick,
+    // 4 bomb, 5 trigger timerObjs, 6 triggerQueue, 7 objective time, 8 power-ups, 9 bots, 10 players,
+    // 11 player sounds, 12 AI, 14 airdrop, 15 teleporters, 16 spinners, 17 destructables, 18 flags,
+    // 19 spawnables, 20 dom zones, 21-22 machines, 23 mode.update, 24 zone, 25 projectiles,
+    // 26 KrunkScript update, 27 interact progress, 28 team scores, 29 leaders. The WP-A stubs
+    // (world.h, triggers_v7.h, spawnables.h) sit at their v7 positions; the owning packages fill
+    // them and move the existing calls (timerObjs / destructibles in game_tick_map_objects) as needed.
+    if (authority && !game->end_timer) trigger_queue_update(game, delta); // #6 (WP-C)
+
     // v7.1.4 game.update: bots.update(delta * deltaMlt) before players.update (their input frames)
     if (authority && !game->end_timer) game_bots_tick(game, world_delta);
 
@@ -649,7 +661,9 @@ void game_tick_world(Game *game, const float now, const float delta, const float
     if (authority && !game->end_timer) game_ai_tick(game, world_delta * 1000.0f * game->config.delta_mlt); // AI.update(delta * deltaMlt) + AI.sync
     if (authority && !game->end_timer) game_tick_projectiles(game, delta);
     game_tick_map_objects(game, delta * 1000.0f); // teleporter cooldowns; authority: onTimer triggers, destructible respawns
+    if (authority && !game->end_timer) spawnables_update(game, delta); // #19 (WP-D)
     if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn
+    if (authority && !game->end_timer) zone_update(game, delta); // #24 (WP-B)
     if (authority && game->leaders_dirty) game_sync_leaders(game, NET_TARGET_ALL);
 
     // Last: the hook re-inits the game (frees the players iterated above).

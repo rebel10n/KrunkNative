@@ -85,6 +85,9 @@ typedef struct {
 
 extern const GameConstants game_constants;
 
+// Krunker v7.1.4 data/prefabs.js prefab ids (map object "i"; doc/v7/map-logic.md §1.4).
+// Ids 0-59 keep their v3.1.1 index; 33 and 55 were renamed (the v3 names stay as aliases);
+// 60-96 are new. The per-prefab data is shared/include/prefabs.h (g_prefab_data, prefab_info).
 typedef enum {
     PREFAB_CUBE,
     PREFAB_CRATE,
@@ -119,7 +122,7 @@ typedef enum {
     PREFAB_SIGN,
     PREFAB_DEPOSIT_BOX,
     PREFAB_LIGHT_CONE,
-    PREFAB_SPECTATE_CAM,
+    PREFAB_CAMERA,              // 33 (v3.1.1 SPECTATE_CAM)
     PREFAB_SPHERE,
     PREFAB_PLACEHOLDER,
     PREFAB_CARD_B,
@@ -127,7 +130,7 @@ typedef enum {
     PREFAB_LIQUID,
     PREFAB_SOUND_EMITTER,
     PREFAB_EVENT,
-    PREFAB_TERMINAL,
+    PREFAB_TERMINAL,            // 41: v7 builds nothing (no object, no uid)
     PREFAB_PREMIUM_ZONE,
     PREFAB_VERIFIED_ZONE,
     PREFAB_CUSTOM_ASSET,
@@ -141,11 +144,51 @@ typedef enum {
     PREFAB_SHOWCASE,
     PREFAB_POINT_LIGHT,
     PREFAB_GHOST,
-    PREFAB_BOT,
+    PREFAB_AI_SPAWNER,          // 55 (v3.1.1 BOT)
     PREFAB_PUMPKIN,
     PREFAB_RUNE,
     PREFAB_SKELETON,
     PREFAB_KNIGHT,
+    PREFAB_GIFT,                // 60
+    PREFAB_CHRISTMASTREE,       // 61
+    PREFAB_CANE,                // 62
+    PREFAB_LIGHT_BAR,           // 63
+    PREFAB_PATH_NODE,           // 64
+    PREFAB_DIRECTIONAL_LIGHT,   // 65
+    PREFAB_RECTAREA_LIGHT,      // 66
+    PREFAB_SPOT_LIGHT,          // 67
+    PREFAB_PRIZE_WHEEL,         // 68
+    PREFAB_KR_ZONE,             // 69
+    PREFAB_NOPVP_ZONE,          // 70
+    PREFAB_PVP_ZONE,            // 71
+    PREFAB_LEADERBOARD,         // 72
+    PREFAB_TILES,               // 73
+    PREFAB_CLOUDS,              // 74
+    PREFAB_PARTNER_ZONE,        // 75
+    PREFAB_SPRITE,              // 76
+    PREFAB_DOMINATION_ZONE,     // 77
+    PREFAB_ROPE_LADDER,         // 78
+    PREFAB_ENVIRONMENT_ZONE,    // 79
+    PREFAB_KPD_ZONE,            // 80
+    PREFAB_DUMPSTER,            // 81
+    PREFAB_SERVER_NODE,         // 82
+    PREFAB_LAMP,                // 83
+    PREFAB_WATER_TOWER,         // 84
+    PREFAB_AC_UNIT,             // 85
+    PREFAB_SHEET_METAL,         // 86
+    PREFAB_ANTENNA,             // 87
+    PREFAB_SATELLITE_DISH,      // 88
+    PREFAB_SPRAY,               // 89
+    PREFAB_WEAPONBOX,           // 90
+    PREFAB_MYSTERY_BOX,         // 91
+    PREFAB_PERK_MACHINE,        // 92
+    PREFAB_AI_REDIRECTION,      // 93
+    PREFAB_KRUM_MACHINE,        // 94
+    PREFAB_BOT_SPAWNER,         // 95
+    PREFAB_MAP_ANCHOR,          // 96
+    PREFAB_COUNT,                // 97
+    PREFAB_SPECTATE_CAM = PREFAB_CAMERA,  // v3.1.1 name of 33
+    PREFAB_BOT = PREFAB_AI_SPAWNER,       // v3.1.1 name of 55
 } Prefab;
 
 typedef struct {
@@ -216,7 +259,37 @@ typedef struct {
     unsigned char force_dir:1;          // teleporter "fd": the receiver sets the view direction
     unsigned char no_vis:1;             // noVis ("v", every build; the client also sets it for meshes created hidden): not rendered, no spray, interface state never shows it
 
-    unsigned char direction:2;
+    // "d" (ladders, ramps, check points, teleporters 0..3; v7 BOOST_PAD 0..5: 0 up, 1 down, 2-5 sideways)
+    unsigned char direction:3;
+
+    // ---- WP-A: Krunker v7.1.4 per-object keys (doc/v7/map-logic.md §1.2-§1.5, shared/src/map.c)
+    unsigned char asset_video:1;        // "at" contains a "v": "<id>/video" (else "<id>/texture")
+    unsigned char force_trans:1;        // "ft" (fTrans)
+    unsigned char sprite:1;             // "msp": rendered as a camera-facing sprite
+    unsigned char no_ai_col:1;          // "nai" (noAICol); SERVER_NODE always
+    unsigned char no_grapple:1;         // "gp"
+    unsigned char no_impulse:1;         // "ip"
+    unsigned char no_player_col:1;      // TRIGGER "pl" (noPCol)
+    unsigned char complex_coll:1;       // "cpx": triangle collision (top-level "tris"); off for destructibles
+    unsigned char no_minimap:1;         // "smm"
+    unsigned char no_cast:1;            // "cst" (cast = cst == null)
+    unsigned char no_receive:1;         // "rcv"
+    unsigned char force_render:1;       // "fcr"
+    unsigned char can_script:1;         // "sci" (any truthy value: the v7 serializer writes this.sci)
+    unsigned char start_inactive:1;     // MYSTERY_BOX: built with active false (switchMysteryBox turns one on)
+    unsigned char legacy_trigger:1;     // TRIGGER without "tas": its single-action keys were wrapped into tas[0]
+    // v7 collision kinds (player.js collision chain, map-logic.md §1.6). The pass-through volumes
+    // (no_pvp, force_pvp, redirection, server_node) are COLLISION_TYPE_NONE: non-solid for players,
+    // bullets, AIs, bot navigation and spawn checks; whoever implements their behaviour tests the
+    // object's AABB (position = bottom centre, scale = full size) directly.
+    unsigned char rope_ladder:1;        // ROPE_LADDER: climbable from any side (collT cylinder, w = l = min(sx, sz) / 2)
+    unsigned char no_pvp:1;             // NOPVP_ZONE: player.noPVP while inside
+    unsigned char force_pvp:1;          // PVP_ZONE: player.forcePVP while inside
+    unsigned char kr_zone:1;            // KR_ZONE: solid unless the player has >= kr_amount KR
+    unsigned char partner_zone:1;       // PARTNER_ZONE: solid unless account.partnerApp >= 2
+    unsigned char kpd_zone:1;           // KPD_ZONE: solid unless account.canFlag
+    unsigned char redirection:1;        // AI_REDIRECTION: steers AIs along direction / bounce (boostDr)
+    unsigned char server_node:1;        // SERVER_NODE: tagged spawn node (node_tag, spread), pass-through
 
     unsigned int team;
     unsigned int score_points;          // "sp": score zone points / gate price
@@ -238,6 +311,40 @@ typedef struct {
     float spin;
     float bounce;
 
+    // ---- WP-A: Krunker v7.1.4 per-object values (defaults / clamps of map.js + MapManager builders)
+    const cJSON *raw;                   // the map record (owned by Map.raw_data): prefab-specific keys,
+                                        // the AI / bot key bags (WP-F), sign / leaderboard text (WP-G)
+    vec3 rotation;                      // "r" radians as authored: (r0, r1, r2); map_object_rotation()
+                                        // gives the per-prefab v7 builder order
+    float penetration;                  // "pe": limitMM(parseFloat(pe) || 0, 0, 1) wallbang fraction
+    int tex_variant;                    // "tv" (parseInt || 0; the variant id appended to the texture src)
+    int asset_texture;                  // "at": user asset id (digits of at), -1 none
+    float tex_rotation;                 // "tro" degrees 0..360 (legacy "tr" radians -> toDeg)
+    float tex_scale_mult;               // "tsm"
+    int tex_encoding;                   // "ten" 0..2 (config.encodingTypes)
+    int frames;                         // "fct" 0..100 sprite-sheet frames
+    float frame_time;                   // "fs" 0..10 -> ms per frame (round(1) * 100)
+    int render_side;                    // "rs" 0 front / 1 back / 2 double, -1 = prefab default
+    float alpha_test;                   // "alt" 0..1
+    float darken;                       // "da"
+    int step_sound;                     // "sat" 0..4 (config.stepSounds)
+    float spawn_chance;                 // "rsc" 0..100 (%) for a start-destroyed object at round reset
+    float hitbox_h, hitbox_w;           // "hbh" / "hbw" 0.1..10 (1)
+    int spin_axis;                      // "spa" 0 y / 1 x
+    float anim_speed;                   // "as" (parseFloat || 0)
+    const char *anim_start;             // "ast" <= 32 chars of the trigger text charset (in raw), NULL none
+    const char *interact_msg;           // "inm" <= 70 chars (in raw), NULL none
+    int objective_uid;                  // OBJECTIVE "obi" 1..10 -> uid obi - 1, -1 = auto (file order)
+    int obj_link;                       // CAMERA "obl" (v3 SPECTATE_CAM "obi" is not read: links to 0)
+    int camera_type;                    // CAMERA "camt" 0 spectate / 1 player
+    int node_id;                        // PATH_NODE "nid" (-1 none)
+    int kr_amount;                      // KR_ZONE "krs" 0..1e7
+    int anchor_type;                    // MAP_ANCHOR "ant" 0 corner / 1 center
+    int zombie_perk;                    // PERK_MACHINE "zp" 0..6
+    int spray_id;                       // SPRAY "spt" (2482)
+    float spread;                       // SERVER_NODE "ssp" 0..50
+    const char *node_tag;               // SERVER_NODE "nt" <= 70 chars (in raw), NULL none
+
     CollisionType collision_type;
 
     vec3 position;
@@ -253,6 +360,8 @@ typedef struct {
     int team;
     int direction;
     int comp;
+    int team_only;  // [6] v7 teamOnly (!!spawn[6])
+    float spread;   // [7] v7 spread: limitMM(parseFloat(spawn[7]) || 0, 0, 50)
 } Spawn;
 
 typedef enum {
@@ -285,6 +394,68 @@ typedef struct {
     unsigned char infinite_jump:1;
 } MapConfig;
 
+// ---- WP-A: Krunker v7.1.4 top-level map keys (doc/v7/map-logic.md §1.1, §1.8), parsed by map.c.
+#define MAP_COLOR_SIZE 8 // "#rrggbb"
+
+// The lighting / sky / fog / output environment of the map (render.js initEnvironment), also the
+// data of an ENVIRONMENT_ZONE (MapManager.addEnvironmentZone, its "ambientC" / "fogC" keys).
+typedef struct {
+    unsigned char has_ambient:1;  // map: a missing "ambient" means no ambient light (zones: always)
+    unsigned char has_light:1;    // map: a missing "light" means no sun
+    unsigned char sky_dome:1;
+    unsigned char sky_dome_tex:1;
+    unsigned char correct_lights:1;
+    char ambient[MAP_COLOR_SIZE], light[MAP_COLOR_SIZE], sky[MAP_COLOR_SIZE], fog[MAP_COLOR_SIZE];
+    float ambient_i, light_i, light_d;  // 1 / 1.3 / 500
+    float sun_ang_x, sun_ang_y;         // 90 / 54
+    int shadow_r, shadow_d;             // 1024 / 1200
+    float fog_d;                        // 2000
+    char sky_dome_col[3][MAP_COLOR_SIZE], sky_dome_emis[MAP_COLOR_SIZE];
+    int sky_dome_tex_asset;             // "skyDomeTexA" asset id, 0 none
+    int sky_dome_emis_tex;              // "skyDomeEmisTex" asset id, 0 none
+    float sky_dome_mov_t, sky_dome_mov_d;
+    int amb_ind;                        // soundscape (config.soundScapes value), 1
+    int amb_ind_custom;                 // "ambIndC" asset id, 0 none
+    int tone_mapping;                   // 0..4
+    float tone_mapping_exposure;        // 1
+    int output_encoding;                // 0..2
+} MapEnvironment;
+
+typedef struct {
+    vec3 position;   // bottom centre (p)
+    vec3 size;       // full size (s)
+    MapEnvironment env;
+} MapEnvironmentZone;
+
+typedef struct {     // Terrain.CONFIG_PROPS (built only when seed, width and height are all truthy)
+    unsigned char enabled:1;
+    char seed[64], tree_seed[64];       // "terrainSeed" / "terrainTSeed" (numbers kept as text)
+    float width, height, mountain_mlt;  // 3000 / 3000 / 1
+    int ease;                           // 12
+    char mountain_col[MAP_COLOR_SIZE], snow_col[MAP_COLOR_SIZE], grass_col[MAP_COLOR_SIZE],
+         dirt_col[MAP_COLOR_SIZE], sand_col[MAP_COLOR_SIZE];
+} MapTerrainConfig;
+
+typedef struct {     // Zone.CONFIG_PROPS (built only when zone && zoneSize && zoneSpeed)
+    unsigned char enabled:1;
+    unsigned char random:1;             // "zoneRnd"
+    float size, speed, height, wait;    // 500 / 1 / 1000 / 5 (s)
+    int stages;                         // 0..10
+    char col[3][MAP_COLOR_SIZE];
+} MapZoneConfig;
+
+typedef struct {     // Ocean.js (client only)
+    unsigned char enabled:1;
+    char col[MAP_COLOR_SIZE];           // #001e0f
+    float opacity, distortion, speed, y_offset, width, length; // .9 / 3.7 / 1 / -1 / 1000 / 1000
+    int reflection_res;                 // 3
+} MapOceanConfig;
+
+typedef struct {
+    int nid;          // PATH_NODE "nid"
+    size_t object;    // index into Map.objects
+} MapPathNode;
+
 typedef struct {
     const cJSON *raw_data;
 
@@ -303,6 +474,47 @@ typedef struct {
     } dimensions;
 
     vec3 camera_position;
+
+    // ---- WP-A: v7 top-level keys (absent keys take the v7 defaults; unknown keys stay in raw_data)
+    const char *name;                   // "name" (raw_data string), NULL none
+    const char *welcome;                // "welMsg" when it passes the v7 charset check, else NULL
+    unsigned char camera_static:1;      // camPos[3]
+    unsigned char no_ambient:1;         // "nAmb"
+    unsigned char old_ao:1;             // "oldAO"
+    unsigned char has_lightmaps:1;      // "hasLM"
+    vec3 camera_rotation;               // camPos[4..6] (rx, ry, rz): rotateCam(p5, p4, p6)
+    int minimap_asset;                  // "mmId" digits, 0 none
+    MapEnvironment env;
+    MapTerrainConfig terrain;
+    MapZoneConfig zone;
+    MapOceanConfig ocean;
+
+    size_t mode_count;                  // top-level "modes" (official map startup / vote modes)
+    int *modes;
+
+    float *tris;                        // "tris": 9 floats per world-space triangle (cpx collision)
+    size_t tri_count;
+
+    // raw references into raw_data (owned by it): parsed by the owning packages
+    const cJSON *game_config;           // "config" {modes, classes, settings, weps, cls, prks} (WP-E)
+    const cJSON *gui;                   // "gui" custom HUD elements (WP-C / WP-G)
+    const cJSON *scripts;               // "scripts" {client, server} base64 KrunkScript
+    const cJSON *bot_paths;             // "botPaths" (no v7 runtime consumer; kept for round-trip)
+    const cJSON *editor_player;         // "player" {pos, rot} (editor test spawn)
+
+    // object lists (indices into objects) and pending spawners (raw records, no map object)
+    MapPathNode *path_nodes;            // PATH_NODE, in file order (manager.pathNodes[nid])
+    size_t path_node_count;
+    size_t *server_nodes, server_node_count;   // SERVER_NODE
+    size_t *map_anchors, map_anchor_count;     // MAP_ANCHOR
+    size_t *dom_zones, dom_zone_count;         // DOMINATION_ZONE (uid = position in this list)
+    size_t *objectives, objective_count;       // OBJECTIVE, in file order
+    MapEnvironmentZone *env_zones;             // ENVIRONMENT_ZONE
+    size_t env_zone_count;
+    const cJSON **ai_spawners;                 // AI_SPAWNER records (map.js addAI: pending AIs, WP-F)
+    size_t ai_spawner_count;
+    const cJSON **bot_spawners;                // BOT_SPAWNER records (addBot: pending map bots, WP-F)
+    size_t bot_spawner_count;
 } Map;
 
 extern const MapConfig g_default_map_config;
@@ -316,11 +528,26 @@ Map *map_init(const cJSON*);
 // build_meshes 0: no meshes even in the client build (the client's in-process sandbox server,
 // server/src/sandbox.c, plays the map exactly like server_bin: game_init passes !game->server).
 Map *map_init_ex(const cJSON*, int build_meshes);
-// The prefab id of a raw map object (prefabs.prefabs[i || id || 0], unknown ids -> CUBE).
+// The prefab id of a raw map object, as v7 map.js generate() resolves it:
+// prefabs.prefabs[i || id || 0] || prefabs.prefabs[0], so ids outside 0..96 and prefab *names*
+// become CUBE (numeric strings index like numbers). Validation rejects unknown ids first
+// (map_validate.h); the name lookup is prefab_id_from_name (prefabs.h).
 int map_raw_object_prefab(const cJSON *raw_obj);
-// 1 when map_init makes a map->objects entry for this raw object (p and s arrays, not a BOT).
-// Code pairing raw_data objects with map->objects in order must skip exactly these.
+// 1 when map_init makes a map->objects entry for this raw object: it has p and s arrays and its
+// prefab builds a map object (not TERMINAL, AI_SPAWNER, BOT_SPAWNER or EVENT; prefab_info()
+// PREFAB_R_NO_OBJECT). Code pairing raw_data objects with map->objects in order must skip
+// exactly these.
 int map_raw_object_kept(const cJSON *raw_obj);
+
+// The v7 builder rotation of an object (map.js generate -> MapManager builders), as a row-major
+// 3x3 matrix applied to the prefab's unit geometry (three.js conventions, y up):
+//   CUBE / models / cylinders / triggers ...: yR = r0, xR = r1, zR = r2, Euler "XYZ"
+//   BOOST_PAD: xR = r0, yR = r1 (v3.1.1 had yR = r0, xR = r1)
+//   PLANE / BILLBOARD / SIGN / LIQUID / SPRITE / LIGHT_BAR / SPRAY / LEADERBOARD (addFixedPlane):
+//     Rx(r0) * Ry(r1) * Rz(r2) * Rx(-PI/2) of the XY unit plane (v3: Euler YXZ (r2, r0 - PI/2, r1))
+//   RECTAREA_LIGHT: (r2, r0, r1)
+// Old v3 maps go through the same table: rotated v3 planes look different, exactly as in v7.
+void map_object_rotation(const Object *object, float out[9]);
 void map_reset(Map*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
 
@@ -845,6 +1072,7 @@ typedef struct {
 #define NET_TARGET_EXCEPT(uid) (-3 - (uid))
 #define NET_TARGET_EXCEPT_UID(target) (-3 - (target)) // decode: target <= -3
 
+struct AccountInfo_t; // shared/include/account.h (GameHooks.account_info)
 typedef struct {
     void *user;
     // Send one framed packet to the connection owning player `uid`, or to every
@@ -876,6 +1104,9 @@ typedef struct {
     // A uid for a new bot that no connection will ever get (server: its connection id
     // counter). NULL: the game counts from GAME_BOT_UID_BASE past every uid in use.
     int (*alloc_uid)(struct Game_t*);
+    // WP-A (shared/include/account.h): the account facts of a player for the v7 zones, trigger
+    // conditions / methods and class locks. NULL = guest. Returns 1 when *out was filled.
+    int (*account_info)(const struct Game_t*, const Player*, struct AccountInfo_t *out);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -972,6 +1203,8 @@ typedef struct Game_t {
     double state_now;             // Krunker game.now for stateHistory (s); double: `now` is a float
                                   // that loses millisecond precision after a day of server uptime
     GameHooks hooks;
+    // WP-A (shared/include/triggers_v7.h): the KrunkScript hooks of the trigger runtime, NULL none
+    const struct TriggerScriptHooks *script_hooks;
     GameProjectile projectiles[GAME_MAX_PROJECTILES];
     struct GameAIs_t *ai;         // Krunker game.AI (shared/include/ai.h): NULL until the first AI
     struct GameBots_t *bots;      // Krunker v7.1.4 game.bots (shared/include/bots.h): NULL until the first bot
@@ -1215,7 +1448,26 @@ typedef struct {
 // server that announces at least 1.1 (client_enter_game).
 #define NET_PROTOCOL_MAJOR 1
 // 1.1 servers accept ENTs up to V6 and drop V7 (1.2: + lagComp) the same way.
-#define NET_PROTOCOL_MINOR 2
+// 1.3: the Krunker v7.1.4 map schema (WP-A, doc/v7/map-logic.md §7.2): prefabs 0-96, no TERMINAL
+// objects, so object uids differ from a 1.2 peer's on the same map. New v7 packets (blocks below)
+// are only sent to peers that announced at least NET_PROTOCOL_MINOR_V7.
+#define NET_PROTOCOL_MINOR 3
+#define NET_PROTOCOL_MINOR_V7 3
+
+// Packet id blocks of the v7.1.4 upgrade (doc/v7/decisions.md "Packet id blocks", map-logic.md
+// §5.3). Each block is owned by one work package; ids inside a block are the owner's to assign.
+#define NET_PACKET_BLOCK_TRIGGERS 120   // 120-129 map-logic WP-C: cv, gv, tgui, camb, sso, asnd/rsnd, cnfm, chgp, int v7
+#define NET_PACKET_BLOCK_WORLD 130      // 130-139 map-logic WP-B: zn, bo, gt, checkpoint reset, env / terrain sync
+#define NET_PACKET_BLOCK_MODES 140      // 140-149 map-logic WP-D: obj v7, uobj, uct, cct, rds, lkt, tx, krt/chrg/bh, crsp v7
+#define NET_PACKET_BLOCK_ZOMBIES 150    // 150-159 map-logic zombies (§5.3 "G", plan WP-H stage 2): mybx/smybx, krm, pwup, upk, upz
+#define NET_PACKET_BLOCK_AI 160         // 160-169 map-logic AI / bots (§5.3 "E", plan WP-F): rai, ai v7, aai v7
+#define NET_PACKET_BLOCK_EFFECTS 170    // 170-176 player-viewer WP-B: EFFECT (pk), STREAK (wstk/jg/bbm)
+#define NET_PACKET_BLOCK_AIRDROP 177    // 177-179 map-logic WP-H: AIRDROP (ad/rad/krp)
+#define NET_PACKET_BLOCK_LOBBY 180      // 180-189 map-logic lobby / maps (§5.3 "A", plan WP-E): maVote, mv, networkData
+#define NET_PACKET_BLOCK_COMBAT 190     // 190-194 player-viewer WP-B: other combat packets
+#define NET_PACKET_BLOCK_PROTOCOL 195   // 195-199 player-viewer WP-C: protocol / input
+#define NET_PACKET_BLOCK_KRUNKSCRIPT 200 // 200-239 KrunkScript (doc/v7/krunkscript.md)
+#define NET_PACKET_BLOCK_END 240
 uint16_t net_ent_size_for(int major, int minor); // the ENT a client sends to an INIT major.minor server: V7 from 1.2, V6 for 1.1, else V4
 
 typedef struct {

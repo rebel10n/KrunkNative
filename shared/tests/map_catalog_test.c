@@ -5,6 +5,7 @@
 // every map. Run from the repository root: ./<build>/map_catalog_test [-v]
 #include <shared.h>
 #include <map_catalog.h>
+#include <prefabs.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -66,11 +67,9 @@ static void test_entry(const size_t index, const int verbose) {
     int raw_objects = 0, bad_palette = 0;
     const cJSON *o;
     cJSON_ArrayForEach(o, objects) {
-        const cJSON *prefab = cJSON_GetObjectItemCaseSensitive(o, "i");
-        // "BOT" objects become AIs (objects.js addAI, shared/src/ai.c), never map objects
-        const int bot = (cJSON_IsNumber(prefab) && (int) prefab->valuedouble == PREFAB_BOT) ||
-                        (cJSON_IsString(prefab) && !strcmp(prefab->valuestring, "BOT"));
-        if (!bot) raw_objects++;
+        // AI_SPAWNER / BOT_SPAWNER become pending AIs / bots, TERMINAL and EVENT build nothing (v7
+        // map.js): never map objects (prefabs.h PREFAB_R_NO_OBJECT)
+        if (!prefab_has_role(map_raw_object_prefab(o), PREFAB_R_NO_OBJECT)) raw_objects++;
         CHECK(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(o, "s")) >= 3, "%s: object without s", e->key);
         const char *idx_keys[] = {"ci", "ei"};
         for (int k = 0; k < 2; k++) {
@@ -86,7 +85,15 @@ static void test_entry(const size_t index, const int verbose) {
     CHECK(map->spawn_count > 0, "%s: no spawns", e->key);
     CHECK((int) map->object_count == raw_objects, "%s: %zu of %d objects built", e->key, map->object_count, raw_objects);
     int out_of_range = 0;
-    for (size_t i = 0; i < map->object_count; i++) out_of_range += map->objects[i]->prefab < 0 || map->objects[i]->prefab > PREFAB_KNIGHT;
+    // v7.1.4: ids 0-96 keep their prefab (no id >= 60 falls back to CUBE any more)
+    for (size_t i = 0; i < map->object_count; i++) out_of_range += map->objects[i]->prefab >= PREFAB_COUNT;
+    int remapped = 0;
+    cJSON_ArrayForEach(o, objects) {
+        const cJSON *prefab = cJSON_GetObjectItemCaseSensitive(o, "i");
+        if (cJSON_IsNumber(prefab) && prefab->valuedouble >= 0 && prefab->valuedouble < PREFAB_COUNT &&
+            map_raw_object_prefab(o) != (int) prefab->valuedouble) remapped++;
+    }
+    CHECK(remapped == 0, "%s: %d objects lose their prefab id", e->key, remapped);
     CHECK(out_of_range == 0, "%s: %d objects keep an unknown prefab id", e->key, out_of_range);
     if (verbose) {
         printf("  %-2zu %-16s %-16s %-9s objects %4zu spawns %2zu cubes %4d dims x[%.0f,%.0f] y[%.0f,%.0f] z[%.0f,%.0f]\n", index,

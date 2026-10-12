@@ -92,7 +92,7 @@ extern const TriggerActionInfo g_trigger_actions[TRIGGER_ACTION_COUNT];
 #define TRIGGER_CONSTANT_MIN (-10000)   // editor "Value" slider
 #define TRIGGER_CONSTANT_MAX 10000
 #define TRIGGER_CONSTANT_EVENT_MAX 10000 // addTrigger: limitMM(constantEvent, 0, 10000)
-#define TRIGGER_INTERFACE_MAX 1000      // config.interfaceIDMax
+#define TRIGGER_INTERFACE_MAX 2000      // config.interfaceIDMax (v7.1.4; v3.1.1 1000)
 #define TRIGGER_EMITTER_VOLUME_MIN 0.05f
 #define TRIGGER_EMITTER_VOLUME_MAX 2.0f
 #define TRIGGER_EMITTER_RATE_MIN 0.5f
@@ -105,6 +105,48 @@ extern const char *const g_trigger_network_sounds[TRIGGER_NETWORK_SOUND_COUNT]; 
 
 // "tct" check of addTrigger / addAI: <= 70 characters from [\w:;()?,.|[] -+*$@=^!{}].
 int trigger_text_valid(const char *text);
+
+// ---- WP-A: Krunker v7.1.4 trigger data model (doc/v7/map-logic.md §3.2-§3.4). The parse lives in
+// shared/src/map.c; the runtime (events 0-31, conditions 0-11, actions 0-71) is WP-C's.
+#define TRIGGER_V7_EVENT_COUNT 32       // triggers.events
+#define TRIGGER_V7_CONDITION_COUNT 12   // triggers.conditions
+#define TRIGGER_V7_ACTION_COUNT 72      // triggers.actions
+#define TRIGGER_V7_ACTION_LIMIT 5       // config.triggerActionLimit (editor save / validation; the runtime has no cap)
+#define TRIGGER_V7_CHAIN_LIMIT 30       // config.triggerLimit (v3.1.1 20)
+#define TRIGGER_V7_CUSTOM_VALUE_LIMIT 30 // config.custValLimit
+#define TRIGGER_V7_KEY_MAX 10           // "tcc" / input condition values: [a-z0-9_]{0,10}
+#define TRIGGER_V7_DELAY_MAX 60.0f      // "tad" seconds (rounded to 0.1)
+#define TRIGGER_V7_COST_MAX 10000       // "tac"
+#define TRIGGER_V7_EMITTER_RATE_MIN 0.1f // config.emitterRateMin (v3.1.1 0.5)
+#define TRIGGER_V7_EMITTER_SOUND_COUNT 73
+#define TRIGGER_V7_EVENT_ON_INTERACT_KEY 16
+#define TRIGGER_V7_EVENT_ON_EXIT_OBJECT 23
+
+// v7 "onAI*" events (15 onAIDeath, 20 onAIDamage, 29 onAIHalfHealth, 31 onAIKillPlayer): AI_SPAWNER
+// only; a TRIGGER drops them (MapManager.addTrigger: eventN.includes("onAI") -> null).
+static inline int trigger_v7_event_is_ai(const int event) {
+    return event == 15 || event == 20 || event == 29 || event == 31;
+}
+
+// One entry of "tas" (MapManager.addTrigger action sanitize, MapManager.js:1938-2041).
+typedef struct {
+    int action;                    // ta: parseInt || 0 (an index into the 72 v7 actions; validated by WP-C)
+    int constant;                  // tc: parseInt || 0
+    int constant2;                 // tc2: parseInt || 0
+    unsigned char has_text:1;      // tct passed the <= 70 chars charset check
+    unsigned char asset_sound:1;   // esa != null
+    char text[TRIGGER_TEXT_MAX + 1]; // tct; for ta 37 / 38 reduced to [a-z0-9_]{0,10}
+    char value_key[TRIGGER_V7_KEY_MAX + 1]; // tcc: [a-z0-9_]{0,10}, "" none
+    int value_type;                // tce: config.inputTypes 0 input / 1 trigger / 2 player / 3 global value
+    float delay;                   // tad: 0..60 s, rounded to 0.1
+    int condition;                 // cd: parseInt || 0 (WP-C maps an unknown index to 0)
+    const void *condition_values[3]; // cv0..cv2: the raw cJSON values (NULL absent); WP-C sanitizes them
+                                     // per triggers.conditions[cd].vals
+    int sound;                     // es (config.emitterSounds index, invalid -> 0) or the esa asset id
+    float volume;                  // ev: 0.05..2 (1)
+    float rate;                    // er: 0.1..4 (1)
+    int emit_from;                 // ef: 0 at the trigger, 1 at the player, 2 global (2D)
+} TriggerActionData;
 
 // A trigger's settings and runtime state: objects.js GameObject trigger* fields of a TRIGGER
 // (Object.trig) or ai.js of a BOT with Can Trigger (GameAIData.trig).
@@ -127,4 +169,14 @@ typedef struct {
     float timer;             // triggerTimer (ms): onTimer countdown
     float last_collision;    // lastColT (game time, ms): onCollision cooldown
     int storage;             // onStorage*: the interface storage
+
+    // ---- WP-A: v7 fields. The single-action fields above mirror actions[0] so the v3.1.1-shaped
+    // runtime keeps working until WP-C runs the action list.
+    int event_index;         // te as v7 reads it: 0..31, -1 = out of range or an onAI event (never fires)
+    int action_cost;         // tac 0..10000 (0 unless te == onInteractKey or tam is set)
+    int action_method;       // tam: 0 cost KR, 1 cost score, 2 require score, 3 require kills, 4 account, 5 verified,
+                             // 6 premium, 7 partner, 8 level
+    unsigned char single_use_player:1; // sup: once per player id per round (uses[])
+    int action_count;
+    TriggerActionData *actions; // tas (any length; validation caps it at TRIGGER_V7_ACTION_LIMIT); owned
 } TriggerData;

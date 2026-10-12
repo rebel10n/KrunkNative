@@ -440,6 +440,13 @@ else ()
         target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # map_v7_test (map-logic WP-A): the v7.1.4 map schema, prefab table, shims, round trip and validation
+    add_executable(map_v7_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_v7_test.c)
+    target_link_libraries(map_v7_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(map_v7_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 

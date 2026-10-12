@@ -7,6 +7,7 @@
 #include <rcon.h>
 #include <auth_join.h>
 #include <map_catalog.h>
+#include <map_validate.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1330,6 +1331,17 @@ static void acc_handle_map_data(cJSON *frame) {
         server_log_error("[brain] published map for a hosted game: %s", err);
         acc_host_reply_error(pending, err);
         cJSON_Delete(pending);
+        return;
+    }
+    // v7.1.4 game.prepareGame: "(" / ")" -> full-width, then customGameConfig.validateMap (a
+    // published map has a creator, so the featured limits apply) and the prefab / texture checks
+    map_prepare_custom_json(map);
+    const char *invalid = map_validate_error(map, 1);
+    if (invalid) {
+        server_log_error("[brain] published map for a hosted game rejected: %s", invalid);
+        acc_host_reply_error(pending, invalid);
+        cJSON_Delete(pending);
+        cJSON_Delete(map);
         return;
     }
     map_sanitize_json(map);

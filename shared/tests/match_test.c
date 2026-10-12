@@ -1126,9 +1126,9 @@ static void test_trigger_map_parse(void) {
         const TriggerData *t = o->trig;
         CHECK(t && t->event == TRIGGER_EVENT_ON_ENTER && t->action == TRIGGER_ACTION_BROADCAST_MESSAGE && !strcmp(t->text, "Welcome!") &&
               t->constant == 5 && t->constant_event == 10000 && t->chance == 100 && t->interface_target == 7 && t->sound == 0 &&
-              near(t->volume, 2.0f, 1e-6f) && near(t->rate, 0.5f, 1e-6f) && t->emit_from == 1 && t->single_use && t->self_destruct &&
+              near(t->volume, 2.0f, 1e-6f) && near(t->rate, 0.1f, 1e-6f) /* v7 emitterRateMin 0.1 */ && t->emit_from == 1 && t->single_use && t->self_destruct &&
               near(t->timer, 10000000.0f, 1.0f), "TRIGGER fields");
-        CHECK(o->interface_id == 1000 && o->health == 40.0f && o->can_destroy && o->team == 2 && o->no_shoot, "TRIGGER interface / health / team / noShoot");
+        CHECK(o->interface_id == 2000 /* v7 interfaceIDMax */ && o->health == 40.0f && o->can_destroy && o->team == 2 && o->no_shoot, "TRIGGER interface / health / team / noShoot");
         CHECK(map->objects[1]->trig->event == TRIGGER_EVENT_NONE && !map->objects[1]->trig->text[0], "onAI events and bad texts are dropped");
         CHECK(map->objects[2]->trig->event == TRIGGER_EVENT_NONE && !map->objects[2]->no_shoot, "unknown events name nothing");
         const Object *cube = map->objects[3];

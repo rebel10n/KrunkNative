@@ -28,6 +28,7 @@
 #include <strings.h>
 
 #include "brain_internal.h"
+#include <modes.h> /* MODE_ID_RANKED */
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/db.h"
@@ -817,7 +818,10 @@ int ranked_init(Brain *b) {
     R.b = b;
     R.enabled = kn_config_bool(cfg, "brain.ranked.enabled", 1);
     R.min_level = (int) kn_config_int(cfg, "brain.ranked.min_level", 15);          /* config.minRankedLevel */
-    R.mode = (int) kn_config_int(cfg, "brain.ranked.mode", 14);                     /* modes[14] Ranked */
+    /* the Ranked mode id from the shared mode table: 14 in the v3.1.1 table, MODE_V7_RANKED (38)
+     * once map-logic WP-D re-indexes GameModeId to v7.1.4 (shared/include/modes_v7.h), where
+     * 13 / 14 are Classic FFA / Deposit (doc/v7/decisions.md "Ranked") */
+    R.mode = (int) kn_config_int(cfg, "brain.ranked.mode", MODE_ID_RANKED);
     const cJSON *maps = kn_config_get(cfg, "brain.ranked.maps");
     R.maps = cJSON_IsArray(maps) ? maps : NULL;
     R.poll_timeout_s = (int) kn_config_int(cfg, "brain.ranked.poll_timeout_s", 15);
