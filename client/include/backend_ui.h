@@ -39,6 +39,7 @@ int  account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
 // Window markup when the account changes what v3.1.1 shows; NULL = keep the static capture.
 char *account_window_gen(int id, const char **header);
 void account_window_post(int id);
+double account_reward_ms(void);             // daily free KR: ms left, 0 claimable, -1 no account / level too low
 void account_set_funds(double funds);       // updateFunds(funds): header + windows
 void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / "" = none)
 
@@ -52,7 +53,7 @@ void account_elo_icon_html(char *out, size_t n, double elo, const char *style); 
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)
 void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin): its asset-host URL (html_dom_asset_url)
-void store_wheels_html(StrBuf *sb);         // Store tab 0 cards
+char *store_window_gen(void);               // windows[13].gen(): the v7.1.4 Store (guest and signed in), malloc'd
 int  store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void store_ui_frame(const cJSON *frame);    // "spin" replies
 void store_ui_tick(void);                   // per frame: spin screen geometry + reveal
@@ -71,7 +72,12 @@ void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?g
 int  servers_ui_account_required(void);     // 1 = the last seek was an online-mode lobby a guest may not join (error screen: Log in)
 char *servers_ui_region_options(const char *selected); // region <option>s (2-letter codes, place name as title); malloc'd
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
-char *servers_window_gen(int id, const char **header);
+char *servers_window_gen(int id, const char **header); // windows 2 (Servers), 8 (Host), 10 (Custom Games)
+void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (scenarios, KRUNKNATIVE_SERVER_LIST); NULL = the brain's
+// KrunkNative addition: the menu's Connect button (next to Invite / Join) and its window
+#define SERVERS_WINDOW_CONNECT 53                // showWindow id (v7's windows[] end at 52)
+void servers_ui_menu_setup(void);                // inject #menuBtnConnect into #subLogoButtons
+char *servers_connect_window_gen(void);          // the Connect window (host[:port], console `connect` semantics)
 // Build versions (ci-release; brain fields: doc/backend.md "Build version"). entry = a game-list
 // tuple or a finder /servers entry. The _html helpers return malloc'd markup (caller frees).
 void  servers_ui_note_list_response(const cJSON *response); // finder / game-list answer: download URL
@@ -92,6 +98,7 @@ void servers_ui_join_ticket(const char *host, int port, const char *game_id, con
 
 // ---- ranked_ui.c (windows[26] + the queue session)
 char *ranked_window_gen(void);
+char *ranked_ui_window_gen(void);           // showWindow(27) for guests too (LOGIN REQUIRED card)
 int  ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 const char *ranked_ui_status(void);   // queueStatusMessage, NULL none (play instructions subtitle)
 const char *ranked_ui_ready(void);    // queueReadyMessage

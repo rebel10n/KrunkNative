@@ -768,6 +768,7 @@ void client_game_events_reset(Client *client) {
     player_accounts_on_init();
     hud_modes_reset(client);
     hud_popups_on_init(); // "init": bN = 0
+    hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt
 #ifdef HUD_UI_HAVE_HIDE_END_SCREEN
     hud_ui_hide_end_screen(client); // no-op unless the end screen is up
 #endif

@@ -135,8 +135,9 @@ static void build_prompt(const Client *client, char *html, const size_t size) {
         }
         case GAME_INTERACT_KEY: {
             const int pending = me->pending_trigger == scan.index + 1;
-            char confirm[64];
-            snprintf(confirm, sizeof(confirm), "<span style=\"color:%s\">[K]</span>", INTERACT_KEY_COLOR); // binds.confirm (75)
+            char confirm[64], confirm_key[32];
+            ui_controls_key_name(ui_controls_v7_bind("confirm", -1, 0), confirm_key, sizeof(confirm_key)); // binds.confirm (K)
+            snprintf(confirm, sizeof(confirm), "<span style=\"color:%s\">[%s]</span>", INTERACT_KEY_COLOR, confirm_key);
             const TriggerData *t = object ? object->trig : NULL;
             const int method = t ? t->action_method : 0, cost = t ? t->action_cost : 0;
             tag[0] = 0;

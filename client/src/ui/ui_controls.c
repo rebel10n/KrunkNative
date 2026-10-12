@@ -1,12 +1,15 @@
-// Krunker's keybinds (CONTROLS, 132.js in the unpacked v3.1.1 client) and the
+// Krunker v7.1.4's keybinds (CONTROLS, src/libs/controls.js + controlBind.js) and the
 // in-game key/mouse routing built on them:
-//   - the binding table: ids 0..37 of windows[6] ("Change Controls", Krunker window 7),
-//     DOM keyCodes (mouse buttons 10000 + event.which, the wheel 20000), defaults
-//     and the localStorage keys Krunker persists them under (cont_0, cont_jumpKey, ...,
-//     cont_27_set for the Toggle rows) through html_storage_*;
-//   - the window markup (gen), changeCont / unbindCont / changeContSet and the
-//     "Press any Key" capture (CONTROLS N(): the next key, side/middle mouse button or
-//     wheel turn becomes the bind);
+//   - the binding table: every v7 ControlBind (a key and an alternate key, DOM keyCodes,
+//     mouse buttons 10000 + event.which, the wheel 20000) under v7's localStorage keys
+//     (cont_<name>, cont_<name>_alt, cont_27_set.. for the Toggle rows, cont_43_set.. for
+//     the quick chat messages) through html_storage_*, mapped onto KrunkNative's bind ids
+//     (UI_CONTROL_*) for the game side; v7 binds without a KrunkNative action yet are
+//     stored and shown only;
+//   - the window markup (windows[6].gen: 5 tabs, collapsible groups, reset / unbind per
+//     key cell, Toggle selects, Message inputs, Trigger selects), changeCont / unbindCont /
+//     resetCont / changeContSet / changeContMsg and the "Press any Key" capture
+//     (CONTROLS N(): the next key, mouse button or wheel turn becomes the bind);
 //   - the bound-key state the game samples every frame (CONTROLS.keys / didPressed /
 //     UCUz1 / DNCv5 / aba6 / wDG6) and the pressButton()/releaseButton() hotkeys;
 //   - chat focus (#chatInput, the chat key opens/sends) and the input settings the
@@ -59,8 +62,14 @@ static const char *const KEYBOARD_MAP[256] = {
     "WIN_OEM_FINISH", "WIN_OEM_COPY", "WIN_OEM_AUTO", "WIN_OEM_ENLW", "WIN_OEM_BACKTAB", "ATTN", "CRSEL", "EXSEL",
     "EREOF", "PLAY", "ZOOM", "", "PA1", "WIN_OEM_CLEAR", "",
 };
-// The `toggle: true` settings (bf.list order) offered by the Toggles rows: value, label.
+// The `toggle: true` settings of v7.1.4's SETTINGS.list (settings.js order) offered by the
+// Toggle rows: value, "name [category header]" (windows[6].gen). v7 also lists the hidden
+// per-weapon clones (scrollDir_0, ...); KrunkNative has no per-weapon settings yet, so
+// they are left out.
 static const char *const TOGGLE_SETTINGS[][2] = {
+    {"oldBrowser", "Legacy Browser [Server Browser]"},
+    {"defaultRegionOnly", "Default Region Only [Server Browser]"},
+    {"kpdVision", "KPD Vision [KPD]"},
     {"antiAlias", "Antialiasing [Performance]"},
     {"lowSpec", "Low Spec [Performance]"},
     {"noTex", "No Textures [Performance]"},
@@ -68,18 +77,21 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"particles", "Particles [Performance]"},
     {"shadows", "Shadows [Performance]"},
     {"shadowsDynamic", "Dynamic Shadows [Performance]"},
-    {"ambientShading", "Ambient Shading [Performance]"},
+    {"ambientShading", "Old Shading (When Possible) [Performance]"},
     {"showTrails", "Bullet Trails [Performance]"},
     {"yourTrails", "Your Trails [Performance]"},
-    {"muzzleFlash", "Muzzle Flash [Performance]"},
-    {"sniperFlap", "Sniper Flap [Performance]"},
+    {"muzzleFlash", "Show Muzzle Flash [Performance]"},
+    {"bulletCasings", "Show Bullet Casings [Performance]"},
+    {"impactHoles", "Show Bullet Impact Holes [Performance]"},
+    {"sniperFlap", "Show Sniper Flap [Performance]"},
+    {"sniperFlapAnim", "Sniper Flap Animation [Performance]"},
     {"textureAnim", "Texture Animations [Performance]"},
     {"objectAnim", "Object Animations [Performance]"},
     {"screenShake", "Screen Shake [Performance]"},
     {"weaponShine", "Weapons Shine [Performance]"},
+    {"showExplo", "Show Explosions [Performance]"},
     {"showUI", "Show UI [Interface]"},
     {"oldScoreboard", "Use Old Scoreboard [Interface]"},
-    {"oldBrowser", "Use Old Browser [Interface]"},
     {"disableRarityAnim", "Disable Rarity Animations [Interface]"},
     {"showPfp", "Show Profile Pictures [Interface]"},
     {"dynamicHP", "Dynamic HP Bars [Interface]"},
@@ -88,13 +100,18 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"showKills", "Show Kill Feed [Interface]"},
     {"showKillC", "Show Kill Counter [Interface]"},
     {"showDeaths", "Show Death Counter [Interface]"},
+    {"showKD", "Show K/D Counter [Interface]"},
     {"showScore", "Show Score Counter [Interface]"},
     {"showStreak", "Show Streak Counter [Interface]"},
     {"showPing", "Show Ping [Interface]"},
     {"showFPS", "Show FPS [Interface]"},
     {"showSpeed", "Show Movement Speed [Interface]"},
-    {"showMedals", "Show Medals [Interface]"},
     {"healthNum", "Nametag Health Number [Interface]"},
+    {"hideNonTrade", "Hide Non-Tradable Skins [Interface]"},
+    {"showMinimap", "Show Minimap [Minimap (Radar)]"},
+    {"showMedals", "Show Medals [Medals]"},
+    {"classicMedals", "Classic Medals [Medals]"},
+    {"playMedals", "Play Medal Sounds [Medals]"},
     {"chatFilter", "Profanity Filter [Chat]"},
     {"showMessages", "Show Player Messages [Chat]"},
     {"showUnboxings", "Show Unboxings [Chat]"},
@@ -102,90 +119,221 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"crosshairUseOpacity", "Use Custom Opacity [Crosshair]"},
     {"crosshairAlways", "Always Show [Crosshair]"},
     {"crosshairDot", "Dot [Crosshair]"},
+    {"crosshairUseOpacityM", "Use Custom Opacity [Crosshair (Throwing)]"},
+    {"crosshairAlwaysM", "Always Show [Crosshair (Throwing)]"},
+    {"crosshairDotM", "Dot [Crosshair (Throwing)]"},
     {"hitm", "Show [Hitmarker]"},
-    {"slidCont", "Non FPS Sliding [Gameplay]"},
     {"scrollDir", "Scroll Direction [Gameplay]"},
-    {"challMode", "Challenge Mode [Gameplay]"},
     {"invertY", "Invert Y-Axis [Gameplay]"},
+    {"challMode", "Challenge Mode [Gameplay]"},
+    {"disableCons", "Disable Controllers [Controller]"},
+    {"muteSpec", "Voice Mute Spectators [Audio]"},
     {"streamMode", "Streamer Mode [Gameplay Privacy]"},
     {"anonMode", "Anonymous Mode [Gameplay Privacy]"},
-    {"leftHand", "Left Handed [View Model]"},
+    {"showRegion", "Show Region Info [Gameplay Privacy]"},
+    {"showServerTimer", "Show Server Timers [Gameplay Privacy]"},
+    {"verifiedBadge", "Show Verified Badge [Gameplay Privacy]"},
+    {"premiumBadge", "Show Premium Badge [Gameplay Privacy]"},
+    {"partnerBadge", "Show Partner Badge [Gameplay Privacy]"},
+    {"customBadge", "Show Custom Badge [Gameplay Privacy]"},
+    {"toggleADS", "Toggle Weapon ADS [View Model]"},
     {"aimAnim", "Weapon Aim Animation [View Model]"},
     {"hideADS", "Hide Weapon on ADS [View Model]"},
     {"showHands", "Show Hands [View Model]"},
     {"showWeapon", "Show Primary [View Model]"},
     {"showWeaponSec", "Show Secondary [View Model]"},
     {"showWeaponMel", "Show Melee [View Model]"},
+    {"leftHand", "Left Handed [View Model]"},
     {"roundArms", "Rounded Arms [View Model]"},
+    {"wallLean", "Wall Slide/Jump Lean [View Model]"},
     {"showPScore", "Show Popup Score [Editing]"},
     {"scoreShadow", "Popup Score Shadow [Editing]"},
+    {"progShadow", "Progress Bar Shadow [Editing]"},
+    {"progMShadow", "Charge Bar Shadow [Editing]"},
     {"bulletTracers", "Bullet Tracers [Editing]"},
     {"scopeBorders", "Scope Borders [Customization]"},
     {"useDamageOverlay", "Use Damage Overlay [Customization]"},
 };
 
-// windows[6].gen() rows, in Krunker's order: label (i18n windows.controls.*), bind id,
-// section header written before the row (NULL none). Toggle rows (27..32) get the
-// setting <select> instead of a label.
+// v7.1.4's CONTROLS.binds (src/libs/controls.js): every ControlBind(name, def, altDef), with
+// the bind / array index the controls window addresses it by and the KrunkNative bind id
+// the game side acts on (-1: stored and shown, not acted on yet). Storage keys are v7's:
+// cont_<name> and cont_<name>_alt (shoot/aim are shoot1Key/aim1Key: v3.1.1's shootKey /
+// aimKey values do not carry over, as in v7).
 typedef struct {
-    const char *label;
-    int id;
-    const char *header;
+    const char *bind;  // binds.<bind>
+    int index;         // array element, -1 scalar
+    const char *name;  // ControlBind name (storage key cont_<name>)
+    int def, alt_def;
+    int kn_id;         // UI_CONTROL_*, -1 none
+} V7Bind;
+
+static const V7Bind V7_BINDS[] = {
+    {"primary", -1, "primKey", 84, -1, UI_CONTROL_PRIMARY},
+    {"reload", -1, "reloadKey", 82, -1, UI_CONTROL_RELOAD},
+    {"jump", -1, "jumpKey", 32, -1, UI_CONTROL_JUMP},
+    {"playerList", -1, "pListKey", 18, -1, UI_CONTROL_PLAYER_LIST},
+    {"scoreBoard", -1, "sBoardKey", 9, -1, UI_CONTROL_BOARD},
+    {"interact", -1, "interactKey", 71, -1, UI_CONTROL_INTERACT},
+    {"confirm", -1, "confirmKey", 75, -1, -1},
+    {"secondaryInteract", -1, "interactSecKey", 72, -1, UI_CONTROL_INTERACT_SEC},
+    {"reset", -1, "resetKey", 66, -1, UI_CONTROL_RESET},
+    {"resetLast", -1, "resetLastKey", 78, -1, UI_CONTROL_RESET_LAST},
+    {"spray", -1, "sprayKey", 70, -1, UI_CONTROL_SPRAY},
+    {"sprayWheel", -1, "sprayWheelKey", 70, -1, -1},
+    {"inspect", -1, "inspKey", 88, -1, UI_CONTROL_INSPECT},
+    {"swap", -1, "swapKey", 69, -1, UI_CONTROL_SWAP},
+    {"shoot", -1, "shoot1Key", 10001, 220, UI_CONTROL_SHOOT},
+    {"aim", -1, "aim1Key", 10003, 221, UI_CONTROL_AIM},
+    {"crouch", -1, "crouchKey", 16, -1, UI_CONTROL_CROUCH},
+    {"melee", -1, "meleeKey", 81, -1, UI_CONTROL_MELEE},
+    {"equip", -1, "equipKey", 67, -1, UI_CONTROL_EQUIP},
+    {"chat", -1, "chatKey", 13, -1, UI_CONTROL_CHAT},
+    {"voiceChat", -1, "voiceKey", 86, -1, UI_CONTROL_VOICE},
+    {"drop", -1, "dropKey", 90, -1, UI_CONTROL_DROP},
+    {"wepVis", -1, "wepVisKey", -1, -1, UI_CONTROL_WEAPON_VIS},
+    {"kickVoteY", -1, "kickVoteYKey", 49, -1, -1},
+    {"kickVoteN", -1, "kickVoteNKey", 50, -1, -1},
+    {"specFree", -1, "specFreeKey", 70, -1, -1},
+    {"specObj", -1, "specObjKey", 72, -1, -1},
+    {"specFirst", -1, "specFirstKey", 82, -1, -1},
+    {"specNames", -1, "specNamesKey", 77, -1, -1},
+    {"specMiniMap", -1, "specMiniMap", 189, -1, -1},
+    {"kpdVoteY", -1, "kpdVoteYKey", 89, -1, -1},
+    {"kpdVoteN", -1, "kpdVoteNKey", 78, -1, -1},
+    {"specFocus", -1, "specFocusKey", 190, -1, -1},
+    {"kpdVision", -1, "kpdVisionKey", 187, -1, -1},
+    {"hidePlayers", -1, "hidePlayersKey", -1, -1, -1},
+    {"prop", -1, "propKey", 80, -1, -1},
+    {"propRand", -1, "propRandKey", 77, -1, -1},
+    {"propRot", -1, "propRotKey", 82, -1, -1},
+    {"propRotR", -1, "propRotRKey", 78, -1, -1},
+    {"noclipSB", -1, "sandboxNoclip", -1, -1, -1},
+    {"godModeSB", -1, "sandboxGodMode", -1, -1, -1},
+    {"killSB", -1, "sandboxKill", -1, -1, -1},
+    {"spawnBot", -1, "sandboxSpawnBot", 107, -1, -1},
+    {"clearBots", -1, "sandboxClearBots", 109, -1, -1},
+    {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
+    {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
+    {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
+    {"taunt", 0, "taunt0", 49, -1, -1},
+    {"taunt", 1, "taunt1", 50, -1, -1},
+    {"taunt", 2, "taunt2", 51, -1, -1},
+    {"taunt", 3, "taunt3", 52, -1, -1},
+    {"taunt", 4, "taunt4", 53, -1, -1},
+    {"taunt", 5, "taunt5", 54, -1, -1},
+    {"move", 0, "0", 87, -1, UI_CONTROL_FORWARD},
+    {"move", 1, "1", 83, -1, UI_CONTROL_BACKWARD},
+    {"move", 2, "2", 65, -1, UI_CONTROL_LEFT},
+    {"move", 3, "3", 68, -1, UI_CONTROL_RIGHT},
+    {"toggle", 0, "27", -1, -1, UI_CONTROL_TOGGLE0},
+    {"toggle", 1, "28", -1, -1, UI_CONTROL_TOGGLE0 + 1},
+    {"toggle", 2, "29", -1, -1, UI_CONTROL_TOGGLE0 + 2},
+    {"toggle", 3, "30", -1, -1, UI_CONTROL_TOGGLE0 + 3},
+    {"toggle", 4, "31", -1, -1, UI_CONTROL_TOGGLE0 + 4},
+    {"toggle", 5, "32", -1, -1, UI_CONTROL_TOGGLE0 + 5},
+    {"premium", 0, "34", -1, -1, UI_CONTROL_PREMIUM0},
+    {"premium", 1, "35", -1, -1, UI_CONTROL_PREMIUM0 + 1},
+    {"premium", 2, "36", -1, -1, UI_CONTROL_PREMIUM0 + 2},
+    {"premium", 3, "37", -1, -1, UI_CONTROL_PREMIUM0 + 3},
+    {"message", 0, "43", -1, -1, -1},
+    {"message", 1, "44", -1, -1, -1},
+    {"message", 2, "45", -1, -1, -1},
+    {"message", 3, "46", -1, -1, -1},
+    {"message", 4, "47", -1, -1, -1},
+    {"message", 5, "48", -1, -1, -1},
+};
+#define V7_BIND_COUNT ((int) (sizeof(V7_BINDS) / sizeof(V7_BINDS[0])))
+#define MESSAGE_COUNT 6
+#define MESSAGE_MAX 72 // config.chatMaxLength 70
+
+// windows[6].tabs (index.js): tab name, then rows {i18n key, bind, index, list, group, list index}.
+// `list` "toggleSets" = a Toggle <select> row, "chatMessages" = a quick chat Message input row.
+typedef struct {
+    const char *label;  // windows.controls.<key> (en)
+    const char *bind;
+    int index;
+    int list;           // 0 none, 1 toggleSets, 2 chatMessages
+    const char *group;
 } ControlRow;
 
-static const ControlRow ROWS[] = {
-    {"Forward", 0, "Movement"}, {"Backward", 1, NULL}, {"Left", 2, NULL}, {"Right", 3, NULL},
-    {"Jump", 4, NULL}, {"Crouch", 5, NULL},
-    {"Reload", 8, "Weapon"}, {"Aim", 10, NULL}, {"Shoot", 25, NULL}, {"Primary Weapon", 13, NULL},
-    {"Melee Weapon", 6, NULL}, {"Secondary Weapon", 7, NULL}, {"Equipment", 33, NULL}, {"Inspect", 14, NULL},
-    {"Spray", 9, NULL},
-    {"Interact", 16, "Interaction"}, {"Secondary Interact", 23, NULL}, {"Drop", 17, NULL},
-    {"Reset Position", 38, NULL}, {"Reset To Last Checkpoint", 39, NULL}, // WP-C: v7.1.4 reset / resetLast
-    {"Chat", 11, "Interface & Audio"}, {"Voice", 12, NULL}, {"Player List", 15, NULL}, {"Leaderboard", 26, NULL},
-    {"Streak 1", 18, "Killstreaks & Prop Hunt"}, {"Streak 2", 19, NULL}, {"Streak 3", 20, NULL},
-    {"Streak 4", 21, NULL}, {"Streak 5", 22, NULL},
-    {"Toggle Weapon Visibility", 24, "Toggles"}, {NULL, 27, NULL}, {NULL, 28, NULL}, {NULL, 29, NULL},
-    {NULL, 30, NULL}, {NULL, 31, NULL}, {NULL, 32, NULL},
-    {"Noclip", 34, "Premium & Host"}, {"Godmode", 35, NULL}, {"Kill", 36, NULL}, {"Smite", 37, NULL},
-};
+typedef struct {
+    const char *name;
+    const ControlRow *rows;
+    int count;
+} ControlTab;
 
-// CONTROLS.keyInfo: the binds.* name behind an id (its storage key is cont_<name>);
-// NULL = an array bind stored as cont_<id> (moveKeys 0-3, streakKeys 18-22,
-// toggleKeys 27-32, premiumKeys 34-37).
-static const char *const KEY_INFO[UI_CONTROL_COUNT] = {
-    NULL, NULL, NULL, NULL, "jumpKey", "crouchKey", "meleeKey", "swapKey", "reloadKey", "sprayKey",
-    "aimKey", "chatKey", "voiceKey", "primKey", "inspKey", "pListKey", "interactKey", "dropKey",
-    NULL, NULL, NULL, NULL, NULL, "interactSecKey", "wepVisKey", "shootKey", "sBoardKey",
-    NULL, NULL, NULL, NULL, NULL, NULL, "equipKey", NULL, NULL, NULL, NULL,
-    "resetKey", "resetLastKey", // WP-C (v7.1.4 controls.js)
+static const ControlRow TAB_GENERAL[] = {
+    {"Forward", "move", 0, 0, "Movement"}, {"Backward", "move", 1, 0, "Movement"}, {"Left", "move", 2, 0, "Movement"},
+    {"Right", "move", 3, 0, "Movement"}, {"Jump", "jump", -1, 0, "Movement"}, {"Crouch", "crouch", -1, 0, "Movement"},
+    {"Reload", "reload", -1, 0, "Weapon"}, {"Aim", "aim", -1, 0, "Weapon"}, {"Shoot", "shoot", -1, 0, "Weapon"},
+    {"Primary Weapon", "primary", -1, 0, "Weapon"}, {"Melee Weapon", "melee", -1, 0, "Weapon"},
+    {"Secondary Weapon", "swap", -1, 0, "Weapon"}, {"Equipment", "equip", -1, 0, "Weapon"},
+    {"Inspect", "inspect", -1, 0, "Weapon"}, {"Spray", "spray", -1, 0, "Weapon"},
+    {"Spray Wheel (Hold)", "sprayWheel", -1, 0, "Weapon"}, {"Player List", "playerList", -1, 0, "Interface"},
+    {"InGame Leaderboard", "scoreBoard", -1, 0, "Interface"}, {"Hide Players", "hidePlayers", -1, 0, "Players"},
 };
-
-// CONTROLS.binds.*.def by id (DOM keyCodes).
-static const int DEFAULT_BINDS[UI_CONTROL_COUNT] = {
-    87, 83, 65, 68,              // W S A D
-    32, 16, 81, 69, 82, 70,      // jump SPACE, crouch SHIFT, melee Q, swap E, reload R, spray F
-    221, 13, 86, 84, 88, 18,     // aim ], chat ENTER, voice V, prim T, inspect X, player list ALT
-    71, 90,                      // interact G, drop Z
-    49, 50, 51, 52, 53,          // streaks 1-5
-    72, -1, 220, 9,              // interactSec H, wepVis unbound, shoot \, leaderboard TAB
-    -1, -1, -1, -1, -1, -1,      // toggles
-    67,                          // equip C
-    -1, -1, -1, -1,              // premium
-    66, 78,                      // WP-C: reset B, resetLast N (v7.1.4 controls.js)
+static const ControlRow TAB_CHAT[] = {
+    {"Chat", "chat", -1, 0, "Interface & Audio"}, {"Voice", "voiceChat", -1, 0, "Interface & Audio"},
+    {"Noclip", "premium", 0, 0, "Premium & Host"}, {"Godmode", "premium", 1, 0, "Premium & Host"},
+    {"Kill", "premium", 2, 0, "Premium & Host"}, {"Smite", "premium", 3, 0, "Premium & Host"},
+    {NULL, "message", 0, 2, "Chat Messages"}, {NULL, "message", 1, 2, "Chat Messages"}, {NULL, "message", 2, 2, "Chat Messages"},
+    {NULL, "message", 3, 2, "Chat Messages"}, {NULL, "message", 4, 2, "Chat Messages"}, {NULL, "message", 5, 2, "Chat Messages"},
+    {"Toggle Weapon Visibility", "wepVis", -1, 0, "Toggle Settings"},
+    {NULL, "toggle", 0, 1, "Toggle Settings"}, {NULL, "toggle", 1, 1, "Toggle Settings"}, {NULL, "toggle", 2, 1, "Toggle Settings"},
+    {NULL, "toggle", 3, 1, "Toggle Settings"}, {NULL, "toggle", 4, 1, "Toggle Settings"}, {NULL, "toggle", 5, 1, "Toggle Settings"},
 };
-
+static const ControlRow TAB_INTERACTION[] = {
+    {"Interact", "interact", -1, 0, "Interaction"}, {"Secondary Interact", "secondaryInteract", -1, 0, "Interaction"},
+    {"Drop", "drop", -1, 0, "Interaction"}, {"Confirm Interact", "confirm", -1, 0, "Interaction"},
+    {"Streak Slot 1", "streak", 0, 0, "Killstreaks"}, {"Streak Slot 2", "streak", 1, 0, "Killstreaks"},
+    {"Streak Slot 3", "streak", 2, 0, "Killstreaks"},
+};
+static const ControlRow TAB_SPECTATE[] = {
+    {"Toggle Focus Player", "specFocus", -1, 0, "Spectating"}, {"Toggle Free Cam", "specFree", -1, 0, "Spectating"},
+    {"Toggle Objective Cam", "specObj", -1, 0, "Spectating"}, {"Toggle First Person", "specFirst", -1, 0, "Spectating"},
+    {"Toggle Forced Names", "specNames", -1, 0, "Spectating"}, {"Toggle Spectator Minimap", "specMiniMap", -1, 0, "Spectating"},
+    {"KPD Vote [Yes]", "kpdVoteY", -1, 0, "KPD"}, {"KPD Vote [No]", "kpdVoteN", -1, 0, "KPD"},
+    {"Toggle KPD Vision", "kpdVision", -1, 0, "KPD"}, {"Vote Kick [Yes]", "kickVoteY", -1, 0, "Vote"},
+    {"Vote Kick [No]", "kickVoteN", -1, 0, "Vote"},
+};
+static const ControlRow TAB_MODES[] = {
+    {"Open Prop Selection (Hold)", "prop", -1, 0, "Prop Hunt"}, {"Select Random Prop", "propRand", -1, 0, "Prop Hunt"},
+    {"Toggle Rotation", "propRot", -1, 0, "Prop Hunt"}, {"Reset Rotation", "propRotR", -1, 0, "Prop Hunt"},
+    {"Taunt (Psst)", "taunt", 0, 0, "Prop Hunt"}, {"Taunt (Whistle)", "taunt", 1, 0, "Prop Hunt"},
+    {"Taunt (Fart)", "taunt", 2, 0, "Prop Hunt"}, {"Taunt (Meme)", "taunt", 3, 0, "Prop Hunt"},
+    {"Taunt (WTF is This?)", "taunt", 4, 0, "Prop Hunt"}, {"Taunt (Right Now!)", "taunt", 5, 0, "Prop Hunt"},
+    {"Reset Position (Parkour etc)", "reset", -1, 0, "Parkour & Race"},
+    {"Reset To Last Checkpoint (Parkour etc)", "resetLast", -1, 0, "Parkour & Race"},
+    {"Noclip", "noclipSB", -1, 0, "Sandbox (Test mode)"}, {"Godmode", "godModeSB", -1, 0, "Sandbox (Test mode)"},
+    {"Kill", "killSB", -1, 0, "Sandbox (Test mode)"}, {"Spawn Bot", "spawnBot", -1, 0, "Sandbox (Test mode)"},
+    {"Clear Bots", "clearBots", -1, 0, "Sandbox (Test mode)"},
+};
+#define TAB(name, rows) {name, rows, (int) (sizeof(rows) / sizeof(rows[0]))}
+static const ControlTab TABS[] = {
+    TAB("General", TAB_GENERAL), TAB("Chat & Toggles", TAB_CHAT), TAB("Interaction", TAB_INTERACTION),
+    TAB("Spectate & Vote", TAB_SPECTATE), TAB("Modes", TAB_MODES),
+};
+#undef TAB
+#define TAB_COUNT ((int) (sizeof(TABS) / sizeof(TABS[0])))
 
 static struct {
     int loaded;
-    int binds[UI_CONTROL_COUNT];
+    int val[sizeof(V7_BINDS) / sizeof(V7_BINDS[0])];     // ControlBind.val
+    int alt[sizeof(V7_BINDS) / sizeof(V7_BINDS[0])];     // ControlBind.altVal
+    int binds[UI_CONTROL_COUNT];   // the KrunkNative id's primary key (val of its v7 bind, -1 none)
+    int alts[UI_CONTROL_COUNT];    // its alternate key (altVal)
     char toggle_sets[TOGGLE_COUNT][SETTING_KEY_MAX]; // "" = -1 (None)
-    int scroll_bound;        // !bMoQ7: some bind uses the wheel, so it does not swap weapons
-    int input_changer;       // id waiting for "Press any Key", -1 none
+    char messages[MESSAGE_COUNT][MESSAGE_MAX];       // CONTROLS.chatMessages (cont_43_set ..)
+    int scroll_bound;        // !scrollToSwap: a bind uses the wheel or the middle button
+    int changer;             // CONTROLS.inputChanger: V7_BINDS index waiting for "Press any Key", -1 none
+    int changer_alt;
+    int tab;                 // windows[6].tabIndex
 
     unsigned char keys[KEY_SLOTS];
     unsigned char did_pressed[KEY_SLOTS];
-    int shoot;               // UCUz1: left mouse button
-    int aim;                 // DNCv5: right mouse button
+    int shoot;               // left mouse button (v7 routes it through binds.shoot: 10001)
+    int aim;                 // right mouse button (binds.aim: 10003)
     int pending_swap;        // aba6: 1 swap(secondary) 2 melee 3 primary 4 equipment
     int scroll_pressed;      // the wheel "key" is down until the end of this input frame
 
@@ -202,7 +350,7 @@ static struct {
     float look_x, look_y;    // a4/a5 added by fakeMouse(2) since the last updateMouseInp
     float speed_lmt;         // speedLmt (gradSpeed); 1 = full speed
 } g_ctl = {
-    .input_changer = -1,
+    .changer = -1,
     .settings = {90.0f, 1, 1, 1, 1, 0, 0.8f, 1.0f, 1.0f, 1},
     // cntrlInput after the settings' set(): sensitivity*Cntrl x5, deadZoneL 0.3 (the
     // setting's val overrides cntrlInput's own 0.25), deadZoneR 0.25, triggerThres 0.1,
@@ -299,17 +447,44 @@ const char *ui_controls_key_name(const int code, char *buf, const size_t n) {
 
 // ---------------------------------------------------------------- binding table
 
-static void storage_key(const int id, char *buf, const size_t n) {
-    if (KEY_INFO[id]) snprintf(buf, n, "cont_%s", KEY_INFO[id]);
-    else snprintf(buf, n, "cont_%d", id);
+static int v7_index(const char *bind, const int index) {
+    if (!bind) return -1;
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        if (!strcmp(V7_BINDS[i].bind, bind) && V7_BINDS[i].index == (V7_BINDS[i].index < 0 ? -1 : index)) return i;
+    }
+    return -1;
 }
 
-// CONTROLS.checkForScroll(): bMoQ7 is false while any bind uses the wheel.
+// v7 ControlBind name or altName -> (index, alt) (CONTROLS.getBindByName, scalar binds only)
+static int v7_index_by_name(const char *name, int *alt) {
+    char base[48];
+    const size_t n = strlen(name);
+    *alt = n > 4 && !strcmp(name + n - 4, "_alt");
+    snprintf(base, sizeof(base), "%.*s", (int) (*alt ? n - 4 : n), name);
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        if (V7_BINDS[i].index < 0 && !strcmp(V7_BINDS[i].name, base)) return i;
+    }
+    return -1;
+}
+
+// CONTROLS.checkScroll(): scrollToSwap is off while any bind uses the wheel or the middle button.
 static void check_for_scroll(void) {
     g_ctl.scroll_bound = 0;
-    for (int i = 0; i < UI_CONTROL_COUNT; i++) {
-        if (g_ctl.binds[i] == KEY_SCROLL) g_ctl.scroll_bound = 1;
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        if (g_ctl.val[i] == KEY_SCROLL || g_ctl.alt[i] == KEY_SCROLL || g_ctl.val[i] == KEY_MOUSE_BASE + 2 || g_ctl.alt[i] == KEY_MOUSE_BASE + 2) g_ctl.scroll_bound = 1;
     }
+}
+
+// the KrunkNative ids follow their v7 binds (the v3.1.1 Streak 4/5 slots v7 dropped stay unbound)
+static void sync_ids(void) {
+    for (int id = 0; id < UI_CONTROL_COUNT; id++) g_ctl.binds[id] = g_ctl.alts[id] = KEY_UNBOUND;
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        const int id = V7_BINDS[i].kn_id;
+        if (id < 0) continue;
+        g_ctl.binds[id] = g_ctl.val[i];
+        g_ctl.alts[id] = g_ctl.alt[i];
+    }
+    check_for_scroll();
 }
 
 // parseInt(getSavedVal(key) || def)
@@ -321,20 +496,36 @@ static int saved_int(const char *key, const int def) {
     return end == buf ? def : (int) v;
 }
 
-// CONTROLS.binds (getSavedVal) + setupBinds() (toggleSets)
-void ui_controls_load(void) {
+static void bind_storage_key(const int i, const int alt, char *buf, const size_t n) {
+    snprintf(buf, n, "cont_%s%s", V7_BINDS[i].name, alt ? "_alt" : "");
+}
+
+// CONTROLS.toggleSets / chatMessages: getSavedVal("cont_<27..32|43..48>_set") || -1 / ""
+static void load_sets(void) {
     char key[64];
-    for (int i = 0; i < UI_CONTROL_COUNT; i++) {
-        storage_key(i, key, sizeof(key));
-        g_ctl.binds[i] = saved_int(key, DEFAULT_BINDS[i]);
-    }
     for (int i = 0; i < TOGGLE_COUNT; i++) {
         snprintf(key, sizeof(key), "cont_%d_set", TOGGLE_FIRST + i);
         char value[SETTING_KEY_MAX] = "";
         if (html_storage_get(key, value, sizeof(value)) < 0 || !strcmp(value, "-1")) value[0] = 0;
         snprintf(g_ctl.toggle_sets[i], sizeof(g_ctl.toggle_sets[i]), "%s", value);
     }
-    check_for_scroll();
+    for (int i = 0; i < MESSAGE_COUNT; i++) {
+        snprintf(key, sizeof(key), "cont_%d_set", 43 + i);
+        if (html_storage_get(key, g_ctl.messages[i], sizeof(g_ctl.messages[i])) < 0) g_ctl.messages[i][0] = 0;
+    }
+}
+
+// new ControlBind(...) for every bind + toggleSets / chatMessages
+void ui_controls_load(void) {
+    char key[64];
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        bind_storage_key(i, 0, key, sizeof(key));
+        g_ctl.val[i] = saved_int(key, V7_BINDS[i].def);
+        bind_storage_key(i, 1, key, sizeof(key));
+        g_ctl.alt[i] = saved_int(key, V7_BINDS[i].alt_def);
+    }
+    load_sets();
+    sync_ids();
     g_ctl.loaded = 1;
 }
 
@@ -347,78 +538,104 @@ int ui_controls_bind(const int id) {
     return id >= 0 && id < UI_CONTROL_COUNT ? g_ctl.binds[id] : KEY_UNBOUND;
 }
 
+int ui_controls_bind_alt(const int id) {
+    ensure_loaded();
+    return id >= 0 && id < UI_CONTROL_COUNT ? g_ctl.alts[id] : KEY_UNBOUND;
+}
+
+int ui_controls_v7_bind(const char *bind, const int index, const int alt) {
+    ensure_loaded();
+    const int i = v7_index(bind, index);
+    return i < 0 ? KEY_UNBOUND : alt ? g_ctl.alt[i] : g_ctl.val[i];
+}
+
+// ControlBind.isKey(code): the key or its alternate
 static int bind_is(const int id, const int code) {
-    return code >= 0 && g_ctl.binds[id] == code;
+    return code >= 0 && (g_ctl.binds[id] == code || g_ctl.alts[id] == code);
 }
 
-static void set_bind(const int id, const int code) {
+// ControlBind.update(code, alt): saveVal("cont_" + name, code)
+static void v7_update(const int i, const int alt, const int code) {
     char key[64], value[16];
-    g_ctl.binds[id] = code;
-    check_for_scroll();
-    storage_key(id, key, sizeof(key));
+    if (alt) g_ctl.alt[i] = code;
+    else g_ctl.val[i] = code;
+    bind_storage_key(i, alt, key, sizeof(key));
     snprintf(value, sizeof(value), "%d", code);
-    html_storage_set(key, value); // saveVal("cont_" + inputChanger, keyCode)
+    html_storage_set(key, value);
+    sync_ids();
 }
 
-// resetSettings(): every cont_* key is removed, then setupBinds() + resetBinds().
+// resetSettings(): every cont_* key is removed, then CONTROLS.resetBinds().
 void ui_controls_reset(void) {
     char key[64];
-    for (int i = 0; i < UI_CONTROL_COUNT; i++) {
-        storage_key(i, key, sizeof(key));
-        html_storage_set(key, NULL);
-        g_ctl.binds[i] = DEFAULT_BINDS[i];
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        for (int alt = 0; alt < 2; alt++) {
+            bind_storage_key(i, alt, key, sizeof(key));
+            html_storage_set(key, NULL);
+        }
+        g_ctl.val[i] = V7_BINDS[i].def;
+        g_ctl.alt[i] = V7_BINDS[i].alt_def;
     }
     for (int i = 0; i < TOGGLE_COUNT; i++) {
         snprintf(key, sizeof(key), "cont_%d_set", TOGGLE_FIRST + i);
         html_storage_set(key, NULL);
-        g_ctl.toggle_sets[i][0] = 0;
     }
-    g_ctl.input_changer = -1;
-    check_for_scroll();
+    for (int i = 0; i < MESSAGE_COUNT; i++) {
+        snprintf(key, sizeof(key), "cont_%d_set", 43 + i);
+        html_storage_set(key, NULL);
+    }
+    load_sets();
+    g_ctl.changer = -1;
+    sync_ids();
     g_ctl.loaded = 1;
     menu_rerender_if_open(7);
 }
 
 // ---------------------------------------------------------------- export / import
 
-// CONTROLS.export() key order; array binds and the id of their element 0.
-typedef struct {
-    const char *name;
-    int first;   // id of element 0 (arrays) or the id itself
-    int count;   // 0 = scalar bind
-} BindGroup;
-
-static const BindGroup BIND_GROUPS[] = {
-    {"jumpKey", 4, 0}, {"crouchKey", 5, 0}, {"meleeKey", 6, 0}, {"swapKey", 7, 0}, {"primKey", 13, 0},
-    {"reloadKey", 8, 0}, {"sprayKey", 9, 0}, {"inspKey", 14, 0}, {"aimKey", 10, 0}, {"shootKey", 25, 0},
-    {"chatKey", 11, 0}, {"voiceKey", 12, 0}, {"pListKey", 15, 0}, {"interactKey", 16, 0},
-    {"interactSecKey", 23, 0}, {"dropKey", 17, 0}, {"wepVisKey", 24, 0}, {"sBoardKey", 26, 0},
-    {"streakKeys", 18, 5}, {"moveKeys", 0, 4}, {"toggleKeys", 27, 6}, {"equipKey", 33, 0},
-    {"premiumKeys", 34, 4}, {"resetKey", 38, 0}, {"resetLastKey", 39, 0},
-};
-
-// CONTROLS.export(): binds that differ from their default; array binds as arrays whose
-// default entries are holes (JSON null), dropped when nothing differs. NULL when every
-// bind is the default (exportSettings then writes no "controls" key).
+// CONTROLS.export(): scalar binds by name / altName when they differ from their default,
+// arrays as "<bind>Keys" / "<bind>Keys_alt" with holes (JSON null), toggleSets and
+// chatMessages when any is set. NULL when there is nothing (no "controls" key).
 cJSON *ui_controls_export_json(void) {
     ensure_loaded();
     cJSON *out = cJSON_CreateObject();
-    for (size_t g = 0; g < sizeof(BIND_GROUPS) / sizeof(BIND_GROUPS[0]); g++) {
-        const BindGroup *b = &BIND_GROUPS[g];
-        if (!b->count) {
-            if (g_ctl.binds[b->first] != DEFAULT_BINDS[b->first]) cJSON_AddNumberToObject(out, b->name, g_ctl.binds[b->first]);
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        const V7Bind *b = &V7_BINDS[i];
+        if (b->index < 0) {
+            char alt_name[64];
+            snprintf(alt_name, sizeof(alt_name), "%s_alt", b->name);
+            if (g_ctl.val[i] != b->def) cJSON_AddNumberToObject(out, b->name, g_ctl.val[i]);
+            if (g_ctl.alt[i] != b->alt_def) cJSON_AddNumberToObject(out, alt_name, g_ctl.alt[i]);
             continue;
         }
-        int last = -1;
-        for (int i = 0; i < b->count; i++) {
-            if (g_ctl.binds[b->first + i] != DEFAULT_BINDS[b->first + i]) last = i;
+        if (b->index) continue; // each array once, from its element 0
+        for (int alt = 0; alt < 2; alt++) {
+            int last = -1, n = 0;
+            for (int k = i; k < V7_BIND_COUNT && !strcmp(V7_BINDS[k].bind, b->bind); k++, n++) {
+                if ((alt ? g_ctl.alt[k] != V7_BINDS[k].alt_def : g_ctl.val[k] != V7_BINDS[k].def)) last = n;
+            }
+            if (last < 0) continue;
+            char name[64];
+            snprintf(name, sizeof(name), "%sKeys%s", b->bind, alt ? "_alt" : "");
+            cJSON *arr = cJSON_AddArrayToObject(out, name);
+            for (int k = 0; k <= last; k++) {
+                const int v = alt ? g_ctl.alt[i + k] : g_ctl.val[i + k];
+                const int d = alt ? V7_BINDS[i + k].alt_def : V7_BINDS[i + k].def;
+                cJSON_AddItemToArray(arr, v != d ? cJSON_CreateNumber(v) : cJSON_CreateNull());
+            }
         }
-        if (last < 0) continue;
-        cJSON *arr = cJSON_AddArrayToObject(out, b->name);
-        for (int i = 0; i <= last; i++) {
-            const int v = g_ctl.binds[b->first + i];
-            cJSON_AddItemToArray(arr, v != DEFAULT_BINDS[b->first + i] ? cJSON_CreateNumber(v) : cJSON_CreateNull());
-        }
+    }
+    int any = 0;
+    for (int i = 0; i < TOGGLE_COUNT; i++) any |= g_ctl.toggle_sets[i][0] != 0;
+    if (any) {
+        cJSON *arr = cJSON_AddArrayToObject(out, "toggleSets");
+        for (int i = 0; i < TOGGLE_COUNT; i++) cJSON_AddItemToArray(arr, g_ctl.toggle_sets[i][0] ? cJSON_CreateString(g_ctl.toggle_sets[i]) : cJSON_CreateNumber(-1));
+    }
+    any = 0;
+    for (int i = 0; i < MESSAGE_COUNT; i++) any |= g_ctl.messages[i][0] != 0;
+    if (any) {
+        cJSON *arr = cJSON_AddArrayToObject(out, "chatMessages");
+        for (int i = 0; i < MESSAGE_COUNT; i++) cJSON_AddItemToArray(arr, cJSON_CreateString(g_ctl.messages[i]));
     }
     if (!out->child) {
         cJSON_Delete(out);
@@ -427,31 +644,70 @@ cJSON *ui_controls_export_json(void) {
     return out;
 }
 
-// settings.import(): the "controls" object. Array entries that are null take the
-// default; ids past the array keep their bind. KrunkNative deviation: v3.1.1 loops over
-// `.length` for every entry, so its scalar binds (jumpKey: 70) are silently skipped;
-// here they are imported too.
+// filterCM: "<", ">", "'" and '"' dropped, "undefined" -> ""
+static void filter_cm(const char *in, char *out, const size_t n) {
+    size_t len = 0;
+    for (; in && *in && len + 1 < n; in++) {
+        if (*in == '<' || *in == '>' || *in == '\'' || *in == '"') continue;
+        out[len++] = *in;
+    }
+    out[len] = 0;
+    if (!strcmp(out, "undefined")) out[0] = 0;
+}
+
+static void store_message(const int i, const char *text) {
+    char key[32];
+    filter_cm(text, g_ctl.messages[i], sizeof(g_ctl.messages[i]));
+    snprintf(key, sizeof(key), "cont_%d_set", 43 + i);
+    html_storage_set(key, g_ctl.messages[i]);
+}
+
+static void store_toggle_set(const int i, const char *value) {
+    char key[32];
+    snprintf(g_ctl.toggle_sets[i], SETTING_KEY_MAX, "%s", value && strcmp(value, "-1") ? value : "");
+    snprintf(key, sizeof(key), "cont_%d_set", TOGGLE_FIRST + i);
+    html_storage_set(key, value && *value ? value : "-1");
+}
+
+// settings.import(): the "controls" object of v7.1.4 (array entries that are null keep the
+// current bind; toggleSets / chatMessages replaced).
 void ui_controls_import_json(const cJSON *controls) {
     ensure_loaded();
     if (!cJSON_IsObject(controls)) return;
-    for (size_t g = 0; g < sizeof(BIND_GROUPS) / sizeof(BIND_GROUPS[0]); g++) {
-        const BindGroup *b = &BIND_GROUPS[g];
-        const cJSON *v = cJSON_GetObjectItem(controls, b->name);
-        if (!v) continue;
-        if (!b->count) {
-            if (cJSON_IsNumber(v)) set_bind(b->first, (int) cJSON_GetNumberValue(v));
+    const cJSON *item;
+    cJSON_ArrayForEach(item, controls) {
+        const char *key = item->string;
+        if (!key) continue;
+        if (!strcmp(key, "toggleSets") || !strcmp(key, "chatMessages")) {
+            if (!cJSON_IsArray(item)) continue;
+            const int toggles = key[0] == 't';
+            for (int i = 0; i < (toggles ? TOGGLE_COUNT : MESSAGE_COUNT); i++) {
+                const cJSON *v = cJSON_GetArrayItem(item, i);
+                const char *s = cJSON_IsString(v) ? cJSON_GetStringValue(v) : "";
+                if (toggles) store_toggle_set(i, ui_setting_value(s) ? s : "");
+                else store_message(i, s);
+            }
             continue;
         }
-        if (!cJSON_IsArray(v)) continue;
-        int i = 0;
-        const cJSON *item;
-        cJSON_ArrayForEach(item, v) {
-            if (i >= b->count) break;
-            const int id = b->first + i++;
-            set_bind(id, cJSON_IsNumber(item) ? (int) cJSON_GetNumberValue(item) : DEFAULT_BINDS[id]);
+        const char *keys = strstr(key, "Keys");
+        if (keys && cJSON_IsArray(item)) { // moveKeys, streakKeys_alt, ...
+            char bind[32];
+            snprintf(bind, sizeof(bind), "%.*s", (int) (keys - key), key);
+            const int alt = strstr(keys, "_alt") != NULL;
+            int k = 0;
+            const cJSON *v;
+            cJSON_ArrayForEach(v, item) {
+                const int i = v7_index(bind, k++);
+                if (i >= 0 && cJSON_IsNumber(v)) v7_update(i, alt, (int) cJSON_GetNumberValue(v));
+            }
+            continue;
         }
+        int alt;
+        const int i = v7_index_by_name(key, &alt);
+        if (i >= 0 && cJSON_IsNumber(item)) v7_update(i, alt, (int) cJSON_GetNumberValue(item));
     }
-    g_ctl.input_changer = -1;
+    g_ctl.changer = -1;
+    sync_ids();
     menu_rerender_if_open(7);
 }
 
@@ -462,23 +718,93 @@ static void append_key_name(StrBuf *sb, const int code) {
     sb_append_esc(sb, ui_controls_key_name(code, name, sizeof(name)));
 }
 
-// windows[6].gen(), serialised the way the page holds it (double quotes, selected="").
+static void append_index(StrBuf *sb, const int index) {
+    if (index < 0) sb_append(sb, "undefined");
+    else sb_appendf(sb, "%d", index);
+}
+
+// One key cell (the alternate key first, then the key): reset / unbind icons, the key name
+// and the mouse button picture for 10001 / 10002 / 10003 / 20000.
+static void append_key_cell(StrBuf *sb, const ControlRow *row, const int alt, const int code) {
+    sb_append(sb, "<div style=\"float:right\"><span class=\"reset\" title=\"Reset Bind\" onclick=\"resetCont(&quot;");
+    sb_append(sb, row->bind);
+    sb_appendf(sb, "&quot;,%d,", alt);
+    append_index(sb, row->index);
+    sb_append(sb, ")\"><i class=\"material-icons\" style=\"font-size:40px;color:var(--yellow);\">refresh</i></span>"
+                  "<span class=\"unbind\" title=\"Unbind\" onclick=\"unbindCont(&quot;");
+    sb_append(sb, row->bind);
+    sb_appendf(sb, "&quot;,%d,", alt);
+    append_index(sb, row->index);
+    sb_append(sb, ")\"><i class=\"material-icons\" style=\"font-size:40px;color:var(--red);\">delete_forever</i></span>"
+                  "<span class=\"settText floatRNoC keyIcon\" id=\"cont");
+    sb_append(sb, row->bind);
+    if (row->index >= 0) sb_appendf(sb, "_%d", row->index);
+    if (alt) sb_append(sb, "_alt");
+    sb_append(sb, "\" onmouseover=\"playTick()\" onclick=\"changeCont(&quot;");
+    sb_append(sb, row->bind);
+    sb_appendf(sb, "&quot;,%d,", alt);
+    append_index(sb, row->index);
+    sb_append(sb, ")\">");
+    append_key_name(sb, code);
+    sb_append(sb, "</span>");
+    if (code == KEY_MOUSE_BASE + 1 || code == KEY_MOUSE_BASE + 2 || code == KEY_MOUSE_BASE + 3 || code == KEY_SCROLL)
+        sb_appendf(sb, "<div class=\"mouseBtn\" style=\"background-image: url(img/mouse/%d.png);\"></div>", code);
+    sb_append(sb, "</div>");
+}
+
+// The <bind>Trigger select (_html.settings.input.select of scoreBoardTrigger / voiceChatTrigger).
+static void append_trigger(StrBuf *sb, const char *bind) {
+    char key[48];
+    snprintf(key, sizeof(key), "%sTrigger", bind);
+    if (strcmp(bind, "scoreBoard") && strcmp(bind, "voiceChat")) return;
+    const cJSON *v = ui_setting_value(key);
+    char cur[16] = "1"; // Continuous (Hold) by default
+    if (v) ui_setting_to_string(v, cur, sizeof(cur));
+    sb_appendf(sb, "<div style=\"float:right\"><select onchange=\"window.setSetting(&quot;%s&quot;, this.value)\" class=\"inputGrey2\">\n"
+                   "\t\t\t\t\t\t\t<option value=\"0\"%s>Press (Toggle)</option>,<option value=\"1\"%s>Continuous (Hold)</option></select></div>",
+               key, !strcmp(cur, "0") ? " selected=\"\"" : "", strcmp(cur, "0") ? " selected=\"\"" : "");
+}
+
+static void group_id(const char *group, char *out, const size_t n) {
+    size_t k = 0;
+    for (const char *p = group; *p && k + 1 < n; p++) {
+        const char c = *p;
+        out[k++] = (char) ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ? c
+                         : c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : '_');
+    }
+    out[k] = 0;
+}
+
+// windows[6].gen(): the tab row, then each group (collapsible) with its rows, serialised the
+// way the page holds it (double quotes, selected="").
 char *ui_controls_window_html(void) {
     ensure_loaded();
     StrBuf sb = {0};
-    for (size_t r = 0; r < sizeof(ROWS) / sizeof(ROWS[0]); r++) {
-        const ControlRow *row = &ROWS[r];
-        if (row->header) {
-            sb_appendf(&sb, "<div class=\"setHedBind\"%s>", r == 0 ? " style=\"margin-top:0px;\"" : "");
-            sb_append_esc(&sb, row->header);
-            sb_append(&sb, "</div>");
+    const int tab = g_ctl.tab >= 0 && g_ctl.tab < TAB_COUNT ? g_ctl.tab : 0;
+    sb_append(&sb, "<div id=\"bindsHeader\"><div class=\"bigMenTabs\" style=\"table-layout: fixed;margin-top: 18px!important;margin-bottom: unset;\">");
+    for (int t = 0; t < TAB_COUNT; t++) {
+        sb_appendf(&sb, "<div class=\"bigMenTab%s\" onclick=\"windows[6].switchTab(%d)\" style=\"padding-top:10px;padding-bottom:5px;\">",
+                   t == tab ? " bigMenTabA" : "", t);
+        sb_append_esc(&sb, TABS[t].name);
+        sb_append(&sb, "</div>");
+    }
+    sb_append(&sb, "</div></div><div id=\"bindsHolder\">");
+    const ControlTab *ct = &TABS[tab];
+    for (int r = 0; r < ct->count; r++) {
+        const ControlRow *row = &ct->rows[r];
+        char gid[48];
+        group_id(row->group, gid, sizeof(gid));
+        if (r == 0 || strcmp(ct->rows[r - 1].group, row->group)) {
+            if (r) sb_append(&sb, "</div>");
+            sb_appendf(&sb, "<div class=\"setHed\" id=\"setBindHed_%s\" onclick=\"window.windows[6].collapseFolder(this)\">"
+                            "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> ", gid);
+            sb_append_esc(&sb, row->group);
+            sb_appendf(&sb, "</div><div class=\"setBodH\" id=\"setBindBod_%s\">", gid);
         }
         sb_append(&sb, "<div class=\"settName\">");
-        if (row->label) {
-            sb_append_esc(&sb, row->label);
-        } else {
-            const char *set = g_ctl.toggle_sets[row->id - TOGGLE_FIRST];
-            sb_appendf(&sb, "Toggle <select class=\"setToggle\" onchange=\"changeContSet(%d, this.value)\">", row->id);
+        if (row->list == 1) {
+            const char *set = g_ctl.toggle_sets[row->index];
+            sb_appendf(&sb, "Toggle <select class=\"setToggle\" onchange=\"changeContSet(%d, this.value)\">", row->index);
             sb_appendf(&sb, "<option value=\"-1\"%s>None</option>", set[0] ? "" : " selected=\"\"");
             for (size_t t = 0; t < sizeof(TOGGLE_SETTINGS) / sizeof(TOGGLE_SETTINGS[0]); t++) {
                 sb_append(&sb, "<option value=\"");
@@ -488,79 +814,115 @@ char *ui_controls_window_html(void) {
                 sb_append(&sb, "</option>");
             }
             sb_append(&sb, "</select>");
+        } else if (row->list == 2) {
+            sb_appendf(&sb, "Message <input type=\"text\" name=\"message%d\" class=\"inputGrey2\" placeholder=\"Message to Send\" style=\"float: none;\" value=\"", row->index);
+            sb_append_esc(&sb, g_ctl.messages[row->index]);
+            sb_appendf(&sb, "\" oninput=\"changeContMsg(%d, this.value)\">", row->index);
+        } else {
+            sb_append_esc(&sb, row->label);
         }
-        sb_appendf(&sb, "<span class=\"unbind\" onclick=\"unbindCont(%d)\"><i class=\"material-icons\" "
-                        "style=\"font-size:40px;color:var(--red);\">delete_forever</i></span>"
-                        "<span class=\"settText floatRNoC keyIcon\" id=\"cont%d\" onmouseover=\"playTick()\" "
-                        "onclick=\"changeCont(%d)\">", row->id, row->id, row->id);
-        append_key_name(&sb, g_ctl.binds[row->id]);
-        sb_append(&sb, "</span></div>");
+        append_trigger(&sb, row->bind);
+        const int i = v7_index(row->bind, row->index);
+        append_key_cell(&sb, row, 1, i >= 0 ? g_ctl.alt[i] : KEY_UNBOUND);
+        sb_append(&sb, "<div class=\"bindSep\"></div>");
+        append_key_cell(&sb, row, 0, i >= 0 ? g_ctl.val[i] : KEY_UNBOUND);
+        sb_append(&sb, "</div>");
     }
+    if (ct->count) sb_append(&sb, "</div>");
+    sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }
 
-static void set_cont_text(const int id, const char *text) {
-    char elem_id[16];
-    snprintf(elem_id, sizeof(elem_id), "cont%d", id);
+static void set_cont_text(const int i, const int alt, const char *text) {
+    char elem_id[64];
+    if (i < 0) return;
+    if (V7_BINDS[i].index >= 0) snprintf(elem_id, sizeof(elem_id), "cont%s_%d%s", V7_BINDS[i].bind, V7_BINDS[i].index, alt ? "_alt" : "");
+    else snprintf(elem_id, sizeof(elem_id), "cont%s%s", V7_BINDS[i].bind, alt ? "_alt" : "");
     HtmlElem el = html_dom_by_id(elem_id);
     if (el) html_dom_set_html(el, text);
 }
 
-static int valid_id(const int id) {
-    return id >= 0 && id < UI_CONTROL_COUNT;
+// windows[6].switchTab(i, force)
+void ui_controls_switch_tab(const int tab, const int force) {
+    if (tab < 0 || tab >= TAB_COUNT) return;
+    if (g_ctl.tab != tab || force) {
+        g_ctl.changer = -1;
+        g_ctl.tab = tab;
+        menu_rerender_if_open(7);
+    }
 }
 
-// window.changeCont(id, noRender): re-render the window, then wait for a key.
-void ui_controls_change(const int id, const int no_render) {
+// window.changeCont(bind, alt, index): re-render the window, then wait for a key.
+void ui_controls_change(const char *bind, const int alt, const int index) {
     ensure_loaded();
-    if (!valid_id(id)) return;
-    if (!no_render) menu_show_window(7, 1);
-    g_ctl.input_changer = id;
-    set_cont_text(id, "Press any Key");
-}
-
-// window.unbindCont(id, noRender)
-void ui_controls_unbind(const int id, const int no_render) {
-    ensure_loaded();
-    g_ctl.input_changer = -1;
-    if (!valid_id(id)) return;
-    if (!no_render) menu_show_window(7, 1);
-    set_cont_text(id, "UNBOUND");
-    set_bind(id, KEY_UNBOUND);
-}
-
-// window.changeContSet(id, setting): which setting a Toggle row flips.
-void ui_controls_change_set(const int id, const char *setting) {
-    ensure_loaded();
-    if (id < TOGGLE_FIRST || id >= TOGGLE_FIRST + TOGGLE_COUNT) return;
-    const char *value = setting && *setting ? setting : "-1";
-    snprintf(g_ctl.toggle_sets[id - TOGGLE_FIRST], SETTING_KEY_MAX, "%s", strcmp(value, "-1") ? value : "");
-    char key[32];
-    snprintf(key, sizeof(key), "cont_%d_set", id);
-    html_storage_set(key, value);
+    const int i = v7_index(bind, index);
+    if (i < 0) return;
     menu_show_window(7, 1);
+    g_ctl.changer = i;
+    g_ctl.changer_alt = !!alt;
+    set_cont_text(i, alt, "Press any Key"); // i18n settings.controls.press
+}
+
+// window.unbindCont(bind, alt, index)
+void ui_controls_unbind(const char *bind, const int alt, const int index) {
+    ensure_loaded();
+    const int i = v7_index(bind, index);
+    menu_show_window(7, 1);
+    g_ctl.changer = -1;
+    if (i < 0) return;
+    set_cont_text(i, alt, "UNBOUND");
+    v7_update(i, !!alt, KEY_UNBOUND);
+}
+
+// window.resetCont(bind, alt, index): ControlBind.reset(alt)
+void ui_controls_reset_bind(const char *bind, const int alt, const int index) {
+    ensure_loaded();
+    const int i = v7_index(bind, index);
+    menu_show_window(7, 1);
+    g_ctl.changer = -1;
+    if (i < 0) return;
+    v7_update(i, !!alt, alt ? V7_BINDS[i].alt_def : V7_BINDS[i].def);
+    char name[32];
+    set_cont_text(i, alt, ui_controls_key_name(g_ctl.val[i], name, sizeof(name))); // v7 writes the key's val in both cells
+}
+
+// window.changeContSet(index, setting): which setting a Toggle row flips.
+void ui_controls_change_set(const int index, const char *setting) {
+    ensure_loaded();
+    if (index < 0 || index >= TOGGLE_COUNT) return;
+    store_toggle_set(index, setting && *setting ? setting : "-1");
+    menu_show_window(7, 1);
+}
+
+// window.changeContMsg(index, text): quick chat message (filterCM)
+void ui_controls_change_msg(const int index, const char *text) {
+    ensure_loaded();
+    if (index < 0 || index >= MESSAGE_COUNT) return;
+    store_message(index, text);
 }
 
 // KrunkNative deviation: Krunker keeps inputChanger after the controls window closes, so
 // the next key pressed anywhere (even in game) is bound and window 7 reopens. Here the
 // capture ends with the window.
 int ui_controls_capturing(void) {
-    if (g_ctl.input_changer < 0) return 0;
+    if (g_ctl.changer < 0) return 0;
     const MenuUi *ui = menu_ui();
     if (ui->active_window != 7 || !menu_window_is_open()) {
-        g_ctl.input_changer = -1;
+        g_ctl.changer = -1;
         return 0;
     }
     return 1;
 }
 
-// CONTROLS N() with inputChanger set: store the code and re-render the window.
+// CONTROLS N() with inputChanger set: updateBind + updateKeybindUI, re-render the window.
 static void capture_bind(const int code) {
-    const int id = g_ctl.input_changer;
-    g_ctl.input_changer = -1;
-    set_bind(id, code);
+    const int i = g_ctl.changer;
+    g_ctl.changer = -1;
+    if (i < 0) return;
+    v7_update(i, g_ctl.changer_alt, code);
     char name[32];
-    printf("[controls] bind %d (%s) = %s\n", id, KEY_INFO[id] ? KEY_INFO[id] : "slot", ui_controls_key_name(code, name, sizeof(name)));
+    printf("[controls] bind %s%s (%s) = %s\n", V7_BINDS[i].name, g_ctl.changer_alt ? "_alt" : "", V7_BINDS[i].bind,
+           ui_controls_key_name(code, name, sizeof(name)));
     menu_show_window(7, 1);
 #ifdef __EMSCRIPTEN__
     g_ctl.swallowed_key = 1; // the page's own keydown listener runs after GLFW's
@@ -713,9 +1075,20 @@ int ui_controls_code_down(const int code) {
     return code_down(code);
 }
 
+static int valid_id(const int id) {
+    return id >= 0 && id < UI_CONTROL_COUNT;
+}
+
+// ControlBind.isPressed-style state of a bind: its key or its alternate is held.
 int ui_controls_down(const int id) {
     ensure_loaded();
-    return valid_id(id) && code_down(g_ctl.binds[id]);
+    return valid_id(id) && (code_down(g_ctl.binds[id]) || code_down(g_ctl.alts[id]));
+}
+
+// ControlBind.isKey(code) for a scalar v7 bind with no UI_CONTROL_* id (confirm, reset, ...)
+static int v7_is(const char *bind, const int code) {
+    const int i = v7_index(bind, -1);
+    return i >= 0 && code >= 0 && (g_ctl.val[i] == code || g_ctl.alt[i] == code);
 }
 
 int ui_controls_scoreboard_held(void) {
@@ -782,7 +1155,7 @@ static void press_button(Client *client, const int code) {
         const NetInteractPacket spray = {.action = 0};
         client_net_send(client, NET_PACKET_INTERACT, &spray, sizeof(spray));
     }
-    if (code == UI_INTERACT_CONFIRM_KEYCODE) ui_interact_confirm(client); // confirmKey: "cnfm" (a pending KR trigger)
+    if (v7_is("confirm", code)) ui_interact_confirm(client); // confirmKey: "cnfm" (a pending KR trigger)
     if (bind_is(UI_CONTROL_INTERACT, code)) ui_interact_key(client, 0);     // io.send("int", type, id)
     if (bind_is(UI_CONTROL_INTERACT_SEC, code)) ui_interact_key(client, 1); // io.send("intSec", type, id)
     if (bind_is(UI_CONTROL_DROP, code)) ui_interact_drop(client);           // io.send("drpw")
@@ -889,9 +1262,9 @@ int ui_controls_mouse_event(Client *client, const int button, const int action, 
     ensure_loaded();
     const int code = mouse_code(button);
     if (!in_game) {
-        // #menuWindow mousedown: middle and side buttons are bindable (left/right click the UI)
-        const int bindable = code == KEY_MOUSE_BASE + 2 || code > KEY_MOUSE_BASE + 3;
-        if (action == GLFW_PRESS && bindable && ui_controls_capturing()) {
+        // controls.js mousedown: `which >= 0 && inputChanger != null` -> every button binds
+        // while "Press any Key" waits (v7: LMB/RMB are rebindable too)
+        if (action == GLFW_PRESS && code > 0 && ui_controls_capturing()) {
             capture_bind(code);
             return 1;
         }
@@ -905,14 +1278,12 @@ int ui_controls_mouse_event(Client *client, const int button, const int action, 
         if (client && (button == GLFW_MOUSE_BUTTON_LEFT || button == GLFW_MOUSE_BUTTON_RIGHT)) {
             spectate_mouse_press(client, button == GLFW_MOUSE_BUTTON_LEFT ? 1 : 3);
         }
-        if (button == GLFW_MOUSE_BUTTON_RIGHT) g_ctl.aim = 1;
-        else if (button == GLFW_MOUSE_BUTTON_LEFT) g_ctl.shoot = 1;
-        else press_code(client, code);
+        // v7.1.4: all mouse buttons go through the binds as 10000 + which (shoot = 10001
+        // LMB, aim = 10003 RMB by default), so they can be rebound
+        press_code(client, code);
     } else if (action == GLFW_RELEASE) {
         gamepad_set_active(0); // canvas mouseup: aa(event) with inputType != "cntrlInput"
-        if (button == GLFW_MOUSE_BUTTON_RIGHT) g_ctl.aim = 0;
-        else if (button == GLFW_MOUSE_BUTTON_LEFT) g_ctl.shoot = 0;
-        else release_code(code);
+        release_code(code);
     }
     return 1;
 }
@@ -1086,13 +1457,14 @@ void ui_controls_fill_look(Client *client, Input *input, const float dx, const f
     const float look_y = dy + g_ctl.look_y;
     g_ctl.look_x = g_ctl.look_y = 0.0f;
     const UiControllerInput *c = &g_ctl.cntrl;
-    const float sens_x = g_ctl.input_cntrl ? (g_ctl.aim ? c->aim_x : c->sens_x) : (g_ctl.aim ? s->aim_sensitivity_x : s->sensitivity_x);
-    const float sens_y = g_ctl.input_cntrl ? (g_ctl.aim ? c->aim_y : c->sens_y) : (g_ctl.aim ? s->aim_sensitivity_y : s->sensitivity_y);
+    const int aiming = g_ctl.aim || ui_controls_down(UI_CONTROL_AIM);
+    const float sens_x = g_ctl.input_cntrl ? (aiming ? c->aim_x : c->sens_x) : (aiming ? s->aim_sensitivity_x : s->sensitivity_x);
+    const float sens_y = g_ctl.input_cntrl ? (aiming ? c->aim_y : c->sens_y) : (aiming ? s->aim_sensitivity_y : s->sensitivity_y);
     const int invert = g_ctl.input_cntrl ? c->invert : s->invert_y;
     input->x_dir -= look_y * base * sens_y * (invert ? -1.0f : 1.0f);
     input->y_dir -= look_x * base * sens_x;
     float touch_x, touch_y; // fakeMouse(2, dx, dy, 0, "mblInput"): mobile sensitivities (ui_mobile.c)
-    if (ui_mobile_take_look(g_ctl.aim, &touch_x, &touch_y)) {
+    if (ui_mobile_take_look(aiming, &touch_x, &touch_y)) {
         input->x_dir -= touch_y * base;
         input->y_dir -= touch_x * base;
     }
@@ -1136,4 +1508,59 @@ void ui_controls_end_frame(void) {
         release_code(KEY_SCROLL);
         g_ctl.scroll_pressed = 0;
     }
+}
+
+// ---------------------------------------------------------------- inline handlers
+
+static const char *h_str(const HtmlArg *args, const int argc, const int i) {
+    return i < argc && args[i].kind == HTML_ARG_STR && args[i].str ? args[i].str : "";
+}
+
+// 0/1 (alt), an array index or `undefined` (-1)
+static int h_int(const HtmlArg *args, const int argc, const int i, const int fallback) {
+    if (i >= argc) return fallback;
+    if (args[i].kind == HTML_ARG_NUM || args[i].kind == HTML_ARG_BOOL) return (int) args[i].num;
+    if (args[i].kind == HTML_ARG_STR && args[i].str) {
+        char *end;
+        const long v = strtol(args[i].str, &end, 10);
+        return end != args[i].str ? (int) v : fallback;
+    }
+    return fallback;
+}
+
+static const char *h_value(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i, char *buf, const size_t n) {
+    if (i < argc && args[i].kind == HTML_ARG_THIS_VALUE) {
+        if (ev && ev->value && ev->value[0]) return ev->value;
+        if (ev && ev->target && html_dom_get_value(ev->target, buf, n) >= 0) return buf; // <select> snapshot reads ""
+        return "";
+    }
+    return h_str(args, argc, i);
+}
+
+// windows[6].collapseFolder(hed): setBindHed_<g> / setBindBod_<g>
+static void collapse_folder(const HtmlElem hed) {
+    char id[96], body_id[112], display[16];
+    if (!hed || html_dom_get_attr(hed, "id", id, sizeof(id)) < 0 || strncmp(id, "setBindHed_", 11)) return;
+    snprintf(body_id, sizeof(body_id), "setBindBod_%s", id + 11);
+    const HtmlElem body = html_dom_by_id(body_id);
+    if (!body) return;
+    const int closed = html_dom_get_style(body, "display", display, sizeof(display)) >= 0 && !strcmp(display, "none");
+    html_dom_set_display(body, closed ? "" : "none");
+    const HtmlElem icon = html_dom_query(hed, ".plusOrMinus");
+    if (icon) html_dom_set_text(icon, closed ? "keyboard_arrow_down" : "keyboard_arrow_right");
+}
+
+// Inline handlers this module owns (ui_handlers.c h_fallback); -1 = not ours.
+int ui_controls_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    if (!name) return -1;
+    char buf[MESSAGE_MAX + 16];
+    if (!strcmp(name, "changeCont")) ui_controls_change(h_str(args, argc, 0), h_int(args, argc, 1, 0), h_int(args, argc, 2, -1));
+    else if (!strcmp(name, "unbindCont")) ui_controls_unbind(h_str(args, argc, 0), h_int(args, argc, 1, 0), h_int(args, argc, 2, -1));
+    else if (!strcmp(name, "resetCont")) ui_controls_reset_bind(h_str(args, argc, 0), h_int(args, argc, 1, 0), h_int(args, argc, 2, -1));
+    else if (!strcmp(name, "changeContSet")) ui_controls_change_set(h_int(args, argc, 0, -1), h_value(ev, args, argc, 1, buf, sizeof(buf)));
+    else if (!strcmp(name, "changeContMsg")) ui_controls_change_msg(h_int(args, argc, 0, -1), h_value(ev, args, argc, 1, buf, sizeof(buf)));
+    else if (!strcmp(name, "windows.6.switchTab")) ui_controls_switch_tab(h_int(args, argc, 0, 0), h_int(args, argc, 1, 0));
+    else if (!strcmp(name, "windows.6.collapseFolder")) collapse_folder(argc > 0 && args[0].kind == HTML_ARG_THIS && args[0].num > 0 ? (HtmlElem) args[0].num : ev ? ev->target : 0);
+    else return -1;
+    return 1;
 }

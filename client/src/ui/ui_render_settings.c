@@ -350,6 +350,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("showDeaths", show_deaths, mark_dom),          // #deathCount
     RS_B("showScore", show_score, mark_dom),            // #scoreCount
     RS_B("showStreak", show_streak, mark_dom),          // #streakCount
+    RS_B("showKD", show_kd, mark_dom),                  // #kdCount (v7.1.4)
     RS_B("showPing", show_ping, mark_dom),              // #pingDisplay
     RS_B("showNetStat", show_net_stat, mark_dom),       // #ingressDisplay/#egressDisplay
     RS_SHARED_B("showFPS", show_fps, mark_dom),         // #fpsDisplay (ui_settings.c) + #menuFPSDisplay
@@ -689,13 +690,15 @@ static int apply_dom(void) {
     display_if("deathCount", g_rs.show_deaths, "inline-block");
     display_if("scoreCount", g_rs.show_score, "inline-block");
     display_if("streakCount", g_rs.show_streak, "inline-block");
+    display_if("kdCount", g_rs.show_kd, "inline-block");
     display_if("pingDisplay", g_rs.show_ping, "block");
     display_if("ingressDisplay", g_rs.show_net_stat, "block");
     display_if("egressDisplay", g_rs.show_net_stat, "block");
+    display_if("tickDisplay", g_rs.show_net_stat, "block"); // v7.1.4 showNetStat: the TPS readout too
     display_if("menuFPSDisplay", g_rs.show_fps, "block");
     // oldScoreboard.set: leaderDisplay shown, killFeed only without it (and with showKills)
     display_if("leaderDisplay", g_rs.old_scoreboard, "block");
-    display_if("killFeed", !g_rs.old_scoreboard && g_rs.show_kills, "inline-block");
+    display_if("killFeed", !g_rs.old_scoreboard && g_rs.show_kills, "inline-grid"); // v7.1.4 showKills: inline-grid
 
     style_if("igXPBarProg", "background-color", g_rs.xp_bar_color);
     fmt(buf, sizeof(buf), "%g", g_rs.xp_bar_opacity);

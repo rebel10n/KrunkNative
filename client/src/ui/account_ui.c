@@ -39,14 +39,14 @@ static int g_header_dirty = 1;   // cK() pending (page not up yet / offsetWidth 
 static int g_header_tries;
 static int g_restore_sent;       // a token restore is in flight
 static int g_tab_index;          // windows[4].tabIndex
-static int g_store_tab;          // windows[13].tabIndex
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
 static char g_token[192];
 static char g_guest_name[32];    // client->menu_name before the account took it over
 static int g_reward_played;      // dc: a match ended this session (canClaimReward)
 static char g_reward_text[16];   // d8: last #claimTimer text
 // windows[29] (Krunker Mail)
-static int g_mail_tab;
+static int g_mail_tab;           // the kml request / answer: 0 unread, 1 archive
+static int g_mail_view;          // windows[29].tabIndex (v7: Followers, Clan, Hub, Inbox, Archive)
 static cJSON *g_mail_rows;       // mailData.d (owned), NULL = not loaded
 static int g_mail_loaded;        // mailData != null
 // 2FA: d3 picked cells of the login grid
@@ -231,6 +231,8 @@ static void apply_menu_name(void) {
 
 // ------------------------------------------------------------------ cK(): header bar
 
+// updateMenuAccountData() (v7.1.4): #signedInHeaderBar (name, KR, junk, level bar and
+// box) for an account, #signedOutHeaderBar ("Login or Register") for a guest.
 static void update_header(void) {
     g_header_dirty = 0;
     if (!html_ui_available() || !html_dom_by_id("signedInHeaderBar")) {
@@ -240,29 +242,22 @@ static void update_header(void) {
     if (g_logged_in) {
         set_display("signedOutHeaderBar", "none");
         set_display("signedInHeaderBar", "");
-        // acc.level >= config.rewardMinLvl: #claimHolder (daily reward) + dd(true)
-        if (g_acc.level >= REWARD_MIN_LVL) {
-            set_display("claimHolder", "block");
-            g_reward_text[0] = 0;
-        } else {
-            set_display("claimHolder", "none");
-            HtmlElem merch = html_dom_by_id("merchHolder");
-            if (merch) html_dom_set_style(merch, "top", "110px");
-        }
         HtmlElem el;
         if ((el = html_dom_by_id("menuAccountUsername"))) html_dom_set_text(el, g_acc.premium ? g_acc.alias : g_acc.name);
         if ((el = html_dom_by_id("menuKRCount"))) {
-            char funds[32], html[96];
+            char funds[32], html[128];
             comma_number(funds, sizeof(funds), g_acc.funds);
-            snprintf(html, sizeof(html), "%s <span style='color:#fff'>KR</span>", funds);
+            snprintf(html, sizeof(html), "%s <span style='color:#fbc02d'>KR</span>", funds);
             html_dom_set_html(el, html);
         }
+        // junk (crafting material): KrunkNative's accounts have none (the store economy is out of scope)
+        if ((el = html_dom_by_id("menuJNKCount"))) html_dom_set_html(el, "0.00<span class='material-icons' style='color:#cc51f8;font-size:27px;margin-left:5px;vertical-align:top;margin-right:-5px;'>plumbing</span>");
         if ((el = html_dom_by_id("menuLevelBar"))) {
             char w[16];
             snprintf(w, sizeof(w), "%d%%", g_acc.level_prog);
             html_dom_set_style(el, "width", w);
         }
-        if ((el = html_dom_by_id("mLevelCont"))) {
+        if ((el = html_dom_by_id("mLevelContV"))) {
             char lvl[16];
             snprintf(lvl, sizeof(lvl), "%d", g_acc.level ? g_acc.level : 1);
             html_dom_set_text(el, lvl);
@@ -275,21 +270,11 @@ static void update_header(void) {
             html_dom_set_display(el, g_acc.mail_unread > 0 ? "block" : "none");
         }
         HtmlElem bar = html_dom_by_id("signedInHeaderBar");
-        const float w = bar ? html_dom_offset_width(bar) : 0.0f;
-        if (w > 0.0f) {
-            char left[24];
-            html_dom_set_style(bar, "border-radius", "0px");
-            snprintf(left, sizeof(left), "%dpx", (int) w);
-            if ((el = html_dom_by_id("mLevelCont"))) html_dom_set_style(el, "left", left);
-        } else if (g_header_tries++ < 30) {
-            g_header_dirty = 1; // laid out on a later frame
-        }
+        if (bar && html_dom_offset_width(bar) > 0.0f) html_dom_set_style(bar, "border-radius", "0px");
+        else if (g_header_tries++ < 30) g_header_dirty = 1; // laid out on a later frame
     } else {
         set_display("signedOutHeaderBar", "");
         set_display("signedInHeaderBar", "none");
-        set_display("claimHolder", "none");
-        HtmlElem merch = html_dom_by_id("merchHolder");
-        if (merch) html_dom_set_style(merch, "top", "110px");
     }
 }
 
@@ -564,29 +549,24 @@ void account_ui_init(Client *client) {
     backend_social_open(); // "__open" restores the saved session
 }
 
-// dd(force): #claimTimer countdown to the next daily reward, "Play 1 Game" until a match
-// ended this session, #claimImg ready / waiting.
-static void reward_tick(const int force) {
-    if (!g_logged_in || g_acc.level < REWARD_MIN_LVL) return;
+// The daily free KR (config.rewardTime after acc.lastReward): v7.1.4 shows it only as the
+// Store's "Free KR Spin" card (store_ui.c), a countdown until it can be claimed. KrunkNative
+// also wants one finished match this session (no ads to watch). ms left, 0 = claimable, -1 = none.
+double account_reward_ms(void) {
+    if (!g_logged_in || g_acc.level < REWARD_MIN_LVL) return -1.0;
     const double last = g_acc.data ? num_at(g_acc.data, 11) : 0.0;
-    double db = REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last);
-    const long long ms = db > 0 ? (long long) db : 0;
+    const double db = REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last);
+    return db > 0 ? db : 0.0;
+}
+
+static void reward_tick(const int force) {
+    if (!g_logged_in || account_reward_ms() < 0) return;
+    const double ms = account_reward_ms();
     char t[16];
-    snprintf(t, sizeof(t), "%02lld:%02lld:%02lld", (ms / 3600000) % 24, (ms / 60000) % 60, (ms / 1000) % 60);
+    snprintf(t, sizeof(t), "%d", ms > 0 ? (int) (ms / 1000) : g_reward_played ? -1 : -2);
     if (!force && !strcmp(t, g_reward_text)) return;
     snprintf(g_reward_text, sizeof(g_reward_text), "%s", t);
-    const int zero = !strcmp(t, "00:00:00");
-    HtmlElem timer = html_dom_by_id("claimTimer");
-    if (timer) {
-        html_dom_set_text(timer, zero ? (g_reward_played ? "" : "Play 1 Game") : t);
-        html_dom_set_style(timer, "font-size", zero ? (g_reward_played ? "18px" : "13px") : "18px");
-    }
-    HtmlElem merch = html_dom_by_id("merchHolder");
-    if (merch) html_dom_set_style(merch, "top", zero && g_reward_played ? "205px" : "237px");
-    HtmlElem img = html_dom_by_id("claimImg");
-    const char *src = db <= 0 && g_reward_played ? "./img/claim_0.png" : "./img/claim_1.png";
-    char cur[64] = "";
-    if (img && (html_dom_get_attr(img, "src", cur, sizeof(cur)) < 0 || strcmp(cur, src))) html_dom_set_attr(img, "src", src);
+    menu_rerender_if_open(14); // the Free KR card's countdown
 }
 
 // ---- windows[29]: Krunker Mail
@@ -635,16 +615,14 @@ static double parse_date_ms(const char *s) {
 }
 
 static char *gen_mail(void) {
+    static const char *const tabs[5] = {"Followers", "Clan", "Hub", "Inbox", "Archive"}; // config.mailTabs
     StrBuf sb = {0};
-    sb_append(&sb, "<div>Your Notifications");
-    if (g_mail_tab == 0) sb_append(&sb, "<div class='readAll' onclick='windows[29].readAll()'>Read All</div>");
-    sb_append(&sb, "</div><div class='menuTabsNew'>");
-    static const char *const tabs[2] = {"Unread", "Archive"}; // config.mailTabs
-    for (int i = 0; i < 2; i++) sb_appendf(&sb, "<div class='menuTabNew%s' onclick='windows[29].switchTab(%d)' style='width: 50%%;'>%s</div>", g_mail_tab == i ? " tabANew" : "", i, tabs[i]);
+    sb_append(&sb, "<div>Your Notifications<div class='button buttonR readAll' onclick='windows[29].readAll()'>Read All</div></div><div style='height:30px;'></div><div class='bigMenTabs' style='table-layout: fixed;'>");
+    for (int i = 0; i < 5; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='windows[29].switchTab(%d)' style='height:30px;'>%s</div>", g_mail_view == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div><div id='mailList'>");
     if (!g_mail_loaded) {
         char frame[32];
-        snprintf(frame, sizeof(frame), "[\"kml\",%d]", g_mail_tab);
+        snprintf(frame, sizeof(frame), "[\"kml\",%d]", g_mail_view == 4 ? 1 : 0);
         backend_social_send_text(frame);
         sb_append(&sb, "Loading...");
     } else if (!g_mail_rows) {
@@ -656,21 +634,26 @@ static char *gen_mail(void) {
         cJSON_ArrayForEach(r, g_mail_rows) {
             const cJSON *archive = cJSON_GetObjectItem(r, "km_archive");
             const int archived = cJSON_IsTrue(archive) || (cJSON_IsNumber(archive) && archive->valuedouble != 0);
-            if (archived != (g_mail_tab == 1)) continue;
+            if (archived != (g_mail_view == 4)) continue;
+            // km_notificationtype: 0 follow, 1 clan, 2 hub, 3 inbox (4 / 5 count as 3); none = inbox
+            const cJSON *type_v = cJSON_GetObjectItem(r, "km_notificationtype");
+            int type = cJSON_IsNumber(type_v) ? type_v->valueint : 3;
+            if (type == 4 || type == 5) type = 3;
+            if (g_mail_view != 4 && type != g_mail_view) continue;
             shown++;
             const int id = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "km_id"));
             char ago[32];
             readable_time2(ago, sizeof(ago), now - parse_date_ms(cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_datesent"))));
-            sb_appendf(&sb, "<div class='mailObj%s' id='mail_%d' onclick='windows[29].readMail(this, %d)'%s><div style='position:relative;'><div class='mailDate'>%s</div></div><div class='mailFrom'>",
-                       g_mail_tab == 0 ? " mailUnread" : "", id, id, g_mail_tab == 0 ? " style='border: 2px solid #5699eb;'" : "", ago);
+            sb_appendf(&sb, "<div class='mailObj' id='mail_%d' onclick='windows[29].readMail(this, %d, %d)'><div style='position:relative;'><div class='mailDate'>%s</div></div><div class='mailFrom' style='margin-bottom:15px'>",
+                       id, id, type, ago);
             const char *from = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_playerfrom"));
             const char *subject = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_subject"));
             sb_append_esc(&sb, from ? from : "");
-            sb_append(&sb, "</div>");
+            sb_append(&sb, "</div><span class='mailSubj'>");
             sb_append_esc(&sb, subject ? subject : "");
-            sb_append(&sb, "<div class='mailText'></div></div>");
+            sb_append(&sb, "</span><div class='mailText'></div></div>");
         }
-        if (!shown) sb_append(&sb, g_mail_tab == 0 ? "No messages" : "No archive messages");
+        if (!shown) sb_append(&sb, "No messages");
         cJSON_Delete(g_mail_rows); // this.mailData = null: the next render asks again
         g_mail_rows = NULL;
         g_mail_loaded = 0;
@@ -689,7 +672,7 @@ static void mail_read_data(const cJSON *rows) {
     if (el) {
         html_dom_set_style(el, "border", "");
         html_dom_set_class(el, "mailUnread", 0);
-        const HtmlElem a = html_dom_first_child(el), b = a ? html_dom_next(a) : 0, text = b ? html_dom_next(b) : 0;
+        const HtmlElem text = html_dom_query(el, ".mailText");
         const char *km_text = cJSON_GetStringValue(cJSON_GetObjectItem(row, "km_text"));
         StrBuf sb = {0};
         for (const char *p = km_text ? km_text : ""; *p; p++) { // replace(/<|>/g,"").replace("&","") + ASCII only
@@ -843,20 +826,21 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         backend_social_send_text("[\"las\"]");
         return 1;
     }
+    if (!strcmp(name, "windows.4.switchStat")) { // statTabB<n> shown, statTab<n> active
+        const int t = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        for (int i = 0; i < 4; i++) {
+            char sel[24], id[16];
+            snprintf(sel, sizeof(sel), ".statTabB%d", i);
+            snprintf(id, sizeof(id), "statTab%d", i);
+            HtmlElem b = html_dom_query(0, sel), tab = html_dom_by_id(id);
+            if (b) html_dom_set_class(b, "hide", i != t);
+            if (tab) html_dom_set_class(tab, "bigMenTabA", i == t);
+        }
+        return 1;
+    }
     if (!strcmp(name, "windows.4.switchTab")) {
         g_tab_index = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
         menu_show_window(5, 1); // updateWindow(5)
-        return 1;
-    }
-    if (!strcmp(name, "windows.13.switchTab") || !strcmp(name, "windows.13.premium") || !strcmp(name, "windows.13.purchase")) {
-        const int tab = !strcmp(name, "windows.13.premium") ? 1 : !strcmp(name, "windows.13.purchase") ? 2
-                      : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
-        if (tab == 4) {
-            app_route_url("/social.html?p=market"); // window.open("/social.html?p=market")
-            return 1;
-        }
-        g_store_tab = tab;
-        menu_show_window(14, 1);
         return 1;
     }
     if (!strcmp(name, "claimReward") && g_logged_in) {
@@ -869,8 +853,9 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "windows.29.switchTab")) {
         const int tab = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
         const int force = argc > 1;
-        if (g_mail_tab != tab || force) {
-            g_mail_tab = tab;
+        if (g_mail_view != tab || force) {
+            g_mail_view = tab >= 0 && tab < 5 ? tab : 3;
+            g_mail_tab = g_mail_view == 4;
             cJSON_Delete(g_mail_rows);
             g_mail_rows = NULL;
             g_mail_loaded = 0;
@@ -880,7 +865,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "windows.29.readMail")) { // toggle the text; "Loading..." + io.send("rml", id)
         HtmlElem obj = ev ? ev->target : 0;
-        const HtmlElem a = obj ? html_dom_first_child(obj) : 0, b = a ? html_dom_next(a) : 0, text = b ? html_dom_next(b) : 0;
+        const HtmlElem text = obj ? html_dom_query(obj, ".mailText") : 0;
         if (!text) return 1;
         char cur[16] = "";
         html_dom_get_text(text, cur, sizeof(cur));
@@ -897,6 +882,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "windows.29.readAll")) {
         backend_social_send_text("[\"raml\"]");
         g_mail_tab = 1;
+        g_mail_view = 4;
         cJSON_Delete(g_mail_rows);
         g_mail_rows = NULL;
         g_mail_loaded = 0;
@@ -1047,24 +1033,54 @@ static void xp_bar_text(char *out, const size_t n) {
     snprintf(out, n, "%d / %d", (int) (g_acc.score - m), (int) (pow((g_acc.level + 1) / RANK_VAR, 2) - m));
 }
 
-// windows[4].gen() for a signed-in account (the guest form is ui/windows/5.html).
+// UTILS.commaFloat(v): thousands separators, the fraction kept
+static void comma_float(char *out, const size_t n, const double v, const int decimals) {
+    char whole[32], frac[16] = "";
+    comma_number(whole, sizeof(whole), v < 0 ? -floor(-v) : floor(v));
+    if (decimals > 0) {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%.*f", decimals, fabs(v) - floor(fabs(v)));
+        snprintf(frac, sizeof(frac), "%s", tmp + 1); // ".1234"
+        size_t len = strlen(frac); // JS number -> string: no trailing zeros
+        while (len > 1 && frac[len - 1] == '0') frac[--len] = 0;
+        if (len == 1) frac[0] = 0;
+    }
+    snprintf(out, n, "%s%s", whole, frac);
+}
+
+static void pst(StrBuf *sb, const char *label, const char *value) {
+    sb_appendf(sb, "<div class='pSt'>%s<strong>%s</strong></div>", label, value);
+}
+
+static void pst_num(StrBuf *sb, const char *label, const double v, const int decimals) {
+    char t[48];
+    comma_float(t, sizeof(t), v, decimals);
+    pst(sb, label, t);
+}
+
+// windows[4].gen() for a signed-in account (the guest form is ui/windows/5.html): the
+// profile tabs of v7.1.4 (home = Your Account + the four stat tabs, Friends, Partner,
+// Settings, Connections, promo codes) and the logout links.
 static char *gen_account(void) {
-    static const char *const tabs[] = {"Stats", "Partner", "Settings", "Twitch"}; // config.profileTabs
+    static const char *const tabs[] = {"<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", "Friends", "Partner",
+                                       "Settings", "Connections", "<span class='material-icons' style='color:#96ff50;font-size:42px;vertical-align:bottom'>vpn_key</span>"}; // config.profileTabs
+    static const char *const stat_tabs[] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats"}; // config.statTabs
     StrBuf sb = {0};
-    sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);margin-top:-5px;margin-bottom:10px'>Choose a Display name &amp; more with <a href='javascript:;' onclick='windows[13].premium()'>Krunker Premium</a></div>");
-    sb_append(&sb, "<div class='menuTabsNew'>");
-    for (int i = 0; i < 4; i++) {
-        sb_appendf(&sb, "<div class='menuTabNew%s' onclick='windows[4].switchTab(%d)'>%s</div>", g_tab_index == i ? " tabANew" : "", i, tabs[i]);
+    char a[64];
+    sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'>");
+    for (int i = 0; i < 6; i++) {
+        if (i == 4) continue; // window.canConnectExternalAccounts (Twitch / Metamask): not in KrunkNative
+        sb_appendf(&sb, "<div class='bigMenTab%s' style='font-size:16px' onmouseenter='playTick(0.1);' onclick='playSelect();windows[4].switchTab(%d)'>%s</div>", g_tab_index == i ? " bigMenTabA" : "", i, tabs[i]);
     }
     sb_append(&sb, "</div>");
-    char a[64], b[256];
     if (g_tab_index == 0) {
-        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='./textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='pfpPopup();'>Change Picture</a></div>");
-        sb_append(&sb, "<div style='display:inline-block;vertical-align:top;width:560px;margin-left:10px'><div class='settName' style='width:100%;margin-top:0px'>Name<a href='/social.html?p=profile&q=");
+        sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
+        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='pfpPopup();'>Change Picture</a></div>");
+        sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>Name<a href='/social.html?p=profile&q=");
         sb_append_esc(&sb, g_acc.name);
         sb_append(&sb, "' class='floatR' target='_blank'>");
         sb_append_esc(&sb, g_acc.name);
-        sb_append(&sb, "</a></div><div class='settName' style='width:100%'>Clan<a class='floatR' class='menuLink' onclick='showWindow(13)'>");
+        sb_append(&sb, "</a></div><div class='settName' style='width:100%'>Clan<a style='float:right'  onclick='showWindow(13)'>");
         if (g_acc.clan[0]) {
             sb_append(&sb, "[");
             sb_append_esc(&sb, g_acc.clan);
@@ -1072,66 +1088,118 @@ static char *gen_account(void) {
         } else {
             sb_append(&sb, "None");
         }
-        sb_appendf(&sb, "</a></div><div class='settName' style='margin-top:0px'>Level<span class='floatR'>%d</span></div></div>", g_acc.level);
+        sb_appendf(&sb, "</a></div><div class='settName'>Level<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>", g_acc.level);
+        sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:15px;'>Your Stats</div>");
         xp_bar_text(a, sizeof(a));
-        sb_appendf(&sb, "<div class='xpBar' style='margin-top:10px'><div class='xpBarB' style='width:%d%%'></div><span class='xpBarV'>%s</span></div>", g_acc.level_prog, a);
-        stat_row_num(&sb, "Score", g_acc.score);
-        comma_number(a, sizeof(a), g_acc.funds);
-        snprintf(b, sizeof(b), "<span style='color:rgba(0,0,0,0.5)'>%s</span> KR", a);
-        stat_row(&sb, "KR", b);
-        stat_row_num(&sb, "Kills", g_acc.kills);
-        stat_row_num(&sb, "Deaths", g_acc.deaths);
-        stat_row_fixed(&sb, "KDR", g_acc.kills / (g_acc.deaths > 1 ? g_acc.deaths : 1));
-        stat_row_fixed(&sb, "KPG", g_acc.kills / (g_acc.games > 1 ? g_acc.games : 1));
-        stat_row_num(&sb, "Nukes", stat_num("n"));
-        stat_row_num(&sb, "Melee", stat_num("mk"));
-        stat_row_num(&sb, "Beatdowns", stat_num("fk"));
-        stat_row_num(&sb, "Bullseyes", stat_num("tmk"));
-        stat_row_num(&sb, "Headshots", stat_num("hs"));
-        stat_row_num(&sb, "Wallbangs", stat_num("wb"));
-        stat_row_num(&sb, "Games Played", g_acc.games);
-        stat_row_num(&sb, "Games Won", g_acc.wins);
-        stat_row_num(&sb, "Games Lost", g_acc.games - g_acc.wins > 0 ? g_acc.games - g_acc.wins : 0);
-        const double losses = g_acc.games - g_acc.wins;
-        stat_row_fixed(&sb, "W/L", g_acc.wins / (losses > 1 ? losses : 1));
+        sb_appendf(&sb, "<div class='xpBar' style='height:31px;line-height:34px;font-size:28px;'><div class='xpBarB' style='width:%d%%'></div><span class='xpBarV'>%s</span></div>", g_acc.level_prog, a);
+        sb_append(&sb, "<div id='statHolder'><div style='height:15px;'></div><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;'>");
+        for (int i = 0; i < 4; i++) {
+            sb_appendf(&sb, "<div id='statTab%d' class='bigMenTab%s' onclick='playSelect(0.1);windows[4].switchStat(%d)' style='padding-left: 5px; padding-right: 5px; padding-top: 10px; padding-bottom: 5px; line-height: 35px;font-size: 16px;'onmouseenter='playTick();'>%s</div>",
+                       i, i == 0 ? " bigMenTabA" : "", i, stat_tabs[i]);
+        }
+        sb_append(&sb, "</div><div class='statTabB0'>");
+        const double losses = g_acc.games - g_acc.wins > 0 ? g_acc.games - g_acc.wins : 0;
+        const double shots = stat_num("s"), hits = fmin(stat_num("s"), stat_num("h"));
+        snprintf(a, sizeof(a), "%d", g_acc.level);
+        pst(&sb, "LVL", a);
+        pst_num(&sb, "KR", g_acc.funds, 0);
+        pst_num(&sb, "Junk", 0, 0);
+        pst(&sb, "Inventory", " ~0");
+        pst_num(&sb, "Score", g_acc.score, 0);
+        pst_num(&sb, "SPK", round(g_acc.score / fmax(g_acc.kills, 1) * 100) / 100, 2);
+        pst_num(&sb, "Kills", g_acc.kills, 0);
+        pst_num(&sb, "Deaths", g_acc.deaths, 0);
+        pst_num(&sb, "KDR", round(g_acc.kills / fmax(g_acc.deaths, 1) * 10000) / 10000, 4);
+        pst_num(&sb, "KPG", round(g_acc.kills / fmax(g_acc.games, 1) * 10000) / 10000, 4);
+        pst_num(&sb, "Games", g_acc.games, 0);
+        snprintf(a, sizeof(a), "%g", round(g_acc.wins / fmax(losses, 1) * 1000) / 1000);
+        pst(&sb, "W/L", a);
+        pst_num(&sb, "Wins", g_acc.wins, 0);
+        pst_num(&sb, "Losses", losses, 0);
+        pst_num(&sb, "Assists", stat_num("ast"), 0);
+        pst_num(&sb, "Melee", stat_num("mk"), 0);
+        pst_num(&sb, "Beatdowns", stat_num("fk"), 0);
+        pst_num(&sb, "Bullseyes", stat_num("tmk"), 0);
+        pst_num(&sb, "Headshots", stat_num("hs"), 0);
+        pst_num(&sb, "Legshots", stat_num("ls"), 0);
+        pst_num(&sb, "Wallbangs", stat_num("wb"), 0);
+        pst_num(&sb, "Shots", shots, 0);
+        pst_num(&sb, "Hits", hits, 0);
+        pst_num(&sb, "Misses", shots - hits, 0);
+        snprintf(a, sizeof(a), "%g%%", shots > 0 ? round(hits / shots * 100 * 100) / 100 : 0.0);
+        pst(&sb, "Accuracy", a);
         readable_time(a, sizeof(a), g_acc.time_played);
-        stat_row(&sb, "Time Played", a);
-        sb_append(&sb, "<div style='height:10px'></div>");
-        // MMR rows: v3.1.1 appends UTILS.eloIconHTML (img/ranks/icon_N.png, not imported in ui/)
-        sb_append(&sb, "<div style='font-size:26px;margin-top:10px;font-weight:bold'>Ranked</div>");
+        pst(&sb, "Time Played", a);
+        sb_append(&sb, "</div><div class='statTabB1 hide'>");
+        pst_num(&sb, "Nukes", stat_num("n"), 0);
+        pst_num(&sb, "Airdrops", stat_num("ad"), 0);
+        pst_num(&sb, "Airdrops Stolen", stat_num("sad"), 0);
+        pst_num(&sb, "Slimers", stat_num("sl"), 0);
+        pst_num(&sb, "Juggernauts", stat_num("jg"), 0);
+        sb_appendf(&sb, "<div class='pSt' style='font-size: 12px;padding-left: 0px;padding-right: 0px;width: 174px;'>Juggernauts Killed<strong>%.0f</strong></div>", stat_num("kjg"));
+        pst_num(&sb, "War Machines", stat_num("wm"), 0);
+        sb_append(&sb, "</div><div class='statTabB2 hide'>");
+        pst_num(&sb, "Crouches", stat_num("crc"), 0);
+        pst_num(&sb, "Sprays Placed", stat_num("spry"), 0);
+        pst(&sb, "Helpful Reports", "0/0");
+        // KrunkNative keeps ranked (doc/v7/decisions.md): the MMRs v3.1.1 listed on the profile
         static const char *const mmr[3] = {"MMR (1v1)", "MMR (2v2)", "MMR (4v4)"};
         const double elos[3] = {g_acc.elo, g_acc.elo2, g_acc.elo4};
-        for (int i = 0; i < 3; i++) { // acc.elo.round(1) + UTILS.eloIconHTML(elo, "margin-left:4px;")
-            char icon[160];
+        for (int i = 0; i < 3; i++) {
+            char icon[160], v[200];
             account_elo_icon_html(icon, sizeof(icon), round(elos[i] * 10.0) / 10.0, "margin-left:4px;");
-            snprintf(b, sizeof(b), "%g%s", round(elos[i] * 10.0) / 10.0, icon);
-            stat_row(&sb, mmr[i], b);
+            snprintf(v, sizeof(v), "%g%s", round(elos[i] * 10.0) / 10.0, icon);
+            pst(&sb, mmr[i], v);
         }
+        sb_append(&sb, "</div><div class='statTabB3 hide'>");
+        const MenuUi *ui = menu_ui();
+        for (int i = 0; i < ui->class_count; i++) {
+            const MenuClass *c = &ui->classes[i];
+            char key[16];
+            snprintf(key, sizeof(key), "c%d", c->index);
+            const double xp = stat_num(key), lv = RANK_VAR * sqrt(xp);
+            int level = (int) floor(lv);
+            const int pct = (int) lround((lv - level) * 100.0);
+            const double lo = level > 1 ? pow(level / RANK_VAR, 2) : 0.0, hi = pow((level + 1) / RANK_VAR, 2);
+            level = level + 1 > 1 ? level + 1 : 1;
+            sb_appendf(&sb, "<div class='clsStatCard'><img class='clsStatImg' src='%s'/><div class='clsStatName'>", c->icon);
+            sb_append_esc(&sb, c->name ? c->name : "");
+            sb_append(&sb, "</div><div class='clsStatWeap'>");
+            sb_append_esc(&sb, c->weapon ? c->weapon : "");
+            sb_appendf(&sb, "</div><div class='clsStatXPBar'><div class='clsStatXPBarC' style='width:%d%%'></div><div class='clsStatXPBarV'>%d / %d</div></div><div class='clsStatLvl'>Lvl %d</div></div>",
+                       pct, (int) (xp - lo), (int) (hi - lo), level);
+        }
+        sb_append(&sb, "</div></div>");
     } else if (g_tab_index == 1) {
-        sb_append(&sb, "<div style='font-size:26px;margin-top:20px;font-weight:bold'>Krunker Partner</div><div style='color:rgba(0,0,0,0.6);margin-bottom:20px'>Krunker Partners earn Money through: <div class='partnerItem' style='margin-top:10px'><b>-</b> Getting KR Sales on their Partner Code</div><div class='partnerItem'><b>-</b> Plays on their Custom Games</div><div class='partnerItem'><b>-</b> Bringing new Players to Krunker</div></div><div style='font-size:26px;margin-top:20px;font-weight:bold'>Partner Application</div><div style='font-size:17px;color:rgba(0,0,0,0.4);margin-top:5px'>By submitting an Application you agree to the <a href='./docs/partner.txt'>Partner Terms</a></div><input type='text' id='crtrCode' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Partner Code Name' /><input type='text' id='crtrEmail' class='smlInput' style='width:80%;margin-bottom:8px' placeholder='PayPal Email for Payouts' /><a class='menuLink' style='margin-left:20px;vertical-align:middle' onclick='submitCrtrCod()'>Submit</a><div id='ctrtRes' style='color:rgba(0,0,0,0.5)'></div></div>");
+        // friends (follows) come from the hub; KrunkNative's account service has no friend list
+        sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;margin-bottom:20px;'>Friends can send private messages and see eachothers online status.<div style='height:10px;'></div>You can add new friends by following eachother.</div><div id='friendList'><span style='color:#9a9a9a'>You don't have any friends yet.</span></div>");
     } else if (g_tab_index == 2) {
-        sb_append(&sb, "<div style='font-size:26px;margin-top:12px;'>Account Settings</div>");
+        sb_append(&sb, "<div class='setHed' style='margin-top:10px;'>Krunker Partner Benefits</div><div class='setBodH'><div class='settName' style='font-size:17px;'>You get <span style='color:#fff !important'>20-40% of Revenue</span> from KR Sales on your Partner Code in the Shop</div><div class='settName' style='font-size:17px;'>You <span style='color:#fff !important;'>earn money</span> when someone Plays your Custom Games/Maps</div><div class='settName' style='font-size:17px;'>Every time a referred player plays the game, you get a <span style='color:#fff !important;'>cut of the Ad Revenue</span></div></div></div><div class='setHed' style='padding-bottom:10px'>Partner Application</div><div class='setBodH' style='padding-top:10px;padding-bottom:10px;'><div style='font-size:19px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom:10px;'>By submitting an Application you agree to the <a href='https://frvr.com/legal/krunker#TermsofService'>Partner Terms</a></div><input type='text' id='crtrCode' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Partner Code Name' /><input type='text' id='crtrEmail' class='smlInput' style='width:86%;margin-bottom:8px' placeholder='PayPal Email for Payouts' /><a class='menuLink' style='margin-left:20px;vertical-align:middle' onclick='submitCrtrCod()'>Submit</a></div><div id='ctrtRes' style='color:rgba(255,255,255,0.5)'></div></div>");
+    } else if (g_tab_index == 3) {
+        sb_append(&sb, "<div class='setHedS' style='margin-top:10px;'>Account Settings</div>");
         if (g_acc.premium) {
-            sb_append(&sb, "<div class='settName'>Display Name<div class='updDisN' onclick='changeName();'>Update</div><input type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' id='displayN' class='smlInput' placeholder='");
+            sb_append(&sb, "<div class='setBodH'><div class='settName'>Display Name<div class='updDisN' onclick='clearName();' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='changeName();'>Update</div><input type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' id='displayN' class='smlInput' placeholder='");
             sb_append_esc(&sb, g_acc.alias);
             sb_append(&sb, "'><div id='aliasRes'></div></div>");
         }
-        // Country Flag (windows.loadout.flag): acc.stats.flg, Game.flags
         const int flg = g_acc.stats && cJSON_IsNumber(cJSON_GetObjectItem(g_acc.stats, "flg")) ? (int) stat_num("flg") : -1;
-        sb_appendf(&sb, "<div class='settName'>Country Flag<select onchange='selectFlag(this.value)' class='inputGrey2' style='padding:4px;font-size:13px;margin-bottom:-18px'><option value='-1' %s>None</option>", flg == -1 ? "selected" : "");
+        sb_appendf(&sb, "<div class='settName'>Country Flag<select onchange='selectFlag(this.value)' class='inputGrey2' style='padding:4px;margin-top:4px'><option value='-1' %s>None</option>", flg == -1 ? "selected" : "");
         for (int i = 0; i < ACCOUNT_FLAG_COUNT; i++) sb_appendf(&sb, "<option value='%d' %s>%s</option>", i, flg == i ? "selected" : "", ACCOUNT_FLAGS[i].name);
         sb_append(&sb, "</select></div>");
+        sb_append(&sb, "<div class='settName'>Custom Badge<div class='updDisN' onclick='selectBadge(-1);' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='selectBadgePop();'>Select</div></div>");
+        sb_appendf(&sb, "<div class='settName'>Hide Detailed Online Status<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='toggleStatus(this.checked)'%s><span class='slider'></span></label></div></div>", stat_num("hds") ? " checked" : "");
         if (!g_acc.hack) {
-            // KrunkNative: v3.1.1 ships act2FA()/twoFAres() but no button for them; this row exposes it
-            sb_appendf(&sb, "<div class='settName'>2-Factor Authentication<a id='twoFAB' class='%s floatR' onclick='act2FA()'>%s</a></div><div id='twoFGridR' class='twoFAGrid' style='display:none'></div><div id='twoFAprom' style='font-size:17px;color:rgba(0,0,0,0.4)'></div>",
-                       g_acc.has_2fa ? "menuLinkD" : "menuLink", g_acc.has_2fa ? "Enabled" : "Enable");
-            sb_append(&sb, "<div style='font-size:26px;margin-top:20px;'>Account Security</div><div style='font-size:17px;color:rgba(0,0,0,0.4);margin-top:5px'>You can update your password every 30 minutes. <b>Never share your password</b> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>Submit</div><div id='newPRes' style='color:rgba(0,0,0,0.5)'></div>");
+            sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>Submit</div><div id='newPRes' style='color:rgba(255,255,255,0.5)'></div>");
+            // 2FA: v7 offers it from level 20 (or dev / partner / featured); KrunkNative always does
+            sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>To further protect your account, you can add enable <span style='color:#fff'>2FA</span>:<div class='subPassChg' onclick='%s' style='float: right;margin-top: -8px;'>%s</div></div><div id='twoFGridR' class='twoFAGrid' style='display:none'></div><div id='twoFAprom' style='font-size:17px;color:rgba(255,255,255,0.4)'></div></div>",
+                       g_acc.has_2fa ? "dact2FA()" : "act2FA()", g_acc.has_2fa ? "Disable" : "Enable");
         }
+        sb_append(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed.</div><div style='height:10px;'></div><div style='margin-top:10px'>Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>");
     } else {
-        sb_append(&sb, "<div class='settName'>Twitch (none)<div class='lnkTw' onclick='linkTwitchPop();'>Link</div></div><div id='skinList'><div style='margin-bottom:10px;color:rgba(0,0,0,0.5);'>Twitch Drops will return soon</div></div>");
+        sb_append(&sb, "<div style='margin-bottom:10px;color:rgba(255,255,255,0.5);'>You have No Promo Codes</div>");
     }
-    sb_append(&sb, "<div style='height:25px'></div><a class='menuLink' onclick='logoutAcc()'>Logout</a>");
-    if (!g_logout_sessions) sb_append(&sb, "<a style='float:right' class='menuLink' onclick='logoutSessions(this)'>Logout of all Sessions</a>");
+    sb_appendf(&sb, "<div style='height:15px;margin-top:30px;border-top:4px solid rgba(255, 255, 255, 0.8);'></div><a class='menuLink' onclick='logoutAcc()'>Logout</a>%s",
+               g_logout_sessions ? "" : "<a style='float:right' class='menuLink' onclick='logoutSessions(this)'>Logout of all Sessions</a>");
     return sb_finish(&sb);
 }
 
@@ -1139,32 +1207,6 @@ static char *gen_account(void) {
 static char *requirement(const int level, const char *text) {
     StrBuf sb = {0};
     sb_appendf(&sb, "<div class='reqW'><i class='material-icons reqWIcon'>clear</i><div class='reqWLvl'>LEVEL %d REQUIRED</div><div class='reqWTxt'>%s</div></div>", level, text);
-    return sb_finish(&sb);
-}
-
-// windows[13].gen() for an account. KrunkNative has no payments, no prize-wheel table
-// (Game.store) and no img/shop art: the tabs, the balance and the forms v3.1.1 shows
-// are real, the card lists stay empty.
-static char *gen_store(void) {
-    static const char *const tabs[] = {"Prize Wheels", "Premium", "Purchase KR", "Redeem", "Marketplace"}; // config.shopTabs
-    StrBuf sb = {0};
-    sb_append(&sb, "<div class='menuTabsNew'>");
-    for (int i = 0; i < 5; i++) sb_appendf(&sb, "<div class='menuTabNew%s' onclick='windows[13].switchTab(%d)'>%s</div>", g_store_tab == i ? " tabANew" : "", i, tabs[i]);
-    sb_append(&sb, "</div>");
-    if (g_store_tab == 0) {
-        store_wheels_html(&sb); // prize wheels (store_ui.c)
-    } else if (g_store_tab == 1) {
-        sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);margin-bottom:10px'>Choose a Display name &amp; more with <a href='javascript:;' onclick='showWindow(36)'>Krunker Premium</a></div><div id='skinList' style='margin-bottom:10px'></div><div id='premiumRes'></div>");
-        char t[64];
-        readable_time(t, sizeof(t), g_acc.premium ? num_at(g_acc.data, 27) : 0);
-        sb_appendf(&sb, "Time Remaining<span id='premTime'>%s</span>", t);
-    } else if (g_store_tab == 2) {
-        sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);font-size:19px;margin-bottom:-3px'>By purchasing you agree to the <a target='_blank' href='./docs/terms.txt'>Terms</a>. Support your favorite Content Creator by using a Creator Code</div>");
-        sb_append(&sb, "<div><input type='text' id='creatorCodeI' class='smlInput' placeholder='Enter Creator Code' /><div class='creatorCodeBtn' style='background-color:#41c300' onclick='creatorCodeAction(1)'>Save</div></div><div id='skinList'></div>");
-        sb_append(&sb, "<div style='font-size:9px;margin-top:10px'>* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank</div>");
-    } else {
-        sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);font-size:19px;margin-bottom:5px'>Get Vouchers from certain Streamers &amp; Events</div><div><input type='text' id='redVouch' class='smlInput' placeholder='Enter KR Code'/><div class='redVouchBtn' onclick='redeemVoucher()'>Redeem</div></div><div id='vouchRes' style='display:none'></div>");
-    }
     return sb_finish(&sb);
 }
 
@@ -1180,8 +1222,6 @@ char *account_window_gen(const int id, const char **header) {
     (void) header;
     if (backend_available() != 1 || !g_logged_in) return NULL; // the guest captures (LOGIN REQUIRED cards, login form)
     if (id == 5) return gen_account();
-    if (id == 14) return gen_store();
-    if (id == 27) return ranked_window_gen();
     if (id == 33) return gen_challenges();
     if (id == 30) return gen_mail();
     return NULL;

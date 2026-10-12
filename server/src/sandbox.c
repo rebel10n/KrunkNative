@@ -256,7 +256,7 @@ int sandbox_start(const SandboxConfig *cfg) {
     game_configure(&g_server->game, NULL, maps, cfg->map_count, modes, 1, NULL, 0, NULL, 0);
     // WP-E: offline is a sandbox of the real server, played as a hosted game: every map's embedded
     // "config" applies (decisions.md "Embedded map config"; v7's sandbox discards its settings).
-    game_config_host(&g_server->game, NULL, GAME_HOST_CUSTOM);
+    game_config_host(&g_server->game, cfg->host_request, cfg->host_request ? cfg->host_type : GAME_HOST_CUSTOM); // + Host Game's request
     const int map_index = cfg->map_index >= 0 && (size_t) cfg->map_index < cfg->map_count ? cfg->map_index : -1;
     game_init(&g_server->game, map_index, 0, 0);
 
@@ -402,6 +402,13 @@ void sandbox_host(const int map_index, const int mode_id) {
     }
     const int map = map_index >= 0 && (size_t) map_index < game->map_count ? map_index : game->current_map_index;
     net_change_map(map, mode_id >= 0 ? 0 : game->current_mode_index);
+    pthread_mutex_unlock(&g_server->lock);
+}
+
+void sandbox_host_config(const cJSON *request, const int host_type) {
+    if (!g_sb.running) return;
+    pthread_mutex_lock(&g_server->lock);
+    game_config_host(&g_server->game, request, host_type);
     pthread_mutex_unlock(&g_server->lock);
 }
 

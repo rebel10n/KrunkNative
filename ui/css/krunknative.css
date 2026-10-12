@@ -1,7 +1,8 @@
 /*
- * KrunkNative overrides for the Krunker v3.1.1 menu.
+ * KrunkNative overrides for the Krunker v7.1.4 menu.
  *
- * Loaded after Krunker's css/main.css, which is kept byte-identical. Only the
+ * Loaded after Krunker's stylesheets (css/main.css & co., imported unchanged apart from
+ * their URLs by tools/ui-import). Only the
  * deviations a different host forces live here; everything Krunker shows in
  * its loaded, logged-out menu stays visible and styled by main.css. Menu
  * open/closed is done with the same inline styles the game JS uses
@@ -123,4 +124,24 @@ html.kn-preview-bg #canvas {
  * row stays on one line, the selected label is clipped like Chrome clips it. */
 .settName > select.inputGrey2 {
   max-width: 320px;
+}
+
+/* KrunkNative addition: the interact progress bar (menu_ui.c's setup_dom creates
+ * #interactProg > #interProgB, client/src/ui/ui_interact.c fills it; v7.1.4 draws its interact
+ * progress on the overlay canvas). Krunker v3.1.1's main.css rules, unchanged. */
+#interactProg {
+  display: none;
+  position: absolute;
+  margin-right: -50%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  bottom: 175px;
+  width: 400px;
+  height: 30px;
+  background-color: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+}
+.interProg {
+  height: 100%;
+  background-color: #fff;
 }

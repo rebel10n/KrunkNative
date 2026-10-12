@@ -23,6 +23,8 @@ typedef struct {
     int map_index;          // first map, -1 random
     int mode_id;            // Krunker mode id of every round (config.modes = [id]), -1 Free for All
     unsigned short tick_rate; // 0 = 30 (gameserver tick_rate)
+    const cJSON *host_request; // Host Game's request (createPrivateRoom), NULL: only the maps' configs
+    int host_type;            // its config.hostTypes index (0 = GAME_HOST_CUSTOM)
 } SandboxConfig;
 
 int sandbox_start(const SandboxConfig*); // 1 = running (a running sandbox is stopped first)
@@ -49,4 +51,7 @@ void sandbox_step(double seconds);
 // on it (net_change_map). set_maps replaces the server's map list with a copy of `maps` (the
 // cJSON maps stay the caller's: keep the one the round plays alive until the next INIT).
 void sandbox_host(int map_index, int mode_id);
+// Host Game's game config (createPrivateRoom's request, game_config_host like a brain-hosted
+// lobby): the rounds from the next one on (sandbox_host / a map change) play it.
+void sandbox_host_config(const cJSON *request, int host_type);
 int sandbox_set_maps(const cJSON **maps, size_t count);

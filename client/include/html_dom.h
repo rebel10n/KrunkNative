@@ -90,6 +90,11 @@ void html_ui_add_handler(const char *name, HtmlHandlerFn fn);
 // Normalised name of the handler being dispatched ("showWindow", "windows.0.changeTab"); NULL outside a
 // dispatch. Lets the fallback tell calls apart (its signature carries no name).
 const char *html_ui_current_handler(void);
+// event.stopPropagation() from C (v7's f1822(window.event) inside a handler): no ancestor's
+// inline handler of the same event runs after the current one. The backend consumes the
+// request with html_ui_take_stop_propagation() after each dispatch.
+void html_ui_stop_propagation(void);
+int  html_ui_take_stop_propagation(void);
 // Non-inline listeners krunknative.js used addEventListener for. elem_id NULL = window/document.
 void html_ui_set_listener(const char *elem_id, const char *type, HtmlHandlerFn fn);
 // Dispatch entry used by backends (native events.c / web ccall): resolves the handler by name and calls it.

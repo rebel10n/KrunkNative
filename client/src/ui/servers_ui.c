@@ -19,6 +19,10 @@
 #include <map_catalog.h>
 #include <online_mode.h> // server finder URL, online / offline mode
 #include <build_info.h>   // kn_build_protocol (seek-game proto)
+#include <modes.h>       // gameModes alias / name (server rows, host modes)
+#include <game_config.h> // WP-E host types (GAME_HOST_CUSTOM, hostTypes titles)
+#include <ui_host_config.h> // WP-E: the Host Game window's mode / advanced / server bodies
+#include <strings.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -70,11 +74,27 @@ static cJSON *g_games;           // serverListData (array of tuples, owned)
 static double g_total_players, g_social_players;
 static double g_last_load_ms = -1e18;
 static int g_loaded;
-static int g_expanded = -1;
-static char g_search[64];
+static int g_expanded = -1;      // windows[1].expandedRegion
+static char g_search[64];        // windows[1].serverSearch
+static int g_server_tab;         // windows[1].tabIndex (the mode-grouped browser, oldBrowser off)
+static double g_list_start_ms;   // windows[1].startTime (the list's arrival: time-left base)
+static double g_timer_tick_ms;   // updateTimers: the last 1 s step
 static int g_hide_full = -1;     // dK (krk_hideFull), -1 = not read yet
 
 static double now_ms(void) { return glfwGetTime() * 1000.0; }
+
+// UTILS.commaNumber
+static void comma_number(char *out, const size_t n, const double value) {
+    char digits[32];
+    snprintf(digits, sizeof(digits), "%.0f", value > 0 ? value : 0);
+    const size_t len = strlen(digits);
+    size_t o = 0;
+    for (size_t i = 0; i < len && o + 2 < n; i++) {
+        if (i && (len - i) % 3 == 0) out[o++] = ',';
+        out[o++] = digits[i];
+    }
+    out[o] = 0;
+}
 
 // The region's display code ("SV"); an id the table does not know shows as itself.
 static const char *region_name(const char *id) {
@@ -504,56 +524,145 @@ static double g_finder_loaded_ms = -1e18;
 
 static int logged_in(void) { return account_get() && account_session_token()[0]; }
 
-static int search_has(const char *hay_in, const char *needle_in) {
-    char hay[160], needle[64];
-    snprintf(hay, sizeof(hay), "%s", hay_in ? hay_in : "");
-    snprintf(needle, sizeof(needle), "%s", needle_in);
-    for (char *p = hay; *p; p++) *p = (char) tolower((unsigned char) *p);
-    for (char *p = needle; *p; p++) *p = (char) tolower((unsigned char) *p);
-    return strstr(hay, needle) != NULL;
+// ---- v7.1.4 windows[1].getServers / searchMatches (src/index.js), over KrunkNative's
+// tuples [id, region, players, max, meta, timeLeft?]. KrunkNative lobby meta (server_bin
+// accounts.c): i (map, "alias_map" for customs), cs (custom), pr (password), earnKR, mode,
+// map, name, host, port, timeLeft, onlineMode; finder rows (rebuild_finder_rows): finder, n.
+// The v7 fields they stand for: c = cs, pw = pr (lock icon), kr = earnKR, g = mode,
+// ds (24/7 dedicated) = a finder-listed server, h (the row's name) = its server name,
+// tuple[5] (seconds left) = meta.timeLeft. KrunkNative has no official customs (oc) and no
+// priority servers (pr star).
+
+static int str_has_ci(const char *hay, const char *needle) {
+    if (!needle || !needle[0]) return 1;
+    if (!hay) return 0;
+    const size_t n = strlen(needle);
+    for (const char *p = hay; *p; p++) {
+        if (!strncasecmp(p, needle, n)) return 1;
+    }
+    return 0;
 }
 
-static int search_matches(const cJSON *tuple) {
-    const cJSON *meta = cJSON_GetArrayItem(tuple, 4);
-    if (!cJSON_IsObject(meta)) return 0;
-    if (!g_search[0]) return 1;
-    return search_has(cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i")), g_search) ||
-           search_has(cJSON_GetStringValue(cJSON_GetObjectItem(meta, "n")), g_search);
+static const cJSON *meta_of(const cJSON *t) {
+    const cJSON *m = cJSON_GetArrayItem(t, 4);
+    return cJSON_IsObject(m) ? m : NULL;
 }
 
-typedef struct {
-    char key[32];       // region id or "custom"
-    const char *name;
-    int order;
-    double players;
-    const cJSON *games[256];
-    int game_count;
-} ServerGroup;
+static int meta_flag(const cJSON *t, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(meta_of(t), key);
+    return cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble != 0);
+}
+
+static const char *meta_str(const cJSON *t, const char *key) {
+    const char *v = cJSON_GetStringValue(cJSON_GetObjectItem(meta_of(t), key));
+    return v ? v : "";
+}
 
 static int tuple_int(const cJSON *t, const int i) {
     const cJSON *v = cJSON_GetArrayItem(t, i);
     return cJSON_IsNumber(v) ? v->valueint : 0;
 }
 
-static int meta_flag(const cJSON *t, const char *key) {
-    const cJSON *v = cJSON_GetObjectItem(cJSON_GetArrayItem(t, 4), key);
-    return cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble != 0);
+static const char *tuple_str(const cJSON *t, const int i) {
+    const char *v = cJSON_GetStringValue(cJSON_GetArrayItem(t, i));
+    return v ? v : "";
 }
 
-static const ServerGroup *g_sort_groups;
-static int cmp_games(const void *a, const void *b) {
-    const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
-    const int pr = meta_flag(y, "pr") - meta_flag(x, "pr");
-    if (pr) return pr;
-    return tuple_int(y, 2) - tuple_int(x, 2);
+static int row_custom(const cJSON *t) { return meta_flag(t, "cs") || meta_flag(t, "c"); }
+static int row_official(const cJSON *t) { return meta_flag(t, "oc"); }
+static int row_dedicated(const cJSON *t) { return meta_flag(t, "ds") || meta_flag(t, "finder"); }
+static int row_players(const cJSON *t) { const int p = tuple_int(t, 2), m = tuple_int(t, 3); return p < m ? p : m; }
+
+// v7 h: the row's own name (custom game / dedicated server); "" = none
+static const char *row_h(const cJSON *t) {
+    if (meta_flag(t, "finder")) return meta_str(t, "n");
+    return meta_str(t, "h");
 }
-static int cmp_groups(const void *a, const void *b) {
-    const ServerGroup *x = a, *y = b;
-    return (y->order ? y->order : -1) - (x->order ? x->order : -1);
+
+// v7 i: the map; KrunkNative customs carry "alias_map" in i and the map in `map`
+static const char *row_i(const cJSON *t) {
+    if (row_custom(t) && meta_str(t, "map")[0]) return meta_str(t, "map");
+    return meta_str(t, "i");
 }
+
+// gameModes[meta.g].alias / name
+static const GameModeConfig *row_mode(const cJSON *t) {
+    const cJSON *m = cJSON_GetObjectItem(meta_of(t), "mode");
+    if (!cJSON_IsNumber(m)) m = cJSON_GetObjectItem(meta_of(t), "g");
+    return cJSON_IsNumber(m) ? mode_config(m->valueint) : NULL;
+}
+
+static const char *row_alias(const cJSON *t) {
+    const GameModeConfig *mode = row_mode(t);
+    return mode && mode->alias ? mode->alias : "";
+}
+
+static int old_browser(void) { return !ui_setting_is_false("oldBrowser"); }      // SETTINGS.tmp.oldBrowser (default true)
+static int show_region(void) { return !ui_setting_is_false("showRegion"); }      // showRegion (default true)
+static int show_timer(void) { return !ui_setting_is_false("showServerTimer"); }  // showServerTimer (default true)
+static int default_region_only(void) {                                          // defaultRegionOnly (default false)
+    const cJSON *v = ui_setting_value("defaultRegionOnly");
+    return cJSON_IsTrue(v) || (cJSON_IsString(v) && !strcmp(v->valuestring, "true"));
+}
+
+// SETTINGS.list.defaultRegion.val (else the region the client seeks in)
+static void default_region(char *out, const size_t n) {
+    const cJSON *setting = ui_setting_saved("defaultRegion");
+    if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(out, n, "%s", setting->valuestring);
+    else if (html_storage_get("pingRegion7", out, n) < 0) out[0] = 0;
+}
+
+// v7 searchMatches(tuple) against the search text (autoPlaySearch || serverSearch)
+static int search_matches(const cJSON *t) {
+    if (!meta_of(t)) return 0;
+    if (!g_search[0]) return 1;
+    const char *alias = row_alias(t);
+    const char *h = row_h(t)[0] ? row_h(t) : row_i(t);
+    char label[192], label2[200], node[96];
+    if (!row_official(t) && !row_custom(t) && !old_browser() && alias[0]) snprintf(label, sizeof(label), "%s_%s", alias, h);
+    else snprintf(label, sizeof(label), "%s", h);
+    if (row_custom(t) || old_browser()) snprintf(label2, sizeof(label2), "%s_%s", alias, label);
+    else snprintf(label2, sizeof(label2), "%s", label);
+    snprintf(node, sizeof(node), "%s", tuple_str(t, 0));
+    char *colon = strchr(node, ':');
+    if (colon) *colon = 0;
+    return str_has_ci(h, g_search) || str_has_ci(node, g_search) || str_has_ci(label, g_search) || str_has_ci(alias, g_search) ||
+           str_has_ci(label2, g_search) || str_has_ci(tuple_str(t, 1), g_search) || str_has_ci(region_full_name(tuple_str(t, 1)), g_search);
+}
+
+typedef struct {
+    char key[32];       // "official", "custom", a region id or a mode alias
+    char name[64];
+    int order;
+    int region_rank;    // the default region's group first (regionPriority)
+    double players;
+    const cJSON *games[256];
+    int game_count;
+} ServerGroup;
+
+// A fixed game list instead of the brain's (servers_ui_set_games: --render-scenario
+// `state.servers`, KRUNKNATIVE_SERVER_LIST=<file.json> {"games": [...], "totalPlayerCount": n}).
+static int g_games_override;
 
 // The brain lobbies the list shows (only while the brain answers).
-static const cJSON *brain_games(void) { return backend_available() == 1 ? g_games : NULL; }
+static const cJSON *brain_games(void) { return backend_available() == 1 || g_games_override ? g_games : NULL; }
+
+void servers_ui_set_games(const cJSON *list) {
+    cJSON_Delete(g_games);
+    g_games = NULL;
+    g_games_override = list != NULL;
+    if (!list) return;
+    const cJSON *games = cJSON_IsArray(list) ? list : cJSON_GetObjectItem(list, "games");
+    g_games = cJSON_Duplicate(games, 1);
+    const cJSON *total = cJSON_GetObjectItem(list, "totalPlayerCount");
+    g_total_players = cJSON_IsNumber(total) ? total->valuedouble : 0;
+    if (!cJSON_IsNumber(total)) {
+        const cJSON *t;
+        cJSON_ArrayForEach(t, g_games) g_total_players += tuple_int(t, 2);
+    }
+    g_list_start_ms = now_ms();
+    g_loaded = 1;
+}
 
 // A brain lobby runs on host:port (the game-list meta carries both).
 static int brain_lists(const char *host, const int port) {
@@ -597,6 +706,8 @@ static void rebuild_finder_rows(void) {
         cJSON_AddStringToObject(meta, "n", name && name[0] ? name : host);
         cJSON_AddStringToObject(meta, "host", host);
         cJSON_AddNumberToObject(meta, "port", port->valueint);
+        const cJSON *mode = cJSON_GetObjectItem(e, "mode");
+        if (cJSON_IsNumber(mode)) cJSON_AddNumberToObject(meta, "mode", mode->valuedouble);
         if (online) cJSON_AddTrueToObject(meta, "onlineMode");
         cJSON_AddTrueToObject(meta, "finder");
         // build version flags for the row badge (servers_ui_entry_badge_html)
@@ -612,115 +723,303 @@ static void rebuild_finder_rows(void) {
     }
 }
 
-static void group_add(ServerGroup *groups, int *count, const int max, const char *preferred, const cJSON *t) {
-    const cJSON *meta = cJSON_GetArrayItem(t, 4);
-    const cJSON *region = cJSON_GetArrayItem(t, 1);
-    if (!cJSON_IsObject(meta) || !cJSON_IsString(region)) return;
-    int gi = -1;
-    for (int i = 1; i < *count; i++) {
-        if (!strcmp(groups[i].key, region->valuestring)) gi = i;
+static int find_group(ServerGroup *groups, const int count, const char *key) {
+    for (int i = 0; i < count; i++) {
+        if (!strcmp(groups[i].key, key)) return i;
     }
-    if (gi < 0 && *count < max) {
-        gi = (*count)++;
-        snprintf(groups[gi].key, sizeof(groups[gi].key), "%s", region->valuestring);
-        groups[gi].name = region_name(region->valuestring);
-        if (!strcmp(preferred, region->valuestring)) groups[gi].order = 1;
-    }
-    if (gi < 0) return;
-    const int target = meta_flag(t, "cs") ? 0 : gi;
-    const int players = tuple_int(t, 2), max_players = tuple_int(t, 3);
-    if (!g_search[0] || search_matches(t)) groups[target].players += players < max_players ? players : max_players;
-    if (groups[target].game_count < 256) groups[target].games[groups[target].game_count++] = t;
+    return -1;
 }
 
-// getServers(regionIndex): builds the region groups (brain lobbies + finder-only servers);
-// returns the group count.
+// region index in config.regionIND order (KrunkNative: its region table)
+static int region_rank(const char *id) {
+    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
+        if (id && !strcmp(k_regions[i].id, id)) return (int) i;
+    }
+    return (int) (sizeof(k_regions) / sizeof(k_regions[0]));
+}
+
+static char g_sort_region[32];
+static int cmp_games_old(const void *a, const void *b) {
+    const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
+    return row_players(y) - row_players(x); // (pr ? 1 : 0) first: no priority servers in KrunkNative
+}
+// Custom Games / Official Customs with regionPriority (always on): default region first
+static int cmp_games_region(const void *a, const void *b) {
+    const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
+    const int dx = !strcmp(tuple_str(x, 1), g_sort_region), dy = !strcmp(tuple_str(y, 1), g_sort_region);
+    return dy - dx;
+}
+static int new_score(const cJSON *t) {
+    int score = row_players(t) + region_rank(tuple_str(t, 1)) * 100;
+    if (!strcmp(tuple_str(t, 1), g_sort_region)) score += 10000;
+    if (row_players(t) <= 0) score -= 50000;
+    return score;
+}
+static int cmp_games_new(const void *a, const void *b) {
+    return new_score(*(const cJSON *const *) a) - new_score(*(const cJSON *const *) b);
+}
+static int cmp_groups_order(const void *a, const void *b) {
+    const ServerGroup *x = a, *y = b;
+    const int d = (y->order ? y->order : -1) - (x->order ? x->order : -1);
+    return d ? d : x->region_rank - y->region_rank; // qsort is not stable: insertion order breaks ties
+}
+static int cmp_groups_players(const void *a, const void *b) {
+    const ServerGroup *x = a, *y = b;
+    if (y->players != x->players) return y->players > x->players ? 1 : -1;
+    return x->region_rank - y->region_rank;
+}
+
+// Stable sort (v8's Array.prototype.sort is stable): insertion sort, the lists are short.
+static void stable_sort(const cJSON **games, const int n, int (*cmp)(const void *, const void *)) {
+    for (int i = 1; i < n; i++) {
+        const cJSON *v = games[i];
+        int j = i - 1;
+        while (j >= 0 && cmp(&games[j], &v) > 0) {
+            games[j + 1] = games[j];
+            j--;
+        }
+        games[j + 1] = v;
+    }
+}
+
+static void group_push(ServerGroup *g, const cJSON *t) {
+    if (!g_search[0] || search_matches(t)) g->players += row_players(t);
+    if (g->game_count < 256) g->games[g->game_count++] = t;
+}
+
+// getServers(): the region groups (oldBrowser, the default) or the mode groups of the
+// Official / Custom Servers tab; empty groups are dropped. Returns the group count.
 static int build_groups(ServerGroup *groups, const int max) {
-    char preferred[32] = "";
-    if (html_storage_get("pingRegion7", preferred, sizeof(preferred)) < 0) preferred[0] = 0;
-    int count = 0;
+    char def[32] = "";
+    default_region(def, sizeof(def));
+    snprintf(g_sort_region, sizeof(g_sort_region), "%s", def);
+    const int only_default = default_region_only();
     memset(groups, 0, sizeof(*groups) * (size_t) max);
-    snprintf(groups[0].key, sizeof(groups[0].key), "custom");
-    groups[0].name = "Custom Games";
-    groups[0].order = 1;
-    count = 1;
+    int count = 0;
     rebuild_finder_rows();
-    const cJSON *t;
-    cJSON_ArrayForEach(t, brain_games()) group_add(groups, &count, max, preferred, t);
-    cJSON_ArrayForEach(t, g_finder_rows) group_add(groups, &count, max, preferred, t);
-    qsort(groups, (size_t) count, sizeof(*groups), cmp_groups);
-    g_sort_groups = groups;
-    for (int i = 0; i < count; i++) qsort((void *) groups[i].games, (size_t) groups[i].game_count, sizeof(groups[i].games[0]), cmp_games);
+    const cJSON *lists[2] = {brain_games(), g_finder_rows};
+    if (old_browser()) {
+        snprintf(groups[0].key, sizeof(groups[0].key), "official");
+        snprintf(groups[0].name, sizeof(groups[0].name), "Official Customs");
+        groups[0].order = 1;
+        snprintf(groups[1].key, sizeof(groups[1].key), "custom");
+        snprintf(groups[1].name, sizeof(groups[1].name), "Custom Games");
+        groups[1].order = 1;
+        groups[1].region_rank = 1;
+        count = 2;
+        for (int l = 0; l < 2; l++) {
+            const cJSON *t;
+            cJSON_ArrayForEach(t, lists[l]) {
+                const char *region = tuple_str(t, 1);
+                if (!meta_of(t) || (only_default && strcmp(def, region))) continue;
+                if (find_group(groups, count, region) < 0 && count < max) {
+                    ServerGroup *g = &groups[count];
+                    snprintf(g->key, sizeof(g->key), "%s", region);
+                    if (show_region()) snprintf(g->name, sizeof(g->name), "%s", region_name(region));
+                    else snprintf(g->name, sizeof(g->name), "%s", !strcmp(def, region) ? "Default Region" : !strcmp(g_region, region) ? "Current Region" : "Hidden Region");
+                    if (!strcmp(def, region)) g->order = 1;
+                    g->region_rank = count;
+                    count++;
+                }
+                const int gi = find_group(groups, count, row_official(t) ? "official" : row_custom(t) ? "custom" : region);
+                if (gi >= 0) group_push(&groups[gi], t);
+            }
+        }
+        int kept = 0;
+        for (int i = 0; i < count; i++) {
+            if (groups[i].game_count) groups[kept++] = groups[i];
+        }
+        count = kept;
+        qsort(groups, (size_t) count, sizeof(*groups), cmp_groups_order);
+        for (int i = 0; i < count; i++) {
+            stable_sort(groups[i].games, groups[i].game_count, cmp_games_old);
+            if (!strcmp(groups[i].key, "custom") || !strcmp(groups[i].key, "official")) stable_sort(groups[i].games, groups[i].game_count, cmp_games_region);
+        }
+        return count;
+    }
+    // the mode groups (gameModes order); tab 0 = Official Servers (no customs), 1 = Custom Servers
+    int modes = 0;
+    const GameModeConfig *list = mode_list(&modes);
+    for (int i = 0; list && i < modes && count < max; i++) {
+        if (!list[i].alias || find_group(groups, count, list[i].alias) >= 0) continue;
+        snprintf(groups[count].key, sizeof(groups[count].key), "%s", list[i].alias);
+        snprintf(groups[count].name, sizeof(groups[count].name), "%s", list[i].name ? list[i].name : list[i].alias);
+        groups[count].region_rank = count;
+        count++;
+    }
+    for (int l = 0; l < 2; l++) {
+        const cJSON *t;
+        cJSON_ArrayForEach(t, lists[l]) {
+            const int custom = row_custom(t) && !row_official(t);
+            if (!meta_of(t) || (only_default && strcmp(def, tuple_str(t, 1)))) continue;
+            if ((g_server_tab == 0 && custom) || (g_server_tab == 1 && !custom)) continue;
+            const int gi = find_group(groups, count, row_alias(t));
+            if (gi >= 0) group_push(&groups[gi], t);
+        }
+    }
+    int kept = 0;
+    for (int i = 0; i < count; i++) {
+        if (groups[i].game_count) groups[kept++] = groups[i];
+    }
+    count = kept;
+    qsort(groups, (size_t) count, sizeof(*groups), cmp_groups_players);
+    for (int i = 0; i < count; i++) stable_sort(groups[i].games, groups[i].game_count, cmp_games_new);
     return count;
 }
 
+// "Ends in 4m 12s " (UTILS.getReadableTime(ms, true, undefined, true)); "" for 0
+static void readable_time(char *out, const size_t n, const double ms) {
+    long s = (long) floor(ms / 1000.0);
+    long m = s / 60;
+    s %= 60;
+    long h = m / 60;
+    m %= 60;
+    long d = h / 24;
+    h %= 24;
+    const long y = d / 365;
+    d %= 365;
+    size_t len = 0;
+    out[0] = 0;
+    if (y) len += (size_t) snprintf(out + len, n - len, "%ldy ", y);
+    if (d && len < n) len += (size_t) snprintf(out + len, n - len, "%ldd ", d);
+    if (h && len < n) len += (size_t) snprintf(out + len, n - len, "%ldh ", h);
+    if (m && len < n) len += (size_t) snprintf(out + len, n - len, "%ldm ", m);
+    if (s && len < n) snprintf(out + len, n - len, "%lds ", s);
+}
+
+static void time_left_text(char *out, const size_t n, const double seconds) {
+    char t[64];
+    readable_time(t, sizeof(t), seconds * 1000.0);
+    if (t[0]) snprintf(out, n, "Ends in %s", t);
+    else snprintf(out, n, "Starting");
+}
+
+// COLORS.ping by the region's ping (/mm/ping-list values; none known -> low)
+static const char *region_ping_color(const char *region) {
+    const cJSON *p = cJSON_GetObjectItem(g_ping_regions, region);
+    const double ping = cJSON_IsNumber(p) ? p->valuedouble : 0.0;
+    return ping / 2 >= 150 ? "rgb(255, 75, 66)" : ping / 2 >= 50 ? "rgb(255, 213, 66)" : "rgb(158, 235, 86)";
+}
+
+// One server row (getServers' settName settNameIn). The row's label markup is v10981.
+static void append_row(StrBuf *sb, const cJSON *t, const double now) {
+    const int old = old_browser();
+    const char *id = tuple_str(t, 0);
+    const char *alias = row_alias(t);
+    const int custom = row_custom(t), official = row_official(t), dedicated = row_dedicated(t);
+    const int finder = meta_flag(t, "finder");
+    const int current = !finder && g_game_id[0] && !strcmp(g_game_id, id);
+    char def[32] = "";
+    default_region(def, sizeof(def));
+    StrBuf name = {0};
+    if (row_h(t)[0]) sb_append(&name, row_h(t));
+    else sb_append(&name, row_i(t));
+    if (!official && !dedicated && !custom && !row_h(t)[0] && !old && alias[0]) {
+        StrBuf pre = {0};
+        sb_appendf(&pre, "%s_%s", alias, name.data ? name.data : "");
+        sb_free(&name);
+        name = pre;
+    }
+    sb_append(sb, "<div class='settName settNameIn' onmouseenter='playTick()'style='");
+    if (current) sb_append(sb, "color:#fff !important;");
+    sb_append(sb, "padding-top:10px;margin-top:0px;' onclick='playSelect(0.1);");
+    if (finder) {
+        // a finder-only server: joined directly (finderJoin(host, port))
+        sb_append(sb, "finderJoin(\"");
+        sb_append_esc(sb, meta_str(t, "host"));
+        sb_appendf(sb, "\", %d)'>", (int) cJSON_GetNumberValue(cJSON_GetObjectItem(meta_of(t), "port")));
+    } else {
+        // v7: checkedSwitchServer(id, this.querySelector(".serverPCount")); the element (the
+        // row) is passed and the handler looks the cell up (servers_ui_handle)
+        sb_append(sb, "checkedSwitchServer(\"");
+        sb_append_esc(sb, id);
+        sb_append(sb, "\", this)'>");
+    }
+    // label
+    if (custom || old) {
+        if (!(dedicated || row_h(t)[0]) && alias[0]) {
+            sb_append_esc(sb, alias);
+            sb_append(sb, "_");
+        }
+    } else {
+        sb_append(sb, "[YEND] ");
+    }
+    if (official) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--green);'>OFFICIAL</div> ");
+    if (official || dedicated) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--blue);'>24/7</div> ");
+    sb_append_esc(sb, name.data ? name.data : "");
+    sb_free(&name);
+    if (meta_flag(t, "kr") || meta_flag(t, "earnKR")) sb_append(sb, " <div class='krIcon' style='margin-top:-6px;vertical-align:middle'>KR</div> ");
+    if (meta_flag(t, "pw") || meta_flag(t, "pr")) sb_append(sb, " <span class='material-icons' style='margin-top:-6px;color:#FBC02D;vertical-align:middle'>lock</span> ");
+    // KrunkNative: online-mode lobbies verify accounts; a guest is told before trying
+    if (meta_flag(t, "onlineMode")) {
+        sb_append(sb, " <span class='material-icons' style='margin-top:-6px;color:rgba(255,255,255,0.5);vertical-align:middle' title='Online mode: verified accounts'>verified_user</span> ");
+        if (!logged_in()) sb_append(sb, "<span style='font-size:16px;color:rgba(255,255,255,0.5)'>Account required </span>");
+    }
+    char *badge = servers_ui_entry_badge_html(t); // Outdated / Incompatible (build versions)
+    sb_append(sb, badge);
+    free(badge);
+    sb_appendf(sb, "<div class='serverPCount'>%d/%d</div>", row_players(t), tuple_int(t, 3));
+    if (custom || !old || official) {
+        sb_append(sb, "<div class='serverRegion'>");
+        if (!show_region()) {
+            sb_append(sb, !strcmp(def, tuple_str(t, 1)) ? "DEFAULT" : !strcmp(g_region, tuple_str(t, 1)) ? "CURRENT" : "HIDDEN");
+        } else {
+            char node[96];
+            snprintf(node, sizeof(node), "%s", id);
+            char *colon = strchr(node, ':');
+            if (colon) *colon = 0;
+            sb_append_esc(sb, node);
+        }
+        sb_append(sb, " -&nbsp;</div>");
+    }
+    sb_appendf(sb, "<div class='serverPing material-icons' style='color:%s!important;'>signal_cellular_alt</div>", region_ping_color(tuple_str(t, 1)));
+    if (!official && !custom && !dedicated && show_timer()) {
+        const cJSON *tl = cJSON_GetArrayItem(t, 5);
+        if (!cJSON_IsNumber(tl)) tl = cJSON_GetObjectItem(meta_of(t), "timeLeft");
+        double left = (cJSON_IsNumber(tl) ? tl->valuedouble : 0.0) - (now - g_list_start_ms) / 1000.0;
+        if (left < 0) left = 0;
+        char text[96];
+        time_left_text(text, sizeof(text), left);
+        sb_appendf(sb, "<div class=\"serverTimeLeft\" data-time-left=\"%.15g\">%s</div>", left, text);
+    }
+    sb_append(sb, "</div>");
+}
+
 static char *get_servers(void) {
-    static ServerGroup groups[24];
-    const int count = build_groups(groups, 24);
-    const int guest = !logged_in();
+    static ServerGroup groups[32];
+    const int count = build_groups(groups, 32);
+    const int old = old_browser();
+    const int hide = hide_full();
+    const double now = now_ms();
+    char def[32] = "";
+    default_region(def, sizeof(def));
     StrBuf sb = {0};
     for (int h = 0; h < count; h++) {
         const ServerGroup *g = &groups[h];
         const int open = g_expanded == h;
-        sb_appendf(&sb, "<div class='menuSelectorHeader' onclick='setExpandedRegion(%d)' style='cursor: pointer;' title='", open ? -1 : h);
-        sb_append_esc(&sb, strcmp(g->key, "custom") ? region_full_name(g->key) : "");
-        sb_appendf(&sb, "'><span class='material-icons plusOrMinus'>%s</span> ", open ? "expand_more" : "navigate_next");
+        sb_appendf(&sb, "<div class='setHed' style='margin-top:20px;' onmouseenter='playTick()' onclick='playSelect(0.1);setExpandedRegion(%d)' style='cursor: pointer;'", open ? -1 : h);
+        if (old && strcmp(g->key, "custom") && strcmp(g->key, "official") && region_full_name(g->key)[0]) {
+            sb_append(&sb, " title='"); // KrunkNative: the region code's place name
+            sb_append_esc(&sb, region_full_name(g->key));
+            sb_append(&sb, "'");
+        }
+        sb_appendf(&sb, "><span class='material-icons plusOrMinus'>%s</span> ", open ? "expand_more" : "navigate_next");
         sb_append_esc(&sb, g->name);
-        sb_appendf(&sb, "<span style='float:right'>%.0f online</span></div><div class='quickJoin' onclick='quickJoinRegion(%d)'>Quick Join</div>", g->players, h);
+        sb_appendf(&sb, "<span style='float:right;color:rgba(255,255,255,0.9)'>%.0f <span style='color:rgba(255,255,255,0.6)'>online</span></span><div class='quickJoin' onclick='quickJoinRegion(%d,%d)'>Quick Join</div></div>",
+                   g->players, h, old ? 0 : 1);
         if (!open) continue;
-        sb_append(&sb, "<div class='menuSelectorHolder'>");
-        int shown = 0;
+        sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;'>");
+        int shown = 0, kept = 0;
         for (int i = 0; i < g->game_count; i++) {
             const cJSON *t = g->games[i];
-            const int players = tuple_int(t, 2), max_players = tuple_int(t, 3);
-            if (hide_full() && players >= max_players) continue;
+            if (hide && tuple_int(t, 2) >= tuple_int(t, 3)) continue; // hideFull: players != max
+            kept++;
+            if (default_region_only() && strcmp(def, tuple_str(t, 1))) continue;
             if (g_search[0] && !search_matches(t)) continue;
             shown++;
-            const cJSON *meta = cJSON_GetArrayItem(t, 4);
-            const cJSON *id = cJSON_GetArrayItem(t, 0);
-            const cJSON *label = cJSON_GetObjectItem(meta, "i");
-            const char *ids = cJSON_IsString(id) ? id->valuestring : "";
-            const int finder = meta_flag(t, "finder");
-            const int selected = !finder && g_game_id[0] && !strcmp(g_game_id, ids);
-            if (finder) {
-                // a finder-only server: joined directly (finderJoin(host, port))
-                sb_append(&sb, "<div class='menuSelector' onclick='finderJoin(\"");
-                sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host")));
-                sb_appendf(&sb, "\", %d)'>", (int) cJSON_GetNumberValue(cJSON_GetObjectItem(meta, "port")));
-            } else {
-                sb_appendf(&sb, "<div class='menuSelector%s' onclick='checkedSwitchServer(\"", selected ? " selectedMenuSelector" : "");
-                sb_append_esc(&sb, ids);
-                sb_append(&sb, "\", this)'>"); // v3.1.1: this.querySelector(".serverPCount") (resolved in C)
-            }
-            sb_append_esc(&sb, cJSON_IsString(label) ? label->valuestring : ids);
-            if (meta_flag(t, "pr")) sb_append(&sb, " <span class='material-icons' style='color:#FBC02D;vertical-align:middle'>star</span> ");
-            if (meta_flag(t, "earnKR")) sb_append(&sb, " <i class='material-icons' style='color:#2196F3;font-size:33px;vertical-align:bottom;'>check_circle</i>");
-            // KrunkNative: online-mode lobbies verify accounts; a guest is told before trying
-            if (meta_flag(t, "onlineMode")) {
-                sb_append(&sb, " <span class='material-icons' style='color:rgba(0,0,0,0.4);font-size:22px;vertical-align:middle' title='Online mode: verified accounts'>lock</span>");
-                if (guest) sb_append(&sb, "<span class='grey' style='font-size:16px'> Account required</span>");
-            }
-            char *badge = servers_ui_entry_badge_html(t); // Outdated / Incompatible (build versions)
-            sb_append(&sb, badge);
-            free(badge);
-            sb_appendf(&sb, "<div class='serverPCount'>%d/%d</div>", players < max_players ? players : max_players, max_players);
-            if (finder) {
-                // like a custom game's node id: the server's own name
-                sb_append(&sb, "<div class='serverRegion'>");
-                sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "n")));
-                sb_append(&sb, " -&nbsp;</div>");
-            } else if (meta_flag(t, "cs")) {
-                char node[64];
-                snprintf(node, sizeof(node), "%s", ids);
-                char *colon = strchr(node, ':');
-                if (colon) *colon = 0;
-                sb_append(&sb, "<div class='serverRegion'>");
-                sb_append_esc(&sb, node);
-                sb_append(&sb, " -&nbsp;</div>");
-            }
-            sb_append(&sb, "</div>");
+            append_row(&sb, t, now);
         }
-        if (!g->game_count || !shown) sb_append(&sb, "<div style='margin-left: 30px;margin-top: -5px;margin-bottom: 2px;'>No Joinable Games Found...</div>");
+        if (!kept || !shown) sb_append(&sb, "<div style='margin-left: 30px;margin-top: 5px;margin-bottom: 2px;'>No Joinable Games Found...</div>");
         sb_append(&sb, "</div>");
     }
     return sb_finish(&sb);
@@ -832,49 +1131,147 @@ int servers_ui_reconnect(void) {
     return 1;
 }
 
-// "host[:port]" (default port 21015); [v6]:port accepted.
-static void direct_connect_text(const char *text) {
-    char host[128] = "";
-    int port = 21015;
+// ---- KrunkNative addition: the menu's Connect button (#menuBtnConnect, next to Invite / Join
+// in #subLogoButtons) and its window (SERVERS_WINDOW_CONNECT, laid out like v7's Join window:
+// an .accountInput field and a .joinBtn). The address is parsed like the console's `connect`
+// (ui_console.c cmd_connect: scheme / path stripped, "host[:port]" with port 21015 by default,
+// "local" / "localhost" = 127.0.0.1, natively IPv4 only) and joins through the same pinned
+// direct session (servers_ui_connect_direct), so `reconnect` / `disconnect` keep working.
+
+// "host[:port]" -> host + port. 0 with a message in err on a bad address.
+static int parse_connect_address(const char *text, char *host, const size_t host_n, int *port, char *err, const size_t err_n) {
+    char target[256];
     while (text && (*text == ' ' || *text == '\t')) text++;
-    if (!text || !*text) return;
-    if (*text == '[') {
-        const char *end = strchr(text, ']');
-        if (!end) return;
-        snprintf(host, sizeof(host), "%.*s", (int) (end - text - 1), text + 1);
-        if (end[1] == ':') port = atoi(end + 2);
-    } else {
-        snprintf(host, sizeof(host), "%s", text);
-        char *colon = strchr(host, ':');
-        if (colon && !strchr(colon + 1, ':')) {
-            port = atoi(colon + 1);
-            *colon = 0;
-        }
+    snprintf(target, sizeof(target), "%s", text && *text ? text : "local");
+    size_t n = strlen(target);
+    while (n && (target[n - 1] == ' ' || target[n - 1] == '\t' || target[n - 1] == '\r' || target[n - 1] == '\n')) target[--n] = 0;
+    *port = NET_DEFAULT_PORT;
+    if (!strcasecmp(target, "local") || !strcasecmp(target, "default")) {
+        snprintf(host, host_n, "127.0.0.1");
+        return 1;
     }
-    size_t n = strlen(host);
-    while (n && host[n - 1] == ' ') host[--n] = 0;
-    direct_join(host, port);
+    const char *start = strstr(target, "://") ? strstr(target, "://") + 3 : target;
+    snprintf(host, host_n, "%s", start);
+    char *slash = strchr(host, '/');
+    if (slash) *slash = 0;
+    char *colon = strrchr(host, ':');
+    if (colon) {
+        *colon = 0;
+        *port = (int) strtoul(colon + 1, NULL, 10);
+    }
+    if (!host[0] || *port <= 0 || *port > 65535) {
+        snprintf(err, err_n, "Enter a server address: host or host:port");
+        return 0;
+    }
+    if (!strcmp(host, "localhost") || !strcmp(host, "0.0.0.0")) snprintf(host, host_n, "127.0.0.1");
+#ifndef __EMSCRIPTEN__
+    unsigned int b[4];
+    char tail;
+    if (sscanf(host, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &tail) != 4 || b[0] > 255 || b[1] > 255 || b[2] > 255 || b[3] > 255) {
+        snprintf(err, err_n, "Cannot resolve %s (IPv4 addresses only)", host);
+        return 0;
+    }
+#endif
+    return 1;
 }
 
-static char *gen_list(void) {
-    char total[32], social[32];
-    snprintf(total, sizeof(total), "%.0f", g_total_players);
-    snprintf(social, sizeof(social), "%.0f", g_social_players);
+char *servers_connect_window_gen(void) {
     StrBuf sb = {0};
-    g_search[0] = 0; // genList: this.serverSearch = null
-    // KrunkNative: hosting is the dedicated server exe; this tab is Direct Connect (host:port)
-    sb_append(&sb, "<div class='serverHeader'><div class='sideTabs'><input id='directConnect' type='text' placeholder='Direct Connect ip:port' onkeydown='if(event.keyCode==13)directConnect()' style='width:170px'></input><a onclick='directConnect()'> Join</a></div><div class='centerTab'><input id='serverSearch' type='text' placeholder='Search Game' oninput='windows[1].searchList()'></input></div><div class='sideTabs'><div id=\"hideFull\" style=\"display:inline-block;\"><span class='grey'>Hide Full</span><label class='switch2' style='margin-top: 4px;margin-left: 11px;'><input type='checkbox' onclick='toggleHF(this.checked);windows[1].searchList()'");
+    sb_append(&sb, "<input id='connectAddr' type='text' placeholder='Enter Server Address (host:port)' class='accountInput' style='margin-top:0;margin-bottom:10px;' value='");
+    if (g_client && g_last_direct && g_client->net_address[0]) { // the last direct server, ready to reconnect
+        sb_append_esc(&sb, g_client->net_address);
+        if (g_client->net_port != NET_DEFAULT_PORT) sb_appendf(&sb, ":%u", (unsigned int) g_client->net_port);
+    }
+    sb_append(&sb, "' onkeydown='if(event.keyCode==13)connectServer()'><div id='connectResp' style='display:none;margin-bottom:10px;font-size:18px;color:rgba(255,255,255,0.5);text-align:center'></div><div class='joinBtn' onclick='connectServer()' style='width:100%'>Connect</div>");
+    return sb_finish(&sb);
+}
+
+// connectServer(): the window's field (or an address argument)
+static void connect_server(const char *text) {
+    char host[160], err[160] = "";
+    int port;
+    if (!parse_connect_address(text, host, sizeof(host), &port, err, sizeof(err))) {
+        HtmlElem resp = html_dom_by_id("connectResp");
+        if (resp) {
+            html_dom_set_text(resp, err);
+            html_dom_set_display(resp, "block");
+        }
+        return;
+    }
+    printf("[mm] connect window: %s:%d\n", host, port);
+    servers_ui_connect_direct(host, port); // pinned, like the console's connect
+    menu_show_connecting();                // CONNECTING... until the server answers
+}
+
+// The menu's Connect button, injected once after Join (#menuBtnJoin).
+void servers_ui_menu_setup(void) {
+    if (html_dom_by_id("menuBtnConnect")) return;
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) return; // uidiff compares the row with v7.1.4's
+#endif
+    HtmlElem join = html_dom_by_id("menuBtnJoin");
+    if (join) html_dom_insert_html(join, HTML_INSERT_AFTER_END,
+                                   "<div class=\"button small buttonPI\" id=\"menuBtnConnect\" onmouseenter=\"playTick()\" onclick=\"playSelect(),openConnectWindow()\">Connect</div>");
+}
+
+// The header's left slot: v7's "+ Host Game" (showWindow(42)). Hosting is the dedicated
+// server in KrunkNative (doc/backend.md 8.7), so natively the link is hidden like the menu's
+// Host Game button; --render-scenario keeps it for uidiff. (Direct connects: the menu's
+// Connect button, servers_ui_menu_setup.)
+static void append_header_left(StrBuf *sb) {
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) {
+        sb_append(sb, "<div style='display:inline-block'><a onclick='showWindow(42)'>+ Host Game</a></div>");
+        return;
+    }
+#endif
+    sb_append(sb, "<div style='display:none'><a onclick='showWindow(42)'>+ Host Game</a></div>");
+}
+
+// windows[1].genList()
+static char *gen_list(void) {
+    const int old = old_browser();
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='serverHeader'><div class='setBodH' style='padding:10px;margin-top:0px;margin-bottom:8px;width:calc(100% - 20px) !important;margin-left:0px;'>");
+    append_header_left(&sb);
+    sb_append(&sb, "<div style='display:inline-block;'><input id='serverSearch' style='width:450px;margin-left:16px;margin-right:18px' type='text' placeholder='Search: FFA, SYD, Burg'");
+    if (g_search[0]) {
+        sb_append(&sb, " value='");
+        sb_append_esc(&sb, g_search);
+        sb_append(&sb, "'");
+    }
+    sb_append(&sb, " oninput='windows[1].searchList()'></input></div><div style='float:right;display:inline-block;'>");
+    char *download = servers_ui_download_button_html(NULL); // the latest server build (ci-release)
+    sb_append(&sb, download);
+    free(download);
+    sb_append(&sb, "<div id='hostMenuBtn' onclick='windows[0].tabIndex=0;showWindow(1);'><span class='material-icons' style='color:#fff;font-size:40px;margin-bottom:-1px;'>miscellaneous_services</span></div></div><div id=\"hideFull\" style=\"display:inline-block;float:right;margin-right:20px;margin-top:3px;\"><span style='color:#fff'>Hide Full</span><label class='switch2' style='margin-top: 4px;margin-left: 11px;'><input type='checkbox' onclick='toggleHF(this.checked);windows[1].searchList()'");
     if (hide_full()) sb_append(&sb, " checked");
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
-    // the custom-games carousel (customsInfo.length >= 3) needs user-assets thumbnails: not shown
-    sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
-    char *servers = backend_available() == 1 || online_finder_url()[0] ? get_servers() : NULL;
-    if (servers) sb_append(&sb, servers);
+    char *servers = get_servers();
+    if (old) {
+        // the custom-games carousel (customsInfo.length >= 3) needs user-assets thumbnails: not shown
+        sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
+        sb_append(&sb, servers);
+        sb_append(&sb, "</div>");
+    } else {
+        static const char *const tabs[] = {"Official Servers", "&nbsp;Custom Servers&nbsp;"}; // config.serverTabs
+        sb_append(&sb, "<div class='bigMenTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
+        for (int i = 0; i < 2; i++) sb_appendf(&sb, "<div class='bigMenTab%s' style='height:18px;' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
+        sb_append(&sb, "</div>");
+        if (g_server_tab != 2) {
+            sb_append(&sb, "<div id='serverHolder'>");
+            sb_append(&sb, servers);
+            sb_append(&sb, "</div>");
+        }
+    }
     free(servers);
-    snprintf(total, sizeof(total), "%.0f", (backend_available() == 1 ? g_total_players : 0) + g_finder_players); // after get_servers: + finder-only
-    char *download = servers_ui_download_button_html(NULL); // the latest server build (ci-release)
-    sb_appendf(&sb, "</div><div style='height:10px'></div><b style='color:rgba(0,0,0,0.6)'>%s In Game &nbsp; %s<span style='float:right;color:rgba(0,0,0,0.6)'>%s on Social</span></b></div>", total, download, social);
-    free(download);
+    char total[32], social[32];
+    const double players = (brain_games() ? g_total_players : 0) + g_finder_players; // after get_servers: + finder-only
+    comma_number(total, sizeof(total), players);
+    comma_number(social, sizeof(social), g_social_players);
+    sb_appendf(&sb, "<div class='setBodH' style='padding-bottom:10px;margin-top:30px;padding-top:0px;margin-left:0px;width:calc(100%% - 40px);'><div style='height:10px'></div><b style='font-size:26px;color:rgba(255,255,255,0.8)'><span style='font-size:26px;color:rgba(255,255,255,0.8)' id='playerCnt'>%s In Game</span><span style='float:right;font-size:26px;color:font-size:26px;color:rgba(255,255,255,0.6);position: absolute;left: 50%%;transform: translateX(-50%%);' id='editorCnt'>0 in Editor</span><span style='float:right;font-size:26px;color:rgba(255,255,255,0.6)' id='socialCnt'>%s on Social</span></b></div>",
+               total, social);
+    sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }
 
@@ -889,6 +1286,7 @@ static void on_game_list(void *user, const int status, const char *body, const s
         g_games = cJSON_Duplicate(games, 1);
         const cJSON *total = cJSON_GetObjectItem(res, "totalPlayerCount");
         g_total_players = cJSON_IsNumber(total) ? total->valuedouble : 0;
+        g_list_start_ms = now_ms(); // windows[1].startTime
     }
     cJSON_Delete(res);
     g_loaded = 1;
@@ -907,34 +1305,66 @@ static void on_player_count(void *user, const int status, const char *body, cons
     cJSON_Delete(res);
 }
 
+static char *games_window_gen(void);
+static char *host_window_gen(void);
+
 char *servers_window_gen(const int id, const char **header) {
     (void) header;
+    if (id == 10) return games_window_gen();
+    if (id == SERVERS_WINDOW_CONNECT) {
+        if (header) *header = "Connect"; // KrunkNative window
+        return servers_connect_window_gen();
+    }
+    if (id == MENU_WINDOW_HOST) return host_window_gen();
     if (id != 2) return NULL;
     finder_refresh(); // the server finder (both modes), then the brain's own lobbies when there is one
-    if (backend_available() != 1) {
-        if (!online_finder_url()[0]) return NULL; // no brain, no finder: the guest capture
+    if (backend_available() != 1 || g_games_override) {
+        // no brain: the finder's servers when there is a finder, else the empty list (what
+        // v7 shows when client.fetchGameList() has no game)
         g_loaded = 1;
         return gen_list();
     }
-    // gen(): the cached list within serverBrowserRate, else loadData() ("Loading...")
+    // gen(): the cached list within serverBrowserRate, else loadData()
     if (now_ms() - g_last_load_ms < SERVER_BROWSER_RATE_MS && g_loaded) return gen_list();
     g_last_load_ms = now_ms();
     g_loaded = 0;
     backend_http_get("/mm/game-list?hostname=krunknative", on_game_list, NULL);
     backend_http_get("/api/player-count", on_player_count, NULL);
+    // loadData()'s "<div style='padding-top:19px;>" lacks its closing quote, which swallows
+    // the text in v7.1.4 (a blank window while loading): fixed
     return strdup("<div style='padding-top:19px;'>LOADING...</div>");
 }
 
+// setExpandedRegion / searchList: #serverHolder = getServers()
 static void refresh_holder(void) {
     HtmlElem holder = html_dom_by_id("serverHolder");
     if (!holder) return;
-    StrBuf sb = {0};
-    char *html = backend_available() == 1 || online_finder_url()[0] ? get_servers() : NULL;
-    if (html) sb_append(&sb, html);
-    free(html);
-    html = sb_finish(&sb);
+    char *html = get_servers();
     html_dom_set_html(holder, html);
     free(html);
+}
+
+// windows[1].updateTimers (post, showServerTimer): every second each "Ends in" counts down.
+static void servers_timer_tick(void) {
+    const double now = now_ms();
+    if (now - g_timer_tick_ms < 1000.0) return;
+    g_timer_tick_ms = now;
+    if (!show_timer() || menu_ui()->active_window != 2) return;
+    HtmlElem cells[256];
+    const int n = html_dom_query_all(0, "#serverHolder .serverTimeLeft", cells, 256);
+    for (int i = 0; i < n; i++) {
+        char v[32] = "";
+        if (html_dom_get_attr(cells[i], "data-time-left", v, sizeof(v)) < 0) continue;
+        int left = atoi(v); // parseInt
+        if (left <= 0 && !strcmp(v, "0")) continue; // :not([data-time-left="0"])
+        left--;
+        if (left < 0) left = 0; // v7 counts below zero ("Ends in -1s") once a fractional start rounds to 0: clamped
+        snprintf(v, sizeof(v), "%d", left);
+        html_dom_set_attr(cells[i], "data-time-left", v);
+        char text[96];
+        time_left_text(text, sizeof(text), left);
+        html_dom_set_text(cells[i], text);
+    }
 }
 
 // quickJoinRegion(i): switchGame on the first joinable candidates (getServers(i))
@@ -955,8 +1385,8 @@ void servers_quick_join_next(void) {
 }
 
 static void quick_join_region(const int index) {
-    static ServerGroup groups[24];
-    const int count = build_groups(groups, 24);
+    static ServerGroup groups[32];
+    const int count = build_groups(groups, 32);
     for (int i = 0; i < g_quick_join_count; i++) free(g_quick_join[i]);
     free(g_quick_join);
     g_quick_join = NULL;
@@ -968,7 +1398,7 @@ static void quick_join_region(const int index) {
     const cJSON *finder_pick = NULL; // the fullest joinable finder-only server (rows are sorted)
     for (int i = 0; g_quick_join && i < g->game_count; i++) {
         const cJSON *t = g->games[i];
-        const int players = tuple_int(t, 2), max_players = tuple_int(t, 3);
+        const int players = row_players(t), max_players = tuple_int(t, 3);
         if (g_search[0] && !search_matches(t)) continue;
         if (!meta_flag(t, "finder")) brain_rows++;
         if (meta_flag(t, "onlineMode") && !logged_in()) continue; // AccountRequired for a guest
@@ -986,7 +1416,7 @@ static void quick_join_region(const int index) {
         direct_join(cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host")), (int) cJSON_GetNumberValue(cJSON_GetObjectItem(meta, "port")));
         return;
     }
-    if (!g_quick_join_count && strcmp(g->key, "custom") && brain_rows && backend_available() == 1) {
+    if (!g_quick_join_count && strcmp(g->key, "custom") && strcmp(g->key, "official") && old_browser() && brain_rows && backend_available() == 1) {
         // no populated public lobby: seek the region (the brain picks or spawns one)
         snprintf(g_region, sizeof(g_region), "%s", g->key);
         menu_show_window(MENU_WINDOW_NONE, 0);
@@ -998,34 +1428,83 @@ static void quick_join_region(const int index) {
     servers_quick_join_next();
 }
 
-// checkedSwitchServer(id, el): game-info first; FULL / ERROR in the count cell
+// checkedSwitchServer(id, el) (v7 f1736): "..." then game-info; FULL when it is full (the
+// count comes back after 1 s), ERROR when the request fails, else switch to it.
 static char g_checked_id[160];
+static char g_checked_count[32];  // "p/max" written back 1 s after FULL
+static int g_checked_timer;
+
+static HtmlElem checked_cell(void) {
+    HtmlElem rows[256];
+    const int n = html_dom_query_all(0, "#serverHolder .settNameIn", rows, 256);
+    for (int i = 0; i < n; i++) {
+        char onclick[512] = "";
+        html_dom_get_attr(rows[i], "onclick", onclick, sizeof(onclick));
+        char want[200];
+        snprintf(want, sizeof(want), "checkedSwitchServer(\"%s\"", g_checked_id);
+        if (strstr(onclick, want)) return html_dom_query(rows[i], ".serverPCount");
+    }
+    return 0;
+}
+
+static void checked_restore(void *user) {
+    (void) user;
+    g_checked_timer = 0;
+    HtmlElem cell = checked_cell();
+    if (cell && g_checked_count[0]) html_dom_set_text(cell, g_checked_count);
+}
+
 static void on_checked_info(void *user, const int status, const char *body, const size_t length) {
     (void) user;
     (void) length;
     cJSON *t = status == 200 ? cJSON_Parse(body) : NULL;
-    HtmlElem cell = 0;
-    HtmlElem cells[256];
-    const int n = html_dom_query_all(0, "#serverHolder .menuSelector", cells, 256);
-    for (int i = 0; i < n; i++) {
-        char onclick[512] = "";
-        html_dom_get_attr(cells[i], "onclick", onclick, sizeof(onclick));
-        if (strstr(onclick, g_checked_id)) cell = html_dom_query(cells[i], ".serverPCount");
-    }
+    HtmlElem cell = checked_cell();
     if (!cJSON_IsArray(t)) {
         if (cell) html_dom_set_text(cell, "ERROR");
-    } else if (tuple_int(t, 2) >= tuple_int(t, 3)) {
-        if (cell) html_dom_set_text(cell, "FULL");
-    } else if (meta_flag(t, "onlineMode") && !logged_in()) {
-        need_account(cell, g_checked_id); // the seek would answer AccountRequired
     } else {
-        menu_show_window(MENU_WINDOW_NONE, 0);
-        switch_server(g_checked_id);
+        snprintf(g_checked_count, sizeof(g_checked_count), "%d/%d", row_players(t), tuple_int(t, 3));
+        if (tuple_int(t, 2) >= tuple_int(t, 3)) {
+            if (cell) html_dom_set_text(cell, "FULL");
+        } else if (meta_flag(t, "onlineMode") && !logged_in()) {
+            need_account(cell, g_checked_id); // the seek would answer AccountRequired
+            cJSON_Delete(t);
+            return;
+        } else {
+            menu_show_window(MENU_WINDOW_NONE, 0);
+            switch_server(g_checked_id);
+        }
+        if (g_checked_timer) html_timer_cancel(g_checked_timer);
+        g_checked_timer = html_timer_add(1000.0, checked_restore, NULL);
     }
     cJSON_Delete(t);
 }
 
+// openServerWindow(n) (Server Finder, showWindow(48)): 0 Public / 1 Customs open the Servers
+// window (Customs: oldBrowser collapses the regions, else the Custom Servers tab); 2 Raids /
+// 3 Zombies / 4 Trade Plaza search the official customs of that mode, which KrunkNative has
+// none of: v7's "Couldnt find any" popup.
+static void open_server_window(const int which) {
+    if (which == 0 || which == 1) {
+        menu_show_window(2, 0);
+        if (which == 1) {
+            if (old_browser()) {
+                g_expanded = -1;
+                refresh_holder();
+            } else {
+                g_server_tab = 1;
+                g_expanded = -1;
+                menu_rerender_if_open(2);
+            }
+        }
+        return;
+    }
+    ui_alert("Couldnt find any");
+}
+
 static void games_load_more(const HtmlEvent *ev);
+
+static void host_switch_tab(int tab);
+static void games_search(void);
 
 int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
@@ -1033,12 +1512,18 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         servers_ui_open_download();
         return 1;
     }
-    if (!strcmp(name, "directConnect")) {
-        char text[160] = "";
-        HtmlElem input = html_dom_by_id("directConnect");
+    if (!strcmp(name, "openConnectWindow")) {
+        menu_show_window(SERVERS_WINDOW_CONNECT, 0);
+        HtmlElem input = html_dom_by_id("connectAddr");
+        if (input) html_dom_focus(input);
+        return 1;
+    }
+    if (!strcmp(name, "connectServer")) {
+        char text[256] = "";
+        HtmlElem input = html_dom_by_id("connectAddr");
         if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) snprintf(text, sizeof(text), "%s", args[0].str);
         else if (input) html_dom_get_value(input, text, sizeof(text));
-        direct_connect_text(text);
+        connect_server(text);
         return 1;
     }
     if (!strcmp(name, "finderJoin")) {
@@ -1051,12 +1536,9 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         }
         return 1;
     }
-    if (backend_available() != 1 && online_finder_url()[0] &&
-        (!strcmp(name, "windows.1.searchList") || !strcmp(name, "toggleHF") || !strcmp(name, "setExpandedRegion") ||
-         !strcmp(name, "quickJoinRegion"))) {
-        // no brain, but the finder list is up: its region groups still filter, expand and quick join
-    } else if (backend_available() != 1) {
-        return -1;
+    if (!strcmp(name, "openServerWindow")) {
+        open_server_window(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
+        return 1;
     }
     if (!strcmp(name, "setExpandedRegion")) {
         g_expanded = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
@@ -1064,25 +1546,28 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         refresh_holder();
         return 1;
     }
+    if (!strcmp(name, "windows.1.switchTab")) {
+        g_server_tab = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        g_expanded = -1;
+        menu_rerender_if_open(2); // updateWindow(2)
+        return 1;
+    }
     if (!strcmp(name, "windows.1.searchList")) {
         HtmlElem input = html_dom_by_id("serverSearch");
         g_search[0] = 0;
         if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) {
-            g_expanded = 0;
             snprintf(g_search, sizeof(g_search), "%s", args[0].str);
             if (input) html_dom_set_value(input, g_search);
+            g_expanded = 1; // searchList(text): expandedRegion = text == "Krunk_Plaza" ? 0 : 1
         } else if (input) {
             html_dom_get_value(input, g_search, sizeof(g_search));
         }
         refresh_holder();
         return 1;
     }
-    if (!strcmp(name, "windows.9.loadMore")) {
-        games_load_more(ev);
-        return 1;
-    }
     if (!strcmp(name, "toggleHF")) {
         g_hide_full = ev ? ev->checked : 0;
+        if (argc > 0 && (args[0].kind == HTML_ARG_BOOL || args[0].kind == HTML_ARG_NUM)) g_hide_full = args[0].num != 0;
         html_storage_set("krk_hideFull", g_hide_full ? "true" : "false");
         return 1;
     }
@@ -1090,16 +1575,31 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         quick_join_region(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
         return 1;
     }
+    if (!strcmp(name, "windows.9.loadMore")) {
+        games_load_more(ev);
+        return 1;
+    }
+    const int host_config = ui_host_config_handle(name, ev, args, argc); // WP-E windows.7.* rows, slider labels
+    if (host_config >= 0) return host_config;
+    if (!strcmp(name, "windows.7.switchTab")) {
+        host_switch_tab(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
+        return 1;
+    }
+    if (!strcmp(name, "favoriteM") || !strcmp(name, "windows.9.searchMaps")) {
+        if (name[0] == 'w') games_search();
+        return 1; // favoriteM: favourites need an account API the brain does not have
+    }
     if (!strcmp(name, "checkedSwitchServer") || !strcmp(name, "switchServer")) {
         const char *id = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
         if (!id) return 1;
         snprintf(g_checked_id, sizeof(g_checked_id), "%s", id);
-        if (!strcmp(name, "switchServer")) {
+        if (!strcmp(name, "switchServer") || backend_available() != 1) {
             menu_show_window(MENU_WINDOW_NONE, 0);
             switch_server(id);
             return 1;
         }
-        HtmlElem cell = ev && ev->target ? html_dom_query(ev->target, ".serverPCount") : 0;
+        HtmlElem row = argc > 1 && args[1].kind == HTML_ARG_THIS ? (HtmlElem) args[1].num : ev ? ev->target : 0;
+        HtmlElem cell = row ? html_dom_query(row, ".serverPCount") : 0;
         if (cell) html_dom_set_text(cell, "...");
         char path[256], enc[192];
         backend_url_encode(enc, sizeof(enc), id);
@@ -1119,6 +1619,7 @@ static struct {
     int waiting;      // a page is in flight
     int pos;          // last requested page (loadInd)
     int more;         // the last page was full (42 rows): Load More
+    int failed;       // the first page did not arrive (brain unreachable): the catalogue instead
 } g_games_tabs[GAMES_TABS];
 
 static void on_maps(void *user, const int status, const char *body, const size_t length) {
@@ -1128,6 +1629,13 @@ static void on_maps(void *user, const int status, const char *body, const size_t
     g_games_tabs[tab].waiting = 0;
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *data = cJSON_GetObjectItem(res, "data");
+    if (!cJSON_IsArray(data) && !g_games_tabs[tab].rows) {
+        // KrunkNative: no answer at all: the map catalogue, like without a brain
+        g_games_tabs[tab].failed = 1;
+        cJSON_Delete(res);
+        menu_rerender_if_open(10);
+        return;
+    }
     if (!g_games_tabs[tab].rows) g_games_tabs[tab].rows = cJSON_CreateArray();
     int n = 0;
     const cJSON *r;
@@ -1150,7 +1658,7 @@ static void games_request(const int tab) {
 }
 
 int servers_games_tab_rows(const int tab, const cJSON **rows) {
-    if (backend_available() != 1 || tab < 0 || tab >= GAMES_TABS) return -1;
+    if (backend_available() != 1 || tab < 0 || tab >= GAMES_TABS || g_games_tabs[tab].failed) return -1;
     if (!g_games_tabs[tab].requested) {
         g_games_tabs[tab].requested = 1;
         g_games_tabs[tab].pos = 0;
@@ -1165,22 +1673,485 @@ int servers_games_tab_more(const int tab) {
     return tab >= 0 && tab < GAMES_TABS && g_games_tabs[tab].more && !g_games_tabs[tab].waiting;
 }
 
+// ---- windows[9].gen() (v7.1.4, config.mapTabs): Home / Popular / Featured / New /
+// Favorites / My Games / Search tabs plus the Editor and Sandbox shortcuts, and the f1825
+// ("map") cards. Rows: the brain's GET /api/maps?index=<n> (its v3.1.1 tab indices: 0
+// Popular, 1 Featured, 2 New, 3 Favorites, 4 My Games), else the map catalogue as the v3.1.1
+// offline server lists it (map_catalog_games_tab). KrunkNative differences, each noted at its
+// line: deterministic Home order (v7 shuffles), catalogue thumbnails for official maps, Play
+// = playMap (v7 reloads the page on /?play=), Sandbox = the offline game (knHostOffline).
+typedef struct {
+    const char *n, *txt, *click;
+    int home, search, fav, owned, paged, data; // data: the brain/catalogue tab index, -1 none
+} GamesTab;
+
+static const GamesTab k_games_tabs[] = {
+    {"Home", "<span class='material-icons material-icons-outlined' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", NULL, 1, 0, 0, 0, 0, 0},
+    {"Popular", NULL, NULL, 0, 0, 0, 0, 1, 0},
+    {"Featured", NULL, NULL, 0, 0, 0, 0, 0, 1},
+    {"New", NULL, NULL, 0, 0, 0, 0, 1, 2},
+    {"Favorites", NULL, NULL, 0, 0, 1, 0, 0, 3},
+    {"My Games", NULL, NULL, 0, 0, 0, 1, 0, 4},
+    {"Search", "<span class='material-icons' style='color:#ffffff;font-size:42px;vertical-align:bottom'>search</span>", NULL, 0, 1, 0, 0, 0, -1},
+    {"Editor", "<span class='material-icons' style='color:#ffffff;font-size:44px;vertical-align:bottom'>construction</span>Editor", "openURL(`./editor.html`)", 0, 0, 0, 0, 0, -1},
+    // v7: openURL(`./?sandbox`) reloads into its in-browser sandbox; KrunkNative's is the offline game
+    {"Sandbox", "<span class='material-icons' style='color:#ffffff;font-size:44px;vertical-align:bottom'>castle</span>Sandbox", "knHostOffline()", 0, 0, 0, 0, 0, -1},
+};
+#define GAMES_TAB_COUNT ((int) (sizeof(k_games_tabs) / sizeof(k_games_tabs[0])))
+
+static const char *const k_map_cats[] = {"Other", "Parkour", "Puzzle", "Trading", "Training", "Social", "Horror", "Adventure",
+    "Battle Royale", "Realism", "Roleplay", "Rotation", "Racing", "Raid", "Remake", "NCR", "Zombies", "Simulation", "Relaxation",
+    "Action", "Tycoon", "Mini-Games", "Single-player", "Education"}; // config.mapCats
+static const struct { const char *n; int i; } k_map_cats_p[] = { // config.mapCatsP
+    {"Action", 1}, {"Parkour", 8}, {"Remake", 4}, {"Zombies", 7}, {"Horror", 0}, {"Realism", 12}, {"Mini-Games", 5},
+};
+
+static int g_games_tab;           // windows[9].tabIndex (v7 index)
+static char g_games_search[96];   // the Search tab's last query ("" = none yet)
+static int g_games_search_cat = -1;
+
+void ui_games_switch_tab(const int tab) {
+    if (tab < 0 || tab >= GAMES_TAB_COUNT || tab == g_games_tab) return; // switchTab: only a different tab
+    g_games_tab = tab;
+    menu_rerender_if_open(10);
+}
+
 static void games_load_more(const HtmlEvent *ev) {
-    for (int tab = 0; tab < GAMES_TABS; tab++) {
-        if (!g_games_tabs[tab].requested || g_games_tabs[tab].waiting || !g_games_tabs[tab].more) continue;
-        HtmlElem active = html_dom_query(0, "#menuWindow .menuTabNew.tabANew");
-        char onclick[96] = "", want[48];
-        if (active) html_dom_get_attr(active, "onclick", onclick, sizeof(onclick));
-        snprintf(want, sizeof(want), "switchTab(%d)", tab);
-        if (!strstr(onclick, want)) continue;
-        if (ev && ev->target) {
-            html_dom_set_attr(ev->target, "class", "loadMoreW");
-            html_dom_set_text(ev->target, "Loading...");
-        }
-        g_games_tabs[tab].pos++;
-        games_request(tab);
+    const int data = k_games_tabs[g_games_tab].data;
+    if (data < 0 || !g_games_tabs[data].requested || g_games_tabs[data].waiting) return;
+    if (ev && ev->target) {
+        html_dom_set_attr(ev->target, "class", "loadMoreW");
+        html_dom_set_html(ev->target, "Loading...");
+    }
+    g_games_tabs[data].pos++;
+    games_request(data);
+}
+
+// windows[9].playerData[map]: players on that map in the brain's game list
+static int games_map_players(const char *map) {
+    int n = 0;
+    const cJSON *t;
+    cJSON_ArrayForEach(t, brain_games()) {
+        if (!strcmp(meta_str(t, "map"), map)) n += row_players(t);
+    }
+    return n;
+}
+
+typedef struct {
+    const char *name, *creator, *mod_url, *image, *category, *friendname;
+    char id[24];
+    double votes, plays;
+    int fav;
+} GameCard;
+
+// UTILS.formatNumYT: k = floor(digits / 3) thousands; the value at 2 significant digits, else 1,
+// whichever leaves at most two digits; one decimal when fractional ("1.2k", "12k", "0.1m").
+static void format_num_yt(char *out, const size_t n, const double v) {
+    static const char *const suffix[] = {"", "k", "m", "b", "t"};
+    if (!(v >= 1000)) {
+        snprintf(out, n, "%.15g", v > 0 ? v : 0);
         return;
     }
+    char whole[40];
+    snprintf(whole, sizeof(whole), "%.15g", v);
+    int k = (int) (strlen(whole) / 3);
+    if (k > 4) k = 4;
+    const double scaled = v / pow(1000.0, k);
+    double r = scaled;
+    for (int p = 2; p >= 1; p--) {
+        char buf[40];
+        snprintf(buf, sizeof(buf), "%.*g", p, scaled); // toPrecision(p) -> parseFloat
+        r = atof(buf);
+        snprintf(buf, sizeof(buf), "%.15g", r);
+        size_t d = 0;
+        for (const char *q = buf; *q; q++) d += isalnum((unsigned char) *q) != 0; // digits left after the punctuation
+        if (d <= 2) break;
+    }
+    if (r != floor(r)) snprintf(out, n, "%.1f%s", r, suffix[k]);
+    else snprintf(out, n, "%.15g%s", r, suffix[k]);
+}
+
+// f1825(data, "map", tabIndex) for one row
+static void games_card(StrBuf *sb, const GameCard *c, const int tab) {
+    const int fav = c->fav || k_games_tabs[tab].fav;
+    char plays[32], online[32];
+    format_num_yt(plays, sizeof(plays), c->plays);
+    snprintf(online, sizeof(online), "%d", games_map_players(c->name));
+    sb_append(sb, "<div style='display:inline-block;'><div class='mapListItem'><div class='mapActionOvrl'><div class='mapActionHol'><div class='mapActionB' title='Host' onclick='selectHostMap(&quot;");
+    sb_append_esc(sb, c->name);
+    sb_append(sb, "&quot;,&quot;");
+    sb_append_esc(sb, c->mod_url);
+    sb_appendf(sb, "&quot;,&quot;%s&quot;,&quot;", c->id);
+    sb_append_esc(sb, c->creator);
+    sb_append(sb, "&quot;,0)'><span class='material-icons' style='font-size:70px;color:#fff;'>video_settings</span></div><div class='mapActionSep'></div>");
+    // v7: openURL("/?play=<name>", 1) reloads the page into autoHostMap; KrunkNative plays in place
+    sb_append(sb, "<div class='hideOnHost mapActionB' onclick='playMap(&quot;");
+    sb_append_esc(sb, c->name);
+    sb_append(sb, "&quot;)' title='Play' style='margin-top:-5px;'><span class='material-icons' style='font-size:80px;color:#fff;'>play_arrow</span></div><div class='mapActionSep' style='margin-left:2px'></div>");
+    sb_appendf(sb, "<div class='mapActionB%s'onclick='favoriteM(0,this, %s);'>%s</div></div></div>", fav ? "" : " sel", c->id,
+               fav ? "<span class='material-icons' style='font-size:70px;color:#fff;'>star</span>" : "<span class='material-icons' style='font-size:70px;color:#fff;'>star_border</span>");
+    sb_append(sb, "<div class='mapsVotes' title='Players Online' id='pcnt_");
+    sb_append_esc(sb, c->name);
+    sb_appendf(sb, "' style='left:10px;right:unset'>%s<span style='color:#999999;'> online</span></div><div style='height:200px;width:100%%;overflow: hidden;'><img class='mapListThumb' loading='lazy' src='", online);
+    sb_append_esc(sb, c->image && c->image[0] ? c->image : "./img/noimg.png");
+    sb_append(sb, "' /></div><div style='margin-top:5px;padding-left:5px;padding-right:5px;line-height:30px;margin-bottom:0px;'><div style='display:inline-block;max-width:250px;overflow:hidden;white-space:nowrap'><a href='javascript:;' onclick='openURL(&quot;https://krunker.io/social.html?q=");
+    sb_append_esc(sb, c->name);
+    sb_append(sb, "&p=map&quot;)' />");
+    sb_append_esc(sb, c->name);
+    sb_appendf(sb, "</a></div><span style='font-size:15px;text-align:right;padding-right:2px;float:right;color:#fff;'>%s <span style='color:rgba(255,255,255,0.5)'>plays</span></span></div></div>", plays);
+    if (c->friendname && c->friendname[0]) {
+        sb_append(sb, "<div class='likdByFrnd'><span class='material-icons' style='color:#fff;font-size:23px;vertical-align:middle;margin-right:6px;margin-top:-4px;'>thumb_up</span>liked by <span style='color:rgba(255,255,255,0.6);'>");
+        sb_append_esc(sb, c->friendname);
+        sb_append(sb, "</span></div>");
+    } else {
+        sb_append(sb, "<div style='height:10px;'></div>");
+    }
+    sb_append(sb, "</div>");
+}
+
+static void card_from_brain(GameCard *c, const cJSON *r) {
+    memset(c, 0, sizeof(*c));
+    c->name = cJSON_GetStringValue(cJSON_GetObjectItem(r, "map_name"));
+    if (!c->name) c->name = cJSON_GetStringValue(cJSON_GetObjectItem(r, "mna"));
+    if (!c->name) c->name = "";
+    c->creator = cJSON_GetStringValue(cJSON_GetObjectItem(r, "creatorname"));
+    if (!c->creator) c->creator = "";
+    c->mod_url = cJSON_GetStringValue(cJSON_GetObjectItem(r, "mod_url"));
+    if (!c->mod_url) c->mod_url = "";
+    c->image = cJSON_GetStringValue(cJSON_GetObjectItem(r, "map_image"));
+    c->category = cJSON_GetStringValue(cJSON_GetObjectItem(r, "category"));
+    c->friendname = cJSON_GetStringValue(cJSON_GetObjectItem(r, "friendname"));
+    const cJSON *id = cJSON_GetObjectItem(r, "map_id");
+    snprintf(c->id, sizeof(c->id), "%.0f", cJSON_IsNumber(id) ? id->valuedouble : 0.0);
+    c->votes = cJSON_GetNumberValue(cJSON_GetObjectItem(r, "map_votes"));
+    if (c->votes != c->votes) c->votes = 0;
+    c->plays = cJSON_GetNumberValue(cJSON_GetObjectItem(r, "map_pl"));
+    if (c->plays != c->plays) c->plays = 0;
+    c->fav = cJSON_IsTrue(cJSON_GetObjectItem(r, "fav"));
+    // KrunkNative: the official maps' own thumbnail (v7's listMaps gives them a map_image too)
+    const int index = !c->image || !c->image[0] ? map_catalog_find(c->name) : -1;
+    static char thumb[8][48];
+    static int next;
+    if (index >= 0 && !strcmp(map_catalog_at((size_t) index)->name, c->name) && map_catalog_thumb(map_catalog_at((size_t) index), thumb[next], sizeof(thumb[0]))) {
+        c->image = thumb[next];
+        next = (next + 1) % 8;
+    }
+}
+
+static void card_from_catalogue(GameCard *c, const MapCatalogEntry *e, char *thumb, const size_t n) {
+    memset(c, 0, sizeof(*c));
+    c->name = e->name;
+    c->creator = e->creator;
+    c->mod_url = e->mod_url;
+    c->image = map_catalog_thumb(e, thumb, n);
+    snprintf(c->id, sizeof(c->id), "%u", (unsigned) map_catalog_map_id(e));
+}
+
+// The tab's cards; returns -1 while its first page loads, else the number of cards.
+static int games_cards(StrBuf *sb, const int tab) {
+    const int data = k_games_tabs[tab].data;
+    const int limit = k_games_tabs[tab].home ? 8 : 1 << 30; // Home: at most 8 per category (4 when 4..7)
+    const cJSON *rows = NULL;
+    const int brain = servers_games_tab_rows(data, &rows);
+    if (brain == 0) return -1;
+    int count = 0;
+    if (brain > 0) {
+        int total = cJSON_GetArraySize(rows);
+        if (k_games_tabs[tab].home && total > limit) total = limit;
+        if (k_games_tabs[tab].home && total < 8 && total >= 4) total = 4;
+        const char *category = NULL;
+        const cJSON *r;
+        cJSON_ArrayForEach(r, rows) {
+            if (count >= total) break;
+            GameCard c;
+            card_from_brain(&c, r);
+            if (c.category && c.category[0] && (!category || strcmp(category, c.category))) {
+                category = c.category;
+                sb_append(sb, "<div class='mapListCat'>");
+                sb_append_esc(sb, category);
+                sb_append(sb, "</div>");
+            }
+            games_card(sb, &c, tab);
+            count++;
+        }
+        return count;
+    }
+    int order[96];
+    size_t n = map_catalog_games_tab(data, order, sizeof(order) / sizeof(order[0]));
+    if (k_games_tabs[tab].home && n > (size_t) limit) n = (size_t) limit;
+    if (k_games_tabs[tab].home && n < 8 && n >= 4) n = 4;
+    for (size_t i = 0; i < n; i++) {
+        GameCard c;
+        char thumb[48];
+        card_from_catalogue(&c, map_catalog_at((size_t) order[i]), thumb, sizeof(thumb));
+        games_card(sb, &c, tab);
+        count++;
+    }
+    return count;
+}
+
+// Home: "Popular Categories" after the cards
+static void games_popular_categories(StrBuf *sb) {
+    sb_append(sb, "<div class='mapListCat'>Popular Categories</div>");
+    for (size_t i = 0; i < sizeof(k_map_cats_p) / sizeof(k_map_cats_p[0]); i++) {
+        int cat = 0;
+        for (size_t k = 0; k < sizeof(k_map_cats) / sizeof(k_map_cats[0]); k++) {
+            if (!strcmp(k_map_cats[k], k_map_cats_p[i].n)) cat = (int) k;
+        }
+        sb_appendf(sb, "<div class='mapListItem' style='width:624px;height:130px;'><div class='mapLICat' onclick='windows[9].switchTab(7);mpCat.selectedIndex=%d;windows[9].searchMaps();' style='background:url(img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
+                   cat + 1, k_map_cats_p[i].i, k_map_cats_p[i].n);
+    }
+}
+
+static char *games_window_gen(void) {
+    const GamesTab *tab = &k_games_tabs[g_games_tab];
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='margin-top:15px;margin-bottom:15px'><div class='bigMenTabs' style='margin-top:0px'>");
+    for (int i = 0; i < GAMES_TAB_COUNT; i++) {
+        sb_appendf(&sb, "<div class='bigMenTab%s' onclick='playSelect();", g_games_tab == i ? " bigMenTabA" : "");
+        if (k_games_tabs[i].click) sb_append(&sb, k_games_tabs[i].click);
+        else sb_appendf(&sb, "windows[9].switchTab(%d)", i);
+        sb_appendf(&sb, "' onmouseenter='playTick(0.1);'>%s</div>", k_games_tabs[i].txt ? k_games_tabs[i].txt : k_games_tabs[i].n);
+    }
+    sb_append(&sb, "</div></div>");
+    if (tab->home) {
+        // the featured game (v12130) is backend data KrunkNative does not have: no feature panel
+        sb_append(&sb, "<div class='bigMFeatHold' style='margin-left:20px;background:#0b0b0b;display:inline-block;width:580px;vertical-align:top;'><div class='biMFeatInfH'>Create your own game & earn real money! Over $750,000 USD has been paid out so far!</div><div class='biMFeatInfB' onclick='openURL(`./editor.html`)'>Open Editor</div><div class='biMFeatInfB' onclick='openURL(`./games`)'>Discover Games</div><div class='biMFeatInfB' onclick='openURL(`https://discord.com/invite/Kfypyp5`)'>Dev Community</div></div>");
+    }
+    if (tab->owned) {
+        sb_append(&sb, "<div class='setBodH'><div class='settName'>View Game earnings and stats on your dashboard<a style='float:right' href='javascript:windows[27].tabIndex=1;showWindow(28);'>Open Dashboard</a></div><div class='settName'>Publish or create a game<a style='float:right' href='./editor.html' target='_blank'>Open Editor</a></div><div class='settName'>Learn how to make a game<a style='float:right' href='//docs.krunker.io' target='_blank'>Open Documentation</a></div></div>");
+    }
+    sb_append(&sb, "<div id='mapList'>");
+    if (tab->search) {
+        sb_append(&sb, "<input type='text' id='mpSrch' class='smlInput' placeholder='Game Name or Keyword' onkeydown='if(window.event.keyCode==13)windows[9].searchMaps()' /><select id='mpCat'><option value='-1'>All</option>");
+        for (size_t i = 0; i < sizeof(k_map_cats) / sizeof(k_map_cats[0]); i++) sb_appendf(&sb, "<option value='%d'>%s</option>", (int) i, k_map_cats[i]);
+        sb_append(&sb, "</select><div class='searchBtn' onclick='windows[9].searchMaps()'><span class='material-icons' style='color:#fff;font-size:45px;margin-bottom:-30px;line-height:75px'>search</span></div><div style='color:rgba(0,0,0,0.5);margin-top:10px' id='searchResultsMA'></div>");
+    } else {
+        StrBuf cards = {0};
+        const int n = games_cards(&cards, g_games_tab);
+        if (n < 0) {
+            sb_append(&sb, "<div class='loadMoreW'>Loading...</div>");
+        } else if (!n && !tab->home) {
+            sb_append(&sb, "No Games found!");
+        } else {
+            sb_append(&sb, cards.data ? cards.data : "");
+            if (tab->home) games_popular_categories(&sb);
+            const int data = tab->data;
+            if (data >= 0 && g_games_tabs[data].waiting) sb_append(&sb, "<div class='loadMoreW'>Loading...</div>");
+            else if (tab->paged && (backend_available() != 1 || servers_games_tab_more(data))) sb_append(&sb, "<div class='loadMoreD' onclick='windows[9].loadMore(this)'>Load More</div>");
+        }
+        sb_free(&cards);
+    }
+    sb_append(&sb, "</div>");
+    return sb_finish(&sb);
+}
+
+// windows[9].searchMaps(): API_CLIENT.searchMap(text, category) has no KrunkNative route; the
+// catalogue and the loaded brain rows are searched by name (and category) instead.
+static void games_search(void) {
+    HtmlElem input = html_dom_by_id("mpSrch"), cat = html_dom_by_id("mpCat"), out = html_dom_by_id("searchResultsMA");
+    if (!out) return;
+    char q[96] = "", c[16] = "-1";
+    if (input) html_dom_get_value(input, q, sizeof(q));
+    if (cat) html_dom_get_value(cat, c, sizeof(c));
+    snprintf(g_games_search, sizeof(g_games_search), "%s", q);
+    g_games_search_cat = atoi(c);
+    const char *want_cat = g_games_search_cat >= 0 && g_games_search_cat < (int) (sizeof(k_map_cats) / sizeof(k_map_cats[0])) ? k_map_cats[g_games_search_cat] : NULL;
+    StrBuf sb = {0};
+    int count = 0;
+    const char *seen[256];
+    int seen_n = 0;
+    for (int data = 0; data < GAMES_TABS; data++) {
+        const cJSON *r;
+        cJSON_ArrayForEach(r, g_games_tabs[data].rows) {
+            GameCard card;
+            card_from_brain(&card, r);
+            if (!str_has_ci(card.name, q) || (want_cat && (!card.category || strcmp(card.category, want_cat)))) continue;
+            int dup = 0;
+            for (int i = 0; i < seen_n; i++) dup |= !strcmp(seen[i], card.name);
+            if (dup) continue;
+            if (seen_n < 256) seen[seen_n++] = card.name;
+            games_card(&sb, &card, 6);
+            count++;
+        }
+    }
+    for (size_t i = 0; !want_cat && i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (!str_has_ci(e->name, q)) continue;
+        int dup = 0;
+        for (int k = 0; k < seen_n; k++) dup |= !strcmp(seen[k], e->name);
+        if (dup) continue;
+        if (seen_n < 256) seen[seen_n++] = e->name;
+        GameCard card;
+        char thumb[48];
+        card_from_catalogue(&card, e, thumb, sizeof(thumb));
+        games_card(&sb, &card, 6);
+        count++;
+    }
+    char *cards = sb_finish(&sb);
+    StrBuf res = {0};
+    if (count) {
+        sb_append(&res, "<div style='height:10px'></div>");
+        sb_append(&res, cards);
+    } else {
+        sb_append(&res, "No Games found!");
+    }
+    free(cards);
+    char *html = sb_finish(&res);
+    html_dom_set_html(out, html);
+    free(html);
+}
+
+// ---- windows[7] (Host Custom Game, showWindow(8)): v7's captured markup with the map
+// catalogue's hostable maps as the "Default Krunker Maps" cards (gameMap<index>, read back by
+// createPrivateRoom through ui_host_checked_*), and WP-E's game-config bodies
+// (client/src/ui/ui_host_config.c) in place of the captured hostTb1 / hostTb2 / hostTb3 ones.
+// Hosting a server is server_bin's job (doc/backend.md 8.11): the menu's Host Game button is
+// hidden natively (menu_ui.c) and openHostWindow is an alert; the window stays for
+// --render-scenario and the console, and Start Game plays the pick offline.
+static int g_host_type = GAME_HOST_CUSTOM; // openHostWindow(false, type): config.hostTypes index
+
+void servers_ui_set_host_type(const int host_type) {
+    g_host_type = game_host_type_name(host_type) ? host_type : GAME_HOST_CUSTOM;
+}
+
+int servers_ui_host_type(void) {
+    return g_host_type;
+}
+
+// Just past the </div> that closes the <div ...> starting at `open`; NULL when unbalanced.
+static const char *div_end(const char *open) {
+    int depth = 0;
+    const char *p = open;
+    for (;;) {
+        const char *o = strstr(p, "<div"), *c = strstr(p, "</div>");
+        if (!c) return NULL;
+        if (o && o < c) {
+            depth++;
+            p = o + 4;
+            continue;
+        }
+        p = c + 6;
+        if (--depth <= 0) return p;
+    }
+}
+
+// s[from, to) replaced with `with` (s is freed; the result is malloc'd)
+static char *splice(char *s, const size_t from, const size_t to, const char *with) {
+    StrBuf sb = {0};
+    sb_append_n(&sb, s, from);
+    sb_append(&sb, with ? with : "");
+    sb_append(&sb, s + to);
+    free(s);
+    return sb_finish(&sb);
+}
+
+// The captured hostTb1 block, the run of hostTb2 bodies after it and hostTb3's inside become
+// windows[7].gen's markup for the window's host type.
+static char *host_config_splice(char *html, const int host_type) {
+    char *tab;
+    const char *a, *b;
+    const char *tb1 = "<div class=\"hostTb1 hide\">";
+    if ((a = strstr(html, tb1)) && (b = div_end(a))) {
+        tab = ui_host_config_tab_html(HOST_CONFIG_TAB_MODES, host_type, NULL);
+        html = splice(html, (size_t) (a - html), (size_t) (b - html), tab);
+        free(tab);
+    }
+    const char *tb2 = "<div class=\"hostTb2 hide\">"; // the Advanced bodies (not the empty one with a style)
+    if ((a = strstr(html, tb2))) {
+        b = a;
+        const char *next;
+        while (!strncmp(b, tb2, strlen(tb2)) && (next = div_end(b))) b = next;
+        tab = ui_host_config_tab_html(HOST_CONFIG_TAB_ADVANCED, host_type, NULL);
+        html = splice(html, (size_t) (a - html), (size_t) (b - html), tab);
+        free(tab);
+    }
+    const char *tb3 = "<div class=\"hostTb3 hide\"";
+    if ((a = strstr(html, tb3)) && (b = div_end(a))) {
+        const char *inner = strchr(a, '>');
+        if (inner && inner < b) {
+            tab = ui_host_config_tab_html(HOST_CONFIG_TAB_SERVER, host_type, NULL);
+            html = splice(html, (size_t) (inner + 1 - html), (size_t) (b - 6 - html), tab);
+            free(tab);
+        }
+    }
+    const char *title = game_host_type_name(host_type); // hostTypes[i].title ("Custom Game Setup")
+    const char *captured = "Custom Game Setup";
+    if (title && (a = strstr(html, captured))) html = splice(html, (size_t) (a - html), (size_t) (a - html) + strlen(captured), title);
+    return html;
+}
+
+static char *host_window_gen(void) {
+    const char *tpl = ui_windows_html("8");
+    const char *anchor = "<div class=\"mapListCat\">Default Krunker Maps</div>";
+    const char *a = strstr(tpl, anchor);
+    const char *b = a ? strstr(a, "</div></div><div id=\"forcedSettings\"") : NULL;
+    StrBuf sb = {0};
+    if (!a || !b) {
+        sb_append(&sb, tpl);
+        return host_config_splice(sb_finish(&sb), g_host_type);
+    }
+    a += strlen(anchor);
+    sb_append_n(&sb, tpl, (size_t) (a - tpl));
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (!e->hostable) continue;
+        char thumb[48];
+        sb_append(&sb, "<label class=\"hostMap\"><div class=\"hostMapName blackShad\">");
+        sb_append_esc(&sb, e->name);
+        sb_appendf(&sb, "</div><input onclick=\"playSelect(0.1)\" id=\"gameMap%d\" type=\"checkbox\"><img loading=\"lazy\" onmouseenter=\"playTick();\" draggable=\"false\" class=\"hostMapImg\" src=\"%s\"></label>",
+                   e->index, map_catalog_thumb(e, thumb, sizeof(thumb)) ? thumb : "./img/noimg.png");
+    }
+    sb_append(&sb, b);
+    return host_config_splice(sb_finish(&sb), g_host_type);
+}
+
+// windows[7].switchTab(n): hstTab<n> active, the .hostTb<n> bodies shown
+static void host_switch_tab(const int tab) {
+    for (int i = 0; i < 4; i++) {
+        char id[16], sel[24];
+        snprintf(id, sizeof(id), "hstTab%d", i);
+        HtmlElem t = html_dom_by_id(id);
+        if (!t) continue;
+        html_dom_set_class(t, "bigMenTabA", i == tab);
+        snprintf(sel, sizeof(sel), "#menuWindow .hostTb%d", i);
+        HtmlElem bodies[16];
+        const int n = html_dom_query_all(0, sel, bodies, 16);
+        for (int k = 0; k < n; k++) html_dom_set_class(bodies[k], "hide", i != tab);
+    }
+}
+
+// createPrivateRoom's mode read-back: the first checked hostable #gameMode<id> (Krunker
+// rotates through all checked modes; the offline server plays one). -1 = none checked.
+int ui_host_checked_mode(void) {
+    int total = 0;
+    mode_list(&total);
+    for (int i = 0; i < total; i++) {
+        char id[24];
+        snprintf(id, sizeof(id), "gameMode%d", i);
+        HtmlElem box = mode_hostable(i) ? html_dom_by_id(id) : 0;
+        if (box && html_dom_get_checked(box)) return i;
+    }
+    return -1;
+}
+
+// createPrivateRoom's map read-back: the first checked #gameMap<mapIndex> box (KrunkNative's
+// local server plays one map). Returns its map catalogue index, -1 when none is checked.
+int ui_host_checked_map_index(void) {
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (!e->hostable) continue;
+        char id[24];
+        snprintf(id, sizeof(id), "gameMap%d", e->index);
+        HtmlElem box = html_dom_by_id(id);
+        if (box && html_dom_get_checked(box)) return (int) i;
+    }
+    return -1;
+}
+
+const char *ui_host_checked_map(void) {
+    const int index = ui_host_checked_map_index();
+    return index >= 0 ? map_catalog_at((size_t) index)->name : NULL;
 }
 
 // ------------------------------------------------------------------ playMap / ?play= / ?game=
@@ -1356,6 +2327,16 @@ int servers_ui_host_game(const char *config_json) {
 
 void servers_ui_init(Client *client, const int brain_mode) {
     g_client = client;
+    const char *list = getenv("KRUNKNATIVE_SERVER_LIST");
+    if (list && *list) {
+        unsigned char *data = NULL;
+        size_t length = 0;
+        cJSON *json = read_file(list, &data, &length) == 0 ? cJSON_Parse((const char *) data) : NULL;
+        free(data);
+        if (json) servers_ui_set_games(json);
+        else fprintf(stderr, "[mm] KRUNKNATIVE_SERVER_LIST %s: unreadable\n", list);
+        cJSON_Delete(json);
+    }
     g_brain_mode = brain_mode && backend_enabled();
     g_start_time = glfwGetTime();
 }
@@ -1386,6 +2367,7 @@ static void direct_account_tick(Client *client, const int direct) {
 
 void servers_ui_tick(Client *client) {
     link_tick(client);
+    servers_timer_tick(); // windows[1] "Ends in" countdown
     if (backend_enabled()) direct_account_tick(client, !g_brain_mode || g_pin == PIN_DIRECT); // tracks the account either way
     if (g_pin != PIN_NONE) g_started = 1; // connected / disconnected by hand first: no startup seek
     // ?play= / ?game= requests once the startup seek is done (or right away without one)

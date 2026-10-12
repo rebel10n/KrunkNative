@@ -1252,7 +1252,15 @@ EM_JS(char *, voice_web_inputs, (void), {
 });
 #endif
 
+// The recording indicator: v7.1.4's #voiceIcon toggles .voiceOn / .voiceOff (toggleRecord);
+// v3.1.1's #voiceDisplay opacity 0.9 / 0.5 maps onto them.
 static void voice_display_opacity(const char *opacity) {
+    const int on = opacity && !strcmp(opacity, "0.9");
+    const HtmlElem icon = html_dom_by_id("voiceIcon");
+    if (icon) {
+        html_dom_set_class(icon, "voiceOn", on);
+        html_dom_set_class(icon, "voiceOff", !on);
+    }
     const HtmlElem el = html_dom_by_id("voiceDisplay");
     if (el) html_dom_set_style(el, "opacity", opacity);
 }

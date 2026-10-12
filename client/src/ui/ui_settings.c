@@ -1,10 +1,13 @@
-// Settings store: the port of krunknative.js's settings section. Values live under
-// Krunker's own keys (sensitivityX, fov, scaleUI, ...) in the `knSettings` storage
-// entry (html_storage_*: native file / web localStorage); defaults are whatever the
-// real game rendered into its settings tabs (scraped from ui/windows/settings-tab-*.html
-// through a detached element, exactly like collectDefaults()). Every change goes to
-// the game through client_apply_setting().
+// Settings store and the Game Settings window (Krunker v7.1.4 windows[0], src/index.js +
+// src/libs/settings.js). Values live under Krunker's own keys (sensitivityX, fov, scaleUI,
+// ...) in the `knSettings` storage entry (html_storage_*: native file / web localStorage);
+// defaults are whatever the real game rendered into its settings tabs (scraped from the
+// advanced view's captures, ui/windows/settings-advanced-*.html, through a detached element).
+// Every change goes to the game through client_apply_setting(). Rows v7 shows that nothing
+// in KrunkNative reads yet are stored and shown (their consumers come with the v7 settings
+// work).
 #include <ui_logic.h>
+#include <ui_mobile.h> // netRate: the mobile default
 #include <audio.h>
 #include <voice_chat.h> // audioInput: microphone list / selection (voice.c)
 #include <client_settings.h> // the Client tab's rows in searchList (ui_client_settings.c)
@@ -31,21 +34,26 @@ static cJSON *g_settings;  // saved values (object)
 static cJSON *g_defaults;  // scraped defaults (object)
 static cJSON *g_ranges;    // slider key -> [min, max] when v3.1.1's `min || max` holds
 
-// v3.1.1 settings with `color: true` (134.js): set()/init() replace any value failing
-// g.isHexColor (/^#([0-9A-F]{3}){1,2}$/i) with the default. dmgColor and hudHealthHigh
-// are `type: "switch"` there, so the page shows a checkbox whose true/false never passes
-// and the colour default (13.js) is what gets saved; their scraped default would be the
-// checkbox state, hence the explicit defaults. NULL = the scraped <input type=color> value.
+// v7.1.4 settings with `color: true` (settings.js): set()/init() replace any value failing
+// UTILS.isHexColor (/^#([0-9A-F]{3}){1,2}$/i) with the default. NULL = the scraped
+// <input type=color> value; the three a colour switch / custom html renders without a
+// plain colour input carry their settings.js default.
 static const struct { const char *key, *def; } COLOR_SETTINGS[] = {
-    {"hitColor", NULL}, {"dmgColor", "#DE292F"}, {"critColor", NULL}, {"speedColor", NULL},
-    {"speedColorMax", NULL}, {"healthColT", NULL}, {"healthColE", NULL}, {"xpBarCol", NULL},
-    {"crosshairColor", NULL}, {"crosshairShadow", NULL}, {"hitmCol", NULL}, {"hitmKCol", NULL},
-    {"hudHealthHigh", "#9eeb56"}, {"hudHealthLow", NULL}, {"spdLinesCol", NULL}, {"scoreColor", NULL},
+    {"kpdVisionCol", "#00ffff"}, {"hitColor", NULL}, {"dmgColor", NULL}, {"critColor", NULL}, {"speedColor", NULL},
+    {"speedColorMax", NULL}, {"healthColT", NULL}, {"healthColE", NULL}, {"crosshairColor", NULL},
+    {"crosshairShadow", NULL}, {"crosshairColorM", NULL}, {"crosshairShadowM", NULL}, {"hitmCol", NULL},
+    {"hitmKCol", NULL}, {"hudHealthHigh", NULL}, {"hudHealthLow", NULL}, {"spdLinesCol", NULL},
+    {"scoreColor", NULL}, {"progColor", NULL}, {"progMColor", NULL}, {"progMOColor", NULL},
+    {"bulletTracerCol", "#ffffdb"}, {"trailCol", NULL}, {"ropeCol", NULL}, {"scopeBorderCol", "#000000"},
 };
 
-// Same selectors as collectDefaults()/applySettingValues() in krunknative.js.
+// The value-carrying controls of v7's setting rows (_html.settings.input.*): sliders
+// (range #slid_<key> + number box #slid_input_<key>), switches, selects, colour / text /
+// url inputs (oninput="window.setSetting(...)").
 static const char *SLIDER_SELECTOR = "input[type=range][id^=slid_]";
-static const char *CONTROL_SELECTOR = "input[type=checkbox][onclick], select[onchange], input[type=text][onchange], input[type=color][onchange]";
+static const char *CONTROL_SELECTOR = "input[type=checkbox][onclick], select[onchange], input[type=text][oninput], "
+                                      "input[type=url][oninput], input[type=input][oninput], input[type=undefined][oninput], "
+                                      "input[type=color][oninput], input[type=text][onchange], input[type=color][onchange]";
 
 // Settings the engine is expected to act on; pushed (saved or default value) once the
 // page is up, followed by every other saved key.
@@ -107,9 +115,12 @@ static int extract_set_setting_key(const char *attr, char *key, const size_t n) 
 }
 
 static int control_setting_key(const HtmlElem el, char *key, const size_t n) {
+    static const char *const attrs[] = {"onclick", "onchange", "oninput"};
     char attr[512];
-    if (html_dom_get_attr(el, "onclick", attr, sizeof(attr)) < 0 && html_dom_get_attr(el, "onchange", attr, sizeof(attr)) < 0) return 0;
-    return extract_set_setting_key(attr, key, n);
+    for (size_t i = 0; i < sizeof(attrs) / sizeof(attrs[0]); i++) {
+        if (html_dom_get_attr(el, attrs[i], attr, sizeof(attr)) >= 0 && extract_set_setting_key(attr, key, n)) return 1;
+    }
+    return 0;
 }
 
 static int elem_is_checkbox(const HtmlElem el) {
@@ -248,6 +259,13 @@ void ui_settings_collect_defaults(void) {
     html_dom_set_html(box, "");
     html_dom_remove(box);
     free(found);
+
+    // settings.js netRate (Advanced > General "Network Rate (Hz)", read by net/recon.c): val
+    // isMobile ? 1 (60 Hz) : 3 (144 Hz); the captured row has the desktop option selected
+    if (ui_mobile_active()) {
+        cJSON_DeleteItemFromObject(g_defaults, "netRate");
+        cJSON_AddStringToObject(g_defaults, "netRate", "1");
+    }
 
     for (size_t i = 0; i < sizeof(COLOR_SETTINGS) / sizeof(COLOR_SETTINGS[0]); i++) {
         if (!COLOR_SETTINGS[i].def) continue;
@@ -483,39 +501,38 @@ void ui_settings_export(void) {
 
 // ---------------------------------------------------------------- presets / reset / import
 
-// settings.list[key].pro / .perf of v3.1.1 (src/libs/settings.js, read from the running
-// game): the Pro and Performance presets set these, every other setting gets its default.
-// Values are JSON; NULL = the preset has no value (default). The pro_* images are the
-// files the v3.1.1 site serves at its root (ui/pro_*.png); the value is Krunker's URL.
+// settings.list[key].pro / .perf of v7.1.4 (src/libs/settings.js): the Pro and Performance
+// presets set these, every other setting gets its default. Values are JSON; NULL = the
+// preset has no value (default). The pro_* image is the file the site serves at its root
+// (ui/pro_crosshair.png); the value is Krunker's URL (UTILS.assetsUrl("pro_crosshair.png")).
 typedef struct {
     const char *key, *pro, *perf;
 } SettingPreset;
 
 static const SettingPreset PRESETS[] = {
     {"resolution", "1", "0.4"}, {"aspectRatio", "\"1280x1024\"", NULL}, {"antiAlias", "false", "false"},
-    {"lowSpec", NULL, "true"}, {"noTex", NULL, "true"}, {"mapDet", NULL, "false"},
-    {"particles", "false", "false"}, {"shadows", "false", "false"}, {"softShad", "false", "false"},
-    {"highResShad", "false", "false"}, {"shadowsDynamic", "false", "false"}, {"ambientShading", "false", "false"},
-    {"showTrails", "false", "false"}, {"yourTrails", NULL, "false"}, {"muzzleFlash", "false", "false"},
-    {"textureAnim", NULL, "false"}, {"objectAnim", NULL, "false"}, {"screenShake", NULL, "false"},
-    {"weaponShine", NULL, "false"}, {"lighting", NULL, "0"}, {"scaleUI", NULL, "1"},
-    {"dynamicHP", NULL, "false"}, {"showHitInd", "false", "false"}, {"showDMG", "false", "false"},
-    {"dmgScale", "0.5", NULL}, {"showDeaths", "true", NULL}, {"showStreak", "true", NULL},
-    {"showFPS", "true", "false"}, {"showMedals", NULL, "false"}, {"showUnboxings", "false", NULL},
-    {"crosshairSho", "4", NULL}, {"crosshairImage", "\"https://assets.krunker.io/pro_crosshair.png\"", NULL},
-    {"crosshairAlways", "true", NULL}, {"aimSensitivityX", "0.69", NULL}, {"aimSensitivityY", "0.69", NULL},
-    {"sound", "0.1", "0.1"}, {"voiceVolume", "0", NULL}, {"fov", "110", NULL}, {"fpsFOV", "105", NULL},
-    {"weaponBob", "0.2", "0"}, {"weaponLean", "2", "0"}, {"weaponRot", "0", NULL}, {"weaponOffX", "1.4", NULL},
-    {"weaponOffY", "2", NULL}, {"weaponOffZ", "1.5", NULL}, {"aimAnim", NULL, "false"},
-    {"hideADS", "true", "true"}, {"showSpdLines", NULL, "0"}, {"scoreScale", "0.6", NULL},
-    {"scoreOffY", "2.5", NULL}, {"saturationn", NULL, "1"}, {"menuSaturation", "1", NULL},
-    {"feedLimit", "4", NULL}, {"bulletTracers", NULL, "false"}, {"scopeBorders", "false", NULL},
-    {"customScope", "\"https://assets.krunker.io/pro_scope.png\"", NULL},
-    {"customADSDot", "\"https://assets.krunker.io/pro_ads.png\"", NULL}, {"useDamageOverlay", "false", "false"},
+    {"lowSpec", NULL, "true"}, {"noTex", NULL, "true"}, {"mapDet", NULL, "false"}, {"particles", "false", "false"},
+    {"shadows", "false", "false"}, {"softShad", "false", "false"}, {"highResShad", "false", "false"},
+    {"shadowsDynamic", "false", "false"}, {"ambientShading", "false", "false"}, {"showTrails", "false", "false"},
+    {"yourTrails", NULL, "false"}, {"muzzleFlash", "false", "false"}, {"bulletCasings", "false", "false"},
+    {"impactHoles", "false", "false"}, {"textureAnim", NULL, "false"}, {"objectAnim", NULL, "false"},
+    {"screenShake", NULL, "false"}, {"weaponShine", NULL, "false"}, {"lighting", NULL, "0"}, {"scaleUI", NULL, "1"},
+    {"dynamicHP", NULL, "false"}, {"showHitInd", "false", "false"}, {"deathMarkers", NULL, "false"},
+    {"showDMG", "false", "false"}, {"dmgScale", "0.5", NULL}, {"showDeaths", "true", NULL}, {"showStreak", "true", NULL},
+    {"showFPS", "true", "false"}, {"showMedals", NULL, "false"}, {"playMedals", NULL, "false"}, {"medalSat", NULL, "1"},
+    {"showUnboxings", "false", NULL}, {"crosshairSho", "4", NULL},
+    {"crosshairImage", "\"https://assets.krunker.io/pro_crosshair.png\"", NULL}, {"crosshairAlways", "true", NULL},
+    {"crosshairShoM", "4", NULL}, {"crosshairAlwaysM", "true", NULL}, {"aimSensitivityX", "0.69", NULL},
+    {"aimSensitivityY", "0.69", NULL}, {"sound", "0.1", "0.1"}, {"micVolume", "0", NULL}, {"voiceVolume", "0", NULL},
+    {"fov", "110", NULL}, {"fpsFOV", "105", NULL}, {"weaponBob", "0.2", "0"}, {"weaponLean", "2", "0"},
+    {"weaponRot", "0", NULL}, {"weaponOffX", "1.4", NULL}, {"weaponOffY", "2", NULL}, {"weaponOffZ", "1.5", NULL},
+    {"aimAnim", NULL, "false"}, {"hideADS", "true", "true"}, {"showSpdLines", NULL, "0"}, {"scoreScale", "0.6", NULL},
+    {"scoreOffY", "2.5", NULL}, {"saturationn", NULL, "1"}, {"menuSaturation", "1", NULL}, {"feedLimit", "4", NULL},
+    {"bulletTracers", NULL, "false"}, {"scopeBorders", "true", NULL}, {"useDamageOverlay", "false", "false"},
 };
 
 // KrunkNative addition: the "Beautiful" preset (index 4, offered after Performance in
-// #settingsPreset; v3.1.1 has Default/Pro/Performance/Custom only). Like Pro/Performance
+// #settingsPreset; v7.1.4 has Default/Pro/Performance/Custom only). Like Pro/Performance
 // it sets these keys and every other setting to its default, and it persists the same
 // way (preIndex = 4; leaving Custom saves krk_customPre, going back to Custom restores it).
 // Every render setting was chosen against what KrunkNative implements (render_settings.h):
@@ -532,7 +549,7 @@ static const SettingPreset PRESETS[] = {
 //   updateRate 0        no frame cap; mapDet/ambientShading/textureAnim/objectAnim/particles/
 //                       trails/muzzle flash/tracers/damage overlay on, noTex/lowSpec off
 //   postProcessing      on (CopyShader in v3.1.1: no visible effect)
-// Kept at Krunker's defaults on purpose: fov/fpsFOV 90 (listed: wide FOVs stretch the edges),
+// Kept at Krunker's defaults on purpose: fov/fpsFOV (v7.1.4: 100 / 90; wide FOVs stretch the edges),
 // screenShake, showSpdLines, aspectRatio (window), saturationn/hue/vignette/menu filters
 // (colour grading is taste, the defaults are the maps' intended colours), HUD/viewmodel,
 // and the KrunkNative-only vsync/windowMode (device choices, not quality). Texture filtering
@@ -544,7 +561,8 @@ static const struct { const char *key, *value; } BEAUTIFUL[] = {
     {"highResShad", "true"}, {"shadowsDynamic", "true"}, {"ambientShading", "true"},
     {"showTrails", "true"}, {"yourTrails", "true"}, {"muzzleFlash", "true"}, {"bulletTracers", "true"},
     {"sniperFlap", "true"}, {"textureAnim", "true"}, {"objectAnim", "true"}, {"weaponShine", "true"},
-    {"lighting", "2"}, {"useDamageOverlay", "true"}, {"fov", "90"}, {"fpsFOV", "90"},
+    {"lighting", "2"}, {"useDamageOverlay", "true"}, {"bulletCasings", "true"}, {"impactHoles", "true"},
+    {"showExplo", "true"},
 };
 #define PRESET_BEAUTIFUL 4
 
@@ -790,6 +808,7 @@ void ui_settings_apply_values(const HtmlElem root) {
         if (!control_setting_key(found[i], key, sizeof(key))) continue;
         if (!strcmp(key, "audioInput")) audio_input_options(found[i]);
         const cJSON *v = ui_setting_saved(key);
+        if (!v && !strcmp(key, "netRate")) v = ui_setting_value(key); // the device's default (mobile 60 Hz)
         if (!v) continue;
         if (elem_is_checkbox(found[i])) {
             // !!settings[key]
@@ -836,76 +855,257 @@ static int inline_display_is_none(const HtmlElem el) {
     return html_dom_get_style(el, "display", display, sizeof(display)) >= 0 && !strcmp(display, "none");
 }
 
-// windows[0].searchList(): Krunker searches every tab, so show matching rows from all.
-void ui_settings_search(const char *query) {
-    // settingSearch = hj.value (untrimmed); searchMatches lowercases both sides. The field is
-    // restored with the raw value, so spaces and case survive typing.
-    char raw[128], q[128];
-    snprintf(raw, sizeof(raw), "%s", query ? query : "");
-    snprintf(q, sizeof(q), "%s", raw);
-    char *start = q;
-    str_tolower(start);
+// ---- windows[0].searchList() / getSettings() with settingSearch set (v7.1.4): every setting
+// of SETTINGS.list (any tab; the basic view skips sType "advanced" ones) whose label (i18n
+// name) or category header contains the query, grouped by category, hidden rows (`<key>_div`
+// display:none: dev, KPD, mobile-only) left out; the "Keybinds" row when "Keybinds" matches;
+// "No settings found" when nothing does. The rows come from the advanced view's captured
+// tabs (ui/windows/settings-advanced-*.html: every category).
 
+// End of the element starting at `p` ("<div ..."): just past its matching "</div>".
+static const char *div_end(const char *p) {
+    int depth = 0;
+    while (p && *p) {
+        const char *open = strstr(p, "<div");
+        const char *close = strstr(p, "</div>");
+        if (!close) return NULL;
+        if (open && open < close) {
+            depth++;
+            p = open + 4;
+        } else {
+            depth--;
+            p = close + 6;
+            if (depth == 0) return p;
+        }
+    }
+    return NULL;
+}
+
+// Lower-cased text of an HTML fragment (tags dropped, the few entities v7's labels use decoded).
+static void fragment_text(const char *s, const size_t n, char *out, const size_t cap) {
+    size_t k = 0;
+    int tag = 0;
+    for (size_t i = 0; i < n && k + 1 < cap; i++) {
+        const char c = s[i];
+        if (c == '<') { tag = 1; continue; }
+        if (c == '>') { tag = 0; continue; }
+        if (tag) continue;
+        if (c == '&') {
+            static const struct { const char *ent; char ch; } ENTS[] = {{"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&#39;", '\''}, {"&nbsp;", ' '}};
+            size_t e = 0;
+            for (; e < sizeof(ENTS) / sizeof(ENTS[0]); e++) {
+                const size_t l = strlen(ENTS[e].ent);
+                if (i + l <= n && !strncmp(s + i, ENTS[e].ent, l)) {
+                    out[k++] = ENTS[e].ch;
+                    i += l - 1;
+                    break;
+                }
+            }
+            if (e < sizeof(ENTS) / sizeof(ENTS[0])) continue;
+        }
+        out[k++] = (char) tolower((unsigned char) c);
+    }
+    out[k] = 0;
+}
+
+// The setting's label: the row's text before its first child element (v7 writes
+// i18n.t(name) first, then the controls).
+static void row_label(const char *row, const char *row_end, char *out, const size_t cap) {
+    const char *gt = strchr(row, '>');
+    if (!gt || gt >= row_end) { out[0] = 0; return; }
+    const char *lt = strchr(gt + 1, '<');
+    if (!lt || lt > row_end) lt = row_end;
+    fragment_text(gt + 1, (size_t) (lt - gt - 1), out, cap);
+}
+
+// The category header text without its arrow icon and the "* requires restart" note.
+static void header_text(const char *hed, const char *hed_end, char *out, const size_t cap) {
+    StrBuf sb = {0};
+    sb_append_n(&sb, hed, (size_t) (hed_end - hed));
+    char *h = sb_finish(&sb);
+    static const char *const DROP[] = {"<span class=\"material-icons plusOrMinus\">", "<span id=\"requiresRestart\">"};
+    for (size_t d = 0; d < sizeof(DROP) / sizeof(DROP[0]); d++) {
+        char *at = strstr(h, DROP[d]);
+        if (!at) continue;
+        // the span's end: its own </span> (requiresRestart nests one more span)
+        char *end = at;
+        int depth = 0;
+        do {
+            char *o = strstr(end + 1, "<span"), *c = strstr(end + 1, "</span>");
+            if (!c) { end = NULL; break; }
+            if (o && o < c) { depth++; end = o; }
+            else { depth--; end = c; }
+        } while (depth > 0 && end);
+        if (end) memmove(at, end + 7, strlen(end + 7) + 1);
+    }
+    fragment_text(h, strlen(h), out, cap);
+    free(h);
+}
+
+// settings.js `sType: "advanced"`: rows the basic view leaves out, search included.
+static const char *const ADVANCED_ONLY[] = {
+    "showNetStat", "updateRate", "antiAlias", "noTex", "reflection", "softShad", "highResShad", "shadowsDynamic",
+    "ambientShading", "showTrails", "yourTrails", "muzzleFlash", "bulletCasings", "impactHoles", "sniperFlap",
+    "sniperFlapAnim", "textureAnim", "objectAnim", "screenShake", "weaponShine", "lighting", "showExplo",
+    "oldScoreboard", "disableRarityAnim", "showPfp", "dynamicHP", "showHitInd", "hitColor", "deathMarkerOpac",
+    "deathMarkers", "deathMarkerAdsOpac", "deathMarkerDur", "dmgType", "showDMG", "dmgColor", "critColor",
+    "dmgScale", "showKills", "showKillC", "showDeaths", "showKD", "showScore", "showStreak", "speedOffX",
+    "speedOffY", "speedScale", "speedOpacity", "speedColor", "speedColorMax", "nametagOpac", "nametagScale",
+    "nametagStyle", "healthNum", "healthColT", "healthColE", "objOpac", "adsObjOpac", "hideNonTrade", "showMinimap",
+    "minimapScale", "minimapZoom", "miniMapHudScale", "scrollDir", "invertY", "challMode", "weaponBob",
+    "weaponLean", "weaponRot", "weaponOffX", "weaponOffY", "weaponOffZ", "weaponADSOffY", "weapSwapY",
+    "weapReloadY", "adsFovMlt", "aimAnim", "hideADS", "showHands", "showWeapon", "showWeaponSec", "showWeaponMel",
+    "leftHand", "roundArms", "wallLeanMlt", "wallLean",
+};
+
+static int advanced_only(const char *row, const char *row_end) {
+    char key[64];
+    StrBuf sb = {0};
+    sb_append_n(&sb, row, (size_t) (row_end - row));
+    char *r = sb_finish(&sb);
+    const int found = extract_set_setting_key(r, key, sizeof(key));
+    free(r);
+    if (!found) return 0;
+    for (size_t i = 0; i < sizeof(ADVANCED_ONLY) / sizeof(ADVANCED_ONLY[0]); i++) {
+        if (!strcmp(ADVANCED_ONLY[i], key)) return 1;
+    }
+    return 0;
+}
+
+static int matches(const char *text, const char *query) {
+    return query[0] && strstr(text, query) != NULL;
+}
+
+// windows[0].getSettings() of one holder body (a captured tab's #settHolder content, the
+// Client tab) filtered by `query`; categories already emitted (`seen`) are skipped.
+static void search_holder(StrBuf *out, const char *body, const char *query, StrBuf *seen, int *keybinds) {
+    const char *p = body;
+    while (p && (p = strstr(p, "<div class=\"")) != NULL) {
+        const char *end = div_end(p);
+        if (!end) break;
+        if (!strncmp(p, "<div class=\"setHed\"", 18)) {
+            const char *bod = end;
+            while (*bod == ' ' || *bod == '\n' || *bod == '\t') bod++;
+            const char *bod_end = !strncmp(bod, "<div", 4) ? div_end(bod) : NULL;
+            if (!bod_end) { p = end; continue; }
+            char id[64] = "";
+            const char *idp = strstr(p, "id=\"setHed_");
+            if (idp && idp < end) {
+                idp += strlen("id=\"setHed_");
+                const size_t l = strcspn(idp, "\"");
+                snprintf(id, sizeof(id), "%.*s", (int) (l < sizeof(id) ? l : sizeof(id) - 1), idp);
+            }
+            char key[80];
+            snprintf(key, sizeof(key), "|%s|", id);
+            if (id[0] && seen->data && strstr(seen->data, key)) { p = bod_end; continue; }
+            char head[256];
+            header_text(p, end, head, sizeof(head));
+            const int head_match = matches(head, query);
+            StrBuf rows = {0};
+            const char *body_open_end = strchr(bod, '>') + 1;
+            for (const char *r = body_open_end; r && (r = strstr(r, "<div class=\"settName\"")) && r < bod_end;) {
+                const char *r_end = div_end(r);
+                if (!r_end || r_end > bod_end) break;
+                const char *tag_end = strchr(r, '>');
+                char tag[512];
+                snprintf(tag, sizeof(tag), "%.*s", (int) (tag_end - r < (long) sizeof(tag) ? tag_end - r : (long) sizeof(tag) - 1), r);
+                const int hidden = strstr(tag, "display:none") != NULL;
+                char label[256];
+                row_label(r, r_end, label, sizeof(label));
+                const int basic_skip = menu_ui()->settings_view == 0 && advanced_only(r, r_end);
+                if (!hidden && !basic_skip && (head_match || matches(label, query))) sb_append_n(&rows, r, (size_t) (r_end - r));
+                r = r_end;
+            }
+            if (rows.len) {
+                // head + body with the display:none of an empty category dropped (cnt > 0)
+                StrBuf hb = {0};
+                sb_append_n(&hb, p, (size_t) (end - p));
+                sb_append_n(&hb, bod, (size_t) (body_open_end - bod));
+                char *hs = sb_finish(&hb);
+                StrBuf fixed = {0};
+                sb_append_replace_all(&fixed, hs, " style=\"display:none\"", "");
+                free(hs);
+                sb_append(out, fixed.data);
+                sb_free(&fixed);
+                sb_append(out, rows.data);
+                sb_append(out, "</div>");
+                if (id[0]) sb_appendf(seen, "|%s|", id);
+            }
+            sb_free(&rows);
+            p = bod_end;
+            continue;
+        }
+        if (!strncmp(p, "<div class=\"setBodH\"", 20) && strstr(p, "showWindow(7)") && strstr(p, "showWindow(7)") < end) {
+            if (!*keybinds && matches("keybinds", query)) { // searchMatches({name: "settings.controls.change"})
+                sb_append_n(out, p, (size_t) (end - p));
+                *keybinds = 1;
+            }
+        }
+        p = end;
+    }
+}
+
+// The #settHolder content of the current view's search for `query` (lower-cased).
+static char *search_html(const char *query) {
+    const int view = 1; // every category (the advanced tabs)
+    StrBuf out = {0}, seen = {0};
+    int keybinds = 0;
+    for (int tab = 0; tab < ui_settings_view_tab_count(view); tab++) {
+        const char *tpl = ui_settings_view_tab_html(view, tab);
+        const char *holder = strstr(tpl, "<div id=\"settHolder\">");
+        if (!holder) continue;
+        char *ext = ui_client_settings_extend_tab(holder); // Default Region list, the Sound tab's client rows
+        search_holder(&out, ext ? ext : holder, query, &seen, &keybinds);
+        free(ext);
+    }
+    char *client_rows = ui_client_settings_tab_html(1); // Settings > Client (ui_client_settings.c)
+    if (client_rows) search_holder(&out, client_rows, query, &seen, &keybinds);
+    free(client_rows);
+    sb_free(&seen);
+    if (!out.len) sb_append(&out, "<div class=\"setHed\">No settings found</div>"); // i18n settings.none
+    return sb_finish(&out);
+}
+
+// windows[0].getTabs() with tabIndex -1 (searching): no tab marked, transparent borders.
+static void search_tabs(void) {
+    HtmlElem layout = html_dom_by_id("settingsTabLayout");
+    if (!layout) return;
+    const int view = menu_ui()->settings_view;
+    StrBuf sb = {0};
+    const int tabs = ui_settings_view_tab_count(view);
+    for (int t = 0; t < tabs; t++) {
+        if (t) sb_append(&sb, "\n");
+        sb_appendf(&sb, "<div class=\"settingTab\" style=\"border-bottom: 5px solid transparent\" onmouseenter=\"playTick()\" "
+                        "onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">", t);
+        sb_append_esc(&sb, ui_settings_view_tab_name(view, t));
+        sb_append(&sb, "</div>");
+    }
+    const int client = ui_client_settings_tab();
+    if (client >= 0)
+        sb_appendf(&sb, "\n<div class=\"settingTab\" style=\"border-bottom: 5px solid transparent\" onmouseenter=\"playTick()\" "
+                        "onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">Client</div>", client);
+    html_dom_set_html(layout, sb.data ? sb.data : "");
+    sb_free(&sb);
+}
+
+void ui_settings_search(const char *query) {
+    // settingSearch = settSearch.value (untrimmed); searchMatches lowercases both sides.
+    char q[128];
+    snprintf(q, sizeof(q), "%s", query ? query : "");
+    str_tolower(q);
     HtmlElem holder = html_dom_by_id("settHolder");
     if (!holder) return;
-    if (!*start) {
+    if (!q[0]) { // changeTab(tabIndex = 0)
+        menu_ui()->settings_tab = 0;
         menu_show_window(1, 1);
         return;
     }
-
-    StrBuf all = {0};
-    for (int tab = 0; tab < ui_settings_tab_count(); tab++) {
-        char *extended = ui_client_settings_extend_tab(ui_settings_tab_html(tab)); // + Sound > Audio Output
-        sb_append(&all, extended ? extended : ui_settings_tab_html(tab));
-        free(extended);
-    }
-    char *client_rows = ui_client_settings_tab_html(1); // Settings > Client (ui_client_settings.c)
-    sb_append(&all, client_rows);
-    free(client_rows);
-    html_dom_set_html(holder, all.data ? all.data : "");
-    sb_free(&all);
+    menu_ui()->settings_tab = -1; // windows[0].tabIndex = -1
+    search_tabs();
+    char *html = search_html(q);
+    html_dom_set_html(holder, html);
+    free(html);
     ui_settings_apply_values(holder);
-
-    HtmlElem *found = malloc(sizeof(HtmlElem) * UI_QUERY_MAX);
-    HtmlElem *rows = malloc(sizeof(HtmlElem) * UI_QUERY_MAX);
-    if (!found || !rows) {
-        free(found);
-        free(rows);
-        return;
-    }
-    char text[1024];
-    int n = html_dom_query_all(holder, ".settName", found, UI_QUERY_MAX);
-    for (int i = 0; i < n; i++) {
-        // searchMatches(setting) && !setting.hide: rows generated hidden (`<key>_div`
-        // with display:none, e.g. the mobile rows off mobile) never match.
-        const int hidden = inline_display_is_none(found[i]);
-        html_dom_get_text(found[i], text, sizeof(text));
-        text[sizeof(text) - 1] = 0;
-        str_tolower(text);
-        html_dom_set_display(found[i], !hidden && strstr(text, start) ? "" : "none");
-    }
-    n = html_dom_query_all(holder, ".setHed", found, UI_QUERY_MAX);
-    for (int i = 0; i < n; i++) {
-        char id[96];
-        if (html_dom_get_attr(found[i], "id", id, sizeof(id)) < 0 || strncmp(id, "setHed_", 7)) continue;
-        char body_id[104];
-        snprintf(body_id, sizeof(body_id), "setBod_%s", id + 7);
-        HtmlElem body = html_dom_by_id(body_id);
-        int any = 0;
-        if (body) {
-            const int m = html_dom_query_all(body, ".settName", rows, UI_QUERY_MAX);
-            for (int j = 0; j < m && !any; j++) any = !inline_display_is_none(rows[j]);
-        }
-        html_dom_set_display(found[i], any ? "" : "none");
-    }
-    free(found);
-    free(rows);
-
-    HtmlElem search = html_dom_by_id("settSearch");
-    if (search) {
-        html_dom_set_value(search, raw);
-        html_dom_focus(search);
-    }
 }
 
 // windows[0].collapseFolder(hd)
@@ -1018,4 +1218,150 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
     else return; // cosmetic Krunker settings the engine has no counterpart for (kept in the store only)
 
     printf("[ui] setting %s=%s\n", key, value);
+}
+
+// ---------------------------------------------------------------- inline handlers
+
+static const char *arg_text(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i, char *buf, const size_t n) {
+    if (i >= argc) return "";
+    const HtmlArg *a = &args[i];
+    switch (a->kind) {
+        case HTML_ARG_STR: return a->str ? a->str : "";
+        case HTML_ARG_NUM: snprintf(buf, n, "%.15g", a->num); return buf;
+        case HTML_ARG_BOOL: return a->num != 0.0 ? "true" : "false";
+        case HTML_ARG_THIS_CHECKED: return ev && ev->checked ? "true" : "false";
+        case HTML_ARG_THIS_VALUE:
+            if (ev && ev->value && ev->value[0]) return ev->value;
+            if (ev && ev->target && html_dom_get_value(ev->target, buf, n) >= 0) return buf; // <select> snapshot reads ""
+            return "";
+        default: return "";
+    }
+}
+
+// window.delayExecute(key, el, ms): on every key press in a slider's number box, the
+// setting takes the box's value on the next frame (requestAnimationFrame: after the
+// pressed key changed it).
+typedef struct {
+    char key[64];
+    HtmlElem el;
+} DelayedSet;
+
+static void delayed_set_fire(void *user) {
+    DelayedSet *d = user;
+    char value[64];
+    if (d->el && html_dom_get_value(d->el, value, sizeof(value)) >= 0) ui_settings_set_string(d->key, value);
+    free(d);
+}
+
+static void delay_execute(const char *key, const HtmlElem el) {
+    if (!key || !*key || !el) return;
+    DelayedSet *d = calloc(1, sizeof(*d));
+    if (!d) return;
+    snprintf(d->key, sizeof(d->key), "%s", key);
+    d->el = el;
+    html_timer_add(0.0, delayed_set_fire, d);
+}
+
+// window.aspectSelect(key, select): the Presets <select> of Aspect Ratio writes its pick
+// ("Native" = "", else config.customRatios[i]: the option text) into #slid_<key>, goes back
+// to "Presets" and sets the setting.
+static void aspect_select(const char *key, const HtmlElem select, const char *picked) {
+    char id[96], value[64];
+    snprintf(value, sizeof(value), "%s", picked && strcmp(picked, "Native") ? picked : "");
+    snprintf(id, sizeof(id), "slid_%s", key);
+    HtmlElem box = html_dom_by_id(id);
+    if (box) html_dom_set_value(box, value);
+    if (select) html_dom_set_value(select, "");
+    ui_settings_set_string(key, value);
+}
+
+// windows[0].toggleType(this): settingType = checked ? "advanced" : "basic",
+// saveVal("krk_advanced", ~~checked), updateWindow(1) (a tab the other view lacks -> 0).
+static void toggle_type(const int advanced) {
+    MenuUi *ui = menu_ui();
+    ui->settings_view = !!advanced;
+    html_storage_set("krk_advanced", advanced ? "1" : "0");
+    if (ui->settings_tab != ui_client_settings_tab() && (ui->settings_tab < 0 || ui->settings_tab >= ui_settings_view_tab_count(ui->settings_view)))
+        ui->settings_tab = 0;
+    menu_rerender_if_open(1);
+}
+
+// window.importSettingsPopup(): genericPopup with the import <textarea id="importTxt">.
+static void import_popup(void) {
+    HtmlElem holder = html_dom_by_id("popupHolder"), pop = html_dom_by_id("genericPop");
+    if (!pop) {
+        ui_settings_import_prompt();
+        return;
+    }
+    ui_loadout_clear_pops(); // resetPops()
+    html_dom_set_attr(pop, "class", "importPop");
+    html_dom_set_attr(pop, "style", "");
+    html_dom_set_html(pop, "<div class=\"pubHed\">Import Settings</div><div style=\"color:rgba(255,255,255,0.7);font-size:19px;text-align:center;margin-bottom:15px;\">"
+                           "Copy Paste Settings Text Here</div><textarea id=\"importTxt\" rows=\"3\" onkeydown=\"if(event.keyCode == 13) importSettings();\"></textarea>"
+                           "<div class=\"mapFndB\" onclick=\"importSettings()\" onmouseover=\"playTick(0.1)\" style=\"margin-left: 0px;margin-top: 10px;background-color:#4ca9f5;width: 380px;\">Import</div>");
+    html_dom_set_display(pop, "block");
+    if (holder) html_dom_set_display(holder, "block");
+    HtmlElem txt = html_dom_by_id("importTxt");
+    if (txt) html_dom_focus(txt);
+    menu_schedule_rect();
+}
+
+// window.importSettings(): the popup's text through settings.import, then clearPops().
+static void import_settings(const char *text_arg) {
+    if (text_arg && *text_arg) {
+        if (ui_settings_import_text(text_arg)) menu_rerender_if_open(1);
+        return;
+    }
+    HtmlElem txt = html_dom_by_id("importTxt");
+    if (!txt) {
+        import_popup();
+        return;
+    }
+    char *buf = malloc(UI_SETTINGS_IMPORT_MAX);
+    if (buf && html_dom_get_value(txt, buf, UI_SETTINGS_IMPORT_MAX) >= 0 && buf[0] && ui_settings_import_text(buf)) menu_rerender_if_open(1);
+    free(buf);
+    ui_loadout_clear_pops();
+}
+
+// An element argument (`this`): the web backend passes its id, the native engine the event
+// target (the element whose handler runs).
+static HtmlElem arg_elem(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i) {
+    if (i < argc && args[i].kind == HTML_ARG_THIS && args[i].num > 0) return (HtmlElem) args[i].num;
+    return ev ? ev->target : 0;
+}
+
+// Inline handlers this module owns (ui_handlers.c h_fallback); -1 = not ours.
+int ui_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    if (!name) return -1;
+    char buf[256];
+    if (!strcmp(name, "delayExecute") || !strcmp(name, "window.delayExecute")) {
+        const HtmlElem el = arg_elem(ev, args, argc, 1);
+        delay_execute(arg_text(ev, args, argc, 0, buf, sizeof(buf)), el);
+        return 1; // `return true`
+    }
+    if (!strcmp(name, "aspectSelect")) {
+        char picked[64] = "";
+        const HtmlElem sel = arg_elem(ev, args, argc, 1);
+        if (sel) html_dom_get_value(sel, picked, sizeof(picked));
+        aspect_select(arg_text(ev, args, argc, 0, buf, sizeof(buf)), sel, picked);
+        return 1;
+    }
+    if (!strcmp(name, "windows.0.toggleType")) {
+        toggle_type(ev ? ev->checked : 0);
+        return 1;
+    }
+    if (!strcmp(name, "selectSettingPre")) { // the #settingsPreset select (this.value) or a preset box (a number)
+        const char *v = arg_text(ev, args, argc, 0, buf, sizeof(buf));
+        ui_settings_select_preset(*v ? (int) strtol(v, NULL, 10) : 2);
+        return 1;
+    }
+    if (!strcmp(name, "importSettingsPopup")) {
+        import_popup();
+        return 1;
+    }
+    if (!strcmp(name, "importSettings")) {
+        import_settings(argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL);
+        return 1;
+    }
+    return -1;
 }

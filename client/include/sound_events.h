@@ -21,4 +21,5 @@ void sound_events_change_ambient(int ambient);           // WP-C "camb": changeA
 // "playTick" -> tick_0 at 0.2, "SOUND.play" -> SOUND.play(name, volume, loop, rate).
 #include <html_dom.h>
 int ui_sound_play_tick(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc);
+int ui_sound_play_select(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc); // playSelect(vol)
 int ui_sound_play(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc);

@@ -1,24 +1,27 @@
-// In-game HUD over the DOM-ops API (client/include/html_dom.h), the C port of the
-// old ui/js/hud.js (doc/html-engine-plan.md 2.3); no JS runs natively.
+// In-game HUD over the DOM-ops API (client/include/html_dom.h): the C port of Krunker
+// v7.1.4's HUD JavaScript (src/index.js io_* handlers, src/libs/UI.js toggleGameUI /
+// toggleControlUI, src/data/players.js updatePlayerAmmo / weapon rack, src/ui/game.js
+// GUI.endScreen); no JS runs natively.
 //
-// client_hud_html_tick() samples the game at 20 Hz (change detection, fps once a
-// second) and writes Krunker's #inGameUI markup directly: one DOM write group per
-// changed value group. Every write mirrors what
-// the real v3.1.1 client does with default settings, verified against the DOM dumps
-// in doc/ref/krunker-v3.1.1/ingame/*.html:
-//   UI.toggleGameUI/toggleControlUI -> which holders are display:block (hud_apply_visibility)
-//   updatePlayerAmmo / reloadUIAnim -> ammoVal/ammoMax, ammoDisplay background-size "N% 100%"
-//   healthValue.innerHTML = hp + " <span id='maxHP'>| " + max + "</span>", 6 .healthBarSeg
-//   curGameInfo.innerHTML = mode + "<div style='color:rgba(255,255,255,0.6)'>on " + map + "</div>"
-//   pingText "-" while the ping is unknown, fpsDisplay hidden, K/D/score counters hidden
-//   weapDisplay: one .weapItem per loadout slot ([E]/[Q] keys, 0.7 opacity when holstered)
-//   chat: map welMsg + "<name> joined the game" rows (config.serverMessages[0])
-//   addKillFeed: <div id='feed_N'><div class='kfItem'><span class='kfMsg'>..</span></div><br>
-//   updateLeaderboard (leaderType 1): .newLeaderItem rows in #leaderContainerD while Tab is held
+// client_hud_html_tick() samples the game every frame (writes change-gated, fps every
+// 100 ms) and writes v7's #inGameUI markup directly: one DOM write group per changed value
+// group. Every write mirrors what the real v7.1.4 client does with default settings
+// (DOM of its sandbox game, tools/uidiff capture):
+//   UI.toggleGameUI/toggleControlUI -> which holders are shown (hud_apply_visibility)
+//   updatePlayerAmmo / reloadUIAnim -> #ammoVal/#ammoMax, #ammoHolder background-size "N%  100%"
+//   io_changeHealth: #bottomLeftHealth = ceil(hp), #bottomLeftHealthBar .nHealthBarSeg x segs
+//   map load: #matchInfo = mode + "<div style='color:rgba(255,255,255,0.6)'>on " + map + "</div>"
+//   KrunkNative has no minimap (v7 src/libs/Minimap.js): the top-left shows Minimap.toggle(false)'s
+//     layout, #timerHolder/#timerInner/#timerIcon/#timerVal/#matchInfo with .topLeftOld
+//   #pingText "-" while the ping is unknown (coloured by COLORS.ping), #fpsDisplay per showFPS
+//   #weapHolder: one .weapItem per loadout slot (key name, weapon name, 0.5 opacity when holstered)
+//   chat: map welMsg + "<name> joined the game" rows; v7 rows carry data-tab (chat channel)
+//   f2024: <div id='feed_N'><div class='killfeedItem'><span class='killfeedMsg'>..</span></div><br>
+//   f1985 (leaderType 1): #centerLeaderDisplay table while the scoreboard key is held
 //   game-overlay default crosshair (type 1): four 4x21 bars on a square of
 //     max(58, spread * 1.1 * uiHeight / 693), opacity = 1 - aimVal, hidden while reloading
 //   game-overlay showHit(): four 7x25 bars at 45deg, spacing 37 (+0.14/ms), fading 0.0062/ms
-// Krunker draws the last two on its <canvas id="overlay">; the page builds them from
+// Krunker draws the last two on its <canvas id="game-overlay">; the page builds them from
 // divs inside #inGameUI (ui/css/hud.css) so they scale with #uiBase like the canvas.
 //
 // Test hooks (`?kn_autoplay_spectate=1` / KRUNKNATIVE_AUTOPLAY_SPECTATE=1 makes the
@@ -44,9 +47,12 @@ void hud_ui_hit(Client*, int kill);
 #include "../viewer/viewer_store.h" // store.skins: the melee skin icon
 #include <streamer.h>
 #include <spectate.h>
+#include <ui_mobile.h>
+#include <hud_gui.h> // map-G: the map's custom GUI (hud_gui.c)
 #include <lobby_ui.h> // WP-E: the end screen's match vote cards (net/lobby_events.c)
 #include <cJSON.h>
 #include <limits.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -70,7 +76,6 @@ void hud_ui_hit(Client*, int kill);
 #define PING_COLOR_MEDIUM "rgb(255, 213, 66)"
 #define PING_COLOR_HIGH "rgb(255, 75, 66)"
 #define SERVER_MSG_COLOR "#fc03ec"
-#define XP_BAR_COLOR "#fbc02d"     // settings.interface.xpBarCol default
 #define SCORE_COLOR "#ffea78"      // settings.interface.scoreColor default (kill card +score)
 
 #define FEED_LIMIT 8               // settings.editing.feedLimit default
@@ -108,7 +113,6 @@ void hud_ui_hit(Client*, int kill);
 
 #define LRM "\xE2\x80\x8E"         // U+200E, UTILS.fixStr wraps names so RTL text cannot reorder a row
 
-static const char *const WEAP_KEYS[HUD_UI_LOADOUT_MAX] = {"", "[E]", "[Q]"}; // swap keys printed next to slots 1/2
 
 // config.suicides (1.js): "<victim> committed <random entry>" kill-feed rows.
 static const char *const SUICIDES[] = {"uninstall life", "toaster bath", "alt f4", "not alive", "neck rope", "scooter ankle", "death.exe"};
@@ -208,6 +212,8 @@ typedef struct {
     double end_start_ms;     // HUD clock of the END
     HtmlElem end_title;      // #knVicTitle (0 until created)
     char end_title_key[64];  // last written title layer state
+    int hide_default;        // KrunkScript game.ui.hidden (hud_ui_hide_default)
+    int streak;              // last written #streakVal
 } HudUi;
 
 static HudUi g_hud_ui = {.visible = -1, .in_game = -1, .cross_shown = -1, .ping = INT_MIN, .chat_shown = -1, .board_shown = -1, .old_board = -1, .feed_last_ms = -1.0, .dmg_last_ms = -1.0, .nums_last_ms = -1.0, .speed_shown = -1, .show_ui = -1};
@@ -285,20 +291,18 @@ static void hud_timer_text(const int total_seconds, char *out, const size_t size
     snprintf(out, size, "%02d:%02d", total / 60, total % 60);
 }
 
-// healthValue.innerHTML
-static void hud_health_value_html(const int hp, const int max, char *out, const size_t size) {
-    snprintf(out, size, "%d <span id='maxHP'>| %d</span>", hp, max);
-}
-
-// healthBar.innerHTML: `segs` .healthBarSeg, each filled by the segment's share of hp/max,
-// red once at most 3 segments worth of health are left.
+// io_changeHealth: #bottomLeftHealthBar.innerHTML = `segs` .nHealthBarSeg, each filled by the
+// segment's share of hp/max, hudHealthLow once at most 3 segments worth of health are left
+// (the colour also goes into `color`, which the CSS uses for the glow).
 static void hud_health_bar_html(int hp, int max, int segs, char *out, const size_t size) {
     hp = hp < 0 ? 0 : hp;
     max = max < 1 ? (hp > 0 ? hp : 1) : max;
     segs = segs < 1 ? 1 : segs;
 
+    const ClientRenderSettings *rs = client_render_settings();
     const double left = (double) segs * ((double) hp / (double) max); // segments worth of health left
-    const char *color = left <= 3.0 ? HEALTH_COLOR_LOW : HEALTH_COLOR_HIGH;
+    const char *color = left <= 3.0 ? (rs->hud_health_low[0] ? rs->hud_health_low : HEALTH_COLOR_LOW)
+                                    : (rs->hud_health_high[0] ? rs->hud_health_high : HEALTH_COLOR_HIGH);
     size_t len = 0;
     out[0] = 0;
 
@@ -306,11 +310,12 @@ static void hud_health_bar_html(int hp, int max, int segs, char *out, const size
         const double v = left - (double) i;
         char width[32];
         fmt_number((v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v) * 100.0, width, sizeof(width));
-        hb_append(out, size, &len, "<div class='healthBarSeg'><div class='hpBSeg' style='width:%s%%;background-color:%s'></div></div>", width, color);
+        hb_append(out, size, &len, "<div class='nHealthBarSeg'><div class='nHpBSeg' style='width:%s%%;background-color:%s;color:%s'></div></div>",
+                  width, color, color);
     }
 }
 
-// weapDisplay icon: `canThrow && melee` -> the melee skin icon (default knife: melee/icon_0),
+// .weapIcon: `canThrow && melee` -> the melee skin icon (default knife: melee/icon_0),
 // else weaponConfig.icon; a thrown knife (canThrow false) leaves the melee slot on the
 // Combat Knife's own icon_0, the fists, until refillKnife / respawn.
 static const char *hud_weapon_icon_src(const Weapon *slot, const int can_throw, const int melee_icon, char *out, const size_t size) {
@@ -323,21 +328,46 @@ static const char *hud_weapon_icon_src(const Weapon *slot, const int can_throw, 
     return out;
 }
 
-// weapDisplay.innerHTML (player manager, isYou branch): one .weapItem per slot, the held
-// one at full opacity, holstered ones at 0.7 with their swap key.
+// weaponConfig index of `w` (the default table; maps / custom games reuse its ids), 0 unknown.
+static int weapon_index_of(const Weapon *w) {
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        if (g_weapons[i] == w) return i;
+    }
+    return 0;
+}
+
+// The key name printed on slot `i` > 0 (v7 players.js swapWeapon): the melee bind for a melee
+// weapon, the equipment bind for equipment, else the swap bind (UTILS.getKeyName).
+static const char *hud_weapon_key(const Weapon *w, char *out, const size_t size) {
+    const int id = w && w->melee ? UI_CONTROL_MELEE : w && w->equipment ? UI_CONTROL_EQUIP : UI_CONTROL_SWAP;
+    return ui_controls_key_name(ui_controls_bind(id), out, size);
+}
+
+// #weapHolder.innerHTML (players.js swapWeapon, isYou): one .weapItem per slot, the held one
+// at opacity 1, holstered ones at 0.5; inside .weapItemInner the key name (slots > 0), the
+// weapon (or skin, in its rarity colour) name, the per-weapon kill streak (hidden at 0) and
+// the icon. Only #weapItem_N's opacity changes on a swap.
 static void hud_weapon_rack_html(const Weapon *const *loadout, const int count, const int index, const int can_throw, const int melee_icon, char *out,
                                  const size_t size) {
     size_t len = 0;
     out[0] = 0;
 
     for (int i = 0; i < count && i < HUD_UI_LOADOUT_MAX; i++) {
-        char src[256];
-        hb_append(out, size, &len, "<div class='weapItem' id='weapItem_%d'>", i);
-        if (i) hb_append(out, size, &len, "<div class='weapKey'>%s</div>", WEAP_KEYS[i]);
-        hb_append(out, size, &len, "<img style='opacity:%s%s' class='weapIcon' src='%s'%s></div>",
-            i == index ? "1" : "0.7", i ? ";margin-right:25px" : "",
-            hud_weapon_icon_src(loadout[i], can_throw, melee_icon, src, sizeof(src)),
-            loadout[i] && loadout[i]->melee ? " id='weapIconMel'" : "");
+        const Weapon *w = loadout[i];
+        char src[256], key[32];
+        hb_append(out, size, &len, "<div class='weapItem' id='weapItem_%d' style='opacity:%s'><div class=\"weapItemInner\">", i, i == index ? "1" : "0.5");
+        if (i) {
+            hb_append(out, size, &len, "<div class='weapKey'>");
+            hb_append_escaped(out, size, &len, hud_weapon_key(w, key, sizeof(key)));
+            hb_append(out, size, &len, "</div>");
+        }
+        hb_append(out, size, &len, "<span class='weapSkin' style='color:#fff'>");
+        hb_append_escaped(out, size, &len, w && w->name ? w->name : "");
+        hb_append(out, size, &len, "</span><div class='weapStreakHolder' data-weapon-index='%d' style='display:none'><div class='weapStreakInner'>"
+                                   "<span class='weapStreak'>0</span><span style='color: var(--yellow)'>KS</span></div></div>",
+                  w ? weapon_index_of(w) : 0);
+        hb_append(out, size, &len, "<img class='weapIcon' src='%s' %s/></div></div>",
+            hud_weapon_icon_src(w, can_throw, melee_icon, src, sizeof(src)), w && w->melee ? "id='weapIconMel' " : "");
     }
 }
 
@@ -351,13 +381,18 @@ static void hud_game_info_html(const char *mode, const char *map, char *out, con
     hb_append(out, size, &len, "</div>");
 }
 
-// Krunker gB() -> gy(): the inner markup of a #chatMsg_N row. A `name` makes a player
-// line (fixStr(name) + ": " + message), else a `color` makes a server line (type 2),
-// else a plain game line (type 1, .chatMsg default color).
+// io_addChat -> f2018: the inner markup of a #chatMsg_N row. A `name` makes a player line
+// (fixStr(name) + ": " + message), else a `color` makes a server line (type 2), else a
+// plain game line (type 1, .chatMsg default color). chatTextOutline / chatBGOp style the
+// .chatItem like v7's (v12018 / v12017).
 static void hud_chat_row_html(const char *name, const char *msg, const char *color, char *out, const size_t size) {
+    const ClientRenderSettings *rs = client_render_settings();
     size_t len = 0;
     out[0] = 0;
-    hb_append(out, size, &len, "<div class='chatItem'>");
+    hb_append(out, size, &len, "<div class='chatItem%s'", rs->chat_text_outline ? " chatTextOutline" : "");
+    if (fabsf(rs->chat_bg_opacity - CHAT_BG_OPACITY_DEFAULT) > 1e-4f)
+        hb_append(out, size, &len, " style='background-color: rgba(0, 0, 0, %g)'", (double) rs->chat_bg_opacity);
+    hb_append(out, size, &len, ">");
     if (name && name[0]) {
         char shown[PLAYER_NAME_SIZE];
         hb_append_fixed(out, size, &len, streamer_name(name, shown, sizeof(shown))); // addChat: scrambleS(sender) in streamer mode
@@ -381,55 +416,65 @@ static void hud_format_num(const int value, char *out, const size_t size) {
     else snprintf(out, size, "%d", value);
 }
 
-// updateLeaderboard: one .newLeaderItem (leaderType 1), or .leaderItem in #leaderContainer
-// with Old Scoreboard (leaderType 0: g_board_prefix "l"); the Name`M` class marks the
-// local player's row.
-static const char *g_board_prefix = "newL";
+// The board columns: v7 modes' leaderStats (gameModes/*.js; FFA/TDM ["score", "kills",
+// "deaths"]). KrunkNative's leaderboard data is Player.score/kills/deaths, so every mode shows
+// those three (mode-specific stats such as caps or deposits are not tracked per player yet).
+#define BOARD_STAT_COUNT 3
+static const char *const BOARD_STATS[BOARD_STAT_COUNT] = {"Score", "Kills", "Deaths"};
 
-// acc: the player's account (NET_PACKET_PLAYER_INFO from a brain-linked server), NULL for
-// guests: premiumT "beenhere" / featured "check_circle" icons and the " [clan]" tag.
-static void hud_scoreboard_row_html_acc(char *out, const size_t size, size_t *len, const int rank, const char *name, const int score, const int is_you,
-                                        const NetPlayerInfoPacket *acc) {
-    char num[32];
-    const char *pre = g_board_prefix;
-    hud_format_num(score, num, sizeof(num));
-    hb_append(out, size, len, "<div class='%seaderItem'><div class='%seaderCounter'>%d.</div>", pre, pre, rank);
+// The " [clan]" tag of a board row: COLORS.getClanCol(clan, fallback) ("DEV" is blue;
+// KrunkNative has no clan ranks, so no rainbow / rank colours).
+static void hb_append_clan(char *out, const size_t size, size_t *len, const char *clan, const char *fallback) {
+    if (!clan || !clan[0]) return;
+    hb_append(out, size, len, "<span style='color:%s'> [", strcmp(clan, "DEV") ? fallback : "#40C4FF");
+    hb_append_escaped(out, size, len, clan);
+    hb_append(out, size, len, "]</span>");
+}
+
+// premiumT "beenhere" / featured "check_circle" icons of a board row (acc: the player's
+// account from NET_PACKET_PLAYER_INFO, NULL for guests); `top` is the icons' margin-top.
+static void hb_append_badges(char *out, const size_t size, size_t *len, const NetPlayerInfoPacket *acc, const int top) {
     if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_PREMIUM))
-        hb_append(out, size, len, " <i class='material-icons' style='color:#FBC02D;margin-top:3px;font-size:23px;vertical-align:middle;'>beenhere</i>");
+        hb_append(out, size, len, " <i class='material-icons' style='color:#FBC02D;margin-top:%dpx;font-size:23px;vertical-align:middle;'>beenhere</i>", top);
     if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_VERIFIED))
-        hb_append(out, size, len, " <i class='material-icons' style='color:#40C4FF;margin-top:3px;font-size:23px;vertical-align:middle;'>check_circle</i>");
-    hb_append(out, size, len, "<div class='%seaderName%s'>", pre, is_you ? "M" : "");
+        hb_append(out, size, len, " <i class='material-icons' style='color:#40C4FF;margin-top:%dpx;font-size:23px;vertical-align:middle;'>check_circle</i>", top);
+}
+
+// One board entry, sampled from the game or a scenario row.
+typedef struct {
+    const char *name;
+    int stats[BOARD_STAT_COUNT];  // score, kills, deaths
+    int is_you, is_ally, team;
+    const NetPlayerInfoPacket *acc;
+} BoardRow;
+
+// f1984 (Old Scoreboard, #leaderContainer): one .leaderItem per player, at most LEADER_MAX.
+static void hud_old_board_row_html(char *out, const size_t size, size_t *len, const int rank, const BoardRow *r) {
+    char num[32], shown[PLAYER_NAME_SIZE];
+    hud_format_num(r->stats[0], num, sizeof(num));
+    hb_append(out, size, len, "<div class='leaderItem'><div class='leaderCounter'>%d.</div>", rank);
+    hb_append_badges(out, size, len, r->acc, 5);
+    hb_append(out, size, len, "<div class='leaderName%s'>", r->is_you ? "M" : r->is_ally ? "F" : "");
+    hb_append_escaped(out, size, len, streamer_name(r->name && r->name[0] ? r->name : "Guest", shown, sizeof(shown))); // streamMode ? scrambleS(alias)
+    hb_append_clan(out, size, len, r->acc && r->acc->account_id > 0 ? r->acc->clan : NULL, "#fff");
+    hb_append(out, size, len, "</div><div class='leaderScore'>%s</div></div>", num);
+}
+
+// f1985's row of the #centerLeaderDisplay table.
+static void hud_center_board_row_html(char *out, const size_t size, size_t *len, const int rank, const BoardRow *r) {
     char shown[PLAYER_NAME_SIZE];
-    hb_append_escaped(out, size, len, streamer_name(name && name[0] ? name : "Guest", shown, sizeof(shown))); // streamerModeEnabled ? scrambleS(alias)
-    if (acc && acc->account_id > 0 && acc->clan[0]) { // COLORS.getClanCol(clan, clanR, "#fff"): "DEV" is blue
-        hb_append(out, size, len, "<span class='' style='color:%s'> [", strcmp(acc->clan, "DEV") ? "#fff" : "#40C4FF");
-        hb_append_escaped(out, size, len, acc->clan);
-        hb_append(out, size, len, "]</span>");
+    hb_append(out, size, len, "<tr><td><div class='newLeaderItem'><div class='newLeaderCounter'>%d.</div>", rank);
+    hb_append_badges(out, size, len, r->acc, 3);
+    hb_append(out, size, len, "<div class='newLeaderName%s'>", r->is_you ? "M" : r->is_ally ? "F" : "");
+    hb_append_escaped(out, size, len, streamer_name(r->name && r->name[0] ? r->name : "Guest", shown, sizeof(shown)));
+    hb_append_clan(out, size, len, r->acc && r->acc->account_id > 0 ? r->acc->clan : NULL, "#fff");
+    hb_append(out, size, len, "</div></div></td>");
+    for (int i = 0; i < BOARD_STAT_COUNT; i++) {
+        char num[32];
+        hud_format_num(r->stats[i], num, sizeof(num));
+        hb_append(out, size, len, "<td>%s</td>", num);
     }
-    hb_append(out, size, len, "</div><div class='%seaderScore'>%s</div></div>", pre, num);
-}
-
-static void hud_scoreboard_row_html(char *out, const size_t size, size_t *len, const int rank, const char *name, const int score, const int is_you) {
-    hud_scoreboard_row_html_acc(out, size, len, rank, name, score, is_you, NULL);
-}
-
-// Scenario rows [{rank, name, score, me?}] (ui_scenario.c `state.scoreboard`).
-static void hud_scoreboard_rows_html(const char *my_name, const cJSON *rows, char *out, const size_t size, size_t *len) {
-    const int count = cJSON_GetArraySize(rows);
-    int index = 0;
-    const cJSON *row;
-    cJSON_ArrayForEach(row, rows) {
-        const cJSON *rank = cJSON_GetObjectItemCaseSensitive(row, "rank");
-        const cJSON *row_name = cJSON_GetObjectItemCaseSensitive(row, "name");
-        const cJSON *row_score = cJSON_GetObjectItemCaseSensitive(row, "score");
-        const cJSON *me = cJSON_GetObjectItemCaseSensitive(row, "me");
-        const char *n = cJSON_IsString(row_name) ? row_name->valuestring : "";
-        // An FFA board always lists the local player: a single row is them.
-        const int is_you = cJSON_IsBool(me) ? cJSON_IsTrue(me) : count == 1 || (my_name && my_name[0] && !strcmp(n, my_name));
-        index++;
-        hud_scoreboard_row_html(out, size, len, cJSON_IsNumber(rank) ? rank->valueint : index, n,
-            cJSON_IsNumber(row_score) ? row_score->valueint : 0, is_you);
-    }
+    hb_append(out, size, len, "</tr>");
 }
 
 static const char *hud_player_name(const Client *client, const Player *player) {
@@ -462,82 +507,200 @@ static int hud_sorted_players(const Client *client, const Player **out, const in
 
 #define HUD_BOARD_PLAYERS_MAX 128
 
-// #leaderContainerD markup (FFA, leaderType 1): scenario rows when a scenario supplies
-// them, else every known player sorted by score (at most LEADER_MAX rows like Krunker),
-// else just the local player.
-static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *out, const size_t size) {
-    size_t len = 0;
-    out[0] = 0;
+static int hud_team_mode(const Client *client) {
+    return client->game.mode && client->game.mode->config.teams && !client->game.mode->config.fake_names;
+}
+
+// The board rows: scenario rows [{rank?, name, score, kills?, deaths?, me?, team?}] when a
+// scenario supplies them, else every known player sorted by score, else just the local player.
+static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out, const int max) {
+    int n = 0;
+    const char *my_name = hud_my_name(client);
+    const int my_team = client->me ? client->me->team : 0;
     if (cJSON_IsArray(rows)) {
-        hud_scoreboard_rows_html(client->me ? hud_player_name(client, client->me) : client->menu_name, rows, out, size, &len);
-        return;
+        const int count = cJSON_GetArraySize(rows);
+        const cJSON *row;
+        cJSON_ArrayForEach(row, rows) {
+            if (n >= max) break;
+            const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+            const cJSON *me = cJSON_GetObjectItemCaseSensitive(row, "me");
+            BoardRow *r = &out[n++];
+            memset(r, 0, sizeof(*r));
+            r->name = cJSON_IsString(name) ? name->valuestring : "";
+            // an FFA board always lists the local player: a single row is them
+            r->is_you = cJSON_IsBool(me) ? cJSON_IsTrue(me) : count == 1 || (my_name[0] && !strcmp(r->name, my_name));
+#define ROW_INT(key) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, key)) ? cJSON_GetObjectItemCaseSensitive(row, key)->valueint : 0)
+            r->stats[0] = ROW_INT("score");
+            r->stats[1] = ROW_INT("kills");
+            r->stats[2] = ROW_INT("deaths");
+            r->team = ROW_INT("team");
+#undef ROW_INT
+            r->is_ally = !r->is_you && r->team && r->team == my_team;
+        }
+        return n;
     }
     const Player *players[HUD_BOARD_PLAYERS_MAX];
     const int count = client->game.players ? hud_sorted_players(client, players, HUD_BOARD_PLAYERS_MAX) : 0;
-    if (count == 0) {
-        hud_scoreboard_row_html(out, size, &len, 1, client->me ? hud_player_name(client, client->me) : client->menu_name,
-            client->me ? client->me->score : 0, 1);
-        return;
+    for (int i = 0; i < count && n < max; i++) {
+        BoardRow *r = &out[n++];
+        memset(r, 0, sizeof(*r));
+        r->name = hud_player_name(client, players[i]);
+        r->stats[0] = players[i]->score;
+        r->stats[1] = (int) players[i]->kills;
+        r->stats[2] = (int) players[i]->deaths;
+        r->team = players[i]->team;
+        r->is_you = players[i] == client->me;
+        r->is_ally = !r->is_you && r->team && r->team == my_team;
+        r->acc = player_accounts_get(players[i]->uid);
     }
-    for (int i = 0; i < count && i < LEADER_MAX; i++) {
-        hud_scoreboard_row_html_acc(out, size, &len, i + 1, hud_player_name(client, players[i]), players[i]->score, players[i] == client->me,
-                                    player_accounts_get(players[i]->uid));
+    if (n == 0 && max > 0) {
+        BoardRow *r = &out[n++];
+        memset(r, 0, sizeof(*r));
+        r->name = my_name;
+        r->stats[0] = client->me ? client->me->score : 0;
+        r->stats[1] = client->me ? (int) client->me->kills : 0;
+        r->stats[2] = client->me ? (int) client->me->deaths : 0;
+        r->team = my_team;
+        r->is_you = 1;
+    }
+    return n;
+}
+
+// f1984: the Old Scoreboard's #leaderContainer markup ("" = "Empty Lobby").
+static void hud_old_board_html(const Client *client, const cJSON *rows, char *out, const size_t size) {
+    BoardRow board[HUD_BOARD_PLAYERS_MAX];
+    const int n = hud_board_rows(client, rows, board, HUD_BOARD_PLAYERS_MAX);
+    size_t len = 0;
+    out[0] = 0;
+    for (int i = 0; i < n && i < LEADER_MAX; i++) hud_old_board_row_html(out, size, &len, i + 1, &board[i]);
+}
+
+// f1985: the #centerLeaderDisplay markup. Team modes (mode.teams && !fakeNames) get one
+// .centerLeaderContainer per team with its .newLeaderTeam header (team name + score).
+static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *out, const size_t size) {
+    BoardRow board[HUD_BOARD_PLAYERS_MAX];
+    const int n = hud_board_rows(client, rows, board, HUD_BOARD_PLAYERS_MAX);
+    const int teams = hud_team_mode(client);
+    size_t len = 0;
+    out[0] = 0;
+    for (int group = 0; group < (teams ? 2 : 1); group++) {
+        int rank = 1;
+        for (int i = 0; i < n; i++) {
+            if (teams && board[i].team - 1 != group) continue;
+            if (rank == 1) {
+                hb_append(out, size, &len, "<div class=\"centerLeaderContainer\"><div class=\"centerLeaderContainerInner\">");
+                if (teams) {
+                    const GameModeConfig *mc = &client->game.mode->config;
+                    const char *team_name = mc->team_options[group] ? mc->team_options[group] : group ? "Bravo" : "Alpha"; // #teamNm1/#teamNm2
+                    hb_append(out, size, &len, "<div class='newLeaderTeam'>");
+                    hb_append_escaped(out, size, &len, team_name);
+                    hb_append(out, size, &len, "<div class='newLeaderTeamScore'>%d</div></div>", client->game.mode->team_scores[group + 1]);
+                }
+                hb_append(out, size, &len, "<table id='ingameTable'><tr><th>Name</th>");
+                for (int k = 0; k < BOARD_STAT_COUNT; k++) hb_append(out, size, &len, "<th>%s</th>", BOARD_STATS[k]);
+                hb_append(out, size, &len, "</tr><tr height='10px;'></tr>");
+            }
+            hud_center_board_row_html(out, size, &len, rank++, &board[i]);
+        }
+        if (rank > 1) hb_append(out, size, &len, "</table></div></div>");
     }
 }
 
-// The " [clan]" tag of a player list row: COLORS.getClanCol(clan, clanR, "#353535") ("DEV"
-// is blue; KrunkNative has no clan ranks, so no rainbow / rank colours).
+// windows[22] "Player List" (showWindow(23), opened by pListKey): the header with the
+// player count and the search box, then .pListTable rows: the local player first, then
+// every player in Game.players.list (config.isProd hides the local player there) with
+// the ping icon, the profile link and the chat / voice mute buttons v7 shows for players
+// with an account (level >= 1). Not ported, as KrunkNative has no backend for them: the
+// Votekick / K.P.D buttons (account-only, v2k / kpd packets), the staff punish buttons and
+// the trade button.
+static char g_plist_search[64]; // windows[22].playerSearch
+
+static int hud_plist_matches(const Player *p, const char *name) {
+    if (!g_plist_search[0]) return 1;
+    char a[PLAYER_NAME_SIZE * 2], q[sizeof(g_plist_search)];
+    size_t i;
+    for (i = 0; name[i] && i + 1 < sizeof(a); i++) a[i] = (char) tolower((unsigned char) name[i]);
+    a[i] = 0;
+    for (i = 0; g_plist_search[i] && i + 1 < sizeof(q); i++) q[i] = (char) tolower((unsigned char) g_plist_search[i]);
+    q[i] = 0;
+    (void) p;
+    return strstr(a, q) != NULL;
+}
+
 static void hud_plist_clan(StrBuf *sb, const char *clan) {
     if (!clan || !clan[0]) return;
-    sb_appendf(sb, "<span class='' style='color:%s'> [", strcmp(clan, "DEV") ? "#353535" : "#40C4FF");
+    sb_appendf(sb, "<span style='color:%s'> [", strcmp(clan, "DEV") ? "#353535" : "#40C4FF");
     sb_append_esc(sb, clan);
     sb_append(sb, "]</span>");
 }
 
-// windows[22] "Player List" (showWindow(23), opened by pListKey): the header with the
-// player count, the local player's row, then every player in Game.players.list as a
-// profile link. Not ported, as KrunkNative has no backend for them: the row buttons
-// (Kick Spec / Votekick / Kick / Ban / Kill / TP2 / TPME / TPAll / police, which need host or
-// staff punish packets and v2k), the ranked elo icon (no per-player maxElo) and isHacker's
-// red link (no flag). config.isProd (not a localhost/LAN host) leaves the local player out
-// of the list, as on krunker.io; the local player always has the top row.
-char *hud_ui_player_list_html(void) {
+static char *hud_plist_rows(void) {
     const Client *client = menu_ui()->client;
     const size_t count = client && client->game.players ? client->game.player_count : 0;
-    size_t listed = 0;
-    for (size_t i = 0; i < count; i++) listed += client->game.players[i] != NULL;
     StrBuf sb = {0};
-    sb_append(&sb, "<div style='margin-top:0px' class='setHed'>");
-    if (listed) sb_appendf(&sb, "Player List<div style='float: right;'>[%zu]</div><hr>", listed); // windows.players.header
-    else sb_append(&sb, "<center>No players currently...<center>");                       // windows.players.none
-    sb_append(&sb, "</div><div style='background-color:gainsboro;border-radius:6px;padding:5px'>");
+    sb_append(&sb, "<table class='pListTable' style='margin-top: 8px;overflow-y: scroll;height: calc(100% - 75px);'><tbody>");
     // isLobbyHost: this client runs the game (offline / hosted), like menu_ui.c's idle kick
     const int remote = client && client->net_connected && !client->offline && !client->game.is_local;
     const char *host = client ? client->net_address : "";
     const int prod = remote && host[0] && strcmp(host, "127.0.0.1") && strcmp(host, "localhost") && strncmp(host, "192.168.", 8);
     const Player *me = client ? client->me : NULL;
     if (me) {
-        sb_append(&sb, "<div><span class='settNameSmall'>");
+        sb_append(&sb, "<tr><td class='pListName'>");
         if (!remote) sb_append(&sb, "<i class='material-icons' style='font-size:25px'>stars</i>");
         sb_append_esc(&sb, hud_player_name(client, me));
         const NetPlayerInfoPacket *info = player_accounts_get(me->uid);
         const AccountInfo *acc = account_get();
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
-        sb_append(&sb, "</span><span style='float:right'></span></div>");
+        sb_appendf(&sb, "</td><td class='pListActions'>%s</td></tr>",
+                   spectate_active() ? "<span onmouseenter='playTick()' title='Clear Focus' class='punishButton kick' onclick='clearFocus()'>Clear Focus</span>" : "");
     }
     for (size_t i = 0; i < count; i++) {
         const Player *p = client->game.players[i];
         if (!p || (prod && p == me)) continue; // Game.players.list.filter(ho => !config.isProd || !ho.isYou)
         const NetPlayerInfoPacket *info = player_accounts_get(p->uid);
         const char *name = hud_player_name(client, p);
-        sb_append(&sb, "<div><span class='settNameSmall'><a target='_blank' class='grey' href='/social.html?p=profile&q=");
+        if (!hud_plist_matches(p, name)) continue;
+        const int ping = p->ping;
+        const char *pcol = ping >= 150 ? PING_COLOR_HIGH : ping >= 50 ? PING_COLOR_MEDIUM : ping <= 0 ? "#fff" : PING_COLOR_LOW; // COLORS.ping
+        sb_appendf(&sb, "<tr><td class='pListName'><span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>"
+                        "<a target='_blank' class='' href='/social.html?p=profile&q=", pcol, ping > 0 ? ping : 0);
         sb_append_esc(&sb, name);
         sb_append(&sb, "'>");
         sb_append_esc(&sb, name);
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : NULL);
-        sb_append(&sb, "</a></span><span style='float:right'></span></div>");
+        sb_append(&sb, "</a></td><td class='pListActions'>");
+        if (info && info->account_id > 0) { // level >= 1: an account
+            sb_appendf(&sb, "<span title='Chat mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 0)'>chat</span>", p->uid);
+            sb_appendf(&sb, "<span title='Voice mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 1)'>record_voice_over</span>", p->uid);
+        }
+        sb_append(&sb, "</td></tr>");
     }
+    sb_append(&sb, "</tbody></table>");
+    return sb_finish(&sb);
+}
+
+char *hud_ui_player_list_html(void) {
+    const Client *client = menu_ui()->client;
+    const size_t count = client && client->game.players ? client->game.player_count : 0;
+    size_t listed = 0;
+    for (size_t i = 0; i < count; i++) listed += client->game.players[i] != NULL;
+    StrBuf sb = {0};
+    if (listed) {
+        sb_appendf(&sb, "<div id='playerSearchH' class='setHed'>Player List [%zu]<div id='plySearchH'><input id='plySearch' type='text' ", listed);
+        if (g_plist_search[0]) {
+            sb_append(&sb, "value='");
+            sb_append_esc(&sb, g_plist_search);
+            sb_append(&sb, "' ");
+        }
+        sb_append(&sb, "placeholder='Search Player' oninput='windows[22].searchPlayers(this)'></div></div>");
+    } else {
+        sb_append(&sb, "<div style='margin-top:0px;' class='setHed'><center>No players currently...<center></div>"); // windows.players.none
+    }
+    char *rows = hud_plist_rows();
+    sb_append(&sb, "<div id='playerListH'>");
+    sb_append(&sb, rows);
     sb_append(&sb, "</div>");
+    free(rows);
     return sb_finish(&sb);
 }
 
@@ -559,19 +722,21 @@ static void hud_feed_name_span(char *out, const size_t size, size_t *len, const 
     hb_append(out, size, len, "</span>");
 }
 
-// weaponConfig icnPad by icon (margin-right of the .weaponChatIcon); icon_0 is the Combat
-// Knife, a melee weapon: gE() shows the killer's melee skin icon (default knife = melee
-// icon_0, gD[0] = 5 px) as .meleeChatIcon instead.
+// v7 weaponConfig icnPad by icon (src/data/weapons.js; margin-right of the .weaponChatIcon);
+// icon_0 is the Combat Knife, a melee weapon: f2024 shows the killer's melee skin icon
+// (default knife = melee icon_0, vA653[0] = 5 px) as .meleeChatIcon instead.
 static const struct {
     const char *icon;
     int pad;
 } FEED_ICON_PAD[] = {
     {"icon_1", 9}, {"icon_2", 5}, {"icon_3", -15}, {"icon_4", 0}, {"icon_5", -10}, {"icon_6", 10}, {"icon_7", 10},
     {"icon_8", 10}, {"icon_9", 10}, {"icon_10", -4}, {"icon_11", -10}, {"icon_12", -8}, {"icon_14", 9},
-    {"icon_15", 9}, {"icon_16", 10}, {"icon_17", -10}, {"icon_18", 9}, {"icon_19", 5},
+    {"icon_15", 9}, {"icon_16", 10}, {"icon_17", -10}, {"icon_18", 9}, {"icon_19", 5}, {"icon_20", 9},
+    {"icon_21", -10}, {"icon_22", -10}, {"icon_23", 10}, {"icon_24", -15}, {"icon_25", -15}, {"icon_26", 10},
+    {"icon_27", 10}, {"icon_28", -4}, {"icon_29", 9},
 };
 #define FEED_MELEE_ICON "icon_0"
-#define FEED_MELEE_PAD 5           // gD[0]: default knife skin
+#define FEED_MELEE_PAD 5           // vA653[0]: default knife skin
 
 static int hud_feed_icon_pad(const char *icon) {
     for (size_t i = 0; i < sizeof(FEED_ICON_PAD) / sizeof(FEED_ICON_PAD[0]); i++) {
@@ -580,13 +745,13 @@ static int hud_feed_icon_pad(const char *icon) {
     return 0; // gC.icnPad || 0
 }
 
-// gE(): "<div class='kfItem'><span class='kfMsg'>" in #killFeed; with Old Scoreboard
-// (`chat`) "<div class='chatItem[ chatTextOutline]'[ style='background-color: rgba(0, 0, 0, op)']>
-// <span class='chatMsg'>" (gv / gu from chatTextOutline / chatBGOp).
+// f2024: "<div class='killfeedItem'><span class='killfeedMsg'>" in #killFeed; with Old
+// Scoreboard (`chat`) "<div class='chatItem[ chatTextOutline]'[ style='background-color:
+// rgba(0, 0, 0, op)']><span class='chatMsg'>" (chatTextOutline / chatBGOp).
 static void hud_feed_open(char *out, const size_t size, size_t *len, const int chat) {
     const ClientRenderSettings *rs = client_render_settings();
     if (!chat) {
-        hb_append(out, size, len, "<div class='kfItem'><span class='kfMsg'>");
+        hb_append(out, size, len, "<div class='killfeedItem'><span class='killfeedMsg'>");
         return;
     }
     hb_append(out, size, len, "<div class='chatItem%s'", rs->chat_text_outline ? " chatTextOutline" : "");
@@ -595,7 +760,7 @@ static void hud_feed_open(char *out, const size_t size, size_t *len, const int c
     hb_append(out, size, len, "><span class='chatMsg'>");
 }
 
-// gE(b8, info, killer, victim): inner markup of a kill row. `killer` NULL = the victim
+// f2024(killer, info, killerHtml, victimHtml): inner markup of a kill row. `killer` NULL = the victim
 // killed itself (hC = ""): only the weapon and the victim.
 static void hud_feed_row_html(const int chat, const char *killer, const int killer_is_you, const char *victim,
                               const int victim_is_you, const char *weapon_icon, const int headshot, char *out,
@@ -749,12 +914,6 @@ static int hud_scoreboard_key(const Client *client) {
 static int hud_ammo(const Player *me) {
     if (!me->ammo || me->loadout_index < 0 || me->loadout_index >= me->loadout_size) return 0;
     return (int) me->ammo[me->loadout_index];
-}
-
-static int hud_class_icon_index(const Client *client, const int class_index) {
-    const Game *game = &client->game;
-    const ClassConfig *class = game->classes && class_index >= 0 && (size_t) class_index < game->class_count ? &game->classes[class_index] : NULL;
-    return class ? class->icon_index : class_index;
 }
 
 static int hud_health_segments(const Client *client, const Player *me) {
@@ -1512,10 +1671,13 @@ static void hud_feed_insert(const int chat, const char *html, double age_ms) {
     slot->chat = chat;
 }
 
+static void hud_h2h_count(const char *killer, int killer_is_you, const char *victim, int victim_is_you);
+
 void hud_ui_add_killfeed_ex(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
                             const char *weapon_icon, const int is_headshot, const double age_ms) {
     (void) client;
-    if (!client_render_settings()->show_kills) return; // bf.tmp.showKillFeed
+    hud_h2h_count(killer, killer_is_you, victim, victim_is_you); // player.killedBy (death screen)
+    if (!client_render_settings()->show_kills) return; // SETTINGS.tmp.showKills
     const int chat = hud_feed_in_chat();
     char html[1024];
     hud_feed_row_html(chat, killer, killer_is_you, victim ? victim : "", victim_is_you, weapon_icon, is_headshot, html, sizeof(html));
@@ -1558,20 +1720,66 @@ void hud_ui_kill_streak(Client *client, const int uid, const int streak) {
 
 /* ------------------------------------------------------------ chat */
 
-// gy(): appends one #chatMsg_N row (see hud_chat_row_html for the three kinds).
+// The chat channel of the local player (v7 vLN02023: 0 global, 1 team; #chatSwitch).
+static int g_chat_channel;
+
+// f2018's data-tab/display of a row on `channel` (-1 = every channel).
+static void hud_chat_row_channel(const HtmlElem row, const int channel) {
+    char tab[8];
+    snprintf(tab, sizeof(tab), "%d", channel);
+    html_dom_set_attr(row, "data-tab", tab);
+    html_dom_set_display(row, channel == g_chat_channel || channel == -1 ? "" : "none");
+}
+
+// The channel of an incoming player line: io_addChat forces -1 outside team modes. KrunkNative's
+// chat packet has no channel yet, so team-mode lines are global (0).
+static int hud_chat_line_channel(const Client *client, const int player_line) {
+    const int teams = client && client->game.mode && client->game.mode->config.teams;
+    return teams && player_line ? 0 : -1;
+}
+
+// f2018: appends one #chatMsg_N row (see hud_chat_row_html for the three kinds); the oldest
+// rows go first beyond config.chatListLength.
 static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
     const HtmlElem list = html_dom_by_id("chatList");
     if (!list || !msg || !msg[0]) return;
 
+    hud_feed_evict(list, CHAT_LIST_LENGTH);
     char id[32], html[1024];
     snprintf(id, sizeof(id), "chatMsg_%d", g_hud_ui.chat_seq++);
     hud_chat_row_html(name, msg, color, html, sizeof(html));
 
     const HtmlElem row = html_dom_create("div", id);
+    hud_chat_row_channel(row, hud_chat_line_channel(menu_ui()->client, name && name[0]));
     html_dom_set_html(row, html);
     html_dom_append(list, row);
     html_dom_scroll_to_bottom(list);
 }
+
+// window.switchChat(#chatSwitch): toggles the text & voice channel (team modes only; forced
+// to global elsewhere), shows the rows of that channel and says so in the chat.
+static void hud_switch_chat(void) {
+    const Client *client = menu_ui()->client;
+    const HtmlElem sw = html_dom_by_id("chatSwitch");
+    if (!sw) return;
+    char tab[16] = "";
+    html_dom_get_attr(sw, "data-tab", tab, sizeof(tab));
+    int next = strcmp(tab, "public") == 0 ? 0 : 1; // the attribute names the channel after the switch
+    const int teams = client && client->game.mode && client->game.mode->config.teams;
+    if (!teams) next = 1;
+    html_dom_set_attr(sw, "data-tab", next ? "public" : "groups");
+    g_chat_channel = !next;
+    const HtmlElem list = html_dom_by_id("chatList");
+    for (HtmlElem row = list ? html_dom_first_child(list) : 0; row; row = html_dom_next(row)) {
+        char ch[8] = "";
+        html_dom_get_attr(row, "data-tab", ch, sizeof(ch));
+        const int c = atoi(ch);
+        html_dom_set_display(row, c == g_chat_channel || c == -1 ? "" : "none");
+    }
+    if (teams) hud_add_chat_row(NULL, g_chat_channel ? "Team Text & Voice Chat" : "Global Text & Voice Chat", SERVER_MSG_COLOR);
+}
+
+int hud_ui_chat_channel(void) { return g_chat_channel; }
 
 // addChat(msg) for a server line.
 static void hud_add_server_chat(const char *msg, const char *color) {
@@ -1619,11 +1827,9 @@ static void hud_render_health(const HtmlHudState *hud) {
     char html[2048];
     HtmlElem el;
 
-    if ((el = html_dom_by_id("healthValue"))) {
-        hud_health_value_html(hud->health < 0 ? 0 : hud->health, hud->max_health < 1 ? 1 : hud->max_health, html, sizeof(html));
-        html_dom_set_html(el, html);
-    }
-    if ((el = html_dom_by_id("healthBar"))) {
+    // io_changeHealth: bottomLeftHealth.textContent = Math.ceil(hp)
+    dom_text_int("bottomLeftHealth", hud->health < 0 ? 0 : hud->health);
+    if ((el = html_dom_by_id("bottomLeftHealthBar"))) {
         hud_health_bar_html(hud->health, hud->max_health, hud->health_segments, html, sizeof(html));
         html_dom_set_html(el, html);
     }
@@ -1636,17 +1842,17 @@ static void hud_render_ammo(const HtmlHudState *hud) {
     else snprintf(text, sizeof(text), "%s", hud->melee ? "-" : "0");
     dom_text("ammoVal", text);
 
+    // "| " + (ammoLimit != null ? "-" : weapon.ammo || "-")
     if (hud->ammo_limit || hud->ammo_max <= 0) snprintf(text, sizeof(text), "| -");
     else snprintf(text, sizeof(text), "| %d", hud->ammo_max);
     dom_text("ammoMax", text);
+    dom_display("ammoHolder", "inline-block");
 
-    // reloadUIAnim: ammoDisplay.style.backgroundSize = Math.round(pct) + "%  100%" (95.js), so the
-    // blank_2 fill keeps the full box height and only its width drains right-to-left. A bare
-    // "N%" / "N% auto" would scale the square image's height too and shrink it into the top-left
-    // corner. resetReloadUIAnim writes "0%" once the reload ends.
+    // reloadUIAnim: ammoHolder.style.backgroundSize = round(pct) + "%  100%", so the blank_2 fill
+    // keeps the full box height and only its width drains; resetReloadUIAnim writes "0%".
     if (hud->reload_percent > 0) snprintf(text, sizeof(text), "%d%% 100%%", hud->reload_percent);
     else snprintf(text, sizeof(text), "0%%");
-    dom_style("ammoDisplay", "background-size", text);
+    dom_style("ammoHolder", "background-size", text);
 
     const int need_reload = !hud->melee && hud->ammo_max > 0 && hud->ammo <= 0 && !hud->ammo_limit;
     dom_display("reloadMsg", need_reload ? "block" : "none");
@@ -1654,17 +1860,29 @@ static void hud_render_ammo(const HtmlHudState *hud) {
 
 static void hud_render_timer(const char *timer_text) {
     dom_text("timerVal", timer_text);
-    const int hidden = !timer_text[0] || strcmp(timer_text, "0:00") == 0 || strcmp(timer_text, "00:00") == 0;
-    dom_display("timerDisplay", hidden ? "none" : "inline-block");
 }
 
-static void hud_render_class(const int icon_index) {
-    const HtmlElem img = html_dom_by_id("hudClassImg");
+// f1773: #bottomLeftClassImg = f1772(classIndex) = textures/classes/icon_<classIndex>.png
+static void hud_render_class(const int class_index) {
+    const HtmlElem img = html_dom_by_id("bottomLeftClassImg");
     if (!img) return;
 
     char src[64];
-    snprintf(src, sizeof(src), "textures/classes/icon_%d.png", icon_index);
+    snprintf(src, sizeof(src), "textures/classes/icon_%d.png", class_index < 0 ? 0 : class_index);
     html_dom_set_attr(img, "src", src);
+}
+
+// Team type / name of the player card (io_addPlayers / io_updateTeam, isYou): "FFA" without
+// teams, else "Team" + the team's name in its mode colour.
+static void hud_render_team(const Client *client) {
+    const GameMode *mode = client->game.mode;
+    const int teams = mode && (mode->config.teams || mode->config.team_options[0]);
+    const int team = client->me ? client->me->team : 0;
+    const char *name = "";
+    if (teams && team >= 1 && team <= 2) name = mode->config.team_options[team - 1] ? mode->config.team_options[team - 1] : team == 2 ? "Bravo" : "Alpha";
+    dom_text("bottomLeftTeamType", teams ? "Team" : "FFA");
+    dom_text("bottomLeftTeamName", name);
+    dom_style("bottomLeftTeamName", "color", teams && team >= 1 && team <= 2 && mode->config.team_colors[team - 1] ? mode->config.team_colors[team - 1] : "#fff");
 }
 
 static void hud_render_scope(const int scoped) {
@@ -1682,23 +1900,23 @@ static void hud_reset_aim(Client *client) {
     client->hud_html.aim_dot = 0;
 }
 
-// reconcilePlayer: pingText = ping == -1 ? "-" : ping; icon colored by COLORS.ping.
+// f1777: pingText = ping == -1 ? "-" : ping, coloured by COLORS.ping.
 static void hud_render_ping(const int ping) {
     char text[16];
     if (ping < 0) snprintf(text, sizeof(text), "-");
     else snprintf(text, sizeof(text), "%d", ping);
     dom_text("pingText", text);
-    dom_style("pingIcon", "color", ping >= 150 ? PING_COLOR_HIGH : ping >= 50 ? PING_COLOR_MEDIUM : PING_COLOR_LOW);
+    dom_style("pingText", "color", ping >= 150 ? PING_COLOR_HIGH : ping >= 50 ? PING_COLOR_MEDIUM : PING_COLOR_LOW);
 }
 
-// The weapon rack bottom-right: rebuilt when the list changes, only the icon opacities
-// when the held slot changes.
+// The weapon rack bottom-right: rebuilt when the list changes, only the items' opacities
+// (and the melee icon after a throw) when the held slot changes.
 static void hud_render_loadout(const HudUiExtra *extra, const int rebuild) {
-    const HtmlElem host = html_dom_by_id("weapDisplay");
+    const HtmlElem host = html_dom_by_id("weapHolder");
     if (!host) return;
 
     if (rebuild) {
-        char html[2048];
+        char html[4096];
         hud_weapon_rack_html(extra->loadout, extra->loadout_size, extra->loadout_index, extra->can_throw, extra->melee_icon, html, sizeof(html));
         html_dom_set_html(host, html);
         g_hud_ui.rack_can_throw = extra->can_throw;
@@ -1712,47 +1930,50 @@ static void hud_render_loadout(const HudUiExtra *extra, const int rebuild) {
         snprintf(id, sizeof(id), "weapItem_%d", i);
         const HtmlElem item = html_dom_by_id(id);
         if (!item) continue;
-
-        HtmlElem img = html_dom_first_child(item); // the <img> is the item's last child
+        html_dom_set_style(item, "opacity", i == extra->loadout_index ? "1" : "0.5");
+        if (!throw_changed || !extra->loadout[i] || !extra->loadout[i]->melee) continue;
+        const HtmlElem inner = html_dom_first_child(item); // .weapItemInner; the <img> is its last child
+        HtmlElem img = inner ? html_dom_first_child(inner) : 0;
         for (HtmlElem next = img; next; next = html_dom_next(next)) img = next;
-        if (img) html_dom_set_style(img, "opacity", i == extra->loadout_index ? "1" : "0.7");
-        if (img && throw_changed && extra->loadout[i] && extra->loadout[i]->melee) {
+        if (img) {
             char src[256];
             html_dom_set_attr(img, "src", hud_weapon_icon_src(extra->loadout[i], extra->can_throw, extra->melee_icon, src, sizeof(src)));
         }
     }
 }
 
-// curGameInfo (top-left, under the timer).
+// #matchInfo (top-left, next to the timer; v7 data/map.js): mode name, "on <map>".
 static void hud_render_game_info(const Client *client) {
-    const HtmlElem info = html_dom_by_id("curGameInfo");
+    const HtmlElem info = html_dom_by_id("matchInfo");
     const char *mode = hud_mode_name(client);
     if (!info || !mode[0]) return;
 
     char html[512];
     hud_game_info_html(mode, hud_map_name(client), html, sizeof(html));
     html_dom_set_html(info, html);
-    html_dom_set_display(info, "");
+    hud_render_team(client);
 }
 
-// Old Scoreboard (leaderType 0): g5() keeps #leaderContainer (inside #leaderDisplay, shown
-// by oldScoreboard.set) filled with .leaderItem rows, "Empty Lobby" without players;
-// switchLeaderboard(0) sets .topRightCounters to 400px wide (auto for leaderType 1).
+// switchLeaderboard(old): Old Scoreboard (leaderType 0) shows #leaderboardHolder, whose
+// #leaderContainer f1984 keeps filled with .leaderItem rows ("Empty Lobby" without players),
+// and sets .topRightCounters to 400px wide (auto for leaderType 1); #killFeed shows only
+// with the new board (and showKills).
 static void hud_old_board_step(const Client *client) {
     HudUi *ui = &g_hud_ui;
-    const int old = client_render_settings()->old_scoreboard;
+    const ClientRenderSettings *rs = client_render_settings();
+    const int old = rs->old_scoreboard;
     if (old != ui->old_board) {
         const HtmlElem counters = html_dom_query(0, ".topRightCounters"); // getElementsByClassName(..)[0]
         if (counters) html_dom_set_style(counters, "width", old ? "400px" : "auto");
+        dom_display("leaderboardHolder", old ? "block" : "none");
+        dom_display("killFeed", !old && rs->show_kills ? "inline-grid" : "none");
         ui->old_board = old;
         ui->old_board_hash = 0;
     }
     if (!old) return;
     char html[4096];
-    g_board_prefix = "l";
-    hud_scoreboard_html(client, g_hud_override.scoreboard, html, sizeof(html));
-    g_board_prefix = "newL";
-    if (!html[0]) snprintf(html, sizeof(html), "Empty Lobby"); // ab.t("leaderboard.empty")
+    hud_old_board_html(client, g_hud_override.scoreboard, html, sizeof(html));
+    if (!html[0]) snprintf(html, sizeof(html), "Empty Lobby"); // i18n leaderboard.empty
     const unsigned hash = hud_hash(html);
     if (hash == ui->old_board_hash) return;
     const HtmlElem c = html_dom_by_id("leaderContainer");
@@ -1760,60 +1981,60 @@ static void hud_old_board_step(const Client *client) {
     ui->old_board_hash = hash;
 }
 
+// f1987 / f1985: #centerLeaderDisplay is "inline-grid" while the scoreboard key is held;
 // `html` is the hud_scoreboard_html() markup (ignored while hidden).
 static void hud_render_scoreboard(const int shown, const char *html) {
     HudUi *ui = &g_hud_ui;
-    if (!html_dom_by_id("newLeaderDisplay")) return;
+    const HtmlElem d = html_dom_by_id("centerLeaderDisplay");
+    if (!d) return;
 
     if (shown) {
         const unsigned hash = hud_hash(html);
-        const HtmlElem d = html_dom_by_id("leaderContainerD");
-        if (d && (ui->board_shown != 1 || hash != ui->board_hash)) {
+        if (ui->board_shown != 1 || hash != ui->board_hash) {
             html_dom_set_html(d, html);
-            html_dom_set_display(d, "block");
             ui->board_hash = hash;
         }
-        if (ui->board_shown != 1) {
-            dom_display("leaderContainer0", "none");
-            dom_display("leaderContainer1", "none");
-        }
     }
-    if (shown != ui->board_shown) dom_display("newLeaderDisplay", shown ? "inline-block" : "none");
+    if (shown != ui->board_shown) html_dom_set_display(d, shown ? "inline-grid" : "none");
     ui->board_shown = shown;
 }
 
-/* ------------------------------------------------------------ death card / end screen */
+/* ------------------------------------------------------------ death screen / end screen */
 
 static void hud_toggle_game_ui(int on);
 static void hud_end_screen_dom(void);
+static double hud_now_ms(const Client *client);
+static const Weapon *hud_weapon_by_name(const Game *game, const char *name);
 
-static int g_end_result;        // fq(): 1 victory, 0 defeat, -1 draw
-static char g_end_timer[32];    // fD(time, 1): "Next Round in <time>"
+static int g_end_result;        // io_gameEnd: 1 victory, 0 defeat, -1 draw
+static char g_end_timer[32];    // "Next Round in <time>" (i18n timer.end)
 
-// UI.toggleGameUI(j) with window.Bf5 (spectating) off: the holders the death card swaps
-// out (j = false) and back (j = true).
+// UI.toggleGameUI(j) (v7 src/libs/UI.js) while not spectating: the holders the death screen
+// swaps out (j = false) and back (j = true).
+static int g_hud_layout_epoch; // bumps on every pass that re-applies the HUD defaults (hud_v7modes.c follows)
+
 static void hud_toggle_game_ui(const int on) {
     const char *block = on ? "block" : "none";
+    g_hud_layout_epoch++;
     dom_display("spectateUI", "none");
-    dom_display("mobileUI", "none");
+    dom_display("mobileUI", on && ui_mobile_active() ? "block" : "none");
     dom_display("gameMessage", block);
-    dom_display("topLeftHolder", block);
+    dom_display("roundMessage", block);
+    dom_display("topLeftMain", on ? "inline-block" : "none");
+    dom_display("topLeftMap", block);
+    dom_display("topLeftMatchData", block);
+    dom_display("topLeftData", on ? "inline-block" : "none");
+    dom_display("topLeftBottom", block);
     dom_display("topRight", block);
     if (!on) dom_display("reloadMsg", "none"); // on: hud_render_ammo decides (valid = 0 rewrites it)
     dom_display("bottomLeftHolder", block);
-    dom_display("weapDisplay", block);
+    dom_display("weapHolder", on && !ui_mobile_active() ? "grid" : "none");
     dom_display("bottomRight", block);
-    dom_display("killCardHolder", on ? "none" : "block");
+    dom_display("deathUIHolder", on ? "none" : "block");
     dom_style("speakerDisplay", "right", on ? "380px" : "20px");
-    dom_style("chatHolder", "bottom", on ? "148px" : "20px");
-    dom_style("voiceDisplay", "bottom", on ? "145px" : "18px");
     dom_display("overlay", block);
     dom_display("vignette", block);
-    dom_display("igXPBar", block);
-    dom_display("interactProg", "none");
     dom_display("interactMsg", "none");
-    const HtmlElem base = html_dom_by_id("uiBase");
-    if (base) html_dom_set_class(base, "onGame", on);
     g_hud_ui.in_game = on;
     // Krunker's crosshair and hit marker live on the overlay canvas hidden above.
     if (!on) {
@@ -1823,86 +2044,208 @@ static void hud_toggle_game_ui(const int on) {
     }
 }
 
-// Krunker g1() for the local player: #killCard markup + toggleGameUI(false). `card` NULL
-// (or no killer) is the "You died" variant without a card.
+// Head-to-head counts of the death screen (player.killedBy[id], counted from the kill feed
+// events: v7 counts them in io_killPlayer the same way) and the life the stats describe.
+#define H2H_MAX 64
+static struct {
+    char name[PLAYER_NAME_SIZE];
+    int they_killed_me, i_killed_them;
+} g_h2h[H2H_MAX];
+static int g_h2h_count;
+static double g_life_start_ms = -1.0; // HUD clock of the spawn (Time Survived)
+static int g_life_kills, g_life_score_start;
+
+static int hud_h2h_find(const char *name, const int create) {
+    if (!name || !name[0]) return -1;
+    for (int i = 0; i < g_h2h_count; i++) {
+        if (!strcmp(g_h2h[i].name, name)) return i;
+    }
+    if (!create || g_h2h_count >= H2H_MAX) return -1;
+    snprintf(g_h2h[g_h2h_count].name, sizeof(g_h2h[0].name), "%s", name);
+    g_h2h[g_h2h_count].they_killed_me = g_h2h[g_h2h_count].i_killed_them = 0;
+    return g_h2h_count++;
+}
+
+static void hud_h2h_count(const char *killer, const int killer_is_you, const char *victim, const int victim_is_you) {
+    if (killer_is_you && !victim_is_you) {
+        const int i = hud_h2h_find(victim, 1);
+        if (i >= 0) g_h2h[i].i_killed_them++;
+        g_life_kills++;
+    } else if (victim_is_you && killer && !killer_is_you) {
+        const int i = hud_h2h_find(killer, 1);
+        if (i >= 0) g_h2h[i].they_killed_me++;
+    }
+}
+
+// f1974: the death screen's weapon art, img/death-ui/<weaponConfig.icon>.png (melee: icon_0_1,
+// fists: icon_0).
+static const char *hud_death_weapon_img(const Weapon *w, const char *icon, char *out, const size_t size) {
+    if ((w && w->melee) || (icon && !strcmp(icon, FEED_MELEE_ICON))) snprintf(out, size, "./img/death-ui/icon_0_1.png");
+    else snprintf(out, size, "./img/death-ui/%s.png", w && w->icon ? w->icon : icon && icon[0] ? icon : "icon_0");
+    return out;
+}
+
+// UTILS.getReadableTime(ms, true, null, true): "<m>m <s>s " (zero parts dropped).
+static void hud_readable_time(const int ms, char *out, const size_t size) {
+    const int secs = ms / 1000, m = secs / 60 % 60, h = secs / 3600;
+    size_t len = 0;
+    out[0] = 0;
+    if (h) hb_append(out, size, &len, "%dh ", h);
+    if (m) hb_append(out, size, &len, "%dm ", m);
+    if (secs % 60) hb_append(out, size, &len, "%ds ", secs % 60);
+}
+
+// f1975: the death screen (#deathUIHolder). With a killer: the VS layout, the killer's card
+// left (weapon [skin] name and art, his kills on us, class icon, "lvl N", alias) and ours
+// right; without one "You Died". Below, the life's stats (Time Survived, Shots Fired,
+// Accuracy, Kills, Score; KrunkNative does not count shots: "Unknown", v7's own text for a
+// missing value).
+static void hud_death_html(const Client *client, const HudKillCard *card, char *out, const size_t size) {
+    size_t len = 0;
+    out[0] = 0;
+    char stats[1024];
+    size_t slen = 0;
+    stats[0] = 0;
+    if (card && card->stats) {
+        static const char *const names[5] = {"Time Survived", "Shots Fired", "Accuracy", "Kills", "Score"};
+        char vals[5][32];
+        hud_readable_time(card->time_alive_ms, vals[0], sizeof(vals[0]));
+        snprintf(vals[1], sizeof(vals[1]), "%s", card->shots >= 0 ? "" : "Unknown");
+        if (card->shots >= 0) snprintf(vals[1], sizeof(vals[1]), "%d", card->shots);
+        snprintf(vals[2], sizeof(vals[2]), "%s", card->accuracy && card->accuracy[0] ? card->accuracy : "Unknown");
+        snprintf(vals[3], sizeof(vals[3]), "%d", card->kills);
+        snprintf(vals[4], sizeof(vals[4]), "%d", card->life_score);
+        for (int i = 0; i < 5; i++) {
+            hb_append(stats, sizeof(stats), &slen, "<div class=\"death-stats-row\">\n\t\t\t%s : <span style=\"color:rgba(255, 255, 255, 0.7)\">%s</span>\n\t\t</div>",
+                      names[i], i == 0 && !vals[0][0] ? "Unknown" : vals[i]);
+        }
+    }
+    const int by = card && card->killer && card->killer[0];
+    if (!by) {
+        hb_append(out, size, &len, "<div class=\"death-ui-bottom-empty\">\n\t\t\t<div class=\"death-column-empty\"></div>\n\t\t\t<div class=\"death-column\" style=\"justify-content: center;\">"
+                                   "\n\t\t\t\t<div class=\"death-row-center-self\">You</div>\n\t\t\t\t<div class=\"death-row-center-self\">Died</div>\n\t\t\t</div>"
+                                   "\n\t\t\t<div class=\"death-stats\">%s</div>\n\t\t</div>", stats);
+        return;
+    }
+    const Player *me = client->me;
+    const Weapon *my_weapon = me ? me->weapon : NULL;
+    char killer_img[96], my_img[96], shown[PLAYER_NAME_SIZE];
+    hud_death_weapon_img(NULL, card->weapon_icon, killer_img, sizeof(killer_img));
+    hud_death_weapon_img(my_weapon, NULL, my_img, sizeof(my_img));
+    const int h2h = hud_h2h_find(card->killer, 0);
+    const int my_class = me ? me->class_index : client->menu_class_index;
+    hb_append(out, size, &len, "\n\t\t\t<div class=\"death-ui-bottom\" id='deathUIBottom'>\n\t\t\t\t<div class=\"death-column-empty\"></div>"
+                               "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: end;\">\n\t\t\t\t\t<div class=\"death-row-left\">"
+                               "\n\t\t\t\t\t\t<div class=\"death-row-weapon\">\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:rgba(255,255,255,0.7)\">%s[",
+              card->thrown ? "Thrown " : "");
+    hb_append_escaped(out, size, &len, card->weapon ? card->weapon : "");
+    hb_append(out, size, &len, "]</div>\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-img\" style=\"background-image:url(%s)\"></div>\n\t\t\t\t\t\t</div>"
+                               "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t"
+                               "\n\t\t\t\t\t\t<div class=\"death-row-class\">\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">"
+                               "\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">lvl %d</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">"
+                               "\n\t\t\t\t\t\t\t<div class=\"death-row-user-text\">",
+              killer_img, h2h >= 0 ? g_h2h[h2h].they_killed_me : 0, card->class_index < 0 ? 0 : card->class_index, card->level > 1 ? card->level : 1);
+    hb_append_escaped(out, size, &len, streamer_name(card->killer, shown, sizeof(shown))); // streamMode ? scrambleS(alias)
+    hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>"
+                               "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: center;\">\n\t\t\t\t\t<div class=\"death-row-center\">-</div>"
+                               "\n\t\t\t\t\t<div class=\"death-row-center death-row-center-bottom\">VS</div>\n\t\t\t\t</div>"
+                               "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: start;\">\n\t\t\t\t\t\n\t\t\t\t\t<div class=\"death-row-right\">"
+                               "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t\t<div class=\"death-row-weapon\">"
+                               "\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:rgba(255,255,255,0.7)\">[",
+              h2h >= 0 ? g_h2h[h2h].i_killed_them : 0);
+    hb_append_escaped(out, size, &len, my_weapon && my_weapon->name ? my_weapon->name : "");
+    const AccountInfo *acc = account_get();
+    hb_append(out, size, &len, "]</div>\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-img-right\" style=\"background-image:url(%s)\"></div>\n\t\t\t\t\t\t</div>"
+                               "\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t\n\t\t\t\t\t\t<div class=\"death-row-class\">"
+                               "\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">lvl %d</div>"
+                               "\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">\n\t\t\t\t\t\t\t<div class=\"death-row-user-text\">",
+              my_img, my_class < 0 ? 0 : my_class, card->my_level > 1 ? card->my_level : 1);
+    hb_append_escaped(out, size, &len, acc ? (acc->premium && acc->alias[0] ? acc->alias : acc->name) : hud_my_name(client));
+    hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t\t<div class=\"death-stats\">%s</div>\n\t\t\t</div>\n\t\t", stats);
+}
+
+// io_killPlayer for the local player: f1975's #deathUIHolder, uiBase.onDeathScrn and
+// UI.toggleGameUI(false). `card` NULL (or no killer) is the "You Died" variant.
 void hud_ui_show_death(Client *client, const HudKillCard *card) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     hud_reset_aim(client); // kill(): toggleAim(player, 0) for the local player
-    const int by = card && card->killer && card->killer[0];
-    char html[1024];
-    size_t len = 0;
-    html[0] = 0;
-    if (by) {
-        hb_append(html, sizeof(html), &len, "<img id='kCProfile' src='textures/classes/icon_%d.png' />", card->class_index);
-        hb_append(html, sizeof(html), &len, "<div class='kClvl'>lvl %d</div>", card->level > 1 ? card->level : 1);
-        hb_append(html, sizeof(html), &len, "<div class='kCFlag'></div><div id='kCName'>");
-        char shown[PLAYER_NAME_SIZE];
-        hb_append_escaped(html, sizeof(html), &len, streamer_name(card->killer, shown, sizeof(shown))); // scrambleS(alias) in streamer mode
-        hb_append(html, sizeof(html), &len, "</div><br/><div id='kCInfo' style='color:rgba(255,255,255,0.7)'>[");
-        hb_append_escaped(html, sizeof(html), &len, card->weapon ? card->weapon : "");
-        hb_append(html, sizeof(html), &len, "]</div>");
+    HudKillCard local = card ? *card : (HudKillCard) {0};
+    if (!local.weapon_icon && local.weapon) { // the killer's weapon art from its name
+        const Weapon *w = hud_weapon_by_name(&client->game, local.weapon);
+        if (w) local.weapon_icon = w->melee ? FEED_MELEE_ICON : w->icon;
     }
-    if (card && card->score) hb_append(html, sizeof(html), &len, "<div id='kCInfoS' style='color:%s;'>+%d</div>", SCORE_COLOR, card->score);
-
+    if (!local.stats && g_life_start_ms >= 0.0) { // the life the stats describe, sampled here (the kill packet has no stats array yet)
+        local.stats = 1;
+        local.time_alive_ms = (int) (hud_now_ms(client) - g_life_start_ms);
+        local.shots = -1;
+        local.kills = g_life_kills;
+        local.life_score = client->me ? client->me->score - g_life_score_start : 0;
+    }
+    char *html = malloc(8192);
+    if (html) {
+        hud_death_html(client, &local, html, 8192);
+        const HtmlElem holder = html_dom_by_id("deathUIHolder");
+        if (holder) html_dom_set_html(holder, html);
+        free(html);
+    }
     dom_display("reloadMsg", "none");
-    dom_text("killCardBy", by ? "Killed by" : "You died");
-    dom_style("killCardBy", "float", by ? "left" : "none");
-    dom_display("killCard", by ? "inline-block" : "none");
-    dom_display("killCardKick", "none"); // votekick/report prompt: not offered in KrunkNative
-    const HtmlElem kc = html_dom_by_id("killCard");
-    if (kc) html_dom_set_html(kc, html);
-
+    const HtmlElem base = html_dom_by_id("uiBase");
+    if (base) html_dom_set_class(base, "onDeathScrn", 1);
     g_hud_ui.dead = 1;
     hud_toggle_game_ui(0);
+    dom_display("deathUIHolder", "block");
 }
 
-// Respawn: toggleGameUI(true).
+// Respawn: toggleGameUI(true) (toggleMenuHider drops onDeathScrn).
 void hud_ui_hide_death(Client *client) {
     if (!g_hud_ui.dead) return;
     g_hud_ui.dead = 0;
     hud_dmg_clear();
     g_hud_ui.speed_max = 0;   // aV.Qp9.max = 0
     g_hud_ui.speed_cur = -1;
+    const HtmlElem base = html_dom_by_id("uiBase");
+    if (base) html_dom_set_class(base, "onDeathScrn", 0);
     hud_toggle_game_ui(1);
     client->hud_html.valid = 0; // rewrite every value group (and the crosshair)
     g_hud_ui.cross_shown = -1;
 }
 
-// UI.showEndScreen(false) -> UI.hideUI(false) (incl. toggleMenu(false)), fq()'s
-// #victorySub and fD(time, 1)'s #endTimer.
+// UI.showEndScreen(false) -> UI.hideUI(false) (incl. toggleMenu(false)), plus the
+// results' #endInfo / #endMidHolder once they show.
 static void hud_end_screen_dom(void) {
-    // showEndScreen
+    // showEndScreen(false)
     dom_display("endMidHolder", "none");
     dom_display("matchVoteHolder", "none");
     dom_display("teamTotal0", "none");
     dom_display("teamTotal1", "none");
     dom_display("endInfo", "none");
     dom_display("endUI", "");
-    // hideUI(false) -> toggleMenu(false) + toggleMenuHider(false)
+    const HtmlElem base = html_dom_by_id("uiBase");
+    if (base) {
+        html_dom_set_class(base, "onEndScrn", 1);
+        // hideUI(false) -> toggleMenu(false) -> toggleMenuHider(false)
+        html_dom_set_class(base, "onMenu", 0);
+        html_dom_set_class(base, "onDeathScrn", 0);
+    }
     dom_display("menuHolder", "none");
     dom_display("speakerDisplay", "block");
-    dom_display("supportMapCreator", "none");
     dom_display("menuHider", "none");
-    const HtmlElem base = html_dom_by_id("uiBase");
-    if (base) html_dom_set_class(base, "onMenu", 0);
     dom_display("gameNameHolder", "none");
     dom_display("spectButton", "none");
     html_dom_set_class(html_dom_root(), "kn-hud-visible", 0); // its !important rule would keep #inGameUI up (ui/css/hud.css)
     dom_display("inGameUI", "none");
+    dom_display("customGUIHolder", "none");
     dom_display("overlay", "none");
     dom_display("vignette", "none");
     dom_display("spectateUI", "none");
     dom_display("aimRecticle", "none");
     dom_display("instructionHolder", "none");
     dom_display("baseLinks", "none");
-    dom_style("chatHolder", "bottom", "20px");
-    dom_style("voiceDisplay", "bottom", "18px");
     dom_style("speakerDisplay", "right", "20px");
     dom_display("purchaseHolder", "none");
     dom_display("consentBlock", "none");
-    dom_display("bdayBlock", "none");
-    // fq(): the title image; shown by fu() after the end animation (the animated title
-    // itself is aV.vicTitle on the overlay canvas, #knVicTitle here)
+    // io_gameEnd: victorySub.src = "./img/" + (vic|def|dra) + ".png"; shown by f1913 after the
+    // end animation (the animated title itself is overlay.vicTitle, #knVicTitle here)
     const HtmlElem sub = html_dom_by_id("victorySub");
     if (sub) {
         html_dom_set_attr(sub, "src", g_end_result < 0 ? "./img/dra.png" : g_end_result ? "./img/vic.png" : "./img/def.png");
@@ -1912,7 +2255,6 @@ static void hud_end_screen_dom(void) {
         dom_display("endInfo", "block");
         dom_display("endMidHolder", "inline-block");
     }
-    // fD(time, 1)
     if (g_end_timer[0]) {
         char text[64];
         snprintf(text, sizeof(text), "Next Round in %s", g_end_timer); // i18n timer.end
@@ -2001,32 +2343,35 @@ static void hud_end_title_draw(const double elapsed_ms) {
     html_dom_set_display(title, "block");
 }
 
-// GUI.endScreen (67.js): tab ids/names in their v3.1.1 order.
-static const char *const END_TABS[4][2] = {{"leaderboard", "Leaderboard"}, {"performance", "Performance"}, {"clanwar", "Clan Wars"}, {"medals", "Medals"}};
+// GUI.endScreen (v7 src/ui/game.js): tab ids/names in their order.
+#define END_TAB_COUNT 4
+static const char *const END_TABS[END_TAB_COUNT][2] = {{"leaderboard", "Leaderboard"}, {"performance", "Performance"}, {"medals", "Medals"}, {"rewards", "Rewards"}};
 static int g_end_tab;                 // GUI.endScreen.currentTab (index into END_TABS)
 static const Client *g_end_client;    // the client the results describe (tab switches re-render)
 
-// config.endForm.reward: "<span style='color:#F8C55C'>+N</span> KR", "NONE" without one (the
-// server's endData.ed cell, shown as is by showEndTable and as the performance tab's funds).
+// config.endForm.reward (applied by the server to its endData.ed cell): "<span
+// style='color:#F8C55C'>+N</span> KR", "NONE" without one; also the performance tab's funds.
 static const char *hud_reward_html(const int reward, char *out, const size_t size) {
     if (reward) snprintf(out, size, "<span style='color:#F8C55C'>+%d</span> KR", reward);
     else snprintf(out, size, "NONE");
     return out;
 }
 
-// One showEndTable row: rank, the name link (colour per local / team / enemy), score,
-// kills, deaths, the endForm.reward cell and the empty actions cell (no account: no buttons).
+// f1917's row of #endTable (config.endStats: name, score, kills, deaths, reward): rank, the
+// pfp + profile link (local #fff, team mate rgba(255,255,255,0.6), else COLORS.teams[1]),
+// the stats and the empty actions cell (guests: no share / report buttons).
 static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const char *name,
                              const char *color, const int score, const int kills, const int deaths, const int reward) {
-    hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td><a class='endTableN' href='./social.html?p=profile&q=",
-        last ? "border-bottom:none" : "", rank);
+    char shown[PLAYER_NAME_SIZE];
+    hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td style='position: relative;'>", last ? "border-bottom:none" : "", rank);
+    hb_append(out, size, len, "<img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>");
+    hb_append(out, size, len, "<a class='endTableN' href='./social.html?p=profile&q=");
     hb_append_escaped(out, size, len, name);
     hb_append(out, size, len, "' target='_blank' style='color:%s'>", color);
-    char shown[PLAYER_NAME_SIZE];
-    hb_append_escaped(out, size, len, streamer_name(name, shown, sizeof(shown))); // showEndTable: scrambleS(alias) text, real link
+    hb_append_escaped(out, size, len, streamer_name(name, shown, sizeof(shown))); // streamMode ? scrambleS(alias)
     char cell[96];
-    hb_append(out, size, len, "</a></td><td>%d</td><td>%d</td><td>%d</td><td>%s</td>", score, kills, deaths,
-              hud_reward_html(reward, cell, sizeof(cell)));
+    hb_append(out, size, len, "</a></td><td style='position: relative;'>%d</td><td style='position: relative;'>%d</td><td style='position: relative;'>%d</td>"
+                              "<td style='position: relative;'>%s</td>", score, kills, deaths, hud_reward_html(reward, cell, sizeof(cell)));
     hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
 }
 
@@ -2051,11 +2396,11 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
     return count;
 }
 
-// tabs.leaderboard: <table id="endTable"> filled like fu()'s showTable callback
-// (endStats sid, name, score, kills, deaths, reward).
+// tabs.leaderboard: <table id="endTable"> filled like f1917 (endStats sid, name, score,
+// kills, deaths, reward).
 static void hud_end_leaderboard_html(const Client *client, char *out, const size_t size, size_t *len) {
-    hb_append(out, size, len, "<table id=\"endTable\">");
-    hb_append(out, size, len, "<tr><th>Rank</th><th>Name</th><th>Score</th><th>Kills</th><th>Deaths</th><th>Reward</th><th></th></tr>");
+    hb_append(out, size, len, "<table id=\"endTable\"><tr><th id='endlb_rank'>Rank</th><th id='endlb_name'>Name</th><th id='endlb_score'>Score</th>"
+                              "<th id='endlb_kills'>Kills</th><th id='endlb_deaths'>Deaths</th><th id='endlb_reward'>Reward</th><th></th></tr><tr height='20px;'></tr>");
     if (cJSON_IsArray(g_hud_override.scoreboard) && hud_end_scenario_rows_html(client, g_hud_override.scoreboard, out, size, len)) {
         hb_append(out, size, len, "</table>");
         return;
@@ -2069,9 +2414,8 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
     }
     for (int i = 0; i < count; i++) {
         const Player *p = players[i];
-        // showEndTable: the local row #fff, a team mate (localTeam == team) rgba(255,255,255,0.6),
-        // else COLORS.teams[1]. localTeam = player.team || (spectating ? 1 : 0); a teamless
-        // (FFA) player's team is null there, so `0 == null` makes every other FFA row red.
+        // localTeam = player.team || (spectating ? 1 : 0); a teamless (FFA) player's team is
+        // null there, so `0 == null` makes every other FFA row red.
         const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
         const char *color = p == client->me ? "#fff" : p->team && p->team == local_team ? "rgba(255,255,255,0.6)" : FEED_COLOR_ENEMY;
         hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_player_name(client, p), color, p->score, (int) p->kills,
@@ -2080,8 +2424,8 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
     hb_append(out, size, len, "</table>");
 }
 
-// tabs.performance.gen() for a guest (no account: no XP bar; W/L from this match).
-// stats = fu()'s hp: rank "#N", score, kills, deaths, funds ("NONE" without a reward), victory.
+// tabs.performance.gen() for a guest (no account: no battle pass / XP bar; W/L from this
+// match). stats = f1914: rank "#N", score, kills, deaths, funds (the reward, "NONE" without).
 static void hud_end_performance_html(const Client *client, char *out, const size_t size, size_t *len) {
     const Player *players[HUD_BOARD_PLAYERS_MAX];
     const int count = client->game.players ? hud_sorted_players(client, players, HUD_BOARD_PLAYERS_MAX) : 0;
@@ -2095,16 +2439,22 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     const int deaths = me ? (int) me->deaths : 0;
     const int q = g_end_result;
     const char *mode = hud_mode_name(client)[0] ? hud_mode_name(client) : "Free for All";
+    const char *alias = client->game.mode && client->game.mode->config.alias ? client->game.mode->config.alias : "ffa";
+    static const char *const icons[] = {"ffa", "tdm", "ctf", "kc", "point"}; // mode.getIcon ids
 
-    hb_append(out, size, len, "<div id='endLayout'><div><div id='gameFundsLayout'><div class='gfSection'>");
+    hb_append(out, size, len, "<div id='endLayout'><div><div id='gameFundsLayout'><div class='gfSection' style='margin-bottom: 0px;padding: 16px 0px;'>");
     hb_append(out, size, len, "<div class=\"endTitle\" style=\"text-align:center\">");
     hb_append_escaped(out, size, len, mode);
-    // mode.getIcon(): ffa is one of the known ids (img/modes/ffa.png)
-    hb_append(out, size, len, "</div> <div id=\"modeLayout\"><img src=\"img/modes/ffa.png\" class=\"modeIcon\"> <div class=\"modeStatus\" style=\"%s\"> %s</div></div>",
-        q == -1 ? "color:var(--yellow)" : q ? "" : "color:var(--red)", q == -1 ? "DRAW" : q ? "VICTORY" : "DEFEAT");
-    char reward[96];
-    hb_append(out, size, len, "</div><div class='gfSection'><div id=\"fundsLayout\" style=\"\"> <div class=\"fundsVal\">%s</div></div></div></div></div>",
-              hud_reward_html(me ? me->reward : 0, reward, sizeof(reward))); // fu(): funds = the reward cell
+    hb_append(out, size, len, "</div>\n\t\t\t\t\t\t\t<div id=\"modeLayout\">");
+    int known = 0;
+    for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++) known |= !strcmp(icons[i], alias);
+    if (known) hb_append(out, size, len, "<img src=\"img/modes/%s.png\" class=\"modeIcon\">", alias);
+    else hb_append(out, size, len, "<div class=\"unknownModeIcon\">?</div>");
+    hb_append(out, size, len, "\n\t\t\t\t\t\t\t<div class=\"modeStatus\" style=\"margin-top: -5px;%s\">\n\t\t\t\t\t\t\t%s</div></div>",
+              q == -1 ? "color:var(--yellow)" : q ? "" : "color:var(--red)", q == -1 ? "DRAW" : q ? "VICTORY" : "DEFEAT");
+    char funds[96];
+    hud_reward_html(me ? me->reward : 0, funds, sizeof(funds)); // f1914: funds = the reward cell
+    hb_append(out, size, len, "</div><div class='gfSection'><div id=\"fundsLayout\" style=\"\">\n\t\t\t\t\t\t\t<div class=\"fundsVal\">%s</div></div></div></div></div>", funds);
     hb_append(out, size, len, "<div class='endSection'><div class='endTitle'>Combat Record</div><div id='combatRecordLayout'>");
     hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>Score</div><div class='crVal'>%d</div></div>", score);
     hb_append(out, size, len, "<div id='kdLayout'><div class='crStat'><div class='crLabel'>Kills</div><div class='crVal'>%d</div></div>", kills);
@@ -2120,29 +2470,29 @@ static void hud_end_performance_html(const Client *client, char *out, const size
 static void hud_end_card_html(const Client *client, char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
-    // spectators (window.Bf5 / no player: fu()'s ho = true) get the leaderboard without headers
+    // spectators (no player of ours: f1912's v11860 = true) get the leaderboard without headers
     const int spectator = spectate_active() || !client->me;
     hb_append(out, size, &len, "<div class=\"endCard\">");
     if (!spectator) {
         hb_append(out, size, &len, "<div id='tabHolder'>");
-        for (int i = 0; i < 4; i++) {
-            hb_append(out, size, &len, "<div class=\"tabHeader %s\" onmouseenter=\"playTick()\" onclick=\"GUI.endScreen.changeTab('%s')\">%s</div>",
+        for (int i = 0; i < END_TAB_COUNT; i++) {
+            hb_append(out, size, &len, "<div class=\"tabHeader %s\"\n\t\t\t\t\t\tonmouseenter=\"playTick()\" onclick=\"GUI.endScreen.changeTab('%s')\">%s</div>",
                 i == g_end_tab ? "selected" : "", END_TABS[i][0], END_TABS[i][1]);
         }
         hb_append(out, size, &len, "</div>");
     } else {
         g_end_tab = 0;
     }
-    hb_append(out, size, &len, " <div class=\"tabBody\">");
+    hb_append(out, size, &len, "\n\t\t\t\t\t<div class=\"tabBody\">");
     switch (g_end_tab) {
         case 1:
             hud_end_performance_html(client, out, size, &len);
             break;
-        case 2: // tabs.clanwar: not a custom match and no account -> the login prompt
-            hb_append(out, size, &len, "<div style='text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;'>Login to view Clan Wars</div>");
+        case 2: // tabs.medals: the end packet's mdls (KrunkNative's END has none yet)
+            hb_append(out, size, &len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any medals this game!</div>");
             break;
-        case 3: // tabs.medals
-            hb_append(out, size, &len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4); border-radius:6px;padding:20px;\">Coming Soon!</div>");
+        case 3: // tabs.rewards: matchRewardSummary (junk / skins; none without an account)
+            hb_append(out, size, &len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any rewards this game!</div>");
             break;
         default:
             hud_end_leaderboard_html(client, out, size, &len);
@@ -2152,9 +2502,9 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
 }
 
 static void hud_end_card_render(const Client *client) {
-    char *html = malloc(16384);
+    char *html = malloc(32768);
     if (!html) return;
-    hud_end_card_html(client, html, 16384);
+    hud_end_card_html(client, html, 32768);
     const HtmlElem view = html_dom_by_id("endTabbedView");
     if (view) html_dom_set_html(view, html);
     free(html);
@@ -2162,7 +2512,7 @@ static void hud_end_card_render(const Client *client) {
 
 // GUI.endScreen.changeTab(id) (the tab headers' onclick).
 void hud_ui_end_screen_tab(const char *tab) {
-    for (int i = 0; tab && i < 4; i++) {
+    for (int i = 0; tab && i < END_TAB_COUNT; i++) {
         if (strcmp(tab, END_TABS[i][0]) != 0) continue;
         g_end_tab = i;
         if (g_hud_ui.ended && g_hud_ui.end_phase == 2 && g_end_client) hud_end_card_render(g_end_client);
@@ -2170,23 +2520,47 @@ void hud_ui_end_screen_tab(const char *tab) {
     }
 }
 
-// fu(): the results after config.endAnim.
+// f1912 + f1913 + f1915 + f1916: the results after config.endAnim.
 static void hud_end_results(const Client *client) {
     dom_display("endInfo", "block");
     dom_style("endUI", "background-color", "transparent");
-    dom_display("victorySub", "");
-    hud_end_title_hide();                       // aV.vicTitle.show = false
-    dom_display("endAHolderR", "inline-block");
+    dom_display("victorySub", "");              // f1913
+    hud_end_title_hide();                       // overlay.vicTitle.show = false
     dom_style("endAHolderR", "opacity", "1");
-    dom_display("endAHolderL", "inline-block");
     dom_style("endAHolderL", "opacity", "1");
-    dom_display("teamTotal0", "none");          // FFA
-    dom_display("teamTotal1", "none");
+    if (!account_get() || !account_get()->premium) { // the ad slots of a non-premium player
+        dom_display("endAHolderL", "inline-block");
+        dom_display("endAHolderR", "inline-block");
+    } else {
+        dom_display("endAHolderL", "none");
+        dom_display("endAHolderR", "none");
+    }
     if (!lobby_vote_show()) dom_style("endMidHolder", "top", "205px"); // WP-E: f1915 endData.mts cards (lobby_events.c)
+    // f1916: the team totals of a team mode
+    const GameMode *mode = client->game.mode;
+    if (mode && mode->config.teams) {
+        char html[512];
+        const char *n1 = mode->config.team_options[0] ? mode->config.team_options[0] : "Alpha";
+        const char *n2 = mode->config.team_options[1] ? mode->config.team_options[1] : "Bravo";
+        const int winner = g_end_result < 0 ? 0 : g_end_result ? (client->me ? client->me->team : 0) : (client->me ? 3 - client->me->team : 0);
+        snprintf(html, sizeof(html), "%s<span class=\"teamTotalN0\">%s</span><span class=\"teamTotalScore\">%d</span>",
+                 winner == 1 ? "<div class='material-icons teamWin0'>emoji_events</div>" : "", n1, mode->team_scores[1]);
+        HtmlElem t = html_dom_by_id("teamTotal0");
+        if (t) html_dom_set_html(t, html);
+        snprintf(html, sizeof(html), "<span class=\"teamTotalScore\">%d</span><span class=\"teamTotalN1\">%s</span>%s",
+                 mode->team_scores[2], n2, winner == 2 ? "<div class='material-icons teamWin1'>emoji_events</div>" : "");
+        if ((t = html_dom_by_id("teamTotal1"))) html_dom_set_html(t, html);
+        dom_display("teamTotal0", "inline-block");
+        dom_display("teamTotal1", "inline-block");
+    } else {
+        dom_display("teamTotal0", "none");
+        dom_display("teamTotal1", "none");
+    }
     dom_display("endMidHolder", "inline-block");
 
     g_end_client = client;
-    g_end_tab = 0; // GUI.endScreen.init(): changeTab("leaderboard")
+    // GUI.endScreen.init(): changeTab(spectating || isCustom ? "leaderboard" : "performance")
+    g_end_tab = spectate_active() || !client->me ? 0 : 1;
     hud_end_card_render(client);
 }
 
@@ -2258,6 +2632,8 @@ int hud_ui_toggle_end_screen(Client *client) {
         glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // CONTROLS stay disabled
         client->mouse_state.locked = 0;
         dom_display("endUI", "");
+        const HtmlElem base = html_dom_by_id("uiBase");
+        if (base) html_dom_set_class(base, "onEndScrn", 1);
         dom_display("endInfo", "block");
         dom_display("victorySub", "");
         dom_display("menuHolder", "none");
@@ -2283,6 +2659,8 @@ void hud_ui_hide_end_screen(Client *client) {
     dom_display("endInfo", "none");
     dom_display("endMidHolder", "none");
     dom_display("victorySub", "none");
+    const HtmlElem base = html_dom_by_id("uiBase");
+    if (base) html_dom_set_class(base, "onEndScrn", 0); // toggleMenu(true)
     hud_end_title_hide();
     hud_dmg_clear();
     if (html_ui_is_menu_open()) {
@@ -2387,8 +2765,28 @@ void hud_ui_hit_elapsed(Client *client, const int kill, const double elapsed_ms)
 
 /* ------------------------------------------------------------ visibility */
 
-// Mirrors UI.toggleGameUI(true) + toggleControlUI(true) with Krunker's default
-// settings (DOM dump of a live match, FFA, guest account).
+// A boolean setting as the settings store has it (saved value, else the page default).
+static int hud_setting_on(const char *key) {
+    const cJSON *v = ui_setting_value(key);
+    if (cJSON_IsBool(v)) return cJSON_IsTrue(v);
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0.0;
+    return cJSON_IsString(v) && v->valuestring && !strcmp(v->valuestring, "true");
+}
+
+// Minimap.toggle(game, false): KrunkNative has no minimap, so the top-left always shows the
+// minimap-less layout (#miniMapOverlay hidden, .topLeftOld on the timer and match info).
+static void hud_minimap_off(void) {
+    static const char *const ids[] = {"timerHolder", "timerIcon", "timerVal", "timerInner", "matchInfo", "specNames", "specStats", "specSUS"};
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        const HtmlElem el = html_dom_by_id(ids[i]);
+        if (el) html_dom_set_class(el, "topLeftOld", 1);
+    }
+    dom_display("miniMapOverlay", "none");
+    dom_display("timerHolder", "block");
+}
+
+// Mirrors UI.toggleGameUI(true) + toggleControlUI(true) with v7's default settings (DOM of
+// its sandbox game, FFA/TDM, guest).
 static void hud_apply_visibility(Client *client, const int in_game, const int visible) {
     HudUi *ui = &g_hud_ui;
     HtmlElem el;
@@ -2398,21 +2796,23 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
         ui->in_game = on_game;
         if ((el = html_dom_by_id("uiBase"))) html_dom_set_class(el, "onGame", on_game);
     }
-    // #chatUI stays up for the whole session (Krunker shows the chat beside the ESC menu,
-    // the death card and the end screen); only the menu before the first spawn has none.
-    if (in_game != ui->chat_shown) {
-        ui->chat_shown = in_game;
-        dom_display("chatUI", in_game ? "block" : "none");
+    // #chatUI: v7 only ever writes it from the showUI setting (settings.js showUI.set:
+    // chatUI.style.display = val ? "block" : "none"), so the chat is up beside the menu (also
+    // before the first spawn), the death screen and the end screen.
+    const int chat = client_render_settings()->show_ui;
+    if (chat != ui->chat_shown) {
+        ui->chat_shown = chat;
+        dom_display("chatUI", chat ? "block" : "none");
     }
-    // showUI off (UI.hideGameUI): toggleControlUI keeps #inGameUI, #overlay and #vignette
-    // hidden; #aimRecticle still follows the game. A live change re-applies everything.
+    // showUI off (UI.hideGameUI): toggleControlUI keeps #inGameUI, #customGUIHolder, #overlay
+    // and #vignette hidden; #aimRecticle still follows the game. A live change re-applies.
     const int show_ui = client_render_settings()->show_ui;
     if (show_ui != ui->show_ui) {
         ui->show_ui = show_ui;
         ui->visible = -1;
     }
     // A map / mode change with no hidden frame in between (the offline sandbox reloads and
-    // respawns inside one frame, net/offline.c): curGameInfo follows it.
+    // respawns inside one frame, net/offline.c): #matchInfo follows it.
     static int info_key = -1;
     const int key = client->game.ready ? client->game.current_map_index * 1024 + game_mode_id(&client->game) + 1 : -1;
     if (key != info_key) {
@@ -2421,62 +2821,75 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     }
     if (visible == ui->visible) return;
     ui->visible = visible;
+    g_hud_layout_epoch++;
 
     html_dom_set_class(html_dom_root(), "kn-hud-visible", visible && show_ui); // its !important rule would override showUI
 
     const char *block = visible ? "block" : "none";
-    const char *game_block = visible && show_ui ? "block" : "none";
+    const char *game_block = visible && show_ui && !ui->hide_default ? "block" : "none";
+    // toggleControlUI(visible)
     dom_display("inGameUI", game_block);
+    dom_display("customGUIHolder", game_block); // KrunkScript's GUI (its children are the script's)
     dom_display("aimRecticle", block);
     dom_display("overlay", game_block);
     dom_display("vignette", game_block);
+    dom_display("centerLeaderDisplay", "none");
+    ui->board_shown = 0;
+    dom_display("speakerDisplay", visible ? "block" : "none");
+    if (visible) dom_display("infoHolder", "none");
+    // toggleGameUI(true)
     dom_display("gameMessage", block);
-    dom_display("topLeftHolder", block);
+    dom_display("roundMessage", block);
+    dom_display("topLeftMain", visible ? "inline-block" : "none");
+    dom_display("topLeftMap", block);
+    dom_display("topLeftMatchData", block);
+    dom_display("topLeftData", visible ? "inline-block" : "none");
+    dom_display("topLeftBottom", block);
     dom_display("topRight", block);
     dom_display("bottomLeftHolder", block);
     dom_display("botRightHider", block);
-    dom_display("weapDisplay", block);
+    dom_display("weapHolder", visible && !ui_mobile_active() ? "grid" : "none");
     dom_display("bottomRight", block);
-    dom_display("igXPBar", block);
-    dom_display("killCardHolder", "none");
+    dom_display("deathUIHolder", "none");
+    dom_style("speakerDisplay", "right", visible ? "380px" : "20px");
+    hud_minimap_off();
 
-    // Pieces the Display settings own (134.js `set`s; ui_render_settings.c applies live
+    // Pieces the Display settings own (settings.js `set`s; ui_render_settings.c applies live
     // changes) are written from the same values, so this pass never undoes a setting.
     const ClientRenderSettings *rs = client_render_settings();
-    dom_display("leaderDisplay", rs->old_scoreboard ? "block" : "none");   // oldScoreboard
-    dom_display("killCount", rs->show_kill_c ? "inline-block" : "none");   // showKillC
-    dom_display("deathCount", rs->show_deaths ? "inline-block" : "none");  // showDeaths
-    dom_display("streakCount", rs->show_streak ? "inline-block" : "none"); // showStreak
-    dom_display("scoreCount", rs->show_score ? "inline-block" : "none");   // showScore
-    dom_display("fpsDisplay", menu_ui()->settings.show_fps ? "" : "none"); // showFPS
+    dom_display("leaderboardHolder", rs->old_scoreboard ? "block" : "none");   // oldScoreboard -> switchLeaderboard
+    dom_display("killCount", rs->show_kill_c ? "inline-block" : "none");       // showKillC
+    dom_display("deathCount", rs->show_deaths ? "inline-block" : "none");      // showDeaths
+    dom_display("streakCount", rs->show_streak ? "inline-block" : "none");     // showStreak
+    dom_display("kdCount", hud_setting_on("showKD") ? "inline-block" : "none"); // showKD
+    dom_display("scoreCount", rs->show_score ? "inline-block" : "none");       // showScore
+    dom_display("fpsDisplay", menu_ui()->settings.show_fps ? "block" : "none"); // showFPS
     dom_display("scoreZoneCount", "none");
     dom_display("livesCount", "none");
     dom_display("ingressDisplay", rs->show_net_stat ? "block" : "none"); // showNetStat
     dom_display("egressDisplay", rs->show_net_stat ? "block" : "none");
-    dom_display("propInstruct", "none");
+    dom_display("tickDisplay", rs->show_net_stat ? "block" : "none");
+    dom_display("propControlHolder", "none");
     dom_display("interactMsg", "none");
-    dom_display("interactProg", "none");
-    dom_display("teamScores", "none");         // FFA only so far
+    dom_display("teamScores", "none");
+    dom_display("bhHolder", "none");
+    dom_display("bloodDisplay", "none");
     dom_display("pingDisplay", rs->show_ping ? "block" : "none");      // showPing
-    dom_display("killFeed", !rs->old_scoreboard && rs->show_kills ? "inline-block" : "none"); // showKills
-    dom_display("ammoDisplay", "inline-block");
-
-    dom_style("teamName", "opacity", "0");     // FFA: no team pill
-    char value[32];
-    fmt_opacity(rs->xp_bar_opacity, value, sizeof(value));
-    dom_style("igXPBar", "opacity", value);                              // xpBarOpac
-    dom_style("igXPBarProg", "background-color", rs->xp_bar_color[0] ? rs->xp_bar_color : XP_BAR_COLOR); // xpBarCol
+    dom_display("killFeed", !rs->old_scoreboard && rs->show_kills ? "inline-grid" : "none"); // switchLeaderboard
+    dom_display("ammoHolder", "inline-block");
+    if ((el = html_dom_by_id("bottomLeftChallIcon"))) { // init: challIconSkull with challenges, else challIconHP
+        html_dom_set_class(el, "challIconSkull", 0);
+        html_dom_set_class(el, "challIconHP", 1);
+    }
     if ((el = html_dom_by_id("chatList"))) {
+        char value[32];
         fmt_opacity(rs->chat_opacity, value, sizeof(value));
         html_dom_set_style(el, "opacity", value);                        // chatOp
         snprintf(value, sizeof(value), "%gpx", rs->chat_height * 100.0);
         html_dom_set_style(el, "max-height", value);                     // chatHeight
         ui_controls_apply_chat_visibility();                             // shwChat: all / on focus / off
     }
-    char src[8];
-    if ((el = html_dom_by_id("challIcon")) && html_dom_get_attr(el, "src", src, sizeof(src)) < 0) {
-        html_dom_set_attr(el, "src", "img/hp_0.png"); // Krunker: challenge mode shows img/skull_0.png instead
-    }
+    dom_text("reloadMsg", "[R] Reload"); // i18n game.reload.keyboard (startBootstrapLoading)
 
     if (visible) {
         hud_ensure_crosshair();
@@ -2486,15 +2899,33 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
         client->hud_html.next_emit_time = 0.0;
     } else {
         dom_style("aimRecticle", "opacity", "0");
-        dom_display("newLeaderDisplay", "none");
-        ui->board_shown = 0;
         hud_hide_hit();
         hud_dmg_hide_all();
     }
-    if (visible && ui->dead) hud_toggle_game_ui(0);
+    if (visible && ui->dead) {
+        hud_toggle_game_ui(0);
+        dom_display("deathUIHolder", "block");
+    }
     // The end screen stays down while the menu is over it (UI.toggleEndScreen ->
     // toggleMenu(true) hid #endUI); it comes back when the menu closes.
     if (ui->ended && !html_ui_is_menu_open()) hud_end_screen_dom();
+}
+
+// KrunkScript game.ui hideDefault() (v7 createKrunkScriptApiContext.js): game.ui.hidden, and
+// #gameUIHider / #fullMenHider hidden; `hidden` 0 shows them again.
+void hud_ui_hide_default(const int hidden) {
+    g_hud_ui.hide_default = !!hidden;
+    dom_display("gameUIHider", hidden ? "none" : "");
+    dom_display("fullMenHider", hidden ? "none" : "block");
+}
+
+// UI.toggleWholeUI(on): the forceHidden class on #fullMenHider, #customGUIHolder, #gameUIHider.
+void hud_ui_toggle_whole_ui(const int on) {
+    static const char *const ids[] = {"fullMenHider", "customGUIHolder", "gameUIHider"};
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        const HtmlElem el = html_dom_by_id(ids[i]);
+        if (el) html_dom_set_class(el, "forceHidden", !on);
+    }
 }
 
 /* ------------------------------------------------------------ autoplay (test hook) */
@@ -2553,8 +2984,6 @@ static void hud_autoplay_hide_menu(void) {
     dom_display("gameNameHolder", "none");
     dom_display("spectButton", "none");
     dom_display("speakerDisplay", "block");
-    dom_style("chatHolder", "bottom", "148px");
-    dom_style("voiceDisplay", "bottom", "145px");
     const HtmlElem base = html_dom_by_id("uiBase");
     if (base) html_dom_set_class(base, "onMenu", 0);
 }
@@ -2701,9 +3130,23 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // hud.js state.inGame came from the `state` event (client->in_game); the values
     // below are only sampled while the local player is alive.
     const int in_game = client->in_game && client->me;
-    if (in_game && !ui->in_game_was) ui->chat_seeded = 0; // new session: welcome lines again
+    if (in_game && !ui->in_game_was) { // new session: welcome lines again, fresh head-to-head counts
+        ui->chat_seeded = 0;
+        g_h2h_count = 0;
+    }
     ui->in_game_was = in_game;
+    // the life the death screen's stats describe starts at the spawn
+    static int alive_was;
+    const int alive = hud_in_game(client);
+    if (alive && !alive_was) {
+        g_life_start_ms = now * 1000.0;
+        g_life_kills = 0;
+        g_life_score_start = client->me->score;
+    }
+    alive_was = alive;
     hud_apply_visibility(client, in_game, in_game && !html_ui_is_menu_open());
+    hud_v7modes_tick(client, in_game, g_hud_layout_epoch); // rounds, KR tags, big head, speed run (hud_v7modes.c)
+    hud_gui_update(client); // map-G: the map's custom "gui" elements in #customGUIHolder (hud_gui.c)
     ui_notify_tick(now * 1000.0); // v3.1.1 mod notify.ts toast (ui_notify.c)
 
     if (spectate_active() && !hud_in_game(client)) {
@@ -2819,9 +3262,22 @@ void client_hud_html_tick(Client *client, const float now_f) {
         dom_text_int("killsVal", hud->kills);
         dom_text_int("deathsVal", hud->deaths);
         dom_text_int("myScoreVal", hud->score);
+        // kdVal = (kills / (deaths || 1)).round(1).toString()
+        char kd[32];
+        const double ratio = (double) hud->kills / (hud->deaths ? hud->deaths : 1);
+        fmt_number(round(ratio * 10.0) / 10.0, kd, sizeof(kd));
+        if (!hud->kills && !hud->deaths) snprintf(kd, sizeof(kd), "0.0"); // resetGameSessionState: kdVal = "0.0"
+        dom_text("kdVal", kd);
     }
     if (fps_changed || force) dom_text_int("ingameFPS", hud->fps);
-    if (class_changed) hud_render_class(hud_class_icon_index(client, hud->class_index));
+    if (force || (int) me->kill_streak != ui->streak) { // streakVal = currentKillStreak
+        ui->streak = (int) me->kill_streak;
+        dom_text_int("streakVal", ui->streak);
+    }
+    if (class_changed) {
+        hud_render_class(hud->class_index);
+        hud_render_team(client);
+    }
     if (scope_changed) hud_render_scope(hud->scoped);
     if (aim_dot_changed) dom_style("aimDot", "opacity", hud->aim_dot ? "1" : "0");
     if (ping_changed) {
@@ -2836,4 +3292,39 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // TODO: call hud_ui_add_killfeed() when the game exposes kill events (player_kill()
     // only deactivates the victim today) and hud_ui_hit() when hitscan damage lands
     // (shared/src/player.c hitscan is still a TODO).
+}
+
+// Inline handlers this module owns (ui_handlers.c h_fallback); -1 = not ours.
+int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    if (!name) return -1;
+    if (!strcmp(name, "switchChat")) { // #chatSwitch
+        hud_switch_chat();
+        return 1;
+    }
+    if (!strcmp(name, "windows.22.searchPlayers")) { // Player List search box
+        char value[sizeof(g_plist_search)] = "";
+        if (ev && ev->target) html_dom_get_value(ev->target, value, sizeof(value));
+        else if (ev && ev->value) snprintf(value, sizeof(value), "%s", ev->value);
+        snprintf(g_plist_search, sizeof(g_plist_search), "%s", value);
+        char *rows = hud_plist_rows();
+        const HtmlElem holder = html_dom_by_id("playerListH");
+        if (holder) html_dom_set_html(holder, rows);
+        free(rows);
+        return 1;
+    }
+    if (!strcmp(name, "muteUser")) { // muteUser(this, id, 0 chat / 1 voice): the button flips
+        // KrunkNative keeps no per-account mute list yet (chat / voice packets carry no account
+        // id): only the icon follows, like v7's speaker_notes_off / voice_over_off.
+        const int voice = argc > 2 && args[2].kind == HTML_ARG_NUM && args[2].num != 0.0;
+        const HtmlElem btn = argc > 0 && args[0].kind == HTML_ARG_THIS ? (HtmlElem) args[0].num : ev ? ev->target : 0;
+        if (btn) {
+            char text[32] = "";
+            html_dom_get_text(btn, text, sizeof(text));
+            const int muted = voice ? !strcmp(text, "voice_over_off") : !strcmp(text, "speaker_notes_off");
+            html_dom_set_text(btn, voice ? (muted ? "record_voice_over" : "voice_over_off") : (muted ? "chat" : "speaker_notes_off"));
+        }
+        return 1;
+    }
+    if (!strcmp(name, "clearFocus")) return 1; // spectator focus: not in KrunkNative's spectate.c yet
+    return -1;
 }

@@ -140,9 +140,35 @@ int main(void) {
     AccountInfo info;
     CHECK(me && game_account_info(&g_server->game, me, &info) && info.has_account && !info.premium && !info.level, "account_info: has_account only");
 
+    // Host Game (createPrivateRoom: ui_host_config_collect -> local_game_host_config): the
+    // collected request wins over the map's own config from the next round on
+    cJSON *request = cJSON_Parse("{\"modes\":[0],\"classes\":[1],\"private\":false,\"override\":0,\"gameTime\":7,\"maxPlayers\":6}");
+    CHECK(request != NULL, "request parses");
+    sandbox_host_config(request, GAME_HOST_CUSTOM);
+    CHECK(g_server->game.config.game_time == 0, "the running round keeps its config until the next one");
+    sandbox_host(0, 0);
+    clients[0].count = clients[1].count = 0;
+    pump(clients, 2, 30);
+    const GameConfig *c = &g_server->game.config;
+    CHECK(c->game_time == 7 && c->max_players == 6 && c->class_list_count == 1 && c->class_list[0] == 1,
+          "the host request on the next round (gameTime %d, maxPlayers %d, %d class(es), first %d)", c->game_time, c->max_players,
+          c->class_list_count, c->class_list_count ? c->class_list[0] : -1);
+    gc = game_config_of(&clients[0]);
+    settings = cJSON_GetObjectItem(gc, "settings");
+    CHECK(gc && cJSON_GetObjectItem(settings, "gameTime") && cJSON_GetObjectItem(settings, "gameTime")->valueint == 7, "GAME_CONFIG: the host's gameTime");
+    cJSON_Delete(gc);
+
     sandbox_disconnect(clients[0].fd);
     sandbox_disconnect(clients[1].fd);
     sandbox_stop();
+
+    // a sandbox started with the request plays it from its first round
+    const SandboxConfig hosted = {.maps = maps, .map_count = 1, .map_index = 0, .mode_id = -1, .host_request = request, .host_type = GAME_HOST_CUSTOM};
+    CHECK(sandbox_start(&hosted), "hosted sandbox starts");
+    CHECK(g_server->game.config.game_time == 7 && g_server->game.config.class_list_count == 1 && g_server->game.config.class_list[0] == 1,
+          "the host request on the first round (gameTime %d)", g_server->game.config.game_time);
+    sandbox_stop();
+    cJSON_Delete(request);
     cJSON_Delete(map);
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

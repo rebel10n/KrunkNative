@@ -75,6 +75,7 @@ typedef struct {
     char crit_color[RS_COLOR_MAX];           // critColor
     float dmg_scale;         // dmgScale (HUD: font = v * 30)
     int show_kills, show_kill_c, show_deaths, show_score, show_streak, show_ping, show_net_stat, show_fps; // DOM toggles
+    int show_kd;             // showKD (v7.1.4): #kdCount
     int show_speed;          // showSpeed: speedometer (HUD)
     float speed_off_x, speed_off_y, speed_scale, speed_opacity; // speedOffX/Y, speedScale, speedOpacity
     char speed_color[RS_COLOR_MAX], speed_color_max[RS_COLOR_MAX]; // speedColor, speedColorMax

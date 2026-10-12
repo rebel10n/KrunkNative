@@ -138,6 +138,18 @@ static int offline_mode_id(const Client *client) {
     return mode_config(mode_id) ? mode_id : MODE_ID_FFA;
 }
 
+// Host Game's request (local_game_host_config): the sandbox plays it, until local_game_stop
+static cJSON *g_host_request;
+static int g_host_type;
+
+void local_game_host_config(Client *client, const cJSON *request, const int host_type) {
+    (void) client;
+    cJSON_Delete(g_host_request);
+    g_host_request = cJSON_IsObject(request) ? cJSON_Duplicate(request, 1) : NULL;
+    g_host_type = host_type;
+    if (sandbox_running()) sandbox_host_config(g_host_request, g_host_type);
+}
+
 static int offline_begin(Client *client, const int map_index) {
     Game *game = &client->game;
     if (!game->map_count) return 0;
@@ -147,6 +159,8 @@ static int offline_begin(Client *client, const int map_index) {
         .map_count = game->map_count,
         .map_index = map_index,
         .mode_id = offline_mode_id(client),
+        .host_request = g_host_request,
+        .host_type = g_host_type,
     };
     if (!sandbox_start(&cfg)) {
         fprintf(stderr, "offline: could not start the sandbox server\n");
@@ -191,6 +205,8 @@ void local_game_stop(Client *client) {
     const int socket = offline_socket(client);
     if (socket >= 0) sandbox_disconnect(socket);
     sandbox_stop();
+    cJSON_Delete(g_host_request); // a later offline game is a plain one again
+    g_host_request = NULL;
     g_offline_buffer.length = 0;
     g_offline_fd = -1;
     client->offline = 0;

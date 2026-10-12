@@ -677,7 +677,9 @@ static int web_menu_pointer(const HtmlEvent *ev) {
     return 0;
 }
 
-// Returns 1 for default behaviour, 0 to preventDefault (handler returned false).
+// Returns bit 0 = 1 for default behaviour (0 = preventDefault: the handler returned false)
+// and bit 1 = the handler asked for event.stopPropagation() (html_ui_stop_propagation, the
+// native engine's stop for ancestor inline handlers; the shim calls it on the browser event).
 // `handler` is either "<event type>|<inline handler name>" ("click|showWindow",
 // "input|windows.1.searchList") or "listener:<elemId>:<type>" for the shim's
 // addEventListener equivalents (elemId empty = window/document).
@@ -727,7 +729,7 @@ EMSCRIPTEN_KEEPALIVE int kn_ui_event(const char *handler, const char *args_json,
     remember_dispatch(name, args, argc);
     const int r = html_ui_dispatch(name, &ev, args, argc);
     free_args(args, argc);
-    return r;
+    return (r ? 1 : 0) | (html_ui_take_stop_propagation() ? 2 : 0);
 }
 
 // ------------------------------------------------------------------ pages (html_ui_load_page)

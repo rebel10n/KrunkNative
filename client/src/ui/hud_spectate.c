@@ -1,14 +1,15 @@
-// Krunker v3.1.1 spectator HUD (#spectateUI in ui/index.html, styled by main.css) over the
-// DOM-ops API. Ported from the unpacked v3.1.1 client:
-//   index.js  cw()      #specNames / #specStats (followed player's class icon, level,
-//                       name, health bar #spectHPB) / #specSUS
-//             fF(), fG() #specTeam0 / #specTeam1 player rows (.specPlayerHolder0/1: class
-//                       icon, flag, name, slot number for the 1-9 keys, eye on the target)
-//             fD()      #specTimer = the round clock;  fO()/106.js #specGMessage = #gameMessage
-//             93.js     #specGameInfo = mode name;  spec0/spec1 team scores (team modes only)
-//   103.js    UI.toggleGameUI / toggleControlUI with window.Bf5: #spectateUI shown, the
-//             player HUD holders hidden, #topRight + chat kept
-//   91.js     fakeCross: the small four-bar crosshair drawn while following in first person
+// Krunker v7.1.4 spectator HUD (#spectateUI in ui/index.html, styled by main.css) over the
+// DOM-ops API. Ported from v7's src/index.js (same structure as v3.1.1's):
+//   f1766     #specNames / #specStats (followed player's class icon, level, name, health
+//             bar #spectHPB) / #specSUS
+//   f1993     #specTeam0 / #specTeam1 player rows (.specPlayerHolder0/1: class icon, flag,
+//             name, slot number for the 1-9 keys, eye on the target)
+//   io_updateTimer #specTimer = the round clock; map.js #specGameInfo = mode name; spec0/spec1
+//             team scores (team modes only); #specControlHolder (objective cam row only with
+//             objective cams, KPD Vision row hidden)
+//   UI.js     toggleGameUI / toggleControlUI with window.spectating: #spectateUI shown, the
+//             player HUD holders hidden, #topLeftMain + #topRight + chat kept
+//   game-overlay fakeCross: the small four-bar crosshair drawn while following in first person
 // hud_ui.c owns the player HUD and samples nothing while we have no player, so this file
 // keeps the holders it would otherwise leave in the wrong state in line every frame
 // (inline style compared first, written only on a difference).
@@ -88,39 +89,44 @@ static const char *hs_name(const Player *player) {
 
 /* ------------------------------------------------------------ visibility */
 
-// UI.toggleGameUI(true) + toggleControlUI(true) with window.Bf5 (j = 1, k = j && !Bf5 = 0).
+// UI.toggleGameUI(true) + toggleControlUI(true) with window.spectating (j = 1, v12226 =
+// j && !spectating = 0); toggleMenuHider(false): uiBase.onSpect.
 static void hs_apply_shown(void) {
     hs_set_display("spectateUI", "block");
     hs_set_display("inGameUI", "block");
-    hs_set_display("propInstruct", "none");
+    hs_set_display("customGUIHolder", "block");
+    hs_set_display("propControlHolder", "none");
     hs_set_display("gameMessage", "none");
-    hs_set_display("topLeftHolder", "none");
+    hs_set_display("roundMessage", "none");
+    hs_set_display("topLeftMain", "inline-block");
+    hs_set_display("topLeftMap", "block");
+    hs_set_display("topLeftMatchData", "none");
+    hs_set_display("topLeftData", "none");
+    hs_set_display("topLeftBottom", "none");
     hs_set_display("topRight", "block");
     hs_set_display("reloadMsg", "none");
     hs_set_display("bottomLeftHolder", "none");
-    hs_set_display("weapDisplay", "none");
+    hs_set_display("weapHolder", "none");
     hs_set_display("bottomRight", "none");
-    hs_set_display("killCardHolder", "none");
+    hs_set_display("deathUIHolder", "none");
     hs_set_display("overlay", "block");
     hs_set_display("vignette", "block");
-    hs_set_display("igXPBar", "none");
     hs_set_display("aimRecticle", "block");
     hs_set_display("chatUI", "block");
-    hs_set_display("interactProg", "none");
     hs_set_display("interactMsg", "none");
-    hs_set_display("knCrosshair", "none"); // hud_ui.c's player crosshair (overlay canvas: !Bf5 only)
+    hs_set_display("knCrosshair", "none"); // hud_ui.c's player crosshair (overlay canvas: !spectating only)
     hs_set_display("knHitmarker", "none");
     hs_set_style("speakerDisplay", "right", "380px");
-    hs_set_style("chatHolder", "bottom", "20px");
-    hs_set_style("voiceDisplay", "bottom", "18px");
     const HtmlElem base = html_dom_by_id("uiBase");
     if (base && !html_dom_has_class(base, "onGame")) html_dom_set_class(base, "onGame", 1);
+    if (base && !html_dom_has_class(base, "onSpect")) html_dom_set_class(base, "onSpect", 1);
 }
 
 // toggleControlUI(false) (menu / end screen over the spectator view); the chat stays.
 static void hs_apply_hidden(const int still_spectating) {
     hs_set_display("spectateUI", "none");
     hs_set_display("inGameUI", "none");
+    hs_set_display("customGUIHolder", "none");
     hs_set_display("overlay", "none");
     hs_set_display("vignette", "none");
     hs_set_display("aimRecticle", "none");
@@ -193,7 +199,7 @@ static void hs_slot_add(const Player *player, const int column) {
     snprintf(html + len, sizeof(html) - len,
         "</div><div class='specNum'>%s</div><span class='material-icons' style='color:rgba(255,255,255,0.7);"
         "font-size:20px;text-shadow:none;margin-top:-47px;vertical-align: middle;' id='specH_%d'>visibility</span>"
-        "<span class='material-icons' id='specKPD'>search</span>", num, player->uid);
+        "<span class='material-icons' id='specKPD'></span>", num, player->uid);
 
     char cls[32];
     snprintf(cls, sizeof(cls), "specPlayerHolder%d", column);
@@ -304,11 +310,11 @@ static void hs_update_stats(const Client *client) {
     char width[32];
     hs_number(pct, width, sizeof(width));
 
-    // Guests: level 0, challenge level 1 (getChallCol(1) = white), no flag, no clan, not featured.
+    // Guests: level 0, no flag, no clan, not featured (v7 f1766 writes #specStatsInner).
     char html[1536];
     size_t len = (size_t) snprintf(html, sizeof(html),
-        "<img class='spectPIcon' src='textures/classes/icon_%d.png'/><span id='f_-1' class='specFlag'></span>"
-        "<div style='display:inline-block;width:200px;vertical-align:top'><div class='specLevelBox' id='lvl_0_1' "
+        "<img class='spectPIcon' src='textures/classes/icon_%d.png' /><span id='f_-1' class='specFlag'></span>"
+        "<div style='display:inline-block;width:200px;vertical-align:top'><div class='specLevelBox' id='lvl_0' "
         "style='color:white;'>0</div><span class='specPHead' id='s_%d'>", target->class_index, target->uid);
     hs_append_escaped(html, sizeof(html), &len, hs_name(target));
     snprintf(html + len, sizeof(html) - len,
@@ -316,7 +322,7 @@ static void hs_update_stats(const Client *client) {
         "<span id='spectHPV'>%d | %d</span><div id='spectHPBI' style='width:%s%%;background-color:%s'></div></div></div>",
         hp, mhp, width, color);
 
-    const HtmlElem stats = html_dom_by_id("specStats");
+    const HtmlElem stats = html_dom_by_id("specStatsInner");
     if (stats) html_dom_set_html(stats, html);
     hs_set_display("specNames", "none");
     hs_set_display("specSUS", "none");
@@ -344,7 +350,8 @@ static void hs_update_info(const Client *client) {
 
     hs_set_text("specIns", g_hs.person, sizeof(g_hs.person), spectate_person_label());
 
-    // spec0/spec1: team names and scores in team modes only; no objective cams (specContr child 3).
+    // spec0/spec1: team names and scores in team modes only (#specHeaderTm0/1 with them); no
+    // objective cams: #specControlHolder's third row (Objective Cam) hidden.
     const int teams = client->game.mode && client->game.mode->config.teams;
     char key[160];
     if (teams) {
@@ -357,6 +364,8 @@ static void hs_update_info(const Client *client) {
         snprintf(g_hs.teams_key, sizeof(g_hs.teams_key), "%s", key);
         hs_set_display("spec0", teams ? "inline-block" : "none");
         hs_set_display("spec1", teams ? "inline-block" : "none");
+        hs_set_display("specHeaderTm0", teams ? "" : "none");
+        hs_set_display("specHeaderTm1", teams ? "" : "none");
         if (teams) {
             char score[16];
             HtmlElem el;
@@ -367,11 +376,11 @@ static void hs_update_info(const Client *client) {
             snprintf(score, sizeof(score), "%d", mode_team_score(&client->game, 2));
             if ((el = html_dom_by_id("specScoreTm1"))) html_dom_set_text(el, score);
         }
-        const HtmlElem contr = html_dom_by_id("specContr");
+        const HtmlElem contr = html_dom_by_id("specControlHolder");
         HtmlElem objective = 0;
         if (contr) {
-            HtmlElem items[8];
-            if (html_dom_query_all(contr, ".specContrI", items, 8) >= 3) objective = items[2];
+            HtmlElem items[12];
+            if (html_dom_query_all(contr, ".specControl", items, 12) >= 3) objective = items[2];
         }
         if (objective) html_dom_set_display(objective, "none");
         hs_set_display("specKPDContr", "none");
@@ -433,8 +442,9 @@ void hud_spectate_tick(Client *client) {
             hs_set_display("spectateUI", "none");
             hs_set_display("knSpecCross", "none");
             if (!client->me) hs_set_display("chatUI", "none");
-            hs_set_style("chatHolder", "bottom", playing ? "148px" : "20px");
-            hs_set_style("voiceDisplay", "bottom", playing ? "145px" : "18px");
+            (void) playing; // the chat's place follows uiBase.onGame (main.css)
+            const HtmlElem base = html_dom_by_id("uiBase");
+            if (base) html_dom_set_class(base, "onSpect", 0);
             g_hs.shown = -1;
         }
         g_hs.was_active = 0;

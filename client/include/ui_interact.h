@@ -9,7 +9,6 @@
 void ui_interact_tick(Client*);                  // per frame: the prompt and the hold progress bar
 void ui_interact_key(Client*, int secondary);    // interactKey (0) / interactSecKey (1)
 void ui_interact_drop(Client*);                  // dropKey: "drpw"
-// confirmKey (v7 controls.js binds.confirm, keyCode 75 "K" until the controls window has the
-// bind): "cnfm" when a confirmation is pending. 1 = consumed.
+// confirmKey (v7 controls.js binds.confirm, "confirmKey" K by default; ui_controls.c):
+// "cnfm" when a confirmation is pending. 1 = consumed.
 int  ui_interact_confirm(Client*);
-#define UI_INTERACT_CONFIRM_KEYCODE 75

@@ -709,6 +709,11 @@ void local_game_host(Client*, int map_index, int mode_id);
 // offline game (leaving a remote session) when needed. 0 on failure.
 #define LOCAL_GAME_HAVE_HOST_CUSTOM 1
 int local_game_host_custom(Client*, const cJSON *map);
+// Host Game's config (createPrivateRoom: ui_host_config_collect's request, a config.hostTypes
+// index): the offline game plays it from its next round on (a running sandbox) or from its start,
+// until the offline game stops. NULL drops it.
+#define LOCAL_GAME_HAVE_HOST_CONFIG 1
+void local_game_host_config(Client*, const cJSON *request, int host_type);
 
 void client_frame(Client*); // one iteration of the main loop: tick, swap, poll events
 

@@ -1,12 +1,12 @@
 // The Settings window's "Client" tab and the menu's Exit button (client/include/client_settings.h).
 //
-// Tab: the v3.1.1 desktop client pushes {name: "Client"} onto windows[0].tabs and
-// fills it from getCSettings() (jail Krunker_v3.1.1/main/utilities.js); glorp does the
-// same with categories of rows (src/cSettings.json, frontend/settings.js). Rows here use
-// the markup of v3.1.1's own settings generator (bd._html.settings.input: .setHed /
-// setBod_ folders, .settName rows, label.switch, select.inputGrey2, sliderVal + sliderM,
-// settingsBtn; "<span style='color: #eb5656'>*</span>" = needsRestart), so the tab looks
-// like Krunker's other tabs. Every row does something real in KrunkNative; rows that do
+// Tab: Krunker v7.1.4's desktop client adds {name: "Client", categories: ["client"]} to
+// both views of windows[0].tabs (index.js, vF1730) and fills it from ClientSession.settings;
+// glorp does the same with categories of rows (src/cSettings.json, frontend/settings.js).
+// Rows here use the markup of v7.1.4's own settings generator (_html.settings.input:
+// .setHed / .setBodH setBod_ folders, .settName rows, label.switch with its grooves,
+// select.inputGrey2, sliderVal + sliderM, settingsBtn; "<span style='color: #eb5656'>*</span>"
+// = needsRestart), so the tab looks like Krunker's other tabs. Every row does something real in KrunkNative; rows that do
 // not apply to the platform are not generated (the web build shows only Frame Cap, UI
 // Scale, the game options and the storage buttons).
 //
@@ -117,7 +117,7 @@ static const ClientSetting SETTINGS[] = {
     {"vsync", "V-Sync", "Display", CS_SWITCH, CS_NATIVE | CS_GAME, "false", "Wait for the display refresh (swap interval 1)"},
     {"updateRate", "Frame Cap", "Display", CS_SLIDER, CS_NATIVE | CS_WEB | CS_GAME, "0",
      "0 = uncapped (also Render > Frame Cap)", NULL, 0, 0, 1200, 10},
-    {"scaleUI", "UI Scale", "Display", CS_UISCALE, CS_NATIVE | CS_WEB | CS_GAME, "0.8", "Also Display > UI Scale"},
+    {"scaleUI", "UI Scale", "Display", CS_UISCALE, CS_NATIVE | CS_WEB | CS_GAME, "0.7", "Also Display > UI Scale"},
     // ---- System (glorp "Raw Input", "Webview Priority"; KRUNKNATIVE_AUDIO_BACKEND)
     {"rawInput", "Raw Input", "System", CS_SWITCH, CS_NATIVE, "true", "Unaccelerated mouse motion while the pointer is locked"},
     {"audioBackend", "Audio Backend", "System", CS_SELECT, CS_NATIVE | CS_RESTART, "",
@@ -772,7 +772,7 @@ void ui_client_settings_dom_init(void) {
 // ---------------------------------------------------------------- tab markup
 
 int ui_client_settings_tab(void) {
-    return chrome_visible() ? ui_settings_tab_count() : -1;
+    return chrome_visible() ? ui_settings_view_tab_count(menu_ui()->settings_view) : -1;
 }
 
 char *ui_client_settings_head(const char *head, const int active_tab) {
@@ -898,15 +898,15 @@ static void append_button(StrBuf *sb, const char *label, const char *action) {
 // The handler a row's control calls: setSetting for the game's own settings,
 // knClientSet for the client store.
 static const char *row_handler(const ClientSetting *s) {
-    return (s->flags & CS_GAME) ? "setSetting" : "knClientSet";
+    return (s->flags & CS_GAME) ? "window.setSetting" : "knClientSet";
 }
 
 static void append_slider(StrBuf *sb, const char *key, const char *value, const double min, const double max,
                           const double step, const char *container_style) {
     sb_appendf(sb, "<input type=\"number\" class=\"sliderVal\" id=\"slid_input_%s\" min=\"%g\" max=\"%g\" value=\"%s\" "
-                   "onkeypress=\"return delayExecute(&quot;%s&quot;, this, undefined)\" style=\"margin-right:0px;border-width:0px\">\n"
-                   "                     <div class=\"slidecontainer\" style=\"%s\"><input type=\"range\" id=\"slid_%s\" min=\"%g\" "
-                   "max=\"%g\" step=\"%g\" value=\"%s\" class=\"sliderM\" oninput=\"setSetting(&quot;%s&quot;, this.value)\"></div>",
+                   "onkeypress=\"return window.delayExecute(&quot;%s&quot;, this, undefined)\" style=\"margin-right:0px;border-width:0px\">\n"
+                   "\t\t\t\t\t\t\t<div class=\"slidecontainer\" style=\"%s\"><input type=\"range\" id=\"slid_%s\" min=\"%g\" "
+                   "max=\"%g\" step=\"%g\" value=\"%s\" class=\"sliderM\" oninput=\"window.setSetting(&quot;%s&quot;, this.value)\"></div>",
                key, min, max, value, key, container_style, key, min, max, step, value, key);
 }
 
@@ -917,7 +917,7 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
     switch (s->kind) {
         case CS_SWITCH:
             sb_appendf(sb, "<label class=\"switch\" style=\"margin-left:10px\"><input type=\"checkbox\" "
-                           "onclick=\"%s(&quot;%s&quot;, this.checked)\"%s><span class=\"slider\"></span></label>",
+                           "onclick=\"%s(&quot;%s&quot;, this.checked)\"%s><span class=\"slider\"><span class=\"grooves\"></span></span></label>",
                        row_handler(s), s->key, !strcmp(value, "true") ? " checked=\"\"" : "");
             if (s->button) append_button(sb, s->button, s->action);
             break;
@@ -950,9 +950,9 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
             // Display > Interface > UI Scale: the uiScaling switch + the scaleUI slider
             const cJSON *on = ui_setting_value("uiScaling");
             sb_appendf(sb, "<label class=\"switch\" style=\"margin-left:10px\"><input type=\"checkbox\" "
-                           "onclick=\"setSetting(&quot;uiScaling&quot;, this.checked)\"%s><span class=\"slider\"></span></label>",
+                           "onclick=\"window.setSetting(&quot;uiScaling&quot;, this.checked)\"%s><span class=\"slider\"><span class=\"grooves\"></span></span></label>",
                        cJSON_IsFalse(on) ? "" : " checked=\"\"");
-            append_slider(sb, "scaleUI", value, 0.1, 1.0, 0.1, "width: 180px;");
+            append_slider(sb, "scaleUI", value, 0.1, 1.0, 0.1, "width: 244px;");
             break;
         }
         case CS_BUTTON:
@@ -976,7 +976,7 @@ char *ui_client_settings_tab_html(const int searching) {
             char id[48];
             snprintf(id, sizeof(id), "kn%s", cat);
             sb_appendf(&sb, "<div class=\"setHed\" id=\"setHed_%s\" onclick=\"window.windows[0].collapseFolder(this)\">"
-                            "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> %s</div><div id=\"setBod_%s\">",
+                            "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> %s</div><div class=\"setBodH\" id=\"setBod_%s\">",
                        id, cat, id);
         }
         append_row(&sb, s);

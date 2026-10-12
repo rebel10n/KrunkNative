@@ -74,6 +74,16 @@ const char *html_ui_current_handler(void) {
     return g_current_handler;
 }
 
+static int g_stop_propagation;
+
+void html_ui_stop_propagation(void) { g_stop_propagation = 1; }
+
+int html_ui_take_stop_propagation(void) {
+    const int stop = g_stop_propagation;
+    g_stop_propagation = 0;
+    return stop;
+}
+
 void html_ui_set_handlers(const HtmlHandlerEntry *table, const size_t count, void *user, const HtmlHandlerFn fallback) {
     g_ctx->handlers = table;
     g_ctx->handler_count = table ? count : 0;
@@ -168,6 +178,7 @@ static void log_dispatch(const char *name, const HtmlEvent *ev, const HtmlArg *a
 
 int html_ui_dispatch(const char *handler_name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     char name[128];
+    g_stop_propagation = 0; // a request is only good for the dispatch that made it
     normalise_handler_name(handler_name, name, sizeof(name));
     if (!name[0]) return 1;
 

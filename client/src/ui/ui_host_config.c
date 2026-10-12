@@ -16,10 +16,19 @@
 // windows[7].wepConf / clsConf / effectConf: the Advanced matrices are open
 static int g_wep_conf, g_cls_conf, g_effect_conf;
 
-// A number the way JS prints it (1, 0.97, 0.0047).
+// A number the way JS prints it (1, 0.97, 0.0047). The base values come from float fields
+// (weapon / class / effect tables), so they are rounded to float precision first: 50, not
+// 50.00000075; 1900, not 1899.999939.
 static void js_num(char *out, const size_t size, const double v) {
-    if (floor(v) == v && fabs(v) < 1e15) snprintf(out, size, "%.0f", v);
-    else snprintf(out, size, "%.10g", v);
+    if (floor(v) == v && fabs(v) < 1e15) {
+        snprintf(out, size, "%.0f", v);
+        return;
+    }
+    char rounded[32];
+    snprintf(rounded, sizeof(rounded), "%.7g", v);
+    const double r = strtod(rounded, NULL);
+    if (floor(r) == r && fabs(r) < 1e15) snprintf(out, size, "%.0f", r);
+    else snprintf(out, size, "%.7g", r); // %g drops the trailing zeros
 }
 
 static const cJSON *preset_entry(const cJSON *preset, const char *key, const int id) {

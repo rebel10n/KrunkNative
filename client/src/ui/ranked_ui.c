@@ -7,6 +7,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <ui_logic.h>
+#include <html_ui.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -369,6 +370,18 @@ void ranked_ui_class_changed(const int index) {
 }
 
 // windows[26].gen() for an account
+// windows[26] (showWindow(27)) for everyone: v7.1.4's gen() writes nothing (ranked play is
+// gone there); KrunkNative keeps ranked: a guest gets the LOGIN REQUIRED card, an account the
+// queue / party UI below, styled by the v3.1.1 rules in css/ranked-kn.css.
+char *ranked_ui_window_gen(void) {
+    static int css;
+    if (!css) css = html_ui_add_stylesheet("css/ranked-kn.css") || 1;
+    if (!account_get() || backend_available() != 1) {
+        return strdup("<div class='reqW login' onclick='showWindow(5)'><i class='material-icons reqWIcon'>clear</i><div class='reqWLvl'>LOGIN REQUIRED</div><div class='reqWTxt'>to play in ranked games!</div></div>");
+    }
+    return ranked_window_gen();
+}
+
 char *ranked_window_gen(void) {
     const AccountInfo *a = acc();
     StrBuf sb = {0};

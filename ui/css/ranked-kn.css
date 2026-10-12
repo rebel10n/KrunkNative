@@ -1,0 +1,252 @@
+/* KrunkNative: the Ranked window (client/src/ui/ranked_ui.c). Krunker v7.1.4 dropped ranked
+ * play and its styles; KrunkNative keeps it (doc/v7/decisions.md), so these are the
+ * v3.1.1 public/css/main.css rules of its classes, copied unchanged. Added at run time
+ * (html_ui_add_stylesheet) the first time the window opens. */
+.accountEloIcon{display: inline-block;
+  width: 1.5em;
+  height: 1.5em;
+  margin-top: 2px;}
+.rankedHeader{display: inline-block;
+  font-size: 18px;}
+#rankedPartyKey{border-width: 0;
+  border: none;
+  margin-right: 4px;
+  display: inline-block;
+  font-size: 18px;
+  width: 180px;
+  background: #eee;
+  padding: 8px;
+  padding-left: 12px;
+  border-radius: 6px;}
+#rankedPartyKey + span{display: inherit;}
+#rankedPartyKey + span > a{display: none;}
+#rankedPartyKey:not(:placeholder-shown) + span > .partyJoin{display: block;}
+#rankedPartyKey:placeholder-shown + span > .partyCreate{display: block;}
+.windowRightInfoText{float: right;
+  border-radius: 8px;
+  font-size: 18px;}
+#headerRankContainer .accountEloIcon{width: 60px;
+  height: 60px;}
+.rankedWarning{border-width: 0;
+  border: none;
+  display: inline-block;
+  font-size: 18px;
+  padding: 8px;
+  margin-top: 10px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.1);
+  width: 689px;
+  text-align: center;}
+.rankedQueueOptions{display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  margin-top: 10px;}
+.rankedSelection{overflow: hidden;
+  position: relative;
+  height: 100px;
+  width: 227px;
+  border-radius: 5px;
+  display: inline-block;}
+.rankedSelection:not(:first-child){margin-left: 14px;}
+.rankedSelection input{display: none;}
+.rankedLocked{position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  color: #fff;
+  font-size: 50px !important;
+  opacity: 0.8;
+  text-shadow:
+    -1px -1px 0 #202020,
+    1px -1px 0 #202020,
+    -1px 1px 0 #202020,
+    1px 1px 0 #202020,
+    -2px -2px 0 #202020,
+    2px -2px 0 #202020,
+    -2px 2px 0 #202020,
+    2px 2px 0 #202020,
+    -3px -3px 0 #202020,
+    3px -3px 0 #202020,
+    -3px 3px 0 #202020,
+    3px 3px 0 #202020;}
+.rankedType{cursor: pointer;
+  position: absolute;
+  text-align: center;
+  font-size: 40px;
+  color: #fff;
+  z-index: 1;
+  top: 2px;
+  left: 85px;
+  right: 20px;
+  text-shadow:
+    -1px -1px 0 #202020,
+    1px -1px 0 #202020,
+    -1px 1px 0 #202020,
+    1px 1px 0 #202020,
+    -2px -2px 0 #202020,
+    2px -2px 0 #202020,
+    -2px 2px 0 #202020,
+    2px 2px 0 #202020,
+    -3px -3px 0 #202020,
+    3px -3px 0 #202020,
+    -3px 3px 0 #202020,
+    3px 3px 0 #202020;}
+.rankedELO{position: absolute;
+  z-index: 1;
+  height: 80px;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;}
+.rankedELOTxt{position: absolute;
+  font-size: 15px;
+  text-align: center;
+  color: #fff;
+  z-index: 1;
+  top: 66px;
+  left: 85px;
+  right: 20px;
+  cursor: pointer;}
+.rankedImg{position: absolute;
+  cursor: pointer;
+  top: 50%;
+  left: 0;
+  right: 0;
+  width: 225px;
+  transform: translateY(-50%);
+  -webkit-filter: grayscale(100%);
+  filter: grayscale(100%);
+  transition: all 0.2s;}
+input:checked:not(:disabled) + .rankedImg{-webkit-filter: grayscale(0%);
+  filter: grayscale(0%);}
+input:hover + .rankedImg{opacity: 0.9;
+  transform: translateY(-50%) scale(1.1);}
+.partyMember{position: relative;
+  width: 100px;
+  text-align: center;}
+.partyAvatar{box-sizing: border-box;
+  display: inline-block;
+  position: relative;
+  width: 85px;
+  height: 85px;
+  border-radius: 5px;
+  overflow: hidden;
+  background-color: rgba(0, 0, 0, 0.3);
+  image-rendering: pixelated;
+  border: 4px solid rgba(0, 0, 0, 0.2);}
+.partyLeaderIcon{position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;}
+.partyMemberLock{position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+  color: #fff;
+  text-shadow:
+    -1px -1px 0 #444,
+    1px -1px 0 #444,
+    -1px 1px 0 #444,
+    1px 1px 0 #444,
+    -2px -2px 0 #444,
+    2px -2px 0 #444,
+    -2px 2px 0 #444,
+    2px 2px 0 #444;}
+.partyLeaderIcon i{position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+  color: #fbc02d;
+  text-shadow:
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    1px 1px 0 #000;}
+.partyMemberActions{position: absolute;
+  opacity: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.75);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  transition: 0.2s opacity;}
+.partyMemberActions a{margin: 4px;}
+.partyMemberActionSep{width: 40px;
+  height: 2px;
+  background: #000;
+  opacity: 0.5;}
+.partyAvatar img{position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;}
+.partyMember.placeholder img{filter: contrast(0) brightness(1.2);}
+.partyAvatar:hover .partyMemberActions{opacity: 1;}
+.partyUsername{margin-top: 2px;
+  text-align: center;
+  font-size: 12px;
+  white-space: nowrap;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;}
+.partyUsername > span,
+.partyUsername > a{text-overflow: ellipsis;
+  overflow: hidden;}
+.partyUsername i{font-size: 20px;
+  vertical-align: bottom;}
+.ready .partyAvatar{border-color: #32cd32;}
+.jQR{box-shadow: inset 0 -10px 0 0 #992b2b !important;
+  background-color: #ff4747 !important;}
+.jQR:hover{height: 57px;
+  margin-top: 15px;
+  box-shadow: inset 0 -7px 0 0 #992b2b !important;}
+.jQR:active{height: 54px;
+  margin-top: 18px;
+  box-shadow: inset 0 -4px 0 0 #992b2b !important;}
+.joinQueue{border-radius: 5px;
+  color: #fff;
+  text-align: center;
+  margin-top: 10px;
+  display: inline-block;
+  -webkit-transition: 0.1s;
+  transition: 0.1s;
+  width: 705px;
+  height: 60px;
+  line-height: 50px;
+  cursor: pointer;
+  box-shadow: inset 0 -10px 0 0 #1b76bf;
+  background-color: #2196f3;
+  font-size: 25px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  text-shadow:
+    -1px -1px 0 #202020,
+    1px -1px 0 #202020,
+    -1px 1px 0 #202020,
+    1px 1px 0 #202020,
+    -2px -2px 0 #202020,
+    2px -2px 0 #202020,
+    -2px 2px 0 #202020,
+    2px 2px 0 #202020,
+    -3px -3px 0 #202020,
+    3px -3px 0 #202020,
+    -3px 3px 0 #202020,
+    3px 3px 0 #202020;}
+.joinQueue:hover{height: 57px;
+  margin-top: 13px;
+  box-shadow: inset 0 -7px 0 0 #1b76bf;}
+.joinQueue:active{height: 54px;
+  margin-top: 16px;
+  box-shadow: inset 0 -4px 0 0 #1b76bf;}

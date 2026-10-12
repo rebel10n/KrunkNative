@@ -164,6 +164,7 @@ static void hud_modes_add_action(Client *client, const NetActionPacket *packet) 
     char id[32];
     snprintf(id, sizeof(id), "chatMsg_m%d", g_modes.chat_seq++);
     const HtmlElem row = html_dom_create("div", id);
+    html_dom_set_attr(row, "data-tab", "-1"); // f2018: a game line shows on every chat channel
     html_dom_set_html(row, html);
     html_dom_append(list, row);
     html_dom_scroll_to_bottom(list);
@@ -728,9 +729,16 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
     char *html = malloc(16384);
     if (!html) return;
     size_t len = 0;
-    len += (size_t) snprintf(html + len, 16384 - len, "<tr><th>Rank</th>");
-    for (int i = 1; i < stat_count; i++) len += (size_t) snprintf(html + len, 16384 - len, "<th>%s</th>", hud_modes_end_header(stats[i]));
-    len += (size_t) snprintf(html + len, 16384 - len, "<th></th></tr>");
+    // v7 f1917: <th id='endlb_<stat>'> headers and a 20px spacer row
+    len += (size_t) snprintf(html + len, 16384 - len, "<tr><th id='endlb_rank'>Rank</th>");
+    for (int i = 1; i < stat_count; i++) {
+        char id[32];
+        size_t k = 0;
+        for (const char *c = stats[i]; *c && k + 1 < sizeof(id); c++) id[k++] = (char) (*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
+        id[k] = 0;
+        len += (size_t) snprintf(html + len, 16384 - len, "<th id='endlb_%s'>%s</th>", id, hud_modes_end_header(stats[i]));
+    }
+    len += (size_t) snprintf(html + len, 16384 - len, "<th></th></tr><tr height='20px;'></tr>");
 
     const int local_team = hud_local_team(client);
     for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len < 15000; r++) {
@@ -748,11 +756,12 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
                                  r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
         for (int i = 1; i < stat_count; i++) {
             if (!strcmp(stats[i], "name")) {
-                len += (size_t) snprintf(html + len, 16384 - len, "<td><a class='endTableN' href='./social.html?p=profile&q=%s' target='_blank' style='color:%s'>%s</a></td>", name, color, shown_name);
+                len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
+                                         "<a class='endTableN' href='./social.html?p=profile&q=%s' target='_blank' style='color:%s'>%s</a></td>", name, color, shown_name);
             } else {
                 char value[64];
                 hud_modes_end_value(player, hud_modes_end_entry(entry->uid), stats[i], value, sizeof(value));
-                len += (size_t) snprintf(html + len, 16384 - len, "<td>%s</td>", value);
+                len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'>%s</td>", value);
             }
         }
         len += (size_t) snprintf(html + len, 16384 - len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
