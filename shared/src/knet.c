@@ -700,6 +700,9 @@ void knet_conn_flush(KnetConn *conn, const double now, const KnetEmitFn emit, vo
 static NetVirtualSendFn g_net_virtual_send;
 void net_set_virtual_send(const NetVirtualSendFn fn) { g_net_virtual_send = fn; }
 NetVirtualSendFn net_virtual_send(void) { return g_net_virtual_send; }
+static NetVirtualSendFn g_net_loopback_send;
+void net_set_loopback_send(const NetVirtualSendFn fn) { g_net_loopback_send = fn; }
+NetVirtualSendFn net_loopback_send(void) { return g_net_loopback_send; }
 
 // ------------------------------------------------------------------ loss simulation
 static int knet_env_percent(const char *name) {

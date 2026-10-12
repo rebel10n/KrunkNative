@@ -70,6 +70,7 @@ set(SERVER_CORE_SOURCES
     server/src/log.c
     server/src/events.c
     server/src/server_core.c
+    server/src/sandbox.c
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -110,9 +111,10 @@ if (EMSCRIPTEN)
         set(WEB_DIST_DIR ${CMAKE_SOURCE_DIR}/dist/web)
     endif()
 
-    add_executable(client ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
+    add_executable(client ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES}
+        ${SERVER_CORE_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES}) # the offline sandbox server (server_sandbox.h)
     target_compile_definitions(client PRIVATE KRUNKNATIVE_CLIENT)
-    target_include_directories(client PRIVATE client/include)
+    target_include_directories(client PRIVATE client/include server/include)
     target_link_libraries(client PRIVATE freetype cJSON pcg_basic m)
 
     # HTML UI on the web: the browser page is the UI. The C UI logic drives the page's
@@ -292,6 +294,9 @@ else ()
     add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
     target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
     target_link_libraries(${CLIENT_BINARY} PRIVATE glfw freetype Threads::Threads m)
+    # the offline sandbox server (server_sandbox.h): the server core + its no-network backend
+    target_sources(${CLIENT_BINARY} PRIVATE ${SERVER_CORE_STANDALONE_SOURCES})
+    target_link_libraries(${CLIENT_BINARY} PRIVATE kn_server_core)
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
     target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})
@@ -406,6 +411,13 @@ else ()
     target_link_libraries(spawn_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(spawn_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # sandbox_test: the offline sandbox server (server_sandbox.h) over the loopback transport
+    add_executable(sandbox_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/sandbox_test.c)
+    target_link_libraries(sandbox_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(sandbox_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # map_catalog_test: every v3.1.1 map (15 official + 21 community) loads, parses and plays

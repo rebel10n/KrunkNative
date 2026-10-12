@@ -72,7 +72,7 @@ static int net_udp_client_send(const int fd, const uint8_t type, const void *pay
 }
 
 int net_udp_client_is_virtual(const int socket) {
-    return socket >= NET_VIRTUAL_FD_BASE;
+    return socket >= NET_VIRTUAL_FD_BASE && socket < NET_LOOPBACK_FD_BASE; // not the offline sandbox's loopback fds
 }
 
 // net_socket_shutdown() for the virtual fd: end the session from the transport thread.

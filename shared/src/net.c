@@ -40,6 +40,7 @@ static ssize_t net_send_nosigpipe(const int fd, const void *data, const size_t l
 
 int net_send_packet(const int fd, const NetPacketType type, const void *payload, const uint16_t length) {
     if (length > NET_MAX_PAYLOAD) return 0;
+    if (fd >= NET_LOOPBACK_FD_BASE && net_loopback_send()) return net_loopback_send()(fd, (uint8_t) type, payload, length); // in-process sandbox
     if (fd >= NET_VIRTUAL_FD_BASE) { // a UDP (knet) peer: server/src/net_udp.c
         const NetVirtualSendFn send_fn = net_virtual_send();
         return send_fn ? send_fn(fd, (uint8_t) type, payload, length) : 0;

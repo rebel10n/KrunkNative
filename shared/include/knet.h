@@ -217,6 +217,12 @@ int net_packet_channel(uint8_t type);
 typedef int (*NetVirtualSendFn)(int fd, uint8_t type, const void *payload, uint16_t length);
 void net_set_virtual_send(NetVirtualSendFn fn);
 NetVirtualSendFn net_virtual_send(void);
+// In-process loopback descriptors (the client's offline sandbox server, server/src/sandbox.c):
+// fds >= NET_LOOPBACK_FD_BASE go to the loopback sender while one is registered (UDP's
+// virtual fds stay below it: NET_VIRTUAL_FD_BASE + 12-bit generation << 16 + slot).
+#define NET_LOOPBACK_FD_BASE 0x40000000
+void net_set_loopback_send(NetVirtualSendFn fn);
+NetVirtualSendFn net_loopback_send(void);
 
 // ------------------------------------------------------------------ loss simulation
 // KRUNKNATIVE_NET_DROP / _DUP / _REORDER = percent of inbound datagrams dropped,

@@ -26,7 +26,6 @@ const ServerVersion g_server_version = {1, 0, 0};
 ServerTickStats g_server_tick_stats;
 
 Replxx *g_replxx;
-Server *g_server;
 
 // ------------------------------------------------------------------ signals
 //

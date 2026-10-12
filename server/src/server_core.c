@@ -6,6 +6,8 @@
 #include <string.h>
 #include <time.h>
 
+Server *g_server; // server_bin's one lobby, or the client's sandbox (sandbox.c)
+
 // ------------------------------------------------------------------ clock
 
 static double (*g_server_clock)(void);

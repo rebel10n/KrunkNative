@@ -157,7 +157,7 @@ void game_init(Game *game, const int map_index, const int mode_index, const unsi
     game->current_mode_index = mode_to_load;
 
     if (map_changed) {
-        Map *new_map = map_init(game->maps[map_to_load]);
+        Map *new_map = map_init_ex(game->maps[map_to_load], !game->server); // a server's map has no meshes
 
         if (game->map) map_fini(game->map);
         game->map = new_map;

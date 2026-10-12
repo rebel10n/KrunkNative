@@ -313,6 +313,9 @@ void load_default_maps();
 const cJSON **map_list_with_custom(const cJSON*, size_t*);
 
 Map *map_init(const cJSON*);
+// build_meshes 0: no meshes even in the client build (the client's in-process sandbox server,
+// server/src/sandbox.c, plays the map exactly like server_bin: game_init passes !game->server).
+Map *map_init_ex(const cJSON*, int build_meshes);
 // The prefab id of a raw map object (prefabs.prefabs[i || id || 0], unknown ids -> CUBE).
 int map_raw_object_prefab(const cJSON *raw_obj);
 // 1 when map_init makes a map->objects entry for this raw object (p and s arrays, not a BOT).

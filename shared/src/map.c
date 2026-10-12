@@ -312,6 +312,11 @@ static void map_parse_interface(Object *object, const cJSON *raw_obj, const int 
 }
 
 Map *map_init(const cJSON *raw_data) {
+    return map_init_ex(raw_data, 1);
+}
+
+Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
+    (void) build_meshes; // only the client build has meshes
     if (!cJSON_IsObject(raw_data)) return NULL;
     // server/game.ts sanitizeCustomMapJson runs on every map before generate(): pooled
     // "si" sizes become "s", objects without p / s go. Idempotent, and it has to edit the
@@ -403,7 +408,7 @@ Map *map_init(const cJSON *raw_data) {
     }
 
 #ifdef KRUNKNATIVE_CLIENT
-    prefab_begin_map(objects, colors);
+    if (build_meshes) prefab_begin_map(objects, colors);
 #endif
 
     for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
@@ -652,10 +657,12 @@ Map *map_init(const cJSON *raw_data) {
         map_parse_interface(object, raw_obj, prefab_id); // destructibles, interfaces, gates, banks, triggers, check points, teleporters
 
 #ifdef KRUNKNATIVE_CLIENT
-        object->mesh = prefab_init(object, parsed_colors, raw_obj);
-        client_animate_object_texture(object, 0.0f);
-        object->no_vis = object->no_vis || (object->mesh && !((Mesh *) object->mesh)->visible); // + meshes created hidden (objectives)
-        if (object->mesh && !object->active && !object->no_vis) ((Mesh *) object->mesh)->visible = 0; // meshRef.visible = active
+        if (build_meshes) {
+            object->mesh = prefab_init(object, parsed_colors, raw_obj);
+            client_animate_object_texture(object, 0.0f);
+            object->no_vis = object->no_vis || (object->mesh && !((Mesh *) object->mesh)->visible); // + meshes created hidden (objectives)
+            if (object->mesh && !object->active && !object->no_vis) ((Mesh *) object->mesh)->visible = 0; // meshRef.visible = active
+        }
 #endif
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {

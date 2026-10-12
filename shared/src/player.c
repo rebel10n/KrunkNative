@@ -2311,14 +2311,16 @@ void player_shoot(Player *player) {
     // TODO: gamepad rumble?
 
 #ifdef KRUNKNATIVE_CLIENT
-    const float rand_recoil = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * (float) M_PI;
+    if (!player->game->server) { // the view's lean: not on a server's player (the in-process sandbox server)
+        const float rand_recoil = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * (float) M_PI;
 
-    player->recoil.x += player->weapon->recoil_r * sinf(rand_recoil);
-    player->recoil.z += player->weapon->recoil_r * 0.3f * cosf(rand_recoil);
+        player->recoil.x += player->weapon->recoil_r * sinf(rand_recoil);
+        player->recoil.z += player->weapon->recoil_r * 0.3f * cosf(rand_recoil);
 
-    if (player->render_you) {
-        player_feel_recoil(player);
-        player_cancel_inspect(player);
+        if (player->render_you) {
+            player_feel_recoil(player);
+            player_cancel_inspect(player);
+        }
     }
 #endif
     // TODO: muzzle flash & casings
