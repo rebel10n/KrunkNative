@@ -54,8 +54,8 @@
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "#menuWindow top (tabs / search / header)"
+      "max_pct": 14.0,
+      "note": "#menuWindow top (tabs / search / header); .logVersionHed: img/backgrounds/whatsnew.png (1125x360, cover, ~0.53x): ~10% of the photo's pixels differ past fuzz 12 from Chromium's resampling"
     },
     {
       "name": "window-body",

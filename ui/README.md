@@ -62,6 +62,13 @@ the hed_* files and the two SVGs (captures of 2024-11-04 and 2023-11-01), the re
 file's MD5), each pinned by SHA-256. `icon_21` and the cards of weapons 13, 18, 20, 21 and 23-28
 were not served (v7 shows a broken image for them too).
 
+Images v7.1.4 loads from `https://assets.krunker.io/img/` that its tree lacks (the kill streak
+and airdrop package icons `img/streaks/`, zombie perk icons `img/perks/zombie/`, effect icons
+`img/perks/`, death markers `img/death_{1,2}_1.png`, build icons, drop rarities, prop thumbnails,
+flag SVGs, `img/backgrounds/junkyrd_0.png`, ...) come from `tools/ui-import/fetch_live_assets.py`
+(`live_assets.lock`, root `ui`), fetched on 2026-10-12 and pinned by SHA-256. These replace the
+404s the import lists for them.
+
 KrunkNative addition: `css/fonts/kn-symbols.ttf`, a subset (arrows, technical, box
 drawing, blocks, geometric shapes, misc symbols, dingbats) of Adwaita Mono 34.1.0
 Regular made with `pyftsubset --unicodes=U+2190-21FF,U+2300-23FF,U+2500-25FF,U+2600-26FF,U+2700-27BF,U+2B00-2BFF`

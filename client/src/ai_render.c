@@ -198,7 +198,9 @@ static void air_build(Client *client, AIMesh *slot, const GameAI *ai) {
     int asset = 0, ok = 0;
     if (d->asset) {
         ok = asset = air_load_asset(slot, ai, &center_y);
-        // the built-in kinds' v7 assets are not shipped: their v3.1.1 models stand in
+        // the built-in kinds' v7 assets (AI.js user assets 30171e, 50838e, 50578q) are not in the
+        // v7.1.4 tree: tools/ui-import/fetch_live_assets.py installs them from Krunker's live
+        // asset host; without them the v3.1.1 models stand in
         if (!ok && ai->index >= 1 && ai->index <= 3 && !strcmp(d->src, "model")) {
             ok = air_load_stock(slot, ai, ai->index == 2 ? "pumpkin_0" : "ghost_0", 1);
         }

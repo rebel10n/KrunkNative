@@ -41,6 +41,7 @@ __pycache__/
 
 # Build / profiling / editor artifacts
 build/
+!/ui/img/build/
 /tmp/
 *.o
 *.obj

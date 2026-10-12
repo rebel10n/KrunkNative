@@ -98,6 +98,21 @@ noSpin / noSale / limited / limT fixups applied, `thumbnail` dropped), identical
 reference's `skins.json`. Provenance and sizes: `assets/README.md`. Page images
 stay under `ui/img` (menu import above); `assets/` is game content only.
 
+### Krunker live asset hosts (files the v7.1.4 tree lacks)
+
+`fetch_live_assets.py` (`make assets-import-live`, `make assets-check-live`) installs the files
+pinned in `live_assets.lock` (root `assets` -> `assets/`, root `ui` -> `ui/img`; path, source URL,
+sha256, size) that are missing from the tree, downloading them from `assets.krunker.io` /
+`user-assets.krunker.io` (`KN_FETCH_PROXY`, `KN_FETCH_UA`, `KN_FETCH_JOBS` <= 4, `KN_FETCH_DELAY`)
+or taking them from a `--stage` tree, and never overwrites a file. Its `fetch` mode downloads an
+inventory TSV (category, path) into a staging tree, validates each file (Pillow decode, ffprobe,
+OBJ/glTF/GLB/zip structure, no HTML/XML error pages, `.gltf` external URIs followed), records
+url / status / sha256 / size per file and writes the lock from the valid 200s. The inventory
+(every path v7.1.4's data tables, code literals and the 68 catalogue maps reference, plus
+v7's own client and `client_bin` run on each map with request / open-failure logging) is
+regenerated outside the repo. After `install`, deploy `--tags web_assets` (kn_web syncs
+`assets/` to the web host, kn_updates re-indexes it as the launcher's content index).
+
 ## Model viewer page
 
 `viewer_page.py` (step of `import.py`, skip with `--no-viewer`) writes

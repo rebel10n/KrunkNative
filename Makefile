@@ -207,7 +207,7 @@ ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon li
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: assets-import-v7 assets-check-v7 gltf-test viewer-diff frame-yield-test resize-early-test
+.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test resize-early-test
 assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
@@ -216,6 +216,12 @@ assets-check-v7: ## Drift check of assets/ and viewer_store_table.c against Krun
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
 	node tools/ui-import/test_gen_viewer_store.js
+
+assets-import-live: ## Add the files the v7.1.4 tree lacks from Krunker's live asset hosts (tools/ui-import/live_assets.lock; KN_FETCH_PROXY=, never overwrites)
+	$(PYTHON) -I tools/ui-import/fetch_live_assets.py install --assets assets --ui ui
+
+assets-check-live: ## List live_assets.lock files missing from (exit 1) or differing in assets/ and ui/img
+	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --assets assets --ui ui
 
 .PHONY: maps-import-v7 maps-check-v7
 maps-import-v7: ## Import Krunker v7.1.4's 32 official maps into assets/maps/ (+ ui/img/maps thumbnails; tools/maps/import_v7_maps.py)

@@ -23,8 +23,8 @@
 //
 // KN notes: weapons have no altSkin in KN (no mid models, video projection or glow skins), so the
 // upgraded weapon shows its base model. The airdrop overlay icon (game-overlay.js,
-// /img/streaks/package/<icon>.png) is not in the v7.1.4 tree, so v7 itself never draws it; KN
-// doesn't either. The claim progress is the generic #interactProg bar (ui_interact.c).
+// /img/streaks/package/<icon>.png) is not in the v7.1.4 tree, so the reference never draws it;
+// KN doesn't either (the icons are in ui/img now, from tools/ui-import/fetch_live_assets.py). The claim progress is the generic #interactProg bar (ui_interact.c).
 #include <zombies_render.h>
 #include <map_post.h>
 #include <zombies.h>

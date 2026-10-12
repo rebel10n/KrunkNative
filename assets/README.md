@@ -42,6 +42,29 @@ Six GLTF remodels in the v7.1.4 reference are corrupt (invalid base64 buffers: w
 v7.1.4's `public/` is ~1.8 GB for these directories; the v7 import adds ~3500 files
 (~720 MB) to a v3.1.1 tree.
 
+## Krunker live asset host content (what the v7.1.4 tree lacks)
+
+The v7.1.4 `public/` tree is incomplete: the v7 client and the catalogue maps reference ~600
+files it never had. Those that Krunker's CDNs still serve (509 on 2026-10-12, ~36 MB) are pinned
+by sha256 in `tools/ui-import/live_assets.lock` and added with
+
+```sh
+make assets-import-live    # python3 -I tools/ui-import/fetch_live_assets.py install (KN_FETCH_PROXY=... optional)
+make assets-check-live     # lists pinned files missing from assets/ and ui/img
+```
+
+It only adds files (an existing file is never replaced). `assets/` gets 187 files: map user
+assets (`user-assets/<id>/texture.png`, `model.obj|glb` + `model.png`, `sound.mp3` of the zombies
+/ custom / AI maps, `md23677/mod.zip`), the built-in AI models (`user-assets/30171`, `50838`,
+`50578`), weapon-skin / shoe / bundle sounds (`sound/weapon_1_23.mp3`, `shoe_46.mp3`,
+`weapon_upgraded.mp3`, ...), the zombie perk machine textures (`textures/perkmachine_0_5|6`),
+the zombie portal / perk bottle pickups, a few previews and `models/weapons/weapon_2_20.gltf`.
+`ui/img` gets the rest (322 HUD / menu images, committed). Sources: `UTILS.assetsUrl` ->
+`https://assets.krunker.io/<path>`, `UTILS.userAssetsUrl` -> `https://user-assets.krunker.io/<path>`.
+The ~100 references neither host serves (e.g. `sound/weapon_18.mp3`, `land_0`, `ambient_10|13`,
+`limited_5..7`, the Hackusate weapon skin textures) 404 for v7 too. The zombie `.glb` models use
+`EXT_meshopt_compression`, which `client/src/gltf.c` does not decode yet (the v3.1.1 stand-ins stay).
+
 ## Krunker v3.1.1 content (legacy)
 
 The v3.1.1 tree was unpacked from Krunker's `mod.zip`, more specifically:

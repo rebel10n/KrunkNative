@@ -239,12 +239,21 @@ BODY_SKIP = {
     "win-servers": "server rows come from the matchmaker (mocked in the reference, none in the scenario)",
     "win-games": "the game list loads from the API (Loading... in the reference)",
 }
+# window headers with a photo: the engine samples a downscaled background-size: cover image
+# differently from Chromium's filtering (texture-level pixel differences, same placement)
+HEADER_PHOTO = {
+    "win-changelog": (14.0, ".logVersionHed: img/backgrounds/whatsnew.png (1125x360, cover, ~0.53x): "
+                            "~10% of the photo's pixels differ past fuzz 12 from Chromium's resampling"),
+}
 for name, win, extra, note in WINDOWS:
     rc = rects("windows/" + name)
     regs = [r for r in chrome(rc, dimmed=True) if r["name"] in ("login-button", "menu-items", "logo")]
     x, y, w, h = rc["menuWindow"]
     head = min(h, 82)
-    regs.append(R("window-header", pad([x, y, w, head], 2), "text", "#menuWindow top (tabs / search / header)"))
+    photo = HEADER_PHOTO.get(name)
+    regs.append(R("window-header", pad([x, y, w, head], 2), "text",
+                  "#menuWindow top (tabs / search / header)" + ("; " + photo[1] if photo else ""),
+                  max_pct=photo[0] if photo else None))
     if h > head + 4 and extra.get("settingsTab") == 0:
         # General tab: KrunkNative's fifth preset box (Beautiful, ui_settings.c sync_preset_boxes)
         # narrows the row of .setSugBox2 boxes, an intentional difference; the rest of the body

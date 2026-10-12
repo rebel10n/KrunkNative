@@ -13,8 +13,11 @@
 //                    emptied when a new game resets the wave.
 //
 // The zombies end table columns (zombies, downs, rounds) are hud_modes.c's endStats values
-// (NET_PACKET_ZOMBIE_STATS for aiKills / rounds). Not drawn: #zPerksHolder (io_updateZombiePerks
-// shows img/perks/zombie/<perk>.png, which the v7.1.4 tree does not ship).
+// (NET_PACKET_ZOMBIE_STATS for aiKills / rounds).
+//   #zPerksHolder    io_updateZombiePerks (NET_PACKET_PERKS, own player): one .zPerkItem per
+//                    perk with background img/perks/zombie/<perk>.png. Those icons are not in
+//                    the v7.1.4 tree; they come from Krunker's live asset host
+//                    (tools/ui-import/fetch_live_assets.py, ui/img).
 #include <ui_logic.h>
 #include <html_dom.h>
 #include <html_ui.h>
@@ -23,6 +26,7 @@
 #include <string.h>
 
 static int g_hz_wave = -1; // the wave #roundMessage was written for, -1 none
+static char g_hz_perks[64] = "-"; // the perk list #zPerksHolder shows ("-" not written yet)
 
 // writes only what differs from the page (a page reload or hud_ui.c's own writes are picked up)
 static void hz_set_display(const HtmlElem el, const char *value) {
@@ -102,9 +106,32 @@ static void hz_round(const Game *game) {
     g_hz_wave = wave;
 }
 
+// io_updateZombiePerks: rewritten when the own player's perks change
+static void hz_perks(const Client *client) {
+    const Player *me = client->me;
+    char key[sizeof(g_hz_perks)];
+    size_t len = 0;
+    key[0] = 0;
+    const int count = me ? me->perk_count : 0;
+    for (int i = 0; i < count && len + 8 < sizeof(key); i++) len += (size_t) snprintf(key + len, sizeof(key) - len, "%d,", me->perks[i]);
+    if (!strcmp(key, g_hz_perks)) return;
+    const HtmlElem holder = html_dom_by_id("zPerksHolder");
+    if (!holder) return;
+    char html[PLAYER_PERK_MAX * 160 + 1];
+    size_t n = 0;
+    html[0] = 0;
+    for (int i = 0; i < count && n + 160 < sizeof(html); i++)
+        n += (size_t) snprintf(html + n, sizeof(html) - n,
+                               "<div class='zPerkItem' style='background-image: url(&quot;img/perks/zombie/%d.png&quot;)'><span></span></div>",
+                               me->perks[i]);
+    html_dom_set_html(holder, html);
+    snprintf(g_hz_perks, sizeof(g_hz_perks), "%s", key);
+}
+
 void hud_zombies_tick(Client *client) {
     if (!client || !html_ui_available() || !html_ui_is_ready() || !client->game.ready) return;
     hz_powerups(&client->game);
     hz_ammo(client);
     hz_round(&client->game);
+    hz_perks(client);
 }

@@ -146,6 +146,8 @@ static const Expected k_css_url[] = {
     {"../img/acp_0.png", "css/main.css", 638, 208},
     {"../img/acp_1.png", "css/main.css", 532, 300},
     {"../img/acp_2.png", "css/main.css", 638, 208},
+    {"../img/backgrounds/free_kr.png", "css/main.css", 851, 422},   /* live asset host (live_assets.lock) */
+    {"../img/backgrounds/whatsnew.png", "css/main.css", 1125, 360}, /* live asset host (live_assets.lock) */
     {"../img/battlepass/bg_window_2.png", "css/main.css", 1310, 704},
     {"../img/battlepass/clock.png", "css/main.css", 128, 128},
     {"../img/battlepass/lock.png", "css/main.css", 128, 128},
@@ -171,10 +173,10 @@ static const Expected k_css_url[] = {
     {"../textures/weapons/icon_1.png", "css/main.css", 256, 128},
 };
 
-/* Referenced by v7.1.4's main.css but absent from its public/ tree (and so from ui/): must fail. */
+/* Referenced by v7.1.4 (index.js: the rarity 6 drop card) but served by neither its public/ tree
+ * nor Krunker's live asset host (and so absent from ui/): must fail. */
 static const Expected k_missing[] = {
-    {"../img/backgrounds/free_kr.png", "css/main.css", 0, 0},
-    {"../img/backgrounds/whatsnew.png", "css/main.css", 0, 0},
+    {"../img/drops/drop_6.png", "css/main.css", 0, 0},
 };
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -456,7 +458,7 @@ static void test_failures(ImageCache *cache) {
 
     /* failures are cached: the same entry comes back, no second log line */
     const int before = image_cache_count(cache);
-    const ImageEntry *again = image_get(cache, "../img/backgrounds/free_kr.png", "css/main.css");
+    const ImageEntry *again = image_get(cache, k_missing[0].url, k_missing[0].base);
     CHECK(again->failed && image_cache_count(cache) == before, "failed entry not cached");
 
     /* the same file through different spellings is one entry */

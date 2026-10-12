@@ -28,9 +28,9 @@
 //   - v7 bug fixed (doc/v7/player-viewer.md 5.1 item 3): v7 sets life = deathMarkerDur (7) and
 //     subtracts the frame delta in ms, so a marker lasts about one frame. KrunkNative reads the
 //     setting as seconds ("Death Marker Duration (s)"): a marker lasts deathMarkerDur * 1000 ms.
-//   - v7 draws other players' markers with img/death_2_1.png, which is not in v7.1.4's public
-//     tree (only death_0_1.png is): those markers never appear in v7. KrunkNative draws
-//     death_0_1.png for every marker.
+//   - v7 draws your own marker with img/death_0_1.png and other players' with img/death_2_1.png
+//     (game-overlay.js f1566). death_2_1.png is not in v7.1.4's public tree; it comes from
+//     Krunker's live asset host (tools/ui-import/fetch_live_assets.py, ui/img).
 // Both are elements of #inGameUI (below the HUD, scaled with #uiBase like the overlay canvas).
 #include <hud_map.h>
 #include <cpu_canvas.h>
@@ -481,6 +481,7 @@ static void mm_update(Client *client, const double dt) {
 typedef struct {
     float x, y, z;
     int is_you;
+    int img_is_you; // the marker image the element shows: 1 death_0_1, 0 death_2_1, -1 none yet
     double life_ms;
     HtmlElem el;
     int shown;
@@ -524,7 +525,7 @@ static HtmlElem dm_element(DeathMarker *m) {
         if (!g_dm_holder) return 0;
     }
     m->el = html_dom_create("img", NULL);
-    html_dom_set_attr(m->el, "src", "./img/death_0_1.png");
+    m->img_is_you = -1;
     html_dom_set_style(m->el, "position", "absolute");
     html_dom_set_style(m->el, "transform", "translate(-50%, -50%)");
     html_dom_set_display(m->el, "none");
@@ -560,6 +561,10 @@ static void dm_tick(Client *client, const double dt, const int drawn) {
         }
         const HtmlElem el = dm_element(m);
         if (!el) continue;
+        if (m->img_is_you != (m->is_you != 0)) { // "/img/death_" + (isYou ? 0 : 2) + "_1.png"
+            m->img_is_you = m->is_you != 0;
+            html_dom_set_attr(el, "src", m->is_you ? "./img/death_0_1.png" : "./img/death_2_1.png");
+        }
         // near the crosshair while aiming: deathMarkerAdsOpac
         const int ads = sx >= 0.45 && sx <= 0.55 && sy >= 0.4 && sy <= 0.6 && aim != 0.0f;
         const double opacity = setting_num(ads ? "deathMarkerAdsOpac" : "deathMarkerOpac", 1.0);
