@@ -16,6 +16,8 @@
 // single world-space mesh (Krunker's meshGroup), so there are two draws per map.
 #include <gl.h>
 #include <ambient.h>
+#include <map_catalog.h>
+#include <prefabs.h>
 #include <render_settings.h>
 #include <math.h>
 #include <stdio.h>
@@ -352,35 +354,21 @@ static void ao_add_pending(AoBuild *build) {
 
 // ---------------------------------------------------------------- collision boxes
 
+// v7.1.4 prefabs.js "complex" (addMesh / addGate / addTrigger ... boxes are complexMesh),
+// the prefabs that fall through to manager.addMesh (models) and "noDetail" (map-G: from the
+// generated v7 prefab table, shared/include/prefabs.h, instead of the v3.1.1 lists)
 static int ao_prefab_complex(const int prefab) {
-    // 29.js prefabs with complex: true (their addMesh boxes are complexMesh)
-    switch (prefab) {
-        case PREFAB_VEHICLE: case PREFAB_TREE: case PREFAB_CONE: case PREFAB_GRASS: case PREFAB_GATE:
-        case PREFAB_TEDDY: case PREFAB_TRIGGER: case PREFAB_DEPOSIT_BOX: case PREFAB_LIGHT_CONE:
-        case PREFAB_PALLET: case PREFAB_EVENT: case PREFAB_CUSTOM_ASSET: case PREFAB_E_BARREL:
-        case PREFAB_SHOWCASE: case PREFAB_BOT: case PREFAB_RUNE:
-            return 1;
-        default:
-            return 0;
-    }
+    return prefab_has_flag(prefab, PF_COMPLEX) || prefab == PREFAB_GATE || prefab == PREFAB_TRIGGER || prefab == PREFAB_DEPOSIT_BOX ||
+           prefab == PREFAB_LIGHT_CONE || prefab == PREFAB_CUSTOM_ASSET || prefab == PREFAB_SHOWCASE || prefab == PREFAB_BOT || prefab == PREFAB_RUNE;
 }
 
 static int ao_prefab_is_mesh(const int prefab) {
-    // 93.js: prefabs that fall through to manager.addMesh (models)
-    switch (prefab) {
-        case PREFAB_CRATE: case PREFAB_BARREL: case PREFAB_VEHICLE: case PREFAB_STACK: case PREFAB_TREE:
-        case PREFAB_CONE: case PREFAB_CONTAINER: case PREFAB_GRASS: case PREFAB_CONTAINER_R:
-        case PREFAB_ACID_BARREL: case PREFAB_DOOR: case PREFAB_WINDOW: case PREFAB_TEDDY: case PREFAB_CARD_B:
-        case PREFAB_PALLET: case PREFAB_POLICE: case PREFAB_CAGE: case PREFAB_E_BARREL: case PREFAB_GHOST:
-        case PREFAB_PUMPKIN: case PREFAB_SKELETON: case PREFAB_KNIGHT:
-            return 1;
-        default:
-            return 0;
-    }
+    const PrefabInfo *info = prefab_info(prefab);
+    return info && info->geometry == PREFAB_GEO_MODEL && prefab != PREFAB_EVENT;
 }
 
 static int ao_prefab_no_detail(const int prefab) {
-    return prefab == PREFAB_GRASS || prefab == PREFAB_WINDOW || prefab == PREFAB_TEDDY;
+    return prefab_has_flag(prefab, PF_NODETAIL);
 }
 
 // The manager.objects boxes that can take part (others are skipped by the loop anyway).
@@ -729,6 +717,18 @@ void ambient_load_map(Scene *scene, const Map *map) {
 
     const ClientRenderSettings *settings = client_render_settings();
     if (settings->no_textures) return; // objects.js addAmbient: nothing with noTex
+
+    // v7.1.4 map.js generate: AO planes only when oldAO || groupData.official (the map's
+    // "official" key) || (!hasLM && custom), custom = a map outside the official list or
+    // mapIndex 0 not named "Burg" (a custom game's maps = [map]). The v7 official maps ship
+    // baked lightmaps and get none unless they set oldAO (freight, lagoon); the v3.1.1 maps,
+    // now community maps, keep them. (map-logic.md decision 11 predates the v7 catalogue:
+    // KN's official maps are v7's now, so the v7 gate applies as is.)
+    const int index = map_catalog_index_of_json(map->raw_data);
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(map->raw_data, "name"));
+    const int custom = index < 0 || index >= MAP_CATALOG_OFFICIAL_COUNT || (index == 0 && (!name || strcmp(name, "Burg")));
+    const int official_key = cJSON_IsTrue(cJSON_GetObjectItem(map->raw_data, "official"));
+    if (!map->old_ao && !official_key && !(!map->has_lightmaps && custom)) return;
 
     const cJSON *objects = cJSON_GetObjectItem(map->raw_data, "objects");
     if (!cJSON_IsArray(objects)) return;

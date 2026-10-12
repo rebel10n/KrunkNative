@@ -2,7 +2,8 @@
 #include <math.h>
 #include <string.h>
 
-void camera_update_projection_matrix(Camera *camera, const float aspect) {
+void camera_update_projection_matrix(Camera *camera, float aspect) {
+    if (camera->aspect_override > 0.0f) aspect = camera->aspect_override; // map-G: ocean mirror pass
     if (camera->ortho > 0.0f) {
         // orthographic (row-major like the perspective matrix below): x/y to the half extents,
         // z from near..far to -1..1

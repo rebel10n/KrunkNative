@@ -1,29 +1,41 @@
-// Krunker v3.1.1 sky dome port (src/libs/SkyDome.js + render.js init/render).
+// Krunker v7.1.4 sky dome port (src/libs/SkyDome.js + render.js init/render).
 //
 // JS reference:
-//   if (map.skyDome && mode && mode.skyCol == null) skyDome = SkyDome.fromConfig(...)
-//   SphereGeometry(50, 32, 32); K = 1 - (y - bbox.min.y) / bbox.size.y;
-//   stops {0: col0, 0.5: col1, 1: col2}, vertex colour = lerp within the stop pair;
-//   MeshBasicMaterial({vertexColors, side: BackSide, depthWrite: false, transparent: true});
-//   each frame: camera world position -> skyDome.position, render backgroundScene first.
-// KrunkNative has no mode with a `skyCol` override (only FFA), so the mode test is
-// always satisfied here.
+//   if (map.skyDome && mode && mode.skyCol == null) skyDome = SkyDome.fromConfig(map, render)
+//   SphereGeometry(50, 32, 16), BackSide, depthWrite false, transparent, colour #ffffff, in the
+//   backgroundScene (no lights, no fog), drawn first each frame at the camera position.
+//   Material: MeshBasicMaterial, or StrippedLambertMaterial with an emissive colour when
+//   skyDomeTex && (skyDomeEmisTex ? #ffffff : skyDomeEmis unless #000000): with no light in the
+//   background scene only the emissive part shows.
+//   map: skyDomeTex ? (skyDomeTexA ? "<id>/texture" (user asset) : "sky_6") : none, scrolled by
+//   skyDomeMovT / 1e6 per ms along skyDomeMovD (0: u); emissiveMap "<skyDomeEmisTex>/texture",
+//   else "<src>_e".
+//   onBeforeCompile: after the whole fragment shader (tone mapping and output encoding
+//   included) gl_FragColor.rgb *= getGradient(uv): mix(mix(col2, col1, v / 0.5),
+//   mix(col1, col0, (v - 0.5) / 0.5), step(0.5, v)) with v the sphere's uv.y (1 at the top).
+// The ENVIRONMENT_ZONE records carry the same keys (map_environment.c reloads the dome).
 #include <gl.h>
 #include <client.h>
 #include <sky.h>
 #include <render_settings.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define SKY_RADIUS 50.0f
-#define SKY_SEGMENTS 32
-#define SKY_VERTEX_FLOATS 8 // position(3) + uv(2) + colour(3)
+#define SKY_WIDTH_SEGMENTS 32
+#define SKY_HEIGHT_SEGMENTS 16
+#define SKY_VERTEX_FLOATS 5 // position(3) + uv(2)
+#define SKY_EMISSIVE_TEXTURE_UNIT 2
 
 typedef struct {
     int enabled;
     int textured;
     unsigned int texture;
+    int emissive;          // StrippedLambert: only emissive * emissiveMap shows
+    vec3 emissive_color;
+    unsigned int emissive_texture;
     int mov_dir;      // skyDomeMovD: 0 scrolls U, anything else scrolls V
     float mov_speed;  // skyDomeMovT / 1e6 (offset per millisecond)
     float tex_offset;
@@ -63,30 +75,20 @@ static int json_truthy(const cJSON *json) {
     return 1;
 }
 
-// Gradient position K -> colour, matching the stop loop in SkyDome.js
-// (a value on a shared stop takes the later segment, which yields the same colour).
-static vec3 sky_gradient(const float k) {
-    const float stops[3] = {0.0f, 0.5f, 1.0f};
-    vec3 out = sky.stops[0];
-
-    for (int n = 0; n < 2; n++) {
-        if (k >= stops[n] && k <= stops[n + 1]) {
-            const float t = (k - stops[n]) / (stops[n + 1] - stops[n]);
-            out.x = sky.stops[n].x + (sky.stops[n + 1].x - sky.stops[n].x) * t;
-            out.y = sky.stops[n].y + (sky.stops[n + 1].y - sky.stops[n].y) * t;
-            out.z = sky.stops[n].z + (sky.stops[n + 1].z - sky.stops[n].z) * t;
-        }
-    }
-
-    return out;
+// parseInt(value || 0) of an asset id ("12345" or "12345e"), 0 none
+static int sky_asset_id(const cJSON *json) {
+    if (cJSON_IsNumber(json)) return (int) cJSON_GetNumberValue(json);
+    if (cJSON_IsString(json)) return atoi(cJSON_GetStringValue(json));
+    return 0;
 }
 
-// THREE.SphereBufferGeometry(50, 32, 32) (r121) with per-vertex gradient colours.
+// THREE.SphereGeometry(50, 32, 16): rows from the top pole, u = ix / 32 (+-0.5 / 32 at the
+// poles), v = 1 - iy / 16.
 static void sky_build_geometry(void) {
-    const int row = SKY_SEGMENTS + 1;
-    const int vertex_count = row * row;
+    const int row = SKY_WIDTH_SEGMENTS + 1;
+    const int vertex_count = row * (SKY_HEIGHT_SEGMENTS + 1);
     float *vertices = malloc(sizeof(float) * SKY_VERTEX_FLOATS * vertex_count);
-    unsigned int *indices = malloc(sizeof(unsigned int) * SKY_SEGMENTS * SKY_SEGMENTS * 6);
+    unsigned int *indices = malloc(sizeof(unsigned int) * SKY_WIDTH_SEGMENTS * SKY_HEIGHT_SEGMENTS * 6);
 
     if (!vertices || !indices) {
         free(vertices);
@@ -94,14 +96,14 @@ static void sky_build_geometry(void) {
         return;
     }
 
-    for (int iy = 0; iy <= SKY_SEGMENTS; iy++) {
-        const float v = (float) iy / SKY_SEGMENTS;
+    for (int iy = 0; iy <= SKY_HEIGHT_SEGMENTS; iy++) {
+        const float v = (float) iy / SKY_HEIGHT_SEGMENTS;
         float u_offset = 0.0f;
-        if (iy == 0) u_offset = 0.5f / SKY_SEGMENTS;
-        else if (iy == SKY_SEGMENTS) u_offset = -0.5f / SKY_SEGMENTS;
+        if (iy == 0) u_offset = 0.5f / SKY_WIDTH_SEGMENTS;
+        else if (iy == SKY_HEIGHT_SEGMENTS) u_offset = -0.5f / SKY_WIDTH_SEGMENTS;
 
-        for (int ix = 0; ix <= SKY_SEGMENTS; ix++) {
-            const float u = (float) ix / SKY_SEGMENTS;
+        for (int ix = 0; ix <= SKY_WIDTH_SEGMENTS; ix++) {
+            const float u = (float) ix / SKY_WIDTH_SEGMENTS;
             const float phi = u * 2.0f * (float) M_PI;
             const float theta = v * (float) M_PI;
             float *out = &vertices[(iy * row + ix) * SKY_VERTEX_FLOATS];
@@ -111,18 +113,12 @@ static void sky_build_geometry(void) {
             out[2] = SKY_RADIUS * sinf(phi) * sinf(theta);
             out[3] = u + u_offset;
             out[4] = 1.0f - v;
-
-            // Bounding box spans y = -50..50 (the poles), so K = 1 - (y + 50) / 100.
-            const vec3 color = sky_gradient(1.0f - (out[1] + SKY_RADIUS) / (2.0f * SKY_RADIUS));
-            out[5] = color.x;
-            out[6] = color.y;
-            out[7] = color.z;
         }
     }
 
     int index_count = 0;
-    for (int iy = 0; iy < SKY_SEGMENTS; iy++) {
-        for (int ix = 0; ix < SKY_SEGMENTS; ix++) {
+    for (int iy = 0; iy < SKY_HEIGHT_SEGMENTS; iy++) {
+        for (int ix = 0; ix < SKY_WIDTH_SEGMENTS; ix++) {
             const unsigned int a = iy * row + ix + 1;
             const unsigned int b = iy * row + ix;
             const unsigned int c = (iy + 1) * row + ix;
@@ -133,7 +129,7 @@ static void sky_build_geometry(void) {
                 indices[index_count++] = b;
                 indices[index_count++] = d;
             }
-            if (iy != SKY_SEGMENTS - 1) {
+            if (iy != SKY_HEIGHT_SEGMENTS - 1) {
                 indices[index_count++] = b;
                 indices[index_count++] = c;
                 indices[index_count++] = d;
@@ -158,8 +154,7 @@ static void sky_build_geometry(void) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void *) 0);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void *) (sizeof(float) * 3));
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, (void *) (sizeof(float) * 5));
+    glDisableVertexAttribArray(2);
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -169,9 +164,24 @@ static void sky_build_geometry(void) {
     free(indices);
 }
 
+static unsigned int sky_texture(const char *relative) {
+    char *path = concat(assets_path(), relative);
+    if (!path) return 0;
+    FILE *f = ensure_asset_file(path) ? fopen(path, "rb") : NULL;
+    unsigned int texture = 0;
+    if (f) {
+        fclose(f);
+        texture = load_texture(path); // cached by path; owned by the texture cache
+    }
+    free(path);
+    return texture;
+}
+
 void sky_load(const cJSON *map_raw) {
     sky.enabled = 0;
     sky.textured = 0;
+    sky.emissive = 0;
+    sky.emissive_texture = 0;
     sky.tex_offset = 0.0f;
     sky.mov_speed = 0.0f;
     sky.mov_dir = 0;
@@ -192,10 +202,33 @@ void sky_load(const cJSON *map_raw) {
     sky.stops[2] = sky_color_or_default(cJSON_GetObjectItem(map_raw, "skyDomeCol2"), 2);
 
     if (json_truthy(cJSON_GetObjectItem(map_raw, "skyDomeTex"))) {
-        char *path = concat(assets_path(), "textures/sky_6.png");
-        sky.texture = load_texture(path); // cached by path; owned by the texture cache
-        free(path);
+        char src[64], relative[96];
+        const int asset = sky_asset_id(cJSON_GetObjectItem(map_raw, "skyDomeTexA"));
+        if (asset) snprintf(src, sizeof(src), "user-assets/%d/texture", asset);
+        else snprintf(src, sizeof(src), "textures/sky_6");
+        snprintf(relative, sizeof(relative), "%s.png", src);
+        sky.texture = sky_texture(relative);
         sky.textured = sky.texture != 0;
+
+        // emissive: skyDomeEmisTex ? #ffffff : skyDomeEmis (not #000000)
+        const int emis_tex = sky_asset_id(cJSON_GetObjectItem(map_raw, "skyDomeEmisTex"));
+        const cJSON *emis = cJSON_GetObjectItem(map_raw, "skyDomeEmis");
+        vec4 emissive = {0.0f, 0.0f, 0.0f, 1.0f};
+        int has_emissive = 0;
+        if (emis_tex) {
+            emissive = (vec4) {1.0f, 1.0f, 1.0f, 1.0f};
+            has_emissive = 1;
+        } else if (cJSON_IsString(emis) && cJSON_GetStringValue(emis)[0] && strcmp(cJSON_GetStringValue(emis), "#000000")) {
+            parse_hex_color(cJSON_GetStringValue(emis), &emissive);
+            has_emissive = 1;
+        }
+        if (has_emissive) {
+            sky.emissive = 1;
+            sky.emissive_color = (vec3) {emissive.x, emissive.y, emissive.z};
+            if (emis_tex) snprintf(relative, sizeof(relative), "user-assets/%d/texture.png", emis_tex);
+            else snprintf(relative, sizeof(relative), "%s_e.png", src);
+            sky.emissive_texture = sky_texture(relative);
+        }
 
         // movT: D != null && D / 1000000 ; movD: skyDomeMovD (0 / absent = U axis).
         const cJSON *mov_t = cJSON_GetObjectItem(map_raw, "skyDomeMovT");
@@ -239,11 +272,26 @@ void sky_render(Camera *camera) {
         sky.mov_dir == 0 ? sky.tex_offset : 0.0f, sky.mov_dir == 0 ? 0.0f : sky.tex_offset);
     glUniform1i(glGetUniformLocation(sky.program, "use_texture"), sky.textured);
     glUniform1i(glGetUniformLocation(sky.program, "tex"), 0);
+    glUniform1i(glGetUniformLocation(sky.program, "emissive_mode"), sky.emissive);
+    glUniform3f(glGetUniformLocation(sky.program, "emissive_color"), sky.emissive_color.x, sky.emissive_color.y, sky.emissive_color.z);
+    glUniform1i(glGetUniformLocation(sky.program, "use_emissive_map"), sky.emissive_texture != 0);
+    glUniform1i(glGetUniformLocation(sky.program, "emissive_map"), SKY_EMISSIVE_TEXTURE_UNIT);
+    glUniform3f(glGetUniformLocation(sky.program, "first_color"), sky.stops[0].x, sky.stops[0].y, sky.stops[0].z);
+    glUniform3f(glGetUniformLocation(sky.program, "middle_color"), sky.stops[1].x, sky.stops[1].y, sky.stops[1].z);
+    glUniform3f(glGetUniformLocation(sky.program, "end_color"), sky.stops[2].x, sky.stops[2].y, sky.stops[2].z);
+    glUniform1i(glGetUniformLocation(sky.program, "tone_mapping"), g_render_lighting.tone_mapping);
+    glUniform1f(glGetUniformLocation(sky.program, "tone_mapping_exposure"), g_render_lighting.tone_mapping_exposure);
+    glUniform1i(glGetUniformLocation(sky.program, "output_encoding"), g_render_lighting.output_encoding);
 
     if (sky.textured) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, sky.texture);
         g_active_texture = sky.texture;
+    }
+    if (sky.emissive_texture) {
+        glActiveTexture(GL_TEXTURE0 + SKY_EMISSIVE_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, sky.emissive_texture);
+        glActiveTexture(GL_TEXTURE0);
     }
 
     // BackSide + depthWrite:false + transparent (normal blending) over a cleared depth buffer.

@@ -66,6 +66,13 @@ typedef struct {
     float fog_far;
     unsigned char enabled:1;
     unsigned char fog_enabled:1;
+    // map-G: Krunker v7.1.4 renderer output state (render.js init: toneMapping,
+    // toneMappingExposure, outputEncoding, useLegacyLights = !correctLights), applied by
+    // basic.frag after lighting and before fog like three.js r150. Zero = v3.1.1 output.
+    unsigned char correct_lights:1;  // physical light units / falloff (three useLegacyLights false)
+    int tone_mapping;                // 0 none, 1 Linear, 2 Reinhard, 3 Cineon, 4 ACESFilmic (config.toneTypes)
+    float tone_mapping_exposure;     // renderer.toneMappingExposure (1)
+    int output_encoding;             // 0/2 linear, 1 sRGB (config.encodingTypes)
 } RenderLighting;
 
 extern RenderLighting g_render_lighting;
@@ -76,6 +83,7 @@ typedef struct {
     float fov;
     float zoom;
     float ortho; // > 0: orthographic projection, half the view height in world units (editor renders); 0 = perspective
+    float aspect_override; // map-G: > 0 replaces the viewport aspect (ocean mirror pass: the main camera's projection on a square target)
 
     vec3 position;
     vec3 rotation;
@@ -209,6 +217,14 @@ typedef struct {
     vec2 texture_offset;      // in repeat units (frame index / scroll progress, main.c)
     vec2 texture_base_offset; // texture.offset from the map (tox/toy), added as-is
     unsigned int texture;
+
+    // map-G: Krunker v7.1.4 map material inputs (prefab.c)
+    float texture_rotation;   // three.js texture.rotation in radians ("tro" degrees), about uv (0, 0)
+    int texture_srgb;         // "ten" 1: the texture is sRGBEncoding, decoded to linear when sampled
+    int cull_front;           // three.js BackSide ("rs" 1): front faces culled (double_sided must be 0)
+    int sprite;               // THREE.Sprite / "msp": the XY unit quad always faces the camera (basic.vert)
+    unsigned int light_map;   // three.js lightMap (user asset "l" flag, "<asset>_l"), read with the mesh UVs
+    float light_map_intensity; // lightMapIntensity (1.5)
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
@@ -216,6 +232,7 @@ BasicMaterial *basic_material_init();
 
 // Texture unit of BasicMaterial.emissive_texture (unit 0: base map, 1: shadow map).
 #define BASIC_EMISSIVE_TEXTURE_UNIT 2
+#define BASIC_LIGHT_MAP_TEXTURE_UNIT 3 // BasicMaterial.light_map (map-G)
 #define BASIC_MAX_POINT_LIGHTS 16 // basic.frag MAX_POINT_LIGHTS
 
 // v3.1.1 POINT_LIGHT objects (94.js addPointLight -> THREE.PointLight), lit only with the
@@ -228,6 +245,44 @@ typedef struct {
 } BasicPointLight;
 
 void basic_material_set_point_lights(const BasicPointLight *lights, int count);
+
+// map-G: the forward light list of basic.frag (Krunker v7.1.4 map lights, KrunkScript SCENE
+// lights): three.js r150 PointLight / SpotLight / DirectionalLight / RectAreaLight. Which
+// material types see which lights follows three.js: Lambert and Phong take point, spot and
+// directional lights, only Standard (lighting 3) takes rect-area lights; the v7 lighting-setting
+// gates of who may add a light (render.js addPointLight: lighting >= 2, ...) stay with the caller.
+// Colours are the hex channels / 255 (no sRGB decode: three r150 legacy colour management).
+// Rect-area lights only light diffuse (three's LTC form factor; no LTC specular, documented).
+#define BASIC_HAVE_LIGHT_LIST 1
+#define BASIC_MAX_LIGHTS 16 // basic.frag MAX_LIGHTS (point lights of basic_material_set_point_lights included)
+typedef enum {
+    BASIC_LIGHT_POINT,
+    BASIC_LIGHT_SPOT,
+    BASIC_LIGHT_DIRECTIONAL,
+    BASIC_LIGHT_RECT,
+} BasicLightType;
+
+typedef struct {
+    BasicLightType type;
+    int visible;
+    vec3 color;
+    float intensity;
+    float distance;   // point / spot cutoff (0 = infinite)
+    float decay;      // point / spot
+    float angle;      // spot cone half angle, radians
+    float penumbra;   // spot 0..1
+    vec3 position;
+    vec3 target;      // spot / directional: aimed from position at target
+    float width, height; // rect full size
+    vec3 rotation;    // rect: rotateY(rotation.y) rotateX(rotation.x) rotateZ(rotation.z) (render.js addRectAreaLight)
+} BasicLight;
+
+int basic_lights_add(const BasicLight *light);              // handle > 0, 0 = list full
+// map-G: a world-space clip plane for every BasicMaterial draw (the ocean mirror pass: three.js
+// Water's oblique near plane), fragments with dot(n, p) + d < 0 are discarded; NULL = off.
+void basic_material_set_clip_plane(const float plane[4]);
+void basic_lights_update(int handle, const BasicLight *light);
+void basic_lights_remove(int handle);
 
 typedef enum {
     ROTATION_ORDER_INTRINSIC,
@@ -358,6 +413,7 @@ void scene_render(const Scene*, Camera*);
 // per-draw defaults (no culling, normal alpha blending, depth writes on); scene_render()
 // only issues the GL calls for state that differs from the previous draw.
 void scene_draw_state(int cull_back, int additive_blend, int depth_write);
+void scene_draw_cull_front(void); // map-G: after scene_draw_state(1, ...): three.js BackSide (cull front faces)
 void scene_fini(Scene*);
 
 typedef struct {
@@ -711,3 +767,4 @@ Geometry *create_ramp_geo();
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);
 void prefab_begin_map(const cJSON *objects, const cJSON *colors); // per-map prefab state (shared model materials, the raw objects) before prefab_init()
+vec4 prefab_raw_color(const cJSON *raw_obj, const vec4 *colors); // map-G: the c / ci colour of a raw object (white when absent)

@@ -522,9 +522,14 @@ static void check_tables(void) {
     float m[9];
     map_object_rotation(&plane, m);
     CHECK(fabsf(m[2] - 0.0f) < 1e-6f && fabsf(m[5] - 1.0f) < 1e-6f && fabsf(m[8]) < 1e-6f, "plane normal up");
-    Object cube = {.prefab = PREFAB_CUBE, .rotation = {(float) M_PI / 2.0f, 0.0f, 0.0f}}; // yR = r0: about Y
+    // "yR" = r0, but addCube does rotation.set(yR, xR, zR): r0 is the Euler x angle
+    Object cube = {.prefab = PREFAB_CUBE, .rotation = {(float) M_PI / 2.0f, 0.0f, 0.0f}};
     map_object_rotation(&cube, m);
-    CHECK(fabsf(m[4] - 1.0f) < 1e-6f && fabsf(m[2] - 1.0f) < 1e-6f, "CUBE r0 rotates about Y");
+    CHECK(fabsf(m[0] - 1.0f) < 1e-6f && fabsf(m[7] - 1.0f) < 1e-6f, "CUBE r0 rotates about X");
+    // RECTAREA_LIGHT: rotateY(r2) rotateX(r0) rotateZ(r1) (Euler YXZ)
+    Object rect = {.prefab = PREFAB_RECTAREA_LIGHT, .rotation = {0.0f, 0.0f, (float) M_PI / 2.0f}};
+    map_object_rotation(&rect, m);
+    CHECK(fabsf(m[4] - 1.0f) < 1e-6f && fabsf(m[2] - 1.0f) < 1e-6f, "RECTAREA_LIGHT r2 rotates about Y");
     Object pad = {.prefab = PREFAB_BOOST_PAD, .rotation = {(float) M_PI / 2.0f, 0.0f, 0.0f}}; // v7 xR = r0: about X
     map_object_rotation(&pad, m);
     CHECK(fabsf(m[0] - 1.0f) < 1e-6f && fabsf(m[7] - 1.0f) < 1e-6f, "BOOST_PAD r0 rotates about X (v7 order)");

@@ -137,9 +137,16 @@ void menu_view_camera(Client *client, const float delta) {
     if (!me) {
         // No player yet (or a new round): CONTROLS.moveCam(map camPos) + rotateCam(menuCameraYaw, 0, 0).
         menu_view_reset();
-        g_view.menu_yaw = fmodf(g_view.menu_yaw + delta * 1000.0f * MENU_CAM_YAW_RATE, 2.0f * (float) M_PI);
-        client->camera.position = client->game.map->camera_position;
-        client->camera.rotation = (vec3) {0.0f, g_view.menu_yaw, 0.0f};
+        const Map *map = client->game.map;
+        client->camera.position = map->camera_position;
+        if (map->camera_static) {
+            // v7.1.4 camPos[3] (hasStaticMenuCamera): the pose of rotateCam(camPos[5], camPos[4],
+            // camPos[6]) stays (rotation.y = [5], x = [4], z = [6]); no menu yaw (map-G)
+            client->camera.rotation = map->camera_rotation;
+        } else {
+            g_view.menu_yaw = fmodf(g_view.menu_yaw + delta * 1000.0f * MENU_CAM_YAW_RATE, 2.0f * (float) M_PI);
+            client->camera.rotation = (vec3) {0.0f, g_view.menu_yaw, 0.0f};
+        }
         client->camera.zoom = 1.0f;
         return;
     }

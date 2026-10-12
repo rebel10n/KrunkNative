@@ -16,6 +16,9 @@
 void shadow_load_map(const Map *map);
 // Drops the caster list (the meshes are freed with the map).
 void shadow_unload_map(void);
+// map-G: re-aim the sun camera after an ENVIRONMENT_ZONE swap (-1 = the map's own shadowR /
+// shadowD / lightD), with the direction already in g_render_lighting.
+void shadow_environment(int shadow_r, int shadow_d, float light_d);
 // Renders the shadow map if it is out of date. Restores framebuffer, viewport,
 // program, VAO, cull/depth/blend state.
 void shadow_update(void);

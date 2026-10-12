@@ -724,22 +724,33 @@ void map_object_rotation(const Object *object, float out[9]) {
     const vec3 r = object ? object->rotation : (vec3) {0};
     switch (object ? (int) object->prefab : -1) {
         case PREFAB_PLANE: case PREFAB_BILLBOARD: case PREFAB_SIGN: case PREFAB_LIQUID: case PREFAB_SPRITE:
-        case PREFAB_LIGHT_BAR: case PREFAB_SPRAY: case PREFAB_LEADERBOARD:
+        case PREFAB_LIGHT_BAR: case PREFAB_SPRAY: case PREFAB_LEADERBOARD: case PREFAB_RUNE:
             // render.js similateRot: parent rotateX(r0) rotateY(r1) rotateZ(r2), child rotateX(-PI/2)
+            // (RUNE too: map.js passes r[0..2] to addFixedPlane; map-G fix, it was unrotated)
             x = r.x, y = r.y, z = r.z;
             plane = 1;
-            break;
-        case PREFAB_RUNE:
-            plane = 1; // addFixedPlane with no rotation
             break;
         case PREFAB_BOOST_PAD:
             x = r.x, y = r.y, z = r.z; // xR = r0, yR = r1, zR = r2
             break;
-        case PREFAB_RECTAREA_LIGHT:
-            x = r.z, y = r.x, z = r.y; // addRectAreaLight(..., r[2], r[0], r[1])
-            break;
+        case PREFAB_RECTAREA_LIGHT: {
+            // render.js addRectAreaLight(..., r[2], r[0], r[1]): rotateY(r2) rotateX(r0) rotateZ(r1),
+            // i.e. Euler "YXZ" R = Ry(r2) * Rx(r0) * Rz(r1) (map-G fix: was XYZ(r2, r0, r1))
+            const float a = r.x, b = r.y, c = r.z; // r0, r1, r2
+            const float ca = cosf(a), sa = sinf(a), cb = cosf(b), sb = sinf(b), cc = cosf(c), sc = sinf(c);
+            const float yxz[9] = {
+                cc * cb + sc * sa * sb, sc * sa * cb - cc * sb, sc * ca,
+                ca * sb, ca * cb, -sa,
+                cc * sa * sb - sc * cb, sb * sc + cc * sa * cb, cc * ca,
+            };
+            memcpy(out, yxz, sizeof(yxz));
+            return;
+        }
         default:
-            x = r.y, y = r.x, z = r.z; // yR = r0, xR = r1, zR = r2
+            // map.js "yR: r[0], xR: r[1], zR: r[2]", but the builders call mesh.rotation.set(yR, xR, zR)
+            // (render.js addCube / addCylinder / addCone / addSphere) and loadMesh copies the r array
+            // into rotation.x/y/z, so the Euler is XYZ (r0, r1, r2) (map-G fix: was (r1, r0, r2))
+            x = r.x, y = r.y, z = r.z;
             break;
     }
     const float cx = cosf(x), sx = sinf(x), cy = cosf(y), sy = sinf(y), cz = cosf(z), sz = sinf(z);

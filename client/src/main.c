@@ -14,6 +14,9 @@
 #include <map_post.h>
 #include <sky.h>
 #include <shadow.h>
+#include <map_environment.h> // v7 environment zones, tone mapping, ocean (map_environment.c)
+#include <ocean.h>
+#include <hud_gui.h> // map "gui" custom HUD (ui/hud_gui.c)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -205,6 +208,7 @@ static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
 
     glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
     sky_load(mode_sky ? NULL : raw); // renderer.init: no sky dome when the mode sets skyCol
+    map_environment_map_loaded(map, mode); // v7 toneMapping / outputEncoding / correctLights, ocean, zone -1 (map_environment.c)
 }
 
 // CONTROLS.skipScroll (index.js b9): an input frame that carried a wheel step swallows the
@@ -777,6 +781,8 @@ void client_unload_map(Client *client) {
 
     shadow_unload_map();
     map_post_unload(client->scene);
+    map_environment_unload(); // ocean, v7 output state (map_environment.c)
+    hud_gui_clear();          // map "gui" elements (ui/hud_gui.c)
 
     for (size_t i = 0; i < client->game.map->object_count; i++) {
         const Object *object = client->game.map->objects[i];
@@ -1259,10 +1265,20 @@ void client_animate_object_texture(Object *object, const float now) {
     BasicMaterial *material = (BasicMaterial *) mesh->material;
 
     if (tex_anim->frames) {
-        const int frame = (int) (fmodf(now, (float) tex_anim->frames * tex_anim->frame_time) / tex_anim->frame_time);
+        // v7 render.js loadTexture / frameMats: a sheet of numX = min(10, frames) columns and
+        // numY = ceil(frames / 10) rows (0: one row), frame `cur` at offset (cur % numX / numX,
+        // (numY - floor(cur / numX) - 1) / numY); frameT 0 keeps the first frame
+        const int frames = tex_anim->frames;
+        const int columns = frames < 10 ? frames : 10;
+        const int rows = frames > 10 ? (frames + 9) / 10 : 0;
+        const int frame = tex_anim->frame_time > 0.0f ? (int) (fmodf(now, (float) frames * tex_anim->frame_time) / tex_anim->frame_time) % frames : 0;
 
-        material->texture_repeat.x = 1.0f / (float) tex_anim->frames;
-        material->texture_offset.x = (float) frame;
+        material->texture_repeat.x = 1.0f / (float) columns;
+        material->texture_offset.x = (float) (frame % columns);
+        if (rows) {
+            material->texture_repeat.y = 1.0f / (float) rows;
+            material->texture_offset.y = (float) (rows - frame / columns - 1);
+        }
     }
 
     if (tex_anim->move) {
@@ -1561,7 +1577,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
         // textureAnim off: Krunker resets moving/framed textures to their first frame.
         client_tick_textures(client, client_render_settings()->texture_anim ? now : 0.0f);
         debug_capture_apply_camera(client); // KRUNKNATIVE_CAMERA pose (debug_capture.c)
+        map_environment_update(client->game.map, client->camera.position); // v7 ENVIRONMENT_ZONE swaps (map_environment.c)
+        map_post_frame(client->scene, &client->game, &client->camera, delta * 1000.0f); // spin, sign distance, GLTF assets, builds, zone (map_post.c)
         shadow_update(); // static sun shadow map, re-rendered after a map load (shadow.c)
+        ocean_update(client->scene, &client->camera, delta * 1000.0f); // v7 ocean: time + mirror reflection pass (ocean.c)
         sky_tick(delta * 1000.0f);
         sky_render(&client->camera); // Krunker's backgroundScene pass: sky dome first (sky.c)
         shadow_begin_world();

@@ -209,6 +209,7 @@ typedef struct {
     int cull_back;
     int additive_blend;
     int depth_write;
+    int cull_front; // map-G: glCullFace(GL_FRONT) while culling (three.js BackSide)
 } SceneDrawState;
 
 static SceneDrawState g_draw_pending;
@@ -218,6 +219,11 @@ void scene_draw_state(const int cull_back, const int additive_blend, const int d
     g_draw_pending.cull_back = cull_back ? 1 : 0;
     g_draw_pending.additive_blend = additive_blend ? 1 : 0;
     g_draw_pending.depth_write = depth_write ? 1 : 0;
+    g_draw_pending.cull_front = 0;
+}
+
+void scene_draw_cull_front(void) {
+    g_draw_pending.cull_front = 1;
 }
 
 static void scene_apply_draw_state(void) {
@@ -241,6 +247,10 @@ static void scene_apply_draw_state(void) {
     if (want->depth_write != have->depth_write) {
         glDepthMask(want->depth_write ? GL_TRUE : GL_FALSE);
         have->depth_write = want->depth_write;
+    }
+    if (want->cull_front != have->cull_front) {
+        glCullFace(want->cull_front ? GL_FRONT : GL_BACK);
+        have->cull_front = want->cull_front;
     }
 }
 
@@ -302,7 +312,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     glActiveTexture(GL_TEXTURE0); // materials bind their base map to unit 0
     glCullFace(GL_BACK);          // FrontSide materials (scene_draw_state cull_back)
     glFrontFace(GL_CCW);
-    g_draw_current = (SceneDrawState) {-1, -1, -1, -1};
+    g_draw_current = (SceneDrawState) {-1, -1, -1, -1, 0}; // cull_front 0: glCullFace(GL_BACK) above
 
     camera_update_projection_matrix(camera, (float) viewport[2] / (float) viewport[3]);
     camera_update_world_inverse_matrix(camera);
@@ -348,7 +358,7 @@ void scene_render(const Scene *scene, Camera *camera) {
 
         // per-draw defaults; BasicMaterial overrides them (FrontSide culling, additive
         // blending, depthWrite: false) inside material_update_uniforms()
-        g_draw_pending = (SceneDrawState) {mesh->material->transparent ? 1 : 0, 0, 0, 1};
+        g_draw_pending = (SceneDrawState) {mesh->material->transparent ? 1 : 0, 0, 0, 1, 0};
         material_update_uniforms(mesh->material);
         scene_apply_draw_state();
         shadow_apply_mesh_uniforms(mesh); // sun shadow receiver uniforms (shadow.c)
@@ -376,6 +386,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     }
 
     glDisable(GL_CULL_FACE);
+    glCullFace(GL_BACK); // map-G: a BackSide material may have left GL_FRONT
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
