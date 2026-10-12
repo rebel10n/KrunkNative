@@ -26,7 +26,7 @@ file of the same name when v7 changed it:
 | `videos/` | `public/videos/` | skin `video` textures |
 | `user-assets/` | `public/user-assets/` | map/AI user assets (`model.gltf`/`.glb`, `sound.mp3`, ...) |
 | `scares/` | `public/scares/` | jump-scare trigger media |
-| `skins.json` | `public/skins.jspck` | the v7 store table (6448 skins, 17 item types), unpacked by `tools/ui-import/v7_skins.js` with v7's own `src/shim/jspck.js`, `store.js` templates merged in; checked against the reference's `skins.json` |
+| `skins.json` | `public/skins.jspck` | the v7 store table (6448 skins, 17 item types): unpacked with v7's own `src/shim/jspck.js` and run through v7's `store.js` load loop (templates, noSpin / noSale / limited / limT fixups) by `tools/ui-import/v7_skins.js`; identical to the reference's `skins.json` minus `thumbnail` |
 | `previews.json` | `previews.json` | v7's item type enum (`src/viewer.js`) |
 
 `skins.json` is the store table every component indexes by **array position**
@@ -34,7 +34,10 @@ file of the same name when v7 changed it:
 write a table that moves an existing index (same `id`, `weapon` and item type, except v7's
 HAT 1 -> HEAD 15 and BODY 2 -> BACK 14 retypes, which keep their slot). All 1917 v3.1.1 indices
 are unchanged in v7 (185 are retyped, 3 renamed). `client/src/cosmetics_table.c` is generated
-from it by `tools/ui-import/gen_cosmetics.py`.
+from it by `tools/ui-import/gen_cosmetics.py`, `client/src/viewer/viewer_store_table.c` (the client's
+full store table: store, inventory, loadout, market, viewer) by `tools/ui-import/gen_viewer_store.js`.
+Six GLTF remodels in the v7.1.4 reference are corrupt (invalid base64 buffers: weapon_2_12, 4_9,
+15_5, 16_3, 17_5, melee_63); v7 fails to load them too, KN falls back to the plain weapon / knife.
 
 v7.1.4's `public/` is ~1.8 GB for these directories; the v7 import adds ~3500 files
 (~720 MB) to a v3.1.1 tree.

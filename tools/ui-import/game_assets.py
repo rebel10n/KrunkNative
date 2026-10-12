@@ -13,7 +13,9 @@ content from (``V7_ASSET_DIRS``: OBJ/GLTF/GLB models of props, weapons and the 1
 item types, their textures and previews, sounds, video textures, user-assets, scares) from the
 v7.1.4 ``public/`` tree, writes ``assets/skins.json`` (the v7 store table, 6448 skins, unpacked
 from ``public/skins.jspck`` by ``v7_skins.js`` exactly as the v7 client does) and
-``assets/previews.json`` (v7's item type enum, ``src/viewer.js``). The skin table write is
+``assets/previews.json`` (v7's item type enum, ``src/viewer.js``). The table is ``store.skins``
+after v7's ``store.js`` loaded (templates and load-time flags applied), so kn_brain, the bots
+and the client read v7's own noSpin / noSale / limited / limT values. The skin table write is
 refused when it would move an existing store index (the array position is the inventory
 ``skin_id``): every index of the current ``assets/skins.json`` must keep its ``id``, ``weapon``
 and item type (v7 retyped HAT 1 -> HEAD 15 and BODY 2 -> BACK 14; those keep their slot).
@@ -143,7 +145,7 @@ def v7_skins(v7_root):
     out = subprocess.run([node, os.path.join(HERE, "v7_skins.js"), v7_root], check=True, stdout=subprocess.PIPE).stdout
     skins = json.loads(out)
     # Cross-check against the reference's readable dump (skins.json = the same table after
-    # store.js's load-time fixups): same length, names, ids and types per index.
+    # store.js loaded, plus `thumbnail`): every entry must be identical.
     ref_path = os.path.join(v7_root, "skins.json")
     if os.path.exists(ref_path):
         with open(ref_path, encoding="utf-8") as fh:
@@ -151,8 +153,10 @@ def v7_skins(v7_root):
         if len(ref) != len(skins):
             sys.exit("game_assets.py: skins.jspck has %d skins, skins.json %d" % (len(skins), len(ref)))
         for i, (a, b) in enumerate(zip(skins, ref)):
-            if (a.get("name"), a.get("id"), a.get("type", 0), a.get("weapon")) != (b.get("name"), b.get("id"), b.get("type", 0), b.get("weapon")):
-                sys.exit("game_assets.py: skins.jspck and skins.json disagree at index %d" % i)
+            b = dict(b)
+            b.pop("thumbnail", None)
+            if a != b:
+                sys.exit("game_assets.py: skins.jspck (store.js applied) and skins.json disagree at index %d" % i)
     return out, skins
 
 

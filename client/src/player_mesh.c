@@ -479,6 +479,60 @@ static void weapon_skin_keys(const Weapon *weapon, const ViewerSkin *skin, char 
     else snprintf(texture, texture_n, "%s", model);
 }
 
+// v7 hasAnim weapon / melee skins: RENDER.loadAnimMesh(src "<model>.<fileExt || gltf>") with the
+// same position / rotation / scale arguments as loadMesh (players.js:805, :1140), the model's own
+// GLTF materials. The mesh the pose code drives (weapon_right / weapon_left) becomes a carrier with
+// an empty geometry and the GLTF root hangs off it, so every pose and visibility write keeps working.
+// TODO (v7 render.js f1117): env maps (`env`, the "_env" texture) on the GLTF materials.
+static Mesh *gltf_skin_carrier(const ViewerSkin *skin, const char *model_key, GltfInstance **out) {
+    *out = NULL;
+    if (!skin || !(skin->flags & VS_HAS_ANIM)) return NULL;
+    char rel[192];
+    snprintf(rel, sizeof(rel), "models/%s.%s", model_key, skin->file_ext ? skin->file_ext : "gltf");
+    char *path = concat(assets_path(), rel);
+    GltfInstance *instance = path ? gltf_instance_create(gltf_model_load(path), skin->anim_s) : NULL;
+    free(path);
+    if (!instance) return NULL;
+    BasicMaterial *material = basic_material_init();
+    Mesh *carrier = material ? mesh_init(gltf_empty_geometry(), (Material *) material) : NULL;
+    if (!carrier) {
+        if (material) material_fini((Material *) material);
+        gltf_instance_fini(instance);
+        return NULL;
+    }
+    instance->root.parent = &carrier->transform;
+    *out = instance;
+    return carrier;
+}
+
+// hasAnim skin whose GLTF model loads (cached by gltf_model_load)
+static int gltf_skin_available(const ViewerSkin *skin, const char *model_key) {
+    if (!skin || !(skin->flags & VS_HAS_ANIM)) return 0;
+    char rel[192];
+    snprintf(rel, sizeof(rel), "models/%s.%s", model_key, skin->file_ext ? skin->file_ext : "gltf");
+    char *path = concat(assets_path(), rel);
+    const int ok = path && gltf_model_load(path) != NULL;
+    free(path);
+    return ok;
+}
+
+// The GLTF remodels follow their carrier's visibility and advance their clips.
+static void player_weapon_models_update(const PlayerMesh *player_mesh, const int loadout_size) {
+    if (!player_mesh->arms) return;
+    const double now = gltf_clock();
+    for (int i = 0; i < loadout_size; i++) {
+        const PlayerArms *arms = player_mesh->arms[i];
+        if (!arms) continue;
+        for (int k = 0; k < 2; k++) {
+            GltfInstance *model = arms->weapon_models[k];
+            const Mesh *carrier = k ? arms->weapon_left : arms->weapon_right;
+            if (!model || !carrier) continue;
+            gltf_instance_set_visible(model, carrier->visible);
+            gltf_instance_update(model, now);
+        }
+    }
+}
+
 // The melee loadMesh: src "melee/melee_<id || 0>", texSrc pat ? tex : tex ? "melee/melee_<id>_<tex>" : the model's.
 static void melee_skin_keys(const ViewerSkin *skin, char *model, const size_t model_n, char *texture, const size_t texture_n) {
     const int id = skin && skin->id > 0 ? skin->id : 0;
@@ -677,22 +731,28 @@ void player_generate_meshes(Player *player, const int render_you) {
                     char model[64], texture[192];
                     melee_skin_keys(skin, model, sizeof(model), texture, sizeof(texture));
 
-                    Geometry *melee_geo = skin_model(model);
-                    unsigned int melee_texture = skin_texture(texture);
-                    if (!melee_texture && strcmp(texture, model) != 0) melee_texture = skin_texture(model);
-                    if (!melee_geo && skin) { // a skin model this build lacks: the default knife
+                    GltfInstance *melee_model = NULL;
+                    Mesh *melee_carrier = gltf_skin_carrier(skin, model, &melee_model); // hasAnim: GLTF remodel
+                    Geometry *melee_geo = melee_carrier ? NULL : skin_model(model);
+                    unsigned int melee_texture = melee_carrier ? 0 : skin_texture(texture);
+                    if (!melee_carrier && !melee_texture && strcmp(texture, model) != 0) melee_texture = skin_texture(model);
+                    if (!melee_carrier && !melee_geo && skin) { // a skin model this build lacks: the default knife
                         skin = NULL;
                         melee_skin_keys(NULL, model, sizeof(model), texture, sizeof(texture));
                         melee_geo = skin_model(model);
                         melee_texture = skin_texture(texture);
                     }
 
-                    if (melee_geo && melee_texture) {
-                        BasicMaterial *melee_mat = basic_material_init();
-                        Mesh *melee = mesh_init(melee_geo, (Material *) melee_mat);
-
-                        melee_mat->texture = melee_texture;
-                        if (skin) {
+                    if (melee_carrier || (melee_geo && melee_texture)) {
+                        Mesh *melee = melee_carrier;
+                        if (!melee) {
+                            BasicMaterial *melee_mat = basic_material_init();
+                            melee = mesh_init(melee_geo, (Material *) melee_mat);
+                            melee_mat->texture = melee_texture;
+                        }
+                        arms->weapon_models[0] = melee_model;
+                        if (skin && !melee_carrier) {
+                            BasicMaterial *melee_mat = (BasicMaterial *) melee->material;
                             const int glow = (skin->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
                             skin_material(melee_mat, skin, texture, model, glow, glow);
                         }
@@ -733,14 +793,15 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const ViewerSkin *skin = player_slot_skin(player, i, weapon);
                     char model[128], texture[192];
                     weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
-                    Geometry *skin_geo = skin_model(model);
+                    // hasAnim: a GLTF remodel, one instance per hand below (empty_geometry marks it)
+                    Geometry *skin_geo = gltf_skin_available(skin, model) ? gltf_empty_geometry() : skin_model(model);
                     if (!skin_geo && skin) { // a remodel this build lacks: the plain weapon
                         skin = NULL;
                         weapon_skin_keys(weapon, NULL, model, sizeof(model), texture, sizeof(texture));
                         skin_geo = skin_model(model);
                     }
-                    unsigned int skin_tex = skin_geo ? skin_texture(texture) : 0;
-                    if (!skin_tex && skin_geo && strcmp(texture, model) != 0) skin_tex = skin_texture(model);
+                    unsigned int skin_tex = skin_geo && skin_geo != gltf_empty_geometry() ? skin_texture(texture) : 0;
+                    if (!skin_tex && skin_geo && skin_geo != gltf_empty_geometry() && strcmp(texture, model) != 0) skin_tex = skin_texture(model);
                     const int glow = skin && (skin->flags & (VS_GLOW | VS_SAME_GLOW));
 
                     for (int j = 0; j < 2; j++) {
@@ -749,11 +810,18 @@ void player_generate_meshes(Player *player, const int render_you) {
 
                         if (!weapon_geo) continue;
 
-                        BasicMaterial *weapon_mat = basic_material_init();
-                        Mesh *weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
-
-                        weapon_mat->texture = weapon_tex;
-                        if (skin) skin_material(weapon_mat, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
+                        GltfInstance *weapon_model = NULL;
+                        Mesh *weapon_mesh = NULL;
+                        if (weapon_geo == gltf_empty_geometry()) {
+                            weapon_mesh = gltf_skin_carrier(skin, model, &weapon_model);
+                            if (!weapon_mesh) continue;
+                        } else {
+                            BasicMaterial *weapon_mat = basic_material_init();
+                            weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
+                            weapon_mat->texture = weapon_tex;
+                            if (skin) skin_material(weapon_mat, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
+                        }
+                        arms->weapon_models[j] = weapon_model;
 
                         weapon_mesh->transform.position.x = j ? weapon->offset.x * -2.0f : 0.0f;
                         weapon_mesh->transform.position.y = skin ? skin->y_off : 0.0f; // ae.yOff || 0
@@ -1037,6 +1105,8 @@ void player_update_meshes(Player *player, const int is_preview) {
             }
         }
     }
+
+    player_weapon_models_update(player_mesh, player->loadout_size);
 }
 
 void player_meshes_fini(Player *player) {
@@ -1067,6 +1137,7 @@ void player_meshes_fini(Player *player) {
 
             if (arms->weapon_right) mesh_fini(arms->weapon_right);
             if (arms->weapon_left) mesh_fini(arms->weapon_left);
+            for (int k = 0; k < 2; k++) gltf_instance_fini(arms->weapon_models[k]);
             if (arms->attachment) mesh_fini(arms->attachment);
 
             for (int j = 0; j < 2; j++) {

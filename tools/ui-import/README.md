@@ -57,7 +57,11 @@ and writes `assets/skins.json` (the v7 store table: `v7_skins.js` unpacks `publi
 with v7's own `src/shim/jspck.js` and merges `store.js` templates) and `assets/previews.json`.
 It refuses a skin table that would move an existing store index (inventory `skin_id`).
 `gen_cosmetics.py` then regenerates `client/src/cosmetics_table.c` from `assets/skins.json`
-(`--check`: exit 1 when out of date). Provenance and sizes: `assets/README.md`. Page images
+(`--check`: exit 1 when out of date), and `gen_viewer_store.js` the client's full store table
+(below). `v7_store.js` evaluates v7's own `store.js` / `itemTypes.js` / `config.js` (read-only)
+for both: `assets/skins.json` is `store.skins` after store.js loaded (templates merged and its
+noSpin / noSale / limited / limT fixups applied, `thumbnail` dropped), identical to the
+reference's `skins.json`. Provenance and sizes: `assets/README.md`. Page images
 stay under `ui/img` (menu import above); `assets/` is game content only.
 
 ## Model viewer page
@@ -65,10 +69,11 @@ stay under `ui/img` (menu import above); `assets/` is game content only.
 `viewer_page.py` (step of `import.py`, skip with `--no-viewer`) writes
 `ui/viewer.html` (Krunker's `public/viewer.html`, scripts removed) and
 `ui/css/dat-gui.css` (dat.gui's injected stylesheet), and runs
-`node gen_viewer_store.js [viewer.js.map] [out.c]`, which regenerates
-`client/src/viewer/viewer_store_table.c` (every `store.skins` entry, rarities,
-previews, skin colours and the viewer's dropdown option lists computed with
-viewer.js's own sorting) from the sources embedded in the v3.1.1 `viewer.js.map`.
+`node gen_viewer_store.js [assets/skins.json] [out.c] [Krunker_v7.1.4 root]` (a `.map` argument, as
+viewer_page.py still passes, is ignored), which regenerates `client/src/viewer/viewer_store_table.c`:
+every v7.1.4 `store.skins` entry (6448, by index), rarities (incl. NFT), the 17 item types,
+previews, skin colours, `currentSeason` 7, and the viewer's dropdown option lists computed like v7
+`src/viewer.js` (f460 / f459 / melee, "[Free]" labels). `GEN_CHECK=1` only reports drift.
 
 ## Social hub page
 

@@ -22,6 +22,9 @@
 #include <client.h>
 
 typedef struct GltfModel GltfModel;
+
+// Which clips gltf_instance_update plays (v7 render.js loadAnimMesh / playClip / stopAllClips)
+enum { GLTF_CLIPS_ALL, GLTF_CLIPS_LOOP, GLTF_CLIPS_ONCE, GLTF_CLIPS_STOPPED };
 typedef struct GltfInstanceNode GltfInstanceNode;
 typedef struct GltfDynamicPrimitive GltfDynamicPrimitive;
 
@@ -40,6 +43,10 @@ typedef struct GltfInstance {
     size_t dynamic_count;
     float time_scale;  // animS
     double time;       // seconds of animation played
+    int clip_mode;     // GLTF_CLIPS_*
+    int clip;          // the clip of GLTF_CLIPS_LOOP / _ONCE
+    int clip_reps;     // GLTF_CLIPS_ONCE repetitions
+    double clip_start; // `time` when that clip started
     double last_now;   // gltf_instance_update's previous `now`, < 0 before the first call
 } GltfInstance;
 
@@ -58,9 +65,26 @@ void gltf_instance_update(GltfInstance*, double now);
 // a --render-scenario run (ui_scenario.c), so scenario captures are reproducible.
 double gltf_clock(void);
 void gltf_set_clock_override(double seconds); // < 0: back to glfwGetTime()
+// KrunkScript GAME.SCENE (v7 createKrunkScriptApiContext.js:861-880, render.js:63-205):
+#define GLTF_HAVE_SCRIPT_API 1
+// getBone: the transform of the first skin joint named `name` (SkeletonUtils.getBoneByName),
+// NULL when none. Writes to it last until the next sampled clip moves that node; skins follow it.
+MeshTransform *gltf_instance_bone(GltfInstance*, const char *name);
+// playClip(name, reps): reps > 0 plays that clip alone `reps` times and clamps on its last frame;
+// reps 0 loops it (no restart when it already is the looping clip). Unknown names: no change.
+void gltf_instance_play_clip(GltfInstance*, const char *clip, int reps);
+// stopAllClips(): no clip plays; the nodes keep their last pose.
+void gltf_instance_stop_clips(GltfInstance*);
+// updateMorphKey(name, weight): weight clamped to 0..1 on every mesh whose morph target names
+// (mesh extras.targetNames) contain `target_name`, applied at once.
+void gltf_instance_set_morph(GltfInstance*, const char *target_name, float weight);
+void gltf_instance_set_time_scale(GltfInstance*, float time_scale); // mixer.timeScale
 // Set every mesh's visibility.
 void gltf_instance_set_visible(GltfInstance*, int visible);
 void scene_add_gltf(Scene*, const GltfInstance*);
+// A shared geometry that draws nothing (index_count 0): the carrier Mesh a GLTF model hangs off
+// when existing code poses a single Mesh (player_mesh.c weapon / melee remodels). Never freed.
+Geometry *gltf_empty_geometry(void);
 void scene_remove_gltf(Scene*, const GltfInstance*);
 // Frees the meshes, their materials and the instance's GL buffers; the model stays cached.
 void gltf_instance_fini(GltfInstance*);

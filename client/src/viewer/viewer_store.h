@@ -1,7 +1,9 @@
 #pragma once
-// Krunker v3.1.1 store data the viewer page reads (src/data/store.js, src/config.js), generated
-// into viewer_store_table.c by tools/ui-import/gen_viewer_store.js. Client-only (the shared code
-// and cosmetics_table.c keep their own subsets).
+// Krunker v7.1.4 store data (src/data/store.js after load, src/config.js): every store.skins entry
+// (6448, the indices of assets/skins.json), rarities, types, previews, generated into
+// viewer_store_table.c by tools/ui-import/gen_viewer_store.js. Read by the viewer page and the
+// store / inventory / loadout / market UI. Client-only (the shared code and cosmetics_table.c keep
+// their own subsets).
 #include <stddef.h>
 
 enum {
@@ -21,12 +23,15 @@ enum {
     VS_TEX_NUM = 1 << 13,    // tex is a number (texture variant "<model>_<tex>"), else a path
     VS_RGB = 1 << 14,
     VS_NO_SPIN = 1 << 15,
-    VS_NOT_IN_WHEEL = 1 << 16, // limited / illicit / limT: never in a prize wheel's pool (getSpnItems)
+    VS_NOT_IN_WHEEL = 1 << 16, // limited / blackM / opensea / limT / limG: never in a prize wheel's pool (getSpnItems)
+    VS_FREE = 1 << 17,       // free: labelled "[Free]" instead of its rarity (v7 viewer lists)
+    VS_HAS_ANIM = 1 << 18,   // hasAnim: an animated GLTF model "<src>.<file_ext || gltf>" (render.js loadAnimMesh)
 };
 
 typedef struct {
     const char *name;
-    int type;            // 0 weapon skin, 1 hat, 2 body (back), 3 melee, 4 spray, 5 dye, 6 waist, 7 face
+    int type;            // v7 itemTypes: 0 weapon skin, 1 hat, 2 body, 3 melee, 4 spray, 5 dye, 6 waist, 7 face,
+                         // 8 shoe, 9 pet, 10 collectible, 11 wrist, 12 charm, 13 ticket, 14 back, 15 head, 16 player card
     int weapon;          // weapon skins: 1-based weapon index (game.weapons[weapon - 1]), else 0
     int id;              // model / skin id, -1 when absent
     int rarity;          // store.rarities index
@@ -48,6 +53,11 @@ typedef struct {
     char r_anim_axis;    // 'x' / 'y' / 'z'
     float mov_t, puls_t;
     const char *creator; // skin.creator, NULL = "Krunker.io"
+    int asset_type;      // assetType: the type whose model / preview directory it uses (BACK 14 -> 2, HEAD 15 -> 1), 0 = type
+    const char *tex_ext; // texExt (player cards: "webp"), NULL = "png"
+    const char *file_ext; // fileExt of a hasAnim model, NULL = "gltf"
+    float anim_s;        // animS (hasAnim)
+    float env;           // env map intensity (env || sameEnv), 0 = none
 } ViewerSkin;
 
 typedef struct { const char *name; const char *color; } ViewerRarity;

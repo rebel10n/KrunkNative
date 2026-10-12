@@ -681,6 +681,7 @@ static const ViewerSkin *slot_skin(const Player *player, const int slot, const i
 // generateMeshes weapon loadMesh: src "weapons/<src>[_mid]", texSrc tex | weapons/skins/<src>_<id> |
 // getReModel, at (akimbo xOff * -2, yOff, zOff), scale mScl || weapon.scale, emissive for glow skins
 static void player_weapon_skin(Player *player, PlayerArms *arms, const Weapon *weapon, const ViewerSkin *skin, const int skin_index) {
+    if (skin->flags & VS_HAS_ANIM) return; // a GLTF remodel: player_mesh.c built it
     char model[128], texture[192];
     if (skin->mid >= 0) snprintf(model, sizeof(model), "weapons/%s_%d", weapon->src, skin->mid);
     else snprintf(model, sizeof(model), "weapons/%s", weapon->src);
@@ -713,7 +714,7 @@ static void player_weapon_skin(Player *player, PlayerArms *arms, const Weapon *w
 // the melee loadMesh: src melee/melee_<id>, texSrc pat ? tex : tex ? melee_<id>_<tex> : "", scale sclMlt || 0.9
 static void player_melee_skin(PlayerArms *arms, const ViewerSkin *skin) {
     Mesh *mesh = arms->weapon_right;
-    if (!mesh) return;
+    if (!mesh || (skin->flags & VS_HAS_ANIM)) return; // a GLTF remodel: player_mesh.c built it
 
     char model[64], texture[192];
     const int id = skin->id > 0 ? skin->id : 0;
@@ -790,6 +791,12 @@ void vscene_rebuild_player(void) {
     player->position = (vec3) {e->show_player ? 0.0f : -3.0f, 3.0f, e->show_player ? 0.0f : 3.0f};
     player->last_position = player->position;
     player->direction = (vec2) {0.0f, 0.0f};
+    // v7 hasAnim (GLTF) weapon / melee skins: player_mesh.c builds the remodel from player->skins;
+    // player_weapon_skin / player_melee_skin below (the OBJ reskin) leave them alone
+    const ViewerSkin *anim_skins[3] = {viewer_skin(e->skin_prim.num), viewer_skin(e->skin_sec.num), viewer_skin(e->melee.num)};
+    if (anim_skins[0] && (anim_skins[0]->flags & VS_HAS_ANIM)) player->skins.primary = e->skin_prim.num;
+    if (anim_skins[1] && (anim_skins[1]->flags & VS_HAS_ANIM)) player->skins.secondary = e->skin_sec.num;
+    if (anim_skins[2] && (anim_skins[2]->flags & VS_HAS_ANIM)) player->skins.melee = e->melee.num;
     player_generate_meshes(player, 0);
     if (!player->mesh) {
         player_free(player);

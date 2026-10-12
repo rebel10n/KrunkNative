@@ -101,15 +101,6 @@ static void m4_mul(const float *a, const float *b, float *out) {
     memcpy(out, r, sizeof(r));
 }
 
-static void m4_from_trs(float *m, const float *t, const float *q, const float *s) {
-    const float x = q[0], y = q[1], z = q[2], w = q[3];
-    const float xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
-    m[0] = (1 - 2 * (yy + zz)) * s[0]; m[1] = 2 * (xy - wz) * s[1];       m[2] = 2 * (xz + wy) * s[2];       m[3] = t[0];
-    m[4] = 2 * (xy + wz) * s[0];       m[5] = (1 - 2 * (xx + zz)) * s[1]; m[6] = 2 * (yz - wx) * s[2];       m[7] = t[1];
-    m[8] = 2 * (xz - wy) * s[0];       m[9] = 2 * (yz + wx) * s[1];       m[10] = (1 - 2 * (xx + yy)) * s[2]; m[11] = t[2];
-    m[12] = m[13] = m[14] = 0.0f;      m[15] = 1.0f;
-}
-
 // three.js Euler.setFromRotationMatrix, order XYZ: mesh.c's ROTATION_ORDER_INTRINSIC is
 // R = Rx * Ry * Rz, so a node's quaternion maps onto MeshTransform.rotation exactly.
 static vec3 quat_to_euler_xyz(const float *q) {
@@ -601,6 +592,19 @@ GltfModel *gltf_model_load(const char *path) {
             return NULL;
         }
     }
+    // Six GLTF remodels of the v7.1.4 reference (weapon_2_12, 4_9, 15_5, 16_3, 17_5, melee_63) carry
+    // corrupt base64 buffers (length % 4 == 1, the stream shifted mid-way). v7's GLTFLoader rejects
+    // them ("Failed to load buffer") and draws nothing; cgltf would decode garbage. Refuse them, so
+    // the callers fall back (plain weapon / default knife) instead of drawing broken geometry.
+    for (size_t i = 0; i < data->buffers_count; i++) {
+        const char *uri = data->buffers[i].uri;
+        const char *comma = uri && !strncmp(uri, "data:", 5) ? strchr(uri, ',') : NULL;
+        if (comma && strstr(uri, ";base64") && strlen(comma + 1) % 4 == 1) {
+            fprintf(stderr, "gltf: %s: buffer %zu is not valid base64 (corrupt file)\n", path, i);
+            cgltf_free(data);
+            return NULL;
+        }
+    }
     for (size_t i = 0; i < data->buffer_views_count; i++) {
         if (data->buffer_views[i].has_meshopt_compression) {
             fprintf(stderr, "gltf: %s uses EXT_meshopt_compression, not supported\n", path);
@@ -679,7 +683,32 @@ static void node_apply(GltfInstanceNode *node) {
     node->transform.position = (vec3) {node->t[0], node->t[1], node->t[2]};
     node->transform.rotation = quat_to_euler_xyz(node->r);
     node->transform.scale = (vec3) {node->s[0], node->s[1], node->s[2]};
-    m4_from_trs(node->local, node->t, node->r, node->s);
+    node->root_valid = 0;
+}
+
+// The node's local matrix from its MeshTransform (T * Rx * Ry * Rz * S, mesh.c's intrinsic order),
+// so a bone moved through gltf_instance_bone() deforms the skin like a sampled one.
+static void node_local_from_transform(GltfInstanceNode *node) {
+    const MeshTransform *tr = &node->transform;
+    const float cx = cosf(tr->rotation.x), sx = sinf(tr->rotation.x);
+    const float cy = cosf(tr->rotation.y), sy = sinf(tr->rotation.y);
+    const float cz = cosf(tr->rotation.z), sz = sinf(tr->rotation.z);
+    // R = Rx * Ry * Rz (three.js Euler XYZ)
+    const float r[9] = {
+        cy * cz, -cy * sz, sy,
+        cx * sz + sx * sy * cz, cx * cz - sx * sy * sz, -sx * cy,
+        sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy,
+    };
+    const float sc[3] = {tr->scale.x, tr->scale.y, tr->scale.z};
+    float *m = node->local;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) m[i * 4 + j] = r[i * 3 + j] * sc[j];
+    }
+    m[3] = tr->position.x;
+    m[7] = tr->position.y;
+    m[11] = tr->position.z;
+    m[12] = m[13] = m[14] = 0.0f;
+    m[15] = 1.0f;
     node->root_valid = 0;
 }
 
@@ -742,6 +771,7 @@ static void dynamic_upload(GltfInstance *instance, GltfDynamicPrimitive *d) {
     }
 
     if (prim->skin >= 0) {
+        for (size_t n = 0; n < instance->model->data->nodes_count; n++) node_local_from_transform(&instance->nodes[n]);
         const cgltf_skin *skin = &instance->model->data->skins[prim->skin];
         const float *inverse_bind = instance->model->inverse_bind[prim->skin];
         float *joint = malloc(skin->joints_count * 16 * sizeof(float));
@@ -944,29 +974,55 @@ static void sample(const cgltf_animation_sampler *sampler, const float t, const 
     for (int i = 0; i < width; i++) out[i] = a[i] + (b[i] - a[i]) * u;
 }
 
+static float clip_duration(const cgltf_animation *anim) {
+    float duration = 0.0f;
+    for (size_t s = 0; s < anim->samplers_count; s++) {
+        const cgltf_accessor *input = anim->samplers[s].input;
+        if (input->has_max && input->max[0] > duration) duration = input->max[0];
+        else if (!input->has_max && input->count) {
+            float last;
+            cgltf_accessor_read_float(input, input->count - 1, &last, 1);
+            if (last > duration) duration = last;
+        }
+    }
+    return duration;
+}
+
 void gltf_instance_update(GltfInstance *instance, const double now) {
     if (!instance || !instance->model || !instance->model->data) return;
     const cgltf_data *data = instance->model->data;
-    if (!data->animations_count) return;
+    if (!data->animations_count) {
+        // no clips: only script bone writes can move a skin
+        for (size_t i = 0; i < instance->dynamic_count; i++)
+            if (instance->dynamic[i].primitive->skin >= 0) dynamic_upload(instance, &instance->dynamic[i]);
+        return;
+    }
 
     const double dt = instance->last_now < 0.0 ? 0.0 : now - instance->last_now;
     instance->last_now = now;
     if (dt > 0.0) instance->time += dt * instance->time_scale;
 
-    // three.js playAllClips(): every clip at once, LoopRepeat
+    if (instance->clip_mode == GLTF_CLIPS_STOPPED) {
+        // stopAllClips(): no clip drives the nodes; the pose (and script bone writes) stays
+        for (size_t i = 0; i < instance->dynamic_count; i++)
+            if (instance->dynamic[i].primitive->skin >= 0) dynamic_upload(instance, &instance->dynamic[i]);
+        return;
+    }
+
+    // three.js playAllClips() (the default): every clip at once, LoopRepeat; playClip(name, reps):
+    // that clip alone, looping (reps 0) or `reps` times then clamped on its last frame
     for (size_t a = 0; a < data->animations_count; a++) {
+        if (instance->clip_mode != GLTF_CLIPS_ALL && (int) a != instance->clip) continue;
         const cgltf_animation *anim = &data->animations[a];
-        float duration = 0.0f;
-        for (size_t s = 0; s < anim->samplers_count; s++) {
-            const cgltf_accessor *input = anim->samplers[s].input;
-            if (input->has_max && input->max[0] > duration) duration = input->max[0];
-            else if (!input->has_max && input->count) {
-                float last;
-                cgltf_accessor_read_float(input, input->count - 1, &last, 1);
-                if (last > duration) duration = last;
-            }
+        const float duration = clip_duration(anim);
+        float t;
+        if (instance->clip_mode == GLTF_CLIPS_ALL) {
+            t = duration > 0.0f ? (float) fmod(instance->time, (double) duration) : 0.0f;
+        } else {
+            const double elapsed = instance->time - instance->clip_start;
+            if (instance->clip_mode == GLTF_CLIPS_ONCE && elapsed >= (double) duration * instance->clip_reps) t = duration;
+            else t = duration > 0.0f ? (float) fmod(elapsed < 0.0 ? 0.0 : elapsed, (double) duration) : 0.0f;
         }
-        const float t = duration > 0.0f ? (float) fmod(instance->time, (double) duration) : 0.0f;
 
         for (size_t c = 0; c < anim->channels_count; c++) {
             const cgltf_animation_channel *channel = &anim->channels[c];
@@ -988,9 +1044,87 @@ void gltf_instance_update(GltfInstance *instance, const double now) {
     for (size_t i = 0; i < instance->dynamic_count; i++) dynamic_upload(instance, &instance->dynamic[i]);
 }
 
+// ---------------------------------------------------------------- script API (KrunkScript GAME.SCENE)
+
+MeshTransform *gltf_instance_bone(GltfInstance *instance, const char *name) {
+    if (!instance || !name || !instance->model || !instance->model->data) return NULL;
+    const cgltf_data *data = instance->model->data;
+    for (size_t s = 0; s < data->skins_count; s++) {
+        for (size_t j = 0; j < data->skins[s].joints_count; j++) {
+            const cgltf_node *joint = data->skins[s].joints[j];
+            if (joint && joint->name && !strcmp(joint->name, name)) return &instance->nodes[cgltf_node_index(data, joint)].transform;
+        }
+    }
+    return NULL;
+}
+
+void gltf_instance_play_clip(GltfInstance *instance, const char *clip, const int reps) {
+    if (!instance || !clip || !instance->model || !instance->model->data) return;
+    const cgltf_data *data = instance->model->data;
+    int index = -1;
+    for (size_t a = 0; a < data->animations_count && index < 0; a++)
+        if (data->animations[a].name && !strcmp(data->animations[a].name, clip)) index = (int) a;
+    if (index < 0) return; // this.anims[name] undefined: nothing happens
+    if (reps > 0) {
+        instance->clip_mode = GLTF_CLIPS_ONCE;
+        instance->clip_reps = reps;
+    } else {
+        // already the looping main clip: keep playing it from where it is
+        if (instance->clip_mode == GLTF_CLIPS_LOOP && instance->clip == index) return;
+        instance->clip_mode = GLTF_CLIPS_LOOP;
+        instance->clip_reps = 0;
+    }
+    instance->clip = index;
+    instance->clip_start = instance->time;
+}
+
+void gltf_instance_stop_clips(GltfInstance *instance) {
+    if (instance) instance->clip_mode = GLTF_CLIPS_STOPPED;
+}
+
+void gltf_instance_set_morph(GltfInstance *instance, const char *target_name, float weight) {
+    if (!instance || !target_name || !instance->model || !instance->model->data) return;
+    weight = weight < 0.0f ? 0.0f : weight > 1.0f ? 1.0f : weight; // UTILS.limitMM(value, 0, 1)
+    const cgltf_data *data = instance->model->data;
+    int changed = 0;
+    for (size_t n = 0; n < data->nodes_count; n++) {
+        const cgltf_mesh *mesh = data->nodes[n].mesh;
+        GltfInstanceNode *node = &instance->nodes[n];
+        if (!mesh || !node->weights) continue;
+        for (size_t t = 0; t < mesh->target_names_count && (int) t < node->weight_count; t++) {
+            if (mesh->target_names[t] && !strcmp(mesh->target_names[t], target_name)) {
+                node->weights[t] = weight;
+                changed = 1;
+            }
+        }
+    }
+    if (!changed) return;
+    for (size_t i = 0; i < instance->dynamic_count; i++)
+        if (instance->dynamic[i].primitive->morph_count) dynamic_upload(instance, &instance->dynamic[i]);
+}
+
+void gltf_instance_set_time_scale(GltfInstance *instance, const float time_scale) {
+    if (instance) instance->time_scale = time_scale;
+}
+
 void gltf_instance_set_visible(GltfInstance *instance, const int visible) {
     if (!instance) return;
     for (size_t i = 0; i < instance->mesh_count; i++) instance->meshes[i]->visible = visible;
+}
+
+Geometry *gltf_empty_geometry(void) {
+    static Geometry geometry;
+    if (!geometry.vao) {
+        static const unsigned int indices[3] = {0, 0, 0};
+        glGenVertexArrays(1, &geometry.vao);
+        glGenBuffers(1, &geometry.ebo);
+        glBindVertexArray(geometry.vao);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry.ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+        glBindVertexArray(0);
+        geometry.index_count = 0; // bound_radius 0: never culled, and nothing to draw
+    }
+    return &geometry;
 }
 
 void scene_add_gltf(Scene *scene, const GltfInstance *instance) {

@@ -300,6 +300,9 @@ typedef struct {
     Mesh *weapon_left;
     Mesh *weapon_right;
     Mesh *attachment; // sight attachment (Weapon.has_attach), first-person / preview models only
+    // v7 hasAnim weapon / melee skins: the GLTF remodel (gltf.h) of weapon_right [0] / weapon_left [1],
+    // parented to that mesh, which is then an empty carrier (its pose and visibility drive the model)
+    struct GltfInstance *weapon_models[2];
 
     int melee_pose;   // first-person melee: arms are posed per arm (pivots) and the melee mesh hangs off the right pivot
     vec3 melee_position; // first-person melee mesh hold (weaponGeos xP/yP/zP incl. the skin's sxOff/syOff/szOff)
