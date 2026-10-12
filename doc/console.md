@@ -213,6 +213,7 @@ Source-style nav mesh of the current map in 3D: `show_navmeshes` builds and show
 | `nav: overlay cleared` (info) | `off` |
 | `nav: renderer/scene not available (are you in a game?)` (error) | no map loaded |
 | `nav: no current map data captured yet` (error) | the map has no JSON |
+| `nav: no walkable ground under this map's spawns (nothing to draw)` (warn) | KrunkNative, after the first line, when the mesh is empty (v7 prints only "0 areas, 0 nodes") |
 
 The mesh is v7's `buildGeneratedNavMesh` (`shared/navgen.ts` + the `extractBoxes` /
 `extractLadders` it uses from `shared/navmesh.ts`), ported to C in `shared/src/navgen.c`
@@ -242,6 +243,20 @@ fills it: `show_navmeshes` draws no bot paths in v7.1.4, so neither does KrunkNa
 entity bounding-box overlay is a separate command (`ent_bbox`), not part of this one.
 
 KrunkNative differences:
+- Two v7.1.4 navgen bugs are fixed (`shared/src/navgen.c`). Each gave an empty mesh: v7's
+  overlay reported "0 areas, 0 nodes, 0 obstacle links" and drew nothing.
+  - navmesh.ts drops objects whose `l` / `col` key merely exists. The engine treats them as
+    collidable when the value is false (map.js `noCol: v.l || v.col`). Older editor exports put
+    `"col": false` on every object, so v7's mesh of Bhop_VIP, ClashRoyale, Slide_Neon_Stage,
+    SniperRoyale2, Verb_Arena and zombie_high was empty. KN reads `l` / `col` by truthiness and
+    `nai` by presence, like the engine.
+  - walkableSeeds snaps each spawn to the 12-unit grid. On Industry (v7 and 3.1.1) every snapped
+    spawn sits within the body radius of a wall, so nothing seeds the flood fill. When no spawn
+    seeds, KN tries the grid points around each spawn (two rings, nearest first), which gives
+    Industry 1061 nodes / 564 areas.
+  Every map where v7 builds a mesh keeps v7's exact mesh (45 of the 47 official and v3.1.1 maps;
+  the other two are the Industries). ESP_Parkour is still empty: its spawn stands only on
+  non-colliding (`l: 1`) objects, so the console adds the warning above.
 - The build runs on a worker thread natively and the result is cached per map, so the frame
   never waits for it and `show_navmeshes` after `off` is instant. v7 builds inside the command
   (in the browser: 60 to 400 ms on most official maps, 7.5 s on Lagoon, 9 s on Little Town,

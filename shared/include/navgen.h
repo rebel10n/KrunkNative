@@ -15,7 +15,8 @@
 // game and the client (the show_navmeshes overlay, client/src/nav_overlay.c) build the same
 // mesh. Arithmetic is in double like the JS, and the result (node, area and link order
 // included) matches v7's for the same map; shared/tests/navgen_test.c checks the counts
-// against v7's own output.
+// against v7's own output. Two v7 bugs that left meshes empty are fixed (navgen.c: falsy
+// "col" / "l" flags, spawns snapped into walls); they only change maps v7 builds nothing for.
 //
 // KrunkNative differences (documented in navgen.c): a spatial hash over the boxes and run
 // length pre-checks in the area merge make the build fast enough for the big maps (v7 takes

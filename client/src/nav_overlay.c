@@ -27,6 +27,7 @@
 #endif
 
 #define COL_INFO "#9ac8ff"
+#define COL_WARN "#ffb84d"
 #define COL_ERROR "#ff6a6a"
 
 // v7's draw order (group children): fill, borders, crouch, twoWay, oneWay, jump, drop, obstacles
@@ -314,6 +315,8 @@ static void nav_show_build(const NavBuild *b) {
     }
     g_nav.key = b->key;
     ui_console_printf(COL_INFO, "nav: generated source-style overlay %d areas, %d nodes, %d obstacle links", b->areas, b->nodes, b->obstacle_links);
+    // KrunkNative: v7 prints the line above with 0 areas and draws nothing; say why
+    if (!b->areas) ui_console_printf(COL_WARN, "nav: no walkable ground under this map's spawns (nothing to draw)");
     size_t vertices = 0;
     for (int i = 0; i < NAV_LAYERS; i++) vertices += b->layers[i].n / 3;
     printf("[nav] overlay: %d areas, %d nodes, %zu vertices; navgen %.1f ms (worker), upload %.1f ms (frame), request to screen %.1f ms\n",

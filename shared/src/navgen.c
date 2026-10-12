@@ -6,6 +6,12 @@
 // NaN like JS, and loops visit nodes / areas / boxes in the JS order wherever the order can
 // change a result (ground ties, area merge, connection lists, A* ties).
 //
+// KrunkNative fixes of v7.1.4 bugs (decisions.md "v7 bugs: fix them"), which only change maps
+// whose v7 mesh is empty (no official map carries a false collision flag; Industry is the only
+// official map with no seed): collision flags by the engine's truthiness (is_non_colliding) and,
+// when no spawn seeds, a seed next to a spawn whose snapped grid point is in a wall
+// (find_seed_near_spawn).
+//
 // KrunkNative speed-ups (results unchanged):
 //   - NgGrid: the solid boxes in a uniform spatial hash. A point query reads one bucket, whose
 //     boxes are in ascending index order, so findGroundForNode's first-wins tie on equal tops
@@ -112,7 +118,23 @@ static double prefab_of(const cJSON *o) {
     return cJSON_IsNumber(v) ? v->valuedouble : NAN;
 }
 
-static int is_non_colliding(const cJSON *o) { return js_present(o, "l") || js_present(o, "col") || js_present(o, "nai"); }
+// JS truthiness of o.key
+static int js_truthy(const cJSON *o, const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+    if (!v || cJSON_IsNull(v) || cJSON_IsFalse(v)) return 0;
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0.0 && !isnan(v->valuedouble);
+    if (cJSON_IsString(v)) return v->valuestring && v->valuestring[0];
+    return 1; // true, arrays, objects
+}
+
+// isNonColliding. KrunkNative fix of a v7.1.4 bug: navmesh.ts tests `o.l != null || o.col !=
+// null || o.nai != null`, so a collidable object written as "col": false (or "l": 0) is dropped,
+// while the engine (map.js: noCol: v.l || v.col, noAICol: v.nai != null; KN map.c) keeps it. Older
+// editor exports put "col": false on every object: v7's mesh of such a map (Bhop_VIP, ClashRoyale,
+// ESP_Parkour, Slide_Neon_Stage, SniperRoyale2, Verb_Arena, zombie_high) is empty. Here l / col
+// count by truthiness like the engine, nai by presence. The official maps carry no false flag:
+// their meshes are unchanged.
+static int is_non_colliding(const cJSON *o) { return js_truthy(o, "l") || js_truthy(o, "col") || js_present(o, "nai"); }
 
 static void size_of(const cJSON *o, const cJSON *xyz, double out[3]) {
     const cJSON *si = cJSON_GetObjectItemCaseSensitive(o, "si");
@@ -470,6 +492,41 @@ static NgTrace trace_adjacent_node(const NgGrid *g, const NavGenPoint from, cons
         dy > NG_STEP ? js_max(dy, obstacle.height) : obstacle.height,
         obstacle.start, obstacle.end,
     };
+}
+
+// KrunkNative fix of a v7.1.4 bug: walkableSeeds snaps each spawn to the 12-unit grid and drops
+// it when that point has no standing room, so a map whose spawns all sit within the body radius
+// (5.2) of a wall after the snap gets no seed and an empty mesh (v7's show_navmeshes reports 0
+// areas on Industry, both versions). When no spawn gives a seed, the grid points around each
+// spawn (two rings) are tried, nearest to the spawn first, on ground within a jump of the spawn's
+// height. Only then: a map where v7 seeds from some spawns (and misses others) keeps v7's mesh.
+static int find_seed_near_spawn(const NgGrid *g, const cJSON *spawn, const NavGenPoint snapped, NgGround *out) {
+    const double sx = js_index(spawn, 0), sz = js_index(spawn, 2);
+    if (!isfinite(sx) || !isfinite(sz) || !isfinite(snapped.y)) return 0;
+    int order[24][2];
+    double dist[24];
+    int n = 0;
+    for (int dz = -2; dz <= 2; dz++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            if (!dx && !dz) continue;
+            const double x = snapped.x + dx * NG_CELL, z = snapped.z + dz * NG_CELL;
+            const double d = (x - sx) * (x - sx) + (z - sz) * (z - sz);
+            int i = n++;
+            for (; i > 0 && dist[i - 1] > d; i--) { // insertion sort, stable: ties keep row order
+                dist[i] = dist[i - 1];
+                order[i][0] = order[i - 1][0];
+                order[i][1] = order[i - 1][1];
+            }
+            dist[i] = d;
+            order[i][0] = dx;
+            order[i][1] = dz;
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        const NavGenPoint p = {snapped.x + order[i][0] * NG_CELL, snapped.y, snapped.z + order[i][1] * NG_CELL};
+        if (find_ground_for_node(g, p, out) && out->point.y >= snapped.y - (NG_JUMP + NG_STEP)) return 1;
+    }
+    return 0;
 }
 
 // ------------------------------------------------------------------------- nodes
@@ -1090,25 +1147,28 @@ NavGenMesh *navgen_build(const cJSON *map) {
         m->max_z = snap_to_grid(max_z + NG_PADDING, NG_CELL);
     }
 
-    // walkableSeeds: the ground under every spawn
-    cJSON_ArrayForEach(spawn, spawns) {
-        const NavGenPoint p = {
-            snap_to_grid(js_index(spawn, 0), NG_CELL),
-            js_or0(js_index(spawn, 1)),
-            snap_to_grid(js_index(spawn, 2), NG_CELL),
-        };
-        NgGround ground;
-        if (!find_ground_for_node(&grid, p, &ground)) continue;
-        seeds++;
-        const int id = add_node(&nodes, &grid, ground.point, ground.normal);
-        if (id < 0) goto done;
-        if (stack_n == stack_cap) {
-            stack_cap = stack_cap ? stack_cap * 2 : 1024;
-            int32_t *grown = realloc(stack, (size_t) stack_cap * sizeof(int32_t));
-            if (!grown) goto done;
-            stack = grown;
+    // walkableSeeds: the ground under every spawn (pass 0). Pass 1 (find_seed_near_spawn) only
+    // runs when pass 0 found nothing, so every mesh v7 builds stays v7's.
+    for (int pass = 0; pass < 2 && !seeds; pass++) {
+        cJSON_ArrayForEach(spawn, spawns) {
+            const NavGenPoint p = {
+                snap_to_grid(js_index(spawn, 0), NG_CELL),
+                js_or0(js_index(spawn, 1)),
+                snap_to_grid(js_index(spawn, 2), NG_CELL),
+            };
+            NgGround ground;
+            if (pass == 0 ? !find_ground_for_node(&grid, p, &ground) : !find_seed_near_spawn(&grid, spawn, p, &ground)) continue;
+            seeds++;
+            const int id = add_node(&nodes, &grid, ground.point, ground.normal);
+            if (id < 0) goto done;
+            if (stack_n == stack_cap) {
+                stack_cap = stack_cap ? stack_cap * 2 : 1024;
+                int32_t *grown = realloc(stack, (size_t) stack_cap * sizeof(int32_t));
+                if (!grown) goto done;
+                stack = grown;
+            }
+            stack[stack_n++] = id;
         }
-        stack[stack_n++] = id;
     }
 
     // the flood fill

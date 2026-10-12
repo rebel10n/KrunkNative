@@ -2,7 +2,9 @@
 // output: node / area / connection / link counts, link kinds, stats and a spawn-to-spawn
 // findGeneratedNavPath on Sandstorm and Kanji (the v3.1.1 maps and v7's), and on small maps for
 // ladders, ramps, crouch space, crates, pooled sizes (xyz / si) and noCol objects; connectivity;
-// determinism (two builds are identical); the build time of every official map.
+// determinism (two builds are identical); the build time of every official map. Regressions of
+// the two v7 bugs KrunkNative fixes (navgen.c): "col": false objects and spawns snapped into walls
+// gave empty meshes (show_navmeshes: "0 areas, 0 nodes"), checked over the whole catalogue.
 //
 // The expected numbers come from v7.1.4's navgen.ts run under node on the same JSON (esbuild
 // bundle of buildGeneratedNavMesh + findGeneratedNavPath; the recipe is in doc/console.md
@@ -213,6 +215,59 @@ int main(void) {
         cJSON *json = cJSON_Parse(small[i]);
         check_map(json, &k_small[i]);
         cJSON_Delete(json);
+    }
+
+    // Regressions (show_navmeshes printed "0 areas, 0 nodes" and drew nothing):
+    // 1. collision flags by the engine's truthiness: "col": false / "l": 0 objects collide (map.js
+    //    noCol: v.l || v.col), "nai" counts when present (noAICol: v.nai != null)
+    static const char *const flag_maps[][2] = {
+        {"{\"spawns\":[[0,0,0,0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[240,10,240],\"col\":false}]}", "441"},
+        {"{\"spawns\":[[0,0,0,0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[240,10,240],\"l\":0,\"col\":\"\"}]}", "441"},
+        {"{\"spawns\":[[0,0,0,0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[240,10,240],\"col\":true}]}", "0"},
+        {"{\"spawns\":[[0,0,0,0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[240,10,240],\"l\":1}]}", "0"},
+        {"{\"spawns\":[[0,0,0,0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[240,10,240],\"nai\":0}]}", "0"},
+    };
+    for (size_t i = 0; i < sizeof(flag_maps) / sizeof(flag_maps[0]); i++) {
+        cJSON *json = cJSON_Parse(flag_maps[i][0]);
+        NavGenMesh *fm = navgen_build(json);
+        CHECK(fm && fm->node_count == atoi(flag_maps[i][1]), "collision flags %zu: %d nodes (want %s)", i, fm ? fm->node_count : -1, flag_maps[i][1]);
+        navgen_free(fm);
+        cJSON_Delete(json);
+    }
+    // 2. a spawn whose snapped grid point is inside a wall's body radius still seeds the mesh
+    //    (v7: no seed, an empty mesh on Industry); the wall at x 4..8 is within 5.2 of x = 0
+    cJSON *walled = cJSON_Parse("{\"spawns\":[[2,0,0,0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[240,10,240]},{\"p\":[6,0,0],\"s\":[4,20,240]}]}");
+    NavGenMesh *wm = navgen_build(walled);
+    CHECK(wm && wm->node_count > 100 && wm->area_count > 0, "walled spawn seeds (%d nodes)", wm ? wm->node_count : -1);
+    navgen_free(wm);
+    cJSON_Delete(walled);
+    // 3. every catalogue map (what the client builds from: Map.raw_data is the catalogue JSON) has
+    //    a mesh, but ESP_Parkour, whose spawn stands on non-colliding ("l": 1) objects only
+    int unexpected = 0;
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const cJSON *json = map_catalog_json(i);
+        const MapCatalogEntry *entry = map_catalog_at(i);
+        if (!json || !entry) continue;
+        NavGenMesh *cm = navgen_build(json);
+        const int nodes = cm ? cm->node_count : -1;
+        navgen_free(cm);
+        if (nodes > 0) continue;
+        if (!strcmp(entry->key, "ESP_Parkour")) continue;
+        CHECK(0, "%s: empty nav mesh", entry->key);
+        unexpected++;
+    }
+    printf("Catalogue: %zu maps, %d unexpectedly empty\n", map_catalog_count(), unexpected);
+    static const Expect k_industry[] = {
+        {"industry", 1061, 564, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL},
+        {"311_industry", 1061, 564, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL},
+    };
+    for (size_t i = 0; i < 2; i++) {
+        const int index = map_catalog_index_of_key(k_industry[i].name);
+        CHECK(index >= 0, "catalogue map %s", k_industry[i].name);
+        NavGenMesh *im = index >= 0 ? navgen_build(map_catalog_json((size_t) index)) : NULL;
+        CHECK(im && im->node_count == k_industry[i].nodes && im->area_count == k_industry[i].areas, "%s: %d nodes, %d areas (v7: 0, 0)",
+              k_industry[i].name, im ? im->node_count : -1, im ? im->area_count : -1);
+        navgen_free(im);
     }
 
     // floor: one 20 x 20 area covers the middle (createNavAreasFromNodes, largest first)
