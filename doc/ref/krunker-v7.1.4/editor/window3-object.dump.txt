@@ -1,0 +1,27 @@
+H Settings
+X Settings
+X Reset All
+T General
+T Display
+T Object *
+T Quick GUI
+L[] Object Connections : switch=1
+L[] Select through invisible objects [ALT] : switch=1
+L[] Object Border Visuals : switch=1
+L[] Highlight : switch=0
+L[] Create Near : switch=0
+L[] Lightcone Boundingbox : button:Toggle
+L[] Model & Asset Boundingbox : button:Toggle
+-
+F Config open
+-
+L[] Anti Radians : switch=0
+L[] Preserve Folders : switch=1
+-
+F Snapping open
+-
+L[] Translation : sval=1 range[0.001,25,0.001]=1
+L[] Rotation : sval=1 range[0.001,45,0.001]=1
+L[] Scale : sval=1 range[0.001,25,0.001]=1
+L[] Reset Snapping : button:Reset
+-

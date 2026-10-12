@@ -1,0 +1,17 @@
+P Spray
+L[subsection] Spray : select#466[Terminal [866]..T3:33TH AM [6419]]=Krunker [2482]
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 20/0,0.01/0,20/0
+-
+F Style closed
+-
+L[] Color : color=#FFFFFF
+L[] Opacity : sval=1 range[0,1,0.1]=1
+-

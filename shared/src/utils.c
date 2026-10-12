@@ -93,6 +93,10 @@ EM_JS(char *, web_asset_url, (const char *path_ptr), {
     return stringToNewUTF8(url);
 });
 
+char *asset_url(const char *path) {
+    return path ? web_asset_url(path) : NULL;
+}
+
 // Makes sure `path` exists in MEMFS, downloading it over HTTP when it does not
 // (URL: web_asset_url, "/assets/models/x.obj" -> "<base>assets/models/x.obj"). The download is
 // synchronous from the caller's point of view thanks to ASYNCIFY, so the
@@ -193,6 +197,10 @@ void asset_prefetch_wait(const char *const *paths, const size_t count) {
 int ensure_asset_file(const char *path) {
     (void) path;
     return 1;
+}
+
+char *asset_url(const char *path) {
+    return path ? concat(path, "") : NULL;
 }
 
 int asset_prefetch(const char *path) {

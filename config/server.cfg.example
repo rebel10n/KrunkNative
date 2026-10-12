@@ -5,7 +5,7 @@
 
 // ---- identity
 hostname        "My KrunkNative Server"
-region          us-nj              // config.regionNames id shown in server lists
+region          CH                 // region code shown in server lists (SV LA CH VA, local)
 community       ""                 // network / community name in lists ("" = the coordinator's)
 tags            "fun,casual"       // extra info-query tags
 
@@ -20,7 +20,17 @@ sv_password     ""                 // players need this to join ("" = open)
 mapcycle        Burg,Sandstorm,Kanji,Littletown
 mode            ffa                // ffa | tdm | ctf | point | ... | rotation (a list rotates)
 round_seconds   0                  // 0 = the mode's game time
-// game.gravMlt  1                 // any v3.1.1 host config var: game.<var> value
+lag_comp        1                  // hits rewind targets to where the shooter saw them (v3.1.1 fetchState)
+lag_comp_anchor 1                  // 1 exact: the shot input's own client time (summed frame deltas) on the server
+                                   //   clock + ping, immune to jitter / lag spikes; 2: its arrival + ping;
+                                   //   0: v3.1.1 ping * 2 at processing (console: lagcomp anchor exact|arrival|v3)
+lag_comp_scale  1                  // 0.1..1, times each player's Lag Compensation slider (v3.1.1 lagComp)
+bots            0                  // keep N Krunker v7.1.4 bot players in the lobby (0..16, config.botLimit)
+bot_quota       0                  // or fill the lobby up to N players with bots that leave as humans join (wins over bots)
+bot_difficulty  normal             // easy | normal | hard | max | a number (like the console's bot_difficulty)
+// game.gravMlt  1                 // any Krunker v7.1.4 serverConfig var: game.<varN> value (clamped like v7)
+// host_type    comp               // play the rotation as a v7 host type: custom | comp | rent | zombies | raid
+// map_config   1                  // each map's embedded "config" applies (game.* keys on top), as in a hosted game
 motd            "Welcome to $'s new home"
 
 // ---- accounts

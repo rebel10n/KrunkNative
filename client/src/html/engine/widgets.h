@@ -229,6 +229,57 @@ void widgets_activate(Widgets *w, HtmlElem e);
 int widgets_select_index(Widgets *w, HtmlElem e);
 void widgets_select_set_index(Widgets *w, HtmlElem e, int index, int fire_events);
 
+/* ---- text editing from C (textarea / text inputs) ----------------------------- */
+
+/* Offsets are UTF-8 byte offsets into the value (clamped, snapped back to a
+ * code point start).  selection: start <= end; 0 when e is no text control. */
+int widgets_selection(Widgets *w, HtmlElem e, int *start, int *end);
+/* setSelectionRange(start, end): caret at end; the next layout scrolls it into view. */
+void widgets_set_selection(Widgets *w, HtmlElem e, int start, int end);
+/* setRangeText(text, start, end, "end") as one undo step (caret after the
+ * text).  Fires no event (the caller is the script).  0 when e is no text control. */
+int widgets_replace_range(Widgets *w, HtmlElem e, int start, int end, const char *text);
+/* Caret box in viewport CSS px (textarea and text inputs); 0 when unknown. */
+int widgets_caret_rect(Widgets *w, HtmlElem e, float *x, float *y, float *cw, float *ch);
+
+/* ---- code view: a <textarea> painted as a code editor ------------------------- */
+/* No soft wrap (horizontal scroll), tab stops every tab_size columns, an
+ * optional line-number gutter at the left of the content box, the caret line
+ * and per-line backgrounds, and per-byte-range text colours set by the owner
+ * (client/src/editor/editor_script.c: Krunker's KrunkScript window). */
+typedef struct WidgetsCodeView {
+    int tab_size;              /* columns per tab stop (<= 0: 4)                    */
+    int gutter;                /* paint line numbers                               */
+    CssColor gutter_fg, gutter_bg;
+    float gutter_pad_left, gutter_pad_right, gutter_min_w; /* number column        */
+    float gutter_extra;        /* marker column right of the numbers               */
+    float gutter_gap;          /* space between the gutter and the rows            */
+    float text_pad;            /* text inset after the gutter (and at the right)   */
+    CssColor active_line_bg;   /* the caret line when nothing is selected (a = 0: none) */
+    CssColor caret;            /* a = 0: the text colour                            */
+    CssColor selection_bg;     /* a = 0: the theme's                                */
+} WidgetsCodeView;
+
+enum { WIDGETS_SPAN_UNDERLINE = 1 };
+typedef struct WidgetsCodeSpan {
+    int start, end;            /* value bytes [start, end); sorted, not overlapping */
+    CssColor color;
+    int flags;                 /* WIDGETS_SPAN_*                                    */
+} WidgetsCodeSpan;
+
+typedef struct WidgetsCodeLine {
+    int line;                  /* 1-based logical line                              */
+    CssColor bg;               /* behind the line's text (full: the whole row)      */
+    int full;
+    uint32_t marker;           /* code point painted in the gutter's marker column (0: none) */
+    CssColor marker_color;
+} WidgetsCodeLine;
+
+/* cfg NULL turns the code view off.  The spans / lines are copied. */
+void widgets_set_code_view(Widgets *w, HtmlElem e, const WidgetsCodeView *cfg);
+void widgets_set_code_spans(Widgets *w, HtmlElem e, const WidgetsCodeSpan *spans, int n);
+void widgets_set_code_lines(Widgets *w, HtmlElem e, const WidgetsCodeLine *lines, int n);
+
 /* ---- paint ------------------------------------------------------------------- */
 
 /* Paints the control internals of `e` whose border box is `g` (local space

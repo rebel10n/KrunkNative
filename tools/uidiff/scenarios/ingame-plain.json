@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/ingame/ingame-plain.png",
+  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-plain.png",
   "size": [
     1280,
     720
@@ -11,22 +11,22 @@
     "connected": true,
     "ready": true,
     "inGame": true,
-    "mapName": "Soul Sanctum",
+    "mapName": "Kanji",
     "modeName": "Free for All",
-    "name": "Guest_1",
-    "region": "New Jersey",
-    "anim_time": 0.0,
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 0.8,
     "hud": {
       "health": 100,
       "maxHealth": 100,
       "healthSegments": 6,
-      "ammo": 30,
-      "ammoMax": 30,
+      "ammo": 28,
+      "ammoMax": 28,
       "ammoLimit": false,
       "melee": false,
       "reloading": false,
       "reloadPercent": 0,
-      "timerText": "02:42",
+      "timerText": "03:45",
       "kills": 0,
       "deaths": 0,
       "score": 0,
@@ -38,7 +38,7 @@
       "aim": 0,
       "spread": 100,
       "scoreboard": false,
-      "ping": 2,
+      "ping": 0,
       "loadout": [
         {
           "name": "Assault Rifle",
@@ -58,17 +58,8 @@
       ],
       "loadoutIndex": 0
     },
-    "chat": [
-      {
-        "text": "You have entered the Soul Sanctum",
-        "color": "#fc03ec"
-      },
-      {
-        "text": "Guest_1 joined the game",
-        "color": "#fc03ec"
-      }
-    ]
+    "chat": []
   },
   "frames": 3,
-  "note": "Plain HUD, full ammo, over flat black; regions compare the reference's opaque colours only."
+  "note": "Plain HUD in the v7 sandbox (FFA on Kanji), full ammo, over flat black."
 }

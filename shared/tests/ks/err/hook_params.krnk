@@ -1,0 +1,2 @@
+# side: server
+public action onGameEnd(num x) {}

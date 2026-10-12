@@ -11,6 +11,7 @@ out float view_depth;
 out vec4 shadow_coord;
 out float vertex_shade;
 out vec3 vertex_color;
+out vec4 clip_pos; // WP-F skin projection (render.js vTexCoords): the clip-space position
 flat out int face_idx;
 
 uniform mat4 transform;
@@ -22,6 +23,9 @@ uniform mat4 shadow_matrix; // sun shadow: world -> [0,1] shadow-map coords (sha
 uniform float wave_height;   // 0: no waves
 uniform float wave_speed;
 uniform float liquid_value;  // liquidVal at the last 50 ms liquid update
+// THREE.Sprite (map-G: SPRITE, "msp" sprites): the XY unit quad is laid out in view space around
+// the transformed origin, scaled by the transform's x / y axis lengths (sizeAttenuation true)
+uniform bool sprite;
 
 void main() {
     tex_coord = v_tex_coord;
@@ -36,8 +40,15 @@ void main() {
 
     vec4 transformed_pos = transform * vec4(position, 1.0);
     vec4 view_pos = camera_world_inverse * transformed_pos;
+    if (sprite) {
+        vec2 scale = vec2(length(transform[0].xyz), length(transform[1].xyz));
+        view_pos = camera_world_inverse * transform * vec4(0.0, 0.0, 0.0, 1.0);
+        view_pos.xy += position.xy * scale;
+        transformed_pos = inverse(camera_world_inverse) * view_pos;
+    }
     world_pos = transformed_pos.xyz;
     shadow_coord = shadow_matrix * transformed_pos;
     view_depth = -view_pos.z; // three.js fogDepth = -mvPosition.z (view-space depth, not distance)
     gl_Position = camera_projection * view_pos;
+    clip_pos = gl_Position;
 }

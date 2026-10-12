@@ -22,6 +22,8 @@
 #include "social_ws.h"
 #include "roles.h"
 #include "finder.h"
+#include "releases.h"
+#include "build_info.h"
 #include "knsvc/config.h"
 #include "knsvc/db.h"
 #include "knsvc/http.h"
@@ -44,6 +46,7 @@ static int registry_module_init(Brain *b) {
  * line each here (anchored edit) plus their sources in CMakeLists.txt. */
 static const BrainModule k_brain_modules[] = {
     {"registry", registry_module_init, NULL},
+    {"releases", releases_init, releases_shutdown}, /* latest server build (releases.h) */
     {"federation", federation_init, federation_shutdown},
     /* svc-accounts modules go here (accounts, social WS) */
     {"accounts", accounts_init, accounts_shutdown},
@@ -143,7 +146,7 @@ int main(int argc, char **argv) {
             kn_config_free(cfg);
             return 0;
         } else if (!strcmp(argv[i], "--version")) {
-            printf("kn_brain %s\n", KN_BRAIN_VERSION);
+            printf("kn_brain %s, build %s\n", KN_BRAIN_VERSION, kn_build_string());
             kn_config_free(cfg);
             return 0;
         } else {

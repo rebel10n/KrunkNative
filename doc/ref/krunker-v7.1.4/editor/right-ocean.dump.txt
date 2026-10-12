@@ -1,0 +1,10 @@
+P Ocean
+L[] Enabled : switch=0
+L[] Water Color : color=#001e0f
+L[] Opacity : sval=0.9 range[0,1,0.1]=0.9
+L[] Distortion : sval=3.7 range[0,10,0.01]=3.7
+L[] Wave Speed : sval=1 range[0.1,5,0.1]=1
+L[] Y Offset : sval=-1 range[-1000,1000,0.01]=-1
+L[] Reflection Resolution : select#6[32..2048]=128
+L[] Width : sval=1000 range[100,20000,1]=1000
+L[] Length : sval=1000 range[100,20000,1]=1000

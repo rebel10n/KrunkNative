@@ -1,0 +1,128 @@
+{
+ "config": {
+  "cls": {
+   "0": {
+    "name": "Hunter",
+    "speed": 1,
+    "health": 150,
+    "segs": 5,
+    "jpC": 2
+   },
+   "1": {
+    "health": 150,
+    "jpC": 2
+   },
+   "2": {
+    "name": "Hunter",
+    "speed": 1,
+    "health": 150,
+    "segs": 5,
+    "jpC": 2,
+    "wallJ": false,
+    "wallJM": 0,
+    "secondary": true
+   },
+   "3": {
+    "name": "Hunter",
+    "speed": 1,
+    "slA": 1,
+    "health": 150,
+    "segs": 5,
+    "regen": 0.1,
+    "jpC": 2,
+    "secondary": true
+   },
+   "4": {
+    "name": "Hunter",
+    "health": 150,
+    "segs": 5,
+    "jpC": 2
+   },
+   "5": {
+    "name": "Hunter",
+    "health": 150,
+    "segs": 5,
+    "jpC": 2,
+    "secondary": true
+   },
+   "6": {
+    "name": "Hunter",
+    "health": 150,
+    "segs": 5,
+    "jpC": 2
+   },
+   "7": {
+    "name": "Hunter",
+    "speed": 1,
+    "health": 150,
+    "segs": 5,
+    "jpC": 2
+   },
+   "8": {
+    "name": "Hunter",
+    "speed": 1,
+    "health": 150,
+    "segs": 5,
+    "jpC": 2,
+    "wallJ": false,
+    "wallJM": 0,
+    "secondary": true
+   },
+   "9": {
+    "name": "Hunter",
+    "health": 150,
+    "segs": 5,
+    "regen": 0.1,
+    "jpC": 2,
+    "throwChrg": 800,
+    "wallJ": false,
+    "wallJM": 0,
+    "secondary": true
+   },
+   "10": {
+    "name": "Hunter",
+    "health": 150,
+    "jpC": 2,
+    "secondary": true
+   },
+   "11": {
+    "name": "Hunter",
+    "health": 150,
+    "segs": 5,
+    "jpC": 2
+   },
+   "12": {
+    "name": "Hunter",
+    "health": 150,
+    "segs": 5,
+    "jpC": 2
+   },
+   "13": {
+    "name": "Hunter",
+    "speed": 1,
+    "slT": 1,
+    "health": 150,
+    "segs": 5,
+    "jpC": 2,
+    "wallJ": false,
+    "wallJM": 0,
+    "secondary": true
+   },
+   "14": {
+    "name": "Hunter",
+    "speed": 1,
+    "segs": 5,
+    "jpC": 2,
+    "wallJ": false,
+    "wallJM": 0,
+    "secondary": true
+   },
+   "15": {
+    "name": "Hunter",
+    "health": 150,
+    "jpC": 2
+   }
+  }
+ },
+ "gui": null
+}

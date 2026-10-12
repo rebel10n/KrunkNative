@@ -18,6 +18,10 @@ make pages                     # make web + deploy/pages/deploy.sh
 deploy/pages/deploy.sh         # an existing dist/web
 ```
 
+`stage.py` also writes a top-level `404.html`: without one Pages runs the site as an SPA and
+answers every unknown path with `index.html` (200, text/html), so a missing image "loads" HTML
+instead of failing. Pages links are real files (`/`, `/social`, `*.html`), nothing needs the fallback.
+
 `deploy.sh` runs `stage.py` (dist/web -> dist/pages) and `wrangler pages deploy` (pinned
 version). Credentials: `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`, else
 `~/.config/kn-secrets/cloudflare.env`. CI does not deploy Pages (deploy-kru.yml only runs
@@ -90,3 +94,11 @@ A records are deliberately not redirected: released native clients have them com
 and neither 301 nor 308 helps there (CORS preflights and WebSocket upgrades do not follow
 redirects, game servers are not HTTP). They keep pointing at the same tunnel / IPs until
 the old clients are gone.
+
+## Cache purge
+
+`deploy.sh` ends by purging Cloudflare's edge cache for the page hosts (`KN_PURGE_HOSTS`,
+default `krunk.io www.krunk.io`, zone `KN_PURGE_ZONE`) so every client loads the new build on
+its next page load. CI (deploy-kru.yml) runs the same script, so every deploy purges. The
+hashed `client.<hash>.*` files and `?v=` assets change URL with each build and are not purged.
+The token needs Zone Read + Cache Purge on the zone; `KN_PURGE_HOSTS=` skips the purge.

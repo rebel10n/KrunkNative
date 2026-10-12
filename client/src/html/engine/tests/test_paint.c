@@ -1,8 +1,10 @@
 /*
  * test_paint.c - DlItem sequence tests for paint.c over hand-made Box trees.
  *
- * Build (throwaway, see README): a /tmp CMake project compiling this file,
- * paint.c and util.c (or a stub) with the engine dir on the include path.
+ * Build (throwaway, from the repository root):
+ *   clang -std=c11 -g -fsanitize=address,undefined -Iclient/src/html/engine -Iclient/include \
+ *      -Ishared/include -Ishared/lib/cJSON client/src/html/engine/paint.c client/src/html/engine/util.c \
+ *      client/src/html/engine/tests/test_paint.c -lm -o test_paint && ./test_paint
  * Text and image modules are stubbed here so no FreeType / GL is needed.
  */
 #include <limits.h>

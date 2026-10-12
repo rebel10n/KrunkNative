@@ -1,6 +1,7 @@
 #include <math.h>
 #include <shared.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef WIN32
 #include <direct.h>
@@ -17,13 +18,31 @@
 #define FEEL_COUNT 7
 static const char *feel_names[FEEL_COUNT] = {"step_val", "step_chase", "bob_anim_y", "bob_anim_z", "lean_anim_x", "lean_anim_y", "lean_anim_z"};
 
+// v7 movement state a tick can also carry (state[14..19], tools/kref/movement-synth-v7.js):
+// wallJumpC, canSlideT (ms), onPad, onGround, crouchVal, slideTimer (ms), and health in runs
+// recorded on the sandbox authority (meta.authority: server-only paths such as fall damage).
+#define V7_COUNT 7
+static const char *v7_names[V7_COUNT] = {"wall_jump_count", "can_slide_timer_ms", "on_pad", "on_ground", "crouch_val", "slide_timer_ms", "health"};
+
 typedef struct {
     vec3 position;
     vec3 velocity;
     float *ramp_fix;
     int has_feel;
     float feel[FEEL_COUNT];
+    int has_v7; // number of v7 fields present (6, or 7 with health)
+    float v7[V7_COUNT];
 } PlayerState;
+
+static void player_v7_values(const Player *player, float out[V7_COUNT]) {
+    out[0] = (float) player->wall_jump_count;
+    out[1] = player->can_slide_timer * 1000.0f;
+    out[2] = player->on_pad;
+    out[3] = player->on_ground;
+    out[4] = player->crouch_val;
+    out[5] = player->slide_timer * 1000.0f;
+    out[6] = player->health;
+}
 
 static void player_feel_values(const Player *player, float out[FEEL_COUNT]) {
     out[0] = player->step_val;
@@ -61,8 +80,9 @@ int parse_tick(const cJSON *raw, Tick *out) {
     out->input.crouch = (int) get_num(raw_input, 5);
     out->input.scope = (int) get_num(raw_input, 6);
 
+    // Krunker movDirs index i (-PI + (i + 1) * PI / 4) -> KrunkNative move_dir k (-PI / 2 + k * PI / 4)
     if (out->input.move_dir != -1) {
-        out->input.move_dir += 7;
+        out->input.move_dir = (out->input.move_dir + 7) % 8;
     }
 
     out->expected.position.x = get_num(raw_state, 0);
@@ -80,6 +100,11 @@ int parse_tick(const cJSON *raw, Tick *out) {
     if (cJSON_GetArraySize(raw_state) >= 7 + FEEL_COUNT) {
         out->expected.has_feel = 1;
         for (int i = 0; i < FEEL_COUNT; i++) out->expected.feel[i] = get_num(raw_state, 7 + i);
+    }
+
+    if (cJSON_GetArraySize(raw_state) >= 7 + FEEL_COUNT + V7_COUNT - 1) {
+        out->expected.has_v7 = MIN(cJSON_GetArraySize(raw_state) - 7 - FEEL_COUNT, V7_COUNT);
+        for (int i = 0; i < out->expected.has_v7; i++) out->expected.v7[i] = get_num(raw_state, 7 + FEEL_COUNT + i);
     }
 
     return 0;
@@ -127,7 +152,12 @@ int validate_tick(const Player *player, const PlayerState *expected, const int i
     int feel_bad = 0;
     for (int f = 0; expected->has_feel && f < FEEL_COUNT; f++) feel_bad |= fabsf(feel[f] - expected->feel[f]) > EPSILON;
 
-    const int bad = x || y || z || vx || vy || vz || ramp_fix || feel_bad;
+    float v7[V7_COUNT];
+    player_v7_values(player, v7);
+    int v7_bad = 0;
+    for (int f = 0; f < expected->has_v7; f++) v7_bad |= fabsf(v7[f] - expected->v7[f]) > EPSILON;
+
+    const int bad = x || y || z || vx || vy || vz || ramp_fix || feel_bad || v7_bad;
 
     if (bad) {
         printf("Failed at tick #%d! \n", i);
@@ -144,11 +174,12 @@ int validate_tick(const Player *player, const PlayerState *expected, const int i
         print_field_delta("vel_y", expected->velocity.y, player->velocity.y);
         print_field_delta("vel_z", expected->velocity.z, player->velocity.z);
 
-        if (expected->ramp_fix) {
-            print_field_delta("ramp_fix", *expected->ramp_fix, player->ramp_fix ? *player->ramp_fix : 0.0f);
+        if (expected->ramp_fix || player->ramp_fix) {
+            print_field_delta(expected->ramp_fix ? "ramp_fix" : "ramp_fix (expected none)", expected->ramp_fix ? *expected->ramp_fix : 0.0f, player->ramp_fix ? *player->ramp_fix : 0.0f);
         }
 
         for (int f = 0; expected->has_feel && f < FEEL_COUNT; f++) print_field_delta(feel_names[f], expected->feel[f], feel[f]);
+        for (int f = 0; f < expected->has_v7; f++) print_field_delta(v7_names[f], expected->v7[f], v7[f]);
 
         printf("|--------------------------------|--------------------------------|--------------------------------|--------------------------------|\n");
     }
@@ -204,18 +235,75 @@ const char *get_project_root() {
 
 static int g_failures = 0;
 
+// The map a fixture names (meta.map): assets/maps/<map>.json, configured once per switch.
+// game_configure free()s a previous map list it assumes is malloc()'d, so map_count is reset first.
+static char g_map_name[64];
+
+static int use_map(Game *game, const char *map) {
+    if (!strcmp(g_map_name, map)) return 1;
+    char file[160];
+    // a name with a '/' is a fixture path from the project root (shared/tests/maps/...)
+    snprintf(file, sizeof(file), strchr(map, '/') ? "%s.json" : "assets/maps/%s.json", map);
+    char *path = concat(get_project_root(), file);
+    const cJSON *json = load_json(path);
+    free(path);
+    if (!json) {
+        printf("Failed to load map %s! \n", map);
+        return 0;
+    }
+    game->map_count = 0;
+    game_configure(game, NULL, &json, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(game, 0, -1, 1);
+    snprintf(g_map_name, sizeof(g_map_name), "%s", map);
+    return 1;
+}
+
+// v7 fixture header (tools/kref/movement-synth-v7.js): the class, the weapon in slot 0 and the
+// Game.config values the v7 run pinned. Only the movement settings that differ from the
+// defaults are applied, and the defaults come back after the run.
+static void apply_meta(Player *player, const cJSON *meta, GameConfig *saved) {
+    Game *game = player->game;
+    *saved = game->config;
+    const cJSON *config = cJSON_GetObjectItem(meta, "config");
+    const cJSON *v;
+    if ((v = cJSON_GetObjectItem(config, "airStrf"))) game->config.air_strafe = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(config, "autoJump"))) game->config.auto_jump = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(config, "canSlide"))) game->config.can_slide = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(config, "disableB"))) game->config.disable_borders = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(config, "fixMov"))) game->config.fixed_movement = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(config, "headClipFix"))) game->config.head_clip_fix = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(config, "slidSpd")) && cJSON_IsNumber(v)) game->config.slide_speed = (float) v->valuedouble;
+    if ((v = cJSON_GetObjectItem(config, "slidTime")) && cJSON_IsNumber(v)) game->config.slide_time = (float) v->valuedouble;
+    if ((v = cJSON_GetObjectItem(config, "strafeSpd")) && cJSON_IsNumber(v)) game->config.strafe_speed = (float) v->valuedouble;
+    if ((v = cJSON_GetObjectItem(config, "gravMlt")) && cJSON_IsNumber(v)) game->config.gravity_mlt = (float) v->valuedouble;
+    if ((v = cJSON_GetObjectItem(config, "jumpMlt")) && cJSON_IsNumber(v)) game->config.jump_mlt = (float) v->valuedouble;
+    if ((v = cJSON_GetObjectItem(config, "wallJP")) && cJSON_IsNumber(v)) game->config.wall_jump = (float) v->valuedouble;
+    if ((v = cJSON_GetObjectItem(config, "fallDmg")) && cJSON_IsNumber(v)) game->config.fall_damage = (float) v->valuedouble;
+    if ((v = cJSON_GetObjectItem(config, "fallDmgThr")) && cJSON_IsNumber(v)) game->config.fall_damage_threshold = (float) v->valuedouble;
+    const cJSON *class_index = cJSON_GetObjectItem(meta, "classIndex");
+    player->class_index = cJSON_IsNumber(class_index) ? class_index->valueint : 0;
+}
+
 void run_test(const char *name, Player *player) {
-    // Absolute paths (CLI replay of recorded/synthetic v3.1.1 runs) are used as is.
+    // Absolute paths (CLI replay of recorded/synthetic runs) are used as is.
     char *test_base_path = concat(get_project_root(), "shared/tests/inputs/");
     char *test_path = name[0] == '/' ? concat(name, "") : concat(test_base_path, name);
 
-    const cJSON *raw_ticks = load_json(test_path);
+    const cJSON *raw = load_json(test_path);
 
     free(test_base_path);
     free(test_path);
 
-    if (!raw_ticks) {
+    if (!raw) {
         printf("Failed to parse %s, skipping... \n", name);
+        g_failures++;
+        return;
+    }
+
+    // v7 fixtures: {"meta": {...}, "ticks": [...]}; older ones: the bare tick array
+    const cJSON *meta = cJSON_GetObjectItem(raw, "meta");
+    const cJSON *raw_ticks = cJSON_IsObject(raw) ? cJSON_GetObjectItem(raw, "ticks") : raw;
+    if (meta && !use_map(player->game, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "map")))) {
         g_failures++;
         return;
     }
@@ -239,36 +327,66 @@ void run_test(const char *name, Player *player) {
         return;
     }
 
+    GameConfig saved_config = player->game->config;
+    player->class_index = 0;
+    if (!player->game->player_count) game_players_add(player->game, player); // game_init (a map switch) clears the list
+    if (meta) apply_meta(player, meta, &saved_config);
     player_spawn(player);
 
-    player->position = ticks[0].expected.position;
-    player->wall_jump = !strcmp(name, "wall_jump.json");
-    // Recorded/synthetic runs start from a long-alive v3.1.1 player: no spawn swap delay.
-    if (name[0] == '/') player->swap_timer = 0.0f;
+    // the weapon the v7 run held (meta.weapon) when the class primary differs
+    const cJSON *weapon = meta ? cJSON_GetObjectItem(meta, "weapon") : NULL;
+    if (cJSON_IsNumber(weapon) && player->loadout_size && player->loadout[0] != weapon->valueint &&
+        weapon->valueint >= 0 && (size_t) weapon->valueint < player->game->weapon_count && player->game->weapons[weapon->valueint]) {
+        player->loadout[0] = weapon->valueint;
+        player->ammo[0] = (int) player->game->weapons[weapon->valueint]->ammo;
+        player_swap_weapon(player, 0, 1, 1, 0);
+    }
 
-    // Ticks carrying feel values were recorded from the local (rendered) player.
-    player->is_you = player->render_you = tick_count > 0 && ticks[0].expected.has_feel;
+    player->position = ticks[0].expected.position;
+    if (!meta) player->wall_jump = !strcmp(name, "wall_jump.json");
+    // Recorded/synthetic runs start from a long-alive player: no spawn swap delay.
+    if (name[0] == '/' || meta) player->swap_timer = 0.0f;
+
+    // Ticks carrying feel values were recorded from the local (rendered) player; v7 runs on the
+    // sandbox authority (meta.authority) from its server-side player, which has no feel.
+    player->is_you = player->render_you = tick_count > 0 && ticks[0].expected.has_feel && !cJSON_IsTrue(cJSON_GetObjectItem(meta, "authority"));
     if (player->is_you) {
         player->direction.x = ticks[0].input.x_dir;
         player->direction.y = ticks[0].input.y_dir;
     }
 
+    free(player->ramp_fix); // a failed run can leave one behind
+    player->ramp_fix = NULL;
+
+    // KN_PROC_TRACE=1: print every tick's position / velocity error (debugging a parity drift)
+    const int trace = getenv("KN_PROC_TRACE") != NULL;
+    int ok = 1;
     for (int i = 0; i < tick_count; i++) {
+        if (trace) {
+            const PlayerState *e = &ticks[i].expected;
+            printf("#%d mv %d j %d c %d | dx %+.6f dy %+.6f dz %+.6f dvx %+.6f dvy %+.6f dvz %+.6f | y %.4f g %d lad %d wall %d\n", i,
+                   ticks[i].input.move_dir, ticks[i].input.jump, ticks[i].input.crouch,
+                   player->position.x - e->position.x, player->position.y - e->position.y, player->position.z - e->position.z,
+                   player->velocity.x - e->velocity.x, player->velocity.y - e->velocity.y, player->velocity.z - e->velocity.z,
+                   player->position.y, player->on_ground, player->on_ladder, player->on_wall);
+        }
         if (!validate_tick(player, &ticks[i].expected, i)) {
-            free(ticks);
             g_failures++;
-            return;
+            ok = 0;
+            break;
         }
 
         player_proc_input(player, &ticks[i].input, 0, 0);
     }
 
-    printf("Test OK\n");
+    if (ok) printf("Test OK\n");
     free(ticks);
+    player->game->config = saved_config;
+    player->class_index = 0;
 }
 
-// proc_input_test <map.json> <ticks.json>...: replay recorded/synthetic v3.1.1 input
-// runs (tools/kref/movement-synth.js / movement-rec.js) on one map.
+// proc_input_test <map.json> <ticks.json>...: replay recorded/synthetic input runs
+// (tools/kref/movement-synth-v7.js) on one map (v7 fixtures switch to their meta.map).
 static int replay_main(const int argc, char **argv) {
     const cJSON *map = load_json(argv[1]);
     if (!map) {
@@ -389,7 +507,8 @@ static void run_input_rule_tests(Player *player) {
     player->crouch_val = 0.0f;
     input.delta = -0.01f;
     player_proc_input(player, &input, 0, 1);
-    RULE_CHECK(player->crouch_val == 0.0f, "negative delta runs as 0 (crouch %.6f)", player->crouch_val);
+    // v7.1.4: Math.max(0.1, ...): a negative or zero delta runs as 0.1 ms (crouchVal 0.0007 -> 0.001)
+    RULE_CHECK(fabsf(player->crouch_val - 0.001f) < 1e-6f, "negative delta runs as 0.1 ms (crouch %.6f)", player->crouch_val);
     input.delta = 0.0164f; // 16 ms
     input.x_dir = 0.0004f; // below 0.0005 rad: rounds to 0
     player_proc_input(player, &input, 0, 1);
@@ -415,45 +534,72 @@ static void run_input_rule_tests(Player *player) {
     if (g_failures == failures) printf("Test OK\n");
 }
 
+// Generated from the real Krunker v7.1.4 client by tools/kref/movement-synth-v7.js at fixed
+// frame rates (33 / 17 / 7 ms = 30 / 60 / 144 fps). Each file names its map, class, weapon and
+// game settings (meta) and checks position, velocity, rampFix, the first-person feel values
+// (step / bob / lean) and the v7 movement state (wall jumps, slide lock, pads, ground, crouch,
+// slide timer) before every tick. Same tolerance for every field: EPSILON.
+static const char *v7_tests[] = {
+    "v7_walk_60fps.json", "v7_walk_144fps.json",                 // ground accel, class speed 1.05, step bob
+    "v7_walk_diag_60fps.json", "v7_walk_diag_144fps.json",       // diagonal strafe speed (strafeSpd), wall contact
+    "v7_jump_60fps.json", "v7_jump_144fps.json",                 // jump velocity, landing
+    "v7_hold_jump_60fps.json", "v7_hold_jump_144fps.json",       // held jump (v7 sends it while held): one jump
+    "v7_sprint_jump_30fps.json", "v7_sprint_jump_144fps.json",   // jump push, ramp landing
+    "v7_crouch_slide_144fps.json", "v7_crouch_slide_60fps.json", "v7_crouch_slide_30fps.json", // landing slide, canSlideT
+    "v7_crouch_walk_30fps.json", "v7_crouch_walk_144fps.json",   // crouch speed, crouch bob, crouchVal.round(3)
+    "v7_crouch_60fps.json", "v7_crouch_144fps.json",
+    "v7_aim_walk_60fps.json", "v7_aim_walk_144fps.json",         // aim slow while walking
+    "v7_scope_60fps.json", "v7_scope_144fps.json",
+    "v7_turn_jump_144fps.json",                                  // turning in the air
+    "v7_look_60fps.json",                                        // lean sway signs (yaw/pitch), strafe step
+    "v7_ladder_60fps.json", "v7_ladder_144fps.json",             // climb up, then down past the bottom (no clamp)
+    "v7_collide_60fps.json", "v7_collide_144fps.json",           // pushing into a wall
+    "v7_ramp_60fps.json", "v7_ramp_144fps.json",                 // ramp climb, rampFix
+    "v7_spawn_60fps.json", "v7_spawn_144fps.json",               // drop onto the floor
+    "v7_wall_jump_60fps.json", "v7_wall_jump_144fps.json",       // Run N Gun wall jump
+    "v7_wall_jump_limit_60fps.json", "v7_wall_jump_limit_144fps.json", // wallJM 2 (Run N Gun)
+    "v7_wall_jump_agent_60fps.json", "v7_wall_jump_agent_144fps.json", // wallJM 3 (Agent)
+    "v7_wall_jump_reset_60fps.json",                             // the count resets on landing
+    "v7_wall_slide_60fps.json", "v7_wall_slide_144fps.json",     // crouched wall slide: gravity x wallJD
+    "v7_ramp_crouch_descend_60fps.json", "v7_ramp_crouch_descend_144fps.json", // crouching on the way down a ramp (S1)
+    "v7_slide_relock_60fps.json", "v7_slide_relock_144fps.json", // canSlide: crouchVal <= 0.5 before a new slide
+    "v7_slide_steer_60fps.json", "v7_slide_steer_144fps.json",   // the slide follows the look direction
+    "v7_slide_class_snp_60fps.json", "v7_slide_class_snp_144fps.json",         // slA 0.98, speed 0.9
+    "v7_slide_class_trooper_60fps.json", "v7_slide_class_trooper_144fps.json", // slT 1.1, speed 0.9
+    "v7_class_walk_hunter_60fps.json", "v7_class_walk_hunter_144fps.json",     // speed 1.0
+    "v7_class_walk_snp_60fps.json", "v7_class_walk_snp_144fps.json",           // speed 0.9
+    "v7_class_walk_trooper_60fps.json", "v7_class_walk_trooper_144fps.json",   // speed 0.9
+    "v7_air_strafe_60fps.json", "v7_air_strafe_144fps.json",     // airStrf: x1.0, strafe and forward diagonals
+    "v7_auto_jump_hold_60fps.json", "v7_auto_jump_hold_144fps.json", // autoJump with jump held
+    "v7_border_jump_60fps.json", "v7_border_jump_144fps.json",   // jumping at a border wall
+    "v7_border_drop_60fps.json",                                 // falling into a border's 500-unit extension
+    "v7_delta_zero_60fps.json",                                  // 0 ms frames run as 0.1 ms
+    "v7_jump_pad_30fps.json", "v7_jump_pad_144fps.json",         // Kanji pad
+    "v7_jump_pad_edge_60fps.json", "v7_jump_pad_edge_144fps.json", // pad box from the map scale
+    "v7_soul_spawn_60fps.json", "v7_soul_spawn_30fps.json",      // Soul Sanctum's spawn disk (cylinder top)
+    "v7_fixmov_walk_60fps.json", "v7_fixmov_walk_144fps.json",   // fixMov: exact exponential integration
+    "v7_minigun_nojump_60fps.json", "v7_minigun_nojump_144fps.json", // Minigun: spdMlt 0.5, noJump
+    // shared/tests/maps/v7_player_movement.json
+    "v7_pad_down_60fps.json", "v7_pad_down_144fps.json",         // d 1: pushes down
+    "v7_pad_x_60fps.json", "v7_pad_x_144fps.json",               // d 2: +x
+    "v7_pad_z_60fps.json", "v7_pad_z_144fps.json",               // d 3: +z
+    "v7_pad_neg_x_60fps.json", "v7_pad_neg_x_144fps.json",       // d 4: -x
+    "v7_pad_neg_z_60fps.json", "v7_pad_neg_z_144fps.json",       // d 5: -z, bm 2
+    "v7_pad_bounce_zero_60fps.json", "v7_pad_bounce_zero_144fps.json", // bm 0 (v3.1.1 read it as 1)
+    "v7_pad_on_block_60fps.json", "v7_pad_on_block_144fps.json", // a pad on a block (wasOnPad keeps velocity.y)
+    "v7_pad_crouch_60fps.json", "v7_pad_crouch_144fps.json",     // cr: crouching does not halve the push
+    "v7_slide_lock_60fps.json", "v7_slide_lock_144fps.json",     // a second landing inside canSlideT (100 ms) does not slide
+    "v7_cylinder_side_60fps.json", "v7_cylinder_side_144fps.json", // two cylinder side pushes in one tick
+    "v7_head_clip_60fps.json", "v7_head_clip_144fps.json",       // standing up under a low ceiling
+    "v7_head_clip_fix_60fps.json", "v7_head_clip_fix_144fps.json", // ... with headClipFix
+    "v7_fall_damage_30fps.json", "v7_fall_damage_60fps.json",    // fallDmg 10 / fallDmgThr 0.1 (authority): landing damage
+};
+
 int main(const int argc, char **argv) {
     if (argc > 2) return replay_main(argc, argv);
 
-    const char *tests[] = {
-        "collide.json",
-        "crouch.json",
-        "jump.json",
-        "scope.json",
-        "slide.json",
-        "spawn.json",
-        "walk_forwards.json",
-        "walk_ladder.json",
-        "walk_ramp.json",
-        "wall_jump.json",
-        // Generated from the real v3.1.1 client by tools/kref/movement-synth.js at fixed
-        // frame rates; these also check the first-person feel values (step/bob/lean).
-        "v3_walk_diag_60fps.json",     // diagonal strafe speed (config.strafeSpd)
-        "v3_aim_walk_60fps.json",      // aim slow while walking
-        "v3_crouch_slide_144fps.json", // sprint -> jump -> crouch slide, slide timer expiry
-        "v3_sprint_jump_30fps.json",   // jump push, landing, step bob
-        "v3_look_60fps.json",          // lean sway signs (yaw/pitch), strafe step
-        "v3_ladder_60fps.json",        // ladder climb, ladder step x1.4
-        "v3_turn_jump_144fps.json",    // turning in the air
-        "v3_crouch_walk_30fps.json",   // crouch speed, crouch bob, crouchVal.round(3)
-    };
-
-    char *sandstorm_path = concat(get_project_root(), "assets/maps/sandstorm.json");
-    const cJSON *sandstorm = load_json(sandstorm_path);
-
-    free(sandstorm_path);
-
-    if (!sandstorm) {
-        printf("Failed to load sandstorm! \n");
-        return 1;
-    }
-
     Game game = {};
-    game_configure(&game, NULL, &sandstorm, 1, NULL, 0, NULL, 0, NULL, 0);
-    game_init(&game, 0, -1, 1);
+    if (!use_map(&game, "sandstorm")) return 1;
 
     Player *player = player_init(&game);
 
@@ -464,32 +610,39 @@ int main(const int argc, char **argv) {
 
     game_players_add(&game, player);
 
-    for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
-        run_test(tests[i], player);
+    for (size_t i = 0; i < sizeof(v7_tests) / sizeof(v7_tests[0]); i++) {
+        run_test(v7_tests[i], player);
         printf("\n");
     }
 
+    if (!use_map(&game, "sandstorm")) return 1;
     run_input_rule_tests(player);
     printf("\n");
 
-    char *kanji_path = concat(get_project_root(), "assets/maps/kanji.json");
-    const cJSON *kanji = load_json(kanji_path);
-
-    free(kanji_path);
-
-    if (!kanji) {
-        printf("Failed to load sandstorm! \n");
-        return 1;
+    // Soul Sanctum's spawn stands on a cylinder top (y 3): v7 collides with it inclusively,
+    // so the player stays grounded (no onGround flicker, no step sound every other tick).
+    if (!use_map(&game, "soul_sanctum")) return 1;
+    printf("Running Soul Sanctum spawn landing test...\n");
+    const int failures = g_failures;
+    player_spawn(player);
+    player->position = (vec3) {1.0f, 4.0f, 0.0f};
+    player->velocity = (vec3) {0};
+    player->is_you = player->render_you = 1;
+    player->land_events = 0;
+    Input idle = {0};
+    idle.move_dir = -1;
+    idle.delta = 0.017f;
+    int grounded_since = -1, ungrounded_after = 0;
+    for (int i = 0; i < 180; i++) {
+        player_proc_input(player, &idle, 0, 0);
+        if (player->on_ground && grounded_since < 0) grounded_since = i;
+        else if (!player->on_ground && grounded_since >= 0) ungrounded_after++;
     }
-
-    game.map_count = 0; // hack: game_configure free()'s maps (assumes maps is malloc()'d), so to prevent that we set map_count to 0
-
-    game_configure(&game, NULL, &kanji, 1, NULL, 0, NULL, 0, NULL, 0);
-    game_init(&game, 0, -1, 1);
-
-    run_test("kanji_jump_pad.json", player);
-    printf("\n");
-    run_test("v3_kanji_jump_pad_30fps.json", player);
+    RULE_CHECK(grounded_since >= 0 && fabsf(player->position.y - 3.0f) < 1e-4f, "lands on the spawn disk (y %.4f)", player->position.y);
+    RULE_CHECK(ungrounded_after == 0, "stays grounded on the disk (%d airborne ticks after landing)", ungrounded_after);
+    RULE_CHECK(player->land_events == 1, "one landing, got %d", player->land_events);
+    player->is_you = player->render_you = 0;
+    if (g_failures == failures) printf("Test OK\n");
 
     return g_failures ? 1 : 0;
 }

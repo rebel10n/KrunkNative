@@ -1,0 +1,28 @@
+2 7 Alice 100 true 1.5 -3
+42.5 7 3 true true false true
+true 100
+100
+{
+  "id": "7",
+  "username": "Alice",
+  "health": 100,
+  "position": {
+    "x": 1.5,
+    "y": 3,
+    "z": 0
+  },
+  "isYou": true,
+  "velocity": {
+    "x": 0,
+    "y": 0,
+    "z": 0
+  },
+  "tag": "custom"
+}
+id,username,health,position,isYou,velocity,respawn,explode,disableDefault,getAsset,
+true {} {}
+7.5 1700000000000 16 6.283185307179586 2.718281828459045
+via action value
+custom 3 100
+!RUNTIME ERROR: Internal Error "Player.explode"
+after undefined undefined

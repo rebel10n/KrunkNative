@@ -3,6 +3,9 @@
 #include <brain.h>
 #include <info_query.h>
 #include <rcon.h>
+#include <bots.h>
+#include <ks_server.h> // KrunkScript server host
+#include <build_info.h>
 #include <pthread.h>
 #include <pcg_basic.h>
 #include <errno.h>
@@ -25,7 +28,6 @@ const ServerVersion g_server_version = {1, 0, 0};
 ServerTickStats g_server_tick_stats;
 
 Replxx *g_replxx;
-Server *g_server;
 
 // ------------------------------------------------------------------ signals
 //
@@ -128,6 +130,23 @@ void server_request_drain(const char *why) {
     g_drain_requested = 1;
 }
 
+// server.cfg bots / bot_quota / bot_difficulty: the v7.1.4 bot manager (shared/src/bots.c)
+// keeps that many bot players in the lobby. The difficulty applies like `bot_difficulty`.
+static void server_configure_bots(const GsConfig *cfg) {
+    const int quota = cfg->bot_quota > 0 ? cfg->bot_quota : cfg->bots;
+    if (quota <= 0) return;
+    float difficulty = BOT_DIFFICULTY_NORMAL;
+    if (!bot_parse_difficulty(cfg->bot_difficulty, &difficulty)) {
+        server_log("bot_difficulty '%s' is not easy|normal|hard|max|<number>: normal", cfg->bot_difficulty);
+        difficulty = BOT_DIFFICULTY_NORMAL;
+    }
+    BotAssignments preset;
+    bot_difficulty_assignments(difficulty, &preset);
+    game_bots_configure(&g_server->game, &preset);
+    game_bots_set_quota(&g_server->game, quota, cfg->bot_quota > 0);
+    server_log("Bots: %s %d, difficulty %g (%s)", cfg->bot_quota > 0 ? "fill to" : "keep", quota, (double) difficulty, cfg->bot_difficulty);
+}
+
 static void server_tick_drain(void) {
     if (!g_drain_requested || g_server->should_quit) return;
     if (!g_drain_active) {
@@ -173,6 +192,7 @@ typedef struct {
     const char *map_path;
     unsigned short port;
     int headless;
+    int no_cli;         // --no-cli: no console thread, stdin is never read
     int help;
     const char *mode;   // --mode: a Krunker mode alias / name / id, or "rotation"
     float round_seconds; // --round-seconds: round length override (debug: quick end screen / rotation tests)
@@ -355,6 +375,7 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
 
         if (!strcmp(arg, "--headless") || !strcmp(arg, "--no-cli")) {
             args->headless = 1;
+            if (!strcmp(arg, "--no-cli")) args->no_cli = 1;
             continue;
         }
 
@@ -407,7 +428,9 @@ static void print_usage(FILE *stream, const char *argv0) {
             "  --open-cheats cheats (/noclip /god /tp, the noclip key ...) for everyone while perms are off,\n"
             "                like v3.1.1 (gameserver.cheats \"all\"); by default only DEV accounts, ops,\n"
             "                the custom host and clients on this machine get them\n"
-            "  --headless    no interactive console (implied when stdin/stdout is not a terminal)\n"
+            "  --headless    no interactive console (implied when stdin/stdout is not a terminal);\n"
+            "                console commands are still read line by line from stdin\n"
+            "  --no-cli      no console at all: stdin is never read (systemd, supervisors)\n"
             "\n"
             "Coordinator / config (config/config.json \"gameserver\", doc/backend.md section 8):\n"
             "  --config FILE        config file (default: $KN_CONFIG, else config/config.json)\n"
@@ -545,11 +568,7 @@ static void server_run_tick_loop(void) {
         last_tick = tick_start;
 
         pthread_mutex_lock(&g_server->lock);
-        g_server->now = now;
-        game_tick(&g_server->game, now, delta);
-        accounts_tick(now); // brain events, join timeouts, stats commits, lobby pushes
-        net_check_idle_clients(now);
-        net_broadcast_states();
+        server_core_tick(now, delta, tick_start); // game_tick, accounts, idle kicks, the per-tick broadcast
         info_query_update(now);
         server_tick_drain();
 
@@ -622,6 +641,8 @@ int main(int argc, char **argv) {
     }
     if (args.version) {
         printf("KrunkNative server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
+        // build identity (shared/include/build_info.h): what the finder / coordinator compare
+        printf("build %s\n", kn_build_string());
         return 0;
     }
     if (args.rcon_target) return rcon_client_main(args.rcon_target, args.rcon_password, args.rcon_argc, args.rcon_argv);
@@ -690,6 +711,9 @@ int main(int argc, char **argv) {
     g_server->config.idle_move_threshold = cfg->idle_move_threshold;
     g_server->config.perms = cfg->perms; // --perms, PERMS=1 or gameserver.perms
     g_server->config.cheats_open = cfg->cheats_open;
+    g_server->game.lag_comp = (unsigned char) !!cfg->lag_comp; // players.js fetchState (shared/src/player.c)
+    g_server->game.lag_comp_anchor = (unsigned char) (cfg->lag_comp_anchor & 3); // LAG_COMP_ANCHOR_*
+    g_server->game.lag_comp_scale = cfg->lag_comp_scale; // times each player's ENT lagComp
     pthread_mutex_init(&g_server->lock, NULL);
 
     // --mode: one mode for every round (Krunker config.modes = [id]), or the public rotation;
@@ -717,6 +741,7 @@ int main(int argc, char **argv) {
     g_server->game.server = g_server;
     accounts_configure_public(&g_server->game, startup_map);
     game_init(&g_server->game, startup_map ? 0 : -1, -1, 0);
+    server_configure_bots(cfg); // server.cfg bots / bot_quota / bot_difficulty (Krunker v7.1.4 bot players)
 
     // Interactive only when a human is on both ends; pipes, /dev/null, systemd
     // and redirected logs run headless (no raw mode, no escape sequences).
@@ -731,6 +756,7 @@ int main(int argc, char **argv) {
 
     server_log("Starting KrunkNative server v%d.%d.%d%s", g_server_version.major, g_server_version.minor, g_server_version.patch,
                interactive ? "" : " (headless)");
+    server_log("Build %s", kn_build_string());
 
     if (g_server->game.ready) {
         const cJSON *name = cJSON_GetObjectItem(g_server->game.maps[g_server->game.current_map_index], "name");
@@ -742,6 +768,7 @@ int main(int argc, char **argv) {
 
     // backend: lobby id, bans file, per-mode lobby size / round length, brain thread
     pthread_mutex_lock(&g_server->lock);
+    ks_server_round_init(); // KrunkScript: the startup map's server script, start()
     accounts_init();
     info_query_update(0.0f); // the query snapshot exists before any transport can answer queries
     pthread_mutex_unlock(&g_server->lock);
@@ -757,7 +784,7 @@ int main(int argc, char **argv) {
     } else if (!server_wait_for_net_startup()) {
         info_query_start(); // server-info query (UDP) + optional finder heartbeat
         rcon_start();       // local rcon (rcon_port + rcon_password)
-        if (cli_start(interactive)) server_log_error("Interactive console unavailable, running headless");
+        if (cli_start(interactive, !args.no_cli)) server_log_error("Interactive console unavailable, running headless");
         if (cli_is_interactive()) server_log("Type 'help' for commands, 'quit' or Ctrl+C to stop.");
     }
 
@@ -788,6 +815,7 @@ int main(int argc, char **argv) {
     const size_t client_count = g_server->client_count;
     server_disconnect_all();
     if (client_count) server_log("Disconnected %lu client%s", (unsigned long) client_count, client_count == 1 ? "" : "s");
+    ks_server_shutdown(); // KrunkScript onServerClosed (the net thread has stopped)
 
     net_cleanup();
     rcon_stop();

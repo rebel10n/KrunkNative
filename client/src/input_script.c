@@ -6,27 +6,34 @@
 //                                     (Xvfb/llvmpipe) replays at a chosen 30/60/144 fps step
 //
 // Script: one event per line, "<t_ms> <command> [args]", '#' starts a comment. Times count
-// game time (summed frame deltas) from the frame the local player became active after `play`.
+// summed frame deltas (the round-end slow motion does not stretch them) from the frame the
+// local player became active after `play`.
 //   0 play                       close the menu and enter the game (waits for the map)
-//   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js)
+//   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
+//                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
-//   100 down W | up W            keys through the normal key path: W A S D SPACE SHIFT R E Q X 1 2 3 C N
-//   100 mdown right | mup right  mouse buttons (left / right)
+//   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER, any A-Z / 0-9
+//   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
+//   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
+//   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
 //   100 look dyaw dpitch         turn the next input's look by these radians (CONTROLS rotation)
 //   5000 respawn                 Play again when dead, as soon as the death delay allows (retried
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
 //   100 wheel 1 | wheel -1       one mouse wheel event (up / down) through the scroll callback
 //   100 blur                     the window loses focus (alt-tab)
-//   100 state                    log the held weapon slot and the menu / pointer lock state
+//   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended
+//   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
 //   3000 quit                    close the window
 // Events run at the start of the first frame whose time is >= t, before the input is
 // sampled, so a key held from t=0 to t=1500 is down for the inputs of [0, 1500).
 #include <gl.h>
 #include <input_script.h>
+#include <app_mode.h>
 #include <camera_feel.h>
 #include <ui_logic.h>
 #include <html_ui.h>
+#include <console.h> // `con`: ui_console_exec
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <stdio.h>
@@ -90,6 +97,11 @@ static void script_load(void) {
             sscanf(rest, "%f %f %f %f %f", &e->v[0], &e->v[1], &e->v[2], &e->v[3], &e->v[4]);
         }
         (void) b;
+        if (!strcmp(e->cmd, "con")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            while (*rest == ' ' || *rest == '\t') rest++;
+            snprintf(e->arg, sizeof(e->arg), "%s", rest);
+            for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
+        }
         g_script.count++;
     }
     fclose(file);
@@ -119,20 +131,52 @@ static int script_key(const char *name) {
         {"W", GLFW_KEY_W}, {"A", GLFW_KEY_A}, {"S", GLFW_KEY_S}, {"D", GLFW_KEY_D},
         {"SPACE", GLFW_KEY_SPACE}, {"SHIFT", GLFW_KEY_LEFT_SHIFT}, {"R", GLFW_KEY_R}, {"E", GLFW_KEY_E},
         {"Q", GLFW_KEY_Q}, {"C", GLFW_KEY_C}, {"X", GLFW_KEY_X}, {"1", GLFW_KEY_1}, {"2", GLFW_KEY_2}, {"3", GLFW_KEY_3}, {"N", GLFW_KEY_N},
+        {"F", GLFW_KEY_F}, {"G", GLFW_KEY_G}, {"T", GLFW_KEY_T}, {"TAB", GLFW_KEY_TAB},
     };
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(name, keys[i].name)) return keys[i].key;
     }
+    // any other letter / digit, ESC and ENTER (KrunkScript key hooks)
+    if (name[0] >= 'A' && name[0] <= 'Z' && !name[1]) return GLFW_KEY_A + (name[0] - 'A');
+    if (name[0] >= '0' && name[0] <= '9' && !name[1]) return GLFW_KEY_0 + (name[0] - '0');
+    if (!strcmp(name, "ESC")) return GLFW_KEY_ESCAPE;
+    if (!strcmp(name, "ENTER")) return GLFW_KEY_ENTER;
     return GLFW_KEY_UNKNOWN;
 }
 
 static void script_run(Client *client, const ScriptEvent *e) {
     if (!strcmp(e->cmd, "down") || !strcmp(e->cmd, "up")) {
+        // through the window's key callback (main.c: KrunkScript key hooks, then the binds)
         const int key = script_key(e->arg);
-        if (key != GLFW_KEY_UNKNOWN) ui_controls_key_event(client, key, 0, e->cmd[0] == 'd' ? GLFW_PRESS : GLFW_RELEASE, 0);
+        const int action = e->cmd[0] == 'd' ? GLFW_PRESS : GLFW_RELEASE;
+        GLFWkeyfun cb = glfwSetKeyCallback(client->window, NULL);
+        glfwSetKeyCallback(client->window, cb);
+        if (key != GLFW_KEY_UNKNOWN) {
+            if (cb) cb(client->window, key, 0, action, 0);
+            else ui_controls_key_event(client, key, 0, action, 0);
+        }
     } else if (!strcmp(e->cmd, "mdown") || !strcmp(e->cmd, "mup")) {
         const int button = !strcmp(e->arg, "right") ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
-        ui_controls_mouse_event(client, button, e->cmd[1] == 'd' ? GLFW_PRESS : GLFW_RELEASE, 1);
+        const int action = e->cmd[1] == 'd' ? GLFW_PRESS : GLFW_RELEASE;
+        GLFWmousebuttonfun cb = glfwSetMouseButtonCallback(client->window, NULL);
+        glfwSetMouseButtonCallback(client->window, cb);
+        if (cb) cb(client->window, button, action, 0);
+        else ui_controls_mouse_event(client, button, action, 1);
+    } else if (!strcmp(e->cmd, "cursor") || !strcmp(e->cmd, "click")) {
+        // cursor x y / click x y: move the cursor (window coordinates) through the cursor
+        // callback; click also presses and releases the left button there
+        glfwSetCursorPos(client->window, e->v[0], e->v[1]);
+        GLFWcursorposfun pos = glfwSetCursorPosCallback(client->window, NULL);
+        glfwSetCursorPosCallback(client->window, pos);
+        if (pos) pos(client->window, e->v[0], e->v[1]);
+        if (e->cmd[1] == 'l') {
+            GLFWmousebuttonfun cb = glfwSetMouseButtonCallback(client->window, NULL);
+            glfwSetMouseButtonCallback(client->window, cb);
+            if (cb) {
+                cb(client->window, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);
+                cb(client->window, GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
+            }
+        }
     } else if (!strcmp(e->cmd, "look")) {
         g_script.look_yaw += e->v[0];
         g_script.look_pitch += e->v[1];
@@ -143,6 +187,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
         me->velocity = (vec3) {0};
         me->direction = (vec2) {e->v[4], e->v[3]};
         me->on_ground = 1;
+        if (client->offline) { // the sandbox server's player follows (the dev "tp": we host it)
+            const NetTeleportPacket tp = {e->v[0], e->v[1] + me->height, e->v[2]};
+            client_net_send(client, NET_PACKET_TELEPORT, &tp, sizeof(tp));
+        }
     } else if (!strcmp(e->cmd, "tp") && client->me) {
         // tp x y z yaw pitch: the dev "tp" (feet at x/y/z, like the mod's Ctrl TP) and a look
         // direction, so online runs (server_bin) can place both players (tools/kref/players-native.sh).
@@ -162,9 +210,13 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "state")) {
         // state: one log line with the held slot and the menu/lock state (scripted checks)
         const Player *me = client->me;
-        fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d\n", g_script.time,
-                me ? me->loadout_index : -1, me ? (int) me->loadout_size : 0,
-                me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked);
+        fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d pos=%.3f,%.3f,%.3f ammo=%d aim=%.2f ended=%d\n",
+                g_script.time, me ? me->loadout_index : -1, me ? (int) me->loadout_size : 0,
+                me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked,
+                me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f,
+                me && me->ammo && me->loadout_size ? (int) me->ammo[me->loadout_index] : -1, me ? me->aim_val : 0.0f, client_round_ended(client));
+    } else if (!strcmp(e->cmd, "con")) {
+        ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
     } else if (!strcmp(e->cmd, "blur")) {
         client_window_focus_lost(client); // alt-tab (the GLFW focus callback)
     } else if (!strcmp(e->cmd, "shot")) {
@@ -217,7 +269,30 @@ void input_script_adjust_input(Client *client, Input *input) {
     g_script.look_yaw = g_script.look_pitch = 0.0f;
 }
 
-void input_script_frame_end(Client *client, const float delta) {
+static void write_pending_shot(Client *client) {
+    if (!g_script.shot[0]) return;
+    int width, height;
+    glfwGetFramebufferSize(client->window, &width, &height);
+    unsigned char *pixels = malloc((size_t) width * height * 4);
+    unsigned char *flipped = malloc((size_t) width * height * 4);
+
+    if (pixels && flipped) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+        const size_t row = (size_t) width * 4;
+        for (int y = 0; y < height; y++) memcpy(flipped + (size_t) y * row, pixels + (size_t) (height - 1 - y) * row, row);
+        for (size_t i = 3; i < row * (size_t) height; i += 4) flipped[i] = 255;
+        png_write_rgba(g_script.shot, flipped, width, height);
+    }
+
+    free(pixels);
+    free(flipped);
+    g_script.shot[0] = 0;
+}
+
+void input_script_frame_end(Client *client, const float delta, const float frame_delta) {
     if (!g_script.active || !g_script.playing) return;
 
     const Player *p = client->me;
@@ -242,27 +317,34 @@ void input_script_frame_end(Client *client, const float delta) {
             ub ? ub->position.y : 0.0f, ub ? ub->rotation.x : 0.0f, an ? an->position.y : 0.0f, p->can_slide, p->idle_anim);
     }
 
-    if (g_script.shot[0]) {
-        int width, height;
-        glfwGetFramebufferSize(client->window, &width, &height);
-        unsigned char *pixels = malloc((size_t) width * height * 4);
-        unsigned char *flipped = malloc((size_t) width * height * 4);
+    write_pending_shot(client);
 
-        if (pixels && flipped) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glPixelStorei(GL_PACK_ALIGNMENT, 1);
-            glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    // The frame time, not the world's: the end-of-round slow motion scales the world delta
+    // down to 0 for the whole results screen, which would hold every later event back.
+    g_script.time += frame_delta * 1000.0f;
+}
 
-            const size_t row = (size_t) width * 4;
-            for (int y = 0; y < height; y++) memcpy(flipped + (size_t) y * row, pixels + (size_t) (height - 1 - y) * row, row);
-            for (size_t i = 3; i < row * (size_t) height; i += 4) flipped[i] = 255;
-            png_write_rgba(g_script.shot, flipped, width, height);
-        }
-
-        free(pixels);
-        free(flipped);
-        g_script.shot[0] = 0;
+// Page windows (app_mode.c): the clock starts once the page is ready; game-only commands
+// (play, pose, tp, look, respawn) are skipped.
+void input_script_page_tick(Client *client) {
+    script_load();
+    if (!g_script.active) return;
+    if (!g_script.playing) {
+        if (!app_mode_page_ready(client)) return;
+        g_script.playing = 1;
+        g_script.time = 0.0f;
     }
+    while (g_script.next < g_script.count && g_script.events[g_script.next].t <= g_script.time + 1e-3f) {
+        const ScriptEvent *e = &g_script.events[g_script.next++];
+        static const char *const GAME_ONLY[] = {"play", "pose", "tp", "look", "respawn"};
+        int skip = 0;
+        for (size_t i = 0; i < sizeof(GAME_ONLY) / sizeof(GAME_ONLY[0]); i++) skip |= !strcmp(e->cmd, GAME_ONLY[i]);
+        if (!skip) script_run(client, e);
+    }
+}
 
-    g_script.time += delta * 1000.0f;
+void input_script_page_frame_end(Client *client, const float frame_delta) {
+    if (!g_script.active || !g_script.playing) return;
+    write_pending_shot(client);
+    g_script.time += frame_delta * 1000.0f;
 }

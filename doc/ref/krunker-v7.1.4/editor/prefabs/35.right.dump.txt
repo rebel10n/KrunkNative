@@ -1,0 +1,15 @@
+P Placeholder
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 10/0,10/0,10/0
+-
+F Style closed
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+-

@@ -1,0 +1,29 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 18 "Attaching", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+
+obj leftPalm = {};
+obj rightPalm = {};
+obj leftCube = {};
+obj rightCube = {};
+
+# Player spawns in
+public action onPlayerSpawn(str id) {
+	obj pl = GAME.PLAYERS.getSelf();
+	if (notEmpty pl) {
+		obj dat = (obj) pl.getAsset();	
+		# GET BONES
+		leftPalm = (obj) dat.getBone("Palm2L");
+		rightPalm = (obj) dat.getBone("Palm2R");
+
+		# CREATE CUBES TO ATTACH
+		leftCube = GAME.SCENE.addCube("13075", "#00ffff", 0, 0, 0, 0.01, 0.01, 0.01, {textureStretching:true});
+		rightCube = GAME.SCENE.addCube("13075", "#ff0000", 0, 0, 0, 0.01, 0.01, 0.01, {textureStretching:true});
+
+		# ATTACH TO PALMS
+		leftCube.attachTo(leftPalm, 0, 0, 0);
+		rightCube.attachTo(rightPalm, 0, 0, 0);
+	}
+}

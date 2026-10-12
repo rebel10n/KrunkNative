@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/windows/win-settings-render.png",
+  "ref": "doc/ref/krunker-v7.1.4/windows/win-settings-render.png",
   "size": [
     1280,
     720
@@ -8,15 +8,18 @@
   "state": {
     "menu": true,
     "window": 0,
-    "settingsTab": 3,
     "connected": true,
     "ready": true,
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
     "region": "...",
-    "anim_time": 0.25
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "settingsTab": 3,
+    "settingsView": "advanced"
   },
   "frames": 3,
-  "note": "Settings / Render tab; anim_time 0.250 = the reference's merch (scaleBob) phase"
+  "note": "Game Settings, advanced view, Render"
 }

@@ -1,8 +1,0 @@
-{
-  "ref": "doc/ref/krunker-v3.1.1/hub/hub-tourney.png",
-  "size": [1280, 720],
-  "background": "#000000",
-  "state": {"page": "hub", "pageQuery": "p=tourney"},
-  "frames": 3,
-  "note": "Social hub (ui/social.html), guest, view p=tourney."
-}

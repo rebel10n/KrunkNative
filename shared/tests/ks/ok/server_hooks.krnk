@@ -1,0 +1,15 @@
+# side: server
+public action start() {}
+public action update(num delta) {}
+public action onPlayerSpawn(str id) {}
+public action onPlayerDeath(str id, str killerID) {}
+public action onPlayerDamage(str id, str doerID, num amount) {}
+public action onPlayerUpdate(str id, num delta, obj inputs) {}
+public action onCustomTrigger(str playerID, str customParam) {}
+public action onNetworkMessage(str id, dynamic obj data, str playerID) {}
+public action onChatMessage(str msg, str playerID) {}
+public action onPlayerLeave(str playerID) {}
+public action onGameEnd() {}
+public action onAdFinished(str playerID, bool success) {}
+public action onServerClosed() {}
+public action render(num a, num b) {}

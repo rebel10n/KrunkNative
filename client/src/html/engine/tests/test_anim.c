@@ -2,12 +2,12 @@
  * test_anim.c - standalone tests for anim.c (CSS animations + transitions).
  *
  * Build (throwaway, from the repository root):
- *   cc -std=c11 -g -fsanitize=address,undefined -DKN_ANIM_NO_SHEET -Iclient/src/html/engine \
+ *   clang -std=c11 -g -fsanitize=address,undefined -DKN_ANIM_NO_SHEET -Iclient/src/html/engine \
  *      client/src/html/engine/anim.c client/src/html/engine/util.c \
- *      client/src/html/engine/tests/test_anim.c -lm -o /tmp/test_anim
- *   /tmp/test_anim [path/to/ui/css]
+ *      client/src/html/engine/tests/test_anim.c -lm -o test_anim
+ *   ./test_anim [path/to/ui/css]
  *
- * The 13 @keyframes blocks are read from ui/css/main.css + hud.css with a
+ * The 30 @keyframes blocks are read from ui/css/main.css + hud.css + krunknative.css with a
  * small scanner (css_sheet.c / css_values.c are not required), turned into
  * AnimKeyframeSets, and sampled at known times.  Expected values are either
  * exact (linear/steps) or derived from an independent bisection bezier
@@ -1199,8 +1199,10 @@ int main(int argc, char **argv)
     test_value_lerp();
 
     int loaded = 0;
-    const char *files[] = { "main.css", "hud.css" };
-    for (size_t i = 0; i < 2; i++) {
+    /* v7.1.4: main.css has 28 @keyframes; typewriter / blinkTextCursor (the map terminal,
+     * a KrunkNative addition since v7 dropped it) live in krunknative.css */
+    const char *files[] = { "main.css", "hud.css", "krunknative.css" };
+    for (size_t i = 0; i < 3; i++) {
         char path[512];
         snprintf(path, sizeof path, "%s/%s", css_dir, files[i]);
         char *text = read_file(path);
@@ -1211,8 +1213,8 @@ int main(int argc, char **argv)
         loaded += load_keyframes_text(&g_sys, text);
         free(text);
     }
-    CHECK(loaded == 13);
-    CHECK(g_sys.set_count == 13);
+    CHECK(loaded == 30);
+    CHECK(g_sys.set_count == 30);
     static const struct { const char *name; uint32_t frames; } expect[] = {
         { "blinkTextCursor", 2 }, { "typewriter", 2 }, { "grow", 1 }, { "lds-ring", 2 }, { "spin", 2 },
         { "scaleBob", 2 }, { "rainbow", 6 }, { "rainbowT", 6 }, { "rainbowB", 6 }, { "rainbowBG", 6 },

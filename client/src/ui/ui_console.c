@@ -11,12 +11,14 @@
 // switch are mods.ts (ui_mods.c).
 //
 // Commands: the local ones run here; server ones go out as "/cmd" chat ("ct"), answered
-// by shared/src/chat_commands.c on server_bin. In singleplayer devConsole runs its own
-// offline versions of some of them (offlineServerCommands, ported below against the
-// in-process game, client/src/net/local_game.c); the rest reach that game's chat handler.
+// by shared/src/chat_commands.c on server_bin. Offline that server is the in-process
+// sandbox (client/src/net/offline.c), so they work there exactly as online; devConsole's
+// offline map / mode / cycle versions (offlineServerCommands, below) stay local because
+// they are the sandbox host's controls (local_game_host).
 #include <console.h>
 #include <ui_mods.h>
 #include <ui_logic.h>
+#include <backend_ui.h> // servers_ui_connect_direct / _disconnect / _reconnect
 #include <html_ui.h>
 #include <chat_commands.h>
 #include <map_catalog.h>
@@ -324,6 +326,13 @@ static const ConArg A_BANIP[] = {{"name|id|ip", ARG_STRING, 1}};
 static const ConArg A_IP[] = {{"ip", ARG_STRING, 1}};
 static const ConArg A_AMOUNT[] = {{"amount", ARG_NUMBER, 1}};
 static const ConArg A_GAME[] = {{"text", ARG_STRING, 1}};
+// Krunker v7.1.4 bots (mod/devConsole.ts registrations; shared/src/chat_commands.c runs them)
+static const ConArg A_BOT_ADD[] = {{"count", ARG_NUMBER, 1}, {"tfue|autoRespawn|key=value", ARG_STRING, 1}};
+static const ConArg A_BOT_TYPE[] = {{"nextbot|tfue", ARG_STRING, 1}};
+static const ConArg A_BOT_PLACE[] = {{"tfue|autoRespawn|key=value", ARG_STRING, 1}};
+static const ConArg A_BOT_QUERY[] = {{"all|index|name", ARG_STRING, 1}};
+static const ConArg A_BOT_CONFIG[] = {{"key=value", ARG_STRING, 1}};
+static const ConArg A_BOT_DIFF[] = {{"value", ARG_NUMBER, 0}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -453,67 +462,6 @@ static void print_server_details(void) {
 }
 
 // ---------------------------------------------------------------- offline server commands
-
-// parseToggleArg
-static int parse_toggle_arg(const char *value, const int current) {
-    if (!value || !*value) return !current;
-    char v[16];
-    snprintf(v, sizeof(v), "%s", value);
-    lower(v);
-    if (!strcmp(v, "on") || !strcmp(v, "1") || !strcmp(v, "true")) return 1;
-    if (!strcmp(v, "off") || !strcmp(v, "0") || !strcmp(v, "false")) return 0;
-    return !current;
-}
-
-static void normalise(const char *in, char *out, const size_t n) {
-    size_t len = 0;
-    for (; in && *in && len + 1 < n; in++) {
-        if (isalnum((unsigned char) *in)) out[len++] = (char) tolower((unsigned char) *in);
-    }
-    out[len] = 0;
-}
-
-// killOfflinePlayer: players.kill(target, source, {}) with godMode lifted
-static void kill_offline_player(Player *source, Player *target) {
-    if (!target) return;
-    const int had_god = target->god_mode;
-    target->god_mode = 0;
-    PlayerKillInfo info = {0};
-    info.weapon_id = -1;
-    player_kill(target, source == target ? NULL : source, &info, 0);
-    target->god_mode = (unsigned char) had_god;
-}
-
-// offlineBoolCommand
-typedef enum { FLAG_GOD, FLAG_NOCLIP, FLAG_SMITE, FLAG_FORCE_HIDE, FLAG_UNLIMITED } OfflineFlag;
-
-static void offline_bool(const OfflineFlag flag, const char *label, const int argc, char **argv) {
-    Player *p = con_player();
-    if (!p) return;
-    int current = 0;
-    switch (flag) {
-        case FLAG_GOD: current = p->god_mode; break;
-        case FLAG_NOCLIP: current = p->noclip; break;
-        case FLAG_SMITE: current = p->smite; break;
-        case FLAG_FORCE_HIDE: current = p->force_hide; break;
-        case FLAG_UNLIMITED: current = p->unlimited_ammo; break;
-    }
-    const int next = parse_toggle_arg(argc ? argv[0] : NULL, current);
-    switch (flag) {
-        case FLAG_GOD:
-            p->god_mode = (unsigned char) next;
-            if (next) p->health = (float) p->max_health;
-            break;
-        case FLAG_NOCLIP: p->noclip = (unsigned char) next; break;
-        case FLAG_SMITE: p->smite = (unsigned char) next; break;
-        case FLAG_FORCE_HIDE: p->force_hide = (unsigned char) next; break;
-        case FLAG_UNLIMITED:
-            p->unlimited_ammo = (unsigned char) next;
-            if (next) p->can_throw = 1;
-            break;
-    }
-    appendf(COL_INFO, "%s %s", label, next ? "ON" : "OFF");
-}
 
 static int offline_mode_for_change(const Game *game) {
     const int current = game_mode_id(game);
@@ -781,214 +729,6 @@ static void off_maps(const int argc, char **argv) {
     }
 }
 
-static void off_borders(const int argc, char **argv) {
-    Game *game = &con_client()->game;
-    if (!game->ready) {
-        append("Offline borders unavailable: game is not ready.", COL_ERROR);
-        return;
-    }
-    const int current = !game->config.disable_borders;
-    const int next = parse_toggle_arg(argc ? argv[0] : NULL, current);
-    if (next == current) {
-        appendf(COL_INFO, "Borders already %s", current ? "ON" : "OFF");
-        return;
-    }
-    game->config.disable_borders = (unsigned int) !next; // applyBordersFromServer
-    appendf(COL_INFO, "Borders %s", next ? "ON" : "OFF");
-}
-
-static void off_god(const int argc, char **argv) { offline_bool(FLAG_GOD, "God mode", argc, argv); }
-static void off_noclip(const int argc, char **argv) { offline_bool(FLAG_NOCLIP, "Noclip", argc, argv); }
-static void off_smite(const int argc, char **argv) { offline_bool(FLAG_SMITE, "Smite", argc, argv); }
-static void off_forcehide(const int argc, char **argv) { offline_bool(FLAG_FORCE_HIDE, "Forcehide", argc, argv); }
-static void off_unlimitedammo(const int argc, char **argv) { offline_bool(FLAG_UNLIMITED, "Unlimited ammo", argc, argv); }
-
-// resolveOfflineKillTarget: active players by name/id and AIs by name/sid; one exact
-// match wins, else one prefix match.
-typedef struct {
-    Player *player;
-    GameAI *ai;
-} KillTarget;
-
-static int key_match(const char *value, const char *needle, int *exact) {
-    char key[96];
-    normalise(value, key, sizeof(key));
-    if (!key[0]) return 0;
-    if (!strcmp(key, needle)) { *exact = 1; return 1; }
-    return starts_with(key, needle);
-}
-
-static KillTarget resolve_kill_target(const char *query, ResReason *reason) {
-    KillTarget none = {0}, exact_p = {0}, exact_a = {0}, any_p = {0}, any_a = {0};
-    char needle[96];
-    normalise(query, needle, sizeof(needle));
-    if (!needle[0]) { *reason = RES_EMPTY; return none; }
-    Game *game = &con_client()->game;
-    int ep = 0, ea = 0, pp = 0, pa = 0;
-    for (size_t i = 0; i < game->player_count; i++) {
-        Player *p = game->players[i];
-        if (!p || !p->active) continue;
-        char id[16];
-        snprintf(id, sizeof(id), "%d", p->uid);
-        int exact = 0;
-        if (!key_match(p->name, needle, &exact) && !key_match(id, needle, &exact)) continue;
-        pp++;
-        any_p.player = p;
-        if (exact) { ep++; exact_p.player = p; }
-    }
-    for (int i = 0; game->ai && i < game->ai->count; i++) {
-        GameAI *ai = &game->ai->ais[i];
-        if (!ai->active) continue;
-        char sid[16];
-        snprintf(sid, sizeof(sid), "%d", ai->sid);
-        int exact = 0;
-        if (!key_match(ai->name, needle, &exact) && !key_match(sid, needle, &exact)) continue;
-        pa++;
-        any_a.ai = ai;
-        if (exact) { ea++; exact_a.ai = ai; }
-    }
-    *reason = RES_OK;
-    if (ep == 1 && ea == 0) return exact_p;
-    if (ea == 1 && ep == 0) return exact_a;
-    if (ep + ea > 1) { *reason = RES_AMBIGUOUS; return none; }
-    if (pp == 1 && pa == 0) return any_p;
-    if (pa == 1 && pp == 0) return any_a;
-    *reason = pp + pa > 1 ? RES_AMBIGUOUS : RES_NOT_FOUND;
-    return none;
-}
-
-static void off_kill(const int argc, char **argv) {
-    Player *p = con_player();
-    if (!p) return;
-    char query[CON_TEXT_MAX];
-    join_args(argc, argv, 0, query, sizeof(query));
-    trim(query);
-    if (!query[0]) {
-        kill_offline_player(p, p);
-        append("You killed yourself.", COL_INFO);
-        return;
-    }
-    ResReason reason;
-    const KillTarget target = resolve_kill_target(query, &reason);
-    if (!target.player && !target.ai) {
-        if (reason == RES_AMBIGUOUS) appendf(COL_ERROR, "Kill target '%s' is ambiguous.", query);
-        else appendf(COL_ERROR, "Kill target '%s' not found.", query);
-        return;
-    }
-    if (target.ai) { // killOfflineAI: ai.kill(source) + AI.sync()
-        char label[GAME_AI_NAME_SIZE + 16];
-        if (target.ai->name[0]) snprintf(label, sizeof(label), "%s", target.ai->name);
-        else snprintf(label, sizeof(label), "%d", target.ai->sid);
-        Game *game = &con_client()->game;
-        game_ai_kill(game, target.ai, p);
-        game_ai_sync(game);
-        appendf(COL_INFO, "Killed AI %s.", label);
-        return;
-    }
-    char label[PLAYER_NAME_SIZE + 16];
-    if (target.player->name[0]) snprintf(label, sizeof(label), "%s", target.player->name);
-    else snprintf(label, sizeof(label), "%d", target.player->uid);
-    kill_offline_player(p, target.player);
-    appendf(COL_INFO, "Killed player %s.", label);
-}
-
-static void off_score(const int argc, char **argv) {
-    Player *p = con_player();
-    if (!p) return;
-    double amount = 100.0;
-    if (argc && !js_number(argv[0], &amount)) amount = 0.0;
-    if (amount == 0.0) {
-        append("Usage: score <amount> (default 100).", COL_ERROR);
-        return;
-    }
-    player_score(p, (int) amount, 0);
-    char num[32];
-    if (amount == floor(amount)) snprintf(num, sizeof(num), "%.0f", amount);
-    else snprintf(num, sizeof(num), "%g", amount);
-    appendf(COL_INFO, "%s%s score (total %d).", amount > 0 ? "+" : "", num, p->score);
-}
-
-static void off_team(const int argc, char **argv) {
-    Player *p = con_player();
-    const Game *game = &con_client()->game;
-    if (!p || !game->ready) return;
-    const GameModeConfig *mode = game->mode ? &game->mode->config : NULL;
-    if (!mode || !mode->teams || mode->friendly || mode->clan_war || mode->convert_team) {
-        append("/team only works in team modes.", COL_ERROR);
-        return;
-    }
-    char arg[32] = "";
-    if (argc) snprintf(arg, sizeof(arg), "%s", argv[0]);
-    lower(arg);
-    const int next = !strcmp(arg, "red") || !strcmp(arg, "1") ? 1 : !strcmp(arg, "blue") || !strcmp(arg, "2") ? 2 : 0;
-    if (!next) {
-        append("Usage: /team red|blue", COL_ERROR);
-        return;
-    }
-    if (p->team == next) {
-        appendf(COL_INFO, "Already on %s.", arg);
-        return;
-    }
-    p->team = next;
-    kill_offline_player(p, p);
-    appendf(COL_INFO, "Switched to %s team.", arg);
-}
-
-static void off_teams(const int argc, char **argv) {
-    (void) argc; (void) argv;
-    const Game *game = &con_client()->game;
-    int any = 0;
-    for (size_t i = 0; i < game->player_count; i++) if (game->players[i]) any = 1;
-    if (!any) {
-        append("No players.", COL_INFO);
-        return;
-    }
-    if (!game->mode || !game->mode->config.teams || game->mode->config.convert_team) {
-        append("Not a team mode.", COL_INFO);
-        return;
-    }
-    for (int team = 0; team < MODE_TEAMS; team++) {
-        char names[CON_LINE_MAX] = "";
-        size_t len = 0;
-        int count = 0;
-        for (size_t i = 0; i < game->player_count; i++) {
-            const Player *p = game->players[i];
-            if (!p || p->team != team) continue;
-            char label[PLAYER_NAME_SIZE + 16];
-            if (p->name[0]) snprintf(label, sizeof(label), "%s", p->name);
-            else snprintf(label, sizeof(label), "Guest_%d", p->uid);
-            if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", count ? ", " : "", label);
-            count++;
-        }
-        if (!count) continue;
-        if (team == 1) appendf(COL_INFO, "Red (%d): %s", count, names);
-        else if (team == 2) appendf(COL_INFO, "Blue (%d): %s", count, names);
-        else appendf(COL_INFO, "Team %d (%d): %s", team, count, names);
-    }
-}
-
-static void off_end(const int argc, char **argv) {
-    (void) argc; (void) argv;
-    Game *game = &con_client()->game;
-    if (!game->ready) return;
-    game_set_round_time(game, 3.0f); // endTimer = 0, gameTimer = 3e3
-    append("Match timer set to 3 seconds.", COL_INFO);
-}
-
-static void off_endless(const int argc, char **argv) {
-    (void) argc; (void) argv;
-    Game *game = &con_client()->game;
-    if (!game->ready) return;
-    if (game->round_endless) {
-        game_set_endless(game, 0); // the mode's full game time again
-        append("Match timer resumed.", COL_INFO);
-        return;
-    }
-    game->round_endless = 1;       // endTimer = "inf": the clock stops where it is
-    game->round_seconds_sent = -1;
-    append("Match timer paused.", COL_INFO);
-}
-
 static void off_server(const int argc, char **argv) {
     (void) argc; (void) argv;
     print_server_details();
@@ -998,11 +738,9 @@ static void off_server(const int argc, char **argv) {
 static const struct {
     const char *name;
     void (*run)(int, char **);
-} OFFLINE_COMMANDS[] = {
+} OFFLINE_COMMANDS[] = { // the player / round cheats (god, noclip, kill, score, team, end, endless, borders, ...) go to the sandbox server
     {"server", off_server}, {"cycle", off_cycle}, {"map", off_map}, {"mode", off_mode}, {"modes", off_modes},
-    {"maps", off_maps}, {"borders", off_borders}, {"god", off_god}, {"noclip", off_noclip}, {"smite", off_smite},
-    {"forcehide", off_forcehide}, {"unlimitedammo", off_unlimitedammo}, {"kill", off_kill}, {"score", off_score},
-    {"team", off_team}, {"teams", off_teams}, {"end", off_end}, {"endless", off_endless},
+    {"maps", off_maps},
 };
 
 static int parse_args(const char *rest, char *work, size_t n, char **argv);
@@ -1167,8 +905,6 @@ static void cmd_exec(const int argc, char **argv, const char *rest) {
 }
 
 #ifndef __EMSCRIPTEN__
-static NetMainArgs g_net_args;
-
 static void stop_net(Client *client) {
     if (!client->net_thread_running) return;
     client->net_should_quit = 1;
@@ -1182,19 +918,13 @@ static void stop_net(Client *client) {
     client->net_should_quit = 0;
     client->net_connected = 0;
 }
-
-static int start_net(Client *client) {
-    client->net_should_quit = 0;
-    client->net_hold_retry = 0;
-    g_net_args = (NetMainArgs) {.client = client, .address = NULL};
-    if (pthread_create(&client->net_thread, NULL, net_main, &g_net_args)) return 0;
-    client->net_thread_running = 1;
-    return 1;
-}
 #endif
 
 // connect [local|hostname]: devConsole points the matchmaker at the host and seeks a game;
-// KrunkNative servers are reached directly (host[:port], TCP).
+// KrunkNative servers are reached directly (host[:port]; UDP, then TCP; the web build goes
+// through the bridge's /native?target=). Like a Source console the server is pinned:
+// matchmaking never moves the session elsewhere until Play / the server browser
+// (servers_ui.c g_pin), and `reconnect` comes back here.
 static void cmd_connect(const int argc, char **argv, const char *rest) {
     char input[CON_TEXT_MAX];
     if (rest && *rest) snprintf(input, sizeof(input), "%s", rest);
@@ -1230,45 +960,29 @@ static void cmd_connect(const int argc, char **argv, const char *rest) {
     if (local) append("Connecting through local...", COL_INFO);
     else appendf(COL_INFO, "Connecting through %s:%u...", host, port);
     appendf(COL_INFO, "  Server: tcp://%s:%u", host, port);
-#ifdef __EMSCRIPTEN__
-    append("endpoint updated; live seek is unavailable on this page", COL_WARN);
-#else
+#ifndef __EMSCRIPTEN__
     unsigned int b[4];
     char tail;
     if (sscanf(host, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &tail) != 4 || b[0] > 255 || b[1] > 255 || b[2] > 255 || b[3] > 255) {
         appendf(COL_ERROR, "connect failed: cannot resolve %s (IPv4 addresses only)", host);
         return;
     }
-    Client *client = con_client();
-    if (!client) return;
-    if (client->offline) local_game_stop(client);
-    stop_net(client);
-    snprintf(client->net_address, sizeof(client->net_address), "%s", host);
-    client->net_port = (unsigned short) port;
-    if (!start_net(client)) {
-        append("connect failed: could not start the network thread", COL_ERROR);
-        return;
-    }
-    menu_retry_connect(); // CONNECTING... until the server answers
 #endif
+    if (!con_client()) return;
+    servers_ui_connect_direct(host, (int) port); // pinned; switch_server leaves an offline game
+    menu_show_connecting(); // CONNECTING... until the server answers
 }
 
-// disconnect: endpoints back to the defaults, socket closed, back to the menu ("/").
+// disconnect: socket closed, back to the menu, and nothing reconnects (no matchmaker seek,
+// no transport retry) until Play / a server / `connect` / `reconnect`. (devConsole goes
+// to "/", which on KrunkNative's page would seek a new public game.)
 static void cmd_disconnect(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
-#ifdef __EMSCRIPTEN__
-    emscripten_run_script("location.href = '/';");
-#else
     Client *client = con_client();
     if (!client) return;
-    if (client->offline) local_game_stop(client);
-    stop_net(client);
-    snprintf(client->net_address, sizeof(client->net_address), "127.0.0.1");
-    client->net_port = NET_DEFAULT_PORT;
-    start_net(client);
+    servers_ui_disconnect();
     client_set_menu_open(client, 1);
-    menu_retry_connect();
-#endif
+    append("Disconnected.", COL_INFO);
 }
 
 static void cmd_quit(const int argc, char **argv, const char *rest) {
@@ -1281,22 +995,23 @@ static void cmd_quit(const int argc, char **argv, const char *rest) {
 #endif
 }
 
-// reconnect: location.reload() (natively: the session starts over)
+// reconnect: location.reload() in devConsole; KrunkNative reconnects to the last server
+// (a `connect` target, a Direct Connect server or the matchmade lobby, sought again for a
+// fresh join ticket), also after `disconnect`. Offline: the local game starts over.
 static void cmd_reconnect(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
-#ifdef __EMSCRIPTEN__
-    emscripten_run_script("location.reload();");
-#else
     Client *client = con_client();
     if (!client) return;
     if (client->offline) {
         local_game_host(client, client->game.ready ? client->game.current_map_index : -1, client->game.ready ? game_mode_id(&client->game) : 0);
         return;
     }
-    if (!client->net_thread_running) start_net(client);
-    client_net_request_reconnect(client);
-    menu_retry_connect();
-#endif
+    if (!servers_ui_reconnect()) {
+        append("reconnect: no server to reconnect to", COL_ERROR);
+        return;
+    }
+    appendf(COL_INFO, "Reconnecting to %s:%u...", client->net_address, (unsigned int) client->net_port);
+    menu_show_connecting();
 }
 
 // clearPingCounter
@@ -1385,6 +1100,19 @@ static void cmd_ping_local(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "Ping: %dms", client && client->net_ping_ms > 0 ? client->net_ping_ms : 0);
 }
 
+// the game transport (WebRTC / WebTransport / WebSocket, UDP / TCP), its session counters and
+// why a transport was skipped (net_notes.c client_net_info)
+static void cmd_netinfo(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    char info[2048];
+    client_net_info(con_client(), info, sizeof(info));
+    for (char *line = info, *end; line && *line; line = end ? end + 1 : NULL) {
+        end = strchr(line, '\n');
+        if (end) *end = 0;
+        append(line, COL_INFO);
+    }
+}
+
 static void register_commands(void) {
     if (g_con.cmd_count) return;
     register_local("help", ARGS(A_CMD), "list commands", cmd_help);
@@ -1396,9 +1124,9 @@ static void register_commands(void) {
     register_local("alias", ARGS(A_ALIAS), "define a command alias", cmd_alias);
     register_local("exec", ARGS(A_COMMANDS), "run multiple commands separated by ;", cmd_exec);
     register_local("connect", ARGS(A_HOSTNAME), "seek and connect through a matchmaker hostname", cmd_connect);
-    register_local("disconnect", NO_ARGS, "disconnect and reset to default endpoints", cmd_disconnect);
+    register_local("disconnect", NO_ARGS, "disconnect and stay in the menu", cmd_disconnect);
     register_local("quit", NO_ARGS, "close the window", cmd_quit);
-    register_local("reconnect", NO_ARGS, "reload the current page", cmd_reconnect);
+    register_local("reconnect", NO_ARGS, "reconnect to the last server", cmd_reconnect);
     register_local("offline", NO_ARGS, "switch to offline mode", cmd_offline);
     register_local("ahk", NO_ARGS, "show current antihack key", cmd_ahk);
     register_local("version", NO_ARGS, "show current client version", cmd_version);
@@ -1413,6 +1141,7 @@ static void register_commands(void) {
     register_local("rot", NO_ARGS, "show local player rotation", cmd_rot);
     register_local("rotation", NO_ARGS, "alias for rot", cmd_rot);
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
+    register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     // Server commands (mirror server/packetHandlers.ts cmds table)
     register_server("god", ARGS(A_TOGGLE), "toggle god mode (self or target)");
     register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self or target)");
@@ -1450,6 +1179,17 @@ static void register_commands(void) {
     register_server("score", ARGS(A_AMOUNT), "add score (default +100)");
     register_server("summon", ARGS(A_NAME), "spawn a Soul Sanctum AI by name (no arg lists summonable names)");
     register_server("game", ARGS(A_GAME), "send a game command");
+    register_server("bot", ARGS(A_BOT_ADD), "spawn player-targeting auto-respawn bots (tfue=off for full-strength bots)");
+    register_server("bot_add", ARGS(A_BOT_ADD), "alias for bot");
+    register_server("bot_type", ARGS(A_BOT_TYPE), "show or switch bot manager type (switching removes old bots)");
+    register_server("bot_place", ARGS(A_BOT_PLACE), "spawn a bot at your current position");
+    register_server("bot_kick", ARGS(A_BOT_QUERY), "remove bots by name/index or all bots");
+    register_server("bot_kill", ARGS(A_BOT_QUERY), "kill bots by name/index or all bots");
+    register_server("bot_list", NO_ARGS, "list spawned bots");
+    register_server("bot_config", ARGS(A_BOT_CONFIG), "show or update default bot options");
+    register_server("bot_mimic", ARGS(A_ON_OFF), "toggle bots mimicking their target inputs");
+    register_server("bot_stop", ARGS(A_ON_OFF), "toggle bot movement and attacking");
+    register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
 }
 
 // ---------------------------------------------------------------- execution
@@ -1733,6 +1473,22 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
                 if (client->game.ai->ais[i].active) cand_add(c, client->game.ai->ais[i].name, prefix);
             }
         }
+    } else if (cmd_is(cmd, WORDS("bot_kick", "bot_kill"))) {
+        const Client *client = con_client(); // the bots of the in-process game (servers: names from the scoreboard)
+        if (arg == 0) cand_add(c, "all", prefix);
+        for (size_t i = 0; client && arg == 0 && i < client->game.player_count; i++) {
+            const Player *p = client->game.players[i];
+            if (p && p->is_bot) cand_add(c, p->name, prefix);
+        }
+    } else if (!strcmp(cmd, "bot_type")) {
+        if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
+    } else if (cmd_is(cmd, WORDS("bot_mimic", "bot_stop"))) {
+        if (arg == 0) con_words(c, prefix, ON_OFF);
+    } else if (!strcmp(cmd, "bot_difficulty")) {
+        if (arg == 0) con_words(c, prefix, WORDS("easy", "normal", "hard", "max"));
+    } else if (cmd_is(cmd, WORDS("bot", "bot_add", "bot_place", "bot_config"))) {
+        con_words(c, prefix, WORDS("tfue", "autoRespawn", "difficulty=", "accuracy=", "name=", "class=", "team=", "level=", "clan=",
+                                   "dmgMlt=", "targetBots=", "randomCosmetics=", "persistent="));
     } else if (!strcmp(cmd, "summon")) {
         int count = 0;
         const GameAITemplate *templates = game_ai_templates(&count);
@@ -2322,6 +2078,13 @@ void ui_console_tick(Client *client) {
         g_con.banner = 1;
         append("Krunker developer console - type `help` for commands.", COL_INFO);
         append("Press ~ to toggle, Esc to close, Tab to autocomplete.", COL_HINT);
+    }
+    { // game transport notes (net_notes.c): which transport, why one failed, the fallback taken
+        char note[320];
+        int level = NET_NOTE_INFO;
+        while (client_net_note_next(&level, note, sizeof(note))) {
+            appendf(level == NET_NOTE_ERROR ? COL_ERROR : level == NET_NOTE_WARN ? COL_WARN : COL_INFO, "[net] %s", note);
+        }
     }
     if (!html_ui_available() || !html_ui_is_ready() || strcmp(html_ui_current_page(), "index.html")) {
         g_con.built = 0;

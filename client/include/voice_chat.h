@@ -24,12 +24,17 @@
 //                                  overriding the audioInput setting; refused when absent
 #include <client.h>
 
-// CONTROLS N(voiceKey, down): window.toggleRecord(down) (push to talk).
+// CONTROLS N(voiceKey, down): window.toggleRecord(down) (push to talk; v7 voiceChatTrigger 0: toggle).
 void voice_toggle_record(Client *client, int down);
 // Per frame (main thread): recorder interval, clips to send, decodes, finished playback.
 void voice_update(Client *client);
 // NET_PACKET_VOICE (["vc", audio, alias, sid] -> window.voiceChat).
 void voice_on_packet(Client *client, const void *payload, uint16_t length);
+// NET_PACKET_VOICE_V7 (v7 io_voiceChat: channel, volume, account id; shared/include/voice.h).
+void voice_on_packet_v7(Client *client, const void *payload, uint16_t length);
+// v7.1.4 voice settings: micQuality, micVolume, voiceChatType, voiceDistance, muteSpec,
+// voiceChatTrigger (client_apply_setting).
+void voice_apply_setting(const char *key, const char *value);
 // initGame(): voiceStreamQueues = {} (what is playing keeps playing).
 void voice_reset_queues(void);
 // settings.tmp.audioInput ("default" or a device id from voice_audio_inputs_json()).

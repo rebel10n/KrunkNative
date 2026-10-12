@@ -1,0 +1,4 @@
+obj p = {tail: 1};
+public action start() {
+    p.tail++;
+}

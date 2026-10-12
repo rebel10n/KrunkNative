@@ -31,6 +31,8 @@ const SC = {
   look: { pos: [0, 13, 0], yaw: -Math.PI / 2, dur: 1400, f: t => ({ mv: t >= 800 && t < 1100 ? 3 : -1, dyaw: t >= 100 && t < 400 ? 0.003 : t >= 400 && t < 500 ? -0.004 : 0, dpitch: t >= 500 && t < 700 ? -0.002 : 0 }) },
   ladder: { pos: [205, 33.5, 118], yaw: -Math.PI, dur: 3600, f: t => ({ mv: t < 3200 ? 1 : -1 }) },
   jump_pad: { pos: [75, -140, -270], yaw: -Math.PI / 2, dur: 2400, f: t => ({ mv: -1 }) },
+  // soul_sanctum: drop onto the spawn disk (cylinder top y 3), stand, walk, stop on it
+  soul_spawn: { pos: [1, 4, 0], yaw: -Math.PI / 2, dur: 1600, f: t => ({ mv: t >= 300 && t < 800 ? 1 : -1 }) },
 };
 
 async function main() {

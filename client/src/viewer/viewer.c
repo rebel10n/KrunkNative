@@ -1,22 +1,31 @@
-// Krunker v3.1.1's model viewer (public/viewer.html + src/viewer.js) as a KrunkNative page:
+// Krunker v7.1.4's model viewer (public/viewer.html + src/viewer.js) as a KrunkNative page:
 // ui/viewer.html is the page, this module is viewer.js. app_mode.c shows it for
-// `client_bin --viewer [query]`, web `index.html?page=viewer&<query>` and the menu's links to
+// `client_bin --viewer [query]`, the web page viewer.html?<query> and the menu's links to
 // /viewer.html; the query is viewer.js's URLSearchParams:
 //
-//   skinIdP skinIdS face hat back waist melee skinCol dye secIndex class attach season
-//                   initial panel values (parseInt(x) || -1, class || 0, secIndex || 2)
-//   hidePlayer hideBack hideWaist hideFace hideHat hideArms hideLegs hideWep
-//                   start with that "Show ..." box unticked
-//   swap=-1|1       show the secondary / melee      nosup   keep skinIdP/S through the first W()
-//   cosmetic=<i>    render page for one weapon skin / melee (512 x 512 canvas, "Render" button)
+//   skinIdP skinIdS face hat head body back waist shoe pet wrist melee skinCol dye secIndex class
+//   attach season    initial panel values (parseInt(x) || -1, class || 0, secIndex || 2, season ||
+//                    config.currentSeason). body is store type 2, back type 14 (v3.1.1's "back" was type 2)
+//   hidePlayer hideBody hideBack hideWaist hideFace hideHat hideHead hidePet hideWrist hideArms
+//   hideLegs hideWep start with that "Show ..." box unticked
+//   anim / crouch    start animating / crouched
+//   swap=-1|1       show the secondary / melee      nosup   keep skinIdP/S through the first f451()
+//   cosmetic=<i>    render page for one store item (512 x 512 canvas, "Render" button)
 //   auto            with cosmetic: export every item from <i> on      size=<px> export size
-//   showcase=<i>    one store item on its own        nogui   no panel, the weapon close up
-//   noTex           untextured models                nobg    no background gradient
-//   dev             adds Render Face / Hat / Back / Waist / Dye
+//   showcase=<i>    one store item on its own, auto-rotating (the store's item view)
+//   nogui           no panel, the weapon close up    noTex   untextured models
+//   nobg            no background gradient
+//   dev             the Render <slot> buttons, the <Slot> / <Weapon> Config editors with Export
+//                   Config (viewer_config.c) and every dropdown newest store index first
+// KRUNKNATIVE_VIEWER_FREEZE=1 stops the clock (reference captures, tools/kref/viewer-ref.js);
+// KRUNKNATIVE_VIEWER_GUI="<Name or Folder/Name>[=<value>];..." acts on the panel after the load.
 //
 // The panel is dat.gui (viewer_gui.c), the scene viewer_scene.c, Load / drop / zip imports and
-// downloads viewer_import.c.
+// downloads viewer_import.c, the dev config editors viewer_config.c. The same showcase scene
+// also fills the store item view's iframe in the game and hub pages (viewer_embed.h, below).
 #include "viewer_internal.h"
+#include <viewer_embed.h>
+#include <cosmetics.h>
 #include <app_mode.h>
 #include <html_ui.h>
 #include <ui_logic.h> // ui_text_input_focused
@@ -31,7 +40,7 @@
 #define VIEWER_POSE_DELAY_MS 500.0     // renderHat & co: setTimeout(..., 500)
 #define VIEWER_EXPORT_CROP 550         // drawImage(..., 550 * dpr, 550 * dpr, ...)
 #define VIEWER_MAX_PARAMS 48
-#define VIEWER_MAX_HANDLERS 24
+#define VIEWER_MAX_HANDLERS 32
 
 Viewer g_viewer;
 
@@ -42,16 +51,12 @@ static struct {
 } g_params;
 
 static struct {
-    VgFolder *player, *weapons, *config;
-    VgCtrl *m[24];   // M: the Player folder's controllers
+    VgFolder *player, *weapons;
+    VgCtrl *m[64];   // vA346: the Player folder's controllers
     int m_count;
-    VgCtrl *b[16];   // b: the Weapons folder's controllers
+    VgCtrl *b[16];   // vA345: the Weapons folder's controllers
     int b_count;
-    VgCtrl *s[8];    // S: the Config folder's controllers
-    int s_count;
-    int keep_skins;  // k = params.has("nosup")
-    cJSON *configs[8]; // z[type]: imported skin configs (generateMeshes takes no such argument in v3.1.1)
-    int pending_config;
+    int keep_skins;  // v5706 = params.has("nosup")
     int render_timer;
     int entered;
     float last_x, last_y;
@@ -160,8 +165,8 @@ static const ClassConfig *current_class(void) {
 // .options(obj): the labels / values of an option object, in key order
 typedef struct {
     int count;
-    char labels[160][96];
-    char values[160][16];
+    char labels[640][96]; // the longest list (season All, faces) has 545 entries
+    char values[640][16];
 } OptionBuffer;
 
 static OptionBuffer g_options;
@@ -185,7 +190,7 @@ static void options_push(const char *label, const int value) {
 }
 
 static VgCtrl *add_options(VgFolder *folder, VgValue *value, const char *name, const VgFn on_change) {
-    const char *labels[160], *values[160];
+    static const char *labels[640], *values[640];
     for (int i = 0; i < g_options.count; i++) {
         labels[i] = g_options.labels[i];
         values[i] = g_options.values[i];
@@ -193,7 +198,29 @@ static VgCtrl *add_options(VgFolder *folder, VgValue *value, const char *name, c
     return vg_add_options(folder, value, name, g_options.count, labels, values, on_change);
 }
 
+// f459 / f460 / the melee list in dev mode: newest store index first (the generated lists are
+// the player's order: by season, then rarity, then id)
+static void options_from_dev(const ViewerListKind kind, const int key) {
+    options_reset();
+    options_push("Default", -1);
+    const int season = g_viewer.e.season.num;
+    for (int i = g_viewer_skin_count - 1; i >= 0; i--) {
+        const ViewerSkin *skin = &g_viewer_skins[i];
+        if (skin->flags & VS_BLOCKED) continue;
+        if (season && season != (skin->seas ? skin->seas : 1)) continue;
+        if (kind == VIEWER_LIST_TYPE ? skin->type != key || skin->weapon : kind == VIEWER_LIST_MELEE ? skin->type != ITEM_MELEE : skin->weapon != key) continue;
+        const char *rarity = (skin->flags & VS_FREE) ? "Free" : skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? g_viewer_rarities[skin->rarity].name : "";
+        char label[128];
+        snprintf(label, sizeof(label), "%s [%s]", skin->name, rarity);
+        options_push(label, i);
+    }
+}
+
 static void options_from_list(const ViewerListKind kind, const int key) {
+    if (g_viewer.dev) {
+        options_from_dev(kind, key);
+        return;
+    }
     options_reset();
     const ViewerOptionList *list = viewer_option_list(kind, key, g_viewer.e.season.num);
     if (!list) {
@@ -210,7 +237,11 @@ static void options_from_list(const ViewerListKind kind, const int key) {
 static void W(int first);
 static void G(void);
 
-static void on_change_z(void) { Z(); }
+// a dropdown / box changed; in dev mode a slot dropdown also retargets its config folder
+static void on_change_z(void) {
+    if (g_viewer.dev) vconfig_changed();
+    Z();
+}
 
 // Show Model: Z() and the camera to the model or the weapon
 static void on_show_player(void) {
@@ -243,43 +274,16 @@ static void on_crouch(void) {
 
 // ---- function controllers
 
-static void fn_custom_face(void) { viewer_import_pick(3, 7); }
-static void fn_custom_hat(void) { viewer_import_pick(3, 1); }
-static void fn_custom_back(void) { viewer_import_pick(3, 2); }
-static void fn_custom_waist(void) { viewer_import_pick(3, 6); }
+// f461(type): Load Custom <slot> (up to 3 files) / Load Skin (1 file, the weapon)
+static void fn_custom_face(void) { viewer_import_pick(3, ITEM_FACE); }
+static void fn_custom_hat(void) { viewer_import_pick(3, ITEM_HAT); }
+static void fn_custom_head(void) { viewer_import_pick(3, ITEM_HEAD); }
+static void fn_custom_body(void) { viewer_import_pick(3, ITEM_BODY); }
+static void fn_custom_back(void) { viewer_import_pick(3, ITEM_BACK); }
+static void fn_custom_waist(void) { viewer_import_pick(3, ITEM_WAIST); }
+static void fn_custom_shoes(void) { viewer_import_pick(3, ITEM_SHOE); }
+static void fn_custom_pet(void) { viewer_import_pick(3, ITEM_PET); }
 static void fn_custom(void) { viewer_import_pick(1, 0); }
-
-// K(e): prompt("Import Skin Json"), z[e] = JSON.parse(...) or alert("Invalid Config"); then Z()
-static void config_done(const char *text) {
-    if (text && *text) {
-        cJSON *json = cJSON_Parse(text);
-        if (!json) {
-            viewer_alert("Invalid Config");
-        } else {
-            cJSON_Delete(g_ui.configs[g_ui.pending_config]);
-            g_ui.configs[g_ui.pending_config] = json;
-        }
-    }
-    Z();
-}
-
-static void config_prompt(const int type) {
-    g_ui.pending_config = type;
-    viewer_prompt("Import Skin Json", config_done);
-}
-
-static void fn_face_json(void) { config_prompt(7); }
-static void fn_hat_json(void) { config_prompt(1); }
-static void fn_back_json(void) { config_prompt(2); }
-static void fn_waist_json(void) { config_prompt(6); }
-
-static void fn_reset_json(void) {
-    for (int i = 0; i < 8; i++) {
-        cJSON_Delete(g_ui.configs[i]);
-        g_ui.configs[i] = NULL;
-    }
-    Z();
-}
 
 static void fn_reset(void) {
     vscene_reset_overrides();
@@ -346,29 +350,30 @@ static void capture_crop_download(const char *name, const float sx, const float 
     free(rgba);
 }
 
-// $(): the crop origin per weapon (t[e.weapon || 0])
-static void render_weapon_crop(const ViewerSkin *e, float *sx, float *sy) {
-    static const int table[20][2] = {
+// f463(): the crop origin, vO205 per weapon (weapons 0-29) or vO206 per item type, with the per-model fixes
+static void render_crop(const ViewerSkin *e, float *sx, float *sy) {
+    static const short weapons[30][2] = {
         [0] = {210, 256}, [1] = {400, 400}, [2] = {310, 310}, [3] = {220, 286}, [4] = {235, 256}, [5] = {225, 300},
         [7] = {256, 300}, [8] = {310, 310}, [10] = {210, 270}, [11] = {210, 330}, [12] = {210, 256}, [13] = {210, 286},
         [14] = {210, 320}, [15] = {210, 220}, [16] = {245, 220}, [17] = {225, 285}, [18] = {190, 256}, [19] = {256, 256},
+        [21] = {195, 256}, [22] = {220, 286}, [23] = {205, 220}, [24] = {205, 220}, [25] = {220, 256}, [28] = {220, 286},
+        [29] = {350, 400},
     };
-    int t[20][2];
-    memcpy(t, table, sizeof(t));
-    t[1][0] = e->mid < 0 ? 400 : 350;
-    if (e->type == 3) {
-        if (e->id == 1) t[0][0] = 170;
-        else if (e->id == 10 || e->id == 18) t[0][0] = 245;
-        else if (e->id == 3 || e->id == 14) t[0][0] = 145;
+    static const short types[17][2] = {
+        [1] = {240, 120}, [15] = {240, 120}, [3] = {210, 256}, [4] = {230, 210}, [5] = {256, 435}, [7] = {240, 120},
+        [8] = {240, 450}, [9] = {235, 220}, [10] = {210, 256}, [12] = {230, 330}, [13] = {230, 195},
+    };
+    const short *t = NULL;
+    if (!e->type) t = e->weapon >= 0 && e->weapon < 30 ? weapons[e->weapon] : NULL;
+    else if (e->type > 0 && e->type < 17) t = types[e->type];
+    *sx = t && t[0] ? (float) t[0] : 256.0f;
+    *sy = t && t[1] ? (float) t[1] : 256.0f;
+    if (e->weapon == 1 && e->mid >= 0) *sx = 350.0f;
+    if (e->type == ITEM_MELEE) {
+        if (e->id == 1) *sx = 170.0f;
+        else if (e->id == 10 || e->id == 18 || e->id == 33 || e->id == 34) *sx = 245.0f;
+        else if (e->id == 3 || e->id == 14) *sx = 145.0f;
     }
-    if (e->type == 4) {
-        t[0][0] = 230;
-        t[0][1] = 210;
-    }
-    const int w = e->weapon;
-    const int known = w >= 0 && w < 20 && (t[w][0] || t[w][1]);
-    *sx = known ? (float) t[w][0] : 256.0f;
-    *sy = known ? (float) t[w][1] : 256.0f;
 }
 
 static void render_next(void);
@@ -379,21 +384,16 @@ static void render_capture(void *user) {
     const ViewerSkin *e = viewer_skin(g_viewer.cosmetic);
     if (!e) return;
     float sx, sy;
-    render_weapon_crop(e, &sx, &sy);
+    render_crop(e, &sx, &sy);
     char name[128];
     viewer_preview_export_name(e, name, sizeof(name));
     capture_crop_download(name, sx, sy, VIEWER_EXPORT_CROP, g_viewer.export_size);
     if (g_viewer.auto_render) render_next();
 }
 
-static int cosmetic_shown(const int index) {
-    const ViewerSkin *n = viewer_skin(index);
-    return n && (n->weapon || n->type == 3 || (n->type == 4 && (n->flags & VS_IS_3D)));
-}
-
-// F(C) with `auto`: skip to the next showable item; past the end auto stops
+// f447(C) with `auto`: skip to the next showable item; past the end auto stops
 static void cosmetic_show(void) {
-    while (g_viewer.auto_render && !cosmetic_shown(g_viewer.cosmetic)) {
+    while (g_viewer.auto_render && !vscene_cosmetic_shown(g_viewer.cosmetic)) {
         if (++g_viewer.cosmetic >= g_viewer_skin_count) {
             g_viewer.cosmetic = 0;
             g_viewer.auto_render = 0;
@@ -406,7 +406,7 @@ static void cosmetic_show(void) {
 static void fn_render_wep(void) {
     const ViewerSkin *e = viewer_skin(g_viewer.cosmetic);
     if (!e) return;
-    if (cosmetic_shown(g_viewer.cosmetic)) {
+    if (vscene_cosmetic_shown(g_viewer.cosmetic)) {
         if (g_ui.render_timer) html_timer_cancel(g_ui.render_timer);
         g_ui.render_timer = html_timer_add(VIEWER_RENDER_DELAY_MS, render_capture, NULL);
     } else if (g_viewer.auto_render) {
@@ -428,19 +428,23 @@ static void pose_capture(void *user) {
     vscene_canvas_rect(&x, &y, &w, &h);
     html_dom_viewport(&vw, &vh, &dpr);
     const float half = w / 2.0f;
-    const VgValue *values[8] = {[1] = &g_viewer.e.hat, [2] = &g_viewer.e.back, [5] = &g_viewer.e.dye, [6] = &g_viewer.e.waist, [7] = &g_viewer.e.face};
+    const ViewerState *e = &g_viewer.e;
+    const VgValue *values[17] = {[ITEM_HAT] = &e->hat, [ITEM_HEAD] = &e->head, [ITEM_BODY] = &e->body, [ITEM_BACK] = &e->back,
+                                 [ITEM_DYE] = &e->dye, [ITEM_WAIST] = &e->waist, [ITEM_FACE] = &e->face, [ITEM_SHOE] = &e->shoe,
+                                 [ITEM_PET] = &e->pet};
     const ViewerSkin *skin = values[g_pose_type] ? viewer_skin(values[g_pose_type]->num) : NULL;
     char name[128];
     if (skin) viewer_preview_export_name(skin, name, sizeof(name));
-    else snprintf(name, sizeof(name), "%d_default.png", g_pose_type);
+    else snprintf(name, sizeof(name), "%d_default.png", g_pose_type == ITEM_HEAD ? 1 : g_pose_type == ITEM_BACK ? 2 : g_pose_type);
 
-    // drawImage source rectangles of renderHat / Face / Back / Waist / Dye (CSS px, times dpr)
+    // drawImage source rectangles of renderHat / Head / Face / Body / Back / Waist / Shoes / Dye / Pet (CSS px, times dpr)
     switch (g_pose_type) {
-        case 1: capture_crop_download(name, half - 128.0f, 100.0f, 256.0f, 256); break;
-        case 7: capture_crop_download(name, half - 100.0f, 150.0f, 200.0f, 256); break;
-        case 2: capture_crop_download(name, half - 256.0f, 100.0f, 512.0f, 256); break;
-        case 6: capture_crop_download(name, half - 256.0f, 100.0f + (skin && (skin->flags & VS_LOW_R) ? 100.0f : 0.0f), 512.0f, 256); break;
-        case 5: capture_crop_download(name, half - 256.0f, 200.0f, 512.0f, 256); break;
+        case ITEM_HAT: case ITEM_HEAD: capture_crop_download(name, half - 128.0f, 100.0f, 256.0f, g_viewer.export_size); break;
+        case ITEM_PET: capture_crop_download(name, half - 100.0f, 128.0f, 256.0f, g_viewer.export_size); break;
+        case ITEM_FACE: capture_crop_download(name, half - 100.0f, 150.0f, 200.0f, g_viewer.export_size); break;
+        case ITEM_BODY: case ITEM_BACK: case ITEM_SHOE: capture_crop_download(name, half - 256.0f, 100.0f, 512.0f, g_viewer.export_size); break;
+        case ITEM_WAIST: capture_crop_download(name, half - 256.0f, 100.0f + (skin && (skin->flags & VS_LOW_R) ? 100.0f : 0.0f), 512.0f, g_viewer.export_size); break;
+        case ITEM_DYE: capture_crop_download(name, half - 256.0f, 200.0f, 512.0f, g_viewer.export_size); break;
         default: break;
     }
 }
@@ -451,24 +455,52 @@ static void render_pose(const int type) {
     html_timer_add(VIEWER_POSE_DELAY_MS, pose_capture, NULL);
 }
 
-static void fn_render_hat(void) { render_pose(1); }
-static void fn_render_face(void) { render_pose(7); }
-static void fn_render_back(void) { render_pose(2); }
-static void fn_render_waist(void) { render_pose(6); }
-static void fn_render_dye(void) { render_pose(5); }
+static void fn_render_hat(void) { render_pose(ITEM_HAT); }
+static void fn_render_head(void) { render_pose(ITEM_HEAD); }
+static void fn_render_face(void) { render_pose(ITEM_FACE); }
+static void fn_render_body(void) { render_pose(ITEM_BODY); }
+static void fn_render_back(void) { render_pose(ITEM_BACK); }
+static void fn_render_waist(void) { render_pose(ITEM_WAIST); }
+static void fn_render_shoes(void) { render_pose(ITEM_SHOE); }
+static void fn_render_dye(void) { render_pose(ITEM_DYE); }
+static void fn_render_pet(void) { render_pose(ITEM_PET); }
 
-// ---- G(): the Player folder
+// ---- f450(): the Player folder
 
-#define PUSH_M(c) do { if (g_ui.m_count < 24) g_ui.m[g_ui.m_count++] = (c); } while (0)
+#define PUSH_M(c) do { if (g_ui.m_count < 64) g_ui.m[g_ui.m_count++] = (c); } while (0)
 #define PUSH_B(c) do { if (g_ui.b_count < 16) g_ui.b[g_ui.b_count++] = (c); } while (0)
+
+// <Name> dropdown (f460(type)), Load Custom <Name>, [dev] <Name> Config folder (f453; not for
+// pets / wrists) and Render <Name>, Show <Name>
+static void slot_rows(VgValue *value, const int type, const char *name, const VgFn custom, const VgFn render, int *show) {
+    char label[48];
+    options_from_list(VIEWER_LIST_TYPE, type);
+    PUSH_M(add_options(g_ui.player, value, name, on_change_z));
+    if (custom) {
+        snprintf(label, sizeof(label), "Load Custom %s", name);
+        PUSH_M(vg_add_function(g_ui.player, custom, label));
+    }
+    if (g_viewer.dev && type != ITEM_PET && type != ITEM_WRIST) {
+        snprintf(label, sizeof(label), "%s Config", name);
+        vconfig_folder(g_ui.player, type, label);
+    }
+    if (render && viewer_param_has("dev")) {
+        snprintf(label, sizeof(label), "Render %s", name);
+        PUSH_M(vg_add_function(g_ui.player, render, label));
+    }
+    if (show) {
+        snprintf(label, sizeof(label), "Show %s", name);
+        PUSH_M(vg_add_bool(g_ui.player, show, label, on_change_z));
+    }
+}
 
 static void G(void) {
     for (int i = 0; i < g_ui.m_count; i++) vg_remove(g_ui.player, g_ui.m[i]);
     g_ui.m_count = 0;
+    vconfig_remove_folders(g_ui.player);
     ViewerState *e = &g_viewer.e;
-    const int dev = viewer_param_has("dev");
 
-    PUSH_M(vg_add_bool(g_ui.player, &e->show_player, "Show Model", on_show_player));
+    PUSH_M(vg_add_bool(g_ui.player, &e->show_player, "Show Player", on_show_player));
     PUSH_M(vg_add_bool(g_ui.player, &e->show_arms, "Show Arms", on_change_z));
     PUSH_M(vg_add_bool(g_ui.player, &e->show_legs, "Show Legs", on_change_z));
 
@@ -476,36 +508,25 @@ static void G(void) {
     for (int i = 0; i < classes_count(); i++) options_push(g_classes[i].name, i);
     PUSH_M(add_options(g_ui.player, &e->class_index, "Class", on_class));
 
-    options_from_list(VIEWER_LIST_TYPE, 7);
-    PUSH_M(add_options(g_ui.player, &e->face, "Face", on_change_z));
-    PUSH_M(vg_add_function(g_ui.player, fn_custom_face, "Load Custom Face"));
-    if (dev) PUSH_M(vg_add_function(g_ui.player, fn_render_face, "Render Face"));
-
-    options_from_list(VIEWER_LIST_TYPE, 1);
-    PUSH_M(add_options(g_ui.player, &e->hat, "Hat", on_change_z));
-    PUSH_M(vg_add_function(g_ui.player, fn_custom_hat, "Load Custom Hat"));
-    if (dev) PUSH_M(vg_add_function(g_ui.player, fn_render_hat, "Render Hat"));
-
-    options_from_list(VIEWER_LIST_TYPE, 2);
-    PUSH_M(add_options(g_ui.player, &e->back, "Back", on_change_z));
-    PUSH_M(vg_add_function(g_ui.player, fn_custom_back, "Load Custom Back"));
-    if (dev) PUSH_M(vg_add_function(g_ui.player, fn_render_back, "Render Back"));
-
-    options_from_list(VIEWER_LIST_TYPE, 6);
-    PUSH_M(add_options(g_ui.player, &e->waist, "Waist", on_change_z));
-    PUSH_M(vg_add_function(g_ui.player, fn_custom_waist, "Load Custom Waist"));
-    if (dev) PUSH_M(vg_add_function(g_ui.player, fn_render_waist, "Render Waist"));
+    slot_rows(&e->face, ITEM_FACE, "Face", fn_custom_face, fn_render_face, &e->show_face);
+    slot_rows(&e->hat, ITEM_HAT, "Hat", fn_custom_hat, fn_render_hat, &e->show_hat);
+    slot_rows(&e->head, ITEM_HEAD, "Head", fn_custom_head, fn_render_head, &e->show_head);
+    slot_rows(&e->body, ITEM_BODY, "Body", fn_custom_body, fn_render_body, &e->show_body);
+    slot_rows(&e->back, ITEM_BACK, "Back", fn_custom_back, fn_render_back, &e->show_back);
+    slot_rows(&e->waist, ITEM_WAIST, "Waist", fn_custom_waist, fn_render_waist, &e->show_waist);
+    slot_rows(&e->shoe, ITEM_SHOE, "Shoes", fn_custom_shoes, fn_render_shoes, NULL);
 
     options_reset();
     options_push("Default", -1);
     for (int i = 0; i < g_viewer_skin_color_count; i++) options_push(g_viewer_skin_colors[i].name, g_viewer_skin_colors[i].id);
     PUSH_M(add_options(g_ui.player, &e->skin_col, "Skin Color", on_change_z));
 
-    options_from_list(VIEWER_LIST_TYPE, 5);
-    PUSH_M(add_options(g_ui.player, &e->dye, "Dye", on_change_z));
-    if (dev) PUSH_M(vg_add_function(g_ui.player, fn_render_dye, "Render Dye"));
+    slot_rows(&e->dye, ITEM_DYE, "Dye", NULL, fn_render_dye, NULL);
+    slot_rows(&e->pet, ITEM_PET, "Pet", fn_custom_pet, fn_render_pet, &e->show_pet);
+    slot_rows(&e->wrist, ITEM_WRIST, "Wrist", NULL, NULL, &e->show_wrist);
 
     vg_folder_open(g_ui.player);
+    vconfig_snapshot();
 }
 
 // ---- W(): the Weapons folder
@@ -513,6 +534,7 @@ static void G(void) {
 static void W(const int first) {
     for (int i = 0; i < g_ui.b_count; i++) vg_remove(g_ui.weapons, g_ui.b[i]);
     g_ui.b_count = 0;
+    vconfig_remove_folders(g_ui.weapons);
     ViewerState *e = &g_viewer.e;
 
     if (!g_ui.keep_skins) {
@@ -528,6 +550,7 @@ static void W(const int first) {
 
     options_from_list(VIEWER_LIST_WEAPON, primary + 1);
     PUSH_B(add_options(g_ui.weapons, &e->skin_prim, "Primary Skin", on_change_z));
+    if (g_viewer.dev) vconfig_folder(g_ui.weapons, -1, "Primary Config");
 
     options_reset();
     options_push("None", -1);
@@ -546,10 +569,12 @@ static void W(const int first) {
 
         options_from_list(VIEWER_LIST_WEAPON, e->secondary.num + 1);
         PUSH_B(add_options(g_ui.weapons, &e->skin_sec, "Secondary Skin", on_change_z));
+        if (g_viewer.dev) vconfig_folder(g_ui.weapons, -2, "Secondary Config");
     }
 
     options_from_list(VIEWER_LIST_MELEE, 3);
     PUSH_B(add_options(g_ui.weapons, &e->melee, "Melee", on_change_z));
+    if (g_viewer.dev) vconfig_folder(g_ui.weapons, -3, "Melee Config");
 
     if (cls->secondary) PUSH_B(vg_add_function(g_ui.weapons, fn_swap, "Swap Secondary"));
     PUSH_B(vg_add_function(g_ui.weapons, fn_swap_melee, "Swap Melee"));
@@ -557,6 +582,7 @@ static void W(const int first) {
     PUSH_B(vg_add_function(g_ui.weapons, fn_reset, "Reset Skins"));
 
     vg_folder_open(g_ui.weapons);
+    vconfig_snapshot();
     Z();
     if (!e->show_player && first) vscene_camera_weapon();
 }
@@ -585,14 +611,6 @@ static void H(void) {
     G();
     g_ui.weapons = vg_add_folder(root, "Weapons");
     W(1);
-    g_ui.config = vg_add_folder(root, "Config");
-    g_ui.s_count = 0;
-    g_ui.s[g_ui.s_count++] = vg_add_function(g_ui.config, fn_face_json, "Face Config");
-    g_ui.s[g_ui.s_count++] = vg_add_function(g_ui.config, fn_hat_json, "Hat Config");
-    g_ui.s[g_ui.s_count++] = vg_add_function(g_ui.config, fn_back_json, "Back Config");
-    g_ui.s[g_ui.s_count++] = vg_add_function(g_ui.config, fn_waist_json, "Waist Config");
-    g_ui.s[g_ui.s_count++] = vg_add_function(g_ui.config, fn_reset_json, "Reset Config");
-
     vg_add_bool(root, &e->animate, "Animate", NULL);
     vg_add_bool(root, &e->crouch, "Crouch", on_crouch);
     options_reset();
@@ -614,10 +632,15 @@ static void state_from_params(void) {
 
     value_set(&e->skin_prim, param_int_or("skinIdP", -1));
     value_set(&e->skin_sec, param_int_or("skinIdS", -1));
+    value_set(&e->shoe, param_int_or("shoe", -1));
     value_set(&e->face, param_int_or("face", -1));
     value_set(&e->hat, param_int_or("hat", -1));
+    value_set(&e->head, param_int_or("head", -1));
+    value_set(&e->body, param_int_or("body", -1));
     value_set(&e->back, param_int_or("back", -1));
     value_set(&e->waist, param_int_or("waist", -1));
+    value_set(&e->pet, param_int_or("pet", -1));
+    value_set(&e->wrist, param_int_or("wrist", -1));
     value_set(&e->melee, param_int_or("melee", -1));
     value_set(&e->skin_col, param_int_or("skinCol", -1));
     value_set(&e->dye, param_int_or("dye", -1));
@@ -629,14 +652,22 @@ static void state_from_params(void) {
     snprintf(e->lighting.str, sizeof(e->lighting.str), "In-game");
 
     e->show_player = !viewer_param_has("hidePlayer");
+    e->show_body = !viewer_param_has("hideBody");
     e->show_back = !viewer_param_has("hideBack");
     e->show_waist = !viewer_param_has("hideWaist");
     e->show_face = !viewer_param_has("hideFace");
     e->show_hat = !viewer_param_has("hideHat");
+    e->show_head = !viewer_param_has("hideHead");
+    e->show_pet = !viewer_param_has("hidePet");
+    e->show_wrist = !viewer_param_has("hideWrist");
     e->show_arms = !viewer_param_has("hideArms");
     e->show_legs = !viewer_param_has("hideLegs");
     e->show_wep = !viewer_param_has("hideWep");
     e->gradient = 1;
+    e->animate = viewer_param_has("anim");
+    e->crouch = viewer_param_has("crouch");
+    const char *freeze = getenv("KRUNKNATIVE_VIEWER_FREEZE");
+    g_viewer.freeze = freeze && *freeze && strcmp(freeze, "0") != 0;
 
     // T = params.has("swap") && params.get("swap"); compared loosely with -1 and 1
     const char *swap = viewer_param_get("swap");
@@ -678,6 +709,7 @@ static void viewer_enter(Client *client, const char *query) {
     g_viewer.client = client;
     params_parse(query);
     state_from_params();
+    vconfig_reset();
     printf("[viewer] enter query=\"%s\"\n", query ? query : "");
 
     static HtmlHandlerEntry handlers[VIEWER_MAX_HANDLERS];
@@ -704,6 +736,24 @@ static void viewer_enter(Client *client, const char *query) {
     }
     if (g_viewer.cosmetic_set && g_viewer.auto_render) fn_render_wep();
 
+    // KRUNKNATIVE_VIEWER_GUI="<Name or Folder/Name>[=<value>];...": panel actions in order, as
+    // picked / typed / clicked (tests: tools/kref/viewer-scenarios.txt)
+    const char *actions = getenv("KRUNKNATIVE_VIEWER_GUI");
+    if (actions && *actions) {
+        const size_t n = strlen(actions);
+        char *list = malloc(n + 1);
+        if (list) memcpy(list, actions, n + 1);
+        for (char *item = list; item && *item;) {
+            char *end = strchr(item, ';');
+            if (end) *end = 0;
+            char *eq = strchr(item, '=');
+            if (eq) *eq = 0;
+            if (*item && !vg_test_action(item, eq ? eq + 1 : NULL)) fprintf(stderr, "[viewer] gui action: no controller \"%s\"\n", item);
+            item = end ? end + 1 : NULL;
+        }
+        free(list);
+    }
+
     // KRUNKNATIVE_VIEWER_IMPORT=<file>[,<target>]: import a file as if dropped / loaded (tests)
     const char *import = getenv("KRUNKNATIVE_VIEWER_IMPORT");
     if (import && *import) {
@@ -722,7 +772,6 @@ static void viewer_leave(Client *client) {
     viewer_import_fini();
     vg_fini();
     vscene_fini();
-    for (int i = 0; i < 8; i++) cJSON_Delete(g_ui.configs[i]);
     params_clear();
     memset(&g_ui, 0, sizeof(g_ui));
 }
@@ -755,6 +804,7 @@ static int viewer_mouse_button(Client *client, const int button, const int actio
         vscene_orbit_begin(button, mods, cx, cy);
         return vscene_orbit_active();
     }
+    if (action == GLFW_RELEASE && vg_dragging()) vg_drag_end(); // dat.gui's window mouseup
     if (action == GLFW_RELEASE && vscene_orbit_active()) {
         vscene_orbit_end();
         return 1;
@@ -764,8 +814,13 @@ static int viewer_mouse_button(Client *client, const int button, const int actio
 
 static int viewer_cursor(Client *client, const double x, const double y) {
     (void) client;
-    if (!g_ui.entered || !vscene_orbit_active()) return 0;
+    if (!g_ui.entered) return 0;
     const float s = css_scale();
+    if (vg_dragging()) { // dat.gui's window mousemove while a box / colour field is dragged
+        vg_drag_move((float) x / s, (float) y / s);
+        return 0;
+    }
+    if (!vscene_orbit_active()) return 0;
     vscene_orbit_move((float) x / s, (float) y / s);
     return 1;
 }
@@ -825,4 +880,82 @@ const AppPage *viewer_app_page(void) {
         .resize = viewer_resize,
     };
     return &page;
+}
+
+// ---------------------------------------------------------------- the store item view (viewer_embed.h)
+
+static struct {
+    int active;
+    int index;
+} g_embed;
+
+void viewer_embed_fini(void) {
+    if (!g_embed.active) return;
+    vscene_fini();
+    params_clear();
+    memset(&g_viewer, 0, sizeof(g_viewer));
+    memset(&g_embed, 0, sizeof(g_embed));
+}
+
+// the iframe of #itemViewPop that shows viewer.html?...showcase=<i>: its store index, -1 = none
+static HtmlElem embed_frame(int *index) {
+    *index = -1;
+    const HtmlElem pop = html_dom_by_id("itemViewPop");
+    char display[16] = "";
+    if (!pop) return 0;
+    html_dom_get_style(pop, "display", display, sizeof(display));
+    if (!strcmp(display, "none") || !display[0]) return 0;
+    const HtmlElem frame = html_dom_query(pop, "iframe");
+    char src[160];
+    if (!frame || html_dom_get_attr(frame, "src", src, sizeof(src)) < 0 || !strstr(src, "viewer.html")) return 0;
+    const char *query = strchr(src, '?');
+    const char *showcase = query ? strstr(query, "showcase=") : NULL;
+    if (!showcase) return 0;
+    *index = atoi(showcase + 9);
+    return frame;
+}
+
+void viewer_embed_frame(Client *client, const float delta) {
+#ifdef __EMSCRIPTEN__
+    (void) client;
+    (void) delta;
+    return; // the browser shows the iframe's own viewer page
+#else
+    if (g_ui.entered || !client || !client->window) return; // the viewer page owns the scene
+    int index = -1;
+    const HtmlElem frame = embed_frame(&index);
+    HtmlRect rect = {0};
+    if (!frame || !html_dom_get_rect(frame, &rect) || rect.w < 1.0f || rect.h < 1.0f) {
+        viewer_embed_fini();
+        return;
+    }
+    if (g_embed.active && g_embed.index != index) viewer_embed_fini();
+    if (!g_embed.active) {
+        char query[64];
+        snprintf(query, sizeof(query), "nobg&showcase=%d", index);
+        memset(&g_viewer, 0, sizeof(g_viewer));
+        g_viewer.client = client;
+        params_parse(query);
+        state_from_params();
+        g_embed.active = 1;
+        g_embed.index = index;
+        if (!vscene_init()) {
+            viewer_embed_fini();
+            return;
+        }
+        vscene_update_lights();
+        vscene_build_showcase(index);
+        printf("[viewer] item view showcase %d\n", index);
+    }
+
+    int fb_w = 0, fb_h = 0;
+    glfwGetFramebufferSize(client->window, &fb_w, &fb_h);
+    float vw = 0.0f, vh = 0.0f, dpr = 1.0f;
+    html_dom_viewport(&vw, &vh, &dpr);
+    const float scale = vh > 0.0f ? (float) fb_h / vh : 1.0f;
+    const int x = (int) lroundf(rect.x * scale), w = (int) lroundf(rect.w * scale), h = (int) lroundf(rect.h * scale);
+    const int y = fb_h - (int) lroundf(rect.y * scale) - h;
+    vscene_tick(fminf(delta, 0.1f) * 1000.0f);
+    vscene_render_rect(x, y, w, h, fb_w, fb_h);
+#endif
 }

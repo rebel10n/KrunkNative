@@ -1,14 +1,22 @@
 #include <shared.h>
+#include <world.h> // map-logic WP-B: tris, zones, score zones, terrain, resets
 #include <ai.h>
+#include <spawnables.h>
+#include <zombies.h> // map-logic WP-H: finiteAmmo, double points, machines, airdrops
+#include <game_config.h> // WP-E: config.classes, forceC
+#include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
+#include <triggers_v7.h> // WP-C: onPlayerSpawn / Damage / Die / Kill map triggers
+#include <player_card.h> // WP-E: the death screen's life accuracy
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
 
-// Krunker v3.1.1 combat constants (src/config.js), used by the spread update and
-// the hitscan/damage code below.
+// Krunker combat constants (v3.1.1 / v7.1.4 src/config.js), used by the spread update and
+// the hitscan/damage code below. Head / leg zones: shared/src/effects.c (player_hit_*).
 #define COMBAT_HEAD_SCALE 2.0f      // config.headScale: headshot band below the top of the hitbox
-#define COMBAT_LEG_HEIGHT 4.2f      // config.legHeight: leg shots deal half damage
+#define COMBAT_THROW_CHARGE 0.9f    // v7 config.throwCharge (s): knife-throw charge of a class without throwChrg
+#define COMBAT_OVER_CHARGE 1.2f     // v7 config.overCharge: ovrChrg weapons reset at chrgTime * 1.2
 #define COMBAT_DENSITY_FLESH 0.2f   // config.materialDens.flesh
 #define COMBAT_DENSITY_DEFAULT 0.5f // config.materialDens.default
 #define COMBAT_FIST_DAMAGE 35.0f    // melee without the knife (after a throw)
@@ -25,6 +33,8 @@
 
 void player_melee(Player*);
 void player_shoot(Player*);
+static void combat_spawn(Player*, const ClassConfig*);
+static void combat_update_charge(Player*, const Input*, float delta);
 void player_step(Player*, float);
 void player_cancel_inspect(Player*);
 
@@ -38,8 +48,18 @@ Player *player_init(Game *game) {
     player->last_killer_uid = -1;
     player->secondary_index = -1;
     player->cosmetics = PLAYER_COSMETICS_NONE;
+    player->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    player->show_badges = PLAYER_SHOW_BADGES_ALL;
+    player->skins = PLAYER_SKINS_NONE;
     player->last_kill_time = -1e6f; // Krunker lastKill starts far in the past (no multi-kill on the first kill)
+    player->last_spray = -1e6f;     // lastSpray 0 against Date.now(): the first spray is never on cooldown
     for (int i = 0; i < PLAYER_DAMAGE_SLOTS; i++) player->damage_received[i].uid = -1;
+    player->lag_comp = 1.0f;                        // players.js: this.lagComp = 1
+    player->c_send_rate = GAME_LAG_COMP_SEND_RATE;  // this.cSendRate = 10
+    player->head_mlt = 1.0f;                        // v7.1.4 headMlt
+    player_set_streak_indexes(player, NULL);        // v7.1.4 streakIndex1..3 defaults (Nuke only)
+    player->pc_stat_index = -1;                     // WP-E: no player card stat until the server sets one
+    effects_reset(player);
 
     return player;
 }
@@ -64,8 +84,14 @@ void player_spawn(Player *player) {
     player->input_seq = -1;
     player->recon_snap = 0;
     player->has_shot_vel_obj = 0;
+    player->state_history_count = 0; // players.js init: this.stateHistory.length = 0
+    player->state_history_head = 0;
+    lag_comp_clock_reset(&player->lag_clock); // a new life restarts its input seq at 0
 
     player->active = 1;
+    // WP-E death screen: player.js reset() of the life counters, spawnTime = Date.now()
+    player->life_start = player->game->now;
+    player->life_shots = player->life_hits = player->life_kills = player->life_score = 0;
 
     const size_t class_count = player->game->class_count ? player->game->class_count : sizeof(g_classes) / sizeof(g_classes[0]);
     const ClassConfig *classes = player->game->classes ? player->game->classes : g_classes;
@@ -73,7 +99,10 @@ void player_spawn(Player *player) {
     Weapon **weapons = player->game->weapons ? player->game->weapons : (Weapon**) g_weapons;
 
     // setClass (v3.1.1 src/data/players.js): mode overrides, then primary + optional secondary + knife.
-    if (player->game->mode) {
+    // WP-E (v7 player.js:649-664): config.classes first (classes[0] when not listed), and the
+    // mode's classes only with forceC.
+    player->class_index = game_config_class_for(player->game, player->class_index);
+    if (player->game->mode && player->game->config.force_classes) {
         const GameModeConfig *mode_config = &player->game->mode->config;
         if (mode_config->no_weapons) player->class_index = 9;
         if (mode_config->force_class >= 0) player->class_index = mode_config->force_class;
@@ -92,7 +121,11 @@ void player_spawn(Player *player) {
     const int primary_index = primary >= 0 && primary < (int) weapon_count && weapons[primary] ? primary : fallback_weapon;
     // setClass(game, classIndex, secIndex): the picked secondary when it is a secondary weapon, else the Pistol.
     const int picked_secondary = player->secondary_index;
-    const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary
+    // v7.1.4: customOnly secondaries (Grappler) need a custom game (KN has none yet) and noComp
+    // ones stay out of competitive (Ranked) rounds.
+    const int ranked = player->game->mode && player->game->mode->config.is_ranked;
+    const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary &&
+        !weapons[picked_secondary]->custom_only && !(ranked && weapons[picked_secondary]->no_comp)
         ? picked_secondary : WEAPON_ID_PISTOL < (int) weapon_count ? WEAPON_ID_PISTOL : -1;
     const int melee_index = WEAPON_ID_KNIFE < (int) weapon_count ? WEAPON_ID_KNIFE : primary_index;
 
@@ -111,6 +144,7 @@ void player_spawn(Player *player) {
     player->max_health = mode_health > 0 ? mode_health : (int) ((float) class_config->health * health_mlt);
     player->health = (float) player->max_health;
     player->wall_jump = class_config->wall_jump;
+    combat_spawn(player, class_config); // WP-B: v7 throwCharge, effects / perks / juggernaut reset
     player->loadout_size = loadout_size;
 
     player->loadout = calloc((size_t) loadout_size, sizeof(int));
@@ -131,8 +165,7 @@ void player_spawn(Player *player) {
 
     for (int i = 0; i < loadout_size; i++) {
         player->loadout[i] = loadout[i];
-        const int ammo_limit = player->game->mode ? player->game->mode->config.ammo_limit : 0;
-        player->ammo[i] = ammo_limit > 0 && weapons[player->loadout[i]]->ammo ? ammo_limit : (int) weapons[player->loadout[i]]->ammo;
+        player->ammo[i] = (unsigned int) mode_ammo_limit(player->game, (int) weapons[player->loadout[i]]->ammo); // v7 ammoLimit (aon 0)
     }
 
     player->velocity.x = 0.0f;
@@ -166,22 +199,33 @@ void player_spawn(Player *player) {
     player->reload_timer = 0.0f;
 
     player_update_height(player);
+    player_movement_spawn(player); // WP-A: wall-jump limits and v7 movement state
     player_swap_weapon(player, 0, 1, 0, 0);
 
-    if (player->game->map && player->game->map->spawn_count) {
-        const Spawn *spawn = player->game->map->spawns[pcg32_boundedrand(player->game->map->spawn_count)];
-
-        player->position = spawn->position;
+    // getSpawnPoint(player.team, player): every mode, offline and server, bots included.
+    vec3 spawn_position;
+    int spawn_direction;
+    if (game_get_spawn_point(player->game, player, &spawn_position, &spawn_direction)) {
+        player->position = spawn_position;
         player->direction.x = 0.0f;
-        player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn->direction);
+        player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn_direction);
     }
 
-    // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker) and,
-    // on the authority, the team spawn point (getSpawnPoint(team)).
+    // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker).
     mode_player_spawned(player->game, player);
+    // map-logic WP-H (Player.reset): full finiteAmmo reserves, no shared boxes
+    player->shared_boxes = 0;
+    player->sharing_is_caring = 0;
+    zombies_reserves_reset(player);
+    if (zombies_finite_ammo(player)) zombies_send_reserves(player);
 
-    // A player that reached a check point respawns there (shared/src/triggers.c).
+    // A player that reached a check point respawns there (shared/src/world.c).
     if (game_is_authority(player->game)) game_spawn_at_checkpoint(player->game, player);
+    world_player_spawned(player->game, player); // WP-B: setInitPos, noPVP / forcePVP off
+    ks_game_on_player_spawn(player->game, player); // KrunkScript: player script state reset, server onPlayerSpawn
+    // onPlayerSpawn map triggers: v7.1.4 never dispatches them (a reconstruction gap); KN does, from the
+    // authority's spawn (doc/v7/decisions.md "player spawn" trigger event; zombie_high relies on it)
+    if (game_is_authority(player->game)) trigger_player_event(player->game, TRIGGER_EVENT_ON_PLAYER_SPAWN, player);
 }
 
 void player_queue_input(Player *player, const Input *input) {
@@ -204,7 +248,10 @@ void player_queue_input(Player *player, const Input *input) {
 int player_accept_input(Player *player, Input *input) {
     if (!player || !input) return 0;
     if (!isfinite(input->delta) || !isfinite(input->x_dir) || !isfinite(input->y_dir) || !isfinite(input->slowdown)) return 0;
+    const float raw_delta = input->delta; // before the clamp: a longer frame breaks the lag comp clock
     input->delta = input->delta < 0.0f ? 0.0f : MIN(input->delta, game_constants.max_delta);
+    input->x_dir = player_clamp_pitch(input->x_dir); // a v3.1.1 client never sends more (controls.js)
+    input->y_dir = player_wrap_yaw(input->y_dir);
     if (input->move_dir < -1 || input->move_dir > 7) input->move_dir = -1; // no movement key, like an unknown input[4]
     if (input->swap > 4) input->swap = 0;                                  // input[11] codes are 0..4
 
@@ -226,6 +273,10 @@ int player_accept_input(Player *player, Input *input) {
         player->input_queue_size -= drop;
     }
     player_queue_input(player, input);
+    if (player->input_queue_size && player->input_queue[player->input_queue_size - 1].seq == input->seq) {
+        lag_comp_clock_frame(&player->lag_clock, &player->input_queue[player->input_queue_size - 1], raw_delta);
+        *input = player->input_queue[player->input_queue_size - 1];
+    }
     return 1;
 }
 
@@ -512,68 +563,288 @@ void player_reset_feel(Player *player) {
     for (int i = 0; i < 4; i++) player->recoil_tween[i] = 0.0f;
 }
 
-void player_reset_step(Player *player, const int recon) {
-    if (!recon && player->render_you && player->velocity.y) player_feel_land(player);
-    if (!recon && player->velocity.y) player->land_events++; // resetStep: step_N at 0.7 (sound_events.c)
+// ---------------------------------------------------------------- v7.1.4 movement
+// Krunker v7.1.4 src/data/player.js procInputs (859-2012), players.js setOnGround / resetStep /
+// playerStep / jump / tryJump (24-32, 1612-1750) and data/movement.js[0] "Default" (dir / mov /
+// vel). v7 values are per ms; KrunkNative keeps delta in seconds and its game_constants scaled
+// by 1000, so the code below converts with `dt` (the frame in ms) where v7 mixes per-ms knobs.
+// doc/v7/player-viewer.md 1.1.7 lists every change from v3.1.1 this region carries.
 
-    // TODO: landing step sound (sound_events)
+#define MOVEMENT_SLIDE_LOCK 0.1f          // canSlideT = 100 ms after a slide starts (resetStep)
+#define MOVEMENT_QUAD_SIZE 150.0f         // config.quadSize: the collision grid cell (MapManager)
+#define MOVEMENT_PAD_MIN_HALF_HEIGHT 3.0f // addPad: h = max(sy, 3) around the pad's y
+#define MOVEMENT_CYLINDER_STEP_EPSILON 0.00001f // cylinder step-up (v3.1.1: only when config.isComp)
 
-    if (!player->game->config.can_slide || player->game->mode->config.real_movement || !player->crouch_val || !player->can_slide) return;
-
-    player->can_slide = 0;
-
-    player->slide_timer =
-        game_constants.slide_time *
-        player->game->config.slide_time *
-        player->game->map->config.slide_time *
-        player->crouch_val
-    ;
-
-    const float slide_mlt = (
-        player->on_terrain ?
-        game_constants.player_terrain_slide_velocity_mlt :
-        game_constants.player_slide_velocity_mlt
-    ) * player->game->map->config.slide_accel;
-
-    player->velocity.x *= slide_mlt;
-    player->velocity.z *= slide_mlt;
+static const ClassConfig *movement_class(const Player *player) {
+    const Game *game = player->game;
+    const size_t count = game->class_count ? game->class_count : CLASS_COUNT;
+    const ClassConfig *classes = game->classes ? game->classes : g_classes;
+    if (player->class_index < 0 || (size_t) player->class_index >= count) return NULL;
+    return &classes[player->class_index];
 }
 
-int player_collides(Player *player, const Object *object, const float pad) {
-    switch (object->collision_type) {
-        case COLLISION_TYPE_NONE:
-            return 0;
-        case COLLISION_TYPE_BOX: {
-            const int in_x = player->position.x + player->scale > object->position.x - (object->scale.x * 0.5f + pad) && player->position.x - player->scale < object->position.x + (object->scale.x * 0.5f + pad);
-            const int in_z = player->position.z + player->scale > object->position.z - (object->scale.z * 0.5f + pad) && player->position.z - player->scale < object->position.z + (object->scale.z * 0.5f + pad);
-            const int in_y = player->position.y + player->height >= object->position.y && player->position.y <= object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
+// this.config: the player's class movement knobs (zeros read as the v7 defaults)
+static const ClassMovement *movement_knobs(const Player *player) {
+    static const ClassMovement none = {0};
+    const ClassConfig *class_config = movement_class(player);
+    return class_config ? &class_config->movement : &none;
+}
 
-            return in_x && in_y && in_z;
+// game.mode movement keys (gameModes/*.js: gravMlt, jumpMlt, groundAccel, frSlid, noSliding,
+// noWallJ, wallJ / wallJM / wallJD / wallJV / wallJYV). Multipliers read 1 when unset.
+typedef struct {
+    float gravity_mlt, jump_mlt, ground_accel;     // gravMlt, jumpMlt, groundAccel (1 = none)
+    float wall_jump_decel, wall_jump_vel;          // wallJD, wallJV: 0 = the class value
+    float wall_jump_y_vel;                         // wallJYV (1)
+    int wall_jump_set, wall_jump, wall_jump_max;   // wallJ / wallJM
+    int free_slide, no_sliding, no_wall_jump;      // frSlid, noSliding, noWallJ
+} MovementModeKeys;
+
+static MovementModeKeys movement_mode(const Player *player) {
+    const Game *game = player->game;
+    MovementModeKeys keys = {
+        .gravity_mlt = mode_grav_mlt(game),
+        .jump_mlt = mode_jump_mlt(game),
+        .ground_accel = mode_ground_accel(game),
+        .wall_jump_y_vel = 1.0f,
+        .free_slide = mode_fr_slid(game),
+        .no_sliding = mode_no_sliding(game),
+        .no_wall_jump = mode_no_wall_jump(game),
+    };
+    float wall_jump = 0.0f, wall_jump_max = 0.0f; // modes.h WP-D accessors (chs / imp / clas / zom)
+    if (mode_wall_jump(game, &wall_jump, &wall_jump_max, &keys.wall_jump_decel, &keys.wall_jump_vel, &keys.wall_jump_y_vel)) {
+        keys.wall_jump_set = 1;
+        keys.wall_jump = (int) wall_jump;
+        keys.wall_jump_max = (int) wall_jump_max;
+    }
+    return keys;
+}
+
+static int movement_real(const Player *player) {
+    return player->game->mode && player->game->mode->config.real_movement;
+}
+
+#define MOVEMENT_OR(value, def) ((value) ? (value) : (def))
+
+// The double v7 computes for a value KrunkNative keeps as a float: table values and crouchVal /
+// yaw / pitch are decimals with at most 6 digits, so rounding gives JS's exact double back.
+// Used where v7's exact double arithmetic decides a tick (the slide's last tick, a move
+// direction 90 degrees off the look direction).
+static double movement_js(const float value) {
+    return round((double) value * 1e6) / 1e6;
+}
+
+// slideTimer: the physics counts v7's double ms (slide_ms); slide_timer (s) mirrors it for the
+// network, sounds and UI, and a slide_timer written elsewhere (reconciliation) wins.
+static double movement_slide_ms(Player *player) {
+    if ((float) (player->slide_ms / 1000.0) != player->slide_timer) player->slide_ms = (double) player->slide_timer * 1000.0;
+    return player->slide_ms;
+}
+
+static void movement_set_slide_ms(Player *player, const double ms) {
+    player->slide_ms = ms;
+    player->slide_timer = (float) (ms / 1000.0);
+}
+
+// this.config.hbS / hbH: the class pads every collision test adds to the player's box
+static float movement_pad_w(const Player *player) {
+    const ClassConfig *class_config = movement_class(player);
+    return class_config ? class_config->hitbox_pad_w : 0.0f;
+}
+
+static float movement_pad_h(const Player *player) {
+    const ClassConfig *class_config = movement_class(player);
+    return class_config ? class_config->hitbox_pad_h : 0.0f;
+}
+
+// wallJP: config.wallJP, 0 in noWallJ modes
+static float movement_wall_jump_power(const Player *player) {
+    return movement_mode(player).no_wall_jump ? 0.0f : player->game->config.wall_jump;
+}
+
+// setClass: wallJump = mode.wallJ ?? class wallJ, wallJumpMax = mode.wallJM ?? class wallJM
+void player_movement_spawn(Player *player) {
+    const ClassConfig *class_config = movement_class(player);
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode = &mode_keys;
+    player->wall_jump = mode->wall_jump_set ? mode->wall_jump : class_config && class_config->wall_jump;
+    player->wall_jump_max = mode->wall_jump_set ? mode->wall_jump_max : class_config ? class_config->wall_jump_max : 0;
+    // Intentional difference: v7 keeps wallJumpC across a death until the next landing, so a life
+    // can start with wall jumps already spent; a new life starts with all of them.
+    player->wall_jump_count = 0;
+    player->can_slide_timer = 0.0f;
+    player->on_pad = player->was_on_pad = 0;
+    player->was_on_ground = 1;
+    player->stop_crouch = player->was_stop_crouch = 0;
+    player->height_old = player->height;
+}
+
+// A map object's collision box in v7 terms: centre x/z, half width w / length l, bottom and top.
+// KrunkNative objects keep the map's bottom-centred p and full size s. v7 sizes a jump pad from
+// the map (addPad: w = sx/2, l = sz/2, y = p.y, h = max(sy, 3), so the box spans p.y -+ h; v3.1.1
+// used fixed 5 x 1 x 5 half extents) and a cylinder's radius is min(sx, sz) / 2.
+typedef struct {
+    float x, z, w, l, bottom, top;
+} MovementBox;
+
+static void movement_box(const Object *object, MovementBox *box) {
+    box->x = object->position.x;
+    box->z = object->position.z;
+    if (object->jump_pad) {
+        const float h = MAX(object->scale.y, MOVEMENT_PAD_MIN_HALF_HEIGHT);
+        box->w = object->scale.x * 0.5f;
+        box->l = object->scale.z * 0.5f;
+        box->bottom = object->position.y - h;
+        box->top = object->position.y + h;
+    } else {
+        if (object->collision_type == COLLISION_TYPE_CYLINDER) {
+            box->w = box->l = MIN(object->scale.x, object->scale.z) * 0.5f;
+        } else {
+            box->w = object->scale.x * 0.5f;
+            box->l = object->scale.z * 0.5f;
         }
-        case COLLISION_TYPE_CYLINDER: {
-            const int in_y = player->position.y + player->height > object->position.y && player->position.y < object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
-            return in_y && hypotf(player->position.x - object->position.x, player->position.z - object->position.z) <= object->scale.x * 0.5f + player->scale + pad;
-        }
+        box->bottom = object->position.y;
+        box->top = object->position.y + object->scale.y;
+    }
+}
+
+static float movement_border(const Player *player, const Object *object) {
+    return object->is_border && !player->game->config.disable_borders ? game_constants.border_height : 0.0f;
+}
+
+// MapManager.getGridArrays(x, y, z): the player only tests the objects registered in its grid
+// cell. applyToQuad registers an object in every config.quadSize cell its box reaches, inflated
+// by playerScale (config, not the class pad) + 0.1 sideways, playerHeight + 0.1 vertically and
+// borderH above a border (disableB or not).
+static int movement_in_cell(const int cell[3], const MovementBox *box, const Object *object) {
+    const float half_h = (box->top - box->bottom) * 0.5f, centre_y = (box->top + box->bottom) * 0.5f;
+    const float ex = box->w + game_constants.player_scale + 0.1f, ez = box->l + game_constants.player_scale + 0.1f;
+    const float ey = half_h + game_constants.player_height + 0.1f;
+    const float border = object->is_border ? game_constants.border_height : 0.0f;
+    return cell[0] >= (int) floorf((box->x - ex) / MOVEMENT_QUAD_SIZE) && cell[0] <= (int) floorf((box->x + ex) / MOVEMENT_QUAD_SIZE) &&
+           cell[2] >= (int) floorf((box->z - ez) / MOVEMENT_QUAD_SIZE) && cell[2] <= (int) floorf((box->z + ez) / MOVEMENT_QUAD_SIZE) &&
+           cell[1] >= (int) floorf((centre_y - ey) / MOVEMENT_QUAD_SIZE) && cell[1] <= (int) floorf((centre_y + ey + border) / MOVEMENT_QUAD_SIZE);
+}
+
+// collidesE(obj, scale + hbS, collPad): an inclusive box test for every kind of object
+// (cylinders too), reaching borderH above a border.
+static int movement_collides_padded(const Player *player, const Object *object, const MovementBox *box, const float pad) {
+    const float s = player->scale + movement_pad_w(player);
+    const vec3 p = player->position;
+    return p.x - s <= box->x + box->w + pad && p.x + s >= box->x - box->w - pad &&
+           p.z - s <= box->z + box->l + pad && p.z + s >= box->z - box->l - pad &&
+           p.y <= box->top + movement_border(player, object) && p.y + movement_pad_h(player) + player->height >= box->bottom;
+}
+
+// collides(obj): cylinders by distance (no border, no hbH), boxes strictly inside sideways.
+static int movement_collides(const Player *player, const Object *object, const MovementBox *box) {
+    const float s = player->scale + movement_pad_w(player);
+    const vec3 p = player->position;
+    if (object->collision_type == COLLISION_TYPE_CYLINDER) {
+        if (!(p.y <= box->top && p.y + player->height >= box->bottom)) return 0;
+        return hypotf(p.x - box->x, p.z - box->z) <= box->w + s;
+    }
+    return p.x - s < box->x + box->w && p.x + s > box->x - box->w && p.z - s < box->z + box->l && p.z + s > box->z - box->l &&
+           p.y <= box->top + movement_border(player, object) && p.y + movement_pad_h(player) + player->height >= box->bottom;
+}
+
+// Player.collides / collidesE for code outside the movement loop (interact prompts, sounds,
+// modes): pad > 0 is the padded inclusive test, 0 the solid one.
+int player_collides(Player *player, const Object *object, const float pad) {
+    if (object->collision_type == COLLISION_TYPE_NONE) return 0;
+    MovementBox box;
+    movement_box(object, &box);
+    return pad > 0.0f ? movement_collides_padded(player, object, &box, pad) : movement_collides(player, object, &box);
+}
+
+// players.setOnGround (lastGround is only read by v7 modes KrunkNative does not have yet)
+static void movement_set_on_ground(Player *player) {
+    player->on_ground = 1;
+}
+
+// players.resetStep: a landing (only from the air, and only moving down: v3.1.1 also slid when a
+// grounded player stepped down a ramp or ledge) resets the wall-jump count, plays the land feel
+// and starts a slide when crouched, then locks new slides for 100 ms. Fall damage is the
+// authority's (players.js isServer).
+void player_reset_step(Player *player, const int recon) {
+    if (player->was_on_ground || !(player->last_position.y > player->position.y)) return;
+
+    const float land_velocity = player->velocity.y;
+    player->wall_jump_count = 0;
+
+    if (!recon && player->render_you && land_velocity) player_feel_land(player);
+    if (!recon && land_velocity) player->land_events++; // step_N at 0.7 (sound_events.c)
+
+    Game *game = player->game;
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode = &mode_keys;
+    const int no_sliding = mode->no_sliding && !player_has_perk(player, PERK_SLIDE) && !player_has_perk(player, PERK_SLIDE_EXPLODE);
+    const int slide = !movement_real(player) && player->crouch_val && player->can_slide && player->can_slide_timer <= 0.0f &&
+                      game->config.can_slide && !no_sliding;
+
+    if (slide) {
+        const ClassConfig *class_config = movement_class(player);
+        player->can_slide = 0;
+        player->can_slide_timer = MOVEMENT_SLIDE_LOCK;
+        // config.slideTime * (slidTime || 1) * (slT || 1) * crouchVal, in v7's double ms
+        movement_set_slide_ms(player, movement_js(game_constants.slide_time * 1000.0f) * movement_js(MOVEMENT_OR(game->config.slide_time, 1.0f)) *
+                                      movement_js(class_config ? MOVEMENT_OR(class_config->slide_time_mlt, 1.0f) : 1.0f) * movement_js(player->crouch_val));
+        // Intentional difference: v7 reads the players manager's onTerrain here (always undefined,
+        // so terrain never weakens the slide boost); this reads the player's.
+        float slide_mlt = (player->on_terrain ? game_constants.player_terrain_slide_velocity_mlt : game_constants.player_slide_velocity_mlt) *
+                          (class_config ? MOVEMENT_OR(class_config->slide_accel_mlt, 1.0f) : 1.0f);
+        slide_mlt *= game->config.slide_speed; // game.config.slidSpd || 0
+        player->velocity.x *= slide_mlt;
+        player->velocity.z *= slide_mlt;
     }
 
-    return 0;
+    if (game_is_authority(game) && game->config.fall_damage > 0.0f) {
+        float damage = fabsf(land_velocity);
+        if (damage > game->config.fall_damage_threshold) {
+            damage *= 10.0f * game->config.fall_damage;
+            damage = floorf(damage * 10.0f + 0.5f) / 10.0f; // changeHealth: dmg.round(1)
+            if (player_change_health(player, NULL, damage, 0)) player_kill(player, NULL, NULL, 0);
+        }
+    }
 }
 
+// The walls a ladder climb or wall jump can use (map.c wall_jumpable = !notWallJ) and the solid
+// objects of the v7 collision chain.
 void player_do_map_collisions(Player *player, const Input *input, const float move_dir, const int can_jump, const float delta, const int recon) {
-    float *max_ramp_height = NULL;
+    Game *game = player->game;
+    const float dt = delta * 1000.0f;
+    const float pad_w = movement_pad_w(player), pad_h = movement_pad_h(player);
+    const float s = player->scale + pad_w;
+    const int has_move = input->move_dir >= 0;
+    const ClassMovement *knobs = movement_knobs(player);
+    player->was_on_ground = can_jump ? 1 : 0;
 
-    // TODO: grid arrays (perf)
-    for (size_t i = 0; i < player->game->map->object_count; i++) {
-        const Object *object = player->game->map->objects[i];
-        const int collides_padded = player_collides(player, object, game_constants.collision_padding);
+    const int cell[3] = {
+        (int) floorf(player->position.x / MOVEMENT_QUAD_SIZE),
+        (int) floorf(player->position.y / MOVEMENT_QUAD_SIZE),
+        (int) floorf(player->position.z / MOVEMENT_QUAD_SIZE),
+    };
+    int has_ramp_height = 0, side_pushed = 0;
+    float max_ramp_height = 0.0f;
 
-        if (!object->active || !collides_padded) {
+    world_player_tris(player);        // WP-B: the tris (cpx) capsule pass before the objects (player.js:1337-1350)
+    world_player_colls_begin(player); // WP-B: collidingObjs of onEnterObject / onExitObject
+
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *object = game->map->objects[i];
+        if (object->complex_coll) continue; // WP-B: cpx objects collide through their tris only (applyToQuad skips them)
+        MovementBox box;
+        movement_box(object, &box);
+        const float top = box.top, bottom = box.bottom;
+
+        if (!object->active || object->collision_type == COLLISION_TYPE_NONE || !movement_in_cell(cell, &box, object) ||
+            !movement_collides_padded(player, object, &box, game_constants.collision_padding)) {
             if (player->in_object == (int) i + 1) player->in_object = 0; // left the onEnter trigger
             continue;
         }
+        world_player_colls_touch(player, (int) i); // WP-B: vA541 (saveColls)
+        if (object->prefab == PREFAB_PERK_MACHINE) zombies_perk_machine_touch(game, player, (int) i); // WP-H gotFreeP
 
-        const int collides = player_collides(player, object, 0.0f);
-        Game *game = player->game;
         const int event = game_object_event(object);
 
         // (the gate / bank / terminal interact prompts: game_interact_prompt, shared/src/interact.c)
@@ -605,36 +876,46 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             continue; // walk-through: the jumpPad / zone / collision else-chain is skipped
         }
 
-        if (event == TRIGGER_EVENT_ON_ENTER) {
-            // onEnter: fires when the player steps in (inObject != sid); nothing else of the
-            // object applies (the jumpPad / zone / collision else-chain is skipped)
-            if (player->in_object != (int) i + 1) game_on_trigger(game, player, (Object *) object, NULL);
+        const int exit_event = object->trig && object->trig->event_index == TRIGGER_V7_EVENT_ON_EXIT_OBJECT;
+        if (event == TRIGGER_EVENT_ON_ENTER || exit_event) {
+            // v7 onEnterObject / onExitObject (WP-B): collidingObjs; onEnterObject fires the tick
+            // the object joins it, onExitObject when it leaves (world_player_colls_end). Nothing
+            // else of the object applies (the jumpPad / zone / collision else-chain is skipped)
+            if (world_player_colls_enter(player, (int) i) && event == TRIGGER_EVENT_ON_ENTER) game_on_trigger(game, player, (Object *) object, NULL);
             player->in_object = (int) i + 1;
             continue;
         }
 
         if (object->jump_pad) {
-            const float bounce_vel = object->bounce * 0.1f * (player->crouch_val == 1.0f && object->crouch ? 0.5f : 1.0f);
-
-            player->velocity.y = bounce_vel;
+            // v7 jump pads push along d: 0 up, 1 down, 2 +x, 4 -x, 3 +z, 5 -z (the pitch/yaw maths
+            // of player.js, evaluated). A horizontal pad only writes the non-zero axis (x pads also
+            // zero z: v7 writes bounce * cos(PI/2) there); bm 0 pads do nothing sideways.
+            const float bounce = object->bounce * 0.1f / (player->crouch_val == 1.0f && object->crouch ? 2.0f : 1.0f);
+            switch (object->direction) {
+                case 1: player->velocity.y = -bounce; break;
+                case 2: if (bounce) { player->velocity.x = bounce; player->velocity.z = 0.0f; } break;
+                case 3: if (bounce) player->velocity.z = bounce; break;
+                case 4: if (bounce) { player->velocity.x = -bounce; player->velocity.z = 0.0f; } break;
+                case 5: if (bounce) player->velocity.z = -bounce; break;
+                default: player->velocity.y = bounce; break;
+            }
             player->on_ground = 0;
-
-            // TODO: bounce sound
+            // TODO: bounce sound (bounce_0 once per pad entry: !was_on_pad)
+            player->on_pad = 1;
         } else if (object->score_zone) {
-            // TODO: score
+            world_player_score_zone(player, object); // WP-B: scoreObjs once, score(scoreP), logTime
         } else if (
             !object->objective && !object->bomb_site &&
-            (!object->premium || !1) && // TODO: check premium
-            (!object->verified || !1) && // TODO: check verified
-            (!object->team_zone || player->game->mode->config.teams && object->team != player->team)
+            // WP-B: premium / verified / partner / KPD / team / KR zones pass the qualifying players
+            !world_zone_passable(player, object)
         ) {
             if (object->teleporter) {
-                game_check_teleport(player->game, player, (Object *) object);
+                game_check_teleport(game, player, (Object *) object);
                 continue;
             }
 
             if (object->checkpoint) {
-                game_set_checkpoint(player->game, player, (Object *) object);
+                game_set_checkpoint(game, player, (Object *) object);
                 continue;
             }
 
@@ -651,64 +932,84 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             // A TRIGGER without onEnter / onInteract is a solid block (objects.js addTrigger:
             // Krunker's `trigger` flag in this chain is the CTF flag zone, not this prefab).
 
-            if (object->kill && !player->god_mode) {
+            if (object->kill) {
                 // TODO: reset flag
-                player_kill(player, NULL, NULL, 0);
+                if (!player->god_mode) player_kill(player, NULL, NULL, 0);
                 continue;
             }
 
             if (object->ladder) {
-                if (player->position.y >= object->position.y + object->scale.y || player->crouch_val) continue;
+                // below the top, not crouched, not grappling (no grapple yet). v7 dropped the
+                // bottom clamp: climbing down carries on below the ladder.
+                if (!(player->position.y < top) || player->crouch_val != 0.0f) continue;
 
                 player->velocity.y = 0.0f;
                 player->on_ladder = 1;
                 player->on_terrain = 0;
 
-                // TODO: step src
-
-                if (input->move_dir >= 0) {
+                if (has_move) {
                     const float ladder_dir = (float) M_PI * 0.5f * (float) object->direction;
                     const float dir = (fabsf(normalize_angle(ladder_dir - (move_dir - player->direction.y))) - (float) M_PI * 0.5f) / ((float) M_PI * 0.5f);
 
                     if (dir > 0.0f) {
-                        player->position.y += game_constants.ladder_speed * player->game->map->config.ladder_accel * player->weapon->speed_mlt * dir * delta;
-                        player->position.y = CLAMP(player->position.y, object->position.y, object->position.y + object->scale.y);
+                        player->position.y += game_constants.ladder_speed * MOVEMENT_OR(knobs->ladder_accel, 1.0f) * player->weapon->speed_mlt * dir * delta;
+                        if (player->position.y >= top) player->position.y = top;
                     }
                 }
 
                 continue;
             }
 
-            if (!object->ramp && object->collision_type != COLLISION_TYPE_CYLINDER && !can_jump && object->position.y + object->scale.y - player->position.y > game_constants.climb_height && object->wall_jumpable) {
-                if (player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f - game_constants.collision_padding) {
+            if (object->no_player_col) continue; // noPCol: walk-through
+
+            // ropeLadder: climbable from any side, relative to the player's own facing; still solid
+            if (object->rope_ladder && player->position.y < top && player->crouch_val == 0.0f) {
+                player->velocity.y = 0.0f;
+                player->on_ladder = 1;
+                player->on_terrain = 0;
+                if (has_move) {
+                    const float facing = atan2f(cosf(player->direction.y), sinf(player->direction.y)); // getDir(sin, cos, 0, 0)
+                    const float dir = (fabsf(normalize_angle(facing - (move_dir - player->direction.y))) - (float) M_PI * 0.5f) / ((float) M_PI * 0.5f);
+                    if (dir > 0.0f) {
+                        player->position.y += game_constants.ladder_speed * MOVEMENT_OR(knobs->ladder_accel, 1.0f) * player->weapon->speed_mlt * dir * delta;
+                        if (player->position.y >= top) player->position.y = top;
+                    }
+                }
+            }
+
+            // Wall-jump surfaces: every solid but ramps and cylinders, unless notWallJ (wj)
+            // (v3.1.1: only blocks built wallJumpable), higher than climbHeight above the feet.
+            if (!object->ramp && object->collision_type != COLLISION_TYPE_CYLINDER && !can_jump && player->position.y < top &&
+                top - player->position.y > game_constants.climb_height && object->wall_jumpable) {
+                if (player->last_position.x - s >= box.x + box.w - game_constants.collision_padding) {
                     player->on_wall = 1;
-                } else if (player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f + game_constants.collision_padding) {
+                } else if (player->last_position.x + s <= box.x - box.w + game_constants.collision_padding) {
                     player->on_wall = 2;
-                } else if (player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f - game_constants.collision_padding) {
+                } else if (player->last_position.z - s >= box.z + box.l - game_constants.collision_padding) {
                     player->on_wall = 3;
-                } else if (player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f + game_constants.collision_padding) {
+                } else if (player->last_position.z + s <= box.z - box.l + game_constants.collision_padding) {
                     player->on_wall = 4;
                 }
             }
 
-            if (!collides) continue;
+            if (!movement_collides(player, object, &box)) continue;
 
             if (object->ramp) {
-                if (player->position.y >= object->position.y + object->scale.y) continue;
+                if (!(player->position.y < top)) continue;
 
                 const float ramp_direction = (float) M_PI * 0.5f * (float) object->direction;
-                const vec2 player_dir = {player->position.x + player->scale * cosf(ramp_direction), player->position.z + player->scale * sinf(ramp_direction)};
+                const vec2 player_dir = {player->position.x + s * cosf(ramp_direction), player->position.z + s * sinf(ramp_direction)};
 
                 const float progress = MAX(0.0f, MIN(1.0f, progress_on_line(object->ramp->start, object->ramp->end, player_dir)));
-                const float collision_height = object->position.y + (object->scale.y + 0.01f) * progress;
+                const float collision_height = bottom + (object->scale.y + 0.01f) * progress;
 
-                if (!max_ramp_height) {
-                    max_ramp_height = calloc(1, sizeof(float));
-                    if (max_ramp_height) *max_ramp_height = collision_height;
+                if (!has_ramp_height) {
+                    has_ramp_height = 1;
+                    max_ramp_height = collision_height;
                 }
 
-                if ((player->position.y <= collision_height || can_jump) && (!max_ramp_height || *max_ramp_height <= collision_height)) {
-                    if (max_ramp_height) *max_ramp_height = collision_height;
+                if ((player->position.y <= collision_height || can_jump) && max_ramp_height <= collision_height) {
+                    max_ramp_height = collision_height;
 
                     if (object->ramp->boost) {
                         player->position.y = collision_height;
@@ -720,19 +1021,19 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                         player->velocity.z += boost_velocity * cosf(-ramp_direction + (float) M_PI * 0.5f) * cosf(boost_direction);
                         player->velocity.y += boost_velocity * sinf(boost_direction);
                     } else {
-                        if (player->last_position.y > player->position.y) player_reset_step(player, recon);
+                        player_reset_step(player, recon); // before the snap: lands only when the ramp is below the old y
 
                         player->position.y = collision_height;
                         player->velocity.y = 0.0f;
                         player->on_wall = 0;
-                        player->on_ground = 1;
+                        movement_set_on_ground(player);
                         player->on_terrain = 0;
 
                         if (!player->ramp_fix) player->ramp_fix = calloc(1, sizeof(float));
 
                         if (player->ramp_fix) {
                             player->on_ramp = 1;
-                            *player->ramp_fix = object->position.y + object->scale.y * roundf(progress);
+                            *player->ramp_fix = bottom + object->scale.y * roundf(progress);
                         }
                     }
                 }
@@ -741,40 +1042,46 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             }
 
             if (object->collision_type == COLLISION_TYPE_CYLINDER) {
-                int y_collision = 1;
+                int y_collision = 0;
 
-                if (player->last_position.y >= object->position.y + object->scale.y) {
-                    if (player->last_position.y > player->position.y) player_reset_step(player, recon);
-
-                    player->position.y = object->position.y + object->scale.y;
-                    player->velocity.y = 0.0f;
-                    player->on_ground = 1;
+                if (player->last_position.y >= top) {
+                    player->position.y = top;
+                    player_reset_step(player, recon);
+                    if (!player->was_on_pad) player->velocity.y = 0.0f;
+                    movement_set_on_ground(player);
                     player->on_terrain = 0;
-                } else if (player->last_position.y + player->height <= object->position.y) {
-                    player->position.y = object->position.y - player->height;
-                    player->velocity.y = 0.0f;
-                } else if (player->position.y < object->position.y + object->scale.y && object->position.y + object->scale.y - player->position.y <= game_constants.climb_height && player->last_position.y < object->position.y + object->scale.y && can_jump) {
-                    player->position.y += (object->position.y + object->scale.y - player->position.y) * 0.3f;
-                    player->on_ground = 1;
+                    y_collision = 1;
+                } else if (player->last_position.y + player->height + pad_h <= bottom) {
+                    player->position.y = bottom - player->height;
+                    if (!player->was_on_pad) player->velocity.y = 0.0f;
+                } else if (player->position.y < top && top - player->position.y <= game_constants.climb_height && player->last_position.y < top && can_jump) {
+                    player->position.y += (top - player->position.y) * 0.3f + MOVEMENT_CYLINDER_STEP_EPSILON;
+                    movement_set_on_ground(player);
                     player->on_terrain = 0;
+                    y_collision = 1;
                 } else {
-                    const float direction = atan2f(player->position.z - object->position.z, player->position.x - object->position.x);
+                    const float direction = atan2f(player->position.z - box.z, player->position.x - box.x);
 
-                    player->position.x = object->position.x + (object->scale.x * 0.5f + player->scale) * cosf(direction);
-                    player->position.z = object->position.z + (object->scale.x * 0.5f + player->scale) * sinf(direction);
+                    player->position.x = box.x + (box.w + s) * cosf(direction);
+                    player->position.z = box.z + (box.w + s) * sinf(direction);
 
-                    y_collision = 0;
+                    // a second side push in the same tick (another cylinder) stops the player
+                    if (side_pushed) {
+                        player->velocity.x = 0.0f;
+                        player->velocity.z = 0.0f;
+                    }
+                    side_pushed = 1;
                 }
 
                 if (y_collision) {
-                    const float direction = atan2f(player->position.z - object->position.z, player->position.x - object->position.x) - object->spin * delta * game_constants.disk_spin;
-                    const float distance = hypotf(player->position.x - object->position.x, player->position.z - object->position.z);
+                    const float direction = atan2f(player->position.z - box.z, player->position.x - box.x) - object->spin * delta * game_constants.disk_spin;
+                    const float distance = hypotf(player->position.x - box.x, player->position.z - box.z);
 
                     const float old_x = player->position.x;
                     const float old_z = player->position.z;
 
-                    player->position.x = object->position.x + distance * cosf(direction);
-                    player->position.z = object->position.z + distance * sinf(direction);
+                    player->position.x = box.x + distance * cosf(direction);
+                    player->position.z = box.z + distance * sinf(direction);
 
                     player->x_vel_cylinder = player->position.x - old_x;
                     player->z_vel_cylinder = player->position.z - old_z;
@@ -783,66 +1090,113 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                 continue;
             }
 
+            const float border = movement_border(player, object);
             if (
-                (!object->is_border || player->game->config.disable_borders) &&
-                player->position.y < object->position.y + object->scale.y &&
-                object->position.y + object->scale.y - player->position.y <= game_constants.climb_height &&
-                player->last_position.y < object->position.y + object->scale.y && can_jump
+                !border && player->position.y < top && top - player->position.y <= game_constants.climb_height &&
+                player->last_position.y < top && can_jump
             ) {
-                player->position.y += delta * 30.0f;
-                player->position.y = MIN(player->position.y, object->position.y + object->scale.y);
+                player->position.y += dt * 0.03f;
+                if (player->position.y > top) player->position.y = top;
 
-                player->on_ground = 1;
+                movement_set_on_ground(player);
                 player->on_terrain = 0;
-            } else if (player->last_position.y >= object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0.0f : game_constants.border_height)) {
+            } else if (player->last_position.y >= top + border) {
                 // TODO: step src
-
-                if (player->last_position.y > player->position.y) player_reset_step(player, recon);
-
-                player->position.y = object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0.0f : game_constants.border_height);
-                player->velocity.y = 0.0f;
-                player->on_ground = 1;
+                player->position.y = top + border;
+                player_reset_step(player, recon);
+                if (!player->was_on_pad) player->velocity.y = 0.0f;
+                movement_set_on_ground(player);
                 player->on_terrain = 0;
-            } else if (player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f - 0.00001f) {
-                player->position.x = object->position.x + object->scale.x * 0.5f + player->scale;
+            } else if (player->last_position.x - s >= box.x + box.w - 0.00001f) {
+                player->position.x = box.x + box.w + s;
                 player->velocity.x = 0.0f;
-            } else if (player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f + 0.00001f) {
-                player->position.x = object->position.x - object->scale.x * 0.5f - player->scale;
+            } else if (player->last_position.x + s <= box.x - box.w + 0.00001f) {
+                player->position.x = box.x - box.w - s;
                 player->velocity.x = 0.0f;
-            } else if (player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f - 0.00001f) {
-                player->position.z = object->position.z + object->scale.z * 0.5f + player->scale;
+            } else if (player->last_position.z - s >= box.z + box.l - 0.00001f) {
+                player->position.z = box.z + box.l + s;
                 player->velocity.z = 0.0f;
-            } else if (player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f + 0.00001f) {
-                player->position.z = object->position.z - object->scale.z * 0.5f - player->scale;
+            } else if (player->last_position.z + s <= box.z - box.l + 0.00001f) {
+                player->position.z = box.z - box.l - s;
                 player->velocity.z = 0.0f;
-            } else if (player->last_position.y + player->height <= object->position.y) {
-                player->position.y = object->position.y - player->height;
-                player->velocity.y = 0.0f;
+            } else if (player->last_position.y + player->height + pad_h <= bottom) {
+                // a ceiling: with headClipFix the pre-crouch height keeps an uncrouching player
+                // under it, and crouch and jump wait a tick (stopCrouch)
+                player->stop_crouch = 1;
+                player->position.y = bottom - (player->was_stop_crouch && game->config.head_clip_fix ? player->height_old : player->height) - pad_w;
+                if (!player->was_on_pad) player->velocity.y = 0.0f;
+            } else if (game->config.head_clip_fix && player->last_position.y + player->height_old + pad_h <= bottom) {
+                player->stop_crouch = 1;
+                player->position.y = bottom - player->height - pad_w;
+                if (!player->was_on_pad) player->velocity.y = 0.0f;
             }
         }
     }
 
-    free(max_ramp_height);
+    world_player_colls_end(player);  // WP-B: onExitObject for the objects left this tick
+    airdrop_player_collide(player, input, delta); // WP-H: the airdrop claim hold (player.js:1718)
+    world_player_pvp_zones(player);  // WP-B: noPVP / forcePVP (COLLISION_TYPE_NONE volumes)
 }
 
+// players.jump: blocked by a noJump weapon (Minigun) and for a tick after a headClipFix ceiling
+// hit; Jump Boost / Rooted effects and the mode's jumpMlt / jumpVel scale it; ovrJump sets the
+// vertical velocity instead of adding to it. jumpCooldown is jpC * 0 in v7 (always 0).
 void player_jump(Player *player) {
+    if ((player->weapon && player->weapon->no_jump) || player->was_stop_crouch) return;
+
+    Game *game = player->game;
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode = &mode_keys;
+
     player->did_act = 1;
-    player->jump_timer = (player->terrain_slipping ? game_constants.player_slipping_jump_cooldown : 0.0f) * player->game->map->config.jump_cooldown;
+    player->jump_timer = 0.0f;
     player->did_jump = 1;
     player->did_wall_jump = 1;
     player->on_terrain = 0;
 
-    const float jump_push = game_constants.jump_push * player->game->config.jump_mlt;
-    const float jump_vel = game_constants.jump_velocity * player->game->config.jump_mlt * (player->game->mode->config.real_movement ? 0.92f : 1.0f);
+    const float attr_jump = MOVEMENT_OR(player_attr_jump(player), 1.0f);
+    const float mode_jump = MOVEMENT_OR(mode->jump_mlt, 1.0f);
+    // mode.jumpVel (no v7.1.4 mode sets it) is not among the WP-D mode keys yet
+    float jump_vel = game_constants.jump_velocity * game->config.jump_mlt * attr_jump * mode_jump;
+    if (movement_real(player)) jump_vel *= 0.92f;
+    jump_vel *= player_attr_rooted(player);
+    const float jump_push = game_constants.jump_push * game->config.jump_mlt * attr_jump * mode_jump;
+
+    const float up = (jump_vel - jump_vel * (game_constants.crouch_jump * player->crouch_val)) *
+                     (player->weapon->jump_mlt ? player->weapon->jump_mlt : player->weapon->speed_mlt) *
+                     (player->aim_val != 1.0f ? 1.0f : game_constants.jump_aim_slow);
+    if (movement_knobs(player)->override_jump) player->velocity.y = up;
+    else player->velocity.y += up;
+
     const float vel = hypotf(player->velocity.x, player->velocity.z);
+    player->velocity.x -= jump_push * vel * sinf(player->direction.y);
+    player->velocity.z -= jump_push * vel * cosf(player->direction.y);
+}
 
-    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * (player->weapon->jump_mlt ? player->weapon->jump_mlt : player->weapon->speed_mlt) * (player->aim_val != 1.0f ? 1.0f : game_constants.jump_aim_slow);
-
-    player->velocity.x -= vel * jump_push * sinf(player->direction.y);
-    player->velocity.z -= vel * jump_push * cosf(player->direction.y);
+// players.tryJump: autoJump jumps on every grounded tick the key is held (v7 sends jump while
+// held); otherwise the key must be released between jumps.
+static void movement_try_jump(Player *player, const int jump, const int recon) {
+    const int blocked = (player->weapon && player->weapon->no_jump) || player->was_stop_crouch; // jump() returns early
+    if (player->game->config.auto_jump && jump) {
+        player_jump(player);
+        if (!recon && player->render_you && !blocked) player_feel_jump(player);
+        return;
+    }
+    if (player->did_jump && !jump) player->did_jump = 0;
+    if (!player->did_jump && jump) {
+        player_jump(player);
+        if (!recon && player->render_you && !blocked) player_feel_jump(player);
+    }
 }
 
 void player_swap_weapon(Player *player, const int index, const int force_swap, const int instant_swap, const int recon) {
+    // v7.1.4 swapWeapon: a noSwap weapon in hand (Minigun, War Machine) only gives way to another
+    // noSwap one (a loadout change forces the swap).
+    if (!force_swap && player->weapon && player->weapon->no_swap && player->loadout && index >= 0 && index < player->loadout_size) {
+        const Weapon *target = player->game->weapons[player->loadout[index]];
+        if (target && !target->no_swap) return;
+    }
+
     int loadout_changed = force_swap || player->loadout_index != index;
     player->loadout_index = index;
 
@@ -850,9 +1204,11 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
         player->reload_timer = 0.0f;
         player->did_shoot = 0;
         player->burst_count = 0;
+        player->charge_time = 0.0f; // v7.1.4: chargeTime = 0, fullCharge = false
+        player->full_charge = 0;
     }
 
-    player->weapon = player->game->weapons[player->loadout[player->loadout_index]];
+    player->weapon = player_slot_weapon(player, player->loadout_index); // v7.1.4 getWeapon: upgraded slots
 
     if (!player->weapon) {
         player->weapon = player->game->weapons[player->loadout[0]];
@@ -902,9 +1258,14 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
 }
 
 void player_reload(Player *player) {
-    if (player->reload_timer || player->ammo[player->loadout_index] >= player->weapon->ammo) return;
+    if (player->reload_timer || (int) player->ammo[player->loadout_index] >= mode_ammo_limit(player->game, (int) player->weapon->ammo)) return;
+    if (player->weapon->no_reload && !zombies_finite_ammo(player)) return; // v7.1.4 noReload (streak equipment; finiteAmmo reloads it)
+    if (!zombies_reload_allowed(player)) return; // WP-H: finiteAmmo with an empty reserve
 
-    player->reload_timer = player->weapon->reload_time * (player->game->config.reload_speed > 0.0f ? player->game->config.reload_speed : 1.0f); // (reSpd || 1)
+    // reload * (reSpd || 1) * attributes.reload (Sleight of Hand) * (perk 2 ? 0.5 : 1) * (kranked
+    // bonuses.reload) * (mode.reloadMlt) (players.js reload)
+    player->reload_timer = player->weapon->reload_time * (player->game->config.reload_speed > 0.0f ? player->game->config.reload_speed : 1.0f) *
+                           player_attr_reload(player) * mode_reload_mlt(player->game, player);
     player->burst_count = 0;
 
     player_cancel_inspect(player);
@@ -936,7 +1297,27 @@ void player_inspect_weapon(Player *player) {
 
 // JS Number.prototype.round(3) (2.js): Math.round(v * 1000) / 1000, halves toward +inf.
 float player_round3(const float v) {
+    // Past 2^23 / 1000 a float has no thousandths left to round, and v * 1000 must not
+    // overflow to inf (a huge network yaw used to become inf here, then NaN positions).
+    if (!(fabsf(v) < 8388.0f)) return v;
     return floorf(v * 1000.0f + 0.5f) / 1000.0f;
+}
+
+// controls.js: xDr = object.rotation.y % Math.PI2 (JS % keeps the sign), so the yaw a client
+// sends stays in (-2pi, 2pi) however far it turns. KrunkNative applies it on both sides: an
+// unbounded yaw loses float precision, and remote players interpolating between two far-apart
+// unwrapped yaws spun on screen ("visual spinbot"). Non-finite (only a broken or malicious
+// client) becomes 0 so it can never reach the physics.
+float player_wrap_yaw(const float yaw) {
+    if (!isfinite(yaw)) return 0.0f;
+    if (yaw > -(float) M_PI * 2.0f && yaw < (float) M_PI * 2.0f) return yaw;
+    return fmodf(yaw, (float) M_PI * 2.0f);
+}
+
+// controls.js: pitchObj.rotation.x = max(-PI_2, min(PI_2, ...)) before yDr is taken.
+float player_clamp_pitch(const float pitch) {
+    if (!isfinite(pitch)) return 0.0f;
+    return CLAMP(pitch, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
 }
 
 // manager.reload(player, Q = +-1) / 95.js pY2(P, Q): the scroll wheel (input[10]) and the
@@ -967,13 +1348,23 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     // Input carries floats: round them here, on both sides, before anything uses them.
     Input rounded = *raw_input;
     rounded.delta = roundf(raw_input->delta * 1000.0f) / 1000.0f;
-    rounded.x_dir = player_round3(raw_input->x_dir);
-    rounded.y_dir = player_round3(raw_input->y_dir);
+    // The client clamps pitch and wraps yaw before rounding (controls.js yDr / xDr); done here
+    // again so no input (prediction, replay or a hostile network frame) has an out-of-range look.
+    rounded.x_dir = player_round3(player_clamp_pitch(raw_input->x_dir));
+    rounded.y_dir = player_round3(player_wrap_yaw(raw_input->y_dir));
+    const ClassMovement *knobs = movement_knobs(player);
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode_movement = &mode_keys;
+    if (knobs->lock_pitch) rounded.x_dir = 0.0f; // class lckCmYR
     const Input *input = &rounded;
+    // KrunkScript onPlayerUpdate + disableDefault masks; disablePlayerBehaviour skips the rest (PLJ:894-948)
+    if (player->game->ks && ks_game_on_player_update(player->game, player, &rounded)) return;
 
-    // Math.max(0, Math.min(input[1], config.dltMx)): NaN and negative deltas become 0.
-    const float delta = input->delta > 0.0f ? MIN(input->delta, game_constants.max_delta) : 0.0f;
-    const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir;
+    // v7.1.4: Math.max(0.1, Math.min(input[1], config.dltMx)); NaN, 0 and negative deltas run as
+    // 0.1 ms (v3.1.1: 0).
+    const float delta = input->delta > game_constants.min_delta ? MIN(input->delta, game_constants.max_delta) : game_constants.min_delta;
+    // config.movDirs[input[4]] + class movDrP * PI
+    const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir + knobs->move_dir_offset * (float) M_PI;
 
     if (player->noclip) player->on_ground = 1;
 
@@ -1007,8 +1398,23 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
     }
 
-    player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
-    player->direction.y = input->y_dir;
+    // movement.js[0].dir: below a turn speed of 1 (class trnSp * trnSpd) the look turns at most
+    // speed * 0.01 rad per ms
+    const ClassConfig *turn_class = movement_class(player);
+    const float turn = MOVEMENT_OR(knobs->turn_rate, 1.0f) * (turn_class ? MOVEMENT_OR(turn_class->turn_speed, 1.0f) : 1.0f);
+    if (!ks_player_allows(player, KS_PLAYER_DEFAULT_ROTATION)) {
+        // KrunkScript defaultRotation = false: the script turns the player (player.js:969)
+    } else if (turn >= 1.0f) {
+        player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        player->direction.y = input->y_dir;
+    } else {
+        const float pi2 = (float) M_PI * 2.0f, step = turn * 0.01f * delta * 1000.0f;
+        const float d = fmodf(player->direction.y - input->y_dir + pi2, pi2);
+        const float move = MIN(MIN(fabsf(d - pi2), d), step);
+        player->direction.y = fmodf(player->direction.y + (d - (float) M_PI >= 0.0f ? 1.0f : -1.0f) * move + pi2, pi2);
+        if (player->direction.x < input->x_dir) player->direction.x = MIN(player->direction.x + step, input->x_dir);
+        else if (player->direction.x > input->x_dir) player->direction.x = MAX(player->direction.x - step, input->x_dir);
+    }
 
     const int feel_loadout_index = player->loadout_index;
 
@@ -1103,119 +1509,142 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
     }
 
-    if (input->crouch && player->crouch_val < 1.0f && !player->on_ladder) {
-        player->crouch_val = MIN(1.0f, player->crouch_val + game_constants.crouch_speed * delta);
+    // v7.1.4 charge system (player.js: right after the aim update, not in replays)
+    if (!recon) combat_update_charge(player, input, delta);
+    // map-logic WP-B: the Build Tool pick (player.js:1109-1124: aim held with a build weapon)
+    player->select_build = 0;
+    if (input->scope && player->weapon && player->weapon->build) player_select_build(player, yaw_delta, pitch_delta);
 
-        if (player->on_ground) {
-            if (!recon && player->render_you) player->bob_anim.y -= game_constants.crouch_anim * 1.4f * delta;
-        } else {
-            player->position.y += game_constants.crouch_speed * delta;
-        }
-    } else if (!input->crouch && player->crouch_val > 0.0f) {
-        player->crouch_val = MAX(0.0f, player->crouch_val - game_constants.crouch_speed * delta);
+    // v7.1.4: a headClipFix ceiling hit last tick blocks crouching (and jumping) for this one;
+    // classes without canCrch never crouch.
+    player->was_stop_crouch = player->game->config.head_clip_fix && player->stop_crouch;
+    player->stop_crouch = 0;
+    const int crouch = input->crouch && !knobs->no_crouch;
 
-        if (player->on_ground) {
-            if (!recon && player->render_you) player->bob_anim.y += game_constants.crouch_anim * delta;
-        } else {
-            player->position.y -= game_constants.crouch_speed * delta;
+    if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && !player->was_stop_crouch) { // defaultMovement
+        if (crouch && player->crouch_val < 1.0f && !player->on_ladder) {
+            player->crouch_val = MIN(1.0f, player->crouch_val + game_constants.crouch_speed * delta);
+
+            if (player->on_ground) {
+                if (!recon && player->render_you) player->bob_anim.y -= game_constants.crouch_anim * 1.4f * delta;
+            } else {
+                player->position.y += game_constants.crouch_speed * delta;
+            }
+        } else if (!crouch && player->crouch_val > 0.0f) {
+            player->crouch_val = MAX(0.0f, player->crouch_val - game_constants.crouch_speed * delta);
+
+            if (player->on_ground) {
+                if (!recon && player->render_you) player->bob_anim.y += game_constants.crouch_anim * delta;
+            } else {
+                player->position.y -= game_constants.crouch_speed * delta;
+            }
         }
+
+        if (player->crouch_val) player->crouch_val = roundf(player->crouch_val * 1000.0f) / 1000.0f; // crouchVal.round(3)
     }
 
-    if (player->crouch_val) player->crouch_val = roundf(player->crouch_val * 1000.0f) / 1000.0f; // crouchVal.round(3)
-
+    player->height_old = player->height; // updateHeight: heightOld
     player_update_height(player);
 
     const int contact = player->on_ground || player->on_ladder;
 
     if (!move_lock) {
+        const float dt = delta * 1000.0f;
+        const double dt_ms = round((double) delta * 10000.0) / 10.0; // v7's frame in ms (whole ms, or the 0.1 floor)
+        const float ground_accel_mlt = MOVEMENT_OR(mode_movement->ground_accel, 1.0f); // mode.groundAccel: ground and air
         float accel;
 
-        if (contact) accel = (player->terrain_slipping ? game_constants.slipping_speed : game_constants.player_speed) * player->speed;
-        else accel = game_constants.air_speed * player->game->map->config.air_accel * (player->game->mode->config.real_movement ? 0.72f : 1.0f);
+        // grA / 100 and arA / 100 per ms (KrunkNative keeps them x1000 per s)
+        if (contact) accel = MOVEMENT_OR(knobs->ground_accel, 0.042f) * 10.0f * player->speed * ground_accel_mlt;
+        else accel = MOVEMENT_OR(knobs->air_accel, 0.0047f) * 10.0f * (movement_real(player) ? 0.72f : 1.0f) * ground_accel_mlt;
 
         accel *= player->aim_val == 1.0f ? game_constants.aim_slow : 1.0f;
-        accel *= player->crouch_val ? game_constants.crouch_slow : 1.0f;
-        accel *= player->game->mode->config.speed_mlt[player->team];
-        accel *= player->weapon->speed_mlt;
-        accel *= (player->noclip ? 2.0f : 1.0f) * delta;
+        accel *= player->game->mode ? MOVEMENT_OR(player->game->mode->config.speed_mlt[player->team], 1.0f) : 1.0f;
+        accel *= player->crouch_val ? MOVEMENT_OR(knobs->crouch_speed, game_constants.crouch_slow) : 1.0f;
+        accel *= player->weapon->speed_mlt * delta;
+        accel *= player->weapon->shoot_charge && input->shoot ? 0.35f : 1.0f; // charging (Charge Rifle)
 
         float decel;
 
         if (player->on_ladder) decel = game_constants.ladder_decel;
-        else if (player->terrain_slipping) decel = game_constants.terrain_slip_decel;
         else if (player->on_terrain) decel = game_constants.terrain_decel;
-        else if (player->on_ground) decel = game_constants.ground_decel;
-        else decel = game_constants.air_decel;
+        else if (player->on_ground) decel = MOVEMENT_OR(knobs->ground_decel, game_constants.ground_decel);
+        else decel = MOVEMENT_OR(knobs->air_decel, game_constants.air_decel);
 
-        if (player->crouch_val <= 0.5) player->can_slide = 1;
-
-        if (!player->on_ground || !player->crouch_val) {
-            player->slide_timer = 0.0f;
+        if (player->can_slide_timer > 0.0f) {
+            player->can_slide_timer -= delta;
+            if (player->can_slide_timer <= MOVEMENT_TIMER_EPSILON) player->can_slide_timer = 0.0f;
         }
 
-        if (player->slide_timer) {
-            player->slide_timer = player->slide_timer - delta > MOVEMENT_TIMER_EPSILON ? player->slide_timer - delta : 0.0f;
+        if (player->crouch_val <= 0.5f) player->can_slide = 1;
 
-            if (player->slide_timer > 0.0f) {
+        double slide_ms = movement_slide_ms(player);
+        if (!player->on_ground || !player->crouch_val) slide_ms = 0.0;
+
+        if (slide_ms) {
+            // TODO (WP-B perks): Drift Fuze (perk 5) explodes every 750 ms while sliding (server)
+            slide_ms -= dt_ms;
+            if (slide_ms <= 0.0) slide_ms = 0.0;
+            movement_set_slide_ms(player, slide_ms);
+
+            if (slide_ms > 0.0) {
                 accel *= 0.25f;
                 decel = player->on_terrain ? game_constants.terrain_slide_decel : game_constants.slide_decel;
 
+                // v7 slides always follow the look direction (v3.1.1's "Non FPS Sliding" setting
+                // slidCont is gone); frSlid slides toward the held movement key, bkSlid backwards
+                // on the S keys (movDirs 4..6).
                 const float vel = hypotf(player->velocity.x, player->velocity.z);
-                const float dir = (float) M_PI / 2.0f - player->direction.y;
+                float yaw = player->direction.y;
+                const int v7_dir = input->move_dir >= 0 ? (input->move_dir + 1) % 8 : -1; // config.movDirs index
+                const ClassConfig *class_config = movement_class(player);
+                if ((knobs->free_slide || mode_movement->free_slide) && v7_dir >= 0) yaw -= (float) M_PI / 4.0f * (float) (v7_dir - 1);
+                else if (class_config && class_config->back_slide && v7_dir >= 4 && v7_dir <= 6) yaw += (float) M_PI;
+                const float dir = atan2f(cosf(yaw), sinf(yaw)); // getDir(sin, cos, 0, 0)
 
-                if (player->slid_cont) {
-                    player->velocity.x = vel * cosf(dir + (float) M_PI);
-                    player->velocity.z = vel * sinf(dir + (float) M_PI);
-                } else {
-                    const float vel_dir = atan2f(-player->velocity.z, -player->velocity.x);
-                    const float angle_delta = normalize_angle(vel_dir - dir) * 0.18f;
-
-                    player->velocity.x = vel * cosf(vel_dir + (float) M_PI - angle_delta);
-                    player->velocity.z = vel * sinf(vel_dir + (float) M_PI - angle_delta);
-                }
+                player->velocity.x = vel * cosf(dir + (float) M_PI);
+                player->velocity.z = vel * sinf(dir + (float) M_PI);
             }
         }
+
+        movement_set_slide_ms(player, slide_ms);
 
         player->jump_timer = MAX(0.0f, player->jump_timer - delta);
 
-        if (player->jump_timer <= 0.0f && (player->on_ground || player->game->map->config.infinite_jump)) {
-            if (player->did_jump && !input->jump) player->did_jump = 0;
-            if (input->jump && (!player->did_jump || player->game->config.auto_jump)) {
-                player_jump(player);
-                if (!recon && player->render_you) player_feel_jump(player);
-            }
+        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && player->jump_timer <= 0.0f && !knobs->disable_jump && (player->on_ground || knobs->infinite_jump)) {
+            movement_try_jump(player, input->jump, recon);
         }
 
         if (!contact) {
-            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && player->game->config.wall_jump > 0.0f && player->crouch_val ? 0.3f : 1.0f;
-            player->velocity.y -= delta * game_constants.gravity * player->game->config.gravity_mlt * wall_mlt;
+            const float wall_power = movement_wall_jump_power(player);
+            const float wall_decel = mode_movement->wall_jump_decel ? mode_movement->wall_jump_decel : MOVEMENT_OR(knobs->wall_jump_decel, 0.3f);
+            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && wall_power > 0.0f && player->crouch_val ? wall_decel : 1.0f;
+            player->velocity.y -= delta * (game_constants.gravity * player->game->config.gravity_mlt * MOVEMENT_OR(mode_movement->gravity_mlt, 1.0f)) * wall_mlt;
         }
 
         // 95.js: ac *= limitMM(1 - a0[12], 0, 1) (input[12]: the controller's Gradual Speed)
         accel *= CLAMP(1.0f - input->slowdown, 0.0f, 1.0f);
+        if (player->noclip) accel *= 2.0f;
+        // speedBoost (admin) is not in KrunkNative yet
+        accel *= player_attr_speed(player);
+        accel *= player_attr_rooted(player);
+        accel *= mode_speed_mlt(player->game, player); // Kranked bonuses.speed (player.js:1236, WP-D)
+        accel *= player_has_perk(player, PERK_SPEED) ? 1.15f : 1.0f;
 
-        // Diagonal movDirs: config.strafeSpd (1.2) unless the mode uses realMov.
-        if (input->move_dir >= 0 && input->move_dir % 2 && !player->game->mode->config.real_movement) {
-            accel *= player->game->config.strafe_speed > 0.0f ? player->game->config.strafe_speed : 1.0f;
-        }
+        // movement.js[0].mov (defaultMovement): diagonal movDirs get config.strafeSpd unless realMov
+        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && input->move_dir >= 0) {
+            const float yaw_origin = player->direction.y; // TODO: camType 1 without camRot uses the camera offset
+            float strafe = 1.0f;
+            if (input->move_dir % 2 && !movement_real(player)) strafe = player->game->config.strafe_speed;
 
-        if (input->move_dir >= 0) {
-            const float yaw_origin = player->direction.y; // TODO: support different cam types?
+            // in double like v7: 90 degrees off the look direction the cosine is a tiny difference
+            // of two angles, and float error there drifts the player sideways over a long climb
+            const double angle = -M_PI / 2.0 + M_PI / 4.0 * input->move_dir + movement_js(knobs->move_dir_offset) * M_PI - movement_js(yaw_origin);
+            player->velocity.x += (float) (accel * strafe * cos(angle));
+            player->velocity.z += (float) (accel * strafe * sin(angle));
 
-            player->velocity.x += accel * cosf(move_dir - yaw_origin);
-            player->velocity.z += accel * sinf(move_dir - yaw_origin);
-
-            if (player->noclip) player->velocity.y += accel * player->direction.x * (input->move_dir > 2 && input->move_dir < 6 ? -1.0f : 1.0f);
-        }
-
-        // Air strafe (config.airStrf): turning while holding right/left (movDirs 3/7)
-        // swings the air velocity with the camera.
-        if (!contact && yaw_delta && player->game->config.air_strafe && ((input->move_dir == 2 && yaw_delta > 0.0f) || (input->move_dir == 6 && yaw_delta < 0.0f))) {
-            const float vel = hypotf(player->velocity.x, player->velocity.z);
-            const float dir = atan2f(-player->velocity.z, -player->velocity.x) + yaw_delta * 0.73f;
-
-            player->velocity.x = vel * cosf(dir + (float) M_PI);
-            player->velocity.z = vel * sinf(dir + (float) M_PI);
+            // movDir > 0 (movDirs 4..7: back, back-diagonals, left) flies down
+            if (player->noclip) player->velocity.y += accel * strafe * (player->direction.x * (input->move_dir >= 3 && input->move_dir <= 6 ? -1.0f : 1.0f));
         }
 
         if (!contact) {
@@ -1230,46 +1659,86 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             }
         }
 
-        if (player->velocity.x) {
-            player->position.x += player->velocity.x * player->game->map->config.speed.x * delta * 1000.0f;
-            player->velocity.x *= powf(decel, delta * 1000.0f);
-            player->velocity.x = CROP(player->velocity.x, game_constants.min_decel);
+        // Air strafe (config.airStrf, v7 currentSeason >= 7): turning swings the air velocity by
+        // the full yaw change while holding right or forward-right (turning right) and left or
+        // forward-left (turning left). v3.1.1: x0.73, pure strafe keys only.
+        if (!contact && yaw_delta && player->game->config.air_strafe &&
+            (((input->move_dir == 2 || input->move_dir == 1) && yaw_delta > 0.0f) || ((input->move_dir == 6 || input->move_dir == 7) && yaw_delta < 0.0f))) {
+            const float vel = hypotf(player->velocity.x, player->velocity.z);
+            const float dir = atan2f(-player->velocity.z, -player->velocity.x) + yaw_delta;
+
+            player->velocity.x = vel * cosf(dir + (float) M_PI);
+            player->velocity.z = vel * sinf(dir + (float) M_PI);
         }
 
-        if (player->velocity.y) {
-            player->position.y += player->velocity.y * player->game->map->config.speed.y * delta * 1000.0f;
-
-            if (player->noclip) {
-                player->velocity.y *= powf(decel, delta * 1000.0f);
-            } else if (player->velocity.y > 0.0f) {
-                player->velocity.y -= delta * 0.032f;
-            } else if (player->velocity.y < -0.3f) {
-                player->velocity.y = -0.3f;
+        // movement.js[0].vel
+        const float speed_x = MOVEMENT_OR(knobs->speed_x, 1.0f), speed_y = MOVEMENT_OR(knobs->speed_y, 1.0f), speed_z = MOVEMENT_OR(knobs->speed_z, 1.0f);
+        if (!ks_player_allows(player, KS_PLAYER_DEFAULT_VELOCITY)) {
+            // KrunkScript defaultVelocity = false: no integration or friction (player.js:1264)
+        } else if (player->game->config.fixed_movement && !player->noclip) {
+            // fixMov: the exact integral of the per-ms decay, x += (v d^t - v) / ln d
+            if (player->velocity.x) {
+                const float v = player->velocity.x * powf(decel, dt);
+                player->position.x += (v - player->velocity.x) / logf(decel) * speed_x;
+                player->velocity.x = CROP(v, game_constants.min_decel);
             }
-        }
+            if (player->velocity.y) {
+                const float v = player->velocity.y * powf(0.9993f, dt);
+                player->position.y += (v - player->velocity.y) / logf(0.9993f) * speed_y;
+                player->velocity.y = v;
+            }
+            if (player->velocity.z) {
+                const float v = player->velocity.z * powf(decel, dt);
+                player->position.z += (v - player->velocity.z) / logf(decel) * speed_z;
+                player->velocity.z = CROP(v, game_constants.min_decel);
+            }
+        } else {
+            if (player->velocity.x) {
+                player->position.x += player->velocity.x * speed_x * dt;
+                player->velocity.x *= powf(decel, dt);
+                player->velocity.x = CROP(player->velocity.x, game_constants.min_decel);
+            }
 
-        if (player->velocity.z) {
-            player->position.z += player->velocity.z * player->game->map->config.speed.z * delta * 1000.0f;
-            player->velocity.z *= powf(decel, delta * 1000.0f);
-            player->velocity.z = CROP(player->velocity.z, game_constants.min_decel);
+            if (player->velocity.y) {
+                player->position.y += player->velocity.y * speed_y * dt;
+
+                if (player->noclip) {
+                    player->velocity.y *= powf(decel, dt);
+                } else if (player->velocity.y > 0.0f) {
+                    player->velocity.y -= delta * 0.032f;
+                } else if (player->velocity.y <= -0.3f) {
+                    player->velocity.y = -0.3f;
+                }
+            }
+
+            if (player->velocity.z) {
+                player->position.z += player->velocity.z * speed_z * dt;
+                player->velocity.z *= powf(decel, dt);
+                player->velocity.z = CROP(player->velocity.z, game_constants.min_decel);
+            }
         }
 
         if (!input->shoot && !recon) player->doing_interact = 0;
 
-        const int can_jump = player->on_ground && !player->did_jump;
+        const int can_jump = player->on_ground && !player->did_jump; // wasOnGround
 
+        player->was_on_pad = player->on_pad;
         player->on_ground = player->noclip;
         player->on_ladder = 0;
         player->on_wall = 0;
         player->on_ramp = 0;
+        player->on_pad = 0;
         player->making_progress = 0;
 
+        // TODO (pColl): players.playerCollision for classes with player collision
         if (!player->noclip) player_do_map_collisions(player, input, move_dir, can_jump, delta, recon);
+        else player->was_on_ground = can_jump ? 1 : 0;
+        if (player->noclip) world_player_pvp_zones(player); // WP-B: v7 clears noPVP / forcePVP in noclip too
 
         if (!player->did_jump && player->ramp_fix && fabsf(player->position.y - *player->ramp_fix) <= game_constants.climb_height) {
             if (!player->on_ramp) {
                 player->position.y = *player->ramp_fix;
-                player->on_ground = 1;
+                movement_set_on_ground(player);
                 player->velocity.y = 0.0f;
 
                 free(player->ramp_fix);
@@ -1281,7 +1750,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
 
         if (!player->making_progress && !recon) player->interact_progress = 0.0f;
-        // TODO: terrain ray cast
+        world_player_terrain(player, recon); // WP-B: terrain ground snap (player.js:1779-1797)
 
         player->air_time = player->on_ground ? 0 : player->air_time + delta;
     }
@@ -1301,8 +1770,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             player->bob_anim.y -= (player->last_position.y - player->position.y) * game_constants.bob_mlt_y;
         }
 
-        // playerStep (the step sound is TODO: sound_events can follow step_dir_neg flips)
-        if (player->is_you && contact && input->move_dir >= 0) player_step(player, delta_pos);
+        // playerStep: every grounded player that moved at least 0.1 this tick (v3.1.1: the local
+        // player holding a movement key; the step sound is sound_events' step_dir_neg flips)
+        if (contact && delta_pos >= 0.1f) player_step(player, delta_pos);
 
         if (player->render_you) {
             if (contact && input->move_dir >= 0) {
@@ -1310,17 +1780,20 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             } else {
                 player->step_val *= powf(game_constants.step_pull, delta * 1000.0f);
             }
-
-            if (player->step_chase != player->step_val) player->step_chase += (player->step_val - player->step_chase) * 0.15f;
         }
 
-        // Krunker spread: movement/fall spreadPlus, crouch and recoil terms, scaled by
-        // the hip-fire amount (KrunkNative aim_val 1 = aimed, Krunker aimVal 0 = aimed).
-        player->spread_plus += delta_pos * COMBAT_SPREAD_MOVE + fabsf(player->last_position.y - player->position.y) * COMBAT_SPREAD_FALL;
+        if (player->step_chase != player->step_val) player->step_chase += (player->step_val - player->step_chase) * 0.15f;
+
+        // Krunker spread: movement/fall spreadPlus x weapon movSpread, crouch and recoil terms,
+        // scaled by the hip-fire amount plus adSpread of the aimed share (v7.1.4 player.js;
+        // KrunkNative aim_val 1 = aimed, Krunker aimVal 0 = aimed). KN bug fixed: movSpread (Akimbo
+        // Uzi 0.01, Akimbo Pistol 0.1) used to be ignored (doc/v7/player-viewer.md 5.2).
+        const float move_spread = player->weapon->move_spread ? player->weapon->move_spread : 1.0f;
+        player->spread_plus += (delta_pos * COMBAT_SPREAD_MOVE + fabsf(player->last_position.y - player->position.y) * COMBAT_SPREAD_FALL) * move_spread;
         player->spread_plus *= powf(COMBAT_SPREAD_RECOVER, delta * 1000.0f);
         player->spread = player->weapon->no_spread ? 0.0f : MAX(player->weapon->min_spread,
             (player->weapon->spread - player->weapon->spread * COMBAT_CROUCH_SPREAD * player->crouch_val +
-             player->recoil_anim * COMBAT_SPREAD_MLT + player->spread_plus) * (1.0f - player->aim_val));
+             player->recoil_anim * COMBAT_SPREAD_MLT + player->spread_plus) * ((1.0f - player->aim_val) + player->aim_val * player->weapon->aim_spread));
 
         // Intentional difference: a reconciliation replay (recon) stops here. v3.1.1 runs the
         // reload / timers / shoot code in replays too and relies on the predicted reloads[]
@@ -1341,7 +1814,8 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
 
             if (!player->reload_timer) {
                 player->did_shoot = 0;
-                player->ammo[player->loadout_index] = player->weapon->ammo;
+                if (zombies_finite_ammo(player)) zombies_reload_finish(player); // WP-H: from the reserve
+                else player->ammo[player->loadout_index] = (unsigned int) mode_ammo_limit(player->game, (int) player->weapon->ammo);
             }
         }
 
@@ -1362,8 +1836,14 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
                 will_shoot = 1;
             }
 
-            if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
-                if (player->weapon->melee) {
+            // map-logic WP-B: players.build runs whenever the timers allow (player.js:1911-1914),
+            // with the fire input as `place`; the Build Tool never takes the shoot path
+            if (player->weapon->build && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
+                player_build(player, will_shoot);
+            } else if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
+                if (player->weapon->grapple_range || player->weapon->build) {
+                    // v7.1.4 tryGrapple (Grappler): grapple physics are WP-A phase 2; until then it never fires.
+                } else if (player->weapon->melee) {
                     player_melee(player);
                 } else {
                     if (player->ammo[player->loadout_index] > 0) {
@@ -1387,28 +1867,34 @@ weapon_done:;
         player->on_ground = 0;
     }
 
-    if (!move_lock && player->wall_jump && !player->on_ground && !player->on_ladder && player->on_wall && player->game->config.wall_jump > 0.0f) {
+    // Wall jump: at most wallJumpMax per airborne period (v3.1.1: unlimited); the class / mode
+    // wallJV, wallJYV and config.wallJP shape it.
+    if (!move_lock && player->wall_jump && player->wall_jump_count < player->wall_jump_max && !player->on_ground && !player->on_ladder &&
+        player->on_wall && movement_wall_jump_power(player) > 0.0f) {
         if (player->did_wall_jump && !input->jump) player->did_wall_jump = 0;
 
         if (!player->did_wall_jump && input->jump) {
             player->did_wall_jump = 1;
+            player->wall_jump_count++;
             if (!recon && player->is_you) player_feel_wall_jump(player);
 
-            const float velocity = (player->game->mode->config.real_movement ? 0.7f : 1.0f) * 0.03f;
-            player->velocity.y = (player->game->mode->config.real_movement ? 0.9f : 1.0f) * 0.058f;
+            const int real = movement_real(player);
+            const float power = movement_wall_jump_power(player);
+            const float velocity = (mode_movement->wall_jump_vel ? mode_movement->wall_jump_vel : MOVEMENT_OR(knobs->wall_jump_vel, 0.03f)) * (real ? 0.7f : 1.0f);
+            player->velocity.y = (real ? 0.9f : 1.0f) * 0.058f * MOVEMENT_OR(mode_movement->wall_jump_y_vel, 1.0f);
 
             switch (player->on_wall) {
                 case 1:
-                    player->velocity.x = velocity * player->game->config.wall_jump;
+                    player->velocity.x = velocity * power;
                     break;
                 case 2:
-                    player->velocity.x = -velocity * player->game->config.wall_jump;
+                    player->velocity.x = -velocity * power;
                     break;
                 case 3:
-                    player->velocity.z = velocity * player->game->config.wall_jump;
+                    player->velocity.z = velocity * power;
                     break;
                 case 4:
-                    player->velocity.z = -velocity * player->game->config.wall_jump;
+                    player->velocity.z = -velocity * power;
                     break;
                 default:
                     break;
@@ -1421,17 +1907,20 @@ weapon_done:;
     // TODO: trading?
     // TODO: player collisions
     // TODO: update interact
+
+    world_player_reset_input(player, input->reset, recon, delta * 1000.0f); // WP-B: input[13] Parkour resets
 }
 
-// playerStep: stepVal swings between +-PI/2 with the distance covered (3D, x1.4 on a
-// ladder for the local player); crouched remote players step 1.6x faster.
+// playerStep: stepVal swings between +-PI/2 * stpFr (class step frequency) with the distance
+// covered (3D, x1.4 on a ladder for the local player); crouched remote players step 1.6x faster.
 void player_step(Player *player, float distance) {
     if (!distance) return;
     if (!player->render_you && player->crouch_val) distance *= 1.6f;
 
     player->step_val += distance * MOVEMENT_STEP_MLT * (player->step_dir_neg ? -1.0f : 1.0f);
+    const float limit = (float) M_PI / 2.0f * MOVEMENT_OR(movement_knobs(player)->step_freq, 1.0f);
 
-    if ((player->step_val >= (float) M_PI / 2.0f && !player->step_dir_neg) || (player->step_val <= -(float) M_PI / 2.0f && player->step_dir_neg)) {
+    if ((player->step_val >= limit && !player->step_dir_neg) || (player->step_val <= -limit && player->step_dir_neg)) {
         player->step_dir_neg ^= 1;
         player->step_events++; // playerStep sound (sound_events.c)
     }
@@ -1442,15 +1931,257 @@ void player_step(Player *player, float distance) {
 // melee, changeHealth, kill, score) and src/data/kills.js (reward). Only the
 // authority (native server, offline local server, is_local games) applies damage;
 // clients predict recoil/spread and learn the outcome from HIT/HEALTH/KILL packets.
-// Not ported yet: lag compensation (fetchState rewind) and kill streak rewards. AI
+// Lag compensation (storeState / fetchState) is below. Kill streaks, effects and perks:
+// shared/src/effects.c. AI
 // targets: shared/src/ai.c (game_ai_damage); map object hits (destructibles, trigger
 // events): shared/src/triggers.c (game_object_hit).
+
+// ---------------------------------------------------------------- lag compensation
+// v3.1.1 players.js storeState / fetchState / getStateConst (and projectile.js stateConst).
+// The server keeps every player's {time, h, x, y, z} for config.stateHistory (500 ms), one
+// entry per update (game_tick_world). A shot (hitscan rays, the melee swing, and every tick
+// of a projectile's flight) tests a target's hitbox where it stood at
+//     targetTime = game.now - (stateConst + (1000 / target.cSendRate) * config.interpolation)
+// (ms): the newest entry at or before targetTime, else the oldest one, with no interpolation
+// between entries. (1000 / cSendRate) * interpolation is the client's remote-player delay
+// (players.js update moves x1 -> x2 over that time; client_apply_state). Only targets are
+// rewound: the shooter's origin, map objects and AI boxes stay current, and only players alive
+// now (active) are tested. Head and leg zones (combat_fire_ray) use the target's current y and
+// height, like v3.1.1's G.obj.y, not the rewound state.
+//
+// stateConst, the network part of the rewind (player_get_state_const):
+//  - literal (server.cfg lag_comp_anchor 0): v3.1.1 getStateConst = ping * 2 * lagComp,
+//    counted back from game.now when the shot is processed. player.ping is the smoothed RTT
+//    (packetHandlers.ts io_po), so this goes back two RTTs, about one more than the client saw.
+//  - arrival-anchored (lag_comp_anchor 2; intentional difference from v3.1.1): the shot is
+//    resolved at the time its input was fired, not at the later tick that processed it.
+//    Input.arrival is when the input reached the server on the state_now clock, minus the
+//    deltas of the later frames of its batch. The client fired it RTT/2 (uplink) before that,
+//    and was showing targets as they were RTT/2 (downlink) plus the interpolation delay earlier.
+//    So stateConst = (game.now - arrival) + ping * lagComp (lagComp 1: one RTT), and
+//    fetchState still adds the interpolation delay as in v3.1.1. The time an input waited for
+//    its tick (or a batch that arrived at once) is measured instead of folded into "ping * 2".
+//    A shot whose packet was delayed (jitter, a lag spike) is rewound that much too little.
+//  - exact (lag_comp_anchor 1, the default; intentional difference from v3.1.1): the shot's time
+//    comes from the client's own input timeline, so a delayed packet costs nothing. No packet
+//    change: every frame carries its delta, so client_time(frame) = the running sum of the
+//    (clamped) deltas of the connection's timeline (LagCompClock below). Per packet, skew =
+//    received - client_time; offset = the least skew of the last LAG_COMP_CLOCK_WINDOW s (the
+//    least-delayed packets set it), so offset + client_time(shot frame) is when that frame
+//    would have arrived over the fastest path. The client fired it the least uplink delay
+//    before that and saw targets the downlink delay + interpolation earlier: the network part
+//    is the least uplink + the typical downlink = ping - excess, where excess = the window's
+//    median skew - offset (ping is a smoothed RTT, so it holds the typical uplink delay).
+//    stateConst = (game.now - (offset + client_time)) + (ping - excess) * lagComp.
+//    Guards: the shot time is never after the frame's arrival (causal) nor more than
+//    LAG_COMP_CLOCK_MAX_EARLY before it; until a timeline has LAG_COMP_CLOCK_CALIBRATION s of
+//    samples, and for the rest of a life whose client clock ran faster or slower than real time
+//    (an anomaly: summed deltas growing faster than arrivals, or the offset drifting), the shot
+//    falls back to the arrival-anchored estimate. A client cannot gain rewind by speeding up its
+//    clock (the shot time stays <= its arrival, and the excess only lowers the ping part); one
+//    holding back or slowing down frames gains at most LAG_COMP_CLOCK_MAX_EARLY, like a real lag
+//    spike, inside the same 500 ms window v3.1.1 allows a client that delays its pongs.
+// The 500 ms stateHistory window bounds the rewind in every mode: the oldest entry is the limit.
+
+#define LAG_COMP_CLOCK_WINDOW 5.0          // s of packet samples behind offset / excess
+#define LAG_COMP_CLOCK_CALIBRATION 0.5     // s of samples (and LAG_COMP_CLOCK_MIN_SAMPLES) before a timeline is used
+#define LAG_COMP_CLOCK_MIN_SAMPLES 8
+#define LAG_COMP_CLOCK_MAX_EARLY 0.25      // s a shot may be credited before its packet's arrival
+#define LAG_COMP_CLOCK_LOST_DELTA 0.005    // s a clamped frame may lose before its timeline breaks
+#define LAG_COMP_CLOCK_DRIFT_TOLERANCE 0.1 // s the skew may leave the calibration baseline (route changes)...
+#define LAG_COMP_CLOCK_DRIFT_RATE 0.005    // ...plus 0.5 % of the timeline's age (clock rate differences)
+
+const char *lag_comp_anchor_name(const int anchor) {
+    return anchor == LAG_COMP_ANCHOR_EXACT ? "exact" : anchor == LAG_COMP_ANCHOR_ARRIVAL ? "arrival" : "v3.1.1";
+}
+
+int lag_comp_anchor_parse(const char *text) {
+    if (!text) return -1;
+    if (!strcmp(text, "1") || !strcmp(text, "exact") || !strcmp(text, "on") || !strcmp(text, "true")) return LAG_COMP_ANCHOR_EXACT;
+    if (!strcmp(text, "2") || !strcmp(text, "arrival")) return LAG_COMP_ANCHOR_ARRIVAL;
+    if (!strcmp(text, "0") || !strcmp(text, "v3") || !strcmp(text, "v3.1.1") || !strcmp(text, "literal") ||
+        !strcmp(text, "off") || !strcmp(text, "false")) return LAG_COMP_ANCHOR_V3;
+    return -1;
+}
+
+void lag_comp_clock_reset(LagCompClock *clock) {
+    const unsigned short epoch = clock->epoch;
+    memset(clock, 0, sizeof(*clock));
+    clock->epoch = (unsigned short) (epoch + 1);
+    clock->last_seq = -1;
+}
+
+// A frame whose time the client clock cannot account for (seq restart / gap, a frame longer than
+// the delta clamp): a new timeline. Its samples start over; the anomaly flag stays for the life.
+static void lag_comp_clock_break(LagCompClock *clock) {
+    clock->epoch++;
+    clock->count = 0;
+    clock->head = 0;
+    clock->calibrated = 0;
+    clock->client_time = 0.0;
+}
+
+static int lag_comp_compare_double(const void *a, const void *b) {
+    const double x = *(const double *) a, y = *(const double *) b;
+    return x < y ? -1 : x > y;
+}
+
+void lag_comp_clock_frame(LagCompClock *clock, Input *input, const float raw_delta) {
+    input->client_time = -1.0;
+    input->clock_epoch = 0;
+    if (!(input->received > 0.0)) return; // not from the network (bots, tests, offline)
+
+    const int fresh = clock->last_seq < 0 || input->seq != clock->last_seq + 1 ||
+                      !isfinite(raw_delta) || raw_delta > game_constants.max_delta + LAG_COMP_CLOCK_LOST_DELTA;
+    if (fresh) lag_comp_clock_break(clock);
+    else clock->client_time += input->delta; // the frame is generated `delta` after the previous one
+    clock->last_seq = input->seq;
+    input->client_time = clock->client_time;
+    input->clock_epoch = clock->epoch;
+
+    // one sample per packet: its frames share `received`, the last one (the least skew) counts
+    const double skew = input->received - clock->client_time;
+    if (clock->count && input->received == clock->sample_received[clock->head]) {
+        if (skew < clock->sample_skew[clock->head]) clock->sample_skew[clock->head] = skew;
+    } else {
+        if (clock->count && input->received < clock->sample_received[clock->head]) return; // non-causal stamp
+        clock->head = (clock->head + 1) % LAG_COMP_CLOCK_SAMPLES;
+        clock->sample_received[clock->head] = input->received;
+        clock->sample_skew[clock->head] = skew;
+        if (clock->count < LAG_COMP_CLOCK_SAMPLES) clock->count++;
+        if (clock->count == 1) {
+            clock->begin = input->received;
+            clock->baseline = skew;
+        }
+    }
+
+    // offset = the least skew of the window, excess = its median skew above that
+    static double window[LAG_COMP_CLOCK_SAMPLES];
+    int n = 0;
+    double offset = 0.0;
+    for (int i = 0; i < clock->count; i++) {
+        const int at = (clock->head - i + LAG_COMP_CLOCK_SAMPLES) % LAG_COMP_CLOCK_SAMPLES;
+        if (clock->sample_received[at] < input->received - LAG_COMP_CLOCK_WINDOW) break;
+        window[n] = clock->sample_skew[at];
+        offset = n ? fmin(offset, window[n]) : window[n];
+        n++;
+    }
+    qsort(window, (size_t) n, sizeof(window[0]), lag_comp_compare_double);
+    clock->offset = offset;
+    clock->excess = (n % 2 ? window[n / 2] : (window[n / 2 - 1] + window[n / 2]) * 0.5) - offset;
+
+    const double age = input->received - clock->begin;
+    if (!clock->calibrated) {
+        clock->baseline = fmin(clock->baseline, skew);
+        clock->calibrated = age >= LAG_COMP_CLOCK_CALIBRATION && clock->count >= LAG_COMP_CLOCK_MIN_SAMPLES;
+        return;
+    }
+    // client_time may only grow as fast as real time: a skew below the baseline means the summed
+    // deltas outran the arrivals (a sped-up clock); a window median above it (spikes do not move a
+    // median), that they fell behind (a slowed-down clock, which would earn rewind)
+    const double tolerance = LAG_COMP_CLOCK_DRIFT_TOLERANCE + LAG_COMP_CLOCK_DRIFT_RATE * age;
+    if (!clock->anomaly && (skew < clock->baseline - tolerance || clock->offset + clock->excess > clock->baseline + tolerance)) {
+        clock->anomaly = 1;
+        clock->anomaly_new = 1;
+    }
+}
+
+double lag_comp_clock_shot_time(const LagCompClock *clock, const Input *input, double *excess) {
+    if (!clock->calibrated || clock->anomaly || input->client_time < 0.0 || input->clock_epoch != clock->epoch ||
+        !(input->received > 0.0)) return 0.0;
+    double sent = clock->offset + input->client_time;
+    if (sent > input->received) sent = input->received; // causal: never after it arrived
+    if (sent < input->received - LAG_COMP_CLOCK_MAX_EARLY) sent = input->received - LAG_COMP_CLOCK_MAX_EARLY;
+    *excess = clock->excess;
+    return sent;
+}
+
+static const PlayerStoredState *player_state_entry(const Player *player, const int newest_first) {
+    const int index = (player->state_history_head - newest_first + PLAYER_STATE_HISTORY_MAX) % PLAYER_STATE_HISTORY_MAX;
+    return &player->state_history[index];
+}
+
+// v7.1.4 adjustedHeight (players.updateHeight): the height with the head band scaled by headMlt,
+// the top of the hit box (ah in stateHistory).
+static float combat_adjusted_height(const Player *player) {
+    // headMlt: the spawn value, or the Bighead FFA one (mode.head_mlt, WP-D); only one is ever set
+    const float head_mlt = (player->head_mlt > 0.0f ? player->head_mlt : 1.0f) * mode_head_mlt(player);
+    return player->height - COMBAT_HEAD_SCALE + COMBAT_HEAD_SCALE * head_mlt;
+}
+
+// players.js storeState: unshift {time: game.now, h, ah, x, y, z}, then drop every entry at least
+// config.stateHistory old (they are the oldest ones: time only grows).
+void player_store_state(Player *player) {
+    const Game *game = player->game;
+
+    player->state_history_head = (player->state_history_head + 1) % PLAYER_STATE_HISTORY_MAX;
+    player->state_history[player->state_history_head] = (PlayerStoredState) {game->state_now, player->position, player->height,
+                                                                             combat_adjusted_height(player)};
+    if (player->state_history_count < PLAYER_STATE_HISTORY_MAX) player->state_history_count++;
+
+    while (player->state_history_count > 0 &&
+           game->state_now - player_state_entry(player, player->state_history_count - 1)->time >= GAME_STATE_HISTORY) {
+        player->state_history_count--;
+    }
+}
+
+// players.js getStateConst: ping * 2 * lagComp (a lagComp <= 0 counts as 1); anchored: the
+// time since the running input arrived plus one ping (see above). lagComp is the player's
+// Settings > Network slider (ENT lag_comp, ent[11]; the server clamps it to 0.1..1 like
+// gameserver.ts applyLagCompFromEnt, so the <= 0 rule only catches a never-set value) times
+// the server's lag_comp_scale (KrunkNative; 1 = v3.1.1).
+float player_get_state_const(const Player *player) {
+    const Game *game = player->game;
+    const float scale = game->lag_comp_scale > 0.0f ? game->lag_comp_scale : 1.0f;
+    const float lag_comp = (player->lag_comp > 0.0f ? player->lag_comp : 1.0f) * scale; // parity: lc <= 0 -> 1
+    const float ping = player->ping > 0.0f ? player->ping : 0.0f;
+    if (game->lag_comp_anchor == LAG_COMP_ANCHOR_V3) return ping * 2.0f * lag_comp;
+
+    if (game->lag_comp_anchor == LAG_COMP_ANCHOR_EXACT && player->input_arrival > 0.0) {
+        double excess = 0.0;
+        const double sent = lag_comp_clock_shot_time(&player->lag_clock, &player->input_running, &excess);
+        if (sent > 0.0) {
+            const double age = game->state_now > sent ? game->state_now - sent : 0.0;
+            const float network = fmaxf(0.0f, ping - (float) (excess * 1000.0));
+            return (float) (age * 1000.0) + network * lag_comp;
+        }
+    }
+
+    const double age = player->input_arrival > 0.0 && game->state_now > player->input_arrival ? game->state_now - player->input_arrival : 0.0;
+    return (float) (age * 1000.0) + ping * lag_comp;
+}
+
+// players.js fetchState(player, ping). 0: nothing to hit (v3.1.1 `if (G = fetchState(...))`
+// with an empty stateHistory, e.g. a player who spawned after this tick's storeState).
+int players_fetch_state(const Player *target, const float ping_ms, PlayerStoredState *out) {
+    const Game *game = target->game;
+    if (!game->lag_comp) { // offline / lag_comp 0: where the target is now
+        *out = (PlayerStoredState) {game->state_now, target->position, target->height, combat_adjusted_height(target)};
+        return 1;
+    }
+    if (!target->state_history_count) return 0;
+
+    const float send_rate = target->c_send_rate > 0.0f ? target->c_send_rate : GAME_LAG_COMP_SEND_RATE;
+    const double target_time = game->state_now - (ping_ms + 1000.0f / send_rate * game_constants.interpolation) / 1000.0;
+
+    for (int i = 0; i < target->state_history_count; i++) {
+        const PlayerStoredState *state = player_state_entry(target, i);
+        if (state->time <= target_time) {
+            *out = *state;
+            return 1;
+        }
+    }
+
+    *out = *player_state_entry(target, target->state_history_count - 1);
+    return 1;
+}
 
 typedef struct {
     const Object *object;
     Player *player;
     float t;
     GameAI *ai;         // players.js shoot / melee: game.AI.ais boxes (authority)
+    PlayerStoredState state; // a player hit: the rewound box it was traced against (head / leg zones)
 } Hit;
 
 typedef struct {
@@ -1509,12 +2240,20 @@ static int combat_object_shootable(const Object *object) {
     }
 }
 
-static int combat_can_damage(const Player *dealer, const Player *victim) {
-    return !dealer->team || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team);
+// players.spray traces the same map.manager.objects as a shot (shared/src/interact.c).
+int game_object_shootable(const Object *object) {
+    return combat_object_shootable(object);
 }
 
-// lineInRect against every shootable object and (authority only) every other
-// living player's hitbox: x/z +-(scale + hitBoxPad), y from the feet to height + pad.
+static int combat_can_damage(const Player *dealer, const Player *victim) {
+    if (!world_pvp_allows(dealer, victim)) return 0; // WP-B: v7 noPVP / forcePVP pairs (forcePVP: no team)
+    return !dealer->team || world_pvp_ignores_team(dealer, victim) || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team) ||
+           dealer->game->config.friendly_fire; // v7 game.config.frFire
+}
+
+// lineInRect against every shootable object and (authority only) every other living player's
+// hitbox: x/z +-(scale + hitboxPadW), y from the feet to adjustedHeight + hitboxPadH (v7.1.4:
+// game hitBoxPad 0.6, 0.1 in Ranked, + class hbS / hbH; v3.1.1 padded by mode.hitBoxPad || 1).
 static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, const int include_players, HitList *hits) {
     Game *game = shooter->game;
 
@@ -1530,24 +2269,28 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
 
     if (!include_players) return;
 
-    const float pad = game->mode && game->mode->config.hitbox_pad ? game->mode->config.hitbox_pad : 1.0f;
+    const float state_const = player_get_state_const(shooter);
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *other = game->players[i];
         if (!other || !other->active || other == shooter || !combat_can_damage(shooter, other)) continue;
 
-        const float half = other->scale + pad;
-        const vec3 box_scale = {half * 2.0f, other->height + pad, half * 2.0f};
-        const float t = line_in_rect(origin, dir, other->position, box_scale);
+        // G = fetchState(list[i], player.getStateConst()): the box where the shooter saw it
+        PlayerStoredState state;
+        if (!players_fetch_state(other, state_const, &state)) continue;
+
+        const float half = other->scale + player_hitbox_pad_w(other);
+        const vec3 box_scale = {half * 2.0f, state.adjusted_height + player_hitbox_pad_h(other), half * 2.0f};
+        const float t = line_in_rect(origin, dir, state.position, box_scale);
         if (t <= 0.0f || t > 1.0f) continue;
 
-        hit_list_push(hits, (Hit) {NULL, other, t});
+        hit_list_push(hits, (Hit) {NULL, other, t, NULL, state});
     }
 
-    // game.AI.ais: x/z +-scale, y .. y + 2 * scale (no hitBoxPad)
+    // game.AI.ais: x/z +-scale, y .. y + 2 * height (no hitBoxPad); v7: not the shooter's team AIs
     for (int i = 0; game->ai && i < game->ai->count; i++) {
         GameAI *ai = &game->ai->ais[i];
-        if (!ai->active) continue;
+        if (!ai->active || (shooter->team && shooter->team == ai->team && !(game->mode && game->mode->config.dmg_team) && !game->config.friendly_fire)) continue;
         const float t = game_ai_line_hit(ai, origin, dir);
         if (t <= 0.0f || t > 1.0f) continue;
         hit_list_push(hits, (Hit) {NULL, NULL, t, ai});
@@ -1573,23 +2316,14 @@ static const Weapon *combat_weapon_at(const Game *game, const int index) {
     return index >= 0 && index < (int) count ? weapons[index] : NULL;
 }
 
-// weapons.js fields the native Weapon struct does not carry yet: `kill` (custom
-// kill score replacing the base 50) and `scope` (sniper scope: No/Quick Scope).
+// weapons.js `kill` (["", N]: replaces the base 50, v7 adds the Rocket's 75) and `scope`
+// (No / Quick Scope: Sniper Rifle and v7's Charge Rifle).
 static int combat_weapon_kill_score(const Weapon *weapon) {
-    static const struct { const char *name; int score; } table[] = {
-        {"Pistol", 75}, {"Revolver", 50}, {"Desert Eagle", 50}, {"Alien Blaster", 50},
-        {"Crossbow", 75}, {"Auto Pistol", 50}, {"Blaster", 75},
-    };
-
-    if (!weapon || !weapon->name) return 0;
-    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
-        if (!strcmp(weapon->name, table[i].name)) return table[i].score;
-    }
-    return 0;
+    return weapon ? weapon->kill_score : 0;
 }
 
 static int combat_weapon_scope(const Weapon *weapon) {
-    return weapon && weapon->name && !strcmp(weapon->name, "Sniper Rifle");
+    return weapon && weapon->scope;
 }
 
 // One kills.js reward pair (tmpList.push(name, score)); returns the score for getScore().
@@ -1618,6 +2352,7 @@ static int combat_kill_reward(Game *game, Player *killer, Player *victim, const 
         if (info && info->thrown) score += combat_medal(medals, "Bullseye", 150);
         else if (info && info->fists) score += combat_medal(medals, "Beatdown", 175);
         else score += combat_medal(medals, "Execution", 150);
+        if (info && info->headshot) score += combat_medal(medals, "Headshot", 25); // v7.1.4 kills.js
     } else {
         const int custom = combat_weapon_kill_score(weapon);
         const int scope = combat_weapon_scope(weapon);
@@ -1657,9 +2392,15 @@ void player_score(Player *player, int amount, const int is_kill) {
     Game *game = player->game;
     if (!game_is_authority(game) || !amount) return;
 
-    player->score += mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
-    if (player->score > GAME_SCORE_CAP) {
-        player->score = GAME_SCORE_CAP;
+    amount = mode_score_scale(game, player, amount, is_kill); // v7 killMlt / oneflag carrier multipliers (WP-D)
+    if (amount > 0 && zombies_double_points(game)) amount *= 2; // WP-H: doublePointsTimer
+    const int gain = mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
+    player->score += gain;
+    if (player->active) player->life_score += gain; // WP-E: scoreL (the death screen's "Score")
+    if (gain) game_challenge(game, player, "score", gain, -1, -1); // WP-E part 2c: challenges.update(game, "score")
+    const int cap = mode_score_cap(game); // v7 noScrLimit: no cap (WP-D)
+    if (cap && player->score > cap) {
+        player->score = cap;
         amount = 0;
     }
 
@@ -1715,10 +2456,11 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     if (!game_is_authority(game) || !victim->active) return 0;
     if (damage < 0.0f && victim->health == (float) victim->max_health) return 0;
     if (dealer && damage > 0.0f && dealer != victim && !combat_can_damage(dealer, victim)) return 0;
+    if (dealer && damage > 0.0f && dealer->dmg_mlt > 0.0f) damage *= dealer->dmg_mlt; // v7.1.4 bots: player.dmgMlt
     if (dealer && dealer->smite && damage > 0.0f) damage = 10000.0f; // /smite: weapon/melee/explosion dmg = 10000
 
-    if (dealer && dealer->team == 1) damage *= game->config.team1_damage;
-    else if (dealer && dealer->team == 2) damage *= game->config.team2_damage;
+    if (dealer && dealer->team > 0 && dealer->team < GAME_CONFIG_TEAMS) damage *= game->config.team_damage[dealer->team]; // t<team>Dmg (sdm teams 3-5 too)
+    damage = floorf(damage * 10.0f + 0.5f) / 10.0f; // v7.1.4 changeHealth: dmg.round(1)
 
     if (dealer && dealer != victim && damage > 0.0f) {
         const NetHitPacket hit = {
@@ -1741,8 +2483,52 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     }
 
     combat_send_health(game, victim, dealer);
+    // KrunkScript onPlayerDamage: damage > 0 that leaves the victim alive (PLS:4295-4299)
+    if (damage > 0.0f && victim->health > 0.0f) {
+        trigger_player_event(game, TRIGGER_EVENT_ON_PLAYER_DAMAGE, victim); // playerTrigger("onPlayerDamage", victim) (WP-C)
+        ks_game_on_player_damage(game, victim, dealer, damage);
+    }
 
     return victim->health <= 0.0f;
+}
+
+// WP-E part 2c: the stats and challenge events of one kill (v7 players.kill, kills.js reward and
+// the melee / hitscan / projectile kill sites): "k" and "kstk" with the killing weapon (none for
+// a weaponless nuke kill: v7's stk kills), mk / fk / tmk, hs / ls / wb, then the kill's medals
+// (incMedal) and their challenge keys (kills.js vA742). v7 counts hs / ls / wb on hitscan and
+// projectile kills only; the kill info carries them for those (a melee headshot medal adds no
+// stat there either).
+static void combat_kill_progress(Game *game, Player *killer, const PlayerKillInfo *info, const int weapon_index,
+                                 const NetKillMedalsPacket *medals) {
+    const int wep = info && info->weapon_id >= 0 ? weapon_index : -1;
+    game_challenge(game, killer, "k", 1, wep, -1);
+    game_challenge(game, killer, "kstk", (int) killer->kill_streak, -1, -1); // nonWep: the kill streak
+    if (wep >= 0) game_challenge(game, killer, "kstk", (int) killer->weapon_streak, wep, -1);
+    const Weapon *weapon = combat_weapon_at(game, weapon_index);
+    const int melee = weapon && weapon->melee;
+    if (melee) {
+        const char *key = info && info->thrown ? "tmk" : info && info->fists ? "fk" : "mk";
+        game_inc_stat(game, killer, key);
+        game_challenge(game, killer, key, 1, wep, -1);
+    }
+    if (info && !melee) {
+        static const char *const keys[3] = {"hs", "wb", "ls"};
+        const int on[3] = {info->headshot, info->wallbang, info->legshot};
+        for (int i = 0; i < 3; i++) {
+            if (!on[i]) continue;
+            game_inc_stat(game, killer, keys[i]);
+            game_challenge(game, killer, keys[i], 1, wep, -1);
+        }
+    }
+    static const char *const medal_keys[][2] = {{"First Blood", "fb"}, {"Revenge", "rk"}, {"Mid Air", "airk"}, {"Turbo Kill", "tk"},
+                                                {"No Scope", "ns"},    {"Quick Scope", "qs"}, {"Longshot", "lns"}, {"Close Call", "cc"},
+                                                {"Buzzkill", "bzk"},   {"Driftkill", "drk"}};
+    for (int m = 0; medals && m < medals->count; m++) {
+        const char *name = medals->medals[m].text;
+        game_inc_medal(game, killer, name);
+        for (size_t k = 0; k < sizeof(medal_keys) / sizeof(*medal_keys); k++)
+            if (!strcmp(medal_keys[k][0], name)) game_challenge(game, killer, medal_keys[k][1], 1, wep, -1);
+    }
 }
 
 // players.kill(player, killer, info, skipRewards). The victim stops playing on
@@ -1765,6 +2551,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     if (streaks) player->death_streak++;
 
     game->kill_count++;
+    game_challenge(game, player, "d", 1, -1, -1); // WP-E part 2c: challenges.update(game, "d", 1)
 
     const int weapon_index = killer ? (kill_info && kill_info->weapon_id >= 0 ? kill_info->weapon_id : combat_weapon_index(killer)) : -1;
     int reward = 0;
@@ -1773,37 +2560,51 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     if (killer && killer != player) {
         player->last_killer_uid = killer->uid;
         killer->kills++;
+        if (killer->active) killer->life_kills++; // WP-E: killsL
 
         if (streaks) {
             killer->streak++;
             killer->kill_streak++;
+            killer->real_kill_streak++; // v7.1.4 realKillStreak -> updateStreaks (streak loadout)
             killer->death_streak = 0;
+            player_update_streaks(killer);
+            // v7.1.4 weaponStreak / "wstk": kills in a row with one weapon (not the Nuke's weaponless kills)
+            if (kill_info && kill_info->weapon_id >= 0) {
+                killer->weapon_streak = killer->streak_weapon == weapon_index ? killer->weapon_streak + 1 : 1;
+                killer->streak_weapon = weapon_index;
+                const NetWeaponStreakPacket wstk = {.weapon = weapon_index, .count = killer->weapon_streak};
+                game_send(game, killer->uid, NET_PACKET_WEAPON_STREAK, &wstk, sizeof(wstk));
+            }
             if (killer->kill_streak % 5 == 0) streak_message = (int) killer->kill_streak; // X = killStreak
             if (game->now - killer->last_kill_time >= GAME_FEED_TIMER) killer->streak = 0;
         }
 
         killer->last_kill_time = game->now;
 
+        NetKillMedalsPacket medals;
+        memset(&medals, 0, sizeof(medals));
         if (!skip_rewards && game->config.kill_rewards) {
-            NetKillMedalsPacket medals;
-            memset(&medals, 0, sizeof(medals));
             reward = combat_kill_reward(game, killer, player, kill_info, combat_weapon_at(game, weapon_index), &medals);
             medals.kills = (int32_t) killer->kills;
             if (medals.count) game_send(game, killer->uid, NET_PACKET_KILL_MEDALS, &medals, sizeof(medals)); // IO.send(Q.id, "6", W, ..)
-            player_score(killer, reward, 1);
         }
+        combat_kill_progress(game, killer, kill_info, weapon_index, &medals); // WP-E part 2c
+        if (!skip_rewards && game->config.kill_rewards) player_score(killer, reward, 1);
     }
 
     // Assists: config.assistMin damage within config.assistTime.
     for (size_t i = 0; i < game->player_count; i++) {
         Player *other = game->players[i];
-        if (!other || other == killer || other == player || (game->mode && game->mode->config.no_assists)) continue;
+        if (!other || other == killer || other == player || (game->mode && game->mode->config.no_assists) || game->config.no_assists) continue;
 
         for (int k = 0; k < PLAYER_DAMAGE_SLOTS; k++) {
             const PlayerDamage *damage = &player->damage_received[k];
             if (damage->uid != other->uid || damage->value < GAME_ASSIST_MIN || game->now - damage->time > GAME_ASSIST_TIME) continue;
 
             other->assists++;
+            game_inc_stat(game, other, "ast"); // WP-E part 2c: giveAssist's incStat / challenge / incMedal
+            game_challenge(game, other, "ast", 1, -1, -1);
+            game_inc_medal(game, other, "Assist");
             player_score(other, GAME_ASSIST_SCORE, 1);
             game_send(game, other->uid, NET_PACKET_ASSIST, NULL, 0); // IO.send(id, "10")
             break;
@@ -1812,6 +2613,25 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
 
     for (int k = 0; k < PLAYER_DAMAGE_SLOTS; k++) player->damage_received[k] = (PlayerDamage) {-1, 0.0f, 0.0f};
     player->kill_streak = 0;
+
+    // WP-E: the victim's "3" extras (players.js:4860) right before its KILL: the killing weapon,
+    // the killer's class stat and player card stat, and this life's stats
+    NetDeathInfoPacket death = {
+        .victim_uid = player->uid,
+        .killer_uid = killer ? killer->uid : -1,
+        .weapon_index = weapon_index,
+        .class_stat = killer && killer != player ? killer->class_stat : 0,
+        .pc_stat_index = (int8_t) (killer && killer != player && killer->pc_stat_index >= 0 ? killer->pc_stat_index : -1),
+        .thrown = (uint8_t) (kill_info && kill_info->thrown),
+        .fists = (uint8_t) (kill_info && kill_info->fists),
+        .time_alive_ms = (int32_t) fmaxf(0.0f, (game->now - player->life_start) * 1000.0f),
+        .shots = player->life_shots,
+        .kills = player->life_kills,
+        .score = player->life_score,
+    };
+    if (death.pc_stat_index >= 0) snprintf(death.pc_stat_value, sizeof(death.pc_stat_value), "%s", killer->pc_stat_value);
+    player_card_accuracy(player->life_shots, player->life_hits, death.accuracy, sizeof(death.accuracy));
+    game_send(game, player->uid, NET_PACKET_DEATH_INFO, &death, sizeof(death));
 
     const NetKillPacket packet = {
         .victim_uid = player->uid,
@@ -1829,20 +2649,43 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     game_send(game, NET_TARGET_ALL, NET_PACKET_KILL, &packet, sizeof(packet));
     game->leaders_dirty = 1;
 
-    mode_on_kill(game, player, killer, weapon_index); // lives, mode.onKill (flags, Gun Game, tags, ...)
+    mode_on_kill(game, player, killer, kill_info && kill_info->weapon_id < 0 ? -1 : weapon_index); // lives, mode.onKill; -1: a weaponless (streak) kill (WP-D: gun.js info.stk)
+    // v7.1.4 Siphon: the killer heals attributes.siphon
+    if (killer && killer != player && killer->active && killer->attributes.siphon > 0.0f) player_change_health(killer, NULL, -killer->attributes.siphon, 0);
     if (streak_message && killer) { // IO.broadcast("kst", Q.sid, X): killStreakMessage on every client
         const NetKillStreakPacket kst = {.uid = killer->uid, .streak = streak_message};
         game_send(game, NET_TARGET_ALL, NET_PACKET_KILL_STREAK, &kst, sizeof(kst));
     }
+    // WP-C: dropWeapon(victim, true), then playerTrigger("onPlayerDie", victim) / ("onPlayerKill", killer)
+    game_player_drop_all(game, player);
+    trigger_player_event(game, TRIGGER_EVENT_ON_PLAYER_DIE, player);
+    if (killer && killer != player) trigger_player_event(game, TRIGGER_EVENT_ON_PLAYER_KILL, killer);
+    ks_game_on_player_death(game, player, killer); // KrunkScript onPlayerDeath(id, killerID) (PLS:4889-4891)
 }
 
 void player_melee(Player *player) {
+    // v7.1.4 melee: `!player.disableMelee && config.canMelee` (KrunkScript; 1 without a script)
+    if (!ks_player_allows(player, KS_PLAYER_CAN_MELEE)) return;
     // 95.js: weapon.canThrow && jKFi4 == 0 && canThrow (fully aimed); the readable jail src/data/players.js has aimVal <= 0.1.
     const int is_throw = player->can_throw && player->weapon->can_throw && player->aim_val == 1.0f;
+    const ClassConfig *class_config = player->game->classes && player->class_index >= 0 && (size_t) player->class_index < player->game->class_count
+        ? &player->game->classes[player->class_index] : NULL;
 
-    player->reloads[player->loadout_index] = player->weapon->rate * (player->game->config.fire_rate > 0.0f ? player->game->config.fire_rate : 1.0f); // (fiRat || 1)
+    // rate * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * (kranked bonuses.firerate) * class melRate
+    player->reloads[player->loadout_index] = player->weapon->rate * (player->game->config.fire_rate > 0.0f ? player->game->config.fire_rate : 1.0f) *
+                                             player_attr_fire_rate(player) * mode_fire_rate_mlt(player->game, player) *
+                                             (class_config && class_config->melee_rate > 0.0f ? class_config->melee_rate : 1.0f);
     player->did_shoot = 1;
     player->did_act = 1;
+
+    // v7.1.4 knife-throw charge: d = clamp(chargeTime / throwCharge, 0.1, 1) (chrgWeps), then reset
+    float throw_d = 1.0f;
+    if (is_throw && !player->game->config.no_charge_weapons) {
+        const float full = player->throw_charge > 0.0f ? player->throw_charge : COMBAT_THROW_CHARGE;
+        throw_d = CLAMP(player->charge_time / full, 0.1f, 1.0f);
+    }
+    player->charge_time = 0.0f;
+    player->full_charge = 0;
 
     // TODO: gamepad rumble?
     // isYou: weapon.anim(player, TWEEN, canThrow ? (throw ? 3 : 1) : 2), cancelInspect (swsh sounds: sound_events.c)
@@ -1856,7 +2699,10 @@ void player_melee(Player *player) {
         player->can_throw = !!player->unlimited_ammo;
         player->shot_count++;
         const vec3 origin = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
-        game_spawn_projectile(player->game, player, WEAPON_ID_KNIFE, projectile_config_for(player->weapon, 1), origin, player->direction.y, player->direction.x, 1);
+        // stored[0] with {d, v: max(0.3, d)}: ceil(180 * d) damage, 0.38 * v speed
+        const ProjectileShot shot = {.speed_mlt = fmaxf(0.3f, throw_d), .damage_d = throw_d, .effect = -1};
+        game_spawn_projectile_ex(player->game, player, WEAPON_ID_KNIFE, projectile_config_for(player->weapon, 1), origin, player->direction.y,
+                                 player->direction.x, 1, &shot);
         return;
     }
 
@@ -1871,14 +2717,15 @@ void player_melee(Player *player) {
     combat_trace(player, origin, dir, 1, &hits);
     hit_list_sort(&hits);
 
-    // Every target in range soaks the full swing unless the weapon pierces.
-    float damage = player->can_throw ? player->weapon->damage : COMBAT_FIST_DAMAGE;
+    // Every target in range soaks the full swing unless the weapon pierces (x attributes.dmg, v7.1.4).
+    float damage = (player->can_throw ? player->weapon->damage : COMBAT_FIST_DAMAGE) * player_attr_damage(player);
 
     for (size_t i = 0; i < hits.count && damage > 0.0f; i++) {
         Player *victim = hits.items[i].player;
         if (hits.items[i].ai && !mode_waiting(game)) game_ai_damage(game, hits.items[i].ai, player, player->smite ? 10000.0f : damage, 0); // G.ai: !waitTimers
         // G.obj: destructible health and onMelee / onDamage / onPunch triggers
         if (hits.items[i].object) game_object_hit(game, (Object *) hits.items[i].object, player, player->smite ? 10000.0f : damage, 0, GAME_HIT_MELEE);
+        if (hits.items[i].object) zombies_melee_object(game, player, hits.items[i].object); // WP-H: share a ready box
 
         if (victim && player_change_health(victim, player, mode_melee_damage(game, player, victim, damage), 0)) { // onMelee (Stalker)
             PlayerKillInfo info = {.weapon_id = weapon_index, .fists = !player->can_throw, .distance = hits.items[i].t};
@@ -1926,21 +2773,62 @@ static void combat_send_shot(Player *player, const int ray, const float pitch, c
 
 // One ray of player_shoot(): physPow push (i < 0) or bullet damage with falloff,
 // headshot/leg multipliers and wallbang through penetrable objects.
-static void combat_fire_ray(Player *player, const int ray, const float pitch, const float yaw, const float shot_height) {
+static void combat_fire_ray(Player *player, const int ray, const float pitch, const float yaw, const float shot_height, const float charge) {
     Game *game = player->game;
     const Weapon *weapon = player->weapon;
     const int authority = game_is_authority(game);
     const float range = ray < 0 ? weapon->physical_range : weapon->range;
     if (range <= 0.0f || (!authority && ray >= 0)) return;
+    if (authority && ray >= 0 && player->active) player->life_shots++; // WP-E: totShotsL (the death screen's "Shots Fired")
+    if (authority && ray >= 0) game_inc_stat(game, player, "s");      // WP-E part 2c: incStat("s")
 
     const vec3 origin = {player->position.x, shot_height, player->position.z};
     const vec3 dir = combat_shot_vector(range, pitch, yaw);
     HitList hits = {0};
 
+    // v7.1.4 knockback: config impulseMlt x mode impulseMlt; noImpulseDist drops the distance term
+    const GameModeConfig *mode_config = game->mode ? &game->mode->config : NULL;
+    const float impulse_mlt = game->config.impulse_mlt * (mode_config && mode_config->has_impulse_mlt ? mode_config->impulse_mlt : 1.0f);
+    const int no_impulse_dist = mode_config && mode_config->no_impulse_dist;
+
+    // nonObjImpulse modes push the physPow ray a fixed 0.04 (x1 with noImpulseDist), hit or not
+    if (ray < 0 && mode_config && mode_config->non_obj_impulse) {
+        const float impulse = (no_impulse_dist ? 1.0f : 0.04f) * impulse_mlt;
+        const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
+                           impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};
+        player->velocity.x -= push.x;
+        player->velocity.z -= push.z;
+        player->velocity.y -= push.y;
+        player->on_ground = 0;
+        if (!authority) {
+            player->shot_vel_obj = push;
+            player->has_shot_vel_obj = 1;
+        }
+    }
+
     combat_trace(player, origin, dir, authority && ray >= 0, &hits);
     hit_list_sort(&hits);
+    // map-logic WP-B: shoot raycasts the terrain too (players.js:2982-2990; pushed first, so it wins
+    // ties): nothing behind it is reached and the tracer ends on it
+    const float terrain_t = world_terrain_fraction(game, origin, dir);
+    if (terrain_t > 0.0f) {
+        size_t kept = 0;
+        for (size_t i = 0; i < hits.count; i++)
+            if (hits.items[i].t < terrain_t) hits.items[kept++] = hits.items[i];
+        hits.count = kept;
+        hit_list_push(&hits, (Hit) {NULL, NULL, terrain_t}); // the terrain: no object, player or AI
+    }
+    if (authority && ray >= 0) { // map-logic WP-H: canShoot spawnables (Skull EE) before the first wall
+        float stop_t = 2.0f;
+        for (size_t i = 0; i < hits.count && stop_t > 1.0f; i++)
+            if (!hits.items[i].player && !hits.items[i].ai) stop_t = hits.items[i].t;
+        zombies_shoot_spawnables(game, player, origin, dir, stop_t);
+    }
 
-    float damage = weapon->damage;
+    // v7.1.4: dmg x charge (vLN1167: chrgTime charge, fullChrgMlt on a full-charge shot) x
+    // attributes.dmg; pierce subtracts from the charged base without the attribute.
+    const float base = weapon->damage * charge;
+    float damage = base * player_attr_damage(player);
     int wallbang = 0;
     const Hit *last = NULL; // Krunker G: the last target the bullet reached (tracer end)
 
@@ -1949,7 +2837,10 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
         last = hit;
 
         if (ray < 0) {
-            const float impulse = (1.0f - hit->t) * weapon->physical_power * game->config.impulse_mlt;
+            // v7.1.4: no object push in nonObjImpulse modes, nor off noPCol / noImpulse ("ip") objects
+            const Object *object = hit->object;
+            if ((mode_config && mode_config->non_obj_impulse) || (object && (object->no_player_col || object->no_impulse)) || hit->t < 0.0f) break;
+            const float impulse = (no_impulse_dist ? 1.0f : 1.0f - hit->t) * weapon->physical_power * impulse_mlt;
             const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
                                impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};
             player->velocity.x -= push.x;
@@ -1964,40 +2855,59 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             break;
         }
 
+        // WP-E: hitShotsL counts a ray whose first hit is a player or an AI (players.js vLN02370 == 0)
+        if (i == 0 && (hit->player || hit->ai) && player->active) player->life_hits++;
+        if (i == 0 && (hit->player || hit->ai)) game_inc_stat(game, player, "h"); // WP-E part 2c: incStat("h")
         const float drop = fminf(1.0f, 1.0f - (1.0f - hit->t) * range / (range - weapon->drop_start));
-        float dealt = damage - weapon->damage_drop * drop;
+        // v7.1.4: falloff clamps at 0 and a 0 bullet stops (v3.1.1 could go negative)
+        float dealt = fmaxf(0.0f, damage - weapon->damage_drop * drop);
+        if (dealt == 0.0f) break;
 
         if (hit->player) {
             Player *victim = hit->player;
             const float hit_y = shot_height + range * hit->t * sinf(pitch);
-            const int head = victim->position.y + victim->height - hit_y < COMBAT_HEAD_SCALE;
-            const int leg = victim->position.y + COMBAT_LEG_HEIGHT > hit_y;
+            // v7.1.4 zones: head within headScale * headMlt of adjustedHeight, legs below legHeight
+            // minus the crouch drop, x weapon hsMlt (unless noHeadShot) / lsMlt (not on heads).
+            // KN bug fixed: noHeadShot was ignored (Auto Pistol, 5.2). v7 bug fixed: v7 measures the
+            // zones from the target's live position, not the rewound box the ray hit.
+            const int head = player_hit_is_head(victim, hit->state.position.y, hit->state.adjusted_height, hit_y);
+            const int leg = player_hit_is_leg(victim, hit->state.position.y, hit_y);
+            dealt = player_hit_damage(game, weapon, dealt, head, leg);
 
-            if (head) dealt *= weapon->headshot_mlt ? weapon->headshot_mlt : 1.5f;
-            if (leg) dealt *= 0.5f;
-            if (!head && game->config.headshots_only) dealt = 0.0f;
+            // effectOnHit: floor(charge * 10) stacks (no stock hitscan weapon has one)
+            const int effect_count = (int) floorf(charge * 10.0f);
+            if (weapon->effect_on_hit > 0 && effect_count > 0) {
+                player_give_effect(victim, weapon->effect_on_hit - 1, effect_count);
+                if (weapon->effect_on_hit - 1 == EFFECT_ZAPPED) victim->zapped_by = player->uid;
+            }
 
             if (player_change_health(victim, player, dealt, head)) {
                 PlayerKillInfo info = {
                     .weapon_id = combat_weapon_index(player),
                     .headshot = (unsigned char) head,
                     .wallbang = (unsigned char) wallbang,
+                    .legshot = (unsigned char) (leg && !head), // WP-E part 2c: the "ls" stat
                     .distance = hit->t,
                 };
                 player_kill(victim, player, &info, 0);
             }
 
-            damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_FLESH * weapon->pierce : damage;
+            damage -= weapon->pierce ? base * COMBAT_DENSITY_FLESH * weapon->pierce : damage;
         } else if (hit->ai) {
             // G.ai: changeHealth(-dmg, player), killScore, "4"; the bullet goes on like a wall it pierces
-            game_ai_damage(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0);
-            damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
+            // v7 players.js: the crit band (crd / crh) and the weapon's effectOnHit (floor(charge * 10) stacks)
+            const float hit_y = shot_height + range * hit->t * sinf(pitch);
+            const int ai_effect_count = (int) floorf(charge * 10.0f);
+            game_ai_damage_ex(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0, hit_y,
+                              weapon->effect_on_hit > 0 && ai_effect_count > 0 ? weapon->effect_on_hit - 1 : -1, ai_effect_count);
+            damage -= weapon->pierce ? base * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         } else {
+            if (!hit->object) break; // WP-B: the terrain stops the bullet
             // G.obj: destructible health ("4", "do", onDestroy) and onShoot / onDamage triggers
             game_object_hit(game, (Object *) hit->object, player, dealt, 0, GAME_HIT_SHOT);
             if (!hit->object->penetrable) break;
             wallbang = 1;
-            damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
+            damage -= weapon->pierce ? base * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         }
 
         if (damage <= 0.0f) break;
@@ -2008,74 +2918,158 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     free(hits.items);
 }
 
+// v7.1.4 removeOnEmpty: the emptied streak equipment leaves the loadout (the Juggernaut's Minigun
+// ends the Juggernaut). v7 bug fixed: v7 only does this in the shooter's own client (renderYou,
+// with serverIO only in the sandbox), so on a dedicated server the empty weapon stayed.
+static void combat_remove_if_empty(Player *player, const int weapon_id) {
+    if (!game_is_authority(player->game) || !player->weapon->remove_on_empty || player->ammo[player->loadout_index] > 0) return;
+    if (weapon_id == WEAPON_ID_MINIGUN && player->is_juggernaut) player_set_juggernaut(player, 0);
+    else player_remove_weapon(player, weapon_id);
+}
+
+// v7.1.4 players.tryDeployable (authority): the first map object along the look ray within
+// deployRang gets the weapon's spawnable (medals.js index `deployable`, the Slime Pad) at the hit
+// point; the emptied Slimer leaves the loadout. The pad's face orientation (xD / zD) is not
+// carried by spawnable_drop yet.
+static void combat_try_deploy(Player *player, const int weapon_id) {
+    Game *game = player->game;
+    if (!game_is_authority(game)) return;
+    const Weapon *weapon = player->weapon;
+    const float eye = player->position.y + player->height - game_constants.camera_height;
+    const vec3 origin = {player->position.x, eye, player->position.z};
+    const vec3 dir = combat_shot_vector(weapon->deploy_range, player->direction.x, player->direction.y);
+    HitList hits = {0};
+    combat_trace(player, origin, dir, 0, &hits);
+    hit_list_sort(&hits);
+    if (hits.count && weapon->deployable > 0) {
+        const float t = hits.items[0].t;
+        const vec3 at = {roundf((origin.x + dir.x * t) * 10.0f) / 10.0f, roundf((origin.y + dir.y * t) * 10.0f) / 10.0f,
+                         roundf((origin.z + dir.z * t) * 10.0f) / 10.0f};
+        spawnable_drop(game, weapon->deployable - 1, player, 0, at);
+    }
+    free(hits.items);
+    if (player->ammo[player->loadout_index] <= 0) player_remove_weapon(player, weapon_id);
+}
+
 void player_shoot(Player *player) {
+    // v7.1.4 shoot: `!player.disableShooting && config.canShoot` (KrunkScript; 1 without a script)
+    if (!ks_player_allows(player, KS_PLAYER_CAN_SHOOT)) return;
     // TODO: increase shots stat
+    Game *game = player->game;
+    const Weapon *weapon = player->weapon;
+    const int weapon_id = combat_weapon_index(player);
+    const int full = player->full_charge; // procInputs: shoot(..., fullCharge)
+    const int charging = !game->config.no_charge_weapons;
 
-    if (!player->unlimited_ammo) player->ammo[player->loadout_index]--;
+    // fullChrgSht weapons (Charge Rifle) spend a round only on the full-charge shot
+    if (!player->unlimited_ammo && (!weapon->full_charge_shot || full) && player->ammo[player->loadout_index] > 0) player->ammo[player->loadout_index]--;
 
-    player->did_shoot = 1;
     player->did_act = 1;
 
-    if (player->burst_count) player->burst_count--;
-    else player->burst_count = player->weapon->burst ? player->weapon->burst_count - 1 : 0;
+    // v7.1.4 charge: vLN1167 = min(1, chargeTime / chrgTime) unless bypassChrg (which keeps
+    // charging between normal shots); rateChrg shortens the interval as the charge builds.
+    float charge = 1.0f;
+    if (!weapon->bypass_charge) {
+        if (weapon->charge_time > 0.0f && charging) charge = MIN(1.0f, player->charge_time / weapon->charge_time);
+        player->did_shoot = 1;
+        player->charge_time = 0.0f;
+        player->full_charge = 0;
+    }
+    float rate_charge = 1.0f;
+    if (weapon->rate_charge && weapon->charge_time > 0.0f) {
+        rate_charge = 1.0f - MIN(1.0f, player->charge_time / weapon->charge_time);
+        rate_charge = MAX(0.7f, rate_charge * 1.5f);
+    }
+    if (full) { // the full-charge shot: fullChrgMlt damage (Charge Rifle 50 x 15 = 750), no spread
+        player->full_charge = 0;
+        player->charge_time = 0.0f;
+        charge = weapon->full_charge_mlt > 0.0f ? weapon->full_charge_mlt : 1.0f;
+    } else {
+        player->did_shoot = 1;
+    }
 
-    player->reloads[player->loadout_index] = (player->burst_count && player->weapon->burst ? player->weapon->burst_rate : player->weapon->rate) * (player->game->config.fire_rate > 0.0f ? player->game->config.fire_rate : 1.0f); // (fiRat || 1)
+    if (player->burst_count) player->burst_count--;
+    else player->burst_count = weapon->burst ? weapon->burst_count - 1 : 0;
+
+    // (burst ? burstR : rate) * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * (kranked
+    // bonuses.firerate) * rateChrg
+    player->reloads[player->loadout_index] = (player->burst_count && weapon->burst ? weapon->burst_rate : weapon->rate) *
+                                             (game->config.fire_rate > 0.0f ? game->config.fire_rate : 1.0f) *
+                                             player_attr_fire_rate(player) * mode_fire_rate_mlt(game, player) * rate_charge;
 
     // TODO: update player ammo (HUD)
     // TODO: play sound
 
-    player->recoil_force += player->weapon->recoil;
+    player->recoil_force += weapon->recoil * (full ? 3.5f : 1.0f);
 
     // TODO: gamepad rumble?
 
 #ifdef KRUNKNATIVE_CLIENT
-    const float rand_recoil = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * (float) M_PI;
+    if (!game->server) { // the view's lean: not on a server's player (the in-process sandbox server)
+        const float rand_recoil = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * (float) M_PI;
 
-    player->recoil.x += player->weapon->recoil_r * sinf(rand_recoil);
-    player->recoil.z += player->weapon->recoil_r * 0.3f * cosf(rand_recoil);
+        player->recoil.x += weapon->recoil_r * sinf(rand_recoil);
+        player->recoil.z += weapon->recoil_r * 0.3f * cosf(rand_recoil);
 
-    if (player->render_you) {
-        player_feel_recoil(player);
-        player_cancel_inspect(player);
+        if (player->render_you) {
+            player_feel_recoil(player);
+            player_cancel_inspect(player);
+        }
     }
 #endif
     // TODO: muzzle flash & casings
 
-    const int is_projectile = player->weapon->projectile && (!player->weapon->projectile_disable || player->game->config.bullet_drop);
+    // deployRang (Slimer): tryDeployable places the weapon's spawnable (Slime Pad) instead of firing
+    if (weapon->deploy_range > 0.0f) {
+        combat_try_deploy(player, weapon_id);
+        return;
+    }
+
+    // bullet drop (bDrop) turns the pj_disable guns into projectiles with their own pj_* flight
+    const int is_projectile = weapon->projectile && weapon->projectile_config.speed > 0.0f && (!weapon->projectile_disable || game->config.bullet_drop);
     const float shot_height = player->position.y + player->height - game_constants.camera_height;
 
     vec2 shot_angles = {};
 
     if (is_projectile) {
-        // config.projSpreads[shotCntP % 12] scales the spread of each projectile.
+        // config.projSpreads[shotCntP % 12] scales the spread of each projectile (noProjSpread: none).
         static const float proj_spreads[] = {0.1f, -0.8f, 0.3f, 1.0f, 0.1f, -0.4f, -0.1f, 0.3f, 0.5f, -0.45f, 0.2f, -0.2f};
         player->shot_count++;
-        const float projectile_spread = proj_spreads[player->shot_count % (sizeof(proj_spreads) / sizeof(proj_spreads[0]))];
-        const float spread = (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment * projectile_spread;
+        const float projectile_spread = weapon->no_proj_spread ? 0.0f : proj_spreads[player->shot_count % (sizeof(proj_spreads) / sizeof(proj_spreads[0]))];
+        const float spread = (player->spread + weapon->inaccuracy) * game_constants.spread_adjustment * projectile_spread;
 
         shot_angles.x = player->direction.x + player->recoil_anim_y * game_constants.recoil_mlt + spread;
         shot_angles.y = player->direction.y + spread;
 
+        // {dmgMlt: 1 - (chrgMlt || 0.9) * (1 - charge), effectInd / effectC: floor(charge * 10)}
+        const float charge_mlt = weapon->charge_mlt > 0.0f ? weapon->charge_mlt : 0.9f;
+        const ProjectileShot shot = {
+            .damage_mlt = 1.0f - charge_mlt * (1.0f - charge),
+            .effect = weapon->effect_on_hit > 0 ? weapon->effect_on_hit - 1 : -1,
+            .effect_count = (int) floorf(charge * 10.0f),
+        };
         const vec3 origin = {player->position.x, shot_height, player->position.z};
-        game_spawn_projectile(player->game, player, combat_weapon_index(player), projectile_config_for(player->weapon, 0),
-                              origin, shot_angles.y, shot_angles.x, 0);
+        game_spawn_projectile_ex(game, player, weapon_id, &weapon->projectile_config, origin, shot_angles.y, shot_angles.x, 0, &shot);
     }
 
-    if (!is_projectile || player->weapon->physical_power) {
+    if (!is_projectile || weapon->physical_power) {
         // A projectile weapon only casts its physPow ray (weapons.js shots: 0 for the RPG).
-        const int rays = is_projectile ? 0 : player->weapon->shots ? (int) player->weapon->shots : 1;
-        for (int i = player->weapon->physical_power ? -1 : 0; i < rays; i++) {
-            if (player->weapon->custom_spread && i >= 0) {
-                const unsigned int offset = player->ammo[player->loadout_index] * player->weapon->shots;
+        const int rays = is_projectile ? 0 : weapon->shots ? (int) weapon->shots : 1;
+        for (int i = weapon->physical_power ? -1 : 0; i < rays; i++) {
+            if (weapon->custom_spread && i >= 0) {
+                // v7.1.4 cSpread[ammo % 2]: two patterns of `shots` pairs (one-pattern tables repeat)
+                const unsigned int shots = weapon->shots ? weapon->shots : 1;
+                const unsigned int offset = (player->ammo[player->loadout_index] % 2) * shots + (unsigned int) i;
 
-                const vec2 spread = player->weapon->custom_spread[offset + i];
+                const vec2 spread = weapon->custom_spread[offset % weapon->custom_spread_count];
                 const float spread_mlt = (float) pcg32_random() / (float) UINT32_MAX * 0.02f + 0.3f;
 
                 // swizzle spread (x is pitch, y is yaw)
                 shot_angles.x = player->direction.x + spread.y * spread_mlt;
                 shot_angles.y = player->direction.y + spread.x * spread_mlt;
             } else {
-                const float spread_range = i >= 0 ? (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment : 0.0f;
+                // the full-charge shot has no spread
+                const float spread_range = i >= 0 && !full ? (player->spread + weapon->inaccuracy) * game_constants.spread_adjustment : 0.0f;
                 const vec2 spread = {
                     ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * spread_range,
                     ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * spread_range,
@@ -2087,43 +3081,112 @@ void player_shoot(Player *player) {
 
             shot_angles.x += player->recoil_anim_y * game_constants.recoil_mlt;
 
-            combat_fire_ray(player, i, shot_angles.x, shot_angles.y, shot_height);
+            combat_fire_ray(player, i, shot_angles.x, shot_angles.y, shot_height, charge);
         }
+    }
+
+    combat_remove_if_empty(player, weapon_id);
+}
+
+// v7.1.4 setClass / Player.reset combat state: throwCharge from the class, no effects, perks,
+// charge or Juggernaut, realKillStreak 0; the earned streaks are kept (player.streaks).
+static void combat_spawn(Player *player, const ClassConfig *class_config) {
+    effects_reset(player);
+    player->upgraded_slots = 0;
+    player->weapon_streak = 0;
+    player->streak_weapon = -1;
+    player->is_juggernaut = 0;
+    player->real_kill_streak = 0;
+    player->throw_charge = class_config->throw_charge > 0.0f ? class_config->throw_charge : COMBAT_THROW_CHARGE;
+    player->start_health = player->max_health;
+    if (player->head_mlt <= 0.0f) player->head_mlt = 1.0f;
+}
+
+// v7.1.4 player.js procInputs charge (game setting chrgWeps): shootChrg weapons charge while
+// the trigger is held, the others (Crossbow, Zapper, the knife throw) while aiming in. Past
+// chrgTime the charge creeps on at delta * 0.1 / (160 / (chrgTime * (overCharge - 1))) ms per
+// ms (chrgTime * 0.125 s per s); ovrChrg weapons reset at chrgTime * 1.2 and stay overCharged
+// until un-aimed, the others clamp at chrgTime as fullCharge. chrgDec weapons decay instead of
+// resetting when released. mode.forceCharge has no KN mode yet.
+static void combat_update_charge(Player *player, const Input *input, const float delta) {
+    const Weapon *weapon = player->weapon;
+    if (!weapon || player->game->config.no_charge_weapons) return;
+
+    const int charging = weapon->shoot_charge ? input->shoot : player->aim_val > 0.0f; // Krunker aimVal < 1
+    const float full = weapon->charge_time > 0.0f ? weapon->charge_time : player->throw_charge > 0.0f ? player->throw_charge : COMBAT_THROW_CHARGE;
+    const int chargeable = (weapon->charge_time > 0.0f && player->ammo && player->ammo[player->loadout_index] > 0) ||
+                           (player->can_throw && weapon->can_throw);
+
+    if (charging && !player->over_charged && player->swap_timer <= 0.0f && chargeable) {
+        player->charge_time += player->charge_time >= full ? delta * 0.1f / (0.16f / (full * (COMBAT_OVER_CHARGE - 1.0f))) : delta;
+        if (weapon->over_charge) {
+            if (player->charge_time >= full * COMBAT_OVER_CHARGE) {
+                player->charge_time = 0.0f;
+                player->full_charge = 0;
+                player->over_charged = 1;
+            }
+        } else if (player->charge_time >= full) {
+            player->full_charge = 1;
+            player->charge_time = full;
+        }
+    } else if (weapon->charge_decay > 0.0f && player->charge_time > 0.0f) {
+        player->charge_time -= weapon->charge_decay * delta;
+        player->full_charge = 0;
+        if (player->charge_time <= 0.0f) {
+            player->charge_time = 0.0f;
+            if (player->aim_val == 0.0f) player->over_charged = 0;
+        }
+    } else {
+        player->full_charge = 0;
+        player->charge_time = 0.0f;
+        if (player->aim_val == 0.0f) player->over_charged = 0;
     }
 }
 
 // index.js Math.lerpAngle(a, b, t): b + (a - b) * t the short way round, wrapped into [0, 2PI]
 // by % (so a negative result stays negative, as in JS).
+// Math.lerpAngle(from = a, to = b, t) adds 2pi to the smaller angle when they are more than pi
+// apart, which is the shortest arc only while |a - b| < 3pi. Here the difference is always
+// taken modulo 2pi, so endpoints from different wraps (or a stale, unwrapped yaw) still turn
+// the short way instead of spinning; for the v3.1.1 range (-2pi, 2pi) the result is the same.
 float player_lerp_angle(float a, float b, const float t) {
     const float pi2 = (float) M_PI * 2.0f;
-    if (fabsf(b - a) > (float) M_PI) {
-        if (a > b) b += pi2;
-        else a += pi2;
-    }
-    const float v = b + (a - b) * t;
+    if (!isfinite(a)) a = isfinite(b) ? b : 0.0f;
+    if (!isfinite(b)) b = a;
+    b = player_wrap_yaw(b);
+    const float d = normalize_angle(player_wrap_yaw(a) - b); // shortest signed arc b -> a, [-pi, pi)
+    const float v = b + d * t;
     return v >= 0.0f && v <= pi2 ? v : fmodf(v, pi2);
+}
+
+// procInputs every queued network frame (the tick, and gameserver.ts io_int before its action).
+void player_drain_inputs(Player *player) {
+    if (!player->active || !player->input_queue_size) return;
+
+    // Detached first: an input can kill the player (kill objects, authority), and
+    // player_kill() drops the queue; the rest of a dead player's inputs are discarded.
+    Input *queue = player->input_queue;
+    const size_t count = player->input_queue_size;
+    player->input_queue = NULL;
+    player->input_queue_size = 0;
+
+    for (size_t i = 0; i < count && player->active; i++) {
+        player->input_arrival = queue[i].arrival; // anchored lag compensation: this input's shots
+        player->input_running = queue[i];
+        player_proc_input(player, &queue[i], 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
+        player->input_seq = queue[i].seq;
+    }
+    player->input_arrival = 0.0;
+    player->input_running.received = 0.0;
+
+    free(queue);
 }
 
 void player_update(Player *player, const float delta) {
     if (!player->active) return;
 
     player_feel_update(player, delta);
-
-    if (player->input_queue_size) {
-        // Detached first: an input can kill the player (kill objects, authority), and
-        // player_kill() drops the queue; the rest of a dead player's inputs are discarded.
-        Input *queue = player->input_queue;
-        const size_t count = player->input_queue_size;
-        player->input_queue = NULL;
-        player->input_queue_size = 0;
-
-        for (size_t i = 0; i < count && player->active; i++) {
-            player_proc_input(player, &queue[i], 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
-            player->input_seq = queue[i].seq;
-        }
-
-        free(queue);
-    }
+    player_drain_inputs(player);
 
     player->idle_anim += game_constants.idle_anim_speed * delta;
 

@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/windows/win-classes.png",
+  "ref": "doc/ref/krunker-v7.1.4/windows/win-classes.png",
   "size": [
     1280,
     720
@@ -7,16 +7,23 @@
   "background": "#d6c6c6",
   "state": {
     "menu": true,
-    "window": 6,
-    "settingsTab": 0,
+    "window": 3,
     "connected": true,
     "ready": true,
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
     "region": "...",
-    "anim_time": 0.3
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "windows.2.switchTab",
+        0
+      ]
+    ]
   },
   "frames": 3,
-  "note": "Select Class: 3x3 class cards, scrollable; anim_time 0.300 = the reference's merch (scaleBob) phase"
+  "note": "Change Loadout, Class tab (v3's Select Class)"
 }

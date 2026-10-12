@@ -1,0 +1,347 @@
+[
+ {
+  "name": "Tag",
+  "model": "tag_0",
+  "scale": 6,
+  "padMlt": 0.8,
+  "yOff": 6,
+  "timer": 8000,
+  "emissive$fn": true,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Gift",
+  "model": "gift_0",
+  "scale": 3,
+  "yOff": 6,
+  "timer": 20000,
+  "texRange": 3,
+  "rarities": [
+   {
+    "chance": 77,
+    "items": [
+     4379,
+     4389,
+     4409
+    ]
+   },
+   {
+    "chance": 20,
+    "items": [
+     4407,
+     4391,
+     4387
+    ]
+   },
+   {
+    "chance": 2.5,
+    "items": [
+     4399,
+     4402,
+     4403,
+     4408,
+     4397,
+     4394,
+     4390
+    ]
+   },
+   {
+    "chance": 0.5,
+    "items": [
+     4412,
+     4395,
+     4388
+    ]
+   }
+  ],
+  "stopInteract$fn": true,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Golden Egg",
+  "model": "egg_0",
+  "texSrc": "egg_0_4",
+  "scale": 3,
+  "yOff": 1,
+  "noAnim": true,
+  "timer": 40000,
+  "onSpawn$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "KR Tag",
+  "model": "krunkie_0",
+  "scale": 3.5,
+  "padMlt": 1.25,
+  "yOff": 6,
+  "timer": 12000,
+  "emissive$fn": true,
+  "getScale$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Diamond Egg",
+  "model": "egg_0",
+  "texSrc": "egg_0_5",
+  "scale": 2,
+  "yOff": 6,
+  "timer": 12000,
+  "getScale$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Slime Pad",
+  "model": "pad_1",
+  "scale": 4,
+  "yOff": 0.2,
+  "noAnim": true,
+  "timer": 10000,
+  "alwaysActive": true,
+  "getRotation$fn": true,
+  "onCollision$fn": true
+ },
+ {
+  "name": "Ammo Pack",
+  "model": "ammobox_0",
+  "scale": 1.5,
+  "yOff": 0.25,
+  "timer": 20000,
+  "noAnim": true,
+  "outline": 0,
+  "icon": 54,
+  "getRotation$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Weapon Box",
+  "model": "weaponbox_0",
+  "scale": 3,
+  "padMlt": 1.5,
+  "yOff": 0.9,
+  "timer": 20000,
+  "noAnim": true,
+  "emisTex": true,
+  "icon": 55,
+  "emissive$fn": true,
+  "getRotation$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Melee Pickup",
+  "model": "melee/melee_0",
+  "scale": 3,
+  "yOff": 6,
+  "timer": 20000,
+  "outline": 0,
+  "stopInteract$fn": true,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Ammo Cache",
+  "model": "ammobox_0",
+  "scale": 4.5,
+  "yOff": 6,
+  "timer": 20000,
+  "outline": 1,
+  "powerup": true,
+  "outlineScale": 1.1,
+  "onSpawn$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Nuke",
+  "model": "streak_0",
+  "scale": 4.5,
+  "yOff": 6,
+  "timer": 20000,
+  "outline": 1,
+  "rotAxis": "z",
+  "powerup": true,
+  "outlineScale": 1.1,
+  "onSpawn$fn": true,
+  "getRotation$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Minigun",
+  "model": "weapons/weapon_26",
+  "scale": 4,
+  "padMlt": 2500,
+  "yOff": 12,
+  "timer": 20000,
+  "outline": 1,
+  "powerup": true,
+  "onSpawn$fn": true,
+  "getScale$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Insta-kill",
+  "model": "skull_0",
+  "scale": 3,
+  "yOff": 8,
+  "timer": 20000,
+  "outline": 1,
+  "powerup": true,
+  "outlineScale": 1.1,
+  "onSpawn$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Discount",
+  "model": "sale_0",
+  "scale": 2,
+  "padMlt": 1.5,
+  "yOff": 8,
+  "timer": 20000,
+  "outline": 1,
+  "powerup": true,
+  "outlineScale": 1.1,
+  "onSpawn$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Double Points",
+  "model": "doublepoints_0",
+  "scale": 4,
+  "yOff": 8,
+  "timer": 20000,
+  "outline": 1,
+  "powerup": true,
+  "outlineScale": 1.1,
+  "onSpawn$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Grenade Launcher",
+  "model": "weapons/weapon_27",
+  "scale": 2,
+  "padMlt": 2,
+  "yOff": 8,
+  "timer": 20000,
+  "outline": 1,
+  "powerup": true,
+  "onSpawn$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Joe Tag",
+  "model": "tag_0",
+  "scale": 6,
+  "padMlt": 0.8,
+  "yOff": 6,
+  "timer": 20000,
+  "outline": 1,
+  "powerup": true,
+  "onSpawn$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Frog",
+  "model": "collectibles/collect_19",
+  "scale": 2,
+  "padMlt": 1.25,
+  "timer": 30000,
+  "noAnim": true,
+  "outline": 1,
+  "onSpawn$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Krunkanium",
+  "model": "collectibles/collect_11",
+  "scale": 2,
+  "yOff": 6,
+  "timer": 30000,
+  "onPickup$fn": true
+ },
+ {
+  "name": "Perk Bottle",
+  "model": "bottle_1",
+  "texSrc": "bottle_1_0",
+  "scale": 2,
+  "padMlt": 2,
+  "yOff": 8,
+  "timer": 30000,
+  "outline": 1,
+  "powerup": true,
+  "onSpawn$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Zombie Portal",
+  "model": "zombie_portal_0",
+  "fileExt": "gltf",
+  "scale": 2,
+  "padMlt": 8,
+  "yOff": -1,
+  "timer": 15000,
+  "aiOnly": true,
+  "onSpawn$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Skull EE",
+  "model": "skull_0",
+  "scale": 3,
+  "noAnim": true,
+  "timer": 120000,
+  "powerup": true,
+  "canShoot": true,
+  "onShoot$fn": true
+ },
+ {
+  "name": "Free Upgrade",
+  "model": "krummachine_0",
+  "scale": 2,
+  "yOff": 8,
+  "timer": 30000,
+  "outline": 1,
+  "onSpawn$fn": true,
+  "stopInteract$fn": true,
+  "onPickup$fn": true,
+  "onDestroy$fn": true
+ },
+ {
+  "name": "Mega Slime Pad",
+  "model": "pad_1",
+  "scale": 20,
+  "yOff": 1,
+  "noAnim": true,
+  "timer": 10000,
+  "alwaysActive": true,
+  "getRotation$fn": true,
+  "onCollision$fn": true
+ },
+ {
+  "name": "Loot Drop",
+  "model": "cardb_0",
+  "scale": 4,
+  "padMlt": 1.5,
+  "yOff": 8,
+  "playerSpecific": true,
+  "outline": 0,
+  "getRotation$fn": true,
+  "onPickup$fn": true
+ }
+]

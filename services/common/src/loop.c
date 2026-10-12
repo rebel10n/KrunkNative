@@ -17,6 +17,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -101,6 +102,38 @@ int kn_set_nonblock(int fd) {
 int kn_set_cloexec(int fd) {
     int fl = fcntl(fd, F_GETFD, 0);
     return (fl < 0 || fcntl(fd, F_SETFD, fl | FD_CLOEXEC) < 0) ? -1 : 0;
+}
+
+#if defined(SOCK_NONBLOCK) && defined(SOCK_CLOEXEC) /* Linux, the BSDs: atomic, with accept4 */
+#define KN_HAVE_SOCK_FLAGS 1
+#endif
+
+/* Without the atomic flags (macOS), the fd is made non-blocking/close-on-exec with fcntl. */
+static int nb_fd_or_close(int fd) {
+    if (fd < 0) return -1;
+    if (kn_set_nonblock(fd) != 0 || kn_set_cloexec(fd) != 0) {
+        int e = errno;
+        close(fd);
+        errno = e;
+        return -1;
+    }
+    return fd;
+}
+
+int kn_socket_nb(int domain, int type, int protocol) {
+#ifdef KN_HAVE_SOCK_FLAGS
+    return socket(domain, type | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
+#else
+    return nb_fd_or_close(socket(domain, type, protocol));
+#endif
+}
+
+int kn_accept_nb(int listen_fd) {
+#ifdef KN_HAVE_SOCK_FLAGS
+    return accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+#else
+    return nb_fd_or_close(accept(listen_fd, NULL, NULL));
+#endif
 }
 
 /* ------------------------------------------------------------------ signals (self-pipe) */

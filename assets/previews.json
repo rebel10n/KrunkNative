@@ -1,0 +1,19 @@
+{
+  "WEAPON": 0,
+  "HAT": 1,
+  "BODY": 2,
+  "MELEE": 3,
+  "SPRAY": 4,
+  "DYE": 5,
+  "WAIST": 6,
+  "FACE": 7,
+  "SHOE": 8,
+  "PET": 9,
+  "COLLECTIBLE": 10,
+  "WRIST": 11,
+  "CHARM": 12,
+  "TICKET": 13,
+  "BACK": 14,
+  "HEAD": 15,
+  "PLAYER_CARD": 16
+}

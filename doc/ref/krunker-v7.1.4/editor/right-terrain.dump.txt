@@ -1,0 +1,22 @@
+P Terrain
+L[] Seed : text(Seed)=
+B Generate Random
+L[] Tree Seed : text(Seed)=
+B Generate Random
+L[subsection] Easing : select#13[linear..easeInOutQuint]=easeInOutQuint
+-
+F Dimensions closed
+-
+L[] Width : sval=3000 range[0,8000,1]=3000
+L[] Length : sval=3000 range[0,8000,1]=3000
+L[] Height : sval=1 range[0,5,0.05]=1
+-
+F Style closed
+-
+Fs Color open
+L[subsection] Snow : color=#e8fdff
+L[subsection] Mountain : color=#707070
+L[subsection] Grass : color=#5e692f
+L[subsection] Dirt : color=#7f6238
+L[subsection] Sand : color=#967f51
+-

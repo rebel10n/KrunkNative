@@ -1,0 +1,6 @@
+# KrunkScript recovered from the v7 compiler's JavaScript output (KrunkNative ks_import_js).
+public action onNetworkMessage(str id, obj data) {
+    if (id == 'customSky') {
+        GAME.SCENE.setSkyDome('', '', '', {texture: (num) data.Id});
+    }
+}

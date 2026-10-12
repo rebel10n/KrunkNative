@@ -28,6 +28,12 @@ static void add_lobby(Registry *r, MmNode *n, const char *lid, int players, int 
     cJSON_Delete(t);
 }
 
+static int outdated_aaaa(const MmLobby *l, void *ud) {
+    (void) ud;
+    const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(l->tuple, 4), "commit"));
+    return c && !strcmp(c, "aaaaaaaaaaaa");
+}
+
 int main(void) {
     Registry *r = registry_new();
     MmPolicy p = {.cross_region = 1, .default_max_players = 8};
@@ -100,16 +106,142 @@ int main(void) {
     b->draining = 0;
 
     /* host target: custom-capable with spare capacity, own brain first */
-    MmNode *h = registry_pick_host_node(r, "us-nj", "brainA", 1, 2000);
+    MmNode *h = registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000);
     CHECK(h == NULL); /* NY2 has a lobby with players and max_lobbies 1; NY is not custom */
     registry_lobby_remove(r, b, "bbbbb");
-    h = registry_pick_host_node(r, "us-nj", "brainA", 1, 2000);
+    h = registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000);
     CHECK(h == b);
     add_lobby(r, b, "bbbbb", 0, 8, 0, "1.0");
-    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 2000) == b); /* idle lobby */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000) == b); /* idle lobby */
     registry_reserve(r, "j2", "NY2:bbbbb", 3000);
-    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 2000) == NULL); /* seat in flight */
-    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 3500) == b);
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000) == NULL); /* seat in flight */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 3500) == b);
+
+    /* online_mode + password protected nodes (hello.onlineMode / hello.password) */
+    {
+        Registry *o = registry_new();
+        MmPolicy po = {.cross_region = 1, .default_max_players = 8};
+        cJSON *h1 = cJSON_Parse("{\"region\":\"us-nj\",\"publicHost\":\"chitown-1\",\"publicPort\":21015,"
+                                "\"custom\":true,\"onlineMode\":1}");
+        cJSON *h2 = cJSON_Parse("{\"region\":\"us-nj\",\"publicHost\":\"chitown-2\",\"publicPort\":21016,\"custom\":true}");
+        cJSON *h3 = cJSON_Parse("{\"region\":\"us-nj\",\"publicHost\":\"chitown-3\",\"publicPort\":21017,"
+                                "\"custom\":true,\"onlineMode\":0,\"password\":true}");
+        MmNode *on = registry_node_hello(o, "CHITOWN1", h1, "brainA", "local", 1000);
+        MmNode *off = registry_node_hello(o, "CHITOWN2", h2, "brainA", "local", 1000); /* old server_bin: no field */
+        MmNode *pw = registry_node_hello(o, "CHITOWN3", h3, "brainA", "local", 1000);
+        cJSON_Delete(h1);
+        cJSON_Delete(h2);
+        cJSON_Delete(h3);
+        CHECK(on && on->online_mode && off && !off->online_mode && pw && pw->password);
+        add_lobby(o, on, "onl", 6, 8, 0, "1.0");  /* the most populated: an authed player's pick */
+        add_lobby(o, off, "off", 2, 8, 0, "1.0");
+        add_lobby(o, pw, "pwd", 7, 8, 0, "1.0");  /* fuller still, but password protected */
+        MmLobby *lon = registry_lobby(o, "CHITOWN1:onl", NULL);
+        CHECK(lon && lon->online_mode && registry_lobby_needs_account(on, lon));
+        CHECK(cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(lon->tuple, 4), "onlineMode"))); /* federated */
+
+        MmPickQuery guest = {.region = "us-nj", .auto_change = 1, .now_ms = 2000};
+        MmPickQuery authed = {.region = "us-nj", .auto_change = 1, .authed = 1, .now_ms = 2000};
+        /* a guest is never routed to an online_mode node, whatever the population */
+        for (int i = 0; i < 4; i++) {
+            CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_OK && pick.node == off);
+            registry_reserve(o, i == 0 ? "g0" : i == 1 ? "g1" : i == 2 ? "g2" : "g3", "CHITOWN2:off", 9000);
+        }
+        CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_OK && pick.node == off); /* 6/8 taken */
+        registry_reserve(o, "g4", "CHITOWN2:off", 9000);
+        registry_reserve(o, "g5", "CHITOWN2:off", 9000);
+        CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_NONE); /* off full: not into onl / pwd */
+        registry_expire(o, 9500);
+        /* an authed player can be: the most populated eligible lobby, never the password one */
+        CHECK(registry_pick(o, &po, &authed, &pick) == MM_PICK_OK && pick.node == on && !strcmp(pick.lobby->game_id, "CHITOWN1:onl"));
+        /* requested online lobby: the authed player gets it, a guest is moved or refused */
+        MmPickQuery gq = {.region = "us-nj", .game_id = "CHITOWN1:onl", .auto_change = 0, .now_ms = 2000};
+        CHECK(registry_pick(o, &po, &gq, &pick) == MM_PICK_ACCOUNT_REQUIRED);
+        gq.auto_change = 1;
+        CHECK(registry_pick(o, &po, &gq, &pick) == MM_PICK_OK && pick.node == off && pick.changed);
+        gq.authed = 1;
+        gq.auto_change = 0;
+        CHECK(registry_pick(o, &po, &gq, &pick) == MM_PICK_OK && pick.node == on && !pick.changed);
+        /* the password lobby only by id */
+        MmPickQuery pq = {.region = "us-nj", .game_id = "CHITOWN3:pwd", .auto_change = 0, .now_ms = 2000};
+        CHECK(registry_pick(o, &po, &pq, &pick) == MM_PICK_OK && pick.node == pw);
+        /* pr in the lobby meta (sv_password set later) also protects */
+        off->password = 0;
+        cJSON *t = cJSON_Parse("[\"off\",\"us-nj\",2,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"pr\":true}]");
+        registry_lobby_upsert(o, off, t);
+        cJSON_Delete(t);
+        CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_NONE);
+        /* a private game (v7 host config "private") too */
+        t = cJSON_Parse("[\"off\",\"us-nj\",2,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"private\":true}]");
+        registry_lobby_upsert(o, off, t);
+        cJSON_Delete(t);
+        CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_NONE);
+        add_lobby(o, off, "off", 2, 8, 0, "1.0");
+        /* remote copy (federation): the flag comes from the tuple meta only */
+        registry_remote_begin(o);
+        MmNode *rem = registry_remote_node(o, "CLARA1");
+        CHECK(rem != NULL);
+        snprintf(rem->region, sizeof(rem->region), "us-nj");
+        cJSON *rt = cJSON_Parse("[\"CLARA1:x\",\"us-nj\",7,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"onlineMode\":true}]");
+        CHECK(registry_lobby_upsert(o, rem, rt) == 0);
+        cJSON_Delete(rt);
+        registry_remote_end(o);
+        CHECK(registry_pick(o, &po, &guest, &pick) == MM_PICK_OK && pick.node == off);
+        CHECK(registry_pick(o, &po, &authed, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "CLARA1:x"));
+        /* hosting: never on a password node; online_mode nodes for signed-in hosts only */
+        registry_lobby_remove(o, on, "onl");
+        registry_lobby_remove(o, off, "off");
+        registry_lobby_remove(o, pw, "pwd");
+        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 0, 2000) == off);
+        registry_node_remove(o, "CHITOWN2");
+        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 0, 2000) == NULL);
+        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 1, 2000) == on);
+        /* an old server_bin reconnecting with the same id drops back to offline */
+        cJSON *h1b = cJSON_Parse("{\"region\":\"us-nj\",\"publicHost\":\"chitown-1\",\"publicPort\":21015}");
+        CHECK(registry_node_hello(o, "CHITOWN1", h1b, "brainA", "local", 3000) == on && !on->online_mode);
+        cJSON_Delete(h1b);
+        registry_free(o);
+    }
+
+    /* ci-release: protocol majors never cross (meta.proto, ?proto=), outdated lobbies lose ties */
+    {
+        Registry *v = registry_new();
+        MmPolicy pv = {.cross_region = 1, .default_max_players = 8};
+        MmNode *n1 = add_node(v, "EDGE1", "CH", 0);
+        MmNode *n2 = add_node(v, "EDGE2", "CH", 0);
+        MmNode *n3 = add_node(v, "EDGE3", "CH", 0);
+        cJSON *t1 = cJSON_Parse("[\"old\",\"CH\",6,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"proto\":\"1.3\",\"commit\":\"aaaaaaaaaaaa\"}]");
+        cJSON *t2 = cJSON_Parse("[\"new\",\"CH\",2,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"proto\":\"1.3\",\"commit\":\"bbbbbbbbbbbb\"}]");
+        cJSON *t3 = cJSON_Parse("[\"two\",\"CH\",7,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"proto\":\"2.0\"}]");
+        CHECK(registry_lobby_upsert(v, n1, t1) == 0 && registry_lobby_upsert(v, n2, t2) == 0 && registry_lobby_upsert(v, n3, t3) == 0);
+        cJSON_Delete(t1);
+        cJSON_Delete(t2);
+        cJSON_Delete(t3);
+        CHECK(registry_lobby(v, "EDGE3:two", NULL)->proto_major == 2);
+        /* a 1.x client: never the 2.0 lobby although it is the fullest */
+        MmPickQuery q1 = {.region = "CH", .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE1:old"));
+        /* outdated EDGE1 (commit aaaa...) loses to the up-to-date one even with fewer players */
+        q1.outdated = outdated_aaaa;
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE2:new"));
+        /* only outdated lobbies left with room: still matched (preference, not exclusion) */
+        registry_lobby_remove(v, n2, "new");
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE1:old"));
+        /* asking for the 2.0 lobby by id */
+        MmPickQuery qid = {.region = "CH", .game_id = "EDGE3:two", .auto_change = 0, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(v, &pv, &qid, &pick) == MM_PICK_INCOMPATIBLE);
+        qid.auto_change = 1;
+        CHECK(registry_pick(v, &pv, &qid, &pick) == MM_PICK_OK && pick.changed && !strcmp(pick.lobby->game_id, "EDGE1:old"));
+        /* only incompatible lobbies: no match */
+        registry_lobby_remove(v, n1, "old");
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_NO_MATCH);
+        /* a 2.x client, and no client protocol (0 = any) */
+        MmPickQuery q2 = {.region = "CH", .auto_change = 1, .now_ms = 2000, .proto_major = 2};
+        CHECK(registry_pick(v, &pv, &q2, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE3:two"));
+        MmPickQuery qany = {.region = "CH", .auto_change = 1, .now_ms = 2000};
+        CHECK(registry_pick(v, &pv, &qany, &pick) == MM_PICK_OK);
+        registry_free(v);
+    }
 
     /* remote refresh */
     registry_remote_begin(r);

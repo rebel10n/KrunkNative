@@ -1,0 +1,8 @@
+# An error in a global initialiser disables the script (1.14, KN: the map still loads);
+# hooks are never called afterwards
+#! call start
+#! call update 16
+num[] list = num[1, 2];
+num bad = list[5];
+public action start() { GAME.log("never"); }
+public action update(num delta) { GAME.log("never"); }

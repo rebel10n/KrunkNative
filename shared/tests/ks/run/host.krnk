@@ -1,0 +1,40 @@
+# Host objects (3.2): getters, coercing setters, read-only and sub-object properties,
+# methods, script-added properties that persist across fetches, identity, for-each, JSON;
+# GAME PROP entries; API functions as action values; host errors -> Internal Error
+#! call start
+#! call again
+#! call broken
+#! call after
+action run(action f, str msg) { f(msg); }
+public action start() {
+    obj[] ps = GAME.PLAYERS.list();
+    obj me = ps[0];
+    GAME.log(lengthOf ps, me.id, me.username, me.health, me.isYou, me.position.x, ps[1].position.z);
+    me.health = "42.5abc";
+    me.id = "hacked";
+    me.position = {};
+    me.position.y = 3;
+    me.tag = "custom";
+    GAME.log(me.health, me.id, me.position.y, hasProp me.health, hasProp me.tag, hasProp me.nope, notEmpty me);
+    GAME.log(me.respawn(), me.health);
+    remove me.health;
+    GAME.log(me.health);
+    GAME.log(me);
+    str keys = "";
+    for (obj e : ps[1]) { keys += e.key + ","; }
+    GAME.log(keys);
+    GAME.log(GAME.PLAYERS.findByID("9") == ps[1], GAME.PLAYERS.findByID("x"), GAME.PLAYERS.getSelf());
+    GAME.CAMERA.position.x = 5;
+    (num) GAME.CAMERA.position.x += 2.5;
+    GAME.log(GAME.CAMERA.position.x, GAME.TIME.now(), GAME.TIME.fixedDelta(), Math.PI2, UTILS.math.E);
+    run(GAME.log, "via action value");
+}
+public action again() {
+    obj me = GAME.PLAYERS.findByID("7");
+    GAME.log(me.tag, me.position.y, me.health);
+}
+public action broken() {
+    obj me = GAME.PLAYERS.findByID("7");
+    me.explode();
+}
+public action after() { GAME.log("after", GAME.RAYCAST.from(0, 0, 0, 0, 0, 10), GAME.SCENE.setFog("#fff", 100)); }

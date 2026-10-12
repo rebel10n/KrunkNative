@@ -85,11 +85,15 @@
     // key events carry no position: x = 1 tells C that Shift is held (the console's Shift+Tab)
     var x = ev && typeof ev.clientX === 'number' ? ev.clientX : (ev && ev.shiftKey ? 1 : 0);
     var y = ev && typeof ev.clientY === 'number' ? ev.clientY : 0;
+    // modifier keys as GLFW_MOD_* bits (HtmlEvent.mods)
+    var mods = ev ? (ev.shiftKey ? 1 : 0) | (ev.ctrlKey ? 2 : 0) | (ev.altKey ? 4 : 0) | (ev.metaKey ? 8 : 0) : 0;
     try {
       var r = global.Module.ccall('kn_ui_event', 'number',
-        ['string', 'string', 'number', 'string', 'number', 'number', 'number', 'number', 'number'],
-        [handler, argsJson, knId(target), value, checked, key, button, x, y]);
-      return r !== 0;
+        ['string', 'string', 'number', 'string', 'number', 'number', 'number', 'number', 'number', 'number'],
+        [handler, argsJson, knId(target), value, checked, key, button, x, y, mods]);
+      // bit 1: C asked for event.stopPropagation() (the native engine stops the ancestors' handlers)
+      if ((r & 2) && ev && ev.stopPropagation) ev.stopPropagation();
+      return (r & 1) !== 0;
     } catch (e) {
       console.error('[kn] kn_ui_event failed for ' + handler, e);
       return true;
@@ -112,9 +116,14 @@
     'toggleTeam', 'toggleSpect', 'claimReward', 'shoPolicePop', 'focusChat', 'sendReaction', 'closeTwitch',
     'toggleHF', 'setExpandedRegion', 'selectSettingPre', 'knRetry', 'knHostOffline', 'knHostMap',
     'selectSkin', 'selectHat', 'selectBack', 'selectWaist', 'selectMelee', 'selectDye', 'selectFace',
-    'selectAttachment', 'selectReticle', 'selectSpray', 'hidePolicePop', 'updateWindow'];
+    'selectAttachment', 'selectReticle', 'selectSpray', 'hidePolicePop', 'updateWindow',
+    // Krunker v7.1.4 menu chrome (index.html; knForwardHandlers also finds them in the markup)
+    'playSelect', 'logBtnFRVR', 'closWind', 'showGames', 'openDiscord', 'openGuide', 'setSpect', 'purchaseCancel',
+    'openServerWindow', 'clientExitPopup', 'abTestsPopup', 'expertMode', 'switchChat', 'goBackWindow',
+    'checkedSwitchServer', 'setExpandedRegion', 'finderJoin', 'openConnectWindow', 'connectServer'];
   var WINDOW_METHODS = ['changeTab', 'searchList', 'collapseFolder', 'switchTab', 'action', 'toggle',
-    'presetAction', 'updateSet', 'changeWep', 'toggleWep', 'premium', 'purchase', 'toggleLog', 'searchMaps'];
+    'presetAction', 'updateSet', 'changeWep', 'toggleWep', 'premium', 'purchase', 'toggleLog', 'searchMaps',
+    'toggleType', 'loadMore', 'openHome', 'viewAll', 'readAll', 'craftMenu', 'newPop', 'toggleEffects', 'changeEffects'];
 
   function isField(t) { return !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)); }
   function isEscOrEnter(e) { return e.key === 'Escape' || e.keyCode === 27 || e.key === 'Enter' || e.keyCode === 13; }
@@ -168,13 +177,28 @@
       global.knRealOpen = global.open.bind(global);
       global.open = forward('window.open');
     }
+    // Krunker v7.1.4's windows[0..51]. Each is a Proxy: methods are forwarders (installed
+    // here and by knForwardHandlers), and a plain property assignment in the markup
+    // (`windows[13].subTab=0`, `windows[20].tabIndex=1`) reaches C as the handler
+    // "windows.13.subTab=" with the value, the name the native engine dispatches it under.
     var wins = [];
-    for (var w = 0; w < 39; w++) { // Krunker's windows[0..38] (windows[34] = Changelog)
+    function windowProxy(w) {
       var obj = {};
       for (var m = 0; m < WINDOW_METHODS.length; m++) obj[WINDOW_METHODS[m]] = forward('windows.' + w + '.' + WINDOW_METHODS[m]);
-      wins.push(obj);
+      if (typeof Proxy !== 'function') return obj;
+      return new Proxy(obj, {
+        set: function (target, prop, value) {
+          target[prop] = value;
+          if (typeof value !== 'function' && typeof prop === 'string') knCall('windows.' + w + '.' + prop + '=', [value]);
+          return true;
+        }
+      });
     }
+    for (var w = 0; w < 52; w++) wins.push(windowProxy(w));
     global.windows = wins;
+    // The markup's `window.canShowExternalLinks ? openTab(url) : showWindow(47)`: both
+    // builds open external links in a browser tab (C answers the same natively).
+    global.canShowExternalLinks = true;
     installListeners();
     knForwardHandlers(document.body); // handler names of this page (social/editor/viewer markup)
     console.info('[kn] kn-shim active: inline handlers and listeners forward to kn_ui_event');
@@ -198,7 +222,35 @@
     if (!active || !isField(e.target)) return;
     e.stopImmediatePropagation();
     if ((isEscOrEnter(e) || isFieldKey(e)) && !knListen('', 'keydown', e.target, e)) e.preventDefault();
+    // The propagation stop above also keeps the field's own inline onkeydown from running
+    // (`if(event.keyCode==13)connectServer()`, the Custom Games search): run it here, as the
+    // browser would have (window.event is still this event), unless C took the key.
+    if (!e.defaultPrevented && typeof e.target.onkeydown === 'function') {
+      try { if (e.target.onkeydown.call(e.target, e) === false) e.preventDefault(); } catch (x) { console.error('[kn] onkeydown failed', x); }
+    }
   }, true);
+
+  // controls.js keydown/keyup: e.preventDefault() while CONTROLS.enabled (the game owns
+  // the input). These bubble listeners run after GLFW's window capture listener, which has
+  // already taken the key through C; C answers whether the game owned it. A key whose
+  // keydown was prevented gets its keyup prevented too: pListKey (Alt) frees the pointer
+  // on keydown, and a bare Alt release would otherwise focus the browser's menu bar
+  // (Firefox, Chrome on Windows) and keep the keyboard away from the page.
+  var gameKeys = {};
+  function gameKey() {
+    if (!active || !engineReady() || !global.Module._kn_ui_key_prevent) return false;
+    try { return global.Module._kn_ui_key_prevent() !== 0; } catch (x) { return false; }
+  }
+  global.addEventListener('keydown', function (e) {
+    if (!gameKey()) return;
+    e.preventDefault();
+    gameKeys[e.keyCode] = 1;
+  });
+  global.addEventListener('keyup', function (e) {
+    if (gameKey() || gameKeys[e.keyCode]) e.preventDefault();
+    delete gameKeys[e.keyCode];
+  });
+  global.addEventListener('blur', function () { gameKeys = {}; });
 
   // Side buttons: never let the browser navigate back/forward (M4/M5 are game binds).
   function noNavigate(e) { if (active && (e.button === 3 || e.button === 4)) e.preventDefault(); }

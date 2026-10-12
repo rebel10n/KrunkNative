@@ -3,123 +3,102 @@
 <head>
 <meta charset="UTF-8">
 <title>Krunker Hub</title>
-<link rel="shortcut icon" type="image/png" href="img/favicon.png"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0">
-<link rel="stylesheet" href="css/social.css"/>
-<link rel="stylesheet" href="css/flag.css"/>
-<link rel="stylesheet" href="css/social_custom.css"/>
-<link rel="stylesheet" href="css/google-secular-one.css"/>
-<link rel="stylesheet" href="css/material-icons.css"/>
+<link rel="shortcut icon" type="image/png" href="img/favicon.png">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=0">
+<link rel="stylesheet" href="css/social.css">
+<link rel="stylesheet" href="css/flag.css">
+<link rel="stylesheet" href="css/social_custom.css">
+<link rel="stylesheet" href="css/material-icons.css">
+<link rel="stylesheet" href="css/material-icons-outlined.css">
 </head>
 <body>
-
 <canvas id="canvas" tabindex="-1" style="display:none"></canvas>
-
+<div id="backImgHoldr">
 <div id="backgroundImage"></div>
-
-<div id="aHolder">
 </div>
-
-<img id="androidDB" onclick="openLink(&quot;https://play.google.com/store/apps/details?id=ch.yendis.krunkerhub&quot;)" src="img/android.png"></img>
-<img id="iosDB" onclick="openLink(&quot;https://apps.apple.com/app/id1515679115&quot;)" src="img/ios.png"></img>
-<img id="steamDB" onclick="openLink(&quot;https://store.steampowered.com/app/1408720/Krunker/&quot;)" src="img/steam.png"></img>
-
-<div id="errorDisplay" style="display: none">
+<div id="uiBase">
+<div id="aHolder">
+<div id="aContainer">
+<div>
+<div align="center" id="/21823819281/frvr-krunker_io-krunker-display-banner-krunkerio_728x90_1"></div>
+</div>
+</div>
+</div>
+<div id="twoFAPop" style="display:none">
+<div id="twoFAWindow">
+<div class="twoFAHeader">2-Factor Authentication</div>
+<div id="twoFAmsg">Enter Verification Code</div>
+<form id="twoFAForm"></form>
+<div id="twoFAbtn" onclick="sub2FA()">Submit</div>
+</div>
+</div>
+<img id="editrDB" onclick="openLink(&quot;./editor.html&quot;)" src="img/editor.png">
+<img id="androidDB" style="display:none" onclick="openLink(&quot;https://play.google.com/store/apps/details?id=ch.yendis.krunkerhub&quot;)" src="img/android.png">
+<img id="iosDB" style="display:none" onclick="openLink(&quot;https://apps.apple.com/app/id1515679115&quot;)" src="img/ios.png">
+<img id="steamDB" style="display:none" onclick="openLink(&quot;https://store.steampowered.com/app/1408720/Krunker/&quot;)" src="img/steam.png">
+<div id="errorDisplay" style="display:none">
 <div id="errorTitle"></div>
+<div id="errorCode"></div>
 <div id="errorReloadButton" onclick="location.reload()">Reload</div>
 </div>
-
 <div id="navBar">
-<div id="navTitle" onclick="openLink('/');">KRUNKER<div id="hubBox">Hub</div></div>
+<div id="navTitle">
+<div class="terms" onclick="openURL(&quot;https://frvr.com/legal/krunker#TermsofService&quot;)" onmouseover="SOUND.play(&quot;tick_0&quot;,.1)">Terms</div>
+<div class="terms" style="color:#fff!important">|</div>
+<div class="material-icons terms" onclick="openSettings()" onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" style="font-size:35px;margin-top:14px;color:#fff">settings</div>
+<div style="display:inline-block;width:20px"></div>
+<div onclick="openLink(&quot;/&quot;)" style="display:inline-block;color:#fff">KRUNKER
+</div>
+<div id="hubBox" onclick="openLink(&quot;/&quot;)">.io</div></div>
 <div id="profileInfo">
-<img id="profileImg" src="textures/classes/icon_0.png" onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('profile')"/>
-<div id="profileName" onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('profile')"></div>
+<img id="profileImg" src="textures/classes/icon_0.png" onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" onclick="updateWindow(&quot;profile&quot;)">
+<div id="profileName" onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" onclick="updateWindow(&quot;profile&quot;)"></div>
 <div id="profileLogin" class="button lgn" onclick="loginPopup()">Login</div>
 <div id="profileSearch">
-<input type="text" id="searchPInput" placeholder="Search User" onkeyup="if (window.event.keyCode==13) window.searchProfile();">
-<div id="searchBtn" onclick="window.searchProfile();">Search</div>
+<input id="searchPInput" placeholder="Search User" onkeyup="13==window.event.keyCode&amp;&amp;window.searchProfile()">
+<div id="searchBtn" onclick="window.searchProfile()">Search</div>
 </div>
 </div>
 <div id="navButtons">
-<div class="terms" onclick="openURL('./docs/terms.txt')" onmouseover="SOUND.play('tick_0',0.1)">Terms</div>
-<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('feed')" id="feed" class="material-icons mic1 menuBtn" style="margin-right:-4px;font-size:42px;margin-top:4px">public</div>
-<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('market',null,null,null,'store')" id="market" class="material-icons mic1 menuBtn" style="margin-right:-4px">store</div>
-<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('leaders')" id="leaders" class="material-icons mic1 menuBtn">poll</div>
-<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('maps')" id="maps" class="material-icons mic1 menuBtn">videogame_asset</div>
-<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('mods')" id="mods" class="material-icons mic1 menuBtn" style="font-size: 44px;margin-top: 3px;">extension</div>
-<div onmouseover="SOUND.play('tick_0',0.1)" onclick="updateWindow('clanwars')" id="clanwars" class="material-icons mic1 menuBtn"><img src="img/crossed_swords_0.svg" style="margin-top:-4px;margin-left:-8px;margin-right:-8px;width:60px;image-rendering:auto;"></div>
-<div onmouseover="SOUND.play('tick_0',0.1)" onclick="openSettings()" id="settings" class="material-icons mic1 menuBtn" style="font-size: 43px;margin-top: 5px;">settings</div>
+<div onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" onclick="updateWindow(&quot;feed&quot;)" id="feed" class="material-icons mic1 menuBtn" style="margin-right:-4px;font-size:42px;margin-top:4px">public</div>
+<div onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" title="Market" onclick="updateWindow(&quot;market&quot;,null,null,null,&quot;store&quot;)" id="market" class="material-icons mic1 menuBtn" style="margin-right:-4px">store</div>
+<div onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" title="Leaderboards" onclick="updateWindow(&quot;leaders&quot;)" id="leaders" class="material-icons mic1 menuBtn">poll</div>
+<div onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" title="Game List" onclick="updateWindow(&quot;maps&quot;)" id="maps" class="material-icons mic1 menuBtn" style="font-size:80px!important">videogame_asset</div>
+<div onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" title="Mod List" onclick="updateWindow(&quot;mods&quot;)" id="mods" class="material-icons mic1 menuBtn" style="font-size:44px;margin-top:3px">extension</div>
+<div onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" title="Item List" onclick="updateWindow(&quot;items&quot;)" id="items" class="material-icons mic1 menuBtn" style="margin-right:-4px">brush</div>
 </div>
 </div>
-
 <div id="loadMessage">
 <div style="width:100%;text-align:center">
 <div class="lds-ring"><div></div><div></div>
 <div></div><div></div></div>
 <div style="font-size:22px;color:rgba(
-					255,255,255,0.6);margin-right:10px">LOADING</div>
+						255,255,255,.6);margin-right:10px">LOADING</div>
 </div>
 </div>
-
 <div id="leaderHolder" class="centerHolder">
 <div class="leaderNav2">
-<div class="leaderBtn2" onclick="updateWindow('leaders')">Level</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_kills')">Kills</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_wins')">Wins</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_timeplayed')">Time</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_funds')">Krunkies</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_clan')">Clans</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_elo')">1v1</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_elo2')">2v2</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_elo4')">4v4</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_chal')">Challenge</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_followed')">Followers</div>
-<div class="leaderBtn2" onclick="updateWindow('leaders','player_eventtime')">Raid</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;)">Level</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_kills&quot;)">Kills</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_wins&quot;)">Wins</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_timeplayed&quot;)">Time</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_clan&quot;)">Clans</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_followed&quot;)">Followers</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_nukes&quot;)">Nukes</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_funds&quot;)">Krunkies</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_elo4&quot;)">Junk</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_skinvalue&quot;)">Inventory</div>
+<div class="leaderBtn2" onclick="updateWindow(&quot;leaders&quot;,&quot;player_eventtime&quot;)">Zombies</div>
 </div>
 <div id="leaderList" class="scrollView"></div>
 </div>
-
-<div id="mapsHolder" class="centerHolder">
-<div class="leaderNav">
-<a class="leaderBtn tabSel" href="javascript:;" id="gTab_0" onclick="windows[0].switchTab(0)">Popular</a>
-<a class="leaderBtn" href="javascript:;" id="gTab_1" onclick="windows[0].switchTab(1)">Featured</a>
-<a class="leaderBtn" href="javascript:;" id="gTab_2" onclick="windows[0].switchTab(2)">New</a>
-<a class="leaderBtn" href="javascript:;" id="gTab_3" onclick="windows[0].switchTab(3)">KR</a>
-<a class="leaderBtn" href="javascript:;" id="gTab_4" onclick="windows[0].switchTab(4)">Favorites</a>
-<a class="leaderBtn" href="javascript:;" id="gTab_5" onclick="windows[0].switchTab(5)">My Games</a>
-<div id="searchBar">
-<input id="searchInput" placeholder="Game Name" style="width:180px"/>
-<a style="margin-left: 5px;font-size: 20px;line-height: 26px;background-color: #2196F3;padding: 8px;
-					padding-left: 15px;padding-right: 15px;border-radius: 6px;color:#fff" href="javascript:;" onclick="windows[0].searchMaps()">Search</a>
-</div>
-<a class="leaderBtn" href="javascript:;" onclick="publishPopup()" style="background-color: #993299!important;margin-left: 5px;">Publish</a>
-<img id="editorDB" onclick="openLink(&quot;/editor.html&quot;)" src="img/editor.png"></img>
-</div>
-<div id="mapList" class="scrollView"></div>
-</div>
-
-<div id="modsHolder" class="centerHolder">
-<div class="leaderNav">
-<a class="leaderBtn tabSel" href="javascript:;" id="mTab_0" onclick="windows[1].switchTab(0)">Popular</a>
-<a class="leaderBtn" href="javascript:;" id="mTab_1" onclick="windows[1].switchTab(1)">Featured</a>
-<a class="leaderBtn" href="javascript:;" id="mTab_2" onclick="windows[1].switchTab(2)">New</a>
-<a class="leaderBtn" href="javascript:;" id="mTab_3" onclick="windows[1].switchTab(3)">Favorites</a>
-<a class="leaderBtn" href="javascript:;" id="mTab_4" onclick="windows[1].switchTab(4)">My Mods</a>
-<div id="searchBar">
-<input id="searchInputMO" placeholder="Mod Name" style="width:180px"/>
-<a style="margin-left: 5px;font-size: 20px;line-height: 26px;background-color: #2196F3;padding: 8px;
-					padding-left: 15px;padding-right: 15px;border-radius: 6px;color:#fff" href="javascript:;" onclick="windows[1].searchMods()">Search</a>
-</div>
-<a class="leaderBtn" href="javascript:;" onclick="publishModPopup()" style="background-color: #993299!important;margin-left: 5px;">Publish</a>
-</div>
-<div id="modList" class="scrollView"></div>
-</div>
-
+<div id="mapsHolder" class="centerHolder"></div>
+<div id="modsHolder" class="centerHolder"></div>
 <div id="profileHolder">
-<div class="scrollItemNew" style="box-shadow:none;-webkit-box-shadow:none;-moz-box-shadow:none;">
+<div class="scrollItemNew" style="box-shadow:none;-webkit-box-shadow:none;-moz-box-shadow:none">
 <div id="hackText">HACKER</div>
 <div id="leftProfile">
-<img id="socialPic" class="profilePic"/>
+<img id="socialPic" class="profilePic">
 <span id="socialFlag"></span>
 </div>
 <div id="rightProfile"></div>
@@ -127,150 +106,112 @@
 <div></div>
 <div class="profileNav">
 <div class="profileTabs">
-<div class="profileTab pTabA" id="pTab_about" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('about')">About</div>
-<div class="profileTab" id="pTab_activity" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('activity')">Activity</div>
-<div class="profileTab" id="pTab_creations" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('creations')">Creations</div>
-<div class="profileTab" id="pTab_reports" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('reports')">Reports</div>
-<div class="profileTab" id="pTab_inputs" onmouseover="SOUND.play('tick_0',0.1)" onclick="openProfileTab('inputs')">Inputs</div>
+<div class="profileTab pTabA" id="pTab_about" onmouseenter="playTick()" onclick="playSelect(.1),openProfileTab(&quot;about&quot;)">About</div>
+<div class="profileTab" id="pTab_activity" onmouseenter="playTick()" onclick="playSelect(.1),openProfileTab(&quot;activity&quot;)">Feed</div>
+<div class="profileTab" id="pTab_listings" onmouseenter="playTick()" onclick="playSelect(.1),openProfileTab(&quot;listings&quot;)">Listings</div>
+<div class="profileTab" id="pTab_badges" onmouseenter="playTick()" onclick="playSelect(.1),openProfileTab(&quot;badges&quot;)">Badges</div>
+<div class="profileTab" id="pTab_creations" onmouseenter="playTick()" onclick="playSelect(.1),openProfileTab(&quot;creations&quot;)">Creations</div>
+<div class="profileTab" id="pTab_reports" onmouseenter="playTick()" onclick="playSelect(.1),openProfileTab(&quot;reports&quot;)">Reports</div>
 </div>
 </div><div></div>
 <div class="pTabsContent selected" id="pTabContent_about"></div>
 <div class="pTabsContent" id="pTabContent_activity"></div>
+<div class="pTabsContent" id="pTabContent_listings"></div>
+<div class="pTabsContent" id="pTabContent_badges"></div>
 <div class="pTabsContent" id="pTabContent_creations"></div>
 <div class="pTabsContent" id="pTabContent_reports"></div>
-<div class="pTabsContent" id="pTabContent_inputs">
-<div class="scrollItemNew">
-<div style="margin-top:10px;margin-bottom:10px;">
-<canvas id="inputsChart"></canvas>
 </div>
-</div>
-<div></div>
-</div>
-</div>
-
 <div id="searchHolder" class="centerHolder">
-<div id="searchInfo" style="height: auto;" class="scrollView"></div>
+<div id="searchInfo" style="height:auto" class="scrollView"></div>
 <div id="searchList" class="scrollView"></div>
 </div>
-
-<div id="tourneyHolder" class="centerHolder">
-<div id="tourneyList" class="scrollView"></div>
-</div>
-
 <div id="popupHolder">
 <div id="popupBack" onclick="showPopup()"></div>
-<div id="filterPop"></div>
-<div id="sortPop"></div>
 <div id="popupContent"></div>
-<div id="tradePop"></div>
-<div id="followPop"></div>
-<div id="offerPop"></div>
-<div id="reportPop"></div>
 <div id="giftPop"></div>
-<div id="flagPop"></div>
-<div id="verifyPop"></div>
-<div id="confListPop"></div>
-<div id="confQSPop"></div>
-<div id="confOfferPop"></div>
-<div id="confSubmitPop"></div>
-<div id="publishPop"></div>
-<div id="loginPop"></div>
-<div id="settingsPop"></div>
+<div id="itemViewPop"></div>
+<div id="genericPop"></div>
 </div>
-
-<div id="adBox" style="display:none">
-<div id="leftAdHol">
-
+<div id="aBox" style="display:none">
+<div id="leftAHol">
 <div id="leftABox">
 <div class="sideBarHeader">Krunker News</div>
-<div class="sideBarItem"><a href="https://www.twitch.tv/krunkeresports" target="_blank" class="menuLink blueLink" style="font-size:14px;margin-right:4px">
-Krunker E-Sports</a> is back!
-Tune in every Saturday to watch the Action!
+<div class="sideBarItem">No news today.</div>
 </div>
-<div class="sideBarItem">Krunker is coming to <a href="https://store.steampowered.com/app/1408720/Krunker/" class="menuLink blueLink" style="font-size:14px" target="_blank">Steam!</a>
-The Browser version will always be available.</div>
-<div class="sideBarItem">Season 4 is in the works. 3 New Item Types &amp; over 500 Unique New Items!</div>
-</div>
-
-<div id="leftYTBox">
+<div id="leftYTBox" style="display:none"></div>
+<div id="leftBox">
 <div class="sideBarHeader">Krunk TV</div>
-<iframe id="recYTVid">
-					</iframe>
+<iframe id="recEmbed">
+						</iframe>
 </div>
 </div>
-<div id="rightAdHol">
-<div id="rightABox"><div align="center" id="krunkerio_300x250_2">
-</div></div>
+<div id="rightAHol">
+<div id="rightABox">
+<div align="center" id="/21823819281/frvr-krunker_io-krunker-display-banner-krunkerio_300x250_2"></div>
+</div>
 <div id="rightFollBox">
 <div class="sideBarHeader">Who to Follow</div>
 <div id="whoToFolL"></div>
 </div>
 </div>
 </div>
-
 <div id="chatHolder">
 <div id="chatScroller"></div>
 <div id="chatBox">
-<div id="postTopBar" class="chatTopBar"><span onclick="closeChat()" class="material-icons likeBtn" style="margin-right:30px;font-size:28px;color:#fff">
+<div id="postTopBar" class="chatTopBar"><span onclick="closeChat()" class="material-icons likeBtn" style="margin-right:30px;font-size:28px;color:#fff!important">
 arrow_back</span><span id="chatWithHead"></span>
 </div>
 <div id="chatBoxList">
 <div id="chatBoxFill"></div>
 </div>
 <div id="chatBoxInputH">
-<input id="chatBoxInput" placeholder="Enter Message"></input>
+<input id="chatBoxInput" placeholder="Enter Message">
 <div id="chatBoxButton" onclick="sendChat()">Send</div>
 </div>
 </div>
 </div>
-
 <div id="feedHolder" class="centerHolder" style="overflow-y:auto;bottom:140px">
-
-<div id="singlePost" style="display:none;overflow-y:hidden;" class="scrollItem">
-<div id="postTopBar"><span onclick="leavePost()" class="material-icons likeBtn" style="margin-right:30px;font-size:28px">
-arrow_back</span><b>Post</b>
+<div id="singlePost" style="display:none;overflow-y:hidden" class="scrollItem">
+<div id="postTopBar"><span onclick="leavePost()" class="material-icons likeBtn" style="margin-right:30px;font-size:28px;color:#fff">
+arrow_back</span><b style="color:rgba(255,255,255,.6)">Post</b>
 <span id="postTopStat" style="float:right"></span>
 </div>
 <div id="singlePostH"></div>
 </div>
-
 <div id="fpHolder">
+<div id="feedTabs">
+<span class="feedTab" id="feedTab1" onclick="switchFeedTab(1)"> <span class="feedTabIcon material-icons">
+person</span> Following</span>
+<span class="feedTab" id="feedTab4" onclick="switchFeedTab(4)"> <span class="feedTabIcon material-icons">
+whatshot</span> Hot</span>
+<span class="feedTab feedTabA" id="feedTab0" onclick="switchFeedTab(0)"> <span class="feedTabIcon material-icons">
+public</span> Global</span>
+<span class="feedTab" id="feedTab5" onclick="switchFeedTab(5)"> <span class="feedTabIcon material-icons" style="font-size:31px">
+local_atm</span> Giveaways</span>
+<span class="feedTab" id="feedTab2" onclick="switchFeedTab(2)"> <span class="feedTabIcon material-icons" style="font-size:31px">
+groups</span> Clan</span>
+</div>
+<div style="width:100%"></div>
 <div id="postEntryC" class="scrollItem">
 <div>
-<img src="img/favicon.png" id="postProf"/>
-<input id="postInput" placeholder="Say something..."></input>
+<img src="img/player_pfp.png" id="postProf">
+<input id="postInput" placeholder="Say something...">
 </div>
 <div>
-<div style="text-align:right;display:none;margin-bottom:10px;" id="krInptHol">
-<input id="postKR" type="number" placeholder="KR Giveaway Amount"></input>
-<div style="font-size:14px;color:rgba(0,0,0,0.4);margin-bottom:12px;margin-top:6px;
-								margin-right:3px">
-You will be charged a 10% KR Fee to post make a Giveaway Post
+<div style="text-align:right;display:none;margin-bottom:10px" id="krInptHol">
+<input id="postKR" type="number" placeholder="KR Giveaway Amount">
+<div style="font-size:15px;color:rgba(255,255,255,.4);margin-bottom:12px;margin-top:12px;margin-right:3px">
+You will be charged a 10% KR Fee to make a Giveaway Post
 </div>
 </div>
-<span class="postCFoll" style="margin-left:103px">
-<span style="color:#000000" id="postCFole">0</span> Followers</span>
-<span class="postCFoll"><span style="color:#000000" id="postCFoli">
-0</span> Following</span>
+<span class="postCFoll" style="margin-left:103px" onclick="viewFollowers(1)">
+<span style="color:#fff" id="postCFole">0</span> Followers</span>
+<span class="postCFoll" onclick="viewFollowing(1)"><span style="color:#fff" id="postCFoli">0</span> Following</span>
 <div style="float:right">
-<div id="givaButton" onclick="togglPos()"><span class="material-icons" style="color:#fff;vertical-align:middle;
-								margin-top:-6px;font-size:31px">local_atm</span></div>
+<div id="givaButton" onclick="togglPos()"><span class="material-icons" style="color:#fff;vertical-align:middle;margin-top:-6px;font-size:31px">local_atm</span></div>
 <div id="postButton" onclick="makePost()">Post</div>
 </div>
 </div>
-</div>
-<div style="width:100%"></div>
-<div id="feedTabs">
-<span class="feedTab feedTabA" id="feedTab1" style="width:140px" onclick="switchFeedTab(1)"> <span class="material-icons" style="vertical-align:middle;margin-top:-6px;font-size:29px">
-person</span> Following</span>
-<span class="feedTab" id="feedTab4" style="width:85px" onclick="switchFeedTab(4)"> <span class="material-icons" style="vertical-align:middle;margin-top:-6px;font-size:29px">
-whatshot</span> Hot</span>
-<span class="feedTab" id="feedTab0" style="width:110px" onclick="switchFeedTab(0)"> <span class="material-icons" style="vertical-align:middle;margin-top:-7px;font-size:29px">
-public</span> Global</span>
-<span class="feedTab" id="feedTab5" style="width:160px" onclick="switchFeedTab(5)"> <span class="material-icons" style="vertical-align:middle;margin-top:-4px;font-size:31px">
-local_atm</span> Giveaways</span>
-<span class="feedTab" id="feedTab2" style="width:100px" onclick="switchFeedTab(2)"> <span class="material-icons" style="vertical-align:middle;margin-top:-4px;font-size:31px">
-groups</span> Clan</span>
 </div>
 <div style="width:100%"></div>
 <div id="postList">
@@ -278,37 +219,51 @@ groups</span> Clan</span>
 </div>
 </div>
 </div>
-
 <div id="marketHolder" class="centerHolder">
-<div class="leaderNav">
-<div id="invTrack"></div>
-<div id="m_blackm" onclick="updateWindow('market','blackm',null,null,'store')"><img src="img/black_m.png" style="margin-top:-3px;width:45px;image-rendering:auto;"></div>
-<div id="m_stats" onclick="updateWindow('market','stats',null,null,'store')"><i class="material-icons" style="font-size: 43px;color: #fff;">assessment</i></div>
-<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market',null,null,null,'store')" id="m_market" onmouseover="SOUND.play('tick_0',0.1)">Market</a>
-<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market','inventory',null,null,'store')" id="m_inventory" onmouseover="SOUND.play('tick_0',0.1)">Inventory</a>
-<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market','sales',null,null,'store')" id="m_sales" onmouseover="SOUND.play('tick_0',0.1)">My Sales</a>
-<a class="leaderBtn" href="javascript:;" onclick="updateWindow('market','trades',null,null,'store')" id="m_trades" onmouseover="SOUND.play('tick_0',0.1)">Trades</a>
-<div id="marketSearchB" onclick="filterPopup(event)" onmouseover="SOUND.play('tick_0',0.1)">Search</div>
-<div id="invSortB" onclick="sortPopup(event)" onmouseover="SOUND.play('tick_0',0.1)">Sort</div>
-<div id="invValue"></div>
+<div style="margin-top:-25px;margin-bottom:10px">
+<div class="bigMenTabs" style="margin-top:25px">
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="m_blackm" onclick="playSelect(),updateWindow(&quot;market&quot;,&quot;blackm&quot;,null,null,&quot;store&quot;)">
+<img src="img/black_m.png" style="margin-top:-3px;width:48px;image-rendering:auto;vertical-align:bottom">
+</div>
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="m_stats" onclick="playSelect(),updateWindow(&quot;market&quot;,&quot;stats&quot;,null,null,&quot;store&quot;)">
+<i class="material-icons" style="color:#fff;font-size:46px;vertical-align:bottom">assessment</i>
+</div>
+<div class="bigMenTab bigMenTabA" onmouseenter="playTick(.1)" id="m_market" onclick="playSelect(),updateWindow(&quot;market&quot;,null,null,null,&quot;store&quot;)">Market</div>
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="m_inventory" onclick="playSelect(),updateWindow(&quot;market&quot;,&quot;inventory&quot;,null,null,&quot;store&quot;)">Inventory</div>
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="m_sales" onclick="playSelect(),updateWindow(&quot;market&quot;,&quot;sales&quot;,null,null,&quot;store&quot;)">My Sales</div>
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="m_trades" onclick="playSelect(),updateWindow(&quot;market&quot;,&quot;trades&quot;,null,null,&quot;store&quot;)">Trading</div>
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="marketSearchB" onclick="playSelect(),filterPopup(event)">Search</div>
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="invSortB" onclick="playSelect(),sortPopup(event)">Sort</div>
+<div class="bigMenTab" onmouseenter="playTick(.1)" id="invStats" style="display:none"></div>
+</div>
 </div>
 <div id="marketList" class="scrollView"></div>
 </div>
-
-<div id="itemsalesHolder" class="centerHolder" style="bottom: 150px;">
-<div id="itemsalesList" class="scrollView">
-<div class="scrollItem" style="position:relative;overflow-y:auto;padding-top: 20px;">
-<div id="weaponInfo"></div>
-<div>
-<a class="dateBtn" href="javascript:;" onclick="changeDateRange(this, 0)" onmouseover="SOUND.play('tick_0',0.1)">7d</a>
-<a class="dateBtn" href="javascript:;" style="background-color:rgba(0, 0, 0, 0.6)" onclick="changeDateRange(this, 1)" onmouseover="SOUND.play('tick_0',0.1)">30d</a>
-<a class="dateBtn" href="javascript:;" onclick="changeDateRange(this, 2)" onmouseover="SOUND.play('tick_0',0.1)">90d</a>
-<a class="dateBtn" href="javascript:;" onclick="changeDateRange(this, 3)" onmouseover="SOUND.play('tick_0',0.1)">120d</a>
+<div id="itemsHolder" class="centerHolder">
+<div id="itemsListNav" class="leaderNav">
 </div>
-<div class="menuTabsNew" style="margin-top: 10px;margin-bottom: 10px;">
-<div class="menuTabNew tabANew" style="width: 33%;" id="iTab_avg" onmouseover="SOUND.play('tick_0',0.1)" onclick="openItemTab('avg')">Average Sales</div>
-<div class="menuTabNew" style="width: 33%;" id="iTab_sold" onmouseover="SOUND.play('tick_0',0.1)" onclick="openItemTab('sold')">Units Sold</div>
-<div class="menuTabNew" style="width: 33%;" id="iTab_owners" onmouseover="SOUND.play('tick_0',0.1)" onclick="openItemTab('owners')">Owners</div>
+<div id="itemsList" class="scrollView" onscroll="itemListScroll()"></div>
+</div>
+<div id="itemsalesHolder" class="centerHolder" style="bottom:150px">
+<div id="itemsalesList" class="scrollView">
+<div class="scrollItem" style="position:relative;overflow-y:auto;padding-top:20px">
+<div id="weaponInfo"></div>
+<div id="dateInfo">
+<span style="color:rgba(255,255,255,.4)">Data Range</span>
+<select class="rangeSelect" onchange="changeDateRange(this.value)">
+<option value="0">1 week</option>
+<option value="1">2 weeks</option>
+<option value="2">3 weeks</option>
+<option value="3" selected="selected">1 month</option>
+<option value="4">2 months</option>
+<option value="5">3 months</option>
+<option value="6">4 months</option>
+</select>
+</div>
+<div class="menuTabsNew" style="margin-top:10px;margin-bottom:10px">
+<div class="menuTabNew tabANew" style="width:33%" id="iTab_avg" onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" onclick="openItemTab(&quot;avg&quot;)">Average Sales</div>
+<div class="menuTabNew" style="width:33%" id="iTab_sold" onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" onclick="openItemTab(&quot;sold&quot;)">Units Sold</div>
+<div class="menuTabNew" style="width:33%" id="iTab_owners" onmouseover="SOUND.play(&quot;tick_0&quot;,.1)" onclick="openItemTab(&quot;owners&quot;)">Owners</div>
 </div>
 <div class="iTabsContent selected" id="iTabContent_avg">
 <div class="graphHeader">
@@ -319,7 +274,7 @@ groups</span> Clan</span>
 <canvas id="averageCost"></canvas>
 </div>
 <div class="iTabsContent" id="iTabContent_sold">
-<div class="graphHeader" style="margin-top: 5px;background-color:#fbc02d">
+<div class="graphHeader" style="margin-top:5px;background-color:#fbc02d">
 <span class="graphHeaderTxt">Units Sold</span>
 <span id="totalSoldTrending" class="graphHeaderTrend"></span>
 <span id="totalSoldHeader" class="graphHeaderTotal">0</span>
@@ -330,56 +285,30 @@ groups</span> Clan</span>
 </div>
 </div>
 </div>
-
+<div id="listingHolder" class="centerHolder" style="bottom:150px">
+</div>
 <div id="clanHolder" class="centerHolder">
-<div id="clanInfo" style="height: auto;" class="scrollView"></div>
+<div id="clanInfo" style="height:auto" class="scrollView"></div>
 <div id="clanRoster" class="scrollView"></div>
 </div>
-
-<div id="clanwarsHolder" class="centerHolder">
-<div class="scrollView" style="position: absolute;">
-<div style="text-align: left;position: absolute;width: 800px;left: 50%;transform: translateX(-50%);">
-<div id="sea"></div>
-<div id="clanwarsProg"></div>
-<div id="clanwarsInfo"></div>
-</div>
-</div>
-</div>
-
-<div id="mapHolder" class="centerHolder" style="bottom: 130px !important;">
+<div id="mapHolder" class="centerHolder" style="bottom:130px!important">
 <div id="mapProfile" class="scrollView"></div>
 </div>
-
-<div id="modHolder" class="centerHolder" style="bottom: 130px !important;">
+<div id="modHolder" class="centerHolder" style="bottom:130px!important">
 <div id="modProfile" class="scrollView"></div>
 </div>
-
-<div id="virusHolder">
-<div class="scrollItem" style="width:800px;padding-top:20px;padding-bottom:15px;overflow:hidden;max-height:unset;">
-<div>
-<a class="dateBtn" href="javascript:;" onclick="changeDateR(this, 0)" onmouseover="SOUND.play('tick_0',0.1)">7d</a>
-<a class="dateBtn" href="javascript:;" style="background-color:rgba(0, 0, 0, 0.6)" onclick="changeDateR(this, 1)" onmouseover="SOUND.play('tick_0',0.1)">30d</a>
-<a class="dateBtn" href="javascript:;" onclick="changeDateR(this, 2)" onmouseover="SOUND.play('tick_0',0.1)">90d</a>
-<a class="dateBtn" href="javascript:;" onclick="changeDateR(this, 3)" onmouseover="SOUND.play('tick_0',0.1)">120d</a>
 </div>
-<div style="width:790px;display:inline-block;">
-<div class="graphHeader">
-<span class="graphHeaderTxt">Krunkitis Infections</span>
-<span id="virusSpreadHeader" class="graphHeaderTotal">0</span>
+<div id="innerBannerHide" style="display:none">
+<div id="acon0" class="aContainer">
+<div align="center" id="/21823819281/frvr-krunker_io-krunker-display-banner-krunkerio_728x90_2"></div>
 </div>
-<canvas id="virusSpread"></canvas>
+<div id="acon1" class="aContainer">
+<div align="center" id="/21823819281/frvr-krunker_io-krunker-display-banner-krunkerio_728x90_3"></div>
 </div>
-</div>
-<div></div>
-<div class="scrollItem" style="width:800px;padding-top:20px;padding-bottom:15px;overflow:hidden;max-height:unset;">
-<div style="margin-bottom: 15px;font-size:16px;color: rgba(0,0,0,0.5);">Krunkitis is a fictional virus. Its meant to illustrate how fast a virus can spread if people are not careful. Please educate yourself on the current situation and follow the advice provided by your local governments and health organizations.</div>
-<div style="font-size: 30px;margin-top: 10px;text-align: center;">
-Find more information
-<a style="text-decoration: underline;" href="https://www.who.int/emergencies/diseases/novel-coronavirus-2019">here</a>
-</div>
+<div id="acon2" class="aContainer">
+<div align="center" id="/21823819281/frvr-krunker_io-krunker-display-banner-krunkerio_728x90_4"></div>
 </div>
 </div>
 <script src="js/kn-shim.js"></script>
 <script src="js/loader.js"></script>
 </body>
-</html>

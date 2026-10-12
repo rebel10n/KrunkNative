@@ -313,6 +313,11 @@ cJSON *finder_list(FinderTable *t, const FinderFilter *f, uint64_t now_ms) {
         cJSON_AddBoolToObject(o, "password", kn_json_bool(info, "password", 0));
         copy_str(o, info, "region");
         copy_str(o, info, "version");
+        /* build identity (server_info.h): releases.c turns it into outdated / incompatible */
+        copy_str(o, info, "commit");
+        cJSON_AddNumberToObject(o, "commit_time", (double) kn_json_int(info, "commit_time", 0));
+        copy_str(o, info, "build_time");
+        copy_str(o, info, "protocol");
         cJSON_AddNumberToObject(o, "ping_ms", e->ping_ms);
         cJSON_AddNumberToObject(o, "last_seen", (double) e->last_ok_wall_s);
         cJSON_AddItemToArray(arr, o);

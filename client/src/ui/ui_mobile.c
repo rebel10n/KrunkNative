@@ -638,48 +638,35 @@ int ui_mobile_take_look(const int aiming, float *dx, float *dy) {
 
 // ---------------------------------------------------------------- settings window
 
-// Appends src[0..n) to the growing buffer.
-static void append(char **w, const char *src, const size_t n) {
-    memcpy(*w, src, n);
-    *w += n;
-}
-
-// The tab markup was generated with isMobile false: every "mobile" row is
-// `id="<key>_div" style="display:none"` and, because hidden rows never count towards
-// hk[cat], each of them re-opened the category (`</div>` + a hidden setHed_mobile +
-// `<div id="setBod_mobile">`). With isMobile the rows are display:block and only the
-// first row opens the category, with the header shown (hj.replace(... "display:none")).
+// The tab markup was generated with isMobile false (v7.1.4 windows[0].getSettings): every
+// "mobile" row is `id="<key>_div" style="display:none"` and, as none counts towards the
+// category, the Mobile header and body stay `style="display:none"`. With isMobile the rows
+// are display:block and the category shows.
 char *ui_mobile_settings_html(const char *tab_html) {
-    static const char HEAD_HIDDEN[] = "<div class=\"setHed\" id=\"setHed_mobile\" style=\"display:none\"";
-    static const char HEAD_SHOWN[] = "<div class=\"setHed\" id=\"setHed_mobile\"";
-    static const char BODY_OPEN[] = "<div id=\"setBod_mobile\">";
-    static const char ROW_HIDDEN[] = "Mbl_div\" style=\"display:none\"";
-    static const char ROW_SHOWN[] = "Mbl_div\" style=\"display:block\"";
+    static const char HEAD_HIDDEN[] = "id=\"setHed_mobile\" style=\"display:none\"";
+    static const char BODY_HIDDEN[] = "id=\"setBod_mobile\" style=\"display:none\"";
+    static const char ROW_HIDDEN[] = "_div\" style=\"display:none\"";
     if (!tab_html || !ui_mobile_active() || !strstr(tab_html, HEAD_HIDDEN)) return NULL;
-    char *out = malloc(strlen(tab_html) + 64 * 16 + 1);
-    if (!out) return NULL;
-    char *w = out;
-    int heads = 0;
-    for (const char *p = tab_html; *p;) {
-        if (!strncmp(p, ROW_HIDDEN, sizeof(ROW_HIDDEN) - 1)) {
-            append(&w, ROW_SHOWN, sizeof(ROW_SHOWN) - 1);
-            p += sizeof(ROW_HIDDEN) - 1;
-            continue;
+    const char *body = strstr(tab_html, BODY_HIDDEN);
+    StrBuf sb = {0};
+    const char *p = tab_html;
+    const char *head = strstr(p, HEAD_HIDDEN);
+    sb_append_n(&sb, p, (size_t) (head - p));
+    sb_append(&sb, "id=\"setHed_mobile\"");
+    p = head + sizeof(HEAD_HIDDEN) - 1;
+    if (body && body > p) {
+        sb_append_n(&sb, p, (size_t) (body - p));
+        sb_append(&sb, "id=\"setBod_mobile\"");
+        p = body + sizeof(BODY_HIDDEN) - 1;
+        // the category's rows: up to the next category header
+        const char *end = strstr(p, "<div class=\"setHed\"");
+        if (!end) end = p + strlen(p);
+        for (const char *row; (row = strstr(p, ROW_HIDDEN)) && row < end;) {
+            sb_append_n(&sb, p, (size_t) (row - p));
+            sb_append(&sb, "_div\" style=\"display:block\"");
+            p = row + sizeof(ROW_HIDDEN) - 1;
         }
-        if (!strncmp(p, HEAD_HIDDEN, sizeof(HEAD_HIDDEN) - 1)) {
-            const char *body = strstr(p, BODY_OPEN);
-            if (heads++ == 0 || !body) {
-                append(&w, HEAD_SHOWN, sizeof(HEAD_SHOWN) - 1);
-                p += sizeof(HEAD_HIDDEN) - 1;
-                continue;
-            }
-            // a repeated category opening: drop the `</div>` before it, the header and the body opener
-            if (w - out >= 6 && !strncmp(w - 6, "</div>", 6)) w -= 6;
-            p = body + sizeof(BODY_OPEN) - 1;
-            continue;
-        }
-        *w++ = *p++;
     }
-    *w = 0;
-    return out;
+    sb_append(&sb, p);
+    return sb_finish(&sb);
 }

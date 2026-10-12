@@ -116,7 +116,7 @@ static void tpl_finish(StrBuf *out, Tpl *t) {
 }
 
 // tpl.split(needle).join(replacement)
-static void sb_append_replace_all(StrBuf *out, const char *tpl, const char *needle, const char *replacement) {
+void sb_append_replace_all(StrBuf *out, const char *tpl, const char *needle, const char *replacement) {
     const size_t nlen = strlen(needle);
     const char *cur = tpl;
     for (;;) {
@@ -132,32 +132,45 @@ static void sb_append_replace_all(StrBuf *out, const char *tpl, const char *need
 }
 
 // ---------------------------------------------------------------- window files
+// ui/windows (tools/ui-import/windows_v7.py): `<n>.html` = the markup v7.1.4 writes for
+// showWindow(n), settings-<basic|advanced>-<t>.html = windows[0] per tab, controls-<t>.html
+// = windows[6] per tab, windows.json = their header / stickyHeader / #menuWindow class and
+// inline style.
 
-#define UI_WINDOWS_MAX 24
+#define UI_WINDOWS_MAX 64
 #define UI_SETTINGS_TABS_MAX 8
+#define UI_CONTROLS_TABS_MAX 8
 
 typedef struct {
     char key[8];
-    char header[40];
-    int sticky;
+    UiWindowMeta meta;
+    char header[48];
+    char cls[48];
+    char style[96];
+    char label[32];
     char *html;      // windows[key].file content
-    char *card;      // "card" (6), "item" (10), "mapCard" (host)
-    char part_name[8];
 } UiWindowFile;
+
+typedef struct {
+    char name[32];
+    char *html;
+} UiTabFile;
 
 static UiWindowFile g_files[UI_WINDOWS_MAX];
 static int g_file_count;
-static char *g_settings_head;
-static char *g_settings_tabs[UI_SETTINGS_TABS_MAX];
-static int g_settings_tab_count;
-static char g_settings_header[40] = "Game Settings";
-static int g_settings_sticky = 1;
+static UiTabFile g_settings_tabs[2][UI_SETTINGS_TABS_MAX];
+static int g_settings_tab_count[2];
+static UiWindowFile g_settings_file; // meta of windows[0] (header "Game Settings", sticky, dark)
+static UiTabFile g_controls_tabs[UI_CONTROLS_TABS_MAX];
+static int g_controls_tab_count;
 static int g_loaded;
 
 static char *windows_dir(void) {
 #ifdef __EMSCRIPTEN__
     return concat("/ui/windows/", "");       // --preload-file ui/windows@/ui/windows
 #else
+    const char *dir = getenv("KRUNKNATIVE_UI_DIR"); // main.c's ui dir override
+    if (dir && *dir) return concat(dir, "/windows/");
     return concat(assets_path(), "../ui/windows/");
 #endif
 }
@@ -181,6 +194,30 @@ static char *load_window_file(const char *dir, const char *file) {
 static const char *json_str(const cJSON *obj, const char *key, const char *fallback) {
     const cJSON *item = cJSON_GetObjectItem(obj, key);
     return cJSON_IsString(item) ? cJSON_GetStringValue(item) : fallback;
+}
+
+static void read_meta(UiWindowFile *w, const cJSON *entry) {
+    snprintf(w->header, sizeof(w->header), "%s", json_str(entry, "header", ""));
+    snprintf(w->cls, sizeof(w->cls), "%s", json_str(entry, "cls", ""));
+    snprintf(w->style, sizeof(w->style), "%s", json_str(entry, "style", ""));
+    snprintf(w->label, sizeof(w->label), "%s", json_str(entry, "label", ""));
+    w->meta.header = w->header;
+    w->meta.cls = w->cls;
+    w->meta.style = w->style;
+    w->meta.label = w->label;
+    w->meta.sticky = cJSON_IsTrue(cJSON_GetObjectItem(entry, "sticky"));
+}
+
+static int load_tabs(const char *dir, const cJSON *list, UiTabFile *out, const int max) {
+    int n = 0;
+    const cJSON *tab;
+    cJSON_ArrayForEach(tab, list) {
+        if (n == max) break;
+        snprintf(out[n].name, sizeof(out[n].name), "%s", json_str(tab, "name", ""));
+        out[n].html = load_window_file(dir, json_str(tab, "file", NULL));
+        n++;
+    }
+    return n;
 }
 
 int ui_windows_load(void) {
@@ -207,43 +244,30 @@ int ui_windows_load(void) {
         return 0;
     }
 
-    const cJSON *windows = cJSON_GetObjectItem(root, "windows");
     const cJSON *entry;
-    cJSON_ArrayForEach(entry, windows) {
+    cJSON_ArrayForEach(entry, cJSON_GetObjectItem(root, "windows")) {
         if (g_file_count == UI_WINDOWS_MAX || !entry->string) continue;
         UiWindowFile *w = &g_files[g_file_count++];
         snprintf(w->key, sizeof(w->key), "%s", entry->string);
-        snprintf(w->header, sizeof(w->header), "%s", json_str(entry, "header", ""));
-        w->sticky = cJSON_IsTrue(cJSON_GetObjectItem(entry, "sticky"));
+        read_meta(w, entry);
         w->html = load_window_file(dir, json_str(entry, "file", NULL));
-        static const char *parts[] = {"card", "item", "mapCard"};
-        for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
-            const char *file = json_str(entry, parts[i], NULL);
-            if (!file) continue;
-            w->card = load_window_file(dir, file);
-            snprintf(w->part_name, sizeof(w->part_name), "%s", parts[i]);
-            break;
-        }
     }
 
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
-    if (settings) {
-        snprintf(g_settings_header, sizeof(g_settings_header), "%s", json_str(settings, "header", "Game Settings"));
-        const cJSON *sticky = cJSON_GetObjectItem(settings, "sticky");
-        if (cJSON_IsBool(sticky)) g_settings_sticky = cJSON_IsTrue(sticky);
-        g_settings_head = load_window_file(dir, json_str(settings, "head", NULL));
-        const cJSON *tab;
-        cJSON_ArrayForEach(tab, cJSON_GetObjectItem(settings, "tabs")) {
-            if (g_settings_tab_count == UI_SETTINGS_TABS_MAX || !cJSON_IsString(tab)) continue;
-            g_settings_tabs[g_settings_tab_count] = load_window_file(dir, cJSON_GetStringValue(tab));
-            char *mobile = ui_mobile_settings_html(g_settings_tabs[g_settings_tab_count]); // isMobile: "mobile" rows shown
+    read_meta(&g_settings_file, settings);
+    snprintf(g_settings_file.key, sizeof(g_settings_file.key), "1");
+    g_settings_tab_count[0] = load_tabs(dir, cJSON_GetObjectItem(settings, "basic"), g_settings_tabs[0], UI_SETTINGS_TABS_MAX);
+    g_settings_tab_count[1] = load_tabs(dir, cJSON_GetObjectItem(settings, "advanced"), g_settings_tabs[1], UI_SETTINGS_TABS_MAX);
+    for (int v = 0; v < 2; v++) {
+        for (int t = 0; t < g_settings_tab_count[v]; t++) {
+            char *mobile = ui_mobile_settings_html(g_settings_tabs[v][t].html); // isMobile: "mobile" rows shown
             if (mobile) {
-                free(g_settings_tabs[g_settings_tab_count]);
-                g_settings_tabs[g_settings_tab_count] = mobile;
+                free(g_settings_tabs[v][t].html);
+                g_settings_tabs[v][t].html = mobile;
             }
-            g_settings_tab_count++;
         }
     }
+    g_controls_tab_count = load_tabs(dir, cJSON_GetObjectItem(cJSON_GetObjectItem(root, "controls"), "tabs"), g_controls_tabs, UI_CONTROLS_TABS_MAX);
 
     cJSON_Delete(root);
     free(dir);
@@ -258,27 +282,57 @@ static const UiWindowFile *find_file(const char *key) {
 }
 
 const char *ui_windows_html(const char *key) {
+    ui_windows_load();
     const UiWindowFile *w = find_file(key);
     return w && w->html ? w->html : "";
 }
 
-const char *ui_windows_part(const char *key, const char *part) {
+const UiWindowMeta *ui_windows_meta(const char *key) {
+    ui_windows_load();
+    if (!strcmp(key, "1")) return &g_settings_file.meta;
     const UiWindowFile *w = find_file(key);
-    return w && w->card && !strcmp(w->part_name, part) ? w->card : "";
+    return w ? &w->meta : NULL;
 }
 
-int ui_settings_tab_count(void) { return g_settings_tab_count; }
-const char *ui_settings_tab_html(const int tab) {
-    return tab >= 0 && tab < g_settings_tab_count && g_settings_tabs[tab] ? g_settings_tabs[tab] : "";
+static int view_index(const int view) { return view ? 1 : 0; }
+
+int ui_settings_view_tab_count(const int view) {
+    ui_windows_load();
+    return g_settings_tab_count[view_index(view)];
 }
-const char *ui_settings_head_html(void) { return g_settings_head ? g_settings_head : ""; }
+
+const char *ui_settings_view_tab_html(const int view, const int tab) {
+    ui_windows_load();
+    const int v = view_index(view);
+    return tab >= 0 && tab < g_settings_tab_count[v] && g_settings_tabs[v][tab].html ? g_settings_tabs[v][tab].html : "";
+}
+
+const char *ui_settings_view_tab_name(const int view, const int tab) {
+    ui_windows_load();
+    const int v = view_index(view);
+    return tab >= 0 && tab < g_settings_tab_count[v] ? g_settings_tabs[v][tab].name : "";
+}
+
+// The advanced view lists every setting (the basic one is a subset).
+int ui_settings_tab_count(void) { return ui_settings_view_tab_count(1); }
+const char *ui_settings_tab_html(const int tab) { return ui_settings_view_tab_html(1, tab); }
+
+int ui_controls_tab_count(void) {
+    ui_windows_load();
+    return g_controls_tab_count;
+}
+
+const char *ui_controls_tab_html(const int tab) {
+    ui_windows_load();
+    return tab >= 0 && tab < g_controls_tab_count && g_controls_tabs[tab].html ? g_controls_tabs[tab].html : "";
+}
+
+const char *ui_controls_tab_name(const int tab) {
+    ui_windows_load();
+    return tab >= 0 && tab < g_controls_tab_count ? g_controls_tabs[tab].name : "";
+}
 
 // ---------------------------------------------------------------- Krunker tables
-
-// Krunker's class window does not list this one (premium only).
-static int class_card_hidden(const char *name) {
-    return name && !strcmp(name, "Deagler");
-}
 
 // mapThumb(): the official map's public/img/maps card, else img/noimg.png (map_image "").
 const char *ui_map_thumb(const char *name) {
@@ -291,294 +345,98 @@ const char *ui_map_thumb(const char *name) {
 
 // ---------------------------------------------------------------- generators
 
+// windows[0].genList() for the current view (basic/advanced) and tab: the captured tab
+// with its `settingTab` row and the advanced switch matching the state. The settings
+// rows' values are applied after rendering (ui_window_post -> ui_settings_apply_values).
 static char *gen_settings(void) {
     const MenuUi *ui = menu_ui();
+    const int view = ui->settings_view;
+    const int tabs = ui_settings_view_tab_count(view);
+    const int client_tab = ui_client_settings_tab(); // desktop client: "Client" after Krunker's tabs
+    int tab = ui->settings_tab;
+    if (tab != client_tab && (tab < 0 || tab >= tabs)) tab = 0;
+    // the captured tab (or the first one for the Client tab: same header, settings replaced)
+    const char *tpl = ui_settings_view_tab_html(view, tab == client_tab ? 0 : tab);
     StrBuf out = {0};
-    // mark the active tab: the n-th `class="settingTab "` becomes `settingTab tabANew`
-    const char *needle = "class=\"settingTab \"";
-    const size_t nlen = strlen(needle);
-    const char *cur = ui_settings_head_html();
-    int n = 0;
-    for (;;) {
-        const char *hit = strstr(cur, needle);
-        if (!hit) break;
-        sb_append_n(&out, cur, (size_t) (hit - cur));
-        sb_append(&out, n++ == ui->settings_tab ? "class=\"settingTab tabANew\"" : "class=\"settingTab \"");
-        cur = hit + nlen;
+    const char *holder = strstr(tpl, "<div id=\"settHolder\">");
+    const char *layout = strstr(tpl, "<div id=\"settingsTabLayout\">");
+    if (!holder || !layout || layout > holder) {
+        sb_append(&out, tpl);
+        return sb_finish(&out);
     }
-    sb_append(&out, cur);
-    // the desktop client's "Client" tab after Krunker's six (ui_client_settings.c)
-    char *head = ui_client_settings_head(out.data ? out.data : "", ui->settings_tab);
+    // header up to the tab row: the advanced switch follows the view
+    StrBuf head = {0};
+    sb_append_n(&head, tpl, (size_t) (layout - tpl));
+    char *head_s = sb_finish(&head);
+    const char *chk = strstr(head_s, "id=\"typeBtn\"");
+    if (chk) {
+        const int checked = strstr(chk, " checked") && strstr(chk, " checked") < strchr(chk, '>');
+        if (checked != (view == 1)) {
+            const char *gt = strchr(chk, '>');
+            sb_append_n(&out, head_s, (size_t) (chk - head_s));
+            if (view == 1) {
+                sb_append(&out, "id=\"typeBtn\" checked=\"\"");
+                sb_append_n(&out, chk + strlen("id=\"typeBtn\""), (size_t) (gt - chk - strlen("id=\"typeBtn\"")));
+            } else {
+                // drop the checked attribute
+                StrBuf attrs = {0};
+                sb_append_n(&attrs, chk, (size_t) (gt - chk));
+                char *a = sb_finish(&attrs);
+                char *c = strstr(a, " checked=\"\"");
+                if (c) memmove(c, c + strlen(" checked=\"\""), strlen(c + strlen(" checked=\"\"")) + 1);
+                sb_append(&out, a);
+                free(a);
+            }
+            sb_append(&out, gt);
+            free(head_s);
+            head_s = sb_finish(&out);
+        }
+    }
     sb_free(&out);
-    sb_append(&out, head);
-    free(head);
+    sb_append(&out, head_s);
+    free(head_s);
+    // windows[0].getTabs(): one settingTab per tab, the active one tabANew
+    sb_append(&out, "<div id=\"settingsTabLayout\">");
+    for (int t = 0; t < tabs; t++) {
+        if (t) sb_append(&out, "\n");
+        sb_appendf(&out, "<div class=\"settingTab %s\" onmouseenter=\"playTick()\" onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">",
+                   t == tab ? "tabANew" : "", t);
+        sb_append_esc(&out, ui_settings_view_tab_name(view, t));
+        sb_append(&out, "</div>");
+    }
+    if (client_tab >= 0) // the desktop client's Client tab (ui_client_settings.c), as v7's own client adds it
+        sb_appendf(&out, "\n<div class=\"settingTab %s\" onmouseenter=\"playTick()\" onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">Client</div>",
+                   tab == client_tab ? "tabANew" : "", client_tab);
+    sb_append(&out, "</div></div>");
     sb_append(&out, "<div id=\"settHolder\">");
-    // acc && tabIndex == 0: the account's settings backup (social socket uploadS / getS)
-    if (account_get() && ui->settings_tab == 0) sb_append(&out, "<div class=\"settName\" style=\"margin-top:15px\">\n                Backup Settings\n                <div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"uploadSettings()\">Upload</div>\n                <div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"fetchSettings()\">Download</div>\n            </div>");
-    if (ui->settings_tab >= 0 && ui->settings_tab == ui_client_settings_tab()) {
+    if (tab == client_tab) {
         char *client = ui_client_settings_tab_html(0);
         sb_append(&out, client);
         free(client);
     } else {
+        const char *body = holder + strlen("<div id=\"settHolder\">");
+        size_t len = strlen(body);
+        if (len >= 6 && !strcmp(body + len - 6, "</div>")) len -= 6; // the holder's own </div>
+        StrBuf inner = {0};
+        sb_append_n(&inner, body, len);
+        char *inner_s = sb_finish(&inner);
+        // acc && tabIndex == 0: the account's settings backup row comes from the capture of a
+        // guest, so it is added here (social socket uploadS / getS)
+        if (account_get() && tab == 0 && !strstr(inner_s, "uploadSettings()")) {
+            sb_append(&out, "<div class='setBodH'><div class=\"settName\" style=\"margin-top:15px\">\n\t\t\t\tBackup Settings\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"uploadSettings()\">Upload</div>\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"fetchSettings()\">Download</div>\n\t\t\t</div></div>");
+        }
         // the Sound tab gains the client's Audio Output row (ui_client_settings.c)
-        char *tab = ui_client_settings_extend_tab(ui_settings_tab_html(ui->settings_tab));
-        sb_append(&out, tab ? tab : ui_settings_tab_html(ui->settings_tab));
-        free(tab);
+        char *ext = ui_client_settings_extend_tab(inner_s);
+        sb_append(&out, ext ? ext : inner_s);
+        free(ext);
+        free(inner_s);
     }
     sb_append(&out, "</div>");
     return sb_finish(&out);
 }
 
-static char *gen_classes(void) {
-    const MenuUi *ui = menu_ui();
-    const char *card = ui_windows_part("6", "card");
-    StrBuf out = {0};
-    sb_append(&out, "<div class=\"skinList\">");
-    for (int i = 0; i < ui->class_count; i++) {
-        const MenuClass *c = &ui->classes[i];
-        if (class_card_hidden(c->name)) continue;
-        char num[16];
-        Tpl t = {card};
-        // .replace(/selectClass\(\d+\)/, 'selectClass(' + index + ')')
-        snprintf(num, sizeof(num), "%d", c->index);
-        tpl_splice(&out, &t, "selectClass(", ")", num, 0);
-        // .replace(/onmouseenter="playTick\(\)">[^<]*<div class="classWeap">[^<]*<\/div>/, ...)
-        tpl_splice(&out, &t, "onmouseenter=\"playTick()\">", "<div class=\"classWeap\">", c->name ? c->name : "", 1);
-        tpl_splice(&out, &t, "<div class=\"classWeap\">", "</div>", c->weapon ? c->weapon : "", 1);
-        // .replace(/src="[^"]*"/, ...)
-        tpl_splice(&out, &t, "src=\"", "\"", c->icon, 1);
-        // .replace(/<div class="classHP">\d+/, ...)
-        snprintf(num, sizeof(num), "%d", c->hp);
-        tpl_splice(&out, &t, "<div class=\"classHP\">", "<", num, 0);
-        tpl_finish(&out, &t);
-    }
-    sb_append(&out, "</div>");
-    return sb_finish(&out);
-}
-
-// The Custom Games list is server data in Krunker (the `maps` popular request, rendered by
-// the client's genList into .mapListItem cards): the v3.1.1 offline server lists its
-// maps/ and custom_maps/ (publicRoutes.ts loadMaps), i.e. the map catalogue
-// (shared/src/map_catalog.c), in the orders it answered a guest (captured in
-// doc/ref/krunker-v3.1.1/windows/win-games.html): no thumbnails (map_image is empty, so
-// the card keeps ./img/noimg.png), 0 votes. Fields: map_name, map_id, creatorname,
-// map_votes, mod_url. Favorites is empty ("No Games found!") and Search shows the search
-// box (its request never answers).
-static int g_games_tab; // windows[9].tabIndex
-
-void ui_games_switch_tab(const int tab) {
-    g_games_tab = tab >= 0 && tab <= 5 ? tab : 0;
-    menu_rerender_if_open(10);
-}
-
-// One .mapListItem of the captured template (getCardsList) for a map row.
-static void games_item(StrBuf *out, const char *item, const char *name, const char *mod_url, const char *id, const char *creator, const int vote_count) {
-    char url[160], host_args[320], fav[48], votes[16];
-    snprintf(url, sizeof(url), "/social.html?p=map&amp;q=%s", name);
-    snprintf(host_args, sizeof(host_args), "%s&quot;,&quot;%s&quot;,&quot;%s&quot;,&quot;%s", name, mod_url, id, creator);
-    snprintf(fav, sizeof(fav), "0, this, %s", id);
-    snprintf(votes, sizeof(votes), "%d", vote_count);
-
-    Tpl t = {item};
-    tpl_splice(out, &t, "openURL(&quot;", "&quot;);", url, 0);             // mapInfoB
-    tpl_splice(out, &t, "playMap(&quot;", "&quot;);", name, 0);            // searchIcon
-    tpl_splice(out, &t, "favoriteM(", ");", fav, 0);                       // creationAction
-    tpl_splice(out, &t, "selectHostMap(&quot;", "&quot;)", host_args, 0);  // thumbnail
-    tpl_splice(out, &t, "selectHostMap(&quot;", "&quot;)", host_args, 0);  // anchor
-    tpl_splice(out, &t, "&quot;)\">", "</a>", name, 0);                   // anchor text
-    tpl_splice(out, &t, "profile&amp;q=", "\"", creator, 0);              // creator link
-    tpl_splice(out, &t, "\">", "</a>", creator, 0);                       // creator text
-    tpl_splice(out, &t, "flex-grow:1\">", "<", votes, 0);                 // votes
-    tpl_finish(out, &t);
-}
-
-// windows[9].gen() for the map tab: header markup + one .mapListItem per entry (genList).
-static char *gen_games(void) {
-    const char *item = ui_windows_part("10", "item");
-    StrBuf out = {0};
-    // the header template has Popular active: move tabANew to the current tab
-    const char *needle = "class=\"menuTabNew tabANew\"";
-    const char *head = ui_windows_html("10");
-    const char *hit = strstr(head, needle);
-    if (hit && g_games_tab) {
-        sb_append_n(&out, head, (size_t) (hit - head));
-        sb_append(&out, "class=\"menuTabNew\"");
-        const char *rest = hit + strlen(needle);
-        char tab[80];
-        snprintf(tab, sizeof(tab), "class=\"menuTabNew\" onclick=\"windows[9].switchTab(%d)\"", g_games_tab);
-        const char *t = strstr(rest, tab);
-        if (t) {
-            sb_append_n(&out, rest, (size_t) (t - rest));
-            sb_append(&out, "class=\"menuTabNew tabANew\"");
-            sb_append(&out, t + strlen("class=\"menuTabNew\""));
-        } else {
-            sb_append(&out, rest);
-        }
-    } else {
-        sb_append(&out, head);
-    }
-    sb_append(&out, "<div style=\"color:rgba(0,0,0,0.3)\" id=\"mapList\">");
-    if (g_games_tab == 5) {
-        sb_append(&out, "<input type=\"text\" id=\"mpSrch\" class=\"smlInput\" placeholder=\"Game Name\" onkeydown=\"if(window.event.keyCode==13)windows[9].searchMaps()\"><div class=\"searchBtn\" onclick=\"windows[9].searchMaps()\">Search</div><div style=\"color:rgba(0,0,0,0.5);margin-top:10px\" id=\"searchResultsMA\"></div></div>");
-        return sb_finish(&out);
-    }
-    // Featured / My Games come back whole (no Load More); Popular / New are paged
-    const int paged = g_games_tab == 0 || g_games_tab == 2;
-    // brain (servers_ui.c): the rows of GET /api/maps?index=<tab> (catalogue + published maps)
-    const cJSON *brain_rows = NULL;
-    const int brain = servers_games_tab_rows(g_games_tab, &brain_rows);
-    if (brain == 0) {
-        sb_append(&out, "<div class=\"loadMoreW\">Loading...</div></div>"); // API_CLIENT.listMaps pending
-        return sb_finish(&out);
-    }
-    if (brain > 0) {
-        const cJSON *r;
-        size_t shown = 0;
-        cJSON_ArrayForEach(r, brain_rows) {
-            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(r, "map_name"));
-            const char *creator = cJSON_GetStringValue(cJSON_GetObjectItem(r, "creatorname"));
-            const char *mod_url = cJSON_GetStringValue(cJSON_GetObjectItem(r, "mod_url"));
-            const cJSON *map_id = cJSON_GetObjectItem(r, "map_id");
-            const cJSON *votes = cJSON_GetObjectItem(r, "map_votes");
-            if (!name) continue;
-            char id[24];
-            snprintf(id, sizeof(id), "%.0f", cJSON_IsNumber(map_id) ? map_id->valuedouble : 0.0);
-            games_item(&out, item, name, mod_url ? mod_url : "", id, creator ? creator : "Krunker", cJSON_IsNumber(votes) ? votes->valueint : 0);
-            shown++;
-        }
-        if (!shown) sb_append(&out, "No Games found!");
-        else if (paged && servers_games_tab_more(g_games_tab)) sb_append(&out, "<div class=\"loadMoreD\" onclick=\"windows[9].loadMore(this)\">Load More</div>");
-        sb_append(&out, "</div>");
-        return sb_finish(&out);
-    }
-    int order[64];
-    const size_t count = map_catalog_games_tab(g_games_tab, order, sizeof(order) / sizeof(order[0]));
-    for (size_t i = 0; i < count; i++) {
-        const MapCatalogEntry *e = map_catalog_at((size_t) order[i]);
-        char id[16];
-        snprintf(id, sizeof(id), "%u", (unsigned) map_catalog_map_id(e));
-        games_item(&out, item, e->name, e->mod_url, id, e->creator, 0);
-    }
-    if (!count) sb_append(&out, "No Games found!");
-    // Popular / New are paged (no sendID/noPages): Krunker appends its Load More button
-    else if (paged) sb_append(&out, "<div class=\"loadMoreD\" onclick=\"windows[9].loadMore(this)\">Load More</div>");
-    sb_append(&out, "</div>");
-    return sb_finish(&out);
-}
-
-// Real genHost (windows[7]): every bundled map (Krunker's `bg` list = the official
-// catalogue maps) except Soul Sanctum, unchecked, `gameMap<mapIndex>` ids and
-// map_<mapIndex> thumbnails; the boxes are read back by createPrivateRoom
-// (ui_host_checked_map_index). No community game selected (eI).
-static char *gen_host(void) {
-    StrBuf cards = {0};
-    for (size_t i = 0; i < map_catalog_count(); i++) {
-        const MapCatalogEntry *e = map_catalog_at(i);
-        if (!e->hostable) continue;
-        const char *name = e->name;
-        char thumb[48];
-        sb_append(&cards, "<label class=\"hostMap\"><div class=\"hostMapName blackShad\">");
-        // aU.capFirst(name)
-        char first[2] = {(char) toupper((unsigned char) name[0]), 0};
-        sb_append_esc(&cards, first);
-        if (name[0]) sb_append_esc(&cards, name + 1);
-        sb_append(&cards, "</div>");
-        if (e->host_by[0]) {
-            sb_append(&cards, "<div class=\"hostMapBy blackShad\">by ");
-            sb_append_esc(&cards, e->host_by);
-            sb_append(&cards, "</div>");
-        }
-        if (e->host_year[0]) sb_appendf(&cards, "<div class=\"hostMapYear blackShad\">%s</div>", e->host_year);
-        if (e->host_version[0]) sb_appendf(&cards, "<div class=\"hostMapVersion blackShad\">%s</div>", e->host_version);
-        sb_appendf(&cards, "<div class=\"mapInfoT\" style=\"top:54px\">?</div><input id=\"gameMap%d\" type=\"checkbox\">", e->index);
-        sb_appendf(&cards, "<img loading=\"lazy\" draggable=\"false\" class=\"hostMapImg\" src=\"%s\"></label>",
-                   map_catalog_thumb(e, thumb, sizeof(thumb)) ? thumb : "img/noimg.png");
-    }
-    // "Select Modes": every mode without preventCustomGames (shared mode table), capFirst
-    // names, `gameMode<id>` ids, Free for All checked (no previous custom room).
-    StrBuf modes = {0};
-    int mode_total = 0;
-    const GameModeConfig *list = mode_list(&mode_total);
-    sb_append(&modes, "<div style=\"margin-top:5px\">");
-    for (int i = 0; list && i < mode_total; i++) {
-        if (!mode_hostable(i)) continue;
-        const char *mname = list[i].name ? list[i].name : "";
-        char first[2] = {(char) toupper((unsigned char) mname[0]), 0};
-        sb_append(&modes, "<label class=\"hostOpt\" onmouseenter=\"playTick()\"><span class=\"optName\">");
-        sb_append_esc(&modes, first);
-        if (mname[0]) sb_append_esc(&modes, mname + 1);
-        sb_appendf(&modes, "</span><input id=\"gameMode%d\" type=\"checkbox\"%s><div class=\"optCheck\"></div></label>", i, i == 0 ? " checked=\"\"" : "");
-    }
-    sb_append(&modes, "</div>");
-    char *tpl = NULL;
-    {
-        StrBuf with_maps = {0};
-        sb_append_replace_all(&with_maps, ui_windows_html("host"), "<!--MAPS-->", cards.data ? cards.data : "");
-        tpl = sb_finish(&with_maps);
-    }
-    sb_free(&cards);
-    StrBuf out = {0};
-    // splice the generated list over the captured one (between the Toggle header and the
-    // next section header)
-    const char *anchor = "windows[7].toggle(&quot;gameMode&quot;)\">Toggle</div></div>";
-    const char *a = strstr(tpl, anchor);
-    const char *b = a ? strstr(a, "<div class=\"settName b\" style=\"margin-top:20px\">") : NULL;
-    if (a && b) {
-        a += strlen(anchor);
-        sb_append_n(&out, tpl, (size_t) (a - tpl));
-        sb_append(&out, modes.data ? modes.data : "");
-        sb_append(&out, b);
-    } else {
-        sb_append(&out, tpl);
-    }
-    sb_free(&modes);
-    free(tpl);
-    return sb_finish(&out);
-}
-
-// createPrivateRoom's mode read-back: the first checked hostable #gameMode<id> (Krunker
-// rotates through all checked modes; the offline server plays one). -1 = none checked.
-int ui_host_checked_mode(void) {
-    int total = 0;
-    mode_list(&total);
-    for (int i = 0; i < total; i++) {
-        char id[24];
-        snprintf(id, sizeof(id), "gameMode%d", i);
-        HtmlElem box = mode_hostable(i) ? html_dom_by_id(id) : 0;
-        if (box && html_dom_get_checked(box)) return i;
-    }
-    return -1;
-}
-
-// createPrivateRoom's map read-back: the first checked #gameMap<mapIndex> box of the host
-// window (Krunker sends every checked map; KrunkNative's local server plays one). Returns
-// its map catalogue index, -1 when none is checked.
-int ui_host_checked_map_index(void) {
-    for (size_t i = 0; i < map_catalog_count(); i++) {
-        const MapCatalogEntry *e = map_catalog_at(i);
-        if (!e->hostable) continue;
-        char id[24];
-        snprintf(id, sizeof(id), "gameMap%d", e->index);
-        HtmlElem box = html_dom_by_id(id);
-        if (box && html_dom_get_checked(box)) return (int) i;
-    }
-    return -1;
-}
-
-// The same as a map name, NULL when none is checked.
-const char *ui_host_checked_map(void) {
-    const int index = ui_host_checked_map_index();
-    return index >= 0 ? map_catalog_at((size_t) index)->name : NULL;
-}
-
-static char *gen_servers(void) {
-    StrBuf out = {0};
-    StrBuf region = {0};
-    sb_append_esc(&region, MENU_REGION_NAME);
-    sb_append_replace_all(&out, ui_windows_html("2"), "New Jersey", region.data ? region.data : "");
-    sb_free(&region);
-    return sb_finish(&out);
-}
+// The Custom Games (windows[9]), Host (windows[7]) and Servers (windows[1]) windows and the
+// host window's read-back (ui_host_checked_*) live in servers_ui.c with the matchmaker client.
 
 static char *gen_static(const char *key) {
     StrBuf out = {0};
@@ -586,96 +444,61 @@ static char *gen_static(const char *key) {
     return sb_finish(&out);
 }
 
+// windows[] entries whose gen() KrunkNative writes; every other window v7 defines shows its
+// captured markup (ui/windows/<id>.html: the guest state of the real page).
 typedef struct {
     int id;
-    const char *key;
-    const char *header;
-    int sticky;
     char *(*gen)(void);
 } WindowDef;
 
-static char *gen_4(void) { return gen_static("4"); }
-static char *gen_5(void) { return gen_static("5"); }
-static char *gen_7(void) { return ui_controls_window_html(); } // live binds (ui_controls.c); 7.html is the default-binds capture
-static char *gen_14(void) { return gen_static("14"); }
-static char *gen_25(void) { return gen_static("25"); }
-static char *gen_27(void) { return gen_static("27"); }
-static char *gen_33(void) { return gen_static("33"); }
-static char *gen_join(void) { return gen_static("join"); }
+static char *gen_7(void) { return ui_controls_window_html(); } // live binds (ui_controls.c)
 static char *gen_9(void) { // Select Spray: owned sprays signed in (ui_loadout.c), else the default sprays
     char *owned = ui_loadout_generate(9, NULL);
     return owned ? owned : gen_static("9");
 }
-static char *gen_21(void) { return gen_static("21"); } // Advertise (guest: "Please Login to Submit a Bid")
-static char *gen_29(void) { return gen_static("29"); } // Support
-static char *gen_30(void) { return strdup(""); }       // Krunker Mail: signed in only (account_ui.c)
-static char *gen_13(void) { return clan_window_gen(); } // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
-// windows[35] Premium ("Things you get with Premium:"), opened by the Store Premium tab's link.
-static char *gen_36(void) {
-    static const char *const perks[] = {
-        "Golden Badge on Profile",
-        "Custom Profile Pictures",
-        "Custom Display Name",
-        "Monthly giveaway entry: Chance to win 50,000 KR",
-        "Custom Skin Color",
-        "Custom Hair Color",
-        "Custom Chat Name Color",
-        "Custom Commands: /god /noclip /kill /smite",
-        "Can host 16 player lobbies",
-        "Can enter Limited Premium Areas on Custom Maps",
-        "Increased Object Limit in Customs",
-        "Increased Max KR per Round to 40",
-        "Increased Market Sale Limit to 40",
-        "Bigger Thumbnails for Maps",
-        "Increased Trade Limit to 10 items",
-        "Increased Asset File Size",
-        "Increased Asset Upload Limit",
-    };
-    StrBuf sb = {0};
-    sb_append(&sb, "<div style='font-size: 22px;margin-bottom:10px'>Things you get with Premium:</div><div style='background-color:#333;padding:15px;border-radius:6px;border:5px solid var(--yellow)'>");
-    for (size_t i = 0; i < sizeof(perks) / sizeof(perks[0]); i++) sb_appendf(&sb, "<div class='settNameSmall premText'><i class='material-icons'>grade</i> %s</div>", perks[i]);
-    sb_append(&sb, "</div>");
-    return sb_finish(&sb);
-}
+static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (pListKey, hud_ui.c)
+static char *gen_13(void) { return clan_window_gen(); }
+static char *gen_14(void) { return store_window_gen(); } // Store (windows[13], store_ui.c)
+static char *gen_27(void) { return ranked_ui_window_gen(); } // Ranked (kept by KrunkNative, ranked_ui.c) // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
 // Change Loadout and the windows it opens, Changelog: ui_loadout.c
 static char *gen_loadout(void) { return ui_loadout_gen(); }
-#define LOADOUT_GEN(n) static char *gen_##n(void) { return ui_loadout_generate(n, NULL); }
+#define LOADOUT_GEN(n) static char *gen_##n(void) { char *h = ui_loadout_generate(n, NULL); return h ? h : gen_static(#n); }
 LOADOUT_GEN(15) LOADOUT_GEN(16) LOADOUT_GEN(17) LOADOUT_GEN(20) LOADOUT_GEN(26) LOADOUT_GEN(31)
 LOADOUT_GEN(32) LOADOUT_GEN(34) LOADOUT_GEN(35) LOADOUT_GEN(38) LOADOUT_GEN(39)
+LOADOUT_GEN(40) LOADOUT_GEN(41) LOADOUT_GEN(43) LOADOUT_GEN(44) LOADOUT_GEN(45) LOADOUT_GEN(46)
+LOADOUT_GEN(50) LOADOUT_GEN(51) LOADOUT_GEN(52)
 #undef LOADOUT_GEN
 
 static const WindowDef WINDOWS[] = {
-    {1, "1", "Game Settings", 1, gen_settings},
-    {2, "2", "Servers", 1, gen_servers},
-    {3, "3", "Change Loadout", 0, gen_loadout},
-    {4, "4", "Mod Manager", 0, gen_4},
-    {5, "5", "Account", 0, gen_5},
-    {6, "6", "Select Class", 0, gen_classes},
-    {7, "7", "Change Controls", 0, gen_7},
-    {10, "10", "Custom Games", 0, gen_games},
-    {13, "13", "Clans", 0, gen_13},
-    {14, "14", "Store", 0, gen_14},
-    {25, "25", "Client", 0, gen_25},
-    {27, "27", "Ranked", 0, gen_27},
-    {33, "33", "Challenges", 0, gen_33},
-    {9, "9", "Select Spray", 0, gen_9},
-    {15, "15", "Select Skin", 0, gen_15},
-    {16, "16", "Select Hat", 0, gen_16},
-    {17, "17", "Select Back", 0, gen_17},
-    {20, "20", "Select Secondary", 0, gen_20},
-    {21, "21", "Advertise", 0, gen_21},
-    {26, "26", "Select Melee", 0, gen_26},
-    {29, "29", "Support", 0, gen_29},
-    {30, "30", "Krunker Mail", 0, gen_30},
-    {31, "31", "Select Attachment", 0, gen_31},
-    {32, "32", "Select Reticle", 0, gen_32},
-    {34, "34", "Select Dye", 0, gen_34},
-    {35, "35", "Changelog", 0, gen_35},
-    {36, "36", "Premium", 0, gen_36},
-    {38, "38", "Select Waist", 0, gen_38},
-    {39, "39", "Select Face", 0, gen_39},
-    {MENU_WINDOW_HOST, "host", "Host Custom Game", 0, gen_host},
-    {MENU_WINDOW_JOIN, "join", "Join", 0, gen_join},
+    {SERVERS_WINDOW_CONNECT, servers_connect_window_gen}, // KrunkNative: the menu's Connect button (servers_ui.c)
+    {1, gen_settings},
+    {3, gen_loadout},
+    {7, gen_7},
+    {9, gen_9},
+    {13, gen_13},
+    {14, gen_14},
+    {27, gen_27},
+    {15, gen_15},
+    {16, gen_16},
+    {17, gen_17},
+    {20, gen_20},
+    {23, gen_23},
+    {26, gen_26},
+    {31, gen_31},
+    {32, gen_32},
+    {34, gen_34},
+    {35, gen_35},
+    {38, gen_38},
+    {39, gen_39},
+    {40, gen_40},
+    {41, gen_41},
+    {43, gen_43},
+    {44, gen_44},
+    {45, gen_45},
+    {46, gen_46},
+    {50, gen_50},
+    {51, gen_51},
+    {52, gen_52},
 };
 
 static const WindowDef *find_window(const int id) {
@@ -685,39 +508,43 @@ static const WindowDef *find_window(const int id) {
     return NULL;
 }
 
+// The window key ("<id>") when v7 has that window, NULL otherwise.
 const char *ui_window_key(const int id) {
-    const WindowDef *w = find_window(id);
-    return w ? w->key : NULL;
+    static char key[8];
+    if (id <= 0) return NULL;
+    snprintf(key, sizeof(key), "%d", id);
+    return ui_windows_meta(key) || find_window(id) ? key : NULL;
+}
+
+// #menuWindow class (windows[n].extraCls + "dark", stickyHeader) and inline style (width,
+// height, maxHeight, borderRadius, overflow-y) of showWindow(id), as captured.
+void ui_window_meta(const int id, const char **cls, const char **style) {
+    char key[8];
+    snprintf(key, sizeof(key), "%d", id);
+    const UiWindowMeta *m = ui_windows_meta(key);
+    if (cls) *cls = m ? m->cls : "dark";
+    if (style) *style = m ? m->style : "overflow-y: auto;";
 }
 
 char *ui_window_generate(const int id, const char **header, int *sticky) {
-    const WindowDef *w = find_window(id);
-    if (!w) return NULL;
+    if (!ui_window_key(id)) return NULL;
     ui_windows_load();
-
-    // windows.json overrides the header/sticky defaults, like the JS did with WIN.windows[k].
-    const char *hdr = w->header;
-    int stk = w->sticky;
-    if (id == 1) {
-        if (g_settings_header[0]) hdr = g_settings_header;
-        if (g_settings_sticky) stk = 1;
-    } else {
-        const UiWindowFile *f = find_file(w->key);
-        if (f && f->header[0]) hdr = f->header;
-        if (f && f->sticky) stk = 1;
-    }
-    if (header) *header = hdr;
-    if (sticky) *sticky = stk;
+    char key[8];
+    snprintf(key, sizeof(key), "%d", id);
+    const UiWindowMeta *m = ui_windows_meta(key);
+    if (header) *header = m ? m->header : "";
+    if (sticky) *sticky = m ? m->sticky : 0;
     // brain backend (backend_ui.h): the signed-in Account window and the live Servers
     // list replace the guest captures; NULL keeps them (no brain, guest)
     char *live = account_window_gen(id, header);
     if (!live) live = servers_window_gen(id, header);
     if (live) return live;
-    return w->gen();
+    const WindowDef *w = find_window(id);
+    return w ? w->gen() : gen_static(key);
 }
 
 void ui_window_post(const int id) {
-    if (id == 1) {
+    if (id == 1 || id == 32 || id == 41) { // 32 / 41: the reticle / scope pickers' settings rows
         ui_settings_apply_values(html_dom_by_id("menuWindow"));
     } else if (id == 5) {
         const MenuUi *ui = menu_ui();

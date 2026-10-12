@@ -4,6 +4,7 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <debug_capture.h>
+#include <app_mode.h>
 #include <png_write.h>
 #include <html_ui.h>
 #include <html_dom.h>
@@ -24,6 +25,9 @@ typedef struct {
     float pitch;
     float yaw;
     float fov;           // radians, 0 = keep the client's FOV
+    float ortho;         // KRUNKNATIVE_ORTHO: orthographic half height (world units), 0 = perspective
+    float far;           // KRUNKNATIVE_CAMERA_FAR: camera far plane, 0 = keep
+    int no_fog;          // KRUNKNATIVE_NO_FOG=1: fog off (editor captures, tools/editor-mcp)
     int hide_ui;
     const char *screenshot;
     int frames_wanted;
@@ -73,6 +77,14 @@ static void debug_capture_init(void) {
     const char *fov = getenv("KRUNKNATIVE_FOV");
     if (fov && *fov) g_capture.fov = (float) atof(fov) * (float) M_PI / 180.0f;
 
+    // editor captures (tools/editor-mcp render_*): orthographic views, no fog, far plane
+    const char *ortho = getenv("KRUNKNATIVE_ORTHO");
+    if (ortho && *ortho) g_capture.ortho = (float) atof(ortho);
+    const char *far = getenv("KRUNKNATIVE_CAMERA_FAR");
+    if (far && *far) g_capture.far = (float) atof(far);
+    const char *no_fog = getenv("KRUNKNATIVE_NO_FOG");
+    g_capture.no_fog = no_fog && !strcmp(no_fog, "1");
+
     const char *hide_ui = getenv("KRUNKNATIVE_HIDE_UI");
     g_capture.hide_ui = hide_ui && !strcmp(hide_ui, "1");
 
@@ -88,7 +100,10 @@ void debug_capture_apply_camera(Client *client) {
     debug_capture_init();
 
     if (g_capture.fov > 0.0f) client->camera.fov = g_capture.fov;
+    if (g_capture.far > 0.0f) client->camera.far = g_capture.far;
+    if (g_capture.no_fog) g_render_lighting.fog_enabled = 0;
     if (!g_capture.pinned) return;
+    client->camera.ortho = g_capture.ortho > 0.0f ? g_capture.ortho : 0.0f;
 
     client->camera.position = g_capture.position;
     client->camera.rotation.x = g_capture.pitch;
@@ -138,7 +153,9 @@ void debug_capture_frame_end(Client *client) {
     debug_capture_init();
     ui_cmds_poll(client);
     if (!g_capture.screenshot || g_capture.done) return;
-    if (!client->game.ready || !client->map_loaded) return;
+    // the game waits for its map; a page window (editor, hub, viewer) for its page to settle
+    // (app_mode_page_ready: the editor after its KRUNKNATIVE_EDITOR_SCRIPT ran)
+    if (app_mode() == APP_MODE_GAME ? !client->game.ready || !client->map_loaded : !app_mode_page_ready(client)) return;
 
     if (++g_capture.frames_drawn < g_capture.frames_wanted) return;
 
@@ -206,7 +223,10 @@ static int ui_cmds_args(const char *s, HtmlArg *args, char strs[][128], const in
 }
 
 static void ui_cmds_dispatch(char *calls) {
-    for (char *call = strtok(calls, ";"); call; call = strtok(NULL, ";")) {
+    // split on ';' by hand: callers may be inside their own strtok loop (editor scripts)
+    for (char *call = calls, *next; call; call = next) {
+        next = strchr(call, ';');
+        if (next) *next++ = 0;
         while (isspace((unsigned char) *call)) call++;
         char *paren = strchr(call, '(');
         if (!paren) continue;
@@ -230,6 +250,14 @@ static void ui_cmds_dispatch(char *calls) {
         const int handled = html_ui_dispatch(norm, &ev, args, argc);
         fprintf(stderr, "[ui_cmds] %s/%d -> %d\n", norm, argc, handled);
     }
+}
+
+void debug_capture_dispatch(const char *calls) {
+    char *copy = malloc(strlen(calls) + 1);
+    if (!copy) return;
+    memcpy(copy, calls, strlen(calls) + 1);
+    ui_cmds_dispatch(copy);
+    free(copy);
 }
 
 static void ui_cmds_click(GLFWwindow *w, const double x, const double y) {
@@ -337,8 +365,10 @@ static void ui_cmds_poll(Client *client) {
         if (path && !*path) path = NULL;
     }
     // One line per frame, and 4 frames after anything but a shot, so a shot queued right
-    // behind a command captures its result (layout, transitions' first frames).
+    // behind a command captures its result (layout, transitions' first frames). A page window
+    // (editor, hub, viewer) starts once its page is ready (app_mode_page_ready).
     if (!path || g_ui_cmds.cooldown-- > 0) return;
+    if (app_mode() != APP_MODE_GAME && !app_mode_page_ready(client)) return;
     FILE *f = fopen(path, "rb");
     if (!f) return;
     char line[sizeof(g_ui_cmds.pending)];

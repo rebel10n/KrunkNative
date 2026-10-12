@@ -1,101 +1,476 @@
 {
   "windows": {
-    "5": {
-      "header": "Account",
-      "sticky": false,
-      "file": "5.html"
-    },
-    "14": {
-      "header": "Store",
-      "sticky": false,
-      "file": "14.html"
-    },
-    "33": {
-      "header": "Challenges",
-      "sticky": false,
-      "file": "33.html"
-    },
-    "4": {
-      "header": "Mod Manager",
-      "sticky": false,
-      "file": "4.html"
-    },
-    "27": {
-      "header": "Ranked",
-      "sticky": false,
-      "file": "27.html"
+    "1": {
+      "header": "Game Settings",
+      "sticky": true,
+      "file": "1.html",
+      "label": "settings",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: auto; width: 1200px;"
     },
     "2": {
       "header": "Servers",
       "sticky": true,
-      "file": "2.html"
+      "file": "2.html",
+      "label": "server_browser",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: auto; width: 1150px;"
     },
     "3": {
       "header": "Change Loadout",
       "sticky": false,
-      "file": "3.html"
+      "file": "3.html",
+      "label": "customize",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 850px;"
+    },
+    "4": {
+      "header": "Mod Manager",
+      "sticky": false,
+      "file": "4.html",
+      "label": "mods",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1460px;"
+    },
+    "5": {
+      "header": "Account",
+      "sticky": false,
+      "file": "5.html",
+      "label": "profile",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 955px;"
     },
     "6": {
-      "header": "Select Class",
+      "header": "UNLOCALIZED STRING",
       "sticky": false,
       "file": "6.html",
-      "card": "6-card.html"
+      "label": "battlepass",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1580px; max-height: calc(100% - 189px);"
+    },
+    "7": {
+      "header": "Change Controls",
+      "sticky": true,
+      "file": "7.html",
+      "label": "controls",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: auto; width: 1300px;"
+    },
+    "8": {
+      "header": "Host Custom Game",
+      "sticky": false,
+      "file": "8.html",
+      "label": "host_games",
+      "cls": "dark",
+      "style": "overflow-y: scroll; width: 1200px;"
+    },
+    "9": {
+      "header": "Select Spray",
+      "sticky": true,
+      "file": "9.html",
+      "label": "spray_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 2263
     },
     "10": {
       "header": "Custom Games",
       "sticky": false,
       "file": "10.html",
-      "item": "10-item.html",
-      "itemCount": 36
+      "label": "games",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1950px;"
     },
-    "7": {
-      "header": "Change Controls",
+    "13": {
+      "header": "Clans",
       "sticky": false,
-      "file": "7.html"
+      "file": "13.html",
+      "label": "clan",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1000px;"
     },
-    "25": {
-      "header": "Client",
+    "14": {
+      "header": "Store",
       "sticky": false,
-      "file": "25.html"
+      "file": "14.html",
+      "label": "shop_crafting",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1300px;"
     },
-    "host": {
-      "header": "Host Custom Game",
-      "sticky": false,
-      "file": "host.html",
-      "mapCard": "host-mapcard.html"
+    "15": {
+      "header": "Select Skin",
+      "sticky": true,
+      "file": "15.html",
+      "label": "skin_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 2937
     },
-    "join": {
-      "header": "Join",
+    "16": {
+      "header": "Select Hat",
+      "sticky": true,
+      "file": "16.html",
+      "label": "hat_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 1623
+    },
+    "17": {
+      "header": "Select Body",
+      "sticky": true,
+      "file": "17.html",
+      "label": "body_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 789
+    },
+    "18": {
+      "header": "Load Mods",
       "sticky": false,
-      "file": "join.html"
+      "file": "18.html",
+      "label": "mods_load",
+      "cls": "dark",
+      "style": "overflow-y: auto;"
+    },
+    "20": {
+      "header": "Select Secondary",
+      "sticky": false,
+      "file": "20.html",
+      "label": "secondary_selection",
+      "cls": "dark",
+      "style": "overflow-y: auto;",
+      "trimmed": 16
     },
     "21": {
       "header": "Advertise",
       "sticky": false,
-      "file": "21.html"
+      "file": "21.html",
+      "label": "advertise",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1000px;"
     },
-    "29": {
-      "header": "Support",
-      "sticky": false,
-      "file": "29.html"
+    "23": {
+      "header": "Player List",
+      "sticky": true,
+      "file": "23.html",
+      "label": "player_list",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: auto; width: 1020px;"
     },
-    "9": {
-      "header": "Select Spray",
+    "24": {
+      "header": "Join",
       "sticky": false,
-      "file": "9.html"
+      "file": "24.html",
+      "label": "join_game",
+      "cls": "dark",
+      "style": "overflow-y: auto;"
+    },
+    "25": {
+      "header": "Client",
+      "sticky": false,
+      "file": "25.html",
+      "label": "client_download",
+      "cls": "dark",
+      "style": "overflow-y: auto;"
+    },
+    "26": {
+      "header": "Select Melee",
+      "sticky": true,
+      "file": "26.html",
+      "label": "melee_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 1683
+    },
+    "27": {
+      "header": "Ranked",
+      "sticky": false,
+      "file": "27.html",
+      "label": "ranked",
+      "cls": "menuWindowF dark",
+      "style": "overflow-y: auto; width: 1800px;"
+    },
+    "28": {
+      "header": "Partner Dashboard",
+      "sticky": false,
+      "file": "28.html",
+      "label": "partner_dashboard",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1200px;"
+    },
+    "30": {
+      "header": "Krunker Mail",
+      "sticky": false,
+      "file": "30.html",
+      "label": "mail",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1000px;"
+    },
+    "31": {
+      "header": "Select Attachment",
+      "sticky": false,
+      "file": "31.html",
+      "label": "attachment_selection",
+      "cls": "dark",
+      "style": "overflow-y: auto;",
+      "trimmed": 1
+    },
+    "32": {
+      "header": "Select Reticle",
+      "sticky": false,
+      "file": "32.html",
+      "label": "reticle_selection",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 900px;",
+      "trimmed": 22
+    },
+    "33": {
+      "header": "Challenges",
+      "sticky": false,
+      "file": "33.html",
+      "label": "challenges",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1200px;"
+    },
+    "34": {
+      "header": "Select Dye",
+      "sticky": true,
+      "file": "34.html",
+      "label": "dye_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 151
+    },
+    "35": {
+      "header": "Changelog",
+      "sticky": false,
+      "file": "35.html",
+      "label": "changelog",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1000px;"
+    },
+    "36": {
+      "header": "Premium",
+      "sticky": false,
+      "file": "36.html",
+      "label": "premium",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1000px;"
+    },
+    "37": {
+      "header": "Trading",
+      "sticky": false,
+      "file": "37.html",
+      "label": "trade",
+      "cls": "dark",
+      "style": "overflow-y: hidden; width: 1146px;"
+    },
+    "38": {
+      "header": "Select Waist",
+      "sticky": true,
+      "file": "38.html",
+      "label": "waist_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 429
+    },
+    "39": {
+      "header": "Select Face",
+      "sticky": true,
+      "file": "39.html",
+      "label": "face_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 3239
+    },
+    "40": {
+      "header": "Select Shoes",
+      "sticky": true,
+      "file": "40.html",
+      "label": "shoe_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 357
+    },
+    "41": {
+      "header": "Select Scope",
+      "sticky": false,
+      "file": "41.html",
+      "label": "scope_selection",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 900px;"
+    },
+    "42": {
+      "header": "Custom Games",
+      "sticky": false,
+      "file": "42.html",
+      "label": "host_type",
+      "cls": "dark",
+      "style": "overflow-y: hidden; width: 985px;"
+    },
+    "43": {
+      "header": "Select Pet",
+      "sticky": true,
+      "file": "43.html",
+      "label": "pet_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 81
+    },
+    "44": {
+      "header": "Select Wrist",
+      "sticky": true,
+      "file": "44.html",
+      "label": "wrist_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 9
+    },
+    "45": {
+      "header": "Select Streaks",
+      "sticky": false,
+      "file": "45.html",
+      "label": "streak_selection",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 877px;"
+    },
+    "46": {
+      "header": "Select Charm",
+      "sticky": true,
+      "file": "46.html",
+      "label": "charm_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 45
+    },
+    "47": {
+      "header": "undefined",
+      "sticky": false,
+      "file": "47.html",
+      "label": "terms",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 1460px;"
+    },
+    "48": {
+      "header": "Custom Games",
+      "sticky": false,
+      "file": "48.html",
+      "label": "host_type",
+      "cls": "dark",
+      "style": "overflow-y: hidden; width: 985px;"
+    },
+    "49": {
+      "header": "UNLOCALIZED STRING",
+      "sticky": false,
+      "file": "49.html",
+      "label": null,
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 985px;"
+    },
+    "50": {
+      "header": "Select Back",
+      "sticky": true,
+      "file": "50.html",
+      "label": "back_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 1377
+    },
+    "51": {
+      "header": "Select Head",
+      "sticky": true,
+      "file": "51.html",
+      "label": "head_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 2175
+    },
+    "52": {
+      "header": "Select Player Card",
+      "sticky": true,
+      "file": "52.html",
+      "label": "playercard_selection",
+      "cls": "stickyHeader dark",
+      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
+      "trimmed": 271
     }
   },
   "settings": {
     "header": "Game Settings",
     "sticky": true,
-    "head": "settings-head.html",
+    "cls": "stickyHeader dark",
+    "style": "overflow-y: auto; width: 1200px;",
+    "basic": [
+      {
+        "name": "General",
+        "file": "settings-basic-0.html"
+      },
+      {
+        "name": "Display",
+        "file": "settings-basic-1.html"
+      },
+      {
+        "name": "Game",
+        "file": "settings-basic-2.html"
+      },
+      {
+        "name": "Sound",
+        "file": "settings-basic-3.html"
+      }
+    ],
+    "advanced": [
+      {
+        "name": "General",
+        "file": "settings-advanced-0.html"
+      },
+      {
+        "name": "Controls",
+        "file": "settings-advanced-1.html"
+      },
+      {
+        "name": "Display",
+        "file": "settings-advanced-2.html"
+      },
+      {
+        "name": "Render",
+        "file": "settings-advanced-3.html"
+      },
+      {
+        "name": "Game",
+        "file": "settings-advanced-4.html"
+      },
+      {
+        "name": "Sound",
+        "file": "settings-advanced-5.html"
+      }
+    ]
+  },
+  "controls": {
+    "header": "Change Controls",
+    "sticky": true,
+    "cls": "stickyHeader dark",
+    "style": "overflow-y: auto; width: 1300px;",
     "tabs": [
-      "settings-tab-0.html",
-      "settings-tab-1.html",
-      "settings-tab-2.html",
-      "settings-tab-3.html",
-      "settings-tab-4.html",
-      "settings-tab-5.html"
+      {
+        "name": "General",
+        "file": "controls-0.html"
+      },
+      {
+        "name": "Chat & Toggles",
+        "file": "controls-1.html"
+      },
+      {
+        "name": "Interaction",
+        "file": "controls-2.html"
+      },
+      {
+        "name": "Spectate & Vote",
+        "file": "controls-3.html"
+      },
+      {
+        "name": "Modes",
+        "file": "controls-4.html"
+      }
     ]
   }
 }

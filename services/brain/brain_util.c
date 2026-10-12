@@ -100,6 +100,9 @@ void brain_reply_json(struct kn_http_req *req, int status, const cJSON *json) {
     brain_reply_json_raw(req, status, json);
 }
 
+/* NetJoinPacket.client_key (shared/include/shared.h, char[352]) minus the NUL */
+#define BRAIN_TICKET_MAX 351
+
 cJSON *brain_seek_reply(Brain *b, MmNode *n, const char *game_id, int64_t account_id,
                         const char *account_name, int changed) {
     return brain_seek_reply_ex(b, n, game_id, account_id, account_name, changed, 1);
@@ -111,17 +114,29 @@ cJSON *brain_seek_reply_ex(Brain *b, MmNode *n, const char *game_id, int64_t acc
     char jti[40];
     if (kn_random_hex(jti, sizeof(jti), 16)) return NULL;
     const char *colon = strchr(game_id, ':');
+    /* Only what the game server / the brain's "auth" read: the ticket travels in
+     * NetJoinPacket.client_key (char[352]), and an account ticket with iss/gid/reg overflowed
+     * it from ~7-char usernames on ("Invalid join key"). gid = nid:lid. */
     cJSON *claims = cJSON_CreateObject();
-    cJSON_AddStringToObject(claims, "iss", "kn-brain");
     cJSON_AddStringToObject(claims, "brn", b->id);
-    cJSON_AddStringToObject(claims, "gid", game_id);
     cJSON_AddStringToObject(claims, "nid", n->node_id);
     cJSON_AddStringToObject(claims, "lid", colon ? colon + 1 : game_id);
-    cJSON_AddStringToObject(claims, "reg", n->region);
     cJSON_AddNumberToObject(claims, "acc", (double) (account_id > 0 ? account_id : 0));
     if (account_id > 0 && account_name && *account_name) cJSON_AddStringToObject(claims, "name", account_name);
     cJSON_AddStringToObject(claims, "jti", jti);
     char *ticket = kn_signed_token_create(s->join_secret, claims, s->join_ttl_s);
+    if (ticket && strlen(ticket) > BRAIN_TICKET_MAX) {
+        /* still too long (long node id / name): the server takes the name from the
+         * brain's ticket auth instead */
+        free(ticket);
+        cJSON_DeleteItemFromObjectCaseSensitive(claims, "name");
+        ticket = kn_signed_token_create(s->join_secret, claims, s->join_ttl_s);
+        if (ticket && strlen(ticket) > BRAIN_TICKET_MAX) {
+            KN_ERROR("routes", "join ticket for %s is %zu chars (max %d)", game_id, strlen(ticket), BRAIN_TICKET_MAX);
+            free(ticket);
+            ticket = NULL;
+        }
+    }
     cJSON_Delete(claims);
     if (!ticket) return NULL;
 

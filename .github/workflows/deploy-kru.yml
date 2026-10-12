@@ -1,13 +1,13 @@
 name: Deploy kru
 
-# Push to slop: build the web client + services, run deploy/ansible/central.yml against
+# Push to main: build the web client + services, run deploy/ansible/central.yml against
 # the central node (assets., matchmaker., coordinator.krunk.io, play.krunk.io), then publish
 # the front end (krunk.io) to Cloudflare Pages (deploy/pages). `make pages` does the same by hand.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
-#          CLOUDFLARE_API_TOKEN (Pages: Edit), CLOUDFLARE_ACCOUNT_ID.
+#          CLOUDFLARE_API_TOKEN (Pages: Edit + Zone Read/Cache Purge on krunk.io), CLOUDFLARE_ACCOUNT_ID.
 on:
   push:
-    branches: [slop]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -20,9 +20,14 @@ permissions:
 env:
   EM_VERSION: 6.0.12
   EM_CACHE_FOLDER: emsdk-cache
+  # Go for the WebTransport relay and the WebRTC gateway (net-bridge/wt, net-bridge/rtc: kn-rtc,
+  # --tags rtc) that central.yml builds on the controller: must equal the `go` line of their
+  # go.mod files (checked in the deploy job). Bump together with them.
+  GO_VERSION: 1.26.0
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main' # deploys only from main
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -54,6 +59,30 @@ jobs:
       # Debian bookworm container: same glibc/OpenSSL as kru.
       - name: Build services (dist/deploy/bookworm)
         run: TARGETS="kn_brain kn_migrate" deploy/ansible/build.sh bookworm
+
+      # Pinned Go, never the runner's preinstalled one; GOTOOLCHAIN=local so a go.mod asking
+      # for a newer Go fails here instead of silently downloading another toolchain.
+      - name: Check the Go pin against net-bridge/*/go.mod
+        run: |
+          set -euo pipefail
+          for mod in net-bridge/*/go.mod; do
+            want="$(awk '$1 == "go" { print $2 }' "$mod")"
+            echo "$mod: go $want"
+            [ "$want" = "$GO_VERSION" ] || { echo "::error file=$mod::go $want, deploy-kru.yml pins GO_VERSION=$GO_VERSION"; exit 1; }
+          done
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+          cache: true
+          cache-dependency-path: net-bridge/*/go.sum
+
+      - name: Go toolchain
+        run: |
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go version
 
       - name: SSH setup
         env:

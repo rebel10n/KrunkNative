@@ -1,113 +1,87 @@
 {
   "scenario": "hub-feed",
   "defaults": {
-    "fuzz": 8,
-    "max_pct": 3.0
+    "fuzz": 6,
+    "max_pct": 0.5
   },
   "regions": [
     {
-      "name": "nav-login-search",
+      "name": "profile",
       "rect": [
-        0,
+        4,
+        4,
+        294,
+        60
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#profileInfo: Login + Search User"
+    },
+    {
+      "name": "nav-buttons",
+      "rect": [
+        490,
         0,
         300,
-        40
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "Login button + Search User box (#profileInfo)"
-    },
-    {
-      "name": "nav-icons",
-      "rect": [
-        440,
-        0,
-        340,
-        42
-      ],
-      "kind": "image",
-      "fuzz": 10,
-      "max_pct": 3.0,
-      "note": "Terms + public/store/poll/videogame/extension icons + the Clan Wars crossed_swords_0.svg icon (svg.c / nanosvg)"
-    },
-    {
-      "name": "nav-logo",
-      "rect": [
-        1080,
-        0,
-        200,
-        40
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "KRUNKER Hub (#navTitle/#hubBox)"
-    },
-    {
-      "name": "store-badges",
-      "rect": [
-        840,
-        650,
-        430,
-        55
-      ],
-      "kind": "image",
-      "fuzz": 10,
-      "max_pct": 3.0,
-      "note": "steam/ios/android badges"
-    },
-    {
-      "name": "news",
-      "rect": [
-        246,
-        64,
-        174,
-        178
-      ],
-      "kind": "text",
-      "fuzz": 14,
-      "max_pct": 6.0,
-      "note": "Krunker News side box (Se)"
-    },
-    {
-      "name": "feed-tabs",
-      "rect": [
-        431,
-        64,
-        419,
-        44
-      ],
-      "kind": "text",
-      "fuzz": 14,
-      "max_pct": 6.0,
-      "note": "Following/Hot/Global/Giveaways/Clan tabs"
-    },
-    {
-      "name": "ad-box",
-      "rect": [
-        948,
-        168,
-        95,
         50
       ],
       "kind": "image",
       "fuzz": 8,
-      "max_pct": 3.0,
-      "note": "#rightABox (empty ad slot), right of the feed's empty-state text"
+      "max_pct": 1.5,
+      "note": "#navButtons icons"
     },
     {
-      "name": "who-header",
+      "name": "nav-title",
       "rect": [
-        860,
-        232,
-        185,
-        30
+        984,
+        5,
+        286,
+        40
       ],
       "kind": "text",
-      "fuzz": 14,
-      "max_pct": 6.0,
-      "note": "Who to Follow header (the 3 names are random, as in Krunker)"
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#navTitle: Terms | settings, KRUNKER .io"
+    },
+    {
+      "name": "badges",
+      "rect": [
+        830,
+        640,
+        450,
+        72
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "Steam / App Store / Google Play badges"
+    },
+    {
+      "name": "editor-badge",
+      "rect": [
+        56,
+        643,
+        166,
+        67
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#editrDB"
+    },
+    {
+      "name": "loading",
+      "rect": [
+        0,
+        291,
+        1280,
+        60
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 5.0,
+      "note": "#loadMessage LOADING (no social server)"
     }
   ]
 }

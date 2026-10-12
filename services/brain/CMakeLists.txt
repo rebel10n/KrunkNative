@@ -27,12 +27,25 @@ set(KN_BRAIN_SOURCES
     auth_state.c
     finder.c
     finder_table.c
+    # ci-release: latest server release (GitHub Releases poll) + the outdated rule
+    release_info.c
+    releases.c
     # coord-store: multi-statement database operations (kn_procs, db_procs.h)
     db_common.c
     db_accounts.c
     db_social.c
     db_mm.c
+    # ks-6 (WP6): KrunkScript storage + map KR rewards; the value rules are the game server's
+    db_storage.c
+    ../../shared/src/ks_storage_data.c
+    ../../shared/src/ks/ks_number.c
     ../../shared/src/map_catalog.c  # relative: knsvc_existing() checks paths under this dir
+    # player-viewer WP-E part 2c: badges, v7 challenges, medal counts (0107_progression); the
+    # challenge / badge rules are the game's (shared/src/progression.c, badges.c)
+    db_progress.c
+    progress.c
+    ../../shared/src/progression.c
+    ../../shared/src/badges.c
 )
 
 # Sources another agent has listed but not landed yet must not break configure
@@ -42,7 +55,7 @@ add_executable(kn_brain ${KN_BRAIN_SOURCES})
 target_include_directories(kn_brain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # svc-accounts: shared/include for map_catalog.h (creations.c; shim in shared_shim.c)
 target_include_directories(kn_brain PRIVATE ${CMAKE_SOURCE_DIR}/shared/include)
-target_link_libraries(kn_brain PRIVATE knsvc_db)
+target_link_libraries(kn_brain PRIVATE knsvc_db kn_build_info)
 # coord-auth: community hasJoined over https:// (auth.c) needs libcurl; http:// works without
 find_package(CURL QUIET)
 if (CURL_FOUND)
@@ -65,6 +78,13 @@ target_sources(kn_brain_auth_test PRIVATE ${CMAKE_SOURCE_DIR}/shared/src/auth_jo
 target_link_libraries(kn_brain_auth_test PRIVATE knsvc)
 add_test(NAME brain_auth_finder COMMAND kn_brain_auth_test)
 set_tests_properties(brain_auth_finder PROPERTIES LABELS "knsvc;brain")
+
+# ci-release: kn-build release metadata + the outdated / incompatible rule (pure).
+add_executable(kn_brain_releases_test tests/test_releases.c release_info.c)
+target_include_directories(kn_brain_releases_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_releases_test PRIVATE knsvc)
+add_test(NAME brain_releases COMMAND kn_brain_releases_test)
+set_tests_properties(brain_releases PROPERTIES LABELS "knsvc;brain")
 set_tests_properties(brain_registry PROPERTIES LABELS "knsvc;brain")
 
 # svc-accounts: accounts + social socket end to end against PostgreSQL (own schema;
@@ -90,6 +110,19 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
     add_test(NAME brain_auth_e2e
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_auth_e2e.sh ${CMAKE_BINARY_DIR})
     set_tests_properties(brain_auth_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # ks-6 (KrunkScript WP6): GAME.STORAGE of a hosted published map through server_bin + kn_brain
+    if (Python3_FOUND)
+        add_test(NAME brain_ks_storage_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/ks_storage_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_ks_storage_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # editor WP6: the map editor's publishing, My Games and asset windows (headless client_bin
+        # --editor against kn_brain; skips 77 without a database, websockets or client_bin)
+        add_test(NAME brain_editor_publish_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/editor/publish_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_editor_publish_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e;editor")
+    endif ()
 endif ()
 
 # Ranked queue end to end (2 brains, fake game server, 4 accounts; per-run schema too).
@@ -98,6 +131,16 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ranked_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_ranked PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # ks-6 (KrunkScript WP6): game-server storage / map KR reward ops on the database
+    add_test(NAME brain_storage
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_storage PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c, 0107_progression)
+    add_test(NAME brain_progress
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_progress PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 endif ()
 
 # coord-store: the same three suites on the other store drivers (KN_TEST_DB_DRIVER,
@@ -116,7 +159,13 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_ranked_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ranked_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
-        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+        add_test(NAME brain_storage_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_progress_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_storage_${drv} brain_progress_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
     endif ()
     add_test(NAME brain_federation_${drv}
@@ -131,4 +180,4 @@ target_link_libraries(kn_fakenode PRIVATE knsvc)
 target_compile_definitions(kn_fakenode PRIVATE _GNU_SOURCE)
 
 # Build the test + tool with the brain (services_all picks up kn_brain).
-add_dependencies(kn_brain kn_brain_registry_test kn_fakenode)
+add_dependencies(kn_brain kn_brain_registry_test kn_fakenode kn_brain_releases_test)

@@ -1,0 +1,125 @@
+// Path API: arcs, ellipses, arcTo, Béziers, nonzero fill, strokes with joins, transforms.
+@size 800 600
+@scale 1
+@background #1e272e
+// filled arc (pie) and stroked arc
+fillStyle "#ff6b6b"
+beginPath
+moveTo 100 100
+arc 100 100 70 0 4.71238898 false
+closePath
+fill
+strokeStyle "#feca57"
+lineWidth 6
+beginPath
+arc 260 100 60 0.5 5.5 true
+stroke
+// ellipse with rotation, full turn
+fillStyle "#48dbfb"
+beginPath
+ellipse 420 100 80 40 0.5 0 6.283185307 false
+fill
+// quadratic + cubic Béziers stroked
+strokeStyle "#ffffff"
+lineWidth 3
+beginPath
+moveTo 540 40
+quadraticCurveTo 620 180 700 40
+stroke
+strokeStyle "#1dd1a1"
+lineWidth 4
+beginPath
+moveTo 540 180
+bezierCurveTo 580 60 680 300 760 160
+stroke
+// self-intersecting star: nonzero fill paints the centre
+fillStyle "#f368e0"
+beginPath
+moveTo 100 230
+lineTo 159 410
+lineTo 5 299
+lineTo 195 299
+lineTo 41 410
+closePath
+fill
+// line joins on a zig-zag
+lineWidth 16
+strokeStyle "#ff9f43"
+lineJoin "miter"
+beginPath
+moveTo 240 400
+lineTo 290 260
+lineTo 340 400
+stroke
+lineJoin "round"
+beginPath
+moveTo 370 400
+lineTo 420 260
+lineTo 470 400
+stroke
+lineJoin "bevel"
+beginPath
+moveTo 500 400
+lineTo 550 260
+lineTo 600 400
+stroke
+// arcTo rounded corner
+lineJoin "miter"
+lineWidth 5
+strokeStyle "#54a0ff"
+beginPath
+moveTo 640 260
+arcTo 780 260 780 400 50
+lineTo 780 420
+stroke
+// strokeRect, translate / transform / setTransform, save / restore, globalAlpha
+strokeStyle "#c8d6e5"
+lineWidth 2
+strokeRect 30 450 120 100
+save
+translate 250 500
+transform 1 0 0.5 1 0 0
+fillStyle "#10ac84"
+beginPath
+moveTo -40 -40
+lineTo 40 -40
+lineTo 40 40
+lineTo -40 40
+closePath
+fill
+restore
+save
+globalAlpha 0.5
+fillStyle "#ee5253"
+beginPath
+arc 420 500 60 0 6.283185307 false
+fill
+fillStyle "#0abde3"
+beginPath
+arc 480 500 60 0 6.283185307 false
+fill
+restore
+setTransform 2 0 0 2 560 440
+fillStyle "#ffffff"
+beginPath
+moveTo 0 0
+lineTo 40 0
+lineTo 40 40
+lineTo 0 40
+closePath
+fill
+lineWidth 1
+strokeStyle "#000000"
+stroke
+// translucent overlapping stroke: union, no double blending at the joins
+setTransform 1 0 0 1 0 0
+globalAlpha 0.5
+lineWidth 20
+lineJoin "round"
+strokeStyle "#ffffff"
+beginPath
+moveTo 680 470
+lineTo 780 470
+lineTo 700 580
+lineTo 690 450
+stroke

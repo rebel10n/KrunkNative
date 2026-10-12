@@ -510,9 +510,11 @@ int main(int argc, char **argv) {
     test_pubsub(db);
     test_migrate(&dbc);
 
-    for (int i = 0; i < 40; i++) kn_db_query(db, "SELECT count(*) FROM accounts", 0, NULL, on_closed, NULL);
+    /* 400, not 40: sqlite's worker threads sometimes finished all 40 before kn_db_free, leaving
+     * nothing queued (closed_cbs 0, about 1 run in 40) */
+    for (int i = 0; i < 400; i++) kn_db_query(db, "SELECT count(*) FROM accounts", 0, NULL, on_closed, NULL);
     kn_db_free(db);
-    CHECK_EQ_INT(done_cbs, 40);  /* every callback ran */
+    CHECK_EQ_INT(done_cbs, 400); /* every callback ran */
     CHECK(closed_cbs > 0);       /* queued ones failed with 08003 */
     kn_loop_free(loop);
     teardown(&dbc);

@@ -1,5 +1,5 @@
 // Spawns every class in a local Game on Sandstorm and Kanji, checks the class/loadout setup against
-// Krunker v3.1.1 (53.js / 27.js) and drives a short input script (walk, jump, crouch, aim, shoot,
+// Krunker v7.1.4 (src/data/classes.js / weapons.js) and drives a short input script (walk, jump, crouch, aim, shoot,
 // reload, swap) asserting the player state never goes NaN/inf.
 #include <math.h>
 #include <shared.h>
@@ -17,29 +17,35 @@ typedef struct {
     float speed;
 } ExpectedClass;
 
-// Copied from Krunker v3.1.1 53.js (regen defaults to config.regenVal = 0.1, speed to 1).
+// Copied from Krunker v7.1.4 src/data/classes.js (v7 changes: Hunter speed 1.05 -> 1.0, Run N Gun
+// HP 100 -> 90, Spray N Pray HP 170 -> 180 and speed 0.95 -> 0.9, Rocketeer gets a secondary, Agent
+// HP 100 -> 110, Trooper speed 1.0 -> 0.9; new Survivor and Infiltrator).
 static const ExpectedClass expected_classes[] = {
     {"Triggerman", 1, 1, 0, 100, 6, 0.1f, 1.05f},
-    {"Hunter", 0, 1, 0, 60, 5, 0.1f, 1.05f},
-    {"Run N Gun", 3, 0, 1, 100, 6, 0.1f, 1.18f},
-    {"Spray N Pray", 6, 0, 0, 170, 7, 0.05f, 0.95f},
+    {"Hunter", 0, 1, 0, 60, 5, 0.1f, 1.0f},
+    {"Run N Gun", 3, 0, 1, 90, 6, 0.1f, 1.18f},
+    {"Spray N Pray", 6, 0, 0, 180, 7, 0.05f, 0.9f},
     {"Vince", 5, 1, 0, 90, 6, 0.1f, 1.0f},
     {"Detective", 4, 0, 0, 100, 6, 0.1f, 1.0f},
     {"Marksman", 7, 1, 0, 90, 6, 0.1f, 1.0f},
-    {"Rocketeer", 8, 0, 0, 130, 7, 0.1f, 0.86f},
-    {"Agent", 9, 0, 1, 100, 6, 0.1f, 1.2f},
+    {"Rocketeer", 8, 1, 0, 130, 7, 0.1f, 0.86f},
+    {"Agent", 9, 0, 1, 110, 6, 0.1f, 1.2f},
     {"Runner", 12, 0, 1, 120, 6, 0.2f, 1.0f},
     {"Deagler", 10, 0, 0, 60, 5, 0.1f, 1.0f},
     {"Bowman", 13, 1, 0, 100, 6, 0.1f, 1.0f},
     {"Commando", 14, 1, 0, 100, 6, 0.1f, 1.0f},
-    {"Trooper", 18, 0, 1, 100, 6, 0.1f, 1.0f},
+    {"Trooper", 18, 0, 1, 100, 6, 0.1f, 0.9f},
+    {"Survivor", 19, 0, 1, 150, 6, 0.1f, 0.8f},
+    {"Infiltrator", 28, 1, 0, 90, 5, 0.1f, 1.0f},
 };
 
-// v3.1.1 weapon names by id (27.js order).
+// v7.1.4 weapon names by id (src/data/weapons.js order; 0-18 as in v3.1.1).
 static const char *expected_weapons[] = {
     "Sniper Rifle", "Assault Rifle", "Pistol", "Submachine Gun", "Revolver", "Shotgun", "Machine Gun",
     "Semi Auto", "Rocket Launcher", "Akimbo Uzi", "Desert Eagle", "Alien Blaster", "Combat Knife",
     "Crossbow", "Famas", "Sawed Off", "Auto Pistol", "Bomb", "Blaster",
+    "Build Tool", "Grappler", "Tehchy-9", "Noob Tube", "Slimer", "Zapper", "Minigun", "War Machine",
+    "Akimbo Pistol", "Charge Rifle",
 };
 
 static int failures = 0;
@@ -80,8 +86,8 @@ static void check_weapon_table(void) {
             CHECK(w->rate > 0.0f, "%s rate", w->name);
             CHECK(w->reload_time > 0.0f, "%s reload_time", w->name);
         }
-        if (w->custom_spread) {
-            CHECK(w->shots > 0 && w->custom_spread_count >= w->ammo * w->shots, "%s cSpread has %u pairs, needs %u", w->name, w->custom_spread_count, w->ammo * w->shots);
+        if (w->custom_spread) { // v7.1.4 cSpread[ammo % 2]: two patterns of `shots` pairs
+            CHECK(w->shots > 0 && w->custom_spread_count == 2 * w->shots, "%s cSpread has %u pairs, needs %u", w->name, w->custom_spread_count, 2 * w->shots);
         }
         if (w->burst) CHECK(w->burst_count > 1 && w->burst_rate > 0.0f, "%s burst", w->name);
     }
@@ -136,6 +142,7 @@ static void check_class(Game *game, const int class_index, const char *map_name)
     CHECK(player->max_health == expected->health && fabsf(player->health - (float) expected->health) < 1e-3f, "%s health %f/%d", expected->name, player->health, player->max_health);
     CHECK(fabsf(player->speed - expected->speed) < 1e-6f, "%s speed %f", expected->name, player->speed);
     CHECK(player->cosmetics.skin_color == -1 && player->cosmetics.hat == -1 && player->cosmetics.dye == -1, "%s default cosmetics", expected->name);
+    CHECK(player->skins.primary == -1 && player->skins.secondary == -1 && player->skins.melee == -1, "%s default weapon skins", expected->name);
     CHECK(player->wall_jump == expected->wall_jump, "%s player wall_jump", expected->name);
     for (int i = 0; i < player->loadout_size; i++) {
         CHECK(player->ammo[i] == (int) game->weapons[player->loadout[i]]->ammo, "%s ammo slot %d", expected->name, i);
@@ -171,7 +178,10 @@ static void check_class(Game *game, const int class_index, const char *map_name)
     tick(player, &input, 2);
     input.shoot = 0;
     tick(player, &input, 60);
-    if (!player->weapon->melee) CHECK(player->ammo[0] < ammo_before, "%s did not fire (%d -> %d)", expected->name, ammo_before, player->ammo[0]);
+    // v7.1.4: the Build Tool builds instead of firing (not ported), the Charge Rifle's normal
+    // shots cost no ammo (fullChrgSht): both fire without spending a round here.
+    const int spends_ammo = !player->weapon->melee && !player->weapon->build && !player->weapon->full_charge_shot;
+    if (spends_ammo) CHECK(player->ammo[0] < ammo_before, "%s did not fire (%d -> %d)", expected->name, ammo_before, player->ammo[0]);
     if (player->weapon->burst) CHECK(ammo_before - player->ammo[0] == (int) player->weapon->burst_count, "%s one click should fire a %u-round burst (fired %d)", expected->name, player->weapon->burst_count, ammo_before - player->ammo[0]);
     else if (player->weapon->no_auto && !player->weapon->melee) CHECK(ammo_before - player->ammo[0] == 1, "%s semi-auto click fired %d", expected->name, ammo_before - player->ammo[0]);
     CHECK(player_state_ok(player), "%s NaN after shooting", expected->name);
@@ -234,6 +244,80 @@ static void check_cosmetics_packets(void) {
     CHECK(net_packet_read_ent(&full, &packet) && full.slid_cont == 1 && !full.spectate, "V4 ENT slidCont");
     packet.length = NET_ENT_PACKET_V3_SIZE;
     CHECK(net_packet_read_ent(&full, &packet) && full.slid_cont == 1, "V3 ENT slidCont default");
+    // ent[1] sprayIndex rides after slidCont; shorter ENTs read as the default spray 0
+    ent.spray_index = 870;
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V5_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 870, "V5 ENT sprayIndex");
+    packet.length = NET_ENT_PACKET_V4_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 0, "V4 ENT sprayIndex default");
+    packet.length = NET_ENT_PACKET_V4_SIZE + 2;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with a cut sprayIndex accepted");
+    // ent[2] weapon skins + ent[9] meleeIndex ride after sprayIndex (V6); shorter ENTs read as none
+    ent.skins = (PlayerSkins) {406, 1203, 1650};
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V6_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 870 && full.skins.primary == 406 && full.skins.secondary == 1203 &&
+          full.skins.melee == 1650, "V6 ENT weapon skins");
+    packet.length = NET_ENT_PACKET_V5_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.spray_index == 870 && full.skins.primary == -1 && full.skins.secondary == -1 &&
+          full.skins.melee == -1, "V5 ENT weapon skins default");
+    packet.length = NET_ENT_PACKET_V5_SIZE + 4;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with cut weapon skins accepted");
+    // ent[11] lagComp (Settings > Network slider) rides after the weapon skins (V7); shorter ENTs read as 1
+    ent.lag_comp = 0.3f;
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V7_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.lag_comp == 0.3f && full.skins.melee == 1650, "V7 ENT lagComp");
+    packet.length = NET_ENT_PACKET_V6_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.lag_comp == 1.0f && full.skins.melee == 1650, "V6 ENT lagComp default 1");
+    packet.length = NET_ENT_PACKET_V6_SIZE + 2;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with a cut lagComp accepted");
+    packet.length = NET_ENT_PACKET_V7_SIZE + 1;
+    CHECK(!net_packet_read_ent(&full, &packet), "ENT with a cut attachIndex accepted");
+    // WP-C: ent[12] attachIndex, ent[7] challMode, ent[19] anonMode ride after lagComp (V8, 1.3.1);
+    // shorter ENTs read as 0 / off / off, longer ones (a newer peer) as their V8 prefix
+    packet.length = NET_ENT_PACKET_V7_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == DEFAULT_ATTACHMENT_INDEX && !full.chall_mode && !full.anon_mode, "V7 ENT v7 flags default");
+    ent.attach_index = 1;
+    ent.chall_mode = 1;
+    ent.anon_mode = 7; // any non-zero byte reads as on
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V8_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == 1 && full.chall_mode == 1 && full.anon_mode == 1 && full.lag_comp == 0.3f, "V8 ENT attachIndex / challMode / anonMode");
+    CHECK(full.cosmetics_v7.pet == -1 && full.cosmetics_v7.charms[1] == -1 && full.show_badges == PLAYER_SHOW_BADGES_ALL, "V8 ENT: no v7 slots, every badge shown");
+    packet.length = NET_ENT_PACKET_V8_SIZE + 9;
+    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == 1 && full.anon_mode == 1 && full.cosmetics_v7.head == -1, "ENT cut inside the WP-F tail reads as V8");
+    // WP-F: the v7 slots (ent[15] shoe, [21] pet, [26] wrist, [30] charms, [31] back, [32] head, [33] card)
+    // and ent[22..25] showBadges ride after anonMode (V9, 1.3.1); longer ENTs read their V9 prefix
+    ent.cosmetics_v7 = (PlayerCosmeticsV7) {.head = 6401, .back = 246, .shoe = 2860, .pet = 2964, .wrist = 4249, .charms = {5000, -1}, .player_card = 6000, .badge = 3};
+    ent.show_badges = PLAYER_SHOW_BADGE_PREMIUM | 0xF0;
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V9_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.cosmetics_v7.head == 6401 && full.cosmetics_v7.back == 246 && full.cosmetics_v7.shoe == 2860 &&
+          full.cosmetics_v7.pet == 2964 && full.cosmetics_v7.wrist == 4249 && full.cosmetics_v7.charms[0] == 5000 && full.cosmetics_v7.player_card == 6000 &&
+          full.show_badges == PLAYER_SHOW_BADGE_PREMIUM && full.attach_index == 1, "V9 ENT v7 slots / showBadges");
+    packet.length = NET_ENT_PACKET_V9_SIZE + 7;
+    CHECK(net_packet_read_ent(&full, &packet) && full.cosmetics_v7.pet == 2964 && full.anon_mode == 1, "ENT longer than V9 reads its prefix");
+    ent.cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    ent.show_badges = PLAYER_SHOW_BADGES_ALL;
+    ent.attach_index = 0;
+    ent.chall_mode = ent.anon_mode = 0;
+    ent.lag_comp = 1.0f;
+    ent.skins = PLAYER_SKINS_NONE;
+    ent.spray_index = 0;
+    // a client sends the long ENT only to servers announcing the protocol that reads it (INIT major.minor):
+    // 1.0 servers (older server_bin builds, community servers) drop anything past V4 without a spawn,
+    // 1.1 servers anything past V6
+    CHECK(net_ent_size_for(1, 0, 0) == NET_ENT_PACKET_V4_SIZE, "ENT to a 1.0 server must stay V4 (%u)", net_ent_size_for(1, 0, 0));
+    CHECK(net_ent_size_for(1, 1, 5) == NET_ENT_PACKET_V6_SIZE, "ENT to a 1.1 server must stay V6 (%u)", net_ent_size_for(1, 1, 5));
+    CHECK(net_ent_size_for(1, 2, 1) == NET_ENT_PACKET_V7_SIZE && net_ent_size_for(1, 3, 0) == NET_ENT_PACKET_V7_SIZE, "ENT to a 1.2 / 1.3.0 server is V7");
+    // 1.3.1 servers prefix-read longer ENTs: they get the WP-F V9 (a pre-WP-F 1.3.1 build reads its V8 prefix)
+    CHECK(net_ent_size_for(1, 3, 1) == NET_ENT_PACKET_V9_SIZE && net_ent_size_for(1, 4, 0) == NET_ENT_PACKET_V9_SIZE, "ENT to a 1.3.1+ server is V9");
+    CHECK(net_ent_size_for(2, 0, 0) == NET_ENT_PACKET_V9_SIZE && net_ent_size_for(0, 9, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
+    CHECK(NET_PROTOCOL_MAJOR == 1 && NET_PROTOCOL_MINOR >= 2, "server_bin announces protocol 1.2+");
+    CHECK(net_peer_has_wpc(NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH), "this build takes its own WP-C sizes");
+    CHECK(NET_ENT_PACKET_V7_SIZE == 58 && NET_ENT_PACKET_V6_SIZE == 54 && NET_ENT_PACKET_V8_SIZE == 64 && NET_ENT_PACKET_V9_SIZE == 101, "ENT V6 / V7 / V8 / V9 sizes (net-bridge, kn_proto.py)");
     ent.slid_cont = 0;
     memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = 6;
@@ -242,15 +326,28 @@ static void check_cosmetics_packets(void) {
 
     NetSpawnPacket spawn = {.uid = 3, .class_index = 5, .secondary_index = -1, .cosmetics = {-1, -1, 1890, -1, -1, -1, 1891}};
     memcpy(packet.payload, &spawn, sizeof(spawn));
-    const uint16_t spawn_sizes[] = {NET_SPAWN_PACKET_V1_SIZE, sizeof(NetSpawnPacket)};
-    for (int i = 0; i < 2; i++) {
+    spawn.attach_index = 1;
+    spawn.head_mlt = 1.5f;
+    spawn.cosmetics_v7 = (PlayerCosmeticsV7) {.head = 6401, .back = -1, .shoe = 2860, .pet = 2964, .wrist = -1, .charms = {-1, -1}, .player_card = -1, .badge = 2};
+    memcpy(packet.payload, &spawn, sizeof(spawn));
+    // V1, V2 (1.0 - 1.3.0 servers), V3 (WP-C: attachIndex, headMlt), a V3 cut inside the WP-F tail,
+    // V4 (WP-F: the v7 slots) and a longer one (V4 prefix)
+    const uint16_t spawn_sizes[] = {NET_SPAWN_PACKET_V1_SIZE, NET_SPAWN_PACKET_V2_SIZE, NET_SPAWN_PACKET_V3_SIZE, NET_SPAWN_PACKET_V3_SIZE + 4,
+                                    NET_SPAWN_PACKET_V4_SIZE, NET_SPAWN_PACKET_V4_SIZE + 4};
+    for (int i = 0; i < 6; i++) {
         NetSpawnPacket read;
         memset(&read, 0x55, sizeof(read));
         packet.length = spawn_sizes[i];
         CHECK(net_packet_read_spawn(&read, &packet), "SPAWN of %u bytes rejected", packet.length);
         CHECK(read.uid == 3 && read.class_index == 5, "SPAWN fields");
         CHECK(read.cosmetics.hat == (i ? 1890 : -1) && read.cosmetics.dye == (i ? 1891 : -1), "SPAWN cosmetics for %u bytes", packet.length);
+        CHECK(read.attach_index == (i >= 2 ? 1 : DEFAULT_ATTACHMENT_INDEX) && read.head_mlt == (i >= 2 ? 1.5f : 1.0f), "SPAWN attachIndex / headMlt for %u bytes", packet.length);
+        CHECK(i >= 4 ? read.cosmetics_v7.head == 6401 && read.cosmetics_v7.pet == 2964 && read.cosmetics_v7.badge == 2 && read.cosmetics_v7.wrist == -1
+                     : read.cosmetics_v7.head == -1 && read.cosmetics_v7.pet == -1 && read.cosmetics_v7.badge == -1, "SPAWN v7 slots for %u bytes", packet.length);
     }
+    packet.length = NET_SPAWN_PACKET_V2_SIZE + 4;
+    NetSpawnPacket cut;
+    CHECK(!net_packet_read_spawn(&cut, &packet), "SPAWN with a cut headMlt accepted");
 }
 
 int main(void) {

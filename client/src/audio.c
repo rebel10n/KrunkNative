@@ -70,6 +70,8 @@ typedef struct {
     int loop;
     int streamed;
     float volume;          // Howl `vol`: volume before the category factor
+    uint32_t handle;       // audio_handle_play voice (KrunkScript sounds), 0 = none
+    int muted;             // audio_handle_mute
     ma_audio_buffer_ref buffer;
     ma_decoder decoder;
     ma_sound sound;
@@ -81,6 +83,7 @@ typedef struct {
     int loop;
     vec3 position;
     float volume, rate, ref_distance, rolloff;
+    uint32_t handle;       // audio_handle_play, 0 = none
 } PendingPlay;
 
 static struct {
@@ -300,6 +303,10 @@ static float spatial_compensation(const AudioVoice *voice) {
 
 static void voice_apply_volume(AudioVoice *voice) {
     const AudioClip *clip = &g_audio.clips[voice->clip];
+    if (voice->muted) {
+        ma_sound_set_volume(&voice->sound, 0.0f);
+        return;
+    }
     ma_sound_set_volume(&voice->sound, clamp01(voice->volume * category_factor(clip->category)) * spatial_compensation(voice));
 }
 
@@ -340,6 +347,7 @@ static void voice_start(const PendingPlay *play) {
     voice->kind = play->kind;
     voice->loop = play->loop;
     voice->volume = play->volume;
+    voice->handle = play->handle;
     voice->streamed = clip->file != NULL;
 
     ma_data_source *source;
@@ -404,8 +412,9 @@ static int clip_is_playing(const int clip, const VoiceKind kind) {
     return 0;
 }
 
-static void play_request(const char *name, const VoiceKind kind, const int loop, const vec3 position,
-                         const float volume, const float rate, const float ref_distance, const float rolloff) {
+static void play_request_handle(const char *name, const VoiceKind kind, const int loop, const vec3 position,
+                                const float volume, const float rate, const float ref_distance, const float rolloff,
+                                const uint32_t handle) {
     if (!g_audio.ready) return;
 
     const int clip = clip_find(name, 1);
@@ -424,6 +433,7 @@ static void play_request(const char *name, const VoiceKind kind, const int loop,
         .rate = rate > 0.0f ? rate : 1.0f,
         .ref_distance = ref_distance > 0.0f ? ref_distance : AUDIO_REF_DISTANCE,
         .rolloff = rolloff > 0.0f ? rolloff : AUDIO_ROLLOFF,
+        .handle = handle,
     };
 
     if (g_audio.clips[clip].state == CLIP_READY) {
@@ -434,6 +444,11 @@ static void play_request(const char *name, const VoiceKind kind, const int loop,
     // Not decoded yet: audio_update() loads it (outside any UI event handler) and plays it.
     if (g_audio.pending_count < AUDIO_MAX_PENDING) g_audio.pending[g_audio.pending_count++] = play;
     if (g_audio.clips[clip].state == CLIP_UNLOADED) g_audio.clips[clip].state = CLIP_QUEUED;
+}
+
+static void play_request(const char *name, const VoiceKind kind, const int loop, const vec3 position,
+                         const float volume, const float rate, const float ref_distance, const float rolloff) {
+    play_request_handle(name, kind, loop, position, volume, rate, ref_distance, rolloff, 0);
 }
 
 // ---------------------------------------------------------------- capture (debug)
@@ -933,3 +948,89 @@ void audio_stop_all(void) {
     if (!g_audio.ready) return;
     stop_matching(-1, 0, VOICE_2D);
 }
+
+// ---------------------------------------------------------------- handles (KrunkScript GAME.SOUND)
+
+static uint32_t g_next_handle;
+
+static AudioVoice *handle_voice(const int handle) {
+    if (!g_audio.ready || handle <= 0) return NULL;
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        if (g_audio.voices[i].in_use && g_audio.voices[i].handle == (uint32_t) handle) return &g_audio.voices[i];
+    }
+    return NULL;
+}
+
+static PendingPlay *handle_pending(const int handle) {
+    for (int i = 0; i < g_audio.pending_count; i++) {
+        if (g_audio.pending[i].handle == (uint32_t) handle) return &g_audio.pending[i];
+    }
+    return NULL;
+}
+
+int audio_handle_play(const char *name, const float volume, const int loop, const float rate, const int positional,
+                      const vec3 position, const float ref_distance, const float rolloff) {
+    if (!g_audio.ready) return 0;
+    if (++g_next_handle == 0 || g_next_handle > 0x7fffffffu) g_next_handle = 1;
+    const VoiceKind kind = positional ? (loop ? VOICE_3D_LOOP : VOICE_3D) : VOICE_2D;
+    play_request_handle(name, kind, loop, position, volume, rate > 0.0f ? rate : 1.0f, ref_distance, rolloff, g_next_handle);
+    return handle_voice((int) g_next_handle) || handle_pending((int) g_next_handle) ? (int) g_next_handle : 0;
+}
+
+void audio_handle_volume(const int handle, const float volume) {
+    AudioVoice *voice = handle_voice(handle);
+    PendingPlay *pending = handle_pending(handle);
+    if (pending) pending->volume = volume;
+    if (!voice) return;
+    voice->volume = volume;
+    voice_apply_volume(voice);
+}
+
+void audio_handle_rate(const int handle, const float rate) {
+    AudioVoice *voice = handle_voice(handle);
+    PendingPlay *pending = handle_pending(handle);
+    const float r = rate > 0.0f ? rate : 1.0f;
+    if (pending) pending->rate = r;
+    if (voice) ma_sound_set_pitch(&voice->sound, r);
+}
+
+void audio_handle_fade(const int handle, const float from, const float to, const float ms) {
+    AudioVoice *voice = handle_voice(handle);
+    if (!voice) return;
+    const float cat = category_factor(g_audio.clips[voice->clip].category) * spatial_compensation(voice);
+    voice->volume = to;
+    ma_sound_set_fade_in_milliseconds(&voice->sound, clamp01(from) * cat, clamp01(to) * cat, (ma_uint64) (ms > 0.0f ? ms : 0.0f));
+}
+
+void audio_handle_mute(const int handle, const int muted) {
+    AudioVoice *voice = handle_voice(handle);
+    if (!voice) return;
+    voice->muted = muted;
+    voice_apply_volume(voice);
+}
+
+int audio_handle_resume(const int handle) {
+    AudioVoice *voice = handle_voice(handle);
+    if (!voice) return 0;
+    if (ma_sound_at_end(&voice->sound)) ma_sound_seek_to_pcm_frame(&voice->sound, 0);
+    ma_sound_start(&voice->sound);
+    return 1;
+}
+
+void audio_handle_pause(const int handle) {
+    AudioVoice *voice = handle_voice(handle);
+    if (voice) ma_sound_stop(&voice->sound);
+}
+
+void audio_handle_stop(const int handle) {
+    if (!g_audio.ready || handle <= 0) return;
+    AudioVoice *voice = handle_voice(handle);
+    if (voice) voice_release(voice);
+    int kept = 0;
+    for (int i = 0; i < g_audio.pending_count; i++) {
+        if (g_audio.pending[i].handle != (uint32_t) handle) g_audio.pending[kept++] = g_audio.pending[i];
+    }
+    g_audio.pending_count = kept;
+}
+
+int audio_handle_active(const int handle) { return handle_voice(handle) || handle_pending(handle); }

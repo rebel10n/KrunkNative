@@ -1,0 +1,6 @@
+H KRUNKSCRIPT
+T Client
+T Server *
+B Validate Script
+C server lines=69 font=13px
+S 0 0

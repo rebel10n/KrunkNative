@@ -1,10 +1,14 @@
-// Krunker v3.1.1 game modes (shared/src/modes) with simulated players on Sandstorm:
-// the mode table, team assignment, scoring, objectives (Hardpoint / KOTH zones, CTF
-// flags, Kill Confirmed tags), waitTimer picks (Hide & Seek, Infected, Boss, Stalker,
-// Simon, Traitor), lives, Gun Game / One in the Chamber / Sharp Shooter loadouts and
-// every mode's end-of-round rule (conditions + winConditions), through the shared game
-// hooks (no sockets). Run from the repository root: ./<build>/modes_test
+// Krunker v7.1.4 game modes (shared/src/modes, doc/v7/map-logic.md §4.1) with simulated players
+// on Sandstorm and the v7 fixtures (shared/tests/maps/v7_dom.json, v7_objectives.json): the mode
+// table, team assignment, scoring, objectives (Hardpoint / KOTH zones by uid, CTF / Blitz /
+// neutral flags, Kill Confirmed tags, Deposit KR Tags, Domination zones), waitTimer picks (Hide &
+// Seek, Infected, Boss, Stalker, Simon, Traitor), lives, loadouts, the modifier modes, rounds /
+// best of / overtime and every mode's end-of-round rule (conditions + winConditions), through
+// the shared game hooks (no sockets). Run from the repository root: ./<build>/modes_test
 #include <shared.h>
+#include <spawnables.h>
+#include <player_card.h>
+#include <progression.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +27,7 @@ static int g_sent_count;
 static int g_failures;
 static int g_checks;
 static int g_respawns[64];
-static const cJSON *g_test_maps[1];
+static const cJSON *g_test_maps[3]; // sandstorm, v7_dom, v7_objectives
 
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
@@ -75,12 +79,12 @@ static void free_players(Game *game) {
     game->player_count = 0;
 }
 
-static void start_mode(Game *game, const int mode_id) {
+static void start_mode_on(Game *game, const int mode_id, const int map) {
     free_players(game);
     int *modes = calloc(1, sizeof(int));
     modes[0] = mode_id;
     const cJSON **maps = calloc(1, sizeof(cJSON *)); // game_configure owns (frees) the lists
-    maps[0] = g_test_maps[0];
+    maps[0] = g_test_maps[map];
     game_configure(game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
     game->hooks.send = test_send;
     game->hooks.respawn = test_respawn;
@@ -88,6 +92,26 @@ static void start_mode(Game *game, const int mode_id) {
     memset(g_respawns, 0, sizeof(g_respawns));
     game_init(game, 0, 0, 1);
     game->now = 0.0f;
+}
+
+static void start_mode(Game *game, const int mode_id) {
+    start_mode_on(game, mode_id, 0);
+}
+
+static int weapon_exists(const Game *game, const int id) {
+    return id >= 0 && (size_t) id < game->weapon_count && game->weapons[id];
+}
+
+static const SentPacket *count_type(const int type, int *count) {
+    const SentPacket *last = NULL;
+    *count = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].type == type) {
+            (*count)++;
+            last = &g_sent[i];
+        }
+    }
+    return last;
 }
 
 static Player *add_player(Game *game, const int uid, const int class_index) {
@@ -155,22 +179,35 @@ static void test_table(void) {
     printf("Running mode table test...\n");
     static const char *const names[MODE_COUNT] = {
         "Free for All", "Team Deathmatch", "Hardpoint", "Capture the Flag", "Parkour", "Hide & Seek", "Infected",
-        "Race", "Last Man Standing", "Simon Says", "Gun Game", "Prop Hunt", "Boss Hunt", "Ranked", "Ranked",
+        "Race", "Last Man Standing", "Simon Says", "Gun Game", "Prop Hunt", "Boss Hunt", "Classic FFA", "Deposit",
         "Stalker", "King of the Hill", "One in the Chamber", "Trade", "Kill Confirmed", "Defuse", "Sharp Shooter",
-        "Traitor", "Raid",
+        "Traitor", "Raid", "Blitz", "Domination", "Squad Deathmatch", "Kranked FFA", "Team Defender", "Deposit FFA",
+        "Carrier", "All or Nothing", "Mag Dump", "Chaos Snipers", "Bighead FFA", "Zombies", "Impulsed",
+        "Ranked", "Ranked",
+    };
+    static const char *const keys[MODE_V7_TABLE_SIZE] = {
+        "ffa", "tdm", "point", "ctf", "bhop", "hide", "infect", "race", "lms", "simon", "gun", "prop", "boss", "clas",
+        "depo", "stalk", "king", "oinc", "trade", "kc", "def", "shrp", "trai", "raid", "blitz", "dom", "sdm", "krank",
+        "tdf", "depoffa", "car", "aon", "md", "chs", "bhffa", "zom", "imp",
     };
 
     int count = 0;
     const GameModeConfig *modes = mode_list(&count);
-    CHECK(count == 24 && mode_count() == 24, "v3.1.1 has 24 modes (%d)", count);
+    CHECK(count == 39 && mode_count() == 39 && MODE_V7_TABLE_SIZE == 37, "v7.1.4 has 37 modes + KN Ranked 37 / 38 (%d)", count);
     for (int i = 0; i < count; i++) {
-        CHECK(modes[i].id == i && !strcmp(modes[i].name, names[i]), "mode %d is %s (%s)", i, names[i], modes[i].name);
+        CHECK(modes[i].id == i && modes[i].name && !strcmp(modes[i].name, names[i]), "mode %d is %s (%s)", i, names[i], modes[i].name);
+        if (i < MODE_V7_TABLE_SIZE) CHECK(modes[i].key && !strcmp(modes[i].key, keys[i]), "mode %d key %s", i, keys[i]);
     }
 
     CHECK(mode_find("tdm") == MODE_ID_TDM && mode_find("Capture the Flag") == MODE_ID_CTF && mode_find("19") == MODE_ID_KC, "mode_find");
-    CHECK(mode_find("ranked") == MODE_ID_RANKED_POINT && mode_find("nope") == -1, "mode_find ranked / unknown");
-    CHECK(g_rotation_modes[0] == 0 && g_rotation_modes[4] == 19, "rotationModes [0, 1, 2, 3, 19]");
-    CHECK(!mode_hostable(MODE_ID_RAID) && !mode_hostable(MODE_ID_RANKED) && mode_hostable(MODE_ID_GUN), "preventCustomGames");
+    CHECK(mode_find("ranked") == MODE_ID_RANKED_POINT && mode_find("nope") == -1 && mode_find("dom") == 25, "mode_find ranked / unknown / dom");
+    CHECK(MODE_ID_CLAS == 13 && MODE_ID_DEPO == 14 && MODE_ID_RANKED_POINT == 37 && MODE_ID_RANKED == 38, "v7 ids 13 / 14, Ranked 37 / 38");
+    CHECK(g_rotation_modes[0] == 0 && g_rotation_modes[1] == 2 && g_rotation_modes[2] == 3 && g_rotation_modes[3] == 19 &&
+          g_rotation_modes[4] == 25, "rotationModes [0, 2, 3, 19, 25]");
+    CHECK(mode_hostable(MODE_ID_RAID) && !mode_hostable(MODE_ID_RANKED) && !mode_hostable(MODE_ID_RANKED_POINT) && mode_hostable(MODE_ID_GUN) &&
+          !mode_hostable(MODE_ID_CAR) && !mode_hostable(MODE_ID_AON) && !mode_hostable(MODE_ID_MD) && !mode_hostable(MODE_ID_ZOM) &&
+          !mode_hostable(MODE_ID_IMP) && mode_hostable(MODE_ID_DOM), "preventCustomGames (raid hostable again)");
+    CHECK(mode_config(MODE_ID_RANKED)->is_ranked && mode_config(MODE_ID_RANKED_POINT)->is_ranked && !mode_config(MODE_ID_DEPO)->is_ranked, "Ranked flags");
 
     const GameModeConfig *stalk = mode_config(MODE_ID_STALK);
     CHECK(stalk->has_fog_dist && stalk->fog_dist == 250.0f && stalk->has_fog_col && stalk->fog_col == 1842204 &&
@@ -179,7 +216,15 @@ static void test_table(void) {
     const GameModeConfig *ffa = mode_config(MODE_ID_FFA);
     CHECK(!ffa->has_fog_dist && !ffa->has_fog_col && !ffa->has_sky_col && !ffa->has_light_col && !ffa->has_amb_col, "FFA keeps the map lighting");
     CHECK(mode_config(MODE_ID_INFECT)->speed_mlt[2] == 1.15f && mode_config(MODE_ID_HIDE)->speed_mlt[1] == 0.8f, "spdMlt");
-    CHECK(mode_config(MODE_ID_GUN)->weapon_order_size == 17 && mode_config(MODE_ID_GUN)->weapon_order[16] == WEAPON_ID_KNIFE, "Gun Game order");
+    static const int order[] = {2, 27, 16, 10, 4, 11, 21, 5, 3, 9, 1, 14, 6, 0, 18, 7, 8, 13, 22, 12};
+    const GameModeConfig *gun = mode_config(MODE_ID_GUN);
+    CHECK(gun->weapon_order_size == 20 && !memcmp(gun->weapon_order, order, sizeof(order)), "Gun Game v7 order");
+    CHECK(!gun->no_reward && !gun->no_streaks && mode_streak_disabled(NULL, 4) == 0, "gun: rewards and streaks on in v7");
+    CHECK(mode_config(MODE_ID_KING)->kill_mlt == 0.15f && mode_config(MODE_ID_KING)->obj_score == 10 && !mode_config(MODE_ID_KING)->no_score_k, "king keys");
+    CHECK(mode_config(MODE_ID_DOM)->capture_time == 10.0f && mode_config(MODE_ID_DOM)->lockout_mlt == 1.5f && mode_config(MODE_ID_DOM)->per_player_mlt == 0.2f, "dom keys");
+    CHECK(mode_config(MODE_ID_SDM)->multi_team == 4 && mode_config(MODE_ID_DEPO)->tag_hold_limit == 20 && mode_config(MODE_ID_DEPOFFA)->obj_score == 75, "sdm / depo keys");
+    CHECK(mode_config(MODE_ID_CHS)->grav_mlt == 0.92f && mode_config(MODE_ID_IMP)->expl_mlt == 5.0f && mode_config(MODE_ID_AON)->has_ammo_limit &&
+          mode_config(MODE_ID_AON)->ammo_limit == 0 && mode_config(MODE_ID_CLAS)->no_melee, "modifier keys");
 }
 
 // ------------------------------------------------------------------ FFA / TDM
@@ -235,12 +280,14 @@ static void test_tdm(Game *game) {
 
 // ------------------------------------------------------------------ objectives
 
-static void test_point(Game *game, const int mode_id) {
-    printf("Running %s test...\n", mode_name(mode_id));
-    start_mode(game, mode_id);
+static void test_point(Game *game) {
+    printf("Running Hardpoint test...\n");
+    start_mode(game, MODE_ID_POINT);
     GameMode *mode = game->mode;
     CHECK(mode->objective_count == 4, "Sandstorm has 4 objectives (%d)", mode->objective_count);
-    CHECK(mode->active_objective == 0 && mode->wait_timer_count == 1 && mode->wait_timers[0].cont_time, "gameStart: objective 0 + rotation timer");
+    CHECK(mode->objectives[0].uid == 0 && mode->objectives[3].uid == 3, "auto uids 0..3 (%d %d)", mode->objectives[0].uid, mode->objectives[3].uid);
+    CHECK(mode->active_objective == 0 && mode->wait_timer_count == 1 && mode->wait_timers[0].cont_time, "gameStart: objective uid 0 + rotation timer");
+    CHECK(fabsf(mode->objective_time - 60.0f) < 0.01f, "objtvTime 1 min (%.1f)", mode->objective_time);
 
     Player *a = add_player(game, 1, 0);
     Player *b = add_player(game, 2, 0);
@@ -249,32 +296,79 @@ static void test_point(Game *game, const int mode_id) {
     place(b, 1000.0f, 1000.0f, 1000.0f);
 
     tick(game, 1.5f, 0.25f);
-    const int points = mode_id == MODE_ID_KING ? 20 : 10;
-    CHECK(a->score == points && b->score == 0, "objScore %d per 1.5 s in the zone (%d / %d)", points, a->score, b->score);
-    CHECK(a->mode.objective_score == points, "objectiveScore %d", a->mode.objective_score);
-    if (mode_id == MODE_ID_POINT) CHECK(mode_team_score(game, a->team) == points, "Hardpoint: zone points feed the team (%d)", mode_team_score(game, a->team));
+    CHECK(a->score == 10 && b->score == 0, "objScore 10 per 1.5 s in the zone (%d / %d)", a->score, b->score);
+    CHECK(a->mode.objective_score == 10, "objectiveScore %d", a->mode.objective_score);
+    CHECK(mode_team_score(game, a->team) == 10, "Hardpoint: zone points feed the team (%d)", mode_team_score(game, a->team));
+
+    // two on the zone: both score (v7 point.js), not only a lone occupant
+    place(b, objective->position.x + 2.0f, objective->position.y - objective->half.y, objective->position.z);
+    tick(game, 1.5f, 0.25f);
+    CHECK(a->score == 20 && b->score == 10, "everyone on the hardpoint scores (%d / %d)", a->score, b->score);
 
     const int before = a->score;
     const int team_before = mode_team_score(game, a->team);
     kill(b, a, 1);
-    if (mode_id == MODE_ID_KING) CHECK(a->score == before, "KOTH noScoreK: kills give no score (%d)", a->score);
-    else CHECK(a->score > before && mode_team_score(game, a->team) == team_before, "Hardpoint: kill score is not team score");
+    CHECK(a->score > before && mode_team_score(game, a->team) == team_before, "Hardpoint: kill score is not team score");
 
     tick(game, 60.0f, 0.5f);
-    CHECK(mode->active_objective == 1, "next objective after 60 s (%d)", mode->active_objective);
-    CHECK(last_sent(NET_PACKET_OBJECTIVE, NET_TARGET_ALL) != NULL, "obj broadcast");
-
-    if (mode_id == MODE_ID_POINT) {
-        mode->team_scores[1] = 5;
-        mode->team_scores[2] = 30;
-        game->round_timer = 0.1f;
-        tick(game, 0.5f, 0.25f);
-        CHECK(ended(game) && end_result_for(a->team == 2 ? 1 : 2) == 1, "the higher team score wins");
-    } else {
-        game->round_timer = 0.1f;
-        tick(game, 0.5f, 0.25f);
-        CHECK(ended(game) && end_result_for(1) == 1, "KOTH: the best score wins");
+    CHECK(mode->active_objective == 1, "next objective (uid + 1) after 60 s (%d)", mode->active_objective);
+    const SentPacket *sent = last_sent(NET_PACKET_OBJECTIVE_V7, NET_TARGET_ALL);
+    CHECK(sent != NULL, "obj v7 broadcast");
+    if (sent) {
+        NetObjectiveV7Packet obj;
+        memcpy(&obj, sent->payload, sizeof(obj));
+        CHECK(obj.uid == 1 && !obj.initial && obj.time_ms > 59000, "obj uid %d initial %d ms %d", obj.uid, obj.initial, obj.time_ms);
     }
+
+    mode->team_scores[1] = 5;
+    mode->team_scores[2] = 30;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game) && end_result_for(a->team == 2 ? 1 : 2) == 1, "the higher team score wins");
+}
+
+// king.js (v7): a random hill, +10 every 1.5 s only for a lone occupant, "uobj" occupancy, kill
+// score x (killMlt 0.15 + player.killMlt), Defender (+50, killMlt += 0.05) / Attacker (+25)
+static void test_king(Game *game) {
+    printf("Running King of the Hill test...\n");
+    start_mode(game, MODE_ID_KING);
+    GameMode *mode = game->mode;
+    CHECK(mode->active_objective >= 0 && mode->active_objective < 4 && mode->wait_timer_count == 1, "gameStart: a random hill (%d)", mode->active_objective);
+
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    CHECK(a->team == 0 && b->team == 0, "KOTH is FFA");
+    const ModeObjective *hill = mode_objective_by_uid(game, mode->active_objective);
+    place(a, hill->position.x, hill->position.y - hill->half.y, hill->position.z);
+    place(b, 1000.0f, 1000.0f, 1000.0f);
+    tick(game, 1.5f, 0.25f);
+    CHECK(a->score == 10 && hill->on_zone == 1, "a lone king scores 10 (%d, on %d)", a->score, hill->on_zone);
+    CHECK(last_sent(NET_PACKET_OBJECTIVE_OCCUPANCY, NET_TARGET_ALL) != NULL, "uobj");
+
+    place(b, hill->position.x + 2.0f, hill->position.y - hill->half.y, hill->position.z);
+    tick(game, 1.5f, 0.25f);
+    CHECK(a->score == 10 && b->score == 0 && hill->on_zone == 2, "contested hill: nobody scores (%d / %d)", a->score, b->score);
+
+    // a kill from the hill: Defender +50, killMlt += hillMlt; the kill reward x (0.15 + killMlt)
+    int score = a->score;
+    kill(b, a, 1);
+    const int reward = a->score - score - 50;
+    CHECK(a->mode.kill_mlt > 0.049f && a->mode.kill_mlt < 0.051f, "Defender raises killMlt (%.2f)", a->mode.kill_mlt);
+    CHECK(reward > 0 && reward < 20, "kill reward x 0.15 (%d)", reward);
+
+    // a kill of the king from outside: Attacker +25
+    player_spawn(b);
+    place(b, 1000.0f, 1000.0f, 1000.0f);
+    tick(game, 0.1f, 0.1f);
+    score = b->score;
+    place(a, hill->position.x, hill->position.y - hill->half.y, hill->position.z);
+    tick(game, 0.1f, 0.1f);
+    kill(a, b, 1);
+    CHECK(b->score - score >= 25, "Attacker +25 (%d)", b->score - score);
+
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game), "KOTH: the clock ends it");
 }
 
 static void test_ctf(Game *game) {
@@ -362,10 +456,26 @@ static void test_kc(Game *game) {
     tick(game, 0.1f, 0.1f);
     CHECK(a->mode.denies == 1, "deny (%d)", a->mode.denies);
 
-    // tagLimit 65 ends the round, more confirms win
-    a->mode.confirms = 65;
+    // tagLimit 65 (team score) ends the round, the higher team score wins
+    game->mode->team_scores[2] = 65;
     tick(game, 0.1f, 0.1f);
     CHECK(ended(game) && end_result_for(a->uid) == 1 && end_result_for(b->uid) == 0, "tag limit: team 2 wins");
+
+    // a tie: denies, then kills, then score (team 2's "score" sums kills: v7.1.4 quirk)
+    start_mode(game, MODE_ID_KC);
+    a = add_player(game, 1, 0); // team 2
+    b = add_player(game, 2, 0); // team 1
+    b->mode.denies = 1;
+    CHECK(mode_pick_winner(game).team == 1, "tie: more denies win");
+    b->mode.denies = 0;
+    a->kills = 2;
+    CHECK(mode_pick_winner(game).team == 2, "tie: more kills win");
+    a->kills = 0;
+    b->score = 100;
+    CHECK(mode_pick_winner(game).team == 1, "tie: team 1 score");
+    b->score = 0;
+    a->score = 500;
+    CHECK(mode_pick_winner(game).team == 2, "tie: team 2 'score' is its kills (0 vs 0): team 2");
 }
 
 // ------------------------------------------------------------------ picks / conversions
@@ -426,7 +536,7 @@ static void test_infect(Game *game) {
     tick(game, 20.5f, 0.5f);
     Player *zombie = first_on_team(game, 2);
     CHECK(zombie && team_count(game, 2) == 1 && !zombie->active, "infection: one player, killed");
-    CHECK(zombie && zombie->cosmetics.skin_color == MODE_INFECTED_SKIN && zombie->cosmetics.hat == MODE_INFECTED_HAT, "Infected outfit");
+    CHECK(zombie && zombie->cosmetics.skin_color == MODE_INFECTED_SKIN && zombie->cosmetics_v7.head == MODE_INFECTED_HAT, "Infected outfit (v7 headIndex)");
 
     player_spawn(zombie);
     CHECK(zombie->class_index == 9 && zombie->weapon && zombie->weapon->melee, "Infected respawn as class 9 with the knife");
@@ -480,32 +590,40 @@ static void test_lms(Game *game) {
 static void test_gun(Game *game) {
     printf("Running Gun Game test...\n");
     start_mode(game, MODE_ID_GUN);
+    const GameModeConfig *config = &game->mode->config;
     Player *a = add_player(game, 1, 0);
     Player *b = add_player(game, 2, 0);
     CHECK(a->class_index == 9 && a->loadout[0] == 2 && a->loadout_size == 2, "starts on the Pistol + knife (%d)", a->loadout[0]);
 
     tick(game, 1.0f, 0.5f);
     kill(b, a, 2);
-    CHECK(a->mode.weapon_tier == 1 && a->loadout[0] == 16, "kill: next weapon (tier %d weapon %d)", a->mode.weapon_tier, a->loadout[0]);
+    CHECK(a->mode.weapon_tier == 1, "kill: next tier (%d)", a->mode.weapon_tier);
+    if (weapon_exists(game, config->weapon_order[1])) CHECK(a->loadout[0] == config->weapon_order[1], "tier 1 weapon %d", a->loadout[0]);
     CHECK(last_sent(NET_PACKET_LOADOUT, NET_TARGET_ALL) != NULL, "inat broadcast");
-    CHECK(a->score > 0 && a->assists == 0, "kill rewards still score (noReward is the KR reward) (%d)", a->score);
+    CHECK(a->score > 0 && a->assists == 0, "kill rewards still score (%d)", a->score);
+
+    // a streak kill (no weapon) does not promote (gun.js info.stk)
+    player_spawn(b);
+    kill(b, a, -1);
+    CHECK(a->mode.weapon_tier == 1, "streak kill: no promotion (%d)", a->mode.weapon_tier);
 
     player_spawn(b);
     CHECK(b->loadout[0] == 2 && b->mode.weapon_tier == 0, "b respawns on tier 0");
     player_spawn(a);
-    CHECK(a->loadout[0] == 16, "keepLoadout: a respawns with its tier weapon");
+    CHECK(a->mode.weapon_tier == 1, "keepLoadout: a keeps its tier");
 
     // a melee kill sets the victim back
     a->mode.weapon_tier = 3;
-    mode_set_player_loadout(a, &(int) {4}, 1, 0);
+    mode_set_player_loadout(a, &(int) {config->weapon_order[3]}, 1, 0);
     kill(a, b, WEAPON_ID_KNIFE);
-    CHECK(a->mode.weapon_tier == 2 && a->mode.setbacks == 1 && a->loadout[0] == 10, "setback (tier %d)", a->mode.weapon_tier);
+    CHECK(a->mode.weapon_tier == 2 && a->mode.setbacks == 1, "setback (tier %d)", a->mode.weapon_tier);
+    if (weapon_exists(game, config->weapon_order[2])) CHECK(a->loadout[0] == config->weapon_order[2], "tier 2 weapon (%d)", a->loadout[0]);
     CHECK(b->mode.melees == 1, "melee kill counted");
 
     // reaching the end of the order ends the round
     player_spawn(a);
     player_spawn(b);
-    a->mode.weapon_tier = 16;
+    a->mode.weapon_tier = config->weapon_order_size - 1;
     mode_set_player_loadout(a, &(int) {12}, 1, 0);
     kill(b, a, 12);
     tick(game, 0.1f, 0.1f);
@@ -684,6 +802,479 @@ static void test_misc(Game *game) {
     CHECK(ended(game) && end_result_for(a->uid) == 1, "Ranked: first to 10 kills");
 }
 
+
+// ------------------------------------------------------------------ v7.1.4 modes
+
+// MapManager.addObjective uids (obi - 1, else the v7 auto uid), randObjective, neutral flags
+static void test_objectives_v7(Game *game) {
+    printf("Running v7 objective / flag table test...\n");
+    start_mode_on(game, MODE_ID_DEPO, 2);
+    GameMode *mode = game->mode;
+    CHECK(mode->objective_count == 3 && mode->objectives[0].uid == 1 && mode->objectives[1].uid == 2 && mode->objectives[2].uid == 0,
+          "uids obi 2 -> 1, auto -> 2, obi 1 -> 0 (%d %d %d)", mode->objectives[0].uid, mode->objectives[1].uid, mode->objectives[2].uid);
+    CHECK(mode_objective_by_uid(game, mode->active_objective) != NULL, "randObjective picks an existing uid (%d)", mode->active_objective);
+    CHECK(mode->flag_count == 3 && mode->flags[0].neutral && mode->flags[0].team == -1 && mode->flags[1].team == 1 && mode->flags[2].team == 2, "flags: tm -1 neutral, 0 -> 1, 1 -> 2");
+
+    // the next objective of point is uid + 1, else uid 0
+    start_mode_on(game, MODE_ID_POINT, 2);
+    mode = game->mode;
+    CHECK(mode->active_objective == 0, "point starts on getNextObjective(-1 + 1) = uid 0 (%d)", mode->active_objective);
+    tick(game, 60.5f, 0.5f);
+    CHECK(mode->active_objective == 1, "then uid 1 (%d)", mode->active_objective);
+    tick(game, 60.0f, 0.5f);
+    CHECK(mode->active_objective == 2, "then uid 2 (%d)", mode->active_objective);
+    tick(game, 60.0f, 0.5f);
+    CHECK(mode->active_objective == 0, "no uid 3: back to 0 (%d)", mode->active_objective);
+
+    // CTF ignores the neutral flag, tdf uses only it
+    start_mode_on(game, MODE_ID_CTF, 2);
+    CHECK(!game->mode->flags[0].active && game->mode->flags[1].active && game->mode->flags[2].active, "CTF: neutral flag out of play");
+    start_mode_on(game, MODE_ID_TDF, 2);
+    CHECK(game->mode->flags[0].active && !game->mode->flags[1].active && !game->mode->flags[2].active, "tdf: only the neutral flag");
+}
+
+// CTF v7: a dropped flag goes home after flagIdle 45 s; Blitz (rush) captures while your own flag
+// is carried from home and respawns the capper; Team Defender (oneflag) carriers score.
+static void test_flags_v7(Game *game) {
+    printf("Running v7 flag test (idle, Blitz, Team Defender)...\n");
+    start_mode_on(game, MODE_ID_CTF, 2);
+    GameMode *mode = game->mode;
+    Player *red = add_player(game, 1, 0);  // team 2
+    Player *blue = add_player(game, 2, 0); // team 1
+    ModeFlag *blue_flag = &mode->flags[1];
+    place(blue, 900.0f, 0.0f, 900.0f);
+    place(red, blue_flag->origin.x, blue_flag->origin.y - 6.0f, blue_flag->origin.z);
+    tick(game, 0.1f, 0.1f);
+    CHECK(blue_flag->carrier_uid == red->uid, "red carries the blue flag");
+    place(red, 0.0f, 0.0f, 300.0f);
+    kill(red, blue, 1);
+    CHECK(blue_flag->carrier_uid < 0 && blue_flag->idle_timer > 44.0f, "dropped with a 45 s idle timer");
+    tick(game, 44.0f, 0.5f);
+    CHECK(blue_flag->position.x != blue_flag->origin.x, "still out after 44 s");
+    tick(game, 1.5f, 0.5f);
+    CHECK(blue_flag->position.x == blue_flag->origin.x && blue_flag->position.z == blue_flag->origin.z && !strcmp(mode->flag_info[1], "AT BASE"), "home after 45 s");
+
+    start_mode_on(game, MODE_ID_BLITZ, 2);
+    mode = game->mode;
+    red = add_player(game, 1, 0);
+    blue = add_player(game, 2, 0);
+    ModeFlag *red_flag = &mode->flags[2];
+    blue_flag = &mode->flags[1];
+    place(blue, red_flag->origin.x, red_flag->origin.y - 6.0f, red_flag->origin.z); // blue takes the red flag
+    place(red, blue_flag->origin.x, blue_flag->origin.y - 6.0f, blue_flag->origin.z); // red takes the blue flag
+    tick(game, 0.1f, 0.1f);
+    CHECK(red_flag->carrier_uid == blue->uid && blue_flag->carrier_uid == red->uid, "both flags taken");
+    place(red, red_flag->origin.x, red_flag->origin.y - 12.0f, red_flag->origin.z); // home, own flag carried away
+    g_sent_count = 0;
+    tick(game, 0.1f, 0.1f);
+    CHECK(red->mode.caps == 1 && mode_team_score(game, 2) == 1, "Blitz rush: capture while your flag is away (%d)", red->mode.caps);
+    CHECK(count_sent(NET_PACKET_ACTION) == 0, "Blitz: no action feed");
+    CHECK(fabsf(red->position.x - red_flag->origin.x) > 20.0f || fabsf(red->position.z - red_flag->origin.z) > 20.0f, "the capper is sent to a spawn");
+
+    start_mode_on(game, MODE_ID_TDF, 2);
+    mode = game->mode;
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    Player *c = add_player(game, 3, 0);
+    ModeFlag *flag = &mode->flags[0];
+    place(a, flag->origin.x, flag->origin.y - 6.0f, flag->origin.z);
+    place(b, 900.0f, 0.0f, 900.0f);
+    place(c, -900.0f, 0.0f, -900.0f);
+    tick(game, 0.1f, 0.1f);
+    CHECK(flag->carrier_uid == a->uid && a->score == 21 && mode->flag_team == a->team, "anyone picks up the neutral flag (+20, then +1 at once: objectiveTimer starts at 0) (carrier %d score %d team %d/%d)", flag->carrier_uid, a->score, mode->flag_team, a->team);
+    const int score = a->score;
+    tick(game, 1.5f, 0.25f);
+    CHECK(a->score == score + 1, "carrier +1 per 1.5 s in a small public lobby (%d)", a->score - score);
+    // kill score multipliers: carrier 1.25, its team 1, others 0.5
+    CHECK(mode_score_scale(game, a, 100, 1) == 125 && mode_score_scale(game, b->team == a->team ? b : c, 100, 1) == (b->team == a->team ? 100 : 100), "carrier x1.25");
+    Player *enemy = b->team != a->team ? b : c;
+    CHECK(mode_score_scale(game, enemy, 100, 1) == 50 && mode_score_scale(game, enemy, 100, 0) == 100, "non-carrier team x0.5 (kills only)");
+    place(a, 0.0f, 0.0f, 300.0f);
+    kill(a, enemy, 1);
+    CHECK(flag->carrier_uid < 0 && mode->flag_team == 0, "the carrier's death drops it");
+}
+
+// game.js updateDomZones / dom.js (map-logic.md §4.1a)
+static void test_dom(Game *game) {
+    printf("Running Domination test...\n");
+    start_mode_on(game, MODE_ID_DOM, 1);
+    GameMode *mode = game->mode;
+    CHECK(mode->dom_zone_count == 3 && mode->dom_zones[1].position.x == 0.0f && fabsf(mode->dom_zones[1].half.y - 10.0f) < 0.01f, "3 zones");
+
+    Player *a = add_player(game, 1, 0); // team 2
+    Player *b = add_player(game, 2, 0); // team 1
+    Player *c = add_player(game, 3, 0); // team 2
+    CHECK(a->team == 2 && b->team == 1 && c->team == 2, "teams");
+    place(a, -100.0f, 0.0f, 0.0f);
+    place(b, 400.0f, 0.0f, 400.0f);
+    place(c, 400.0f, 0.0f, -400.0f);
+    ModeDomZone *zone = &mode->dom_zones[0];
+
+    // one player: 10 s to capture (mlt 1)
+    tick(game, 9.5f, 0.25f);
+    CHECK(!zone->captured_by && zone->capture_t > 9.0f && zone->last_team_on == 2 && zone->mlt == 1.0f, "capturing (%.2f)", zone->capture_t);
+    CHECK(last_sent(NET_PACKET_DOM_UPDATE, NET_TARGET_ALL) != NULL, "uct");
+    tick(game, 0.75f, 0.25f);
+    CHECK(zone->captured_by == 2 && a->mode.caps == 1 && a->score >= 200, "captured: Secured +200 (%d)", a->score);
+    CHECK(last_sent(NET_PACKET_DOM_CAPTURE, NET_TARGET_ALL) != NULL, "cct");
+
+    // owned zones score +10 every 1.5 s
+    const int team_score = mode_team_score(game, 2);
+    tick(game, 1.5f, 0.25f);
+    CHECK(mode_team_score(game, 2) == team_score + 10, "owner +10 per 1.5 s (%d)", mode_team_score(game, 2) - team_score);
+
+    // two players: mlt 1 + 0.2; contested: frozen; empty: reset
+    ModeDomZone *mid = &mode->dom_zones[1];
+    place(a, 0.0f, 0.0f, 0.0f);
+    place(c, 2.0f, 0.0f, 0.0f);
+    tick(game, 1.0f, 0.25f);
+    CHECK(fabsf(mid->mlt - 1.2f) < 1e-4f && fabsf(mid->capture_t - 1.2f) < 0.01f, "perPlayerMlt (mlt %.2f t %.2f)", mid->mlt, mid->capture_t);
+    place(b, -2.0f, 0.0f, 0.0f);
+    const float frozen = mid->capture_t;
+    tick(game, 1.0f, 0.25f);
+    CHECK(mid->capture_t == frozen && mid->teams_on_count == 2, "contested: frozen");
+    place(a, 400.0f, 0.0f, 400.0f);
+    place(c, 400.0f, 0.0f, -400.0f);
+    place(b, 900.0f, 0.0f, 900.0f);
+    tick(game, 0.5f, 0.25f);
+    CHECK(mid->capture_t == 0.0f && !mid->last_team_on, "empty: reset");
+
+    // lockout: team 2 holds every zone -> team 1 captures 1.5x faster
+    mode->dom_zones[1].captured_by = 2;
+    mode->dom_zones[2].captured_by = 2;
+    CHECK(mode_has_all_zones(game) == 2, "hasAllZones");
+    place(b, 0.0f, 0.0f, 0.0f);
+    tick(game, 1.0f, 0.25f);
+    CHECK(fabsf(mid->mlt - 1.5f) < 1e-4f, "lockoutMlt (%.2f)", mid->mlt);
+
+    // Defender: a kill from your own zone
+    place(a, -100.0f, 0.0f, 0.0f);
+    tick(game, 0.25f, 0.25f);
+    const int before = a->score;
+    kill(b, a, 1);
+    CHECK(a->score - before >= 25 && a->mode.on_zone == 0, "Defender +25 (%d)", a->score - before);
+}
+
+// depo.js / depoffa.js + medals.js KR Tag
+static void test_deposit(Game *game) {
+    printf("Running Deposit test...\n");
+    start_mode(game, MODE_ID_DEPO);
+    GameMode *mode = game->mode;
+    Player *a = add_player(game, 1, 0); // team 2
+    Player *b = add_player(game, 2, 0); // team 1
+    place(a, 0.0f, 600.0f, 0.0f);
+    place(b, 0.0f, 600.0f, 40.0f);
+
+    // a kill drops 1 tag (+ the victim's); clusters of 3 with jitter above that
+    b->mode.dog_tags = 6;
+    kill(b, a, 1);
+    int active = 0, total = 0;
+    for (int i = 0; i < MODE_MAX_SPAWNABLES; i++) {
+        if (!mode->spawnables[i].active) continue;
+        active++;
+        total += mode->spawnables[i].data_c;
+        CHECK(mode->spawnables[i].type == SPAWNABLE_KR_TAG && mode->spawnables[i].team == b->team, "KR Tag of the victim's team");
+    }
+    CHECK(active == 3 && total == 7 && b->mode.dog_tags == 0, "7 tags in 3 clusters (%d / %d)", active, total);
+
+    // picking them up: +10 each stack, krt; the hold limit leaves the rest
+    a->mode.dog_tags = 18;
+    for (int i = 0; i < MODE_MAX_SPAWNABLES; i++) {
+        if (!mode->spawnables[i].active || mode->spawnables[i].data_c != 3) continue;
+        place(a, mode->spawnables[i].position.x, mode->spawnables[i].position.y - 3.0f, mode->spawnables[i].position.z);
+        tick(game, 0.1f, 0.1f);
+        CHECK(a->mode.dog_tags == 20 && mode->spawnables[i].active && mode->spawnables[i].data_c == 1, "hold limit 20: 1 tag stays (%d, c %d)",
+              a->mode.dog_tags, mode->spawnables[i].data_c);
+        break;
+    }
+    CHECK(last_sent(NET_PACKET_MODE_COUNTER, a->uid) != NULL, "krt");
+
+    // deposit one per 500 ms on the objective: +50, team +1
+    const ModeObjective *objective = mode_objective_by_uid(game, mode->active_objective);
+    place(a, objective->position.x, objective->position.y - objective->half.y, objective->position.z);
+    const int score = a->score;
+    tick(game, 1.0f, 0.25f);
+    CHECK(a->mode.deposits == 2 && a->mode.dog_tags == 18 && mode_team_score(game, a->team) == 2 && a->score == score + 100,
+          "deposits %d tags %d team %d score +%d", a->mode.deposits, a->mode.dog_tags, mode_team_score(game, a->team), a->score - score);
+
+    // denies: your own team's tags
+    player_spawn(b);
+    place(b, 300.0f, 600.0f, 300.0f);
+    Player *c = add_player(game, 3, 0); // team 2
+    place(c, 300.0f, 600.0f, 340.0f);
+    kill(c, b, 1);
+    place(a, 300.0f, 600.0f, 340.0f);
+    tick(game, 0.1f, 0.1f);
+    CHECK(a->mode.denies == 1, "teammate's tag: deny (%d)", a->mode.denies);
+
+    // tagLimit on the team score
+    mode->team_scores[2] = 65;
+    tick(game, 0.1f, 0.1f);
+    CHECK(ended(game) && end_result_for(a->uid) == 1, "65 deposits win");
+    const NetModeEndPacket end = last_end();
+    CHECK(end.count && end.entries[0].stats[NET_MODE_STAT_DEPOSITS] >= 0, "deposits end stat");
+
+    // Deposit FFA: 750 ms, +75, no team score; the first to 65 deposits wins
+    start_mode(game, MODE_ID_DEPOFFA);
+    mode = game->mode;
+    a = add_player(game, 1, 0);
+    CHECK(a->team == 0, "FFA");
+    a->mode.dog_tags = 5;
+    objective = mode_objective_by_uid(game, mode->active_objective);
+    place(a, objective->position.x, objective->position.y - objective->half.y, objective->position.z);
+    tick(game, 0.75f, 0.25f);
+    CHECK(a->mode.deposits == 1 && a->score == 75, "depoffa: +75 (%d / %d)", a->mode.deposits, a->score);
+    a->mode.deposits = 65;
+    tick(game, 0.1f, 0.1f);
+    CHECK(ended(game), "65 deposits end Deposit FFA");
+}
+
+// sdm: 4 teams, smallest team first
+static void test_sdm(Game *game) {
+    printf("Running Squad Deathmatch test...\n");
+    start_mode_on(game, MODE_ID_SDM, 1);
+    int counts[MODE_TEAMS] = {0};
+    for (int i = 1; i <= 8; i++) counts[add_player(game, i, 0)->team]++;
+    CHECK(counts[1] == 2 && counts[2] == 2 && counts[3] == 2 && counts[4] == 2 && !counts[5], "8 players: 2 per team (%d %d %d %d)", counts[1], counts[2], counts[3], counts[4]);
+    CHECK(mode_team_count(game) == 4, "4 teams");
+    Player *a = game->players[0];
+    Player *b = NULL;
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i]->team == 3) b = game->players[i];
+    }
+    kill(b, a, 1);
+    CHECK(mode_team_score(game, a->team) == a->score && a->score > 0, "team score");
+    game->mode->team_scores[3] = a->score + 50;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game) && end_result_for(b->uid) == 1 && end_result_for(a->uid) == 0, "team 3 wins");
+}
+
+// krank / bhffa / aon / md / chs / imp / clas
+static void test_modifiers(Game *game) {
+    printf("Running Kranked / Bighead / All or Nothing / Mag Dump / Chaos / Impulsed / Classic test...\n");
+    start_mode(game, MODE_ID_KRANK);
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    place(a, 0.0f, 600.0f, 0.0f);
+    place(b, 200.0f, 600.0f, 0.0f);
+    kill(b, a, 1);
+    CHECK(a->mode.is_kranked && fabsf(a->mode.kranked_timer - 15.0f) < 0.01f, "a kill krankes the killer");
+    CHECK(fabsf(mode_speed_mlt(game, a) - 1.25f) < 1e-4f && fabsf(mode_reload_mlt(game, a) - 0.35f) < 1e-4f && fabsf(mode_fire_rate_mlt(game, a) - 0.85f) < 1e-4f, "bonuses");
+    player_spawn(b);
+    const int score = a->score;
+    kill(b, a, 1);
+    CHECK(a->score - score >= 35, "Recharge +35 (%d)", a->score - score);
+    tick(game, 15.5f, 0.5f);
+    CHECK(!a->active, "the timer runs out: boom");
+
+    start_mode(game, MODE_ID_BHFFA);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    for (int i = 0; i < 3; i++) {
+        kill(b, a, 1);
+        player_spawn(b);
+    }
+    CHECK(fabsf(a->mode.head_mlt - 1.3f) < 1e-4f && fabsf(mode_head_mlt(a) - 1.3f) < 1e-4f, "headMlt 1 + 0.1 x kills (%.2f)", a->mode.head_mlt);
+    a->kills = 40;
+    kill(b, a, 1);
+    CHECK(a->mode.head_mlt == 3.0f, "capped at 3");
+
+    start_mode(game, MODE_ID_AON);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    CHECK(a->class_index == 9 && a->loadout[0] == 16 && a->ammo[0] == 0 && !a->can_throw, "aon: weapon 16, no ammo, no knife throw (%d %u)", a->loadout[0], a->ammo[0]);
+    place(b, 0.0f, 600.0f, 0.0f);
+    kill(b, a, 16);
+    int packs = 0;
+    for (int i = 0; i < MODE_MAX_SPAWNABLES; i++) packs += game->mode->spawnables[i].active && game->mode->spawnables[i].type == SPAWNABLE_AMMO_PACK;
+    CHECK(packs == 1, "the victim drops an Ammo Pack");
+
+    start_mode(game, MODE_ID_MD);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    place(b, 0.0f, 600.0f, 0.0f);
+    kill(b, a, 2);
+    const ModeSpawnable *box = NULL;
+    for (int i = 0; i < MODE_MAX_SPAWNABLES; i++) {
+        if (game->mode->spawnables[i].active && game->mode->spawnables[i].type == SPAWNABLE_WEAPON_BOX) box = &game->mode->spawnables[i];
+    }
+    CHECK(box && box->data_w >= 0, "md: a Weapon Box with a weapon");
+    if (box && weapon_exists(game, box->data_w)) {
+        const int weapon = box->data_w;
+        place(a, box->position.x, box->position.y - 1.0f, box->position.z);
+        tick(game, 0.1f, 0.1f);
+        CHECK(a->loadout[0] == weapon && a->mode.pickups == 1, "picked up: weapon %d", a->loadout[0]);
+    }
+
+    start_mode(game, MODE_ID_CHS);
+    a = add_player(game, 1, 0);
+    CHECK(a->class_index == 0 && a->loadout[0] == 0 && a->max_health == 10 && a->ammo[0] == 1, "chs: sniper, 10 hp, 1 bullet");
+    CHECK(mode_grav_mlt(game) == 0.92f && mode_jump_mlt(game) == 1.5f && mode_ground_accel(game) == 2.0f && mode_reload_mlt(game, a) == 0.5f, "chs physics");
+    float wall_jump = 0.0f, d = 0.0f, v = 0.0f, yv = 0.0f, max = 0.0f;
+    CHECK(mode_wall_jump(game, &wall_jump, &max, &d, &v, &yv) && max == 100.0f && yv == 2.0f, "chs wallJ");
+
+    start_mode(game, MODE_ID_IMP);
+    a = add_player(game, 1, 0);
+    CHECK(a->loadout_size >= 2 && a->loadout[0] == 5 && (!weapon_exists(game, 22) || a->loadout[1] == 22), "imp: weapons 5 + 22");
+    CHECK(mode_explosion_damage_mlt(game, a, NULL) == 5.0f && mode_explosion_damage_mlt(game, a, a) == 1.0f && mode_explosion_size_mlt(game) == 2.0f, "explMlt others only");
+
+    start_mode(game, MODE_ID_CLAS);
+    a = add_player(game, 1, 0);
+    int knife = 0;
+    for (int i = 0; i < a->loadout_size; i++) knife |= a->loadout[i] == WEAPON_ID_KNIFE;
+    CHECK(!knife && !a->can_throw && mode_no_sliding(game) && mode_no_wall_jump(game) && game->mode->config.real_movement, "clas: no melee, no slide / wall jump");
+}
+
+// endGame rounds: best of, intermission (flipped spawns, locked movement), overtime
+static void test_rounds(Game *game) {
+    printf("Running rounds / best of / overtime test...\n");
+    start_mode(game, MODE_ID_TDM);
+    GameMode *mode = game->mode;
+    game->config.intermission_time = 10.0f; // WP-E: intermTmr (the serverConfig default is 30 s)
+    mode->game_rounds = 3;
+    mode->round_count = 2;
+    mode->best_of = 1;
+    Player *a = add_player(game, 1, 0); // team 2
+    Player *b = add_player(game, 2, 0); // team 1
+
+    mode->team_scores[2] = 10;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(!ended(game) && mode->team_round_wins[2] == 1 && mode->round_count == 1 && mode->flipped_spawns, "round 1 to team 2 (wins %d left %d)",
+          mode->team_round_wins[2], mode->round_count);
+    CHECK(mode->team_scores[2] == 0 && game->move_lock && mode->wait_timer_count && mode->wait_timers[0].dont_wait, "scores reset, intermission");
+    const SentPacket *sent = last_sent(NET_PACKET_ROUNDS, NET_TARGET_ALL);
+    CHECK(sent != NULL, "rds");
+    if (sent) {
+        NetRoundsPacket rounds;
+        memcpy(&rounds, sent->payload, sizeof(rounds));
+        CHECK(rounds.rounds_left == 1 && rounds.win_team == 2 && rounds.team_round_wins[2] == 1, "rds payload");
+    }
+    tick(game, 10.5f, 0.5f);
+    CHECK(!game->move_lock && !mode->wait_timer_count && a->active && b->active, "intermission over, everyone respawned");
+
+    // a tie with noDraws: 60 s overtime
+    mode->need_winner = 1;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(!ended(game) && mode->in_overtime && game->round_timer > 59.0f && last_sent(NET_PACKET_TEXT_POPUP, NET_TARGET_ALL) != NULL, "overtime");
+
+    // team 2 wins round 2: 2 round wins of 3 win the match
+    mode->team_scores[2] = 5;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game) && end_result_for(a->uid) == 1 && end_result_for(b->uid) == 0, "best of 3: team 2 wins the match");
+
+    // flipped spawns: team 1 spawns on team 2's spawn points
+    start_mode_on(game, MODE_ID_TDM, 1);
+    game->mode->flipped_spawns = 1;
+    Player *c = add_player(game, 1, 0); // team 2
+    const int team1_spawn = fabsf(c->position.x + 200.0f) < 0.01f || (fabsf(c->position.x - 150.0f) < 0.01f && fabsf(c->position.z - 150.0f) < 0.01f);
+    CHECK(c->team == 2 && team1_spawn, "flipped: team 2 at a team 1 spawn (%.0f, %.0f)", c->position.x, c->position.z);
+}
+
+// v7 getSpawnPoint: teamOnly and spread
+static void test_spawn_v7(Game *game) {
+    printf("Running v7 spawn point test...\n");
+    start_mode_on(game, MODE_ID_FFA, 1);
+    int team_only = 0, spread = 0;
+    for (int i = 0; i < 40; i++) {
+        Player *p = add_player(game, 100 + i, 0);
+        team_only += fabsf(p->position.x - 150.0f) < 0.01f && fabsf(p->position.z - 150.0f) < 0.01f;
+        const float dx = p->position.x + 300.0f, dz = p->position.z - 300.0f;
+        if (sqrtf(dx * dx + dz * dz) < 25.0f) spread += sqrtf(dx * dx + dz * dz) > 0.5f;
+        p->active = 0;
+    }
+    CHECK(team_only == 0, "FFA never takes a teamOnly spawn (%d)", team_only);
+    (void) spread;
+
+    // team 2: its plain spawn (200, 0), the teamless one, or the spread one (-300, 300, spread 20): within 27 - 10
+    start_mode_on(game, MODE_ID_TDM, 1);
+    int spread_hits = 0, bad = 0;
+    for (int i = 0; i < 40; i++) {
+        Player *p = add_player(game, 200 + i, 0);
+        if (p->team != 2) {
+            p->active = 0;
+            continue;
+        }
+        const float sx = p->position.x + 300.0f, sz = p->position.z - 300.0f;
+        const float d = sqrtf(sx * sx + sz * sz);
+        if (d <= 17.71f) spread_hits += d > 0.5f;
+        else if (!(fabsf(p->position.x - 200.0f) < 0.01f && fabsf(p->position.z) < 0.01f) &&
+                 !(fabsf(p->position.x + 150.0f) < 0.01f && fabsf(p->position.z + 150.0f) < 0.01f)) bad++; // or the teamless one
+        p->active = 0;
+    }
+    CHECK(!bad && spread_hits > 0, "team 2: own spawns only, the spread one moves the point (%d spread, %d bad)", spread_hits, bad);
+}
+
+// zom shell + raid v7
+static void test_zombies_raid(Game *game) {
+    printf("Running Zombies shell / Raid v7 test...\n");
+    start_mode(game, MODE_ID_ZOM);
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    CHECK(a->team == 1 && b->team == 1 && a->score == 150 && a->class_index == 9 && a->loadout[0] == 2, "zom: friendly, 150 starter score, pistol");
+    tick(game, 12.5f, 0.5f); // lives modes: "match starts in " 12 s
+    a->score = 1000;
+    kill(b, NULL, 0);
+    CHECK(a->score == 900, "a death costs everyone 10%% (%d)", a->score);
+    kill(a, NULL, 0);
+    tick(game, 0.1f, 0.1f);
+    CHECK(ended(game) && end_result_for(a->uid) == 0 && a->score == 100, "everyone down: winCondition 2, score = wave x 100");
+
+    start_mode(game, MODE_ID_RAID);
+    a = add_player(game, 1, 0);
+    CHECK(mode_hostable(MODE_ID_RAID) && fabsf(game->round_timer - 360.0f) < 0.01f, "raid hostable, 6 min");
+    // raid.js onEnd: with time left, every active player without a time gets the elapsed clock;
+    // v7 has no boss-death end timer any more (v3.1.1's Lord of Souls rule)
+    game->round_timer = 123.5f;
+    mode_on_game_end(game);
+    CHECK(a->mode.has_timer && fabsf(a->mode.timer - (360.0f - 123.5f)) < 1e-3f, "onEnd: time = elapsed clock (%.2f)", a->mode.timer);
+    a->mode.has_timer = 0;
+    game->round_timer = 360.0f;
+    tick(game, 20.5f, 0.5f);
+    tick(game, 10.0f, 0.5f);
+    kill(a, NULL, 0);
+    tick(game, 0.1f, 0.1f);
+    CHECK(ended(game) && end_result_for(a->uid) == 0, "everyone out: team 2 (the raid) wins");
+}
+
+// the WP-D packets (140-149) and the joiner sync
+static void test_net_v7(Game *game) {
+    printf("Running v7 mode packet test...\n");
+    start_mode_on(game, MODE_ID_DOM, 1);
+    add_player(game, 1, 0);
+    g_sent_count = 0;
+    game_send_round_state(game, 1);
+    int count = 0;
+    const SentPacket *sync = count_type(NET_PACKET_MODE_SYNC_V7, &count);
+    CHECK(sync && sync->length == sizeof(NetModeSyncV7Packet), "MODE_SYNC_V7 to the joiner");
+    const SentPacket *doms = count_type(NET_PACKET_DOM_UPDATE, &count);
+    CHECK(doms && doms->uid == 1, "sync.doms to the joiner");
+    if (doms) {
+        NetDomUpdatePacket update;
+        memcpy(&update, doms->payload, sizeof(update));
+        CHECK(update.count == 3, "every zone (%d)", update.count);
+    }
+    CHECK(sizeof(NetDomUpdatePacket) <= NET_MAX_PAYLOAD && sizeof(NetModeSyncV7Packet) <= NET_MAX_PAYLOAD && sizeof(NetSpawnableV7Packet) <= NET_MAX_PAYLOAD &&
+          sizeof(NetRoundsPacket) <= NET_MAX_PAYLOAD && sizeof(NetModeStatePacket) <= NET_MAX_PAYLOAD, "v7 packets fit a frame");
+    CHECK(NET_PACKET_OBJECTIVE_V7 == 140 && NET_PACKET_MODE_SYNC_V7 == 149, "block 140-149");
+
+    start_mode(game, MODE_ID_KC);
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    g_sent_count = 0;
+    kill(b, a, 1);
+    const SentPacket *crsp = last_sent(NET_PACKET_SPAWNABLE_V7, NET_TARGET_ALL);
+    CHECK(crsp != NULL, "crsp");
+    if (crsp) {
+        NetSpawnableV7Packet packet;
+        memcpy(&packet, crsp->payload, sizeof(packet));
+        CHECK(packet.type == SPAWNABLE_TAG && packet.active && packet.team == b->team, "crsp type 0, the victim's team");
+    }
+}
+
 static void test_net(Game *game) {
     printf("Running mode packet test...\n");
     start_mode(game, MODE_ID_CTF);
@@ -703,6 +1294,236 @@ static void test_net(Game *game) {
     CHECK(count_sent(NET_PACKET_MODE_STATE) >= 1, "sent");
 }
 
+// WP-E: players.syncLeaders "7": mode.leaderStats columns (endForm applied) in the leader order.
+static NetLeaderStatsPacket leader_stats_sent(int *found) {
+    NetLeaderStatsPacket stats;
+    memset(&stats, 0, sizeof(stats));
+    const SentPacket *sent = last_sent(NET_PACKET_LEADER_STATS, NET_TARGET_ALL);
+    *found = sent && sent->length == sizeof(stats);
+    if (*found) memcpy(&stats, sent->payload, sizeof(stats));
+    return stats;
+}
+
+static void test_leader_stats(Game *game) {
+    printf("Running leader stats test...\n");
+    CHECK(NET_PACKET_LEADER_STATS == NET_PACKET_BLOCK_SOCIAL && NET_PACKET_BLOCK_END == 250, "WP-E block 240-249");
+    CHECK(sizeof(NetLeaderStatsPacket) <= NET_MAX_PAYLOAD, "LEADER_STATS fits a frame (%zu)", sizeof(NetLeaderStatsPacket));
+
+    start_mode(game, MODE_ID_FFA); // ["score", "kills", "deaths"], orderByScore
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    a->score = 100, a->kills = 1, a->deaths = 4;
+    b->score = 300, b->kills = 3, b->deaths = 2;
+    g_sent_count = 0;
+    game_sync_leaders(game, NET_TARGET_ALL);
+    int found;
+    NetLeaderStatsPacket stats = leader_stats_sent(&found);
+    CHECK(found && stats.count == 2 && stats.stat_count == 3, "FFA: 2 rows x 3 columns (%d x %d)", stats.count, stats.stat_count);
+    CHECK(stats.uid[0] == 2 && stats.uid[1] == 1, "by score (%d, %d)", stats.uid[0], stats.uid[1]);
+    CHECK(stats.values[0][0] == 300 && stats.values[0][1] == 3 && stats.values[0][2] == 2, "score / kills / deaths");
+
+    start_mode(game, MODE_ID_ZOM); // ["points", "zombies", "downs", "dmg"]
+    a = add_player(game, 1, 0);
+    a->score = 450, a->deaths = 2, a->damage_dealt = 99.6f;
+    a->mode.ai_kills = 7;
+    g_sent_count = 0;
+    game_sync_leaders(game, NET_TARGET_ALL);
+    stats = leader_stats_sent(&found);
+    CHECK(found && stats.count == 1 && stats.stat_count == 4, "Zombies: 4 columns (%d)", stats.stat_count);
+    CHECK(stats.values[0][0] == 450 && stats.values[0][1] == 7 && stats.values[0][2] == 2 && stats.values[0][3] == 100,
+          "points = score, zombies = aiKills, downs = deaths, dmg = round(dmgDealt) (%d %d %d %d)",
+          stats.values[0][0], stats.values[0][1], stats.values[0][2], stats.values[0][3]);
+
+    start_mode(game, MODE_ID_RAID); // botsAsAI: bots stay off the board
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    b->is_bot = 1;
+    b->score = 999;
+    g_sent_count = 0;
+    game_sync_leaders(game, NET_TARGET_ALL);
+    stats = leader_stats_sent(&found);
+    CHECK(found && stats.count == 1 && stats.uid[0] == 1 && stats.stat_count == 1, "Raid: no bots, [\"score\"] (%d rows)", stats.count);
+}
+
+// WP-E part 2a: the victim's "3" extras (NET_PACKET_DEATH_INFO) ahead of its KILL, and the
+// config.playerCardStats / class level formulas.
+static void test_death_info(Game *game) {
+    printf("Running death info test...\n");
+    CHECK(NET_PACKET_DEATH_INFO == NET_PACKET_BLOCK_SOCIAL + 1 && NET_PACKET_PC_STAT == NET_PACKET_BLOCK_SOCIAL + 2, "WP-E part 2a ids 241 / 242");
+    CHECK(sizeof(NetDeathInfoPacket) <= NET_MAX_PAYLOAD, "DEATH_INFO fits a frame");
+
+    start_mode(game, MODE_ID_FFA);
+    game->now = 2.0f;
+    Player *killer = add_player(game, 1, 0);
+    Player *victim = add_player(game, 2, 0);
+    CHECK(victim->life_start == 2.0f && !victim->life_shots && !victim->life_hits && !victim->life_kills && !victim->life_score,
+          "spawn resets the life counters");
+    CHECK(killer->pc_stat_index == -1 && !killer->class_stat, "no account values by default");
+    player_score(victim, 40, 0);
+    CHECK(victim->life_score == 40, "scoreL follows the score (%d)", victim->life_score);
+    victim->life_shots = 8;
+    victim->life_hits = 3;
+    killer->class_stat = 2500;
+    killer->pc_stat_index = 3;
+    snprintf(killer->pc_stat_value, sizeof(killer->pc_stat_value), "1.52");
+    game->now = 7.25f;
+    g_sent_count = 0;
+    PlayerKillInfo info = {.weapon_id = 1};
+    player_kill(victim, killer, &info, 1);
+    int death_at = -1, kill_at = -1;
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].type == NET_PACKET_DEATH_INFO && death_at < 0) death_at = i;
+        if (g_sent[i].type == NET_PACKET_KILL && kill_at < 0) kill_at = i;
+    }
+    CHECK(death_at >= 0 && kill_at > death_at && g_sent[death_at].uid == 2, "DEATH_INFO to the victim, before the KILL");
+    NetDeathInfoPacket death;
+    memset(&death, 0, sizeof(death));
+    if (death_at >= 0 && g_sent[death_at].length == sizeof(death)) memcpy(&death, g_sent[death_at].payload, sizeof(death));
+    CHECK(death.victim_uid == 2 && death.killer_uid == 1 && death.weapon_index == 1, "victim / killer / weapon");
+    CHECK(death.class_stat == 2500 && death.pc_stat_index == 3 && !strcmp(death.pc_stat_value, "1.52"), "the killer's class and card stat");
+    CHECK(death.time_alive_ms == 5250 && death.shots == 8 && !strcmp(death.accuracy, "37.5%") && death.score == 40,
+          "life stats (%d ms, %d shots, %s, score %d)", death.time_alive_ms, death.shots, death.accuracy, death.score);
+    CHECK(killer->life_kills == 1, "killsL counts the kill");
+
+    // config.playerCardStats and f1975's class level
+    cJSON *account = cJSON_Parse("{\"kills\":300,\"deaths\":120,\"games\":40,\"wins\":25,\"score\":45000,\"funds\":12,"
+                                 "\"stats\":{\"s\":1000,\"h\":381,\"hs\":77,\"c2\":10000}}");
+    char v[16];
+    CHECK(player_card_stat_format(0, account, v, sizeof(v)) && !strcmp(v, "150.00"), "SPK %s", v);
+    CHECK(player_card_stat_format(3, account, v, sizeof(v)) && !strcmp(v, "2.50"), "KDR %s", v);
+    CHECK(player_card_stat_format(7, account, v, sizeof(v)) && !strcmp(v, "1.67"), "W/L %s", v);
+    CHECK(player_card_stat_format(10, account, v, sizeof(v)) && !strcmp(v, "38.1%"), "Accuracy %s", v);
+    CHECK(player_card_stat_format(12, account, v, sizeof(v)) && !strcmp(v, "77"), "Headshots %s", v);
+    CHECK(player_card_stat_format(13, account, v, sizeof(v)) && !strcmp(v, "15"), "Losses %s", v);
+    CHECK(player_card_stat_format(23, account, v, sizeof(v)) && !strcmp(v, "619"), "Misses %s", v);
+    CHECK(!player_card_stat_format(PLAYER_CARD_STAT_COUNT, account, v, sizeof(v)) && !player_card_stat_format(0, NULL, v, sizeof(v)), "no stat");
+    CHECK(!strcmp(player_card_stat_name(27), "War Machines"), "28 stats");
+    cJSON_Delete(account);
+    CHECK(player_card_class_level(0) == 1 && player_card_class_level(10000) == 4 && player_card_class_level(2500) == 2, "class levels");
+    player_card_accuracy(0, 0, v, sizeof(v));
+    CHECK(!strcmp(v, "0%"), "no shots: 0%%");
+}
+
+// WP-E part 2c: v7 stat / challenge events (GameHooks.progress), incMedal counts and the end
+// screen's NET_PACKET_END_MEDALS, the level progress curve and challenges.finalize.
+#define PROG_EVENTS_MAX 64
+static struct {
+    int uid, stat, value, weapon, streak;
+    char key[8];
+} g_prog[PROG_EVENTS_MAX];
+static int g_prog_count;
+
+static void test_progress_hook(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak) {
+    (void) game;
+    if (g_prog_count >= PROG_EVENTS_MAX) return;
+    g_prog[g_prog_count].uid = player->uid;
+    g_prog[g_prog_count].stat = stat;
+    g_prog[g_prog_count].value = value;
+    g_prog[g_prog_count].weapon = weapon;
+    g_prog[g_prog_count].streak = streak;
+    snprintf(g_prog[g_prog_count].key, sizeof(g_prog[0].key), "%s", key);
+    g_prog_count++;
+}
+
+static int prog_has(const int uid, const int stat, const char *key, const int value, const int weapon) {
+    for (int i = 0; i < g_prog_count; i++)
+        if (g_prog[i].uid == uid && g_prog[i].stat == stat && !strcmp(g_prog[i].key, key) && g_prog[i].value == value && g_prog[i].weapon == weapon) return 1;
+    return 0;
+}
+
+static void test_progression(Game *game) {
+    printf("Running progression test...\n");
+    CHECK(NET_PACKET_END_MEDALS == NET_PACKET_BLOCK_SOCIAL + 3 && sizeof(NetEndMedalsPacket) <= NET_MAX_PAYLOAD, "END_MEDALS: id 243, fits a frame");
+    CHECK(PLAYER_MEDAL_SLOTS == PROGRESSION_MEDAL_COUNT && progression_medal_index("Headshot") == 9 && progression_medal_index("Cycled") == 55 &&
+          progression_medal_index("Nuke") == -1, "overlay.medalsList");
+
+    start_mode(game, MODE_ID_FFA);
+    game->hooks.progress = test_progress_hook;
+    g_prog_count = 0;
+    Player *killer = add_player(game, 1, 0);
+    Player *victim = add_player(game, 2, 0);
+    killer->has_account = 1; // the server's player.account
+    PlayerKillInfo info = {.weapon_id = 1, .headshot = 1};
+    player_kill(victim, killer, &info, 0);
+    CHECK(prog_has(2, 0, "d", 1, -1), "challenges.update(\"d\") for the victim");
+    CHECK(prog_has(1, 0, "k", 1, 1) && prog_has(1, 0, "kstk", 1, -1) && prog_has(1, 0, "kstk", 1, 1), "\"k\" and \"kstk\" (kill / weapon streak)");
+    CHECK(prog_has(1, 1, "hs", 1, -1) && prog_has(1, 0, "hs", 1, 1), "headshot kill: incStat + challenge");
+    CHECK(prog_has(1, 0, "fb", 1, 1), "First Blood: \"fb\"");
+    int score_events = 0;
+    for (int i = 0; i < g_prog_count; i++) score_events += g_prog[i].uid == 1 && !strcmp(g_prog[i].key, "score") && g_prog[i].value == killer->score;
+    CHECK(score_events == 1, "challenges.update(\"score\") with the kill's score (%d)", killer->score);
+    CHECK(killer->medal_counts[progression_medal_index("First Blood")] == 1 && killer->medal_counts[progression_medal_index("Headshot")] == 1,
+          "incMedal: First Blood + Headshot");
+    game_inc_medal(game, victim, "Assist");
+    CHECK(!victim->medal_counts[progression_medal_index("Assist")], "no medals without an account");
+    game_inc_medal(game, killer, "Not A Medal");
+    game->hooks.progress = NULL;
+
+    g_sent_count = 0;
+    game_end_round(game);
+    int medals_at = -1, end_at = -1;
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].type == NET_PACKET_END_MEDALS && g_sent[i].uid == 1 && medals_at < 0) medals_at = i;
+        if (g_sent[i].type == NET_PACKET_END && g_sent[i].uid == 1 && end_at < 0) end_at = i;
+    }
+    CHECK(medals_at >= 0 && end_at > medals_at, "END_MEDALS before the player's END");
+    NetEndMedalsPacket medals;
+    memset(&medals, 0, sizeof(medals));
+    if (medals_at >= 0 && g_sent[medals_at].length == sizeof(medals)) memcpy(&medals, g_sent[medals_at].payload, sizeof(medals));
+    CHECK(medals.count == 2 && medals.medals[0].index == 2 && medals.medals[0].count == 1 && medals.medals[1].index == 9,
+          "endData.mdls in list order (%d entries)", medals.count);
+
+    // getLevelProg (v7): linear in score between the level bounds
+    CHECK(progression_level(0, 0.03) == 1 && progression_level(10000, 0.03) == 3, "levels");
+    const double prog = progression_level_prog(7222, 0.03);
+    CHECK(prog > 49.9 && prog < 50.0 && progression_level_prog(10000, 0.03) == 0.0 && progression_level_prog(2222, 0.03) == 50.0,
+          "level progress %.3f", prog);
+
+    // challenges.finalize
+    cJSON *active = cJSON_Parse("["
+        "{\"CI\":1,\"T\":\"map\",\"DAT\":{\"ky\":\"k\",\"val\":10,\"mp\":0},\"REW\":{\"kr\":5,\"sk\":[7,8]},\"PV\":4,\"PT\":0},"
+        "{\"CI\":2,\"T\":\"weapon\",\"DAT\":{\"ky\":\"k\",\"val\":50,\"wep\":1},\"REW\":{\"kr\":5},\"PV\":0,\"PT\":0},"
+        "{\"CI\":3,\"T\":\"map\",\"DAT\":{\"ky\":\"k\",\"val\":10,\"mp\":3},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":4,\"T\":\"daily\",\"DAT\":{\"ky\":\"kstk\",\"val\":5},\"REW\":{\"kr\":1},\"PV\":0,\"PT\":0},"
+        "{\"CI\":5,\"T\":\"daily\",\"DAT\":{\"ky\":\"kstk\",\"val\":3,\"wep\":1},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":6,\"T\":\"nightmare\",\"DAT\":{\"ky\":\"score\",\"val\":1000,\"sm\":1},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":7,\"T\":\"map\",\"DAT\":{\"ky\":\"chall\",\"val\":1},\"REW\":{\"kr\":2},\"PV\":0,\"PT\":0},"
+        "{\"CI\":8,\"T\":\"daily\",\"DAT\":{\"ky\":\"uwk\",\"val\":9},\"REW\":{},\"PV\":0,\"PT\":0},"
+        "{\"CI\":9,\"T\":\"ranked\",\"DAT\":{\"ky\":\"w\",\"val\":1},\"REW\":{},\"PV\":0,\"PT\":0}]");
+    cJSON *events = cJSON_Parse("[[\"k\",3,-1,-1],[\"k\",4,1,-1],[\"kstk\",6,-1,-1],[\"kstk\",2,1,-1],[\"score\",400,-1,-1],[\"uwk\",3,-1,-1],[\"w\",1,-1,-1]]");
+    cJSON *results = cJSON_CreateArray(), *completed = cJSON_CreateArray(), *reward = cJSON_CreateObject();
+    const ChallengeMatch match = {.map_index = 0, .map_id = -1, .mode = 0, .class_index = 0};
+    challenges_finalize(active, events, &match, results, completed, reward);
+    char *text = cJSON_PrintUnformatted(results);
+    // 1: 4 + 7 = 11 >= 10 done; 2: 4 with the weapon; 3 other map; 4: nonWep streak 6 >= 5 done; 5: weapon
+    // streak 2 < 3 (a SET/MAX key below its value is not saved); 6: single match 400 < 1000 (reset);
+    // 7: one completed map challenge; 8: MAX below its value; 9: not a ranked game
+    CHECK(text && !strcmp(text, "[1,1,11,0,2,4,1,4,6,1,7,1]"), "chg triples %s", text ? text : "");
+    free(text);
+    CHECK(cJSON_GetArraySize(completed) == 3 && cJSON_GetNumberValue(cJSON_GetObjectItem(reward, "kr")) == 8 &&
+          cJSON_GetArraySize(cJSON_GetObjectItem(reward, "skins")) == 2, "completed 1, 4, 7; reward 8 KR + 2 skins");
+    CHECK(cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetArrayItem(active, 0), "PT")) == 1, "PT set in place");
+    // a player who left mid-match keeps only DAT.nem challenges
+    cJSON *results2 = cJSON_CreateArray();
+    const ChallengeMatch quit = {.map_index = 0, .map_id = -1, .quit = 1};
+    CHECK(challenges_finalize(active, events, &quit, results2, NULL, NULL) == 0 && cJSON_GetArraySize(results2) == 0, "quit: nothing");
+    char name[96];
+    cJSON *daily = cJSON_Parse("{\"T\":\"daily\",\"N\":\"\",\"DAT\":{\"ky\":\"hs\",\"val\":5,\"wep\":0}}");
+    challenge_name(daily, NULL, name, sizeof(name));
+    CHECK(!strcmp(name, "Get 5 headshots "), "updateNames without weapon names: \"%s\"", name);
+    cJSON *stats = cJSON_Parse("{\"n\":760}");
+    CHECK(badge_requirement_met(11, stats) && badge_requirement_met(13, stats) && !badge_requirement_met(14, stats) &&
+          !badge_requirement_met(22, stats), "Nuclear badge rules");
+    cJSON_Delete(stats);
+    cJSON_Delete(daily);
+    cJSON_Delete(results2);
+    cJSON_Delete(active);
+    cJSON_Delete(events);
+    cJSON_Delete(results);
+    cJSON_Delete(completed);
+    cJSON_Delete(reward);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *sandstorm = NULL;
@@ -711,13 +1532,20 @@ int main(void) {
         return 1;
     }
     g_test_maps[0] = sandstorm;
+    cJSON *dom = NULL, *objectives = NULL;
+    if (load_json_file("shared/tests/maps/v7_dom.json", &dom) || load_json_file("shared/tests/maps/v7_objectives.json", &objectives)) {
+        printf("Failed to load shared/tests/maps/v7_*.json (run from the repository root)\n");
+        return 1;
+    }
+    g_test_maps[1] = dom;
+    g_test_maps[2] = objectives;
 
     static Game game;
     test_table();
     test_ffa(&game);
     test_tdm(&game);
-    test_point(&game, MODE_ID_POINT);
-    test_point(&game, MODE_ID_KING);
+    test_point(&game);
+    test_king(&game);
     test_ctf(&game);
     test_kc(&game);
     test_hide(&game);
@@ -731,6 +1559,19 @@ int main(void) {
     test_shrp(&game);
     test_misc(&game);
     test_net(&game);
+    test_objectives_v7(&game);
+    test_flags_v7(&game);
+    test_dom(&game);
+    test_deposit(&game);
+    test_sdm(&game);
+    test_modifiers(&game);
+    test_rounds(&game);
+    test_spawn_v7(&game);
+    test_zombies_raid(&game);
+    test_net_v7(&game);
+    test_leader_stats(&game);
+    test_death_info(&game);
+    test_progression(&game);
 
     if (g_failures) {
         printf("modes_test: %d of %d check(s) failed\n", g_failures, g_checks);

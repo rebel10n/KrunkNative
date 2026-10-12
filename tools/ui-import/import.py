@@ -2,7 +2,15 @@
 """KrunkNative UI import tool.
 
 Run with ``python3 -I tools/ui-import/import.py --ui ui`` from the repository
-root (the Makefile target ``make ui-import`` does exactly that).
+root (the Makefile target ``make ui-import`` does exactly that). ``--ref v7`` (the
+default) imports Krunker v7.1.4's pages; ``--ref v3`` the former Krunker v3.1.1 import
+(``ui/index.html`` hand-maintained, ``krunker-windows.js`` window templates).
+
+With ``--ref v7`` the steps are: the menu page and its stylesheets (``index_page.py``),
+the window templates (``windows_v7.py``, from ``krunker-windows-v7.json.gz`` captured by
+``capture_v7_windows.js``), the social hub, editor and viewer pages, the fonts and
+ligature tables below, and every file the pages reference plus the C UI's own image
+list (``menu_assets.py``, ``menu-assets-v7.txt``).
 
 What it does (all steps are idempotent; files are rewritten only when their
 content changes):
@@ -53,6 +61,12 @@ URL_RE = re.compile(r"url\(\s*(['\"]?)([^)'\"]+)\1\s*\)", re.I)
 JS_PREFIX_RE = re.compile(r"window\.KRUNKER_WINDOWS\s*=\s*", re.S)
 
 LIGA_HEADER_REL = os.path.join("client", "src", "html", "engine", "material_icons_liga.h")
+LIGA_OUTLINED_REL = os.path.join("client", "src", "html", "engine", "material_icons_outlined_liga.h")
+
+REFS = {
+    "v3": {"public": "/home/user/jails/kru/src/Krunker_v3.1.1/public", "manifest": "menu-assets.txt"},
+    "v7": {"public": "/home/user/jails/kru/src/Krunker_v7.1.4/public", "manifest": "menu-assets-v7.txt"},
+}
 
 
 def log(msg):
@@ -124,7 +138,11 @@ def convert_woff2(family, woff2_path, force):
     if not os.path.exists(woff2_path):
         log("skip %s: %s does not exist" % (family, os.path.relpath(woff2_path, REPO)))
         return None
-    ttf_path = os.path.join(os.path.dirname(woff2_path), slug(family) + ".ttf")
+    # Material icon fonts get their family's name (the engine's fallback for their opaque
+    # Google file names); other faces (several unicode-range subsets per family, e.g. v7's
+    # "play") keep the woff2's own name, which the engine tries first.
+    name = slug(family) if slug(family).startswith("material-") else os.path.splitext(os.path.basename(woff2_path))[0]
+    ttf_path = os.path.join(os.path.dirname(woff2_path), name + ".ttf")
     if os.path.exists(ttf_path) and not force:
         try:
             existing = load_font(ttf_path)
@@ -239,7 +257,17 @@ def render_header(ligs, font_name, generator="tools/ui-import/import.py"):
     return "".join(out)
 
 
-def generate_liga_header(font_path, header_path):
+def rename_liga_header(text, prefix):
+    """The Material Icons header with its table renamed to `prefix` (``material_icons_outlined``):
+    the struct typedef comes from material_icons_liga.h."""
+    upper = prefix.upper()
+    text = re.sub(r"typedef struct MaterialIconLiga \{.*?\} MaterialIconLiga;\n\n",
+                  '#include "material_icons_liga.h" /* MaterialIconLiga */\n\n', text, flags=re.S)
+    text = text.replace("MATERIAL_ICONS_LIGA_", upper + "_LIGA_").replace("material_icons_liga[", prefix + "_liga[")
+    return text.replace("/* Material Icons ligature names", "/* %s ligature names" % prefix.replace("_", " ").title())
+
+
+def generate_liga_header(font_path, header_path, prefix=None):
     """Write the ligature header from `font_path` (the woff2). Returns (count, changed)."""
     gen = _load_gen_liga()
     font = load_font(font_path)
@@ -258,6 +286,8 @@ def generate_liga_header(font_path, header_path):
     font.close()
     if not ligs:
         raise SystemExit("no ligatures found in %s" % font_path)
+    if prefix:
+        text = rename_liga_header(text.decode("utf-8"), prefix).encode("utf-8")
     return len(ligs), write_if_changed(header_path, text)
 
 
@@ -355,6 +385,10 @@ def resolve_windows_source(ui_dir):
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ui", default=os.path.join(REPO, "ui"), help="ui directory (default: <repo>/ui)")
+    ap.add_argument("--ref", choices=sorted(REFS), default="v7", help="Krunker reference to import (default v7)")
+    ap.add_argument("--public", default=None, help="the reference's public/ tree (default per --ref)")
+    ap.add_argument("--viewer-store", action="store_true",
+                    help="also regenerate client/src/viewer/viewer_store_table.c (v3 always does when node is there)")
     ap.add_argument("--windows-out", default=None, help="output dir for window files (default: <ui>/windows)")
     ap.add_argument("--liga-header", default=os.path.join(REPO, LIGA_HEADER_REL),
                     help="generated C header path (default: %s)" % LIGA_HEADER_REL)
@@ -362,6 +396,8 @@ def main(argv):
     ap.add_argument("--no-fonts", action="store_true", help="skip font conversion and the liga table")
     ap.add_argument("--no-windows", action="store_true", help="skip the window split")
     ap.add_argument("--no-editor", action="store_true", help="skip the map editor page (editor_page.py)")
+    ap.add_argument("--editor-page", action="store_true",
+                    help="(no-op, kept for old scripts: the v7 editor page is imported by default since editor WP2)")
     ap.add_argument("--no-social", action="store_true", help="skip the social hub page (social_page.py)")
     ap.add_argument("--no-viewer", action="store_true", help="skip the model viewer page (viewer_page.py)")
     ap.add_argument("--no-assets", action="store_true", help="skip the menu/HUD images (menu_assets.py, menu-assets.txt)")
@@ -371,6 +407,15 @@ def main(argv):
     if not os.path.isdir(ui_dir):
         raise SystemExit("ui dir not found: " + ui_dir)
     windows_out = os.path.abspath(args.windows_out or os.path.join(ui_dir, "windows"))
+    ref = REFS[args.ref]
+    public = os.path.abspath(args.public or ref["public"])
+    v7 = args.ref == "v7"
+    sys.path.insert(0, HERE)
+    if v7:
+        # the page first: fonts, windows and assets read what it links
+        import index_page  # tools/ui-import/index_page.py
+        index_page.import_index(ui_dir, write_if_changed, log, public)
+        index_page.import_shared_css(ui_dir, write_if_changed, log, public)
 
     if not args.no_fonts:
         try:
@@ -379,19 +424,38 @@ def main(argv):
         except ImportError as exc:
             raise SystemExit("missing dependency (%s): pip install fonttools brotli" % exc)
         os.environ.setdefault("SOURCE_DATE_EPOCH", "0")  # deterministic head.modified in saved TTFs
-        material_woff2 = None
+        if v7:
+            # every font file an imported stylesheet names (the woff2s are converted below)
+            for family, woff2 in font_face_woff2s(ui_dir):
+                rel = os.path.relpath(woff2, ui_dir)
+                src = os.path.join(public, rel)
+                if os.path.isfile(src):
+                    with open(src, "rb") as fh:
+                        write_if_changed(woff2, fh.read())
+        material_woff2 = outlined_woff2 = None
         for family, woff2 in font_face_woff2s(ui_dir):
             ttf = convert_woff2(family, woff2, args.force)
             if ttf and slug(family) == "material-icons":
                 material_woff2 = woff2
+            if ttf and slug(family) == "material-icons-outlined":
+                outlined_woff2 = woff2
         if material_woff2 is None:
             log("warning: no Material Icons font found; liga header not generated")
         else:
             count, changed = generate_liga_header(material_woff2, os.path.abspath(args.liga_header))
             log("%s %s: %d ligatures" % ("wrote" if changed else "unchanged",
                                          os.path.relpath(args.liga_header, REPO), count))
+        if outlined_woff2 is not None:
+            header = os.path.join(REPO, LIGA_OUTLINED_REL)
+            count, changed = generate_liga_header(outlined_woff2, header, "material_icons_outlined")
+            log("%s %s: %d ligatures" % ("wrote" if changed else "unchanged", LIGA_OUTLINED_REL, count))
 
-    if not args.no_windows:
+    if not args.no_windows and v7:
+        import windows_v7  # tools/ui-import/windows_v7.py
+        windows_v7.split_windows_v7(windows_out, write_if_changed, log)
+        with open(os.path.join(public, "docs", "versions.txt"), "rb") as fh:  # the Changelog source
+            write_if_changed(os.path.join(windows_out, "versions.txt"), fh.read())
+    elif not args.no_windows:
         src, data = resolve_windows_source(ui_dir)
         parsed = parse_windows_js(data.decode("utf-8"))
         index, files, written = split_windows(parsed, windows_out)
@@ -401,22 +465,18 @@ def main(argv):
         for name, size in files:
             log("  %-24s %8d bytes" % (name, size))
 
-    if not args.no_assets:
-        sys.path.insert(0, HERE)
-        import menu_assets  # every image the menu/HUD references (tools/ui-import/menu-assets.txt)
-        menu_assets.import_menu_assets(ui_dir, write_if_changed, log)
     if not args.no_editor:
-        sys.path.insert(0, HERE)
         import editor_page  # Krunker's editor.html + its stylesheets (tools/ui-import/editor_page.py)
-        editor_page.import_editor(ui_dir, write_if_changed, log)
+        editor_page.import_editor(ui_dir, write_if_changed, log, public, v7)
     if not args.no_social:
-        sys.path.insert(0, HERE)
         import social_page  # Krunker's social.html + its stylesheets/images (tools/ui-import/social_page.py)
-        social_page.import_social(ui_dir, write_if_changed, log)
+        social_page.import_social(ui_dir, write_if_changed, log, public, v7)
     if not args.no_viewer:
-        sys.path.insert(0, HERE)
         import viewer_page  # Krunker's viewer.html, dat.gui's stylesheet, the viewer store tables (tools/ui-import/viewer_page.py)
-        viewer_page.import_viewer(ui_dir, write_if_changed, log)
+        viewer_page.import_viewer(ui_dir, write_if_changed, log, public, store_table=args.viewer_store or not v7)
+    if not args.no_assets:
+        import menu_assets  # every image the pages and the C UI reference (tools/ui-import/menu-assets*.txt)
+        menu_assets.import_menu_assets(ui_dir, write_if_changed, log, public, os.path.join(HERE, ref["manifest"]), auto=v7)
     return 0
 
 

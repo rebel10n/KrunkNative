@@ -1,0 +1,21 @@
+// strokeText uses the context font, which GAME.OVERLAY never sets outside drawText/measureText
+// (save/restore): v7 strokes in the canvas default "10px sans-serif". KN renders every family
+// with GameFont (no system sans-serif), so the scene sets the context font to GameFont in both
+// renderers to compare the outline strokes themselves.
+@font 10px GameFont
+@size 400 200
+@scale 0.8
+@background #2d3436
+fillStyle "#ffffff"
+strokeStyle "#00cec9"
+lineWidth 2
+save
+scale 1.25
+strokeText "strokeText" 40 60
+restore
+strokeStyle "#fdcb6e"
+lineWidth 1
+save
+scale 4
+strokeText "big stroke" 10 35
+restore

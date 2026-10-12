@@ -66,10 +66,12 @@ static float camera_feel_zoom(const Player *me) {
     if (!weapon || !weapon->zoom) return 1.0f;
 
     const float ads_fov_mlt = menu_ui()->settings.ads_fov_mlt;
+    // v7.1.4: weapon.zoom * attach.zoomMlt (the Acog Scope x1.35; FOV only)
+    const float zoom = weapon_aim_zoom(weapon, weapon_attachment(weapon, player_attach_index(me)));
     // toggleAim: scopes jump straight to the full zoom once aimed (and back at the
     // first un-aim tick); everything else eases with aimVal (updateAimZoom).
-    if (weapon->scope) return me->aim_val >= 1.0f ? 1.0f + (weapon->zoom - 1.0f) * ads_fov_mlt : 1.0f;
-    return 1.0f + (weapon->zoom - 1.0f) * me->aim_val * ads_fov_mlt;
+    if (weapon->scope) return me->aim_val >= 1.0f ? 1.0f + (zoom - 1.0f) * ads_fov_mlt : 1.0f;
+    return 1.0f + (zoom - 1.0f) * me->aim_val * ads_fov_mlt;
 }
 
 void camera_feel_apply(Client *client) {

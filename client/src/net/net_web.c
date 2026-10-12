@@ -24,14 +24,19 @@
 // Fake descriptor stored in client->net_socket while the WebSocket is open.
 #define NET_WEB_FAKE_FD 1
 
-// Reconnect backoff after a failed/dropped WebSocket (same as the native thread).
+// Reconnect backoff after a failed/dropped WebSocket (same as the native thread, net.c):
+// 2 s doubling per consecutive failure (a short session counts) up to 30 s.
 #define NET_WEB_RETRY_MILLIS 2000
+#define NET_WEB_RETRY_MAX_MILLIS 30000
+#define NET_WEB_SESSION_STABLE_MILLIS 10000.0
 
 static EMSCRIPTEN_WEBSOCKET_T g_web_socket;
 static NetPacketBuffer g_web_read_buffer;
 static char g_web_url[512];          // resolved endpoint, for error messages
 static int g_web_reconnect_pending;  // an emscripten_async_call reconnect is scheduled
 static int g_web_switching;          // client_net_switch_server closed the socket: reconnect at once
+static int g_web_failures;           // consecutive failed connects / short sessions (backoff)
+static double g_web_opened_at;       // emscripten_get_now() of the last open
 
 static void net_web_reconnect_later(void *user_data) {
     Client *client = user_data;
@@ -46,8 +51,13 @@ static void net_web_schedule_reconnect(Client *client) {
     if (g_web_reconnect_pending || client->net_should_quit || client->offline) return;
     if (client->net_hold_retry) return; // server ERROR: only the page's `reconnect` tries again
 
+    g_web_failures++;
+    int delay = NET_WEB_RETRY_MILLIS;
+    for (int i = 1; i < g_web_failures && delay < NET_WEB_RETRY_MAX_MILLIS; i++) delay *= 2;
+    if (delay > NET_WEB_RETRY_MAX_MILLIS) delay = NET_WEB_RETRY_MAX_MILLIS;
+    printf("[net] retrying in %d s (failure %d)\n", delay / 1000, g_web_failures);
     g_web_reconnect_pending = 1;
-    emscripten_async_call(net_web_reconnect_later, client, NET_WEB_RETRY_MILLIS);
+    emscripten_async_call(net_web_reconnect_later, client, delay);
 }
 
 static char *net_web_resolve_url(Client *client) {
@@ -98,9 +108,10 @@ static bool net_web_on_open(int event_type, const EmscriptenWebSocketOpenEvent *
     client->net_socket = NET_WEB_FAKE_FD;
     pthread_mutex_unlock(&client->net_lock);
 
+    g_web_opened_at = emscripten_get_now();
     on_client_socket_connect(client);
 
-    const NetHelloPacket hello = {1, 0, 0};
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH}; // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes
     client_net_send_packet(NET_WEB_FAKE_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
     client_net_send_join(client, NET_WEB_FAKE_FD); // brain ticket / session / guest name (net_join.c)
 
@@ -180,13 +191,15 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
         g_web_socket = 0;
     }
 
-    printf("websocket closed (code %d%s%s)\n", event->code, event->reason[0] ? ": " : "", event->reason);
+    client_net_note(client->net_should_quit || g_web_switching ? NET_NOTE_INFO : NET_NOTE_WARN, "websocket closed (code %d%s%s)", event->code,
+                    event->reason[0] ? ": " : "", event->reason);
 
     if (client->net_session_connected) {
+        if (emscripten_get_now() - g_web_opened_at >= NET_WEB_SESSION_STABLE_MILLIS) g_web_failures = 0; // a session that lasted
         on_client_socket_disconnect(client);
-    } else if (!client->offline) {
-        char message[160];
-        snprintf(message, sizeof(message), "Could not connect to %s", g_web_url);
+    } else if (!client->offline && !client->net_should_quit) { // (client_net_stop already said why)
+        char message[160]; // the bridge's close reason (e.g. "target not allowed") when it gave one
+        snprintf(message, sizeof(message), "Could not connect to %s%s%s", g_web_url, event->reason[0] ? ": " : "", event->reason);
         on_client_socket_failed(client, message);
     }
 
@@ -227,7 +240,7 @@ int net_web_connect(Client *client) {
     attributes.createOnMainThread = true;
 
     g_web_socket = emscripten_websocket_new(&attributes);
-    printf("connecting to %s\n", g_web_url);
+    client_net_note(NET_NOTE_INFO, "connecting to %s (game transport WebSocket)", g_web_url); // (wt-e2e.js: "connecting to ws")
 
     if (g_web_socket <= 0) {
         char message[160];
@@ -260,7 +273,23 @@ void net_web_disconnect(Client *client) {
 // open/connecting or the embedded server runs).
 void net_web_request_reconnect(Client *client) {
     if (g_web_socket || net_wt_busy() || client->net_should_quit || client->offline) return;
+    g_web_failures = 0;
     net_web_connect(client);
+}
+
+void client_net_stop(Client *client, const char *reason) {
+    const int had_session = client->net_session_connected;
+    pthread_mutex_lock(&client->net_lock);
+    if (client->net_socket >= 0) { // net_web_on_close -> on_client_socket_disconnect shows it
+        snprintf(client->net_disconnect_reason, sizeof(client->net_disconnect_reason), "%s", reason ? reason : "Disconnected");
+        snprintf(client->net_disconnect_code, sizeof(client->net_disconnect_code), "000000");
+    }
+    pthread_mutex_unlock(&client->net_lock);
+    client->net_should_quit = 1; // no net_web_schedule_reconnect / wt_reconnect_later until switch_server
+    g_web_failures = 0;
+    net_web_disconnect(client);
+    client->net_connected = 0;
+    if (!had_session) on_client_socket_failed(client, reason ? reason : "Disconnected"); // stopped while (re)trying
 }
 
 // Frames the packet exactly like shared/src/net.c net_send_packet() and sends
@@ -294,6 +323,7 @@ void client_net_switch_server(Client *client) {
     client->menu_play_pending = 0;
     client->net_should_quit = 0;
     client->net_hold_retry = 0;
+    g_web_failures = 0;
     if (net_wt_busy()) {
         net_wt_close(1); // and connect to the new target
         return;

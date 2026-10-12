@@ -34,6 +34,9 @@ void vfx_remote_shot(Client*, const Player *shooter, vec3 hit, int has_normal, f
 // 88.js effect(x, y, z, yaw, pitch, 0): impact puffs plus the bullet hole (index.js g8
 // spawns it at a projectile's end with yaw = pitch = 0).
 void vfx_impact(Client*, vec3 position, float yaw, float pitch);
+// v7.1.4 players.js itemEffects -> PARTICLES.effect(x, y, z, 0, 0, particle): a store item's
+// particle effect (5 feathers, 6 embers, 7 stars) at `position`; other ids do nothing.
+void vfx_item_effect(vec3 position, int effect);
 // Krunker packet "ex" (index.js gb): explosion at `position` with range `radius`
 // (projectile.explode, e.g. 35 for the RPG).
 void vfx_explosion(Client*, vec3 position, float radius);

@@ -1,7 +1,7 @@
 name: Release
 
 # Dedicated-server builds as public GitHub release assets (CI artifacts need a GitHub login):
-#   push to slop/main, dispatch  -> rolling prerelease `server-latest`, assets replaced
+#   push to main, dispatch       -> rolling prerelease `server-latest`, assets replaced
 #   push of a tag server-v*       -> release <tag>, kept
 # Assets: krunknative-server-<platform>.{tar.gz,zip} + .sha256 for linux-x86_64 (Debian 12
 # container, deploy/ansible/build.sh), linux-x86_64-bullseye (Debian 11), windows-x86_64 (MinGW)
@@ -11,11 +11,11 @@ name: Release
 # that kn_brain polls to flag outdated servers (doc/backend.md).
 # Neither release is ever marked "Latest": v1.0.0 (the full game package) stays the repo's
 # Latest release; server-latest is a prerelease and server-v* use --latest=false.
-# server-latest only moves forward: a run whose commit is older than the published one (main
-# lagging slop) builds but does not publish.
+# server-latest only moves forward: a run whose commit is older than the published one builds
+# but does not publish.
 on:
   push:
-    branches: [slop, main]
+    branches: [main]
     tags: ["server-v*"]
   workflow_dispatch:
 
@@ -31,6 +31,7 @@ permissions:
 jobs:
   meta:
     name: Version
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/server-v') # CI runs on main only
     runs-on: ubuntu-latest
     outputs:
       describe: ${{ steps.meta.outputs.describe }}
@@ -255,13 +256,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # server-latest publishes once the Linux builds are in: a platform whose build failed is left
+  # out of this run (its old asset is removed, no mixed versions) and named in the notes.
+  # server-v* releases need every platform.
   publish:
     name: Publish ${{ needs.meta.outputs.tag }}
     needs: [meta, linux, windows, macos]
+    if: >-
+      !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
+      (needs.meta.outputs.tag == 'server-latest' || (needs.windows.result == 'success' && needs.macos.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release create/upload, moving the server-latest tag
-    # slop and main both feed server-latest: one publisher at a time
+    # one server-latest publisher at a time
     concurrency:
       group: publish-${{ needs.meta.outputs.tag }}
       cancel-in-progress: false
@@ -297,10 +304,13 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/$GH_REPO/releases/download/$TAG"
-          row() { echo "| $1 | [$2]($base/$2) | [sha256]($base/$2.sha256) |"; }
+          row() {
+            if [ -f "release-assets/$2" ]; then echo "| $1 | [$2]($base/$2) | [sha256]($base/$2.sha256) |"
+            else echo "| $1 | not built in this run ([build failed]($RUN_URL)) | |"; fi
+          }
           {
             if [ "$TAG" = server-latest ]; then
-              echo "Rolling build of the KrunkNative dedicated server, replaced on every push to \`slop\`/\`main\`. Servers listed in the server browser that run an older build or protocol show as **Outdated**."
+              echo "Rolling build of the KrunkNative dedicated server, replaced on every push to \`main\`. Servers listed in the server browser that run an older build or protocol show as **Outdated**."
             else
               echo "KrunkNative dedicated server $TAG."
             fi

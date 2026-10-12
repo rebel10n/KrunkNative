@@ -6,6 +6,7 @@
 //
 // Runs on the main thread from client_tick_net(); the transports only queue packets.
 #include <player_accounts.h> // PLAYER_INFO / BILLBOARD (doc/backend.md section 8)
+#include <ks_client.h> // KrunkScript client host: hooks and script packets
 #include <backend_ui.h>      // NET_PACKET_REDIRECT: servers_ui_redirect
 #include <online_mode.h>     // NET_PACKET_AUTH_CHALLENGE: online-mode join (net/online_mode.c)
 #include <client.h>
@@ -19,12 +20,20 @@
 #include <ai_render.h> // AI shots ("pr" with an AI stored kind)
 #include <camera_feel.h>
 #include <spectate.h> // NET_PACKET_SPECTATE -> spectate_begin / spectate_end
+#include <hud_map.h>  // WP-E part 2a: death markers, minimap blips
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
-#include <ui_terminal.h> // NET_PACKET_TERMINAL: openTerminal (ui_terminal.c)
+#include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
+#include <hud_social.h>    // WP-E part 2b: NET_PACKET_CHAT_V7 / VOICE_V7 / SPRAY_V7 (social_v7.h)
+#include <lobby_ui.h>      // WP-E: GAME_CONFIG / NETWORK_DATA / MATCH_VOTE_STATE (client/src/net/lobby_events.c)
+#include <world_events.h>  // map-logic WP-B: NET_PACKET_ZONE / BUILD / LOG_TIME / OBJECT_ANIM
 #include <map_triggers.h>  // map trigger events: "do"/"ro"/"gte"/"bnk", "chp", "s", "scr", "am" popups (client/src/map_triggers.c)
+#include <player_card.h>   // WP-E part 2a: death screen class levels / player card stats
+#include <cosmetics.h>     // player card items (cosmetic_item)
+#include "../viewer/viewer_store.h" // store skins / rarities (the killer's weapon skin)
+#include <game_config.h>   // game_config_is_custom (the report prompt)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,8 +42,9 @@
 #define SERVER_CHAT_COLOR "#fc03ec" // gB type 2 default
 
 void client_net_send(Client *client, const NetPacketType type, const void *payload, const uint16_t length) {
+    client_net_tally_egress(length); // WP-E: #egressPacketCount
     if (client->offline) {
-        local_game_receive(client, type, payload, length); // a direct call into the offline game (net/local_game.c)
+        client_offline_send(client, type, payload, length); // the sandbox server's connection (net/offline.c)
         return;
     }
 
@@ -56,6 +66,12 @@ void client_chat_send(Client *client, const char *text) {
     if (!client->offline && client->net_socket < 0) return;
     if (!net_chat_allow(&limiter, (float) glfwGetTime())) return;
 
+    if (social_server_v7(client)) { // v7 f1909: "ct", channel (#chatSwitch), msg
+        NetChatV7SendPacket v7 = {.channel = (uint8_t) (hud_ui_chat_channel() == CHAT_CHANNEL_TEAM ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL)};
+        memcpy(v7.text, packet.text, sizeof(v7.text));
+        client_net_send(client, NET_PACKET_CHAT_V7, &v7, (uint16_t) (1 + strlen(v7.text) + 1));
+        return;
+    }
     client_net_send(client, NET_PACKET_CHAT_SEND, &packet, (uint16_t) (strlen(packet.text) + 1));
 }
 
@@ -86,6 +102,52 @@ static void events_player_dead(Client *client, Player *player) {
     }
 }
 
+// WP-E part 2a: the victim's "3" extras (NET_PACKET_DEATH_INFO), sent right before its KILL.
+static NetDeathInfoPacket g_death_info;
+static int g_death_info_valid;
+
+// store.skins[index].thumbnail of a player card (Game.store.skins[playerCardIndex] ? .thumbnail : null).
+static const char *events_card_url(const int index, char *out, const size_t n) {
+    out[0] = 0;
+    if (index < 0 || !cosmetic_item(index, ITEM_PLAYER_CARD)) return NULL;
+    store_skin_preview(index, out, n);
+    return out[0] ? out : NULL;
+}
+
+// f1975: the killer's weapon [name] = its skin's name in the rarity colour (the skin on the
+// loadout slot of the killing weapon, the melee skin on a melee kill, "Fists" on a fist kill).
+static const char *events_weapon_label(const Player *killer, const Weapon *weapon, const int weapon_index, const int fists,
+                                       const char **color) {
+    *color = NULL;
+    if (!weapon) return fists ? "Fists" : "";
+    if (weapon->melee && fists) return "Fists";
+    const ViewerSkin *skin = NULL;
+    if (weapon->melee) {
+        skin = killer->skins.melee >= 0 ? viewer_skin(killer->skins.melee) : NULL;
+    } else {
+        int slot = -1;
+        for (int i = 0; i < killer->loadout_size && slot < 0; i++)
+            if (killer->loadout && killer->loadout[i] == weapon_index) slot = i;
+        const int index = slot == 0 ? killer->skins.primary : slot == 1 ? killer->skins.secondary : -1;
+        skin = index >= 0 ? viewer_skin(index) : NULL;
+        if (skin && (skin->type != 0 || skin->weapon - 1 != weapon_index)) skin = NULL; // skin.weapon - 1 != loadout[slot]
+    }
+    if (!skin || !skin->name) return weapon->name ? weapon->name : "";
+    if (skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count) *color = g_viewer_rarities[skin->rarity].color;
+    return skin->name;
+}
+
+// v7 ENT pcStatIndex (getSavedVal("pcStatIndex"), Change Loadout's player card stat), right before
+// every ENT to v7 servers: the stat the server shows on our victims' death screens.
+void client_send_pc_stat(Client *client) {
+    if (!client->offline && client->net_server_minor < NET_PROTOCOL_MINOR_V7) return;
+    char buf[16];
+    long index = -1;
+    if (html_storage_get("pcStatIndex", buf, sizeof(buf)) >= 0 && buf[0]) index = strtol(buf, NULL, 10);
+    const NetPcStatPacket packet = {.index = (int8_t) (index >= 0 && index < PLAYER_CARD_STAT_COUNT ? index : -1)};
+    client_net_send(client, NET_PACKET_PC_STAT, &packet, sizeof(packet));
+}
+
 // g1(): kill feed for everyone, death card + respawn delay for the victim.
 static void events_kill(Client *client, const NetKillPacket *packet) {
     Player *victim = events_find_player(client, packet->victim_uid);
@@ -93,12 +155,16 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     const Weapon *weapon = events_weapon(client, packet->weapon_index);
 
     if (victim) {
+        // io_killPlayer: overlay.addDeathMarker for a teammate, ourselves or anyone while spectating
+        const Player *me = client->me;
+        if (victim == me || spectate_active() || (me && me->team && me->team == victim->team))
+            hud_death_marker_add(victim->position, victim == me);
         victim->deaths = (unsigned int) packet->victim_deaths;
         events_player_dead(client, victim);
     }
 
     if (killer && killer != victim) killer->kills = (unsigned int) packet->killer_kills;
-    if (killer && killer != victim && killer == client->me) sound_events_kill(packet->headshot); // gk: kill sound
+    if (killer && killer != victim && killer == client->me) sound_events_kill(packet->headshot, killer, packet->weapon_index); // gk: kill sound (getKillSnd)
 
     const char *victim_name = events_name(victim);
 
@@ -114,16 +180,55 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
 
     if (!victim || victim != client->me) return;
 
+    client_recon_on_death(client); // no movement input leaves until the respawn (net/recon.c)
     HudKillCard card = {0};
     const int by_other = killer && killer != victim;
-    menu_view_death_cam(client, by_other ? killer : NULL); // CONTROLS.camLookAt(killer.x, y + height / 1.5, z)
+    const NetDeathInfoPacket *death = g_death_info_valid && g_death_info.victim_uid == packet->victim_uid ? &g_death_info : NULL;
+    g_death_info_valid = 0;
+    client->camera.zoom = 1.0f; // kill(): toggleAim(player, 0) -> resetAim() -> RENDER.zoom(1); hud_ui_show_death the DOM half
+    // CONTROLS.camLookAt(killer.x, y + height / 1.5, z) only with the game config's Kill Cams (kCams, default on)
+    menu_view_death_cam(client, by_other && client->game.config.kill_cams ? killer : NULL);
 
+    char killer_card[256], my_card[256], pc_value[sizeof(g_death_info.pc_stat_value) + 1];
     if (by_other) {
+        const int weapon_index = death && death->weapon_index >= 0 ? death->weapon_index : packet->weapon_index;
+        const Weapon *killer_weapon = death && death->weapon_index >= 0 ? events_weapon(client, death->weapon_index) : weapon;
         card.killer = events_name(killer);
-        card.weapon = packet->fists ? "Fists" : weapon && weapon->name ? weapon->name : "";
-        const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
-        card.level = info && info->level > 1 ? info->level : 1; // guests: Krunker shows lvl 1 for fresh players
+        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, packet->fists || (death && death->fists), &card.weapon_color);
         card.class_index = packet->killer_class >= 0 ? packet->killer_class : 0;
+        if (death) {
+            card.level = player_card_class_level(death->class_stat); // f1975: the killer's class level from "3" [1]
+            card.thrown = killer_weapon && killer_weapon->melee && death->thrown;
+            if (death->pc_stat_index >= 0 && player_card_stat_name(death->pc_stat_index)) {
+                card.pc_stat_name = player_card_stat_name(death->pc_stat_index);
+                snprintf(pc_value, sizeof(pc_value), "%.*s", (int) sizeof(death->pc_stat_value), death->pc_stat_value);
+                card.pc_stat_value = pc_value;
+            }
+        } else { // an older server: the account level stands in (guests show lvl 1)
+            const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
+            card.level = info && info->level > 1 ? info->level : 1;
+        }
+        card.killer_card_url = events_card_url(killer->cosmetics_v7.player_card, killer_card, sizeof(killer_card));
+        card.my_card_url = events_card_url(victim->cosmetics_v7.player_card, my_card, sizeof(my_card));
+        // (otherPlayer.level <= 10 || !level) && account && !Game.isCustom: "[key] to Report"
+        const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
+        card.report = account_get() && !game_config_is_custom(&client->game) && (!info || info->level <= 10);
+        // our "lvl": account.stats["c" + classIndex] (guests: lvl 1)
+        const AccountInfo *acc = account_get();
+        char key[8];
+        snprintf(key, sizeof(key), "c%d", victim->class_index);
+        const cJSON *cls = acc && acc->stats ? cJSON_GetObjectItemCaseSensitive(acc->stats, key) : NULL;
+        card.my_level = player_card_class_level(cJSON_IsNumber(cls) ? cls->valuedouble : 0.0);
+    }
+    if (death) { // "3" [3]: [timeAlive, shots, accuracy, kills, score]
+        card.stats = 1;
+        card.time_alive_ms = death->time_alive_ms;
+        card.shots = death->shots;
+        static char accuracy[sizeof(g_death_info.accuracy) + 1];
+        snprintf(accuracy, sizeof(accuracy), "%.*s", (int) sizeof(death->accuracy), death->accuracy);
+        card.accuracy = accuracy;
+        card.kills = death->kills;
+        card.life_score = death->score;
     }
     card.score = packet->score;
 
@@ -217,6 +322,10 @@ static void events_chat(const NetChatPacket *packet) {
     name[sizeof(name) - 1] = 0;
     text[sizeof(text) - 1] = 0;
 
+    if (packet->kind == NET_CHAT_PLAYER && packet->uid >= 0) { // mute_chat by the sender's account (v7 "ch" carries it)
+        const NetPlayerInfoPacket *info = player_accounts_get(packet->uid);
+        if (info && social_chat_muted(info->account_id)) return;
+    }
     ui_console_on_chat(packet->kind == NET_CHAT_PLAYER ? (name[0] ? name : "unknown") : NULL, text, packet->kind);
 
     switch (packet->kind) {
@@ -408,6 +517,9 @@ int client_map_hold(Client *client, const NetPacket *packet) {
         case NET_PACKET_PING:
         case NET_PACKET_PING_RESULT:
         case NET_PACKET_CHAT:
+        case NET_PACKET_CHAT_V7:
+        case NET_PACKET_VOICE:
+        case NET_PACKET_VOICE_V7:
             return 0; // not tied to the map
         default:
             break;
@@ -477,8 +589,8 @@ int client_handle_game_packet(Client *client, const NetPacket *packet) {
     return client_handle_game_event(client, packet->type, packet->payload, packet->length);
 }
 
-// One server event as its struct: from a received packet above, or straight from the
-// offline client's own authoritative game (GameHooks.send in net/local_game.c).
+// One server event as its struct, from a received packet above (the offline sandbox
+// server's arrive the same way, net/offline.c).
 int client_handle_game_event(Client *client, const int type, const void *payload, const uint16_t length) {
     switch (type) {
         case NET_PACKET_CHAT: {
@@ -488,7 +600,20 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         }
         case NET_PACKET_KILL: {
             EVENTS_READ(NetKillPacket, kill);
-            if (client->game.ready) events_kill(client, &kill);
+            if (client->game.ready) {
+                events_kill(client, &kill);
+                // KrunkScript onPlayerDeath(id, killerID or ""), index.js:15238-15240
+                ks_client_player_killed(client, kill.victim_uid, events_find_player(client, kill.killer_uid) ? kill.killer_uid : -1);
+            }
+            return 1;
+        }
+        case NET_PACKET_SCRIPT_MSG:  // KrunkScript (client/src/ks/ks_client_host.c): onNetworkMessage
+        case NET_PACKET_SCRIPT_LOG:  // the server script's GAME.log / errors
+        case NET_PACKET_SCRIPT_SYNC: // registerSyncValues
+            return ks_client_handle_packet(client, type, payload, length);
+        case NET_PACKET_SCRIPT_CHAT: { // GAME.CHAT.send / broadcast: a server chat line (its colour is not shown)
+            EVENTS_READ(NetScriptChatPacket, script_chat);
+            events_chat(&script_chat.chat);
             return 1;
         }
         case NET_PACKET_HIT: {
@@ -520,13 +645,45 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             if (!game_is_authority(&client->game)) game_ai_apply_sync(&client->game, &sync);
             return 1;
         }
+        // WP-F: the v7.1.4 AI packets (servers send them to clients that announced NET_PROTOCOL_MINOR_V7)
+        case NET_PACKET_AI_ADD_V7: { // "aai" v7: AI.cSpawn(getData)
+            EVENTS_READ(NetAIAddV7Packet, add);
+            if (!game_is_authority(&client->game)) game_ai_apply_add_v7(&client->game, &add);
+            return 1;
+        }
+        case NET_PACKET_AI_SYNC_V7: { // "ai" v7, stride 9: AI.syncAll
+            NetAISyncV7Packet sync;
+            memset(&sync, 0, sizeof(sync));
+            if (length < offsetof(NetAISyncV7Packet, entries) || length > sizeof(sync)) return 1;
+            memcpy(&sync, payload, length);
+            if (sync.count > NET_AI_SYNC_V7_MAX || length < offsetof(NetAISyncV7Packet, entries) + sync.count * sizeof(NetAISyncV7Entry)) return 1;
+            if (!game_is_authority(&client->game)) game_ai_apply_sync_v7(&client->game, &sync);
+            return 1;
+        }
+        case NET_PACKET_AI_REMOVE: { // "rai": AI.removeBySid
+            EVENTS_READ(NetAIRemovePacket, remove);
+            if (!game_is_authority(&client->game)) game_ai_apply_remove(&client->game, &remove);
+            return 1;
+        }
+        case NET_PACKET_AI_ANIM: { // "ana" sid, clip, raw: AI.servAnim
+            EVENTS_READ(NetAIAnimPacket, anim);
+            if (!game_is_authority(&client->game)) game_ai_apply_anim(&client->game, &anim);
+            return 1;
+        }
+        case NET_PACKET_AI_SHOT: { // the AI that fired the last "pr": its projOb visuals
+            EVENTS_READ(NetAIShotPacket, shot);
+            ai_render_ai_shot(client, &shot);
+            return 1;
+        }
         case NET_PACKET_SHOT: {
             EVENTS_READ(NetShotPacket, shot);
+            hud_minimap_on_shot(client, shot.uid); // f1988: the shooter blips on the minimap
             events_shot(client, &shot);
             return 1;
         }
         case NET_PACKET_PROJECTILE: {
             EVENTS_READ(NetProjectilePacket, projectile);
+            hud_minimap_on_shot(client, projectile.owner_uid); // f1988 (io_addProjectile's sid)
             events_projectile(client, &projectile);
             return 1;
         }
@@ -574,6 +731,22 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             events_apply_board(client, &board);
             return 1;
         }
+        case NET_PACKET_DEATH_INFO: { // WP-E part 2a: the victim's "3" extras, ahead of its KILL
+            EVENTS_READ(NetDeathInfoPacket, death);
+            g_death_info = death;
+            g_death_info_valid = 1;
+            return 1;
+        }
+        case NET_PACKET_END_MEDALS: { // WP-E part 2c: endData.mdls, right before this player's END
+            EVENTS_READ(NetEndMedalsPacket, medals);
+            hud_ui_set_end_medals(&medals);
+            return 1;
+        }
+        case NET_PACKET_LEADER_STATS: { // WP-E: v7 "7" columns (mode.leaderStats) in the server's board order
+            EVENTS_READ(NetLeaderStatsPacket, stats);
+            hud_ui_set_leader_stats(&stats);
+            return 1;
+        }
         case NET_PACKET_TIMER: {
             EVENTS_READ(NetTimerPacket, timer);
             events_timer(client, &timer);
@@ -606,9 +779,22 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_REFILL: // "rfl" -> fY(): b5.refillKnife() (the HUD melee icon follows can_throw)
             if (client->me) client->me->can_throw = 1;
             return 1;
-        case NET_PACKET_TERMINAL: {
-            EVENTS_READ(NetTerminalPacket, terminal);
-            ui_terminal_open(client, terminal.uid); // "ot": openTerminal
+        case NET_PACKET_SPRAY: { // "sp": addSpray(sid, sprayIndex, x, y, z, xDr, yDr)
+            EVENTS_READ(NetSprayPacket, spray);
+            sprays_add(client, &spray);
+            return 1;
+        }
+        case NET_PACKET_SPRAY_V7: { // v7 "sp": addSpray("<sid>_<n>", sprayIndex, x, y, z, rotY, rotX, rotZ, dyeId)
+            EVENTS_READ(NetSprayV7Packet, spray);
+            sprays_add_v7(client, &spray);
+            return 1;
+        }
+        case NET_PACKET_SOCIAL_V7: // the server takes the v7 chat / voice / spray / taunt packets
+            if (length >= 1) social_on_server_caps(((const uint8_t *) payload)[0]);
+            return 1;
+        case NET_PACKET_CHAT_V7: { // v7 "ch": io_addChat(channel, ..., accountId)
+            EVENTS_READ(NetChatV7Packet, chat);
+            social_on_chat_v7(client, &chat);
             return 1;
         }
         case NET_PACKET_CHEAT: {
@@ -659,6 +845,9 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_VOICE: // "vc": window.voiceChat(audio, alias, sid)
             voice_on_packet(client, payload, length);
             return 1;
+        case NET_PACKET_VOICE_V7: // v7 "vc": io_voiceChat(audio, name, sid, channel, volume, isFinal, accountId)
+            voice_on_packet_v7(client, payload, length);
+            return 1;
         case NET_PACKET_SPECTATE: {
             // "start" with spectating = true: our ENT asked to spectate (client/src/spectate.c)
             EVENTS_READ(NetSpectatePacket, spectate);
@@ -672,7 +861,44 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_JUMP_SCARE:
         case NET_PACKET_POSITION:
         case NET_PACKET_POPUP:
+        case NET_PACKET_CUSTOM_VALUE:      // WP-C v7 trigger packets (120-128)
+        case NET_PACKET_GLOBAL_VALUE:
+        case NET_PACKET_GUI_TOGGLE:
+        case NET_PACKET_AMBIENT_CHANGE:
+        case NET_PACKET_STOP_SOUND:
+        case NET_PACKET_PLAYER_SOUND:
+        case NET_PACKET_CONFIRM_INTERACT:
+        case NET_PACKET_CHANGE_POSITION:
+        case NET_PACKET_PICKUP:
             return client_triggers_handle_event(client, type, payload, length); // client/src/map_triggers.c
+        case NET_PACKET_EFFECT:
+        case NET_PACKET_STREAK:
+        case NET_PACKET_NUKE:
+        case NET_PACKET_JUGGERNAUT:
+        case NET_PACKET_PERKS:
+        case NET_PACKET_UPGRADES:
+        case NET_PACKET_WEAPON_STREAK:
+            return combat_events_handle(client, type, payload, length); // WP-B (client/src/net/combat_events.c)
+        case NET_PACKET_BLOCK_ZOMBIES + 0: // map-logic WP-H (client/src/net/zombie_events.c): mybx / krm, smybx,
+        case NET_PACKET_BLOCK_ZOMBIES + 1: // pwup, upz, uamo reserves, sic
+        case NET_PACKET_BLOCK_ZOMBIES + 2:
+        case NET_PACKET_BLOCK_ZOMBIES + 3:
+        case NET_PACKET_BLOCK_ZOMBIES + 4:
+        case NET_PACKET_BLOCK_ZOMBIES + 5:
+        case NET_PACKET_BLOCK_ZOMBIES + 6: // zombies end stats (aiKills / rounds)
+        case NET_PACKET_BLOCK_AIRDROP + 0: // ad, rad, krp
+        case NET_PACKET_BLOCK_AIRDROP + 1:
+        case NET_PACKET_BLOCK_AIRDROP + 2:
+            return zombie_events_handle(client, type, payload, length);
+        case NET_PACKET_GAME_CONFIG:
+        case NET_PACKET_NETWORK_DATA:
+        case NET_PACKET_MATCH_VOTE_STATE:
+            return lobby_events_handle(client, type, payload, length); // WP-E
+        case NET_PACKET_ZONE:
+        case NET_PACKET_BUILD:
+        case NET_PACKET_LOG_TIME:
+        case NET_PACKET_OBJECT_ANIM:
+            return client_world_handle_event(client, type, payload, length); // map-logic WP-B (client/src/world_events.c)
         default:
             return hud_modes_handle_event(client, type, payload, length); // mode packets (client/src/ui/hud_modes.c)
     }
@@ -680,20 +906,29 @@ int client_handle_game_event(Client *client, const int type, const void *payload
 
 // New session or round (INIT): no clock, no end screen, nobody dead yet.
 void client_game_events_reset(Client *client) {
+    client_world_reset(); // WP-B: no speed-run time yet
     player_accounts_on_init();
     hud_modes_reset(client);
     hud_popups_on_init(); // "init": bN = 0
+    hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt
+    hud_map_on_init(client); // part 2a: overlay.miniMap.reset + overlay.resetAll (no death markers)
+    g_death_info_valid = 0;
 #ifdef HUD_UI_HAVE_HIDE_END_SCREEN
     hud_ui_hide_end_screen(client); // no-op unless the end screen is up
 #endif
     client->net_round_seconds = -1;
     client->net_end_seconds = -1;
     client->net_end_result = INT32_MIN;
+    // "init" -> CONTROLS.reset(): keys = {}, didPressed = {}. A key held through the end
+    // screen does not move or jump the next round's first frames; it needs a new press
+    // (GLFW_REPEAT never re-presses, ui_controls.c).
+    ui_controls_reset_keys();
     client->net_damage_from_valid = 0;
     client->net_death_time = 0.0;
     client->net_death_menu_pending = 0;
     memset(client->net_projectiles, 0, sizeof(client->net_projectiles));
     projectiles_render_reset();
+    sprays_clear(client); // "init": RENDER.clearSprays()
     voice_reset_queues(); // initGame: voiceStreamQueues = {}
 }
 
@@ -745,6 +980,7 @@ void client_game_events_tick(Client *client) {
     events_test_aim(client);
     events_projectiles_step(client);
     hud_modes_tick(client); // team scores, flags, game message, lives, team pill
+    sprays_tick(client);    // framed / moving spray textures
     client_triggers_tick(client); // jump scare timeout
     if (!client->net_death_menu_pending) return;
     if (glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;

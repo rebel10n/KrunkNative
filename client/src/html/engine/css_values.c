@@ -984,7 +984,7 @@ static const CssKeyword kw_image_rendering[] = { { "auto", CSS_IMAGE_RENDERING_A
 static const CssKeyword kw_object_fit[] = { { "fill", CSS_OBJECT_FIT_FILL }, { "contain", CSS_OBJECT_FIT_CONTAIN }, { "cover", CSS_OBJECT_FIT_COVER }, { "none", CSS_OBJECT_FIT_NONE }, { "scale-down", CSS_OBJECT_FIT_SCALE_DOWN }, { NULL, 0 } };
 static const CssKeyword kw_flex_direction[] = { { "row", CSS_FLEX_DIRECTION_ROW }, { "row-reverse", CSS_FLEX_DIRECTION_ROW_REVERSE }, { "column", CSS_FLEX_DIRECTION_COLUMN }, { "column-reverse", CSS_FLEX_DIRECTION_COLUMN_REVERSE }, { NULL, 0 } };
 static const CssKeyword kw_flex_wrap[] = { { "nowrap", CSS_FLEX_WRAP_NOWRAP }, { "wrap", CSS_FLEX_WRAP_WRAP }, { "wrap-reverse", CSS_FLEX_WRAP_WRAP_REVERSE }, { NULL, 0 } };
-static const CssKeyword kw_justify_content[] = { { "flex-start", CSS_JUSTIFY_CONTENT_FLEX_START }, { "flex-end", CSS_JUSTIFY_CONTENT_FLEX_END }, { "center", CSS_JUSTIFY_CONTENT_CENTER }, { "space-between", CSS_JUSTIFY_CONTENT_SPACE_BETWEEN }, { "space-around", CSS_JUSTIFY_CONTENT_SPACE_AROUND }, { "space-evenly", CSS_JUSTIFY_CONTENT_SPACE_EVENLY }, { "start", CSS_JUSTIFY_CONTENT_FLEX_START }, { "end", CSS_JUSTIFY_CONTENT_FLEX_END }, { "left", CSS_JUSTIFY_CONTENT_FLEX_START }, { "right", CSS_JUSTIFY_CONTENT_FLEX_END }, { "normal", CSS_JUSTIFY_CONTENT_FLEX_START }, { "stretch", CSS_JUSTIFY_CONTENT_FLEX_START }, { NULL, 0 } };
+static const CssKeyword kw_justify_content[] = { { "flex-start", CSS_JUSTIFY_CONTENT_FLEX_START }, { "flex-end", CSS_JUSTIFY_CONTENT_FLEX_END }, { "center", CSS_JUSTIFY_CONTENT_CENTER }, { "space-between", CSS_JUSTIFY_CONTENT_SPACE_BETWEEN }, { "space-around", CSS_JUSTIFY_CONTENT_SPACE_AROUND }, { "space-evenly", CSS_JUSTIFY_CONTENT_SPACE_EVENLY }, { "start", CSS_JUSTIFY_CONTENT_FLEX_START }, { "end", CSS_JUSTIFY_CONTENT_FLEX_END }, { "left", CSS_JUSTIFY_CONTENT_FLEX_START }, { "right", CSS_JUSTIFY_CONTENT_FLEX_END }, { "normal", CSS_JUSTIFY_CONTENT_NORMAL }, { "stretch", CSS_JUSTIFY_CONTENT_NORMAL }, { NULL, 0 } };
 static const CssKeyword kw_align_items[] = { { "stretch", CSS_ALIGN_ITEMS_STRETCH }, { "flex-start", CSS_ALIGN_ITEMS_FLEX_START }, { "flex-end", CSS_ALIGN_ITEMS_FLEX_END }, { "center", CSS_ALIGN_ITEMS_CENTER }, { "baseline", CSS_ALIGN_ITEMS_BASELINE }, { "start", CSS_ALIGN_ITEMS_FLEX_START }, { "end", CSS_ALIGN_ITEMS_FLEX_END }, { "self-start", CSS_ALIGN_ITEMS_FLEX_START }, { "self-end", CSS_ALIGN_ITEMS_FLEX_END }, { "normal", CSS_ALIGN_ITEMS_STRETCH }, { NULL, 0 } };
 /* align-self / justify-self (auto: the container's align-items / justify-items) and justify-items */
 static const CssKeyword kw_self_align[] = { { "auto", CSS_ALIGN_ITEMS_AUTO }, { "normal", CSS_ALIGN_ITEMS_STRETCH }, { "stretch", CSS_ALIGN_ITEMS_STRETCH }, { "start", CSS_ALIGN_ITEMS_FLEX_START }, { "end", CSS_ALIGN_ITEMS_FLEX_END }, { "flex-start", CSS_ALIGN_ITEMS_FLEX_START }, { "flex-end", CSS_ALIGN_ITEMS_FLEX_END }, { "self-start", CSS_ALIGN_ITEMS_FLEX_START }, { "self-end", CSS_ALIGN_ITEMS_FLEX_END }, { "left", CSS_ALIGN_ITEMS_FLEX_START }, { "right", CSS_ALIGN_ITEMS_FLEX_END }, { "center", CSS_ALIGN_ITEMS_CENTER }, { "baseline", CSS_ALIGN_ITEMS_BASELINE }, { NULL, 0 } };
@@ -2608,6 +2608,11 @@ int css_parse_content(const CssToken *tokens, int n, CssContent *out)
     if (m == 3 && tok_is_func(&t[0], "attr") && t[1].type == CSS_TOK_IDENT && t[2].type == CSS_TOK_RPAREN) {
         c.kind = CSS_CONTENT_ATTR; c.str = kn_atom_lower(t[1].text, t[1].len); *out = c; return 1;
     }
+    CssImage img;
+    int used = 0;
+    if (css_parse_image(t, m, &img, &used) && used == m && img.kind == CSS_IMAGE_URL) {
+        c.kind = CSS_CONTENT_URL; c.str = img.url; c.base = img.base; *out = c; return 1;
+    }
     return 0;
 }
 
@@ -3418,7 +3423,12 @@ static void custom_set(CssComputed *c, const char *name, const char *value)
             return;
         }
     }
-    if (!value || c->custom_count >= CSS_MAX_CUSTOM_PROPS) return;
+    if (!value) return;
+    if (c->custom_count >= CSS_MAX_CUSTOM_PROPS) {
+        static int warned;
+        if (!warned++) fprintf(stderr, "[css] more than %d custom properties on one element: %s dropped\n", CSS_MAX_CUSTOM_PROPS, name);
+        return;
+    }
     c->custom[c->custom_count].name = name;
     c->custom[c->custom_count].value = value;
     c->custom_count++;
@@ -3503,6 +3513,7 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_FLEX_DIRECTION: CP(flex_direction); break;
     case CSS_PROP_FLEX_WRAP: CP(flex_wrap); break;
     case CSS_PROP_JUSTIFY_CONTENT: CP(justify_content); break;
+    case CSS_PROP_ALIGN_CONTENT: CP(align_content); break;
     case CSS_PROP_ALIGN_ITEMS: CP(align_items); break;
     case CSS_PROP_FLEX_GROW: CP(flex_grow); break;
     case CSS_PROP_FLEX_SHRINK: CP(flex_shrink); break;
@@ -3855,6 +3866,7 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
     case CSS_PROP_FLEX_DIRECTION: SET_KW(kw_flex_direction, flex_direction);
     case CSS_PROP_FLEX_WRAP: SET_KW(kw_flex_wrap, flex_wrap);
     case CSS_PROP_JUSTIFY_CONTENT: SET_KW(kw_justify_content, justify_content);
+    case CSS_PROP_ALIGN_CONTENT: SET_KW(kw_justify_content, align_content);
     case CSS_PROP_ALIGN_ITEMS: SET_KW(kw_align_items, align_items);
     case CSS_PROP_FLEX_GROW: { float f; if (!css_parse_number(t, m, &f) || f < 0) return 0; d->flex_grow = f; return 1; }
     case CSS_PROP_FLEX_SHRINK: { float f; if (!css_parse_number(t, m, &f) || f < 0) return 0; d->flex_shrink = f; return 1; }

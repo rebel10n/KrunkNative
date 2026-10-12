@@ -20,6 +20,9 @@ void accounts_on_connect(ClientConnection*);
 void accounts_handle_join(ClientConnection*, const NetPacket*);
 int  accounts_gate_ent(ClientConnection*, int spectate);   // 0 = deferred until the identity is settled
 void accounts_on_spawn(ClientConnection*, int first_spawn);
+// WP-E: the death screen's account values on the player (players.js:4860): class_stat of its
+// class (0 for guests and anonMode) and its pcStatIndex value (-1 for guests / none picked).
+void accounts_player_card(const ClientConnection*, Player*);
 void accounts_send_infos_to(ClientConnection*);           // every player's PLAYER_INFO to a joiner
 void accounts_on_disconnect(ClientConnection*);
 void accounts_on_end_packet(int uid, const NetEndPacket*);
@@ -36,11 +39,19 @@ int accounts_list_account_bans(int *out, int max);
 
 // GameHooks.reward: KR of this player's round (v3.1.1 endGame rules + gameserver.kr_*).
 int accounts_reward(const Player*);
+// GameHooks.progress (WP-E part 2c): game.incStat (stat 1) / challenges.update (stat 0) of an
+// account's player, tallied for the next stats commit.
+void accounts_progress(const Player*, int stat, const char *key, int value, int weapon, int streak);
 
 // Ranked lobbies (brain queue): the account's team (1 / 2) from the roster, 0 = mode picks.
 int accounts_assigned_team(const ClientConnection*);
 // The account hosting the current custom lobby (requirePremiumCheatPerm's custom host).
 int accounts_is_custom_host(const ClientConnection*);
+// WP6: the published map (config.customMap) the current custom lobby hosts, NULL none:
+// GAME.STORAGE and Save / Load Data need one online (v7 customMap + defaultSetts).
+const char *accounts_published_map(void);
+// WP6: v7 game.krRewards: the host option krRewards on a hosted published map.
+int accounts_kr_rewards(void);
 
 // Templates of config.serverMessages[0/1] ("" = off).
 const char *accounts_join_message(void);
@@ -59,7 +70,9 @@ int accounts_info_tags(char tags[][24], int max); // ranked / custom / draining 
 // 1 = the player may wear store.skins index `skin` (always 1 when not enforced, guests: none).
 int accounts_owns_skin(const ClientConnection*, int skin);
 // Clears cosmetics the player does not own (ENT). Returns how many were stripped.
-int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*);
+int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*, PlayerCosmeticsV7*); // unowned slots -> -1 (+ the premium hat/head, body/back rule)
+// Same for the weapon skins and the melee skin (ENT ent[2] / ent[9]).
+int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 
 // net.c exports used here
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)

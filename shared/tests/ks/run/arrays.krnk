@@ -1,0 +1,60 @@
+# Arrays: literals, addTo, remove (splice), lengthOf, bounds-checked index read/write,
+# N() index conversion, in-place casts, aliasing (1.11, 1.13)
+#! call start
+#! call writeOut
+#! call readNeg
+#! call removes
+obj idx = {two: "2", frac: 1.7, tiny: 0.0000001, neg: -0.5, word: "x"};
+public action start() {
+    num[] a = num[1, 2, 3];
+    str[][] rows = str[][str['q', 'w'], str['a']];
+    num[][] grid = num[][];
+    addTo grid num[0, 0];
+    addTo grid num [5, 6];
+    grid[1][0] = 7;
+    GAME.log(lengthOf a, lengthOf rows, rows[0][1], rows[1][0], grid[1][0], lengthOf grid[0]);
+    addTo a 4;
+    a[0] = 10;
+    a[1] += 5;
+    a[2]++;
+    GAME.log(a);
+    GAME.log(a[1.7], a[idx.two], a[idx.frac], a[idx.tiny], a[idx.neg], a[idx.word]);
+    num[] alias = a;
+    addTo alias 99;
+    GAME.log(lengthOf a, a == alias, a == num[10, 7, 4, 4, 99]);
+    obj[] objs = obj[];
+    addTo objs {x: 1};
+    objs[0].x = 2;
+    GAME.log(objs);
+    obj holder = {list: str["1", "2.5", "x"]};
+    num[] converted = (num[]) holder.list;
+    GAME.log(holder.list, converted == holder.list);
+    obj deep = {m: str[][str["7"], str["1"]]};
+    GAME.log((num[][]) deep.m);
+    GAME.log((str[]) num[1, 2], (bool[]) num[0, 1], toStr num[1, 2], lengthOf toStr num[1, 2]);
+    GAME.log(num[], obj[], num[][], (num) num[]);
+}
+public action writeOut() {
+    num[] a = num[1];
+    a[1] = 5;
+    GAME.log("unreachable");
+}
+public action readNeg() {
+    num[] a = num[1, 2];
+    GAME.log(a[-1]);
+}
+public action removes() {
+    num[] a = num[0, 1, 2, 3, 4, 5];
+    remove a[1];
+    GAME.log(a);
+    remove a[-1];
+    GAME.log(a);
+    remove a[100];
+    remove a[-100];
+    GAME.log(a);
+    remove a[1.9];
+    GAME.log(a);
+    obj o = {notArray: 1};
+    remove o.notArray;
+    GAME.log(o);
+}

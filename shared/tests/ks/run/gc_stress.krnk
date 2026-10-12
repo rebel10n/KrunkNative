@@ -1,0 +1,39 @@
+# GC stress: ~150 MB of cyclic garbage through a 1 MiB threshold heap (collections run at
+# loop back-edges and calls), long string churn, and collections while temporaries
+# (a half-built array literal, call arguments) exist only on the VM stack
+#! call start
+#! gc
+#! call update 16
+obj keep = {};
+obj action mk(num n) {
+    obj[] junk = obj[];
+    for (num i = 0; i < 20000; i++) { addTo junk {v: i, self: {}}; }
+    return {n: n, junk: lengthOf junk};
+}
+num action sum3(obj a, obj b, obj c) { return (num) a.n + (num) b.n + (num) c.n; }
+public action start() {
+    obj[] kept = obj[];
+    for (num i = 0; i < 300000; i++) {
+        obj a = {i: i};
+        obj b = {peer: a, list: num[i, i + 1]};
+        a.peer = b;
+        a.self = a;
+        if (i % 1000 == 0) { addTo kept a; }
+    }
+    num sum = 0;
+    for (num j = 0; j < lengthOf kept; j++) { sum += (num) kept[j].peer.peer.i; }
+    keep.kept = kept;
+    GAME.log(lengthOf kept, sum);
+    str s = "";
+    for (num k = 0; k < 20000; k++) {
+        s = s + "x" + toStr k;
+        if (lengthOf s > 300) { s = ""; }
+    }
+    GAME.log(lengthOf s, s);
+    obj[] built = obj[mk(1), mk(2), mk(3)];
+    GAME.log(built, sum3(mk(4), mk(5), mk(6)));
+}
+public action update(num delta) {
+    obj last = (obj) keep.kept[299];
+    GAME.log(lengthOf (obj[]) keep.kept, last.i, last.peer.list, last.self == last);
+}

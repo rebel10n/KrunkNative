@@ -79,6 +79,9 @@ typedef enum {
     VFX_TEX_GRASS,        // particles/grass_0.png
     VFX_TEX_FOG,          // particles/fog_0.png
     VFX_TEX_EMBER,        // particles/ember_0.png
+    VFX_TEX_FEATHER,      // particles/feather.png (v7 item effect 5)
+    VFX_TEX_GLOW,         // particles/glow_0.png  (v7 item effect 6)
+    VFX_TEX_STAR,         // particles/star_0.png  (v7 item effect 7)
     VFX_TEX_SCREEN_FLASH, // img/muzflash.png
     VFX_TEX_BLOOD,        // img/blood.png
     VFX_TEX_COUNT,
@@ -93,6 +96,9 @@ static const char *const vfx_texture_paths[VFX_TEX_COUNT] = {
     "textures/particles/grass_0.png",
     "textures/particles/fog_0.png",
     "textures/particles/ember_0.png",
+    "textures/particles/feather.png",
+    "textures/particles/glow_0.png",
+    "textures/particles/star_0.png",
     "img/muzflash.png",
     "img/blood.png",
 };
@@ -604,6 +610,39 @@ void vfx_impact(Client *client, const vec3 position, const float yaw, const floa
     spawn_impact(position, yaw, pitch);
 }
 
+// v7.1.4 particles.js effects 5-7 (store items' `particle`: Moonfeather 5, Ember Slides 6): count
+// sprites of src, speed 0.005-0.007 per ms in a random direction (spread -PI..PI on yaw and pitch),
+// no gravity, colour picked from colr, life 1000-1800 ms. dstVis 70 (visible within particlesDist * 70)
+// keeps them on at any distance a map allows.
+typedef struct {
+    int texture, count;
+    VfxBlend blend;
+    float scale[2];
+    int colors[7], color_count;
+} VfxItemEffect;
+
+static const VfxItemEffect vfx_item_effects[3] = {
+    {VFX_TEX_FEATHER, 1, VFX_BLEND_NORMAL, {2.0f, 3.0f}, {0x764CAD, 0xffffc2, 0x51ff99, 0xffa0b3}, 4},
+    {VFX_TEX_GLOW, 2, VFX_BLEND_ADDITIVE, {0.5f, 0.8f}, {0xffd666, 0xffbd66}, 2},
+    {VFX_TEX_STAR, 5, VFX_BLEND_ADDITIVE, {0.2f, 1.0f}, {0x0A0068, 0x26007B, 0x42008D, 0x5E00A0, 0x7A00B2, 0xffffff, 0x000000}, 7},
+};
+
+void vfx_item_effect(const vec3 position, const int effect) {
+    if (!vfx.settings.particles || effect < 5 || effect > 7) return;
+    const VfxItemEffect *e = &vfx_item_effects[effect - 5];
+    for (int i = 0; i < e->count; i++) {
+        const float speed = rand_float(0.005f, 0.007f);
+        const float u = rand_float((float) -M_PI, (float) M_PI);
+        const float v = rand_float((float) -M_PI, (float) M_PI);
+        const vec3 velocity = {speed * sinf(u) * cosf(v), speed * sinf(v), speed * cosf(u) * cosf(v)};
+        VfxSprite *sprite = sprite_add(position, e->texture, e->blend, rand_float(e->scale[0], e->scale[1]), velocity, 0.0f,
+                                       rand_int(1000.0f, 1800.0f), 1);
+        if (!sprite) break;
+        const int col = e->colors[(int) rand_int(0.0f, (float) (e->color_count - 1))];
+        sprite->color = (vec4) {(float) ((col >> 16) & 255) / 255.0f, (float) ((col >> 8) & 255) / 255.0f, (float) (col & 255) / 255.0f, 1.0f};
+    }
+}
+
 static VfxBox *box_alloc(void) {
     for (int i = 0; i < VFX_MAX_BOXES; i++) {
         if (!vfx.boxes[i].active) return &vfx.boxes[i];
@@ -793,10 +832,14 @@ static void local_shot(Client *client, Player *me) {
 
     if (vfx.log) fprintf(stderr, "[vfx] shot %s scoped=%d\n", weapon->src ? weapon->src : "?", scoped);
 
-    if (me->render_you && !sprite_model) {
+    PlayerArms *arms = held_arms(me);
+
+    // !isWeaponHidden: showWeapon/Sec/Mel off means no muzzle sprites, overlay flash or casings
+    if (me->render_you && !sprite_model && ui_controls_weapon_visible(client)) {
         if (vfx.settings.muzzle_flash && !fx->no_muzzle && !camera_offset_active(client)) {
             for (int i = 0; i < muzzle_count; i++) {
                 VfxMuzzle *muzzle = &vfx.muzzles[i];
+                if (arms) arms->muzzle[i] = muzzle_local(me, fx, i); // muzzles[i].init(...)
 
                 muzzle->active = 1;
                 muzzle->texture = fx->muz_id == 3 ? VFX_TEX_PART_3 : VFX_TEX_PART_2;
@@ -875,10 +918,13 @@ static void local_shot(Client *client, Player *me) {
         }
 
         if (distance >= VFX_TRACER_MIN_DST && vfx.settings.tracers) {
+            // muzzles[i].getWorldPosition(): the barrel tip only once a muzzle flash has placed the
+            // sprite there; with muzzleFlash off (or the weapon hidden, camOffset, nMuz) v3.1.1's
+            // tracer starts at the weapon anchor origin instead.
             vec3 start;
             const int muzzle = muzzle_count > 1 ? (int) rand_int(0.0f, (float) muzzle_count - 1.0f) : 0;
 
-            if (sprite_model || !arms_point(me, muzzle_local(me, fx, muzzle), &start)) {
+            if (sprite_model || !arms || !arms_point(me, arms->muzzle[muzzle], &start)) {
                 start = me->position;
                 start.y += me->height / 2.0f;
             }
@@ -886,6 +932,11 @@ static void local_shot(Client *client, Player *me) {
             const float back = scoped ? VFX_SCOPED_TRACER_BACK : 0.0f;
             start = v3_sub(start, v3_scale(direction, back));
             spawn_tracer(start, hit, fminf(distance + back, VFX_TRACER_MAX_DST), fx->trail);
+            if (vfx.log) {
+                fprintf(stderr, "[vfx] tracer start %.2f %.2f %.2f dst %.2f (camera %.2f %.2f %.2f fov %.2f)\n", start.x, start.y, start.z,
+                        fminf(distance + back, VFX_TRACER_MAX_DST), client->camera.position.x, client->camera.position.y,
+                        client->camera.position.z, client->camera.fov);
+            }
         }
     }
 }
@@ -1182,14 +1233,7 @@ void vfx_update(Client *client, const float delta) {
     vfx.time_ms += dt;
     vfx.frame_ms = dt;
 
-    // advance what already exists first so new spawns render at their start point
-    update_sprites(dt, client->camera.position);
-    update_boxes(dt);
-    if (map) detect_local_projectile(client);
-    projectiles_render_update(client, dt);
-    update_trails(dt);
-    update_debris(dt);
-
+    // The one-frame muzzle sprites / overlay flash age before this frame's shot can re-arm them.
     for (int i = 0; i < 2; i++) {
         VfxMuzzle *muzzle = &vfx.muzzles[i];
         if (!muzzle->active) continue;
@@ -1205,7 +1249,19 @@ void vfx_update(Client *client, const float delta) {
         }
     }
 
+    // game.update: players.update (shoot() spawns the tracer, impacts and casings) runs before
+    // particles.update of the same frame, so effects are advanced once before their first draw.
+    // A new tracer is already spd * delta past the muzzle; drawn at the muzzle instead, its
+    // centred 13-unit box would reach back past the camera. Remote shots ("9") arrive between
+    // frames and are advanced the same way.
     if (map) detect_local_shot(client);
+
+    update_sprites(dt, client->camera.position);
+    update_boxes(dt);
+    if (map) detect_local_projectile(client);
+    projectiles_render_update(client, dt);
+    update_trails(dt);
+    update_debris(dt);
 }
 
 // ---------------------------------------------------------------- GL

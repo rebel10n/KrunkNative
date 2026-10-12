@@ -7,7 +7,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define SCHEMA "kn_svccore_mig"
+/* per-process schemas: concurrent runs share the krunknative_svccore database */
+static char g_schema[48], g_repo_schema[48];
 
 static char dir[256];
 
@@ -37,8 +38,12 @@ int main(void) {
     kn_db_config dbc;
     kn_config *cfg = test_db_config(&dbc);
     kn_dbconn *admin = test_db_connect_or_skip(&dbc);
-    test_exec(admin, "DROP SCHEMA IF EXISTS " SCHEMA " CASCADE; CREATE SCHEMA " SCHEMA);
-    dbc.search_path = SCHEMA;
+    snprintf(g_schema, sizeof g_schema, "kn_svccore_mig_%d", (int)getpid());
+    snprintf(g_repo_schema, sizeof g_repo_schema, "kn_svccore_mig_%d_repo", (int)getpid());
+    char sql[256];
+    snprintf(sql, sizeof sql, "DROP SCHEMA IF EXISTS %s CASCADE; CREATE SCHEMA %s", g_schema, g_schema);
+    test_exec(admin, sql);
+    dbc.search_path = g_schema;
     char err[1024];
     kn_dbconn *c = kn_dbconn_open(&dbc, err, sizeof err);
     CHECK(c != NULL);
@@ -65,7 +70,8 @@ int main(void) {
     write_file("0003_bad.sql", "CREATE TABLE u (id int);\nINSERT INTO nope VALUES (1);\n");
     CHECK_EQ_INT(kn_migrate_run(c, &opts, err, sizeof err), -1);
     CHECK(strstr(err, "0003_bad.sql") != NULL && strstr(err, "nope") != NULL);
-    CHECK_EQ_INT(scalar(c, "SELECT count(*) FROM information_schema.tables WHERE table_schema = '" SCHEMA "' AND table_name = 'u'"), 0);
+    snprintf(sql, sizeof sql, "SELECT count(*) FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'u'", g_schema);
+    CHECK_EQ_INT(scalar(c, sql), 0);
     CHECK_EQ_INT(scalar(c, "SELECT count(*) FROM kn_migrations"), 2);
     /* the connection is still usable after the failure */
     CHECK_EQ_INT(scalar(c, "SELECT 7"), 7);
@@ -89,9 +95,10 @@ int main(void) {
     CHECK_EQ_INT(kn_migrate_run(c, &nodir, err, sizeof err), -1);
 
     /* the real repository migrations apply cleanly into a fresh schema */
-    test_exec(admin, "DROP SCHEMA IF EXISTS " SCHEMA "_repo CASCADE; CREATE SCHEMA " SCHEMA "_repo");
+    snprintf(sql, sizeof sql, "DROP SCHEMA IF EXISTS %s CASCADE; CREATE SCHEMA %s", g_repo_schema, g_repo_schema);
+    test_exec(admin, sql);
     kn_db_config repo_dbc = dbc;
-    repo_dbc.search_path = SCHEMA "_repo";
+    repo_dbc.search_path = g_repo_schema;
     kn_dbconn *rc = kn_dbconn_open(&repo_dbc, err, sizeof err);
     char repo_dir[512];
     snprintf(repo_dir, sizeof repo_dir, "%s/services/db/migrations", KN_REPO_ROOT);
@@ -107,7 +114,8 @@ int main(void) {
     snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
     CHECK(system(cmd) == 0);
     kn_dbconn_close(c);
-    test_exec(admin, "DROP SCHEMA " SCHEMA " CASCADE; DROP SCHEMA " SCHEMA "_repo CASCADE");
+    snprintf(sql, sizeof sql, "DROP SCHEMA %s CASCADE; DROP SCHEMA %s CASCADE", g_schema, g_repo_schema);
+    test_exec(admin, sql);
     kn_dbconn_close(admin);
     kn_config_free(cfg);
     TEST_DONE("knsvc_migrate");

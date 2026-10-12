@@ -126,7 +126,13 @@ static void dialog_show(const char *text, const char *field, const char *yes, co
     for (size_t i = 0; i < sizeof(pops) / sizeof(pops[0]); i++) set_disp(pops[i], "none");
     ui_loadout_hide_police_pop();
     set_disp("popupHolder", "block");
+    // v3.1.1's #confPop; v7.1.4 renders its confirm popups (clientExitPopup & co.: the same
+    // #confirmBtn / #declineBtn markup) into #genericPop through genericPopup(html, cls)
     HtmlElem pop = html_dom_by_id("confPop");
+    if (!pop && (pop = html_dom_by_id("genericPop"))) {
+        html_dom_set_attr(pop, "class", "confPop"); // v7 main.css: .confPop (the confirm popups' card)
+        html_dom_set_attr(pop, "style", "");
+    }
     if (!pop) return;
     StrBuf sb = {0};
     sb_append(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;white-space:pre-wrap'>");
@@ -152,6 +158,7 @@ static void dialog_show(const char *text, const char *field, const char *yes, co
 
 static void dialog_hide(void) {
     set_disp("confPop", "none");
+    set_disp("genericPop", "none");
     set_disp("popupHolder", "none");
     menu_schedule_rect();
 }

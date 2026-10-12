@@ -1,9 +1,18 @@
+// The server core's connections (server.h): packet dispatch, spawns, map changes, chat
+// commands and the per-tick broadcast. The bytes move through each connection's transport
+// (ClientConnection.transport): TCP sockets (net_tcp.c), UDP peers (net_udp.c) or the
+// in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
 #include <server.h>
 #include <server_log.h>
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
-#include <server_net_udp.h>  // UDP game transport: virtual client fds (net-udp)
 #include <ai.h>
+#include <bots.h>            // Krunker v7.1.4 bot players (shared/src/bots.c)
+#include <ks_server.h>       // KrunkScript server host (server/src/ks_server_host.c)
+#include <ks_storage.h>      // WP6: trigger storage / KR reward hooks (server/src/ks_storage.c)
+#include <ks_game.h>
+#include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
+#include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -12,41 +21,16 @@
 #include <pcg_basic.h>
 
 #ifdef WIN32
-#include <windows.h>
-#define NET_ERRNO WSAGetLastError()
-#define CLOSE_SOCKET closesocket
-#define WOULD_BLOCK(err) ((err) == WSAEWOULDBLOCK)
-#define SLEEP_MILLIS(ms) Sleep(ms)
-#else
-#include <unistd.h>
-#include <poll.h>
-#include <netinet/tcp.h>
-#define NET_ERRNO errno
-#define CLOSE_SOCKET close
-#define WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
-#define SLEEP_MILLIS(ms) do { struct timespec ts = {0, (ms) * 1000000L}; nanosleep(&ts, NULL); } while (0)
+#include <ws2tcpip.h> // inet_pton
 #endif
 
-// Client fds may be virtual (UDP peers, server/src/net_udp.c): they close through the transport.
-#define CLOSE_RAW_SOCKET CLOSE_SOCKET
-#define CLOSE_CLIENT_FD(fd) ((fd) >= NET_VIRTUAL_FD_BASE ? net_udp_close(fd) : (void) CLOSE_RAW_SOCKET(fd))
-
-#define NET_ERROR(fd, ...) { server_log_error(__VA_ARGS__); if ((fd) >= 0) CLOSE_SOCKET(fd); g_server->should_quit = 1; return; }
+// Client fds close through their transport (sockets, UDP peers, sandbox connections).
+#define CLOSE_CLIENT_FD(client) ((client)->transport->close((client)->fd))
 
 // Wall clock for ping RTTs: g_server->now only advances once per tick.
 static double net_time() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double) ts.tv_sec + (double) ts.tv_nsec / 1e9;
+    return server_time();
 }
-
-// When poll() last saw each client fd readable (net thread). The thread then waits for
-// g_server->lock, which the tick holds while it runs: a PONG is stamped with that wake-up so
-// the ping measures the connection, not how long the tick kept the lock. (Intentional
-// difference: v3.1.1's io_po reads Date.now() when Node's event loop gets to the message,
-// so a running tick is included there.)
-#define NET_READABLE_FDS 1024
-static double g_net_readable_at[NET_READABLE_FDS];
 
 static ClientConnection *net_client_by_id(const int id) {
     for (size_t i = 0; i < g_server->client_count; i++) {
@@ -126,6 +110,22 @@ void net_broadcast_chat(const char *from, const char *msg) {
 }
 
 // Game hooks (GameHooks.send): player uid == ClientConnection.id.
+// WP-D: the v7 mode packets (NET_PACKET_BLOCK_MODES, 140-149) only go to peers that announced
+// NET_PROTOCOL_MINOR_V7 in their HELLO; so do map-logic WP-H's zombies / airdrop packets. WP-E: the lobby packets (NET_PACKET_BLOCK_LOBBY, 180-189:
+// match votes, network data, game config) too.
+static int net_peer_takes(const ClientConnection *client, const int type) {
+    if (!game_ai_packet_for_peer(type, client->peer_minor)) return 0; // v3.1.1 vs v7 AI packets (shared/src/ai.c)
+    if (type >= NET_PACKET_BLOCK_LOBBY && type < NET_PACKET_BLOCK_LOBBY + 10) return client->peer_minor >= NET_PROTOCOL_MINOR_V7;
+    // map-logic WP-H: zombies (150-159) and airdrop (177-179) packets, v7 peers only
+    if ((type >= NET_PACKET_BLOCK_ZOMBIES && type < NET_PACKET_BLOCK_ZOMBIES + 10) ||
+        (type >= NET_PACKET_BLOCK_AIRDROP && type < NET_PACKET_BLOCK_LOBBY)) return ks_server_peer_v7(client);
+    // player-viewer WP-E: the HUD / death screen / social packets (NET_PACKET_BLOCK_SOCIAL, 240-249)
+    if (type >= NET_PACKET_BLOCK_SOCIAL && type < NET_PACKET_BLOCK_SOCIAL + 10) return ks_server_peer_v7(client);
+    // WP-E part 2b: v7 peers get every spray as NET_PACKET_SPRAY_V7 (multi-spray), older ones the v3 "sp"
+    if (type == NET_PACKET_SPRAY) return !ks_server_peer_v7(client);
+    return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
+}
+
 static void net_game_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
 
@@ -136,6 +136,7 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
             const ClientConnection *client = &g_server->clients[i];
             if (uid == NET_TARGET_NON_PLAYERS && client->player) continue;
             if (skip >= 0 && client->id == skip) continue;
+            if (!net_peer_takes(client, type)) continue;
             net_send_packet(client->fd, (NetPacketType) type, payload, length);
         }
         return;
@@ -143,15 +144,21 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
 
     ClientConnection *client = net_client_by_id(uid);
     if (client && type == NET_PACKET_END && length == sizeof(NetEndPacket)) accounts_on_end_packet(uid, payload); // didWin for the commit
-    if (client) net_send_packet(client->fd, (NetPacketType) type, payload, length);
+    if (client && net_peer_takes(client, type)) net_send_packet(client->fd, (NetPacketType) type, payload, length);
 }
 
 static void net_change_map_internal(int map_index, int mode_index, int respawn_joined);
 
-// GameHooks.next_round: the end screen ran out, start the next round on a map from
-// the rotation (pickWinningMap without votes) and respawn everyone who played.
+// GameHooks.next_round: the end screen ran out, start the next round on the voted match
+// (WP-E game_next_match: endData.mts tally) and respawn everyone who played. No picks (no
+// map list): a random rotation map, as before.
 static void net_game_next_round(Game *game) {
-    net_change_map_internal(game_pick_next_map(game), game_pick_next_mode(game), 1);
+    int map_index, mode_index;
+    if (!game_next_match(game, &map_index, &mode_index)) {
+        map_index = game_pick_next_map(game);
+        mode_index = game_pick_next_mode(game);
+    }
+    net_change_map_internal(map_index, mode_index, 1);
 }
 
 static ClientConnection *net_client_by_id(int id);
@@ -163,11 +170,25 @@ static int net_game_reward(Game *game, const Player *player) {
     return accounts_reward(player);
 }
 
+// GameHooks.progress (WP-E part 2c): v7 incStat / challenge events of account players (accounts.c).
+static void net_game_progress(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon,
+                              const int streak) {
+    (void) game;
+    accounts_progress(player, stat, key, value, weapon, streak);
+}
+
 // GameHooks.respawn: a mode respawns a dead player itself (forceSpawn, Krunker "frs").
 static void net_game_respawn(Game *game, const int uid) {
     (void) game;
     ClientConnection *client = net_client_by_id(uid);
     if (client && client->player && !client->player->active && g_server->game.end_timer <= 0.0f) net_spawn_client(client);
+}
+
+// GameHooks.alloc_uid: a bot player's uid comes from the connection id counter, so no
+// connection ever gets the same one.
+static int net_game_alloc_uid(Game *game) {
+    (void) game;
+    return g_server->next_client_id++;
 }
 
 static int net_alloc_player_number() {
@@ -250,24 +271,6 @@ static void net_mark_client_spawned(ClientConnection *client) {
     client->has_idle_position = 1;
 }
 
-static void net_set_nonblocking(const int fd) {
-#ifdef WIN32
-    unsigned long non_blocking = 1;
-    ioctlsocket(fd, FIONBIO, &non_blocking);
-#else
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-#endif
-}
-
-// Krunker's ws sockets run with Nagle off (ws calls socket.setNoDelay()). With Nagle on, a
-// small PING/STATE written while the previous tick's segment is unacked waits for the
-// peer's delayed ACK (40 ms on Linux loopback): the random 5-130 ms local pings.
-static void net_set_nodelay(const int fd) {
-    const int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *) &one, sizeof(one));
-}
-
 // One tick's frames for one client go out in a single send(): Krunker sends its per-tick
 // sync as one ws message, and ~one send() per player per client per tick (with
 // net_send_packet() spinning on EAGAIN) held g_server->lock for milliseconds at full lobbies.
@@ -289,41 +292,10 @@ static int net_batch_append(NetSendBatch *batch, const NetPacketType type, const
     return 1;
 }
 
-// Sends the batch. When the socket buffer is full (a stalled peer) nothing is written and the
-// tick's snapshots are dropped: the next tick carries fresher ones (intentional: Krunker's ws
-// would queue them in user space instead). A partial write is finished, since a cut frame
-// would desync the stream; that only waits on a peer that is draining.
-static void net_batch_flush(const int fd, NetSendBatch *batch) {
-    if (fd >= NET_VIRTUAL_FD_BASE) { // UDP peer: one knet message per frame (STATE rides the unreliable channel)
-        for (size_t at = 0; at + NET_PACKET_HEADER_SIZE <= batch->length;) {
-            const uint16_t length = (uint16_t) ((batch->data[at + 1] << 8) | batch->data[at + 2]);
-            net_send_packet(fd, (NetPacketType) batch->data[at], batch->data + at + NET_PACKET_HEADER_SIZE, length);
-            at += NET_PACKET_HEADER_SIZE + length;
-        }
-        batch->length = 0;
-        return;
-    }
-    size_t sent = 0;
-    while (sent < batch->length) {
-#ifdef WIN32
-        const int wrote = send(fd, (const char *) batch->data + sent, (int) (batch->length - sent), 0);
-#else
-        const ssize_t wrote = send(fd, batch->data + sent, batch->length - sent, MSG_NOSIGNAL);
-#endif
-        if (wrote > 0) {
-            sent += (size_t) wrote;
-            continue;
-        }
-        if (wrote < 0 && WOULD_BLOCK(NET_ERRNO)) {
-            if (!sent) break;
-#ifndef WIN32
-            struct pollfd pfd = {.fd = fd, .events = POLLOUT};
-            poll(&pfd, 1, 5);
-#endif
-            continue;
-        }
-        break; // closed / reset: net_poll_client() removes it on its next recv
-    }
+// Sends the batch through the connection's transport (TCP: one send(), UDP: one knet message
+// per frame, sandbox: the in-memory queue).
+static void net_batch_flush(const ClientConnection *client, NetSendBatch *batch) {
+    if (batch->length) client->transport->send_frames(client->fd, batch->data, batch->length);
     batch->length = 0;
 }
 
@@ -387,14 +359,25 @@ static void net_handle_map_request(ClientConnection *client, const NetPacket *pa
     }
 }
 
+// WP-E part 2b (shared/include/social_v7.h): a v7 peer may send the v7 chat / voice / spray / taunt
+// packets to this server.
+static void net_send_social_caps(const ClientConnection *client) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_V7) return;
+    const uint8_t version = NET_SOCIAL_V7_VERSION;
+    net_send_packet(client->fd, NET_PACKET_SOCIAL_V7, &version, sizeof(version));
+}
+
 static void net_send_init(ClientConnection *client) {
     accounts_send_billboard(client); // init "bill" (config gameserver.billboards), before the map loads
     net_send_map_info(client);
+    // WP-E: init's config / customData / networkData, before the INIT that uses them. A peer whose
+    // HELLO is still on its way gets them when it arrives (NET_PACKET_HELLO below).
+    if (client->peer_minor >= NET_PROTOCOL_MINOR_V7) game_config_send(&g_server->game, client->id);
 
     const NetInitPacket packet = {
-        .major = 1,
-        .minor = 0,
-        .patch = 0,
+        .major = NET_PROTOCOL_MAJOR,
+        .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6, 1.2: V7 (client_enter_game sends them only then)
+        .patch = NET_PROTOCOL_PATCH, // 1.3.1: ENT V8 (WP-C)
         .map_index = g_server->game.current_map_index,
         .mode_index = game_mode_id(&g_server->game), // Krunker "init" modeIndex: the mode id
         .tick_rate = g_server->config.tick_rate,
@@ -402,10 +385,15 @@ static void net_send_init(ClientConnection *client) {
     };
 
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
+    net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
 }
 
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
+    // The weapon / melee skins first: the client builds the player's meshes on SPAWN.
+    const NetSkinsPacket skins = {.uid = player->uid, .skins = player->skins};
+    net_send_packet(client->fd, NET_PACKET_SKINS, &skins, sizeof(skins));
+
     NetSpawnPacket packet = {
         .uid = player->uid,
         .is_you = (uint8_t) is_you,
@@ -418,11 +406,22 @@ static void net_send_spawn(ClientConnection *client, const Player *player, const
         .max_health = player->max_health,
         .position = {player->position.x, player->position.y, player->position.z},
         .direction = {player->direction.x, player->direction.y},
+        .attach_index = player->attach_index, // WP-C: v7.1.4 sync attachIndex, headMlt
+        // the player's own headMlt; Bighead FFA's mode.head_mlt rides in "bh" (NET_MODE_COUNTER_HEAD)
+        .head_mlt = player->head_mlt > 0.0f ? player->head_mlt : 1.0f,
     };
 
     strncpy(packet.name, player->name, sizeof(packet.name) - 1);
 
-    net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, sizeof(packet));
+    // WP-F: the v7.1.4 slots (players.js sync). badgeIndex only when the player shows its custom
+    // badge, and not in anonMode (except to itself and dev viewers).
+    packet.cosmetics_v7 = player->cosmetics_v7;
+    const int anon_hidden = player->anon_mode && !is_you && !(client->acct.flags & NET_PLAYER_INFO_DEV);
+    if (anon_hidden || !(player->show_badges & PLAYER_SHOW_BADGE_CUSTOM)) packet.cosmetics_v7.badge = -1;
+
+    // WP-C: 1.3.0 and older peers only take the V2 SPAWN; 1.3.1 peers prefix-read the WP-F V4
+    const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_SPAWN_PACKET_V4_SIZE : NET_SPAWN_PACKET_V2_SIZE;
+    net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, size);
 }
 
 static void net_broadcast_spawn(const Player *player) {
@@ -448,6 +447,7 @@ static void net_send_spectate_state(ClientConnection *client) {
     net_send_packet(client->fd, NET_PACKET_SPECTATE, &ack, sizeof(ack));
     net_send_existing_spawns(client);
     accounts_send_infos_to(client);
+    game_bots_send_infos(&g_server->game, client->id); // bot players' account-style PLAYER_INFO
     game_sync_leaders(&g_server->game, client->id);
     game_send_round_state(&g_server->game, client->id);
     game_ai_sync_non_players(&g_server->game); // AI.sync sends spectators every AI ("aai" first)
@@ -460,6 +460,7 @@ static void net_start_spectating(ClientConnection *client) {
 
     if (client->player) {
         Player *player = client->player;
+        ks_server_on_leave(client); // KrunkScript onPlayerLeave: the player leaves the match
         player->active = 0;
         game_player_left(&g_server->game, player);
 
@@ -488,6 +489,8 @@ static void net_spawn_client(ClientConnection *client) {
 
         player->uid = client->id;
         player->team = accounts_assigned_team(client); // ranked roster team (players.setTeam isFromQueue), 0 = mode picks
+        player->ping = client->ping_ms > 0 ? (float) client->ping_ms : 0.0f; // lag compensation (getStateConst)
+        player->custom_values = client->custom_values; // WP-C: custVals survive the map change (v7 never resets them)
         client->player = player;
         game_players_add(&g_server->game, player);
     }
@@ -497,7 +500,23 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->secondary_index = client->secondary_index;
     client->player->cosmetics = client->cosmetics;
     client->player->slid_cont = client->slid_cont; // gameserver.ts: player.slidCont = ent[15]
+    client->player->spray_index = client->spray_index; // applyEntData: player.sprayIndex = ent[1]
+    client->player->skins = client->skins;             // applyEntData: player.skins = ent[2], meleeIndex = ent[9]
+    client->player->lag_comp = client->lag_comp;       // applyLagCompFromEnt: player.lagComp = ent[11]
+    client->player->attach_index = client->attach_index; // WP-C: player.attachIndex = ent[12] (sent in SPAWN)
+    client->player->chall_mode = client->chall_mode;     // WP-C: player.challMode = ent[7]
+    client->player->anon_mode = client->anon_mode;       // WP-C: player.anonMode = ent[19]
+    // WP-F: ent[15] shoeIndex, [21] petIndex, [26] wristIndex, [30] charms, [31] backIndex, [32] headIndex,
+    // [33] playerCardIndex; ent[22..25] showBadges; the badge is the account's (stats.bdg)
+    client->player->cosmetics_v7 = client->cosmetics_v7;
+    client->player->cosmetics_v7.badge = client->acct.account_id ? client->acct.badge : -1;
+    client->player->show_badges = client->show_badges;
+    // WP-B: v7 player.streakIndexs (ENT) and player.account for reqAccount streaks: a backend
+    // account, or the host's own machine (the offline sandbox counts as an account, decisions.md)
+    player_set_streak_indexes(client->player, client->streak_indexes_set ? client->streak_indexes : NULL);
+    client->player->has_account = (unsigned char) (client->acct.account_id > 0 || client->local);
     player_spawn(client->player);
+    accounts_player_card(client, client->player); // WP-E: class stat of the spawned class + pcStatIndex value
     client->joined = 1;
     net_mark_client_spawned(client);
     if (first_spawn) net_send_existing_spawns(client);
@@ -517,6 +536,7 @@ static void net_spawn_client(ClientConnection *client) {
     }
 
     accounts_on_spawn(client, first_spawn); // PLAYER_INFO (account level / clan), MOTD on the first spawn
+    if (first_spawn) game_bots_send_infos(&g_server->game, client->id); // the bots' level / clan, like accounts_send_infos_to
 }
 
 // ENT from a client: (re)spawn unless the round is over, the player is alive, or
@@ -536,6 +556,7 @@ static void net_request_spawn(ClientConnection *client) {
 
 static void net_free_players() {
     for (size_t i = 0; i < g_server->client_count; i++) {
+        if (g_server->clients[i].player) g_server->clients[i].custom_values = g_server->clients[i].player->custom_values; // WP-C
         g_server->clients[i].player = NULL;
         g_server->clients[i].spawned_at = 0.0f;
         g_server->clients[i].has_idle_position = 0;
@@ -576,6 +597,7 @@ static void net_change_map_internal(const int map_index, const int mode_index, c
     for (size_t i = 0; i < g_server->client_count; i++) g_server->clients[i].joined = 0;
 
     game_init(&g_server->game, map_index, mode_index, 0);
+    ks_server_round_init(); // KrunkScript: (re)load the map's server script, start()
     accounts_round_changed(); // lobby size / round length per mode, billboard rotation, match id
 
     server_log("Loaded map %d mode %d", g_server->game.current_map_index, g_server->game.current_mode_index);
@@ -726,7 +748,7 @@ static void net_process_pending_kicks(void) {
 void net_add_client(ClientConnection *client) {
     if (g_server->config.max_players && g_server->client_count >= g_server->config.max_players) {
         server_log("Rejecting client: server full (%zu/%u)", g_server->client_count, (unsigned int) g_server->config.max_players);
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
@@ -737,21 +759,21 @@ void net_add_client(ClientConnection *client) {
         const NetErrorPacket error = {.message = "Banned", .code = "004003"};
         net_send_packet(client->fd, NET_PACKET_ERROR, &error, sizeof(error));
         server_log("Rejecting %s: IP banned", client->address);
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
     NetErrorPacket refuse = {{0}};
     if (accounts_refuse_connect(client->address, &refuse)) { // draining ("GAME UPDATING")
         net_send_packet(client->fd, NET_PACKET_ERROR, &refuse, sizeof(refuse));
         server_log("Rejecting %s: %s", client->address, refuse.message);
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
     ClientConnection *new_clients = realloc(g_server->clients, (g_server->client_count + 1) * sizeof(ClientConnection));
 
     if (!new_clients) {
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
@@ -760,7 +782,7 @@ void net_add_client(ClientConnection *client) {
     client->player_number = net_alloc_player_number();
 
     if (!client->player_number) {
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
@@ -776,12 +798,23 @@ void net_add_client(ClientConnection *client) {
     client->secondary_index = -1;
     client->cosmetics = PLAYER_COSMETICS_NONE;
     client->slid_cont = 1;
+    client->spray_index = 0;
+    client->skins = PLAYER_SKINS_NONE;
+    client->lag_comp = 1.0f;
+    client->attach_index = DEFAULT_ATTACHMENT_INDEX;
+    client->chall_mode = 0;
+    client->anon_mode = 0;
+    client->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    client->show_badges = PLAYER_SHOW_BADGES_ALL;
+    client->pc_stat_index = -1;
     client->chat_limiter = (NetChatLimiter) {0};
     client->ping_seq = 0;
     client->ping_ms = -1;
     client->next_ping_at = 0.0; // first probe right away (pi on connect)
     client->social = (SocialAssembly) {0};
     client->voice = (SocialAssembly) {0};
+    client->voice_v7 = (SocialAssembly) {0};
+    memset(&client->custom_values, 0, sizeof(client->custom_values)); // WP-C: no custVals yet
     g_server->clients[g_server->client_count] = *client;
 
     ClientConnection *stored_client = &g_server->clients[g_server->client_count++];
@@ -806,6 +839,8 @@ void net_remove_client(ClientConnection *client) {
     accounts_on_disconnect(client); // partial stats commit, player-leave to the brain
     on_client_disconnect(client);
     net_set_spectating(client, 0);
+    ks_server_on_leave(client); // KrunkScript onPlayerLeave, before the player is removed
+    ks_server_on_disconnect(client);
     if (client->player) {
         client->player->active = 0;
         game_player_left(&g_server->game, client->player);
@@ -823,7 +858,8 @@ void net_remove_client(ClientConnection *client) {
     net_release_player_number(client);
     social_assembly_free(&client->social);
     social_assembly_free(&client->voice);
-    CLOSE_CLIENT_FD(client->fd);
+    social_assembly_free(&client->voice_v7);
+    CLOSE_CLIENT_FD(client);
 
     if (index + 1 < g_server->client_count) {
         memmove(&g_server->clients[index], &g_server->clients[index + 1], (g_server->client_count - index - 1) * sizeof(ClientConnection));
@@ -841,9 +877,30 @@ void net_remove_client(ClientConnection *client) {
     if (new_clients) g_server->clients = new_clients;
 }
 
+_Static_assert(sizeof(NetChatV7Packet) <= NET_MAX_PAYLOAD, "NetChatV7Packet exceeds NET_MAX_PAYLOAD");
+
+static int net_team_mode(void) {
+    return g_server->game.mode && g_server->game.mode->config.teams;
+}
+
+static int net_teammates(const ClientConnection *a, const ClientConnection *b) {
+    return a->player && b->player && a->player->team == b->player->team;
+}
+
+// One player chat line to `to`: v7 peers get NET_PACKET_CHAT_V7 ("ch", channel, ..., accountId),
+// older peers the v3 NET_PACKET_CHAT.
+static void net_send_player_chat(ClientConnection *to, const ClientConnection *from, const int channel, const char *text) {
+    NetChatV7Packet packet = {.channel = (int8_t) channel, .account_id = from->acct.account_id};
+    net_packet_chat(&packet.chat, from->id, NET_CHAT_PLAYER, from->name, text);
+    if (ks_server_peer_v7(to)) net_send_packet(to->fd, NET_PACKET_CHAT_V7, &packet, sizeof(packet));
+    else net_send_packet(to->fd, NET_PACKET_CHAT, &packet.chat, sizeof(packet.chat));
+}
+
 // io_ct: burst limit (closing the socket like the v3.1.1 server, code 4008),
-// 70 characters, blank lines dropped, then "ch" to everyone.
-static int net_handle_chat(ClientConnection *client, const NetPacket *packet) {
+// 70 characters, blank lines dropped, then "ch" to everyone. v7.1.4 sendPlayerChat: the team
+// channel only exists in team modes, and its lines go to the sender's team only (the sender
+// included); v3 "ct" is the global channel.
+static int net_handle_chat(ClientConnection *client, const char *payload, const size_t length, const int requested_channel) {
     if (!net_chat_allow(&client->chat_limiter, (float) net_time())) {
         server_log("Kicking %s: chat rate limit exceeded", client->name);
         net_remove_client(client);
@@ -851,15 +908,21 @@ static int net_handle_chat(ClientConnection *client, const NetPacket *packet) {
     }
 
     char text[NET_CHAT_TEXT_SIZE];
-    if (!net_chat_sanitize(text, sizeof(text), (const char *) packet->payload, packet->length)) return 1;
+    if (!net_chat_sanitize(text, sizeof(text), payload, length)) return 1;
 
     if (chat_command_handle(net_chat_host(), client->id, text)) { // "/" commands answer the sender only
         server_log("[cmd] %s: %s", client->name, text);
         return 1;
     }
 
-    server_log("[chat] %s: %s", client->name, text);
-    net_broadcast_chat_except(NULL, client->id, NET_CHAT_PLAYER, client->name, text);
+    const int channel = requested_channel == CHAT_CHANNEL_TEAM && net_team_mode() && client->player ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL;
+    server_log("[chat%s] %s: %s", channel == CHAT_CHANNEL_TEAM ? " team" : "", client->name, text);
+    ks_server_on_chat(client, text); // KrunkScript onChatMessage (not for "/" commands)
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *to = &g_server->clients[i];
+        if (channel == CHAT_CHANNEL_TEAM && !net_teammates(client, to)) continue;
+        net_send_player_chat(to, client, channel, text);
+    }
     return 1;
 }
 
@@ -871,11 +934,11 @@ static void net_handle_pong(ClientConnection *client, const NetPacket *packet) {
     if (pong.seq != client->ping_seq) return;
 
     const double now = net_time();
-    const double readable_at = client->fd >= NET_VIRTUAL_FD_BASE ? net_udp_pong_received_at(client->fd) // datagram arrival (net_udp.c)
-                               : client->fd >= 0 && client->fd < NET_READABLE_FDS ? g_net_readable_at[client->fd] : 0.0;
+    const double readable_at = client->transport->pong_received_at(client->fd); // datagram arrival / socket readable
     const double received_at = readable_at > client->ping_sent_at && readable_at < now ? readable_at : now;
     client->ping_ms = net_ping_update(client->ping_ms, (float) (received_at - client->ping_sent_at));
     client->ping_seq = 0;
+    if (client->player) client->player->ping = (float) client->ping_ms; // io_po: player.ping = smoothed
     client->next_ping_at = now + NET_PING_INTERVAL;
 
     const NetPingResultPacket result = {.ping_ms = client->ping_ms};
@@ -910,21 +973,57 @@ static void net_handle_social(ClientConnection *client, const NetPacket *packet)
     free(reply);
 }
 
-static int net_voice_send(void *user, const int peer, const NetPacketType type, const void *payload, const uint16_t length) {
-    (void) user;
-    return net_send_packet(g_server->clients[peer].fd, type, payload, length);
+// One clip of `speaker` to every other connection. v7 peers get NET_PACKET_VOICE_V7 ("vc", audio,
+// name, sid, channel, volume, isFinal, accountId) and play it when the channel is -1 or theirs;
+// older peers get the v3 NET_PACKET_VOICE. KrunkNative fix: v7's server relays a team-channel clip
+// to everyone and only the receivers' own channel filters it, so enemies on their team channel
+// heard it too; here team-channel clips (channel 1 in a team mode) reach the speaker's team only.
+static void net_relay_voice(const ClientConnection *speaker, const char *audio, const VoiceV7Meta *meta) {
+    const int team_only = meta->channel == CHAT_CHANNEL_TEAM && net_team_mode();
+    size_t v3_len = 0, v7_len = 0;
+    char *v3 = NULL, *v7 = NULL;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *to = &g_server->clients[i];
+        if (to == speaker) continue; // "Skip echoing back to the sender"
+        if (team_only && !net_teammates(speaker, to)) continue;
+        const int peer_v7 = ks_server_peer_v7(to);
+        if (peer_v7 && !v7) v7 = voice_relay_v7_message(meta, speaker->name, audio, &v7_len);
+        if (!peer_v7 && !v3) v3 = voice_relay_message(speaker->name, audio, &v3_len);
+        const char *msg = peer_v7 ? v7 : v3;
+        if (!msg) continue;
+        social_send_message(peer_v7 ? (NetPacketType) NET_PACKET_VOICE_V7 : NET_PACKET_VOICE, (uint32_t) speaker->id, msg,
+                            peer_v7 ? v7_len : v3_len, net_social_send, to);
+    }
+    free(v3);
+    free(v7);
 }
 
-// io_vc (shared/src/voice.c): a clip from a connection that has a v3.1.1 player (voice_player) goes
-// to every other connection as ["vc", audio, alias, sid].
+// io_vc (v3.1.1): a clip from a connection that has a player (voice_player) goes to every other
+// connection as ["vc", audio, alias, sid]; v7 peers see it on every channel at full volume.
 static void net_handle_voice(ClientConnection *client, const NetPacket *packet) {
-    const VoiceSpeaker speaker = {
-        .sid = client->id, // player.sid: the uid net_spawn_client gives this connection's player
-        .alias = client->name,
-        .has_player = client->voice_player,
-        .peer = (int) (client - g_server->clients),
-    };
-    voice_relay(&client->voice, packet->payload, packet->length, &speaker, (int) g_server->client_count, net_voice_send, NULL);
+    char *audio = NULL;
+    if (social_assembly_push(&client->voice, packet->payload, packet->length, &audio, NULL) != 1) return;
+    // `if (!player || typeof audio !== "string" || !audio.length) return;` and the 256 KiB cap
+    const size_t len = strlen(audio);
+    if (client->voice_player && len && len <= VOICE_MAX_DATA) {
+        const VoiceV7Meta meta = {.channel = CHAT_CHANNEL_ALL, .volume = 1.0f, .account_id = client->acct.account_id};
+        net_relay_voice(client, audio, &meta);
+    }
+    free(audio);
+}
+
+// v7.1.4 "vc", dataUrl, channel, micVolume, micQuality (server/index.ts:4241-4263): dropped without
+// a player, unless it is a data:audio/ URL of at most 750 000 characters; volume clamped to 0..1.
+static void net_handle_voice_v7(ClientConnection *client, const NetPacket *packet) {
+    char *msg = NULL;
+    if (social_assembly_push(&client->voice_v7, packet->payload, packet->length, &msg, NULL) != 1) return;
+    VoiceV7Send sent;
+    const char *audio = NULL;
+    if (client->voice_player && voice_parse_send_v7(msg, &sent, &audio)) {
+        const VoiceV7Meta meta = {.channel = sent.channel, .volume = sent.volume, .is_final = 0, .account_id = client->acct.account_id};
+        net_relay_voice(client, audio, &meta);
+    }
+    free(msg);
 }
 
 // packetHandlers.ts requireDev for the dev packets, through the chat commands' gate
@@ -985,19 +1084,52 @@ static void net_handle_teleport(ClientConnection *client, const NetPacket *packe
 // (non-finite fields dropped, delta clamped, seq floor, 240-frame cap). Physics only ever runs
 // from these inputs: the server never takes a position from the client, so a client-side
 // noclip flag or position jump has no effect on the authoritative player.
-static void net_handle_input_frame(ClientConnection *client, const NetInputPacket *net_input) {
+static void net_handle_input_frame(ClientConnection *client, const NetInputPacket *net_input, const double arrival,
+                                   const double received) {
     Input input;
     if (!client->player || !client->player->active) return;
     if (g_server->game.end_timer > 0.0f) return; // io_q: isVoteWindow drops the batch
     net_packet_to_input(&input, net_input);
+    input.arrival = arrival;
+    input.received = received; // the packet's arrival: exact lag compensation's input clock (LagCompClock)
     player_accept_input(client->player, &input);
+
+    LagCompClock *clock = &client->player->lag_clock;
+    if (clock->anomaly_new) {
+        clock->anomaly_new = 0;
+        server_log("[lagcomp] %s: input clock ran %s real time (summed deltas vs arrivals); arrival-anchored lag "
+                   "compensation for the rest of this life", client->name,
+                   clock->offset + clock->excess > clock->baseline ? "slower than" : "faster than");
+    }
 }
 
-// "q": every frame of the batch, in order, through the same checks as a single INPUT.
+// When this client's packet reached the server, on the game.state_now clock that stamps the
+// stateHistory (anchored lag compensation, shared/src/player.c): the wall time poll() saw the
+// socket readable (TCP; the handler may have waited for the tick's lock) or now, mapped by the
+// last tick's start. state_now advances by each tick's wall delta, so state_now - tick_wall
+// is constant up to float rounding.
+static double net_input_arrival(const ClientConnection *client) {
+    const double now = net_time();
+    const double readable_at = client->transport->input_received_at(client->fd);
+    const double wall = readable_at > 0.0 && readable_at <= now && now - readable_at < 1.0 ? readable_at : now;
+    return g_server->game.state_now + (wall - g_server->tick_wall);
+}
+
+// "q": every frame of the batch, in order, through the same checks as a single INPUT. The
+// client sends a batch once per clientSendRate, so its earlier frames were generated earlier:
+// each one arrives "back" by the deltas (seconds, clamped like procInputs) of the frames after it.
 static void net_handle_input_batch(ClientConnection *client, const NetPacket *packet) {
     NetInputBatchPacket batch;
     if (!net_packet_read_input_batch(&batch, packet)) return;
-    for (int i = 0; i < batch.count; i++) net_handle_input_frame(client, &batch.frames[i]);
+    double arrival[NET_INPUT_BATCH_MAX];
+    double at = net_input_arrival(client);
+    for (int i = batch.count - 1; i >= 0; i--) {
+        arrival[i] = at;
+        const float delta = batch.frames[i].delta;
+        if (isfinite(delta) && delta > 0.0f) at -= MIN(delta, game_constants.max_delta);
+    }
+    const double received = arrival[batch.count ? batch.count - 1 : 0];
+    for (int i = 0; i < batch.count; i++) net_handle_input_frame(client, &batch.frames[i], arrival[i], received);
 }
 
 // ENT after its fields were stored (also replayed by accounts.c once a deferred join settled).
@@ -1014,11 +1146,32 @@ void net_resume_ent(ClientConnection *client, const int spectate) {
 }
 
 // Returns 0 when the client was removed.
-static int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
+int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     const int first_packet = !client->first_packet_seen;
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     switch (packet->type) {
         case NET_PACKET_HELLO:
+            NetHelloPacket hello;
+            if (net_packet_read_hello(&hello, packet)) { // the peer's protocol minor.patch (v7 AI / WP-C gates)
+                client->peer_minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;
+                client->peer_patch = hello.major == NET_PROTOCOL_MAJOR ? hello.patch : 0;
+            }
+            ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
+            if (client->peer_minor >= NET_PROTOCOL_MINOR_V7 && g_server->game.ready) { // WP-E: its INIT went out before the HELLO
+                game_config_send(&g_server->game, client->id);
+                net_send_social_caps(client);
+                if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
+            }
+            break;
+        case NET_PACKET_MATCH_VOTE: { // WP-E "maVote" "mode,map" (end screen; players and spectators)
+            NetMatchVotePacket vote;
+            if (packet->length != sizeof(vote) || client->peer_minor < NET_PROTOCOL_MINOR_V7) break;
+            memcpy(&vote, packet->payload, sizeof(vote));
+            game_vote_match(&g_server->game, client->id, vote.mode_id, vote.map_index);
+            break;
+        }
+        case NET_PACKET_SCRIPT_MSG: // KrunkScript GAME.NETWORK.send from the client script
+            ks_server_on_script_msg(client, packet);
             break;
         case NET_PACKET_FORWARDED: // net-bridge: the browser's address, before its HELLO
             if (first_packet) net_handle_forwarded(client, packet);
@@ -1035,6 +1188,18 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             client->secondary_index = ent.secondary_index;
             client->cosmetics = ent.cosmetics;
             client->slid_cont = ent.slid_cont;
+            client->spray_index = ent.spray_index;
+            client->skins = ent.skins;
+            // gameserver.ts applyLagCompFromEnt: a finite ent[11] clamped to 0.1..1 (never 0: a client
+            // must not turn off the rewind of its targets); otherwise the previous value stays
+            if (isfinite(ent.lag_comp)) client->lag_comp = fminf(1.0f, fmaxf(0.1f, ent.lag_comp));
+            if (client->player) client->player->lag_comp = client->lag_comp;
+            // WP-C (ENT V8): attachIndex, challengeMode, anonMode (server/index.ts parseEnterData), applied at the spawn
+            client->attach_index = ent.attach_index >= -1 && ent.attach_index < 256 ? ent.attach_index : DEFAULT_ATTACHMENT_INDEX;
+            client->chall_mode = ent.chall_mode;
+            client->anon_mode = ent.anon_mode;
+            client->cosmetics_v7 = ent.cosmetics_v7; // WP-F (ENT V9)
+            client->show_badges = ent.show_badges;
 
             // brain-linked: the first ENT waits for the JOIN / account lookup (server/src/accounts.c)
             if (accounts_gate_ent(client, ent.spectate)) net_resume_ent(client, ent.spectate);
@@ -1053,24 +1218,61 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             break;
         }
         case NET_PACKET_CHAT_SEND:
-            if (packet->length && packet->length <= sizeof(NetChatSendPacket)) return net_handle_chat(client, packet);
+            if (packet->length && packet->length <= sizeof(NetChatSendPacket))
+                return net_handle_chat(client, (const char *) packet->payload, packet->length, CHAT_CHANNEL_GLOBAL);
             break;
-        case NET_PACKET_INTERACT: { // io_int
+        case NET_PACKET_CHAT_V7: // WP-E: "ct", channel, msg (getChatTeam: 1 is the team channel, anything else global)
+            if (packet->length > 1 && packet->length <= sizeof(NetChatV7SendPacket))
+                return net_handle_chat(client, (const char *) packet->payload + 1, packet->length - 1u, packet->payload[0] == 1 ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL);
+            break;
+        case NET_PACKET_SPRAY_V7: { // WP-E: "spry"[, wheel index] (handleSpray)
+            NetSprayRequestPacket spray = {.index = -1};
+            if (!client->player || packet->length != sizeof(spray)) break;
+            memcpy(&spray, packet->payload, sizeof(spray));
+            const int owned = spray.index >= 0 && accounts_owns_skin(client, spray.index); // canUseSkin
+            game_player_spray_request(&g_server->game, client->player, spray.index, owned);
+            break;
+        }
+        case NET_PACKET_TAUNT: // WP-E: "prpt", i (handleModeTaunt -> players.taunt)
+            if (client->player && packet->length == sizeof(NetTauntPacket)) game_player_taunt(&g_server->game, client->player, packet->payload[0]);
+            break;
+        case NET_PACKET_STREAK_SLOTS: { // WP-B: v7 ENT streakIndexes (streakIndex1..3), before the ENT
+            if (packet->length != sizeof(NetStreakSlotsPacket)) break;
+            const NetStreakSlotsPacket *slots = (const NetStreakSlotsPacket *) packet->payload;
+            for (int i = 0; i < STREAK_SLOTS; i++) client->streak_indexes[i] = slots->indexes[i];
+            client->streak_indexes_set = 1;
+            if (client->player) player_set_streak_indexes(client->player, client->streak_indexes);
+            break;
+        }
+        case NET_PACKET_PC_STAT: // WP-E: v7 ENT pcStatIndex (the killer's player card stat on the death screen), before the ENT
+            if (packet->length != sizeof(NetPcStatPacket)) break;
+            client->pc_stat_index = (int8_t) packet->payload[0];
+            if (client->pc_stat_index < -1 || client->pc_stat_index >= PLAYER_CARD_STAT_COUNT) client->pc_stat_index = -1;
+            if (client->player) accounts_player_card(client, client->player);
+            break;
+        case NET_PACKET_USE_STREAK: // WP-B: "k<slot>" -> players.checkStreak (v7.1.4 sandbox semantics)
+            if (client->player && packet->length == sizeof(NetUseStreakPacket)) player_check_streak(client->player, packet->payload[0]);
+            break;
+        case NET_PACKET_INTERACT: { // io_int: v7 "int" type, uid / "intSec" (WP-C), or the v3 "int" action
+            if (!client->player || !packet->length) break;
+            if (packet->length == sizeof(NetInteractV7Packet)) {
+                NetInteractV7Packet interact;
+                memcpy(&interact, packet->payload, sizeof(interact));
+                if (interact.action == 1) game_player_interact_v7(&g_server->game, client->player, interact.type, interact.uid, interact.secondary);
+                else game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
+                break;
+            }
             NetInteractPacket interact = {0};
-            if (!client->player || !packet->length || packet->length > sizeof(interact)) break;
+            if (packet->length > sizeof(interact)) break;
             memcpy(&interact, packet->payload, packet->length);
             game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
             break;
         }
-        case NET_PACKET_TERMINAL_MSG: { // "tmc" has no handler: io_default logs it
-            NetTerminalMsgPacket msg;
-            char text[NET_CHAT_TEXT_SIZE];
-            if (packet->length < sizeof(int32_t) + 1 || packet->length > sizeof(msg)) break;
-            memset(&msg, 0, sizeof(msg));
-            memcpy(&msg, packet->payload, packet->length);
-            if (net_chat_sanitize(text, sizeof(text), msg.text, packet->length - sizeof(int32_t))) {
-                server_log("tmc %d,\"%s\" (%s)", (int) msg.uid, text, client->name);
-            }
+        case NET_PACKET_CONFIRM_INTERACT: { // "cnfm" (WP-C): confirmInteract
+            NetConfirmPacket confirm = {0};
+            if (!client->player || !packet->length || packet->length > sizeof(confirm)) break;
+            memcpy(&confirm, packet->payload, packet->length);
+            game_player_confirm_interact(&g_server->game, client->player, confirm.kind);
             break;
         }
         case NET_PACKET_PONG:
@@ -1081,7 +1283,10 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
             break;
         case NET_PACKET_INPUT: {
             NetInputPacket net_input;
-            if (net_packet_read_input(&net_input, packet)) net_handle_input_frame(client, &net_input);
+            if (net_packet_read_input(&net_input, packet)) {
+                const double at = net_input_arrival(client);
+                net_handle_input_frame(client, &net_input, at, at);
+            }
             break;
         }
         case NET_PACKET_INPUT_BATCH: // "q"
@@ -1102,6 +1307,9 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
         case NET_PACKET_VOICE_SEND:
             net_handle_voice(client, packet);
             break;
+        case NET_PACKET_VOICE_V7:
+            net_handle_voice_v7(client, packet);
+            break;
         default:
             on_client_event(client);
             break;
@@ -1111,185 +1319,27 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
 }
 
 int net_poll_client(ClientConnection *client) {
-    char buffer[1024];
-    int read;
-
-    if (client->fd >= NET_VIRTUAL_FD_BASE) { // UDP peer: whole packets from its knet inbox
-        NetPacket packet;
-        int result;
-        while ((result = net_udp_next_packet(client->fd, &packet)) > 0) {
-            if (!net_handle_packet(client, &packet)) return 0;
-        }
-        if (result < 0) {
-            net_remove_client(client);
-            return 0;
-        }
-        return 1;
-    }
-
-    if ((read = recv(client->fd, buffer, sizeof(buffer), 0)) <= 0) {
-        if (read < 0 && WOULD_BLOCK(NET_ERRNO)) return 1;
-
-        net_remove_client(client);
-        return 0;
-    }
-
-    if (!net_buffer_push(&client->read_buffer, buffer, (size_t) read)) {
-        net_remove_client(client);
-        return 0;
-    }
-
-    NetPacket packet;
-    int result;
-
-    while ((result = net_buffer_next(&client->read_buffer, &packet)) > 0) {
-        if (!net_handle_packet(client, &packet)) return 0;
-    }
-
-    if (result < 0) {
-        net_remove_client(client);
-        return 0;
-    }
-
-    return 1;
+    return client->transport->poll(client);
 }
 
-// Block until the listen socket or a client socket has data (5 ms at most, so pending kicks
-// and should_quit are still seen promptly). A fixed 1 ms sleep here delayed every PONG
-// (and input) by up to a millisecond plus timer slack.
-#define NET_WAIT_MAX_FDS 128
-#define NET_WAIT_TIMEOUT_MS 5
-static void net_wait_readable(const int server_socket) {
-#ifdef WIN32
-    (void) server_socket;
-    SLEEP_MILLIS(1);
-#else
-    struct pollfd fds[NET_WAIT_MAX_FDS];
-    nfds_t count = 0;
-    fds[count++] = (struct pollfd) {.fd = server_socket, .events = POLLIN};
-
-    const int udp_fd = net_udp_fd();
-    if (udp_fd >= 0) fds[count++] = (struct pollfd) {.fd = udp_fd, .events = POLLIN};
-    const nfds_t first_client = count;
-
-    pthread_mutex_lock(&g_server->lock);
-    for (size_t i = 0; i < g_server->client_count && count < NET_WAIT_MAX_FDS; i++) {
-        if (g_server->clients[i].fd >= NET_VIRTUAL_FD_BASE) continue; // UDP peers share udp_fd
-        fds[count++] = (struct pollfd) {.fd = g_server->clients[i].fd, .events = POLLIN};
+void net_poll_clients(void) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        if (!net_poll_client(&g_server->clients[i])) i--;
     }
-    pthread_mutex_unlock(&g_server->lock);
-
-    // a client closed meanwhile only makes this return early (POLLNVAL)
-    if (poll(fds, count, NET_WAIT_TIMEOUT_MS) <= 0) return;
-
-    const double now = net_time();
-    for (nfds_t i = first_client; i < count; i++) {
-        if ((fds[i].revents & POLLIN) && fds[i].fd >= 0 && fds[i].fd < NET_READABLE_FDS) g_net_readable_at[fds[i].fd] = now;
-    }
-#endif
+    net_process_pending_kicks(); // chat /kick, /ban, /banip (and the CLI running them)
 }
 
-void net_main() {
-
-#ifdef WIN32
-    WSADATA wsa_data;
-    WSAStartup(MAKEWORD(2, 2), &wsa_data);
-#endif
-
-    const int server_socket = (int) socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (server_socket < 0) NET_ERROR(-1, "Failed to create server socket, quitting...");
-
-    // Rebind right after a restart even while old connections sit in TIME_WAIT.
-    // Windows' SO_REUSEADDR would let a second server share a listening port, so
-    // it gets SO_EXCLUSIVEADDRUSE instead (TIME_WAIT never blocks a bind there).
-    const int reuse = 1;
-#ifdef WIN32
-    setsockopt(server_socket, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *) &reuse, sizeof(reuse));
-#else
-    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (const char *) &reuse, sizeof(reuse));
-#endif
-
+void net_install_game_hooks(void) {
     // Match events leave the shared game through these hooks (see GameHooks).
-    pthread_mutex_lock(&g_server->lock);
     g_server->game.hooks.user = g_server;
     g_server->game.hooks.send = net_game_send;
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
-    pthread_mutex_unlock(&g_server->lock);
-
-    struct sockaddr_in listen_addr;
-
-    listen_addr.sin_family = AF_INET;
-    listen_addr.sin_addr.s_addr = INADDR_ANY;
-    if (g_gs_config.listen_host[0] && strcmp(g_gs_config.listen_host, "0.0.0.0") &&
-        inet_pton(AF_INET, g_gs_config.listen_host, &listen_addr.sin_addr) != 1) {
-        NET_ERROR(server_socket, "Invalid gameserver.listen_host '%s' (IPv4 address expected), quitting...", g_gs_config.listen_host);
-    }
-    listen_addr.sin_port = htons(g_server->config.listen_port);
-
-    if (bind(server_socket, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
-        NET_ERROR(server_socket, "Failed to bind to port %d (is it in use?), quitting...", g_server->config.listen_port);
-    }
-
-    if (listen(server_socket, 5) < 0) NET_ERROR(server_socket, "Failed to listen on port %d, quitting...", g_server->config.listen_port);
-
-    net_set_nonblocking(server_socket);
-
-    server_log("Listening on port %d", g_server->config.listen_port);
-
-    // UDP game transport on the same port number (KRUNKNATIVE_NET_UDP=0: TCP only). It also
-    // answers server-info queries, so info_query.c opens no socket of its own.
-    if (net_udp_enabled()) net_udp_open(g_gs_config.listen_host, g_server->config.listen_port);
-
-    while (!g_server->should_quit) {
-        net_udp_receive(); // datagrams in (stamps PONG arrival before the lock), acks/resends out
-
-        pthread_mutex_lock(&g_server->lock);
-
-        net_udp_service(); // new UDP peers -> net_add_client, dead ones flagged
-        for (size_t i = 0; i < g_server->client_count; i++) {
-            if (!net_poll_client(&g_server->clients[i])) i--;
-        }
-        net_process_pending_kicks(); // chat /kick, /ban, /banip (and the CLI running them)
-
-        pthread_mutex_unlock(&g_server->lock);
-        net_udp_flush_all(); // the handlers' replies leave now, not after the next poll
-
-        struct sockaddr_in client_addr;
-#ifdef WIN32
-        int client_addr_size = sizeof(client_addr);
-#else
-        socklen_t client_addr_size = sizeof(client_addr);
-#endif
-
-        const int client = (int) accept(server_socket, (struct  sockaddr *) &client_addr, &client_addr_size);
-
-        if (client < 0) {
-            if (WOULD_BLOCK(NET_ERRNO)) {
-                net_wait_readable(server_socket);
-                continue;
-            }
-
-            break;
-        }
-
-        net_set_nonblocking(client);
-        net_set_nodelay(client);
-
-        ClientConnection conn = {};
-
-        conn.fd = client;
-        conn.addr = client_addr;
-
-        pthread_mutex_lock(&g_server->lock);
-        net_add_client(&conn);
-        pthread_mutex_unlock(&g_server->lock);
-    }
-
-    CLOSE_SOCKET(server_socket);
+    g_server->game.hooks.progress = net_game_progress; // WP-E part 2c: stats / challenge tallies (accounts.c)
+    g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
+    ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
 }
-
 
 // kickIdleSocket: ["error", "Kicked for inactivity", "000005"], then close.
 static void net_kick_idle(ClientConnection *client, const char *phase) {
@@ -1382,11 +1432,14 @@ static void net_send_reconciliation(void) {
     for (size_t i = 0; i < g_server->client_count; i++) {
         ClientConnection *client = &g_server->clients[i];
         Player *player = client->player;
+        if (ks_game_flag(&g_server->game, KS_FLAG_NO_SERVER_SYNC)) break; // KrunkScript DEFAULT.disableServerSync
         if (!net_recon_due(player, now, &client->next_recon_at)) continue;
 
         NetReconPacket packet;
         net_packet_from_recon(&packet, player, player->input_seq);
-        net_send_packet(client->fd, NET_PACKET_RECON, &packet, sizeof(packet));
+        // WP-C: the v7 movement locks only to 1.3.1+ peers (1.3.0 / net-bridge read exactly 58 bytes)
+        const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_RECON_PACKET_V2_SIZE : NET_RECON_PACKET_V1_SIZE;
+        net_send_packet(client->fd, NET_PACKET_RECON, &packet, size);
     }
 }
 
@@ -1398,7 +1451,7 @@ static void net_broadcast_states_tick(void);
 // thread would only flush them after its next poll wake-up).
 void net_broadcast_states() {
     net_broadcast_states_tick();
-    net_udp_flush_all();
+    server_transport_flush_all();
 }
 
 static void net_broadcast_states_tick(void) {
@@ -1409,32 +1462,32 @@ static void net_broadcast_states_tick(void) {
     static double next_state_at; // gameserver.ts K_PACKET_INTERVAL_MS
     const double state_now = net_time();
     if (state_now < next_state_at) return;
-    next_state_at = state_now + 1.0 / NET_STATE_SEND_HZ;
+    // WP-E: the round's networkData send rate (config.serverSendFrequency 10, mode.sendR)
+    const NetNetworkDataPacket *rates = game_network_data(&g_server->game);
+    next_state_at = state_now + 1.0 / (rates->send_hz ? rates->send_hz : NET_STATE_SEND_HZ);
 
     NetStatePacket states[256];
+    const Player *state_players[256];
     size_t state_count = 0;
     for (size_t j = 0; j < g_server->game.player_count && state_count < sizeof(states) / sizeof(states[0]); j++) {
         Player *player = g_server->game.players[j];
-        if (player && player->active) net_packet_from_player(&states[state_count++], player);
+        if (!player || !player->active) continue;
+        state_players[state_count] = player;
+        net_packet_from_player(&states[state_count++], player);
     }
     if (!state_count) return;
 
     static NetSendBatch batch; // main thread only
     for (size_t i = 0; i < g_server->client_count; i++) {
-        const int fd = g_server->clients[i].fd;
+        const ClientConnection *client = &g_server->clients[i];
+        const Player *viewer = net_is_spectating(client) ? NULL : client->player; // spectators see everyone
         batch.length = 0;
         for (size_t j = 0; j < state_count; j++) {
+            if (!game_network_relevant(&g_server->game, viewer, state_players[j])) continue; // WP-E mode.viewDis
             if (net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]))) continue;
-            net_batch_flush(fd, &batch); // full (> ~140 players): send and start the next batch
+            net_batch_flush(client, &batch); // full (> ~140 players): send and start the next batch
             net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]));
         }
-        net_batch_flush(fd, &batch);
+        net_batch_flush(client, &batch);
     }
-}
-
-void net_cleanup() {
-    net_udp_shutdown(); // after server_disconnect_all: the last ERROR / LEAVE still reach UDP peers
-#ifdef WIN32
-    WSACleanup();
-#endif
 }

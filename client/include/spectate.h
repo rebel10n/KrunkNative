@@ -18,6 +18,13 @@ int  spectate_active(void);              // window.Bf5
 void spectate_begin(Client*);            // fc(.., spectating): drop our player, free cam where the camera is
 void spectate_end(Client*);              // left spectating (our SPAWN, INIT, disconnect)
 int  spectate_target_uid(void);          // b4.spect.target sid, -1 free cam
+// player-viewer WP-E part 2a (v7.1.4)
+int  spectate_show_names(void);          // showSpectatorNameTags (specNames toggles it, default on)
+int  spectate_focused_uid(void);         // focusedPlayerId, -1 none
+int  spectate_objective_cam(void);       // following an objective spectate camera
+int  spectate_has_objective_cams(const Client*); // mode.objective && Map.spectateCams has some
+void spectate_on_player_spawn(Client*, int uid); // io_spawn: a focused player is followed again
+void spectate_on_player_leave(int uid);  // io_removePlayer: the focused player left (clearFocus)
 int  spectate_first_person(void);        // cu && cv: first-person follow view
 const char *spectate_person_label(void); // #specIns text ("First Person" / "Third Person")
 void spectate_mode(Client*, int dir);    // window.spectMode(dir): 0 free cam, +1 next, -1 previous player

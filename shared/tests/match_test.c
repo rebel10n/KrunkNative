@@ -5,6 +5,7 @@
 // Run from the repository root: ./<build>/match_test
 #include <shared.h>
 #include <ai.h>
+#include <triggers_v7.h> // trigger_queue_update (the v7 timerObjs loop)
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,7 +35,7 @@ static void test_send(Game *game, const int uid, const int type, const void *pay
     packet->uid = uid;
     packet->type = type;
     packet->length = length;
-    memcpy(packet->payload, payload, length);
+    if (length) memcpy(packet->payload, payload, length); // payload may be NULL when empty
 }
 
 static void test_next_round(Game *game) {
@@ -112,7 +113,8 @@ static void test_combat(Game *game) {
     aim_at(a, b->position.y + 7.0f, 50.0f);
     shoot(a);
     const float body = 23.0f - 5.0f * 50.0f / 700.0f;
-    CHECK(near(b->health, 100.0f - body, 0.05f), "body shot: health %.2f, expected %.2f", b->health, 100.0f - body);
+    // v7.1.4 changeHealth rounds the damage to 0.1
+    CHECK(near(b->health, 100.0f - body, 0.1f), "body shot: health %.2f, expected %.2f", b->health, 100.0f - body);
 
     const SentPacket *hit = find_sent(NET_PACKET_HIT, 1, 0);
     CHECK(hit != NULL, "HIT packet to the shooter");
@@ -294,7 +296,7 @@ static void test_projectiles(Game *game) {
     aim_at(a, b->position.y + 7.0f, 50.0f);
     shoot(a);
     const float through = 23.0f - 23.0f * 0.5f - 5.0f * 50.0f / 700.0f;
-    CHECK(near(100.0f - b->health, through, 0.05f), "wallbang damage %.2f, expected %.2f", 100.0f - b->health, through);
+    CHECK(near(100.0f - b->health, through, 0.1f), "wallbang damage %.2f, expected %.2f", 100.0f - b->health, through);
 
     wall.penetrable = 0;
     const float before_solid = b->health;
@@ -571,7 +573,7 @@ static void test_trigger_player_actions(Game *game) {
     t->action = TRIGGER_ACTION_SET_TEAM;
     t->constant = 7;
     game_on_trigger(game, a, trigger, NULL);
-    CHECK(a->team == 2, "Set Player Team clamps 7 to 2");
+    CHECK(a->team == TRIGGER_TEAM_LIMIT, "Set Player Team clamps 7 to 5 (v7 teamLimit)");
     t->constant = -3;
     game_on_trigger(game, a, trigger, NULL);
     CHECK(a->team == 1, "Set Player Team clamps -3 to 1");
@@ -774,13 +776,13 @@ static void test_trigger_interface_actions(Game *game) {
     st->action = TRIGGER_ACTION_BROADCAST_POPUP;
     snprintf(st->text, sizeof(st->text), "%s", "tick");
     g_sent_count = 0;
-    game_tick_map_objects(game, 1999.0f);
+    trigger_queue_update(game, 1.999f); // the v7 timerObjs loop (game.update #5)
     CHECK(!find_sent(NET_PACKET_POPUP, -2, 0), "onTimer: not yet");
-    game_tick_map_objects(game, 2.0f);
+    trigger_queue_update(game, 0.002f);
     CHECK(find_sent(NET_PACKET_POPUP, NET_TARGET_ALL, 0) && near(st->timer, 2000.0f, 0.01f), "onTimer fires every Event Value seconds");
     store->active = 0;
     g_sent_count = 0;
-    game_tick_map_objects(game, 5000.0f);
+    trigger_queue_update(game, 5.0f);
     CHECK(!find_sent(NET_PACKET_POPUP, -2, 0), "onTimer: inactive triggers wait");
     store->active = 1;
 
@@ -1126,11 +1128,11 @@ static void test_trigger_map_parse(void) {
         const TriggerData *t = o->trig;
         CHECK(t && t->event == TRIGGER_EVENT_ON_ENTER && t->action == TRIGGER_ACTION_BROADCAST_MESSAGE && !strcmp(t->text, "Welcome!") &&
               t->constant == 5 && t->constant_event == 10000 && t->chance == 100 && t->interface_target == 7 && t->sound == 0 &&
-              near(t->volume, 2.0f, 1e-6f) && near(t->rate, 0.5f, 1e-6f) && t->emit_from == 1 && t->single_use && t->self_destruct &&
+              near(t->volume, 2.0f, 1e-6f) && near(t->rate, 0.1f, 1e-6f) /* v7 emitterRateMin 0.1 */ && t->emit_from == 1 && t->single_use && t->self_destruct &&
               near(t->timer, 10000000.0f, 1.0f), "TRIGGER fields");
-        CHECK(o->interface_id == 1000 && o->health == 40.0f && o->can_destroy && o->team == 2 && o->no_shoot, "TRIGGER interface / health / team / noShoot");
+        CHECK(o->interface_id == 2000 /* v7 interfaceIDMax */ && o->health == 40.0f && o->can_destroy && o->team == 2 && o->no_shoot, "TRIGGER interface / health / team / noShoot");
         CHECK(map->objects[1]->trig->event == TRIGGER_EVENT_NONE && !map->objects[1]->trig->text[0], "onAI events and bad texts are dropped");
-        CHECK(map->objects[2]->trig->event == TRIGGER_EVENT_NONE && !map->objects[2]->no_shoot, "unknown events name nothing");
+        CHECK(map->objects[2]->trig->event == TRIGGER_EVENT_ON_NUKE_END && !map->objects[2]->no_shoot, "v7 events 16-31 parse (te 22 onNukeEnd)");
         const Object *cube = map->objects[3];
         CHECK(cube->health == 50.0f && cube->can_destroy && cube->start_destroyed && cube->destroyed && !cube->active &&
               cube->respawn_time_start == 100.0f && cube->interface_id == 3, "CUBE destructible fields");
@@ -1156,6 +1158,60 @@ static void test_trigger_map_parse(void) {
     if (map) map_fini(map);
     cJSON_Delete(raw);
     printf("Trigger map parse test %s\n", g_failures != failures ? "FAILED" : "OK");
+}
+
+// players.spray (shared/src/interact.c): the ray skips noVis ("v") objects and lands on the
+// rendered wall behind them, on server_bin as well (no meshes: map.c parses "v" itself).
+static const SentPacket *spray_once(Game *game, Player *player) {
+    g_sent_count = 0;
+    player->last_spray = -1e6f;
+    game_player_spray(game, player);
+    return find_sent(NET_PACKET_SPRAY, NET_TARGET_ALL, 0);
+}
+
+static void test_spray_invisible(Game *game) {
+    const int failures = g_failures;
+    printf("Running spray invisible object test...\n");
+    const char *json =
+        "{\"name\":\"t\",\"spawns\":[[0,0,0]],\"objects\":["
+        "{\"p\":[0,-2,0],\"s\":[200,2,200]},"          // floor
+        "{\"p\":[0,0,-10],\"s\":[40,40,2],\"v\":1},"  // invisible wall, front face z = -9 (spray 0.1 before it: -8.9)
+        "{\"p\":[0,0,-20],\"s\":[40,40,2]}"            // visible wall, front face z = -19
+        "]}";
+    cJSON *raw = cJSON_Parse(json);
+    Map *map = raw ? map_init(raw) : NULL;
+    Player *a = game_find_player(game, 1);
+    CHECK(map && map->object_count == 3 && map->objects[1]->no_vis && !map->objects[2]->no_vis, "\"v\" parsed as noVis");
+    if (map && map->object_count == 3 && a) {
+        Map *saved = game->map;
+        game->map = map;
+        if (!a->active) player_spawn(a);
+        a->position = (vec3) {0.0f, 0.0f, 0.0f};
+        a->direction = (vec2) {0.0f, 0.0f}; // pitch 0, yaw 0: facing -z
+        a->spray_index = 7;
+
+        const SentPacket *sent = spray_once(game, a);
+        NetSprayPacket spray = {0};
+        if (sent && sent->length == sizeof(spray)) memcpy(&spray, sent->payload, sizeof(spray));
+        CHECK(sent && sent->length == sizeof(spray), "a spray through the invisible wall");
+        CHECK(near(spray.position[2], -18.9f, 0.011f) && spray.y_rot == 0 && spray.x_rot == 0 && spray.spray_index == 7 && spray.uid == 1,
+              "lands on the visible wall behind (z %g, rot %d/%d)", spray.position[2], spray.y_rot, spray.x_rot);
+
+        map->objects[1]->no_vis = 0; // a rendered wall in front stops the ray
+        sent = spray_once(game, a);
+        if (sent && sent->length == sizeof(spray)) memcpy(&spray, sent->payload, sizeof(spray));
+        CHECK(sent && near(spray.position[2], -8.9f, 0.011f), "a visible wall in front takes the spray (z %g)", spray.position[2]);
+
+        map->objects[1]->no_vis = 1;
+        map->objects[2]->no_vis = 1; // only invisible walls ahead (the floor is below the ray): no spray
+        CHECK(!spray_once(game, a), "no spray on invisible walls alone");
+
+        game->map = saved;
+        player_spawn(a);
+    }
+    if (map) map_fini(map);
+    cJSON_Delete(raw);
+    printf("Spray invisible object test %s\n", g_failures != failures ? "FAILED" : "OK");
 }
 
 // kills.js reward(): the killer gets "6" (NET_PACKET_KILL_MEDALS) with the [name, score]
@@ -1205,6 +1261,44 @@ static int test_round_reward(Game *game, const Player *player) {
     if (player->uid != 1) return 0;
     const int reward = player->score / 100;
     return reward > 30 ? 30 : reward;
+}
+
+// /endless pauses the round clock where it is and resumes from there (no reset, no drift).
+static void test_endless(Game *game) {
+    const int failures = g_failures;
+    printf("Running endless test...\n");
+
+    Player *a = game_find_player(game, 1);
+    const int score = a ? a->score : 0;
+    game->round_timer = 180.4f;
+    game->round_seconds_sent = -1;
+    game_tick(game, game->now + 0.1f, 0.1f); // 180.3
+
+    for (int pass = 0; pass < 3; pass++) {
+        const float before = game->round_timer;
+        g_sent_count = 0;
+        game_set_endless(game, 1);
+        const SentPacket *timer = find_sent(NET_PACKET_TIMER, NET_TARGET_ALL, 0);
+        CHECK(timer != NULL, "endless on: frozen TIMER broadcast");
+        if (timer) {
+            NetTimerPacket packet;
+            memcpy(&packet, timer->payload, sizeof(packet));
+            CHECK(packet.seconds == (int) before && !packet.end, "endless TIMER %d (want %d)", packet.seconds, (int) before);
+        }
+        for (int i = 0; i < 100; i++) game_tick(game, game->now + 0.1f, 0.1f); // 10 s
+        CHECK(near(game->round_timer, before, 0.001f), "endless: clock frozen %.2f (was %.2f)", game->round_timer, before);
+
+        game_set_endless(game, 0);
+        CHECK(near(game->round_timer, before, 0.001f) && !game->round_endless, "endless off: resumes from %.2f (got %.2f)", before, game->round_timer);
+        g_sent_count = 0;
+        for (int i = 0; i < 10; i++) game_tick(game, game->now + 0.1f, 0.1f); // 1 s
+        CHECK(near(game->round_timer, before - 1.0f, 0.01f), "counting down again: %.2f", game->round_timer);
+        CHECK(find_sent(NET_PACKET_TIMER, NET_TARGET_ALL, 0) != NULL, "TIMER resent after resume");
+    }
+    CHECK(near(game->round_timer, 177.3f, 0.02f), "no drift after 3 toggles: %.2f", game->round_timer);
+    CHECK(game->end_timer == 0.0f && (!a || a->score == score), "round and scores untouched");
+
+    printf("Endless test %s\n", g_failures != failures ? "FAILED" : "OK");
 }
 
 static void test_round(Game *game) {
@@ -1345,7 +1439,9 @@ int main(void) {
     test_trigger_events(&game);
     test_checkpoints_teleporters(&game);
     test_trigger_map_parse();
+    test_spray_invisible(&game);
     test_kill_medals(&game);
+    test_endless(&game);
     test_round(&game);
     test_chat();
 

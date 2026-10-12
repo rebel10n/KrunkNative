@@ -1,0 +1,4 @@
+obj o = {};
+public action start() {
+    addTo o 1;
+}

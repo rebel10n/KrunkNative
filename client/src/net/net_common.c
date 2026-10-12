@@ -8,6 +8,7 @@
 
 #include <client.h>
 #include <ai.h>
+#include <social_v7.h> // WP-E part 2b packets
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,13 +76,13 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
 
     switch (type) {
         case NET_PACKET_HELLO: {
-            if (length != sizeof(NetHelloPacket)) {
+            if (length < offsetof(NetHelloPacket, patch)) { // WP-C: a 2-byte HELLO is patch 0
                 client_net_log_bad_payload("hello", type, payload, length);
                 break;
             }
 
-            NetHelloPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
+            NetHelloPacket packet = {0};
+            memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
 
             printf("{\"type\":\"hello\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u}",
                    (unsigned int) type,
@@ -91,7 +92,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_INIT: {
-            if (length != sizeof(NetInitPacket)) {
+            if (length < sizeof(NetInitPacket)) { // longer: a newer server (prefix)
                 client_net_log_bad_payload("init", type, payload, length);
                 break;
             }
@@ -111,30 +112,34 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_ENT: {
-            if (length != NET_ENT_PACKET_V2_SIZE && length != NET_ENT_PACKET_MIN_SIZE && (length < NET_ENT_PACKET_V3_SIZE || length > sizeof(NetEntPacket))) {
+            if (length != NET_ENT_PACKET_V2_SIZE && length != NET_ENT_PACKET_MIN_SIZE && length < NET_ENT_PACKET_V3_SIZE) {
                 client_net_log_bad_payload("ent", type, payload, length);
                 break;
             }
 
-            NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1};
-            memcpy(&packet, payload, length);
+            NetEntPacket packet = {.secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+            memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
 
-            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u}",
+            const PlayerSkins skins = length >= NET_ENT_PACKET_V6_SIZE ? packet.skins : PLAYER_SKINS_NONE;
+            printf("{\"type\":\"ent\",\"id\":%u,\"class_index\":%d,\"secondary_index\":%d,\"spectate\":%u,\"slid_cont\":%u,\"spray_index\":%d,\"skins\":[%d,%d],\"melee\":%d,\"lag_comp\":%g}",
                    (unsigned int) type,
                    packet.class_index,
                    packet.secondary_index,
                    (unsigned int) (length > NET_ENT_PACKET_V3_SIZE ? packet.spectate : 0),
-                   (unsigned int) (length > offsetof(NetEntPacket, slid_cont) ? packet.slid_cont : 1));
+                   (unsigned int) (length > offsetof(NetEntPacket, slid_cont) ? packet.slid_cont : 1),
+                   length >= NET_ENT_PACKET_V5_SIZE ? packet.spray_index : 0,
+                   skins.primary, skins.secondary, skins.melee,
+                   length >= NET_ENT_PACKET_V7_SIZE ? (double) packet.lag_comp : 1.0);
             break;
         }
         case NET_PACKET_SPAWN: {
-            if (length != sizeof(NetSpawnPacket) && length != NET_SPAWN_PACKET_V1_SIZE) {
+            if (length != NET_SPAWN_PACKET_V2_SIZE && length != NET_SPAWN_PACKET_V1_SIZE && length < NET_SPAWN_PACKET_V3_SIZE) {
                 client_net_log_bad_payload("spawn", type, payload, length);
                 break;
             }
 
             NetSpawnPacket packet = {.cosmetics = PLAYER_COSMETICS_NONE};
-            memcpy(&packet, payload, length);
+            memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
             packet.name[sizeof(packet.name) - 1] = '\0';
 
             printf("{\"type\":\"spawn\",\"id\":%u,\"uid\":%d,\"is_you\":%u,\"active\":%u,\"class_index\":%d,\"team\":%d,\"health\":%g,\"max_health\":%d,\"name\":\"%s\",\"position\":[%g,%g,%g],\"direction\":[%g,%g],\"skin\":%d,\"hat\":%d,\"back\":%d,\"waist\":%d,\"face\":%d,\"dye\":%d}",
@@ -152,7 +157,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.position[2],
                    packet.direction[0],
                    packet.direction[1],
-                   packet.cosmetics.skin_color, packet.cosmetics.hat, packet.cosmetics.back,
+                   packet.cosmetics.skin_color, packet.cosmetics.hat, packet.cosmetics.body,
                    packet.cosmetics.waist, packet.cosmetics.face, packet.cosmetics.dye);
             break;
         }
@@ -176,6 +181,24 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    (unsigned int) packet.swap,
                    (unsigned int) packet.slowdown,
                    (int) packet.scroll);
+            break;
+        }
+        case NET_PACKET_INPUT_BATCH: { // "q": the frames' seq range and whether any moves
+            NetPacket packet = {.type = (uint8_t) type, .length = length};
+            NetInputBatchPacket batch;
+            if (length > sizeof(packet.payload)) {
+                client_net_log_bad_payload("input_batch", type, payload, length);
+                break;
+            }
+            memcpy(packet.payload, payload, length);
+            if (!net_packet_read_input_batch(&batch, &packet) || !batch.count) {
+                client_net_log_bad_payload("input_batch", type, payload, length);
+                break;
+            }
+            int moving = 0;
+            for (int i = 0; i < batch.count; i++) moving |= batch.frames[i].move_dir >= 0;
+            printf("{\"type\":\"input_batch\",\"id\":%u,\"count\":%u,\"first_seq\":%d,\"last_seq\":%d,\"moving\":%d}",
+                   (unsigned int) type, (unsigned int) batch.count, batch.frames[0].seq, batch.frames[batch.count - 1].seq, moving);
             break;
         }
         case NET_PACKET_STATE: {
@@ -349,6 +372,52 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             printf("]}");
             break;
         }
+        case NET_PACKET_AI_ADD_V7: { // "aai" v7
+            LOG_READ(NetAIAddV7Packet, "ai_add_v7");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            packet.asset[sizeof(packet.asset) - 1] = 0;
+            printf("{\"type\":\"ai_add_v7\",\"id\":%u,\"sid\":%d,\"index\":%d,\"name\":\"%s\",\"position\":[%g,%g,%g],\"team\":%d,"
+                   "\"health\":%g,\"mSize\":%g,\"asset\":\"%s\",\"hasAnim\":%u}",
+                   (unsigned int) type, packet.sid, packet.index, packet.name, packet.position[0], packet.position[1], packet.position[2],
+                   packet.team, packet.max_health, packet.m_size, packet.asset, (unsigned int) packet.has_anim);
+            break;
+        }
+        case NET_PACKET_AI_SYNC_V7: { // "ai" v7: [sid, x, y, z, xD, yD, health, didMov, team] per AI
+            NetAISyncV7Packet packet;
+            memset(&packet, 0, sizeof(packet));
+            const size_t header = offsetof(NetAISyncV7Packet, entries);
+            if (length < header || length > sizeof(packet)) { client_net_log_bad_payload("ai_sync_v7", type, payload, length); break; }
+            memcpy(&packet, payload, length);
+            if (packet.count > NET_AI_SYNC_V7_MAX || length != header + packet.count * sizeof(NetAISyncV7Entry)) {
+                client_net_log_bad_payload("ai_sync_v7", type, payload, length);
+                break;
+            }
+            printf("{\"type\":\"ai_sync_v7\",\"id\":%u,\"first\":%u,\"ais\":[", (unsigned int) type, (unsigned int) packet.first);
+            for (int i = 0; i < packet.count; i++) {
+                const NetAISyncV7Entry *e = &packet.entries[i];
+                printf("%s[%d,%g,%g,%g,%g,%g,%d,%u,%d]", i ? "," : "", e->sid, e->position[0], e->position[1], e->position[2], e->x_dir,
+                       e->y_dir, e->health, (unsigned int) e->did_move, e->team);
+            }
+            printf("]}");
+            break;
+        }
+        case NET_PACKET_AI_REMOVE: { // "rai"
+            LOG_READ(NetAIRemovePacket, "ai_remove");
+            printf("{\"type\":\"ai_remove\",\"id\":%u,\"sid\":%d}", (unsigned int) type, packet.sid);
+            break;
+        }
+        case NET_PACKET_AI_ANIM: { // "ana"
+            LOG_READ(NetAIAnimPacket, "ai_anim");
+            packet.clip[sizeof(packet.clip) - 1] = 0;
+            printf("{\"type\":\"ai_anim\",\"id\":%u,\"sid\":%d,\"clip\":\"%s\",\"raw\":%u}", (unsigned int) type, packet.sid, packet.clip,
+                   (unsigned int) packet.raw);
+            break;
+        }
+        case NET_PACKET_AI_SHOT: {
+            LOG_READ(NetAIShotPacket, "ai_shot");
+            printf("{\"type\":\"ai_shot\",\"id\":%u,\"projectile\":%d,\"sid\":%d}", (unsigned int) type, packet.projectile, packet.sid);
+            break;
+        }
         // map triggers (shared/src/triggers.c)
         case NET_PACKET_OBJECT_STATE: { // "do" / "ro" / "gte" / "bnk"
             static const char *const kinds[] = {"destroy", "respawn", "gate", "bank"};
@@ -357,9 +426,9 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.kind < 4 ? kinds[packet.kind] : "?", packet.value);
             break;
         }
-        case NET_PACKET_CHECKPOINT: // "chp"
-            if (length) { client_net_log_bad_payload("checkpoint", type, payload, length); break; }
-            printf("{\"type\":\"checkpoint\",\"id\":%u}", (unsigned int) type);
+        case NET_PACKET_CHECKPOINT: // "chp" (v7: NetCheckpointPacket, reset = "chp" true)
+            if (length && length != sizeof(NetCheckpointPacket)) { client_net_log_bad_payload("checkpoint", type, payload, length); break; }
+            printf("{\"type\":\"checkpoint\",\"id\":%u,\"reset\":%u}", (unsigned int) type, length ? (unsigned int) ((const uint8_t *) payload)[0] : 0u);
             break;
         case NET_PACKET_SOUND: { // "s"
             LOG_READ(NetSoundPacket, "sound");
@@ -385,6 +454,106 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             printf("{\"type\":\"popup\",\"id\":%u,\"text\":\"%s\"}", (unsigned int) type, packet.text);
             break;
         }
+        // WP-C v7 trigger packets (shared.h NET_PACKET_BLOCK_TRIGGERS)
+        case NET_PACKET_CUSTOM_VALUE: // "cv"
+        case NET_PACKET_GLOBAL_VALUE: { // "gv" / "gbl"
+            LOG_READ(NetValuePacket, type == NET_PACKET_CUSTOM_VALUE ? "custom_value" : "global_value");
+            packet.key[sizeof(packet.key) - 1] = 0;
+            printf("{\"type\":\"%s\",\"id\":%u,\"key\":\"%s\",\"value\":%g,\"reset\":%u}", type == NET_PACKET_CUSTOM_VALUE ? "custom_value" : "global_value",
+                   (unsigned int) type, packet.key, packet.value, (unsigned int) (packet.flags & NET_VALUE_RESET));
+            break;
+        }
+        case NET_PACKET_GUI_TOGGLE: { // "tgui"
+            LOG_READ(NetGuiTogglePacket, "gui_toggle");
+            printf("{\"type\":\"gui_toggle\",\"id\":%u,\"element\":%d,\"status\":%u}", (unsigned int) type, packet.id, (unsigned int) packet.status);
+            break;
+        }
+        case NET_PACKET_AMBIENT_CHANGE: { // "camb"
+            LOG_READ(NetAmbientPacket, "ambient");
+            printf("{\"type\":\"ambient\",\"id\":%u,\"ambient\":%d}", (unsigned int) type, packet.ambient);
+            break;
+        }
+        case NET_PACKET_STOP_SOUND: { // "sso"
+            LOG_READ(NetStopSoundPacket, "stop_sound");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            printf("{\"type\":\"stop_sound\",\"id\":%u,\"name\":\"%s\"}", (unsigned int) type, packet.name);
+            break;
+        }
+        case NET_PACKET_PLAYER_SOUND: { // "asnd" / "rsnd"
+            LOG_READ(NetPlayerSoundPacket, "player_sound");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            printf("{\"type\":\"player_sound\",\"id\":%u,\"uid\":%d,\"add\":%u,\"name\":\"%s\"}", (unsigned int) type, packet.uid,
+                   (unsigned int) packet.add, packet.name);
+            break;
+        }
+        case NET_PACKET_CONFIRM_INTERACT: { // "cnfm"
+            LOG_READ(NetConfirmPacket, "confirm");
+            printf("{\"type\":\"confirm\",\"id\":%u,\"uid\":%d,\"kind\":%u}", (unsigned int) type, packet.uid, (unsigned int) packet.kind);
+            break;
+        }
+        case NET_PACKET_CHANGE_POSITION: { // "chgp"
+            LOG_READ(NetChangePositionPacket, "change_position");
+            printf("{\"type\":\"change_position\",\"id\":%u,\"uid\":%d,\"position\":[%g,%g,%g]}", (unsigned int) type, packet.uid, packet.x,
+                   packet.y, packet.z);
+            break;
+        }
+        case NET_PACKET_PICKUP: { // the pickup half of "inat" / "pkups"
+            LOG_READ(NetPickupPacket, "pickup");
+            printf("{\"type\":\"pickup\",\"id\":%u,\"uid\":%d,\"weapon\":%d,\"active\":%u}", (unsigned int) type, packet.uid, packet.weapon,
+                   (unsigned int) packet.active);
+            break;
+        }
+        case NET_PACKET_SPRAY: { // "sp"
+            LOG_READ(NetSprayPacket, "spray");
+            printf("{\"type\":\"spray\",\"id\":%u,\"uid\":%d,\"index\":%d,\"position\":[%g,%g,%g],\"y_rot\":%d,\"x_rot\":%d}",
+                   (unsigned int) type, packet.uid, packet.spray_index, packet.position[0], packet.position[1], packet.position[2],
+                   packet.y_rot, packet.x_rot);
+            break;
+        }
+        case NET_PACKET_SPRAY_V7: { // v7 "spry" (C->S, 4 bytes) / "sp" (S->C)
+            if (length == sizeof(NetSprayRequestPacket)) {
+                NetSprayRequestPacket request;
+                memcpy(&request, payload, sizeof(request));
+                printf("{\"type\":\"spry\",\"id\":%u,\"index\":%d}", (unsigned int) type, request.index);
+                break;
+            }
+            LOG_READ(NetSprayV7Packet, "spray_v7");
+            printf("{\"type\":\"spray_v7\",\"id\":%u,\"uid\":%d,\"slot\":%u,\"skin\":%d,\"position\":[%g,%g,%g],\"rot\":[%d,%d,%d]}",
+                   (unsigned int) type, packet.uid, (unsigned int) packet.slot, packet.skin, packet.position[0], packet.position[1],
+                   packet.position[2], packet.y_rot, packet.x_rot, packet.z_rot);
+            break;
+        }
+        case NET_PACKET_CHAT_V7: { // v7 "ct" (C->S: channel + text) / "ch" (S->C)
+            if (length == sizeof(NetChatV7Packet)) {
+                NetChatV7Packet packet;
+                memcpy(&packet, payload, sizeof(packet));
+                packet.chat.name[sizeof(packet.chat.name) - 1] = 0;
+                packet.chat.text[sizeof(packet.chat.text) - 1] = 0;
+                printf("{\"type\":\"chat_v7\",\"id\":%u,\"channel\":%d,\"account\":%d,\"uid\":%d,\"name\":\"%s\",\"text\":\"%s\"}", (unsigned int) type,
+                       packet.channel, packet.account_id, packet.chat.uid, packet.chat.name, packet.chat.text);
+                break;
+            }
+            char text[NET_CHAT_TEXT_SIZE] = "";
+            const size_t n = length > 1 ? (length - 1u < sizeof(text) - 1 ? length - 1u : sizeof(text) - 1) : 0;
+            if (n) memcpy(text, (const char *) payload + 1, n);
+            text[n] = 0;
+            printf("{\"type\":\"ct\",\"id\":%u,\"channel\":%u,\"text\":\"%s\"}", (unsigned int) type, length ? (unsigned int) ((const uint8_t *) payload)[0] : 0u, text);
+            break;
+        }
+        case NET_PACKET_SOCIAL_V7: // the server takes the v7 social packets (uint8 version)
+            printf("{\"type\":\"social_v7\",\"id\":%u,\"version\":%u}", (unsigned int) type, length ? (unsigned int) ((const uint8_t *) payload)[0] : 0u);
+            break;
+        case NET_PACKET_TAUNT: {
+            LOG_READ(NetTauntPacket, "taunt");
+            printf("{\"type\":\"taunt\",\"id\":%u,\"index\":%u}", (unsigned int) type, (unsigned int) packet.index);
+            break;
+        }
+        case NET_PACKET_SKINS: {
+            LOG_READ(NetSkinsPacket, "skins");
+            printf("{\"type\":\"skins\",\"id\":%u,\"uid\":%d,\"skins\":[%d,%d],\"melee\":%d}",
+                   (unsigned int) type, packet.uid, packet.skins.primary, packet.skins.secondary, packet.skins.melee);
+            break;
+        }
 #undef LOG_READ
         default:
             client_net_log_bad_payload("unknown", type, payload, length);
@@ -395,8 +564,42 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
     fflush(stdout);
 }
 
+// WP-E: the packet tally (io-client trackPacketStats). Ingress runs on the transport thread under
+// net_lock, egress on the main thread: both go through g_tally_lock.
+static pthread_mutex_t g_tally_lock = PTHREAD_MUTEX_INITIALIZER;
+static ClientNetTally g_tally;
+static double g_tally_last_state = -1.0; // arrival of the previous NET_PACKET_STATE (seconds)
+#define TALLY_TICK_GAP 0.004             // STATE packets closer than this belong to one server sync
+
+void client_net_tally_take(ClientNetTally *out) {
+    pthread_mutex_lock(&g_tally_lock);
+    *out = g_tally;
+    memset(&g_tally, 0, sizeof(g_tally));
+    pthread_mutex_unlock(&g_tally_lock);
+}
+
+void client_net_tally_egress(const uint16_t length) {
+    pthread_mutex_lock(&g_tally_lock);
+    g_tally.egress_packets++;
+    g_tally.egress_bytes += length + NET_PACKET_HEADER_SIZE;
+    pthread_mutex_unlock(&g_tally_lock);
+}
+
+static void client_net_tally_ingress(const NetPacket *packet) {
+    pthread_mutex_lock(&g_tally_lock);
+    g_tally.ingress_packets++;
+    g_tally.ingress_bytes += packet->length + NET_PACKET_HEADER_SIZE;
+    if (packet->type == NET_PACKET_STATE) { // v7 counts its "k" sync messages
+        const double now = glfwGetTime();
+        if (g_tally_last_state < 0.0 || now - g_tally_last_state > TALLY_TICK_GAP) g_tally.ticks++;
+        g_tally_last_state = now;
+    }
+    pthread_mutex_unlock(&g_tally_lock);
+}
+
 void client_net_queue_packet(Client *client, const NetPacket *packet) {
     pthread_mutex_lock(&client->net_lock);
+    client_net_tally_ingress(packet);
 
     // The server explains a kick right before it closes the socket; the transport
     // reports the close before the main thread drains this queue, so keep the text

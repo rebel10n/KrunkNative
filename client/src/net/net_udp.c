@@ -72,7 +72,20 @@ static int net_udp_client_send(const int fd, const uint8_t type, const void *pay
 }
 
 int net_udp_client_is_virtual(const int socket) {
-    return socket >= NET_VIRTUAL_FD_BASE;
+    return socket >= NET_VIRTUAL_FD_BASE && socket < NET_LOOPBACK_FD_BASE; // not the offline sandbox's loopback fds
+}
+
+// netinfo (client_net_info): the knet session's counters.
+void net_udp_client_info(char *out, const size_t size) {
+    out[0] = 0;
+    pthread_mutex_lock(&g_cu.lock);
+    if (g_cu.active) {
+        const KnetStats *st = &g_cu.conn.stats;
+        snprintf(out, size, "knet: rtt %d ms, sent %llu / received %llu datagrams, %llu resent segments, %llu duplicate\n",
+                 knet_conn_rtt_ms(&g_cu.conn), (unsigned long long) st->datagrams_sent, (unsigned long long) st->datagrams_received,
+                 (unsigned long long) st->segments_resent, (unsigned long long) st->duplicates_received);
+    }
+    pthread_mutex_unlock(&g_cu.lock);
 }
 
 // net_socket_shutdown() for the virtual fd: end the session from the transport thread.
@@ -234,10 +247,11 @@ int net_udp_client_session(Client *client, const struct sockaddr_in *address) {
     pthread_mutex_lock(&client->net_lock);
     client->net_socket = CU_VIRTUAL_FD;
     pthread_mutex_unlock(&client->net_lock);
-    printf("udp session established (token %08x)\n", token);
+    client_net_note(NET_NOTE_INFO, "udp session established (token %08x, knet over UDP to %s:%u)", token, client->net_address,
+                    (unsigned int) client->net_port);
     on_client_socket_connect(client);
 
-    const NetHelloPacket hello = {1, 0, 0};
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH}; // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes
     client_net_send_packet(CU_VIRTUAL_FD, NET_PACKET_HELLO, &hello, sizeof(hello));
     client_net_send_join(client, CU_VIRTUAL_FD); // brain ticket / session / guest name (net_join.c)
 
@@ -274,7 +288,7 @@ int net_udp_client_session(Client *client, const struct sockaddr_in *address) {
     uint8_t bye[8];
     const size_t bye_length = knet_build_disconnect(bye, token);
     for (int i = 0; i < 3; i++) cu_emit(NULL, bye, bye_length); // best effort: the server times out otherwise
-    printf("udp session ended (%s; sent %llu / received %llu datagrams, %llu resent segments, rtt %d ms)\n", why,
+    client_net_note(NET_NOTE_WARN, "udp session ended (%s; sent %llu / received %llu datagrams, %llu resent segments, rtt %d ms)", why,
            (unsigned long long) g_cu.conn.stats.datagrams_sent, (unsigned long long) g_cu.conn.stats.datagrams_received,
            (unsigned long long) g_cu.conn.stats.segments_resent, knet_conn_rtt_ms(&g_cu.conn));
     g_cu.active = 0;

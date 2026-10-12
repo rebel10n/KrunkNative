@@ -24,7 +24,9 @@
 #include <GLFW/glfw3.h>
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
+#include <backend_ui.h> // WP-E part 2c: state.account
 #include <app_mode.h> // state.page: hub / editor / viewer pages
+#include <debug_capture.h> // state.pageActions calls with arguments
 #include <html_ui.h>
 #include <html_dom.h>
 #include <png_write.h>
@@ -46,6 +48,10 @@
 #include <process.h>
 #endif
 #include "../html/engine/engine.h"
+#include <gltf.h> // gltf_set_clock_override: animated GLTF items follow the pinned clock
+#include <spectate.h> // state.spectate
+#include <hud_map.h>  // state.customMap (the minimap of custom-map games)
+#include <backend_ui.h> // store_skin_preview: killcard player card banners
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -92,6 +98,7 @@ typedef struct {
     char out[1024];
     int w, h, frames;
     double anim_time_s;
+    double after_ms;      // state.after_ms > 0: capture exactly this long after the state was applied
     int preview;
 
     int bg_is_color;
@@ -219,7 +226,8 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
-        "clientChrome",
+        "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
+        "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -271,6 +279,9 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     warn_unknown_keys();
     g_sc.anim_time_s = obj_num(g_sc.state, "anim_time", 0.0);
     if (g_sc.anim_time_s < 0.0) g_sc.anim_time_s = 0.0;
+    // one-shot animations (the death screen's 1.5 s slide-in): the reference was taken a fixed
+    // time after the event, so the capture follows the state by that much instead of the cycle
+    g_sc.after_ms = obj_num(g_sc.state, "after_ms", 0.0);
     g_sc.preview = st_bool("preview", 0);
 
     // background: "#rrggbb" or an image path; default opaque black
@@ -295,8 +306,13 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     // `client_bin <map.json>` (the map list becomes [that map] + the rotation). Without
     // it the client keeps its default rotation list (what the host/games windows show)
     // and the seeded RNG below makes its random map pick repeatable.
+    // state.mapFile (part 2a): an explicit map JSON under assets/ ("maps/v7/kanji.json": v7's own
+    // Kanji, the map v7's references load) instead of the mapName lookup
     const char *map_name = st_str("mapName");
-    if (map_name && map_name[0] && !find_map(map_name, g_sc.map_path, sizeof(g_sc.map_path))) {
+    const char *map_file = st_str("mapFile");
+    if (map_file && map_file[0]) {
+        snprintf(g_sc.map_path, sizeof(g_sc.map_path), "%s%s", assets, map_file);
+    } else if (map_name && map_name[0] && !find_map(map_name, g_sc.map_path, sizeof(g_sc.map_path))) {
         fprintf(stderr, "[scenario] warning: no map named '%s' in %smaps, using the rotation\n", map_name, assets);
         g_sc.map_path[0] = 0;
     }
@@ -472,6 +488,7 @@ static void scenario_frame(Client *client, const double clock_ms, const int pres
     g_sc.clock_ms = clock_ms;
     engine_set_clock_override(clock_ms);
     hud_ui_set_clock(clock_ms / 1000.0);
+    gltf_set_clock_override(clock_ms / 1000.0);
     const double now_s = clock_ms / 1000.0;
     double delta = now_s - g_sc.last_now_s;
     if (delta <= 0.0) delta = SCENARIO_FRAME_MS / 1000.0;
@@ -495,6 +512,34 @@ static int spawned(const Client *c) {
     return c->in_game && c->me && c->me->active;
 }
 
+static void run_frames(Client *client, int n);
+
+static int spectating(const Client *c) {
+    return c->in_game && spectate_active();
+}
+
+// state.pose [x, y, z, yaw, pitch]: the input script's `pose` (the player at rest there, the
+// offline sandbox server's player too), so position-dependent HUD parts (minimap) repeat.
+static void apply_pose(Client *client) {
+    const cJSON *pose = st("pose");
+    if (!cJSON_IsArray(pose) || cJSON_GetArraySize(pose) < 5 || !client->me) return;
+    double v[5];
+    for (int i = 0; i < 5; i++) v[i] = cJSON_GetNumberValue(cJSON_GetArrayItem(pose, i));
+    if (client->offline) {
+        const NetTeleportPacket tp = {(float) v[0], (float) v[1] + client->me->height, (float) v[2]};
+        client_net_send(client, NET_PACKET_TELEPORT, &tp, sizeof(tp));
+    }
+    // held while the server's teleport comes back (its corrections would move the view)
+    for (int i = 0; i < 30 && client->me; i++) {
+        Player *me = client->me;
+        me->position = (vec3) {(float) v[0], (float) v[1], (float) v[2]};
+        me->last_position = me->position;
+        me->velocity = (vec3) {0};
+        me->direction = (vec2) {(float) v[4], (float) v[3]};
+        run_frames(client, 1);
+    }
+}
+
 // Runs frames until `done(client)` (or the frame / wall-clock cap). Returns 1 when done.
 static int run_until(Client *client, int (*done)(const Client*), const int max_frames, const char *what) {
     const double wall0 = glfwGetTime();
@@ -514,8 +559,9 @@ static void run_frames(Client *client, const int n) {
 
 /* ------------------------------------------------------------ state */
 
-// state.window -> MenuUi window id. Scenario ids are showWindow(N) ids except 0, which
-// is windows[0] (settings; showWindow(1) in Krunker and menu_ui.c).
+// state.window -> MenuUi window id. Scenario ids are v7.1.4 showWindow(N) ids except 0, which
+// is windows[0] (settings; showWindow(1) in Krunker and menu_ui.c); "host" = 8 (Host Custom
+// Game), "join" = 24.
 static int scenario_window_id(const cJSON *window, int *id) {
     if (cJSON_IsNumber(window)) {
         *id = window->valueint == 0 ? 1 : window->valueint;
@@ -533,9 +579,42 @@ static int scenario_window_id(const cJSON *window, int *id) {
     return 0;
 }
 
-static void apply_window(void) {
+// state.windowActions: inline-handler calls dispatched once the window is open, as the
+// window's own markup would (["windows.2.switchTab", 0], ["windows.6.switchTab", 2], ...):
+// each entry is [name, args...] with number / string / bool arguments.
+static void apply_window_actions(Client *client) {
+    const cJSON *actions = st("windowActions");
+    const cJSON *action;
+    cJSON_ArrayForEach(action, actions) {
+        const cJSON *name = cJSON_IsArray(action) ? cJSON_GetArrayItem(action, 0) : action;
+        if (!cJSON_IsString(name)) continue;
+        HtmlArg args[8];
+        int argc = 0;
+        for (const cJSON *a = cJSON_IsArray(action) ? name->next : NULL; a && argc < 8; a = a->next) {
+            HtmlArg *arg = &args[argc++];
+            memset(arg, 0, sizeof(*arg));
+            if (cJSON_IsNumber(a)) { arg->kind = HTML_ARG_NUM; arg->num = a->valuedouble; }
+            else if (cJSON_IsBool(a)) { arg->kind = HTML_ARG_BOOL; arg->num = cJSON_IsTrue(a); }
+            else { arg->kind = HTML_ARG_STR; arg->str = cJSON_IsString(a) ? a->valuestring : ""; }
+        }
+        HtmlEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = "click";
+        ev.value = "";
+        html_ui_dispatch(name->valuestring, &ev, argc ? args : NULL, argc);
+        run_frames(client, 2);
+    }
+}
+
+static void apply_window(Client *client) {
     int id;
     if (!scenario_window_id(st("window"), &id)) return;
+    if (id == 1) {
+        // windows[0].settingType: "basic" (v7's default) or "advanced" (state.settingsView)
+        const char *view = st_str("settingsView");
+        if (view) menu_ui()->settings_view = !strcmp(view, "advanced");
+        else if (st_has("settingsView")) menu_ui()->settings_view = st_int("settingsView", 0) != 0;
+    }
     if (id == 1 && st_has("settingsTab")) {
         // windows[0].changeTab(N): the page's own handler (stores the tab, opens settings)
         const HtmlArg arg = {HTML_ARG_NUM, (double) st_int("settingsTab", 0), NULL};
@@ -545,9 +624,10 @@ static void apply_window(void) {
         ev.value = "";
         html_ui_dispatch("windows.0.changeTab", &ev, &arg, 1);
         if (menu_ui()->active_window != 1) menu_show_window(1, 1);
-        return;
+    } else {
+        menu_show_window(id, 1);
     }
-    menu_show_window(id, 1);
+    apply_window_actions(client);
 }
 
 // connected/ready: the `connect` + `state` net fields that drive #instructions and the
@@ -596,6 +676,31 @@ static void apply_killcard(Client *client) {
         card.level = (int) obj_num(kc, "level", 1);
         card.score = (int) obj_num(kc, "score", 0);
         card.class_index = (int) obj_num(kc, "classIndex", 0);
+        // v7 death screen: weaponIcon / myLevel and the life's stats [timeAlive ms, shots, "acc%", kills, score]
+        card.weapon_icon = obj_str(kc, "weaponIcon");
+        card.my_level = (int) obj_num(kc, "myLevel", 0);
+        // part 2a: the killer's player card stat ["KDR", "2.50"], banners (store.skins indices of
+        // player cards: Game.store.skins[playerCardIndex].thumbnail) and the report prompt
+        const cJSON *pc = cJSON_GetObjectItemCaseSensitive(kc, "pcStat");
+        if (cJSON_IsArray(pc) && cJSON_GetArraySize(pc) >= 2) {
+            card.pc_stat_name = cJSON_GetStringValue(cJSON_GetArrayItem(pc, 0));
+            card.pc_stat_value = cJSON_GetStringValue(cJSON_GetArrayItem(pc, 1));
+        }
+        static char killer_card[256], my_card[256];
+        const cJSON *kcard = cJSON_GetObjectItemCaseSensitive(kc, "killerCard"), *mcard = cJSON_GetObjectItemCaseSensitive(kc, "myCard");
+        if (cJSON_IsNumber(kcard)) { store_skin_preview(kcard->valueint, killer_card, sizeof(killer_card)); card.killer_card_url = killer_card; }
+        if (cJSON_IsNumber(mcard)) { store_skin_preview(mcard->valueint, my_card, sizeof(my_card)); card.my_card_url = my_card; }
+        card.report = (int) obj_num(kc, "report", 0);
+        card.weapon_color = obj_str(kc, "weaponColor");
+        const cJSON *stats = cJSON_GetObjectItemCaseSensitive(kc, "stats");
+        if (cJSON_IsArray(stats) && cJSON_GetArraySize(stats) >= 5) {
+            card.stats = 1;
+            card.time_alive_ms = cJSON_GetArrayItem(stats, 0)->valueint;
+            card.shots = cJSON_GetArrayItem(stats, 1)->valueint;
+            card.accuracy = cJSON_GetStringValue(cJSON_GetArrayItem(stats, 2));
+            card.kills = cJSON_GetArrayItem(stats, 3)->valueint;
+            card.life_score = cJSON_GetArrayItem(stats, 4)->valueint;
+        }
     }
     hud_ui_show_death(client, cJSON_IsObject(kc) ? &card : NULL);
 }
@@ -631,7 +736,8 @@ static void apply_timed(Client *client, const double capture_ms) {
 
 // state.page ("hub" | "editor" | "viewer") + state.pageQuery: show that page (app_mode.h)
 // like `client_bin --hub "<query>"`; state.pageActions: handler names dispatched once the
-// page is up (e.g. "openSettings", "loginPopup"), as the page's inline handlers would.
+// page is up (e.g. "openSettings", "loginPopup"), or calls with literal arguments
+// ("showWindow(3)"), as the page's inline handlers would.
 static int page_entered(const Client *c) {
     (void) c;
     return app_mode() != APP_MODE_GAME && html_ui_is_ready();
@@ -655,8 +761,12 @@ static int apply_page(Client *client) {
     const cJSON *action;
     cJSON_ArrayForEach(action, actions) {
         if (!cJSON_IsString(action)) continue;
-        HtmlEvent ev = {.type = "click", .value = ""};
-        html_ui_dispatch(action->valuestring, &ev, NULL, 0);
+        if (strchr(action->valuestring, '(')) {
+            debug_capture_dispatch(action->valuestring); // "showWindow(3)": a call with arguments
+        } else {
+            HtmlEvent ev = {.type = "click", .value = ""};
+            html_ui_dispatch(action->valuestring, &ev, NULL, 0);
+        }
         run_frames(client, 2);
     }
     return 1;
@@ -681,12 +791,23 @@ static int ui_scenario_apply(Client *client) {
     const cJSON *board = st("scoreboard");
     if (cJSON_IsArray(board)) hud_ui_set_override_scoreboard(board);
 
+    // v7's reference captures load Kanji as a custom map (customsData): no minimap unless the
+    // scenario says otherwise (WP-E part 2a, client/src/ui/hud_map.c)
+    hud_minimap_set_custom_override(st_bool("customMap", 1));
     if (in_game) {
-        // what `play` does: close the menu, ENT -> SPAWN through the local server
+        // what `play` does: close the menu, ENT -> SPAWN through the local server (or, with
+        // state.spectate, the spectate toggle on: ENT spectate -> SPECTATE)
+        const int spectate = st_bool("spectate", 0);
+        if (spectate) spectate_set_requested(1);
         client_set_menu_open(client, 0);
         client_enter_game(client);
         client->menu_lock_grace_until = 1e18; // a hidden window never holds the pointer lock
-        if (!run_until(client, spawned, SCENARIO_SPAWN_MAX_FRAMES, "the local player to spawn")) return 0;
+        if (spectate) {
+            if (!run_until(client, spectating, SCENARIO_SPAWN_MAX_FRAMES, "spectating")) return 0;
+        } else if (!run_until(client, spawned, SCENARIO_SPAWN_MAX_FRAMES, "the local player to spawn")) {
+            return 0;
+        }
+        apply_pose(client);
         run_frames(client, 2); // HUD visible + first value write (session edge seeds chat)
         apply_chat();
     }
@@ -695,7 +816,8 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open != html_ui_is_menu_open()) client_set_menu_open(client, menu_open);
     if (in_game) client->menu_lock_grace_until = 1e18;
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
-    if (menu_open) apply_window();
+    account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
+    if (menu_open) apply_window(client);
 
     run_frames(client, 2);
     apply_killcard(client);
@@ -756,6 +878,7 @@ int ui_scenario_run(Client *client) {
     scenario_frame(client, 0.0, 1);
     if (!run_until(client, boot_done, SCENARIO_BOOT_MAX_FRAMES, "the page, map and local server")) return 1;
     if (!ui_scenario_apply(client)) return 1;
+    const double applied_ms = g_sc.clock_ms;
     run_frames(client, SCENARIO_SETTLE_FRAMES);
 
     // capture clock: the first k * cycle + anim_time after the settle frames, reached by
@@ -763,7 +886,8 @@ int ui_scenario_run(Client *client) {
     const double anim_ms = g_sc.anim_time_s * 1000.0;
     const double earliest = g_sc.clock_ms + (double) g_sc.frames * SCENARIO_FRAME_MS;
     const double k = ceil((earliest - anim_ms) / SCENARIO_ANIM_CYCLE_MS);
-    const double capture_ms = (k > 0.0 ? k : 0.0) * SCENARIO_ANIM_CYCLE_MS + anim_ms;
+    double capture_ms = (k > 0.0 ? k : 0.0) * SCENARIO_ANIM_CYCLE_MS + anim_ms;
+    if (g_sc.after_ms > 0.0 && applied_ms + g_sc.after_ms >= earliest) capture_ms = applied_ms + g_sc.after_ms;
     const double first_ms = capture_ms - (double) (g_sc.frames - 1) * SCENARIO_FRAME_MS;
 
     g_sc.clock_ms = first_ms - SCENARIO_FRAME_MS; // timed state is applied one frame before the first
@@ -787,4 +911,24 @@ int ui_scenario_run(Client *client) {
     return ok ? 0 : 1;
 }
 
+#elif !defined(__EMSCRIPTEN__)
+// KRUNKNATIVE_HTML_ENGINE=OFF: no page to render, so no scenario is ever active (ui_logic.h
+// still declares the API for the native callers).
+#include <ui_logic.h>
+#include <stdio.h>
+
+int ui_scenario_begin(const char *scenario_path, const char *out_png) {
+    (void) out_png;
+    fprintf(stderr, "[scenario] %s: this client was built without the HTML engine\n", scenario_path ? scenario_path : "");
+    return 0;
+}
+int ui_scenario_active(void) { return 0; }
+int ui_scenario_client_chrome(void) { return 0; }
+void ui_scenario_window_size(int *w, int *h) { (void) w; (void) h; }
+const char *ui_scenario_map_path(void) { return NULL; }
+int ui_scenario_run(Client *client) { (void) client; return 1; }
+void ui_scenario_end(void) {}
+void ui_scenario_draw_background(void) {}
+int ui_scenario_draws_preview(void) { return 0; }
+void ui_scenario_preview_backdrop(Client *client) { (void) client; }
 #endif // KRUNKNATIVE_HTML_ENGINE && !__EMSCRIPTEN__

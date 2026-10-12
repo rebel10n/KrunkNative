@@ -1,0 +1,6 @@
+max 1048576
+!RUNTIME ERROR: Invalid string length
+max 1000000
+!RUNTIME ERROR: Invalid array length
+alive
+!RUNTIME ERROR: Out of memory.

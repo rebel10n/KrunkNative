@@ -15,15 +15,33 @@
 // Text is drawn with textBaseline "middle" + textAlign "center" at (left %, top % or px);
 // a `shadow` strokes the text black with lineWidth = shadow at +1 px x first.
 // main.css sets `* { color: #353535 }`: every text element gets its color itself.
+//
+// player-viewer WP-E part 2a: Krunker v7.1.4 medals (index.js io_addMedal / f2009,
+// game-overlay.js animateMedalNew + medalPrefab). A medal whose name is in
+// overlay.medalsList (56 names) is an icon medal: img/medals/badge_0 behind
+// img/medals/medal_<index>.png, the name, "+score" and an "x<count>" when the same medal
+// repeats while it is up (or queued); sound medal_<snd> at 0.08 with playMedals. Other texts
+// (trigger popups, "Purchased", "KR Claimed", ...) and every medal with classicMedals keep the
+// banner (animateMedal on chalName). config.medalAnim is 1800 ms in v7 (1000 in v3.1.1), and
+// medals are not shown in competitive games. Settings: showMedals, classicMedals, playMedals,
+// medalScale, medalOffX / medalOffY (x 10 %), medalSat / medalHue (a CSS filter on the medal,
+// settings.js bundleMedalFilters). v7's "am" sends [index, score, sound, count]; KrunkNative's
+// medal packets carry the name, which maps to the same index, and every v7 medal plays sound
+// medal_0. Documented difference: v7 queues a new medal with count 1 whatever count it came
+// with (io_addMedal pushes [.., 1]); KrunkNative keeps the count.
 #include <ui_logic.h>
 #include <html_dom.h>
 #include <html_ui.h>
 #include <render_settings.h>
+#include <audio.h>
+#include <cJSON.h>
+#include <progression.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 #define POPUP_DELTA_MAX_MS 33.0     // config.dltMx = round(1000 / 30)
-#define MEDAL_ANIM_MS 1000.0        // config.medalAnim
+#define MEDAL_ANIM_MS 1800.0        // config.medalAnim (v7.1.4; 1000 in v3.1.1)
 #define MEDAL_DELAY_MS 900.0        // config.medalDelay
 #define ASSIST_SCORE 25             // config.assistScore
 #define MEDAL_QUEUE_MAX 64          // name/score pairs waiting (gj)
@@ -68,7 +86,10 @@ static int g_score_total;            // bN: accumulated while the "+N" is up
 static struct {
     char text[TRIGGER_TEXT_MAX + 1]; // medal names, trigger popup texts
     int score;
-} g_medals[MEDAL_QUEUE_MAX];         // gj (as pairs)
+    int index;                       // overlay.medalsList index, -1 = a text (classic banner only)
+    int sound;                       // medal_<sound>
+    int count;
+} g_medals[MEDAL_QUEUE_MAX];         // vA651: [name / index, score, sound, count]
 static int g_medal_count;
 static double g_last_ms = -1.0;
 
@@ -265,10 +286,75 @@ void hud_popups_checkpoint(void) {
     popup_animate_text(&g_check, "Checkpoint!", 75.0, 0.38, 1100.0, 100.0, 0.0, NULL); // ab.t("popup.checkpoint")
 }
 
+// overlay.medalsList (game-overlay.js:141): the icon medals, img/medals/medal_<index>.png
+// (shared/src/progression.c: the game counts the same names for the end screen, WP-E part 2c)
+#define MEDALS g_progression_medals
+#define MEDAL_COUNT PROGRESSION_MEDAL_COUNT
+
+static int medal_index(const char *name) {
+    for (int i = 0; i < MEDAL_COUNT; i++)
+        if (!strcmp(MEDALS[i], name)) return i;
+    return -1;
+}
+
+static int g_comp;   // Game.isComp: no medals
+
+static int setting_on(const char *key, const int fallback) {
+    const cJSON *v = ui_setting_value(key);
+    if (cJSON_IsBool(v)) return cJSON_IsTrue(v);
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0.0;
+    if (cJSON_IsString(v) && v->valuestring) return !strcmp(v->valuestring, "true");
+    return fallback;
+}
+
+static double setting_num(const char *key, const double fallback) {
+    double v;
+    return ui_setting_number(key, &v) ? v : fallback;
+}
+
+// overlay.medalPrefab (an icon medal on the overlay canvas, drawn by the divs loop)
+static struct {
+    int in_divs, display, index, count, sound;
+    double life, fade, opacity, delay, zoom;
+    char name[48], score[32];
+    PopupCallback callback;
+    HtmlElem el, badge, icon, name_el, score_el, count_el;
+    int shown;
+    char last[256];
+} g_icon = {.index = -1};
+
+static void medal_sound(const int sound) {
+    if (!setting_on("playMedals", 1)) return; // medalPrefab.sound
+    char name[24];
+    snprintf(name, sizeof(name), "medal_%d", sound > 0 ? sound : 0);
+    audio_play(name, 0.08f, 0, 1.0f);
+}
+
+// animateMedalNew(prefab, index, score, sound, count, life, fade, delay, callback)
+static void medal_animate_icon(const int index, const char *score, const int sound, const int count, const double life,
+                               const double fade, const double delay, const PopupCallback callback) {
+    g_icon.in_divs = 1;
+    g_icon.delay = delay;
+    if (!delay) g_icon.display = 1;
+    snprintf(g_icon.score, sizeof(g_icon.score), "%s", score ? score : "");
+    upper(g_icon.score);
+    snprintf(g_icon.name, sizeof(g_icon.name), "%s", MEDALS[index]);
+    upper(g_icon.name);
+    g_icon.index = index;
+    g_icon.zoom = 1.5;
+    g_icon.life = life;
+    g_icon.fade = fade;
+    g_icon.sound = sound;
+    g_icon.opacity = 1.0;
+    g_icon.count = count > 0 ? count : 1;
+    g_icon.callback = callback;
+    if (!delay) medal_sound(sound);
+}
+
 static void medal_show(double delay);
 
 static void medal_done(void) {
-    // gj.splice(0, 2); showMedal(0)
+    // vA651.splice(0, 1); f2009(0)
     if (g_medal_count > 0) {
         memmove(&g_medals[0], &g_medals[1], (size_t) (g_medal_count - 1) * sizeof(g_medals[0]));
         g_medal_count--;
@@ -276,41 +362,219 @@ static void medal_done(void) {
     medal_show(0.0);
 }
 
-// showMedal(delay): only while showMedals is on; like v3.1.1 the queue is then left as it
-// is (and later medals only queue up behind it until the next spawn clears it).
+// f2009(delay): only while showMedals is on (except the "Reward" / "Spent" texts); like v7
+// the queue is then left as it is (later medals queue up behind it until the next spawn).
 static void medal_show(const double delay) {
-    if (!client_render_settings()->show_medals || g_medal_count <= 0) return;
+    if (g_medal_count <= 0) return;
+    if (!client_render_settings()->show_medals && strcmp(g_medals[0].text, "Reward") && strcmp(g_medals[0].text, "Spent")) return;
     char text2[24] = "";
-    if (g_medals[0].score) snprintf(text2, sizeof(text2), "+%d", g_medals[0].score);
+    if (g_medals[0].score) snprintf(text2, sizeof(text2), "%s%d", g_medals[0].score > 0 ? "+" : "", g_medals[0].score);
+    if (!setting_on("classicMedals", 0) && g_medals[0].index >= 0) {
+        medal_animate_icon(g_medals[0].index, text2[0] ? text2 : NULL, g_medals[0].sound, g_medals[0].count, MEDAL_ANIM_MS, 50.0,
+                           delay, medal_done);
+        return;
+    }
     popup_animate_div(&g_medal, g_medals[0].text, text2[0] ? text2 : NULL, 130.0, 0.4, MEDAL_ANIM_MS, 100.0, delay, medal_done);
 }
 
-// gm(list): queue the named pairs ("" names and their scores are skipped); the first
-// medal of an empty queue waits config.medalDelay.
+// io_addMedal: one medal (name, score, sound, count); an icon medal already up gains the count
+// and its full life again, a queued one its count.
+static void medal_add(const char *text, const int score, const int sound, const int count) {
+    if (!text || !text[0]) return;
+    const int index = medal_index(text);
+    const int c = count > 0 ? count : 1;
+    if (!setting_on("classicMedals", 0) && index >= 0) {
+        if (g_icon.in_divs && g_icon.index == index) {
+            g_icon.count += c;
+            g_icon.life = MEDAL_ANIM_MS;
+            return;
+        }
+        for (int i = 0; i < g_medal_count; i++) {
+            if (g_medals[i].index == index) {
+                g_medals[i].count += c;
+                return;
+            }
+        }
+    }
+    if (g_medal_count >= MEDAL_QUEUE_MAX) return;
+    snprintf(g_medals[g_medal_count].text, sizeof(g_medals[0].text), "%s", text);
+    g_medals[g_medal_count].score = score;
+    g_medals[g_medal_count].index = index;
+    g_medals[g_medal_count].sound = sound;
+    g_medals[g_medal_count].count = c; // v7 pushes 1 here (documented above)
+    g_medal_count++;
+}
+
+// io_addMedal(list): not in competitive games; the first medal of an empty queue waits
+// config.medalDelay.
 void hud_popups_medals(const NetMedalPacket *medals, const int count) {
+    if (g_comp) return;
     const int was_empty = g_medal_count == 0;
     for (int i = 0; i < count; i++) {
-        if (!medals[i].text[0] || g_medal_count >= MEDAL_QUEUE_MAX) continue;
-        snprintf(g_medals[g_medal_count].text, sizeof(g_medals[0].text), "%.*s", (int) sizeof(medals[i].text) - 1, medals[i].text);
-        g_medals[g_medal_count].score = medals[i].score;
-        g_medal_count++;
+        char text[sizeof(medals[i].text) + 1];
+        snprintf(text, sizeof(text), "%.*s", (int) sizeof(medals[i].text), medals[i].text);
+        medal_add(text, medals[i].score, 0, 1);
     }
     if (was_empty) medal_show(MEDAL_DELAY_MS);
 }
 
 // "am" [text, null] of a Broadcast / Send Popup trigger: one medal without score.
 void hud_popups_medal_text(const char *text) {
-    if (!text || !text[0] || g_medal_count >= MEDAL_QUEUE_MAX) return;
+    if (g_comp || !text || !text[0]) return;
     const int was_empty = g_medal_count == 0;
-    snprintf(g_medals[g_medal_count].text, sizeof(g_medals[0].text), "%s", text);
-    g_medals[g_medal_count].score = 0;
-    g_medal_count++;
+    medal_add(text, 0, 0, 1);
     if (was_empty) medal_show(MEDAL_DELAY_MS);
 }
 
 void hud_popups_assist(void) {
-    const NetMedalPacket assist = {.text = "Assist", .score = ASSIST_SCORE}; // gl(): ["Assist", config.assistScore]
+    const NetMedalPacket assist = {.text = "Assist", .score = ASSIST_SCORE}; // io_getAssist: [31, config.assistScore, 0, 1]
     hud_popups_medals(&assist, 1);
+}
+
+void hud_popups_set_comp(const int comp) { g_comp = !!comp; }
+
+/* ------------------------------------------------------------ icon medal DOM */
+
+static HtmlElem medal_text_el(const HtmlElem parent) {
+    const HtmlElem el = popup_text_el(parent);
+    html_dom_set_style(el, "transform", "translate(-50%, -75%)"); // textAlign centred by hand, alphabetic baseline
+    html_dom_set_style(el, "text-shadow", "1.5px 0 #000, -1.5px 0 #000, 0 1.5px #000, 0 -1.5px #000, "
+                                          "1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000"); // strokeText, lineWidth 3
+    return el;
+}
+
+static HtmlElem medal_icon_element(void) {
+    if (g_icon.el) return g_icon.el;
+    const HtmlElem host = html_dom_by_id("inGameUI");
+    if (!host) return 0;
+    const HtmlElem el = html_dom_create("div", "knMedal");
+    html_dom_set_style(el, "position", "absolute");
+    html_dom_set_style(el, "width", "0");
+    html_dom_set_style(el, "height", "0");
+    html_dom_set_style(el, "pointer-events", "none");
+    html_dom_set_style(el, "z-index", "1001");
+    html_dom_set_display(el, "none");
+    g_icon.badge = html_dom_create("img", NULL);
+    html_dom_set_attr(g_icon.badge, "src", "./img/medals/badge_0.svg");
+    html_dom_set_style(g_icon.badge, "position", "absolute");
+    html_dom_append(el, g_icon.badge);
+    g_icon.icon = html_dom_create("img", NULL);
+    html_dom_set_style(g_icon.icon, "position", "absolute");
+    html_dom_append(el, g_icon.icon);
+    g_icon.name_el = medal_text_el(el);
+    html_dom_set_style(g_icon.name_el, "color", "#fff");
+    g_icon.score_el = medal_text_el(el);
+    g_icon.count_el = medal_text_el(el);
+    html_dom_append(host, el);
+    g_icon.el = el;
+    g_icon.shown = 0;
+    g_icon.last[0] = 0;
+    return el;
+}
+
+// The medal branch of the divs loop: the badge ((size + 10) * z + 2 * border), the icon
+// (0.65 * size * z, offset (0, -5)), the name at size * z / 2 + marginName * scale, the score
+// at + marginScore * scale and "x<count>" right of the centre (marginCount * scale), all at
+// medalOffX * 10 % / medalOffY * 10 % with z = zoom * medalScale.
+static void medal_icon_render(const int visible) {
+    const int show = visible && g_icon.in_divs && g_icon.life >= 0.0 && g_icon.display;
+    if (!show) {
+        if (g_icon.el && g_icon.shown) html_dom_set_display(g_icon.el, "none");
+        g_icon.shown = 0;
+        return;
+    }
+    if (!medal_icon_element()) return;
+    const double scale = setting_num("medalScale", 1.0);
+    const double z = g_icon.zoom * scale, size = 130.0, border = 7.0;
+    const double left = setting_num("medalOffX", 5.0) * 10.0, top = setting_num("medalOffY", 1.0) * 10.0;
+    const double sat = setting_num("medalSat", 1.0), hue = setting_num("medalHue", 0.0);
+    char filter[96] = "none";
+    if (sat != 1.0 && hue != 0.0) snprintf(filter, sizeof(filter), "saturate(%g%%) hue-rotate(%gdeg)", sat * 100.0, hue * 3.6);
+    else if (sat != 1.0) snprintf(filter, sizeof(filter), "saturate(%g%%)", sat * 100.0);
+    else if (hue != 0.0) snprintf(filter, sizeof(filter), "hue-rotate(%gdeg)", hue * 3.6);
+    char key[256];
+    snprintf(key, sizeof(key), "%.4f|%.4f|%g|%g|%s|%d|%s|%s|%d|%s", z, g_icon.opacity, left, top, filter, g_icon.index, g_icon.name,
+             g_icon.score, g_icon.count, client_render_settings()->popup_score_color);
+    if (g_icon.shown && !strcmp(key, g_icon.last)) return;
+    snprintf(g_icon.last, sizeof(g_icon.last), "%s", key);
+    char v[64];
+    snprintf(v, sizeof(v), "%g%%", left);
+    html_dom_set_style(g_icon.el, "left", v);
+    snprintf(v, sizeof(v), "%g%%", top);
+    html_dom_set_style(g_icon.el, "top", v);
+    snprintf(v, sizeof(v), "%.4f", g_icon.opacity);
+    html_dom_set_style(g_icon.el, "opacity", v);
+    html_dom_set_style(g_icon.el, "filter", filter);
+    const double bs = (size + 10.0) * z + border * 2.0;
+    snprintf(v, sizeof(v), "%.2fpx", -bs / 2.0);
+    html_dom_set_style(g_icon.badge, "left", v);
+    html_dom_set_style(g_icon.badge, "top", v);
+    snprintf(v, sizeof(v), "%.2fpx", bs);
+    html_dom_set_style(g_icon.badge, "width", v);
+    html_dom_set_style(g_icon.badge, "height", v);
+    const double is = size * 0.65 * z;
+    snprintf(v, sizeof(v), "./img/medals/medal_%d.png", g_icon.index);
+    html_dom_set_attr(g_icon.icon, "src", v);
+    snprintf(v, sizeof(v), "%.2fpx", -is / 2.0);
+    html_dom_set_style(g_icon.icon, "left", v);
+    snprintf(v, sizeof(v), "%.2fpx", -is / 2.0 - 5.0);
+    html_dom_set_style(g_icon.icon, "top", v);
+    snprintf(v, sizeof(v), "%.2fpx", is);
+    html_dom_set_style(g_icon.icon, "width", v);
+    html_dom_set_style(g_icon.icon, "height", v);
+    const char *score_color = g_score.color; // vVO311.scoreText.color
+    snprintf(v, sizeof(v), "%.2fpx", z * 20.0);
+    html_dom_set_style(g_icon.name_el, "font-size", v);
+    snprintf(v, sizeof(v), "%.2fpx", size * z / 2.0 + 40.0 * scale);
+    html_dom_set_style(g_icon.name_el, "top", v);
+    html_dom_set_text(g_icon.name_el, g_icon.name);
+    html_dom_set_display(g_icon.score_el, g_icon.score[0] ? "block" : "none");
+    if (g_icon.score[0]) {
+        snprintf(v, sizeof(v), "%.2fpx", z * 18.0);
+        html_dom_set_style(g_icon.score_el, "font-size", v);
+        snprintf(v, sizeof(v), "%.2fpx", size * z / 2.0 + 70.0 * scale);
+        html_dom_set_style(g_icon.score_el, "top", v);
+        html_dom_set_style(g_icon.score_el, "color", score_color);
+        html_dom_set_text(g_icon.score_el, g_icon.score);
+    }
+    html_dom_set_display(g_icon.count_el, g_icon.count > 1 ? "block" : "none");
+    if (g_icon.count > 1) {
+        snprintf(v, sizeof(v), "x%d", g_icon.count);
+        html_dom_set_text(g_icon.count_el, v);
+        snprintf(v, sizeof(v), "%.2fpx", z * 25.0);
+        html_dom_set_style(g_icon.count_el, "font-size", v);
+        snprintf(v, sizeof(v), "%.2fpx", 30.0 * scale);
+        html_dom_set_style(g_icon.count_el, "left", v);
+        snprintf(v, sizeof(v), "%.2fpx", size * z / 2.0);
+        html_dom_set_style(g_icon.count_el, "top", v);
+        html_dom_set_style(g_icon.count_el, "color", score_color);
+    }
+    if (!g_icon.shown) html_dom_set_display(g_icon.el, "block");
+    g_icon.shown = 1;
+}
+
+static void medal_icon_step(const double dt) {
+    if (!g_icon.in_divs) return;
+    if (g_icon.display) { // the draw shrinks the zoom: zoom -= zoomInc * delta / 16, down to 1
+        g_icon.zoom -= 0.06 * (dt / 16.0);
+        if (g_icon.zoom < 1.0) g_icon.zoom = 1.0;
+    }
+    if (g_icon.delay > 0.0) {
+        g_icon.delay -= dt;
+        if (g_icon.delay <= 0.0) {
+            g_icon.display = 1;
+            medal_sound(g_icon.sound);
+        }
+        return;
+    }
+    g_icon.life -= dt;
+    if (g_icon.life <= 0.0) {
+        g_icon.display = 0;
+        g_icon.in_divs = 0;
+        const PopupCallback callback = g_icon.callback;
+        if (callback) callback();
+    }
+    if (g_icon.fade && g_icon.life <= g_icon.fade) g_icon.opacity = g_icon.life / g_icon.fade;
 }
 
 // "start" (the local player spawns): gj.length = 0 and overlay.reset() (every popup hidden,
@@ -321,6 +585,8 @@ void hud_popups_on_spawn(void) {
         POPUPS[i]->display = 0;
         POPUPS[i]->in_divs = 0;
     }
+    g_icon.display = 0;
+    g_icon.in_divs = 0;
 }
 
 // "init" (a new game): bN = 0.
@@ -334,6 +600,8 @@ void hud_popups_page_reset(void) {
         POPUPS[i]->el = POPUPS[i]->text_el = POPUPS[i]->text2_el = POPUPS[i]->rect_el = 0;
         POPUPS[i]->shown = 0;
     }
+    g_icon.el = g_icon.badge = g_icon.icon = g_icon.name_el = g_icon.score_el = g_icon.count_el = 0;
+    g_icon.shown = 0;
     g_last_ms = -1.0;
 }
 
@@ -354,5 +622,7 @@ void hud_popups_tick(const double now_ms, const int visible) {
 
     // divs loop: draw, then step; from the end of the list (latest pushed first)
     for (int i = 0; i < POPUP_COUNT; i++) popup_render(POPUPS[i], visible);
+    medal_icon_render(visible);
+    medal_icon_step(dt);
     for (int i = POPUP_COUNT - 1; i >= 0; i--) popup_step(POPUPS[i], dt);
 }

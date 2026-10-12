@@ -1,0 +1,21 @@
+# API callbacks are new host entries (6.4): the stored action value survives GC (pinned by
+# the host), gets its own loop budget, and a runtime error in it is contained
+#! side server
+#! call start
+#! gc
+#! callback {} true "alice"
+#! callback {} false "bob"
+#! call update 16
+num loads = 0;
+action loaded(obj data, bool success, str account) {
+    loads += 1;
+    num n = 0;
+    while (n < 1000000) { n++; }
+    GAME.log("loaded", account, success, data, loads);
+    if (!success) { GAME.log(data.missing.field); }
+}
+public action start() {
+    GAME.STORAGE.load("alice", "", loaded);
+    GAME.log("requested");
+}
+public action update(num delta) { GAME.log("loads", loads); }

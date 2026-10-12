@@ -6,8 +6,8 @@
 #
 #   *-latest tags  rolling prerelease: assets replaced in place (--clobber), then the notes, then
 #                  the tag is moved to COMMIT. Only moves forward: when the published notes'
-#                  <!-- kn-build ... --> line has a newer commit_time than COMMIT_TIME (main lagging
-#                  slop), nothing is published (exit 0, a ::notice).
+#                  <!-- kn-build ... --> line has a newer commit_time than COMMIT_TIME (an older
+#                  commit), nothing is published (exit 0, a ::notice).
 #   other tags     the tag must exist (pushed by hand); the release is created once, later runs
 #                  replace its assets and notes.
 # Never marks a release "Latest" (v1.0.0 stays the repo's Latest release).

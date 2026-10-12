@@ -8,10 +8,16 @@
 //     spins, rides above its carrier (flagHOff) and hides with the carrier's model;
 //   106.js createSpawnable: Kill Confirmed tags are krunkie_0 models (noFog, emissive by
 //     team) that bob and spin the same way.
+// v7.1.4 (WP-D): objectives are shown by uid (setObjective), neutral flags (tm -1) are the only
+// flags of the oneflag modes and the only ones they ignore, every medals.js spawnable type has its
+// model (game.js createSpawnable: noAnim ones stay still), and DOMINATION_ZONEs (no map object)
+// get their objective_4 zone in Domination (resetDomZones: meshRef.visible = mode.dom).
 // Everything is created lazily for the current map + mode and removed on change.
 #include <gl.h>
 #include <mode_world.h>
 #include <hud_modes.h>
+#include <spawnables.h>
+#include <audio.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -31,10 +37,42 @@ typedef struct {
 
 typedef struct {
     Mesh *mesh;
+    Mesh *outline;           // loadMesh outlineMesh (medals.js outline), child of mesh
+    int sound;               // onSpawn play3DL("egg_0") voice, 0 none
     int sid;
+    int type;                // medals.js index the mesh was built for
     float bob;
     float spin;
 } ModeWorldTag;
+
+// map-logic WP-H (zombies power-up drops), medals.js per type: outline (the outline material + 1,
+// 0 none: materials 0 cyan 65535, 1 gold 13938487, 2 purple 11299257, a BackSide
+// MeshBasicMaterial copy of the model), outlineScale (|| 1.025), onSpawn vF85 (play3DL "egg_0"
+// 0.8 until the spawnable goes, onDestroy vF86), rotAxis "z" (getRotation [PI/2, 0, 0]).
+static const struct {
+    unsigned char outline;
+    float outline_scale;
+    unsigned char egg_sound:1;
+    unsigned char spin_z:1;
+} k_world_spawnables[SPAWNABLE_COUNT] = {
+    [SPAWNABLE_AMMO_PACK] = {1, 1.025f},
+    [SPAWNABLE_MELEE_PICKUP] = {1, 1.025f},
+    [SPAWNABLE_AMMO_CACHE] = {2, 1.1f, 1},
+    [SPAWNABLE_NUKE] = {2, 1.1f, 1, 1},
+    [SPAWNABLE_MINIGUN] = {2, 1.025f, 1},
+    [SPAWNABLE_INSTA_KILL] = {2, 1.1f, 1},
+    [SPAWNABLE_DISCOUNT] = {2, 1.1f, 1},
+    [SPAWNABLE_DOUBLE_POINTS] = {2, 1.1f, 1},
+    [SPAWNABLE_GRENADE_LAUNCHER] = {2, 1.025f, 1},
+    [SPAWNABLE_JOE_TAG] = {2, 1.025f, 1},
+    [SPAWNABLE_FROG] = {2, 1.025f, 1},
+    [SPAWNABLE_PERK_BOTTLE] = {2, 1.025f, 1},
+    [SPAWNABLE_ZOMBIE_PORTAL] = {0, 0.0f, 1},
+    [SPAWNABLE_FREE_UPGRADE] = {2, 1.025f, 1},
+    [SPAWNABLE_LOOT_DROP] = {1, 1.025f},
+};
+static const int k_world_outline_colors[3] = {65535, 13938487, 11299257};
+#define MODE_WORLD_MINIGUN_SCALE 0.0026568026773869323f // Minigun getScale()
 
 static struct {
     const Map *map;
@@ -43,10 +81,12 @@ static struct {
     int flag_count;
     ModeWorldFlag flags[MODE_MAX_FLAGS];
     ModeWorldTag tags[MODE_MAX_SPAWNABLES];
+    Mesh *dom_zones[MODE_MAX_DOM_ZONES];
     Geometry *zone_geometry;     // 4 side faces (addCube faces [1, 1, 0, 0, 1, 1])
     unsigned int zone_vbo;
     Geometry *crystal_geometry;
-    Geometry *tag_geometry;
+    Geometry *spawnable_geometry[SPAWNABLE_COUNT]; // medals.js models (loaded on first use)
+    unsigned char spawnable_missing[SPAWNABLE_COUNT];
     double last_time;
     int objective_shown;
 } g_world = {.mode_id = -1, .objective_shown = -2};
@@ -121,9 +161,15 @@ static Mesh *mode_world_mesh(Geometry *geometry, const unsigned int texture) {
 static void mode_world_drop_mesh(Mesh **mesh) {
     if (!*mesh) return;
     if (g_world.scene) scene_remove_mesh(g_world.scene, *mesh);
-    free((*mesh)->material);
-    mesh_fini(*mesh); // geometry is shared (kept)
+    mesh_fini(*mesh); // frees the material too (material_fini); geometry is shared (kept)
     *mesh = NULL;
+}
+
+static void mode_world_drop_tag(ModeWorldTag *tag) {
+    mode_world_drop_mesh(&tag->outline);
+    mode_world_drop_mesh(&tag->mesh);
+    if (tag->sound) audio_handle_stop(tag->sound); // onDestroy vF86: the egg_0 loop stops
+    tag->sound = 0;
 }
 
 static void mode_world_clear(void) {
@@ -131,7 +177,8 @@ static void mode_world_clear(void) {
         mode_world_drop_mesh(&g_world.flags[f].crystal);
         mode_world_drop_mesh(&g_world.flags[f].zone);
     }
-    for (int t = 0; t < MODE_MAX_SPAWNABLES; t++) mode_world_drop_mesh(&g_world.tags[t].mesh);
+    for (int t = 0; t < MODE_MAX_SPAWNABLES; t++) mode_world_drop_tag(&g_world.tags[t]);
+    for (int z = 0; z < MODE_MAX_DOM_ZONES; z++) mode_world_drop_mesh(&g_world.dom_zones[z]);
     g_world.flag_count = 0;
     g_world.map = NULL;
     g_world.mode_id = -1;
@@ -145,12 +192,32 @@ static void mode_world_build(Client *client) {
     g_world.mode_id = client->game.mode ? client->game.mode->config.id : -1;
 
     const GameMode *mode = client->game.mode;
-    if (!mode || !mode->config.flags || !client->scene) return;
+    if (!mode || !client->scene) return;
+
+    // Domination zones: objective_4 side faces, base at the zone's bottom
+    for (int z = 0; mode->config.dom && z < mode->dom_zone_count && z < MODE_MAX_DOM_ZONES; z++) {
+        const ModeDomZone *zone = &mode->dom_zones[z];
+        Mesh *mesh = mode_world_mesh(mode_world_zone_geometry(), mode_world_texture("objective_4"));
+        if (!mesh) continue;
+        BasicMaterial *material = (BasicMaterial *) mesh->material;
+        material->unlit = 1;
+        material->base.transparent = 1;
+        material->no_depth_write = 1;
+        material->double_sided = 1;
+        mesh->no_shadow_receive = 1;
+        mesh->transform.position = (vec3) {zone->position.x, zone->position.y - zone->half.y, zone->position.z};
+        mesh->transform.scale = (vec3) {zone->half.x * 2.0f, zone->half.y * 2.0f, zone->half.z * 2.0f};
+        scene_add_mesh(client->scene, mesh);
+        g_world.dom_zones[z] = mesh;
+    }
+
+    if (!mode->config.flags && !mode->config.oneflag) return;
 
     if (!g_world.crystal_geometry) g_world.crystal_geometry = mode_world_model("crystal_0");
 
     for (int f = 0; f < mode->flag_count && f < MODE_MAX_FLAGS; f++) {
         ModeWorldFlag *flag = &g_world.flags[f];
+        if (!mode->flags[f].active) continue; // resetFlags: the other kind of flag is hidden
         const vec3 origin = mode->flags[f].origin;
         const float ground = origin.y - MODE_FLAG_SCALE * 0.5f - MODE_FLAG_OFF;
 
@@ -212,8 +279,8 @@ static void mode_world_tick_flags(Client *client, const float delta_ms) {
             team = base->team;
         }
 
-        mode_world_flag_colors(flag, team, local_team);
         if (!flag->crystal) continue;
+        mode_world_flag_colors(flag, team, local_team);
 
         flag->crystal->visible = 1;
         if (carrier_uid >= 0) {
@@ -231,6 +298,18 @@ static void mode_world_tick_flags(Client *client, const float delta_ms) {
     }
 }
 
+static Geometry *mode_world_spawnable_geometry(const int type) {
+    if (type < 0 || type >= SPAWNABLE_COUNT || g_world.spawnable_missing[type]) return NULL;
+    if (!g_world.spawnable_geometry[type]) {
+        const SpawnableInfo *info = spawnable_info(type);
+        g_world.spawnable_geometry[type] = info && info->model ? mode_world_model(info->model) : NULL;
+        if (!g_world.spawnable_geometry[type]) g_world.spawnable_missing[type] = 1; // e.g. the Zombies models not in assets/
+    }
+    return g_world.spawnable_geometry[type];
+}
+
+// createSpawnable / updateSpawnables: the medals.js model at the spawnable, bobbing and spinning
+// unless noAnim; tags glow by team (spawnables[0/3].emissive).
 static void mode_world_tick_tags(Client *client, const float delta_ms) {
     if (!client->scene) return;
     const int local_team = client->me ? client->me->team : 0;
@@ -238,30 +317,58 @@ static void mode_world_tick_tags(Client *client, const float delta_ms) {
     for (int t = 0; t < MODE_MAX_SPAWNABLES; t++) {
         ModeWorldTag *tag = &g_world.tags[t];
         vec3 position;
-        int team = 0;
+        int team = 0, data_c = 0;
 
         if (!hud_modes_spawnable(t, &position, &team)) {
-            mode_world_drop_mesh(&tag->mesh);
+            mode_world_drop_tag(tag);
             continue;
         }
+        const int type = hud_modes_spawnable_type(t, &data_c);
+        const SpawnableInfo *info = spawnable_info(type);
+        if (!info) continue;
+        if (tag->mesh && tag->type != type) mode_world_drop_tag(tag);
 
         if (!tag->mesh) {
-            if (!g_world.tag_geometry) g_world.tag_geometry = mode_world_model("krunkie_0");
-            tag->mesh = mode_world_mesh(g_world.tag_geometry, mode_world_texture("krunkie_0"));
+            tag->mesh = mode_world_mesh(mode_world_spawnable_geometry(type), mode_world_texture(info->model));
             if (!tag->mesh) continue;
             tag->mesh->no_shadow_receive = 1;
-            tag->mesh->transform.scale = (vec3) {MODE_TAG_SCALE, MODE_TAG_SCALE, MODE_TAG_SCALE};
+            tag->type = type;
             tag->bob = 0.0f;
             tag->spin = 0.0f;
             scene_add_mesh(client->scene, tag->mesh);
+            if (k_world_spawnables[type].outline) { // outlineMesh: same geometry, BackSide, scaled about the model
+                BasicMaterial *material = basic_material_init();
+                if (material) {
+                    material->unlit = 1;
+                    material->double_sided = 0;
+                    material->cull_front = 1;
+                    material->fog_enabled = 0;
+                    material->color = hex_to_vec(k_world_outline_colors[k_world_spawnables[type].outline - 1]);
+                    tag->outline = mesh_init(tag->mesh->geometry, (Material *) material);
+                    const float k = k_world_spawnables[type].outline_scale;
+                    tag->outline->transform.parent = &tag->mesh->transform;
+                    tag->outline->transform.scale = (vec3) {k, k, k};
+                    tag->outline->no_shadow_receive = 1;
+                    scene_add_mesh(client->scene, tag->outline);
+                }
+            }
+            if (k_world_spawnables[type].egg_sound) tag->sound = audio_handle_play("egg_0", 0.8f, 1, 1.0f, 1, position, 0.0f, 0.0f);
         }
 
-        // spawnables[0].emissive(localPlayer, team)
-        ((BasicMaterial *) tag->mesh->material)->emissive = hex_to_vec(local_team && team == local_team ? MODE_WORLD_EMISSIVE_ENEMY : MODE_WORLD_EMISSIVE_ALLY);
-        tag->bob += delta_ms * 0.003f;
-        tag->spin += delta_ms * 0.002f;
-        tag->mesh->transform.position = (vec3) {position.x, position.y + cosf(tag->bob), position.z};
-        tag->mesh->transform.rotation = (vec3) {0.0f, tag->spin, 0.0f};
+        // getScale(data): KR Tags / Diamond Eggs grow with their count
+        const float scale = type == SPAWNABLE_KR_TAG || type == SPAWNABLE_DIAMOND_EGG ? info->scale + (float) (data_c ? data_c : 1) * 0.5f
+                          : type == SPAWNABLE_MINIGUN ? MODE_WORLD_MINIGUN_SCALE : info->scale;
+        tag->mesh->transform.scale = (vec3) {scale, scale, scale};
+        if (type == SPAWNABLE_TAG || type == SPAWNABLE_KR_TAG) {
+            ((BasicMaterial *) tag->mesh->material)->emissive = hex_to_vec(local_team && team == local_team ? MODE_WORLD_EMISSIVE_ENEMY : MODE_WORLD_EMISSIVE_ALLY);
+        }
+        if (!info->no_anim) {
+            tag->bob += delta_ms * 0.003f;
+            tag->spin += delta_ms * 0.002f;
+        }
+        tag->mesh->transform.position = (vec3) {position.x, position.y + (info->no_anim ? 0.0f : cosf(tag->bob)), position.z};
+        // rotAxis "z" (the Nuke): getRotation [PI/2, 0, 0], the spin on z
+        tag->mesh->transform.rotation = k_world_spawnables[type].spin_z ? (vec3) {(float) M_PI / 2.0f, 0.0f, tag->spin} : (vec3) {0.0f, tag->spin, 0.0f};
     }
 }
 
@@ -273,11 +380,13 @@ static void mode_world_tick_objectives(Client *client) {
     if (active == g_world.objective_shown || !map) return;
     g_world.objective_shown = active;
 
+    // v7: activeObjective is a uid; the OBJECTIVE objects are in mode->objectives' (file) order
     int index = 0;
     for (size_t i = 0; i < map->object_count; i++) {
         Object *object = map->objects[i];
         if (!object->objective) continue;
-        if (object->mesh) ((Mesh *) object->mesh)->visible = index == active;
+        const int uid = mode && index < mode->objective_count ? mode->objectives[index].uid : -1;
+        if (object->mesh) ((Mesh *) object->mesh)->visible = active >= 0 && uid == active;
         index++;
     }
 }

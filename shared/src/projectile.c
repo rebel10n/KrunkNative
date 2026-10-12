@@ -1,34 +1,23 @@
-// Server-authoritative projectiles: Krunker v3.1.1 src/data/projectile.js
+// Server-authoritative projectiles: Krunker v3.1.1 src/data/projectile.js, v7.1.4 projectiles.js
+// (charge-scaled shots, effects on hit, head / leg multipliers, v7 hitbox padding)
 // (flight, map/player collision, "pr"/"pre" packets) and game.explosion (splash
 // damage with linear falloff, 0.2x self damage). Krunker speeds are units per
 // millisecond; the simulation keeps those units and converts the tick delta.
 #include <shared.h>
+#include <world.h> // map-logic WP-B: PvP filter, terrain
 #include <ai.h>
 #include <math.h>
 #include <string.h>
 
-// weapons.js projectile blocks (the native Weapon struct does not carry them) and
-// projectiles.stored[0], the thrown knife.
-static const struct {
-    const char *weapon;
-    ProjectileConfig config;
-} g_projectile_configs[] = {
-    {"Rocket Launcher", {.speed = 0.72f, .gravity = 0.00008f, .range = 1500.0f, .damage = 50.0f, .explode = 35.0f, .explode_damage = 35.0f, .no_impact = 1}},
-    {"Crossbow", {.speed = 0.68f, .gravity = 0.0f, .range = 1500.0f, .damage = 200.0f}},
-    {"Blaster", {.speed = 1.0f, .gravity = 0.0f, .range = 500.0f, .damage = 35.0f, .no_impact = 1}},
-};
+// v7.1.4 projectiles.stored[0], the thrown knife: dmg 200 -> 180, scaled by the throw charge.
+static const ProjectileConfig g_thrown_melee = {.speed = 0.38f, .gravity = 0.0002f, .range = 1500.0f, .damage = 180.0f};
 
-static const ProjectileConfig g_thrown_melee = {.speed = 0.38f, .gravity = 0.0002f, .range = 1500.0f, .damage = 200.0f};
-
+// The weapon's own pj_* block (weapons.js); NULL when it fires no projectile (pj_disable: the
+// hitscan guns only fly with the bullet-drop game setting, player.c reads projectile_config then).
 const ProjectileConfig *projectile_config_for(const Weapon *weapon, const int thrown_melee) {
     if (thrown_melee) return &g_thrown_melee;
-    if (!weapon || !weapon->name) return NULL;
-
-    for (size_t i = 0; i < sizeof(g_projectile_configs) / sizeof(g_projectile_configs[0]); i++) {
-        if (!strcmp(g_projectile_configs[i].weapon, weapon->name)) return &g_projectile_configs[i].config;
-    }
-
-    return NULL;
+    if (!weapon || weapon->projectile_config.speed <= 0.0f || weapon->projectile_disable) return NULL;
+    return &weapon->projectile_config;
 }
 
 static void projectile_send_end(Game *game, const GameProjectile *projectile, const int hit_object) {
@@ -42,9 +31,19 @@ static void projectile_send_end(Game *game, const GameProjectile *projectile, co
 }
 
 // projectiles.init: the first free slot, Krunker's rounding of the launch values.
-static void projectile_spawn(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config,
-                             const vec3 origin, const float yaw, const float pitch, const int thrown_melee, const int ai_kind) {
-    if (!game_is_authority(game) || !config) return;
+static void projectile_spawn(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *base,
+                             const vec3 origin, const float yaw, const float pitch, const int thrown_melee, const int ai_kind,
+                             const ProjectileShot *shot) {
+    if (!game_is_authority(game) || !base) return;
+
+    // Projectile.init: spd * v, dmg = ceil(dmg * d) * dmgMlt (v7.1.4 charge)
+    ProjectileConfig scaled = *base;
+    if (shot) {
+        if (shot->speed_mlt > 0.0f) scaled.speed *= shot->speed_mlt;
+        scaled.damage = ceilf(scaled.damage * (shot->damage_d > 0.0f ? shot->damage_d : 1.0f));
+        if (shot->damage_mlt > 0.0f) scaled.damage *= shot->damage_mlt;
+    }
+    const ProjectileConfig *config = &scaled;
 
     GameProjectile *projectile = NULL;
     for (int i = 0; i < GAME_MAX_PROJECTILES; i++) {
@@ -65,8 +64,13 @@ static void projectile_spawn(Game *game, Player *owner, const int weapon_index, 
     projectile->skip_move = 1;
     projectile->thrown_melee = (unsigned char) !!thrown_melee;
     projectile->ai_kind = ai_kind;
+    // projectile.js init: stateConst = owner && !dontPred ? ping * 2 * lagComp : 0 (the owner's
+    // getStateConst; anchored lag compensation measures it from this shot's input, player.c)
+    projectile->state_const = owner && !config->dont_pred ? player_get_state_const(owner) : 0.0f;
     projectile->position = (vec3) {roundf(origin.x * 10.0f) / 10.0f, roundf(origin.y * 10.0f) / 10.0f, roundf(origin.z * 10.0f) / 10.0f};
     projectile->config = *config;
+    projectile->effect = shot ? shot->effect : -1;
+    projectile->effect_count = shot && shot->effect_count > 0 ? shot->effect_count : 1;
     projectile->speed = config->speed;
     projectile->range = config->range;
     projectile->yaw_dir = yaw_r - (float) M_PI;
@@ -92,18 +96,25 @@ static void projectile_spawn(Game *game, Player *owner, const int weapon_index, 
 
 void game_spawn_projectile(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config,
                            const vec3 origin, const float yaw, const float pitch, const int thrown_melee) {
-    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0);
+    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0, NULL);
+}
+
+void game_spawn_projectile_ex(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config, const vec3 origin,
+                              const float yaw, const float pitch, const int thrown_melee, const ProjectileShot *shot) {
+    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0, shot);
 }
 
 // ai.js shots: projectiles.init(x, y, z, yaw, pitch, stored[kind], null, {}, true, "orb_0")
 void game_spawn_ai_projectile(Game *game, const int stored_kind, const vec3 origin, const float yaw, const float pitch) {
-    projectile_spawn(game, NULL, -1, game_ai_projectile_config(stored_kind), origin, yaw, pitch, 0, stored_kind);
+    projectile_spawn(game, NULL, -1, game_ai_projectile_config(stored_kind), origin, yaw, pitch, 0, stored_kind, NULL);
 }
 
 // game.explosion(x, y, z, radius, dmg, owner): 1 - distance / radius of the damage,
 // a fifth for the owner (who may hurt themselves).
-void game_explosion(Game *game, const vec3 position, const float radius, const float damage, Player *owner, const int weapon_index) {
+void game_explosion(Game *game, const vec3 position, float radius, float damage, Player *owner, const int weapon_index) {
     if (!game_is_authority(game) || radius <= 0.0f) return;
+    radius *= mode_explosion_size_mlt(game);            // v7 mode.explSMlt (Impulsed 2), before the "ex"
+    if (owner) damage *= player_attr_damage(owner);     // v7 source.attributes.dmg (Strength), players and AIs
 
     const NetExplosionPacket packet = {.position = {roundf(position.x), roundf(position.y), roundf(position.z)}, .radius = roundf(radius)};
     game_send(game, NET_TARGET_ALL, NET_PACKET_EXPLOSION, &packet, sizeof(packet));
@@ -111,6 +122,7 @@ void game_explosion(Game *game, const vec3 position, const float radius, const f
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
         if (!player || !player->active) continue;
+        if (!world_pvp_allows(owner, player)) continue; // WP-B: v7 explosion noPVP / forcePVP filter
 
         const float dx = player->position.x - position.x;
         const float dy = player->position.y - position.y;
@@ -119,7 +131,7 @@ void game_explosion(Game *game, const vec3 position, const float radius, const f
         const float falloff = 1.0f - distance / radius;
         if (falloff <= 0.0f) continue;
 
-        const float dealt = damage * falloff * (player == owner ? 0.2f : 1.0f);
+        const float dealt = damage * falloff * (player == owner ? 0.2f : 1.0f) * mode_explosion_damage_mlt(game, owner, player); // explMlt
         if (player_change_health(player, owner, dealt, 0)) {
             PlayerKillInfo info = {.weapon_id = weapon_index, .distance = distance};
             player_kill(player, owner, &info, 0);
@@ -141,6 +153,7 @@ typedef struct {
     GameAI *ai;
     float t;
     Object *object;     // u[0].obj of a map object hit
+    PlayerStoredState state; // the player's rewound box (head / leg zones)
 } ProjectileHit;
 
 static int projectile_object_blocks(const Object *object) {
@@ -161,6 +174,7 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
     for (size_t i = 0; i < game->map->object_count; i++) {
         const Object *object = game->map->objects[i];
         if (!projectile_object_blocks(object)) continue;
+        if (game_ai_projectile_skips_objects(game, projectile)) break; // projOb.noObjC (WP-F, shared/src/ai.c)
 
         const float t = line_in_rect(projectile->position, step, object->position, object->scale);
         if (t > 0.0f && t <= 1.0f && t < best.t) {
@@ -169,36 +183,49 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         }
     }
 
+    // WP-B: projectiles.js:215 the terrain stops the step too
+    const float terrain_t = world_terrain_fraction(game, projectile->position, step);
+    if (terrain_t > 0.0f && terrain_t <= 1.0f && terrain_t < best.t) {
+        best = (ProjectileHit) {NULL, NULL, terrain_t};
+        *hit_any = 1;
+    }
+
     const float step_length = projectile->speed * dt_ms;
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
         if (!player || !player->active || player->uid == projectile->owner_uid) continue;
+        if (!world_pvp_allows(game_find_player(game, projectile->owner_uid), player)) continue; // WP-B: noPVP / forcePVP
+
+        // p = fetchState(q, m.stateConst): every tick of the flight tests the rewound box
+        PlayerStoredState state;
+        if (!players_fetch_state(player, projectile->state_const, &state)) continue;
 
         float t;
         if (projectile->config.hit_box > 0.0f) {
-            const float dx = projectile->position.x - player->position.x;
-            const float dy = projectile->position.y - (player->position.y + player->height * 0.5f);
-            const float dz = projectile->position.z - player->position.z;
+            const float dx = projectile->position.x - state.position.x;
+            const float dy = projectile->position.y - (state.position.y + state.adjusted_height * 0.5f);
+            const float dz = projectile->position.z - state.position.z;
             const float distance = sqrtf(dx * dx + dy * dy + dz * dz);
             t = distance <= projectile->config.hit_box ? distance / projectile->config.hit_box : -1.0f;
         } else {
-            const float pad = 1.0f; // config.hitBoxPad
-            const float half = player->scale + pad;
-            const vec3 box = {half * 2.0f, player->height + pad, half * 2.0f};
-            t = step_length > 0.0f ? line_in_rect(projectile->position, step, player->position, box) : -1.0f;
+            // v7.1.4 projectiles.js: scale + hitboxPadW sideways, ah + hitboxPadH on top
+            // (game hitBoxPad 0.6 / comp 0.1 + class hbS / hbH; v3.1.1 padded by 1).
+            const float half = player->scale + player_hitbox_pad_w(player);
+            const vec3 box = {half * 2.0f, state.adjusted_height + player_hitbox_pad_h(player), half * 2.0f};
+            t = step_length > 0.0f ? line_in_rect(projectile->position, step, state.position, box) : -1.0f;
         }
 
         if (t > 0.0f && t <= 1.0f && t < best.t) {
-            best = (ProjectileHit) {player, NULL, t};
+            best = (ProjectileHit) {player, NULL, t, NULL, state};
             *hit_any = 1;
         }
     }
 
-    // projectile.js: AI boxes only for a player's projectile (m.owner)
-    for (int i = 0; projectile->owner_uid >= 0 && game->ai && i < game->ai->count; i++) {
+    // projectiles.js: AI boxes for a player's projectile or another AI's shot (team-checked, never the shooter)
+    for (int i = 0; game->ai && i < game->ai->count; i++) {
         GameAI *ai = &game->ai->ais[i];
-        if (!ai->active || step_length <= 0.0f) continue;
+        if (step_length <= 0.0f || !game_ai_projectile_can_hit(game, projectile, ai)) continue;
         const float t = game_ai_line_hit(ai, projectile->position, step);
         if (t > 0.0f && t <= 1.0f && t < best.t) {
             best = (ProjectileHit) {NULL, ai, t};
@@ -238,15 +265,42 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
             Player *owner = game_find_player(game, projectile->owner_uid);
             hit_object = !hit.player && !hit.ai;
 
-            // u[0].ai: changeHealth(-dmg, owner, thrown knife), killScore, "4"
-            if (hit.ai) game_ai_damage(game, hit.ai, owner, owner && owner->smite ? 10000.0f : projectile->config.damage, projectile->thrown_melee);
-            // u[0].obj: destructible health and onShoot / onDamage / onProjectile / onThrowingMelee triggers
-            if (hit.object) game_object_hit(game, hit.object, owner, owner && owner->smite ? 10000.0f : projectile->config.damage, projectile->thrown_melee, GAME_HIT_PROJECTILE);
+            // v7.1.4: smite, then attributes.dmg (Strength); the bot dmgMlt is player_change_health's
+            float damage = owner && owner->smite ? 10000.0f : projectile->config.damage;
+            if (owner) damage *= player_attr_damage(owner);
 
-            if (hit.player && projectile->config.damage > 0.0f && player_change_health(hit.player, owner, projectile->config.damage, 0)) {
-                PlayerKillInfo info = {.weapon_id = projectile->weapon_index, .distance = 0.0f};
-                info.thrown = projectile->thrown_melee;
-                player_kill(hit.player, owner, &info, 0);
+            // u[0].ai: changeHealth(-dmg, owner, thrown knife), killScore, "4"
+            if (hit.ai) game_ai_projectile_hit_ai(game, projectile, hit.ai, owner, damage); // WP-F: player or AI shooter rules
+            if (hit.player && !owner) game_ai_projectile_hit_player(game, projectile, hit.player); // an AI shot's effectInd (WP-F)
+            // u[0].obj: destructible health and onShoot / onDamage / onProjectile / onThrowingMelee triggers
+            if (hit.object) game_object_hit(game, hit.object, owner, damage, projectile->thrown_melee, GAME_HIT_PROJECTILE);
+
+            if (hit.player && damage > 0.0f) {
+                // v7.1.4: a player's direct hit takes the weapon's hsMlt / lsMlt (1 / 1 on every stock
+                // projectile weapon). v7 bugs fixed: it tests the head band against the target's live
+                // y and plain headScale; here the rewound box and headScale * headMlt, like hitscan.
+                int head = 0, leg = 0;
+                const Weapon *weapon = owner && projectile->weapon_index >= 0 && (size_t) projectile->weapon_index < game->weapon_count
+                    ? game->weapons[projectile->weapon_index] : NULL;
+                if (weapon) {
+                    const float hit_y = projectile->position.y + projectile->velocity.y * dt_ms * hit.t;
+                    head = player_hit_is_head(hit.player, hit.state.position.y, hit.state.adjusted_height, hit_y);
+                    leg = player_hit_is_leg(hit.player, hit.state.position.y, hit_y);
+                    damage = player_hit_damage(game, weapon, damage, head, leg);
+                }
+                // effectInd (Zapper): Zapped stacks, credited to the owner, unless a teammate
+                if (projectile->effect >= 0 && (!owner || !owner->team || owner->team != hit.player->team ||
+                                                (game->mode && game->mode->config.dmg_team) || game->config.friendly_fire)) {
+                    player_give_effect(hit.player, projectile->effect, projectile->effect_count);
+                    if (projectile->effect == EFFECT_ZAPPED && owner) hit.player->zapped_by = owner->uid;
+                }
+                if (player_change_health(hit.player, owner, damage, head)) {
+                    PlayerKillInfo info = {.weapon_id = projectile->weapon_index, .distance = 0.0f};
+                    info.thrown = projectile->thrown_melee;
+                    info.headshot = (unsigned char) head;
+                    info.legshot = (unsigned char) (leg && !head); // WP-E part 2c: the "ls" stat
+                    player_kill(hit.player, owner, &info, 0);
+                }
             }
 
             const float t = hit.t - 0.02f;

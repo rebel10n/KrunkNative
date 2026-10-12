@@ -1,0 +1,10 @@
+P Flag
+L[] Team : select#7[Alpha..Neutral]=Alpha
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-

@@ -1,16 +1,19 @@
-// The inline-handler table: every `on*` callee in ui/index.html and the captured
-// window markup (doc/ui-feature-inventory.md section 1, 60 names + the three
-// KrunkNative-dynamic ones), with the bodies krunknative.js gave them. Names the
-// Krunker JS itself never defined (updateWSliderLabel, updateSliderLabel,
-// aspectSelect, windows[7].updateSet/changeWep/toggleWep) are no-ops,
-// as a ReferenceError in the real page is. Also installs the non-inline listeners
-// (setupDom's addEventListener calls).
+// The inline-handler table: every `on*` callee in ui/index.html and the captured window
+// markup of Krunker v7.1.4 (ui/windows), with the bodies v7's src/index.js gives them, plus
+// the KrunkNative-only names C writes (knRetry, knHostOffline, knDialog, knClient*). Names
+// owned by one module (settings, controls, loadout, HUD, account, store, servers, ranked,
+// clans) are answered by that module's *_handle() through h_fallback. Analytics / ad /
+// payment hooks (logBtnFRVR, XsollaPopup, ...) are no-ops. Also installs the non-inline
+// listeners (setupDom's addEventListener calls).
 #include <ui_logic.h>
+#include <lobby_ui.h> // WP-E voteOnMatch
+#include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
+#include <cJSON.h>
 #include <map_catalog.h>  // Host Game / Games window maps
+#include <modes.h>        // copyInviteLink: Game.mode.isRanked
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
 #include <spectate.h>     // spectate_set_requested (toggleSpect)
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
-#include <ui_terminal.h>  // #terminalInput keys (map terminals, ui_terminal.c)
 #include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
 #include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
@@ -114,22 +117,12 @@ H(h_set_setting) {
     return 1;
 }
 
-// onkeypress handler of the number boxes next to sliders: Enter commits.
-H(h_delay_execute) {
-    (void) user;
-    const char *key = arg_str(ev, args, argc, 0, NULL);
-    if (ev && key && html_key_is_enter(ev->key)) {
-        char value[64];
-        if (ev->target && html_dom_get_value(ev->target, value, sizeof(value)) >= 0) ui_settings_set_string(key, value);
-        else ui_settings_set_string(key, ev->value ? ev->value : "");
-        return 0;
-    }
-    return 1;
-}
 
 H(h_show_window) { UNUSED; menu_show_window(arg_int(args, argc, 0, 0), 0); return 1; }
 H(h_close_window) { UNUSED; menu_close_window(); return 1; }
 H(h_select_class) { UNUSED; menu_select_class(arg_int(args, argc, 0, 0)); return 1; }
+// WP-E voteOnMatch("mode,map"): the end screen's match vote cards (client/src/net/lobby_events.c)
+H(h_vote_on_match) { (void) user; return lobby_vote_handler(menu_ui()->client, ev, args, argc); }
 
 // openURL(url) / openTab(url) / window.open(url, "_blank"): a new browser tab in Krunker;
 // the system browser natively, window.open on the web (ui_dialog.c, http(s) only).
@@ -157,7 +150,14 @@ H(h_copy_invite_link) {
     UNUSED;
     HtmlElem b = html_dom_by_id("inviteButton");
     if (!b) return 1;
+    const GameModeConfig *mode = mode_config(game_mode_id(&menu_ui()->client->game));
+    if (mode && mode->is_ranked) return 1; // v3.1.1: !Game.mode || !Game.mode.isRanked
+    char link[512];
+    servers_ui_invite_link(link, sizeof(link)); // location.protocol + "//" + location.host + "/?game=" + gameId
+    html_clipboard_write(link);
     html_dom_set_text(b, "Copied");
+    // copyInviteLink(1) (the competitive menu's link button): io_addChat(-1, null, ..., 2)
+    if (arg_bool(ev, args, argc, 0, 0)) hud_ui_add_chat(NULL, "Link Copied. Send it to someone to invite them", "#fc03ec");
     MenuUi *ui = menu_ui();
     if (ui->invite_timer) html_timer_cancel(ui->invite_timer);
     ui->invite_timer = html_timer_add(1250, invite_reset, NULL); // copyInviteLink: setTimeout 1250
@@ -190,7 +190,16 @@ H(h_check_terms) {
     return 1;
 }
 
-H(h_play) { UNUSED; menu_play(); return 1; }                       // quickJoinRegion / joinGame
+H(h_play) { UNUSED; menu_play(); return 1; }                       // quickJoinRegion
+// joinGame(): f9(gameURL.value || "") - a game link or lobby id (servers_ui.c)
+H(h_join_game) {
+    UNUSED;
+    char text[512] = "";
+    HtmlElem input = html_dom_by_id("gameURL");
+    if (input) html_dom_get_value(input, text, sizeof(text));
+    servers_ui_join_link(text);
+    return 1;
+}
 // Host a map of the catalogue (shared/src/map_catalog.c) on the embedded local server:
 // it joins the client's map list (map_catalog_slot: Shipyard, Soul Sanctum and the
 // community maps are not in the default rotation) and the offline game starts or reloads
@@ -240,29 +249,33 @@ H(h_create_private_room) {
         if (msg) html_dom_set_html(msg, "<span class='error'>Select at least one Game or Map</span>");
         return 1;
     }
-    const int mode = ui_host_checked_mode();
-    if (mode < 0) {
-        if (msg) html_dom_set_html(msg, "<span class='error'>Select at least one Mode</span>");
+    // WP-E: the Game Settings / Advanced / Server rows (ui_host_config.c): at least one mode and
+    // one class, the password length; the request carries the config the game plays with
+    char err[128] = "";
+    cJSON *request = ui_host_config_collect(servers_ui_host_type(), err, sizeof(err));
+    if (!request) {
+        if (msg) {
+            StrBuf sb = {0};
+            sb_append(&sb, "<span class='error'>");
+            sb_append_esc(&sb, err[0] ? err : "Invalid game settings");
+            sb_append(&sb, "</span>");
+            char *html = sb_finish(&sb);
+            html_dom_set_html(msg, html);
+            free(html);
+        }
         return 1;
     }
+    const int mode = ui_host_checked_mode(); // the offline game plays one mode; -1 (restricted types): keep
+#ifdef LOCAL_GAME_HAVE_HOST_CONFIG
+    local_game_host_config(menu_ui()->client, request, servers_ui_host_type()); // the next round's game config
+#endif
+    cJSON_Delete(request);
     // No brain /mm/host-game from the client any more (hosting = server_bin): the window
     // (only reachable from --render-scenario / the console now) starts offline practice.
     host_catalog_map(catalog_index, mode);
     return 1;
 }
 
-// windows[7].toggle(prefix): flip every input whose id starts with prefix (host window).
-H(h_host_toggle) {
-    UNUSED;
-    const char *prefix = arg_str(ev, args, argc, 0, "");
-    if (!prefix[0] || strchr(prefix, '\'') || strchr(prefix, ']')) return 1;
-    char sel[96];
-    snprintf(sel, sizeof(sel), "#menuWindow input[id^='%s']", prefix);
-    HtmlElem found[256];
-    const int n = html_dom_query_all(0, sel, found, 256);
-    for (int i = 0; i < n; i++) html_dom_set_checked(found[i], !html_dom_get_checked(found[i]));
-    return 1;
-}
 // registerAcc / loginAcc: the brain account (account_ui.c), else the guest nickname
 H(h_commit_account) {
     UNUSED;
@@ -279,18 +292,6 @@ H(h_servers) {
 }
 // resetSettings(): confirm first; the confirmed path also resets the binds (ui_settings.c).
 H(h_reset_settings) { UNUSED; ui_settings_reset_confirm(); return 1; }
-// importSettings(text?): settings.import(text) or the "Copy Paste Settings Text Here" prompt.
-H(h_import_settings) {
-    UNUSED;
-    if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str && args[0].str[0]) ui_settings_import_text(args[0].str);
-    else ui_settings_import_prompt();
-    return 1;
-}
-H(h_select_setting_pre) {
-    UNUSED;
-    ui_settings_select_preset((int) strtol(arg_str(ev, args, argc, 0, "2"), NULL, 10));
-    return 1;
-}
 H(h_dialog) { UNUSED; ui_dialog_answer(arg_int(args, argc, 0, 0)); return 1; } // knDialog: the #confPop buttons
 H(h_export_settings) { UNUSED; ui_settings_export(); return 1; }
 
@@ -394,18 +395,10 @@ H(h_police_pop) { UNUSED; ui_loadout_show_police_pop(); return 1; }
 H(h_hide_police_pop) { UNUSED; ui_loadout_hide_police_pop(); return 1; }
 H(h_clear_pops) { UNUSED; ui_loadout_clear_pops(); return 1; }
 H(h_games_tab) { UNUSED; ui_games_switch_tab(arg_int(args, argc, 0, 0)); return 1; } // windows[9].switchTab
-// windows[9].searchMaps(): "Loading..." while the (never answered offline) search runs.
-H(h_search_maps) {
-    UNUSED;
-    HtmlElem r = html_dom_by_id("searchResultsMA");
-    if (r) html_dom_set_text(r, "Loading...");
-    return 1;
-}
-// windows[13].premium()/purchase(): showWindow(14, true); a guest gets the Store's LOGIN REQUIRED card.
+// windows[13].premium()/purchase(): the Store's Premium / Purchase KR tab (store_ui.c)
 H(h_store_tab) {
     UNUSED;
-    if (account_ui_handle(html_ui_current_handler(), ev, args, argc) >= 0) return 1; // signed in: windows[13].tabIndex
-    menu_show_window(14, 1);
+    store_ui_handle(html_ui_current_handler(), ev, args, argc);
     return 1;
 }
 // claimReward(): the v3.1.1 client only has alert("Ad Failed. Contact your Ad Provider").
@@ -425,44 +418,86 @@ H(h_update_window) {
     return 1;
 }
 
-// ---- controls (client/src/ui/ui_controls.c): Krunker's changeCont / unbindCont /
-// changeContSet (index.js) and #chatInput's focusChat.
-H(h_change_cont) { UNUSED; ui_controls_change(arg_int(args, argc, 0, -1), arg_bool(ev, args, argc, 1, 0)); return 1; }
-H(h_unbind_cont) { UNUSED; ui_controls_unbind(arg_int(args, argc, 0, -1), arg_bool(ev, args, argc, 1, 0)); return 1; }
-H(h_change_cont_set) {
-    UNUSED;
-    char value[64];
-    ui_controls_change_set(arg_int(args, argc, 0, -1), arg_value(ev, args, argc, 1, value, sizeof(value)));
-    return 1;
-}
+// ---- #chatInput's focusChat (the Change Controls handlers are ui_controls_handle's,
+// the settings rows' delayExecute / aspectSelect / import ui_settings_handle's).
 H(h_focus_chat) { UNUSED; ui_controls_chat_focus(arg_bool(ev, args, argc, 0, 0)); return 1; }
 // clientExitPopup / closeClient (v7.1.4 #clientExit) and the Client tab's knClientSet / knClientAction
 H(h_client) { (void) user; ui_client_settings_handle(html_ui_current_handler(), ev, args, argc); return 1; }
 
+// closWind(): UI.toggleWindow(false) (the window's close button / backdrop)
+H(h_close_wind) { UNUSED; menu_toggle_window(0); return 1; }
+// showGames(hostType): windows[9].hostType = hostType || null; showWindow(10)
+H(h_show_games) { UNUSED; menu_show_window(10, 0); return 1; }
+// openDiscord(): window.open(config.discordInvite)
+H(h_open_discord) { UNUSED; ui_open_external("https://discord.gg/krunker"); return 1; }
+// openGuide(on): the "New to Krunker?" guide popup
+H(h_open_guide) {
+    UNUSED;
+    HtmlElem el = html_dom_by_id("guidePopupH");
+    if (el) html_dom_set_display(el, arg_bool(ev, args, argc, 0, 0) ? "block" : "none");
+    return 1;
+}
+// setSpect(this.checked): #specBtn (v7 menu Spectate switch) = spectateEnabled
+H(h_set_spect) {
+    UNUSED;
+    spectate_set_requested(arg_bool(ev, args, argc, 0, 0));
+    menu_update_instructions();
+    return 1;
+}
+// purchaseCancel(): closePurchaseSelector()
+H(h_purchase_cancel) {
+    UNUSED;
+    HtmlElem el = html_dom_by_id("purchaseHolder");
+    if (el) html_dom_set_display(el, "none");
+    return 1;
+}
+// window.canShowExternalLinks (`canShowExternalLinks ? openTab(terms) : showWindow(47)`):
+// the desktop client and the web build both open external links in a browser tab.
+H(h_can_show_external_links) { UNUSED; return 1; }
+// windows[20].tabIndex = n (Contact opens Advertise on its Contact tab)
+static int g_advertise_tab;
+H(h_advertise_tab_index) { UNUSED; g_advertise_tab = arg_int(args, argc, 0, 0); return 1; }
+H(h_advertise_switch_tab) { UNUSED; g_advertise_tab = arg_int(args, argc, 0, 0); menu_set_active_tab(g_advertise_tab); return 1; }
+
 static const HtmlHandlerEntry HANDLERS[] = {
     // settings inputs
     {"setSetting", h_set_setting},
-    {"delayExecute", h_delay_execute},
     {"updateWSliderLabel", h_noop},   // undefined in Krunker's own JS
-    {"updateSliderLabel", h_noop},    // undefined in Krunker's own JS
-    {"aspectSelect", h_noop},         // undefined in Krunker's own JS
-    {"changeContSet", h_change_cont_set},
+    {"updateSliderLabel", h_servers}, // WP-E: the host settings' customSet<n> labels (ui_host_config.c)
     // windows
     {"showWindow", h_show_window},
     {"closeWindow", h_close_window},
     {"selectClass", h_select_class},
+    {"voteOnMatch", h_vote_on_match}, // WP-E
     {"openHostWindow", h_open_host_window},
     {"openJoinWindow", h_open_join_window},
     // sounds
     {"playTick", ui_sound_play_tick},  // client/src/ui/ui_sound.c
+    {"playSelect", ui_sound_play_select},
     {"SOUND.play", ui_sound_play},
+    // analytics, ads, payments, FTUE: nothing in KrunkNative
+    {"logBtnFRVR", h_noop},
+    {"XsollaPopup", h_noop},
+    {"dropsPopup", h_noop},
+    {"abTestsPopup", h_noop},
+    {"expertMode", h_noop},
+    {"purchaseCancel", h_purchase_cancel},
+    // v7 menu chrome
+    {"closWind", h_close_wind},
+    {"showGames", h_show_games},
+    {"openDiscord", h_open_discord},
+    {"openGuide", h_open_guide},
+    {"setSpect", h_set_spect},
+    {"window.canShowExternalLinks", h_can_show_external_links},
+    {"windows.20.tabIndex=", h_advertise_tab_index},
+    {"windows.20.switchTab", h_advertise_switch_tab},
     // navigation is never allowed
     {"openURL", h_open_url},
     {"openTab", h_open_url},
     {"window.open", h_open_url},
     // play / host / join
     {"quickJoinRegion", h_servers},
-    {"joinGame", h_play},
+    {"joinGame", h_join_game},
     {"createPrivateRoom", h_create_private_room},
     {"playMap", h_play_map},
     {"selectHostMap", h_select_host_map},
@@ -476,8 +511,6 @@ static const HtmlHandlerEntry HANDLERS[] = {
     // settings window buttons
     {"resetSettings", h_reset_settings},
     {"exportSettings", h_export_settings},
-    {"importSettings", h_import_settings},
-    {"selectSettingPre", h_select_setting_pre},
     {"knDialog", h_dialog},
     // desktop client chrome (ui_client_settings.c)
     {"clientExitPopup", h_client},
@@ -501,25 +534,15 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"toggleHF", h_servers},
     {"setExpandedRegion", h_servers},
     // controls / loadout / customisation
-    {"changeCont", h_change_cont},
-    {"unbindCont", h_unbind_cont},
     {"skinSelector", h_skin_selector},
     {"selectSkin", h_select_skin},
-    {"selectHat", h_select_item},
-    {"selectBack", h_select_item},
-    {"selectWaist", h_select_item},
-    {"selectMelee", h_select_item},
-    {"selectDye", h_select_item},
-    {"selectFace", h_select_item},
-    {"selectAttachment", h_select_item},
-    {"selectReticle", h_select_item},
-    {"selectSpray", h_select_item},
+    // selectHat / selectBody / ... / selectReticle(i, url) / selectStreak / selectCharm: ui_loadout_handle
     {"hidePolicePop", h_hide_police_pop},
     {"updateWindow", h_update_window},
     {"windows.34.toggleLog", h_toggle_log},
     {"selectSkinColor", h_select_skin_color},
     {"selectStat", h_select_stat},
-    {"favoriteM", h_noop},
+    {"favoriteM", h_servers},          // servers_ui.c (Custom Games cards)
     {"GUI.endScreen.changeTab", h_end_screen_tab},
     // windows[N].*
     {"windows.0.changeTab", h_settings_change_tab},
@@ -528,13 +551,19 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"windows.1.searchList", h_servers},
     {"windows.2.action", h_loadout_action},
     {"windows.3.switchTab", h_switch_tab},
-    {"windows.7.toggle", h_host_toggle},
+    // WP-E Host Game rows (ui_host_config.c, routed through servers_ui_handle)
+    {"windows.7.toggle", h_servers},
+    {"windows.7.changeWep", h_servers},
+    {"windows.7.toggleWep", h_servers},
+    {"windows.7.changeCls", h_servers},
+    {"windows.7.toggleCls", h_servers},
+    {"windows.7.changeEffects", h_servers},
+    {"windows.7.toggleEffects", h_servers},
+    {"updateSliderLabel2", h_servers},
     {"windows.7.presetAction", h_noop},
     {"windows.7.updateSet", h_noop},  // undefined in Krunker's own JS
-    {"windows.7.changeWep", h_noop},  // undefined in Krunker's own JS
-    {"windows.7.toggleWep", h_noop},  // undefined in Krunker's own JS
     {"windows.9.switchTab", h_games_tab},
-    {"windows.9.searchMaps", h_search_maps},
+    {"windows.9.searchMaps", h_servers}, // servers_ui.c: the catalogue / loaded games by name
     {"windows.9.loadMore", h_servers}, // brain: the next /api/maps page (servers_ui.c); offline: one page
     {"windows.13.premium", h_store_tab},
     {"windows.13.purchase", h_store_tab},
@@ -542,13 +571,33 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"window.windows.0.changeTab", h_settings_change_tab},
     {"window.windows.0.searchList", h_settings_search_list},
     {"window.windows.0.collapseFolder", h_settings_collapse_folder},
+    {"window.setSetting", h_set_setting},
+};
+
+// Names one module owns: each *_handle() returns -1 when the name is not its own, else the
+// handler result (0 = `return false` cancels the default action).
+typedef int (*UiModuleHandler)(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);
+static const UiModuleHandler MODULE_HANDLERS[] = {
+    account_ui_handle,         // account_ui.c: Account window, logout, mail, profile
+    servers_ui_handle,         // servers_ui.c: Servers / Server Finder / Games / Host / Join
+    store_ui_handle,           // store_ui.c: Store (windows[13])
+    clan_ui_handle,            // clan_ui.c: Clans (windows[12])
+    ranked_ui_handle,          // ranked_ui.c: Ranked (windows[26])
+    ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
+    ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
+    ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
+    hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
+    ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
 };
 
 static int h_fallback(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     UNUSED;
     const char *name = html_ui_current_handler(); // logoutAcc, windows[4].*, checkedSwitchServer, ...
-    if (account_ui_handle(name, ev, args, argc) >= 0 || servers_ui_handle(name, ev, args, argc) >= 0) return 1;
-    menu_log("unhandled inline handler on %s event", ev && ev->type ? ev->type : "?");
+    for (size_t i = 0; i < sizeof(MODULE_HANDLERS) / sizeof(MODULE_HANDLERS[0]); i++) {
+        const int r = MODULE_HANDLERS[i](name, ev, args, argc);
+        if (r >= 0) return r;
+    }
+    menu_log("unhandled inline handler %s on %s event", name ? name : "?", ev && ev->type ? ev->type : "?");
     return 1;
 }
 
@@ -631,7 +680,6 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
     // web: GLFW's keydown (window capture) already bound this key in the controls window
     if (ui_controls_take_swallowed_key()) return 0;
     if (ui_console_page_key(ev)) return 0; // Enter/Escape/Tab/arrows/` in the console input
-    if (ui_terminal_page_key(ev)) return 0; // Enter (tmc) / Escape in #terminalInput
     if (target_is_form_control(ev->target)) {
         // Enter in #chatInput (menu chat natively, every chat Enter on the web): send/blur.
         // Natively in game main.c routes the chat key before the page sees it.

@@ -14,6 +14,9 @@
 // KRUNKNATIVE_NET_JITTER_MS=<+- ms> hold every received packet and every sent input batch
 // that long (order kept, like TCP). KRUNKNATIVE_RECON_LOG=1 prints each correction.
 #include <client.h>
+#include <ks_client.h> // ks_client_no_prediction
+#include <ui_logic.h>  // ui_setting_number ("netRate")
+#include <ui_mobile.h> // ui_mobile_active (netRate's mobile default)
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -112,10 +115,26 @@ void client_recon_drain_delayed(Client *client, void (*handle)(Client*, const Ne
 
 // CONTROLS.reset() on our (re)spawn and on a new session: no pending inputs, a fresh batch.
 void client_recon_reset(Client *client) {
+    client->net_input_accum = 0.0f; // index.js "start": inputFrameDelta = 0
     client->net_pending_count = 0;
     client->net_batch_count = 0;
     client->net_batch_time = 0.0f;
     client->net_next_input_seq = 0;
+}
+
+// v7.1.4 SETTINGS.tmp.netRate: Settings > General > Network Rate (select index 0-5, default 3 =
+// 144 Hz, mobile 1 = 60 Hz). WP-D owns the row; until it exists the default applies.
+static int recon_net_rate_hz(void) {
+    double index = ui_mobile_active() ? 1 : NET_RATE_DEFAULT_INDEX;
+    ui_setting_number("netRate", &index);
+    return net_rate_hz((int) index);
+}
+
+// index.js gameLoop: inputFrameDelta += gameTimeDiff, then shouldSampleInput (net_input_rate_take).
+// Online and offline alike (v7's sandbox player samples the same frames). Returns the delta (s) of
+// the input frame to build this frame, or -1 when this frame samples none.
+float client_recon_sample(Client *client, const float frame_delta) {
+    return net_input_rate_take(&client->net_input_accum, frame_delta, recon_net_rate_hz());
 }
 
 static void batch_flush(Client *client) {
@@ -127,6 +146,20 @@ static void batch_flush(Client *client) {
     client->net_batch_count = 0;
     if (delay_enabled()) delay_push(&g_recon.out, &packet);
     else send_now(client, &packet);
+}
+
+// Whether this frame's input may join the "q" window: our player is alive and the round
+// is not over (END seen while playing, until the next INIT; menu_view.c's `ended`).
+int client_recon_sending(const Client *client) {
+    if (client->game.is_local || !client->me || !client->me->active) return 0;
+    return !client_round_ended(client);
+}
+
+// END reached us while playing or spectating (the victory/defeat title, the endAnim slow
+// motion, the results), until the next INIT. Offline too: the local game's END comes
+// through the same events (game_events.c events_end / client_game_events_reset).
+int client_round_ended(const Client *client) {
+    return client->net_end_seconds >= 0 && client->net_end_result != INT32_MIN;
 }
 
 // tmpInpts.push(b9) + the "q" window: called with each input right after it was queued for
@@ -143,6 +176,18 @@ void client_recon_record(Client *client, const Input *input) {
     }
     client->net_pending_inputs[client->net_pending_count++] = *input;
 
+    // gameLoop only batches `!Game.singlePlayer && !endAnimationTimeLeft`, and the "q" send
+    // needs `player && player.active`: nothing leaves while dead (death card, death cam,
+    // spectating: no active player, so main.c builds no input at all) or on the end screen.
+    // v3.1.1 resumes zero-delta frames once its endAnim reached 0, which its io_q drops in
+    // the vote window like our server (end_timer); KrunkNative keeps quiet until the next
+    // INIT. The frame still predicts locally and stays in the pending list (tmpInpts).
+    if (!client_recon_sending(client)) {
+        client->net_batch_count = 0; // the half-filled window is dropped, not sent late
+        client->net_batch_time = 0.0f;
+        return;
+    }
+
     if (client->net_batch_count >= NET_INPUT_BATCH_MAX) batch_flush(client);
     net_packet_from_input(&client->net_batch[client->net_batch_count++], input);
 
@@ -153,6 +198,14 @@ void client_recon_record(Client *client, const Input *input) {
         if (client->net_batch_time > NET_INPUT_SEND_INTERVAL) client->net_batch_time = 0.0f; // a long hitch
         batch_flush(client);
     }
+}
+
+// Our KILL: the half-filled "q" window is never sent (the server killed us before this
+// packet left it, and io_q ignores a dead player). The pending inputs stay until the
+// respawn's client_recon_reset, like tmpInpts until CONTROLS.reset().
+void client_recon_on_death(Client *client) {
+    client->net_batch_count = 0;
+    client->net_batch_time = 0.0f;
 }
 
 // After the frame's game tick ran the input: the shot's physPow knockback becomes that
@@ -167,6 +220,8 @@ void client_recon_apply(Client *client, const NetReconPacket *packet) {
     if (client->game.is_local || !me || !me->active) return;
 
     const vec3 predicted = me->position;
+    // KrunkScript DEFAULT.disablePrediction (Game.noPred): the snap applies, nothing is replayed
+    if (ks_client_no_prediction()) client->net_pending_count = 0;
     const size_t before = client->net_pending_count;
     const int move_lock = client->game.move_lock || mode_input_locked(me);
     client->net_pending_count = net_reconcile(me, packet, client->net_pending_inputs, client->net_pending_count, move_lock);

@@ -1,0 +1,4 @@
+num[] a = num[];
+public action start() {
+    remove a;
+}

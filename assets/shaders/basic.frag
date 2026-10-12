@@ -8,6 +8,7 @@ in float view_depth;
 in vec4 shadow_coord;
 in float vertex_shade;
 in vec3 vertex_color;
+in vec4 clip_pos;
 flat in int face_idx;
 
 // BasicMaterial uv_mode (client.h BasicUvMode): 0 vertex UVs, 1 Krunker cube, 2 Krunker plane
@@ -48,35 +49,74 @@ uniform sampler2D shadow_map;
 uniform mat3 tex_transform;
 uniform sampler2D tex;
 
-// The "lighting" setting (134.js, 55.js getMat): 0 every material is a MeshBasicMaterial
-// (no light, no emissive), 1 Lambert (the material's own choice: light cones stay Basic),
-// 2 MeshPhongMaterial for every material (Blinn-Phong specular, shininess 30, specular
-// 0x111111) plus the map's POINT_LIGHT objects.
+// The "lighting" setting (v7.1.4 render.js getMat, restart): 0 every material is a
+// MeshBasicMaterial (no light, no emissive), 1 Lambert (the material's own choice: light cones
+// stay Basic), 2 MeshPhongMaterial for every material (Blinn-Phong specular, shininess 30,
+// specular 0x111111), 3 MeshStandardMaterial for every material (roughness 1, metalness 0:
+// Lambert diffuse + GGX specular, the only one that takes rect-area lights). SpriteMaterial
+// (sprites) is never lit.
 uniform int lighting_mode;
 uniform vec3 camera_position;
-#define MAX_POINT_LIGHTS 16
+
+// Forward light list (basic.c basic_upload_lights, client.h BasicLight), three.js r150 lights:
+// lt_type 0 point, 1 spot, 2 directional, 3 rect-area. lt_color is colour * intensity *
+// (legacy lights ? PI : 1) (rect: colour * intensity); lt_direction points from the target
+// to the light; lt_params = (distance, decay, coneCos, penumbraCos).
+#define MAX_LIGHTS 16
 uniform int point_light_count;
-uniform vec3 point_light_position[MAX_POINT_LIGHTS];
-uniform vec3 point_light_color[MAX_POINT_LIGHTS];    // colour * intensity
-uniform vec2 point_light_falloff[MAX_POINT_LIGHTS];  // distance, decay
+uniform int lt_type[MAX_LIGHTS];
+uniform vec3 lt_position[MAX_LIGHTS];
+uniform vec3 lt_direction[MAX_LIGHTS];
+uniform vec3 lt_color[MAX_LIGHTS];
+uniform vec4 lt_params[MAX_LIGHTS];
+uniform vec3 lt_half_width[MAX_LIGHTS];
+uniform vec3 lt_half_height[MAX_LIGHTS];
+
+// renderer state of the map environment (map_environment.c, RenderLighting): useLegacyLights =
+// !correctLights, toneMapping 0..4 with toneMappingExposure, outputEncoding (1 sRGB)
+uniform bool correct_lights;
+uniform int tone_mapping;
+uniform float tone_mapping_exposure;
+uniform int output_encoding;
+uniform bool tex_srgb;  // the map texture is sRGBEncoding ("ten" 1): decoded when sampled
+uniform bool sprite;    // THREE.SpriteMaterial: never lit
+// three.js lightMap (texture unit 3, BASIC_LIGHT_MAP_TEXTURE_UNIT): indirect irradiance +=
+// texel * lightMapIntensity (* PI with legacy lights, folded into the uniform by basic.c)
+// ocean mirror pass (ocean.c): world-space clip plane, discard dot(n, p) + d < 0
+uniform bool clip_enabled;
+uniform vec4 clip_plane;
+uniform bool use_light_map;
+uniform sampler2D light_map;
+uniform float light_map_intensity;
 
 // three.js emissiveMap (texture unit 2): totalEmissiveRadiance = emissive * texel.rgb
 uniform bool use_emissive_map;
 uniform sampler2D emissive_map;
 vec3 emissive_radiance;
 
-// Krunker v3.1.1 world lighting under three.js r121 (non-physical lights, linear output).
-// Map materials are "StrippedLambertMaterial" (src/libs/shaders.js), but it does
-// Object.assign(shader, new MeshLambertMaterial(...)), which copies type
-// "MeshLambertMaterial", so three.js renders them with the stock meshlambert shader:
-//   indirect = getAmbientLightIrradiance(ambient * ambientI) * BRDF_Diffuse_Lambert   (PI / PI)
-//   direct   = PI * light * lightI * saturate(dot(N, L)) * BRDF_Diffuse_Lambert * shadowMask
-//   out      = diffuse * (indirect + direct) + emissive
-// (verified on the real client by zeroing each light: the two terms add up per channel).
-// The per-object "ab" map flag (ambient_enabled) turns off Krunker's vertex ambient-
-// occlusion gradient, not the AmbientLight, so it does not take part here.
-// three.js r121 getShadow() for BasicShadowMap: one nearest-texel compare, lit outside
-// the shadow camera frustum.
+// WP-F store-item effects (client/src/skin_fx.c). env: the skin's "<tex>_env" equirectangular map
+// (texture unit 4) sampled along the world-space reflection. Every v7.1.4 item with `env` is a GLTF
+// model (MeshStandardMaterial, metalness 1): its look is the reflection, albedo * env *
+// envMapIntensity, plus its emission; the PMREM roughness blur and the Fresnel term are not modelled.
+// projection_uv: screen-space texture coordinates (render.js projection: vTexCoords.xy / w / 2 + 0.5).
+uniform bool use_env_map;
+uniform sampler2D env_map;
+uniform float env_map_intensity;
+uniform bool projection_uv;
+
+const float PI = 3.141592653589793;
+const float RECIPROCAL_PI = 0.3183098861837907;
+
+// Krunker world lighting under three.js r150 (r121 in v3.1.1: the same maths for legacy lights).
+// Map materials are "StrippedLambertMaterial" (MeshLambertMaterial), so:
+//   irradiance = light colour (* PI with legacy lights) * saturate(dot(N, L)) * attenuation
+//   direct     = irradiance * BRDF_Lambert(diffuse) (= diffuse / PI)  [+ specular]
+//   indirect   = ambient * ambientI (* PI legacy) * BRDF_Lambert(diffuse)
+//   out        = indirect + direct + emissive
+// The per-object "ab" map flag (ambient_enabled) turns off Krunker's vertex ambient-occlusion
+// gradient, not the AmbientLight, so it does not take part here.
+// three.js r150 getShadow() for BasicShadowMap: one nearest-texel compare, lit outside the
+// shadow camera frustum.
 float krunker_shadow_mask() {
     if (!shadow_enabled) return 1.0;
     vec3 coord = shadow_coord.xyz / shadow_coord.w;
@@ -86,45 +126,168 @@ float krunker_shadow_mask() {
     return step(coord.z, texture(shadow_map, coord.xy).r);
 }
 
-// three.js r121 BRDF_Specular_BlinnPhong times the non-physical PI irradiance factor,
-// specularColor 0x111111, shininess 30: F_Schlick * 0.25 * (30 / 2 + 1) * dotNH^30.
-vec3 krunker_blinn_phong(vec3 light_dir, vec3 normal, vec3 view_dir) {
+vec3 f_schlick(vec3 f0, float f90, float dot_vh) {
+    float fresnel = exp2((-5.55473 * dot_vh - 6.98316) * dot_vh);
+    return f0 * (1.0 - fresnel) + f90 * fresnel;
+}
+
+// three.js r150 BRDF_BlinnPhong (specular 0x111111, shininess 30): F * 0.25 * D_BlinnPhong
+vec3 brdf_blinn_phong(vec3 light_dir, vec3 normal, vec3 view_dir) {
     vec3 half_dir = normalize(light_dir + view_dir);
     float dot_nh = clamp(dot(normal, half_dir), 0.0, 1.0);
-    float dot_lh = clamp(dot(light_dir, half_dir), 0.0, 1.0);
-    vec3 specular_color = vec3(17.0 / 255.0);
-    float fresnel = exp2((-5.55473 * dot_lh - 6.98316) * dot_lh);
-    vec3 f = (1.0 - specular_color) * fresnel + specular_color;
-    return f * (0.25 * (30.0 * 0.5 + 1.0) * pow(dot_nh, 30.0));
+    float dot_vh = clamp(dot(view_dir, half_dir), 0.0, 1.0);
+    vec3 f = f_schlick(vec3(17.0 / 255.0), 1.0, dot_vh);
+    return f * (0.25 * RECIPROCAL_PI * (30.0 * 0.5 + 1.0) * pow(dot_nh, 30.0));
+}
+
+// three.js r150 BRDF_GGX (MeshStandardMaterial: specularColor 0.04, specularF90 1, roughness 1)
+vec3 brdf_ggx(vec3 light_dir, vec3 normal, vec3 view_dir) {
+    float alpha = 1.0;
+    float a2 = alpha * alpha;
+    vec3 half_dir = normalize(light_dir + view_dir);
+    float dot_nl = clamp(dot(normal, light_dir), 0.0, 1.0);
+    float dot_nv = clamp(dot(normal, view_dir), 0.0, 1.0);
+    float dot_nh = clamp(dot(normal, half_dir), 0.0, 1.0);
+    float dot_vh = clamp(dot(view_dir, half_dir), 0.0, 1.0);
+    vec3 f = f_schlick(vec3(0.04), 1.0, dot_vh);
+    float gv = dot_nl * sqrt(a2 + (1.0 - a2) * dot_nv * dot_nv);
+    float gl = dot_nv * sqrt(a2 + (1.0 - a2) * dot_nl * dot_nl);
+    float v = 0.5 / max(gv + gl, 1e-6);
+    float denom = dot_nh * dot_nh * (a2 - 1.0) + 1.0;
+    float d = RECIPROCAL_PI * a2 / (denom * denom);
+    return f * (v * d);
+}
+
+// three.js r150 getDistanceAttenuation
+float distance_attenuation(float d, float cutoff, float decay) {
+    if (!correct_lights) {
+        return cutoff > 0.0 && decay > 0.0 ? pow(clamp(-d / cutoff + 1.0, 0.0, 1.0), decay) : 1.0;
+    }
+    float falloff = 1.0 / max(pow(d, decay), 0.01);
+    if (cutoff > 0.0) {
+        float r = d / cutoff;
+        float x = clamp(1.0 - r * r * r * r, 0.0, 1.0);
+        falloff *= x * x;
+    }
+    return falloff;
+}
+
+// three.js r150 LTC_Evaluate with mInv = identity: the clipped form factor of a rect-area light
+// (RE_Direct_RectArea_Physical's diffuse term). The LTC specular needs three's ltc_1/ltc_2
+// lookup textures and is not drawn (documented in client.h BasicLight).
+vec3 ltc_edge_vector_form_factor(vec3 v1, vec3 v2) {
+    float x = dot(v1, v2);
+    float y = abs(x);
+    float a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
+    float b = 3.4175940 + (4.1616724 + y) * y;
+    float v = a / b;
+    float theta_sintheta = x > 0.0 ? v : 0.5 * inversesqrt(max(1.0 - x * x, 1e-7)) - v;
+    return cross(v1, v2) * theta_sintheta;
+}
+
+float ltc_diffuse(vec3 n, vec3 v, vec3 p, vec3 rect[4]) {
+    vec3 v1 = rect[1] - rect[0];
+    vec3 v2 = rect[3] - rect[0];
+    vec3 light_normal = cross(v1, v2);
+    if (dot(light_normal, p - rect[0]) < 0.0) return 0.0;
+    vec3 t1 = normalize(v - n * dot(v, n));
+    vec3 t2 = -cross(n, t1);
+    mat3 m = transpose(mat3(t1, t2, n));
+    vec3 c0 = normalize(m * (rect[0] - p));
+    vec3 c1 = normalize(m * (rect[1] - p));
+    vec3 c2 = normalize(m * (rect[2] - p));
+    vec3 c3 = normalize(m * (rect[3] - p));
+    vec3 f = ltc_edge_vector_form_factor(c0, c1) + ltc_edge_vector_form_factor(c1, c2) +
+             ltc_edge_vector_form_factor(c2, c3) + ltc_edge_vector_form_factor(c3, c0);
+    float l = length(f);
+    return max((l * l + f.z) / (l + 1.0), 0.0);
+}
+
+// One punctual light (irradiance = colour * dotNL) for the material type.
+vec3 krunker_direct(vec3 c, vec3 l, vec3 diffuse, vec3 normal, vec3 view_dir) {
+    float dot_nl = clamp(dot(normal, l), 0.0, 1.0);
+    vec3 irradiance = c * dot_nl;
+    vec3 outgoing = irradiance * diffuse * RECIPROCAL_PI;
+    if (lighting_mode == 2) outgoing += irradiance * brdf_blinn_phong(l, normal, view_dir);
+    else if (lighting_mode == 3) outgoing += irradiance * brdf_ggx(l, normal, view_dir);
+    return outgoing;
 }
 
 vec3 krunker_lambert(vec3 diffuse, vec3 normal) {
-    vec3 light_dir = normalize(light_direction);
-    float dot_nl = clamp(dot(normal, light_dir), 0.0, 1.0);
-    vec3 indirect = ambient_color.rgb * ambient_intensity;
-    vec3 light = light_color.rgb * light_intensity * krunker_shadow_mask(); // getShadow scales the light
-    vec3 direct = light * dot_nl;
-    vec3 outgoing = diffuse * (indirect + direct) + emissive_radiance;
+    float light_scale = correct_lights ? 1.0 : PI;
+    vec3 view_dir = normalize(camera_position - world_pos);
+    // AmbientLight + the map's sun (skyLight, the only shadow caster)
+    vec3 irradiance = ambient_color.rgb * ambient_intensity * light_scale;
+    if (use_light_map) irradiance += texture(light_map, tex_coord).rgb * light_map_intensity;
+    vec3 outgoing = irradiance * diffuse * RECIPROCAL_PI + emissive_radiance;
+    vec3 sun = light_color.rgb * light_intensity * light_scale * krunker_shadow_mask(); // getShadow scales the light
+    outgoing += krunker_direct(sun, normalize(light_direction), diffuse, normal, view_dir);
 
-    if (lighting_mode == 2) {
-        vec3 view_dir = normalize(camera_position - world_pos);
-        outgoing += light * dot_nl * krunker_blinn_phong(light_dir, normal, view_dir);
-
-        // THREE.PointLight(colr, intensity, distance, decay), non-physical:
-        // irradiance = dotNL * color * (distance > 0 && decay > 0 ? saturate(1 - d / distance)^decay : 1)
-        for (int i = 0; i < point_light_count && i < MAX_POINT_LIGHTS; i++) {
-            vec3 to_light = point_light_position[i] - world_pos;
-            float d = length(to_light);
-            vec3 l = to_light / max(d, 1e-4);
-            vec2 falloff = point_light_falloff[i];
-            float factor = falloff.x > 0.0 && falloff.y > 0.0 ? pow(clamp(1.0 - d / falloff.x, 0.0, 1.0), falloff.y) : 1.0;
-            vec3 c = point_light_color[i] * factor;
-            float nl = clamp(dot(normal, l), 0.0, 1.0);
-            outgoing += c * nl * (diffuse + krunker_blinn_phong(l, normal, view_dir));
+    for (int i = 0; i < point_light_count && i < MAX_LIGHTS; i++) {
+        int type = lt_type[i];
+        vec4 params = lt_params[i];
+        if (type == 3) {
+            vec3 hw = lt_half_width[i], hh = lt_half_height[i], lp = lt_position[i];
+            vec3 rect[4];
+            rect[0] = lp + hw - hh;
+            rect[1] = lp - hw - hh;
+            rect[2] = lp - hw + hh;
+            rect[3] = lp + hw + hh;
+            outgoing += lt_color[i] * diffuse * ltc_diffuse(normal, view_dir, world_pos, rect);
+            continue;
         }
+        vec3 l;
+        vec3 c = lt_color[i];
+        if (type == 2) {
+            l = lt_direction[i];
+        } else {
+            vec3 to_light = lt_position[i] - world_pos;
+            float d = length(to_light);
+            l = to_light / max(d, 1e-4);
+            if (type == 1) {
+                float angle_cos = dot(l, lt_direction[i]);
+                c *= smoothstep(params.z, params.w, angle_cos); // getSpotAttenuation
+            }
+            c *= distance_attenuation(d, params.x, params.y);
+        }
+        outgoing += krunker_direct(c, l, diffuse, normal, view_dir);
     }
 
     return outgoing;
+}
+
+// three.js r150 tonemapping_pars_fragment (renderer.toneMapping, toneMappingExposure)
+vec3 krunker_tone_map(vec3 color) {
+    if (tone_mapping == 1) return tone_mapping_exposure * color;
+    if (tone_mapping == 2) {
+        color *= tone_mapping_exposure;
+        return clamp(color / (vec3(1.0) + color), 0.0, 1.0);
+    }
+    if (tone_mapping == 3) {
+        color *= tone_mapping_exposure;
+        color = max(vec3(0.0), color - 0.004);
+        return pow((color * (6.2 * color + 0.5)) / (color * (6.2 * color + 1.7) + 0.06), vec3(2.2));
+    }
+    if (tone_mapping == 4) {
+        const mat3 aces_input = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
+        const mat3 aces_output = mat3(vec3(1.60475, -0.10208, -0.00327), vec3(-0.53108, 1.10813, -0.07276), vec3(-0.07367, -0.00605, 1.07602));
+        color *= tone_mapping_exposure / 0.6;
+        color = aces_input * color;
+        vec3 a = color * (color + 0.0245786) - 0.000090537;
+        vec3 b = color * (0.983729 * color + 0.4329510) + 0.238081;
+        color = aces_output * (a / b);
+        return clamp(color, 0.0, 1.0);
+    }
+    return color;
+}
+
+// three.js r150 LinearTosRGB / sRGBToLinear
+vec3 linear_to_srgb(vec3 v) {
+    return mix(pow(v, vec3(0.41666)) * 1.055 - vec3(0.055), v * 12.92, vec3(lessThanEqual(v, vec3(0.0031308))));
+}
+
+vec3 srgb_to_linear(vec3 v) {
+    return mix(pow(v * 0.9478672986 + vec3(0.0521327014), vec3(2.4)), v * 0.0773993808, vec3(lessThanEqual(v, vec3(0.04045))));
 }
 
 // THREE.Fog(color, 1, fogD): fogFactor = smoothstep(near, far, -mvPosition.z).
@@ -200,6 +363,7 @@ float krunker_ramp_strip(float across) {
 }
 
 void main() {
+    if (clip_enabled && dot(clip_plane.xyz, world_pos) + clip_plane.w < 0.0) discard;
     vec2 scaled_tex_coord;
     vec4 object_color = color;
 
@@ -213,17 +377,20 @@ void main() {
     } else {
         scaled_tex_coord = tex_coord;
     }
+    if (projection_uv) scaled_tex_coord = clip_pos.xy / clip_pos.w * 0.5 + 0.5;
     if (use_vertex_color) object_color.rgb *= vertex_color;
 
     vec3 t_tex_coord = tex_transform * vec3(scaled_tex_coord, 1.0);
     vec4 texel = texture(tex, t_tex_coord.xy);
+    if (tex_srgb) texel.rgb = srgb_to_linear(texel.rgb);
     vec4 base_color = texel * object_color;
     if (base_color.a < alpha_test) discard;
 
     emissive_radiance = emissive.rgb * emissive.a;
     if (use_emissive_map) emissive_radiance *= texture(emissive_map, t_tex_coord.xy).rgb;
 
-    bool basic_material = lighting_mode == 0 || (lighting_mode == 1 && unlit);
+    vec3 albedo = base_color.rgb;
+    bool basic_material = lighting_mode == 0 || (lighting_mode == 1 && unlit) || sprite;
     if (lighting_enabled && !basic_material) {
         vec3 normal;
 
@@ -240,6 +407,17 @@ void main() {
 
         base_color.rgb = krunker_lambert(base_color.rgb, normal);
     }
+
+    if (use_env_map) {
+        vec3 n = use_flat_normal ? normalize(flat_normal) : normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+        vec3 r = reflect(normalize(world_pos - camera_position), n);
+        vec2 env_uv = vec2(atan(r.z, r.x) * 0.15915494309189535 + 0.5, asin(clamp(r.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
+        base_color.rgb = albedo * texture(env_map, env_uv).rgb * env_map_intensity + emissive_radiance;
+    }
+
+    // three.js r150 fragment tail: tonemapping_fragment, encodings_fragment, then fog_fragment
+    base_color.rgb = krunker_tone_map(base_color.rgb);
+    if (output_encoding == 1) base_color.rgb = linear_to_srgb(base_color.rgb);
 
     if (fog_enabled && material_fog_enabled) { // unlit (MeshBasicMaterial light cones) is fogged too
         base_color.rgb = krunker_fog(base_color.rgb);

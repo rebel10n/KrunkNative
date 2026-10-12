@@ -1,0 +1,59 @@
+P Custom GUIs
+-
+L[] Show GUI : switch=0
+B Add Element
+F Element 0 open
+-
+B Remove Element 0
+B Duplicate Element 0
+L[subsection] Element Label : text()=
+L[subsection] Type : select#4[Box..Div (HTML)]=Text
+L[] Value Type : select#3[Input Value..Global Value]=Player Value
+L[subsection] Key : text(Key)=score
+L[subsection] Font Size : sval=20 range[0,100,1]=20
+L[subsection] Color : color=#00ff00
+L[subsection] Opacity : sval=1 range[0,1,0.1]=1
+L[subsection] X : sval=25 range[0,100,1]=25
+L[subsection] Y : sval=10 range[0,100,1]=10
+L[subsection] Width : sval=100 range[0,2000,1]=100
+L[subsection] Height : sval=50 range[0,2000,1]=50
+L[subsection] Order Index : sval=0 range[0,2000,1]=0
+L[subsection] Hide : switch=0
+L[subsection] Element Id : sval=0 range[0,2000,1]=0
+-
+F Element 1 - Logo open
+-
+B Remove Element 1
+B Duplicate Element 1
+L[subsection] Element Label : text()=Logo!!
+L[subsection] Type : select#4[Box..Div (HTML)]=Image
+L[subsection] Image Asset ID : text(ID)=123
+B Select Image
+L[subsection] Opacity : sval=0.5 range[0,1,0.1]=0.5
+L[subsection] X : sval=50 range[0,100,1]=50
+L[subsection] Y : sval=50 range[0,100,1]=50
+L[subsection] Width : sval=64 range[0,2000,1]=64
+L[subsection] Height : sval=64 range[0,2000,1]=64
+L[subsection] Order Index : sval=3 range[0,2000,1]=3
+L[subsection] Hide : switch=0
+L[subsection] Element Id : sval=0 range[0,2000,1]=0
+-
+F Element 2 open
+-
+B Remove Element 2
+B Duplicate Element 2
+L[subsection] Element Label : text()=
+L[subsection] Type : select#4[Box..Div (HTML)]=Text
+L[] Value Type : select#3[Input Value..Global Value]=Player Value
+L[subsection] Key : text(Key)=score
+L[subsection] Font Size : sval=20 range[0,100,1]=20
+L[subsection] Color : color=#00ff00
+L[subsection] Opacity : sval=1 range[0,1,0.1]=1
+L[subsection] X : sval=25 range[0,100,1]=25
+L[subsection] Y : sval=10 range[0,100,1]=10
+L[subsection] Width : sval=100 range[0,2000,1]=100
+L[subsection] Height : sval=50 range[0,2000,1]=50
+L[subsection] Order Index : sval=0 range[0,2000,1]=0
+L[subsection] Hide : switch=0
+L[subsection] Element Id : sval=0 range[0,2000,1]=0
+-

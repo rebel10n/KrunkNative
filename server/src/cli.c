@@ -2,6 +2,7 @@
 #include <server_accounts.h>
 #include <server_config.h>
 #include <brain.h>
+#include <build_info.h>
 #include <map_catalog.h>
 #include <ctype.h>
 #include <errno.h>
@@ -14,8 +15,20 @@
 #include <direct.h>
 #define CLI_PATH_SEPARATOR '\\'
 #else
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
 #define CLI_PATH_SEPARATOR '/'
 #endif
+
+// The server log through replxx while the console owns the terminal (server_cli.h).
+static void cli_log_write(void *user, const char *text, const int length) {
+    replxx_write(user, text, length);
+}
+
+void server_log_set_replxx(Replxx *replxx) {
+    server_log_set_writer(replxx ? cli_log_write : NULL, replxx);
+}
 
 #define CLI_PROMPT "\x1b[1;32mkrunk\x1b[0m> "
 #define CLI_PROMPT_PLAIN "krunk> "
@@ -256,6 +269,7 @@ static void cli_cmd_mode(const char *args);
 static void cli_cmd_say(const char *args);
 #endif
 static void cli_cmd_round(const char *args);
+static void cli_cmd_lagcomp(const char *args);
 static void cli_cmd_op(const char *args);
 static void cli_cmd_deop(const char *args);
 static void cli_cmd_clear(const char *args);
@@ -279,6 +293,7 @@ static const CliCommand g_cli_commands[] = {
     {CLI_NAMES("say"), "say <message>", "Send a chat message to every player", CLI_ARG_TEXT, cli_cmd_say},
 #endif
     {CLI_NAMES("round"), "round [end | time <s> | length <s>]", "Show the round clock, end the round now, set the seconds left, or the length of later rounds (0 = mode default)", CLI_ARG_TEXT, cli_cmd_round},
+    {CLI_NAMES("lagcomp", "lag_comp"), "lagcomp [on | off | anchor exact|arrival|v3 | scale <0.1-1>]", "Show or change lag compensation (server.cfg lag_comp, lag_comp_anchor, lag_comp_scale)", CLI_ARG_TEXT, cli_cmd_lagcomp},
     {CLI_NAMES("op"), "op <id|name>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
     {CLI_NAMES("deop"), "deop <id|name>", "Take op away again", CLI_ARG_PLAYER, cli_cmd_deop},
     {CLI_NAMES("clear", "cls"), "clear", "Clear the screen", CLI_ARG_NONE, cli_cmd_clear},
@@ -375,6 +390,7 @@ static void cli_cmd_status(const char *args) {
     server_log("KrunkNative server v%d.%d.%d, listening on port %u",
                g_server_version.major, g_server_version.minor, g_server_version.patch,
                (unsigned int) g_server->config.listen_port);
+    server_log("  build      %s", kn_build_string());
     server_log("  uptime     %s", uptime);
     if (game->ready) {
         server_log("  map        %s (%d/%lu)", cli_map_name((size_t) game->current_map_index), game->current_map_index, (unsigned long) game->map_count);
@@ -555,6 +571,53 @@ static void cli_cmd_say(const char *args) {
 #endif
 
 // round: debug controls for the match clock (shared/src/game.c).
+static int cli_parse_switch(const char *word, int *out) {
+    if (!strcmp(word, "on") || !strcmp(word, "1") || !strcmp(word, "true")) return *out = 1, 1;
+    if (!strcmp(word, "off") || !strcmp(word, "0") || !strcmp(word, "false")) return *out = 0, 1;
+    return 0;
+}
+
+// Lag compensation (shared/src/player.c storeState / fetchState): the server.cfg knobs at runtime.
+static void cli_cmd_lagcomp(const char *args) {
+    pthread_mutex_lock(&g_server->lock);
+    Game *game = &g_server->game;
+    char word[16] = "", value[16] = "";
+    const int parsed = sscanf(args, "%15s %15s", word, value);
+    int on = 0;
+    int ok = 1;
+
+    if (parsed <= 0) {
+    } else if (cli_parse_switch(word, &on)) {
+        game->lag_comp = (unsigned char) on;
+    } else if (!strcmp(word, "anchor") && parsed == 2 && lag_comp_anchor_parse(value) >= 0) {
+        game->lag_comp_anchor = (unsigned char) lag_comp_anchor_parse(value);
+    } else if (!strcmp(word, "scale") && parsed == 2 && atof(value) >= 0.1 && atof(value) <= 1.0) {
+        g_gs_config.lag_comp_scale = (float) atof(value);
+        game->lag_comp_scale = g_gs_config.lag_comp_scale; // times each player's ENT lagComp
+    } else {
+        ok = 0;
+        server_log("Usage: lagcomp [on | off | anchor exact|arrival|v3 | scale <0.1-1>]");
+    }
+
+    if (ok) {
+        server_log("Lag compensation %s: %s rewind (%s), lagComp scale %.2f (x each player's slider), %.0f ms history",
+                   game->lag_comp ? "on" : "off", lag_comp_anchor_name(game->lag_comp_anchor),
+                   game->lag_comp_anchor == LAG_COMP_ANCHOR_EXACT ? "client input time + ping" :
+                   game->lag_comp_anchor == LAG_COMP_ANCHOR_ARRIVAL ? "input arrival + ping" : "ping * 2", g_gs_config.lag_comp_scale,
+                   GAME_STATE_HISTORY * 1000.0f);
+        for (size_t i = 0; i < g_server->client_count; i++) { // each player's ENT lagComp (Settings > Network slider)
+            const ClientConnection *client = &g_server->clients[i];
+            if (!client->player) continue;
+            const LagCompClock *clock = &client->player->lag_clock;
+            server_log("  %s: lagComp %.2f, ping %d ms, input clock %s (excess %.0f ms, %d samples)", client->name,
+                       client->player->lag_comp, client->ping_ms,
+                       clock->anomaly ? "anomaly (arrival fallback)" : clock->calibrated ? "calibrated" : "calibrating",
+                       clock->excess * 1000.0, clock->count);
+        }
+    }
+    pthread_mutex_unlock(&g_server->lock);
+}
+
 static void cli_cmd_round(const char *args) {
     pthread_mutex_lock(&g_server->lock);
     Game *game = &g_server->game;
@@ -905,7 +968,85 @@ void cli_main() {
 
 // Headless (stdin not a terminal: a pipe, a FIFO, docker attach, systemd): read plain
 // command lines like srcds. EOF only ends the reader (systemd's /dev/null is EOF at once).
-// Detached: a blocking fgets must not hold up shutdown.
+#ifndef WIN32
+// poll(stdin, wake pipe) + read(2), never stdio: a thread blocked in fgets() holds the
+// stdin FILE lock, and glibc's exit() (_IO_cleanup -> _IO_flush_all) waits for every
+// stream lock, so the process hung after "server stopped" while stdin was an idle pipe
+// or tty. cli_stop() writes the wake pipe and joins the reader.
+static int g_stdin_wake[2] = {-1, -1};
+static pthread_t g_stdin_thread;
+static int g_stdin_thread_running;
+
+static void cli_stdin_line(char *line, const int discard) {
+    line[strcspn(line, "\r")] = 0;
+    if (!discard && !g_server->should_quit) cli_execute(line);
+}
+
+static void *cli_stdin_main(void *arg) {
+    (void) arg;
+    char buf[512];
+    size_t len = 0;
+    int discard = 0; // the rest of an over-long line
+    while (!g_server->should_quit) {
+        struct pollfd fds[2] = {{.fd = STDIN_FILENO, .events = POLLIN}, {.fd = g_stdin_wake[0], .events = POLLIN}};
+        if (poll(fds, 2, -1) < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (fds[1].revents) break; // cli_stop()
+        if (fds[0].revents & POLLNVAL) break;
+        if (!(fds[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+        const ssize_t got = read(STDIN_FILENO, buf + len, sizeof(buf) - 1 - len);
+        if (got < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+        if (got <= 0) break; // EOF (or the terminal went away)
+        len += (size_t) got;
+        size_t start = 0;
+        for (size_t i = 0; i < len; i++) {
+            if (buf[i] != '\n') continue;
+            buf[i] = 0;
+            cli_stdin_line(buf + start, discard);
+            discard = 0;
+            start = i + 1;
+        }
+        memmove(buf, buf + start, len - start);
+        len -= start;
+        if (len == sizeof(buf) - 1) { // no newline in 511 bytes: drop the line
+            discard = 1;
+            len = 0;
+        }
+    }
+    if (len && !g_server->should_quit) { // last line without a newline before EOF
+        buf[len] = 0;
+        cli_stdin_line(buf, discard);
+    }
+    return NULL;
+}
+
+static void cli_stdin_start(void) {
+    if (pipe(g_stdin_wake)) return;
+    for (int i = 0; i < 2; i++) fcntl(g_stdin_wake[i], F_SETFD, FD_CLOEXEC);
+    if (pthread_create(&g_stdin_thread, NULL, cli_stdin_main, NULL)) {
+        close(g_stdin_wake[0]);
+        close(g_stdin_wake[1]);
+        g_stdin_wake[0] = g_stdin_wake[1] = -1;
+        return;
+    }
+    g_stdin_thread_running = 1;
+}
+
+static void cli_stdin_stop(void) {
+    if (!g_stdin_thread_running) return;
+    const char wake = 1;
+    while (write(g_stdin_wake[1], &wake, 1) < 0 && errno == EINTR) {}
+    pthread_join(g_stdin_thread, NULL);
+    g_stdin_thread_running = 0;
+    close(g_stdin_wake[0]);
+    close(g_stdin_wake[1]);
+    g_stdin_wake[0] = g_stdin_wake[1] = -1;
+}
+#else
+// Windows: no poll() on console handles; the detached reader stays (its fgets may
+// outlive shutdown, the CRT does not wait for it).
 static void *cli_stdin_main(void *arg) {
     (void) arg;
     char line[512];
@@ -916,11 +1057,19 @@ static void *cli_stdin_main(void *arg) {
     return NULL;
 }
 
-int cli_start(const int interactive) {
+static void cli_stdin_start(void) {
+    pthread_t reader;
+    if (!pthread_create(&reader, NULL, cli_stdin_main, NULL)) pthread_detach(reader);
+}
+
+static void cli_stdin_stop(void) {}
+#endif
+
+int cli_start(const int interactive, const int stdin_console) {
     g_cli_interactive = interactive && g_replxx;
     if (!g_cli_interactive) {
-        pthread_t reader;
-        if (!getenv("KN_NO_STDIN_CONSOLE") && !pthread_create(&reader, NULL, cli_stdin_main, NULL)) pthread_detach(reader);
+        // --no-cli (and KN_NO_STDIN_CONSOLE): no console at all, stdin is never read
+        if (stdin_console && !getenv("KN_NO_STDIN_CONSOLE")) cli_stdin_start();
         return 0;
     }
 
@@ -958,6 +1107,7 @@ int cli_is_interactive(void) {
 }
 
 void cli_stop(void) {
+    cli_stdin_stop();
     if (!g_cli_thread_running) return;
 
     g_server->should_quit = 1;

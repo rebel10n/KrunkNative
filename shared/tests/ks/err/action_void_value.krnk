@@ -1,0 +1,4 @@
+action f() {}
+public action start() {
+    num x = f();
+}

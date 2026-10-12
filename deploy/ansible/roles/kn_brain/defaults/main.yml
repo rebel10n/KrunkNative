@@ -17,6 +17,11 @@ kn_brain_instances:
     roles: auth,community
     db: "{{ kn_coordinator_db }}"
 kn_brain_log_level: info
+# Staff accounts (config accounts.developers / accounts.moderators): kn_brain sets
+# players.player_developer + player_moderator (developers) or player_moderator
+# (moderators) for these usernames at every start. Developer is the highest level.
+kn_brain_developers: []
+kn_brain_moderators: []
 # Secrets: put them in an ansible-vault file (group_vars/central/vault.yml, see
 # README) or pass -e; generated once on the host when unset, then kept.
 kn_brain_internal_secret: ""

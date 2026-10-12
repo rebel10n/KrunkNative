@@ -1,0 +1,16 @@
+H 
+X Publish Game
+X 0 / 250
+X KB
+I button()=Select
+X Select Thumbnail
+I file()=null
+X Category
+I select#24[Other..Education]=Other
+X Post to Hub
+I switch=0
+X Mobile Friendly
+I switch=0
+I text(Paste Data)=null
+I text(Youtube Link (Optional))=null
+X Publish

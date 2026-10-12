@@ -9,6 +9,7 @@
 #include <backend.h>
 #include <cJSON.h>
 #include "backend_internal.h"
+#include <headless.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -92,6 +93,16 @@ static int parse_url(const char *url, BrainAddr *a) {
     size_t n = strlen(a->base);
     while (n && a->base[n - 1] == '/') a->base[--n] = 0;
     return 1;
+}
+
+// The request target of an http(s) URL: everything from the first '/' after host[:port]
+// ("" for none). Not BrainAddr.base: that one is char[128] and cut a signed-in seek-game
+// (?game=...&token=<32 hex>) short by a character, so the brain saw a guest.
+static const char *url_target(const char *url) {
+    const char *p = strstr(url, "://");
+    p = p ? p + 3 : url;
+    while (*p && *p != '/') p++;
+    return p;
 }
 
 static int64_t now_ms(void) {
@@ -323,6 +334,13 @@ void backend_init(const char *cli_url) {
     char saved[256] = "";
     if ((!url || !url[0]) && html_storage_get("knBrainUrl", saved, sizeof(saved)) > 0) url = saved; // client setting
     char local[256] = "";
+    if ((!url || !url[0]) && headless_enabled()) {
+        // headless runs (tests, captures, smoke) never reach the production coordinator unless
+        // a URL is given explicitly (--brain / KRUNKNATIVE_BRAIN_URL)
+        backend_store_url("");
+        printf("[backend] headless: no account service (set KRUNKNATIVE_BRAIN_URL to use one)\n");
+        return;
+    }
     if (!url || !url[0]) {
         // nothing configured: the mode's account service (online: coordinator.krunk.io), probed first
         snprintf(local, sizeof(local), "%s", online_default_account_url());
@@ -381,14 +399,15 @@ static void http_run(HttpJob *job) {
         free(req_body);
         return;
     }
-    // the path part of the URL after host[:port] (parse_url put it in base)
+    // the whole path + query of the URL after host[:port]
     Bytes req = {0};
     char head[640];
     const size_t body_len = req_body ? strlen(req_body) : 0;
+    const char *target = url_target(job->url);
     bytes_push(&req, job->method, strlen(job->method));
     bytes_push(&req, " ", 1);
-    if (!a.base[0]) bytes_push(&req, "/", 1);
-    bytes_push(&req, a.base, strlen(a.base));
+    if (!target[0]) bytes_push(&req, "/", 1);
+    bytes_push(&req, target, strlen(target));
     const int default_port = !strcmp(a.port, a.tls ? "443" : "80");
     snprintf(head, sizeof(head), " HTTP/1.1\r\nHost: %s%s%s\r\nUser-Agent: KrunkNative\r\nAccept: application/json\r\nConnection: close\r\n",
              a.host, default_port ? "" : ":", default_port ? "" : a.port);

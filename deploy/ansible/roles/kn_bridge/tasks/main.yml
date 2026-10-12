@@ -180,7 +180,8 @@
           {%- set rule = {'hostname': kn_bridge_hostname, 'service': 'http://localhost:' ~ kn_bridge_port} -%}
           {%- set ns = namespace(out=[], done=false) -%}
           {%- for r in kn_bridge_tunnel.json.result.config.ingress -%}
-            {%- if r.hostname is defined and r.hostname == kn_bridge_hostname -%}
+            {#- path rules on the same hostname (kn_rtc: /rtc) are other services': kept as they are -#}
+            {%- if r.hostname is defined and r.hostname == kn_bridge_hostname and r.path is not defined -%}
               {%- if not ns.done -%}{%- set ns.out = ns.out + [r | combine(rule)] -%}{%- set ns.done = true -%}{%- endif -%}
             {%- elif loop.last and r.hostname is not defined and not ns.done -%}
               {%- set ns.out = ns.out + [rule, r] -%}{%- set ns.done = true -%}

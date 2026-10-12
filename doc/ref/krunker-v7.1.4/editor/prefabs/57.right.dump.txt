@@ -1,0 +1,32 @@
+P Rune
+L[] Visible : switch=1
+L[] Bullet Collisions : switch=1
+L[] AI Collisions : switch=1
+L[] Wall Jumpable : switch=1
+L[] Can Grapple : switch=1
+L[] Can Impulse : switch=1
+L[] Show On Minimap : switch=1
+L[] Step Sound : select#5[Default..Snow]=Default
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 20/0,0.01/0,20/0
+-
+F Style closed
+-
+Fs Texture closed
+Fss Movement closed
+L[subsubsection] Speed : sval=0 range[-20,20,0.1]=0
+L[subsubsection] Axis : select#2[X..Y]=X
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+L[] Emissive : color=#000000
+L[] Opacity : sval=1 range[0,1,0.1]=1
+L[] Mimic Sprite : switch=0
+-

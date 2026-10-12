@@ -1,8 +1,11 @@
-// The modes.js functions (Krunker.Unpacked-v3.1.1/50.js): round conditions,
-// winConditions, endSorts, gameStarts, onKills and the waitTimer triggers that pick
-// seekers / bosses / stalkers / traitors (106.js pickSeeker, infectRandom, ...).
+// The mode functions (Krunker v7.1.4 src/modes/<id>.js; v3.1.1 Krunker.Unpacked-v3.1.1/50.js):
+// round conditions, winConditions, endSorts / leaderSorts, gameStarts, onKills and the
+// waitTimer triggers that pick seekers / bosses / stalkers / traitors (game.js pickSeeker,
+// infectRandom, ...). The objective updates live in mode_objectives.c, mode_dom.c and
+// mode_deposit.c.
 #include "mode_internal.h"
 #include <ai.h>
+#include <math.h>
 #include <string.h>
 
 // ------------------------------------------------------------------ helpers
@@ -90,6 +93,7 @@ int mode_cond_gun(const Game *game) {
     return 1;
 }
 
+// KN Ranked (38, v3.1.1 modes[14]): first to 10 kills
 int mode_cond_kills(const Game *game) {
     for (size_t i = 0; i < game->player_count; i++) {
         const Player *player = game->players[i];
@@ -107,20 +111,19 @@ int mode_cond_oinc(const Game *game) {
     return alive > 1;
 }
 
-static void kc_team_confirms(const Game *game, int *team1, int *team2) {
-    *team1 = *team2 = 0;
-    for (size_t i = 0; i < game->player_count; i++) {
-        const Player *player = game->players[i];
-        if (!player) continue;
-        if (player->team == 1) *team1 += player->mode.confirms;
-        else *team2 += player->mode.confirms;
-    }
+// kc.js / depo.js condition: !(teamScores[1] >= tagLimit) && !(teamScores[2] >= tagLimit)
+int mode_cond_tag_limit(const Game *game) {
+    const GameMode *mode = game->mode;
+    return !(mode->team_scores[1] >= mode->config.tag_limit) && !(mode->team_scores[2] >= mode->config.tag_limit);
 }
 
-int mode_cond_kc(const Game *game) {
-    int team1, team2;
-    kc_team_confirms(game, &team1, &team2);
-    return team1 < game->mode->config.tag_limit && team2 < game->mode->config.tag_limit;
+// depoffa.js condition: nobody has deposited tagLimit KR Tags
+int mode_cond_deposits(const Game *game) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *player = game->players[i];
+        if (player && player->mode.deposits >= game->mode->config.tag_limit) return 0;
+    }
+    return 1;
 }
 
 int mode_cond_def(const Game *game) {
@@ -139,31 +142,26 @@ int mode_cond_def(const Game *game) {
     return defenders >= 1 && attackers >= 1;
 }
 
-// raid: someone still has a life; once the behavType 2 boss AI (Lord of Souls) is dead
-// and no wait timer runs, "raid ends in " 10 s ends the round (gameTimer = "skip").
-// Every player's "time" end stat becomes the round clock shown at that moment (lastTimer).
+// raid.js v7: (lives > 0 && active) players left. v3.1.1 also ended the round 10 s after the
+// boss AI (behavType 2) died; v7.1.4 dropped that, the raid ends on time or when everyone is out.
 int mode_cond_raid(const Game *game) {
-    int alive = 0;
-    for (size_t i = 0; i < game->player_count && !alive; i++) {
+    for (size_t i = 0; i < game->player_count; i++) {
         const Player *player = game->players[i];
-        alive = player && player->mode.lives > 0;
+        if (player && player->mode.lives > 0 && player->active) return 1;
     }
-    if (!alive) return 0;
+    return 0;
+}
 
-    for (int i = 0; game->ai && i < game->ai->count; i++) {
-        const GameAI *ai = &game->ai->ais[i];
-        if (!ai->active && ai->behaviour_type == 2 && !game->mode->wait_timer_count) {
-            for (size_t p = 0; p < game->player_count; p++) { // players.list[g].timer = c.lastTimer
-                Player *player = game->players[p];
-                if (!player) continue;
-                player->mode.has_timer = 1;
-                player->mode.timer = game->round_timer;
-            }
-            const ModeWaitTimer end = {.time = 10.0f, .msg = "raid ends in ", .trigger = mode_trigger_skip};
-            mode_push_wait_timer((Game *) game, &end, 1);
-        }
+// raid.js onEnd: with time left, every active player without a time gets the elapsed time.
+void mode_end_raid(Game *game) {
+    if (game->round_timer <= 0.0f) return; // gameTimerP <= 0
+    const float total = game->mode->started_timer;
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (!player || player->mode.has_timer || !player->active) continue;
+        player->mode.has_timer = 1;
+        player->mode.timer = total - game->round_timer;
     }
-    return 1;
 }
 
 // trai onKill: outside the wait timers, "<victim>'s Ghost" (AI kind 0) where they died.
@@ -187,6 +185,17 @@ int mode_cond_lives_ffa(const Game *game) {
 
 int mode_cond_lives_teams(const Game *game) {
     return count_lives_team(game, 1, 0) >= 1 && count_lives_team(game, 2, 0) >= 1;
+}
+
+// finishInit multiTeam lives condition: players with lives left on more than one team
+int mode_cond_lives_multi(const Game *game) {
+    int seen[MODE_TEAMS] = {0}, teams = 0;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *player = game->players[i];
+        if (!player || player->mode.lives <= 0 || player->team <= 0 || player->team >= MODE_TEAMS) continue;
+        if (!seen[player->team]++) teams++;
+    }
+    return teams > 1;
 }
 
 int mode_cond_score_ffa(const Game *game) {
@@ -262,10 +271,44 @@ ModeWinner mode_win_first_alive(const Game *game) {
     return winner_player(NULL);
 }
 
-ModeWinner mode_win_kc(const Game *game) {
-    int team1, team2;
-    kc_team_confirms(game, &team1, &team2);
-    return winner_team(team1 > team2 ? 1 : 2);
+// kc.js / depo.js winCondition: the higher team score; a tie goes to denies, then kills, then
+// score. v7.1.4 quirk kept (map-logic.md Appendix D): team 2's "score" sums its kills.
+ModeWinner mode_win_tag_teams(const Game *game) {
+    const int score1 = game->mode->team_scores[1], score2 = game->mode->team_scores[2];
+    if (score1 != score2) return winner_team(score1 > score2 ? 1 : 2);
+
+    int kills1 = 0, kills2 = 0, points1 = 0, points2 = 0, denies1 = 0, denies2 = 0;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *player = game->players[i];
+        if (!player) continue;
+        if (player->team == 1) {
+            kills1 += (int) player->kills;
+            points1 += player->score;
+            denies1 += player->mode.denies;
+        } else {
+            kills2 += (int) player->kills;
+            points2 += (int) player->kills; // the v7.1.4 bug: vLN0488 += kills
+            denies2 += player->mode.denies;
+        }
+    }
+    if (denies1 != denies2) return winner_team(denies1 > denies2 ? 1 : 2);
+    if (kills1 != kills2) return winner_team(kills1 > kills2 ? 1 : 2);
+    return winner_team(points1 > points2 ? 1 : 2);
+}
+
+// raid.js winCondition: someone has lives left and the clock did not run out
+ModeWinner mode_win_raid(const Game *game) {
+    int alive = 0;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *player = game->players[i];
+        if (player && player->mode.lives > 0) alive++;
+    }
+    return winner_team(game->round_timer > 0.0f && alive > 0 ? 1 : 2);
+}
+
+ModeWinner mode_win_team2(const Game *game) {
+    (void) game;
+    return winner_team(2);
 }
 
 ModeWinner mode_win_def(const Game *game) {
@@ -304,11 +347,52 @@ int mode_sort_kc(const Player *a, const Player *b) {
     return b->mode.confirms - a->mode.confirms;
 }
 
+// ctf.js endSort == leaderSort: caps, then (both scored) the lower score first, as written in v7
+int mode_sort_ctf(const Player *a, const Player *b) {
+    if (a->mode.caps == b->mode.caps && a->score && b->score) return a->score - b->score;
+    return b->mode.caps - a->mode.caps;
+}
+
+// depo.js / depoffa.js endSort: deposits, then more kills first
+int mode_sort_depo(const Player *a, const Player *b) {
+    if (a->mode.deposits == b->mode.deposits && a->kills && b->kills) return (int) b->kills - (int) a->kills;
+    return b->mode.deposits - a->mode.deposits;
+}
+
+// The leaderSorts (client leaderboard) of gun / oinc / kc / depo: as the endSorts, but a tie
+// puts the player with fewer kills first (a.kills - b.kills), exactly as v7.1.4 writes them.
+int mode_leader_sort_gun(const Player *a, const Player *b) {
+    if (a->mode.weapon_tier == b->mode.weapon_tier && a->kills && b->kills) return (int) a->kills - (int) b->kills;
+    return b->mode.weapon_tier - a->mode.weapon_tier;
+}
+
+int mode_leader_sort_oinc(const Player *a, const Player *b) {
+    if (a->mode.lives == b->mode.lives && a->kills && b->kills) return (int) a->kills - (int) b->kills;
+    return b->mode.lives - a->mode.lives;
+}
+
+int mode_leader_sort_kc(const Player *a, const Player *b) {
+    if (a->mode.confirms == b->mode.confirms && a->kills && b->kills) return (int) a->kills - (int) b->kills;
+    return b->mode.confirms - a->mode.confirms;
+}
+
+int mode_leader_sort_depo(const Player *a, const Player *b) {
+    if (a->mode.deposits == b->mode.deposits && a->kills && b->kills) return (int) a->kills - (int) b->kills;
+    return b->mode.deposits - a->mode.deposits;
+}
+
 // ------------------------------------------------------------------ gameStart
 
+// point.js gameStart: activeObjective = -1; nextObjective(null, true)
 void mode_start_objective(Game *game) {
     game->mode->active_objective = -1;
-    mode_next_objective(game, 0.0f, 1);
+    mode_next_objective(game, 0.0f, 1, 1, -1);
+}
+
+// king.js / depo.js / depoffa.js gameStart: activeObjective = -1; randObjective(null, true)
+void mode_start_rand_objective(Game *game) {
+    game->mode->active_objective = -1;
+    mode_rand_objective(game, 0.0f, 1, 1);
 }
 
 void mode_start_lock_objective(Game *game) {
@@ -337,19 +421,22 @@ void mode_start_weapon(Game *game) {
 
 // ------------------------------------------------------------------ onKill
 
-void mode_kill_ctf(Game *game, Player *victim, Player *killer, const int weapon_id) {
+// ctf / blitz / tdf / car onKill: dropFlag(victim.flag). A death zone / deathY resets the flag
+// first (player.js kill objects, players.update deathY: resetFlag, then kill).
+void mode_kill_flag(Game *game, Player *victim, Player *killer, const int weapon_id) {
     (void) killer;
     (void) weapon_id;
     if (!victim->mode.flag) return;
 
-    // A death zone / falling resets the flag (players.update, Player.update kill objects),
-    // any other death drops it where the carrier fell.
     if (mode_in_kill_zone(game, victim)) mode_reset_flag(game, victim->mode.flag - 1);
     else mode_drop_flag(game, victim);
 }
 
+// gun.js onKill: a streak kill (info.stk; KN: a kill without a weapon) does not promote.
 void mode_kill_gun(Game *game, Player *victim, Player *killer, const int weapon_id) {
-    if (killer && killer != victim) {
+    if (killer && killer != victim && weapon_id < 0) {
+        // streak kill: no tier change
+    } else if (killer && killer != victim) {
         const int id = weapon_id >= 0 ? weapon_id : (killer->loadout_size ? killer->loadout[killer->loadout_index] : -1);
         const Weapon *weapon = id >= 0 && (size_t) id < game->weapon_count ? game->weapons[id] : NULL;
 
@@ -366,7 +453,7 @@ void mode_kill_gun(Game *game, Player *victim, Player *killer, const int weapon_
     game->leaders_dirty = 1;
 }
 
-// oinc: a kill refills one bullet (max 7)
+// oinc: a kill refills one bullet (max 7), "uamo"
 void mode_kill_oinc(Game *game, Player *victim, Player *killer, const int weapon_id) {
     (void) weapon_id;
     if (killer && killer != victim && killer->loadout_size && killer->ammo) {
@@ -389,6 +476,108 @@ void mode_kill_def(Game *game, Player *victim, Player *killer, const int weapon_
     (void) victim;
     (void) killer;
     (void) weapon_id;
+}
+
+// shrp.js onKill: killStreak % 2 -> effect 1, % 3 -> effect 2, % 5 -> effect 0 (players.giveEffect)
+void mode_kill_shrp(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) game;
+    (void) weapon_id;
+    if (!killer || killer == victim) return;
+#ifdef PLAYER_EFFECTS_V7 // player-viewer WP-B effects (shared/src/effects.c)
+    if (killer->kill_streak % 2 == 0) player_give_effect(killer, 1, 1);
+    if (killer->kill_streak % 3 == 0) player_give_effect(killer, 2, 1);
+    if (killer->kill_streak % 5 == 0) player_give_effect(killer, 0, 1);
+#endif
+}
+
+// krank.js onKill: the killer is (re)kranked for krankedTimer ("chrg"); a kill while kranked or
+// of a kranked victim gives +35 "Recharge" / "Clock Work".
+void mode_kill_krank(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) weapon_id;
+    if (!killer || killer == victim) return;
+    const int was_kranked = killer->mode.is_kranked;
+    killer->mode.kranked_timer = game->mode->config.kranked_timer;
+    killer->mode.is_kranked = 1;
+    mode_send_counter(game, NET_MODE_COUNTER_CHARGE, killer, killer->mode.kranked_timer, 0);
+    if (was_kranked || victim->mode.is_kranked) {
+        player_score(killer, 35, 0);
+        mode_send_medal(game, killer, was_kranked ? "Recharge" : "Clock Work", 35);
+    }
+}
+
+// krank.js update: an expired kranked timer explodes (radius 50, 300 damage) and kills its player.
+void mode_update_krank(Game *game, const float delta) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (!player || !player->active || player->mode.kranked_timer <= 0.0f) continue;
+        player->mode.kranked_timer -= delta;
+        if (player->mode.kranked_timer > 0.0f) continue;
+        player->mode.kranked_timer = 0.0f;
+        const vec3 at = {player->position.x, player->position.y + 6.0f, player->position.z};
+        game_explosion(game, at, 50.0f, 300.0f, player, -1); // game.explosion(x, y + 6, z, 50, 300, player, {})
+        if (player->active) player_kill(player, NULL, NULL, 0);
+    }
+}
+
+// bhffa.js onKill: headMlt = min(headMltMax, 1 + headMlt * kills) -> updateHeadSize, "bh"
+void mode_kill_bhffa(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) weapon_id;
+    if (!killer || killer == victim) return;
+    const GameModeConfig *config = &game->mode->config;
+    const float step = config->head_mlt > 0.0f ? config->head_mlt : 0.1f;
+    const float max = config->head_mlt_max > 0.0f ? config->head_mlt_max : 3.0f;
+    killer->mode.head_mlt = fminf(max, 1.0f + step * (float) killer->kills);
+    mode_send_counter(game, NET_MODE_COUNTER_HEAD, killer, killer->mode.head_mlt, 0);
+}
+
+// imp.js onKill: a killer whose knife is out (thrown) gets it back (refillPlayer)
+void mode_kill_imp(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) weapon_id;
+    if (!killer || killer == victim || killer->can_throw) return;
+    killer->can_throw = 1;
+    game_send(game, killer->uid, NET_PACKET_REFILL, NULL, 0);
+}
+
+// aon.js onKill: the victim drops an Ammo Pack (its magazine, data.c) and 30% a Melee Pickup; a
+// killer on a streak of 5+ gets a random effect of {0, 2, 9} half of the time.
+void mode_kill_aon(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) weapon_id;
+    int use_ground = victim->mode.has_last_ground && (!killer || killer == victim);
+    if ((killer && killer != victim) || use_ground) {
+        if (victim->mode.has_last_ground && !victim->on_ground) use_ground = 1;
+        const vec3 at = use_ground ? victim->mode.last_ground : victim->position;
+        const SpawnableData pack = {.c = victim->ammo && victim->loadout_size ? (int) victim->ammo[0] : 0, .w = -1,
+                                    .xd = victim->direction.x + (float) M_PI / 2.0f};
+        spawnable_drop_ex(game, SPAWNABLE_AMMO_PACK, victim, &pack, at);
+        if (mode_rand_int(1, 100) <= 30) spawnable_drop(game, SPAWNABLE_MELEE_PICKUP, victim, 0, at);
+    }
+    if (killer && killer != victim && killer->kill_streak >= 5 && mode_rand_int(1, 100) >= 50) {
+        static const int k_effects[] = {0, 2, 9};
+        const int effect = k_effects[mode_rand_int(0, 2)];
+#ifdef PLAYER_EFFECTS_V7 // player-viewer WP-B effects (shared/src/effects.c)
+        player_give_effect(killer, effect, 1);
+#else
+        (void) effect;
+#endif
+    }
+}
+
+// md.js onKill: a Weapon Box with a random weapon, and 20% a Melee Pickup 3-8 units away
+void mode_kill_md(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) weapon_id;
+    static const int k_weapons[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 16, 18, 21, 27};
+    if (!killer || killer == victim) return;
+    vec3 at;
+    mode_kill_point(victim, &at);
+    const SpawnableData box = {.w = k_weapons[mode_rand_int(0, (int) (sizeof(k_weapons) / sizeof(k_weapons[0])) - 1)],
+                               .xd = victim->direction.x + (float) M_PI / 2.0f};
+    spawnable_drop_ex(game, SPAWNABLE_WEAPON_BOX, victim, &box, at);
+    if (mode_rand_int(1, 100) <= 20) {
+        // UTILS.randInt2(3, 8): 3..8 with a random sign
+        const float dx = (float) mode_rand_int(3, 8) * (mode_random() < 0.5f ? -1.0f : 1.0f);
+        const float dz = (float) mode_rand_int(3, 8) * (mode_random() < 0.5f ? -1.0f : 1.0f);
+        spawnable_drop(game, SPAWNABLE_MELEE_PICKUP, victim, 0, (vec3) {at.x + dx, at.y, at.z + dz});
+    }
 }
 
 // ------------------------------------------------------------------ waitTimer triggers
@@ -525,7 +714,11 @@ void mode_trigger_lives_start(Game *game, const float overflow) {
 }
 
 void mode_trigger_next_objective(Game *game, const float overflow) {
-    mode_next_objective(game, overflow, 0);
+    mode_next_objective(game, overflow, 0, 0, -1);
+}
+
+void mode_trigger_rand_objective(Game *game, const float overflow) {
+    mode_rand_objective(game, overflow, 0, 0);
 }
 
 void mode_trigger_next_weapon(Game *game, const float overflow) {

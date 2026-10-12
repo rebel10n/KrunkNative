@@ -66,7 +66,7 @@
     "ranked": {
       "enabled": true,
       "min_level": 15,
-      "mode": 14,
+      "mode": 38,
       "maps": [],
       "rating_window": 150,
       "window_growth": 10,
@@ -125,9 +125,10 @@
       "jb-hnd": 2,
       "blr": 2,
       "de-fra": 3,
-      "us-nj": 4,
-      "us-ca-sv": 4,
-      "us-fl": 4
+      "SV": 4,
+      "LA": 4,
+      "CH": 4,
+      "VA": 4
     },
     "rank_var": 0.03,
     "trade_min_level": 20,
@@ -229,6 +230,12 @@
     "tags": [],
     "enforce_skins": "auto",
     "shutdown_grace": 10,
+    "lag_comp": true,
+    "lag_comp_anchor": 1,
+    "lag_comp_scale": 1,
+    "bots": 0,
+    "bot_quota": 0,
+    "bot_difficulty": "normal",
     "log_file": ""
   }
 }

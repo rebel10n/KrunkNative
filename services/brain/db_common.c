@@ -318,5 +318,13 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     for (int i = 0; i < 40; i++) cJSON_AddItemToArray(d, slots[i]);
     cJSON_AddItemToObject(o, "data", d);
     cJSON_Delete(r);
+    /* WP-E part 2c (0107_progression): the earned badges, as kn_account_json's "badges" */
+    cJSON *rows = dbx_rows(x, SQL(.any = "SELECT badge AS b__i FROM player_badges WHERE account_id = $1 ORDER BY badge"),
+                           KN_DB_ARGS(I64S(id)));
+    cJSON *badges = cJSON_CreateArray();
+    const cJSON *row;
+    cJSON_ArrayForEach(row, rows) cJSON_AddItemToArray(badges, cJSON_CreateNumber(num(row, "b")));
+    cJSON_Delete(rows);
+    cJSON_AddItemToObject(o, "badges", badges);
     return o;
 }

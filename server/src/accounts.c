@@ -3,10 +3,14 @@
 #include <server_accounts.h>
 #include <server_log.h>
 #include <brain.h>
+#include <build_info.h>
 #include <central_auth.h>
 #include <rcon.h>
 #include <auth_join.h>
 #include <map_catalog.h>
+#include <map_validate.h>
+#include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
+#include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +45,8 @@ static struct {
     cJSON *pending_host;       // "host" waiting for its published map (/api/map-data)
     uint32_t pending_rid;
     cJSON *hosted_map;         // the fetched published map of the current custom game (owned)
+    char published_map[128];   // WP6: config.customMap of the current custom game ("" none)
+    int kr_rewards;            // WP6: host option krRewards on that published map
 
     // bans file
     int ban_accounts[256];
@@ -181,10 +187,16 @@ static cJSON *acc_lobby_tuple(void) {
         cJSON_AddStringToObject(meta, "i", map);
     }
     cJSON_AddStringToObject(meta, "v", ACC_VERSION);
+    // build identity (build_info.h): the brain flags outdated lobbies and matches protocols
+    // (services/brain/release_info.c); federated with the tuple like every meta field
+    cJSON_AddStringToObject(meta, "proto", kn_build_protocol());
+    cJSON_AddStringToObject(meta, "build", kn_build_info()->describe);
+    cJSON_AddStringToObject(meta, "commit", kn_build_info()->commit);
+    cJSON_AddNumberToObject(meta, "commitTime", (double) kn_build_info()->commit_time);
     cJSON_AddBoolToObject(meta, "cs", g_acc.custom);
     if (custom_map) cJSON_AddStringToObject(meta, "m", map);
     else cJSON_AddNullToObject(meta, "m");
-    cJSON_AddBoolToObject(meta, "pr", 0);
+    cJSON_AddBoolToObject(meta, "pr", g_gs_config.password[0] != 0); // password protected (never quick-joined)
     cJSON_AddBoolToObject(meta, "earnKR", g_gs_config.earn_kr && !g_acc.custom);
     cJSON_AddNumberToObject(meta, "mode", mode_id);
     cJSON_AddStringToObject(meta, "modeName", mode_name(mode_id));
@@ -195,6 +207,10 @@ static cJSON *acc_lobby_tuple(void) {
     if (g_gs_config.web_url[0]) cJSON_AddStringToObject(meta, "webUrl", g_gs_config.web_url);
     cJSON_AddNumberToObject(meta, "timeLeft", game->end_timer > 0.0f ? 0 : (int) ceilf(game->round_timer > 0.0f ? game->round_timer : 0.0f));
     cJSON_AddBoolToObject(meta, "draining", g_acc.draining);
+    // WP-E: a hosted game's config.hostTypes index (comp / zombies / raid) and its privacy, for the
+    // custom games list; the brain passes meta through, older brains and clients ignore them
+    if (game->config.host_type > 0) cJSON_AddNumberToObject(meta, "hostType", game->config.host_type);
+    if (game->config.is_private) cJSON_AddBoolToObject(meta, "private", 1);
     if (g_rk.active) {
         cJSON_AddBoolToObject(meta, "ranked", 1);
         cJSON_AddStringToObject(meta, "matchId", g_rk.match_id);
@@ -237,9 +253,19 @@ static cJSON *acc_hello(void) {
     cJSON_AddNumberToObject(hello, "publicPort", g_gs_config.public_port ? g_gs_config.public_port : g_server->config.listen_port);
     if (g_gs_config.web_url[0]) cJSON_AddStringToObject(hello, "webUrl", g_gs_config.web_url);
     cJSON_AddStringToObject(hello, "version", ACC_VERSION);
+    const KnBuildInfo *build = kn_build_info();
+    cJSON_AddStringToObject(hello, "build", build->describe);
+    cJSON_AddStringToObject(hello, "commit", build->commit);
+    cJSON_AddNumberToObject(hello, "commitTime", (double) build->commit_time);
+    cJSON_AddStringToObject(hello, "buildTime", build->build_time);
+    cJSON_AddStringToObject(hello, "protocol", kn_build_protocol());
     cJSON_AddNumberToObject(hello, "maxPlayers", g_server->config.max_players);
     cJSON_AddBoolToObject(hello, "custom", g_gs_config.custom_games);
     cJSON_AddNumberToObject(hello, "maxLobbies", 1);
+    // Matchmaking eligibility: the brain sends only signed-in players to online_mode nodes
+    // and never quick-joins password protected ones (services/brain/registry.c).
+    cJSON_AddNumberToObject(hello, "onlineMode", g_gs_config.online_mode ? 1 : 0);
+    cJSON_AddBoolToObject(hello, "password", g_gs_config.password[0] != 0);
     cJSON *modes = cJSON_AddArrayToObject(hello, "modes");
     for (size_t i = 0; i < g_server->game.mode_count; i++) cJSON_AddItemToArray(modes, cJSON_CreateNumber(g_server->game.modes[i]));
     cJSON *maps = cJSON_AddArrayToObject(hello, "maps");
@@ -368,24 +394,44 @@ void accounts_configure_public(Game *game, const cJSON *cli_map) {
     size_t mode_count = 0;
     int *modes = gs_build_mode_list(&g_gs_config, &mode_count);
     game_configure(game, g_gs_config.has_game ? &g_gs_config.game : NULL, maps, map_count, modes, mode_count, NULL, 0, NULL, 0);
+    // WP-E server presets (gameserver.host_type / map_config): the rotation plays as a hosted game
+    if (g_gs_config.host_type >= 0 || g_gs_config.map_config) {
+        cJSON *request = g_gs_config.game_request[0] ? cJSON_Parse(g_gs_config.game_request) : NULL;
+        game_config_host(game, request, g_gs_config.host_type >= 0 ? g_gs_config.host_type : GAME_HOST_CUSTOM);
+        cJSON_Delete(request);
+    }
 }
 
 // ------------------------------------------------------------------ PLAYER_INFO
 
-static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *info) {
+static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *info, const ClientConnection *to) {
     memset(info, 0, sizeof(*info));
     info->uid = client->player ? client->player->uid : client->id;
+    // WP-C: v7.1.4 players.js sync with anonMode: a random level, no clan, account or badges for
+    // everyone but the player and dev viewers
+    if (client->player && client->player->anon_mode && to != client && !(to && (to->acct.flags & NET_PLAYER_INFO_DEV))) {
+        info->level = 1 + rand() % 100; // fakeLevel || UTILS.randInt(1, 100)
+        return;
+    }
     info->account_id = client->acct.account_id;
     info->level = client->acct.level;
     info->flags = client->acct.flags;
+    // WP-F: ENT showBadges (settings verifiedBadge / premiumBadge): the player may hide those badges
+    // from others (players.js sync showBadges.verified / .premium)
+    if (client->player && to != client) {
+        if (!(client->player->show_badges & PLAYER_SHOW_BADGE_VERIFIED)) info->flags &= (uint8_t) ~NET_PLAYER_INFO_VERIFIED;
+        if (!(client->player->show_badges & PLAYER_SHOW_BADGE_PREMIUM)) info->flags &= (uint8_t) ~NET_PLAYER_INFO_PREMIUM;
+    }
     snprintf(info->clan, sizeof(info->clan), "%s", client->acct.clan);
 }
 
 static void acc_broadcast_info(const ClientConnection *client) {
     if (!g_acc.brain || !client->player) return;
     NetPlayerInfoPacket info;
-    acc_fill_info(client, &info);
-    for (size_t i = 0; i < g_server->client_count; i++) net_send_packet(g_server->clients[i].fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        acc_fill_info(client, &info, &g_server->clients[i]);
+        net_send_packet(g_server->clients[i].fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
+    }
 }
 
 void accounts_send_infos_to(ClientConnection *target) {
@@ -394,7 +440,7 @@ void accounts_send_infos_to(ClientConnection *target) {
         const ClientConnection *client = &g_server->clients[i];
         if (!client->player || client == target) continue;
         NetPlayerInfoPacket info;
-        acc_fill_info(client, &info);
+        acc_fill_info(client, &info, target);
         net_send_packet(target->fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
     }
 }
@@ -432,6 +478,84 @@ int accounts_reward(const Player *player) {
     return client ? acc_reward(client, player) : 0;
 }
 
+// ------------------------------------------------------------------ WP-E part 2c: progression
+
+// GameHooks.progress: game.incStat / challenges.update of an account's player, tallied for the
+// stats commit (doc/backend.md 8.4). Guests and hack-flagged accounts keep nothing.
+void accounts_progress(const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak) {
+    ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
+    if (!client || client->acct.account_id <= 0 || client->acct.hack || !key || !key[0] || strlen(key) >= sizeof(client->acct.tallies[0].key)) return;
+    ServerAccount *a = &client->acct;
+    if (stat) {
+        const int index = progression_stat_index(key);
+        if (index >= 0 && a->stat_counts[index] < UINT32_MAX) a->stat_counts[index]++;
+        return;
+    }
+    const ChallengeKeyKind kind = challenge_key_kind(key);
+    if (kind == CHALLENGE_KEY_UNKNOWN || kind == CHALLENGE_KEY_META) return;
+    ServerChallengeTally *t = NULL;
+    for (int i = 0; i < a->tally_count; i++) {
+        ServerChallengeTally *c = &a->tallies[i];
+        if (c->weapon == weapon && c->streak == streak && !strcmp(c->key, key)) t = c;
+    }
+    if (!t) {
+        if (a->tally_count >= SERVER_TALLY_MAX) return;
+        t = &a->tallies[a->tally_count++];
+        memset(t, 0, sizeof(*t));
+        snprintf(t->key, sizeof(t->key), "%s", key);
+        t->weapon = (int16_t) weapon;
+        t->streak = (int16_t) streak;
+        t->value = kind == CHALLENGE_KEY_ADD ? 0 : value;
+    }
+    if (kind == CHALLENGE_KEY_ADD) t->value += value;
+    else if (kind == CHALLENGE_KEY_MAX || !strcmp(key, "kstk")) t->value = value > t->value ? value : t->value;
+    else t->value = value; // SET
+}
+
+static void acc_progress_clear(ServerAccount *a) {
+    memset(a->stat_counts, 0, sizeof(a->stat_counts));
+    a->tally_count = 0;
+}
+
+// The commit's progression fields: "stats" (incStat deltas, transferStats), "prog" (the challenge
+// tallies [key, value, weapon, streak], plus game.js endGame's "w" / "gp"), "medals" ({name:
+// count}, player.medals) and the match context of checkChallenge (mapIndex, mapId, ranked).
+static void acc_add_progress(cJSON *p, const ClientConnection *client, const Player *player, const int final, const int won) {
+    const ServerAccount *a = &client->acct;
+    cJSON *stats = cJSON_AddObjectToObject(p, "stats");
+    for (int i = 0; i < PROGRESSION_STAT_COUNT; i++)
+        if (a->stat_counts[i]) cJSON_AddNumberToObject(stats, g_progression_stats[i], a->stat_counts[i]);
+    cJSON *prog = cJSON_AddArrayToObject(p, "prog");
+    for (int i = 0; i < a->tally_count; i++) {
+        const ServerChallengeTally *t = &a->tallies[i];
+        cJSON *row = cJSON_CreateArray();
+        cJSON_AddItemToArray(row, cJSON_CreateString(t->key));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->value));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->weapon));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->streak));
+        cJSON_AddItemToArray(prog, row);
+    }
+    if (final) { // game.js endGame: challenges.update(game, "w") for the winners, "gp" for everyone
+        const char *keys[2] = {"w", "gp"};
+        for (int i = won ? 0 : 1; i < 2; i++) {
+            cJSON *row = cJSON_CreateArray();
+            cJSON_AddItemToArray(row, cJSON_CreateString(keys[i]));
+            cJSON_AddItemToArray(row, cJSON_CreateNumber(1));
+            cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
+            cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
+            cJSON_AddItemToArray(prog, row);
+        }
+    }
+    cJSON *medals = cJSON_AddObjectToObject(p, "medals");
+    for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
+        if (player->medal_counts[i]) cJSON_AddNumberToObject(medals, g_progression_medals[i], player->medal_counts[i]);
+    const Game *game = &g_server->game;
+    const int catalogue = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
+                              ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
+    cJSON_AddNumberToObject(p, "mapIndex", catalogue >= 0 && catalogue < MAP_CATALOG_OFFICIAL_COUNT ? catalogue : -1);
+    cJSON_AddBoolToObject(p, "ranked", g_rk.active);
+}
+
 static cJSON *acc_player_stats(const ClientConnection *client, const int final) {
     const Player *player = client->player;
     const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
@@ -452,6 +576,7 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     cJSON_AddNumberToObject(p, "kr", final && player ? player->reward : 0); // game_end_round -> accounts_reward
     cJSON_AddNumberToObject(p, "xp", counts && player && player->score > 0 ? player->score : 0);
     cJSON_AddNumberToObject(p, "classIndex", player ? player->class_index : client->class_index);
+    if (counts) acc_add_progress(p, client, player, final, won); // WP-E part 2c (v7 updateAccounts / checkChallenges)
     return p;
 }
 
@@ -471,6 +596,7 @@ static void acc_commit(ClientConnection **clients, const int count, const int fi
     cJSON *players = cJSON_AddArrayToObject(frame, "players");
     for (int i = 0; i < count; i++) {
         cJSON_AddItemToArray(players, acc_player_stats(clients[i], final));
+        acc_progress_clear(&clients[i]->acct);
         clients[i]->acct.committed = 1;
         server_log("[stats] %s %s (account %d): K %u D %u S %d%s", final ? "final" : "partial", clients[i]->name, clients[i]->acct.account_id,
                    clients[i]->player ? clients[i]->player->kills : 0, clients[i]->player ? clients[i]->player->deaths : 0,
@@ -519,6 +645,7 @@ void accounts_round_ending(void) {
 void accounts_round_changed(void) {
     Game *game = &g_server->game;
     const int mode_id = game_mode_id(game);
+    game_network_apply(game, g_server->config.tick_rate); // WP-E: the round's networkData (applyNetworking, mode.sendR)
 
     // per-mode lobby size and round length (config, CLI --round-seconds)
     g_server->config.max_players = (unsigned short) (g_acc.custom && game->config.max_players > 0 ? game->config.max_players
@@ -544,6 +671,7 @@ void accounts_round_changed(void) {
         a->match_since = 0.0f;
         a->round_result = -1;
         a->committed = 0;
+        acc_progress_clear(a); // WP-E part 2c: a new round's tallies
     }
     acc_queue_push();
 
@@ -606,6 +734,14 @@ static void acc_ranked_setup(const cJSON *config) {
 // isPremiumCustomHost: this connection's account hosts the current custom lobby (brain "host").
 // v3.1.1 also needs premiumT > 0, but every account has premium while accounts.free_premium
 // is on, so the host account alone decides.
+const char *accounts_published_map(void) {
+    return g_acc.custom && g_acc.published_map[0] ? g_acc.published_map : NULL;
+}
+
+int accounts_kr_rewards(void) {
+    return accounts_published_map() && g_acc.kr_rewards;
+}
+
 int accounts_is_custom_host(const ClientConnection *client) {
     return g_acc.custom && g_acc.host_account_id && client->acct.account_id == g_acc.host_account_id;
 }
@@ -799,10 +935,34 @@ int accounts_owns_skin(const ClientConnection *client, const int skin) {
     return (client->acct.skins_owned[skin >> 3] >> (skin & 7)) & 1;
 }
 
-int accounts_filter_cosmetics(const ClientConnection *client, PlayerCosmetics *c) {
-    int32_t *slots[5] = {&c->hat, &c->back, &c->waist, &c->face, &c->dye};
+int accounts_filter_cosmetics(const ClientConnection *client, PlayerCosmetics *c, PlayerCosmeticsV7 *v7) {
+    int32_t *slots[14] = {&c->hat, &c->body, &c->waist, &c->face, &c->dye};
+    int count = 5;
+    if (v7) {
+        int32_t *more[] = {&v7->head, &v7->back, &v7->shoe, &v7->pet, &v7->wrist, &v7->charms[0], &v7->charms[1], &v7->player_card};
+        for (size_t i = 0; i < sizeof(more) / sizeof(more[0]); i++) slots[count++] = more[i];
+    }
     int stripped = 0;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < count; i++) {
+        if (*slots[i] >= 0 && !accounts_owns_skin(client, *slots[i])) {
+            *slots[i] = -1;
+            stripped++;
+        }
+    }
+    // v7.1.4 premium slot rule: without premium a player wears a HEAD or a hat, a BACK or a body, not
+    // both (the head / back wins, as on the Customize tab, v7 index.js:5169-5209). v7 only enforces
+    // it in the menu; KrunkNative also drops the pair here, for accounts (sandbox / guests: no rule).
+    if (v7 && client->acct.account_id && !client->acct.premium && !(client->acct.flags & NET_PLAYER_INFO_DEV)) {
+        if (v7->head >= 0 && c->hat >= 0) c->hat = -1, stripped++;
+        if (v7->back >= 0 && c->body >= 0) c->body = -1, stripped++;
+    }
+    return stripped;
+}
+
+int accounts_filter_skins(const ClientConnection *client, PlayerSkins *s) {
+    int32_t *slots[3] = {&s->primary, &s->secondary, &s->melee};
+    int stripped = 0;
+    for (int i = 0; i < 3; i++) {
         if (*slots[i] >= 0 && !accounts_owns_skin(client, *slots[i])) {
             *slots[i] = -1;
             stripped++;
@@ -846,9 +1006,9 @@ int accounts_refuse_connect(const char *address, NetErrorPacket *error) {
 static void acc_reject(ClientConnection *client, const char *message, const char *code);
 
 // A client cannot wear a skin it does not own (the coordinator's inventory): unowned
-// cosmetic slots fall back to none before the spawn, with a chat notice once per ENT.
+// cosmetic, weapon and melee slots fall back to none before the spawn, with a chat notice once per ENT.
 static void acc_enforce_skins(ClientConnection *client) {
-    const int stripped = accounts_filter_cosmetics(client, &client->cosmetics);
+    const int stripped = accounts_filter_cosmetics(client, &client->cosmetics, &client->cosmetics_v7) + accounts_filter_skins(client, &client->skins);
     if (!stripped) return;
     server_log("%s: removed %d unowned cosmetic(s)", client->name, stripped);
     acc_chat_to(client, "You don't own some of the skins you equipped on this server");
@@ -890,6 +1050,7 @@ static void acc_set_ready(ClientConnection *client) {
 
 void accounts_on_connect(ClientConnection *client) {
     memset(&client->acct, 0, sizeof(client->acct));
+    client->acct.badge = -1;
     client->acct.round_result = -1;
     const int gated = g_acc.brain || g_gs_config.online_mode || g_gs_config.password[0];
     client->acct.join_state = gated ? SERVER_JOIN_AWAIT : SERVER_JOIN_READY;
@@ -1150,7 +1311,38 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     if (acc_truthy(cJSON_GetObjectItem(account, "featured"))) client->acct.flags |= NET_PLAYER_INFO_VERIFIED;
     if (acc_truthy(cJSON_GetObjectItem(account, "dev"))) client->acct.flags |= NET_PLAYER_INFO_DEV;
     if (acc_truthy(cJSON_GetObjectItem(account, "mod"))) client->acct.flags |= NET_PLAYER_INFO_MOD;
+    // WP-F: the custom badge (v7 account.stats.bdg, badges.js index), when the brain supplies one
+    const cJSON *stats = cJSON_GetObjectItem(account, "stats");
+    const cJSON *bdg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "bdg") : cJSON_GetObjectItem(account, "badge");
+    client->acct.badge = cJSON_IsNumber(bdg) && bdg->valueint >= 0 ? bdg->valueint : -1;
+    // WP-E part 2c: only a badge the account owns (kn_brain's account "badges", badges.js indices)
+    const cJSON *owned = cJSON_GetObjectItem(account, "badges");
+    if (client->acct.badge >= 0 && cJSON_IsArray(owned)) {
+        int found = 0;
+        const cJSON *b;
+        cJSON_ArrayForEach(b, owned) found |= cJSON_IsNumber(b) && b->valueint == client->acct.badge;
+        if (!found) client->acct.badge = -1;
+    }
     acc_load_skins(client, account);
+    // WP-E: the death screen's account values (class levels, config.playerCardStats)
+    client->acct.has_stats = 1;
+    for (int i = 0; i < SERVER_CLASS_STATS_MAX; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "c%d", i);
+        const cJSON *c = cJSON_IsObject(stats) ? cJSON_GetObjectItemCaseSensitive(stats, key) : NULL;
+        client->acct.class_stats[i] = cJSON_IsNumber(c) && c->valuedouble > 0.0 ? (int) c->valuedouble : 0;
+    }
+    for (int i = 0; i < PLAYER_CARD_STAT_COUNT; i++) player_card_stat_format(i, account, client->acct.pc_stats[i], sizeof(client->acct.pc_stats[i]));
+}
+
+void accounts_player_card(const ClientConnection *client, Player *player) {
+    const int account = client->acct.account_id > 0 && client->acct.has_stats;
+    const int cls = player->class_index;
+    // players.js:4860: account.stats["c" + classIndex] unless anonMode; [pcStatIndex, stat] with an account
+    player->class_stat = account && !player->anon_mode && cls >= 0 && cls < SERVER_CLASS_STATS_MAX ? client->acct.class_stats[cls] : 0;
+    player->pc_stat_index = account && client->pc_stat_index >= 0 && client->pc_stat_index < PLAYER_CARD_STAT_COUNT ? client->pc_stat_index : -1;
+    if (player->pc_stat_index >= 0) snprintf(player->pc_stat_value, sizeof(player->pc_stat_value), "%s", client->acct.pc_stats[player->pc_stat_index]);
+    else player->pc_stat_value[0] = 0;
 }
 
 static void acc_handle_auth_reply(const cJSON *frame) {
@@ -1242,6 +1434,8 @@ static void acc_revert_custom(const char *why) {
     g_rk.active = 0;
     g_acc.custom = 0;
     g_acc.host_account_id = 0;
+    g_acc.published_map[0] = 0;
+    g_acc.kr_rewards = 0;
     accounts_configure_public(&g_server->game, g_acc.cli_map);
     net_change_map(-1, -1);
 }
@@ -1316,6 +1510,17 @@ static void acc_handle_map_data(cJSON *frame) {
         cJSON_Delete(pending);
         return;
     }
+    // v7.1.4 game.prepareGame: "(" / ")" -> full-width, then customGameConfig.validateMap (a
+    // published map has a creator, so the featured limits apply) and the prefab / texture checks
+    map_prepare_custom_json(map);
+    const char *invalid = map_validate_error(map, 1);
+    if (invalid) {
+        server_log_error("[brain] published map for a hosted game rejected: %s", invalid);
+        acc_host_reply_error(pending, invalid);
+        cJSON_Delete(pending);
+        cJSON_Delete(map);
+        return;
+    }
     map_sanitize_json(map);
     if (acc_player_count() > 0 || g_acc.custom || g_acc.draining) { // the lobby changed meanwhile
         acc_host_reply_error(pending, "lobby is not empty");
@@ -1336,24 +1541,34 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     cJSON_AddStringToObject(reply, "type", "host-reply");
     if (cJSON_IsNumber(rid)) cJSON_AddNumberToObject(reply, "rid", rid->valuedouble);
 
-    GameConfig game_config = g_default_game_config;
-    gs_game_config_from_json(&game_config, config);
+    // WP-E: the request is a v7 host config: "override" picks the host type (config.hostTypes);
+    // every round then runs setupGameConfig(override, map config + request) -> applyConfig(cfg, 3)
+    // (game_apply_map_config). The setup below only decides the forced maps / modes.
+    cJSON *request = cJSON_IsObject(config) ? cJSON_Duplicate(config, 1) : cJSON_CreateObject();
+    const cJSON *override = cJSON_GetObjectItem(config, "override");
+    const int host_index = cJSON_IsNumber(override) && override->valueint >= 0 && override->valueint < GAME_HOST_TYPE_COUNT ? override->valueint : GAME_HOST_CUSTOM;
 
     const int ranked = cJSON_IsTrue(cJSON_GetObjectItem(config, "ranked"));
-    if (ranked) {
+    if (ranked && request) {
         // ranked (doc/backend.md 6.5): the roster's size is the lobby, everyone must be in
         // before the countdown (v3.1.1 needAll + minPlayers), one round (infEndTimer)
         const cJSON *team_size = cJSON_GetObjectItem(config, "teamSize");
         const int size = cJSON_IsNumber(team_size) && team_size->valueint > 0 ? team_size->valueint : 1;
-        game_config.max_players = size * 2;
-        game_config.min_players = size * 2;
+        cJSON_DeleteItemFromObjectCaseSensitive(request, "maxPlayers");
+        cJSON_DeleteItemFromObjectCaseSensitive(request, "minPlayers");
+        cJSON_AddNumberToObject(request, "maxPlayers", size * 2);
+        cJSON_AddNumberToObject(request, "minPlayers", size * 2);
     }
+    // Zombies / Raid hosts force their maps and modes (forceDat / allowedDat)
+    cJSON *forced = host_index == GAME_HOST_ZOMBIES || host_index == GAME_HOST_RAID ? game_config_setup(host_index, request, NULL, ranked) : NULL;
+    GameConfig game_config = g_default_game_config;
+    game_config_read(&game_config, forced ? forced : request, GAME_CONFIG_CLAMP_HOSTED, host_index); // round 1 before its map loads
 
     // maps: catalogue indices, or names (this server's own maps first: custom dirs / the
     // command line map), else the public rotation
     const cJSON *chosen[GS_MAX_LIST];
     size_t map_count = 0;
-    cJSON *map_names = cJSON_Duplicate(cJSON_GetObjectItem(config, "maps"), 1);
+    cJSON *map_names = cJSON_Duplicate(cJSON_GetObjectItem(forced ? forced : config, "maps"), 1);
     const cJSON *single_map = cJSON_GetObjectItem(config, "map");
     if (!cJSON_IsArray(map_names) && cJSON_IsString(single_map)) {
         cJSON_Delete(map_names);
@@ -1385,7 +1600,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     int *modes = NULL;
     size_t mode_count = 0;
-    cJSON *mode_list = cJSON_Duplicate(cJSON_GetObjectItem(config, "modes"), 1);
+    cJSON *mode_list = cJSON_Duplicate(cJSON_GetObjectItem(forced ? forced : config, "modes"), 1);
     const cJSON *single_mode = cJSON_GetObjectItem(config, "mode");
     if (!cJSON_GetArraySize(mode_list) && cJSON_IsNumber(single_mode)) {
         cJSON_Delete(mode_list);
@@ -1397,7 +1612,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
         cJSON_ArrayForEach(entry, mode_list) {
             const int id = cJSON_IsNumber(entry) ? entry->valueint : cJSON_IsString(entry) ? mode_find(entry->valuestring) : -1;
             // ranked modes are preventCustomGames: only the brain's ranked lobbies get them
-            if (modes && mode_config(id) && (mode_hostable(id) || (ranked && mode_config(id)->is_ranked))) modes[mode_count++] = id;
+            if (modes && mode_config(id) && (mode_hostable(id) || forced || (ranked && mode_config(id)->is_ranked))) modes[mode_count++] = id;
         }
         if (!mode_count) {
             free(modes);
@@ -1412,6 +1627,12 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     g_acc.custom = 1;
     g_acc.custom_since = g_server->now;
+    // WP6: a hosted published map is v7's customMap played with defaultSetts: GAME.STORAGE, Save /
+    // Load Data and (host option krRewards, customGameConfig.js:438-445) KR rewards use its name.
+    // [KN] defaultSetts is not modelled: every hosted published map counts.
+    const char *published = custom_map ? acc_str(cJSON_GetObjectItem(config, "customMap"), acc_str(cJSON_GetObjectItem(config, "mapName"), "")) : "";
+    snprintf(g_acc.published_map, sizeof(g_acc.published_map), "%s", published);
+    g_acc.kr_rewards = g_acc.published_map[0] && cJSON_IsTrue(cJSON_GetObjectItem(config, "krRewards"));
     g_acc.custom_had_players = 0;
     const cJSON *host_id = cJSON_GetObjectItem(frame, "hostAccountId");
     g_acc.host_account_id = cJSON_IsNumber(host_id) ? host_id->valueint : 0;
@@ -1419,6 +1640,9 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     if (ranked) acc_ranked_setup(config);
     game_configure(&g_server->game, &game_config, maps, map_count, modes, mode_count, NULL, 0, NULL, 0);
+    game_config_host(&g_server->game, request, host_index); // WP-E: every round's map config + this request
+    cJSON_Delete(request);
+    cJSON_Delete(forced);
     net_change_map(0, 0);
     server_log("[brain] hosting a custom game for %s (account %d): %zu map(s), %zu mode(s), %d players", g_acc.host_name[0] ? g_acc.host_name : "?",
                g_acc.host_account_id, g_server->game.map_count, g_server->game.mode_count, g_server->config.max_players);
@@ -1512,12 +1736,15 @@ static void acc_handle_frame(cJSON *frame) {
         // best-effort heads-up; the ticket itself is verified on JOIN
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "jti"));
         server_log("[brain] assignment %s for lobby %s", jti ? jti : "?", acc_str(cJSON_GetObjectItem(frame, "lobbyId"), "?"));
+    } else if (!strcmp(type, "acct-r") && ks_storage_on_brain_frame(frame)) {
+        // WP6: GAME.STORAGE / Save / Load Data / KR rewards (server/src/ks_storage.c)
     } else if (!strcmp(type, "acct-r") || !strcmp(type, "host-request-reply")) {
         // no game-socket account ops / host requests on the native protocol yet
     }
 }
 
 static void acc_link_down(void) {
+    ks_storage_link_down(); // their replies never come
     // pending auths will never be answered: ticket holders keep the ticket identity,
     // session-only joins become guests (or are refused)
     for (size_t i = 0; i < g_server->client_count; i++) {

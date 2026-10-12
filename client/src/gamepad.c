@@ -39,6 +39,7 @@
 //   - SDL_GAMECONTROLLERCONFIG (SDL's variable: mapping lines) and
 //     KRUNKNATIVE_GAMEPAD_DB (a gamecontrollerdb.txt path) add/override native mappings.
 #include <gamepad.h>
+#include <ks_client.h> // KrunkScript controller hooks
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <GLFW/glfw3.h>
@@ -376,6 +377,14 @@ static void trigger(const int type, const GpEvent *e) {
     if (type != GP_RELEASE && ui_text_input_focused()) return;
     if (e->name < GP_BUTTON_NAMES) {
         on_mapped_button(type, e->name, e->value);
+        // KrunkScript onControllerPress / Held / Up (CTL:1137-1141): the button name and the
+        // key code of the bind it presses (0 for the mouse / unmapped buttons)
+        if (GP_MAPPING[e->name] >= 0) {
+            const int bound = ui_controls_bind(GP_MAPPING[e->name]);
+            ks_client_controller(type, GP_NAME[e->name], bound > 0 ? bound : 0);
+        } else if (GP_MAPPING[e->name] == GP_MAP_MOUSE) {
+            ks_client_controller(type, GP_NAME[e->name], 0);
+        }
         if (e->name == GP_START && type == GP_PRESS) ui_controls_toggle(g_gp.client, !ui_controls_enabled(g_gp.client));
         return;
     }

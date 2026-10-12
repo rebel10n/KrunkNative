@@ -1,0 +1,22 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 17 "Custom Geometry", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+
+# Runs when the game starts
+public action start() {
+	
+	# Create Custom Geometry vertices:
+	GAME.SCENE.addCustom("", "#00ffff", num[
+		0.5, 0.5, 0.5,
+		-0.5, 0.5, 0.5,
+		-0.5, -0.5, 0.5,
+		0.5, -0.5, 0.5,
+		0.5, 0.5, -0.5,
+		-0.5, 0.5, -0.5,
+		-0.5, -0.5, -0.5,
+		0.5, -0.5, -0.5
+	], 0, 10, 0, 10, 10, 10);
+
+}

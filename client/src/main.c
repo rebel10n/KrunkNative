@@ -1,9 +1,15 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <client.h>
+#include <cosmetics.h>
+#include <skin_fx.h>
+#include <pets.h>
+#include <build_info.h>
 #include <vfx.h>
 #include <ai_render.h>
 #include <nametags.h>
+#include <sprays.h> // WP-E: the v7 spray wheel overlay
+#include <hud_social.h> // WP-E: social_reset_server
 #include <camera_feel.h>
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
 #include <html_ui.h>
@@ -13,6 +19,10 @@
 #include <map_post.h>
 #include <sky.h>
 #include <shadow.h>
+#include <map_environment.h> // v7 environment zones, tone mapping, ocean (map_environment.c)
+#include <ocean.h>
+#include <zombies_render.h> // map-logic WP-H in-world (zombies_render.c)
+#include <hud_gui.h> // map "gui" custom HUD (ui/hud_gui.c)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,12 +36,20 @@
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
 #include <menu_view.h> // the world behind the menu: menu/death cameras, end slow motion (menu_view.c)
 #include <spectate.h> // Krunker spectating (window.Bf5): cameras, controls, #spectateUI (spectate.c, ui/hud_spectate.c)
+#include <hud_map.h>  // WP-E part 2a: minimap + death markers
 #include <gamepad.h> // game controllers: v3.1.1 gamepad.js + the controller half of CONTROLS (gamepad.c)
 #include <ui_mobile.h> // Krunker's #mobileUI touch controls (ui/ui_mobile.c)
 #include <app_mode.h> // game / social hub / editor / viewer pages (app_mode.c)
+#include <viewer_embed.h> // the store item view's 3D showcase (viewer/viewer.c)
 #include <backend_ui.h> // brain backend: account, matchmaker, --brain / --connect (net/backend_startup.c)
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
+#include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
+#include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
+#include <lobby_ui.h> // WP-E: lobby packets, match vote cards (net/lobby_events.c)
+#include <game_config.h> // WP-E: GAME_CONFIG on INIT, the round's networkData
+#include <ks_client.h> // KrunkScript client host: the map's client script (ks/ks_client_host.c)
+#include <ks_game.h> // ks_game_free
 
 #ifdef WIN32
 #include <direct.h>
@@ -198,6 +216,7 @@ static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
 
     glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
     sky_load(mode_sky ? NULL : raw); // renderer.init: no sky dome when the mode sets skyCol
+    map_environment_map_loaded(map, mode); // v7 toneMapping / outputEncoding / correctLights, ocean, zone -1 (map_environment.c)
 }
 
 // CONTROLS.skipScroll (index.js b9): an input frame that carried a wheel step swallows the
@@ -206,12 +225,21 @@ static int g_skip_scroll;
 
 // The unrounded look the input frames are built from (client_tick, CONTROLS xDr/yDr).
 static vec2 g_look;
+static vec2 g_look_sent;      // WP-C: g_look as the last sampled input frame took it (me->direction after it)
+static int g_look_unsampled;  // WP-C: this frame sampled no input frame (netRate), the camera shows g_look
 static int g_look_valid;
 
+static void print_usage_to(FILE *out, const char *program) {
+    fprintf(out, "Usage: %s [--offline] [--headless] [--windowed|--fullscreen|--borderless] [--hub|--viewer [query]]\n"
+                 "          [--brain <url>] [--connect <host[:port]>] [map.json]\n"
+                 "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
+                 "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
+                 "       %s --help | --version\n", program, program, program, program);
+    editor_usage(out); // client/src/editor/editor_bus_link.c
+}
+
 static void print_usage(const char *program) {
-    fprintf(stderr, "Usage: %s [--offline] [--headless] [--windowed|--fullscreen|--borderless] [--hub|--editor|--viewer [query]]\n"
-                    "          [--brain <url>] [--connect <host[:port]>] [map.json]\n"
-                    "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n", program, program);
+    print_usage_to(stderr, program);
 }
 
 #ifdef __EMSCRIPTEN__
@@ -315,6 +343,10 @@ static int parse_startup_args(int argc, char **argv, int *offline, const char **
     *scenario_out = NULL;
 
     for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+            print_usage_to(stdout, argv[0]);
+            exit(0);
+        }
         if (!strcmp(argv[i], "--offline")) {
             *offline = 1;
         } else if (!strcmp(argv[i], "--windowed") || !strcmp(argv[i], "--fullscreen") || !strcmp(argv[i], "--borderless")) {
@@ -338,6 +370,14 @@ static int parse_startup_args(int argc, char **argv, int *offline, const char **
 }
 
 int main(int argc, char **argv) {
+    // --version before anything needs assets or a GL context (build identity: build_info.h)
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--version")) {
+            printf("KrunkNative client %s\n", kn_build_string());
+            return 0;
+        }
+    }
+    printf("KrunkNative client %s\n", kn_build_string());
     debug_capture_startup(); // KRUNKNATIVE_CAMERA/SCREENSHOT runs ignore stored settings (debug_capture.c)
 
     char *rand_memory = malloc(1);
@@ -546,6 +586,7 @@ int main(int argc, char **argv) {
     glfwSetWindowFocusCallback(INSTANCE.window, window_focus_callback); // alt-tab = pointer lock lost
 #endif
     if (!SCENARIO_ACTIVE()) gamepad_init(&INSTANCE); // controller hotplug (GLFW joysticks / browser gamepads)
+    ks_client_init(&INSTANCE); // KrunkScript client host (scripts load per INIT: ks_client_round)
 
     if (glfwRawMouseMotionSupported()) {
         glfwSetInputMode(INSTANCE.window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
@@ -569,6 +610,7 @@ int main(int argc, char **argv) {
 
     INSTANCE.scene = scene_init();
     INSTANCE.fps_scene = scene_init();
+    g_pet_world_scene = INSTANCE.scene; // the local player's pet flies in the world (pets.h)
     INSTANCE.ui = ui_init();
 
     if (!INSTANCE.scene || !INSTANCE.fps_scene || !INSTANCE.ui) return -1;
@@ -629,7 +671,7 @@ int main(int argc, char **argv) {
     const int brain_mode = backend_startup(&INSTANCE, offline, SCENARIO_ACTIVE());
 
     if (offline) {
-        if (!local_game_start(&INSTANCE)) return -1; // singleplayer: client->game is the authority (net/local_game.c)
+        if (!local_game_start(&INSTANCE)) return -1; // the in-process sandbox server, joined like any server (net/offline.c)
     } else {
 #ifdef __EMSCRIPTEN__
         (void) net_args;
@@ -657,6 +699,8 @@ int main(int argc, char **argv) {
         INSTANCE.net_should_quit = 1;
         local_game_stop(&INSTANCE);
         client_class_preview_fini(&INSTANCE);
+        viewer_embed_fini();
+        spin_wheel_fini();
         ui_scenario_end();
         html_ui_fini();
         headless_shutdown();
@@ -686,7 +730,11 @@ int main(int argc, char **argv) {
     }
 
     local_game_stop(&INSTANCE);
+    ks_client_unload(&INSTANCE); // KrunkScript: script objects / DIVs / sounds
+    ks_game_free(&INSTANCE.game);
     client_class_preview_fini(&INSTANCE);
+    viewer_embed_fini();
+    spin_wheel_fini();
     vfx_fini();
     ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
@@ -694,6 +742,7 @@ int main(int argc, char **argv) {
     render_target_fini();
     html_ui_fini();
     voice_fini();
+    sprays_wheel_fini(); // its canvas (GL)
     audio_fini();
     headless_shutdown();
     client_settings_exit(); // Discord RPC close; relaunch when a "*" setting asked for a restart
@@ -703,8 +752,8 @@ int main(int argc, char **argv) {
 }
 
 // One main-loop iteration, shared by the native while loop and the emscripten
-// main loop callback: advance time, tick/render (offline included: the game is
-// the authority, net/local_game.c), present and poll input.
+// main loop callback: advance time, tick/render (offline included: the sandbox server
+// steps inside the frame, net/offline.c), present and poll input.
 void client_frame(Client *client) {
     // updateRate on the web: Krunker skips whole animation frames (index.js gP); the
     // canvas keeps the last frame. Natively the cap sleeps in client_render_frame_end.
@@ -739,6 +788,7 @@ void client_load_map(Client *client) {
 
     shadow_load_map(client->game.map); // caster/receiver flags + light camera (shadow.c)
     map_post_load(client->scene, client->game.map); // AO planes, noise planes, point lights (map_post.c)
+    zombies_render_load(client->scene, client->game.map); // WP-H machine weapons, beams, airdrops (zombies_render.c)
 }
 
 void client_unload_map(Client *client) {
@@ -746,6 +796,9 @@ void client_unload_map(Client *client) {
 
     shadow_unload_map();
     map_post_unload(client->scene);
+    zombies_render_unload();
+    map_environment_unload(); // ocean, v7 output state (map_environment.c)
+    hud_gui_clear();          // map "gui" elements (ui/hud_gui.c)
 
     for (size_t i = 0; i < client->game.map->object_count; i++) {
         const Object *object = client->game.map->objects[i];
@@ -790,6 +843,16 @@ Player *client_find_player(Client *client, const int uid) {
     return NULL;
 }
 
+// ENT ent[22..25]: SETTINGS.tmp.verifiedBadge / premiumBadge / partnerBadge / customBadge (default on)
+static uint8_t client_show_badges(void) {
+    static const char *const keys[4] = {"verifiedBadge", "premiumBadge", "partnerBadge", "customBadge"};
+    uint8_t show = 0;
+    for (int i = 0; i < 4; i++) {
+        if (!ui_setting_is_false(keys[i])) show |= (uint8_t) (1u << i);
+    }
+    return show;
+}
+
 void client_add_player_mesh(Client *client, Player *player, const int render_you) {
     if (player->mesh) return;
 
@@ -809,6 +872,29 @@ void client_drop_player_mesh(Client *client, Player *player) {
 
     scene_remove_player_mesh(player->render_you ? client->fps_scene : client->scene, player->mesh, player->loadout_size);
     player_meshes_fini(player);
+}
+
+// SKINS (sent right before every SPAWN): a player's validated weapon / melee skins, kept by uid
+// for its SPAWN (servers without SKINS: none). A full table recycles slot uid % CLIENT_SKINS_MAX.
+#define CLIENT_SKINS_MAX 256
+static NetSkinsPacket g_client_skins[CLIENT_SKINS_MAX];
+static int g_client_skins_count;
+
+static PlayerSkins client_skins_of(const int uid) {
+    for (int i = 0; i < g_client_skins_count; i++) {
+        if (g_client_skins[i].uid == uid) return g_client_skins[i].skins;
+    }
+    return PLAYER_SKINS_NONE;
+}
+
+static void client_apply_skins(const NetSkinsPacket *packet) {
+    int slot = 0;
+    while (slot < g_client_skins_count && g_client_skins[slot].uid != packet->uid) slot++;
+    if (slot == g_client_skins_count) {
+        if (g_client_skins_count < CLIENT_SKINS_MAX) g_client_skins_count++;
+        else slot = (int) ((unsigned) packet->uid % CLIENT_SKINS_MAX);
+    }
+    g_client_skins[slot] = *packet;
 }
 
 // SPAWN: a player (re)spawned, or (active = 0) a player the server knows who is
@@ -832,6 +918,7 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         return;
     }
 
+    const PlayerSkins skins = client_skins_of(packet->uid);
     if (!player) {
         player = player_init(&client->game);
         if (!player) return;
@@ -840,20 +927,29 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player->class_index = packet->class_index;
         player->secondary_index = packet->secondary_index;
         player->cosmetics = packet->cosmetics;
+        player->cosmetics_v7 = packet->cosmetics_v7;
+        player->skins = skins;
         game_players_add(&client->game, player);
         player_spawn(player);
     } else if (!player->active || !player->loadout_size || player->class_index != packet->class_index || player->secondary_index != packet->secondary_index ||
-               memcmp(&player->cosmetics, &packet->cosmetics, sizeof(packet->cosmetics)) != 0) {
+               memcmp(&player->cosmetics, &packet->cosmetics, sizeof(packet->cosmetics)) != 0 ||
+               memcmp(&player->cosmetics_v7, &packet->cosmetics_v7, sizeof(packet->cosmetics_v7)) != 0 ||
+               memcmp(&player->skins, &skins, sizeof(skins)) != 0 || player->attach_index != packet->attach_index ||
+               player->head_mlt != packet->head_mlt) {
         client_drop_player_mesh(client, player); // respawn: fresh loadout, timers and meshes
         player->class_index = packet->class_index;
         player->secondary_index = packet->secondary_index;
         player->cosmetics = packet->cosmetics;
+        player->cosmetics_v7 = packet->cosmetics_v7; // WP-F: SPAWN V4 (shorter: none)
+        player->skins = skins;
         player_spawn(player);
     }
 
     snprintf(player->name, sizeof(player->name), "%.*s", (int) sizeof(packet->name) - 1, packet->name);
     player->active = packet->active;
     player->team = packet->team;
+    player->attach_index = packet->attach_index; // WP-C: SPAWN V3 attachIndex / headMlt (V2: 0 / 1)
+    player->head_mlt = packet->head_mlt;
     player->health = packet->health;
     player->max_health = packet->max_health;
     player->position.x = packet->position[0];
@@ -867,16 +963,16 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     client_player_spawned(client, player, packet->is_you);
 }
 
-// A player just (re)spawned in client->game (SPAWN above, or the offline game's own spawn in
-// net/local_game.c): its meshes, and for us the in-game state.
+// A player just (re)spawned in client->game (SPAWN above, or a bot of the client's own game):
+// its meshes, and for us the in-game state.
 void client_player_spawned(Client *client, Player *player, const int is_you) {
     if (is_you) {
         client->me = player;
         player->is_you = 1;
         client_recon_reset(client); // "start" -> CONTROLS.reset(): tmpInpts emptied, isn = 0
-        // Online our prediction copy has to slide like the server's player (v3.1.1 reads it
-        // back from the spawn data, index.js serverSetting.slidCont); offline it is that player.
-        if (!client->offline) player->slid_cont = ui_controls_settings()->slid_cont ? 1 : 0;
+        // Our prediction copy has to slide like the server's player (v3.1.1 reads it back from
+        // the spawn data, index.js serverSetting.slidCont); the offline sandbox server too.
+        player->slid_cont = ui_controls_settings()->slid_cont ? 1 : 0;
         client_add_player_mesh(client, player, 1);
 
         // Our (re)spawn: in the game again, death card down (UI.toggleGameUI(true)).
@@ -893,6 +989,7 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
     } else {
         client_add_player_mesh(client, player, 0);
     }
+    ks_client_player_spawned(client, player); // KrunkScript onPlayerSpawn (index.js:14700)
 }
 
 // LEAVE (Krunker "2"): the player disconnected; forget it entirely.
@@ -916,9 +1013,6 @@ static void client_remove_player(Client *client, const int uid) {
     }
 }
 
-// sendRateA: the rate remote states arrive at (NET_STATE_SEND_HZ, gameserver.ts K_PACKET_FREQUENCY)
-static float g_net_send_rate = 30.0f;
-
 void client_apply_state(Client *client, const NetStatePacket *packet) {
     Player *player = client_find_player(client, packet->uid);
     if (!player) return;
@@ -932,7 +1026,7 @@ void client_apply_state(Client *client, const NetStatePacket *packet) {
     const vec3 position = player->position;
     const vec2 direction = player->direction;
     net_packet_apply_player(player, packet);
-    player->send_rate = g_net_send_rate;
+    player->send_rate = (float) game_network_data(&client->game)->send_hz; // WP-E: the round's networkData (sendRateA)
 
     if (player->force_pos) {
         player->interpolate = 0;
@@ -951,21 +1045,29 @@ void client_apply_state(Client *client, const NetStatePacket *packet) {
 }
 
 void client_send_cycle_packet(Client *client) {
-    client_net_send(client, NET_PACKET_CYCLE, NULL, 0); // offline: the next map right away (net/local_game.c)
+    client_net_send(client, NET_PACKET_CYCLE, NULL, 0); // io_cycle (offline: the sandbox server's)
 }
 
 // INIT: a new session or round on map init->map_index (already resolved to the
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
+    client->net_ent_size = net_ent_size_for(init->major, init->minor, init->patch);
+    client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
+    client->net_server_patch = init->major == NET_PROTOCOL_MAJOR ? init->patch : 0; // WP-C (ENT V8)
+    social_reset_server(); // WP-E part 2b: v7 social packets after the server's NET_PACKET_SOCIAL_V7
     if (client->map_loaded) client_unload_map(client);
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
 
+    game_config_on_init(&client->game); // WP-E: no GAME_CONFIG before this INIT (older server): the defaults
+    lobby_vote_reset();                 // WP-E: the end screen's vote cards go
     // INIT carries the Krunker mode id (modes.js index), not a rotation index
     game_init(&client->game, init->map_index, game_mode_index_for(&client->game, init->mode_index), 0);
-    g_net_send_rate = NET_STATE_SEND_HZ; // remote state rate ("k" sendRateA, client_apply_state)
     client_load_map(client);
     client->map_loaded = client->game.ready;
+    // KrunkScript: the map's client script, reloaded every INIT, then start(); script packets
+    // only exist on servers of protocol minor >= NET_PROTOCOL_MINOR_V7
+    ks_client_round(client, init->major == NET_PROTOCOL_MAJOR ? init->minor : 0);
 }
 
 static void client_handle_net_packet(Client *client, const NetPacket *packet) {
@@ -975,10 +1077,8 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
 
     switch (packet->type) {
         case NET_PACKET_INIT: {
-            if (packet->length != sizeof(NetInitPacket)) break;
-
             NetInitPacket init;
-            memcpy(&init, packet->payload, sizeof(init));
+            if (!net_packet_read_init(&init, packet)) break;
             if (client_map_prepare_init(client, &init)) client_apply_init(client, &init);
             break;
         }
@@ -986,6 +1086,15 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             NetSpawnPacket spawn;
             if (!client->game.ready || !net_packet_read_spawn(&spawn, packet)) break;
             client_apply_spawn(client, &spawn);
+            spectate_on_player_spawn(client, spawn.uid); // WP-E: a focused player is followed again
+            break;
+        }
+        case NET_PACKET_SKINS: {
+            if (packet->length != sizeof(NetSkinsPacket)) break;
+
+            NetSkinsPacket skins;
+            memcpy(&skins, packet->payload, sizeof(skins));
+            client_apply_skins(&skins);
             break;
         }
         case NET_PACKET_STATE: {
@@ -997,10 +1106,8 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             break;
         }
         case NET_PACKET_RECON: {
-            if (packet->length != sizeof(NetReconPacket) || !client->game.ready) break;
-
-            NetReconPacket recon;
-            memcpy(&recon, packet->payload, sizeof(recon));
+            NetReconPacket recon; // V1 (1.3.0 servers, net-bridge) keeps our own v7 movement locks
+            if (!client->game.ready || !net_packet_read_recon(&recon, packet, client->me)) break;
             client_recon_apply(client, &recon);
             break;
         }
@@ -1009,6 +1116,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
 
             NetLeavePacket leave;
             memcpy(&leave, packet->payload, sizeof(leave));
+            spectate_on_player_leave(leave.uid); // WP-E: the focused player left
             client_remove_player(client, leave.uid);
             break;
         }
@@ -1070,10 +1178,12 @@ static void html_cursor_scale(GLFWwindow *window, double *x, double *y) {
 
 // The page takes pointer input while the menu is open or the end-screen results are up.
 static int html_pointer_input(void) {
-    return html_ui_is_menu_open() || hud_ui_end_screen_interactive();
+    // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse (clicks reach script DIVs)
+    return html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ks_client_pointer_free();
 }
 
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
+    ks_client_cursor(glfwGetWindowUserPointer(window), x, y); // KrunkScript INPUTS.mousePos / mouseMovement
     if (!html_pointer_input()) return;
     html_cursor_scale(window, &x, &y);
     if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
@@ -1082,6 +1192,7 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
 
 static void mouse_button_callback(GLFWwindow *window, const int button, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
+    if (ks_client_mouse_button(client, button, action)) return; // KrunkScript onMouseClick / onMouseUp, re-lock after unlockMouse
     if (!html_pointer_input()) {
         // In game: Krunker's canvas mousedown/mouseup (left shoots, right aims, the
         // other buttons are bindable keys M2/M4/M5), sampled by client_tick_game.
@@ -1107,6 +1218,7 @@ void scroll_callback(GLFWwindow *window, const double xoffset, const double yoff
     }
 
     if (!client || !yoffset) return;
+    ks_client_scroll(client, yoffset); // KrunkScript onMouseScroll
     if (ui_controls_scroll_event(client, yoffset, 1)) return; // a bind uses the wheel: no weapon swap
 
     if (g_skip_scroll) {
@@ -1139,6 +1251,8 @@ static void window_focus_callback(GLFWwindow *window, const int focused) {
 
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
+
+    ks_client_key(client, key, scancode, action, mods); // KrunkScript onKeyPress / onKeyUp / onKeyHeld (observes only)
 
     // Keybinds first (ui_controls.c): the "Press any Key" capture, typing in #chatInput
     // and the bound game keys / hotkeys (chat key, leaderboard, toggles, ...).
@@ -1183,10 +1297,20 @@ void client_animate_object_texture(Object *object, const float now) {
     BasicMaterial *material = (BasicMaterial *) mesh->material;
 
     if (tex_anim->frames) {
-        const int frame = (int) (fmodf(now, (float) tex_anim->frames * tex_anim->frame_time) / tex_anim->frame_time);
+        // v7 render.js loadTexture / frameMats: a sheet of numX = min(10, frames) columns and
+        // numY = ceil(frames / 10) rows (0: one row), frame `cur` at offset (cur % numX / numX,
+        // (numY - floor(cur / numX) - 1) / numY); frameT 0 keeps the first frame
+        const int frames = tex_anim->frames;
+        const int columns = frames < 10 ? frames : 10;
+        const int rows = frames > 10 ? (frames + 9) / 10 : 0;
+        const int frame = tex_anim->frame_time > 0.0f ? (int) (fmodf(now, (float) frames * tex_anim->frame_time) / tex_anim->frame_time) % frames : 0;
 
-        material->texture_repeat.x = 1.0f / (float) tex_anim->frames;
-        material->texture_offset.x = (float) frame;
+        material->texture_repeat.x = 1.0f / (float) columns;
+        material->texture_offset.x = (float) (frame % columns);
+        if (rows) {
+            material->texture_repeat.y = 1.0f / (float) rows;
+            material->texture_offset.y = (float) (rows - frame / columns - 1);
+        }
     }
 
     if (tex_anim->move) {
@@ -1227,28 +1351,36 @@ void client_enter_game(Client *client) {
 
     // setClass(classIndex, selectedSecondaryIndex): the Select Secondary pick (ui_loadout.c)
     NetEntPacket packet = {.class_index = client->menu_class_index, .secondary_index = ui_loadout_secondary(client->menu_class_index)};
-    ui_loadout_cosmetics(&packet.cosmetics); // skin colour + cosmetic items, echoed back in SPAWN
+    // skin colour + cosmetic items (echoed back in SPAWN) and ent[2] / ent[9] weapon + melee skins (SKINS)
+    ui_loadout_ent_look(client->menu_class_index, &packet.cosmetics, &packet.skins);
     // ent[6] = toggleSpect and ent[15] = slidCont ride after the cosmetics (NET_ENT_PACKET_V4_SIZE).
     packet.spectate = (uint8_t) spectate_requested();
     packet.slid_cont = (uint8_t) (ui_controls_settings()->slid_cont ? 1 : 0); // ent[15] settings.tmp.slidCont ("Requires respawn")
-    const uint16_t ent_size = (uint16_t) NET_ENT_PACKET_V4_SIZE;
-
-    if (client->offline && (packet.spectate || leave_spectate)) {
-        // The offline game has no spectators: like v3.1.1's single player
-        // (enterGame without a server player), spectate locally / stop and spawn.
-        if (packet.spectate) {
-            spectate_begin(client);
-            return;
-        }
-        spectate_end(client);
-    }
+    packet.spray_index = ui_loadout_spray(); // ent[1] selectedSprayIndex
+    packet.lag_comp = client_render_settings()->lag_comp; // ent[11] parseFloat(settings.tmp.lagCompensation)
+    // WP-C ENT V8 (v7.1.4 io.send("en")): ent[12] parseInt(attachIndex), ent[7] challengeModeEnabled,
+    // ent[19] SETTINGS.tmp.anonMode
+    packet.attach_index = client_saved_attach_index();
+    packet.chall_mode = (uint8_t) (ui_controls_settings()->chall_mode ? 1 : 0);
+    packet.anon_mode = (uint8_t) (client_render_settings()->anon_mode ? 1 : 0);
+    // WP-F ENT V9: ent[15] shoeIndex, [21] petIndex, [26] wristIndex, [30] charms, [31] backIndex,
+    // [32] headIndex, [33] playerCardIndex and ent[22..25] showBadges (cosmetics.c)
+    ui_loadout_cosmetics_v7(client->menu_class_index, &packet.cosmetics_v7, 1); // the Customize picks, Random resolved
+    cosmetics_route(&packet.cosmetics, &packet.cosmetics_v7);                 // v3.1.1 placements to their v7 slots
+    packet.show_badges = client_show_badges();
+    // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
+    // a 1.1 server anything longer than V6 (no lagComp), a 1.3.0 server anything longer than V7
+    // (no attachIndex / challMode / anonMode): net_ent_size_for.
+    const uint16_t ent_size = client->net_ent_size ? client->net_ent_size : (uint16_t) NET_ENT_PACKET_V4_SIZE;
 
     pthread_mutex_lock(&client->net_lock);
     const int socket = client->net_socket;
     pthread_mutex_unlock(&client->net_lock);
 
     if (client->offline || socket >= 0) {
-        client->spawn_requested = 1; // offline the spawn happens inside this call (SPAWN clears it)
+        client->spawn_requested = 1; // SPAWN clears it
+        combat_send_streak_slots(client); // WP-B: v7 ENT streakIndexes, ahead of the ENT (1.3+ servers)
+        client_send_pc_stat(client);      // WP-E: v7 ENT pcStatIndex, ahead of the ENT (1.3+ servers)
         client_net_send(client, NET_PACKET_ENT, &packet, ent_size);
     } else {
         client->in_game = 0;
@@ -1272,6 +1404,7 @@ void client_tick(Client *client, const float now, const float delta) {
     ui_scenario_draw_background(); // scenario mode: its background replaces the world
 #endif
 
+    client_offline_pump(client, delta); // offline: the sandbox server's step on this frame (net/offline.c)
     client_tick_net(client);
     client_game_events_tick(client); // death delay -> menu (net/game_events.c)
 
@@ -1283,6 +1416,7 @@ void client_tick(Client *client, const float now, const float delta) {
 
     client_menu_tick(client);
     hud_spectate_tick(client); // #spectateUI while spectating (after hud_ui.c's pass in client_menu_tick)
+    hud_map_tick(client);      // WP-E part 2a: minimap + death markers (client/src/ui/hud_map.c)
     ui_mobile_tick(client);    // #mobileUI touch controls on phones (client/src/ui/ui_mobile.c)
     if (debug_capture_hide_ui()) {
         // KRUNKNATIVE_HIDE_UI (debug_capture.c): world only, no page/preview
@@ -1293,7 +1427,13 @@ void client_tick(Client *client, const float now, const float delta) {
     else ui_scenario_preview_backdrop(client); // the preview's dimmed backdrop without the model
 #endif
     if (!SCENARIO_ACTIVE()) client_render_settings_tick(client); // DOM pieces the display settings control (after the HUD pass)
-    if (!debug_capture_hide_ui()) html_ui_render(client->ui); // last: composites the page over the scene and HUD
+    if (!debug_capture_hide_ui()) {
+        spin_wheel_render(client);           // the prize wheel's canvas under its #spinButton (ui/spin_wheel.c)
+        ks_client_ui_late(client);           // KrunkScript UI.hideDefault / hideCrosshair over the HUD's writes
+        html_ui_render(client->ui);          // last: composites the page over the scene and HUD
+        viewer_embed_frame(client, delta);   // the item view's 3D showcase over its iframe box (viewer_embed.h)
+        spin_wheel_render_confetti(client);  // canvas-confetti draws above the page
+    }
     debug_capture_frame_end(client); // KRUNKNATIVE_SCREENSHOT: reads the finished frame
 }
 
@@ -1346,8 +1486,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (menu_open) {
         // client_set_menu_open freed the pointer; nothing to lock or enter here.
     } else if (html_menu) {
-        // Menu closed: the game owns the mouse (client_set_menu_open locked it).
-        client->mouse_state.locked = 1;
+        // Menu closed: the game owns the mouse (client_set_menu_open locked it), unless a
+        // KrunkScript INPUTS.unlockMouse freed it until lockMouse / a click on the game view.
+        client->mouse_state.locked = !ks_client_input_unlocked();
     } else {
         client->mouse_state.locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
 
@@ -1381,6 +1522,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
     look_y = (float) web_y;
 #endif
 
+    // WP-C v7.1.4 netRate: an input frame is sampled (predicted, sent) only once the frame time since
+    // the last one reaches half a netRate period; it carries that summed delta (net/recon.c).
+    int input_sampled = 0;
+    g_look_unsampled = 0;
     if (client->me && client->me->active) {
         Input input = {0};
         vec2 mouse_delta = {0};
@@ -1388,45 +1533,74 @@ static void client_tick_game(Client *client, const float now, const float frame_
         mouse_delta.x = look_x;
         mouse_delta.y = look_y;
 
+        const float input_delta = client_recon_sample(client, delta);
+        input_sampled = input_delta >= 0.0f;
         input.move_dir = -1;
-        input.delta = delta;
+        input.delta = input_sampled ? input_delta : 0.0f;
 
         // Krunker's camera keeps the unrounded look (CONTROLS xDr/yDr) and only the input
         // frame is rounded to 0.001 rad, so slow mouse movement still adds up.
         // player_proc_input rounds, so build the input from a client-side copy. It resyncs
-        // whenever me->direction stops matching it (spawn, reconciliation, teleport, pose).
+        // whenever me->direction stops matching the look of the last sampled frame (spawn,
+        // reconciliation, teleport, pose); between samples the look keeps turning (netRate).
         const Player *me = client->me;
-        const float look_pitch = CLAMP(player_round3(g_look.x), -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
-        if (!g_look_valid || fabsf(look_pitch - me->direction.x) > 1e-5f || fabsf(player_round3(g_look.y) - me->direction.y) > 1e-5f) {
-            g_look.x = me->direction.x;
-            g_look.y = me->direction.y;
+        const float look_pitch = CLAMP(player_round3(g_look_sent.x), -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        if (!g_look_valid || fabsf(look_pitch - me->direction.x) > 1e-5f || fabsf(player_round3(g_look_sent.y) - me->direction.y) > 1e-5f) {
+            g_look.x = g_look_sent.x = me->direction.x;
+            g_look.y = g_look_sent.y = me->direction.y;
             g_look_valid = 1;
         }
         input.x_dir = g_look.x;
         input.y_dir = g_look.y;
 
         if (client->mouse_state.locked && !menu_open) {
+            if (!input_sampled) {
+                // CONTROLS.updateMouseInp runs every frame: only the look turns, keys wait for the sample
+                ui_controls_fill_look(client, &input, mouse_delta.x, mouse_delta.y);
+                input_script_adjust_input(client, &input); // scripted look (tests)
+            } else {
+                // Look (sensitivity/aim sensitivity/invertY), move binds, bound buttons and
+                // the weapon keys (pressed this frame) from the keybind table (ui_controls.c).
+                ui_controls_fill_input(client, &input, mouse_delta.x, mouse_delta.y);
+                input_script_adjust_input(client, &input); // scripted look (tests)
 
-            // Look (sensitivity/aim sensitivity/invertY), move binds, bound buttons and
-            // the weapon keys (pressed this frame) from the keybind table (ui_controls.c).
-            ui_controls_fill_input(client, &input, mouse_delta.x, mouse_delta.y);
-            input_script_adjust_input(client, &input); // scripted look (tests)
-
-            // input[10] = wDG6 * scrollDirM: wheel up (wDG6 -1) steps back a slot, down forward;
-            // procInputs only scrolls when input[11] (a swap key) is 0. The wheel only reaches
-            // here when no bind uses it (bMoQ7, ui_controls_scroll_event).
-            const int scroll_delta = client->mouse_state.scroll_delta;
-            input.scroll = (signed char) (scroll_delta ? (scroll_delta > 0 ? -1 : 1) * ui_controls_scroll_dir() : 0);
-            g_skip_scroll = scroll_delta != 0; // skipScroll: false before b9, then bMoQ7 when wDG6 was set
-            client->mouse_state.scroll_delta = 0;
-            client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
+                // input[10] = wDG6 * scrollDirM: wheel up (wDG6 -1) steps back a slot, down forward;
+                // procInputs only scrolls when input[11] (a swap key) is 0. The wheel only reaches
+                // here when no bind uses it (bMoQ7, ui_controls_scroll_event).
+                const int scroll_delta = client->mouse_state.scroll_delta;
+                input.scroll = (signed char) (scroll_delta ? (scroll_delta > 0 ? -1 : 1) * ui_controls_scroll_dir() : 0);
+                g_skip_scroll = scroll_delta != 0; // skipScroll: false before b9, then bMoQ7 when wDG6 was set
+                client->mouse_state.scroll_delta = 0;
+                client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
+            }
         }
-        g_look.x = CLAMP(input.x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        // Round over, v3.1.1 parity (index.js endGame / gameLoop): through the endAnim title the
+        // controls stay enabled, so WASD/jump/shots/ADS still act locally in the shrinking slow
+        // motion; nothing is sent (the "q" batch needs !endAnimationTimeLeft, recon.c). Once
+        // endAnim ran out, CONTROLS.disable() (toggle(false) -> resetKeys, locked) frees the
+        // pointer for the results (hud_ui_end_screen_interactive above resets the keys) and
+        // the world stands still (deltaMs * 0). Without the HTML end screen this keeps the
+        // frozen results input empty too. INIT resets the keys: nothing reaches the next round.
+        if (client_round_ended(client) && menu_view_time_scale() <= 0.0f) {
+            input = (Input) {.move_dir = -1, .delta = input.delta, .x_dir = input.x_dir, .y_dir = input.y_dir};
+        }
+        // controls.js: the pitch is clamped and xDr = rotation.y % Math.PI2 before the input
+        // frame takes them, so the yaw sent (and predicted) never grows without bound.
+        input.x_dir = player_clamp_pitch(input.x_dir);
+        input.y_dir = player_wrap_yaw(input.y_dir);
+        g_look.x = input.x_dir;
         g_look.y = input.y_dir;
 
-        input.seq = client->net_next_input_seq++;
-        player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame
-        client_recon_record(client, &input);    // tmpInpts + the "q" window (online only, net/recon.c)
+        if (input_sampled) {
+            g_look_sent = g_look;
+            input.seq = client->net_next_input_seq++;
+            // KrunkScript: INPUTS.disableDefault (dontSendInputs) neither predicts nor sends,
+            // DEFAULT.disablePrediction (noPred) sends without predicting (index.js:16840-16847)
+            if (!ks_client_inputs_disabled() && !ks_client_no_prediction()) player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame
+            if (!ks_client_inputs_disabled()) client_recon_record(client, &input); // tmpInpts + the "q" window (online only, net/recon.c)
+        } else {
+            g_look_unsampled = 1; // the camera shows g_look (camera_feel_apply below poses me->direction)
+        }
 
         // The camera is posed after game_tick() below, once this input has moved the player.
     } else if (spectate_active()) {
@@ -1435,7 +1609,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
         const int look = client->mouse_state.locked && !menu_open;
         spectate_tick(client, delta, look ? look_x : 0.0f, look ? look_y : 0.0f);
     }
-    ui_controls_end_frame(); // didPressed / aba6 / the wheel key last one input frame
+    // didPressed / aba6 / the wheel key last one input frame (v7: wSwap and scrollDelta are cleared
+    // when a frame is sampled, so a press between samples reaches the next one)
+    if (input_sampled || !client->me || !client->me->active) ui_controls_end_frame();
 
     client->mouse_state.last_pos.x = (float) x;
     client->mouse_state.last_pos.y = (float) y;
@@ -1443,12 +1619,21 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // The world on the endAnim-scaled delta; the offline game's round/end clocks on real time.
     game_tick_world(&client->game, now, frame_delta, delta);
     client_recon_after_tick(client); // this input's shot knockback, kept for replays (input.velObj)
+    ks_client_frame(client, delta, frame_delta); // KrunkScript update(delta) + script scene objects (game.js:4960)
 
     // Krunker poses the camera right after procInputs (index.js gameLoop: rotateCam with
     // recoil/landing bob/shake, moveCam, ADS zoom) and renders in the same frame, so this
     // frame shows this frame's input.
-    if (client->me && client->me->active) camera_feel_apply(client);
+    if (client->me && client->me->active) {
+        camera_feel_apply(client);
+        if (g_look_unsampled) { // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS)
+            client->camera.rotation.x += player_clamp_pitch(g_look.x) - client->me->direction.x;
+            const float yaw = g_look.y - client->me->direction.y;
+            client->camera.rotation.y += yaw - 2.0f * (float) M_PI * roundf(yaw / (2.0f * (float) M_PI));
+        }
+    }
     menu_view_camera(client, delta); // no active player: pre-spawn menu camera / death chase cam
+    ks_client_camera(client); // KrunkScript GAME.CAMERA: a detached camera replaces the pose
     camera_feel_update(MIN(delta, game_constants.max_delta)); // RENDER.updateShake(deltaMs)
     for (size_t i = 0; i < client->game.player_count; i++) player_mesh_debug_log(client->game.players[i], now); // KRUNKNATIVE_PLAYER_LOG
 
@@ -1458,13 +1643,19 @@ static void client_tick_game(Client *client, const float now, const float frame_
     const int scene_target = !scenario && render_target_begin(client);
 
     if (!scenario) vfx_update(client, delta); // combat effects from this frame's game tick (vfx.c)
+    // store-item material animations: frames, movT, pulsT, rgb, rAnim (skin_fx.c), with textureAnim
+    skin_fx_tick(delta * 1000.0f, client_render_settings()->texture_anim, client_render_settings()->lighting == 0);
     if (!scenario) ai_render_tick(client, delta); // AI meshes / orbs (ai_render.c), drawn by the world scene
 
-    if (!scenario) {
+    if (!scenario && !ks_client_3d_disabled()) { // KrunkScript DEFAULT.disable3D: RENDER.disable()
         // textureAnim off: Krunker resets moving/framed textures to their first frame.
         client_tick_textures(client, client_render_settings()->texture_anim ? now : 0.0f);
         debug_capture_apply_camera(client); // KRUNKNATIVE_CAMERA pose (debug_capture.c)
+        map_environment_update(client->game.map, client->camera.position); // v7 ENVIRONMENT_ZONE swaps (map_environment.c)
+        map_post_frame(client->scene, &client->game, &client->camera, delta * 1000.0f); // spin, sign distance, GLTF assets, builds, zone (map_post.c)
+        zombies_render_frame(client, delta * 1000.0f); // WP-H: mystery box / krum weapons, beams, airdrops (zombies_render.c)
         shadow_update(); // static sun shadow map, re-rendered after a map load (shadow.c)
+        ocean_update(client->scene, &client->camera, delta * 1000.0f); // v7 ocean: time + mirror reflection pass (ocean.c)
         sky_tick(delta * 1000.0f);
         sky_render(&client->camera); // Krunker's backgroundScene pass: sky dome first (sky.c)
         shadow_begin_world();
@@ -1475,7 +1666,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
     }
 
-    if (!scenario || SCENARIO_PREVIEW()) {
+    if ((!scenario || SCENARIO_PREVIEW()) && !ks_client_3d_disabled()) {
         glClear(GL_DEPTH_BUFFER_BIT);
         // fpsFOV: the first-person camera has its own fov (Krunker fpsCamera, zoomed alike);
         // showWeapon/Sec/Mel hide the model of the weapon in hand.
@@ -1502,5 +1693,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
 
     if (!scenario) vfx_render_screen(client); // overlay-canvas muzzle flash + damage overlay
     if (!scenario) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
-    input_script_frame_end(client, delta); // KRUNKNATIVE_INPUT_LOG row
+    if (!scenario) sprays_wheel_render(client, delta); // WP-E: v7 spray wheel (game-overlay canvas)
+    if (!scenario) ks_overlay_frame(frame_delta); // KrunkScript overlay canvas: script render(), below the HTML page
+    input_script_frame_end(client, delta, frame_delta); // KRUNKNATIVE_INPUT_LOG row
 }

@@ -1,0 +1,66 @@
+P Deposit Box
+L[] Visible : switch=1
+L[] Bullet Collisions : switch=1
+L[] AI Collisions : switch=1
+L[] Wall Jumpable : switch=1
+L[] Can Grapple : switch=1
+L[] Can Impulse : switch=1
+L[] Border : switch=0
+L[] Show On Minimap : switch=1
+L[] Team : select#5[Default..Delta]=Default
+L[] Step Sound : select#5[Default..Snow]=Default
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 10/0,10/0,10/0
+-
+F Style closed
+-
+Fs Texture closed
+L[subsection] Type : select#20[Default..Snow]=Stone
+L[subsection] Variant : select#8[Default..Light Cobble]=Default
+L[subsection] Asset ID : text(Texture Asset ID)=0
+B Select Custom
+L[subsection] Stretch : switch=0
+L[subsection] Scale : sval=0 range[0,10,0.01]=0
+L[subsection] Force Transparency : switch=0
+L[subsection] Rotation : sval=0 range[0,360,1]=0
+Fss Offset closed
+L[subsubsection] X : sval=0 range[0,1,0.01]=0
+L[subsubsection] Y : sval=0 range[0,1,0.01]=0
+Fss Movement closed
+L[subsubsection] Speed : sval=0 range[-20,20,0.1]=0
+L[subsubsection] Axis : select#2[X..Y]=X
+Fss Frame Animation closed
+L[subsubsection] Frame Count : sval=0 range[0,100,1]=0
+L[subsubsection] Frame Speed : sval=0 range[0,10,0.1]=0
+-
+L[] Encoding : select#3[Default..LinearEncoding]=Default
+L[] Color : color=#FFFFFF
+L[] Emissive : color=#000000
+L[] Opacity : sval=1 range[0,1,0.1]=1
+L[] Shading : switch=1
+L[] Fog : switch=1
+-
+F Technical & Logic closed
+-
+L[] Withdraw Amount : sval=1000 range[0,100000,1]=1000
+L[] Deposit Amount : sval=1000 range[0,100000,1]=1000
+L[] Custom Message : text()=
+Fs Interface closed
+L[subsection] ID : sval=0 range[0,2000,1]=0
+-
+F Render Faces closed
+-
+L[] Right : switch=1
+L[] Left : switch=1
+L[] Top : switch=1
+L[] Bottom : switch=1
+L[] Back : switch=1
+L[] Front : switch=1
+-

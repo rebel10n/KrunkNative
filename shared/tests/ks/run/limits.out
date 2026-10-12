@@ -1,0 +1,12 @@
+exact 1000001
+!RUNTIME ERROR: 32:5 Loop timed out.
+!RUNTIME ERROR: 38:9 Loop timed out.
+progress 999001
+deep ok 1500
+!RUNTIME ERROR: Maximum call stack size exceeded
+progress 3002
+update 1 16
+!RUNTIME ERROR: 52:19 Index out of range.
+update 3 16
+!RUNTIME ERROR: Execution timed out.
+alive 3

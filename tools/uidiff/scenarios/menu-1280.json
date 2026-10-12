@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/menu/real-1280.png",
+  "ref": "doc/ref/krunker-v7.1.4/menu/menu-1280.png",
   "size": [
     1280,
     720
@@ -8,15 +8,16 @@
   "state": {
     "menu": true,
     "window": null,
-    "settingsTab": 0,
     "connected": true,
     "ready": true,
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
     "region": "...",
-    "anim_time": 0.325
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8
   },
   "frames": 3,
-  "note": "Logged-out loaded menu, no window. anim_time 0.325: `grow` phase of the capture (merch phase follows; its own best match is 0.4)."
+  "note": "Returning guest's menu, no window (v7.1.4 sandbox chrome undone: CONNECTED_MENU)."
 }

@@ -1,0 +1,27 @@
+H Controls
+X call_made
+X Controls
+T Default
+T Advanced *
+L[] Open Texture/Model List : label:T
+L[] Open Scripting Window : label:0
+L[] Create placeholder : label:P
+L[] Create Cube : label:C
+L[] Create Gate : label:G
+L[] Create Trigger : label:R
+L[] Hitbox fixer : label:Shift + F
+L[] Flip x/z size : label:F
+L[] Quick Add : label:X
+-
+F Group open
+-
+L[] Remove all groups : label:Shift + Alt + G
+L[] Create group / Remove group if exist : label:Shift + G
+L[] Duplicate Group / Object : label:Shift + R
+L[] Copy group : label:Ctrl + C
+L[] Paste group : label:Ctrl + V
+-
+F File open
+-
+L[] Paste preset JSON : label:Shift + Click (w/ Objectpainter)
+-

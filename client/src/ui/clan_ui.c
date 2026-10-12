@@ -301,8 +301,8 @@ char *clan_window_gen(void) {
         }
         return sb_finish(&sb);
     }
-    sb_append(&sb, "<div class='setHed' style='margin-top:-5px'>Create Clan</div><input id='clanInp1' type='text' class='smlInput' maxlength='4' placeholder='Clan Name' /><a class='menuLink' style='margin-left:20px' onclick='windows[12].sendReq(1)'>Create</a>");
-    sb_append(&sb, "<div style='margin-top:0px' class='setHed'>Join Clan <a href='./social.html?p=leaders&q=clans' target='_blank' class='menuLink' style='margin-top:10px;display:inline-block'>View Clans</a></div><input id='clanInp2' type='text' class='smlInput' maxlength='5' placeholder='Clan Name' /><a class='menuLink' style='margin-left:20px' onclick='windows[12].sendReq(2)'>Submit</a><div id='clanErr' style='margin-top:10px'></div>");
+    // windows[12].gen() without a clan (v7.1.4)
+    sb_append(&sb, "<div class='setHed' style='margin-top:-5px'>Create Clan</div><input id='clanInp1' type='text' class='smlInput' maxlength='4' placeholder='Clan Name' /><a class='clanSubmitBtn' style='margin-left:20px' onclick='windows[12].sendReq(1)'>Create</a><div class='setHed'>Join Clan <a href='./social.html?p=leaders&q=clans' target='_blank' class='menuLink' style='float:right'>View Clans</a></div><input id='clanInp2' type='text' class='smlInput' maxlength='5' placeholder='Clan Name' /><a class='clanSubmitBtn' style='margin-left:20px' onclick='windows[12].sendReq(2)'>Submit</a><div id='clanErr' style='margin-top:10px'></div>");
     return sb_finish(&sb);
 }
 // ---- popups (#popupHolder: confPop / popupContent, index.js resetPops / dP / contPopup)

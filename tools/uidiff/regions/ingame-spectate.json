@@ -1,0 +1,89 @@
+{
+  "scenario": "ingame-spectate",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "spec-names",
+      "rect": [
+        10,
+        10,
+        131,
+        35
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#specNames: Spectating (free cam)"
+    },
+    {
+      "name": "spec-info",
+      "rect": [
+        589,
+        10,
+        102,
+        56
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#specTimer 03:44 + #specGameInfo Free For All"
+    },
+    {
+      "name": "spec-team",
+      "rect": [
+        401,
+        10,
+        183,
+        56
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "skip": true,
+      "note": "#specTeam0: the sandbox bot's row (class / name differ)"
+    },
+    {
+      "name": "spec-controls",
+      "rect": [
+        1125,
+        589,
+        145,
+        121
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#specControlHolder: Prev / Next / Free Cam [F] / Player/Cam / First Person [R] / Focus [.] / Force Nametags [M] / Minimap [-] (no Objective Cam row in FFA)"
+    },
+    {
+      "name": "chat",
+      "rect": [
+        10,
+        651,
+        243,
+        59
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatHolder"
+    },
+    {
+      "name": "empty-bottom-left",
+      "rect": [
+        300,
+        600,
+        700,
+        100
+      ],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "expect": "background",
+      "note": "no player HUD while spectating"
+    }
+  ]
+}

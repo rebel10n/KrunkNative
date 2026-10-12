@@ -1,10 +1,11 @@
-// The Krunker v3.1.1 map catalogue (shared/include/map_catalog.h).
+// The KrunkNative map catalogue (shared/include/map_catalog.h): Krunker v7.1.4's 32 official maps
+// plus the community maps, among them the v3.1.1 official maps as "v3_<key>".
 //
-// Sources: Krunker_v3.1.1/main/maps.js + server/game.ts (MAPS: name -> mapIndex),
-// src/data/map.js (the bundled `maps` array and rotationMaps), matchmaker/publicRoutes.ts
-// (loadMaps: maps/ then custom_maps/, map_id = fnv1a(name.toLowerCase()), creatorname,
-// map_featured), server/packetHandlers.ts (cmd_map / listCustomMaps), and the Host Game /
-// Games windows captured from the running game (doc/ref/krunker-v3.1.1/windows/).
+// Sources: Krunker_v7.1.4/src/data/maps.js (the official list: name, fileName; the index is the
+// v7 mapIndex) and data/map.js rotationMaps; Krunker_v3.1.1 matchmaker/publicRoutes.ts (loadMaps,
+// map_id = fnv1a(name.toLowerCase()), creatorname, map_featured), server/packetHandlers.ts
+// (cmd_map / listCustomMaps), and the v3.1.1 Games window capture (doc/ref/krunker-v3.1.1/windows/).
+// tools/maps/import_v7_maps.py imports the v7 map files (assets/maps/v7/) and their thumbnails.
 
 #include <map_catalog.h>
 #include <shared.h>
@@ -14,30 +15,51 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define OFFICIAL(key_, name_, idx, rot, host, by, year, version) \
-    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, host, "Krunker", "", by, year, version}
+#define OFFICIAL(key_, name_, idx, rot) \
+    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, 1, "Krunker", "", "", "", "", "maps/v7/" key_ ".json"}
 #define CUSTOM(key_, name_, creator_, mod) \
-    {key_, name_, -1, MAP_SOURCE_CUSTOM, 0, 0, creator_, mod, "", "", ""}
+    {key_, name_, -1, MAP_SOURCE_CUSTOM, 0, 0, creator_, mod, "", "", "", "maps/custom/" key_ ".json"}
+// a v3.1.1 official map, kept playable as a community map at its old path (v3.1.1 Host Game
+// card labels kept: "by", year, version)
+#define V3(key_, name_, by, year, version) \
+    {"v3_" key_, name_, -1, MAP_SOURCE_CUSTOM, 0, 0, "Krunker", "", by, year, version, "maps/" key_ ".json"}
 
 static const MapCatalogEntry k_catalog[] = {
-    // maps/ (MAPS order). Host card labels are genHost's (windows[7]) as captured.
-    OFFICIAL("burg", "Burg", 0, 1, 1, "", "2018", "v3.2"),
-    OFFICIAL("littletown", "Littletown", 1, 1, 1, "", "2018", "v0.9"),
-    OFFICIAL("sandstorm", "Sandstorm", 2, 1, 1, "CrispyCrust", "2019", "v2.3"),
-    OFFICIAL("subzero", "Subzero", 3, 1, 1, "CrispyCrust", "2019", "v0.9"),
-    OFFICIAL("undergrowth", "Undergrowth", 4, 1, 1, "CrispyCrust", "2019", "v1.2"),
-    OFFICIAL("shipyard", "Shipyard", 5, 0, 1, "Chwoubaka", "2019", "v1.0"),
-    OFFICIAL("freight", "Freight", 6, 1, 1, "", "2019", "v2.1"),
-    OFFICIAL("lostworld", "Lostworld", 7, 1, 1, "DasIstWalter", "2020", "v1.2"),
-    OFFICIAL("citadel", "Citadel", 8, 1, 1, "", "2020", "v2.4"),
-    OFFICIAL("oasis", "Oasis", 9, 1, 1, "DasIstWalter", "2020", "v0.2"),
-    OFFICIAL("kanji", "Kanji", 10, 1, 1, "Arbiter", "2020", "v5.2"),
-    OFFICIAL("newtown", "Newtown", 11, 1, 1, "Arbiter", "2020", "v0.1"),
-    OFFICIAL("industry", "Industry", 12, 1, 1, "CrispyCrust", "2020", "v1.0"),
-    // DISABLED_ROTATION_MAPS (game.ts) and not in genHost: Raid's map ("23,13" end votes)
-    OFFICIAL("soul_sanctum", "Soul Sanctum", 13, 0, 0, "", "2020", ""),
-    OFFICIAL("evacuation", "Evacuation", 14, 1, 1, "Creationfier", "2020", "vTest"),
-    // custom_maps/ (ASCII filename order); creator = body.creator, mod = body.modURL
+    // v7.1.4 data/maps.js, in mapIndex order; rotation = map.js rotationMaps
+    // [0,1,2,3,4,6,7,8,9,10,11,12,13,14,15,16,19,21,22,23,24,25,26,28]
+    OFFICIAL("burg_new", "Burg", 0, 1),
+    OFFICIAL("littletown", "Littletown", 1, 1),
+    OFFICIAL("sandstorm_v3", "Sandstorm", 2, 1),
+    OFFICIAL("subzero_new", "Subzero", 3, 1),
+    OFFICIAL("undergrowth", "Undergrowth", 4, 1),
+    OFFICIAL("shipment", "Shipment", 5, 0),
+    OFFICIAL("freight", "Freight", 6, 1),
+    OFFICIAL("lostworld_s6", "Lostworld", 7, 1),
+    OFFICIAL("citadel", "Citadel", 8, 1),
+    OFFICIAL("oasis_v3", "Oasis", 9, 1),
+    OFFICIAL("kanji", "Kanji", 10, 1),
+    OFFICIAL("industry", "Industry", 11, 1),
+    OFFICIAL("lumber", "Lumber", 12, 1),
+    OFFICIAL("evacuation", "Evacuation", 13, 1),
+    OFFICIAL("site", "Site", 14, 1),
+    OFFICIAL("skytemple_v2", "SkyTemple", 15, 1),
+    OFFICIAL("lagoon", "Lagoon", 16, 1),
+    OFFICIAL("bureau", "Bureau", 17, 0),
+    OFFICIAL("shipwrecked", "Tortuga", 18, 0),
+    OFFICIAL("tropicano", "Tropicano", 19, 1),
+    OFFICIAL("krunk_plaza_v2", "Krunk_Plaza", 20, 0),
+    OFFICIAL("arena", "Arena", 21, 1),
+    OFFICIAL("habitat_v2", "Habitat", 22, 1),
+    OFFICIAL("atomic", "Atomic", 23, 1),
+    OFFICIAL("burg_2018", "Old_Burg", 24, 1),
+    OFFICIAL("throwback_2018", "Throwback", 25, 1),
+    OFFICIAL("stockade_2018", "Stockade", 26, 1),
+    OFFICIAL("facility", "Facility", 27, 0),
+    OFFICIAL("clockwork", "Clockwork", 28, 1),
+    OFFICIAL("laboratory", "Laboratory", 29, 0),
+    OFFICIAL("shipyard", "Shipyard", 30, 0),
+    OFFICIAL("sanctum", "Soul Sanctum", 31, 0),
+    // assets/maps/custom/ (ASCII filename order); creator = body.creator, mod = body.modURL
     CUSTOM("Bhop_VIP", "Bhop_VIP", "eskrr", ""),
     CUSTOM("ClashRoyale", "ClashRoyale", "Community", ""),
     CUSTOM("ESP_Parkour", "ESP_Parkour", "ImCriistian", ""),
@@ -59,6 +81,22 @@ static const MapCatalogEntry k_catalog[] = {
     CUSTOM("old_undergrowth", "Undergrowth", "Community", ""),
     CUSTOM("slide_moonlight", "slide_moonlight", "Community", ""),
     CUSTOM("zombie_high", "Zombie_High", "IamFiercer", "https://user-assets.krunker.io/md23677/mod.zip"),
+    // the v3.1.1 official maps (v3.1.1 MAPS order); Host Game card labels as v3.1.1 showed them
+    V3("burg", "Burg", "", "2018", "v3.2"),
+    V3("littletown", "Littletown", "", "2018", "v0.9"),
+    V3("sandstorm", "Sandstorm", "CrispyCrust", "2019", "v2.3"),
+    V3("subzero", "Subzero", "CrispyCrust", "2019", "v0.9"),
+    V3("undergrowth", "Undergrowth", "CrispyCrust", "2019", "v1.2"),
+    V3("shipyard", "Shipyard", "Chwoubaka", "2019", "v1.0"),
+    V3("freight", "Freight", "", "2019", "v2.1"),
+    V3("lostworld", "Lostworld", "DasIstWalter", "2020", "v1.2"),
+    V3("citadel", "Citadel", "", "2020", "v2.4"),
+    V3("oasis", "Oasis", "DasIstWalter", "2020", "v0.2"),
+    V3("kanji", "Kanji", "Arbiter", "2020", "v5.2"),
+    V3("newtown", "Newtown", "Arbiter", "2020", "v0.1"),
+    V3("industry", "Industry", "CrispyCrust", "2020", "v1.0"),
+    V3("soul_sanctum", "Soul Sanctum", "", "2020", ""),
+    V3("evacuation", "Evacuation", "Creationfier", "2020", "vTest"),
 };
 
 #define CATALOG_COUNT (sizeof(k_catalog) / sizeof(k_catalog[0]))
@@ -66,26 +104,23 @@ static const MapCatalogEntry k_catalog[] = {
 static cJSON *g_catalog_json[CATALOG_COUNT];
 static unsigned char g_catalog_failed[CATALOG_COUNT];
 
-// The Games window orders the v3.1.1 offline server sent (win-games.html capture). Popular
-// sorts by file mtime and New by birthtime, both install-time noise, so they are recorded
-// rather than derived; Featured is the official maps in the order the server returned them.
+// The Games window orders. v3.1.1's were recorded from its offline server (win-games.html
+// capture: Popular by file mtime, New by birthtime); v7.1.4 has no recorded order, so the v7
+// official maps lead (data/maps.js order) and the community maps keep the v3.1.1 order, with
+// the v3.1.1 official maps under their "v3_" keys.
 static const char *const k_games_popular[] = {
-    "soul_sanctum", "subzero", "undergrowth", "lostworld", "newtown", "oasis", "sandstorm", "shipyard", "freight",
-    "industry", "kanji", "littletown", "burg", "citadel", "evacuation", "zombie_high", "old_sandstorm", "old_shipyard",
-    "old_subzero", "old_undergrowth", "slide_moonlight", "old_burg", "old_freight", "old_kanji", "old_littletown",
-    "old_lostworld", "SniperRoyale2", "Test", "Verb_Arena", "eterno_jump", "Krunk_Plaza", "Slide_Neon_Stage", "Bhop_VIP",
-    "ClashRoyale", "ESP_Parkour", "FortniteTiltedT",
-};
-static const char *const k_games_featured[] = {
-    "industry", "subzero", "lostworld", "evacuation", "undergrowth", "kanji", "shipyard", "freight", "sandstorm",
-    "oasis", "littletown", "newtown", "soul_sanctum", "citadel", "burg",
+    "v3_soul_sanctum", "v3_subzero", "v3_undergrowth", "v3_lostworld", "v3_newtown", "v3_oasis", "v3_sandstorm",
+    "v3_shipyard", "v3_freight", "v3_industry", "v3_kanji", "v3_littletown", "v3_burg", "v3_citadel", "v3_evacuation",
+    "zombie_high", "old_sandstorm", "old_shipyard", "old_subzero", "old_undergrowth", "slide_moonlight", "old_burg",
+    "old_freight", "old_kanji", "old_littletown", "old_lostworld", "SniperRoyale2", "Test", "Verb_Arena", "eterno_jump",
+    "Krunk_Plaza", "Slide_Neon_Stage", "Bhop_VIP", "ClashRoyale", "ESP_Parkour", "FortniteTiltedT",
 };
 static const char *const k_games_new[] = {
-    "subzero", "undergrowth", "newtown", "oasis", "sandstorm", "shipyard", "soul_sanctum", "industry", "kanji",
-    "littletown", "lostworld", "citadel", "evacuation", "freight", "burg", "old_shipyard", "old_subzero",
-    "old_undergrowth", "slide_moonlight", "zombie_high", "old_freight", "old_kanji", "old_littletown", "old_lostworld",
-    "old_sandstorm", "Test", "Verb_Arena", "eterno_jump", "old_burg", "Slide_Neon_Stage", "SniperRoyale2",
-    "ClashRoyale", "ESP_Parkour", "FortniteTiltedT", "Krunk_Plaza", "Bhop_VIP",
+    "v3_subzero", "v3_undergrowth", "v3_newtown", "v3_oasis", "v3_sandstorm", "v3_shipyard", "v3_soul_sanctum",
+    "v3_industry", "v3_kanji", "v3_littletown", "v3_lostworld", "v3_citadel", "v3_evacuation", "v3_freight", "v3_burg",
+    "old_shipyard", "old_subzero", "old_undergrowth", "slide_moonlight", "zombie_high", "old_freight", "old_kanji",
+    "old_littletown", "old_lostworld", "old_sandstorm", "Test", "Verb_Arena", "eterno_jump", "old_burg",
+    "Slide_Neon_Stage", "SniperRoyale2", "ClashRoyale", "ESP_Parkour", "FortniteTiltedT", "Krunk_Plaza", "Bhop_VIP",
 };
 
 size_t map_catalog_count(void) { return CATALOG_COUNT; }
@@ -266,10 +301,7 @@ int map_sanitize_json(cJSON *map) {
 }
 
 static char *catalog_path(const size_t index) {
-    const MapCatalogEntry *e = &k_catalog[index];
-    char relative[128];
-    snprintf(relative, sizeof(relative), "maps/%s%s.json", e->source == MAP_SOURCE_CUSTOM ? "custom/" : "", e->key);
-    return concat(assets_path(), relative);
+    return concat(assets_path(), k_catalog[index].path);
 }
 
 const cJSON *map_catalog_json(const size_t index) {
@@ -392,9 +424,15 @@ static int key_ascii_cmp(const void *a, const void *b) {
 
 size_t map_catalog_games_tab(const int tab, int *out, const size_t max) {
     if (!out) return 0;
+    size_t n = 0;
     switch (tab) {
-        case 1: return games_from_keys(k_games_featured, sizeof(k_games_featured) / sizeof(k_games_featured[0]), out, max);
-        case 2: return games_from_keys(k_games_new, sizeof(k_games_new) / sizeof(k_games_new[0]), out, max);
+        case 1: // Featured: the official maps (data/maps.js order)
+            for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT && n < max; i++) out[n++] = (int) i;
+            return n;
+        case 0: case 2: // Popular / New: the official maps, then the community maps' recorded order
+            for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT && n < max; i++) out[n++] = (int) i;
+            if (tab == 2) return n + games_from_keys(k_games_new, sizeof(k_games_new) / sizeof(k_games_new[0]), out + n, max - n);
+            return n + games_from_keys(k_games_popular, sizeof(k_games_popular) / sizeof(k_games_popular[0]), out + n, max - n);
         case 3: return 0; // Favorites: nothing favourited
         case 4: {
             // My Games: the rows unsorted, i.e. readdir order (maps/ then custom_maps/, ASCII)
@@ -405,6 +443,6 @@ size_t map_catalog_games_tab(const int tab, int *out, const size_t max) {
             memcpy(out, all, n * sizeof(int));
             return n;
         }
-        default: return games_from_keys(k_games_popular, sizeof(k_games_popular) / sizeof(k_games_popular[0]), out, max);
+        default: return 0;
     }
 }

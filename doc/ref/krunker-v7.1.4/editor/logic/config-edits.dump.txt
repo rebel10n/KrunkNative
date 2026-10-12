@@ -1,0 +1,3252 @@
+P Essential
+L[] Name : text(Name)=New Krunker Map
+L[] Welcome Msg : text(Welcome)=Welcome!
+L[] Mod URL : text(Mod URL)=
+B Select Mod
+L[] Death Height : sval=-100 range[-1000,3000,1]=-100
+L[] Force Old AO : switch=1
+L[] Minimap AssetId : text()=55
+-
+F Game Modes closed
+-
+L[subsection] Free for All [ID: 0] : switch=1
+L[subsection] Team Deathmatch [ID: 1] : switch=1
+L[subsection] Hardpoint [ID: 2] : switch=0
+L[subsection] Capture the Flag [ID: 3] : switch=0
+L[subsection] Parkour [ID: 4] : switch=0
+L[subsection] Hide & Seek [ID: 5] : switch=0
+L[subsection] Infected [ID: 6] : switch=0
+L[subsection] Race [ID: 7] : switch=0
+L[subsection] Last Man Standing [ID: 8] : switch=0
+L[subsection] Simon Says [ID: 9] : switch=0
+L[subsection] Gun Game [ID: 10] : switch=0
+L[subsection] Prop Hunt [ID: 11] : switch=0
+L[subsection] Boss Hunt [ID: 12] : switch=0
+L[subsection] Classic FFA [ID: 13] : switch=0
+L[subsection] Deposit [ID: 14] : switch=0
+L[subsection] Stalker [ID: 15] : switch=0
+L[subsection] King of the Hill [ID: 16] : switch=0
+L[subsection] One in the Chamber [ID: 17] : switch=0
+L[subsection] Trade [ID: 18] : switch=0
+L[subsection] Kill Confirmed [ID: 19] : switch=0
+L[subsection] Defuse [ID: 20] : switch=0
+L[subsection] Sharp Shooter [ID: 21] : switch=0
+L[subsection] Traitor [ID: 22] : switch=0
+L[subsection] Raid [ID: 23] : switch=0
+L[subsection] Blitz [ID: 24] : switch=0
+L[subsection] Domination [ID: 25] : switch=0
+L[subsection] Squad Deathmatch [ID: 26] : switch=0
+L[subsection] Kranked FFA [ID: 27] : switch=0
+L[subsection] Team Defender [ID: 28] : switch=0
+L[subsection] Deposit FFA [ID: 29] : switch=0
+L[subsection] Chaos Snipers [ID: 33] : switch=0
+L[subsection] Bighead FFA [ID: 34] : switch=0
+-
+F Server Preset closed
+-
+Fs Server Size closed
+-
+L[subsection] Players : sval=8 range[1,20,1]=8
+L[subsection] Min Players : sval=0 range[0,20,1]=0
+-
+Fs Timers closed
+-
+L[subsection] Minutes : sval=4 range[0,60,1]=4
+L[subsection] Warmup : sval=0 range[0,4,0.1]=0
+L[subsection] Rounds : sval=1 range[1,10,1]=1
+L[subsection] Intermission (s) : sval=30 range[5,120,1]=30
+L[subsection] Auto Respawn : sval=0 range[0,15,1]=0
+-
+Fs Health & Lives closed
+-
+L[subsection] Lives : sval=0 range[0,10,1]=0
+L[subsection] Health Multiplier : sval=1 range[0.1,3,0.1]=1
+L[subsection] Health Regen : switch=1
+-
+Fs Score & Rewards closed
+-
+L[subsection] Score Limit : sval=0 range[0,10000,100]=0
+L[subsection] Keep Team Score : switch=0
+L[subsection] Kill Rewards : switch=1
+L[subsection] No Assists : switch=0
+-
+Fs Mode Settings closed
+-
+L[subsection] Objective Time : sval=1 range[0.1,10,0.1]=1
+L[subsection] Force Mode Classes : switch=1
+L[subsection] Log Time (Race/Bhop) : switch=1
+L[subsection] Last Checkpoint Time Rewind (Race/Bhop) : switch=0
+-
+Fs World Physics closed
+-
+L[subsection] Gravity : sval=0.5 range[0,2,0.001]=0.5
+L[subsection] Time Scale : sval=1 range[0.1,1.5,0.1]=1
+L[subsection] Fall Damage : sval=0 range[0,10,0.01]=0
+L[subsection] Fall Damage Thresh : sval=0 range[0,10,0.01]=0
+L[subsection] Bullet Drop : switch=0
+-
+Fs Jumping closed
+-
+L[subsection] Jump Force : sval=1 range[0.1,3,0.001]=1
+L[subsection] Wall Jump Power : sval=1 range[0,2,1]=1
+L[subsection] Auto Jump : switch=0
+-
+Fs Movement closed
+-
+L[subsection] Fixed Movement : switch=0
+L[subsection] Slide Time : sval=1 range[1,5,0.1]=1
+L[subsection] Slide Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Strafe Speed : sval=1.2 range[1,2,0.1]=1.2
+L[subsection] Sliding : switch=1
+L[subsection] Air Strafe : switch=0
+-
+Fs Gameplay Logic closed
+-
+L[subsection] Weapon Impulse : sval=1 range[0,3,0.1]=1
+L[subsection] Fire Rate : sval=1 range[0.5,2,0.1]=1
+L[subsection] Reload Speed : sval=1 range[0.5,2,0.1]=1
+L[subsection] Headshots Only : switch=0
+L[subsection] No Secondaries : switch=0
+L[subsection] Throwable Melees : switch=1
+L[subsection] Chargable Weapons : switch=1
+-
+Fs Collisions closed
+-
+L[subsection] Hitbox Padding : sval=0.6 range[-2,2,0.1]=0.6
+-
+Fs Other closed
+-
+L[subsection] Disable Streaks : switch=0
+L[subsection] Disable Borders : switch=0
+L[subsection] Spectating : switch=1
+L[subsection] 3rd Person : switch=0
+L[subsection] Hide Nametags (Enemies) : switch=0
+L[subsection] Hide Nametags (Allies) : switch=0
+L[subsection] Kill Cams : switch=1
+L[subsection] Allow Anonymous : switch=1
+L[subsection] Stop Head Clipping : switch=0
+L[subsection] Minimaps : switch=1
+-
+Fs Teams closed
+-
+L[subsection] Select Team : switch=0
+L[subsection] Friendly Fire : switch=0
+L[subsection] Alpha Team Name : text()=Alpha
+L[subsection] Bravo Team Name : text()=Bravo
+L[subsection] Charlie Team Name : text()=Charlie
+L[subsection] Delta Team Name : text()=Delta
+L[subsection] Echo Team Name : text()=Echo
+L[subsection] Alpha Team Damage : sval=1 range[0,2,0.1]=1
+L[subsection] Bravo Team Damage : sval=1 range[0,2,0.1]=1
+L[subsection] Charlie Team Damage : sval=1 range[0,2,0.1]=1
+L[subsection] Delta Team Damage : sval=1 range[0,2,0.1]=1
+L[subsection] Echo Team Damage : sval=1 range[0,2,0.1]=1
+-
+-
+F Weapon Config closed
+-
+Fs Longshot [ID: 0] closed
+L[subsection] Name : text()=Longshot
+L[subsection] Damage : sval=90 range[-200,200,1]=90
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=3 range[1,500,1]=3
+L[subsection] Rate : sval=1000 range[70,1000,5]=1000
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1900 range[500,5000,25]=1900
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.95 range[0.5,3,0.01]=0.95
+L[subsection] Pierce : sval=0.2 range[0,1,0.05]=0.2
+L[subsection] Range : sval=1000 range[5,2000,1]=1000
+L[subsection] Damage Drop : sval=30 range[0,100,1]=30
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=260 range[0,500,0.1]=260
+L[subsection] Zoom : sval=2.7 range[1,15,0.01]=2.7
+L[subsection] Recoil : sval=0.009 range[0,0.05,0.0001]=0.009
+L[subsection] Recoil Y : sval=0.55 range[0,2,0.01]=0.55
+L[subsection] Recoil Z : sval=1.5 range[0,10,0.1]=1.5
+L[subsection] Jump Power : sval=0.15 range[0.1,1,0.01]=0.15
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=100 range[-200,200,1]=100
+L[subsection] Projectile Speed : sval=2.5 range[0.01,5,0.01]=2.5
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=7000 range[10,10000,10]=7000
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs Assault Rifle [ID: 1] closed
+L[subsection] Name : text()=Assault Rifle
+L[subsection] Damage : sval=23 range[-200,200,1]=23
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=28 range[1,500,1]=28
+L[subsection] Rate : sval=120 range[70,1000,5]=120
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1500 range[500,5000,25]=1500
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=130 range[100,500,10]=130
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.95 range[0.5,3,0.01]=0.95
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=5 range[0,100,1]=5
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=100 range[0,500,0.1]=100
+L[subsection] Min Spread : sval=5 range[0,100,0.1]=5
+L[subsection] Zoom : sval=1.6 range[1,15,0.01]=1.6
+L[subsection] Recoil : sval=0.003 range[0,0.05,0.0001]=0.003
+L[subsection] Recoil Y : sval=1.1 range[0,2,0.01]=1.1
+L[subsection] Recoil Z : sval=4.3 range[0,10,0.1]=4.3
+L[subsection] Recoil Z Aim : sval=-0.04 range[-1,1,0.01]=-0.04
+L[subsection] Jump Power : sval=0.3 range[0.1,1,0.01]=0.3
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=23 range[-200,200,1]=23
+L[subsection] Projectile Speed : sval=2.6 range[0.01,5,0.01]=2.6
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=3000 range[10,10000,10]=3000
+L[subsection] Projectile Gravity : sval=0.00011 range[-0.01,0.01,0.00001]=0.00011
+Fs Pistol [ID: 2] closed
+L[subsection] Name : text()=Pistol
+L[subsection] Damage : sval=20 range[-200,200,1]=20
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=10 range[1,500,1]=10
+L[subsection] Rate : sval=150 range[70,1000,5]=150
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=700 range[500,5000,25]=700
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=260 range[100,1000,10]=260
+L[subsection] Aim Speed : sval=110 range[100,500,10]=110
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1.05 range[0.5,3,0.01]=1.05
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=10 range[0,100,1]=10
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=60 range[0,500,0.1]=60
+L[subsection] Zoom : sval=1.4 range[1,15,0.01]=1.4
+L[subsection] Recoil : sval=0.006 range[0,0.05,0.0001]=0.006
+L[subsection] Recoil Y : sval=0.2 range[0,2,0.01]=0.2
+L[subsection] Recoil Z : sval=3.8 range[0,10,0.1]=3.8
+L[subsection] Recoil Z Aim : sval=-0.4 range[-1,1,0.01]=-0.4
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=12 range[-200,200,1]=12
+L[subsection] Projectile Speed : sval=2.3 range[0.01,5,0.01]=2.3
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=1600 range[10,10000,10]=1600
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs Submachine Gun [ID: 3] closed
+L[subsection] Name : text()=Submachine Gun
+L[subsection] Damage : sval=18 range[-200,200,1]=18
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=30 range[1,500,1]=30
+L[subsection] Rate : sval=95 range[70,1000,5]=95
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1000 range[500,5000,25]=1000
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=110 range[100,500,10]=110
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1.04 range[0.5,3,0.01]=1.04
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=12 range[0,100,1]=12
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=70 range[0,500,0.1]=70
+L[subsection] Min Spread : sval=5 range[0,100,0.1]=5
+L[subsection] Zoom : sval=1.65 range[1,15,0.01]=1.65
+L[subsection] Recoil : sval=0.0034 range[0,0.05,0.0001]=0.0034
+L[subsection] Recoil Y : sval=0.3 range[0,2,0.01]=0.3
+L[subsection] Recoil Z : sval=4.2 range[0,10,0.1]=4.2
+L[subsection] Recoil Z Aim : sval=-0.1 range[-1,1,0.01]=-0.1
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=18 range[-200,200,1]=18
+L[subsection] Projectile Speed : sval=2.4 range[0.01,5,0.01]=2.4
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=2700 range[10,10000,10]=2700
+L[subsection] Projectile Gravity : sval=0.00011 range[-0.01,0.01,0.00001]=0.00011
+Fs Revolver [ID: 4] closed
+L[subsection] Name : text()=Revolver
+L[subsection] Damage : sval=66 range[-200,200,1]=66
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=6 range[1,500,1]=6
+L[subsection] Rate : sval=450 range[70,1000,5]=450
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=900 range[500,5000,25]=900
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=110 range[100,500,10]=110
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1.04 range[0.5,3,0.01]=1.04
+L[subsection] Pierce : sval=0.85 range[0,1,0.05]=0.85
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=10 range[0,100,1]=10
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=100 range[0,500,0.1]=100
+L[subsection] Zoom : sval=1.45 range[1,15,0.01]=1.45
+L[subsection] Recoil : sval=0.013 range[0,0.05,0.0001]=0.013
+L[subsection] Recoil Y : sval=0.5 range[0,2,0.01]=0.5
+L[subsection] Recoil Z : sval=4 range[0,10,0.1]=4
+L[subsection] Recoil Z Aim : sval=0.01 range[-1,1,0.01]=0.01
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=66 range[-200,200,1]=66
+L[subsection] Projectile Speed : sval=2.3 range[0.01,5,0.01]=2.3
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=2600 range[10,10000,10]=2600
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs Shotgun [ID: 5] closed
+L[subsection] Name : text()=Shotgun
+L[subsection] Damage : sval=50 range[-200,200,1]=50
+L[subsection] Headshot Mlt : sval=1.25 range[0.5,3,0.0001]=1.25
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=2 range[1,500,1]=2
+L[subsection] Rate : sval=450 range[70,1000,5]=450
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1100 range[500,5000,25]=1100
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Range : sval=160 range[5,2000,1]=160
+L[subsection] Damage Drop : sval=50 range[0,100,1]=50
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=180 range[0,500,0.1]=180
+L[subsection] Min Spread : sval=20 range[0,100,0.1]=20
+L[subsection] Zoom : sval=1.25 range[1,15,0.01]=1.25
+L[subsection] Recoil : sval=0.02 range[0,0.05,0.0001]=0.02
+L[subsection] Recoil Y : sval=0.65 range[0,2,0.01]=0.65
+L[subsection] Recoil Z : sval=2.1 range[0,10,0.1]=2.1
+L[subsection] Recoil Z Aim : sval=0.2 range[-1,1,0.01]=0.2
+L[subsection] Jump Power : sval=0.5 range[0.1,1,0.01]=0.5
+L[subsection] Impulse Range : sval=35 range[0,2000,1]=35
+L[subsection] Impulse Power : sval=0.09 range[-2,2,0.001]=0.09
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Machine Gun [ID: 6] closed
+L[subsection] Name : text()=Machine Gun
+L[subsection] Damage : sval=18 range[-200,200,1]=18
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=60 range[1,500,1]=60
+L[subsection] Rate : sval=130 range[70,1000,5]=130
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=3300 range[500,5000,25]=3300
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=600 range[100,1000,10]=600
+L[subsection] Aim Speed : sval=200 range[100,500,10]=200
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.79 range[0.5,3,0.01]=0.79
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=10 range[0,100,1]=10
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=300 range[0,500,0.1]=300
+L[subsection] Min Spread : sval=10 range[0,100,0.1]=10
+L[subsection] Zoom : sval=1.3 range[1,15,0.01]=1.3
+L[subsection] Recoil : sval=0.0032 range[0,0.05,0.0001]=0.0032
+L[subsection] Recoil Y : sval=0.25 range[0,2,0.01]=0.25
+L[subsection] Recoil Z : sval=3 range[0,10,0.1]=3
+L[subsection] Recoil Z Aim : sval=-0.1 range[-1,1,0.01]=-0.1
+L[subsection] Jump Power : sval=0.5 range[0.1,1,0.01]=0.5
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=18 range[-200,200,1]=18
+L[subsection] Projectile Speed : sval=2.3 range[0.01,5,0.01]=2.3
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=3000 range[10,10000,10]=3000
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs Semi Auto [ID: 7] closed
+L[subsection] Name : text()=Semi Auto
+L[subsection] Damage : sval=35 range[-200,200,1]=35
+L[subsection] Headshot Mlt : sval=1.4571 range[0.5,3,0.0001]=1.4571
+L[subsection] Legshot Mlt : sval=0.5429 range[0.01,3,0.0001]=0.5429
+L[subsection] Ammo : sval=8 range[1,500,1]=8
+L[subsection] Rate : sval=150 range[70,1000,5]=150
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1500 range[500,5000,25]=1500
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0.2 range[0,1,0.05]=0.2
+L[subsection] Range : sval=1000 range[5,2000,1]=1000
+L[subsection] Damage Drop : sval=0 range[0,100,1]=0
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=250 range[0,500,0.1]=250
+L[subsection] Zoom : sval=2.1 range[1,15,0.01]=2.1
+L[subsection] Recoil : sval=0.01 range[0,0.05,0.0001]=0.01
+L[subsection] Recoil Y : sval=0.6 range[0,2,0.01]=0.6
+L[subsection] Recoil Z : sval=2 range[0,10,0.1]=2
+L[subsection] Recoil Z Aim : sval=0.2 range[-1,1,0.01]=0.2
+L[subsection] Jump Power : sval=0.5 range[0.1,1,0.01]=0.5
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=33 range[-200,200,1]=33
+L[subsection] Projectile Speed : sval=2.5 range[0.01,5,0.01]=2.5
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=4000 range[10,10000,10]=4000
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs Rocket Launcher [ID: 8] closed
+L[subsection] Name : text()=Rocket Launcher
+L[subsection] Damage : sval=25 range[-200,200,1]=25
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=1 range[0.01,3,0.0001]=1
+L[subsection] Ammo : sval=3 range[1,500,1]=3
+L[subsection] Rate : sval=320 range[70,1000,5]=320
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1500 range[500,5000,25]=1500
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=350 range[100,1000,10]=350
+L[subsection] Aim Speed : sval=200 range[100,500,10]=200
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.9 range[0.5,3,0.01]=0.9
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=120 range[0,500,0.1]=120
+L[subsection] Min Spread : sval=15 range[0,100,0.1]=15
+L[subsection] Zoom : sval=1.5 range[1,15,0.01]=1.5
+L[subsection] Recoil : sval=0.008 range[0,0.05,0.0001]=0.008
+L[subsection] Recoil Z : sval=4 range[0,10,0.1]=4
+L[subsection] Recoil Z Aim : sval=-0.5 range[-1,1,0.01]=-0.5
+L[subsection] Jump Power : sval=0.3 range[0.1,1,0.01]=0.3
+L[subsection] Impulse Range : sval=46 range[0,2000,1]=46
+L[subsection] Impulse Power : sval=0.095 range[-2,2,0.001]=0.095
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=50 range[-200,200,1]=50
+L[subsection] Projectile Speed : sval=0.75 range[0.01,5,0.01]=0.75
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=1500 range[10,10000,10]=1500
+L[subsection] Projectile Gravity : sval=0.00008 range[-0.01,0.01,0.00001]=0.00008
+Fs Akimbo Uzi [ID: 9] closed
+L[subsection] Name : text()=Akimbo Uzi
+L[subsection] Damage : sval=15 range[-200,200,1]=15
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=28 range[1,500,1]=28
+L[subsection] Rate : sval=70 range[70,1000,5]=70
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1300 range[500,5000,25]=1300
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1.04 range[0.5,3,0.01]=1.04
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=500 range[5,2000,1]=500
+L[subsection] Damage Drop : sval=13 range[0,100,1]=13
+L[subsection] Move Spread : sval=0.01 range[0,3,0.01]=0.01
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=0 range[0,500,0.1]=0
+L[subsection] Min Spread : sval=10 range[0,100,0.1]=10
+L[subsection] Zoom : sval=1.5 range[1,15,0.01]=1.5
+L[subsection] Recoil : sval=0.0034 range[0,0.05,0.0001]=0.0034
+L[subsection] Recoil Y : sval=0.7 range[0,2,0.01]=0.7
+L[subsection] Recoil Z : sval=5 range[0,10,0.1]=5
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=1
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=1
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Desert Eagle [ID: 10] closed
+L[subsection] Name : text()=Desert Eagle
+L[subsection] Damage : sval=45 range[-200,200,1]=45
+L[subsection] Headshot Mlt : sval=1.2 range[0.5,3,0.0001]=1.2
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=7 range[1,500,1]=7
+L[subsection] Rate : sval=450 range[70,1000,5]=450
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1000 range[500,5000,25]=1000
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=110 range[100,500,10]=110
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0.85 range[0,1,0.05]=0.85
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=10 range[0,100,1]=10
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=150 range[0,500,0.1]=150
+L[subsection] Zoom : sval=1.4 range[1,15,0.01]=1.4
+L[subsection] Recoil : sval=0.01 range[0,0.05,0.0001]=0.01
+L[subsection] Recoil Y : sval=0.62 range[0,2,0.01]=0.62
+L[subsection] Recoil Z : sval=4.8 range[0,10,0.1]=4.8
+L[subsection] Recoil Z Aim : sval=0.2 range[-1,1,0.01]=0.2
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=50 range[-200,200,1]=50
+L[subsection] Projectile Speed : sval=2.3 range[0.01,5,0.01]=2.3
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=1500 range[10,10000,10]=1500
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs Alien Blaster [ID: 11] closed
+L[subsection] Name : text()=Alien Blaster
+L[subsection] Damage : sval=45 range[-200,200,1]=45
+L[subsection] Headshot Mlt : sval=1.25 range[0.5,3,0.0001]=1.25
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=4 range[1,500,1]=4
+L[subsection] Rate : sval=170 range[70,1000,5]=170
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1500 range[500,5000,25]=1500
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0.85 range[0,1,0.05]=0.85
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=10 range[0,100,1]=10
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=150 range[0,500,0.1]=150
+L[subsection] Zoom : sval=1.4 range[1,15,0.01]=1.4
+L[subsection] Recoil : sval=0.006 range[0,0.05,0.0001]=0.006
+L[subsection] Recoil Y : sval=0.2 range[0,2,0.01]=0.2
+L[subsection] Recoil Z : sval=2.2 range[0,10,0.1]=2.2
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Combat Knife [ID: 12] closed
+L[subsection] Name : text()=Combat Knife
+L[subsection] Damage : sval=50 range[-200,200,1]=50
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=1 range[0.01,3,0.0001]=1
+L[subsection] Rate : sval=250 range[70,1000,5]=250
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=250 range[100,1000,10]=250
+L[subsection] Aim Speed : sval=100 range[100,500,10]=100
+L[subsection] Overcharge : switch=1
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1.1 range[0.5,3,0.01]=1.1
+L[subsection] Range : sval=15 range[5,2000,1]=15
+L[subsection] Damage Drop : sval=0 range[0,100,1]=0
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=100 range[0,500,0.1]=100
+L[subsection] Zoom : sval=1.2 range[1,15,0.01]=1.2
+L[subsection] Recoil : sval=0.006 range[0,0.05,0.0001]=0.006
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Crossbow [ID: 13] closed
+L[subsection] Name : text()=Crossbow
+L[subsection] Damage : sval=100 range[-200,200,1]=100
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=1 range[0.01,3,0.0001]=1
+L[subsection] Ammo : sval=1 range[1,500,1]=1
+L[subsection] Rate : sval=150 range[70,1000,5]=150
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=900 range[500,5000,25]=900
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=1
+L[subsection] Charge Time : sval=1300 range[0,10000,10]=1300
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0 range[0,1,0.05]=0
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=0 range[0,100,1]=0
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=120 range[0,500,0.1]=120
+L[subsection] Zoom : sval=1.4 range[1,15,0.01]=1.4
+L[subsection] Recoil : sval=0.007 range[0,0.05,0.0001]=0.007
+L[subsection] Recoil Z : sval=4 range[0,10,0.1]=4
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=200 range[-200,200,1]=200
+L[subsection] Projectile Speed : sval=0.68 range[0.01,5,0.01]=0.68
+L[subsection] Projectile Scale : sval=0.7 range[0.01,10,0.01]=0.7
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=1500 range[10,10000,10]=1500
+Fs Famas [ID: 14] closed
+L[subsection] Name : text()=Famas
+L[subsection] Damage : sval=28 range[-200,200,1]=28
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=30 range[1,500,1]=30
+L[subsection] Rate : sval=280 range[70,1000,5]=280
+L[subsection] Is Burst : switch=1
+L[subsection] Burst Count : sval=3 range[0,10,1]=3
+L[subsection] Burst Rate : sval=90 range[50,1000,10]=90
+L[subsection] Reload Time : sval=1200 range[500,5000,25]=1200
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=130 range[100,500,10]=130
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.95 range[0.5,3,0.01]=0.95
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=900 range[5,2000,1]=900
+L[subsection] Damage Drop : sval=5 range[0,100,1]=5
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=90 range[0,500,0.1]=90
+L[subsection] Min Spread : sval=5 range[0,100,0.1]=5
+L[subsection] Zoom : sval=1.5 range[1,15,0.01]=1.5
+L[subsection] Recoil : sval=0.003 range[0,0.05,0.0001]=0.003
+L[subsection] Recoil Y : sval=0.32 range[0,2,0.01]=0.32
+L[subsection] Recoil Z : sval=5.5 range[0,10,0.1]=5.5
+L[subsection] Recoil Z Aim : sval=0.05 range[-1,1,0.01]=0.05
+L[subsection] Jump Power : sval=0.6 range[0.1,1,0.01]=0.6
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=28 range[-200,200,1]=28
+L[subsection] Projectile Speed : sval=2.4 range[0.01,5,0.01]=2.4
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=3000 range[10,10000,10]=3000
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs Sawed Off [ID: 15] closed
+L[subsection] Name : text()=Sawed Off
+L[subsection] Damage : sval=12 range[-200,200,1]=12
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=1 range[1,500,1]=1
+L[subsection] Rate : sval=400 range[70,1000,5]=400
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1100 range[500,5000,25]=1100
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=100 range[100,500,10]=100
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Range : sval=210 range[5,2000,1]=210
+L[subsection] Damage Drop : sval=12 range[0,100,1]=12
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=120 range[0,500,0.1]=120
+L[subsection] Min Spread : sval=20 range[0,100,0.1]=20
+L[subsection] Zoom : sval=1.25 range[1,15,0.01]=1.25
+L[subsection] Recoil : sval=0.02 range[0,0.05,0.0001]=0.02
+L[subsection] Recoil Y : sval=1 range[0,2,0.01]=1
+L[subsection] Recoil Z : sval=2.1 range[0,10,0.1]=2.1
+L[subsection] Recoil Z Aim : sval=0.32 range[-1,1,0.01]=0.32
+L[subsection] Jump Power : sval=0.5 range[0.1,1,0.01]=0.5
+L[subsection] Impulse Range : sval=36 range[0,2000,1]=36
+L[subsection] Impulse Power : sval=0.1 range[-2,2,0.001]=0.1
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Auto Pistol [ID: 16] closed
+L[subsection] Name : text()=Auto Pistol
+L[subsection] Damage : sval=16 range[-200,200,1]=16
+L[subsection] Headshot Mlt : sval=1.1 range[0.5,3,0.0001]=1.1
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=15 range[1,500,1]=15
+L[subsection] Rate : sval=100 range[70,1000,5]=100
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1000 range[500,5000,25]=1000
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=100 range[100,500,10]=100
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0.95 range[0,1,0.05]=0.95
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=2 range[0,100,1]=2
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=150 range[0,500,0.1]=150
+L[subsection] Zoom : sval=1.3 range[1,15,0.01]=1.3
+L[subsection] Recoil : sval=0.004 range[0,0.05,0.0001]=0.004
+L[subsection] Recoil Y : sval=0.2 range[0,2,0.01]=0.2
+L[subsection] Recoil Z : sval=3.8 range[0,10,0.1]=3.8
+L[subsection] Recoil Z Aim : sval=-0.4 range[-1,1,0.01]=-0.4
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Bomb [ID: 17] closed
+L[subsection] Name : text()=Bomb
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=250 range[100,1000,10]=250
+L[subsection] Aim Speed : sval=140 range[100,500,10]=140
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.65 range[0.5,3,0.01]=0.65
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=120 range[0,500,0.1]=120
+L[subsection] Zoom : sval=1 range[1,15,0.01]=1
+L[subsection] Is Equipment : switch=1
+L[subsection] Disable ADS : switch=1
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Blaster [ID: 18] closed
+L[subsection] Name : text()=Blaster
+L[subsection] Damage : sval=1 range[-200,200,1]=1
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=1 range[0.01,3,0.0001]=1
+L[subsection] Ammo : sval=16 range[1,500,1]=16
+L[subsection] Rate : sval=160 range[70,1000,5]=160
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1450 range[500,5000,25]=1450
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=130 range[100,500,10]=130
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.95 range[0.5,3,0.01]=0.95
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=0 range[0,100,1]=0
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=100 range[0,500,0.1]=100
+L[subsection] Min Spread : sval=5 range[0,100,0.1]=5
+L[subsection] Zoom : sval=1.6 range[1,15,0.01]=1.6
+L[subsection] Recoil : sval=0.003 range[0,0.05,0.0001]=0.003
+L[subsection] Recoil Y : sval=0.4 range[0,2,0.01]=0.4
+L[subsection] Recoil Z : sval=5.7 range[0,10,0.1]=5.7
+L[subsection] Recoil Z Aim : sval=-0.05 range[-1,1,0.01]=-0.05
+L[subsection] Jump Power : sval=0.6 range[0.1,1,0.01]=0.6
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=35 range[-200,200,1]=35
+L[subsection] Projectile Speed : sval=1 range[0.01,5,0.01]=1
+L[subsection] Projectile Scale : sval=0.7 range[0.01,10,0.01]=0.7
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=500 range[10,10000,10]=500
+L[subsection] Projectile Gravity : sval=0 range[-0.01,0.01,0.00001]=0
+Fs Build Tool [ID: 19] closed
+L[subsection] Name : text()=Build Tool
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Rate : sval=300 range[70,1000,5]=300
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=100 range[100,500,10]=100
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.9 range[0.5,3,0.01]=0.9
+L[subsection] Range : sval=50 range[5,2000,1]=50
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=120 range[0,500,0.1]=120
+L[subsection] Zoom : sval=1.1 range[1,15,0.01]=1.1
+L[subsection] Is Equipment : switch=1
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Grappler [ID: 20] closed
+L[subsection] Name : text()=Grappler
+L[subsection] Damage : sval=1 range[-200,200,1]=1
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=10 range[1,500,1]=10
+L[subsection] Rate : sval=300 range[70,1000,5]=300
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1000 range[500,5000,25]=1000
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=110 range[100,500,10]=110
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0.85 range[0,1,0.05]=0.85
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=0 range[0,100,1]=0
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=0 range[0,500,0.1]=0
+L[subsection] Zoom : sval=1.2 range[1,15,0.01]=1.2
+L[subsection] Recoil : sval=0.01 range[0,0.05,0.0001]=0.01
+L[subsection] Recoil Y : sval=0.62 range[0,2,0.01]=0.62
+L[subsection] Recoil Z : sval=4.8 range[0,10,0.1]=4.8
+L[subsection] Recoil Z Aim : sval=0.2 range[-1,1,0.01]=0.2
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=1
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Tehchy-9 [ID: 21] closed
+L[subsection] Name : text()=Tehchy-9
+L[subsection] Damage : sval=23 range[-200,200,1]=23
+L[subsection] Headshot Mlt : sval=1.25 range[0.5,3,0.0001]=1.25
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=15 range[1,500,1]=15
+L[subsection] Rate : sval=380 range[70,1000,5]=380
+L[subsection] Is Burst : switch=1
+L[subsection] Burst Count : sval=3 range[0,10,1]=3
+L[subsection] Burst Rate : sval=90 range[50,1000,10]=90
+L[subsection] Reload Time : sval=1000 range[500,5000,25]=1000
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=100 range[100,500,10]=100
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0.95 range[0,1,0.05]=0.95
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=2 range[0,100,1]=2
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=150 range[0,500,0.1]=150
+L[subsection] Zoom : sval=1.3 range[1,15,0.01]=1.3
+L[subsection] Recoil : sval=0.004 range[0,0.05,0.0001]=0.004
+L[subsection] Recoil Y : sval=0.2 range[0,2,0.01]=0.2
+L[subsection] Recoil Z : sval=3.8 range[0,10,0.1]=3.8
+L[subsection] Recoil Z Aim : sval=-0.4 range[-1,1,0.01]=-0.4
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Noob Tube [ID: 22] closed
+L[subsection] Name : text()=Noob Tube
+L[subsection] Damage : sval=12 range[-200,200,1]=12
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=1 range[0.01,3,0.0001]=1
+L[subsection] Ammo : sval=1 range[1,500,1]=1
+L[subsection] Rate : sval=400 range[70,1000,5]=400
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1200 range[500,5000,25]=1200
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=100 range[100,500,10]=100
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Range : sval=150 range[5,2000,1]=150
+L[subsection] Damage Drop : sval=12 range[0,100,1]=12
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=20 range[0,500,0.1]=20
+L[subsection] Min Spread : sval=20 range[0,100,0.1]=20
+L[subsection] Zoom : sval=1.25 range[1,15,0.01]=1.25
+L[subsection] Recoil : sval=0.02 range[0,0.05,0.0001]=0.02
+L[subsection] Recoil Y : sval=1 range[0,2,0.01]=1
+L[subsection] Recoil Z : sval=2.1 range[0,10,0.1]=2.1
+L[subsection] Recoil Z Aim : sval=0.32 range[-1,1,0.01]=0.32
+L[subsection] Jump Power : sval=0.5 range[0.1,1,0.01]=0.5
+L[subsection] Impulse Range : sval=36 range[0,2000,1]=36
+L[subsection] Impulse Power : sval=0.1 range[-2,2,0.001]=0.1
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] No Spread : switch=1
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=45 range[-200,200,1]=45
+L[subsection] Projectile Speed : sval=0.75 range[0.01,5,0.01]=0.75
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=15 range[1,50,1]=15
+L[subsection] Projectile Range : sval=1000 range[10,10000,10]=1000
+L[subsection] Projectile Gravity : sval=0.001 range[-0.01,0.01,0.00001]=0.001
+Fs Slimer [ID: 23] closed
+L[subsection] Name : text()=Slimer
+L[subsection] Damage : sval=1 range[-200,200,1]=1
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=2 range[1,500,1]=2
+L[subsection] Rate : sval=300 range[70,1000,5]=300
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=5000 range[500,5000,25]=5000
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=200 range[100,1000,10]=200
+L[subsection] Aim Speed : sval=110 range[100,500,10]=110
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Pierce : sval=0.85 range[0,1,0.05]=0.85
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=0 range[0,100,1]=0
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=0 range[0,500,0.1]=0
+L[subsection] Min Spread : sval=0 range[0,100,0.1]=0
+L[subsection] Zoom : sval=1.6 range[1,15,0.01]=1.6
+L[subsection] Recoil : sval=0.003 range[0,0.05,0.0001]=0.003
+L[subsection] Recoil Y : sval=1.1 range[0,2,0.01]=1.1
+L[subsection] Recoil Z : sval=4.3 range[0,10,0.1]=4.3
+L[subsection] Recoil Z Aim : sval=-0.04 range[-1,1,0.01]=-0.04
+L[subsection] Jump Power : sval=0.3 range[0.1,1,0.01]=0.3
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=1
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=1
+L[subsection] Disable ADS : switch=1
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Zapper [ID: 24] closed
+L[subsection] Name : text()=Zapper
+L[subsection] Damage : sval=10 range[-200,200,1]=10
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=1 range[0.01,3,0.0001]=1
+L[subsection] Ammo : sval=5 range[1,500,1]=5
+L[subsection] Rate : sval=150 range[70,1000,5]=150
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1400 range[500,5000,25]=1400
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=260 range[100,1000,10]=260
+L[subsection] Aim Speed : sval=110 range[100,500,10]=110
+L[subsection] Overcharge : switch=1
+L[subsection] Charge Time : sval=1500 range[0,10000,10]=1500
+L[subsection] Move Speed : sval=1.05 range[0.5,3,0.01]=1.05
+L[subsection] Range : sval=150 range[5,2000,1]=150
+L[subsection] Damage Drop : sval=10 range[0,100,1]=10
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=60 range[0,500,0.1]=60
+L[subsection] Zoom : sval=1.4 range[1,15,0.01]=1.4
+L[subsection] Recoil : sval=0.006 range[0,0.05,0.0001]=0.006
+L[subsection] Recoil Y : sval=0.2 range[0,2,0.01]=0.2
+L[subsection] Recoil Z : sval=3.8 range[0,10,0.1]=3.8
+L[subsection] Recoil Z Aim : sval=-0.4 range[-1,1,0.01]=-0.4
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=5 range[-200,200,1]=5
+L[subsection] Projectile Speed : sval=0.5 range[0.01,5,0.01]=0.5
+L[subsection] Projectile Scale : sval=0.8 range[0.01,10,0.01]=0.8
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=150 range[10,10000,10]=150
+L[subsection] Projectile Gravity : sval=0 range[-0.01,0.01,0.00001]=0
+Fs Minigun [ID: 25] closed
+L[subsection] Name : text()=Minigun
+L[subsection] Damage : sval=18 range[-200,200,1]=18
+L[subsection] Headshot Mlt : sval=1.5 range[0.5,3,0.0001]=1.5
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=250 range[1,500,1]=250
+L[subsection] Rate : sval=70 range[70,1000,5]=70
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=3300 range[500,5000,25]=3300
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=600 range[100,1000,10]=600
+L[subsection] Aim Speed : sval=200 range[100,500,10]=200
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=0.5 range[0.5,3,0.01]=0.5
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=10 range[0,100,1]=10
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=300 range[0,500,0.1]=300
+L[subsection] Min Spread : sval=10 range[0,100,0.1]=10
+L[subsection] Zoom : sval=1.3 range[1,15,0.01]=1.3
+L[subsection] Recoil : sval=0.0032 range[0,0.05,0.0001]=0.0032
+L[subsection] Recoil Y : sval=0.25 range[0,2,0.01]=0.25
+L[subsection] Recoil Z : sval=3 range[0,10,0.1]=3
+L[subsection] Recoil Z Aim : sval=-0.1 range[-1,1,0.01]=-0.1
+L[subsection] Jump Power : sval=0.1 range[0.1,1,0.01]=0.1
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Equipment : switch=1
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=18 range[-200,200,1]=18
+L[subsection] Projectile Speed : sval=2.3 range[0.01,5,0.01]=2.3
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=3000 range[10,10000,10]=3000
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+Fs War Machine [ID: 26] closed
+L[subsection] Name : text()=War Machine
+L[subsection] Damage : sval=12 range[-200,200,1]=12
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=1 range[0.01,3,0.0001]=1
+L[subsection] Ammo : sval=6 range[1,500,1]=6
+L[subsection] Rate : sval=300 range[70,1000,5]=300
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=2000 range[500,5000,25]=2000
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=400 range[100,1000,10]=400
+L[subsection] Aim Speed : sval=100 range[100,500,10]=100
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1 range[0.5,3,0.01]=1
+L[subsection] Range : sval=150 range[5,2000,1]=150
+L[subsection] Damage Drop : sval=12 range[0,100,1]=12
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=20 range[0,500,0.1]=20
+L[subsection] Min Spread : sval=20 range[0,100,0.1]=20
+L[subsection] Zoom : sval=1.25 range[1,15,0.01]=1.25
+L[subsection] Recoil : sval=0.02 range[0,0.05,0.0001]=0.02
+L[subsection] Recoil Y : sval=1 range[0,2,0.01]=1
+L[subsection] Recoil Z : sval=2.1 range[0,10,0.1]=2.1
+L[subsection] Recoil Z Aim : sval=0.32 range[-1,1,0.01]=0.32
+L[subsection] Jump Power : sval=0.5 range[0.1,1,0.01]=0.5
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=1
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=1
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=60 range[-200,200,1]=60
+L[subsection] Projectile Speed : sval=0.75 range[0.01,5,0.01]=0.75
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=15 range[1,50,1]=15
+L[subsection] Projectile Range : sval=1000 range[10,10000,10]=1000
+L[subsection] Projectile Gravity : sval=0.001 range[-0.01,0.01,0.00001]=0.001
+Fs Akimbo Pistol [ID: 27] closed
+L[subsection] Name : text()=Akimbo Pistol
+L[subsection] Damage : sval=15 range[-200,200,1]=15
+L[subsection] Headshot Mlt : sval=1.4 range[0.5,3,0.0001]=1.4
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=12 range[1,500,1]=12
+L[subsection] Rate : sval=100 range[70,1000,5]=100
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=750 range[500,5000,25]=750
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=0 range[0,10000,10]=0
+L[subsection] Move Speed : sval=1.04 range[0.5,3,0.01]=1.04
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=700 range[5,2000,1]=700
+L[subsection] Damage Drop : sval=13 range[0,100,1]=13
+L[subsection] Move Spread : sval=0.1 range[0,3,0.01]=0.1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=40 range[0,500,0.1]=40
+L[subsection] Min Spread : sval=10 range[0,100,0.1]=10
+L[subsection] Zoom : sval=1.5 range[1,15,0.01]=1.5
+L[subsection] Recoil : sval=0.0034 range[0,0.05,0.0001]=0.0034
+L[subsection] Recoil Y : sval=0.7 range[0,2,0.01]=0.7
+L[subsection] Recoil Z : sval=5 range[0,10,0.1]=5
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=1
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=1
+L[subsection] Single Fire : switch=1
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=1
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+Fs Charge Rifle [ID: 28] closed
+L[subsection] Name : text()=Charge Rifle
+L[subsection] Damage : sval=15 range[-200,200,1]=15
+L[subsection] Headshot Mlt : sval=1 range[0.5,3,0.0001]=1
+L[subsection] Legshot Mlt : sval=0.5 range[0.01,3,0.0001]=0.5
+L[subsection] Ammo : sval=1 range[1,500,1]=1
+L[subsection] Rate : sval=150 range[70,1000,5]=150
+L[subsection] Is Burst : switch=0
+L[subsection] Burst Count : sval=0 range[0,10,1]=0
+L[subsection] Burst Rate : sval=50 range[50,1000,10]=50
+L[subsection] Reload Time : sval=1400 range[500,5000,25]=1400
+L[subsection] Reload Y : sval=1 range[0,1,0.01]=1
+L[subsection] Swap Time : sval=300 range[100,1000,10]=300
+L[subsection] Aim Speed : sval=120 range[100,500,10]=120
+L[subsection] Overcharge : switch=0
+L[subsection] Charge Time : sval=700 range[0,10000,10]=700
+L[subsection] Move Speed : sval=0.95 range[0.5,3,0.01]=0.95
+L[subsection] Pierce : sval=1 range[0,1,0.05]=1
+L[subsection] Range : sval=1000 range[5,2000,1]=1000
+L[subsection] Damage Drop : sval=5 range[0,100,1]=5
+L[subsection] Move Spread : sval=1 range[0,3,0.01]=1
+L[subsection] Ads Spread : sval=0 range[0,1,0.01]=0
+L[subsection] Spread : sval=150 range[0,500,0.1]=150
+L[subsection] Min Spread : sval=5 range[0,100,0.1]=5
+L[subsection] Zoom : sval=2 range[1,15,0.01]=2
+L[subsection] Recoil : sval=0.003 range[0,0.05,0.0001]=0.003
+L[subsection] Recoil Y : sval=1.1 range[0,2,0.01]=1.1
+L[subsection] Recoil Z : sval=4.3 range[0,10,0.1]=4.3
+L[subsection] Recoil Z Aim : sval=-0.04 range[-1,1,0.01]=-0.04
+L[subsection] Jump Power : sval=0.15 range[0.1,1,0.01]=0.15
+L[subsection] Impulse Range : sval=0 range[0,2000,1]=0
+L[subsection] Impulse Power : sval=0 range[-2,2,0.001]=0
+L[subsection] Is Secondary : switch=0
+L[subsection] Is Equipment : switch=0
+L[subsection] Akimbo : switch=0
+L[subsection] Single Fire : switch=0
+L[subsection] No Spread : switch=0
+L[subsection] Disable ADS : switch=0
+L[subsection] Custom Icon ID : text(ID)=
+B Select Icon
+L[subsection] Reference Distance (Sound) : sval=25 range[0,5000,0.1]=25
+L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1
+L[subsection] Disable Projectile : switch=1
+L[subsection] Projectile Asset ID : text(ID)=
+B Select Asset
+L[subsection] Projectile Damage : sval=100 range[-200,200,1]=100
+L[subsection] Projectile Speed : sval=2.5 range[0.01,5,0.01]=2.5
+L[subsection] Projectile Scale : sval=1.4 range[0.01,10,0.01]=1.4
+L[subsection] Projectile Length : sval=10 range[1,50,1]=10
+L[subsection] Projectile Range : sval=7000 range[10,10000,10]=7000
+L[subsection] Projectile Gravity : sval=0.0001 range[-0.01,0.01,0.00001]=0.0001
+-
+F Classes closed
+-
+L[subsection] Triggerman [ID: 0] : switch=1
+L[subsection] Hunter [ID: 1] : switch=1
+L[subsection] Run N Gun [ID: 2] : switch=0
+L[subsection] Spray N Pray [ID: 3] : switch=1
+L[subsection] Vince [ID: 4] : switch=1
+L[subsection] Detective [ID: 5] : switch=1
+L[subsection] Marksman [ID: 6] : switch=1
+L[subsection] Rocketeer [ID: 7] : switch=1
+L[subsection] Agent [ID: 8] : switch=1
+L[subsection] Runner [ID: 9] : switch=1
+L[subsection] Deagler [ID: 10] : switch=1
+L[subsection] Bowman [ID: 11] : switch=1
+L[subsection] Commando [ID: 12] : switch=1
+L[subsection] Trooper [ID: 13] : switch=1
+L[subsection] Survivor [ID: 14] : switch=1
+L[subsection] Infiltrator [ID: 15] : switch=1
+-
+F Class Config closed
+-
+Fs Triggerman closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Triggerman
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=Platformer (X)
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=150 range[1,5000,1]=150
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Hunter closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Hunter
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=60 range[1,5000,1]=60
+L[subsection] HP Segments : sval=5 range[1,10,1]=5
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Run N Gun closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Run N Gun
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=90 range[1,5000,1]=90
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=0
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Tank closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Tank
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=180 range[1,5000,1]=180
+L[subsection] HP Segments : sval=7 range[1,10,1]=7
+L[subsection] Regen : sval=0.05 range[0.01,3,0.01]=0.05
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=0
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Vince closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Vince
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1 range[0.01,5,0.01]=1
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=90 range[1,5000,1]=90
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Detective closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Detective
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=100 range[1,5000,1]=100
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=0
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Marksman closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Marksman
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=90 range[1,5000,1]=90
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Rocketeer closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Rocketeer
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=130 range[1,5000,1]=130
+L[subsection] HP Segments : sval=7 range[1,10,1]=7
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Agent closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Agent
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=110 range[1,5000,1]=110
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=0
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Runner closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Runner
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=120 range[1,5000,1]=120
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.2 range[0.01,3,0.01]=0.2
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=600 range[0,5000,10]=600
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=0
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Deagler closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Deagler
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=60 range[1,5000,1]=60
+L[subsection] HP Segments : sval=5 range[1,10,1]=5
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=0
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Bowman closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Bowman
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=100 range[1,5000,1]=100
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Commando closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Commando
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=100 range[1,5000,1]=100
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Trooper closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Trooper
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=100 range[1,5000,1]=100
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=0
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Survivor closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Survivor
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=150 range[1,5000,1]=150
+L[subsection] HP Segments : sval=6 range[1,10,1]=6
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+Fs Infiltrator closed
+-
+B Copy to All Classes
+B Reset
+L[subsection] Name : text()=Infiltrator
+Fss Camera closed
+B Copy Camera to All Classes
+L[subsection] Type : select#5[FPS..Orthographic]=FPS
+L[subsection] X Offset : sval=0 range[0,500,1]=0
+L[subsection] Y Offset : sval=0 range[0,500,1]=0
+L[subsection] Z Offset : sval=0 range[0,500,1]=0
+L[subsection] Ortho Frustum Size : sval=50 range[1,1000,1]=50
+L[subsection] Face Player : sval=0 range[0,1,0.01]=0
+L[subsection] Lock Y Rot : sval=0 range[-1,1,0.01]=0
+L[subsection] Y Limit : sval=0 range[0,1,0.01]=0
+L[subsection] Mouse Rotation : switch=1
+L[subsection] Force Pointer Lock : switch=0
+Fss Player Asset closed
+B Copy Player Asset to All Classes
+L[subsection] Player Type : select#3[Default..Model]=Default
+L[subsection] Custom Asset ID : text(ID)=
+B Select Asset
+L[subsection] Show First Person : switch=1
+L[subsection] Asset Anim Speed : sval=1 range[0.1,10,0.1]=1
+L[subsection] Asset Scale : sval=1 range[0.1,100,0.1]=1
+L[subsection] Asset Preview Scale : sval=1 range[0.01,10,0.01]=1
+L[subsection] Asset Preview Y Off : sval=0 range[-50,50,0.01]=0
+L[subsection] Asset Dir : sval=0 range[0,360,5]=0
+L[subsection] Asset Y Offset : sval=0 range[-50,50,0.01]=0
+Fss Movement closed
+B Copy Movement to All Classes
+L[subsection] Move Scheme : select#8[Default..MMORPG]=Default
+L[subsection] Speed : sval=1.5 range[0.01,5,0.01]=1.5
+L[subsection] Speed X : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Y : sval=1 range[-50,50,0.1]=1
+L[subsection] Speed Z : sval=1 range[-50,50,0.1]=1
+L[subsection] SpeedLines Threshold : sval=500 range[1,500,1]=500
+L[subsection] Move Dir : sval=0 range[-1,1,0.1]=0
+L[subsection] Turn Speed : sval=1 range[0,2,0.01]=1
+L[subsection] Ground Accel : sval=0.042 range[0.0001,0.1,0.0001]=0.042
+L[subsection] Ground Decel : sval=0.99 range[0.9,0.9999,0.0001]=0.99
+L[subsection] Air Accel : sval=0.0047 range[0.0001,0.1,0.0001]=0.0047
+L[subsection] Air Decel : sval=0.9996 range[0.9,0.9999,0.0001]=0.9996
+L[subsection] Can Crouch : switch=1
+L[subsection] Crouch Speed : sval=0.3 range[0,4,0.1]=0.3
+L[subsection] Ladder Accel : sval=1 range[0.1,5,0.1]=1
+L[subsection] Slide Time : sval=1 range[0.01,3,0.01]=1
+L[subsection] Slide Accel : sval=1 range[0.01,1.5,0.01]=1
+L[subsection] Free Range Sliding : switch=0
+L[subsection] Backwards Sliding : switch=0
+L[subsection] Step Frequency : sval=1 range[0.1,20,0.1]=1
+L[subsection] Step Sound Dynamic : sval=0 range[0,1,0.01]=0
+L[subsection] Can Wall Jump : switch=0
+L[subsection] Walljumps Max : sval=0 range[0,100,1]=0
+L[subsection] Wall Jump Decel : sval=0.3 range[0,1,0.1]=0.3
+L[subsection] Wall Jump Velocity : sval=0.03 range[0.01,0.1,0.01]=0.03
+Fss Vehicle Config closed
+B Copy Vehicle Config to All Classes
+L[subsection] Drag : sval=0.97 range[0.001,0.999,0.001]=0.97
+L[subsection] Angular Drag : sval=0.94 range[0.001,0.999,0.001]=0.94
+L[subsection] Turn Lean : sval=-2.7 range[-100,100,0.1]=-2.7
+L[subsection] Turn Threshold : sval=0.0025 range[0,0.01,0.0001]=0.0025
+L[subsection] Turn Conv : sval=0 range[0,1,0.01]=0
+L[subsection] Max Power : sval=0.12 range[0,1,0.001]=0.12
+L[subsection] Power Force : sval=0.0012 range[0,0.1,0.0001]=0.0012
+L[subsection] Max Reverse : sval=0.0375 range[0,1,0.0001]=0.0375
+L[subsection] Reverse Force : sval=0.0005 range[0,0.1,0.0001]=0.0005
+Fss Health closed
+B Copy Health to All Classes
+L[subsection] Health : sval=90 range[1,5000,1]=90
+L[subsection] HP Segments : sval=5 range[1,10,1]=5
+L[subsection] Regen : sval=0.1 range[0.01,3,0.01]=0.1
+Fss Hitbox closed
+B Copy Hitbox to All Classes
+L[subsection] Hitbox Scale : sval=0 range[0,20,0.1]=0
+L[subsection] Hitbox Height : sval=0 range[0,20,0.1]=0
+Fss Jumping closed
+B Copy Jumping to All Classes
+L[subsection] Jump Cooldown : sval=1 range[0.1,3,0.1]=1
+L[subsection] Disable Jump : switch=0
+L[subsection] Infinite Jump : switch=0
+L[subsection] Override Jump : switch=0
+Fss Shooting closed
+B Copy Shooting to All Classes
+L[subsection] Can Shoot : switch=1
+L[subsection] Shoot to Camera : switch=0
+L[subsection] Shot Dir Drag : sval=1 range[0.01,1,0.01]=1
+L[subsection] Shot Dir XOff : sval=0 range[0,360,5]=0
+L[subsection] Shot Dir YOff : sval=0 range[0,360,5]=0
+L[subsection] Can Hipfire : switch=1
+L[subsection] Crouch Shooting : switch=1
+L[subsection] Mid Air Shooting : switch=1
+Fss Collision closed
+B Copy Collision to All Classes
+L[subsection] Player Collision : switch=0
+Fss Weapons closed
+B Copy Weapons to All Classes
+L[subsection] Can Melee : switch=1
+L[subsection] Melee Charge Time : sval=800 range[0,5000,10]=800
+L[subsection] Melee Rate Multiplier : sval=1 range[0.1,5,0.1]=1
+L[subsection] Has Secondary : switch=1
+Fss Crosshair closed
+B Copy Crosshair to All Classes
+L[subsection] Custom Crosshair ID : text(ID)=
+B Select Asset
+L[subsection] Chase Crosshair ID : text(ID)=
+B Select Asset
+-
+-
+F Effect Config closed
+-
+Fs Boosted closed
+-
+B Reset
+L[subsection] Name : text()=Boosted
+L[subsection] Max Limit : sval=5 range[1,10,1]=5
+L[subsection] Timer : sval=0 range[0,120,1]=0
+L[subsection] Effect Mlt : sval=0.1 range[0,10,0.01]=0.1
+-
+Fs Sleight of Hand closed
+-
+B Reset
+L[subsection] Name : text()=Sleight of Hand
+L[subsection] Max Limit : sval=5 range[1,10,1]=5
+L[subsection] Timer : sval=0 range[0,120,1]=0
+L[subsection] Effect Mlt : sval=0.1 range[0,10,0.01]=0.1
+-
+Fs Rapid Fire closed
+-
+B Reset
+L[subsection] Name : text()=Rapid Fire
+L[subsection] Max Limit : sval=5 range[1,10,1]=5
+L[subsection] Timer : sval=0 range[0,120,1]=0
+L[subsection] Effect Mlt : sval=0.05 range[0,10,0.01]=0.05
+-
+Fs Siphon closed
+-
+B Reset
+L[subsection] Name : text()=Siphon
+L[subsection] Max Limit : sval=5 range[1,10,1]=5
+L[subsection] Timer : sval=0 range[0,120,1]=0
+L[subsection] Effect Mlt : sval=1 range[0,10,0.01]=1
+L[subsection] Health : sval=10 range[0,100,1]=10
+-
+Fs Rooted closed
+-
+B Reset
+L[subsection] Name : text()=Rooted
+L[subsection] Max Limit : sval=3 range[1,10,1]=3
+L[subsection] Timer : sval=25 range[0,120,1]=25
+L[subsection] Effect Mlt : sval=0.25 range[0,10,0.01]=0.25
+-
+Fs Dizzy closed
+-
+B Reset
+L[subsection] Name : text()=Dizzy
+L[subsection] Max Limit : sval=4 range[1,10,1]=4
+L[subsection] Timer : sval=35 range[0,120,1]=35
+L[subsection] Effect Mlt : sval=0.25 range[0,10,0.01]=0.25
+-
+Fs Poisoned closed
+-
+B Reset
+L[subsection] Name : text()=Poisoned
+L[subsection] Max Limit : sval=1 range[1,10,1]=1
+L[subsection] Timer : sval=40 range[0,120,1]=40
+L[subsection] Effect Mlt : sval=1 range[0,10,0.01]=1
+L[subsection] Health : sval=10 range[0,100,1]=10
+-
+Fs Jump Boost closed
+-
+B Reset
+L[subsection] Name : text()=Jump Boost
+L[subsection] Max Limit : sval=5 range[1,10,1]=5
+L[subsection] Timer : sval=0 range[0,120,1]=0
+L[subsection] Effect Mlt : sval=0.1 range[0,10,0.01]=0.1
+-
+Fs Zapped closed
+-
+B Reset
+L[subsection] Name : text()=Zapped
+L[subsection] Max Limit : sval=10 range[1,10,1]=10
+L[subsection] Timer : sval=5 range[0,120,1]=5
+L[subsection] Effect Mlt : sval=0.5 range[0,10,0.01]=0.5
+L[subsection] Health : sval=2 range[0,100,1]=2
+-
+Fs Strength closed
+-
+B Reset
+L[subsection] Name : text()=Strength
+L[subsection] Max Limit : sval=10 range[1,10,1]=10
+L[subsection] Timer : sval=0 range[0,120,1]=0
+L[subsection] Effect Mlt : sval=0.1 range[0,10,0.01]=0.1
+-
+-

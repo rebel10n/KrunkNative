@@ -1,0 +1,28 @@
+// GAME.OVERLAY shape primitives: rects, rotated/centred rects, circles/ellipses, lines,
+// clear/offset/scale. Coordinates are overlay units (canvas px / scale).
+@size 800 600
+@scale 0.8
+@background #34495e
+// full-canvas backdrop with transparency over the background
+drawRect 0 0 1000 750 0 "#fafafa" 0.15
+drawRect 20 20 200 100 0 "#e74c3c" 1
+drawRect 260 20 200 100 0 "#2ecc71" 0.5
+drawRect 600 80 120 60 30 "#3498db" 1 true
+drawRect 820 80 120 60 -15 "#f1c40f" 0.8
+drawRect 100 200 80 80 45 "#9b59b6" 1 true
+// invalid colour -> #FFF, missing args -> defaults
+drawRect 220 160 60 40 0 "red" 1
+drawRect 300 160 60 40 0 12 1
+// circles: radii, the v7 "center" quirk (offset by half the radius), ellipse + rotation
+drawCircle 400 300 80 80 0 "#ff0000" 1
+drawCircle 600 300 80 80 0 "#00ff00" 0.5 true
+drawCircle 820 300 100 40 30 "#ffffff" 0.7
+drawCircle 120 420 30 30 0 "#ffa500" 1
+// lines: thickness, alpha, thickness 0 keeps the default width 1
+drawLine 20 500 980 500 1 "#000000" 1
+drawLine 20 520 980 560 3 "#ffffff" 0.6
+drawLine 20 580 980 520 0 "#ff00ff" 1
+drawLine 300 650 700 700 12 "#00ffff" 0.5
+// grid like the Bouncing Ball template (alpha 0.1 lines, width 3)
+drawLine 0 620 1000 620 3 "#000000" 0.1
+drawLine 0 640 1000 640 3 "#000000" 0.1

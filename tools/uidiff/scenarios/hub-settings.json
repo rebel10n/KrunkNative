@@ -1,8 +1,18 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/hub/hub-settings.png",
-  "size": [1280, 720],
+  "ref": "doc/ref/krunker-v7.1.4/hub/hub-settings.png",
+  "size": [
+    1280,
+    720
+  ],
   "background": "#000000",
-  "state": {"page": "hub", "pageQuery": "p=maps", "pageActions": ["openSettings"]},
+  "state": {
+    "page": "hub",
+    "pageQuery": "p=maps",
+    "anim_time": 0.8,
+    "pageActions": [
+      "openSettings"
+    ]
+  },
   "frames": 3,
-  "note": "Social hub settings popup (gear icon) over the maps view."
+  "note": "Social hub (ui/social.html), guest, p=maps + openSettings."
 }

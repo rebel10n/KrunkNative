@@ -1,3 +1,5 @@
+# `--tags web_assets` runs only the asset sync + version.txt (no dist/web upload, no
+# release flip): e.g. after `make assets-import` added content the deployed client asks for.
 - name: Web build is present locally
   ansible.builtin.stat:
     path: "{{ kn_web_dist }}/client.wasm"
@@ -20,6 +22,7 @@
   loop:
     - "{{ kn_web_base }}/releases"
     - "{{ kn_web_base }}/assets"
+  tags: [web_assets]
 
 # Seed the new release from the current one so rsync only sends what changed.
 - name: Seed release {{ kn_release_id }} from current
@@ -58,6 +61,7 @@
     # --checksum: a changed file of the same size must still go out (it was --size-only)
     rsync_opts: "{{ ['--chmod=D755,F644', '--chown=root:root', '--checksum'] + (kn_web_assets_exclude | map('regex_replace', '^', '--exclude=') | list) }}"
   when: kn_web_sync_assets | bool
+  tags: [web_assets]
 
 # assets/version.txt: content hash of the tree. The web client appends it to every
 # asset URL (?v=), so the URLs are immutable and change exactly when the content does.
@@ -75,6 +79,7 @@
     executable: /bin/bash
   register: kn_web_assets_version
   changed_when: "'changed' in kn_web_assets_version.stdout"
+  tags: [web_assets]
 
 - name: Flip current -> releases/{{ kn_release_id }}
   ansible.builtin.file:

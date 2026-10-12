@@ -1,0 +1,42 @@
+H Controls
+X call_made
+X Controls
+T Default *
+T Advanced
+-
+F Movement open
+-
+L[] Fly forward : label:W or call_made
+L[] Fly backwards : label:S or call_made
+L[] Fly left : label:A or call_made
+L[] Fly right : label:D or call_made
+L[] Fly up : label:E
+L[] Fly down : label:Q
+L[] Hold to fly faster : label:Shift
+Fs Speed open
+L[subsection] Normal : number()=70
+L[subsection] Sprinting : number()=180
+L[subsection] Reset Speed : button:Reset
+-
+F Transform open
+-
+L[] Translate : label:1
+L[] Rotate : label:2
+L[] Scale : label:3
+L[] Toggle World / Local space : label:À
+-
+F Edit open
+-
+L[] Undo : label:Ctrl + Z
+L[] Redo : label:Ctrl + Y or Shift + Ctrl + Z
+-
+F Object open
+-
+L[] Face Selection Mode : label:M
+L[] Group Selection Mode : label:N
+L[] Wireframe Mode : label:¼
+L[] Delete element : label:Del or Backspace
+L[] Toggle snapping : label:Control
+L[] Toggle collidable : label:Shift + C
+L[] Toggle visibilty : label:Shift + V
+-

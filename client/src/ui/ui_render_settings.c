@@ -24,6 +24,8 @@
 #include <emscripten.h>
 #elif defined(_WIN32)
 #include <windows.h>
+#undef near // minwindef.h empty macros: Camera has near/far members
+#undef far
 #else
 #include <time.h>
 #endif
@@ -52,7 +54,6 @@ static ClientRenderSettings g_rs = {
     .speed_color = "#ffea78", .speed_color_max = "#ff0000",
     .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_style = 0, .health_num = 0,
     .health_col_team = "#9eeb56", .health_col_enemy = "#eb5656",
-    .xp_bar_color = "#FBC02D", .xp_bar_opacity = 1.0f,
     .chat_filter = 0, .show_messages = 1, .show_unboxings = 1, .chat_text_outline = 0,
     .chat_opacity = 1.0f, .chat_bg_opacity = 0.2f, .chat_height = 2.5f, .chat_timer = 0.0f,
     .crosshair_type = 1, .crosshair_style = 0, .crosshair_opacity = 1.0f,
@@ -348,6 +349,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("showDeaths", show_deaths, mark_dom),          // #deathCount
     RS_B("showScore", show_score, mark_dom),            // #scoreCount
     RS_B("showStreak", show_streak, mark_dom),          // #streakCount
+    RS_B("showKD", show_kd, mark_dom),                  // #kdCount (v7.1.4)
     RS_B("showPing", show_ping, mark_dom),              // #pingDisplay
     RS_B("showNetStat", show_net_stat, mark_dom),       // #ingressDisplay/#egressDisplay
     RS_SHARED_B("showFPS", show_fps, mark_dom),         // #fpsDisplay (ui_settings.c) + #menuFPSDisplay
@@ -365,8 +367,6 @@ static const RsEntry RS_TABLE[] = {
     RS_B("healthNum", health_num, NULL),
     RS_S("healthColT", health_col_team, NULL),
     RS_S("healthColE", health_col_enemy, NULL),
-    RS_S("xpBarCol", xp_bar_color, mark_dom),           // #igXPBarProg background
-    RS_F("xpBarOpac", xp_bar_opacity, mark_dom),        // #igXPBar opacity
     RS_B("chatFilter", chat_filter, NULL),
     RS_B("showMessages", show_messages, NULL),
     RS_B("showUnboxings", show_unboxings, NULL),
@@ -687,17 +687,16 @@ static int apply_dom(void) {
     display_if("deathCount", g_rs.show_deaths, "inline-block");
     display_if("scoreCount", g_rs.show_score, "inline-block");
     display_if("streakCount", g_rs.show_streak, "inline-block");
+    display_if("kdCount", g_rs.show_kd, "inline-block");
     display_if("pingDisplay", g_rs.show_ping, "block");
     display_if("ingressDisplay", g_rs.show_net_stat, "block");
     display_if("egressDisplay", g_rs.show_net_stat, "block");
+    display_if("tickDisplay", g_rs.show_net_stat, "block"); // v7.1.4 showNetStat: the TPS readout too
     display_if("menuFPSDisplay", g_rs.show_fps, "block");
     // oldScoreboard.set: leaderDisplay shown, killFeed only without it (and with showKills)
     display_if("leaderDisplay", g_rs.old_scoreboard, "block");
-    display_if("killFeed", !g_rs.old_scoreboard && g_rs.show_kills, "inline-block");
+    display_if("killFeed", !g_rs.old_scoreboard && g_rs.show_kills, "inline-grid"); // v7.1.4 showKills: inline-grid
 
-    style_if("igXPBarProg", "background-color", g_rs.xp_bar_color);
-    fmt(buf, sizeof(buf), "%g", g_rs.xp_bar_opacity);
-    style_if("igXPBar", "opacity", buf);
     // vignette.set: 1 removes the inline opacity (stylesheet value), else opacity = v
     fmt(buf, sizeof(buf), "%g", g_rs.vignette);
     style_if("vignette", "opacity", g_rs.vignette == 1.0f ? "" : buf);

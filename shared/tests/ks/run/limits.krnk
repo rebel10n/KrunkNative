@@ -1,0 +1,59 @@
+# Loop budget (exactly 1,000,001 iterations per host entry), call depth, instruction budget,
+# runtime error containment (1.14)
+#! call exact
+#! call over
+#! call nested
+#! call report
+#! call deep 1500
+#! call deep 5000
+#! call report
+#! call update 16
+#! call update 16
+#! call update 16
+#! call spin
+#! call alive
+num progress = 0;
+num updates = 0;
+num action fib(num n) {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+action rec(num n) {
+    progress = n;
+    if (n > 0) { rec(n - 1); }
+}
+public action exact() {
+    num n = 0;
+    while (n < 1000001) { n++; }
+    GAME.log("exact", n);
+}
+public action over() {
+    num n = 0;
+    while (n < 1000002) { n++; }
+    GAME.log("unreachable");
+}
+public action nested() {
+    num n = 0;
+    for (num i = 0; i < 1000; i++) {
+        for (num j = 0; j < 1000; j++) { n++; progress = n; }
+    }
+    GAME.log("unreachable");
+}
+public action alive() { GAME.log("alive", updates); }
+public action report() { GAME.log("progress", progress); }
+public action deep(num d) {
+    rec(d);
+    GAME.log("deep ok", d);
+}
+public action update(num delta) {
+    updates += 1;
+    if (updates == 2) {
+        num[] a = num[];
+        GAME.log(a[0]);
+    }
+    GAME.log("update", updates, delta);
+}
+public action spin() {
+    progress = 0;
+    for (num i = 0; i < 1000; i++) { progress = i; fib(20); }
+}

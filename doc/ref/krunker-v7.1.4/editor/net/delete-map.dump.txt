@@ -1,0 +1,4 @@
+H 
+X Are you sure you want to delete this Map?
+X YES
+X NO

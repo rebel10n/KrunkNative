@@ -116,7 +116,25 @@ typedef struct WidgetState {
     double last_click_ms;      /* text: double/triple-click detection               */
     float last_click_x, last_click_y;
     int click_count;
+    struct WidgetCode *code;   /* textarea: code view (widgets_set_code_view)      */
 } WidgetState;
+
+/* Code view of a <textarea> (widgets.h WidgetsCodeView). */
+typedef struct WidgetCode {
+    WidgetsCodeView cfg;
+    WidgetsCodeSpan *spans;
+    int nspans;
+    WidgetsCodeLine *lines;
+    int nlines;
+} WidgetCode;
+
+static void code_free(WidgetCode *c)
+{
+    if (!c) return;
+    free(c->spans);
+    free(c->lines);
+    free(c);
+}
 
 struct Widgets {
     Dom *dom;
@@ -439,6 +457,7 @@ static void state_free(WidgetState *s)
 {
     if (!s) return;
     undo_clear(s);
+    code_free(s->code);
     kn_sb_free(&s->value);
     free(s->commit_value);
     free(s->drag_start);
@@ -1444,6 +1463,13 @@ typedef struct MlLayout {
     float top;                 /* y of the first line (content y - scroll_y)    */
     MlLine *lines;
     int n, cap;
+    /* code view (s->code): hard lines only, tab stops, gutter, horizontal scroll */
+    const WidgetCode *code;
+    float tx;                  /* x of column 0 (cx, or cx + gutter + pad - scroll_x) */
+    float tab_w;               /* tab stop width                                 */
+    float gutter_w;            /* gutter width (0: none)                         */
+    float num_w;               /* line-number column width                       */
+    float text_x, text_w;      /* visible text area (code view)                  */
 } MlLayout;
 
 static int next_cp(const char *s, int len, int off);
@@ -1474,8 +1500,8 @@ static void ml_wrap(Widgets *w, MlLayout *ml, const char *v, int len, float widt
         int e = p;
         while (e < len && v[e] != '\n') e++;
         int ls = p;
-        if (ls == e) ml_push(ml, ls, e);
-        while (ls < e) {
+        if (ls == e || ml->code) ml_push(ml, ls, e);
+        while (ls < e && !ml->code) {
             int i = ls, brk = -1;
             while (i < e) {
                 int ni = next_cp(v, e, i);
@@ -1496,6 +1522,22 @@ static void ml_wrap(Widgets *w, MlLayout *ml, const char *v, int len, float widt
 
 static void ml_free(MlLayout *ml) { free(ml->lines); ml->lines = NULL; ml->n = ml->cap = 0; }
 
+/* Advance of s[0, len) at the start of a line: in a code view a tab moves to
+ * the next multiple of tab_w (CSS tab-size), elsewhere the font's advance. */
+static float ml_measure(Widgets *w, const MlLayout *ml, const char *s, int len)
+{
+    if (!ml->code || ml->tab_w <= 0) return measure(w, &ml->font, s, (size_t)len);
+    float x = 0;
+    int a = 0;
+    for (int i = 0; i <= len; i++) {
+        if (i < len && s[i] != '\t') continue;
+        if (i > a) x += measure(w, &ml->font, s + a, (size_t)(i - a));
+        if (i < len) x = (floorf(x / ml->tab_w + 1e-3f) + 1) * ml->tab_w;
+        a = i + 1;
+    }
+    return x;
+}
+
 static int ml_line_of(const MlLayout *ml, int off)
 {
     int k = 0;
@@ -1506,7 +1548,7 @@ static int ml_line_of(const MlLayout *ml, int off)
 static float ml_x(Widgets *w, const MlLayout *ml, const char *v, int off)
 {
     const MlLine *l = &ml->lines[ml_line_of(ml, off)];
-    return ml->cx + measure(w, &ml->font, v + l->start, (size_t)(off - l->start));
+    return ml->tx + ml_measure(w, ml, v + l->start, off - l->start);
 }
 
 static float ml_line_y(const MlLayout *ml, int line) { return ml->top + (float)line * ml->lh; }
@@ -1515,10 +1557,10 @@ static int ml_offset_in_line(Widgets *w, const MlLayout *ml, const char *v, int 
 {
     const MlLine *l = &ml->lines[line];
     int best = l->start, i = l->start;
-    float best_d = fabsf(x - ml->cx);
+    float best_d = fabsf(x - ml->tx);
     while (i < l->end) {
         i = next_cp(v, l->end, i);
-        float d = fabsf(x - (ml->cx + measure(w, &ml->font, v + l->start, (size_t)(i - l->start))));
+        float d = fabsf(x - (ml->tx + ml_measure(w, ml, v + l->start, i - l->start)));
         if (d < best_d) { best_d = d; best = i; }
     }
     /* a soft-wrapped line's end is the next line's start: stay on this line */
@@ -1547,26 +1589,63 @@ static void ml_layout(Widgets *w, WidgetState *s, const CssComputed *st, const W
     ml->ch = widget_geom_content_h(g);
     ml->lh = resolved_line_height(st, &ml->font);
     if (ml->lh <= 0) ml->lh = 1;
+    ml->code = s->code;
+    ml->tx = ml->cx;
     ml_wrap(w, ml, text, len, ml->cw);
     if (!ml->n) ml_push(ml, 0, 0);
+    float max_scroll_x = 0;
+    if (ml->code) {
+        /* code view: [gutter][pad][text ... pad], scrolled horizontally */
+        const WidgetsCodeView *cv = &ml->code->cfg;
+        ml->tab_w = (float)(cv->tab_size > 0 ? cv->tab_size : 4) * measure(w, &ml->font, " ", 1);
+        if (cv->gutter) {
+            char num[16];
+            int k = snprintf(num, sizeof num, "%d", ml->n);
+            ml->num_w = fmaxf(cv->gutter_min_w, measure(w, &ml->font, num, (size_t)k));
+            ml->gutter_w = cv->gutter_pad_left + ml->num_w + cv->gutter_pad_right + cv->gutter_extra;
+        }
+        ml->text_x = ml->cx + ml->gutter_w + cv->gutter_gap;
+        ml->text_w = fmaxf(0, ml->cw - ml->gutter_w - cv->gutter_gap);
+        float widest = 0;
+        for (int i = 0; i < ml->n; i++)
+            widest = fmaxf(widest, ml_measure(w, ml, text + ml->lines[i].start, ml->lines[i].end - ml->lines[i].start));
+        max_scroll_x = fmaxf(0, widest + 2 * cv->text_pad + w->theme.caret_width - ml->text_w);
+    }
     float content_h = (float)ml->n * ml->lh;
     float max_scroll = fmaxf(0, content_h - ml->ch);
     /* scroll the caret into view when it moved or the text changed (not on
      * wheel scrolling, which leaves the caret where it is) */
     if (text == sb_cstr(&s->value) && w->focused == s->elem && (s->seen_caret != s->caret + 1 || s->seen_len != s->value.len)) {
-        float cy = (float)ml_line_of(ml, s->caret) * ml->lh;
+        const int line = ml_line_of(ml, s->caret);
+        float cy = (float)line * ml->lh;
         s->seen_caret = s->caret + 1;
         s->seen_len = s->value.len;
         if (cy < s->scroll_y) s->scroll_y = cy;
         if (cy + ml->lh > s->scroll_y + ml->ch) s->scroll_y = cy + ml->lh - ml->ch;
+        if (ml->code) {
+            const float pad = ml->code->cfg.text_pad;
+            float x = ml_measure(w, ml, text + ml->lines[line].start, s->caret - ml->lines[line].start);
+            if (x < s->scroll_x) s->scroll_x = x;
+            if (x + 2 * pad + w->theme.caret_width > s->scroll_x + ml->text_w) s->scroll_x = x + 2 * pad + w->theme.caret_width - ml->text_w;
+        }
     }
     s->scroll_y = clampf(s->scroll_y, 0, max_scroll);
     ml->top = ml->cy - s->scroll_y;
+    if (ml->code) {
+        s->scroll_x = clampf(s->scroll_x, 0, max_scroll_x);
+        ml->tx = ml->text_x + ml->code->cfg.text_pad - s->scroll_x;
+    }
 }
+
+static void paint_code(Widgets *w, WidgetState *s, const CssComputed *st, const WidgetGeom *g, const WidgetPaintArgs *a);
 
 static void paint_textarea(Widgets *w, WidgetState *s, const CssComputed *st, const WidgetGeom *g, const WidgetPaintArgs *a)
 {
     MlLayout ml;
+    if (s->code) {
+        paint_code(w, s, st, g, a);
+        return;
+    }
     CssColor color = st ? st->color : rgba(0, 0, 0, 255);
     const int focused = w->focused == s->elem;
     const char *v = sb_cstr(&s->value);
@@ -1609,6 +1688,127 @@ static void paint_textarea(Widgets *w, WidgetState *s, const CssComputed *st, co
         emit_rect(a, floorf(cx), top, w->theme.caret_width, ml.font.ascent + ml.font.descent, color);
     }
     emit_pop_clip(a);
+    ml_free(&ml);
+}
+
+/* First span that ends after `off` (spans are sorted). */
+static int code_span_from(const WidgetCode *c, int off)
+{
+    int lo = 0, hi = c->nspans;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (c->spans[mid].end <= off) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+/* One line of a code view: runs of one colour between span edges and tabs. */
+static void paint_code_line(Widgets *w, const MlLayout *ml, const char *v, const MlLine *l, float y, float base_off,
+                            CssColor def, const WidgetPaintArgs *a)
+{
+    const WidgetCode *c = ml->code;
+    int si = code_span_from(c, l->start);
+    float x = 0;     /* relative to tx */
+    int p = l->start;
+    while (p < l->end) {
+        if (v[p] == '\t') {
+            x = (floorf(x / ml->tab_w + 1e-3f) + 1) * ml->tab_w;
+            p++;
+            continue;
+        }
+        while (si < c->nspans && c->spans[si].end <= p) si++;
+        const WidgetsCodeSpan *sp = si < c->nspans && c->spans[si].start <= p ? &c->spans[si] : NULL;
+        int q = sp ? sp->end : (si < c->nspans ? c->spans[si].start : l->end);
+        if (q > l->end) q = l->end;
+        for (int i = p; i < q; i++) if (v[i] == '\t') { q = i; break; }
+        if (q <= p) q = next_cp(v, l->end, p);
+        const CssColor col = sp ? sp->color : def;
+        /* skip what is left of the visible text area (long lines) */
+        const float adv = ml->tx + x > ml->text_x + ml->text_w ? 0 : emit_text(w, a, &ml->font, v + p, (size_t)(q - p), ml->tx + x, y + base_off, col);
+        if (sp && (sp->flags & WIDGETS_SPAN_UNDERLINE) && adv > 0)
+            emit_rect(a, ml->tx + x, y + base_off + fmaxf(1, roundf(ml->font.size * 0.08f)), adv, 1, col);
+        x += adv;
+        p = q;
+    }
+}
+
+/* Code view: gutter, line backgrounds, selection, coloured text, caret. */
+static void paint_code(Widgets *w, WidgetState *s, const CssComputed *st, const WidgetGeom *g, const WidgetPaintArgs *a)
+{
+    MlLayout ml;
+    const WidgetCode *c = s->code;
+    const WidgetsCodeView *cv = &c->cfg;
+    CssColor color = st ? st->color : rgba(0, 0, 0, 255);
+    const int focused = w->focused == s->elem;
+    const char *v = sb_cstr(&s->value);
+    ml_layout(w, s, st, g, v, (int)s->value.len, &ml);
+    const float pad_x = g->x + g->border[CSS_LEFT], pad_y = g->y + g->border[CSS_TOP];
+    const float pad_w = g->w - g->border[CSS_LEFT] - g->border[CSS_RIGHT], pad_h = g->h - g->border[CSS_TOP] - g->border[CSS_BOTTOM];
+    const float base_off = (ml.lh - (ml.font.ascent + ml.font.descent)) / 2 + ml.font.ascent;
+    const int lo = s->caret < s->anchor ? s->caret : s->anchor, hi = s->caret < s->anchor ? s->anchor : s->caret;
+    const int caret_line = ml_line_of(&ml, s->caret);
+    const float right = ml.text_x + ml.text_w;
+    int first = (int)floorf((ml.cy - ml.top) / ml.lh) - 1, last = (int)ceilf((ml.cy + ml.ch - ml.top) / ml.lh) + 1;
+    if (first < 0) first = 0;
+    if (last > ml.n) last = ml.n;
+    /* rows: the caret line, marked lines, the selection, then the text */
+    emit_clip(a, ml.text_x, pad_y, fmaxf(0, pad_x + pad_w - ml.text_x), pad_h);
+    if (cv->active_line_bg.a && hi == lo)
+        emit_rect(a, ml.text_x, ml_line_y(&ml, caret_line), ml.text_w, ml.lh, cv->active_line_bg);
+    for (int k = 0; k < c->nlines; k++) {
+        const WidgetsCodeLine *cl = &c->lines[k];
+        const int i = cl->line - 1;
+        if (!cl->bg.a || i < first || i >= last) continue;
+        const MlLine *l = &ml.lines[i];
+        const float y = ml_line_y(&ml, i);
+        if (cl->full) emit_rect(a, ml.text_x, y, ml.text_w, ml.lh, cl->bg);
+        else {
+            const float x1 = ml.tx + ml_measure(w, &ml, v + l->start, l->end - l->start);
+            if (x1 > ml.tx) emit_rect(a, ml.tx, y, x1 - ml.tx, ml.lh, cl->bg);
+        }
+    }
+    const CssColor sel_bg = cv->selection_bg.a ? cv->selection_bg : w->theme.selection_bg;
+    for (int i = first; i < last && hi > lo; i++) {
+        const MlLine *l = &ml.lines[i];
+        if (hi < l->start || lo > l->end) continue;
+        const int a0 = lo > l->start ? lo : l->start, a1 = hi < l->end ? hi : l->end;
+        const float x0 = ml.tx + ml_measure(w, &ml, v + l->start, a0 - l->start);
+        /* CodeMirror: a selection that runs past the line end fills the row */
+        const float x1 = hi > l->end ? right : ml.tx + ml_measure(w, &ml, v + l->start, a1 - l->start);
+        if (x1 > x0) emit_rect(a, x0, ml_line_y(&ml, i), x1 - x0, ml.lh, sel_bg);
+    }
+    for (int i = first; i < last; i++)
+        if (ml.lines[i].end > ml.lines[i].start) paint_code_line(w, &ml, v, &ml.lines[i], ml_line_y(&ml, i), base_off, color, a);
+    if (focused && caret_visible(w, a->now_ms)) {
+        const float cx = ml_x(w, &ml, v, s->caret);
+        const float top = ml_line_y(&ml, caret_line) + base_off - ml.font.ascent;
+        if (cx >= ml.text_x && cx <= right)
+            emit_rect(a, floorf(cx), top, w->theme.caret_width, ml.font.ascent + ml.font.descent, cv->caret.a ? cv->caret : color);
+    }
+    emit_pop_clip(a);
+    /* the gutter: fixed horizontally, numbers right-aligned, markers right of them */
+    if (cv->gutter) {
+        emit_clip(a, pad_x, pad_y, fminf(ml.gutter_w, pad_w), pad_h);
+        if (cv->gutter_bg.a) emit_rect(a, ml.cx, pad_y, ml.gutter_w, pad_h, cv->gutter_bg);
+        for (int i = first; i < last; i++) {
+            char num[16];
+            const int k = snprintf(num, sizeof num, "%d", i + 1);
+            const float nw = measure(w, &ml.font, num, (size_t)k);
+            emit_text(w, a, &ml.font, num, (size_t)k, ml.cx + cv->gutter_pad_left + ml.num_w - nw, ml_line_y(&ml, i) + base_off, cv->gutter_fg);
+        }
+        for (int k = 0; k < c->nlines; k++) {
+            const WidgetsCodeLine *cl = &c->lines[k];
+            const int i = cl->line - 1;
+            if (!cl->marker || i < first || i >= last) continue;
+            char m[4];
+            const int n = kn_utf8_encode(cl->marker, m);
+            const float mw = measure(w, &ml.font, m, (size_t)n);
+            const float mx = ml.cx + cv->gutter_pad_left + ml.num_w + cv->gutter_pad_right + (cv->gutter_extra - mw) / 2;
+            emit_text(w, a, &ml.font, m, (size_t)n, mx, ml_line_y(&ml, i) + base_off, cl->marker_color.a ? cl->marker_color : cv->gutter_fg);
+        }
+        emit_pop_clip(a);
+    }
     ml_free(&ml);
 }
 
@@ -2962,8 +3162,9 @@ static int copy_selection(Widgets *w, WidgetState *s)
     return 1;
 }
 
-/* Paste: newlines stripped (value sanitisation of single-line inputs), number
- * inputs keep only characters a number may contain, maxlength honoured. */
+/* Paste: newlines stripped (value sanitisation of single-line inputs; a
+ * textarea keeps them, CRLF / CR normalised to LF), number inputs keep only
+ * characters a number may contain, maxlength honoured. */
 static int paste_text(Widgets *w, WidgetState *s)
 {
     const char *clip = clipboard_get(w);
@@ -2973,7 +3174,9 @@ static int paste_text(Widgets *w, WidgetState *s)
     while (i < n) {
         uint32_t cp;
         int k = kn_utf8_decode(clip + i, n - i, &cp);
-        if (cp != '\n' && cp != '\r' && (s->kind != WIDGET_NUMBER || number_char_ok(cp)) && (cp >= 0x20 || cp == '\t'))
+        if (s->kind == WIDGET_TEXTAREA && (cp == '\n' || cp == '\r')) {
+            if (cp == '\n' || !(i + 1 < n && clip[i + 1] == '\n')) kn_sb_append(&t, "\n", 1);
+        } else if (cp != '\n' && cp != '\r' && (s->kind != WIDGET_NUMBER || number_char_ok(cp)) && (cp >= 0x20 || cp == '\t'))
             kn_sb_append(&t, clip + i, (size_t)k);
         i += (size_t)k;
     }
@@ -3169,7 +3372,7 @@ static double clock_ms(Widgets *w)
 {
     struct timespec ts;
     if (w->time_set) return w->now_ms;
-    timespec_get(&ts, TIME_UTC);
+    clock_gettime(CLOCK_REALTIME, &ts); // not C11 timespec_get: MinGW's msvcrt lacks it
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
@@ -3291,7 +3494,7 @@ static void select_typeahead(Widgets *w, WidgetState *s, uint32_t cp)
  * popup when the page scrolls).  Returns 1 when consumed. */
 /* Wheel over an overflowing <textarea>: scrolls its lines (consumed unless
  * already at the limit, then the page scrolls, like Chrome). */
-static int textarea_wheel(Widgets *w, float dy, float x, float y)
+static int textarea_wheel(Widgets *w, float dx, float dy, float x, float y)
 {
     for (uint32_t i = 0; i < w->slot_cap; i++) {
         WidgetState *s = w->slots[i];
@@ -3303,7 +3506,16 @@ static int textarea_wheel(Widgets *w, float dy, float x, float y)
         const char *v = sb_cstr(&s->value);
         ml_layout(w, s, computed(w, s->elem), &g, v, (int)s->value.len, &ml);
         const float max_scroll = fmaxf(0, (float)ml.n * ml.lh - ml.ch);
+        const float old_x = s->scroll_x;
         ml_free(&ml);
+        if (s->code && dx != 0) {
+            /* code view: horizontal wheel; ml_layout clamps on the next paint */
+            s->scroll_x = fmaxf(0, s->scroll_x - dx * EV_SCROLL_PIXELS_PER_CLICK);
+            if (s->scroll_x != old_x) {
+                invalidate(w, s->elem, 0);
+                return 1;
+            }
+        }
         const float next = clampf(s->scroll_y - dy * EV_SCROLL_PIXELS_PER_CLICK, 0, max_scroll);
         if (next == s->scroll_y) return 0;
         s->scroll_y = next;
@@ -3317,8 +3529,7 @@ int widgets_scroll(Widgets *w, float dx, float dy, float x, float y)
 {
     PopupGeom pg;
     WidgetState *s;
-    (void)dx;
-    if (w && !w->popup) return textarea_wheel(w, dy, x, y);
+    if (w && !w->popup) return textarea_wheel(w, dx, dy, x, y);
     if (!w || !w->popup) return 0;
     s = state_find(w, w->popup);
     if (!s || !popup_geom(w, &pg)) return 0;
@@ -3449,6 +3660,166 @@ int widgets_char(Widgets *w, HtmlElem e, uint32_t codepoint)
         fire_input(w, e);
     }
     return 1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Text editing from C and the code view (widgets.h)                          */
+/* ------------------------------------------------------------------------- */
+
+/* A text control's state, or NULL. */
+static WidgetState *text_state(Widgets *w, HtmlElem e)
+{
+    WidgetState *s = w && e ? state_get(w, e) : NULL;
+    return s && kind_is_text((WidgetKind)s->kind) ? s : NULL;
+}
+
+/* off clamped to the value and moved back to a code point start. */
+static int clamp_offset(const WidgetState *s, int off)
+{
+    const char *v = sb_cstr(&s->value);
+    if (off < 0) off = 0;
+    if (off > (int)s->value.len) off = (int)s->value.len;
+    while (off > 0 && ((unsigned char)v[off] & 0xC0) == 0x80) off--;
+    return off;
+}
+
+int widgets_selection(Widgets *w, HtmlElem e, int *start, int *end)
+{
+    WidgetState *s = text_state(w, e);
+    if (!s) return 0;
+    if (start) *start = s->caret < s->anchor ? s->caret : s->anchor;
+    if (end) *end = s->caret < s->anchor ? s->anchor : s->caret;
+    return 1;
+}
+
+void widgets_set_selection(Widgets *w, HtmlElem e, int start, int end)
+{
+    WidgetState *s = text_state(w, e);
+    if (!s) return;
+    start = clamp_offset(s, start);
+    end = clamp_offset(s, end);
+    if (end < start) end = start;
+    s->anchor = start;
+    s->caret = end;
+    s->goal_x = -1;
+    s->last_edit = EDIT_NONE;
+    s->seen_caret = 0;   /* scroll it into view on the next layout */
+    reset_blink(w);
+    invalidate(w, e, 0);
+}
+
+int widgets_replace_range(Widgets *w, HtmlElem e, int start, int end, const char *text)
+{
+    WidgetState *s = text_state(w, e);
+    if (!s) return 0;
+    start = clamp_offset(s, start);
+    end = clamp_offset(s, end);
+    if (end < start) { int t = start; start = end; end = t; }
+    undo_checkpoint(s, EDIT_OTHER);
+    s->anchor = start;
+    s->caret = end;
+    delete_selection(s);
+    if (text && *text) {
+        /* bypasses maxlength / sanitisation like setRangeText */
+        KnStrBuf tmp = {0};
+        const size_t n = strlen(text);
+        kn_sb_append(&tmp, sb_cstr(&s->value), (size_t)s->caret);
+        kn_sb_append(&tmp, text, n);
+        kn_sb_append(&tmp, sb_cstr(&s->value) + s->caret, s->value.len - (size_t)s->caret);
+        sb_set(&s->value, sb_cstr(&tmp), tmp.len);
+        kn_sb_free(&tmp);
+        s->caret += (int)n;
+        s->anchor = s->caret;
+    }
+    edit_done(s, EDIT_OTHER);
+    s->goal_x = -1;
+    s->seen_caret = 0;
+    value_changed(w, s);
+    return 1;
+}
+
+int widgets_caret_rect(Widgets *w, HtmlElem e, float *x, float *y, float *cw, float *ch)
+{
+    WidgetState *s = text_state(w, e);
+    WidgetGeom vg, g;
+    float lx, ly;
+    if (!s || !owner_geom(w, e, &vg) || !local_geom(w, e, vg.x, vg.y, &g, &lx, &ly)) return 0;
+    /* local -> viewport: the untransformed box scaled onto its viewport box */
+    const float sx = g.w > 0 ? vg.w / g.w : 1, sy = g.h > 0 ? vg.h / g.h : 1;
+    float px, py, ph;
+    if (s->kind == WIDGET_TEXTAREA) {
+        MlLayout ml;
+        const char *v = sb_cstr(&s->value);
+        ml_layout(w, s, computed(w, e), &g, v, (int)s->value.len, &ml);
+        px = ml_x(w, &ml, v, s->caret);
+        py = ml_line_y(&ml, ml_line_of(&ml, s->caret));
+        ph = ml.lh;
+        ml_free(&ml);
+    } else {
+        TextLayout tl;
+        text_layout(w, s, computed(w, e), &g, &tl);
+        px = caret_x_for(w, &tl, s, s->caret);
+        py = tl.editor_y;
+        ph = tl.lh;
+        text_layout_free(&tl);
+    }
+    if (x) *x = vg.x + (px - g.x) * sx;
+    if (y) *y = vg.y + (py - g.y) * sy;
+    if (cw) *cw = w->theme.caret_width * sx;
+    if (ch) *ch = ph * sy;
+    return 1;
+}
+
+void widgets_set_code_view(Widgets *w, HtmlElem e, const WidgetsCodeView *cfg)
+{
+    WidgetState *s = w && e ? state_get(w, e) : NULL;
+    if (!s || s->kind != WIDGET_TEXTAREA) return;
+    if (!cfg) {
+        code_free(s->code);
+        s->code = NULL;
+        s->scroll_x = 0;
+    } else {
+        if (!s->code) s->code = (WidgetCode *)calloc(1, sizeof *s->code);
+        if (!s->code) return;
+        s->code->cfg = *cfg;
+    }
+    invalidate(w, e, 0);
+}
+
+void widgets_set_code_spans(Widgets *w, HtmlElem e, const WidgetsCodeSpan *spans, int n)
+{
+    WidgetState *s = w && e ? state_find(w, e) : NULL;
+    if (!s || !s->code) return;
+    WidgetCode *c = s->code;
+    free(c->spans);
+    c->spans = NULL;
+    c->nspans = 0;
+    if (n > 0 && spans) {
+        c->spans = (WidgetsCodeSpan *)malloc((size_t)n * sizeof *spans);
+        if (c->spans) {
+            memcpy(c->spans, spans, (size_t)n * sizeof *spans);
+            c->nspans = n;
+        }
+    }
+    invalidate(w, e, 0);
+}
+
+void widgets_set_code_lines(Widgets *w, HtmlElem e, const WidgetsCodeLine *lines, int n)
+{
+    WidgetState *s = w && e ? state_find(w, e) : NULL;
+    if (!s || !s->code) return;
+    WidgetCode *c = s->code;
+    free(c->lines);
+    c->lines = NULL;
+    c->nlines = 0;
+    if (n > 0 && lines) {
+        c->lines = (WidgetsCodeLine *)malloc((size_t)n * sizeof *lines);
+        if (c->lines) {
+            memcpy(c->lines, lines, (size_t)n * sizeof *lines);
+            c->nlines = n;
+        }
+    }
+    invalidate(w, e, 0);
 }
 
 /* ------------------------------------------------------------------------- */

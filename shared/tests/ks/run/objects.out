@@ -1,0 +1,45 @@
+{
+  "a": 1,
+  "b": "x",
+  "c": {
+    "d": false,
+    "e": [
+      1
+    ]
+  },
+  "quoted key": 5,
+  "z": 26
+}
+true false true true false false true false true false
+{
+  "b": "x",
+  "c": {
+    "d": false,
+    "e": [
+      1
+    ]
+  },
+  "quoted key": 5,
+  "z": 26,
+  "a": 2
+}
+changed true
+{} {} {} {
+  "d": false,
+  "e": [
+    1
+  ]
+} [
+  {},
+  {}
+]
+42
+hey!
+apply 8 8 1
+{}
+[
+  1
+] {} {
+  "e": {},
+  "a": []
+}

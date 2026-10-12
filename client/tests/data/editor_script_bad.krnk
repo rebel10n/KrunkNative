@@ -1,0 +1,5 @@
+public action start() {
+	num x = 1;
+	x = "s";
+	GAME.log(x)
+}

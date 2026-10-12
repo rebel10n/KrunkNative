@@ -1,4 +1,4 @@
-// mod/mods.ts of the Krunker v3.1.1 offline build, the parts around the developer console
+// mod/mods.ts of the Krunker offline builds (v3.1.1, unchanged in v7.1.4), the parts around the developer console
 // (client/include/ui_mods.h). Rows are built with the same markup mods.ts creates and
 // inserted where its ensure*Row() puts them; the switches are read back each frame (the
 // mod's click listeners) and the bind rows react to the left button (ui_mods_pointer,
@@ -211,16 +211,23 @@ static const char SETTING_ROWS_HTML[] =
     "Enable Developer Console (`) <label class=\"switch\" style=\"margin-left: 10px;\"><input type=\"checkbox\">"
     "<span class=\"slider\"></span></label></div>";
 
+// mods.ts makes a plain .setHedBind heading + rows (v3.1.1 Change Controls markup); v7.1.4's
+// window has collapsible groups instead and no .setHedBind style, so the rows form a v7 group
+// of their own ("Developer Tools", collapsible like the others) with v7's key cell markup.
 #define BIND_ROW(data, label)                                                                              \
     "<div class=\"settName\" " data "=\"1\" data-kn-pointer=\"1\">" label                                    \
-    "<span class=\"unbind\"><i class=\"material-icons\" style=\"font-size: 40px; color: var(--red);\">"     \
-    "delete_forever</i></span><span class=\"settText floatRNoC keyIcon\"></span></div>"
+    "<div style=\"float:right\"><span class=\"unbind\" title=\"Unbind\"><i class=\"material-icons\" "           \
+    "style=\"font-size:40px;color:var(--red);\">delete_forever</i></span>"                                   \
+    "<span class=\"settText floatRNoC keyIcon\" onmouseover=\"playTick()\"></span></div></div>"
 
 static const char BIND_ROWS_HTML[] =
-    "<div class=\"setHedBind\" data-dev-console-bind-head=\"1\">Developer Tools</div>"
+    "<div class=\"setHed\" id=\"setBindHed_developer_tools\" data-dev-console-bind-head=\"1\" "
+    "onclick=\"window.windows[6].collapseFolder(this)\"><span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> "
+    "Developer Tools</div><div class=\"setBodH\" id=\"setBindBod_developer_tools\">"
     BIND_ROW("data-dev-console-bind", "Developer Console")
     BIND_ROW("data-bhop-mode-bind", "Bhop Mode")
-    BIND_ROW("data-cycle-command-bind", "Cycle Map (/cycle)");
+    BIND_ROW("data-cycle-command-bind", "Cycle Map (/cycle)")
+    "</div>";
 
 static const char *const BIND_ROW_SELECTORS[3] = {
     "[data-dev-console-bind] .settText.floatRNoC.keyIcon",
@@ -254,7 +261,7 @@ static void mods_refresh_ui(void) {
 }
 
 // ensureDevConsoleSettingRow: Force Offline Mode, then the dev console switch, after the
-// "Mouse Flick Fix" (slid_flickClamp) row of the General tab.
+// "Mouse Flick Fix" (slid_flickClamp) row (v7.1.4: General > Experimental, advanced view).
 static void ensure_setting_rows(void) {
     const HtmlElem anchor_input = html_dom_by_id("slid_flickClamp");
     if (!anchor_input) return;
@@ -264,12 +271,18 @@ static void ensure_setting_rows(void) {
     mods_refresh_ui();
 }
 
-// ensureDevConsoleBindRow: the "Developer Tools" rows after the Smite (#cont37) row.
+// ensureDevConsoleBindRow: the "Developer Tools" rows after the Smite row. mods.ts anchors
+// at v3.1.1's #cont37 / #cont34, which v7.1.4's Change Controls no longer has (its ids are
+// cont<bind>_<index>), so the rows never appear in the reference; KrunkNative anchors them
+// at v7's Smite / Noclip key cells (Chat & Toggles > Premium & Host) instead.
 static void ensure_bind_rows(void) {
-    HtmlElem anchor = html_dom_by_id("cont37");
+    HtmlElem anchor = html_dom_by_id("contpremium_3");
+    if (!anchor) anchor = html_dom_by_id("contpremium_0");
+    if (!anchor) anchor = html_dom_by_id("cont37");
     if (!anchor) anchor = html_dom_by_id("cont34");
     if (!anchor) return;
-    const HtmlElem anchor_row = html_dom_closest(anchor, ".settName");
+    HtmlElem anchor_row = html_dom_closest(anchor, ".setBodH"); // after the Premium & Host group
+    if (!anchor_row) anchor_row = html_dom_closest(anchor, ".settName");
     if (!anchor_row || html_dom_query(0, "[data-dev-console-bind-head='1']")) return;
     html_dom_insert_html(anchor_row, HTML_INSERT_AFTER_END, BIND_ROWS_HTML);
     for (int i = 0; i < 3; i++) g_mods.shown[i][0] = 0;
@@ -349,6 +362,21 @@ static void toggle_developer_console(void) {
     ui_console_toggle(1);
 }
 
+// The v7 Parkour reset binds (resetKey B / resetLastKey N by default) win over the mod's bhop
+// toggle (KeyB by default) in modes that reset (mode.allowReset): v7 has no bhop mod, so there the
+// key keeps its v7 meaning and the toggle does not fire with it.
+static int parkour_reset_key(const Client *client, const int key) {
+    const GameMode *mode = client ? client->game.mode : NULL;
+    if (!mode || !mode->config.allow_reset) return 0;
+    const int code = ui_controls_dom_key(key);
+    if (code < 0) return 0;
+    static const int ids[2] = {UI_CONTROL_RESET, UI_CONTROL_RESET_LAST};
+    for (int i = 0; i < 2; i++) {
+        if (code == ui_controls_bind(ids[i]) || code == ui_controls_bind_alt(ids[i])) return 1;
+    }
+    return 0;
+}
+
 int ui_mods_key_event(Client *client, const int key, const int action, const int mods, const int typing) {
     (void) mods;
     mods_load();
@@ -365,7 +393,7 @@ int ui_mods_key_event(Client *client, const int key, const int action, const int
         if (client) client_send_cycle_packet(client); // window.io.send("cycle")
         return 1;
     }
-    if (!typing && !visible && ui_mods_code_matches(ui_bhop_bind(), key)) {
+    if (!typing && !visible && ui_mods_code_matches(ui_bhop_bind(), key) && !parkour_reset_key(client, key)) {
         ui_bhop_toggle();
         return 1;
     }

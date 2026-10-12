@@ -1,0 +1,39 @@
+# KrunkScript recovered from the v7 compiler's JavaScript output (KrunkNative ks_import_js).
+num count = 0;
+num[][] grid = num[][num[1, 2], num[3]];
+obj o = {a: 1, b: "x", f: helper};
+str label = "n" + (str) count;
+num action helper() {
+    return count * 2;
+}
+public action update(num delta) {
+    obj[] list = GAME.PLAYERS.list();
+
+
+
+    while (count < 3) {
+        count++;
+    }
+    if (count == 1) {
+        count = 2;
+    } else if (count != 3) {
+        count -= 1;
+    } else {
+        count = helper();
+    }
+    addTo grid[0] count;
+    remove grid[1];
+    remove o.a;
+    (num) o.c += 2;
+    for (obj e : o) {
+        GAME.log(e.key, hasProp o.b, notEmpty list, Math.floor(1.5) ** 2);
+    }
+    o.f(1, delta > 2 ? "a" : 'b\'c');
+    GAME.log(-(-delta), lengthOf grid[0], (num[][]) grid, (bool) count && !count, label);
+    for (num i = 0; i < 2; i += 1) {
+        if (i == 1) {
+            break;
+        }
+        continue;
+    }
+}

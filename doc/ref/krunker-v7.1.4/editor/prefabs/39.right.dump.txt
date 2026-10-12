@@ -1,0 +1,20 @@
+P Sound Emitter
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-
+F Sound closed
+-
+L[] Type : select#73[nuke_0..melee_equip]=nuke_0
+L[] Asset ID : number(Sound Asset ID)=0
+B Select Custom
+L[] Volume : sval=1 range[0.05,2,0.01]=1
+L[] Rate : sval=1 range[0.1,4,0.01]=1
+L[] Reference Distance : sval=0 range[0,5000,1]=0
+L[] Distance Model : select#3[Inverse..Exponential]=Inverse
+L[] Roll-off : sval=0 range[0,1,0.01]=0
+-

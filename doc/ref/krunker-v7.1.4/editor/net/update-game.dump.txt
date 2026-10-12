@@ -1,0 +1,17 @@
+H 
+X Update Game
+X 0 / 250
+X KB
+I button()=Select
+X Select Thumbnail
+I file()=null
+X Category
+I select#24[Other..Education]=Puzzle
+X Post to Hub
+I switch=0
+X Mobile Friendly
+I switch=1
+I text(Paste Data)=null
+I text(Youtube Link (Optional))=null
+X about
+X Publish v0.2

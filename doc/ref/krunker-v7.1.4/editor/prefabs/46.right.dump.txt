@@ -1,0 +1,15 @@
+P Boost Pad
+L[] Visible : switch=1
+L[] Bounce : sval=1 range[-3,3,0.1]=1
+L[] Crouch Reduces : switch=1
+L[] Direction : sval=0 range[0,5,1]=0
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 10/0,0.5/0,10/0
+-

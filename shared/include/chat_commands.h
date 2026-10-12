@@ -22,6 +22,7 @@ typedef enum {
     CHAT_PERM_DEV = 1,       // requireDev: DEV accounts
     CHAT_PERM_CHEAT = 2,     // requirePremiumCheatPerm: DEV or the premium host of a custom lobby
     CHAT_PERM_DEV_CHEAT = 3, // requireDev, and a cheat (unlimited ammo, score, summon...): see cheats_open
+    CHAT_PERM_HOST_DEV = 4,  // Krunker v7.1.4 requireHostOrDev (bot_*): DEV peers / the custom host only, perms on or off
 } ChatCommandPerm;
 
 typedef struct {

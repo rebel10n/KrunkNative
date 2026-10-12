@@ -100,6 +100,12 @@ MmNode *registry_node_hello(Registry *r, const char *node_id, const cJSON *hello
     n->max_lobbies = (int) kn_json_int(hello, "maxLobbies", 1);
     if (n->max_lobbies <= 0) n->max_lobbies = 1;
     n->custom = kn_json_bool(hello, "custom", 0);
+    /* server_bin builds before the field: 0 (edges link their online_mode instances only
+     * with a server_bin that sends it, deploy/ansible role kn_gameserver) */
+    n->online_mode = kn_json_bool(hello, "onlineMode", 0);
+    n->password = kn_json_bool(hello, "password", 0);
+    /* lobbies kept from before a reconnect follow the node's current mode */
+    for (size_t i = 0; i < n->lobby_count; i++) n->lobbies[i].online_mode = n->online_mode;
     n->draining = 0;
     n->local = 1;
     n->connected_ms = now_ms;
@@ -134,7 +140,10 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
     l->max_players = cJSON_IsNumber(mx) && mx->valuedouble > 0 ? (int) mx->valuedouble : n->max_players;
     const cJSON *meta = cJSON_GetArrayItem(tuple, 4);
     l->custom = kn_json_bool(meta, "cs", 0) || kn_json_bool(meta, "isCustom", 0);
-    l->protect = kn_json_bool(meta, "pr", 0);
+    /* pr: password protected; private (v7 host config "private", server_bin WP-E): a private
+     * custom game is joined by id only, never quick-joined (older servers never send it) */
+    l->protect = kn_json_bool(meta, "pr", 0) || kn_json_bool(meta, "private", 0);
+    l->online_mode = n->online_mode || kn_json_bool(meta, "onlineMode", 0);
     l->draining = kn_json_bool(meta, "draining", 0);
     const cJSON *mode = cJSON_GetObjectItemCaseSensitive(meta, "mode");
     l->mode_index = cJSON_IsNumber(mode) ? (int) mode->valuedouble
@@ -142,6 +151,9 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
     copy_str(l->mode, sizeof(l->mode), kn_json_str(meta, "modeName", cJSON_IsString(mode) ? mode->valuestring : ""));
     copy_str(l->map, sizeof(l->map), kn_json_str(meta, "map", kn_json_str(meta, "mapName", kn_json_str(meta, "i", ""))));
     copy_str(l->version, sizeof(l->version), kn_json_str(meta, "v", ""));
+    /* meta.proto "M.m" (server_bin with build info); absent = a 1.x server */
+    const char *proto = kn_json_str(meta, "proto", "");
+    l->proto_major = proto[0] >= '0' && proto[0] <= '9' ? atoi(proto) : -1;
 }
 
 /* o[key] = value with JS assignment semantics: replaced in place, else appended. */
@@ -178,6 +190,12 @@ static cJSON *namespace_tuple(const MmNode *n, const cJSON *tuple) {
     if (cJSON_IsObject(meta)) {
         set_meta_str(meta, "lobbyId", ns);
         set_meta_str(meta, "nodeId", n->node_id);
+        /* KrunkNative: online_mode nodes take signed-in players only; the flag travels
+         * with the tuple so other brains (federation, mm_lobbies.tuple) see it too */
+        if (n->online_mode && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(meta, "onlineMode"))) {
+            cJSON_DeleteItemFromObjectCaseSensitive(meta, "onlineMode");
+            cJSON_AddBoolToObject(meta, "onlineMode", 1);
+        }
     }
     return out;
 }
@@ -381,8 +399,30 @@ static int lobby_joinable(const MmNode *n, const MmLobby *l) {
     return !n->draining && !l->draining;
 }
 
+int registry_lobby_needs_account(const MmNode *n, const MmLobby *l) {
+    return n->online_mode || l->online_mode;
+}
+
+int registry_lobby_protected(const MmNode *n, const MmLobby *l) {
+    return n->password || l->protect;
+}
+
+/* may the seeking player be sent here without asking for it by id */
+static int lobby_auto_ok(const MmNode *n, const MmLobby *l, const MmPickQuery *q) {
+    return !registry_lobby_protected(n, l) && (q->authed || !registry_lobby_needs_account(n, l));
+}
+
 static int version_ok(const MmLobby *l, const char *version) {
     return !version || !*version || !l->version[0] || !strcmp(l->version, version);
+}
+
+/* the client can speak the lobby's protocol (same major; release_info.h) */
+static int proto_ok(const MmLobby *l, const MmPickQuery *q) {
+    return q->proto_major <= 0 || l->proto_major < 0 || l->proto_major == q->proto_major;
+}
+
+static int lobby_outdated(const MmLobby *l, const MmPickQuery *q) {
+    return q->outdated ? q->outdated(l, q->outdated_ud) != 0 : 0;
 }
 
 static int region_eq(const MmNode *n, const char *region) {
@@ -394,21 +434,26 @@ static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, con
                        int use_soft_cap, MmPick *out) {
     MmNode *best_n = NULL;
     MmLobby *best = NULL;
-    int best_taken = -1;
+    int best_taken = -1, best_outdated = 1;
     for (size_t i = 0; i < r->node_count; i++) {
         MmNode *n = r->nodes[i];
         if (!region_eq(n, region)) continue;
         for (size_t j = 0; j < n->lobby_count; j++) {
             MmLobby *l = &n->lobbies[j];
-            if (l->custom || !lobby_joinable(n, l) || !version_ok(l, q->version)) continue;
+            if (l->custom || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) || !version_ok(l, q->version) ||
+                !proto_ok(l, q))
+                continue;
             int taken = registry_lobby_taken(r, l, q->now_ms);
             int cap = registry_lobby_cap(l, p);
             if (use_soft_cap && p->soft_cap > 0 && p->soft_cap < cap) cap = p->soft_cap;
             if (taken >= cap) continue;
-            if (taken > best_taken) {
+            /* up-to-date before outdated, then the most populated */
+            const int outdated = lobby_outdated(l, q);
+            if (!best || outdated < best_outdated || (outdated == best_outdated && taken > best_taken)) {
                 best = l;
                 best_n = n;
                 best_taken = taken;
+                best_outdated = outdated;
             }
         }
     }
@@ -424,7 +469,13 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     if (q->game_id && *q->game_id) {
         MmNode *n = NULL;
         MmLobby *l = registry_lobby(r, q->game_id, &n);
-        if (l && lobby_joinable(n, l)) {
+        if (l && lobby_joinable(n, l) && !proto_ok(l, q)) {
+            /* another protocol major: the client could not play there */
+            if (!q->auto_change) return MM_PICK_INCOMPATIBLE;
+        } else if (l && lobby_joinable(n, l) && !q->authed && registry_lobby_needs_account(n, l)) {
+            /* a guest asking for an online_mode lobby: the server would refuse it */
+            if (!q->auto_change) return MM_PICK_ACCOUNT_REQUIRED;
+        } else if (l && lobby_joinable(n, l)) {
             int taken = registry_lobby_taken(r, l, q->now_ms);
             if (q->force || taken < l->max_players) {
                 out->node = n;
@@ -451,17 +502,26 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     for (size_t i = 0; i < r->node_count; i++) {
         for (size_t j = 0; j < r->nodes[i]->lobby_count; j++) {
             const MmLobby *l = &r->nodes[i]->lobbies[j];
-            if (l->custom) continue;
+            if (l->custom || !lobby_auto_ok(r->nodes[i], l, q)) continue;
             any = 1;
-            if (version_ok(l, q->version)) any_version = 1;
+            if (version_ok(l, q->version) && proto_ok(l, q)) any_version = 1;
         }
     }
     out->changed = 0;
     return any && !any_version ? MM_PICK_NO_MATCH : MM_PICK_NONE;
 }
 
-static int node_host_free(const Registry *r, const MmNode *n, int64_t now_ms) {
-    if (!n->custom || n->draining) return 0;
+static int node_host_free(const Registry *r, const MmNode *n, int authed, int64_t now_ms) {
+    if (!n->custom || n->draining || n->password) return 0;
+    /* remote nodes: the flags are known through their lobby tuples only */
+    if (!authed && n->online_mode) return 0;
+    if (!authed && !n->local && n->lobby_count == 0) return 0;
+    for (size_t j = 0; j < n->lobby_count; j++) {
+        const MmLobby *l = &n->lobbies[j];
+        /* a private custom game (ranked, passworded host) does not lock the node; the
+         * public lobby of a server-wide sv_password does */
+        if ((l->protect && !l->custom) || (!authed && l->online_mode)) return 0;
+    }
     if ((int) n->lobby_count < n->max_lobbies) return 1;
     for (size_t j = 0; j < n->lobby_count; j++) {
         const MmLobby *l = &n->lobbies[j];
@@ -478,7 +538,7 @@ static int node_load(const MmNode *n) {
 }
 
 MmNode *registry_pick_host_node(Registry *r, const char *region, const char *brain_id, int cross_region,
-                                int64_t now_ms) {
+                                int authed, int64_t now_ms) {
     for (int pass = 0; pass < 2; pass++) {
         const char *reg = pass == 0 ? region : NULL;
         if (pass == 1 && (!cross_region || !region || !*region)) break;
@@ -486,7 +546,7 @@ MmNode *registry_pick_host_node(Registry *r, const char *region, const char *bra
         int best_score = 0;
         for (size_t i = 0; i < r->node_count; i++) {
             MmNode *n = r->nodes[i];
-            if (!region_eq(n, reg) || !node_host_free(r, n, now_ms)) continue;
+            if (!region_eq(n, reg) || !node_host_free(r, n, authed, now_ms)) continue;
             /* own nodes first, then least loaded */
             int score = (brain_id && !strcmp(n->brain_id, brain_id) ? 0 : 100000) + node_load(n);
             if (!best || score < best_score) {

@@ -1,9 +1,15 @@
 #pragma once
+// The server core (kn_server_core): connection table, packet dispatch, broadcast, the game
+// tick step and the accounts gate. server_bin links it with its network frontend (TCP / UDP
+// sockets, rcon, brain link, finder, CLI: server_cli.h); the client links it as the offline
+// sandbox server (server/src/sandbox.c, server_sandbox.h) over an in-memory transport. No GL,
+// sockets or threads of its own: the frontend owns the I/O and the threads.
 #include <shared.h>
 #include <social.h> // social hub requests (SocialAssembly)
 #include <voice.h> // voice chat relay (io_vc)
 #include <chat_commands.h>
-#include <replxx.h>
+#include <player_card.h> // WP-E: PLAYER_CARD_STAT_COUNT (ServerAccount)
+#include <progression.h> // WP-E part 2c: PROGRESSION_STAT_COUNT (ServerAccount)
 #include <pthread.h>
 
 #ifdef WIN32
@@ -42,6 +48,17 @@ typedef enum {
     SERVER_JOIN_AUTH,          // JOIN received, waiting for the brain's auth-reply
 } ServerJoinState;
 
+#define SERVER_CLASS_STATS_MAX 32 // account.stats c0..c31 (v7.1.4 has 16 classes)
+#define SERVER_TALLY_MAX 96       // challenge tallies of one round (key x weapon x streak)
+
+// WP-E part 2c: one challenges.update tally (shared/include/progression.h)
+typedef struct {
+    char key[8];
+    int16_t weapon;            // -1 none
+    int16_t streak;            // -1 none
+    int value;                 // ADD keys: the sum; MAX / SET keys: the highest / last value
+} ServerChallengeTally;
+
 typedef struct {
     int account_id;            // 0 guest
     char username[32];
@@ -68,12 +85,26 @@ typedef struct {
     unsigned char central_verified:1;  // online_mode: identity confirmed by central auth
     unsigned char skins_known:1;       // skins_owned holds the coordinator's inventory
     unsigned char password_ok:1;       // a JOIN carried the right server password
-    uint8_t skins_owned[512];          // bitset of owned store.skins indices (4096), enforced on ENT
+    uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v7.1.4 has 6448), enforced on ENT
+    int badge;                         // badgeIndex (v7 account stats.bdg, badges.js), -1 none
+    // player-viewer WP-E part 2a: the death screen's account values (players.js:4860), read from the
+    // brain account at auth: stats["c" + classIndex] and every config.playerCardStats value
+    unsigned char has_stats:1;
+    int class_stats[SERVER_CLASS_STATS_MAX];
+    char pc_stats[PLAYER_CARD_STAT_COUNT][16];
+    // player-viewer WP-E part 2c: this round's game.incStat counts (progression.h stat keys) and
+    // challenges.update tallies per (key, weapon, streak), committed with the stats and then cleared
+    uint32_t stat_counts[PROGRESSION_STAT_COUNT];
+    ServerChallengeTally tallies[SERVER_TALLY_MAX];
+    int tally_count;
 } ServerAccount;
+
+struct ServerTransport;
 
 typedef struct {
     int fd;
     struct sockaddr_in addr;
+    const struct ServerTransport *transport; // the frontend that accepted it (set before net_add_client)
     NetPacketBuffer read_buffer;
     int id;
     int player_number;
@@ -81,6 +112,17 @@ typedef struct {
     int secondary_index;           // ENT secondary pick (weapon id, -1 default)
     PlayerCosmetics cosmetics;     // ENT skin colour / cosmetic items (none for older ENTs)
     int slid_cont;                 // ENT slidCont (gameserver.ts ent[15]: player.slidCont), 1 for older ENTs
+    int spray_index;               // ENT sprayIndex (gameserver.ts ent[1]: player.sprayIndex), 0 for older ENTs
+    PlayerSkins skins;             // ENT weapon skins + meleeIndex (ent[2], ent[9]), owned ones only once enforced
+    float lag_comp;                // ENT lagComp (ent[11] slider) clamped to 0.1..1, 1 for older ENTs
+    int attach_index;              // WP-C ENT V8 attachIndex (ent[12]), DEFAULT_ATTACHMENT_INDEX for older ENTs
+    unsigned char chall_mode:1;    // WP-C ENT V8 challengeMode (ent[7])
+    unsigned char anon_mode:1;     // WP-C ENT V8 anonMode (ent[19])
+    PlayerCosmeticsV7 cosmetics_v7; // WP-F ENT V9: the v7.1.4 cosmetic slots (none for older ENTs; badge unused)
+    unsigned char show_badges;     // WP-F ENT V9 showBadges (PLAYER_SHOW_BADGE_*), all for older ENTs
+    int streak_indexes[3];         // WP-B: STREAK_SLOTS (v7 ENT streakIndexes), applied at spawn
+    unsigned char streak_indexes_set:1; // 0: the default pick (Nuke only)
+    int pc_stat_index;             // WP-E: NET_PACKET_PC_STAT (v7 ENT pcStatIndex), -1 none
     char name[SERVER_PLAYER_NAME_MAX];
     char address[CHAT_CMD_ADDRESS_SIZE]; // dotted peer address (chat /ip, /banip)
     unsigned char op:1;            // CLI `op`: passes the DEV checks of chat commands while perms are on
@@ -88,6 +130,8 @@ typedef struct {
     // browser whose forwarded address is loopback too). Such a player hosts the server: DEV.
     unsigned char local:1;
     unsigned char first_packet_seen:1; // NET_PACKET_FORWARDED counts only as the first packet
+    unsigned char peer_minor;      // HELLO minor of a NET_PROTOCOL_MAJOR peer (0 before / other majors): per-peer packet gates
+    unsigned char peer_patch;      // WP-C: its HELLO patch (0 for a 2-byte HELLO): net_peer_has_wpc(peer_minor, peer_patch)
 
     float connected_at;
     float spawned_at;
@@ -107,9 +151,13 @@ typedef struct {
     double next_recon_at;          // net_time() of the next periodic RECON ("l", NET_RECON_SEND_HZ)
     SocialAssembly social;         // social hub request being reassembled (shared/include/social.h)
     SocialAssembly voice;          // voice clip being reassembled (shared/include/voice.h, io_vc)
+    SocialAssembly voice_v7;       // WP-E: a NET_PACKET_VOICE_V7 clip being reassembled (v7 "vc" with channel)
 
     Player *player;
     ServerAccount acct;            // backend account + match stats (server/src/accounts.c)
+    // WP-C: v7 player.custVals are never reset, but KN frees the players at every map change: the
+    // connection keeps them across rounds (net_free_players / net_spawn_client)
+    TriggerValueSet custom_values;
 } ClientConnection;
 
 typedef struct {
@@ -120,20 +168,56 @@ typedef struct {
     int next_client_id;
     unsigned int used_player_numbers;
     float now;
+    double tick_wall;              // CLOCK_MONOTONIC seconds when the running/last game_tick started
     pthread_mutex_t lock;
 
     ServerConfig config;
     Game game;
 } Server;
 
-extern Replxx *g_replxx;
 extern Server *g_server;
 
-ReplxxActionResult cli_sigint(int, void*);
-void cli_main();
+// A connection's byte transport: TCP (server/src/net_tcp.c), UDP (net_udp.c) or the
+// in-process sandbox (sandbox.c). Every hook runs with g_server->lock held unless noted.
+typedef struct ServerTransport {
+    const char *name;
+    // Read what arrived for the connection and hand each whole packet to net_handle_packet().
+    // Returns 0 once the connection was removed (net_handle_packet returned 0, or the peer
+    // is gone and the transport called net_remove_client), else 1.
+    int (*poll)(ClientConnection *client);
+    // Send one tick's whole frames ([type, length hi, length lo, payload]...) to fd.
+    void (*send_frames)(int fd, const uint8_t *frames, size_t length);
+    void (*close)(int fd);
+    // server_time() when the data carrying the latest PONG / INPUT of fd arrived, 0 unknown.
+    double (*pong_received_at)(int fd);
+    double (*input_received_at)(int fd);
+    // Send whatever is queued for every peer now (end of tick), NULL when sends are immediate.
+    void (*flush)(void);
+} ServerTransport;
 
-void net_main();
-void net_cleanup();
+// Transports whose flush runs at the end of every tick (net_broadcast_states).
+void server_transport_register(const ServerTransport *transport);
+void server_transport_unregister(const ServerTransport *transport);
+void server_transport_flush_all(void);
+
+// The server's wall clock (seconds): CLOCK_MONOTONIC, or the sandbox's own clock
+// (server_set_clock) so an in-process server follows the client's frame time.
+double server_time(void);
+void server_set_clock(double (*clock)(void)); // NULL = CLOCK_MONOTONIC
+
+// Krunker's game hooks (GameHooks.send / next_round / respawn / reward / alloc_uid) on
+// g_server->game. Caller holds g_server->lock.
+void net_install_game_hooks(void);
+// Every connection's pending packets through net_handle_packet, then the kicks the chat
+// commands queued. Caller holds g_server->lock (server_bin's net thread, the sandbox step).
+void net_poll_clients(void);
+int net_handle_packet(ClientConnection*, const NetPacket*); // 0 = the client was removed
+void net_add_client(ClientConnection*); // takes a copy; caller holds g_server->lock
+
+// One server tick (main.c's loop body, the sandbox step): g_server->now / tick_wall, bot
+// slots, game_tick, accounts_tick, idle kicks, the per-tick broadcast. Caller holds the lock.
+void server_core_tick(float now, float delta, double tick_wall);
+
 void net_broadcast_states();
 void net_check_idle_clients(float);
 void net_remove_client(ClientConnection*); // disconnect + free; caller holds g_server->lock

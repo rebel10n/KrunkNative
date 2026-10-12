@@ -1,0 +1,21 @@
+const { GAME, hook, done, S, BC, L } = require('./prelude.js');
+const UTILS = require('./utils.js');
+const o = { five: '5', n: 2 };
+hook(() => {
+  const e = 'é';
+  const smile = '😀';
+  GAME.log(L(e), L(smile), L('😀'), L(''), L('abc') + 1);
+  GAME.log(smile === '😀', 'a' + 'b' + 'c', 'x' + S(1.5) + 'y', 'tab\there');
+  const w = 'héllo';
+  GAME.log(w[BC(w, 0)], w[BC(w, 1)], w[BC(w, 4)], L(smile[BC(smile, 0)]), smile[BC(smile, 0)] === '\ud83d');
+  GAME.log('a' < 'b', 'B' < 'a', 'é' > 'z', '😀' < '￿', 'abc' < 'abd', 'ab' < 'abc', '' < 'a', 'b' >= 'b');
+  GAME.log(o.five + 1, o.n + 1, 1 + o.five, o.missing + '!', '' + o.n);
+  GAME.log(UTILS.truncateTxt('Hello World', 5), UTILS.truncateTxt('Hello', 5), UTILS.truncateTxt('Hello World', 5, true));
+  GAME.log(UTILS.truncateTxt('Hello World', 8, true, 2), UTILS.truncateTxt('Hello World', 'x'), UTILS.truncateTxt('😀😀😀', 3, true));
+  GAME.log(UTILS.replaceText('a-b-c', '-', '+'), UTILS.replaceText('abc', 'b', '[$&$$$`$\']'), UTILS.replaceText('abc', '', '^'), UTILS.replaceText('abc', 'z', 'y'));
+  GAME.log(UTILS.textContains('keypad3', 'key'), UTILS.textContains('abc', 'd'), UTILS.textContains(12345, 34));
+  GAME.log(UTILS.toLower('HeLLo ÉÀ'), UTILS.toUpper('straße ñ'), UTILS.toLower(5), UTILS.toUpper(''));
+  GAME.log(S([1, 2, 3]), S(['a', 'b']), S([{}]), S(true), S([[1], []]));
+  GAME.log('q"uote', "single 'q'", 'back\\slash', 'nl\nx');
+});
+done();

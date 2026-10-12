@@ -9,6 +9,31 @@ import time
 
 HELLO, ENT, SPAWN, INIT, CHAT, ERROR = 1, 3, 4, 2, None, 30
 JOIN, AUTH_CHALLENGE, REDIRECT = 72, 73, 74
+SKINS = 35  # S->C before every SPAWN: uid i + PlayerSkins (primary, secondary, melee) 3i
+
+
+def free_ports(n):
+    """n distinct ports free for both TCP and UDP right now (a server_bin game port is both: the TCP
+    game socket and the UDP transport / server-info query). Tests take their ports from here instead
+    of fixed numbers, so concurrent runs (parallel agents, CI jobs) cannot reach each other's
+    coordinator, servers or rcon."""
+    held, ports = [], []
+    while len(ports) < n:
+        t = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        t.bind(("0.0.0.0", 0))
+        port = t.getsockname()[1]
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            u.bind(("0.0.0.0", port))
+        except OSError:
+            t.close()
+            u.close()
+            continue
+        held += [t, u]
+        ports.append(port)
+    for s in held:
+        s.close()
+    return ports
 
 
 def cstr(s, n):
@@ -36,8 +61,18 @@ class Conn:
     def join(self, client_key="", session="", name="", password="", game_id=""):
         self.send(JOIN, cstr(game_id, 48) + cstr(client_key, 352) + cstr(session, 64) + cstr(name, 32) + cstr(password, 16))
 
-    def ent(self, class_index=0, secondary=-1, cosmetics=(-1, -1, -1, -1, -1, -1, -1), spectate=0, slid=1):
-        self.send(ENT, struct.pack("<ii7iBB", class_index, secondary, *cosmetics, spectate, slid))
+    def ent(self, class_index=0, secondary=-1, cosmetics=(-1, -1, -1, -1, -1, -1, -1), spectate=0, slid=1, spray=None, skins=None,
+            lag_comp=None):
+        """V4 ENT, + spray_index (V5) when spray is given, + weapon skins (primary, secondary, melee) (V6),
+        + float lagComp (ent[11], V7, protocol 1.2) when lag_comp is given."""
+        payload = struct.pack("<ii7iBB", class_index, secondary, *cosmetics, spectate, slid)
+        if spray is not None or skins is not None or lag_comp is not None:
+            payload += struct.pack("<i", spray or 0)
+        if skins is not None or lag_comp is not None:
+            payload += struct.pack("<3i", *(skins if skins is not None else (-1, -1, -1)))
+        if lag_comp is not None:
+            payload += struct.pack("<f", lag_comp)
+        self.send(ENT, payload)
 
     def read(self, until=None, timeout=5.0):
         """Reads packets for up to timeout s; returns the first matching `until` type (or None)."""
@@ -78,6 +113,17 @@ def spawn_info(payload):
         return None
     v = struct.unpack(fmt, payload[: struct.calcsize(fmt)])
     return {"uid": v[0], "is_you": v[1], "name": uncstr(v[12]), "cosmetics": list(v[14:21])}
+
+
+def skins_of(conn, uid):
+    """The last NetSkinsPacket read for uid: [primary, secondary, melee], None when none came."""
+    found = None
+    for t, payload in conn.packets:
+        if t == SKINS and len(payload) == 16:
+            v = struct.unpack("<i3i", payload)
+            if v[0] == uid:
+                found = list(v[1:])
+    return found
 
 
 def error_info(payload):

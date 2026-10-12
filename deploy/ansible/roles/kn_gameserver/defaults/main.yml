@@ -3,18 +3,21 @@
 #   instance n (1-based): port {{ kn_gameserver_first_port }}+n-1, TCP game + UDP
 #   server-info query on the same number; hostname <edge>-<n>.krunk.io.
 # kn_gameserver_first_port / kn_gameserver_count live in group_vars/edges/main.yml
-# (shared with kn_firewall, which opens exactly those ports).
+# (shared with edge_firewall, which opens exactly those ports).
 kn_gameserver_hostname_fmt: "{{ kn_edge_name }}-%d.{{ kn_domain }}"
 # Units are installed but stay disabled/stopped until the finder heartbeat code
 # (server.cfg finder_url) lands in the shipped server_bin: flip to true then.
 kn_gameserver_enabled: false
 # Escape hatch: false keeps a host's units down regardless of kn_gameserver_enabled
-# (e.g. if its game ports cannot be opened). kn_firewall opens them on every edge.
+# (e.g. if its game ports cannot be opened). edge_firewall opens them on every edge.
 kn_gameserver_ports_open: true
 kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
-# v3.1.1 region id (config.regionNames / accounts.region_index); per host in the inventory.
-kn_gameserver_region: us-nj
+# Region id = the 2-letter code the client shows (SV LA CH VA: client/src/ui/servers_ui.c
+# k_regions; accounts.region_index); per host in the inventory.
+kn_gameserver_region: local
 kn_gameserver_max_players: 8
+# In-map billboard text (server.cfg billboard); empty = the engine default "Your Ad Here".
+kn_gameserver_billboard: ""
 # online_mode 1 (accounts verified via auth_url hasJoined) on these instances; the
 # rest are offline-mode (guests welcome, nothing saved).
 kn_gameserver_online_instances: [1]
@@ -31,7 +34,9 @@ kn_gameserver_coordinator_url: "wss://coordinator.{{ kn_domain }}/mm/internal/ws
 # {{ kn_etc_dir }}/secrets.env (role kn_brain) at deploy time, written only into the 0640
 # server-<n>.cfg. Never in git.
 kn_gameserver_secret_host: "{{ groups['central'] | first }}"
-# Online-mode instances stay out of the coordinator pool: kn_brain does not know a node's
-# online_mode yet (no hello field), so /mm/seek-game would send guests there and the
-# server rejects them ("Failed to verify username"). They stay standalone + finder-listed.
-kn_gameserver_coordinator_online_instances: false
+# Online-mode instances join the coordinator pool too: server_bin sends onlineMode in its
+# hello and kn_brain sends only signed-in players there (guests go to the offline-mode
+# instances, services/brain/registry.c). Escape hatch: false keeps them standalone +
+# finder-listed, e.g. when rolling an edge back to a server_bin from before the hello
+# field (the brain would treat it as offline-mode and send guests to it).
+kn_gameserver_coordinator_online_instances: true

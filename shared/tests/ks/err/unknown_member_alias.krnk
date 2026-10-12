@@ -1,0 +1,3 @@
+public action start() {
+    num x = Math.TAU;
+}

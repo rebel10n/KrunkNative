@@ -1,18 +1,20 @@
-// Krunker v3.1.1 social hub (public/social.html + js/social.js, readable source
-// src/social.js and src/ui/social.js in the v3.1.1 tree) ported to C over html_dom.h.
+// Krunker v7.1.4 social hub (public/social.html + js/social.js, readable source
+// src/social.js and src/ui/social.js in the v7.1.4 tree) ported to C over html_dom.h.
 // The page is ui/social.html (imported by tools/ui-import/social_page.py); app_mode.c
 // shows it for APP_MODE_HUB (--hub, the web page social.html, the menu's Hub button and every
 // /social.html link) and calls the AppPage hooks at the bottom of this file.
 //
 // Krunker's hub talks to the matchmaker over its own socket; here the same request /
 // reply frames travel over the game connection as JSON (shared/include/social.h) and the
-// KrunkNative server (or the in-process local server) answers them like the v3.1.1
-// offline server does. KrunkNative has no accounts, so the hub is always a guest:
-// logins are refused by the server, and every view shows what the real page shows a
-// guest for the data the server has (the map catalogue is the server's own map list).
+// KrunkNative server (or the in-process local server) answers them like Krunker's offline
+// server does, or the brain (kn_brain) answers them over its social socket. Without an
+// account every view shows what the real page shows a guest for the data the server has
+// (the map catalogue is the server's own map list).
 //
-// Function names in comments are social.js's (minified) names: updateWindow, io_0,
-// Xa (send "r"), Se (side boxes), La (map cards), windows[0]/windows[1] (maps/mods).
+// Function names in comments are v7 social.js's: updateWindow, io_0, f556 (send "r"),
+// f492 (side boxes), f544 / f545 (map / mod cards), windows[0] / windows[1] (maps / mods),
+// genericPopup / resetPops (every popup is #genericPop with a class since v7). The v3.1.1
+// views v7 dropped (Clan Wars, Tourney, Krunkitis) fall back to the feed.
 #include <app_mode.h>
 #include <audio.h>
 #include <backend.h>
@@ -29,11 +31,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#define timegm _mkgmtime // MinGW has no timegm (same as editor_net.c)
+#endif
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
 
+#include "../viewer/viewer_store.h"
+
 #define HUB_KEY_MAX 128
+#define MARKET_MIN_LVL 15       // config.marketMinLVl (v7.1.4)
+#define TRADE_MIN_LVL 20        // config.tradeMinLvl
 
 // ------------------------------------------------------------------ v3.1.1 data (src/config.js, i18n/en.js)
 
@@ -44,37 +53,24 @@ typedef struct {
     int id;
 } HubFollow;
 
-// config.whoToFol
+// config.whoToFol (v7.1.4)
 static const HubFollow k_who_to_follow[] = {
-    {"Sidney", NULL, "Developer", 201211}, {"Vince", NULL, "Developer", 105683}, {"Tehchy", NULL, "Developer", 289362},
+    {"Sidney", NULL, "Developer", 201211}, {"Vince", NULL, "Developer", 105683},
     {"MoonJuiceAlt", "MoonJuice", "Streamer", 2968503}, {"ImWaspy", NULL, "Streamer", 2593871},
-    {"hey_im_zed", "HeyImZed", "Streamer", 177694}, {"cimota", NULL, "Skin Maker", 7516049},
-    {"Kilfy", NULL, "Skin Maker", 8871318}, {"iSpy", NULL, "Skin Maker", 177694}, {"Nxbulah", NULL, "Skin Maker", 5739887},
-    {"Skriller33", NULL, "Skin Maker", 5068654}, {"Andrii", NULL, "Map Maker", 163429}, {"JavieBhop", NULL, "Map Maker", 1517556},
-    {"Andrii", NULL, "Map Maker", 163429}, {"Keybi", NULL, "Map Maker", 310968}, {"thejavi99", NULL, "Map Maker", 1498591},
-    {"owOmar", NULL, "Mod Maker", 5461278}, {"siktis", NULL, "Mod Maker", 5746131}, {"DukeV", NULL, "Map Maker", 943615},
-    {"Chwoubaka", NULL, "Mod Maker", 4927907}, {"PhilZ", NULL, "Youtuber", 2378875},
-    {"FrostyWolfTTV", "FrostyWolf", "Streamer", 5090891}, {"JamemesG", NULL, "E-Sports", 3524000},
-    {"jcStani", NULL, "E-Sports", 6895308}, {"COLOR", NULL, "E-Sports", 164485}, {"roadman", NULL, "E-Sports", 241773},
-    {"revzi", NULL, "E-Sports", 8345163}, {"Mosswi", NULL, "Staff", 2768744}, {"wingmangod69", "Wingman", "E-Sports", 2449631},
-    {"Swixie", NULL, "Streamer", 5720620}, {"QuackyTTV", "Quacky", "Streamer", 3742667}, {"Highnoon", NULL, "Support", 361086},
-    {"StremZ", NULL, "Streamer", 5045705},
+    {"cimota", NULL, "Skin Maker", 7516049}, {"Kilfy", NULL, "Skin Maker", 8871318}, {"iSpy", NULL, "Skin Maker", 177694},
+    {"Nxbulah", NULL, "Skin Maker", 5739887}, {"Skriller33", NULL, "Skin Maker", 5068654}, {"Andrii", NULL, "Map Maker", 163429},
+    {"JavieBhop", NULL, "Map Maker", 1517556}, {"Keybi", NULL, "Map Maker", 310968}, {"siktis", NULL, "Mod Maker", 5746131},
+    {"DukeV", NULL, "Map Maker", 943615}, {"Chwoubaka", NULL, "Mod Maker", 4927907}, {"Swixie", NULL, "Streamer", 5720620},
+    {"QuackyTTV", "Quacky", "Streamer", 3742667}, {"Highnoon", NULL, "Support", 361086}, {"eskrr", NULL, "Map Maker", 383703},
 };
 #define WHO_TO_FOLLOW_COUNT (sizeof(k_who_to_follow) / sizeof(k_who_to_follow[0]))
 
-static const char *const k_social_regions[] = {"All Regions", "Oceania", "Asia", "Europe", "Americas"};
+static const char *const k_social_regions[] = {"All Regions", "Oceania", "Asia", "Europe", "North America", "South America"};
 
-// config.mapTabs / config.modTabs: {search, sendID, noPages} per tab index (6 entries; the
-// page's tab buttons are indexed differently, which Krunker's page does too).
-typedef struct {
-    int search, send_id, no_pages;
-} HubTab;
-static const HubTab k_list_tabs[6] = {{0, 0, 0}, {0, 0, 1}, {0, 0, 0}, {0, 1, 0}, {0, 1, 0}, {1, 0, 0}};
-
-// navigation buttons (Za) and the pages without one ($a)
-static const char *const k_nav_pages[] = {"leaders", "mods", "maps", "market", "clanwars", "feed"};
-static const char *const k_sub_pages[] = {"itemsales", "clan", "map", "mod", "search", "profile", "tourney"};
-static const char *const k_market_queries[] = {"market", "inventory", "sales", "stats", "trades"};
+// navigation buttons (vA177) and the pages without one (vA178)
+static const char *const k_nav_pages[] = {"leaders", "mods", "maps", "market", "feed", "items"};
+static const char *const k_sub_pages[] = {"itemsales", "clan", "map", "mod", "search", "profile", "post", "listing"};
+static const char *const k_market_queries[] = {"market", "inventory", "sales", "stats", "trades", "blackm"}; // config.marketQueries
 
 #define STR_MAPS_NONE "No Games found..."       // social.maps.none
 #define STR_MODS_NONE "No Mods found..."        // social.mods.none
@@ -84,28 +80,40 @@ static const char *const k_market_queries[] = {"market", "inventory", "sales", "
 #define STR_MARKET_LOGIN "You must be logged in." // social.market.login
 #define STR_MARKET_FAILED "Failed. Try Again"   // social.market.failed
 
-// ------------------------------------------------------------------ settings (re = {...})
+// ------------------------------------------------------------------ settings (vO78 = {...})
 
-typedef enum { SET_SELECT, SET_SLIDER, SET_SWITCH, SET_HIDDEN } HubSettingKind;
+typedef enum { SET_SELECT, SET_SLIDER, SET_SWITCH, SET_HIDDEN, SET_URL } HubSettingKind;
 
 typedef struct {
     const char *key;
-    const char *name;   // en.js text of re[key].name
+    const char *name;   // en.js text of vO78[key].name
+    const char *info;   // vO78[key].info ("" = none)
     HubSettingKind kind;
     double def, min, max, step;
-    int hide;           // -1 = no `hide` field, 0/1 = re[key].hide
+    int hide;           // -1 = no `hide` field, 0/1 = vO78[key].hide
     double val;
+    char str[256];      // SET_URL: the value (background image URL)
 } HubSetting;
 
-enum { HS_REGION, HS_SCALE_UI, HS_UI_SCALING, HS_RARITY_ANIM, HS_SHOW_PFP, HS_SOUND, HS_COUNT };
+enum {
+    HS_REGION, HS_SCALE_UI, HS_UI_SCALING, HS_RARITY_ANIM, HS_SHOW_PFP, HS_SHOW_TRADE_MSG, HS_HIDE_NON_TRADE,
+    HS_SOUND, HS_AMBIENT_VOLUME, HS_UI_VOLUME, HS_MENU_SATURATION, HS_MENU_HUE, HS_BACKGROUND, HS_COUNT
+};
 
 static HubSetting g_settings[HS_COUNT] = {
-    {"region", "Region Stats", SET_SELECT, 0, 0, 0, 0, -1, 0},
-    {"scaleUI", "UI Scale", SET_SLIDER, 0.7, 0.1, 1, 0.1, -1, 0},
-    {"uiScaling", "UI Scale", SET_HIDDEN, 1, 0, 0, 0, 1, 0},
-    {"disableRarityAnim", "Disable Rarity Animations", SET_SWITCH, 0, 0, 0, 0, -1, 0},
-    {"showPfp", "Show Profile Pictures", SET_SWITCH, 1, 0, 0, 0, -1, 0},
-    {"sound", "Master Volume", SET_SLIDER, 1, 0, 1, 0.1, -1, 0},
+    {"region", "Region Stats", "", SET_SELECT, 0, 0, 0, 0, -1, 0, ""},
+    {"scaleUI", "UI Scale", "", SET_SLIDER, 0.7, 0.1, 1, 0.1, -1, 0, ""},
+    {"uiScaling", "UI Scale", "", SET_HIDDEN, 1, 0, 0, 0, 1, 0, ""},
+    {"disableRarityAnim", "Disable Rarity Animations", "", SET_SWITCH, 0, 0, 0, 0, -1, 0, ""},
+    {"showPfp", "Show Profile Pictures", "", SET_SWITCH, 1, 0, 0, 0, -1, 0, ""},
+    {"showTradeMsg", "Show Trade Messages", "", SET_SWITCH, 1, 0, 0, 0, -1, 0, ""},
+    {"hideNonTrade", "Hide Non-Tradable Skins", "", SET_SWITCH, 0, 0, 0, 0, -1, 0, ""},
+    {"sound", "Master Volume", "", SET_SLIDER, 1, 0, 1, 0.01, -1, 0, ""},
+    {"ambientVolume", "Ambient Volume", "Background sound volume", SET_SLIDER, 1, 0, 1, 0.01, -1, 0, ""},
+    {"uiVolume", "UI Volume", "Menu interface volume", SET_SLIDER, 1, 0, 1, 0.01, -1, 0, ""},
+    {"menuSaturation", "Saturation (UI)", "Increase color saturation for menu", SET_SLIDER, 1, 0, 3, 0.1, -1, 0, ""},
+    {"menuHue", "Color Hue (UI)", "Shift colors in-menu", SET_SLIDER, 0, 0, 100, 5, -1, 0, ""},
+    {"background", "Background Image", "", SET_URL, 0, 0, 0, 0, -1, 0, ""},
 };
 
 // ------------------------------------------------------------------ state
@@ -118,9 +126,11 @@ typedef struct {
     int has_dat;
 } HubListData;
 
+#define HUB_LIST_TABS 13 // config.mapTabs.length (modTabs has 7)
 typedef struct {
     int tab_index;
-    HubListData data[8];
+    HubListData data[HUB_LIST_TABS];
+    cJSON *home_rows;  // listData[home].list: the featured card's pick (mods); maps: the featured list (v3540)
 } HubList;          // windows[0] (maps) / windows[1] (mods)
 
 typedef struct {
@@ -145,9 +155,12 @@ typedef struct {
     int region;             // V
     double ui_scale_b;      // B
     int ui_scaling;         // D
-    int rarity_anim;        // j
-    int show_pfp;           // F
+    int rarity_anim;        // v3530
+    int show_pfp;           // v3531
+    int show_trade_msg;     // v3532
+    int hide_non_trade;     // v3533
     double volume;
+    double ambient_volume, ui_volume;
 
     HubList maps, mods;
     uint32_t next_id;
@@ -223,6 +236,18 @@ static void sb_append_js_escape(StrBuf *sb, const char *s) {
     }
 }
 
+// UTILS.compareString-like case-insensitive "contains"
+static int contains_ci_str(const char *hay, const char *needle) {
+    if (!hay || !needle) return 0;
+    const size_t n = strlen(needle);
+    for (const char *p = hay; *p; p++) {
+        size_t i = 0;
+        while (i < n && p[i] && tolower((unsigned char) p[i]) == tolower((unsigned char) needle[i])) i++;
+        if (i == n) return 1;
+    }
+    return !n;
+}
+
 static int rand_int(const int lo, const int hi) {
     return lo + (int) ((double) rand() / ((double) RAND_MAX + 1.0) * (hi - lo + 1));
 }
@@ -276,13 +301,56 @@ static cJSON *str_or_null(const char *s) {
 
 // ------------------------------------------------------------------ popups
 
+// The market filter / sort panels keep their state across popups (v7 saves #genericPop's
+// innerHTML in resetPops when it holds one: v3528 / v3527); here the checkbox and field
+// values are read back into these before the popup goes.
+typedef struct {
+    int built;
+    int checked[3][40];  // [rarity | weapon | type][index]
+    char text[128], season[8], order[8];
+    int missing;
+} HubFilterState;
+static HubFilterState g_filter_state[2]; // 0 filter (market search), 1 sort (inventory)
+static void filter_state_save(int sort);
+
+static void reset_genericpop_state(void) {
+    const HtmlElem pop = el("genericPop");
+    if (!pop) return;
+    if (html_dom_has_class(pop, "sortPop")) filter_state_save(1);
+    if (html_dom_has_class(pop, "filterPop")) filter_state_save(0);
+}
+
 // resetPops()
 static void reset_pops(void) {
-    static const char *const pops[] = {"popupContent", "filterPop", "sortPop", "tradePop", "settingsPop", "followPop",
-                                       "offerPop", "giftPop", "flagPop", "verifyPop", "reportPop", "loginPop",
-                                       "confListPop", "confQSPop", "confOfferPop", "confSubmitPop", "publishPop"};
     set_display("popupHolder", "block");
-    for (size_t i = 0; i < sizeof(pops) / sizeof(pops[0]); i++) set_display(pops[i], "none");
+    set_display("popupContent", "none");
+    set_display("giftPop", "none");
+    reset_genericpop_state();
+    const HtmlElem pop = el("genericPop");
+    if (pop) {
+        html_dom_set_display(pop, "none");
+        html_dom_remove_attr(pop, "class");
+        html_dom_set_html(pop, "");
+    }
+    set_display("itemViewPop", "none");
+}
+
+// clearPops()
+static void clear_pops(void) {
+    reset_pops();
+    set_display("popupHolder", "none");
+}
+
+// genericPopup(html, cls, style): every v7 popup (settings, login, filters, confirmations,
+// responses) is #genericPop with its class.
+static void generic_popup(const char *html, const char *cls, const char *style) {
+    reset_pops();
+    const HtmlElem pop = el("genericPop");
+    if (!pop) return;
+    if (cls && *cls) html_dom_set_attr(pop, "class", cls);
+    html_dom_set_attr(pop, "style", style ? style : "");
+    html_dom_set_html(pop, html ? html : "");
+    html_dom_set_display(pop, "block");
 }
 
 // showPopup() with no item: closes the popup (popupBack's onclick).
@@ -293,11 +361,8 @@ static void show_popup_none(void) {
     set_display("popupContent", "block");
 }
 
-// io_po(e, a, t)
+// io_po(e, a, t): genericPopup(..., "responsePop")
 static void io_po(const int success, const char *text) {
-    reset_pops();
-    set_display("popupContent", "block");
-    set_style("popupContent", "width", "300px");
     StrBuf sb = {0};
     if (success) {
         sb_append(&sb, "<div style='width:100%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#3be354'>done</i></div><div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
@@ -308,37 +373,34 @@ static void io_po(const int success, const char *text) {
     }
     sb_append(&sb, "</div></div>");
     char *html = sb_finish(&sb);
-    set_html("popupContent", html);
+    generic_popup(html, "responsePop", NULL);
     free(html);
 }
 
-// ta(text): the waiting popup
+// f520(text): the waiting popup (genericPopup(..., "loadingPop"))
 static void io_wait(const char *text) {
-    reset_pops();
-    set_style("popupContent", "width", "300px");
-    set_display("popupContent", "block");
     StrBuf sb = {0};
     sb_append(&sb, "<div style='width:100%;text-align:center'><div class='lds-ring'><div></div><div></div><div></div><div></div></div><div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
     sb_append(&sb, text);
     sb_append(&sb, "</div></div>");
     char *html = sb_finish(&sb);
-    set_html("popupContent", html);
+    generic_popup(html, "loadingPop", NULL);
     free(html);
 }
 
 // hideAll(e)
 static void hide_all(const int keep_loading) {
     static const char *const holders[] = {"profileHolder", "searchHolder", "mapsHolder", "modsHolder", "mapHolder",
-                                          "modHolder", "leaderHolder", "virusHolder", "clanwarsHolder", "feedHolder",
-                                          "adBox", "tourneyHolder", "marketHolder", "itemsalesHolder", "clanHolder",
-                                          "popupHolder", "averageCost", "totalSold", "chatBox"};
+                                          "modHolder", "leaderHolder", "feedHolder", "aBox", "marketHolder",
+                                          "itemsHolder", "itemsalesHolder", "listingHolder", "clanHolder", "popupHolder",
+                                          "averageCost", "totalSold", "chatBox", "itemViewPop"};
     if (!keep_loading) set_display("loadMessage", "block");
     for (size_t i = 0; i < sizeof(holders) / sizeof(holders[0]); i++) set_display(holders[i], "none");
     const HtmlElem tip = el("chartjs-tooltip");
     if (tip) html_dom_remove(tip);
 }
 
-// io_1(text): the error screen (DISCONNECTED)
+// io_error(text, code): the error screen (DISCONNECTED)
 static void io_error(const char *text) {
     if (g_hub.error_shown) return;
     g_hub.error_shown = 1;
@@ -350,6 +412,8 @@ static void io_error(const char *text) {
     set_display("errorDisplay", "flex");
     const HtmlElem title = el("errorTitle");
     if (title) html_dom_set_text(title, text);
+    const HtmlElem code = el("errorCode");
+    if (code) html_dom_set_text(code, "");
 }
 
 // ------------------------------------------------------------------ settings
@@ -358,14 +422,19 @@ static void storage_key(char *out, const size_t n, const char *key) {
     snprintf(out, n, "krs_setngss_%s", key);
 }
 
-// onResize(): the 1700x900 design space times B (scaleUI), when uiScaling is on.
+// f483(): the 1700x900 design space times vLN155 (1 - scaleUI + 1) on #uiBase (v7 scales
+// #uiBase, v3.1.1 scaled <body>), when uiScaling is on. toFixed(3) like the page.
+static void js_fixed3(char *out, const size_t n, const double v) {
+    snprintf(out, n, "%.3f", v);
+}
+
 static void on_resize(void) {
-    const HtmlElem body = html_dom_body();
-    if (!body) return;
+    const HtmlElem base = el("uiBase");
+    if (!base) return;
     if (!g_hub.ui_scaling) {
-        html_dom_set_style(body, "transform", "");
-        html_dom_set_style(body, "width", "");
-        html_dom_set_style(body, "height", "");
+        html_dom_set_style(base, "transform", "");
+        html_dom_set_style(base, "width", "");
+        html_dom_set_style(base, "height", "");
         return;
     }
     float w = 0, h = 0;
@@ -375,26 +444,38 @@ static void on_resize(void) {
     const double n = g_hub.ui_scale_b * 900.0;
     const double i = w / t;
     const double r = h / n;
-    char transform[48], width[32], height[32];
-    // v3.1.1 rounds with toFixed(3): scale(0.579) at 1280 wide, body 2210px -> 1279.6 px,
-    // which the hub references are captured with (full precision shifts text by 1 px).
+    char transform[48], width[32], height[32], num[32];
     if (r < i) {
-        snprintf(transform, sizeof(transform), "scale(%.3f)", r);
-        snprintf(width, sizeof(width), "%.3fpx", w / r);
-        snprintf(height, sizeof(height), "%.0fpx", n);
+        js_fixed3(num, sizeof(num), r);
+        snprintf(transform, sizeof(transform), "scale(%s)", num);
+        js_fixed3(num, sizeof(num), w / r);
+        snprintf(width, sizeof(width), "%spx", num);
+        snprintf(height, sizeof(height), "%.15gpx", n);
     } else {
-        snprintf(transform, sizeof(transform), "scale(%.3f)", i);
-        snprintf(width, sizeof(width), "%.0fpx", t);
-        snprintf(height, sizeof(height), "%.3fpx", h / i);
+        js_fixed3(num, sizeof(num), i);
+        snprintf(transform, sizeof(transform), "scale(%s)", num);
+        snprintf(width, sizeof(width), "%.15gpx", t);
+        js_fixed3(num, sizeof(num), h / i);
+        snprintf(height, sizeof(height), "%spx", num);
     }
-    html_dom_set_style(body, "transform", transform);
-    html_dom_set_style(body, "width", width);
-    html_dom_set_style(body, "height", height);
+    html_dom_set_style(base, "transform", transform);
+    html_dom_set_style(base, "width", width);
+    html_dom_set_style(base, "height", height);
 }
 
 static void request_page(void);
 
-// re[key].set(val)
+// window.bundleFilters(): saturate / hue-rotate on #uiBase
+static void bundle_filters(void) {
+    char f[96] = "";
+    const double sat = g_settings[HS_MENU_SATURATION].val, hue = g_settings[HS_MENU_HUE].val;
+    size_t o = 0;
+    if (sat != 1) o += (size_t) snprintf(f + o, sizeof(f) - o, "saturate(%.15g%%)", sat * 100);
+    if (hue != 0) o += (size_t) snprintf(f + o, sizeof(f) - o, "%shue-rotate(%.15gdeg)", o ? " " : "", hue * 3.6);
+    set_style("uiBase", "filter", f);
+}
+
+// vO78[key].set(val)
 static void setting_apply(const int index) {
     const double v = g_settings[index].val;
     switch (index) {
@@ -418,7 +499,26 @@ static void setting_apply(const int index) {
         case HS_UI_SCALING: g_hub.ui_scaling = v != 0; on_resize(); break;
         case HS_RARITY_ANIM: g_hub.rarity_anim = v == 0; break;
         case HS_SHOW_PFP: g_hub.show_pfp = v != 0; break;
+        case HS_SHOW_TRADE_MSG: g_hub.show_trade_msg = v != 0; break;
+        case HS_HIDE_NON_TRADE: g_hub.hide_non_trade = v != 0; break;
         case HS_SOUND: g_hub.volume = v; break;
+        case HS_AMBIENT_VOLUME: g_hub.ambient_volume = v; break;
+        case HS_UI_VOLUME: g_hub.ui_volume = v; break;
+        case HS_MENU_SATURATION:
+        case HS_MENU_HUE: bundle_filters(); break;
+        case HS_BACKGROUND: {
+            // isURL && !svg, else the default bg_test.png
+            const char *u = g_settings[index].str;
+            const int ok = (!strncmp(u, "http://", 7) || !strncmp(u, "https://", 8)) && !strstr(u, ".svg");
+            StrBuf sb = {0};
+            sb_append(&sb, "url(");
+            sb_append(&sb, ok && strlen(u) > 1 ? u : "./img/backgrounds/bg_test.png");
+            sb_append(&sb, ")");
+            char *bg = sb_finish(&sb);
+            set_style("backgroundImage", "background-image", bg);
+            free(bg);
+            break;
+        }
         default: break;
     }
 }
@@ -436,7 +536,8 @@ static double setting_parse(const HubSetting *s, const char *text) {
 }
 
 static void setting_value_text(const HubSetting *s, char *out, const size_t n) {
-    if (s->kind == SET_SWITCH || s->kind == SET_HIDDEN) snprintf(out, n, "%s", s->val != 0 ? "true" : "false");
+    if (s->kind == SET_URL) snprintf(out, n, "%s", s->str);
+    else if (s->kind == SET_SWITCH || s->kind == SET_HIDDEN) snprintf(out, n, "%s", s->val != 0 ? "true" : "false");
     else js_num(out, n, s->val);
 }
 
@@ -445,19 +546,32 @@ static int setting_index(const char *key) {
     return -1;
 }
 
+// img settings: /\.(jpg|jpeg|png|gif|webp|ico)/ else the default; quotes removed
+static void setting_set_url(HubSetting *s, const char *text) {
+    static const char *const exts[] = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico"};
+    int ok = 0;
+    for (size_t i = 0; text && i < sizeof(exts) / sizeof(exts[0]); i++) ok |= strstr(text, exts[i]) != NULL;
+    size_t o = 0;
+    for (const char *p = ok ? text : ""; *p && o + 1 < sizeof(s->str); p++) {
+        if (*p != '\'' && *p != '"') s->str[o++] = *p;
+    }
+    s->str[o] = 0;
+}
+
 // setSetting(key, value)
 static void set_setting(const char *key, const char *value) {
     const int i = setting_index(key);
     if (i < 0) return;
     HubSetting *s = &g_settings[i];
-    char cleaned[64];
+    char cleaned[256];
     size_t o = 0;
     for (const char *p = value ? value : ""; *p && o + 1 < sizeof(cleaned); p++) {
         if (*p != '<' && *p != '>') cleaned[o++] = *p;
     }
     cleaned[o] = 0;
-    s->val = value ? setting_parse(s, cleaned) : s->val;
-    char text[64], id[96];
+    if (s->kind == SET_URL) setting_set_url(s, value ? cleaned : s->str);
+    else s->val = value ? setting_parse(s, cleaned) : s->val;
+    char text[256], id[96];
     setting_value_text(s, text, sizeof(text));
     snprintf(id, sizeof(id), "slid_%s", key);
     HtmlElem e = el(id);
@@ -475,23 +589,27 @@ static void settings_load(void) {
     for (int i = 0; i < HS_COUNT; i++) {
         HubSetting *s = &g_settings[i];
         s->val = s->def;
-        char skey[64], saved[64];
+        s->str[0] = 0;
+        char skey[64], saved[256];
         storage_key(skey, sizeof(skey), s->key);
-        if (html_storage_get(skey, saved, sizeof(saved)) >= 0) s->val = setting_parse(s, saved);
+        if (html_storage_get(skey, saved, sizeof(saved)) >= 0) {
+            if (s->kind == SET_URL) setting_set_url(s, saved);
+            else s->val = setting_parse(s, saved);
+        }
         setting_apply(i);
     }
 }
 
-// openSettings(): initSocialUI._html.settings.input.* markup, byte for byte.
+// openSettings(): initSocialUI._html.settings.input.* markup (v7 src/ui/social.js), byte for byte.
 static void append_setting_html(StrBuf *sb, const HubSetting *s) {
-    char val[64], min[32], max[32], step[32];
+    char val[256], min[32], max[32], step[32];
     setting_value_text(s, val, sizeof(val));
     js_num(min, sizeof(min), s->min);
     js_num(max, sizeof(max), s->max);
     js_num(step, sizeof(step), s->step);
     switch (s->kind) {
         case SET_SELECT:
-            sb_appendf(sb, "<select onchange='setSetting(\"%s\", this.value)' class='inputGrey2'>\n                       ", s->key);
+            sb_appendf(sb, "<select onchange='setSetting(\"%s\", this.value)' class='inputGrey2'>\n\t\t\t\t\t\t\t", s->key);
             for (size_t i = 0; i < sizeof(k_social_regions) / sizeof(k_social_regions[0]); i++) {
                 // Object.keys(l).map(...) concatenated to a string: joined with ","
                 sb_appendf(sb, "%s<option value='%zu' %s>%s</option>", i ? "," : "", i,
@@ -500,48 +618,56 @@ static void append_setting_html(StrBuf *sb, const HubSetting *s) {
             sb_append(sb, "</select>");
             break;
         case SET_SWITCH:
-            sb_appendf(sb, "<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='setSetting(\"%s\", this.checked)'\n                       %s><span class='slider'></span></label>",
+            sb_appendf(sb, "<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='setSetting(\"%s\", this.checked)'\n\t\t\t\t\t\t\t%s><span class='slider'></span></label>",
                        s->key, s->val != 0 ? "checked" : "");
             break;
         case SET_SLIDER: {
-            const char *style = s == &g_settings[HS_SCALE_UI] ? "width: 180px;" : "";
+            const char *style = s == &g_settings[HS_SCALE_UI] ? "width: 180px" : "";
             if (s == &g_settings[HS_SCALE_UI]) {
-                // switch("uiScaling", re.uiScaling) + slider("scaleUI", this, "width: 180px;")
-                append_setting_html(sb, &(HubSetting) {"uiScaling", "", SET_SWITCH, 0, 0, 0, 0, 0, g_settings[HS_UI_SCALING].val});
+                // switch(vO78.uiScaling) + slider(this)
+                HubSetting sw = g_settings[HS_UI_SCALING];
+                sw.kind = SET_SWITCH;
+                append_setting_html(sb, &sw);
             }
-            sb_appendf(sb, "<input type='number' class='sliderVal' id='slid_input_%s' min='%s' max='%s'\n                       value='%s' onkeypress='return delayExecute(\"%s\", this, undefined)' style='margin-right:0px;border-width:0px'/>\n                       <div class='slidecontainer' style='%s'><input type='range' id='slid_%s' min='%s' max='%s' step='%s'\n                       value='%s' class='sliderM' oninput='setSetting(\"%s\", this.value)'></div>",
+            sb_appendf(sb, "<input type='number' class='sliderVal' id='slid_input_%s' min='%s' max='%s'\n\t\t\t\t\t\t\tvalue='%s' onkeypress='return delayExecute(\"%s\", this, undefined)' style='margin-right:0px;border-width:0px'/>\n\t\t\t\t\t\t\t<div class='slidecontainer' style='margin-top: -8px;%s'><input type='range' id='slid_%s' min='%s' max='%s' step='%s'\n\t\t\t\t\t\t\tvalue='%s' class='sliderM' oninput='setSetting(\"%s\", this.value)'></div>",
                        s->key, min, max, val, s->key, style, s->key, min, max, step, val, s->key);
             break;
         }
+        case SET_URL: // generic(): type "url", placeholder settings.social.bg.paste
+            sb_appendf(sb, "<input type='url' name='url' id='slid_%s' class='inputGrey2' placeholder='Background Image URL'\n\t\t\t\t\t\t\tvalue='", s->key);
+            sb_append_esc(sb, val);
+            sb_appendf(sb, "' oninput='setSetting(\"%s\", this.value)'/>", s->key);
+            break;
         case SET_HIDDEN:
-            sb_append(sb, "undefined"); // re.uiScaling.html() returns undefined
+            sb_append(sb, "undefined"); // vO78.uiScaling.html() returns undefined
             break;
     }
 }
 
 static void open_settings(void) {
-    reset_pops();
-    set_display("settingsPop", "block");
     StrBuf sb = {0};
-    sb_append(&sb, "<div id='settHolder'>");
+    sb_append(&sb, "<div class='setPopHeader'>Settings</div><div id='settHolder'>");
     for (int i = 0; i < HS_COUNT; i++) {
         const HubSetting *s = &g_settings[i];
-        sb_append(&sb, "<div class='settName' title=''");
+        sb_appendf(&sb, "<div class='settName' title='%s'", s->info);
         if (s->hide >= 0) sb_appendf(&sb, "id='%s_div' style='display:%s'", s->key, s->hide ? "none" : "block");
         sb_appendf(&sb, ">%s ", s->name);
+        if (s->kind == SET_URL) sb_appendf(&sb, "<div class='openCollection material-icons' onclick='imagePopup(&quot;%s&quot;)'>collections</div>", s->key);
         append_setting_html(&sb, s);
         sb_append(&sb, "</div>");
     }
+    // openOneTrust(): KrunkNative shows no ads (the button stays, it does nothing)
+    sb_append(&sb, "<div style='background-color: #994cd1!important;font-size: 17px;padding: 5px;border-radius: 4px;text-align: center;margin-top: 10px;color: rgba(255, 255, 255, 1) !important;' onclick='openOneTrust()'>Manage Ad Preferences</div>");
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
-    set_html("settingsPop", html);
+    generic_popup(html, "settingsPop", NULL);
     free(html);
 }
 
-// ------------------------------------------------------------------ side boxes (Se)
+// ------------------------------------------------------------------ side boxes (f492)
 
 static void side_boxes(void) {
-    set_display("adBox", "block");
+    set_display("aBox", "block");
     int picks[WHO_TO_FOLLOW_COUNT];
     int count = (int) WHO_TO_FOLLOW_COUNT;
     for (int i = 0; i < count; i++) picks[i] = i;
@@ -550,23 +676,80 @@ static void side_boxes(void) {
         const int e = rand_int(0, count - 1);
         const HubFollow *f = &k_who_to_follow[picks[e]];
         // src: user-assets.krunker.io/p<id>/profile.png has no picture for these accounts, so
-        // the real page always ends on its onerror fallback, favicon.png (the native engine
+        // the real page always ends on its onerror fallback, player_pfp.png (the native engine
         // runs no onerror): the fallback is the src here.
         (void) f->id;
-        sb_appendf(&sb, "<div class='sideBarItem'><img class='replyPfp pfpOutlW' onerror='this.onerror=null;this.src=\"./img/favicon.png\";'src='./img/favicon.png' /><div class='reqFollH'><a class='menuLink blueLink reqFollN' href='/social.html?p=profile&q=%s'>%s</a><div style='color:rgba(255,255,255,0.4);font-size:12px'>%s</div></div><div class='reqFollB' onclick='instaFollo(&quot;%s&quot;,this)'>Follow</div></div>",
+        sb_appendf(&sb, "<div class='sideBarItem'><img class='replyPfp pfpOutlW' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png' /><div class='reqFollH'><a class='menuLink blueLink reqFollN' href='/social.html?p=profile&q=%s'>%s</a><div style='color:rgba(255,255,255,0.4);font-size:12px'>%s</div></div><div class='reqFollB' onclick='instaFollo(&quot;%s&quot;,this)'>Follow</div></div>",
                    f->name, f->alias ? f->alias : f->name, f->tag, f->name);
-        memmove(&picks[e], &picks[e + 1], (size_t) (count - e - 1) * sizeof(int)); // t.splice(e, 1)
+        memmove(&picks[e], &picks[e + 1], (size_t) (count - e - 1) * sizeof(int)); // splice(e, 1)
         count--;
     }
     char *html = sb_finish(&sb);
     set_html("whoToFolL", html);
     free(html);
-    set_style("leftYTBox", "display", "");
-    // recYTVid.src stays empty: /api/streams has no live stream (n null), the box hides
-    set_style("leftYTBox", "display", "none");
+    set_style("leftBox", "display", "");
+    // recEmbed.src stays empty: no live stream is listed (v3490 null), the box hides
+    set_style("leftBox", "display", "none");
 }
 
 // ------------------------------------------------------------------ maps / mods lists (windows[0], windows[1])
+
+static double parse_time_ms(const cJSON *v);
+static double now_epoch_ms(void);
+
+// config.mapTabs / config.modTabs (v7.1.4). `api` is the /api/maps|mods `index` the
+// KrunkNative server and kn_brain answer (shared/src/social.c, services/brain/creations.c:
+// 0 Popular, 1 Featured, 2 New, 3 Favorites, 4 My Games / My Mods); v7's own index space
+// (Home, the hidden recent/trending lists) has no server of its own.
+typedef struct {
+    const char *n, *txt, *click;
+    int home, search, send_id, no_pages, hide, fav, owned, no_load, api;
+} HubTab;
+
+static const HubTab k_map_tabs[] = {
+    {"Home", "<span class='material-icons material-icons-outlined' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", NULL, 1, 0, 0, 1, 0, 0, 0, 0, 0},
+    {"Popular", NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {"Featured", NULL, NULL, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+    {"New", NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 2},
+    {"Favorites", NULL, NULL, 0, 0, 1, 0, 0, 1, 0, 0, 3},
+    {"My Games", NULL, NULL, 0, 0, 1, 0, 0, 0, 1, 0, 4},
+    {"Search", "<span class='material-icons' style='color:#ffffff;font-size:42px;vertical-align:bottom'>search</span>", NULL, 0, 1, 0, 0, 0, 0, 0, 0, -1},
+    {"Editor", "<span class='material-icons' style='color:#ffffff;font-size:44px;vertical-align:bottom'>construction</span>Editor", "openURL(`./editor.html`)", 0, 0, 0, 0, 0, 0, 0, 0, -1},
+    {"Sandbox", "<span class='material-icons' style='color:#ffffff;font-size:44px;vertical-align:bottom'>castle</span>Sandbox", "openURL(`./?sandbox`)", 0, 0, 0, 0, 0, 0, 0, 0, -1},
+    {"New & Popular", NULL, NULL, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {"All time", NULL, NULL, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {"Trending Now", NULL, NULL, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {"New & Trending", NULL, NULL, 0, 0, 0, 0, 1, 0, 0, 0, 2},
+};
+#define MAP_TAB_COUNT ((int) (sizeof(k_map_tabs) / sizeof(k_map_tabs[0])))
+
+static const HubTab k_mod_tabs[] = {
+    {"Home", "<span class='material-icons-outlined' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", NULL, 1, 0, 0, 1, 0, 0, 0, 0, 1},
+    {"Popular", NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {"New", NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 2},
+    {"Favorites", NULL, NULL, 0, 0, 1, 0, 0, 1, 0, 0, 3},
+    {"My Mods", NULL, NULL, 0, 0, 1, 0, 0, 0, 1, 0, 4},
+    {"Loaded", NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 1, -1},
+    {"Search", "<span class='material-icons' style='color:#ffffff;font-size:42px;vertical-align:bottom'>search</span>", NULL, 0, 1, 0, 0, 0, 0, 0, 0, -1},
+};
+#define MOD_TAB_COUNT ((int) (sizeof(k_mod_tabs) / sizeof(k_mod_tabs[0])))
+
+// config.mapCats / config.mapCatsP
+static const char *const k_map_cats[] = {"Other", "Parkour", "Puzzle", "Trading", "Training", "Social", "Horror", "Adventure",
+                                         "Battle Royale", "Realism", "Roleplay", "Rotation", "Racing", "Raid", "Remake", "NCR",
+                                         "Zombies", "Simulation", "Relaxation", "Action", "Tycoon", "Mini-Games", "Single-player", "Education"};
+#define MAP_CAT_COUNT ((int) (sizeof(k_map_cats) / sizeof(k_map_cats[0])))
+static const struct { const char *n; int i; } k_map_cats_p[] = {
+    {"Action", 1}, {"Parkour", 8}, {"Remake", 4}, {"Zombies", 7}, {"Horror", 0}, {"Realism", 12}, {"Mini-Games", 5},
+    {"Adventure", 2}, {"Single-player", 10}, {"Battle Royale", 9}, {"Relaxation", 3}, {"Simulation", 11}, {"Tycoon", 6}, {"Raid", 13},
+};
+
+static const HubTab *list_tab(const int is_mods, const int tab) {
+    if (is_mods) return tab >= 0 && tab < MOD_TAB_COUNT ? &k_mod_tabs[tab] : NULL;
+    return tab >= 0 && tab < MAP_TAB_COUNT ? &k_map_tabs[tab] : NULL;
+}
+
+static int list_search_id(const int is_mods) { return 6; } // config.mapTabs/modTabs.findIndex(t => t.search)
 
 static void api_request(const char *path, const int index, const int pos, const char *search_type, const char *val) {
     cJSON *params = cJSON_CreateObject();
@@ -584,56 +767,197 @@ static void api_request(const char *path, const int index, const int pos, const 
     hub_send(f);
 }
 
-// La(rows, tab): map cards
-static void append_map_cards(StrBuf *sb, const cJSON *rows, const int tab) {
-    if (!cJSON_IsArray(rows) || !cJSON_GetArraySize(rows)) {
-        sb_append(sb, "<span style='color:rgba(0,0,0,0.4);'>" STR_MAPS_NONE "</span>");
+// API_CLIENT.listMaps(tab, pos, ...) / listMods
+static void list_request(const int is_mods, const int tab, const int pos) {
+    const HubTab *t = list_tab(is_mods, tab);
+    if (t && t->api >= 0) api_request(is_mods ? "/mods" : "/maps", t->api, pos, NULL, NULL);
+}
+
+// UTILS.formatNumYT(n)
+static void format_num_yt(char *out, const size_t n, const double v) {
+    static const char *const suffix[] = {"", "k", "m", "b", "t"};
+    if (!(v >= 1000)) {
+        js_num(out, n, v);
+        return;
     }
+    char digits[64];
+    js_num(digits, sizeof(digits), v);
+    int l = (int) (strlen(digits) / 3);
+    if (l > 4) l = 4;
+    double val = 0;
+    for (int p = 2; p >= 1; p--) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.*g", p, v / pow(1000.0, l));
+        val = atof(buf);
+        js_num(buf, sizeof(buf), val);
+        int len = 0;
+        for (const char *c = buf; *c; c++) len += isalnum((unsigned char) *c) || *c == ' ';
+        if (len <= 2) break;
+    }
+    if (fmod(val, 1.0) != 0) snprintf(out, n, "%.1f%s", val, suffix[l]);
+    else snprintf(out, n, "%.0f%s", val, suffix[l]);
+}
+
+// The row field aliases f544 / f545 accept (dte / mna / mid / ctn / vte, ...)
+static const char *row_str2(const cJSON *r, const char *a, const char *b) {
+    const char *v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, a));
+    if (!v && b) v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, b));
+    return v;
+}
+
+static double row_num2(const cJSON *r, const char *a, const char *b) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(r, a);
+    if (!v && b) v = cJSON_GetObjectItemCaseSensitive(r, b);
+    if (cJSON_IsNumber(v)) return v->valuedouble;
+    if (cJSON_IsString(v)) return atof(v->valuestring);
+    return 0;
+}
+
+static double row_age_days(const cJSON *r, const char *a, const char *b) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(r, a);
+    if (!v && b) v = cJSON_GetObjectItemCaseSensitive(r, b);
+    const double born = parse_time_ms(v);
+    return born > 0 ? (now_epoch_ms() - born) / 86400000.0 : -1;
+}
+
+static void shuffle_rows(cJSON *rows) {
+    for (int m = cJSON_GetArraySize(rows); m-- > 0;) { // UTILS.shuffleArray
+        const int p = rand_int(0, m);
+        if (p == m) continue;
+        cJSON *a = cJSON_DetachItemFromArray(rows, m);
+        cJSON *b = cJSON_DetachItemFromArray(rows, p);
+        cJSON_InsertItemInArray(rows, p, a);
+        cJSON_InsertItemInArray(rows, m, b);
+    }
+}
+
+// f544(rows, tab): map cards (tab 0 = Home: shuffled, "Popular Categories" first)
+static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
+    if (!cJSON_IsArray(rows_in) || !cJSON_GetArraySize(rows_in)) sb_append(sb, "<span style='color:rgba(0,0,0,0.4);'>" STR_MAPS_NONE "</span>");
+    if (!cJSON_IsArray(rows_in)) return;
+    const HubTab *cfg = list_tab(0, tab);
+    cJSON *rows = cJSON_Duplicate(rows_in, 1);
+    if (tab == 0) {
+        shuffle_rows(rows);
+        sb_append(sb, "<div class='mapListCat'>Popular Categories</div>");
+        StrBuf cats = {0};
+        for (size_t i = 0; i < sizeof(k_map_cats_p) / sizeof(k_map_cats_p[0]); ++i) {
+            int idx = 0;
+            for (int c = 0; c < MAP_CAT_COUNT; c++) if (!strcmp(k_map_cats[c], k_map_cats_p[i].n)) idx = c;
+            sb_appendf(&cats, "<div class='mapListItem' style='width:450px;height:130px;'><div class='mapLICat' onclick='windows[0].switchTab(7);mpCat.selectedIndex=%d;windows[0].searchMaps();' style='background:url(./img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
+                       idx + 1, k_map_cats_p[i].i, k_map_cats_p[i].n);
+        }
+        char *c = sb_finish(&cats);
+        sb_appendf(sb, "<div class='mapCatScrl'>%s</div>", c);
+        free(c);
+    }
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const char *last_cat = NULL;
     const cJSON *r;
     cJSON_ArrayForEach(r, rows) {
-        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "map_name"));
-        const char *creator = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "creatorname"));
-        const char *mod_url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "mod_url"));
-        const char *mod_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "mod_id"));
-        const char *image = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "map_image"));
-        const double map_id = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "map_id"));
-        const double fund = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "fund"));
-        const double votes = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "map_votes"));
-        const double plays = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "map_pl"));
-        const double fav = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "fav"));
-        if (!name || !creator) continue;
-        char id[32], fund_s[32], votes_s[32], plays_s[32];
+        const char *name = row_str2(r, "mna", "map_name");
+        const char *creator = row_str2(r, "ctn", "creatorname");
+        if (!name) continue;
+        const char *mod_url = row_str2(r, "mod_url", NULL);
+        const char *mod_id = row_str2(r, "mod_id", NULL);
+        const char *image = row_str2(r, "map_image", NULL);
+        const char *cat = row_str2(r, "category", NULL);
+        const double age = row_age_days(r, "dte", "map_date");
+        const double map_id = row_num2(r, "mid", "map_id");
+        const int fav = row_num2(r, "fav", NULL) != 0 || (cfg && cfg->fav);
+        const int edit = acc && (acc->is_dev || (creator && !strcmp(acc->name, creator) && cfg && cfg->owned));
+        const int del = acc && (acc->is_dev || (creator && !strcmp(acc->name, creator) && cfg && cfg->owned));
+        if (cat && (!last_cat || strcmp(last_cat, cat))) {
+            if (last_cat) sb_append(sb, "</div>");
+            last_cat = cat;
+            sb_appendf(sb, "<div class='mapListCat'>%s</div><div class='mapCatScrl'>", cat);
+        }
+        char id[32], plays[32], fund[32];
         js_num(id, sizeof(id), map_id);
-        comma_number(fund_s, sizeof(fund_s), isnan(fund) ? 0 : fund);
-        comma_number(votes_s, sizeof(votes_s), isnan(votes) ? 0 : votes);
-        comma_number(plays_s, sizeof(plays_s), isnan(plays) ? 0 : plays);
-        const int faved = (!isnan(fav) && fav != 0) || tab == 3;
-        // no map_date from KrunkNative servers: never NEW/UPDATED (age -1)
-        sb_append(sb, "<div class='mapListItem'><div class='creationActions'></div><div class='mapListThumbHolder'><img draggable='false' class='mapListThumb' loading='lazy' src='");
+        format_num_yt(plays, sizeof(plays), row_num2(r, "map_pl", NULL));
+        comma_number(fund, sizeof(fund), row_num2(r, "fund", NULL));
+        sb_append(sb, "<div style='display:inline-block;margin-bottom:20px;vertical-align:top;'><div class='mapListItem'>");
+        if (age >= 0 && age <= 7) {
+            const int upd = row_num2(r, "map_updatecounter", NULL) > 1;
+            sb_appendf(sb, "<div class='mapAgeD' style='background-color:%s'>%s</div>", upd ? "#0080ff" : "#da00ff", upd ? "UPDATED" : "NEW");
+        }
+        sb_append(sb, "<div class='creationActions'>");
+        if (edit) {
+            sb_append(sb, "<span title='Edit' class='material-icons creationAction edit' onclick='openEdit(&quot;");
+            sb_append_js_escape(sb, name);
+            sb_appendf(sb, "&quot;,%s,%s)'>create</span>", id, fund);
+        }
+        if (del) sb_appendf(sb, "<span title='Delete' class='material-icons creationAction del' onclick='deleteCreationConf(%s,0);'>delete_forever</span>", id);
+        if (acc && acc->is_dev) sb_appendf(sb, "<span title='Feature' class='material-icons creationAction%s' onclick='featureCreation(this, %s,0);'>check_circle</span>", row_num2(r, "map_featured", NULL) ? " sel" : "", id);
+        sb_appendf(sb, "<span title='Favorite' class='material-icons creationAction%s' onclick='favoriteM(0, this, %s);'>grade</span></div><div class='mapListThumbHolder'><img draggable='false' class='mapListThumb' loading='lazy' src='", fav ? " sel" : "", id);
         sb_append(sb, image && *image ? image : "./img/noimg.png");
         sb_append(sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' onclick='openMap(&quot;");
         sb_append_js_escape(sb, name);
-        sb_appendf(sb, "&quot;)'/><span class='material-icons favIcon%s' onclick='favoriteM(0, this, %s);'>grade</span>", faved ? " favd" : "", id);
-        sb_appendf(sb, "<div class='mapsVotes' style='top: 51px;right: 9px;' title='KR Bank'>%s<span style='margin-left: 8px;color:#FBC02D;font-size: 12px;'>KR</span></div>", fund_s);
-        sb_appendf(sb, "<div class='mapsVotes' style='top: 75px' title='Total Likes'>%s<span class='material-icons' style='margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;'>thumb_up</span></div>", votes_s);
-        sb_appendf(sb, "<div class='mapsVotes' title='Total Plays'>%s<span class='material-icons' style='margin-left: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;'>videogame_asset</span></div>", plays_s);
+        sb_append(sb, "&quot;)'/>");
+        if (edit) sb_appendf(sb, "<div class='mapsVotes' style='top: 145px;right: 9px;' title='KR Bank'>%s<span style='margin-left: 8px;color:#FBC02D;font-size: 17px;'>KR</span></div>", fund);
         sb_append(sb, "<div class='mapsVotes' title='Live Players' id='pcnt_");
         sb_append_js_escape(sb, name);
-        sb_append(sb, "' style='left: 10px;right:unset'><span class='material-icons' style='margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;'>person</span>0</div></div>");
-        sb_append(sb, "<div style='margin-top:1px'><a href='javascript:;' onclick='openMap(&quot;");
+        // windows[0].playerData: live counts come from custom servers in the matchmaker's game
+        // list; KrunkNative servers list none, every count stays 0
+        sb_append(sb, "' style='left:10px;right:unset;top:145px;'><span class='material-icons' style='margin-right: 8px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top:-5px;font-size:30px;'>person</span>0</div><div class='mapListCrdI'><a href='javascript:;' style='color:#fff !important;margin-left:6px;' onclick='openMap(&quot;");
         sb_append_js_escape(sb, name);
-        sb_appendf(sb, "&quot;,&quot;%s&quot;,&quot;%s&quot;)'/>", mod_url ? mod_url : "", mod_id ? mod_id : "");
+        sb_appendf(sb, "&quot;,&quot;%s&quot;,&quot;%s&quot;)'/>", mod_url ? mod_url : "undefined", mod_id ? mod_id : "undefined");
         sb_append(sb, name);
-        sb_append(sb, "</a></div><div style='margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;'>by <span class='click' onclick='openProfile(&quot;");
-        sb_append(sb, creator);
-        sb_append(sb, "&quot;)' style='color: rgba(0, 0, 0, 0.6);'>");
-        sb_append(sb, creator);
-        sb_append(sb, "</span></div></div>");
+        sb_appendf(sb, "</a><span style='float:right;color:#fff;margin-right:6px;'>%s <span style='color:rgba(255,255,255,0.6)'>Plays</span></span></div></div></div></div>", plays);
+    }
+    cJSON_Delete(rows);
+}
+
+// f545(rows, tab): mod cards
+static void append_mod_cards(StrBuf *sb, const cJSON *rows, const int tab) {
+    if (!cJSON_IsArray(rows) || !cJSON_GetArraySize(rows)) sb_append(sb, "<span style='color:rgba(0,0,0,0.4);'>" STR_MODS_NONE "</span>");
+    if (!cJSON_IsArray(rows)) return;
+    const HubTab *cfg = list_tab(1, tab);
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const char *last_cat = NULL;
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        const char *name = row_str2(r, "mna", "mod_name");
+        const char *creator = row_str2(r, "ctn", "creatorname");
+        if (!name) continue;
+        const char *image = row_str2(r, "mod_image", NULL);
+        const char *cat = row_str2(r, "category", NULL);
+        const double age = row_age_days(r, "dte", "mod_date");
+        const double mod_id = row_num2(r, "mid", "mod_id");
+        const int fav = row_num2(r, "fav", NULL) != 0 || (cfg && cfg->fav);
+        const int own = acc && (acc->is_dev || (creator && !strcmp(acc->name, creator) && cfg && cfg->owned));
+        if (cat && (!last_cat || strcmp(last_cat, cat))) {
+            if (last_cat) sb_append(sb, "</div>");
+            last_cat = cat;
+            sb_appendf(sb, "<div class='mapListCat'>%s</div><div class='mapCatScrl'>", cat);
+        }
+        char id[32], votes[32];
+        js_num(id, sizeof(id), mod_id);
+        format_num_yt(votes, sizeof(votes), row_num2(r, "vte", "mod_votes"));
+        sb_append(sb, "<div class='mapListItem'>");
+        if (age >= 0 && age <= 7) sb_append(sb, "<div class='mapAgeD' style='background-color:#da00ff'>NEW</div>");
+        sb_append(sb, "<div class='creationActions'>");
+        if (own) {
+            sb_append(sb, "<span class='material-icons creationAction edit' onclick='updateMod(&quot;");
+            sb_append_js_escape(sb, name);
+            sb_append(sb, "&quot;);'>edit</span>");
+            sb_appendf(sb, "<span class='material-icons creationAction del' onclick='deleteCreationConf(%s,1);'>delete_forever</span>", id);
+        }
+        if (acc && acc->is_dev) sb_appendf(sb, "<span class='material-icons creationAction%s' onclick='featureCreation(this, %s,1);'>check_circle</span>", row_num2(r, "mod_featured", NULL) ? " sel" : "", id);
+        sb_appendf(sb, "<span title='Favorite' class='material-icons creationAction%s' onclick='favoriteM(1, this, %s);'>grade</span></div><div class='mapListThumbHolder'><img draggable='false' class='mapListThumb' loading='lazy' src='", fav ? " sel" : "", id);
+        sb_append(sb, image && *image ? image : "./img/noimg.png");
+        sb_append(sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' onclick='openMod(&quot;");
+        sb_append_js_escape(sb, name);
+        sb_append(sb, "&quot;)'/><div class='mapListCrdI'><a href='javascript:;' style='color:#fff !important;margin-left:6px;' onclick='openMod(&quot;");
+        sb_append_js_escape(sb, name);
+        sb_append(sb, "&quot;)'/>");
+        sb_append(sb, name);
+        sb_appendf(sb, "</a><span style='float:right;color:#fff;margin-right:6px;'>%s <span style='color:rgba(255,255,255,0.6)'>Likes</span></span></div></div></div>", votes);
     }
 }
 
 static HubListData *list_data(HubList *list, const int tab) {
-    if (tab < 0 || tab >= 8) return NULL;
+    if (tab < 0 || tab >= HUB_LIST_TABS) return NULL;
     return &list->data[tab];
 }
 
@@ -642,98 +966,182 @@ static void list_reset(HubListData *d) {
     memset(d, 0, sizeof(*d));
 }
 
-// windows[n].gen()
-static char *list_gen(HubList *list, const int is_mods) {
+// The listData body of the current tab (both gens): cards + Loading / Load More
+static void list_body(StrBuf *sb, HubList *list, const int is_mods, const HubTab *t) {
     const int tab = list->tab_index;
-    if (tab < 0 || tab >= 6 || k_list_tabs[tab].search) return strdup("");
     HubListData *d = list_data(list, tab);
-    StrBuf sb = {0};
-    if (d->used) {
+    if (d && d->used) {
         if (d->has_dat) {
-            sb_append(&sb, d->dat.data ? d->dat.data : "");
-            if (d->waiting) sb_append(&sb, "<div class='loadMoreW'>Loading...</div>");
-            else if (!k_list_tabs[tab].send_id && !k_list_tabs[tab].no_pages)
-                sb_appendf(&sb, "<div class='loadMoreD' onclick='windows[%d].loadMore(this)'>Load More</div>", is_mods);
+            sb_append(sb, d->dat.data ? d->dat.data : "");
+            if (d->waiting) sb_append(sb, "<div class='loadMoreW'>Loading...</div>");
+            else if (!t->home && !t->send_id && !t->no_pages) sb_appendf(sb, "<div class='loadMoreD' onclick='windows[%d].loadMore(this)'>Load More</div>", is_mods);
         } else {
-            sb_append(&sb, "<div class='loadMoreW'>Loading...</div>");
+            sb_append(sb, "<div class='loadMoreW'>Loading...</div>");
         }
     } else {
-        sb_append(&sb, "<div class='loadMoreW'>Loading...</div>");
-        d->used = 1;
-        d->load_ind = 0;
-        api_request(is_mods ? "/mods" : "/maps", tab, 0, NULL, NULL);
+        sb_append(sb, "<div class='loadMoreW'>Loading...</div>");
+        if (d) {
+            d->used = 1;
+            d->load_ind = 0;
+        }
+        list_request(is_mods, tab, 0);
     }
-    return sb_finish(&sb);
 }
 
+// windows[0].gen()
+static char *maps_gen(void) {
+    HubList *list = &g_hub.maps;
+    const HubTab *t = list_tab(0, list->tab_index);
+    if (!t) t = &k_map_tabs[0];
+    StrBuf tabs = {0};
+    sb_append(&tabs, "<div class='bigMenTabs' style='margin-top:25px'>");
+    for (int i = 0; i < MAP_TAB_COUNT; ++i) {
+        if (k_map_tabs[i].hide) continue;
+        sb_appendf(&tabs, "<div class='bigMenTab%s' onclick='playSelect();", list->tab_index == i ? " bigMenTabA" : "");
+        if (k_map_tabs[i].click) sb_append(&tabs, k_map_tabs[i].click);
+        else sb_appendf(&tabs, "windows[0].switchTab(%d)", i);
+        sb_appendf(&tabs, "' onmouseenter='playTick(0.1);'>%s</div>", k_map_tabs[i].txt ? k_map_tabs[i].txt : k_map_tabs[i].n);
+    }
+    sb_append(&tabs, "</div>");
+    char *tabs_s = sb_finish(&tabs);
+    StrBuf body = {0}, out = {0};
+    if (t->home) {
+        list_body(&body, list, 0, t);
+        char *b = sb_finish(&body);
+        sb_appendf(&out, "<div style='margin-top:15px;margin-bottom:15px;color: #fff;'>%s</div>", tabs_s);
+        // v3540: one of the featured games (API_CLIENT.listMaps(2) at connect) as the big card
+        const int n = cJSON_GetArraySize(list->home_rows);
+        if (n >= 1) {
+            const cJSON *f = cJSON_GetArrayItem(list->home_rows, rand_int(0, n - 1));
+            const char *name = row_str2(f, "mna", "map_name"), *creator = row_str2(f, "ctn", "creatorname");
+            const char *image = row_str2(f, "map_image", NULL), *descr = row_str2(f, "map_description", NULL);
+            char pl[32], vt[32];
+            comma_number(pl, sizeof(pl), row_num2(f, "map_pl", NULL));
+            comma_number(vt, sizeof(vt), row_num2(f, "vte", "map_votes"));
+            sb_append(&out, "<div class='bigMFeatHold' style='background-image:linear-gradient(to right, black, rgba(0, 0, 0, 0.4)),url(");
+            sb_append(&out, image && *image ? image : "./img/noimg.png"); // KrunkNative: the catalogue thumbnail, no user-assets thumb
+            sb_appendf(&out, ");'><div id='bigMFeatName'>%s</div><div id='bigMFeatVbar'><span style='color:#fff;'>%s</span><span class='material-icons' style='margin-top:-8px;margin-left:0px;font-size:46px;vertical-align:middle;color:rgba(255,255,255,0.5);margin-right:10px;'>play_arrow</span>%s<span class='material-icons' style='margin-left:10px;font-size:33px;vertical-align:top;color:rgba(255,255,255,0.5);'>thumb_up</span><div style='color:#7d7d7d;margin-left:20px;margin-top:-12px;display:inline-block;vertical-align:middle;'>by <a target='_blank' href='/social.html?p=profile&q=%s' style='color: #2196F3;'>%s</a></div></div><div id='bigMFeatDesc'>%s</div><div id='bigMFeatIBtn' class='button' onclick='openURL(&quot;/social.html?p=map&q=%s&quot;, 1)' style='color:#fff !important;'>?</div><div id='bigMFeatPBtn' class='btnAnim buttonS' onclick='openURL(&quot;/?play=%s&quot;, 1)' style='color:#fff !important;'>Play Now</div></div>",
+                       name ? name : "", pl, vt, creator ? creator : "", creator ? creator : "", descr ? descr : "undefined", name ? name : "", name ? name : "");
+            // the featured video (config.fetMapVids / map_videolink) is a YouTube iframe: no
+            // embedded video natively, the box stays
+            sb_append(&out, "<div class='bigMFeatVid'></div>");
+        }
+        sb_appendf(&out, "<div id='mapList'>%s</div>", b);
+        free(b);
+        free(tabs_s);
+        return sb_finish(&out);
+    }
+    if (t->search) {
+        sb_append(&body, "<input type='text' id='mpSrch' class='smlInput' placeholder='Game Name or Keyword' onkeydown='if(window.event.keyCode==13)windows[0].searchMaps()' />");
+        sb_append(&body, "<select id='mpCat'><option style='color:#fff' value='-1'>All</option>");
+        for (int i = 0; i < MAP_CAT_COUNT; i++) sb_appendf(&body, "<option style='color:#fff;' value='%d'>%s</option>", i, k_map_cats[i]);
+        sb_append(&body, "</select>");
+        sb_append(&body, "<div class='searchListBtn' onclick='windows[0].searchMaps()'><span class='material-icons' style='color:#fff;font-size:45px;margin-bottom:-30px;line-height:75px'>search</span></div><div style='color:rgba(255,255,255,0.5);margin-top:10px' id='searchResultsMA'></div>");
+    } else {
+        list_body(&body, list, 0, t);
+    }
+    char *b = sb_finish(&body);
+    sb_appendf(&out, "<div style='margin-top:15px;margin-bottom:15px'>%s</div>", tabs_s);
+    if (!strcmp(t->n, "My Games")) sb_append(&out, "<div class='setBodH'><div class='settName'>Publish or Create a Game<a style='float:right' href='./editor.html' target='_blank'>Open Editor</a></div></div>");
+    sb_appendf(&out, "<div id='mapList'>%s</div>", b);
+    free(b);
+    free(tabs_s);
+    return sb_finish(&out);
+}
+
+// windows[1].gen()
+static char *mods_gen(void) {
+    HubList *list = &g_hub.mods;
+    const HubTab *t = list_tab(1, list->tab_index);
+    if (!t) t = &k_mod_tabs[0];
+    StrBuf out = {0}, body = {0};
+    sb_append(&out, "<div style='margin-top:30px;margin-bottom:10px'><div class='bigMenTabs' style='margin-top:25px;'>");
+    for (int i = 0; i < MOD_TAB_COUNT; ++i) {
+        const char *sel = list->tab_index == i ? " bigMenTabA" : "";
+        if (k_mod_tabs[i].no_load) sb_appendf(&out, "<div class='bigMenTab%s' style='background-color: #993299!important;' ' onmouseenter='playTick(0.1);' onclick='playSelect();publishModPopup(true)'>Publish</div>", sel);
+        else sb_appendf(&out, "<div class='bigMenTab%s' onmouseenter='playTick(0.1);' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", sel, i, k_mod_tabs[i].txt ? k_mod_tabs[i].txt : k_mod_tabs[i].n);
+    }
+    sb_append(&out, "</div></div>");
+    if (t->search) sb_append(&body, "<input type='text' id='mdSrch' class='smlInput' placeholder='Mod Name or Keyword' onkeydown='if(window.event.keyCode==13)windows[1].searchMods()' /><div class='searchListBtn' onclick='windows[1].searchMods()'><span class='material-icons' style='color:#fff;font-size:45px;margin-bottom:-30px;line-height:75px'>search</span></div><div style='color:rgba(0,0,0,0.5);margin-top:10px' id='searchResultsMO'></div>");
+    else list_body(&body, list, 1, t);
+    if (t->home) {
+        // listData.list: one of the loaded mods as the big card
+        const int n = cJSON_GetArraySize(list->home_rows);
+        if (n >= 1) {
+            const cJSON *f = cJSON_GetArrayItem(list->home_rows, rand_int(0, n - 1));
+            const char *name = row_str2(f, "mna", "mod_name"), *creator = row_str2(f, "ctn", "creatorname");
+            char vt[32];
+            comma_number(vt, sizeof(vt), row_num2(f, "vte", "mod_votes"));
+            sb_appendf(&out, "<div class='bigMFeatHold' style='background-image:linear-gradient(to right, black, rgba(0, 0, 0, 0.4)),url(.png);'><div id='bigMFeatName' style='top:185px;'>%s</div><div id='bigMFeatVbar' style='top:260px;'>%s<span class='material-icons' style='margin-left:10px;font-size:33px;vertical-align:top;color:rgba(255,255,255,0.5);'>thumb_up</span><div style='color:#7d7d7d;margin-left:20px;margin-top:-12px;display:inline-block;vertical-align:middle;'>by <a style='color: #2196F3;'>%s</a></div></div><div id='bigMFeatPBtn' class='btnAnim' style='top:225px;width:232px' onclick='openMod(&quot;",
+                       name ? name : "", vt, creator ? creator : "");
+            sb_append_js_escape(&out, name ? name : "");
+            sb_append(&out, "&quot;)'>Load Mod <span class='material-icons' style='font-size:50px;color:#fff;vertical-align:middle;margin-top:-16px;margin-left:5px'>move_to_inbox</span></div></div><div class='bigMFeatVid'><div style='color:rgba(255,255,255,0.4);line-height:320px;'>Missing Preview</div></div>");
+            sb_append(&out, "<div class='mapListCat' style='margin-bottom:10px;padding-bottom:10px;margin-top:20px;'>Featured Mods</div>");
+        }
+    }
+    char *b = sb_finish(&body);
+    sb_appendf(&out, "<div style='color:rgba(255,255,255,0.3)' id='modList'>%s</div>", b);
+    free(b);
+    return sb_finish(&out);
+}
+
+// windows[n].update(): mapsHolder / modsHolder.innerHTML = gen()
 static void list_update(const int is_mods) {
-    char *html = list_gen(is_mods ? &g_hub.mods : &g_hub.maps, is_mods);
-    set_html(is_mods ? "modList" : "mapList", html);
+    char *html = is_mods ? mods_gen() : maps_gen();
+    set_html(is_mods ? "modsHolder" : "mapsHolder", html);
     free(html);
-    // windows[0].updatePlayers(): live player counts come from custom servers in the
-    // matchmaker's game list; KrunkNative servers list none, every count stays 0.
 }
 
 // windows[n].switchTab(e, a)
 static void list_switch_tab(const int is_mods, const int tab, const int no_update) {
     HubList *list = is_mods ? &g_hub.mods : &g_hub.maps;
-    if (list->tab_index != tab) {
+    if (list->tab_index != tab && list_tab(is_mods, tab)) {
         list->tab_index = tab;
         if (!no_update) list_update(is_mods);
     }
-    HtmlElem tabs[16];
-    const size_t n = html_dom_query_all(0, is_mods ? "a[id^=mTab_]" : "a[id^=gTab_]", tabs, 16);
-    char want[16];
-    snprintf(want, sizeof(want), "%cTab_%d", is_mods ? 'm' : 'g', tab);
-    for (size_t i = 0; i < n; i++) {
-        char id[16] = "";
-        html_dom_get_attr(tabs[i], "id", id, sizeof(id));
-        html_dom_set_class(tabs[i], "tabSel", !strcmp(id, want));
-    }
 }
 
-// windows[0].mapsLoaded / windows[1].modsLoaded (both write the "none" text into
-// #mapList, as Krunker's modsLoaded does)
-static void list_loaded(const int is_mods, const cJSON *rows, const int tab, const cJSON *error) {
+// windows[0].mapsLoaded / windows[1].modsLoaded for every tab waiting on this API index
+static void list_loaded(const int is_mods, const cJSON *rows, const int api, const cJSON *error) {
     HubList *list = is_mods ? &g_hub.mods : &g_hub.maps;
-    HubListData *d = list_data(list, tab);
-    if (!d || !el("mapList")) return;
-    d->waiting = 0;
-    if (cJSON_IsArray(rows) && cJSON_GetArraySize(rows)) {
-        if (cJSON_IsString(error)) {
-            if (!d->has_dat) {
-                set_html("mapList", error->valuestring);
-                list_reset(d);
+    // the featured list of the maps Home card (v3540: listMaps(2) at connect, shuffled; its own
+    // callback, before the maps window exists)
+    if (!is_mods && api == 1 && cJSON_IsArray(rows) && cJSON_GetArraySize(rows) && !list->home_rows) {
+        list->home_rows = cJSON_Duplicate(rows, 1);
+        shuffle_rows(list->home_rows);
+        const HubTab *t = list_tab(0, list->tab_index);
+        if (t && t->home && el("mapList")) list_update(0);
+    }
+    if (!el(is_mods ? "modList" : "mapList")) return; // `if (mapList)`
+    for (int tab = 0; tab < (is_mods ? MOD_TAB_COUNT : MAP_TAB_COUNT); tab++) {
+        const HubTab *t = list_tab(is_mods, tab);
+        HubListData *d = list_data(list, tab);
+        if (!t || t->api != api || !d || !d->used || (d->has_dat && !d->waiting)) continue;
+        d->waiting = 0;
+        if (cJSON_IsArray(rows) && cJSON_GetArraySize(rows)) {
+            if (cJSON_IsString(error)) {
+                if (!d->has_dat) {
+                    set_html(is_mods ? "modList" : "mapList", error->valuestring);
+                    list_reset(d);
+                }
+                continue;
             }
-            return;
-        }
-        StrBuf sb = {0};
-        if (is_mods) {
-            sb_append(&sb, ""); // KrunkNative servers list no mods
-        } else if (tab == 1) {
-            // UTILS.shuffleArray(e) for Featured
-            cJSON *copy = cJSON_Duplicate(rows, 1);
-            for (int m = cJSON_GetArraySize(copy); m-- > 0;) {
-                const int p = rand_int(0, m);
-                if (p == m) continue;
-                cJSON *a = cJSON_DetachItemFromArray(copy, m);
-                cJSON *b = cJSON_DetachItemFromArray(copy, p);
-                cJSON_InsertItemInArray(copy, p, a);
-                cJSON_InsertItemInArray(copy, m, b);
+            StrBuf sb = {0};
+            if (is_mods) append_mod_cards(&sb, rows, tab);
+            else append_map_cards(&sb, rows, tab);
+            char *cards = sb_finish(&sb);
+            sb_append(&d->dat, cards);
+            d->has_dat = 1;
+            free(cards);
+            if (is_mods && t->home) {
+                cJSON_Delete(list->home_rows);
+                list->home_rows = cJSON_Duplicate(rows, 1);
             }
-            append_map_cards(&sb, copy, tab);
-            cJSON_Delete(copy);
-        } else {
-            append_map_cards(&sb, rows, tab);
+            if (list->tab_index == tab) list_update(is_mods);
+        } else if (!d->has_dat) {
+            set_html(is_mods ? "modList" : "mapList", is_mods ? STR_WIN_MODS_NONE : STR_WIN_MAPS_NONE);
+            list_reset(d);
         }
-        char *cards = sb_finish(&sb);
-        sb_append(&d->dat, cards);
-        d->has_dat = 1;
-        free(cards);
-        if (list->tab_index == tab) list_update(is_mods);
-    } else if (!d->has_dat) {
-        set_html("mapList", is_mods ? STR_WIN_MODS_NONE : STR_WIN_MAPS_NONE);
-        list_reset(d);
     }
 }
 
@@ -748,132 +1156,22 @@ static void list_load_more(const int is_mods, const HtmlElem button) {
     }
     d->waiting = 1;
     d->load_ind += 1;
-    api_request(is_mods ? "/mods" : "/maps", list->tab_index, d->load_ind, NULL, NULL);
+    list_request(is_mods, list->tab_index, d->load_ind);
 }
 
-// windows[n].searchResp(rows) (za)
+// windows[n].searchResp(rows) (f550)
 static void list_search_resp(const int is_mods, const cJSON *rows) {
-    list_switch_tab(is_mods, is_mods ? 5 : 6, 1);
     StrBuf sb = {0};
     if (cJSON_IsArray(rows) && cJSON_GetArraySize(rows)) {
-        if (!is_mods) append_map_cards(&sb, rows, -1);
+        sb_append(&sb, "<div style='height:10px'></div>");
+        if (is_mods) append_mod_cards(&sb, rows, list_search_id(1));
+        else append_map_cards(&sb, rows, list_search_id(0));
     } else {
         sb_append(&sb, is_mods ? STR_WIN_MODS_NONE : STR_WIN_MAPS_NONE);
     }
     char *html = sb_finish(&sb);
-    set_html(is_mods ? "modList" : "mapList", html);
+    set_html(is_mods ? "searchResultsMO" : "searchResultsMA", html);
     free(html);
-}
-
-
-// ------------------------------------------------------------------ clan wars (io_0 "clanwars" + initSocialUI.clanwars)
-
-typedef struct {
-    const char *name;
-    int x, y;
-    int reward_index;        // store skin index of the region's "Clan Wars" reward
-    const char *reward_png;  // its preview (textures/previews/...)
-} HubClanRegion;
-
-// config.clanRegions + store.skins.find(limT == "Clan Wars" && region == name)
-static const HubClanRegion k_clan_regions[] = {
-    {"North America", 140, 180, 1893, "textures/previews/cosmetics/6_9.png"},
-    {"South America", 230, 285, 1899, "textures/previews/melee/melee_18.png"},
-    {"Western Europe", 380, 170, 1898, "textures/previews/cosmetics/2_66.png"},
-    {"Africa", 380, 250, 1896, "textures/previews/cosmetics/1_128.png"},
-    {"Middle East", 430, 210, 1894, "textures/previews/cosmetics/6_8.png"},
-    {"Asia", 530, 210, 1892, "textures/previews/cosmetics/6_10.png"},
-    {"Oceania", 600, 310, 1897, "textures/previews/cosmetics/2_65.png"},
-    {"Eastern Europe", 476, 165, 1895, "textures/previews/cosmetics/1_129.png"},
-};
-#define CLAN_REGION_COUNT ((int) (sizeof(k_clan_regions) / sizeof(k_clan_regions[0])))
-
-static HtmlElem g_dropper_elem; // h.clanwars.droppers.elem: the bouncing arrow
-
-static void clanwars_region_deselect(void) {
-    if (g_dropper_elem) {
-        html_dom_set_style(g_dropper_elem, "transform", "");
-        html_dom_set_class(g_dropper_elem, "bounce", 0);
-    }
-}
-
-// GUI.clanwars.buttons.leader: no clans offline
-static void clanwars_show_leaders(void) {
-    clanwars_region_deselect();
-    set_html("clanwarsInfo", "<div class='regionCard'><div style='margin-bottom:10px;'><span class='regionTitle'>Global Leaders</span></div></div>");
-}
-
-static void clanwars_show_soldiers(void) {
-    clanwars_region_deselect();
-    set_html("clanwarsInfo", "<div class='regionCard'><div style='margin-bottom:10px;'><span class='regionTitle'>Top Soldiers</span></div></div>");
-}
-
-// GUI.clanwars.region.show(name, region): reward + occupying clans (none offline)
-static void clanwars_show_region(const int index) {
-    if (index < 0 || index >= CLAN_REGION_COUNT) return;
-    const HubClanRegion *r = &k_clan_regions[index];
-    StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='regionCard'><div style='margin-bottom:10px;'><span class='regionTitle'>%s</span><div style='float:right;color:rgba(0,0,0,0.3)'>Reward: <div class='rewItemIcon' style='background-image:url(&quot;%s&quot;)' onclick='openSales(%d)'></div><span class='regionKR'> <span style='color:rgba(0,0,0,0.3)'>+</span> 0<span style='color:rgba(0,0,0,0.6)'> KR</span></span></div></div>",
-               r->name, r->reward_png, r->reward_index);
-    sb_append(&sb, "<div class='rEmpty'>No Clans currently occupying this Region</div></div>");
-    char *html = sb_finish(&sb);
-    set_html("clanwarsInfo", html);
-    free(html);
-}
-
-static void clanwars_show(void) {
-    // t = {}: no regions, clans or war timer from the server -> 7 days left, all zero
-    StrBuf sb = {0};
-    sb_append(&sb, "<div class='overlay' id='sea-mask'></div><div class='overlay' id='sea-pseudo'></div><div class='overlay' id='sea-map'></div><div id='clanwarsStats'><div class='cwStatItem' style='font-size:10px;color:var(--yellow);margin-bottom:3px;'>Global Stats</div><div class='cwStatItem' style='font-size:10px;text-align:right;color:var(--yellow)'></div><div class='cwStatItem'>Clans</div><div class='cwStatItem' style='text-align:right'>0</div><div class='cwStatItem'>Soldiers</div><div class='cwStatItem' style='text-align:right'>0</div><div class='cwStatItem'>K.I.A</div><div class='cwStatItem' style='text-align:right'>0</div></div>");
-    // help.show() + buttons.show() (GUI.action keys flattened to one string)
-    sb_append(&sb, "<div id='clanwarsButtons'><div id=\"clanwarsLeaderIcon\" style=\"\" onclick=\"GUI.action('clanwars.buttons.leader', this)\"><div><i class='material-icons' style='color:white'>emoji_events</i></div></div>\n<div id=\"clanwarsPlayerKillsIcon\" style=\"\" onclick=\"GUI.action('clanwars.buttons.kills', this)\"><img src='./img/soldier_0.png' width='20' height='20' style='image-rendering:pixelated;margin:auto;position:absolute;left:0;right:0;top:0;bottom:0'></div></div>");
-    sb_append(&sb, "<div id='clanwarsHelp'><div id=\"clanwarsHelpIcon\" style=\"\" onclick=\"GUI.action('clanwars.help.icon', this)\"><div>?</div></div>\n<div id=\"clanwarsHelpVig\" style=\"display:none\" onclick=\"GUI.action('clanwars.help.vig', this)\"></div><div id='clanwarsHelpWin' style='display:none'><div class='cwHelpHed'>Welcome to Clan Wars</div><div class='cwHelpBod'>Clan Leaders can assign up to 30 Clan Members to different Regions. Once a player is assigned to a Region,\n\t\t\t\t\t\tany kills they get in a pub match will count toward the clans overall kills in that Region.\n\t\t\t\t\t\t<div style='height:16px'></div>If a player runs out of lives (by dying in Pub Matches),\n\t\t\t\t\t\ttheir contract will end and the clan leader has to replace\n\t\t\t\t\t\tthem with another player until the next Clan War.<div style='height:16px'></div>At the end of the\n\t\t\t\t\t\tWar Period, the Clan with the most kills in a specific Region will win all the KR available in that Region.\n\t\t\t\t\t\tThe Clans with the most Kills globally, will also receive special clan tag colors:\n\t\t\t\t\t\t<div class='clanRewH' style='margin-top:20px'># 1 Clan <span style='float:right;' class='rainbowText'>[CLAN]</span></div>\n\t\t\t\t\t\t<div class='clanRewH' style='margin-top:20px'># 2-5 Clan <span style='float:right;color:#eb3437'>[CLAN]</span></div>\n\t\t\t\t\t\t<div class='clanRewH' style='margin-top:20px'># 6-15 Clan <span style='float:right;color:#FBC02D'>[CLAN]</span></div>\n\t\t\t\t\t\t<div class='clanRewH' style='margin-top:20px'># 16-25 Clan <span style='float:right;color:#e834eb'>[CLAN]</span></div>\n\t\t\t\t\t\t<div class='clanRewH' style='margin-top:20px'># 26-50 Clan <span style='float:right;color:#349ceb'>[CLAN]</span></div>\n\t\t\t\t\t\t<div style='height:20px'></div>Remember to have fun and to follow the\n\t\t\t\t\t\t<a style='color:#00a6ff' target='_blank' href='./docs/clan.txt'>Rules</a></div></div></div>");
-    sb_append(&sb, "<div id='dropperHolder'>");
-    for (int i = 0; i < CLAN_REGION_COUNT; i++) {
-        if (i) sb_append(&sb, "\n");
-        sb_appendf(&sb, "<div class=\"dropper\" style=\"transform: translate(%dpx, %dpx)\">\n\t\t\t\t\t\t\t<div class=\"dropperPoint\" onclick=\"GUI.action('clanwars.droppers.%d', this)\"></div>\n\t\t\t\t\t\t\t<div class=\"dropperArrow\" onclick=\"GUI.action('clanwars.droppers.%d', this)\"><div class='dropperArrowBod'>\n\t\t\t\t\t\t\t<div class=\"dropperText\" style=\"color:#fff;height:25px;\"></div>\n\t\t\t\t\t\t\t<i class='material-icons' style='color:white;font-size:30px;transform:translateY(-4px)'>tour</i>\n\t\t\t\t\t\t\t</div></div></div>",
-                   k_clan_regions[i].x, k_clan_regions[i].y, i, i);
-    }
-    sb_append(&sb, "</div><svg><filter id='turbulence' x='0' y='0' width='100%' height='100%'><feTurbulence id='sea-filter' numOctaves='1' seed='2' baseFrequency='0.004'></feTurbulence><feDisplacementMap scale='20' in='SourceGraphic'></feDisplacementMap></filter></svg>");
-    char *html = sb_finish(&sb);
-    set_html("sea", html);
-    free(html);
-    // getRoundTim(604800000): the war ends in 7 days
-    set_html("clanwarsProg", "<div class='xpBar' style='width: calc(100% - 8px);'><div class='xpBarB' style='background-color:var(--yellow);width:100%'></div><span class='xpBarV'>Ends in 7 Days 0 Hour</span></div>");
-    g_dropper_elem = 0;
-    clanwars_show_leaders(); // clanwarsButtons.children[0].onclick()
-}
-
-// GUI.action(key, this)
-static int h_gui_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user;
-    const char *key = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
-    if (!key) return 1;
-    if (!strcmp(key, "clanwars.buttons.leader")) {
-        clanwars_show_leaders();
-    } else if (!strcmp(key, "clanwars.buttons.kills")) {
-        clanwars_show_soldiers();
-    } else if (!strcmp(key, "clanwars.help.icon") || !strcmp(key, "clanwars.help.vig")) {
-        char display[16] = "";
-        const HtmlElem win = el("clanwarsHelpWin");
-        const int shown = win && html_dom_get_style(win, "display", display, sizeof(display)) >= 0 ? strcmp(display, "none") != 0 : 1;
-        set_style("clanwarsHelpWin", "display", shown ? "none" : "");
-        set_style("clanwarsHelpVig", "display", shown ? "none" : "");
-    } else if (!strncmp(key, "clanwars.droppers.", 18)) {
-        // type "dropper": the clicked dropper's arrow bounces, then the region card
-        const HtmlElem target = ev ? ev->target : 0;
-        const HtmlElem dropper = target ? html_dom_closest(target, ".dropper") : 0;
-        HtmlElem arrow = dropper ? html_dom_first_child(dropper) : 0;
-        if (arrow) arrow = html_dom_next(arrow); // children[1]: .dropperArrow
-        clanwars_region_deselect();
-        if (arrow) {
-            html_dom_set_style(arrow, "transform", "scale(1.0) translateY(-41px)");
-            html_dom_set_class(arrow, "bounce", 1);
-            g_dropper_elem = arrow;
-        }
-        clanwars_show_region(atoi(key + 18));
-    }
-    return 1;
 }
 
 // ------------------------------------------------------------------ pages
@@ -904,16 +1202,22 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
 static void update_window(const char *e, const char *a, const char *t, const char *n, const char *r, const int s) {
     if (!s) {
         if (r && *r) hub_sound(r, 0.5f);
-        // market ambience loops (ambient_4 / ambient_8) are not played
+        // the market ambience loops (ambient_4 / ambient_8) are not played
         hide_all(0);
     }
-    snprintf(g_hub.v, sizeof(g_hub.v), "%s", e && *e ? e : "feed");
+    // v3.1.1 pages v7.1.4 dropped (no holder, no nav button: v7's updateWindow would throw on
+    // `document.getElementById(v).style`): the feed instead
+    const char *page = e && *e ? e : "feed";
+    if (!str_in(page, k_nav_pages, sizeof(k_nav_pages) / sizeof(k_nav_pages[0])) &&
+        !str_in(page, k_sub_pages, sizeof(k_sub_pages) / sizeof(k_sub_pages[0]))) page = "feed";
+    snprintf(g_hub.v, sizeof(g_hub.v), "%s", page);
     snprintf(g_hub.k, sizeof(g_hub.k), "%s", t ? t : "");
     snprintf(g_hub.x, sizeof(g_hub.x), "%s", n ? n : "");
     snprintf(g_hub.b, sizeof(g_hub.b), "%s", a ? a : "");
     snprintf(g_hub.ja_k, sizeof(g_hub.ja_k), "%s", g_hub.k);
     if (!g_hub.b[0]) {
-        if (!strcmp(g_hub.v, "market") || !strcmp(g_hub.v, "itemsales")) snprintf(g_hub.b, sizeof(g_hub.b), "market");
+        if (!strcmp(g_hub.v, "market") || !strcmp(g_hub.v, "itemsales") || !strcmp(g_hub.v, "listing")) snprintf(g_hub.b, sizeof(g_hub.b), "market");
+        else if (!strcmp(g_hub.v, "items")) snprintf(g_hub.b, sizeof(g_hub.b), "items");
         else if (!strcmp(g_hub.v, "leaders")) snprintf(g_hub.b, sizeof(g_hub.b), "player_score");
         else if (!strcmp(g_hub.v, "maps")) snprintf(g_hub.b, sizeof(g_hub.b), "votes");
         else if (!strcmp(g_hub.v, "profile") && g_hub.logged_in && account_get()) snprintf(g_hub.b, sizeof(g_hub.b), "%s", account_get()->name); // b = q
@@ -924,31 +1228,23 @@ static void update_window(const char *e, const char *a, const char *t, const cha
         char id[96];
         for (size_t i = 0; i < sizeof(k_market_queries) / sizeof(k_market_queries[0]); i++) {
             snprintf(id, sizeof(id), "m_%s", k_market_queries[i]);
-            set_style(id, "background-color", "rgba(0, 0, 0, 0.2)");
+            if (el(id)) html_dom_set_class(el(id), "bigMenTabA", 0);
         }
         snprintf(id, sizeof(id), "m_%s", g_hub.b);
-        set_style(id, "background-color", "rgba(0, 0, 0, 0.5)");
+        if (el(id)) html_dom_set_class(el(id), "bigMenTabA", 1);
     }
     snprintf(g_hub.S, sizeof(g_hub.S), "%s_%s", g_hub.v, g_hub.b[0] ? g_hub.b : "null");
     g_hub.has_s = 1;
-    if (!strcmp(g_hub.v, "tourney")) {
-        // fetch(assets /json/weekly.json): no asset server offline -> io_0("tourney", null, null)
-        io_0("tourney", NULL, NULL, NULL);
-    } else if (g_hub.connected && !s) {
-        request_page();
-    }
+    if (g_hub.connected && !s) request_page();
 }
 
 // ------------------------------------------------------------------ brain data views (social.js io_0 branches)
 
-// colors.getClanCol(tag, rank, fallback)
-static const char *clan_col(const char *tag, const int rank, const char *fallback) {
+// COLORS.getClanCol(tag, fallback) (v7.1.4: the clan war ranks are gone)
+static const char *clan_col(const char *tag, const char *fallback) {
     if (tag && !strcmp(tag, "DEV")) return "#40C4FF";
-    if (rank == 1) return "rgb";
-    if (rank >= 2 && rank <= 5) return "#eb3437";
-    if (rank >= 6 && rank <= 15) return "#FBC02D";
-    if (rank >= 16 && rank <= 25) return "#e834eb";
-    if (rank >= 26 && rank <= 50) return "#349ceb";
+    if (tag && !strcmp(tag, "VIP")) return "#11D445";
+    if (tag && !strcmp(tag, "CMD")) return "#993299";
     return fallback;
 }
 
@@ -960,15 +1256,12 @@ static double jnum(const cJSON *o, const char *key) {
     return 0.0;
 }
 
-static double parse_time_ms(const cJSON *v);
-static double now_epoch_ms(void);
-
 static const char *jstr(const cJSON *o, const char *key) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
     return cJSON_IsString(v) ? v->valuestring : NULL;
 }
 
-// User text the brain serves already HTML-escaped (kn_html: & < > " ', for the v3.1.1 page's
+// User text the brain serves already HTML-escaped (kn_html: & < > " ', for the page's
 // innerHTML): undo that one level, then escape, so "<b>" shows as typed instead of "&lt;b&gt;".
 static void sb_append_served(StrBuf *sb, const char *s) {
     static const struct { const char *ent; char c; } k_ents[] = {{"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&#39;", '\''}};
@@ -998,16 +1291,36 @@ static void format_num(char *out, const size_t n, const double v) {
     else js_num(out, n, v);
 }
 
-// UTILS.getReadableTime(ms)
+// UTILS.getReadableTime(ms) (v7.1.4: years too; no seconds)
 static void readable_time(char *out, const size_t n, const double ms) {
-    long long s = (long long) floor(ms / 1000.0), m = s / 60, h = m / 60;
+    long long sec = (long long) floor(ms / 1000.0), m = sec / 60, h = m / 60;
     m %= 60;
-    const long long d = h / 24;
+    long long d = h / 24;
     h %= 24;
-    char dp[24] = "", hp[24] = "";
+    const long long y = d / 365;
+    d %= 365;
+    char yp[24] = "", dp[24] = "", hp[24] = "";
+    if (y) snprintf(yp, sizeof(yp), "%lldy ", y);
     if (d) snprintf(dp, sizeof(dp), "%lldd ", d);
     if (h) snprintf(hp, sizeof(hp), "%lldh ", h);
-    snprintf(out, n, "%s%s%lldm ", dp, hp, m);
+    snprintf(out, n, "%s%s%s%lldm ", yp, dp, hp, m);
+}
+
+// UTILS.commaFloat(n): commas in the integer part only
+static void comma_float(char *out, const size_t n, const char *num) {
+    const char *dot = strchr(num, '.');
+    char ip[64];
+    snprintf(ip, sizeof(ip), "%.*s", (int) (dot ? (size_t) (dot - num) : strlen(num)), num);
+    char c[80];
+    comma_number(c, sizeof(c), atof(ip));
+    snprintf(out, n, "%s%s", c, dot ? dot : "");
+}
+
+static void comma_fixed(char *out, const size_t n, const double v, const int places) {
+    char raw[64];
+    if (places < 0) js_num(raw, sizeof(raw), v);
+    else snprintf(raw, sizeof(raw), "%.*f", places, v);
+    comma_float(out, n, raw);
 }
 
 // UTILS.getDate("YYYY-MM-DD hh:mm:ss") -> "D Mon YYYY"
@@ -1021,22 +1334,14 @@ static void get_date(char *out, const size_t n, const char *s) {
     snprintf(out, n, "%d %s %d", d, months[mo - 1], y);
 }
 
-static void append_clan_link(StrBuf *sb, const char *clan, const int rank, const char *fallback) {
-    sb_appendf(sb, " <a target='_blank' class='%s' style='color:%s' href='/social.html?p=clan&q=", rank == 1 ? "rainbowText" : "", clan_col(clan, rank, fallback));
-    sb_append_esc(sb, clan);
-    sb_append(sb, "'>[");
-    sb_append_esc(sb, clan);
-    sb_append(sb, "]</a>");
-}
-
 // config.leaderCal.player_score(score): level icon + level
 static void append_level_cell(StrBuf *sb, const double score) {
     int lvl = (int) floor(0.03 * sqrt(score > 0 ? score : 0));
     if (lvl < 1) lvl = 1;
-    int icon = (int) (round(lvl / 2.0) * 2) - 1; // j.roundToNearest(2) - 1, clamped to [0, maxLevel - 1]
+    int icon = (int) (round(lvl / 2.0) * 2) - 1; // roundToNearest(2) - 1, clamped to [0, maxLevel 102 - 1]
     if (icon > 101) icon = 101;
     if (icon < 0) icon = 0;
-    sb_appendf(sb, "<span class='floatR'><img src='./img/levels/%d.png' class='rnkIcon'>%d</span>", icon, lvl);
+    sb_appendf(sb, "<span class='floatR' style='color:rgba(255,255,255,0.5);'><img src='./img/levels/%d.png' class='rnkIcon'>%d</span>", icon, lvl);
 }
 
 static void hub_render_profile(const cJSON *t, const cJSON *extra) {
@@ -1057,8 +1362,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     const double score = jnum(t, "player_score");
     int k = (int) floor(0.03 * sqrt(score > 0 ? score : 0));
     if (k < 1) k = 1;
-    int chal = (int) jnum(t, "player_chal") + 1;
-    if (chal > 26) chal = 26;
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
     const HtmlElem pic = el("socialPic");
     if (pic) {
         char src[64];
@@ -1066,15 +1370,15 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         html_dom_set_attr(pic, "src", src);
     }
     const char *clan = jstr(t, "player_clan");
-    const int clan_rank = (int) jnum(t, "clan_rank");
     const int premium = jnum(t, "player_premium") > 0;
     const char *alias = jstr(t, "player_alias");
     char num[64], num2[64];
     StrBuf sb = {0};
+    sb_appendf(&sb, "<div class='onStatus onStatProf' style='background:%s'></div>", jnum(t, "st") ? "#27ab32" : "#7f7f7f");
     sb_append(&sb, "<div class='leftTopHolder'>");
-    if (jnum(t, "partner_approved") >= 2) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#993299;vertical-align:middle;margin-top:-6px;'>verified</i>");
-    if (premium) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#FBC02D;vertical-align:middle;margin-top:-6px;'>beenhere</i>");
-    if (jnum(t, "player_featured")) sb_append(&sb, "<i class='material-icons' style='margin-right:1px;font-size:32px;color:#40C4FF;vertical-align:middle;margin-top:-6px;'>check_circle</i>");
+    if (jnum(t, "partner_approved") >= 2) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#993299;vertical-align:middle;margin-top:-14px;'>verified</i>");
+    if (premium) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#FBC02D;vertical-align:middle;margin-top:-14px;'>beenhere</i>");
+    if (jnum(t, "player_featured")) sb_append(&sb, "<i class='material-icons' style='margin-right:1px;font-size:32px;color:#40C4FF;vertical-align:middle;margin-top:-14px;'>check_circle</i>");
     if (premium && alias && alias[0]) {
         sb_append(&sb, "<span id='nameSwitch' onclick='switchNames()'>");
         sb_append_esc(&sb, g_hub.profile_name);
@@ -1082,161 +1386,225 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         sb_append_esc(&sb, alias);
         sb_append(&sb, "</span>");
     } else {
+        sb_append(&sb, "<span id='nameSwitch'>");
         sb_append_esc(&sb, g_hub.profile_name);
+        sb_append(&sb, "</span>");
     }
-    if (clan && clan[0]) append_clan_link(&sb, clan, clan_rank, "rgba(0,0,0,0.4)");
+    if (clan && clan[0]) {
+        sb_appendf(&sb, " <a target='_blank' style='color:%s' href='/social.html?p=clan&q=", clan_col(clan, "rgba(255,255,255,0.6)"));
+        sb_append_esc(&sb, clan);
+        sb_append(&sb, "'>[");
+        sb_append_esc(&sb, clan);
+        sb_append(&sb, "]</a>");
+    }
     get_date(num, sizeof(num), jstr(t, "player_datenew"));
-    sb_appendf(&sb, "</div><div class='leftMidHolder'>Since <span style='color:rgba(0,0,0,0.6)'>%s</span></div><div class='leftBottomHolder'>", num);
+    sb_appendf(&sb, "</div><div class='leftMidHolder'>Since <span style='color:rgba(255,255,255,0.6)'>%s</span></div><div class='leftBottomHolder'>", num);
     format_num(num, sizeof(num), g_hub.profile_followed);
     format_num(num2, sizeof(num2), g_hub.profile_following);
-    sb_appendf(&sb, "<div class='follL' onclick='viewFollowers()'>%s<span class='follCount'>Followers</span></div><div class='follL' style='margin-left:10px;' onclick='viewFollowing()'>%s<span class='follCount'>following</span></div></div>", num, num2);
-    sb_append(&sb, "<div class='rightTopHolder'><span class='material-icons' id='flagBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='flagPopup();'>flag</span><span class='material-icons' id='reprtBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='reportPopup();'>report</span><span class='material-icons' id='shareBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='shareProfile();'>share</span></div>");
-    // c = follow state [{f}]: the 6th reply argument
+    sb_appendf(&sb, "<div class='follL' id='followerC' onclick='viewFollowers()'>%s<span class='follCount'>Followers</span></div><div class='follL' id='followC' style='margin-left:10px;' onclick='viewFollowing()'>%s<span class='follCount'>following</span></div></div>", num, num2);
+    sb_appendf(&sb, "<div class='rightTopHolder'><span class='material-icons canFlag%s' id='flagBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='flagPopup();'>flag</span><span class='material-icons' id='reprtBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='reportPopup();'>report</span><span class='material-icons' id='shareBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='shareProfile();'>share</span></div>",
+               acc && (acc->is_dev || acc->is_mod) ? "" : " hide");
+    sb_append(&sb, "<div class='rightMidHolder'>");
+    const char *twitch = jstr(t, "player_twitchname");
+    if (twitch && *twitch) {
+        sb_append(&sb, "<img id='twitchBtn' src='./img/twitch.png' onClick='openLink(&quot;https://twitch.tv/");
+        sb_append_esc(&sb, twitch);
+        sb_append(&sb, "&quot;, &quot;_blank&quot;)'>");
+    }
+    sb_append(&sb, "</div>");
+    // the follow state [{f}]: the reply's 7th argument
     const cJSON *follow = cJSON_GetArrayItem(cJSON_GetArrayItem(extra, 6), 0);
     const int not_following = !follow || !jnum(follow, "f");
-    sb_append(&sb, "<div class='rightBottomHolder'><div class='bottomBtn' id='tradeBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='tradePopup();'>Trade</div><div class='bottomBtn' id='giftBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='giftPopup();'>Gift KR</div>");
+    sb_append(&sb, "<div class='rightBottomHolder'><div class='bottomBtn' id='tradeBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='tradePopup();'>Trade</div><div class='bottomBtn' id='giftBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='giftPopup();'>Send Gift</div>");
     sb_appendf(&sb, "<div class='bottomBtn %s' id='followBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='followUser();'>%s</div>", not_following ? "follow" : "unfollow", not_following ? "Follow" : "Unfollow");
-    sb_appendf(&sb, "<div class='bottomBtn' id='verifyBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='verifyPopup();'>%s</div></div>", jnum(t, "player_featured") ? "Unverify" : "Verify");
+    sb_appendf(&sb, "<div class='bottomBtn canVerify%s' id='verifyBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='verifyPopup();'>%s</div>", acc && acc->is_dev ? "" : " hide", jnum(t, "player_featured") ? "Unverify" : "Verify");
+    sb_appendf(&sb, "<div class='bottomBtn canBadge%s' id='badgeBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='badgePopup();'>Give Badge</div>", acc && acc->is_dev ? "" : " hide");
     char *html = sb_finish(&sb);
     set_html("rightProfile", html);
     free(html);
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
     if (g_hub.profile_name[0] && acc && strcmp(acc->name, g_hub.profile_name) != 0) set_display("followBtn", "inline-block");
-    if (acc && (acc->is_dev || acc->is_mod)) set_display("flagBtn", "inline-block");
+    if (acc && acc->level >= TRADE_MIN_LVL && k >= TRADE_MIN_LVL) set_display("tradeBtn", "inline-block");
 
-    // pTabContent_about: Overall Stats
+    // pTabContent_about: Overall Stats with the four config.statTabs
     const double kills = jnum(t, "player_kills"), deaths = jnum(t, "player_deaths"), games = jnum(t, "player_games_played"), wins = jnum(t, "player_wins");
     const double lo = k > 1 ? pow(k / 0.03, 2) : 0, hi = pow((k + 1) / 0.03, 2);
     sb_append(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>Overall Stats</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div>");
     js_num(num, sizeof(num), (double) (long long) (score - lo) / (double) (long long) (hi - lo) * 100.0);
     sb_appendf(&sb, "<div class='xpBar'><div class='xpBarB' style='width:%s%%'></div><span class='xpBarV'>%lld / %lld</span></div>", num, (long long) (score - lo), (long long) (hi - lo));
-    const double elos[3] = {jnum(t, "player_elo"), jnum(t, "player_elo2"), jnum(t, "player_elo4")};
-    static const char *const elo_names[3] = {"Solo", "Duo", "Quad"};
-    sb_append(&sb, "<div class='rankBadges'>");
-    for (int i = 0; i < 3; i++) {
-        int id = (int) floor(elos[i] / 120.0);
-        id = (id > 8 ? 8 : id < 1 ? 1 : id) - 1;
-        sb_appendf(&sb, "<div class='eloHolder'><img src='./img/ranks/icon_%d.png' class='rnkIconELO'/><div class='eloText'>%s</div></div>", id, elo_names[i]);
-    }
-    sb_append(&sb, "</div></div><div id='statHolder'>");
-    const char *chal_col = chal > 20 ? "#fb2d2d" : chal > 15 ? "#c12dfb" : chal > 10 ? "#fb942d" : "false";
-#define PST(label, fmt, ...) sb_appendf(&sb, "<div class='pSt'>" label "<strong>" fmt "</strong></div>", __VA_ARGS__)
-    sb_appendf(&sb, "<div class='pSt'>LVL<strong style='color:%s'>%d</strong></div>", chal_col, k);
-    PST("Challenge", "%d", chal);
-    js_num(num, sizeof(num), jnum(t, "player_funds"));
-    PST("KR", "%s", num);
-    js_num(num, sizeof(num), score);
-    PST("Score", "%s", num);
-    PST("SPK", "%.2f", score / (kills > 1 ? kills : 1));
-    js_num(num, sizeof(num), kills);
-    PST("Kills", "%s", num);
-    js_num(num, sizeof(num), deaths);
-    PST("Deaths", "%s", num);
-    PST("KDR", "%.2f", kills / (deaths > 1 ? deaths : 1));
-    PST("KPG", "%.2f", kills / (games > 1 ? games : 1));
-    js_num(num, sizeof(num), games);
-    PST("Games", "%s", num);
-    PST("W/L", "%.2f", wins / (games - wins > 1 ? games - wins : 1));
-    js_num(num, sizeof(num), wins);
-    PST("Wins", "%s", num);
-    js_num(num, sizeof(num), games - wins > 0 ? games - wins : 0);
-    PST("Losses", "%s", num);
-    for (int i = 0; i < 3; i++) {
-        js_num(num, sizeof(num), elos[i]);
-        sb_appendf(&sb, "<div class='pSt'>MMR (%s)<strong>%s</strong></div>", i == 0 ? "1v1" : i == 1 ? "2v2" : "4v4", num);
-    }
-    static const char *const stat_keys[][2] = {{"Nukes", "n"}, {"Melee", "mk"}, {"Beatdowns", "fk"}, {"Bullseyes", "tmk"}, {"Headshots", "hs"}, {"Wallbangs", "wb"}};
+    sb_append(&sb, "</div><div id='statHolder' style='margin-top: 0px;'><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;width: calc(100% - 18px);margin-left: 9px;background-color: rgba(0, 0, 0, 0.5);'>");
+    static const char *const stat_tabs[4] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats"};
+    for (int i = 0; i < 4; ++i)
+        sb_appendf(&sb, "<div id='statTab%d' class='bigMenTab%s' onclick='playSelect(0.1);switchStat(%d)' style='padding-left: 5px; padding-right: 5px; padding-top: 10px; padding-bottom: 5px; line-height: 35px;font-size: 14px;'onmouseenter='playTick();'>%s</div>",
+                   i, i == 0 ? " bigMenTabA" : "", i, stat_tabs[i]);
+    sb_append(&sb, "</div><div class='statTabB0'>");
+#define PST(label, value) sb_appendf(&sb, "<div class='pSt'>%s<strong>%s</strong></div>", label, value)
+    char v[64];
+    snprintf(v, sizeof(v), "%d", k);
+    PST("LVL", v);
+    comma_fixed(v, sizeof(v), jnum(t, "player_funds"), -1);
+    PST("KR", v);
+    comma_fixed(v, sizeof(v), jnum(t, "player_elo4"), 2);
+    PST("Junk", v);
+    comma_fixed(num, sizeof(num), jnum(t, "player_skinvalue"), -1);
+    snprintf(v, sizeof(v), " ~%s", num);
+    PST("Inventory", v);
+    comma_fixed(v, sizeof(v), score, -1);
+    PST("Score", v);
+    comma_fixed(v, sizeof(v), score / (kills > 1 ? kills : 1), 2);
+    PST("SPK", v);
+    comma_fixed(v, sizeof(v), kills, -1);
+    PST("Kills", v);
+    comma_fixed(v, sizeof(v), deaths, -1);
+    PST("Deaths", v);
+    comma_fixed(v, sizeof(v), kills / (deaths > 1 ? deaths : 1), 4);
+    PST("KDR", v);
+    comma_fixed(v, sizeof(v), kills / (games > 1 ? games : 1), 4);
+    PST("KPG", v);
+    comma_fixed(v, sizeof(v), games, -1);
+    PST("Games", v);
+    js_num(v, sizeof(v), round(wins / (games - wins > 1 ? games - wins : 1) * 1000.0) / 1000.0); // .round(3)
+    PST("W/L", v);
+    comma_fixed(v, sizeof(v), wins, -1);
+    PST("Wins", v);
+    comma_fixed(v, sizeof(v), games - wins > 0 ? games - wins : 0, -1);
+    PST("Losses", v);
+    static const char *const stat_keys[][2] = {{"Assists", "ast"}, {"Melee", "mk"}, {"Beatdowns", "fk"}, {"Bullseyes", "tmk"}, {"Headshots", "hs"},
+                                              {"Legshots", "ls"}, {"Wallbangs", "wb"}, {"Shots", "s"}};
     for (size_t i = 0; i < sizeof(stat_keys) / sizeof(stat_keys[0]); i++) {
-        js_num(num, sizeof(num), jnum(stats, stat_keys[i][1]));
-        sb_appendf(&sb, "<div class='pSt'>%s<strong>%s</strong></div>", stat_keys[i][0], num);
+        comma_fixed(v, sizeof(v), jnum(stats, stat_keys[i][1]), -1);
+        PST(stat_keys[i][0], v);
     }
-    const double shots = jnum(stats, "s");
-    js_num(num, sizeof(num), round((shots ? jnum(stats, "h") / shots * 100.0 : 0.0) * 10.0) / 10.0);
-    PST("Accuracy", "%s%%", num);
-    readable_time(num, sizeof(num), jnum(t, "player_timeplayed"));
-    PST("Time Played", "%s", num);
+    const double shots = jnum(stats, "s"), hits = fmin(shots, jnum(stats, "h"));
+    comma_fixed(v, sizeof(v), hits, -1);
+    PST("Hits", v);
+    comma_fixed(v, sizeof(v), shots - hits, -1);
+    PST("Misses", v);
+    comma_fixed(num, sizeof(num), round((shots ? hits / shots * 100.0 : 0.0) * 100.0) / 100.0, -1);
+    snprintf(v, sizeof(v), "%s%%", num);
+    PST("Accuracy", v);
+    readable_time(v, sizeof(v), jnum(t, "player_timeplayed"));
+    PST("Time Played", v);
+    sb_append(&sb, "</div><div class='statTabB1 hide'>");
+    static const char *const streak_keys[][2] = {{"Nukes", "n"}, {"Airdrops", "ad"}, {"Airdrops Stolen", "sad"}, {"Slimers", "sl"}, {"Juggernauts", "jg"}};
+    for (size_t i = 0; i < sizeof(streak_keys) / sizeof(streak_keys[0]); i++) {
+        comma_fixed(v, sizeof(v), jnum(stats, streak_keys[i][1]), -1);
+        PST(streak_keys[i][0], v);
+    }
+    comma_fixed(v, sizeof(v), jnum(stats, "kjg"), -1);
+    sb_appendf(&sb, "<div class='pSt' style='font-size: 9.5px;padding-left: 0px;padding-right: 0px;width: 140px;'>Juggernauts Killed<strong>%s</strong></div>", v);
+    comma_fixed(v, sizeof(v), jnum(stats, "wm"), -1);
+    PST("War Machines", v);
+    sb_append(&sb, "</div><div class='statTabB2 hide'>");
+    comma_fixed(v, sizeof(v), jnum(stats, "crc"), -1);
+    PST("Crouches", v);
+    comma_fixed(v, sizeof(v), jnum(stats, "spry"), -1);
+    PST("Sprays Placed", v);
+    sb_appendf(&sb, "<div class='pSt' style='padding-left: 9px;padding-right: 9px;width: 122px;'>Helpful Reports<strong>%d/%d</strong></div>", (int) jnum(t, "player_jobratingpositive"), (int) jnum(t, "player_jobrating"));
+    comma_fixed(v, sizeof(v), jnum(t, "player_calls"), -1);
+    sb_appendf(&sb, "<div class='pSt' title='Amount of times you called KPD'>Total Calls<strong>%s</strong></div>", v);
+    comma_fixed(v, sizeof(v), jnum(t, "player_taggedaccounts"), -1);
+    sb_appendf(&sb, "<div class='pSt' title='Amount of users banned from calls you made to KPD' style='padding-left: 8px;padding-right: 8px;width: 124px;'>Bans from calls<strong>%s</strong></div>", v);
 #undef PST
-    sb_append(&sb, "</div></div><div></div><div class='scrollItemNew collapsed'><span class='scrollItemHead'>Class Stats</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_more</div><div id='skinList'>");
-    for (size_t v = 0; v < sizeof(g_classes) / sizeof(g_classes[0]); v++) {
-        const ClassConfig *c = &g_classes[v];
-        if (!c->name || !c->name[0]) continue;
+    sb_append(&sb, "</div><div class='statTabB3 hide'>");
+    for (size_t c = 0; c < sizeof(g_classes) / sizeof(g_classes[0]); c++) {
+        const ClassConfig *cc = &g_classes[c];
+        if (!cc->name || !cc->name[0]) continue;
         char key[16];
-        snprintf(key, sizeof(key), "c%zu", v);
+        snprintf(key, sizeof(key), "c%zu", c);
         const double xp = jnum(stats, key);
         const double e2 = 0.03 * sqrt(xp > 0 ? xp : 0);
         int lvl = (int) floor(e2);
         const int prog = (int) round((e2 - lvl) * 100);
         const double clo = lvl > 1 ? pow(lvl / 0.03, 2) : 0, chi = pow((lvl + 1) / 0.03, 2);
         lvl = lvl + 1 > 1 ? lvl + 1 : 1;
-        const int w = c->loadout ? c->loadout[0] : -1;
+        const int w = cc->loadout ? cc->loadout[0] : -1;
         const char *weapon = w >= 0 && w < WEAPON_COUNT && g_weapons[w] && g_weapons[w]->name ? g_weapons[w]->name : "";
         sb_appendf(&sb, "<div class='classCard'><img class='classImg' src='./textures/classes/icon_%zu.png'/><div class='className'>%s</div><div class='classWeap'>%s</div><div class='classXPBar'><div class='clsXPBarC' style='width:%d%%'></div><div class='clsXPBarV'>%lld / %lld</div></div><div class='classLvl'>Lvl %d</div></div>",
-                   v, c->name, weapon, prog, (long long) (xp - clo), (long long) (chi - clo), lvl);
+                   c, cc->name, weapon, prog, (long long) (xp - clo), (long long) (chi - clo), lvl);
     }
-    sb_append(&sb, "</div></div><div></div><div class='scrollItemNew'><span class='scrollItemHead'>Sales</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div style='margin-top:10px;margin-left: 8px;'><a class='dateBtn' href='javascript:;' onclick='changeDateRange(this, 0, 1)' onmouseover='SOUND.play(`tick_0`,0.1)'>7d</a><a class='dateBtn' href='javascript:;' style='background-color:rgba(0, 0, 0, 0.6)' onclick='changeDateRange(this, 1, 1)' onmouseover='SOUND.play(`tick_0`,0.1)'>30d</a><a class='dateBtn' href='javascript:;' onclick='changeDateRange(this, 2, 1)' onmouseover='SOUND.play(`tick_0`,0.1)'>90d</a><a class='dateBtn' href='javascript:;' onclick='changeDateRange(this, 3, 1)' onmouseover='SOUND.play(`tick_0`,0.1)'>120d</a></div><div class='graphHolder'><div class='graphHeader'><span class='graphHeaderTxt'>Market Sales</span><span id='totalSalesHeader' class='graphHeaderTotal'>0</span></div><canvas id='profSales'></canvas></div></div><div></div>");
+    sb_append(&sb, "</div></div></div><div></div><div></div>");
+    sb_append(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>Sales</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div style='margin-top:10px;margin-left: 8px;'><span style='color: rgba(255,255,255,0.4);'>Data Range</span><select class='rangeSelect' onchange='changeDateRange2(this.value)'><option value='0'>1 week</option><option value='1'>2 weeks</option><option value='2'>3 weeks</option><option value='3' selected>1 month</option><option value='4'>2 months</option><option value='5'>3 months</option><option value='6'>4 months</option></select></div><div class='graphHolder'><div class='graphHeader'><span class='graphHeaderTxt'>Market Sales</span><span id='totalSalesHeader' class='graphHeaderTotal'>0</span></div><canvas id='profSales'></canvas></div></div><div></div>");
     html = sb_finish(&sb);
     set_html("pTabContent_about", html);
     free(html);
     set_html("pTabContent_activity", "");
-    // creations: games r, mods l, assets f (extra[0], extra[1], extra[3])
-    static const char *const heads[3] = {"Games", "Mods", "Assets"};
-    static const int arg_index[3] = {4, 5, 7}; // frame slots of r, l, f
+    set_html("pTabContent_listings", "");
+    // badges (v7 data/badges.js): KrunkNative has no badge table yet: the none text
+    set_html("pTabContent_badges", "<div class='scrollItemNew'><div class='noneText'>No Badges found for this user</div></div>");
+    // creations: skins (store skins by this creator), games r, mods l, assets f
+    const cJSON *games_rows = cJSON_GetArrayItem(extra, 4), *mods_rows = cJSON_GetArrayItem(extra, 5), *assets_rows = cJSON_GetArrayItem(extra, 7);
+    int skins_n = 0;
+    for (int i = 0; i < g_viewer_skin_count; i++) {
+        const char *cr = g_viewer_skins[i].creator;
+        if (cr && g_hub.profile_name[0] && strstr(cr, g_hub.profile_name)) skins_n++;
+    }
+    sb_appendf(&sb, "<div class='scrollItemNew'><div class=\"creationTabs\">\n\t\t\t\t<div class=\"creationTab creationTabA\" id=\"creationTab_skins\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('skins')\">Skins [%d]</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_games\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('games')\">Games [%d]</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_mods\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('mods')\">Mods [%d]</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_assets\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('assets')\">Assets [%d]</div>\n\t\t\t</div>",
+               skins_n, cJSON_GetArraySize(games_rows), cJSON_GetArraySize(mods_rows), cJSON_GetArraySize(assets_rows));
+    sb_append(&sb, "<div class='creationContent selected' id='creationContent_skins'>");
+    if (skins_n) {
+        for (int i = g_viewer_skin_count - 1; i >= 0; i--) { // reversed
+            const ViewerSkin *sk = &g_viewer_skins[i];
+            if (!sk->creator || !strstr(sk->creator, g_hub.profile_name)) continue;
+            char path[256], url[256];
+            viewer_skin_preview_path(sk, path, sizeof(path));
+            html_dom_asset_url(path, url, sizeof(url));
+            sb_appendf(&sb, "<div class='creationSkinItem'><div class='creationSkinImgH' onclick='viewItem(%d)'><img draggable='false' class='creationSkinImg' loading='lazy' src='%s'/></div><div class='creationSkinName'>", i, url);
+            sb_append_esc(&sb, sk->name);
+            sb_append(&sb, "</div></div>");
+        }
+    } else {
+        sb_append(&sb, "<div class='noneText'>No published Skins from this user</div>");
+    }
+    sb_append(&sb, "</div>");
+    static const char *const heads[3] = {"games", "mods", "assets"};
+    static const char *const nones[3] = {"No published Games from this user", "No published Mods from this user", "No published Assets from this user"};
+    const cJSON *lists[3] = {games_rows, mods_rows, assets_rows};
     for (int i = 0; i < 3; i++) {
-        const cJSON *rows = cJSON_GetArrayItem(extra, arg_index[i]);
-        sb_appendf(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>%s</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div style='margin-top:10px;'>", heads[i]);
+        sb_appendf(&sb, "<div class='creationContent' id='creationContent_%s'>", heads[i]);
         const cJSON *r;
         int any = 0;
-        cJSON_ArrayForEach(r, rows) {
-            const char *nm = i == 2 ? jstr(r, "nm") : jstr(r, i == 0 ? "map_name" : "mod_name");
-            if (!nm) nm = jstr(r, "mna");
+        cJSON_ArrayForEach(r, lists[i]) {
+            const char *nm = i == 2 ? jstr(r, "nm") : row_str2(r, "mna", i == 0 ? "map_name" : "mod_name");
             if (!nm) continue;
             any = 1;
-            // G: age in days of map_date (dte) / mod_date / ini; NEW when 0..7
-            const cJSON *dt = cJSON_GetObjectItemCaseSensitive(r, i == 2 ? "ini" : i == 0 ? "map_date" : "mod_date");
-            if (i == 0 && !dt) dt = cJSON_GetObjectItemCaseSensitive(r, "dte");
-            const double born = parse_time_ms(dt);
-            const double age = born > 0 ? (now_epoch_ms() - born) / 86400000.0 : -1;
+            const double age = i == 2 ? row_age_days(r, "ini", NULL) : row_age_days(r, "dte", i == 0 ? "map_date" : "mod_date");
             sb_append(&sb, "<div class='mapListItem2'>");
-            if (age >= 0 && age <= 7) sb_append(&sb, "<div class='mapAgeD' style='background-color:#E040FB'>NEW</div>");
+            if (age >= 0 && age <= 7) sb_append(&sb, "<div class='mapAgeD' style='background-color:#da00ff'>NEW</div>");
             if (i == 2) {
-                const char *plrn = jstr(r, "plrn") ? jstr(r, "plrn") : "";
-                sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;'><img class='mapListThumb' loading='lazy' style='width:204px;' src='./img/noimg.png' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'/></div><div style='margin-top:1px;text-overflow: ellipsis;overflow: hidden;white-space: nowrap;'><a href='javascript:;'/>");
+                sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;height: 90px;'><img class='mapListThumb' loading='lazy' style='width:204px;height: 90px;' src='./img/noimg.png' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'/></div><div style='margin-top:1px;text-overflow: ellipsis;overflow: hidden;white-space: nowrap;'><a href='javascript:;'/>");
                 sb_append_served(&sb, nm);
-                sb_append(&sb, "</a></div><div style='display: flex'><span style='color:rgba(0,0,0,0.2);font-size:15px'> by <a target='_blank' class='grey' href='/social.html?p=profile&q=");
-                sb_append_esc(&sb, plrn);
-                sb_append(&sb, "'>");
-                sb_append_esc(&sb, plrn);
-                sb_appendf(&sb, "</a></span><div style='font-size:15px;text-align:right;flex-grow:1'>%d <span style='color: rgba(0,0,0,0.6);'>kb</span></div></div></div>", (int) jnum(r, "siz"));
+                sb_append(&sb, "</a></div></div>");
                 continue;
             }
             const char *img = jstr(r, i == 0 ? "map_image" : "mod_image");
             const char *open = i == 0 ? "openMap" : "openMod";
-            const char *by = i == 0 ? (jstr(r, "creatorname") ? jstr(r, "creatorname") : jstr(r, "ctn")) : g_hub.profile_name;
-            const cJSON *votes = cJSON_GetObjectItemCaseSensitive(r, i == 0 ? "map_votes" : "mod_votes");
-            if (i == 0 && cJSON_GetObjectItemCaseSensitive(r, "vte")) votes = cJSON_GetObjectItemCaseSensitive(r, "vte");
-            sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;height:90px;'><img draggable='false' class='mapListThumb' loading='lazy' style='width:204px;' src='");
+            const char *by = row_str2(r, "ctn", "creatorname");
+            if (!by) by = g_hub.profile_name;
+            char votes[32];
+            js_num(votes, sizeof(votes), row_num2(r, "vte", i == 0 ? "map_votes" : "mod_votes"));
+            sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;height:90px;'><img draggable='false' class='mapListThumb' loading='lazy' style='width:204px;height: 90px;' src='");
             sb_append_esc(&sb, img && *img ? img : "./img/noimg.png");
             sb_appendf(&sb, "' onclick='%s(&quot;", open);
             sb_append_js_escape(&sb, nm);
-            sb_appendf(&sb, "&quot;)'/><div class='mapsVotes' style='top: 68px;'>%d<span class='material-icons' style='margin-left: 5px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;'>thumb_up</span></div></div><div style='margin-top:1px;text-overflow: ellipsis;overflow: hidden;white-space: nowrap;'><a href='javascript:;' onclick='%s(&quot;",
-                       cJSON_IsNumber(votes) ? votes->valueint : 0, open);
+            sb_appendf(&sb, "&quot;)'/><div class='mapsVotes' style='top: 68px;'>%s<span class='material-icons' style='margin-left: 5px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;'>thumb_up</span></div></div><div style='margin-top:1px;text-overflow: ellipsis;overflow: hidden;white-space: nowrap;'><a href='javascript:;' onclick='%s(&quot;", votes, open);
             sb_append_js_escape(&sb, nm);
             sb_append(&sb, "&quot;)'/>");
             sb_append_served(&sb, nm);
-            sb_append(&sb, "</a></div><div style='margin-top:1px;display: block;color: rgba(0,0,0,0.2);font-size: 15px;text-align: left;'>by <span onclick='openProfile(&quot;");
-            sb_append_esc(&sb, by ? by : "");
-            sb_append(&sb, "&quot;)' style='color: rgba(0, 0, 0, 0.6);'>");
-            sb_append_esc(&sb, by ? by : "");
+            sb_append(&sb, "</a></div><div style='margin-top:1px;display: block;color: rgba(255,255,255,0.2);font-size: 15px;text-align: left;'>by <span onclick='openProfile(&quot;");
+            sb_append_esc(&sb, by);
+            sb_append(&sb, "&quot;)' style='color: rgba(255,255,255,0.6);'>");
+            sb_append_esc(&sb, by);
             sb_append(&sb, "</span></div></div>");
         }
-        if (!any) sb_appendf(&sb, "<div style='margin-bottom:20px;margin-top:20px;text-align:center;'>No published %s from this user</div>", heads[i]);
-        sb_append(&sb, "</div></div><div></div>");
+        if (!any) sb_appendf(&sb, "<div class='noneText'>%s</div>", nones[i]);
+        sb_append(&sb, "</div>");
     }
+    sb_append(&sb, "</div>");
     html = sb_finish(&sb);
     set_html("pTabContent_creations", html);
     free(html);
     set_display("hackText", jnum(t, "player_hack") ? "block" : "none");
-    // io.send("pst", t.player_name, J[Z]): the sales graph data (30 days)
+    // io.send("pst", t.player_name, vLN33): the sales graph data (vLN33 = 3: 1 month)
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("pst"));
     cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
@@ -1245,73 +1613,71 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     cJSON_Delete(stats);
 }
 
-// config.leaderCal[a](h) for the non-score/elo columns (config.js); other keys print h as is
+// config.leaderCal[a](h) (v7.1.4)
 static void append_leader_cal(StrBuf *sb, const char *a, const double h) {
-    char n[32];
-    if (!strcmp(a, "player_funds") || !strcmp(a, "player_followed")) comma_number(n, sizeof(n), h);
-    else js_num(n, sizeof(n), h);
-    if (!strcmp(a, "player_kills")) sb_appendf(sb, "%s<span class='lName'> kills</span>", n);
-    else if (!strcmp(a, "player_wins")) sb_appendf(sb, "%s<span class='lName'> wins</span>", n);
-    else if (!strcmp(a, "player_funds")) sb_appendf(sb, "<span style='color:rgba(0,0,0,0.4)'>%s</span> KR", n);
+    char n[48];
+    comma_number(n, sizeof(n), h);
+    if (!strcmp(a, "player_kills")) { js_num(n, sizeof(n), h); sb_appendf(sb, "%s<span class='lName'> kills</span>", n); }
+    else if (!strcmp(a, "player_wins")) { js_num(n, sizeof(n), h); sb_appendf(sb, "%s<span class='lName'> wins</span>", n); }
+    else if (!strcmp(a, "player_funds")) sb_appendf(sb, "<span style='color:rgba(255,255,255,0.4)'>%s</span> KR", n);
+    else if (!strcmp(a, "player_skinvalue")) sb_appendf(sb, "<span style='color:rgba(255,255,255,0.4)'>~ %s</span> KR", n);
     else if (!strcmp(a, "player_followed")) sb_appendf(sb, "%s <span class='lName'>followers</span>", n);
-    else if (!strcmp(a, "player_eventcount")) sb_appendf(sb, "<span class='lName'>found</span> %s/150", n); // easterEggs
-    else if (!strcmp(a, "player_chal")) sb_appendf(sb, "%d", (int) fmin(26, h + 1)); // maxChal
+    else if (!strcmp(a, "player_eventcount")) { js_num(n, sizeof(n), h); sb_appendf(sb, "<span class='lName'>found</span> %s/187", n); } // config.easterEggs
+    else if (!strcmp(a, "player_eventtime")) { js_num(n, sizeof(n), h); sb_appendf(sb, "Round %s", n); }
     else if (!strcmp(a, "player_timeplayed")) {
-        const double mins = h / 1000 / 60;
-        const int m = (int) fmod(mins, 60), hr = (int) fmod(mins / 60, 24), d = (int) (mins / 60 / 24);
-        if (d) sb_appendf(sb, "%dd ", d);
-        if (hr) sb_appendf(sb, "%dh ", hr);
-        sb_appendf(sb, "%dm ", m);
-    } else sb_append(sb, n);
+        const double ms = h * 1.2;
+        long long sec = (long long) floor(ms / 1000), m = sec / 60, hr = m / 60;
+        sec %= 60;
+        m %= 60;
+        const long long d = hr / 24;
+        hr %= 24;
+        sb_append(sb, "<span style='color:rgba(255,255,255,0.5)'>");
+        if (d) sb_appendf(sb, "%lldd ", d);
+        if (hr) sb_appendf(sb, "%lldh ", hr);
+        sb_appendf(sb, "%lldm %llds</span>", m, sec);
+    } else { js_num(n, sizeof(n), h); sb_append(sb, n); }
 }
 
 static void hub_render_leaders(const char *a, const cJSON *t) {
     StrBuf sb = {0};
     sb_append(&sb, "<div class='scrollItem'>");
     const int clans = a && !strcmp(a, "player_clan");
-    const int elo = a && !strncmp(a, "player_elo", 10);
     const cJSON *r;
     int v = 0;
     cJSON_ArrayForEach(r, t) {
-        if (elo && jnum(r, "player_hack")) continue;
         v++;
         const char *clan = jstr(r, "player_clan");
-        const int rank = (int) jnum(r, "clan_rank");
         if (clans) {
-            sb_appendf(&sb, "<div>%d. <a target='_blank' class='%s' style='color:%s' href='/social.html?p=clan&q=", v, rank == 1 ? "rainbowText" : "", clan_col(clan, rank, "rgba(0,0,0,0.6)"));
+            const char *col = clan_col(clan, "rgba(255,255,255,0.6)");
+            sb_appendf(&sb, "<div style='color:rgba(255,255,255,0.6)'>%d. <a target='_blank' style='color:%s' href='/social.html?p=clan&q=", v, col);
             sb_append_esc(&sb, clan ? clan : "");
-            sb_append(&sb, "'>[");
+            sb_appendf(&sb, "'>[<div class='clanNameFixed' style='color:%s'>", col);
             sb_append_esc(&sb, jstr(r, "clan_name") ? jstr(r, "clan_name") : "");
-            sb_appendf(&sb, "]</a> (%d) ", (int) jnum(r, "clan_membercount"));
+            sb_appendf(&sb, "</div>]</a> (%d) ", (int) jnum(r, "clan_membercount"));
             if (jnum(r, "clan_hackcount")) sb_appendf(&sb, "<span style='color:#E85656'>%d</span>", (int) jnum(r, "clan_hackcount"));
-            sb_append(&sb, "<span style='color:rgba(0,0,0,0.3)'> by <a target='_blank' href='/social.html?p=profile&q=");
-            sb_append_esc(&sb, jstr(r, "creatorname") ? jstr(r, "creatorname") : "");
-            sb_append(&sb, "' class='lName'>");
-            sb_append_esc(&sb, jstr(r, "creatorname") ? jstr(r, "creatorname") : "");
             char n[32];
             comma_number(n, sizeof(n), jnum(r, "clan_score"));
-            sb_appendf(&sb, "</a></span><div style='float:right'>%s</div></div>", n);
+            sb_appendf(&sb, "<div style='float:right;color:rgba(255,255,255,0.7);'>%s</div></div>", n);
             continue;
         }
         const char *name = jstr(r, "player_name");
-        sb_appendf(&sb, "<div>%d. <div class='leaderText'>", v);
+        sb_appendf(&sb, "<div style='color:rgba(255,255,255,0.6)'>%d. <div class='leaderText'>", v);
         if (jnum(r, "player_featured")) sb_append(&sb, "<i class='material-icons' style='margin-right:5px;font-size:26px;color:#40C4FF'>check_circle</i>");
-        sb_append(&sb, "<a target='_blank' href='/social.html?p=profile&q=");
+        sb_append(&sb, "<a target='_blank' style='color:#fff' href='/social.html?p=profile&q=");
         sb_append_esc(&sb, name ? name : "");
         sb_appendf(&sb, "' class='lName' style='%s'>", jnum(r, "player_hack") ? "color:#E85656" : "");
         sb_append_esc(&sb, name ? name : "");
         sb_append(&sb, "</a>");
-        if (clan && clan[0]) append_clan_link(&sb, clan, rank, "rgba(0,0,0,0.4)");
-        sb_append(&sb, "</div><div style='float:right'>");
-        if (!a || !strcmp(a, "player_score")) {
-            append_level_cell(&sb, jnum(r, "player_score"));
-        } else if (elo) {
-            int id = (int) floor(jnum(r, a) / 120.0);
-            id = (id > 8 ? 8 : id < 1 ? 1 : id) - 1;
-            sb_appendf(&sb, "<span class='floatR'><img src='./img/ranks/icon_%d.png' class='rnkIconR'></span>", id);
-        } else {
-            append_leader_cal(&sb, a, jnum(r, a));
+        if (clan && clan[0]) {
+            sb_appendf(&sb, " <a target='_blank' style='color:%s' href='/social.html?p=clan&q=", clan_col(clan, "rgba(255,255,255,0.4)"));
+            sb_append_esc(&sb, clan);
+            sb_append(&sb, "'>[");
+            sb_append_esc(&sb, clan);
+            sb_append(&sb, "]</a>");
         }
+        sb_append(&sb, "</div><div style='float:right;color:rgba(255,255,255,0.7)'>");
+        if (!a || !strcmp(a, "player_score")) append_level_cell(&sb, jnum(r, "player_score"));
+        else append_leader_cal(&sb, a, jnum(r, a));
         sb_append(&sb, "</div></div>");
     }
     sb_append(&sb, "</div>");
@@ -1320,26 +1686,16 @@ static void hub_render_leaders(const char *a, const cJSON *t) {
     free(html);
 }
 
-// search results (io_0 "search")
 // io_0("map"/"mod", name, row): the creation page (mapProfile / modProfile). Active servers
-// (Ra / Aa: matchmaker game-list filtered to this map) are not fetched: "No active servers".
-static const char *const k_map_cats[] = {"Other", "Zombies", "Parkour", "Trading", "Social", "Horror",
-                                         "Puzzle", "Training", "Battle Royale", "Realism", "Rotation", "Raid"};
-static int g_map_tab; // Ce
+// (f540: the matchmaker's game list filtered to this map) are not fetched: none online.
+static int g_map_tab; // vLN0588
 
-// getMapTapHTML()
-static void append_map_tabs(StrBuf *sb) {
-    sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(0)'>About</div><div class='mapTabP%s' onclick='updateMapTab(1)'>Servers</div>",
-               g_map_tab == 0 ? " activeTab" : "", g_map_tab == 1 ? " activeTab" : "");
-}
-
-static void append_creation_actions(StrBuf *sb, const int id, const int featured, const int kind) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
-    sb_append(sb, "<div class='creationActions'>");
-    if (acc && acc->is_dev) // canDeleteCreations (isDev || isCreationMod), canFeatureCreations (isDev)
-        sb_appendf(sb, "<span class='material-icons creationAction del' onclick='deleteCreationConf(%d,%d);'>delete_forever</span><span class='material-icons creationAction%s' onclick='featureCreation(this, %d,%d);'>check_circle</span>",
-                   id, kind, featured ? " sel" : "", id, kind);
-    sb_append(sb, "</div>");
+// getMapTapHTML(canEdit)
+static void append_map_tabs(StrBuf *sb, const int can_edit) {
+    sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(0, %s)'>About</div><div class='mapTabP%s' onclick='updateMapTab(1, %s)'>Servers</div><div class='mapTabP%s' onclick='updateMapTab(2, %s)'>Leaderboard</div>",
+               g_map_tab == 0 ? " activeTab" : "", can_edit ? "true" : "false", g_map_tab == 1 ? " activeTab" : "", can_edit ? "true" : "false",
+               g_map_tab == 2 ? " activeTab" : "", can_edit ? "true" : "false");
+    if (can_edit) sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(3, true)'>Data</div>", g_map_tab == 3 ? " activeTab" : "");
 }
 
 static void hub_render_creation(const int is_mod, const cJSON *t) {
@@ -1350,85 +1706,102 @@ static void hub_render_creation(const int is_mod, const cJSON *t) {
     snprintf(key, sizeof(key), "%s_name", pre);
     const char *name = cJSON_IsObject(t) ? jstr(t, key) : NULL;
     if (!name) {
-        sb_appendf(&sb, "<span style='color:rgba(0,0,0,0.4);'>%s</span>", is_mod ? STR_MODS_NONE : STR_MAPS_NONE);
+        sb_appendf(&sb, "<span style='color:rgba(%s,0.4);'>%s</span>", is_mod ? "0,0,0" : "255,255,255", is_mod ? STR_MODS_NONE : STR_MAPS_NONE);
         char *html = sb_finish(&sb);
         set_html(is_mod ? "modProfile" : "mapProfile", html);
         free(html);
         return;
     }
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
     snprintf(key, sizeof(key), "%s_id", pre);
     const int id = (int) jnum(t, key);
     snprintf(key, sizeof(key), "%s_featured", pre);
-    append_creation_actions(&sb, id, (int) jnum(t, key), is_mod);
+    const int featured = (int) jnum(t, key);
     snprintf(key, sizeof(key), "%s_creator", pre);
     const char *creator = jstr(t, key) ? jstr(t, key) : "";
     snprintf(key, sizeof(key), "%s_image", pre);
     const char *image = jstr(t, key);
     snprintf(key, sizeof(key), "%s_updatecounter", pre);
-    const double upd = jnum(t, key) > 0 ? jnum(t, key) : 1;
-    js_num(ver, sizeof(ver), upd / 10);
-    const double pl = jnum(t, "pl"), vt = jnum(t, "vt");
+    js_num(ver, sizeof(ver), (jnum(t, key) > 0 ? jnum(t, key) : 1) / 10);
+    const int can_edit = !is_mod && acc && (acc->is_dev || !strcmp(acc->name, creator));
+    const int dev = acc && acc->is_dev;
+    sb_append(&sb, "<div class='creationActions'>");
+    if (can_edit) {
+        sb_append(&sb, "<span title='Edit' class='material-icons creationAction edit' onclick='openEdit(&quot;");
+        sb_append_js_escape(&sb, name);
+        js_num(num, sizeof(num), jnum(t, "fund"));
+        sb_appendf(&sb, "&quot;,%d,%s)'>create</span>", id, num);
+    }
+    sb_appendf(&sb, "<span class='material-icons creationAction del canDeleteCreations%s' onclick='deleteCreationConf(%d,%d);'>delete_forever</span><span class='material-icons creationAction canFeatureCreations%s%s' onclick='featureCreation(this, %d,%d);'>check_circle</span></div>",
+               dev ? "" : " hide", id, is_mod, featured ? " sel" : "", dev ? "" : " hide", id, is_mod);
     sb_append(&sb, "<img draggable='false' class='mapPageThumb' src='");
     sb_append_esc(&sb, image && *image ? image : "./img/noimg.png");
-    sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'><div style='display: inline-block;width: calc(100% - 260px);'><div style='font-size:22px;margin-bottom: 2px;'>");
-    sb_append_served(&sb, name);
-    sb_append(&sb, "</div><div style='font-size:16px;'>by <a target='_blank' href='/social.html?p=profile&q=");
-    sb_append_esc(&sb, creator);
-    sb_appendf(&sb, "' style='color: rgba(0,0,0,0.4);'>");
-    sb_append_esc(&sb, creator);
-    sb_append(&sb, "</a></div>");
+    sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'><div style='display: inline-block;width: calc(100% - 260px);'>");
     if (is_mod) {
+        sb_append(&sb, "<div style='font-size:22px;margin-bottom: 2px;color:#fff'>");
+        sb_append_served(&sb, name);
+        sb_append(&sb, "</div><div style='font-size:16px;color:#fff;'>by <a target='_blank' href='/social.html?p=profile&q=");
+        sb_append_esc(&sb, creator);
+        sb_append(&sb, "' style='color: rgba(255, 255, 255, 0.4);'>");
+        sb_append_esc(&sb, creator);
         snprintf(key, sizeof(key), "%s_date", pre);
         get_date(date, sizeof(date), jstr(t, key));
         snprintf(key, sizeof(key), "%s_initialdate", pre);
         get_date(date2, sizeof(date2), jstr(t, key));
-        sb_appendf(&sb, "<div style='position:absolute;right:28px;top:336px;text-align:right'><div style='font-size:17px;color:rgba(0,0,0,0.5);'>updated <b>%s</b></div><div style='font-size:17px;color:rgba(0,0,0,0.5);'>created <b>%s</b></div></div><div class='mapText' style='font-size:26px;top:268px;left:35px;'>v%s</div>", date, date2, ver);
+        sb_appendf(&sb, "</a></div><div style='position:absolute;right:28px;top:336px;text-align:right'><div style='font-size:17px;color:rgba(255,255,255,0.5);'>updated <b style='color:#fff;'>%s</b></div><div style='font-size:17px;color:rgba(255,255,255,0.5);'>created <b style='color:#fff;'>%s</b></div></div><div class='mapText' style='font-size:26px;top:268px;left:35px;'>v%s</div><div class='mapText' style='top:275px;right:33px;'>%d<span class='material-icons' style='margin-left:10px;color:rgba(255, 255, 255, 0.5);vertical-align:middle;margin-top:-6px;font-size:30px'>thumb_up</span></div></div><div style='height:12px'></div>",
+                   date, date2, ver, (int) jnum(t, "vt"));
+        // t.vl: a YouTube embed (no iframes natively): the box stays hidden
+        sb_append(&sb, "<div id='modVid' style='display:none'></div><div id='modDescr'>");
+        snprintf(key, sizeof(key), "%s_description", pre);
+        const char *descr = jstr(t, key);
+        if (descr && *descr) sb_append_served(&sb, descr);
+        else sb_append(&sb, "No Description");
+        sb_append(&sb, "</div><div class='button mod buttonP' onclick='shareModLink(this, &quot;");
+        sb_append_js_escape(&sb, name);
+        sb_append(&sb, "&quot;)'>Share</div><div class='button mod buttonH' style='margin-left:8px' onclick='playMod(&quot;");
+        sb_append_js_escape(&sb, name);
+        sb_append(&sb, "&quot;)'>Use</div><div class='button mod buttonR' style='margin-left:8px' onclick='repPop(`Mod`)'>Report</div>");
     } else {
+        const double pl = jnum(t, "pl");
+        sb_append(&sb, "<div style='font-size:22px;margin-bottom:2px;color:#fff;'>");
+        sb_append_served(&sb, name);
+        sb_append(&sb, "</div><div style='font-size:16px;color:#fff !important;'>by <a target='_blank' href='/social.html?p=profile&q=");
+        sb_append_esc(&sb, creator);
+        sb_append(&sb, "' style='color: rgba(255,255,255,0.4);'>");
+        sb_append_esc(&sb, creator);
         comma_number(num, sizeof(num), pl);
-        sb_appendf(&sb, "<div style='position:absolute;right:30px;top:335px;text-align:right;font-size:17px;'><b>%s</b><span style='color:rgba(0,0,0,0.5);'> Plays</span><div></div><b id='totalOnline'>0</b><span style='color: rgba(0, 0, 0, 0.5);'> Online</span></div>", num);
-    }
-    sb_appendf(&sb, "<div class='mapText' style='top:275px;right:33px;'>%d<span class='material-icons' style='margin-left:10px;color:rgba(255, 255, 255, 0.5);vertical-align:middle;margin-top:-6px;font-size:30px'>thumb_up</span></div></div>", (int) vt);
-    if (!is_mod) {
-        sb_append(&sb, "<div id='mapTabsP'>");
-        append_map_tabs(&sb);
-        sb_append(&sb, "</div>");
-    }
-    // t.vl: a YouTube embed (no iframes natively): the box stays hidden
-    sb_appendf(&sb, "<div id='%sVid' style='display:none'></div><div id='%sDescr'%s>", pre, pre, is_mod ? "" : " style='padding-top:20px'");
-    snprintf(key, sizeof(key), "%s_description", pre);
-    const char *descr = jstr(t, key);
-    if (descr && *descr) sb_append_served(&sb, descr);
-    else sb_append(&sb, "No Description");
-    if (!is_mod) {
+        sb_appendf(&sb, "</a></div><div style='position:absolute;right:30px;top:350px;text-align:right;font-size:17px;'><b style='color:#fff;'>%s</b><span style='color:rgba(255,255,255,0.5);'> Plays</span><div></div><b id='totalOnline' style='color:#fff;'>0</b><span style='color: rgba(255, 255, 255, 0.5);'> Online</span></div><div class='mapPagePlB buttonS' style='width:150px;' onclick='playMap(&quot;", num);
+        sb_append_js_escape(&sb, name);
+        sb_append(&sb, "&quot;)'><span class='material-icons' style='color:#fff;font-size:40px;line-height:0px;vertical-align:middle;margin-top:-8px;'>play_arrow</span></div><div class='mapPagePlB buttonH' style='height:35px;left:245px;'onclick='shareGameTweet(`");
+        sb_append_js_escape(&sb, name);
+        comma_number(num, sizeof(num), jnum(t, "vt"));
+        sb_appendf(&sb, "`)'><img src='./img/social/twitter.png' style='width:40px;margin-bottom:-30px;position:absolute;top:2px;left:11px;' /></div><div class='mapText' style='top:285px;right:20px;'>%s<span class='material-icons' style='margin-left:10px;color:rgba(255, 255, 255, 0.5);vertical-align:middle;margin-top:-6px;font-size:30px'>thumb_up</span></div></div><div id='mapTabsP'>", num);
+        append_map_tabs(&sb, can_edit);
+        sb_appendf(&sb, "</div><div id='mapVid' style='display:none'></div><div id='mapDescr' style='padding-top:20px%s'>", g_map_tab ? ";display:none" : "");
+        snprintf(key, sizeof(key), "%s_description", pre);
+        const char *descr = jstr(t, key);
+        if (descr && *descr) sb_append_served(&sb, descr);
+        else sb_append(&sb, "No Description");
         const int ca = (int) jnum(t, "ca");
         get_date(date, sizeof(date), jstr(t, "map_initialdate"));
-        char cash[48];
-        snprintf(cash, sizeof(cash), "%.2f", round(pl / 1000 * 0.5 * 100) / 100); // UTILS.formatNumCash
+        char cash[48], cash_c[64];
+        snprintf(cash, sizeof(cash), "%.2f", round(pl / 1000 * 0.8 * 100) / 100); // formatNumCash(pl / 1000 * config.EPM)
+        snprintf(cash_c, sizeof(cash_c), "%s", cash);
         comma_number(num, sizeof(num), pl);
-        sb_appendf(&sb, "<div class='mapSubDesc'><div class='mapSubItm'><b>Category</b><br/>%s</div><div class='mapSubItm'><b>~Revenue</b><br/>$%s</div><div class='mapSubItm'><b>Plays</b><br/>%s</div><div class='mapSubItm'><b>Released</b><br/>%s</div><div class='mapSubItm'><b>Version</b><br/>v%s</div></div></div>",
-                   k_map_cats[ca >= 0 && ca < (int) (sizeof(k_map_cats) / sizeof(k_map_cats[0])) ? ca : 0], cash, num, date, ver);
-        sb_appendf(&sb, "<div id='activeGames' style='display:%s'><div class='menuSelectorHolder'><div style='position: absolute;top: 50%%;left: 50%%;transform: translate(-50%%, -50%%);color: rgba(0,0,0,0.4);'>No active servers</div></div></div>", g_map_tab == 0 ? "none" : "block");
-    } else {
-        sb_append(&sb, "</div>");
-    }
-    sb_appendf(&sb, "<div class='button %s buttonP' onclick='share%sLink(this, &quot;", pre, is_mod ? "Mod" : "Map");
-    sb_append_js_escape(&sb, name);
-    sb_append(&sb, "&quot;)'>Share</div>");
-    if (!is_mod) {
-        sb_append(&sb, "<div class='button map buttonH' onclick='hostMap(&quot;");
+        sb_appendf(&sb, "<div class='mapSubDesc'><div class='mapSubItm'><b style='color:#fff'>Category</b><br/>%s</div><div class='mapSubItm'><b style='color:#fff'>~Revenue</b><br/>$%s</div><div class='mapSubItm'><b style='color:#fff'>Plays</b><br/>%s</div><div class='mapSubItm'><b style='color:#fff'>Released</b><br/>%s</div><div class='mapSubItm'><b style='color:#fff'>Version</b><br/>v%s</div></div></div>",
+                   k_map_cats[ca >= 0 && ca < MAP_CAT_COUNT ? ca : 0], cash_c, num, date, ver);
+        sb_appendf(&sb, "<div id='activeGames' style='display:%s'></div><div id='mapLeaders' style='display:%s;'><div style='font-size:16px;margin-bottom: 2px;text-align:center;color:#fff'>Not Set Yet!</div></div>",
+                   g_map_tab == 1 ? "block" : "none", g_map_tab == 2 ? "block" : "none");
+        if (can_edit) sb_appendf(&sb, "<div id='mapData' style='display:%s;margin-bottom:20px'><div style='font-size:16px;margin-bottom: 2px'><input type='text' id='searchDInput' placeholder='Search User' onkeyup='if (window.event.keyCode==13) window.searchPData();'><div id='searchDBtn' onclick='window.searchPData();'>Search</div><div id='deleteDBtn' onclick='window.deleteDataPop();'>Delete By Key</div></div><div id='dataList'></div></div>", g_map_tab == 3 ? "block" : "none");
+        sb_append(&sb, "<div class='button map buttonP' onclick='shareMapLink(this, &quot;");
         sb_append_js_escape(&sb, name);
-        sb_append(&sb, "&quot;)'>Host</div>");
+        sb_append(&sb, "&quot;)'>Share</div><div class='button map buttonH' style='margin-left:8px' onclick='hostMap(&quot;");
+        sb_append_js_escape(&sb, name);
+        sb_append(&sb, "&quot;)'>Host</div><div class='button map buttonR' style='margin-left:8px' onclick='repPop(`Map`)'>Report</div>");
     }
-    sb_appendf(&sb, "<div class='button %s buttonS' onclick='play%s(&quot;", pre, is_mod ? "Mod" : "Map");
-    sb_append_js_escape(&sb, name);
-    sb_append(&sb, "&quot;)'>Play</div>");
     char *html = sb_finish(&sb);
     set_html(is_mod ? "modProfile" : "mapProfile", html);
     free(html);
-    if (!is_mod) {
-        const HtmlElem d = el("mapDescr");
-        if (d) html_dom_set_style(d, "display", g_map_tab == 1 ? "none" : "block");
-    }
 }
 
 static void hub_render_search(const cJSON *t) {
@@ -1453,8 +1826,7 @@ static void hub_render_search(const cJSON *t) {
         sb_append_esc(&sb, name ? name : "");
         sb_append(&sb, "</a> ");
         if (clan && clan[0]) {
-            const int rank = (int) jnum(r, "clan_rank");
-            sb_appendf(&sb, "<span class='searchPClan%s' style='color:%s' onclick='openLink(&quot;/social.html?p=clan&q=", rank == 1 ? " rainbowText" : "", clan_col(clan, rank, "rgba(0,0,0,0.4)"));
+            sb_appendf(&sb, "<span class='searchPClan' style='color:%s' onclick='openLink(&quot;/social.html?p=clan&q=", clan_col(clan, "rgba(0,0,0,0.4)"));
             sb_append_esc(&sb, clan);
             sb_append(&sb, "&quot;, &quot;_blank&quot;)'>[");
             sb_append_esc(&sb, clan);
@@ -1470,12 +1842,14 @@ static void hub_render_search(const cJSON *t) {
     free(html);
 }
 
-// $e(post): likes / comments footer
-static void append_post_footer(StrBuf *sb, const cJSON *e) {
+// f515(post, width): likes / comments footer
+static void append_post_footer(StrBuf *sb, const cJSON *e, const int width) {
     const int pid = (int) jnum(e, "pid");
     const int liked = jnum(e, "dlk") == 1;
-    sb_appendf(sb, "<div class='likesHolder' ><span id='comVal%d'>%d</span> <span onclick='openPost(%d)' class='material-icons likeBtn' style='font-size:33px;vertical-align:middle;margin-top:-4px;margin-right:20px'>chat_bubble_outline</span><span id='likesVal%d'>%d</span> Likes <span class='material-icons likeBtn'  onclick='likePost(%d,this)'  style='font-size:33px;vertical-align:middle;margin-top:-5px;color:%s'>favorite%s</span></div>",
-               pid, (int) jnum(e, "cnt"), pid, pid, (int) jnum(e, "vot"), pid, liked ? "#eb4034" : "#000", liked ? "" : "_border");
+    sb_append(sb, "<div class='likesHolder' ");
+    if (width) sb_appendf(sb, "style='width:%dpx'", width);
+    sb_appendf(sb, "><span class='shareBtnHol' onclick='copyPost(this, %d)'>Share</span><span id='comVal%d' style='color:#fff;'>%d</span> <span onclick='openPost(%d)' class='material-icons likeBtn' style='font-size:33px;vertical-align:middle;margin-top:-4px;margin-right:20px;color:rgba(255,255,255,0.5)'>chat_bubble_outline</span><span id='likesVal%d' style='color:#fff'>%d</span> Likes <span class='material-icons likeBtn'  onclick='likePost(%d,this)'  style='font-size:33px;vertical-align:middle;margin-top:-5px;color:%s'>favorite%s</span></div>",
+               pid, pid, (int) jnum(e, "cnt"), pid, pid, (int) jnum(e, "vot"), pid, liked ? "#eb4034" : "#fff", liked ? "" : "_border");
 }
 
 static void append_post_author(StrBuf *sb, const cJSON *e) {
@@ -1483,11 +1857,11 @@ static void append_post_author(StrBuf *sb, const cJSON *e) {
     const char *cln = jstr(e, "cln");
     sb_append(sb, "<span class='postLink'><a href='/social.html?p=profile&q=");
     sb_append_esc(sb, pln ? pln : "");
-    sb_append(sb, "'>");
+    sb_append(sb, "' style='color:#fff'>");
     sb_append_esc(sb, pln ? pln : "");
     sb_append(sb, "</a>");
     if (cln && cln[0]) {
-        sb_appendf(sb, " <span style='color:%s'>[", clan_col(cln, (int) jnum(e, "clr"), "rgba(0,0,0,0.2)"));
+        sb_appendf(sb, " <span style='color:%s'>[", clan_col(cln, "rgba(255,255,255,0.2)"));
         sb_append_esc(sb, cln);
         sb_append(sb, "]</span>");
     }
@@ -1495,8 +1869,8 @@ static void append_post_author(StrBuf *sb, const cJSON *e) {
     if (jnum(e, "ftr")) sb_append(sb, " <i class='material-icons' style='margin-bottom:5px;font-size:25px;color:#40C4FF;vertical-align:middle;margin-left:-2px'>check_circle</i>");
 }
 
-// Je(post, single): one feed post (text posts and game links; skin unboxings need the
-// store table KrunkNative does not ship)
+// f516(post, single, fromProfile): one feed post (text posts, game / mod links, invites;
+// skin unboxings need the v7 skin table KrunkNative's viewer data does not carry yet)
 static void append_post(StrBuf *sb, const cJSON *e, const int single) {
     char ago[64] = "Just Now";
     if (jnum(e, "tim") > 0) {
@@ -1505,9 +1879,9 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
     }
     char flw[32];
     comma_number(flw, sizeof(flw), jnum(e, "flw"));
-    sb_appendf(sb, "<div %s><div class='postHead'><img class='postPFP' onerror='this.onerror=null;this.src=\"./img/favicon.png\";'src='./img/favicon.png' /><div class='postInfo'><div>", single ? "" : "class='socPost'");
+    sb_appendf(sb, "<div></div><div %s><div class='postHead'><img class='postPFP' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png' /><div class='postInfo'><div>", single ? "" : "class='socPost'");
     append_post_author(sb, e);
-    sb_appendf(sb, "<span class='postTime'>%s</span></div><span class='postSubInfo'>%s Followers</span></div><div class='postContent'><div style='overflow-x:hidden;'>", ago, flw);
+    sb_appendf(sb, "<span class='postTime'>%s</span></div><span class='postSubInfo'>%s Followers</span></div><div class='postContent'><div style='overflow-x:hidden;color:rgba(255,255,255,0.8);user-select: text;'>", ago, flw);
     const char *txt = jstr(e, "txt");
     if (txt) sb_append_served(sb, txt);
     const int typ = (int) jnum(e, "typ");
@@ -1526,7 +1900,7 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
         sb_append(sb, "' target='_blank' class='blueLink'>Join Now!</a>");
     }
     sb_append(sb, "</div></div></div>");
-    if (!single) append_post_footer(sb, e);
+    if (!single) append_post_footer(sb, e, 0);
     sb_append(sb, "</div>");
 }
 
@@ -1542,7 +1916,11 @@ static void hub_render_feed(const cJSON *t) {
     StrBuf sb = {0};
     if (!cJSON_IsArray(t) || !cJSON_GetArraySize(t)) sb_append(&sb, "<div style='color:#fff;font-size:40px;margin-top:20px'>No Current Posts. Follow some Players!</div>");
     const cJSON *post;
-    cJSON_ArrayForEach(post, t) append_post(&sb, post, 0);
+    int i = 0, ads = 0;
+    cJSON_ArrayForEach(post, t) {
+        append_post(&sb, post, 0);
+        if (i++ % 3 == 0) sb_appendf(&sb, "<div id=\"innerDiv%d\" class=\"innerContent\"></div>", ++ads); // the in-feed ad slots (empty: no ads)
+    }
     char *html = sb_finish(&sb);
     set_html("postHolder", html);
     free(html);
@@ -1550,10 +1928,7 @@ static void hub_render_feed(const cJSON *t) {
 
 // ------------------------------------------------------------------ brain: market, item sales, clan (social.js io_0)
 
-#include "../viewer/viewer_store.h"
 
-#define MARKET_MIN_LVL 20       // config.marketMinLVl
-#define TRADE_MIN_LVL 20        // config.tradeMinLvl
 #define SALE_GRACE_MS 300000.0  // config.saleGrace
 #define SALE_MAX 10000000       // config.saleMax
 
@@ -1646,23 +2021,11 @@ static int rarity_animate(const ViewerSkin *s) {
     return s && s->rarity == 6; // store.rarities[6] (Unobtainable) is the only animated rarity
 }
 
-// UTILS.getPreview(skin, store): textures/<sprays/<id> | previews/...>.png
+// UTILS.getPreview(skin, store): textures/<sprays/<id> | previews/...>.png on the asset host
 static void skin_preview(char *out, const size_t n, const ViewerSkin *skin) {
-    const char *types = skin->type >= 0 && skin->type < g_viewer_type_count ? g_viewer_types[skin->type] : "";
-    if (skin->type == 4 && !(skin->flags & VS_IS_3D)) snprintf(out, n, "textures/sprays/%d.png", skin->id);
-    else if (skin->type && skin->type != 3) {
-        if (viewer_skin_tex_truthy(skin)) snprintf(out, n, "textures/previews/cosmetics/%d_%d_%s.png", skin->type, skin->id, skin->tex);
-        else snprintf(out, n, "textures/previews/cosmetics/%d_%d.png", skin->type, skin->id);
-    } else if (skin->type == 3) {
-        if (skin->pat >= 0) snprintf(out, n, "textures/previews/%s%d_c%d.png", types, skin->id, skin->pat);
-        else if (skin->tex) snprintf(out, n, "textures/previews/%s%d_%s.png", types, skin->id, skin->tex);
-        else snprintf(out, n, "textures/previews/%s%d.png", types, skin->id);
-    } else if (skin->mid >= 0) {
-        if (skin->mid_t >= 0) snprintf(out, n, "textures/previews/%s%d_m%d_%d.png", types, skin->weapon, skin->mid, skin->mid_t);
-        else snprintf(out, n, "textures/previews/%s%d_m%d.png", types, skin->weapon, skin->mid);
-    } else if (skin->pat >= 0) snprintf(out, n, "textures/previews/%s%d_c%d.png", types, skin->weapon, skin->pat);
-    else if (viewer_skin_tex_truthy(skin)) snprintf(out, n, "textures/previews/%s%d_%s.png", types, skin->weapon, skin->tex);
-    else snprintf(out, n, "textures/previews/%s%d_%d.png", types, skin->weapon, skin->id);
+    char path[256];
+    viewer_skin_preview_path(skin, path, sizeof(path));
+    html_dom_asset_url(path, out, n);
 }
 
 // me(skin): the item's type line
@@ -2090,27 +2453,35 @@ static void hub_render_itemsales(const cJSON *t, const cJSON *owners) {
     set_display("itemsalesHolder", "block");
 }
 
-// io_0("clan", tag, {clan_name, clan_rank, clan_score, creatorname, members[{p, r, s, su, ve, h}]})
+// io_0("clan", tag, {clan_name, clan_score, creatorname, clan_link4, members[{p, r, s, su, ve, h}]})
 static void hub_render_clan(const cJSON *t) {
     static const char *const roles[4] = {"Recruit", "Soldier", "Captain", "Commander"}; // config.clanRoles
     static const int role_perms[4] = {0, 0, 1, 2};
     const char *name = jstr(t, "clan_name");
     const char *creator = jstr(t, "creatorname");
-    const int rank = (int) jnum(t, "clan_rank");
+    const char *discord = jstr(t, "clan_link4");
     const cJSON *members = cJSON_GetObjectItemCaseSensitive(t, "members");
     const int count = cJSON_GetArraySize(members);
     char score[32];
     comma_number(score, sizeof(score), jnum(t, "clan_score"));
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='scrollItem'><span style='color:%s' class='%s'>[", clan_col(name, rank, ""), rank == 1 ? "rainbowText" : "");
+    sb_appendf(&sb, "<div class='scrollItem'><div style='height:2px'></div><img class='clanLogoP'><div class='clanInfH'><span style='font-size:24px;color:%s'>[", clan_col(name, "rgba(255,255,255,0.2)"));
     sb_append_esc(&sb, name ? name : "");
-    sb_appendf(&sb, "]</span> (%d)<span style='color:rgba(0,0,0,0.3)'> by <a target='_blank' href='/social.html?p=profile&q=", count);
+    sb_append(&sb, "]</span><span style='color:rgba(255,255,255,0.3)'> by <a target='_blank' href='/social.html?p=profile&q=");
     sb_append_esc(&sb, creator ? creator : "");
     sb_append(&sb, "' class='lName'>");
     sb_append_esc(&sb, creator ? creator : "");
-    sb_appendf(&sb, "</a></span><div style='float:right'>%s</div><div style='margin-top:15px;margin-bottom:8px'><div class='clanBut' style='background-color:#659ad6' onclick='clanRS(1)'>Clan Discord</div><div class='clanBut' style='float:right;background-color:#c365d6' onclick='clanRS(0, &quot;", score);
+    sb_appendf(&sb, "</a></span><div style='float:right;color:rgba(255,255,255,0.5)'>%s</div><div style='margin-top:4px;color:rgba(255,255,255,0.5)'><span style='font-size:26px;color:rgba(255,255,255,0.5)'>100.00</span>  0.00 (0.00%%)</div></div>", score);
+    sb_appendf(&sb, "<div class='clanStatH'><div style='color: rgba(255,255,255,.5);'>Members<span style='float:right;color: rgba(255,255,255,.5);'>%d</span></div><div style='color: rgba(255,255,255,.5);'>Market Cap<span style='float:right;color: rgba(255,255,255,.5);'>~</span></div><div style='color: rgba(255,255,255,.5);'>Purchase Power<span style='float:right;color: rgba(255,255,255,.5);'>~</span></div></div>", count);
+    sb_append(&sb, "<div style='margin-top:15px;margin-bottom:8px'><div class='clanBut' style='background-color:#659ad6' onclick='");
+    if (discord && *discord) {
+        sb_append(&sb, "window.open(&quot;https://discord.gg/");
+        sb_append_esc(&sb, discord);
+        sb_append(&sb, "&quot;);");
+    }
+    sb_append(&sb, "'>Clan Discord</div><div class='clanBut' style='float:right;background-color:#c365d6' onclick='clanRS(0, `");
     sb_append_esc(&sb, name ? name : "");
-    sb_append(&sb, "&quot;)'>Send Request</div></div></div>");
+    sb_append(&sb, "`)'>Request to Join</div></div></div>");
     char *html = sb_finish(&sb);
     set_html("clanInfo", html);
     free(html);
@@ -2126,32 +2497,32 @@ static void hub_render_clan(const cJSON *t) {
             sorted[j - 1] = tmp;
         }
     }
-    sb_append(&sb, "<div class='scrollItem' style='max-height: calc(100% - 80px);'>");
+    sb_append(&sb, "<div class='scrollItem' style='max-height: calc(100% - 285px);'>");
     for (int re = 3; re >= 0; --re) {
         int ie = 0;
         StrBuf le = {0};
         for (int v = 0; v < n; v++) {
-            const char *p = jstr(sorted[v], "p");
-            const int is_creator = creator && p && !strcmp(creator, p);
+            const char *pl = jstr(sorted[v], "p");
+            const int is_creator = creator && pl && !strcmp(creator, pl);
             if (!((is_creator && role_perms[re] == 2) || ((int) jnum(sorted[v], "r") == re && !is_creator))) continue;
             ie++;
             sb_append(&le, "<div style='padding-left:8px;padding-right:8px'>");
             if (jnum(sorted[v], "su")) sb_append(&le, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
             if (jnum(sorted[v], "ve")) sb_append(&le, "<i class='material-icons' style='color:#40C4FF;margin-top:4px;margin-right: 4px;font-size:28px;vertical-align:baseline;'>check_circle</i>");
             sb_append(&le, "<a target='_blank' href='/social.html?p=profile&q=");
-            sb_append_esc(&le, p ? p : "");
+            sb_append_esc(&le, pl ? pl : "");
             sb_appendf(&le, "' class='lName' style='%s'>", jnum(sorted[v], "h") ? "color:#E85656" : "");
-            sb_append_esc(&le, p ? p : "");
+            sb_append_esc(&le, pl ? pl : "");
             sb_append(&le, "</a><div style='float:right'>");
             append_level_cell(&le, jnum(sorted[v], "s"));
             sb_append(&le, "</div></div>");
         }
-        sb_appendf(&sb, "<div style='margin-top:%dpx;margin-bottom:5px;font-size:22px;background-color:rgba(0,0,0,0.1);padding:3px;padding-left:10px;padding-right:10px;border-radius:5px'>%ss <span style='float:right;color:rgba(0,0,0,0.4)'>%d Members</span></div>",
+        sb_appendf(&sb, "<div style='margin-top:%dpx;margin-bottom:5px;font-size:22px;background-color:rgba(255,255,255,0.1);padding:3px;padding-left:10px;padding-right:10px;border-radius:5px;color:rgba(255,255,255,0.5)'>%ss <span style='float:right;color:rgba(255,255,255,0.4)'>%d Members</span></div>",
                    role_perms[re] == 2 ? 10 : 18, roles[re], ie);
         char *list = sb_finish(&le);
         sb_append(&sb, list);
         free(list);
-        if (!ie) sb_appendf(&sb, "<div style='color:rgba(0,0,0,0.5);padding-left:8px'>No %ss</div>", roles[re]);
+        if (!ie) sb_appendf(&sb, "<div style='color:rgba(255,255,255,0.5);padding-left:8px'>No %ss</div>", roles[re]);
     }
     sb_append(&sb, "</div>");
     free(sorted);
@@ -2213,6 +2584,249 @@ static void hub_render_item_graph(const cJSON *days) {
     const double a = n ? floor(avg / n) : 0;
     snprintf(s, sizeof(s), "%d <span style='color:#fff'>KR</span>", isfinite(a) ? (int) a : 0);
     set_html("averageCostHeader", s);
+}
+
+// ------------------------------------------------------------------ item list (io_0 "items", f494-f496, itemFilter)
+
+#define ITEMS_CHUNK 500
+typedef struct {
+    int seas, rarity, weapon, type; // -1 = no filter (vO81 keys); seas 0..: Season n
+    int blackm;                     // categories ViewerSkin has no field for: always empty
+    int sort;                       // vLN0570: 0 normal (rarity), 1 newest, 2 oldest
+    int *list;                      // vA156: skin indices
+    int count, shown;               // vLN0571 chunks rendered
+} HubItems;
+static HubItems g_items = {-1, -1, -1, -1, 0, 0, NULL, 0, 0};
+
+static void items_card(StrBuf *sb, const int index) {
+    const ViewerSkin *sk = hub_skin(index);
+    if (!sk) return;
+    const char *col = rarity_color(sk);
+    char path[256], url[256];
+    viewer_skin_preview_path(sk, path, sizeof(path));
+    html_dom_asset_url(path, url, sizeof(url));
+    sb_appendf(sb, "<div class='marketCard%s' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(`tick_0`,0.1)'>",
+               g_hub.rarity_anim && rarity_animate(sk) ? " rainbow" : "", col, col);
+    sb_append_esc(sb, sk->name);
+    sb_appendf(sb, "<div class='itemOwn'>%s</div>", skin_type_label(sk));
+    if (sk->type == 4) {
+        sb_appendf(sb, "<div class='sprayMarketImg' style='background: url(&quot;%s&quot;);", url);
+        if (sk->frames) sb_appendf(sb, "animation: itemAnm%d %.15gs steps(%d) infinite;", sk->frames, 1 + sk->frame_t / 1000.0, sk->frames);
+        sb_append(sb, "'></div>");
+    } else {
+        const char *suffix = !sk->type ? "" : sk->type >= 16 ? "P" : sk->type >= 8 ? "S" : sk->type == 5 ? "D" : "C";
+        sb_appendf(sb, "<img draggable='false' loading='lazy' class='marketImg%s%s' src='%s'/>", suffix, (sk->flags & VS_RGB) ? " rgbHue" : "", url);
+    }
+    if (skin_animated(sk)) sb_append(sb, "<div class='material-icons isAnim'>loop</div>");
+    sb_appendf(sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='viewItem(%d)'>Preview</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openLink(&quot;/social.html?p=market&i=%d&quot;, &quot;_blank&quot;)'>Listings</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a></div></div>",
+               index, index, index);
+}
+
+// f496(): the next chunk of 500
+static void items_more(void) {
+    const int from = g_items.shown * ITEMS_CHUNK;
+    if (from >= g_items.count) return;
+    StrBuf sb = {0};
+    for (int i = from; i < g_items.count && i < from + ITEMS_CHUNK; i++) items_card(&sb, g_items.list[i]);
+    char *html = sb_finish(&sb);
+    const HtmlElem list = el("itemsList");
+    if (list) html_dom_insert_html(list, HTML_INSERT_BEFORE_END, html);
+    free(html);
+    g_items.shown++;
+}
+
+static int items_rarity_cmp(const void *pa, const void *pb) { // rarity desc, then the table order
+    const int a = *(const int *) pa, b = *(const int *) pb;
+    const ViewerSkin *sa = hub_skin(a), *sbk = hub_skin(b);
+    const int ra = sa ? sa->rarity : 0, rb = sbk ? sbk->rarity : 0;
+    if (ra != rb) return rb - ra;
+    return a - b;
+}
+
+static int items_index_cmp(const void *pa, const void *pb) { return *(const int *) pa - *(const int *) pb; }
+
+// f494(): the keyframes, the count, sort, first chunk
+static void items_show(void) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<style>");
+    for (int i = 0; i < 11; i++) sb_appendf(&sb, "@keyframes itemAnm%d {100%%{background-position:-%dpx}}", i, i * 200);
+    sb_append(&sb, "</style>");
+    char *html = sb_finish(&sb);
+    set_html("itemsList", html);
+    free(html);
+    char cnt[32];
+    snprintf(cnt, sizeof(cnt), "%d Items", g_items.count);
+    const HtmlElem c = el("itemCount");
+    if (c) html_dom_set_text(c, cnt);
+    g_items.shown = 0;
+    if (g_items.sort) {
+        qsort(g_items.list, (size_t) g_items.count, sizeof(int), items_index_cmp);
+        if (g_items.sort != 2) {
+            for (int i = 0, j = g_items.count - 1; i < j; i++, j--) {
+                const int t = g_items.list[i];
+                g_items.list[i] = g_items.list[j];
+                g_items.list[j] = t;
+            }
+        }
+    } else {
+        qsort(g_items.list, (size_t) g_items.count, sizeof(int), items_rarity_cmp);
+    }
+    items_more();
+}
+
+static void items_alloc(void) {
+    if (!g_items.list) g_items.list = calloc((size_t) (g_viewer_skin_count ? g_viewer_skin_count : 1), sizeof(int));
+    g_items.count = 0;
+}
+
+// f495(): store.skins filtered by vO81
+static void items_filter_apply(void) {
+    items_alloc();
+    for (int i = 0; g_items.list && i < g_viewer_skin_count; i++) {
+        const ViewerSkin *sk = &g_viewer_skins[i];
+        if (sk->flags & VS_BLOCKED) continue;
+        if (g_items.blackm) continue;
+        if (g_items.seas >= 0 && (sk->seas ? sk->seas : 1) != g_items.seas) continue;
+        if (g_items.rarity >= 0 && sk->rarity != g_items.rarity) continue;
+        if (g_items.weapon >= 0 && sk->weapon != g_items.weapon) continue;
+        if (g_items.type >= 0 && sk->type != g_items.type) continue;
+        g_items.list[g_items.count++] = i;
+    }
+    items_show();
+}
+
+// itemFilter(key, value): key seas / rarity / weapon / type / sort / category / the
+// category groups (blackM, drop, ranked, challenge, spinable)
+static void items_filter(const char *key, const char *value) {
+    const int all = !value || !strcmp(value, "all");
+    if (!strcmp(key, "sort")) {
+        g_items.sort = all ? 0 : !strcmp(value, "new") ? 1 : !strcmp(value, "old") ? 2 : 0;
+        items_filter_apply();
+        return;
+    }
+    const int v = all ? -1 : atoi(value);
+    if (!strcmp(key, "weapon")) { g_items.type = -1; g_items.weapon = v; }
+    else if (!strcmp(key, "type")) { g_items.weapon = -1; g_items.type = v; }
+    else if (!strcmp(key, "rarity")) g_items.rarity = v;
+    else if (!strcmp(key, "seas")) { g_items.blackm = 0; g_items.seas = v; }
+    else if (!strcmp(key, "category")) { g_items.seas = -1; g_items.blackm = 0; }
+    else { g_items.seas = -1; g_items.blackm = !all; } // blackM / drop / ranked / challenge / spinable: no such fields in the table
+    const HtmlElem in = el("itemFilterInput");
+    if (in) html_dom_set_value(in, "");
+    items_filter_apply();
+}
+
+// itemFilterSearch(text): every skin whose name / weapon matches (case-insensitive)
+static void items_search(const char *text) {
+    g_items.seas = g_items.rarity = g_items.weapon = g_items.type = -1;
+    g_items.blackm = 0;
+    g_items.sort = 0;
+    static const char *const sels[] = {"itemCategory", "itemWeapon", "itemRarity", "itemCosm", "itemSortOther"};
+    for (size_t i = 0; i < sizeof(sels) / sizeof(sels[0]); i++) {
+        const HtmlElem e = el(sels[i]);
+        if (e) {
+            HtmlElem first = html_dom_first_child(e);
+            char t[64] = "";
+            if (first) html_dom_get_text(first, t, sizeof(t));
+            html_dom_set_value(e, t);
+        }
+    }
+    items_alloc();
+    for (int i = 0; g_items.list && i < g_viewer_skin_count; i++) {
+        const ViewerSkin *sk = &g_viewer_skins[i];
+        int hit = !text || !*text;
+        if (!hit && sk->name && contains_ci_str(sk->name, text)) hit = 1;
+        if (!hit && sk->weapon >= 1 && sk->weapon <= WEAPON_COUNT && g_weapons[sk->weapon - 1] && contains_ci_str(g_weapons[sk->weapon - 1]->name, text)) hit = 1;
+        if (!hit && sk->creator && contains_ci_str(sk->creator, text)) hit = 1;
+        if (sk->flags & VS_BLOCKED) hit = 0;
+        if (hit) g_items.list[g_items.count++] = i;
+    }
+    items_show();
+}
+
+// itemFilterChange(select): the chosen <option>'s onclick (the native engine does not click
+// options): the option's text is looked up in what items_page wrote.
+static void items_filter_change(const HtmlElem sel) {
+    char id[32] = "", text[96] = "";
+    if (!sel) return;
+    html_dom_get_attr(sel, "id", id, sizeof(id));
+    html_dom_get_value(sel, text, sizeof(text));
+    if (!strcmp(id, "itemCategory")) {
+        if (!strcmp(text, "All")) items_filter("category", "all");
+        else if (!strncmp(text, "Season ", 7)) items_filter("seas", text + 7);
+        else items_filter("blackM", "true");
+    } else if (!strcmp(id, "itemRarity")) {
+        if (!strcmp(text, "All")) items_filter("rarity", "all");
+        for (int i = 0; i < g_viewer_rarity_count; i++) {
+            if (!strcmp(g_viewer_rarities[i].name, text)) {
+                char v[8];
+                snprintf(v, sizeof(v), "%d", i);
+                items_filter("rarity", v);
+            }
+        }
+    } else if (!strcmp(id, "itemWeapon")) {
+        if (!strcmp(text, "All")) items_filter("weapon", "all");
+        for (int i = 0; i < WEAPON_COUNT; i++) {
+            if (g_weapons[i] && g_weapons[i]->name && !strcmp(g_weapons[i]->name, text)) {
+                char v[8];
+                snprintf(v, sizeof(v), "%d", i + 1);
+                items_filter("weapon", v);
+                break;
+            }
+        }
+    } else if (!strcmp(id, "itemCosm")) {
+        if (!strcmp(text, "All")) items_filter("type", "all");
+        for (int i = 1; i < g_viewer_type_count; i++) {
+            char name[32];
+            snprintf(name, sizeof(name), "%s", g_viewer_types[i]);
+            char *slash = strchr(name, '/');
+            if (slash) *slash = 0;
+            name[0] = (char) toupper((unsigned char) name[0]);
+            if (!strcmp(name, text)) {
+                char v[8];
+                snprintf(v, sizeof(v), "%d", i);
+                items_filter("type", v);
+            }
+        }
+    } else if (!strcmp(id, "itemSortOther")) {
+        items_filter("sort", !strcmp(text, "Newest") ? "new" : !strcmp(text, "Oldest") ? "old" : "all");
+    }
+}
+
+static void items_page(const char *a, const char *k) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<select id='itemCategory' onchange='itemFilterChange(this)'><option disabled selected>Category</option><option onclick='itemFilter(`category`,`all`)'>All</option>");
+    for (int i = 1; i <= 7; i++) sb_appendf(&sb, "<option onclick='itemFilter(`seas`,%d)'>Season %d</option>", i, i); // config.currentSeason
+    sb_append(&sb, "<option onclick='itemFilter(`blackM`,true)'>Black Market</option><option onclick='itemFilter(`drop`,true)'>Drops</option><option onclick='itemFilter(`ranked`,true)'>Ranked</option><option onclick='itemFilter(`challenge`,true)'>Challenge</option><option onclick='itemFilter(`spinable`,true)'>Spinable</option></select>");
+    sb_append(&sb, "<select id='itemRarity' onchange='itemFilterChange(this)'><option disabled selected>Rarity</option><option onclick='itemFilter(`rarity`,`all`)'>All</option>");
+    for (int i = 0; i < g_viewer_rarity_count; i++) sb_appendf(&sb, "<option onclick='itemFilter(`rarity`,%d)'>%s</option>", i, g_viewer_rarities[i].name);
+    sb_append(&sb, "</select><select id='itemWeapon' onchange='itemFilterChange(this)'><option disabled selected>Weapon</option><option onclick='itemFilter(`weapon`,`all`)'>All</option>");
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        if (!g_weapons[i] || g_weapons[i]->melee || g_weapons[i]->equipment) continue;
+        sb_appendf(&sb, "<option onclick='itemFilter(`weapon`,%d)'>%s</option>", i + 1, g_weapons[i]->name);
+    }
+    sb_append(&sb, "</select><select id='itemCosm' onchange='itemFilterChange(this)'><option disabled selected>Cosmetics</option><option onclick='itemFilter(`type`,`all`)'>All</option>");
+    for (int i = 1; i < g_viewer_type_count; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "%s", g_viewer_types[i]);
+        char *slash = strchr(name, '/');
+        if (slash) *slash = 0;
+        name[0] = (char) toupper((unsigned char) name[0]);
+        sb_appendf(&sb, "<option onclick='itemFilter(`type`,%d)'>%s</option>", i, name);
+    }
+    sb_append(&sb, "</select><select id='itemSortOther' onchange='itemFilterChange(this)'><option disabled selected>Sort</option><option onclick='itemFilter(`sort`,`all`)'>Normal</option><option onclick='itemFilter(`sort`,`new`)'>Newest</option><option onclick='itemFilter(`sort`,`old`)'>Oldest</option></select>");
+    sb_append(&sb, "<input type='text' id='itemFilterInput' placeholder='Search Item' onkeyup='itemFilterSearch(this.value)'><div id='itemCount'></div>");
+    char *html = sb_finish(&sb);
+    set_html("itemsListNav", html);
+    free(html);
+    set_display("itemsHolder", "block");
+    set_html("itemsList", "");
+    g_items.seas = g_items.rarity = g_items.weapon = g_items.type = -1;
+    g_items.blackm = 0;
+    g_items.sort = 0;
+    items_filter("seas", "all");
+    // ?p=items&q=<key>&s=<value>: a preset filter
+    if (a && *a && strcmp(a, "items") && k && *k) items_filter(a, k);
 }
 
 // ------------------------------------------------------------------ brain: market popups (showPopup and friends)
@@ -2319,121 +2933,140 @@ static void remove_card(const char *page, const int uid) {
     if (e) html_dom_remove(e);
 }
 
-// filterPopup / sortPopup: the market search and inventory sort panels
-static void market_filter_popup(const int sort) {
+// filterPopup / sortPopup (v7: genericPopup(..., "filterPop" | "sortPop"); the panel's state
+// lives on in g_filter_state between popups, as v7 keeps the popup's innerHTML)
+static int filter_weapon_shown(const int a) {
+    return g_weapons[a] && !g_weapons[a]->melee && !g_weapons[a]->equipment;
+}
+
+static void filter_state_save(const int sort) {
+    HubFilterState *st = &g_filter_state[sort];
     const char *pre = sort ? "Sort" : "Filt";
-    reset_pops();
-    set_display(sort ? "sortPop" : "filterPop", "block");
-    const HtmlElem pop = el(sort ? "sortPop" : "filterPop");
-    if (!pop || html_dom_first_child(pop)) return; // built once (Be / ze)
-    StrBuf sb = {0};
-    if (!sort) sb_append(&sb, "<div class='filterName'>Sort</div><div id='orderBySel'><select id='sortFilt'><option value='0'>Highest Price</option><option value='1' selected>Lowest Price</option></select></div>");
-    sb_appendf(&sb, "<div class='filterName'>Season</div><div id='orderBySel'><select id='sea%s'><option value='0'>All Seasons</option>", pre);
-    for (int s = 1; s <= g_viewer_current_season; s++) sb_appendf(&sb, "<option>%d</option>", s);
-    sb_append(&sb, "</select></div>");
-    if (sort) sb_append(&sb, "<div class='filterName' style='position: relative;display: block;width: 100%;'>Only Show Missing<label class='switchsml'><input type='checkbox' id='onlyMissing'><span class='sliderSml2'></span></label></div>");
+    char id[32];
+    for (int r = 0; r < g_viewer_rarity_count && r < 40; r++) {
+        snprintf(id, sizeof(id), "rar%s%d", pre, r);
+        if (el(id)) st->checked[0][r] = html_dom_get_checked(el(id));
+    }
+    for (int r = 0; r < WEAPON_COUNT && r < 40; r++) {
+        snprintf(id, sizeof(id), "wep%s%d", pre, r);
+        if (el(id)) st->checked[1][r] = html_dom_get_checked(el(id));
+    }
+    for (int r = 1; r < g_viewer_type_count && r < 40; r++) {
+        snprintf(id, sizeof(id), "type%s%d", pre, r);
+        if (el(id)) st->checked[2][r] = html_dom_get_checked(el(id));
+    }
+    const HtmlElem in = el(sort ? "invSortTxt" : "marketFiltTxt");
+    if (in) html_dom_get_value(in, st->text, sizeof(st->text));
+    snprintf(id, sizeof(id), "sea%s", pre);
+    if (el(id)) html_dom_get_value(el(id), st->season, sizeof(st->season));
+    if (!sort && el("sortFilt")) html_dom_get_value(el("sortFilt"), st->order, sizeof(st->order));
+    if (sort && el("onlyMissing")) st->missing = html_dom_get_checked(el("onlyMissing"));
+}
+
+static void market_filter_popup(const int sort) {
+    HubFilterState *st = &g_filter_state[sort];
+    if (!st->built) {
+        st->built = 1;
+        for (int g = 0; g < 3; g++) for (int i = 0; i < 40; i++) st->checked[g][i] = 1;
+        snprintf(st->season, sizeof(st->season), "0");
+        snprintf(st->order, sizeof(st->order), "1");
+    }
+    const char *pre = sort ? "Sort" : "Filt";
     const char *nav = sort ? "sort" : "filter";
-    sb_appendf(&sb, "<input type='search' id='%s' placeholder='Keyword: Sniper, Plasma, Wings' /><div class='filterNav' id='%sNav_0' onclick='switch%s(0)' style='color:#faa332'>Rarity</div><div class='filterNav' id='%sNav_1' onclick='switch%s(1)'>Weapons</div><div class='filterNav' id='%sNav_2' onclick='switch%s(2)'>Other</div><div id='%sTog' onclick='toggle%ss()'>Toggle</div>",
-               sort ? "invSortTxt" : "marketFiltTxt", nav, sort ? "Sort" : "Filter", nav, sort ? "Sort" : "Filter", nav, sort ? "Sort" : "Filter", sort ? "sort" : "filter", sort ? "Sort" : "Filter");
+    StrBuf sb = {0};
+    if (!sort) {
+        sb_appendf(&sb, "<div class='filterPopHeader'>Market Search</div><div class='filterName'>Sort</div><div id='orderBySel'><select id='sortFilt' onchange='retainSelected(this)'><option value='0'%s>Highest Price</option><option value='1'%s>Lowest Price</option></select></div>",
+                   !strcmp(st->order, "0") ? " selected" : "", strcmp(st->order, "0") ? " selected" : "");
+    } else {
+        sb_append(&sb, "<div class='filterPopHeader'>Sort Inventory</div>");
+    }
+    sb_appendf(&sb, "<div class='filterName'>Season</div><div id='orderBySel'><select id='sea%s' onchange='retainSelected(this)'><option value='0'>All Seasons</option>", pre);
+    for (int s2 = 1; s2 <= 7; s2++) sb_appendf(&sb, "<option%s>%d</option>", atoi(st->season) == s2 ? " selected" : "", s2); // config.currentSeason
+    sb_append(&sb, "</select></div>");
+    if (sort) sb_appendf(&sb, "<div class='filterName' style='position: relative;display: block;width: 100%%;'>Only Show Missing<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='onlyMissing'%s><span class='filterSlider'></span></label></div>", st->missing ? " checked" : "");
+    sb_appendf(&sb, "<input type='search' id='%s' onkeydown='if(window.event.keyCode==13) run%s()' placeholder='Keyword: Sniper, Plasma, Wings' value='", sort ? "invSortTxt" : "marketFiltTxt", sort ? "Sort" : "Filter");
+    sb_append_esc(&sb, st->text);
+    sb_appendf(&sb, "' /><div class='filterNav' id='%sNav_0' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='switchSortFilter(%d, 0)' style='color:#faa332'>Rarities</div><div class='filterNav' id='%sNav_1' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='switchSortFilter(%d, 1)'>Weapons</div><div class='filterNav' id='%sNav_2' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='switchSortFilter(%d, 2)'>Cosmetics</div><div id='%sTog' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='toggleSortFilters(%d)'>Toggle</div>",
+               nav, sort, nav, sort, nav, sort, nav, sort);
     sb_appendf(&sb, "<div class='filterDiv' id='%sDiv_0'>", nav);
     for (int a = g_viewer_rarity_count - 1; a >= 0; --a) {
-        sb_appendf(&sb, "<div class='raritySel%s' style='color:%s'>%s<label class='switchsml'><input type='checkbox' onclick='' id='rar%s%d' checked><span class='sliderSml2'></span></label></div>",
-                   a == 6 ? " rainbowText" : "", g_viewer_rarities[a].color, g_viewer_rarities[a].name, pre, a);
+        sb_append(&sb, "<div class='raritySel'>");
+        if (g_hub.rarity_anim && a == 6) sb_append(&sb, "<div class='colCub rainbowBG'></div>");
+        else sb_appendf(&sb, "<div class='colCub' style='background-color:%s'></div>", g_viewer_rarities[a].color);
+        sb_appendf(&sb, "%s<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='rar%s%d'%s><span class='filterSlider'></span></label></div>",
+                   g_viewer_rarities[a].name, pre, a, st->checked[0][a] ? " checked" : "");
     }
     sb_appendf(&sb, "</div><div class='filterDiv' id='%sDiv_1' style='display:none;'>", nav);
-    for (int a = 0; a < WEAPON_COUNT; ++a) {
-        if (!g_weapons[a] || g_weapons[a]->melee || a == 17) continue; // melee, Bomb (type 3)
-        sb_appendf(&sb, "<div class='wepSel' style='color:#fff'>%s<label class='switchsml'><input type='checkbox' onclick='' id='wep%s%d' checked><span class='sliderSml2'></span></label></div>", g_weapons[a]->name, pre, a);
+    for (int a = 0; a < WEAPON_COUNT && a < 40; ++a) {
+        if (!filter_weapon_shown(a)) continue;
+        sb_appendf(&sb, "<div class='wepSel' style='color:#fff'>%s<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='wep%s%d'%s><span class='filterSlider'></span></label></div>",
+                   g_weapons[a]->name, pre, a, st->checked[1][a] ? " checked" : "");
     }
     sb_appendf(&sb, "</div><div class='filterDiv' id='%sDiv_2' style='display:none;'>", nav);
-    for (int a = 1; a < g_viewer_type_count; ++a) {
+    for (int a = 1; a < g_viewer_type_count && a < 40; ++a) {
         char name[32];
         snprintf(name, sizeof(name), "%s", g_viewer_types[a]);
         char *slash = strchr(name, '/');
         if (slash) *slash = 0;
         name[0] = (char) toupper((unsigned char) name[0]);
-        sb_appendf(&sb, "<div class='otherSel' style='color:#fff'>%s<label class='switchsml'><input type='checkbox' onclick='' id='type%s%d' checked><span class='sliderSml2'></span></label></div>", name, pre, a);
+        sb_appendf(&sb, "<div class='otherSel' style='color:#fff'>%s<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='type%s%d'%s><span class='filterSlider'></span></label></div>",
+                   name, pre, a, st->checked[2][a] ? " checked" : "");
     }
-    sb_appendf(&sb, "</div><div id='filterRBtn' onclick='run%s()'>%s</div><div id='resetFBtn' onclick='reset%s()'>Reset</div>", sort ? "Sort" : "Filter", sort ? "Sort" : "Search", sort ? "Sort" : "Filter");
+    sb_appendf(&sb, "</div><div id='filterRBtn' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='run%s()'>%s</div><div id='resetFBtn' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='resetSortFilter(%d)'>Reset</div>",
+               sort ? "Sort" : "Filter", sort ? "Sort" : "Search", sort);
     char *html = sb_finish(&sb);
-    html_dom_set_html(pop, html);
+    generic_popup(html, sort ? "sortPop" : "filterPop", NULL);
     free(html);
 }
 
-static int g_filter_n, g_sort_n; // Ne / We: the latest request (stale replies are dropped)
+static int g_filter_n, g_sort_n; // the latest request (stale replies are dropped)
 
 // runFilter / runSort: io.send("fil"|"srt", n, text, rarities{}, weapons{}, types{}, season, order|missing)
 static void market_run_filter(const int sort) {
-    const char *pre = sort ? "Sort" : "Filt";
-    char text[128] = "", id[32];
-    const HtmlElem in = el(sort ? "invSortTxt" : "marketFiltTxt");
-    if (in) html_dom_get_value(in, text, sizeof(text));
+    filter_state_save(sort);
+    const HubFilterState *st = &g_filter_state[sort];
     cJSON *rar = cJSON_CreateObject(), *wep = cJSON_CreateObject(), *typ = cJSON_CreateObject();
-    for (int r = 0; r < g_viewer_rarity_count; ++r) {
-        snprintf(id, sizeof(id), "rar%s%d", pre, r);
-        const HtmlElem e = el(id);
-        char key[8];
+    char key[8];
+    for (int r = 0; r < g_viewer_rarity_count && r < 40; ++r) {
         snprintf(key, sizeof(key), "%d", r);
-        if (e && html_dom_get_checked(e)) cJSON_AddNumberToObject(rar, key, 1);
+        if (st->checked[0][r]) cJSON_AddNumberToObject(rar, key, 1);
     }
-    for (int r = 0; r < WEAPON_COUNT; ++r) {
-        snprintf(id, sizeof(id), "wep%s%d", pre, r);
-        const HtmlElem e = el(id);
-        char key[8];
+    for (int r = 0; r < WEAPON_COUNT && r < 40; ++r) {
         snprintf(key, sizeof(key), "%d", r + 1);
-        if (e && html_dom_get_checked(e)) cJSON_AddNumberToObject(wep, key, 1);
+        if (filter_weapon_shown(r) && st->checked[1][r]) cJSON_AddNumberToObject(wep, key, 1);
     }
-    for (int r = 1; r < g_viewer_type_count; ++r) {
-        snprintf(id, sizeof(id), "type%s%d", pre, r);
-        const HtmlElem e = el(id);
-        char key[8];
+    for (int r = 1; r < g_viewer_type_count && r < 40; ++r) {
         snprintf(key, sizeof(key), "%d", r);
-        if (e && html_dom_get_checked(e)) cJSON_AddNumberToObject(typ, key, 1);
+        if (st->checked[2][r]) cJSON_AddNumberToObject(typ, key, 1);
     }
-    char season[16] = "0", order[16] = "1";
-    snprintf(id, sizeof(id), "sea%s", pre);
-    const HtmlElem sea = el(id);
-    if (sea) html_dom_get_value(sea, season, sizeof(season));
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString(sort ? "srt" : "fil"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(sort ? ++g_sort_n : ++g_filter_n));
-    cJSON_AddItemToArray(f, cJSON_CreateString(text));
+    cJSON_AddItemToArray(f, cJSON_CreateString(st->text));
     cJSON_AddItemToArray(f, rar);
     cJSON_AddItemToArray(f, wep);
     cJSON_AddItemToArray(f, typ);
-    cJSON_AddItemToArray(f, cJSON_CreateString(season));
-    if (sort) {
-        const HtmlElem missing = el("onlyMissing");
-        cJSON_AddItemToArray(f, cJSON_CreateBool(missing && html_dom_get_checked(missing)));
-    } else {
-        const HtmlElem o = el("sortFilt");
-        if (o) html_dom_get_value(o, order, sizeof(order));
-        cJSON_AddItemToArray(f, cJSON_CreateString(order));
-    }
+    cJSON_AddItemToArray(f, cJSON_CreateString(st->season));
+    if (sort) cJSON_AddItemToArray(f, cJSON_CreateBool(st->missing));
+    else cJSON_AddItemToArray(f, cJSON_CreateString(st->order));
     io_wait("Searching");
     hub_send(f);
 }
 
+// resetSortFilter(sort): everything checked again, the search runs
 static void market_reset_filter(const int sort) {
-    const char *pre = sort ? "Sort" : "Filt";
-    char sel[48];
-    HtmlElem found[64];
-    snprintf(sel, sizeof(sel), "%s input[type=checkbox]", sort ? "#sortPop" : "#filterPop");
-    const int n = html_dom_query_all(0, sel, found, 64);
-    for (int i = 0; i < n; i++) {
-        char id[32] = "";
-        html_dom_get_attr(found[i], "id", id, sizeof(id));
-        html_dom_set_checked(found[i], strcmp(id, "onlyMissing") != 0);
-    }
-    const HtmlElem in = el(sort ? "invSortTxt" : "marketFiltTxt");
-    if (in) html_dom_set_value(in, "");
-    snprintf(sel, sizeof(sel), "sea%s", pre);
-    if (el(sel)) html_dom_set_value(el(sel), "0");
-    if (!sort && el("sortFilt")) html_dom_set_value(el("sortFilt"), "1");
+    HubFilterState *st = &g_filter_state[sort];
+    for (int g = 0; g < 3; g++) for (int i = 0; i < 40; i++) st->checked[g][i] = 1;
+    st->text[0] = 0;
+    snprintf(st->season, sizeof(st->season), "0");
+    snprintf(st->order, sizeof(st->order), "1");
+    st->missing = 0;
+    market_filter_popup(sort);
+    filter_state_save(sort);
     market_run_filter(sort);
 }
 
-// switchFilter / switchSort and toggleFilters / toggleSorts
+// switchSortFilter(sort, tab) / toggleSortFilters(sort)
 static int g_filter_tab, g_sort_tab;
 static void market_switch_filter(const int sort, const int tab) {
     const char *nav = sort ? "sort" : "filter";
@@ -2528,6 +3161,9 @@ static int hub_market_frame(const char *label, const cJSON *frame) {
     return 1;
 }
 
+// The v7 item list (io_0 "items": the whole store table, client side)
+static void items_page(const char *a, const char *k);
+
 // io_0(e, a, t, ...): one page's data arrived
 static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extra) {
     char key[HUB_KEY_MAX * 2];
@@ -2537,27 +3173,19 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
     const int has_t = t && !cJSON_IsNull(t);
     hide_all(0);
     set_display("loadMessage", "none");
-    const int blackm = a && !strcmp(a, "blackm");
-    const HtmlElem body = html_dom_body();
-    if (body) html_dom_set_class(body, "darkBG", blackm);
     const HtmlElem title = el("navTitle");
-    if (title) html_dom_set_class(title, "glitch", blackm);
-    const HtmlElem root = html_dom_root();
-    if (root) html_dom_set_class(root, "darkBG", blackm);
+    if (title) html_dom_set_class(title, "glitch", a && !strcmp(a, "blackm"));
 
     if (!strcmp(e, "profile")) {
-        // a guest server has no profile row: nothing is shown
         if (has_t && cJSON_IsObject(t)) hub_render_profile(t, extra);
+        else io_po(0, "Profile doesn't exist");
         set_display("pTab_reports", "none");
-        set_display("pTab_inputs", "none");
     } else if (!strcmp(e, "search")) {
         set_display("searchHolder", "block");
         if (has_t && cJSON_IsArray(t)) hub_render_search(t);
     } else if (!strcmp(e, "mods")) {
         set_display("modsHolder", "block");
-        char *html = list_gen(&g_hub.mods, 1);
-        set_html("modList", html);
-        free(html);
+        list_update(1);
     } else if (!strcmp(e, "mod") || !strcmp(e, "map")) {
         const int is_mod = !strcmp(e, "mod");
         side_boxes();
@@ -2565,23 +3193,21 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         hub_render_creation(is_mod, has_t ? t : NULL);
     } else if (!strcmp(e, "maps")) {
         set_display("mapsHolder", "block");
-        char *html = list_gen(&g_hub.maps, 0);
-        set_html("mapList", html);
-        free(html);
+        list_update(0);
     } else if (!strcmp(e, "leaders")) {
         side_boxes();
         set_display("leaderHolder", "block");
         hub_render_leaders(a, has_t ? t : NULL); // no leaderboard rows offline: an empty list
     } else if (!strcmp(e, "market")) {
         set_display("marketHolder", "block");
-        const int inventory = a && !strcmp(a, "inventory");
-        set_display("invSortB", inventory ? "inline-block" : "none");
-        set_display("marketSearchB", a && !strcmp(a, "market") ? "inline-block" : "none");
-        set_display("invValue", inventory ? "inline-block" : "none");
-        set_display("invTrack", inventory ? "inline-block" : "none");
+        set_display("invSortB", a && !strcmp(a, "inventory") ? "table-cell" : "none");
+        set_display("marketSearchB", a && !strcmp(a, "market") ? "table-cell" : "none");
+        set_display("invStats", a && (!strcmp(a, "inventory") || !strcmp(a, "sales")) ? "table-cell" : "none");
         // no listings / inventory for a guest: social.market.login (K is null)
         if (g_hub.brain) hub_render_market(a, has_t ? t : NULL);
         else set_html("marketList", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_LOGIN "...</div>");
+    } else if (!strcmp(e, "items")) {
+        items_page(a, g_hub.k);
     } else if (!strcmp(e, "itemsales") && g_hub.brain) {
         hub_render_itemsales(has_t ? t : NULL, cJSON_GetArrayItem(extra, 4));
     } else if (!strcmp(e, "itemsales")) {
@@ -2589,21 +3215,35 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         set_display("itemsalesList", "none");
         if (!has_t) set_html("itemsalesHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
         set_display("itemsalesHolder", "block");
+    } else if (!strcmp(e, "listing")) {
+        side_boxes();
+        // a listing row needs the v7 skin table and the brain market: the none text
+        set_html("listingHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
+        set_display("listingHolder", "block");
     } else if (!strcmp(e, "clan")) {
+        side_boxes();
         set_display("clanHolder", "block");
         if (g_hub.brain && has_t && cJSON_IsObject(t)) hub_render_clan(t);
-    } else if (!strcmp(e, "clanwars")) {
-        set_display("clanwarsHolder", "block");
-        clanwars_show();
     } else if (!strcmp(e, "feed")) {
         set_display("feedHolder", "block");
         set_display("postEntryC", g_hub.logged_in ? "inline-block" : "none"); // acc ? inline-block : none
+        set_display("fpHolder", "block");
+        set_display("singlePost", "none");
         side_boxes();
         g_hub.feed_switching = 0;
         hub_render_feed(has_t ? t : NULL);
-    } else if (!strcmp(e, "tourney")) {
-        set_display("tourneyHolder", "block");
-        set_html("tourneyList", "<div>Tourney Results Coming soon</div>");
+    } else if (!strcmp(e, "post")) {
+        set_display("feedHolder", "block");
+        set_display("postEntryC", g_hub.logged_in ? "inline-block" : "none");
+        side_boxes();
+        g_hub.feed_switching = 0;
+        if (has_t) {
+            set_html("postTopStat", "");
+            set_display("singlePost", "inline-block");
+            set_display("fpHolder", "none");
+            set_html("singlePostH", "<div style='margin-top:25px;margin-left:310px;margin-bottom:10px;opacity:0.4'><div class='lds-ring darkring'><div></div><div></div><div></div><div></div></div></div>");
+        }
+        set_html("postHolder", "");
     }
 }
 
@@ -2973,6 +3613,10 @@ H(h_update_window) {
     return 1;
 }
 
+// playTick(v) / playSelect(v): hover_0 at v || 0.2, select_0 at v || 0.15 (v7 social.js)
+H(h_play_tick) { (void) user; (void) ev; hub_sound("hover_0", (float) (argc > 0 && args[0].num ? args[0].num : 0.2)); return 1; }
+H(h_play_select) { (void) user; (void) ev; hub_sound("select_0", (float) (argc > 0 && args[0].num ? args[0].num : 0.15)); return 1; }
+
 H(h_sound_play) {
     (void) user; (void) ev;
     const char *name = arg_s(ev, args, argc, 0);
@@ -3002,29 +3646,29 @@ H(h_location_reload) {
     return 1;
 }
 
+// loginPopup(): genericPopup(..., "loginPop") when no account
 H(h_login_popup) {
     UNUSED;
-    reset_pops();
-    set_display("loginPop", "block");
+    if (g_hub.logged_in) return 1;
     char saved[128] = "";
     if (html_storage_get("krunker_username", saved, sizeof(saved)) < 0) saved[0] = 0;
     StrBuf sb = {0};
-    sb_append(&sb, "<input id='accName' type='text' placeholder='Enter Username' class='accountInput' style='margin-top:0' value='");
+    sb_append(&sb, "<div style='position:relative;z-index:9'><div id='referralHeader'>Login</div><div style='height:20px;'></div><input id='accName' type='text' placeholder='Enter Username' class='accountInput' style='margin-top:0' value='");
     sb_append_esc(&sb, saved);
-    sb_append(&sb, "'></input><input id='accPass' type='password' placeholder='Enter Password' class='accountInput'></input><div id='accResp' style='margin-top:10px;color:#fff;display:none'></div><div class='accountButton' onclick='loginAcc()'>Login</div>");
+    sb_append(&sb, "'></input><input id='accPass' type='password' placeholder='Enter Password' class='accountInput'></input><div class='setBodH' style='margin-left:0px;width:calc(100% - 40px)'><div id='accResp' style='margin-top:20px;margin-bottom:20px;font-size:18px;color:rgba(255,255,255,0.5);text-align:center'>For lost Passwords/Accounts contact <span style='color:rgba(255,255,255,0.8)'>recovery@yendis.ch</span></div></div><div style='width:100%;text-align:center;margin-top:10px;background-color:rgba(0,0,0,0.3);padding-top:10px;padding-bottom:20px;'><div class='accBtn button buttonG' style='width: calc(100% - 30px);'onclick='loginAcc()'>Login</div></div>");
     char *html = sb_finish(&sb);
-    set_html("loginPop", html);
+    generic_popup(html, "loginPop", NULL);
     free(html);
     return 1;
 }
 
 H(h_login_acc) {
     UNUSED;
-    io_wait("Please Wait...");
     char name[128] = "", pass[128] = "";
     const HtmlElem n = el("accName"), p = el("accPass");
     if (n) html_dom_get_value(n, name, sizeof(name));
     if (p) html_dom_get_value(p, pass, sizeof(pass));
+    io_wait("Please wait...");
     cJSON *creds = cJSON_CreateArray();
     cJSON_AddItemToArray(creds, cJSON_CreateString(name));
     cJSON_AddItemToArray(creds, cJSON_CreateString(pass));
@@ -3178,7 +3822,7 @@ H(h_delay_execute) {
     return 1;
 }
 
-H(h_clear_pops) { UNUSED; reset_pops(); set_display("popupHolder", "none"); return 1; }
+H(h_clear_pops) { UNUSED; clear_pops(); return 1; }
 
 // ---- brain: market / clan / profile tab handlers (social.js window.*)
 
@@ -3274,15 +3918,13 @@ H(h_list_item) {
     const int skin = (int) arg_n(args, argc, 0, 0);
     const ViewerSkin *pa = hub_skin(skin);
     if (!pa) return 1;
-    reset_pops();
-    set_display("confListPop", "block");
     StrBuf sb = {0};
     sb_appendf(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Are you sure you want to list <span style='color:%s'>", rarity_color(pa));
     sb_append_esc(&sb, pa->name);
     sb_appendf(&sb, "</span> for %dKR ?</div><div id='confirmBtn' onclick='listConfirmed(%d, %d,%d, %d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='refreshPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
                atoi(price), skin, (int) arg_n(args, argc, 1, 0), (int) arg_n(args, argc, 2, 0), atoi(price));
     char *html = sb_finish(&sb);
-    set_html("confListPop", html);
+    generic_popup(html, "confListPop", NULL); // confListPopup
     free(html);
     return 1;
 }
@@ -3308,21 +3950,19 @@ H(h_unlist_item) {
 H(h_quick_sell) {
     UNUSED;
     if (!g_hub.logged_in) {
-        io_po(0, "Must be logged in");
+        io_po(0, "Must be logged in"); // account.login.required
         return 1;
     }
     const int skin = (int) arg_n(args, argc, 0, 0), uid = (int) arg_n(args, argc, 2, 0);
     const ViewerSkin *pa = hub_skin(skin);
     if (!pa) return 1;
-    reset_pops();
-    set_display("confQSPop", "block");
     StrBuf sb = {0};
     sb_appendf(&sb, "<div style='color:#fff;font-size:19px;position:relative;margin-bottom:15px;'>Are you sure you want to Quick Sell <span style='color:%s'>", rarity_color(pa));
     sb_append_esc(&sb, pa->name);
     sb_appendf(&sb, "</span>?</div><div class='quickSellText'>KR<div class='quickSellKR'><span style='color: #FBC02D'>%d</span> KR (each)</div></div><div class='quickSellText'>Amount<select id='quickSellSelect'><option value='0'>1 Item</option><option value='1'>All But 1</option><option value='2'>All</option></select></div><div id='confirmBtn' onclick='sellConfirmed(%d,%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
                pa->rarity >= 0 && pa->rarity < 7 ? k_rarity_sell[pa->rarity] : 1, skin, uid);
     char *html = sb_finish(&sb);
-    set_html("confQSPop", html);
+    generic_popup(html, "confQSPop", NULL); // confQSPopup
     free(html);
     return 1;
 }
@@ -3372,9 +4012,10 @@ static void open_hub_url(const char *prefix, const char *name, int new_tab);
 H(h_search_item) { UNUSED; char n[16]; snprintf(n, sizeof(n), "%d", (int) arg_n(args, argc, 0, 0)); open_hub_url("/social.html?p=market&i=", n, 1); return 1; }
 H(h_filter_popup) { UNUSED; if (g_hub.brain) market_filter_popup(!strcmp(html_ui_current_handler(), "sortPopup")); return 1; }
 H(h_run_filter) { UNUSED; market_run_filter(!strcmp(html_ui_current_handler(), "runSort")); return 1; }
-H(h_reset_filter) { UNUSED; market_reset_filter(!strcmp(html_ui_current_handler(), "resetSort")); return 1; }
-H(h_switch_filter) { UNUSED; market_switch_filter(!strcmp(html_ui_current_handler(), "switchSort"), (int) arg_n(args, argc, 0, 0)); return 1; }
-H(h_toggle_filters) { UNUSED; market_toggle_filters(!strcmp(html_ui_current_handler(), "toggleSorts")); return 1; }
+// resetSortFilter(sort) / switchSortFilter(sort, tab) / toggleSortFilters(sort)
+H(h_reset_filter) { UNUSED; market_reset_filter((int) arg_n(args, argc, 0, 0) != 0); return 1; }
+H(h_switch_filter) { UNUSED; market_switch_filter((int) arg_n(args, argc, 0, 0) != 0, (int) arg_n(args, argc, 1, 0)); return 1; }
+H(h_toggle_filters) { UNUSED; market_toggle_filters((int) arg_n(args, argc, 0, 0) != 0); return 1; }
 
 // updateTrades(tab): incoming / outgoing / history
 H(h_update_trades) {
@@ -3432,8 +4073,7 @@ H(h_open_profile_tab) {
     UNUSED;
     const char *tab = arg_s(ev, args, argc, 0);
     if (!tab) return 1;
-    reset_pops();
-    set_display("popupHolder", "none");
+    clear_pops();
     HtmlElem found[16];
     int n = html_dom_query_all(0, "div[id^=pTab_]", found, 16);
     for (int i = 0; i < n; i++) {
@@ -3451,6 +4091,13 @@ H(h_open_profile_tab) {
         set_html("pTabContent_activity", "<div class='lds-ring'><div></div><div></div><div></div><div></div></div>");
         const double v[1] = {g_hub.profile_id};
         send_ints("guf", 1, v);
+    }
+    if (!strcmp(tab, "listings") && g_hub.profile_name[0]) {
+        // io.send("uml", id): the user's market listings (kn_brain does not answer "uml": the
+        // waiting popup closes on the backdrop, the tab stays empty)
+        io_wait("Please wait...");
+        const double v[1] = {g_hub.profile_id};
+        send_ints("uml", 1, v);
     }
     return 1;
 }
@@ -3476,25 +4123,20 @@ H(h_open_item_tab) {
     return 1;
 }
 
-// changeDateRange(el, range, profile): the sales graph range (7/30/90/120 days)
+// changeDateRange(range) (item page) / changeDateRange2(range) (profile sales):
+// config.dataDateRanges = [7, 14, 21, 30, 60, 90, 120] days
 H(h_change_date_range) {
-    (void) user;
-    static const int days[4] = {7, 30, 90, 120};
-    const int range = (int) arg_n(args, argc, 1, 1);
-    const HtmlElem e = ev ? ev->target : 0;
-    const HtmlElem parent = e ? html_dom_parent(e) : 0;
-    int i = 0;
-    for (HtmlElem c = parent ? html_dom_first_child(parent) : 0; c; c = html_dom_next(c), i++) {
-        char tag[8] = "";
-        html_dom_tag(c, tag, sizeof(tag));
-        if (strcmp(tag, "a") != 0) {
-            i--;
-            continue;
-        }
-        html_dom_set_style(c, "background-color", c == e ? "rgba(0, 0, 0, 0.6)" : "rgba(0, 0, 0, 0.4)");
+    UNUSED;
+    static const int days[7] = {7, 14, 21, 30, 60, 90, 120};
+    char buf[16];
+    const char *v = arg_s(ev, args, argc, 0);
+    if (!v && argc > 0) {
+        js_num(buf, sizeof(buf), arg_n(args, argc, 0, 3));
+        v = buf;
     }
-    if (range < 0 || range > 3 || !g_hub.brain) return 1;
-    if (arg_n(args, argc, 2, 0) != 0 && g_hub.profile_name[0]) {
+    const int range = v ? atoi(v) : 3;
+    if (range < 0 || range > 6 || !g_hub.brain) return 1;
+    if (!strcmp(html_ui_current_handler(), "changeDateRange2") && g_hub.profile_name[0]) {
         cJSON *f = cJSON_CreateArray();
         cJSON_AddItemToArray(f, cJSON_CreateString("pst"));
         cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
@@ -3504,6 +4146,180 @@ H(h_change_date_range) {
     return 1;
 }
 
+// openCreationTab(tab): skins / games / mods / assets of the profile's Creations tab
+H(h_open_creation_tab) {
+    UNUSED;
+    const char *tab = arg_s(ev, args, argc, 0);
+    if (!tab) return 1;
+    HtmlElem found[8];
+    int n = html_dom_query_all(0, "div[id^=creationTab_]", found, 8);
+    for (int i = 0; i < n; i++) {
+        char id[48] = "";
+        html_dom_get_attr(found[i], "id", id, sizeof(id));
+        html_dom_set_class(found[i], "creationTabA", !strcmp(id + 12, tab));
+    }
+    n = html_dom_query_all(0, "div[id^=creationContent_]", found, 8);
+    for (int i = 0; i < n; i++) {
+        char id[48] = "";
+        html_dom_get_attr(found[i], "id", id, sizeof(id));
+        html_dom_set_class(found[i], "selected", !strcmp(id + 16, tab));
+    }
+    return 1;
+}
+
+// switchStat(tab): the profile's four stat tabs
+H(h_switch_stat) {
+    UNUSED;
+    const int tab = (int) arg_n(args, argc, 0, 0);
+    for (int i = 0; i < 4; ++i) {
+        char id[16], sel[24];
+        snprintf(id, sizeof(id), "statTab%d", i);
+        if (!el(id)) continue;
+        html_dom_set_class(el(id), "bigMenTabA", i == tab);
+        snprintf(sel, sizeof(sel), ".statTabB%d", i);
+        HtmlElem found[4];
+        const int n = html_dom_query_all(0, sel, found, 4);
+        for (int k = 0; k < n; k++) html_dom_set_class(found[k], "hide", i != tab);
+    }
+    return 1;
+}
+
+// switchNames(): the premium alias <-> account name
+H(h_switch_names) {
+    UNUSED;
+    HtmlElem found[4];
+    const int n = html_dom_query_all(0, "span[id=\"nameSwitch\"]", found, 4);
+    for (int i = 0; i < n; i++) {
+        char d[16] = "";
+        html_dom_get_style(found[i], "display", d, sizeof(d));
+        html_dom_set_display(found[i], !strcmp(d, "none") ? "" : "none");
+    }
+    return 1;
+}
+
+// viewItem(index, mode): the item popup with v7's 3D showcase iframe
+// (viewer.html?nobg&showcase=<i>; natively drawn into the iframe's box by viewer_embed.h),
+// a player card's thumbnail instead.
+H(h_view_item) {
+    UNUSED;
+    const int index = (int) arg_n(args, argc, 0, -1);
+    const ViewerSkin *sk = hub_skin(index);
+    if (!sk) {
+        char n[16];
+        snprintf(n, sizeof(n), "%d", index);
+        open_hub_url("/social.html?p=itemsales&i=", n, 1);
+        return 1;
+    }
+    reset_pops();
+    const char *col = rarity_color(sk);
+    const HtmlElem pop = el("itemViewPop");
+    if (!pop) return 1;
+    html_dom_set_display(pop, "block");
+    char border[64];
+    snprintf(border, sizeof(border), "5px solid %s", col);
+    html_dom_set_style(pop, "border", border);
+    html_dom_set_class(pop, "rainbow", rarity_animate(sk));
+    char path[256], url[256];
+    viewer_skin_preview_path(sk, path, sizeof(path));
+    html_dom_asset_url(path, url, sizeof(url));
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class='itemViewName blackShad%s' style='color:%s;'>", g_hub.rarity_anim && rarity_animate(sk) ? " rainbow" : "", col);
+    sb_append_esc(&sb, sk->name);
+    sb_append(&sb, "</div>");
+    if ((sk->seas ? sk->seas : 1) != g_viewer_current_season) sb_append(&sb, "<div class='itemViewSea'>Vaulted</div>");
+    else if (sk->flags & VS_BLOCKED) sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
+    if (sk->type == 16) sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url); // PLAYER_CARD thumbnail
+    else sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d'></iframe>", index);
+    if ((int) arg_n(args, argc, 1, 0) == 2) sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openViewer(%d)'>Open Model Viewer</div>", index);
+    else sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openSales(%d)'>More Information</div>", index);
+    char *html = sb_finish(&sb);
+    html_dom_set_html(pop, html);
+    free(html);
+    return 0;
+}
+
+// openSales(index): the item's sales page in a new tab
+H(h_open_sales) {
+    UNUSED;
+    char n[16];
+    snprintf(n, sizeof(n), "%d", (int) arg_n(args, argc, 0, 0));
+    open_hub_url("/social.html?p=itemsales&i=", n, 1);
+    return 0;
+}
+
+// openViewer(index): /viewer.html?class=9&<type>=<index>
+H(h_open_viewer) {
+    UNUSED;
+    const int index = (int) arg_n(args, argc, 0, 0);
+    const ViewerSkin *sk = hub_skin(index);
+    if (!sk) return 1;
+    static const char *const keys[] = {"skin", "hat", "body", "melee", "spray", "dye", "waist", "face"};
+    char url[128];
+    if (sk->type == 3) snprintf(url, sizeof(url), "/viewer.html?class=9&hidePlayer&melee=%d", index);
+    else if (sk->type >= 1 && sk->type <= 7) snprintf(url, sizeof(url), "/viewer.html?class=9&%s=%d", keys[sk->type], index);
+    else snprintf(url, sizeof(url), "/viewer.html?class=9&skin=%d", index);
+    open_hub_url(url, "", 1);
+    return 1;
+}
+
+// repPop(kind): the creation report info popup
+H(h_rep_pop) {
+    UNUSED;
+    const char *k = arg_s(ev, args, argc, 0);
+    if (!k) k = "";
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div style='font-size:20px;color:#fff;margin-bottom:10px'>Report %s</div>If this %s breaches our Terms of Service or Endorses or Contains any of the following:<div style='color:rgba(255,255,255,0.6);margin-top:10px;'>- Copyrighted Materials</div><div style='color:rgba(255,255,255,0.6);'>- Gambling</div><div style='color:rgba(255,255,255,0.6)'>- Scamming</div><div style='height:10px;'></div>Please Report the map name to <a class='menuLink blueLink' style='font-size:16px;margin-right:5px'>krunker@yendis.ch</a> for removal. <div style='margin-top:10px;color:#fff'>If this %s infringes your rights report it to <a class='blueLink'>legal@yendis.ch</a></div>", k, k, k);
+    char *html = sb_finish(&sb);
+    generic_popup(html, "custPop", NULL);
+    free(html);
+    return 1;
+}
+
+static void share_restore_text(void *user);
+
+// copyPost / shareListing (this, id): the link to the clipboard, "Copied" for 1.25 s
+H(h_copy_link) {
+    UNUSED;
+    if (!ev || !ev->target) return 1;
+    char origin[128], url[256];
+    html_page_origin(origin, sizeof(origin));
+    if (!strcmp(html_ui_current_handler(), "copyPost")) snprintf(url, sizeof(url), "%s/social.html?p=post&q=%d", origin, (int) arg_n(args, argc, 1, 0));
+    else snprintf(url, sizeof(url), "%s/social.html?p=listing&i=%d", origin, (int) arg_n(args, argc, 1, 0));
+    html_clipboard_write(url);
+    html_dom_set_text(ev->target, "Copied");
+    html_timer_add(1250, share_restore_text, (void *) (uintptr_t) ev->target);
+    return 1;
+}
+
+// retainSelected / retainChecked: v7 keeps the filter popups' markup in sync for its
+// innerHTML copy; the state lives in g_filter_state here (filter_state_save)
+H(h_retain) { UNUSED; return 1; }
+
+// item list handlers (itemFilter, itemFilterSearch, itemFilterChange, itemListScroll)
+H(h_item_filter) {
+    UNUSED;
+    const char *k = arg_s(ev, args, argc, 0);
+    char v[32];
+    if (argc > 1 && args[1].kind == HTML_ARG_STR) snprintf(v, sizeof(v), "%s", args[1].str ? args[1].str : "");
+    else if (argc > 1 && args[1].kind == HTML_ARG_BOOL) snprintf(v, sizeof(v), "%s", args[1].num ? "true" : "false");
+    else js_num(v, sizeof(v), arg_n(args, argc, 1, 0));
+    if (k) items_filter(k, v);
+    return 1;
+}
+H(h_item_filter_search) {
+    UNUSED;
+    char buf[128] = "";
+    const char *v = arg_s(ev, args, argc, 0);
+    if ((!v || !*v) && ev && ev->target) {
+        html_dom_get_value(ev->target, buf, sizeof(buf));
+        v = buf;
+    }
+    items_search(v);
+    return 1;
+}
+H(h_item_filter_change) { UNUSED; items_filter_change(argc > 0 && args[0].kind == HTML_ARG_THIS ? (HtmlElem) args[0].num : ev ? ev->target : 0); return 1; }
+H(h_item_list_scroll) { UNUSED; items_more(); return 1; }
+
 H(h_maps_switch_tab) { UNUSED; list_switch_tab(0, (int) arg_n(args, argc, 0, 0), 0); return 1; }
 H(h_mods_switch_tab) { UNUSED; list_switch_tab(1, (int) arg_n(args, argc, 0, 0), 0); return 1; }
 H(h_maps_load_more) { (void) user; (void) args; (void) argc; list_load_more(0, ev ? ev->target : 0); return 1; }
@@ -3512,18 +4328,20 @@ H(h_mods_load_more) { (void) user; (void) args; (void) argc; list_load_more(1, e
 H(h_maps_search) {
     UNUSED;
     char value[128] = "";
-    const HtmlElem input = el("searchInput");
+    const HtmlElem input = el("mpSrch");
     if (input) html_dom_get_value(input, value, sizeof(value));
-    api_request("/search", 0, 0, "map", value);
+    set_html("searchResultsMA", "Loading...");
+    api_request("/search", 0, 0, "map", value); // API_CLIENT.searchMap(value, category): the server matches names
     return 1;
 }
 
 H(h_mods_search) {
     UNUSED;
     char value[128] = "";
-    const HtmlElem input = el("searchInputMO");
+    const HtmlElem input = el("mdSrch");
     if (input) html_dom_get_value(input, value, sizeof(value));
-    api_request("/search", 0, 0, "mod", value);
+    set_html("searchResultsMO", "Loading...");
+    api_request("/search", 3, 0, "mod", value);
     return 1;
 }
 
@@ -3533,34 +4351,38 @@ static void open_hub_url(const char *prefix, const char *name, const int new_tab
     if (!app_route_url_target(url, new_tab)) ui_open_external(url);
 }
 
-// openMap/openMod: openLink(url) (same tab); openProfile, playMap, hostMap, playMod: "_blank"
-H(h_open_map) { UNUSED; open_hub_url("/social.html?p=map&q=", arg_s(ev, args, argc, 0), 0); return 1; }
-H(h_open_mod) { UNUSED; open_hub_url("/social.html?p=mod&q=", arg_s(ev, args, argc, 0), 0); return 1; }
+// openMap/openMod/openProfile, playMap, hostMap, playMod: "_blank" (v7.1.4)
+H(h_open_map) { UNUSED; open_hub_url("/social.html?p=map&q=", arg_s(ev, args, argc, 0), 1); return 1; }
+H(h_open_mod) { UNUSED; open_hub_url("/social.html?p=mod&q=", arg_s(ev, args, argc, 0), 1); return 1; }
 H(h_open_profile) { UNUSED; open_hub_url("/social.html?p=profile&q=", arg_s(ev, args, argc, 0), 1); return 1; }
 H(h_play_map) { UNUSED; open_hub_url("/?play=", arg_s(ev, args, argc, 0), 1); return 1; }
 H(h_play_mod) { UNUSED; open_hub_url("/?mod=", arg_s(ev, args, argc, 0), 1); return 1; }
 
-// updateMapTab(e): About / Servers on the map page
+// updateMapTab(tab, canEdit): About / Servers / Leaderboard / Data on the map page
 H(h_update_map_tab) {
     UNUSED;
-    g_map_tab = (int) arg_n(args, argc, 0, 0) == 1;
+    g_map_tab = (int) arg_n(args, argc, 0, 0);
+    const int can_edit = argc > 1 && args[1].kind == HTML_ARG_BOOL && args[1].num != 0;
     StrBuf sb = {0};
-    append_map_tabs(&sb);
+    append_map_tabs(&sb, can_edit);
     char *html = sb_finish(&sb);
     set_html("mapTabsP", html);
     free(html);
-    set_display("mapDescr", g_map_tab == 1 ? "none" : "block");
+    set_display("mapDescr", g_map_tab == 0 ? "block" : "none");
     set_display("mapVid", "none");
-    set_display("activeGames", g_map_tab == 0 ? "none" : "block");
+    set_display("activeGames", g_map_tab == 1 ? "block" : "none");
+    set_display("mapLeaders", g_map_tab == 2 ? "block" : "none");
+    if (el("mapData")) set_display("mapData", g_map_tab == 3 ? "block" : "none");
     return 1;
 }
 
-// shareMapLink / shareModLink(this, name): UTILS.copyToClipboard (no clipboard here), then the
-// button reads "Copied" for 1.25 s
+// shareMapLink / shareModLink(this, name): UTILS.copyToClipboard, then the button reads
+// "Copied" for 1.25 s
 static void share_restore(void *user) {
     const HtmlElem b = (HtmlElem) (uintptr_t) user;
     if (b) html_dom_set_text(b, "Share");
 }
+static void share_restore_text(void *user) { share_restore(user); }
 
 H(h_share_link) {
     UNUSED;
@@ -3756,7 +4578,6 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"publishModPopup", h_publish_popup},
     {"switchFeedTab", h_switch_feed_tab},
     {"toggleView", h_toggle_view},
-    {"GUI.action", h_gui_action},
     {"favoriteM", h_noop},
     {"instaFollo", h_noop},
     {"followUser", h_follow_user},
@@ -3793,6 +4614,32 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"openProfileTab", h_open_profile_tab},
     {"openItemTab", h_open_item_tab},
     {"changeDateRange", h_change_date_range},
+    {"changeDateRange2", h_change_date_range},
+    // v7.1.4
+    {"playTick", h_play_tick},
+    {"playSelect", h_play_select},
+    {"switchSortFilter", h_switch_filter},
+    {"toggleSortFilters", h_toggle_filters},
+    {"resetSortFilter", h_reset_filter},
+    {"retainSelected", h_retain},
+    {"retainChecked", h_retain},
+    {"openCreationTab", h_open_creation_tab},
+    {"switchStat", h_switch_stat},
+    {"switchNames", h_switch_names},
+    {"viewItem", h_view_item},
+    {"openSales", h_open_sales},
+    {"openViewer", h_open_viewer},
+    {"repPop", h_rep_pop},
+    {"copyPost", h_copy_link},
+    {"shareListing", h_copy_link},
+    {"itemFilter", h_item_filter},
+    {"itemFilterSearch", h_item_filter_search},
+    {"itemFilterChange", h_item_filter_change},
+    {"itemListScroll", h_item_list_scroll},
+    {"openOneTrust", h_noop},   // no ads / consent manager in KrunkNative
+    {"closeOneTrust", h_noop},
+    {"logBtnFRVR", h_noop},     // analytics
+    {"imagePopup", h_noop},     // the custom background collection (krk_custImgs): not ported
 };
 
 // Krunker functions that need an account (follow, trade, post, chat, filters, ...): no-ops
@@ -3844,6 +4691,9 @@ static void hub_connected(void) {
         set_display("profileLogin", "inline-block");
         set_html("profileName", "");
     }
+    // API_CLIENT.listMaps(2, 0): the featured games of the maps Home card (v3540); KN's /maps
+    // index 1 is Featured
+    api_request("/maps", 1, 0, NULL, NULL);
     request_page(); // Xa(v, b, K, q, k, V, x)
 }
 
@@ -3875,11 +4725,21 @@ static int query_param(const char *query, const char *name, char *out, const siz
     return 0;
 }
 
-static void social_enter(Client *client, const char *query) {
+// The listData of both windows, the featured picks and the item list.
+static void hub_lists_free(void) {
     for (int i = 0; i < 2; i++) {
         HubList *list = i ? &g_hub.mods : &g_hub.maps;
-        for (int t = 0; t < 8; t++) list_reset(&list->data[t]);
+        for (int t = 0; t < HUB_LIST_TABS; t++) list_reset(&list->data[t]);
+        cJSON_Delete(list->home_rows);
+        list->home_rows = NULL;
     }
+    free(g_items.list);
+    g_items.list = NULL;
+    g_items.count = g_items.shown = 0;
+}
+
+static void social_enter(Client *client, const char *query) {
+    hub_lists_free();
     social_assembly_free(&g_hub.assembly);
     memset(&g_hub, 0, sizeof(g_hub));
     g_hub.client = client;
@@ -3911,6 +4771,11 @@ static void social_enter(Client *client, const char *query) {
 
     settings_load(); // re[...].set(saved) at load: B, D, j, F, volume + onResize()
     on_resize();
+    // the app badges: iosDB / androidDB when window.canShowExternalLinks (always true in
+    // KrunkNative, as in ui_handlers.c), steamDB always
+    set_display("iosDB", "block");
+    set_display("androidDB", "block");
+    set_display("steamDB", "block");
 
     // updateWindow(de("p"), de("q"), de("s"), de("i")) (?games opens the maps)
     char p[64], q[HUB_KEY_MAX], s[HUB_KEY_MAX], i[HUB_KEY_MAX], tmp[8];
@@ -3953,10 +4818,7 @@ static void social_leave(Client *client) {
     backend_social_unlisten(hub_on_social, NULL);
     if (g_delayed_timer) html_timer_cancel(g_delayed_timer);
     g_delayed_timer = 0;
-    for (int i = 0; i < 2; i++) {
-        HubList *list = i ? &g_hub.mods : &g_hub.maps;
-        for (int t = 0; t < 8; t++) list_reset(&list->data[t]);
-    }
+    hub_lists_free();
     social_assembly_free(&g_hub.assembly);
     g_hub.entered = 0;
 }

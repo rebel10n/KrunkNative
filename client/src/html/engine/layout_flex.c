@@ -5,7 +5,8 @@
  * center; baseline treated as start), flex-grow/flex-shrink/flex-basis,
  * automatic minimum size (min-content), auto margins on the main axis,
  * align-content stretch for wrapped lines with a definite cross size,
- * align-self overriding align-items per item.
+ * align-self overriding align-items per item, row-gap / column-gap (the
+ * main-axis gap between items of a line, the cross-axis gap between lines).
  */
 #include "layout_internal.h"
 
@@ -58,6 +59,9 @@ static int item_align(const CssComputed *s, const CssComputed *cs)
 
 static float clampf_mm(float v, float mn, float mx) { if (v > mx) v = mx; if (v < mn) v = mn; return v; }
 
+/* row-gap / column-gap in px ("normal" is 0 in flex layout; a percentage needs a definite base). */
+static float flex_gap(const CssLength *l, float base) { return kn_maxf(0, layout_resolve_len(l, base, 0)); }
+
 void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h)
 {
     const CssComputed *s = b->style;
@@ -102,6 +106,8 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
     if (!items || !lines) { free(items); free(lines); *content_h = 0; return; }
     int k = 0;
     float main_avail = row ? cw : ch;         /* -1 when indefinite (column) */
+    const float gap_main = flex_gap(row ? &s->column_gap : &s->row_gap, main_avail);
+    const float gap_cross = flex_gap(row ? &s->row_gap : &s->column_gap, row ? ch : cw);
 
     for (Box *c = b->first_child; c; c = c->next) {
         if (c->flags & BOXF_OUT_OF_FLOW) continue;
@@ -186,7 +192,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             float used = 0;
             while (i < n) {
                 FItem *it = &items[i];
-                float outer = it->hypo + it->mm0 + it->mm1;
+                float outer = it->hypo + it->mm0 + it->mm1 + (ln->count ? gap_main : 0);
                 if (wrap && ln->count > 0 && main_avail >= 0 && used + outer > main_avail + 0.001f) break;
                 used += outer; ln->count++; i++;
             }
@@ -199,7 +205,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         /* indefinite column: content-sized, min/max-height of the container clamp later */
         float mx = 0;
         for (int l = 0; l < nl; l++) {
-            float sum = 0;
+            float sum = gap_main * (float)(lines[l].count - 1);
             for (int j = 0; j < lines[l].count; j++) { FItem *it = &items[lines[l].first + j]; sum += it->hypo + it->mm0 + it->mm1; }
             if (sum > mx) mx = sum;
         }
@@ -212,7 +218,8 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
     }
     for (int l = 0; l < nl; l++) {
         FLine *ln = &lines[l];
-        float sum_hypo = 0;
+        const float line_gaps = gap_main * (float)(ln->count - 1);
+        float sum_hypo = line_gaps;
         for (int j = 0; j < ln->count; j++) { FItem *it = &items[ln->first + j]; sum_hypo += it->hypo + it->mm0 + it->mm1; }
         int grow = sum_hypo < container_main;
         for (int j = 0; j < ln->count; j++) {
@@ -224,7 +231,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             if (f == 0 || (grow && it->base > it->hypo) || (!grow && it->base < it->hypo)) { it->frozen = 1; it->target = it->hypo; }
         }
         for (int iter = 0; iter < 16; iter++) {
-            float used = 0, sum_f = 0, sum_scaled = 0;
+            float used = line_gaps, sum_f = 0, sum_scaled = 0;
             int unfrozen = 0;
             for (int j = 0; j < ln->count; j++) {
                 FItem *it = &items[ln->first + j];
@@ -290,11 +297,11 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         float mx = 0;
         for (int j = 0; j < ln->count; j++) { FItem *it = &items[ln->first + j]; mx = kn_maxf(mx, it->cross + it->cm0 + it->cm1); }
         ln->cross = mx;
-        total_cross += mx;
+        total_cross += mx + (l ? gap_cross : 0);
     }
     if (nl == 1 && cross_avail >= 0) { total_cross = cross_avail; lines[0].cross = cross_avail; }
     else if (cross_avail >= 0 && total_cross < cross_avail && nl > 1) {
-        float extra = (cross_avail - total_cross) / (float)nl;   /* align-content: normal (stretch) */
+        float extra = (cross_avail - total_cross) / (float)nl;   /* align-content: normal (stretch); gaps stay */
         for (int l = 0; l < nl; l++) lines[l].cross += extra;
         total_cross = cross_avail;
     }
@@ -320,7 +327,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
     /* ---- main axis positions ---- */
     for (int l = 0; l < nl; l++) {
         FLine *ln = &lines[l];
-        float used = 0; int autos = 0;
+        float used = gap_main * (float)(ln->count - 1); int autos = 0;
         for (int j = 0; j < ln->count; j++) {
             FItem *it = &items[ln->first + j];
             used += it->main + it->mm0 + it->mm1;
@@ -361,7 +368,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             FItem *it = &items[ln->first + j];
             pos += it->mm0;
             it->pos_main = rev ? container_main - pos - it->main : pos;
-            pos += it->main + it->mm1 + between;
+            pos += it->main + it->mm1 + between + gap_main;
         }
     }
 
@@ -385,7 +392,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             }
             it->pos_cross = cpos + off + it->cm0;
         }
-        cpos += ln->cross;
+        cpos += ln->cross + gap_cross;
     }
     if (s->flex_wrap == CSS_FLEX_WRAP_WRAP_REVERSE) {
         for (int i = 0; i < n; i++) items[i].pos_cross = total_cross - items[i].pos_cross - items[i].cross;
@@ -416,7 +423,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
     if (!row && main_avail < 0) {
         float used = 0;
         for (int l = 0; l < nl; l++) {
-            float sum = 0;
+            float sum = gap_main * (float)(lines[l].count - 1);
             for (int j = 0; j < lines[l].count; j++) { FItem *it = &items[lines[l].first + j]; sum += it->main + it->mm0 + it->mm1; }
             used = kn_maxf(used, sum);
         }
@@ -433,8 +440,11 @@ void layout_flex_intrinsic(LayoutTree *t, Box *b, float *min_w, float *max_w)
     int row = is_row(b);
     int wrap = b->style->flex_wrap != CSS_FLEX_WRAP_NOWRAP;
     float mn = 0, mx = 0;
+    const float gap = row ? flex_gap(&b->style->column_gap, -1) : 0;
+    int items = 0;
     for (Box *c = b->first_child; c; c = c->next) {
         if (c->flags & BOXF_OUT_OF_FLOW) continue;
+        if (row && items++) { mx += gap; if (!wrap) mn += gap; }
         float cmin = layout_intrinsic_margin_width(t, c, 0, 0.0f);
         float cmax = layout_intrinsic_margin_width(t, c, 1, 0.0f);
         if (row) {

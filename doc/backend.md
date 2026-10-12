@@ -106,7 +106,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.node_ttl_s` | `30` | node/lobby row TTL (v3.1.1 `STALE_AFTER_MS`) |
 | `brain.heartbeat_s` | `5` | how often the owning brain refreshes its rows |
 | `brain.ping_interval_s` | `10` | internal WS ping interval (v3.1.1 `PING_INTERVAL_MS`) |
-| `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are v3.1.1 `regionNames` ids (`us-nj`, `de-fra`, ...) |
+| `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are the 2-letter region codes the client shows (`SV`, `LA`, `CH`, `VA`) |
 | `brain.federation` | `true` | use the shared database's rows (false or no DB = in-memory, this brain only) |
 | `brain.matchmaking.cross_region` | `true` | quick join falls back to other regions when the requested one has no room |
 | `brain.matchmaking.max_players` | `8` | cap when a lobby reports none |
@@ -474,6 +474,8 @@ brain draining).
 | `webUrl` | string | optional: ws(s) URL web clients use (net-bridge `/native`) |
 | `timeLeft` | int | seconds left in the round |
 | `draining` | bool | the server is shutting down (not joinable) |
+| `proto`, `build`, `commit`, `commitTime` | string, string, string, int | build identity of the server (`proto` "M.m", git describe, 12-hex commit, unix s): see 8.12 |
+| `outdated`, `incompatible` | bool | added by `/mm/game-list` (8.12); not sent by servers |
 
 ### Routes
 
@@ -500,7 +502,9 @@ seek-game details:
   picked (`autoChangeGame`), else `null`. With `autoChangeGame=false` and a full or
   unknown requested game the error is `GameFull` / `InvalidGameId`.
 * `token` (optional) = a svc-accounts session token; when valid the ticket carries
-  the account id + name so the game server can attach the account.
+  the account id + name so the game server can attach the account. Only such
+  signed-in players are matched to `onlineMode` nodes (6.2); a guest asking for one
+  by id with `autoChangeGame=false` gets 403 `AccountRequired`.
 * `FORCE_ENTER=1` cookie (or `&force=1`) bypasses the capacity check on the requested
   game (v3.1.1 `hasForceEnterCookie`).
 
@@ -576,7 +580,7 @@ Node -> brain:
 
 | type | fields | notes |
 | --- | --- | --- |
-| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version`, `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `modes`?, `maps`? | first frame |
+| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version` (game version, `"1.0.0"`), `build`?, `commit`?, `commitTime`?, `buildTime`?, `protocol`? (build identity, 8.12), `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `onlineMode`? (0/1, default 0: only signed-in players are matched to it), `password`? (bool: never quick-joined), `modes`?, `maps`? | first frame |
 | `snapshot` | `lobbies: [tuple...]` | full lobby set, every 5 s (replaces the node's set) |
 | `lobby-up` | `lobby: tuple` | upsert one lobby (joins/leaves, 250 ms debounce) |
 | `lobby-down` | `lobbyId` | lobby removed (local or namespaced id) |
@@ -612,11 +616,14 @@ The seek-game `clientId` is a compact JWS (`kn_signed_token`, HS256, key
 `brain.join_secret`), verifiable locally by the game server without a round trip:
 
 ```
-{"iss":"kn-brain","brn":"<brainId>","gid":"NY:ab12c","nid":"NY","lid":"ab12c",
- "reg":"us-nj","acc":12,"name":"bob","jti":"<16 random hex>","iat":...,"exp":iat+join_ttl_s}
+{"brn":"<brainId>","nid":"NY","lid":"ab12c","acc":12,"name":"bob",
+ "jti":"<16 random bytes, hex>","iat":...,"exp":iat+join_ttl_s}
 ```
 
-`acc` is 0 and `name` absent for guests. A game server should accept a ticket when
+`acc` is 0 and `name` absent for guests. The ticket travels in the 352-byte
+`NetJoinPacket.client_key`: only claims something reads are in it, and `name` is left
+out when the ticket would still be longer than 351 chars (the game server's `auth`
+with the ticket returns the account name anyway). A game server should accept a ticket when
 the signature is valid, `exp` is in the future, `nid` is its node id and `lid` one of
 its lobbies (or when `gameserver.require_ticket` is off, accept tickets-less joins
 as today). Each issued ticket reserves a slot for `join_ttl_s` (reservations count
@@ -688,7 +695,13 @@ live reservations of every brain; cap = min(maxPlayers, mode cap)
 1. `game=ID` requested: if it exists and has room (or `FORCE_ENTER`/`force=1`) -> it.
    Otherwise `autoChangeGame=false` -> `GameFull` / `InvalidGameId`; with
    `autoChangeGame` (default) continue and answer `changeReason: "game_changed"`.
-2. Public pool = non-custom lobbies (custom lobbies are only reachable by id).
+   KrunkNative: a guest (no valid `token`) asking for an `onlineMode` lobby is
+   treated like a full one, but with `AccountRequired` (403).
+2. Public pool = non-custom lobbies (custom lobbies are only reachable by id),
+   minus password protected ones (hello `password` or meta `pr`) and, for guests,
+   lobbies of `onlineMode` nodes (hello `onlineMode`, persisted for other brains as
+   meta `onlineMode: true` in the lobby tuple): the server would refuse them
+   ("Failed to verify username").
    In the requested region, the most populated lobby with room (first pass below
    `soft_cap`, if set).
 3. No room in the region and `cross_region`: the same rule over every region.
@@ -706,7 +719,8 @@ Admin / tooling only: the clients no longer call `/mm/host-game` (hosting = runn
 
 `/mm/host-game`, a node's `host-request` (game-socket `custom`), or the social WS
 via `brain_host_game()` (`registry.h`): pick, in the requested region (then any
-region when `cross_region`), a non-draining `custom`-capable node with spare
+region when `cross_region`), a non-draining `custom`-capable node (not password
+protected; `onlineMode` only for a signed-in host or ranked) with spare
 capacity (fewer lobbies than `maxLobbies`, or a non-custom lobby with no players and
 no seat reserved), preferring this brain's own nodes, then the least loaded. Own
 node -> `host` frame; another brain's node -> `mm_host_requests` row +
@@ -766,7 +780,7 @@ parties whose members are all ready, per region and queue (r4v4, r2v2, r1v1 =
 longest-waiting party anchors; parties within `rating_window + window_growth x
 wait` (max `window_max`) of its average rating fill team 0, then team 1. The match
 is hosted with `host` (config `{"ranked":true, "matchId", "queue", "teamSize",
-"maxPlayers", "mode": brain.ranked.mode (14), "modes", "maps"/"map" (random from
+"maxPlayers", "mode": brain.ranked.mode (38, MODE_ID_RANKED), "modes", "maps"/"map" (random from
 brain.ranked.maps, if set), "private":true, "startGraceS", "teams":[[{accountId,
 name}],[...]]}`); hosting failure puts the parties back (10 s back-off).
 
@@ -778,7 +792,7 @@ abandoners, and replies `{"type":"ranked-result-reply","rid","ok":true,"ratings"
 [{accountId,name,team,key,old,new,delta,abandoned?}]}`. Matches without a result
 are aborted after `match_timeout_s`.
 
-Config `brain.ranked.*`: `enabled`, `min_level` (15), `mode` (14), `maps`,
+Config `brain.ranked.*`: `enabled`, `min_level` (15), `mode` (38: KN Ranked on the v7.1.4 mode table), `maps`,
 `rating_window`, `window_growth`, `window_max`, `k`, `abandon_penalty`,
 `cooldown_s`, `poll_timeout_s`, `creating_timeout_s`, `match_timeout_s`,
 `start_grace_s`. Test: `ctest -R brain_ranked` (`tests/ranked_test.py`). The matcher's
@@ -850,6 +864,10 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
   (one clan per player, role 0 Recruit .. 3 Commander, clan XP/kills/deaths),
   `clan_requests`, `clan_messages`, `chat_messages`, `feed_posts` / `feed_comments`
   / `feed_likes`, `mail`, `reports`, `moderation_log`.
+* `player_badges` (earned badges.js indices), `challenges` (v7 challenge definitions: type,
+  DAT / REW JSON, icon, name; seeded with a starting set), `player_challenges` (PV / PT per
+  account, challenge and period: UTC day / week for daily / weekly), `player_medals` (medal
+  counts per account): `0107_progression.sql`, player-viewer WP-E part 2c.
 * `inventory` (skin index -> count), `skin_transactions`, `market_listings`,
   `trades` + `trade_items`, `published_maps`, `published_mods`, `published_assets`,
   `creation_votes`, `creation_favs`.
@@ -870,7 +888,7 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 {id, username, alias, level, levelProg, score, funds, clan, clan_rank, clan_role,
  premium, dev, mod, hack, featured, elo, elo2, elo4, chal,
  banned (0/1), ban_reason, ban_expires (unix s, 0 = none/permanent),
- data: [40 slots], token?}
+ badges: [earned badges.js indices], data: [40 slots], token?}
 ```
 
 `data` is `Account.getData()` of `src/data/account.js` in its order: 0 id, 1 kills,
@@ -880,7 +898,8 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 20 regionInd, 21 isMod, 22 elo, 23 elo2, 24 elo4, 25 chal, 26 virus, 27 premiumT,
 28 has2FA, 29 alias, 30 createDate, 31 twitch, 32 isCreationMod, 33 clanDeaths,
 34 clanKills, 35 clanCon, 36 clanRegion, 37 clanRank, 38 jobRating, 39 jobRatingPos.
-Level: `max(1, floor(0.03*sqrt(score)))`, `levelProg = round(frac*100)` (XP = score).
+Level: `max(1, floor(0.03*sqrt(score)))`; `levelProg` is v7.1.4's getLevelProg, a float percent
+linear in score between `(level/0.03)^2` (0 at level 1) and `((level+1)/0.03)^2` (XP = score).
 
 Session token: 32 lowercase hex (16 random bytes, as v3.1.1), stored as sha256,
 sliding `session_ttl_days`. Issued by password login and register; a token resume
@@ -917,7 +936,7 @@ Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 | `["a", 1, [name, null, token]]` token resume | same (token unchanged) |
 | `["a", -1]` logout | none (session token revoked) |
 
-`info` = `{level, levelProg, alias, premium, funds, score, clan, dev, mod, banned}`
+`info` = `{level, levelProg, alias, premium, funds, score, clan, dev, mod, banned, badges}`
 (ignored by v3.1.1). Then `["gmc", unreadMail]` (JSON clients). Error strings:
 `Username must be 3–16 characters.`, `Username may only contain letters, digits, and
 underscores.`, `Password must be ≥ 6 characters.`, `Password is too long.`,
@@ -984,10 +1003,17 @@ Other labels (request -> reply):
 | `["fkr", captcha]` | `["spinKR", lastReward, randNum, rewardIndex, funds]` / `["spinKR", null, null, null, null, err]`: `store.freeKR[i].kr[level >= 20]`, once per `reward_time_s` |
 | `["clm"]` | `["clm", lastReward, funds]` / `["pRes", null, err]`: daily reward (level >= `reward_min_level`, `daily_reward_kr`, same clock as `fkr`); `["unbx"]` is accepted |
 | `["rpt", name, reason, details]` / `["grp", name]` | `["rpr", ok]` / `["rps", rows]` (staff) |
+| `["chg"]` | `["chgL", activeChallenges]`: `[{CI, T, DAT, REW, IC, N, PV, PT, TR?, PER}]` (v7 `account.activeChallenges`; TR = ms left of a daily / weekly one; 3 daily + 3 weekly rotate per account and UTC day / week) (WP-E part 2c, `progress.c`) |
+| `["bdg", badge]` | `["bdgr", badge]` / `["po", null, "You dont own this badge"]`: `player_stats.bdg` (-1 clears; v7 io_badgeUpdate) |
+| `["cbdg", badge]` | `["cbdgr", badge]` / `["po", null, err]` ("Badge not claimable", "Requirements not met", "Badge already claimed"): a claimable badge whose rule holds (Nuclear I-IV: `stats.n`) |
+| `["mdl"]` | `["mdl", {medal: count}]`: the account's medal counts (KrunkNative) |
 | `["flg", name, 0\|1]` / `["ver", name, 0\|1]` | `["fgr", ok]` (mods) / `["verr", ok]` (devs) |
 
 Server pushes: `["ua", data40, info]` (v3.1.1 `updateAccount`) after a stats commit
-of that account; `["gmc", n]` unread mail.
+of that account; `["gmc", n]` unread mail. After a commit with v7 progression fields (7.6):
+`["chg", [done, CI, PV, ...]]` (v7 io_updateChallenges), `["chgC", [challenge...]]` (the
+completed challenge objects: the end screen's cards and reward skins), `["chlR", skins, funds,
+0, 0, kr]` (io_updateChallengeRewards) and `["nbdgr", [badge...]]` (checkBadges).
 
 ### 7.5 Hub HTTP catalogue (`creations.c`, v3.1.1 `publicRoutes.ts`)
 
@@ -1019,16 +1045,35 @@ servers hosting community maps; 404 `{"error":"not_found"}`.
 | `logout` | `{token}` | `{}` |
 | `alias` | `{id, alias}` | account |
 | `password` | `{id, old, new}` | `{token}` |
-| `stats` | `{id, match, kills, deaths, score, won, games, time_ms\|timePlayed, kr, xp?, class\|classIndex, mode, map, region, region_index?, server, stats{}}` (deltas of one match) | account + `{kr_awarded, duplicate}` |
+| `stats` | `{id, match, kills, deaths, score, won, games, time_ms\|timePlayed, kr, xp?, class\|classIndex, mode, map, region, region_index?, server, stats{}, prog?, medals?, mapIndex?, mapId?, ranked?, final?}` (deltas of one match) | account + `{kr_awarded, duplicate}` |
 | `rewards` | `{items: [[id, kr], ...]}` | `{funds: [...]}` |
 | `give_skin` | `{id, skin, source?}` | `{skin, count}` |
 | `elo` | `{id, mode: 1\|2\|4, elo}` / `{id, mode, delta}` (atomic, clamped at 0) | `{}` / `{elo}` |
 | `challenge` | `{id, chal, kr}` | `{chal, funds}` |
 | `ban_check` | `{ip, id?}` | `{banned, reason, expires}` |
+| `storage` | `{id, name, map, type: 0-5, scope: 0\|1, data: [[key, value]...]}` | `{rows: [[key, value]...]}` (the touched keys after the operation) |
+| `storage_load` | `{name, map, from?}` | `{rows: [[key, value]...]}` (`from` = another map of the same creator: its global rows) |
+| `map_reward` | `{id, amount, map}` | `{rsp: "Success", funds}` or `{rsp: <refusal>}` |
+
+`storage` / `storage_load` / `map_reward` are KrunkScript's `GAME.STORAGE`, the Save / Load Data
+triggers and `GAME.PAYMENTS.giveKR` / Reward KR of a game server hosting a published map
+(doc/v7/krunkscript.md 2.6, WP6; `db_storage.c`, migration `0300_ks_storage.sql`): rows of table
+`ks_storage (account_id, map_id, skey, svalue, scope)`, the map resolved by `published_maps.map_name`
+(unknown: `"Storage only supported on published maps"`), the v7 data checks again; KR rewards come out of
+`published_maps.map_funds`. Tests: `ctest -R brain_storage` (ops, every driver), `ctest -R
+brain_ks_storage_e2e` (server_bin + kn_brain + a hosted published map).
 
 `stats` is idempotent per `(match, id)` (`match_results` primary key; a retry
 returns `duplicate: 1` and changes nothing), adds XP to the per-class `c<class>`
 stat and the clan's score, clamps KR to `max_match_kr`, writes a ledger row.
+`stats{}` holds v7's incStat counters (`s, h, hs, ls, wb, mk, fk, tmk, ast, spry, crc, n, ad,
+sad, cad, sl, jg, kjg, jgk, wm`), added to `player_stats`. player-viewer WP-E part 2c: when
+`prog` (`[[key, value, weapon, streak], ...]`, the match's challenge tallies) or `medals`
+(`{name: count}`) is present and the commit is not a duplicate, kn_brain then runs
+`P_PROGRESS` (`db_progress.c`): v7's challenges.finalize on the account's active challenges
+(`final: false` = a player who left: only `DAT.nem` ones), KR / skin rewards (`kr_transactions`
+source `challenge`), the medal counts, and checkBadges (claimable badges whose rule holds), then
+pushes 7.4's match-end frames.
 
 ### 7.7 Tests
 
@@ -1044,6 +1089,10 @@ stat and the clan's score, clamps KR to `max_match_kr`, writes a ledger row.
   brain on an ephemeral port (read from its "listening on" log line), no sleeps
   except the login throttle window: 50/50 sequential and concurrent runs pass.
   Skips (77) without PostgreSQL or python `websockets`.
+* `ctest -R brain_progress` (`services/brain/tests/progress_test.py`, every driver): the
+  challenge list and its daily / weekly rotation, a commit with tallies -> the match-end pushes,
+  duplicate and partial commits, badge select / claim refusals and the auto-awarded Nuclear I,
+  medal counts, `badges` in the account object (WP-E part 2c).
 * Real v3.1.1 client: `services/brain/tests/v311_site_proxy.js <port> <brainPort>
   <v3.1.1 public dir>` (same-origin front like nginx) +
   `v311_social_client.js <port> <cdpPort> <user> <pass> <outDir>` against headless
@@ -1093,7 +1142,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 
 | key | default | meaning |
 | --- | --- | --- |
-| `region` | `local` | brain region id (v3.1.1 `MM_NODE_REGION`, a `config.regionNames` id such as `us-nj`) |
+| `region` | `local` | brain region id (v3.1.1 `MM_NODE_REGION`): the 2-letter code shown in the server browser (`SV`, `LA`, `CH`, `VA`) |
 | `node_id` | `LOC` | node id (v3.1.1 `MM_NODE_ID`), prefix of the lobby id `"<node_id>:<5 chars>"`; no `:` |
 | `name` | `KrunkNative` | server name (hello, lobby meta `name`) |
 | `listen_host` / `listen_port` (alias `port`) | `0.0.0.0` / `21015` | TCP bind address / port |
@@ -1197,7 +1246,9 @@ logged in elsewhere; `004003` banned; `004004` server draining (`"GAME UPDATING"
   `matchId` = `<round matchId>#c<connection id>` so svc-accounts' `(match, id)`
   idempotency never swallows a rejoin). Per player: `accountId, name, kills, deaths,
   score, won, timePlayed` (ms since the player's first spawn of the round), `games,
-  kr, xp` (= score), `classIndex`. Like v3.1.1 `updateAccounts`, hosted (custom)
+  kr, xp` (= score), `classIndex`, and (WP-E part 2c, GameHooks.progress) `stats` (v7 incStat
+  counts), `prog` (challenge tallies per key, weapon and streak, plus `w` / `gp` at the round
+  end), `medals` (player.medals), `mapIndex` (v7 official map index, -1 custom) and `ranked`. Like v3.1.1 `updateAccounts`, hosted (custom)
   games and `noReward` modes only add time played, and hack-flagged accounts get
   nothing. Guests are never sent.
 * KR: `min(premium ? kr_cap_premium : kr_cap, floor(score × mode.rewardMlt ×
@@ -1304,6 +1355,9 @@ New keys (also in config.example.json):
 | `tags` | `[]` | extra info-query tags |
 | `enforce_skins` | `auto` | cosmetics must be owned (8.9); auto = on while linked to a coordinator |
 | `shutdown_grace` | `10` | seconds a SIGTERM/SIGINT drain lets the round finish |
+| `lag_comp` | `true` | hits test targets where the shooter saw them (v3.1.1 storeState / fetchState, 500 ms history); console `lagcomp` |
+| `lag_comp_anchor` | `1` | `1` exact: the shot input's client time (the running sum of its timeline's frame deltas, no packet change) mapped onto the server clock by a min-filtered per-connection offset, + 1 ping; a delayed packet (jitter, a lag spike) costs nothing. Falls back to `2` while a timeline calibrates (0.5 s after a spawn / seq gap / hitch) and for the rest of a life whose summed deltas run faster or slower than real time (logged `[lagcomp]`); a shot is credited at most 250 ms before its arrival and never after it. `2`: the shot input's arrival + 1 ping. `0`: v3.1.1 `ping * 2 * lagComp` from processing. `true`/`false` read as `1`/`0`. Console: `lagcomp anchor exact\|arrival\|v3` |
+| `lag_comp_scale` | `1` | 0.1..1, multiplies each player's v3.1.1 `player.lagComp` (the Settings > Network "Lag Compensation" slider, ENT V7, server-clamped to 0.1..1): scales the ping part of the rewind |
 | `log_file` | `""` | also append every console line (timestamped) here |
 
 CLI additions: `--cfg FILE`, `--hostname`, `--password`, `--online-mode` /
@@ -1340,12 +1394,15 @@ demuxes the `FF FF FF FF` prefix, which no game datagram starts with).
 * request: `FF FF FF FF "KNINFO" [00 <nonce <= 32 printable bytes>]`
 * reply: `FF FF FF FF "KNinfo" 00 <JSON <= 1200 bytes>`:
   `{"v":1,"game":"krunknative","name","map","mode","modeId","players","max","bots",
-  "tags":[...],"community","online_mode","password","region","version","port","nonce"}`.
+  "tags":[...],"community","online_mode","password","region","version","port","nonce",
+  "commit","commit_time","build_time","protocol"}` (`version` = the build's git describe; 8.12).
   Tags: `online`/`offline`, `password`, `ranked`, `custom`, `draining`, `community`
   (linked to a coordinator), then `tags`. Snapshot refreshed 4x a second by the tick.
 * `services/scripts/kn-query.py HOST[:PORT] ...` prints it.
 * Finder (opt-in, `finder_url`): `POST <finder_url>/servers/heartbeat`
-  `{"v":1,"host","port","query_port","name","community","online_mode"[,"shutdown":true]}`
+  `{"v":1,"host","port","query_port","name","community","online_mode","version","commit",
+  "commit_time","build_time","protocol"[,"shutdown":true]}` (the build fields are informational:
+  the listing uses the verified query reply)
   every `interval` s from the reply `{"ok":true,"interval":N}` (default 60), plus one with
   `shutdown` on exit. `host` is `""` (= the request's source IP) while `public_host` is
   loopback. The finder lists only what it verified by polling the query. HTTPS needs
@@ -1427,6 +1484,50 @@ direct connect / community servers (coord-auth). Kept: offline / practice play
 (`local_game.c`, "play offline" on the error screen, editor Test Map), the server
 browser and join. `/mm/host-game` and node `host-request` stay on the coordinator for
 admin tooling (6.3); clients never call them.
+
+### 8.12 Build version and outdated servers
+
+Every binary embeds its build identity (`shared/include/build_info.h`, generated
+`kn_version.h` from `cmake/kn_version.cmake` at every build): git describe (`--match
+'server-v*' --match 'v[0-9]*' --exclude '*-parity*' --always --dirty`), 12-hex commit, its
+committer date, the build time and the protocol `NET_PROTOCOL_MAJOR.MINOR`. CI builds without
+git pass `-DKRUNKNATIVE_VERSION_{DESCRIBE,COMMIT,COMMIT_TIME,BUILD_TIME}`. Shown by
+`server_bin --version` / `client_bin --version` / `kn_brain --version`, the server's startup log
+and `status`, the KNINFO reply and finder heartbeat (8.8), the coordinator `hello` (5.2) and every
+lobby tuple's meta (`proto`, `build`, `commit`, `commitTime`). The INIT packet is unchanged
+(fixed size; a tail would need a protocol bump).
+
+**Latest release** (`services/brain/releases.c`, rule in `release_info.c`, module `releases`,
+every role). kn_brain polls `servers.releases_url` (default
+`https://api.github.com/repos/rebel10n/KrunkNative/releases?per_page=30`, no token) every
+`servers.latest_poll_s` (600; 0 = off) on a worker thread (libcurl), with `If-None-Match`
+(a 304 keeps the cache) and backoff to `X-RateLimit-Reset` on 403/429 or a spent limit. The
+latest server build is the `server-latest` / `server-v*` release (not drafts) with the newest
+`commit_time` in the body line `<!-- kn-build {"describe","commit","commit_time","build_time",
+"protocol"} -->` (`.github/workflows/release.yml`). Overrides: `servers.latest_version`
+(describe or commit; no poll then) and `servers.download_url` (the page shown to players).
+
+**Outdated** (`release_server_outdated`): a server is outdated when
+1. its protocol major.minor is lower than this coordinator's own, or
+2. the latest release is known, the server's commit is not the latest commit, and its commit
+   is older than the latest commit by more than `servers.outdated_grace_h` (48 h; dirty builds
+   compare by commit time like any other), or
+3. the latest release is known and the server reports no build info (an older server_bin), or
+4. `servers.latest_version` is set and neither the server's describe nor its commit match it.
+
+**Incompatible**: the server announces another protocol MAJOR than the client (`?proto=M.m`;
+clients without it count as the coordinator's major). Minors interoperate.
+
+Exposed per entry as `outdated` / `incompatible` (finder `GET /servers`, `meta` of `/mm/game-list`
+tuples) plus top-level `latest` `{version, commit, commit_time, build_time, protocol, tag}`,
+`download_url` (release page, default `https://github.com/rebel10n/KrunkNative/releases/tag/server-latest`)
+and `downloads` `{linux, linux_bullseye, windows, macos}` (asset URLs). Matchmaking
+(`/mm/seek-game`, the client sends `proto`): never a lobby of another protocol major (requested by
+id: `IncompatibleVersion` 409 with `autoChangeGame=false`, else moved); up-to-date lobbies with
+room win over outdated ones, which are still used when nothing else has room. The client's
+Servers window shows an Outdated / Incompatible badge and a "Download server" link
+(`downloadServer()`: the OS asset natively, the release page on the web; only
+`https://github.com/rebel10n/KrunkNative/` URLs are opened).
 
 ## 9. Client integration (client-integration)
 
@@ -1524,7 +1625,7 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 | 2FA at login | twoFAres / pick2FAkey / sub2FA (#twoFAPop grid) | password login -> `["c2fa",1]`; `["2fa",1,[cells]]` -> `["c2fa",2]` + `a` |
 | 2FA enable | act2FA (no markup in the shipped page: KrunkNative adds a row to the Account window's Settings tab) | `["2fa"]` -> `["c2fa",null,null,pattern]` |
 | Daily reward (level >= 5) | cK / dd (#claimHolder timer, "Play 1 Game" until a round ended), claimReward (ad-gated upstream) | `["clm"]` -> `["clm",lastReward,funds]` |
-| Prize wheels (Store tab 0) | windows[13] tab 0, prizeWheel, spinButton/spinUI onclick, spinResponse | `["spin",i]` -> `["spin",null,rand,skin,funds,follow]`, `["unbx"]`. The canvas wheel is a white disc (no 2D canvas natively); the won item shows its preview PNG (most skin previews are not shipped in `ui/`: noimg fallback) |
+| Prize wheels (Store tab 0) | windows[13] tab 0, prizeWheel, spinButton/spinUI onclick, spinResponse | `["spin",i]` -> `["spin",null,rand,skin,funds,follow]`, `["unbx"]`. The canvas wheel is a white disc (no 2D canvas natively); the won item shows its preview PNG (`textures/previews/` from the asset tree, `make assets-import`; noimg fallback) |
 | Ranked (27) | windows[26], joinQueue / leaveQueue / updateQueueStatus, QueueManager | `/mm/queue/join` (token, region, queues, party, ready, classIndex), `/mm/queue/poll` every 1 s, update-ready / update-queues / update-class / kick / promote / leave; "Join" `{gameId,host,port,webUrl,clientId}` is joined with that ticket. Status under CLICK TO PLAY |
 | playMap / `?play=` / `?game=` | playMap -> `/?play=`, autoHostMap | brain: a public lobby whose `meta.map`/`meta.m` matches, else `/mm/host-game` (`customMap` for non-catalogue maps: the game server fetches `/api/map-data`); offline: published maps are fetched (`/api/map-data?name=`) and hosted in the local game |
 
@@ -1534,6 +1635,11 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 it matches `KRUNK_NATIVE_TARGETS` (comma list of `host:port`, `host:lo-hi`, `host:*`;
 default `KRUNK_NATIVE_HOST:KRUNK_NATIVE_PORT..+63`); other targets are refused (1008).
 No `target` = `KRUNK_NATIVE_HOST:KRUNK_NATIVE_PORT` as before.
+`target=localhost:<port>` matches the `127.0.0.1` rules. A local/dev bridge also bridges
+any loopback target (`localhost`, `127.x`, `::1`, any port: a developer's own `server_bin`
+through the web console's `connect localhost:<port>` or Direct Connect): `make bridge` (no
+`KRUNK_NATIVE_TARGETS`) or `KRUNK_NATIVE_ALLOW_LOOPBACK=1` (`deploy/local/backend.sh`).
+Deployed bridges set `KRUNK_NATIVE_TARGETS` and keep the strict list.
 
 ### 9.7 Coordinator roles, central auth, server finder, client modes (coord-auth)
 
@@ -1589,7 +1695,9 @@ echoed the nonce (and is younger than two intervals) are listed, with every fiel
 or `finder.max_failures` (3) failed polls. Limits: `finder.submit_per_min` (30) per IP,
 `finder.max_per_ip` (64) entries. `GET /servers?map=&mode=&tag=&space=1&online_mode=0|1&
 community=&region=&q=&limit=` -> `{ok, servers:[{host, port, query_port, name, map, mode, modeId,
-players, max, tags, community, online_mode, password, region, version, ping_ms, last_seen}]}`.
+players, max, tags, community, online_mode, password, region, version, commit, commit_time,
+build_time, protocol, ping_ms, last_seen, outdated, incompatible}], latest, download_url, downloads}`
+(`?proto=M.m` = the asking client's protocol for `incompatible`; 8.12).
 
 **Client modes** (`client/include/online_mode.h`, `client/src/net/online_mode.c`). `--mode
 online|offline`, `KRUNKNATIVE_MODE`, web `?mode=`, storage `knMode` (Settings > Client > Account

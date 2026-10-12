@@ -1,0 +1,10 @@
+// devicePixelRatio 2: coordinates stay in canvas px (CSS px), the layer renders at device px.
+@size 400 300
+@dpr 2
+@scale 0.8
+@background #2c3e50
+drawRect 20 20 150 80 15 "#e67e22" 1
+drawCircle 300 90 60 40 0 "#1abc9c" 0.8
+drawLine 10 200 480 160 1 "#ecf0f1" 1
+drawText "HiDPI text" 250 280 0 40 "center" "#ffffff" 1
+drawText "tiny 10px" 30 340 0 10 "left" "#f1c40f" 1

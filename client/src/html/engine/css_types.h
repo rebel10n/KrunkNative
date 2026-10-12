@@ -42,8 +42,8 @@ extern "C" {
 #define CSS_MAX_ANIMATIONS      2
 #define CSS_MAX_TRANSITIONS     2
 #define CSS_MAX_BOX_SHADOWS     4
-#define CSS_MAX_GRID_TRACKS     8
-#define CSS_MAX_CUSTOM_PROPS    12
+#define CSS_MAX_GRID_TRACKS     12  /* v7.1.4 editor.css #_toolbar: 10 columns */
+#define CSS_MAX_CUSTOM_PROPS    96  /* v7.1.4: main.css 21 + bundledStyles.min.css 34 :root properties, + hud.css / social.css */
 #define CSS_MAX_CLIP_POINTS     8
 #define CSS_MAX_FONT_FAMILIES   4
 
@@ -152,8 +152,10 @@ typedef enum CssObjectFit { CSS_OBJECT_FIT_FILL = 0, CSS_OBJECT_FIT_CONTAIN, CSS
 typedef enum CssFlexDirection { CSS_FLEX_DIRECTION_ROW = 0, CSS_FLEX_DIRECTION_ROW_REVERSE, CSS_FLEX_DIRECTION_COLUMN, CSS_FLEX_DIRECTION_COLUMN_REVERSE } CssFlexDirection;
 typedef enum CssFlexWrap { CSS_FLEX_WRAP_NOWRAP = 0, CSS_FLEX_WRAP_WRAP, CSS_FLEX_WRAP_WRAP_REVERSE } CssFlexWrap;
 
+/* justify-content / align-content. NORMAL (also `stretch`) is flex-start in flex layout and
+ * stretches the auto tracks in grid layout. */
 typedef enum CssJustifyContent {
-    CSS_JUSTIFY_CONTENT_FLEX_START = 0, CSS_JUSTIFY_CONTENT_FLEX_END, CSS_JUSTIFY_CONTENT_CENTER,
+    CSS_JUSTIFY_CONTENT_NORMAL = 0, CSS_JUSTIFY_CONTENT_FLEX_START, CSS_JUSTIFY_CONTENT_FLEX_END, CSS_JUSTIFY_CONTENT_CENTER,
     CSS_JUSTIFY_CONTENT_SPACE_BETWEEN, CSS_JUSTIFY_CONTENT_SPACE_AROUND, CSS_JUSTIFY_CONTENT_SPACE_EVENLY
 } CssJustifyContent;
 
@@ -201,7 +203,8 @@ typedef enum CssTransformKind {
 } CssTransformKind;
 
 typedef enum CssClipPathKind { CSS_CLIP_PATH_NONE = 0, CSS_CLIP_PATH_POLYGON } CssClipPathKind;
-typedef enum CssContentKind { CSS_CONTENT_NORMAL = 0, CSS_CONTENT_NONE, CSS_CONTENT_STRING, CSS_CONTENT_ATTR } CssContentKind;
+/* CSS_CONTENT_URL: `content: url(...)` replaces an element's image (<img>; Krunker's .challIconHP). */
+typedef enum CssContentKind { CSS_CONTENT_NORMAL = 0, CSS_CONTENT_NONE, CSS_CONTENT_STRING, CSS_CONTENT_ATTR, CSS_CONTENT_URL } CssContentKind;
 typedef enum CssImageKind { CSS_IMAGE_NONE = 0, CSS_IMAGE_URL, CSS_IMAGE_GRADIENT } CssImageKind;
 typedef enum CssGradientKind { CSS_GRADIENT_LINEAR = 0, CSS_GRADIENT_RADIAL } CssGradientKind;
 typedef enum CssRadialShape { CSS_RADIAL_ELLIPSE = 0, CSS_RADIAL_CIRCLE } CssRadialShape;
@@ -389,7 +392,8 @@ typedef struct CssClipPath {
 
 typedef struct CssContent {
     uint8_t kind;          /* CssContentKind                                  */
-    const char *str;       /* atom: STRING text or ATTR attribute name        */
+    const char *str;       /* atom: STRING text, ATTR attribute name or URL   */
+    const char *base;      /* URL: atom of the stylesheet URL it resolves against */
 } CssContent;
 
 /* Side indices used by all [4] arrays */
@@ -491,6 +495,7 @@ typedef struct CssComputed {
     uint8_t flex_direction;           /* CssFlexDirection                      */
     uint8_t flex_wrap;                /* CssFlexWrap                           */
     uint8_t justify_content;          /* CssJustifyContent                     */
+    uint8_t align_content;            /* CssJustifyContent (grid rows; flex: normal only) */
     uint8_t align_items;              /* CssAlignItems                         */
     float flex_grow, flex_shrink;
     CssLength flex_basis;             /* AUTO by default                       */

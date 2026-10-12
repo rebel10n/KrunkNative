@@ -1,0 +1,30 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 14 "Sprinting", scripts.server (base64-decoded)
+# Server Script runs only on Hosted server & not in test mode
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+
+# Player update
+public action onPlayerUpdate(str id, num delta, obj inputs) {
+    obj tPlr = GAME.PLAYERS.findByID(id);
+    if (!!tPlr) {
+        
+        # Disable Default Movement:
+        tPlr.defaultMovement = false;
+        tPlr.disableDefault("crouch");
+
+        # Move Direction:
+        if ((num) inputs.movDir >= -Math.PI && (num) inputs.movDir <= Math.PI) {
+            num movDir = 0;
+            if (!!inputs.movDir) {
+                movDir = (num) inputs.movDir;
+            }
+            movDir -= ((num) inputs.mouseX);
+            num movSpd = 0.0003 * delta;
+            if ((bool) inputs.crouch) { # Sprint
+                movSpd *= 1.6;
+            }
+            (num) tPlr.velocity.x += (movSpd * Math.cos(movDir));
+            (num) tPlr.velocity.z += (movSpd * Math.sin(movDir));    
+        }
+        
+    }
+}

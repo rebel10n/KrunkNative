@@ -92,7 +92,7 @@ static const char k_fix_containerr[] =
 
 void ed_fix_hitbox(EditorObject *e) {
     // fixHitbox(e = objectSelected()): replaceObject(e, hitbox JSON, true, objType)
-    if (!(e = e ? e : g_ed.selected)) return;
+    if (!(e = e ? e : g_ed.proj->selected)) return;
     const char *type = editor_prefabs[e->prefab].name;
     if (!strcmp(type, "VEHICLE")) ed_obj_replace(e, k_fix_vehicle, type, 0);
     else if (!strcmp(type, "TREE")) ed_obj_replace(e, k_fix_tree, type, 0);
@@ -127,8 +127,8 @@ void ed_fix_hitbox(EditorObject *e) {
 
 int ed_object_painter_click(const vec3 hit) {
     // shift + left click with Object Painter on and a JSON: 1 = handled
-    const char *json = ed_json_str(g_ed.advanced, "objectPainterJson", "");
-    if (!ed_json_truthy(cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "objectPainter")) || !json[0]) return 0;
+    const char *json = ed_object_painter_json(); // the JSON field or a scrap preset (editor_tools.c)
+    if (!json) return 0;
     // fakeSelected(x, y + 0.5, z): owner.position = position = the point, scale 1, no
     // rotation. replaceObject places at owner.position.y - scale.y / 2, which is the
     // serialized p.y of a unit box centred there. The fake is never in the scene, so
@@ -235,10 +235,10 @@ void ed_quickgui_show(EditorObject *o, const double fb_x, const double fb_y) {
     cJSON *arr = cJSON_CreateArray();
     const EditorGroup *g = ed_group_of(o);
     if (g) {
-        for (size_t i = 0; i < g_ed.count; i++) {
+        for (size_t i = 0; i < g_ed.proj->count; i++) {
             for (size_t k = 0; k < g->count; k++) {
-                if (g->objects[k] == g_ed.objects[i]->uuid) {
-                    cJSON_AddItemToArray(arr, ed_obj_serialize(g_ed.objects[i]));
+                if (g->objects[k] == g_ed.proj->objects[i]->uuid) {
+                    cJSON_AddItemToArray(arr, ed_obj_serialize(g_ed.proj->objects[i]));
                     break;
                 }
             }

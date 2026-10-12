@@ -1,0 +1,70 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 11 "Networking Objects", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+
+# Runs when the game starts
+public action start() {
+
+}
+
+# Runs every game tick
+public action update(num delta) {
+
+}
+
+# Add rendering logic in here
+public action render(num delta) {
+
+}
+
+# Player spawns in
+public action onPlayerSpawn(str id) {
+
+}
+
+# Player update
+public action onPlayerUpdate(str id, num delta, obj inputs) {
+
+}
+
+# User pressed a key
+public action onKeyPress(str key, num code) {
+
+}
+
+# User released a key
+public action onKeyUp(str key, num code) {
+
+}
+
+# User held a key
+public action onKeyHeld(str key, num code) {
+
+}
+
+# User clicked on screen
+public action onMouseClick(num button, num x, num y) {
+
+}
+
+# User released clicked on screen
+public action onMouseUp(num button, num x, num y) {
+
+}
+
+# User scrolled on screen
+public action onMouseScroll(num dir) {
+
+}
+
+# User clicked a DIV (ID)
+public action onDIVClicked(str id) {
+
+}
+
+# Client receives network message
+public action onNetworkMessage(str id, obj data) {
+
+}

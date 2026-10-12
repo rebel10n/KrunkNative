@@ -1,5 +1,5 @@
 # edge-firewall-contract v1 drop-in: {{ edge_firewall_dropin.name }}{{ (' (inputs: ' ~ edge_firewall_dropin.source ~ ')') if edge_firewall_dropin.source | default('') else '' }}.
-# Rendered by the vendored edge_firewall role (deploy/ansible/roles/edge_firewall).
+# Managed by Ansible: rendered by the vendored edge_firewall role (deploy/ansible/roles/edge_firewall).
 {% for edge_firewall_line in edge_firewall_dropin.comment | default([]) %}
 # {{ edge_firewall_line }}
 {% endfor %}

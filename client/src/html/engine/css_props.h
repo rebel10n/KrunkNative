@@ -131,7 +131,8 @@ extern "C" {
     X(VERTICAL_ALIGN,             "vertical-align",             0, "baseline") \
     X(FLEX_DIRECTION,             "flex-direction",             0, "row") \
     X(FLEX_WRAP,                  "flex-wrap",                  0, "nowrap") \
-    X(JUSTIFY_CONTENT,            "justify-content",            0, "flex-start") \
+    X(JUSTIFY_CONTENT,            "justify-content",            0, "normal") \
+    X(ALIGN_CONTENT,              "align-content",              0, "normal") \
     X(ALIGN_ITEMS,                "align-items",                0, "stretch") \
     X(FLEX_GROW,                  "flex-grow",                  0, "0") \
     X(FLEX_SHRINK,                "flex-shrink",                0, "1") \

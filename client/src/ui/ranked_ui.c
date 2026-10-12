@@ -7,6 +7,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <ui_logic.h>
+#include <html_ui.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -369,6 +370,18 @@ void ranked_ui_class_changed(const int index) {
 }
 
 // windows[26].gen() for an account
+// windows[26] (showWindow(27)) for everyone: v7.1.4's gen() writes nothing (ranked play is
+// gone there); KrunkNative keeps ranked: a guest gets the LOGIN REQUIRED card, an account the
+// queue / party UI below, styled by the v3.1.1 rules in css/ranked-kn.css.
+char *ranked_ui_window_gen(void) {
+    static int css;
+    if (!css) css = html_ui_add_stylesheet("css/ranked-kn.css") || 1;
+    if (!account_get() || backend_available() != 1) {
+        return strdup("<div class='reqW login' onclick='showWindow(5)'><i class='material-icons reqWIcon'>clear</i><div class='reqWLvl'>LOGIN REQUIRED</div><div class='reqWTxt'>to play in ranked games!</div></div>");
+    }
+    return ranked_window_gen();
+}
+
 char *ranked_window_gen(void) {
     const AccountInfo *a = acc();
     StrBuf sb = {0};
@@ -393,15 +406,15 @@ char *ranked_window_gen(void) {
         sb_append_esc(&sb, region ? region : "");
         sb_append(&sb, "</div>");
     } else {
-        static const char *const regions[][2] = {{"de-fra", "Frankfurt"}, {"us-ca-sv", "Silicon Valley"}, {"au-syd", "Sydney"}, {"jb-hnd", "Tokyo"},
-            {"us-fl", "Miami"}, {"sgp", "Singapore"}, {"us-nj", "New York"}, {"blr", "India"}, {"us-tx", "Dallas"}, {"brz", "Brazil"},
-            {"me-bhn", "Middle East"}, {"af-ct", "South Africa"}, {"local", "Local"}};
         char saved[32] = "";
         if (html_storage_get("krunker_rankedRegion", saved, sizeof(saved)) < 0 || !saved[0]) {
             if (html_storage_get("pingRegion7", saved, sizeof(saved)) < 0) saved[0] = 0;
         }
+        // KrunkNative's regions (servers_ui.c: 2-letter codes, the place name as tooltip)
+        char *options = servers_ui_region_options(saved);
         sb_append(&sb, "<select id='queueRegionSelect' class='inputGrey'>");
-        for (size_t i = 0; i < sizeof(regions) / sizeof(regions[0]); i++) sb_appendf(&sb, "<option value='%s' %s>%s", regions[i][0], strcmp(regions[i][0], saved) ? "" : "selected", regions[i][1]);
+        if (options) sb_append(&sb, options);
+        free(options);
         sb_append(&sb, "</select>");
     }
     const int leader = party_is_leader();

@@ -416,11 +416,18 @@ async def scenario(base, internal_url, secret):
         check(r[1] == "Map Updated!", "republish updates: %r" % r)
         r = await a.call("upMp", "uploadM", json.dumps({"name": "Burg", "objects": []}), None, "", "", 0)
         check(r[1] == "Map name taken", "catalogue names reserved")
+        # catalogue (shared/include/map_catalog.h, since 83d680d): v7.1.4's 32 official maps at their
+        # v7 indices (0 = Burg), then 21 v3.1.1 community maps + 15 v3_* maps = 68. Popular / New list
+        # the 32 officials first, then the rest in the v3.1.1 tab order; 42 rows per page (TAB_PAGE_SIZE)
         page = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=2&pos=0").read())
-        check(page["data"][0]["map_name"] == mapname and page["data"][0]["creatorname"] == alice
-              and len(page["data"]) == 37, "/api/maps New tab: published map first + 36 catalogue maps")
+        page1 = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=2&pos=1").read())
+        rows = page["data"] + page1["data"]
+        check(rows[0]["map_name"] == mapname and rows[0]["creatorname"] == alice and rows[1]["map_name"] == "Burg"
+              and len(page["data"]) == 42 and len(rows) == 1 + 68,
+              "/api/maps New tab: published map first + 68 catalogue maps (%d)" % len(rows))
         page = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=0&pos=0").read())
-        check(page["data"][0]["map_name"] == "Soul Sanctum" and page["error"] is None, "/api/maps Popular = v3.1.1 order")
+        check(page["data"][0]["map_name"] == "Burg" and page["data"][32]["map_name"] == "Soul Sanctum"
+              and page["error"] is None, "/api/maps Popular = v7 official maps, then the v3.1.1 order")
         found = json.loads(urllib.request.urlopen(http_base + "/api/search?type=map&val=arena_" + stamp).read())
         check(len(found["data"]) == 1, "/api/search finds the published map")
         data = urllib.request.urlopen(http_base + "/api/map-data?name=" + mapname).read()

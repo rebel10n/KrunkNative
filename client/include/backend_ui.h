@@ -23,12 +23,14 @@ typedef struct {
     char clan[16];        // "" = none
     double kills, deaths, wins, games, funds, score, time_played;
     double elo, elo2, elo4;
-    int level, level_prog;
+    int level;
+    double level_prog;    // v7.1.4 getLevelProg(): percent, linear in score (WP-E part 2c)
     int premium, featured, is_dev, is_mod, hack, has_2fa;
     int following, followers;
     int mail_unread;
     cJSON *stats;         // acc.stats (object, owned)
     cJSON *data;          // the raw 40-slot data array (owned)
+    cJSON *badges;        // acc.badges: earned badges.js indices (array, owned; kn_brain info "badges")
 } AccountInfo;
 
 void account_ui_init(Client*);              // listens on the social socket; restores the saved session
@@ -39,8 +41,14 @@ int  account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
 // Window markup when the account changes what v3.1.1 shows; NULL = keep the static capture.
 char *account_window_gen(int id, const char **header);
 void account_window_post(int id);
+double account_reward_ms(void);             // daily free KR: ms left, 0 claimable, -1 no account / level too low
 void account_set_funds(double funds);       // updateFunds(funds): header + windows
 void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / "" = none)
+// WP-E part 2c: the account's selected custom badge (stats.bdg) when it owns it and the
+// customBadge privacy setting shows it, else -1 (menu header, v7 updateClassPreview).
+int account_custom_badge(void);
+void account_ui_scenario(const cJSON *account); // --render-scenario: state.account stands in for a login
+int account_owns_badge(int badge);
 
 // ---- clan_ui.c (windows[12], the menu Clans window = showWindow(13))
 char *clan_window_gen(void);                // guest: LOGIN REQUIRED; member: the clan page
@@ -51,19 +59,40 @@ int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns t
 void account_elo_icon_html(char *out, size_t n, double elo, const char *style); // UTILS.eloIconHTML
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)
-void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin) page path
-void store_wheels_html(StrBuf *sb);         // Store tab 0 cards
+void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin): its asset-host URL (html_dom_asset_url)
+char *store_window_gen(void);               // windows[13].gen(): the v7.1.4 Store (guest and signed in), malloc'd
 int  store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void store_ui_frame(const cJSON *frame);    // "spin" replies
 void store_ui_tick(void);                   // per frame: spin screen geometry + reveal
 
 // ---- servers_ui.c (ClientManager + windows[1])
 void servers_ui_init(Client*, int brain_mode); // brain_mode: matchmake at startup instead of the default server
-int  servers_ui_brain_mode(void);
+int  servers_ui_brain_mode(void);            // matchmaking on and the session is a brain lobby (not pinned)
+int  servers_ui_pinned(void);               // 1 = pinned to a direct server (console connect, Direct Connect)
+void servers_ui_connect_direct(const char *host, int port); // console `connect`: a pinned direct session
+void servers_ui_disconnect(void);           // console `disconnect`: stay disconnected, no automatic seek
+int  servers_ui_reconnect(void);            // console `reconnect`: the last server (lobby: sought again); 1 = started
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
+int  servers_ui_join_link(const char *text);  // Join window / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining
+void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?game=<id>, the id unescaped
+int  servers_ui_account_required(void);     // 1 = the last seek was an online-mode lobby a guest may not join (error screen: Log in)
+char *servers_ui_region_options(const char *selected); // region <option>s (2-letter codes, place name as title); malloc'd
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
-char *servers_window_gen(int id, const char **header);
+char *servers_window_gen(int id, const char **header); // windows 2 (Servers), 8 (Host), 10 (Custom Games)
+void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (scenarios, KRUNKNATIVE_SERVER_LIST); NULL = the brain's
+// KrunkNative addition: the menu's Connect button (next to Invite / Join) and its window
+#define SERVERS_WINDOW_CONNECT 53                // showWindow id (v7's windows[] end at 52)
+void servers_ui_menu_setup(void);                // inject #menuBtnConnect into #subLogoButtons
+char *servers_connect_window_gen(void);          // the Connect window (host[:port], console `connect` semantics)
+// Build versions (ci-release; brain fields: doc/backend.md "Build version"). entry = a game-list
+// tuple or a finder /servers entry. The _html helpers return malloc'd markup (caller frees).
+void  servers_ui_note_list_response(const cJSON *response); // finder / game-list answer: download URL
+int   servers_ui_entry_outdated(const cJSON *entry);
+int   servers_ui_entry_incompatible(const cJSON *entry);
+char *servers_ui_entry_badge_html(const cJSON *entry);      // "" or an Outdated / Incompatible badge
+char *servers_ui_download_button_html(const cJSON *list_response); // "Download server" -> downloadServer()
+void  servers_ui_open_download(void);                       // downloadServer(): the release page / OS asset
 int  servers_ui_host_game(const char *config_json); // /mm/host-game: disabled (hosting = server_bin), 0 unless KRUNKNATIVE_ALLOW_CLIENT_HOST
 // Join a lobby with a ticket the brain issued elsewhere (ranked match): native TCP host:port,
 // web web_url or /native?target=.
@@ -76,6 +105,7 @@ void servers_ui_join_ticket(const char *host, int port, const char *game_id, con
 
 // ---- ranked_ui.c (windows[26] + the queue session)
 char *ranked_window_gen(void);
+char *ranked_ui_window_gen(void);           // showWindow(27) for guests too (LOGIN REQUIRED card)
 int  ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 const char *ranked_ui_status(void);   // queueStatusMessage, NULL none (play instructions subtitle)
 const char *ranked_ui_ready(void);    // queueReadyMessage

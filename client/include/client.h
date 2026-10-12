@@ -66,6 +66,13 @@ typedef struct {
     float fog_far;
     unsigned char enabled:1;
     unsigned char fog_enabled:1;
+    // map-G: Krunker v7.1.4 renderer output state (render.js init: toneMapping,
+    // toneMappingExposure, outputEncoding, useLegacyLights = !correctLights), applied by
+    // basic.frag after lighting and before fog like three.js r150. Zero = v3.1.1 output.
+    unsigned char correct_lights:1;  // physical light units / falloff (three useLegacyLights false)
+    int tone_mapping;                // 0 none, 1 Linear, 2 Reinhard, 3 Cineon, 4 ACESFilmic (config.toneTypes)
+    float tone_mapping_exposure;     // renderer.toneMappingExposure (1)
+    int output_encoding;             // 0/2 linear, 1 sRGB (config.encodingTypes)
 } RenderLighting;
 
 extern RenderLighting g_render_lighting;
@@ -75,6 +82,8 @@ typedef struct {
     float far;
     float fov;
     float zoom;
+    float ortho; // > 0: orthographic projection, half the view height in world units (editor renders); 0 = perspective
+    float aspect_override; // map-G: > 0 replaces the viewport aspect (ocean mirror pass: the main camera's projection on a square target)
 
     vec3 position;
     vec3 rotation;
@@ -208,6 +217,19 @@ typedef struct {
     vec2 texture_offset;      // in repeat units (frame index / scroll progress, main.c)
     vec2 texture_base_offset; // texture.offset from the map (tox/toy), added as-is
     unsigned int texture;
+
+    // map-G: Krunker v7.1.4 map material inputs (prefab.c)
+    float texture_rotation;   // three.js texture.rotation in radians ("tro" degrees), about uv (0, 0)
+    int texture_srgb;         // "ten" 1: the texture is sRGBEncoding, decoded to linear when sampled
+    int cull_front;           // three.js BackSide ("rs" 1): front faces culled (double_sided must be 0)
+    int sprite;               // THREE.Sprite / "msp": the XY unit quad always faces the camera (basic.vert)
+    unsigned int light_map;   // three.js lightMap (user asset "l" flag, "<asset>_l"), read with the mesh UVs
+    float light_map_intensity; // lightMapIntensity (1.5)
+
+    // WP-F: v7.1.4 store-item material effects (skin_fx.c)
+    unsigned int env_map;     // envMap "<tex>_env" (EquirectangularReflectionMapping), texture unit 4, 0 = none
+    float env_map_intensity;  // envMapIntensity (skin env || 3)
+    int projection_uv;        // skin `projection`: screen-space texture coordinates (render.js vTexCoords)
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
@@ -215,6 +237,8 @@ BasicMaterial *basic_material_init();
 
 // Texture unit of BasicMaterial.emissive_texture (unit 0: base map, 1: shadow map).
 #define BASIC_EMISSIVE_TEXTURE_UNIT 2
+#define BASIC_LIGHT_MAP_TEXTURE_UNIT 3 // BasicMaterial.light_map (map-G)
+#define BASIC_ENV_MAP_TEXTURE_UNIT 4   // BasicMaterial.env_map (WP-F skin env)
 #define BASIC_MAX_POINT_LIGHTS 16 // basic.frag MAX_POINT_LIGHTS
 
 // v3.1.1 POINT_LIGHT objects (94.js addPointLight -> THREE.PointLight), lit only with the
@@ -227,6 +251,47 @@ typedef struct {
 } BasicPointLight;
 
 void basic_material_set_point_lights(const BasicPointLight *lights, int count);
+
+// map-G: the forward light list of basic.frag (Krunker v7.1.4 map lights, KrunkScript SCENE
+// lights): three.js r150 PointLight / SpotLight / DirectionalLight / RectAreaLight. Which
+// material types see which lights follows three.js: Lambert and Phong take point, spot and
+// directional lights, only Standard (lighting 3) takes rect-area lights; the v7 lighting-setting
+// gates of who may add a light (render.js addPointLight: lighting >= 2, ...) stay with the caller.
+// Colours are the hex channels / 255 (no sRGB decode: three r150 legacy colour management).
+// Rect-area lights only light diffuse (three's LTC form factor; no LTC specular, documented).
+#define BASIC_HAVE_LIGHT_LIST 1
+#define BASIC_MAX_LIGHTS 16 // basic.frag MAX_LIGHTS (point lights of basic_material_set_point_lights included)
+typedef enum {
+    BASIC_LIGHT_POINT,
+    BASIC_LIGHT_SPOT,
+    BASIC_LIGHT_DIRECTIONAL,
+    BASIC_LIGHT_RECT,
+} BasicLightType;
+
+typedef struct {
+    BasicLightType type;
+    int visible;
+    vec3 color;
+    float intensity;
+    float distance;   // point / spot cutoff (0 = infinite)
+    float decay;      // point / spot
+    float angle;      // spot cone half angle, radians
+    float penumbra;   // spot 0..1
+    vec3 position;
+    vec3 target;      // spot / directional: aimed from position at target
+    float width, height; // rect full size
+    vec3 rotation;    // rect: rotateY(rotation.y) rotateX(rotation.x) rotateZ(rotation.z) (render.js addRectAreaLight)
+} BasicLight;
+
+int basic_lights_add(const BasicLight *light);              // handle > 0, 0 = list full
+// map-G: a world-space clip plane for every BasicMaterial draw (the ocean mirror pass: three.js
+// Water's oblique near plane), fragments with dot(n, p) + d < 0 are discarded; NULL = off.
+void basic_material_set_clip_plane(const float plane[4]);
+void basic_lights_update(int handle, const BasicLight *light);
+// WP-F (the viewer page): while count >= 0, draws take exactly `lights` (copied, up to
+// BASIC_MAX_LIGHTS) instead of the registered map lights; count < 0 goes back to the list.
+void basic_lights_override(const BasicLight *lights, int count);
+void basic_lights_remove(int handle);
 
 typedef enum {
     ROTATION_ORDER_INTRINSIC,
@@ -267,6 +332,18 @@ typedef struct {
     Mesh **meshes;
 } ColorCube;
 
+// playerMesh.js genCube / render.js genColorCube: a width x height x length box of stacked colour
+// segments (heights in units of `height`) stacking down from top = 0.5 + yOffset (genColorCube's
+// offset); a segment of height 0 is skipped (v7 segment[5]: noHair, noBody, legLen). player_mesh.c
+typedef struct {
+    int color;
+    float height;
+    float scale;
+} ColorCubeSegment;
+ColorCube *generate_color_cube_at(float width, float height, float length, const ColorCubeSegment *segments, size_t segment_count, float top);
+void color_cube_fini(ColorCube *cube); // its meshes (and their skin effects), the cube
+vec4 krunker_get_color(int hex); // geos.js getColor(colr): the colour with its HSL saturation x1.5 (player_mesh.c)
+
 typedef struct {
     MeshTransform anchor;
 
@@ -299,8 +376,25 @@ typedef struct {
     Mesh *weapon_left;
     Mesh *weapon_right;
     Mesh *attachment; // sight attachment (Weapon.has_attach), first-person / preview models only
+    // v7 hasAnim weapon / melee skins: the GLTF remodel (gltf.h) of weapon_right [0] / weapon_left [1],
+    // parented to that mesh, which is then an empty carrier (its pose and visibility drive the model)
+    struct GltfInstance *weapon_models[2];
 
     int melee_pose;   // first-person melee: arms are posed per arm (pivots) and the melee mesh hangs off the right pivot
+    vec3 melee_position; // first-person melee mesh hold (weaponGeos xP/yP/zP incl. the skin's sxOff/syOff/szOff)
+    vec3 melee_rotation; // its rotation (yR/zR incl. the skin's flip and sxRot)
+    // ac.muzzles[i] (local player): sprite positions in the anchor, (0, 0, 0) until a muzzle flash
+    // first init()s them at the barrel. The local tracer starts there either way (vfx.c local_shot).
+    vec3 muzzle[2];
+    // v7.1.4 (WP-F): the weapon's charm (players.js:1262-1291): charms/charm_mount_0 at the weapon's
+    // charm mount, the charm item inside it (swaying, player_update_meshes); NULL when none
+    Mesh *charm_mount;
+    Mesh *charm;
+    // the wrist item (type 11, players.js:1082-1089 / 1127-1130): first-person / own model only,
+    // on the left arm; wrist (OBJ) or wrist_model (hasAnim GLTF) inside wrist_holder
+    MeshTransform wrist_holder;
+    Mesh *wrist;
+    struct GltfInstance *wrist_model;
 } PlayerArms;
 
 typedef struct {
@@ -316,10 +410,28 @@ typedef struct {
 
     PlayerArms **arms;
 
-    Mesh *cosmetics[4]; // third-person hat, back (body), waist and face items (PLAYER_COSMETIC_*), NULL when unused
+    // v7.1.4 cosmetic items on the third-person model (players.js generateMeshes, PLAYER_COSMETIC_*):
+    // each item hangs off its genObj3D holder (hatMesh, headMesh, ..., shoeMeshes[0..1]); an OBJ
+    // model in cosmetics[slot] or a hasAnim GLTF in cosmetic_models[slot], NULL when unused
+    Mesh *cosmetics[8];
+    struct GltfInstance *cosmetic_models[8];
+    MeshTransform cosmetic_holders[8];
+    unsigned char shoe_hidden[2]; // randomLeg: the shoe of the other leg is hidden
+    float head_mlt;               // the headMlt the head / face / hat / head holders are scaled for
+    int render_you;               // built as the local first-person model (the pet goes to the world scene)
+
+    // v7.1.4 pet (pets.h): the follower of petIndex, in world space, toward pet_holder (petHolder:
+    // (3, player.height, 0) on the anchor); NULL when none
+    struct PlayerPet *pet;
+    MeshTransform pet_holder;
+    double pet_clock;             // gltf_clock() of the last pet / item-effect update, < 0 before the first
+    float effect_timer;           // players.js itemEffects effectTimer (ms)
 } PlayerMesh;
 
-enum { PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BACK, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_FACE, PLAYER_COSMETIC_SLOTS };
+enum {
+    PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BODY, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_FACE,
+    PLAYER_COSMETIC_HEAD, PLAYER_COSMETIC_BACK, PLAYER_COSMETIC_SHOE_R, PLAYER_COSMETIC_SHOE_L, PLAYER_COSMETIC_SLOTS
+};
 
 void player_generate_meshes(Player*, int);
 void player_update_meshes(Player*, int);
@@ -346,6 +458,7 @@ void scene_render(const Scene*, Camera*);
 // per-draw defaults (no culling, normal alpha blending, depth writes on); scene_render()
 // only issues the GL calls for state that differs from the previous draw.
 void scene_draw_state(int cull_back, int additive_blend, int depth_write);
+void scene_draw_cull_front(void); // map-G: after scene_draw_state(1, ...): three.js BackSide (cull front faces)
 void scene_fini(Scene*);
 
 typedef struct {
@@ -453,8 +566,8 @@ typedef struct {
     unsigned char map_loaded:1;
     unsigned char net_connected:1;
     unsigned char net_thread_running:1;
-    // Singleplayer (client/src/net/local_game.c): `game` itself is the authoritative game
-    // (game.is_local), driven by direct calls on the main thread. No server, thread or packets.
+    // Offline (client/src/net/offline.c): connected to the in-process sandbox server
+    // (server/include/server_sandbox.h) over its loopback transport; `game` is a normal client game.
     unsigned char offline:1;
 
     pthread_t net_thread;
@@ -487,6 +600,10 @@ typedef struct {
 
     // Live match state from the server (client/src/net/game_events.c). Read by the HUD.
     int net_ping_ms;               // smoothed RTT from PING_RESULT, -1 = unknown (Krunker "-")
+    uint16_t net_ent_size;         // ENT size the server's INIT protocol accepts (net_ent_size_for): V7 from 1.2, V6 for 1.1, else V4
+    uint8_t net_server_minor;      // WP-B: INIT minor (NET_PROTOCOL_MINOR_V7 servers take the v7 combat packets)
+    uint8_t net_server_patch;      // WP-C: INIT patch (net_peer_has_wpc: the server reads ENT V8)
+    float net_input_accum;         // WP-C: frame time (s) since the last sampled input frame (index.js inputFrameDelta, netRate)
     int net_round_seconds;         // round clock (TIMER), -1 = no round clock received yet
     int net_end_seconds;           // end screen "Next Round in" seconds, -1 = no end screen
     int net_end_result;            // END result: 1 victory, 0 defeat, -1 draw
@@ -516,8 +633,6 @@ typedef struct {
     cJSON **net_map_cache;         // maps received from servers (owned, kept for later rounds)
     size_t net_map_cache_count;
     double last_frame_time;        // glfwGetTime() of the previous client_frame()
-    int offline_uid;               // offline: the local player's uid (Krunker socketId; "Guest_<uid + 1>")
-    int offline_joined;            // offline: the local player spawned this round (the next round respawns it)
 
     size_t net_packet_count;
     NetPacket *net_packets;
@@ -565,6 +680,9 @@ void client_net_request_reconnect(Client*);        // page `reconnect`: retry no
 // client_net_request_reconnect); NET_STATUS_FAILED carries reason/code. No-op without a session.
 #define CLIENT_HAVE_NET_DISCONNECT 1
 void client_net_disconnect(Client*, const char *reason, const char *code);
+// Console `disconnect`: close the session (or stop retrying) and leave the transport idle
+// until client_net_switch_server; NET_STATUS_FAILED carries `reason` (net.c / net_web.c).
+void client_net_stop(Client*, const char *reason);
 void on_client_socket_event(Client*);
 
 typedef struct {
@@ -580,6 +698,7 @@ int net_udp_client_session(Client*, const struct sockaddr_in *address); // 1 ran
 int net_udp_client_mode(void);              // KRUNKNATIVE_NET_TRANSPORT: 0 auto, 1 udp, -1 tcp
 int net_udp_client_is_virtual(int socket);
 void net_udp_client_request_close(void);
+void net_udp_client_info(char *out, size_t size); // netinfo: the knet session's counters ("" without one)
 // Brain matchmaking (servers_ui.c): connect to client->net_address:net_port (web: net_ws_url)
 // with client->net_join, replacing the current session (starts the transport when idle,
 // leaves an offline game). net.c natively, net_web.c on the web.
@@ -590,25 +709,55 @@ int net_web_connect(Client*); // WebSocket transport (net_web.c)
 void net_web_target_url(char *out, size_t size, const char *host, int port); // bridge URL for host:port
 void net_web_disconnect(Client*);
 void net_web_request_reconnect(Client*);
-// WebTransport + knet (net_wt.c): tried by net_web_connect before the WebSocket.
+// knet over a browser datagram transport (net_wt.c), tried by net_web_connect before the
+// WebSocket: WebRTC DataChannel (net_rtc.c) first, then WebTransport (net_wt.c).
+typedef struct {
+    const char *name;                            // "webrtc" / "webtransport" (logs, stats)
+    int (*wanted)(void);                         // configured for this page and supported by the browser
+    void (*open)(const char *target, int gen);   // async; reports through kn_dg_on_open/_datagram/_close/_fail(gen)
+    void (*send)(const uint8_t *data, int length);
+    void (*close)(void);
+    void (*describe)(char *out, size_t size); // netinfo lines about the browser session (may be NULL)
+} NetDgramBackend;
+extern const NetDgramBackend net_rtc_backend;
 int net_wt_connect(Client*);
 int net_wt_active(void);
 int net_wt_busy(void);
 int net_wt_send(NetPacketType, const void*, uint16_t);
 void net_wt_close(int reconnect);
+const char *net_wt_transport_label(void); // "WebRTC" / "WebTransport" while a session is up, else NULL
+void net_wt_info(char *out, size_t size); // netinfo lines: knet session, ICE path, per-transport retry state
 #endif
+// Transport notes (net_notes.c): printed at once and queued for the in-game console
+// (ui_console_tick drains them on the main thread), so the net thread may call it natively.
+enum { NET_NOTE_INFO, NET_NOTE_WARN, NET_NOTE_ERROR };
+void client_net_note(int level, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+int client_net_note_next(int *level, char *out, size_t size); // 1 = one line taken (main thread)
+const char *client_net_transport_name(const Client*);         // "WebRTC", "WebSocket", "UDP", "TCP", "offline", "-"
+void client_net_info(const Client*, char *out, size_t size);  // the console's `netinfo`
 void client_net_queue_packet(Client*, const NetPacket*);
+// WP-E: v7 io-client packet tally (settings showNetStat: #ingressPacketCount, #egressPacketCount,
+// #tickPacketCount). Every received / sent frame counts; a tick is one server player sync ("k":
+// one burst of NET_PACKET_STATE). client_net_tally_take() returns the counts since the last take
+// and resets them (resetPacketTally).
+typedef struct {
+    int ingress_packets, ingress_bytes;
+    int egress_packets, egress_bytes;
+    int ticks;
+} ClientNetTally;
+void client_net_tally_take(ClientNetTally *out);
+void client_net_tally_egress(uint16_t length);
 void client_net_log_packet(const char*, NetPacketType, const void*, uint16_t);
 int client_net_send_packet(int, NetPacketType, const void*, uint16_t);
 
-// Singleplayer (client/src/net/local_game.c): client->game becomes the one authoritative
-// game, run in-process like v3.1.1's single player (index.js aW.singlePlayer). Server-side
-// rules live in shared/ (as on server_bin); what a server would send reaches the event
-// handlers below directly as structs (GameHooks.send), what the client would send
-// (client_net_send) arrives in local_game_receive() as a function call.
-int local_game_start(Client*);   // load the offline game: offline_start_map, else the startup map, else a random rotation map; mode net_mode_index / KRUNKNATIVE_MODE
-void local_game_stop(Client*);   // leave offline mode; the game stays loaded as a plain mirror
-void local_game_receive(Client*, NetPacketType, const void *payload, uint16_t length); // a client->server message, typed payload
+// Offline (client/src/net/offline.c): the in-process sandbox server (server_sandbox.h, the
+// real server core) joined over its loopback transport like any server, stepped by the main
+// loop. client->game is a normal predicted client game.
+int local_game_start(Client*);   // start the sandbox and join it: offline_start_map, else the startup map, else a random rotation map; mode net_mode_index / KRUNKNATIVE_MODE
+void local_game_stop(Client*);   // leave offline mode (the sandbox stops); the game stays loaded as a plain mirror
+void client_offline_pump(Client*, float delta);  // main loop, before client_tick_net: step the sandbox, queue what it sent
+void client_offline_send(Client*, NetPacketType, const void *payload, uint16_t length); // client_net_send offline
+void client_tick_net(Client*);   // handle the queued packets (main.c)
 // Host Game / console `map`: reload on `map_index` (-1 current) in Krunker mode `mode_id`,
 // the only mode of the next rounds.
 void local_game_host(Client*, int map_index, int mode_id);
@@ -616,6 +765,11 @@ void local_game_host(Client*, int map_index, int mode_id);
 // offline game (leaving a remote session) when needed. 0 on failure.
 #define LOCAL_GAME_HAVE_HOST_CUSTOM 1
 int local_game_host_custom(Client*, const cJSON *map);
+// Host Game's config (createPrivateRoom: ui_host_config_collect's request, a config.hostTypes
+// index): the offline game plays it from its next round on (a running sandbox) or from its start,
+// until the offline game stops. NULL drops it.
+#define LOCAL_GAME_HAVE_HOST_CONFIG 1
+void local_game_host_config(Client*, const cJSON *request, int host_type);
 
 void client_frame(Client*); // one iteration of the main loop: tick, swap, poll events
 
@@ -626,10 +780,29 @@ void client_frame(Client*); // one iteration of the main loop: tick, swap, poll 
 void client_chat_send(Client*, const char *text); // Enter-to-chat: sends one line (trimmed, max 70 chars)
 int client_handle_game_packet(Client*, const NetPacket*); // 1 = handled (KILL/HIT/HEALTH/CHAT/...)
 int client_handle_game_event(Client*, int type, const void *payload, uint16_t length); // same, typed payload
-void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the socket, or offline local_game_receive()
+// WP-B v7 combat packets (client/src/net/combat_events.c): effects, streaks, Nuke, Juggernaut, perks.
+int combat_events_handle(Client*, int type, const void *payload, uint16_t length); // 1 = handled
+// map-logic WP-H zombies / airdrop packets (client/src/net/zombie_events.c)
+int zombie_events_handle(Client*, int type, const void *payload, uint16_t length); // 1 = handled
+void combat_send_streak_slots(Client*);      // the streakIndex1..3 loadout, right before every ENT
+void client_send_pc_stat(Client*);           // WP-E (net/game_events.c): pcStatIndex, right before every ENT
+void combat_call_in_streak(Client*, int slot); // window.callInStreak(slot): the streak keys
+// The sight a player's weapons take (attach.js index): the local player's saved attachIndex,
+// others' Player.attach_index (0 Reflex until the v7 SPAWN carries attachIndex, WP-C).
+int player_attach_index(const Player*);
+int client_saved_attach_index(void); // getSavedVal("attachIndex") || 0: our pick (ENT V8 ent[12])
+// window.updateScope(scopeIndex, savedScope) (v7.1.4 aimRecticles.js): the #recticleImg source for
+// the saved scopeIndex (getSavedVal, 0 Default) into buf; NULL when scopeIndex is -1 (no overlay).
+// A custom (-2) image must be an http(s) URL and not .svg, else scope_0.
+const char *combat_scope_overlay_src(char *buf, size_t n);
+void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the socket, or offline the sandbox connection
 // Prediction / reconciliation (client/src/net/recon.c, Krunker tmpInpts / "q" / reconcilePlayer).
 void client_recon_reset(Client*);                                 // CONTROLS.reset(): our spawn, a new session
+float client_recon_sample(Client*, float frame_delta);            // WP-C netRate: this frame's input delta (s), -1 = no input frame
 void client_recon_record(Client*, const Input*);                  // a predicted input: pending + the "q" batch
+int  client_recon_sending(const Client*);                         // inputs may leave: alive, round not over (net/recon.c)
+int  client_round_ended(const Client*);                           // END seen while playing, until the next INIT (net/recon.c)
+void client_recon_on_death(Client*);                              // our KILL: the unsent "q" window is dropped
 void client_recon_after_tick(Client*);                            // the frame's shot knockback -> input.velObj
 void client_recon_apply(Client*, const NetReconPacket*);          // "l": snap + replay
 int  client_recon_delay_inbound(Client*, const NetPacket*);       // KRUNKNATIVE_NET_DELAY_MS: 1 = held
@@ -662,3 +835,4 @@ Geometry *create_ramp_geo();
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);
 void prefab_begin_map(const cJSON *objects, const cJSON *colors); // per-map prefab state (shared model materials, the raw objects) before prefab_init()
+vec4 prefab_raw_color(const cJSON *raw_obj, const vec4 *colors); // map-G: the c / ci colour of a raw object (white when absent)

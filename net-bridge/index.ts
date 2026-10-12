@@ -63,6 +63,7 @@ function usage(): string {
     "  KRUNK_NATIVE_TARGETS                                  /native?target=host:port allowlist (brain matchmaking),",
     "                                                        host:port|host:lo-hi|host:* comma list",
     "                                                        (default KRUNK_NATIVE_HOST:PORT..PORT+63)",
+    "  KRUNK_NATIVE_ALLOW_LOOPBACK=1                         also any loopback target (dev; default on without TARGETS)",
     "  KRUNK_NATIVE_MAX_PER_IP / KRUNK_NATIVE_MAX_SESSIONS    /native session caps (0 = off)",
     "  KRUNK_NATIVE_IDLE_TIMEOUT_MS / KRUNK_NATIVE_WS_PING_MS  idle close (0 = off) / ws ping (30000)",
     "  KRUNK_NATIVE_CLIENT_IP_HEADER                         client address header from a loopback proxy",

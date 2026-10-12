@@ -191,8 +191,8 @@ async def scenario(pa, pb, node):
     cfg = node.hosted[-1][1] if node.hosted else {}
     teams = cfg.get("teams", [])
     names = sorted(p["name"] for t in teams for p in t)
-    check(cfg.get("ranked") and cfg.get("queue") == "r1v1" and cfg.get("maxPlayers") == 2 and cfg.get("mode") == 14
-          and names == sorted([alice["name"], bob["name"]]), "ranked host config (queue, teams, mode 14)")
+    check(cfg.get("ranked") and cfg.get("queue") == "r1v1" and cfg.get("maxPlayers") == 2 and cfg.get("mode") == 38
+          and names == sorted([alice["name"], bob["name"]]), "ranked host config (queue, teams, mode 38 = KN Ranked on the v7.1.4 table)")
     again = join(pa, alice, ["r1v1"])
     check(again["status"] == "AccountAlreadyPlaying", "re-queue during the match -> AccountAlreadyPlaying")
     http(pa, "/mm/queue/leave", clientKey=ja["clientKey"])

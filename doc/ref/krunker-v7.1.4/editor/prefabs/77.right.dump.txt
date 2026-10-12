@@ -1,0 +1,11 @@
+P Domination Zone
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 35/0,35/0,35/0
+-

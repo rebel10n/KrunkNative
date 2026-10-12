@@ -1,0 +1,17 @@
+H Tips & Tricks
+X Tips & Tricks
+X Decals
+X Slippery Ice Effect
+X How to make No-Teleport (better) Ramps
+X Fake Mirror
+X Better Glass
+X How to make Objects Fade to Black
+X Texture Merging
+X Angled Rooves
+X No Kill (safe) Spawns
+X No Glitch Ledges
+X Moving Fabric
+X Fire
+X Face Rendering
+X Moving Water
+X Bevelled Edges

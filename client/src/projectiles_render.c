@@ -42,6 +42,10 @@ static const ProjVisualConfig proj_visual_configs[] = {
     {"weapon_9", 0xffffdb, 1.4f, 10.0f, 1, 0},  // Rocket Launcher
     {"weapon_14", 0xffffdb, 0.7f, 10.0f, 1, 1}, // Crossbow (dontPred)
     {"weapon_19", 0x8b00fb, 0.7f, 10.0f, 1, 0}, // Blaster
+    // v7.1.4 (WP-B) pj_color / pj_scale / pj_length
+    {"weapon_23", 0xfbc02d, 1.4f, 15.0f, 1, 0}, // Noob Tube
+    {"weapon_25", 0xfbc02d, 0.8f, 10.0f, 1, 0}, // Zapper
+    {"weapon_27", 0xfbc02d, 1.4f, 15.0f, 1, 0}, // War Machine
 };
 // bullet-drop projectiles of the hitscan guns (projectile.disable unless config.bDrop)
 static const ProjVisualConfig proj_visual_bullet = {NULL, 0xffffdb, 1.4f, 10.0f, 1, 0};

@@ -10,6 +10,7 @@
  */
 #include "layout_internal.h"
 #include "css_values.h"
+#include "image.h"     /* image_resolve_url: content: url() on <img> */
 
 /* ------------------------------------------------------------------------- */
 /* ctx                                                                        */
@@ -221,6 +222,7 @@ static uint8_t replaced_type_for_tag(int tag)
     case LXB_TAG_IMG: return BOX_IMAGE;
     case LXB_TAG_CANVAS: return BOX_CANVAS;
     case LXB_TAG_VIDEO: return BOX_VIDEO;
+    case LXB_TAG_IFRAME: return BOX_VIDEO;     /* no nested browsing context: an empty 300x150 box */
     case LXB_TAG_INPUT: return BOX_INPUT;
     case LXB_TAG_TEXTAREA: return BOX_INPUT;   /* widgets.c WIDGET_TEXTAREA paints the text */
     case LXB_TAG_SELECT: return BOX_SELECT;
@@ -264,6 +266,12 @@ static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b)
         size_t len;
         const char *src = elem_attr(b->node, "src", &len);
         float w = 0, h = 0;
+        char key[512];
+        if (b->style && b->style->content.kind == CSS_CONTENT_URL && b->style->content.str) {
+            /* content: url(...) replaces the image: resolved against its stylesheet, root-relative */
+            key[0] = '/';
+            if (image_resolve_url(b->style->content.str, b->style->content.base, key + 1, sizeof(key) - 1)) { src = key; len = strlen(key); }
+        }
         if (src && len) {
             char *s = malloc(len + 1);
             if (s) { memcpy(s, src, len); s[len] = 0; }
@@ -282,7 +290,7 @@ static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b)
         b->intrinsic_w = b->attr_w >= 0 ? b->attr_w : ctx->ua_canvas_w;
         b->intrinsic_h = b->attr_h >= 0 ? b->attr_h : ctx->ua_canvas_h;
         b->attr_w = b->attr_h = -1.0f;   /* canvas attributes are the bitmap size, not presentational hints */
-    } else if (tag == LXB_TAG_VIDEO) {
+    } else if (tag == LXB_TAG_VIDEO || tag == LXB_TAG_IFRAME) {
         b->intrinsic_w = ctx->ua_canvas_w;
         b->intrinsic_h = ctx->ua_canvas_h;
     } else if (tag == LXB_TAG_INPUT) {
@@ -509,17 +517,31 @@ static int tag_is_skipped(int tag)
         || tag == LXB_TAG_OPTION || tag == LXB_TAG_OPTGROUP;
 }
 
-static Box *build_text_box(LayoutTree *t, Box *parent, lxb_dom_node_t *node, const char *src, size_t len)
+/* `style` is the text's own (inherited) style: the parent box's, or a display:contents
+ * element's when the text is a child of one (NULL = the parent box's). */
+static Box *build_text_box_styled(LayoutTree *t, Box *parent, lxb_dom_node_t *node, const char *src, size_t len, const CssComputed *style)
 {
-    Box *b = layout_new_box(t, BOX_TEXT, node, parent->style);
-    b->text = build_text(t, src, len, parent->style, &b->text_len);
+    const int own = style && style != parent->style;
+    if (!style) style = parent->style;
+    Box *b = layout_new_box(t, BOX_TEXT, node, style);
+    b->text = build_text(t, src, len, style, &b->text_len);
     b->flags |= BOXF_INLINE_LEVEL;
-    b->font = parent->font;
-    b->fm = parent->fm;
-    if (parent->style->visibility != CSS_VISIBILITY_VISIBLE) b->flags |= BOXF_HIDDEN;
-    if (parent->style->pointer_events == CSS_POINTER_EVENTS_NONE) b->flags |= BOXF_NO_POINTER;
+    if (own) {
+        b->parent = parent;
+        layout_resolve_font(t, b);
+    } else {
+        b->font = parent->font;
+        b->fm = parent->fm;
+    }
+    if (style->visibility != CSS_VISIBILITY_VISIBLE) b->flags |= BOXF_HIDDEN;
+    if (style->pointer_events == CSS_POINTER_EVENTS_NONE) b->flags |= BOXF_NO_POINTER;
     layout_append_child(parent, b);
     return b;
+}
+
+static Box *build_text_box(LayoutTree *t, Box *parent, lxb_dom_node_t *node, const char *src, size_t len)
+{
+    return build_text_box_styled(t, parent, node, src, len, NULL);
 }
 
 static void build_pseudo(LayoutTree *t, Box *parent, lxb_dom_node_t *node, CssComputed *style, int pseudo)
@@ -579,23 +601,39 @@ static Box *build_element(LayoutTree *t, Box *parent, lxb_dom_node_t *node, cons
     return b;
 }
 
-static void build_children(LayoutTree *t, Box *parent, lxb_dom_node_t *elem)
+/* `text_style`: the style of text children (NULL = the parent box's; set while expanding a
+ * display:contents element, whose children are built into the nearest box). */
+static void build_children_styled(LayoutTree *t, Box *parent, lxb_dom_node_t *elem, const CssComputed *text_style)
 {
     ElemData *ed = layout_elem_data(elem);
     if (ed && ed->before) build_pseudo(t, parent, elem, ed->before, 1);
     for (lxb_dom_node_t *c = elem->first_child; c; c = c->next) {
         if (c->type == LXB_DOM_NODE_TYPE_TEXT) {
             lexbor_str_t *d = &lxb_dom_interface_text(c)->char_data.data;
-            if (d->length) build_text_box(t, parent, c, (const char *)d->data, d->length);
+            if (d->length) build_text_box_styled(t, parent, c, (const char *)d->data, d->length, text_style);
         } else if (c->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-            if (tag_is_skipped(node_tag(c))) continue;
+            const int tag = node_tag(c);
+            if (tag_is_skipped(tag)) continue;
             ElemData *ced = layout_elem_data(c);
             if (!ced || !ced->computed) continue;
             if (ced->computed->display == CSS_DISPLAY_NONE) continue;
+            /* display: contents (CSS Display 3 2.5): no box of its own, its children (and
+             * ::before/::after) are laid out as children of the parent box, e.g. flex items
+             * of v7's #headerRight. Replaced elements keep their box (they behave like
+             * display: none there in Chrome, but none of the pages uses that). */
+            if (ced->computed->display == CSS_DISPLAY_CONTENTS && !replaced_type_for_tag(tag)) {
+                build_children_styled(t, parent, c, ced->computed);
+                continue;
+            }
             build_element(t, parent, c, ced->computed, 0);
         }
     }
     if (ed && ed->after) build_pseudo(t, parent, elem, ed->after, 2);
+}
+
+static void build_children(LayoutTree *t, Box *parent, lxb_dom_node_t *elem)
+{
+    build_children_styled(t, parent, elem, NULL);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1030,7 +1068,12 @@ static void assign_containers(LayoutTree *t, Box *b, Box *root)
             Box *cb = p;
             int fixed = b->style->position == CSS_POSITION_FIXED;
             while (cb && cb != root) {
-                if ((cb->flags & BOXF_HAS_TRANSFORM) || (!fixed && (cb->flags & BOXF_POSITIONED))) break;
+                /* a filter makes the box the containing block of its abs and fixed
+                 * descendants, like a transform (Filter Effects 1 §5, Chrome): the v7
+                 * death screen's player card banner (img.death-row-bottom-bg in the
+                 * drop-shadow'ed .death-row-bottom) */
+                if ((cb->flags & BOXF_HAS_TRANSFORM) || (cb->style && cb->style->filter_count > 0)
+                    || (!fixed && (cb->flags & BOXF_POSITIONED))) break;
                 cb = cb->parent;
             }
             if (!cb) cb = root;
@@ -1229,6 +1272,9 @@ int layout_children_changed(LayoutTree *t, lxb_dom_node_t *node)
     if (!t || !node) return LAYOUT_RESTYLE_NONE;
     ElemData *ed = layout_elem_data(node);
     if (!ed || !ed->box) {
+        /* display: contents: its children live in the nearest ancestor box */
+        if (ed && ed->computed && ed->computed->display == CSS_DISPLAY_CONTENTS && rebuild_root_for_node(node))
+            return rebuild_for_node(t, node);
         /* not rendered (display:none or inside one): nothing to do unless an ancestor renders it */
         return LAYOUT_RESTYLE_NONE;
     }
@@ -1256,7 +1302,7 @@ static int structural_changed(const CssComputed *a, const CssComputed *b)
     return a->display != b->display || a->position != b->position || a->float_ != b->float_
         || a->overflow_x != b->overflow_x || a->overflow_y != b->overflow_y
         || (a->clip_path.kind != CSS_CLIP_PATH_NONE) != (b->clip_path.kind != CSS_CLIP_PATH_NONE)
-        || a->content.kind != b->content.kind || a->content.str != b->content.str;
+        || a->content.kind != b->content.kind || a->content.str != b->content.str || a->content.base != b->content.base;
 }
 
 /* Properties layout reads (everything else is paint-only). */
@@ -1277,7 +1323,7 @@ static int layout_changed(const CssComputed *a, const CssComputed *b)
     if (!len_eq(&a->width, &b->width) || !len_eq(&a->height, &b->height) || !len_eq(&a->min_width, &b->min_width)
         || !len_eq(&a->min_height, &b->min_height) || !len_eq(&a->max_width, &b->max_width) || !len_eq(&a->max_height, &b->max_height)) return 1;
     if (a->text_overflow != b->text_overflow || a->vertical_align != b->vertical_align || !len_eq(&a->vertical_align_length, &b->vertical_align_length)) return 1;
-    if (a->flex_direction != b->flex_direction || a->flex_wrap != b->flex_wrap || a->justify_content != b->justify_content
+    if (a->flex_direction != b->flex_direction || a->flex_wrap != b->flex_wrap || a->justify_content != b->justify_content || a->align_content != b->align_content
         || a->align_items != b->align_items || a->flex_grow != b->flex_grow || a->flex_shrink != b->flex_shrink
         || !len_eq(&a->flex_basis, &b->flex_basis)) return 1;
     if (a->grid_column_count != b->grid_column_count || !len_eq(&a->row_gap, &b->row_gap) || !len_eq(&a->column_gap, &b->column_gap)) return 1;
@@ -1364,7 +1410,12 @@ int layout_restyled(LayoutTree *t, lxb_dom_node_t *node, const CssComputed *old_
          * animation running there (the menu's #merchImg / #instructions while in game)
          * must not rebuild the nearest rendered ancestor's children on every tick. */
         lxb_dom_node_t *p = node->parent;
-        while (p && p->type != LXB_DOM_NODE_TYPE_ELEMENT) p = p->parent;
+        for (;;) { /* display: contents ancestors render through their parent's box */
+            while (p && p->type != LXB_DOM_NODE_TYPE_ELEMENT) p = p->parent;
+            ElemData *ped = p ? layout_elem_data(p) : NULL;
+            if (!ped || ped->box || !ped->computed || ped->computed->display != CSS_DISPLAY_CONTENTS) break;
+            p = p->parent;
+        }
         ElemData *ped = p ? layout_elem_data(p) : NULL;
         if (!ped || !ped->box) return LAYOUT_RESTYLE_NONE;
         if (!rebuild_root_for_node(node->parent)) return LAYOUT_RESTYLE_NONE;

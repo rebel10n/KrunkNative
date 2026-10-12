@@ -1,11 +1,22 @@
 name: Build
 
+# Pushes to main also publish the native clients to the rolling prerelease
+# `client-latest` (job client-latest); the dedicated servers are release.yml's.
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
+
+# One running + one pending run per branch (superseded pushes are skipped, a running build is
+# not cancelled: agents push faster than a build takes); PR runs cancel their predecessor.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 env:
   # Emscripten release used by the `web` job (matches the local toolchain).
@@ -13,16 +24,40 @@ env:
   EM_CACHE_FOLDER: emsdk-cache
 
 jobs:
+  # Build version for kn_version.h (tools/release/version-meta.sh): git describe needs the
+  # history and tags, the build jobs check out shallow and get it as -DKRUNKNATIVE_VERSION_*.
+  meta:
+    name: Version
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
+    runs-on: ubuntu-latest
+    outputs:
+      cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
+      describe: ${{ steps.meta.outputs.describe }}
+      commit: ${{ steps.meta.outputs.commit }}
+      commit12: ${{ steps.meta.outputs.commit12 }}
+      commit_time: ${{ steps.meta.outputs.commit_time }}
+      build_time: ${{ steps.meta.outputs.build_time }}
+      protocol: ${{ steps.meta.outputs.protocol }}
+      kn_build: ${{ steps.meta.outputs.kn_build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version metadata
+        id: meta
+        run: tools/release/version-meta.sh "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
   linux:
     name: Linux (GCC)
+    needs: meta
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      # imagemagick + xvfb + the Mesa DRI drivers (llvmpipe) are for `make uidiff`;
-      # libegl-dev + libegl-mesa0 for the headless EGL mode (client/include/headless.h).
+      # libegl-dev: the headless EGL mode (client/include/headless.h) is compiled in.
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -39,38 +74,24 @@ jobs:
             libxrandr-dev \
             libxi-dev \
             libgl1-mesa-dev \
-            libgl1-mesa-dri \
             libglu1-mesa-dev \
             libxkbcommon-dev \
             libxcb-present-dev \
-            libegl-dev \
-            libegl-mesa0 \
-            imagemagick \
-            xvfb
+            libegl-dev
 
       # The in-house HTML/CSS engine is part of the default build (HTML_ENGINE=ON).
       - name: Build (Release)
-        run: make release
+        run: make release CMAKE_FLAGS="${{ needs.meta.outputs.cmake_flags }}"
 
+      # CI has only the tracked files: the game content under assets/*/* is gitignored
+      # (only maps/, img/ and shaders/ are tracked), so nothing here may start client_bin
+      # (fonts, models, textures). `make smoke-native` and `make uidiff` are local checks.
       - name: Run tests
         run: ./cmake-build-release/proc_input_test
 
-      # Headless (EGL on Mesa llvmpipe, no window, no X server): the client boots offline,
-      # the C UI logic sets up the page and the menu frame is written to /tmp/smoke-native.png.
-      # Reuses the release build (-o build: no debug build).
-      - name: Native smoke run (headless)
-        run: make -o build smoke-native DEBUG_DIR=cmake-build-release EGL_DEVICE=mesa
-
-      # ui_test is built with the engine; the Lexbor smoke probe needs no display.
+      # ui_test is built with the engine; the Lexbor smoke probe needs no display or assets.
       - name: HTML engine smoke probe
         run: ./cmake-build-release/ui_test lexbor-probe
-
-      # Renders every tools/uidiff scenario through client_bin --render-scenario under
-      # Xvfb/llvmpipe and pixel-diffs it against the Krunker references.
-      # Advisory for now: becomes required once the diff baseline is green.
-      - name: UI pixel diff (make uidiff)
-        run: make uidiff
-        continue-on-error: true
 
       - name: Stage Linux artifact
         run: |
@@ -78,8 +99,9 @@ jobs:
           mkdir -p dist
           cp -v cmake-build-release/client_bin cmake-build-release/server_bin dist/
           cp -r ui dist/ui
-          # shellcheck disable=SC2012
-          ls -laR dist | head -100
+          # no `| head` under pipefail: ls/find die of SIGPIPE once head has its lines
+          du -sh dist
+          find dist -maxdepth 1 | sort
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -90,6 +112,7 @@ jobs:
 
   windows:
     name: Windows (MinGW-w64)
+    needs: meta
     runs-on: windows-latest
     defaults:
       run:
@@ -113,7 +136,7 @@ jobs:
 
       # The HTML engine is pure C (Lexbor + FreeType), so MinGW builds it too.
       - name: Build (Release)
-        run: make release
+        run: make release CMAKE_FLAGS="${{ needs.meta.outputs.cmake_flags }}"
 
       - name: Run tests
         run: ./cmake-build-release/proc_input_test.exe
@@ -190,11 +213,13 @@ jobs:
           if-no-files-found: error
 
   # Native macOS renders through Metal via ANGLE (OpenGL ES 3.0, the KN_GLES path the web
-  # build shares; README.md "ANGLE / Metal (macOS)"). ANGLE is built from the commit pinned in
-  # tools/angle/build-angle.sh and cached per arch: the cache key is that script's hash, so
-  # bumping the pin rebuilds it (cold: ~30-60 min, then a cache restore). The `desktop` entry
-  # keeps Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
+  # build shares; README.md "ANGLE / Metal (macOS)"). CI never builds ANGLE: the ANGLE jobs
+  # download the prebuilt release asset pinned and checksummed in tools/angle/angle.lock
+  # (tools/angle/fetch-angle.sh; published by the dispatch-only `angle` workflow) and are
+  # skipped, with a warning, when there is none for their arch. The `desktop` entry keeps
+  # Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
   macos:
+    needs: meta
     name: macOS (Clang, ${{ matrix.gl == 'angle' && 'ANGLE/Metal' || 'desktop GL 4.1' }}, ${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -212,6 +237,7 @@ jobs:
             arch: arm64
             gl: desktop
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     env:
       ANGLE_DIR: ${{ github.workspace }}/angle-dist
     steps:
@@ -219,38 +245,55 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install build dependencies
-        run: |
-          brew update
-          brew install cmake ninja pkg-config
-
-      - name: Cache ANGLE
+      # available=false when angle.lock has no asset for this arch: the job's build steps are
+      # skipped (the desktop entry still compiles the macOS code).
+      - name: Fetch prebuilt ANGLE
         if: matrix.gl == 'angle'
-        id: angle-cache
-        uses: actions/cache@v6
-        with:
-          path: angle-dist
-          key: angle-macos-${{ matrix.arch }}-${{ hashFiles('tools/angle/build-angle.sh') }}
+        id: angle
+        run: tools/angle/fetch-angle.sh "macos-${{ matrix.arch }}" "$ANGLE_DIR" >> "$GITHUB_OUTPUT"
 
-      # depot_tools + gclient + gn, Metal and OpenGL backends only; the checkout (~9 GB) lives
-      # in RUNNER_TEMP and only lib/ + include/ (a few MB) are cached.
-      - name: Build ANGLE (pinned commit)
-        if: matrix.gl == 'angle' && steps.angle-cache.outputs.cache-hit != 'true'
-        run: tools/angle/build-angle.sh "$ANGLE_DIR" --work "$RUNNER_TEMP/angle-work"
+      # The runner images ship cmake, ninja and pkg-config: install only what is missing and
+      # never `brew update`/upgrade. Homebrew has no Intel bottles any more, so an upgrade
+      # there compiles cmake from source (~45 min).
+      - name: Install build dependencies
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_UPGRADE: 1
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+        run: |
+          set -euo pipefail
+          missing=()
+          for tool in cmake ninja pkg-config; do command -v "$tool" > /dev/null || missing+=("$tool"); done
+          if [ ${#missing[@]} -gt 0 ]; then brew install "${missing[@]}"; fi
+          cmake --version | sed -n 1p
+          echo "ninja $(ninja --version), pkg-config $(pkg-config --version)"
+          # services/ (knsvc, linked by server_bin) needs libcrypto: Homebrew's keg-only OpenSSL
+          for formula in openssl@3 openssl@4; do
+            prefix="$(brew --prefix "$formula" 2> /dev/null || true)"
+            if [ -n "$prefix" ] && [ -d "$prefix/include/openssl" ]; then
+              echo "OPENSSL_ROOT_DIR=$prefix" >> "$GITHUB_ENV"
+              echo "OpenSSL: $prefix"
+              break
+            fi
+          done
 
       - name: Build (Release)
-        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }}"
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
+        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }} ${{ needs.meta.outputs.cmake_flags }}"
 
       - name: Run tests
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         run: ./cmake-build-release/proc_input_test
 
       - name: HTML engine smoke probe
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         run: ./cmake-build-release/ui_test lexbor-probe
 
       # client_bin links @rpath/libEGL.dylib with an @executable_path rpath, and the build copied
       # ANGLE's dylibs next to it (GLFW dlopens @rpath/libEGL.dylib + @rpath/libGLESv2.dylib).
       - name: Check ANGLE bundling
-        if: matrix.gl == 'angle'
+        if: matrix.gl == 'angle' && steps.angle.outputs.available == 'true'
         run: |
           set -euxo pipefail
           otool -L cmake-build-release/client_bin | tee /dev/stderr | grep -q '@rpath/libEGL.dylib'
@@ -260,51 +303,11 @@ jobs:
             otool -D "cmake-build-release/$lib" | grep -q "@rpath/$lib"
           done
 
-      # Headless (client/include/headless.h on ANGLE's EGL: an OpenGL ES 3.0 pbuffer, no window):
-      # the menu over the default map and the uidiff menu scenario. The arm64 runner's
-      # paravirtual GPU must give the Metal backend; the Intel runner has no Metal device, so
-      # there the client falls back to ANGLE's OpenGL backend and the step is advisory.
-      - name: Smoke screenshots (headless ANGLE)
-        if: matrix.gl == 'angle'
-        continue-on-error: ${{ matrix.arch == 'x86_64' }}
-        run: |
-          set -uo pipefail
-          mkdir -p smoke
-          export KRUNKNATIVE_HEADLESS=1 XDG_CONFIG_HOME="$RUNNER_TEMP/kn-config"
-          # run <seconds> <log> <command...>: macOS has no timeout(1)
-          run() {
-            local seconds=$1 log=$2; shift 2
-            "$@" > "$log" 2>&1 &
-            local pid=$!
-            for _ in $(seq "$seconds"); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-            kill "$pid" 2>/dev/null
-            wait "$pid"
-          }
-          KRUNKNATIVE_SCREENSHOT="$PWD/smoke/menu-offline.png" KRUNKNATIVE_CAPTURE_FRAMES=60 \
-            run 180 smoke/menu-offline.log ./cmake-build-release/client_bin --offline
-          run 180 smoke/menu-1280.log ./cmake-build-release/client_bin \
-            --render-scenario tools/uidiff/scenarios/menu-1280.json "$PWD/smoke/menu-1280.png"
-          grep -h -E '^\[gl\]|GL_RENDERER' smoke/*.log | sort -u
-          status=0
-          for shot in menu-offline menu-1280; do
-            if [ ! -s "smoke/$shot.png" ]; then
-              echo "::error::no smoke/$shot.png"; tail -40 "smoke/$shot.log"; status=1
-            fi
-          done
-          if [ "${{ matrix.arch }}" = arm64 ] && ! grep -q 'ANGLE Metal Renderer' smoke/menu-offline.log; then
-            echo "::error::GL_RENDERER is not ANGLE's Metal renderer"; status=1
-          fi
-          exit $status
-
-      - name: Upload smoke screenshots
-        if: always() && matrix.gl == 'angle'
-        uses: actions/upload-artifact@v7
-        with:
-          name: KrunkNative-macos-${{ matrix.arch }}-smoke
-          path: smoke/**
-          if-no-files-found: warn
+      # No headless client_bin screenshots here: the client needs the gitignored game assets
+      # (fonts, models, textures). Run them locally with the assets (README.md "ANGLE / Metal").
 
       - name: Stage macOS artifact
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         run: |
           set -euxo pipefail
           mkdir -p dist
@@ -312,10 +315,12 @@ jobs:
           # ANGLE (Metal): client_bin loads them from its own directory (@executable_path rpath)
           if [ "${{ matrix.gl }}" = angle ]; then cp -v cmake-build-release/libEGL.dylib cmake-build-release/libGLESv2.dylib dist/; fi
           cp -R ui dist/ui
-          # shellcheck disable=SC2012
-          ls -laR dist | head -100
+          # no `| head` under pipefail: ls/find die of SIGPIPE once head has its lines
+          du -sh dist
+          find dist -maxdepth 1 | sort
 
       - name: Upload artifacts
+        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: KrunkNative-macos-${{ matrix.arch }}${{ matrix.gl == 'desktop' && '-desktop-gl' || '' }}
@@ -324,6 +329,7 @@ jobs:
 
   web:
     name: Web (Emscripten / WebGL2)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -381,7 +387,7 @@ jobs:
           mkdir -p stage
           rsync -a --exclude='/assets' --exclude='/assets/' dist/web/ stage/web/
           du -sh stage/web
-          find stage/web -maxdepth 2 | head -50
+          find stage/web -maxdepth 1 | sort
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -447,8 +453,9 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # v3 installs the long-removed `tools` package by default and fails in sdkmanager.
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Build debug APK
         working-directory: platform/android
@@ -499,14 +506,17 @@ jobs:
           path: platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkNative.app
           if-no-files-found: error
 
-  net-bridge:
-    name: net-bridge (typecheck)
+  # `make check`: the debug build, every test of `make test`, `make lint` (actionlint +
+  # shellcheck on the workflows, CMakePresets.json, ui/js) and the net-bridge typecheck. Plus
+  # shellcheck of the CI/deploy scripts.
+  check:
+    name: make check (tests, lint, net-bridge typecheck)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: net-bridge
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: actions/setup-node@v7
         with:
@@ -514,5 +524,118 @@ jobs:
           cache: npm
           cache-dependency-path: net-bridge/package-lock.json
 
-      - run: npm ci
-      - run: npm run typecheck
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config shellcheck \
+            libwayland-dev wayland-protocols libx11-dev libxcursor-dev libxinerama-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev \
+            libxcb-present-dev libegl-dev
+          # pinned; `make lint` runs it (it skips without one) and it runs shellcheck on run: blocks
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: net-bridge dependencies
+        working-directory: net-bridge
+        run: npm ci
+
+      - name: make check
+        run: make check
+
+      - name: shellcheck (CI and deploy scripts)
+        run: shellcheck -S warning tools/release/*.sh tools/angle/*.sh deploy/ansible/build.sh
+
+  # Rolling prerelease `client-latest`: the linux/windows/macos artifacts above (binaries +
+  # ui/, no game content: assets/ is not in git) zipped per platform, on pushes to main
+  # and dispatches. Needs Linux; a platform whose build failed is left out of that run. Same rules as server-latest (tools/release/publish.sh): never "Latest",
+  # only moves forward.
+  client-latest:
+    name: Publish client-latest
+    needs: [meta, linux, windows, macos]
+    if: >-
+      !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create/upload, moving the client-latest tag
+      actions: read # this run's artifacts
+    concurrency:
+      group: publish-client-latest
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT: ${{ needs.meta.outputs.commit }}
+      COMMIT12: ${{ needs.meta.outputs.commit12 }}
+      COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
+      BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+      DESCRIBE: ${{ needs.meta.outputs.describe }}
+      PROTOCOL: ${{ needs.meta.outputs.protocol }}
+      KN_BUILD: ${{ needs.meta.outputs.kn_build }}
+      BRANCH: ${{ github.ref_name }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # one directory per artifact (download-artifact unpacks a lone match without one)
+      - name: Download client artifacts
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate --jq '.artifacts[].name' \
+            | grep -E '^KrunkNative-(linux|windows|macos)-' | while read -r name; do
+              gh run download "$GITHUB_RUN_ID" -n "$name" -D "client-artifacts/$name"
+            done
+          ls client-artifacts
+
+      # upload-artifact drops the executable bits: restore them before zipping
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p client-pkg
+          base="https://github.com/$GH_REPO/releases/download/client-latest"
+          rows=""
+          for dir in client-artifacts/KrunkNative-*; do
+            [ -d "$dir" ] || continue
+            plat="$(basename "$dir" | sed 's/^KrunkNative-//; s/-mingw$//')"
+            name="krunknative-client-$plat"
+            find "$dir" -maxdepth 1 -type f \( -name client_bin -o -name server_bin \) -exec chmod 0755 {} +
+            {
+              echo "KrunkNative client ($plat), $DESCRIBE"
+              echo "Commit $COMMIT, built $BUILD_TIME, protocol $PROTOCOL"
+              echo
+              echo "Binaries and the ui/ menu only. The game content (assets/: models, textures,"
+              echo "sounds, fonts) is not in git or CI: put this next to an assets/ directory, e.g."
+              echo "the one from the v1.0.0 package (https://github.com/$GH_REPO/releases/tag/v1.0.0)."
+            } > "$dir/README.txt"
+            (cd "$dir" && zip -qr9 "$GITHUB_WORKSPACE/client-pkg/$name.zip" .)
+            (cd client-pkg && sha256sum "$name.zip" > "$name.zip.sha256")
+            rows+="| $plat | [$name.zip]($base/$name.zip) | [sha256]($base/$name.zip.sha256) |"$'\n'
+          done
+          ls -la client-pkg
+          {
+            echo "Rolling build of the KrunkNative native client, replaced on every push to \`main\`. Binaries and \`ui/\` only: the game content (\`assets/\`) comes from the [v1.0.0](https://github.com/$GH_REPO/releases/tag/v1.0.0) package."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | [\`$COMMIT12\`](https://github.com/$GH_REPO/commit/$COMMIT) ($BRANCH) |"
+            echo "| Version | \`$DESCRIBE\` |"
+            echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
+            echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
+            echo
+            echo "| Platform | Package | Checksum |"
+            echo "|---|---|---|"
+            printf '%s' "$rows"
+            echo
+            echo "<!-- kn-build $KN_BUILD -->"
+          } > notes.md
+          cat notes.md
+
+      - name: Publish
+        run: tools/release/publish.sh client-latest "Native client (latest build)" notes.md client-pkg/*

@@ -23,7 +23,7 @@ typedef struct {
 
 typedef struct {
     // ---- identity / network (brain registration)
-    char region[32];            // brain region key ("us-nj"; MM_NODE_REGION)
+    char region[32];            // brain region key, the 2-letter code ("SV", "CH"; MM_NODE_REGION)
     char node_id[16];           // lobby id prefix ("NY" -> "NY:ab12c"; MM_NODE_ID)
     char name[GS_STR_SMALL];    // human-readable server name (server browser)
     char listen_host[GS_STR_SMALL];
@@ -50,8 +50,15 @@ typedef struct {
     int custom_map_dir_count;
     float round_seconds;                 // all modes, 0 = the mode's game time
     float mode_round_seconds[MODE_COUNT];
-    GameConfig game;                     // v3.1.1 host config ("game": maxPlayers, gameTime, lives, gravMlt, ...)
+    GameConfig game;                     // "game": v7.1.4 serverConfig keys (maxPlayers, gameTime, lives, gravMlt, ...)
     int has_game;
+    // WP-E server presets: host_type plays the rotation as that config.hostTypes entry (0 custom,
+    // 1 comp, 2 rent, 3 zombies, 4 raid; -1 a public game) and map_config applies each map's
+    // embedded "config" under the "game" keys (both make it a hosted game: setupGameConfig +
+    // applyConfig per round, random vote picks). game_request is the "game" object as given.
+    int host_type;
+    int map_config;
+    char game_request[4096];
     int custom_games;                    // accept hosted custom games from the brain
 
     // ---- messages
@@ -93,6 +100,16 @@ typedef struct {
     char tags[GS_STR_SMALL * 2];         // extra comma-separated info-query tags
     int enforce_skins;                   // -1 auto (on with a coordinator), 0 off, 1 on
     float shutdown_grace;                // seconds a SIGTERM/SIGINT drain waits for players (0 = immediate)
+    int lag_comp;                        // 1: hits rewind targets (v3.1.1 storeState / fetchState), 0 = current positions
+    int lag_comp_anchor;                 // LAG_COMP_ANCHOR_*: 1 exact (client input timeline, default), 2 arrival + ping, 0 v3.1.1 ping * 2
+    float lag_comp_scale;                // 0.1..1 (default 1) times each player's lagComp (ENT ent[11] slider)
+    // Krunker v7.1.4 bot players (shared/src/bots.c; KrunkNative addition: v7 only has the dev
+    // console). bots: keep N bots in the lobby; bot_quota: fill the lobby up to N players with
+    // bots that leave as humans join (wins over bots). Both capped at config.botLimit (16) and
+    // the lobby size. bot_difficulty: easy | normal | hard | max | a number (botDifficultyConfig).
+    int bots;
+    int bot_quota;
+    char bot_difficulty[16];
     char log_file[GS_STR_LARGE];         // append every log line here too ("" = stdout/stderr only)
     char cfg_path[GS_STR_LARGE];         // server.cfg actually loaded ("" none)
 
@@ -118,7 +135,7 @@ int gs_config_apply_env(GsConfig*);
 int gs_config_set_cli(const char *key, const char *value);
 // "gameserver" object -> config (also used for hot reload / tests). Returns 0 or fills err.
 int gs_config_from_json(GsConfig*, const cJSON *section, char *err, size_t err_size);
-// v3.1.1 host config object (applyConfig keys) -> GameConfig, clamped like serverConfig.
+// gameserver.game / server.cfg game.<varN>: the v7.1.4 serverConfig keys present, clamped (WP-E).
 void gs_game_config_from_json(GameConfig*, const cJSON*);
 
 // Lobby size / round length for a mode id (team sizes and per-mode overrides applied).

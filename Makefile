@@ -145,16 +145,35 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport test)
+test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation, editor bus and editor model tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/knet_test
+	./$(DEBUG_DIR)/lagcomp_test
+	./$(DEBUG_DIR)/map_v7_test
+	./$(DEBUG_DIR)/world_v7_test
+	./$(DEBUG_DIR)/triggers_test
+	./$(DEBUG_DIR)/trigger_authority_test
+	./$(DEBUG_DIR)/editor_bus_test
+	./$(DEBUG_DIR)/editor_serialize_test . --golden doc/ref/krunker-v7.1.4/editor/inspector-edits.json
+	./$(DEBUG_DIR)/weapons_v7_test
+	./$(DEBUG_DIR)/combat_test
+	./$(DEBUG_DIR)/zombies_test
+	./$(DEBUG_DIR)/config_test
+	./$(DEBUG_DIR)/sandbox_config_test
+	./$(DEBUG_DIR)/ks_storage_test
 
 # --------------------------------------------------------------------------- html-engine
 # The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).
 # These targets use the debug directory with HTML_ENGINE=ON (the default) so they also
 # work after a `make HTML_ENGINE=OFF`.
 
-.PHONY: ui-test ui-import uidiff
+.PHONY: ui-test ui-import assets-import uidiff
+viewer-diff: build ## Viewer render scenarios vs the v7.1.4 viewer captures (doc/ref/krunker-v7.1.4/viewer, headless; EGL_DEVICE=)
+	EGL_DEVICE=$(or $(EGL_DEVICE),nvidia) tools/kref/viewer-diff.sh $(DEBUG_DIR)
+
+gltf-test: build ## GLTF loader on v7 animated store models via the pet path, pets.js follow AI, skin animations (headless GL)
+	env -u DISPLAY -u WAYLAND_DISPLAY ./$(DEBUG_DIR)/gltf_test --headless
+
 ui-test: ## Build ui_test (HTML_ENGINE=ON) and run it: ARGS="lexbor-probe" (default: help)
 	@$(MAKE) --no-print-directory configure HTML_ENGINE=ON
 	$(call BUILD,$(DEBUG_DIR)) --target ui_test
@@ -162,6 +181,27 @@ ui-test: ## Build ui_test (HTML_ENGINE=ON) and run it: ARGS="lexbor-probe" (defa
 
 ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon ligatures) via tools/ui-import
 	$(PYTHON) -I tools/ui-import/import.py --ui ui
+
+assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
+	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
+
+.PHONY: assets-import-v7 assets-check-v7 gltf-test viewer-diff
+assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
+	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
+	node tools/ui-import/gen_viewer_store.js
+
+assets-check-v7: ## Drift check of assets/ and viewer_store_table.c against Krunker v7.1.4 (exit 1 on any difference)
+	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
+	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
+	node tools/ui-import/test_gen_viewer_store.js
+
+.PHONY: maps-import-v7 maps-check-v7
+maps-import-v7: ## Import Krunker v7.1.4's 32 official maps into assets/maps/v7/ (+ ui/img/maps thumbnails; tools/maps/import_v7_maps.py)
+	$(PYTHON) -I tools/maps/import_v7_maps.py
+
+maps-check-v7: ## Drift check of assets/maps/v7/ and the map thumbnails against Krunker v7.1.4
+	$(PYTHON) -I tools/maps/import_v7_maps.py --check
+
 
 # uidiff renders every scenario through the real client and its C UI logic
 # (`client_bin --render-scenario`, client/src/ui/ui_scenario.c) on llvmpipe inside one
@@ -258,8 +298,22 @@ wt-build: ## Build the WebTransport relay (net-bridge/wt/kn-wt, needs Go)
 wt: wt-build ## Run the WebTransport <-> UDP relay on UDP $(WT_ADDR) (WT_CERT=/WT_KEY= for a real certificate)
 	$(WT_BIN) -addr $(WT_ADDR) -info-file $(DIST_WEB)/wt.json $(if $(WT_CERT),-cert $(WT_CERT) -key $(WT_KEY))
 
-test-net: build ## knet transport unit test (loss/dup/reorder) + 2-client UDP end-to-end (headless)
+# WebRTC gateway (net-bridge/rtc, doc/transport.md): signaling over HTTP on RTC_HTTP, ICE/DTLS on
+# the one UDP port RTC_ICE; DataChannel messages 1:1 to the game server's UDP port. Writes
+# $(DIST_WEB)/rtc.json (the gateway URL; the web client fetches it when kn-rtc is empty).
+RTC_BIN  := $(BRIDGE_DIR)/rtc/kn-rtc
+RTC_HTTP ?= 127.0.0.1:8085
+RTC_ICE  ?= :21100
+.PHONY: rtc rtc-build
+rtc-build: ## Build the WebRTC gateway (net-bridge/rtc/kn-rtc, needs Go)
+	cd $(BRIDGE_DIR)/rtc && go build -trimpath -o kn-rtc .
+
+rtc: rtc-build ## Run the WebRTC <-> UDP gateway (signaling http $(RTC_HTTP), ICE udp $(RTC_ICE))
+	$(RTC_BIN) -http $(RTC_HTTP) -ice-addr $(RTC_ICE) -info-file $(DIST_WEB)/rtc.json
+
+test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice channels + sprays (social_test), 2-client UDP end-to-end (headless)
 	./$(DEBUG_DIR)/knet_test
+	./$(DEBUG_DIR)/social_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
 
@@ -306,13 +360,73 @@ backend-run: build services ## Foreground variant of backend-up (ctrl-c stops al
 # --------------------------------------------------------------------------- checks
 
 .PHONY: smoke smoke-native smoke-web lint check
-check: test lint bridge-check ## Everything CI runs that does not need a display
+check: test ks-test editor-mcp-test lint bridge-check ## Everything CI runs that does not need a display
 
 lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@command -v actionlint >/dev/null && actionlint || echo "actionlint not installed, skipping"
 	$(PYTHON) -c "import json; json.load(open('CMakePresets.json'))"
 	@for f in ui/js/*.js; do node --check $$f || exit 1; done
+	@# GL calls must go through gl.h (glad / GLES); GLFW's system GL header links on Linux only
+	@bad=$$(for f in $$(grep -lE '\bgl[A-Z][A-Za-z0-9]+\(' client/src/*.c client/src/*/*.c client/src/*/*/*.c 2>/dev/null); do \
+		grep -qE '#include [<"](gl\.h|editor_internal\.h)[>"]' $$f || echo $$f; done); \
+		if [ -n "$$bad" ]; then echo "GL calls without #include <gl.h>: $$bad"; exit 1; fi
+	@# MinGW's C runtime has no timespec_get/TIME_UTC: use ks_wall_ms() or guard it with _WIN32
+	@bad=$$(grep -lE '\btimespec_get\(' $$(git ls-files '*.c') | xargs -r grep -L '_WIN32'); \
+		if [ -n "$$bad" ]; then echo "timespec_get without a _WIN32 path: $$bad"; exit 1; fi
 	@echo "lint ok"
+
+.PHONY: ks-test
+ks-test: build ## KrunkScript: front end + runtime tests (ks_front_test, ks_vm_test) and `ksc check` over the corpus and the compiled-JS fixtures
+	./$(DEBUG_DIR)/ks_front_test shared/tests/ks
+	./$(DEBUG_DIR)/ks_vm_test shared/tests/ks
+	./$(DEBUG_DIR)/ksc check --quiet shared/tests/ks/corpus/*.krnk shared/tests/ks/js/*.js
+
+# kn_editor_mcp: the Krunker map editor MCP server (tools/editor-mcp/README.md). The test drives
+# it over MCP stdio and covers every tool; renders use the headless client_bin (EGL, no window)
+# and are skipped when client_bin is missing. EDITOR_MCP_TEST_ARGS="--no-render" skips them.
+EDITOR_MCP_TEST_ARGS ?=
+EDITOR_MCP_PREFIX ?= $(HOME)/.local
+.PHONY: editor-mcp editor-mcp-test editor-mcp-install
+editor-mcp: configure ## Build kn_editor_mcp (debug: cmake-build-debug/tools/editor-mcp/kn_editor_mcp)
+	$(call BUILD,$(DEBUG_DIR)) --target kn_editor_mcp
+
+.PHONY: editor-logic-test
+editor-logic-test: build ## Editor logic UI / game config / custom GUI vs v7.1.4 (headless client_bin; tools/editor/logic_parity.py)
+	$(PYTHON) -I tools/editor/logic_parity.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
+editor-mcp-test: build ## kn_editor_mcp test suite over MCP stdio (every tool, round trips, undo, validation, renders)
+	$(PYTHON) -I tools/editor-mcp/tests/mcp_test.py --bin $(DEBUG_DIR)/tools/editor-mcp/kn_editor_mcp $(EDITOR_MCP_TEST_ARGS)
+
+.PHONY: editor-inspector-test
+editor-inspector-test: build ## Object inspector + Environment/Terrain/Zone/Ocean panels vs v7.1.4: panel dumps and edits (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/inspector_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
+.PHONY: editor-windows-test
+editor-windows-test: build ## Assets / Mods / Textures / Sounds / My Games windows vs v7.1.4 (headless, no brain; tools/editor/windows_check.py)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/windows_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
+.PHONY: editor-publish-test
+editor-publish-test: build ## Editor publishing / My Games / asset windows against a local kn_brain (headless; needs config/config.json DB creds or KN_TEST_DB_DRIVER=sqlite)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/publish_e2e.py $(DEBUG_DIR)
+
+.PHONY: editor-tools-test
+editor-tools-test: build ## Tools / Prefabs panels, Optimize Faces and Color Merging vs v7.1.4 (headless; tools/editor/tools_check.py)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/tools_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
+# the editor's KrunkScript window (doc/v7/editor.md WP5): headless client_bin --editor runs
+# against v7.1.4's window (doc/ref/krunker-v7.1.4/editor/scripting*.dump.txt), ksc's diagnostics,
+# editing, export and test play. Needs the game content (fonts); skipped without it.
+.PHONY: editor-script-test
+editor-script-test: build ## KrunkScript window e2e (v7 parity dumps, ksc diagnostics, editing, export, test play)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/script_window_test.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
+# its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
+EDITOR_MCP_BUILD := cmake-build-mcp-release
+editor-mcp-install: ## Install a release kn_editor_mcp to EDITOR_MCP_PREFIX/bin (default ~/.local/bin; schema embedded)
+	@$(call CHECK_GENERATOR,$(EDITOR_MCP_BUILD)); $(CMAKE) --preset release -B $(EDITOR_MCP_BUILD) $(GEN_FLAG) -DKRUNKNATIVE_SERVICES=OFF $(CMAKE_FLAGS) > /dev/null
+	$(call BUILD,$(EDITOR_MCP_BUILD)) --target kn_editor_mcp
+	install -D -m 0755 $(EDITOR_MCP_BUILD)/tools/editor-mcp/kn_editor_mcp $(EDITOR_MCP_PREFIX)/bin/kn_editor_mcp
+	@echo "installed $(EDITOR_MCP_PREFIX)/bin/kn_editor_mcp (register: claude mcp add --scope user krunker-editor -- $(EDITOR_MCP_PREFIX)/bin/kn_editor_mcp --root $(CURDIR))"
 
 smoke: smoke-native smoke-web ## Headless render checks for both clients (screenshots in /tmp)
 

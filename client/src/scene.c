@@ -1,5 +1,7 @@
 #include <gl.h>
 #include <client.h>
+#include <gltf.h>
+#include <pets.h>
 #include <shadow.h>
 #include <math.h>
 #include <stdlib.h>
@@ -11,8 +13,10 @@ Scene *scene_init() {
 }
 
 void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
+    scene_add_pet(scene, player_mesh->pet, player_mesh->render_you);
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_add_mesh(scene, player_mesh->cosmetics[i]);
+        scene_add_gltf(scene, player_mesh->cosmetic_models[i]);
     }
 
     if (player_mesh->body) {
@@ -34,7 +38,12 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
 
             if (arms->weapon_right) scene_add_mesh(scene, arms->weapon_right);
             if (arms->weapon_left) scene_add_mesh(scene, arms->weapon_left);
+            for (int k = 0; k < 2; k++) scene_add_gltf(scene, arms->weapon_models[k]);
             if (arms->attachment) scene_add_mesh(scene, arms->attachment);
+            if (arms->charm_mount) scene_add_mesh(scene, arms->charm_mount);
+            if (arms->charm) scene_add_mesh(scene, arms->charm);
+            if (arms->wrist) scene_add_mesh(scene, arms->wrist);
+            scene_add_gltf(scene, arms->wrist_model);
 
             for (int j = 0; j < 2; j++) {
                 const PlayerArmMesh *arm = j ? arms->left : arms->right;
@@ -76,9 +85,11 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
 // NOTE: probably should optimize - scene_remove_mesh iterates over scene children until it finds the target mesh!
 void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
     if (!player_mesh) return;
+    scene_remove_pet(player_mesh->pet);
 
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_remove_mesh(scene, player_mesh->cosmetics[i]);
+        scene_remove_gltf(scene, player_mesh->cosmetic_models[i]);
     }
 
     if (player_mesh->body) {
@@ -100,7 +111,12 @@ void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const
 
             if (arms->weapon_right) scene_remove_mesh(scene, arms->weapon_right);
             if (arms->weapon_left) scene_remove_mesh(scene, arms->weapon_left);
+            for (int k = 0; k < 2; k++) scene_remove_gltf(scene, arms->weapon_models[k]);
             if (arms->attachment) scene_remove_mesh(scene, arms->attachment);
+            if (arms->charm_mount) scene_remove_mesh(scene, arms->charm_mount);
+            if (arms->charm) scene_remove_mesh(scene, arms->charm);
+            if (arms->wrist) scene_remove_mesh(scene, arms->wrist);
+            scene_remove_gltf(scene, arms->wrist_model);
 
             for (int j = 0; j < 2; j++) {
                 const PlayerArmMesh *arm = j ? arms->left : arms->right;
@@ -204,6 +220,7 @@ typedef struct {
     int cull_back;
     int additive_blend;
     int depth_write;
+    int cull_front; // map-G: glCullFace(GL_FRONT) while culling (three.js BackSide)
 } SceneDrawState;
 
 static SceneDrawState g_draw_pending;
@@ -213,6 +230,11 @@ void scene_draw_state(const int cull_back, const int additive_blend, const int d
     g_draw_pending.cull_back = cull_back ? 1 : 0;
     g_draw_pending.additive_blend = additive_blend ? 1 : 0;
     g_draw_pending.depth_write = depth_write ? 1 : 0;
+    g_draw_pending.cull_front = 0;
+}
+
+void scene_draw_cull_front(void) {
+    g_draw_pending.cull_front = 1;
 }
 
 static void scene_apply_draw_state(void) {
@@ -236,6 +258,10 @@ static void scene_apply_draw_state(void) {
     if (want->depth_write != have->depth_write) {
         glDepthMask(want->depth_write ? GL_TRUE : GL_FALSE);
         have->depth_write = want->depth_write;
+    }
+    if (want->cull_front != have->cull_front) {
+        glCullFace(want->cull_front ? GL_FRONT : GL_BACK);
+        have->cull_front = want->cull_front;
     }
 }
 
@@ -297,7 +323,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     glActiveTexture(GL_TEXTURE0); // materials bind their base map to unit 0
     glCullFace(GL_BACK);          // FrontSide materials (scene_draw_state cull_back)
     glFrontFace(GL_CCW);
-    g_draw_current = (SceneDrawState) {-1, -1, -1, -1};
+    g_draw_current = (SceneDrawState) {-1, -1, -1, -1, 0}; // cull_front 0: glCullFace(GL_BACK) above
 
     camera_update_projection_matrix(camera, (float) viewport[2] / (float) viewport[3]);
     camera_update_world_inverse_matrix(camera);
@@ -343,7 +369,7 @@ void scene_render(const Scene *scene, Camera *camera) {
 
         // per-draw defaults; BasicMaterial overrides them (FrontSide culling, additive
         // blending, depthWrite: false) inside material_update_uniforms()
-        g_draw_pending = (SceneDrawState) {mesh->material->transparent ? 1 : 0, 0, 0, 1};
+        g_draw_pending = (SceneDrawState) {mesh->material->transparent ? 1 : 0, 0, 0, 1, 0};
         material_update_uniforms(mesh->material);
         scene_apply_draw_state();
         shadow_apply_mesh_uniforms(mesh); // sun shadow receiver uniforms (shadow.c)
@@ -371,6 +397,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     }
 
     glDisable(GL_CULL_FACE);
+    glCullFace(GL_BACK); // map-G: a BackSide material may have left GL_FRONT
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);

@@ -1,7 +1,7 @@
 #pragma once
-// C UI logic layer over the DOM-ops API (html_dom.h): the C port of the former menu
-// and HUD JavaScript (krunknative.js, hud.js) that drives Krunker's v3.1.1 page without
-// JavaScript. Contract: doc/html-ui-engine.md; plan: doc/html-engine-plan.md, "C UI
+// C UI logic layer over the DOM-ops API (html_dom.h): the C port of Krunker v7.1.4's
+// menu and HUD JavaScript (src/index.js, src/libs/UI.js, src/ui/game.js) that drives its
+// page (ui/, imported by tools/ui-import) without JavaScript. Contract: doc/html-ui-engine.md; plan: doc/html-engine-plan.md, "C UI
 // logic". Built into every client: with KRUNKNATIVE_HTML_ENGINE=OFF the DOM ops are the
 // no-ops of client/src/html/stub.c and html_ui_available() is 0.
 //
@@ -16,11 +16,11 @@
 #include <client.h>
 #include <html_dom.h>
 
-// Window ids: Krunker's numeric ids, plus the two non-numbered windows krunknative.js
-// addressed as 'host' and 'join'.
+// Window ids: Krunker's showWindow(n) ids = windows[n - 1] + 1 (v7.1.4: 1 settings, 2 servers,
+// 3 customize, 8 host, 24 join, 48 server finder, ...).
 #define MENU_WINDOW_NONE 0
-#define MENU_WINDOW_HOST (-1)
-#define MENU_WINDOW_JOIN (-2)
+#define MENU_WINDOW_HOST 8
+#define MENU_WINDOW_JOIN 24
 
 #define MENU_CLASS_MAX 16
 #define MENU_MAP_MAX 64
@@ -30,12 +30,16 @@
 // "..." until then. KrunkNative has one server.
 #define MENU_REGION_NAME "Local"
 
+#define MENU_CLASS_LOADOUT_MAX 4
 typedef struct {
     int index;
     const char *name;    // borrowed from Game.classes / g_classes
     const char *weapon;  // primary weapon name, "" when unknown
     int hp;
     char icon[48];       // textures/classes/icon_N.png
+    const char *loadout_names[MENU_CLASS_LOADOUT_MAX]; // weaponConfig names of the class loadout
+    int loadout_count;
+    char preview[96];    // textures/previews/weapons/<src>.png of the last loadout weapon ("" none)
 } MenuClass;
 
 typedef struct {
@@ -51,7 +55,7 @@ typedef struct {
     int invert_y;
     float fov;            // degrees (Krunker setting); applied to Camera.fov in radians
     float ads_fov_mlt;
-    float scale_ui;       // 0.8 default -> uiCustomScale = 2 - scale_ui
+    float scale_ui;       // 0.7 default (v7 desktop) -> uiCustomScale = 2 - scale_ui
     int ui_scaling;       // 0: #uiBase is not scaled at all
     int resolution_pct;   // `resolution` (percent)
     int shadows, soft_shadows, high_res_shadows, ambient_shading;
@@ -79,6 +83,7 @@ typedef struct {
 
     int active_window;       // MENU_WINDOW_* / Krunker id currently in #menuWindow
     int settings_tab;
+    int settings_view;       // windows[0].settingType: 0 "basic" (default), 1 "advanced" (krk_advanced)
     int selected_map;        // Game.maps index picked in the host/games windows, -1 = none
 
     MenuClass classes[MENU_CLASS_MAX];
@@ -87,7 +92,7 @@ typedef struct {
     int map_count;
 
     char last_rect[96];      // last previewRect handed to class_preview.c (dedupe key)
-    char last_instructions[1024];
+    char last_instructions[4096];
     float viewport_w, viewport_h; // last scaleBase() viewport (resize fallback)
 
     ClientSettings settings;
@@ -122,6 +127,7 @@ void menu_schedule_rect(void);                   // scheduleRect
 void menu_play(void);                            // play
 void menu_host_offline(void);                    // hostOffline
 void menu_retry_connect(void);                   // retryConnect
+void menu_show_connecting(void);                 // CONNECTING... + the connect timeout, no reconnect / seek
 void menu_set_class_index(int index, int silent);// setClassIndex
 void menu_select_class(int index);               // selectClass
 void menu_select_map(int index);                 // knSelectMap
@@ -140,6 +146,12 @@ void hud_ui_hit(Client*, int kill);
 
 // ---- ui_handlers.c
 void ui_handlers_install(MenuUi *ui);            // html_ui_set_handlers + the non-inline listeners
+// Module handlers (ui_handlers.c h_fallback): the inline-handler names one module owns.
+// -1 = not ours, else the handler's result (0 = `return false`).
+int ui_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // ui_settings.c
+int ui_controls_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // ui_controls.c
+int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);  // ui_loadout.c
+int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);      // hud_ui.c
 
 // ---- ui_windows.c
 // Small string builder shared by the window generators and the menu.
@@ -154,18 +166,36 @@ void  sb_appendf(StrBuf*, const char *fmt, ...);
 char *sb_finish(StrBuf*);                          // returns the (always non-NULL) buffer; StrBuf is reset
 void  sb_free(StrBuf*);
 
+void  sb_append_replace_all(StrBuf*, const char *tpl, const char *needle, const char *replacement); // tpl.split(needle).join(r)
+
+// windows.json entry of one captured window (tools/ui-import/windows_v7.py)
+typedef struct {
+    const char *header;      // windowHeader.innerHTML
+    int sticky;              // #menuWindow.stickyHeader
+    const char *cls;         // #menuWindow class after showWindow ("dark", "stickyHeader dark", "menuWindowF dark")
+    const char *style;       // #menuWindow inline style after showWindow (overflow-y, width, max-height)
+    const char *label;       // windows[n].label ("settings", "server_browser", ...)
+} UiWindowMeta;
 int         ui_windows_load(void);                       // ui/windows/windows.json + files; 1 on success
-const char *ui_windows_html(const char *key);            // windows[key].file content, "" when absent
-const char *ui_windows_part(const char *key, const char *part); // "card" / "item" / "mapCard"
-int         ui_settings_tab_count(void);
+const char *ui_windows_html(const char *key);            // the captured markup of showWindow(key), "" when absent
+const UiWindowMeta *ui_windows_meta(const char *key);    // NULL when v7 has no such window
+int         ui_settings_view_tab_count(int view);        // windows[0].tabs[basic|advanced].length
+const char *ui_settings_view_tab_html(int view, int tab); // the captured windows[0] markup on that tab
+const char *ui_settings_view_tab_name(int view, int tab); // "General", "Controls", ...
+int         ui_settings_tab_count(void);                 // the advanced view (every setting)
 const char *ui_settings_tab_html(int tab);
-const char *ui_settings_head_html(void);
-// WINDOWS[id].gen(): malloc'd markup for #menuWindow, header text and stickyHeader
+int         ui_controls_tab_count(void);                 // windows[6].tabs (Change Controls)
+const char *ui_controls_tab_html(int tab);               // captured markup (default binds) of that tab
+const char *ui_controls_tab_name(int tab);
+// windows[id - 1].gen(): malloc'd markup for #menuWindow, header text and stickyHeader
 // flag. NULL when the id is not available in KrunkNative.
 char *ui_window_generate(int id, const char **header, int *sticky);
+void  ui_window_meta(int id, const char **cls, const char **style); // showWindow's #menuWindow class + inline style
 void  ui_window_post(int id);                             // WINDOWS[id].post()
-const char *ui_window_key(int id);                        // "1".."33", "host", "join"; NULL unknown
+const char *ui_window_key(int id);                        // "1".."52"; NULL unknown
 const char *ui_map_thumb(const char *name);               // mapThumb()
+void        servers_ui_set_host_type(int host_type);      // openHostWindow(false, type): the Host Game window's config.hostTypes index
+int         servers_ui_host_type(void);                   // GAME_HOST_CUSTOM unless set
 int         ui_host_checked_mode(void);                   // createPrivateRoom: first checked hostable #gameMode<id>, -1 none
 const char *ui_host_checked_map(void);                    // createPrivateRoom: first checked #gameMap<i>, NULL none
 int ui_host_checked_map_index(void);                       // the same as a map catalogue index (map_catalog.h), -1 none
@@ -197,13 +227,27 @@ void client_apply_setting(Client*, const char *key, const char *value);
 
 // ---- hud_ui.c: more game-event entry points
 typedef struct {
-    const char *killer;  // killer alias; NULL/"" = "You died" (no card)
-    const char *weapon;  // weapon (or skin) name shown as [name]
-    int level;           // killer level ("lvl N", at least 1)
-    int score;           // +score for the kill (0 = no score line)
+    const char *killer;  // killer alias; NULL/"" = "You Died" (no VS layout)
+    const char *weapon;  // killer's weapon (or skin) name shown as [name]
+    int level;           // killer class level ("lvl N", at least 1)
+    int score;           // +score for the kill (v3 kill card; v7's death screen does not show it)
     int class_index;     // killer class -> textures/classes/icon_N.png
+    // v7 death screen (f1975); zero = unknown
+    const char *weapon_icon; // killer weapon's weaponConfig.icon ("icon_2") -> img/death-ui/<icon>.png
+    int thrown;          // a thrown knife: "Thrown [name]"
+    int my_level;        // our class level ("lvl N")
+    int stats;           // the life's stats below are set (else the HUD samples time alive / kills / score)
+    int time_alive_ms, shots, kills, life_score; // shots < 0 = "Unknown"
+    const char *accuracy; // "47%"; NULL = "Unknown"
+    // part 2a: the rest of f1975 (NET_PACKET_DEATH_INFO / the killer's and our SPAWN data)
+    const char *weapon_color;    // the killer's weapon skin rarity colour ("[name]"), NULL = rgba(255,255,255,0.7)
+    const char *killer_card_url; // .death-row-bottom-bg banners: Game.store.skins[playerCardIndex].thumbnail, NULL none
+    const char *my_card_url;
+    const char *pc_stat_name;    // the killer's player card stat: config.playerCardStats[i].name, NULL = none ("3" [2] null)
+    const char *pc_stat_value;
+    int report;                  // "[<playerList key>] to Report" (killer level <= 10, signed in, public game)
 } HudKillCard;
-// Krunker g1() for the local player: #killCard markup + UI.toggleGameUI(false).
+// v7 io_killPlayer for the local player: #deathUIHolder (f1975) + UI.toggleGameUI(false).
 void hud_ui_show_death(Client*, const HudKillCard *card);
 void hud_ui_hide_death(Client*);                 // respawn: UI.toggleGameUI(true)
 // UI.showEndScreen(false) + fq()/fD(): result 1 victory, 0 defeat, -1 draw; next_round "MM:SS".
@@ -214,9 +258,16 @@ void hud_ui_show_end_screen(Client*, int result, const char *next_round);
 void hud_ui_hide_end_screen(Client*);
 // GUI.endScreen.changeTab(id): "leaderboard", "performance", "clanwar" or "medals".
 void hud_ui_end_screen_tab(const char *tab);
+// WP-E part 2c: the end screen's Medals tab (NET_PACKET_END_MEDALS: endData.mdls), the Rewards tab
+// (matchRewardSummary.skins of completed challenges) and #endChals' completed challenge cards
+// (io_challengeCompleted). All reset when the end screen goes (a new game).
+void hud_ui_set_end_medals(const NetEndMedalsPacket *packet);
+void hud_ui_add_reward_skin(int skin);
+void hud_ui_end_challenge_completed(int icon, const char *name);
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled
 int  hud_ui_end_screen_interactive(void);   // end-screen results up: pointer free, mouse goes to the page
 int  hud_ui_toggle_end_screen(Client*);     // UI.toggleEndScreen: results <-> menu (Escape, controller Start); 1 = acted
+char *hud_ui_player_list_html(void);        // windows[22].gen(): "Player List" (pListKey, showWindow(23)); malloc'd
 // "<victim> committed <random config.suicides entry>" kill-feed row (no killer/weapon).
 #define HUD_UI_HAVE_KILLFEED_SUICIDE 1
 void hud_ui_add_killfeed_suicide(Client*, const char *victim, int victim_is_you);
@@ -235,6 +286,7 @@ void hud_ui_damage_number(Client*, float x, float y, float z, int value, int cri
 // One #chatList row (Krunker gB/gy): name+msg = player line, else color = server line
 // (type 2), else a plain game line (type 1).
 void hud_ui_add_chat(const char *name, const char *msg, const char *color);
+void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, int channel); // WP-E: a v7 "ch" line on its channel (-1 all)
 void hud_ui_clear_chat(void);                    // empty #chatList, no join lines seeded
 // hud_ui_add_killfeed with explicit "You" flags and the row's age (into its 4 s life). A NULL
 // killer (not "You") is a self-kill: weapon + victim only. Old Scoreboard puts the row in #chatList.
@@ -246,7 +298,13 @@ void hud_ui_hit_elapsed(Client*, int kill, double elapsed_ms); // hud_ui_hit `el
 // samples from the game; `state.scoreboard` rows replace the local-player-only board.
 void hud_ui_set_override(const cJSON *hud);
 void hud_ui_set_override_scoreboard(const cJSON *rows);
+// WP-E: NET_PACKET_LEADER_STATS (v7 "7" leaderStats columns, board order); NULL forgets it (new round).
+void hud_ui_set_leader_stats(const NetLeaderStatsPacket *packet);
 void hud_ui_set_clock(double now_s);             // HUD clock (hit marker, 20 Hz pacing); < 0 = GLFW clock
+const char *hud_ui_override_timer(void);        // scenario hud.timerText (also #specTimer), NULL none
+double hud_ui_now_ms(const Client*);            // the HUD clock in ms (hud_ui_set_clock or GLFW)
+// World point -> #uiBase fraction (0..1, y down) through the scene camera; 0 outside the frustum.
+int hud_ui_project(const Client*, float x, float y, float z, double *sx, double *sy);
 
 // ---- menu_ui.c
 void menu_set_region_label(const char *name);    // #menuRegionLabel text when connected; NULL = MENU_REGION_NAME
@@ -283,7 +341,10 @@ enum {
     UI_CONTROL_INTERACT = 16, UI_CONTROL_DROP = 17, UI_CONTROL_STREAK0 = 18, /* 18..22 */
     UI_CONTROL_INTERACT_SEC = 23, UI_CONTROL_WEAPON_VIS = 24, UI_CONTROL_SHOOT = 25, UI_CONTROL_BOARD = 26,
     UI_CONTROL_TOGGLE0 = 27, /* 27..32 */ UI_CONTROL_EQUIP = 33, UI_CONTROL_PREMIUM0 = 34, /* 34..37 */
-    UI_CONTROL_COUNT = 38
+    // WP-C: v7.1.4 binds.reset / binds.resetLast (input[13]); KrunkNative ids, stored as cont_resetKey /
+    // cont_resetLastKey like v7
+    UI_CONTROL_RESET = 38, UI_CONTROL_RESET_LAST = 39,
+    UI_CONTROL_COUNT = 40
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).
@@ -294,21 +355,29 @@ typedef struct {
     int shw_chat;           // shwChat: 0 all, 1 on focus, 2 off
     float master_volume, voice_volume, asset_volume; // sound, voiceVolume, assetVolume (stored)
     int slid_cont;          // slidCont ("Non FPS Sliding", default on): sent in ENT (ent[15]), applies on the next spawn
+    int chall_mode;         // challMode ("Challenge Mode", default off): sent in ENT V8 (ent[7]), applies on the next spawn
 } UiInputSettings;
 
-void ui_controls_load(void);                     // binds + toggle sets from storage
+void ui_controls_load(void);                     // binds + toggle sets + quick chat messages from storage
 void ui_controls_reset(void);                    // resetSettings: drop cont_*, defaults
 int  ui_controls_bind(int id);                   // DOM keyCode / 10000+which / 20000, -1 unbound
+int  ui_controls_bind_alt(int id);               // the alternate key (v7 ControlBind.altVal), -1 unbound
+int  ui_controls_v7_bind(const char *bind, int index, int alt); // CONTROLS.binds[bind][index].val / altVal (index -1: scalar)
 int  ui_controls_dom_key(int glfw_key);          // GLFW key -> DOM keyCode, -1 unknown
-const char *ui_controls_key_name(int code, char *buf, size_t n); // aU.getKeyName
+const char *ui_controls_key_name(int code, char *buf, size_t n); // UTILS.getKeyName
+int ui_controls_v7_val(const char *bind, int index); // CONTROLS.binds.<bind>[index].val (index -1: scalar), -1 none
 char *ui_controls_window_html(void);             // windows[6].gen() (malloc'd)
-void ui_controls_change(int id, int no_render);  // changeCont
-void ui_controls_unbind(int id, int no_render);  // unbindCont
-void ui_controls_change_set(int id, const char *setting); // changeContSet
+void ui_controls_change(const char *bind, int alt, int index);    // changeCont(bind, alt, index)
+void ui_controls_unbind(const char *bind, int alt, int index);    // unbindCont
+void ui_controls_reset_bind(const char *bind, int alt, int index); // resetCont
+void ui_controls_change_set(int index, const char *setting);      // changeContSet(0..5, setting)
+void ui_controls_change_msg(int index, const char *text);         // changeContMsg(0..5, text)
+void ui_controls_switch_tab(int tab, int force);                  // windows[6].switchTab
 cJSON *ui_controls_export_json(void);            // CONTROLS.export() (caller frees; NULL = all default)
 void ui_controls_import_json(const cJSON *controls); // settings.import's "controls" object
 int  ui_controls_capturing(void);                // waiting for "Press any Key"
 int  ui_controls_take_swallowed_key(void);       // web: the capture consumed the current keydown
+int  ui_controls_take_game_key(void);            // web: the game owned the current key event (preventDefault it)
 // GLFW events from main.c. Return 1 when consumed (main.c then does nothing else).
 int  ui_controls_key_event(Client*, int key, int scancode, int action, int mods);
 int  ui_controls_mouse_event(Client*, int button, int action, int in_game);
@@ -325,6 +394,9 @@ void ui_controls_apply_chat_visibility(void);    // shwChat
 int  ui_controls_down(int id);                   // the bound key/button is held
 int  ui_controls_scoreboard_held(void);          // sBoardKey held (Tab), not while typing
 void ui_controls_fill_input(Client*, Input*, float mouse_dx, float mouse_dy);
+// WP-C netRate: a frame that samples no input frame still turns the look (CONTROLS.updateMouseInp
+// runs every frame); the keys and one-frame events wait for the next sampled frame.
+void ui_controls_fill_look(Client*, Input*, float mouse_dx, float mouse_dy);
 void ui_controls_end_frame(void);
 void ui_controls_reset_keys(void);               // CONTROLS.resetKeys (menu opened / lock lost)
 int  ui_controls_scroll_dir(void);               // scrollDirM: 1 / -1
@@ -363,9 +435,16 @@ void ui_loadout_select_skin(int index, int weapon); // selectSkin
 void ui_loadout_action(int action);              // windows[2].action
 void ui_loadout_toggle_log(HtmlElem obj);        // windows[34].toggleLog
 int  ui_loadout_secondary(int class_index);     // selected secondary weapon id (secondaryInd, default 2), -1 = class has none
+int  ui_loadout_streak(int slot);                // streakIndex1..3 (data/streaks.js index for slot 0..2), -1 none
 int  ui_loadout_skin_color(void);                // selected skin colour as 0xRRGGBB, -1 = class colour
-void ui_loadout_cosmetics(PlayerCosmetics *out); // skin colour + hat/back/waist/face/dye picks for ENT and the preview
+void ui_loadout_cosmetics(PlayerCosmetics *out); // skin colour + hat/body/waist/face/dye picks for ENT and the preview
+void ui_loadout_ent_look(int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins); // ENT: cosmetics + weapon/melee skins, Random resolved to owned items
+void ui_loadout_preview_skins(int class_index, PlayerSkins *out); // the class preview's weapon/melee skins (Random shows none)
+void ui_loadout_cosmetics_v7(int class_index, PlayerCosmeticsV7 *out, int resolve_random); // WP-F: head/back/shoe/pet/wrist/charms/card picks (ENT V9, preview)
+int  ui_loadout_spray(void);                    // ENT ent[1]: the selected spray as a v7 store index, Random resolved, unowned -> 2482
+int  ui_loadout_spray_wheel(int *out, int max); // WP-E: the spray wheel's store indices (owned sprays, then the equipped one)
 void ui_loadout_class_bubble(int index);         // selectClass speech line
+void ui_loadout_switch_tab(int tab);             // windows[2].switchTab(tab, true): Class / Loadout / Customize / Other
 void ui_loadout_show_police_pop(void);           // shoPolicePop
 void ui_loadout_hide_police_pop(void);           // hidePolicePop
 void ui_loadout_clear_pops(void);                // clearPops
@@ -416,6 +495,10 @@ int  ui_mod_keys_ctrl_tp_mouse(Client*, int glfw_button, int action); // Ctrl TP
 
 // BEGIN hud_popups block (client/src/ui/hud_popups.c): the game-overlay canvas text popups
 // of v3.1.1 (overlay animateText / animateDiv): score "+N", "Checkpoint!", medal banner.
+// v7.1.4 mode HUD (hud_v7modes.c): #roundsDisplay, #krTagHolder, #bhHolder, #speedRunHolder
+void hud_v7modes_on_init(void);                                // INIT: initGame's resets
+void hud_v7modes_tick(Client*, int on, int layout_epoch);     // per frame (client_hud_html_tick)
+void hud_v7modes_format_time(double ms, int with_ms, char *out, size_t size); // UTILS.getTime(t, ms, h, 1000, d, 2)
 void hud_popups_score(int delta);                // gf(): "5" score popup (bN accumulates while up)
 void hud_popups_checkpoint(void);                // gg(): "chp" Checkpoint! (showMedals)
 void hud_popups_medals(const NetMedalPacket *medals, int count); // gm(): "6" / "am" medal queue
@@ -425,5 +508,14 @@ void hud_popups_on_spawn(void);                  // "start": medal queue cleared
 void hud_popups_on_init(void);                   // "init": bN = 0
 void hud_popups_page_reset(void);                // fresh page: elements gone
 void hud_popups_tick(double now_ms, int visible); // per frame: draw + age every popup
+void hud_popups_set_comp(int comp);              // Game.isComp: io_addMedal shows nothing
+// map-logic WP-H zombies HUD (hud_zombies.c): #powerUpHolder timers, the finiteAmmo reserve in
+// #ammoMax / #reloadMsg, #roundMessage. Every frame after client_hud_html_tick().
+void hud_zombies_tick(Client*);
 // END hud_popups block
 void hud_ui_kill_streak(Client*, int uid, int streak); // killStreakMessage ("kst"): "<who> on a N Kill Streak" chat line
+// KrunkScript game.ui hideDefault() (v7): hides #gameUIHider and #fullMenHider (0 = shows them
+// again). #customGUIHolder follows #inGameUI's visibility and its children are the script's.
+void hud_ui_hide_default(int hidden);
+void hud_ui_toggle_whole_ui(int on);             // UI.toggleWholeUI: forceHidden on #fullMenHider/#customGUIHolder/#gameUIHider
+int  hud_ui_chat_channel(void);                  // #chatSwitch channel (v7 vLN02023): 0 global, 1 team

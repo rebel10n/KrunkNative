@@ -13,6 +13,7 @@
 #include <server.h> // g_server (effective lobby size in the summary)
 #include <server_log.h>
 #include <map_catalog.h>
+#include <game_config.h> // WP-E: v7 serverConfig table (game.<varN>)
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -35,6 +36,7 @@ void gs_config_defaults(GsConfig *cfg) {
     gs_copy(cfg->name, sizeof(cfg->name), "KrunkNative");
     gs_copy(cfg->listen_host, sizeof(cfg->listen_host), "0.0.0.0");
     cfg->listen_port = NET_DEFAULT_PORT;
+    cfg->host_type = -1; // WP-E: a public game
     gs_copy(cfg->public_host, sizeof(cfg->public_host), "127.0.0.1");
     gs_copy(cfg->brain_secret, sizeof(cfg->brain_secret), "kn-dev-secret"); // = kn_brain's brain.internal_secret default
     cfg->tick_rate = 30;
@@ -55,6 +57,10 @@ void gs_config_defaults(GsConfig *cfg) {
     gs_copy(cfg->auth_url, sizeof(cfg->auth_url), "https://coordinator.krunk.io"); // coord-auth contract
     cfg->enforce_skins = -1;            // auto: on when linked to a coordinator
     cfg->shutdown_grace = 10.0f;
+    cfg->lag_comp = 1;
+    cfg->lag_comp_anchor = LAG_COMP_ANCHOR_EXACT;
+    cfg->lag_comp_scale = 1.0f;         // x each player's lagComp (ENT slider): 1 = v3.1.1
+    gs_copy(cfg->bot_difficulty, sizeof(cfg->bot_difficulty), "normal"); // bots / bot_quota: 0 = no bots
 }
 
 // ------------------------------------------------------------------ file location
@@ -261,93 +267,54 @@ static void gs_load_billboards_file(GsConfig *cfg, const char *path) {
     cJSON_Delete(json);
 }
 
-// ------------------------------------------------------------------ host config (applyConfig)
+// ------------------------------------------------------------------ game.<varN> (serverConfig)
 
-typedef enum { GS_NUM, GS_BOOL, GS_STR } GsKind;
+// gameserver.game / server.cfg "game.<varN>": the v7.1.4 serverConfig keys (WP-E,
+// shared/src/game_config.c), only the ones present, clamped like a dedicated server's
+// applyConfig (maxD). server.cfg values arrive as text ("game.canSlide 0"): each is typed by its
+// option first, with this file's number / bool spellings.
+#define GS_GAME_MAX_PLAYERS 31 // the lobby cap (gameserver.max_players), below v7's maxD 50
 
-// src/config.js serverConfig: varN, min, max (the custom-game clamps).
-static const struct {
-    const char *var;
-    GsKind kind;
-    float min, max;
-    size_t offset;
-    unsigned int bit; // GS_BOOL: GameConfig bitfields cannot be addressed, see gs_set_bool
-} k_host_keys[] = {
-    {"maxPlayers", GS_NUM, 1, 31, offsetof(GameConfig, max_players), 0},
-    {"minPlayers", GS_NUM, 0, 10, offsetof(GameConfig, min_players), 0},
-    {"gameTime", GS_NUM, 0, 60, offsetof(GameConfig, game_time), 0},
-    {"warmupTime", GS_NUM, 0, 4, offsetof(GameConfig, warmup_time), 1},
-    {"forceSpawn", GS_NUM, 0, 15, offsetof(GameConfig, auto_respawn), 0},
-    {"lives", GS_NUM, 0, 10, offsetof(GameConfig, lives), 0},
-    {"scoreLimit", GS_NUM, 0, 10000, offsetof(GameConfig, score_limit), 0},
-    {"gravMlt", GS_NUM, 0.1f, 2, offsetof(GameConfig, gravity_mlt), 1},
-    {"jumpMlt", GS_NUM, 0.1f, 3, offsetof(GameConfig, jump_mlt), 1},
-    {"deltaMlt", GS_NUM, 0.1f, 1.5f, offsetof(GameConfig, delta_mlt), 1},
-    {"slidTime", GS_NUM, 1, 5, offsetof(GameConfig, slide_time), 1},
-    {"impulseMlt", GS_NUM, 0, 3, offsetof(GameConfig, impulse_mlt), 1},
-    {"wallJP", GS_NUM, 0, 2, offsetof(GameConfig, wall_jump), 1},
-    {"strafeSpd", GS_NUM, 1, 2, offsetof(GameConfig, strafe_speed), 1},
-    {"healthMlt", GS_NUM, 0.1f, 3, offsetof(GameConfig, health_mlt), 1},
-    {"fiRat", GS_NUM, 0.5f, 2, offsetof(GameConfig, fire_rate), 1},
-    {"reSpd", GS_NUM, 0.5f, 2, offsetof(GameConfig, reload_speed), 1},
-    {"t1Dmg", GS_NUM, 0, 2, offsetof(GameConfig, team1_damage), 1},
-    {"t2Dmg", GS_NUM, 0, 2, offsetof(GameConfig, team2_damage), 1},
-};
-
-static void gs_set_bool(GameConfig *g, const char *var, const int on) {
-    if (!strcmp(var, "canSlide")) g->can_slide = on;
-    else if (!strcmp(var, "airStrf")) g->air_strafe = on;
-    else if (!strcmp(var, "autoJump")) g->auto_jump = on;
-    else if (!strcmp(var, "bDrop")) g->bullet_drop = on;
-    else if (!strcmp(var, "hpRegen")) g->health_regen = on;
-    else if (!strcmp(var, "killRewards")) g->kill_rewards = on;
-    else if (!strcmp(var, "headshotOnly")) g->headshots_only = on;
-    else if (!strcmp(var, "noSecondary")) g->no_secondaries = on;
-    else if (!strcmp(var, "noStreaks")) g->no_streaks = on;
-    else if (!strcmp(var, "disableB")) g->disable_borders = on;
-    else if (!strcmp(var, "throwMel")) g->throwable_melees = on;
-    else if (!strcmp(var, "selTeam")) g->select_team = on;
-    else if (!strcmp(var, "allowSpect")) g->allow_spectate = on;
-    else if (!strcmp(var, "thirdPerson")) g->third_person = on;
-    else if (!strcmp(var, "nameTags")) g->hide_nametags = on;
+// The serverConfig option of a key in any case: server.cfg lowercases its keys (game.gametime).
+static const GameConfigOption *gs_game_option(const char *key) {
+    size_t count = 0;
+    const GameConfigOption *options = game_config_options(GAME_CONFIG_SERVER, &count);
+    for (size_t i = 0; key && i < count; i++) {
+        if (!strcasecmp(options[i].var, key)) return &options[i];
+    }
+    return NULL;
 }
 
-static const char *const k_host_bools[] = {
-    "canSlide", "airStrf", "autoJump", "bDrop", "hpRegen", "killRewards", "headshotOnly", "noSecondary",
-    "noStreaks", "disableB", "throwMel", "selTeam", "allowSpect", "thirdPerson", "nameTags",
-};
-
-// Team names live as long as the process (GameConfig keeps char pointers).
-static char g_team_names[2][17];
+// The "game" object with each known key under its varN and of its option's type.
+static cJSON *gs_game_typed(const cJSON *obj) {
+    cJSON *typed = cJSON_CreateObject();
+    const cJSON *item;
+    cJSON_ArrayForEach(item, (cJSON_IsObject(obj) ? obj : NULL)) {
+        const GameConfigOption *o = gs_game_option(item->string);
+        if (!o || !typed) continue;
+        cJSON_DeleteItemFromObjectCaseSensitive(typed, o->var);
+        if (o->kind == GC_INPUT) {
+            if (cJSON_IsString(item)) cJSON_AddStringToObject(typed, o->var, item->valuestring);
+        } else if (o->kind == GC_BOOL) {
+            int on = -1;
+            gs_read_bool(obj, item->string, &on);
+            if (on >= 0) cJSON_AddBoolToObject(typed, o->var, on);
+        } else {
+            double v;
+            if (gs_read_num(obj, item->string, &v)) cJSON_AddNumberToObject(typed, o->var, v);
+        }
+    }
+    return typed;
+}
 
 void gs_game_config_from_json(GameConfig *g, const cJSON *obj) {
-    if (!cJSON_IsObject(obj)) return;
-
-    for (size_t i = 0; i < sizeof(k_host_keys) / sizeof(k_host_keys[0]); i++) {
-        double v;
-        if (!gs_read_num(obj, k_host_keys[i].var, &v)) continue;
-        if (v < k_host_keys[i].min) v = k_host_keys[i].min;
-        if (v > k_host_keys[i].max) v = k_host_keys[i].max;
-        char *field = (char *) g + k_host_keys[i].offset;
-        if (k_host_keys[i].bit) *(float *) field = (float) v;
-        else *(int *) field = (int) v;
-    }
-
-    for (size_t i = 0; i < sizeof(k_host_bools) / sizeof(k_host_bools[0]); i++) {
-        int on = -1;
-        gs_read_bool(obj, k_host_bools[i], &on);
-        if (on >= 0) gs_set_bool(g, k_host_bools[i], on);
-    }
-
-    // input fields: sanitizeStr, 16 characters
-    const char *keys[2] = {"nameTeam1", "nameTeam2"};
-    for (int t = 0; t < 2; t++) {
-        const cJSON *item = gs_item(obj, keys[t]);
-        if (!cJSON_IsString(item)) continue;
-        snprintf(g_team_names[t], sizeof(g_team_names[t]), "%.16s", item->valuestring);
-        if (t == 0) g->team1_name = g_team_names[0];
-        else g->team2_name = g_team_names[1];
-    }
+    if (!g || !cJSON_IsObject(obj)) return;
+    cJSON *typed = gs_game_typed(obj);
+    if (!typed) return;
+    game_config_merge(g, typed, GAME_CONFIG_CLAMP_DEDICATED);
+    cJSON_Delete(typed);
+    if (g->max_players > GS_GAME_MAX_PLAYERS) g->max_players = GS_GAME_MAX_PLAYERS;
+    if (g->min_players > GS_GAME_MAX_PLAYERS) g->min_players = GS_GAME_MAX_PLAYERS;
 }
 
 // ------------------------------------------------------------------ section parser
@@ -415,10 +382,29 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     if (cJSON_IsObject(game)) {
         gs_game_config_from_json(&cfg->game, game);
         cfg->has_game = 1;
+        cJSON *typed = gs_game_typed(game);
+        char *text = typed ? cJSON_PrintUnformatted(typed) : NULL;
+        gs_copy(cfg->game_request, sizeof(cfg->game_request), text && strlen(text) < sizeof(cfg->game_request) ? text : "");
+        cJSON_free(text);
+        cJSON_Delete(typed);
         // config.maxPlayers is the lobby size of a hosted game, keep them in sync
         if (gs_item(game, "maxPlayers") && !gs_item(s, "max_players")) cfg->max_players = cfg->game.max_players;
     }
     gs_read_bool(s, "custom_games", &cfg->custom_games);
+    // WP-E server presets: host_type by index or name ("comp", "zombies", "raid", ...)
+    const cJSON *host_type = gs_item(s, "host_type");
+    if (cJSON_IsString(host_type) && host_type->valuestring[0] && !isdigit((unsigned char) host_type->valuestring[0])) {
+        static const char *const names[GAME_HOST_TYPE_COUNT] = {"custom", "comp", "rent", "zombies", "raid"};
+        cfg->host_type = -2;
+        for (int i = 0; i < GAME_HOST_TYPE_COUNT; i++) if (!strcasecmp(host_type->valuestring, names[i])) cfg->host_type = i;
+        if (cfg->host_type == -2) {
+            snprintf(err, err_size, "gameserver.host_type: unknown host type '%s' (custom, comp, rent, zombies, raid)", host_type->valuestring);
+            return -1;
+        }
+    } else {
+        gs_read_int(s, "host_type", &cfg->host_type, -1, GAME_HOST_TYPE_COUNT - 1);
+    }
+    gs_read_bool(s, "map_config", &cfg->map_config);
 
     // messages
     const int motd = gs_read_lines(s, "motd", &cfg->motd[0][0], sizeof(cfg->motd[0]), 8);
@@ -489,6 +475,24 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
         else if (item) gs_read_bool(s, "enforce_skins", &cfg->enforce_skins);
     }
     gs_read_float(s, "shutdown_grace", &cfg->shutdown_grace, 0.0f, 3600.0f);
+    gs_read_bool(s, "lag_comp", &cfg->lag_comp);
+    {
+        const cJSON *item = gs_item(s, "lag_comp_anchor"); // true / false (older configs), 0 / 1 / 2, or a mode name
+        int anchor = -1;
+        if (cJSON_IsBool(item)) anchor = cJSON_IsTrue(item) ? LAG_COMP_ANCHOR_EXACT : LAG_COMP_ANCHOR_V3;
+        else if (cJSON_IsNumber(item)) anchor = item->valueint >= 0 && item->valueint <= 2 ? item->valueint : -1;
+        else if (cJSON_IsString(item)) anchor = lag_comp_anchor_parse(item->valuestring);
+        if (anchor >= 0) cfg->lag_comp_anchor = anchor;
+        else if (item) server_log_error("config: gameserver.lag_comp_anchor: expected 0 (v3.1.1), 1 (exact) or 2 (arrival)");
+    }
+    gs_read_float(s, "lag_comp_scale", &cfg->lag_comp_scale, 0.1f, 1.0f); // the range of the per-player lagComp
+    gs_read_int(s, "bots", &cfg->bots, 0, 16);            // config.botLimit
+    gs_read_int(s, "bot_quota", &cfg->bot_quota, 0, 16);
+    {
+        const cJSON *item = gs_item(s, "bot_difficulty"); // "hard" or 1.8
+        if (cJSON_IsNumber(item)) snprintf(cfg->bot_difficulty, sizeof(cfg->bot_difficulty), "%g", item->valuedouble);
+        else gs_read_str(s, "bot_difficulty", cfg->bot_difficulty, sizeof(cfg->bot_difficulty));
+    }
     {
         char path[GS_STR_LARGE] = "";
         gs_read_str(s, "log_file", path, sizeof(path));
@@ -1022,4 +1026,9 @@ void gs_config_log_summary(const GsConfig *cfg) {
                cfg->rcon_port && cfg->rcon_password[0] ? "local tcp" : cfg->brain_url[0] ? "coordinator only" : "off",
                cfg->finder_url[0] ? cfg->finder_url : "off (unlisted)", cfg->password[0] ? " | password protected" : "",
                cfg->community[0] ? " | community set" : "");
+    if (!cfg->lag_comp) server_log("Lag compensation: off");
+    else server_log("Lag compensation: %s, lagComp scale %.2f (x each player's slider), %.0f ms history",
+                    cfg->lag_comp_anchor == LAG_COMP_ANCHOR_EXACT ? "exact (client input time + ping)" :
+                    cfg->lag_comp_anchor == LAG_COMP_ANCHOR_ARRIVAL ? "arrival (input arrival + ping)" : "v3.1.1 (ping * 2)",
+                    cfg->lag_comp_scale, GAME_STATE_HISTORY * 1000.0f);
 }

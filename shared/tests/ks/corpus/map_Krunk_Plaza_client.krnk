@@ -1,0 +1,300 @@
+# Krunker v7.1.4 content: public/maps/Krunk_Plaza.json scripts.client (base64-decoded)
+bool inInteraction = false;
+bool interactionToggle = false;
+num interactionTimer = 0;
+str interactionText = "";
+num interactionIteration = 0;
+num interactionType = 0;
+
+str tempCode = '';
+
+action generateInteractionWindow() {
+	obj css = {
+		mainHolder: "position: absolute; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;",
+		chatHolder: "position: absolute; bottom: 20vh; width: 40vw; height: 20vh; padding: 15px; background-color: black; border: 4px solid #ffffff;",
+		nameHolder: "position: absolute; bottom: 45vh; margin-left: -30vw; width: 10vw; padding: 15px; color: white; background-color: black; border: 4px solid #ffffff;",
+		exitHolder: "position: absolute; bottom: 45vh; width: 2vw; margin-right: -38vw; padding: 15px; color: white; background-color: black; border: 4px solid #ffffff;",
+		chat: "text-align: left; color: white;",
+		instructions: "position: absolute; left: 0; bottom: 0; padding: 15px; text-align: left; color: rgba(255, 255, 255, 0.5);",
+		
+		keypadHolder: "display: flex; justify-content: center; align-items: center; flex-direction: column; padding: 15px; gap: 15px; background-color: #b1b1b1; border: solid 4px white;",
+		screenHolder: "width: 20vw; text-align: center; font-size: 30px; letter-spacing: 5px; padding: 15px; background-color: black; color: #32cd32",
+		padHolder: "display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 5px; width: 100%;",
+		key: "aspect-ratio: 1/1; display: flex; justify-content: center; align-items: center; background-color: #4a4a4a; color: white;",
+		
+		warehouseHolder: "display: flex; justify-content: center; align-items: center; flex-direction: column; padding: 15px; gap: 15px; background-color: #b1b1b1; border: solid 4px white;",
+		codeHolder: "width: 30vw; height: 10vh; background: black; color: #32cd32; justify-content: center; align-items: center; font-size: 30px;",
+		keebHolder: "display: flex; justify-content: center; align-items: center; gap: 5px; width: 30vw;",
+		keebKey: "aspect-ratio: 1/1; display: flex; justify-content: center; align-items: center; background-color: #4a4a4a; color: white; width: 2.25vw; text-transform: uppercase;",
+	};
+	
+ 	str mainHolder = GAME.UI.addDIV('customHolder', false, css.mainHolder, "inGameUI");
+	str chatHolder = GAME.UI.addDIV('customChatHolder', false, css.chatHolder, "customHolder");
+	str nameHolder = GAME.UI.addDIV('customNameHolder', false, css.nameHolder, "customHolder");
+	str exitHolder = GAME.UI.addDIV('customExitHolder', false, css.exitHolder, "customHolder");
+	GAME.UI.updateDIVText("customExitHolder", 'X');
+	str chat = GAME.UI.addDIV('customChat', false, css.chat, 'customChatHolder');
+	str instructions = GAME.UI.addDIV('customInstructions', false, css.instructions, 'customChatHolder');
+
+	str keypadHolder = GAME.UI.addDIV('keypadHolder', false, css.keypadHolder, 'customHolder');
+	str screenHolder = GAME.UI.addDIV('screenHolder', false, css.screenHolder, 'keypadHolder');
+	GAME.UI.updateDIVText(screenHolder, '_______');
+	str padHolder = GAME.UI.addDIV('padHolder', false, css.padHolder, 'keypadHolder');
+
+	for (num i = 0; i < 12; i++) {
+		str key = GAME.UI.addDIV('keypad' + (str)i, false, css.key, 'padHolder');
+		num temp = i + 1;
+		GAME.UI.updateDIVText('keypad' + (str)i, (str)temp);
+	}
+	GAME.UI.updateDIVText('keypad9', 'X');
+	GAME.UI.updateDIV('keypad9', 'background-color', 'red');
+	GAME.UI.updateDIVText('keypad10', '0');
+	GAME.UI.updateDIVText('keypad11', '>');
+	GAME.UI.updateDIV('keypad11', 'background-color', '#32cd32');
+
+	str warehouseHolder = GAME.UI.addDIV('warehouseHolder', false, css.warehouseHolder, 'customHolder');
+	str codeHolder = GAME.UI.addDIV('codeHolder', false, css.codeHolder, 'warehouseHolder');
+	GAME.UI.updateDIVText(codeHolder, '__________');
+	str keebHolder1 = GAME.UI.addDIV('keebHolder1', false, css.keebHolder, 'warehouseHolder');
+	str keebHolder2 = GAME.UI.addDIV('keebHolder2', false, css.keebHolder, 'warehouseHolder');
+	str keebHolder3 = GAME.UI.addDIV('keebHolder3', false, css.keebHolder, 'warehouseHolder');
+
+	str[][] rows = str[][str['q','w','e',"r",'t','y','u','i','o','p'], str['a','s','d','f','g','h','j','k','l'], str['exit', 'z','x','c','v','b','n','m', 'enter']];
+
+	for (num i = 0; i < lengthOf rows; i++) {
+		for (num j = 0; j < lengthOf rows[i]; j++) {
+			str key = GAME.UI.addDIV('key' + rows[i][j], false, css.keebKey, 'keebHolder' + (str)(i + 1));
+			GAME.UI.updateDIVText('key' + rows[i][j], rows[i][j]);
+
+			if (rows[i][j] == 'enter') {
+				GAME.UI.updateDIVText('key' + rows[i][j], '>');
+				GAME.UI.updateDIV('key' + rows[i][j], 'background-color', '#32cd32');
+			} else if (rows[i][j] == 'exit') {
+				GAME.UI.updateDIVText('key' + rows[i][j], 'x');
+				GAME.UI.updateDIV('key' + rows[i][j], 'background-color', 'red');
+			}
+		}
+	}
+}
+
+action showInteraction(bool toggle, str name) {
+	if (!toggle) {
+		GAME.UI.updateDIV('customHolder', 'display', 'none');
+		GAME.UI.updateDIV('customChatHolder', 'display', 'none');
+		GAME.UI.updateDIV('customNameHolder', 'display', 'none');
+		GAME.UI.updateDIV('customExitHolder', 'display', 'none');
+		GAME.UI.updateDIV('customChat', 'display', 'none');
+		return;
+	} else {
+		GAME.UI.updateDIV('customHolder', 'display', 'flex');
+		GAME.UI.updateDIVText('customNameHolder', name);
+
+		GAME.UI.updateDIV('customChatHolder', 'display', 'block');
+		GAME.UI.updateDIV('customNameHolder', 'display', 'block');
+		GAME.UI.updateDIV('customExitHolder', 'display', 'block');
+		GAME.UI.updateDIV('customChat', 'display', 'block');
+	}
+}
+
+action showKeypad(bool toggle) {
+	if (!toggle) {
+		GAME.UI.updateDIV('customHolder', 'display', 'none');
+		GAME.UI.updateDIV('keypadHolder', 'display', 'none');
+		GAME.UI.updateDIV('screenHolder', 'display', 'none');
+		GAME.UI.updateDIV('padHolder', 'display', 'none');
+
+		for (num i = 0; i < 12; i++) {
+			GAME.UI.updateDIV('keypad' + (str)i, 'display', 'none');
+		}
+		return;
+	} else {
+		GAME.UI.updateDIV('customHolder', 'display', 'flex');
+		GAME.UI.updateDIV('keypadHolder', 'display', 'flex');
+		GAME.UI.updateDIV('screenHolder', 'display', 'block');
+		GAME.UI.updateDIV('padHolder', 'display', 'grid');
+
+		for (num i = 0; i < 12; i++) {
+			GAME.UI.updateDIV('keypad' + (str)i, 'display', 'flex');
+		}
+	}
+}
+
+action showKeeb(bool toggle) {
+		if (!toggle) {
+		GAME.UI.updateDIV('customHolder', 'display', 'none');
+	
+		GAME.UI.updateDIV('codeHolder', 'display', 'none');
+		GAME.UI.updateDIV('warehouseHolder', 'display', 'none');
+		GAME.UI.updateDIV('keebHolder1', 'display', 'none');
+		GAME.UI.updateDIV('keebHolder2', 'display', 'none');
+		GAME.UI.updateDIV('keebHolder3', 'display', 'none');
+		GAME.UI.updateDIV('keebExit', 'display', 'none');
+		GAME.UI.updateDIV('keebEnter', 'display', 'none');
+		return;
+	} else {
+		GAME.UI.updateDIV('customHolder', 'display', 'flex');
+
+		GAME.UI.updateDIV('codeHolder', 'display', 'flex');
+		GAME.UI.updateDIV('warehouseHolder', 'display', 'flex');
+		GAME.UI.updateDIV('keebHolder1', 'display', 'flex');
+		GAME.UI.updateDIV('keebHolder2', 'display', 'flex');
+		GAME.UI.updateDIV('keebHolder3', 'display', 'flex');
+		GAME.UI.updateDIV('keebExit', 'display', 'flex');
+		GAME.UI.updateDIV('keebEnter', 'display', 'flex');
+	}
+}
+
+action showInstructions(bool toggle, num state) {
+	if (toggle == false) {
+		GAME.UI.updateDIV('customInstructions', 'display', 'none');
+		return;
+	} else {
+		if (state == 0) {
+			GAME.UI.updateDIVText('customInstructions', 'Click to continue...');
+		} else if (state == 1) {
+			GAME.UI.updateDIVText('customInstructions', 'Type the answer in chat...');
+		}
+		
+		GAME.UI.updateDIV('customInstructions', 'display', 'block');
+	}
+}
+
+action updateKeypad() {
+	num amount = 7 - lengthOf tempCode;
+	str underscores = '';
+	for (num i = 0; i < amount; i++) {
+		underscores += '_';
+	}
+	
+	GAME.UI.updateDIVText('screenHolder', tempCode + underscores);
+}
+
+action updateKeeb() {
+	num amount = 10 - lengthOf tempCode;
+	str underscores = '';
+	for (num i = 0; i < amount; i++) {
+		underscores += '_';
+	}
+	
+	GAME.UI.updateDIVText('codeHolder', tempCode + underscores);
+}
+
+public action start() {
+	generateInteractionWindow();
+	showKeypad(false);
+	showKeeb(false);
+}
+
+public action onNetworkMessage(str id, obj data) {
+	if (id == "startInteraction") {
+		GAME.INPUTS.unlockMouse();
+
+		interactionText = (str)data.text;
+		interactionType = (num)data.type;
+		interactionToggle = true;
+		inInteraction = true;
+	
+		showInteraction(true, (str)data.name);
+	} else if (id == 'updateInteraction') {
+		interactionText = (str)data.text;
+		interactionType = (num)data.type;
+		interactionIteration = 0;
+		interactionToggle = true;
+		
+		showInstructions(false, 0);
+	} else if (id == 'endInteraction') {
+		GAME.INPUTS.lockMouse();
+
+		interactionText = "";
+		interactionType = 0;
+		interactionIteration = 0;
+		interactionToggle = false;
+		inInteraction = false;
+
+		showInteraction(false, "");
+		showInstructions(false, 0);
+	} else if (id == 'keypadInteraction') {
+		GAME.INPUTS.unlockMouse();
+		showKeypad(true);
+	} else if (id == 'endKeypad') {
+		GAME.INPUTS.lockMouse();
+		tempCode = '';
+		GAME.UI.updateDIVText('screenHolder', '_______');
+		showKeypad(false);
+	} else if (id == 'keypadContinue') {
+		GAME.changeGame((str)data.map, { private: true, host: true });
+	} else if (id == 'eternoTP') {
+		GAME.changeGame('eterno_sim');
+	} else if (id == 'keebInteraction') {
+		GAME.INPUTS.unlockMouse();
+		showKeeb(true);
+	} else if (id == 'endKeeb') {
+		GAME.INPUTS.lockMouse();
+		tempCode = '';
+		GAME.UI.updateDIVText('codeHolder', '__________');
+		showKeeb(false);
+	} else if (id == 'shopTP') {
+		GAME.changeGame('weapons_factory');
+	}
+}
+
+public action onDIVClicked(str id) {
+	if (id == 'customChat' || id == 'customChatHolder' || id == 'customHolder' || id == 'customInstructions' || id == 'customNameHolder') {
+		if (inInteraction && interactionType == 0) {
+			GAME.NETWORK.send('progressInteraction', {}, GAME.PLAYERS.getSelf());
+		}
+	} else if (id == 'customExitHolder') {
+		GAME.NETWORK.send('endInteraction', {}, GAME.PLAYERS.getSelf());
+	} else if (id == 'keypad9') {
+		tempCode = '';
+		GAME.NETWORK.send('exitKeypad', {}, GAME.PLAYERS.getSelf());
+	} else if (id == 'keypad11') {
+		GAME.NETWORK.send('submitKeypad', {code: tempCode}, GAME.PLAYERS.getSelf());
+	} else if (UTILS.textContains(id, 'keypad')) {
+		for (num i = 0; i < 12; i++) {
+			if (id == 'keypad' + (str)i) {
+				if (lengthOf tempCode >= 7) { return; }
+				num temp = 0;
+				if (i != 10) { temp = i + 1; }
+				tempCode += (str)temp;
+				updateKeypad();
+			}
+		}	
+	} else if (id == 'keyexit') {
+		tempCode = '';
+		GAME.NETWORK.send('exitKeeb', {}, GAME.PLAYERS.getSelf());
+	} else if (id == 'keyenter') {
+		GAME.NETWORK.send('submitKeeb', {code: tempCode}, GAME.PLAYERS.getSelf());
+	} else if (UTILS.textContains(id, 'key')) {
+		str[] keys = str['q','w','e',"r",'t','y','u','i','o','p','a','s','d','f','g','h','j','k','l','exit','z','x','c','v','b','n','m','enter'];
+		for (num i = 0; i < lengthOf keys; i++) {
+			if (id == 'key' + keys[i]) {
+				if (lengthOf tempCode >= 10) { return; }
+				
+				tempCode += keys[i];
+				updateKeeb();
+			}
+		}
+	}
+}
+
+public action update(num delta) {
+	if (interactionToggle) {
+		interactionTimer += delta;
+		if (interactionTimer >= 50) {
+			interactionTimer = 0;
+			if (interactionIteration == lengthOf interactionText + 1) {
+				
+				interactionToggle = false;
+				interactionIteration = 0;
+				
+				showInstructions(true, interactionType);
+				return;
+			}
+			
+			str currentString = UTILS.truncateTxt(interactionText, interactionIteration, true);
+			GAME.UI.updateDIVText('customChat', currentString);
+			interactionIteration++;
+		} 
+	}
+}

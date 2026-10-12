@@ -73,6 +73,10 @@ size_t server_info_build_reply(uint8_t *out, const size_t cap, const ServerInfo 
     cJSON_AddStringToObject(o, "version", info->version);
     cJSON_AddNumberToObject(o, "port", info->port);
     cJSON_AddStringToObject(o, "nonce", info->nonce);
+    cJSON_AddStringToObject(o, "commit", info->commit);
+    cJSON_AddNumberToObject(o, "commit_time", (double) info->commit_time);
+    cJSON_AddStringToObject(o, "build_time", info->build_time);
+    cJSON_AddStringToObject(o, "protocol", info->protocol);
     char *json = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!json) return 0;
@@ -130,6 +134,11 @@ int server_info_parse_reply(const uint8_t *in, const size_t len, ServerInfo *inf
     copy_str(info->version, sizeof(info->version), o, "version");
     info->port = get_int(o, "port");
     copy_str(info->nonce, sizeof(info->nonce), o, "nonce");
+    copy_str(info->commit, sizeof(info->commit), o, "commit");
+    const cJSON *ct = cJSON_GetObjectItemCaseSensitive(o, "commit_time");
+    info->commit_time = cJSON_IsNumber(ct) && ct->valuedouble > 0 ? (int64_t) ct->valuedouble : 0;
+    copy_str(info->build_time, sizeof(info->build_time), o, "build_time");
+    copy_str(info->protocol, sizeof(info->protocol), o, "protocol");
     cJSON_Delete(o);
     return 1;
 }

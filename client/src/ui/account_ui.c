@@ -17,12 +17,21 @@
 #include <app_mode.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#define timegm _mkgmtime // MinGW has no timegm (same as editor_net.c)
+#endif
 #include "account_flags.h"
+#include <progression.h> // WP-E part 2c: v7 level progress, challenge names
+#include <badges.h>      // WP-E part 2c: badges.js
+#include <map_catalog.h> // WP-E part 2c: the Map Challenges cards
+#include <weapons.h>
+#include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT "Please wait..." // generic.wait
@@ -36,20 +45,27 @@ static int g_header_dirty = 1;   // cK() pending (page not up yet / offsetWidth 
 static int g_header_tries;
 static int g_restore_sent;       // a token restore is in flight
 static int g_tab_index;          // windows[4].tabIndex
-static int g_store_tab;          // windows[13].tabIndex
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
 static char g_token[192];
 static char g_guest_name[32];    // client->menu_name before the account took it over
 static int g_reward_played;      // dc: a match ended this session (canClaimReward)
 static char g_reward_text[16];   // d8: last #claimTimer text
 // windows[29] (Krunker Mail)
-static int g_mail_tab;
+static int g_mail_tab;           // the kml request / answer: 0 unread, 1 archive
+static int g_mail_view;          // windows[29].tabIndex (v7: Followers, Clan, Hub, Inbox, Archive)
 static cJSON *g_mail_rows;       // mailData.d (owned), NULL = not loaded
 static int g_mail_loaded;        // mailData != null
 // 2FA: d3 picked cells of the login grid
 static int g_2fa_cells[25];
 static int g_2fa_count;
 static double g_auth_sent_at;    // a login/register is waiting for its "a" reply (glfwGetTime), 0 none
+// player-viewer WP-E part 2c: v7 challenges (windows[32]) and the account's medal counts
+static cJSON *g_chal;            // account.activeChallenges from kn_brain's "chgL" (owned), NULL = not loaded
+static int g_chal_requested;     // a "chg" request is out
+static char g_chal_typ[12];      // windows[32].openChallenge.typ ("" = home)
+static int g_chal_ind;           // windows[32].openChallenge.ind
+static cJSON *g_medal_counts;    // "mdl" {medal: count} (owned), NULL = not loaded
+static int g_scenario;           // account_ui_scenario: a stand-in account (no kn_brain)
 #define AUTH_TIMEOUT_SECONDS 8.0
 
 // ------------------------------------------------------------------ helpers
@@ -165,12 +181,10 @@ void account_set_clan(const char *tag) {
     mark_header();
 }
 
-// Account.updateLevel()
+// Account.updateLevel(): levelProg is v7.1.4's getLevelProg (linear in score, WP-E part 2c)
 static void update_level(void) {
-    const double h = RANK_VAR * sqrt(g_acc.score > 0 ? g_acc.score : 0);
-    g_acc.level = (int) floor(h);
-    g_acc.level_prog = (int) lround((h - g_acc.level) * 100.0);
-    if (g_acc.level < 1) g_acc.level = 1;
+    g_acc.level = progression_level(g_acc.score, RANK_VAR);
+    g_acc.level_prog = progression_level_prog(g_acc.score, RANK_VAR);
 }
 
 // Account.setData(h)
@@ -228,6 +242,8 @@ static void apply_menu_name(void) {
 
 // ------------------------------------------------------------------ cK(): header bar
 
+// updateMenuAccountData() (v7.1.4): #signedInHeaderBar (name, KR, junk, level bar and
+// box) for an account, #signedOutHeaderBar ("Login or Register") for a guest.
 static void update_header(void) {
     g_header_dirty = 0;
     if (!html_ui_available() || !html_dom_by_id("signedInHeaderBar")) {
@@ -237,29 +253,23 @@ static void update_header(void) {
     if (g_logged_in) {
         set_display("signedOutHeaderBar", "none");
         set_display("signedInHeaderBar", "");
-        // acc.level >= config.rewardMinLvl: #claimHolder (daily reward) + dd(true)
-        if (g_acc.level >= REWARD_MIN_LVL) {
-            set_display("claimHolder", "block");
-            g_reward_text[0] = 0;
-        } else {
-            set_display("claimHolder", "none");
-            HtmlElem merch = html_dom_by_id("merchHolder");
-            if (merch) html_dom_set_style(merch, "top", "110px");
-        }
         HtmlElem el;
-        if ((el = html_dom_by_id("menuAccountUsername"))) html_dom_set_text(el, g_acc.premium ? g_acc.alias : g_acc.name);
+        // premiumT && SETTINGS.tmp.premiumBadge ? alias : name (v7 privacy setting, WP-E part 2c)
+        if ((el = html_dom_by_id("menuAccountUsername"))) html_dom_set_text(el, g_acc.premium && !ui_setting_is_false("premiumBadge") ? g_acc.alias : g_acc.name);
         if ((el = html_dom_by_id("menuKRCount"))) {
-            char funds[32], html[96];
+            char funds[32], html[128];
             comma_number(funds, sizeof(funds), g_acc.funds);
-            snprintf(html, sizeof(html), "%s <span style='color:#fff'>KR</span>", funds);
+            snprintf(html, sizeof(html), "%s <span style='color:#fbc02d'>KR</span>", funds);
             html_dom_set_html(el, html);
         }
+        // junk (crafting material): KrunkNative's accounts have none (the store economy is out of scope)
+        if ((el = html_dom_by_id("menuJNKCount"))) html_dom_set_html(el, "0.00<span class='material-icons' style='color:#cc51f8;font-size:27px;margin-left:5px;vertical-align:top;margin-right:-5px;'>plumbing</span>");
         if ((el = html_dom_by_id("menuLevelBar"))) {
             char w[16];
-            snprintf(w, sizeof(w), "%d%%", g_acc.level_prog);
+            snprintf(w, sizeof(w), "%.6g%%", g_acc.level_prog); // menuLevelBar.style.width = levelProg + "%"
             html_dom_set_style(el, "width", w);
         }
-        if ((el = html_dom_by_id("mLevelCont"))) {
+        if ((el = html_dom_by_id("mLevelContV"))) {
             char lvl[16];
             snprintf(lvl, sizeof(lvl), "%d", g_acc.level ? g_acc.level : 1);
             html_dom_set_text(el, lvl);
@@ -272,21 +282,11 @@ static void update_header(void) {
             html_dom_set_display(el, g_acc.mail_unread > 0 ? "block" : "none");
         }
         HtmlElem bar = html_dom_by_id("signedInHeaderBar");
-        const float w = bar ? html_dom_offset_width(bar) : 0.0f;
-        if (w > 0.0f) {
-            char left[24];
-            html_dom_set_style(bar, "border-radius", "0px");
-            snprintf(left, sizeof(left), "%dpx", (int) w);
-            if ((el = html_dom_by_id("mLevelCont"))) html_dom_set_style(el, "left", left);
-        } else if (g_header_tries++ < 30) {
-            g_header_dirty = 1; // laid out on a later frame
-        }
+        if (bar && html_dom_offset_width(bar) > 0.0f) html_dom_set_style(bar, "border-radius", "0px");
+        else if (g_header_tries++ < 30) g_header_dirty = 1; // laid out on a later frame
     } else {
         set_display("signedOutHeaderBar", "");
         set_display("signedInHeaderBar", "none");
-        set_display("claimHolder", "none");
-        HtmlElem merch = html_dom_by_id("merchHolder");
-        if (merch) html_dom_set_style(merch, "top", "110px");
     }
 }
 
@@ -382,7 +382,60 @@ static void clear_account(void) {
     clan_ui_reset();
     cJSON_Delete(g_acc.stats);
     cJSON_Delete(g_acc.data);
+    cJSON_Delete(g_acc.badges);
     memset(&g_acc, 0, sizeof(g_acc));
+    cJSON_Delete(g_chal);
+    g_chal = NULL;
+    g_chal_requested = 0;
+    g_chal_typ[0] = 0;
+    cJSON_Delete(g_medal_counts);
+    g_medal_counts = NULL;
+}
+
+// WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices)
+static void set_badges(const cJSON *info) {
+    const cJSON *badges = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "badges") : NULL;
+    if (!cJSON_IsArray(badges)) return;
+    cJSON_Delete(g_acc.badges);
+    g_acc.badges = cJSON_Duplicate(badges, 1);
+}
+
+int account_owns_badge(const int badge) {
+    const cJSON *b;
+    cJSON_ArrayForEach(b, (g_logged_in ? g_acc.badges : NULL)) {
+        if (cJSON_IsNumber(b) && b->valueint == badge) return 1;
+    }
+    return 0;
+}
+
+static int stat_bdg(void) {
+    const cJSON *v = g_acc.stats ? cJSON_GetObjectItem(g_acc.stats, "bdg") : NULL;
+    return cJSON_IsNumber(v) ? v->valueint : -1;
+}
+
+// updateClassPreview: account.stats.bdg >= 0 && Game.badges[bdg] && customBadge && owned
+int account_custom_badge(void) {
+    if (!g_logged_in || ui_setting_is_false("customBadge")) return -1;
+    const int bdg = stat_bdg();
+    return badge_get(bdg) && account_owns_badge(bdg) ? bdg : -1;
+}
+
+static void add_badge(const int badge) {
+    if (account_owns_badge(badge)) return;
+    if (!g_acc.badges) g_acc.badges = cJSON_CreateArray();
+    cJSON_AddItemToArray(g_acc.badges, cJSON_CreateNumber(badge));
+}
+
+// acc.stats[key] = value in both copies (g_acc.stats and data[16])
+static void set_stat(const char *key, const double value) {
+    if (!g_acc.stats) g_acc.stats = cJSON_CreateObject();
+    cJSON_DeleteItemFromObject(g_acc.stats, key);
+    cJSON_AddNumberToObject(g_acc.stats, key, value);
+    cJSON *stats = g_acc.data ? cJSON_GetArrayItem(g_acc.data, 16) : NULL;
+    if (cJSON_IsObject(stats)) {
+        cJSON_DeleteItemFromObject(stats, key);
+        cJSON_AddNumberToObject(stats, key, value);
+    }
 }
 
 // accountResponse(html, id, username, data, token)
@@ -416,6 +469,7 @@ static void account_response(const cJSON *frame) {
     if (cJSON_IsObject(info)) {
         const cJSON *mail = cJSON_GetObjectItem(info, "mail_unread");
         if (cJSON_IsNumber(mail)) g_acc.mail_unread = mail->valueint;
+        set_badges(info);
     }
 
     char idtext[24];
@@ -456,6 +510,10 @@ static void logout(void) {
 
 static void reward_tick(int force);
 static void auth_unreachable(void);
+static int progress_frame(const char *label, const cJSON *frame);
+static int progress_handle(const char *name, const HtmlArg *args, int argc);
+static void medal_tab_html(StrBuf *sb);
+static void badge_url(int index, char *out, size_t n);
 static void mail_count(int count);
 static void mail_read_data(const cJSON *rows);
 static void twofa_res(const cJSON *frame);
@@ -476,6 +534,7 @@ static void on_social(void *user, const cJSON *frame) {
         account_response(frame);
     } else if ((!strcmp(label, "ua") || !strcmp(label, "upd")) && g_logged_in) { // ua: updateAccount(data) after a match
         set_data(cJSON_GetArrayItem(frame, 1));
+        set_badges(cJSON_GetArrayItem(frame, 2)); // WP-E part 2c: the info's "badges"
         mark_header();
         rerender_windows();
     } else if (!strcmp(label, "spin")) {
@@ -538,6 +597,7 @@ static void on_social(void *user, const cJSON *frame) {
             }
         }
         menu_rerender_if_open(5);
+    } else if (progress_frame(label, frame)) { // WP-E part 2c: badges, challenges, medals
     } else if (!strcmp(label, "upp")) { // changePasswordResponse(msg, newToken)
         const char *token = str_at(frame, 2);
         if (token && token[0]) {
@@ -561,29 +621,24 @@ void account_ui_init(Client *client) {
     backend_social_open(); // "__open" restores the saved session
 }
 
-// dd(force): #claimTimer countdown to the next daily reward, "Play 1 Game" until a match
-// ended this session, #claimImg ready / waiting.
-static void reward_tick(const int force) {
-    if (!g_logged_in || g_acc.level < REWARD_MIN_LVL) return;
+// The daily free KR (config.rewardTime after acc.lastReward): v7.1.4 shows it only as the
+// Store's "Free KR Spin" card (store_ui.c), a countdown until it can be claimed. KrunkNative
+// also wants one finished match this session (no ads to watch). ms left, 0 = claimable, -1 = none.
+double account_reward_ms(void) {
+    if (!g_logged_in || g_acc.level < REWARD_MIN_LVL) return -1.0;
     const double last = g_acc.data ? num_at(g_acc.data, 11) : 0.0;
-    double db = REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last);
-    const long long ms = db > 0 ? (long long) db : 0;
+    const double db = REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last);
+    return db > 0 ? db : 0.0;
+}
+
+static void reward_tick(const int force) {
+    if (!g_logged_in || account_reward_ms() < 0) return;
+    const double ms = account_reward_ms();
     char t[16];
-    snprintf(t, sizeof(t), "%02lld:%02lld:%02lld", (ms / 3600000) % 24, (ms / 60000) % 60, (ms / 1000) % 60);
+    snprintf(t, sizeof(t), "%d", ms > 0 ? (int) (ms / 1000) : g_reward_played ? -1 : -2);
     if (!force && !strcmp(t, g_reward_text)) return;
     snprintf(g_reward_text, sizeof(g_reward_text), "%s", t);
-    const int zero = !strcmp(t, "00:00:00");
-    HtmlElem timer = html_dom_by_id("claimTimer");
-    if (timer) {
-        html_dom_set_text(timer, zero ? (g_reward_played ? "" : "Play 1 Game") : t);
-        html_dom_set_style(timer, "font-size", zero ? (g_reward_played ? "18px" : "13px") : "18px");
-    }
-    HtmlElem merch = html_dom_by_id("merchHolder");
-    if (merch) html_dom_set_style(merch, "top", zero && g_reward_played ? "205px" : "237px");
-    HtmlElem img = html_dom_by_id("claimImg");
-    const char *src = db <= 0 && g_reward_played ? "./img/claim_0.png" : "./img/claim_1.png";
-    char cur[64] = "";
-    if (img && (html_dom_get_attr(img, "src", cur, sizeof(cur)) < 0 || strcmp(cur, src))) html_dom_set_attr(img, "src", src);
+    menu_rerender_if_open(14); // the Free KR card's countdown
 }
 
 // ---- windows[29]: Krunker Mail
@@ -632,16 +687,14 @@ static double parse_date_ms(const char *s) {
 }
 
 static char *gen_mail(void) {
+    static const char *const tabs[5] = {"Followers", "Clan", "Hub", "Inbox", "Archive"}; // config.mailTabs
     StrBuf sb = {0};
-    sb_append(&sb, "<div>Your Notifications");
-    if (g_mail_tab == 0) sb_append(&sb, "<div class='readAll' onclick='windows[29].readAll()'>Read All</div>");
-    sb_append(&sb, "</div><div class='menuTabsNew'>");
-    static const char *const tabs[2] = {"Unread", "Archive"}; // config.mailTabs
-    for (int i = 0; i < 2; i++) sb_appendf(&sb, "<div class='menuTabNew%s' onclick='windows[29].switchTab(%d)' style='width: 50%%;'>%s</div>", g_mail_tab == i ? " tabANew" : "", i, tabs[i]);
+    sb_append(&sb, "<div>Your Notifications<div class='button buttonR readAll' onclick='windows[29].readAll()'>Read All</div></div><div style='height:30px;'></div><div class='bigMenTabs' style='table-layout: fixed;'>");
+    for (int i = 0; i < 5; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='windows[29].switchTab(%d)' style='height:30px;'>%s</div>", g_mail_view == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div><div id='mailList'>");
     if (!g_mail_loaded) {
         char frame[32];
-        snprintf(frame, sizeof(frame), "[\"kml\",%d]", g_mail_tab);
+        snprintf(frame, sizeof(frame), "[\"kml\",%d]", g_mail_view == 4 ? 1 : 0);
         backend_social_send_text(frame);
         sb_append(&sb, "Loading...");
     } else if (!g_mail_rows) {
@@ -653,21 +706,26 @@ static char *gen_mail(void) {
         cJSON_ArrayForEach(r, g_mail_rows) {
             const cJSON *archive = cJSON_GetObjectItem(r, "km_archive");
             const int archived = cJSON_IsTrue(archive) || (cJSON_IsNumber(archive) && archive->valuedouble != 0);
-            if (archived != (g_mail_tab == 1)) continue;
+            if (archived != (g_mail_view == 4)) continue;
+            // km_notificationtype: 0 follow, 1 clan, 2 hub, 3 inbox (4 / 5 count as 3); none = inbox
+            const cJSON *type_v = cJSON_GetObjectItem(r, "km_notificationtype");
+            int type = cJSON_IsNumber(type_v) ? type_v->valueint : 3;
+            if (type == 4 || type == 5) type = 3;
+            if (g_mail_view != 4 && type != g_mail_view) continue;
             shown++;
             const int id = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "km_id"));
             char ago[32];
             readable_time2(ago, sizeof(ago), now - parse_date_ms(cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_datesent"))));
-            sb_appendf(&sb, "<div class='mailObj%s' id='mail_%d' onclick='windows[29].readMail(this, %d)'%s><div style='position:relative;'><div class='mailDate'>%s</div></div><div class='mailFrom'>",
-                       g_mail_tab == 0 ? " mailUnread" : "", id, id, g_mail_tab == 0 ? " style='border: 2px solid #5699eb;'" : "", ago);
+            sb_appendf(&sb, "<div class='mailObj' id='mail_%d' onclick='windows[29].readMail(this, %d, %d)'><div style='position:relative;'><div class='mailDate'>%s</div></div><div class='mailFrom' style='margin-bottom:15px'>",
+                       id, id, type, ago);
             const char *from = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_playerfrom"));
             const char *subject = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_subject"));
             sb_append_esc(&sb, from ? from : "");
-            sb_append(&sb, "</div>");
+            sb_append(&sb, "</div><span class='mailSubj'>");
             sb_append_esc(&sb, subject ? subject : "");
-            sb_append(&sb, "<div class='mailText'></div></div>");
+            sb_append(&sb, "</span><div class='mailText'></div></div>");
         }
-        if (!shown) sb_append(&sb, g_mail_tab == 0 ? "No messages" : "No archive messages");
+        if (!shown) sb_append(&sb, "No messages");
         cJSON_Delete(g_mail_rows); // this.mailData = null: the next render asks again
         g_mail_rows = NULL;
         g_mail_loaded = 0;
@@ -686,7 +744,7 @@ static void mail_read_data(const cJSON *rows) {
     if (el) {
         html_dom_set_style(el, "border", "");
         html_dom_set_class(el, "mailUnread", 0);
-        const HtmlElem a = html_dom_first_child(el), b = a ? html_dom_next(a) : 0, text = b ? html_dom_next(b) : 0;
+        const HtmlElem text = html_dom_query(el, ".mailText");
         const char *km_text = cJSON_GetStringValue(cJSON_GetObjectItem(row, "km_text"));
         StrBuf sb = {0};
         for (const char *p = km_text ? km_text : ""; *p; p++) { // replace(/<|>/g,"").replace("&","") + ASCII only
@@ -817,7 +875,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         auth_unreachable();
         return 1;
     }
-    if (!name || !backend_enabled()) return -1;
+    if (!name || (!backend_enabled() && !g_scenario)) return -1; // g_scenario: --render-scenario's stand-in account
     if (store_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (clan_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (ranked_ui_handle(name, ev, args, argc) >= 0) return 1;
@@ -840,20 +898,22 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         backend_social_send_text("[\"las\"]");
         return 1;
     }
+    if (progress_handle(name, args, argc) >= 0) return 1; // WP-E part 2c: badges, windows[32]
+    if (!strcmp(name, "windows.4.switchStat")) { // statTabB<n> shown, statTab<n> active
+        const int t = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        for (int i = 0; i < 5; i++) { // + KrunkNative's Medals tab (WP-E part 2c)
+            char sel[24], id[16];
+            snprintf(sel, sizeof(sel), ".statTabB%d", i);
+            snprintf(id, sizeof(id), "statTab%d", i);
+            HtmlElem b = html_dom_query(0, sel), tab = html_dom_by_id(id);
+            if (b) html_dom_set_class(b, "hide", i != t);
+            if (tab) html_dom_set_class(tab, "bigMenTabA", i == t);
+        }
+        return 1;
+    }
     if (!strcmp(name, "windows.4.switchTab")) {
         g_tab_index = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
         menu_show_window(5, 1); // updateWindow(5)
-        return 1;
-    }
-    if (!strcmp(name, "windows.13.switchTab") || !strcmp(name, "windows.13.premium") || !strcmp(name, "windows.13.purchase")) {
-        const int tab = !strcmp(name, "windows.13.premium") ? 1 : !strcmp(name, "windows.13.purchase") ? 2
-                      : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
-        if (tab == 4) {
-            app_route_url("/social.html?p=market"); // window.open("/social.html?p=market")
-            return 1;
-        }
-        g_store_tab = tab;
-        menu_show_window(14, 1);
         return 1;
     }
     if (!strcmp(name, "claimReward") && g_logged_in) {
@@ -866,8 +926,9 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "windows.29.switchTab")) {
         const int tab = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
         const int force = argc > 1;
-        if (g_mail_tab != tab || force) {
-            g_mail_tab = tab;
+        if (g_mail_view != tab || force) {
+            g_mail_view = tab >= 0 && tab < 5 ? tab : 3;
+            g_mail_tab = g_mail_view == 4;
             cJSON_Delete(g_mail_rows);
             g_mail_rows = NULL;
             g_mail_loaded = 0;
@@ -877,7 +938,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "windows.29.readMail")) { // toggle the text; "Loading..." + io.send("rml", id)
         HtmlElem obj = ev ? ev->target : 0;
-        const HtmlElem a = obj ? html_dom_first_child(obj) : 0, b = a ? html_dom_next(a) : 0, text = b ? html_dom_next(b) : 0;
+        const HtmlElem text = obj ? html_dom_query(obj, ".mailText") : 0;
         if (!text) return 1;
         char cur[16] = "";
         html_dom_get_text(text, cur, sizeof(cur));
@@ -894,6 +955,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "windows.29.readAll")) {
         backend_social_send_text("[\"raml\"]");
         g_mail_tab = 1;
+        g_mail_view = 4;
         cJSON_Delete(g_mail_rows);
         g_mail_rows = NULL;
         g_mail_loaded = 0;
@@ -1044,24 +1106,55 @@ static void xp_bar_text(char *out, const size_t n) {
     snprintf(out, n, "%d / %d", (int) (g_acc.score - m), (int) (pow((g_acc.level + 1) / RANK_VAR, 2) - m));
 }
 
-// windows[4].gen() for a signed-in account (the guest form is ui/windows/5.html).
+// UTILS.commaFloat(v): thousands separators, the fraction kept
+static void comma_float(char *out, const size_t n, const double v, const int decimals) {
+    char whole[32], frac[16] = "";
+    comma_number(whole, sizeof(whole), v < 0 ? -floor(-v) : floor(v));
+    if (decimals > 0) {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%.*f", decimals, fabs(v) - floor(fabs(v)));
+        snprintf(frac, sizeof(frac), "%s", tmp + 1); // ".1234"
+        size_t len = strlen(frac); // JS number -> string: no trailing zeros
+        while (len > 1 && frac[len - 1] == '0') frac[--len] = 0;
+        if (len == 1) frac[0] = 0;
+    }
+    snprintf(out, n, "%s%s", whole, frac);
+}
+
+static void pst(StrBuf *sb, const char *label, const char *value) {
+    sb_appendf(sb, "<div class='pSt'>%s<strong>%s</strong></div>", label, value);
+}
+
+static void pst_num(StrBuf *sb, const char *label, const double v, const int decimals) {
+    char t[48];
+    comma_float(t, sizeof(t), v, decimals);
+    pst(sb, label, t);
+}
+
+// windows[4].gen() for a signed-in account (the guest form is ui/windows/5.html): the
+// profile tabs of v7.1.4 (home = Your Account + the four stat tabs, Friends, Partner,
+// Settings, Connections, promo codes) and the logout links.
 static char *gen_account(void) {
-    static const char *const tabs[] = {"Stats", "Partner", "Settings", "Twitch"}; // config.profileTabs
+    static const char *const tabs[] = {"<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", "Friends", "Partner",
+                                       "Settings", "Connections", "<span class='material-icons' style='color:#96ff50;font-size:42px;vertical-align:bottom'>vpn_key</span>"}; // config.profileTabs
+    // config.statTabs + KrunkNative's Medals (the account's medal counts, kn_brain "mdl", WP-E part 2c)
+    static const char *const stat_tabs[] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats", "Medals"};
     StrBuf sb = {0};
-    sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);margin-top:-5px;margin-bottom:10px'>Choose a Display name &amp; more with <a href='javascript:;' onclick='windows[13].premium()'>Krunker Premium</a></div>");
-    sb_append(&sb, "<div class='menuTabsNew'>");
-    for (int i = 0; i < 4; i++) {
-        sb_appendf(&sb, "<div class='menuTabNew%s' onclick='windows[4].switchTab(%d)'>%s</div>", g_tab_index == i ? " tabANew" : "", i, tabs[i]);
+    char a[64];
+    sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'>");
+    for (int i = 0; i < 6; i++) {
+        if (i == 4) continue; // window.canConnectExternalAccounts (Twitch / Metamask): not in KrunkNative
+        sb_appendf(&sb, "<div class='bigMenTab%s' style='font-size:16px' onmouseenter='playTick(0.1);' onclick='playSelect();windows[4].switchTab(%d)'>%s</div>", g_tab_index == i ? " bigMenTabA" : "", i, tabs[i]);
     }
     sb_append(&sb, "</div>");
-    char a[64], b[256];
     if (g_tab_index == 0) {
-        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='./textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='pfpPopup();'>Change Picture</a></div>");
-        sb_append(&sb, "<div style='display:inline-block;vertical-align:top;width:560px;margin-left:10px'><div class='settName' style='width:100%;margin-top:0px'>Name<a href='/social.html?p=profile&q=");
+        sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
+        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='pfpPopup();'>Change Picture</a></div>");
+        sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>Name<a href='/social.html?p=profile&q=");
         sb_append_esc(&sb, g_acc.name);
         sb_append(&sb, "' class='floatR' target='_blank'>");
         sb_append_esc(&sb, g_acc.name);
-        sb_append(&sb, "</a></div><div class='settName' style='width:100%'>Clan<a class='floatR' class='menuLink' onclick='showWindow(13)'>");
+        sb_append(&sb, "</a></div><div class='settName' style='width:100%'>Clan<a style='float:right'  onclick='showWindow(13)'>");
         if (g_acc.clan[0]) {
             sb_append(&sb, "[");
             sb_append_esc(&sb, g_acc.clan);
@@ -1069,66 +1162,127 @@ static char *gen_account(void) {
         } else {
             sb_append(&sb, "None");
         }
-        sb_appendf(&sb, "</a></div><div class='settName' style='margin-top:0px'>Level<span class='floatR'>%d</span></div></div>", g_acc.level);
+        sb_appendf(&sb, "</a></div><div class='settName'>Level<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>", g_acc.level);
+        sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:15px;'>Your Stats</div>");
         xp_bar_text(a, sizeof(a));
-        sb_appendf(&sb, "<div class='xpBar' style='margin-top:10px'><div class='xpBarB' style='width:%d%%'></div><span class='xpBarV'>%s</span></div>", g_acc.level_prog, a);
-        stat_row_num(&sb, "Score", g_acc.score);
-        comma_number(a, sizeof(a), g_acc.funds);
-        snprintf(b, sizeof(b), "<span style='color:rgba(0,0,0,0.5)'>%s</span> KR", a);
-        stat_row(&sb, "KR", b);
-        stat_row_num(&sb, "Kills", g_acc.kills);
-        stat_row_num(&sb, "Deaths", g_acc.deaths);
-        stat_row_fixed(&sb, "KDR", g_acc.kills / (g_acc.deaths > 1 ? g_acc.deaths : 1));
-        stat_row_fixed(&sb, "KPG", g_acc.kills / (g_acc.games > 1 ? g_acc.games : 1));
-        stat_row_num(&sb, "Nukes", stat_num("n"));
-        stat_row_num(&sb, "Melee", stat_num("mk"));
-        stat_row_num(&sb, "Beatdowns", stat_num("fk"));
-        stat_row_num(&sb, "Bullseyes", stat_num("tmk"));
-        stat_row_num(&sb, "Headshots", stat_num("hs"));
-        stat_row_num(&sb, "Wallbangs", stat_num("wb"));
-        stat_row_num(&sb, "Games Played", g_acc.games);
-        stat_row_num(&sb, "Games Won", g_acc.wins);
-        stat_row_num(&sb, "Games Lost", g_acc.games - g_acc.wins > 0 ? g_acc.games - g_acc.wins : 0);
-        const double losses = g_acc.games - g_acc.wins;
-        stat_row_fixed(&sb, "W/L", g_acc.wins / (losses > 1 ? losses : 1));
+        sb_appendf(&sb, "<div class='xpBar' style='height:31px;line-height:34px;font-size:28px;'><div class='xpBarB' style='width:%.6g%%'></div><span class='xpBarV'>%s</span></div>", g_acc.level_prog, a);
+        sb_append(&sb, "<div id='statHolder'><div style='height:15px;'></div><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;'>");
+        for (int i = 0; i < 5; i++) {
+            sb_appendf(&sb, "<div id='statTab%d' class='bigMenTab%s' onclick='playSelect(0.1);windows[4].switchStat(%d)' style='padding-left: 5px; padding-right: 5px; padding-top: 10px; padding-bottom: 5px; line-height: 35px;font-size: 16px;'onmouseenter='playTick();'>%s</div>",
+                       i, i == 0 ? " bigMenTabA" : "", i, stat_tabs[i]);
+        }
+        sb_append(&sb, "</div><div class='statTabB0'>");
+        const double losses = g_acc.games - g_acc.wins > 0 ? g_acc.games - g_acc.wins : 0;
+        const double shots = stat_num("s"), hits = fmin(stat_num("s"), stat_num("h"));
+        snprintf(a, sizeof(a), "%d", g_acc.level);
+        pst(&sb, "LVL", a);
+        pst_num(&sb, "KR", g_acc.funds, 0);
+        pst_num(&sb, "Junk", 0, 0);
+        pst(&sb, "Inventory", " ~0");
+        pst_num(&sb, "Score", g_acc.score, 0);
+        pst_num(&sb, "SPK", round(g_acc.score / fmax(g_acc.kills, 1) * 100) / 100, 2);
+        pst_num(&sb, "Kills", g_acc.kills, 0);
+        pst_num(&sb, "Deaths", g_acc.deaths, 0);
+        pst_num(&sb, "KDR", round(g_acc.kills / fmax(g_acc.deaths, 1) * 10000) / 10000, 4);
+        pst_num(&sb, "KPG", round(g_acc.kills / fmax(g_acc.games, 1) * 10000) / 10000, 4);
+        pst_num(&sb, "Games", g_acc.games, 0);
+        snprintf(a, sizeof(a), "%g", round(g_acc.wins / fmax(losses, 1) * 1000) / 1000);
+        pst(&sb, "W/L", a);
+        pst_num(&sb, "Wins", g_acc.wins, 0);
+        pst_num(&sb, "Losses", losses, 0);
+        pst_num(&sb, "Assists", stat_num("ast"), 0);
+        pst_num(&sb, "Melee", stat_num("mk"), 0);
+        pst_num(&sb, "Beatdowns", stat_num("fk"), 0);
+        pst_num(&sb, "Bullseyes", stat_num("tmk"), 0);
+        pst_num(&sb, "Headshots", stat_num("hs"), 0);
+        pst_num(&sb, "Legshots", stat_num("ls"), 0);
+        pst_num(&sb, "Wallbangs", stat_num("wb"), 0);
+        pst_num(&sb, "Shots", shots, 0);
+        pst_num(&sb, "Hits", hits, 0);
+        pst_num(&sb, "Misses", shots - hits, 0);
+        snprintf(a, sizeof(a), "%g%%", shots > 0 ? round(hits / shots * 100 * 100) / 100 : 0.0);
+        pst(&sb, "Accuracy", a);
         readable_time(a, sizeof(a), g_acc.time_played);
-        stat_row(&sb, "Time Played", a);
-        sb_append(&sb, "<div style='height:10px'></div>");
-        // MMR rows: v3.1.1 appends UTILS.eloIconHTML (img/ranks/icon_N.png, not imported in ui/)
-        sb_append(&sb, "<div style='font-size:26px;margin-top:10px;font-weight:bold'>Ranked</div>");
+        pst(&sb, "Time Played", a);
+        sb_append(&sb, "</div><div class='statTabB1 hide'>");
+        pst_num(&sb, "Nukes", stat_num("n"), 0);
+        pst_num(&sb, "Airdrops", stat_num("ad"), 0);
+        pst_num(&sb, "Airdrops Stolen", stat_num("sad"), 0);
+        pst_num(&sb, "Slimers", stat_num("sl"), 0);
+        pst_num(&sb, "Juggernauts", stat_num("jg"), 0);
+        sb_appendf(&sb, "<div class='pSt' style='font-size: 12px;padding-left: 0px;padding-right: 0px;width: 174px;'>Juggernauts Killed<strong>%.0f</strong></div>", stat_num("kjg"));
+        pst_num(&sb, "War Machines", stat_num("wm"), 0);
+        sb_append(&sb, "</div><div class='statTabB2 hide'>");
+        pst_num(&sb, "Crouches", stat_num("crc"), 0);
+        pst_num(&sb, "Sprays Placed", stat_num("spry"), 0);
+        pst(&sb, "Helpful Reports", "0/0");
+        // KrunkNative keeps ranked (doc/v7/decisions.md): the MMRs v3.1.1 listed on the profile
         static const char *const mmr[3] = {"MMR (1v1)", "MMR (2v2)", "MMR (4v4)"};
         const double elos[3] = {g_acc.elo, g_acc.elo2, g_acc.elo4};
-        for (int i = 0; i < 3; i++) { // acc.elo.round(1) + UTILS.eloIconHTML(elo, "margin-left:4px;")
-            char icon[160];
+        for (int i = 0; i < 3; i++) {
+            char icon[160], v[200];
             account_elo_icon_html(icon, sizeof(icon), round(elos[i] * 10.0) / 10.0, "margin-left:4px;");
-            snprintf(b, sizeof(b), "%g%s", round(elos[i] * 10.0) / 10.0, icon);
-            stat_row(&sb, mmr[i], b);
+            snprintf(v, sizeof(v), "%g%s", round(elos[i] * 10.0) / 10.0, icon);
+            pst(&sb, mmr[i], v);
         }
+        sb_append(&sb, "</div><div class='statTabB3 hide'>");
+        const MenuUi *ui = menu_ui();
+        for (int i = 0; i < ui->class_count; i++) {
+            const MenuClass *c = &ui->classes[i];
+            char key[16];
+            snprintf(key, sizeof(key), "c%d", c->index);
+            const double xp = stat_num(key), lv = RANK_VAR * sqrt(xp);
+            int level = (int) floor(lv);
+            const int pct = (int) lround((lv - level) * 100.0);
+            const double lo = level > 1 ? pow(level / RANK_VAR, 2) : 0.0, hi = pow((level + 1) / RANK_VAR, 2);
+            level = level + 1 > 1 ? level + 1 : 1;
+            sb_appendf(&sb, "<div class='clsStatCard'><img class='clsStatImg' src='%s'/><div class='clsStatName'>", c->icon);
+            sb_append_esc(&sb, c->name ? c->name : "");
+            sb_append(&sb, "</div><div class='clsStatWeap'>");
+            sb_append_esc(&sb, c->weapon ? c->weapon : "");
+            sb_appendf(&sb, "</div><div class='clsStatXPBar'><div class='clsStatXPBarC' style='width:%d%%'></div><div class='clsStatXPBarV'>%d / %d</div></div><div class='clsStatLvl'>Lvl %d</div></div>",
+                       pct, (int) (xp - lo), (int) (hi - lo), level);
+        }
+        sb_append(&sb, "</div><div class='statTabB4 hide'>");
+        medal_tab_html(&sb);
+        if (!g_medal_counts) backend_social_send_text("[\"mdl\"]");
+        sb_append(&sb, "</div></div>");
     } else if (g_tab_index == 1) {
-        sb_append(&sb, "<div style='font-size:26px;margin-top:20px;font-weight:bold'>Krunker Partner</div><div style='color:rgba(0,0,0,0.6);margin-bottom:20px'>Krunker Partners earn Money through: <div class='partnerItem' style='margin-top:10px'><b>-</b> Getting KR Sales on their Partner Code</div><div class='partnerItem'><b>-</b> Plays on their Custom Games</div><div class='partnerItem'><b>-</b> Bringing new Players to Krunker</div></div><div style='font-size:26px;margin-top:20px;font-weight:bold'>Partner Application</div><div style='font-size:17px;color:rgba(0,0,0,0.4);margin-top:5px'>By submitting an Application you agree to the <a href='./docs/partner.txt'>Partner Terms</a></div><input type='text' id='crtrCode' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Partner Code Name' /><input type='text' id='crtrEmail' class='smlInput' style='width:80%;margin-bottom:8px' placeholder='PayPal Email for Payouts' /><a class='menuLink' style='margin-left:20px;vertical-align:middle' onclick='submitCrtrCod()'>Submit</a><div id='ctrtRes' style='color:rgba(0,0,0,0.5)'></div></div>");
+        // friends (follows) come from the hub; KrunkNative's account service has no friend list
+        sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;margin-bottom:20px;'>Friends can send private messages and see eachothers online status.<div style='height:10px;'></div>You can add new friends by following eachother.</div><div id='friendList'><span style='color:#9a9a9a'>You don't have any friends yet.</span></div>");
     } else if (g_tab_index == 2) {
-        sb_append(&sb, "<div style='font-size:26px;margin-top:12px;'>Account Settings</div>");
+        sb_append(&sb, "<div class='setHed' style='margin-top:10px;'>Krunker Partner Benefits</div><div class='setBodH'><div class='settName' style='font-size:17px;'>You get <span style='color:#fff !important'>20-40% of Revenue</span> from KR Sales on your Partner Code in the Shop</div><div class='settName' style='font-size:17px;'>You <span style='color:#fff !important;'>earn money</span> when someone Plays your Custom Games/Maps</div><div class='settName' style='font-size:17px;'>Every time a referred player plays the game, you get a <span style='color:#fff !important;'>cut of the Ad Revenue</span></div></div></div><div class='setHed' style='padding-bottom:10px'>Partner Application</div><div class='setBodH' style='padding-top:10px;padding-bottom:10px;'><div style='font-size:19px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom:10px;'>By submitting an Application you agree to the <a href='https://frvr.com/legal/krunker#TermsofService'>Partner Terms</a></div><input type='text' id='crtrCode' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Partner Code Name' /><input type='text' id='crtrEmail' class='smlInput' style='width:86%;margin-bottom:8px' placeholder='PayPal Email for Payouts' /><a class='menuLink' style='margin-left:20px;vertical-align:middle' onclick='submitCrtrCod()'>Submit</a></div><div id='ctrtRes' style='color:rgba(255,255,255,0.5)'></div></div>");
+    } else if (g_tab_index == 3) {
+        sb_append(&sb, "<div class='setHedS' style='margin-top:10px;'>Account Settings</div>");
         if (g_acc.premium) {
-            sb_append(&sb, "<div class='settName'>Display Name<div class='updDisN' onclick='changeName();'>Update</div><input type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' id='displayN' class='smlInput' placeholder='");
+            sb_append(&sb, "<div class='setBodH'><div class='settName'>Display Name<div class='updDisN' onclick='clearName();' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='changeName();'>Update</div><input type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' id='displayN' class='smlInput' placeholder='");
             sb_append_esc(&sb, g_acc.alias);
             sb_append(&sb, "'><div id='aliasRes'></div></div>");
         }
-        // Country Flag (windows.loadout.flag): acc.stats.flg, Game.flags
         const int flg = g_acc.stats && cJSON_IsNumber(cJSON_GetObjectItem(g_acc.stats, "flg")) ? (int) stat_num("flg") : -1;
-        sb_appendf(&sb, "<div class='settName'>Country Flag<select onchange='selectFlag(this.value)' class='inputGrey2' style='padding:4px;font-size:13px;margin-bottom:-18px'><option value='-1' %s>None</option>", flg == -1 ? "selected" : "");
+        sb_appendf(&sb, "<div class='settName'>Country Flag<select onchange='selectFlag(this.value)' class='inputGrey2' style='padding:4px;margin-top:4px'><option value='-1' %s>None</option>", flg == -1 ? "selected" : "");
         for (int i = 0; i < ACCOUNT_FLAG_COUNT; i++) sb_appendf(&sb, "<option value='%d' %s>%s</option>", i, flg == i ? "selected" : "", ACCOUNT_FLAGS[i].name);
         sb_append(&sb, "</select></div>");
-        if (!g_acc.hack) {
-            // KrunkNative: v3.1.1 ships act2FA()/twoFAres() but no button for them; this row exposes it
-            sb_appendf(&sb, "<div class='settName'>2-Factor Authentication<a id='twoFAB' class='%s floatR' onclick='act2FA()'>%s</a></div><div id='twoFGridR' class='twoFAGrid' style='display:none'></div><div id='twoFAprom' style='font-size:17px;color:rgba(0,0,0,0.4)'></div>",
-                       g_acc.has_2fa ? "menuLinkD" : "menuLink", g_acc.has_2fa ? "Enabled" : "Enable");
-            sb_append(&sb, "<div style='font-size:26px;margin-top:20px;'>Account Security</div><div style='font-size:17px;color:rgba(0,0,0,0.4);margin-top:5px'>You can update your password every 30 minutes. <b>Never share your password</b> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>Submit</div><div id='newPRes' style='color:rgba(0,0,0,0.5)'></div>");
+        sb_append(&sb, "<div class='settName'>Custom Badge<div class='updDisN' onclick='selectBadge(-1);' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='selectBadgePop();'>Select</div>");
+        if (badge_get(stat_bdg())) { // v7 index.js:5651: the selected badge's image
+            char url[256];
+            badge_url(stat_bdg(), url, sizeof(url));
+            sb_appendf(&sb, "<img draggable='false' src='%s' class='customBadge'>", url);
         }
+        sb_append(&sb, "</div>");
+        sb_appendf(&sb, "<div class='settName'>Hide Detailed Online Status<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='toggleStatus(this.checked)'%s><span class='slider'></span></label></div></div>", stat_num("hds") ? " checked" : "");
+        if (!g_acc.hack) {
+            sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>Submit</div><div id='newPRes' style='color:rgba(255,255,255,0.5)'></div>");
+            // 2FA: v7 offers it from level 20 (or dev / partner / featured); KrunkNative always does
+            sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>To further protect your account, you can add enable <span style='color:#fff'>2FA</span>:<div class='subPassChg' onclick='%s' style='float: right;margin-top: -8px;'>%s</div></div><div id='twoFGridR' class='twoFAGrid' style='display:none'></div><div id='twoFAprom' style='font-size:17px;color:rgba(255,255,255,0.4)'></div></div>",
+                       g_acc.has_2fa ? "dact2FA()" : "act2FA()", g_acc.has_2fa ? "Disable" : "Enable");
+        }
+        sb_append(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed.</div><div style='height:10px;'></div><div style='margin-top:10px'>Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>");
     } else {
-        sb_append(&sb, "<div class='settName'>Twitch (none)<div class='lnkTw' onclick='linkTwitchPop();'>Link</div></div><div id='skinList'><div style='margin-bottom:10px;color:rgba(0,0,0,0.5);'>Twitch Drops will return soon</div></div>");
+        sb_append(&sb, "<div style='margin-bottom:10px;color:rgba(255,255,255,0.5);'>You have No Promo Codes</div>");
     }
-    sb_append(&sb, "<div style='height:25px'></div><a class='menuLink' onclick='logoutAcc()'>Logout</a>");
-    if (!g_logout_sessions) sb_append(&sb, "<a style='float:right' class='menuLink' onclick='logoutSessions(this)'>Logout of all Sessions</a>");
+    sb_appendf(&sb, "<div style='height:15px;margin-top:30px;border-top:4px solid rgba(255, 255, 255, 0.8);'></div><a class='menuLink' onclick='logoutAcc()'>Logout</a>%s",
+               g_logout_sessions ? "" : "<a style='float:right' class='menuLink' onclick='logoutSessions(this)'>Logout of all Sessions</a>");
     return sb_finish(&sb);
 }
 
@@ -1139,46 +1293,472 @@ static char *requirement(const int level, const char *text) {
     return sb_finish(&sb);
 }
 
-// windows[13].gen() for an account. KrunkNative has no payments, no prize-wheel table
-// (Game.store) and no img/shop art: the tabs, the balance and the forms v3.1.1 shows
-// are real, the card lists stay empty.
-static char *gen_store(void) {
-    static const char *const tabs[] = {"Prize Wheels", "Premium", "Purchase KR", "Redeem", "Marketplace"}; // config.shopTabs
+// ------------------------------------------------------------------ WP-E part 2c: badges
+
+// genericPopup(html, cls): #genericPop over #popupBack
+static void generic_popup(const char *html, const char *cls) {
+    ui_loadout_clear_pops();
+    set_display("popupHolder", "block");
+    HtmlElem pop = html_dom_by_id("genericPop");
+    if (!pop) return;
+    html_dom_set_attr(pop, "class", cls);
+    html_dom_set_attr(pop, "style", "");
+    html_dom_set_html(pop, html);
+    html_dom_set_display(pop, "block");
+}
+
+static void badge_url(const int index, char *out, const size_t n) {
+    char tex[96];
+    html_dom_asset_url(badge_texture(index, tex, sizeof(tex)), out, n); // Game.badges[i].url
+}
+
+static int badge_claimable(const int index) {
+    const BadgeDef *b = badge_get(index);
+    return b && b->claimable && !account_owns_badge(index) && badge_requirement_met(index, g_acc.stats);
+}
+
+// window.selectBadgePop(): the Badge Collection (claimable first, then owned, then the rest;
+// v7 sorts twice with a stable sort, so each group keeps the badges.js order)
+static void select_badge_pop(void) {
+    if (!g_logged_in) return;
+    int claimable = 0, owned = 0;
+    for (int i = 0; i < BADGE_COUNT; i++) {
+        claimable += badge_claimable(i);
+        owned += account_owns_badge(i);
+    }
+    if (!owned && claimable <= 0) {
+        popup_response(0, "You dont own any badges", NULL); // io_showPopup(null, ...)
+        return;
+    }
     StrBuf sb = {0};
-    sb_append(&sb, "<div class='menuTabsNew'>");
-    for (int i = 0; i < 5; i++) sb_appendf(&sb, "<div class='menuTabNew%s' onclick='windows[13].switchTab(%d)'>%s</div>", g_store_tab == i ? " tabANew" : "", i, tabs[i]);
+    sb_append(&sb, "<div class='imageListHeader'>Badge Collection</div><div id='skinList' style='margin-top:18px;text-align: center;'>");
+    for (int pass = 0; pass < 3; pass++) {
+        for (int i = 0; i < BADGE_COUNT; i++) {
+            const int own = account_owns_badge(i), claim = badge_claimable(i);
+            if ((pass == 0 && !claim) || (pass == 1 && (claim || !own)) || (pass == 2 && (claim || own))) continue;
+            const BadgeDef *b = badge_get(i);
+            char url[256];
+            badge_url(i, url, sizeof(url));
+            sb_append(&sb, "<div class='badgeCard'");
+            if (own) sb_appendf(&sb, " onclick='selectBadge(%d)'", i);
+            else if (claim) sb_appendf(&sb, " onclick='claimBadge(%d)' style='outline: 2px inset #FBC02D;'", i);
+            sb_appendf(&sb, "><img class='badgeImg' src='%s'><div class='badgeName'>", url);
+            sb_append_esc(&sb, b->name && b->name[0] ? b->name : "Unknown");
+            sb_append(&sb, "</div><div class='badgeDesc'>");
+            sb_append_esc(&sb, b->desc && b->desc[0] ? b->desc : "No Description");
+            sb_append(&sb, "</div>");
+            if (claim) sb_append(&sb, "<div class='badgeBound'><span class='material-icons' style='font-size:30px;color:#FBC02D;'>lock_open</span></div>");
+            else if (!own) sb_append(&sb, "<div class='badgeBound'><span class='material-icons' style='font-size:30px;color:#fff;'>lock</span></div>");
+            sb_append(&sb, "</div>");
+        }
+    }
     sb_append(&sb, "</div>");
-    if (g_store_tab == 0) {
-        store_wheels_html(&sb); // prize wheels (store_ui.c)
-    } else if (g_store_tab == 1) {
-        sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);margin-bottom:10px'>Choose a Display name &amp; more with <a href='javascript:;' onclick='showWindow(36)'>Krunker Premium</a></div><div id='skinList' style='margin-bottom:10px'></div><div id='premiumRes'></div>");
-        char t[64];
-        readable_time(t, sizeof(t), g_acc.premium ? num_at(g_acc.data, 27) : 0);
-        sb_appendf(&sb, "Time Remaining<span id='premTime'>%s</span>", t);
-    } else if (g_store_tab == 2) {
-        sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);font-size:19px;margin-bottom:-3px'>By purchasing you agree to the <a target='_blank' href='./docs/terms.txt'>Terms</a>. Support your favorite Content Creator by using a Creator Code</div>");
-        sb_append(&sb, "<div><input type='text' id='creatorCodeI' class='smlInput' placeholder='Enter Creator Code' /><div class='creatorCodeBtn' style='background-color:#41c300' onclick='creatorCodeAction(1)'>Save</div></div><div id='skinList'></div>");
-        sb_append(&sb, "<div style='font-size:9px;margin-top:10px'>* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank</div>");
-    } else {
-        sb_append(&sb, "<div style='color:rgba(0,0,0,0.3);font-size:19px;margin-bottom:5px'>Get Vouchers from certain Streamers &amp; Events</div><div><input type='text' id='redVouch' class='smlInput' placeholder='Enter KR Code'/><div class='redVouchBtn' onclick='redeemVoucher()'>Redeem</div></div><div id='vouchRes' style='display:none'></div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "badgePop");
+    free(html);
+}
+
+// ------------------------------------------------------------------ WP-E part 2c: challenges
+
+static const char *weapon_name_at(const int index) {
+    return index >= 0 && index < WEAPON_COUNT && g_weapons[index] ? g_weapons[index]->name : NULL;
+}
+
+// challenges.updateNames(): N or i18n chall.name.<ky>
+static void chal_name(const cJSON *c, char *out, const size_t n) {
+    challenge_name(c, weapon_name_at, out, n);
+    if (!out[0]) { // i18n.t of a missing key prints the key
+        const cJSON *dat = cJSON_GetObjectItem(c, "DAT");
+        const char *ky = cJSON_GetStringValue(cJSON_GetObjectItem(dat, "ky"));
+        snprintf(out, n, "chall.name.%s", ky ? ky : "");
+    }
+}
+
+static double cnum(const cJSON *o, const char *k) {
+    const cJSON *v = o ? cJSON_GetObjectItem(o, k) : NULL;
+    return cJSON_IsNumber(v) ? v->valuedouble : cJSON_IsBool(v) ? cJSON_IsTrue(v) : 0.0;
+}
+
+static int chas(const cJSON *o, const char *k) {
+    const cJSON *v = o ? cJSON_GetObjectItem(o, k) : NULL;
+    return cJSON_IsNumber(v) || cJSON_IsBool(v);
+}
+
+static const char *ctype(const cJSON *c) {
+    const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(c, "T"));
+    return t ? t : "";
+}
+
+static void cap_first(StrBuf *sb, const char *s) { // UTILS.capFirst
+    if (!s || !s[0]) return;
+    char first[2] = {(char) toupper((unsigned char) s[0]), 0};
+    sb_append_esc(sb, first);
+    sb_append_esc(sb, s + 1);
+}
+
+// windows[32].genChallengeCard(challenge, marginTop)
+static void chal_card(StrBuf *sb, const cJSON *c, const int margin) {
+    const cJSON *dat = cJSON_GetObjectItem(c, "DAT"), *rew = cJSON_GetObjectItem(c, "REW");
+    const int boss = cnum(dat, "boss") != 0.0;
+    const int done = cnum(c, "PT") != 0.0;
+    const char *ky = cJSON_GetStringValue(cJSON_GetObjectItem(dat, "ky"));
+    const int time_key = ky && !strcmp(ky, "time");
+    const double val = cnum(dat, "val"), pv = cnum(c, "PV");
+    // REW.sk: up to 3 reward skins, shown last to first
+    int skins[3] = {-1, -1, -1}, skin_count = 0;
+    const cJSON *sk = cJSON_GetObjectItem(rew, "sk");
+    if (cJSON_IsNumber(sk)) skins[skin_count++] = sk->valueint;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, (cJSON_IsArray(sk) ? sk : NULL)) if (skin_count < 3 && cJSON_IsNumber(it)) skins[skin_count++] = it->valueint;
+    char icon[256], path[64], name[160], text[64];
+    snprintf(path, sizeof(path), "img/chals/icon_%d.png", (int) cnum(c, "IC"));
+    html_dom_asset_url(path, icon, sizeof(icon));
+    chal_name(c, name, sizeof(name));
+    sb_appendf(sb, "<div class='chalCard' style='margin-top:%dpx;%s'><img class='chalImgC' src='%s'  style='%s%s' />", margin,
+               boss ? "box-shadow: 0 0 14px #ffa000;background:rgb(79 50 0 / 40%);border:4px solid #ff9c00;" : "", icon,
+               boss ? "border: 4px solid #ff9c00;" : "", done ? "filter:grayscale(1);brightness(0.8);" : "");
+    if (done) sb_append(sb, "<div class='challComplB'><span class='material-icons' style='font-size:110px;color:#38cd3a;'>done</span></div>");
+    sb_append(sb, "<div class='chalRight'>");
+    sb_append_esc(sb, name);
+    if (cnum(c, "TR") > 0) {
+        readable_time(text, sizeof(text), cnum(c, "TR"));
+        sb_appendf(sb, "<div class='chalExpr'>%s left</div>", text);
+    }
+    if (done) snprintf(text, sizeof(text), "Completed");
+    else if (time_key) readable_time(text, sizeof(text), val);
+    else snprintf(text, sizeof(text), "%.15g/%.15g", pv, val);
+    sb_appendf(sb, "<div class='chalXPBar'><div class='chalXPVal'>%s</div><div class='chalXPBarC' style='width:%.15g%%;'></div></div></div>", text,
+               done ? 100.0 : time_key || val == 0.0 ? 0.0 : pv / val * 100.0);
+    const double kr = cnum(rew, "kr"), jnk = cnum(rew, "jnk");
+    sb_appendf(sb, "<div class='chalRews' style='%s'><div class='chalRewV' style='%s'><span style='color:white'>+</span>%.15g <span style='color:#fbc02d'>KR</span></div>",
+               boss ? "border-left: 3px solid #ff9c00;" : "", kr ? "" : "filter:grayscale(1);", kr);
+    sb_appendf(sb, "<div class='chalRewV' style='%s'><span style='color:white'>+</span>%.15g <span class='material-icons' style='color:#cc51f8;font-size:29px;vertical-align:top;'>plumbing</span></div><div>",
+               jnk ? "" : "filter:grayscale(1);", jnk);
+    for (int i = 0; i < 3; i++) {
+        const int index = skins[2 - i];
+        const ViewerSkin *skin = index >= 0 ? viewer_skin(index) : NULL;
+        sb_append(sb, "<div class='chalRewSkn' style='");
+        if (skin) {
+            char url[256];
+            store_skin_preview(index, url, sizeof(url));
+            const int r = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
+            sb_appendf(sb, "background-image:url(%s);border:2px solid %s;' onclick='viewItem(%d)'>", url, g_viewer_rarities[r].color, index);
+        } else {
+            sb_append(sb, "' >");
+        }
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "</div></div></div>");
+}
+
+// (boss ? 2 : PT) descending, stable (v7's Array.sort)
+static int chal_sorted(const cJSON **out, const int max, const char *type, const char *field, const int value) {
+    int n = 0;
+    const cJSON *c;
+    cJSON_ArrayForEach(c, g_chal) {
+        if (strcmp(ctype(c), type) != 0 || n >= max) continue;
+        if (field && (!chas(cJSON_GetObjectItem(c, "DAT"), field) || (int) cnum(cJSON_GetObjectItem(c, "DAT"), field) != value)) continue;
+        out[n++] = c;
+    }
+    for (int i = 1; i < n; i++) {
+        const cJSON *x = out[i];
+        const double kx = cnum(cJSON_GetObjectItem(x, "DAT"), "boss") ? 2.0 : cnum(x, "PT");
+        int j = i - 1;
+        while (j >= 0 && (cnum(cJSON_GetObjectItem(out[j], "DAT"), "boss") ? 2.0 : cnum(out[j], "PT")) < kx) {
+            out[j + 1] = out[j];
+            j--;
+        }
+        out[j + 1] = x;
+    }
+    return n;
+}
+
+static void chal_header(StrBuf *sb, const char *image, const int margin, const char *title, const int done, const int total, const int back,
+                        const char *extra_style) {
+    char url[256], path[96];
+    snprintf(path, sizeof(path), "img/chals/%s.png", image);
+    html_dom_asset_url(path, url, sizeof(url));
+    sb_appendf(sb, "<div class='challHeadrI' style='background-image:url(%s);margin-top:%dpx;%s'>", url, margin, extra_style ? extra_style : "");
+    if (back) sb_append(sb, "<div class='challHeadrBck' onclick='windows[32].closeChallengeCat();'><span class='material-icons challBackArr'>arrow_back</span></div>");
+    sb_append(sb, "<div class='challHeadrT'>");
+    sb_append_esc(sb, title);
+    sb_appendf(sb, "</div><div class='challHeadrS'>%d<span style='color:#fff;'>/%d</span></div></div>", done, total);
+}
+
+#define CHAL_MSG "<div class='challCrdMsg' style='margin-bottom:25px;font-size:27px;color:#9f9f9f;'>Abandoning a match will result in the loss of challenge progress.</div>"
+#define CHAL_LIST_MAX 256
+
+// The cards of one list (the v7 category views and KrunkNative's daily / weekly sections).
+static void chal_cards(StrBuf *sb, const char *type, const char *field, const int value, const char *empty) {
+    const cJSON *list[CHAL_LIST_MAX];
+    const int n = chal_sorted(list, CHAL_LIST_MAX, type, field, value);
+    sb_append(sb, "<div style='margin-top:10px;'>");
+    for (int i = 0; i < n; i++) chal_card(sb, list[i], i ? 20 : 0);
+    if (!n && empty) sb_appendf(sb, "<div class='challCrdMsg'>%s</div>", empty);
+    sb_append(sb, "</div>");
+}
+
+static void chal_count(const char *type, const char *field, const int value, int *done, int *total) {
+    *done = *total = 0;
+    const cJSON *c;
+    cJSON_ArrayForEach(c, g_chal) {
+        if (strcmp(ctype(c), type) != 0) continue;
+        const cJSON *dat = cJSON_GetObjectItem(c, "DAT");
+        if (field && (!chas(dat, field) || (int) cnum(dat, field) != value)) continue;
+        (*total)++;
+        *done += cnum(c, "PT") != 0.0;
+    }
+}
+
+// windows[32].gen() (v7.1.4 index.js:8742) for an account; guests keep the static LOGIN REQUIRED
+// page. config.minChalLevel is 1 in v7 (30 in v3.1.1), so every account gets the list.
+// KrunkNative difference (documented): v7 shows the daily challenges in the Battle Pass window
+// (windows[5] tab 1) and has no weekly ones; KrunkNative has no Battle Pass, so its Daily and
+// Weekly challenges get their own sections at the top of this window.
+static char *gen_challenges(void) {
+    if (g_acc.level < 1) return requirement(1, "for Challenges");
+    if (!g_chal) {
+        if (!g_chal_requested) {
+            g_chal_requested = 1;
+            backend_social_send_text("[\"chg\"]");
+        }
+        return strdup("Loading");
+    }
+    if (cJSON_GetArraySize(g_chal) == 0) return strdup("<span style='color: #fff;'>No active challenges.</span>");
+    StrBuf sb = {0};
+    int done, total;
+    if (!g_chal_typ[0]) {
+        static const char *const rotating[2][3] = {{"daily", "Daily Challenges", "Check back later for new daily challenges!"},
+                                                   {"weekly", "Weekly Challenges", "Check back later for new weekly challenges!"}};
+        int margin = 0;
+        for (int r = 0; r < 2; r++) {
+            chal_count(rotating[r][0], NULL, 0, &done, &total);
+            if (!total) continue;
+            chal_header(&sb, "hed_1", margin, rotating[r][1], done, total, 0, NULL);
+            if (!margin) sb_append(&sb, "<div style='height:10px'></div>" CHAL_MSG); // the Battle Pass daily tab's note
+            chal_cards(&sb, rotating[r][0], NULL, 0, rotating[r][2]);
+            margin = 30;
+        }
+        // Map Challenges: one card per map that has some
+        chal_count("map", NULL, 0, &done, &total);
+        chal_header(&sb, "hed_1", margin, "Map Challenges", done, total, 0, NULL);
+        sb_append(&sb, "<div style='margin-top:10px;text-align:center;'>");
+        for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
+            const MapCatalogEntry *m = map_catalog_at((size_t) i);
+            int d, t;
+            chal_count("map", "mp", i, &d, &t);
+            if (!m || !t) continue;
+            char path[64], url[256];
+            html_dom_asset_url(map_catalog_thumb(m, path, sizeof(path)), url, sizeof(url));
+            sb_appendf(&sb, "<div class='challMapCrd' style='background-image:url(%s)' onmouseenter='playTick()' onclick='windows[32].openChallengeCat(&quot;map&quot;,%d);'><div class='challMapCvr'></div><div class='challMapName blackShad'>", url, i);
+            cap_first(&sb, m->name);
+            sb_appendf(&sb, "</div><div class='challMapPrg'>%d<span style='color:#fff;'>/%d</span></div></div>", d, t);
+        }
+        sb_append(&sb, "</div>");
+        chal_count("weapon", NULL, 0, &done, &total);
+        chal_header(&sb, "hed_2", 30, "Weapon Challenges", done, total, 0, NULL);
+        sb_append(&sb, "<div style='margin-top:10px;text-align:center;'>");
+        for (int i = 0; i < WEAPON_COUNT; i++) {
+            const Weapon *w = g_weapons[i];
+            int d, t;
+            chal_count("weapon", "wep", i, &d, &t);
+            if (!w || w->type == 3 || w->custom_only || !t) continue; // weaponTypes.EQUIPMENT, customOnly
+            char path[96], url[256];
+            snprintf(path, sizeof(path), "img/chals/%s.png", w->src ? w->src : "noimg");
+            html_dom_asset_url(path, url, sizeof(url));
+            sb_appendf(&sb, "<div class='challMapCrd' onmouseenter='playTick()' onclick='windows[32].openChallengeCat(&quot;weapon&quot;,%d);'><img class='challRotImg' style='background-image:url(%s);background-size:contain;background-repeat:no-repeat;' /><div class='challMapCvr'></div><div class='challMapName blackShad'>", i, url);
+            cap_first(&sb, w->name);
+            sb_appendf(&sb, "</div><div class='challMapPrg'>%d<span style='color:#fff;'>/%d</span></div></div>", d, t);
+        }
+        sb_append(&sb, "</div>");
+        chal_count("nightmare", NULL, 0, &done, &total);
+        chal_header(&sb, "hed_4", 30, "Nightmare Challenges", done, total, 0, NULL);
+        chal_cards(&sb, "nightmare", NULL, 0, "Check back later for new nightmare challanges!"); // sic (v7)
+    } else if (!strcmp(g_chal_typ, "map")) {
+        const MapCatalogEntry *m = g_chal_ind >= 0 && g_chal_ind < MAP_CATALOG_OFFICIAL_COUNT ? map_catalog_at((size_t) g_chal_ind) : NULL;
+        char title[96];
+        snprintf(title, sizeof(title), "%s Challenges", m ? m->name : "");
+        chal_count("map", "mp", g_chal_ind, &done, &total);
+        chal_header(&sb, "hed_1", 0, title, done, total, 1, NULL);
+        sb_append(&sb, CHAL_MSG);
+        chal_cards(&sb, "map", "mp", g_chal_ind, "Check back later for new challenges!");
+    } else if (!strcmp(g_chal_typ, "weapon")) {
+        const char *wname = weapon_name_at(g_chal_ind);
+        const Weapon *w = g_chal_ind >= 0 && g_chal_ind < WEAPON_COUNT ? g_weapons[g_chal_ind] : NULL;
+        char title[96];
+        snprintf(title, sizeof(title), "%s Challenges", wname ? wname : "");
+        chal_count("weapon", "wep", g_chal_ind, &done, &total);
+        chal_header(&sb, w && w->src ? w->src : "noimg", 0, title, done, total, 1, "filter: saturate(0.8);");
+        sb_append(&sb, CHAL_MSG);
+        chal_cards(&sb, "weapon", "wep", g_chal_ind, "Check back later for new challenges!");
     }
     return sb_finish(&sb);
 }
 
-// windows[32].gen(): config.minChalLevel = 30; the challenge list needs acc.stats.chgP
-// (else io.send("chg") and "Loading" until the server answers)
-static char *gen_challenges(void) {
-    if (g_acc.level < 30) return requirement(30, "for Challenges");
-    backend_social_send_text("[\"chg\"]");
-    return strdup("Loading");
+static cJSON *chal_by_ci(const double ci) {
+    cJSON *c;
+    cJSON_ArrayForEach(c, g_chal) if (cnum(c, "CI") == ci) return c;
+    return NULL;
+}
+
+static void chal_set(cJSON *c, const char *key, const double v) {
+    if (cJSON_GetObjectItem(c, key)) cJSON_ReplaceItemInObject(c, key, cJSON_CreateNumber(v));
+    else cJSON_AddNumberToObject(c, key, v);
+}
+
+// ------------------------------------------------------------------ WP-E part 2c: medal counts
+
+// KrunkNative: the account's medal counts (kn_brain "mdl") as the profile's fifth stat tab
+static void medal_tab_html(StrBuf *sb) {
+    if (!g_medal_counts) {
+        sb_append(sb, "<div class='pSt'>Medals<strong>...</strong></div>");
+        return;
+    }
+    int any = 0;
+    for (int i = 0; i < PROGRESSION_MEDAL_COUNT; i++) {
+        const cJSON *v = cJSON_GetObjectItem(g_medal_counts, g_progression_medals[i]);
+        if (!cJSON_IsNumber(v) || v->valuedouble <= 0) continue;
+        pst_num(sb, g_progression_medals[i], v->valuedouble, 0);
+        any = 1;
+    }
+    if (!any) sb_append(sb, "<div style='color:rgba(255,255,255,0.5);font-size:20px;padding:10px;'>No medals yet</div>");
+}
+
+static void medal_tab_update(void) {
+    HtmlElem tab = html_dom_query(0, ".statTabB4");
+    if (!tab) return;
+    StrBuf sb = {0};
+    medal_tab_html(&sb);
+    char *html = sb_finish(&sb);
+    html_dom_set_html(tab, html);
+    free(html);
+}
+
+// ------------------------------------------------------------------ WP-E part 2c: frames
+
+// kn_brain's badge / challenge / medal frames (doc/backend.md 7.4); 1 = handled.
+static int progress_frame(const char *label, const cJSON *frame) {
+    const cJSON *a1 = cJSON_GetArrayItem(frame, 1);
+    if (!strcmp(label, "bdgr")) { // io_badgeUpdate(bdg)
+        if (g_logged_in && cJSON_IsNumber(a1)) set_stat("bdg", a1->valueint);
+        ui_loadout_clear_pops(); // clearPops()
+        menu_rerender_if_open(5);
+        menu_update_class_box();
+    } else if (!strcmp(label, "cbdgr")) { // io_badgeClaimResponse(badge)
+        if (g_logged_in && cJSON_IsNumber(a1)) add_badge(a1->valueint);
+        popup_response(1, NULL, "Badge Claimed!");
+    } else if (!strcmp(label, "nbdgr")) { // io_badgeClaimMultiRes(badges): checkBadges at the match end
+        const cJSON *b;
+        cJSON_ArrayForEach(b, (g_logged_in ? a1 : NULL)) if (cJSON_IsNumber(b)) add_badge(b->valueint);
+        popup_response(1, NULL, "You unlocked new badges");
+    } else if (!strcmp(label, "chgL")) { // the "chg" list: account.activeChallenges
+        g_chal_requested = 0;
+        if (!g_logged_in || !cJSON_IsArray(a1)) return 1;
+        cJSON_Delete(g_chal);
+        g_chal = cJSON_Duplicate(a1, 1);
+        menu_rerender_if_open(33);
+    } else if (!strcmp(label, "chg")) { // io_updateChallenges([done, CI, PV, ...])
+        for (int i = 0; g_chal && i + 2 < cJSON_GetArraySize(a1); i += 3) {
+            cJSON *c = chal_by_ci(cJSON_GetNumberValue(cJSON_GetArrayItem(a1, i + 1)));
+            if (!c) continue;
+            chal_set(c, "PV", cJSON_GetNumberValue(cJSON_GetArrayItem(a1, i + 2)));
+            chal_set(c, "PT", cJSON_GetNumberValue(cJSON_GetArrayItem(a1, i)));
+        }
+        menu_rerender_if_open(33); // if (!inGame) updateWindow(33)
+    } else if (!strcmp(label, "chgC")) { // io_challengeCompleted: the end screen's "Completed!" cards
+        const cJSON *c;
+        cJSON_ArrayForEach(c, a1) {
+            char name[160];
+            chal_name(c, name, sizeof(name));
+            hud_ui_end_challenge_completed((int) cnum(c, "IC"), name);
+            const cJSON *sk = cJSON_GetObjectItem(cJSON_GetObjectItem(c, "REW"), "sk"), *it; // matchRewardSummary.skins
+            if (cJSON_IsNumber(sk)) hud_ui_add_reward_skin(sk->valueint);
+            cJSON_ArrayForEach(it, (cJSON_IsArray(sk) ? sk : NULL)) if (cJSON_IsNumber(it)) hud_ui_add_reward_skin(it->valueint);
+            cJSON *mine = chal_by_ci(cnum(c, "CI"));
+            if (mine) chal_set(mine, "PT", 1);
+        }
+    } else if (!strcmp(label, "chlR")) { // io_updateChallengeRewards(skins, funds, junk, jnk, kr)
+        if (!g_logged_in) return 1;
+        const cJSON *funds = cJSON_GetArrayItem(frame, 2), *it;
+        if (cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
+        cJSON_ArrayForEach(it, (cJSON_IsArray(a1) ? a1 : NULL)) if (cJSON_IsNumber(it)) account_add_skin(it->valueint);
+    } else if (!strcmp(label, "mdl")) {
+        if (!g_logged_in || !cJSON_IsObject(a1)) return 1;
+        cJSON_Delete(g_medal_counts);
+        g_medal_counts = cJSON_Duplicate(a1, 1);
+        medal_tab_update();
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+// windows[32] and the badge handlers; -1 = not ours
+static int progress_handle(const char *name, const HtmlArg *args, const int argc) {
+    const int a0 = argc > 0 && (args[0].kind == HTML_ARG_NUM || args[0].kind == HTML_ARG_BOOL) ? (int) args[0].num
+                 : argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : -1;
+    char frame[48];
+    if (!strcmp(name, "selectBadge")) { // if (account) io.send("bdg", parseInt(i))
+        if (g_logged_in) {
+            snprintf(frame, sizeof(frame), "[\"bdg\",%d]", a0);
+            backend_social_send_text(frame);
+        }
+    } else if (!strcmp(name, "claimBadge")) { // io.send("cbdg", parseInt(i))
+        if (g_logged_in) {
+            snprintf(frame, sizeof(frame), "[\"cbdg\",%d]", a0);
+            backend_social_send_text(frame);
+        }
+    } else if (!strcmp(name, "selectBadgePop")) {
+        select_badge_pop();
+    } else if (!strcmp(name, "windows.32.openChallengeCat")) { // (typ, ind)
+        const char *typ = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? args[0].str : "";
+        snprintf(g_chal_typ, sizeof(g_chal_typ), "%s", typ);
+        g_chal_ind = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0;
+        menu_show_window(33, 1); // menuWindow.scrollTop = 0; updateWindow(33)
+    } else if (!strcmp(name, "windows.32.closeChallengeCat")) {
+        g_chal_typ[0] = 0;
+        menu_show_window(33, 1);
+    } else if (!strcmp(name, "windows.32.openHome")) {
+        g_chal_typ[0] = 0;
+        menu_show_window(33, 0); // showWindow(33)
+    } else {
+        return -1;
+    }
+    return 1;
+}
+
+// client_bin --render-scenario (ui_scenario.c): state.account = {name, score, funds, clan, premium,
+// badges [], stats {}, challenges [], medals {}} stands in for a logged-in account, so the
+// account windows (Challenges, Account) can be rendered without kn_brain (WP-E part 2c).
+void account_ui_scenario(const cJSON *account) {
+    if (!cJSON_IsObject(account)) return;
+    clear_account();
+    g_logged_in = 1;
+    g_scenario = 1;
+    g_acc.id = 1;
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(account, "name"));
+    copy_str(g_acc.name, sizeof(g_acc.name), name ? name : "Player");
+    copy_str(g_acc.alias, sizeof(g_acc.alias), g_acc.name);
+    const char *clan = cJSON_GetStringValue(cJSON_GetObjectItem(account, "clan"));
+    copy_str(g_acc.clan, sizeof(g_acc.clan), clan);
+    g_acc.score = cnum(account, "score");
+    g_acc.funds = cnum(account, "funds");
+    g_acc.premium = cnum(account, "premium") != 0.0;
+    update_level();
+    const cJSON *stats = cJSON_GetObjectItem(account, "stats");
+    g_acc.stats = cJSON_IsObject(stats) ? cJSON_Duplicate(stats, 1) : cJSON_CreateObject();
+    set_badges(account);
+    const cJSON *chal = cJSON_GetObjectItem(account, "challenges"), *medals = cJSON_GetObjectItem(account, "medals");
+    g_chal = cJSON_IsArray(chal) ? cJSON_Duplicate(chal, 1) : NULL;
+    g_medal_counts = cJSON_IsObject(medals) ? cJSON_Duplicate(medals, 1) : NULL;
+    mark_header();
+    menu_update_class_box();
 }
 
 char *account_window_gen(const int id, const char **header) {
     (void) header;
-    if (backend_available() != 1 || !g_logged_in) return NULL; // the guest captures (LOGIN REQUIRED cards, login form)
+    if ((backend_available() != 1 && !g_scenario) || !g_logged_in) return NULL; // the guest captures (LOGIN REQUIRED cards, login form)
     if (id == 5) return gen_account();
-    if (id == 14) return gen_store();
-    if (id == 27) return ranked_window_gen();
     if (id == 33) return gen_challenges();
     if (id == 30) return gen_mail();
     return NULL;

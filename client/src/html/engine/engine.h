@@ -65,6 +65,9 @@ void engine_before_remove(Engine *g, HtmlElem e, int include_root);
 void engine_children_changed(Engine *g, HtmlElem e);
 /* Before dom_append()/insert moves an attached element to a new parent. */
 void engine_before_move(Engine *g, HtmlElem e);
+/* html_dom_canvas_put: a <canvas>'s bitmap (straight RGBA8, row 0 on top), w x h px.
+ * Uploaded as a texture the paint of the canvas box draws; 0 on failure. */
+int engine_canvas_put(Engine *g, HtmlElem e, const unsigned char *rgba, int w, int h);
 /* Only the paint output changed (widget value, scroll offset). */
 void engine_mark_paint(Engine *g, HtmlElem e); /* e = 0: everything */
 

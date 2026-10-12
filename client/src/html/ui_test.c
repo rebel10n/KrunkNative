@@ -619,6 +619,7 @@ static int ut_parse_page_opts(int argc, char **argv, int first, UtPageOpts *o) {
         else if (!strcmp(a, "--set") && has_next && o->n_sets < 64) o->sets[o->n_sets++] = argv[++i];
         else if (!strcmp(a, "--class") && has_next && o->n_classes < 64) o->classes[o->n_classes++] = argv[++i];
         else if (!strcmp(a, "--hover") && has_next) o->hover = argv[++i];
+        else if (!strcmp(a, "--hide-scrollbars")) engine_set_hide_scrollbars(1); // headless Chromium --hide-scrollbars
         else {
             fprintf(stderr, "ui_test: unknown or incomplete option '%s'\n", a);
             return 0;
@@ -648,7 +649,7 @@ static double ut_frame_clock(const UtPageOpts *o, int i) {
 static int cmd_render_page(int argc, char **argv) {
     if (argc < 5) {
         fprintf(stderr, "usage: ui_test render-page <w> <h> <#rrggbb|image> <out.png> [--menu-open] [--menu-preset]\n"
-                        "         [--frames N] [--anim-time S] [--set id:prop:value]... [--class id:cls]... [--hover selector]\n"
+                        "         [--frames N] [--anim-time S] [--set id:prop:value]... [--class id:cls]... [--hover selector] [--hide-scrollbars]\n"
                         "  --menu-preset  applies krunknative.js applyMenuOpen(true) + CLICK TO PLAY + class box + scaleBase()\n"
                         "  --class id:-cls removes a class; id 'html'/'body' address the root/body elements\n");
         return 2;

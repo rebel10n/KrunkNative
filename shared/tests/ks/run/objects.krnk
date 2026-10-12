@@ -1,0 +1,27 @@
+# Objects: literals, nested writes, add/remove, hasProp, notEmpty, aliasing, (obj) cast,
+# action values stored in objects / passed as arguments (1.8, 1.10, 1.13)
+num action twice(num x) { return x * 2; }
+action shout(str s) { GAME.log(s + "!"); }
+action useFn(action f, num v) { GAME.log("apply", f(v), f(v, 6), lengthOf f); }
+public action start() {
+    obj o = {a: 1, b: "x", c: {d: true}, "quoted key": 5,};
+    o.c.d = false;
+    o.c.e = num[1];
+    o.z = 26;
+    GAME.log(o);
+    GAME.log(hasProp o.a, hasProp o.nope, hasProp o.c.e, notEmpty o, notEmpty {}, notEmpty "", notEmpty "a", notEmpty num[], notEmpty num[0], notEmpty o.nope);
+    remove o.a;
+    remove o.nope;
+    o.a = 2;
+    GAME.log(o);
+    obj alias = o;
+    alias.b = "changed";
+    GAME.log(o.b, alias == o);
+    GAME.log((obj) 5, (obj) "s", (obj) o.nope, (obj) o.c, (obj) num[1, 2]);
+    obj fns = {double: twice, loud: shout};
+    GAME.log(fns.double(21));
+    fns.loud("hey");
+    useFn(twice, 4);
+    GAME.log(fns);
+    GAME.log(num[1], {}, {e: {}, a: obj[]});
+}

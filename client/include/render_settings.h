@@ -75,6 +75,7 @@ typedef struct {
     char crit_color[RS_COLOR_MAX];           // critColor
     float dmg_scale;         // dmgScale (HUD: font = v * 30)
     int show_kills, show_kill_c, show_deaths, show_score, show_streak, show_ping, show_net_stat, show_fps; // DOM toggles
+    int show_kd;             // showKD (v7.1.4): #kdCount
     int show_speed;          // showSpeed: speedometer (HUD)
     float speed_off_x, speed_off_y, speed_scale, speed_opacity; // speedOffX/Y, speedScale, speedOpacity
     char speed_color[RS_COLOR_MAX], speed_color_max[RS_COLOR_MAX]; // speedColor, speedColorMax
@@ -84,8 +85,7 @@ typedef struct {
     int nametag_style;       // nametagStyle 0..3
     int health_num;          // healthNum
     char health_col_team[RS_COLOR_MAX], health_col_enemy[RS_COLOR_MAX]; // healthColT/E
-    char xp_bar_color[RS_COLOR_MAX];         // xpBarCol: #igXPBarProg background
-    float xp_bar_opacity;    // xpBarOpac: #igXPBar opacity
+    // (v3's xpBarCol / xpBarOpac are gone with the in-game XP bar: v7.1.4 has neither)
     int chat_filter, show_messages, show_unboxings, chat_text_outline; // chat flags (chat owner)
     float chat_opacity, chat_bg_opacity, chat_height, chat_timer; // chatOp (#chatList), chatBGOp, chatHeight (x100 px), chatTimer (s)
     int crosshair_type;      // crosshairSho: 0 off, 1 default, 2 custom, 3 layered, 4 image, 5 precision
@@ -118,7 +118,7 @@ typedef struct {
     char custom_damage[RS_URL_MAX];
 
     // ---- General tab (cat "local"/"network"/"experimental")
-    float lag_comp;          // lagComp (client interpolation; flag)
+    float lag_comp;          // lagComp slider (settings.tmp.lagCompensation, 0..1): ENT ent[11], the server's player.lagComp
     int net_rerouting, serv_send_r, shader_rendering; // restart-only flags (shaderRendering is set(){} in v3.1.1)
 
     // ---- KrunkNative-only (no v3.1.1 row; persisted in the same store)

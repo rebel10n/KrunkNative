@@ -1,0 +1,55 @@
+# {{ ansible_managed }} (deploy/ansible role kn_rtc)
+# net-bridge/rtc: signaling on {{ kn_rtc_http_host }}:{{ kn_rtc_http_port }} (cloudflared ingress
+# {{ kn_rtc_hostname }}{{ kn_rtc_path }} -> localhost:{{ kn_rtc_http_port }}), ICE/DTLS on {{ kn_rtc_public_ip }}:{{ kn_rtc_ice_port }}/udp.
+[Unit]
+Description=KrunkNative WebRTC gateway (https://{{ kn_rtc_hostname }}{{ kn_rtc_path }} -> edge game servers over UDP)
+After=network-online.target
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User={{ kn_user }}
+Group={{ kn_group }}
+WorkingDirectory={{ kn_rtc_base }}
+EnvironmentFile={{ kn_etc_dir }}/rtc.env
+ExecStart={{ kn_rtc_base }}/kn-rtc
+
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+
+# Hardening as the kn_brain units. Nothing writable: the gateway only logs to the journal.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+# UDP to the edges and from browsers, HTTP from cloudflared on loopback; AF_NETLINK: the ICE
+# agent lists the interfaces (pion transport/stdnet).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+UMask=0027
+ReadOnlyPaths={{ kn_rtc_base }} {{ kn_etc_dir }}
+
+[Install]
+WantedBy=krunknative.target

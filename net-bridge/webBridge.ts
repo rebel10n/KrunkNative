@@ -66,6 +66,17 @@ function targetAllowed(host: string, port: number): boolean {
   return false;
 }
 
+/**
+ * Local/dev bridges also take any loopback target (`localhost`, 127.x, ::1; any port), so a
+ * developer's own server_bin is reachable from the web console `connect localhost:<port>` and
+ * the Direct Connect field: `make bridge` (no KRUNK_NATIVE_TARGETS) or
+ * KRUNK_NATIVE_ALLOW_LOOPBACK=1 (deploy/local/backend.sh). A deployed bridge sets
+ * KRUNK_NATIVE_TARGETS and is never an open proxy to its host's loopback ports.
+ */
+const ALLOW_LOOPBACK = process.env.KRUNK_NATIVE_ALLOW_LOOPBACK !== undefined
+  ? /^(1|true|yes|on)$/i.test(process.env.KRUNK_NATIVE_ALLOW_LOOPBACK)
+  : !process.env.KRUNK_NATIVE_TARGETS;
+
 // The default target (no `?target=`) has to pass the allowlist too: a deployment that
 // only allows remote game servers must not bridge to whatever listens on its own loopback.
 function resolveTarget(req: IncomingMessage): { host: string; port: number } | null {
@@ -83,7 +94,11 @@ function resolveTarget(req: IncomingMessage): { host: string; port: number } | n
   if (!/^[0-9]{1,5}$/.test(portText)) return null;
   const port = Number.parseInt(portText, 10);
   if (port <= 0 || port > 65535) return null;
-  return targetAllowed(host, port) ? { host, port } : null;
+  if (targetAllowed(host, port)) return { host, port };
+  // "localhost" is the IPv4 loopback the game servers listen on (they bind 0.0.0.0 only)
+  if (host === "localhost" && targetAllowed("127.0.0.1", port)) return { host: "127.0.0.1", port };
+  if (ALLOW_LOOPBACK && isLoopbackTarget(host)) return { host: host === "localhost" ? "127.0.0.1" : host, port };
+  return null;
 }
 
 function envInt(name: string, fallback: number): number {
@@ -349,7 +364,8 @@ export function createServer(): WebSocketServer {
   wss.on("connection", handleConnection);
   console.info(
     `[web-bridge] passthrough ${WEB_WS_PATH} -> native ${NATIVE_HOST}:${NATIVE_PORT}; ` +
-      `targets ${TARGET_RULES.map((r) => `${r.host}:${r.lo === r.hi ? r.lo : `${r.lo}-${r.hi}`}`).join(",") || "(none)"}; ` +
+      `targets ${TARGET_RULES.map((r) => `${r.host}:${r.lo === r.hi ? r.lo : `${r.lo}-${r.hi}`}`).join(",") || "(none)"}` +
+      `${ALLOW_LOOPBACK ? " + any loopback (dev)" : ""}; ` +
       `limits per-ip ${MAX_PER_IP || "off"}, total ${MAX_SESSIONS || "off"}, idle ${IDLE_TIMEOUT_MS || "off"} ms, ping ${WS_PING_MS || "off"} ms`,
   );
   return wss;

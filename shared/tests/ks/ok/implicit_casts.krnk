@@ -1,0 +1,10 @@
+obj o = {n: 1, s: "a", list: num[]};
+num action half(num v) { return o.n; }
+public action start() {
+    num n = o.n;
+    str s = o.s;
+    num[] l = o.list;
+    n = o.n;
+    GAME.log(half(o.n));
+    addTo l o.n;
+}

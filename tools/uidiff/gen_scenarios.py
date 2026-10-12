@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Generates tools/uidiff/scenarios/*.json and tools/uidiff/regions/*.json.
+"""Generates tools/uidiff/scenarios/*.json and tools/uidiff/regions/*.json (Krunker v7.1.4).
 
     python3 -I tools/uidiff/gen_scenarios.py
 
-The JSON files are committed; edit this script and re-run instead of editing
-them by hand. Rects are [x, y, w, h] in output pixels, measured on the
-reference captures (doc/ref/krunker-v3.1.1/). See README.md for the region
-keys (fuzz, max_pct, skip, mask, mask_colors, ref_offset).
+The JSON files are committed; edit this script and re-run instead of editing them by hand.
+References: doc/ref/krunker-v7.1.4/ (tools/uidiff/capture-v7.js). Region rects come from the
+reference's own layout (<name>.rects.json, viewport rects of the page's elements written by the
+capture tool) wherever an element exists, else they are measured on the PNG. Rects are [x, y, w, h]
+in output pixels. See README.md for the region keys (fuzz, max_pct, skip, mask, ...). The
+v3.1.1 scenarios are in git history (doc/ref/krunker-v3.1.1/ keeps their references).
 """
 import json
 import os
+import re
 import sys
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-REF = "doc/ref/krunker-v3.1.1"
+REPO = os.path.dirname(os.path.dirname(HERE))
+REF = "doc/ref/krunker-v7.1.4"
 
 KIND = {  # default fuzz (%), max differing pixels (%)
     "text": (12, 3.0),
@@ -22,11 +26,12 @@ KIND = {  # default fuzz (%), max differing pixels (%)
     "image": (8, 1.5),
     "scene": (12, 3.0),
 }
+ANIM = 0.8  # capture-v7.js pauses every CSS animation at 800 ms
 
 
 def R(name, rect, kind="text", note=None, skip=False, max_pct=None, fuzz=None, **extra):
     f, m = KIND[kind]
-    r = {"name": name, "rect": list(rect), "kind": kind,
+    r = {"name": name, "rect": [int(v) for v in rect], "kind": kind,
          "fuzz": fuzz if fuzz is not None else f,
          "max_pct": max_pct if max_pct is not None else m}
     if skip:
@@ -37,10 +42,16 @@ def R(name, rect, kind="text", note=None, skip=False, max_pct=None, fuzz=None, *
     return r
 
 
-def colors(name, rect, cols, note, cfuzz=2.5, **kw):
-    """Opaque-colour masked region (in-game: the reference is the background)."""
-    return R(name, rect, kw.pop("kind", "text"), note, mask="colors", mask_colors=list(cols),
-             mask_color_fuzz=cfuzz, **kw)
+def rects(path):
+    with open(os.path.join(REPO, REF, path + ".rects.json")) as fh:
+        return json.load(fh)
+
+
+def pad(rect, p=2, w=1280, h=720):
+    x, y, rw, rh = rect
+    x0, y0 = max(0, x - p), max(0, y - p)
+    x1, y1 = min(w, x + rw + p), min(h, y + rh + p)
+    return [x0, y0, x1 - x0, y1 - y0]
 
 
 def scale(regs, k):
@@ -48,158 +59,143 @@ def scale(regs, k):
     for r in regs:
         r = dict(r)
         r["rect"] = [int(round(v * k)) for v in r["rect"]]
-        if "ref_offset" in r:
-            r["ref_offset"] = [int(round(v * k)) for v in r["ref_offset"]]
         out.append(r)
     return out
 
 
 scen = {}
 regions = {}
+inline_rects = set()  # region files written with one-line "rect": [x, y, w, h] arrays
 
 
-def add(name, scenario, regs):
+def add(name, scenario, regs, one_line_rects=False):
     scen[name] = scenario
     regions[name] = regs
+    if one_line_rects:
+        inline_rects.add(name)
 
 
 # --------------------------------------------------------------------------- menu
-# 1280x720: #uiBase scale 1280/1700 = 0.753. Background #d6c6c6 = the canvas colour
-# under #instructionHolder's 50 % dim (the screen shows #6b6363).
-MERCH_NOTE = ("#merchImg (scaleBob 0.4s ease-in-out alternate); anim_time picked by sweeping the "
-              "renderer over 0..1.6 s and matching this reference's merch crop")
+# 1280x720: #uiBase scale min(1280/2210, 720/1170) = 0.579 (scaleUI 0.7). Background #d6c6c6 under
+# the page (capture-v7.js hides the 3D canvas and paints the page background that colour).
+MENU_BG = "#d6c6c6"
 
 
-def chrome(with_instructions, merch_note=MERCH_NOTE):
-    regs = [
-        R("logo", (400, 8, 480, 144), "image", "img/logo_4.png scaled by #uiBase"),
-        R("login-button", (0, 0, 206, 50), "text", "#signedOutHeaderBar: Login or Register"),
-        R("menu-items", (0, 50, 82, 670), "text", "#menuItemContainer: 6 icons + labels"),
-        R("spectate", (88, 48, 92, 20), "text", "Spectate label + switch"),
-        R("merch", (88, 68, 90, 80), "image", merch_note),
-        R("top-right-bar", (1090, 0, 190, 42), "image", "signal icon + 4 social sprite buttons"),
-        R("loading-streams", (1140, 44, 140, 22), "text", "#streamContainer"),
-        R("class-name-tag", (1100, 262, 66, 24), "text", "#menuClassNameTag: Guest"),
-        R("class-preview", (1040, 288, 190, 96), "scene", "3D class preview canvas", skip=True),
-        R("class-text", (1060, 383, 150, 38), "text",
-          "#menuClassSubtext/#menuClassName drawn over the 3D preview character", skip=True),
-        R("class-icon-button", (1018, 424, 36, 40), "image", "class icon button left of Customize"),
-        R("customize-button", (1056, 424, 154, 40), "text", "Customize button"),
-        R("bottom-buttons", (406, 598, 466, 38), "text", "Host Game / Servers / Ranked / Invite / Join"),
-        R("empty-left", (90, 160, 300, 420), "flat", "nothing may be painted here (scenario background only)"),
-        R("empty-bottom-right", (900, 480, 380, 110), "flat", "nothing may be painted here"),
-    ]
-    if with_instructions:
-        regs.append(R("click-to-play", (536, 338, 208, 36), "text",
-                      "#instructions `grow` (from 30px/opacity .3 to 32px/1, 0.8s ease alternate): anim_time "
-                      "picked by sweeping the renderer and matching the reference's ink size/opacity", max_pct=5.0))
+def chrome(rc, w=1280, h=720, dimmed=False):
+    """Regions of the menu chrome from a capture's rects (rc)."""
+    k = "dimmed under the window backdrop; " if dimmed else ""
+    regs = []
+
+    def opt(name, key, kind, note, **kw):
+        if key in rc:
+            regs.append(R(name, pad(rc[key], 2, w, h), kind, k + note, **kw))
+
+    opt("login-button", "signedOutHeaderBar", "text", "#signedOutHeaderBar: Login or Register")
+    opt("menu-items", "menuItemContainer", "text", "#menuItemContainer: 7 items (no Exit: browser page)")
+    opt("logo", "mainLogo", "image", "#mainLogo (logo_6) + #mainLogoFace f_0")
+    opt("season", "seasonLabel", "text", "#seasonLabel Season 7")
+    opt("header-right", "headerRight", "image", "#headerRight: region, ping, social icons, client/editor images")
+    opt("top-left-info", "tlInfHold", "image", "#tlInfHold: home store ad box, New to Krunker?, Season 7 battle pass")
+    opt("now-playing", "mapInfoHld", "text", "#mapInfoHld: Now Playing: ffa on Kanji")
+    if "subLogoButtons" in rc and "mapInfoHld" in rc:
+        x, y, bw, bh = rc["subLogoButtons"]
+        my = rc["mapInfoHld"][1] + rc["mapInfoHld"][3]
+        regs.append(R("bottom-buttons", pad([x, my, bw, y + bh - my], 2, w, h), "text",
+                      k + "Host Game / Server Finder / Invite / Join / police buttons"))
+    opt("streams", "streamContainer", "text", "#streamContainer: Loading Streams...")
+    opt("terms", "termsInfo", "text", "#termsInfo: Contact / Experiments / Terms / Changelog")
+    opt("chat", "chatHolder", "text", "#chatHolder: chat input bar (menu)")
+    opt("customize-button", "customizeButton", "text", "#customizeButton")
+    opt("class-icon", "menuClassIcn", "image", "#menuClassIcn: primary weapon preview")
+    if "menuClassName" in rc and "menuClassSubtext" in rc:
+        a, b = rc["menuClassSubtext"], rc["menuClassName"]
+        x0, y0 = min(a[0], b[0]), min(a[1], b[1])
+        x1, y1 = max(a[0] + a[2], b[0] + b[2]), max(a[1] + a[3], b[1] + b[3])
+        regs.append(R("class-text", pad([x0, y0, x1 - x0, y1 - y0], 2, w, h), "text",
+                      k + "#menuClassSubtext / #menuClassName over the 3D preview's legs", max_pct=6.0))
+    regs.append(R("class-preview", [int(w * 0.70), int(h * 0.50), int(w * 0.24), int(h * 0.27)], "scene",
+                  "3D class preview (v7's three.js preview vs the engine's)", skip=True))
     return regs
 
 
-MENU_STATE = {"menu": True, "window": None, "settingsTab": 0, "connected": True, "ready": True,
-              "inGame": False, "name": "Guest", "classIndex": 0, "region": "..."}
+rc = rects("menu/menu-1280")
+regs = chrome(rc)
+regs.append(R("click-to-play", pad(rc["instructions"], 3), "text", "#instructions CLICK TO PLAY (animations at 0.8 s)"))
+regs.append(R("spectate", pad(rc["spectButton"], 2), "text", "#spectButton label + switch"))
+add("menu-1280", {"ref": REF + "/menu/menu-1280.png", "size": [1280, 720], "background": MENU_BG,
+                  "state": {"menu": True, "window": None, "connected": True, "ready": True, "inGame": False,
+                            "name": "Guest", "classIndex": 0, "region": "...", "mapName": "Kanji",
+                            "gameName": "ffa on Kanji", "anim_time": ANIM},
+                  "frames": 3, "note": "Returning guest's menu, no window (v7.1.4 sandbox chrome undone: CONNECTED_MENU)."},
+    regs)
+rc = rects("menu/menu-1920")
+regs = chrome(rc, 1920, 1080)
+regs.append(R("click-to-play", pad(rc["instructions"], 3, 1920, 1080), "text", "#instructions CLICK TO PLAY"))
+add("menu-1920", {"ref": REF + "/menu/menu-1920.png", "size": [1920, 1080], "background": MENU_BG,
+                  "state": dict(scen["menu-1280"]["state"]), "frames": 3, "note": "Same as menu-1280 at 1920x1080."},
+    regs)
 
-
-def menu(name, ref, size, anim_time, regs, note, **state):
-    st = dict(MENU_STATE)
-    st.update(state)
-    st["anim_time"] = anim_time
-    add(name, {"ref": ref, "size": list(size), "background": "#d6c6c6", "state": st, "frames": 3,
-               "note": note}, regs)
-
-
-# CLICK TO PLAY: ink 188x24 px at peak R 201 (opacity .79) in real-1280, 284x37 at R 212 (.89)
-# in real-1920 -> renderer sweep minimum at 0.325 s / 0.435 s.
-menu("menu-1280", REF + "/menu/real-1280.png", (1280, 720), 0.325, chrome(True),
-     "Logged-out loaded menu, no window. anim_time 0.325: `grow` phase of the capture "
-     "(merch phase follows; its own best match is 0.4).")
-menu("menu-1920", REF + "/menu/real-1920.png", (1920, 1080), 0.435, scale(chrome(True), 1.5),
-     "Same as menu-1280 at 1920x1080 (#uiBase scale 1.129 = 1.5x the 1280 layout); anim_time 0.435 = `grow` phase.")
-
-
-def win_regions(y, h, header_h=0, extra=None, body=True):
-    regs = chrome(False)
-    if header_h:
-        regs.append(R("window-header", (406, y, 468, header_h), "text",
-                      "sticky header (search, preset select, tabs)"))
-        if body:
-            regs.append(R("window-body", (406, y + header_h, 468, h - header_h), "text"))
-    elif body:
-        regs.append(R("window-body", (406, y, 468, h), "text"))
-    regs.extend(extra or [])
-    return regs
-
-
-# Settings General: the reference capture holds the two rows the offline reference server's
-# page mod adds ("Force Offline Mode", "Enable Developer Console"; mod/mods.ts). KrunkNative
-# ports that mod (client/src/ui/ui_mods.c), so the window lines up with no ref_offset.
-
-
+# --------------------------------------------------------------------------- windows
+# name, window, extra state, note
 WINDOWS = [
-    # name, window, tab, ref window y, h, header_h, anim_time (merch), note
-    ("win-settings-general", 0, 0, 153, 422, 70, 0.275, "Settings / General tab"),
-    ("win-settings-controls", 0, 1, 153, 434, 70, 0.000, "Settings / Controls tab"),
-    ("win-settings-display", 0, 2, 153, 434, 70, 0.275, "Settings / Display tab"),
-    ("win-settings-render", 0, 3, 153, 434, 70, 0.250, "Settings / Render tab"),
-    ("win-settings-game", 0, 4, 153, 434, 70, 0.050, "Settings / Game tab"),
-    ("win-settings-sound", 0, 5, 215, 296, 70, 0.325, "Settings / Sound tab (short window, vertically centred)"),
-    ("win-classes", 6, 0, 153, 435, 0, 0.300, "Select Class: 3x3 class cards, scrollable"),
-    ("win-loadout", 3, 0, 154, 417, 0, 0.200, "Change Loadout"),
-    ("win-attach", 31, 0, 301, 140, 0, 0.275, "Select Attachment: None + Reflex Sight cards (nested rounded clips)"),
-    ("win-reticle", 32, 0, 153, 435, 0, 0.375, "Select Reticle: 14 reticle cards with preview images, scrollable"),
-    ("win-servers", 2, 0, 293, 140, 0, 0.025, "Servers (sticky serverHeader, 2 regions, 0 online)"),
-    ("win-games", 10, 0, 153, 435, 0, 0.075, "Custom Games: map list with placeholder thumbnails"),
-    ("win-host", "host", 0, 153, 435, 0, 0.275, "Host Custom Game (138 KB window, map cards with thumbnails)"),
-    ("win-hostX", "host", 0, 153, 435, 0, 0.125,
-     "Host Custom Game via the bottom Host Game button (openHostWindow); visually identical to win-host"),
-    ("win-join", "join", 0, 316, 93, 0, 0.400, "Join: URL input + button"),
-    ("win-keybinds", 7, 0, 153, 435, 0, 0.275, "Change Controls: key labels + delete_forever icons"),
-    ("win-mods", 4, 0, 307, 112, 0, 0.075, "Mod Manager: links, tabs, No Mods Found"),
-    ("win-profile-login", 5, 0, 286, 153, 0, 0.225, "Account: two inputs with placeholders, two buttons"),
-    ("win-ranked", 27, 0, 279, 167, 0, 0.175, "Ranked: LOGIN REQUIRED card with the `clear` Material icon"),
-    ("win-challenges", 33, 0, 279, 167, 0, 0.025, "Challenges: LOGIN REQUIRED card"),
-    ("win-download", 25, 0, 307, 112, 0, 0.125, "Client: three installer links with images"),
+    ("win-settings-general", 0, {"settingsTab": 0, "settingsView": "advanced"}, "Game Settings, advanced view, General"),
+    ("win-settings-controls", 0, {"settingsTab": 1, "settingsView": "advanced"}, "Game Settings, advanced view, Controls"),
+    ("win-settings-display", 0, {"settingsTab": 2, "settingsView": "advanced"}, "Game Settings, advanced view, Display"),
+    ("win-settings-render", 0, {"settingsTab": 3, "settingsView": "advanced"}, "Game Settings, advanced view, Render"),
+    ("win-settings-game", 0, {"settingsTab": 4, "settingsView": "advanced"}, "Game Settings, advanced view, Game"),
+    ("win-settings-sound", 0, {"settingsTab": 5, "settingsView": "advanced"}, "Game Settings, advanced view, Sound"),
+    ("win-settings-basic", 0, {"settingsTab": 0, "settingsView": "basic"}, "Game Settings, basic view (v7 default), General"),
+    ("win-servers", 2, {}, "Servers (windows[1]); the reference lists 3 mocked matchmaker games, the scenario none"),
+    ("win-loadout", 3, {"windowActions": [["windows.2.switchTab", 1]]}, "Change Loadout, Loadout tab"),
+    ("win-classes", 3, {"windowActions": [["windows.2.switchTab", 0]]}, "Change Loadout, Class tab (v3's Select Class)"),
+    ("win-mods", 4, {}, "Mod Manager"),
+    ("win-profile-login", 5, {}, "Account: Register or Login"),
+    ("win-keybinds", 7, {"windowActions": [["windows.6.switchTab", 0]]}, "Change Controls, General tab"),
+    ("win-host", 8, {}, "Host Custom Game (hosting is server_bin's in KrunkNative)"),
+    ("win-spray", 9, {}, "Select Spray"),
+    ("win-games", 10, {}, "Custom Games (home tab, loading)"),
+    ("win-shop", 14, {}, "Store (home tab)"),
+    ("win-join", 24, {}, "Join"),
+    ("win-download", 25, {}, "Client download"),
+    ("win-ranked", 27, {}, "Ranked (loading bar)"),
+    ("win-attach", 31, {}, "Select Attachment"),
+    ("win-reticle", 32, {}, "Select Reticle"),
+    ("win-challenges", 33, {}, "Challenges: LOGIN REQUIRED"),
+    ("win-changelog", 35, {}, "Changelog: Whats New in v7.1.4"),
+    ("win-host-type", 42, {}, "Host Game: server type picker"),
+    ("win-server-finder", 48, {}, "Server Finder: server type picker"),
 ]
-# Small cards whose content a broken renderer can drop without tripping window-body's 3 %.
-WINDOW_EXTRA = {
-    "win-attach": [R("attach-image", (548, 350, 70, 60), "image",
-                     "Reflex Sight preview: rounded image inside the rounded card (nested clip); dropped = 21 %, "
-                     "ours 1.9 % (1 px card offset)", max_pct=3.0)],
-    "win-reticle": [R("scrollbar", (858, 140, 16, 446), "image",
-                      "#menuWindow's ::-webkit-scrollbar (track #f5f5f5 + #868686 thumb, 12 px, radius 10); "
-                      "hidden = 41 %, ours 6.3 %: Chrome rasterises the 9.04 device px bar from x 866, ours "
-                      "anti-aliases from 865 (sub-pixel placement under #uiBase scale 0.753)", max_pct=8.0)],
+# windows whose content depends on data KrunkNative does not have in a scenario: body skipped
+BODY_SKIP = {
+    "win-servers": "server rows come from the matchmaker (mocked in the reference, none in the scenario)",
+    "win-games": "the game list loads from the API (Loading... in the reference)",
 }
-# This reference was captured over CDP without headless Chromium's --hide-scrollbars.
-WINDOW_STATE = {"win-reticle": {"scrollbars": True}}
-for name, win, tab, y, h, hh, t, note in WINDOWS:
-    regs = win_regions(y, h, hh, WINDOW_EXTRA.get(name))
-    menu(name, "%s/windows/%s.png" % (REF, name), (1280, 720), t, regs,
-         note + "; anim_time %.3f = the reference's merch (scaleBob) phase" % t, window=win, settingsTab=tab,
-         **WINDOW_STATE.get(name, {}))
+for name, win, extra, note in WINDOWS:
+    rc = rects("windows/" + name)
+    regs = [r for r in chrome(rc, dimmed=True) if r["name"] in ("login-button", "menu-items", "logo")]
+    x, y, w, h = rc["menuWindow"]
+    head = min(h, 82)
+    regs.append(R("window-header", pad([x, y, w, head], 2), "text", "#menuWindow top (tabs / search / header)"))
+    if h > head + 4:
+        regs.append(R("window-body", pad([x, y + head, w, h - head], 2), "text",
+                      BODY_SKIP.get(name, "#menuWindow body"), skip=name in BODY_SKIP))
+    st = {"window": win}
+    st.update(extra)
+    add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [1280, 720], "background": MENU_BG,
+               "state": dict(scen["menu-1280"]["state"], **st), "frames": 3, "note": note}, regs)
 
 # ------------------------------------------------------------------------ in-game
-# In-game scenarios render over flat black (GAME_BG), not over the reference: with the
-# reference as background every translucent HUD element is blended twice, and worse, an
-# element that is not drawn at all leaves the reference's own pixels in place and passes
-# trivially (that is how `#1 VICTORY`, drawn on Krunker's overlay canvas and not by the
-# HTML UI, "passed" at 0 %). Over black, regions compare only opaque pixels: mask "colors"
-# keys on the element's opaque colours (glyph cores of #fff text, #fc03ec server chat,
-# #9eeb56 health segments, the class icon palette, ...) in the reference OR the render,
-# with a 2.5 % colour fuzz that excludes translucent text (#maxHP rgba(255,255,255,.8) is
-# #cfd1d0 in the reference and #cccccc over black). A missing element shows black on the
-# reference's opaque pixels and fails. Regions that must stay empty use
-# "expect": "background".
+# In-game references are v7's sandbox (Free for All on Kanji, local player "Local User") with the
+# 3D canvas hidden over flat black, so the render compares over the same flat black. The
+# crosshair is drawn on v7's overlay canvas (the engine draws it with divs, ui/css/hud.css).
 GAME_BG = "#000000"
-WHITE = "#ffffff"
-CLASS0_PALETTE = ["#3d3d3d", "#72503e", "#282828", "#bc9c7a", "#dfd7d4", "#95381e", "#cfbc8f", "#a9785d", "#b2acaa"]
 
 
 def hud(**kw):
-    base = {"health": 100, "maxHealth": 100, "healthSegments": 6, "ammo": 30, "ammoMax": 30, "ammoLimit": False,
-            "melee": False, "reloading": False, "reloadPercent": 0, "timerText": "02:42", "kills": 0, "deaths": 0,
+    base = {"health": 100, "maxHealth": 100, "healthSegments": 6, "ammo": 28, "ammoMax": 28, "ammoLimit": False,
+            "melee": False, "reloading": False, "reloadPercent": 0, "timerText": "03:45", "kills": 0, "deaths": 0,
             "score": 0, "weaponName": "Assault Rifle", "weaponIcon": "icon_2", "classIndex": 0, "scoped": False,
-            "fps": 0, "aim": 0, "spread": 100, "scoreboard": False, "ping": 2,
+            "fps": 0, "aim": 0, "spread": 100, "scoreboard": False, "ping": 0,
             "loadout": [{"name": "Assault Rifle", "icon": "icon_2", "melee": False},
                         {"name": "Pistol", "icon": "icon_3", "melee": False},
                         {"name": "Combat Knife", "icon": "icon_0", "melee": True}],
@@ -208,199 +204,300 @@ def hud(**kw):
     return base
 
 
-CHAT2 = [{"text": "You have entered the Soul Sanctum", "color": "#fc03ec"},
-         {"text": "Guest_1 joined the game", "color": "#fc03ec"}]
+BOT_CHAT = [{"text": "Spawned a Bot", "color": "#fc03ec"}]
 
 
-def game_state(hudv, chat=CHAT2, **kw):
-    st = {"menu": False, "window": None, "connected": True, "ready": True, "inGame": True,
-          "mapName": "Soul Sanctum", "modeName": "Free for All", "name": "Guest_1", "region": "New Jersey",
-          "anim_time": 0.0, "hud": hudv, "chat": chat}
+def game_state(hudv, chat=(), **kw):
+    st = {"menu": False, "window": None, "connected": True, "ready": True, "inGame": True, "mapName": "Kanji",
+          "modeName": "Free for All", "name": "Local User", "region": "...", "anim_time": ANIM, "hud": hudv,
+          "chat": list(chat)}
     st.update(kw)
     return st
 
 
-SKIP_CHAT_INPUT = R("chat-input", (10, 603, 180, 26), "text",
-                    "#chatInput placeholder is rgba(255,255,255,.7) on rgba(0,0,0,.4): translucent only, "
-                    "double-blended over the reference background", skip=True)
-SKIP_MIC = R("chat-mic", (195, 603, 45, 24), "text", "#voiceDisplay has opacity .5: translucent only", skip=True)
-SKIP_PING = R("ping", (138, 8, 40, 28), "text",
-              "#pingText rgba(255,255,255,.5) and the signal icon are translucent", skip=True)
+def hud_regions(rc, extra=()):
+    regs = []
 
+    def opt(name, key, kind, note, **kw):
+        if key in rc:
+            regs.append(R(name, pad(rc[key], 2), kind, note, **kw))
 
-def hud_regions(chat_rows=(14, 538, 180, 62), chat_cols=("#fc03ec",), extra=(), chat_input=SKIP_CHAT_INPUT):
-    regs = [
-        colors("timer", (18, 16, 104, 34), [WHITE, "#ca56eb"], "#timerHolder: timer icon + #timerVal (box is translucent)"),
-        SKIP_PING,
-        colors("game-mode", (10, 60, 80, 18), [WHITE],
-               "#curGameInfo first line `Free for All` (`on <map>` is rgba .6)"),
-        colors("chat-rows", chat_rows, chat_cols, "#chatList rows: coloured message glyphs (row boxes are rgba(0,0,0,.2))"),
-        chat_input,
-        SKIP_MIC,
-        colors("class-icon", (12, 634, 66, 66), CLASS0_PALETTE, "class icon (pixelated, transparent texels excluded)",
-               kind="image", fuzz=8, max_pct=1.5),
-        colors("health-value", (85, 636, 95, 24), [WHITE, "#eb4343"], "#healthValue `100` + red cross (`| 100` is rgba .8)"),
-        colors("health-bar", (82, 664, 190, 38), ["#9eeb56"], "6 .healthBarSeg fills (opaque #9eeb56)",
-               kind="flat", fuzz=6, max_pct=1.0),
-        colors("ammo", (1125, 650, 140, 40), [WHITE, "#ffd542"], "#ammoVal + `!!!` (#ammoMax is rgba .7)"),
-        colors("weapon-active", (1180, 538, 96, 30), [WHITE], "active .weapItem icon (opacity 1)", kind="image",
-               fuzz=10, max_pct=2.5),
-        colors("weapon-keys", (1250, 568, 26, 60), [WHITE], "[E] / [Q] key labels"),
-        R("weapon-holstered", (1170, 568, 80, 66), "image",
-          "holstered .weapItem icons have opacity .7: translucent only", skip=True),
-        R("crosshair", (584, 298, 112, 120), "scene", "default crosshair bars over the 3D scene", skip=True),
-    ]
+    opt("timer", "timerHolder", "text", "#timerHolder: timer icon + 03:45")
+    opt("match-info", "matchInfo", "text", "#matchInfo: Free for All / on Kanji")
+    opt("ping", "pingDisplay", "text", "#pingDisplay 0 PING")
+    opt("chat-input", "chatInputHolder", "text", "#chatInputHolder: channel icon, Enter Message, mic [V]")
+    opt("chat-rows", "chatList", "text", "#chatList rows")
+    opt("player-card", "bottomLeftPlayer", "image", "#bottomLeftPlayer: class image, FFA, health bar, 100")
+    opt("weapons", "weapHolder", "image", "#weapHolder: Assault Rifle / [E] Pistol / [Q] Combat Knife")
+    opt("ammo", "ammoHolder", "text", "#ammoHolder: 28 | 28 + ammo icon")
+    opt("killfeed", "killFeed", "text", "#killFeed row: You [AR] Bot")
+    opt("scoreboard", "centerLeaderDisplay", "text", "#centerLeaderDisplay: Name / Score / Kills / Deaths + Local User")
+    regs.append(R("crosshair", [590, 310, 100, 100], "image",
+                  "crosshair: v7 draws it on #game-overlay, the engine with hud.css divs", max_pct=4.0))
     regs.extend(extra)
     return regs
 
 
-def game(name, ref, size, state, regs, note, background=GAME_BG):
-    add(name, {"ref": ref, "size": list(size), "background": background, "state": state, "frames": 3,
-               "note": note}, regs)
+def game(name, state, regs, note, size=(1280, 720), frames=3):
+    add(name, {"ref": "%s/ingame/%s.png" % (REF, name), "size": list(size), "background": GAME_BG, "state": state,
+               "frames": frames, "note": note}, regs)
 
 
-IG = REF + "/ingame/"
-game("ingame-plain", IG + "ingame-plain.png", (1280, 720), game_state(hud(timerText="02:42")), hud_regions(),
-     "Plain HUD, full ammo, over flat black; regions compare the reference's opaque colours only.")
-game("ingame-scoped", IG + "ingame-scoped.png", (1280, 720),
-     game_state(hud(timerText="02:41", scoped=False, aim=1)), hud_regions(),
-     "Aiming the Assault Rifle down its sight (no scope reticle; aim 1 hides the crosshair).")
-game("ingame-reloading", IG + "ingame-reloading.png", (1280, 720),
-     game_state(hud(timerText="02:39", ammo=27, reloading=True, reloadPercent=0)),
-     hud_regions(extra=[R("reload-msg", (560, 420, 160, 40), "text",
-                          "#reloadMsg `[R] Reload` is not visible in the capture (reloading just started)", skip=True)]),
-     "Reloading with 27|30; the capture shows no reload message yet.")
-game("ingame-scoreboard", IG + "ingame-scoreboard.png", (1280, 720),
-     game_state(hud(timerText="02:35", ammo=27, scoreboard=True),
-                scoreboard=[{"rank": 1, "name": "Guest_1", "score": 0}]),
-     hud_regions(extra=[colors("scoreboard", (481, 345, 316, 24), [WHITE],
-                               "#leaderContainerD .newLeaderItem row: rank/name/score glyphs (row box is translucent)")]),
-     "Tab held: one .newLeaderItem row (the local player Guest_1) in the centre.")
-CHAT4 = CHAT2 + [{"text": "Guest_1: gg", "color": "#ffffff", "name": "Guest_1", "msg": "gg"},
-                 {"text": "Guest_2 joined the game", "color": "#fc03ec"}]
-game("ingame-killfeed", IG + "ingame-killfeed.png", (1280, 720),
-     game_state(hud(timerText="02:16", ammo=24), chat=CHAT4,
-                killfeed=[{"killer": "You", "killerIsYou": True, "victim": "Guest_2", "weapon": "Assault Rifle",
-                           "weaponIcon": "icon_2", "headshot": True, "age_ms": 500}]),
-     hud_regions(chat_rows=(14, 488, 180, 112), chat_cols=("#fc03ec", WHITE), extra=[
-         colors("killfeed-row", (1104, 10, 166, 28), [WHITE, "#eb5656"],
-                "#killFeed row: `You`, skull, victim `Guest_2` (#eb5656); the weapon icon is translucent"),
-         R("score-popup", (590, 240, 100, 40), "scene", "+125 score popup is drawn by the game, not the HUD",
-           skip=True)]),
-     "One kill-feed row top right, 4 chat rows, 24|30.")
-game("ingame-chat-open", IG + "ingame-chat-open.png", (1280, 720),
-     game_state(hud(timerText="02:34", ammo=27), chatOpen=True, chatInput="gg"),
-     hud_regions(chat_input=colors("chat-input", (10, 603, 180, 26), [WHITE],
-                                   "#chatInput focused: typed `gg` (#fff) and the caret (blink phase unknown)",
-                                   max_pct=4.0)),
-     "Chat input focused with text `gg`.")
-CHAT_DEATH = [{"text": "You have entered the Soul Sanctum", "color": "#fc03ec"},
-              {"text": "Guest_2 joined the game", "color": "#fc03ec"}]
-game("ingame-death", IG + "ingame-death.png", (1280, 720),
-     game_state(hud(timerText="02:15", health=0, deaths=1, ping=3), chat=CHAT_DEATH, dead=True, name="Guest_2",
-                killcard={"killer": "Guest_1", "weapon": "Assault Rifle", "level": 1, "score": 125, "classIndex": 0}),
-     [colors("chat-rows", (14, 618, 180, 62), ["#fc03ec"], "chat rows (HUD bottom-left hidden while dead)"),
-      R("chat-input", (10, 683, 180, 26), "text", SKIP_CHAT_INPUT["note"], skip=True),
-      R("chat-mic", (195, 683, 45, 24), "text", SKIP_MIC["note"], skip=True),
-      colors("killcard-text", (488, 600, 300, 110), [WHITE, "#ffea78"],
-             "#killCardHolder: `Killed by`, killer name, `lvl 1`, `+125` (#ffea78); the weapon line is translucent"),
-      colors("killcard-icon", (500, 636, 62, 66), CLASS0_PALETTE, "killer class image", kind="image", fuzz=8,
-             max_pct=1.5),
-      R("empty-top-left", (0, 0, 200, 100), "flat", "timer/ping/game-info hidden while dead", expect="background")],
-     "Death card (local player Guest_2): HUD holders hidden, kill card at the bottom centre.")
-CHAT_END = CHAT2 + [{"text": "Guest_2 joined the game", "color": "#fc03ec"},
-                    {"text": "You're on a 5 Kill Streak", "color": "#ffffff"},
-                    {"text": "You're on a 10 Kill Streak", "color": "#ffffff"}]
-game("ingame-endscreen", IG + "ingame-endscreen.png", (1280, 720),
-     game_state(hud(timerText="00:00", ammo=5, kills=11, score=750, ping=1), chat=CHAT_END,
-                endscreen={"place": 1, "text": "#1 VICTORY", "nextRound": "00:23"}),
-     [R("victory-text", (420, 300, 440, 100), "text",
-        "`#1 VICTORY` is drawn on Krunker's overlay canvas, not by the HTML UI (#victorySub stays empty), so "
-        "the native client does not draw it", skip=True),
-      colors("chat-rows", (14, 545, 180, 135), ["#fc03ec", WHITE], "5 chat rows (white `You're` spans)"),
-      R("chat-input", (10, 683, 180, 26), "text", SKIP_CHAT_INPUT["note"], skip=True),
-      R("chat-mic", (195, 683, 45, 24), "text", SKIP_MIC["note"], skip=True),
-      R("empty-top-left", (0, 0, 200, 100), "flat", "HUD hidden on the end screen", expect="background"),
-      R("empty-bottom-right", (1100, 530, 180, 190), "flat", "ammo/weapon rack hidden on the end screen",
-        expect="background")],
-     "End screen: #1 VICTORY, HUD hidden, chat still visible.")
+# The death screen slides in (death-ui-moveup / chat-moveup, 1.5 s ease): capture-v7.js took the
+# reference settle(800) after the kill, so the render is taken that long after the death too.
+DEATH_FRAMES = 6
+DEATH_AFTER_MS = 820
 
-# ESC pause: the menu over the live scene. The reference is dimmed 50 % by
-# #instructionHolder; backgrounds/ingame-pause-esc-undimmed.png = reference x 2
-# (`magick <ref> -evaluate multiply 2`, exact to +-1 for scene pixels, which are all < 128
-# there), so the render's own dim reproduces the scene. Pixels under translucent UI are
-# still wrong in that background, so text over the scene uses colour/ink masks.
-PAUSE_STATE = dict(MENU_STATE)
-PAUSE_STATE.update({"inGame": True, "mapName": "Soul Sanctum", "modeName": "Free for All", "region": "New Jersey",
-                    "gameName": "ffa_Soul Sanctum", "chat": CHAT4[:3], "name": "Guest", "anim_time": 0.325})
-PAUSE_OPAQUE = ("logo", "login-button", "class-icon-button", "customize-button", "bottom-buttons", "class-preview",
-                "class-text")
-pause_regs = [r for r in chrome(True) if r["name"] in PAUSE_OPAQUE]
-pause_regs += [
-    R("spectate", (88, 48, 92, 20), "text",
-      "Spectate label/switch are translucent: the un-dimmed background is wrong under any reference UI pixel",
-      skip=True),
-    R("merch", (88, 68, 90, 80), "image", "merch over the scene; scaleBob phase not measured on this capture",
-      skip=True),
-    colors("menu-items", (0, 50, 82, 670), [WHITE, "#ffc710"],
-           "#menuItemContainer labels + icons (column bg is rgba(0,0,0,.75) over the scene)", cfuzz=6),
-    colors("class-name-tag", (1100, 262, 66, 24), [WHITE], "#menuClassNameTag `Guest` glyph cores"),
-    R("click-to-play", (536, 338, 208, 36), "text",
-      "#instructions is rgba(255,255,255,.8) x grow opacity over the scene: translucent only", skip=True),
-    colors("region-label", (1040, 4, 92, 22), [WHITE], "#menuRegionLabel: New Jersey"),
-    R("social-buttons", (1136, 0, 144, 42), "image", "4 social sprite buttons"),
-    R("featured-creators", (1110, 44, 166, 20), "text",
-      "#streamContainer `Featured Creators` list comes from the live Krunker streams feed; the offline client "
-      "keeps `Loading Streams...`", skip=True),
-    R("creator-row", (1130, 66, 146, 34), "text", "streams feed content (see featured-creators)", skip=True),
-    colors("chat-rows", (100, 598, 170, 82), ["#fc03ec", WHITE], "in-game chat next to the menu column"),
-    R("chat-input", (96, 683, 170, 26), "text", SKIP_CHAT_INPUT["note"], skip=True),
-    R("chat-mic", (275, 683, 45, 24), "text", SKIP_MIC["note"], skip=True),
-    colors("game-name", (1118, 646, 156, 24), [WHITE], "#gameNameHolder: ffa_Soul Sanctum"),
-    colors("bottom-links", (1000, 683, 280, 26), [WHITE],
-           "#baseLinks: `Advertise` (#fff); Support/Terms/v3.1.1 are translucent grey"),
+
+game("ingame-plain", game_state(hud()), hud_regions(rects("ingame/ingame-plain")),
+     "Plain HUD in the v7 sandbox (FFA on Kanji), full ammo, over flat black.")
+game("ingame-scoped", game_state(hud(aim=1)),
+     [r for r in hud_regions(rects("ingame/ingame-scoped")) if r["name"] != "crosshair"] +
+     [R("aim-dot", [610, 330, 60, 60], "image", "aiming the Assault Rifle: the overlay's red aim dot, no crosshair")],
+     "Assault Rifle aimed (right mouse held): crosshair hidden, red aim dot.")
+game("ingame-reloading", game_state(hud(ammo=27, reloading=True)), hud_regions(rects("ingame/ingame-reloading")),
+     "3 shots fired, R pressed: 27 | 28 while reloading.")
+game("ingame-scoreboard", game_state(hud(scoreboard=True), scoreboard=[{"rank": 1, "name": "Local User", "score": 0}]),
+     hud_regions(rects("ingame/ingame-scoreboard")), "Tab held: v7's #centerLeaderDisplay table, one row.")
+game("ingame-chat-open", game_state(hud(), chatOpen=True, chatInput="gg"), hud_regions(rects("ingame/ingame-chat-open")),
+     "Enter pressed, `gg` typed into #chatInput.")
+game("ingame-killfeed",
+     game_state(hud(score=75, kills=1), chat=BOT_CHAT,
+                killfeed=[{"killer": "You", "killerIsYou": True, "victim": "Bot", "weapon": "Assault Rifle",
+                           "weaponIcon": "icon_2", "headshot": False, "age_ms": 500}]),
+     hud_regions(rects("ingame/ingame-killfeed"),
+                 [R("score-popup", [580, 100, 120, 60], "scene", "+75 score popup on the overlay canvas", skip=True),
+                  R("weapon-streak", [1170, 540, 30, 20], "text", "weapon kill streak counter (1KS) next to the rack",
+                    skip=True)]),
+     "The local player killed a sandbox bot (spawned with pressButton(107)): kill feed + Spawned a Bot.")
+DEATH_REGS = [
+    R("death-weapons", [380, 570, 470, 75], "text",
+      "#deathUIHolder top row: [Desert Eagle] icon, kills 1 - 0, [Assault Rifle] icon"),
+    R("death-cards", [380, 650, 460, 50], "image", "class images + lvl, Bot VS Local User"),
+    R("death-time", [950, 570, 160, 25], "text", "Time Survived: differs per run", skip=True),
+    R("death-stats", [950, 595, 160, 90], "text", "Shots Fired / Accuracy / Kills / Score rows"),
+    R("empty-top-left", [0, 0, 300, 100], "flat", "HUD hidden on the death screen", expect="background"),
+    R("empty-bottom-right", [1100, 520, 180, 200], "flat", "weapon rack / ammo hidden", expect="background"),
 ]
-game("ingame-pause-esc", IG + "ingame-pause-esc.png", (1280, 720), PAUSE_STATE, pause_regs,
-     "Escape pressed in game: menu over the live scene (background = the reference un-dimmed x2, see "
-     "backgrounds/), chat kept, "
-     "game name + base links shown.", background="tools/uidiff/backgrounds/ingame-pause-esc-undimmed.png")
+rc = rects("ingame/ingame-death")
+game("ingame-death",
+     game_state(hud(health=0, deaths=1), chat=BOT_CHAT, dead=True, after_ms=DEATH_AFTER_MS,
+                killcard={"killer": "Bot", "weapon": "Desert Eagle", "weaponIcon": "icon_11", "level": 1, "myLevel": 1,
+                          "score": 0, "classIndex": 10, "stats": [4000, 0, "0%", 0, 0]}),
+     [R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder (moves right while dead)")] + DEATH_REGS,
+     "Killed by a sandbox bot (server-side players.kill): v7's head-to-head death screen.", frames=DEATH_FRAMES)
+rc = rects("ingame/ingame-death-self")
+game("ingame-death-self",
+     game_state(hud(health=0, deaths=1), dead=True, after_ms=DEATH_AFTER_MS, killcard={"stats": [2000, 0, "0%", 0, 0]}),
+     [R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder"),
+      R("death-self", [595, 580, 90, 110], "text", "`You` / `Died` (death-row-center-self)"),
+      R("death-time", [705, 570, 150, 25], "text", "Time Survived: differs per run", skip=True),
+      R("death-stats", [705, 595, 150, 90], "text", "Shots Fired / Accuracy / Kills / Score rows"),
+      R("empty-top-left", [0, 0, 300, 100], "flat", "HUD hidden", expect="background")],
+     "Killed with no killer: `You Died` + stats.", frames=DEATH_FRAMES)
+# player-viewer WP-E part 2a. The v7 death screen with an account's data on the killer (class
+# level from its class stat, the KDR player card stat) and this life's stats; the killer's class
+# and weapon are what the sandbox bot had in the capture (capture-v7.js prints them).
+rc = rects("ingame/ingame-death-v7")
+game("ingame-death-v7",
+     game_state(hud(health=0, deaths=1), chat=BOT_CHAT, dead=True, after_ms=DEATH_AFTER_MS,
+                killcard={"killer": "Bot", "weapon": "Shotgun", "weaponIcon": "icon_6", "level": 2, "myLevel": 1,
+                          "score": 0, "classIndex": 4, "pcStat": ["KDR", "2.50"], "stats": [65000, 42, "38.1%", 3, 450]}),
+     [R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder (moves right while dead)"),
+      R("death-weapons", [400, 565, 440, 65], "text", "[Shotgun] icon, kills 1 - 0, [Assault Rifle] icon"),
+      R("death-cards", [365, 655, 450, 55], "image", "class images + lvl 2 / lvl 1, Bot + `2.50 KDR` VS Local User"),
+      R("death-stats", [945, 565, 180, 125], "text", "Time Survived 1m 5s / Shots Fired 42 / Accuracy 38.1% / Kills 3 / Score 450"),
+      R("killer-tag", [1080, 330, 80, 30], "scene", "the kill cam turns to the bot: its 3D nametag (not drawn by "
+        "--render-scenario)", skip=True),
+      R("empty-top-left", [0, 0, 300, 100], "flat", "HUD hidden on the death screen", expect="background")],
+     "v7 death screen: class level, player card stat and life stats from the \"3\" packet (NET_PACKET_DEATH_INFO).",
+     frames=DEATH_FRAMES)
+rc = rects("ingame/ingame-spectate")
+game("ingame-spectate",
+     game_state(hud(timerText="03:44"), chat=BOT_CHAT, spectate=True),
+     [R("spec-names", pad(rc["specNames"], 2), "text", "#specNames: Spectating (free cam)"),
+      R("spec-info", pad([591, 12, 98, 52], 2), "text", "#specTimer 03:44 + #specGameInfo Free For All"),
+      R("spec-team", pad(rc["specTeam0"], 2), "image", "#specTeam0: the sandbox bot's row (class / name differ)",
+        skip=True),
+      R("spec-controls", pad(rc["specControlHolder"], 2), "text",
+        "#specControlHolder: Prev / Next / Free Cam [F] / Player/Cam / First Person [R] / Focus [.] / Force "
+        "Nametags [M] / Minimap [-] (no Objective Cam row in FFA)"),
+      R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder"),
+      R("empty-bottom-left", [300, 600, 700, 100], "flat", "no player HUD while spectating", expect="background")],
+     "Spectating the sandbox (Spectate toggle on): free cam, v7's #spectateUI.")
+rc = rects("ingame/ingame-minimap")
+game("ingame-minimap",
+     game_state(hud(), customMap=False, mapFile="maps/v7/kanji.json", pose=[144, -139, -182, -1.5707963267948966, 0]),
+     hud_regions(rc, [R("minimap", pad(rc["miniMapOverlay"], 2), "text",
+                        "#miniMapCanvas: Kanji's mmId image turned with the view, the N/E/S/W ring, our arrow")]),
+     "The minimap on Kanji (an official map in KrunkNative; the reference clears v7's customsData) at a fixed pose.")
+rc = rects("ingame/ingame-endscreen")
+game("ingame-endscreen", game_state(hud(), endscreen={"place": 1, "result": 1, "text": "#1 VICTORY", "nextRound": "00:00"}),
+     [R("victory-text", [420, 300, 440, 100], "text", "`#1 VICTORY` is drawn on v7's overlay canvas (vicTitle)", skip=True),
+      R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder"),
+      R("empty-top-left", [0, 0, 300, 100], "flat", "HUD hidden on the end screen", expect="background"),
+      R("empty-bottom-right", [1100, 520, 180, 200], "flat", "HUD hidden on the end screen", expect="background")],
+     "sandboxGame.endGame(): end animation (#1 VICTORY), HUD hidden.")
+rc = rects("ingame/ingame-pause-esc")
+pause = [r for r in chrome(rc) if r["name"] in ("login-button", "menu-items", "logo", "header-right", "now-playing",
+                                                "bottom-buttons", "customize-button", "terms", "chat")]
+pause.append(R("click-to-play", pad(rc["instructions"], 3), "text", "#instructions CLICK TO PLAY"))
+pause.append(R("crosshair", [590, 310, 100, 100], "scene", "v7 keeps drawing the crosshair on its overlay canvas "
+               "behind the menu", skip=True))
+add("ingame-pause-esc", {"ref": REF + "/ingame/ingame-pause-esc.png", "size": [1280, 720], "background": GAME_BG,
+                         "state": dict(scen["menu-1280"]["state"], inGame=True, name="Local User"), "frames": 3,
+                         "note": "Pointer lock released in game: the menu over the (hidden) scene."}, pause)
 
-HIT_CHAT = [{"text": "Guest_1 joined the game", "color": "#fc03ec"}, {"text": "Guest_2 joined the game", "color": "#fc03ec"}]
-# 1280x577: #uiBase scale = min(1280/1700, 577/900) = 0.641, HUD anchored to the viewport edges.
-hit_regs = [
-    colors("timer", (8, 8, 102, 44), [WHITE, "#ca56eb"], "#timerHolder icon + digits"),
-    R("ping", (114, 6, 36, 26), "text", SKIP_PING["note"], skip=True),
-    colors("game-mode", (8, 54, 70, 14), [WHITE], "#curGameInfo first line"),
-    colors("chat-rows", (14, 432, 140, 46), ["#fc03ec"], "2 chat rows"),
-    R("chat-input", (8, 476, 156, 24), "text", SKIP_CHAT_INPUT["note"], skip=True),
-    R("chat-mic", (170, 478, 36, 20), "text", SKIP_MIC["note"], skip=True),
-    colors("class-icon", (10, 504, 56, 56), CLASS0_PALETTE, "class icon", kind="image", fuzz=8, max_pct=1.5),
-    colors("health-value", (72, 504, 84, 22), [WHITE, "#eb4343"], "#healthValue + red cross"),
-    colors("health-bar", (68, 528, 164, 34), ["#9eeb56"], "health segments", kind="flat", fuzz=6, max_pct=1.0),
-    colors("ammo", (1150, 514, 124, 40), [WHITE, "#ffd542"], "#ammoVal + !!!"),
-    colors("weapon-active", (1192, 418, 86, 28), [WHITE], "active weapon icon", kind="image", fuzz=10, max_pct=2.5),
-    R("hitmarker", (596, 240, 92, 100), "text",
-      "crosshair + hit marker 363 ms after the hit; the red damage number is drawn by the game", skip=True),
+# --------------------------------------------------------------------------- hub
+# social.html with a socket that opens and never answers: the guest chrome with every view
+# loading. Only the navigation bar, the store badges and the popups are compared.
+HUB = [("hub-maps", "p=maps", []), ("hub-feed", "p=feed", []), ("hub-leaders", "p=leaders", []),
+       ("hub-market", "p=market", []), ("hub-mods", "p=mods", []),
+       ("hub-login", "p=maps", ["loginPopup"]), ("hub-settings", "p=maps", ["openSettings"])]
+for name, query, actions in HUB:
+    rc = rects("hub/" + name)
+    regs = [R("profile", pad(rc["profileInfo"], 2), "text", "#profileInfo: Login + Search User"),
+            R("nav-buttons", pad(rc["navButtons"], 2), "image", "#navButtons icons"),
+            R("nav-title", pad(rc["navTitle"], 2), "text", "#navTitle: Terms | settings, KRUNKER .io"),
+            R("badges", [830, 640, 450, 72], "image", "Steam / App Store / Google Play badges"),
+            R("editor-badge", pad(rc["editrDB"], 2), "image", "#editrDB")]
+    if "genericPop" in rc:
+        regs.append(R("popup", pad(rc["genericPop"], 2), "text", "#genericPop"))
+    else:
+        regs.append(R("loading", pad(rc["loadMessage"], 0), "text", "#loadMessage LOADING (no social server)",
+                      max_pct=5.0))
+    st = {"page": "hub", "pageQuery": query, "anim_time": ANIM}
+    if actions:
+        st["pageActions"] = actions
+    add(name, {"ref": "%s/hub/%s.png" % (REF, name), "size": [1280, 720], "background": "#000000", "state": st,
+               "frames": 3, "note": "Social hub (ui/social.html), guest, %s%s." % (query, " + " + ", ".join(actions) if actions else "")},
+        regs)
+
+
+# --------------------------------------------------------------------------- editor
+# v7's editor.html at 1920x937 (#uiBase scale 1), captured by tools/editor/v7ref.js
+# (doc/ref/krunker-v7.1.4/editor/). The 3D view (three.js grid and sky vs the native GL view)
+# is skipped; the chrome over it (canvas buttons, stats box) is compared with a loose budget.
+EW, EH = 1920, 937
+
+
+def editor_chrome(rc, dimmed=False):
+    k = "dimmed under the window backdrop; " if dimmed else ""
+    regs = []
+
+    def opt(name, key, kind, note, **kw):
+        if key in rc:
+            regs.append(R(name, pad(rc[key], 2, EW, EH), kind, k + note, **kw))
+
+    opt("toolbar", "_toolbar", "text", "#_toolbar: File .. Documentation")
+    opt("playbar", "playbar", "image", "#playbar: test / host / teleport icons")
+    opt("version", "versionTxt", "text", "#versionTxt: Krunker Editor v2.0.0 - Yendis Entertainment")
+    if "transform" in rc and "wireframeOption" in rc:
+        x0, y0 = rc["transform"][0], rc["transform"][1]
+        x1 = rc["wireframeOption"][0] + rc["wireframeOption"][2]
+        regs.append(R("canvas-buttons", pad([x0, y0, x1 - x0, 30], 2, EW, EH), "text",
+                      k + "#canvasUI buttons over the 3D view (translate .. Wireframe: OFF)", max_pct=6.0))
+    # KrunkNative's label reads "Snapping: ON" at boot (snapping is on; v7's label says OFF:
+    # an intentional difference, client/src/editor/editor.c)
+    opt("snapping", "snappingOption", "text", "#snappingOption: ON natively (intentional), OFF in v7", skip=True)
+    opt("canvas-info", "canvasInfo", "text", "#canvasInfo stats over the 3D view", max_pct=6.0)
+    opt("canvas-objedit", "canvasObjEdit", "text", "#canvasObjEdit Delete / Duplicate", max_pct=6.0)
+    opt("canvas-add", "canvasAdd", "image", "#canvasAdd +", max_pct=6.0)
+    # the v7 Essential panel (editor WP4, editor_gameconfig.c)
+    opt("left-panel", "left-panel", "text", "left panel: Essential (map config), editor WP4", max_pct=4.0)
+    opt("right-panel", "right-panel", "flat", "right panel: blank")
+    if "container" in rc:
+        regs.append(R("view-3d", rc["container"], "scene", "3D view: v7 three.js vs the native GL view", skip=True))
+    return regs
+
+
+rc = rects("editor/editor-1920")
+add("editor-1920", {"ref": REF + "/editor/editor-1920.png", "size": [EW, EH], "background": "#000000",
+                    "state": {"page": "editor", "pageQuery": "new", "pageActions": ["closeWindow"], "anim_time": ANIM},
+                    "frames": 3, "note": "Map editor (ui/editor.html), new map, Welcome window closed."},
+    editor_chrome(rc))
+# editor WP6 (editor_net.c): the API windows. v7's capture has no API, so its lists show "Loading..."
+# forever; the render has no brain either: net:pending puts the list in that state (else the native
+# list shows its empty text, an intentional difference checked by tools/editor/windows_check.py)
+for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3)", "Settings window, General tab"),
+                                ("editor-win-controls", "window1", "showWindow(1)", "Controls window, Default tab"),
+                                ("editor-win-assets", "window2", ["showWindow(2)", "KE.kn.script('net:pending:2')"], "Assets window, New tab, request pending"),
+                                ("editor-win-sounds", "window9", ["showWindow(9)", "KE.kn.script('net:pending:9')"], "Sounds window, New tab, request pending")):
+    rc = rects("editor/" + ref)
+    regs = [r for r in editor_chrome(rc, True) if r["name"] in ("toolbar", "version", "left-panel")]
+    # Secular One rasterises about 1 px higher natively (FreeType vs Chromium): 4 %
+    regs.append(R("window", pad(rc["menuWindow"], 2, EW, EH), "text", "#menuWindow: " + note, max_pct=4.0))
+    actions = action if isinstance(action, list) else [action]
+    add(name, {"ref": "%s/editor/%s.png" % (REF, ref), "size": [EW, EH], "background": "#000000",
+               "state": {"page": "editor", "pageQuery": "new", "pageActions": actions, "anim_time": ANIM},
+               "frames": 3, "note": "Map editor, new map, %s (%s)." % (note, actions[0])},
+        regs)
+
+
+# the object inspector (editor WP3, editor_inspector.c): a new cube's panel with Transform and Style
+# open (v7ref.js state right-object-cube). The 3D view and the stats box show the cube differently
+# (three.js vs the native view): only the toolbar, the version text and the right panel are compared.
+rc = rects("editor/right-object-cube")
+# The left panel is not compared here (editor-1920 compares the Essential panel).
+regs = [R(r["name"], r["rect"], r["kind"], r.get("note"), skip=True, max_pct=r["max_pct"], fuzz=r["fuzz"])
+        if r["name"] == "left-panel" else r
+        for r in editor_chrome(rc) if r["name"] in ("toolbar", "version", "left-panel")]
+regs.append(R("right-panel", pad(rc["right-panel"], 0, EW, EH), "text", "right panel: the Cube's object panel (Transform, Style open)", max_pct=4.0))
+add("editor-inspector", {"ref": REF + "/editor/right-object-cube.png", "size": [EW, EH], "background": "#000000",
+                         "state": {"page": "editor", "pageQuery": "new",
+                                   "pageActions": ["closeWindow"] + ["KE.kn.script('%s')" % c for c in  # one command per call
+                                                                     ("clear", "add:0", "select:0", "open:transformH", "open:styleH")],
+                                   "anim_time": ANIM},
+                         "frames": 3, "note": "Map editor, new map, a new Cube selected: the object panel (Transform, Style open)."},
+    regs)
+
+# the KrunkScript window (editor WP5, editor_script.c). v7.1.4 opens scripting.html as a browser
+# window, so there is no rects capture: the reference is v7's own page (recovered,
+# tools/editor/fetch_scripting_ref.sh) in an iframe at that window's place (tools/editor/v7ref.js
+# scripting), and the script-* rects are measured on scripting.png. The toolbar and version rects
+# are the editor-1920 chrome's.
+regs = [{k: v for k, v in r.items() if r["name"] == "toolbar" or k != "note"}
+        for r in editor_chrome(rects("editor/editor-1920")) if r["name"] in ("toolbar", "version")]
+regs += [
+    R("script-tabs", [192, 94, 400, 36], "text", "#tabHolder: Client (selected) / Server, GameFont 12px"),
+    {"name": "script-strip", "rect": [600, 94, 940, 36], "kind": "flat",  # the file defaults (fuzz 6, max 0.5%)
+     "note": "the empty tab strip (KrunkNative's close button sits right of it, at right:150px)"},
+    R("script-label", [1585, 94, 143, 36], "text", "#label KRUNKSCRIPT"),
+    R("script-gutter", [192, 130, 50, 656], "text",
+      "line numbers and fold markers (CodeMirror measured its gutters at 22px: numbers end at 32px)"),
+    R("script-code", [242, 130, 1486, 656], "text",
+      "the client template in material-palenight colours; KrunkNative's caret is drawn (focused), v7's unfocused window has none"),
+    R("script-compile", [192, 787, 1536, 57], "text",
+      "#compile: Validate Script. The window ends at 80% of 937px (843.3): the native engine snaps it 1px higher than Chromium (~3% of this region)",
+      max_pct=4.5),
 ]
-game("ingame-hitmarker", IG + "ingame-hitmarker-burst1-1-363ms.png", (1280, 577),
-     game_state(hud(timerText="01:36", ammo=21, ping=1), chat=HIT_CHAT, mapName="Shipyard",
-                hit={"elapsed_ms": 363, "kill": False}),
-     hit_regs, "Hit-marker frame 363 ms after a hit on Shipyard, captured at 1280x577.")
+add("editor-script-1920", {"ref": REF + "/editor/scripting.png", "size": [EW, EH], "background": "#000000",
+                           "state": {"page": "editor", "pageQuery": "new",
+                                     "pageActions": ["closeWindow", "KE.kn.script('script:open')"], "anim_time": ANIM},
+                           "frames": 3,
+                           "note": "Map editor, new map, the KrunkScript window (Scripting / key 0) on the client template. v7.1.4 opens "
+                                   "scripting.html as a browser window; the reference is v7's own page (recovered, "
+                                   "tools/editor/fetch_scripting_ref.sh) in an iframe at that window's place (tools/editor/v7ref.js scripting)."},
+    regs, one_line_rects=True)
 
 
 def main():
     for d in ("scenarios", "regions"):
         os.makedirs(os.path.join(HERE, d), exist_ok=True)
+        for f in os.listdir(os.path.join(HERE, d)):
+            if f.endswith(".json") and f[:-5] not in scen:
+                os.remove(os.path.join(HERE, d, f))  # v3.1.1 scenarios with no v7 counterpart
     for name in sorted(scen):
         with open(os.path.join(HERE, "scenarios", name + ".json"), "w") as fh:
             json.dump(scen[name], fh, indent=2)
             fh.write("\n")
+        regs = [r for r in regions[name] if r["rect"][2] > 1 and r["rect"][3] > 1]
+        text = json.dumps({"scenario": name, "defaults": {"fuzz": 6, "max_pct": 0.5}, "regions": regs}, indent=2)
+        if name in inline_rects:
+            text = re.sub(r'"rect": \[\s*(-?\d+),\s*(-?\d+),\s*(-?\d+),\s*(-?\d+)\s*\]', r'"rect": [\1, \2, \3, \4]', text)
         with open(os.path.join(HERE, "regions", name + ".json"), "w") as fh:
-            json.dump({"scenario": name, "defaults": {"fuzz": 6, "max_pct": 0.5}, "regions": regions[name]}, fh,
-                      indent=2)
-            fh.write("\n")
-        rs = regions[name]
-        print("%-24s %2d regions (%d skipped)" % (name, len(rs), sum(1 for r in rs if r.get("skip"))))
+            fh.write(text + "\n")
+        print("%-24s %2d regions (%d skipped)" % (name, len(regs), sum(1 for r in regs if r.get("skip"))))
 
 
 if __name__ == "__main__":

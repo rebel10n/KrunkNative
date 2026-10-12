@@ -1,0 +1,4 @@
+obj o = {};
+public action start() {
+    o.call = 1;
+}

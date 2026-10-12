@@ -6,9 +6,9 @@
  *   then: cd /tmp/kn-events && CC=clang cmake -S . -B build && cmake --build build && ./build/test_events <repo>
  * (KN_EVENTS_TRACE=1 prints every dispatch as it happens).
  *
- * Part 1 scans every inline on* attribute in ui/index.html and every ui/windows HTML file,
- * entity-decodes it like the HTML parser and asserts the handler parser accepts
- * all 979, then compares the distinct callee set with the inventory's 60 names.
+ * Part 1 scans every inline on* attribute in ui/index.html and every ui/windows HTML file
+ * (Krunker v7.1.4's page), entity-decodes it like the HTML parser and asserts the handler
+ * parser accepts all 2184, then compares the distinct callee set with the inventory.
  * Part 2 drives events.c against a stub Dom (the dom.h subset events.c uses) and
  * a stub EventsHost (rect hit testing, scroll geometry) and checks hover chains,
  * click synthesis and bubbling, label->checkbox forwarding, prevent-default,
@@ -230,6 +230,10 @@ static int log_indexf(const char *fmt, ...)
 }
 static void log_dump(void) { for (int i = 0; i < g_log_n; i++) fprintf(stderr, "   %2d %s\n", i, g_log[i]); }
 
+static const char *g_stop_handler;     /* handler name that calls html_ui_stop_propagation() */
+static int g_stop_requested;
+int html_ui_take_stop_propagation(void) { int s = g_stop_requested; g_stop_requested = 0; return s; }
+
 int html_ui_dispatch(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc)
 {
     char buf[512];
@@ -247,6 +251,7 @@ int html_ui_dispatch(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     }
     snprintf(buf + n, sizeof(buf) - (size_t)n, ") key=%d btn=%d checked=%d", ev->key, ev->button, ev->checked);
     logf_("%s", buf);
+    if (g_stop_handler && !strcmp(name, g_stop_handler)) g_stop_requested = 1;
     if (g_zero_handler && !strcmp(name, g_zero_handler)) return 0;
     return g_handler_result;
 }
@@ -351,18 +356,29 @@ static int scan_file(const char *path, int *total, int *failed)
 }
 
 static const char *k_inventory[] = {
-    "updateWSliderLabel", "setSetting", "playTick", "delayExecute", "unbindCont", "changeCont", "showWindow",
-    "windows.0.collapseFolder", "updateSliderLabel", "windows.7.updateSet", "openURL", "changeContSet",
-    "windows.3.switchTab", "windows.9.switchTab", "windows.0.changeTab", "selectSkinColor", "SOUND.play",
-    "windows.2.action", "windows.13.premium", "windows.7.presetAction", "checkTerms", "openHostWindow", "focusChat",
-    "windows.1.searchList", "setExpandedRegion", "quickJoinRegion", "selectHostMap", "windows.7.toggle", "sub2FA",
-    "bdayPlay", "openTab", "copyInviteLink", "openJoinWindow", "toggleTeam", "claimReward", "toggleSpect",
-    "shoPolicePop", "windows.13.purchase", "window.open", "clearPops", "closeTwitch", "sendReaction", "toggleHF",
-    "skinSelector", "selectStat", "registerAcc", "loginAcc", "selectClass", "playMap", "favoriteM",
-    "createPrivateRoom", "joinGame", "resetSettings", "exportSettings", "importSettings", "selectSettingPre",
-    "windows.0.searchList", "aspectSelect", "windows.7.changeWep", "windows.7.toggleWep",
-    /* the special-cased bare expression */
-    "kn.hideErrorNotification",
+    /* every callee of the Krunker v7.1.4 page (ui/index.html) and its captured windows (ui/windows) */
+    "kn.hideErrorNotification", "sub2FA", "checkTerms", "windows.20.tabIndex=", "showWindow", "SOUND.play",
+    "abTestsPopup", "openTab", "purchaseCancel", "XsollaPopup", "playTick", "playSelect", "logBtnFRVR",
+    "copyInviteLink", "openJoinWindow", "shoPolicePop", "openGuide", "windows.13.purchase", "dropsPopup",
+    "claimReward", "toggleTeam", "setSpect", "windows.13.craftMenu", "openURL", "openDiscord",
+    "windows.32.openHome", "window.open", "showGames", "clientExitPopup", "expertMode", "toggleSpect",
+    "clearPops", "closWind", "switchChat", "focusChat", "closeTwitch", "resetSettings", "exportSettings",
+    "importSettingsPopup", "selectSettingPre", "windows.0.searchList", "windows.0.toggleType",
+    "windows.0.changeTab", "windows.0.collapseFolder", "window.setSetting", "windows.2.switchTab",
+    "windows.2.action", "skinSelector", "charmSelector", "viewAttachments", "windows.3.switchTab",
+    "registerAcc", "loginAcc", "windows.5.switchTab", "windows.6.switchTab", "windows.6.collapseFolder",
+    "resetCont", "unbindCont", "changeCont", "windows.7.switchTab", "createPrivateRoom", "windows.7.toggle",
+    "windows.7.changeEffects", "windows.7.toggleEffects", "updateSliderLabel2", "updateSliderLabel",
+    "windows.7.updateSet", "windows.7.presetAction", "goBackWindow", "searchItems", "selectSpray",
+    "cancelTip", "createTip", "windows.9.switchTab", "windows.13.switchTab", "windows.13.subTabT=",
+    "windows.13.subTab=", "updateWindow", "windows.13.premium", "windows.13.updateScroll",
+    "windows.13.updateScrollWheel", "selectSkin", "selectHat", "selectBody", "loadMod", "loadModURL",
+    "windows.20.switchTab", "joinGame", "selectMelee", "windows.29.readAll", "windows.29.switchTab",
+    "selectAttachment", "window.delayExecute", "selectReticle", "windows.31.newPop", "selectDye",
+    "windows.34.viewAll", "selectWaist", "selectFace", "selectShoe", "selectScope", "openHostWindow",
+    "selectPet", "selectWrist", "selectStreak", "createStreakTip", "selectCharm", "openServerWindow",
+    "selectBack", "selectHead", "selectPlayerCard", "aspectSelect", "imagePopup", "changeContMsg",
+    "changeContSet",
 };
 
 static void test_parser_corpus(const char *repo)
@@ -385,13 +401,13 @@ static void test_parser_corpus(const char *repo)
         closedir(d);
     }
     printf("corpus: %d inline handlers, %d parse failures, %d distinct callees\n", total, failed, g_callee_n);
-    CHECK(total == 979);
+    CHECK(total == 2184);
     CHECK(failed == 0);
     printf("callees:");
     for (int i = 0; i < g_callee_n; i++) printf(" %s(%d)", g_callees[i].name, g_callees[i].count);
     printf("\n");
     const int inv_n = (int)(sizeof(k_inventory) / sizeof(k_inventory[0]));
-    CHECK(inv_n == 61);
+    CHECK(inv_n == 115);
     for (int i = 0; i < inv_n; i++) {
         int found = 0;
         for (int j = 0; j < g_callee_n; j++) if (!strcmp(g_callees[j].name, k_inventory[i])) found = 1;
@@ -469,12 +485,43 @@ static void test_parser_grammar(void)
     n = events_parse_handler("return f(1)", c, 8);
     CHECK(n == 1 && c[0].returns && c[0].name == kn_atom_cstr("f"));
 
+    /* v7.1.4's minified handlers: comma sequences, assignments, !0/!1, backticks, .5 */
+    n = events_parse_handler("playSelect(),logBtnFRVR(\"host\"),showWindow(42)", c, 8);
+    CHECK(n == 3); CHECK_STR(c[0].name, "playSelect"); CHECK_STR(c[2].name, "showWindow");
+    CHECK(c[2].args[0].kind == HTML_ARG_NUM && c[2].args[0].num == 42);
+    n = events_parse_handler("windows[20].tabIndex=1,showWindow(21)", c, 8);
+    CHECK(n == 2); CHECK_STR(c[0].name, "windows.20.tabIndex="); CHECK(c[0].argc == 1 && c[0].args[0].num == 1);
+    n = events_parse_handler("playSelect(.1),openJoinWindow(!1,1)", c, 8);
+    CHECK(n == 2); CHECK(c[0].args[0].kind == HTML_ARG_NUM && c[0].args[0].num > 0.09 && c[0].args[0].num < 0.11);
+    CHECK(c[1].args[0].kind == HTML_ARG_BOOL && c[1].args[0].num == 0);
+    n = events_parse_handler("SOUND.play(`tick_0`,0.1)", c, 8);
+    CHECK(n == 1); CHECK_STR(c[0].args[0].str, "tick_0");
+    n = events_parse_handler("errorNotification.style.display=\"none\"", c, 8);
+    CHECK(n == 1); CHECK_STR(c[0].name, "kn.hideErrorNotification");
+    n = events_parse_handler("x.style.display = 'none'", c, 8);
+    CHECK(n == 1); CHECK_STR(c[0].name, "x.style.display="); CHECK_STR(c[0].args[0].str, "none");
+    n = events_parse_handler("return!1", c, 8);
+    CHECK(n == 1 && c[0].prevent_default && !c[0].name);
+    n = events_parse_handler("event.stopPropagation();windows[13].subTabT=5000;updateWindow(14);", c, 8);
+    CHECK(n == 3); CHECK(c[0].stop_propagation && !c[0].name); CHECK_STR(c[1].name, "windows.13.subTabT=");
+    n = events_parse_handler("window.canShowExternalLinks?openTab(\"t\"):showWindow(47)", c, 8);
+    CHECK(n == 2); CHECK_STR(c[0].guard, "window.canShowExternalLinks"); CHECK(!c[0].guard_neg); CHECK_STR(c[0].name, "openTab");
+    CHECK(c[1].guard == c[0].guard && c[1].guard_neg); CHECK_STR(c[1].name, "showWindow");
+    n = events_parse_handler("13==window.event.keyCode&&window.searchProfile()", c, 8);
+    CHECK(n == 1 && c[0].guard_key == 13); CHECK_STR(c[0].name, "window.searchProfile");
+    n = events_parse_handler("if(window.event.keyCode==13)windows[9].searchMaps()", c, 8);
+    CHECK(n == 1 && c[0].guard_key == 13); CHECK_STR(c[0].name, "windows.9.searchMaps");
+    n = events_parse_handler("toggleTeam(this.checked?2:1)", c, 8);
+    CHECK(n == 1 && (c[0].tern_mask & 1) && c[0].args[0].num == 2 && c[0].tern_else[0] == 1);
+
     /* errors */
     CHECK(events_parse_handler("foo(", c, 8) == -1);
     CHECK(events_parse_handler("foo(1,)", c, 8) == -1);
     CHECK(events_parse_handler("foo() bar()", c, 8) == -1);
-    CHECK(events_parse_handler("a = 1", c, 8) == -1);
-    CHECK(events_parse_handler("x.style.display = 'none'", c, 8) == -1);
+    CHECK(events_parse_handler("a == 1", c, 8) == -1);
+    CHECK(events_parse_handler("`a${b}`", c, 8) == -1);
+    CHECK(events_parse_handler("f(`a${b}`)", c, 8) == -1);
+    CHECK(events_parse_handler("a ? b() c()", c, 8) == -1);
     CHECK(events_parse_handler("foo('unterminated)", c, 8) == -1);
     CHECK(events_parse_handler("windows[a].b()", c, 8) == -1);
     CHECK(events_parse_handler("return", c, 8) == -1);
@@ -633,6 +680,36 @@ static void test_click(void)
     click_at(50, 430);
     CHECK(!log_has("neverCalled"));
     CHECK(events_focused(&g_es) == 0);
+
+    /* v7.1.4 handlers: event.stopPropagation() keeps the ancestor's onclick from running;
+     * a ternary runs the branch its guard handler answers; keyCode guards skip clicks */
+    dom_set_attr(&g_dom, menu_, "onclick", "outer()");
+    dom_set_attr(&g_dom, btn_, "onclick", "event.stopPropagation();inner(1)");
+    log_clear();
+    click_at(50, 30);
+    CHECK(log_hasf("H click inner@%u(1)", btn_));
+    CHECK(!log_has("outer"));
+    dom_set_attr(&g_dom, btn_, "onclick", "inner(2)");
+    log_clear();
+    click_at(50, 30);
+    CHECK(log_hasf("H click inner@%u(2)", btn_) && log_hasf("H click outer@%u()", menu_));
+    /* a C handler stopping the event (html_ui_stop_propagation, v7's f1822(window.event)) */
+    g_stop_handler = "inner";
+    log_clear();
+    click_at(50, 30);
+    CHECK(log_hasf("H click inner@%u(2)", btn_) && !log_has("outer"));
+    g_stop_handler = NULL;
+    dom_remove_attr(&g_dom, menu_, "onclick");
+    dom_set_attr(&g_dom, btn_, "onclick", "cond?yes():no(),13==event.keyCode&&enter()");
+    g_zero_handler = "cond";
+    log_clear();
+    click_at(50, 30);
+    CHECK(log_has("H click cond@") && log_has("H click no@") && !log_has("yes@") && !log_has("enter@"));
+    g_zero_handler = NULL;
+    log_clear();
+    click_at(50, 30);
+    CHECK(log_has("H click yes@") && !log_has("no@"));
+    dom_set_attr(&g_dom, btn_, "onclick", "showWindow(1)");
 }
 
 static void test_label_checkbox(void)
@@ -766,10 +843,11 @@ static void test_select(void)
     log_clear();
     events_fire_input_change(&g_es, sel_);
     CHECK(log_hasf("H change setSetting@%u('mode',this.value='bee')", sel_));
+    /* a value attribute on the <select> itself is not its value: the selected option is */
     dom_set_attr(&g_dom, sel_, "value", "zz");
     log_clear();
     events_fire(&g_es, sel_, "change", 0, 0);
-    CHECK(log_has("this.value='zz'"));
+    CHECK(log_has("this.value='bee'") && !log_has("this.value='zz'"));
     dom_remove_attr(&g_dom, sel_, "value");
 
     /* widget capture via mouse_down bits */

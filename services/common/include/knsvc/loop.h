@@ -69,5 +69,10 @@ uint64_t kn_now_ms(void);           /* CLOCK_MONOTONIC milliseconds */
 int64_t kn_wall_ms(void);           /* unix epoch milliseconds */
 int kn_set_nonblock(int fd);
 int kn_set_cloexec(int fd);
+/* socket(2) / accept(2) returning a non-blocking close-on-exec fd (-1 + errno on failure):
+ * SOCK_NONBLOCK|SOCK_CLOEXEC and accept4 where the OS has them (Linux, BSD), else fcntl
+ * (macOS). */
+int kn_socket_nb(int domain, int type, int protocol);
+int kn_accept_nb(int listen_fd);
 
 #endif

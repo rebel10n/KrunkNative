@@ -1,0 +1,54 @@
+# Krunker v7.1.4 content: src/data/scriptTemplates.js template 10 "Basic Networking", scripts.client (base64-decoded)
+# Client Script runs only on the client
+# KrunkScript Copyright (C) Yendis Entertainment Pty Ltd
+# 
+# Add custom actions here
+str resDivId = "";
+
+# Runs when the game starts
+public action start() {
+	
+	# add custom UI
+	resDivId = GAME.UI.addDIV(
+		'resText', 
+		false,
+		'color:#f1f1f1;position:absolute;top:50%;left:50%;' +
+		'transform: translate(-50%,-50%);font-size: 24px;' +
+		'border:solid 2px #fff;border-radius:4px;' +
+		'padding:10px 30px 10px 30px;background-color: rgba(0,0,0,0.2);'
+	);
+	
+	# add custom UI
+	str divID = GAME.UI.addDIV(
+		'infoText', 
+		true,
+		'color:#f1f1f1;position:absolute;top:90%;left:50%;' +
+		'transform: translate(-50%,-50%);font-size: 24px;' +
+		'border:solid 2px #fff;border-radius:4px;' +
+		'padding:10px 30px 10px 30px;background-color: rgba(0,0,0,0.2);'
+	);
+	
+	# add text to div
+	GAME.UI.updateDIVText(divID, 'Press G to Validate Age');
+}
+
+# User pressed a key
+public action onKeyPress(str key, num code) {
+	
+	# check if pressed correct key
+	if (key == 'g') {
+		GAME.NETWORK.send("check", {
+			name: "Test",
+			age: GAME.UTILS.randInt(0, 21)
+		});
+	}
+}
+
+# Client receives network message
+public action onNetworkMessage(str id, obj data) {
+	if (id == "check") {
+		str status = (str) data.status;
+		GAME.UI.updateDIVText(resDivId, 'You ' + status + ' Age Validation');
+		GAME.UI.updateDIV(resDivId, 'display', 'block');
+	}
+}

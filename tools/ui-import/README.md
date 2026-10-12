@@ -1,15 +1,46 @@
 # tools/ui-import
 
-One-shot (but idempotent) importer that turns the Krunker v3.1.1 UI sources
-into the static inputs the native HTML engine consumes. The Makefile target
-`make ui-import` runs:
+One-shot (but idempotent) importer that turns the Krunker UI sources into the static
+inputs the native HTML engine consumes. The Makefile target `make ui-import` runs:
 
 ```sh
 python3 -I tools/ui-import/import.py --ui ui
 ```
 
-Outputs are committed to the tree; re-running only rewrites files whose
-content changed.
+`--ref v7` (the default) imports Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/public`,
+`--public` overrides); `--ref v3` the former Krunker v3.1.1 import (the sections below marked
+v3.1.1). Outputs are committed to the tree; re-running only rewrites files whose content changed.
+
+## Krunker v7.1.4 (`--ref v7`)
+
+| Step | Module | Output |
+|---|---|---|
+| menu page | `index_page.py` | `ui/index.html` from `public/index.html` (every `<script>`, comments, og/PWA links removed; `?build=`/`?v=` stripped; `https://assets.krunker.io/` and root-relative URLs made relative; external `<a href>` -> `href="#" data-ext-href`; `<canvas id="canvas">`, `css/krunknative.css` + `css/hud.css`, `js/kn-shim.js` + `js/loader.js` added) and its stylesheets (`main.css`, `bundled/bundledStyles.min.css`, `main_custom.css`, `flag.css`, `material-icons*.css`, `material-symbols-outlined.css`, `google-play.css`, plus `google-secular-one.css`) with the same URL rewriting, nothing else changed |
+| fonts | `import.py` | every font file the stylesheets name is copied; each `.woff2` gets a `.ttf` next to it (material icon fonts named after their family: `material-icons.ttf`, `material-icons-outlined.ttf`; other faces after the woff2), and the ligature tables `client/src/html/engine/material_icons_liga.h` + `material_icons_outlined_liga.h` |
+| windows | `windows_v7.py` | `ui/windows/` from `krunker-windows-v7.json.gz` (below): `<n>.html` = showWindow(n), `settings-{basic,advanced}-<t>.html`, `controls-<t>.html`, `windows.json` (header, sticky, class, inline style per window), `versions.txt` (= `public/docs/versions.txt`, the Changelog) |
+| hub / viewer | `social_page.py`, `viewer_page.py` | `ui/social.html` (+ `social.css`, `social_custom.css`), `ui/viewer.html` (+ `dat-gui.css`); `--viewer-store` also regenerates `client/src/viewer/viewer_store_table.c` |
+| editor | `editor_page.py` | only with `--editor-page`: v7's `editor.html` + editor CSS + CodeMirror CSS (`ui/libs/codemirror/`). Off by default while `client/src/editor/` drives the v3.1.1 editor page |
+| images | `menu_assets.py` | every local file the pages, stylesheets and window templates reference (`collect_page_refs`), plus `menu-assets-v7.txt` (what C generates; `dest = v3:src` / `pattern = v3:` take files the v7.1.4 reconstruction lacks from v3.1.1). References v7 itself 404s on are listed, grouped by directory |
+
+### Window captures (`capture_v7_windows.js`)
+
+`node tools/ui-import/capture_v7_windows.js [out.json.gz]` loads v7's own client (`public/index.html`
+with `js/index.js`) in headless Chromium against a read-only static serve of v7's `public/`
+(`v7_page.js`; v7's npm server is never run: it writes into the reference tree). With no
+matchmaker the page starts its offline sandbox; the capture sets a returning guest
+(`krunker_haslogin`), undoes the sandbox's menu chrome (`CONNECTED_MENU`: `fullMenu()` plus the
+elements `f2064` hides), then calls `showWindow(n, true)` for every `windows[]` entry and records
+`#windowHeader`, `#menuWindow`'s class, inline style and markup, every settings tab of both views
+(`windows[0].settingType` / `tabIndex`) and the five Change Controls tabs. The result is
+committed as `krunker-windows-v7.json.gz` (gzipped JSON) so `make ui-import` needs no browser.
+Needs `chromium-browser` (`KN_CHROME=`) and `net-bridge/node_modules` (`ws`, `tools/kref/cdp.js`).
+
+`windows_v7.py` keeps the captured markup unchanged except: `?build=` stripped, the cosmetic
+pickers' `#skinList` cut to their first 4 cards (templates; C lists the items), the host window's
+Advanced tab bodies over 32 KB emptied (per-weapon/class matrices), and the hidden per-weapon
+clones of the settings rows (`<key>_<weapon>_div`) dropped (no per-weapon settings storage yet).
+
+## Krunker v3.1.1 (`--ref v3`)
 
 ## What it produces
 
@@ -37,15 +68,46 @@ docs/versions.txt`). `{a..b}` and `{x,y}` expand like shell braces; a listed fil
 reference does not serve stops the import. Add a line when code starts generating a new
 image path (audit: `KRUNKNATIVE_HTML_IMAGE_LOG=<file>` while walking the UI natively).
 
+## Game content mod.zip lacks
+
+`game_assets.py` (`make assets-import`, not part of `import.py`: `assets/` is not committed)
+copies whole directories of the v3.1.1 `public/` tree into `assets/`, byte-identical:
+`textures/previews/` (attach, cosmetics, melee, weapons), the item previews
+`UTILS.getPreview(skin, store)` loads from Krunker's asset host
+(`assetsUrl("/textures/previews/" ...)`). The C UI writes their URLs with
+`html_dom_asset_url()` (native `/assets/...`, read from `assets_path()` by the engine; web the
+asset host's versioned URL), so they are not copied into `ui/`. `--check` lists files that are
+missing or differ. Deploy: `ansible-playbook central.yml --tags web` (role kn_web syncs
+`assets/` and rehashes `assets/version.txt`).
+
+### Krunker v7.1.4 content
+
+`game_assets.py --v7` (`make assets-import-v7`; `make assets-check-v7` is the `--check` drift
+mode) copies v7.1.4's `public/{models,textures,sound,videos,user-assets,scares}` into `assets/`
+and writes `assets/skins.json` (the v7 store table: `v7_skins.js` unpacks `public/skins.jspck`
+with v7's own `src/shim/jspck.js` and merges `store.js` templates) and `assets/previews.json`.
+It refuses a skin table that would move an existing store index (inventory `skin_id`).
+It also decodes every real WebP it copied (the player card banners, `textures/playercards/`)
+into a `<name>.webp.png` sidecar (Pillow, first frame): the native HTML engine has no WebP
+decoder and reads the sidecar for a `.webp` URL; the web build's browser decodes the `.webp`.
+`gen_cosmetics.py` then regenerates `client/src/cosmetics_table.c` from `assets/skins.json`
+(`--check`: exit 1 when out of date), and `gen_viewer_store.js` the client's full store table
+(below). `v7_store.js` evaluates v7's own `store.js` / `itemTypes.js` / `config.js` (read-only)
+for both: `assets/skins.json` is `store.skins` after store.js loaded (templates merged and its
+noSpin / noSale / limited / limT fixups applied, `thumbnail` dropped), identical to the
+reference's `skins.json`. Provenance and sizes: `assets/README.md`. Page images
+stay under `ui/img` (menu import above); `assets/` is game content only.
+
 ## Model viewer page
 
 `viewer_page.py` (step of `import.py`, skip with `--no-viewer`) writes
 `ui/viewer.html` (Krunker's `public/viewer.html`, scripts removed) and
 `ui/css/dat-gui.css` (dat.gui's injected stylesheet), and runs
-`node gen_viewer_store.js [viewer.js.map] [out.c]`, which regenerates
-`client/src/viewer/viewer_store_table.c` (every `store.skins` entry, rarities,
-previews, skin colours and the viewer's dropdown option lists computed with
-viewer.js's own sorting) from the sources embedded in the v3.1.1 `viewer.js.map`.
+`node gen_viewer_store.js [assets/skins.json] [out.c] [Krunker_v7.1.4 root]` (a `.map` argument, as
+viewer_page.py still passes, is ignored), which regenerates `client/src/viewer/viewer_store_table.c`:
+every v7.1.4 `store.skins` entry (6448, by index), rarities (incl. NFT), the 17 item types,
+previews, skin colours, `currentSeason` 7, and the viewer's dropdown option lists computed like v7
+`src/viewer.js` (f460 / f459 / melee, "[Free]" labels). `GEN_CHECK=1` only reports drift.
 
 ## Social hub page
 
@@ -70,6 +132,10 @@ ignores user site-packages), i.e. installed system-wide:
 
 ```
 --ui DIR            ui directory (default <repo>/ui)
+--ref v7|v3         Krunker reference (default v7)
+--public DIR        the reference's public/ tree (default per --ref)
+--viewer-store      also regenerate client/src/viewer/viewer_store_table.c (v7)
+--editor-page       v7: also import editor.html + its CSS
 --windows-out DIR   window output dir (default <ui>/windows)
 --liga-header PATH  generated header (default client/src/html/engine/material_icons_liga.h)
 --force             regenerate .ttf files even if present

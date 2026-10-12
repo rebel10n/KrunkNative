@@ -2,10 +2,35 @@
 //
 // Renders a display list exercising every DlOp into a 1280x720 offscreen
 // framebuffer under a hidden GLFW window, writes it as a PPM and asserts a
-// few pixel colors. Run from a cmake-build-* directory so assets_path()
-// resolves ../assets/shaders/html_ui.{vert,frag}:
+// few pixel colors.
 //
-//   cd cmake-build-debug && LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a /tmp/glb_test/build/test_gl_backend /tmp/glb_test/out.ppm
+// Build (throwaway CMake project in a scratch directory; KN = the repository):
+//
+//   cmake_minimum_required(VERSION 3.16)
+//   project(kn_glb_test C)
+//   set(CMAKE_C_STANDARD 11)
+//   set(KN /path/to/KrunkNative)
+//   foreach(dep ZLIB BZIP2 PNG HARFBUZZ BROTLI)
+//     set(FT_DISABLE_${dep} TRUE CACHE BOOL "" FORCE)
+//   endforeach()
+//   set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+//   set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+//   set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+//   add_subdirectory(${KN}/client/lib/freetype freetype)
+//   add_subdirectory(${KN}/client/lib/glad glad)
+//   add_subdirectory(${KN}/client/lib/glfw glfw)
+//   add_subdirectory(${KN}/shared/lib/cJSON cJSON)
+//   set(E ${KN}/client/src/html/engine)
+//   add_executable(test_gl_backend ${E}/tests/test_gl_backend.c ${E}/gl_backend.c ${KN}/client/src/shader.c
+//       ${KN}/shared/src/utils.c)
+//   target_include_directories(test_gl_backend PRIVATE ${E} ${KN}/client/include ${KN}/shared/include
+//       ${KN}/shared/lib/cJSON ${KN}/client/lib/lexbor)
+//   target_link_libraries(test_gl_backend PRIVATE freetype glad glfw cJSON m)
+//
+// Run from a directory named cmake-build-* next to the repository's assets/ so
+// assets_path() resolves ../assets/shaders/html_ui.{vert,frag}:
+//
+//   cd $KN/cmake-build-debug && LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a <build>/test_gl_backend <scratch>/out.ppm
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <math.h>

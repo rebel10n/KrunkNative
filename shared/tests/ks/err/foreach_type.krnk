@@ -1,0 +1,4 @@
+obj o = {};
+public action start() {
+    for (num v : o) {}
+}

@@ -78,6 +78,13 @@ typedef struct {
     // negative controls: snap without replaying (no prediction kept), replays without velObj
     int control_no_replay, control_no_vel_obj;
 
+    // WP-C v7.1.4 netRate (client/src/net/recon.c client_recon_sample): 0 = an input every frame
+    int net_rate;
+    float input_accum;
+    int fixed_frames;           // frames exactly 1 / fps long (no +-30%)
+    unsigned int frames, sampled;
+    float min_input_delta, input_time;
+
     // measurements
     unsigned int recons;
     float max_correction, last_correction;
@@ -124,6 +131,18 @@ static int sim_init(Sim *sim, const char *map, const int class_index, const floa
     player_spawn(sim->s);
     player_spawn(sim->c);
     sim->c->is_you = 1;
+
+    // A fixed start, independent of the spawn pick and its RNG use: the scripted walks stay
+    // on the map from these spawns (from others, e.g. Kanji's spawns[0] / [1], they walk off
+    // an edge and the server kills the player at deathY).
+    const int start = strstr(map, "kanji") ? 5 : strstr(map, "sandstorm") ? 4 : -1; // (-128 -144 -108), (241 33 -322)
+    const Map *spawn_map = sim->server.map;
+    if (spawn_map && start >= 0 && (size_t) start < spawn_map->spawn_count) {
+        const Spawn *spawn = spawn_map->spawns[start];
+        sim->s->position = sim->s->last_position = spawn->position;
+        sim->s->direction.x = 0.0f;
+        sim->s->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn->direction);
+    }
 
     // SPAWN: the client takes the server's spawn point
     sim->c->position = sim->c->last_position = sim->s->position;
@@ -173,9 +192,8 @@ static void client_frame(Sim *sim, Input input, const float delta) {
 static void client_receive(Sim *sim) {
     NetPacket packet;
     while (link_take(&sim->down, sim->now, &packet)) {
-        if (packet.type != NET_PACKET_RECON || packet.length != sizeof(NetReconPacket)) continue;
         NetReconPacket recon;
-        memcpy(&recon, packet.payload, sizeof(recon));
+        if (packet.type != NET_PACKET_RECON || !net_packet_read_recon(&recon, &packet, sim->c)) continue;
         const vec3 before = sim->c->position;
         if (sim->control_no_vel_obj) {
             for (size_t i = 0; i < sim->pending_count; i++) sim->pending[i].has_vel_obj = 0;
@@ -212,14 +230,30 @@ static void server_tick(Sim *sim) {
 static void sim_step(Sim *sim, const Input *input, const float fps) {
     sim->frame_rng = sim->frame_rng * 1664525u + 1013904223u;
     const float r = (float) ((sim->frame_rng >> 8) & 0xffff) / 65535.0f;
-    const float delta = (1.0f / fps) * (0.7f + 0.6f * r);
+    const float delta = (1.0f / fps) * (sim->fixed_frames ? 1.0f : 0.7f + 0.6f * r);
     sim->now += delta;
     while (sim->server_next_tick <= sim->now) {
         server_tick(sim);
         sim->server_next_tick += 1.0 / 30.0;
     }
     client_receive(sim);
-    if (sim->c->active) client_frame(sim, *input, delta);
+    if (!sim->c->active) return;
+    sim->frames++;
+    if (!sim->net_rate) {
+        client_frame(sim, *input, delta);
+        return;
+    }
+    // netRate: an input frame only once half a period has passed, carrying the summed time;
+    // the other frames tick the world only (main.c)
+    const float input_delta = net_input_rate_take(&sim->input_accum, delta, sim->net_rate);
+    if (input_delta < 0.0f) {
+        game_tick(&sim->client, (float) sim->now, delta);
+        return;
+    }
+    if (!sim->sampled || input_delta < sim->min_input_delta) sim->min_input_delta = input_delta;
+    sim->sampled++;
+    sim->input_time += input_delta;
+    client_frame(sim, *input, input_delta);
 }
 
 // Idle frames until everything in flight was processed and acked (then client == server).
@@ -483,6 +517,316 @@ static void case_packets(void) {
     CHECK(length <= NET_MAX_PAYLOAD, "batch %u bytes", length);
 }
 
+// ---------------------------------------------------------------- look rotation ("visual spinbot")
+
+static float angle_gap(const float a, const float b) { // |a - b| on the circle
+    return fabsf(normalize_angle(a - b));
+}
+
+static int finite_player(const Player *p) {
+    return isfinite(p->position.x) && isfinite(p->position.y) && isfinite(p->position.z) && isfinite(p->velocity.x) &&
+           isfinite(p->velocity.y) && isfinite(p->velocity.z) && isfinite(p->direction.x) && isfinite(p->direction.y);
+}
+
+// Wrap / clamp / round3 / lerp and the STATE / "l" round trips at large and broken angles.
+static void case_rotation_math(void) {
+    const float pi2 = (float) M_PI * 2.0f;
+    const float yaws[] = {0.0f, 1.0f, -1.0f, 6.28f, -6.28f, 6.3f, -6.3f, 100.0f, -1000.5f, -123456.789f, 1e9f, -3.0e38f, 3.4028235e38f};
+    for (size_t i = 0; i < sizeof(yaws) / sizeof(yaws[0]); i++) {
+        const float w = player_wrap_yaw(yaws[i]);
+        CHECK(isfinite(w) && w > -pi2 && w < pi2, "wrap(%g) = %g", yaws[i], w);
+        if (fabsf(yaws[i]) < 1e4f) CHECK(angle_gap(w, yaws[i]) < 1e-3f, "wrap(%g) = %g changed the heading", yaws[i], w);
+        if (yaws[i] > -pi2 && yaws[i] < pi2) CHECK(w == yaws[i], "wrap(%g) = %g: v3.1.1-range yaws must pass unchanged", yaws[i], w);
+        const float r = player_round3(yaws[i]);
+        CHECK(isfinite(r), "round3(%g) = %g", yaws[i], r);
+
+        NetStatePacket state = {0};
+        Player p = {0};
+        p.direction = (vec2) {yaws[i], yaws[i]};
+        net_packet_from_player(&state, &p);
+        CHECK(state.direction[1] > -pi2 && state.direction[1] < pi2, "STATE yaw %g from %g", state.direction[1], yaws[i]);
+        CHECK(fabsf(state.direction[0]) <= (float) M_PI / 2.0f, "STATE pitch %g from %g", state.direction[0], yaws[i]);
+        NetReconPacket recon;
+        net_packet_from_recon(&recon, &p, 0);
+        CHECK(recon.yaw > -pi2 && recon.yaw < pi2, "l yaw %g from %g", recon.yaw, yaws[i]);
+    }
+    const float bad[] = {NAN, INFINITY, -INFINITY};
+    for (size_t i = 0; i < 3; i++) {
+        CHECK(player_wrap_yaw(bad[i]) == 0.0f && player_clamp_pitch(bad[i]) == 0.0f, "non-finite look not zeroed");
+        NetStatePacket state = {.direction = {bad[i], bad[i]}};
+        Player p = {0};
+        p.direction = (vec2) {1.0f, 1.0f};
+        net_packet_apply_player(&p, &state);
+        CHECK(isfinite(p.direction.x) && isfinite(p.direction.y), "STATE apply took a non-finite direction");
+        CHECK(isfinite(player_lerp_angle(bad[i], 1.0f, 0.5f)) && isfinite(player_lerp_angle(1.0f, bad[i], 0.5f)), "lerp of non-finite");
+    }
+    CHECK(fabsf(player_clamp_pitch(10.0f) - (float) M_PI / 2.0f) < 1e-6f && fabsf(player_clamp_pitch(-10.0f) + (float) M_PI / 2.0f) < 1e-6f,
+          "pitch clamp");
+
+    // Math.lerpAngle parity inside the v3.1.1 range, and the short way between any two wraps.
+    CHECK(fabsf(player_lerp_angle(0.1f, 6.2f, 0.5f) - fmodf(6.2f + (6.383185f - 6.2f) * 0.5f, pi2)) < 1e-4f, "lerp across 2pi");
+    CHECK(fabsf(player_lerp_angle(1.0f, 0.5f, 0.5f) - 0.75f) < 1e-6f, "plain lerp");
+    for (int k = -6; k <= 6; k++) {
+        for (int j = 0; j < 64; j++) {
+            const float from = -3.0f + 0.1f * (float) j, step = -0.3f; // a remote player turning right
+            const float to = from + step;
+            const float a = to + (float) k * pi2, b = from - (float) (k * 3) * pi2; // wrapped differently
+            const float mid = player_lerp_angle(a, b, 0.5f);
+            CHECK(angle_gap(mid, from + step * 0.5f) < 1e-3f, "lerp(%g, %g) = %g, want %g: long way round", a, b, mid,
+                  from + step * 0.5f);
+        }
+    }
+}
+
+// The report: a player turning right for a long time. The old client let its yaw grow without
+// bound (input.y_dir -= look forever); remote players interpolated between far-apart unwrapped
+// yaws and spun. Here the inputs are the old, unbounded ones: the server must still store and
+// send a wrapped yaw, prediction and the authority must agree, and an observer interpolating the
+// STATE packets (client_apply_state + player_update) must turn smoothly the short way.
+static void case_turn_right(void) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
+
+    Player *watched = player_init(&sim->client); // the turning player as another client sees it
+    watched->uid = 2;
+    game_players_add(&sim->client, watched);
+    player_spawn(watched);
+    watched->send_rate = 30.0f;
+
+    const float rate = 7.5f; // rad/s to the right: a fast flick, sustained
+    float yaw = sim->c->direction.y;
+    const float yaw_start = yaw;
+    float max_step = 0.0f, max_server_yaw = 0.0f, last_seen = 0.0f, seen_start = 0.0f;
+    double turned = 0.0; // the observer's signed turn, frame by frame (a spin adds whole turns)
+    int have_seen = 0, states = 0;
+    const double start = sim->now, server_tick = 1.0 / 30.0;
+    double next_state = sim->now;
+    while (sim->now - start < 40.0 && sim->c->active) {
+        const double before = sim->now;
+        yaw -= rate / 60.0f; // ~ -300 rad by the end: never wrapped by this "client"
+        const Input input = {.move_dir = -1, .x_dir = 0.3f, .y_dir = yaw}; // standing: no fall, no respawn
+        sim_step(sim, &input, 60.0f);
+        const float dt = (float) (sim->now - before);
+        max_server_yaw = MAX(max_server_yaw, fabsf(sim->s->direction.y));
+
+        if (sim->now >= next_state) { // "k": the server's STATE of this player to the observer
+            next_state += server_tick;
+            NetStatePacket state;
+            net_packet_from_player(&state, sim->s);
+            const vec2 dir = watched->direction;
+            const vec3 pos = watched->position;
+            net_packet_apply_player(watched, &state);
+            watched->dt = 0.0f;
+            watched->interp_pos_start = pos;
+            watched->interp_pos_end = watched->position;
+            watched->interp_dir_start = dir;
+            watched->interp_dir_end = watched->direction;
+            watched->position = pos;
+            watched->direction = dir;
+            watched->interpolate = 1;
+            states++;
+        }
+        // the client's game_tick (in sim_step) ran player_update(watched) for this frame
+        if (have_seen && states > 3) { // from the 4th STATE: the first ones turn from the spawn yaw
+            const float step = normalize_angle(watched->direction.y - last_seen);
+            max_step = MAX(max_step, fabsf(step));
+            turned += step;
+        } else if (states == 3) {
+            seen_start = watched->direction.y;
+        }
+        last_seen = watched->direction.y;
+        have_seen = states >= 3;
+        (void) dt;
+    }
+    for (int i = 0; i < 30; i++) { // let the observer reach the last STATE
+        game_tick(&sim->client, (float) (sim->now += 1.0 / 60.0), 1.0f / 60.0f);
+        turned += normalize_angle(watched->direction.y - last_seen);
+        last_seen = watched->direction.y;
+    }
+    sim_settle(sim, 60.0f);
+    const float pi2 = (float) M_PI * 2.0f;
+    // The observer starts from its first STATE (seen_start ~ the spawn yaw) and must end on
+    // the sent heading having turned exactly as far as the sender, frame steps well below pi.
+    const double want = (double) yaw - (double) yaw_start - normalize_angle(seen_start - yaw_start);
+    printf("  turn right: sent yaw %.1f, server |yaw| <= %.3f, observer turned %.2f rad (sent %.2f), max %.3f rad/frame, %d states\n",
+           yaw, max_server_yaw, turned, want, max_step, states);
+    CHECK(yaw < -250.0f, "the test did not turn far enough (%f)", yaw);
+    CHECK(max_server_yaw < pi2, "server yaw left (-2pi, 2pi): %f", max_server_yaw);
+    CHECK(max_step < 1.0f, "observer yaw jumped %f rad in one frame (spin)", max_step);
+    // Up to latency * rate (the inputs still in flight when the last STATE left) short; every
+    // spin would add a whole 2pi.
+    CHECK(fabs(turned - want) < 1.5, "observer turned %f rad, the player %f rad: it spun", turned, want);
+    CHECK(angle_gap(sim->c->direction.y, sim->s->direction.y) < 1e-3f, "client yaw %f != server yaw %f", sim->c->direction.y,
+          sim->s->direction.y);
+    CHECK(angle_gap(sim->s->direction.y, yaw) < 1e-2f, "server heading %f != sent heading %f", sim->s->direction.y, yaw);
+    CHECK(dist3(sim->c->position, sim->s->position) < 1e-3f, "turning: client/server diverged by %f", dist3(sim->c->position, sim->s->position));
+    CHECK(finite_player(sim->s), "server player went non-finite");
+    free(sim);
+}
+
+// A hostile client: huge, NaN and inf look values (single frames, as the server's
+// player_accept_input sees them) must never reach the physics, the STATE or the "l".
+static void case_bad_rotation(void) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 0.0f, 0.0f)) { CHECK(0, "map"); free(sim); return; }
+    const float values[] = {NAN, INFINITY, -INFINITY, 3.4028235e38f, -3.4028235e38f, 1e30f, -1e30f, 2.2e9f, -2.2e9f,
+                            1e-45f, -0.0f, 123456.0f, 6.2831855f, -6.2831855f};
+    const size_t n = sizeof(values) / sizeof(values[0]);
+    int seq = 0;
+    for (int round = 0; round < 3; round++) {
+        for (size_t i = 0; i < n; i++) {
+            for (size_t j = 0; j < n; j++) {
+                Input input = {.seq = seq++, .move_dir = (int) ((i + j) % 9) - 1, .delta = 1.0f / 60.0f, .x_dir = values[i],
+                               .y_dir = values[j], .shoot = (int) (j & 1), .jump = (int) (i & 1)};
+                player_accept_input(sim->s, &input);
+                NetInputPacket wire;
+                net_packet_from_input(&wire, &input); // and the raw prediction path on the client
+                Input back;
+                net_packet_to_input(&back, &wire);
+                if (sim->c->active) player_proc_input(sim->c, &back, 0, 0);
+            }
+            game_tick(&sim->server, (float) (sim->now += 1.0 / 30.0), 1.0f / 30.0f);
+            if (!sim->s->active) player_spawn(sim->s);
+            CHECK(finite_player(sim->s), "server player non-finite after look %g", values[i]);
+            CHECK(fabsf(sim->s->direction.y) < (float) M_PI * 2.0f && fabsf(sim->s->direction.x) <= (float) M_PI / 2.0f,
+                  "server look %g %g out of range", sim->s->direction.x, sim->s->direction.y);
+            CHECK(!sim->c->active || finite_player(sim->c), "predicted player non-finite after look %g", values[i]);
+        }
+    }
+    NetStatePacket state;
+    net_packet_from_player(&state, sim->s);
+    CHECK(isfinite(state.position[0]) && isfinite(state.direction[1]), "STATE non-finite");
+    printf("  bad rotation: %d frames, server player finite at %.2f %.2f %.2f yaw %.3f\n", seq, sim->s->position.x,
+           sim->s->position.y, sim->s->position.z, sim->s->direction.y);
+    free(sim);
+}
+
+// ---------------------------------------------------------------- WP-C: netRate, held jump, v7 RECON
+
+// v7.1.4 netRate sampling (index.js gameLoop): at 144 Hz the input rate follows the render rate up to
+// ~288 fps (a frame of at least half a period samples), every input frame carries the time since the
+// previous one, and prediction + reconciliation stay exact.
+static void case_net_rate(const float fps, const int rate, const unsigned int want_per_second) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
+    sim->net_rate = rate;
+    sim->fixed_frames = 1;
+    const double start = sim->now;
+    while (sim->now - start < 4.0 && sim->c->active) {
+        const Input input = script_input(sim, sim->now - start);
+        sim_step(sim, &input, fps);
+    }
+    const double elapsed = sim->now - start;
+    const float per_second = (float) sim->sampled / (float) elapsed;
+    const float period = 1.0f / (float) rate;
+    printf("  netRate %3d Hz @%3.0f fps: %u of %u frames sampled (%.1f/s), min input %.2f ms\n", rate, fps, sim->sampled, sim->frames,
+           per_second, sim->min_input_delta * 1000.0f);
+    CHECK(fabsf(per_second - (float) want_per_second) <= 2.0f, "netRate %d @%.0f fps: %.1f inputs/s, want %u", rate, fps, per_second, want_per_second);
+    CHECK(sim->min_input_delta >= period * 0.5f - 1e-4f, "an input frame shorter than half a period (%.3f ms)", sim->min_input_delta * 1000.0f);
+    CHECK(fabsf(sim->input_time + sim->input_accum - (float) elapsed) < 1e-3f, "input time %.4f + %.4f pending != %.4f elapsed", sim->input_time,
+          sim->input_accum, elapsed);
+    sim->fixed_frames = 0; // +-30% frames for the rest
+    walk(sim, 3.0, 2, fps);
+    sim_settle(sim, fps);
+    CHECK(sim->max_correction < 1e-3f, "netRate %d @%.0f fps: rubber-banding %f", rate, fps, sim->max_correction);
+    CHECK(dist3(sim->c->position, sim->s->position) < 1e-3f, "netRate %d @%.0f fps: final %f", rate, fps, dist3(sim->c->position, sim->s->position));
+    free(sim);
+}
+
+static void case_net_rate_math(void) {
+    static const int rates[NET_RATE_COUNT] = {30, 60, 120, 144, 240, 360};
+    for (int i = 0; i < NET_RATE_COUNT; i++) CHECK(net_rate_hz(i) == rates[i], "netRate option %d", i);
+    CHECK(net_rate_hz(-1) == 144 && net_rate_hz(NET_RATE_COUNT) == 144, "netRate default 144 Hz");
+    float accum = 0.0f;
+    CHECK(net_input_rate_take(&accum, 0.0f, 144) < 0.0f && accum == 0.0f, "a zero frame samples nothing");
+    CHECK(net_input_rate_take(&accum, 0.003f, 144) < 0.0f && fabsf(accum - 0.003f) < 1e-7f, "3 ms < half of 6.94 ms");
+    CHECK(fabsf(net_input_rate_take(&accum, 0.0005f, 144) - 0.0035f) < 1e-7f && accum == 0.0f, "3.5 ms rounds up to one period");
+    CHECK(fabsf(net_input_rate_take(&accum, 0.1f, 30) - 0.1f) < 1e-7f, "a long frame is one input frame");
+    CHECK(net_input_rate_take(&accum, NAN, 30) < 0.0f && accum == 0.0f, "NaN frame time ignored");
+}
+
+// v7.1.4 jump input is held (J4): without autoJump one jump per press (tryJump waits for a release),
+// with autoJump a jump on every landing while held; both predicted exactly.
+static void case_held_jump(const int auto_jump) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
+    sim->server.config.auto_jump = sim->client.config.auto_jump = (unsigned char) auto_jump;
+    sim->net_rate = 144;
+    walk(sim, 1.0, -1, 120.0f);
+    int jumps = 0, was_ground = sim->s->on_ground;
+    const double until = sim->now + 3.0;
+    while (sim->now < until) {
+        const Input input = {.move_dir = -1, .jump = 1, .x_dir = sim->c->direction.x, .y_dir = sim->c->direction.y};
+        sim_step(sim, &input, 120.0f);
+        if (was_ground && !sim->c->on_ground && sim->c->velocity.y > 0.0f) jumps++;
+        was_ground = sim->c->on_ground;
+    }
+    sim_settle(sim, 120.0f);
+    printf("  held jump (autoJump %d): %d jumps in 3 s, max correction %.6f\n", auto_jump, jumps, sim->max_correction);
+    CHECK(auto_jump ? jumps >= 3 : jumps == 1, "held jump, autoJump %d: %d jumps", auto_jump, jumps);
+    CHECK(sim->max_correction < 1e-3f, "held jump: rubber-banding %f", sim->max_correction);
+    CHECK(dist3(sim->c->position, sim->s->position) < 1e-3f, "held jump: final %f", dist3(sim->c->position, sim->s->position));
+    free(sim);
+}
+
+// RECON V2 carries wallJumpC / canSlideT / the exact slide ms (v7.1.4 io_syncPlayer [12] / [24]); a
+// V1 RECON (a 1.3.0 server, net-bridge) keeps the client's own values. Input reset / interact ride
+// in the input flags (map-logic WP-B's input[13] / [14]).
+static void case_v7_recon_packets(void) {
+    Player s = {0}, c = {0};
+    s.position = (vec3) {1.0f, 2.0f, 3.0f};
+    s.wall_jump_count = 3;
+    s.can_slide_timer = 0.07f;
+    s.slide_ms = 312.3456789;
+    s.slide_timer = (float) (s.slide_ms / 1000.0);
+    NetReconPacket out;
+    net_packet_from_recon(&out, &s, 42);
+    NetPacket packet = {.type = NET_PACKET_RECON, .length = (uint16_t) NET_RECON_PACKET_V2_SIZE};
+    memcpy(packet.payload, &out, sizeof(out));
+    NetReconPacket in;
+    CHECK(net_packet_read_recon(&in, &packet, NULL), "RECON V2 read");
+    net_packet_apply_recon(&c, &in);
+    CHECK(c.wall_jump_count == 3 && c.can_slide_timer == 0.07f && c.slide_ms == s.slide_ms && c.slide_timer == s.slide_timer,
+          "RECON V2: wallJumpC %d canSlideT %f slide %.7f ms", c.wall_jump_count, (double) c.can_slide_timer, c.slide_ms);
+    // a 1.3.0 server: 58 bytes, the client's own locks stay
+    Player keep = {0};
+    keep.wall_jump_count = 1;
+    keep.can_slide_timer = 0.02f;
+    packet.length = (uint16_t) NET_RECON_PACKET_V1_SIZE;
+    CHECK(net_packet_read_recon(&in, &packet, &keep), "RECON V1 read");
+    net_packet_apply_recon(&keep, &in);
+    CHECK(keep.wall_jump_count == 1 && keep.can_slide_timer == 0.02f && keep.slide_timer == s.slide_timer, "RECON V1 keeps the client's locks");
+    packet.length = (uint16_t) NET_RECON_PACKET_V1_SIZE + 3;
+    CHECK(!net_packet_read_recon(&in, &packet, NULL), "RECON with a cut v7 tail accepted");
+    packet.length = (uint16_t) NET_RECON_PACKET_V2_SIZE + 8;
+    CHECK(net_packet_read_recon(&in, &packet, NULL) && in.wall_jump_count == 3, "RECON longer than V2 reads its prefix");
+    packet.length = 20;
+    CHECK(!net_packet_read_recon(&in, &packet, NULL), "short RECON accepted");
+
+    for (int reset = 0; reset <= 2; reset++) {
+        for (int interact = 0; interact <= 1; interact++) {
+            const Input input = {.seq = 9, .move_dir = 3, .delta = 0.007f, .jump = 1, .reset = (unsigned char) reset, .interact_held = (unsigned char) interact};
+            NetInputPacket wire;
+            net_packet_from_input(&wire, &input);
+            Input back;
+            net_packet_to_input(&back, &wire);
+            CHECK(back.reset == reset && back.interact_held == interact && back.jump && back.seq == 9, "input reset %d interact %d", reset, interact);
+        }
+    }
+
+    // a client that predicted wall jumps the server did not see is reset by the next "l"
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
+    walk(sim, 1.0, 2, 60.0f);
+    sim->c->wall_jump_count = 99;
+    sim->c->can_slide_timer = 0.09f;
+    const unsigned int recons = sim->recons;
+    walk(sim, 1.5, 2, 60.0f);
+    CHECK(sim->recons > recons && sim->c->wall_jump_count == sim->s->wall_jump_count, "the next \"l\" resets wallJumpC (%d, server %d)",
+          sim->c->wall_jump_count, sim->s->wall_jump_count);
+    free(sim);
+}
+
 int main(void) {
     printf("Running reconciliation tests...\n");
     case_packets();
@@ -501,8 +845,22 @@ int main(void) {
         case_noclip(latencies[i], jitter);
     }
     case_respawn();
+    case_net_rate_math();
+    case_v7_recon_packets();
+    case_net_rate(30.0f, 144, 30);   // a sample every frame
+    case_net_rate(60.0f, 144, 60);
+    case_net_rate(144.0f, 144, 144);
+    case_net_rate(240.0f, 144, 240); // 4.17 ms >= 3.47 ms: still every frame (v7 roundToClos)
+    case_net_rate(360.0f, 144, 180); // every other frame
+    case_net_rate(144.0f, 30, 48);   // 30 Hz: every third 6.94 ms frame (20.8 ms >= 16.7 ms)
+    case_held_jump(0);
+    case_held_jump(1);
     case_control_no_replay(50.0f, 15.0f);
     case_control_no_replay(150.0f, 45.0f);
+    // Last: these games draw from the shared spawn RNG, and the cases above expect its sequence.
+    case_rotation_math();
+    case_turn_right();
+    case_bad_rotation();
 
     if (g_failures) {
         printf("Reconciliation tests: %d failure(s)\n", g_failures);

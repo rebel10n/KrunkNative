@@ -5,9 +5,11 @@
 #include <app_mode.h>
 #include <backend_ui.h>
 #include <debug_capture.h>
+#include <input_script.h>
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h> // menu_close_window (Test Map) // html_storage_get/set (knTestMap)
+#include <viewer_embed.h> // the hub's item view showcase
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -254,9 +256,21 @@ void app_mode_parse_args(int *argc, char **argv) {
 #ifndef __EMSCRIPTEN__
     app_window_init(argv[0]); // the executable the page windows run
 #endif
+    // `--editor [flags] [map files...]`: every map file opens as an editor project and the
+    // editor's own flags (--mcp-bus, --bus-dir, --mcp-auto-accept, ...) are taken here
+    int editor = 0;
+    for (int i = 1; i < *argc; i++) editor |= !strcmp(argv[i], "--editor");
     int out = 1;
     for (int i = 1; i < *argc; i++) {
         const char *arg = argv[i];
+        if (editor && editor_bus_parse_arg(*argc, argv, &i)) continue;
+        if (editor && arg[0] != '-') {
+            const size_t len = strlen(arg);
+            if ((len > 5 && !strcmp(arg + len - 5, ".json")) || (len > 4 && !strcmp(arg + len - 4, ".txt"))) {
+                editor_cli_add_file(arg);
+                continue;
+            }
+        }
         if (!strcmp(arg, "--game") || !strcmp(arg, "--hub") || !strcmp(arg, "--social") || !strcmp(arg, "--editor") || !strcmp(arg, "--viewer")) {
             g_start_mode = mode_from_name(arg + 2);
             g_start_query[0] = 0;
@@ -264,7 +278,7 @@ void app_mode_parse_args(int *argc, char **argv) {
             if (i + 1 < *argc && argv[i + 1][0] != '-') {
                 const char *next = argv[i + 1];
                 const size_t len = strlen(next);
-                if (len < 5 || strcmp(next + len - 5, ".json") != 0) {
+                if ((len < 5 || strcmp(next + len - 5, ".json") != 0) && (len < 4 || strcmp(next + len - 4, ".txt") != 0)) {
                     snprintf(g_start_query, sizeof(g_start_query), "%s", next[0] == '?' ? next + 1 : next);
                     i++;
                 }
@@ -513,6 +527,11 @@ static void apply_pending(Client *client) {
     }
 }
 
+int app_mode_page_ready(Client *client) {
+    if (g_app.mode == APP_MODE_GAME || !g_app.page || !g_app.entered) return 0;
+    return g_app.page->ready ? g_app.page->ready(client) : 1;
+}
+
 int app_mode_frame(Client *client, const float now, const float delta) {
     g_app.client = client;
 #ifndef __EMSCRIPTEN__
@@ -553,8 +572,13 @@ int app_mode_frame(Client *client, const float now, const float delta) {
     glViewport(0, 0, fb_w, fb_h);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    input_script_page_tick(client); // KRUNKNATIVE_INPUT_SCRIPT on a page (keys / mouse / shot)
     if (g_app.entered && g_app.page && g_app.page->tick) g_app.page->tick(client, now, delta);
-    if (!debug_capture_hide_ui()) html_ui_render(client->ui);
+    if (!debug_capture_hide_ui()) {
+        html_ui_render(client->ui);
+        viewer_embed_frame(client, delta); // the hub's item view showcase iframe (no-op on the viewer page)
+    }
+    input_script_page_frame_end(client, delta);
     debug_capture_frame_end(client);
     return 1;
 }

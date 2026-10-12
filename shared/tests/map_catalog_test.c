@@ -1,10 +1,12 @@
-// The v3.1.1 map catalogue (shared/src/map_catalog.c): every map file loads, its JSON
-// "name" is the catalogue name, map_init() builds it (objects, spawns, prefab fallbacks,
-// pooled "si" sizes), ids / rotation / Games-window lists match the v3.1.1 capture, and
-// cmd_map style lookups resolve like packetHandlers.ts. Also plays one game_init() on
-// every map. Run from the repository root: ./<build>/map_catalog_test [-v]
+// The map catalogue (shared/src/map_catalog.c): v7.1.4's 32 official maps (index = v7 mapIndex)
+// and the community maps (v3.1.1 custom_maps + the v3.1.1 official maps as "v3_<key>"). Every
+// map file loads, its JSON "name" is the catalogue name, map_init() builds it (objects, spawns,
+// v7 prefabs, pooled "si" sizes), ids / rotation / Games-window lists match, and cmd_map style
+// lookups resolve like packetHandlers.ts. Also plays one game_init() on every map.
+// Run from the repository root: ./<build>/map_catalog_test [-v]
 #include <shared.h>
 #include <map_catalog.h>
+#include <prefabs.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -22,19 +24,21 @@ static int g_checks;
         }                                                 \
     } while (0)
 
-// map_id values the v3.1.1 offline server sent (doc/ref/krunker-v3.1.1/windows/win-games.html)
+// map_id values the v3.1.1 offline server sent (doc/ref/krunker-v3.1.1/windows/win-games.html);
+// fnv1a of the lower-cased name, so the v7 maps of the same name share them
 static const struct {
     const char *key;
     uint32_t id;
 } k_ids[] = {
-    {"soul_sanctum", 2717856513u}, {"subzero", 1389891507u}, {"undergrowth", 2699178862u}, {"lostworld", 2026576977u},
-    {"newtown", 4056084657u}, {"oasis", 2101154094u}, {"sandstorm", 88334292u}, {"shipyard", 2613134335u},
-    {"freight", 1010451404u}, {"industry", 312130495u}, {"kanji", 1336255044u}, {"littletown", 3836435553u},
-    {"burg", 1257833875u}, {"citadel", 1963634499u}, {"evacuation", 4241009034u}, {"zombie_high", 569198284u},
-    {"old_sandstorm", 88334292u}, {"slide_moonlight", 3690042710u}, {"SniperRoyale2", 2800345118u},
-    {"Test", 2949673445u}, {"Verb_Arena", 682138864u}, {"eterno_jump", 739315237u}, {"Krunk_Plaza", 537274925u},
-    {"Slide_Neon_Stage", 197077862u}, {"Bhop_VIP", 3459552096u}, {"ClashRoyale", 2789783172u},
-    {"ESP_Parkour", 2793053018u}, {"FortniteTiltedT", 563473844u},
+    {"v3_soul_sanctum", 2717856513u}, {"v3_subzero", 1389891507u}, {"v3_undergrowth", 2699178862u},
+    {"v3_lostworld", 2026576977u}, {"v3_newtown", 4056084657u}, {"v3_oasis", 2101154094u}, {"v3_sandstorm", 88334292u},
+    {"v3_shipyard", 2613134335u}, {"v3_freight", 1010451404u}, {"v3_industry", 312130495u}, {"v3_kanji", 1336255044u},
+    {"v3_littletown", 3836435553u}, {"v3_burg", 1257833875u}, {"v3_citadel", 1963634499u}, {"v3_evacuation", 4241009034u},
+    {"zombie_high", 569198284u}, {"old_sandstorm", 88334292u}, {"slide_moonlight", 3690042710u},
+    {"SniperRoyale2", 2800345118u}, {"Test", 2949673445u}, {"Verb_Arena", 682138864u}, {"eterno_jump", 739315237u},
+    {"Krunk_Plaza", 537274925u}, {"Slide_Neon_Stage", 197077862u}, {"Bhop_VIP", 3459552096u},
+    {"ClashRoyale", 2789783172u}, {"ESP_Parkour", 2793053018u}, {"FortniteTiltedT", 563473844u},
+    {"sanctum", 2717856513u}, {"sandstorm_v3", 88334292u}, {"kanji", 1336255044u}, {"krunk_plaza_v2", 537274925u},
 };
 
 static int count_prefab(const Map *map, const int prefab) {
@@ -54,7 +58,7 @@ static void test_entry(const size_t index, const int verbose) {
           cJSON_IsString(name) ? name->valuestring : "?", e->name);
     const cJSON *creator = cJSON_GetObjectItemCaseSensitive(json, "creator");
     const char *want_creator = cJSON_IsString(creator) && creator->valuestring[0] ? creator->valuestring
-                               : e->source == MAP_SOURCE_OFFICIAL ? "Krunker" : "Community";
+                               : e->source == MAP_SOURCE_OFFICIAL || !strncmp(e->key, "v3_", 3) ? "Krunker" : "Community";
     CHECK(!strcmp(e->creator, want_creator), "%s: creator %s != body %s", e->key, e->creator, want_creator);
     const cJSON *mod = cJSON_GetObjectItemCaseSensitive(json, "modURL");
     CHECK(!strcmp(e->mod_url, cJSON_IsString(mod) ? mod->valuestring : ""), "%s: modURL mismatch", e->key);
@@ -66,11 +70,9 @@ static void test_entry(const size_t index, const int verbose) {
     int raw_objects = 0, bad_palette = 0;
     const cJSON *o;
     cJSON_ArrayForEach(o, objects) {
-        const cJSON *prefab = cJSON_GetObjectItemCaseSensitive(o, "i");
-        // "BOT" objects become AIs (objects.js addAI, shared/src/ai.c), never map objects
-        const int bot = (cJSON_IsNumber(prefab) && (int) prefab->valuedouble == PREFAB_BOT) ||
-                        (cJSON_IsString(prefab) && !strcmp(prefab->valuestring, "BOT"));
-        if (!bot) raw_objects++;
+        // AI_SPAWNER / BOT_SPAWNER become pending AIs / bots, TERMINAL and EVENT build nothing (v7
+        // map.js): never map objects (prefabs.h PREFAB_R_NO_OBJECT)
+        if (!prefab_has_role(map_raw_object_prefab(o), PREFAB_R_NO_OBJECT)) raw_objects++;
         CHECK(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(o, "s")) >= 3, "%s: object without s", e->key);
         const char *idx_keys[] = {"ci", "ei"};
         for (int k = 0; k < 2; k++) {
@@ -86,7 +88,15 @@ static void test_entry(const size_t index, const int verbose) {
     CHECK(map->spawn_count > 0, "%s: no spawns", e->key);
     CHECK((int) map->object_count == raw_objects, "%s: %zu of %d objects built", e->key, map->object_count, raw_objects);
     int out_of_range = 0;
-    for (size_t i = 0; i < map->object_count; i++) out_of_range += map->objects[i]->prefab < 0 || map->objects[i]->prefab > PREFAB_KNIGHT;
+    // v7.1.4: ids 0-96 keep their prefab (no id >= 60 falls back to CUBE any more)
+    for (size_t i = 0; i < map->object_count; i++) out_of_range += map->objects[i]->prefab >= PREFAB_COUNT;
+    int remapped = 0;
+    cJSON_ArrayForEach(o, objects) {
+        const cJSON *prefab = cJSON_GetObjectItemCaseSensitive(o, "i");
+        if (cJSON_IsNumber(prefab) && prefab->valuedouble >= 0 && prefab->valuedouble < PREFAB_COUNT &&
+            map_raw_object_prefab(o) != (int) prefab->valuedouble) remapped++;
+    }
+    CHECK(remapped == 0, "%s: %d objects lose their prefab id", e->key, remapped);
     CHECK(out_of_range == 0, "%s: %d objects keep an unknown prefab id", e->key, out_of_range);
     if (verbose) {
         printf("  %-2zu %-16s %-16s %-9s objects %4zu spawns %2zu cubes %4d dims x[%.0f,%.0f] y[%.0f,%.0f] z[%.0f,%.0f]\n", index,
@@ -101,7 +111,9 @@ static void test_entry(const size_t index, const int verbose) {
 // One round of the shared game on every catalogue map (the list map_catalog_list builds).
 static void test_game_init_all(void) {
     const size_t count = map_catalog_count();
-    int all[64];
+    int all[256]; // 68 maps since the v7 catalogue (was int[64]: a stack overflow past 64)
+    CHECK(count <= sizeof(all) / sizeof(all[0]), "catalogue fits the test's index array: %zu", count);
+    if (count > sizeof(all) / sizeof(all[0])) return;
     for (size_t i = 0; i < count; i++) all[i] = (int) i;
     size_t n = 0;
     const cJSON **maps = map_catalog_list(all, count, &n);
@@ -119,27 +131,35 @@ static void test_game_init_all(void) {
 int main(const int argc, char **argv) {
     const int verbose = argc > 1 && !strcmp(argv[1], "-v");
     const size_t count = map_catalog_count();
-    CHECK(count == 36, "catalogue has %zu maps, v3.1.1 ships 15 + 21", count);
+    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 32 && count == 32 + 21 + 15, "catalogue has %zu maps: v7.1.4's 32 + 21 community + 15 v3", count);
 
-    // official maps: catalogue index == v3.1.1 mapIndex; keys unique
+    // official maps: catalogue index == v7.1.4 mapIndex; keys unique; community maps in readdir
+    // order, then the v3.1.1 official maps
     for (size_t i = 0; i < count; i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (i < MAP_CATALOG_OFFICIAL_COUNT) CHECK(e->source == MAP_SOURCE_OFFICIAL && e->index == (int) i, "%s index", e->key);
+        if (i < MAP_CATALOG_OFFICIAL_COUNT) CHECK(e->source == MAP_SOURCE_OFFICIAL && e->index == (int) i && e->hostable, "%s index", e->key);
         else CHECK(e->source == MAP_SOURCE_CUSTOM && e->index == -1 && !e->rotation && !e->hostable, "%s custom flags", e->key);
         CHECK(map_catalog_index_of_key(e->key) == (int) i, "%s key not unique", e->key);
-        if (i > MAP_CATALOG_OFFICIAL_COUNT) CHECK(strcmp(map_catalog_at(i - 1)->key, e->key) < 0, "%s not in readdir order", e->key);
+        const int v3 = !strncmp(e->key, "v3_", 3);
+        if (i > MAP_CATALOG_OFFICIAL_COUNT && !v3) CHECK(strcmp(map_catalog_at(i - 1)->key, e->key) < 0, "%s not in readdir order", e->key);
+        CHECK(e->path && !strncmp(e->path, i < MAP_CATALOG_OFFICIAL_COUNT ? "maps/v7/" : v3 ? "maps/" : "maps/custom/", v3 ? 5 : 8),
+              "%s path %s", e->key, e->path ? e->path : "?");
     }
+    CHECK(!strcmp(map_catalog_at(0)->key, "burg_new") && !strcmp(map_catalog_at(10)->name, "Kanji") &&
+          !strcmp(map_catalog_at(18)->name, "Tortuga") && !strcmp(map_catalog_at(31)->name, "Soul Sanctum"), "v7 data/maps.js order");
 
     if (verbose) printf("catalogue:\n");
     for (size_t i = 0; i < count; i++) test_entry(i, verbose);
 
-    // rotation == src/data/map.js rotationMaps == g_rotation_maps
+    // rotation == v7 src/data/map.js rotationMaps == g_rotation_maps
+    static const int k_v7_rotation[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28};
     int rotation[64];
     const size_t rotation_count = map_catalog_rotation(rotation, 64);
-    CHECK(rotation_count == sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]), "rotation size %zu", rotation_count);
-    for (size_t i = 0; i < rotation_count; i++) CHECK(rotation[i] == g_rotation_maps[i], "rotation[%zu] = %d", i, rotation[i]);
-    // the Raid end-vote candidate "23,13" needs map 13 = Soul Sanctum
-    CHECK(!strcmp(map_catalog_at(13)->name, "Soul Sanctum"), "mapIndex 13 is not Soul Sanctum");
+    CHECK(rotation_count == sizeof(k_v7_rotation) / sizeof(k_v7_rotation[0]) &&
+          rotation_count == sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]), "rotation size %zu", rotation_count);
+    for (size_t i = 0; i < rotation_count; i++) {
+        CHECK(rotation[i] == g_rotation_maps[i] && rotation[i] == k_v7_rotation[i], "rotation[%zu] = %d", i, rotation[i]);
+    }
     load_default_maps();
     for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) CHECK(g_maps[i] == map_catalog_json(i), "g_maps[%zu]", i);
 
@@ -149,48 +169,46 @@ int main(const int argc, char **argv) {
         CHECK(index >= 0 && map_catalog_map_id(map_catalog_at((size_t) index)) == k_ids[i].id, "map_id of %s", k_ids[i].key);
     }
 
-    // cmd_map lookups
+    // cmd_map lookups: official names first, then community keys
     CHECK(map_catalog_find("burg") == 0, "find burg");
-    CHECK(map_catalog_find("Soul") == 13, "find soul");
-    CHECK(map_catalog_find("soul sanctum") == 13, "find soul sanctum");
-    CHECK(map_catalog_find("soul_sanctum") == 13, "find soul_sanctum");
+    CHECK(map_catalog_find("Soul") == 31, "find soul");
+    CHECK(map_catalog_find("soul sanctum") == 31, "find soul sanctum");
+    CHECK(map_catalog_find("tortuga") == 18, "find tortuga");
+    CHECK(map_catalog_find("v3_soul_sanctum") == map_catalog_index_of_key("v3_soul_sanctum"), "find v3_soul_sanctum");
     CHECK(map_catalog_find("old_burg") == map_catalog_index_of_key("old_burg"), "find old_burg");
     CHECK(map_catalog_find("zombie") == map_catalog_index_of_key("zombie_high"), "find zombie");
     CHECK(map_catalog_find("SLIDE_") == map_catalog_index_of_key("Slide_Neon_Stage"), "find SLIDE_");
     CHECK(map_catalog_find("5") == 5, "find 5");
     CHECK(map_catalog_find("nosuchmap") == -1, "find nosuchmap");
 
-    // console lookups (client `map`, server_bin `map`/`changelevel`): Soul Sanctum is not in
-    // the rotation, so these resolve against the catalogue
-    const char *const soul[] = {"Soul Sanctum", "soul sanctum", "SOUL SANCTUM", "\"Soul Sanctum\"", "soul_sanctum",
-                                "Soul_Sanctum", "  soul  ", "soul", "Sou", "soulsanctum", "'soul sanctum'"};
-    for (size_t i = 0; i < sizeof(soul) / sizeof(soul[0]); i++) CHECK(map_catalog_resolve(soul[i], NULL, 0, NULL) == 13, "resolve %s", soul[i]);
-    CHECK(map_catalog_resolve("burg", NULL, 0, NULL) == 0, "resolve burg (key beats old_burg's name)");
+    // console lookups (client `map`, server_bin `map`/`changelevel`)
+    const char *const soul[] = {"Soul Sanctum", "soul sanctum", "SOUL SANCTUM", "\"Soul Sanctum\"", "Soul_Sanctum", "soulsanctum",
+                                "'soul sanctum'", "sanctum"};
+    for (size_t i = 0; i < sizeof(soul) / sizeof(soul[0]); i++) CHECK(map_catalog_resolve(soul[i], NULL, 0, NULL) == 31, "resolve %s", soul[i]);
+    CHECK(map_catalog_resolve("v3_soul_sanctum", NULL, 0, NULL) == map_catalog_index_of_key("v3_soul_sanctum"), "resolve v3 key");
+    CHECK(map_catalog_resolve("kanji", NULL, 0, NULL) == 10, "resolve kanji (the v7 key)");
     CHECK(map_catalog_resolve("Freight", NULL, 0, NULL) == 6, "resolve Freight");
     CHECK(map_catalog_resolve("old burg", NULL, 0, NULL) == map_catalog_index_of_key("old_burg"), "resolve old burg");
     CHECK(map_catalog_resolve("zombie", NULL, 0, NULL) == map_catalog_index_of_key("zombie_high"), "resolve zombie");
-    CHECK(map_catalog_resolve("sand", NULL, 0, NULL) == 2, "resolve sand (old_sandstorm's label is its key)");
-    CHECK(map_catalog_resolve("ship", NULL, 0, NULL) == 5, "resolve ship");
+    CHECK(map_catalog_resolve("trop", NULL, 0, NULL) == 19, "resolve trop");
     int cands[8];
     size_t cand_n = 0;
-    // Sandstorm, Subzero, Shipyard, Soul Sanctum, SniperRoyale2, Slide_Neon_Stage, slide_moonlight;
-    // only `max` are written, the count is the total
-    CHECK(map_catalog_resolve("s", cands, 3, &cand_n) == -2 && cand_n == 7 && cands[0] == 2 && cands[2] == 5,
-          "resolve s ambiguous (%zu)", cand_n);
     CHECK(map_catalog_resolve("slide", cands, 8, &cand_n) == -2 && cand_n == 2 &&
           cands[0] == map_catalog_index_of_key("Slide_Neon_Stage") && cands[1] == map_catalog_index_of_key("slide_moonlight"),
           "resolve slide candidates");
-    CHECK(map_catalog_resolve("lit", cands, 8, &cand_n) == 1, "resolve lit");
     CHECK(map_catalog_resolve("nosuchmap", cands, 8, &cand_n) == -1 && cand_n == 0, "resolve nosuchmap");
     CHECK(map_catalog_resolve("\"\"", NULL, 0, NULL) == -1, "resolve empty quotes");
 
-    // Games window tabs (capture): Popular / New list all 36, Featured the 15 official ones
-    int tab[64];
-    CHECK(map_catalog_games_tab(0, tab, 64) == 36 && tab[0] == 13, "popular");
-    CHECK(map_catalog_games_tab(1, tab, 64) == 15 && tab[0] == 12, "featured");
-    CHECK(map_catalog_games_tab(2, tab, 64) == 36 && tab[0] == 3, "new");
-    CHECK(map_catalog_games_tab(3, tab, 64) == 0, "favorites");
-    CHECK(map_catalog_games_tab(4, tab, 64) == 36 && tab[0] == 0 && tab[1] == 8 && tab[15] == 15 && tab[35] == 35, "mine");
+    // Games window tabs: Featured = the 32 official maps; Popular / New = those, then the rest
+    int tab[128];
+    CHECK(map_catalog_games_tab(0, tab, 128) == count && tab[0] == 0 && tab[32] == map_catalog_index_of_key("v3_soul_sanctum"), "popular");
+    CHECK(map_catalog_games_tab(1, tab, 128) == 32 && tab[0] == 0 && tab[31] == 31, "featured");
+    CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[32] == map_catalog_index_of_key("v3_subzero"), "new");
+    CHECK(map_catalog_games_tab(3, tab, 128) == 0, "favorites");
+    CHECK(map_catalog_games_tab(4, tab, 128) == count, "mine");
+    char thumb[64];
+    CHECK(map_catalog_thumb(map_catalog_at(31), thumb, sizeof(thumb)) && !strcmp(thumb, "img/maps/map_31.png") &&
+          !map_catalog_thumb(map_catalog_at((size_t) map_catalog_index_of_key("v3_kanji")), thumb, sizeof(thumb)), "thumbnails");
 
     // map_catalog_slot: find-or-append
     const cJSON **list = NULL;

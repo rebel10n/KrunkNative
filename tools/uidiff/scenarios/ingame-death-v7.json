@@ -1,0 +1,92 @@
+{
+  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-death-v7.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 0.8,
+    "hud": {
+      "health": 0,
+      "maxHealth": 100,
+      "healthSegments": 6,
+      "ammo": 28,
+      "ammoMax": 28,
+      "ammoLimit": false,
+      "melee": false,
+      "reloading": false,
+      "reloadPercent": 0,
+      "timerText": "03:45",
+      "kills": 0,
+      "deaths": 1,
+      "score": 0,
+      "weaponName": "Assault Rifle",
+      "weaponIcon": "icon_2",
+      "classIndex": 0,
+      "scoped": false,
+      "fps": 0,
+      "aim": 0,
+      "spread": 100,
+      "scoreboard": false,
+      "ping": 0,
+      "loadout": [
+        {
+          "name": "Assault Rifle",
+          "icon": "icon_2",
+          "melee": false
+        },
+        {
+          "name": "Pistol",
+          "icon": "icon_3",
+          "melee": false
+        },
+        {
+          "name": "Combat Knife",
+          "icon": "icon_0",
+          "melee": true
+        }
+      ],
+      "loadoutIndex": 0
+    },
+    "chat": [
+      {
+        "text": "Spawned a Bot",
+        "color": "#fc03ec"
+      }
+    ],
+    "dead": true,
+    "after_ms": 820,
+    "killcard": {
+      "killer": "Bot",
+      "weapon": "Shotgun",
+      "weaponIcon": "icon_6",
+      "level": 2,
+      "myLevel": 1,
+      "score": 0,
+      "classIndex": 4,
+      "pcStat": [
+        "KDR",
+        "2.50"
+      ],
+      "stats": [
+        65000,
+        42,
+        "38.1%",
+        3,
+        450
+      ]
+    }
+  },
+  "frames": 6,
+  "note": "v7 death screen: class level, player card stat and life stats from the \"3\" packet (NET_PACKET_DEATH_INFO)."
+}

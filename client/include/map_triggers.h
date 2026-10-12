@@ -6,3 +6,6 @@
 // NET_PACKET_OBJECT_STATE / CHECKPOINT / SOUND / JUMP_SCARE / POSITION / POPUP; 1 = handled.
 int  client_triggers_handle_event(Client*, int type, const void *payload, uint16_t length);
 void client_triggers_tick(Client*); // per frame: the jump scare timeout
+// The custom map GUI (Map.gui, overlay.customGUIs): whether element `index` (its position in the
+// map's "gui" array) shows, after "tgui" toggles (nv). For the HUD renderer of the custom GUI.
+int client_triggers_gui_visible(const Client*, int index);

@@ -1,0 +1,92 @@
+H 
+X Publish or Update Asset
+X Type
+I select#5[Model..Video]=Model
+X Category
+I select#17[Clutter..Triggers]=Clutter
+X Private
+I switch=0
+X Thumbnail (.png):
+I button()=Select
+I file()=null
+X 0 / 250
+X KB
+X Sound (.mp3):
+I button()=Select
+I file()=null
+X 0 / 5
+X MB
+X Video (.mp4):
+I button()=Select
+I file()=null
+X 0 / 20
+X MB
+X Texture / Image (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Diffuse Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Emissive Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Normal Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Specular Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Alpha Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Displacement Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Roughness Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Metalness Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Bump Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Light Texture (.png):
+I button()=Select
+I file()=null
+X 0 / 10
+X MB
+X Model (.obj/.gltf/.glb/.fbx):
+I button()=Select
+I file()=null
+X Icon (.png):
+I button()=Select
+I file()=null
+X 0 / 100
+X KB
+X Max Size
+X 0 / 100
+X mb
+I text(Name)=null
+I text(Paste Data)=null
+X Publish/Update

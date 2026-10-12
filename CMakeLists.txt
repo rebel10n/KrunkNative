@@ -39,6 +39,31 @@ include_directories(shared/include)
 file(GLOB_RECURSE SHARED_SOURCES shared/src/*.c)
 file(GLOB_RECURSE SHARED_HEADERS shared/include/*.h)
 
+# Build version (shared/include/build_info.h): cmake/kn_version.cmake writes
+# generated/kn_version.h (git describe, commit, commit time, build time) at configure time and
+# at every build; only shared/src/build_info.c reads it, in library kn_build_info, which the
+# client, server_bin and kn_brain link. CI builds without git pass the KRUNKNATIVE_VERSION_*
+# values (a non-empty value wins over git).
+set(KRUNKNATIVE_VERSION_DESCRIBE "" CACHE STRING "Build version override (git describe)")
+set(KRUNKNATIVE_VERSION_COMMIT "" CACHE STRING "Build commit override (hex)")
+set(KRUNKNATIVE_VERSION_COMMIT_TIME "" CACHE STRING "Build commit time override (unix seconds)")
+set(KRUNKNATIVE_VERSION_BUILD_TIME "" CACHE STRING "Build time override (ISO-8601 UTC)")
+set(KN_VERSION_HEADER "${CMAKE_BINARY_DIR}/generated/kn_version.h")
+set(KN_VERSION_ARGS
+    "-DKN_SRC_DIR=${CMAKE_SOURCE_DIR}" "-DKN_OUT=${KN_VERSION_HEADER}"
+    "-DKN_OVR_DESCRIBE=${KRUNKNATIVE_VERSION_DESCRIBE}" "-DKN_OVR_COMMIT=${KRUNKNATIVE_VERSION_COMMIT}"
+    "-DKN_OVR_COMMIT_TIME=${KRUNKNATIVE_VERSION_COMMIT_TIME}" "-DKN_OVR_BUILD_TIME=${KRUNKNATIVE_VERSION_BUILD_TIME}")
+execute_process(COMMAND "${CMAKE_COMMAND}" ${KN_VERSION_ARGS} -P "${CMAKE_SOURCE_DIR}/cmake/kn_version.cmake")
+add_custom_target(kn_version
+    COMMAND "${CMAKE_COMMAND}" ${KN_VERSION_ARGS} -P "${CMAKE_SOURCE_DIR}/cmake/kn_version.cmake"
+    BYPRODUCTS "${KN_VERSION_HEADER}"
+    COMMENT "Build version (kn_version.h)"
+    VERBATIM)
+list(FILTER SHARED_SOURCES EXCLUDE REGEX "/shared/src/build_info\\.c$")
+add_library(kn_build_info STATIC shared/src/build_info.c shared/include/build_info.h)
+target_include_directories(kn_build_info PRIVATE "${CMAKE_BINARY_DIR}/generated" shared/lib/cJSON)
+add_dependencies(kn_build_info kn_version)
+
 set(CLIENT_BINARY client_bin)
 file(GLOB_RECURSE CLIENT_SOURCES client/src/*.c)
 file(GLOB_RECURSE CLIENT_HEADERS client/include/*.h)
@@ -57,6 +82,34 @@ endif ()
 set(SERVER_BINARY server_bin)
 file(GLOB_RECURSE SERVER_SOURCES server/src/*.c)
 file(GLOB_RECURSE SERVER_HEADERS server/include/*.h)
+
+# Server core (server/include/server.h): connections, packet dispatch, broadcast, the tick
+# step, accounts and config. server_bin links it with its network frontend (the rest of
+# server/src: TCP/UDP sockets, rcon, brain link, finder, CLI); the client links it as the
+# offline sandbox server (server/src/sandbox.c) with the no-network backend below. No GL,
+# sockets or threads of its own.
+set(SERVER_CORE_SOURCES
+    server/src/net.c
+    server/src/accounts.c
+    server/src/config.c
+    server/src/log.c
+    server/src/events.c
+    server/src/server_core.c
+    server/src/sandbox.c
+    server/src/ks_server_host.c
+    server/src/ks_storage.c
+)
+# What the core needs from the backend link in a build without it (the client): brain.c
+# compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
+# central auth and rcon hooks.
+set(SERVER_CORE_STANDALONE_SOURCES
+    server/src/brain.c
+    server/src/sandbox_backend.c
+)
+list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/server/src/sandbox_backend.c)
+foreach (src IN LISTS SERVER_CORE_SOURCES)
+    list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/${src})
+endforeach ()
 
 if (EMSCRIPTEN)
     # ------------------------------------------------------------------
@@ -85,10 +138,11 @@ if (EMSCRIPTEN)
         set(WEB_DIST_DIR ${CMAKE_SOURCE_DIR}/dist/web)
     endif()
 
-    add_executable(client ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
+    add_executable(client ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES}
+        ${SERVER_CORE_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES}) # the offline sandbox server (server_sandbox.h)
     target_compile_definitions(client PRIVATE KRUNKNATIVE_CLIENT)
-    target_include_directories(client PRIVATE client/include)
-    target_link_libraries(client PRIVATE freetype cJSON pcg_basic m)
+    target_include_directories(client PRIVATE client/include server/include)
+    target_link_libraries(client PRIVATE freetype cJSON pcg_basic kn_build_info m)
 
     # HTML UI on the web: the browser page is the UI. The C UI logic drives the page's
     # DOM through web_dom.c (html_dom.h) and ui/js/kn-shim.js; the engine itself is not
@@ -121,7 +175,7 @@ if (EMSCRIPTEN)
         -sSTACK_SIZE=8388608
         -sFORCE_FILESYSTEM=1
         -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,stringToNewUTF8,stackSave,stackRestore,stackAlloc
-        -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_kn_ui_event,_kn_ui_resize_observed
+        -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_kn_ui_event,_kn_ui_resize_observed,_kn_ui_key_prevent
         -lwebsocket.js
         --preload-file ${CMAKE_SOURCE_DIR}/ui/windows@/ui/windows
     )
@@ -266,7 +320,10 @@ else ()
     # CLIENT
     add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
     target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
-    target_link_libraries(${CLIENT_BINARY} PRIVATE glfw freetype Threads::Threads m)
+    target_link_libraries(${CLIENT_BINARY} PRIVATE glfw freetype kn_build_info Threads::Threads m)
+    # the offline sandbox server (server_sandbox.h): the server core + its no-network backend
+    target_sources(${CLIENT_BINARY} PRIVATE ${SERVER_CORE_STANDALONE_SOURCES})
+    target_link_libraries(${CLIENT_BINARY} PRIVATE kn_server_core)
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
     target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})
@@ -295,10 +352,14 @@ else ()
         krunknative_add_html_sources(${CLIENT_BINARY} SOURCES html_ui.c html_dom_core.c stub.c)
     endif ()
 
-    # SERVER
+    # SERVER: the core library + server_bin's network frontend
+    add_library(kn_server_core STATIC ${SERVER_CORE_SOURCES} ${SERVER_HEADERS})
+    target_include_directories(kn_server_core PUBLIC server/include)
+    target_link_libraries(kn_server_core PUBLIC kn_build_info Threads::Threads m)
+
     add_executable(${SERVER_BINARY} ${SERVER_HEADERS} ${SERVER_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
     target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)
-    target_link_libraries(${SERVER_BINARY} PRIVATE replxx Threads::Threads m)
+    target_link_libraries(${SERVER_BINARY} PRIVATE kn_server_core replxx Threads::Threads m)
     target_include_directories(${SERVER_BINARY} PRIVATE server/include)
     # https:// for the finder heartbeat and central auth hasJoined (server/src/http_client.c);
     # without libcurl server_bin only speaks plain http:// to them.
@@ -311,6 +372,7 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32)
         target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
+        target_link_libraries(kn_server_core PUBLIC ws2_32)
     endif ()
 
     # TESTS
@@ -323,11 +385,42 @@ else ()
     # knet UDP transport (shared/src/knet.c only: no game code, no sockets)
     add_executable(knet_test shared/include/knet.h shared/src/knet.c shared/tests/knet_test.c)
 
+    # editor bus (shared/src/editor_bus.c: framing, scopes, tokens, unix socket + TCP fallback)
+    add_executable(editor_bus_test shared/include/editor_bus.h shared/src/editor_bus.c shared/tests/editor_bus_test.c)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(editor_bus_test PRIVATE ws2_32)
+    endif ()
+
+    # config_test (map-logic WP-E): v7.1.4 custom game config against v7's own setupGameConfig /
+    # applyConfig results (shared/tests/data/v7/config_cases.json), map config, sync, match votes
+    add_executable(config_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/config_test.c)
+    target_link_libraries(config_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(config_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     add_executable(class_spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/class_spawn_test.c)
     target_link_libraries(class_spawn_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(class_spawn_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+
+    # weapons_v7_test / combat_test (WP-B): v7.1.4 class / weapon / effect / streak tables against
+    # shared/tests/data/v7 (tools/kref/v7-dump.js), and the charge / hitbox / streak / effect maths
+    # zombies_test (map-logic WP-H): waves, power-ups, machines, perks, finiteAmmo, airdrops
+    add_executable(zombies_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/zombies_test.c)
+    target_link_libraries(zombies_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(zombies_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    foreach (wpb_test weapons_v7_test combat_test)
+        add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
+        target_link_libraries(${wpb_test} PRIVATE m)
+        if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+            target_link_libraries(${wpb_test} PRIVATE ws2_32) # shared/src/net.c
+        endif ()
+    endforeach ()
 
     # recon_test: client prediction + server reconciliation over a simulated laggy link
     add_executable(recon_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/recon_test.c)
@@ -341,6 +434,13 @@ else ()
     target_link_libraries(match_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(match_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # lagcomp_test: v3.1.1 storeState / fetchState lag compensation (hit with, miss without; window, selection)
+    add_executable(lagcomp_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/lagcomp_test.c)
+    target_link_libraries(lagcomp_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(lagcomp_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # modes_test: every v3.1.1 game mode (scoring, objectives, picks, lives, win rules) with simulated players
@@ -357,12 +457,144 @@ else ()
         target_link_libraries(ai_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # bot_test: Krunker v7.1.4 bot players (shared/src/bots.c) and the bot_* console commands
+    add_executable(bot_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/bot_test.c)
+    target_link_libraries(bot_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(bot_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # spawn_test: v3.1.1 getSpawnPoint rules, distinct points for players spawning in one tick
+    add_executable(spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/spawn_test.c)
+    target_link_libraries(spawn_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(spawn_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # sandbox_test: the offline sandbox server (server_sandbox.h) over the loopback transport
+    add_executable(sandbox_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/sandbox_test.c)
+    target_link_libraries(sandbox_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(sandbox_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # social_test (player-viewer WP-E part 2b): v7 chat / voice channels, multi-spray, taunts over the sandbox
+    add_executable(social_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/social_test.c)
+    target_link_libraries(social_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(social_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # sandbox_config_test (map-logic WP-E): the offline sandbox plays a map's embedded config, its
+    # players count as having an account; GAME_CONFIG / NETWORK_DATA only to protocol-1.3 peers
+    add_executable(sandbox_config_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/sandbox_config_test.c)
+    target_link_libraries(sandbox_config_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(sandbox_config_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # ks_server_test: the KrunkScript server host (server/src/ks_server_host.c) over the sandbox
+    add_executable(ks_server_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/ks_server_test.c)
+    target_link_libraries(ks_server_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(ks_server_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # ks_storage_test (KrunkScript WP6): GAME.STORAGE / Save / Load Data on the offline store, the
+    # kn_brain frames, KR rewards, ADMIN.ban
+    add_executable(ks_storage_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/ks_storage_test.c)
+    target_link_libraries(ks_storage_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(ks_storage_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # triggers_test: the v7.1.4 trigger runtime (WP-C): events, conditions, actions, values, delays, chains,
+    # costs, pickups, and every trigger of the v7-format custom maps
+    add_executable(triggers_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/triggers_test.c)
+    target_link_libraries(triggers_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(triggers_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # trigger_authority_test: map triggers / interact fire on an authority game only (is_local or a server)
+    add_executable(trigger_authority_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/trigger_authority_test.c)
+    target_link_libraries(trigger_authority_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(trigger_authority_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # map_catalog_test: every v3.1.1 map (15 official + 21 community) loads, parses and plays
     add_executable(map_catalog_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_catalog_test.c)
     target_link_libraries(map_catalog_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+
+    # map_v7_test (map-logic WP-A): the v7.1.4 map schema, prefab table, shims, round trip and validation
+    add_executable(map_v7_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_v7_test.c)
+    target_link_libraries(map_v7_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(map_v7_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # world_v7_test (map-logic WP-B): tris, terrain, BR zone, score / check points / resets, zones, PvP, moves, builds
+    add_executable(world_v7_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/world_v7_test.c)
+    target_link_libraries(world_v7_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(world_v7_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # editor_serialize_test (doc/v7/editor.md WP1): the editor's GL-free data model
+    # (client/src/editor/editor_model.c) against v7.1.4's own ObjectInstance serialization
+    # (client/tests/data/editor_v7_golden.json) and import / export round trips over assets/maps
+    add_executable(editor_serialize_test client/tests/editor_serialize_test.c client/src/editor/editor_model.c
+                   client/src/editor/editor_model.h client/src/editor/editor_data.c client/src/editor/editor_data.h
+                   client/src/editor/editor_script_lang.c shared/src/ks/ks_lex.c shared/src/ks/ks_parse.c
+                   shared/src/ks/ks_check.c shared/src/ks/ks_api_table.c)
+    target_include_directories(editor_serialize_test PRIVATE client/src/editor shared/include)
+    target_link_libraries(editor_serialize_test PRIVATE cJSON m)
+    enable_testing()
+    add_test(NAME editor_serialize_test COMMAND editor_serialize_test ${CMAKE_SOURCE_DIR}
+             --golden ${CMAKE_SOURCE_DIR}/doc/ref/krunker-v7.1.4/editor/inspector-edits.json) # WP3: the inspector edits
+
+    # editor_export_test (doc/v7/editor.md WP6): File > Export GLTF / Export MTL
+    # (client/src/editor/editor_export.c, GL-free) against goldens and read back with fast_obj / cgltf
+    add_executable(editor_export_test client/tests/editor_export_test.c client/src/editor/editor_export.c
+                   client/src/editor/editor_export.h client/src/editor/editor_model.c client/src/editor/editor_data.c
+                   client/src/fast_obj.c ${SHARED_SOURCES} ${SHARED_HEADERS})
+    target_compile_definitions(editor_export_test PRIVATE ED_EXPORT_NO_EDITOR)
+    target_include_directories(editor_export_test PRIVATE client/src/editor client/include shared/include)
+    target_link_libraries(editor_export_test PRIVATE cJSON pcg_basic m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(editor_export_test PRIVATE ws2_32)
+    endif ()
+    add_test(NAME editor_export_test COMMAND editor_export_test ${CMAKE_SOURCE_DIR})
+
+    # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
+    add_subdirectory(tools/editor-mcp)
+
+    # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
+    # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
+    file(GLOB KS_SOURCES shared/src/ks/*.c)
+    add_executable(ksc tools/ks/ksc.c tools/ks/ksc_run.c ${KS_SOURCES})
+    target_link_libraries(ksc PRIVATE m)
+    set(KS_FRONT_SOURCES shared/src/ks/ks_lex.c shared/src/ks/ks_parse.c shared/src/ks/ks_check.c shared/src/ks/ks_api_table.c
+        shared/src/ks/ks_import_js.c)
+    add_executable(ks_front_test shared/tests/ks_front_test.c ${KS_FRONT_SOURCES})
+    enable_testing()
+    add_test(NAME ks_front_test COMMAND ks_front_test ${CMAKE_SOURCE_DIR}/shared/tests/ks)
+    # ks_vm_test (WP2): runtime conformance programs (shared/tests/ks/run/*.krnk + .out), number,
+    # serialisation and GC unit tests, and the corpus runtime smoke test, over the ks sources
+    # only. -DKRUNKNATIVE_KS_SANITIZE=ON builds it with ASan + UBSan (GCC needs libasan).
+    option(KRUNKNATIVE_KS_SANITIZE "Build ks_vm_test with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+    add_executable(ks_vm_test shared/tests/ks_vm_test.c ${KS_SOURCES})
+    target_compile_definitions(ks_vm_test PRIVATE KS_TEST_DIR="${CMAKE_SOURCE_DIR}/shared/tests/ks")
+    target_link_libraries(ks_vm_test PRIVATE m)
+    if (KRUNKNATIVE_KS_SANITIZE)
+        target_compile_options(ks_vm_test PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+        target_link_libraries(ks_vm_test PRIVATE -fsanitize=address,undefined)
+    endif ()
+    add_test(NAME ks_vm_test COMMAND ks_vm_test ${CMAKE_SOURCE_DIR}/shared/tests/ks)
 
     # ui_test: engine driver for dumps, probes, renders and benchmarks
     # (client/src/html/ui_test.c holds the subcommand table). It is the engine plus
@@ -383,6 +615,54 @@ else ()
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
             target_link_libraries(ui_test PRIVATE ws2_32) # shared/src/net.c
         endif ()
+    endif ()
+
+    # canvas2d_test: the KrunkScript GAME.OVERLAY canvas (client/src/ks/canvas2d.c + ks_overlay.c)
+    # replaying a tools/canvas2d scene into a PNG; tools/canvas2d/run.sh diffs it against
+    # headless Chromium's Canvas 2D. Needs only GL, FreeType and the shared sources.
+    add_executable(canvas2d_test
+        tools/canvas2d/canvas2d_test.c
+        client/src/ks/canvas2d.c
+        client/src/ks/ks_overlay.c
+        client/src/ks/ks_overlay_scene.c
+        client/src/shader.c
+        client/src/png_write.c
+        client/src/headless.c
+        client/src/stb_image.c
+        ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(canvas2d_test PRIVATE client/include)
+    target_link_libraries(canvas2d_test PRIVATE freetype glfw Threads::Threads m)
+    krunknative_link_gl(canvas2d_test)
+    krunknative_link_headless(canvas2d_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(canvas2d_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # gltf_test: the GLTF loader (client/src/gltf.c) on v7.1.4 animated store models through the
+    # pet path (client/src/pets.c), the pets.js follow AI and the skin animations (skin_fx.c).
+    # Headless GL (--headless); run from the repo root (WP-F, doc/v7/player-viewer.md).
+    add_executable(gltf_test
+        tools/gltf_test/gltf_test.c
+        client/src/gltf.c
+        client/src/pets.c
+        client/src/skin_fx.c
+        client/src/cosmetics.c
+        client/src/viewer/viewer_store.c
+        client/src/viewer/viewer_store_table.c
+        client/src/mesh.c
+        client/src/loaders.c
+        client/src/fast_obj.c
+        client/src/shader.c
+        client/src/materials/basic.c
+        client/src/headless.c
+        client/src/stb_image.c
+        ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(gltf_test PRIVATE client/include client/lib)
+    target_link_libraries(gltf_test PRIVATE freetype glfw Threads::Threads m)
+    krunknative_link_gl(gltf_test)
+    krunknative_link_headless(gltf_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(gltf_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the

@@ -1,0 +1,26 @@
+P Partner Zone
+L[] Border : switch=0
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 10/0,10/0,10/0
+-
+F Technical & Logic closed
+-
+L[] Destructible : switch=0
+L[] Start Destroyed : switch=0
+L[] Spawn Chance : sval=0 range[0,100,0.01]=0
+L[] Health : sval=0 range[0,50000,10]=0
+-
+Fs Respawn closed
+L[subsection] Timer (s) : sval=0 range[0,3600,0.1]=0
+L[subsection] Random : switch=0
+-
+Fs Interface closed
+L[subsection] ID : sval=0 range[0,2000,1]=0
+-

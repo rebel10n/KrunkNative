@@ -183,7 +183,7 @@ void social_push_account(int64_t account_id, cJSON *frame) { social_push_account
 
 cJSON *social_account_info(const cJSON *account) {
     cJSON *info = cJSON_CreateObject();
-    const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned"};
+    const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges"};
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(account, keys[i]);
         if (v) cJSON_AddItemToObject(info, keys[i], cJSON_Duplicate(v, 1));
@@ -516,6 +516,10 @@ static const SocialRoute k_routes[] = {
     {"spin", sh_spin},
     {"fkr", sh_free_kr},
     {"clm", sh_claim},
+    {"chg", sh_challenges},   /* WP-E part 2c (progress.c) */
+    {"bdg", sh_badge_select},
+    {"cbdg", sh_badge_claim},
+    {"mdl", sh_medals},
     {"unbx", sh_noop},
     {"edMp", sh_edit_map},
     {"fvM", sh_fav_creation},

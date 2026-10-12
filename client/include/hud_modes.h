@@ -16,6 +16,22 @@ void hud_modes_tick(Client*);                             // per frame: keep the
 int  hud_modes_flag_count(void);
 int  hud_modes_flag(int index, vec3 *position, int *team, int *carrier_uid);
 int  hud_modes_active_objective(const Client*, vec3 *center, vec3 *half); // 1 when a hardpoint is up
-int  hud_modes_spawnable(int index, vec3 *position, int *team);           // Kill Confirmed tags, 0 = slot empty
+int  hud_modes_spawnable(int index, vec3 *position, int *team);           // spawnables ("crsp"), 0 = slot empty
+int  hud_modes_spawnable_type(int index, int *data_c);                    // WP-D: its medals.js type, -1 = slot empty
 #define HUD_MODES_MAX_SPAWNABLES MODE_MAX_SPAWNABLES
 const char *hud_modes_game_message(void);                 // what #gameMessage shows ("" none)
+
+// WP-D: the v7.1.4 mode state the HUD shows (ui-v7 owns the DOM): team scores 1..5 (sdm), rounds
+// ("rds"), lockout ("lkt"), the local KR Tags ("krt"), the last "tx" / "Switching Sides" popup.
+// Objective uid / time, dom zones and per-player kranked / headMlt live in client->game.mode.
+typedef struct {
+    int team_scores[MODE_TEAMS];
+    int team_round_wins[MODE_TEAMS];
+    int rounds_left;            // -1: no rounds packet yet
+    int lockout_ms;
+    int dog_tags;
+    const char *popup_title;
+    const char *popup_text;
+    int popup_seq;              // bumps on every new popup
+} HudModesV7;
+const HudModesV7 *hud_modes_v7(void);

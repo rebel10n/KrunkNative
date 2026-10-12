@@ -14,6 +14,4214 @@
  - Here is some info on how to enable WebGL https://superuser.com/questions/836832/how-can-i-enable-webgl-in-my-browser
  - If you have connection issues at school or work, Try using browserfps.com
 
+ == UPDATE 7.1.4 ==
+ * General
+ - Added Voicechat Type setting (Default or spacial/proximity)
+ - Added Voice Distance setting (For spacial/proximity)
+ - Added back Time Scale server setting (expect wierd behavior)
+ - More changes to ongoing FTUE experiments
+ * Bug Fixes
+ - Fixed FTUE map
+
+ == UPDATE 7.1.3 ==
+ * General
+ - Reworked Krunk Plaza
+ - Added Can Shoot & Can Melee to class config
+ - More changes to ongoing FTUE experiments
+ * Bug Fixes
+ - Fixed respawning on mobile
+ - Fixed minor ui spacing issues
+ - Fixed server crash causing disconnects
+ - Fixed contact button
+ - Fixed health bar size
+ - Fixed skins in sandbox mode
+ - Fixed kill keybind in sandbox mode
+ - Fixed invalid billboard issue
+ - Fixed ingame scoreboard header styling
+
+ == UPDATE 7.1.2 ==
+ * General
+ - Added Show Minimap setting
+ - Added Spawn Bot keybind while in sandbox mode
+ - Added Clear Bots keybind while in sandbox mode
+ - All users will now auto respawn instead of going to menu on death
+ * Editor
+ - Sandbox overhaul
+
+ == UPDATE 7.1.1 ==
+ * General
+ - Overhauled Minimap & added ingame
+ - Added Minimap server setting
+ - Added Minimap Scale setting
+ - Added Minimap Zoom setting
+ - Added Minimap Hud Scale setting
+ - Teams now have names by default instead of being numbered
+ - UI Changes
+ - Added busy icon while trading ingame
+ - Removed Game Theme setting
+ - Removed User submitted billboards
+ - Reduced Premium price
+ * Editor
+ - Bounce pad bounce can now be set to negative
+ - Bounce pads can now bounce in different directions
+ - Bounce pad model now scales properly
+ * Experiments
+ - 50% of users will auto respawn instead of going to menu on death
+ * Bug Fixes
+ - Fixed missing server setting translation
+ - Fixed particle issues
+ - Fixed left handed setting (Thanks iona)
+ - Fixed grey screen issue
+ - Fixed editor search input
+ - Fixed skin showcase with specific skins
+
+ == UPDATE 7.1.0 ==
+ * Bug Fixes
+ - Hopefully fixed all region issues
+
+ == UPDATE 7.0.9 ==
+ * General
+ - Increased servers in Frankfurt region
+ - Added item type to spin reward screen
+ * Bug Fixes
+ - Fixed India region servers & switched region name to Mumbai
+ - Fixed missing Brazil servers
+
+ == UPDATE 7.0.8 ==
+ * General
+ - South Korea servers are now reserved for dedicated hosting only
+ - Removed Hawaii region
+ - Team names can now be changed in comp hosting
+ - Added Weapon killstreak to bottom right UI
+ - Updated minimaps on Bureau, Lumber & Shipment
+ - Added ectoplasm pistol back to Soul Sanctum
+ * Bug Fixes
+ - Fixed battlepass purchases on steam again
+ - Fixed incorrect loot from Captains chest on Tortuga
+ - Fixed missing objects with instance rendering
+
+ == UPDATE 7.0.7 ==
+ * General
+ - Added loading message when rehosting
+ - Minor changes to FTUE menu
+ - Reporter name can now be clicked on Hub Reports
+ - Removed unused krunkscript from bureau map
+ - Added Minimap image to Industry (wip)
+ * Raids
+ - Replaced Charge Rifle with Submachine Gun on Soul Sanctum
+ - Fixed loot requirements on Soul Sanctum
+ - Fixed out of map glitches on Soul Sanctum
+ - Fixed incorrect loot from Captains chest on Tortuga
+ - Fixed loot table for Mirror Image on Tortuga
+ * Editor
+ - Change class trigger action now bypasses class restrictions
+ - Added keybinds to spawn Cubes, Gates & Triggers
+ - Added Map Anchors (Used to position the minimap)
+ - Added Minimap AssetId option
+ * Bug Fixes
+ - Fixed chat ui when toggling Show UI
+ - Fixed spray rarity sorting
+ - Fixed clan issues
+
+ == UPDATE 7.0.6 ==
+ * General
+ - Added new Sprays
+ - Adjusted Death Marker setting & added more options
+ * Bug Fixes
+ - Removed unintended loot from Soul Sanctum
+ - Fixed other players rewards showing in rewards tab
+
+ == UPDATE 7.0.5 ==
+ * General
+ - Added new Dye
+ - Added 10x spins
+ - Added Shipyard back to customs
+ - Added rewards tab to end screen
+ - Optimized initial load times
+ - Minor changes to spectating ui
+ - Updated Dye & Shoe preview images
+ * Editor
+ - Optimized AI map export data (This could effect old maps)
+ - Added Directional scaling (Shift & Drag / Ctrl & Drag)
+ - Fixed default ai ghost texture in game & editor
+ * Raids
+ - Added Soul Sanctum to Raid host menu
+ - Added new challenge to Tortuga
+ - Added new challenge to Soul Sanctum
+ - Added loot to King Krum in Tortuga
+ - Added loot to Mirror Image in Tortuga
+ - Added Frost Essence & Krunkanium to Boss room loot in Tortuga
+ - Added Frost Essence to Boss room loot in Laboratory
+ - Replaced tradable rewards in Soul Sanctum
+ * Settings
+ - Added Death Marker setting
+ * Bug Fixes
+ - Fixed premium purchases on steam
+ - Fixed hide players setting
+ - Fixed missing class config option for some classes
+ - Fixed 3 & 4 month item sale data
+
+ == UPDATE 7.0.4 ==
+ * General
+ - Added ui elements to Laboratory
+ - Changed the loot method of the final boss on Laboratory
+ - Enabled keyboards on mobile again
+ * Bug Fixes
+ - Fixed issue with gui element labels in the Editor
+ - Fixed onTimer triggers not resetting correctly between rounds
+ - Fixed more exploits on Laboratory
+ - Fixed missing wall on Laboratory
+ - Fixed unlimited slimer ammo
+ - Fixed junk piles on hosted raid matches
+ - Fixed Brainrot being mislabeled as a gift
+ - Fixed bots disappearing with hideplayers setting
+ - Fixed exploits on Tortuga
+ - Fixed ai texture on Soul Sanctum
+
+ == UPDATE 7.0.3 ==
+ * General
+ - Changes & Optimizations to Laboratory
+ - Added labels to gui elements in the editor
+ * Bug Fixes
+ - Fixed a few exploits on Laboratory
+ - Fixed hardpoint issues on Kanji
+ - Fixed Bot aim height
+ - Fixed guest playercards
+ - Fixed premium alias on playercards
+
+ == UPDATE 7.0.2 ==
+ * Raid
+ - New Laboratory Raid
+ * General
+ - Reduced Premium pricing
+ - Added Non Tradable skins sorting option to Social
+ - Reworked class limits in comp server settings
+ * Editor
+ - Added No Assists server setting
+ - Added Require Player Level to Gates, Weapons Pickups & Trigger Action costs
+ - Added Player Level & Player Inventory Trigger conditions
+ - Added Grouping Id to Weapon pickups (Allows you to group randomized weapons)
+ - Added Objective Id option (Allows for multiple objectives at once)
+ * Bug Fixes
+ - Fixed server crash
+ - Fixed incorrect Settings Header on social
+ - Fixed broken tabs on Image Collection popup
+ - Fixed UI issue with challenges
+ - Fixed UI issue with Asset list in Editor
+ - Fixed UI issue with death screen
+ - Fixed pixelation on game overlay
+ - Fixed issue with players leaving comp matches unable to rejoin
+ - Fixed bug allowing any class to be used in comp matches
+
+ == UPDATE 7.0.1 ==
+ * Raid
+ - The raid has been delayed until next week due to some unforeseen issues
+ * General
+ - Added Clockwork to rotation
+ - Added more detail on restrictions of linking & unlinking twitch accounts
+ * Bug Fixes
+ - Fixed missing zombies perk icons
+ - Fixed invisible alien blaster
+ - Fixed bundle purchase button
+ - Fixed issue with players leaving comp matches rendering that slot unusable
+ - Fixed issue with premium purchase on steam
+ - Fixed invisible badge icons
+ - Fixed Objective opacity setting
+ - Fixed twitch linking error not showing up
+ - Fixed Nasa Game theme
+ - Fixed some UI issues seen on older chromium versions
+ - Fixed asset ui issue in the editor
+ - Fixed Cherry Blossom playercard skin credits
+ - Fixed incorrect empty slots on trade offers
+ - Fixed teleport in the editor
+
+ == UPDATE 7.0.0 ==
+ * Items & Skins
+ - Added new Battlepass
+ - Added new item type: Player cards
+ - Added 600 new items
+ - Added new Map Reward
+ * General
+ - Split Body slot into Back & body for more outfit combinations
+ - Split Hat slot into Hat & Head for more outfit combinations
+ - Added new default Alien Blaster
+ - Added new default spray
+ - Added back 2.8.6 Air strafing setting
+ - Added new map: Clockwork
+ - Reworked SkyTemple
+ - Added 2FA for all accounts Verified, Partnered or level 20+
+ - Added Creator code usage to battlepass purchases
+ * UI
+ - Added Sandbox button in Games window
+ - Overhauled Shop home page
+ - Overhauled Death screen
+ - Updated Hardpoint, Deposit & King of the Hill indicators
+ - Cleaned up Item labels
+ * Settings
+ - Added Objective Opacity setting
+ - Added Raw Mouse Input setting (May help with mouse flick issue)
+ * Premium Overhaul
+ - Premium now costs USD (Existing premium subscriptions will stay)
+ - Added Creator Code usage to premium
+ - Double KPD Calls
+ - Removed premium gifting
+ * Balance & Gameplay
+ - Increased Triggerman Firerate from 130ms between shots to 120ms
+ - Changed Run N Gun HP from 100 to 90
+ * Zombies
+ - Added Drift Fuze perk
+ - Added Holster perk
+ - Added more rewards
+ * Editor
+ - Overhauled Test/Sandbox mode
+ - Can now use Triggers in Sandbox (Offline) Mode
+ - Can now use Weapon pickups in Sandbox Mode
+ - Can now use Gates in Sandbox Mode
+ - Modes now work in Sandbox mode (Hardpoints etc)
+ * Social
+ - Added Menu Saturation & Hue settings
+ - Added UI & Ambient volume settings
+ - Cleaned up Settings Popup
+ * Bug Fixes
+ - Host is now updated properly in dedicated servers
+ - Fixed server crash with terrain
+
+ == UPDATE 6.1.4 ==
+ * General
+ - Added Survey option for Starter bundle
+ * Bug Fixes
+ - Fixed black GLTF models
+
+ == UPDATE 6.1.3 ==
+ * General
+ - Added St. Patrick's Day Bundle (Can take some time to show)
+ * Bug Fixes
+ - Optimized Terrain generation
+ - Fixed Zone in the editor
+ - Fixed trigger weapon names in the editor
+ - Fixed GLTF asset coloring & encoding
+ - Fixed 3d audio volume on first load
+ - Fixed player count on custom map menu
+ - Fixed weapon pickups after dying
+
+ == UPDATE 6.1.2 ==
+ * General
+ - Sprays now work in sandbox
+ - Updated account recovery form
+ - Optimized customization preview
+ - Zombie wall guns are now white
+ - Made afk kicking in trade more lenient
+ - Billboards no longer show Your ad Here
+ - Reduced Dedicated server prices
+ * Editor
+ - Added No Texture option to Weapon Pickups
+ - Added Model variant menu (Similar to texture list)
+ - Added onAIKillPlayer trigger event
+ - Fixed MTL exporting
+ - Fixed cylinder open ended textures
+ * Bug Fixes
+ - Fixed some stats not saving when logging out
+ - Fixed wrist positioning
+ - Fixed grey screen issue
+ - Fixed out of map on atomic
+ - Fixed url issue with auto hosting
+ - Fixed pet duplication in customization preview
+ - Fixed freeze with melee pickups
+
+ == UPDATE 6.1.1 ==
+ * Bug Fixes
+ - Fixed modes on Kanji
+ - Fixed issues with habitat
+
+ == UPDATE 6.1.0 ==
+ * General
+ - Added Force Pointer Lock to class config
+ - Various minimap changes
+ * Bug Fixes
+ - Fixed wallbangs
+ - Fixed slime pads disappearing after one use
+ - Fixed issue with optimized gltf loading
+ - Fixed ticket count
+
+ == UPDATE 6.0.9 ==
+ * General
+ - Added 25 more levels to the vip battlepass tier
+ - Added popup when viewing invalid/non existing profile on the hub
+ - Added back inactivity kicking to krunk plaza
+ - Added more options to spectating minimap
+ - Added Spin tickets popup in Prize wheel section of Shop
+ - Refactored player interactions (Trading, pickups, banks etc)
+ - Optimized Habitat
+ - Stop head clipping setting is now enabled by default in comp
+ * Zombies
+ - Fixed ammo drop at the end of special rounds
+ * Editor
+ - Reworked Assets UI & added basic sorting
+ - Fixed object connections not removing properly
+ - Fixed AI spin option
+ * Bug Fixes
+ - Fixed issue with weapon pickups position resetting
+ - Fixed freeze from Zones
+ - Fixed other players arm position when switching weapons
+ - Fixed AI 0 sound bug
+
+ == UPDATE 6.0.8 ==
+ * General
+ - Battlepass will be extended soon
+ - Added Valentine's Day Bundle (Can take some time to show)
+ - Creator codes can now be used on bundles
+ - Network stats setting is now available to everyone
+ - Added a basic name filter to account registration
+ - Added experimental minimap to spectating hud
+ - Testing the ability to rehost games in the same session
+ - Allowed more fine tuning of sound settings
+ - Various changes to Atomic map
+ - Reworked Habitat
+ * Balancing
+ - Reduced Submachine Gun ammo to 30 from 34
+ - Reduced Submachine Gun fire rate to 95 from 90
+ - Reduced Akimbo Uzi ammo to 28 from 29
+ * Zombies
+ - Added random chance for zombies to drop a perk
+ - Added Weapon Upgrading (But how do you unlock it?)
+ * Editor
+ - Added color swatches to the color picker based on most colors used in current map
+ - Added texture scaling to cylinders
+ - Fixed ladder texture scaling visuals
+ - Fixed object focus in the editor
+ * Bug Fixes
+ - Fixed login popups on social & editor
+ - Fixed inventory sort & market search on social
+ - Fixed crouching gap
+ - Fixed sales graph in player profiles on social
+ - Fixed issue with spectate camera objects
+ - Fixed trade mode window scrolling issue
+ - Fixed server memory leak
+ - Fixed arm positioning in third person
+ - Fixed grapple not resetting
+
+ == UPDATE 6.0.7 ==
+ * General
+ - Added Hue & Saturation settings for Medals
+ - Added Esports tab
+ - Simplified popups
+ - Slight changes to trade popup ingame
+ - Slight changes to server browser
+ - Slight changes to Market & Inventory search popup on the Hub
+ - Removed explosion effect from gift popup (Caused fps drops)
+ - Removed old hardcoded item prices
+ * Editor
+ - Added Search to spray & texture selection window
+ - Added Charms to Showcase object
+ - Fixed Create near setting
+ - Fixed script exporting when no scripts used
+ - Fixed GLTF exporting
+ - Removed CubeUVRefractionMapping mapping type
+ * KPD
+ - Added KPD vision setting & keybind
+ - Cleaned up Call list
+ - Fixed time in ban log
+ - Profile is no longer copied if suspect is a guest
+ * Bug Fixes
+ - Fixed freeze when using wall lean
+ - Fixed freeze when shooting
+ - Fixed freeze & texture/model loading when using Instance rendering
+ - Fixed freeze when using RGB & shader skins
+ - Fixed freeze when testing maps
+ - Fixed Terrain color
+ - Fixed mods not loading
+ - Fixed Hackusate skin coloring
+ - Fixed Steam battlepass level skip purchasing
+ - Fixed battlepass section not always showing on the end screen
+ - Fixed battlepass points not saving at the end of a game
+ - Fixed challenges not saving at the end of a game
+ - Fixed Skydome issues with High & Physical lighting
+ - Fixed edge case with translations
+ - Fixed glitches on Evacuation & Arena
+
+ == UPDATE 6.0.6 ==
+ * General
+ - Added Free Guest Spin (Register to claim item)
+ - Optimized networking is now forced default
+ - Renamed Missions back to Challenges
+ - Krunkanium is obtainable again from kills in Hardpoint
+ - Added Trade Plaza to server selection popup
+ - Reworked Junkyard/crafting window
+ - Junkyard recipes are now sorted better
+ - You can now host your own private official raid game
+ * Bug Fixes
+ - Fixes to Xsolla payment flow
+ - Fixed glitches on several maps
+ - Fixed Unlock VIP button not functioning
+ - Fixed battlepass NaN issue
+ - Fixed purchasing issues
+ - Fixed Marauders Cleaver crafting
+ * Settings
+ - Removed Optimized Networking
+ - Removed Post Processing SSAO
+ - Removed Post Processing Bloom
+ * Zombies Mode
+ - Added random frog spawn
+ - Every 5 rounds is now a random special round
+ - Special rounds guarantee a ammo refill
+ * Editor
+ - Added search to Skin Selection on Showcase object
+
+ == UPDATE 6.0.5 ==
+ * General
+ - Added Chat & Voice Mute options per player
+ - Added Voice Mute Spectators setting
+ - Spin History now auto scrolls when new data is loaded
+ * Bug Fixes
+ - Fixed Xsolla payment window scaling
+ - Fixed object stretching issue
+ - Fixed issue with spin history date range
+
+ == UPDATE 6.0.4 ==
+ * General
+ - Added Gift Deposit Event
+ - Added Steam purchasing for Bundles & Battle Pass
+ - Enabled Battle Pass level skips
+ - Added option to clear premium name
+ - Added Stats to Spin History
+ - Changed Battlepass endscreen
+ - Removed Baked lighting
+ * Editor
+ - Added color option to Sprays in the Editor
+ - Adjusted translate gizmo in the Editor
+ - Added Projectile Transparency option to AI
+ - Added Drift while Stuck option to AI
+ - Added Show Icon option to Weapon Pickups
+ * Settings
+ - Added FPS Display Update rate setting
+ - Added Show Bullet Casings setting
+ - Added Show Bullet Impact Holes setting
+ - Removed Ambient Shading setting
+ * Bug Fixes
+ - Fixed out of map on Arena
+ - Fixed glitch on Habitat
+ - Fixed highspot on Evacuation
+ - Fixed AI memory leak
+ - Fixed possible inaccuracy with Spin History
+ * Optimizations
+ - Small lumber optimization
+ - Optimized load times
+ - Optimized Zombies meshes
+
+ == UPDATE 6.0.3 ==
+ * Bug Fixes
+ - Fixed S6 Map Master badge again
+ - Fixed Advent Calender claiming on Steam client
+ * Zombie Mode
+ - Fixed Mystery boxes
+ - Fixed pixel walk on perks
+
+ == UPDATE 6.0.2 ==
+ * General
+ - Fixed issue with Battlepass not being claimable or BPP not saving properly
+ - Added Setting to toggle server timers
+ - Added new Loading screen tips
+ - Added Atomic to Comp preset
+ - Added Vince, Agent & Infiltrator to Comp preset
+ * Bug Fixes
+ - Spin ban now applies to in-game spin wheels as well
+ - Fixed issue when selecting some cosmetics
+ - Fixed issue causing charms to not show for other players
+ - Fixed S6 Map Master badge
+ - Fixed several pistol skins
+ - Fixed Season 63 skin
+ * Zombie Mode
+ - Rounds are now saved per player (No more late join expoiting)
+ - Will now kick players if over player limit
+ - Death point reduction now only applies to players still alive
+ - Fixed bug allowing Nuke to instant end rounds
+ - Removed charge ability from all weapons
+ - Adjusted fire sale powerup size
+ - Reduced Bait time to 10s
+ - Increased Bait cooldown to 5m
+ - Added 30s cooldown to the metal door
+ - Players stay on scoreboard after dying
+ * Editor
+ - Ramps now have AI Collisions option
+
+ == UPDATE 6.0.1 ==
+ * General
+ - Zapper DMG now shows dmg numbers on players & AI
+ - Added Equip Item button after a item is spun
+ * Balancing & Gameplay
+ - Added slight constant spread to UZI
+ - Increased UZI Ammo by 5
+ - Increased UZI base damage to 15 from 14
+ - Increased Agent HP to 110
+ - Increased Infiltrator HP to 90
+ - Charge Rifle now charges faster
+ - Trooper now has reduced jump-height for better slide movement
+ - Increased Trooper slide duration
+ * Bug Fixes
+ - Badges now auto claim at the end of a match to avoid future claiming issues
+ - Fixed Vehicle variant names
+ - Fixed default weapon texture icons
+ * Zombie Mode & AI
+ - You can now host your own private zombies game
+ - Added bait mechanic
+ - Added special waves
+ - Added velocity based movement setting to AI
+ - Zapper now damages AI over time
+ - Frog spawns in pond
+ - Adjusted weapon rarities in mystery boxes
+ - Can now only have 4 perks at once max
+ - Reduce fire sale time to 20s
+ - Fixed mysterybox teddy bear issues
+
+ == UPDATE 6.0.0 ==
+ * Items & Skins
+ - Added Battlepass
+ - Added new item type: Weapon Charms
+ - Added new item type: Tickets
+ - Added 600 new items
+ - Added new Map Rewards
+ - Spin history now stays after refreshing the session
+ - Added double XP option to end screen
+ * Maps & Modes
+ - Can now quick-join zombie and raid games from server menu
+ - Added new Zombie survival mode (More content coming soon)
+ - Added new party mode: Chaos Snipers
+ - Added classic as party mode in rotation
+ - Added new map: Atomic
+ - Added new map: Habitat
+ - Added classic maps for classic mode: Stockade, Throwback & Old Burg
+ * Gameplay, Weapons & Classes
+ - Added new class; Infiltrator
+ - Increased akimbo pistol damage from 13 to 15
+ - Decreased Noob Tube reload time from 1.5s to 1.2s
+ - Increased Zapper ammo from 1 to 5
+ - Increased Rocket launcher firerate
+ - Decreased AK firerate from 120ms between shots to 130ms (10ms reduction)
+ - Increased Sniper reload time from 1.7s to 1.9s
+ - Removed Spread from UZI
+ - Removed Headshot multiplier from UZI
+ - Reduced UZI range from 700 to 500
+ - Slimer is now a slot 1 killstreak and requires 7 kills
+ * Challenges/Mission
+ - Seasonal Completion challenges will only count challenges of the same season
+ - Daily challenges are now battlepass challenges and have been moved to the battlepass screen
+ - Added challenges for Charge Rifle
+ - Added new Nightmare challenges
+ - Challenges are now called missions
+ * UI Changes
+ - Customize UI overhaul
+ - Compacted Hub Creations into multiple tabs
+ - Updated Hub Profile header
+ - Compacted Badges & added hover tooltip
+ - Simplified Clans UI
+ - Removed Ingame XP Bar
+ * Bug Fixes
+ - Fixed bug with melee range on AI
+ - Fixed height of skin selection window
+ - Fixed noclip with fixed movement setting enabled
+ - Fixed Hub Profile feed tab width
+ - Fixed issues with edge noise
+ - Fixed partner submission window
+ - Fixed Airdrops falling through ramps
+ - Fixed issues with item showcase
+ * Editor & KS
+ - Added 30+ assets & variants
+ - Added 40+ texture variants
+ - Created new selection window for Textures & Showcase item
+ - Models list in editor now chunked together
+ - Added option to disable font scaling on signs & leaderboards
+ - Increase max font size for signs and leaderboards
+ - Decreased min font size for signs and leaderboards
+ - Added Leaderboard results amount setting
+ - Changed Default texture name to None
+ - Fixed Editor keybinding not working
+ - Can now add Spray objects in editor
+ - Added Ignore while Stuck option to AI
+ - Added AI Collisions option to objects
+ - Updated Translate gizmo
+ - Models can now be scaled with scale gizmo
+
+ == UPDATE 5.8.5 ==
+ * Fixes
+ - Fixed join button
+ - Fixed instant disconnect
+
+ == UPDATE 5.8.4 ==
+ * Fixes
+ - Old Clients should function again
+ - Textures load properly now
+ - Fixed redeem voucher popup
+
+ == UPDATE 5.8.3 ==
+ * General
+ - Added Halloween Event
+ - Added head size visual for Bighead mode
+ - Added Designated Spectators setting to Comp hosting
+ - Updated a bunch of translations
+ * Hub
+ - Added 2 KPD calls stats to profiles
+ - Fixed minimum sell limit
+ * Performance
+ - Optimized model scaling in the editor
+ - Optimized load times
+ * Matchmaking
+ - Adjusted what we considered "almost ending matches"
+
+ == UPDATE 5.8.2 ==
+ * General
+ - Added Bighead party mode
+ - Added new badges
+ - Hackertagged and locked players automatically removed from clans
+ - Hackertagged accounts are no longer able to be logged in to
+ - XP bar is now filled properly in the end screen
+ * Performance
+ - Fixed memory leak in prolonged sessions
+ - Skydomes load 45% faster
+ * Matchmaking
+ - You are less likely to join almost ending matches now
+ - Added time remaining to server list
+
+ == UPDATE 5.8.1 ==
+ * General
+ - Spins are now disabled in Belgium & Netherlands
+ - Added Stats to KPD popup
+ - Fixed sound on melee pickup
+ - Removed Jump scare package
+ - Fixed issue that allowed players to go over team size in comp customs
+ * Settings
+ - Streamer mode no-longer resets randomly
+
+ == UPDATE 5.8.0 ==
+ * Mag Dump Event
+ - Event now triggers properly
+ - Extended event by 2 hours
+ * General
+ - Package items can now be traded & sold
+ - Fixed credits on a few skins
+ - Fixed 1911 texture
+
+ == UPDATE 5.7.9 ==
+ * Mag Dump Event
+ - Added limited time mode
+ - Added Event Challenges
+ - Added Double XP to Mag Dump
+ - Event starts August 26th 12AM UTC & ends on September 2nd 12AM UTC
+ * General
+ - Added 10+ skins to spins
+ - Added new Bundle
+ - Fixed some issues when tabbing out and game freezing
+ * Hub
+ - Collectibles minimum to sell is now 1KR again
+ - Simplified Clan leaderboard
+ * Editor
+ - Added Classic 2018 Vehicle texture variant
+
+ == UPDATE 5.7.8 ==
+ * Ranked
+ - Partially enabled servers for Hubs
+
+ == UPDATE 5.7.7 ==
+ * General
+ - Fixed issue with server label in the server browser
+ - KPD suspects now show ping value
+ - Removed FACEIT
+
+ == UPDATE 5.7.6 ==
+ * All or Nothing Event
+ - Removed Knives on spawn
+ - Increased chance to spawn a knife on kill
+ - Fixed Obtain bullets challenge
+ - Fixed View Challenges button
+ - Selected auto pistol skins will now show in this mode
+ * General
+ - Fixed UI for ammo count
+ - Fixed incorrect ping for other users in player list menu
+ * Gameplay
+ - 50% of score now gets added to a random class in modes that force a class (previously you gained none)
+
+ == UPDATE 5.7.5 ==
+ * All or Nothing Event
+ - Added limited time mode
+ - Added Event Challenges
+ - Added Double XP to All or Nothing
+ - Event starts August 1st 12AM UTC & ends on August 8th 12AM UTC
+ * General
+ - Added 10+ skins to spins
+ - Added Streaks to Packages
+ - Added Host Transferring (2 per session)
+ - Added Ping to Player list
+ - Added Voice icon to Player list when a player is speaking
+ - Added missing Headshot medal for throwing knives
+ - Added missing Tehchy-9 challenge header
+ - Moved Class Stats into Overall Stats
+ - Minor UI fixes
+ - Fixed Mods search button
+ - Fixed unboxing message being delayed if you closed spin early
+ - Fixed default slide position on Free Range Sliding being left
+ - Spin History can no longer be opened while a spin is happening
+ - Reduced instances of "Account already used"
+ - Saw blade on Lumber now kills players again
+ * Raids
+ - Doubled the chances to get Unobtainable from final boss
+ * Hub
+ - Lowered Market level requirement to 15
+ - Black Market now shows items you already claimed
+ - Updated Creations tab on Profile
+ * Editor
+ - Added Experimental Head Clipping fix to Host options (Disabled by default)
+ - Added Strength Effect
+ - Added Wall Jump Velocity & Wall Jump Decel class config
+ - Fixed asset search bar
+ * FACEIT
+ - Shorten forfeit command to just /ff
+
+ == UPDATE 5.7.4 ==
+ * General
+ - Added OG Joe bundle to shop
+ - Added 40+ skins to spins
+ - Added Tehchy-9 challenges
+ - Added Spin History (Shows recent items you got from spins)
+ - Added missing icon for Starduster
+ - We are testing a experimental fix for head glitching through objects
+ * Hub
+ - Clicking comments now opens the correct post
+
+ == UPDATE 5.7.3 ==
+ * General
+ - Fixed some exploits on Sandstorm
+ - Fixed Death screen text when killed by throwing knife
+ - Custom badge no longer shows if you don't own it
+ - Fixed ammo on new killstreaks with weapon pickups
+ * KrunkScript & Editor
+ - Added Render Side option to cubes
+
+ == UPDATE 5.7.2 ==
+ * General
+ - Added Sandstorm map remake
+ - Added XP amount to Class selection
+ - Optimized Billboard ads
+ - Optimized Kanji's geometries
+ - Changed Death screen text when killed by throwing knife
+ - Removed Competition section from games list
+ - Updated Lost connection Screen
+ - Removed all mentions of NFT's from Steam client
+ - Reduced Free KR to twice a day due to botting
+ - Updated Mod zip (https://krunker.io/modzip/5.7.2)
+ * Hub
+ - Updated Rarest Items & Black Market UI
+ - Fixed level requirement to gift premium
+ - Removed Egg Hunt leaderboard
+ - Removed Profile Inputs tab
+ * Settings
+ - Removed Show Ranked Badge setting
+ - Removed TB Interpolation experimental setting
+ * KrunkScript & Editor
+ - Fixed Scripting window
+ - Fixed GLTF exporting
+ - GLTF exporting now supports transparent objects
+ * FACEIT
+ - Fixed popups
+ - Ranked Badges now only show in comp matches
+
+ == UPDATE 5.7.1 ==
+ * General
+ - Fixed Health Number setting not rounding
+ * Balancing
+ - Reverted Spray & Pray Changes
+ - Corrected a mistake causing Crossbow's max damage to only be 120
+ * FACEIT
+ - Ranked Season 4
+ - Added Shipment to map pool
+
+ == UPDATE 5.7.0 ==
+ * General
+ - Made the Font legible
+ - Added 65+ skins to Spins
+ - Changed how damage is calculated
+ - Added Tooltips to Streak selection window
+ - Fixed Weapon, Class & Effect Configs with Host Presets
+ - Fixed Zapper being able to effect teammates without Friendly Fire
+ - Fixed Cyber Abyss & Patina weapon skin size
+ * Settings
+ - Weapon ADS FOV Power can no longer go below 0.3
+ - Added Rounded & Float options to Show Damage setting (Rounded being the old way)
+ - Fixed Shadow Thickness issue with Precision crosshair
+ * Balancing
+ - Changed Assault rifle Fire rate from 110 to 120
+ - Changed Noob Tube Reload time from 2000 to 1500
+ - Increased Akimbo Pistol Headshot multiplier from 1.3 to 1.4
+ - Increased Akimbo Pistol damage from 12 to 13
+ - Changed Akimbo Pistol Fire rate from 80 to 100
+ - Increased Spray N Pray Health from 180 to 230
+ - Decreased Spray N Pray Slide Accel multiplier from 0.98 to 0.95 (mislabeled last update)
+ - Increased Machine Gun damage from 18 to 19
+ - Increased War Machine Explosion damage from 55 to 65
+ - Increased War Machine Explosion scale from 55 to 70
+ - Increased War Machine Damage from 50 to 60
+ - Removed Impulse from War Machine
+ - Crossbow can now do Headshots
+ - Throwing Knife can now do Headshots
+ * KrunkScript & Editor
+ - Fixed player.inView
+ * Translations
+ - Updates to Hindi, Japanese, Korean, Portuguese, German, Finnish, Dutch, Polish, French & Chinese (Traditional/Simplified)
+ * FACEIT
+ - Increased Overtime to 60 seconds
+ - Match now auto ends when other team can no longer win
+
+ == UPDATE 5.6.9 ==
+ * General
+ - Added 45+ skins to Spins
+ - Added Shipment to Comp presets
+ - Added Critical hit sound for Mod Makers (crit_0)
+ - Separated Stats into multiple sections
+ - Fixed issues with Juggernaut audio not ending
+ - Fixed issues opening KPD popup when logged out
+ - Fixed menu nametag on steam client
+ - Fixed image size in loaded mods tab
+ * Gameplay
+ - Added Akimbo Pistol secondary weapon
+ - Added War machine Killstreak
+ - Added Noob Tube & Akimbo Pistol to Gungame
+ * Balancing
+ - Decreased Desert Eagle base damage from 50 to 45
+ - Increased Desert Eagle ammo from 6 to 7
+ - Decreased Desert Eagle Headshot multiplier from 1.5 to 1.2
+ - Changed Desert Eagle Fire rate from 500 to 450
+ - Changed Blaster Reload time from 1600 to 1450
+ - Decreased Shotgun Headshot multiplier from 1.5 to 1.25
+ - Decreased Assault rifle ammo from 30 to 28
+ - Changed Sniper Rifle Fire rate from 920 to 1000
+ - Decreased Spray N Pray speed multiplier from 0.95 to 0.90
+ - Decreased Spray N Pray Slide Accel multiplier from 1 to 0.95
+ - Decreased Zapper Reload time from 2100 to 1400
+ - Increased Slimer's slime pad duration from 8s to 10s
+ * Settings
+ - Throwing Crosshair now uses thickness setting
+ * Hub
+ - Estimated price now properly shows Unknown when no price found
+ - Increased Trade Popup size
+ - Added an icon to trades that contain messages
+ * KrunkScript & Editor
+ - Frame Animations now support up to 100 frames (10x10)
+ - Added player.inView to KS
+ - Added GAME.SCENE.addLightCone();
+ - Added GAME.SCENE.addLightBar();
+
+ == UPDATE 5.6.8 ==
+ * General
+ - Fixed Melee & Crossbow charge persisting after switching while spectating
+ - Fixed Juggernauts Killed stat alignment in hub profiles
+ * Gameplay
+ - Added on screen visual for Juggernauts currently in play
+ - Disabled Juggernaut & Slimer killstreaks in Sharp Shooter & Gun Game
+ - Removed regen from Juggernaut and doubled the health
+ - Fixed health not visually updating after exiting juggernaut
+
+ == UPDATE 5.6.7 ==
+ * General
+ - FRVR Announcement & Skins
+ - Added 40+ skins to Spins
+ * Gameplay
+ - Added Zapper Secondary
+ - Added Juggernaut Killstreak
+ * Faceit
+ - Disabled Killstreaks
+
+ == UPDATE 5.6.6 ==
+ * General
+ - Slimer stat now shows on Profile & Hub
+ - Fixed issue with importing settings
+ * Servers
+ - Upgraded South Africa servers
+ * Editor
+ - Added Is Equipment Weapon config
+ - Fixed Slimer weapon config
+
+ == UPDATE 5.6.5 ==
+ * General
+ - Added 50+ skins to Spins
+ - Fixed glitches on Subzero
+ - Fixed KR Gifting
+ - Fixed Hackusate Rev skin
+ * Gameplay
+ - Added Slimer Killstreak
+ * Servers
+ - Upgraded Sydney servers
+ * Editor
+ - Added a texture for Neutral flags
+ - Fixed texture for team flags 3-5
+
+ == UPDATE 5.6.4 ==
+ * General
+ - Added Subzero map remake
+ - Changed Kill Confirmed tag model
+ * Killstreak Overhaul
+ - Killstreaks can now be selected individually
+ - We are currently testing several streaks but would like more suggestions
+ - There is no streaks for Slot 1 but this will change when new streaks get added
+ - Keybinds for streaks are now based on slot not streak
+
+ == UPDATE 5.6.3 ==
+ * General
+ - Added new Trapped Package
+ * Servers
+ - Upgraded Chicago, Mexico City, Seattle, South Korea & Brazil servers
+ * Editor
+ - Added Jump boost Effect
+ - Fixed Boost pad visual offset
+ * FACEIT
+ - Popup now shows again
+
+ == UPDATE 5.6.2 ==
+ * General
+ - Fixed Rare Trapped Package effect
+ - Fixed follower count not updating instantly
+ * Servers
+ - Upgraded Singapore, Tokyo & India servers
+ - Added more dedicated servers
+ * Editor
+ - Added Effect on Hit/Shot options to AI
+ - Fixed Environment Zone GUI bug
+ - Fixed Rune transparency
+ - Fixed Custom Projectile models
+ - Fixed GLTF textures on Firefox
+ * FACEIT
+ - Fixed Popup images
+
+ == UPDATE 5.6.1 ==
+ * Easter Event
+ - Easter event is over
+ - Easter Collectibles have been removed from maps aswell
+ - Any remaining Precious eggs can be quick sold for 5KR each
+ * Servers
+ - Upgraded Frankfurt, New York & Silicon Valley servers
+ * Gameplay
+ - Added more airdrop variants (WIP)
+ - Guests can no longer call in Nukes
+ * General
+ - Added Industry to Comp preset
+ - Fixed Shader mods freezing at the start of a new match
+
+ == UPDATE 5.6.0 ==
+ * Easter Event
+ - Egg Deposit is now Over
+ - You have till Monday to finish egg hunting
+ * General
+ - Deposit is now a Rotation mode instead of Party
+ - Added Deposit FFA to Party modes
+
+ == UPDATE 5.5.9 ==
+ * Easter Event
+ - You have a 10% chance to get a Precious Egg when depositing in Egg Deposit
+ - First 10 to Reach 1000 can craft a Pet
+ - Fixed Golden egg spawns
+ * General
+ - Fixed Industry spawns
+ - Fixed Spray wheel
+ - Reduced Noob Tube shot randomness
+ * Hub
+ - Leaderboards should now update every hour properly
+
+ == UPDATE 5.5.8 ==
+ * KrunkScript & Editor
+ - Added Bullet Collisions option to objects
+ * FACEIT
+ - Minor fixes
+
+ == UPDATE 5.5.7 ==
+ * Easter Event
+ - Added Easter Bundle
+ - Added Eggs around all rotation maps
+ - Golden egg has a chance to spawn throughout the round (Egg basket is needed to collect egg)
+ - Added Chocolate & Carrots to Junkyard drops
+ * General
+ - Added new secondary: Noob Tube
+ - Added 150+ skins to Spins
+ - Fixed issue resulting in 0 time in parkour/race leaderboards
+ - Parkour/Race millisecond timing is now a fraction of a second instead of the amount of milliseconds
+ - Fixed button text when flagging users
+ - Fixed transparent issue with Link texture serverside
+ * Servers
+ - Added Hawaii servers (Starting small but will increase based on demand)
+ - Better servers will roll out over the next few updates (Few regions each update)
+ - Upgraded Dallas & Miami servers
+ * Gameplay
+ - Added Wall Lean (Enable in settings)
+ - Added new Grappler model
+ - Added Kills to Tab Leaderboard for Hardpoint
+ - Added back 24/7 Party modes (12 Player Matches on Gun Game, Deposit, Sharp Shooter & Kranked FFA)
+ - Decreased amount of 24/7 Raid Matches
+ * KrunkScript & Editor
+ - Added GLB Asset Support (WIP)
+ - Temporary fix for Raw Map Data freezing (Still Investigating this issue)
+ - Added player.respawn()
+ - Fixed UTILS.truncateTxt()
+ * FACEIT
+ - Added individual Class limits
+ - Fixed Starting spawn on Industry
+
+ == UPDATE 5.5.6 ==
+ * General
+ - Added new Free Spin
+ - Fixed another issue with Starting Area spawns
+ * KrunkScript & Editor
+ - Renamed Hide Nametags Host option to Hide Nametags (Enemies)
+ - Added Hide Nametags (Allies) Host option
+
+ == UPDATE 5.5.5 ==
+ * General
+ - Updated Mod zip (https://krunker.io/modzip/5.5.5)
+ * Gameplay
+ - Adjusted how Timeplayed is calculated
+ - Adjusted Team Defender scoring
+ - Added better sorting to in-game Leaderboard/Scoreboard
+ - Last Checkpoint time rewind is now disabled by default (Can be enabled in Host settings)
+ - Fixed Domination on Oasis
+ - Fixed issues on Burg
+ - Fixed issues with Parkour/Race timers
+ - Fixed Starting Area spawns
+ * KrunkScript & Editor
+ - Added Theta Start & Theta Length to Cylinders
+
+ == UPDATE 5.5.4 ==
+ * General
+ - Added new Free Spin
+ - Added 2 new Free sprays
+ - Added 3 more Badges
+ - Nuke Badge is now claimable
+ - Added Friendly Fire Host Option
+ - Added Keybind to Reset to Last Checkpoint in Parkour etc
+ - Suspect is now auto Focused when KPD joins
+ - Fixed "Your on a X Kill streak" message in team modes
+ - Fixed issue causing 99 damage to display as 100
+ - Changed Mode alias to Mode name in Match voting
+ * Hub
+ - Feed text is now selectable
+ * KrunkScript & Editor
+ - Added support for UI.addImage()
+
+ == UPDATE 5.5.3 ==
+ * General
+ - Added new Free spray
+ - Updated Oasis to newer version
+ - Minor server fixes
+ * KrunkScript & Editor
+ - Added support for GAME.setTitle("Test") (document.title)
+ - Added support for OVERLAY.globalAlpha(val)
+ - Added support for OVERLAY.strokeText(text, x, y, maxWidth)
+ - Added support for OVERLAY.strokeRect(x, y, width, height)
+ - Added support for OVERLAY.arc(x, y, radius, startAngle, endAngle, counterClockwise)
+ - Added support for OVERLAY.quadraticCurveTo(cpx, cpy, x, y)
+ - Added support for OVERLAY.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y)
+ - Added support for OVERLAY.arcTo(x1, y1, x2, y2, radius)
+ - Added support for OVERLAY.ellipse(x, y, radiusX, radiusY, rotation, startAngle, endAngle, counterClockwise)
+
+ == UPDATE 5.5.2 ==
+ * General
+ - Added new rotation map: Tropicano
+ - Added Oasis map remake
+ - Added Burg map remake
+ - Replaced Shipyard with Shipment (Will be added to rotation based on feedback)
+ - Added new rotation Gamemode: Team Defender
+ - Added new Party Gamemode: Deposit
+ - Added new Customs Gamemode: Squad Deathmatch
+ - Added new Customs Gamemode: Classic FFA
+ - Fixed freeze when spectating objective modes
+ - Fixed Time leaderboard
+ - Airdrops now require no solid objects above the player
+ * KrunkScript & Editor
+ - Increased Asset Limits
+ * FACEIT & Anticheat
+ - Fixed issues with AC
+ - Removed 13k Score cap in Ranked
+ - New Popup
+
+ == UPDATE 5.5.1 ==
+ * General
+ - Fixed Death Zone on Site
+ - Added new Free Spin
+ - Updated Objective & Flag Zone textures
+ - Added ADS Objective Opacity setting
+ * KrunkScript & Editor
+ - Added ability to fetch host from KrunkScript (GAME.CONFIG.getHost())
+ * Ranked & FACEIT
+ - Server fixes
+
+ == UPDATE 5.5.0 ==
+ * General
+ - Added Kawaii bundle to shop
+ - Added new free spin
+ - Fixed bug allowing impulse inside of objects
+ - Map Fixes
+ * KrunkScript & Editor
+ - SOUND.play2D() now converts assetid if supplied with a string
+
+ == UPDATE 5.4.9 ==
+ * General
+ - Added several new skins & items to spins
+ - Added Legshots stats to Profile, Hub & Killcard Stats
+ - Fixed Corrosive Uzi skin
+ - Map Fixes
+ * KrunkScript & Editor
+ - Fixed issue when dragging objects
+ - Added Default maps to Game Templates
+ * Ranked & FACEIT
+ - Fixed freezing issue at the end of a match
+
+ == UPDATE 5.4.8 ==
+ * General
+ - Added Hits, Misses & Shots stats to Profile, Hub & Killcard Stats
+ - Fixed crash from invalid images in settings
+ * KrunkScript & Editor
+ - Added Noclip, Godmode & Kill keybinds for Sandbox (test mode)
+ - Fixed GLTF loading
+
+ == UPDATE 5.4.7 ==
+ * General
+ - Fixed accuracy with thrown knives
+ - Toggle between Basic & Advanced Settings
+ - Fixed K/D Counter not showing
+ - Removed Sawed off from SharpShooter
+ - Added XP Bar Type (Class & Account)
+ - Added Force respawn to Kranked
+ * KrunkScript & Editor
+ - Added onControllerPress, onControllerUp, onControllerHeld hooks to KS
+ - Added player.removeMelee(), player.removePrimary() & player.removeSecondary() to KS
+ - Added player.changePrimary(), player.changeSecondary(), player.clearLoadout(), player.giveWeapon() to KS
+ - Added GAME.OBJECTS.list() which returns objects
+ - player.lives can be set in KS
+ - player.ammo can be read in KS
+ - Added Can Impulse Option to Objects
+ - Domination Zone, Objective & Bomb Site now show more accurately
+ * Ranked & FACEIT
+ - AFK kicking is now only active after match starts
+ - 2x KR is now over
+ * Translations
+ - Updates to German, Spanish, Chinese (Traditional), Chinese (Simplified), Hindi, Korean, Polish, Japanese, Turkish, Finnish, Tagalog & Dutch
+
+ == UPDATE 5.4.6 ==
+ * General
+ - Removed Sawed off from Gungame
+ - Enabled streaks in Gungame
+ * KrunkScript & Editor
+ - KrunkScript has been enabled
+ - Added player Data syncing (player.registerSyncValues & player.deregisterSyncValues)
+ * Ranked & FACEIT
+ - Added AFK kicking
+ - Game full should no longer happen
+ - Adjusted Round win chat message again (Should fix all edge cases)
+ - Adjusted Kick & Error messaging
+ - Disabled AFK rewards
+ - Paid out Season 1 rewards
+
+ == UPDATE 5.4.5 ==
+ * General
+ - Fixed incorrect default region causing 'Servers at Max Capacity' error
+ - Reduced Maximum clan tag width ingame
+ - Fixed DesertHawk skin
+ - Selecting no face nolonger defaults to class face if your logged in
+ - Fixed issue with ranked popup
+ * KrunkScript & Editor
+ - Krunkscript has been temporarily disabled
+ * Translations
+ - Updates to Polish, Tagalog, Simplified Chinese, Traditional Chinese & Turkish
+
+ == UPDATE 5.4.4 ==
+ * General
+ - Class Faces are now used by default
+ - Fixed issue with ranked popup
+
+ == UPDATE 5.4.3 ==
+ * General
+ - Added default faces for each class
+ - Added new free spin
+ - Added more dedicated servers
+ - in-Game Leaderboard is now usable with Old Scoreboard
+ - in-Game Leaderboard & Voice chat now has 2 trigger options in keybinds (Press & Continuous)
+ - Added Categories to Image Collection
+ - Changed 'Market Scripting' to 'Market Manipulation' when reporting players
+ - Added tooltips to settings
+ - Added several new daily challenges
+ - Sniperflap is no-longer shown on different models
+ - Adjusted Junkyard Tuesdays drops start & end time
+ - Empty regions no-longer show up in server browser
+ * Gameplay
+ - Removed TDM mode from pubs/quickplay
+ - Disabled all TDM challenges
+ * KrunkScript & Editor
+ - Added object iteration loop (loop through KS object properties)
+ - Reduced script validation rate limit from 15s to 6s
+ - Premium, Verified, Partner, Team, KR, NoPVP, PVP, KPD & Death Zones are now destructible
+ - player.weaponIndex renamed to player.loadoutIndex
+ - player.loadoutIndex can now be set in KS (server side)
+ * Translations
+ - Updates to Spanish, Japanese, Hindi, Italian, Korean, German, French, Dutch, Turkish, Portuguese & Russian
+ - Language selection names are now in its respective language
+
+ == UPDATE 5.4.2 ==
+ * General
+ - Added Translator Badge
+ - Fixed Player billboards
+ - Fixed zip loading on viewer
+ - Fixed Mod searching
+ * KrunkScript & Editor
+ - Removed some Render encoding types (For future update compatibility)
+ * Official Client & Steam
+ - Updated to 3.0
+ - Better performance
+ - New resource pack system
+  (Convert in-game mods to resource packs which can load directly with resource swapper & be managed better)
+ - Can take a few hours to roll out
+ * Ranked & FACEIT
+ - Fixed server crashes
+
+ == UPDATE 5.4.1 ==
+ * General
+ - Adjusted wrist item position (WIP)
+ - Fixed Accuracy stat when using Projectile weapons
+ - Fixed NFT claiming bug
+ - Added several new skins & items to spins
+ * KrunkScript
+ - Added action type: can pass actions as parameters action()
+ - Action parameters are now option for all GAME sub actions
+ - Can now see parameter types in auto complete
+ - Added hasProp keyword to object: true/false
+
+ == UPDATE 5.4.0 ==
+ * General
+ - Player Billboards are back
+ - Watches will be visible on Primary weapon arms soon
+ - Party Mode Tag nolonger shows in Customs
+ * Krunkscript & Editor
+ - Added GAME.SCENE.addSign(); (Docs will be updated soon)
+ - Fixed Ocean Component
+ - Fixed Asset Publish UI file sizes
+ * Ranked & FACEIT
+ - Adjusted Round win chat message
+ - Removed Frostbite Side Ad & Popup
+ - End Leaderboards now shows for 5 seconds
+
+ == UPDATE 5.3.9 ==
+ * General
+ - Added new spin items
+ - Added Lobby Streaks (Get bonuses from playing multiple matches in the same lobby) (WIP)
+ - Added Opensea link to item page for NFT items
+ - Fixed Owners list for NFT items
+ - Fixed issue setting Chat & Toggle settings (Thx Absent)
+ - Minor optimizations
+ - Added Mic Quality Setting
+ - Explosions no-longer effect team AI
+ - Killstreaks are now clickable on mobile
+ - Fixed forced spawn spread on Warmup/Intermission
+ - Fixed Leaderboard Objects after rehosting
+ - Fixed issue with deleting mods
+ * Krunkscript & Editor
+ - Added UTILS.copyToClipboard(text) to KS
+ - Added GAME.UI.moveDIV(oldId, parentId, newId) to KS
+ - Asset publishing level requirement has been reduced to 5
+ - Fixed Texture Offset & Rotation on Cylinders
+ - Fixed issue with Class Icon not updating
+ - Fixed inconsistent Name check for maps/games
+ - Fixed Sawed Off damage with modified ammo count
+ * Ranked & FACEIT
+ - Added /forfeit command (Requires entire team)
+ - Restored to max capacity
+
+ == UPDATE 5.3.8 ==
+ * Servers
+ - Fixed corrupted regions
+
+ == UPDATE 5.3.7 ==
+ * General
+ - Christmas Event has ended
+ - Removed Holiday Effects setting
+ - Fixed visual item count after trading in trade mode
+ - Fixed bug giving kr/junk for non quick sellable items
+ - Added missing melee icons
+ - Added missing medals (Nuked & Effects)
+ * Ranked & FACEIT
+ - Fixed issue allowing multiple joins
+ * Krunkscript & Editor
+ - Added .updateMorph(name, val) to Assets in KS
+ * Servers
+ - Switched Brazil server providers (Should be less dead servers)
+ - Added Seattle, Chicago, London & Mexico to Dedicated Servers
+
+ == UPDATE 5.3.6 ==
+ * Christmas Event
+ - End of Holiday Season Twitch drops Event
+ - Increased Present drop rate (2.22% to 4%)
+ - Added Another Crafting Recipe for Christmas Event
+ * General
+ - Added new Free spin
+ - Fixed Sawed Off Lunar Challenge
+ - Inventory now updates in trade lobbies
+ - Added 400+ New Daily challenges
+ * Balancing & Gameplay
+ - Semi Auto fire-rate decreased (120ms to 150ms)
+ - Tehchy-9 Base damage increased (20 to 24)
+ - Tehchy-9 Headshot multiplier increased (1 to 1.25)
+ - Alien Blaster Base damage decreased (50 to 45)
+ - Alien Blaster Headshot multiplier decreased (1.5 to 1.25)
+ - Auto Pistol Headshot multiplier increased (1 to 1.10)
+ * KrunkScript & Editor
+ - Fixed Camera Z Offset max limit
+ - Added GAME.CHAT.broadcast function
+ - Added GAME.changeGame() action
+ - Added player.lives property to KS
+
+ == UPDATE 5.3.5 ==
+ * General
+ - Backend anti cheat changes
+ - Added new free spin
+ - King of the hill Objectives are now random
+ - Medal icons can now be changed with mods
+ - Updated Mod zip (https://krunker.io/modzip/5.3.5)
+ * Shop & Skins
+ - Added first wave of NFT items to store
+ * Editor & KrunkScript
+ - Added orthographic camera support (WIP)
+ - Added ability to set local rotation on object in script
+ - Added ability to attach assets to bones on GLTFs & FBX
+ - Added basic bone manipulation on GLTFs & FBX
+ - Added ability to fetch player asset from player object
+ * Settings
+ - Added Offset & Scale settings for new medals
+ - Added Nametag scale
+
+ == UPDATE 5.3.4 ==
+ * General
+ - Added Holiday Effects setting
+ - Increased Present drop rate by 10%
+ - Fixed Gingerbread Head item
+ - Decreased chance to get Soul Essence
+ - Renamed Krunkite to Krunkanium
+ - As requested disabled selling/trading of Frost Essense & Krunkanium
+ - Enabled Trading of Soul Essence
+
+ == UPDATE 5.3.3 ==
+ * Christmas Event
+ - Added new Christmas bundle
+ - You have a 1/50 chance for a present to drop upon killing someone
+ - Gifts may contain skins or crafting materials
+ - Added new limited time crafting recipes
+ - Added 2 limited time challenges
+ - Event Ends January 10th
+ * General
+ - Added new Christmas bundle
+ - Added new spin items
+ - Added new free spin
+ * Editor & KrunkScript
+ - Added raycast support (WIP - check docs)
+ * Ranked & FACEIT
+ - Added new ranked window
+ - Added new materials that can drop when killing someone in ranked or while on hardpoint
+ - Added new crafting recipes (limited)
+ - Changed match ID on disconnect screen
+ - Defeat/Victory no longer shows when a match is cancelled
+ * Editor
+ - Added Step Sound setting to All Default models
+ - Fixed different step sounds on ramps
+ * Translations
+ - Major updates to Portuguese
+ - Updates to Korean
+ - Updates to Russian
+
+
+ == UPDATE 5.3.2 ==
+ * General
+ - Fixed South Africa, Middle East & Brazil region
+ - Added new Kill Medals
+ - Medals now stack
+ - Added Sounds to medals (with Setting to turn off or lower with Action Volume)
+ - Added setting to toggle between old/new medals
+ * FACEIT & Ranked
+ - Regional ranking is now displayed on ranked page
+ - Double XP & KR has ended
+ - Added message to ranked menu about leaver punishment
+ - Added server ID to disconnect screen
+ - Fixed glitches on Bureau
+ - Rewards match config
+ * KrunkScript & Editor
+ - Added ability to set score & classIndex on players (Server script)
+ - Added ability to check for weaponIndex
+
+ == UPDATE 5.3.1 ==
+ * General
+ - Server fixes
+ - Added new Items to spins
+ - Added new Free spin
+ * FACEIT & Ranked
+ - Fixed issues with Ranked popup
+ - Added TB interpolation experimental setting (testing)
+
+ == UPDATE 5.3.0 ==
+ * General
+ - Added Free KR Popup back
+ - Added /suspect command for kpd
+ * FACEIT & Ranked
+ - New Ranked popup
+ - Fixed issue where ranked matches always count as loss
+ * KrunkScript & Editor
+ - Re-added onCustomValGreater trigger event (removed on accident with Scripting release)
+ - Fixed issue with Change Class action
+ - Health UI now updates when class switched from triggers/scripting
+
+ == UPDATE 5.2.9 ==
+ * General
+ - Added Charity Events items
+ - KPD now has access to Citizen's Arrest item
+ - Adjusted Tehchy9's sound
+ * KrunkScript & Editor
+ - Added GAME.SETTINGS.list & GAME.SETTINGS.get
+ - Fixed Data Storage "Value too long"
+ - Fixed another issue with frame animation
+
+ == UPDATE 5.2.8 ==
+ * General
+ - Added new Daily challenge & Reward
+ - Added 35 Cosmetics to spins
+ - Complete Community service to unlock Citizen's Arrest (Black market)
+ - Updated in-game Scoreboard
+ - Added Support for Watches (WIP)
+ - Added Helpful reports stat to Profile & hub
+ - Fixed issue with discontinued client popup
+ - Fixed issue with blue house on Littletown
+ - Fixed controller vibration issue
+ - Fixed controller deadzone issue
+ * KrunkScript & Editor
+ - Fixed Send Sound trigger action
+ - Fixed Frame animation issue
+ - Re-enabled Data Storage
+ - Added Snow step sounds
+ - Added placeholder sounds for Wood & Sand steps
+ - Step sounds now use Player sound channel
+ - Asset AnimSpeed can now be updated in KS
+ - Added score to player object in KS
+ - Video Textures now work in KS
+ - Added startIndex parameter to truncateTxt
+ * FACEIT & Ranked
+ - Updated Billboard
+ - Ranked popup shows more often
+ - Optimized Ranked Background video
+
+ == UPDATE 5.2.7 ==
+ * General
+ - Fixed crash issue
+ * FACEIT & Ranked
+ - Fixed issue with Ranked Popup
+
+ == UPDATE 5.2.6 ==
+ * General
+ - Warmup/Intermission now only forces Spawn Spread in Defuse & Ranked
+ - Fixed issue with Partner Gameplay earnings
+ - Fixed Login/Register UI
+ - Updated Editor login UI
+ - Updated Hub login UI
+ - Various minor ui changes
+ * FACEIT & Ranked
+ - Double XP and KR bonus now active for ranked mode
+ - Added Asia & South America regions to ranked
+ - Removed Ranked page. Button now directly opens IGA
+ - Fixed crouch hitbox desync issue
+ * Editor
+ - Fixed issue with .obj assets & fog
+ - Fog now properly refreshes after duplicating in the editor
+ - Fixed issue with frame textures
+ - Fixed Gate Cost Score interact message
+
+ == UPDATE 5.2.5 ==
+ * General
+ - Fixed Online Status setting not saving properly
+ - Medals now show in the End screen Medals tab
+ * FACEIT & Ranked
+ - Preparing Asia and South America region servers for open beta
+ - Faceit KD Stats now separate from Pubs
+ - Play now button now links to in-game app
+ * KrunkScript & Editor
+ - Added .team property to player object
+ - Added GAME.TIME.fixedDelta which is not affected by slowmo effects etc
+ - Fixed issue with Signs after duplicating
+ - Models ingame visual rotation/position now matches the Editor
+ - Fixed issue with Lightbars
+ - Fixed issue with Ladders using stone texture
+ - Fixed Effect Config hosting issue
+ - Added accountName to storage callbacks (last parameter)
+ - Added Basic NFT functions: hasWallet, ownedAssets (check docs)
+ * Game Portal
+ - Updated game portal design
+ - Added featured game to top of game portal
+ * Servers
+ - Map Loading/Generating optimizations
+
+ == UPDATE 5.2.4 ==
+ * General
+ - Added Objective time below objective markers
+ * FACEIT & Ranked
+ - Upgraded Servers (WIP)
+ - Apply now shows Play Now once you're whitelisted for beta
+ - Updated ranked page stats bottom right
+ - Body altering skins are now disabled by default
+ - Completely disabled Anonymous mode in ranked matches
+
+ == UPDATE 5.2.3 ==
+ * General
+ - Added new free spin
+ - Slight adjustments to Customize UI
+ * FACEIT & Ranked
+ - Rank icons now update in-game
+ - Sawed off secondary now banned from comp
+ - XP and KR rewards now sent to FACEIT for end screen display
+ - Match result now reported properly when a player is reported as leaver
+ * Shop & Bundles
+ - Added thanksgiving bundle to shop
+
+ == UPDATE 5.2.2 ==
+ * FACEIT & Ranked
+ - Reduced games per server
+ - Removed Rank badge from guests
+ - Optimized Networking is forced in comp matches
+ - Fixed challenges not updating in comp matches
+
+ == UPDATE 5.2.1 ==
+ * General
+ - Fixed Terrain trees freezing games
+ - Reverted free KR popup image
+ * Editor
+ - Sign limit increased to 100
+ - Can now input copied colors via Enter Key
+ - Fixed Fog not updating in the editor for assets
+ - Fixed issue with custom textures sometimes not loading in the editor
+ - Fixed Asset size overlapping play button & texture preview
+ - Fixed issue with backup missing texture being all black
+ - Fixed rendering issues in the Editor
+ - Fixed custom texture loading issues
+ * FACEIT & Ranked
+ - Ranked closed beta invites now open
+ - Added ranked billboards
+ - Rank now displays in game and menu
+ - Added Ranked challenges
+ - Added Ranked Blog link to menu
+ - Updated in-game loading tips
+ - Added FACEIT watermark to death screen on ranked games
+ - Updated Krunker Menu Logo
+ - Ranked Button is now active again (animation)
+ - Fixed ranked shop purchasing issue
+
+ == UPDATE 5.2.0 ==
+ * Hitboxes & Servers
+ - Disabled accurate hitboxes until servers & hitreg are improved
+ - We are looking into the issue where bullets dont reg properly sometimes with new hitboxes
+
+ == UPDATE 5.1.9 ==
+ * General
+ - Added new free spin
+ - Fixed Double XP & KR Discount Weekends ending early
+ - Fixed Assist medal showing Confirmed
+ - Selecting & Hovering sound now uses UI sound channel
+ * Servers & Hitboxes
+ - Fixed middle east & brazil servers
+ - Removed Hitbox padding entirely
+ - Hitboxes are now much more accurate to the player model in all modes (Work in progress)
+ - Leg Hitboxes now synced when running
+ @ /img/hitboxes.png
+ * KrunkScript & Editor
+ - Fixed moveObj, scaleObj and rotateObj
+ - Added onServerClosed hook
+ - Added drawPath option to KS
+ - Added callback to check once asset has loaded
+ - Added ability to change canvas font in KS
+ - GLTF & FBX Assets now render shadows
+ - Fixed Class selection in Sandbox
+ - Object Fog now updates in the Editor
+ - Object Fog is now applied properly in-game
+ - Removed Visual rotation from Ramp & Prize Wheels in the Editor (Rotation is not used ingame)
+ - Liquid object now uses Fixed Plane rotation
+ - Fixed Color picker in the Editor
+ - Fixed Game Publishing error messages
+ - Fixed Opacity on Multi-node / Multi-material Assets
+ - Fixed issue with Objects encompassed in Environment Zones
+
+ == UPDATE 5.1.8 ==
+ * General
+ - Adjusted Empty lobby checks
+ - Can now purchase Bundles with Paypal
+ * FaceIT & Ranked
+ - Fixed issue where "defeat" is shown to winning team when other team disconnect to forfeit match
+ - Can now change class during warmup and between rounds even when spawned in
+ * Steam
+ - Can now purchase KR on steam (Requires Client update later today)
+
+ == UPDATE 5.1.7 ==
+ * General
+ - Added new free spin
+ - Fixed Model Viewer
+ - Fixed Round Arms setting
+ - Added Airdrops Stolen stat to profile & Hub
+ * FaceIT & Ranked
+ - Updated Ranked page
+ - Added Faceit watermark on death screen bottom right
+ - Fixed incorrect Team scores
+ - Updated menu logo for ranked players
+ * Editor
+ - Fixed object rotation issues
+ - Some really old maps have incorrect rotations which we nolonger support
+ - Fixing old rotations is simple as resetting rotation values and just rotating again
+
+ == UPDATE 5.1.6 ==
+ * FaceIT & Ranked
+ - Fixed AC issue
+ - Updated AC Client
+ - Fixed issue where game would count as win instead of cancelling sometimes
+ * KrunkScript & Editor
+ - Fixed issue where custom values on player object are reset when fetching player object again
+ - Added LightMap texture support to assets: Check docs for more info
+ - Can now delete storage values by key: delete all
+ - Added onPlayerDamage hook to KS
+ * General
+ - Added new Free spin
+ - Changes to vote-kick system
+ - Major performance optimizations for destructible objects
+ - Fixed issue with 2fa not fully working sometimes
+ - Empty lobbies no-longer grant wins
+ - Added new Experimental setting to disable Mouse Acceleration (Browser only atm)
+
+ == UPDATE 5.1.5 ==
+ * Halloween Event
+ - Event is over
+ - Bones will return in the future
+ * General
+ - Renamed Perks to Effects
+ - Added 2FA Account protection (Starting with Verified & Partners first)
+ - Fixed issue where leg hitbox overlaps body when crouching
+ - Updated NASA CSS
+ - Improved auto play reliability
+ - Updated Custom Badge Selection
+ - Updated Mod zip (https://assets.krunker.io/mod.zip?v=5.1.5)
+ - Fixed Izon Famas skin
+ - Fixed all old model Marksman skins
+ * Partner System
+ - Fixed issue with reward progress bar not filling properly
+ - Added detailed creator code sales stats tab to partner dashboard
+ * KrunkScript & Editor
+ - Fixed object attach issues
+ - Fixed DataStorage value search & delete
+ - Added GAME.UI.getProp support (returns current value of a div style property)
+ - Added action value to onCustomTrigger hook
+ - Added player.isActive property
+ - Added killerID to onPlayerDeath hook
+ * Ranked & faceIT
+ - Removed hitbox padding on ranked games (Pixel perfect hitbox rework coming soon)
+ - Ranked matches now reward more KR & XP
+ * Translations
+ - All languages have been updated/changed
+ * Kranked FFA
+ - Added to Industry
+ - Changes to Kranked effects
+ - Speed Boost from 30% to 25%
+ - Reload Speed from 40% to 35%
+ - Firerate from 20% to 15%
+ * Hub
+ - Fixed following/unfollowing
+ - Fixed itemsales on the Hub
+ * Servers
+ - Fixed rare crash issue
+ - Fixed some Miami servers auto disconnecting
+ - Added more dedicated servers where required
+ - Fixed issue with play links not working with dedicated servers
+
+ == UPDATE 5.1.4 ==
+ * General
+ - Fixed Hardpoint
+ - Added halloween bundles
+ - Added zombies that spawn around maps: chance to drop loot
+ - Added new crafting recipes
+ - Added new crafting materials
+ - Added new skins to spins
+ - Added spawn chance setting to AI in editor
+ * Ranked & FaceIT
+ - Fixed rotation issue on ranked servers
+ - Fixed jitter issue
+ - Server Fixes
+
+ == UPDATE 5.1.3 ==
+ * KrunkScript & Editor
+ - Added data storage support
+ * General
+ - Updated shop menu slightly
+ - Added Metamask account linking
+ - Added NASA to Game Themes setting
+ - Fixed issues with price tooltips
+ - Added new free spin
+ - Added Search bar to in-game playerlist
+ * Ranked & Servers
+ - Fixed performance issue with domination
+ - Fixed 128 tick servers jitter issue
+ - Fixed config not setting tickrate properly
+ - Updated Official client to include faceit plugins
+ - Client deep-link
+ - Fixed login issue on ranked mode
+
+ == UPDATE 5.1.2 ==
+ * General
+ - Fixed Ad Preferences Button
+ - Added Tehchy9 to Gungame
+ - Sawed Off is now the 3rd weapon in Gungame
+
+ == UPDATE 5.1.1 ==
+ * Servers
+ - Fixed crash related to ramps & triggers
+ - Added more dedicated servers to NY and Frankfurt
+ - Fixed specific disconnect issue
+ * KrunkScript & Editor
+ - Add onPlayerDeath hook to server
+ - Added showVideoAd trigger action
+ * General
+ - Updated Terms & Conditions around item selling & NFTs
+ - Added hover tooltips to inventory and skins list
+ - Updated profiles connections tab
+
+ == UPDATE 5.1.0 ==
+ * General
+ - Added level up popup to game
+ - Updated SSL certs
+ - Added Free KR popup back
+ - Fixed drop rate of unob in raid
+ - Class score nolonger counts in Party modes that force a class
+ - Adjusted Gameplays calculation for increased partner payouts
+ * KrunkScript & Editor
+ - Added onAdFinished hook function to server: rewarded video ads
+ - Fixed trigger data storage
+ - Added onGameEnd hook
+ - Adjusted Siphon & Poisoned perk config
+ - Added Health option to Siphon & Poisoned perk config
+ - Boost option on ramps now have 2 decimals
+ * Partner System
+ - Added video ad revenue to dashboard
+ - Added total revenue summary chart to partner dashboard
+ - Added partner tier bonus system: earn bonus revenue from gameplays
+ - Map makers now earn additional revenue when playing a video (Added docs)
+ - Reduced required gameplays for payout to 10,000
+ - Increased partner payouts slightly (gameplay specific)
+ * FaceIT & Servers
+ - Triggerman icon issue fixed
+ - Disabled lag compensation setting on comp
+ - Fixed 128 tick config server issue on Ranked Servers
+ - Fixed players randomly appearing during ranked match
+
+ == UPDATE 5.0.9 ==
+ * General
+ - Added improved logging to find disconnect issue
+ - Added report error button to disconnect screen
+ - Added new Free Spin
+ - Added several new daily challenges
+ * KrunkScript & Editor
+ - Updated Krunker Docs page: now updated and maintained properly
+ - Fixed fog distance issue on Environment Zones
+ - Added Perk Configs: Create custom perks
+ - Increased custom value limit to 30
+ - Fixed mapworker crash with bigger objects and maps
+ - Fixed player count on games list
+ * Ranked
+ - Updated FaceIT plugin
+ * Social
+ - Updated UI for date range selection
+ - Added more date ranges for market sales (2 weeks, 3 weeks, 2 months)
+
+ == UPDATE 5.0.8 ==
+ * General
+ - Added crouches killcard stat
+ - Fixed Scoring on Kranked
+ - Added Kranked to Oasis
+ - Fixed Autohosting on Mobile
+ * Servers
+ - Fixed Brazil & South Africa Servers
+
+ == UPDATE 5.0.7 ==
+ * KrunkScript & Editor
+ - Added ability to get player account name and id: player.accountName & player.accountID
+ - Added ability to assign complex collision to Objects: Rotated & Asset collisions now work at last (WIP)
+ - Sliding is currently disabled on complex collision objects (check documentation for details under: Collision)
+ - Raycasting is being added next update for tri collisions
+ * Servers
+ - Minor server fixes and optimizations
+ * General
+ - Updated FaceIT plugin in preparation for beta launch
+ - Reduced occurence of ramp speed glitch
+ - Added new Free Spin
+ - Added new crafting recipe
+ - Slightly updated games home page in-game
+ - Added new Party Mode: Kranked FFA
+
+ == UPDATE 5.0.6 ==
+ * KrunkScript & Editor
+ - Fixed sound asset upload issue
+ - Assets ingame visual rotation/position now matches the Editor
+ - Progress on rotated and baked collisions: very soon tm
+ * General
+ - Adjustments to reconciliation
+ * Hub
+ - Trade offers items are now sorted by rarity
+ - Fixed Trade offer popup height
+ - Trade offers now show item count
+ * Ranked
+ - Progress on FaceIT implementation
+ - Updated FaceIT anti cheat client
+
+ == UPDATE 5.0.5 ==
+ * Raid
+ - Fixed Final Raid boss loot table
+ * Editor
+ - Fixed issue with trigger name & options
+ - Fixed issue with importing maps
+ * Settings
+ - Added GIF support to crosshair image setting
+
+ == UPDATE 5.0.4 ==
+ * Raid
+ - Fixed more cheese spots on final boss
+ - Balancing changes on all bosses
+ * General
+ - Added new free spin
+ - Fixed Team Score display showing up in spectate screen
+ * KrunkScript & Editor
+ - Added onChatMessage hook to server script
+ - Adjusted Network rate limits
+ - Increased file size limits on textures and sounds
+ - Updated docs: Publishing, Currencies, Funding
+ - Fixed issue with SOUND object not working as intended
+ - Fixed shadows not being casted by models added with GAME.SCENE.addAsset
+ - Fixed issues with input object in player update hook
+ - Added CAMERA.shake(1) function
+ - Added CAMERA.envZone property
+ - Can now get AI name in KrunkScript via obj.displayName
+ - Added sides property to lightcones
+ - Can now scale lightcone in both directions
+ - Fixed environment zones not resetting properly: (shadows & on new raid map)
+
+ == UPDATE 5.0.3 ==
+ * Krunker Plaza
+ - Nametags now hide at a certain distance in trade mode
+ - Updated thumbnail
+ - Moved nightclub entrance
+ - Cinema is now Open in the plaza
+ - Official trade Lobbies are now 80 players
+ * Raid
+ - Added official raid servers
+ - Fixed cheese spots on final boss
+ - Buffed King Krum
+ - Can now get Apex Predator item from fishing
+ * KrunkScript & Editor
+ - Adjusted network limitations: Check docs networking section
+ - Object Overhaul: KS objects are now more dynamic (add/remove properties)
+ - Updated documentation
+ - Added code folding/minimizing to script window
+ - Fixed cookies/localstorage not working
+ - Added new Asset type: mp4 (video)
+ - Objects now support mp4's as textures
+ - Added Icons above Weapon Pickups
+ - Fixed shadows on Assets
+ * Networking & Servers
+ - Server optimizations
+ - Adjusted Hitboxes on pubs to be more accurate
+ * FaceIT & Ranked
+ - Fixed sprays issue in comp matches
+ - Reduced warmup countdown
+ - Reduced match starting countdown
+ * Challenges
+ - Added new Map challenges
+ * General
+ - Added more dedicated servers to: NY and FRA
+ - Fixed issues with browserfps.com proxy
+ - Added new category to games home page: New & Trending
+ - Slight adjustment to walking animations in third person
+ - Added more update screen backgrounds
+ - Fixed Completion challenges
+ - Deep space no-longer changes all cosmetics
+ - Fixed issue with twitch channels not updating over time
+ - Added badge to Endboard & Leaderboard
+
+ == UPDATE 5.0.2 ==
+ * Raid
+ - Fixed issue with Raid showing up way to often
+ - Fixed some cheese spots on final boss
+ - Changes to final boss fight
+ - Raid unob is now tradable
+ - Added mystery weapon chest
+ * Weapons & Balancing
+ - Increased Tehchy-9 DMG from 18 to 20
+ * Challenges
+ - Added more map challenges
+ * General
+ - Fixed issue with Airdrops & High/Physical lighting
+ - Fixed time based challenge progress going over 100%
+
+ == UPDATE 5.0.1 ==
+ * Raid
+ - Changes to final boss
+ - Buffed Sailors Potion
+ - Added new Locations to Raid map
+ - Removed some stat changes in raid mode
+ * General
+ - Added new challenges
+ - Fixed missing skin from RPG Completion challenge
+ - Fixed issue with secondary skins
+ - Fixed issue with damage sound not using a audio channel
+ - Fixed middle east servers
+ - Increased crouches needed for Krunk Twerk
+ - Interact triggers are nolonger usable before warmup ends/round starts
+ - Fixed Catgirl weapon sound
+ - Fixed issue with Ambient Sounds & Enviornment zones
+ - Leaving games now only effects losses
+
+ == UPDATE 5.0.0 ==
+ * Raids & Events
+ - Added new Official Raid Event: Tortuga
+ - Updated Official Trade server map
+ * Shop & Skins
+ - Can now unlock special giveaway keys from spins
+ - Added new Currency: Junk
+ - Added new Item Type: Collectible
+ - Can now dissolve your skins to earn Junk
+ - Junk & Materials has a chance to spawn around every pub map
+ - Added Junkyard to Shop: Craft unique skins & items
+ - Added new Blackmarket skins
+ - Added masteries for all primary weapons to Blackmarket
+ - Added 100+ new Hats
+ - Added 80+ new Body Items
+ - Added 500+ new Weapon Skins
+ - Added 30+ new Weapon Models
+ - Added 35+ new Melee Items
+ - Added 3 new Dyes
+ - Added Bundles: One time purchase for KR, Junk & Unique Skins
+ * Challenges & Progression
+ - Added new Badges system: Unlock new badges for your profile (WIP)
+ - Reset old challenge level
+ - Added Daily Challenges + Rewards
+ - Added Map specific Challenges
+ - Added Weapon specific Challenges
+ - Added Junk leaderboard
+ * Servers
+ - Added more dedicated servers
+ - Slight adjustments to hit-reg
+ - Reduced hitbox sizes in pubs (more accurate)
+ - Server Optimizations
+ * Gameplay
+ - Leaving a match early now counts as a loss & death on your stats
+ - Added slight flinch animation when taking damage: (Disable screen-shake in settings)
+ - Dropping a nuke has a small chance to drop uranium (material)
+ - Adjusted Semi color-scheme to be more different from LMG
+ - 4th Map in pubs is now always a unique mode (Raid, Party mode etc)
+ - Added Double Class XP Weekends (Every other weekend)
+ - Added Trapped Airdrops
+ - You now have a chance to earn rare skins from Air Drops
+ * Weapons & Classes
+ - Added new Secondary: Tehchy-9
+ - Increased Spray N Pray health to 180
+ * KrunkScript & Editor
+ - Trigger Objects can now have an Asset ID (Custom Model)
+ - Added Fog, Force Transparency Setting to more Objects
+ - Added Render Side Setting Assets
+ - Added Environment Areas: Change environment when inside
+ - Fixed issue with asset publishing rate limit
+ - Fixed issue where cookies don't work properly
+ - Added AI level slider
+ - Fixed Teleport Player to Path Node
+ - Slight changes to AI Health-bar HUD
+ - Slight changes to AI default behavior
+ - You now deal critical damage when shooting an AI from behind
+ - Added Melee & Shoot shake slider to AI
+ - Added critical hit damage setting to AI
+ - Replaced AI attack sound with 2 new Options: Melee Sound & Shoot Sound
+ - Added AI Health-bar size setting
+ - Fixed Teleport to Path-node not working
+ - AI Meshes now support all Asset settings
+ - Added Change Ambient Sound Trigger Action
+ - No more level requirement to publish a map
+ - Added Player Collidable setting to triggers
+ - Added Allow Anonymous Host setting
+ - Added Spawn Chance to Destructible objects
+ * Sounds
+ - Fixed Sound Emitters not resetting properly
+ - Changed sound when player takes damage
+ - Added footstep sound setting to Cubes & Triggers (WIP)
+ * General
+ - Clan Wars discontinued (New clan systems being worked on)
+ - Removed Clan tag colors for now
+ - Fixed issues with browserfps.com proxy
+ - Added Free KR Card on left in main menu
+ - Added Free Spin
+ - Slight spin re-design
+ - Updated Social buttons in menu
+ - Idle kick timer adjustments
+ - Slightly updated default weapon models
+ - Reduced min level to chat in-game
+ - Separated Spray & Spray Wheel keybinds
+ - Added 3 Second limit to Chat message Keybinds
+ - Better placement for sprays that are not full size
+ - Added back button to customize screen
+ - Fixed config sliders not working on Host settings
+ * Games, Maps & Modes
+ - Prophunt Overhauled: Auto Taunts, Prop Wheel, Rotations & More!
+ - King of the hill Overhauled: Point Contesting, Kill Score Based on Amount of kills on point & More!
+ - Overhauled Villa/Bureau visuals
+ - Map Drops moved to Air Drops
+
+ == UPDATE 4.3.0 ==
+ * Servers
+ - Fixed urgent Server crash
+
+ == UPDATE 4.2.9 ==
+ * Other
+ - Added new Free spin
+ - Added gift object as new prop in prophunt
+ - Optimized sync data on map load
+ * Servers
+ - Fixed Server crash issue
+ - Fixed comp server issue
+ - Added more dedicated servers
+ * KrunkScript & Editor
+ - Added Shoot & Melee delay to AI
+ - Added Projectile Mesh Scale to AI
+ - Fixed Ramp Collisions for AI
+ - Fixed issue where AI would collide with onEnter trigger objects
+ * Settings
+ - Added Show Region Info setting (Could help counter stream snipers)
+
+ == UPDATE 4.2.8 ==
+ * Servers
+ - Fixed issue where plays dont count on dedicated servers
+ - Dedicated servers now save play stats constantly (even during an update)
+ * KrunkScript & Editor
+ - AI name is now hidden if no name is given
+ - Added onHalfHealth Trigger Event to AI
+ - Added Shot Arch Y property to AI shooting options
+ - Fixed AI aggro sound not working
+ * UI
+ - Fixed Usernames being too dark on the Hub
+ - Slight changes to Trade UI on the Hub
+ - Estimated Value is now more Visible on Trade UI in Trade mode
+ - Added Item Requests to Trade mode (Click other users item to request)
+ - Semi Fixed Trade chat
+ * Comp
+ - Fixed Abandoned matches
+ - Added More configs
+ * Settings & Keybinds
+ - Gradual Speed is now enabled by default on mobile
+
+ == UPDATE 4.2.7 ==
+ * General
+ - Added new Free Spin
+ * Servers
+ - Added more dedicated servers to rent
+ - Fixed issue with Dedicated servers not functioning properly
+ - Added option to restart server to dedicated servers
+ - Merged Dedicated Servers and Official Customs into their own server browser list
+ * KrunkScript & Editor
+ - Fixed shadows not working on GLTF models
+ - Added Rope Ladder object (360 ladders)
+ - Fixed issue with image centering on overlay canvas
+ - Fixed Asset Invisibility when using destructible or spin
+ * Games, Maps & Mods
+ - Added Trade button to Player menu while in Trade mode
+ - Fixed Reset Mods when using Shader mods
+ - Added new Taunt to Prophunt
+ * UI
+ - Added Read All button to all Inbox tabs (Except Archive)
+ - Hub profile is now Dark Theme
+
+ == UPDATE 4.2.6 ==
+ * General
+ - Added new Free Spin
+ - Hidden players no longer emit sounds & bullets
+ * Servers
+ - Added ability to rent dedicated servers (WIP)
+ * Comp
+ - Fixed medals in Comp Mode
+ - Bronze is no longer default rank
+ - Fixed Score reporting
+ * Settings & Keybinds
+ - Rearranged Keybinds more
+ - Separated Prophunt Keybinds from Streaks
+ * Maps
+ - Slight Changes to Lumber
+ - Fixed spinning Cylinder objects
+ * UI
+ - Fixed Item sold Inbox messages
+ - Moved/Re-styled Cookie Button
+ - Made gifting fee more noticeable
+
+ == UPDATE 4.2.5 ==
+ * Comp
+ - Adjusted default comp preset to be: Best-of 3
+ - Fixed team score display in comp mode
+ - Adjustments to best-of system (now ends when its supposed to)
+ * Other
+ - /kill can now be used in Customs with Default Settings (Premium Host only)
+ - Fixed Creator code notifications
+ - Visual changes to creator code messages
+ - Keybinds Menu Overhauled
+ - Updated TOS surrounding assets
+ - Fix load screen scaling issue
+
+ == UPDATE 4.2.4 ==
+ * General
+ - Chat Messages & Toggle Settings now export & import properly
+ - Fixed freeze at the end of a match
+ - Fixed freeze when loading assets in-game
+ - Fixed in-game trade chat
+
+ == UPDATE 4.2.3 ==
+ * Settings
+ - Optimized Networking is now on by default (If you are on a high HZ monitor, change the Network Rate setting)
+ - Width & Height for Image Crosshairs are now consistent with each other
+ - "Hide Game" keybind no longer triggers when typing normally
+ - Added Chat Message Keybinds (Can send preset messages with a keybind)
+ - Adjusted Mobile Default settings
+ - Adjusted Controller Default settings
+ - Added a Slider to Controller Vibration
+ - Adjustments to several languages
+ * KrunkScript & Editor
+ - Adjusted network data size limit
+ - play2D and play3D now return a sound object (updated documentation)
+ - Fixed issue with Truncate text not working
+ - Fixed GLTF Exporting
+ * UI & CSS
+ - Update Challenge window with renders etc
+ - Doubled amount of sprays shown on Premium Spray Wheel
+ - Made Keybind Toggles dropdown more visible
+ - Fixed Menu button on Mobile
+ - Fixed issue with Server Browser reopening after closed
+ - Fixed Spray Wheel Scroll Image position
+ * General
+ - Added new Free Spin
+ - Changes to Ad refreshing: should alleviate spawn freeze issue
+ - Map Drop chances doubled for Premium Users
+ - Fixed Builder Crosshair (Froze players using builder)
+ - Fixed not being able to shoot with controller
+
+ == UPDATE 4.2.2 ==
+ * KrunkScript & Editor
+ - Updated docs in certain areas (added a few images)
+ - Added New Variant For Wood Texture & Crate Model
+ * Other
+ - Added new free spin
+ - Added new network rate setting (Adjust this and test what feels best for you)
+ - Updated Comp store page a bit
+ - Fixed third person issue with Opt Networking
+ - Fixed issue with weapons not showing with Opt Networking setting
+ * Settings
+ - "Custom" crosshair type renamed to "Shapes"
+ - Added more options to Throwing Crosshair
+ - Added Width & Height for Image Crosshairs (0 = Size from image)
+ - Removed Static Rendering setting (Now always enabled)
+ - You can now select your Audio/Mic Input Device
+ - You can now Change your own mics volume
+ - Adjustments to several languages
+ * Games, Maps & Modes
+ - Added new Comp/Rotation Map: Lumber
+ - Overhauled Kill Confirm Win conditions (Now counts confirms for players that left, New Order of checks: Confirms -> Denies -> Kills -> Score)
+ - CTF End Leaderboard sorting updated
+ - Added more accuracy to milliseconds on speed run finished time
+ * UI & CSS
+ - Made W/L Stats more accurate on Profile & Hub
+ - Fixed issue with changing players in Host menu
+
+ == UPDATE 4.2.1 ==
+ * KrunkScript & Editor
+ - Added Trigger -> KrunkScript example (Must be hosted to work)
+ - Added Game of Life in KrunkScript as Template
+ - Updated Editor welcome popup
+ - All templates are now loadable from the templates popup
+ - Fixed issue with player.name not being a property: changed to player.username
+ - Added player.isCrouching, player.onTerrain
+ - Added support for custom geometry creation via vertex Positions GAME.SCENE.addCustom() (WIP)
+ * UI & CSS
+ - Added Popups for Editor Import & Ingame Settings Import
+ - Renamed "Default" Crosshair option to "Dynamic"
+ - Reduced Max Size of Dynamic crosshair
+ - Crosshair dot is enabled by default for Dynamic Crosshair
+ - Throwing Crosshair is now separate from normal crosshair with its own settings
+ * Games & Maps
+ - Another Possible 200 DMG/healing Bug fix (Please report if it happens again)
+ - Overhauled King of the Hill mode
+ * General
+ - Added free spin
+ - Renamed 'Nightmare Fue' skin to 'Nightmare Fuel'
+ - Fix Hub in-feed Ads
+
+ == UPDATE 4.2.0 ==
+ * Other
+ - Added new free spin
+ - Added new Free Spray: krTree
+ - Added Image Collection (Used to save all images for image based settings)
+ * KrunkScript & Editor
+ - Added basic sprinting template
+ - Added function to update player asset
+ - Added function to get list of path-nodes
+ - Fixed onScreen property not working properly for coords
+ - Added getDir3D function
+ - Updated movement docs a bit
+ - Updated Docs CSS a bit
+ * UI & CSS
+ - Fixed Blackmarket Glitch Logo on the Hub
+ - Fixed "No Active Streams"
+ * Games & Maps
+ - Update & New Game tag now show on Games home page
+ - Fixed third person camera not looking at player
+ - Reduced Instances of "Server Limit Reached"
+
+ == UPDATE 4.1.9 ==
+ * Servers & Optimizations
+ - Added more logging/system messages for rubberbanding
+ - Static Rendering is now enabled by default
+ - Slight increase to server tickrate on all servers
+ - Server renting front-end progress
+ * KrunkScript & Editor
+ - Fixed issue where maps with special characters couldnt be updated
+ - Fixed asset uploads not working
+ - Added keybind to open scripting window in editor: 0 key
+ - Added keybind to Save/Validate in scripting window (Ctrl S)
+ - Added function to convert 3d to 2d coordinates: GAME.SCENE.posToScreen(0,0,0)
+ - Added onPlayerSpawn Hooks to server & client scripts (Updated docs accordingly)
+ - Added onPlayerUpdate Hooks to server & client scripts (Updated docs accordingly)
+ - Added defaultMovement, defaultVelocity, defaultRotation to player object
+ - Added ability to disable more default behaviours: player.disableDefault("space");
+ - Added disableShooting, disableMelee to player object
+ - NETWORK.send & NETWORK.broadcast now return true or false if they succeed or fail
+ - Added new Trigger Action: CustomAction -> onCustomTrigger() hook in KS (server side)
+ - Added docs about new Custom Action in triggers
+ - Added basic docs about Movement (Custom player movement etc)
+ - Added UTILS.replaceText("Test", "e", "") function (Updated docs accordingly)
+ - Added UTILS.textContains("Test", "es") function (Updated docs accordingly)
+ - Added onMouseUp Hook
+ - Added basic Jetpack KrunkScript template
+ - Small changes to Editor welcome popup
+ - Added new Game/Map Category: Education
+ * UI & CSS
+ - Added hover animation to custom host button in host menu (You're welcome swixie)
+ - Fixed issue where friends tab extends too far with long map names
+ - Added country flag icons to end board
+ * Mods
+ - Thumbnail no longer needs to be filled in every time when updating a mod (Click edit button on My Mods on the hub)
+ * Hub
+ - Added Background setting to Hub
+ * Ranked & Comp
+ - Added map name to comp menu
+ - Show team score in intermission comp screen
+ * Other
+ - Added new Free Spin
+ - Fixed issue where all objectives show at the same time
+ - Fixed issue where selecting a game to host from Hub doesn't work in-game
+ - Limited Games home page categories to 8 items max
+ - Fixed certain flag icons not loading properly
+ - Fixed issue with Host Game button not working on Home Page
+
+ == UPDATE 4.1.8 ==
+ * General
+ - Added new Free Spin
+ - Game/Map Home page now shows more dynamic suggestions
+ - Game/Map search now returns better & more results
+ * Servers & Optimizations
+ - Optimized Server Input data
+ - Adjusted reconciliation logic (rubberbanding)
+ - Can now see a system chat message when rubberbanding, please report the numbers to us
+ - Optimized server processing on certain gamemodes
+ * KrunkScript & Editor
+ - Fix rate limiting of krunkScript in io-server
+ - Added more nav buttons to top of editor window
+ - Cleaned up Game & Asset publishing process/window
+ - Thumbnail, Description etc no longer needs to be filled in every time when updating a game
+ - Increased Zone Config Max values (Speed, Stages, Wait Timer)
+ * UI & CSS
+ - Cleaned up Host menu CSS & Layout
+ - Slight Changes to Mods, Assets & Maps Window in the Editor
+ * Steam Client
+ - Updated Steam store page
+ - Fixed some CSS issues on steam client
+ * Controls & Keybinds
+ - Added Alternate Binds to all Controls
+ - Fixed Switching Players while Spectating
+
+ == UPDATE 4.1.7 ==
+ * KrunkScript & Editor
+ - Added Zone Stages & Wait Timer to the Editor
+ - Updated KrunkScript editor window: Resizable etc
+ * Weapons & Balancing
+ - Decreased AK Reload speed (1400ms to 1500ms time)
+ * KPD & Anticheat
+ - Trust score will now affect your ability to call KPD
+ * UI & CSS
+ - Profile pictures now show on end leaderboard
+ - Updated payment screen CSS
+ - Updated Featured games display a bit
+ - Updated CSS for several Popups
+ - Fixed Join Game Popup
+ - Fixed CSS Images & Fonts
+ * Social & Friends
+ - Fixed bug with profile picture uploading: invalid png error
+ - Hub Chat messages now appear in real-time
+ - Can now see online status on someones profile page
+ * Servers & Optimizations
+ - Optimized Server Memory (WIP)
+ - Optimized Maps Data to now be stored per game instance
+ * Store & Purchases
+ - Can now purchase KR with Cash or Crypto
+ * Comp & Ranked
+ - Alien Blaster is now banned from Comp Games
+ - Runner removed from comp matches
+ - Agent removed from comp matches
+ * Other
+ - Trigger Teleporting is now smoother
+ - Scroll Click, Left Click & Right Click can now be binded
+ - Fixed Inventory value not working on Hub Profile
+
+ == UPDATE 4.1.6 ==
+ * Other
+ - Added new Free Spin
+ * KrunkScript
+ - Can now attach 3D objects to Camera
+ - Added GAME.UI.getDIVText
+ - Added GAME.INPUTS.enableDefault
+ - Fixed issue with GAME.UI.updateDIVText & empty text
+ * Editor
+ - Update Editor Home Popup slightly
+ * UI & CSS
+ - Update in-game XP bar css
+ - Added join friend button to Chat window on Hub
+ - Updated Featured Games panel in menu
+ - Updated Menu buttons
+ - Slight menu CSS changes
+ - Fixed CSS loading issues with Mods
+ * Servers & Optimizations
+ - Optimized server memory a bit
+ * FaceIT & Ranked
+ - Progress on api
+
+ == UPDATE 4.1.5 ==
+ * KrunkScript
+ - Enabled Server Side & Networking on KrunkScript
+ - Can now get player.classIndex from a player object (Which class player is)
+ - Fixed offset issues with drawImage
+ - Added ability to get/set Camera position/rotation: GAME.CAMERA.position.x etc
+ - Added ability to attach 3D objects to player and other objects (Camera soon TM)
+ * Weapons & Balancing
+ - Slight decrease to Sniper firerate from 900ms between shots to 920ms
+ - Changed Rocket Launcher pullout time from 400ms to 350ms
+ * Settings & Accounts
+ - Added account setting to hide detailed online status (Basic online info still shows)
+ - Premium Name is no-longer displayed when Premium badge is disabled
+ * Items & Market
+ - Added inventory value leaderboard (Estimates)
+ - Added inventory value as killcard Stat option
+ - Added inventory value stat to profile: Hub & Game
+ - Estimated item value now shows as "Unknown" instead of 0
+ * UI & CSS
+ - Updated store CSS a bit
+ - Updated Hub background (Less distracting)
+ - Fixed clan page CSS
+ - Updated Esports menu a bit
+ - Updated online status CSS in hub
+ - Updated Ingame Profile Stats to match the Hub
+ - Adjusted/Fixed level display on main menu
+ - Added badges and Clans to nuke leaderboard
+ - Added Editor button to Hub UI
+ - Added follow back button to follow notifications
+ - Added Item Count to Sprays
+ * Social & Friends
+ - Added Friend box to top left in menu
+ - Online status now shows when hovering on a player in hub
+ - Added more info to online status: (in-game, On the Hub, Making Maps)
+ - Fixed remove friend option in-game
+ - Added Join Button to Friends pages
+ * Maps, Games & Mods
+ - Added Raid category to categories list
+ * Servers & Optimizations
+ - Slight server optimization: Map Gen
+ * Editor
+ - Updated UI & CSS documentation
+ - "Show first person" config now also works for default player (Not Only Asset)
+ * KPD & Anticheat
+ - KPD Badges delayed till next update
+ - Lvl 15 and up can now call the KPD
+ - You can make more calls per day to KPD depending on your trust level
+ * Other
+ - Fixed issue with Custom Projectile damage not working as intended
+ - Fixed issue where player is still able to shoot up while Y axis is locked
+ - Fixed issue with Uploading a Profile pic
+ - Fixed Clan filtering in Kill Messages
+
+ == UPDATE 4.1.4 ==
+ * General Fixes
+ - Fixed issue where loading Followers can result in a crash
+ - Fixed red plus KR button opening wrong popup
+ - Fixed bug with AI meshes
+ - Fixed loading screen issue with password protected lobbies
+ * KrunkScript
+ - KrunkScript is back (Networking & Server disabled till next update)
+ - Added += and -= support
+ - Added bitwise operators `~ << >> >>> & | ^`
+ - Added power operator `**`
+ - Added hex num support `0xAB`
+ - Added standard form support `1e+3, 1e-3`
+ - Added shadows: true/false option to lights KrunkScript
+ * KPD & Anticheat
+ - Added 20 new Deputy Officers
+ - Can now see KPD rank in KPD menu
+ - Fixed Deputy not having KPD Perms
+ * Games, Maps & Mods
+ - Added new Category to Game Page: Games your Friends like
+ - Added new Category to Mod Page: Mods your Friends like
+ - Corrected flipped Billboard on Kanji
+ * Social & Friends
+ - Added Friends button to Hub chat view (WIP)
+ - Can now see Online status of your Friends (WIP - status soon)
+   (You are considered online while on: Hub, Editor, Game)
+ - Added Friends Tab to Profile menu in-game (WIP)
+ - Can now click following/followers buttons on Hub to view
+ * UI & CSS
+ - Updated Hub Feed tabs
+ - Adjusted Market Width
+ - Fixed Clan page CSS
+ - Adjusted in-game Trade Search box
+ - Converted Followers & Following popup to Darkmode
+ - Slight changes to Inbox UI
+ - Added Image backgrounds to game categories on hub
+ - Added Game categories list to Game Page in-game
+ - Hub logo now links back to Krunker main menu
+ - Added Focus to Spectator UI
+ * Weapons & Gameplay
+ - Adjusted Rev firerate to 450ms (From 500ms between shots)
+ - Toggle Ads now cancels on weapon swap
+ - Added Keybind to Hide other players (Useful in Parkour & Race)
+ - Increased bowman Health to 100 again
+ * FaceIT & Ranked
+ - Progress on unlocks system
+ - Finalized Endpoints
+ * Other
+ - Added more loading tips/info
+ - Can now Sort/Search Inventory, Market & Trade by Skin Creators name
+ - Updates to Spanish, Japanese & French language.
+
+ == UPDATE 4.1.3 ==
+ * General
+ - Fixed Krunker South Korea region: New provider
+ - Added Recently Updated category to games list
+ - Small Server Optimizations
+ * Social & Community
+ - Updated Home Page content creator list
+ *Balancing & Meta
+ - Reduced Revolver firerate from 400ms to 500ms between shots
+
+ == UPDATE 4.1.2 ==
+ *General
+ - Added new Free Spin
+ *Settings
+ - Added Chargeable Weapons setting to Host Settings
+ - Added Overchargeable config value to weapon config
+ *Fixes
+ - Fixed Blaster damage bug
+ - Fixed Votekick issues/bug
+
+ == UPDATE 4.1.1 ==
+ *General
+ - Added new Free Spin
+ - Added Changelog/What's New Popup with more info on updates
+ *Balancing & Meta
+ - Increased UZI Clip size to 24
+ - Agent & Trooper can now walljump 3 times instead of 2
+ - Increased Sniper reload time from 1500ms to 1700ms
+ - Slightly reduced Hunter movement speed
+ - Adjusted Semi Damage Stats: Head: 51 Body: 35 Legs: 19
+ - Crossbow now Charges the shot when ADS (Full charge = full damage)
+ - Slightly reduced LMG Pullout time from 700ms to 600ms
+ - Added overcharge to Throwing Knife & Crossbow charge
+ - Increased knife charge time from 800ms to 900ms
+ - Added overcharge color setting
+ *KPD & Anti Cheat
+ - KPD Can now be called on Guests
+ - Added Tier System to KPD: Deputy, Marshal etc (More KPD will be able to respond)
+ - Guests can now be kicked more easily from a lobby
+ - Restricted more classes for guest users
+ *Settings
+ - Adjusted Default Settings
+ - Added toggle ADS setting
+ - Added Focus Player setting (Spectating - useful for KPD)
+ - Fixed Aim X & Y Sensitivity when aiming with keyboard inputs
+ *UI & Menus
+ - Updated loading animation
+ - Fixed Tabs CSS in Item page on HUB
+ - Darkened Hub Background
+ - Fixed clan page CSS
+ - Fixed KPD Call Popup CSS
+ *Map Changes
+ - Fixed out of bounds spots on Undergrowth
+ *Other
+ - Server Optimizations (We are still looking for the Rubberband/Freeze issue)
+ - Improved AI Hitboxes when they are moving (WIP)
+
+ == UPDATE 4.1.0 ==
+ (Balance changes coming next update)
+ - Added new Free Spin
+ - Changes to Freight Layout
+ - Changes to Lagoon
+ - Changes to KPD Application Process: Open KPD menu to see
+ - Adjusted Trade Popup UI
+ - Added Setting Preset buttons to settings menu
+ - Added more Server Checks to Find cause of Rubberbanding (Fix is WIP)
+ - Added New Map/Game Category: Single-Player
+ - Improvements to IP ban system
+ - Custom Games with custom CSS now load without showing Krunker UI
+ - Trade history is now hidden by default
+ - Added Tagalog, Italian & Traditional Chinese languages
+ - Updates to Portuguese, Hindi & French languages
+ - Added more extensive Gameplay Privacy Options
+ - Slight menu UI changes
+
+ == UPDATE 4.0.9 ==
+ (We are looking into the Server issues. FaceIT is in final stages of testing)
+ (KPD System is being overhauled as well)
+ - Added new Free Spin
+ - Updated Villa Layout a bit
+ - Added Extensive Server Logging to Help fix the server lag & rubberbanding
+ - Fixed Profile Link on Games Page
+ - Can now see KR on My Games Page again
+ - Added Twitter Share button to Games Pages
+ - Added Featured Creator showcase to Games List
+ - Added Category Cards to Games List on Hub
+ - Added Spawn Spread to Spawnpoints in the editor
+ - Trade history is now limited to 100 at a time (Can load more)
+
+ == UPDATE 4.0.8 ==
+ (Scripting will return very soon)
+ - Added Home Tab to Hub Games page
+ - Game Page Hub CSS Changes
+ - Changed Sydney server provider
+ - Cleaned up Host menu UI a bit
+ - Updated Market & Trading UI a bit in HUB
+ - Updated Challenge window a bit
+ - Add Play Now Button to Social Games Page
+ - Clicking a Game on Social Hub list now opens new tab
+ - Added KR to Domination Leaderboard
+ - Fixed Damage on Teams 3-5
+
+ == UPDATE 4.0.7 ==
+ - Added new Free Spin
+ - Fixed issue with Direct Impact Projectiles
+ - Restricted certain modes to certain maps in pubs (CTF specific maps in the works)
+ - Added new Gamemode: Domination
+ - You can now scroll Messages on Trades
+ - Fixed mod searching on Social
+ - Shift clicking to create a new Object will now copy the current selected Objects size & position for the new Object
+
+ == UPDATE 4.0.6 ==
+ - Fixed Hardpoint, King of the Hill & Comp Hardpoint
+ - Fixed Spectating issue
+ - Fixed issue with HardPoint not working
+ - Added new Rotation Map: Lagoon
+ - Added new Comp Map (Layout Test): Villa
+ - FaceIT Backend Progress
+
+ == UPDATE 4.0.5 ==
+ - Fixed Spawn direction issue
+ - Fixed issue with if statements in KrunkScript
+ - Sound object is now returned from SOUND.play functions in KrunkScript
+ - Can now change sound volume etc in KrunkScript: sound.volume = 0.2;
+ - KrunkScript has been disabled for the time being
+
+ == UPDATE 4.0.4 ==
+ - Added new Free Spin
+ - Fixed Loop timed out issue in KrunkScript
+ - Fixed toNum not working
+ - Sprites no longer count as collidable objects
+ - GLTF & FBX Assets now support Color & Opacity
+ - Added GAME.SCENE.setSkyColor() & GAME.SCENE.setSkyDome();
+ - Added rotation.z support for 3D Objects
+ - Added playAnim Support to AI Objects in KrunkScript
+ - Added truncateTxt function to KrunkScript
+ - Added lookAt function to 3D objects in KrunkScript (Rotates object to face point)
+ - Added Flashlight KrunkScript template/example
+ - Another Possible 200 DMG/healing Bug fix (Please report if it happens again)
+ - Changed GAME.AIS to GAME.AI
+
+ == UPDATE 4.0.3.1 ==
+ - Fixed South Africa, Middle East & Brazil servers
+ - Added Keycode to onKeyPress, onKeyUp & onKeyHeld
+
+ == UPDATE 4.0.3 ==
+ (We know content updates have been slow, but we are making good progress on faceIT)
+ - Added new Free Spin
+ - Asset ID now shows in Assets list display
+ - Fixed issue where burg shows in test mode without scripts
+ - Added GAME.TIME.freeze(); action to KrunkScript
+ - Added onPlayerLeave Hook to server script
+ - Added GAME.INPUTS.disableDefault(); action to KrunkScript
+ - Fixed GAME.SCENE.clear();
+ - Fixed GAME.SCENE.addAsset(); not working
+ - Switched GAME.PLAYERS.findBySID to findByID
+ - Switched onNetworkMessage parameter from playerSID to playerID
+ - Added basic AI Scripting Support & Docs
+ - Fixed AI Limit issue: Dead AIs no longer count to the limit
+ - Added basic Animation & Clip support to KrunkScript + Docs: object.playAnim("Idle");
+ - Added more information to docs in regards to key inputs & keycodes
+ - Adding semi-colons after if statements and loops is no longer required
+ - Added Extended Property Support to Objects in KrunkScript: Double Sided Materials etc
+ - Fixed stuck inputs when use GAME.unlockMouse
+ - Object & GUI Limits are no longer based on the host When hosting Published maps
+ - Fixed GAME.CHAT.send
+ - Fixed GAME.UTILS.HEXtoRGB
+ - Added GAME.PLATFORM.isMobile(), GAME.PLATFORM.isBrowser(), GAME.PLATFORM.isClient()
+ - Added GAME.SCENE.setAmbientLight() & GAME.SCENE.setSkyLight();
+ - Added GAME.CAMERA.attach()
+ - Added object.move & object.rotate functions
+ - Added object.delete function (removes object from scene)
+ - Added Math.atan2 support
+ - Syntax Errors are now highlighted in KrunkScript Editor
+ - All Errors are now shown in Error Popup in KrunkScript
+ - KrunkScript auto complete now includes parameters
+
+ == UPDATE 4.0.2 ==
+ - Added new Free Spin
+ - Updated .io Template Example
+ - Fixed Validate Script issues
+ - Server Fixes
+ - Fixed issue where client scripts continue when game is rehosted
+ - Fixed OVERLAY.getSize not returning any values
+ - Added remaining ranked items to list
+ - Fixed Map Publishing issue
+
+ == UPDATE 4.0.1 ==
+ - Fixed GAME.log on KrunkScript
+ - Removed Game Competition Popup
+ - Fixed GUI Host Limit issue
+ - Fixed Discord Invite Link
+ - Added Canvas Overlay Offset & Scale Functions to KrunkScript
+ - Added several functions to UTILS (toLower, toUpper, RGBtoHEX, HEXtoRGB)
+ - Added several functions to MATH (hypot, sqrt, min, max, sinh, cosh, tanh, asinh, acosh, atanh, trunc)
+ - Added several properties to players (onWall, onGround, velocity.z)
+ - Added KrunkScript support for break; and continue; in loops
+
+ == UPDATE 4.0.0 ==
+ - Added new Free Spin
+ - Initial Scripting release (Work in Progress - Some features are limited)
+ (If you find any issues with scripting, report them to the scripting channel in MMOK or join this https://discord.gg/KudrwJdvNf)
+ - Map Competition submissions closed (We are reviewing all submissions)
+ - Added Map Competition Tab to Games List
+ - Fixed issue with map publishing not working for some people
+ - Cleaned up Editor Docs a bit
+ - Added Decline All button to Clan Requests
+ - Added 'Hide Non-Tradable Skins' setting
+ - Overhauled Twitch Linking & Unlinking
+ (You can now only relink to a previously linked account)
+ (Changing Twitch Password or Username will require you to unlink then relink)
+ - Fixed issue with Entry to Heaven skin not appearing in spins
+ - Fixed Scrolling on spin items
+ - Adjusted Item Showcase Rotation speed
+ - Fixed in-game Visual Rotation for Planes (Exactly how it looks in the Editor)
+ - Minor Optimization & Visual Changes to Interact messages
+ - Allowed More Characters in Editor GUI's (Not length)
+ - Added Sprite object to the Editor (Always faces camera)
+ - Added Mimic Sprite option to Leaderboards, Signs, Runes, Light Bars, Billboards & Planes
+ - AI Projectiles now support GLTF's
+ - Fixed Weapon & Class config on Auto Hosted games
+ - Added Static Rendering Experimental setting (Please report performance differences if any)
+ - Minor Visual changes to Inbox
+ - Added Scripting Font Size setting to the Editor
+ - Updated Krunker Bunker Discord Invite
+ - Fixed Lives counter icon size
+ - Possible 200 DMG/healing Bug fix (we are still monitoring this)
+ - Fixed issue with Custom GUI elements showing while in menu
+ - Editor now forces Backup when closing tab/window (If AutoBackups is enabled)
+ - Errors from Hosting Games are now more detailed
+
+ == UPDATE 3.9.9 ==
+ (Initial Scripting release next update!)
+ - Added Charity Drop items
+ - Added Names list of Previous charity event
+ - Added Documentation Button to Editor Popup
+ - Increased data length for My Assets list
+ - Shader Mods can now stack and be toggled
+ - Fixed issue with Ocean not working with different ToneMapping & OutputEncoding
+ - Added Player has Account, Player has Premium, Player is Verified & Player is Partner Trigger Conditions
+ - Added 'Can Hipfire' setting to Class Config
+ - Added 'Can Crouch' setting to Class Config
+ - Added 'Mid Air Shooting' setting to Class Config
+ - Added Ids to EndTable Headers
+ - Added Displacement, Roughness, Metalness & Bump maps to Asset Uploading
+ - Added Outline Color & Thickness to Signs
+ - Fixed Assets & Models turning black on High or Physical lighting
+ - Fixed in-game Rotation for Leaderboards, Signs, Runes, Light Bars & Billboards (Exactly how it looks in the Editor)
+ - Fixed issue with Projectile weapons being hitscan
+ - Fixed missing mode issue when hosting maps
+
+ == UPDATE 3.9.8 ==
+ - Added new Free Spin
+ - Server Optimizations
+ - Fixed AI movement issues
+ - Fixed issues with new Payment Methods
+ - Fixed issue with pets disappearing after picking up a weapon
+
+ == UPDATE 3.9.7 ==
+ - Added new Payment Methods
+ - Added more Korea Servers
+ - Added onPlayerDamage Trigger Event
+ - Added Best of Setting to Comp Servers (WIP)
+ - Can now set Ads Power to 0 in Settings
+ - Adjusted Hitboxes on Comp Servers
+ - Server Fixes
+ - Fixed Melee Icons from Twitch Drops
+ - Fixed Drop Helmet Item Animation
+
+ == UPDATE 3.9.6 ==
+ - Extended Map Competition to June 25 as many teams are behind (Final Extension)
+ - Twitch Drops now active!
+ - Added FaceIT Sendrate Config
+ - Networking Optimizations
+ - Improvements to Net-Code & Hitreg (Hitbox fix soon)
+ - Adjustments to Interpolation
+ - 0 is no longer returned for Custom Leaderboards
+
+ == UPDATE 3.9.5 ==
+ - Added new Free Spin
+ - Added more limited items
+ - Slight Adjustments to SkyTemple map
+ - Fixed CTF on SkyTemple
+ - FaceIT Servers now use 64 Tick (Testing)
+ - Added Per Weapon Option to View Model Settings & Gameplay Settings
+ - Fixed Texture Offset Slider in the Editor
+ - Fixed issue with Scroll Wheel binding
+ - Added AlphaTest setting to Assets in the Editor
+ - Twitch Unlinking enabled temporarily
+
+ == UPDATE 3.9.4 ==
+ - Added new Map: SkyTemple (Test)
+ - Added Test Hitreg Setting to Network Settings (Testing new Algo Changes)
+ - Added a few new Default Textures
+ - Updated Account Terms
+ - Can now Create Leaderboard Object with Custom Values
+ - Fixed Animated Images for Spray Wheel
+ - Added Scroll Icon to Spray Wheel
+ - Model Scale now accepts up to 2 decimals
+ - Can now add Rotation Animation to Default Models
+ - Added Model variant Support to Editor
+ - Added Texture variant Support to Editor
+ - Renamed some textures in the editor (Still uses the old filename) (Wall -> Stone, Floor -> Wood)
+ - Added New Gate, Interact Trigger & Weapon pickup Requirement options
+ - Added Theta Length setting to Light Cones
+ - Added Radius Top & Bottom to Cylinders
+ - Added Partner Zone to the Editor
+ - Added "Model & Asset Boundingbox" toggle to the Editor (Works like the Lightcone setting)
+ - Added UI Button for Toggling Snapping in the Editor
+ - Input/Show rotation in degrees instead of radians in the Editor (With Anti Radians enabled)
+ - Fixed issue with Skin Makers not being able to use Sprays they created
+ - Fixed "My Assets" in the Editor
+ - Shader Mod settings no longer reset every map change
+ - Delete Follower no longer shows up for other profiles
+ - Added More Keybinds
+ - Fixed Trigger Delay importing not supporting below 1
+
+ == UPDATE 3.9.3 ==
+ - At the end of this month all Creator Code Rev shares will be increased to 25%
+ - Added new KPD Officers
+ - Added new Free Spin
+ - Added editor button to Games popup
+ - Added Grappler to Premium Zone in Trade Hub
+ - Fixed issue where you get stuck in menu in comp warmup
+ - Added No Draws setting to Comp Mode
+ - Added Video Background to Ranked Menu
+ - Added KR Sales Icon to Menu
+ - Added Falldamage & Falldamage Threshold Setting to World Physics Config
+ - Can now Call KPD in ranked matches (Prioritized)
+ - Added SaveData & LoadData Trigger Actions (Map Data Storage) (SaveData Replaces Save leader)
+ (To save score or time use Player Values as Value Type then input score or time into Data Name)
+ - Added Ability to Delete/Search Data Storage on your Maps/Games
+ - Sharing a Game/Map now also includes the Creators Ref Code if they have one
+ - Updated Several Language Translations
+ - Fixed issue with Creator Code input
+ - Fixed issue with Profile Picture uploading
+ - Fixed issue where score value doesnt update on UI when setting to 0 from Trigger Action
+ - Fixed issue where you cant click on skin maker name on Item Page
+ - Skin makers can now use the skins they created in-game (non-tradable)
+
+ == UPDATE 3.9.2 ==
+ - Can now gift Premium to other players (Requires Lvl 30)
+ - Updated Partner Dashboard Layout a bit
+ - Fixed Issue with Spins not working sometimes
+ - Added Dashboard Link to My Games Tab
+ - Added Basic Gameplay Stats to Partner Dashboard
+ - Added Spray selection wheel for premium users (Hold Spray Key, Scroll to Cycle)
+ - Premium users can now place 2 sprays at once (Premium with Verification is 3)
+ - Fixed some Spawn Issues on Site
+ - Fixed where Free Spin doesn't update after using it
+ - Can now use classIndex as Key in Player value triggers
+ - Added Grapple Rope & Bullet Trail Color settings
+
+ == UPDATE 3.9.1 ==
+ - Added new Free Spin
+ - Updated Partner Window Layout a Bit
+ - Fixed Issue with Vehicle Movement Config
+ - Referral System Overhaul (Also increased Referral Code payouts to 0.04 USD per Hour)
+ - Fix issue with Glitch when grapple behind object
+ - Renamed Advertise Button on Menu to Business
+ - Updated Advertise Popup Layout a bit
+ - Can now see other players grapples
+ - Fixed grapple positioning
+ - Added Home Tab to Mod Window (WIP)
+ - More Votes now needed to Kick Players
+ - Added Can Grapple Option to Objects
+ - Grapple is now removed when teleported
+ - Added Class override for Mobile only CSS (#uiBase .isMobile .DIVID {})
+ - Added Mobile Friendly Button to Publish Popup
+ - Updated Look/Design of Map Publish Popup
+ - Fixed Favorite Button on Hub Mods & Maps
+ - Nametags will now crop super long names
+ - Fixed Spawn Point Team only Option not Exporting issue
+ - Fixed Asset/Sounds ID Input not Updating sometimes
+
+ == UPDATE 3.9.0 ==
+ - Added new Free Spin
+ - Renamed Spectate Cam to Camera in the Editor
+ - Added Camera Type setting to Camera Object in Editor (WIP)
+ - Updates to FaceIT backend
+ - Added Sound & Animation to Grapple Hook (WIP Still)
+ - Fixed Grappler Secondary Momentum & Movement (WIP)
+ - There may be some issues with Grappler still (Its WIP)
+ - Fixed AI Speed Max to actually be 10
+ - Can now choose Player or Global for GUI Element hide/show Events
+ - Fixed Steam Client Issues
+ - Fixed missing decimal on Hub Profile Stats
+ - Added HiddenClasses DIV to Menu: menuClassPIcker+classIndex (Css Makers)
+
+ == UPDATE 3.8.9 ==
+ - Added new Free Spin
+ - Fixed Game not loading on Safari/Ipads etc
+ - Disabled Custom Skin Colors in Comp Mode
+ - Increased AI max move speed value
+ - Join Team Buttons now Toggle: Join/Leave Team in Comp Mode
+ - Added ability to Favorite Skins/Items (Random Skin cycles through Favorites)
+ - Slight Editor FPS Improvements
+ - Can now Post Youtube Video links on Hub (Also in Giveaway Posts)
+ - Bowman & Vince now require you to be logged in
+ - Fixed menu getting stuck in Comp Intermission
+ - Added new Test Secondary (Customs Only - Work in Prog): Grappler
+
+ == UPDATE 3.8.8 ==
+ - Fixed Secondary not working on Comp Mode (Secondary Issue)
+ - Fixed Editor Freeze Issue when adding GUI element
+ - Fixed issue where clicking Map Icon on Server browser opens Official Customs tab
+ - Added more Middle East Servers
+ - Added Join Game Button to Comp Menu
+ - Fixed issue where you can't spawn in when joining back to Comp Match
+ - Spectator can now see both Teams Class choices in Comp
+ - Added Hover & Click Sounds to Server Browser
+
+ == UPDATE 3.8.7 ==
+ - Added more Brazil Servers
+ - Added new Free Spin
+ - Added new Background to Limited Shop Screen when its not Active
+ - Added 6 new KPD Officers
+ - Added more Host Options to Comp Hosting (For Testing)
+ - Fixed issue with Custom Textures not Loading
+ - Fixed some issues with Light-Baking
+ - Fixed Purchase Popup Position
+ - Default Comp Preset is now 2 rounds of 6 minutes & 1:30 Point Time (Testing Variants each update)
+ - Excess damage no longer Counts to stats
+ - Free KR popup is now hidden when clicking the claim button
+ - Asset Y-Offset now uses 2 decimal places again
+ - Can no longer see enemy team class choices in Comp Lobby/Menu
+ - Added Animation to Round Over Screen
+ - Added Team Chat Option for Text/Voice Chat
+ - Added Invite Button to Comp Menu Screen
+ - Added Letters to Site Icons on Hardpoint
+ - Added Intermission Timer Setting (For Round based Games)
+ - Can now only switch classes during intermission in Comp (Testing)
+ - Menu is now re-opened between rounds
+ - Added Limit Classes setting to Comp Servers
+ - Fixed Flag & KR Tag pickup when in the air (Kanji Boost Pad)
+ - Flags now reset after not being touched for 45 seconds
+
+ == UPDATE 3.8.6 ==
+ - Added new Free Spin
+ - Updated Site Layout: Site+ (Thanks to AceInTransit)
+ - Added 4 New KPD Officers
+ - Added Proxies to Play Krunker where its Blocked: browserfps.com
+   (More Regions will be supported soon)
+ - Added Several new Skins & Items to Spins
+ - Added Several new Language Settings: Dutch, Polish, Hindi & Russian
+ - Updated Several Language Translations
+ - Updated Comp Warmup Screen Design
+ - Can now Change several Render Settings for your Map/Game in Editor:
+   (ToneMapping, Gamma, Exposure, Output Encoding)
+ - Fixed Hub profile stats displaying wrong
+ - Fixed Rubberbanding issue on spawn in comp matches
+ - Can now use Text & Voice Chat during Comp Warmup
+ - Added Music to Comp Warmup
+ - Slight Changes to Chat UI
+ - Added Rounds Option to Host Settings: Switches Side Each Round
+   (WIP - Needs to be fixed for Defuse & CTF)
+ - Fixed Class & profile Pictures on Comp UI
+ - Fixed UI scale issue with Comp warmup screen
+ - Updated GUI value type logic: can now use keys for all types
+   (You may have to update your Custom GUI to fix it)
+ - Updated Steam Button in Hub
+ - Added some extra UI/Hud sounds
+ - Fixed issue with Leader Values being overwritten
+ - Legacy Browser is now Default Again (working on an alternative)
+ - Updated Start Server Button Look
+ - Fixed issue with Mod Settings due to spacing
+ - Increased GUI Element limit (Normal: 20 -> 40, Verified: 40 -> 80)
+ - Added Spectate button to comp warmup screen
+ - Added Settings button to comp warmup screen
+ - Updated all menu windows to new dark theme (WIP)
+ - Updated Settings menu Look/Design a bit
+ - Updated Free KR Popup Look/Design
+ - Fixed earnings display in Partner Tab not showing earnings
+ - Fixed issue when switching from Third Person to First Person config
+ - Added Countdown timer sounds to Warmup
+ - Added Country Flags to Comp Warmup screen
+ - Added Projectile Asset option to Weapon Config
+ - Increased max Interface target value to 2000
+ - Added Server Browser Link to Disconnect Screen/Popup
+ - Clicking find new game now redirects to the game type that you tried to join
+
+ == UPDATE 3.8.5 ==
+ - Added new Free Spin
+ - Added Warmup/Class screen to Comp Servers as Test Mode (Class Limits etc is WIP)
+   (Secondary Picking, Settings Button & Login coming next update)
+ - Fixed invis wall on Undergrowth
+ - Default Weapon Y Offset is now 1.2
+ - Added Trigger Action to Show/Hide Gui Element or Div
+ - Now have a rare chance to drop an RGB KR Package: 100 KR
+ - Added Backwards Sliding Option to Class Config
+ - Added Free Range Sliding Option to Class Config (Slide in 8 directions)
+ - Added onGameStart & onObjectiveSwitch Trigger Events
+ - Added Stop Sound Trigger Action
+ - Added Submission Button to Map Comp popup
+ - Slightly updated host menu design
+ - Games Home Page now randomizes category & map order
+ - Updated Comp Popup & Design
+ - Fixed Popular Maps Tab randomizing positions
+ - Fixed Middle East Scrim Server link
+ - Fixed issue with Change Class Trigger
+ - Can now determine the type of data save you want to use when using Save Leader trigger
+ - Updated ESports Menu Window/Popup
+ - Pathing is now Reset on AI Death
+ - Fixed Unfavoriting Maps & Mods
+ - Fixed Giveaway Posts not working
+ - Fixed Cylinder Hitbox issue when using non-default player hitbox size
+ - Fixed issue with Posting to Hub Feed
+ - Fixed issue with Billboards
+ - Slightly adjusted Game Popup position
+ - Increased Sign Limit to 60
+ - Increased Interface ID Limit to 2000
+ - Increased inactivity kick timer
+ - Slight increase to AK Firerate
+ - Limited SMG, UZI & Blaster Jumps to 2 consecutive
+ - Can now set walljump max count in class config
+
+ == UPDATE 3.8.4 ==
+ - Added new Free Spin
+ - Added new Limited Store
+ - Opened Submissions for Map/Game competition: One Map Per Player
+ - Fixed Issue with Rotation input in editor
+ - Optimized Map/Mod Recent
+ - Made GUI Element Dropdowns more visible in Editor UI
+ - Can now Choose 1v1, 2v2, 3v3 and 4v4 in Comp Host Settings
+ - Changed GUI Type "Custom Value (Text)" to "Global Value (Text)"
+ - Added Set & Inc/Dec Global Value Trigger Actions
+ - Can now link Custom Values and Global Values to DIV GUI object
+ - Can now use Global, Trigger & Player values in certain Trigger Actions
+ - Can now use Global Values as Conditions
+ - data-text attribute is now set on Custom Divs. Allows for: #custUI1 > div[text>"value"]
+ (If You used a Custom Key in a Trigger Before this update, Change "Value Type" to "Trigger Value")
+ - Increased max values for certain player configs: speed X etc
+ - Increased File Size Limits for Thumbnails etc: 250KB Normal, 500KB Premium
+ - Fixed Settings Mods
+ - Changed 'Force Nametags' button from N to M
+ - Fixed Asset Preview Y Off and Asset Preview Scale not working
+ - Removed Time Scale Setting for now
+ - Added Item count to Skin List
+ - Fixed issue when searching "Cyberdragon" in inventory
+ - You can now unfollow Users from Hub Profile followers list
+ - Fixed Leaderboard not loading
+ - Game Page Re-Design (New Categories)
+ - Updated Mod Page Design/Layout a bit
+
+ == UPDATE 3.8.3.1 ==
+ - Login fixes
+ - Fixed issues with Skin list on the Hub
+ - Fixed Flag button on profiles
+
+ == UPDATE 3.8.3 ==
+ - Added new Free Spin
+ - Opened Map/Game Competition Submissions (Closes June 1)
+ - Added Static Option to Camera Position Object in the Editor (Disable Spin in Menu)
+ - Added Penetrable Slider to Objects: 0-1 (Including Cylinders)
+ - Added Marksman Mastery & Detective Mastery
+ - Fixed issue with onTimer triggers
+ - Fixed issue with trade history not showing up
+ - Fixed issue where you get timed out when in clan or partner page
+ - Fixed Sprays Placed Text on Hub Profiles
+ - Added KR Package Stat
+ - Sniper Flap Animation can now be disabled
+ - Updated Mod zip (https://krunker.io/modzip/3.8.3)
+ - Killcard Class Icon are now affected by Custom Class Icons
+ - 99% of Settings are now changeable with mods
+ - Render faces now works with Triggers
+ - Rotation in editor now supports 2 decimals (Rad & Deg)
+ - Can now disable Custom Player Models/Sprite in First Person ("Show First Person" in Class Config)
+ - Objective & Flag Markers can now be changed with Mods
+ - Added Change Primary & Secondary Weapon Trigger Actions
+ - Added Complete Skin List to Hub (https://krunker.io/skins)
+ - Kick & Ban Chat messages are now Red
+ - Vote Kicks now only last for 1 hour
+ - Added Leaderboard to Map/Game pages
+
+ == UPDATE 3.8.2 ==
+ - Added new Free Spin
+ - Added new Sprays
+ - Added Several new Skins & Items to Spins
+ - Added Agent Mastery
+ - Added Texture Scaling to the Editor
+ - Added Projectile Options to Weapon Config
+ - Fixed Objective Score while Keep Team Score is enabled
+ - Fixed Issue with KR-Package Rewards not being given
+ - Added Chat Message to Show KR Reward From KR-Package (Also Shows in Medals)
+ - Fixed issue with Weapon Models in some game modes
+ - Fixed issue where custom player hitbox doesnt work with collisions
+ - Increased Sign Limit to 40
+
+ == UPDATE 3.8.1 ==
+ - Added 2 new KPD
+ - Added new Free Spin
+ - Added Back Twitch Drops
+ - Updated Twitch Drops Info Page (https://krunker.io/twitch/info=1)
+ - Streamlined Hosting: Default Settings always selected by default (Replaced KR Rewards)
+ - Increased KPD Payouts from 5KR to 8KR
+ - Changed KR-Package Claim Button to Interact Key (G)
+ - Fixed Comment issue with Certain languages
+ - Added delay for the Send Message action
+ - Added 2 More decimals for KDR display on profile
+ - Added Perks to Sharp Shooter mode
+ - QuickJoin button now forces Default Region
+ - Fixed Hub Listing UI issue
+ - Fixed Shotgun Mastery sound
+ - Added Duplicate UI Button
+ - Fixed a few rare crashes
+ - Added Player Count as Condition for Triggers
+ - Added new GUI Element Type (in Editor): Div (Use Custom CSS & content: to change the styling etc of these)
+ - Fixed Incorrect Keybind Naming
+ - Can now Reset individual controls
+ - Fixed undefined Keybind name issue
+
+ == UPDATE 3.8.0 ==
+ - Added new Free Spin
+ - Added Several new Language Settings: French, Finnish, Chinese
+ - Updated Several Language Translations
+ - Added 2 new KPD Officers
+ - Can now see region in call log for KPD
+ - Can now see caller on spectate UI for KPD
+ - Added Market Listings to Profiles
+ - Added Share button to Each Market Listing
+ - Fixed !important override in CSS Mods
+ - CSS Mods now have more options
+ - Added Disable Shoot while crouch Option to Editor
+ - Fixed Projectile going through wall on client issue
+ - Afk Players now get Auto Kicked from Lobbies more Effectively
+ - Added "Set Interface Deposit Box Amount" Trigger Action
+ - Added SaveLeader Trigger Action to Editor (Saves: Score, Time or Custom Value (Coming Soon))
+ (SaveLeader Trigger will only work when Hosting a Game/Map on default settings (KR Rewards) set by the creator)
+ - Added Leaderboard Object to Custom Maps: Score, Time ASC, Time DES, Custom Val ASC, Custom Val DES
+ - Increased Max Zoom value from 10 to 15
+ - Min Spread value is now lower
+ - Spread value now increments in decimals
+ - Fixed Objective Points on End Screen
+ - Fixed Negative Social count
+ - Fixed Rare Server Crash
+ - FaceIT Progress: Final week of internal testing
+
+ == UPDATE 3.7.9 ==
+ - Server Fixes
+ - Added Button to view Map Competition Popup again
+ - Fixed India and South America Discord Links
+ - Fixed Plane Collision issue
+ - Fixed Texture Animation issue
+ - Reduced Claim timer on KR Drops a bit
+
+ == UPDATE 3.7.8 ==
+ - Added new Free Spin
+ - Added Several new Skins & Items to Spins
+ - Added Da Baby Gamemode
+ - Increased Shotgun Damage by 1000
+ - Added PVP Zone to Editor (Can fight other players while inside)
+ - Added Skins to Profile Creations Tab (Skin Makers)
+ - Added KR-Package killstreak (12 Killstreak - Chance of 1-5KR)
+ (Be careful, other players can steal your KR Package)
+ - Added 8 new KPD Officers
+ - Added Announcement for Game making Competition
+ (The comp side of krunker will be seeing similar prize pools when the ranked overhaul is done)
+ - Added new Blackmarket Items
+ - Add ability to disable kill cam on maps
+ - Moved Class Button above Loadout in Customize Menu
+ - Clan War Contracts are now 3 Hours long
+ - Fixed Arrow Direction in the Editor
+ - Slight FPS Optimizations
+ - Fixed Multiple Crosshair Rendering issue with Custom Crosshairs
+ - Fixed GLTF Asset Positioning in-game
+ (Maybe break some maps. Just reposition the objects in Editor)
+ - Fixed Open Ended Option for Cylinders
+ - Separated Progress Bar and Melee Charge Bar (Also added new setting)
+ - Cleaned up change class Action UI
+ - Added ADS Spread Slider to Weapon Config in Editor
+ - Added Reload Y Slider to Weapon Config in Editor
+ - Increased Max Weapon Zoom Value to 5
+ - Added Move Spread Property to Weapon Config (How much movement affects spread)
+
+ == UPDATE 3.7.7 ==
+ - Added new Free Spin
+ - Added Nuke Leaderboard (Updates every hour)
+ - Added Burst Count & Burst Speed to all Weapon Configs
+ - Added Sides Slider to Cylinder Object
+ - Added Assist Stat to Profiles and Killcard
+ - Added Custom Crosshair Image Option to Class config in Editor
+ - Added Custom Chase Crosshair Image Option to Class Config
+ - Optimized Memory Cleanup
+ - Fixed FPS issues with Particles
+ - Increased Asset upload limit to 600 for premium users
+ - Increased Texture Size Limit for Assets to 300KB from 200Kb
+ - Increased Max PFP File Size from 150kb to 250kb
+ - Added new Black Market Item (More soon)
+ - Fixed Disconnect Issue (Specific Instance)
+ - Fixed issue with Customize Button not working on non-english languages
+ - Fixed Animated Spray preview in new Customize window
+ - Bug Fixes
+
+ == UPDATE 3.7.6 ==
+ - Added new Free Spin
+ - Added new Blackmarket Items (more soon)
+ - Added Chatbox to KTV
+ - Added "Start Animation" option to Assets in the Editor
+ - Added ability to play Asset animation with Play Animation Trigger
+ - Added Limit to Prize Wheels in Editor
+ - Added force render property to assets: Always Render
+ - Added KR Zone (can set minimum kr needed to enter (does not cost anything))
+ - Added NOPVP Zone (Cant kill or be killed by other players while in this zone)
+ - Added "Sprays Placed" stat to Profiles & Killcard Stat option (Stats don't apply in Customs)
+ - Updated Customize Menu Layout
+ - Updated Profile Flags
+ - Trade Mode no longer shows Health Bars
+ - Optimized FPS on Official Trade map
+ - Increased time between Spin on Prize Wheels
+ - Fixed issue with Partner Level 2 Application Display
+ - Fixed Official Trade Map configs
+ - Fixed issue with Texture alignment in-game
+
+ == UPDATE 3.7.5 ==
+ - Added 4 new KPD Officers
+ - Added Heroic Spin to Official Trade Map
+ - Added Spinner Object to Custom Maps
+ - Fixed Issue with Party Mode Rewards
+ - If you get enough map/game plays you can now apply to be Partner Level 2
+ - Added new Limited Time Shop
+ - Added Y Angle Limit Option to Camera Config
+ - Movement config now works properly in test mode
+
+ == UPDATE 3.7.4 ==
+ - Added new Free Spin
+ - Added 4 new KPD Officers
+ - Added new Item Type: Pet
+ - Added Change Class Trigger
+ - Added Skins that have a chance to drop from pub matches (Unique skin per map)
+ - Added Lock Y Rotation setting to Camera Options
+ - Added Step Sound Dynamic Setting (Changes based on Speed)
+ - Cleaned up Default Host menu: Always show default settings by default
+ - Item Particles now show in the Viewer
+ - Fixed onHoldMouse Event Freeze issue
+ - Fixed Interact Messages
+ - Changed 24/7 Gungame to 24/7 Party Modes (Gungame, Sharp Shooter & One in the Chamber)
+ - Increased max value for step frequency from 10 to 20
+ - Fixed issue with sound direction when using Follow Camera
+
+ == UPDATE 3.7.3 ==
+ - Added New Skins/Items to Spins
+ - Added Decimal Support to Trigger Delay Value
+ - Added ability to change Interact text to custom Text
+ - Krunker News now Update more Frequently
+ - Added Step Sound Frequency Slider to Class config in Editor
+ - Added Option to lock camera to character direction to Editor
+ - Can now Scale Boost Pads
+ - You now have 2 weeks to claim Twitch Drops in-game (After Twitch Campaign ends)
+ - Updated Popup Shown when redeeming Drops
+ - Class & Weapon Headers now update based on name changes in Editor
+ - Renamed Enable Rotation to "Rotate with Mouse" in Editor Camera Settings
+ - Fixed Speed Lines issue with vehicles
+ - Added Speed Lines Threshold to Class Config
+ - Added Setting to not force mode specific classes
+ - Added Turn Threshold Value to Vehicle Config (Speed at which you can turn)
+ - Added Turn Conversion Setting to Vehicle Config (Turn Speed based on movement speed)
+ - Fixed Host preset loading issue
+ - Fixed Class Config slider
+ - Fixed issue with Searching Regions in Server Browser
+ - Added Mods/Assets/Games Count to Profiles
+ - Added Render faces setting to Triggers, Gates & Deposit Boxes
+ - Fixed Keep Team Score setting
+ - Can now change Id of Custom Assets
+ - Added Gungame to Official Customs
+ - Removed Defuse & Race from Official Customs (For now)
+
+ == UPDATE 3.7.2 ==
+ - Added New Skins/Items to Spins
+ - Fixed Trigger Action Custom keys
+ - Added Vehicle movement Config to Class config
+ - Limited Items can now be quick sold
+ - Twitch tab now shows drops earned
+ - Drops can now be searched in market with keyword "drop" or "twitch"
+ - Fixed Melee animations
+ - Test mode now loads Server Presets config
+
+ == UPDATE 3.7.1 ==
+ - Added New Skins/Items to Spins
+ - Fixed Server Crashes
+ - Fixed Class config issues
+
+ == UPDATE 3.7.0 ==
+ - Added New Skins/Items to Spins
+ - Moved Game Config to Class Config in Editor (Allows for more class specific configs)
+ (This change could break maps that used Game Config but is needed for future customization)
+ (Re-exporting the map can fix most issues)
+ - Added Custom Value storage to Triggers
+ - Can now use Custom Value for Action Value on Triggers
+ - Added 3 New Custom Value Trigger Events: Value Equals, Less than, Greater than
+ - Added "Custom Value" Action Condition
+ - Added "Advanced Triggers" Template to the Editor
+ - Added option to Clear Editor Backups
+ - Fixed issue with Reset mods
+ - Fixed Editor Backups Order
+
+ == UPDATE 3.6.9 ==
+ - Added new Free Spin
+ - Added new Trigger Action: Teleport Interface (Move Object to Node)
+ - Added new Trigger Action: Teleport Player to Node
+ - Added new Trigger Action: Reset Object Position
+ - Increase Interface per Id Limit to 30
+ - Increase Limit of Trigger Calls Limit to 30
+ - Editor Backups now save to a local Database (File -> Load Backup)
+ - Fixed issues with Linking Twitch account
+ - Fixed Editor crash
+ - Fixed Editor scaling issue
+ - Fixed Editor grouping GUI issue
+
+ == UPDATE 3.6.8 ==
+ (Some changes have been made to vehicle controls, you may have to update your maps/games)
+ - Fixed issue with Vehicle Controls when moving backwards (Vehicle Changes are WIP)
+ - Added KPD Bot to Servers
+ - Added New Template: City
+ - Added FBX Support to Assets
+ - GLTF & FBX Assets dont require diffuse textures anymore
+ - Added Partial Modding Support to GLTF & FBX models
+ - Object Connections now render even when one of the objects are off screen
+ - Object Connections colors are now based on Interface/node ids
+ - Fixed issue with Physical lighting
+
+ == UPDATE 3.6.7.1 ==
+ - Server Fixes
+
+ == UPDATE 3.6.7 ==
+ (Twitch Linking Process has been redone. Please Relink)
+ - Added new Free Spin
+ - Added More Limited Items to the Item Shop
+ - Added New Skins/Items to Spins
+ - Added 4 new KPD Officers
+ - Fixed Defuse Template (Thanks Prof)
+ - Added Lock icon to non-tradable items in trade mode as well
+ - Added Search to trade mode
+ - Added Old-Shading Setting for Maps without Baked Lighting
+ - Fixed AI Nametags showing when Nametags are off
+ - Fixed Suspect Missing issue for KPD
+ - KPD Call limit increased based on Trust Factor
+ - Added Legshot Mlt Value to Weapon Configs
+ - Added Spectator Button to Disable Nametags
+ - Added New Lighting Option (Physical)
+ - Added RectArea Light to the Editor (Requires Lighting set to Physical)
+ - Added Spot Light to the Editor (Requires Lighting set to High or Physical)
+ - Added Directional Light to the Editor (Requires Lighting set to Physical)
+ - Added Show FPS & Render Distance Settings to the Editor
+ - Added Position Teleporting to the Editor
+ - Added Slider to Mouse Flick Fix
+ - Damage sound nolonger triggers when switching classes
+ - Fixed issue with Waist not showing in the Viewer
+ - Fixed issue with Lock item not showing on some items in the Hub
+
+ == UPDATE 3.6.6 ==
+ - Added 4 new KPD Officers
+ - Suspect is now Shown Separately in Alt Menu for KPD
+ - KPD Officers are now Rewarded KR for responding to Calls
+   (Must deal with call properly to earn KR)
+ - Streamlined KPD System: Simpler banning process
+ - Added Minimum time KPD must be in Server to make decision (Level Dependant)
+ - Fixed issue where Team 3 & 4 cannot deal any damage
+ - Increased AI Max Chase Distance
+ - Fixed issue where AI randomly falls through floor
+ - Can now see DMG Dealt in Comp Servers end Screen
+ - Server Fixes
+ - Added Basic Aim Drag Crosshair
+ - Fixed Idle Sound not playing on AI
+
+ == UPDATE 3.6.5 ==
+ (Please Test the movement Changes in the Comp Servers.
+ We are considering implementing it to Pubs as well. For a more
+ balanced experience.)
+ (KTV now selects random streamers that are currently live)
+ (FaceIT Delayed due to Technical issues & to ensure Quality)
+
+ - Updated Burg Layout (Public Layout Test) Thx MoonJuice
+   (Visuals are a work in progress)
+ - Added new Free Spin
+ - Added 2 New KPD Officers
+ - Removed /flip Command
+ - KTV now shows a Random Krunker Streamer
+ - Can now use Knife and Weapon Skins in Comp Servers
+ - Added Copy on Rightclick to Alt Menu for KPD
+ - Added Keep Team Score Setting
+ - Added more Map Making Tutorial Videos to Editor
+ - Fixed Raid Timer Showing NaN:NaN
+ - Added AI Pathnodes to Editor
+ - Added Path Settings to AI in Editor
+ - Added Decimal Points to Ocean Y Offset
+ - Added SSAO Shader to Settings (WIP)
+ - Added Bloom Shader to Settings
+ - Added Teleporter Connections to the Editor
+ - Added Team Name & Damage Settings for all possible teams
+ - Texture Rotation now uses Degrees 0-360 instead of 0-2
+ - Renamed onEnter to onEnterObject
+ - Fixed issue where Reflection Resolution doesnt use map value
+ - Added onExitObject Trigger Event
+ - Added Skybox Emissive Texture Option to Editor
+ - Fixed issue where AI deals Damage to Self
+ - Healing AI no longer makes it target you
+ - Fixed "Error Occurred" when Publishing a Map
+ - Fixed AI with Team not being able to Trigger anything in Team Modes
+
+ == UPDATE 3.6.4 ==
+ (FaceIT Delays expected)
+ - Added new Free Spin
+ - Added More Limited Items to the Item Shop
+ - Added New Skins/Items to Spins
+ - Weapon & Class Config now Loads when Quick-Hosting from Editor
+ - Can no longer heal Trigger Objects
+ - Adjusted Jump Multiplier to 1.005 on Comp Servers
+ - Reduced Rubber-banding a bit
+ - Fixed Speed issue on Pirate Template
+ - Fixed issue where Crossbow shoots 2 shots after certain config changes
+ - Added Aim Drag Speed Value to Player Config in Editor
+ - Added Option to AI to toggle if they Attack other AI
+ - Added Target Players Option to AI (Toggle)
+ - Fixed issue where changing shotgun ammo in config breaks it
+ - Added Classindex as a Trigger Condition
+ - Bullet Dropoff no longer allows for Healing
+ - Added lock icon on Non-Tradable items in trade window
+ - Added Objective Duration Setting to Server Config
+ - Healing now shows Heal Value in Green Text
+ - Fixed issue where Ambient sound stops after 1 round
+ - Increased AI Projectile Max Speed and Damage
+ - Cleaned up Server Preset/Config in Editor (Categorized)
+ - Added Sound Falloff to Weapon Config in Editor
+ - Added Class Specific Turn Speed setting
+ - ADS now zooms while Third Person + Shoot to Camera is Enabled
+ - Added Crouch Move Speed Multiplier to Player Config
+ - Categorized Class Config in Editor (Per Class)
+ - Renamed Played Settings to Gameplay Settings in Editor
+ - Added Minimum Chase distance to AI (Custom Pathing coming soon)
+ - Added Spread Slider to AI Shooting Section (Spread/Accuracy)
+ - Add Play Animation Trigger Action (AI Only for now): Interface ID, Clip Name
+ - Added Material Subsection to Editor Objects (WIP)
+ - Added Crouch Animation Channel: Looping Animation like Move/Idle
+ - Added Shot Break Option to AI: (Stop Moving Time after shot)
+ - Fixed issue where AI doesn't roam when canHit is not Set
+ - Added Reflection Quality Setting
+ - Added Ocean Option to Editor (Includes Real-Time Reflections)
+ - Added Option to add Glow to AI Projectile
+ - Added Sound Distance Model to Sound Emitters
+
+ == UPDATE 3.6.3 ==
+ - Added new Limited Store Items (Available for 1 Week)
+ - Added 3 new KPD Officers
+ - Added new Free Spin
+ - Weapon Damage can now Be Negative
+ - AI now Attack eachother if opposing teams
+ - Added Model Direction setting to AI in Editor
+ - AI movement is now smoother
+ - Cleaned up Player Settings Section in Editor with Categories
+ - Increased Player Menu width to fit longer names
+ - Added Ability to Delete Assets from My Assets Section in Editor
+ - Updated Character Animation Template
+ - Comp Servers now use Fixed Movement and 0.97 Slide Speed
+ - Updated Brick Texture Slightly
+ - Slightly Changed Editor Dropdown UI for better visibility
+ - Separated AI Attack Behaviour into 2 Sections: Melee & Shooting
+ - Added Melee Damage Setting to AI in Editor
+ - Added Melee Range Setting to AI in Editor
+ - Added Anim Speed Option to custom Player Model
+ - Added "Shoot to Camera" Player Setting to Editor (Shoots at Camera Direction)
+ - Updated Tutorials & Tips List Layout in Editor
+ - Fixed AI Nametag Y Position
+ - Increased AI View Distance
+ - Fixed AI not rotating when Hitting Player
+ - Fixed KR Fee displaying incorrectly on Hub
+ - Texture Assets no longer show in the Quick-Add Menu
+ - AI now Dies when going below Death Y
+ - AI Projectiles can now hit other AI
+ - Can now see other players Jump & Melee Animations
+ - Added ability to adjust Player Hitbox Size in Editor
+ - Can now Set Multiple Teams in Editor
+ - Added Closed Option to Ramps: Affects Visuals only for now
+ - Fixed issue with importing Custom Reticles & Scopes
+ - Updated Host Preset Saving & Loading
+ (Might break old host presets that contain class/weapon config)
+
+ == UPDATE 3.6.2 ==
+ - Added new Free Spin
+ - Added Several new Skins
+ - Increased Max Weapon Impulse Range from 500 to 2000
+ - Can now Add Animated Custom Player Model. Clips: Melee, Shoot, Idle, Walk, Jump
+ - Added Trigger Action to Set Custom Value on Player
+ - Can now Tie UI element to Custom Player Value
+ - AI Gravity now defaults to 1
+ - Added Melee Rate Option to AI in Editor
+ - Added Trigger Conditions to Editor (WIP)
+ - Added Different Animation Channels to AI: Melee, Shoot, Idle, Move (WIP)
+ - Added new Section to Guide: Play with Friends
+ - Can now Adjust Gravity and Jump force by 3 Decimal Places in Host Settings
+ - Adjusted Jump Height on Fixed Movement Slightly
+ - Clan Wars Kills now save when leaving
+ - Extended Clan War breaks to 2 weeks (After next one)
+ - Added Option to Publish from within Editor
+ - Server Fixes
+
+ == UPDATE 3.6.1 ==
+ - Added new Free Spin
+ - Added more Dallas Servers
+ - Added more Brazil Servers
+ - Added Lightbar Object
+ - Fixed issue with KR Sales on Weekends
+ - Weapon Impulse power can now be negative
+ - Raid Timer no longer forced to 6 Minutes
+ - Moonfeather Item now Emits Particles
+ - Increased Impulse Range max value from 100 to 500
+ - Added Fixed Movement Customs Setting to make Jumpheight and Acceleration FPS Independent (Test before Pubs)
+ - Default Slide Speed is now 0.96 in Comp Servers (Test before Pubs)
+ - Added ability to Login to Editor
+ - Added ability to View & Edit your own Maps in Editor
+ - Vaulted Items no longer show as limited but as: Vaulted
+ - Added Free KR Spin to Featured Spins Section in Store
+ - Fixed Spray Sorting in Customize Screen
+ - Added Search to Skin Selection Windows
+
+ == UPDATE 3.6.0 ==
+ - Added new Free Spin
+ - Added Experimental Setting to Potentially Fix Polling Rate Mouse Flick issue
+ - Added Slide Speed Adjuster to Host Settings
+ - Deaths no Longer count during warmup
+ - Added New Unob Item to Spins
+ - Fixed Please Try Later Trading issue
+ - Added Krunker India Scrim Discord Link
+ - Moved Light-Cones and Point Light to new Subsection: Lights
+ - Fixed issue where Real Hitbox is shown after Baking in Editor
+ - Added Roam Radius/Time Settings to AI in Editor
+ - Removed Slight Bobbing animation from AI Bots
+ - Slightly reduced Revolver Firerate
+ - Added New Setting: Tracer Offset
+ - Fixed Join Button on Steam Client
+ - Fixed Issue with AI Names not showing sometimes
+
+ == UPDATE 3.5.9 ==
+ - Added Several new Skins
+ - Added Basic Help Guide to Menu (WIP)
+ - Added 5 new KPD Mods
+ - Fixed Loading issue on Steam Client
+ - Fixed issue with Client Game Instances being Created when not needed
+ - Fixed Sales Charts on Hub not working properly on 90d
+ - Fixed issue with Hosting & Test in Editor setting
+ - Fixed issue when setting aspect ratio negative
+ - Server Fixes
+
+ == UPDATE 3.5.8 ==
+ - Added new Free Spin
+ - Added KR Sales (Every 2nd Weekend)
+ - Added Test in Editor setting (Opens test mode in the editor instead of new tab/window)
+ - Added Sale Count & estimated earning to Sales page in the Hub
+ - Updated Clan Page on Hub
+ - Reduced Comp Warmup time to 30 Seconds from 1 Minute
+ - Finished FaceIT Backend (Testing Phase Start)
+ - Optimized Hub Loading
+ - Hub feed now defaults to Global
+ - Fixed issue with AI limit 40 not working
+ - Fixed connection error when using other languages
+
+ == UPDATE 3.5.7 ==
+ - Added new Free Spin
+ - Added more Limited items to Limited Store
+ - Added Item Type Display to Limited Store Popup
+ - Re-Enabled Direct Trading
+ - Increased Object Max Health Value from 20k to 50k
+ - Post to Hub Option now Off by default for Game/Map Updates
+ - Added Lock Icon to non Tradable Items
+ - Fixed Hover Stats on Item Charts in Hub
+ - Reduced Comp Server Warmup to 1 Min
+ - Replaced Stalker Jumpscare with Actual Scary one
+ - Increased Thumbnail max size from 100kb to 150kb
+ - Increased AI Limit from 35 to 40
+
+ == UPDATE 3.5.6 ==
+ - Added new Free Spin
+ - Server Optimizations
+ - Fixed issue with Throwing Melee not Spinning
+ - Fixed Purchase KR Button issue
+ - Slight Hub Optimization
+ - Fixed issue where certain destructible objects are desynced
+
+ == UPDATE 3.5.5 ==
+ - Fixed Server Crash
+ - Fixed AI Spawn issues
+ - Can now set Start Destroyed on AI Spawner
+ - Removed Auto AI Spawning from Boss AI (Use Triggers Instead)
+
+ == UPDATE 3.5.4 ==
+ - Added new Free Spin
+ - Added new KPD Officers
+ - Fixed Spectate issue where players disappear on certain modes
+ - Made Edit Map button look better in My Games section
+ - Added Player to Player Collision Option to Editor (WIP)
+ - Added Disable Jump Option to Player Config in Editor
+ - Added Animated Weapon/Skin Type (WIP)
+ - Started AC Data Collection
+ - Added Limited Time Item Store
+ - Made Separators in Editor UI more Visible
+ - Renamed AI to AI Spawner in Editor
+ - Added on Nuke Trigger Events
+ - Added new Section to Object Dropdown: Zones
+ - Added Option to Change AI Projectile: Mesh, Spin Speed, Scale, Speed, Gravity
+ - Fixed Air Acceleration on Official Customs: Train
+ - Certain Dropdown Option are now Minimized by Default in Editor
+ - Fixed issue with Some Assets not Loading in the Editor: Rover etc
+ - Slightly Updated Store UI (WIP)
+ - Added Option to Spawn AI with Trigger Action
+ - Added Option to Adjust Hitbox size of AI
+ - Added Mesh Y Offset Option to AI
+
+ == UPDATE 3.5.3 ==
+ - Added new Free Spin
+ - Added Africa Pickup Discord Link
+ - Added Animation Template (Basic)
+ - Cosmetics are now Disabled in Comp Hosted Servers
+ - Added more Frankfurt Servers
+ - Added Several new Skins
+ - Updated Icons for Host Menu Options
+ - AI Attack Sound now Plays when it Melees
+ - Quick menu is now enabled by default in Editor (Middle click)
+ - Fixed Jumpscare Trigger Action not working
+ - Optimized Certain Modes (Player Render Distance)
+ - Clan Contract list is now Sorted by Time on Clan Page
+ - Clan war time now counts when you leave the lobby
+ - Must now be Level 30 to use challenge mode
+ - Fixed issue where onDamage is triggered even when Trigger is Destroyed
+ - Fixed issue with Animated Assets not working
+ - Creator Code used messages now show in Inbox again
+ - Turn Speed now Supports Decimal Values
+ - Added Trigger Action delay Option: Delays Execution of Action
+ - Updated Tutorial Section in the Editor
+ - Added Decimal Support for Asset Spin Speed
+ - Fixed issue where you have to Check + Uncheck Cylinder open-ended option
+ - Fixed spectating issue on Official 24/7 FFA Servers
+
+ == UPDATE 3.5.2 ==
+ - Added new Free Spin
+ - Updated Host Menu to add more Options (WIP)
+   (Comp Server will have increased Tickrate; among other things)
+ - Updated Guide Page on Editor
+ - Added Basic Animation Support to Assets (WIP)
+ - Added Ability to change Weapon Icons in Editor
+ - Added Custom UI Tool to Editor (WIP)
+ - Added Click to Copy Link to Host Menu
+ - Added MMORPG Movement Scheme to Editor
+ - Added Obby Template to Editor
+ - Adjusted Ground and Air Accel in Editor to be more consistent
+ - Fixed issue with SRM Mode and Ramps Desyncing
+ - Fixed issue where you fall through spawns after Warmup
+ - Fixed Decel issue with SRM Mode
+ - Fixed Timer issues with Min Players
+ - Fixed Delete Mod Option
+ - Fixed issue with Liquid Speed
+ - Weapon + Class Config now Applies in Test Mode
+ - Action Value now Changes Explosion Power on Trigger Action
+ - Fixed Secondaries in Official Customs
+
+ == UPDATE 3.5.1 ==
+ - Added 4 new KPD Officers
+ - Added Force Respawn to Official FFA Only Servers
+ - Player Preview now changes to Custom Model
+ - Added Pirates Template to Editor (WIP)
+ - Added Player Preview Scale setting to Editor Player Config
+ - Added ability to name teams in editor
+ - Template Screen is now the Default in the Editor
+ - Added Several new Items & Skins
+ - Added shot X and Y Dir Offset to Editor
+ - Added new Map/Game categories: (Tycoon & Mini-Games)
+ - Fixed issue with Clan Time + Kills not counting in Clan Wars
+ - Can now Delete your Maps & Mods
+ - Added Vote kicking to Official Customs (FFA only)
+ - Added Title Setting to Gameplay Privacy
+ - Added Explode Trigger Action
+ - Add knife Swap Button to Mobile Version
+ - Renamed Game Settings to Server Preset in Editor
+ - Asset List now shows more Assets in Editor
+ - Fixed KR Rewards not working on Certain Maps
+ - Fixed Issue with Weapon & Class config
+ - Fixed AI Trigger actions not saving in Editor
+ - Fixed Scrim Server Links not working in Esports Tab
+ - Fixed issue when importing Signs in the Editor
+
+ == UPDATE 3.5.0 ==
+ - Fixed issue with Work Mode showing up when Typing in chat/password/username
+ - Added Region to Official Customs on Legacy Browser
+ - Empty Servers now fall to the bottom on New Server Browser
+ - Added Cast/Receive Shadow Setting to Assets in Editor
+ - Model Assets can now contain a class icon
+ - Added 4 new KPD Officers
+
+ == UPDATE 3.4.9 ==
+ - Added new Free Spin
+ - Added Several new Sprays
+ - Speed Display now only accounts for Horizontal Velocity
+ - Added yOffset setting to Player Model Asset
+ - Added Hide Game Button: Pretend youre doing Work
+ - Changed CPMA Movement to SRM (Sakura Race Mode)
+   (Added Helper UI & Dashing & Ramp Sliding)
+ - Added SRM Map Template to Editor
+ - Added Option to Pick unique Custom Asset Model per class
+ - Added Option to Change Class Config in Editor
+ - Fixed issue with minPlayers setting not being respected
+ - Added Popups to Can't Afford Screen
+ - Fixed Score icon not updating when score resets
+ - Fixed issue with Speedrun UI overlapping with Spectate UI
+ - Fixed Turn Speed not working on high FPS for vehicles
+ - Fixed issue where you fall through floor when teleporting to checkpoint
+ - Fixed issue with Undefined showing on legacy browser
+ - Increased Max Turn Speed Value from 3 to 5 in editor
+ - Updated TOS around Hosting
+
+ == UPDATE 3.4.8 ==
+ - Fixed issue with Timer in Bhop mode
+ - Added Host Setting: Log Time (Speed Run UI)
+ - Added Asset Rotation Setting for Player Model (Editor)
+ - Added More Player Settings to Editor: Decel, Accel etc
+ - Reset Key is now Mappable on Parkour Mode
+ - Fixed Delay when Resetting on Parkour Mode
+ - Added Teleport to Active Checkpoint Option to Teleporters
+ - Added Setting to hide Explosions
+ - Added Explosion setting to Moddable Settings
+ - Added Moddable Check-Point Sound
+ - Added Vehicle Template to Editor
+ - Added Moddable Reset Sound on Parkour
+ - Added KDR Counter Option: UI
+ - Added Speed Lines to Moddable Settings
+ - Added another map to Defuse Rotation
+ - Added super basic Vehicle Preset to Movement Presets (WIP: Glitchy)
+ - Speed Run Display now Supports Hours
+ - Fixed issue with Hitmarker not working in spectate mode on Raid
+ - Added Highscores Tab to Map Page (WIP)
+ - Disabled bobbing animation with Custom Asset
+ - Renamed Dialogue Volume Category to Action Volume
+ - Fixed issue where Team AI attacks own team on TDM
+
+ == UPDATE 3.4.7 ==
+ - Added new Free Spin
+ - Added Several new Skins
+ - Added new KPD Officers
+ - Fixed issue where Trigger Charge KR Per Action when multiple actions are applied
+ - Can now upload an image to use as a skybox instead of having to use a mod
+ - Added Speedrun UI to Parkour/Race Mode: Use scorezones
+ - Increased Sign Limit from 30 to 35
+ - Time now Increases in Parkour Mode: Own Time
+ - Official Customs dont count towards CW Contracts anymore
+ - Can now Reset to Start in Parkour Mode by Pressing: B
+
+ == UPDATE 3.4.6 ==
+ - Added Several new Skins
+ - Added Default Region Only Setting for Server Browser
+ - Adjusted Server Browser to be Grouped by Regions
+ - Fixed player count on games list in-game
+ - Fixed Legacy Browser searching
+ - Removed Christmas Decorations
+ - Optimized Official Race Maps
+ - Added ability to search by Region or Mode in new Server Browser
+ - Added Reset Mod Button to Mod Menu
+ - Fixed Lag issue with Build Blocks
+ - Clan War Contracts are now based on Time Played instead of lives: 4h per contract
+
+ == UPDATE 3.4.5 ==
+ - Mode now shows on legacy browser
+ - Fixed player count on games list on Hub
+ - Fixed issue on Defuse Official Customs
+ - Fixed Sorting of Servers in Browser
+
+ == UPDATE 3.4.4 ==
+ - Server Browser Overhaul: Choose Modes more easily
+ - Updated Legacy Server Browser Setting (To use old Browser)
+ - Added new Skins
+ - Added new Free Spin
+ - Added Ability to Vote on next Official Custom Map between rounds
+ - Added Official FFA Only Servers (Constant FFA Lobbies to earn KR+XP)
+ - Added new Official Custom Maps (More will be added soon)
+ - Can now call KPD from Official Customs
+ - Fixed issue with Edit Map Button not working Properly from Hub
+ - Fixed issue where Popups are positioned wrong on the Hub
+ - Fixed issue with Certain Models loading in editor but not in-game
+ - Fixed issue with Ranked Challenges still being required
+ - Hub Leaderboards now Update more frequently
+ - Increased Market Listing Fee to 10%
+ - Fixed issue with Terms
+
+ == UPDATE 3.4.3 ==
+ - Added Sydney to Official Customs
+ - Server Fixes
+ - Temporary Reduced KR earned from Official Custom Race Maps
+
+ == UPDATE 3.4.2 ==
+ - Added Game Capture to Official Client
+ - Added new Free Spin
+ - Added Class Balance Survey: To Gather Feedback for Balancing the Meta
+ - Added Official Custom Servers: Hosted 24/7 (Earn KR Like Pubs)
+ - Added Appeals Popup when Singing into Tagged Account
+ - Added new Attachment: Acog (Req Class Level 20)
+ - Added Ban Log for Moderators to View Ban History (Increases Accountability)
+ - Multiple Trigger Actions
+ - Progress on Face-IT Integration
+ - Server Fixes
+ - Nuke will now always go off if called in near the end of the game
+ - Fixed issue with Gates not showing when map details is turned off
+ - Fixed issue with Hub Page not Loading in Thailand
+
+ == UPDATE 3.4.1 ==
+ - Fixed Disconnect issue on Customs
+ - Removed Christmas Spin
+ - Added Appeals Section to Appeal Bans to Contact Page
+ - Added 8 new KPD/Moderators
+ - Fixed issue with Test/Offline Mode
+ - Clan Owners can now Add Link to Clan Discord
+ - Increased "Tick" Rate for Spectating (KPD Only)
+ - Fixed bug where class level isn't shown correctly
+ - Fixed Free KR Bug where it gave the wrong value
+ - Updated Freight Decorations
+
+ == UPDATE 3.4.0 ==
+ - Added new KPD Officer
+ - Fixed Loading issue on Firefox and Mobile
+ - Fixed Sorting issue for KPD Calls
+ - Server Fixes
+
+ == UPDATE 3.3.9 ==
+ (If you believe that you have been banned in error. Contact krunker+banappeals@frvr.com)
+ (IP bans will start rolling out over the coming days)
+ (Clan Wars will be changed to be time based and not KDR Based)
+ - Start of IP Bans
+ - Added new Free Spin
+ - Added new KPD Officers/Moderators
+ - KPD Call list is now ordered by Trust Score
+ - Update KPD Call List so its easier to read
+ - Hacker Reports can now be reviewed more effectively by moderators
+ - Disabled KPD has joined Message
+ - Increased KPD Call limit from 10 per day to 20
+ - Fixed Auto Pistol Sound not Playing
+ - Reduced AK Firerate Slightly
+ - Fixed Christmas Spin Item Previews
+
+ == UPDATE 3.3.8 ==
+ (We have hired 3 new Devs to Help out with the workload)
+ - Updated Terms & Conditions Surrounding Partner Payouts
+ - Added new Free Spin
+ - Added 9 new KPD Moderators/Officers (Applications being Reviewed still)
+ - Added Editor Button to main menu
+ - Added Roadmap to Changelog
+ - Added Basic Game Making Guide to Editor
+ - Replaced Default Option in Clan War Contracts with Blank
+ - Fixed Gravity issue with Flappy Bird Template
+ - Fixed issue with Post Option on Map updates
+ - Added Stretched Texture Setting to Cylinders in Editor
+ - Added new Movement Preset for Customs: KPMA (Strafing, BHop etc) (WIP)
+ - Fixed Sprite Invisible Issue on .io Preset
+ - Fixed issue where Reports are listed in the wrong order (For Moderators)
+ - Can now see all reports (For Moderators)
+ - You now earn more KR from winning clan wars
+ - Added Send Sound Trigger Action (Plays sound for 1 User)
+
+ == UPDATE 3.3.7 ==
+ - Added new KPD Moderator
+ - Added 7 Day Option to Premium
+ - Added new Creator Scope: Sorable
+ - Added Search to Trade offers
+ - Added Force Transparency to More Objects
+ - Added Share button to Hub Posts
+ - Added more clan tag colors from clan wars
+ - Added Ramp to Build Tool (WIP)
+ - Removed Support Beam from Build Tool
+ - Updated Build Blocks to be Models instead of Cubes
+ - Readjusted Vote Kick Max Level (Now 20)
+ - Ranked Games no longer count toward clan war contract
+ - Server Browser now shows Games sorted by Region when in Play Mode
+ - Increase Premium Trade Item Limit to 15
+ - Game Creators can now Choose to Share update posts or not
+ - Fixed Woodstock Famas Preview
+ - Fixed Trigger Connections in the Editor
+ - Renamed "Shader Based Rendering" to "Instance Rendering"
+ - Minor Menu UI Changes
+ - Updated Mod zip (https://assets.krunker.io/mod.zip?v=3.3.7)
+
+ == UPDATE 3.3.6 ==
+ - Added New Skins
+ - Added more KPD Moderators
+ - Added Creator Scopes
+ - Added Scope & Scope Border Opacity settings
+ - Added Scope Border Color Setting
+ - Added Force Transparency Option to the Editor
+ - Added Social Post Linking from inbox
+ - Added Popup to Close Client
+ - Added Custom Maps Info to Main Menu
+ - Scope Width & Height now work with Animated Images
+ - Loadouts & Custom Scopes/Reticles are now exportable and importable with other settings
+ - Fixed issue with Deleting Scopes & Reticles
+ - Fixed Require Kills Interact Message on Pickups
+ - Updated Mod zip (https://assets.krunker.io/mod.zip?v=3.3.6)
+
+ == UPDATE 3.3.5 ==
+ - Added new Free Spin
+ - Added more KPD Moderators
+ - Added Custom Scope Preset Screen
+ - Added Scope Height/Width Setting
+ - Can now add Scope and Reticle Presets
+ - Can now add Animated/Frame Textures to Blocks in Editor
+ - Increased Asset Texture Size Limit
+ - GLTF Import Partial Fix
+ - Added Setting to Social to Hide Trade Messages
+
+ == UPDATE 3.3.4 ==
+ - Added Charity Drop Items
+ - Added new Region: South Korea (Seoul)
+ - Minor Server Fixes
+ - Fixed issue where you can't withdraw KR from your map
+ - Removed Edit Map Button from Select Map Menu
+ - Added new Trigger Action: Clear Checkpoint
+ - When you come from a play link it only shows servers from that game/map
+
+ == UPDATE 3.3.3 ==
+ (A third Person Aim Fix is being worked on)
+ - Added new Free Spin
+ - Categorized Inbox a bit More
+ - Fixed issues with Object Collision on Terrain (Trees etc)
+ - Added Basic Scripting UI to Editor (Script Support coming soon)
+ - Walls now Snap to other Walls better
+ - Walls now Rotate to View when placed on Terrain
+ - Slightly Increased Build Speed (Adjust Firerate on Buildtool Config)
+ - Added Force Team Spawn Setting
+ - Rocketeer now gets 75 points per kill
+ - Added Zone Height Setting to Editor
+ - Updated Mobile Default Settings
+ - Updated Ranked Button to ESports
+ - Chat is now Hidden on Mobile while in-game
+ - Fixed issue with Home Button not working on Mobile
+ - Fixed Reflecting Objects in the Editor
+ - Fixed Most Object Interactions on Mobile
+
+ == UPDATE 3.3.2 ==
+ (We are still working with FaceIT to improve Anti Cheat
+  & to Provide a better Comp Experience)
+ - Fixed Embed issues on iFrames
+ - Added some new Skins
+ - Can now use Negative Values for X,Y,Z Speed in Editor
+ - Added Move Dir Value to Editor Player Config
+ - Fixed 2D Platformer Template
+ - Fixed Top Down Template
+ - Fixed issue where Score is still deducted if you cant build
+ - Added Texture to Building Blocks
+ - Added more Building Blocks to Survivor Class
+   (More Coming Soon)
+ - Can now Build on Terrain
+ - Start of Rolling out IP Bans
+ (Please keep Reporting hackers. It really helps)
+ - Added new KPD Officers
+ - Minor Server Fixes
+
+ == UPDATE 3.3.1 ==
+ - FPS Optimizations
+ - Added more KPD Moderators
+ - Increased Payout Rates for Map/Game Creators from $0.50 PM to 0.80$ PM
+ - Added Team Setting to AI (Only works in Team Based Modes)
+ - Added Basic Builder Tool: Build Blocks in Customs (WIP)
+   (Full Customization Options coming soon + more blocks, stairs etc)
+ - Added Survivor Class to Customs (For later use)
+ - Added Collidable Setting to Ramps in Editor
+ - Fixed Stuck on Loading issue on some clients
+ - Added Fix for Virtual Controllers being Forced on
+ - Added Visibility Option to AI
+
+ == UPDATE 3.3.0 ==
+ - Moved Free KR to a new Ad Provider
+ - Added Trigger Mastery to Black Market
+ - When Hosting a Game with Select Teams Setting you now get unique Links to send to each team
+ - Added more Quickstart Options/Templates to Editor (WIP)
+   (The templates will be improved over time)
+ - Added Custom Movement Control Option to Editor (WIP)
+ (Allows for more control over movement in your Games/Maps)
+ - Added Checkpoint support to Respawn trigger action
+ - Added Override Jump Option in Editor Config
+ - Player Sprites are now Loaded from Assets
+ - Changed Minimum Value for Gravity to 0 in Game Settings
+ - You can now see Current Player Count on the games list
+ - Increased Max Values for Speed X,Y,Z in Editor
+ - Clicking away from Free KR Popup hides it from future matches
+ - Fixed Issue with Triggers Retaining Data after Round Reset
+
+ == UPDATE 3.2.9 ==
+ - Added back Free KR (Reduced KR Rate)
+ - Added new Free Spin
+ - Added a few new Items
+ - Added 2 More Progress Bar Customization Settings
+ - Runner Class now has a shorter Charge-Up time for Throwing Knife
+ - Default Sprays are now considered Free items and have a stats page
+ - Fixed Issue with Mobile Controls not Working
+ - Fixed Spray Randomization
+ - Updated Guide Popup in Editor
+
+ == UPDATE 3.2.8 ==
+ - Adjusted Lighting on Sandstorm a bit: Rebake
+ - Added a few new Skins
+ - Added Progress Bar Customization Settings
+ - Added Charge-Up Time to Knife Throw: Longer Charge = More Distance & Damage
+ (This is a test. It may change based on community feedback)
+ - Reduced Maximum Damage of Throwing Knife to 180 from 200
+ - Made Progress Bar Animation Smoother
+ - Minor Server Fixes
+
+ == UPDATE 3.2.7 ==
+ - Added Separate Volume Slider for cosmetic sounds
+ - Added new Waist Item
+ - Added More Moddable Settings
+ - Added more KPD officers
+ - Fixed Shoot through wall issue on site
+ - Increased Weapon Offset Settings Max
+ - Updated Skins: Sad Noodle, Swipe Left
+ - Updated Skin Creator Listings
+
+ == UPDATE 3.2.6 ==
+ - Fixed some issues with Skin Textures not loading
+ - Fixed Issue with some clients being stuck on Loading...
+
+ == UPDATE 3.2.5 ==
+ (Start of Season 4)
+ More Items, Modes, Regions, Anti Cheat, Maps, Item Types and Features are coming very soon.
+ If you are experiencing frame drops; disable ambient shading in the settings.
+ Map Overhauls and Optimizations are being worked on as well
+ - Added 150+ New Hat Items
+ - Added 15+ New Face Items
+ - Added 60+ New Body Items
+ - Added 250+ New Weapon Skins
+ - Added 15+ New Melee Items
+ - Added new Black Market Item
+ - Added New Item Type: Shoes
+ - Added New Challenge Levels to Level 30
+ - Added New Rainbow Challenge Level Color
+ - Added more Creators to Krunk TV
+ - Added new Free Spin
+ - Added Free KR to Android App (Different Provider. IOS Soon)
+ - Added Edit Map Button in-game
+ - Added Wireframe Mode to Editor
+ - Added Wireframe Keybind to Editor
+ - Added new Map: Site (Test from Competition: More Soon)
+ - Added MTL Exporting to the Editor
+ - Added Hosting API: Preparation for FaceIT Integration
+ - Added Baked Lighting Option to Editor (WIP: Colors + Glow soon)
+ - Added 3D Item Preview when pressing (?) button in Inventory (in-game)
+ - Added 3D Item Preview to Spin Items Preview Icons
+ - Added Secondary back to Rocketeer
+ - Added Optimize Faces to Editor Optimizations Tab
+ - Added Reload Animation Y Setting
+ - Added Game URL to Popup when Publishing a Game/Map
+ - Added more info to Editor Dropdowns
+ - Added Texture Rotation option to the Editor
+ - Made Ambient Shading a Slider Setting
+ - Adjusted Lighting on all Rotation Maps (WIP Some glitches Expected)
+ (The lighting changes are a work in progress and will be improved/changed based on feedback)
+ - Merged Newtown into Littletown
+ - Removed FPS Sliding Completely
+ - Can now Scroll on 3D Item Preview to Rotate it in Spin Popup
+ - Can now use KR Triggers in Trade mode (Issue with G key Fixed)
+ - Increased Sign-Limit to 25
+ - Optimized initial Map Loading time
+ - Optimized Mobile Performance
+ - Optimized Map Export File Size
+ - Decreased LMG Reload time by 100ms
+ - Fixed Boost Pads on High Lighting
+ - Fixed Shotgun Glitch on Burg
+ - Fixed Ladder Bug on Burg and Lostworld
+ - Fixed Scaling issue with Uniform scaled objects in Editor
+ - Fixed Custom Group Editing in the Editor
+ - Fixed Texture Swapping in the Viewer
+ - Fixed All Shotgun Remodel Skins
+ - Jumpscares are now Moddable
+
+ == UPDATE 3.2.4 ==
+ - Added new Free Spin
+ - Added more creators to Krunk TV
+ - Server Fixes
+ - Fixed Connection Error Issue
+ - Slight Decrease on LMG reload time
+ - Added Swap Animation Y Setting
+ - Increased Max and Min value for Weapon Rotation Setting
+
+ == UPDATE 3.2.3 ==
+ - Clan Captains can now also deploy members to Clan Wars
+ - Added new Free Spin
+ - Fixed Issues with Brazil Region Servers
+ - Added more Creators to Krunk TV (More soon)
+ - Increased Price for Promoting a Server
+ - Added Global Option to Sound Emit event (Triggers)
+ - Fixed Social Captcha issue (Mobile & Web)
+
+ == UPDATE 3.2.2 ==
+ - Fixed Invalid Reason Issue with KPD Applications
+ - KR Rewards are now Enabled when Auto Hosting a Game/Map
+ - Halloween Contrabands are now Tradable
+ - Server Upgrades now Show even when KR Rewards are enabled (Hosting)
+ - Slightly Increased Rocket Projectile Speed
+ - Server Fixes
+ - Moderator Tools Fixes
+
+ == UPDATE 3.2.1 ==
+ - Opened KPD Applications (Manually Curated)
+ - Removed Soul Sanctum from Rotation (More Raids Later)
+ (Rewards will be given out with Season 4 Release)
+ - Added Triggers Category to Assets
+ - Fixed Team Score Values on UI (For Team Modes)
+ - Added new Categories to Maps/Games
+ - Increased Asset Upload Limits to Assets/Images/Sounds
+ - KR Rewards are now Enabled by Default in the Host Menu (If available)
+ - Reduced Invalid Version issue
+ - Slightly increased aim time of Throwing Knife
+ - Server fixes
+
+ == UPDATE 3.2.0 ==
+ - Added Blitz Gamemode to Customs
+ - Added Charity Drop Items
+ - Raid can now be Hosted in Customs (No Rewards)
+ - Fixed Collision issues with Jump-Pads
+ - Increased Jump-Pads collision height
+ - Editor Fixes
+
+ == UPDATE 3.1.9 ==
+ - Optimized Rotation Maps
+ - Server Fixes
+ - Fixed Damage Color setting
+ - Fixed issues with Leaderboards not updating
+
+ == UPDATE 3.1.8 ==
+ - Raids are Back! They will end on the 31st
+ (Fastest Run will win a Reward)
+ - Increased Minimum DMG on RPG Explosion
+ - Added new Free Spin
+ - Added Custom Ambient Sound Button to editor
+ - Added Spin option to Showcase Objects
+ - Added Score Cost Option to Triggers
+ - Added Optimizations Section to the Editor
+ - Added Merge Colors Optimization to the Editor
+ - Added 3 New Player Trigger Events
+ - Added Dialogue Volume Category
+ - Added Comma separators to Giveaway values
+ - Updated Social Page Background
+ - Adjusted Default Settings
+ - Lowered default Gun Volume
+ - Reset Interface Trigger Action now works all Events
+ - Fixed issue where you auto join Private Lobbies
+ - Fixed Classes in KR Rewardable Games (Thx ALT F4)
+ - Fixed Destroy on Use Trigger option (Thx Xelciar)
+ - Fixed Require kills interact messages
+
+ == UPDATE 3.1.7 ==
+ - Can now Change Images/Icons and Fonts with Mod Packs
+ - Added new Free Spin
+ - Adjusted Default Settings
+ - Adjusted Spanish Translation
+ - Added Rotation Axis Option for Assets
+ - Fixed Prefabs not Loading issue
+ - Increased Collidable object limit for non verified players
+ - Fixed Issue with Total Earnings display on Partner Dashboard
+ - Fixed Issue with Hotkey Host commands working in KR-Reward Customs
+ - Fixed Spectating not working in Test Mode
+
+ == UPDATE 3.1.6 ==
+ - Updated Map/Game Policy Surrounding KR Additions
+ (Map Makers have 24 hours to update their maps to comply before risking removal)
+ - Added Report button to Map/Mod Page
+ - Added Popup for KR Spending in-game
+ - Added Can't Afford text to KR Popup
+ - Added Japanese Language Setting (WIP)
+ - Minor Server Fixes
+ - Adjusted Spawns on Evacuation
+ - Added Option to Profile Settings to Delete Account
+
+ == UPDATE 3.1.5 ==
+ - Added Host & Play Button to Game list on Hover
+ - Added Confirm Interact Keybind
+ - Added KR Action Cost to Triggers
+ - Added 'onInteractKey' Trigger Event
+ - Renamed 'onInteract' Event to 'onHoldMouse'
+ - Moved Spectate Button
+ - Slight Menu Layout changes
+ - You can now Post Giveaway Posts: Last 12 Hours
+   (Winner is chosen randomly from: followers and likes)
+ - Slight changes to Mod List
+ - Fixed Map Hosting issue
+
+ == UPDATE 3.1.4 ==
+ - Server Fixes
+ - Fixed Partner Icon on Social
+ - Fixed Hud Health Setting
+ - Reduced Clan War Lives to 100 (So it's less time consuming)
+ - Slightly Adjusted Game Selection Window
+ - Added Category Search to Map List
+ - Added KR Tab to Map List
+ - Added Giveaway Tab to Krunk Feed (Giveaway Posts Soon)
+
+ == UPDATE 3.1.3 ==
+ (You can now Earn KR from certain Custom maps by enabling:
+ Enable KR Rewards in the Host menu)
+ - Added Reward KR Trigger Action to Editor (Give Players KR in Custom Games)
+ - Custom Servers where you can Earn KR are shown with a Special Icon in the Server Browser
+ - Opened Referral Partner Applications for Level 20 and Above
+ (Earn money and KR from bringing new Players to Krunker)
+ - Raids Disabled: Will return on October 28
+ - Updated Mod Page Layout
+ - Updated Partner Dashboard a bit
+ - Renamed Camera Presets in Editor
+ - Total Partner Earnings Estimate for the month is now shown on Dashboard
+ - Added select Asset button to Editor (For Player Model Setting)
+ - Updated Disconnect Screen with more Information
+
+ == UPDATE 3.1.2 ==
+ (Raids will End on October 17th & Return for the days surrounding Halloween)
+ - Added new Free Spin
+ - Added ability to Deposit KR into a Map (For Map Makers)
+   (Preparation for upcoming Features)
+ - Updated Cookie Compliance
+ - Changes to Soul Sanctum
+ - Added Edit Popup to My Games list on Hub
+ - Added Categories to Maps (Adding Search by Category Soon)
+ - Merged Black-Market into Market Tab
+ - Added Leaderboard for Raid Time to Complete (Will reset on the 18th)
+ - Raid timer now Shows Time it took to Beat on End-Board
+ - Slight change to Map Page
+ - Time Played Leaderboard now shows in Hours
+
  == UPDATE 3.1.1 ==
  (We will be adding a few Maps from the Map competition to test them in pubs)
  - Added new Map: Evacuation (Test)

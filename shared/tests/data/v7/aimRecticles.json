@@ -1,0 +1,30 @@
+[
+ {
+  "name": "Default",
+  "id": 0
+ },
+ {
+  "name": "Pro",
+  "id": 1
+ },
+ {
+  "name": "OG",
+  "id": 2
+ },
+ {
+  "name": "Waspy",
+  "id": 4
+ },
+ {
+  "name": "MoonJuice",
+  "id": 5
+ },
+ {
+  "name": "Swixie",
+  "id": 6
+ },
+ {
+  "name": "Sorable",
+  "id": 7
+ }
+]

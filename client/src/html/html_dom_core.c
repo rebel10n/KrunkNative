@@ -5,11 +5,13 @@
 // Emscripten); both call html_ui_dispatch()/html_ui_dispatch_listener() when
 // the page produces an event and html_timers_tick() once per frame.
 #include <html_dom.h>
+#include <shared.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef __EMSCRIPTEN__
+#include <GLFW/glfw3.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
@@ -72,6 +74,16 @@ const char *html_ui_current_handler(void) {
     return g_current_handler;
 }
 
+static int g_stop_propagation;
+
+void html_ui_stop_propagation(void) { g_stop_propagation = 1; }
+
+int html_ui_take_stop_propagation(void) {
+    const int stop = g_stop_propagation;
+    g_stop_propagation = 0;
+    return stop;
+}
+
 void html_ui_set_handlers(const HtmlHandlerEntry *table, const size_t count, void *user, const HtmlHandlerFn fallback) {
     g_ctx->handlers = table;
     g_ctx->handler_count = table ? count : 0;
@@ -106,7 +118,33 @@ static void normalise_handler_name(const char *name, char *out, const size_t n) 
     out[len] = 0;
 }
 
+// html_ui_add_handler: run-time handlers of the game page (context 0)
+#define HTML_MAX_ADDED_HANDLERS 8
+static HtmlHandlerEntry g_added_handlers[HTML_MAX_ADDED_HANDLERS];
+static char g_added_names[HTML_MAX_ADDED_HANDLERS][48];
+
+void html_ui_add_handler(const char *name, const HtmlHandlerFn fn) {
+    if (!name || !*name) return;
+    int free_slot = -1;
+    for (int i = 0; i < HTML_MAX_ADDED_HANDLERS; i++) {
+        if (g_added_handlers[i].name && !strcmp(g_added_handlers[i].name, name)) {
+            g_added_handlers[i].fn = fn;
+            if (!fn) g_added_handlers[i].name = NULL;
+            return;
+        }
+        if (!g_added_handlers[i].name && free_slot < 0) free_slot = i;
+    }
+    if (!fn || free_slot < 0) return;
+    snprintf(g_added_names[free_slot], sizeof(g_added_names[free_slot]), "%s", name);
+    g_added_handlers[free_slot] = (HtmlHandlerEntry) {g_added_names[free_slot], fn};
+}
+
 static const HtmlHandlerEntry *find_handler(const char *name) {
+    if (g_ctx == &g_contexts[0]) {
+        for (int i = 0; i < HTML_MAX_ADDED_HANDLERS; i++) {
+            if (g_added_handlers[i].name && g_added_handlers[i].fn && !strcmp(g_added_handlers[i].name, name)) return &g_added_handlers[i];
+        }
+    }
     for (size_t i = 0; i < g_ctx->handler_count; i++) {
         if (g_ctx->handlers[i].name && !strcmp(g_ctx->handlers[i].name, name)) return &g_ctx->handlers[i];
     }
@@ -140,6 +178,7 @@ static void log_dispatch(const char *name, const HtmlEvent *ev, const HtmlArg *a
 
 int html_ui_dispatch(const char *handler_name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     char name[128];
+    g_stop_propagation = 0; // a request is only good for the dispatch that made it
     normalise_handler_name(handler_name, name, sizeof(name));
     if (!name[0]) return 1;
 
@@ -354,6 +393,11 @@ static int storage_path(const char *key, char *out, const size_t n, const int cr
     return written > 0 && (size_t) written < n;
 }
 
+// native builds have no BroadcastChannel (html_dom.h): the editor bus connects windows
+int html_channel_open(const char *name) { (void) name; return 0; }
+void html_channel_post(const char *name, const char *text) { (void) name; (void) text; }
+char *html_channel_take(const char *name) { (void) name; return NULL; }
+
 int html_storage_get(const char *key, char *buf, const size_t n) {
     char path[640];
     if (!storage_path(key, path, sizeof(path), 0)) return -1;
@@ -391,4 +435,38 @@ void html_storage_set(const char *key, const char *value) {
     fclose(f);
 }
 
+// --------------------------------------------------------------------------- page address + clipboard (native)
+// No address bar natively: the URL calls are no-ops (web_dom.c has the browser's).
+
+int html_page_query(char *buf, const size_t n) {
+    if (buf && n) buf[0] = 0;
+    return -1;
+}
+
+void html_page_set_url(const char *href, const int push) {
+    (void) href;
+    (void) push;
+}
+
+// Links copied from the native client point at the public web client.
+void html_page_origin(char *buf, const size_t n) {
+    if (buf && n) snprintf(buf, n, "%s", KN_PUBLIC_ORIGIN);
+}
+
+void html_clipboard_write(const char *text) {
+    GLFWwindow *window = glfwGetCurrentContext();
+    if (window && text) glfwSetClipboardString(window, text);
+}
+
 #endif // !__EMSCRIPTEN__
+
+// --------------------------------------------------------------------------- game content URLs
+
+void html_dom_asset_url(const char *path, char *out, const size_t n) {
+    if (!out || !n) return;
+    char rel[512];
+    snprintf(rel, sizeof(rel), "/assets/%s", path ? path : "");
+    char *url = asset_url(rel);
+    snprintf(out, n, "%s", url ? url : rel);
+    free(url);
+}

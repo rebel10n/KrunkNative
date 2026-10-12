@@ -17,61 +17,27 @@
       "fuzz": 12,
       "max_pct": 3.0,
       "skip": true,
-      "note": "`#1 VICTORY` is drawn on Krunker's overlay canvas, not by the HTML UI (#victorySub stays empty), so the native client does not draw it"
+      "note": "`#1 VICTORY` is drawn on v7's overlay canvas (vicTitle)"
     },
     {
-      "name": "chat-rows",
-      "rect": [
-        14,
-        545,
-        180,
-        135
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#fc03ec",
-        "#ffffff"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "5 chat rows (white `You're` spans)"
-    },
-    {
-      "name": "chat-input",
+      "name": "chat",
       "rect": [
         10,
-        683,
-        180,
-        26
+        674,
+        243,
+        36
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": true,
-      "note": "#chatInput placeholder is rgba(255,255,255,.7) on rgba(0,0,0,.4): translucent only, double-blended over the reference background"
-    },
-    {
-      "name": "chat-mic",
-      "rect": [
-        195,
-        683,
-        45,
-        24
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true,
-      "note": "#voiceDisplay has opacity .5: translucent only"
+      "note": "#chatHolder"
     },
     {
       "name": "empty-top-left",
       "rect": [
         0,
         0,
-        200,
+        300,
         100
       ],
       "kind": "flat",
@@ -84,15 +50,15 @@
       "name": "empty-bottom-right",
       "rect": [
         1100,
-        530,
+        520,
         180,
-        190
+        200
       ],
       "kind": "flat",
       "fuzz": 6,
       "max_pct": 0.5,
       "expect": "background",
-      "note": "ammo/weapon rack hidden on the end screen"
+      "note": "HUD hidden on the end screen"
     }
   ]
 }

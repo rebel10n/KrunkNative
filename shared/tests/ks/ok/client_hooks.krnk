@@ -1,0 +1,21 @@
+# side: client
+public action start() {}
+public action update(num delta) {}
+public action render(num delta) {}
+public action onPlayerSpawn(str id) {}
+public action onPlayerDeath(str id, str killerID) {}
+public action onPlayerUpdate(str id, num delta, static obj inputs) {}
+public action onKeyPress(str key, num code) {}
+public action onKeyUp(str key, num code) {}
+public action onKeyHeld(str key, num code) {}
+public action onControllerPress(str key, num code) {}
+public action onControllerUp(str key, num code) {}
+public action onControllerHeld(str key, num code) {}
+public action onMouseClick(num button, num x, num y) {}
+public action onMouseUp(num button, num x, num y) {}
+public action onMouseScroll(num dir) {}
+public action onDIVClicked(str id) {}
+public action onNetworkMessage(str id, obj data) {}
+# server-only hooks are ordinary public actions on the client
+public action onGameEnd(num a, num b, num c, num d) {}
+public action myExport(num a, num b, num c, num d) {}

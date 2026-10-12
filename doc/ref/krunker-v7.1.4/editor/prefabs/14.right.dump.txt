@@ -1,0 +1,12 @@
+P Objective
+L[] Objective Id : sval=0 range[0,10,1]=0
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+S Size
+V 50/0,50/0,50/0
+-

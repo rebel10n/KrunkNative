@@ -10,6 +10,9 @@
 //   kn-brain       account service / matchmaker URL ("" = this origin)
 //   kn-bridge      net-bridge WebSocket endpoint the game connects through, e.g.
 //                  wss://play.krunk.io/native ("" = ws(s)://<this host>/native); ?ws= wins
+//   kn-rtc         WebRTC gateway signaling URL (net-bridge/rtc, doc/transport.md), e.g.
+//                  https://play.krunk.io/rtc; "off" = no WebRTC; "" = fetch rtc.json next to
+//                  the page (dev gateway); ?rtc= wins. Tried first, then kn-wt, then kn-bridge
 //   kn-wt          WebTransport relay URL (net-bridge/wt, doc/transport.md), e.g.
 //                  https://wt.krunk.io:8443/native; "off" = WebSocket only; "" = fetch wt.json
 //                  next to the page (dev relay with a self-signed certificate hash)
@@ -27,6 +30,7 @@
   var brain = meta('kn-brain');
   var bridge = meta('kn-bridge');
   var wt = meta('kn-wt');
+  var rtc = meta('kn-rtc');
 
   window.Module = Object.assign({
     canvas: document.getElementById('canvas'),
@@ -35,6 +39,7 @@
     krunkNativeBridgeUrl: bridge || undefined, // net_web.c net_web_target_url
     krunkNativeBrainUrl: brain || undefined,
     krunkNativeWtUrl: wt || undefined, // net_wt.c
+    krunkNativeRtcUrl: rtc || undefined, // net_rtc.c
     krunkNativeAssetBase: assetBase,
     krunkNativeAssetVersion: '',
     locateFile: function (path, prefix) {

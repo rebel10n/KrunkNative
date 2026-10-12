@@ -13,6 +13,8 @@
 #include <sound_events.h>
 #include <audio.h>
 #include <client_settings.h> // Settings > Client "Always Play HS Sound on Kill"
+#include <cosmetics.h>
+#include "viewer/viewer_store.h"
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdint.h>
@@ -65,8 +67,8 @@ static struct {
     int preloaded;
 } g_sound;
 
-// weapon.sound per weapon (Krunker.Unpacked-v3.1.1/27.js), and whether it ejects casings
-// (!nCase). Matched on Weapon.name; the shared weapon table carries no sound field.
+// weapon.sound per weapon (v7.1.4 src/data/weapons.js; Weapon.sound carries the same name), and
+// whether it ejects casings (!nCase). Matched on Weapon.name.
 static const struct {
     const char *weapon;
     const char *sound;
@@ -86,10 +88,21 @@ static const struct {
     {"Alien Blaster", "weapon_12", 0},
     {"Crossbow", "weapon_14", 0},
     {"Famas", "weapon_15", 1},
-    {"Sawed Off", "weapon_6", 0},
+    {"Sawed Off", "weapon_16", 0}, // v7.1.4: weapon_6 -> weapon_16
     {"Auto Pistol", "weapon_17", 1},
     {"Bomb", "weapon_18", 0},
     {"Blaster", "weapon_19", 0},
+    // v7.1.4 weapons 19-28 (WP-B)
+    {"Build Tool", "weapon_20", 0},
+    {"Grappler", "weapon_21", 1},
+    {"Tehchy-9", "weapon_22", 1},
+    {"Noob Tube", "weapon_23", 0},
+    {"Slimer", "weapon_24", 1},
+    {"Zapper", "weapon_25", 1},
+    {"Minigun", "weapon_26", 1},
+    {"War Machine", "weapon_27", 0},
+    {"Akimbo Pistol", "weapon_28", 1},
+    {"Charge Rifle", "weapon_29", 1},
 };
 
 // Krunker's amvVols: per-ambience volume, 0.12 otherwise.
@@ -117,6 +130,31 @@ static void play_numbered(const char *prefix, const int min, const int max, cons
     char name[32];
     snprintf(name, sizeof(name), "%s%d", prefix, rand_int(min, max));
     audio_play(name, volume, 0, rate);
+}
+
+// v7.1.4 players.js getStepSound / getJumpSound: a player wearing shoes with stepSnd steps and lands
+// with "shoe_<id>" (and jumps with it when they also have jumpSnd); NULL = the default sounds.
+static const ViewerSkin *step_shoes(const Player *player) {
+    PlayerCosmetics cosmetics = player->cosmetics;
+    PlayerCosmeticsV7 v7 = player->cosmetics_v7;
+    cosmetics_route(&cosmetics, &v7);
+    const ViewerSkin *shoes = cosmetic_item(v7.shoe, ITEM_SHOE);
+    return shoes && (shoes->flags2 & VS2_STEP_SND) ? shoes : NULL;
+}
+
+// a footstep (Te7): step_N, or the shoes' sound at 0.6 x the volume and a 0.95-1.05 rate
+static void play_step(const Player *player, const int positional, float volume, float rate) {
+    char name[32];
+    const ViewerSkin *shoes = step_shoes(player);
+    if (shoes) {
+        snprintf(name, sizeof(name), "shoe_%d", shoes->id);
+        volume *= 0.6f;
+        rate *= rand_float(0.95f, 1.05f);
+    } else {
+        snprintf(name, sizeof(name), "step_%d", rand_int(0, 2));
+    }
+    if (positional) audio_play_3d(name, player->position, volume, rate, 0.0f, 0.0f);
+    else audio_play(name, volume, 0, rate);
 }
 
 static float distance3(const vec3 a, const vec3 b) {
@@ -189,6 +227,19 @@ static void map_start_emitters(const Map *map) {
 
 // 106.js game init: `H.play("ambient_" + ambInd, amvVols[ambInd] || 0.12, true, 1)`, the
 // previous ambience stopped only when the index changes.
+// WP-C "camb" (v7 window.changeAmbient): the ambience loop switches when the index changes.
+void sound_events_change_ambient(const int ambient) {
+    if (ambient <= 0 || ambient == g_sound.ambient) return;
+    char name[32];
+    if (g_sound.ambient) {
+        snprintf(name, sizeof(name), "ambient_%d", g_sound.ambient);
+        audio_stop(name);
+    }
+    g_sound.ambient = ambient;
+    snprintf(name, sizeof(name), "ambient_%d", ambient);
+    audio_play(name, ambient_volume(ambient), 1, 1.0f); // SOUND.play("ambient_" + id, amvVols[id] || 0.12, true, 1)
+}
+
 static void map_sounds_update(Client *client) {
     const Map *map = client->game.ready ? client->game.map : NULL;
     if (map == g_sound.map && client->game.current_map_index == g_sound.map_index) return;
@@ -342,7 +393,14 @@ static void local_player_events(Client *client, const float now, const float del
                 audio_play("bounce_0", 1.0f, 0, rand_float(0.95f, 1.0f));
             }
         } else {
-            play_numbered("jump_", 0, 1, 0.04f, 1.0f);
+            const ViewerSkin *shoes = step_shoes(me);
+            if (shoes && (shoes->flags2 & VS2_JUMP_SND)) { // getJumpSound: stepSnd && jumpSnd
+                char name[32];
+                snprintf(name, sizeof(name), "shoe_%d", shoes->id);
+                audio_play(name, 0.04f, 0, 1.0f);
+            } else {
+                play_numbered("jump_", 0, 1, 0.04f, 1.0f);
+            }
         }
     }
 
@@ -352,14 +410,23 @@ static void local_player_events(Client *client, const float now, const float del
     // hMY7 (landing): step_N at 0.7 per resetStep the simulation counted (player.c), plus
     // slide_0 when the landing starts a slide.
     (void) teleport;
-    if (me->land_events != track->land_events) play_numbered("step_", 0, 2, 0.7f, 1.0f);
+    if (me->land_events != track->land_events) { // resetStep: getStepSound at (stepSnd ? 0.4 : 1) * 0.7
+        const ViewerSkin *shoes = step_shoes(me);
+        if (shoes) {
+            char name[32];
+            snprintf(name, sizeof(name), "shoe_%d", shoes->id);
+            audio_play(name, 0.4f * 0.7f, 0, 1.0f);
+        } else {
+            play_numbered("step_", 0, 2, 0.7f, 1.0f);
+        }
+    }
     if (track->can_slide && !me->can_slide && me->crouch_val > 0.0f) audio_play("slide_0", 0.35f, 0, 1.0f);
 
     // Te7 footsteps: one per playerStep stepDir flip, counted per input by the simulation
     // (player.c player_step), so the cadence is Krunker's exactly at any frame rate.
     if (me->step_events != track->step_events) {
         const float volume = rand_float(0.15f, 0.25f) * (me->crouch_val < 1.0f ? 1.0f : 0.5f);
-        play_numbered("step_", 0, 2, volume, me->crouch_val < 1.0f ? 1.0f : 0.8f);
+        play_step(me, 0, volume, me->crouch_val < 1.0f ? 1.0f : 0.8f);
     }
 
     // HUD health drop: impact_0.
@@ -411,9 +478,7 @@ static void remote_player_events(Client *client, const float delta) {
             const int crouched = player->crouch_val >= 1.0f;
             if (step_advance(track, moved * (crouched ? 1.6f : 1.0f)) && !crouched &&
                 distance3(player->position, client->camera.position) <= STEP_RANGE) {
-                char name[16];
-                snprintf(name, sizeof(name), "step_%d", rand_int(0, 2));
-                audio_play_3d(name, player->position, rand_float(0.15f, 0.25f), 1.0f, 0.0f, 0.0f);
+                play_step(player, 1, rand_float(0.15f, 0.25f), 1.0f);
             }
         }
 
@@ -462,10 +527,30 @@ void sound_events_hitmarker(void) {
     audio_play("hit_0", 3.1f, 0, 1.0f);
 }
 
-void sound_events_kill(const int headshot) {
+void sound_events_kill(const int headshot, const Player *killer, const int weapon_index) {
     // getKillSnd: headshot_0, else the weapon skin's sound (none for default skins).
     // glorp hsSound: every own kill plays headshot_0 when the Client tab asks for it
-    if (headshot || client_settings_hs_sound_always()) audio_play("headshot_0", 1.0f, 0, 1.0f);
+    if (headshot || client_settings_hs_sound_always()) {
+        audio_play("headshot_0", 1.0f, 0, 1.0f);
+        return;
+    }
+    // v7.1.4 getKillSnd: the store skin of the killing weapon (the melee skin for the knife, else the
+    // loadout slot's) with killSnd plays weapon.sound + "_" + id; only typed items (melee, type 3) have one
+    const Weapon *weapon = killer && killer->game && weapon_index >= 0 && (size_t) weapon_index < killer->game->weapon_count ? killer->game->weapons[weapon_index] : NULL;
+    if (!weapon || !weapon->sound) return;
+    int skin_index = -1;
+    if (weapon->melee) {
+        skin_index = killer->skins.melee;
+    } else {
+        for (int slot = 0; slot < killer->loadout_size && slot < 2; slot++) {
+            if (killer->loadout[slot] == weapon_index) skin_index = slot ? killer->skins.secondary : killer->skins.primary;
+        }
+    }
+    const ViewerSkin *skin = viewer_skin(skin_index);
+    if (!skin || !(skin->flags2 & VS2_KILL_SND) || !skin->type) return;
+    char name[48];
+    snprintf(name, sizeof(name), "%s_%d", weapon->sound, skin->id);
+    audio_play(name, 1.0f, 0, 1.0f);
 }
 
 void sound_events_remote_shot(Client *client, const Player *shooter) {

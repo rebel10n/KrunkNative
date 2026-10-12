@@ -1,15 +1,19 @@
-// Menu state machine over the DOM-ops API: the C port of the menu JavaScript
-// (krunknative.js) plus the net/state/connection glue. No JS runs natively; on the web
-// ui/js/kn-shim.js only forwards page events here. The page is Krunker's own markup + main.css; this mirrors what the real
-// client does in its loaded, logged-out, menu-open state:
+// Menu state machine over the DOM-ops API: the C port of Krunker v7.1.4's menu JavaScript
+// (src/index.js, src/libs/UI.js) plus the net/state/connection glue. No JS runs natively;
+// on the web ui/js/kn-shim.js only forwards page events here. The page is Krunker's own
+// markup + main.css; this mirrors what the real client does in its loaded, logged-out,
+// menu-open state (a returning player: v7's fullMenu(), no FTUE gradual menu):
 //   - scaleBase()                   fit the 1700x900 * uiCustomScale design space
 //   - UI.toggleMenu/toggleMenuHider menu open/close inline styles
-//   - updatePlayInstructions()      #instructions = "CLICK TO PLAY" (4 states)
+//   - updatePlayInstructions()      #instructions = "CLICK TO PLAY" / the loading ring /
+//                                   the "Lost Connection" screen in #instructionsUpdate
 //   - showWindow/closeWindow        #windowHolder / #windowHeader / #menuWindow
-//   - the class box (#menuClassContainer) population
+//   - updateClassPreview()          the class box (#menuClassContainer) population
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <badges.h> // WP-E part 2c: the custom badge in the class box
+#include <ks_client.h> // ks_client_pointer_free
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <weapons.h>
@@ -17,7 +21,8 @@
 #include <gamepad.h> // Gamepad.active: "PRESS START" (client/src/gamepad.c)
 #include <spectate.h> // the Spectate switch: "CLICK TO SPECTATE" (client/src/spectate.c)
 #include <console.h> // developer console overlay (client/src/ui/ui_console.c)
-#include <ui_terminal.h> // map terminals (client/src/ui/ui_terminal.c)
+#include <ui_interact.h> // the interact prompt (client/src/ui/ui_interact.c)
+#include <game_config.h> // Game.config.classes / isCustom (the class list)
 #include <client_settings.h> // Exit menu item + Settings > Client (client/src/ui/ui_client_settings.c)
 #include <math.h>
 #include <stdarg.h>
@@ -42,6 +47,8 @@
 #define CONNECT_ERROR_DEFAULT "Could not connect to the game server"
 
 static MenuUi g_ui;
+// Region name override (ui_scenario.c `state.region`); "" = MENU_REGION_NAME.
+static char g_region_label[64];
 static char g_connect_code[8]; // Krunker's error code on the connection error screen ("000000")
 
 // Krunker v3.1.1 idle kick (index.js gameLoop + config.kickTimer): while the menu is up
@@ -239,6 +246,26 @@ static const char *client_mode_name(const Client *client) {
     return client->game.mode && client->game.mode->config.name ? client->game.mode->config.name : "";
 }
 
+// windows[2] tab 0 lists the classes in Game.config.classes; without a list, resetClasses():
+// every class but the hidden ones (Deagler, Survivor), all of them in a sandbox / custom game.
+static int menu_class_listed(const Game *game, const ClassConfig *classes, const int index) {
+    if (game->config.class_list_count > 0) {
+        for (int i = 0; i < game->config.class_list_count; i++) {
+            if (game->config.class_list[i] == index) return 1;
+        }
+        return 0;
+    }
+    return !classes[index].hide || game_config_is_custom(game);
+}
+
+// What menu_class_listed reads, to rebuild the list when it changes (GAME_CONFIG).
+static unsigned menu_class_filter_key(const Game *game) {
+    unsigned key = 2166136261u ^ (unsigned) game_config_is_custom(game);
+    for (int i = 0; i < game->config.class_list_count; i++) key = (key ^ (unsigned) game->config.class_list[i]) * 16777619u;
+    return key * 16777619u + (unsigned) game->config.class_list_count;
+}
+static unsigned g_class_filter_key;
+
 // Mirrors Game.classes as the real class window renders them (name, primary weapon, HP).
 static void menu_build_classes(void) {
     const Client *client = g_ui.client;
@@ -248,7 +275,9 @@ static void menu_build_classes(void) {
     const size_t weapon_count = client->game.weapons ? client->game.weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
 
     g_ui.class_count = 0;
+    g_class_filter_key = menu_class_filter_key(&client->game);
     for (size_t i = 0; i < count && g_ui.class_count < MENU_CLASS_MAX; i++) {
+        if (!menu_class_listed(&client->game, classes, (int) i)) continue;
         MenuClass *c = &g_ui.classes[g_ui.class_count++];
         c->index = (int) i;
         c->name = classes[i].name ? classes[i].name : "";
@@ -259,6 +288,19 @@ static void menu_build_classes(void) {
         }
         c->hp = classes[i].health;
         snprintf(c->icon, sizeof(c->icon), "textures/classes/icon_%d.png", classes[i].icon_index);
+        // updateClassPreview: every loadout weapon's name; the icon is the last one's preview
+        // (weaponConfig.src, the Bomb's cosmetics/3_default)
+        c->loadout_count = 0;
+        c->preview[0] = 0;
+        // (ClassConfig.loadout lists the class weapon only; v7's Rocketeer-style multi-weapon
+        // loadouts arrive with WP-B's class table)
+        for (int k = 0; classes[i].loadout && k < 1 && c->loadout_count < MENU_CLASS_LOADOUT_MAX; k++) {
+            const int w = classes[i].loadout[k];
+            if (w < 0 || (size_t) w >= weapon_count || !weapons[w]) continue;
+            c->loadout_names[c->loadout_count++] = weapons[w]->name ? weapons[w]->name : "";
+            if (w == 12) snprintf(c->preview, sizeof(c->preview), "textures/previews/cosmetics/3_default.png");
+            else if (weapons[w]->src) snprintf(c->preview, sizeof(c->preview), "textures/previews/weapons/%s.png", weapons[w]->src);
+        }
     }
     g_ui.last_classes = classes;
     g_ui.last_class_count = count;
@@ -423,8 +465,8 @@ static void on_observed_resize(const HtmlElem el, void *user) {
 // ---------------------------------------------------------------- scaleBase
 
 // Port of window.scaleBase(): fit a 1700x900 design space, scaled by
-// settings.tmp.uiCustomScale (= 1 - scaleUI + 1, scaleUI defaults to 0.8 so the space
-// is 2040x1080), into the viewport by scaling #uiBase.
+// settings.tmp.scaleUI (= 1 - scaleUI + 1; scaleUI defaults to 0.7 on desktop in v7.1.4, so
+// the space is 2210x1170), into the viewport by scaling #uiBase.
 void menu_scale_base(void) {
     HtmlElem base = by_id("uiBase");
     if (!base) return;
@@ -436,7 +478,7 @@ void menu_scale_base(void) {
         return;
     }
     double scale_ui;
-    if (!ui_setting_number("scaleUI", &scale_ui) || scale_ui != scale_ui) scale_ui = 0.8;
+    if (!ui_setting_number("scaleUI", &scale_ui) || scale_ui != scale_ui) scale_ui = 0.7; // v7 default (desktop)
     const double custom = 1.0 - scale_ui + 1.0;
     float w, h, dpr;
     html_dom_viewport(&w, &h, &dpr);
@@ -477,33 +519,36 @@ void menu_apply_open(const int open) {
     const int on = g_ui.menu_open;
 
     html_dom_set_class(html_dom_root(), "kn-menu-open", on);
+    // UI.toggleMenu(j)
     set_display("menuHolder", on ? "block" : "none");
     set_display("speakerDisplay", on ? "none" : "block");
-    set_style("chatHolder", "bottom", on ? "20px" : "148px");
-    set_style("voiceDisplay", "bottom", on ? "18px" : "145px");
-    set_display("supportMapCreator", "none");
-    // toggleMenuHider
+    // UI.toggleMenuHider(j)
     set_display("menuHider", on ? "block" : "none");
     HtmlElem base = by_id("uiBase");
-    if (base) html_dom_set_class(base, "onMenu", on);
+    if (base) {
+        html_dom_set_class(base, "onMenu", on);
+        html_dom_set_class(base, "onDeathScrn", 0);
+        html_dom_set_class(base, "onSpect", spectate_active() && !on);
+    }
     set_display("gameNameHolder", on ? "" : "none");
     set_display("spectButton", on ? "" : "none");
     if (on) {
         set_display("spinUI", "none");
-        set_display("respinUI", "none");
+        set_display("spinUIBtns", "none");
+        // toggleMenu(true)
         set_display("endUI", "none");
+        if (base) html_dom_set_class(base, "onEndScrn", 0);
         set_display("instructionHolder", "block");
-        if (by_id("baseLinks") && !menu_window_is_open()) set_display("baseLinks", "block");
-        set_display("newLeaderDisplay", "none");
-        set_display("terminalHolder", "none");
+        if (!menu_window_is_open()) set_display("baseLinks", "block");
+        set_display("centerLeaderDisplay", "none");
     } else {
-        // entering the game: Krunker hides the overlay (hud_ui.c shows #inGameUI)
+        // entering the game: toggleControlUI(true) hides the overlay (hud_ui.c shows #inGameUI)
         set_display("instructionHolder", "none");
         menu_close_window();
     }
     set_style("menuClassContainer", "visibility", "");
     menu_update_info_holder();
-    ui_loadout_clear_pops(); // UI.toggleControlUI ends with clearPops()
+    ui_loadout_clear_pops(); // toggleMenuHider(false) / toggleControlUI end with clearPops()
     menu_update_instructions();
     menu_schedule_rect();
 }
@@ -526,56 +571,82 @@ static int can_play(void) {
     return g_ui.connected && g_ui.ready;
 }
 
-// updatePlayInstructions(): in the loaded, connected state the real client writes
-// exactly i18n "app.play" = "CLICK TO PLAY". Before the socket is up it shows
-// generic.loading / generic.connecting; a dead socket gets showConnectionErrorScreen()'s
-// markup (error text, error.seek line with the retry link, error.extentions footer).
-// KrunkNative adds one line to that screen: a link that hosts an offline game.
+// updatePlayInstructions() (v7 f2041/f2042): connected and loaded, #instructions is i18n
+// "app.play" = "CLICK TO PLAY" ("app.spectate" with the menu's Spectate switch on,
+// ".controller" / ".mobile" variants) plus the queue status in #instructionsSubtitle. Before
+// that UI.loadSpinner()'s ring. A dead connection is v7's error screen (f2040): #instructions
+// hidden and #instructionsUpdate = "Lost Connection", the error, the ID / region lines and the
+// instructionsTabs row (Find a Game / Servers / Settings / Changelog); KrunkNative adds one
+// tab that plays offline (knHostOffline).
+#define MENU_LOAD_SPINNER "<div style='width:100%;text-align:center;transform:scale(1.3);'><div class='lds-ring'><div></div><div></div><div></div><div></div></div></div>"
 void menu_update_instructions(void) {
     HtmlElem el = by_id("instructions");
     if (!el) return;
     StrBuf sb = {0};
+    const int error = g_ui.dom_ready && !can_play() && g_ui.connect_error[0] && !g_ui.connected;
     if (!g_ui.dom_ready) {
-        sb_append(&sb, "LOADING...");
+        sb_append(&sb, MENU_LOAD_SPINNER);
     } else if (can_play()) {
-        // gamepad.active ? "app.play.controller" : aM.isMobile ? "TAP TO PLAY" : "app.play".
-        // KrunkNative addition (user request): with the menu's Spectate switch on the line
-        // says what a click does - "CLICK TO SPECTATE" / "TAP TO SPECTATE" (the controller
-        // keeps "PRESS START"); v3.1.1 keeps "CLICK TO PLAY" whatever the switch says.
         const int spect = spectate_requested();
-        sb_append(&sb, gamepad_active() ? "PRESS START"
+        sb_append(&sb, gamepad_active() ? (spect ? "START to SPECTATE" : "PRESS START")
                        : ui_mobile_active() ? (spect ? "TAP TO SPECTATE" : "TAP TO PLAY")
                        : spect ? "CLICK TO SPECTATE" : "CLICK TO PLAY");
-        // updatePlayInstructions: the ranked queue status under it (ranked_ui.c)
+        // the ranked queue status under it (v10794.toUpperCase(), ranked_ui.c)
         if (ranked_ui_status()) {
             sb_append(&sb, "<div id='instructionsSubtitle'>");
             for (const char *p = ranked_ui_status(); *p; p++) sb_appendf(&sb, "%c", *p >= 'a' && *p <= 'z' ? *p - 32 : *p);
-            sb_append(&sb, "</div><div id='instructionsSubtitle'>");
-            sb_append_esc(&sb, ranked_ui_ready() ? ranked_ui_ready() : "");
             sb_append(&sb, "</div>");
+            if (ranked_ui_ready() && ranked_ui_ready()[0]) {
+                sb_append(&sb, "<div id='instructionsSubtitle'>");
+                sb_append_esc(&sb, ranked_ui_ready());
+                sb_append(&sb, "</div>");
+            }
         }
-    } else if (g_ui.connect_error[0] && !g_ui.connected) {
-        sb_append(&sb, "<span style='color: rgba(255, 255, 255, 0.6)'>");
-        sb_append_esc(&sb, g_ui.connect_error);
-        sb_append(&sb, "</span><br/><span style='color: rgba(255, 255, 255, 0.6)'>Try seeking a new game by clicking <a href='#' onclick='return knRetry()'>here</a>.</span>"
-            "<br/><span style='color: rgba(255, 255, 255, 0.6)'>Or <a href='#' onclick='return knHostOffline()'>play offline</a>.</span>"
-            "<div style='margin-top:10px;font-size:20px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them (Error 0x");
-        sb_append_esc(&sb, g_connect_code[0] ? g_connect_code : "000000");
-        sb_append(&sb, ")</div>");
-    } else {
-        sb_append(&sb, "CONNECTING...");
+    } else if (!error) {
+        sb_append(&sb, MENU_LOAD_SPINNER);
     }
     char *html = sb_finish(&sb);
-    if (strcmp(html, g_ui.last_instructions)) {
+    // the error screen: #instructionsUpdate
+    StrBuf eb = {0};
+    if (error) {
+        eb.len = 0;
+        sb_append(&eb, "<div class='instructionsHeader'>Lost Connection</div><div style='color: rgba(255, 255, 255, 0.6);margin-top: 5px;font-size: 28px;'>");
+        sb_append_esc(&eb, g_ui.connect_error);
+        // KrunkNative: an online-mode lobby turned a guest away (AccountRequired): log in (the
+        // lobby is joined right after, servers_ui.c)
+        if (servers_ui_account_required()) sb_append(&eb, "<div style='font-size:20px'><a href='#' onclick='showWindow(5);return false'>Log in</a> to join it.</div>");
+        sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>ID: 0x");
+        sb_append_esc(&eb, g_connect_code[0] ? g_connect_code : "000000");
+        sb_append(&eb, " | Code: 0 | Reason: 0</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>Region: ");
+        sb_append_esc(&eb, g_region_label[0] ? g_region_label : MENU_REGION_NAME);
+        sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them</div>");
+        // Find a Game: seek a new game (or retry a pinned server: console connect / Direct Connect)
+        sb_appendf(&eb, "<div class=\"instructionsTabs\">\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knRetry()\">%s</div>"
+                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knHostOffline()\">Play Offline</div>"
+                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(2)\">Servers</div>"
+                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(1)\">Settings</div>"
+                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(35)\">Changelog</div>\n\t\t\t</div>",
+                   servers_ui_pinned() ? "Reconnect" : "Find a Game");
+    }
+    char *update = sb_finish(&eb);
+    char key[sizeof(g_ui.last_instructions)];
+    snprintf(key, sizeof(key), "%d|%s|%s", error, html, update);
+    if (strcmp(key, g_ui.last_instructions)) {
         html_dom_set_html(el, html);
-        snprintf(g_ui.last_instructions, sizeof(g_ui.last_instructions), "%s", html);
+        html_dom_set_display(el, error ? "none" : "");
+        HtmlElem upd = by_id("instructionsUpdate");
+        if (upd) {
+            html_dom_set_html(upd, update);
+            html_dom_set_display(upd, error ? "block" : "");
+        }
+        if (error) set_display("frvrFTUEVideoHolder", "none");
+        snprintf(g_ui.last_instructions, sizeof(g_ui.last_instructions), "%s", key);
     }
     free(html);
+    free(update);
     set_style("instructionHolder", "pointer-events", "all");
 }
 
-// Region name override (ui_scenario.c `state.region`); "" = MENU_REGION_NAME.
-static char g_region_label[64];
 
 void menu_set_region_label(const char *name) {
     snprintf(g_region_label, sizeof(g_region_label), "%s", name ? name : "");
@@ -587,17 +658,54 @@ void menu_update_top_bar(void) {
     if (lbl) html_dom_set_text(lbl, g_ui.connected ? (g_region_label[0] ? g_region_label : MENU_REGION_NAME) : "...");
 }
 
-// Krunker's map load: mapInfo.textContent = mode.alias + "_" + map.name, and the
-// menu's #infoHolder (map info + terms links) shows once a game session exists.
+// The top bar's #menuPingText / #menuPingIcon. v3.1.1 reconcilePlayer writes them on every
+// change of the "l" ping while #menuHolder shows: text = ping == -1 ? "-" : ping, icon
+// COLORS.ping (src/data/colors.js: low < 50 <= medium < 150 <= high). KrunkNative's ping
+// comes in PING_RESULT (one per pong, NET_PING_INTERVAL) instead of "l", so the menu also
+// follows it before the first spawn and while dead, and catches up when it reopens.
+// Offline, disconnected or before the first sample: the page's own "0" in gray
+// (clearPingCounter). -1 = that state; the page starts in it.
+#define MENU_PING_COLOR_LOW "rgb(158, 235, 86)"
+#define MENU_PING_COLOR_MEDIUM "rgb(255, 213, 66)"
+#define MENU_PING_COLOR_HIGH "rgb(255, 75, 66)"
+static int g_menu_ping = -1;
+
+static void menu_update_ping(const Client *client) {
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) return; // the reference captures keep the page's "0"
+#endif
+    if (!html_ui_is_menu_open()) return;
+    const int ping = client->offline || client->game.is_local || !client->net_connected || client->net_ping_ms < 0 ? -1 : client->net_ping_ms;
+    // KrunkNative: the tooltip names the game transport (net_notes.c), e.g. "Ping 41 ms over WebRTC"
+    static const char *menu_transport;
+    const char *transport = client_net_transport_name(client);
+    if (transport != menu_transport) {
+        menu_transport = transport;
+        char title[64];
+        if (ping >= 0 || strcmp(transport, "-")) snprintf(title, sizeof(title), "Game transport: %s", transport);
+        else title[0] = 0;
+        const HtmlElem holder = by_id("menuPingDisplay");
+        if (holder) html_dom_set_attr(holder, "title", title);
+    }
+    if (ping == g_menu_ping) return;
+    g_menu_ping = ping;
+
+    char text[16];
+    snprintf(text, sizeof(text), "%d", ping < 0 ? 0 : ping);
+    const HtmlElem el = by_id("menuPingText");
+    if (el) html_dom_set_text(el, text);
+    set_style("menuPingIcon", "color", ping < 0 ? "gray" : ping >= 150 ? MENU_PING_COLOR_HIGH : ping >= 50 ? MENU_PING_COLOR_MEDIUM : MENU_PING_COLOR_LOW);
+}
+
+// Map load (v7 src/data/map.js): mapInfo.textContent = (custom map ? mode.alias :
+// mode.name) + " on " + map.name; the menu's #infoHolder (Contact / Experiments / Terms /
+// Changelog) shows once a game session exists (io.connect: infoHolder.style.display = null).
 void menu_set_game_name(const char *name) {
     HtmlElem info = by_id("mapInfo");
     if (info) html_dom_set_text(info, name ? name : "");
     set_display("infoHolder", name && name[0] ? "" : "none");
 }
 
-// io.connect callback: infoHolder.style.display = null (map info + Advertise / Support /
-// Terms / version links); map load: mapInfo.textContent = mode.alias + "_" + map.name.
-// The alias is the running mode's (GameModeConfig.alias, "ffa" before a mode exists).
 static void menu_update_info_holder(void) {
 #ifdef UI_SCENARIO_SUPPORTED
     if (ui_scenario_active()) return; // the scenario's state.gameName drives it
@@ -606,54 +714,70 @@ static void menu_update_info_holder(void) {
         set_display("infoHolder", "none");
         return;
     }
-    char name[96] = "";
+    char name[128] = "";
     const Client *client = g_ui.client;
-    const char *alias = client->game.mode && client->game.mode->config.alias ? client->game.mode->config.alias : "ffa";
-    if (g_ui.map_name[0]) snprintf(name, sizeof(name), "%s_%s", alias, g_ui.map_name);
+    const int custom = client->game.map && client->game.current_map_index < 0; // not an official map: the mode's alias
+    const char *mode = client->game.mode ? (custom && client->game.mode->config.alias ? client->game.mode->config.alias : client->game.mode->config.name) : NULL;
+    if (g_ui.map_name[0]) snprintf(name, sizeof(name), "%s on %s", mode && mode[0] ? mode : "Free for All", g_ui.map_name);
     HtmlElem info = by_id("mapInfo");
     if (info) html_dom_set_text(info, name);
     set_display("infoHolder", "");
 }
 
-// The class box: name tag, weapon line, class name (see the real dJ()).
+// The class box (v7 updateClassPreview): #menuClassName = the class, #menuClassSubtext =
+// its loadout weapons (" - " separated, skinned ones in their rarity colour), #menuClassIcn =
+// the last loadout weapon's preview, #menuClassNameTag = the player tag (level box, name,
+// [clan], badges) or "Guest".
 void menu_update_class_box(void) {
     const MenuClass *c = menu_class_at(g_ui.client->menu_class_index);
     HtmlElem name_el = by_id("menuClassName"), sub_el = by_id("menuClassSubtext"), tag_el = by_id("menuClassNameTag");
-    if (name_el) html_dom_set_text(name_el, c ? c->name : "");
+    if (name_el) html_dom_set_text(name_el, ui_police_active() ? "Officer" : c ? c->name : ""); // vO349.classN (K.P.D)
     if (sub_el) {
         StrBuf sb = {0};
-        if (c && c->weapon && c->weapon[0]) {
+        for (int i = 0; c && i < c->loadout_count; i++) {
+            if (sb.len) sb_append(&sb, " - ");
             sb_append(&sb, "<span style='color:inherit'>");
-            sb_append_esc(&sb, c->weapon);
+            sb_append_esc(&sb, c->loadout_names[i]);
             sb_append(&sb, "</span>");
         }
         char *html = sb_finish(&sb);
         html_dom_set_html(sub_el, html);
         free(html);
     }
+    HtmlElem icn = by_id("menuClassIcn");
+    if (icn && c && c->preview[0]) {
+        char url[256];
+        html_dom_asset_url(c->preview, url, sizeof(url));
+        html_dom_set_attr(icn, "src", url);
+    }
+    set_style("menuClassContainer", "z-index", "99999");
     if (tag_el && ui_police_active()) {
-        html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>");
+        html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>"); // vO349: no lvl / clan
     } else if (tag_el && account_get()) {
-        // dJ() for an account: level box (challenge colour), name, [clan], partner / premium /
-        // featured badges
+        // account: level box, name, [clan], partner / premium / featured badges and the custom
+        // badge, each behind its v7 privacy setting (partnerBadge / premiumBadge / verifiedBadge /
+        // customBadge); the clan colour is v7's getClanCol (DEV / VIP / CMD only, WP-E part 2c)
         const AccountInfo *acc = account_get();
-        const int chal = acc->data ? (int) cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 25)) + 1 : 1;
-        const char *col = chal > 20 ? "#fb2d2d" : chal > 15 ? "#c12dfb" : chal > 10 ? "#fb942d" : "white";
+        const int premium = acc->premium && !ui_setting_is_false("premiumBadge");
         StrBuf sb = {0};
-        sb_appendf(&sb, "<div class='menuClassLevelBox' style='color:%s;'>%d</div><span class='menuClassPlayerName'>", col, acc->level);
-        sb_append_esc(&sb, acc->premium && acc->alias[0] ? acc->alias : acc->name);
+        sb_appendf(&sb, "<div class='menuClassLevelBox' style='color:white;'>%d</div><span class='menuClassPlayerName'>", acc->level);
+        sb_append_esc(&sb, premium && acc->alias[0] ? acc->alias : acc->name);
         sb_append(&sb, "</span>");
         if (acc->clan[0]) {
-            const int rank = acc->data ? (int) cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 37)) : 0;
-            const char *ccol = !strcmp(acc->clan, "DEV") ? "#40C4FF" : rank == 1 ? "rgb" : rank >= 2 && rank <= 5 ? "#eb3437" : rank >= 6 && rank <= 15 ? "#FBC02D"
-                             : rank >= 16 && rank <= 25 ? "#e834eb" : rank >= 26 && rank <= 50 ? "#349ceb" : "rgba(255,255,255,0.5)";
-            sb_appendf(&sb, "<span class='menuClassPlayerClan%s' style='color:%s'>[", rank == 1 ? " rainbowText" : "", ccol);
+            const char *ccol = !strcmp(acc->clan, "DEV") ? "#40C4FF" : !strcmp(acc->clan, "VIP") ? "#11D445" : !strcmp(acc->clan, "CMD") ? "#993299" : "rgba(255,255,255,0.5)";
+            sb_appendf(&sb, "<span class='menuClassPlayerClan' style='color:%s'>[", ccol);
             sb_append_esc(&sb, acc->clan);
             sb_append(&sb, "]</span>");
         }
-        if (acc->data && cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 19))) sb_append(&sb, "<i class='material-icons menuClassPlayerPartner'>verified</i>");
-        if (acc->premium) sb_append(&sb, "<i class='material-icons menuClassPlayerPremium'>check_circle</i>");
-        if (acc->featured) sb_append(&sb, "<i class='material-icons menuClassPlayerVerified'>check_circle</i>");
+        if (acc->data && cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 19)) && !ui_setting_is_false("partnerBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerPartner'>verified</i>");
+        if (premium) sb_append(&sb, "<i class='material-icons menuClassPlayerPremium'>beenhere</i>");
+        if (acc->featured && !ui_setting_is_false("verifiedBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerVerified'>check_circle</i>");
+        const int badge = account_custom_badge();
+        if (badge >= 0) {
+            char tex[96], url[256];
+            html_dom_asset_url(badge_texture(badge, tex, sizeof(tex)), url, sizeof(url));
+            sb_appendf(&sb, "<img src='%s' class='menuClassPlayerCustom'>", url);
+        }
         char *html = sb_finish(&sb);
         html_dom_set_html(tag_el, html);
         free(html);
@@ -698,11 +822,12 @@ void menu_set_class_index(const int index, const int silent) {
     ranked_ui_class_changed(index); // setClassIndex: client.queueUpdateClass when in a party
 }
 
-// window.selectClass(i): bubble, remember, back to the loadout window.
+// window.selectClass(i): bubble, remember, back to Change Loadout's Loadout tab
+// (windows[2].switchTab(1, true)).
 void menu_select_class(const int index) {
     ui_loadout_class_bubble(index); // Game.classes[i].txts, else "Let's Go!"... one time in three
     menu_set_class_index(index, 0);
-    menu_show_window(3, 0);
+    ui_loadout_switch_tab(1);
 }
 
 void menu_select_map(const int index) {
@@ -736,11 +861,19 @@ void menu_show_window(const int id, const int force) {
         int sticky = 0;
         char *html = ui_window_generate(id, &header, &sticky);
         if (mw) {
+            // menuWindow.className = extraCls; innerHTML = gen(); stickyHeader; overflowY /
+            // width / height / maxHeight / borderRadius; "dark"; forceFill (the captured
+            // class and inline style of that window)
+            const char *cls = "dark", *style = "overflow-y: auto;";
+            ui_window_meta(id, &cls, &style);
+            html_dom_set_attr(mw, "class", cls);
+            html_dom_set_attr(mw, "style", style);
             html_dom_set_html(mw, html ? html : "");
             html_dom_set_class(mw, "stickyHeader", sticky);
-            html_dom_set_style(mw, "overflow-y", "auto");
-            html_dom_set_style(mw, "width", "");
+            html_dom_set_class(mw, "dark", 1);
         }
+        HtmlElem holder = by_id("windowHolder");
+        if (holder) html_dom_set_class(holder, "popupWin", 1);
         free(html);
         g_ui.active_window = id;
         if (header_el) html_dom_set_html(header_el, header);
@@ -754,11 +887,11 @@ void menu_show_window(const int id, const int force) {
 // UI.toggleWindow(j)
 void menu_toggle_window(const int open) {
     set_style("menuClassContainer", "visibility", "");
-    set_display("supportMapCreator", "none");
     set_display("windowHolder", open ? "block" : "none");
     set_display("baseLinks", open ? "none" : "block");
     menu_update_instructions();
     if (!open) menu_close_window();
+    set_style("aHolder", "z-index", open ? "999999" : "99999999999");
     menu_schedule_rect();
 }
 
@@ -864,8 +997,8 @@ static void menu_try_play(Client *client) {
 static void menu_request_play(const int offline) {
     Client *client = g_ui.client;
 
-    // `offline:true` (Host Game -> Start Server) with no server: play the offline game
-    // in-process for this session (net/local_game.c) and stop the transport from retrying.
+    // `offline:true` (Host Game -> Start Server) with no server: play on the in-process
+    // sandbox server for this session (net/offline.c) and stop the transport from retrying.
     if (offline && !client_is_connected(client)) {
         client->net_should_quit = 1;
         if (!local_game_start(client)) {
@@ -901,12 +1034,18 @@ void menu_host_offline(void) {
     menu_request_play(1);
 }
 
-// The error screen's "here" link: ask for an immediate reconnect (natively the net
-// thread retries on its own every 2 s anyway).
-void menu_retry_connect(void) {
+// CONNECTING... (the error screen goes) until the server answers or the timer fires.
+void menu_show_connecting(void) {
     g_ui.connect_error[0] = 0;
     arm_connect_timer();
     menu_update_instructions();
+}
+
+// The error screen's "here" link: ask for an immediate reconnect (natively the net
+// thread retries on its own with a backoff anyway). Pinned to a direct server
+// (servers_ui.c) it retries that server; otherwise with a brain it seeks a new game.
+void menu_retry_connect(void) {
+    menu_show_connecting();
     if (client_is_connected(g_ui.client)) return;
     if (servers_ui_retry()) return; // brain matchmaker: seek a new game (servers_ui.c)
     client_net_request_reconnect(g_ui.client);
@@ -1011,7 +1150,7 @@ static void menu_apply_state(Client *client) {
 static void menu_refresh_tables(const Client *client) {
     const ClassConfig *classes = client->game.classes ? client->game.classes : g_classes;
     const size_t class_count = client->game.class_count ? client->game.class_count : sizeof(g_classes) / sizeof(g_classes[0]);
-    if (classes != g_ui.last_classes || class_count != g_ui.last_class_count) {
+    if (classes != g_ui.last_classes || class_count != g_ui.last_class_count || menu_class_filter_key(&client->game) != g_class_filter_key) {
         menu_build_classes();
         menu_update_class_box();
         menu_rerender_if_open(6);
@@ -1026,35 +1165,96 @@ static void menu_refresh_tables(const Client *client) {
 
 // ---------------------------------------------------------------- DOM set-up
 
+static int scenario_on(void) {
+#ifdef UI_SCENARIO_SUPPORTED
+    return ui_scenario_active();
+#else
+    return 0;
+#endif
+}
+
+// The inline state v7.1.4's client leaves on its static page once loaded, connected and
+// on the menu (DOM of the real page, tools/uidiff/capture-v7.js), minus the HUD's (hud_ui.c).
 static void setup_dom(void) {
-    // Krunker turns these off once the game has loaded / consent was given.
     set_display("loadingBg", "none");
+    set_display("loadingBg1", "none");
     set_display("consentBlock", "none");
-    set_display("bdayBlock", "none");
+    set_display("aHider", "none");            // ads: none in KrunkNative
+    set_display("topRightAdHolder", "none");
+    set_display("topLeftAdHolder", "none");
     set_display("menuFPSDisplay", "none");
     set_style("vignette", "opacity", "0");
     set_display("teamSelector", "none");
-    // The class preview canvas keeps the size the three.js renderer gives it; it stays
-    // transparent and the engine draws the player model behind it.
-    set_style("classPreviewCanvas", "width", "660px");
-    set_style("classPreviewCanvas", "height", "350px");
+    set_display("fullMenHider", "block");
+    set_display("infoHider", "block");
+    set_display("mMenuHolDef", "block");
+    set_display("instructionHider", "block");
+    set_style("instructionsFadeBG", "opacity", "0");
+    set_style("spectButton", "opacity", "1");
+    set_display("vsHolder", "none");
+    set_style("menuRegionLabel", "display", "flex");
+    // f2045 (featured panel): the stream list ("Loading Streams..." while API_CLIENT.listStreams
+    // has no answer), not the ad slot
+    set_display("streamCon", "block");
+    set_display("adCon", "none");
+    // the FTUE / gradual-menu chrome stays as fullMenu() leaves it
+    set_display("frvrFTUEVideoHolder", "none");
+    set_display("expertModeBtn", "none");
+    // The class preview canvas keeps the size the three.js renderer gives it (750x600 CSS
+    // px); it stays transparent and the engine draws the player model behind it.
+    set_style("classPreviewCanvas", "width", "750px");
+    set_style("classPreviewCanvas", "height", "600px");
+    set_style("classPreviewCanvas", "opacity", "1");
     set_style("bubbleContainer", "transform", "scale(0.0)");
+    // #mainLogoFace: index.html's mainLogoFace.src = "./img/menu/faces/f_" + randInt(0, 15) + ".png"
+    // (f_0 in --render-scenario renders, the reference captures pin it)
+    {
+        HtmlElem face = by_id("mainLogoFace");
+        char src[48];
+        snprintf(src, sizeof(src), "./img/menu/faces/f_%d.png", scenario_on() ? 0 : rand() % 16);
+        if (face) html_dom_set_attr(face, "src", src);
+    }
 #ifndef __EMSCRIPTEN__
-    // KrunkNative: the native build is the desktop client already, so no "Download
-    // Client" button (window 25) in the header; the web build keeps Krunker's. Removed
-    // rather than hidden: main.css forces `.imageButton { display: inline-block !important }`.
-    // --render-scenario keeps it: uidiff compares the header with v3.1.1's.
-    const HtmlElem download = ui_scenario_active() ? 0 : html_dom_query(0, ".downloadClient");
-    if (download) html_dom_remove(download);
+    // KrunkNative: the native build is the desktop client already, so no "Download Client"
+    // image (showWindow(25)) in the header; the web build keeps Krunker's. --render-scenario
+    // keeps it: uidiff compares the header with v7.1.4's.
+    if (!scenario_on()) {
+        HtmlElem imgs[4];
+        const int n = html_dom_query_all(0, "#headerRightSocial img", imgs, 4);
+        for (int i = 0; i < n; i++) {
+            char src[64] = "";
+            if (html_dom_get_attr(imgs[i], "src", src, sizeof(src)) >= 0 && strstr(src, "client.png")) html_dom_set_display(imgs[i], "none");
+        }
+    }
 #endif
+    // KrunkNative addition: v7.1.4 draws the interact progress bar on its overlay canvas
+    // (game-overlay interactProg); KrunkNative keeps v3.1.1's #interactProg > #interProgB
+    // divs (styled by css/krunknative.css), driven by the interact prompt code.
+    if (!by_id("interactProg")) {
+        HtmlElem parent = by_id("midGameUIHider");
+        HtmlElem holder = parent ? html_dom_create("div", "interactProg") : 0;
+        HtmlElem bar = holder ? html_dom_create("div", "interProgB") : 0;
+        if (bar) {
+            html_dom_set_attr(bar, "class", "interProg");
+            html_dom_append(holder, bar);
+            html_dom_append(parent, holder);
+        }
+    }
+    // KrunkNative addition: Ranked. v7.1.4 dropped ranked play and its menu entry; KrunkNative
+    // keeps it (doc/v7/decisions.md, ranked_ui.c / windows 27), as a left menu item in v7's
+    // style just above Settings. --render-scenario leaves the menu as v7 has it.
+    if (!scenario_on() && !by_id("menuBtnRanked")) {
+        HtmlElem settings = by_id("menuBtnSettings");
+        HtmlElem item = settings ? html_dom_closest(settings, ".menuItem") : 0;
+        if (item) html_dom_insert_html(item, HTML_INSERT_BEFORE_BEGIN,
+            "<div class=\"menuItem\" onmouseenter=\"playTick()\" onclick=\"playSelect(),showWindow(27)\">"
+            "<span class=\"material-icons-outlined menBtnIcn\" style=\"color:#ffc147\">military_tech</span>"
+            "<div class=\"menuItemTitle\" id=\"menuBtnRanked\">Ranked</div></div>");
+    }
     // Hosting is the dedicated server (server_bin, doc/backend.md 8.7): no Host Game button.
-    // Hidden, not removed, so the v3.1.1 #subLogoButtons markup stays; --render-scenario
-    // keeps it for uidiff.
-#ifdef UI_SCENARIO_SUPPORTED
-    if (!ui_scenario_active()) set_display("menuBtnHost", "none");
-#else
-    set_display("menuBtnHost", "none");
-#endif
+    // Hidden, not removed, so v7's #subLogoButtons markup stays; --render-scenario keeps it.
+    if (!scenario_on()) set_display("menuBtnHost", "none");
+    servers_ui_menu_setup(); // KrunkNative: the Connect button next to Invite / Join (servers_ui.c)
 
     HtmlElem el;
     if ((el = by_id("classPreviewCanvas"))) html_dom_observe_resize(el, on_observed_resize, NULL);
@@ -1071,6 +1271,8 @@ static void setup_dom(void) {
         copy_str(g_ui.client->menu_name, sizeof(g_ui.client->menu_name), saved);
         g_ui.name_set = 1;
     }
+    // windows[0].settingType = settingsViewMode || "basic" (getSavedVal("krk_advanced"))
+    g_ui.settings_view = html_storage_get("krk_advanced", saved, sizeof(saved)) >= 0 && atoi(saved) == 1;
 }
 
 // init() + the `bridgeReady` handler: runs once the page's DOM exists.
@@ -1087,6 +1289,7 @@ static void menu_dom_init(void) {
     menu_update_top_bar();
     menu_update_class_box();
     menu_update_instructions();
+    g_menu_ping = -1; // a fresh page shows "0" in gray
 
     // bridgeReady
     g_ui.dom_ready = 1;
@@ -1137,7 +1340,7 @@ void client_menu_bind(Client *client) {
     g_ui.settings.aim_sensitivity_x = g_ui.settings.aim_sensitivity_y = 1.0f;
     g_ui.settings.fov = 90.0f;
     g_ui.settings.ads_fov_mlt = 1.0f;
-    g_ui.settings.scale_ui = 0.8f;
+    g_ui.settings.scale_ui = 0.7f;
     g_ui.settings.ui_scaling = 1;
     g_ui.settings.resolution_pct = 100;
     g_ui.settings.speed_scale = g_ui.settings.dmg_scale = 1.0f;
@@ -1174,6 +1377,7 @@ void client_menu_tick(Client *client) {
     if (g_ui.dom_ready) {
         menu_refresh_tables(client);
         if (menu_state_changed(client)) menu_apply_state(client);
+        menu_update_ping(client);
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.
         float w, h, dpr;
@@ -1182,8 +1386,9 @@ void client_menu_tick(Client *client) {
     }
 
     client_hud_html_tick(client, (float) glfwGetTime()); // HTML HUD (hud_ui.c)
+    hud_zombies_tick(client); // power-up timers, finiteAmmo reserve, zombie round (hud_zombies.c)
     ui_console_tick(client); // developer console (ui_console.c)
-    ui_terminal_tick(client); // map terminals: interact prompt, typewriter (ui_terminal.c)
+    ui_interact_tick(client); // the interact prompt and hold progress (ui_interact.c)
 
     // Round end: the end screen frees the pointer (Krunker exits pointer lock so its
     // results can be clicked) and relocks when the next round starts.
@@ -1212,8 +1417,9 @@ void client_menu_tick(Client *client) {
     g_lock.denied_seen = lock_errors;
 #endif
     const double grace_left = client->menu_lock_grace_until - glfwGetTime(); // tests park it far ahead (hud_autoplay)
-    if (!hud_ui_end_screen_up() && !html_ui_is_menu_open() && (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) &&
-        !client_pointer_locked(client)) {
+    // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse released the lock on purpose
+    if (!hud_ui_end_screen_up() && !html_ui_is_menu_open() && !ks_client_pointer_free() &&
+        (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) && !client_pointer_locked(client)) {
         client_set_menu_open(client, 1);
     }
 }

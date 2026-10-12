@@ -1,0 +1,61 @@
+#include <weapons.h>
+
+// Krunker v7.1.4 weapon 27 (src/data/weapons.js), generated from shared/tests/data/v7/weapons.json
+// (tools/kref/v7-dump.js) with the same field mapping as weapons 0-18. Times ms -> s, recoil per ms -> per s.
+const Weapon g_akimbo_pistol = {
+    .name = "Akimbo Pistol",
+    .src = "weapon_28",
+    .icon = "icon_28",
+
+    .secondary = 1,
+    .akimbo = 1,
+    .no_aim = 1,
+    .no_auto = 1,
+    .no_inspect = 1,
+
+    .burst_rate = 0.05f,
+    .ammo = 12,
+    .swap_time = 0.3f,
+    .reload_time = 0.75f,
+    .aim_speed = 0.12f,
+    .speed_mlt = 1.04f,
+    .damage = 15.0f,
+    .headshot_mlt = 1.4f,
+    .pierce = 1.0f,
+    .range = 700.0f,
+    .damage_drop = 13.0f,
+    .rate = 0.1f,
+    .spread = 40.0f,
+    .min_spread = 10.0f,
+    .recoil = 3.4f,
+    .recoil_r = 0.015f,
+    .recover = 0.978f,
+    .recover_y = 0.996f,
+    .recover_f = 0.975f,
+    .zoom = 1.5f,
+    .recoil_y_mlt = 0.7f,
+    .recoil_z = 5.0f,
+    .z_lean_mlt = 0.4f,
+    .lean_mlt = 0.6f,
+    .crouch_lean = 0.1f,
+    .crouch_rotation = 0.1f,
+    .crouch_drop = 0.2f,
+    .scale = 0.0003158947055276376f,
+    .hold_width = 1.3f,
+
+    .origin = {0.0f, -0.62f, -2.5f},
+    .offset = {1.5f, -0.95f, -3.3f},
+    .left_hold = {0.13f, -0.62f, -0.3f},
+    .right_hold = {0.13f, -0.62f, -0.3f},
+    .has_recoil_anim = 1,
+    .recoil_tween_y = 0.01f,
+    .recoil_anim_mask = 1,
+
+    // ---- Krunker v7.1.4 (WP-B) ----
+    .sound = "weapon_28",
+    .type = 1,
+    .min_rec = 10,
+    .mag_reserve = 4,
+    .move_spread = 0.1f,
+    .can_upgrade = 1,
+};

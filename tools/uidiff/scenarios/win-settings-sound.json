@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/windows/win-settings-sound.png",
+  "ref": "doc/ref/krunker-v7.1.4/windows/win-settings-sound.png",
   "size": [
     1280,
     720
@@ -8,15 +8,18 @@
   "state": {
     "menu": true,
     "window": 0,
-    "settingsTab": 5,
     "connected": true,
     "ready": true,
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
     "region": "...",
-    "anim_time": 0.325
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "settingsTab": 5,
+    "settingsView": "advanced"
   },
   "frames": 3,
-  "note": "Settings / Sound tab (short window, vertically centred); anim_time 0.325 = the reference's merch (scaleBob) phase"
+  "note": "Game Settings, advanced view, Sound"
 }

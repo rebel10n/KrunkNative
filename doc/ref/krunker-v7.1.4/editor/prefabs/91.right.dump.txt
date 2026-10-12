@@ -1,0 +1,13 @@
+P Mystery Box
+-
+F Transform closed
+-
+S Position
+V 0/,0/,0/
+S Rotation
+V 0/,0/,0/
+-
+F Technical & Logic closed
+-
+L[] Cost : sval=1 range[1,50000,1]=1
+-

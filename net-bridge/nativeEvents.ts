@@ -432,6 +432,24 @@ export const COSMETICS_NONE: Cosmetics = { skinColor: -1, hairColor: -1, hat: -1
 export const COSMETICS_SIZE = 28;
 export const ENT_COSMETICS_SIZE = 8 + COSMETICS_SIZE; // class, secondary, cosmetics (NET_ENT_PACKET_V3_SIZE)
 export const ENT_SIZE = ENT_COSMETICS_SIZE + 2; // + spectate (ent[6]) + slidCont (ent[15]) (NET_ENT_PACKET_V4_SIZE)
+export const ENT_SPRAY_SIZE = ENT_SIZE + 4; // + int32 sprayIndex (ent[1]) (NET_ENT_PACKET_V5_SIZE)
+export const ENT_SKINS_SIZE = ENT_SPRAY_SIZE + 12; // + PlayerSkins: ent[2] weapon skins + ent[9] meleeIndex (NET_ENT_PACKET_V6_SIZE)
+export const ENT_LAG_COMP_SIZE = ENT_SKINS_SIZE + 4; // + float32 lagComp: ent[11] lagCompensation slider (NET_ENT_PACKET_V7_SIZE)
+
+// net_ent_size_for: the ENT a native server announcing INIT major.minor reads (1.0 drops anything past
+// V4, 1.1 anything past V6).
+export function entSizeFor(major: number, minor: number): number {
+  if (major > 1 || (major === 1 && minor >= 2)) return ENT_LAG_COMP_SIZE;
+  if (major === 1 && minor === 1) return ENT_SKINS_SIZE;
+  return ENT_SIZE;
+}
+
+// ent[11] parseFloat(settings.tmp.lagCompensation): 1 (the setting's default) when missing or not a number.
+// The server clamps it (0.1..1, gameserver.ts applyLagCompFromEnt).
+export function lagCompFromEnt(value: unknown): number {
+  const lc = typeof value === "string" ? parseFloat(value) : Number(value);
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(lc) ? lc : 1;
+}
 export const SPAWN_V1_SIZE = 78;
 export const SPAWN_COSMETICS_SIZE = SPAWN_V1_SIZE + COSMETICS_SIZE;
 
@@ -489,6 +507,28 @@ export function cosmeticsFromSpawn(spawn: unknown[]): Cosmetics {
     face: cosmeticIndex(spawn[37]),
     dye: cosmeticIndex(spawn[25]),
   };
+}
+
+// ---- weapon skins (PlayerSkins at the end of ENT V6 and in NET_PACKET_SKINS after the uid)
+
+export const NET_PACKET_SKINS = 35; // S->C right before every SPAWN: int32 uid + PlayerSkins
+export type WeaponSkins = { primary: number; secondary: number; melee: number };
+export const SKINS_NONE: WeaponSkins = { primary: -1, secondary: -1, melee: -1 };
+export const SKINS_PACKET_SIZE = 4 + 12;
+
+// Krunker ent ([2] = [primary, secondary], [9] = meleeIndex) or spawn ([12] skins, [19] meleeIndex)
+export function skinsFromKrunker(skins: unknown, melee: unknown): WeaponSkins {
+  const pair = Array.isArray(skins) ? skins : [];
+  return { primary: cosmeticIndex(pair[0]), secondary: cosmeticIndex(pair[1]), melee: cosmeticIndex(melee) };
+}
+
+export function writeSkins(out: Buffer, offset: number, s: WeaponSkins): void {
+  [s.primary, s.secondary, s.melee].forEach((v, i) => out.writeInt32LE(v | 0, offset + i * 4));
+}
+
+export function readSkins(payload: Buffer, offset: number): WeaponSkins {
+  if (payload.length < offset + 12) return { ...SKINS_NONE };
+  return { primary: payload.readInt32LE(offset), secondary: payload.readInt32LE(offset + 4), melee: payload.readInt32LE(offset + 8) };
 }
 
 export function writeCosmetics(out: Buffer, offset: number, c: Cosmetics): void {

@@ -1,0 +1,236 @@
+/* KrunkScript window (client/src/editor/editor_script.c, doc/v7/editor.md WP5).
+ * Krunker's scripting.html + css/scripting.css (krunker.io, recovered from the Wayback Machine:
+ * tools/editor/fetch_scripting_ref.sh) scoped under #knScriptWin, the in-page window that stands in for
+ * v7's window.open("./scripting.html") at the same place: 10% / 10%, 80% x 80% of the editor.
+ * CodeMirror itself is the engine's code view of the textareas (html_dom_code_view: gutter,
+ * material-palenight colours, caret line, marks); the rules for it here are its box. */
+@font-face {
+	font-family: 'GameFont';
+	src: url("fonts/FrVrKrunkerBold2.ttf");
+}
+#knScriptWin {
+	font-family: Helvetica, Arial, sans-serif;
+	color: #fff;
+	position: fixed;
+	left: 10%;
+	top: 10%;
+	width: 80%;
+	height: 80%;
+	margin: 0;
+	background-color: #292d3e;
+	box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+	overflow: hidden;
+	z-index: 1000;
+}
+/* scripting.html had no editor.css: its "* {font-family: GameFont; color: #353535}" and
+   ".selected {background-color: rgba(0,0,0,.7) !important}" stay out of the window */
+#knScriptWin * {
+	font-family: inherit;
+	color: inherit;
+}
+#knScriptWin #tabHolder {
+	position: absolute;
+	height: 36px;
+	width: 100%;
+	top: 0;
+	left: 0;
+	background-color: #222;
+}
+#knScriptWin #tabHolder .tab {
+	width: fit-content;
+	display: block;
+	float: left;
+	background-color: #222;
+	font-family: "GameFont";
+	color: #888;
+	font-size: 12px;
+	padding: 6px 14px;
+	height: 24px;
+	user-select: none;
+}
+#knScriptWin #tabHolder .tab.selected {
+	background-color: #292d3e !important;
+}
+#knScriptWin #tabHolder .tab:hover {
+	color: #fff;
+	cursor: pointer;
+}
+#knScriptWin #compile {
+	position: absolute;
+	width: 100%;
+	bottom: 0;
+	left: 0;
+	padding: 15px 0px;
+	text-align: center;
+	font-family: monospace;
+	font-size: 20px;
+	font-weight: bold;
+	color: white;
+	background-color: #2196f3;
+	z-index: 10;
+}
+#knScriptWin #compile:hover {
+	background-color: #03a9f4;
+	cursor: pointer;
+}
+#knScriptWin .tabIcon {
+	max-width: 24px;
+	float: left;
+	margin-left: -5px;
+	position: relative;
+	margin-right: 5px;
+	vertical-align: sub;
+	font-family: 'Material Icons';
+	font-weight: normal;
+	font-style: normal;
+	font-size: 24px;
+	line-height: 1;
+	letter-spacing: normal;
+	text-transform: none;
+	white-space: nowrap;
+	word-wrap: normal;
+	direction: ltr;
+	-webkit-font-feature-settings: 'liga';
+	-webkit-font-smoothing: antialiased;
+}
+#knScriptWin .iconE {
+	color: #ef2929 !important;
+}
+#knScriptWin .iconE:after {
+	content: "error_outline";
+}
+#knScriptWin .iconV {
+	color: #98ff00 !important;
+}
+#knScriptWin .iconV:after {
+	content: "task_alt";
+}
+#knScriptWin .iconC {
+	color: #888888 !important;
+}
+#knScriptWin .iconC:after {
+	content: "circle";
+}
+#knScriptWin #label {
+	float: right;
+	font-size: 14px;
+	font-family: "GameFont";
+	color: rgba(255, 255, 255, 0.5);
+	margin-right: 10px;
+	margin-top: 5px;
+	user-select: none;
+}
+/* KrunkNative: the window's close button (the browser window had its own), left of the
+   label so the label keeps its place */
+#knScriptWin #knScriptClose {
+	position: absolute;
+	right: 150px;
+	top: 6px;
+	color: #888;
+	font-size: 22px;
+	cursor: pointer;
+	user-select: none;
+}
+#knScriptWin #knScriptClose:hover {
+	color: #fff;
+}
+/* .CodeMirror: top 36px, setSize(null, innerHeight - compile.clientHeight - 30); a textarea
+   keeps its intrinsic height under top + bottom, so the height is explicit */
+#knScriptWin textarea.knCode {
+	position: absolute;
+	left: 0;
+	top: 36px;
+	height: calc(100% - 83px);
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0;
+	padding: 4px 0;
+	border: 0;
+	outline: none;
+	resize: none;
+	background-color: #292d3e;
+	color: #fff;
+	font-family: monospace;
+	font-size: 22px;
+	line-height: normal;
+	white-space: pre;
+	overflow: hidden;
+	tab-size: 4;
+	-moz-tab-size: 4;
+	caret-color: #ffcc00;
+}
+#knScriptWin.knHasDiags textarea.knCode {
+	height: calc(100% - 187px);
+}
+/* KrunkNative: the diagnostics list (v7 showed the error in an alert()) */
+#knScriptWin #knScriptErrors {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 53px;
+	height: 98px;
+	overflow-y: auto;
+	box-sizing: border-box;
+	padding: 2px 0;
+	background-color: #1d1f2b;
+	border-top: 1px solid #222;
+	font-family: monospace;
+	font-size: 14px;
+	z-index: 5;
+}
+#knScriptWin .knDiag {
+	padding: 2px 10px;
+	color: rgba(255, 255, 255, 0.8);
+	white-space: nowrap;
+	overflow: hidden;
+	cursor: pointer;
+}
+#knScriptWin .knDiag:hover {
+	background-color: rgba(0, 0, 0, 0.5);
+}
+#knScriptWin .knDiagPos {
+	margin-right: 6px;
+}
+#knScriptWin .knDiagE .knDiagPos {
+	color: #ef2929;
+}
+#knScriptWin .knDiagW .knDiagPos {
+	color: #ffcb6b;
+}
+/* show-hint.css + scripting.css; max-height: 20em of the 90% (14.4px) list font */
+#knScriptHints.CodeMirror-hints {
+	position: fixed;
+	z-index: 1001;
+	overflow: hidden;
+	list-style: none;
+	margin: 0;
+	padding: 2px;
+	box-shadow: 2px 3px 5px rgba(0, 0, 0, 0.2);
+	border-radius: 6px;
+	border: none;
+	background: #1d1f2b;
+	font-family: monospace;
+	font-size: 22px;
+	max-height: 288px;
+}
+#knScriptHints .CodeMirror-hint {
+	margin: 0;
+	padding: 0 4px;
+	border-radius: 2px;
+	white-space: pre;
+	color: rgba(255, 255, 255, 0.5);
+	cursor: pointer;
+	font-size: inherit;
+}
+#knScriptHints .CodeMirror-hint a {
+	float: right;
+	color: rgba(255, 255, 255, 0.3);
+	margin-left: 20px;
+}
+#knScriptHints li.CodeMirror-hint-active {
+	color: rgba(255, 255, 255, 0.8);
+	background: rgba(0, 0, 0, 0.5);
+}
+#knScriptHints li.CodeMirror-hint-active a {
+	color: rgba(255, 255, 255, 0.5);
+}
