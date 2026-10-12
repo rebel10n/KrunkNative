@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <season.h> // season-system: SEASON_CURRENT (the season leaderboards)
 #include <time.h>
 #ifdef _WIN32
 #define timegm _mkgmtime // MinGW has no timegm (same as editor_net.c)
@@ -1432,8 +1433,11 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     js_num(num, sizeof(num), (double) (long long) (score - lo) / (double) (long long) (hi - lo) * 100.0);
     sb_appendf(&sb, "<div class='xpBar'><div class='xpBarB' style='width:%s%%'></div><span class='xpBarV'>%lld / %lld</span></div>", num, (long long) (score - lo), (long long) (hi - lo));
     sb_append(&sb, "</div><div id='statHolder' style='margin-top: 0px;'><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;width: calc(100% - 18px);margin-left: 9px;background-color: rgba(0, 0, 0, 0.5);'>");
-    static const char *const stat_tabs[4] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats"};
-    for (int i = 0; i < 4; ++i)
+    // + KrunkNative's fifth tab (season-system): the current season's stats ("sst", kn_brain season_stats)
+    char season_tab[24];
+    snprintf(season_tab, sizeof(season_tab), "Season %d", SEASON_CURRENT);
+    const char *const stat_tabs[5] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats", season_tab};
+    for (int i = 0; i < 5; ++i)
         sb_appendf(&sb, "<div id='statTab%d' class='bigMenTab%s' onclick='playSelect(0.1);switchStat(%d)' style='padding-left: 5px; padding-right: 5px; padding-top: 10px; padding-bottom: 5px; line-height: 35px;font-size: 14px;'onmouseenter='playTick();'>%s</div>",
                    i, i == 0 ? " bigMenTabA" : "", i, stat_tabs[i]);
     sb_append(&sb, "</div><div class='statTabB0'>");
@@ -1522,7 +1526,14 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         sb_appendf(&sb, "<div class='classCard'><img class='classImg' src='./textures/classes/icon_%zu.png'/><div class='className'>%s</div><div class='classWeap'>%s</div><div class='classXPBar'><div class='clsXPBarC' style='width:%d%%'></div><div class='clsXPBarV'>%lld / %lld</div></div><div class='classLvl'>Lvl %d</div></div>",
                    c, cc->name, weapon, prog, (long long) (xp - clo), (long long) (chi - clo), lvl);
     }
+    sb_append(&sb, "</div><div class='statTabB4 hide'><div class='pSt'>Season<strong>...</strong></div>");
     sb_append(&sb, "</div></div></div><div></div><div></div>");
+    if (g_hub.profile_name[0] && g_hub.connected) { // ["sst", name] -> hub_season_stats
+        cJSON *f = cJSON_CreateArray();
+        cJSON_AddItemToArray(f, cJSON_CreateString("sst"));
+        cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
+        hub_send(f);
+    }
     sb_append(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>Sales</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div style='margin-top:10px;margin-left: 8px;'><span style='color: rgba(255,255,255,0.4);'>Data Range</span><select class='rangeSelect' onchange='changeDateRange2(this.value)'><option value='0'>1 week</option><option value='1'>2 weeks</option><option value='2'>3 weeks</option><option value='3' selected>1 month</option><option value='4'>2 months</option><option value='5'>3 months</option><option value='6'>4 months</option></select></div><div class='graphHolder'><div class='graphHeader'><span class='graphHeaderTxt'>Market Sales</span><span id='totalSalesHeader' class='graphHeaderTotal'>0</span></div><canvas id='profSales'></canvas></div></div><div></div>");
     html = sb_finish(&sb);
     set_html("pTabContent_about", html);
@@ -1624,7 +1635,10 @@ static void append_leader_cal(StrBuf *sb, const char *a, const double h) {
     else if (!strcmp(a, "player_followed")) sb_appendf(sb, "%s <span class='lName'>followers</span>", n);
     else if (!strcmp(a, "player_eventcount")) { js_num(n, sizeof(n), h); sb_appendf(sb, "<span class='lName'>found</span> %s/187", n); } // config.easterEggs
     else if (!strcmp(a, "player_eventtime")) { js_num(n, sizeof(n), h); sb_appendf(sb, "Round %s", n); }
-    else if (!strcmp(a, "player_timeplayed")) {
+    else if (!strcmp(a, "season_score")) sb_appendf(sb, "%s <span class='lName'>score</span>", n);
+    else if (!strcmp(a, "season_kills")) { js_num(n, sizeof(n), h); sb_appendf(sb, "%s<span class='lName'> kills</span>", n); }
+    else if (!strcmp(a, "season_wins")) { js_num(n, sizeof(n), h); sb_appendf(sb, "%s<span class='lName'> wins</span>", n); }
+    else if (!strcmp(a, "player_timeplayed") || !strcmp(a, "season_timeplayed")) {
         const double ms = h * 1.2;
         long long sec = (long long) floor(ms / 1000), m = sec / 60, hr = m / 60;
         sec %= 60;
@@ -1638,7 +1652,22 @@ static void append_leader_cal(StrBuf *sb, const char *a, const double h) {
     } else { js_num(n, sizeof(n), h); sb_append(sb, n); }
 }
 
+// KrunkNative (season-system): the season leaderboards (kn_brain season_* queries over
+// season_stats) as extra .leaderNav2 buttons after v7's: "Season 7" (score), "S7 Kills", "S7 Wins".
+static void hub_season_leader_buttons(void) {
+    const HtmlElem nav = html_dom_query(0, ".leaderNav2");
+    if (!nav || html_dom_by_id("knSeasonLeaders")) return;
+    char html[768];
+    snprintf(html, sizeof(html),
+             "<div class=\"leaderBtn2\" id=\"knSeasonLeaders\" onclick=\"updateWindow(&quot;leaders&quot;,&quot;season_score&quot;)\">Season %d</div>"
+             "<div class=\"leaderBtn2\" onclick=\"updateWindow(&quot;leaders&quot;,&quot;season_kills&quot;)\">S%d Kills</div>"
+             "<div class=\"leaderBtn2\" onclick=\"updateWindow(&quot;leaders&quot;,&quot;season_wins&quot;)\">S%d Wins</div>",
+             SEASON_CURRENT, SEASON_CURRENT, SEASON_CURRENT);
+    html_dom_insert_html(nav, HTML_INSERT_BEFORE_END, html);
+}
+
 static void hub_render_leaders(const char *a, const cJSON *t) {
+    hub_season_leader_buttons();
     StrBuf sb = {0};
     sb_append(&sb, "<div class='scrollItem'>");
     const int clans = a && !strcmp(a, "player_clan");
@@ -3458,9 +3487,53 @@ static void hub_on_social(void *user, const cJSON *frame) {
     handle_reply_frame(frame);
 }
 
+// KrunkNative (season-system): ["sst", {season, kills, deaths, wins, games, score, timePlayed, bpp,
+// tier, level, levels}] -> the profile's Season tab (.statTabB4)
+static void hub_season_stats(const cJSON *v) {
+    HtmlElem tab = html_dom_query(0, ".statTabB4");
+    if (!tab) return;
+    StrBuf sb = {0};
+    char num[48];
+#define SST(label, value) sb_appendf(&sb, "<div class='pSt'>%s<strong>%s</strong></div>", label, value)
+    if (!cJSON_IsObject(v)) {
+        SST("Season", "-");
+    } else {
+        const double kills = jnum(v, "kills"), deaths = jnum(v, "deaths"), games = jnum(v, "games"), wins = jnum(v, "wins");
+        comma_number(num, sizeof(num), jnum(v, "score"));
+        SST("Score", num);
+        comma_number(num, sizeof(num), kills);
+        SST("Kills", num);
+        comma_number(num, sizeof(num), deaths);
+        SST("Deaths", num);
+        snprintf(num, sizeof(num), "%.2f", deaths > 0 ? kills / deaths : kills);
+        SST("KDR", num);
+        comma_number(num, sizeof(num), wins);
+        SST("Wins", num);
+        comma_number(num, sizeof(num), games);
+        SST("Games", num);
+        snprintf(num, sizeof(num), "%.2f", games > 0 ? wins / games : 0.0);
+        SST("W/L", num);
+        const long long sec = (long long) (jnum(v, "timePlayed") / 1000.0);
+        snprintf(num, sizeof(num), "%lldh %lldm", sec / 3600, (sec / 60) % 60);
+        SST("Time Played", num);
+        if (cJSON_GetObjectItemCaseSensitive(v, "level")) {
+            snprintf(num, sizeof(num), "%d/%d%s", (int) jnum(v, "level"), (int) jnum(v, "levels"), jnum(v, "tier") >= 1 ? " VIP" : "");
+            SST("Battle Pass", num);
+        }
+    }
+#undef SST
+    char *html = sb_finish(&sb);
+    html_dom_set_html(tab, html);
+    free(html);
+}
+
 static void handle_reply_frame(const cJSON *frame) {
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     if (!label) return;
+    if (!strcmp(label, "sst")) {
+        hub_season_stats(cJSON_GetArrayItem(frame, 1));
+        return;
+    }
     if (!strcmp(label, "0")) {
         const char *e = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 1));
         const char *a = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2));
@@ -4167,11 +4240,11 @@ H(h_open_creation_tab) {
     return 1;
 }
 
-// switchStat(tab): the profile's four stat tabs
+// switchStat(tab): the profile's four stat tabs (+ KrunkNative's Season tab)
 H(h_switch_stat) {
     UNUSED;
     const int tab = (int) arg_n(args, argc, 0, 0);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         char id[16], sel[24];
         snprintf(id, sizeof(id), "statTab%d", i);
         if (!el(id)) continue;

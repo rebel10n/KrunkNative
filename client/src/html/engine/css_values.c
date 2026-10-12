@@ -1562,9 +1562,14 @@ static int parse_color_stops(const CssToken *t, int n, CssGradient *g)
         memset(&st, 0, sizeof(st));
         if (len == 0) return 0;
         if (!css_parse_color_item(it, len, &st.color, &used)) {
-            /* a bare position is a transition hint: accept and ignore */
+            /* a bare position is a transition hint (CSS Images 4 §3.5.3): it bends the
+             * interpolation between the stops around it (`#fbc02d, 94%, white`) */
             CssLength hint;
-            if (css_parse_length_item(it, len, CSS_LENF_PCT, &hint, &used) && used == len) continue;
+            if (css_parse_length_item(it, len, CSS_LENF_PCT, &hint, &used) && used == len && g->stop_count > 0) {
+                g->stops[g->stop_count - 1].has_hint = 1;
+                g->stops[g->stop_count - 1].hint = hint;
+                continue;
+            }
             return 0;
         }
         int j = used;

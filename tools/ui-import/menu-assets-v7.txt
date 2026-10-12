@@ -127,3 +127,9 @@ img/shop/filter/vignette.png
 textures/previews/cosmetics/13_0_{1..8}.png
 # Change Loadout selector tabs (ui_loadout.c)
 img/customize/{class,loadout,outfit,other}.png
+# Battle Pass (client/src/ui/battlepass_ui.c): windows[5]'s Available BPP info icon and the free
+# claim button's ad icon, the end screen's #endBPLayout (img/battlepass/* is collected from the
+# stylesheet; logo_white.svg / krunkies.svg and img/chals/* are not in the v7.1.4 tree:
+# tools/ui-import/fetch_season_images.sh)
+img/frvr-ui/info-icon.svg
+img/frvr-ui/ad-icon.svg

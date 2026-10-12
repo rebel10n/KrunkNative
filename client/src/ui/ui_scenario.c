@@ -715,6 +715,7 @@ static void apply_endscreen(Client *client) {
     const int place = (int) obj_num(end, "place", 1);
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(end, "result");
     hud_ui_show_end_screen(client, cJSON_IsNumber(result) ? result->valueint : place == 1, obj_str(end, "nextRound"));
+    if (obj_num(end, "results", 0)) hud_ui_end_results_now(client); // the GUI.endScreen tabs (performance)
 }
 
 // Time-dependent pieces, applied at `clock_ms` for a capture at `capture_ms`.

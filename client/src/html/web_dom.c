@@ -238,6 +238,21 @@ EM_JS(void, kn_js_scroll_to_bottom, (int id), {
     if (el) el.scrollTop = el.scrollHeight;
 });
 
+EM_JS(int, kn_js_get_scroll, (int id, float *out), {
+    var el = knEl(id);
+    if (!el) return 0;
+    var cs = getComputedStyle(el);
+    if (cs.overflowX == 'visible' && cs.overflowY == 'visible') return 0;
+    var v = [el.scrollLeft, el.scrollTop, el.scrollWidth, el.scrollHeight, el.clientWidth, el.clientHeight];
+    for (var i = 0; i < 6; i++) HEAPF32[(out >> 2) + i] = v[i];
+    return 1;
+});
+
+EM_JS(void, kn_js_set_scroll, (int id, float left, float top), {
+    var el = knEl(id);
+    if (el) { el.scrollLeft = left; el.scrollTop = top; }
+});
+
 // ---- text editing + code view (html_dom.h): offsets are UTF-8 bytes in C, UTF-16 indices
 // in the page. The code view is a <div class="kn-code-overlay"> (gutter + <pre> of coloured
 // spans + the caret-line bar) under the textarea, whose own text is transparent; the overlay
@@ -700,6 +715,13 @@ int html_dom_get_checked(const HtmlElem e) { return e ? kn_js_get_checked((int) 
 void html_dom_focus(const HtmlElem e) { if (e) kn_js_focus((int) e); }
 void html_dom_blur(const HtmlElem e) { if (e) kn_js_blur((int) e); }
 void html_dom_scroll_to_bottom(const HtmlElem e) { if (e) kn_js_scroll_to_bottom((int) e); }
+int html_dom_get_scroll(const HtmlElem e, HtmlScroll *out) {
+    float v[6] = {0};
+    const int ok = e ? kn_js_get_scroll((int) e, v) : 0;
+    if (out) *out = (HtmlScroll) {v[0], v[1], v[2], v[3], v[4], v[5]};
+    return ok;
+}
+void html_dom_set_scroll(const HtmlElem e, const float left, const float top) { if (e) kn_js_set_scroll((int) e, left, top); }
 
 int html_dom_text_selection(const HtmlElem e, int *start, int *end) {
     int v[2] = {0, 0};

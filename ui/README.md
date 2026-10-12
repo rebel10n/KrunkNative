@@ -53,6 +53,15 @@ by `tools/ui-import/import.py` (details and options: `tools/ui-import/README.md`
   `img/customize/other.png.png`, ...) are listed by the import and stay 404s here too.
   `KRUNKNATIVE_HTML_IMAGE_LOG=1|<file>` logs every image the native engine fails to load.
 
+Season / challenge images v7.1.4 loaded from its CDN and its tree lacks (`img/chals/icon_<n>.png`,
+`img/chals/hed_{1,2,4}.png`, the Weapon Challenges cards `img/chals/weapon_*.png`,
+`img/battlepass/logo_white.svg` and `krunkies.svg`) come from
+`tools/ui-import/fetch_season_images.sh`, fetched on 2026-10-12: the Wayback Machine's copies of
+the hed_* files and the two SVGs (captures of 2024-11-04 and 2023-11-01), the rest from
+`https://assets.krunker.io/img/chals/` as served that day (Last-Modified 2021-2023, ETag = the
+file's MD5), each pinned by SHA-256. `icon_21` and the cards of weapons 13, 18, 20, 21 and 23-28
+were not served (v7 shows a broken image for them too).
+
 KrunkNative addition: `css/fonts/kn-symbols.ttf`, a subset (arrows, technical, box
 drawing, blocks, geometric shapes, misc symbols, dingbats) of Adwaita Mono 34.1.0
 Regular made with `pyftsubset --unicodes=U+2190-21FF,U+2300-23FF,U+2500-25FF,U+2600-26FF,U+2700-27BF,U+2B00-2BFF`

@@ -257,6 +257,8 @@ typedef struct CssGradientStop {
     CssColor color;
     CssLength pos;         /* px/pct along the gradient line                  */
     uint8_t has_pos;       /* 0: distribute evenly (CSS Images 3 rules)       */
+    uint8_t has_hint;      /* a transition hint follows this stop             */
+    CssLength hint;        /* its position (px/pct along the gradient line)   */
 } CssGradientStop;
 
 typedef struct CssGradient {

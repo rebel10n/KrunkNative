@@ -184,6 +184,64 @@ win('win-changelog', 35);
 win('win-host-type', 42);
 win('win-server-finder', 48);
 
+// season-system: the signed-in Battle Pass / Challenges windows. The account, the pass and the
+// challenge list are tools/uidiff/season_fixture.json (the scenarios' state.account, gen_scenarios.py),
+// handed to v7's own socket handlers ("a" io_accountResponse with the Account data tuple, "bpdl"
+// windows[5].dataLoaded, "bppd" io_syncBpProg; exposeBundle). The pass's startdate keeps the
+// scenario's distance to its "now" (the Available BPP bar). Run with KN_V7_OVERLAY=ui so the
+// images v7 loaded from its CDN (img/chals/*) come from KrunkNative's fetched copies.
+// v7's bundle is one IIFE: its socket handlers are not globals. Pausing in a frame of the bundle
+// (the render loop) and evaluating there copies them to window.__kn.
+async function exposeBundle(c, names) {
+  await c.send('Debugger.enable');
+  const paused = new Promise((res) => c.on((m) => { if (m.method === 'Debugger.paused') res(m.params); }));
+  await c.send('Debugger.pause');
+  const p = await paused;
+  const frame = p.callFrames.find((f) => /\/js\/index\.js/.test(f.url)) || p.callFrames[0];
+  const expr = `(window.__kn = {${names.map((n) => `${n}: typeof ${n} === 'function' ? ${n} : null`).join(', ')}}, 1)`;
+  const r = await c.send('Debugger.evaluateOnCallFrame', { callFrameId: frame.callFrameId, expression: expr, returnByValue: true });
+  await c.send('Debugger.resume');
+  await c.send('Debugger.disable');
+  return r && r.result ? r.result.value : null;
+}
+
+// the account variants of gen_scenarios.py season_account()
+function seasonAccount(kind) {
+  const acc = JSON.parse(fs.readFileSync(path.join(REPO, 'tools', 'uidiff', 'season_fixture.json'), 'utf8'));
+  if (kind === 'vip') Object.assign(acc.battlepass.progress, { tier: 1, items_claimed: '20001,21001,21004' });
+  if (kind === 'chal') { acc.battlepass.tab = 1; acc.challenges = acc.challenges.filter((x) => x.T !== 'weekly'); }
+  return acc;
+}
+
+function seasonWin(name, window, kind) {
+  scenario(name, 'windows', async (c) => {
+    const acc = seasonAccount(kind), bp = acc.battlepass || {};
+    const sc = { state: { window } };
+    await menuBase(c);
+    const tuple = new Array(49).fill(null);
+    Object.assign(tuple, { 0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: acc.funds || 0, 6: acc.score || 0, 7: acc.clan || null, 8: 0, 9: 0, 10: [], 11: 0,
+      12: 0, 13: 0, 14: 0, 15: acc.stats || {}, 16: 0, 21: acc.premium || 0, 23: acc.name, 44: acc.challenges || [], 45: acc.badges || [],
+      47: bp.progress ? bp.progress.bpp : 0 });
+    const data = bp.data ? Object.assign({}, bp.data) : null;
+    if (data && bp.now) data.startdate = `__START__`;
+    const shift = data && bp.now ? (bp.now * 1000 - Date.parse(bp.data.startdate)) : 0;
+    const ex = await exposeBundle(c, ['io_accountResponse', 'io_syncBpProg']);
+    if (ex !== 1) console.error('[capture-v7] ' + name + ': the bundle scope was not reached');
+    const r = await c.eval(`(() => { try { closWind();
+      __kn.io_accountResponse(null, 1, ${JSON.stringify(acc.name)}, ${JSON.stringify(tuple)}, null);
+      const data = ${JSON.stringify(data)}; if (data && data.startdate === '__START__') data.startdate = new Date(Date.now() - ${shift}).toISOString();
+      windows[5].dataLoaded(data); __kn.io_syncBpProg(${JSON.stringify(bp.progress || null)});
+      windows[5].tabIndex = ${bp.tab ? 1 : 0}; windows[32].openChallenge = null;
+      showWindow(${sc.state.window}, true); return 1; } catch (e) { return String(e.stack); } })()`);
+    if (r !== 1) console.error('[capture-v7] ' + name + ': ' + r);
+    await settle(c, 1500);
+  });
+}
+seasonWin('win-battlepass', 6, 'free');
+seasonWin('win-battlepass-vip', 6, 'vip');
+seasonWin('win-battlepass-chal', 6, 'chal');
+seasonWin('win-challenges-acc', 33, 'free');
+
 // in game
 async function hudBase(c) { await enterGame(c); await settle(c, 800); }
 scenario('ingame-plain', 'ingame', hudBase);

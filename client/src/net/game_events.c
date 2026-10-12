@@ -737,6 +737,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             g_death_info_valid = 1;
             return 1;
         }
+        case NET_PACKET_SKIN_FOUND: { // season-system: v7 "skin" (io_skinReward) / "skinF" (io_skinFoundMessage)
+            EVENTS_READ(NetSkinFoundPacket, found);
+            hud_ui_skin_found(client, found.uid, found.skin);
+            return 1;
+        }
         case NET_PACKET_END_MEDALS: { // WP-E part 2c: endData.mdls, right before this player's END
             EVENTS_READ(NetEndMedalsPacket, medals);
             hud_ui_set_end_medals(&medals);

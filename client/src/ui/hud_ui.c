@@ -1890,6 +1890,80 @@ void hud_ui_add_chat(const char *name, const char *msg, const char *color) {
     hud_add_chat_row(name, msg, color);
 }
 
+// io_addChat(-1, null, html, 1): a system line whose message is markup (UTILS.fixStr only wraps it)
+static void hud_add_chat_markup(const char *markup) {
+    const HtmlElem list = html_dom_by_id("chatList");
+    if (!list || !markup || !markup[0]) return;
+    hud_feed_evict(list, CHAT_LIST_LENGTH);
+    const ClientRenderSettings *rs = client_render_settings();
+    char id[32], html[1024];
+    size_t len = 0;
+    html[0] = 0;
+    snprintf(id, sizeof(id), "chatMsg_%d", g_hud_ui.chat_seq++);
+    hb_append(html, sizeof(html), &len, "<div class='chatItem%s'", rs->chat_text_outline ? " chatTextOutline" : "");
+    if (fabsf(rs->chat_bg_opacity - CHAT_BG_OPACITY_DEFAULT) > 1e-4f)
+        hb_append(html, sizeof(html), &len, " style='background-color: rgba(0, 0, 0, %g)'", (double) rs->chat_bg_opacity);
+    hb_append(html, sizeof(html), &len, "><span class='chatMsg'>" LRM "%s" LRM "</span></div><br>", markup);
+    const HtmlElem row = html_dom_create("div", id);
+    hud_chat_row_channel(row, -1);
+    html_dom_set_html(row, html);
+    html_dom_append(list, row);
+    html_dom_scroll_to_bottom(list);
+}
+
+static int g_skin_reward_timer;
+static void hud_skin_reward_hide(void *user) {
+    (void) user;
+    g_skin_reward_timer = 0;
+    const HtmlElem el = html_dom_by_id("skinRewards");
+    if (!el) return;
+    html_dom_set_display(el, "none");
+    html_dom_set_html(el, "");
+}
+
+// season-system: NET_PACKET_SKIN_FOUND. The finder: v7 io_skinReward (account.addSkin, the
+// #skinRewards card for 5 s, "You found [name]", matchRewardSummary.skins); the others:
+// io_skinFoundMessage ("<name> found [skin]" with Show Unboxings on).
+void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    const ViewerSkin *skin = viewer_skin(skin_index);
+    const Player *player = game_find_player(&client->game, uid);
+    const int rarity = skin && skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
+    const int rainbow = skin && skin->rarity == 6 && !client_render_settings()->disable_rarity_anim; // RENDER.rarityAnim && rarities[r].animate
+    char name[256] = "", markup[768];
+    size_t len = 0;
+    if (skin) hb_append_escaped(name, sizeof(name), &len, skin->name ? skin->name : "");
+    if (player && player == client->me) {
+        account_add_skin(skin_index);
+        hud_ui_add_reward_skin(skin_index);
+        if (!skin) return;
+        char thumb[256], card[1024];
+        store_skin_preview(skin_index, thumb, sizeof(thumb));
+        snprintf(card, sizeof(card), "<div class='skinRewCard' onclick='openSales(%d)' onmouseenter='playTick()'><img class='skinRewImg%s' src='%s' style='border: 3px solid %s' /><div class='skinRewRight'>%s<div class='skinRewDesc'>Item Found!</div></div></div>",
+                 skin_index, rainbow ? " rainbowBorder" : "", thumb, g_viewer_rarities[rarity].color, name);
+        const HtmlElem el = html_dom_by_id("skinRewards");
+        if (el) {
+            html_dom_set_display(el, "block");
+            html_dom_set_html(el, card);
+            if (g_skin_reward_timer) html_timer_cancel(g_skin_reward_timer);
+            g_skin_reward_timer = html_timer_add(5000.0, hud_skin_reward_hide, NULL);
+        }
+        snprintf(markup, sizeof(markup), "<span style='color:#fff'>You</span> found <span class='click%s' style='color:%s' onclick='viewItem(%d)'>[" LRM "%s" LRM "]</span>",
+                 rainbow ? " rainbowText" : "", g_viewer_rarities[rarity].color, skin_index, name);
+        hud_add_chat_markup(markup);
+        return;
+    }
+    if (!skin || !player || !client_render_settings()->show_unboxings) return;
+    char who[PLAYER_NAME_SIZE * 2], shown[PLAYER_NAME_SIZE];
+    size_t wlen = 0;
+    who[0] = 0;
+    hb_append_escaped(who, sizeof(who), &wlen, streamer_name(hud_player_name(client, player), shown, sizeof(shown)));
+    // i18n "windows.store.found" = "{0}{1} found": "<span style='color:#fff'>" + fixStr(name) + "</span> found"
+    snprintf(markup, sizeof(markup), "<span style='color:#fff'>" LRM "%s" LRM "</span> found <span class='click%s' style='color:%s' onclick='viewItem(%d)'>[" LRM "%s" LRM "]</span>",
+             who, rainbow ? " rainbowText" : "", g_viewer_rarities[rarity].color, skin_index, name);
+    hud_add_chat_markup(markup);
+}
+
 // Empties #chatList and marks the session's join lines as written (a scenario brings
 // its own chat history).
 void hud_ui_clear_chat(void) {
@@ -2588,6 +2662,15 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     const char *alias = client->game.mode && client->game.mode->config.alias ? client->game.mode->config.alias : "ffa";
     static const char *const icons[] = {"ffa", "tdm", "ctf", "kc", "point"}; // mode.getIcon ids
 
+    // v7.1.4 Battle Pass: #endBPLayout (account && !isCustom && bpData; battlepass_ui.c)
+    StrBuf bp = {0};
+    if (battlepass_ui_end_html(&bp)) {
+        char *html = sb_finish(&bp);
+        hb_append(out, size, len, "%s", html);
+        free(html);
+    } else {
+        sb_free(&bp);
+    }
     hb_append(out, size, len, "<div id='endLayout'><div><div id='gameFundsLayout'><div class='gfSection' style='margin-bottom: 0px;padding: 16px 0px;'>");
     hb_append(out, size, len, "<div class=\"endTitle\" style=\"text-align:center\">");
     hb_append_escaped(out, size, len, mode);
@@ -2732,6 +2815,20 @@ static void hud_end_card_render(const Client *client) {
     const HtmlElem view = html_dom_by_id("endTabbedView");
     if (view) html_dom_set_html(view, html);
     free(html);
+}
+
+static void hud_end_results(const Client *client);
+
+// --render-scenario: the results at once (endscreen.results), without config.endAnim.
+void hud_ui_end_results_now(const Client *client) {
+    if (!g_hud_ui.ended || g_hud_ui.end_phase != 1) return;
+    g_hud_ui.end_phase = 2;
+    hud_end_results(client);
+}
+
+// The current tab again (the Battle Pass's bpData came in after the results were shown).
+void hud_ui_end_refresh(void) {
+    if (g_hud_ui.ended && g_hud_ui.end_phase == 2 && g_end_tab == 1 && g_end_client) hud_end_card_render(g_end_client);
 }
 
 // GUI.endScreen.changeTab(id) (the tab headers' onclick).
@@ -2880,6 +2977,7 @@ void hud_ui_hide_end_screen(Client *client) {
     // WP-E part 2c: a new game: endData.mdls, matchRewardSummary = {} and endChals.innerHTML = ""
     memset(&g_end_medals, 0, sizeof(g_end_medals));
     g_end_skin_count = 0;
+    battlepass_ui_end_clear(); // v7.1.4: the next end screen's bpData comes with its own commit
     if (!html_ui_available() || !html_ui_is_ready()) return;
     const HtmlElem chals = html_dom_by_id("endChals");
     if (chals) html_dom_set_html(chals, "");

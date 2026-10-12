@@ -981,6 +981,7 @@ static void bg_tile_size(const CssBgLayer *L, float aw, float ah, float iw, floa
 typedef struct BgTiling {
     float tw, th;       /* tile size */
     float x0, y0;       /* first tile origin */
+    float px, py;       /* the positioned tile's origin (background-position in the area) */
     int nx, ny;         /* tiles per axis */
 } BgTiling;
 
@@ -994,6 +995,8 @@ static void bg_tiling(const CssBgLayer *L, DlRect area, DlRect paint, float iw, 
     const float py = area.y + length_resolve(L->y, area.h - t->th);
     t->x0 = px;
     t->y0 = py;
+    t->px = px;
+    t->py = py;
     t->nx = t->ny = 1;
     if (t->tw <= 0 || t->th <= 0) {
         t->nx = t->ny = 0;
@@ -1053,7 +1056,11 @@ static void paint_bg_layer(Painter *p, const CssComputed *s, const CssBgLayer *L
         memset(&it, 0, sizeof it);
         it.op = DL_GRADIENT;
         it.u.gradient.rect = paint;
-        it.u.gradient.box = dl_rect(t.x0, t.y0, t.tw, t.th);
+        /* The gradient line is the positioned tile's (background-origin, padding box by
+         * default), not the first repeated tile's: with a border the first tile starts one
+         * tile to the left / above (bg_tiling), which put every pixel of the paint area past
+         * the gradient's end (a flat end colour). Repeats over the border are not drawn. */
+        it.u.gradient.box = dl_rect(t.px, t.py, t.tw, t.th);
         it.u.gradient.gradient = L->image.gradient;
         for (int i = 0; i < it.u.gradient.gradient.stop_count; i++)
             it.u.gradient.gradient.stops[i].color = paint_resolve_color(it.u.gradient.gradient.stops[i].color, s);

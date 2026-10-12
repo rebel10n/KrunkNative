@@ -537,10 +537,17 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     // brain backend (backend_ui.h): the signed-in Account window and the live Servers
     // list replace the guest captures; NULL keeps them (no brain, guest)
     char *live = account_window_gen(id, header);
+    if (!live) live = battlepass_window_gen(id, header); // v7.1.4 Battle Pass (battlepass_ui.c)
     if (!live) live = servers_window_gen(id, header);
     if (live) return live;
     const WindowDef *w = find_window(id);
     return w ? w->gen() : gen_static(key);
+}
+
+void ui_img_url(const char *path, char *out, const size_t n) {
+    if (!out || !n) return;
+    while (path && *path == '/') path++;
+    snprintf(out, n, "./%s", path ? path : "");
 }
 
 void ui_window_post(const int id) {
@@ -552,4 +559,5 @@ void ui_window_post(const int id) {
         if (input) html_dom_set_value(input, ui->name_set ? ui->client->menu_name : "");
     }
     account_window_post(id); // brain: the saved krunker_username instead of the nickname
+    battlepass_window_post(id); // windows[5].post(): the window width, scroll to the current level
 }

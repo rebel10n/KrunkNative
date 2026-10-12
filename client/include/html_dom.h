@@ -52,6 +52,11 @@ int      html_dom_get_checked(HtmlElem);
 void     html_dom_focus(HtmlElem);
 void     html_dom_blur(HtmlElem);
 void     html_dom_scroll_to_bottom(HtmlElem);                        // scrollTop = scrollHeight
+typedef struct HtmlScroll { float left, top, width, height, client_w, client_h; } HtmlScroll;
+// scrollLeft / scrollTop, scrollWidth / scrollHeight, clientWidth / clientHeight of a scroll
+// container (overflow other than visible); 0 when it is none / not laid out.
+int      html_dom_get_scroll(HtmlElem, HtmlScroll *out);
+void     html_dom_set_scroll(HtmlElem, float left, float top);       // scrollLeft / scrollTop = (clamped)
 
 // ---- text controls (<textarea>, text <input>) edited from C. Offsets are UTF-8 byte offsets
 // into the value (the web backend converts from the browser's UTF-16 indices).

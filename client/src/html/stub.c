@@ -138,6 +138,16 @@ int html_dom_get_checked(const HtmlElem e) { (void) e; return 0; }
 void html_dom_focus(const HtmlElem e) { (void) e; }
 void html_dom_blur(const HtmlElem e) { (void) e; }
 void html_dom_scroll_to_bottom(const HtmlElem e) { (void) e; }
+int html_dom_get_scroll(const HtmlElem e, HtmlScroll *out) {
+    (void) e;
+    if (out) *out = (HtmlScroll) {0};
+    return 0;
+}
+void html_dom_set_scroll(const HtmlElem e, const float left, const float top) {
+    (void) e;
+    (void) left;
+    (void) top;
+}
 int html_dom_text_selection(const HtmlElem e, int *start, int *end) {
     (void) e;
     if (start) *start = 0;

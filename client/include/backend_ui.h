@@ -49,6 +49,25 @@ void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / ""
 int account_custom_badge(void);
 void account_ui_scenario(const cJSON *account); // --render-scenario: state.account stands in for a login
 int account_owns_badge(int badge);
+void account_popup(int kind, const char *error, const char *text); // popupResponse: 0 error, 1 success, 2 loading
+void account_readable_time(char *out, size_t n, double ms);         // UTILS.getReadableTime
+// account.activeChallenges (kn_brain "chgL"; NULL = not loaded / guest), its request, and
+// challenges.updateNames' N
+const cJSON *account_challenges(void);
+void account_challenges_request(void);
+void account_challenge_name(const cJSON *challenge, char *out, size_t n);
+
+// ---- battlepass_ui.c (v7.1.4 windows[5], showWindow(6): the Battle Pass; the end screen's #endBPLayout)
+char *battlepass_window_gen(int id, const char **header); // NULL: not window 6 / guest (the captured Sign-in card)
+void battlepass_window_post(int id);
+int  battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
+int  battlepass_ui_frame(const char *label, const cJSON *frame); // bpdl, bppd, bpclmr, purbp, purbpl, bpEnd; 1 = handled
+void battlepass_ui_reset(void);             // logout: windows[5].data, account.BP, bpData
+void battlepass_ui_challenges_changed(void); // the challenge list changed (tab 1 re-renders)
+int  battlepass_ui_tier(void);              // account.BP.tier (0 without)
+void battlepass_ui_end_clear(void);         // a new end screen: no bpData until kn_brain sends it
+void battlepass_ui_scenario(const cJSON *state); // --render-scenario: state.account.battlepass
+int  battlepass_ui_end_html(StrBuf *sb);    // tabs.performance's #endBPLayout; 0 = none (no account / bpData)
 
 // ---- clan_ui.c (windows[12], the menu Clans window = showWindow(13))
 char *clan_window_gen(void);                // guest: LOGIN REQUIRED; member: the clan page

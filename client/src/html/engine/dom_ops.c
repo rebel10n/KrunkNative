@@ -446,6 +446,37 @@ void html_dom_scroll_to_bottom(const HtmlElem e)
     engine_mark_paint(g, e);
 }
 
+int html_dom_get_scroll(const HtmlElem e, HtmlScroll *out)
+{
+    if (out) memset(out, 0, sizeof *out);
+    Engine *g = engine_get();
+    if (!alive(engine_dom(g), e)) return 0;
+    engine_flush_layout(g);
+    Box *box = engine_elem_box(g, e);
+    if (!box || !(box->flags & BOXF_SCROLL_CONTAINER)) return 0;
+    if (out) {
+        out->left = box->scroll_x;
+        out->top = box->scroll_y;
+        out->width = box->scroll_w;
+        out->height = box->scroll_h;
+        /* clientWidth / clientHeight: the padding box minus the scrollbars */
+        out->client_w = box->w - box->border[1] - box->border[3] - box->scrollbar_w;
+        out->client_h = box->h - box->border[0] - box->border[2] - box->scrollbar_h;
+    }
+    return 1;
+}
+
+void html_dom_set_scroll(const HtmlElem e, const float left, const float top)
+{
+    Engine *g = engine_get();
+    if (!alive(engine_dom(g), e)) return;
+    LayoutTree *tree = engine_flush_layout(g);
+    Box *box = engine_elem_box(g, e);
+    if (!tree || !box || !(box->flags & BOXF_SCROLL_CONTAINER)) return;
+    layout_set_scroll(tree, box, left, top); /* clamps to the scroll range */
+    engine_mark_paint(g, e);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Text editing + code view (widgets.c)                                       */
 /* ------------------------------------------------------------------------- */

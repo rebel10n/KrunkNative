@@ -715,11 +715,16 @@ static int gradient_row(GlBackend *b, const CssGradient *g, float len) {
     float t[CSS_MAX_GRADIENT_STOPS];
     CssColor c[CSS_MAX_GRADIENT_STOPS];
     const int n = resolve_stops(g, len, t, c);
+    // transition hints: position (0..1) after stop i, -1 none
+    float hint[CSS_MAX_GRADIENT_STOPS];
+    for (int i = 0; i < n; i++)
+        hint[i] = i + 1 < n && g->stops[i].has_hint && len > 0.0f ? css_len(g->stops[i].hint, len) / len : -1.0f;
 
     uint64_t h = 1469598103934665603ull;
     h = hash_bytes(h, &n, sizeof(n));
     h = hash_bytes(h, t, sizeof(float) * (size_t) n);
     h = hash_bytes(h, c, sizeof(CssColor) * (size_t) n);
+    h = hash_bytes(h, hint, sizeof(float) * (size_t) n);
 
     b->grad_tick++;
     int row = -1, victim = 0;
@@ -750,6 +755,13 @@ static int gradient_row(GlBackend *b, const CssGradient *g, float len) {
             float f = 0.0f;
             if (u < t[0]) f = 0.0f;
             else if (j > i && t[j] > t[i]) f = clampf((u - t[i]) / (t[j] - t[i]), 0.0f, 1.0f);
+            if (j > i && hint[i] >= 0.0f && t[j] > t[i]) {
+                // CSS Images 4 §3.5.3: f = pow(f, ln 0.5 / ln H), H = the hint's place between the stops
+                const float hh = (hint[i] - t[i]) / (t[j] - t[i]);
+                if (hh <= 0.0f) f = f > 0.0f ? 1.0f : 0.0f;
+                else if (hh >= 1.0f) f = f < 1.0f ? 0.0f : 1.0f;
+                else if (f > 0.0f) f = powf(f, logf(0.5f) / logf(hh));
+            }
             float p0[4], p1[4];
             const CssColor a = c[i], d = c[j];
             const float aa = a.a / 255.0f, da = d.a / 255.0f;

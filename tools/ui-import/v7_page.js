@@ -19,12 +19,23 @@ const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 't
   '.map': 'application/json', '.ico': 'image/x-icon', '.jspck': 'application/octet-stream', '.txt': 'text/plain' };
 
 // GET/HEAD only, paths confined to `root`; never writes.
+// KN_V7_OVERLAY (colon-separated directories, e.g. KrunkNative's ui/): files the v7.1.4 tree lacks
+// (v7 loaded them from its CDN: img/chals/*, img/battlepass/logo_white.svg, ...) are served from
+// there, only when the reference tree has no such file.
+const OVERLAYS = (process.env.KN_V7_OVERLAY || '').split(':').filter(Boolean).map((d) => path.resolve(d));
 function staticServer(root, port) {
   const server = http.createServer((req, res) => {
     let rel = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
     if (rel.endsWith('/')) rel += 'index.html';
-    const file = path.join(root, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
+    const clean = path.normalize(rel).replace(/^(\.\.[/\\])+/, '');
+    let file = path.join(root, clean);
     if (!file.startsWith(root) || (req.method !== 'GET' && req.method !== 'HEAD')) { res.writeHead(404); return res.end(); }
+    if (!fs.existsSync(file)) {
+      for (const dir of OVERLAYS) {
+        const f = path.join(dir, clean);
+        if (f.startsWith(dir) && fs.existsSync(f)) { file = f; break; }
+      }
+    }
     fs.stat(file, (err, st) => {
       if (err || !st.isFile()) { res.writeHead(404); return res.end(); }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Content-Length': st.size, 'Cache-Control': 'no-store' });

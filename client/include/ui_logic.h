@@ -192,6 +192,10 @@ const char *ui_controls_tab_name(int tab);
 char *ui_window_generate(int id, const char **header, int *sticky);
 void  ui_window_meta(int id, const char **cls, const char **style); // showWindow's #menuWindow class + inline style
 void  ui_window_post(int id);                             // WINDOWS[id].post()
+// UTILS.assetsUrl(path) of an image the page's own tree holds (ui/img/...: the menu imports,
+// tools/ui-import/fetch_season_images.sh): "./" + path, resolved against ui/ like the page's
+// own markup (v7's hook.js rewrote assets.krunker.io to its local tree the same way).
+void  ui_img_url(const char *path, char *out, size_t n);
 const char *ui_window_key(int id);                        // "1".."52"; NULL unknown
 const char *ui_map_thumb(const char *name);               // mapThumb()
 void        servers_ui_set_host_type(int host_type);      // openHostWindow(false, type): the Host Game window's config.hostTypes index
@@ -263,6 +267,9 @@ void hud_ui_end_screen_tab(const char *tab);
 // (io_challengeCompleted). All reset when the end screen goes (a new game).
 void hud_ui_set_end_medals(const NetEndMedalsPacket *packet);
 void hud_ui_add_reward_skin(int skin);
+void hud_ui_end_refresh(void); // re-render the end screen tab (the Battle Pass bpData came in late)
+void hud_ui_end_results_now(const Client*); // --render-scenario endscreen.results: skip config.endAnim
+void hud_ui_skin_found(Client*, int uid, int skin); // season-system: NET_PACKET_SKIN_FOUND (v7 "skin" / "skinF")
 void hud_ui_end_challenge_completed(int icon, const char *name);
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled
 int  hud_ui_end_screen_interactive(void);   // end-screen results up: pointer free, mouse goes to the page

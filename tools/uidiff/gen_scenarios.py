@@ -177,7 +177,25 @@ WINDOWS = [
     ("win-changelog", 35, {}, "Changelog: Whats New in v7.1.4"),
     ("win-host-type", 42, {}, "Host Game: server type picker"),
     ("win-server-finder", 48, {}, "Server Finder: server type picker"),
+    # season-system: signed in (season_fixture.json; capture-v7.js hands the same account to v7)
+    ("win-battlepass", 6, {"account": "free"}, "Battle Pass, signed in: free track, level 4"),
+    ("win-battlepass-vip", 6, {"account": "vip"}, "Battle Pass, signed in: VIP tier"),
+    ("win-battlepass-chal", 6, {"account": "chal"}, "Battle Pass, Challenges tab: the daily cards (+ KrunkNative's weekly ones)"),
+    ("win-challenges-acc", 33, {"account": "free"}, "Challenges, signed in: map, weapon and nightmare sections"),
 ]
+with open(os.path.join(HERE, "season_fixture.json")) as _fh:
+    SEASON_ACCOUNT = json.load(_fh)
+SEASON_ACCOUNT.pop("_comment", None)
+
+
+def season_account(kind):
+    acc = json.loads(json.dumps(SEASON_ACCOUNT))
+    if kind == "vip":
+        acc["battlepass"]["progress"].update(tier=1, items_claimed="20001,21001,21004")
+    if kind == "chal":  # v7 has no weekly challenges: the variant lists the daily ones only
+        acc["battlepass"]["tab"] = 1
+        acc["challenges"] = [c for c in acc["challenges"] if c["T"] != "weekly"]
+    return acc
 # windows whose content depends on data KrunkNative does not have in a scenario: body skipped
 BODY_SKIP = {
     "win-servers": "server rows come from the matchmaker (mocked in the reference, none in the scenario)",
@@ -202,6 +220,9 @@ for name, win, extra, note in WINDOWS:
                       BODY_SKIP.get(name, "#menuWindow body"), skip=name in BODY_SKIP))
     st = {"window": win}
     st.update(extra)
+    if "account" in st:
+        st["name"] = "Player"
+        st["account"] = season_account(st["account"])
     add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [1280, 720], "background": MENU_BG,
                "state": dict(scen["menu-1280"]["state"], **st), "frames": 3, "note": note}, regs)
 

@@ -126,6 +126,8 @@ static void readable_time(char *out, const size_t n, const double ms) {
     snprintf(out, n, "%s%s%lldm ", dp, hp, m);
 }
 
+void account_readable_time(char *out, const size_t n, const double ms) { readable_time(out, n, ms); }
+
 // ------------------------------------------------------------------ state
 
 const AccountInfo *account_get(void) { return g_logged_in ? &g_acc : NULL; }
@@ -319,8 +321,11 @@ static void popup_response(const int kind, const char *error, const char *text) 
     free(html);
 }
 
+void account_popup(const int kind, const char *error, const char *text) { popup_response(kind, error, text); }
+
 static void rerender_windows(void) {
     menu_rerender_if_open(5);
+    menu_rerender_if_open(6); // v7.1.4 Battle Pass (battlepass_ui.c)
     menu_rerender_if_open(14);
     menu_rerender_if_open(27);
     menu_rerender_if_open(33);
@@ -380,6 +385,7 @@ static void clear_account(void) {
     g_chal_typ[0] = 0;
     cJSON_Delete(g_medal_counts);
     g_medal_counts = NULL;
+    battlepass_ui_reset(); // windows[5].data / account.BP
 }
 
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices)
@@ -529,6 +535,7 @@ static void on_social(void *user, const cJSON *frame) {
         rerender_windows();
     } else if (!strcmp(label, "spin")) {
         store_ui_frame(frame);
+    } else if (battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd
     } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // io_cln / io_clnL (windows[12])
         clan_ui_frame(frame);
     } else if (!strcmp(label, "pRes")) { // uploadS reply: popupResponse(kind, error, text)
@@ -866,6 +873,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!name || (!backend_enabled() && !g_scenario)) return -1; // g_scenario: --render-scenario's stand-in account
+    if (battlepass_ui_handle(name, ev, args, argc) >= 0) return 1; // before the Store: creatorCodeAction(.., 3)
     if (store_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (clan_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (ranked_ui_handle(name, ev, args, argc) >= 0) return 1;
@@ -1393,7 +1401,7 @@ static void chal_card(StrBuf *sb, const cJSON *c, const int margin) {
     cJSON_ArrayForEach(it, (cJSON_IsArray(sk) ? sk : NULL)) if (skin_count < 3 && cJSON_IsNumber(it)) skins[skin_count++] = it->valueint;
     char icon[256], path[64], name[160], text[64];
     snprintf(path, sizeof(path), "img/chals/icon_%d.png", (int) cnum(c, "IC"));
-    html_dom_asset_url(path, icon, sizeof(icon));
+    ui_img_url(path, icon, sizeof(icon)); // UTILS.assetsUrl: KrunkNative's ui/ copy (fetch_season_images.sh)
     chal_name(c, name, sizeof(name));
     sb_appendf(sb, "<div class='chalCard' style='margin-top:%dpx;%s'><img class='chalImgC' src='%s'  style='%s%s' />", margin,
                boss ? "box-shadow: 0 0 14px #ffa000;background:rgb(79 50 0 / 40%);border:4px solid #ff9c00;" : "", icon,
@@ -1458,7 +1466,7 @@ static void chal_header(StrBuf *sb, const char *image, const int margin, const c
                         const char *extra_style) {
     char url[256], path[96];
     snprintf(path, sizeof(path), "img/chals/%s.png", image);
-    html_dom_asset_url(path, url, sizeof(url));
+    ui_img_url(path, url, sizeof(url));
     sb_appendf(sb, "<div class='challHeadrI' style='background-image:url(%s);margin-top:%dpx;%s'>", url, margin, extra_style ? extra_style : "");
     if (back) sb_append(sb, "<div class='challHeadrBck' onclick='windows[32].closeChallengeCat();'><span class='material-icons challBackArr'>arrow_back</span></div>");
     sb_append(sb, "<div class='challHeadrT'>");
@@ -1492,10 +1500,11 @@ static void chal_count(const char *type, const char *field, const int value, int
 }
 
 // windows[32].gen() (v7.1.4 index.js:8742) for an account; guests keep the static LOGIN REQUIRED
-// page. config.minChalLevel is 1 in v7 (30 in v3.1.1), so every account gets the list.
-// KrunkNative difference (documented): v7 shows the daily challenges in the Battle Pass window
-// (windows[5] tab 1) and has no weekly ones; KrunkNative has no Battle Pass, so its Daily and
-// Weekly challenges get their own sections at the top of this window.
+// page. config.minChalLevel is 1 in v7 (30 in v3.1.1), so every account gets the list. The
+// daily challenges (and KrunkNative's weekly ones) are in the Battle Pass window's Challenges
+// tab, as in v7 (battlepass_ui.c). v7's Event Challenges section needs an active
+// config.events entry (UTILS.hasActiveEvents); v7.1.4's config.events is empty, so it never
+// shows and is not ported.
 static char *gen_challenges(void) {
     if (g_acc.level < 1) return requirement(1, "for Challenges");
     if (!g_chal) {
@@ -1509,17 +1518,7 @@ static char *gen_challenges(void) {
     StrBuf sb = {0};
     int done, total;
     if (!g_chal_typ[0]) {
-        static const char *const rotating[2][3] = {{"daily", "Daily Challenges", "Check back later for new daily challenges!"},
-                                                   {"weekly", "Weekly Challenges", "Check back later for new weekly challenges!"}};
-        int margin = 0;
-        for (int r = 0; r < 2; r++) {
-            chal_count(rotating[r][0], NULL, 0, &done, &total);
-            if (!total) continue;
-            chal_header(&sb, "hed_1", margin, rotating[r][1], done, total, 0, NULL);
-            if (!margin) sb_append(&sb, "<div style='height:10px'></div>" CHAL_MSG); // the Battle Pass daily tab's note
-            chal_cards(&sb, rotating[r][0], NULL, 0, rotating[r][2]);
-            margin = 30;
-        }
+        const int margin = 0;
         // Map Challenges: one card per map that has some
         chal_count("map", NULL, 0, &done, &total);
         chal_header(&sb, "hed_1", margin, "Map Challenges", done, total, 0, NULL);
@@ -1530,7 +1529,7 @@ static char *gen_challenges(void) {
             chal_count("map", "mp", i, &d, &t);
             if (!m || !t) continue;
             char path[64], url[256];
-            html_dom_asset_url(map_catalog_thumb(m, path, sizeof(path)), url, sizeof(url));
+            ui_img_url(map_catalog_thumb(m, path, sizeof(path)), url, sizeof(url));
             sb_appendf(&sb, "<div class='challMapCrd' style='background-image:url(%s)' onmouseenter='playTick()' onclick='windows[32].openChallengeCat(&quot;map&quot;,%d);'><div class='challMapCvr'></div><div class='challMapName blackShad'>", url, i);
             cap_first(&sb, m->name);
             sb_appendf(&sb, "</div><div class='challMapPrg'>%d<span style='color:#fff;'>/%d</span></div></div>", d, t);
@@ -1546,7 +1545,7 @@ static char *gen_challenges(void) {
             if (!w || w->type == 3 || w->custom_only || !t) continue; // weaponTypes.EQUIPMENT, customOnly
             char path[96], url[256];
             snprintf(path, sizeof(path), "img/chals/%s.png", w->src ? w->src : "noimg");
-            html_dom_asset_url(path, url, sizeof(url));
+            ui_img_url(path, url, sizeof(url));
             sb_appendf(&sb, "<div class='challMapCrd' onmouseenter='playTick()' onclick='windows[32].openChallengeCat(&quot;weapon&quot;,%d);'><img class='challRotImg' style='background-image:url(%s);background-size:contain;background-repeat:no-repeat;' /><div class='challMapCvr'></div><div class='challMapName blackShad'>", i, url);
             cap_first(&sb, w->name);
             sb_appendf(&sb, "</div><div class='challMapPrg'>%d<span style='color:#fff;'>/%d</span></div></div>", d, t);
@@ -1575,6 +1574,16 @@ static char *gen_challenges(void) {
     }
     return sb_finish(&sb);
 }
+
+const cJSON *account_challenges(void) { return g_logged_in ? g_chal : NULL; }
+
+void account_challenges_request(void) {
+    if (!g_logged_in || g_chal || g_chal_requested) return;
+    g_chal_requested = 1;
+    backend_social_send_text("[\"chg\"]");
+}
+
+void account_challenge_name(const cJSON *c, char *out, const size_t n) { chal_name(c, out, n); }
 
 static cJSON *chal_by_ci(const double ci) {
     cJSON *c;
@@ -1638,6 +1647,7 @@ static int progress_frame(const char *label, const cJSON *frame) {
         cJSON_Delete(g_chal);
         g_chal = cJSON_Duplicate(a1, 1);
         menu_rerender_if_open(33);
+        battlepass_ui_challenges_changed(); // windows[5] tab 1: the daily (and weekly) cards
     } else if (!strcmp(label, "chg")) { // io_updateChallenges([done, CI, PV, ...])
         for (int i = 0; g_chal && i + 2 < cJSON_GetArraySize(a1); i += 3) {
             cJSON *c = chal_by_ci(cJSON_GetNumberValue(cJSON_GetArrayItem(a1, i + 1)));
@@ -1646,6 +1656,7 @@ static int progress_frame(const char *label, const cJSON *frame) {
             chal_set(c, "PT", cJSON_GetNumberValue(cJSON_GetArrayItem(a1, i)));
         }
         menu_rerender_if_open(33); // if (!inGame) updateWindow(33)
+        battlepass_ui_challenges_changed();
     } else if (!strcmp(label, "chgC")) { // io_challengeCompleted: the end screen's "Completed!" cards
         const cJSON *c;
         cJSON_ArrayForEach(c, a1) {
@@ -1732,6 +1743,7 @@ void account_ui_scenario(const cJSON *account) {
     const cJSON *chal = cJSON_GetObjectItem(account, "challenges"), *medals = cJSON_GetObjectItem(account, "medals");
     g_chal = cJSON_IsArray(chal) ? cJSON_Duplicate(chal, 1) : NULL;
     g_medal_counts = cJSON_IsObject(medals) ? cJSON_Duplicate(medals, 1) : NULL;
+    battlepass_ui_scenario(cJSON_GetObjectItem(account, "battlepass")); // {data, progress, tab, end, now}
     mark_header();
     menu_update_class_box();
 }
