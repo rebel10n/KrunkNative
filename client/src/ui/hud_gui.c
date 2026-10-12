@@ -12,11 +12,14 @@
 // - "Div (HTML)": v7 assigns style.width / height as bare numbers, which the browser ignores
 //   (a v7 bug, fixed here: they are px); the click hook (KrunkScript onDIVClicked) is the
 //   KrunkScript agent's.
-// - Player values (vt 1) read the local player's health / maxHealth / score / classIndex;
-//   custom player values and global values (vt 2) come from hud_gui_set_value (WP-C cv / gv
-//   packets), 0 until then.
+// - Values: vt 1 reads the local player's health / maxHealth / score / classIndex
+//   (config.playerVals) or its custom value (custVals, "cv"), vt 2 the global value ("gv" /
+//   "gbl"); a missing key shows 0 (map-C triggers_v7.h mirrors). Visibility after "tgui"
+//   toggles is map-C's client_triggers_gui_visible (map_triggers.h).
 #include <hud_gui.h>
 #include <html_dom.h>
+#include <map_triggers.h>
+#include <triggers_v7.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,20 +40,13 @@ typedef struct {
     char color[8];  // c (#ff0000)
     HtmlElem elem;
     char shown[96]; // the text currently in the element
+    int index;      // position in Map.gui (client_triggers_gui_visible)
+    int shown_visible;
 } HudGuiElement;
-
-typedef struct {
-    char key[32];
-    char value[64];
-    int global;
-} HudGuiValue;
 
 static HudGuiElement g_gui[HUD_GUI_MAX];
 static int g_gui_count;
 static const void *g_gui_map;      // the Map the elements were built for
-static HudGuiValue g_values[64];
-static int g_value_count;
-static int g_pending_toggle_rebuild;
 
 static int gui_int(const cJSON *json, const int fallback) {
     if (cJSON_IsNumber(json)) return (int) cJSON_GetNumberValue(json);
@@ -124,6 +120,11 @@ static void gui_parse(const cJSON *raw, HudGuiElement *e) {
     snprintf(e->color, sizeof(e->color), "%s", hex_ok ? text : "#ff0000");
 }
 
+// JS String(number) for the values (integers without decimals)
+static void gui_number(const double v, char *out, const size_t size) {
+    snprintf(out, size, "%.16g", v);
+}
+
 static void gui_value_text(const Client *client, const HudGuiElement *e, char *out, const size_t size) {
     if (e->value_type == 0) {
         snprintf(out, size, "%s", e->value[0] ? e->value : "Text"); // v || "Text"
@@ -132,20 +133,15 @@ static void gui_value_text(const Client *client, const HudGuiElement *e, char *o
     snprintf(out, size, "0");
     if (e->value_type == 1) {
         const Player *me = client ? client->me : NULL;
-        if (me && !strcmp(e->value, "health")) snprintf(out, size, "%g", (double) me->health);
-        else if (me && !strcmp(e->value, "maxHealth")) snprintf(out, size, "%d", me->max_health);
-        else if (me && !strcmp(e->value, "score")) snprintf(out, size, "%d", me->score);
-        else if (me && !strcmp(e->value, "classIndex")) snprintf(out, size, "%d", me->class_index);
-        else goto lookup;
+        if (!me) return;
+        if (!strcmp(e->value, "health")) gui_number(me->health, out, size);
+        else if (!strcmp(e->value, "maxHealth")) gui_number(me->max_health, out, size);
+        else if (!strcmp(e->value, "score")) gui_number(me->score, out, size);
+        else if (!strcmp(e->value, "classIndex")) gui_number(me->class_index, out, size);
+        else gui_number(player_custom_value_get(me, e->value), out, size); // custVals[v] || 0
         return;
     }
-lookup:
-    for (int i = 0; i < g_value_count; i++) {
-        if (g_values[i].global == (e->value_type == 2) && !strcmp(g_values[i].key, e->value)) {
-            snprintf(out, size, "%s", g_values[i].value);
-            return;
-        }
-    }
+    if (client) gui_number(trigger_global_value_get(&client->game, e->value), out, size); // globalVals[v] != null ? : 0
 }
 
 static HtmlElem gui_holder(void) {
@@ -176,9 +172,11 @@ static void gui_build(const Client *client, const Map *map) {
     if (!holder) return;
 
     const cJSON *raw;
+    int index = 0;
     cJSON_ArrayForEach(raw, gui) {
         if (g_gui_count >= HUD_GUI_MAX) break;
-        gui_parse(raw, &g_gui[g_gui_count++]);
+        gui_parse(raw, &g_gui[g_gui_count]);
+        g_gui[g_gui_count++].index = index++;
     }
     // customGUIs.sort((a, b) => (a.z || 0) - (b.z || 0)) (stable)
     for (int i = 1; i < g_gui_count; i++) {
@@ -249,19 +247,23 @@ static void gui_build(const Client *client, const Map *map) {
         }
         // canvas kinds draw only when o && !nv; divs: display none while nv
         html_dom_set_display(e->elem, e->hidden ? "none" : "block");
+        e->shown_visible = !e->hidden;
     }
     (void) client;
 }
 
 void hud_gui_update(Client *client) {
     const Map *map = client ? client->game.map : NULL;
-    if (map != g_gui_map || g_pending_toggle_rebuild) {
-        g_pending_toggle_rebuild = 0;
-        gui_build(client, map);
-    }
+    if (map != g_gui_map) gui_build(client, map);
     for (int i = 0; i < g_gui_count; i++) {
         HudGuiElement *e = &g_gui[i];
-        if (!e->elem || (e->type != 1 && e->type != 3)) continue;
+        if (!e->elem) continue;
+        const int visible = client_triggers_gui_visible(client, e->index);
+        if (visible != e->shown_visible) {
+            html_dom_set_display(e->elem, visible ? "block" : "none");
+            e->shown_visible = visible;
+        }
+        if (e->type != 1 && e->type != 3) continue;
         char text[96];
         gui_value_text(client, e, text, sizeof(text));
         if (strcmp(text, e->shown)) {
@@ -277,29 +279,4 @@ void hud_gui_clear(void) {
     }
     g_gui_count = 0;
     g_gui_map = NULL;
-}
-
-void hud_gui_toggle(const int id, const int mode) {
-    for (int i = 0; i < g_gui_count; i++) {
-        HudGuiElement *e = &g_gui[i];
-        if (e->id != id) continue;
-        e->hidden = mode == 0 ? !e->hidden : mode == 1 ? 0 : mode == 2 ? 1 : e->hidden;
-        if (e->elem) html_dom_set_display(e->elem, e->hidden ? "none" : "block");
-    }
-}
-
-void hud_gui_set_value(const int global, const char *key, const char *value) {
-    if (!key) return;
-    for (int i = 0; i < g_value_count; i++) {
-        if (g_values[i].global == (global != 0) && !strcmp(g_values[i].key, key)) {
-            if (value) snprintf(g_values[i].value, sizeof(g_values[i].value), "%s", value);
-            else g_values[i] = g_values[--g_value_count];
-            return;
-        }
-    }
-    if (!value || g_value_count >= (int) (sizeof(g_values) / sizeof(g_values[0]))) return;
-    HudGuiValue *v = &g_values[g_value_count++];
-    v->global = global != 0;
-    snprintf(v->key, sizeof(v->key), "%s", key);
-    snprintf(v->value, sizeof(v->value), "%s", value);
 }

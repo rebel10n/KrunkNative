@@ -11,6 +11,7 @@ void map_post_unload(Scene *scene);
 // player builds (their meshes), the battle-royale zone.
 void map_post_frame(Scene *scene, const Game *game, const Camera *camera, float delta_ms);
 Mesh *prefab_build_dynamic(const Object *object); // prefab.c: the mesh of a player build (caller owns it)
+Mesh *prefab_pickup_mesh(int weapon_id, int no_texture, float *scale); // prefab.c: a weapon pickup's model (caller owns it)
 
 // prefab.c canvas helpers (utils.js createCanvasText / ctxText on canvas2d.h), for the
 // leaderboard canvases: begin a width x height canvas, draw, end -> a cached RGBA texture.

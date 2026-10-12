@@ -15,6 +15,7 @@
 #include <prefabs.h>
 #include <render_settings.h>
 #include <canvas2d.h>
+#include <weapons.h>
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -419,6 +420,78 @@ static void post_builds_frame(Scene *scene, const Map *map) {
     }
 }
 
+// ---- weapon pickups (MapManager.addWeapon mesh, game.resetPickups / updatePickup): one mesh per
+// WEAPON_PICKUP, rebuilt when the weapon it holds changes, shown while the pickup is active and
+// holds a weapon, at its (moved) position + pickupOff 1, rotateY(r2) rotateX(r0 - PI/2)
+// rotateZ(r1) (equipment: rotateX(r0) rotateZ(r1 - PI/2)), the state from map-C's
+// game_pickup_state (client mirror of "inat" / "pkups").
+typedef struct {
+    int uid;
+    const Object *object;
+    int weapon;
+    Mesh *mesh;
+} PickupMesh;
+
+static PickupMesh *g_pickups;
+static size_t g_pickup_count;
+static Scene *g_pickup_scene;
+
+static void post_pickups_load(Scene *scene, const Map *map) {
+    g_pickup_scene = scene;
+    for (size_t i = 0; i < map->object_count; i++) {
+        const Object *object = map->objects[i];
+        if (object->prefab != PREFAB_WEAPON_PICKUP) continue;
+        PickupMesh *grown = realloc(g_pickups, (g_pickup_count + 1) * sizeof(PickupMesh));
+        if (!grown) break;
+        g_pickups = grown;
+        g_pickups[g_pickup_count++] = (PickupMesh) {(int) i, object, -2, NULL};
+    }
+}
+
+static void post_pickups_unload(void) {
+    for (size_t i = 0; i < g_pickup_count; i++) {
+        if (!g_pickups[i].mesh) continue;
+        if (g_pickup_scene) scene_remove_mesh(g_pickup_scene, g_pickups[i].mesh);
+        mesh_fini(g_pickups[i].mesh);
+    }
+    free(g_pickups);
+    g_pickups = NULL;
+    g_pickup_count = 0;
+    g_pickup_scene = NULL;
+}
+
+static void post_pickups_frame(const Game *game) {
+    if (!game || !g_pickup_scene) return;
+    for (size_t i = 0; i < g_pickup_count; i++) {
+        PickupMesh *p = &g_pickups[i];
+        GamePickup state;
+        if (!game_pickup_state(game, p->uid, &state)) continue;
+        if (state.weapon != p->weapon) {
+            if (p->mesh) {
+                scene_remove_mesh(g_pickup_scene, p->mesh);
+                mesh_fini(p->mesh);
+                p->mesh = NULL;
+            }
+            p->weapon = state.weapon;
+            float scale = 1.0f;
+            const cJSON *ntx = p->object->raw ? cJSON_GetObjectItem(p->object->raw, "ntx") : NULL;
+            p->mesh = state.weapon >= 0 ? prefab_pickup_mesh(state.weapon, ntx && !cJSON_IsNull(ntx), &scale) : NULL;
+            if (p->mesh) {
+                const int equipment = state.weapon < WEAPON_COUNT && g_weapons[state.weapon] && g_weapons[state.weapon]->equipment;
+                const vec3 r = p->object->rotation;
+                p->mesh->transform.rotation_order = ROTATION_ORDER_YXZ;
+                p->mesh->transform.rotation = (vec3) {r.x - (equipment ? 0.0f : (float) M_PI / 2.0f), r.z, r.y - (equipment ? (float) M_PI / 2.0f : 0.0f)};
+                p->mesh->transform.scale = (vec3) {scale, scale, scale};
+                p->mesh->no_shadow_receive = 0;
+                scene_add_mesh(g_pickup_scene, p->mesh);
+            }
+        }
+        if (!p->mesh) continue;
+        p->mesh->transform.position = (vec3) {state.position.x, state.position.y + 1.0f, state.position.z}; // config.pickupOff
+        p->mesh->visible = state.active && state.weapon >= 0;
+    }
+}
+
 // "ana" on a map object (world_events.c): Game.playAnim(obj, clip, 1) on its GLTF user asset
 static void post_object_anim(Client *client, Object *object, const char *clip, const int raw) {
     (void) client;
@@ -429,6 +502,7 @@ static void post_object_anim(Client *client, Object *object, const char *clip, c
 void map_post_frame(Scene *scene, const Game *game, const Camera *camera, const float delta_ms) {
     user_asset_frame();
     post_builds_frame(scene, game ? game->map : NULL);
+    post_pickups_frame(game);
     zone_mesh_frame(game, delta_ms);
 
     if (client_render_settings()->texture_anim) {
@@ -631,6 +705,7 @@ void map_post_load(Scene *scene, const Map *map) {
     g_distance_timer = 0.0f;
     user_asset_map_load(scene);
     terrain_mesh_load(scene, map);
+    post_pickups_load(scene, map);
     zone_mesh_load(scene, map);
     client_world_set_anim_handler(post_object_anim);
     ambient_load_map(scene, map);
@@ -640,6 +715,7 @@ void map_post_unload(Scene *scene) {
     ambient_unload_map(scene);
     post_lights_unload();
     post_builds_clear();
+    post_pickups_unload();
     terrain_mesh_unload();
     zone_mesh_unload();
     client_world_set_anim_handler(NULL);
