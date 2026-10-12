@@ -303,6 +303,9 @@ typedef struct {
     int melee_pose;   // first-person melee: arms are posed per arm (pivots) and the melee mesh hangs off the right pivot
     vec3 melee_position; // first-person melee mesh hold (weaponGeos xP/yP/zP incl. the skin's sxOff/syOff/szOff)
     vec3 melee_rotation; // its rotation (yR/zR incl. the skin's flip and sxRot)
+    // ac.muzzles[i] (local player): sprite positions in the anchor, (0, 0, 0) until a muzzle flash
+    // first init()s them at the barrel. The local tracer starts there either way (vfx.c local_shot).
+    vec3 muzzle[2];
 } PlayerArms;
 
 typedef struct {

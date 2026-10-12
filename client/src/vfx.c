@@ -793,10 +793,14 @@ static void local_shot(Client *client, Player *me) {
 
     if (vfx.log) fprintf(stderr, "[vfx] shot %s scoped=%d\n", weapon->src ? weapon->src : "?", scoped);
 
-    if (me->render_you && !sprite_model) {
+    PlayerArms *arms = held_arms(me);
+
+    // !isWeaponHidden: showWeapon/Sec/Mel off means no muzzle sprites, overlay flash or casings
+    if (me->render_you && !sprite_model && ui_controls_weapon_visible(client)) {
         if (vfx.settings.muzzle_flash && !fx->no_muzzle && !camera_offset_active(client)) {
             for (int i = 0; i < muzzle_count; i++) {
                 VfxMuzzle *muzzle = &vfx.muzzles[i];
+                if (arms) arms->muzzle[i] = muzzle_local(me, fx, i); // muzzles[i].init(...)
 
                 muzzle->active = 1;
                 muzzle->texture = fx->muz_id == 3 ? VFX_TEX_PART_3 : VFX_TEX_PART_2;
@@ -875,10 +879,13 @@ static void local_shot(Client *client, Player *me) {
         }
 
         if (distance >= VFX_TRACER_MIN_DST && vfx.settings.tracers) {
+            // muzzles[i].getWorldPosition(): the barrel tip only once a muzzle flash has placed the
+            // sprite there; with muzzleFlash off (or the weapon hidden, camOffset, nMuz) v3.1.1's
+            // tracer starts at the weapon anchor origin instead.
             vec3 start;
             const int muzzle = muzzle_count > 1 ? (int) rand_int(0.0f, (float) muzzle_count - 1.0f) : 0;
 
-            if (sprite_model || !arms_point(me, muzzle_local(me, fx, muzzle), &start)) {
+            if (sprite_model || !arms || !arms_point(me, arms->muzzle[muzzle], &start)) {
                 start = me->position;
                 start.y += me->height / 2.0f;
             }
@@ -886,6 +893,11 @@ static void local_shot(Client *client, Player *me) {
             const float back = scoped ? VFX_SCOPED_TRACER_BACK : 0.0f;
             start = v3_sub(start, v3_scale(direction, back));
             spawn_tracer(start, hit, fminf(distance + back, VFX_TRACER_MAX_DST), fx->trail);
+            if (vfx.log) {
+                fprintf(stderr, "[vfx] tracer start %.2f %.2f %.2f dst %.2f (camera %.2f %.2f %.2f fov %.2f)\n", start.x, start.y, start.z,
+                        fminf(distance + back, VFX_TRACER_MAX_DST), client->camera.position.x, client->camera.position.y,
+                        client->camera.position.z, client->camera.fov);
+            }
         }
     }
 }
@@ -1182,14 +1194,7 @@ void vfx_update(Client *client, const float delta) {
     vfx.time_ms += dt;
     vfx.frame_ms = dt;
 
-    // advance what already exists first so new spawns render at their start point
-    update_sprites(dt, client->camera.position);
-    update_boxes(dt);
-    if (map) detect_local_projectile(client);
-    projectiles_render_update(client, dt);
-    update_trails(dt);
-    update_debris(dt);
-
+    // The one-frame muzzle sprites / overlay flash age before this frame's shot can re-arm them.
     for (int i = 0; i < 2; i++) {
         VfxMuzzle *muzzle = &vfx.muzzles[i];
         if (!muzzle->active) continue;
@@ -1205,7 +1210,19 @@ void vfx_update(Client *client, const float delta) {
         }
     }
 
+    // game.update: players.update (shoot() spawns the tracer, impacts and casings) runs before
+    // particles.update of the same frame, so effects are advanced once before their first draw.
+    // A new tracer is already spd * delta past the muzzle; drawn at the muzzle instead, its
+    // centred 13-unit box would reach back past the camera. Remote shots ("9") arrive between
+    // frames and are advanced the same way.
     if (map) detect_local_shot(client);
+
+    update_sprites(dt, client->camera.position);
+    update_boxes(dt);
+    if (map) detect_local_projectile(client);
+    projectiles_render_update(client, dt);
+    update_trails(dt);
+    update_debris(dt);
 }
 
 // ---------------------------------------------------------------- GL
