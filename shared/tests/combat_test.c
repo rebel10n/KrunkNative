@@ -11,6 +11,7 @@
 
 void player_shoot(Player*);  // shared/src/player.c
 void player_melee(Player*);
+void player_reload(Player*);
 
 static int g_failures, g_checks;
 
@@ -22,9 +23,11 @@ static int g_failures, g_checks;
 
 static int g_last_hit_damage = -1;
 static int g_watch_uid = -1; // record HITs on this target only (pierce 1 rays go on into others)
+static int g_last_explosion_radius = -1;
 
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game; (void) uid;
+    if (type == NET_PACKET_EXPLOSION && length == sizeof(NetExplosionPacket)) g_last_explosion_radius = (int) ((const NetExplosionPacket *) payload)->radius;
     if (type == NET_PACKET_HIT && length == sizeof(NetHitPacket) && ((const NetHitPacket *) payload)->target_uid == g_watch_uid) {
         g_last_hit_damage = ((const NetHitPacket *) payload)->damage;
     }
@@ -438,6 +441,66 @@ static void test_upgrades(Game *game) {
     CHECK(!p->upgraded_slots && p->weapon == g_weapons[1], "spawn drops the upgrades");
 }
 
+// map-D's v7 mode keys in the weapon / combat code: reloadMlt, kranked bonuses.reload /
+// firerate, ammoLimit, headMlt (Bighead FFA), disabledStreaks, explMlt / explSMlt.
+static void test_mode_multipliers(Game *game) {
+    printf("mode multipliers...\n");
+    GameMode *saved = game->mode;
+
+    game->mode = mode_init(MODE_ID_IMP); // Impulsed: reloadMlt 0.5, explMlt 5, explSMlt 2, disabledStreaks [4, 5, 6]
+    Player *p = add_player(game, 60, 0); // Triggerman AR
+    p->ammo[p->loadout_index] = 0;
+    player_reload(p);
+    CHECK(fabsf(p->reload_timer - p->weapon->reload_time * 0.5f) < 1e-5f, "Impulsed reloadMlt 0.5 (%f)", p->reload_timer);
+    p->reload_timer = 0.0f;
+
+    Player *victim = add_player(game, 61, 0);
+    place(p, 0.0f, 0.0f);
+    place(victim, 0.0f, 15.0f);
+    victim->health = 100.0f;
+    g_last_explosion_radius = -1;
+    game_explosion(game, (vec3) {0.0f, 1000.0f, 0.0f}, 10.0f, 20.0f, p, 8);
+    CHECK(g_last_explosion_radius == 20, "explSMlt 2: the \"ex\" radius 20 (%d)", g_last_explosion_radius);
+    CHECK(fabsf(victim->health - (100.0f - 20.0f * 0.25f * 5.0f)) < 1e-4f, "explMlt 5 on others (%.2f)", victim->health);
+    p->health = 100.0f;
+    game_explosion(game, p->position, 10.0f, 20.0f, p, 8);
+    CHECK(fabsf(p->health - (100.0f - 20.0f * 0.2f)) < 1e-4f, "explMlt not on the source (%.2f)", p->health);
+
+    const int picks[STREAK_SLOTS] = {STREAK_SLIMER, -1, STREAK_NUKE};
+    player_set_streak_indexes(p, picks);
+    p->has_account = 1;
+    kill_n(game, p, 7);
+    CHECK(!p->streaks_owned[STREAK_SLIMER], "disabledStreaks: no Slimer in Impulsed");
+    mode_fini(game->mode);
+
+    game->mode = mode_init(MODE_ID_KRANK); // bonuses reload 0.35 / firerate 0.85 while kranked
+    player_spawn(p);
+    p->mode.is_kranked = 1;
+    p->ammo[p->loadout_index] = 0;
+    player_reload(p);
+    CHECK(fabsf(p->reload_timer - p->weapon->reload_time * 0.35f) < 1e-5f, "kranked reload x0.35");
+    p->reload_timer = 0.0f;
+    p->ammo[p->loadout_index] = p->weapon->ammo;
+    p->reloads[p->loadout_index] = 0.0f;
+    player_shoot(p);
+    CHECK(fabsf(p->reloads[p->loadout_index] - p->weapon->rate * 0.85f) < 1e-5f, "kranked fire rate x0.85 (%f)", p->reloads[p->loadout_index]);
+    p->mode.is_kranked = 0;
+    mode_fini(game->mode);
+
+    game->mode = mode_init(MODE_ID_AON); // ammoLimit 0
+    player_spawn(p);
+    CHECK(p->ammo[0] == 0, "All or Nothing: ammoLimit 0 at spawn (%u)", p->ammo[0]);
+    mode_fini(game->mode);
+
+    game->mode = saved;
+    // Bighead FFA: player.headMlt widens the head band (headScale 2 x headMlt from the top)
+    victim->mode.head_mlt = 0.0f;
+    CHECK(!player_hit_is_head(victim, 0.0f, 10.0f, 7.5f), "2.5 below the top: body");
+    victim->mode.head_mlt = 1.5f;
+    CHECK(player_hit_is_head(victim, 0.0f, 10.0f, 7.5f), "headMlt 1.5: head");
+    victim->mode.head_mlt = 0.0f;
+}
+
 int main(void) {
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/sandstorm.json", &sandstorm) && load_json_file("../assets/maps/sandstorm.json", &sandstorm)) {
@@ -461,6 +524,7 @@ int main(void) {
     test_effects(&game);
     test_streaks(&game);
     test_upgrades(&game);
+    test_mode_multipliers(&game);
 
     if (g_failures) {
         printf("combat_test: %d of %d checks failed\n", g_failures, g_checks);

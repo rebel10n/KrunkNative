@@ -156,8 +156,7 @@ void player_spawn(Player *player) {
 
     for (int i = 0; i < loadout_size; i++) {
         player->loadout[i] = loadout[i];
-        const int ammo_limit = player->game->mode ? player->game->mode->config.ammo_limit : 0;
-        player->ammo[i] = ammo_limit > 0 && weapons[player->loadout[i]]->ammo ? ammo_limit : (int) weapons[player->loadout[i]]->ammo;
+        player->ammo[i] = (unsigned int) mode_ammo_limit(player->game, (int) weapons[player->loadout[i]]->ammo); // v7 ammoLimit (aon 0)
     }
 
     player->velocity.x = 0.0f;
@@ -1240,12 +1239,13 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
 }
 
 void player_reload(Player *player) {
-    if (player->reload_timer || player->ammo[player->loadout_index] >= player->weapon->ammo) return;
+    if (player->reload_timer || (int) player->ammo[player->loadout_index] >= mode_ammo_limit(player->game, (int) player->weapon->ammo)) return;
     if (player->weapon->no_reload) return; // v7.1.4 noReload (streak equipment)
 
-    // reload * (reSpd || 1) * attributes.reload (Sleight of Hand) * (perk 2 ? 0.5 : 1)
+    // reload * (reSpd || 1) * attributes.reload (Sleight of Hand) * (perk 2 ? 0.5 : 1) * (kranked
+    // bonuses.reload) * (mode.reloadMlt) (players.js reload)
     player->reload_timer = player->weapon->reload_time * (player->game->config.reload_speed > 0.0f ? player->game->config.reload_speed : 1.0f) *
-                           player_attr_reload(player);
+                           player_attr_reload(player) * mode_reload_mlt(player->game, player);
     player->burst_count = 0;
 
     player_cancel_inspect(player);
@@ -1794,7 +1794,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
 
             if (!player->reload_timer) {
                 player->did_shoot = 0;
-                player->ammo[player->loadout_index] = player->weapon->ammo;
+                player->ammo[player->loadout_index] = (unsigned int) mode_ammo_limit(player->game, (int) player->weapon->ammo);
             }
         }
 
@@ -2083,7 +2083,8 @@ static const PlayerStoredState *player_state_entry(const Player *player, const i
 // v7.1.4 adjustedHeight (players.updateHeight): the height with the head band scaled by headMlt,
 // the top of the hit box (ah in stateHistory).
 static float combat_adjusted_height(const Player *player) {
-    const float head_mlt = player->head_mlt > 0.0f ? player->head_mlt : 1.0f;
+    // headMlt: the spawn value, or the Bighead FFA one (mode.head_mlt, WP-D); only one is ever set
+    const float head_mlt = (player->head_mlt > 0.0f ? player->head_mlt : 1.0f) * mode_head_mlt(player);
     return player->height - COMBAT_HEAD_SCALE + COMBAT_HEAD_SCALE * head_mlt;
 }
 
@@ -2574,9 +2575,10 @@ void player_melee(Player *player) {
     const ClassConfig *class_config = player->game->classes && player->class_index >= 0 && (size_t) player->class_index < player->game->class_count
         ? &player->game->classes[player->class_index] : NULL;
 
-    // rate * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * class melRate
+    // rate * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * (kranked bonuses.firerate) * class melRate
     player->reloads[player->loadout_index] = player->weapon->rate * (player->game->config.fire_rate > 0.0f ? player->game->config.fire_rate : 1.0f) *
-                                             player_attr_fire_rate(player) * (class_config && class_config->melee_rate > 0.0f ? class_config->melee_rate : 1.0f);
+                                             player_attr_fire_rate(player) * mode_fire_rate_mlt(player->game, player) *
+                                             (class_config && class_config->melee_rate > 0.0f ? class_config->melee_rate : 1.0f);
     player->did_shoot = 1;
     player->did_act = 1;
 
@@ -2880,10 +2882,11 @@ void player_shoot(Player *player) {
     if (player->burst_count) player->burst_count--;
     else player->burst_count = weapon->burst ? weapon->burst_count - 1 : 0;
 
-    // (burst ? burstR : rate) * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * rateChrg
+    // (burst ? burstR : rate) * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * (kranked
+    // bonuses.firerate) * rateChrg
     player->reloads[player->loadout_index] = (player->burst_count && weapon->burst ? weapon->burst_rate : weapon->rate) *
                                              (game->config.fire_rate > 0.0f ? game->config.fire_rate : 1.0f) *
-                                             player_attr_fire_rate(player) * rate_charge;
+                                             player_attr_fire_rate(player) * mode_fire_rate_mlt(game, player) * rate_charge;
 
     // TODO: update player ammo (HUD)
     // TODO: play sound

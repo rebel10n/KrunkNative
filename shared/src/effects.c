@@ -466,9 +466,8 @@ void player_set_streak_indexes(Player *player, const int indexes[STREAK_SLOTS]) 
 }
 
 static int streak_disabled(const Game *game, const int streak) {
-    // mode.disabledStreaks (no stock v7 mode sets it) and the KN/v3 noStreaks switches
-    (void) streak;
-    return (game->mode && game->mode->config.no_streaks) || game->config.no_streaks;
+    // mode.disabledStreaks (aon / md / chs / imp: [4, 5, 6]) and the noStreaks switches
+    return (game->mode && game->mode->config.no_streaks) || game->config.no_streaks || mode_streak_disabled(game, streak);
 }
 
 static void streak_send(Player *player, const int streak) {
@@ -589,7 +588,7 @@ float player_hitbox_pad_h(const Player *player) {
 }
 
 int player_hit_is_head(const Player *target, const float base_y, const float adjusted_height, const float hit_y) {
-    const float head_mlt = target->head_mlt > 0.0f ? target->head_mlt : 1.0f;
+    const float head_mlt = (target->head_mlt > 0.0f ? target->head_mlt : 1.0f) * mode_head_mlt(target); // + Bighead FFA (WP-D)
     return base_y + adjusted_height - hit_y < CONFIG_HEAD_SCALE * head_mlt;
 }
 

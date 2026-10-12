@@ -111,8 +111,10 @@ void game_spawn_ai_projectile(Game *game, const int stored_kind, const vec3 orig
 
 // game.explosion(x, y, z, radius, dmg, owner): 1 - distance / radius of the damage,
 // a fifth for the owner (who may hurt themselves).
-void game_explosion(Game *game, const vec3 position, const float radius, const float damage, Player *owner, const int weapon_index) {
+void game_explosion(Game *game, const vec3 position, float radius, float damage, Player *owner, const int weapon_index) {
     if (!game_is_authority(game) || radius <= 0.0f) return;
+    radius *= mode_explosion_size_mlt(game);            // v7 mode.explSMlt (Impulsed 2), before the "ex"
+    if (owner) damage *= player_attr_damage(owner);     // v7 source.attributes.dmg (Strength), players and AIs
 
     const NetExplosionPacket packet = {.position = {roundf(position.x), roundf(position.y), roundf(position.z)}, .radius = roundf(radius)};
     game_send(game, NET_TARGET_ALL, NET_PACKET_EXPLOSION, &packet, sizeof(packet));
@@ -129,7 +131,7 @@ void game_explosion(Game *game, const vec3 position, const float radius, const f
         const float falloff = 1.0f - distance / radius;
         if (falloff <= 0.0f) continue;
 
-        const float dealt = damage * falloff * (player == owner ? 0.2f : 1.0f);
+        const float dealt = damage * falloff * (player == owner ? 0.2f : 1.0f) * mode_explosion_damage_mlt(game, owner, player); // explMlt
         if (player_change_health(player, owner, dealt, 0)) {
             PlayerKillInfo info = {.weapon_id = weapon_index, .distance = distance};
             player_kill(player, owner, &info, 0);
