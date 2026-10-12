@@ -21,7 +21,7 @@ file of the same name when v7 changed it:
 | assets/ | v7.1.4 source | notes |
 |---|---|---|
 | `models/` | `public/models/` | props, `weapons/` (incl. `weapon_<w>_<mid>.gltf` remodels), `melee/`, `attach/` and the cosmetic dirs `hats/ body/ back/ waist/ faces/ shoes/ pets/ charms/ wrist/ collectibles/ tickets/`. `.obj`, plus `.gltf` for the animated (`hasAnim`) items, loaded by `client/src/gltf.c` |
-| `textures/` | `public/textures/` | model textures, `previews/` (item previews, `UTILS.getPreview`), `badges/`, `playercards/` (`.webp`), `classes/`, ... |
+| `textures/` | `public/textures/` | model textures, `previews/` (item previews, `UTILS.getPreview`), `badges/`, `playercards/` (`.webp`, plus the importer's `.webp.png` sidecars for the native HTML engine), `classes/`, ... |
 | `sound/` | `public/sound/` | weapon, class and per-skin sounds |
 | `videos/` | `public/videos/` | skin `video` textures |
 | `user-assets/` | `public/user-assets/` | map/AI user assets (`model.gltf`/`.glb`, `sound.mp3`, ...) |

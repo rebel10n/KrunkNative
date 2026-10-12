@@ -1068,7 +1068,12 @@ static void assign_containers(LayoutTree *t, Box *b, Box *root)
             Box *cb = p;
             int fixed = b->style->position == CSS_POSITION_FIXED;
             while (cb && cb != root) {
-                if ((cb->flags & BOXF_HAS_TRANSFORM) || (!fixed && (cb->flags & BOXF_POSITIONED))) break;
+                /* a filter makes the box the containing block of its abs and fixed
+                 * descendants, like a transform (Filter Effects 1 §5, Chrome): the v7
+                 * death screen's player card banner (img.death-row-bottom-bg in the
+                 * drop-shadow'ed .death-row-bottom) */
+                if ((cb->flags & BOXF_HAS_TRANSFORM) || (cb->style && cb->style->filter_count > 0)
+                    || (!fixed && (cb->flags & BOXF_POSITIONED))) break;
                 cb = cb->parent;
             }
             if (!cb) cb = root;

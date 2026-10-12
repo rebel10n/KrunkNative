@@ -12,6 +12,7 @@ v3.1.1 scenarios are in git history (doc/ref/krunker-v3.1.1/ keeps their referen
 """
 import json
 import os
+import re
 import sys
 
 sys.dont_write_bytecode = True
@@ -64,11 +65,14 @@ def scale(regs, k):
 
 scen = {}
 regions = {}
+inline_rects = set()  # region files written with one-line "rect": [x, y, w, h] arrays
 
 
-def add(name, scenario, regs):
+def add(name, scenario, regs, one_line_rects=False):
     scen[name] = scenario
     regions[name] = regs
+    if one_line_rects:
+        inline_rects.add(name)
 
 
 # --------------------------------------------------------------------------- menu
@@ -434,7 +438,10 @@ for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3
 # open (v7ref.js state right-object-cube). The 3D view and the stats box show the cube differently
 # (three.js vs the native view): only the toolbar, the version text and the right panel are compared.
 rc = rects("editor/right-object-cube")
-regs = [r for r in editor_chrome(rc) if r["name"] in ("toolbar", "version", "left-panel")]
+# The left panel is not compared here (editor-1920 compares the Essential panel).
+regs = [R(r["name"], r["rect"], r["kind"], r.get("note"), skip=True, max_pct=r["max_pct"], fuzz=r["fuzz"])
+        if r["name"] == "left-panel" else r
+        for r in editor_chrome(rc) if r["name"] in ("toolbar", "version", "left-panel")]
 regs.append(R("right-panel", pad(rc["right-panel"], 0, EW, EH), "text", "right panel: the Cube's object panel (Transform, Style open)", max_pct=4.0))
 add("editor-inspector", {"ref": REF + "/editor/right-object-cube.png", "size": [EW, EH], "background": "#000000",
                          "state": {"page": "editor", "pageQuery": "new",
@@ -443,6 +450,35 @@ add("editor-inspector", {"ref": REF + "/editor/right-object-cube.png", "size": [
                                    "anim_time": ANIM},
                          "frames": 3, "note": "Map editor, new map, a new Cube selected: the object panel (Transform, Style open)."},
     regs)
+
+# the KrunkScript window (editor WP5, editor_script.c). v7.1.4 opens scripting.html as a browser
+# window, so there is no rects capture: the reference is v7's own page (recovered,
+# tools/editor/fetch_scripting_ref.sh) in an iframe at that window's place (tools/editor/v7ref.js
+# scripting), and the script-* rects are measured on scripting.png. The toolbar and version rects
+# are the editor-1920 chrome's.
+regs = [{k: v for k, v in r.items() if r["name"] == "toolbar" or k != "note"}
+        for r in editor_chrome(rects("editor/editor-1920")) if r["name"] in ("toolbar", "version")]
+regs += [
+    R("script-tabs", [192, 94, 400, 36], "text", "#tabHolder: Client (selected) / Server, GameFont 12px"),
+    {"name": "script-strip", "rect": [600, 94, 940, 36], "kind": "flat",  # the file defaults (fuzz 6, max 0.5%)
+     "note": "the empty tab strip (KrunkNative's close button sits right of it, at right:150px)"},
+    R("script-label", [1585, 94, 143, 36], "text", "#label KRUNKSCRIPT"),
+    R("script-gutter", [192, 130, 50, 656], "text",
+      "line numbers and fold markers (CodeMirror measured its gutters at 22px: numbers end at 32px)"),
+    R("script-code", [242, 130, 1486, 656], "text",
+      "the client template in material-palenight colours; KrunkNative's caret is drawn (focused), v7's unfocused window has none"),
+    R("script-compile", [192, 787, 1536, 57], "text",
+      "#compile: Validate Script. The window ends at 80% of 937px (843.3): the native engine snaps it 1px higher than Chromium (~3% of this region)",
+      max_pct=4.5),
+]
+add("editor-script-1920", {"ref": REF + "/editor/scripting.png", "size": [EW, EH], "background": "#000000",
+                           "state": {"page": "editor", "pageQuery": "new",
+                                     "pageActions": ["closeWindow", "KE.kn.script('script:open')"], "anim_time": ANIM},
+                           "frames": 3,
+                           "note": "Map editor, new map, the KrunkScript window (Scripting / key 0) on the client template. v7.1.4 opens "
+                                   "scripting.html as a browser window; the reference is v7's own page (recovered, "
+                                   "tools/editor/fetch_scripting_ref.sh) in an iframe at that window's place (tools/editor/v7ref.js scripting)."},
+    regs, one_line_rects=True)
 
 
 def main():
@@ -456,9 +492,11 @@ def main():
             json.dump(scen[name], fh, indent=2)
             fh.write("\n")
         regs = [r for r in regions[name] if r["rect"][2] > 1 and r["rect"][3] > 1]
+        text = json.dumps({"scenario": name, "defaults": {"fuzz": 6, "max_pct": 0.5}, "regions": regs}, indent=2)
+        if name in inline_rects:
+            text = re.sub(r'"rect": \[\s*(-?\d+),\s*(-?\d+),\s*(-?\d+),\s*(-?\d+)\s*\]', r'"rect": [\1, \2, \3, \4]', text)
         with open(os.path.join(HERE, "regions", name + ".json"), "w") as fh:
-            json.dump({"scenario": name, "defaults": {"fuzz": 6, "max_pct": 0.5}, "regions": regs}, fh, indent=2)
-            fh.write("\n")
+            fh.write(text + "\n")
         print("%-24s %2d regions (%d skipped)" % (name, len(regs), sum(1 for r in regs if r.get("skip"))))
 
 

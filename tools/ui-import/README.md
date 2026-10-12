@@ -87,6 +87,9 @@ mode) copies v7.1.4's `public/{models,textures,sound,videos,user-assets,scares}`
 and writes `assets/skins.json` (the v7 store table: `v7_skins.js` unpacks `public/skins.jspck`
 with v7's own `src/shim/jspck.js` and merges `store.js` templates) and `assets/previews.json`.
 It refuses a skin table that would move an existing store index (inventory `skin_id`).
+It also decodes every real WebP it copied (the player card banners, `textures/playercards/`)
+into a `<name>.webp.png` sidecar (Pillow, first frame): the native HTML engine has no WebP
+decoder and reads the sidecar for a `.webp` URL; the web build's browser decodes the `.webp`.
 `gen_cosmetics.py` then regenerates `client/src/cosmetics_table.c` from `assets/skins.json`
 (`--check`: exit 1 when out of date), and `gen_viewer_store.js` the client's full store table
 (below). `v7_store.js` evaluates v7's own `store.js` / `itemTypes.js` / `config.js` (read-only)

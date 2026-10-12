@@ -20,6 +20,12 @@ refused when it would move an existing store index (the array position is the in
 ``skin_id``): every index of the current ``assets/skins.json`` must keep its ``id``, ``weapon``
 and item type (v7 retyped HAT 1 -> HEAD 15 and BODY 2 -> BACK 14; those keep their slot).
 
+v7 serves the player card banners (``textures/playercards/card_<id>.webp``) as WebP, which
+the native HTML engine can't decode (stb_image has none; client/src/html/engine/image.c): the
+v7 import also writes ``<name>.webp.png`` next to every real WebP it copied (Pillow, the first
+frame of animated ones, RGBA), and the engine reads that sidecar for a ``.webp`` URL. The page
+and the C UI keep v7's ``.webp`` URLs, which the web build's browser decodes itself.
+
 Both modes copy byte-identical, leave identical files alone and delete nothing; v7 files
 replace the v3 files of the same name. The client builds asset URLs with
 ``html_dom_asset_url()`` (client/include/html_dom.h) and opens files through
@@ -136,6 +142,44 @@ def sync_dirs(src_root, assets, dirs, check, quiet=False):
     return total, total_bytes, differ, differ_bytes, new
 
 
+# ---------------------------------------------------------------- WebP sidecars
+
+def is_webp(path):
+    with open(path, "rb") as fh:
+        head = fh.read(12)
+    return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+
+
+def webp_sidecars(assets, dirs, check, quiet=False):
+    """<name>.webp.png for every real WebP under dirs of assets (a .webp holding PNG data needs
+    none: stb_image decodes it). Returns (sidecars, differ)."""
+    try:
+        import io
+        from PIL import Image
+    except ImportError:
+        sys.exit("game_assets.py: Pillow (python3-pillow) is required to decode the .webp player cards for the native client")
+    count = differ = 0
+    for rel_dir in dirs:
+        for rel in files_under(assets, rel_dir):
+            if not rel.endswith(".webp") or not is_webp(os.path.join(assets, rel)):
+                continue
+            count += 1
+            with Image.open(os.path.join(assets, rel)) as im:
+                im.seek(0)
+                out = io.BytesIO()
+                im.convert("RGBA").save(out, "PNG")
+            dest = os.path.join(assets, rel + ".png")
+            if same_content(dest, out.getvalue()):
+                continue
+            differ += 1
+            if check:
+                if not quiet:
+                    print("%s: %s.png" % ("missing" if not os.path.exists(dest) else "differs", rel))
+                continue
+            write_atomic(dest, data=out.getvalue())
+    return count, differ
+
+
 # ---------------------------------------------------------------- v7 skin table
 
 def v7_skins(v7_root):
@@ -241,13 +285,15 @@ def main():
 
     total, total_bytes, written, written_bytes, new = sync_dirs(src, args.assets, dirs, args.check, quiet=args.size)
     tables = import_v7_tables(os.path.dirname(src.rstrip("/")), args.assets, args.check) if args.v7 else 0
+    sidecars, sidecars_differ = webp_sidecars(args.assets, dirs, args.check, quiet=args.size) if args.v7 else (0, 0)
 
     verb = "differ" if args.check else "copied"
     print("game assets%s: %d files, %s (%s); %d %s (%d new), %s"
           % (" v7" if args.v7 else "", total, mib(total_bytes), ", ".join(dirs), written, verb, new, mib(written_bytes)))
     if args.v7:
         print("tables: %d %s (skins.json, previews.json)" % (tables, verb))
-    if args.check and (written or tables):
+        print("webp sidecars: %d .webp.png, %d %s" % (sidecars, sidecars_differ, "differ" if args.check else "written"))
+    if args.check and (written or tables or sidecars_differ):
         sys.exit(1)
 
 

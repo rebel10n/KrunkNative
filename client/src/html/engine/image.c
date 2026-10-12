@@ -513,6 +513,37 @@ int image_decode_data_url(const char *url, unsigned char **out, size_t *out_len)
 
 /* Cache key of a data: URL: its length + FNV-1a 64 (the URL itself can be far
  * longer than IMAGE_KEY_MAX). */
+/* WebP.  stb_image has no WebP decoder and the engine vendors none: v7's only
+ * WebP images are the player card banners (assets/textures/playercards/
+ * card_<id>.webp, viewer_skin_preview_path() with texExt "webp").  At import time
+ * tools/ui-import/game_assets.py --v7 decodes every real WebP of the asset tree
+ * into "<name>.webp.png" next to it (the first frame of an animated one; stb
+ * gives the first frame of a GIF too), and a ".webp" that stb can't decode is
+ * read from that sidecar.  Some of v7's .webp files are PNG data, which stb
+ * decodes directly.  The page keeps v7's URLs: the web build's browser decodes
+ * the .webp itself. */
+#define IMAGE_WEBP_EXT ".webp"
+#define IMAGE_WEBP_SIDECAR ".png"
+
+static int image_is_webp_key(const char *key) {
+    const size_t len = strlen(key), ext = sizeof(IMAGE_WEBP_EXT) - 1;
+    return len > ext && !strcmp(key + len - ext, IMAGE_WEBP_EXT);
+}
+
+static unsigned char *image_load_webp_sidecar(const ImageCache *cache, const char *key, int *w, int *h) {
+    char sidecar[IMAGE_KEY_MAX + sizeof(IMAGE_WEBP_SIDECAR)];
+    snprintf(sidecar, sizeof(sidecar), "%s%s", key, IMAGE_WEBP_SIDECAR);
+
+    unsigned char *bytes = NULL;
+    size_t len = 0;
+    if (!image_read(cache, sidecar, &bytes, &len)) return NULL;
+
+    int channels = 0;
+    unsigned char *px = len <= (size_t) INT32_MAX ? stbi_load_from_memory(bytes, (int) len, w, h, &channels, 4) : NULL;
+    free(bytes);
+    return px;
+}
+
 static void image_data_url_key(const char *url, char *key, size_t cap) {
     uint64_t h = 1469598103934665603ull;
     size_t n = 0;
@@ -561,10 +592,15 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
     }
     free(bytes);
 
+    const int webp = !px && !svg && !data_url && image_is_webp_key(slot->key);
+    if (webp) px = image_load_webp_sidecar(cache, slot->key, &w, &h);
+
     if (!px || w <= 0 || h <= 0) {
         if (svg) free(px);
         else stbi_image_free(px);
-        image_fail(slot, svg ? "unsupported SVG" : stbi_failure_reason() ? stbi_failure_reason() : "decode failed");
+        image_fail(slot, svg ? "unsupported SVG"
+                         : webp ? "WebP without its .webp.png sidecar (tools/ui-import/game_assets.py --v7)"
+                         : stbi_failure_reason() ? stbi_failure_reason() : "decode failed");
         return;
     }
 
