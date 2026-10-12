@@ -27,6 +27,8 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <process.h>
+#else
+#include <unistd.h> // mkdtemp (macOS declares it here, not in stdlib.h)
 #endif
 
 static int g_failures;
