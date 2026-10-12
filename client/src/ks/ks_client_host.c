@@ -307,6 +307,10 @@ static void player_model_set_visible(const Player *player, const int visible) {
         mesh_set(arms->weapon_left, visible);
         mesh_set(arms->weapon_right, visible);
         mesh_set(arms->attachment, visible);
+        mesh_set(arms->charm_mount, visible);
+        mesh_set(arms->charm, visible);
+        mesh_set(arms->wrist, visible);
+        if (arms->wrist_model) gltf_instance_set_visible(arms->wrist_model, visible);
     }
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         mesh_set(pm->cosmetics[i], visible);

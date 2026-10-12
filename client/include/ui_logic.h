@@ -416,9 +416,10 @@ void ui_loadout_toggle_log(HtmlElem obj);        // windows[34].toggleLog
 int  ui_loadout_secondary(int class_index);     // selected secondary weapon id (secondaryInd, default 2), -1 = class has none
 int  ui_loadout_streak(int slot);                // streakIndex1..3 (data/streaks.js index for slot 0..2), -1 none
 int  ui_loadout_skin_color(void);                // selected skin colour as 0xRRGGBB, -1 = class colour
-void ui_loadout_cosmetics(PlayerCosmetics *out); // skin colour + hat/back/waist/face/dye picks for ENT and the preview
+void ui_loadout_cosmetics(PlayerCosmetics *out); // skin colour + hat/body/waist/face/dye picks for ENT and the preview
 void ui_loadout_ent_look(int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins); // ENT: cosmetics + weapon/melee skins, Random resolved to owned items
 void ui_loadout_preview_skins(int class_index, PlayerSkins *out); // the class preview's weapon/melee skins (Random shows none)
+void ui_loadout_cosmetics_v7(int class_index, PlayerCosmeticsV7 *out, int resolve_random); // WP-F: head/back/shoe/pet/wrist/charms/card picks (ENT V9, preview)
 int  ui_loadout_spray(void);                    // ENT ent[1]: the selected spray (sprayindex), Random resolved, unowned -> 0
 void ui_loadout_class_bubble(int index);         // selectClass speech line
 void ui_loadout_switch_tab(int tab);             // windows[2].switchTab(tab, true): Class / Loadout / Customize / Other

@@ -7,6 +7,20 @@ const ViewerSkin *viewer_skin(const int index) {
     return index >= 0 && index < g_viewer_skin_count ? &g_viewer_skins[index] : NULL;
 }
 
+const ViewerDye *viewer_dye(const int index) {
+    int lo = 0, hi = g_viewer_dye_count;
+    while (lo < hi) {
+        const int mid = lo + (hi - lo) / 2;
+        if (g_viewer_dyes[mid].index < index) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < g_viewer_dye_count && g_viewer_dyes[lo].index == index ? &g_viewer_dyes[lo] : NULL;
+}
+
+const ViewerCharmMount *viewer_charm_mount(const int weapon_id) {
+    return weapon_id >= 0 && weapon_id < VIEWER_CHARM_WEAPONS && g_viewer_charm_mounts[weapon_id].set ? &g_viewer_charm_mounts[weapon_id] : NULL;
+}
+
 const ViewerOptionList *viewer_option_list(const ViewerListKind kind, const int key, const int season) {
     for (int i = 0; i < g_viewer_list_count; i++) {
         const ViewerOptionList *list = &g_viewer_lists[i];

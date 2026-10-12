@@ -76,8 +76,50 @@ const rows = store.skins.map((s, i) => {
   if (s.rAnim) fields.push(`.r_anim = ${f(s.rAnim)}`, `.r_anim_axis = '${(s.rAnimA || 'y').toLowerCase()}'`);
   if (s.movT != null) fields.push(`.mov_t = ${f(s.movT)}`);
   if (s.pulsT != null) fields.push(`.puls_t = ${f(s.pulsT === true ? 1 : num(s.pulsT, 0))}`); // one skin has pulsT: true
+  // v7.1.4 player-model and material-effect fields (players.js generateMeshes / generateMeshData,
+  // playerMesh.js, pets.js, render.js getMat): flags2 + the values below
+  const flags2 = [];
+  const flag2 = (cond, name) => { if (cond) flags2.push(name); };
+  flag2(s.noBody, 'VS2_NO_BODY'); flag2(s.noHair, 'VS2_NO_HAIR'); flag2(s.randomLeg, 'VS2_RANDOM_LEG');
+  flag2(s.noSleeve, 'VS2_NO_SLEEVE'); flag2(s.noLeftSleeve, 'VS2_NO_LEFT_SLEEVE'); flag2(s.noRightHand, 'VS2_NO_RIGHT_HAND');
+  flag2(s.noCharm, 'VS2_NO_CHARM'); flag2(s.projection, 'VS2_PROJECTION'); flag2(s.useSkin, 'VS2_USE_SKIN');
+  flag2(s.shaderNum != null, 'VS2_SHADER'); flag2(s.video != null, 'VS2_VIDEO'); flag2(s.particle != null, 'VS2_PARTICLE');
+  flag2(s.snd, 'VS2_SND'); flag2(s.killSnd, 'VS2_KILL_SND'); flag2(s.stepSnd, 'VS2_STEP_SND'); flag2(s.jumpSnd, 'VS2_JUMP_SND');
+  flag2(s.reloadSnd, 'VS2_RELOAD_SND'); flag2(s.spraySnd != null, 'VS2_SPRAY_SND'); flag2(s.explode, 'VS2_EXPLODE');
+  flag2(s.sameEnv, 'VS2_SAME_ENV');
+  if (flags2.length) fields.push(`.flags2 = ${flags2.join(' | ')}`);
+  if (s.shaderNum != null) fields.push(`.shader_num = ${s.shaderNum}`);
+  if (s.video != null) fields.push(`.video = ${s.video}`);
+  if (s.particle != null) fields.push(`.particle = ${s.particle}`);
+  if (s.spraySnd != null) fields.push(`.spray_snd = ${num(s.spraySnd, 0)}`);
+  opt('legLen', 'leg_len', 0); opt('sitOffX', 'sit_off_x', 0); opt('syRot', 'sy_rot', 0); opt('szRot', 'sz_rot', 0);
+  opt('glowInt', 'glow_int', 0); opt('minGlo', 'min_glo', 0); opt('rgbS', 'rgb_s', 0); opt('rgbT', 'rgb_t', 0);
+  opt('rAnimT', 'r_anim_t', 0); opt('rAnimM', 'r_anim_m', 0); opt('movD', 'mov_d', 0); opt('movE', 'mov_e', 0);
+  opt('rotT', 'rot_t', 0); opt('spd', 'spd', 0);
+  const hold = (k) => num(s[k], 0) || 0;
+  if (['leftHoldX', 'leftHoldY', 'leftHoldZ', 'rightHoldX', 'rightHoldY', 'rightHoldZ'].some((k) => num(s[k], 0))) {
+    fields.push(`.left_hold = {${f(hold('leftHoldX'))}, ${f(hold('leftHoldY'))}, ${f(hold('leftHoldZ'))}}`);
+    fields.push(`.right_hold = {${f(hold('rightHoldX'))}, ${f(hold('rightHoldY'))}, ${f(hold('rightHoldZ'))}}`);
+  }
   return `    /* ${i} */ {${fields.join(', ')}},`;
 });
+
+// Dyes (type 5): the colour overrides of players.js generateMeshes. A colour may be a list the
+// client picks from at random per model (UTILS.getRandom); up to 4 entries are kept.
+const DYE_PARTS = ['skinCol', 'shirtCol', 'sleeveCol', 'pantsCol', 'waistCol', 'shoeCol', 'hairCol'];
+const dyeRows = store.skins.filter((s) => s.type === 5).map((s) => {
+  const parts = DYE_PARTS.map((k) => {
+    const v = s[k];
+    const list = v == null ? [] : (Array.isArray(v) ? v : [v]).map(col).filter((c) => c >= 0).slice(0, 4);
+    return `{${list.length}, {${[...list, ...[-1, -1, -1, -1]].slice(0, 4).join(', ')}}}`;
+  });
+  return `    {${s.index}, {${parts.join(', ')}}},`;
+});
+
+// The weapons' charm mounts (v7 src/data/weapons.js charm, charmM{X,Y,Z}Off, charmMScl,
+// charm{X,Y,Z}Off, charmScl) from the WP-B dump shared/tests/data/v7/weapons.json, by weapon id.
+const weaponsJson = JSON.parse(fs.readFileSync(path.join(REPO, 'shared/tests/data/v7/weapons.json'), 'utf8'));
+const charmRows = weaponsJson.map((w, id) => w && w.charm ? `    [${id}] = {.set = 1, .mount = {${f(num(w.charmMXOff, 0))}, ${f(num(w.charmMYOff, 0))}, ${f(num(w.charmMZOff, 0))}}, .mount_scl = ${f(num(w.charmMScl, 1))}, .offset = {${f(num(w.charmXOff, 0))}, ${f(num(w.charmYOff, 0))}, ${f(num(w.charmZOff, 0))}}, .scl = ${f(num(w.charmScl, 1))}},` : null).filter(Boolean);
 
 const previews = Object.keys(store.previews).map((w) => {
   const p = store.previews[w];
@@ -153,6 +195,17 @@ ${config.skinColors.map((c) => `    {${c.id}, ${c.col}, ${cstr(c.name)}},`).join
 const int g_viewer_skin_color_count = ${config.skinColors.length};
 
 const int g_viewer_current_season = ${config.currentSeason};
+
+// Dyes: store index, then {count, colours} for skin, shirt, sleeve, pants, waist, shoe, hair
+const ViewerDye g_viewer_dyes[] = {
+${dyeRows.join('\n')}
+};
+const int g_viewer_dye_count = ${dyeRows.length};
+
+// Weapon charm mounts by weapon id (weapons.js)
+const ViewerCharmMount g_viewer_charm_mounts[VIEWER_CHARM_WEAPONS] = {
+${charmRows.join('\n')}
+};
 
 // Dropdown option lists: pairs of (label skin index, value), -1/-1 = "Default".
 ${listData.join('\n')}

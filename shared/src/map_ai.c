@@ -106,7 +106,7 @@ static void bot_data_args(const cJSON *o, MapBotArgs *a) {
     static const struct { const char *json, *key; } k_cosmetics[] = {
         {"btcpr", "primSkin"}, {"btcd", "dye"}, {"btcf", "face"}, {"btcht", "hat"}, {"btcbk", "back"},
         {"btcb", "body"}, {"btcw", "waist"}, {"btcm", "melee"},
-        // head (btch), wrist (btcwr), shoes (btcs), pet (btcp): no KN slot (bots.c ignores them)
+        {"btch", "head"}, {"btcwr", "wrist"}, {"btcs", "shoes"}, {"btcp", "pet"}, // v7.1.4 slots (WP-F)
     };
     for (size_t i = 0; i < sizeof(k_cosmetics) / sizeof(k_cosmetics[0]); i++) {
         const int v = (int) bot_json_number(o, k_cosmetics[i].json, 1);

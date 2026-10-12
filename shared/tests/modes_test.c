@@ -534,7 +534,7 @@ static void test_infect(Game *game) {
     tick(game, 20.5f, 0.5f);
     Player *zombie = first_on_team(game, 2);
     CHECK(zombie && team_count(game, 2) == 1 && !zombie->active, "infection: one player, killed");
-    CHECK(zombie && zombie->cosmetics.skin_color == MODE_INFECTED_SKIN && zombie->cosmetics.hat == MODE_INFECTED_HAT, "Infected outfit");
+    CHECK(zombie && zombie->cosmetics.skin_color == MODE_INFECTED_SKIN && zombie->cosmetics_v7.head == MODE_INFECTED_HAT, "Infected outfit (v7 headIndex)");
 
     player_spawn(zombie);
     CHECK(zombie->class_index == 9 && zombie->weapon && zombie->weapon->melee, "Infected respawn as class 9 with the knife");

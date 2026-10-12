@@ -264,14 +264,14 @@ typedef struct {
 #define K_SB(n, f) {n, KT_BOOL, KW_SPAWN, KC_I32, offsetof(BotSpawnOptions, f), 0}
 #define K_IGN(n) {n, KT_NUM, KW_IGNORE, KC_I32, 0, 0}
 
-// server/index.ts BOT_CONFIG_TYPES (+ NextBot's retreat). body / back are both v3.1.1's back
-// slot (store type 2); head / pet / shoes / wrist have no v3.1.1 slot.
+// server/index.ts BOT_CONFIG_TYPES (+ NextBot's retreat). body is store type 2, back type 14,
+// head type 15 (v7.1.4 slots, WP-F).
 static const BotKey k_keys[] = {
     K_CF("accuracy", accuracy),
     K_CB("attackTarget", attack_target),
     {"autoRespawn", KT_BOOL, KW_AUTORESPAWN, KC_U8, 0, 0},
     K_SI("back", back),
-    K_SI("body", back),
+    K_SI("body", body),
     K_CB("canRespawn", can_respawn),
     K_SI("class", class_index),
     {"clan", KT_STR, KW_CFG, KC_STR, offsetof(BotConfig, clan), sizeof(((BotConfig *) 0)->clan)},
@@ -287,7 +287,7 @@ static const BotKey k_keys[] = {
     K_CB("godMode", god_mode),
     K_SI("hairColor", hair_color),
     K_SI("hat", hat),
-    K_IGN("head"),
+    K_SI("head", head),
     K_CF("healthMlt", health_mlt),
     K_CB("joinMessage", join_message),
     K_CB("leaveMessage", leave_message),
@@ -299,7 +299,7 @@ static const BotKey k_keys[] = {
     K_CB("noRecoil", no_recoil),
     K_CB("nodNo", nod_no),
     K_CB("nodYes", nod_yes),
-    K_IGN("pet"),
+    K_SI("pet", pet),
     K_CI("premium", premium),
     K_SB("persistent", persistent),
     K_SI("primSkin", prim_skin),
@@ -311,7 +311,7 @@ static const BotKey k_keys[] = {
     K_CB("roam", roam),
     K_CB("scoreOnDeath", score_on_death),
     K_SI("secondary", secondary),
-    K_IGN("shoes"),
+    K_SI("shoes", shoes),
     K_SI("skinColor", skin_color),
     K_CB("slideHop", slide_hop),
     K_CF("speedMlt", speed_mlt),
@@ -325,7 +325,7 @@ static const BotKey k_keys[] = {
     K_CB("voiceChat", voice_chat),
     K_SI("waist", waist),
     K_CB("watchTarget", watch_target),
-    K_IGN("wrist"),
+    K_SI("wrist", wrist),
 };
 #define BOT_KEY_COUNT ((int) (sizeof(k_keys) / sizeof(k_keys[0])))
 _Static_assert(sizeof(k_keys) / sizeof(k_keys[0]) <= 64, "BotAssignments.set has one bit per key");
@@ -402,7 +402,8 @@ int bot_parse_difficulty(const char *raw, float *out) {
 static void bot_spawn_options_none(BotSpawnOptions *o) {
     memset(o, 0, sizeof(*o));
     o->class_index = o->secondary = o->team = o->lives = o->persistent = o->force_class = -1;
-    o->prim_skin = o->hat = o->back = o->waist = o->face = o->dye = o->melee = o->skin_color = o->hair_color = -1;
+    o->prim_skin = o->hat = o->body = o->waist = o->face = o->dye = o->melee = o->skin_color = o->hair_color = -1;
+    o->head = o->back = o->shoes = o->pet = o->wrist = -1;
 }
 
 static void bot_assignments_init(BotAssignments *a) {
@@ -701,16 +702,31 @@ static void bot_roll_weapon_skins(const Game *game, GameBot *bot) {
 static void bot_roll_cosmetics(GameBot *bot) {
     const int cap = bot->config.cosmetic_rarity;
     PlayerCosmetics c = PLAYER_COSMETICS_NONE;
+    PlayerCosmeticsV7 v7 = PLAYER_COSMETICS_V7_NONE;
     if (bot->config.random_cosmetics) {
-        if (bot_chance(0.55)) c.hat = bot_pick_item(1, 0, cap);
-        if (bot_chance(0.3)) c.back = bot_pick_item(2, 0, cap);
+        // v7.1.4 NextBot.randomizeCosmetics rolls every slot; KrunkNative keeps its per-slot chances
+        // (a bot wearing all 11 slots looks nothing like a public lobby) and only one of hat / head
+        // and body / back, the non-premium rule.
+        if (bot_chance(0.35)) c.hat = bot_pick_item(1, 0, cap);
+        else if (bot_chance(0.35)) v7.head = bot_pick_item(15, 0, cap);
+        if (bot_chance(0.2)) c.body = bot_pick_item(2, 0, cap);
+        else if (bot_chance(0.25)) v7.back = bot_pick_item(14, 0, cap);
         if (bot_chance(0.15)) c.waist = bot_pick_item(6, 0, cap);
         if (bot_chance(0.12)) c.face = bot_pick_item(7, 0, cap);
         if (bot_chance(0.3)) c.dye = bot_pick_item(5, 0, cap);
+        if (bot_chance(0.3)) v7.shoe = bot_pick_item(8, 0, cap);
+        if (bot_chance(0.12)) v7.pet = bot_pick_item(9, 0, cap);
+        if (bot_chance(0.3)) v7.player_card = bot_pick_item(16, 0, cap);
     }
     const BotSpawnOptions *o = &bot->options;
     if (o->hat >= 0) c.hat = o->hat;
-    if (o->back >= 0) c.back = o->back;
+    if (o->body >= 0) c.body = o->body;
+    if (o->head >= 0) v7.head = o->head;
+    if (o->back >= 0) v7.back = o->back;
+    if (o->shoes >= 0) v7.shoe = o->shoes;
+    if (o->pet >= 0) v7.pet = o->pet;
+    if (o->wrist >= 0) v7.wrist = o->wrist;
+    bot->cosmetics_v7 = v7;
     if (o->waist >= 0) c.waist = o->waist;
     if (o->face >= 0) c.face = o->face;
     if (o->dye >= 0) c.dye = o->dye;
@@ -770,6 +786,9 @@ static void bot_broadcast_spawn(Game *game, const Player *p) {
     packet.class_index = p->class_index;
     packet.secondary_index = p->secondary_index;
     packet.cosmetics = p->cosmetics;
+    packet.attach_index = p->attach_index;
+    packet.head_mlt = p->head_mlt > 0.0f ? p->head_mlt : 1.0f;
+    packet.cosmetics_v7 = p->cosmetics_v7; // WP-F (bots have no account badge)
     packet.team = p->team;
     packet.health = p->health;
     packet.max_health = p->max_health;
@@ -869,6 +888,7 @@ static int bot_spawn(Game *game, GameBot *bot) {
     p->class_index = bot->class_index;
     p->secondary_index = bot->secondary_index;
     p->cosmetics = bot->cosmetics;
+    p->cosmetics_v7 = bot->cosmetics_v7;
     p->skins = bot->skins;
     p->spray_index = 0;
     p->slid_cont = 1;

@@ -83,7 +83,8 @@ typedef struct {
 typedef struct {
     char name[PLAYER_NAME_SIZE];
     int class_index, secondary, team, lives, persistent, force_class;
-    int prim_skin, hat, back, waist, face, dye, melee, skin_color, hair_color;
+    int prim_skin, hat, body, waist, face, dye, melee, skin_color, hair_color;
+    int head, back, shoes, pet, wrist; // v7.1.4 slots (WP-F): headIndex, backIndex, shoeIndex, petIndex, wristIndex
 } BotSpawnOptions;
 
 // The fields a key=value list set (bot_add / bot_config): what was given wins over defaults.
@@ -115,6 +116,7 @@ typedef struct {
     BotConfig config;
     BotSpawnOptions options;
     PlayerCosmetics cosmetics;
+    PlayerCosmeticsV7 cosmetics_v7; // WP-F: head / back / shoes / pet / wrist
     PlayerSkins skins;
     int class_index, secondary_index, team, lives;
     unsigned char persistent:1, can_respawn:1, joined:1, cosmetics_rolled:1, pinned:1, pending:1, was_active:1;

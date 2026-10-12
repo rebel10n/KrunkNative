@@ -313,9 +313,12 @@ static void test_wpc_peer_mix(void) {
     ent_new.attach_index = 1;
     ent_new.chall_mode = 1;
     ent_new.anon_mode = 1;
+    // WP-F: a HEAD item in the v3.1.1 hat slot, the pet and shoes in ENT V9; the custom badge hidden
+    ent_new.cosmetics_v7 = (PlayerCosmeticsV7) {.head = -1, .back = -1, .shoe = 2860, .pet = 2964, .wrist = -1, .charms = {-1, -1}, .player_card = -1, .badge = 7};
+    ent_new.show_badges = PLAYER_SHOW_BADGES_ALL & ~PLAYER_SHOW_BADGE_CUSTOM;
     mix_join(&old, &hello_old, sizeof(hello_old), &ent_old, (uint16_t) NET_ENT_PACKET_V7_SIZE);
     mix_join(&bare, &hello_old, 2, &ent_old, (uint16_t) NET_ENT_PACKET_V7_SIZE); // major.minor only: patch 0
-    mix_join(&now, &hello_new, sizeof(hello_new), &ent_new, (uint16_t) NET_ENT_PACKET_V8_SIZE);
+    mix_join(&now, &hello_new, sizeof(hello_new), &ent_new, (uint16_t) NET_ENT_PACKET_V9_SIZE);
     for (int f = 0; f < 30; f++) {
         pump(&old, 1);
         pump(&bare, 1);
@@ -325,7 +328,7 @@ static void test_wpc_peer_mix(void) {
     const NetPacket *init = last(&now, NET_PACKET_INIT);
     NetInitPacket init_now = {0};
     CHECK(init && net_packet_read_init(&init_now, init) && init_now.minor == NET_PROTOCOL_MINOR && init_now.patch == NET_PROTOCOL_PATCH, "INIT announces 1.%d.%d", init_now.minor, init_now.patch);
-    CHECK(net_ent_size_for(init_now.major, init_now.minor, init_now.patch) == NET_ENT_PACKET_V8_SIZE, "a 1.3.1 server reads ENT V8");
+    CHECK(net_ent_size_for(init_now.major, init_now.minor, init_now.patch) == NET_ENT_PACKET_V9_SIZE, "a 1.3.1 server reads ENT V9");
 
     NetSpawnPacket me_old, me_bare, me_now, seen;
     const NetPacket *packet = spawn_of(&old, 1, &me_old);
@@ -333,8 +336,10 @@ static void test_wpc_peer_mix(void) {
     packet = spawn_of(&bare, 1, &me_bare);
     CHECK(packet && packet->length == NET_SPAWN_PACKET_V2_SIZE, "2-byte HELLO: patch 0, SPAWN V2 (%u)", packet ? packet->length : 0);
     packet = spawn_of(&now, 1, &me_now);
-    CHECK(packet && packet->length == NET_SPAWN_PACKET_V3_SIZE && me_now.attach_index == 1 && me_now.head_mlt == 1.0f,
-          "1.3.1 peer: SPAWN V3 with its ENT V8 attachIndex %d, headMlt %.2f", packet ? me_now.attach_index : -9, (double) me_now.head_mlt);
+    CHECK(packet && packet->length == NET_SPAWN_PACKET_V4_SIZE && me_now.attach_index == 1 && me_now.head_mlt == 1.0f,
+          "1.3.1 peer: SPAWN V4 with its ENT V9 attachIndex %d, headMlt %.2f", packet ? me_now.attach_index : -9, (double) me_now.head_mlt);
+    CHECK(packet && me_now.cosmetics_v7.pet == 2964 && me_now.cosmetics_v7.shoe == 2860 && me_now.cosmetics_v7.badge == -1,
+          "1.3.1 peer: SPAWN V4 carries its pet %d / shoes %d, no badge (sandbox guest, hidden) %d", me_now.cosmetics_v7.pet, me_now.cosmetics_v7.shoe, me_now.cosmetics_v7.badge);
     // the 1.3.0 peer sees the 1.3.1 player's SPAWN as V2; the 1.3.1 peer the 1.3.0 one's as V3 (attachIndex 0)
     int old_sees_new = 0, new_sees_old = 0;
     for (int i = 0; i < old.count; i++) {
@@ -343,7 +348,7 @@ static void test_wpc_peer_mix(void) {
     }
     for (int i = 0; i < now.count; i++) {
         if (now.packets[i].type == NET_PACKET_SPAWN && net_packet_read_spawn(&seen, &now.packets[i]) && seen.uid == me_old.uid && seen.active)
-            new_sees_old = now.packets[i].length == NET_SPAWN_PACKET_V3_SIZE && seen.attach_index == DEFAULT_ATTACHMENT_INDEX;
+            new_sees_old = now.packets[i].length == NET_SPAWN_PACKET_V4_SIZE && seen.attach_index == DEFAULT_ATTACHMENT_INDEX && seen.cosmetics_v7.pet == -1;
     }
     CHECK(old_sees_new && new_sees_old, "SPAWN of the other peer by the receiver's protocol (old %d new %d)", old_sees_new, new_sees_old);
 

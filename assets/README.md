@@ -10,7 +10,7 @@ KrunkNative is being upgraded in place to Krunker v7.1.4 (`doc/v7/decisions.md`)
 content set with:
 
 ```sh
-make assets-import-v7    # python3 -I tools/ui-import/game_assets.py --v7 + gen_cosmetics.py
+make assets-import-v7    # python3 -I tools/ui-import/game_assets.py --v7 + gen_viewer_store.js
 make assets-check-v7     # drift check only: lists missing/different files, exit 1 on any
 ```
 
@@ -33,9 +33,9 @@ file of the same name when v7 changed it:
 (`services/brain/store.c`, `shared/src/bots.c`, inventory `skin_id`): the importer refuses to
 write a table that moves an existing index (same `id`, `weapon` and item type, except v7's
 HAT 1 -> HEAD 15 and BODY 2 -> BACK 14 retypes, which keep their slot). All 1917 v3.1.1 indices
-are unchanged in v7 (185 are retyped, 3 renamed). `client/src/cosmetics_table.c` is generated
-from it by `tools/ui-import/gen_cosmetics.py`, `client/src/viewer/viewer_store_table.c` (the client's
-full store table: store, inventory, loadout, market, viewer) by `tools/ui-import/gen_viewer_store.js`.
+are unchanged in v7 (185 are retyped, 3 renamed). `client/src/viewer/viewer_store_table.c` (the
+client's full store table: player model cosmetics, store, inventory, loadout, market, viewer) is
+generated from it by `tools/ui-import/gen_viewer_store.js` (checked by `test_gen_viewer_store.js`).
 Six GLTF remodels in the v7.1.4 reference are corrupt (invalid base64 buffers: weapon_2_12, 4_9,
 15_5, 16_3, 17_5, melee_63); v7 fails to load them too, KN falls back to the plain weapon / knife.
 

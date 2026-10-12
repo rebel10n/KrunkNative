@@ -392,8 +392,14 @@ static void net_send_spawn(ClientConnection *client, const Player *player, const
 
     strncpy(packet.name, player->name, sizeof(packet.name) - 1);
 
-    // WP-C: 1.3.0 and older peers only take the V2 SPAWN
-    const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_SPAWN_PACKET_V3_SIZE : NET_SPAWN_PACKET_V2_SIZE;
+    // WP-F: the v7.1.4 slots (players.js sync). badgeIndex only when the player shows its custom
+    // badge, and not in anonMode (except to itself and dev viewers).
+    packet.cosmetics_v7 = player->cosmetics_v7;
+    const int anon_hidden = player->anon_mode && !is_you && !(client->acct.flags & NET_PLAYER_INFO_DEV);
+    if (anon_hidden || !(player->show_badges & PLAYER_SHOW_BADGE_CUSTOM)) packet.cosmetics_v7.badge = -1;
+
+    // WP-C: 1.3.0 and older peers only take the V2 SPAWN; 1.3.1 peers prefix-read the WP-F V4
+    const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_SPAWN_PACKET_V4_SIZE : NET_SPAWN_PACKET_V2_SIZE;
     net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, size);
 }
 
@@ -479,6 +485,11 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->attach_index = client->attach_index; // WP-C: player.attachIndex = ent[12] (sent in SPAWN)
     client->player->chall_mode = client->chall_mode;     // WP-C: player.challMode = ent[7]
     client->player->anon_mode = client->anon_mode;       // WP-C: player.anonMode = ent[19]
+    // WP-F: ent[15] shoeIndex, [21] petIndex, [26] wristIndex, [30] charms, [31] backIndex, [32] headIndex,
+    // [33] playerCardIndex; ent[22..25] showBadges; the badge is the account's (stats.bdg)
+    client->player->cosmetics_v7 = client->cosmetics_v7;
+    client->player->cosmetics_v7.badge = client->acct.account_id ? client->acct.badge : -1;
+    client->player->show_badges = client->show_badges;
     // WP-B: v7 player.streakIndexs (ENT) and player.account for reqAccount streaks: a backend
     // account, or the host's own machine (the offline sandbox counts as an account, decisions.md)
     player_set_streak_indexes(client->player, client->streak_indexes_set ? client->streak_indexes : NULL);
@@ -771,6 +782,8 @@ void net_add_client(ClientConnection *client) {
     client->attach_index = DEFAULT_ATTACHMENT_INDEX;
     client->chall_mode = 0;
     client->anon_mode = 0;
+    client->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    client->show_badges = PLAYER_SHOW_BADGES_ALL;
     client->chat_limiter = (NetChatLimiter) {0};
     client->ping_seq = 0;
     client->ping_ms = -1;
@@ -1097,6 +1110,8 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             client->attach_index = ent.attach_index >= -1 && ent.attach_index < 256 ? ent.attach_index : DEFAULT_ATTACHMENT_INDEX;
             client->chall_mode = ent.chall_mode;
             client->anon_mode = ent.anon_mode;
+            client->cosmetics_v7 = ent.cosmetics_v7; // WP-F (ENT V9)
+            client->show_badges = ent.show_badges;
 
             // brain-linked: the first ENT waits for the JOIN / account lookup (server/src/accounts.c)
             if (accounts_gate_ent(client, ent.spectate)) net_resume_ent(client, ent.spectate);

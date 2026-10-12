@@ -180,15 +180,14 @@ assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) int
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
 .PHONY: assets-import-v7 assets-check-v7
-assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/cosmetics_table.c + viewer_store_table.c
+assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
-	$(PYTHON) -I tools/ui-import/gen_cosmetics.py
 	node tools/ui-import/gen_viewer_store.js
 
-assets-check-v7: ## Drift check of assets/, cosmetics_table.c and viewer_store_table.c against Krunker v7.1.4 (exit 1 on any difference)
+assets-check-v7: ## Drift check of assets/ and viewer_store_table.c against Krunker v7.1.4 (exit 1 on any difference)
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
-	$(PYTHON) -I tools/ui-import/gen_cosmetics.py --check
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
+	node tools/ui-import/test_gen_viewer_store.js
 
 .PHONY: maps-import-v7 maps-check-v7
 maps-import-v7: ## Import Krunker v7.1.4's 32 official maps into assets/maps/v7/ (+ ui/img/maps thumbnails; tools/maps/import_v7_maps.py)

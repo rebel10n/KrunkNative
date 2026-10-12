@@ -47,6 +47,8 @@ Player *player_init(Game *game) {
     player->last_killer_uid = -1;
     player->secondary_index = -1;
     player->cosmetics = PLAYER_COSMETICS_NONE;
+    player->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    player->show_badges = PLAYER_SHOW_BADGES_ALL;
     player->skins = PLAYER_SKINS_NONE;
     player->last_kill_time = -1e6f; // Krunker lastKill starts far in the past (no multi-kill on the first kill)
     player->last_spray = -1e6f;     // lastSpray 0 against Date.now(): the first spray is never on cooldown

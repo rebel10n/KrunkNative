@@ -1,6 +1,7 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <client.h>
+#include <cosmetics.h>
 #include <build_info.h>
 #include <vfx.h>
 #include <ai_render.h>
@@ -903,16 +904,20 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player->class_index = packet->class_index;
         player->secondary_index = packet->secondary_index;
         player->cosmetics = packet->cosmetics;
+        player->cosmetics_v7 = packet->cosmetics_v7;
         player->skins = skins;
         game_players_add(&client->game, player);
         player_spawn(player);
     } else if (!player->active || !player->loadout_size || player->class_index != packet->class_index || player->secondary_index != packet->secondary_index ||
                memcmp(&player->cosmetics, &packet->cosmetics, sizeof(packet->cosmetics)) != 0 ||
-               memcmp(&player->skins, &skins, sizeof(skins)) != 0 || player->attach_index != packet->attach_index) {
+               memcmp(&player->cosmetics_v7, &packet->cosmetics_v7, sizeof(packet->cosmetics_v7)) != 0 ||
+               memcmp(&player->skins, &skins, sizeof(skins)) != 0 || player->attach_index != packet->attach_index ||
+               player->head_mlt != packet->head_mlt) {
         client_drop_player_mesh(client, player); // respawn: fresh loadout, timers and meshes
         player->class_index = packet->class_index;
         player->secondary_index = packet->secondary_index;
         player->cosmetics = packet->cosmetics;
+        player->cosmetics_v7 = packet->cosmetics_v7; // WP-F: SPAWN V4 (shorter: none)
         player->skins = skins;
         player_spawn(player);
     }
@@ -1332,6 +1337,9 @@ void client_enter_game(Client *client) {
     packet.attach_index = client_saved_attach_index();
     packet.chall_mode = (uint8_t) (ui_controls_settings()->chall_mode ? 1 : 0);
     packet.anon_mode = (uint8_t) (client_render_settings()->anon_mode ? 1 : 0);
+    // WP-F ENT V9: ent[15] shoeIndex, [21] petIndex, [26] wristIndex, [30] charms, [31] backIndex,
+    // [32] headIndex, [33] playerCardIndex and ent[22..25] showBadges (cosmetics.c)
+    cosmetics_ent_v7(client->menu_class_index, &packet.cosmetics, &packet.cosmetics_v7, &packet.show_badges);
     // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
     // a 1.1 server anything longer than V6 (no lagComp), a 1.3.0 server anything longer than V7
     // (no attachIndex / challMode / anonMode): net_ent_size_for.

@@ -17,6 +17,7 @@
 // client's game.
 #include <gl.h>
 #include "viewer_internal.h"
+#include <cosmetics.h>
 #include <gltf.h>
 #include <fast_obj.h>
 #include <stb_image.h>
@@ -735,18 +736,16 @@ static void player_melee_skin(PlayerArms *arms, const ViewerSkin *skin) {
 
 // back / waist / hat / face: what player_mesh.c leaves out of the store item (glow, spin, frames)
 static void player_cosmetic_extras(Player *player) {
-    static const char *const prefix[PLAYER_COSMETIC_SLOTS] = {"hats/hat_", "body/body_", "waist/waist_", "faces/face_"};
-    const int index[PLAYER_COSMETIC_SLOTS] = {player->cosmetics.hat, player->cosmetics.back, player->cosmetics.waist, player->cosmetics.face};
+    static const int slots[4] = {PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BODY, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_FACE};
+    const int index[4] = {player->cosmetics.hat, player->cosmetics.body, player->cosmetics.waist, player->cosmetics.face};
 
-    for (int slot = 0; slot < PLAYER_COSMETIC_SLOTS; slot++) {
-        Mesh *mesh = ((PlayerMesh *) player->mesh)->cosmetics[slot];
-        const ViewerSkin *skin = viewer_skin(index[slot]);
+    for (int i = 0; i < 4; i++) {
+        Mesh *mesh = ((PlayerMesh *) player->mesh)->cosmetics[slots[i]];
+        const ViewerSkin *skin = viewer_skin(index[i]);
         if (!mesh || !skin) continue;
 
         char model[96], texture[128];
-        snprintf(model, sizeof(model), "%s%d", prefix[slot], skin->id);
-        if (viewer_skin_tex_truthy(skin)) snprintf(texture, sizeof(texture), "%s_%s", model, skin->tex);
-        else snprintf(texture, sizeof(texture), "%s", model);
+        cosmetic_asset_keys(skin, model, sizeof(model), texture, sizeof(texture));
 
         BasicMaterial *material = (BasicMaterial *) mesh->material;
         const int glow = (skin->flags & VS_GLOW) != 0;
@@ -772,7 +771,7 @@ void vscene_rebuild_player(void) {
 
     PlayerCosmetics cosmetics = PLAYER_COSMETICS_NONE;
     cosmetics.hat = e->hat.num;
-    cosmetics.back = e->back.num;
+    cosmetics.body = e->back.num; // v3.1.1 viewer "Back" = store type 2 (v7 BODY)
     cosmetics.waist = e->waist.num;
     cosmetics.face = e->face.num;
     cosmetics.dye = e->dye.num;
@@ -872,10 +871,10 @@ static void player_visibility(Player *player) {
         for (size_t k = 0; parts[p] && k < parts[p]->mesh_count; k++) parts[p]->meshes[k]->visible = show;
     }
 
-    static const int order[PLAYER_COSMETIC_SLOTS] = {PLAYER_COSMETIC_BACK, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_FACE};
-    const int flags[PLAYER_COSMETIC_SLOTS] = {e->show_back, e->show_waist, e->show_hat, e->show_face};
+    static const int order[4] = {PLAYER_COSMETIC_BODY, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_FACE};
+    const int flags[4] = {e->show_back, e->show_waist, e->show_hat, e->show_face};
     int child = 0;
-    for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
+    for (int i = 0; i < 4; i++) {
         Mesh *item = mesh->cosmetics[order[i]];
         GltfInstance *model = mesh->cosmetic_models[order[i]]; // v7 animated (GLTF) item
         if (!item && !model) continue;

@@ -238,10 +238,10 @@ int ui_loadout_skin_color(void) {
 // The look sent with the spawn request (ENT): skin colour and the cosmetic picks. "Random" (-2) resolves to
 // one of the owned items, and a guest owns none, so it is none (-1) like the preview's `dw == -2 ? -1 : dw`;
 // v7's explicit None (-3) is none too. hairCol stays the class colour (-1): Krunker only takes a hex string
-// there, which the picker never sets. PlayerCosmetics.back is the type-2 body item (v7 Body, bodyIndex).
+// there, which the picker never sets. PlayerCosmetics.body is the type-2 body item (v7 Body, bodyIndex).
 void ui_loadout_cosmetics(PlayerCosmetics *out) {
     const int pick[5] = {sel(SEL_HAT), sel(SEL_BODY), sel(SEL_WAIST), sel(SEL_FACE), sel(SEL_DYE)};
-    int32_t *slot[5] = {&out->hat, &out->back, &out->waist, &out->face, &out->dye};
+    int32_t *slot[5] = {&out->hat, &out->body, &out->waist, &out->face, &out->dye};
     out->skin_color = ui_loadout_skin_color();
     out->hair_color = -1;
     for (int i = 0; i < 5; i++) *slot[i] = pick[i] >= 0 ? pick[i] : -1;
@@ -257,7 +257,7 @@ static void ent_cosmetics(PlayerCosmetics *out) {
     static const struct { int which, type; } SLOTS[5] = {
         {SEL_HAT, 1}, {SEL_BODY, 2}, {SEL_WAIST, 6}, {SEL_FACE, 7}, {SEL_DYE, 5},
     };
-    int32_t *slot[5] = {&out->hat, &out->back, &out->waist, &out->face, &out->dye};
+    int32_t *slot[5] = {&out->hat, &out->body, &out->waist, &out->face, &out->dye};
     for (int i = 0; i < 5; i++) {
         if (sel(SLOTS[i].which) == -2) *slot[i] = random_owned_skin(0, SLOTS[i].type);
     }
@@ -283,6 +283,26 @@ static void loadout_skins(const int class_index, PlayerSkins *out, const int res
 void ui_loadout_ent_look(const int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins) {
     ent_cosmetics(cosmetics);
     loadout_skins(class_index, skins, 1);
+}
+
+// WP-F: the v7.1.4 slots of enterGame's "en" (ent[15] shoeIndex, [21] petIndex, [26] wristIndex,
+// [30] selectedLoadoutCharms, [31] backIndex, [32] headIndex, [33] playerCardIndex). Random (-2)
+// is getRandomOwnedSkin(null, type) when resolve_random (the ENT), none for the preview; the
+// secondary's charm only for a class with a secondary slot. The badge is the server's (-1 here).
+void ui_loadout_cosmetics_v7(const int class_index, PlayerCosmeticsV7 *out, const int resolve_random) {
+    static const struct { int which, type; } SLOTS[6] = {
+        {SEL_HEAD, 15}, {SEL_BACK, 14}, {SEL_SHOE, 8}, {SEL_PET, 9}, {SEL_WRIST, 11}, {SEL_CARD, 16},
+    };
+    *out = PLAYER_COSMETICS_V7_NONE;
+    int32_t *slot[6] = {&out->head, &out->back, &out->shoe, &out->pet, &out->wrist, &out->player_card};
+    for (int i = 0; i < 6; i++) {
+        const int pick = sel(SLOTS[i].which);
+        *slot[i] = pick == -2 ? (resolve_random ? random_owned_skin(0, SLOTS[i].type) : -1) : pick >= 0 ? pick : -1;
+    }
+    for (int k = 0; k < 2; k++) {
+        const int pick = k == 1 && !class_at(class_index).secondary ? -1 : charm_at(k);
+        out->charms[k] = pick == -2 ? (resolve_random ? random_owned_skin(0, 12) : -1) : pick >= 0 ? pick : -1;
+    }
 }
 
 void ui_loadout_preview_skins(const int class_index, PlayerSkins *out) {

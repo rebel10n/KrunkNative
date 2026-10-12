@@ -663,7 +663,7 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         const PlayerMesh *mesh = player->mesh;
         vec3 anchor = mesh->anchor ? mesh->anchor->position : player->position;
         anchor.y += game_constants.player_height + NT_NAME_OFFSET - player->crouch_val * game_constants.crouch_distance;
-        if (player->cosmetics.hat >= 0) anchor.y += NT_NAME_OFFSET_HAT;
+        if (player->cosmetics.hat >= 0 || player->cosmetics_v7.head >= 0) anchor.y += NT_NAME_OFFSET_HAT; // hatIndex || headIndex (v7)
 
         double fx, fy;
         if (!nt_project(&client->camera, anchor, &fx, &fy)) {

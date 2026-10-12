@@ -416,6 +416,12 @@ static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *i
     info->account_id = client->acct.account_id;
     info->level = client->acct.level;
     info->flags = client->acct.flags;
+    // WP-F: ENT showBadges (settings verifiedBadge / premiumBadge): the player may hide those badges
+    // from others (players.js sync showBadges.verified / .premium)
+    if (client->player && to != client) {
+        if (!(client->player->show_badges & PLAYER_SHOW_BADGE_VERIFIED)) info->flags &= (uint8_t) ~NET_PLAYER_INFO_VERIFIED;
+        if (!(client->player->show_badges & PLAYER_SHOW_BADGE_PREMIUM)) info->flags &= (uint8_t) ~NET_PLAYER_INFO_PREMIUM;
+    }
     snprintf(info->clan, sizeof(info->clan), "%s", client->acct.clan);
 }
 
@@ -848,14 +854,26 @@ int accounts_owns_skin(const ClientConnection *client, const int skin) {
     return (client->acct.skins_owned[skin >> 3] >> (skin & 7)) & 1;
 }
 
-int accounts_filter_cosmetics(const ClientConnection *client, PlayerCosmetics *c) {
-    int32_t *slots[5] = {&c->hat, &c->back, &c->waist, &c->face, &c->dye};
+int accounts_filter_cosmetics(const ClientConnection *client, PlayerCosmetics *c, PlayerCosmeticsV7 *v7) {
+    int32_t *slots[14] = {&c->hat, &c->body, &c->waist, &c->face, &c->dye};
+    int count = 5;
+    if (v7) {
+        int32_t *more[] = {&v7->head, &v7->back, &v7->shoe, &v7->pet, &v7->wrist, &v7->charms[0], &v7->charms[1], &v7->player_card};
+        for (size_t i = 0; i < sizeof(more) / sizeof(more[0]); i++) slots[count++] = more[i];
+    }
     int stripped = 0;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < count; i++) {
         if (*slots[i] >= 0 && !accounts_owns_skin(client, *slots[i])) {
             *slots[i] = -1;
             stripped++;
         }
+    }
+    // v7.1.4 premium slot rule: without premium a player wears a HEAD or a hat, a BACK or a body, not
+    // both (the head / back wins, as on the Customize tab, v7 index.js:5169-5209). v7 only enforces
+    // it in the menu; KrunkNative also drops the pair here, for accounts (sandbox / guests: no rule).
+    if (v7 && client->acct.account_id && !client->acct.premium && !(client->acct.flags & NET_PLAYER_INFO_DEV)) {
+        if (v7->head >= 0 && c->hat >= 0) c->hat = -1, stripped++;
+        if (v7->back >= 0 && c->body >= 0) c->body = -1, stripped++;
     }
     return stripped;
 }
@@ -909,7 +927,7 @@ static void acc_reject(ClientConnection *client, const char *message, const char
 // A client cannot wear a skin it does not own (the coordinator's inventory): unowned
 // cosmetic, weapon and melee slots fall back to none before the spawn, with a chat notice once per ENT.
 static void acc_enforce_skins(ClientConnection *client) {
-    const int stripped = accounts_filter_cosmetics(client, &client->cosmetics) + accounts_filter_skins(client, &client->skins);
+    const int stripped = accounts_filter_cosmetics(client, &client->cosmetics, &client->cosmetics_v7) + accounts_filter_skins(client, &client->skins);
     if (!stripped) return;
     server_log("%s: removed %d unowned cosmetic(s)", client->name, stripped);
     acc_chat_to(client, "You don't own some of the skins you equipped on this server");
@@ -951,6 +969,7 @@ static void acc_set_ready(ClientConnection *client) {
 
 void accounts_on_connect(ClientConnection *client) {
     memset(&client->acct, 0, sizeof(client->acct));
+    client->acct.badge = -1;
     client->acct.round_result = -1;
     const int gated = g_acc.brain || g_gs_config.online_mode || g_gs_config.password[0];
     client->acct.join_state = gated ? SERVER_JOIN_AWAIT : SERVER_JOIN_READY;
@@ -1211,6 +1230,10 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     if (acc_truthy(cJSON_GetObjectItem(account, "featured"))) client->acct.flags |= NET_PLAYER_INFO_VERIFIED;
     if (acc_truthy(cJSON_GetObjectItem(account, "dev"))) client->acct.flags |= NET_PLAYER_INFO_DEV;
     if (acc_truthy(cJSON_GetObjectItem(account, "mod"))) client->acct.flags |= NET_PLAYER_INFO_MOD;
+    // WP-F: the custom badge (v7 account.stats.bdg, badges.js index), when the brain supplies one
+    const cJSON *stats = cJSON_GetObjectItem(account, "stats");
+    const cJSON *bdg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "bdg") : cJSON_GetObjectItem(account, "badge");
+    client->acct.badge = cJSON_IsNumber(bdg) && bdg->valueint >= 0 ? bdg->valueint : -1;
     acc_load_skins(client, account);
 }
 

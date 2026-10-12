@@ -1,46 +1,42 @@
 #pragma once
+// Krunker v7.1.4 cosmetic items on the player model (players.js generateMeshes, playerMesh.js):
+// the store items of each slot, looked up in the client's store table (game.store.skins,
+// client/src/viewer/viewer_store_table.c, generated from assets/skins.json), and the look a
+// player sends in its ENT. client/src/player_mesh.c builds the meshes.
 #include <stddef.h>
+#include <stdint.h>
+#include <shared.h>
 
-// Krunker store.skins entries that dress the player model: hats, bodies (back), dyes, waists and
-// faces, plus v7.1.4's HEAD and BACK items (v7 split them off HAT and BODY; their meshes still
-// load from hats/ and body/, store.js assetType). The table (cosmetics_table.c) is generated from
-// assets/skins.json by tools/ui-import/gen_cosmetics.py.
+struct ViewerSkin;
+
+// v7 src/data/itemTypes.js (previews.json): store.skins[i].type
 typedef enum {
-    COSMETIC_HAT = 1,   // models/hats/hat_<id>
-    COSMETIC_BACK = 2,  // models/body/body_<id>
-    COSMETIC_DYE = 5,   // recolours skin / shirt / sleeve / pants / shoes / hair
-    COSMETIC_WAIST = 6, // models/waist/waist_<id>
-    COSMETIC_FACE = 7,  // models/faces/face_<id>
-    COSMETIC_V7_BACK = 14, // v7 BACK: worn in the back slot, models/body/body_<id> (assetType 2)
-    COSMETIC_V7_HEAD = 15, // v7 HEAD: worn in the hat slot, models/hats/hat_<id> (assetType 1)
-} CosmeticType;
+    ITEM_WEAPON = 0, ITEM_HAT = 1, ITEM_BODY = 2, ITEM_MELEE = 3, ITEM_SPRAY = 4, ITEM_DYE = 5, ITEM_WAIST = 6,
+    ITEM_FACE = 7, ITEM_SHOE = 8, ITEM_PET = 9, ITEM_COLLECTIBLE = 10, ITEM_WRIST = 11, ITEM_CHARM = 12,
+    ITEM_TICKET = 13, ITEM_BACK = 14, ITEM_HEAD = 15, ITEM_PLAYER_CARD = 16, ITEM_TYPE_COUNT
+} ItemType;
 
-typedef struct {
-    int index;          // store.skins index (what hatIndex / backIndex / ... hold)
-    int type;           // CosmeticType
-    int id;             // model id
-    const char *name;
-    int tex;            // texture variant (<model>_<tex>.png), -1 = the model's own texture
-    float scl_mlt;      // sclMlt || 1
-    float sit_off;      // sitOff || 0
-    float sit_off_z;    // sitOffZ || 0
-    float opacity;      // opac || 1
-    float alpha_test;   // alpha || 0
-    int double_sided;   // side == 2 (DoubleSide)
-    int color;          // material colour 0xRRGGBB, -1 = none
-    int skin_col, shirt_col, sleeve_col, pants_col, shoe_col, hair_col; // dyes, -1 = keep
-    int asset_type;     // v7 store.js assetType (model directory type), 0 = `type` itself
-    float anim_s;       // hasAnim: AnimationMixer timeScale (animS || 1)
-    const char *file_ext; // hasAnim: model file extension (fileExt || "gltf"), NULL = .obj
-    unsigned char no_head:1;     // hat replaces the head
-    unsigned char no_legs:1;     // waist item replaces the legs
-    unsigned char transparent:1; // opac != null || trans
-    unsigned char has_anim:1;    // v7 hasAnim: an animated GLTF/GLB model (render.js loadAnimMesh, client/src/gltf.c)
-} Cosmetic;
+// store.skins[store_index] when it is an item of `type`, else NULL (-1, out of range, other types).
+const struct ViewerSkin *cosmetic_item(int store_index, ItemType type);
 
-extern const Cosmetic g_cosmetics[];
-extern const size_t g_cosmetic_count;
+// players.js generateMeshData src / texSrc: "<store.types[assetType || type]><id>" and, with a
+// truthy tex, "<that>_<tex>" (texture = model otherwise). E.g. "hats/hat_12", "body/body_4_1".
+void cosmetic_asset_keys(const struct ViewerSkin *item, char *model, size_t model_n, char *texture, size_t texture_n);
 
-// The entry for a store index when it is worn in the slot of `type`; NULL for -1, unknown
-// indices and other types. COSMETIC_HAT also accepts v7 HEAD items, COSMETIC_BACK v7 BACK items.
-const Cosmetic *cosmetic_get(int store_index, CosmeticType type);
+// The look the player model wears: each index moves to the slot of its item's type, so v3.1.1
+// placements keep working (a v7 HEAD item in hatIndex, a BACK item in bodyIndex: KrunkNative
+// inventories and saved picks from before the split); an index of a type no slot takes is dropped.
+// An explicit pick in the right slot wins over a moved one.
+void cosmetics_route(PlayerCosmetics *cosmetics, PlayerCosmeticsV7 *v7);
+
+// players.js generateMeshes overrides: game.config.noCosm clears every slot and the skin colour;
+// the Juggernaut wears items 4908-4911 (body, head, shoes, waist).
+#define COSMETIC_JUGGERNAUT_BODY 4908
+#define COSMETIC_JUGGERNAUT_HEAD 4909
+#define COSMETIC_JUGGERNAUT_SHOES 4910
+#define COSMETIC_JUGGERNAUT_WAIST 4911
+
+// ENT V9 (index.js enterGame io.send("en")): the v7 slot picks of the Customize tab
+// (ui_loadout_cosmetics_v7, Random resolved to owned items), routed together with the v3.1.1
+// slots in `cosmetics` (cosmetics_route), and ent[22..25] showBadges from the settings.
+void cosmetics_ent_v7(int class_index, PlayerCosmetics *cosmetics, PlayerCosmeticsV7 *v7, uint8_t *show_badges);

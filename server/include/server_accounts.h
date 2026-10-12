@@ -64,7 +64,7 @@ int accounts_info_tags(char tags[][24], int max); // ranked / custom / draining 
 // 1 = the player may wear store.skins index `skin` (always 1 when not enforced, guests: none).
 int accounts_owns_skin(const ClientConnection*, int skin);
 // Clears cosmetics the player does not own (ENT). Returns how many were stripped.
-int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*);
+int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*, PlayerCosmeticsV7*); // unowned slots -> -1 (+ the premium hat/head, body/back rule)
 // Same for the weapon skins and the melee skin (ENT ent[2] / ent[9]).
 int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 

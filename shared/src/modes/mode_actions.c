@@ -304,21 +304,28 @@ static int mode_team_is(const Game *game, const Player *player, const char *opti
 // again on "tm".
 int mode_apply_outfit(const Game *game, Player *player) {
     PlayerCosmetics outfit = player->cosmetics;
+    PlayerCosmeticsV7 outfit_v7 = player->cosmetics_v7;
 
     if (mode_team_is(game, player, "Infected")) {
         outfit.skin_color = MODE_INFECTED_SKIN;
-        outfit.hat = MODE_INFECTED_HAT;
+        outfit_v7.head = MODE_INFECTED_HAT; // v7 headIndex: Zombie Head is a HEAD (type 15) item
     } else if (mode_team_is(game, player, "Stalker")) {
         outfit = PLAYER_COSMETICS_NONE;
         outfit.skin_color = MODE_STALKER_SKIN;
         outfit.hair_color = MODE_STALKER_SKIN;
+        // noCosmetics clears every slot (players.js:697-712); the badge and card are not on the model
+        const int badge = outfit_v7.badge, card = outfit_v7.player_card;
+        outfit_v7 = PLAYER_COSMETICS_V7_NONE;
+        outfit_v7.badge = badge;
+        outfit_v7.player_card = card;
     } else {
         return 0;
     }
 
-    if (!memcmp(&outfit, &player->cosmetics, sizeof(outfit))) return 0;
+    if (!memcmp(&outfit, &player->cosmetics, sizeof(outfit)) && !memcmp(&outfit_v7, &player->cosmetics_v7, sizeof(outfit_v7))) return 0;
     game_player_changing(game, player, 0);
     player->cosmetics = outfit;
+    player->cosmetics_v7 = outfit_v7;
     game_player_changing(game, player, 1);
     return 1;
 }

@@ -365,6 +365,15 @@ typedef struct {
     // ac.muzzles[i] (local player): sprite positions in the anchor, (0, 0, 0) until a muzzle flash
     // first init()s them at the barrel. The local tracer starts there either way (vfx.c local_shot).
     vec3 muzzle[2];
+    // v7.1.4 (WP-F): the weapon's charm (players.js:1262-1291): charms/charm_mount_0 at the weapon's
+    // charm mount, the charm item inside it (swaying, player_update_meshes); NULL when none
+    Mesh *charm_mount;
+    Mesh *charm;
+    // the wrist item (type 11, players.js:1082-1089 / 1127-1130): first-person / own model only,
+    // on the left arm; wrist (OBJ) or wrist_model (hasAnim GLTF) inside wrist_holder
+    MeshTransform wrist_holder;
+    Mesh *wrist;
+    struct GltfInstance *wrist_model;
 } PlayerArms;
 
 typedef struct {
@@ -380,13 +389,20 @@ typedef struct {
 
     PlayerArms **arms;
 
-    Mesh *cosmetics[4]; // third-person hat, back (body), waist and face items (PLAYER_COSMETIC_*), NULL when unused
-    // v7 animated items (Cosmetic.has_anim) in the same slots: GLTF models (gltf.h) instead of
-    // cosmetics[slot], NULL when unused
-    struct GltfInstance *cosmetic_models[4];
+    // v7.1.4 cosmetic items on the third-person model (players.js generateMeshes, PLAYER_COSMETIC_*):
+    // each item hangs off its genObj3D holder (hatMesh, headMesh, ..., shoeMeshes[0..1]); an OBJ
+    // model in cosmetics[slot] or a hasAnim GLTF in cosmetic_models[slot], NULL when unused
+    Mesh *cosmetics[8];
+    struct GltfInstance *cosmetic_models[8];
+    MeshTransform cosmetic_holders[8];
+    unsigned char shoe_hidden[2]; // randomLeg: the shoe of the other leg is hidden
+    float head_mlt;               // the headMlt the head / face / hat / head holders are scaled for
 } PlayerMesh;
 
-enum { PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BACK, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_FACE, PLAYER_COSMETIC_SLOTS };
+enum {
+    PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BODY, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_FACE,
+    PLAYER_COSMETIC_HEAD, PLAYER_COSMETIC_BACK, PLAYER_COSMETIC_SHOE_R, PLAYER_COSMETIC_SHOE_L, PLAYER_COSMETIC_SLOTS
+};
 
 void player_generate_meshes(Player*, int);
 void player_update_meshes(Player*, int);

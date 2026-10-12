@@ -156,7 +156,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.position[2],
                    packet.direction[0],
                    packet.direction[1],
-                   packet.cosmetics.skin_color, packet.cosmetics.hat, packet.cosmetics.back,
+                   packet.cosmetics.skin_color, packet.cosmetics.hat, packet.cosmetics.body,
                    packet.cosmetics.waist, packet.cosmetics.face, packet.cosmetics.dye);
             break;
         }

@@ -285,8 +285,22 @@ static void check_cosmetics_packets(void) {
     memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = NET_ENT_PACKET_V8_SIZE;
     CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == 1 && full.chall_mode == 1 && full.anon_mode == 1 && full.lag_comp == 0.3f, "V8 ENT attachIndex / challMode / anonMode");
+    CHECK(full.cosmetics_v7.pet == -1 && full.cosmetics_v7.charms[1] == -1 && full.show_badges == PLAYER_SHOW_BADGES_ALL, "V8 ENT: no v7 slots, every badge shown");
     packet.length = NET_ENT_PACKET_V8_SIZE + 9;
-    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == 1 && full.anon_mode == 1, "ENT longer than V8 reads its prefix");
+    CHECK(net_packet_read_ent(&full, &packet) && full.attach_index == 1 && full.anon_mode == 1 && full.cosmetics_v7.head == -1, "ENT cut inside the WP-F tail reads as V8");
+    // WP-F: the v7 slots (ent[15] shoe, [21] pet, [26] wrist, [30] charms, [31] back, [32] head, [33] card)
+    // and ent[22..25] showBadges ride after anonMode (V9, 1.3.1); longer ENTs read their V9 prefix
+    ent.cosmetics_v7 = (PlayerCosmeticsV7) {.head = 6401, .back = 246, .shoe = 2860, .pet = 2964, .wrist = 4249, .charms = {5000, -1}, .player_card = 6000, .badge = 3};
+    ent.show_badges = PLAYER_SHOW_BADGE_PREMIUM | 0xF0;
+    memcpy(packet.payload, &ent, sizeof(ent));
+    packet.length = NET_ENT_PACKET_V9_SIZE;
+    CHECK(net_packet_read_ent(&full, &packet) && full.cosmetics_v7.head == 6401 && full.cosmetics_v7.back == 246 && full.cosmetics_v7.shoe == 2860 &&
+          full.cosmetics_v7.pet == 2964 && full.cosmetics_v7.wrist == 4249 && full.cosmetics_v7.charms[0] == 5000 && full.cosmetics_v7.player_card == 6000 &&
+          full.show_badges == PLAYER_SHOW_BADGE_PREMIUM && full.attach_index == 1, "V9 ENT v7 slots / showBadges");
+    packet.length = NET_ENT_PACKET_V9_SIZE + 7;
+    CHECK(net_packet_read_ent(&full, &packet) && full.cosmetics_v7.pet == 2964 && full.anon_mode == 1, "ENT longer than V9 reads its prefix");
+    ent.cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    ent.show_badges = PLAYER_SHOW_BADGES_ALL;
     ent.attach_index = 0;
     ent.chall_mode = ent.anon_mode = 0;
     ent.lag_comp = 1.0f;
@@ -298,11 +312,12 @@ static void check_cosmetics_packets(void) {
     CHECK(net_ent_size_for(1, 0, 0) == NET_ENT_PACKET_V4_SIZE, "ENT to a 1.0 server must stay V4 (%u)", net_ent_size_for(1, 0, 0));
     CHECK(net_ent_size_for(1, 1, 5) == NET_ENT_PACKET_V6_SIZE, "ENT to a 1.1 server must stay V6 (%u)", net_ent_size_for(1, 1, 5));
     CHECK(net_ent_size_for(1, 2, 1) == NET_ENT_PACKET_V7_SIZE && net_ent_size_for(1, 3, 0) == NET_ENT_PACKET_V7_SIZE, "ENT to a 1.2 / 1.3.0 server is V7");
-    CHECK(net_ent_size_for(1, 3, 1) == NET_ENT_PACKET_V8_SIZE && net_ent_size_for(1, 4, 0) == NET_ENT_PACKET_V8_SIZE, "ENT to a 1.3.1+ server is V8");
-    CHECK(net_ent_size_for(2, 0, 0) == NET_ENT_PACKET_V8_SIZE && net_ent_size_for(0, 9, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
+    // 1.3.1 servers prefix-read longer ENTs: they get the WP-F V9 (a pre-WP-F 1.3.1 build reads its V8 prefix)
+    CHECK(net_ent_size_for(1, 3, 1) == NET_ENT_PACKET_V9_SIZE && net_ent_size_for(1, 4, 0) == NET_ENT_PACKET_V9_SIZE, "ENT to a 1.3.1+ server is V9");
+    CHECK(net_ent_size_for(2, 0, 0) == NET_ENT_PACKET_V9_SIZE && net_ent_size_for(0, 9, 9) == NET_ENT_PACKET_V4_SIZE, "ENT size by major");
     CHECK(NET_PROTOCOL_MAJOR == 1 && NET_PROTOCOL_MINOR >= 2, "server_bin announces protocol 1.2+");
     CHECK(net_peer_has_wpc(NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH), "this build takes its own WP-C sizes");
-    CHECK(NET_ENT_PACKET_V7_SIZE == 58 && NET_ENT_PACKET_V6_SIZE == 54 && NET_ENT_PACKET_V8_SIZE == 64, "ENT V6 / V7 / V8 sizes (net-bridge, kn_proto.py)");
+    CHECK(NET_ENT_PACKET_V7_SIZE == 58 && NET_ENT_PACKET_V6_SIZE == 54 && NET_ENT_PACKET_V8_SIZE == 64 && NET_ENT_PACKET_V9_SIZE == 101, "ENT V6 / V7 / V8 / V9 sizes (net-bridge, kn_proto.py)");
     ent.slid_cont = 0;
     memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = 6;
@@ -313,10 +328,13 @@ static void check_cosmetics_packets(void) {
     memcpy(packet.payload, &spawn, sizeof(spawn));
     spawn.attach_index = 1;
     spawn.head_mlt = 1.5f;
+    spawn.cosmetics_v7 = (PlayerCosmeticsV7) {.head = 6401, .back = -1, .shoe = 2860, .pet = 2964, .wrist = -1, .charms = {-1, -1}, .player_card = -1, .badge = 2};
     memcpy(packet.payload, &spawn, sizeof(spawn));
-    // V1, V2 (1.0 - 1.3.0 servers), V3 (WP-C: attachIndex, headMlt) and a longer one (V3 prefix)
-    const uint16_t spawn_sizes[] = {NET_SPAWN_PACKET_V1_SIZE, NET_SPAWN_PACKET_V2_SIZE, NET_SPAWN_PACKET_V3_SIZE, NET_SPAWN_PACKET_V3_SIZE + 4};
-    for (int i = 0; i < 4; i++) {
+    // V1, V2 (1.0 - 1.3.0 servers), V3 (WP-C: attachIndex, headMlt), a V3 cut inside the WP-F tail,
+    // V4 (WP-F: the v7 slots) and a longer one (V4 prefix)
+    const uint16_t spawn_sizes[] = {NET_SPAWN_PACKET_V1_SIZE, NET_SPAWN_PACKET_V2_SIZE, NET_SPAWN_PACKET_V3_SIZE, NET_SPAWN_PACKET_V3_SIZE + 4,
+                                    NET_SPAWN_PACKET_V4_SIZE, NET_SPAWN_PACKET_V4_SIZE + 4};
+    for (int i = 0; i < 6; i++) {
         NetSpawnPacket read;
         memset(&read, 0x55, sizeof(read));
         packet.length = spawn_sizes[i];
@@ -324,6 +342,8 @@ static void check_cosmetics_packets(void) {
         CHECK(read.uid == 3 && read.class_index == 5, "SPAWN fields");
         CHECK(read.cosmetics.hat == (i ? 1890 : -1) && read.cosmetics.dye == (i ? 1891 : -1), "SPAWN cosmetics for %u bytes", packet.length);
         CHECK(read.attach_index == (i >= 2 ? 1 : DEFAULT_ATTACHMENT_INDEX) && read.head_mlt == (i >= 2 ? 1.5f : 1.0f), "SPAWN attachIndex / headMlt for %u bytes", packet.length);
+        CHECK(i >= 4 ? read.cosmetics_v7.head == 6401 && read.cosmetics_v7.pet == 2964 && read.cosmetics_v7.badge == 2 && read.cosmetics_v7.wrist == -1
+                     : read.cosmetics_v7.head == -1 && read.cosmetics_v7.pet == -1 && read.cosmetics_v7.badge == -1, "SPAWN v7 slots for %u bytes", packet.length);
     }
     packet.length = NET_SPAWN_PACKET_V2_SIZE + 4;
     NetSpawnPacket cut;

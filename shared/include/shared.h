@@ -934,19 +934,45 @@ typedef struct {
     unsigned char has_then:1;
 } MeleeAnimTween;
 
-// Krunker's per-player look (jLrR6): skinColIndex / hairCol and the hat / back / waist / face / dye store items.
-// Only int32 members, so it embeds unchanged in the packed net packets (ENT, SPAWN).
+// Krunker's per-player look (jLrR6): skinColIndex / hairCol and the hat / body / waist / face / dye store items.
+// Only int32 members, so it embeds unchanged in the packed net packets (ENT, SPAWN). The v7.1.4
+// slots added after v3.1.1 ride in PlayerCosmeticsV7 at the end of those packets.
 typedef struct {
     int32_t skin_color; // 0xRRGGBB (config.skinColors[skinColIndex].col), -1 = the class colour
     int32_t hair_color; // 0xRRGGBB, -1 = the class colour
-    int32_t hat;        // store.skins index, -1 = none (hatIndex)
-    int32_t back;       // backIndex
+    int32_t hat;        // store.skins index, -1 = none (hatIndex, type 1)
+    int32_t body;       // bodyIndex (type 2): v3.1.1 called this slot backIndex; v7 ent[4]
     int32_t waist;      // waistIndex
     int32_t face;       // faceIndex
     int32_t dye;        // dyeIndex
 } PlayerCosmetics;
 
 #define PLAYER_COSMETICS_NONE ((PlayerCosmetics) {-1, -1, -1, -1, -1, -1, -1})
+
+// v7.1.4's other cosmetic slots (players.js init / sync, server/index.ts parseEnterPlayerData):
+// store.skins indices, -1 = none. ENT V9 and SPAWN V4 (protocol 1.3.1, WP-F) end with it.
+typedef struct {
+    int32_t head;        // headIndex (type 15, ent[32])
+    int32_t back;        // backIndex (type 14, ent[31])
+    int32_t shoe;        // shoeIndex (type 8, ent[15])
+    int32_t pet;         // petIndex (type 9, ent[21])
+    int32_t wrist;       // wristIndex (type 11, ent[26])
+    int32_t charms[2];   // charms (type 12, ent[30]): the primary's and the secondary's
+    int32_t player_card; // playerCardIndex (type 16, ent[33])
+    int32_t badge;       // badgeIndex (badges.js): the account's custom badge, -1 none / hidden. ENT: ignored (the server takes the account's)
+} PlayerCosmeticsV7;
+
+#define PLAYER_COSMETICS_V7_NONE ((PlayerCosmeticsV7) {-1, -1, -1, -1, -1, {-1, -1}, -1, -1})
+
+// ENT showBadges (ent[22..25], settings verifiedBadge / premiumBadge / partnerBadge / customBadge):
+// what the player lets others see. Absent (shorter ENTs) = all shown, the settings' default.
+enum {
+    PLAYER_SHOW_BADGE_VERIFIED = 1 << 0,
+    PLAYER_SHOW_BADGE_PREMIUM = 1 << 1,
+    PLAYER_SHOW_BADGE_PARTNER = 1 << 2,
+    PLAYER_SHOW_BADGE_CUSTOM = 1 << 3,
+    PLAYER_SHOW_BADGES_ALL = 0x0F,
+};
 
 // Lag compensation: v3.1.1 players.js storeState / fetchState (shared/src/player.c). One
 // stateHistory entry {time, h, x, y, z} per server update; entries older than
@@ -1013,6 +1039,8 @@ typedef struct Player_t {
     char name[PLAYER_NAME_SIZE];  // display name (server-assigned Guest_N, synced by SPAWN)
     int secondary_index;          // chosen secondary weapon id (Select Secondary), -1 = Pistol
     PlayerCosmetics cosmetics;    // skin colour + cosmetic items (ENT -> SPAWN), PLAYER_COSMETICS_NONE by default
+    PlayerCosmeticsV7 cosmetics_v7; // v7.1.4 head / back / shoe / pet / wrist / charms / card / badge, PLAYER_COSMETICS_V7_NONE
+    unsigned char show_badges;    // ENT showBadges (PLAYER_SHOW_BADGE_*), PLAYER_SHOW_BADGES_ALL by default
     int score;                    // Krunker player.score
     int reward;                   // Krunker player.reward: KR of the last endGame (END "reward" column)
     unsigned int assists;
@@ -2047,6 +2075,10 @@ typedef struct {
     int32_t attach_index;      // the sight on attach weapons: 0 Reflex, 1 Acog, -1 none
     uint8_t chall_mode;        // settings challMode: no health regen (players.js tickPlayer), x1.5 KR reward
     uint8_t anon_mode;         // settings anonMode: others see no account, clan, level or badges
+    // ---- WP-F (protocol 1.3.1, NET_ENT_PACKET_V9_SIZE): the v7.1.4 cosmetic slots and ent[22..25]
+    // showBadges. A 1.3.1 peer without them reads the V8 prefix; shorter ENTs read as none / all shown.
+    PlayerCosmeticsV7 cosmetics_v7;
+    uint8_t show_badges;       // PLAYER_SHOW_BADGE_*
 } NetEntPacket;
 
 #define NET_ENT_PACKET_MIN_SIZE 4 // class_index only (older clients / bridges)
@@ -2056,7 +2088,8 @@ typedef struct {
 #define NET_ENT_PACKET_V5_SIZE (offsetof(NetEntPacket, skins)) // + spray_index
 #define NET_ENT_PACKET_V6_SIZE (offsetof(NetEntPacket, lag_comp)) // + weapon / melee skins (protocol 1.1)
 #define NET_ENT_PACKET_V7_SIZE (offsetof(NetEntPacket, attach_index)) // + lagComp (protocol 1.2)
-#define NET_ENT_PACKET_V8_SIZE (sizeof(NetEntPacket)) // + attachIndex, challMode, anonMode (1.3.1): what a client sends
+#define NET_ENT_PACKET_V8_SIZE (offsetof(NetEntPacket, cosmetics_v7)) // + attachIndex, challMode, anonMode (1.3.1, WP-C)
+#define NET_ENT_PACKET_V9_SIZE (sizeof(NetEntPacket)) // + the v7 cosmetic slots and showBadges (1.3.1, WP-F): what a client sends
 
 typedef struct {
     uint8_t spectating;      // 1: this connection spectates now (no player; every player's state is streamed to it)
@@ -2083,11 +2116,16 @@ typedef struct {
     // headMlt (players.js:5002). Shorter SPAWNs read as DEFAULT_ATTACHMENT_INDEX and 1.
     int32_t attach_index;
     float head_mlt;
+    // ---- WP-F (protocol 1.3.1): the v7.1.4 cosmetic slots (players.js sync: shoeIndex, petIndex,
+    // badgeIndex, wristIndex, charms, backIndex, headIndex, playerCardIndex). badge is -1 unless the
+    // player shows its custom badge. Shorter SPAWNs read as PLAYER_COSMETICS_V7_NONE.
+    PlayerCosmeticsV7 cosmetics_v7;
 } NetSpawnPacket;
 
 #define NET_SPAWN_PACKET_V1_SIZE 78 // up to secondary_index (before cosmetics)
 #define NET_SPAWN_PACKET_V2_SIZE (offsetof(NetSpawnPacket, attach_index)) // + cosmetics (1.0 - 1.3.0)
-#define NET_SPAWN_PACKET_V3_SIZE (sizeof(NetSpawnPacket))                // + attachIndex, headMlt (1.3.1)
+#define NET_SPAWN_PACKET_V3_SIZE (offsetof(NetSpawnPacket, cosmetics_v7)) // + attachIndex, headMlt (1.3.1, WP-C)
+#define NET_SPAWN_PACKET_V4_SIZE (sizeof(NetSpawnPacket))                // + the v7 cosmetic slots (1.3.1, WP-F)
 
 typedef struct {
     int32_t seq;

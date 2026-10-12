@@ -12,6 +12,9 @@ _Static_assert(NET_ENT_PACKET_V6_SIZE == NET_ENT_PACKET_V5_SIZE + sizeof(PlayerS
 _Static_assert(NET_ENT_PACKET_V7_SIZE == NET_ENT_PACKET_V6_SIZE + sizeof(float) && NET_ENT_PACKET_V7_SIZE == 58, "ENT lag_comp must follow the skins");
 _Static_assert(NET_ENT_PACKET_V8_SIZE == NET_ENT_PACKET_V7_SIZE + 6, "ENT attach_index, chall_mode, anon_mode must be the last bytes (WP-C)");
 _Static_assert(NET_SPAWN_PACKET_V3_SIZE == NET_SPAWN_PACKET_V2_SIZE + 8, "SPAWN attach_index, head_mlt must be the last bytes (WP-C)");
+_Static_assert(sizeof(PlayerCosmeticsV7) == 36, "PlayerCosmeticsV7 is nine int32 (wire)");
+_Static_assert(NET_ENT_PACKET_V9_SIZE == NET_ENT_PACKET_V8_SIZE + 37, "ENT cosmetics_v7, show_badges must follow anon_mode (WP-F)");
+_Static_assert(NET_SPAWN_PACKET_V4_SIZE == NET_SPAWN_PACKET_V3_SIZE + 36, "SPAWN cosmetics_v7 must follow head_mlt (WP-F)");
 _Static_assert(NET_RECON_PACKET_V1_SIZE == 58 && NET_RECON_PACKET_V2_SIZE == 72, "RECON v7 locks must be the last bytes (WP-C; net-bridge reads 58)");
 _Static_assert(NET_INPUT_PACKET_V1_SIZE == 22 && NET_INPUT_PACKET_V2_SIZE == 23 && sizeof(NetInputPacket) == 24, "INPUT slowdown then scroll must be the last bytes");
 
@@ -510,8 +513,10 @@ int net_packet_read_input(NetInputPacket *input, const NetPacket *packet) {
 
 int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
     // 4 / 8 bytes, or cosmetics followed by the optional spectate and slid_cont bytes (36..38),
-    // or with spray_index (42), with the weapon skins (54), with lag_comp (58), or all of it with
-    // attachIndex / challMode / anonMode (64, WP-C). Longer ENTs (a newer peer) read the V8 prefix.
+    // or with spray_index (42), with the weapon skins (54), with lag_comp (58), with
+    // attachIndex / challMode / anonMode (64, WP-C), or all of it with the v7 cosmetic slots and
+    // showBadges (101, WP-F). Longer ENTs (a newer peer) read the V9 prefix; a V8-sized one (a 1.3.1
+    // peer before WP-F) has no v7 slots.
     if (packet->length != NET_ENT_PACKET_V2_SIZE && packet->length != NET_ENT_PACKET_MIN_SIZE &&
         packet->length != NET_ENT_PACKET_V5_SIZE && packet->length != NET_ENT_PACKET_V6_SIZE &&
         packet->length != NET_ENT_PACKET_V7_SIZE && packet->length < NET_ENT_PACKET_V8_SIZE &&
@@ -527,7 +532,12 @@ int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
     ent->attach_index = DEFAULT_ATTACHMENT_INDEX; // absent: parseEnterData integer(data[12], 0)
     ent->chall_mode = 0;
     ent->anon_mode = 0;
-    memcpy(ent, packet->payload, packet->length < sizeof(*ent) ? packet->length : sizeof(*ent));
+    ent->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    ent->show_badges = PLAYER_SHOW_BADGES_ALL;
+    // a 1.3.1 ENT cut inside the WP-F tail (V8 < length < V9) carries none of it
+    const size_t length = packet->length > NET_ENT_PACKET_V8_SIZE && packet->length < NET_ENT_PACKET_V9_SIZE ? NET_ENT_PACKET_V8_SIZE : packet->length;
+    memcpy(ent, packet->payload, length < sizeof(*ent) ? length : sizeof(*ent));
+    ent->show_badges &= PLAYER_SHOW_BADGES_ALL;
     ent->spectate = ent->spectate ? 1 : 0;
     ent->slid_cont = ent->slid_cont ? 1 : 0;
     ent->chall_mode = ent->chall_mode ? 1 : 0;
@@ -536,21 +546,25 @@ int net_packet_read_ent(NetEntPacket *ent, const NetPacket *packet) {
 }
 
 uint16_t net_ent_size_for(const int major, const int minor, const int patch) {
-    if (major > NET_PROTOCOL_MAJOR || (major == NET_PROTOCOL_MAJOR && net_peer_has_wpc(minor, patch))) return (uint16_t) NET_ENT_PACKET_V8_SIZE;
+    // 1.3.1 readers prefix-read longer ENTs, so the WP-F tail (V9) goes to every 1.3.1+ server
+    if (major > NET_PROTOCOL_MAJOR || (major == NET_PROTOCOL_MAJOR && net_peer_has_wpc(minor, patch))) return (uint16_t) NET_ENT_PACKET_V9_SIZE;
     if (major == NET_PROTOCOL_MAJOR && minor >= 2) return (uint16_t) NET_ENT_PACKET_V7_SIZE;
     if (major == NET_PROTOCOL_MAJOR && minor == 1) return (uint16_t) NET_ENT_PACKET_V6_SIZE;
     return (uint16_t) NET_ENT_PACKET_V4_SIZE;
 }
 
 int net_packet_read_spawn(NetSpawnPacket *spawn, const NetPacket *packet) {
-    // 78 (no cosmetics), V2 (cosmetics), V3 (+ attachIndex / headMlt, WP-C) or longer (V3 prefix)
+    // 78 (no cosmetics), V2 (cosmetics), V3 (+ attachIndex / headMlt, WP-C), V4 (+ the v7 cosmetic
+    // slots, WP-F) or longer (V4 prefix). V3 < length < V4 (cut inside the WP-F tail) reads as V3.
     if (packet->length != NET_SPAWN_PACKET_V1_SIZE && packet->length != NET_SPAWN_PACKET_V2_SIZE &&
         packet->length < NET_SPAWN_PACKET_V3_SIZE) return 0;
 
     spawn->cosmetics = PLAYER_COSMETICS_NONE;
     spawn->attach_index = DEFAULT_ATTACHMENT_INDEX;
     spawn->head_mlt = 1.0f;
-    memcpy(spawn, packet->payload, packet->length < sizeof(*spawn) ? packet->length : sizeof(*spawn));
+    spawn->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    const size_t length = packet->length > NET_SPAWN_PACKET_V3_SIZE && packet->length < NET_SPAWN_PACKET_V4_SIZE ? NET_SPAWN_PACKET_V3_SIZE : packet->length;
+    memcpy(spawn, packet->payload, length < sizeof(*spawn) ? length : sizeof(*spawn));
     if (!isfinite(spawn->head_mlt) || spawn->head_mlt <= 0.0f) spawn->head_mlt = 1.0f;
     return 1;
 }

@@ -72,7 +72,8 @@ typedef struct {
     unsigned char central_verified:1;  // online_mode: identity confirmed by central auth
     unsigned char skins_known:1;       // skins_owned holds the coordinator's inventory
     unsigned char password_ok:1;       // a JOIN carried the right server password
-    uint8_t skins_owned[512];          // bitset of owned store.skins indices (4096), enforced on ENT
+    uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v7.1.4 has 6448), enforced on ENT
+    int badge;                         // badgeIndex (v7 account stats.bdg, badges.js), -1 none
 } ServerAccount;
 
 struct ServerTransport;
@@ -94,6 +95,8 @@ typedef struct {
     int attach_index;              // WP-C ENT V8 attachIndex (ent[12]), DEFAULT_ATTACHMENT_INDEX for older ENTs
     unsigned char chall_mode:1;    // WP-C ENT V8 challengeMode (ent[7])
     unsigned char anon_mode:1;     // WP-C ENT V8 anonMode (ent[19])
+    PlayerCosmeticsV7 cosmetics_v7; // WP-F ENT V9: the v7.1.4 cosmetic slots (none for older ENTs; badge unused)
+    unsigned char show_badges;     // WP-F ENT V9 showBadges (PLAYER_SHOW_BADGE_*), all for older ENTs
     int streak_indexes[3];         // WP-B: STREAK_SLOTS (v7 ENT streakIndexes), applied at spawn
     unsigned char streak_indexes_set:1; // 0: the default pick (Nuke only)
     char name[SERVER_PLAYER_NAME_MAX];

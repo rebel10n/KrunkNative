@@ -94,7 +94,7 @@ static PlayerCosmetics preview_cosmetics(void) {
     ui_loadout_cosmetics(&cosmetics);
 
     if (ui_police_active()) {
-        cosmetics.back = 1487;
+        cosmetics.body = 1487;
         cosmetics.hat = 1890;
         cosmetics.dye = 1891;
         cosmetics.face = 1842;
@@ -110,10 +110,19 @@ static PlayerSkins preview_skins(const int class_index) {
     return skins;
 }
 
+// WP-F: the v7 slots (head, back, shoes, pet, wrist, charms; Random shows none); none for Officer Buddy
+static PlayerCosmeticsV7 preview_cosmetics_v7(const int class_index) {
+    PlayerCosmeticsV7 v7 = PLAYER_COSMETICS_V7_NONE;
+    if (!ui_police_active()) ui_loadout_cosmetics_v7(class_index, &v7, 0);
+    return v7;
+}
+
 static int preview_cosmetics_changed(const Player *player) {
     const PlayerCosmetics want = preview_cosmetics();
+    const PlayerCosmeticsV7 want_v7 = preview_cosmetics_v7(player->class_index);
     const PlayerSkins want_skins = preview_skins(player->class_index);
-    return memcmp(&player->cosmetics, &want, sizeof(want)) != 0 || memcmp(&player->skins, &want_skins, sizeof(want_skins)) != 0;
+    return memcmp(&player->cosmetics, &want, sizeof(want)) != 0 || memcmp(&player->skins, &want_skins, sizeof(want_skins)) != 0 ||
+           memcmp(&player->cosmetics_v7, &want_v7, sizeof(want_v7)) != 0;
 }
 
 // A private third-person player of the menu class, like Krunker's preview `dF`
@@ -125,6 +134,7 @@ static Player *preview_player_new(Client *client, Scene *scene) {
     player->uid = -1; // player_update_meshes() anchors uid -1 (Krunker's preview sid) at player->position
     player->class_index = client->menu_class_index;
     player->cosmetics = preview_cosmetics();
+    player->cosmetics_v7 = preview_cosmetics_v7(player->class_index);
     player->skins = preview_skins(player->class_index);
     player_spawn(player); // loadout, ammo and weapon for the class (also picks a map spawn: reset below)
 
