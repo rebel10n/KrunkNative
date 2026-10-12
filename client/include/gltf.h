@@ -71,8 +71,12 @@ void gltf_set_clock_override(double seconds); // < 0: back to glfwGetTime()
 // NULL when none. Writes to it last until the next sampled clip moves that node; skins follow it.
 MeshTransform *gltf_instance_bone(GltfInstance*, const char *name);
 // playClip(name, reps): reps > 0 plays that clip alone `reps` times and clamps on its last frame;
-// reps 0 loops it (no restart when it already is the looping clip). Unknown names: no change.
+// reps 0 loops it (no restart when it already is the looping clip, and no effect while a reps > 0
+// clip is still playing: v7's isRunning guard). Unknown names: no change.
 void gltf_instance_play_clip(GltfInstance*, const char *clip, int reps);
+// 1 while a reps > 0 clip plays (not yet clamped on its last frame).
+#define GLTF_HAVE_CLIP_RUNNING 1
+int gltf_instance_clip_running(const GltfInstance*);
 // stopAllClips(): no clip plays; the nodes keep their last pose.
 void gltf_instance_stop_clips(GltfInstance*);
 // updateMorphKey(name, weight): weight clamped to 0..1 on every mesh whose morph target names

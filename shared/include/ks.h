@@ -137,6 +137,7 @@ KsValue ks_host_object(KsScript *, const KsHostClass *, void *native, uint32_t n
 void    ks_host_forget(KsScript *, const KsHostClass *, uint32_t native_id);
 size_t  ks_to_string(KsScript *, KsValue, char *buf, size_t n);   // ToString (1.12)
 double  ks_to_number(KsValue);                                    // ToNumber
+double  ks_to_float(KsValue);                                     // F(x) = parseFloat(ToString(x)) || 0: (num) casts, host setters
 // (de)serialisation for networking/storage (2.5)
 size_t  ks_serialize(KsScript *, KsValue, uint8_t *out, size_t cap);
 KsValue ks_deserialize(KsScript *, const uint8_t *in, size_t len, int *ok);

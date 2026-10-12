@@ -1058,6 +1058,13 @@ MeshTransform *gltf_instance_bone(GltfInstance *instance, const char *name) {
     return NULL;
 }
 
+int gltf_instance_clip_running(const GltfInstance *instance) {
+    if (!instance || instance->clip_mode != GLTF_CLIPS_ONCE || !instance->model || !instance->model->data) return 0;
+    if (instance->clip < 0 || (size_t) instance->clip >= instance->model->data->animations_count) return 0;
+    const float duration = clip_duration(&instance->model->data->animations[instance->clip]);
+    return instance->time - instance->clip_start < (double) duration * instance->clip_reps;
+}
+
 void gltf_instance_play_clip(GltfInstance *instance, const char *clip, const int reps) {
     if (!instance || !clip || !instance->model || !instance->model->data) return;
     const cgltf_data *data = instance->model->data;
@@ -1071,6 +1078,9 @@ void gltf_instance_play_clip(GltfInstance *instance, const char *clip, const int
     } else {
         // already the looping main clip: keep playing it from where it is
         if (instance->clip_mode == GLTF_CLIPS_LOOP && instance->clip == index) return;
+        // render.js playClip(name, 0): `!currAnim || !isFinite(currAnim.repetitions) ||
+        // !currAnim.isRunning()`, so a loop never cuts a one-shot that is still playing
+        if (gltf_instance_clip_running(instance)) return;
         instance->clip_mode = GLTF_CLIPS_LOOP;
         instance->clip_reps = 0;
     }
