@@ -6,6 +6,7 @@
 #include <shared.h>
 #include <world.h> // map-logic WP-B: PvP filter, terrain
 #include <ai.h>
+#include <prefabs.h> // prefab_info: geometry of an object hit
 #include <math.h>
 #include <string.h>
 
@@ -165,6 +166,18 @@ static int projectile_object_blocks(const Object *object) {
              object->prefab == PREFAB_CAMERA_POSITION || object->prefab == PREFAB_SPECTATE_CAM);
 }
 
+// v7 bug fixed (thrown knives frozen in the air): projectiles.js sends "pre" with impact 1 for
+// every map-object hit, so the client sticks the knife (linger 5 s) and puts impact dust wherever
+// the projectile stopped. noVis volumes still block it (v7: roof blockers and clip walls stop shots
+// too), but nobody sees them: on lostworld_s6, sandstorm_v3 or oasis_v3, 4 to 19 throws in a hundred
+// from the spawns end on one far above any visible surface, and the knife hung there in mid-air.
+// The same for a destructible the hit just destroyed. Those ends carry no impact: the knife goes away
+// as on a player hit. (v7's own spray trace, players.spray, skips noVis objects.)
+static int projectile_object_visible(const Object *object) {
+    const PrefabInfo *info = prefab_info((int) object->prefab);
+    return object->active && !object->no_vis && !(info && info->geometry == PREFAB_GEO_NONE);
+}
+
 // Nearest hit along this tick's step (lineInRect against step = velocity * dt).
 static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectile, const float dt_ms, int *hit_any) {
     const vec3 step = {projectile->velocity.x * dt_ms, projectile->velocity.y * dt_ms, projectile->velocity.z * dt_ms};
@@ -263,7 +276,6 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
 
         if (hit_any) {
             Player *owner = game_find_player(game, projectile->owner_uid);
-            hit_object = !hit.player && !hit.ai;
 
             // v7.1.4: smite, then attributes.dmg (Strength); the bot dmgMlt is player_change_health's
             float damage = owner && owner->smite ? 10000.0f : projectile->config.damage;
@@ -274,6 +286,8 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
             if (hit.player && !owner) game_ai_projectile_hit_player(game, projectile, hit.player); // an AI shot's effectInd (WP-F)
             // u[0].obj: destructible health and onShoot / onDamage / onProjectile / onThrowingMelee triggers
             if (hit.object) game_object_hit(game, hit.object, owner, damage, projectile->thrown_melee, GAME_HIT_PROJECTILE);
+            // an impact on the terrain or on a map object still there to see (after this hit's damage)
+            hit_object = !hit.player && !hit.ai && (!hit.object || projectile_object_visible(hit.object));
 
             if (hit.player && damage > 0.0f) {
                 // v7.1.4: a player's direct hit takes the weapon's hsMlt / lsMlt (1 / 1 on every stock

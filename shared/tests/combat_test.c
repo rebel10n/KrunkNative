@@ -25,8 +25,15 @@ static int g_last_hit_damage = -1;
 static int g_watch_uid = -1; // record HITs on this target only (pierce 1 rays go on into others)
 static int g_last_explosion_radius = -1;
 
+static int g_end_count;
+static NetProjectileEndPacket g_last_end;
+
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game; (void) uid;
+    if (type == NET_PACKET_PROJECTILE_END && length == sizeof(NetProjectileEndPacket)) {
+        g_last_end = *(const NetProjectileEndPacket *) payload;
+        g_end_count++;
+    }
     if (type == NET_PACKET_EXPLOSION && length == sizeof(NetExplosionPacket)) g_last_explosion_radius = (int) ((const NetExplosionPacket *) payload)->radius;
     if (type == NET_PACKET_HIT && length == sizeof(NetHitPacket) && ((const NetHitPacket *) payload)->target_uid == g_watch_uid) {
         g_last_hit_damage = ((const NetHitPacket *) payload)->damage;
@@ -515,6 +522,59 @@ static void test_chall_mode(Game *game) {
     CHECK(p->health > 50.0f, "without challMode the class regen heals (%.1f)", (double) p->health);
 }
 
+// Where a thrown knife stops, "pre" says whether it sticks (impact: the client lingers it 5 s
+// and puts impact dust there). Walls, floors and the terrain: yes. A noVis volume (roof blockers,
+// clip walls) or a destructible the knife just broke: the knife would hang in mid-air, so no
+// (v7 bug fixed in shared/src/projectile.c). The knife stops at both either way.
+static const char *const KNIFE_MAP = "{\"name\": \"knife_ends\", \"spawns\": [[0, 0, 0]], \"objects\": ["
+    "{\"p\": [0, -10, 0], \"s\": [400, 10, 400]},"               // floor
+    "{\"p\": [0, 0, -60], \"s\": [100, 100, 2]},"                // wall, -z
+    "{\"p\": [60, 0, 0], \"s\": [2, 100, 100], \"v\": 1},"       // invisible wall, +x
+    "{\"p\": [-60, 0, 0], \"s\": [2, 100, 100], \"h\": 50}]}";  // destructible wall, -x (50 HP)
+
+static NetProjectileEndPacket throw_knife(Game *game, Player *owner, const float yaw, const float pitch) {
+    const int before = g_end_count;
+    const ProjectileShot shot = {.speed_mlt = 1.0f, .damage_d = 1.0f, .effect = -1};
+    game_spawn_projectile_ex(game, owner, WEAPON_ID_KNIFE, projectile_config_for(owner->weapon, 1), (vec3) {0.0f, 10.0f, 0.0f}, yaw, pitch, 1, &shot);
+    for (int i = 0; i < 600 && g_end_count == before; i++) game_tick_projectiles(game, 1.0f / 60.0f);
+    if (g_end_count == before) return (NetProjectileEndPacket) {.id = -1};
+    return g_last_end;
+}
+
+static void test_knife_ends(void) {
+    printf("thrown knife ends: impact only on something to see...\n");
+    cJSON *json = cJSON_Parse(KNIFE_MAP);
+    static const cJSON *maps[1];
+    maps[0] = json;
+    static Game game;
+    memset(&game, 0, sizeof(game));
+    game_configure(&game, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&game, 0, -1, 1);
+    game.hooks.send = test_send;
+    game.lag_comp = 0;
+    Player *thrower = add_player(&game, 1, 0);
+    thrower->position = (vec3) {0.0f, 0.0f, 0.0f};
+
+    // yaw - PI is the flight heading: 0 flies to -z, 3 PI / 2 to +x, PI / 2 to -x
+    NetProjectileEndPacket end = throw_knife(&game, thrower, 0.0f, 0.0f);
+    CHECK(end.id >= 0 && end.impact && end.position[2] > -60.0f && end.position[2] < -57.0f,
+          "the wall: stuck at its face (impact %d, z %.2f)", end.impact, end.position[2]);
+    end = throw_knife(&game, thrower, 0.0f, -1.2f);
+    CHECK(end.id >= 0 && end.impact && fabsf(end.position[1]) < 1.0f, "the floor: stuck (impact %d, y %.2f)", end.impact, end.position[1]);
+    end = throw_knife(&game, thrower, 1.5f * (float) M_PI, 0.0f);
+    CHECK(end.id >= 0 && !end.impact, "an invisible wall: no impact, no knife hanging in the air (impact %d)", end.impact);
+    CHECK(end.id >= 0 && end.position[0] > 57.0f && end.position[0] < 60.0f, "an invisible wall still stops the knife (x %.2f)", end.position[0]);
+
+    const Object *destructible = NULL;
+    for (size_t i = 0; i < game.map->object_count; i++) {
+        if (game.map->objects[i]->health > 0.0f) destructible = game.map->objects[i];
+    }
+    CHECK(destructible && destructible->active, "the destructible wall stands");
+    end = throw_knife(&game, thrower, 0.5f * (float) M_PI, 0.0f);
+    CHECK(destructible && !destructible->active, "180 damage breaks the 50 HP wall");
+    CHECK(end.id >= 0 && !end.impact, "a wall the knife broke: no impact (impact %d)", end.impact);
+}
+
 int main(void) {
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/311_sandstorm.json", &sandstorm) && load_json_file("../assets/maps/311_sandstorm.json", &sandstorm)) {
@@ -540,6 +600,7 @@ int main(void) {
     test_upgrades(&game);
     test_mode_multipliers(&game);
     test_chall_mode(&game);
+    test_knife_ends();
 
     if (g_failures) {
         printf("combat_test: %d of %d checks failed\n", g_failures, g_checks);

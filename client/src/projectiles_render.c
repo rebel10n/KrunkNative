@@ -178,12 +178,16 @@ void projectiles_render_server_spawn(Client *client, const NetProjectilePacket *
 
     if (own && !proj_dont_pred(client, packet->weapon_index)) {
         // 129.js init: the owner gets no "pr" for a predicted projectile. Link the oldest
-        // prediction of this weapon that is still waiting for its server id.
+        // prediction of this weapon that is still waiting for its server id. A knife stuck in
+        // its wall (linger) already had its end: linked back to the next throw, the knife in
+        // the air lost its stick / removal and flew on through the map for 3000 units, while
+        // the stuck one jumped to the next throw's end (v7 links by owid = shotCntP instead).
         ProjVisual *oldest = NULL;
 
         for (int i = 0; i < PROJ_MAX; i++) {
             ProjVisual *visual = &proj.visuals[i];
-            if (!visual->active || !visual->predicted || visual->linked || visual->weapon_index != packet->weapon_index) continue;
+            if (!visual->active || !visual->predicted || visual->linked || visual->linger > 0.0f ||
+                visual->weapon_index != packet->weapon_index) continue;
             if (visual->age > PROJ_LINK_WINDOW_MS) continue;
             if (!oldest || visual->age > oldest->age) oldest = visual;
         }
@@ -267,9 +271,12 @@ void projectiles_render_local_shot(Client *client, const Player *me, const int t
         pitch += me->recoil_anim_y * game_constants.recoil_mlt + spread;
     }
 
-    // D.init: L -= PI; xS = spd * sin(L) * cos(M), zS = spd * cos(L) * cos(M), yS = spd * sin(M)
+    // D.init: L -= PI; xS = spd * sin(L) * cos(M), zS = spd * cos(L) * cos(M), yS = spd * sin(M).
+    // A knife throw passes its charge {d, v: max(0.3, d)} (players.js): spd * v, like the server's
+    // knife. At full speed a quick throw's knife outran its server twin threefold, through walls.
+    const float speed = config->speed * (thrown && me->throw_speed_mlt > 0.0f ? me->throw_speed_mlt : 1.0f);
     const float l = yaw - (float) M_PI;
-    const vec3 velocity = {config->speed * sinf(l) * cosf(pitch), config->speed * sinf(pitch), config->speed * cosf(l) * cosf(pitch)};
+    const vec3 velocity = {speed * sinf(l) * cosf(pitch), speed * sinf(pitch), speed * cosf(l) * cosf(pitch)};
     const vec3 origin = {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z};
 
     ProjVisual *visual = proj_spawn(client, weapon_index, origin, velocity, config->gravity, PROJ_LOCAL_DST);

@@ -160,6 +160,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/editor_serialize_test . --golden doc/ref/krunker-v7.1.4/editor/inspector-edits.json
 	./$(DEBUG_DIR)/weapons_v7_test
 	./$(DEBUG_DIR)/combat_test
+	./$(DEBUG_DIR)/projectiles_render_test
 	./$(DEBUG_DIR)/zombies_test
 	./$(DEBUG_DIR)/config_test
 	./$(DEBUG_DIR)/comp_ranked_test

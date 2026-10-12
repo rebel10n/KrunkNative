@@ -1229,6 +1229,7 @@ typedef struct Player_t {
     unsigned char streaks_owned[STREAK_COUNT]; // player.streaks[i].cnt: earned, not yet called in
     int start_health;             // startHealth: maxHealth before Juggernaut
     float throw_charge;           // throwCharge (s): class throwChrg || config.throwCharge
+    float throw_speed_mlt;        // v (max(0.3, d)) of the last knife throw: the owner's physObj flies at spd * v too
     int attach_index;             // attachIndex (ENT / spawn): the sight on attach weapons, 0 Reflex, 1 Acog, -1 none
     unsigned char upgraded_slots; // player.upgrades: bit per loadout slot holding its upgradeWeapons entry (krumMachine)
     int weapon_streak;            // weaponStreak: kills in a row with streak_weapon ("wstk")

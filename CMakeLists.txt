@@ -676,6 +676,17 @@ else ()
         target_link_libraries(gltf_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # projectiles_render_test: thrown-knife visuals over the owner's "pr" / "pre" sequences (stuck
+    # knives keep their end, the throw's charge speed). GL-free: it includes projectiles_render.c and
+    # stubs the mesh / scene / loader calls, so the GL target only provides headers.
+    add_executable(projectiles_render_test client/tests/projectiles_render_test.c ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(projectiles_render_test PRIVATE client/include client/lib)
+    target_link_libraries(projectiles_render_test PRIVATE freetype glfw m)
+    krunknative_link_gl(projectiles_render_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(projectiles_render_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the
     # brain when libpq is available). Optional; never affects the game targets. Tests: ctest.
     option(KRUNKNATIVE_SERVICES "Build the backend services (services/; needs OpenSSL, libpq for the DB parts)" ON)

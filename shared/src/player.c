@@ -2701,6 +2701,7 @@ void player_melee(Player *player) {
         const vec3 origin = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
         // stored[0] with {d, v: max(0.3, d)}: ceil(180 * d) damage, 0.38 * v speed
         const ProjectileShot shot = {.speed_mlt = fmaxf(0.3f, throw_d), .damage_d = throw_d, .effect = -1};
+        player->throw_speed_mlt = shot.speed_mlt; // physObj(..., {d, v}): the thrower's own knife (projectiles_render.c)
         game_spawn_projectile_ex(player->game, player, WEAPON_ID_KNIFE, projectile_config_for(player->weapon, 1), origin, player->direction.y,
                                  player->direction.x, 1, &shot);
         return;
