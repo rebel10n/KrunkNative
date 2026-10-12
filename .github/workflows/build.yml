@@ -463,6 +463,12 @@ jobs:
         working-directory: platform/android
         run: ./gradlew --no-daemon assembleDebug
 
+      # client.yml's published APK: the release build over https://krunk.io/ (signed there with the
+      # repository key; unsigned here, it only has to build)
+      - name: Build release APK (unsigned)
+        working-directory: platform/android
+        run: ./gradlew --no-daemon assembleRelease -Pkrunknative.serverUrl=https://krunk.io/
+
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:

@@ -4845,10 +4845,15 @@ static void social_enter(Client *client, const char *query) {
     settings_load(); // re[...].set(saved) at load: B, D, j, F, volume + onResize()
     on_resize();
     // the app badges: iosDB / androidDB when window.canShowExternalLinks (always true in
-    // KrunkNative, as in ui_handlers.c), steamDB always
+    // KrunkNative, as in ui_handlers.c), steamDB always. KrunkNative: both app badges open the
+    // menu's Download window (/?download: the Android APK, Add to Home Screen on iOS;
+    // tools/ui-import/social_page.py APP_BADGES) and steamDB (Krunker on Steam) stays hidden:
+    // KrunkNative is not on Steam (--render-scenario keeps it: uidiff compares the badges with v7.1.4's).
     set_display("iosDB", "block");
     set_display("androidDB", "block");
-    set_display("steamDB", "block");
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) set_display("steamDB", "block");
+#endif
 
     // updateWindow(de("p"), de("q"), de("s"), de("i")) (?games opens the maps)
     char p[64], q[HUB_KEY_MAX], s[HUB_KEY_MAX], i[HUB_KEY_MAX], tmp[8];

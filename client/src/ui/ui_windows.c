@@ -7,6 +7,7 @@
 #include <map_catalog.h>
 #include <ui_mobile.h>
 #include <client_settings.h>
+#include <download_ui.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -459,6 +460,7 @@ static char *gen_9(void) { // Select Spray: owned sprays signed in (ui_loadout.c
 static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (pListKey, hud_ui.c)
 static char *gen_13(void) { return clan_window_gen(); }
 static char *gen_14(void) { return store_window_gen(); } // Store (windows[13], store_ui.c)
+static char *gen_25(void) { return download_window_gen(); } // Download Client: KrunkNative's packages (download_ui.c)
 static char *gen_27(void) { return ranked_ui_window_gen(); } // Ranked (kept by KrunkNative, ranked_ui.c) // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
 // Change Loadout and the windows it opens, Changelog: ui_loadout.c
 static char *gen_loadout(void) { return ui_loadout_gen(); }
@@ -477,6 +479,7 @@ static const WindowDef WINDOWS[] = {
     {9, gen_9},
     {13, gen_13},
     {14, gen_14},
+    {25, gen_25},
     {27, gen_27},
     {15, gen_15},
     {16, gen_16},

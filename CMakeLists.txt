@@ -194,6 +194,8 @@ if (EMSCRIPTEN)
     else ()
         set(KN_WEB_COPY_UI copy_directory)
     endif ()
+    # platform/web/pwa.py (emsdk ships a Python for emcc anyway)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_custom_target(web_dist ALL
         COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_DIST_DIR}
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/js
@@ -203,6 +205,8 @@ if (EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.data ${WEB_DIST_DIR}/client.data
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/assets
         COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_SOURCE_DIR}/assets ${WEB_DIST_DIR}/assets
+        # Add to Home Screen (PWA): manifest, icons and the <head> links of index.html
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/platform/web/pwa.py ${WEB_DIST_DIR}
         DEPENDS client
         COMMENT "Assembling web client in ${WEB_DIST_DIR}"
     )

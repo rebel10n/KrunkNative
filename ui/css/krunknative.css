@@ -172,3 +172,134 @@ html.kn-preview-bg #canvas {
 .setSugBox2 {
   width: 219px;
 }
+
+/* The Download window (showWindow(25), client/src/ui/download_ui.c): v7's header and
+ * description, then KrunkNative's packages: the visitor's platform first (.knDlRec,
+ * highlighted), every other platform below (.knDlRow), in the window's dark palette. */
+.knDlRec {
+  margin: 0 5px 15px 5px;
+  padding: 12px 20px 10px 20px;
+  border-radius: 6px;
+  border: 3px solid #fbc02d;
+  background-color: rgba(0, 0, 0, 0.4);
+}
+#menuWindow.dark div.knDlRecTag {
+  color: #fbc02d;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+.knDlRecHead {
+  display: flex;
+  align-items: center;
+}
+.knDlIcon {
+  width: 56px;
+  height: 56px;
+  margin-right: 16px;
+  flex-shrink: 0;
+}
+.knDlMi {
+  font-size: 56px;
+  line-height: 56px;
+}
+.knDlRecName {
+  font-size: 26px;
+}
+#menuWindow.dark div.knDlRecSub,
+#menuWindow.dark div.knDlRecPkg {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 17px;
+}
+#menuWindow.dark div.knDlRecPkg {
+  margin-top: 10px;
+}
+.knDlBtns {
+  margin-top: 10px;
+}
+a.knDlBtn {
+  display: inline-block;
+  padding: 6px 16px;
+  margin: 0 8px 8px 0;
+  border-radius: 4px;
+  background-color: #2196f3;
+  color: #fff;
+  font-size: 19px;
+  text-decoration: none;
+}
+a.knDlBtn:hover {
+  background-color: #42a5f5;
+  text-decoration: none;
+}
+a.knDlBtn.knDlAlt {
+  background-color: rgba(255, 255, 255, 0.12);
+  font-size: 17px;
+}
+a.knDlBtn.knDlAlt:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+#menuWindow.dark div.knDlHow {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 16px;
+  line-height: 21px;
+}
+#menuWindow.dark div.knDlNote {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 15px;
+  margin-top: 6px;
+}
+.knDlOther {
+  margin: 0 5px;
+}
+#menuWindow.dark div.knDlOtherHed {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 17px;
+  margin: 0 0 6px 4px;
+}
+.knDlRow {
+  display: flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 17px;
+}
+.knDlRow.knDlOdd {
+  background-color: rgba(0, 0, 0, 0.25);
+}
+.knDlRow .knDlIcon {
+  width: 26px;
+  height: 26px;
+  margin-right: 12px;
+}
+.knDlRow .knDlMi {
+  font-size: 26px;
+  line-height: 26px;
+}
+.knDlRowName {
+  flex-grow: 1;
+}
+.knDlRowLinks {
+  flex-shrink: 0;
+  text-align: right;
+}
+a.knDlLink {
+  color: #2196f3;
+  margin-left: 12px;
+  text-decoration: none;
+}
+.knDlRec a.knDlLink,
+.knDlFoot a.knDlLink {
+  margin-left: 0;
+}
+a.knDlLink:hover {
+  text-decoration: underline;
+}
+#menuWindow.dark span.knDlHint {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 15px;
+}
+#menuWindow.dark div.knDlFoot {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 15px;
+  text-align: center;
+  margin-top: 12px;
+}

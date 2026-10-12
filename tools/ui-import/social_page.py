@@ -13,6 +13,10 @@ reference tree into ``ui/``, with the same transformations as the menu page
   page is its own URL on the web and boots the same ``client.js`` in hub mode.
 - The asset-server profile icon (``https://totallynotio.krunker.zip/textures/classes/
   icon_0.png``) points at the local copy in ``ui/textures/classes/``.
+- The app badges (``#androidDB`` / ``#iosDB``: Krunker Hub on Google Play / the App Store)
+  open KrunkNative's Download window (``/?download``, ``client/src/ui/download_ui.c``: the
+  Android APK, Add to Home Screen on iOS) instead of Krunker's store pages (``APP_BADGES``);
+  ``#steamDB`` (Krunker on Steam) stays hidden (``social_ui.c``).
 
 ``css/social.css`` and ``css/social_custom.css`` are copied byte-identical (social.css
 keeps its dead web-archive ``url()``s, which fail in the real offline page too);
@@ -35,6 +39,11 @@ SOCIAL_TEXTURES = ("previews/cosmetics/6_9.png", "previews/melee/melee_18.png", 
                    "previews/cosmetics/2_65.png", "previews/cosmetics/1_129.png")
 
 
+# Krunker's store links on the hub's app badges -> KrunkNative's Download window
+APP_BADGES = (("https://play.google.com/store/apps/details?id=ch.yendis.krunkerhub", "/?download"),
+              ("https://apps.apple.com/app/id1515679115", "/?download"))
+
+
 def _transform_html(html, v7=False):
     html = re.sub(r"<script\b[^>]*>.*?</script>\s*", "", html, flags=re.S | re.I)
     if v7:
@@ -46,6 +55,8 @@ def _transform_html(html, v7=False):
     html = re.sub(r"\?build=[A-Za-z0-9]+", "", html)
     html = re.sub(r"(href|src)=\"/(?!/)", r'\1="', html)
     html = html.replace("https://totallynotio.krunker.zip/textures/classes/icon_0.png", "textures/classes/icon_0.png")
+    for store, ours in APP_BADGES:
+        html = html.replace(store, ours)
     # Web build: the page boots the same client.js as index.html (in hub mode, from its
     # file name). The WebGL canvas GLFW needs stays hidden: the hub draws no 3D.
     if 'id="canvas"' not in html:

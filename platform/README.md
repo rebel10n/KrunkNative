@@ -70,6 +70,19 @@ make android-install        # adb install -r .../app-debug.apk
 
 Output: `platform/android/app/build/outputs/apk/debug/app-debug.apk`.
 
+**Published APK** (`krunknative-android.apk` on the GitHub release `client-latest`, linked by the
+menu's Download window, client/src/ui/download_ui.c): `assembleRelease` with
+`-Pkrunknative.serverUrl=https://krunk.io/`, so the app is a thin fullscreen WebView over the live
+site (no bundled client: `krunknative.bundleWeb` defaults to false with a server URL), always the
+latest game, online play included. It is signed with the repository key:
+`tools/release/android-keystore.sh` creates it once in `~/.config/kn-secrets/android/` (never
+commit it: an update signed with another key does not install over the old app) and prints the
+`gh secret set` commands for `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`; `make android-release` builds the same APK locally.
+Gradle reads the key from `KN_ANDROID_KEYSTORE`, `KN_ANDROID_KEYSTORE_PASSWORD`,
+`KN_ANDROID_KEY_ALIAS`, `KN_ANDROID_KEY_PASSWORD` (none: an unsigned release APK);
+`-Pkrunknative.versionCode` / `versionName` (CI: commit time in minutes / git describe).
+
 Toolchain: JDK 17 or 21, Android SDK with `platforms;android-35` and
 `build-tools;35.0.0` (`sdkmanager`), Gradle 8.11.1 through the wrapper, AGP 8.7.3.
 
@@ -107,7 +120,19 @@ xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -configuration Deb
 
 For a device build open the generated project in Xcode and pick a signing team.
 
+**Published .ipa** (`krunknative-ios-unsigned.ipa` on `client-latest`): an unsigned Release build
+for devices with `KN_SERVER_URL=https://krunk.io/` (the `KNServerURL` build setting). iOS only
+installs signed apps, so it is for sideloading tools (AltStore, Sideloadly), which sign it with
+the player's Apple ID. The Download window sends iPhone / iPad players to Add to Home Screen
+first: the web build is an installable web app (`platform/web`: `manifest.webmanifest`, icons and
+the `<head>` links `pwa.py` adds to `dist/web/index.html`; `display: standalone`, landscape), so
+Safari opens krunk.io from the Home Screen fullscreen, with no signing at all.
+
 ## CI
+
+`.github/workflows/client.yml` publishes the mobile apps with the native packages on
+`client-latest`: job `android` (the signed release APK above; skipped with a warning while the
+`ANDROID_KEYSTORE_BASE64` secret is missing) and job `ios` (the unsigned .ipa).
 
 `.github/workflows/build.yml`: `android` (Linux, downloads the `web` job's artifact,
 `./gradlew assembleDebug`, uploads `KrunkNative-android-debug`) and `ios` (macOS,

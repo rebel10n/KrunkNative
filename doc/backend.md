@@ -1931,6 +1931,15 @@ with `--wait-pid` and quits; never forced mid-game) and **Download** (the deb/rp
 install, else the release page; only `github.com/rebel10n/KrunkNative/` and the updates host are
 opened). Console: `update` (status), `update check`, `update now` (menu open only), `update download`.
 
+**Download window** (`client/src/ui/download_ui.c`, the header's "Download Our Client" = v7's
+`showWindow(25)`; `/?download` opens it, the hub's app badges link there): every package of the
+GitHub release `client-latest` (`krunknative-client-<plat>.<ext>`, `krunknative-android.apk`,
+`krunknative-ios-unsigned.ipa`), the visitor's platform first and highlighted (web:
+`navigator.userAgent` / `userAgentData` / the WebGL renderer for Mac CPUs; native: `kn-install.json`,
+else the build's platform), every other platform listed under it. iPhone / iPad: Add to Home Screen
+(the web build's PWA, `platform/web`). The importer keeps v7's header and description only
+(`tools/ui-import/windows_v7.py`), so Krunker's installer links never come back.
+
 **Tests**: `update_test` (in `make test`: manifest parsing, URL resolution, version comparison, asset
 lists and diffing, the install marker, tar.gz/zip extraction incl. traversal and escaping symlinks,
 the journaled swap with rollback and crash recovery, package asset mirroring);

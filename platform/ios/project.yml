@@ -51,12 +51,15 @@ targets:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: KrunkNative connects to game servers on your local network.
         # KrunkNative configuration (empty = bundled client with the offline server):
-        KNServerURL: ""        # open this URL instead of the bundled client (like Krunker's apps)
+        # open this URL instead of the bundled client (like Krunker's apps): the build setting
+        # KN_SERVER_URL (xcodebuild ... KN_SERVER_URL=https://krunk.io/, client.yml's .ipa)
+        KNServerURL: "$(KN_SERVER_URL)"
         KNWebSocketURL: ""     # bundled client: game server WebSocket (?ws=)
         KNAssetBaseURL: ""     # bundled client: where /assets/* comes from when not bundled
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.krunknative.app
+        KN_SERVER_URL: ""
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO

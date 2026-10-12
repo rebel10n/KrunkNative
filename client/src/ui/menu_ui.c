@@ -29,6 +29,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <update_ui.h>
+#include <download_ui.h> // showWindow(25) / ?download (client/src/ui/download_ui.c)
 #include <stdlib.h>
 #include <string.h>
 
@@ -1434,6 +1435,7 @@ void client_menu_tick(Client *client) {
         menu_refresh_tables(client);
         if (menu_state_changed(client)) menu_apply_state(client);
         menu_update_ping(client);
+        download_ui_tick(); // ?download opens the Download window (download_ui.c)
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.
         float w, h, dpr;

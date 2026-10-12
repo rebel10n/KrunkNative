@@ -11,7 +11,16 @@ fun quoted(s: String): String = "\"" + s.replace("\\", "\\\\").replace("\"", "\\
 val repoRoot = rootProject.projectDir.resolve("../..").canonicalFile
 val webDir = rootProject.projectDir.resolve(prop("krunknative.webDir", "../../dist/web")).canonicalFile
 val bundleAssets = prop("krunknative.bundleAssets", "tracked")
+val serverUrl = prop("krunknative.serverUrl")
+// A hosted game (serverUrl, e.g. the release APK over https://krunk.io/) needs no bundled client.
+val bundleWeb = prop("krunknative.bundleWeb", if (serverUrl.isEmpty()) "true" else "false") == "true"
 val webAssetsOut = layout.buildDirectory.dir("generated/krunknative/assets")
+
+// Release signing (CI: .github/workflows/client.yml, secrets ANDROID_KEYSTORE_BASE64 & co.;
+// locally: tools/release/android-keystore.sh). Without KN_ANDROID_KEYSTORE the release APK is
+// unsigned (app-release-unsigned.apk) and cannot be installed.
+fun env(name: String): String = System.getenv(name)?.trim() ?: ""
+val releaseKeystore = env("KN_ANDROID_KEYSTORE")
 
 android {
     namespace = "io.krunknative.app"
@@ -21,9 +30,11 @@ android {
         applicationId = "io.krunknative.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "3.1.1-kn"
-        buildConfigField("String", "SERVER_URL", quoted(prop("krunknative.serverUrl")))
+        // CI: versionCode = commit time in minutes (monotonic, so every build installs over the
+        // previous one), versionName = git describe
+        versionCode = prop("krunknative.versionCode", "1").toInt()
+        versionName = prop("krunknative.versionName", "7.1.4-kn")
+        buildConfigField("String", "SERVER_URL", quoted(serverUrl))
         buildConfigField("String", "WS_URL", quoted(prop("krunknative.wsUrl")))
         buildConfigField("String", "ASSET_BASE_URL", quoted(prop("krunknative.assetBaseUrl")))
     }
@@ -32,9 +43,21 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        if (releaseKeystore.isNotEmpty()) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = env("KN_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = env("KN_ANDROID_KEY_ALIAS")
+                keyPassword = env("KN_ANDROID_KEY_PASSWORD").ifEmpty { env("KN_ANDROID_KEYSTORE_PASSWORD") }
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseKeystore.isNotEmpty()) signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -61,8 +84,12 @@ dependencies {
 }
 
 // Copy the assembled web client into the APK assets as web/ (without the game assets
-// symlink), plus the selected part of <repo>/assets as web/assets/.
-val copyWebClient by tasks.registering(Sync::class) {
+// symlink), plus the selected part of <repo>/assets as web/assets/. A hosted-game build
+// (bundleWeb false) carries none: the task empties the generated asset dir instead.
+val copyWebClient = if (!bundleWeb) tasks.register<Delete>("copyWebClient") {
+    description = "No bundled web client: the app opens $serverUrl"
+    delete(webAssetsOut)
+} else tasks.register<Sync>("copyWebClient") {
     description = "Bundles the KrunkNative web client (${webDir}) into the APK assets"
     into(webAssetsOut.map { it.dir("web") })
     from(webDir) {

@@ -277,7 +277,7 @@ ANDROID_DIR  := platform/android
 ANDROID_APK  := $(ANDROID_DIR)/app/build/outputs/apk/debug/app-debug.apk
 ANDROID_ARGS ?=
 
-.PHONY: android android-only android-install ios-prepare
+.PHONY: android android-only android-install android-release ios-prepare
 android: web android-only ## Build the web client, then the Android debug APK (needs JDK 17+ and the Android SDK)
 
 android-only: ## Android debug APK from the existing dist/web (no web rebuild)
@@ -289,6 +289,16 @@ android-only: ## Android debug APK from the existing dist/web (no web rebuild)
 
 android-install: ## Install the debug APK on a connected device (adb)
 	adb install -r $(ANDROID_APK)
+
+# The published APK (client.yml job android): a thin app over ANDROID_SERVER_URL, release-signed
+# with the key of tools/release/android-keystore.sh (ANDROID_KEYS = its keystore.env).
+ANDROID_KEYS       ?= $(HOME)/.config/kn-secrets/android/keystore.env
+ANDROID_SERVER_URL ?= https://krunk.io/
+android-release: ## Signed release APK over https://krunk.io/ (key: tools/release/android-keystore.sh)
+	@[ -f "$(ANDROID_KEYS)" ] || { echo "no $(ANDROID_KEYS): run tools/release/android-keystore.sh"; exit 1; }
+	set -a; . "$(ANDROID_KEYS)"; set +a; cd $(ANDROID_DIR) && \
+	  ./gradlew --no-daemon assembleRelease -Pkrunknative.serverUrl=$(ANDROID_SERVER_URL) $(ANDROID_ARGS)
+	@ls -l $(ANDROID_DIR)/app/build/outputs/apk/release/app-release.apk
 
 ios-prepare: ## Copy dist/web into platform/ios/web (then: cd platform/ios && xcodegen generate, on macOS)
 	platform/ios/prepare.sh $(DIST_WEB)

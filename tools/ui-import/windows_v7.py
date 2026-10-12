@@ -18,7 +18,9 @@ class/inline style and markup) -- into ``ui/windows/``:
   "controls": {header, sticky, cls, style, tabs: [{name, file}]}}``.
 
 ``?build=`` query strings of the captured URLs are stripped and ``https://assets.krunker.io/``
-URLs made relative (as v7's hook.js rewrites them); nothing else is changed.
+URLs made relative (as v7's hook.js rewrites them). Window 25 (Download Client) keeps only v7's
+header and description: KrunkNative fills its package list (``client_download_template``).
+Nothing else is changed.
 """
 
 import gzip
@@ -158,6 +160,31 @@ def empty_big_blocks(html, opener, limit):
     return "".join(out)
 
 
+CLIENT_WINDOW = "25"  # showWindow(25), windows[24] "client_download"
+CLIENT_PLACEHOLDER = '<div id="knDownloads"></div>'
+
+
+def client_download_template(html):
+    """windows[24] (Download Client) as KrunkNative's template (intentional difference).
+
+    v7's markup links Krunker's own installers (https://krunker.zip/glorp/Krunker.io_Client_*);
+    KrunkNative keeps v7's header and description and replaces the installer list with
+    CLIENT_PLACEHOLDER, which client/src/ui/download_ui.c fills with the KrunkNative packages
+    of the GitHub release `client-latest` (the visitor's platform highlighted). A re-import
+    therefore never brings the krunker.zip links back; a capture this no longer matches fails
+    the import instead of passing them through.
+    """
+    start = html.find("<div><ul")
+    end = html.rfind("</ul></div>")
+    if "Download Krunker Client" not in html or start < 0 or end < start:
+        raise SystemExit("windows_v7.py: window %s no longer looks like v7's Download Client window" % CLIENT_WINDOW)
+    html = html[:start] + CLIENT_PLACEHOLDER + html[end + len("</ul></div>"):]
+    html = html.replace("Download Krunker Client", "Download KrunkNative")
+    if "krunker.zip" in html:
+        raise SystemExit("windows_v7.py: window %s still links krunker.zip" % CLIENT_WINDOW)
+    return html
+
+
 def load_capture(path=SOURCE):
     with gzip.open(path, "rt", encoding="utf-8") as fh:
         return json.load(fh)
@@ -196,6 +223,8 @@ def split_windows_v7(out_dir, write_if_changed, log, path=SOURCE):
             html = drop_per_weapon_rows(html)
         if wid == "8":
             html = empty_big_blocks(html, '<div class="hostTb2 hide"', HOST_TAB_MAX)
+        if wid == CLIENT_WINDOW:
+            html = client_download_template(html)
         name = "%s.html" % wid
         emit(name, html)
         entry = {"header": win.get("header") or "", "sticky": bool(win.get("sticky")), "file": name,

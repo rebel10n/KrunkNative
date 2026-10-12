@@ -42,7 +42,8 @@
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "dimmed under the window backdrop; #mainLogo (logo_6) + #mainLogoFace f_0"
+      "note": "dimmed under the window backdrop; #mainLogo (logo_6) + #mainLogoFace f_0; skipped: the taller window covers it (the window lists KrunkNative's client-latest packages (client/src/ui/download_ui.c), taller than v7's three Krunker installers)",
+      "skip": true
     },
     {
       "name": "window-header",
@@ -55,7 +56,8 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#menuWindow top (tabs / search / header)"
+      "note": "#menuWindow top (tabs / search / header); skipped: KrunkNative difference: the window lists KrunkNative's client-latest packages (client/src/ui/download_ui.c), taller than v7's three Krunker installers",
+      "skip": true
     },
     {
       "name": "window-body",
@@ -68,7 +70,8 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#menuWindow body"
+      "note": "#menuWindow body; skipped: KrunkNative difference: the window lists KrunkNative's client-latest packages (client/src/ui/download_ui.c), taller than v7's three Krunker installers",
+      "skip": true
     }
   ]
 }

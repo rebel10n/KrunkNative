@@ -4,6 +4,7 @@
 #include <gl.h> // glad natively, GLES3 on the web (before GLFW)
 #include <app_mode.h>
 #include <backend_ui.h>
+#include <download_ui.h> // ?download
 #include <debug_capture.h>
 #include <input_script.h>
 #include <html_ui.h>
@@ -184,6 +185,7 @@ void app_mode_navigate_self(Client *client, const char *query) {
     if (self == APP_MODE_GAME) {
         if (query && strstr(query, "testMap=1")) g_app.test_pending = 1;
         servers_ui_query(query); // ?play=<map> / ?game=<id> (hub Play / Join links; brain, backend_ui.h)
+        download_ui_query(query); // ?download: the Download window (the hub's app badges)
     } else {
         app_set_mode(client, self, query);
     }
@@ -398,6 +400,7 @@ void app_mode_start(Client *client) {
     // index.html?offline=1&testMap=1 / --game "testMap=1": the editor's Test Map in a new game window
     if (g_start_mode == APP_MODE_GAME && strstr(g_start_query, "testMap=1")) g_app.test_pending = 1;
     if (g_start_mode == APP_MODE_GAME) servers_ui_query(g_start_query); // ?play= / ?game= (backend_ui.h)
+    if (g_start_mode == APP_MODE_GAME) download_ui_query(g_start_query); // ?download (download_ui.h)
     g_app.started = 1;
 }
 
