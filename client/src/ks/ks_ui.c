@@ -422,7 +422,7 @@ int ks_ui_crosshair_hidden(void) { return g_ui.hide_crosshair; }
 // (ks_client_ui_late) with an important inline display (the native engine reads no <style>
 // inserted at run time).
 static const char *const DEFAULT_UI_IDS[] = {"gameUIHider", "fullMenHider", "inGameUI"};
-static const char *const CROSSHAIR_IDS[] = {"knCrosshair", "crosshair", "aimRecticle"};
+static const char *const CROSSHAIR_IDS[] = {"knCrosshair", "aimRecticle", "aimDot"};
 
 static void enforce_hidden(const char *const *ids, const size_t n, const int hide) {
     for (size_t i = 0; i < n; i++) {
