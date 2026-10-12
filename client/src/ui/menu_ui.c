@@ -53,12 +53,17 @@ static MenuUi g_ui;
 static char g_region_label[64];
 static char g_connect_code[8]; // Krunker's error code on the connection error screen ("000000")
 
-// Krunker v3.1.1 idle kick (index.js gameLoop + config.kickTimer): while the menu is up
-// (menuHolder shown), not spectating, on a production page, not the lobby host, not from
-// a ranked queue and the mode has no `noKick`, CONTROLS.idleTimer += delta; at 90 s
-// disconnect(i18n "player.inactive", "000005"). The timer resets on any key, opening a
-// window (showWindow), showMenu() and entering the game.
-#define MENU_KICK_TIMER_MS 90000.0
+// Krunker v7.1.4 idle kick (index.js gameLoop + config.kickTimer 120000): while the menu is
+// up (menuHolder shown), not spectating, on a production page, not the game host
+// (isGameHost), not a developer account, `!Game.config` and the mode has neither `noKick` nor
+// `noClientKick`, CONTROLS.idleTimer += delta; at 120 s disconnect(i18n "player.inactive",
+// "000005"). The timer resets on any key, opening a window (showWindow), showMenu(), entering
+// the game and every INIT (a map change).
+// v7 bug, not replicated: Game.config is always an object there (game.js `config = {}`,
+// applyConfig), so `!Game.config` disables the kick everywhere. KrunkNative reads it as its
+// v3.1.1 meaning, "not a hosted game's config": no menu kick in custom games
+// (game_config_is_custom, which also covers their host), the kick stays in public lobbies.
+#define MENU_KICK_TIMER_MS 120000.0
 static double g_idle_ms;
 static double g_idle_last;
 
@@ -88,9 +93,11 @@ static void menu_idle_tick(Client *client) {
     const double delta_ms = g_idle_last > 0.0 ? (now - g_idle_last) * 1000.0 : 0.0;
     g_idle_last = now;
     double limit_ms;
-    const int remote = client->net_connected && !client->offline && !client->game.is_local; // !isLobbyHost
-    const int no_kick = client->game.mode && client->game.mode->config.no_kick;
-    if (!g_ui.menu_open || !remote || no_kick || !idle_kick_prod(client, &limit_ms)) return;
+    const int remote = client->net_connected && !client->offline && !client->game.is_local; // !isGameHost (offline: the host)
+    const int no_kick = client->game.mode && (client->game.mode->config.no_kick || client->game.mode->config.no_client_kick);
+    const AccountInfo *account = account_get();
+    const int exempt = no_kick || spectate_active() || (account && account->is_dev) || game_config_is_custom(&client->game);
+    if (!g_ui.menu_open || !remote || exempt || !idle_kick_prod(client, &limit_ms)) return;
     g_idle_ms += delta_ms;
     if (g_idle_ms < limit_ms) return;
     g_idle_ms = 0.0;

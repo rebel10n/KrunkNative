@@ -136,7 +136,7 @@ typedef struct {
 
     float connected_at;
     float spawned_at;
-    float last_significant_move_at;
+    float last_significant_move_at; // the idle clock: connect, (re)spawn, map change, a 1-unit move
     vec3 idle_position;
     unsigned char has_idle_position:1;
     unsigned char joined:1;        // spawned in the current round (respawned by the next round)

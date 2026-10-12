@@ -338,6 +338,9 @@ static const ConArg A_BOT_QUERY[] = {{"all|index|name", ARG_STRING, 1}};
 static const ConArg A_BOT_CONFIG[] = {{"key=value", ARG_STRING, 1}};
 static const ConArg A_BOT_DIFF[] = {{"value", ARG_NUMBER, 0}};
 static const ConArg A_NAV_OFF[] = {{"off", ARG_STRING, 1}}; // show_navmeshes: [arg("off", "string", true)]
+// KrunkNative teleports (shared/src/chat_commands.c cmd_tp / cmd_bring)
+static const ConArg A_TP[] = {{"x|player", ARG_STRING, 0}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
+static const ConArg A_BRING[] = {{"player|all", ARG_STRING, 0}, {"x", ARG_NUMBER, 1}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -1275,6 +1278,8 @@ static void register_commands(void) {
     register_server("bot_start", NO_ARGS, "resume bots after bot_stop");
     register_server("bot_resume", NO_ARGS, "alias for bot_start");
     register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
+    register_server("tp", ARGS(A_TP), "teleport yourself to x y z (feet, as pos prints) or to a player");
+    register_server("bring", ARGS(A_BRING), "bring a player (or all) to you, or to x y z");
 }
 
 // ---------------------------------------------------------------- execution
@@ -1565,6 +1570,9 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
             const Player *p = client->game.players[i];
             if (p && p->is_bot) cand_add(c, p->name, prefix);
         }
+    } else if (cmd_is(cmd, WORDS("tp", "bring"))) {
+        if (arg == 0 && !strcmp(cmd, "bring")) cand_add(c, "all", prefix);
+        if (arg == 0) con_player_candidates(c, prefix); // bots included: they are players
     } else if (!strcmp(cmd, "bot_type")) {
         if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
     } else if (!strcmp(cmd, "show_navmeshes")) {

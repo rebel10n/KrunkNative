@@ -482,10 +482,218 @@ static void test_dead_player_sync(void) {
     sandbox_stop();
 }
 
+static ClientConnection *server_connection_last(void) {
+    return g_server->client_count ? &g_server->clients[g_server->client_count - 1] : NULL;
+}
+
+static void pump_both(TestClient *a, TestClient *b, const int frames) {
+    for (int f = 0; f < frames; f++) {
+        pump(a, 1);
+        pump(b, 0);
+    }
+}
+
+static int got_idle_kick(const TestClient *c) {
+    for (int i = 0; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_ERROR || c->packets[i].length != sizeof(NetErrorPacket)) continue;
+        NetErrorPacket error;
+        memcpy(&error, c->packets[i].payload, sizeof(error));
+        if (!strcmp(error.code, "000005")) return 1;
+    }
+    return 0;
+}
+
+// "i switched a map and it kicked me for inactivity even tho im the host". The server idle kick
+// (net_check_idle_clients): a map change restarts every unspawned connection's clock (v3.1.1
+// markPlayerUnspawned; it used to keep counting from the connect, so whoever the new map did
+// not respawn was kicked at once), and the host (here the sandbox's own player, a DEV peer)
+// is never kicked, as v7.1.4 never kicks the game host or developers.
+static void test_idle_kick_map_change(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "sandbox_start (idle)");
+    g_server->config.idle_timeout = 2.0f; // the sandbox has no idle kick: a server_bin's, shortened
+
+    static TestClient host, guest;
+    memset(&host, 0, sizeof(host));
+    host.fd = sandbox_connect();
+    join(&host);
+    pump(&host, 30);
+    NetSpawnPacket me = {0};
+    CHECK(spawn_of(&host, 1, &me), "host spawned (idle)");
+
+    // a remote guest (not this machine: no DEV) who stays in the menu (no ENT)
+    memset(&guest, 0, sizeof(guest));
+    guest.fd = sandbox_connect();
+    const NetHelloPacket hello = {1, 0, 0};
+    client_send(&guest, NET_PACKET_HELLO, &hello, sizeof(hello));
+    pump_both(&host, &guest, 1);
+    ClientConnection *remote = server_connection_last();
+    CHECK(remote && remote->id != me.uid, "guest connection");
+    if (remote) remote->local = 0;
+
+    // the host dies, then switches the map 1.5 s after the guest connected: the new map does
+    // not respawn the dead host, who sits in the menu
+    chat(&host, "/kill");
+    pump_both(&host, &guest, 89);
+    sandbox_host(1, -1);
+    pump_both(&host, &guest, 90); // 3 s after the connect, 1.5 s after the map change
+    CHECK(!guest.closed && !got_idle_kick(&guest), "a map change restarts the idle clock (guest not kicked 3 s after connecting)");
+    CHECK(!host.closed && !got_idle_kick(&host), "host not kicked right after the map change");
+
+    pump_both(&host, &guest, 60); // 2.5 s after the map change
+    CHECK(guest.closed && got_idle_kick(&guest), "an idle guest is still kicked, 2 s after the map change");
+    pump_both(&host, &guest, 240); // the host idles 6.5 s past the map change
+    CHECK(!host.closed && !got_idle_kick(&host), "the host is never idle-kicked");
+
+    // the host spawns on the new map and idles there: still connected
+    const NetEntPacket ent = {.class_index = 0, .secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+    client_send(&host, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    pump(&host, 300);
+    CHECK(!host.closed && !got_idle_kick(&host) && server_player(me.uid) && server_player(me.uid)->active,
+          "the host idles in game past the timeout");
+    sandbox_disconnect(guest.fd);
+    sandbox_stop();
+}
+
+static int changed_position(const TestClient *c, const int from, const int uid, const vec3 to) {
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_CHANGE_POSITION || c->packets[i].length != sizeof(NetChangePositionPacket)) continue;
+        NetChangePositionPacket packet;
+        memcpy(&packet, c->packets[i].payload, sizeof(packet));
+        if (packet.uid == uid && packet.x == to.x && packet.y == to.y && packet.z == to.z && packet.recon && packet.stop_momentum) return 1;
+    }
+    return 0;
+}
+
+static int at(const Player *p, const vec3 to) {
+    return p && p->position.x == to.x && p->position.y == to.y && p->position.z == to.z;
+}
+
+static int notified(const TestClient *c, const int from, const char *text) {
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_NOTIFY) continue;
+        NetNotifyPacket notify;
+        memset(&notify, 0, sizeof(notify));
+        memcpy(&notify, c->packets[i].payload, c->packets[i].length < sizeof(notify) ? c->packets[i].length : sizeof(notify));
+        if (strstr(notify.text, text)) return 1;
+    }
+    return 0;
+}
+
+// tp / bring (shared/src/chat_commands.c, doc/console.md "Teleports"): the host's commands move
+// players server-side (changePosition with doRecon: POSITION to the owner, CHANGE_POSITION to
+// everyone); a guest is refused; unknown names answer.
+// One command line, then a frame for both. The chat burst limit (NET_CHAT_BURST_MAX lines per
+// wall-clock second) would close a test that types faster than a player: it starts over each time.
+static void command(TestClient *from, TestClient *a, TestClient *b, const char *text) {
+    for (size_t i = 0; i < g_server->client_count; i++) memset(&g_server->clients[i].chat_limiter, 0, sizeof(g_server->clients[i].chat_limiter));
+    chat(from, text);
+    pump_both(a, b, 1);
+}
+
+static void test_tp_bring(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "sandbox_start (tp)");
+
+    static TestClient host, guest;
+    memset(&host, 0, sizeof(host));
+    host.fd = sandbox_connect();
+    join(&host);
+    pump(&host, 30);
+    memset(&guest, 0, sizeof(guest));
+    guest.fd = sandbox_connect();
+    join(&guest);
+    pump_both(&host, &guest, 1);
+    ClientConnection *remote = server_connection_last();
+    if (remote) remote->local = 0; // a remote guest: no DEV, not the host
+    pump_both(&host, &guest, 60);
+    NetSpawnPacket me = {0}, other = {0};
+    CHECK(spawn_of(&host, 1, &me) && spawn_of(&guest, 1, &other) && me.uid != other.uid, "both spawned (tp)");
+    Player *ph = (Player *) server_player(me.uid), *pg = (Player *) server_player(other.uid);
+    CHECK(ph && pg, "server players");
+    if (!ph || !pg) {
+        sandbox_stop();
+        return;
+    }
+
+    int mark = guest.count;
+    command(&host, &host, &guest, "/tp 10 20.5 -30");
+    const vec3 p1 = {10.0f, 20.5f, -30.0f};
+    CHECK(at(ph, p1), "tp x y z: host at %.2f %.2f %.2f", (double) ph->position.x, (double) ph->position.y, (double) ph->position.z);
+    CHECK(ph->velocity.x == 0.0f && ph->velocity.y == 0.0f && ph->velocity.z == 0.0f, "tp stops momentum");
+    CHECK(find(&host, NET_PACKET_POSITION, 0) != NULL, "tp: POSITION to the owner (doRecon)");
+    CHECK(changed_position(&guest, mark, me.uid, p1), "tp: CHANGE_POSITION to the others");
+    CHECK(chat_contains(&host, "Teleported to 10.00 20.50 -30.00."), "tp x y z reply");
+
+    const vec3 guest_at = pg->position;
+    command(&host, &host, &guest, "/tp guest_2");
+    CHECK(at(ph, guest_at), "tp player: host at the guest");
+    CHECK(chat_contains(&host, "Teleported to Guest_2."), "tp player reply");
+
+    mark = guest.count;
+    const vec3 p2 = {-5.0f, 40.0f, 7.25f};
+    command(&host, &host, &guest, "/bring Guest_2 -5 40 7.25");
+    CHECK(at(pg, p2), "bring player x y z");
+    CHECK(changed_position(&guest, mark, other.uid, p2), "bring: the guest's client gets CHANGE_POSITION");
+    CHECK(find(&guest, NET_PACKET_POSITION, 0) != NULL, "bring: POSITION to the moved player");
+    CHECK(chat_contains(&host, "Brought Guest_2 to -5.00 40.00 7.25."), "bring x y z reply");
+
+    command(&host, &host, &guest, "/bring GUEST_2");
+    CHECK(at(pg, ph->position), "bring player: to the host (case-insensitive name)");
+    CHECK(chat_contains(&host, "Brought Guest_2 to you."), "bring player reply");
+
+    const vec3 host_before = ph->position, p3 = {1.0f, 2.0f, 3.0f};
+    command(&host, &host, &guest, "/bring all 1 2 3");
+    CHECK(at(pg, p3) && at(ph, host_before), "bring all x y z: everyone but the host");
+    CHECK(chat_contains(&host, "Brought 1 player to 1.00 2.00 3.00."), "bring all reply");
+
+    command(&host, &host, &guest, "/tp nobody");
+    command(&host, &host, &guest, "/bring nobody");
+    command(&host, &host, &guest, "/tp");
+    CHECK(chat_contains(&host, "Player 'nobody' not found."), "unknown name");
+    CHECK(chat_contains(&host, "Usage: tp <x> <y> <z> | tp <player>"), "tp usage");
+
+    // a guest may not: notify, nobody moves
+    const vec3 guest_before = pg->position, host_now = ph->position;
+    mark = guest.count;
+    command(&guest, &host, &guest, "/tp 100 100 100");
+    command(&guest, &host, &guest, "/bring all");
+    command(&guest, &host, &guest, "/bring Guest_1 0 0 0");
+    CHECK(at(pg, guest_before) && at(ph, host_now), "guest tp / bring: nobody moved");
+    CHECK(notified(&guest, mark, "Host or developer required"), "guest tp / bring: permission denied");
+
+    // bots are players: bring one by its id
+    command(&host, &host, &guest, "/bot_add 1");
+    command(&host, &host, &guest, "/bot_stop on");
+    pump_both(&host, &guest, 90);
+    Player *bot = NULL;
+    for (size_t i = 0; i < g_server->game.player_count; i++) {
+        Player *p = g_server->game.players[i];
+        if (p && p->is_bot && p->active) bot = p;
+    }
+    CHECK(bot != NULL, "bot spawned");
+    if (bot) {
+        char line[64];
+        snprintf(line, sizeof(line), "/bring %d", bot->uid);
+        mark = guest.count;
+        command(&host, &host, &guest, line);
+        CHECK(changed_position(&guest, mark, bot->uid, ph->position), "bring a bot by id");
+    }
+    CHECK(!host.closed && !guest.closed, "nobody dropped (tp)");
+    sandbox_disconnect(guest.fd);
+    sandbox_stop();
+}
+
 int main(void) {
     test_join_move_leave();
     test_wpc_peer_mix();
     test_dead_player_sync();
+    test_idle_kick_map_change();
+    test_tp_bring();
     test_restart_and_disconnect();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);

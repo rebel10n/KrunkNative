@@ -164,6 +164,40 @@ given (v7 bot_add bots are level 0); cosmetics per slot with a chance; a bot kee
 scoreOnDeath are parsed but have no native effect; the sandbox Spawn Bot / Clear Bots keys
 (numpad + / -) are not bound.
 
+## Teleports (KrunkNative `tp` / `bring`)
+
+v3.1.1 has only the `tp` packet (the mod's Ctrl TP: a camera-ray hit). v7.1.4's admin menu
+moves players (`server/index.ts` handleAdminAction 4 "go to", 5 "bring", 9 "bring all", through
+`movePlayerTo` = `players.changePosition(p, x, y, z, doRecon, stopMomentum, dir, true)`) but has
+no console command for it. KrunkNative adds two, in `shared/src/chat_commands.c`, so chat, the
+dev console, the server console, rcon and the offline game share them. Gate: `CHAT_PERM_HOST_DEV`
+like `bot_*` (DEV accounts, ops, the server's own machine, the custom host; the console and rcon
+always; offline always); everyone else gets the notify "Host or developer required".
+
+| Command | Args | Reply |
+|---|---|---|
+| tp | x y z | "Teleported to 10.00 2.00 -35.50." (your feet go there, the coordinates `pos` prints) |
+| tp | player | "Teleported to Name." (to that player's feet) / "Player 'x' not found." / "Player 'x' is ambiguous." / "Name is not spawned." / "You are already there." |
+| bring | player\|all | "Brought Name to you." / "Brought N players to you." / "Nobody to bring." |
+| bring | player\|all x y z | "Brought Name to 0.00 10.00 0.00." / "Brought N players to …" |
+
+Players match like `/kick`: the name or id with everything but letters and digits removed,
+case-insensitive, exact first, else a unique prefix (`bring wand` brings "Wandering Ghost").
+Bots are players. `all` (or `*`) is every spawned player except you; from the server console
+or rcon there is no "you", so `bring` needs coordinates there and `tp` is refused. Dead
+players are not moved. Without arguments both print their usage; `tp` before you spawn
+answers "Spawn first.".
+
+The move is the server-authoritative `changePosition` with doRecon and stopMomentum: velocity
+zeroed, the moved player's own client snaps to it (POSITION + a full RECON), everyone else gets
+CHANGE_POSITION ("chgp") and snaps the player instead of interpolating. Unlike v7 (which passes
+the destination's yaw in radians as the quarter-turn `dir` and spins the player), the facing is
+kept.
+
+Tests: `server/tests/sandbox_test.c` (test_tp_bring: positions, packets, a guest refused,
+unknown names, a bot by id) and `server/tests/host_tp_e2e.py` (server_bin + two protocol
+clients + rcon).
+
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).
 
@@ -263,6 +297,8 @@ and adds completion for arguments:
 | connect | local, the last server address |
 | score | 100, 250, 500, 1000, -100 (the signature row shows `amount: number?`) |
 | bot_kick, bot_kill | all, the bots' names |
+| tp | 1: player names in the game (bots included) |
+| bring | 1: all and the player names in the game (bots included) |
 | bot_type | nextbot / tfue |
 | bot_mimic, bot_stop | on / off |
 | show_navmeshes | on / off |

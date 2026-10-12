@@ -506,6 +506,7 @@ static void net_start_spectating(ClientConnection *client) {
         client->player = NULL;
         client->joined = 0;
         client->spawned_at = 0.0f;
+        client->last_significant_move_at = g_server->now; // markPlayerUnspawned
         client->has_idle_position = 0;
     }
 
@@ -602,6 +603,7 @@ static void net_free_players() {
         if (g_server->clients[i].player) g_server->clients[i].custom_values = g_server->clients[i].player->custom_values; // WP-C
         g_server->clients[i].player = NULL;
         g_server->clients[i].spawned_at = 0.0f;
+        g_server->clients[i].last_significant_move_at = g_server->now; // markPlayerUnspawned: a new idle clock
         g_server->clients[i].has_idle_position = 0;
     }
 
@@ -1411,8 +1413,21 @@ static void net_kick_idle(ClientConnection *client, const char *phase) {
     net_remove_client(client);
 }
 
+// Who the idle kick skips. Krunker v7.1.4 has no server idle kick; its only one is the
+// client's menu kick (index.js gameLoop), which skips the game host (isGameHost), developer
+// accounts and noKick modes. The server kick (a v3.1.1 gameserver.ts feature KrunkNative keeps)
+// follows the same exemptions: DEV peers (the CLI op, a DEV account, a player on the server's
+// own machine: whoever hosts a local server), the custom lobby's host account, and modes with
+// noKick (LMS / Prop Hunt / Infected...: the dead wait for the round there).
+static int net_idle_exempt(const ClientConnection *client) {
+    const GameModeConfig *mode = g_server->game.mode ? &g_server->game.mode->config : NULL;
+    return net_client_is_dev(client) || accounts_is_custom_host(client) || (mode && mode->no_kick);
+}
+
 // gameserver.ts checkIdleTimeouts (v3.1.1 server): 60 s without moving 1 unit kicks,
-// dead players included; before the first spawn the clock runs from the connect.
+// dead players included; before the first spawn the clock runs from the connect, or from
+// the last map change (markPlayerUnspawned: the players.clear() of a new map restarts it, so
+// someone who is not respawned on the new map is not kicked for the time before it).
 // Nobody is idle on the end screen (players.clear() leaves no player to check); the
 // respawn of the next round counts as movement.
 void net_check_idle_clients(const float now) {
@@ -1426,16 +1441,15 @@ void net_check_idle_clients(const float now) {
         ClientConnection *client = &g_server->clients[i];
         Player *player = client->player;
 
-        if (g_server->game.end_timer > 0.0f) {
-            client->last_significant_move_at = now;
+        if (g_server->game.end_timer > 0.0f || net_idle_exempt(client)) {
+            client->last_significant_move_at = now; // a fresh clock if the exemption ends (host change, mode change)
             continue;
         }
 
         if (!player || !player->active) {
             if (net_is_spectating(client)) continue; // spectators are never idle-kicked (index.js: !window.Bf5)
 
-            const float idle_since = client->spawned_at > 0.0f ? client->last_significant_move_at : client->connected_at;
-            if (now - idle_since >= timeout) {
+            if (now - client->last_significant_move_at >= timeout) {
                 net_kick_idle(client, client->spawned_at > 0.0f ? "in game (dead)" : "before spawn");
                 i--;
             }

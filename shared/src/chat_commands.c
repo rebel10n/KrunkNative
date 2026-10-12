@@ -5,8 +5,10 @@
 #include <ai.h>
 #include <bots.h>
 #include "modes/mode_internal.h"
+#include "triggers_internal.h" // trigger_send_change_position ("chgp")
 #include <map_catalog.h>
 #include <ctype.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1303,6 +1305,145 @@ static void cmd_bot_difficulty(ChatCtx *c) {
     reply(c, "Bot difficulty set to %s (%d live bot%s updated; applies to future bot_add).", value, updated, plural(updated));
 }
 
+// ---------------------------------------------------------------- tp / bring (KrunkNative)
+// Krunker v7.1.4's admin actions 4 / 5 / 9 (server/index.ts handleAdminAction: go to a player,
+// bring a player, bring everyone) as console commands, plus coordinates. Gated like bot_*
+// (requireHostOrDev): DEV peers and the custom host, perms on or off; offline the local player
+// hosts. Coordinates are feet positions, what `pos` prints. Players match like /kick (normalised
+// name or id, exact, else a unique prefix); bots are players too.
+
+#define CHAT_TP_TOKENS 8
+
+// args.join(" ") split on whitespace (empty parts dropped), into `work`
+static int tp_tokens(const ChatCtx *c, char *work, const size_t size, char **out) {
+    snprintf(work, size, "%s", c->rest);
+    int n = 0;
+    for (char *p = work; *p && n < CHAT_TP_TOKENS;) {
+        while (*p == ' ' || *p == '\t') *p++ = 0;
+        if (!*p) break;
+        out[n++] = p;
+        while (*p && *p != ' ' && *p != '\t') p++;
+    }
+    return n;
+}
+
+static int tp_number(const char *s, float *out) {
+    char *end = NULL;
+    const float v = strtof(s, &end);
+    if (!end || end == s || *end || !isfinite(v)) return 0;
+    *out = v;
+    return 1;
+}
+
+// the last three tokens as x y z
+static int tp_coords(char **tokens, const int n, vec3 *out) {
+    return n >= 3 && tp_number(tokens[n - 3], &out->x) && tp_number(tokens[n - 2], &out->y) && tp_number(tokens[n - 1], &out->z);
+}
+
+// movePlayerTo: players.changePosition(player, x, y, z, doRecon, stopMomentum, dir, broadcast), the
+// server-authoritative move: the owner snaps to it (POSITION + a full "l"), everyone else gets "chgp".
+// v7 passes the destination's xDire (radians) as dir, a quarter-turn index, and spins the player
+// (v7 bug, not replicated): the moved player keeps its facing.
+static void tp_move(Game *game, Player *player, const vec3 feet) {
+    game_change_position(game, player, feet, 1, 1, 0, 0);
+    trigger_send_change_position(game, player, 1, 1, 0, 0);
+}
+
+static Player *tp_spawned_target(ChatCtx *c, const char *query) {
+    Player *target = resolve_or_reply(c, query);
+    if (target && !target->active) {
+        char label[PLAYER_NAME_SIZE + 16];
+        reply(c, "%s is not spawned.", player_label(target, label, sizeof(label)));
+        return NULL;
+    }
+    return target;
+}
+
+// tp <x> <y> <z> | tp <player>
+static void cmd_tp(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV)) return;
+    char work[NET_CHAT_TEXT_SIZE], *tokens[CHAT_TP_TOKENS];
+    const int n = tp_tokens(c, work, sizeof(work), tokens);
+    if (!n) {
+        reply(c, "Usage: tp <x> <y> <z> | tp <player>");
+        return;
+    }
+    Player *self = c->player;
+    if (!self || !self->active) {
+        reply(c, c->sender == CHAT_CMD_CONSOLE ? "tp moves your own player; use bring <player|all> <x> <y> <z>." : "Spawn first.");
+        return;
+    }
+    vec3 to;
+    char label[PLAYER_NAME_SIZE + 64];
+    if (n == 3 && tp_coords(tokens, n, &to)) {
+        snprintf(label, sizeof(label), "%.2f %.2f %.2f", (double) to.x, (double) to.y, (double) to.z);
+    } else {
+        const Player *target = tp_spawned_target(c, c->rest);
+        if (!target) return;
+        if (target == self) {
+            reply(c, "You are already there.");
+            return;
+        }
+        to = target->position;
+        player_label(target, label, sizeof(label));
+    }
+    tp_move(c->host->game, self, to);
+    reply(c, "Teleported to %s.", label);
+}
+
+// bring <player|all> [<x> <y> <z>]: all = every spawned player but you
+static void cmd_bring(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV)) return;
+    char work[NET_CHAT_TEXT_SIZE], *tokens[CHAT_TP_TOKENS];
+    const int n = tp_tokens(c, work, sizeof(work), tokens);
+    vec3 to;
+    const int coords = n >= 4 && tp_coords(tokens, n, &to);
+    if (!n) {
+        reply(c, "Usage: bring <player|all> [<x> <y> <z>]");
+        return;
+    }
+    Player *self = c->player;
+    char where[64];
+    if (coords) {
+        snprintf(where, sizeof(where), "%.2f %.2f %.2f", (double) to.x, (double) to.y, (double) to.z);
+    } else {
+        if (!self || !self->active) {
+            reply(c, c->sender == CHAT_CMD_CONSOLE ? "Usage from the console: bring <player|all> <x> <y> <z>" : "Spawn first.");
+            return;
+        }
+        to = self->position;
+        snprintf(where, sizeof(where), "you");
+    }
+    // the query: every token before the coordinates, as typed
+    char query[NET_CHAT_TEXT_SIZE] = "";
+    size_t len = 0;
+    for (int i = 0; i < (coords ? n - 3 : n) && len < sizeof(query); i++) {
+        len += (size_t) snprintf(query + len, sizeof(query) - len, "%s%s", i ? " " : "", tokens[i]);
+    }
+    Game *game = c->host->game;
+    if (!strcasecmp(query, "all") || !strcmp(query, "*")) {
+        int moved = 0;
+        for (size_t i = 0; i < player_slots(c); i++) {
+            Player *p = game->players[i];
+            if (!p || !p->active || p == self) continue;
+            tp_move(game, p, to);
+            moved++;
+        }
+        if (moved) reply(c, "Brought %d player%s to %s.", moved, plural(moved), where);
+        else reply(c, "Nobody to bring.");
+        return;
+    }
+    Player *target = tp_spawned_target(c, query);
+    if (!target) return;
+    if (target == self && !coords) {
+        reply(c, "You are already there.");
+        return;
+    }
+    tp_move(game, target, to);
+    char label[PLAYER_NAME_SIZE + 16];
+    reply(c, "Brought %s to %s.", player_label(target, label, sizeof(label)), where);
+}
+
 // v3.1.1 `cmds`, in its order; descriptions from the v3.1.1 dev console mod.
 static const ChatCommand COMMANDS[] = {
     {{"c", NULL, "", "show connected players and menu count", CHAT_PERM_ANY}, cmd_c},
@@ -1354,6 +1495,9 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_resume", "bot_start", "", "alias for bot_start", CHAT_PERM_HOST_DEV}, cmd_bot_start},
     {{"bot_difficulty", NULL, "<value>", "set default bot difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
     {{"bot_diff", "bot_difficulty", "<value>", "alias for bot_difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
+    // KrunkNative: v7.1.4's admin teleports (handleAdminAction 4 / 5 / 9) with coordinates
+    {{"tp", NULL, "<x> <y> <z> | <player>", "teleport yourself to a coordinate or to a player", CHAT_PERM_HOST_DEV}, cmd_tp},
+    {{"bring", NULL, "<player|all> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
 };
 
 #define COMMAND_COUNT ((int) (sizeof(COMMANDS) / sizeof(COMMANDS[0])))

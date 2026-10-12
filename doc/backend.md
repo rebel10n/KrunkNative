@@ -1272,7 +1272,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 | `motd` | `[]` | server chat line(s) sent to every player on their first spawn (`$` = their name) |
 | `join_message` / `leave_message` | `"$ joined the game"` / `"$ left the game"` | v3.1.1 `config.serverMessages[0/1]`, `""` = off |
 | `billboard` / `billboards` / `billboards_file` | none | billboard ads (below) |
-| `idle_kick_seconds` | `60` | v3.1.1 `SERVER_IDLE_TIMEOUT_MS`, 0 = never |
+| `idle_kick_seconds` | `60` | v3.1.1 `SERVER_IDLE_TIMEOUT_MS`, 0 = never. The clock restarts on connect, (re)spawn, every map change and each move; never kicked: spectators, the end screen, DEV peers (ops, DEV accounts, the server's own machine), the custom lobby's host and `noKick` modes (v7.1.4's own idle kick, the client's menu kick, skips the game host and developers; v7 has no server kick) |
 | `idle_move_threshold` | `1` | units a player must move to count as active |
 | `perms` | `false` | v3.1.1 `PERMS`: DEV chat commands only for ops and loopback |
 | `ops` | `[]` | account ids (numbers) or account usernames that are op (DEV) when they join; names only match accounts, never guests |

@@ -1134,6 +1134,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
         case NET_PACKET_INIT: {
             NetInitPacket init;
             if (!net_packet_read_init(&init, packet)) break;
+            menu_idle_reset(); // v7 io_init: CONTROLS.idleTimer = 0 (a map change restarts the menu idle kick)
             if (client_map_prepare_init(client, &init)) client_apply_init(client, &init);
             break;
         }

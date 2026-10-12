@@ -429,7 +429,7 @@ static void cli_cmd_players(const char *args) {
         const ClientConnection *client = &g_server->clients[i];
         const Player *player = client->player;
         const char *state = !player ? "lobby" : player->active ? "alive" : "dead";
-        const float idle_since = client->spawned_at > 0.0f ? client->last_significant_move_at : client->connected_at;
+        const float idle_since = client->last_significant_move_at; // net_check_idle_clients' clock
 
         char idle[24];
         char health[16] = "-";

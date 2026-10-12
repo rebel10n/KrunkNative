@@ -119,7 +119,8 @@ Diagnostics:
 Not to be confused with the game transport: the matchmaker and social WebSocket
 (`wss://coordinator.krunk.io/social/ws`) is always open next to it. A server kick also ends
 the session; for example the v3.1.1 idle kick, "Kicked for inactivity", after 60 s without
-moving, counted from the connect in the menu. Both browser and gateway log it as the server
+moving, counted from the connect (or the last map change) in the menu; hosts and DEV peers
+are exempt. Both browser and gateway log it as the server
 ending the session.
 
 The HUD and menu ping is the server's PING/PONG measurement over the active transport, so
