@@ -33,6 +33,7 @@
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
 #include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
+#include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
 
 #ifdef WIN32
 #include <direct.h>
@@ -1555,5 +1556,6 @@ static void client_tick_game(Client *client, const float now, const float frame_
 
     if (!scenario) vfx_render_screen(client); // overlay-canvas muzzle flash + damage overlay
     if (!scenario) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
+    if (!scenario) ks_overlay_frame(frame_delta); // KrunkScript overlay canvas: script render(), below the HTML page
     input_script_frame_end(client, delta, frame_delta); // KRUNKNATIVE_INPUT_LOG row
 }

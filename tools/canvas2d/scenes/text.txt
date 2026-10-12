@@ -1,0 +1,21 @@
+// drawText alignments / sizes / rotation / opacity, measureText, strokeText, invalid args.
+@size 800 600
+@scale 0.8
+@background #2d3436
+drawLine 500 0 500 750 1 "#ff0000" 0.6
+drawLine 0 60 1000 60 1 "#ff0000" 0.6
+drawText "Krunker left" 500 60 0 40 "left" "#ffffff" 1
+drawLine 0 140 1000 140 1 "#ff0000" 0.6
+drawText "center 70px" 500 140 0 70 "center" "#ffeaa7" 1
+drawLine 0 230 1000 230 1 "#ff0000" 0.6
+drawText "right aligned" 500 230 0 50 "right" "#55efc4" 1
+drawText "rotated 30" 200 340 30 36 "center" "#74b9ff" 1
+drawText "half alpha" 700 340 0 44 "center" "#fd79a8" 0.5
+drawText "small 12px text, numbers 0123456789" 20 420 0 12 null "#dfe6e9" 1
+drawText "default size" 20 450
+drawText "1" 800 520 0 70 "center" "#fff" 1
+drawText "Big" 300 620 0 200 "center" "#e17055" 0.9
+measureText 40 "Krunker left" "GameFont"
+measureText 0 "default ten"
+measureText 70 "center 70px"
+getSize

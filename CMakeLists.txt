@@ -465,6 +465,27 @@ else ()
         endif ()
     endif ()
 
+    # canvas2d_test: the KrunkScript GAME.OVERLAY canvas (client/src/ks/canvas2d.c + ks_overlay.c)
+    # replaying a tools/canvas2d scene into a PNG; tools/canvas2d/run.sh diffs it against
+    # headless Chromium's Canvas 2D. Needs only GL, FreeType and the shared sources.
+    add_executable(canvas2d_test
+        tools/canvas2d/canvas2d_test.c
+        client/src/ks/canvas2d.c
+        client/src/ks/ks_overlay.c
+        client/src/ks/ks_overlay_scene.c
+        client/src/shader.c
+        client/src/png_write.c
+        client/src/headless.c
+        client/src/stb_image.c
+        ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(canvas2d_test PRIVATE client/include)
+    target_link_libraries(canvas2d_test PRIVATE freetype glfw Threads::Threads m)
+    krunknative_link_gl(canvas2d_test)
+    krunknative_link_headless(canvas2d_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(canvas2d_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the
     # brain when libpq is available). Optional; never affects the game targets. Tests: ctest.
     option(KRUNKNATIVE_SERVICES "Build the backend services (services/; needs OpenSSL, libpq for the DB parts)" ON)

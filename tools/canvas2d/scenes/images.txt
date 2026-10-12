@@ -1,0 +1,14 @@
+// drawImage: centred on (x, y), rotation in degrees, opacity, scaling, missing asset skipped.
+@size 800 600
+@scale 0.8
+@background #636e72
+@image 13075 assets/img/icon.png
+@image 42 assets/img/muzflash.png
+drawImage 13075 200 200 256 256 0 1
+drawImage 13075 520 200 128 128 45 1
+drawImage 13075 800 200 300 150 0 0.5
+drawImage 42 200 520 200 200 0 1
+drawImage 42 500 520 64 64 -20 0.8
+drawImage 999 700 520 100 100 0 1
+drawRect 690 470 120 100 0 "#000000" 0.4
+drawImage 13075 750 520 100 100 0 1

@@ -1,0 +1,47 @@
+// v7 argument semantics: parseFloat strings in offset/scale, invalid colours/alpha, the
+// lineDashOffset -> lineWidth bug, drawCircle with a negative radius throwing (Internal Error,
+// the save() inside is never restored), globalAlpha() = 0, transforms outside render.
+@size 600 400
+@scale 1
+@background #222f3e
+save
+offset "40.5px" "  20"
+drawRect 0 0 50 50 0 "#ff9ff3" 1
+scale "2x"
+drawRect 30 0 20 20 0 "#feca57" 1
+restore
+// colour/alpha validation: "red" and "#ff00" fail isHex -> #FFF; opacity 3 is ignored by canvas
+drawRect 200 20 40 40 0 "red" 0.5
+drawRect 250 20 40 40 0 "#ff00" 1
+drawRect 300 20 40 40 0 "#0f0" 3
+// strings are not numbers for draw calls: x "100" -> 0
+drawRect "100" 80 30 30 0 "#48dbfb" 1
+// lineDashOffset sets lineWidth (v7 bug); lineJoin ignores unknown values
+beginPath
+strokeStyle "#ff6b6b"
+lineDashOffset 9
+lineJoin "square"
+moveTo 40 150
+lineTo 140 150
+lineTo 90 220
+stroke
+// drawCircle with a negative radius throws after save + translate: the next draw is offset
+drawCircle 300 150 -20 20 0 "#ffffff" 1
+drawRect 0 0 30 30 0 "#1dd1a1" 1
+restore
+drawRect 0 0 30 30 0 "#5f27cd" 1
+// globalAlpha with no argument = 0: nothing visible until restored
+save
+globalAlpha
+drawLine 0 300 600 300 10 "#ffffff"
+fillStyle "#ffffff"
+beginPath
+arc 450 300 40 0 6.283185307 false
+fill
+restore
+beginPath
+arc 450 300 20 -1 2 true
+fill
+measureText 30 "Width" "Arial"
+measureText -5 "neg"
+measureText "12" 12345
