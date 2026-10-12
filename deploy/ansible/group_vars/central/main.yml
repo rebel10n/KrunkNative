@@ -6,4 +6,4 @@ kn_release_bins: [kn_brain, kn_migrate]
 kn_release_migrations: true
 
 # Staff accounts: highest privilege (developer, which also sets moderator).
-kn_brain_developers: [ading2210, ASA_z3db0y]
+kn_brain_developers: [ading2210, ASA_z3db0y, Joelmatic]
