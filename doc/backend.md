@@ -624,7 +624,7 @@ Node -> brain:
 | `pong` | `ts` | answer to `ping` |
 | `drain` | `reason`? | node is shutting down: its lobbies stop being offered (seek/host), still listed with `meta.draining` |
 | `player-join` / `player-leave` | `lobbyId`, `clientId`? (ticket `jti`), `accountId`? | optional; join consumes the ticket's slot reservation |
-| `auth` | `rid`, `ticket` or `token` | resolve a player: ticket = seek-game `clientId`; token = session token. -> `auth-reply` |
+| `auth` | `rid`, `ticket` or `token`, `resume`? | resolve a player: ticket = seek-game `clientId`; token = session token. `resume: true`: the node admitted this ticket before and a reconnect of that session sent it again after `exp` (8.3): signature checked, expiry not. -> `auth-reply` |
 | `commit` | `rid`, `lobbyId`, `matchId`, `final`, `map`, `mode`, `players: [{accountId, name, kills, deaths, score, won, timePlayed, games, kr, xp, classIndex}]` | match result; the brain forwards each `accountId > 0` to svc-accounts op `stats` -> `commit-reply` |
 | `acct` | `rid`, `op`, `args` | generic pass-through to svc-accounts (`accounts_internal_call`) -> `acct-r` |
 | `host-request` | `rid`, `region`?, `config`, `hostAccountId`? | a player asked this server (game socket `custom`) to host a game; the brain finds a server with capacity -> `host-request-reply` |
@@ -672,6 +672,12 @@ settles it; its `mm_reservations` row is deleted once that count is persisted. R
 `auth`/`player-join` left the lobby looking empty for the node's 250 ms lobby-up debounce, so
 seekers in that window were sent to empty lobbies. Session-token auth (`auth` with `token`)
 is the path for players that connect without the brain (direct connect).
+
+A client sends its ticket in every JOIN of the session, also when its transport reconnects
+mid-match (a WebRTC gateway or UDP session dropping, the WebRTC -> WebSocket fallback, a
+net-bridge / gateway restart). The game server accepts a ticket it admitted before again after
+`exp` while its lobby lives (8.3 "resume"); a restarted server has a new lobby id, so its players
+seek a fresh ticket (9.4).
 
 ## 6. Brain: registry, federation and matchmaking
 
@@ -1444,9 +1450,18 @@ ticket), `session` = the social session token, `name` reserved (guests stay
    ticket holders keep the ticket identity, session-only joins become guests.
 6. `player-join {lobbyId, clientId: jti, accountId}` releases the ticket's slot
    reservation; `player-leave` on disconnect.
+7. Resume (KrunkNative): an expired ticket whose `jti` this lobby admitted (READY) is accepted
+   again until 30 min after that session's last connection ended (`accounts.c`
+   `acc_resume_allowed`, at most 256 remembered): the transport reconnects of 5.3 used to end in
+   `"Join key expired"` a few minutes into a match (the edges' logs: kn-rtc sessions failing,
+   coordinator / gateway restarts). The new connection replaces the old one (`004002` to the
+   old one); an account's `auth` carries `resume: true`. A ticket never admitted, or for another
+   lobby, is refused as before.
 
-Error codes: `004001` invalid/expired ticket or session, guests refused; `004002`
-logged in elsewhere; `004003` banned; `004004` server draining (`"GAME UPDATING"`).
+Error codes (`shared.h` `NET_ERROR_CODE_*`): `004001` invalid/expired ticket or session, guests
+refused; `004002` logged in elsewhere; `004003` banned; `004004` server draining or stopping for
+an update (`"GAME UPDATING"`); `004006` server stopped (8.5). The client rejoins through the
+matchmaker on `004004` / `004006` and on a refused join key (9.4).
 
 ### 8.4 Lobby state, stats and rewards
 
@@ -1495,7 +1510,16 @@ logged in elsewhere; `004003` banned; `004004` server draining (`"GAME UPDATING"
 * `drain` from the brain: chat notice, refuse new connections (`GAME UPDATING`),
   finish the round, then `lobby-down`.
 * SIGTERM / `quit`: partial commits for everyone in the round, `drain` + `lobby-down`,
-  then up to 3 s for outstanding `commit-reply`s before the socket closes.
+  then every player gets `ERROR` (v7.1.4 `restartForUpdate`: `["error", "GAME UPDATING"]`, the
+  socket closed 100 ms later) and the sockets close 150 ms after it; up to 3 s for outstanding
+  `commit-reply`s before the brain socket closes. The text follows the stop reason
+  (`server_shutdown_message`): `update` -> `"GAME UPDATING"` (`004004`), `restart` ->
+  `"Server restarting"`, other text -> `"Server shutting down: <text>"`, none -> `"Server
+  shutting down"` (all `004006`); the drain's chat notice says the same ("Server is restarting
+  for an update after this round"). The reason comes from console `quit <reason>` / `drain
+  <reason>` (also over rcon), else from the first line of `gameserver.shutdown_reason_file`, read
+  at the first stop request and ignored when older than 15 min: deploys write `update` there
+  around the restart (section 10).
 
 ### 8.6 End-screen reward, ranked lobbies, tests
 
@@ -1586,6 +1610,7 @@ New keys (also in config.example.json):
 | `tags` | `[]` | extra info-query tags |
 | `enforce_skins` | `auto` | cosmetics must be owned (8.9); auto = on while linked to a coordinator |
 | `shutdown_grace` | `10` | seconds a SIGTERM/SIGINT drain lets the round finish |
+| `shutdown_reason_file` | `""` | read at the first stop request: `update` = players see `GAME UPDATING` (8.5); deploys write it |
 | `lag_comp` | `true` | hits test targets where the shooter saw them (v3.1.1 storeState / fetchState, 500 ms history); console `lagcomp` |
 | `lag_comp_anchor` | `1` | `1` exact: the shot input's client time (the running sum of its timeline's frame deltas, no packet change) mapped onto the server clock by a min-filtered per-connection offset, + 1 ping; a delayed packet (jitter, a lag spike) costs nothing. Falls back to `2` while a timeline calibrates (0.5 s after a spawn / seq gap / hitch) and for the rest of a life whose summed deltas run faster or slower than real time (logged `[lagcomp]`); a shot is credited at most 250 ms before its arrival and never after it. `2`: the shot input's arrival + 1 ping. `0`: v3.1.1 `ping * 2 * lagComp` from processing. `true`/`false` read as `1`/`0`. Console: `lagcomp anchor exact\|arrival\|v3` |
 | `lag_comp_scale` | `1` | 0.1..1, multiplies each player's v3.1.1 `player.lagComp` (the Settings > Network "Lag Compensation" slider, ENT V7, server-clamped to 0.1..1): scales the ping part of the rewind |
@@ -1600,7 +1625,8 @@ stdin line; `KN_RCON_PASSWORD`). `server_bin --help` shows a sample server.cfg.
 or FIFO, EOF only ends the reader): `status` (hostname, map, mode, players, tick rate,
 auth mode, coordinator link, listing), `players`, `kick`, `ban` (account ban into
 `bans_file`, guests by IP), `map`/`changelevel`, `mode`, `say`, `round`, `op`/`deop`,
-`send` (8.10), `drain`, `quit`, `help`, and every Krunker chat command without the slash.
+`send` (8.10), `drain [reason]`, `quit [reason]` (`update`, `restart` or any text: what the
+players are told, 8.5), `help`, and every Krunker chat command without the slash.
 
 **rcon**: the same commands, their output captured per command
 (`cli_run_command`). Local TCP: line 1 = password (`OK` / `ERR bad password`, 1 s delay),
@@ -1830,6 +1856,15 @@ menu re-seeks the same lobby so the server attaches (or drops) the account.
    (`client/src/net/net_join.c`).
 4. `GET /mm/game-info?game=ID` -> `#menuRegionLabel` = the server's proper name
    (`Chicago 2`; v3.1.1: `regionNames[region]`).
+5. Rejoin (`servers_ui_connection_lost`): the server's `ERROR` `004004` / `004006` (it stopped,
+   8.5) holds the transport and seeks the lobby again with `autoChangeGame` 2 s later (a fresh
+   ticket: the same game id if it is back, else the region's best lobby), every 3 s while the
+   matchmaker has none, for 2 min; a refused join key (`004001` "Join key ...", e.g. the
+   transport retried a crashed server's address after its restart) seeks once at once and a
+   second refusal within 30 s is shown ("Could not rejoin: ... again"). The error screen keeps the
+   server's message ("GAME UPDATING" is v7's "Game Updating" header) with "Rejoining a game...".
+   Direct (pinned) servers have no tickets: the transport retries them. Console `reconnect` / F5
+   seek again too (`autoChangeGame` after a server stop), never with the old ticket.
 
 Servers window (2): `GET /mm/game-list` + `GET /api/player-count` (cached
 `serverBrowserRate` 10 s), region groups, Custom Games group (`meta.cs`), search, Hide
@@ -2087,7 +2122,10 @@ Optional: a Cloudflare cache rule making `assets.krunk.io/updates/client/builds/
   `KN_SMTP_PORT`, `KN_SMTP_TLS`, `KN_SMTP_USER`, `KN_SMTP_PASSWORD`, `KN_SMTP_FROM` (deploy-kru.yml).
 * systemd: `kn-brain.service` (migrations in ExecStartPre), `kn-gameserver@<NODE>`
   (`/etc/krunknative/gameserver-<NODE>.env` = `KN_GAMESERVER_*`), `kn-net-bridge`,
-  `krunknative.target`.
+  `krunknative.target`. `deploy.sh push` and the ansible role `kn_gameserver` (its "Restart game
+  servers" handlers) write `update` to `/run/krunknative-deploy/gameserver-stop-reason`
+  (`shutdown_reason_file`) for the restart and remove it after: players see "GAME UPDATING" and
+  rejoin (8.5, 9.4).
 * nginx (mirrors the jail's `ansible/templates/nginx/*.j2`): brain host
   `matchmaker.<domain>/<x> -> /mm/<x>` (incl. `/internal/ws` upgrade),
   `api.` -> `/api/`, `social.` -> `/social/`, `play.<host>` = web client + `/native` +

@@ -16,6 +16,10 @@ kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
 # k_regions; accounts.region_index); per host in the inventory.
 kn_gameserver_region: local
 kn_gameserver_max_players: 8
+# server.cfg shutdown_reason_file: the "Restart game servers" handlers write "update" here
+# for the restart (players see GAME UPDATING and rejoin), then remove it. A tmpfs path
+# outside the unit's sandbox writes (ProtectSystem=strict still lets server_bin read it).
+kn_gameserver_stop_reason_file: /run/krunknative-deploy/gameserver-stop-reason
 # In-map billboard text (server.cfg billboard); empty = the engine default "Your Ad Here".
 kn_gameserver_billboard: ""
 # online_mode 1 (accounts verified via auth_url hasJoined) on these instances; the

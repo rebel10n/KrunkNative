@@ -22,6 +22,8 @@ finder_url      "{{ kn_gameserver_finder_url }}"
 rcon_port       0
 // Writable: StateDirectory=krunknative/gs-%i of the unit.
 bans_file       "{{ kn_state_dir }}/gs-{{ n }}/bans.json"
+// Read on SIGTERM: a deploy writes "update" there (players see GAME UPDATING, then rejoin).
+shutdown_reason_file "{{ kn_gameserver_stop_reason_file }}"
 // Coordinator link (matchmaking): wss:// through Cloudflare, certificate verified against
 // the system CA store; the brain hands clients public_host/port, not the TCP peer.
 {% set kn_gs_link = kn_gameserver_coordinator_url if (n not in kn_gameserver_online_instances or kn_gameserver_coordinator_online_instances | bool) else '' %}

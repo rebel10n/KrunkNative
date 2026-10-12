@@ -76,6 +76,7 @@ typedef struct {
     float join_deadline;       // g_server->now
     uint32_t auth_rid;
     char ticket_jti[40];       // seek-game ticket id (player-join releases its reservation)
+    unsigned char resumed:1;   // the JOIN resumed an expired ticket this lobby admitted before (acc_resume_allowed)
 
     float match_since;         // g_server->now of the first spawn in this round, 0 = not playing
     int round_result;          // END result of this round: 1 won, 0 lost, -1 draw / none
@@ -205,6 +206,18 @@ void server_transport_flush_all(void);
 // (server_set_clock) so an in-process server follows the client's frame time.
 double server_time(void);
 void server_set_clock(double (*clock)(void)); // NULL = CLOCK_MONOTONIC
+
+// Why the server stops, for the players' disconnect message (doc/backend.md 8.5): console
+// `quit <reason>` / `drain <reason>` set it; otherwise gameserver.shutdown_reason_file (a
+// deploy writes "update" there before restarting the units) is read once at the first stop
+// request. "update" -> ERROR "GAME UPDATING" (v7.1.4 UPDATING_SHUTDOWN_MESSAGE) code 004004,
+// "restart" -> "Server restarting", other text -> "Server shutting down: <text>", none ->
+// "Server shutting down"; all but "update" use code 004006 (NET_ERROR_CODE_SHUTDOWN).
+void server_set_shutdown_reason(const char *reason);
+const char *server_shutdown_reason(void); // "" = none (reads the reason file the first time)
+// The disconnect every connected player gets on shutdown (and its drain chat notice).
+void server_shutdown_message(char *message, size_t message_size, char *code, size_t code_size);
+const char *server_shutdown_notice(void);
 
 // Krunker's game hooks (GameHooks.send / next_round / respawn / reward / alloc_uid) on
 // g_server->game. Caller holds g_server->lock.

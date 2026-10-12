@@ -74,6 +74,28 @@ static int g_quick_join_left;    // quickJoinRegion: remaining candidates
 static char **g_quick_join;      // candidate game ids
 static int g_quick_join_count, g_quick_join_next;
 
+// Rejoining after the server went away or refused the join key (servers_ui_connection_lost)
+enum { REJOIN_NONE, REJOIN_RESTART, REJOIN_KEY, REJOIN_DIRECT };
+static int g_rejoin;             // REJOIN_* of the pending / running rejoin
+static double g_rejoin_at;       // glfwGetTime() of its next attempt, 0 = none due
+static double g_rejoin_until;    // REJOIN_RESTART / REJOIN_DIRECT: give up after this
+static int g_rejoin_next;        // the coming seek() is a rejoin's
+static int g_rejoin_seek;        // the seek in flight is a rejoin's
+static int g_server_gone;        // the lobby's server stopped / refused us: `reconnect` may change game
+static char g_rejoin_game[160];  // the lobby to seek again ("" = the region's best)
+#define REJOIN_FIRST_DELAY 2.0   // s after the server's ERROR: its lobby-down reaches the matchmaker first
+#define REJOIN_RETRY_DELAY 3.0   // s between seeks while the matchmaker has no lobby for us
+#define REJOIN_WINDOW 120.0      // s a restart rejoin keeps trying (a deploy restarts in ~15 s)
+#define REJOIN_KEY_WINDOW 30.0   // a second refused join key within this is shown, not retried
+#define REJOIN_SETTLED 5.0       // s connected after which a rejoin is over
+
+static void rejoin_cancel(void) {
+    if (g_rejoin == REJOIN_NONE && g_rejoin_at <= 0.0) return;
+    g_rejoin = REJOIN_NONE;
+    g_rejoin_at = g_rejoin_until = 0.0;
+    menu_update_instructions(); // the error screen's "Rejoining..." line goes
+}
+
 // windows[1]
 static cJSON *g_games;           // serverListData (array of tuples, owned)
 static double g_total_players, g_social_players;
@@ -198,6 +220,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
     Client *client = g_client;
     g_pin = PIN_NONE; // a matchmade (or server-redirected) session
     g_last_direct = 0;
+    g_server_gone = 0;
     snprintf(g_game_id, sizeof(g_game_id), "%s", game_id ? game_id : "");
     snprintf(g_game_region, sizeof(g_game_region), "%s", region ? region : "");
 
@@ -455,7 +478,9 @@ static void fatal_error(const char *message) {
 static void on_seek(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     const int quiet = user != NULL; // quick join: try the next candidate instead of failing
+    const int rejoin = g_rejoin_seek;
     g_seek_inflight = 0;
+    g_rejoin_seek = 0;
     if (g_pin != PIN_NONE) {
         // the user connected to / disconnected from a server by hand while this seek ran
         printf("[mm] seek answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
@@ -472,6 +497,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (cJSON_IsString(region)) snprintf(g_region, sizeof(g_region), "%s", region->valuestring);
         g_quick_join_left = 0;
         g_account_game[0] = 0;
+        if (rejoin) printf("[mm] rejoin: %s with a fresh join ticket\n", cJSON_IsString(game) ? game->valuestring : "?");
         join_server(host->valuestring, port->valueint, cJSON_IsString(game) ? game->valuestring : "",
                     cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL,
                     cJSON_IsString(region) ? region->valuestring : NULL);
@@ -481,6 +507,14 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     } else {
         const cJSON *err = cJSON_GetObjectItem(res, "error");
         fprintf(stderr, "[mm] seek failed (HTTP %d): %s\n", status, cJSON_IsString(err) ? err->valuestring : "no response");
+        if (rejoin && g_rejoin == REJOIN_RESTART && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
+            // the restarted server (or another one of the region) is not listed yet: try again,
+            // the error screen keeps the server's message ("Rejoining...")
+            g_rejoin_at = glfwGetTime() + REJOIN_RETRY_DELAY;
+            cJSON_Delete(res);
+            return;
+        }
+        if (rejoin) rejoin_cancel(); // gave up: the seek's error below
         if (cJSON_IsString(err) && !strcmp(err->valuestring, "AccountRequired") && g_seek_game[0]) {
             snprintf(g_account_game, sizeof(g_account_game), "%s", g_seek_game); // log in -> join it
         }
@@ -495,6 +529,9 @@ static void on_seek(void *user, const int status, const char *body, const size_t
 static void seek(const char *game_id, const int auto_change, void *quiet) {
     char path[1024], enc[512];
     g_pin = PIN_NONE;
+    g_rejoin_seek = g_rejoin_next;
+    g_rejoin_next = 0;
+    if (!g_rejoin_seek) rejoin_cancel(); // any other matchmaking action replaces a pending rejoin
     snprintf(g_seek_game, sizeof(g_seek_game), "%s", game_id ? game_id : "");
     g_account_game[0] = 0;
     backend_url_encode(enc, sizeof(enc), g_region);
@@ -512,6 +549,13 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     g_seek_inflight = 1;
     if (!backend_http_get(path, on_seek, quiet)) {
         g_seek_inflight = 0;
+        if (g_rejoin_seek && g_rejoin == REJOIN_RESTART && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
+            g_rejoin_seek = 0;
+            g_rejoin_at = glfwGetTime() + REJOIN_RETRY_DELAY; // the restart rejoin tries again
+            return;
+        }
+        g_rejoin_seek = 0;
+        rejoin_cancel();
         fatal_error("Could not reach the matchmaker");
     }
 }
@@ -1258,15 +1302,18 @@ int servers_ui_reconnect_offline(void) {
 }
 
 // Console `reconnect`: the last server again, through the same transport fallback (UDP,
-// then TCP / WebTransport, then WebSocket). A brain lobby is sought again by its id: its
-// join ticket is single-use and expires (server/src/accounts.c "Join key expired").
+// then TCP / WebTransport, then WebSocket). A brain lobby is sought again by its id for a fresh
+// join ticket (the old one expires join_ttl_s after its seek: server/src/accounts.c).
+// After the server stopped / refused the ticket (g_server_gone) its lobby is likely gone: the seek
+// may change game (autoChangeGame), like the automatic rejoin. A brain session never reconnects
+// with its old ticket: without a lobby id it seeks the region's best lobby.
 int servers_ui_reconnect(void) {
     if (!g_client) return 0;
-    if (!g_last_direct && g_brain_mode && g_game_id[0] && g_pin != PIN_DIRECT) {
+    if (!g_last_direct && g_brain_mode && g_pin != PIN_DIRECT && (g_game_id[0] || g_client->net_join.client_key[0])) {
         char id[sizeof(g_game_id)];
         snprintf(id, sizeof(id), "%s", g_game_id);
-        printf("[mm] reconnect: seeking %s again\n", id);
-        seek(id, 0, NULL);
+        printf("[mm] reconnect: seeking %s again\n", id[0] ? id : "a game");
+        seek(id[0] ? id : NULL, !id[0] || g_server_gone, NULL);
         return 1;
     }
     if (!g_client->net_address[0]) return 0;
@@ -1274,6 +1321,112 @@ int servers_ui_reconnect(void) {
     printf("[mm] reconnect: %s:%u\n", g_client->net_address, (unsigned int) g_client->net_port);
     client_net_switch_server(g_client);
     return 1;
+}
+
+// ---- KrunkNative: rejoining when the server goes away or refuses the join key. v7.1.4's server
+// sends ["error", "GAME UPDATING"] before an update restart and its client shows the Game
+// Updating screen until the player picks Find a Game (backToOrigin: a fresh matchmaker seek).
+// The native transport used to retry the same address with the spent join ticket instead, and
+// the restarted server answered "Join key expired" (server/src/accounts.c, 004001). Now:
+//  * ERROR 004004 / 004006 (server_shutdown_message: update / restart / shutdown): the lobby is
+//    sought again with autoChangeGame after REJOIN_FIRST_DELAY, so a fresh ticket for the same
+//    game id if it is back, else for the region's best lobby (fill-first, doc/backend.md 6.2);
+//    while the matchmaker has nothing (the region's only server restarting) every
+//    REJOIN_RETRY_DELAY for REJOIN_WINDOW. The transport holds meanwhile (events.c: a server
+//    ERROR stops its retries), so the old ticket is never sent again. A direct (pinned) server
+//    has no tickets: the transport retries it after the same delay.
+//  * ERROR 004001 about the join key (expired, invalid, another server's: e.g. the transport
+//    retried a crashed server's address after its restart): one fresh seek; a second refusal
+//    within REJOIN_KEY_WINDOW is shown ("Could not rejoin: ... again").
+// The error screen keeps the server's message with a "Rejoining..." line (menu_ui.c).
+
+static int ci_contains(const char *text, const char *needle) {
+    const size_t n = strlen(needle);
+    for (; *text; text++) {
+        if (!strncasecmp(text, needle, n)) return 1;
+    }
+    return 0;
+}
+
+// Main thread, for every NET_STATUS_FAILED (menu_ui.c menu_poll_connection): error / code are
+// what the screen shows; error may be rewritten. 1 = a rejoin is under way.
+int servers_ui_connection_lost(char *error, const size_t error_size, const char *code) {
+    if (!g_client || g_client->offline || !code) return servers_ui_rejoining();
+    const int restart = !strcmp(code, NET_ERROR_CODE_UPDATING) || !strcmp(code, NET_ERROR_CODE_SHUTDOWN);
+    const int key = !strcmp(code, NET_ERROR_CODE_TICKET) && ci_contains(error, "join key");
+    if ((!restart && !key) || g_pin == PIN_IDLE) return servers_ui_rejoining();
+    const double now = glfwGetTime();
+    if (!g_brain_mode || g_pin == PIN_DIRECT || backend_available() != 1) {
+        if (!restart) return servers_ui_rejoining();
+        // a direct server: the transport (holding after the ERROR) tries the address again
+        printf("[mm] server stopped (%s): reconnecting to it\n", error);
+        if (g_rejoin != REJOIN_DIRECT || now >= g_rejoin_until) g_rejoin_until = now + REJOIN_WINDOW;
+        g_rejoin = REJOIN_DIRECT;
+        g_rejoin_at = now + REJOIN_FIRST_DELAY;
+        menu_update_instructions();
+        return 1;
+    }
+    g_server_gone = 1;
+    if (key) {
+        static double last_key_rejoin = -1e9;
+        if (now - last_key_rejoin < REJOIN_KEY_WINDOW) {
+            // the fresh ticket was refused too: say so (the error screen's Find a Game seeks again)
+            char original[96];
+            snprintf(original, sizeof(original), "%s", error);
+            snprintf(error, error_size, "Could not rejoin: %s again", original);
+            fprintf(stderr, "[mm] rejoin failed: a fresh join ticket was refused too (%s)\n", original);
+            rejoin_cancel();
+            return 0;
+        }
+        last_key_rejoin = now;
+        g_rejoin = REJOIN_KEY;
+        g_rejoin_at = now; // right away: the server is up, only the ticket was stale
+    } else {
+        if (g_rejoin != REJOIN_RESTART || now >= g_rejoin_until) g_rejoin_until = now + REJOIN_WINDOW;
+        g_rejoin = REJOIN_RESTART;
+        g_rejoin_at = now + REJOIN_FIRST_DELAY;
+    }
+    snprintf(g_rejoin_game, sizeof(g_rejoin_game), "%s", g_game_id);
+    printf("[mm] %s (%s): rejoining %s through the matchmaker\n", key ? "join key refused" : "server stopped", error,
+           g_rejoin_game[0] ? g_rejoin_game : "the region's best lobby");
+    menu_update_instructions();
+    return 1;
+}
+
+// 1 while a rejoin is due or its seek / connection runs (the error screen says "Rejoining...").
+int servers_ui_rejoining(void) {
+    return g_rejoin != REJOIN_NONE && (g_rejoin_at > 0.0 || g_rejoin_seek || g_rejoin == REJOIN_DIRECT);
+}
+
+static void rejoin_tick(Client *client) {
+    static double connected_since = -1.0;
+    const double now = glfwGetTime();
+    if (!client->net_connected) connected_since = -1.0;
+    else if (connected_since < 0.0) connected_since = now;
+    if (g_rejoin == REJOIN_NONE) return;
+    if (connected_since >= 0.0 && now - connected_since >= REJOIN_SETTLED && g_rejoin_at <= 0.0 && !g_rejoin_seek) {
+        rejoin_cancel(); // back in a lobby
+        return;
+    }
+    if (g_rejoin == REJOIN_DIRECT && now >= g_rejoin_until && g_rejoin_at <= 0.0) {
+        rejoin_cancel(); // the transport keeps retrying with its backoff, its errors show again
+        return;
+    }
+    if (g_rejoin_at <= 0.0 || now < g_rejoin_at || g_seek_inflight) return;
+    g_rejoin_at = 0.0;
+    if (g_rejoin == REJOIN_DIRECT) {
+        if (!client->net_connected) client_net_request_reconnect(client);
+        return;
+    }
+    if (g_pin != PIN_NONE || !g_brain_mode) {
+        rejoin_cancel();
+        return;
+    }
+    char id[sizeof(g_rejoin_game)];
+    snprintf(id, sizeof(id), "%s", g_rejoin_game);
+    printf("[mm] rejoin: seeking %s\n", id[0] ? id : "a game");
+    g_rejoin_next = 1;
+    seek(id[0] ? id : NULL, 1, NULL);
 }
 
 // ---- KrunkNative addition: the menu's Connect button (#menuBtnConnect, next to Invite / Join
@@ -2514,6 +2667,7 @@ static void direct_account_tick(Client *client, const int direct) {
 
 void servers_ui_tick(Client *client) {
     link_tick(client);
+    rejoin_tick(client); // after a server restart / a refused join key: a fresh ticket
     servers_timer_tick(); // windows[1] "Ends in" countdown
     if (backend_enabled()) direct_account_tick(client, !g_brain_mode || g_pin == PIN_DIRECT); // tracks the account either way
     if (g_pin != PIN_NONE) g_started = 1; // connected / disconnected by hand first: no startup seek

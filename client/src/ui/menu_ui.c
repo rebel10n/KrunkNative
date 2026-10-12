@@ -659,8 +659,14 @@ void menu_update_instructions(void) {
     StrBuf eb = {0};
     if (error) {
         eb.len = 0;
-        sb_append(&eb, "<div class='instructionsHeader'>Lost Connection</div><div style='color: rgba(255, 255, 255, 0.6);margin-top: 5px;font-size: 28px;'>");
-        sb_append_esc(&eb, g_ui.connect_error);
+        // v7.1.4 f2040: "GAME UPDATING" (a server stopping for an update, or the matchmaker's
+        // NoServersMatchQuery) is the Game Updating screen. KrunkNative keeps the error screen's
+        // layout for it (no update art / Twitch embeds), says what happened for the server's
+        // ERROR and, while servers_ui.c rejoins with a fresh ticket, "Rejoining..."
+        const int updating = !strcmp(g_ui.connect_error, "GAME UPDATING");
+        sb_appendf(&eb, "<div class='instructionsHeader'>%s</div><div style='color: rgba(255, 255, 255, 0.6);margin-top: 5px;font-size: 28px;'>",
+                   updating ? "Game Updating" : "Lost Connection");
+        sb_append_esc(&eb, updating && !strcmp(g_connect_code, NET_ERROR_CODE_UPDATING) ? "Restarting for an update" : g_ui.connect_error);
         // KrunkNative: an online-mode lobby turned a guest away (AccountRequired): log in (the
         // lobby is joined right after, servers_ui.c)
         if (servers_ui_account_required()) sb_append(&eb, "<div style='font-size:20px'><a href='#' onclick='showWindow(5);return false'>Log in</a> to join it.</div>");
@@ -668,7 +674,12 @@ void menu_update_instructions(void) {
         sb_append_esc(&eb, g_connect_code[0] ? g_connect_code : "000000");
         sb_append(&eb, " | Code: 0 | Reason: 0</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>Region: ");
         sb_append_esc(&eb, g_region_label[0] ? g_region_label : MENU_REGION_NAME);
-        sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them</div>");
+        // while servers_ui.c rejoins with a fresh ticket, its status replaces the extensions hint
+        if (servers_ui_rejoining())
+            sb_appendf(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>",
+                       servers_ui_pinned() || !servers_ui_brain_mode() ? "Reconnecting..." : "Rejoining a game...");
+        else
+            sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them</div>");
         // Find a Game: seek a new game (or retry a pinned server: console connect / Direct Connect).
         // v7's row is table-layout: fixed, four equal cells of the box's 610px; KrunkNative's fifth
         // tab (Play Offline) leaves 112px of text per cell, less than "Find a Game" / "Play
@@ -1137,6 +1148,15 @@ static void menu_poll_connection(Client *client) {
         }
     }
 
+    // KrunkNative: a server shutdown / a refused join key rejoins through the matchmaker with a
+    // fresh ticket (servers_ui.c); meanwhile its connect errors keep the server's message up
+    int keep_screen = 0;
+    if (status == NET_STATUS_FAILED) {
+        const int was_rejoining = servers_ui_rejoining();
+        servers_ui_connection_lost(error, sizeof(error), code);
+        keep_screen = was_rejoining && !strcmp(code, "000001");
+    }
+
     if (!html_ui_available() || !g_ui.dom_ready) return;
 
     if (client_is_connected(client)) {
@@ -1144,7 +1164,7 @@ static void menu_poll_connection(Client *client) {
             menu_set_connect(1, NULL, NULL);
             client->menu_connect_error[0] = 0;
         }
-    } else if (status == NET_STATUS_FAILED) {
+    } else if (status == NET_STATUS_FAILED && !keep_screen) {
         const double now = glfwGetTime();
         const int changed = client->menu_connect_sent != 0 || strcmp(error, client->menu_connect_error) != 0;
 

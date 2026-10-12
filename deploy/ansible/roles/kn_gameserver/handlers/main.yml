@@ -1,4 +1,25 @@
-- name: Restart game servers
+# A deploy restart tells the players why: server_bin reads "update" from its
+# shutdown_reason_file (server.cfg) on SIGTERM and sends them v7.1.4's "GAME UPDATING"
+# (their clients then rejoin through the coordinator with a fresh join ticket). All of them
+# listen to "Restart game servers" and run in this order (a reason file left behind by a failed
+# run is ignored by server_bin after 15 minutes).
+- name: Stop reason directory
+  ansible.builtin.file:
+    path: "{{ kn_gameserver_stop_reason_file | dirname }}"
+    state: directory
+    mode: "0755"
+  listen: Restart game servers
+  when: kn_gameserver_active
+
+- name: Stop reason for the restart (update)
+  ansible.builtin.copy:
+    dest: "{{ kn_gameserver_stop_reason_file }}"
+    content: "update\n"
+    mode: "0644"
+  listen: Restart game servers
+  when: kn_gameserver_active
+
+- name: Restart game server instances
   ansible.builtin.systemd_service:
     name: "kn-gameserver@{{ item }}"
     state: restarted
@@ -6,3 +27,10 @@
   loop: "{{ range(1, (kn_gameserver_count | int) + 1) | list }}"
   when: kn_gameserver_active
   ignore_errors: "{{ ansible_check_mode }}"
+  listen: Restart game servers
+
+- name: Clear the stop reason
+  ansible.builtin.file:
+    path: "{{ kn_gameserver_stop_reason_file }}"
+    state: absent
+  listen: Restart game servers

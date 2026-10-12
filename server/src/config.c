@@ -475,6 +475,7 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
         else if (item) gs_read_bool(s, "enforce_skins", &cfg->enforce_skins);
     }
     gs_read_float(s, "shutdown_grace", &cfg->shutdown_grace, 0.0f, 3600.0f);
+    gs_read_str(s, "shutdown_reason_file", cfg->shutdown_reason_file, sizeof(cfg->shutdown_reason_file));
     gs_read_bool(s, "lag_comp", &cfg->lag_comp);
     {
         const cJSON *item = gs_item(s, "lag_comp_anchor"); // true / false (older configs), 0 / 1 / 2, or a mode name

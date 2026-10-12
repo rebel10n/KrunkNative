@@ -298,8 +298,8 @@ static const CliCommand g_cli_commands[] = {
     {CLI_NAMES("deop"), "deop <id|name>", "Take op away again", CLI_ARG_PLAYER, cli_cmd_deop},
     {CLI_NAMES("clear", "cls"), "clear", "Clear the screen", CLI_ARG_NONE, cli_cmd_clear},
     {CLI_NAMES("send", "move"), "send <id|name|*> <gameId|host:port> [reason]", "Move player(s) to another server of the network (lobby id from the coordinator, or a direct address)", CLI_ARG_PLAYER, cli_cmd_send},
-    {CLI_NAMES("drain"), "drain", "Refuse new players, finish the round, then stop (like SIGTERM)", CLI_ARG_NONE, cli_cmd_drain},
-    {CLI_NAMES("quit", "exit", "stop"), "quit", "Disconnect everyone and stop the server now (also Ctrl+C / Ctrl+D)", CLI_ARG_NONE, cli_cmd_quit},
+    {CLI_NAMES("drain"), "drain [update|restart|reason]", "Refuse new players, finish the round, then stop (like SIGTERM); the reason is what players are told", CLI_ARG_TEXT, cli_cmd_drain},
+    {CLI_NAMES("quit", "exit", "stop"), "quit [update|restart|reason]", "Disconnect everyone and stop the server now (also Ctrl+C / Ctrl+D); \"update\" tells players GAME UPDATING", CLI_ARG_TEXT, cli_cmd_quit},
 };
 
 #define CLI_COMMAND_COUNT (sizeof(g_cli_commands) / sizeof(g_cli_commands[0]))
@@ -670,13 +670,15 @@ static void cli_cmd_clear(const char *args) {
     replxx_clear_screen(g_replxx);
 }
 
+// quit / drain [reason]: the reason picks the players' disconnect message (server.h
+// server_shutdown_message): "update" = v7.1.4 "GAME UPDATING", "restart", or any text.
 static void cli_cmd_quit(const char *args) {
-    (void) args;
+    server_set_shutdown_reason(args);
     server_request_stop(SERVER_STOP_COMMAND, NULL);
 }
 
 static void cli_cmd_drain(const char *args) {
-    (void) args;
+    server_set_shutdown_reason(args);
     server_request_drain("console drain");
 }
 

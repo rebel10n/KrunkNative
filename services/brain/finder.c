@@ -170,6 +170,12 @@ static void reply_err(kn_http_req *req, int status, const char *msg) {
 
 static void h_heartbeat(kn_http_req *req, void *ud) {
     (void) ud;
+    /* after finder_shutdown (SIGTERM) the HTTP server still answers for 400 ms: game servers
+     * stopping at the same time send their final "shutdown" heartbeat into that window */
+    if (!g_f.t) {
+        reply_err(req, 503, "Shutting down");
+        return;
+    }
     const char *ip = req->remote_addr ? req->remote_addr : "";
     if (!auth_limiter_hit(g_f.submit_limit, ip, kn_now_ms())) {
         reply_err(req, 429, "Too many requests");
@@ -217,6 +223,10 @@ static void h_heartbeat(kn_http_req *req, void *ud) {
 
 static void h_list(kn_http_req *req, void *ud) {
     (void) ud;
+    if (!g_f.t) {
+        reply_err(req, 503, "Shutting down");
+        return;
+    }
     char map[64] = "", mode[32] = "", tag[32] = "", community[64] = "", region[32] = "", q[64] = "", tmp[16];
     kn_http_query_get(req, "map", map, sizeof(map));
     kn_http_query_get(req, "mode", mode, sizeof(mode));

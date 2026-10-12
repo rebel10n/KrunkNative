@@ -47,5 +47,8 @@ int brain_fetch_map(uint32_t rid, const char *name);
 // Join ticket (seek-game clientId): HS256 JWS signed with gameserver.join_secret (default
 // brain_secret). Returns the claims (caller frees) when the signature and exp are valid.
 cJSON *brain_verify_ticket(const char *ticket, char *err, size_t err_size);
+// The same without the expiry check (signature, claims): a reconnect resuming a ticket this lobby
+// admitted before (accounts.c acc_resume_allowed). NULL with err otherwise.
+cJSON *brain_verify_ticket_any_age(const char *ticket, char *err, size_t err_size);
 // 16 hex chars of CSPRNG output (match ids), or a time-based fallback without knsvc.
 void brain_random_hex(char *out, size_t size, size_t bytes);

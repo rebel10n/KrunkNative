@@ -34,6 +34,8 @@ DEPLOY_PREFIX=${DEPLOY_PREFIX:-/opt/krunknative}
 DEPLOY_USER=${DEPLOY_USER:-root}
 BRAIN_PORT=${BRAIN_PORT:-5050}
 BRIDGE_PORT=${BRIDGE_PORT:-8080}
+# read by server_bin on SIGTERM (gameserver.shutdown_reason_file): "update" while push restarts
+STOP_REASON_FILE=/run/krunknative-deploy/gameserver-stop-reason
 INVENTORY=$ROOT/deploy/inventory
 DRY=0
 CERTBOT=0
@@ -132,6 +134,7 @@ ENV
             echo "KN_GAMESERVER_PUBLIC_PORT=$port"
             echo "KN_GAMESERVER_BRAIN_URL=$brain_url"
             echo "KN_GAMESERVER_BRAIN_SECRET=$DEPLOY_SECRET"
+            echo "KN_GAMESERVER_SHUTDOWN_REASON_FILE=$STOP_REASON_FILE"
             [ "$bridge" = 1 ] && echo "KN_GAMESERVER_WEB_URL=wss://$pub/native?target=127.0.0.1:$port"
         } > "$out/etc/gameserver-$node.env"
     done
@@ -198,8 +201,9 @@ push_host() {
     [ "$(var "$h" brain 0)" = 1 ] && units+=" kn-brain.service"
     [ "$(var "$h" bridge 0)" = 1 ] && units+=" kn-net-bridge.service"
     for ((i = 1; i <= n; i++)); do units+=" kn-gameserver@$prefix$i.service"; done
-    # brain first (migrations run in its ExecStartPre), then the rest
-    remote "$h" "systemctl enable $units >/dev/null && systemctl restart $units"
+    # brain first (migrations run in its ExecStartPre), then the rest. The stop reason file tells
+    # the game servers' players "GAME UPDATING" (server_bin shutdown_reason_file) during the restart.
+    remote "$h" "install -d -m 0755 ${STOP_REASON_FILE%/*} && echo update > $STOP_REASON_FILE && chmod 0644 $STOP_REASON_FILE; systemctl enable $units >/dev/null && systemctl restart $units; rc=\$?; rm -f $STOP_REASON_FILE; exit \$rc"
     # stop instances that are no longer in the inventory
     remote "$h" "for u in \$(systemctl list-units --plain --no-legend 'kn-gameserver@*' | awk '{print \$1}'); do case \" $units \" in *\" \$u \"*) ;; *) systemctl disable --now \$u ;; esac; done"
     rm -rf "$tmp"

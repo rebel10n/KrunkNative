@@ -608,6 +608,14 @@ cJSON *brain_verify_ticket(const char *ticket, char *err, const size_t err_size)
     return kn_signed_token_verify(g_brain.join_secret, ticket, 0, err, err_size);
 }
 
+cJSON *brain_verify_ticket_any_age(const char *ticket, char *err, const size_t err_size) {
+    if (!ticket || !ticket[0]) {
+        snprintf(err, err_size, "no ticket");
+        return NULL;
+    }
+    return kn_signed_token_verify(g_brain.join_secret, ticket, 1, err, err_size); // "now" = 1 s: any exp passes
+}
+
 void brain_random_hex(char *out, const size_t size, const size_t bytes) {
     if (kn_random_hex(out, size, bytes)) snprintf(out, size, "%08lx", (unsigned long) time(NULL));
 }
@@ -632,6 +640,9 @@ cJSON *brain_verify_ticket(const char *ticket, char *err, const size_t err_size)
     (void) ticket;
     snprintf(err, err_size, "tickets need knsvc");
     return NULL;
+}
+cJSON *brain_verify_ticket_any_age(const char *ticket, char *err, const size_t err_size) {
+    return brain_verify_ticket(ticket, err, err_size);
 }
 void brain_random_hex(char *out, const size_t size, const size_t bytes) {
     (void) bytes;

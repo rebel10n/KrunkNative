@@ -305,7 +305,10 @@ static void handle_auth(NodeConn *c, const cJSON *frame) {
     }
     if (ticket && *ticket) {
         char err[128] = "";
-        a->claims = kn_signed_token_verify(mm_settings()->join_secret, ticket, 0, err, sizeof(err));
+        /* "resume": the node admitted this ticket before and a reconnect of that session sent it
+         * again after its expiry (server/src/accounts.c acc_resume_allowed): signature only */
+        const int resume = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(frame, "resume"));
+        a->claims = kn_signed_token_verify(mm_settings()->join_secret, ticket, resume ? 1 : 0, err, sizeof(err));
         if (!a->claims) {
             auth_finish(a, err[0] ? err : "invalid ticket", NULL);
             return;

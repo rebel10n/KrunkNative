@@ -51,3 +51,4 @@ ops             ""                 // account ids / usernames that are DEV on jo
 bans_file       config/bans.json
 log_file        ""                 // also append the console log here
 shutdown_grace  10                 // SIGTERM: seconds to finish the round before exiting
+// shutdown_reason_file "/run/krunknative-deploy/gameserver-stop-reason"  // read on SIGTERM: "update" = players see GAME UPDATING

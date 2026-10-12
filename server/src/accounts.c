@@ -1112,6 +1112,8 @@ static void acc_enforce_skins(ClientConnection *client) {
     acc_chat_to(client, "You don't own some of the skins you equipped on this server");
 }
 
+static void acc_resume_note(const char *jti, int connected);
+
 static void acc_set_ready(ClientConnection *client) {
     const char *ranked_refusal = acc_ranked_refusal(client);
     if (ranked_refusal) { // isFromQueue: the queued accounts only
@@ -1123,6 +1125,7 @@ static void acc_set_ready(ClientConnection *client) {
     if (slot) slot->joined = 1;
     const int was_waiting = client->acct.join_state != SERVER_JOIN_READY;
     client->acct.join_state = SERVER_JOIN_READY;
+    acc_resume_note(client->acct.ticket_jti, 1); // a reconnect may resume this ticket (accounts_handle_join)
     net_comp_lobby_sync(client); // comp lobby: the account identity (+ the roster team)
     client->acct.auth_rid = 0;
     if (client->acct.account_id && gs_is_op(&g_gs_config, client->acct.account_id, client->acct.username)) {
@@ -1206,6 +1209,7 @@ static void acc_send_auth(ClientConnection *client, const char *key, const char 
     cJSON_AddStringToObject(frame, "type", "auth");
     cJSON_AddNumberToObject(frame, "rid", rid);
     cJSON_AddStringToObject(frame, key, value);
+    if (client->acct.resumed) cJSON_AddBoolToObject(frame, "resume", 1); // the brain skips the ticket's expiry
     client->acct.auth_rid = rid;
     client->acct.join_state = SERVER_JOIN_AUTH;
     client->acct.join_deadline = g_server->now + 10.0f; // brainClient.ts DB_CALL_TIMEOUT_MS
@@ -1308,6 +1312,66 @@ static void acc_handle_central(const CentralAuthResult *r) {
     acc_set_ready(client);
 }
 
+// ---- resuming admitted join tickets (KrunkNative). The client sends its seek ticket in every
+// JOIN of the session, also when its transport reconnects mid-match: the WebRTC gateway or a UDP
+// (knet) session dropping, the WebRTC -> WebSocket fallback, a net-bridge / gateway restart (the
+// edges log these as "Join key expired" a few minutes into a match: the ticket expires
+// brain.join_ttl_s, 30 s, after the seek). A ticket this lobby admitted is accepted again,
+// expired, while the lobby lives: until ACC_RESUME_SECONDS after its last connection ended. A
+// restarted server has a new lobby id ("Join key is for another server": the client seeks a
+// fresh ticket, servers_ui.c), so a resume never crosses a restart.
+#define ACC_RESUME_MAX 256
+#define ACC_RESUME_SECONDS 1800
+
+typedef struct {
+    char jti[40];
+    char lid[8];
+    time_t ended; // wall clock of the last connection's end, 0 = connected
+} AccResume;
+
+static AccResume g_resume[ACC_RESUME_MAX];
+
+static AccResume *acc_resume_find(const char *jti) {
+    for (int i = 0; i < ACC_RESUME_MAX; i++) {
+        if (g_resume[i].jti[0] && !strcmp(g_resume[i].jti, jti)) return &g_resume[i];
+    }
+    return NULL;
+}
+
+static void acc_resume_note(const char *jti, const int connected) {
+    if (!jti || !jti[0]) return;
+    AccResume *r = acc_resume_find(jti);
+    if (!r) { // a free slot, else the entry that ended longest ago (connected ones last)
+        r = &g_resume[0];
+        for (int i = 0; i < ACC_RESUME_MAX; i++) {
+            AccResume *e = &g_resume[i];
+            if (!e->jti[0]) {
+                r = e;
+                break;
+            }
+            if ((r->ended == 0 && e->ended != 0) || (e->ended != 0 && e->ended < r->ended)) r = e;
+        }
+        snprintf(r->jti, sizeof(r->jti), "%s", jti);
+    }
+    snprintf(r->lid, sizeof(r->lid), "%s", g_acc.lobby_id);
+    r->ended = connected ? 0 : time(NULL);
+}
+
+static int acc_resume_allowed(const char *jti) {
+    const AccResume *r = jti && jti[0] ? acc_resume_find(jti) : NULL;
+    return r && !strcmp(r->lid, g_acc.lobby_id) && (r->ended == 0 || time(NULL) - r->ended <= ACC_RESUME_SECONDS);
+}
+
+// The resumed connection replaces the one it left behind (a dead transport the server has not
+// timed out yet: it would stay in the game as an idle ghost until the idle kick).
+static void acc_resume_replace(const ClientConnection *client) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        const ClientConnection *other = &g_server->clients[i];
+        if (other != client && !strcmp(other->acct.ticket_jti, client->acct.ticket_jti))
+            net_kick_client(other->id, "Logged in from another location", "004002");
+    }
+}
+
 void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
     if (client->acct.join_state != SERVER_JOIN_AWAIT) return; // standalone without password: guests, as always
     if (packet->length != sizeof(NetJoinPacket) && packet->length != NET_JOIN_PACKET_V1_SIZE &&
@@ -1340,6 +1404,17 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
     if (join.client_key[0]) {
         char err[96] = "";
         cJSON *claims = brain_verify_ticket(join.client_key, err, sizeof(err));
+        int resumed = 0;
+        if (!claims && strstr(err, "exp")) { // a transport reconnect of a session this lobby admitted
+            char age_err[96] = "";
+            cJSON *old = brain_verify_ticket_any_age(join.client_key, age_err, sizeof(age_err));
+            if (old && acc_resume_allowed(cJSON_GetStringValue(cJSON_GetObjectItem(old, "jti")))) {
+                claims = old;
+                resumed = 1;
+            } else {
+                cJSON_Delete(old);
+            }
+        }
         const char *nid = cJSON_GetStringValue(cJSON_GetObjectItem(claims, "nid"));
         const char *lid = cJSON_GetStringValue(cJSON_GetObjectItem(claims, "lid"));
         if (!claims) {
@@ -1354,6 +1429,11 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
         }
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(claims, "jti"));
         snprintf(client->acct.ticket_jti, sizeof(client->acct.ticket_jti), "%s", jti ? jti : "");
+        client->acct.resumed = (unsigned char) resumed;
+        if (resumed) {
+            server_log("%s resumes join ticket %.8s... (expired, admitted by this lobby before)", client->address, client->acct.ticket_jti);
+            acc_resume_replace(client);
+        }
         const cJSON *acc = cJSON_GetObjectItem(claims, "acc");
         const int account_id = cJSON_IsNumber(acc) ? acc->valueint : 0;
         if (account_id > 0) {
@@ -1453,6 +1533,13 @@ static void acc_handle_auth_reply(const cJSON *frame) {
     const cJSON *account = cJSON_GetObjectItem(frame, "account");
     if (!cJSON_IsTrue(cJSON_GetObjectItem(frame, "ok")) || !cJSON_IsObject(account)) {
         const char *err = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "err"));
+        if (client->acct.resumed && err && strstr(err, "expired")) {
+            // a brain without "resume": the ticket identity stands, as when the brain is unreachable
+            server_log("%s: the coordinator refused the resumed ticket (%s); keeping account %d", client->address, err,
+                       client->acct.account_id);
+            acc_set_ready(client);
+            return;
+        }
         acc_reject(client, err && err[0] ? err : "Invalid session", err && !strncasecmp(err, "Banned", 6) ? "004003" : "004001");
         return;
     }
@@ -1511,6 +1598,7 @@ static void acc_revert_custom(const char *why);
 
 void accounts_on_disconnect(ClientConnection *client) {
     if (!g_acc.brain) return;
+    if (client->acct.join_state == SERVER_JOIN_READY) acc_resume_note(client->acct.ticket_jti, 0);
     acc_ranked_on_leave(client);
     acc_commit_partial(client);
     if (client->acct.join_state == SERVER_JOIN_READY && (client->acct.account_id || client->acct.ticket_jti[0])) {
@@ -1813,12 +1901,13 @@ static void acc_handle_drain(const cJSON *frame) {
 void accounts_begin_drain(const char *why) {
     if (g_acc.draining) return;
     g_acc.draining = 1;
-    server_log("Draining (%s): refusing new players, finishing the round", why ? why : "-");
-    net_broadcast_chat(NULL, "Server is shutting down after this round");
+    const char *reason = server_shutdown_reason(); // "update" during a deploy (server_cli.h)
+    server_log("Draining (%s%s%s): refusing new players, finishing the round", why ? why : "-", reason[0] ? ", reason " : "", reason);
+    net_broadcast_chat(NULL, server_shutdown_notice());
     if (brain_linked()) { // the coordinator stops offering this lobby at once
         cJSON *drain = cJSON_CreateObject();
         cJSON_AddStringToObject(drain, "type", "drain");
-        cJSON_AddStringToObject(drain, "reason", why ? why : "shutdown");
+        cJSON_AddStringToObject(drain, "reason", reason[0] ? reason : why ? why : "shutdown");
         brain_post(drain, 0);
     }
     acc_push_lobby_now();

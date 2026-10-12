@@ -132,6 +132,13 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/mm_fill_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_mm_fill_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # shutdown-msg: server_bin's shutdown ERROR (SIGTERM / reason file "update" / quit restart)
+        # and headless client_bin rejoining a restarted node with a fresh join ticket, also after
+        # "Join key expired" (skips 77 without a database or client_bin)
+        add_test(NAME brain_restart_rejoin_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/restart_rejoin_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_restart_rejoin_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # editor WP6: the map editor's publishing, My Games and asset windows (headless client_bin
         # --editor against kn_brain; skips 77 without a database, websockets or client_bin)
         add_test(NAME brain_editor_publish_e2e

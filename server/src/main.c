@@ -131,6 +131,26 @@ void server_request_drain(const char *why) {
     g_drain_requested = 1;
 }
 
+// Every connected player gets the shutdown ERROR, then (after ~100 ms, like v7.1.4's
+// sock.close timer, so the text is read before the close) the sockets close.
+static void server_send_shutdown_message(void) {
+    NetErrorPacket error;
+    memset(&error, 0, sizeof(error));
+    server_shutdown_message(error.message, sizeof(error.message), error.code, sizeof(error.code));
+    pthread_mutex_lock(&g_server->lock);
+    const size_t count = g_server->client_count;
+    for (size_t i = 0; i < count; i++) net_send_packet(g_server->clients[i].fd, NET_PACKET_ERROR, &error, sizeof(error));
+    pthread_mutex_unlock(&g_server->lock);
+    if (!count) return;
+    server_log("Sent \"%s\" (%s) to %lu client%s", error.message, error.code, (unsigned long) count, count == 1 ? "" : "s");
+#ifdef WIN32
+    Sleep(150);
+#else
+    const struct timespec pause = {0, 150 * 1000 * 1000};
+    nanosleep(&pause, NULL);
+#endif
+}
+
 // server.cfg bots / bot_quota / bot_difficulty: the v7.1.4 bot manager (shared/src/bots.c)
 // keeps that many bot players in the lobby. The difficulty applies like `bot_difficulty`.
 static void server_configure_bots(const GsConfig *cfg) {
@@ -445,7 +465,8 @@ static void print_usage(FILE *stream, const char *argv0) {
             "(also every Krunker chat command without the slash). The same commands work over rcon.\n"
             "Ctrl+C / SIGINT / SIGTERM drain: no new players, the round finishes (up to shutdown_grace\n"
             "seconds, default 10), stats are committed, then the server exits; a second signal or 'quit'\n"
-            "stops at once.\n",
+            "stops at once. Players are told why: 'quit update' / 'drain update' (or \"update\" in the\n"
+            "shutdown_reason_file a deploy writes) says GAME UPDATING, 'quit restart' Server restarting.\n",
             argv0, argv0, NET_DEFAULT_PORT);
 }
 
@@ -814,6 +835,7 @@ int main(int argc, char **argv) {
     accounts_shutdown();
     pthread_mutex_unlock(&g_server->lock);
 
+    server_send_shutdown_message(); // ERROR "GAME UPDATING" / "Server shutting down" (v7.1.4 restartForUpdate)
     const size_t client_count = g_server->client_count;
     server_disconnect_all();
     if (client_count) server_log("Disconnected %lu client%s", (unsigned long) client_count, client_count == 1 ? "" : "s");

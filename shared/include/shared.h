@@ -2406,6 +2406,13 @@ typedef struct {
     char code[8];          // Krunker error code ("000005" = idle kick)
 } NetErrorPacket;
 
+// NetErrorPacket codes the client acts on (doc/backend.md 8.3 / 8.5; the rest are shown only):
+// a refused join ticket makes a matchmade client seek a fresh one (once); the two shutdown
+// codes make it rejoin through the matchmaker (fresh ticket) once the server is gone.
+#define NET_ERROR_CODE_TICKET "004001"   // invalid / expired join key or session, guests refused
+#define NET_ERROR_CODE_UPDATING "004004" // "GAME UPDATING": draining, or stopping for an update
+#define NET_ERROR_CODE_SHUTDOWN "004006" // the server stopped (restart / shutdown / console quit)
+
 // NET_PACKET_BILLBOARD: the server's billboard config (v3.1.1 game.updateBillboards: txt,
 // txtCol, bgCol) painted on every "sad" BILLBOARD map object. Empty fields = the engine
 // defaults ("Your Ad Here", #e3e3e3, #000000).

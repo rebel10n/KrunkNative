@@ -100,6 +100,7 @@ typedef struct {
     char tags[GS_STR_SMALL * 2];         // extra comma-separated info-query tags
     int enforce_skins;                   // -1 auto (on with a coordinator), 0 off, 1 on
     float shutdown_grace;                // seconds a SIGTERM/SIGINT drain waits for players (0 = immediate)
+    char shutdown_reason_file[GS_STR_LARGE]; // read at the first stop request: "update" = deploy (server_shutdown_reason)
     int lag_comp;                        // 1: hits rewind targets (v3.1.1 storeState / fetchState), 0 = current positions
     int lag_comp_anchor;                 // LAG_COMP_ANCHOR_*: 1 exact (client input timeline, default), 2 arrival + ping, 0 v3.1.1 ping * 2
     float lag_comp_scale;                // 0.1..1 (default 1) times each player's lagComp (ENT ent[11] slider)
