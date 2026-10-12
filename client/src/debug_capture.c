@@ -24,6 +24,9 @@ typedef struct {
     float pitch;
     float yaw;
     float fov;           // radians, 0 = keep the client's FOV
+    float ortho;         // KRUNKNATIVE_ORTHO: orthographic half height (world units), 0 = perspective
+    float far;           // KRUNKNATIVE_CAMERA_FAR: camera far plane, 0 = keep
+    int no_fog;          // KRUNKNATIVE_NO_FOG=1: fog off (editor captures, tools/editor-mcp)
     int hide_ui;
     const char *screenshot;
     int frames_wanted;
@@ -73,6 +76,14 @@ static void debug_capture_init(void) {
     const char *fov = getenv("KRUNKNATIVE_FOV");
     if (fov && *fov) g_capture.fov = (float) atof(fov) * (float) M_PI / 180.0f;
 
+    // editor captures (tools/editor-mcp render_*): orthographic views, no fog, far plane
+    const char *ortho = getenv("KRUNKNATIVE_ORTHO");
+    if (ortho && *ortho) g_capture.ortho = (float) atof(ortho);
+    const char *far = getenv("KRUNKNATIVE_CAMERA_FAR");
+    if (far && *far) g_capture.far = (float) atof(far);
+    const char *no_fog = getenv("KRUNKNATIVE_NO_FOG");
+    g_capture.no_fog = no_fog && !strcmp(no_fog, "1");
+
     const char *hide_ui = getenv("KRUNKNATIVE_HIDE_UI");
     g_capture.hide_ui = hide_ui && !strcmp(hide_ui, "1");
 
@@ -88,7 +99,10 @@ void debug_capture_apply_camera(Client *client) {
     debug_capture_init();
 
     if (g_capture.fov > 0.0f) client->camera.fov = g_capture.fov;
+    if (g_capture.far > 0.0f) client->camera.far = g_capture.far;
+    if (g_capture.no_fog) g_render_lighting.fog_enabled = 0;
     if (!g_capture.pinned) return;
+    client->camera.ortho = g_capture.ortho > 0.0f ? g_capture.ortho : 0.0f;
 
     client->camera.position = g_capture.position;
     client->camera.rotation.x = g_capture.pitch;

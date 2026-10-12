@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "krunker-editor": {
+      "type": "stdio",
+      "command": "/home/user/src/KrunkNative/cmake-build-debug/tools/editor-mcp/kn_editor_mcp",
+      "args": ["--root", "/home/user/src/KrunkNative"]
+    }
+  }
+}

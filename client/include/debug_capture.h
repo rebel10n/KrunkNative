@@ -6,6 +6,9 @@
 //                                         uses Krunker's YXZ order: yaw about Y, then pitch about X)
 //   KRUNKNATIVE_FOV=<degrees>             vertical field of view override
 //   KRUNKNATIVE_HIDE_UI=1                 skip the HTML page, class preview and HUD
+//   KRUNKNATIVE_ORTHO=<half height>       orthographic projection (with KRUNKNATIVE_CAMERA; editor views)
+//   KRUNKNATIVE_NO_FOG=1                  map fog off
+//   KRUNKNATIVE_CAMERA_FAR=<units>        camera far plane
 //   KRUNKNATIVE_SCREENSHOT=<out.png>      after the map has rendered KRUNKNATIVE_CAPTURE_FRAMES
 //                                         frames (default 30), write the framebuffer and exit
 #include <client.h>

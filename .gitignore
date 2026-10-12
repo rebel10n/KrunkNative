@@ -2,6 +2,7 @@
 .vscode/
 cmake-build-debug/
 cmake-build-release/
+cmake-build-mcp-release/
 assets/*/*
 !assets/maps/*
 !assets/img/*

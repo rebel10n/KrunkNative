@@ -1,0 +1,8007 @@
+{
+ "generated_by": "tools/editor-mcp/gen/gen_schema.py",
+ "format": "Krunker map JSON (v3.1.1 native, v7.1.4 fields)",
+ "native_prefab_count": 60,
+ "prefabs": [
+  {
+   "id": 0,
+   "name": "CUBE",
+   "label": "Cube",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canComplexColl",
+    "canDirectionalScale",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canStretch",
+    "canTrans",
+    "canWallJump",
+    "castShadow",
+    "editAICol",
+    "editAmb",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editFaces",
+    "editFog",
+    "editOpac",
+    "editPen",
+    "editRenderSide",
+    "frameTexture",
+    "hasBorder",
+    "hasHealth",
+    "movingTexture",
+    "receiveShadow",
+    "scalable",
+    "showMinimap",
+    "stepSrc",
+    "texturable"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 1,
+   "name": "CRATE",
+   "label": "Crate",
+   "aliases": [],
+   "default_size": [
+    12,
+    12,
+    12
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 6,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "crate_0",
+   "category": "props"
+  },
+  {
+   "id": 2,
+   "name": "BARREL",
+   "label": "Barrel",
+   "aliases": [],
+   "default_size": [
+    5.921,
+    7.739,
+    5.921
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "barrel_0",
+   "category": "props"
+  },
+  {
+   "id": 3,
+   "name": "LADDER",
+   "label": "Ladder",
+   "aliases": [],
+   "default_size": [
+    2,
+    10,
+    4
+   ],
+   "size_source": "defaultSize",
+   "scale": 0.5,
+   "flags": [
+    "assetTextures",
+    "canDirectionalScale",
+    "canStretch",
+    "canTrans",
+    "castShadow",
+    "customDirection",
+    "editColor",
+    "editEmissive",
+    "editOpac",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "stepSrc",
+    "texturable"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 4,
+   "name": "PLANE",
+   "label": "Plane",
+   "aliases": [],
+   "default_size": [
+    4,
+    0.01,
+    4
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canComplexColl",
+    "canDirectionalScale",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canSprite",
+    "canStretch",
+    "canTerrain",
+    "canTrans",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "doubleSide",
+    "edgeNoise",
+    "editAICol",
+    "editAlphaTest",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editFog",
+    "editOpac",
+    "editPen",
+    "frameTexture",
+    "hasHealth",
+    "movingTexture",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "showMinimap",
+    "stepSrc",
+    "texturable"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 5,
+   "name": "SPAWN_POINT",
+   "label": "Spawn Point",
+   "aliases": [],
+   "default_size": [
+    7,
+    11,
+    7
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 1,
+   "flags": [
+    "alwaysSee",
+    "customDirection",
+    "dontRound",
+    "noTexture",
+    "notStyleable",
+    "notTechnical",
+    "teamable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "spawns"
+  },
+  {
+   "id": 6,
+   "name": "CAMERA_POSITION",
+   "label": "Camera Position",
+   "aliases": [],
+   "default_size": [
+    2,
+    2,
+    2
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "alwaysSee",
+    "isCam",
+    "notStyleable",
+    "notTechnical",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "camera"
+  },
+  {
+   "id": 7,
+   "name": "VEHICLE",
+   "label": "Vehicle",
+   "aliases": [],
+   "default_size": [
+    50.809,
+    15.134,
+    20.354
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 20,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "emiss",
+    "hasHealth",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "vehicle_0",
+   "category": "props"
+  },
+  {
+   "id": 8,
+   "name": "STACK",
+   "label": "Stack",
+   "aliases": [],
+   "default_size": [
+    12.083,
+    12.147,
+    12
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 6,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "stack_0",
+   "category": "props"
+  },
+  {
+   "id": 9,
+   "name": "RAMP",
+   "label": "Ramp",
+   "aliases": [],
+   "default_size": [
+    10,
+    5,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "boostable",
+    "canDirectionalScale",
+    "canStretch",
+    "canTrans",
+    "castShadow",
+    "customDirection",
+    "doubleSide",
+    "editAICol",
+    "editColor",
+    "editEmissive",
+    "editOpac",
+    "frameTexture",
+    "movingTexture",
+    "noRotation",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "shootable",
+    "showMinimap",
+    "stepSrc",
+    "texturable"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 10,
+   "name": "SCORE_ZONE",
+   "label": "Score Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "customScore",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ffff00",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 11,
+   "name": "BILLBOARD",
+   "label": "Billboard",
+   "aliases": [],
+   "default_size": [
+    40,
+    0.01,
+    20
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canSprite",
+    "canTerrain",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "doubleSide",
+    "editFog",
+    "hasHealth",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ffff00",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 12,
+   "name": "DEATH_ZONE",
+   "label": "Death Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasHealth",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ff0000",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 13,
+   "name": "PARTICLES",
+   "label": "Particles",
+   "aliases": [],
+   "default_size": [
+    20,
+    20,
+    20
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "customDirection",
+    "editColor",
+    "noTexture",
+    "notTechnical",
+    "scalable",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#2effff",
+   "model": "cube_0",
+   "category": "effects"
+  },
+  {
+   "id": 14,
+   "name": "OBJECTIVE",
+   "label": "Objective",
+   "aliases": [],
+   "default_size": [
+    50,
+    50,
+    50
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canSetObjective",
+    "doubleSide",
+    "notStyleable",
+    "notTechnical",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#c800ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 15,
+   "name": "TREE",
+   "label": "Tree",
+   "aliases": [],
+   "default_size": [
+    64.548,
+    109.168,
+    53.626
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 10,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "tree_0",
+   "category": "props"
+  },
+  {
+   "id": 16,
+   "name": "CONE",
+   "label": "Cone",
+   "aliases": [],
+   "default_size": [
+    4.246,
+    7.299,
+    4.246
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cone_0",
+   "category": "props"
+  },
+  {
+   "id": 17,
+   "name": "CONTAINER",
+   "label": "Container",
+   "aliases": [],
+   "default_size": [
+    57.145,
+    26.123,
+    25.476
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 7,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "container_0",
+   "category": "props"
+  },
+  {
+   "id": 18,
+   "name": "GRASS",
+   "label": "Grass",
+   "aliases": [],
+   "default_size": [
+    8.624,
+    7.861,
+    8.874
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 32,
+   "flags": [
+    "canInterface",
+    "complex",
+    "doubleSide",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noDetail",
+    "noMinimap",
+    "receiveShadow",
+    "transparent"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "grass_0",
+   "category": "effects"
+  },
+  {
+   "id": 19,
+   "name": "CONTAINERR",
+   "label": "Containerr",
+   "aliases": [],
+   "default_size": [
+    57.145,
+    26.123,
+    25.476
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 7,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "containerr_0",
+   "category": "props"
+  },
+  {
+   "id": 20,
+   "name": "ACIDBARREL",
+   "label": "Acidbarrel",
+   "aliases": [],
+   "default_size": [
+    5.41,
+    8.686,
+    5.41
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "emiss",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "acidbarrel_0",
+   "category": "props"
+  },
+  {
+   "id": 21,
+   "name": "DOOR",
+   "label": "Door",
+   "aliases": [],
+   "default_size": [
+    2.703,
+    20,
+    10
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 5,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "door_0",
+   "category": "geometry"
+  },
+  {
+   "id": 22,
+   "name": "WINDOW",
+   "label": "Window",
+   "aliases": [],
+   "default_size": [
+    1.2,
+    17.373,
+    17.373
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 6,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noDetail",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc",
+    "transparent"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "window_0",
+   "category": "geometry"
+  },
+  {
+   "id": 23,
+   "name": "FLAG",
+   "label": "Flag",
+   "aliases": [],
+   "default_size": [
+    24,
+    36,
+    24
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canNeutral",
+    "noDefault",
+    "noDetail",
+    "notStyleable",
+    "notTechnical",
+    "teamable",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#c800ff",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 24,
+   "name": "GATE",
+   "label": "Gate",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canDirectionalScale",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canStretch",
+    "canTrans",
+    "canUndo",
+    "canWallJump",
+    "castShadow",
+    "customScore",
+    "editAICol",
+    "editAmb",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editFaces",
+    "editFog",
+    "editOpac",
+    "forceCollision",
+    "frameTexture",
+    "hasBorder",
+    "interact",
+    "interactMsg",
+    "movingTexture",
+    "receiveShadow",
+    "scalable",
+    "showMinimap",
+    "stepSrc",
+    "teamable",
+    "texturable",
+    "tool2"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 25,
+   "name": "CHECK_POINT",
+   "label": "Check Point",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "customDirection",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "teamable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#03dac5",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 26,
+   "name": "WEAPON_PICKUP",
+   "label": "Weapon Pickup",
+   "aliases": [],
+   "default_size": [
+    12,
+    2,
+    4
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "customScore",
+    "interact",
+    "interactMsg",
+    "noTexture",
+    "notStyleable",
+    "teamable",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#36dbff",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 27,
+   "name": "TELEPORTER",
+   "label": "Teleporter",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "customDirection",
+    "noTexture",
+    "notStyleable",
+    "optionalDirection",
+    "scalable",
+    "teamable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#b1fff0",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 28,
+   "name": "TEDDY",
+   "label": "Teddy",
+   "aliases": [],
+   "default_size": [
+    3.486,
+    5.81,
+    4.583
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 6,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "noDetail",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "teddy_0",
+   "category": "props"
+  },
+  {
+   "id": 29,
+   "name": "TRIGGER",
+   "label": "Trigger",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "alterHitbox",
+    "assetTextures",
+    "canDirectionalScale",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canScript",
+    "canStretch",
+    "canTargetInterface",
+    "canTrans",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editAICol",
+    "editAlphaTest",
+    "editAmb",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editFaces",
+    "editFog",
+    "editOpac",
+    "editRenderSide",
+    "forceCollision",
+    "frameTexture",
+    "hasHealth",
+    "hasSpin",
+    "hasSpinDir",
+    "movingTexture",
+    "receiveShadow",
+    "scalable",
+    "showMinimap",
+    "stepSrc",
+    "teamable",
+    "texturable",
+    "tool2"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 30,
+   "name": "SIGN",
+   "label": "Sign",
+   "aliases": [],
+   "default_size": [
+    40,
+    0.01,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canSprite",
+    "castShadow",
+    "doubleSide",
+    "forceCollision",
+    "hasText",
+    "movingTexture",
+    "noCol",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ffff00",
+   "model": "cube_0",
+   "category": "effects"
+  },
+  {
+   "id": 31,
+   "name": "DEPOSIT_BOX",
+   "label": "Deposit Box",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canDirectionalScale",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canStretch",
+    "canTrans",
+    "canWallJump",
+    "castShadow",
+    "editAICol",
+    "editAmb",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editFaces",
+    "editFog",
+    "editOpac",
+    "forceCollision",
+    "frameTexture",
+    "hasBorder",
+    "interactMsg",
+    "movingTexture",
+    "receiveShadow",
+    "scalable",
+    "showMinimap",
+    "stepSrc",
+    "teamable",
+    "texturable",
+    "tool2"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 32,
+   "name": "LIGHT_CONE",
+   "label": "Light Cone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "castShadow",
+    "complex",
+    "doubleSide",
+    "editColor",
+    "editOpac",
+    "movingTexture",
+    "noCol",
+    "noCollision",
+    "noDetail",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "transparent"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "lights"
+  },
+  {
+   "id": 33,
+   "name": "CAMERA",
+   "label": "Spectate Cam",
+   "aliases": [
+    "SPECTATE_CAM"
+   ],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "isCam",
+    "notStyleable",
+    "notTechnical",
+    "objectiveLink",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "camera"
+  },
+  {
+   "id": 34,
+   "name": "SPHERE",
+   "label": "Sphere",
+   "aliases": [],
+   "default_size": [
+    5,
+    5,
+    5
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canComplexColl",
+    "canDirectionalScale",
+    "canTrans",
+    "editColor",
+    "editEmissive",
+    "editFog",
+    "editOpac",
+    "frameTexture",
+    "movingTexture",
+    "noCol",
+    "noCollision",
+    "notTechnical",
+    "scalable",
+    "texturable"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 35,
+   "name": "PLACEHOLDER",
+   "label": "Placeholder",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "noExport",
+    "noTexture",
+    "scalable",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#000000",
+   "model": "cube_0",
+   "category": "camera"
+  },
+  {
+   "id": 36,
+   "name": "CARDB",
+   "label": "Cardb",
+   "aliases": [],
+   "default_size": [
+    5,
+    5.304,
+    5
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 5,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cardb_0",
+   "category": "props"
+  },
+  {
+   "id": 37,
+   "name": "PALLET",
+   "label": "Pallet",
+   "aliases": [],
+   "default_size": [
+    12,
+    2.1,
+    12
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 6,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "pallet_0",
+   "category": "props"
+  },
+  {
+   "id": 38,
+   "name": "LIQUID",
+   "label": "Liquid",
+   "aliases": [],
+   "default_size": [
+    25,
+    0.01,
+    25
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canDirectionalScale",
+    "canTerrain",
+    "castShadow",
+    "dontRound",
+    "doubleSide",
+    "editColor",
+    "editEmissive",
+    "editOpac",
+    "movingTexture",
+    "noCol",
+    "noCollision",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "texturable"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "effects"
+  },
+  {
+   "id": 39,
+   "name": "SOUND_EMITTER",
+   "label": "Sound Emitter",
+   "aliases": [],
+   "default_size": [
+    5,
+    5,
+    5
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetSounds",
+    "hasSound",
+    "noCol",
+    "noCollision",
+    "notStyleable",
+    "notTechnical",
+    "tool",
+    "wireframe"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 40,
+   "name": "EVENT",
+   "label": "Event",
+   "aliases": [],
+   "default_size": [
+    1,
+    1,
+    1
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 2,
+   "flags": [
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editColor",
+    "editOpac",
+    "localOnly",
+    "noExport",
+    "receiveShadow"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "event_0",
+   "category": "logic"
+  },
+  {
+   "id": 41,
+   "name": "TERMINAL",
+   "label": "Terminal",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canStretch",
+    "canTrans",
+    "canWallJump",
+    "castShadow",
+    "editAICol",
+    "editAmb",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editFog",
+    "editOpac",
+    "editPen",
+    "frameTexture",
+    "hasBorder",
+    "hasHealth",
+    "interactMsg",
+    "localOnly",
+    "movingTexture",
+    "receiveShadow",
+    "scalable",
+    "showMinimap",
+    "stepSrc",
+    "texturable",
+    "tool2"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 42,
+   "name": "PREMIUM_ZONE",
+   "label": "Premium Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#fbc02d",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 43,
+   "name": "VERIFIED_ZONE",
+   "label": "Verified Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#40c4ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 44,
+   "name": "CUSTOM_ASSET",
+   "label": "Custom Asset",
+   "aliases": [],
+   "default_size": [
+    1,
+    1,
+    1
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 1,
+   "flags": [
+    "alterHitbox",
+    "canComplexColl",
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canScript",
+    "canTrans",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "custom",
+    "dontRound",
+    "editAICol",
+    "editAlphaTest",
+    "editBulletCol",
+    "editColor",
+    "editFog",
+    "editOpac",
+    "editRenderSide",
+    "hasHealth",
+    "hasSpin",
+    "hasSpinDir",
+    "receiveShadow",
+    "showMinimap"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "model",
+   "category": "geometry"
+  },
+  {
+   "id": 45,
+   "name": "BOMB_SITE",
+   "label": "Bomb Site",
+   "aliases": [],
+   "default_size": [
+    25,
+    25,
+    25
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "doubleSide",
+    "notStyleable",
+    "notTechnical",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#927ded",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 46,
+   "name": "BOOST_PAD",
+   "label": "Boost Pad",
+   "aliases": [],
+   "default_size": [
+    10,
+    0.5,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 4,
+   "flags": [
+    "altDirection",
+    "bounce",
+    "canDirectionalScale",
+    "customDirection",
+    "noDefault",
+    "notStyleable",
+    "notTechnical",
+    "scalable",
+    "tool"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#c800ff",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 47,
+   "name": "TEAM_ZONE",
+   "label": "Team Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "teamable",
+    "tool",
+    "zone"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#40c4ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 48,
+   "name": "CYLINDER",
+   "label": "Cylinder",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canComplexColl",
+    "canInterface",
+    "canStretch",
+    "canTrans",
+    "castShadow",
+    "doubleSide",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editOpac",
+    "editPen",
+    "fakeScale",
+    "frameTexture",
+    "hasHealth",
+    "hasSpin",
+    "movingTexture",
+    "receiveShadow",
+    "scalable",
+    "texturable"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 49,
+   "name": "POLICE",
+   "label": "Police",
+   "aliases": [],
+   "default_size": [
+    5.778,
+    16.05,
+    7.778
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "police_0",
+   "category": "props"
+  },
+  {
+   "id": 50,
+   "name": "CAGE",
+   "label": "Cage",
+   "aliases": [],
+   "default_size": [
+    12,
+    12,
+    12
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 6,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cage_0",
+   "category": "props"
+  },
+  {
+   "id": 51,
+   "name": "EBARREL",
+   "label": "Ebarrel",
+   "aliases": [],
+   "default_size": [
+    5.982,
+    7.739,
+    6.075
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "ebarrel_0",
+   "category": "props"
+  },
+  {
+   "id": 52,
+   "name": "SHOWCASE",
+   "label": "Showcase",
+   "aliases": [],
+   "default_size": [
+    1,
+    1,
+    1
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 1,
+   "flags": [
+    "castShadow",
+    "complex",
+    "dontRound",
+    "editColor",
+    "editOpac",
+    "hasSpin",
+    "hasSpinDir",
+    "noCol",
+    "noCollision",
+    "receiveShadow"
+   ],
+   "native": true,
+   "since": "v3",
+   "category": "effects"
+  },
+  {
+   "id": 53,
+   "name": "POINT_LIGHT",
+   "label": "Point Light",
+   "aliases": [],
+   "default_size": [
+    5,
+    5,
+    5
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "editColor",
+    "light",
+    "noCol",
+    "noCollision",
+    "noDetail",
+    "noTexture",
+    "notTechnical",
+    "tool",
+    "wireframe"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "cube_0",
+   "category": "lights"
+  },
+  {
+   "id": 54,
+   "name": "GHOST",
+   "label": "Ghost",
+   "aliases": [],
+   "default_size": [
+    9.319,
+    10.232,
+    8.867
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "emiss",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "ghost_0",
+   "category": "props"
+  },
+  {
+   "id": 55,
+   "name": "AI_SPAWNER",
+   "label": "Bot",
+   "aliases": [
+    "BOT"
+   ],
+   "default_size": [
+    9.319,
+    10.232,
+    8.867
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "ai",
+    "alterHitbox",
+    "canInterface",
+    "canTargetInterface",
+    "canTrans",
+    "castShadow",
+    "complex",
+    "customScore",
+    "dontRound",
+    "editAlphaTest",
+    "editColor",
+    "editFog",
+    "editOpac",
+    "editRenderSide",
+    "frameTexture",
+    "hasHealth",
+    "receiveShadow",
+    "teamable",
+    "tool2",
+    "transparent"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "ghost_0",
+   "category": "ai"
+  },
+  {
+   "id": 56,
+   "name": "PUMPKIN",
+   "label": "Pumpkin",
+   "aliases": [],
+   "default_size": [
+    10.848,
+    9.578,
+    10.848
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "emiss",
+    "hasHealth",
+    "isProp",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "pumpkin_0",
+   "category": "props"
+  },
+  {
+   "id": 57,
+   "name": "RUNE",
+   "label": "Rune",
+   "aliases": [],
+   "default_size": [
+    20,
+    0.01,
+    20
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canSprite",
+    "canWallJump",
+    "complex",
+    "doubleSide",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editEmissive",
+    "editOpac",
+    "fakeScale",
+    "movingTexture",
+    "noCol",
+    "noCollision",
+    "noMinimap",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "line_color": "#ff00ff",
+   "model": "rune_0",
+   "category": "effects"
+  },
+  {
+   "id": 58,
+   "name": "SKELETON",
+   "label": "Skeleton",
+   "aliases": [],
+   "default_size": [
+    6.022,
+    8.022,
+    4.756
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "skeleton_0",
+   "category": "props"
+  },
+  {
+   "id": 59,
+   "name": "KNIGHT",
+   "label": "Knight",
+   "aliases": [],
+   "default_size": [
+    3.31,
+    15.206,
+    7.374
+   ],
+   "size_source": "model bounds (v3 editor)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": true,
+   "since": "v3",
+   "model": "knight_0",
+   "category": "props"
+  },
+  {
+   "id": 60,
+   "name": "GIFT",
+   "label": "Gift",
+   "aliases": [],
+   "default_size": [
+    20,
+    20,
+    20
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 2,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "isProp",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "gift_0",
+   "category": "props"
+  },
+  {
+   "id": 61,
+   "name": "CHRISTMASTREE",
+   "label": "Christmastree",
+   "aliases": [],
+   "default_size": [
+    20,
+    20,
+    20
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 2,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "christmastree_0",
+   "category": "props"
+  },
+  {
+   "id": 62,
+   "name": "CANE",
+   "label": "Cane",
+   "aliases": [],
+   "default_size": [
+    20,
+    20,
+    20
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 2,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "cane_0",
+   "category": "props"
+  },
+  {
+   "id": 63,
+   "name": "LIGHT_BAR",
+   "label": "Light Bar",
+   "aliases": [],
+   "default_size": [
+    10,
+    0.01,
+    5
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canSprite",
+    "canTerrain",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "doubleSide",
+    "editColor",
+    "editOpac",
+    "movingTexture",
+    "noCol",
+    "noCollision",
+    "noDetail",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "transparent"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "lights"
+  },
+  {
+   "id": 64,
+   "name": "PATH_NODE",
+   "label": "Path Node",
+   "aliases": [],
+   "default_size": [
+    5,
+    5,
+    5
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "noCol",
+    "noCollision",
+    "noTexture",
+    "notStyleable",
+    "notTechnical",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "ai"
+  },
+  {
+   "id": 65,
+   "name": "DIRECTIONAL_LIGHT",
+   "label": "Directional Light",
+   "aliases": [],
+   "default_size": [
+    4,
+    4,
+    4
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "castShadow",
+    "complex",
+    "doubleSide",
+    "editColor",
+    "noCol",
+    "noCollision",
+    "noDetail",
+    "noTexture",
+    "notTechnical",
+    "receiveShadow",
+    "tool",
+    "wireframe"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "lights"
+  },
+  {
+   "id": 66,
+   "name": "RECTAREA_LIGHT",
+   "label": "Rectarea Light",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    0.01
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "castShadow",
+    "complex",
+    "dontRound",
+    "doubleSide",
+    "editColor",
+    "noCol",
+    "noCollision",
+    "noDetail",
+    "noTexture",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "lights"
+  },
+  {
+   "id": 67,
+   "name": "SPOT_LIGHT",
+   "label": "Spot Light",
+   "aliases": [],
+   "default_size": [
+    4,
+    4,
+    4
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "castShadow",
+    "complex",
+    "doubleSide",
+    "editColor",
+    "noCol",
+    "noCollision",
+    "noDetail",
+    "noTexture",
+    "notTechnical",
+    "receiveShadow",
+    "tool",
+    "wireframe"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "lights"
+  },
+  {
+   "id": 68,
+   "name": "PRIZE_WHEEL",
+   "label": "Prize Wheel",
+   "aliases": [],
+   "default_size": [
+    0.01,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canStretch",
+    "canTrans",
+    "castShadow",
+    "customDirection",
+    "editAmb",
+    "extraDirection",
+    "forceCollision",
+    "noRotation",
+    "noScaleX",
+    "receiveShadow",
+    "scalable",
+    "tool2"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#ff00ff",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 69,
+   "name": "KR_ZONE",
+   "label": "Kr Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noMinimap",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#40c4ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 70,
+   "name": "NOPVP_ZONE",
+   "label": "Nopvp Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noMinimap",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#40c4ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 71,
+   "name": "PVP_ZONE",
+   "label": "Pvp Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noMinimap",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#40c4ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 72,
+   "name": "LEADERBOARD",
+   "label": "Leaderboard",
+   "aliases": [],
+   "default_size": [
+    40,
+    0.01,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canSprite",
+    "castShadow",
+    "doubleSide",
+    "forceCollision",
+    "hasText",
+    "movingTexture",
+    "noCol",
+    "noMinimap",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#964b00",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 73,
+   "name": "TILES",
+   "label": "Tiles",
+   "aliases": [],
+   "default_size": [
+    100,
+    100,
+    100
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 10,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "tiles_0",
+   "category": "props"
+  },
+  {
+   "id": 74,
+   "name": "CLOUDS",
+   "label": "Clouds",
+   "aliases": [],
+   "default_size": [
+    30,
+    30,
+    30
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 3,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "clouds_0",
+   "category": "props"
+  },
+  {
+   "id": 75,
+   "name": "PARTNER_ZONE",
+   "label": "Partner Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noMinimap",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#993299",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 76,
+   "name": "SPRITE",
+   "label": "Sprite",
+   "aliases": [],
+   "default_size": [
+    4,
+    0.01,
+    4
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canDirectionalScale",
+    "canTerrain",
+    "canTrans",
+    "castShadow",
+    "dontRound",
+    "doubleSide",
+    "editColor",
+    "editEmissive",
+    "editOpac",
+    "frameTexture",
+    "movingTexture",
+    "noCol",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "texturable"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "cube_0",
+   "category": "effects"
+  },
+  {
+   "id": 77,
+   "name": "DOMINATION_ZONE",
+   "label": "Domination Zone",
+   "aliases": [],
+   "default_size": [
+    35,
+    35,
+    35
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "doubleSide",
+    "notStyleable",
+    "notTechnical",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#dedede",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 78,
+   "name": "ROPE_LADDER",
+   "label": "Rope Ladder",
+   "aliases": [],
+   "default_size": [
+    2,
+    10,
+    2
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "assetTextures",
+    "canStretch",
+    "canTrans",
+    "castShadow",
+    "editAmb",
+    "editColor",
+    "editEmissive",
+    "editFog",
+    "editOpac",
+    "fakeScale",
+    "frameTexture",
+    "movingTexture",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "stepSrc",
+    "texturable"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "cube_0",
+   "category": "geometry"
+  },
+  {
+   "id": 79,
+   "name": "ENVIRONMENT_ZONE",
+   "label": "Environment Zone",
+   "aliases": [],
+   "default_size": [
+    100,
+    100,
+    100
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "noMinimap",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#40c4ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 80,
+   "name": "KPD_ZONE",
+   "label": "Kpd Zone",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "canInterface",
+    "forceCollision",
+    "hasBorder",
+    "hasHealth",
+    "noMinimap",
+    "noTexture",
+    "notStyleable",
+    "scalable",
+    "tool",
+    "zone"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#40c4ff",
+   "model": "cube_0",
+   "category": "zones"
+  },
+  {
+   "id": 81,
+   "name": "DUMPSTER",
+   "label": "Dumpster",
+   "aliases": [],
+   "default_size": [
+    40,
+    40,
+    40
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 4,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "dumpster_0",
+   "category": "props"
+  },
+  {
+   "id": 82,
+   "name": "SERVER_NODE",
+   "label": "Server Node",
+   "aliases": [],
+   "default_size": [
+    5,
+    5,
+    5
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canInterface",
+    "doubleSide",
+    "forceCollision",
+    "hasHealth",
+    "noMinimap",
+    "notStyleable",
+    "tool",
+    "transparent"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#000000",
+   "model": "cube_0",
+   "category": "logic"
+  },
+  {
+   "id": 83,
+   "name": "LAMP",
+   "label": "Lamp",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 1,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "lamp_0",
+   "category": "props"
+  },
+  {
+   "id": 84,
+   "name": "WATER_TOWER",
+   "label": "Water Tower",
+   "aliases": [],
+   "default_size": [
+    100,
+    100,
+    100
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 10,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "receiveShadow",
+    "showMinimap",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "water_tower_0",
+   "category": "props"
+  },
+  {
+   "id": 85,
+   "name": "AC_UNIT",
+   "label": "Ac Unit",
+   "aliases": [],
+   "default_size": [
+    50,
+    50,
+    50
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 5,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "ac_unit_0",
+   "category": "props"
+  },
+  {
+   "id": 86,
+   "name": "SHEET_METAL",
+   "label": "Sheet Metal",
+   "aliases": [],
+   "default_size": [
+    5,
+    5,
+    5
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 0.5,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "sheet_metal_0",
+   "category": "props"
+  },
+  {
+   "id": 87,
+   "name": "ANTENNA",
+   "label": "Antenna",
+   "aliases": [],
+   "default_size": [
+    100,
+    100,
+    100
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 10,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "antenna_0",
+   "category": "props"
+  },
+  {
+   "id": 88,
+   "name": "SATELLITE_DISH",
+   "label": "Satellite Dish",
+   "aliases": [],
+   "default_size": [
+    50,
+    50,
+    50
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 5,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "noMinimap",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "satellite_dish_0",
+   "category": "props"
+  },
+  {
+   "id": 89,
+   "name": "SPRAY",
+   "label": "Spray",
+   "aliases": [],
+   "default_size": [
+    20,
+    0.01,
+    20
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canStretch",
+    "canTrans",
+    "castShadow",
+    "dontRound",
+    "editAmb",
+    "editColor",
+    "editOpac",
+    "fakeScale",
+    "forceCollision",
+    "noCol",
+    "noCollision",
+    "receiveShadow",
+    "scalable",
+    "scaleWithSize",
+    "sprayTexture",
+    "texturable",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "cube_0",
+   "category": "effects"
+  },
+  {
+   "id": 90,
+   "name": "WEAPONBOX",
+   "label": "Weaponbox",
+   "aliases": [],
+   "default_size": [
+    50,
+    50,
+    50
+   ],
+   "size_source": "estimate (model scale)",
+   "scale": 5,
+   "flags": [
+    "canGrapple",
+    "canImpulse",
+    "canInterface",
+    "canWallJump",
+    "castShadow",
+    "dontRound",
+    "editAICol",
+    "editBulletCol",
+    "editColor",
+    "editOpac",
+    "hasHealth",
+    "receiveShadow",
+    "stepSrc"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "weaponbox_0",
+   "category": "props"
+  },
+  {
+   "id": 91,
+   "name": "MYSTERY_BOX",
+   "label": "Mystery Box",
+   "aliases": [],
+   "default_size": [
+    10,
+    7.27,
+    17.91
+   ],
+   "size_source": "defaultSize",
+   "scale": 5,
+   "flags": [
+    "customScore",
+    "dontRound",
+    "mysteryBox",
+    "noMinimap",
+    "noTexture",
+    "notStyleable",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "weaponbox_0",
+   "category": "logic"
+  },
+  {
+   "id": 92,
+   "name": "PERK_MACHINE",
+   "label": "Perk Machine",
+   "aliases": [],
+   "default_size": [
+    6.7,
+    21.9,
+    8.41
+   ],
+   "size_source": "defaultSize",
+   "scale": 5,
+   "flags": [
+    "canInterface",
+    "canStretch",
+    "customScore",
+    "dontRound",
+    "hasBorder",
+    "hasHealth",
+    "noTexture",
+    "notStyleable",
+    "perkMachine",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "perkmachine_0",
+   "category": "logic"
+  },
+  {
+   "id": 93,
+   "name": "AI_REDIRECTION",
+   "label": "Ai Redirection",
+   "aliases": [],
+   "default_size": [
+    10,
+    10,
+    10
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "canDirectionalScale",
+    "castShadow",
+    "customDirection",
+    "forceCollision",
+    "noCol",
+    "noMinimap",
+    "noRotation",
+    "noTexture",
+    "notStyleable",
+    "notTechnical",
+    "receiveShadow",
+    "scalable",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#2effff",
+   "model": "cube_0",
+   "category": "ai"
+  },
+  {
+   "id": 94,
+   "name": "KRUM_MACHINE",
+   "label": "Krum Machine",
+   "aliases": [],
+   "default_size": [
+    17.14,
+    22.3,
+    15.73
+   ],
+   "size_source": "defaultSize",
+   "scale": 7,
+   "flags": [
+    "customScore",
+    "dontRound",
+    "hasBorder",
+    "noTexture",
+    "notStyleable",
+    "packapunch",
+    "tool"
+   ],
+   "native": false,
+   "since": "v7",
+   "model": "krummachine_0",
+   "category": "logic"
+  },
+  {
+   "id": 95,
+   "name": "BOT_SPAWNER",
+   "label": "Bot Spawner",
+   "aliases": [],
+   "default_size": [
+    5,
+    5,
+    5
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "bot",
+    "customDirection",
+    "doubleSide",
+    "localOnly",
+    "noCol",
+    "noMinimap",
+    "notStyleable",
+    "tool",
+    "transparent"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#000000",
+   "model": "cube_0",
+   "category": "ai"
+  },
+  {
+   "id": 96,
+   "name": "MAP_ANCHOR",
+   "label": "Map Anchor",
+   "aliases": [],
+   "default_size": [
+    1,
+    500,
+    1
+   ],
+   "size_source": "defaultSize",
+   "scale": 1,
+   "flags": [
+    "doubleSide",
+    "forceCollision",
+    "noMinimap",
+    "notStyleable",
+    "tool",
+    "transparent"
+   ],
+   "native": false,
+   "since": "v7",
+   "line_color": "#ff0000",
+   "model": "check_0",
+   "category": "logic"
+  }
+ ],
+ "textures": [
+  {
+   "id": 0,
+   "name": "WALL",
+   "src": "wall_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 1,
+   "name": "DIRT",
+   "src": "dirt_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 2,
+   "name": "FLOOR",
+   "src": "floor_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 3,
+   "name": "GRID",
+   "src": "grid_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 4,
+   "name": "GREY",
+   "src": "grey_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 5,
+   "name": "DEFAULT",
+   "src": "default",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 6,
+   "name": "ROOF",
+   "src": "roof_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 7,
+   "name": "FLAG",
+   "src": "flag_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 8,
+   "name": "GRASS",
+   "src": "grass_1",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 9,
+   "name": "CHECK",
+   "src": "check_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 10,
+   "name": "LINES",
+   "src": "lines_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 11,
+   "name": "BRICK",
+   "src": "brick_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 12,
+   "name": "LINK",
+   "src": "link_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 13,
+   "name": "LIQUID",
+   "src": "liquid_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 14,
+   "name": "GRAIN",
+   "src": "grain_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 15,
+   "name": "FABRIC",
+   "src": "fabric_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 16,
+   "name": "TILE",
+   "src": "tile_0",
+   "variants": 0,
+   "since": "v3"
+  },
+  {
+   "id": 17,
+   "name": "METAL",
+   "src": "metal_0",
+   "variants": 0,
+   "since": "v7"
+  },
+  {
+   "id": 18,
+   "name": "SAND",
+   "src": "sand_0",
+   "variants": 0,
+   "since": "v7"
+  },
+  {
+   "id": 19,
+   "name": "SNOW",
+   "src": "snow_0",
+   "variants": 0,
+   "since": "v7"
+  }
+ ],
+ "properties": [
+  {
+   "prop": "position",
+   "key": "p",
+   "type": "vec3",
+   "since": "v3",
+   "desc": "bottom-centre position (y is the bottom face)"
+  },
+  {
+   "prop": "size",
+   "key": "s",
+   "type": "vec3",
+   "alt_keys": [
+    "si"
+   ],
+   "since": "v3",
+   "desc": "size; pooled maps store an index into the top-level xyz array as si"
+  },
+  {
+   "prop": "rotation",
+   "key": "r",
+   "type": "vec3",
+   "default": [
+    0,
+    0,
+    0
+   ],
+   "since": "v3",
+   "desc": "rotation in radians (x, y, z); omitted when zero"
+  },
+  {
+   "prop": "prefab",
+   "key": "i",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "since": "v3",
+   "desc": "prefab id (omitted for CUBE); legacy maps use id"
+  },
+  {
+   "prop": "visible",
+   "key": "v",
+   "type": "bool_absent",
+   "since": "v3",
+   "desc": "false writes v:1 (noVis)"
+  },
+  {
+   "prop": "collidable",
+   "key": "l",
+   "type": "bool_absent",
+   "alt_keys": [
+    "col"
+   ],
+   "when": {
+    "not_flags": [
+     "tool",
+     "forceCollision",
+     "noCollision"
+    ]
+   },
+   "since": "v3",
+   "desc": "false writes l:1 (no collision)"
+  },
+  {
+   "prop": "penetrable",
+   "key": "pe",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "editPen"
+    ]
+   },
+   "since": "v3",
+   "desc": "bullets pass through (wallbang)"
+  },
+  {
+   "prop": "wall_jumpable",
+   "key": "wj",
+   "type": "bool_absent",
+   "when": {
+    "flags": [
+     "canWallJump"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "boost",
+   "key": "b",
+   "type": "num",
+   "default": 0,
+   "min": -10,
+   "max": 10,
+   "decimals": 2,
+   "when": {
+    "flags": [
+     "boostable"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "bounce",
+   "key": "bm",
+   "type": "num",
+   "default": 1,
+   "min": 0.1,
+   "max": 3,
+   "decimals": 2,
+   "when": {
+    "flags": [
+     "bounce"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "crouch_reduces",
+   "key": "cr",
+   "type": "bool_absent",
+   "when": {
+    "flags": [
+     "bounce"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "edge_noise",
+   "key": "en",
+   "type": "num",
+   "default": 0,
+   "min": -5,
+   "max": 5,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "edgeNoise"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "border",
+   "key": "bo",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "hasBorder"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "spin",
+   "key": "spn",
+   "type": "num",
+   "default": 0,
+   "min": -20,
+   "max": 20,
+   "when": {
+    "flags": [
+     "hasSpin"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "open_ended",
+   "key": "opn",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "CYLINDER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "direction",
+   "key": "d",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 3,
+   "when": {
+    "flags": [
+     "customDirection"
+    ],
+    "prefabs": [
+     "CHECK_POINT",
+     "TELEPORTER",
+     "SPAWN_POINT"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "force_direction",
+   "key": "fd",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "optionalDirection"
+    ],
+    "prefabs": [
+     "TELEPORTER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "team",
+   "key": "tm",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 2,
+   "when": {
+    "flags": [
+     "teamable"
+    ],
+    "prefabs": [
+     "TRIGGER",
+     "TERMINAL",
+     "GATE",
+     "DEPOSIT_BOX",
+     "CHECK_POINT",
+     "TELEPORTER",
+     "SPAWN_POINT"
+    ]
+   },
+   "since": "v3",
+   "desc": "0 default/any, 1 team 1, 2 team 2 (spawns: team id)"
+  },
+  {
+   "prop": "model_size",
+   "key": "ms",
+   "type": "num",
+   "min": 0.1,
+   "max": 100,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "gen"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "item_id",
+   "key": "skin",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "when": {
+    "prefabs": [
+     "SHOWCASE"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "objective_id",
+   "key": "obi",
+   "type": "int",
+   "default": 0,
+   "min": -1,
+   "max": 10,
+   "when": {
+    "flags": [
+     "objectiveLink"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "texture",
+   "key": "t",
+   "type": "texture",
+   "default": 0,
+   "when": {
+    "flags": [
+     "texturable"
+    ]
+   },
+   "since": "v3",
+   "desc": "texture index or name (krunker://textures)"
+  },
+  {
+   "prop": "texture_variant",
+   "key": "tv",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 20,
+   "when": {
+    "flags": [
+     "texturable"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "asset_texture",
+   "key": "at",
+   "type": "any",
+   "when": {
+    "flags": [
+     "assetTextures"
+    ]
+   },
+   "since": "v3",
+   "desc": "custom texture asset id (not available offline)"
+  },
+  {
+   "prop": "texture_stretch",
+   "key": "tsr",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "canStretch"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "texture_offset_x",
+   "key": "tox",
+   "type": "num",
+   "default": 0,
+   "min": 0,
+   "max": 1,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "texturable"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "texture_offset_y",
+   "key": "toy",
+   "type": "num",
+   "default": 0,
+   "min": 0,
+   "max": 1,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "texturable"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "texture_rotation",
+   "key": "tro",
+   "type": "num",
+   "default": 0,
+   "alt_keys": [
+    "tr"
+   ],
+   "when": {
+    "flags": [
+     "texturable"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "texture_scale",
+   "key": "tsm",
+   "type": "num",
+   "default": 1,
+   "when": {
+    "flags": [
+     "texturable"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "moving_speed",
+   "key": "ts",
+   "type": "num",
+   "default": 0,
+   "min": -20,
+   "max": 20,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "movingTexture"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "moving_axis",
+   "key": "td",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 1,
+   "when": {
+    "flags": [
+     "movingTexture"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "color",
+   "key": "c",
+   "type": "color",
+   "default": "#ffffff",
+   "palette_key": "ci",
+   "when": {
+    "flags": [
+     "editColor"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "emissive",
+   "key": "e",
+   "type": "color",
+   "default": "#000000",
+   "palette_key": "ei",
+   "when": {
+    "flags": [
+     "editEmissive"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "opacity",
+   "key": "o",
+   "type": "num",
+   "default": 1,
+   "min": 0,
+   "max": 1,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "editOpac"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "texture_smoothing",
+   "key": "txs",
+   "type": "bool_absent",
+   "when": {
+    "flags": [
+     "custom",
+     "texturable"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "shading",
+   "key": "ab",
+   "type": "bool_absent",
+   "when": {
+    "not_flags": [
+     "complex"
+    ]
+   },
+   "since": "v3",
+   "desc": "ambient shading; false writes ab:1"
+  },
+  {
+   "prop": "fog",
+   "key": "nf",
+   "type": "bool_absent",
+   "when": {
+    "flags": [
+     "editFog"
+    ]
+   },
+   "since": "v3",
+   "desc": "false writes nf:1 (ignores fog)"
+  },
+  {
+   "prop": "full_cone",
+   "key": "fc",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "LIGHT_CONE"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "faces",
+   "key": "f",
+   "type": "faces",
+   "when": {
+    "flags": [
+     "editFaces"
+    ]
+   },
+   "since": "v3",
+   "desc": "6 booleans Right Left Top Bottom Back Front, stored as hex"
+  },
+  {
+   "prop": "light_intensity",
+   "key": "li",
+   "type": "num",
+   "default": 1,
+   "min": 0,
+   "max": 2,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "light"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "light_distance",
+   "key": "lds",
+   "type": "num",
+   "default": 0,
+   "min": 0,
+   "max": 1000,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "light"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "light_decay",
+   "key": "ld",
+   "type": "num",
+   "default": 1,
+   "min": 0,
+   "max": 2,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "light"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "light_angle",
+   "key": "la",
+   "type": "num",
+   "when": {
+    "flags": [
+     "light"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "light_penumbra",
+   "key": "lp",
+   "type": "num",
+   "when": {
+    "flags": [
+     "light"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "light_target",
+   "key": "lt",
+   "type": "vec3",
+   "when": {
+    "flags": [
+     "light"
+    ],
+    "prefabs": [
+     "DIRECTIONAL_LIGHT",
+     "SPOT_LIGHT"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "withdraw",
+   "key": "wd",
+   "type": "int",
+   "default": 1000,
+   "min": 0,
+   "max": 100000,
+   "when": {
+    "prefabs": [
+     "DEPOSIT_BOX"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "deposit",
+   "key": "dp",
+   "type": "int",
+   "default": 1000,
+   "min": 0,
+   "max": 100000,
+   "when": {
+    "prefabs": [
+     "DEPOSIT_BOX"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "score",
+   "key": "sp",
+   "type": "int",
+   "min": 0,
+   "max": 10000,
+   "when": {
+    "flags": [
+     "customScore",
+     "interact"
+    ],
+    "prefabs": [
+     "GATE"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "single_use",
+   "key": "su",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "ai"
+    ],
+    "prefabs": [
+     "CHECK_POINT",
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "single_use_player",
+   "key": "sup",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "method",
+   "key": "md",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 2,
+   "when": {
+    "flags": [
+     "interact"
+    ]
+   },
+   "since": "v3",
+   "desc": "gate: 0 cost score, 1 require score, 2 require kills"
+  },
+  {
+   "prop": "closeable",
+   "key": "cl",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "canUndo"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "start_closed",
+   "key": "stc",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "canUndo"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "no_popup",
+   "key": "nm",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "interact",
+     "interact2"
+    ],
+    "prefabs": [
+     "TERMINAL"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "destructible",
+   "key": "cdy",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "hasHealth"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "start_destroyed",
+   "key": "sd",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "hasHealth"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "self_destruct",
+   "key": "sfd",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "health",
+   "key": "h",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 20000,
+   "alt_keys": [
+    "hp"
+   ],
+   "when": {
+    "flags": [
+     "hasHealth"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "respawn_time",
+   "key": "rt",
+   "type": "num",
+   "default": 0,
+   "min": 0,
+   "max": 300,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "hasHealth"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "respawn_random",
+   "key": "rr",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "hasHealth"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "spawn_chance",
+   "key": "rsc",
+   "type": "num",
+   "min": 0,
+   "max": 100,
+   "when": {
+    "flags": [
+     "hasHealth"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "weapon",
+   "key": "w",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 40,
+   "alt_keys": [
+    "wid"
+   ],
+   "when": {
+    "prefabs": [
+     "WEAPON_PICKUP"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "weapon_replaceable",
+   "key": "wr",
+   "type": "bool_absent",
+   "when": {
+    "prefabs": [
+     "WEAPON_PICKUP"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "random_weapon",
+   "key": "rw",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "WEAPON_PICKUP"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "random_weapon_group",
+   "key": "rwg",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "WEAPON_PICKUP"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "hide_pickup_icon",
+   "key": "wpi",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "WEAPON_PICKUP"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "event",
+   "key": "te",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 31,
+   "when": {
+    "flags": [
+     "ai"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3",
+   "desc": "trigger event (krunker://triggers)"
+  },
+  {
+   "prop": "event_value",
+   "key": "tce",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 10000,
+   "when": {
+    "flags": [
+     "ai"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "action",
+   "key": "ta",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 71,
+   "when": {
+    "flags": [
+     "ai"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3",
+   "desc": "trigger action (legacy single action)"
+  },
+  {
+   "prop": "value",
+   "key": "tc",
+   "type": "int",
+   "default": 0,
+   "min": -10000,
+   "max": 10000,
+   "when": {
+    "flags": [
+     "ai"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "value_text",
+   "key": "tct",
+   "type": "str",
+   "default": "",
+   "max_length": 70,
+   "when": {
+    "flags": [
+     "ai"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "chance",
+   "key": "cha",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 100,
+   "when": {
+    "flags": [
+     "ai"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "actions",
+   "key": "tas",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v7",
+   "desc": "v7 action list: up to 5 {ta, tc, tc2, tce, tct, tcc, tad, cd, cv0, cv1, cv2}"
+  },
+  {
+   "prop": "action_cost",
+   "key": "tac",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "action_method",
+   "key": "tam",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "interface_id",
+   "key": "in",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 1000,
+   "when": {
+    "flags": [
+     "canInterface"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "target_interface",
+   "key": "tin",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 1000,
+   "when": {
+    "flags": [
+     "canTargetInterface"
+    ],
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "node",
+   "key": "n",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 2,
+   "when": {
+    "prefabs": [
+     "TELEPORTER"
+    ]
+   },
+   "since": "v3",
+   "desc": "0 sending, 1 receiving, 2 both"
+  },
+  {
+   "prop": "channel",
+   "key": "ch",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 100,
+   "when": {
+    "prefabs": [
+     "TELEPORTER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "stop_momentum",
+   "key": "m",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "TELEPORTER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "checkpoint",
+   "key": "tcp",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "TELEPORTER"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "dynamic",
+   "key": "dyn",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "canBeDynamic"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "gravity",
+   "key": "gy",
+   "type": "num",
+   "default": 0,
+   "min": 0,
+   "max": 5,
+   "decimals": 1,
+   "when": {
+    "flags": [
+     "canBeDynamic",
+     "ai"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "poster",
+   "key": "bb",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 6,
+   "when": {
+    "prefabs": [
+     "BILLBOARD"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "show_ad",
+   "key": "sad",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "BILLBOARD"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_texture",
+   "key": "pr",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 3,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_blending",
+   "key": "pb",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 4,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_count",
+   "key": "pc",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 300,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_size",
+   "key": "ps",
+   "type": "num",
+   "default": 0,
+   "min": 0,
+   "max": 30,
+   "decimals": 1,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_scale",
+   "key": "psc",
+   "type": "num",
+   "default": 0,
+   "min": -10,
+   "max": 10,
+   "decimals": 1,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_speed",
+   "key": "psp",
+   "type": "num",
+   "default": 0,
+   "min": -10,
+   "max": 10,
+   "decimals": 1,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_decel",
+   "key": "pd",
+   "type": "num",
+   "default": 0,
+   "min": -1,
+   "max": 1,
+   "decimals": 1,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "particle_gravity",
+   "key": "pg",
+   "type": "num",
+   "default": 0,
+   "min": -10,
+   "max": 10,
+   "decimals": 1,
+   "when": {
+    "prefabs": [
+     "PARTICLES"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "text",
+   "key": "st",
+   "type": "str",
+   "default": "",
+   "max_length": 1500,
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "text_align",
+   "key": "sa",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 2,
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "font_size",
+   "key": "sf",
+   "type": "int",
+   "default": 10,
+   "min": 10,
+   "max": 120,
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "font_color",
+   "key": "sc",
+   "type": "color",
+   "default": "#000000",
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "background_color",
+   "key": "sb",
+   "type": "color",
+   "default": "#ffffff",
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "background_visible",
+   "key": "bv",
+   "type": "bool_absent",
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "competitive_spawn",
+   "key": "cp",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "SPAWN_POINT"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "wave_speed",
+   "key": "ws",
+   "type": "num",
+   "default": 10,
+   "min": 0,
+   "max": 25,
+   "when": {
+    "prefabs": [
+     "LIQUID"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "wave_height",
+   "key": "wh",
+   "type": "num",
+   "default": 0.5,
+   "min": 0,
+   "max": 5,
+   "when": {
+    "prefabs": [
+     "LIQUID"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "tiles_x",
+   "key": "tx",
+   "type": "int",
+   "default": 10,
+   "min": 2,
+   "max": 100,
+   "when": {
+    "prefabs": [
+     "LIQUID"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "tiles_z",
+   "key": "tz",
+   "type": "int",
+   "default": 10,
+   "min": 2,
+   "max": 100,
+   "when": {
+    "prefabs": [
+     "LIQUID"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "sound",
+   "key": "es",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 50,
+   "when": {
+    "flags": [
+     "hasSound"
+    ],
+    "prefabs": [
+     "SOUND_EMITTER",
+     "TRIGGER"
+    ]
+   },
+   "since": "v3",
+   "desc": "emitter sound index (krunker://triggers emitter_sounds)"
+  },
+  {
+   "prop": "asset_sound",
+   "key": "esa",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "SOUND_EMITTER",
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "volume",
+   "key": "ev",
+   "type": "num",
+   "default": 1,
+   "min": 0.05,
+   "max": 2,
+   "decimals": 2,
+   "when": {
+    "prefabs": [
+     "SOUND_EMITTER",
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "rate",
+   "key": "er",
+   "type": "num",
+   "default": 1,
+   "min": 0.5,
+   "max": 4,
+   "decimals": 1,
+   "when": {
+    "prefabs": [
+     "SOUND_EMITTER",
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "reference_distance",
+   "key": "ed",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 5000,
+   "when": {
+    "prefabs": [
+     "SOUND_EMITTER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "rolloff",
+   "key": "ero",
+   "type": "num",
+   "default": 0,
+   "min": 0,
+   "max": 1,
+   "decimals": 2,
+   "when": {
+    "prefabs": [
+     "SOUND_EMITTER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "emit_from",
+   "key": "ef",
+   "type": "int",
+   "default": 0,
+   "min": 0,
+   "max": 1,
+   "when": {
+    "prefabs": [
+     "TRIGGER"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "asset_id",
+   "key": "aid",
+   "type": "str",
+   "default": "",
+   "when": {
+    "flags": [
+     "ai",
+     "custom"
+    ],
+    "prefabs": [
+     "CUSTOM_ASSET"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "class_index",
+   "key": "ci",
+   "type": "int",
+   "default": 0,
+   "when": {
+    "flags": [
+     "ai"
+    ]
+   },
+   "since": "v3",
+   "desc": "AI class (ci on non-AI objects is the colour palette index)"
+  },
+  {
+   "prop": "skill",
+   "key": "sk",
+   "type": "int",
+   "default": 0,
+   "when": {
+    "flags": [
+     "ai"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "hp_multiplier",
+   "key": "hm",
+   "type": "num",
+   "default": 1,
+   "when": {
+    "flags": [
+     "ai"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "can_trigger",
+   "key": "ct",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "ai"
+    ]
+   },
+   "since": "v3"
+  },
+  {
+   "prop": "no_player_collision",
+   "key": "pl",
+   "type": "bool_present",
+   "since": "v7"
+  },
+  {
+   "prop": "no_bullet_collision",
+   "key": "ns",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "editBulletCol"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "no_ai_collision",
+   "key": "nai",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "editAICol"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "no_grapple",
+   "key": "gp",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "canGrapple"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "no_impulse",
+   "key": "ip",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "canImpulse"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "complex_collision",
+   "key": "cpx",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "canComplexColl"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "frame_count",
+   "key": "fct",
+   "type": "int",
+   "when": {
+    "flags": [
+     "frameTexture"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "frame_speed",
+   "key": "fs",
+   "type": "num",
+   "when": {
+    "flags": [
+     "frameTexture"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "texture_encoding",
+   "key": "ten",
+   "type": "int",
+   "since": "v7"
+  },
+  {
+   "prop": "darken",
+   "key": "da",
+   "type": "num",
+   "since": "v7"
+  },
+  {
+   "prop": "force_transparent",
+   "key": "ft",
+   "type": "bool_present",
+   "since": "v7"
+  },
+  {
+   "prop": "render_side",
+   "key": "rs",
+   "type": "int",
+   "when": {
+    "flags": [
+     "editRenderSide"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "alpha_test",
+   "key": "alt",
+   "type": "num",
+   "since": "v7"
+  },
+  {
+   "prop": "mimic_sprite",
+   "key": "msp",
+   "type": "bool_present",
+   "since": "v7"
+  },
+  {
+   "prop": "no_cast_shadow",
+   "key": "cst",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "castShadow"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "no_receive_shadow",
+   "key": "rcv",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "receiveShadow"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "force_render",
+   "key": "fcr",
+   "type": "bool_present",
+   "since": "v7"
+  },
+  {
+   "prop": "hide_on_minimap",
+   "key": "smm",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "showMinimap"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "step_sound",
+   "key": "sat",
+   "type": "any",
+   "when": {
+    "flags": [
+     "stepSrc"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "spin_axis",
+   "key": "spa",
+   "type": "int",
+   "when": {
+    "flags": [
+     "hasSpin"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "wheel_type",
+   "key": "sty",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "PRIZE_WHEEL"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "kr_minimum",
+   "key": "krs",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "KR_ZONE"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "perk",
+   "key": "zp",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "PERK_MACHINE"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "node_tag",
+   "key": "nt",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "SERVER_NODE"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "spawn_spread",
+   "key": "ssp",
+   "type": "num",
+   "when": {
+    "prefabs": [
+     "SPAWN_POINT"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "anchor_type",
+   "key": "ant",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "MAP_ANCHOR"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "node_id",
+   "key": "nid",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "PATH_NODE"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "camera_type",
+   "key": "camt",
+   "type": "int",
+   "when": {
+    "prefabs": [
+     "CAMERA"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "camera_force",
+   "key": "frc",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "CAMERA"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "follow_path",
+   "key": "fp",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "CAMERA"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "camera_static",
+   "key": "cstc",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "CAMERA_POSITION"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "leaderboard_type",
+   "key": "ldt",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "LEADERBOARD"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "leaderboard_count",
+   "key": "ldc",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "LEADERBOARD"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "leaderboard_order",
+   "key": "ldo",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "LEADERBOARD"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "leaderboard_reset",
+   "key": "ldr",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "LEADERBOARD"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "no_pickup_texture",
+   "key": "ntx",
+   "type": "bool_present",
+   "when": {
+    "prefabs": [
+     "WEAPON_PICKUP"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "no_shadow_font",
+   "key": "nsf",
+   "type": "bool_present",
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "outline_thickness",
+   "key": "sot",
+   "type": "num",
+   "when": {
+    "flags": [
+     "hasText"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "anim_speed",
+   "key": "as",
+   "type": "num",
+   "since": "v7"
+  },
+  {
+   "prop": "start_anim",
+   "key": "ast",
+   "type": "any",
+   "since": "v7"
+  },
+  {
+   "prop": "script_id",
+   "key": "sci",
+   "type": "any",
+   "when": {
+    "flags": [
+     "canScript"
+    ]
+   },
+   "since": "v7"
+  },
+  {
+   "prop": "hitbox_height",
+   "key": "hbh",
+   "type": "num",
+   "since": "v7"
+  },
+  {
+   "prop": "hitbox_width",
+   "key": "hbw",
+   "type": "num",
+   "since": "v7"
+  },
+  {
+   "prop": "enclose",
+   "key": "ec",
+   "type": "bool_present",
+   "since": "v7"
+  },
+  {
+   "prop": "interact_message",
+   "key": "inm",
+   "type": "str",
+   "max_length": 70,
+   "since": "v7"
+  },
+  {
+   "prop": "spray_texture",
+   "key": "spt",
+   "type": "any",
+   "when": {
+    "prefabs": [
+     "SPRAY"
+    ]
+   },
+   "since": "v7"
+  }
+ ],
+ "map_keys": [
+  {
+   "key": "name",
+   "type": "string",
+   "group": "general",
+   "since": "v3",
+   "default": "New Krunker Map",
+   "desc": "map name (v7 publish limit 16 chars)"
+  },
+  {
+   "key": "modURL",
+   "type": "string",
+   "group": "general",
+   "since": "v3",
+   "default": "",
+   "desc": "resource pack URL"
+  },
+  {
+   "key": "welMsg",
+   "type": "string",
+   "group": "general",
+   "since": "v3",
+   "default": "",
+   "desc": "welcome message (<= 70 chars)"
+  },
+  {
+   "key": "ambInd",
+   "type": "number",
+   "group": "sound",
+   "since": "v3",
+   "default": 1,
+   "desc": "ambient sound index"
+  },
+  {
+   "key": "ambIndC",
+   "type": "number",
+   "group": "sound",
+   "since": "v7"
+  },
+  {
+   "key": "sky",
+   "type": "hex_or_int",
+   "group": "sky",
+   "since": "v3",
+   "default": "#dce8ed",
+   "desc": "sky colour"
+  },
+  {
+   "key": "skyDome",
+   "type": "bool",
+   "group": "sky",
+   "since": "v3",
+   "default": false
+  },
+  {
+   "key": "skyDomeCol0",
+   "type": "hex_or_int",
+   "group": "sky",
+   "since": "v3",
+   "default": "#74a4b9"
+  },
+  {
+   "key": "skyDomeCol1",
+   "type": "hex_or_int",
+   "group": "sky",
+   "since": "v3",
+   "default": "#dce8ed"
+  },
+  {
+   "key": "skyDomeCol2",
+   "type": "hex_or_int",
+   "group": "sky",
+   "since": "v3",
+   "default": "#dce8ed"
+  },
+  {
+   "key": "skyDomeEmis",
+   "type": "hex_or_int",
+   "group": "sky",
+   "since": "v3",
+   "default": "#000000"
+  },
+  {
+   "key": "skyDomeTex",
+   "type": "bool",
+   "group": "sky",
+   "since": "v3",
+   "default": false
+  },
+  {
+   "key": "skyDomeEmisTex",
+   "type": "any",
+   "group": "sky",
+   "since": "v7"
+  },
+  {
+   "key": "skyDomeTexA",
+   "type": "any",
+   "group": "sky",
+   "since": "v7"
+  },
+  {
+   "key": "skyDomeMovD",
+   "type": "number",
+   "group": "sky",
+   "since": "v3",
+   "default": 0
+  },
+  {
+   "key": "skyDomeMovT",
+   "type": "number",
+   "group": "sky",
+   "since": "v3",
+   "default": 0
+  },
+  {
+   "key": "fog",
+   "type": "hex_or_int",
+   "group": "fog",
+   "since": "v3",
+   "default": "#8d9aa0",
+   "desc": "fog colour"
+  },
+  {
+   "key": "fogD",
+   "type": "number",
+   "group": "fog",
+   "since": "v3",
+   "default": 2000,
+   "min": 0,
+   "desc": "fog distance"
+  },
+  {
+   "key": "ambient",
+   "type": "hex_or_int",
+   "group": "light",
+   "since": "v3",
+   "default": "#97a0a8",
+   "desc": "ambient light colour"
+  },
+  {
+   "key": "ambientI",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "default": 1,
+   "min": 0,
+   "max": 5,
+   "desc": "ambient intensity"
+  },
+  {
+   "key": "light",
+   "type": "hex_or_int",
+   "group": "light",
+   "since": "v3",
+   "default": "#f2f8fc",
+   "desc": "sun colour"
+  },
+  {
+   "key": "lightI",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "default": 1.3,
+   "min": 0,
+   "max": 5,
+   "desc": "sun intensity"
+  },
+  {
+   "key": "lightD",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "default": 500,
+   "desc": "sun distance"
+  },
+  {
+   "key": "lightP",
+   "type": "any",
+   "group": "light",
+   "since": "v3",
+   "desc": "sun position (legacy)"
+  },
+  {
+   "key": "sunAngX",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "default": 90,
+   "desc": "sun angle X (deg)"
+  },
+  {
+   "key": "sunAngY",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "default": 54,
+   "desc": "sun angle Y (deg)"
+  },
+  {
+   "key": "shadowR",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "default": 1024,
+   "desc": "shadow map resolution"
+  },
+  {
+   "key": "shadowD",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "default": 1200,
+   "desc": "shadow distance"
+  },
+  {
+   "key": "nAmb",
+   "type": "any",
+   "group": "light",
+   "since": "v3",
+   "desc": "no ambient gradient on cubes"
+  },
+  {
+   "key": "ambO",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "desc": "legacy ambient occlusion opacity"
+  },
+  {
+   "key": "ambS",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "desc": "legacy ambient occlusion size"
+  },
+  {
+   "key": "oldAO",
+   "type": "bool",
+   "group": "light",
+   "since": "v7"
+  },
+  {
+   "key": "correctLights",
+   "type": "bool",
+   "group": "light",
+   "since": "v7"
+  },
+  {
+   "key": "toneMapping",
+   "type": "number",
+   "group": "light",
+   "since": "v7"
+  },
+  {
+   "key": "toneMappingExposure",
+   "type": "number",
+   "group": "light",
+   "since": "v7"
+  },
+  {
+   "key": "outputEncoding",
+   "type": "number",
+   "group": "light",
+   "since": "v7"
+  },
+  {
+   "key": "dthY",
+   "type": "number",
+   "group": "physics",
+   "since": "v3",
+   "default": -100,
+   "desc": "death height (falling below kills)"
+  },
+  {
+   "key": "deathHeight",
+   "type": "number",
+   "group": "physics",
+   "since": "v3",
+   "desc": "legacy death height"
+  },
+  {
+   "key": "zone",
+   "type": "bool",
+   "group": "zone",
+   "since": "v3",
+   "default": false,
+   "desc": "battle royale zone"
+  },
+  {
+   "key": "zoneSize",
+   "type": "number",
+   "group": "zone",
+   "since": "v3",
+   "default": 500
+  },
+  {
+   "key": "zoneSpeed",
+   "type": "number",
+   "group": "zone",
+   "since": "v3",
+   "default": 1
+  },
+  {
+   "key": "zoneRnd",
+   "type": "bool",
+   "group": "zone",
+   "since": "v3",
+   "default": false
+  },
+  {
+   "key": "zoneCol0",
+   "type": "hex_or_int",
+   "group": "zone",
+   "since": "v3",
+   "default": "#c542d9"
+  },
+  {
+   "key": "zoneCol1",
+   "type": "hex_or_int",
+   "group": "zone",
+   "since": "v3",
+   "default": "#c542d9"
+  },
+  {
+   "key": "zoneCol2",
+   "type": "hex_or_int",
+   "group": "zone",
+   "since": "v3",
+   "default": "#c542d9"
+  },
+  {
+   "key": "zoneHeight",
+   "type": "number",
+   "group": "zone",
+   "since": "v7"
+  },
+  {
+   "key": "zoneStages",
+   "type": "any",
+   "group": "zone",
+   "since": "v7"
+  },
+  {
+   "key": "zoneWait",
+   "type": "number",
+   "group": "zone",
+   "since": "v7"
+  },
+  {
+   "key": "terrainSeed",
+   "type": "string",
+   "group": "terrain",
+   "since": "v3",
+   "default": ""
+  },
+  {
+   "key": "terrainTSeed",
+   "type": "string",
+   "group": "terrain",
+   "since": "v3",
+   "default": ""
+  },
+  {
+   "key": "terrainWidth",
+   "type": "number",
+   "group": "terrain",
+   "since": "v3",
+   "default": 3000
+  },
+  {
+   "key": "terrainHeight",
+   "type": "number",
+   "group": "terrain",
+   "since": "v3",
+   "default": 3000
+  },
+  {
+   "key": "terrainMntMlt",
+   "type": "number",
+   "group": "terrain",
+   "since": "v3",
+   "default": 1
+  },
+  {
+   "key": "terrainMntCol",
+   "type": "hex_or_int",
+   "group": "terrain",
+   "since": "v3",
+   "default": "#707070"
+  },
+  {
+   "key": "terrainSnwCol",
+   "type": "hex_or_int",
+   "group": "terrain",
+   "since": "v3",
+   "default": "#e8fdff"
+  },
+  {
+   "key": "terrainGrsCol",
+   "type": "hex_or_int",
+   "group": "terrain",
+   "since": "v3",
+   "default": "#5e692f"
+  },
+  {
+   "key": "terrainDrtCol",
+   "type": "hex_or_int",
+   "group": "terrain",
+   "since": "v3",
+   "default": "#7f6238"
+  },
+  {
+   "key": "terrainSndCol",
+   "type": "hex_or_int",
+   "group": "terrain",
+   "since": "v3",
+   "default": "#967f51"
+  },
+  {
+   "key": "terrainEase",
+   "type": "number",
+   "group": "terrain",
+   "since": "v3",
+   "default": 12
+  },
+  {
+   "key": "sizeMlt",
+   "type": "number",
+   "group": "terrain",
+   "since": "v3",
+   "default": 2
+  },
+  {
+   "key": "ocean",
+   "type": "bool",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocCol",
+   "type": "hex_or_int",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocOpac",
+   "type": "number",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocDist",
+   "type": "number",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocSpd",
+   "type": "number",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocYOff",
+   "type": "number",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocRefRes",
+   "type": "number",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocW",
+   "type": "number",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "ocL",
+   "type": "number",
+   "group": "ocean",
+   "since": "v7"
+  },
+  {
+   "key": "mmId",
+   "type": "any",
+   "group": "general",
+   "since": "v7",
+   "desc": "minimap id"
+  },
+  {
+   "key": "modes",
+   "type": "array",
+   "group": "game",
+   "since": "v3",
+   "desc": "legacy mode list (prefer config.modes)"
+  },
+  {
+   "key": "shadScale",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "desc": "legacy"
+  },
+  {
+   "key": "shadLength",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "desc": "legacy"
+  },
+  {
+   "key": "shadWidth",
+   "type": "number",
+   "group": "light",
+   "since": "v3",
+   "desc": "legacy"
+  },
+  {
+   "key": "skyDomeSize",
+   "type": "number",
+   "group": "sky",
+   "since": "v3",
+   "desc": "legacy"
+  },
+  {
+   "key": "biomes",
+   "type": "any",
+   "group": "general",
+   "since": "v3",
+   "desc": "legacy"
+  },
+  {
+   "key": "creator",
+   "type": "string",
+   "group": "general",
+   "since": "v3",
+   "desc": "creator name"
+  },
+  {
+   "key": "objects",
+   "type": "array",
+   "group": "structure",
+   "since": "v3",
+   "desc": "map objects"
+  },
+  {
+   "key": "colors",
+   "type": "array",
+   "group": "structure",
+   "since": "v3",
+   "desc": "colour palette referenced by ci / ei"
+  },
+  {
+   "key": "xyz",
+   "type": "array",
+   "group": "structure",
+   "since": "v3",
+   "desc": "pooled sizes referenced by si (v7)"
+  },
+  {
+   "key": "spawns",
+   "type": "array",
+   "group": "structure",
+   "since": "v3",
+   "desc": "[x, y, z, team, dir, comp, teamOnly?, spread?]"
+  },
+  {
+   "key": "camPos",
+   "type": "array",
+   "group": "structure",
+   "since": "v3",
+   "desc": "menu camera [x, y, z] (v7: [x,y,z,static,rx,ry,rz])"
+  },
+  {
+   "key": "config",
+   "type": "object",
+   "group": "game",
+   "since": "v3",
+   "desc": "{modes, classes, settings, weps, cls?, prks?}"
+  },
+  {
+   "key": "game",
+   "type": "object",
+   "group": "game",
+   "since": "v3",
+   "desc": "v3 game config (camera / model / speed overrides)"
+  },
+  {
+   "key": "gui",
+   "type": "array",
+   "group": "structure",
+   "since": "v7",
+   "desc": "custom GUI list (v7)"
+  },
+  {
+   "key": "scripts",
+   "type": "object",
+   "group": "structure",
+   "since": "v7",
+   "desc": "KrunkScript {client, server} (base64 in v7 exports)"
+  },
+  {
+   "key": "botPaths",
+   "type": "array",
+   "group": "structure",
+   "since": "v7",
+   "desc": "bot paths [{p:[[x,y,z]...], r}] (v7)"
+  },
+  {
+   "key": "tris",
+   "type": "array",
+   "group": "structure",
+   "since": "v7",
+   "desc": "baked complex-collision triangles (v7)"
+  }
+ ],
+ "triggers": {
+  "events": [
+   {
+    "id": 0,
+    "name": "onShoot",
+    "native": true
+   },
+   {
+    "id": 1,
+    "name": "onMelee",
+    "native": true
+   },
+   {
+    "id": 2,
+    "name": "onDamage",
+    "native": true
+   },
+   {
+    "id": 3,
+    "name": "onEnterObject",
+    "native": true,
+    "v3_name": "onEnter"
+   },
+   {
+    "id": 4,
+    "name": "onDestroy",
+    "native": true
+   },
+   {
+    "id": 5,
+    "name": "onRespawn",
+    "native": true
+   },
+   {
+    "id": 6,
+    "name": "onTimer",
+    "native": true
+   },
+   {
+    "id": 7,
+    "name": "onProjectile",
+    "native": true
+   },
+   {
+    "id": 8,
+    "name": "onThrowingMelee",
+    "native": true
+   },
+   {
+    "id": 9,
+    "name": "onPunch",
+    "native": true
+   },
+   {
+    "id": 10,
+    "name": "onHoldMouse",
+    "native": true,
+    "v3_name": "onInteract"
+   },
+   {
+    "id": 11,
+    "name": "onCollision",
+    "native": true
+   },
+   {
+    "id": 12,
+    "name": "onStorageEquals",
+    "native": true
+   },
+   {
+    "id": 13,
+    "name": "onStorageGreater",
+    "native": true
+   },
+   {
+    "id": 14,
+    "name": "onStorageLesser",
+    "native": true
+   },
+   {
+    "id": 15,
+    "name": "onAIDeath",
+    "native": true
+   },
+   {
+    "id": 16,
+    "name": "onInteractKey",
+    "native": false
+   },
+   {
+    "id": 17,
+    "name": "onPlayerSpawn",
+    "native": false
+   },
+   {
+    "id": 18,
+    "name": "onPlayerKill",
+    "native": false
+   },
+   {
+    "id": 19,
+    "name": "onPlayerDie",
+    "native": false
+   },
+   {
+    "id": 20,
+    "name": "onAIDamage",
+    "native": false
+   },
+   {
+    "id": 21,
+    "name": "onNukeStart",
+    "native": false
+   },
+   {
+    "id": 22,
+    "name": "onNukeEnd",
+    "native": false
+   },
+   {
+    "id": 23,
+    "name": "onExitObject",
+    "native": false
+   },
+   {
+    "id": 24,
+    "name": "onCustomValEquals",
+    "native": false
+   },
+   {
+    "id": 25,
+    "name": "onCustomValLesser",
+    "native": false
+   },
+   {
+    "id": 26,
+    "name": "onGameStart",
+    "native": false
+   },
+   {
+    "id": 27,
+    "name": "onObjectiveSwitch",
+    "native": false
+   },
+   {
+    "id": 28,
+    "name": "onPlayerDamage",
+    "native": false
+   },
+   {
+    "id": 29,
+    "name": "onAIHalfHealth",
+    "native": false
+   },
+   {
+    "id": 30,
+    "name": "onCustomValGreater",
+    "native": false
+   },
+   {
+    "id": 31,
+    "name": "onAIKillPlayer",
+    "native": false
+   }
+  ],
+  "actions": [
+   {
+    "id": 0,
+    "name": "Give Player Score",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 1,
+    "name": "Kill Player",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 2,
+    "name": "Respawn Player",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 3,
+    "name": "Change Player Health",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 4,
+    "name": "Destroy Interface",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 5,
+    "name": "Toggle Interface Gate",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 6,
+    "name": "Change Interface Health",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 7,
+    "name": "Teleport Player To Interface",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 8,
+    "name": "Change Interface Deposit Box Amount",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 9,
+    "name": "Kill Opposing Team",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 10,
+    "name": "Respawn Opposing Team",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 11,
+    "name": "Respawn Destructible Interface",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 12,
+    "name": "Toggle Destructible Interface",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 13,
+    "name": "Set Player Score",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 14,
+    "name": "Broadcast Sound",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 15,
+    "name": "Clear Player Loadout",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 16,
+    "name": "Broadcast Message",
+    "value": "text",
+    "native": true
+   },
+   {
+    "id": 17,
+    "name": "Send Message",
+    "value": "text",
+    "native": true
+   },
+   {
+    "id": 18,
+    "name": "Swap Player Team",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 19,
+    "name": "Set Player Team",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 20,
+    "name": "Round Time",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 21,
+    "name": "Reset Interface",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 22,
+    "name": "End Round",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 23,
+    "name": "Refill Player Knife",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 24,
+    "name": "Destroy Self",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 25,
+    "name": "Increase Interface Storage",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 26,
+    "name": "Decrease Interface Storage",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 27,
+    "name": "Set Interface Storage",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 28,
+    "name": "Reset Interface Storage",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 29,
+    "name": "Broadcast Popup",
+    "value": "text",
+    "native": true
+   },
+   {
+    "id": 30,
+    "name": "Send Popup",
+    "value": "text",
+    "native": true
+   },
+   {
+    "id": 31,
+    "name": "Jump Scare",
+    "value": "number",
+    "native": true
+   },
+   {
+    "id": 32,
+    "name": "Reward KR",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 33,
+    "name": "Clear Player Checkpoints",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 34,
+    "name": "Send Sound",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 35,
+    "name": "Explosion",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 36,
+    "name": "Spawn AI",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 37,
+    "name": "Set Player Value",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 38,
+    "name": "Inc/Dec Player Value",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 39,
+    "name": "Play Animation",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 40,
+    "name": "Teleport Player to Path Node",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 41,
+    "name": "Teleport Destructible Interface to Path Node",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 42,
+    "name": "Reset Destructible Interface Position",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 43,
+    "name": "Set Interface Trigger Value",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 44,
+    "name": "Inc/Dec Interface Trigger Value",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 45,
+    "name": "Set Trigger Value (Self)",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 46,
+    "name": "Inc/Dec Trigger Value (Self)",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 47,
+    "name": "Change Class",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 48,
+    "name": "Set Interface Deposit Box Amount",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 49,
+    "name": "Save Data",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 50,
+    "name": "Change Primary Weapon",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 51,
+    "name": "Change Secondary Weapon",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 52,
+    "name": "Set Global Value",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 53,
+    "name": "Change Global Value",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 54,
+    "name": "Stop Sound",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 55,
+    "name": "Show/Hide GUI Element (All)",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 56,
+    "name": "Show/Hide GUI Element (Player)",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 57,
+    "name": "Load Data",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 58,
+    "name": "Custom Action",
+    "value": "text",
+    "native": false
+   },
+   {
+    "id": 59,
+    "name": "Reward Junk",
+    "value": "text",
+    "native": false
+   },
+   {
+    "id": 60,
+    "name": "Reward Skin",
+    "value": "text",
+    "native": false
+   },
+   {
+    "id": 61,
+    "name": "Change Ambient Sound",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 62,
+    "name": "Give Challenge Progress",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 63,
+    "name": "Play Animation (Self)",
+    "value": "text",
+    "native": false
+   },
+   {
+    "id": 64,
+    "name": "Give Effect",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 65,
+    "name": "Give Challenge Progress (All)",
+    "value": "both",
+    "native": false
+   },
+   {
+    "id": 66,
+    "name": "Give Random Effect",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 67,
+    "name": "Play Video Ad",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 68,
+    "name": "Drop Powerup",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 69,
+    "name": "Spawn Bot at Node",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 70,
+    "name": "Force AI Target",
+    "value": "number",
+    "native": false
+   },
+   {
+    "id": 71,
+    "name": "Mode Specific",
+    "value": "number",
+    "native": false
+   }
+  ],
+  "conditions": [
+   {
+    "id": 0,
+    "name": "None"
+   },
+   {
+    "id": 1,
+    "name": "Player Value"
+   },
+   {
+    "id": 2,
+    "name": "Current Class"
+   },
+   {
+    "id": 3,
+    "name": "Trigger Value"
+   },
+   {
+    "id": 4,
+    "name": "Player Count"
+   },
+   {
+    "id": 5,
+    "name": "Global Value"
+   },
+   {
+    "id": 6,
+    "name": "Player has Account"
+   },
+   {
+    "id": 7,
+    "name": "Player has Premium"
+   },
+   {
+    "id": 8,
+    "name": "Player is Verified"
+   },
+   {
+    "id": 9,
+    "name": "Player is Partner"
+   },
+   {
+    "id": 10,
+    "name": "Player Level"
+   },
+   {
+    "id": 11,
+    "name": "Player Inventory Value"
+   }
+  ],
+  "emitter_sounds": [
+   "nuke_0",
+   "siren_0",
+   "explosion",
+   "fart_0",
+   "taunt_0",
+   "taunt_1",
+   "taunt_2",
+   "taunt_3",
+   "buy_0",
+   "buy_1",
+   "case_0",
+   "case_1",
+   "cheer_0",
+   "reward",
+   "store",
+   "tick_0",
+   "scare_0",
+   "cough_1",
+   "cough_2",
+   "taunt_4",
+   "ambient_1",
+   "ambient_2",
+   "ambient_3",
+   "ambient_4",
+   "ambient_5",
+   "ambient_6",
+   "ambient_7",
+   "ambient_8",
+   "beep_0",
+   "bo_plant",
+   "bo_diff",
+   "collect_1",
+   "bounce_0",
+   "headshot_0",
+   "hit_0",
+   "impact_0",
+   "jump_0",
+   "jump_1",
+   "land_0",
+   "punch_0",
+   "punch_1",
+   "slide_0",
+   "spray",
+   "step_0",
+   "step_1",
+   "step_2",
+   "whizz_0",
+   "whizz_1",
+   "gclick_0",
+   "pick_0",
+   "pick_1",
+   "build_0",
+   "break_wood",
+   "bhop_check",
+   "bhop_reset",
+   "gong_0",
+   "dragon_0",
+   "taunt_5",
+   "spray_1",
+   "stepwo_0",
+   "stepwo_1",
+   "stepwat_0",
+   "stepwat_1",
+   "stepsa_0",
+   "stepsa_1",
+   "stepsno_0",
+   "stepsno_1",
+   "stepsno_2",
+   "bounce_1",
+   "zap_0",
+   "jug_0",
+   "crit_0",
+   "melee_equip"
+  ]
+ },
+ "game_config": [
+  {
+   "name": "Type",
+   "varN": "camType",
+   "cat": 0,
+   "def": 0,
+   "options": [
+    "Normal",
+    "Top Down",
+    "Platformer (X)",
+    "Platformer (Z)"
+   ],
+   "select": true
+  },
+  {
+   "name": "X Offset",
+   "varN": "camOffX",
+   "cat": 0,
+   "def": 0,
+   "max": 500,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Y Offset",
+   "varN": "camOffY",
+   "cat": 0,
+   "def": 0,
+   "max": 500,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Z Offset",
+   "varN": "camOffZ",
+   "cat": 0,
+   "def": 0,
+   "max": 500,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Enable Rotation",
+   "varN": "camRot",
+   "cat": 0,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Model",
+   "varN": "mdl",
+   "cat": 1,
+   "def": 0,
+   "options": [
+    "Normal",
+    "Sprite",
+    "Custom Asset"
+   ],
+   "select": true
+  },
+  {
+   "name": "Custom Asset",
+   "varN": "aID",
+   "cat": 1,
+   "def": "",
+   "input": true
+  },
+  {
+   "name": "Custom Asset Scale",
+   "varN": "mdlS",
+   "cat": 1,
+   "def": 1,
+   "max": 100,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Speed X",
+   "varN": "speedX",
+   "cat": 1,
+   "def": 1,
+   "max": 3,
+   "min": 0,
+   "step": 0.1
+  },
+  {
+   "name": "Speed Y",
+   "varN": "speedY",
+   "cat": 1,
+   "def": 1,
+   "max": 3,
+   "min": 0,
+   "step": 0.1
+  },
+  {
+   "name": "Speed Z",
+   "varN": "speedZ",
+   "cat": 1,
+   "def": 1,
+   "max": 3,
+   "min": 0,
+   "step": 0.1
+  },
+  {
+   "name": "Ladder Accel",
+   "varN": "ldA",
+   "cat": 1,
+   "def": 1,
+   "max": 5,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Air Accel",
+   "varN": "arA",
+   "cat": 1,
+   "def": 1,
+   "max": 3,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Slide Time",
+   "varN": "slT",
+   "cat": 1,
+   "def": 1,
+   "max": 3,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Slide Accel",
+   "varN": "slA",
+   "cat": 1,
+   "def": 1,
+   "max": 1.5,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Jump Cooldown",
+   "varN": "jpC",
+   "cat": 1,
+   "def": 1,
+   "max": 3,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Infinite Jump",
+   "varN": "infJ",
+   "cat": 1,
+   "def": false,
+   "bool": true
+  }
+ ],
+ "server_config": [
+  {
+   "name": "Players",
+   "varN": "maxPlayers",
+   "sub": "Server Size",
+   "basic": true,
+   "def": 2,
+   "max": 10,
+   "maxP": 16,
+   "maxF": 20,
+   "maxD": 50,
+   "maxG": 6,
+   "min": 1,
+   "step": 1
+  },
+  {
+   "name": "Min Players",
+   "varN": "minPlayers",
+   "sub": "Server Size",
+   "basic": true,
+   "def": 0,
+   "max": 10,
+   "maxP": 16,
+   "maxF": 20,
+   "maxD": 50,
+   "maxG": 6,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Minutes",
+   "varN": "gameTime",
+   "sub": "Timers",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "basic": true,
+   "def": 4,
+   "defC": 4,
+   "max": 60,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Warmup",
+   "varN": "warmupTime",
+   "sub": "Timers",
+   "basic": true,
+   "def": 0,
+   "max": 4,
+   "min": 0,
+   "step": 0.1
+  },
+  {
+   "name": "Rounds",
+   "varN": "gamRounds",
+   "sub": "Timers",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "basic": true,
+   "def": 1,
+   "defC": 3,
+   "max": 10,
+   "min": 1,
+   "step": 1
+  },
+  {
+   "name": "Intermission (s)",
+   "varN": "intermTmr",
+   "sub": "Timers",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "basic": true,
+   "def": 30,
+   "defC": 30,
+   "max": 120,
+   "min": 5,
+   "step": 1
+  },
+  {
+   "name": "Auto Respawn",
+   "varN": "forceSpawn",
+   "sub": "Timers",
+   "dontChange": true,
+   "def": 0,
+   "max": 15,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Lives",
+   "varN": "lives",
+   "sub": "Health & Lives",
+   "dontChange": true,
+   "basic": true,
+   "def": 0,
+   "max": 10,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Score Limit",
+   "varN": "scoreLimit",
+   "sub": "Score & Rewards",
+   "def": 0,
+   "max": 10000,
+   "min": 0,
+   "step": 100
+  },
+  {
+   "name": "Keep Team Score",
+   "varN": "keepTScore",
+   "sub": "Score & Rewards",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Objective Time",
+   "varN": "objtvTime",
+   "head": "Mode Settings",
+   "sub": "Mode Settings",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "def": 1,
+   "defC": 1,
+   "max": 10,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Force Mode Classes",
+   "sub": "Mode Settings",
+   "varN": "forceC",
+   "dontChange": true,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Log Time (Race/Bhop)",
+   "varN": "logTim",
+   "sub": "Mode Settings",
+   "dontChange": true,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Last Checkpoint Time Rewind (Race/Bhop)",
+   "varN": "lstChkT",
+   "sub": "Mode Settings",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Gravity",
+   "head": "Physics",
+   "sub": "World Physics",
+   "varN": "gravMlt",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 0.001
+  },
+  {
+   "name": "Time Scale",
+   "varN": "deltaMlt",
+   "sub": "World Physics",
+   "dontChange": true,
+   "def": 1,
+   "max": 1.5,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Fall Damage",
+   "sub": "World Physics",
+   "varN": "fallDmg",
+   "def": 0,
+   "max": 10,
+   "min": 0,
+   "step": 0.01
+  },
+  {
+   "name": "Fall Damage Thresh",
+   "sub": "World Physics",
+   "varN": "fallDmgThr",
+   "def": 0,
+   "max": 10,
+   "min": 0,
+   "step": 0.01
+  },
+  {
+   "name": "Jump Force",
+   "varN": "jumpMlt",
+   "sub": "Jumping",
+   "dontChange": true,
+   "def": 1,
+   "max": 3,
+   "min": 0.1,
+   "step": 0.001
+  },
+  {
+   "name": "Fixed Movement",
+   "varN": "fixMov",
+   "sub": "Movement",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Slide Time",
+   "varN": "slidTime",
+   "sub": "Movement",
+   "dontChange": true,
+   "def": 1,
+   "max": 5,
+   "min": 1,
+   "step": 0.1
+  },
+  {
+   "name": "Slide Speed",
+   "varN": "slidSpd",
+   "sub": "Movement",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 0.01
+  },
+  {
+   "name": "Weapon Impulse",
+   "varN": "impulseMlt",
+   "sub": "Gameplay Logic",
+   "dontChange": true,
+   "def": 1,
+   "max": 3,
+   "min": 0,
+   "step": 0.1
+  },
+  {
+   "name": "Wall Jump Power",
+   "varN": "wallJP",
+   "sub": "Jumping",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Strafe Speed",
+   "varN": "strafeSpd",
+   "sub": "Movement",
+   "dontChange": true,
+   "def": 1.2,
+   "max": 2,
+   "min": 1,
+   "step": 0.1
+  },
+  {
+   "name": "Sliding",
+   "varN": "canSlide",
+   "sub": "Movement",
+   "dontChange": true,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Air Strafe",
+   "varN": "airStrf",
+   "sub": "Movement",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Auto Jump",
+   "varN": "autoJump",
+   "sub": "Jumping",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Bullet Drop",
+   "varN": "bDrop",
+   "sub": "World Physics",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Health Multiplier",
+   "head": "Game Logic",
+   "varN": "healthMlt",
+   "sub": "Health & Lives",
+   "dontChange": true,
+   "def": 1,
+   "max": 3,
+   "min": 0.1,
+   "step": 0.1
+  },
+  {
+   "name": "Hitbox Padding",
+   "varN": "hitBoxPad",
+   "sub": "Collisions",
+   "dontChange": true,
+   "hostTypes": [
+    0,
+    1
+   ],
+   "def": 0.6,
+   "defC": 0.1,
+   "max": 2,
+   "min": -2,
+   "step": 0.1
+  },
+  {
+   "name": "Fire Rate",
+   "varN": "fiRat",
+   "sub": "Gameplay Logic",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0.5,
+   "step": 0.1
+  },
+  {
+   "name": "Reload Speed",
+   "varN": "reSpd",
+   "sub": "Gameplay Logic",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0.5,
+   "step": 0.1
+  },
+  {
+   "name": "Health Regen",
+   "varN": "hpRegen",
+   "sub": "Health & Lives",
+   "dontChange": true,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Kill Rewards",
+   "varN": "killRewards",
+   "sub": "Score & Rewards",
+   "dontChange": true,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "No Assists",
+   "varN": "noAssists",
+   "sub": "Score & Rewards",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Headshots Only",
+   "varN": "headshotOnly",
+   "sub": "Gameplay Logic",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "No Secondaries",
+   "varN": "noSecondary",
+   "sub": "Gameplay Logic",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Disable Streaks",
+   "varN": "noStreaks",
+   "sub": "Other",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Disable Borders",
+   "varN": "disableB",
+   "sub": "Other",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Throwable Melees",
+   "varN": "throwMel",
+   "sub": "Gameplay Logic",
+   "dontChange": true,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Chargable Weapons",
+   "varN": "chrgWeps",
+   "sub": "Gameplay Logic",
+   "dontChange": true,
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Select Team",
+   "head": "Teams",
+   "varN": "selTeam",
+   "sub": "Teams",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Friendly Fire",
+   "sub": "Teams",
+   "varN": "frFire",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Alpha Team Name",
+   "varN": "nameTeam1",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "sub": "Teams",
+   "def": "Alpha",
+   "input": true
+  },
+  {
+   "name": "Bravo Team Name",
+   "varN": "nameTeam2",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "sub": "Teams",
+   "def": "Bravo",
+   "input": true
+  },
+  {
+   "name": "Charlie Team Name",
+   "varN": "nameTeam3",
+   "sub": "Teams",
+   "def": "Charlie",
+   "input": true,
+   "hide": true
+  },
+  {
+   "name": "Delta Team Name",
+   "varN": "nameTeam4",
+   "sub": "Teams",
+   "def": "Delta",
+   "input": true,
+   "hide": true
+  },
+  {
+   "name": "Echo Team Name",
+   "varN": "nameTeam5",
+   "sub": "Teams",
+   "def": "Echo",
+   "input": true,
+   "hide": true
+  },
+  {
+   "name": "Alpha Team Damage",
+   "varN": "t1Dmg",
+   "sub": "Teams",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 0.1
+  },
+  {
+   "name": "Bravo Team Damage",
+   "varN": "t2Dmg",
+   "sub": "Teams",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 0.1
+  },
+  {
+   "name": "Charlie Team Damage",
+   "varN": "t3Dmg",
+   "sub": "Teams",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 0.1,
+   "hide": true
+  },
+  {
+   "name": "Delta Team Damage",
+   "varN": "t4Dmg",
+   "sub": "Teams",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 0.1,
+   "hide": true
+  },
+  {
+   "name": "Echo Team Damage",
+   "varN": "t5Dmg",
+   "sub": "Teams",
+   "dontChange": true,
+   "def": 1,
+   "max": 2,
+   "min": 0,
+   "step": 0.1,
+   "hide": true
+  },
+  {
+   "name": "Spectating",
+   "head": "Other",
+   "varN": "allowSpect",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "sub": "Other",
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "3rd Person",
+   "varN": "thirdPerson",
+   "sub": "Other",
+   "dontChange": true,
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Hide Nametags (Enemies)",
+   "varN": "nameTags",
+   "sub": "Other",
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Hide Nametags (Allies)",
+   "varN": "nameTagsFR",
+   "sub": "Other",
+   "def": false,
+   "bool": true
+  },
+  {
+   "name": "Kill Cams",
+   "varN": "kCams",
+   "sub": "Other",
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Allow Anonymous",
+   "varN": "aAnon",
+   "sub": "Other",
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Designated Spectators",
+   "varN": "specSlots",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 2,
+   "max": 4,
+   "min": 0,
+   "step": 1
+  },
+  {
+   "name": "Team Size",
+   "varN": "tmSize",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 3,
+   "options": [
+    "1v1",
+    "2v2",
+    "3v3",
+    "4v4"
+   ],
+   "select": true
+  },
+  {
+   "name": "Hide Cosmetics",
+   "varN": "noCosm",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": false,
+   "defC": true,
+   "bool": true
+  },
+  {
+   "name": "Test Mode",
+   "varN": "tstCmp",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": false,
+   "defC": true,
+   "bool": true
+  },
+  {
+   "name": "No Draws",
+   "varN": "noDraws",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": false,
+   "defC": true,
+   "bool": true
+  },
+  {
+   "name": "Best of",
+   "varN": "bstOfR",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": false,
+   "defC": true,
+   "bool": true
+  },
+  {
+   "name": "Stop Head Clipping",
+   "varN": "headClipFix",
+   "hostTypes": [
+    0,
+    1
+   ],
+   "sub": "Other",
+   "def": false,
+   "defC": true,
+   "bool": true
+  },
+  {
+   "name": "Minimaps",
+   "varN": "minimaps",
+   "sub": "Other",
+   "def": true,
+   "bool": true
+  },
+  {
+   "name": "Limit Classes",
+   "head": "Class Limits",
+   "varN": "limitClasses",
+   "sub": "Class Limits",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": false,
+   "defC": true,
+   "bool": true
+  },
+  {
+   "name": "Triggerman",
+   "varN": "classLim0",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 0
+  },
+  {
+   "name": "Hunter",
+   "varN": "classLim1",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 1
+  },
+  {
+   "name": "Run N Gun",
+   "varN": "classLim2",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 2
+  },
+  {
+   "name": "Spray N Pray",
+   "varN": "classLim3",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 3
+  },
+  {
+   "name": "Vince",
+   "varN": "classLim4",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 4
+  },
+  {
+   "name": "Detective",
+   "varN": "classLim5",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 5
+  },
+  {
+   "name": "Marksman",
+   "varN": "classLim6",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 6
+  },
+  {
+   "name": "Rocketeer",
+   "varN": "classLim7",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 0,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 7
+  },
+  {
+   "name": "Agent",
+   "varN": "classLim8",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 8
+  },
+  {
+   "name": "Runner",
+   "varN": "classLim9",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 0,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 9
+  },
+  {
+   "name": "Deagler",
+   "varN": "classLim10",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 0,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 10
+  },
+  {
+   "name": "Bowman",
+   "varN": "classLim11",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 0,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 11
+  },
+  {
+   "name": "Commando",
+   "varN": "classLim12",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 12
+  },
+  {
+   "name": "Trooper",
+   "varN": "classLim13",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 13
+  },
+  {
+   "name": "Survivor",
+   "varN": "classLim14",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 0,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 14
+  },
+  {
+   "name": "Infiltrator",
+   "varN": "classLim15",
+   "sub": "Other",
+   "basic": true,
+   "hostTypes": [
+    1
+   ],
+   "hideE": true,
+   "def": 0,
+   "defC": 1,
+   "max": 20,
+   "min": 0,
+   "step": 1,
+   "classIcon": 15
+  }
+ ],
+ "modes": [
+  {
+   "name": "Free for All"
+  },
+  {
+   "name": "Team Deathmatch"
+  },
+  {
+   "name": "Hardpoint"
+  },
+  {
+   "name": "Capture the Flag"
+  },
+  {
+   "name": "Parkour"
+  },
+  {
+   "name": "Hide & Seek"
+  },
+  {
+   "name": "Infected"
+  },
+  {
+   "name": "Race"
+  },
+  {
+   "name": "Last Man Standing"
+  },
+  {
+   "name": "Simon Says"
+  },
+  {
+   "name": "Gun Game"
+  },
+  {
+   "name": "Prop Hunt"
+  },
+  {
+   "name": "Boss Hunt"
+  },
+  {
+   "name": "Ranked",
+   "pcg": true
+  },
+  {
+   "name": "Ranked",
+   "pcg": true
+  },
+  {
+   "name": "Stalker"
+  },
+  {
+   "name": "King of the Hill"
+  },
+  {
+   "name": "One in the Chamber"
+  },
+  {
+   "name": "Trade"
+  },
+  {
+   "name": "Kill Confirmed"
+  },
+  {
+   "name": "Defuse"
+  },
+  {
+   "name": "Sharp Shooter"
+  },
+  {
+   "name": "Traitor"
+  },
+  {
+   "name": "Raid",
+   "pcg": true
+  }
+ ],
+ "classes": [
+  {
+   "name": "Triggerman"
+  },
+  {
+   "name": "Hunter"
+  },
+  {
+   "name": "Run N Gun"
+  },
+  {
+   "name": "Spray N Pray"
+  },
+  {
+   "name": "Vince"
+  },
+  {
+   "name": "Detective"
+  },
+  {
+   "name": "Marksman"
+  },
+  {
+   "name": "Rocketeer"
+  },
+  {
+   "name": "Agent"
+  },
+  {
+   "name": "Runner"
+  },
+  {
+   "name": "Deagler"
+  },
+  {
+   "name": "Bowman"
+  },
+  {
+   "name": "Commando"
+  },
+  {
+   "name": "Trooper"
+  }
+ ],
+ "limits": {
+  "spawnLimit": 20,
+  "signLimit": 100,
+  "objectLimit": 5000,
+  "objectColLimit": 4500,
+  "objectLimitF": 7500,
+  "objectColLimitF": 6000,
+  "eventObjectLimit": 10,
+  "guiLimit": 80,
+  "signTextLimit": 1500,
+  "lbLimit": 2,
+  "wheelLimit": 10,
+  "triggerLimit": 30,
+  "triggerActionLimit": 5,
+  "interfaceLimit": 30,
+  "triangleLimit": 5000,
+  "anchorLimit": 1000,
+  "aiLimit": 40,
+  "botLimit": 16,
+  "positionRange": 500000,
+  "interfaceIDMax": 2000,
+  "publishMaxChars": 500000,
+  "nameMaxChars": 16,
+  "welcomeMaxChars": 70,
+  "triggerTextMax": 70
+ },
+ "defaults": {
+  "shadowRes": 1024,
+  "shadowDst": 1200,
+  "lightDistance": 500,
+  "lightIntensity": 1.3,
+  "ambIntensity": 1,
+  "sunAngleX": 90,
+  "sunAngleY": 54
+ }
+}

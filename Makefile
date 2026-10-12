@@ -334,7 +334,7 @@ backend-run: build services ## Foreground variant of backend-up (ctrl-c stops al
 # --------------------------------------------------------------------------- checks
 
 .PHONY: smoke smoke-native smoke-web lint check
-check: test ks-test lint bridge-check ## Everything CI runs that does not need a display
+check: test ks-test editor-mcp-test lint bridge-check ## Everything CI runs that does not need a display
 
 lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@command -v actionlint >/dev/null && actionlint || echo "actionlint not installed, skipping"
@@ -347,6 +347,26 @@ ks-test: build ## KrunkScript: front end + runtime tests (ks_front_test, ks_vm_t
 	./$(DEBUG_DIR)/ks_front_test shared/tests/ks
 	./$(DEBUG_DIR)/ks_vm_test shared/tests/ks
 	./$(DEBUG_DIR)/ksc check --quiet shared/tests/ks/corpus/*.krnk
+
+# kn_editor_mcp: the Krunker map editor MCP server (tools/editor-mcp/README.md). The test drives
+# it over MCP stdio and covers every tool; renders use the headless client_bin (EGL, no window)
+# and are skipped when client_bin is missing. EDITOR_MCP_TEST_ARGS="--no-render" skips them.
+EDITOR_MCP_TEST_ARGS ?=
+EDITOR_MCP_PREFIX ?= $(HOME)/.local
+.PHONY: editor-mcp editor-mcp-test editor-mcp-install
+editor-mcp: configure ## Build kn_editor_mcp (debug: cmake-build-debug/tools/editor-mcp/kn_editor_mcp)
+	$(call BUILD,$(DEBUG_DIR)) --target kn_editor_mcp
+
+editor-mcp-test: build ## kn_editor_mcp test suite over MCP stdio (every tool, round trips, undo, validation, renders)
+	$(PYTHON) -I tools/editor-mcp/tests/mcp_test.py --bin $(DEBUG_DIR)/tools/editor-mcp/kn_editor_mcp $(EDITOR_MCP_TEST_ARGS)
+
+# its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
+EDITOR_MCP_BUILD := cmake-build-mcp-release
+editor-mcp-install: ## Install a release kn_editor_mcp to EDITOR_MCP_PREFIX/bin (default ~/.local/bin; schema embedded)
+	@$(call CHECK_GENERATOR,$(EDITOR_MCP_BUILD)); $(CMAKE) --preset release -B $(EDITOR_MCP_BUILD) $(GEN_FLAG) -DKRUNKNATIVE_SERVICES=OFF $(CMAKE_FLAGS) > /dev/null
+	$(call BUILD,$(EDITOR_MCP_BUILD)) --target kn_editor_mcp
+	install -D -m 0755 $(EDITOR_MCP_BUILD)/tools/editor-mcp/kn_editor_mcp $(EDITOR_MCP_PREFIX)/bin/kn_editor_mcp
+	@echo "installed $(EDITOR_MCP_PREFIX)/bin/kn_editor_mcp (register: claude mcp add --scope user krunker-editor -- $(EDITOR_MCP_PREFIX)/bin/kn_editor_mcp --root $(CURDIR))"
 
 smoke: smoke-native smoke-web ## Headless render checks for both clients (screenshots in /tmp)
 

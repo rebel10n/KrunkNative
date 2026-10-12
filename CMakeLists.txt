@@ -440,6 +440,9 @@ else ()
         target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
+    add_subdirectory(tools/editor-mcp)
+
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
     # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
     file(GLOB KS_SOURCES shared/src/ks/*.c)
