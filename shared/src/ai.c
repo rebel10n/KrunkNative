@@ -872,7 +872,7 @@ static int ai_template_compare(const void *a, const void *b) { // localeCompare 
 const GameAITemplate *game_ai_templates(int *count) {
     if (g_template_count < 0) {
         g_template_count = 0;
-        const int index = map_catalog_index_of_key("soul_sanctum");
+        const int index = map_catalog_index_of_key("v3_soul_sanctum"); // the v3.1.1 map (catalogue v3_ entry)
         const cJSON *map = index >= 0 ? map_catalog_json((size_t) index) : NULL;
         const cJSON *objects = map ? cJSON_GetObjectItem(map, "objects") : NULL;
         for (int i = 0; i < cJSON_GetArraySize(objects) && g_template_count < 16; i++) {

@@ -366,7 +366,7 @@ static void test_raid(Game *game) {
 }
 
 int main(void) {
-    const int soul = map_catalog_index_of_key("soul_sanctum");
+    const int soul = map_catalog_index_of_key("v3_soul_sanctum"); // the v3.1.1 Soul Sanctum
     const cJSON *soul_json = soul >= 0 ? map_catalog_json((size_t) soul) : NULL;
     cJSON *flat = cJSON_Parse(k_flat_map);
     if (!soul_json || !flat) {

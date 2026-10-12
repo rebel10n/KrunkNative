@@ -178,6 +178,13 @@ assets-check-v7: ## Drift check of assets/ and cosmetics_table.c against Krunker
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
 	$(PYTHON) -I tools/ui-import/gen_cosmetics.py --check
 
+.PHONY: maps-import-v7 maps-check-v7
+maps-import-v7: ## Import Krunker v7.1.4's 32 official maps into assets/maps/v7/ (+ ui/img/maps thumbnails; tools/maps/import_v7_maps.py)
+	$(PYTHON) -I tools/maps/import_v7_maps.py
+
+maps-check-v7: ## Drift check of assets/maps/v7/ and the map thumbnails against Krunker v7.1.4
+	$(PYTHON) -I tools/maps/import_v7_maps.py --check
+
 
 # uidiff renders every scenario through the real client and its C UI logic
 # (`client_bin --render-scenario`, client/src/ui/ui_scenario.c) on llvmpipe inside one

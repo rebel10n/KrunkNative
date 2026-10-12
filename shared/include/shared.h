@@ -518,8 +518,8 @@ typedef struct {
 } Map;
 
 extern const MapConfig g_default_map_config;
-extern const cJSON *g_maps[15];
-extern const int g_rotation_maps[13];
+extern const cJSON *g_maps[32];           // the official maps (MAP_CATALOG_OFFICIAL_COUNT, v7.1.4 mapIndex)
+extern const int g_rotation_maps[24];     // v7.1.4 data/map.js rotationMaps
 
 void load_default_maps();
 const cJSON **map_list_with_custom(const cJSON*, size_t*);

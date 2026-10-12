@@ -5,6 +5,7 @@
 // Run from the repository root: ./<build>/sandbox_test
 #include <server_sandbox.h>
 #include <shared.h>
+#include <map_catalog.h>
 #include <knet.h>
 #include <math.h>
 #include <stdio.h>
@@ -105,10 +106,11 @@ static void chat(TestClient *c, const char *text) {
 }
 
 static const cJSON **load_maps(size_t *count) {
-    load_default_maps();
+    // the v3.1.1 Burg and Littletown (catalogue "v3_" entries): /cycle picks its map with the game
+    // RNG, which the maps' contents advance, so the test keeps the maps it was written against
     static const cJSON *maps[2];
-    maps[0] = g_maps[g_rotation_maps[0]];
-    maps[1] = g_maps[g_rotation_maps[1]];
+    maps[0] = map_catalog_json((size_t) map_catalog_index_of_key("v3_burg"));
+    maps[1] = map_catalog_json((size_t) map_catalog_index_of_key("v3_littletown"));
     *count = 2;
     return maps;
 }

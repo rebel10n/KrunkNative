@@ -27,9 +27,10 @@ const MapConfig g_default_map_config = {
     .infinite_jump = 0,
 };
 
-// The official maps (catalogue indices 0..14 = v3.1.1 mapIndex, shared/src/map_catalog.c)
+// The official maps (catalogue indices 0..31 = v7.1.4 mapIndex, shared/src/map_catalog.c)
 const cJSON *g_maps[MAP_CATALOG_OFFICIAL_COUNT];
-const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 14};
+// v7.1.4 data/map.js rotationMaps
+const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28};
 
 // prefabs.prefabs[i || id || 0] || prefabs.prefabs[0] (v7 map.js generate): a JS array index
 // is a number or its canonical string; anything else (a prefab *name*, 5.5, true) is undefined.

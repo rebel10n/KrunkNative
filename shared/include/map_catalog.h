@@ -1,18 +1,18 @@
 #ifndef KRUNKNATIVE_MAP_CATALOG_H
 #define KRUNKNATIVE_MAP_CATALOG_H
 
-// The Krunker v3.1.1 map catalogue: every map the offline server ships, in its order, with
-// the ids and names its UI, rotation, host window, Games window and `map` command use.
+// The KrunkNative map catalogue: every map the game ships, in its order, with the ids and names
+// its UI, rotation, host window, Games window and `map` command use.
 //
-//   index 0..14   the official maps (Krunker_v3.1.1/maps/), in the MAPS / src/data/map.js
-//                 order, so a catalogue index here IS the v3.1.1 mapIndex
-//                 (assets/maps/<key>.json)
-//   index 15..35  the community maps (Krunker_v3.1.1/custom_maps/), in readdir (ASCII
-//                 filename) order like publicRoutes.ts loadMaps / packetHandlers.ts
-//                 listCustomMaps (assets/maps/custom/<key>.json)
+//   index 0..31   Krunker v7.1.4's official maps (src/data/maps.js), so a catalogue index here
+//                 IS the v7.1.4 mapIndex (assets/maps/v7/<fileName>.json, imported unmodified by
+//                 tools/maps/import_v7_maps.py; thumbnails ui/img/maps/map_<index>.png)
+//   index 32..    the community maps: Krunker_v3.1.1/custom_maps/ (assets/maps/custom/<key>.json,
+//                 ASCII filename order), then the v3.1.1 official maps as "v3_<key>"
+//                 (assets/maps/<key>.json, their v3.1.1 MAPS order)
 //
-// The JSON files are reference data, copied unmodified. Several community maps reuse an
-// official name ("old_burg.json" is also "Burg"), so the file stem `key` is the unique id.
+// The JSON files are reference data, copied unmodified. Several maps share a name ("Burg" is
+// burg_new, old_burg and v3_burg), so `key` is the unique id.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -24,19 +24,20 @@ typedef enum {
 } MapSource;
 
 typedef struct {
-    const char *key;     // file stem, unique ("burg", "old_burg", "Bhop_VIP")
-    const char *name;    // the JSON "name": v3.1.1's display name (map_name)
-    int index;           // v3.1.1 mapIndex (MAPS) for official maps, -1 for community maps
+    const char *key;     // unique id: the file stem ("burg_new", "old_burg", "Bhop_VIP"), "v3_<stem>"
+    const char *name;    // the JSON "name": the display name (map_name)
+    int index;           // v7.1.4 mapIndex (data/maps.js) for official maps, -1 for community maps
     MapSource source;
-    unsigned char rotation; // in src/data/map.js rotationMaps (public round rotation)
-    unsigned char hostable; // in the Host Game window (genHost: official maps but Soul Sanctum)
+    unsigned char rotation; // in v7 src/data/map.js rotationMaps (public round rotation)
+    unsigned char hostable; // in the Host Game window (the official maps)
     const char *creator;    // publicRoutes creatorname: body.creator || "Krunker" / "Community"
     const char *mod_url;    // body.modURL || ""
     // Host Game card (windows[7] genHost): "by", year and version labels, "" = none
     const char *host_by, *host_year, *host_version;
+    const char *path;       // the JSON file, relative to the assets directory ("maps/v7/kanji.json")
 } MapCatalogEntry;
 
-#define MAP_CATALOG_OFFICIAL_COUNT 15
+#define MAP_CATALOG_OFFICIAL_COUNT 32
 
 size_t map_catalog_count(void);
 const MapCatalogEntry *map_catalog_at(size_t index); // NULL out of range
@@ -90,9 +91,10 @@ const cJSON **map_catalog_list(const int *indices, size_t count, size_t *out_cou
 // (realloc) when the list does not hold it yet. -1 on failure. Existing indices never move.
 int map_catalog_slot(const cJSON ***maps, size_t *map_count, size_t index);
 
-// The Games window (windows[9]) tabs as the v3.1.1 offline server answers a guest
-// (doc/ref/krunker-v3.1.1/windows/win-games.html): 0 Popular, 1 Featured, 2 New,
-// 3 Favorites (empty), 4 My Games. Writes catalogue indices, returns the count.
+// The Games window (windows[9]) tabs: 0 Popular, 1 Featured, 2 New, 3 Favorites (empty), 4 My
+// Games. Featured is the official maps; Popular / New list them first, then the community maps
+// in the order the v3.1.1 offline server answered a guest (doc/ref/krunker-v3.1.1/windows/
+// win-games.html). Writes catalogue indices, returns the count.
 size_t map_catalog_games_tab(int tab, int *out, size_t max);
 
 #endif
