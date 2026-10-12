@@ -172,7 +172,9 @@ static int usage(void) {
             "usage: ksc check [--side client|server] [--json] [--quiet] FILE...\n"
             "  FILE: a .krnk script (side: --side, else \"server\" when the path contains \"server\")\n"
             "        or a map .json (checks scripts.client and scripts.server)\n"
-            "  exit status: 0 ok, 1 compile errors, 2 usage or I/O error\n");
+            "  exit status: 0 ok, 1 compile errors, 2 usage or I/O error\n"
+            "       ksc run [--side client|server] [--hooks start,update:16,...] [--repeat N] [--seed N] [--stats] FILE\n"
+            "  compiles FILE and calls the hooks against a minimal host (tools/ks/ksc_run.c)\n");
     return 2;
 }
 
@@ -201,10 +203,12 @@ static int cmd_check(int argc, char **argv) {
     return io_error ? 2 : o.errors ? 1 : 0;
 }
 
+int ksc_run(int argc, char **argv); // tools/ks/ksc_run.c (WP2)
+
 int main(int argc, char **argv) {
     if (argc < 2) return usage();
     if (strcmp(argv[1], "check") == 0) return cmd_check(argc - 2, argv + 2);
-    // WP2: `ksc run ...` dispatches here.
+    if (strcmp(argv[1], "run") == 0) return ksc_run(argc - 2, argv + 2);
     if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0) return usage();
     return cmd_check(argc - 1, argv + 1);
 }

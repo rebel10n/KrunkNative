@@ -443,12 +443,24 @@ else ()
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
     # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
     file(GLOB KS_SOURCES shared/src/ks/*.c)
-    add_executable(ksc tools/ks/ksc.c ${KS_SOURCES})
+    add_executable(ksc tools/ks/ksc.c tools/ks/ksc_run.c ${KS_SOURCES})
     target_link_libraries(ksc PRIVATE m)
     set(KS_FRONT_SOURCES shared/src/ks/ks_lex.c shared/src/ks/ks_parse.c shared/src/ks/ks_check.c shared/src/ks/ks_api_table.c)
     add_executable(ks_front_test shared/tests/ks_front_test.c ${KS_FRONT_SOURCES})
     enable_testing()
     add_test(NAME ks_front_test COMMAND ks_front_test ${CMAKE_SOURCE_DIR}/shared/tests/ks)
+    # ks_vm_test (WP2): runtime conformance programs (shared/tests/ks/run/*.krnk + .out), number,
+    # serialisation and GC unit tests, and the corpus runtime smoke test, over the ks sources
+    # only. -DKRUNKNATIVE_KS_SANITIZE=ON builds it with ASan + UBSan (GCC needs libasan).
+    option(KRUNKNATIVE_KS_SANITIZE "Build ks_vm_test with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+    add_executable(ks_vm_test shared/tests/ks_vm_test.c ${KS_SOURCES})
+    target_compile_definitions(ks_vm_test PRIVATE KS_TEST_DIR="${CMAKE_SOURCE_DIR}/shared/tests/ks")
+    target_link_libraries(ks_vm_test PRIVATE m)
+    if (KRUNKNATIVE_KS_SANITIZE)
+        target_compile_options(ks_vm_test PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+        target_link_libraries(ks_vm_test PRIVATE -fsanitize=address,undefined)
+    endif ()
+    add_test(NAME ks_vm_test COMMAND ks_vm_test ${CMAKE_SOURCE_DIR}/shared/tests/ks)
 
     # ui_test: engine driver for dumps, probes, renders and benchmarks
     # (client/src/html/ui_test.c holds the subcommand table). It is the engine plus

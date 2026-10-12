@@ -1,0 +1,19 @@
+# GAME.log formatting (2.8): logStringify(sanitize(x)) = JSON.stringify(x, null, 2) for
+# objects/arrays (null -> {}, actions omitted / null, NaN -> null, JSON string escapes),
+# x + "" otherwise; arguments joined with one space
+action cb() { }
+obj holder = {};
+public action start() {
+    GAME.log();
+    GAME.log("plain", 1.5, true, holder.nope, -0, 0 / 0);
+    GAME.log({s: "q\"b\\n\nt\tc\u0001", u: holder.nope, f: cb, nested: {empty: obj[], nul: GAME.PLAYERS.getSelf()}});
+    GAME.log(obj[{a: 1}, {}], num[0 / 0, 1 / 0], str["é", "😀"]);
+    obj arr = {list: num[1, 2]};
+    addTo (obj[]) holder.missingList {x: 1};
+}
+public action onPlayerSpawn(str id) {
+    obj o = {a: GAME.PLAYERS.getSelf(), cbs: num[]};
+    GAME.log(o, GAME.PLAYERS.getSelf(), id);
+}
+#! call start
+#! call onPlayerSpawn "12"

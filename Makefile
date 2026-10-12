@@ -334,13 +334,19 @@ backend-run: build services ## Foreground variant of backend-up (ctrl-c stops al
 # --------------------------------------------------------------------------- checks
 
 .PHONY: smoke smoke-native smoke-web lint check
-check: test lint bridge-check ## Everything CI runs that does not need a display
+check: test ks-test lint bridge-check ## Everything CI runs that does not need a display
 
 lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@command -v actionlint >/dev/null && actionlint || echo "actionlint not installed, skipping"
 	$(PYTHON) -c "import json; json.load(open('CMakePresets.json'))"
 	@for f in ui/js/*.js; do node --check $$f || exit 1; done
 	@echo "lint ok"
+
+.PHONY: ks-test
+ks-test: build ## KrunkScript: front end + runtime tests (ks_front_test, ks_vm_test) and `ksc check` over the corpus
+	./$(DEBUG_DIR)/ks_front_test shared/tests/ks
+	./$(DEBUG_DIR)/ks_vm_test shared/tests/ks
+	./$(DEBUG_DIR)/ksc check --quiet shared/tests/ks/corpus/*.krnk
 
 smoke: smoke-native smoke-web ## Headless render checks for both clients (screenshots in /tmp)
 

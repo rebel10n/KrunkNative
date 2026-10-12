@@ -1,0 +1,26 @@
+
+plain 1.5 true undefined 0 NaN
+{
+  "s": "q\"b\\n\nt\tc\u0001",
+  "nested": {
+    "empty": [],
+    "nul": {}
+  }
+}
+[
+  {
+    "a": 1
+  },
+  {}
+] [
+  null,
+  null
+] [
+  "é",
+  "😀"
+]
+!RUNTIME ERROR: A(...).push is not a function
+{
+  "a": {},
+  "cbs": []
+} {} 12

@@ -1,0 +1,29 @@
+# KN safety limits (1.14): string length 1,048,576 UTF-16 units, array length 1,000,000,
+# heap 64 MiB per script (Out of memory. disables the script: later hooks never run)
+#! call strings
+#! call arrays
+#! call alive
+#! call heap
+#! call alive
+public action strings() {
+    str s = "x";
+    for (num i = 0; i < 20; i++) { s = s + s; }
+    GAME.log("max", lengthOf s);
+    s = s + "y";
+    GAME.log("unreachable");
+}
+public action arrays() {
+    num[] a = num[];
+    for (num i = 0; i < 1000000; i++) { addTo a i; }
+    GAME.log("max", lengthOf a);
+    addTo a 1;
+    GAME.log("unreachable");
+}
+public action alive() { GAME.log("alive"); }
+public action heap() {
+    str s = "x";
+    for (num i = 0; i < 19; i++) { s = s + s; }
+    str[] keep = str[];
+    for (num i = 0; i < 1000; i++) { addTo keep s + toStr i; }
+    GAME.log("unreachable");
+}

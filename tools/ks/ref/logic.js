@@ -1,0 +1,14 @@
+const { GAME, hook, done } = require('./prelude.js');
+const o = { zero: 0, s: '0', e: '', nan: 0 / 0, t: true, n: 5, list: [], inner: {} };
+function truthy(v) { if (v.x) { GAME.log('T'); } else { GAME.log('F'); } }
+hook(() => {
+  GAME.log(1 === 1, 1 !== 1, '1' === '1', 0 / 0 === 0 / 0, o.n === 5, o.s === 0, o.zero === 0, o.inner === o.inner, o.inner === {});
+  GAME.log(!!o.zero, !!o.s, !!o.e, !!o.nan, !!o.t, !!o.list, !!o.inner, !!o.missing, !o.n);
+  GAME.log(o.zero || 'fallback', o.n || 'fallback', o.n && 'both', o.e && 'never', o.missing || o.s, true && false, false || true);
+  GAME.log(o.n > 3 ? 'big' : 'small', o.n > 10 ? 'big' : o.n > 4 ? 'mid' : 'small');
+  truthy({ x: 0 }); truthy({ x: '0' }); truthy({ x: [] }); truthy({});
+  const grade = 72;
+  if (grade >= 90) { GAME.log('A'); } else if (grade >= 70) { GAME.log('C'); } else { GAME.log('F'); }
+  GAME.log(o.missing === o.missing2, o.n > o.missing, o.n < o.missing, o.s < 1, '10' < '9', o.s >= 0);
+});
+done();

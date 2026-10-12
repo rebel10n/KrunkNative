@@ -1,0 +1,33 @@
+# Runtime error texts (1.14): each hook aborts at its first error, later hooks still run
+#! call readUndef
+#! call readNull
+#! call writeUndef
+#! call writePrim
+#! call writeStr
+#! call notFn
+#! call notAction
+#! call methodOnUndef
+#! call addToNum
+#! call hasPropUndef
+#! call lengthUndef
+#! call removeUndef
+#! call logAction
+#! call logCycle
+#! call survived
+obj o = {n: 5, s: "abc", list: num[1]};
+action invoke(action f) { f(1); }
+public action readUndef() { GAME.log(o.nope.x); }
+public action readNull() { GAME.log(GAME.PLAYERS.findByID("nobody").username); }
+public action writeUndef() { o.nope.x = 1; }
+public action writePrim() { o.n.x = 1; }
+public action writeStr() { o.s[0] = "x"; }
+public action notFn() { invoke(o.n); }
+public action notAction() { o.n(); }
+public action methodOnUndef() { o.nope.go(1, 2); }
+public action addToNum() { addTo (num[]) o.n 5; }
+public action hasPropUndef() { GAME.log(hasProp o.nope.x); }
+public action lengthUndef() { GAME.log(lengthOf o.nope); }
+public action removeUndef() { remove o.nope.x; }
+public action logAction() { GAME.log("before", invoke); }
+public action logCycle() { obj c = {}; c.self = c; GAME.log(c); }
+public action survived() { GAME.log("survived", o.n, o.list); }
