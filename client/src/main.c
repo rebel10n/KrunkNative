@@ -20,6 +20,7 @@
 #include <map_post.h>
 #include <sky.h>
 #include <shadow.h>
+#include <nav_overlay.h>
 #include <map_environment.h> // v7 environment zones, tone mapping, ocean (map_environment.c)
 #include <ocean.h>
 #include <zombies_render.h> // map-logic WP-H in-world (zombies_render.c)
@@ -772,6 +773,7 @@ int main(int argc, char **argv) {
     spin_wheel_fini();
     vfx_fini();
     ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
+    nav_overlay_fini(); // show_navmeshes: waits for a running build, GL buffers, the line program
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
     sky_fini();    // sky dome VAO/buffers/program (sky.c)
     render_target_fini();
@@ -1700,6 +1702,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // store-item material animations: frames, movT, pulsT, rgb, rAnim (skin_fx.c), with textureAnim
     skin_fx_tick(delta * 1000.0f, client_render_settings()->texture_anim, client_render_settings()->lighting == 0);
     if (!scenario) ai_render_tick(client, delta); // AI meshes / orbs (ai_render.c), drawn by the world scene
+    nav_overlay_frame(client); // show_navmeshes: a finished build, map switches (nav_overlay.c)
 
     if (!scenario && !ks_client_3d_disabled()) { // KrunkScript DEFAULT.disable3D: RENDER.disable()
         // textureAnim off: Krunker resets moving/framed textures to their first frame.
@@ -1718,6 +1721,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         spectate_render_end(client);
         shadow_end_world();
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
+        nav_overlay_render(client); // show_navmeshes: nav areas + connections, over the world (nav_overlay.c)
     }
 
     if ((!scenario || SCENARIO_PREVIEW()) && !ks_client_3d_disabled()) {

@@ -23,6 +23,7 @@
 #include <chat_commands.h>
 #include <map_catalog.h>
 #include <ai.h>
+#include <nav_overlay.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -334,6 +335,7 @@ static const ConArg A_BOT_PLACE[] = {{"tfue|autoRespawn|key=value", ARG_STRING, 
 static const ConArg A_BOT_QUERY[] = {{"all|index|name", ARG_STRING, 1}};
 static const ConArg A_BOT_CONFIG[] = {{"key=value", ARG_STRING, 1}};
 static const ConArg A_BOT_DIFF[] = {{"value", ARG_NUMBER, 0}};
+static const ConArg A_NAV_OFF[] = {{"off", ARG_STRING, 1}}; // show_navmeshes: [arg("off", "string", true)]
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -478,6 +480,7 @@ static const char *mode_display_name(const int id) {
 static int offline_init_at(const int map_index, const int mode_id) {
     Client *client = con_client();
     if (!client || !client->offline || !client->game.map_count) return 0;
+    nav_overlay_map_switch(); // clearNavOverlayForMapSwitch + scheduleNavOverlayRebuild
     local_game_host(client, map_index, mode_id);
     return 1;
 }
@@ -1049,6 +1052,7 @@ static void clear_ping_counter(void) {
 // in-process sandbox server. `catalog_index` (-1 none) is the map it starts on, or the one a
 // running offline game reloads on (local_game_pick_map).
 static void go_offline(Client *client, const int catalog_index, const char *command) {
+    nav_overlay_map_switch(); // runOfflineSandbox: clearNavOverlayForMapSwitch + scheduleNavOverlayRebuild
 #ifndef __EMSCRIPTEN__
     if (!client->offline) stop_net(client);
 #else
@@ -1157,6 +1161,17 @@ static void cmd_ping_local(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "Ping: %dms", client && client->net_ping_ms > 0 ? client->net_ping_ms : 0);
 }
 
+// show_navmeshes [off]: "off", "0" or "clear" clears, anything else builds (registerLocal
+// "show_navmeshes", nav_overlay.c)
+static void cmd_show_navmeshes(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    if (argc && (!strcmp(argv[0], "off") || !strcmp(argv[0], "0") || !strcmp(argv[0], "clear"))) {
+        nav_overlay_clear(1);
+        return;
+    }
+    nav_overlay_show(con_client());
+}
+
 // the game transport (WebRTC / WebTransport / WebSocket, UDP / TCP), its session counters and
 // why a transport was skipped (net_notes.c client_net_info)
 static void cmd_netinfo(const int argc, char **argv, const char *rest) {
@@ -1200,6 +1215,7 @@ static void register_commands(void) {
     register_local("rotation", NO_ARGS, "alias for rot", cmd_rot);
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
+    register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
     // Server commands (mirror server/packetHandlers.ts cmds table)
     register_server("god", ARGS(A_TOGGLE), "toggle god mode (self or target)");
     register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self or target)");
@@ -1542,6 +1558,8 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         }
     } else if (!strcmp(cmd, "bot_type")) {
         if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
+    } else if (!strcmp(cmd, "show_navmeshes")) {
+        if (arg == 0) con_words(c, prefix, ON_OFF);
     } else if (cmd_is(cmd, WORDS("bot_mimic", "bot_stop"))) {
         if (arg == 0) con_words(c, prefix, ON_OFF);
     } else if (!strcmp(cmd, "bot_difficulty")) {

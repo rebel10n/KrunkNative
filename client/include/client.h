@@ -18,6 +18,9 @@ typedef struct {
     // frustumCulled). bound_radius 0 = unknown: the geometry is always drawn.
     float bound_center[3];
     float bound_radius;
+    // glDrawElements mode: 0 = GL_TRIANGLES; GL_LINES for line lists (LineMaterial: the
+    // show_navmeshes overlay, nav_overlay.c). Lines are the GLES 3.0 way to draw wireframes.
+    unsigned int draw_mode;
 } Geometry;
 
 #define NAME geometry_cache_map
@@ -165,6 +168,20 @@ typedef struct {
 } TextMaterial;
 
 TextMaterial *text_material_init();
+
+// Unlit single-colour material for debug lines and flat overlays (three.js LineBasicMaterial /
+// MeshBasicMaterial): assets/shaders/line.vert/.frag, fogged like three.js (fog: true), no
+// lighting, no texture. Draw lines with a Geometry whose draw_mode is GL_LINES. depth_test 0 is
+// three.js depthTest: false (drawn over the scene; depth writes are off for every LineMaterial).
+typedef struct {
+    Material base;
+    vec4 color;       // rgb + opacity (transparent materials blend)
+    int fog;          // three.js material.fog
+    int depth_test;
+} LineMaterial;
+
+LineMaterial *line_material_init(void); // NULL when the shader is unavailable
+void line_material_fini_program(void);  // the shared program (renderer shutdown)
 
 // How BasicMaterial texture coordinates are produced (basic.frag).
 typedef enum {
@@ -458,6 +475,8 @@ void scene_render(const Scene*, Camera*);
 // per-draw defaults (no culling, normal alpha blending, depth writes on); scene_render()
 // only issues the GL calls for state that differs from the previous draw.
 void scene_draw_state(int cull_back, int additive_blend, int depth_write);
+// Called the same way: this draw ignores the depth buffer (three.js depthTest: false).
+void scene_draw_no_depth_test(void);
 void scene_draw_cull_front(void); // map-G: after scene_draw_state(1, ...): three.js BackSide (cull front faces)
 void scene_fini(Scene*);
 

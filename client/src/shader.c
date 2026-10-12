@@ -50,6 +50,7 @@ static void shader_prefetch_all(void) {
     static const char *const names[] = {
         "basic.vert", "basic.frag", "quad.vert", "quad.frag", "text.frag", "sky.vert", "sky.frag",
         "scene_composite.vert", "scene_composite.frag", "shadow.vert", "shadow.frag", "vfx.vert", "vfx.frag",
+        "line.vert", "line.frag", // LineMaterial (show_navmeshes): compiled later, from the frame loop
     };
     char *paths[sizeof(names) / sizeof(names[0])];
     size_t count = 0;

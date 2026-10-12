@@ -475,6 +475,13 @@ else ()
         target_link_libraries(bot_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # navgen_test: the Krunker v7.1.4 generated nav mesh (shared/src/navgen.c) against v7's navgen.ts
+    add_executable(navgen_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/navgen_test.c)
+    target_link_libraries(navgen_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(navgen_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # spawn_test: v3.1.1 getSpawnPoint rules, distinct points for players spawning in one tick
     add_executable(spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/spawn_test.c)
     target_link_libraries(spawn_test PRIVATE m)

@@ -7,6 +7,13 @@
 // Built lazily for the authority's current map the first time a bot needs a path (tens of
 // milliseconds on the largest v3.1.1 maps), dropped on a map change. Dynamic objects
 // (destructibles, gates) are static for the grid, like v7's first pass.
+//
+// v7.1.4's bots path over its generated Source-style nav areas instead (navgen.ts, ported as
+// shared/src/navgen.c for the show_navmeshes overlay). KrunkNative keeps this grid on purpose:
+// v7's area links climb up to 21 units (jumpHeight 18 + climbHeight 3) while a standing jump
+// peaks near 14, and they ignore jump pads and kill volumes. With bots pathing on the generated
+// mesh, bot_test and bots_e2e still passed, but in 120 s runs of 8 bots, stuck recoveries went
+// from 2 to 62 on Shipyard and from 17 to 47 on Little Town (doc/console.md "show_navmeshes").
 #include <bots.h>
 #include <pcg_basic.h>
 #include <math.h>

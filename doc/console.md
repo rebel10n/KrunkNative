@@ -37,7 +37,7 @@ silent (only the `] line` echo), as in the mod.
 
 | Command | v3.1.1 behaviour | Native |
 |---|---|---|
-| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (73 commands) |
+| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (76 commands) |
 | clear | empties the log | same |
 | echo / print text | prints the text | same |
 | bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
@@ -58,6 +58,7 @@ silent (only the `] line` echo), as in the mod.
 | pos / position | `position: x y z` | same |
 | rot / rotation | `rotation: yaw=… pitch=… xDire=…` | same |
 | ping | overwritten by the server command | same (it is the server `/ping`) |
+| show_navmeshes [off] | v7.1.4: the nav mesh visualizer (below) | same (v7.1.4 command; v3.1.1 has none) |
 
 ## Server commands (`/cmd` in chat, or the console without the slash)
 
@@ -166,6 +167,68 @@ scoreOnDeath are parsed but have no native effect; the sandbox Spawn Bot / Clear
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).
 
+## Nav mesh visualizer (Krunker v7.1.4 `show_navmeshes`)
+
+v7.1.4's dev console (`mod/devConsole.ts` "Nav mesh visualizer") draws the generated
+Source-style nav mesh of the current map in 3D: `show_navmeshes` builds and shows it,
+`show_navmeshes off` (or `0` / `clear`) removes it. Any other argument (`on`) shows it.
+
+| Reply | When |
+|---|---|
+| `nav: generated source-style overlay N areas, M nodes, K obstacle links` (info) | shown |
+| `nav: overlay cleared` (info) | `off` |
+| `nav: renderer/scene not available (are you in a game?)` (error) | no map loaded |
+| `nav: no current map data captured yet` (error) | the map has no JSON |
+
+The mesh is v7's `buildGeneratedNavMesh` (`shared/navgen.ts` + the `extractBoxes` /
+`extractLadders` it uses from `shared/navmesh.ts`), ported to C in `shared/src/navgen.c`
+(`shared/include/navgen.h`, with `findGeneratedNavPath` and `resolveGeneratedNavArea`): nodes
+flood-filled on a 12-unit grid from the spawns, merged into rectangular areas, area
+connections and links (walk / jump / drop / crouch / ladder). It reads the map JSON only, so
+the client builds it from the current map like v7's mod does in the browser, offline and
+online alike; no server data is involved. Counts and paths equal v7's on every official map
+and the v3.1.1 maps (`navgen_test`).
+
+The drawing (`client/src/nav_overlay.c`) is v7's, line for line: area fills black at 0.16
+opacity, area borders red (inset 0.2), crouch areas a blue diagonal, obstacle areas a second
+red outline, and from each area centre toward each connected area: two-way connections cyan,
+one-way blue arrows, jump links green arrows, drop links red arrows, crouch links blue arrows.
+All of it ignores depth (three.js `depthTest: false`) and is fogged with the map's fog, after
+the world scene and before the first-person weapon. It goes through `scene_render()` with
+`LineMaterial` (`client/src/materials/line.c`, `assets/shaders/line.*`): GL_LINES and
+triangles, no `glPolygonMode`, the same on GL 4.5, ANGLE and WebGL 2.
+
+Map switches: the overlay belongs to one map. The console's offline map switches (`map`,
+`mode`, `cycle`, `offline`, `sandbox`: v7's `offlineInitAt` / `runOfflineSandbox`) rebuild it
+on the new map; any other map change (rotation, a server's `map`) clears it, as v7's
+`ensureNavOverlayOwnerCurrent` does.
+
+v7's overlay state also holds a bot path group (`navOverlay.pathGroup`), but nothing ever
+fills it: `show_navmeshes` draws no bot paths in v7.1.4, so neither does KrunkNative. The
+entity bounding-box overlay is a separate command (`ent_bbox`), not part of this one.
+
+KrunkNative differences:
+- The build runs on a worker thread natively and the result is cached per map, so the frame
+  never waits for it and `show_navmeshes` after `off` is instant. v7 builds inside the command
+  (in the browser: 60 to 400 ms on most official maps, 7.5 s on Lagoon, 9 s on Little Town,
+  22 s on Shipwrecked). The C build (-O2) takes 2 to 30 ms on most maps and 0.1 to 0.2 s on
+  Lagoon (50 000 nodes). The web build has no threads and builds inside the command.
+- In v7's offline sandbox, its bots get the generated mesh only while the overlay is on
+  (`OfflineNextBotManager.mapData`). KrunkNative's bots don't depend on the overlay: they
+  always path over `bot_nav.c`'s grid (see Bots). They do not use the generated mesh: v7's
+  links climb up to 21 units (jumpHeight 18 + climbHeight 3) while a standing jump peaks near 14
+  (jump 0.072, gravity 0.00015 + 0.000032 while rising),
+  and they ignore jump pads and kill volumes. In 120 s runs with 8 bots on nine maps, pathing
+  on the generated mesh passed bot_test and bots_e2e but got bots stuck much more often:
+  stuck recoveries went from 2 to 62 on Shipyard and from 17 to 47 on Little Town.
+
+Reference capture: `tools/kref/navmesh-ref.js <map.json> "<x,y,z,pitch,yaw>" out.png` runs
+v7's own `show_navmeshes` in headless Chromium against a v7 server (recipe in the script); the
+native counterpart is `client_bin --offline <map>` with `KRUNKNATIVE_CAMERA` at the same pose,
+`KRUNKNATIVE_FOV=90`, and an input script running `con show_navmeshes` and `shot`. The
+expected numbers in `shared/tests/navgen_test.c` come from v7's `navgen.ts` run under node (an
+esbuild bundle of `buildGeneratedNavMesh` + `findGeneratedNavPath`) on the same JSON.
+
 ## Argument completion (KrunkNative extension)
 
 devConsole.ts completes only the command name: Tab fills the longest common prefix, and
@@ -202,6 +265,7 @@ and adds completion for arguments:
 | bot_kick, bot_kill | all, the bots' names |
 | bot_type | nextbot / tfue |
 | bot_mimic, bot_stop | on / off |
+| show_navmeshes | on / off |
 | bot_difficulty | easy / normal / hard / max |
 | bot, bot_add, bot_place, bot_config | tfue, autoRespawn and common `key=` options |
 
