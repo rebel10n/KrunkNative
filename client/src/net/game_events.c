@@ -22,7 +22,6 @@
 #include <spectate.h> // NET_PACKET_SPECTATE -> spectate_begin / spectate_end
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
-#include <ui_terminal.h> // NET_PACKET_TERMINAL: openTerminal (ui_terminal.c)
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
@@ -655,11 +654,6 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_REFILL: // "rfl" -> fY(): b5.refillKnife() (the HUD melee icon follows can_throw)
             if (client->me) client->me->can_throw = 1;
             return 1;
-        case NET_PACKET_TERMINAL: {
-            EVENTS_READ(NetTerminalPacket, terminal);
-            ui_terminal_open(client, terminal.uid); // "ot": openTerminal
-            return 1;
-        }
         case NET_PACKET_SPRAY: { // "sp": addSpray(sid, sprayIndex, x, y, z, xDr, yDr)
             EVENTS_READ(NetSprayPacket, spray);
             sprays_add(client, &spray);
@@ -726,6 +720,15 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_JUMP_SCARE:
         case NET_PACKET_POSITION:
         case NET_PACKET_POPUP:
+        case NET_PACKET_CUSTOM_VALUE:      // WP-C v7 trigger packets (120-128)
+        case NET_PACKET_GLOBAL_VALUE:
+        case NET_PACKET_GUI_TOGGLE:
+        case NET_PACKET_AMBIENT_CHANGE:
+        case NET_PACKET_STOP_SOUND:
+        case NET_PACKET_PLAYER_SOUND:
+        case NET_PACKET_CONFIRM_INTERACT:
+        case NET_PACKET_CHANGE_POSITION:
+        case NET_PACKET_PICKUP:
             return client_triggers_handle_event(client, type, payload, length); // client/src/map_triggers.c
         case NET_PACKET_EFFECT:
         case NET_PACKET_STREAK:

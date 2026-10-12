@@ -4,6 +4,7 @@
 #include <spawnables.h>
 #include <game_config.h> // WP-E: config.classes, forceC
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
+#include <triggers_v7.h> // WP-C: onPlayerSpawn / Damage / Die / Kill map triggers
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -209,6 +210,9 @@ void player_spawn(Player *player) {
     if (game_is_authority(player->game)) game_spawn_at_checkpoint(player->game, player);
     world_player_spawned(player->game, player); // WP-B: setInitPos, noPVP / forcePVP off
     ks_game_on_player_spawn(player->game, player); // KrunkScript: player script state reset, server onPlayerSpawn
+    // onPlayerSpawn map triggers: v7.1.4 never dispatches them (a reconstruction gap); KN does, from the
+    // authority's spawn (doc/v7/decisions.md "player spawn" trigger event; zombie_high relies on it)
+    if (game_is_authority(player->game)) trigger_player_event(player->game, TRIGGER_EVENT_ON_PLAYER_SPAWN, player);
 }
 
 void player_queue_input(Player *player, const Input *input) {
@@ -2459,7 +2463,10 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
 
     combat_send_health(game, victim, dealer);
     // KrunkScript onPlayerDamage: damage > 0 that leaves the victim alive (PLS:4295-4299)
-    if (damage > 0.0f && victim->health > 0.0f) ks_game_on_player_damage(game, victim, dealer, damage);
+    if (damage > 0.0f && victim->health > 0.0f) {
+        trigger_player_event(game, TRIGGER_EVENT_ON_PLAYER_DAMAGE, victim); // playerTrigger("onPlayerDamage", victim) (WP-C)
+        ks_game_on_player_damage(game, victim, dealer, damage);
+    }
 
     return victim->health <= 0.0f;
 }
@@ -2564,6 +2571,10 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         const NetKillStreakPacket kst = {.uid = killer->uid, .streak = streak_message};
         game_send(game, NET_TARGET_ALL, NET_PACKET_KILL_STREAK, &kst, sizeof(kst));
     }
+    // WP-C: dropWeapon(victim, true), then playerTrigger("onPlayerDie", victim) / ("onPlayerKill", killer)
+    game_player_drop_all(game, player);
+    trigger_player_event(game, TRIGGER_EVENT_ON_PLAYER_DIE, player);
+    if (killer && killer != player) trigger_player_event(game, TRIGGER_EVENT_ON_PLAYER_KILL, killer);
     ks_game_on_player_death(game, player, killer); // KrunkScript onPlayerDeath(id, killerID) (PLS:4889-4891)
 }
 

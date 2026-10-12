@@ -5,6 +5,7 @@
 // Run from the repository root: ./<build>/match_test
 #include <shared.h>
 #include <ai.h>
+#include <triggers_v7.h> // trigger_queue_update (the v7 timerObjs loop)
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -572,7 +573,7 @@ static void test_trigger_player_actions(Game *game) {
     t->action = TRIGGER_ACTION_SET_TEAM;
     t->constant = 7;
     game_on_trigger(game, a, trigger, NULL);
-    CHECK(a->team == 2, "Set Player Team clamps 7 to 2");
+    CHECK(a->team == TRIGGER_TEAM_LIMIT, "Set Player Team clamps 7 to 5 (v7 teamLimit)");
     t->constant = -3;
     game_on_trigger(game, a, trigger, NULL);
     CHECK(a->team == 1, "Set Player Team clamps -3 to 1");
@@ -775,13 +776,13 @@ static void test_trigger_interface_actions(Game *game) {
     st->action = TRIGGER_ACTION_BROADCAST_POPUP;
     snprintf(st->text, sizeof(st->text), "%s", "tick");
     g_sent_count = 0;
-    game_tick_map_objects(game, 1999.0f);
+    trigger_queue_update(game, 1.999f); // the v7 timerObjs loop (game.update #5)
     CHECK(!find_sent(NET_PACKET_POPUP, -2, 0), "onTimer: not yet");
-    game_tick_map_objects(game, 2.0f);
+    trigger_queue_update(game, 0.002f);
     CHECK(find_sent(NET_PACKET_POPUP, NET_TARGET_ALL, 0) && near(st->timer, 2000.0f, 0.01f), "onTimer fires every Event Value seconds");
     store->active = 0;
     g_sent_count = 0;
-    game_tick_map_objects(game, 5000.0f);
+    trigger_queue_update(game, 5.0f);
     CHECK(!find_sent(NET_PACKET_POPUP, -2, 0), "onTimer: inactive triggers wait");
     store->active = 1;
 
@@ -1131,7 +1132,7 @@ static void test_trigger_map_parse(void) {
               near(t->timer, 10000000.0f, 1.0f), "TRIGGER fields");
         CHECK(o->interface_id == 2000 /* v7 interfaceIDMax */ && o->health == 40.0f && o->can_destroy && o->team == 2 && o->no_shoot, "TRIGGER interface / health / team / noShoot");
         CHECK(map->objects[1]->trig->event == TRIGGER_EVENT_NONE && !map->objects[1]->trig->text[0], "onAI events and bad texts are dropped");
-        CHECK(map->objects[2]->trig->event == TRIGGER_EVENT_NONE && !map->objects[2]->no_shoot, "unknown events name nothing");
+        CHECK(map->objects[2]->trig->event == TRIGGER_EVENT_ON_NUKE_END && !map->objects[2]->no_shoot, "v7 events 16-31 parse (te 22 onNukeEnd)");
         const Object *cube = map->objects[3];
         CHECK(cube->health == 50.0f && cube->can_destroy && cube->start_destroyed && cube->destroyed && !cube->active &&
               cube->respawn_time_start == 100.0f && cube->interface_id == 3, "CUBE destructible fields");

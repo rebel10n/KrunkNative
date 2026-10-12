@@ -485,6 +485,14 @@ else ()
         target_link_libraries(ks_server_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # triggers_test: the v7.1.4 trigger runtime (WP-C): events, conditions, actions, values, delays, chains,
+    # costs, pickups, and every trigger of the v7-format custom maps
+    add_executable(triggers_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/triggers_test.c)
+    target_link_libraries(triggers_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(triggers_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # trigger_authority_test: map triggers / interact fire on an authority game only (is_local or a server)
     add_executable(trigger_authority_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/trigger_authority_test.c)
     target_link_libraries(trigger_authority_test PRIVATE m)

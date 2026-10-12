@@ -453,6 +453,55 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             printf("{\"type\":\"popup\",\"id\":%u,\"text\":\"%s\"}", (unsigned int) type, packet.text);
             break;
         }
+        // WP-C v7 trigger packets (shared.h NET_PACKET_BLOCK_TRIGGERS)
+        case NET_PACKET_CUSTOM_VALUE: // "cv"
+        case NET_PACKET_GLOBAL_VALUE: { // "gv" / "gbl"
+            LOG_READ(NetValuePacket, type == NET_PACKET_CUSTOM_VALUE ? "custom_value" : "global_value");
+            packet.key[sizeof(packet.key) - 1] = 0;
+            printf("{\"type\":\"%s\",\"id\":%u,\"key\":\"%s\",\"value\":%g,\"reset\":%u}", type == NET_PACKET_CUSTOM_VALUE ? "custom_value" : "global_value",
+                   (unsigned int) type, packet.key, packet.value, (unsigned int) (packet.flags & NET_VALUE_RESET));
+            break;
+        }
+        case NET_PACKET_GUI_TOGGLE: { // "tgui"
+            LOG_READ(NetGuiTogglePacket, "gui_toggle");
+            printf("{\"type\":\"gui_toggle\",\"id\":%u,\"element\":%d,\"status\":%u}", (unsigned int) type, packet.id, (unsigned int) packet.status);
+            break;
+        }
+        case NET_PACKET_AMBIENT_CHANGE: { // "camb"
+            LOG_READ(NetAmbientPacket, "ambient");
+            printf("{\"type\":\"ambient\",\"id\":%u,\"ambient\":%d}", (unsigned int) type, packet.ambient);
+            break;
+        }
+        case NET_PACKET_STOP_SOUND: { // "sso"
+            LOG_READ(NetStopSoundPacket, "stop_sound");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            printf("{\"type\":\"stop_sound\",\"id\":%u,\"name\":\"%s\"}", (unsigned int) type, packet.name);
+            break;
+        }
+        case NET_PACKET_PLAYER_SOUND: { // "asnd" / "rsnd"
+            LOG_READ(NetPlayerSoundPacket, "player_sound");
+            packet.name[sizeof(packet.name) - 1] = 0;
+            printf("{\"type\":\"player_sound\",\"id\":%u,\"uid\":%d,\"add\":%u,\"name\":\"%s\"}", (unsigned int) type, packet.uid,
+                   (unsigned int) packet.add, packet.name);
+            break;
+        }
+        case NET_PACKET_CONFIRM_INTERACT: { // "cnfm"
+            LOG_READ(NetConfirmPacket, "confirm");
+            printf("{\"type\":\"confirm\",\"id\":%u,\"uid\":%d,\"kind\":%u}", (unsigned int) type, packet.uid, (unsigned int) packet.kind);
+            break;
+        }
+        case NET_PACKET_CHANGE_POSITION: { // "chgp"
+            LOG_READ(NetChangePositionPacket, "change_position");
+            printf("{\"type\":\"change_position\",\"id\":%u,\"uid\":%d,\"position\":[%g,%g,%g]}", (unsigned int) type, packet.uid, packet.x,
+                   packet.y, packet.z);
+            break;
+        }
+        case NET_PACKET_PICKUP: { // the pickup half of "inat" / "pkups"
+            LOG_READ(NetPickupPacket, "pickup");
+            printf("{\"type\":\"pickup\",\"id\":%u,\"uid\":%d,\"weapon\":%d,\"active\":%u}", (unsigned int) type, packet.uid, packet.weapon,
+                   (unsigned int) packet.active);
+            break;
+        }
         case NET_PACKET_SPRAY: { // "sp"
             LOG_READ(NetSprayPacket, "spray");
             printf("{\"type\":\"spray\",\"id\":%u,\"uid\":%d,\"index\":%d,\"position\":[%g,%g,%g],\"y_rot\":%d,\"x_rot\":%d}",

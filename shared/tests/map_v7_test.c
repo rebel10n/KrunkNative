@@ -305,7 +305,7 @@ static void check_all_prefabs_fixture(void) {
 
     const Object *trig_obj = by_id[PREFAB_TRIGGER];
     const TriggerData *t = trig_obj->trig;
-    CHECK(t && t->event_index == 16 && t->event == TRIGGER_EVENT_NONE && t->action_cost == 100 && t->action_method == 1 &&
+    CHECK(t && t->event_index == 16 && t->event == TRIGGER_EVENT_ON_INTERACT_KEY && t->action_cost == 100 && t->action_method == 1 &&
               t->single_use_player && t->action_count == 2, "TRIGGER v7 object keys");
     CHECK(trig_obj->no_player_col && fabsf(trig_obj->hitbox_h - 2.0f) < 1e-6f && fabsf(trig_obj->hitbox_w - 0.5f) < 1e-6f &&
               trig_obj->interact_msg && !strcmp(trig_obj->interact_msg, "Buy") && !trig_obj->legacy_trigger, "TRIGGER pl / hbh / hbw / inm");

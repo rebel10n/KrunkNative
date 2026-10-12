@@ -454,6 +454,7 @@ static void net_spawn_client(ClientConnection *client) {
         player->uid = client->id;
         player->team = accounts_assigned_team(client); // ranked roster team (players.setTeam isFromQueue), 0 = mode picks
         player->ping = client->ping_ms > 0 ? (float) client->ping_ms : 0.0f; // lag compensation (getStateConst)
+        player->custom_values = client->custom_values; // WP-C: custVals survive the map change (v7 never resets them)
         client->player = player;
         game_players_add(&g_server->game, player);
     }
@@ -510,6 +511,7 @@ static void net_request_spawn(ClientConnection *client) {
 
 static void net_free_players() {
     for (size_t i = 0; i < g_server->client_count; i++) {
+        if (g_server->clients[i].player) g_server->clients[i].custom_values = g_server->clients[i].player->custom_values; // WP-C
         g_server->clients[i].player = NULL;
         g_server->clients[i].spawned_at = 0.0f;
         g_server->clients[i].has_idle_position = 0;
@@ -760,6 +762,7 @@ void net_add_client(ClientConnection *client) {
     client->next_ping_at = 0.0; // first probe right away (pi on connect)
     client->social = (SocialAssembly) {0};
     client->voice = (SocialAssembly) {0};
+    memset(&client->custom_values, 0, sizeof(client->custom_values)); // WP-C: no custVals yet
     g_server->clients[g_server->client_count] = *client;
 
     ClientConnection *stored_client = &g_server->clients[g_server->client_count++];
@@ -1106,22 +1109,26 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
         case NET_PACKET_USE_STREAK: // WP-B: "k<slot>" -> players.checkStreak (v7.1.4 sandbox semantics)
             if (client->player && packet->length == sizeof(NetUseStreakPacket)) player_check_streak(client->player, packet->payload[0]);
             break;
-        case NET_PACKET_INTERACT: { // io_int
+        case NET_PACKET_INTERACT: { // io_int: v7 "int" type, uid / "intSec" (WP-C), or the v3 "int" action
+            if (!client->player || !packet->length) break;
+            if (packet->length == sizeof(NetInteractV7Packet)) {
+                NetInteractV7Packet interact;
+                memcpy(&interact, packet->payload, sizeof(interact));
+                if (interact.action == 1) game_player_interact_v7(&g_server->game, client->player, interact.type, interact.uid, interact.secondary);
+                else game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
+                break;
+            }
             NetInteractPacket interact = {0};
-            if (!client->player || !packet->length || packet->length > sizeof(interact)) break;
+            if (packet->length > sizeof(interact)) break;
             memcpy(&interact, packet->payload, packet->length);
             game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
             break;
         }
-        case NET_PACKET_TERMINAL_MSG: { // "tmc" has no handler: io_default logs it
-            NetTerminalMsgPacket msg;
-            char text[NET_CHAT_TEXT_SIZE];
-            if (packet->length < sizeof(int32_t) + 1 || packet->length > sizeof(msg)) break;
-            memset(&msg, 0, sizeof(msg));
-            memcpy(&msg, packet->payload, packet->length);
-            if (net_chat_sanitize(text, sizeof(text), msg.text, packet->length - sizeof(int32_t))) {
-                server_log("tmc %d,\"%s\" (%s)", (int) msg.uid, text, client->name);
-            }
+        case NET_PACKET_CONFIRM_INTERACT: { // "cnfm" (WP-C): confirmInteract
+            NetConfirmPacket confirm = {0};
+            if (!client->player || !packet->length || packet->length > sizeof(confirm)) break;
+            memcpy(&confirm, packet->payload, packet->length);
+            game_player_confirm_interact(&g_server->game, client->player, confirm.kind);
             break;
         }
         case NET_PACKET_PONG:

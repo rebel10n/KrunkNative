@@ -19,7 +19,7 @@
 #include <gamepad.h>  // Gamepad.active (controller: client/src/gamepad.c)
 #include <ui_mobile.h> // touch look (#mobileUI, client/src/ui/ui_mobile.c)
 #include <console.h>   // the developer console takes the keyboard while open (ui_console.c)
-#include <ui_terminal.h> // map terminals: "int" on the interact keys, #terminalInput typing (ui_terminal.c)
+#include <ui_interact.h> // v7 interaction: "int" / "intSec" type, uid, "drpw", "cnfm" (ui_interact.c)
 #include <voice_chat.h> // voiceKey -> toggleRecord (client/src/voice.c)
 #include <GLFW/glfw3.h>
 #include <math.h>
@@ -624,7 +624,7 @@ void ui_controls_chat_focus(const int focused) {
 }
 
 int ui_text_input_focused(void) {
-    if (g_ctl.chat_focused || ui_terminal_focused()) return 1;
+    if (g_ctl.chat_focused) return 1;
     const HtmlElem el = html_dom_active_element();
     if (!el) return 0;
     char tag[16] = "", editable[16] = "";
@@ -635,7 +635,7 @@ int ui_text_input_focused(void) {
 
 // Typing in #chatInput or in the developer console (main.c: no hotkeys, chars to the page).
 int ui_controls_chat_focused(void) {
-    return g_ctl.chat_focused || ui_console_is_open() || ui_terminal_focused();
+    return g_ctl.chat_focused || ui_console_is_open();
 }
 
 static void chat_blur(void) {
@@ -784,9 +784,10 @@ static void press_button(Client *client, const int code) {
         const NetInteractPacket spray = {.action = 0};
         client_net_send(client, NET_PACKET_INTERACT, &spray, sizeof(spray));
     }
-    if (bind_is(UI_CONTROL_INTERACT, code)) ui_terminal_interact(client, 0);     // io.send("int", 1)
-    if (bind_is(UI_CONTROL_INTERACT_SEC, code)) ui_terminal_interact(client, 1); // io.send("int", 1, true)
-    if (bind_is(UI_CONTROL_DROP, code)) log_once(UI_CONTROL_DROP, "drop (int 2)");
+    if (code == UI_INTERACT_CONFIRM_KEYCODE) ui_interact_confirm(client); // confirmKey: "cnfm" (a pending KR trigger)
+    if (bind_is(UI_CONTROL_INTERACT, code)) ui_interact_key(client, 0);     // io.send("int", type, id)
+    if (bind_is(UI_CONTROL_INTERACT_SEC, code)) ui_interact_key(client, 1); // io.send("intSec", type, id)
+    if (bind_is(UI_CONTROL_DROP, code)) ui_interact_drop(client);           // io.send("drpw")
     if (bind_is(UI_CONTROL_INSPECT, code)) player_inspect_weapon(me); // Game.players.wInspect(player)
     for (int i = 0; i < 5; i++) { // v7.1.4 streak loadout: slots 0-2 (callInStreak); 3-4 are v3 leftovers
         if (bind_is(UI_CONTROL_STREAK0 + i, code)) {
@@ -855,7 +856,6 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     }
 
     if (ui_console_key_event(client, key, scancode, action, mods)) return 1; // dev console + mods.ts keys (ui_console.c)
-    if (ui_terminal_focused()) return ui_terminal_key_event(client, key, scancode, action, mods, code >= 0 && bind_is(UI_CONTROL_CHAT, code));
 
     if (g_ctl.chat_focused) {
         if (press && code >= 0 && bind_is(UI_CONTROL_CHAT, code)) return chat_key(client);

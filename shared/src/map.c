@@ -261,8 +261,7 @@ static TriggerData *map_parse_trigger(Object *object, const cJSON *raw_obj, cons
     const int te = map_int(raw_obj, "te");
     // eventN = triggers.events[parseInt(te) || 0]?.name; addTrigger drops the onAI events
     t->event_index = te >= 0 && te < TRIGGER_V7_EVENT_COUNT && !trigger_v7_event_is_ai(te) ? te : -1;
-    // the v3.1.1-shaped runtime (shared/src/triggers.c) knows events 0..15 only
-    t->event = t->event_index >= 0 && t->event_index < TRIGGER_EVENT_COUNT ? t->event_index : TRIGGER_EVENT_NONE;
+    t->event = t->event_index; // the v7 runtime (shared/src/triggers_v7.c) runs events 0..31
     t->chance = map_clamp(map_int(raw_obj, "cha"), 0, 100);
     t->constant_event = map_clamp(map_int(raw_obj, "tce"), 0, TRIGGER_CONSTANT_EVENT_MAX);
     t->interface_target = map_int(raw_obj, "tin") ? map_clamp(map_int(raw_obj, "tin"), 0, TRIGGER_INTERFACE_MAX) : 0;

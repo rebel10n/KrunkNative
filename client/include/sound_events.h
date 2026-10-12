@@ -15,6 +15,7 @@ void sound_events_hitmarker(void);                       // gF: hit_0
 void sound_events_kill(int headshot);                    // gk: kill sound (headshot_0)
 void sound_events_remote_shot(Client *client, const Player *shooter); // "s": play3D weapon sound
 void sound_events_explosion(vec3 position);              // gb: play3D explosion
+void sound_events_change_ambient(int ambient);           // WP-C "camb": changeAmbient(soundscape) (the next map resets it)
 
 // Inline page handlers (client/src/ui/ui_sound.c) for ui_handlers.c's table:
 // "playTick" -> tick_0 at 0.2, "SOUND.play" -> SOUND.play(name, volume, loop, rate).

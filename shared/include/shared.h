@@ -854,6 +854,7 @@ struct Game_t;
 #define PLAYER_CHECKPOINT_LIST_MAX 256 // single-use check points one player can remember
 #define PLAYER_SCORE_OBJS_MAX 256      // map-logic WP-B: score zones one player can have taken (scoreObjs)
 #define PLAYER_COLLIDING_OBJS_MAX 64   // map-logic WP-B: enter / exit trigger objects a player is inside (collidingObjs)
+#define PLAYER_PICKED_MAX 64           // WP-C: lastPicked slots (weapon ids 0..63)
 
 typedef struct {
     int uid;      // dealer uid, -1 = free slot
@@ -1221,6 +1222,12 @@ typedef struct Player_t {
     int build_index;                   // buildIndex: the Build Tool's buildObjs.js pick (0..3)
     unsigned char select_build:1;      // selectBuild: aiming with the Build Tool (the pick wheel is up)
     // ---- end WP-B
+    // ---- WP-C: v7.1.4 trigger / interaction state (shared/src/triggers_v7.c, interact.c) ----
+    TriggerValueSet custom_values; // custVals: Set / Inc Player Value, condition 1, value type 2; never reset ("cv")
+    int pending_trigger;          // pendingTrigger: map uid + 1 of the KR-cost onInteractKey awaiting "cnfm", 0 none
+    int pending_spin;             // pendingSpin: PRIZE_WHEEL uid + 1 awaiting "cnfm" 2, 0 none
+    int last_picked[PLAYER_PICKED_MAX]; // lastPicked[weapon id]: uid + 1 of the pickup it came from, 0 none
+    // ---- end WP-C ----
 } Player;
 
 typedef struct {
@@ -1464,6 +1471,9 @@ typedef struct {
     // WP-A (shared/include/account.h): the account facts of a player for the v7 zones, trigger
     // conditions / methods and class locks. NULL = guest. Returns 1 when *out was filled.
     int (*account_info)(const struct Game_t*, const Player*, struct AccountInfo_t *out);
+    // WP-C: KR-cost triggers (tam 0 + tac, v7 DB call 138): spend `amount` KR of the player's
+    // account; 1 = spent. NULL (offline, no kn_brain wallet): KR-cost triggers are unaffordable.
+    int (*spend_kr)(struct Game_t*, const Player*, int amount);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -1618,6 +1628,9 @@ typedef struct Game_t {
     void *server; // TODO
 
     GameWorld world; // map-logic WP-B (shared/include/world.h): zone, moved objects, builds
+    // ---- WP-C: the v7.1.4 trigger runtime (shared/src/triggers_v7.c): globalVals, triggerQueue,
+    // trigger chains, per-object custVals, playerSounds, pickups. Allocated on first use, NULL none.
+    struct TriggerRuntime_t *trigger_rt;
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);
@@ -1644,25 +1657,69 @@ void game_sync_leaders(Game*, int uid);  // LEADERBOARD to `uid` (or NET_TARGET_
 void game_start_round(Game*);            // fresh round timer + stats (after game_init)
 void game_end_round(Game*);              // Krunker endGame(3): END packets, players cleared
 void game_set_round_time(Game*, float seconds); // debug: seconds left in the running round (TIMER goes out next tick)
-// Interaction (shared/src/interact.c): players.interact / the terminal checks of Player.
-#define GAME_TERMINAL_RADIUS 7.0f      // addTerminal tRadius
+// Interaction (shared/src/interact.c): v7.1.4 players.interact ("int" type, uid / "intSec"),
+// confirmInteract ("cnfm"), dropWeapon ("drpw") and Player's changeInteract prompts. Terminals
+// are gone in v7 (TERMINAL builds nothing); weapon pickups (WEAPON_PICKUP) are interact type 6.
 #define GAME_INTERACT_TIMER 0.1f       // config.interactTimer (s)
 #define GAME_SPRAY_TIMER 1.0f          // config.sprayTimer (s)
 #define GAME_SPRAY_RANGE 25.0f         // config.sprayRange
 #define GAME_SPRAY_SCALE 15.0f         // config.sprayScale: the decal's width and height
-int  game_terminal_in_range(const Game*, const Player*, int prompt); // map object index of a terminal the player can open, -1 none; prompt: skip noMsg ones
-void game_player_interact(Game*, Player*, int action, int secondary); // "int": 0 spray (game_player_spray), 1 terminals / gates / banks (authority)
+// v3-shaped "int": 0 spray (game_player_spray), 1 interact (the server resolves the target from
+// its own prompt scan, game_interact_scan), 2 drop weapon. Authority only.
+void game_player_interact(Game*, Player*, int action, int secondary);
+// v7 "int" type, uid (lastInteractData) / "intSec" type, uid (secondary): authority only.
+void game_player_interact_v7(Game*, Player*, int type, int uid, int secondary);
+void game_player_confirm_interact(Game*, Player*, int kind); // "cnfm": kind 0 trigger (pendingTrigger), 2 prize wheel
+void game_player_drop_weapon(Game*, Player*);  // "drpw": players.dropWeapon(player) of the weapon in hand
+void game_player_drop_all(Game*, Player*);     // dropWeapon(player, true): at a death / leave, picked weapons go back to their pickups
 void game_player_spray(Game*, Player*); // players.spray: NET_PACKET_SPRAY + the "spray" sound when the view ray hits a wide enough face
-// players.js changeInteract priorities: the #interactMsg line the local player gets this tick.
+// players.js changeInteract types (the #interactMsg line and lastInteractData.type).
 typedef enum {
     GAME_INTERACT_NONE = -1,
-    GAME_INTERACT_GATE = 0,       // "Press [key] to Open/Close gate [price]"
-    GAME_INTERACT_BANK = 1,       // deposit box: deposit / withdraw
-    GAME_INTERACT_TERMINAL = 2,   // "Press [key] to Open Terminal"
-    GAME_INTERACT_TRIGGER = 4,    // onInteract trigger: "Press [M1] to Interact" (priority 1)
+    GAME_INTERACT_GATE = 0,        // "Press [key] to <inm || Open/Close gate> [price]"
+    GAME_INTERACT_BANK = 1,        // deposit box: deposit / withdraw
+    GAME_INTERACT_BOMB = 3,        // bomb site plant / equip / defuse (data 1..3; modes)
+    GAME_INTERACT_TRIGGER = 4,     // onHoldMouse: "Hold [M1] to <inm || Interact>" (priority 1)
+    GAME_INTERACT_PICKUP = 6,      // WEAPON_PICKUP: "Press [key] to <inm || pickup NAME> [price]"
+    GAME_INTERACT_KEY = 7,         // onInteractKey trigger: "Press [key] to <inm || Interact> [cost]"
+    GAME_INTERACT_SPINNER = 9,     // PRIZE_WHEEL (KR store wheels: no store natively)
+    GAME_INTERACT_CLAIM = 10,      // airdrop claim (hold interact)
+    GAME_INTERACT_SPAWNABLE = 12,  // spawnable pickup message
+    GAME_INTERACT_MYSTERY_BOX = 13,
+    GAME_INTERACT_PERK = 14,
+    GAME_INTERACT_KRUM = 15,
 } GameInteractType;
-#define GAME_INTERACT_RADIUS 7.0f      // addGate / addBank / addTerminal tRadius
-int game_interact_prompt(const Game*, const Player*, int *object_index); // GameInteractType, object index (or -1)
+#define GAME_INTERACT_RADIUS 7.0f      // addGate / addBank tRadius (and onInteractKey triggers)
+// One tick of changeInteract calls for a player: the prompt that wins (vO422: type, object,
+// priority rules, noMsg skipped) and lastInteractData (vO423: the last call whose type is not
+// 3 / 10 / 11 / 12), which is what the interact key sends.
+typedef struct {
+    int type;        // GameInteractType of the prompt, GAME_INTERACT_NONE = no prompt
+    int index;       // its map object index, -1 none
+    int data;        // the prompt's data (bomb 1..3)
+    int last_type;   // lastInteractData.type, GAME_INTERACT_NONE none
+    int last_uid;    // lastInteractData.id (map object uid), -1 none
+} GameInteractScan;
+void game_interact_scan(const Game*, const Player*, GameInteractScan *out);
+int game_interact_prompt(const Game*, const Player*, int *object_index); // the scan's prompt type and object index (or -1)
+// WEAPON_PICKUP runtime (game.updatePickup / resetPickups): the weapon id it holds now (-1 empty),
+// whether it shows, its price / method; 0 when `uid` is no pickup.
+typedef struct {
+    int weapon;      // pickup: weapon id, -1 none (a pickupRep pickup emptied by a swap)
+    int ammo;        // pickupAmmo
+    int score;       // scoreP ("sp")
+    int method;      // "md" 0..7 (as gates)
+    int team;        // "tm"
+    unsigned char active:1;
+    unsigned char replace:1;   // pickupRep (!"wr"): a pickup swaps the old weapon in
+    unsigned char random:1;    // "rw": a random weapon at round reset
+    unsigned char no_msg:1;    // "nm"
+    int random_group;          // "rwg" 1..10000, 0 none
+    vec3 position;             // x, y, z (moved by drops), bottom
+    vec3 origin;               // orgX/Y/Z
+} GamePickup;
+int game_pickup_state(const Game*, int uid, GamePickup *out);
+void game_pickup_set(Game*, int uid, int weapon, int active, const vec3 *position, int ammo); // client mirror of "inat" pickups
 
 // Map triggers, interfaces, check points, teleporters (shared/src/triggers.c).
 typedef enum {
@@ -1671,9 +1728,11 @@ typedef enum {
     GAME_HIT_PROJECTILE,    // projectile: onShoot / onDamage / onProjectile (+ onThrowingMelee for the knife)
 } GameHitKind;
 struct GameAI_t;
-void game_on_trigger(Game*, Player *source, Object *object, int *chain); // game.onTrigger (authority); chain NULL starts one
+// game.onTrigger(player, obj, chain) (v7.1.4, shared/src/triggers_v7.c, authority): `chain` points to the
+// chain key of the calling action (triggerChains[key]); NULL starts a chain keyed by the object's uid.
+void game_on_trigger(Game*, Player *source, Object *object, int *chain);
 void game_trigger_ai_death(Game*, Player *source, struct GameAI_t *ai); // AI.kill: onAIDeath -> game.onTrigger(source, ai)
-int  game_object_event(const Object*);                  // the object's TriggerEvent (TRIGGER_EVENT_NONE without one)
+int  game_object_event(const Object*);                  // the object's v7 TriggerEvent 0..31 (TRIGGER_EVENT_NONE without one)
 void game_object_hit(Game*, Object*, Player *dealer, float damage, int thrown_melee, int kind); // a shot / swing / projectile reached a map object
 void game_destroy_object(Game*, Object*, Player *by);   // health 0: active = false, destObjs, "do"
 void game_respawn_object(Game*, Object*, int *chain);   // "ro": active again, onRespawn
@@ -1767,9 +1826,8 @@ typedef enum {
     // Chat command effects (shared/src/chat_commands.c), numbered from 60.
     NET_PACKET_CHEAT = 60,       // S->C: NetCheatPacket (Krunker "noc" / "unl" / "fh" to the target, "borders" / "forcecol" to all)
     // Interaction (shared/src/interact.c)
-    NET_PACKET_INTERACT = 61,    // C->S: NetInteractPacket (Krunker "int" action [, secondary])
-    NET_PACKET_TERMINAL = 62,    // S->C to the player: NetTerminalPacket (Krunker "ot" uid: openTerminal)
-    NET_PACKET_TERMINAL_MSG = 63,// C->S: NetTerminalMsgPacket (Krunker "tmc" uid, text)
+    NET_PACKET_INTERACT = 61,    // C->S: NetInteractPacket (v3 "int" action [, secondary]) or NetInteractV7Packet (v7 "int" type, uid)
+    // 62 / 63: the v3.1.1 terminal packets ("ot" / "tmc"); v7.1.4 has no terminals (retired, WP-C)
     NET_PACKET_SPRAY = 64,       // S->C to all: NetSprayPacket (Krunker "sp": players.spray -> addSpray)
     // Social hub (shared/include/social.h; Krunker's /api/ws socket + /api/* routes), numbered from 70.
     NET_PACKET_SOCIAL_REQUEST = 70, // C->S: NetSocialChunk pieces of one JSON request frame
@@ -2236,20 +2294,11 @@ typedef struct {
     uint8_t on;
 } NetCheatPacket;
 
-// "int": 0 spray, 1 interact (gates / pickups / terminals; secondary = interactSecKey), 2 drop.
+// v3 "int": 0 spray, 1 interact (secondary = interactSecKey), 2 drop. v7 peers send NetInteractV7Packet.
 typedef struct {
     uint8_t action;
     uint8_t secondary;
 } NetInteractPacket;
-
-typedef struct {
-    int32_t uid;    // the terminal's map object index (Krunker GameObject uid)
-} NetTerminalPacket;
-
-typedef struct {
-    int32_t uid;
-    char text[NET_CHAT_TEXT_SIZE]; // #terminalInput value (maxlength 70), NUL-terminated
-} NetTerminalMsgPacket;
 
 // "sp" [sid, sprayIndex, x, y, z, xDr, yDr] (players.spray): the decal's centre (0.1 in front of
 // the face) and its plane rotation in degrees: y_rot (three.js rotation.y) 0 = +z face, 180 = -z,
@@ -2712,6 +2761,81 @@ typedef struct {
     uint8_t data[NET_GAME_CONFIG_CHUNK_SIZE];
 } NetGameConfigChunk;
 // ---- end WP-E lobby packets ----
+// ---- WP-C trigger / interaction packets (v7.1.4, doc/v7/map-logic.md §3.9, §5.3), ids in
+// NET_PACKET_BLOCK_TRIGGERS (120-129). Old peers ignore unknown ids; a client sends the C->S
+// ones (and the v7 INTERACT payload) only to servers that announced NET_PROTOCOL_MINOR_V7 (or
+// offline). Built by shared/src/triggers_v7.c / interact.c, handled in client/src/map_triggers.c.
+#define NET_PACKET_CUSTOM_VALUE (NET_PACKET_BLOCK_TRIGGERS + 0)     // S->C to the player: NetValuePacket ("cv" key, val)
+#define NET_PACKET_GLOBAL_VALUE (NET_PACKET_BLOCK_TRIGGERS + 1)     // S->C to all: NetValuePacket ("gv" key, val; the "gbl" join list)
+#define NET_PACKET_GUI_TOGGLE (NET_PACKET_BLOCK_TRIGGERS + 2)       // S->C: NetGuiTogglePacket ("tgui" id, status)
+#define NET_PACKET_AMBIENT_CHANGE (NET_PACKET_BLOCK_TRIGGERS + 3)   // S->C to all: NetAmbientPacket ("camb" soundscape)
+#define NET_PACKET_STOP_SOUND (NET_PACKET_BLOCK_TRIGGERS + 4)       // S->C to all: NetStopSoundPacket ("sso" name, isAsset)
+#define NET_PACKET_PLAYER_SOUND (NET_PACKET_BLOCK_TRIGGERS + 5)     // S->C to all: NetPlayerSoundPacket ("asnd" / "rsnd"; the "asnd" join list)
+#define NET_PACKET_CONFIRM_INTERACT (NET_PACKET_BLOCK_TRIGGERS + 6) // S->C to the player: NetConfirmPacket ("cnfm" uid, kind); C->S: NetConfirmPacket (uid ignored)
+#define NET_PACKET_CHANGE_POSITION (NET_PACKET_BLOCK_TRIGGERS + 7)  // S->C to all: NetChangePositionPacket ("chgp")
+#define NET_PACKET_PICKUP (NET_PACKET_BLOCK_TRIGGERS + 8)           // S->C to all: NetPickupPacket (the pickup half of v7 "inat"; joiners: "pkups")
+// NET_PACKET_BLOCK_TRIGGERS + 9: free
+
+#define NET_VALUE_RESET 0x01 // NetValuePacket.flags: clear the client's set first (join list / round start)
+typedef struct {
+    uint8_t flags;                      // NET_VALUE_*
+    char key[TRIGGER_VALUE_KEY_SIZE];   // "" with NET_VALUE_RESET: only the clear
+    double value;
+} NetValuePacket;
+
+typedef struct {
+    int32_t id;       // gui element id
+    uint8_t status;   // 0 toggle, 1 show, 2 hide
+} NetGuiTogglePacket;
+
+typedef struct {
+    int32_t ambient;  // config.soundScapes value: "ambient_<n>"
+} NetAmbientPacket;
+
+typedef struct {
+    char name[NET_SOUND_NAME_SIZE]; // emitter sound name or the asset id digits
+    uint8_t asset;                  // user asset sound (no asset sounds natively)
+} NetStopSoundPacket;
+
+typedef struct {
+    int32_t uid;                    // the player the loop follows
+    uint8_t add;                    // 1 asnd, 0 rsnd
+    uint8_t force;                  // rsnd force: every sound of that player
+    uint8_t loop;                   // asnd data.loop
+    float volume, rate;             // asnd data.vol / data.rate
+    char name[NET_SOUND_NAME_SIZE];
+} NetPlayerSoundPacket;
+
+typedef struct {
+    int32_t uid;      // S->C: the object awaiting confirmation (pendingTrigger / pendingSpin), -1 clears
+    uint8_t kind;     // 0 trigger, 2 prize wheel
+} NetConfirmPacket;
+
+typedef struct {
+    int32_t uid;      // the moved player
+    float x, y, z;    // feet
+    uint8_t recon, stop_momentum, has_direction;
+    int32_t direction;
+} NetChangePositionPacket;
+
+typedef struct {
+    int32_t uid;      // the pickup's map object uid
+    int32_t weapon;   // weapon id it holds now, -1 empty
+    uint8_t active;
+    uint8_t moved;    // position below is valid (a drop moved it; else it sits at its origin)
+    float position[3];
+    int32_t ammo;     // pickupAmmo
+} NetPickupPacket;
+
+// NET_PACKET_INTERACT from a v7 client (the v3 NetInteractPacket is the first two bytes): action 1
+// with lastInteractData {type, uid}; servers tell the two apart by the length.
+typedef struct {
+    uint8_t action;     // 0 spray, 1 interact, 2 drop weapon ("drpw")
+    uint8_t secondary;  // intSec
+    int32_t type;       // lastInteractData.type (GameInteractType)
+    int32_t uid;        // lastInteractData.id
+} NetInteractV7Packet;
+// ---- end WP-C packets ----
 #pragma pack(pop)
 
 typedef struct {

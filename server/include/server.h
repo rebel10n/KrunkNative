@@ -123,6 +123,9 @@ typedef struct {
 
     Player *player;
     ServerAccount acct;            // backend account + match stats (server/src/accounts.c)
+    // WP-C: v7 player.custVals are never reset, but KN frees the players at every map change: the
+    // connection keeps them across rounds (net_free_players / net_spawn_client)
+    TriggerValueSet custom_values;
 } ClientConnection;
 
 typedef struct {

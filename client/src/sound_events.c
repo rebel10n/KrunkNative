@@ -200,6 +200,19 @@ static void map_start_emitters(const Map *map) {
 
 // 106.js game init: `H.play("ambient_" + ambInd, amvVols[ambInd] || 0.12, true, 1)`, the
 // previous ambience stopped only when the index changes.
+// WP-C "camb" (v7 window.changeAmbient): the ambience loop switches when the index changes.
+void sound_events_change_ambient(const int ambient) {
+    if (ambient <= 0 || ambient == g_sound.ambient) return;
+    char name[32];
+    if (g_sound.ambient) {
+        snprintf(name, sizeof(name), "ambient_%d", g_sound.ambient);
+        audio_stop(name);
+    }
+    g_sound.ambient = ambient;
+    snprintf(name, sizeof(name), "ambient_%d", ambient);
+    audio_play(name, ambient_volume(ambient), 1, 1.0f); // SOUND.play("ambient_" + id, amvVols[id] || 0.12, true, 1)
+}
+
 static void map_sounds_update(Client *client) {
     const Map *map = client->game.ready ? client->game.map : NULL;
     if (map == g_sound.map && client->game.current_map_index == g_sound.map_index) return;

@@ -64,6 +64,18 @@ CASES = {
     "boost-pad": ("assets/maps/kanji.json", [(1500, (71, -154, -269)), (1550, "state"), (1900, "state")], state_rose(4.0)),
     # AI (shared/src/ai.c): the map's BOTs reach the client
     "map-ai": ("assets/maps/soul_sanctum.json", [(2500, "state")], has(r'"type":"ai_add"')),
+    # v7.1.4 trigger runtime (WP-C, shared/src/triggers_v7.c) on the v7-format custom maps
+    "v7-enter-kill": ("assets/maps/custom/ESP_Parkour.json", [(1500, (122, 5, 45))], has(r'"type":"kill"')),
+    "v7-player-spawn": ("assets/maps/custom/zombie_high.json", [(2500, "state")], has(r'"type":"unknown","id":48')), # onPlayerSpawn -> Change Class / Clear Loadout ("inat")
+    "v7-enter-message": ("assets/maps/custom/Slide_Neon_Stage.json", [(6000, (4861, 1058, -235))], has(r'"type":"chat".*"text":"Time logged"')),
+    "v7-enter-delayed": ("assets/maps/custom/eterno_jump.json", [(1500, (-3515.75, 46, 8))], has(r'"type":"chat".*"text":"Time logged"')),
+    "v7-condition-score": ("assets/maps/custom/Bhop_VIP.json", [(1200, "con score 300"), (1500, (16745, -100, 1008))],
+                           has(r'"type":"chat".*"text":"Successfully logged time"')), # cd 1: score > 60
+    "v7-condition-false": ("assets/maps/custom/slide_moonlight.json", [(1500, (-8634, -715, -6218))],
+                           lambda log: (re.search(r'Successfully logged time', log) is None, "cd 1 score == 21 must stay false")),
+    "v7-interact-key-node": ("assets/maps/custom/Krunk_Plaza.json", [(1500, (561, 12, 363)), (2200, "down G"), (2300, "up G")],
+                             has(r'"type":"change_position"')), # onInteractKey -> Teleport Player to Path Node 1 ("chgp")
+    "v7-join-globals": ("assets/maps/custom/zombie_high.json", [(2000, "state")], has(r'"type":"global_value".*"reset":1')), # the "gbl" join list
 }
 
 def run_case(build, mode, name, work, egl):

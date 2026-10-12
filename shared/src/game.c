@@ -336,9 +336,12 @@ void game_start_round(Game *game) {
     game->leaders_dirty = 1;
     memset(game->projectiles, 0, sizeof(game->projectiles));
 
-    // finishInit: the mode's clock (gameTime), waitTimers, conditions, objectives, gameStart
+    // finishInit: resetAll / resetPickups / triggerQueue / globalVals (WP-C), then the mode's clock
+    // (gameTime), waitTimers, conditions, objectives, gameStart, then multiObjectTrigger("onGameStart")
+    trigger_round_reset(game);
     if (game->mode) mode_round_start(game);
     world_round_start(game); // WP-B: resetZone, movedObjs, saveColls (shared/src/world.c)
+    trigger_multi_event(game, TRIGGER_EVENT_ON_GAME_START, NULL);
 }
 
 static void game_send_timer(Game *game, const int uid, const int seconds, const int end) {
@@ -514,6 +517,8 @@ void game_send_round_state(Game *game, const int uid) {
 
 void game_player_left(Game *game, Player *player) {
     mode_player_left(game, player); // players.remove: dropFlag
+    game_player_drop_all(game, player); // players.remove: dropWeapon(player, true) (WP-C)
+    trigger_player_left(game, player);  // its looping sounds stop, queued actions lose it (WP-C)
     if (game->nuke_player == player) {
         game->nuke_player = NULL;
         game->nuke_timer = 0.0f;
@@ -662,6 +667,9 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                     game_send(game, game->nuke_player->uid, NET_PACKET_KILL_MEDALS, &medals, sizeof(medals));
                     player_score(game->nuke_player, nuke_reward, 1);
                 }
+                // v7 streaks.js: findTriggers("onNukeEnd", nukePlayer) in custom games; KN fires it on
+                // every map (official maps have no nuke triggers)
+                trigger_multi_event(game, TRIGGER_EVENT_ON_NUKE_END, game->nuke_player);
             }
         }
 

@@ -7,6 +7,7 @@
 // STREAK / JUGGERNAUT packets (client/src/net/combat_events.c) so its prediction matches.
 #include <shared.h>
 #include "modes/mode_internal.h"
+#include <triggers_v7.h> // WP-C: onNukeStart
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -507,6 +508,7 @@ int game_start_nuke(Game *game, Player *player) {
     game->nuke_player = player;
     const NetNukePacket packet = {.state = 0};
     game_send(game, NET_TARGET_ALL, NET_PACKET_NUKE, &packet, sizeof(packet)); // "n", 0
+    trigger_multi_event(game, TRIGGER_EVENT_ON_NUKE_START, player); // findTriggers("onNukeStart", player) (WP-C)
     return 1;
 }
 

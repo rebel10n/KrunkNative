@@ -18,7 +18,7 @@
 #include <gamepad.h> // Gamepad.active: "PRESS START" (client/src/gamepad.c)
 #include <spectate.h> // the Spectate switch: "CLICK TO SPECTATE" (client/src/spectate.c)
 #include <console.h> // developer console overlay (client/src/ui/ui_console.c)
-#include <ui_terminal.h> // map terminals (client/src/ui/ui_terminal.c)
+#include <ui_interact.h> // the interact prompt (client/src/ui/ui_interact.c)
 #include <client_settings.h> // Exit menu item + Settings > Client (client/src/ui/ui_client_settings.c)
 #include <math.h>
 #include <stdarg.h>
@@ -1236,7 +1236,7 @@ void client_menu_tick(Client *client) {
 
     client_hud_html_tick(client, (float) glfwGetTime()); // HTML HUD (hud_ui.c)
     ui_console_tick(client); // developer console (ui_console.c)
-    ui_terminal_tick(client); // map terminals: interact prompt, typewriter (ui_terminal.c)
+    ui_interact_tick(client); // the interact prompt and hold progress (ui_interact.c)
 
     // Round end: the end screen frees the pointer (Krunker exits pointer lock so its
     // results can be clicked) and relocks when the next round starts.

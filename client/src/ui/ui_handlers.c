@@ -12,7 +12,6 @@
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
 #include <spectate.h>     // spectate_set_requested (toggleSpect)
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
-#include <ui_terminal.h>  // #terminalInput keys (map terminals, ui_terminal.c)
 #include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
 #include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
@@ -650,7 +649,6 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
     // web: GLFW's keydown (window capture) already bound this key in the controls window
     if (ui_controls_take_swallowed_key()) return 0;
     if (ui_console_page_key(ev)) return 0; // Enter/Escape/Tab/arrows/` in the console input
-    if (ui_terminal_page_key(ev)) return 0; // Enter (tmc) / Escape in #terminalInput
     if (target_is_form_control(ev->target)) {
         // Enter in #chatInput (menu chat natively, every chat Enter on the web): send/blur.
         // Natively in game main.c routes the chat key before the page sees it.
