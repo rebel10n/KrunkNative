@@ -323,6 +323,9 @@ typedef struct {
     PlayerArms **arms;
 
     Mesh *cosmetics[4]; // third-person hat, back (body), waist and face items (PLAYER_COSMETIC_*), NULL when unused
+    // v7 animated items (Cosmetic.has_anim) in the same slots: GLTF models (gltf.h) instead of
+    // cosmetics[slot], NULL when unused
+    struct GltfInstance *cosmetic_models[4];
 } PlayerMesh;
 
 enum { PLAYER_COSMETIC_HAT, PLAYER_COSMETIC_BACK, PLAYER_COSMETIC_WAIST, PLAYER_COSMETIC_FACE, PLAYER_COSMETIC_SLOTS };

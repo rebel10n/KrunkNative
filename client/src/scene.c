@@ -1,5 +1,6 @@
 #include <gl.h>
 #include <client.h>
+#include <gltf.h>
 #include <shadow.h>
 #include <math.h>
 #include <stdlib.h>
@@ -13,6 +14,7 @@ Scene *scene_init() {
 void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_add_mesh(scene, player_mesh->cosmetics[i]);
+        scene_add_gltf(scene, player_mesh->cosmetic_models[i]);
     }
 
     if (player_mesh->body) {
@@ -79,6 +81,7 @@ void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const
 
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_remove_mesh(scene, player_mesh->cosmetics[i]);
+        scene_remove_gltf(scene, player_mesh->cosmetic_models[i]);
     }
 
     if (player_mesh->body) {

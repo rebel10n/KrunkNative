@@ -46,6 +46,7 @@
 #include <process.h>
 #endif
 #include "../html/engine/engine.h"
+#include <gltf.h> // gltf_set_clock_override: animated GLTF items follow the pinned clock
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -472,6 +473,7 @@ static void scenario_frame(Client *client, const double clock_ms, const int pres
     g_sc.clock_ms = clock_ms;
     engine_set_clock_override(clock_ms);
     hud_ui_set_clock(clock_ms / 1000.0);
+    gltf_set_clock_override(clock_ms / 1000.0);
     const double now_s = clock_ms / 1000.0;
     double delta = now_s - g_sc.last_now_s;
     if (delta <= 0.0) delta = SCENARIO_FRAME_MS / 1000.0;

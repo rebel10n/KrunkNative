@@ -17,6 +17,7 @@
 // client's game.
 #include <gl.h>
 #include "viewer_internal.h"
+#include <gltf.h>
 #include <fast_obj.h>
 #include <stb_image.h>
 #include <math.h>
@@ -869,8 +870,11 @@ static void player_visibility(Player *player) {
     int child = 0;
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         Mesh *item = mesh->cosmetics[order[i]];
-        if (!item) continue;
-        item->visible = show && flags[child++];
+        GltfInstance *model = mesh->cosmetic_models[order[i]]; // v7 animated (GLTF) item
+        if (!item && !model) continue;
+        const int visible = show && flags[child++];
+        if (item) item->visible = visible;
+        gltf_instance_set_visible(model, visible);
     }
 
     for (int slot = 0; slot < player->loadout_size; slot++) {

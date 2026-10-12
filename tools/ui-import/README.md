@@ -49,6 +49,17 @@ asset host's versioned URL), so they are not copied into `ui/`. `--check` lists 
 missing or differ. Deploy: `ansible-playbook central.yml --tags web` (role kn_web syncs
 `assets/` and rehashes `assets/version.txt`).
 
+### Krunker v7.1.4 content
+
+`game_assets.py --v7` (`make assets-import-v7`; `make assets-check-v7` is the `--check` drift
+mode) copies v7.1.4's `public/{models,textures,sound,videos,user-assets,scares}` into `assets/`
+and writes `assets/skins.json` (the v7 store table: `v7_skins.js` unpacks `public/skins.jspck`
+with v7's own `src/shim/jspck.js` and merges `store.js` templates) and `assets/previews.json`.
+It refuses a skin table that would move an existing store index (inventory `skin_id`).
+`gen_cosmetics.py` then regenerates `client/src/cosmetics_table.c` from `assets/skins.json`
+(`--check`: exit 1 when out of date). Provenance and sizes: `assets/README.md`. Page images
+stay under `ui/img` (menu import above); `assets/` is game content only.
+
 ## Model viewer page
 
 `viewer_page.py` (step of `import.py`, skip with `--no-viewer`) writes

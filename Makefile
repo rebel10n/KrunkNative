@@ -168,6 +168,16 @@ ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon li
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
+.PHONY: assets-import-v7 assets-check-v7
+assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/cosmetics_table.c
+	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
+	$(PYTHON) -I tools/ui-import/gen_cosmetics.py
+
+assets-check-v7: ## Drift check of assets/ and cosmetics_table.c against Krunker v7.1.4 (exit 1 on any difference)
+	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
+	$(PYTHON) -I tools/ui-import/gen_cosmetics.py --check
+
+
 # uidiff renders every scenario through the real client and its C UI logic
 # (`client_bin --render-scenario`, client/src/ui/ui_scenario.c) on llvmpipe inside one
 # Xvfb server (1920x1080, large enough for every scenario size), then pixel-diffs the

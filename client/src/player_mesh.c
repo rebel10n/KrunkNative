@@ -1,5 +1,6 @@
 #include <client.h>
 #include <cosmetics.h>
+#include <gltf.h>
 #include <render_settings.h>
 #include "viewer/viewer_store.h" // game.store.skins: weapon / melee skins
 #include <math.h>
@@ -538,28 +539,52 @@ static Mesh *generate_cosmetic_mesh(const Cosmetic *item, const char *dir, const
     return mesh;
 }
 
+// v7 hasAnim items: RENDER.loadAnimMesh(generateMeshData(item), 0, 0, 0, PI / 2, scale, holder)
+// loads "models/<dir>/<prefix><id>.<fileExt || gltf>" (render.js:2231) with the GLTF's own
+// materials and plays every clip (timeScale animS); holder = genObj3D(0, y, -sitOffZ).
+// TODO (v7 render.js f1117): color / opacity overrides, env maps, pulse/rgb on the GLTF materials.
+static GltfInstance *generate_cosmetic_model(const Cosmetic *item, const char *dir, const char *prefix, const float y, const float scale, MeshTransform *parent) {
+    char model[128];
+    snprintf(model, sizeof(model), "models/%s/%s%d.%s", dir, prefix, item->id, item->file_ext ? item->file_ext : "gltf");
+    char *path = concat(assets_path(), model);
+    GltfInstance *instance = path ? gltf_instance_create(gltf_model_load(path), item->anim_s) : NULL;
+    free(path);
+    if (!instance) return NULL;
+
+    instance->root.position = (vec3) {0.0f, y, -item->sit_off_z};
+    instance->root.rotation.y = (float) M_PI * 0.5f;
+    instance->root.scale = (vec3) {scale, scale, scale};
+    instance->root.parent = parent;
+    return instance;
+}
+
+static void player_generate_cosmetic(PlayerMesh *player_mesh, const int slot, const Cosmetic *item, const char *dir, const char *prefix, const float y, const float scale) {
+    MeshTransform *body = player_mesh->body_anchor; // Krunker's lowerBody
+    if (item->has_anim) player_mesh->cosmetic_models[slot] = generate_cosmetic_model(item, dir, prefix, y, scale, body);
+    else player_mesh->cosmetics[slot] = generate_cosmetic_mesh(item, dir, prefix, y, scale, body);
+}
+
 static void player_generate_cosmetic_meshes(PlayerMesh *player_mesh, const PlayerCosmetics *cosmetics, const Cosmetic *hat, const Cosmetic *waist) {
     const float above_legs = game_constants.player_height - game_constants.leg_height; // yz3 - legHeight
     const Cosmetic *back = cosmetic_get(cosmetics->back, COSMETIC_BACK);
     const Cosmetic *face = cosmetic_get(cosmetics->face, COSMETIC_FACE);
-    MeshTransform *body = player_mesh->body_anchor; // Krunker's lowerBody
 
     if (back) {
-        player_mesh->cosmetics[PLAYER_COSMETIC_BACK] = generate_cosmetic_mesh(back, "body", "body_",
-            (above_legs - game_constants.head_scale) / 2.0f - back->sit_off, back->scl_mlt * 2.1f, body);
+        player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_BACK, back, "body", "body_",
+            (above_legs - game_constants.head_scale) / 2.0f - back->sit_off, back->scl_mlt * 2.1f);
     }
 
     if (waist) {
-        player_mesh->cosmetics[PLAYER_COSMETIC_WAIST] = generate_cosmetic_mesh(waist, "waist", "waist_",
-            (above_legs - game_constants.head_scale - 2.0f) / 2.0f - waist->sit_off, waist->scl_mlt * 2.1f, body);
+        player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_WAIST, waist, "waist", "waist_",
+            (above_legs - game_constants.head_scale - 2.0f) / 2.0f - waist->sit_off, waist->scl_mlt * 2.1f);
     }
 
     if (hat) {
-        player_mesh->cosmetics[PLAYER_COSMETIC_HAT] = generate_cosmetic_mesh(hat, "hats", "hat_", above_legs - hat->sit_off, hat->scl_mlt * 2.1f, body);
+        player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_HAT, hat, "hats", "hat_", above_legs - hat->sit_off, hat->scl_mlt * 2.1f);
     }
 
     if (face) {
-        player_mesh->cosmetics[PLAYER_COSMETIC_FACE] = generate_cosmetic_mesh(face, "faces", "face_", above_legs - face->sit_off, face->scl_mlt, body);
+        player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_FACE, face, "faces", "face_", above_legs - face->sit_off, face->scl_mlt);
     }
 }
 
@@ -804,6 +829,9 @@ void player_update_meshes(Player *player, const int is_preview) {
     if (!player->mesh) return;
 
     const PlayerMesh *player_mesh = player->mesh;
+
+    // v7 animated cosmetics: RENDER's mixers advance with the frame clock
+    for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) gltf_instance_update(player_mesh->cosmetic_models[i], gltf_clock());
 
     // Viewmodel settings (v3.1.1 settings.js -> RENDER.aimAnim/weaponBob/weaponLean/
     // weaponRot/weaponOffX..Z/weaponADSOffY; weaponBob defaults to 0.9).
@@ -1087,6 +1115,7 @@ void player_meshes_fini(Player *player) {
 
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) mesh_fini(player_mesh->cosmetics[i]);
+        gltf_instance_fini(player_mesh->cosmetic_models[i]);
     }
 
     free(player_mesh->upper_body_anchor);
