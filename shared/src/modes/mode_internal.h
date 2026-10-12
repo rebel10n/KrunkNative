@@ -12,7 +12,6 @@ int mode_cond_teams_alive(const Game*);   // prop / trai: lives > 0 and active o
 int mode_cond_stalk(const Game*);
 int mode_cond_race(const Game*);
 int mode_cond_gun(const Game*);
-int mode_cond_kills(const Game*);         // KN ranked: first to 10 kills
 int mode_cond_oinc(const Game*);
 int mode_cond_tag_limit(const Game*);     // kc / depo: a team score reached tagLimit
 int mode_cond_deposits(const Game*);      // depoffa: a player deposited tagLimit
@@ -29,7 +28,6 @@ ModeWinner mode_win_team1_active(const Game*);
 ModeWinner mode_win_team2_active(const Game*);
 ModeWinner mode_win_lives(const Game*);
 ModeWinner mode_win_gun(const Game*);
-ModeWinner mode_win_kills(const Game*);
 ModeWinner mode_win_first_alive(const Game*);
 ModeWinner mode_win_tag_teams(const Game*);  // kc / depo: team score, then denies, kills, score
 ModeWinner mode_win_def(const Game*);
@@ -51,7 +49,6 @@ int mode_leader_sort_depo(const Player*, const Player*);
 // ---- gameStart
 void mode_start_objective(Game*);         // point: nextObjective(null, true)
 void mode_start_rand_objective(Game*);    // king / depo / depoffa: randObjective(null, true)
-void mode_start_lock_objective(Game*);    // KN ranked objective variant
 void mode_start_lock(Game*);
 void mode_start_race(Game*);
 void mode_start_def(Game*);

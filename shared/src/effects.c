@@ -573,12 +573,12 @@ void player_check_streak(Player *player, const int slot) {
     }
 }
 
-// player.hitboxPadW / hitboxPadH: game.config.hitBoxPad + class hbS / hbH. KN's Ranked modes
-// are v7's comp lobbies (defC 0.1). v3's mode.hitBoxPad (Search & Destroy 0.5) is not read by
+// player.hitboxPadW / hitboxPadH: game.config.hitBoxPad + class hbS / hbH. A comp lobby (ranked
+// included) gets the option's defC 0.1. v3's mode.hitBoxPad (Search & Destroy 0.5) is not read by
 // v7 and is ignored here too.
 static float game_hitbox_pad(const Game *game) {
     if (game->config.hitbox_pad_set) return game->config.hitbox_pad;
-    return game->mode && game->mode->config.is_ranked ? CONFIG_HIT_BOX_PAD_C : CONFIG_HIT_BOX_PAD;
+    return game->config.comp ? CONFIG_HIT_BOX_PAD_C : CONFIG_HIT_BOX_PAD;
 }
 
 static const ClassConfig *player_class(const Player *player) {

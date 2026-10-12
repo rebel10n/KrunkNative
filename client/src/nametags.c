@@ -582,6 +582,7 @@ static void nt_info(const Player *player, TagInfo *info) {
         info->badge[NT_BADGE_PREMIUM] = (account->flags & NET_PLAYER_INFO_PREMIUM) != 0;
         info->badge[NT_BADGE_FEATURED] = (account->flags & NET_PLAYER_INFO_VERIFIED) != 0;
     }
+    if (player->game && player->game->config.comp) info->level = 0; // game-overlay: game.isComp ? 0 : level
     // v7 badgeIndex from the SPAWN (-1 unless the player shows its custom badge, server/src/net.c)
     if (badge_get(player->cosmetics_v7.badge)) info->custom_badge = player->cosmetics_v7.badge;
     if (g_nt.demo == 1) { // KRUNKNATIVE_NAMETAG_DEMO=1: account fields KrunkNative does not have

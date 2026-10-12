@@ -450,6 +450,13 @@ else ()
         target_link_libraries(modes_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # comp_ranked_test: v7.1.4 ranked rating rules and the comp lobby (lobbyPlayers, canSpawn)
+    add_executable(comp_ranked_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/comp_ranked_test.c)
+    target_link_libraries(comp_ranked_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(comp_ranked_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # ai_test: v3.1.1 AI (map BOTs, behaviour, damage, sync, /summon /ais /kill, Traitor ghosts)
     add_executable(ai_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/ai_test.c)
     target_link_libraries(ai_test PRIVATE m)

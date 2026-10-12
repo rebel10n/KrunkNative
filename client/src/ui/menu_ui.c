@@ -24,6 +24,7 @@
 #include <ui_interact.h> // the interact prompt (client/src/ui/ui_interact.c)
 #include <game_config.h> // Game.config.classes / isCustom (the class list)
 #include <client_settings.h> // Exit menu item + Settings > Client (client/src/ui/ui_client_settings.c)
+#include <lobby_ui.h> // the comp menu (comp_ui.c)
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -828,7 +829,8 @@ void menu_set_class_index(const int index, const int silent) {
 void menu_select_class(const int index) {
     ui_loadout_class_bubble(index); // Game.classes[i].txts, else "Let's Go!"... one time in three
     menu_set_class_index(index, 0);
-    ui_loadout_switch_tab(1);
+    ui_loadout_select_tab(1);
+    comp_ui_class_selected(g_ui.client, index); // updSyncDat("c", i): the comp lobby's class
 }
 
 void menu_select_map(const int index) {
@@ -1241,16 +1243,17 @@ static void setup_dom(void) {
             html_dom_append(parent, holder);
         }
     }
-    // KrunkNative addition: Ranked. v7.1.4 dropped ranked play and its menu entry; KrunkNative
-    // keeps it (doc/v7/decisions.md, ranked_ui.c / windows 27), as a left menu item in v7's
-    // style just above Settings. --render-scenario leaves the menu as v7 has it.
+    // Ranked (doc/v7/decisions.md "Ranked", ranked_ui.c / windows[26] = showWindow(27)): v7.1.4 keeps
+    // the window and its "menu.btn.ranked" label but its page has no button left, so KrunkNative adds
+    // one to the main menu bar (#subLogoButtons), right after Server Finder: both start a match
+    // (Invite / Join / Connect / KPD are lobby links and tools), so the two matchmaking entries sit
+    // together. Styled with v7's own `button small buttonO` (#ff6a0b): v7's ranked colour (store.js
+    // limT "Ranked" #ff5500) and unlike its neighbours. --render-scenario leaves the bar as v7 has it.
     if (!scenario_on() && !by_id("menuBtnRanked")) {
-        HtmlElem settings = by_id("menuBtnSettings");
-        HtmlElem item = settings ? html_dom_closest(settings, ".menuItem") : 0;
-        if (item) html_dom_insert_html(item, HTML_INSERT_BEFORE_BEGIN,
-            "<div class=\"menuItem\" onmouseenter=\"playTick()\" onclick=\"playSelect(),showWindow(27)\">"
-            "<span class=\"material-icons-outlined menBtnIcn\" style=\"color:#ffc147\">military_tech</span>"
-            "<div class=\"menuItemTitle\" id=\"menuBtnRanked\">Ranked</div></div>");
+        HtmlElem finder = by_id("menuBtnBrowser");
+        if (finder) html_dom_insert_html(finder, HTML_INSERT_AFTER_END,
+            "<div class=\"button small buttonO\" id=\"menuBtnRanked\" onmouseenter=\"playTick()\" "
+            "onclick=\"playSelect(),showWindow(27)\">Ranked</div>");
     }
     // Hosting is the dedicated server (server_bin, doc/backend.md 8.7): no Host Game button.
     // Hidden, not removed, so v7's #subLogoButtons markup stays; --render-scenario keeps it.

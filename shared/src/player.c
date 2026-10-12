@@ -122,8 +122,8 @@ void player_spawn(Player *player) {
     // setClass(game, classIndex, secIndex): the picked secondary when it is a secondary weapon, else the Pistol.
     const int picked_secondary = player->secondary_index;
     // v7.1.4: customOnly secondaries (Grappler) need a custom game (KN has none yet) and noComp
-    // ones stay out of competitive (Ranked) rounds.
-    const int ranked = player->game->mode && player->game->mode->config.is_ranked;
+    // ones stay out of comp lobbies (weapons.js `!this.noComp || !game.isComp`; ranked included).
+    const int ranked = player->game->config.comp;
     const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary &&
         !weapons[picked_secondary]->custom_only && !(ranked && weapons[picked_secondary]->no_comp)
         ? picked_secondary : WEAPON_ID_PISTOL < (int) weapon_count ? WEAPON_ID_PISTOL : -1;

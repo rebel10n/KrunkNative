@@ -243,7 +243,12 @@ static int clipped_out(const Hit *h, const Box *b)
 static int hittable(const Hit *h, const Box *b)
 {
     if (!h->pe_aware) return 1;
-    return !(b->flags & (BOXF_NO_POINTER | BOXF_HIDDEN));
+    /* text and anonymous boxes carry no style flags of their own: they take pointer-events /
+     * visibility from their element (a pointer-events:none block's anonymous line boxes and
+     * text are not targets either) */
+    const Box *e = b;
+    while (e->parent && (e->type == BOX_TEXT || (e->flags & BOXF_ANONYMOUS) || !e->node)) e = e->parent;
+    return !((b->flags | e->flags) & (BOXF_NO_POINTER | BOXF_HIDDEN));
 }
 
 static Box *element_box(Box *b)
@@ -284,9 +289,12 @@ static Box *lines_hit(const Hit *h, const Box *b)
             if (!point_in(lx, ly, it->x, it->y, it->w, it->h)) continue;
             Box *tb = it->box;
             if (h->pe_aware && (tb->flags & (BOXF_NO_POINTER | BOXF_HIDDEN))) continue;
-            /* the text's element: walk inline ancestors that are hittable */
+            /* the text's element: walk inline ancestors that are hittable; the block whose
+             * lines these are is a target only when it is hittable itself (pointer-events:
+             * none on it, inherited by its text, lets the point through to what is below) */
             Box *p = tb->parent;
             while (p && p != b && h->pe_aware && !hittable(h, p)) p = p->parent;
+            if (p == b && !hittable(h, b)) continue;
             return p;
         }
     }

@@ -163,6 +163,8 @@ int lobby_events_handle(Client *client, const int type, const void *payload, con
             game_network_receive(&client->game, &packet);
             return 1;
         }
+        case NET_PACKET_COMP_LOBBY: // v7 "cd" / "cda": the comp lobby table (comp_ui.c)
+            return comp_ui_packet(client, payload, length);
         case NET_PACKET_MATCH_VOTE_STATE: {
             NetMatchVoteStatePacket packet;
             if (length != sizeof(packet)) return 1;

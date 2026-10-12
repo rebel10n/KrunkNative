@@ -613,8 +613,8 @@ void game_config_defaults(GameConfig *g, const int host_index) {
     g->mimic_pubs = 0;
     g->is_private = 0;
     g->class_list_count = 0;
-    // hitBoxPad: the comp default is a value; otherwise KN's Ranked modes keep their defC 0.1
-    // (shared/src/effects.c game_hitbox_pad) and everything else gets def 0.6.
+    // hitBoxPad: the comp default is a value; otherwise a lobby made comp later (cfg.isComp) keeps
+    // the defC 0.1 (shared/src/effects.c game_hitbox_pad) and everything else gets def 0.6.
     g->hitbox_pad_set = (unsigned int) comp;
     game_config_sync_teams(g);
 }
@@ -657,7 +657,7 @@ cJSON *game_config_write(const GameConfig *g) {
     if (!out || !g) return out;
     for (size_t i = 0; i < sizeof(k_server_options) / sizeof(k_server_options[0]); i++) {
         const GameConfigOption *o = &k_server_options[i];
-        if (!strcmp(o->var, "hitBoxPad") && !g->hitbox_pad_set) continue; // the mode's default (Ranked)
+        if (!strcmp(o->var, "hitBoxPad") && !g->hitbox_pad_set) continue; // the default (comp: defC)
         if (o->kind == GC_INPUT) {
             cJSON_AddStringToObject(out, o->var, (const char *) g + o->offset);
         } else if (o->kind == GC_BOOL) {

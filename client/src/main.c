@@ -1099,6 +1099,7 @@ void client_send_cycle_packet(Client *client) {
 void client_apply_init(Client *client, const NetInitPacket *init) {
     client->net_ent_size = net_ent_size_for(init->major, init->minor, init->patch);
     client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
+    client->net_client_id = init->client_id;
     client->net_server_patch = init->major == NET_PROTOCOL_MAJOR ? init->patch : 0; // WP-C (ENT V8)
     social_reset_server(); // WP-E part 2b: v7 social packets after the server's NET_PACKET_SOCIAL_V7
     if (client->map_loaded) client_unload_map(client);

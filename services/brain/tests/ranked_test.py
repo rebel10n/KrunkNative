@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Ranked queue end to end (doc/backend.md 6.5): 2 brains sharing one database,
-a fake game server on brain A, 4 accounts registered over the social socket.
+"""Ranked queue end to end (doc/backend.md 6.5, Krunker v7.1.4 ranked): 2 brains sharing one
+database (plus a third with the default level gate and another season), a fake game server on
+brain A, 8 accounts registered over the social socket.
 
   ranked_test.py <kn_brain> <repo root> [database]
 Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's
 database.name; every run uses its own schema (kn_test_rq_<pid>, dropped after)
 and ephemeral ports, so concurrent runs never interfere. 77 = skip (no PostgreSQL).
-KN_TEST_DB_DRIVER=sqlite|mysql runs both brains on that store driver instead
+KN_TEST_DB_DRIVER=sqlite|mysql runs the brains on that store driver instead
 (db_scratch.py: one temp sqlite file, or a scratch MySQL/MariaDB database).
 
-Covers /mm/queue/join on both brains, cross-brain matching + hosting (the node
-lives on brain A), Join tickets, the ranked "host" config, AccountAlreadyPlaying,
-ranked-result -> Elo through svc-accounts' "elo" op, abandon -> RankedCooldown,
-parties (join by id, ready, queues, kick, promote, leave), InvalidClientKey, and
-that the brain logs carry no statement errors.
+Covers the one "ranked" queue (4v4) on both brains, cross-brain matching + hosting (the node
+lives on brain A), parties kept on one team, Join tickets, the ranked "host" config (a comp
+lobby: Hardpoint, a comp-pool catalogue map, teamSize 4), AccountAlreadyPlaying, ranked-result
+-> per-season ratings (eloK 32 vs the other team's average, floored at 0) on /mm/queue/rating,
+abandon -> rankedDeduction + RankedCooldown, parties (join by id, ready, class, kick, promote,
+leave), the removed v3.1.1 queues (InvalidQueue, no update-queues), LevelTooLow (minRankedLevel
+15), another season's empty rating, InvalidClientKey, and that the brain logs carry no
+statement errors.
 """
 import asyncio
 import json
@@ -159,9 +163,15 @@ async def register(port, name):
         return {"id": r[2], "name": name, "token": r[5]}
 
 
-def join(port, acc, queues, ready=1, party=""):
-    return http(port, "/mm/queue/join", token=acc["token"], region="us-nj", queues=json.dumps(queues),
-                party=party, ready=ready, classIndex=1)[1]
+def join(port, acc, ready=1, party="", queues=None, cls=1):
+    q = {"token": acc["token"], "region": "us-nj", "party": party, "ready": ready, "classIndex": cls}
+    if queues is not None:
+        q["queues"] = json.dumps(queues)
+    return http(port, "/mm/queue/join", **q)[1]
+
+
+def rating(port, acc):
+    return http(port, "/mm/queue/rating", token=acc["token"])
 
 
 async def wait_status(port, key, want, secs=15):
@@ -174,75 +184,114 @@ async def wait_status(port, key, want, secs=15):
     return st
 
 
-async def scenario(pa, pb, node):
-    stamp = str(int(time.time()) % 100000)
-    alice, bob, carol, dave = [await register(pa, n + stamp) for n in ("ral", "rbo", "rca", "rda")]
+COMP_MAPS = [0, 2, 4, 5, 11, 12, 14, 17, 23]  # config.hostTypes[1] overDat maps
 
-    print("== 1v1 across two brains")
-    ja, jb = join(pa, alice, ["r1v1"]), join(pb, bob, ["r1v1"])
-    check(ja["status"] is None and ja["clientKey"] and jb["status"] is None, "join on brain A and brain B")
-    st = await wait_status(pa, ja["clientKey"], "Join")
-    stb = await wait_status(pb, jb["clientKey"], "Join")
-    ok = st and stb and st["status"]["t"] == "Join" and st["status"]["c"]["gameId"] == stb["status"]["c"]["gameId"]
-    check(ok, "both reach Join in the same game (%s)" % (st and st["status"]["c"].get("gameId")))
-    c = st["status"]["c"] if st else {}
+
+async def full_match(pa, pb, accs, node, party_of_two=True):
+    """8 accounts into one 4v4: the first two as a party on brain A, the rest solo on A / B."""
+    keys = []
+    first = join(pa, accs[0], ready=0)
+    st = await wait_status(pa, first["clientKey"], "Queued")
+    second = join(pa, accs[1], ready=1, party=st["partyId"]) if party_of_two else join(pa, accs[1])
+    http(pa, "/mm/queue/update-ready", clientKey=first["clientKey"], isReady="true")
+    keys += [(pa, first), (pa, second)]
+    for i, acc in enumerate(accs[2:]):
+        port = pa if i % 2 else pb
+        keys.append((port, join(port, acc)))
+    states = [await wait_status(port, k["clientKey"], "Join") for port, k in keys]
+    return keys, states
+
+
+async def scenario(pa, pb, pc, node):
+    stamp = str(int(time.time()) % 100000)
+    accs = [await register(pa, "r%d%s" % (i, stamp)) for i in range(8)]
+    spare = await register(pa, "r8%s" % stamp)
+    names = [a["name"] for a in accs]
+    alice, bob = accs[0], accs[1]
+
+    print("== 4v4 across two brains")
+    code, r0 = rating(pa, alice)
+    check(code == 200 and r0.get("rating") == 0 and r0.get("rank") == 1 and r0.get("season") == 7 and r0.get("teamSize") == 4
+          and r0.get("cooldownMs") == 0, "rating card before any match (%s)" % r0)
+    keys, states = await full_match(pa, pb, accs, node)
+    games = {st["status"]["c"].get("gameId") for st in states if st and st["status"]["t"] == "Join"}
+    check(len(games) == 1 and all(st and st["status"]["t"] == "Join" for st in states),
+          "all 8 reach Join in the same game (%s)" % games)
+    c = states[0]["status"]["c"] if states[0] else {}
     check(c.get("gameId", "").startswith("RKD:") and c.get("port") == 23999 and len(c.get("clientId", "")) > 100,
           "Join carries gameId/host/port and a per-player ticket")
     cfg = node.hosted[-1][1] if node.hosted else {}
     teams = cfg.get("teams", [])
-    names = sorted(p["name"] for t in teams for p in t)
-    check(cfg.get("ranked") and cfg.get("queue") == "r1v1" and cfg.get("maxPlayers") == 2 and cfg.get("mode") == 38
-          and names == sorted([alice["name"], bob["name"]]), "ranked host config (queue, teams, mode 38 = KN Ranked on the v7.1.4 table)")
-    again = join(pa, alice, ["r1v1"])
+    roster = sorted(p["name"] for t in teams for p in t)
+    party_team = [i for i, t in enumerate(teams) if alice["name"] in [p["name"] for p in t]]
+    check(cfg.get("ranked") and cfg.get("queue") == "ranked" and cfg.get("teamSize") == 4 and cfg.get("mode") == 2
+          and cfg.get("modes") == [2] and len(cfg.get("maps", [])) == 1 and cfg["maps"][0] in COMP_MAPS
+          and roster == sorted(names) and [len(t) for t in teams] == [4, 4],
+          "ranked host config: comp Hardpoint (mode 2), a comp map, 4 + 4 (%s)" % {k: cfg.get(k) for k in ("queue", "mode", "maps", "teamSize")})
+    check(party_team and bob["name"] in [p["name"] for p in teams[party_team[0]]], "the party plays on one team")
+    again = join(pa, alice)
     check(again["status"] == "AccountAlreadyPlaying", "re-queue during the match -> AccountAlreadyPlaying")
-    http(pa, "/mm/queue/leave", clientKey=ja["clientKey"])
-    http(pb, "/mm/queue/leave", clientKey=jb["clientKey"])
-    team_a = 0 if teams[0][0]["name"] == alice["name"] else 1
+    for port, k in keys:
+        http(port, "/mm/queue/leave", clientKey=k["clientKey"])
+    win = party_team[0]
     r = await node.request({"type": "ranked-result", "matchId": cfg["matchId"], "lobbyId": node.hosted[-1][0],
-                            "winner": team_a, "players": [], "abandoned": []})
+                            "winner": win, "players": [], "abandoned": []})
     rat = {x["name"]: x for x in (r or {}).get("ratings", [])}
-    check(r and r.get("ok") and rat.get(alice["name"], {}).get("delta") == 16 and rat[alice["name"]]["new"] == 16
-          and rat.get(bob["name"], {}).get("new") == 0, "Elo: winner +16, loser clamped at 0 (%s)" % rat)
-    r2 = await node.request({"type": "ranked-result", "matchId": cfg["matchId"], "winner": 1 - team_a})
+    losers = [p["name"] for p in teams[1 - win]]
+    check(r and r.get("ok") and len(rat) == 8 and rat.get(alice["name"], {}).get("delta") == 16
+          and rat[alice["name"]]["new"] == 16 and rat[alice["name"]].get("season") == 7
+          and all(rat[n]["new"] == 0 for n in losers), "Elo: winners +16, losers floored at 0 (%s)" % rat.get(alice["name"]))
+    r2 = await node.request({"type": "ranked-result", "matchId": cfg["matchId"], "winner": 1 - win})
     check(r2 and r2.get("ok") and r2.get("ratings") == [], "a second result for the same match is ignored")
-    j3 = join(pa, alice, ["r1v1"], ready=0)
+    await asyncio.sleep(0.5)
+    code, ra = rating(pb, alice)
+    check(code == 200 and ra.get("rating") == 16 and ra.get("games") == 1 and ra.get("wins") == 1 and ra.get("peak") == 16,
+          "season rating on the other brain (%s)" % ra)
+    code, rl = rating(pa, [a for a in accs if a["name"] == losers[0]][0])
+    check(code == 200 and rl.get("rating") == 0 and rl.get("losses") == 1, "loser's card (%s)" % rl)
+    code, rc = rating(pc, alice)
+    check(code == 200 and rc.get("season") == 8 and rc.get("rating") == 0 and rc.get("games") == 0,
+          "another season starts at 0 (%s)" % rc)
+    j3 = join(pa, alice, ready=0)
     st = await wait_status(pa, j3["clientKey"], "Queued")
     acc = json.loads(st["partyMembers"][0]["accountData"]) if st else {}
-    check(acc.get("e") == 16, "rating visible in accountData.e (%s)" % acc)
+    check(acc.get("e") == 16 and st.get("queueIds") == ["ranked"], "rating visible in accountData.e (%s)" % acc)
     http(pa, "/mm/queue/leave", clientKey=j3["clientKey"])
 
-    print("== abandon -> cooldown")
-    ja, jb = join(pa, alice, ["r1v1"]), join(pa, bob, ["r1v1"])
-    st = await wait_status(pa, ja["clientKey"], "Join")
+    print("== abandon -> deduction + cooldown")
+    keys, states = await full_match(pa, pb, accs, node, party_of_two=False)
     cfg = node.hosted[-1][1]
-    for k in (ja, jb):
-        http(pa, "/mm/queue/leave", clientKey=k["clientKey"])
+    for port, k in keys:
+        http(port, "/mm/queue/leave", clientKey=k["clientKey"])
     r = await node.request({"type": "ranked-result", "matchId": cfg["matchId"], "winner": -1, "players": [],
-                            "abandoned": [bob["id"]]})
-    rb = [x for x in (r or {}).get("ratings", []) if x["name"] == bob["name"]]
-    check(rb and rb[0].get("abandoned"), "abandoner flagged")
-    jb2 = join(pb, bob, ["r1v1"])
+                            "abandoned": [alice["id"]]})
+    ra = [x for x in (r or {}).get("ratings", []) if x["name"] == alice["name"]]
+    check(ra and ra[0].get("abandoned") and ra[0].get("delta") == -16 and ra[0].get("new") == 0,
+          "abandoner: -rankedDeduction, floored at 0 (%s)" % ra)
+    jb2 = join(pb, alice)
     check(jb2["status"] == "RankedCooldown" and jb2.get("cooldownMs", 0) > 7000000,
           "abandoner gets RankedCooldown on the other brain (%s)" % jb2)
+    code, rb = rating(pb, alice)
+    check(code == 200 and rb.get("abandons") == 1 and rb.get("cooldownMs", 0) > 7000000, "rating card: abandons + cooldown (%s)" % rb)
 
     print("== parties")
-    jc = join(pa, carol, ["r2v2"], ready=0)
+    carol, dave = accs[2], accs[3]
+    jc = join(pa, carol, ready=0)
     st = await wait_status(pa, jc["clientKey"], "Queued")
     pid = st["partyId"]
-    jd = join(pb, dave, ["r2v2"], ready=0, party=pid)
+    jd = join(pb, dave, ready=0, party=pid, cls=7)
     check(jd["status"] is None, "join a party by id on the other brain")
     code, st = http(pa, "/mm/queue/poll", clientKey=jc["clientKey"])
     leader = st["partyLeaderId"]
     members = st["partyMembers"]
-    check(len(members) == 2 and leader == members[0]["clientId"] and st["queueIds"] == ["r2v2"],
+    check(len(members) == 2 and leader == members[0]["clientId"] and st["queueIds"] == ["ranked"],
           "party has 2 members, creator leads")
+    check(members[1]["classIndex"] == 0, "a class outside config.rankedClasses (Rocketeer) -> Triggerman")
     dave_id = members[1]["clientId"]
     code, st = http(pb, "/mm/queue/update-ready", clientKey=jd["clientKey"], isReady="true")
     check(st["partyMembers"][1]["isReady"] is True, "update-ready")
-    code, st = http(pb, "/mm/queue/update-queues", clientKey=jd["clientKey"], queues='["r4v4"]')
-    check(st["queueIds"] == ["r2v2"], "non-leader cannot change queues")
-    code, st = http(pa, "/mm/queue/update-queues", clientKey=jc["clientKey"], queues='["r4v4","bogus"]')
-    check(st["queueIds"] == ["r4v4"], "leader changes queues (invalid ids dropped)")
+    code, st = http(pa, "/mm/queue/update-queues", clientKey=jc["clientKey"], queues='["r4v4"]')
+    check(code == 404, "no update-queues: one queue")
     code, st = http(pa, "/mm/queue/update-class", clientKey=jc["clientKey"], classIndex=3)
     check(st["partyMembers"][0]["classIndex"] == 3, "update-class")
     code, st = http(pa, "/mm/queue/promote-party-member", clientKey=jc["clientKey"], promoteClientId=dave_id)
@@ -255,16 +304,30 @@ async def scenario(pa, pb, node):
     code, st = http(pb, "/mm/queue/leave", clientKey=jd["clientKey"])
     check(st == {"left": True}, "leave")
 
+    print("== removed queues, gates")
+    jq = join(pa, carol, queues=["r1v1"])
+    check(jq["status"] == "InvalidQueue", "v3.1.1 queue ids are gone -> InvalidQueue")
+    jl = join(pc, carol)
+    check(jl["status"] == "LevelTooLow", "minRankedLevel 15 -> LevelTooLow")
+    code, st = http(pa, "/mm/queue/join", region="us-nj")
+    check(st["status"] == "LoginRequired", "join without a session -> LoginRequired")
+    code, st = http(pa, "/mm/queue/rating")
+    check(code == 401, "rating without a session -> 401")
+
     print("== host failure puts the parties back")
     node.fail_hosts = 1
-    ja, jc = join(pa, alice, ["r1v1"]), join(pa, carol, ["r1v1"])
+    others = accs[1:] + [spare]  # alice is on her cooldown
+    keys = []
+    for i, acc in enumerate(others):
+        port = pa if i % 2 else pb
+        keys.append((port, join(port, acc)))
     await asyncio.sleep(2.5)
-    code, st = http(pa, "/mm/queue/poll", clientKey=ja["clientKey"])
-    check(st["status"]["t"] == "Queued", "after a failed host the party is Queued again")
-    st = await wait_status(pa, ja["clientKey"], "Join", secs=20)
+    code, st = http(keys[0][0], "/mm/queue/poll", clientKey=keys[0][1]["clientKey"])
+    check(st["status"]["t"] == "Queued", "after a failed host the parties are Queued again")
+    st = await wait_status(keys[0][0], keys[0][1]["clientKey"], "Join", secs=20)
     check(st and st["status"]["t"] == "Join", "retried after the back-off and joined")
-    code, st = http(pa, "/mm/queue/join", region="us-nj", queues="[]")
-    check(st["status"] == "LoginRequired", "join without a session -> LoginRequired")
+    for port, k in keys:
+        http(port, "/mm/queue/leave", clientKey=k["clientKey"])
 
 
 def main():
@@ -288,21 +351,24 @@ def main():
     subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)
     procs, logs, ports = [], [], []
-    for name, region in (("rank-a-%d" % os.getpid(), "us-nj"), ("rank-b-%d" % os.getpid(), "de-fra")):
+    # brain C: the default level gate (minRankedLevel 15) and season 8
+    for name, region, extra in (("rank-a-%d" % os.getpid(), "us-nj", ["--brain.ranked.min_level=1", "--accounts.current_season=7"]),
+                                ("rank-b-%d" % os.getpid(), "de-fra", ["--brain.ranked.min_level=1", "--accounts.current_season=7"]),
+                                ("rank-c-%d" % os.getpid(), "de-fra", ["--accounts.current_season=8"])):
         path = os.path.join(work, name + ".log")
         log = open(path, "w")
         logs.append(path)
         procs.append(subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=" + name,
-                                       "--brain.region=" + region, "--brain.ranked.min_level=1"], cwd=ROOT, env=env,
+                                       "--brain.region=" + region] + extra, cwd=ROOT, env=env,
                                       stdout=log, stderr=subprocess.STDOUT))
     try:
-        pa, pb = bound_port(logs[0], procs[0]), bound_port(logs[1], procs[1])
+        pa, pb, pc = (bound_port(logs[i], procs[i]) for i in range(3))
 
         async def run():
             node = FakeNode(pa)
             await node.start()
             await asyncio.sleep(1.5)
-            await scenario(pa, pb, node)
+            await scenario(pa, pb, pc, node)
             node.task.cancel()
             await node.ws.close()
         asyncio.run(run())

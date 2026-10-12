@@ -112,14 +112,6 @@ static void comma_number(char *out, const size_t n, const double value) {
     out[o] = 0;
 }
 
-// UTILS.eloIconHTML(elo, style): config.eloPer 120, config.maxELOLevel 8
-void account_elo_icon_html(char *out, const size_t n, const double elo, const char *style) {
-    int id = (int) floor((elo > 0 ? elo : 0) / 120.0);
-    if (id > 8) id = 8;
-    if (id < 1) id = 1;
-    snprintf(out, n, "<img class='accountEloIcon' style='%s' src='./img/ranks/icon_%d.png'>", style && style[0] ? style : "margin-bottom:-2px;", id - 1);
-}
-
 // UTILS.getReadableTime(ms)
 static void readable_time(char *out, const size_t n, const double ms) {
     long long s = (long long) floor(ms / 1000.0);
@@ -208,9 +200,7 @@ static void set_data(const cJSON *h) {
     g_acc.stats = cJSON_IsObject(stats) ? cJSON_Duplicate(stats, 1) : cJSON_CreateObject();
     g_acc.hack = (int) num_at(h, 17);
     g_acc.is_mod = (int) num_at(h, 21);
-    g_acc.elo = num_at(h, 22);
-    g_acc.elo2 = num_at(h, 23);
-    g_acc.elo4 = num_at(h, 24);
+    g_acc.elo = num_at(h, 22); // player_elo: this season's ranked rating (kn_brain ranked.c)
     g_acc.premium = num_at(h, 27) > 0;
     g_acc.has_2fa = (int) num_at(h, 28);
     const char *alias = str_at(h, 29);
@@ -1216,15 +1206,6 @@ static char *gen_account(void) {
         pst_num(&sb, "Crouches", stat_num("crc"), 0);
         pst_num(&sb, "Sprays Placed", stat_num("spry"), 0);
         pst(&sb, "Helpful Reports", "0/0");
-        // KrunkNative keeps ranked (doc/v7/decisions.md): the MMRs v3.1.1 listed on the profile
-        static const char *const mmr[3] = {"MMR (1v1)", "MMR (2v2)", "MMR (4v4)"};
-        const double elos[3] = {g_acc.elo, g_acc.elo2, g_acc.elo4};
-        for (int i = 0; i < 3; i++) {
-            char icon[160], v[200];
-            account_elo_icon_html(icon, sizeof(icon), round(elos[i] * 10.0) / 10.0, "margin-left:4px;");
-            snprintf(v, sizeof(v), "%g%s", round(elos[i] * 10.0) / 10.0, icon);
-            pst(&sb, mmr[i], v);
-        }
         sb_append(&sb, "</div><div class='statTabB3 hide'>");
         const MenuUi *ui = menu_ui();
         for (int i = 0; i < ui->class_count; i++) {

@@ -333,12 +333,10 @@ int mode_leader_stat_value(const Player *player, const char *key) {
 }
 
 static int mode_leaders_by_score(const Player *a, const Player *b) { return b->score - a->score; }
-static int mode_leaders_by_kills(const Player *a, const Player *b) { return (int) b->kills - (int) a->kills; }
 
 void mode_sort_leaders(const Game *game, Player **players, const size_t count) {
     const GameModeConfig *config = game && game->mode ? &game->mode->config : NULL;
-    const ModeSortFn sort = config && config->kill_sort ? mode_leaders_by_kills
-                          : config && config->leader_sort ? config->leader_sort : mode_leaders_by_score;
+    const ModeSortFn sort = config && config->leader_sort ? config->leader_sort : mode_leaders_by_score;
     for (size_t i = 1; i < count; i++) {
         Player *player = players[i];
         size_t at = i;

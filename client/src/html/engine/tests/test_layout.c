@@ -923,7 +923,16 @@ static void t_hit_test(void)
         "<div id=h5 style='position:absolute;left:400px;top:0;width:100px;height:100px;transform:scale(0.5)'></div>"
         "<div id=hc style='position:absolute;left:0;top:200px;width:50px;height:50px;overflow:hidden'>"
         "<div id=hcc style='width:200px;height:20px'></div></div>"
-        "<div id=hn style='position:absolute;left:0;top:300px;width:100px;height:100px;z-index:-1'></div>", NULL);
+        "<div id=hn style='position:absolute;left:0;top:300px;width:100px;height:100px;z-index:-1'></div>"
+        /* v7's comp menu: two overlapping pointer-events:none lists (#uiBase inherits none), each
+         * with a pointer-events:all button; the later list's anonymous line box and text must
+         * let the point through to the earlier list's button */
+        "<div style='pointer-events:none'>"
+        "<div id=hpa style='position:absolute;left:0;top:500px;width:300px;transform:scale(0.9)'><div>Alpha</div>"
+        "<span id=hpab style='display:inline-block;width:60px;height:30px;pointer-events:all'></span></div>"
+        "<div id=hpb style='position:absolute;left:0;top:500px;width:300px;transform:scale(0.9);text-align:right'>"
+        "<div>Bravo</div>xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx "
+        "<span id=hpbb style='display:inline-block;width:60px;height:30px;pointer-events:all'></span></div></div>", NULL);
     Box *b = layout_hit_test(fx->tree, 50, 50, 1);
     CHECK(b && strcmp(box_id(b), "h1") == 0, "hit: higher z-index wins (%s)", box_id(b));
     b = layout_hit_test(fx->tree, 250, 50, 1);
@@ -940,6 +949,13 @@ static void t_hit_test(void)
     CHECK(b && strcmp(box_id(b), "hcc") == 0, "hit: child inside the clip (%s)", box_id(b));
     b = layout_hit_test(fx->tree, 50, 350, 1);
     CHECK(b && strcmp(box_id(b), "hn") == 0, "hit: negative z-index still above the root background (%s)", box_id(b));
+    HtmlRect pab = { 0, 0, 0, 0 }, pbb = { 0, 0, 0, 0 };
+    if (bx(fx, "hpab")) layout_box_rect_in_viewport(bx(fx, "hpab"), &pab);
+    if (bx(fx, "hpbb")) layout_box_rect_in_viewport(bx(fx, "hpbb"), &pbb);
+    b = layout_hit_test(fx->tree, pab.x + 5, pab.y + pab.h * 0.5f, 1);
+    CHECK(b && strcmp(box_id(b), "hpab") == 0, "hit: a pointer-events:none block's anonymous lines / text let the point through (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, pbb.x + 5, pbb.y + pbb.h * 0.5f, 1);
+    CHECK(b && strcmp(box_id(b), "hpbb") == 0, "hit: the later list's own button (%s)", box_id(b));
     Box *list[16];
     int n = layout_stacking_children(layout_tree_root(fx->tree), list, 16);
     CHECK(n >= 6 && strcmp(box_id(list[0]), "hn") == 0 && strcmp(box_id(list[n - 1]), "h3") == 0,

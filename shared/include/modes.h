@@ -7,8 +7,10 @@
 // config (teams, speed multipliers, realMov, ...) for prediction.
 //
 // v3.1.1 -> v7.1.4: ids 0-12 and 15-23 keep their index; v3's 13 / 14 (both Ranked) are Classic
-// FFA and Deposit in v7. KrunkNative keeps Ranked on ids 37 / 38 (doc/v7/decisions.md "Ranked"):
-// not hostable, ranked matchmaking only (services/brain/ranked.c, server/src/accounts.c).
+// FFA and Deposit in v7. v7.1.4 has no ranked mode: a ranked match is a comp lobby (game.isComp,
+// config.hostTypes[1] "Comp Server Setup") playing Hardpoint (services/brain/ranked.c,
+// server/src/accounts.c). Ids 37 / 38 held KrunkNative's own Ranked modes until the v7 ranked
+// port and stay reserved for ranked (doc/v7/decisions.md "Ranked"): never reuse them.
 #include <stddef.h>
 #include <stdint.h>
 #include <common.h>
@@ -56,10 +58,13 @@ typedef enum {
     MODE_ID_ZOM,           // Zombies (economy, waves: map-logic WP-H stage 2, mode_zombies.c)
     MODE_ID_IMP,           // Impulsed
     MODE_V7_TABLE_SIZE,    // 37: gameModes.js
-    MODE_ID_RANKED_POINT = MODE_V7_TABLE_SIZE, // 37: KN Ranked (objective variant; v3.1.1 modes[13])
-    MODE_ID_RANKED,        // 38: KN Ranked (first to 10 kills; v3.1.1 modes[14])
-    MODE_COUNT
+    MODE_COUNT = MODE_V7_TABLE_SIZE
 } GameModeId;
+
+// Reserved for ranked (doc/v7/decisions.md "Ranked"): KrunkNative's former Ranked modes. No table
+// entry, never assigned to another mode; mode_config() returns NULL for them.
+#define MODE_ID_RESERVED_RANKED_37 37
+#define MODE_ID_RESERVED_RANKED_38 38
 
 // sdm multiTeam: team 0 (none / FFA) plus teams 1..5 (players.js setTeam, nameTeam1..5, t1..5Dmg)
 #define MODE_TEAMS 6
@@ -156,10 +161,6 @@ typedef struct {
     unsigned char timed:1;           // the round clock counts up
     unsigned char show_ms:1;
     unsigned char keep_loadout:1;
-    unsigned char kill_sort:1;       // KN Ranked only (v3.1.1 killSort; removed in v7)
-    unsigned char is_ranked:1;       // KN Ranked only (v3.1.1 isRanked; removed in v7)
-    unsigned char need_all:1;        // KN Ranked only (v3.1.1 needAll)
-    unsigned char inf_end_timer:1;   // KN Ranked only (v3.1.1 infEndTimer)
     unsigned char can_trade:1;
     unsigned char prevent_custom:1;  // preventCustomGames: not offered in Host Game
     unsigned char no_free_cam:1;
@@ -459,7 +460,7 @@ typedef struct GameMode_t {
 int mode_count(void);                                // MODE_COUNT
 const GameModeConfig *mode_config(int id);           // NULL for an unknown id
 const GameModeConfig *mode_list(int *count);         // every mode, indexed by id
-int mode_find(const char *query);                    // id by alias/key/name/number, -1 none (first "ranked" wins)
+int mode_find(const char *query);                    // id by alias/key/name/number, -1 none
 const char *mode_name(int id);                       // "unknown mode" for an unknown id
 const char *mode_team_name(const struct Game_t*, int team); // teamOptions[team - 1] / config team names
 int mode_hostable(int id);                           // offered in Host Game (v7 table, not preventCustomGames)

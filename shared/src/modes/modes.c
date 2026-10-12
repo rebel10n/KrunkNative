@@ -3,7 +3,7 @@
 // "init". The function hooks (conditions, winConditions, waitTimer triggers, onKill, update,
 // collisionCheck, gameStart, endSort) live in mode_rules.c, mode_objectives.c, mode_dom.c,
 // mode_deposit.c and mode_zombies.c; this file holds the data and the mode-key accessors.
-// KN Ranked stays on ids 37 / 38 (v3.1.1 modes[13] / [14], doc/v7/decisions.md "Ranked").
+// v7 has no ranked mode: ids 37 / 38 stay reserved for ranked (modes.h, doc/v7/decisions.md "Ranked").
 #include <shared.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,7 +40,6 @@ static const char *const k_stats_lms[] = {"sid", "name", "score", "kills", "deat
 static const char *const k_stats_simon[] = {"sid", "name", "score", "reward", NULL};
 static const char *const k_stats_gun[] = {"sid", "name", "weapon", "kills", "melees", "setbacks", "reward", NULL};
 static const char *const k_stats_prop[] = {"sid", "name", "score", "kills", NULL};
-static const char *const k_stats_ranked[] = {"sid", "name", "score", "kills", "deaths", "MMR", NULL};
 static const char *const k_stats_stalk[] = {"sid", "name", "score", "reward", NULL};
 static const char *const k_stats_oinc[] = {"sid", "name", "kills", "deaths", "melees", NULL};
 static const char *const k_stats_trade[] = {"sid", "name", "score", NULL};
@@ -97,9 +96,6 @@ static const ModeWaitTimer k_wait_prop[] = {
 };
 static const ModeWaitTimer k_wait_boss[] = {
     {.time = 15.0f, .msg = "picking boss in ", .trigger = mode_trigger_pick_boss},
-};
-static const ModeWaitTimer k_wait_ranked[] = {
-    {.time = 10.0f, .msg = "starts in ", .trigger = mode_trigger_unlock_move},
 };
 static const ModeWaitTimer k_wait_stalk[] = {
     {.time = 15.0f, .msg = "picking stalker in ", .trigger = mode_trigger_pick_stalker},
@@ -292,16 +288,6 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .expl_mlt = 5.0f, .expl_size_mlt = 2.0f, .grav_mlt = 1.05f, .has_impulse_mlt = 1, .impulse_mlt = 3.0f,
         .non_obj_impulse = 1, CHAOS_MOVEMENT, .no_scr_limit = 1, LOADOUT(starting_loadout, k_imp_start),
         STREAKS_OFF(k_no_big_streaks), .prevent_custom = 1, .on_kill = mode_kill_imp},
-    // ---- KN Ranked (v3.1.1 modes[13] / [14] on new ids, doc/v7/decisions.md "Ranked")
-    [MODE_ID_RANKED_POINT] = {BASE, .id = MODE_ID_RANKED_POINT, .key = "ranked", .name = "Ranked", .alias = "ranked",
-        .no_reward = 1, .prevent_custom = 1, .end_stats = k_stats_ranked, .is_ranked = 1, .no_kick = 1,
-        .need_all = 1, .inf_end_timer = 1, .objective = 1, .teams = 1, .force_spawn = 15.0f,
-        WAIT(k_wait_ranked), .game_start = mode_start_lock_objective, .update = mode_update_point},
-    [MODE_ID_RANKED] = {BASE, .id = MODE_ID_RANKED, .key = "ranked", .name = "Ranked", .alias = "ranked",
-        .no_reward = 1, .prevent_custom = 1, .end_stats = k_stats_ranked, .is_ranked = 1, .no_kick = 1,
-        .need_all = 1, .inf_end_timer = 1, .no_regen = 1, .kill_sort = 1, .force_spawn = 15.0f,
-        .win_condition = mode_win_kills, .condition = mode_cond_kills, WAIT(k_wait_ranked),
-        .game_start = mode_start_lock},
 };
 
 int mode_count(void) {

@@ -183,7 +183,6 @@ static void test_table(void) {
         "Stalker", "King of the Hill", "One in the Chamber", "Trade", "Kill Confirmed", "Defuse", "Sharp Shooter",
         "Traitor", "Raid", "Blitz", "Domination", "Squad Deathmatch", "Kranked FFA", "Team Defender", "Deposit FFA",
         "Carrier", "All or Nothing", "Mag Dump", "Chaos Snipers", "Bighead FFA", "Zombies", "Impulsed",
-        "Ranked", "Ranked",
     };
     static const char *const keys[MODE_V7_TABLE_SIZE] = {
         "ffa", "tdm", "point", "ctf", "bhop", "hide", "infect", "race", "lms", "simon", "gun", "prop", "boss", "clas",
@@ -193,21 +192,22 @@ static void test_table(void) {
 
     int count = 0;
     const GameModeConfig *modes = mode_list(&count);
-    CHECK(count == 39 && mode_count() == 39 && MODE_V7_TABLE_SIZE == 37, "v7.1.4 has 37 modes + KN Ranked 37 / 38 (%d)", count);
+    CHECK(count == 37 && mode_count() == 37 && MODE_V7_TABLE_SIZE == 37, "v7.1.4 has 37 modes (%d)", count);
     for (int i = 0; i < count; i++) {
         CHECK(modes[i].id == i && modes[i].name && !strcmp(modes[i].name, names[i]), "mode %d is %s (%s)", i, names[i], modes[i].name);
         if (i < MODE_V7_TABLE_SIZE) CHECK(modes[i].key && !strcmp(modes[i].key, keys[i]), "mode %d key %s", i, keys[i]);
     }
 
     CHECK(mode_find("tdm") == MODE_ID_TDM && mode_find("Capture the Flag") == MODE_ID_CTF && mode_find("19") == MODE_ID_KC, "mode_find");
-    CHECK(mode_find("ranked") == MODE_ID_RANKED_POINT && mode_find("nope") == -1 && mode_find("dom") == 25, "mode_find ranked / unknown / dom");
-    CHECK(MODE_ID_CLAS == 13 && MODE_ID_DEPO == 14 && MODE_ID_RANKED_POINT == 37 && MODE_ID_RANKED == 38, "v7 ids 13 / 14, Ranked 37 / 38");
+    CHECK(mode_find("ranked") == -1 && mode_find("nope") == -1 && mode_find("dom") == 25, "mode_find: no ranked mode / unknown / dom");
+    CHECK(MODE_ID_CLAS == 13 && MODE_ID_DEPO == 14 && MODE_ID_RESERVED_RANKED_37 == 37 && MODE_ID_RESERVED_RANKED_38 == 38 &&
+          !mode_config(MODE_ID_RESERVED_RANKED_37) && !mode_config(MODE_ID_RESERVED_RANKED_38) && !mode_hostable(37) && !mode_hostable(38),
+          "v7 ids 13 / 14; 37 / 38 reserved for ranked, no mode");
     CHECK(g_rotation_modes[0] == 0 && g_rotation_modes[1] == 2 && g_rotation_modes[2] == 3 && g_rotation_modes[3] == 19 &&
           g_rotation_modes[4] == 25, "rotationModes [0, 2, 3, 19, 25]");
-    CHECK(mode_hostable(MODE_ID_RAID) && !mode_hostable(MODE_ID_RANKED) && !mode_hostable(MODE_ID_RANKED_POINT) && mode_hostable(MODE_ID_GUN) &&
+    CHECK(mode_hostable(MODE_ID_RAID) && mode_hostable(MODE_ID_GUN) &&
           !mode_hostable(MODE_ID_CAR) && !mode_hostable(MODE_ID_AON) && !mode_hostable(MODE_ID_MD) && !mode_hostable(MODE_ID_ZOM) &&
           !mode_hostable(MODE_ID_IMP) && mode_hostable(MODE_ID_DOM), "preventCustomGames (raid hostable again)");
-    CHECK(mode_config(MODE_ID_RANKED)->is_ranked && mode_config(MODE_ID_RANKED_POINT)->is_ranked && !mode_config(MODE_ID_DEPO)->is_ranked, "Ranked flags");
 
     const GameModeConfig *stalk = mode_config(MODE_ID_STALK);
     CHECK(stalk->has_fog_dist && stalk->fog_dist == 250.0f && stalk->has_fog_col && stalk->fog_col == 1842204 &&
@@ -792,14 +792,6 @@ static void test_misc(Game *game) {
     start_mode(game, MODE_ID_RAID);
     a = add_player(game, 1, 0);
     CHECK(fabsf(game->round_timer - 360.0f) < 0.01f && a->class_index == 9 && a->mode.lives == 1, "Raid config");
-
-    start_mode(game, MODE_ID_RANKED);
-    a = add_player(game, 1, 0);
-    b = add_player(game, 2, 0);
-    tick(game, 10.5f, 0.5f);
-    a->kills = 10;
-    tick(game, 0.1f, 0.1f);
-    CHECK(ended(game) && end_result_for(a->uid) == 1, "Ranked: first to 10 kills");
 }
 
 
@@ -1170,8 +1162,10 @@ static void test_rounds(Game *game) {
     start_mode_on(game, MODE_ID_TDM, 1);
     game->mode->flipped_spawns = 1;
     Player *c = add_player(game, 1, 0); // team 2
-    const int team1_spawn = fabsf(c->position.x + 200.0f) < 0.01f || (fabsf(c->position.x - 150.0f) < 0.01f && fabsf(c->position.z - 150.0f) < 0.01f);
-    CHECK(c->team == 2 && team1_spawn, "flipped: team 2 at a team 1 spawn (%.0f, %.0f)", c->position.x, c->position.z);
+    // team 1's spawns or the neutral one (-150, -150): ties between them are broken at random, so
+    // the check is "never one of team 2's own spawns" (x 200, or (-300, 300) spread 20)
+    const int team2_spawn = fabsf(c->position.x - 200.0f) < 0.01f || (fabsf(c->position.x + 300.0f) < 28.0f && fabsf(c->position.z - 300.0f) < 28.0f);
+    CHECK(c->team == 2 && !team2_spawn, "flipped: team 2 at a team 1 (or neutral) spawn (%.0f, %.0f)", c->position.x, c->position.z);
 }
 
 // v7 getSpawnPoint: teamOnly and spread

@@ -1603,6 +1603,13 @@ void ui_loadout_switch_tab(const int tab) {
     menu_show_window(3, 1);
 }
 
+// selectClass's windows[2].switchTab(1, true): updateWindow(3) re-renders the window only when it
+// is the one showing (the comp menu's class picker selects with no window open)
+void ui_loadout_select_tab(const int tab) {
+    g_tab = tab >= 0 && tab <= 3 ? tab : 1;
+    if (menu_ui()->active_window == 3) menu_show_window(3, 1);
+}
+
 // The handlers that stop the event (f1822(window.event) in v7: charmSelector,
 // viewAttachments, windows[n].clear, remove*) sit inside a .custContainer whose own onclick
 // opens a picker: they act at once and stop the event (html_ui_stop_propagation), so the

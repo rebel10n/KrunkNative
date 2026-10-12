@@ -45,6 +45,10 @@ void accounts_progress(const Player*, int stat, const char *key, int value, int 
 
 // Ranked lobbies (brain queue): the account's team (1 / 2) from the roster, 0 = mode picks.
 int accounts_assigned_team(const ClientConnection*);
+// 1 while this lobby plays a ranked match (its roster's teams are fixed: no "cd" team picks).
+int accounts_ranked_active(void);
+// A one-line server notice in the chat of `client` (v7's ranked.* messages, refusals).
+void accounts_notice(ClientConnection*, const char *text);
 // The account hosting the current custom lobby (requirePremiumCheatPerm's custom host).
 int accounts_is_custom_host(const ClientConnection*);
 // WP6: the published map (config.customMap) the current custom lobby hosts, NULL none:
@@ -77,3 +81,4 @@ int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 // net.c exports used here
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)
 void net_resume_ent(ClientConnection*, int spectate);              // replay a deferred ENT
+void net_comp_lobby_sync(ClientConnection*);                        // v7 syncLobbyP(player, id, 0) once the identity is known

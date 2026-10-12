@@ -93,15 +93,6 @@ int mode_cond_gun(const Game *game) {
     return 1;
 }
 
-// KN Ranked (38, v3.1.1 modes[14]): first to 10 kills
-int mode_cond_kills(const Game *game) {
-    for (size_t i = 0; i < game->player_count; i++) {
-        const Player *player = game->players[i];
-        if (player && player->kills >= 10) return 0;
-    }
-    return 1;
-}
-
 int mode_cond_oinc(const Game *game) {
     int alive = 0;
     for (size_t i = 0; i < game->player_count; i++) {
@@ -249,20 +240,6 @@ ModeWinner mode_win_gun(const Game *game) {
     return best == 0 ? winner_player(NULL) : winner_player(winner);
 }
 
-ModeWinner mode_win_kills(const Game *game) {
-    unsigned int best = 0;
-    Player *winner = NULL;
-    for (size_t i = 0; i < game->player_count; i++) {
-        Player *player = game->players[i];
-        if (!player) continue;
-        if (!winner || player->kills > best) {
-            best = player->kills;
-            winner = player;
-        }
-    }
-    return best == 0 ? winner_player(NULL) : winner_player(winner);
-}
-
 ModeWinner mode_win_first_alive(const Game *game) {
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
@@ -393,11 +370,6 @@ void mode_start_objective(Game *game) {
 void mode_start_rand_objective(Game *game) {
     game->mode->active_objective = -1;
     mode_rand_objective(game, 0.0f, 1, 1);
-}
-
-void mode_start_lock_objective(Game *game) {
-    mode_lock_move(game);
-    mode_start_objective(game);
 }
 
 void mode_start_lock(Game *game) {

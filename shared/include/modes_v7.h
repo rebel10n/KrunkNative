@@ -4,8 +4,8 @@
 // (GameModeId) to this table, so these names are aliases of the MODE_ID_* ids.
 //
 // v3.1.1 ids 0-12 and 15-23 keep their index. 13 and 14 were both Ranked in v3.1.1; v7 puts
-// Classic FFA and Deposit there, and KN keeps Ranked on new ids 37+ (doc/v7/decisions.md
-// "Ranked"; not hostable, ranked matchmaking only).
+// Classic FFA and Deposit there. v7 has no ranked mode (ranked = a comp Hardpoint lobby); ids 37
+// and 38 stay reserved for ranked (modes.h MODE_ID_RESERVED_RANKED_*, doc/v7/decisions.md).
 #include <modes.h>
 
 typedef GameModeId ModeIdV7;
@@ -48,8 +48,6 @@ typedef GameModeId ModeIdV7;
 #define MODE_V7_ZOM MODE_ID_ZOM
 #define MODE_V7_IMP MODE_ID_IMP
 #define MODE_V7_TABLE_COUNT MODE_V7_TABLE_SIZE  // 37: gameModes.js
-#define MODE_V7_RANKED_POINT MODE_ID_RANKED_POINT // 37: KN Ranked (objective variant)
-#define MODE_V7_RANKED MODE_ID_RANKED             // 38: KN Ranked (first to 10 kills)
 #define MODE_V7_COUNT MODE_COUNT
 
 // gameModes.js rotationModes (v3.1.1 [0, 1, 2, 3, 19]); g_rotation_modes holds the same list

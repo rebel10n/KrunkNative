@@ -1556,7 +1556,7 @@ void   player_custom_value_set(Game *game, Player *player, const char *key, doub
 **Index changes (breaking):**
 - v3 indices 13 and 14 were both `ranked`. In v7 they are **13 clas** and **14 depo**.
 - 0-12 and 15-23 keep their index. 24 blitz was only in v3's UI table. 25-36 are new.
-- **Decision:** adopt the v7 table. Ranked modes are dropped. If KN still wants them, they get non-hostable ids ≥37.
+- **Decision:** adopt the v7 table. Ranked modes are dropped. v7's ranked is a comp lobby playing Hardpoint (decisions.md "Ranked"); ids 37 / 38 stay reserved for ranked with no table entry.
 
 **Rotation:** `rotationModes` changes from v3 `[0,1,2,3,19]` to v7 `[0,2,3,19,25]` (`map.js:28`).
 

@@ -161,6 +161,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/combat_test
 	./$(DEBUG_DIR)/zombies_test
 	./$(DEBUG_DIR)/config_test
+	./$(DEBUG_DIR)/comp_ranked_test
 	./$(DEBUG_DIR)/sandbox_config_test
 	./$(DEBUG_DIR)/ks_storage_test
 

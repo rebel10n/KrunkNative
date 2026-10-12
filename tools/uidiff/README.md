@@ -187,6 +187,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `dead`, `killcard` | bool, `{killer, weapon, level, score, classIndex, stats}` | death screen (`#deathUIHolder`; `stats` = v7's `[timeAlive ms, shots, "acc%", kills, score]`), HUD holders hidden |
 | `endscreen` | `{place, text, nextRound}` | end screen (`#endUI`), HUD hidden |
 | `hit` | `{elapsed_ms, kill}` | hit marker `elapsed_ms` after the hit |
+| `ranked` | `{rating, party, clientId, tab, cooldownMs}` | the Ranked window (27) without a brain (with `account`): `rating` = a `/mm/queue/rating` answer, `party` = a `/mm/queue/poll` answer, `clientId` = our member, `tab` 0 Play / 1 Season (`ranked_ui_scenario`) |
 
 ### Regions JSON
 

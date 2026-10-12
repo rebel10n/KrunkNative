@@ -422,14 +422,9 @@ static int mode_order_by_score(const Player *a, const Player *b) {
     return b->score - a->score;
 }
 
-static int mode_order_by_kills(const Player *a, const Player *b) {
-    return (int) b->kills - (int) a->kills;
-}
-
 // players.list.sort(endSort || orderByScore); stable like V8's TimSort.
 void mode_sort_players(Game *game, Player **players, const size_t count) {
-    const ModeSortFn sort = game->mode && game->mode->config.end_sort ? game->mode->config.end_sort
-                          : game->mode && game->mode->config.kill_sort ? mode_order_by_kills : mode_order_by_score;
+    const ModeSortFn sort = game->mode && game->mode->config.end_sort ? game->mode->config.end_sort : mode_order_by_score;
 
     for (size_t i = 1; i < count; i++) {
         Player *player = players[i];

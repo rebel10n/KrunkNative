@@ -10,7 +10,6 @@
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
 #include <cJSON.h>
 #include <map_catalog.h>  // Host Game / Games window maps
-#include <modes.h>        // copyInviteLink: Game.mode.isRanked
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
 #include <spectate.h>     // spectate_set_requested (toggleSpect)
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
@@ -123,6 +122,7 @@ H(h_close_window) { UNUSED; menu_close_window(); return 1; }
 H(h_select_class) { UNUSED; menu_select_class(arg_int(args, argc, 0, 0)); return 1; }
 // WP-E voteOnMatch("mode,map"): the end screen's match vote cards (client/src/net/lobby_events.c)
 H(h_vote_on_match) { (void) user; return lobby_vote_handler(menu_ui()->client, ev, args, argc); }
+H(h_toggle_team) { (void) user; return comp_ui_toggle_team(menu_ui()->client, ev, args, argc); } // comp menu: updSyncDat("t", team)
 
 // openURL(url) / openTab(url) / window.open(url, "_blank"): a new browser tab in Krunker;
 // the system browser natively, window.open on the web (ui_dialog.c, http(s) only).
@@ -150,8 +150,6 @@ H(h_copy_invite_link) {
     UNUSED;
     HtmlElem b = html_dom_by_id("inviteButton");
     if (!b) return 1;
-    const GameModeConfig *mode = mode_config(game_mode_id(&menu_ui()->client->game));
-    if (mode && mode->is_ranked) return 1; // v3.1.1: !Game.mode || !Game.mode.isRanked
     char link[512];
     servers_ui_invite_link(link, sizeof(link)); // location.protocol + "//" + location.host + "/?game=" + gameId
     html_clipboard_write(link);
@@ -241,6 +239,10 @@ H(h_create_private_room) {
     // createPrivateRoom's checks, in order, into #hostGameMsg: a map (or raw game data),
     // then at least one mode
     HtmlElem msg = html_dom_by_id("hostGameMsg");
+    if (ranked_ui_in_ranked()) { // v7: if (config.isComp) custom.host.ranked
+        if (msg) html_dom_set_html(msg, "<span class='error'>Can't host match while in ranked.</span>");
+        return 1;
+    }
     const int catalog_index = ui_host_checked_map_index();
     char raw[64] = "";
     HtmlElem raw_el = html_dom_by_id("rawMapData");
@@ -469,6 +471,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"closeWindow", h_close_window},
     {"selectClass", h_select_class},
     {"voteOnMatch", h_vote_on_match}, // WP-E
+    {"toggleTeam", h_toggle_team},     // updSyncDat("t"): the comp menu Join / Leave Team, #selectT (comp_ui.c)
     {"openHostWindow", h_open_host_window},
     {"openJoinWindow", h_open_join_window},
     // sounds
@@ -523,7 +526,6 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"kn.hideErrorNotification", h_hide_error_notification},
     {"checkTerms", h_check_terms},
     {"clearPops", h_clear_pops},
-    {"toggleTeam", h_noop},
     {"toggleSpect", h_toggle_spect},
     {"claimReward", h_claim_reward},
     {"shoPolicePop", h_police_pop},

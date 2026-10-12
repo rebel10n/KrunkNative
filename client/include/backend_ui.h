@@ -22,7 +22,7 @@ typedef struct {
     char alias[32];       // premium display name, else name
     char clan[16];        // "" = none
     double kills, deaths, wins, games, funds, score, time_played;
-    double elo, elo2, elo4;
+    double elo;           // player_elo: the current season's ranked rating
     int level;
     double level_prog;    // v7.1.4 getLevelProg(): percent, linear in score (WP-E part 2c)
     int premium, featured, is_dev, is_mod, hack, has_2fa;
@@ -56,7 +56,6 @@ int  clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
 void clan_ui_reset(void);                   // account changed: drop clanData
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
-void account_elo_icon_html(char *out, size_t n, double elo, const char *style); // UTILS.eloIconHTML
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)
 void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin): its asset-host URL (html_dom_asset_url)
@@ -104,13 +103,16 @@ void servers_ui_query(const char *query);   // the game page's ?play= / ?game= (
 void servers_ui_redirect(const char *game_id, const char *host, int port, const char *reason); // NET_PACKET_REDIRECT
 void servers_ui_join_ticket(const char *host, int port, const char *game_id, const char *ticket, const char *web_url);
 
-// ---- ranked_ui.c (windows[26] + the queue session)
-char *ranked_window_gen(void);
+// ---- ranked_ui.c (windows[26] + the queue session, Krunker v7.1.4 ranked)
 char *ranked_ui_window_gen(void);           // showWindow(27) for guests too (LOGIN REQUIRED card)
 int  ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 const char *ranked_ui_status(void);   // queueStatusMessage, NULL none (play instructions subtitle)
 const char *ranked_ui_ready(void);    // queueReadyMessage
 void ranked_ui_class_changed(int index);
+int  ranked_ui_in_ranked(void);       // queued or in a ranked match (v7 config.isComp: custom.host.ranked)
+void ranked_ui_left_match(void);      // the ranked match's lobby was left
+// --render-scenario: state.ranked {rating, party, tab} stands in for the brain (with state.account)
+void ranked_ui_scenario(const cJSON *state);
 // Custom Games window (windows[9]) rows from GET /api/maps?index=<tab>&pos=<n>&accountId=:
 // -1 = no brain (use the local catalogue), 0 = loading (requested; the window re-renders),
 // 1 = *rows (borrowed cJSON array of map rows). _more: another page may follow (Load More).

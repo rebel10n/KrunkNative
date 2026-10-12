@@ -893,6 +893,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_GAME_CONFIG:
         case NET_PACKET_NETWORK_DATA:
         case NET_PACKET_MATCH_VOTE_STATE:
+        case NET_PACKET_COMP_LOBBY:
             return lobby_events_handle(client, type, payload, length); // WP-E
         case NET_PACKET_ZONE:
         case NET_PACKET_BUILD:

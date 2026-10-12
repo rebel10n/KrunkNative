@@ -47,11 +47,10 @@ static int in_list(const cJSON *a, const char *s) {
     return 0;
 }
 
+/* kn_rq_key (postgres/0204): the one v7 queue's members carry their season rating as "elo" */
 static const char *queue_key(const char *q) {
     if (!q) return NULL;
-    if (!strcmp(q, "r1v1")) return "elo";
-    if (!strcmp(q, "r2v2")) return "elo2";
-    if (!strcmp(q, "r4v4")) return "elo4";
+    if (!strcmp(q, "ranked")) return "elo";
     return NULL;
 }
 

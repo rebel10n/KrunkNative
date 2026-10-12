@@ -10,6 +10,7 @@
 #include <map_catalog.h>
 #include <map_validate.h>
 #include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
+#include <ranked.h>      // RANKED_TEAM_SIZE
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <math.h>
 #include <stdio.h>
@@ -125,6 +126,10 @@ static void acc_chat_to(ClientConnection *client, const char *text) {
     NetChatPacket packet;
     net_packet_chat(&packet, -1, NET_CHAT_SERVER, NULL, text);
     net_send_packet(client->fd, NET_PACKET_CHAT, &packet, sizeof(packet));
+}
+
+void accounts_notice(ClientConnection *client, const char *text) {
+    if (client && text && text[0]) acc_chat_to(client, text);
 }
 
 static const char *acc_map_name(void) {
@@ -553,7 +558,7 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
     const int catalogue = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
                               ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
     cJSON_AddNumberToObject(p, "mapIndex", catalogue >= 0 && catalogue < MAP_CATALOG_OFFICIAL_COUNT ? catalogue : -1);
-    cJSON_AddBoolToObject(p, "ranked", g_rk.active);
+    cJSON_AddBoolToObject(p, "ranked", game->config.comp); // checkChallenge: T "ranked" needs game.isComp
 }
 
 static cJSON *acc_player_stats(const ClientConnection *client, const int final) {
@@ -686,11 +691,16 @@ void accounts_round_changed(void) {
 }
 
 // ------------------------------------------------------------------ ranked (brain queue)
-// doc/backend.md 6.5. v3.1.1 rules (src/data/game.js): isFromQueue lobbies take only the
-// queued accounts, players.setTeam puts each on its queue team, needAll + minPlayers hold
-// the countdown until everyone is in (needAllTimer, here the brain's startGraceS), a
-// player leaving before the end screen ends the match (leaveGame -> endGame(3)) and is
-// an abandoner (checkLeave: rankedDeduction, applied by the brain), infEndTimer: one round.
+// doc/backend.md 6.5. A v7.1.4 ranked match is a comp lobby (game.isComp, config.hostTypes[1]
+// "Comp Server Setup": Hardpoint, the comp maps, rankedClasses, fixMov / jumpMlt / slidSpd)
+// for the queue's roster. v7's server strings: "Joined Ranked Match. Abandoning a match will
+// result in a temporary ban" (ranked.join), "Game in Progress" (ranked.progress) for anyone
+// else, "Spectating Disabled in Ranked", "Can't switch while in-game" (the roster's teams are
+// the comp lobby's `t`). v7's server code is not in the reconstruction, so the lobby rules are
+// v3.1.1's isFromQueue ones (src/data/game.js): minPlayers holds the start until everyone is in
+// (needAllTimer, here the brain's startGraceS), a player leaving before the end screen ends the
+// match (leaveGame -> endGame(3)) and is an abandoner (checkLeave: rankedDeduction and the
+// rankedCooldown queue ban, applied by the brain); one round (comp endTimer "inf").
 
 
 static RankedSlot *acc_ranked_slot(const int account_id) {
@@ -751,12 +761,15 @@ int accounts_assigned_team(const ClientConnection *client) {
     return slot ? slot->team + 1 : 0;
 }
 
+int accounts_ranked_active(void) {
+    return g_rk.active;
+}
+
 // Only the roster plays a ranked lobby; a roster player who left is out (needAll).
 static const char *acc_ranked_refusal(const ClientConnection *client) {
     if (!g_rk.active) return NULL;
     RankedSlot *slot = acc_ranked_slot(client->acct.account_id);
-    if (!slot) return "This is a ranked match";
-    if (slot->left || g_rk.ended) return "This ranked match is over";
+    if (!slot || slot->left || g_rk.ended) return "Game in Progress"; // ranked.progress
     return NULL;
 }
 
@@ -841,7 +854,7 @@ static void acc_handle_ranked_reply(const cJSON *frame) {
         const cJSON *delta = cJSON_GetObjectItem(rating, "delta");
         if (!cJSON_IsNumber(id) || !cJSON_IsNumber(new_value)) continue;
         char text[NET_CHAT_TEXT_SIZE];
-        snprintf(text, sizeof(text), "Rating %s: %.0f -> %.0f (%+.0f)%s", acc_str(cJSON_GetObjectItem(rating, "key"), "elo"),
+        snprintf(text, sizeof(text), "Ranked rating: %.0f -> %.0f (%+.0f)%s",
                  cJSON_IsNumber(old_value) ? old_value->valuedouble : 0.0, new_value->valuedouble,
                  cJSON_IsNumber(delta) ? delta->valuedouble : 0.0, acc_truthy(cJSON_GetObjectItem(rating, "abandoned")) ? " (abandoned)" : "");
         server_log("[ranked] account %d %s", id->valueint, text);
@@ -1021,9 +1034,11 @@ static void acc_set_ready(ClientConnection *client) {
         return;
     }
     RankedSlot *slot = g_rk.active ? acc_ranked_slot(client->acct.account_id) : NULL;
+    if (slot && !slot->joined) acc_chat_to(client, "Joined Ranked Match. Abandoning a match will result in a temporary ban"); // ranked.join
     if (slot) slot->joined = 1;
     const int was_waiting = client->acct.join_state != SERVER_JOIN_READY;
     client->acct.join_state = SERVER_JOIN_READY;
+    net_comp_lobby_sync(client); // comp lobby: the account identity (+ the roster team)
     client->acct.auth_rid = 0;
     if (client->acct.account_id && gs_is_op(&g_gs_config, client->acct.account_id, client->acct.username)) {
         client->op = 1;
@@ -1547,21 +1562,27 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     // (game_apply_map_config). The setup below only decides the forced maps / modes.
     cJSON *request = cJSON_IsObject(config) ? cJSON_Duplicate(config, 1) : cJSON_CreateObject();
     const cJSON *override = cJSON_GetObjectItem(config, "override");
-    const int host_index = cJSON_IsNumber(override) && override->valueint >= 0 && override->valueint < GAME_HOST_TYPE_COUNT ? override->valueint : GAME_HOST_CUSTOM;
-
     const int ranked = cJSON_IsTrue(cJSON_GetObjectItem(config, "ranked"));
+    // ranked (doc/backend.md 6.5): v7's ranked match is a comp lobby, config.hostTypes[1]
+    const int host_index = ranked ? GAME_HOST_COMP
+                         : cJSON_IsNumber(override) && override->valueint >= 0 && override->valueint < GAME_HOST_TYPE_COUNT ? override->valueint : GAME_HOST_CUSTOM;
+
     if (ranked && request) {
-        // ranked (doc/backend.md 6.5): the roster's size is the lobby, everyone must be in
-        // before the countdown (v3.1.1 needAll + minPlayers), one round (infEndTimer)
+        // the roster is the lobby: tmSize = team size - 1 (comp minPlayers / maxPlayers = 2 x
+        // (tmSize + 1) + specSlots, so everyone must be in before the countdown, v3.1.1 needAll),
+        // no spectator slots (ranked.spectate), the overDat's map / mode replaced by the queue's
         const cJSON *team_size = cJSON_GetObjectItem(config, "teamSize");
-        const int size = cJSON_IsNumber(team_size) && team_size->valueint > 0 ? team_size->valueint : 1;
-        cJSON_DeleteItemFromObjectCaseSensitive(request, "maxPlayers");
-        cJSON_DeleteItemFromObjectCaseSensitive(request, "minPlayers");
-        cJSON_AddNumberToObject(request, "maxPlayers", size * 2);
-        cJSON_AddNumberToObject(request, "minPlayers", size * 2);
+        int size = cJSON_IsNumber(team_size) && team_size->valueint > 0 ? team_size->valueint : RANKED_TEAM_SIZE;
+        if (size > 4) size = 4; // tmSize options 1v1..4v4
+        const char *const replaced[] = {"tmSize", "specSlots", "allowSpect", "override", "maxPlayers", "minPlayers"};
+        for (size_t i = 0; i < sizeof(replaced) / sizeof(replaced[0]); i++) cJSON_DeleteItemFromObjectCaseSensitive(request, replaced[i]);
+        cJSON_AddNumberToObject(request, "tmSize", size - 1);
+        cJSON_AddNumberToObject(request, "specSlots", 0);
+        cJSON_AddBoolToObject(request, "allowSpect", 0);
+        cJSON_AddNumberToObject(request, "override", GAME_HOST_COMP);
     }
-    // Zombies / Raid hosts force their maps and modes (forceDat / allowedDat)
-    cJSON *forced = host_index == GAME_HOST_ZOMBIES || host_index == GAME_HOST_RAID ? game_config_setup(host_index, request, NULL, ranked) : NULL;
+    // Comp (ranked), Zombies and Raid hosts: setupGameConfig's overDat / forceDat / allowedDat
+    cJSON *forced = ranked || host_index == GAME_HOST_ZOMBIES || host_index == GAME_HOST_RAID ? game_config_setup(host_index, request, NULL, ranked) : NULL;
     GameConfig game_config = g_default_game_config;
     game_config_read(&game_config, forced ? forced : request, GAME_CONFIG_CLAMP_HOSTED, host_index); // round 1 before its map loads
 
@@ -1612,8 +1633,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
         modes = calloc((size_t) cJSON_GetArraySize(mode_list), sizeof(int));
         cJSON_ArrayForEach(entry, mode_list) {
             const int id = cJSON_IsNumber(entry) ? entry->valueint : cJSON_IsString(entry) ? mode_find(entry->valuestring) : -1;
-            // ranked modes are preventCustomGames: only the brain's ranked lobbies get them
-            if (modes && mode_config(id) && (mode_hostable(id) || forced || (ranked && mode_config(id)->is_ranked))) modes[mode_count++] = id;
+            if (modes && mode_config(id) && (mode_hostable(id) || forced)) modes[mode_count++] = id;
         }
         if (!mode_count) {
             free(modes);
@@ -1623,7 +1643,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     cJSON_Delete(mode_list);
     if (ranked && !mode_count) {
         modes = calloc(1, sizeof(int));
-        if (modes) modes[mode_count++] = MODE_ID_RANKED; // brain.ranked.mode default
+        if (modes) modes[mode_count++] = MODE_ID_POINT; // the comp host's overDat modes [2]: Hardpoint
     }
 
     g_acc.custom = 1;

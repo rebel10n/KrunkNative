@@ -228,6 +228,7 @@ static void warn_unknown_keys(void) {
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
+        "ranked",  // the Ranked window's state: {rating: /mm/queue/rating, party: a poll response, tab}
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -818,6 +819,7 @@ static int ui_scenario_apply(Client *client) {
     if (in_game) client->menu_lock_grace_until = 1e18;
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
+    ranked_ui_scenario(st("ranked"));   // the Ranked window's rank card / party (ranked_ui.c)
     if (menu_open) apply_window(client);
 
     run_frames(client, 2);

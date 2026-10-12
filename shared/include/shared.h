@@ -1768,6 +1768,8 @@ typedef struct Game_t {
     // ---- WP-C: the v7.1.4 trigger runtime (shared/src/triggers_v7.c): globalVals, triggerQueue,
     // trigger chains, per-object custVals, playerSounds, pickups. Allocated on first use, NULL none.
     struct TriggerRuntime_t *trigger_rt;
+    // v7.1.4 game.lobbyPlayers of a comp lobby (shared/include/comp_lobby.h), NULL until used
+    struct CompLobby_t *comp_lobby;
     GameZombies zombies; // map-logic WP-H (shared/include/zombies.h): machines, power-ups, waves, airdrops
 } Game;
 
@@ -2964,6 +2966,8 @@ typedef struct {
 #define NET_PACKET_MATCH_VOTE_STATE (NET_PACKET_BLOCK_LOBBY + 1) // S->C: NetMatchVoteStatePacket (endData.mts + "mv" totals)
 #define NET_PACKET_NETWORK_DATA (NET_PACKET_BLOCK_LOBBY + 2)     // S->C: NetNetworkDataPacket (init networkData)
 #define NET_PACKET_GAME_CONFIG (NET_PACKET_BLOCK_LOBBY + 3)      // S->C: NetGameConfigChunk (init config + customData, JSON)
+#define NET_PACKET_COMP_SET (NET_PACKET_BLOCK_LOBBY + 4)         // C->S: NetCompSetPacket (v7 updSyncDat: "cd" key, value)
+#define NET_PACKET_COMP_LOBBY (NET_PACKET_BLOCK_LOBBY + 5)       // S->C: NetCompLobbyPacket (v7 "cd" lobbyPlayers / "cda" id, entry)
 
 #define NET_MATCH_PICKS 4 // config.matchPicks
 
@@ -3000,6 +3004,38 @@ typedef struct {
     uint32_t offset;   // of this chunk; offset 0 starts a new config
     uint8_t data[NET_GAME_CONFIG_CHUNK_SIZE];
 } NetGameConfigChunk;
+
+// Comp lobby (shared/include/comp_lobby.h). v7 "cd" (the whole lobbyPlayers table) is a CLEAR
+// followed by one SET per entry; "cda" is a SET, or a REMOVE for `cda id null`.
+typedef enum {
+    NET_COMP_LOBBY_CLEAR = 0,
+    NET_COMP_LOBBY_SET = 1,
+    NET_COMP_LOBBY_REMOVE = 2,
+} NetCompLobbyOp;
+
+typedef struct {
+    int32_t uid;           // lobbyId: the player's connection id (player.id)
+    uint8_t active;        // a
+    uint8_t rejected;      // rej: left the lobby while on a team
+    int8_t team;           // t: 0 none, 1 / 2
+    int8_t class_index;    // c: -1 null
+    int32_t account_id;    // i (0 guest)
+    int32_t level;         // l
+    uint8_t verified;      // v (account.featured)
+    int16_t flag;          // f: account stats.flg, -1 none
+    char name[32];         // n ("" = guest)
+    char clan[8];          // cl
+} NetCompLobbyEntry;
+
+typedef struct {
+    uint8_t op;            // NetCompLobbyOp
+    NetCompLobbyEntry entry;
+} NetCompLobbyPacket;
+
+typedef struct {
+    uint8_t key;           // 't' team (0 leave, 1, 2) or 'c' class index
+    int32_t value;
+} NetCompSetPacket;
 // ---- end WP-E lobby packets ----
 // ---- WP-C trigger / interaction packets (v7.1.4, doc/v7/map-logic.md §3.9, §5.3), ids in
 // NET_PACKET_BLOCK_TRIGGERS (120-129). Old peers ignore unknown ids; a client sends the C->S

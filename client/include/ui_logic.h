@@ -449,6 +449,7 @@ int  ui_loadout_spray(void);                    // ENT ent[1]: the selected spra
 int  ui_loadout_spray_wheel(int *out, int max); // WP-E: the spray wheel's store indices (owned sprays, then the equipped one)
 void ui_loadout_class_bubble(int index);         // selectClass speech line
 void ui_loadout_switch_tab(int tab);             // windows[2].switchTab(tab, true): Class / Loadout / Customize / Other
+void ui_loadout_select_tab(int tab);             // the same from selectClass: re-renders only an open window 3
 void ui_loadout_show_police_pop(void);           // shoPolicePop
 void ui_loadout_hide_police_pop(void);           // hidePolicePop
 void ui_loadout_clear_pops(void);                // clearPops

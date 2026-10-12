@@ -1840,8 +1840,7 @@ void hud_ui_add_chat_channel(const char *name, const char *msg, const char *colo
 }
 
 // index.js (per menu update): the team channel switches back to global when the mode has no teams
-// (switchChat(chatSwitch) without its chat line). v7 also forces the team channel in competitive
-// games (Game.isComp), which KrunkNative's ranked modes do not use.
+// (switchChat(chatSwitch) without its chat line). The comp lobby's team channel: hud_reset_page.
 static void hud_chat_channel_check(const Client *client) {
     if (g_chat_channel != CHAT_CHANNEL_TEAM || hud_chat_teams(client)) return;
     g_chat_channel = CHAT_CHANNEL_GLOBAL;
@@ -3410,6 +3409,11 @@ static void hud_spectator_tick(Client *client, const double now) {
 // A fresh page (ready edge): nothing we created or wrote still exists.
 static void hud_reset_page(Client *client) {
     HudUi *ui = &g_hud_ui;
+    comp_ui_round(client); // f1904(Game.isComp): the comp lobby's menu or the default one
+    if (!client->game.config.comp) ranked_ui_left_match(); // a round outside a comp lobby: no ranked match any more
+    // io_startGame: `if (chatChannel != 1 && Game.isComp) switchChat(chatSwitch)`: a comp lobby
+    // (ranked) starts on the team channel
+    if (client->game.config.comp && g_chat_channel != CHAT_CHANNEL_TEAM && client->game.mode && client->game.mode->config.teams) hud_switch_chat();
 
     hud_feed_clear(0);
     hud_popups_page_reset();

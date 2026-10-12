@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <spawnables.h>
+#include <lobby_ui.h> // the comp menu (comp_ui.c)
 
 Player *client_find_player(Client*, int uid);                      // client/src/main.c
 void client_add_player_mesh(Client*, Player*, int render_you);      // client/src/main.c
@@ -582,6 +583,7 @@ static void hud_modes_message(const Client *client, const GameModeConfig *config
         text = enemy_has_ours && carrying ? MODES_FLAG_MSG_RC : enemy_has_ours ? MODES_FLAG_MSG_E : carrying ? MODES_FLAG_MSG : text;
     }
 
+    comp_ui_message(text); // io_updateGameMessage: compTimBox.textContent
     const HtmlElem el = html_dom_by_id("gameMessage");
     if (!el) return;
     char current[NET_GAME_MESSAGE_SIZE];

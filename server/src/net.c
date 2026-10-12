@@ -13,6 +13,7 @@
 #include <ks_game.h>
 #include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
 #include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
+#include <comp_lobby.h>     // v7 comp lobby (lobbyPlayers): ranked matches and comp hosts
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -367,6 +368,31 @@ static void net_send_social_caps(const ClientConnection *client) {
     net_send_packet(client->fd, NET_PACKET_SOCIAL_V7, &version, sizeof(version));
 }
 
+// v7 syncLobbyP(player, id, 0) in a comp game: the connection's entry (account identity, a
+// ranked roster team) and the whole table to it ("cd"). Called after every INIT (the client
+// resets its session there) and when accounts settle the identity.
+void net_comp_lobby_sync(ClientConnection *client) {
+    Game *game = &g_server->game;
+    if (!game->config.comp || !client) return;
+    CompLobbyEntry identity;
+    memset(&identity, 0, sizeof(identity));
+    identity.flag = -1;
+    identity.class_index = -1;
+    if (client->acct.account_id && client->acct.join_state == SERVER_JOIN_READY) {
+        identity.account_id = client->acct.account_id;
+        identity.level = client->acct.level;
+        identity.verified = (uint8_t) !!(client->acct.flags & NET_PLAYER_INFO_VERIFIED);
+        snprintf(identity.name, sizeof(identity.name), "%s", client->acct.username);
+        snprintf(identity.clan, sizeof(identity.clan), "%s", client->acct.clan);
+    } else if (client->local) { // the offline sandbox's own player counts as an account (decisions.md)
+        snprintf(identity.name, sizeof(identity.name), "%s", client->name);
+    }
+    comp_lobby_join(game, client->id, &identity);
+    comp_lobby_send_all(game, client->id);
+    const int team = accounts_assigned_team(client); // ranked: the roster team, never picked
+    if (team) comp_lobby_set_team(game, client->id, team);
+}
+
 static void net_send_init(ClientConnection *client) {
     accounts_send_billboard(client); // init "bill" (config gameserver.billboards), before the map loads
     net_send_map_info(client);
@@ -386,6 +412,7 @@ static void net_send_init(ClientConnection *client) {
 
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
     net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
+    net_comp_lobby_sync(client);  // comp lobby: the connection's entry + the table
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
 }
 
@@ -497,6 +524,10 @@ static void net_spawn_client(ClientConnection *client) {
 
     snprintf(client->player->name, sizeof(client->player->name), "%s", client->name);
     client->player->class_index = client->class_index;
+    // comp lobby: the player spawns on its lobby team and class (getLobbyDat "t" / "c")
+    const CompLobbyEntry *comp = g_server->game.config.comp ? comp_lobby_get(&g_server->game, client->id) : NULL;
+    if (comp && comp->team) client->player->team = comp->team;
+    if (comp && comp->class_index >= 0) client->player->class_index = comp->class_index;
     client->player->secondary_index = client->secondary_index;
     client->player->cosmetics = client->cosmetics;
     client->player->slid_cont = client->slid_cont; // gameserver.ts: player.slidCont = ent[15]
@@ -550,6 +581,12 @@ static void net_request_spawn(ClientConnection *client) {
         return;
     }
     if (!game_can_spawn(&g_server->game, client->player)) return; // shared with the offline client
+    // comp lobby canSpawn: a team and a class picked in the comp menu
+    const char *blocked = comp_lobby_spawn_block(&g_server->game, client->id);
+    if (blocked) {
+        accounts_notice(client, blocked);
+        return;
+    }
 
     net_spawn_client(client);
 }
@@ -837,6 +874,7 @@ void net_remove_client(ClientConnection *client) {
     if (index == SIZE_MAX) return;
 
     accounts_on_disconnect(client); // partial stats commit, player-leave to the brain
+    comp_lobby_leave(&g_server->game, client->id); // syncLobbyP(player, id, 1)
     on_client_disconnect(client);
     net_set_spectating(client, 0);
     ks_server_on_leave(client); // KrunkScript onPlayerLeave, before the player is removed
@@ -1159,6 +1197,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
             if (client->peer_minor >= NET_PROTOCOL_MINOR_V7 && g_server->game.ready) { // WP-E: its INIT went out before the HELLO
                 game_config_send(&g_server->game, client->id);
+                comp_lobby_send_all(&g_server->game, client->id);
                 net_send_social_caps(client);
                 if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
             }
@@ -1168,6 +1207,17 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             if (packet->length != sizeof(vote) || client->peer_minor < NET_PROTOCOL_MINOR_V7) break;
             memcpy(&vote, packet->payload, sizeof(vote));
             game_vote_match(&g_server->game, client->id, vote.mode_id, vote.map_index);
+            break;
+        }
+        case NET_PACKET_COMP_SET: { // v7 updSyncDat: "cd" key, value -> game.updLobbyP (comp lobbies)
+            NetCompSetPacket set;
+            if (packet->length != sizeof(set) || client->peer_minor < NET_PROTOCOL_MINOR_V7) break;
+            memcpy(&set, packet->payload, sizeof(set));
+            if (set.key == 't' && accounts_ranked_active()) { // the roster's teams are fixed
+                accounts_notice(client, "Can't switch while in-game"); // ranked.switch
+                break;
+            }
+            comp_lobby_update(&g_server->game, client->id, (char) set.key, set.value);
             break;
         }
         case NET_PACKET_SCRIPT_MSG: // KrunkScript GAME.NETWORK.send from the client script
@@ -1201,8 +1251,13 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             client->cosmetics_v7 = ent.cosmetics_v7; // WP-F (ENT V9)
             client->show_badges = ent.show_badges;
 
+            int spectate = ent.spectate;
+            if (spectate && accounts_ranked_active()) {
+                accounts_notice(client, "Spectating Disabled in Ranked"); // ranked.spectate
+                spectate = 0;
+            }
             // brain-linked: the first ENT waits for the JOIN / account lookup (server/src/accounts.c)
-            if (accounts_gate_ent(client, ent.spectate)) net_resume_ent(client, ent.spectate);
+            if (accounts_gate_ent(client, spectate)) net_resume_ent(client, spectate);
             break;
         }
         case NET_PACKET_JOIN:

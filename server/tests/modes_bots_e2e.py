@@ -3,7 +3,7 @@
 
   python3 -I server/tests/modes_bots_e2e.py BUILD_DIR [MODE...]      (run from the repository root)
 
-For each mode id 0..36 (and KN Ranked 37 / 38): one standalone server_bin on Sandstorm (the v7.1.4
+For each mode id 0..36 (37 / 38 are reserved for ranked: no mode): one standalone server_bin on Sandstorm (the v7.1.4
 sandstorm_v3: objectives, team + neutral flags, Domination zones) with `bot_quota 4`, a guest that
 announces protocol 1.3 (NET_PROTOCOL_MINOR_V7) and watches for a while. Checks per mode: the guest
 spawns in that mode, the server keeps ticking (STATE packets) and survives, and the mode's own
@@ -30,10 +30,10 @@ WATCH = float(os.environ.get("KN_MODES_WATCH", "8"))
 
 MODES = ["ffa", "tdm", "point", "ctf", "bhop", "hide", "infect", "race", "lms", "simon", "gun", "prop", "boss", "clas",
          "depo", "stalk", "king", "oinc", "trade", "kc", "def", "shrp", "trai", "raid", "blitz", "dom", "sdm", "krank",
-         "tdf", "depoffa", "car", "aon", "md", "chs", "bhffa", "zom", "imp", "37", "38"]
+         "tdf", "depoffa", "car", "aon", "md", "chs", "bhffa", "zom", "imp"]
 # what a joiner gets for sure: MODE_SYNC_V7 always (objective modes: an objective uid in it),
 # Domination its zones ("uct" sync.doms)
-OBJECTIVE_MODES = {2, 14, 16, 29, 37}
+OBJECTIVE_MODES = {2, 14, 16, 29}
 EXPECT = {25: DOM_UPDATE}
 results = []
 

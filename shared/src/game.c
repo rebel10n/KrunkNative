@@ -8,6 +8,7 @@
 #include <spawnables.h>
 #include <game_config.h> // WP-E: v7 custom game config, map config, match votes
 #include <zombies.h> // map-logic WP-H: machines, power-ups, airdrops
+#include <comp_lobby.h> // v7 comp lobby (lobbyPlayers)
 #include <account.h>     // WP-E part 2c: incMedal (accounts and the sandbox)
 #include <progression.h> // WP-E part 2c: overlay.medalsList
 #include <pcg_basic.h>
@@ -91,6 +92,7 @@ void game_configure(
     else game->config = g_default_game_config;
     game_config_sync_teams(&game->config); // WP-E: team1/2_name point at this copy's team_names
     game_config_free(game);                // WP-E: a new configuration drops the host request / overrides
+    comp_lobby_free(game);                 // and a new game object's lobbyPlayers start empty
 
     if (game->map_count) {
         free(game->maps);

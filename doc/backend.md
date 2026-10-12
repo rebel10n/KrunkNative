@@ -737,66 +737,84 @@ node draining (still listed with `meta.draining`, no longer offered). Used by
 `deploy/deploy.sh drain`.
 
 
-### 6.5 Ranked queue (`ranked.c`, `0201_ranked.sql`)
+### 6.5 Ranked (`ranked.c`, `0201_ranked.sql`, `0204_ranked_seasons.sql`)
 
-v3.1.1's ranked matchmaking (index.js `joinQueue` / `leaveQueue`,
-ClientManager's `QueueManager`, `config.queues`, `minRankedLevel`, `eloK`,
-`rankedDeduction`, `rankedCooldown`). The reconstruction leaves it unimplemented
-(`UPDATE_ELO` is a no-op), so the routes and shapes follow the v3.1.1 client.
+Krunker v7.1.4's ranked (doc/v7/decisions.md "Ranked"). What v7.1.4 itself keeps: the Ranked
+window (`windows[26]`, header "Ranked", dark popup, tabs, a party invite link, region flags; its
+`gen()` is empty in the reconstruction), its strings (`windows.ranked.login`, `windows.ranked.level`,
+`ranked.join` "Joined Ranked Match. Abandoning a match will result in a temporary ban",
+`ranked.progress` "Game in Progress", `ranked.switch` "Can't switch while in-game",
+`ranked.spectate` "Spectating Disabled in Ranked", the comp lobby's spawn refusals,
+`custom.host.ranked`), the constants of `src/config.js` (eloPer 120, eloK 32, minRankedLevel 15,
+rankedCooldown 7200000, rankedDeduction 30, rankedClasses), the comp lobby of `game.isComp`
+(`config.hostTypes[1]` "Comp Server Setup", lobbyPlayers / canSpawn / the comp menu) and the
+ranked reward skins of `store.js` (`ranked: true`, `rseas` 1-4, limT "Ranked", not sold, spun or
+quick-sold). Its client has no queue code and its server no ranked code left, so the queue keeps
+the v3.1.1 ClientManager route shapes KrunkNative already served and the rating formula is
+v3.1.1's `updateELO` / `checkLeave` (shared/include/ranked.h). v3.1.1's three queues (Solo / Duo /
+Quad: r1v1, r2v2, r4v4) and KrunkNative's own ranked modes (ids 37 / 38: an objective variant and
+first to 10 kills) are gone; 37 / 38 stay reserved for ranked with no mode.
 
-State is in the shared database (`mm_ranked_parties`, `mm_ranked_members`,
-`mm_ranked_matches`, `mm_ranked_match_players`, `mm_ranked_bans`; logic in the
-plpgsql functions `kn_rq_*` on PostgreSQL, the `P_RQ_*` kn_procs of `db_mm.c`
-elsewhere; the matcher lock is `pg_try_advisory_xact_lock`, the sqlite write lock
-or `SELECT ... FOR UPDATE NOWAIT` on `mm_ranked_lock`), so any brain serves any client. Ratings are
-svc-accounts' `players.player_elo/elo2/elo4` (read from the session's account,
-written with the accounts op `"elo"` `{id, mode: 1|2|4, delta}`).
+State is in the shared database (`mm_ranked_parties`, `mm_ranked_members`, `mm_ranked_matches`,
+`mm_ranked_match_players`, `mm_ranked_bans`, `ranked_ratings`; queue logic in the plpgsql
+functions `kn_rq_*` on PostgreSQL, the `P_RQ_*` kn_procs of `db_mm.c` elsewhere; the matcher lock
+is `pg_try_advisory_xact_lock`, the sqlite write lock or `SELECT ... FOR UPDATE NOWAIT` on
+`mm_ranked_lock`), so any brain serves any client. Ratings are per season: `ranked_ratings
+(account_id, season, rating, peak, games, wins, losses, abandons, updated_at)`, the season being
+`accounts.current_season` (the season registry `seasons` is season-system's 0108; ranked only
+uses the number). The current season's rating is mirrored to svc-accounts'
+`players.player_elo` (accounts op `"elo"` `{id, mode: 1, elo}`), the field v7's profile data
+carries; `player_elo2` / `player_elo4` are no longer written (v7's `player_elo4` is Junk).
 
 Routes (each also without the `/mm` prefix; all GET):
 
 | route | answer |
 | --- | --- |
-| `/mm/queue/join?token=SESSION&region=R&queues=["r2v2"]&party=ID\|&ready=0\|1&classIndex=N` | `{"clientId","clientKey","status":null}`, or `{"clientId":null,"clientKey":null,"status":ERR[, "cooldownMs"]}` (v3.1.1 `"iq"` values; ERR = `AccountAlreadyPlaying`, `LoginRequired`, `LevelTooLow`, `PartyNotFound`, `PartyFull`, `RankedCooldown`) |
+| `/mm/queue/join?token=SESSION&region=R&party=ID\|&ready=0\|1&classIndex=N` | `{"clientId","clientKey","status":null}`, or `{"clientId":null,"clientKey":null,"status":ERR[, "cooldownMs"]}` (ERR = `AccountAlreadyPlaying`, `LoginRequired`, `LevelTooLow`, `PartyNotFound`, `PartyFull`, `RankedCooldown`, `InvalidQueue` for a `queues` list without `"ranked"`). `classIndex` outside config.rankedClasses becomes 0. |
 | `/mm/queue/poll?clientKey=` | poll state (below); members that stop polling for `poll_timeout_s` are dropped |
 | `/mm/queue/update-ready?clientKey&isReady=true\|false` | state |
-| `/mm/queue/update-queues?clientKey&queues=JSON` | state (leader only; unknown ids dropped) |
 | `/mm/queue/update-class?clientKey&classIndex=N` | state |
 | `/mm/queue/kick-party-member?clientKey&kickClientId=` | state (leader only) |
 | `/mm/queue/promote-party-member?clientKey&promoteClientId=` | state (leader only) |
 | `/mm/queue/leave?clientKey=` | `{"left":true}` (v3.1.1 "unqueue") |
+| `/mm/queue/rating?token=SESSION` | the Ranked window's rank card: `{season, rating, peak, games, wins, losses, abandons, rank, level, minLevel, teamSize, cooldownMs}`; 401 `LoginRequired` without a session |
 
-Unknown key: 404 `{"error":"InvalidClientKey"}` (the client then drops the queue).
-State (v3.1.1 poll response):
+`/mm/queue/update-queues` is gone (one queue). Unknown key: 404 `{"error":"InvalidClientKey"}`
+(the client then drops the queue). State (v3.1.1 poll response):
 `{"status":{"t":"Queued"|"CreatingGame"|"Join","c":{...}},"partyId","partyLeaderId",
 "partyMembers":[{"clientId","accountId":<username>,"accountData":"{\"c\":clan,\"cR\":rank,\"e\":rating}",
-"classIndex","isReady"}],"queueIds":["r2v2"],"region"}`; `c` is `{queueSize}` while
+"classIndex","isReady"}],"queueIds":["ranked"],"region"}`; `c` is `{queueSize}` while
 Queued and `{gameId, host, port, webUrl, matchId, clientId: <this player's ticket>}`
 on Join. `HostGame` is not used (the brain creates the lobby). Join tickets reserve
 no seat: either connect with `clientId` or seek `?game=gameId&token=`.
 
-Matching (every second, by whichever brain gets `pg_try_advisory_xact_lock`):
-parties whose members are all ready, per region and queue (r4v4, r2v2, r1v1 =
-2 teams of 4/2/1; a party fits a queue when its size <= the team size). The
-longest-waiting party anchors; parties within `rating_window + window_growth x
-wait` (max `window_max`) of its average rating fill team 0, then team 1. The match
-is hosted with `host` (config `{"ranked":true, "matchId", "queue", "teamSize",
-"maxPlayers", "mode": brain.ranked.mode (38, MODE_ID_RANKED), "modes", "maps"/"map" (random from
-brain.ranked.maps, if set), "private":true, "startGraceS", "teams":[[{accountId,
-name}],[...]]}`); hosting failure puts the parties back (10 s back-off).
+Matching (every second, by whichever brain gets the matcher lock): parties whose members are
+all ready, per region; a party fills at most one team (`team_size`, 4). The longest-waiting
+party anchors; parties within `rating_window + window_growth x wait` (max `window_max`) of its
+average rating fill team 0, then team 1 (a party always plays on one team). The match is hosted
+with `host` (config `{"ranked":true, "matchId", "queue":"ranked", "teamSize", "mode"/"modes":
+2 (Hardpoint: the comp host's overDat mode, which the game server keeps), "maps":[a catalogue index from brain.ranked.maps], "private":true,
+"startGraceS", "teams":[[{accountId, name}],[...]]}`); hosting failure puts the parties back
+(10 s back-off). The game server plays it as a comp lobby (doc section 8.6).
 
 Results: the game server sends `{"type":"ranked-result","rid","matchId","winner":0|1|-1,
-"players":[...],"abandoned":[accountIds]}`; the brain closes the match once
-(idempotent), applies Elo per player on team averages (K = `brain.ranked.k`, 32;
-ratings floor at 0), `-abandon_penalty` (30) and a `cooldown_s` (2 h) queue ban for
-abandoners, and replies `{"type":"ranked-result-reply","rid","ok":true,"ratings":
-[{accountId,name,team,key,old,new,delta,abandoned?}]}`. Matches without a result
-are aborted after `match_timeout_s`.
+"players":[...],"abandoned":[accountIds]}`; the brain closes the match once (idempotent), rates
+each player against the other team's average (`ranked_delta`: K `brain.ranked.k` 32, divisor
+330, floored at 0), an abandoner instead loses `abandon_penalty` (30) and gets a `cooldown_s`
+(2 h) queue ban, upserts this season's `ranked_ratings` row, mirrors `player_elo`, and replies
+`{"type":"ranked-result-reply","rid","ok":true,"ratings":[{accountId,name,team,key:"elo",season,
+old,new,delta,rank,abandoned?}]}`. Ranks are v3.1.1's `eloIconId`: one per eloPer (120) rating,
+1..8. Matches without a result are aborted after `match_timeout_s`. Ranked reward skins (v7
+`rseas`) are not granted yet: v7.1.4 has no rule for them.
 
-Config `brain.ranked.*`: `enabled`, `min_level` (15), `mode` (38: KN Ranked on the v7.1.4 mode table), `maps`,
-`rating_window`, `window_growth`, `window_max`, `k`, `abandon_penalty`,
-`cooldown_s`, `poll_timeout_s`, `creating_timeout_s`, `match_timeout_s`,
-`start_grace_s`. Test: `ctest -R brain_ranked` (`tests/ranked_test.py`). The matcher's
-advisory lock key includes the schema (`0202`), so schemas sharing a database match independently.
+Config `brain.ranked.*`: `enabled`, `min_level` (15), `team_size` (4: 1..4), `maps` (catalogue indices or names; default the comp host's maps 0, 2, 4, 5,
+11, 12, 14, 17, 23: Burg, Sandstorm, Undergrowth, Shipment, Industry, Lumber, Site, Bureau,
+Atomic), `rating_window`, `window_growth`, `window_max`, `k`, `abandon_penalty`, `cooldown_s`,
+`poll_timeout_s`, `creating_timeout_s`, `match_timeout_s`, `start_grace_s`; the season is
+`accounts.current_season` (7). Tests: `ctest -R brain_ranked` (`tests/ranked_test.py`, every
+store driver) and `server/tests/ranked_e2e.py BUILD_DIR` (a 4v4 on a real server_bin with
+protocol test clients). The matcher's advisory lock key includes the schema (`0202`), so schemas
+sharing a database match independently.
 
 ## 7. Social WebSocket, accounts, profiles (svc-accounts)
 
@@ -1288,30 +1306,43 @@ logged in elsewhere; `004003` banned; `004004` server draining (`"GAME UPDATING"
   `config.endForm.reward`: `<span style='color:#F8C55C'>+N</span> KR`, `NONE` for 0, in
   the end table (`hud_modes.c`, every mode's `endStats`) and as the Performance tab's
   funds; the stats commit's `kr` is the same `player.reward`.
-* **Ranked** (brain `host` with `config.ranked`, section 6.5). v3.1.1 `isFromQueue` rules:
-  only the roster's accounts may join (ticket `acc` or session; others get `ERROR "This
-  is a ranked match"`), each spawns on its queue team (`teams[0]` → team 1, `teams[1]` →
-  team 2, `players.setTeam`), the lobby is `cs`/private with `meta.ranked` + `matchId`,
-  `minPlayers` = roster size so the mode's countdown waits until everyone is in
-  (`needAll`); after `startGraceS` without everyone it starts with whoever is there when
-  both teams have someone, else ends. A roster player who leaves before the end screen
-  ends the round (`leaveGame` → `endGame(3)`) and is an abandoner (`checkLeave`), as are
-  no-shows; the team that stayed wins, else the winner is the END's didWin. One round
-  (`infEndTimer`): `ranked-result {matchId, lobbyId, winner, players[{accountId, team,
-  score, kills, deaths}], abandoned}` goes out once (reliable), the reply's rating
-  changes are logged and sent to each player as a chat line, and the lobby returns to
-  the public rotation at the end of the end screen. The normal `commit` is sent too
-  (ranked modes are `noReward`: time played only, like `updateAccounts`).
+* **Ranked** (brain `host` with `config.ranked`, section 6.5). The lobby is v7's comp lobby:
+  `config.hostTypes[1]` "Comp Server Setup" (`setupGameConfig`: overDat Hardpoint, `fixMov`,
+  `jumpMlt` 1.005, `slidSpd` 0.97, `warmupTime` 0.2, `selTeam`, `throwMel` off, `isComp`; defC
+  `tstCmp` 1 (the comp menu), `limitClasses` 1 with `classLim<i>` 1 for config.rankedClasses)
+  with `tmSize` = team size - 1, `specSlots` 0, `allowSpect` off and the queue's map, re-applied
+  every round. Comp lobby rules (`shared/src/comp_lobby.c`, v7 game.js `lobbyPlayers`): every
+  connection has an entry (`NET_PACKET_COMP_LOBBY` = v7 "cd" / "cda": account id, name, level,
+  verified, team `t`, class `c`), `NET_PACKET_COMP_SET` = `updSyncDat("t"|"c", v)` (team: selTeam,
+  tmSize + 1 per team; class: classLim per team), a player spawns only with a team and a class
+  (canSpawn: "Missing Sync Data", "Please join a Team to Spawn", "Please select a Class to
+  Spawn") and spawns on them; ranked fixes each roster player's `t` to its queue team (`teams[0]`
+  → 1, `teams[1]` → 2) and refuses team picks ("Can't switch while in-game"). v7's server code is
+  not in the reconstruction, so the rest are v3.1.1's `isFromQueue` rules: only the roster's
+  accounts may join (others: `ERROR "Game in Progress"`), each gets "Joined Ranked Match.
+  Abandoning a match will result in a temporary ban" once, spectating is refused ("Spectating
+  Disabled in Ranked"), the lobby is `cs`/private with `meta.ranked` + `matchId`, `minPlayers` =
+  roster size so the countdown waits until everyone is in (`needAll`); after `startGraceS`
+  without everyone it starts with whoever is there when both teams have someone, else ends. A
+  roster player who leaves before the end screen ends the round (`leaveGame` → `endGame(3)`) and
+  is an abandoner (`checkLeave`), as are no-shows; the team that stayed wins, else the winner is
+  the END's didWin (Hardpoint's comp mercy rule ends a match the trailing team can no longer
+  win). One round (comp `endTimer` "inf"): `ranked-result {matchId, lobbyId, winner,
+  players[{accountId, team, score, kills, deaths}], abandoned}` goes out once (reliable), the
+  reply's rating changes are logged and sent to each player as a chat line, and the lobby
+  returns to the public rotation at the end of the end screen. The normal `commit` is sent too;
+  its `ranked` (checkChallenge's `T == "ranked"`) is `game.isComp`.
 * **Tests** (real hits, real DB, headless clients; each creates and drops its own
   database): `server/tests/gunfight.sh [build]` — two accounts on the open
   `server/tests/arena.json`, `KRUNKNATIVE_TEST_AIM` + an input script (trigger held,
   strafes, `respawn` after every death) → checks kills/deaths/score/`kr` in
   `match_results`, `players`, and `player_funds` = sum of rewards; `KN_TEST_SHOT=file`
-  captures the end screen with the Reward column. `server/tests/ranked1v1.sh [build]` —
-  both accounts queue `r1v1` over `/mm/queue/*`, the brain hosts the match, the clients
-  play to 10 kills, checks `mm_ranked_matches` / `players.player_elo`;
-  `KN_TEST_ABANDON=1` makes one player quit mid-match (abandoner, other team wins,
-  cooldown row).
+  captures the end screen with the Reward column. `server/tests/ranked_e2e.py BUILD_DIR` —
+  8 accounts queue over `/mm/queue/*` (a party of two + solos), the brain hosts a 4v4 comp
+  lobby on server_bin, 8 protocol test clients (`kn_proto`, ports from `free_ports()`) join
+  with their tickets: Hardpoint, the roster teams in the comp lobby table, a stranger refused,
+  the class / team / spectate rules, then one player quits: the other team gains 16,
+  `ranked_ratings` / `players.player_elo`, the abandoner's cooldown.
 
 Not ported: the game-socket account ops of v3.1.1 (`io_a` login/register over the
 game socket: the native client logs in over the social WS), `host-request` from a
@@ -1626,7 +1657,7 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 | 2FA enable | act2FA (no markup in the shipped page: KrunkNative adds a row to the Account window's Settings tab) | `["2fa"]` -> `["c2fa",null,null,pattern]` |
 | Daily reward (level >= 5) | cK / dd (#claimHolder timer, "Play 1 Game" until a round ended), claimReward (ad-gated upstream) | `["clm"]` -> `["clm",lastReward,funds]` |
 | Prize wheels (Store tab 0) | windows[13] tab 0, prizeWheel, spinButton/spinUI onclick, spinResponse | `["spin",i]` -> `["spin",null,rand,skin,funds,follow]`, `["unbx"]`. The canvas wheel is a white disc (no 2D canvas natively); the won item shows its preview PNG (`textures/previews/` from the asset tree, `make assets-import`; noimg fallback) |
-| Ranked (27) | windows[26], joinQueue / leaveQueue / updateQueueStatus, QueueManager | `/mm/queue/join` (token, region, queues, party, ready, classIndex), `/mm/queue/poll` every 1 s, update-ready / update-queues / update-class / kick / promote / leave; "Join" `{gameId,host,port,webUrl,clientId}` is joined with that ticket. Status under CLICK TO PLAY |
+| Ranked (27), from the menu bar's Ranked button (after Server Finder) | v7.1.4 windows[26] (tabs, justCopied, region; gen() empty in v7: the body is KrunkNative's in v7's window classes), joinQueue / leaveQueue / updateQueueStatus, QueueManager | `/mm/queue/rating` (the Season tab's rank card), `/mm/queue/join` (token, region, party, ready, classIndex), `/mm/queue/poll` every 1 s, update-ready / update-class / kick / promote / leave; "Join" `{gameId,host,port,webUrl,clientId}` is joined with that ticket; Host Game refuses while queued or in a ranked match (`custom.host.ranked`). Status under CLICK TO PLAY. In the match: the comp menu (`#mMenuHolComp`, `client/src/ui/comp_ui.c`) |
 | playMap / `?play=` / `?game=` | playMap -> `/?play=`, autoHostMap | brain: a public lobby whose `meta.map`/`meta.m` matches, else `/mm/host-game` (`customMap` for non-catalogue maps: the game server fetches `/api/map-data`); offline: published maps are fetched (`/api/map-data?name=`) and hosted in the local game |
 
 ### 9.6 net-bridge `/native?target=`

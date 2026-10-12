@@ -21,3 +21,12 @@ char *lobby_vote_cards_html(void);
 int lobby_vote_show(void);
 // Page handler "voteOnMatch" (args: the "mode,map" string of the card).
 int lobby_vote_handler(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc);
+
+// Krunker v7.1.4 comp menu (#mMenuHolComp, client/src/ui/comp_ui.c): the lobby table of a comp
+// game (ranked matches) from NET_PACKET_COMP_LOBBY, f1904 / f1892, updSyncDat.
+int  comp_ui_packet(Client*, const void *payload, uint16_t length); // NET_PACKET_COMP_LOBBY
+void comp_ui_round(Client*);                     // f1904 at every round start: the comp or the default menu
+void comp_ui_refresh(Client*);                   // f1892: lists, class locks, Join / Leave Team
+void comp_ui_message(const char *text);          // io_updateGameMessage: #compTimBox
+void comp_ui_class_selected(Client*, int index); // selectClass: updSyncDat("c", i)
+int  comp_ui_toggle_team(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc); // toggleTeam(t)

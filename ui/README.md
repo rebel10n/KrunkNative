@@ -69,8 +69,9 @@ system's Adwaita Mono on the reference machine.
   are created by `client/src/ui/ui_terminal.c`).
 - `css/hud.css` — the in-game HUD's crosshair and hit marker built from divs (v7 draws them on
   its overlay canvas).
-- `css/ranked-kn.css` — Ranked (v7.1.4 dropped ranked play; KrunkNative keeps it): Krunker
-  v3.1.1's ranked window rules, added at run time by `client/src/ui/ranked_ui.c`.
+- `css/ranked-kn.css` — the body of v7.1.4's Ranked window (its gen() is empty in the
+  reconstruction and its stylesheet has no ranked rules): a few rules laying out v7's own
+  window pieces, added at run time by `client/src/ui/ranked_ui.c`.
 - `css/devconsole.css` + `css/fonts/lucon.ttf` — the offline build's developer console
   (`mod/devConsole.ts` in the jail tree): its injected `<style>` (only the root-relative font
   URL made relative). `client/src/ui/ui_console.c` adds the sheet at run time
@@ -95,8 +96,9 @@ Settings and Change Controls), `ui_loadout.c` (Change Loadout and its pickers), 
 `account_ui.c`, `clan_ui.c`, `ranked_ui.c`, `servers_ui.c` (Servers, Server Finder, Custom
 Games, Join, Connect) and `hud_ui.c` (the in-game `#inGameUI`, death and end screens).
 
-KrunkNative additions on the v7 page (each restyled with v7's own classes): the menu's
-"Ranked" item, the "Connect" button next to Invite/Join (direct connect to `host[:port]`,
+KrunkNative additions on the v7 page (each restyled with v7's own classes): the menu bar's
+"Ranked" button after Server Finder (v7 keeps the window and its `menu.btn.ranked` label but no
+button), the "Connect" button next to Invite/Join (direct connect to `host[:port]`,
 default port 21015, the console `connect` path), the "Exit" item and Settings > Client tab of
 the desktop client, the Settings rows of the client mods (bhop, dev console binds), the
 Audio Output row, the Lag Compensation slider, the map terminal and interact bar, and the

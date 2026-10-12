@@ -66,8 +66,8 @@
     "ranked": {
       "enabled": true,
       "min_level": 15,
-      "mode": 38,
-      "maps": [],
+      "team_size": 4,
+      "maps": [0, 2, 4, 5, 11, 12, 14, 17, 23],
       "rating_window": 150,
       "window_growth": 10,
       "window_max": 1000,

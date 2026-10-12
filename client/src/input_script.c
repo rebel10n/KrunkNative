@@ -9,6 +9,9 @@
 // summed frame deltas (the round-end slow motion does not stretch them) from the frame the
 // local player became active after `play`.
 //   0 play                       close the menu and enter the game (waits for the map)
+//   0 menu                       as the first event instead of play: the clock starts on the menu once
+//                                the map is ready (menu clicks before any spawn, e.g. a comp lobby's
+//                                team / class picks); a later `play` then enters the game
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
 //                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
@@ -55,6 +58,7 @@ static struct {
     ScriptEvent events[SCRIPT_MAX_EVENTS];
     int count, next;
     int playing;      // `play` ran and the player is active: time runs (dead or alive)
+    int menu_mode;    // the first event is `menu`: time runs from the menu, `play` just enters the game
     int respawn_pending; // `respawn` ran while dead: Play again as soon as the death delay allows
     char shot[160];   // pending `shot` path (written at frame end)
     float time;       // ms since play
@@ -224,6 +228,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
         ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
     } else if (!strcmp(e->cmd, "blur")) {
         client_window_focus_lost(client); // alt-tab (the GLFW focus callback)
+    } else if (!strcmp(e->cmd, "play") && g_script.menu_mode) {
+        if (html_ui_available() && html_ui_is_menu_open()) client_set_menu_open(client, 0);
+        client_enter_game(client);
     } else if (!strcmp(e->cmd, "shot")) {
         strncpy(g_script.shot, e->arg, sizeof(g_script.shot) - 1);
     } else if (!strcmp(e->cmd, "quit")) {
@@ -236,6 +243,12 @@ void input_script_tick(Client *client) {
     script_load();
     if (!g_script.active) return;
 
+    if (!g_script.playing && g_script.count && !strcmp(g_script.events[0].cmd, "menu")) {
+        if (!client->game.ready || (html_ui_is_ready() && !menu_ui()->dom_ready)) return;
+        g_script.playing = g_script.menu_mode = 1;
+        g_script.time = 0.0f;
+        g_script.next = 1;
+    }
     if (!g_script.playing) {
         // `play` (first event, any time): enter the game once the map is ready and the menu
         // has set up its page (menu_dom_init loads the saved classindex/name: entering
