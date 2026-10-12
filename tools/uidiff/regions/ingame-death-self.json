@@ -1,0 +1,76 @@
+{
+  "scenario": "ingame-death-self",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "chat",
+      "rect": [
+        35,
+        679,
+        243,
+        36
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatHolder"
+    },
+    {
+      "name": "death-self",
+      "rect": [
+        595,
+        580,
+        90,
+        110
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "`You` / `Died` (death-row-center-self)"
+    },
+    {
+      "name": "death-time",
+      "rect": [
+        705,
+        570,
+        150,
+        25
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "Time Survived: differs per run"
+    },
+    {
+      "name": "death-stats",
+      "rect": [
+        705,
+        595,
+        150,
+        90
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Shots Fired / Accuracy / Kills / Score rows"
+    },
+    {
+      "name": "empty-top-left",
+      "rect": [
+        0,
+        0,
+        300,
+        100
+      ],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "expect": "background",
+      "note": "HUD hidden"
+    }
+  ]
+}

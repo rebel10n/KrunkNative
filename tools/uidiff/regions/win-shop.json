@@ -1,0 +1,74 @@
+{
+  "scenario": "win-shop",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "login-button",
+      "rect": [
+        0,
+        0,
+        187,
+        43
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "dimmed under the window backdrop; #signedOutHeaderBar: Login or Register"
+    },
+    {
+      "name": "menu-items",
+      "rect": [
+        0,
+        39,
+        77,
+        681
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "dimmed under the window backdrop; #menuItemContainer: 7 items (no Exit: browser page)"
+    },
+    {
+      "name": "logo",
+      "rect": [
+        420,
+        7,
+        440,
+        150
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "dimmed under the window backdrop; #mainLogo (logo_6) + #mainLogoFace f_0"
+    },
+    {
+      "name": "window-header",
+      "rect": [
+        250,
+        116,
+        780,
+        86
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#menuWindow top (tabs / search / header)"
+    },
+    {
+      "name": "window-body",
+      "rect": [
+        250,
+        198,
+        780,
+        406
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#menuWindow body"
+    }
+  ]
+}

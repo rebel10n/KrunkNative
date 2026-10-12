@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/windows/win-join.png",
+  "ref": "doc/ref/krunker-v7.1.4/windows/win-join.png",
   "size": [
     1280,
     720
@@ -7,16 +7,17 @@
   "background": "#d6c6c6",
   "state": {
     "menu": true,
-    "window": "join",
-    "settingsTab": 0,
+    "window": 24,
     "connected": true,
     "ready": true,
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
     "region": "...",
-    "anim_time": 0.4
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8
   },
   "frames": 3,
-  "note": "Join: URL input + button; anim_time 0.400 = the reference's merch (scaleBob) phase"
+  "note": "Join"
 }

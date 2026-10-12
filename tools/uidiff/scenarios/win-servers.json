@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/windows/win-servers.png",
+  "ref": "doc/ref/krunker-v7.1.4/windows/win-servers.png",
   "size": [
     1280,
     720
@@ -8,15 +8,16 @@
   "state": {
     "menu": true,
     "window": 2,
-    "settingsTab": 0,
     "connected": true,
     "ready": true,
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
     "region": "...",
-    "anim_time": 0.025
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8
   },
   "frames": 3,
-  "note": "Servers (sticky serverHeader, 2 regions, 0 online); anim_time 0.025 = the reference's merch (scaleBob) phase"
+  "note": "Servers (windows[1]); the reference lists 3 mocked matchmaker games, the scenario none"
 }

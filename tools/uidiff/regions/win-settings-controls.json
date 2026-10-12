@@ -6,226 +6,69 @@
   },
   "regions": [
     {
-      "name": "logo",
-      "rect": [
-        400,
-        8,
-        480,
-        144
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "note": "img/logo_4.png scaled by #uiBase"
-    },
-    {
       "name": "login-button",
       "rect": [
         0,
         0,
-        206,
-        50
+        187,
+        43
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#signedOutHeaderBar: Login or Register"
+      "note": "dimmed under the window backdrop; #signedOutHeaderBar: Login or Register"
     },
     {
       "name": "menu-items",
       "rect": [
         0,
-        50,
-        82,
-        670
+        39,
+        77,
+        681
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#menuItemContainer: 6 icons + labels"
+      "note": "dimmed under the window backdrop; #menuItemContainer: 7 items (no Exit: browser page)"
     },
     {
-      "name": "spectate",
+      "name": "logo",
       "rect": [
-        88,
-        48,
-        92,
-        20
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "Spectate label + switch"
-    },
-    {
-      "name": "merch",
-      "rect": [
-        88,
-        68,
-        90,
-        80
+        420,
+        7,
+        440,
+        150
       ],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "#merchImg (scaleBob 0.4s ease-in-out alternate); anim_time picked by sweeping the renderer over 0..1.6 s and matching this reference's merch crop"
-    },
-    {
-      "name": "top-right-bar",
-      "rect": [
-        1090,
-        0,
-        190,
-        42
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "note": "signal icon + 4 social sprite buttons"
-    },
-    {
-      "name": "loading-streams",
-      "rect": [
-        1140,
-        44,
-        140,
-        22
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "#streamContainer"
-    },
-    {
-      "name": "class-name-tag",
-      "rect": [
-        1100,
-        262,
-        66,
-        24
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "#menuClassNameTag: Guest"
-    },
-    {
-      "name": "class-preview",
-      "rect": [
-        1040,
-        288,
-        190,
-        96
-      ],
-      "kind": "scene",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true,
-      "note": "3D class preview canvas"
-    },
-    {
-      "name": "class-text",
-      "rect": [
-        1060,
-        383,
-        150,
-        38
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true,
-      "note": "#menuClassSubtext/#menuClassName drawn over the 3D preview character"
-    },
-    {
-      "name": "class-icon-button",
-      "rect": [
-        1018,
-        424,
-        36,
-        40
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "note": "class icon button left of Customize"
-    },
-    {
-      "name": "customize-button",
-      "rect": [
-        1056,
-        424,
-        154,
-        40
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "Customize button"
-    },
-    {
-      "name": "bottom-buttons",
-      "rect": [
-        406,
-        598,
-        466,
-        38
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "Host Game / Servers / Ranked / Invite / Join"
-    },
-    {
-      "name": "empty-left",
-      "rect": [
-        90,
-        160,
-        300,
-        420
-      ],
-      "kind": "flat",
-      "fuzz": 6,
-      "max_pct": 0.5,
-      "note": "nothing may be painted here (scenario background only)"
-    },
-    {
-      "name": "empty-bottom-right",
-      "rect": [
-        900,
-        480,
-        380,
-        110
-      ],
-      "kind": "flat",
-      "fuzz": 6,
-      "max_pct": 0.5,
-      "note": "nothing may be painted here"
+      "note": "dimmed under the window backdrop; #mainLogo (logo_6) + #mainLogoFace f_0"
     },
     {
       "name": "window-header",
       "rect": [
-        406,
-        153,
-        468,
-        70
+        279,
+        65,
+        722,
+        86
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "sticky header (search, preset select, tabs)"
+      "note": "#menuWindow top (tabs / search / header)"
     },
     {
       "name": "window-body",
       "rect": [
-        406,
-        223,
-        468,
-        364
+        279,
+        147,
+        722,
+        509
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 3.0
+      "max_pct": 3.0,
+      "note": "#menuWindow body"
     }
   ]
 }

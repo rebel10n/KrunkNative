@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/windows/win-profile-login.png",
+  "ref": "doc/ref/krunker-v7.1.4/windows/win-profile-login.png",
   "size": [
     1280,
     720
@@ -8,15 +8,16 @@
   "state": {
     "menu": true,
     "window": 5,
-    "settingsTab": 0,
     "connected": true,
     "ready": true,
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
     "region": "...",
-    "anim_time": 0.225
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8
   },
   "frames": 3,
-  "note": "Account: two inputs with placeholders, two buttons; anim_time 0.225 = the reference's merch (scaleBob) phase"
+  "note": "Account: Register or Login"
 }

@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/ingame/ingame-death.png",
+  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-death.png",
   "size": [
     1280,
     720
@@ -11,22 +11,22 @@
     "connected": true,
     "ready": true,
     "inGame": true,
-    "mapName": "Soul Sanctum",
+    "mapName": "Kanji",
     "modeName": "Free for All",
-    "name": "Guest_2",
-    "region": "New Jersey",
-    "anim_time": 0.0,
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 0.8,
     "hud": {
       "health": 0,
       "maxHealth": 100,
       "healthSegments": 6,
-      "ammo": 30,
-      "ammoMax": 30,
+      "ammo": 28,
+      "ammoMax": 28,
       "ammoLimit": false,
       "melee": false,
       "reloading": false,
       "reloadPercent": 0,
-      "timerText": "02:15",
+      "timerText": "03:45",
       "kills": 0,
       "deaths": 1,
       "score": 0,
@@ -38,7 +38,7 @@
       "aim": 0,
       "spread": 100,
       "scoreboard": false,
-      "ping": 3,
+      "ping": 0,
       "loadout": [
         {
           "name": "Assault Rifle",
@@ -60,23 +60,28 @@
     },
     "chat": [
       {
-        "text": "You have entered the Soul Sanctum",
-        "color": "#fc03ec"
-      },
-      {
-        "text": "Guest_2 joined the game",
+        "text": "Spawned a Bot",
         "color": "#fc03ec"
       }
     ],
     "dead": true,
     "killcard": {
-      "killer": "Guest_1",
-      "weapon": "Assault Rifle",
+      "killer": "Bot",
+      "weapon": "Desert Eagle",
+      "weaponIcon": "icon_11",
       "level": 1,
-      "score": 125,
-      "classIndex": 0
+      "myLevel": 1,
+      "score": 0,
+      "classIndex": 10,
+      "stats": [
+        4000,
+        0,
+        "0%",
+        0,
+        0
+      ]
     }
   },
   "frames": 3,
-  "note": "Death card (local player Guest_2): HUD holders hidden, kill card at the bottom centre."
+  "note": "Killed by a sandbox bot (server-side players.kill): v7's head-to-head death screen."
 }

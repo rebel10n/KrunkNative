@@ -220,7 +220,7 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
-        "clientChrome",
+        "clientChrome", "settingsView", "windowActions",
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -516,8 +516,9 @@ static void run_frames(Client *client, const int n) {
 
 /* ------------------------------------------------------------ state */
 
-// state.window -> MenuUi window id. Scenario ids are showWindow(N) ids except 0, which
-// is windows[0] (settings; showWindow(1) in Krunker and menu_ui.c).
+// state.window -> MenuUi window id. Scenario ids are v7.1.4 showWindow(N) ids except 0, which
+// is windows[0] (settings; showWindow(1) in Krunker and menu_ui.c); "host" = 8 (Host Custom
+// Game), "join" = 24.
 static int scenario_window_id(const cJSON *window, int *id) {
     if (cJSON_IsNumber(window)) {
         *id = window->valueint == 0 ? 1 : window->valueint;
@@ -535,9 +536,42 @@ static int scenario_window_id(const cJSON *window, int *id) {
     return 0;
 }
 
-static void apply_window(void) {
+// state.windowActions: inline-handler calls dispatched once the window is open, as the
+// window's own markup would (["windows.2.switchTab", 0], ["windows.6.switchTab", 2], ...):
+// each entry is [name, args...] with number / string / bool arguments.
+static void apply_window_actions(Client *client) {
+    const cJSON *actions = st("windowActions");
+    const cJSON *action;
+    cJSON_ArrayForEach(action, actions) {
+        const cJSON *name = cJSON_IsArray(action) ? cJSON_GetArrayItem(action, 0) : action;
+        if (!cJSON_IsString(name)) continue;
+        HtmlArg args[8];
+        int argc = 0;
+        for (const cJSON *a = cJSON_IsArray(action) ? name->next : NULL; a && argc < 8; a = a->next) {
+            HtmlArg *arg = &args[argc++];
+            memset(arg, 0, sizeof(*arg));
+            if (cJSON_IsNumber(a)) { arg->kind = HTML_ARG_NUM; arg->num = a->valuedouble; }
+            else if (cJSON_IsBool(a)) { arg->kind = HTML_ARG_BOOL; arg->num = cJSON_IsTrue(a); }
+            else { arg->kind = HTML_ARG_STR; arg->str = cJSON_IsString(a) ? a->valuestring : ""; }
+        }
+        HtmlEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = "click";
+        ev.value = "";
+        html_ui_dispatch(name->valuestring, &ev, argc ? args : NULL, argc);
+        run_frames(client, 2);
+    }
+}
+
+static void apply_window(Client *client) {
     int id;
     if (!scenario_window_id(st("window"), &id)) return;
+    if (id == 1) {
+        // windows[0].settingType: "basic" (v7's default) or "advanced" (state.settingsView)
+        const char *view = st_str("settingsView");
+        if (view) menu_ui()->settings_view = !strcmp(view, "advanced");
+        else if (st_has("settingsView")) menu_ui()->settings_view = st_int("settingsView", 0) != 0;
+    }
     if (id == 1 && st_has("settingsTab")) {
         // windows[0].changeTab(N): the page's own handler (stores the tab, opens settings)
         const HtmlArg arg = {HTML_ARG_NUM, (double) st_int("settingsTab", 0), NULL};
@@ -547,9 +581,10 @@ static void apply_window(void) {
         ev.value = "";
         html_ui_dispatch("windows.0.changeTab", &ev, &arg, 1);
         if (menu_ui()->active_window != 1) menu_show_window(1, 1);
-        return;
+    } else {
+        menu_show_window(id, 1);
     }
-    menu_show_window(id, 1);
+    apply_window_actions(client);
 }
 
 // connected/ready: the `connect` + `state` net fields that drive #instructions and the
@@ -598,6 +633,18 @@ static void apply_killcard(Client *client) {
         card.level = (int) obj_num(kc, "level", 1);
         card.score = (int) obj_num(kc, "score", 0);
         card.class_index = (int) obj_num(kc, "classIndex", 0);
+        // v7 death screen: weaponIcon / myLevel and the life's stats [timeAlive ms, shots, "acc%", kills, score]
+        card.weapon_icon = obj_str(kc, "weaponIcon");
+        card.my_level = (int) obj_num(kc, "myLevel", 0);
+        const cJSON *stats = cJSON_GetObjectItemCaseSensitive(kc, "stats");
+        if (cJSON_IsArray(stats) && cJSON_GetArraySize(stats) >= 5) {
+            card.stats = 1;
+            card.time_alive_ms = cJSON_GetArrayItem(stats, 0)->valueint;
+            card.shots = cJSON_GetArrayItem(stats, 1)->valueint;
+            card.accuracy = cJSON_GetStringValue(cJSON_GetArrayItem(stats, 2));
+            card.kills = cJSON_GetArrayItem(stats, 3)->valueint;
+            card.life_score = cJSON_GetArrayItem(stats, 4)->valueint;
+        }
     }
     hud_ui_show_death(client, cJSON_IsObject(kc) ? &card : NULL);
 }
@@ -697,7 +744,7 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open != html_ui_is_menu_open()) client_set_menu_open(client, menu_open);
     if (in_game) client->menu_lock_grace_until = 1e18;
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
-    if (menu_open) apply_window();
+    if (menu_open) apply_window(client);
 
     run_frames(client, 2);
     apply_killcard(client);

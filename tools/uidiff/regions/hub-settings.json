@@ -1,22 +1,87 @@
 {
   "scenario": "hub-settings",
   "defaults": {
-    "fuzz": 8,
-    "max_pct": 3.0
+    "fuzz": 6,
+    "max_pct": 0.5
   },
   "regions": [
     {
-      "name": "settings-pop",
+      "name": "profile",
       "rect": [
-        435,
-        272,
-        405,
-        120
+        4,
+        4,
+        294,
+        60
       ],
       "kind": "text",
-      "fuzz": 14,
-      "max_pct": 6.0,
-      "note": "#settingsPop (openSettings)"
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#profileInfo: Login + Search User"
+    },
+    {
+      "name": "nav-buttons",
+      "rect": [
+        490,
+        0,
+        300,
+        50
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#navButtons icons"
+    },
+    {
+      "name": "nav-title",
+      "rect": [
+        984,
+        5,
+        286,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#navTitle: Terms | settings, KRUNKER .io"
+    },
+    {
+      "name": "badges",
+      "rect": [
+        830,
+        640,
+        450,
+        72
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "Steam / App Store / Google Play badges"
+    },
+    {
+      "name": "editor-badge",
+      "rect": [
+        56,
+        643,
+        166,
+        67
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#editrDB"
+    },
+    {
+      "name": "popup",
+      "rect": [
+        398,
+        167,
+        485,
+        334
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#genericPop"
     }
   ]
 }

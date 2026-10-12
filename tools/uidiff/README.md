@@ -1,7 +1,8 @@
 # tools/uidiff
 
-Per-region pixel diff of the native HTML/CSS UI against the Krunker v3.1.1
-reference captures in `doc/ref/krunker-v3.1.1/`. `make uidiff` builds `client_bin`
+Per-region pixel diff of the native HTML/CSS UI against the Krunker v7.1.4
+reference captures in `doc/ref/krunker-v7.1.4/` (made by `capture-v7.js`, see
+[References](#references); the v3.1.1 captures stay in `doc/ref/krunker-v3.1.1/`). `make uidiff` builds `client_bin`
 with the in-house engine (`HTML_ENGINE=ON`) and renders every scenario through the
 real client and its C UI logic (see [Rendering with client_bin](#rendering-with-client_bin)):
 
@@ -127,7 +128,7 @@ local server are ready):
 | `preview` | bool (extension): draw the first-person weapon and the class preview |
 | `scrollbars` | bool (extension): paint scrollbars; default off = headless Chromium's `--hide-scrollbars`, which most references were captured with (`win-reticle` was not) |
 | `modeName` | only "Free for All" exists (a warning otherwise) |
-| `page`, `pageQuery`, `pageActions` | (extension) show another page instead of the game menu: `app_set_mode()` with `page` = `hub` / `editor` / `viewer` and the URL query (`"p=maps"`), then each `pageActions` entry is dispatched as an inline handler (`"openSettings"`, `"loginPopup"`); every other key is ignored. The `hub-*` scenarios (references `doc/ref/krunker-v3.1.1/hub/`, captured from the real social page with the socket connected) use it |
+| `page`, `pageQuery`, `pageActions` | (extension) show another page instead of the game menu: `app_set_mode()` with `page` = `hub` / `editor` / `viewer` and the URL query (`"p=maps"`), then each `pageActions` entry is dispatched as an inline handler (`"openSettings"`, `"loginPopup"`); every other key is ignored. The `hub-*` scenarios (references `doc/ref/krunker-v7.1.4/hub/`) use it |
 
 Debugging: `KRUNKNATIVE_SCENARIO_DUMP=<selector>` prints the captured frame's box tree
 of the first match (`engine_dump_boxes`), e.g. to tell a layout bug from a state bug.
@@ -156,7 +157,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 
 ```json
 {
-  "ref": "doc/ref/krunker-v3.1.1/menu/real-1280.png",
+  "ref": "doc/ref/krunker-v7.1.4/menu/menu-1280.png",
   "size": [1280, 720],
   "background": "#d6c6c6",
   "state": { ... },
@@ -170,8 +171,10 @@ client_bin --render-scenario <scenario.json> <out.png>
 | Key | Type | Meaning |
 |---|---|---|
 | `menu` | bool | menu open (`menu_apply_open`) |
-| `window` | int, string or null | window to show: numeric ids as in `showWindow(N)` (0 settings, 2 servers, 3 loadout, 4 mods, 5 account, 6 classes, 7 controls, 10 custom games, 25 client/download, 27 ranked, 33 challenges), `"host"`, `"join"`, `null` = none |
-| `settingsTab` | int | `windows[0].changeTab(N)` 0..5 when `window` is 0 |
+| `window` | int, string or null | window to show: v7.1.4 `showWindow(N)` ids (0 = 1 settings, 2 servers, 3 Change Loadout, 4 mods, 5 account, 7 controls, 8 host, 9 spray, 10 custom games, 14 store, 24 join, 25 client, 27 ranked, 31 attachment, 32 reticle, 33 challenges, 35 changelog, 42 host type, 48 server finder), `"host"` = 8, `"join"` = 24, `null` = none |
+| `settingsTab` | int | `windows[0].changeTab(N)` when `window` is 0 |
+| `settingsView` | `"basic"` / `"advanced"` | `windows[0].settingType` (v7's default is basic) |
+| `windowActions` | array of `[name, args...]` | inline-handler calls dispatched once the window is open, by the names v7's markup uses: `["windows.2.switchTab", 0]` (Change Loadout's Class tab), `["windows.6.switchTab", 2]` (a controls tab) |
 | `connected`, `ready` | bool | net state for `#instructions` (CLICK TO PLAY when both true) |
 | `inGame` | bool | HUD visible when `inGame && !menu`; with `menu` also true = ESC pause |
 | `mapName`, `modeName`, `region`, `name`, `gameName`, `classIndex` | string / int | state glue (`#curGameInfo`, `#menuRegionLabel`, `#menuClassNameTag`, `#gameNameHolder`, class box) |
@@ -181,7 +184,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `chatOpen`, `chatInput` | bool, string | `#chatInput` focused with the given text |
 | `killfeed` | array | `killfeed` payloads (`killer, victim, weapon, weaponIcon, killerIsYou, victimIsYou, headshot, age_ms`) |
 | `scoreboard` | array of `{rank, name, score}` | `.newLeaderItem` rows shown while `hud.scoreboard` is true |
-| `dead`, `killcard` | bool, `{killer, weapon, level, score, classIndex}` | death card (`#killCardHolder`), HUD holders hidden |
+| `dead`, `killcard` | bool, `{killer, weapon, level, score, classIndex, stats}` | death screen (`#deathUIHolder`; `stats` = v7's `[timeAlive ms, shots, "acc%", kills, score]`), HUD holders hidden |
 | `endscreen` | `{place, text, nextRound}` | end screen (`#endUI`), HUD hidden |
 | `hit` | `{elapsed_ms, kill}` | hit marker `elapsed_ms` after the hit |
 
@@ -222,75 +225,49 @@ pass them).
 ## Scenarios
 
 The JSON files are generated: edit `tools/uidiff/gen_scenarios.py` and run
-`python3 -I tools/uidiff/gen_scenarios.py`.
+`python3 -I tools/uidiff/gen_scenarios.py`. Region rects come from each reference's
+`<name>.rects.json` (viewport rects of the page's own elements, written by `capture-v7.js`),
+measured on the PNG only where no element exists (the death screen rows).
 
-Menu (1280x720 unless noted): `menu-1280`, `menu-1920` (1920x1080, rects = 1.5x),
-`win-settings-{general,controls,display,render,game,sound}` (window 0, tab 0..5),
-`win-classes` (6), `win-loadout` (3), `win-servers` (2), `win-games` (10),
-`win-host` / `win-hostX` (`"host"`), `win-join` (`"join"`), `win-keybinds` (7),
-`win-mods` (4), `win-profile-login` (5), `win-ranked` (27), `win-challenges`
-(33), `win-download` (25). `region` is `"..."` (the reference's
-`#menuRegionLabel`). Rects were measured on the references (`#uiBase` scale
-1280/1700 = 0.753): window bodies are `x 406..873`, vertically centred (`y 153`
-for tall windows); the settings window has a 70 px sticky header.
+Menu (1280x720 unless noted; `#uiBase` scale 0.579 for v7's scaleUI 0.7): `menu-1280`,
+`menu-1920`; windows `win-settings-{general,controls,display,render,game,sound}` (advanced view),
+`win-settings-basic`, `win-servers`, `win-loadout`, `win-classes` (Change Loadout's Class tab: v7
+has no Select Class window), `win-mods`, `win-profile-login`, `win-keybinds`, `win-host`,
+`win-spray`, `win-games`, `win-shop`, `win-join`, `win-download`, `win-ranked`, `win-attach`,
+`win-reticle`, `win-challenges`, `win-changelog`, `win-host-type`, `win-server-finder`. Window
+scenarios compare the dimmed login button, menu items and logo, the window's top 82 px (tabs,
+search) and its body. Bodies whose content comes from a server (Servers rows, the Custom Games list)
+are skipped.
 
-In-game: `ingame-plain`, `ingame-scoped` (Assault Rifle aimed: `scoped:false,
-aim:1`, no scope reticle), `ingame-reloading`, `ingame-scoreboard`,
-`ingame-killfeed`, `ingame-chat-open`, `ingame-death` (local player Guest_2),
-`ingame-endscreen`, `ingame-pause-esc`, `ingame-hitmarker` (1280x577: the
-capture window was that size, so `#uiBase` scales by 0.641 and the HUD rects
-differ). The local player is `Guest_1` unless noted. Only opaque HUD pixels are
-compared (`mask: colors` with each element's opaque colours at 2.5 % colour
-fuzz: glyph cores of `#fff` text, `#fc03ec` server chat, `#9eeb56` health
-segments, `#ffd542` ammo marks, `#eb5656` kill-feed victim, `#ffea78` kill-card
-score, the class-icon palette). Translucent-only elements are skipped with the
-reason in `note`: chat input placeholder (rgba .7 on rgba .4), `#voiceDisplay`
-(opacity .5), `#pingText` (rgba .5), holstered weapon icons (opacity .7),
-`#maxHP`/`#ammoMax` are excluded by the colour key. Also skipped: crosshair,
-score pop-ups and the damage number (drawn by the game), `#1 VICTORY` (drawn on
-Krunker's overlay canvas, not by the HTML UI), the pause menu's featured
-creators (live streams feed).
+In-game (v7's sandbox, Free for All on Kanji, local player `Local User`): `ingame-plain`,
+`ingame-scoped`, `ingame-reloading`, `ingame-scoreboard`, `ingame-chat-open`, `ingame-killfeed`,
+`ingame-death`, `ingame-death-self`, `ingame-endscreen`, `ingame-pause-esc`. HUD regions follow
+v7's elements (`#timerHolder`, `#matchInfo`, `#pingDisplay`, `#chatInputHolder`, `#chatList`,
+`#bottomLeftPlayer`, `#weapHolder`, `#ammoHolder`, `#killFeed`, `#centerLeaderDisplay`, the death
+screen rows) plus the crosshair. Skipped: what v7 draws on its overlay canvas or what changes per
+run (`#1 VICTORY`, the +score popup, Time Survived).
+
+Hub: `hub-{maps,feed,leaders,market,mods}` and the `hub-login` / `hub-settings` popups. The
+reference has no social server (every view is loading), so only the navigation bar, the store
+badges, the loading message and the popups are compared.
 
 ### Backgrounds
 
-- Menu/window scenarios: `#d6c6c6`, the canvas colour under
-  `#instructionHolder`'s 50 % dim (the screen shows `#6b6363`).
-- In-game scenarios: flat `#000000`. Rendering over the reference blends every
-  translucent HUD element twice, and an element that is not drawn at all leaves
-  the reference's own pixels in place and matches trivially (`#1 VICTORY`
-  "passed" at 0 % that way). Over black, a missing element shows black on the
-  reference's opaque pixels and fails.
-- `ingame-pause-esc`: `backgrounds/ingame-pause-esc-undimmed.png` = the
-  reference x 2 (`magick doc/ref/krunker-v3.1.1/ingame/ingame-pause-esc.png
-  -evaluate multiply 2 -strip ...`). All scene pixels of the capture are < 128
-  (50 % dim), so this recovers the scene to +-1 and the render's own dim
-  reproduces it; opaque menu chrome is compared plainly, text over the scene
-  with colour masks, translucent elements are skipped.
+The references are captured over a flat page background (the 3D canvas is transparent), so
+the scenarios render over the same colour: `#d6c6c6` for the menu and windows, `#000000` in game
+(including `ingame-pause-esc`, where the menu covers the hidden scene).
 
 ### anim_time
 
-The renderer captures at `k * 1.6 s + anim_time` from clock 0, so `anim_time`
-selects the phase of `#instructions`' `grow` (from 30px/opacity .3 to 32px/1,
-0.8 s ease alternate) and `#merchImg`'s `scaleBob` (scale 1 -> .9, 0.4 s
-ease-in-out alternate). Values were found by rendering `menu-1280` at 0..1.6 s
-in 25 ms steps (`menu-1920` at 0..0.8 s, then 5-10 ms around the minimum) and
-picking the frame whose crop is closest to the reference (mean absolute
-difference):
+`capture-v7.js` pauses every CSS animation of the reference at 800 ms
+(`document.getAnimations()`, `currentTime = 800`). The renderer starts the page's animations at
+clock 0 and captures at `k * 1.6 s + anim_time`, so every scenario uses `anim_time` 0.8.
 
-- `menu-1280` 0.325 s (CLICK TO PLAY ink 188x24 px, peak R 201 = opacity .79),
-  `menu-1920` 0.435 s (284x37, opacity .89); their merch phase follows.
-- window scenarios: the merch phase of each capture (CLICK TO PLAY is hidden
-  behind the window): settings general/display 0.275, controls 0.0, render
-  0.25, game 0.05, sound 0.325, classes 0.3, loadout 0.2, servers 0.025, games
-  0.075, host 0.275, hostX 0.125, join 0.4, keybinds 0.275, mods 0.075,
-  profile-login 0.225, ranked 0.175, challenges 0.025, download 0.125.
+### References
 
-### win-settings-general
-
-The reference capture contains two rows injected by the offline reference
-server ("Force Offline Mode", "Enable Developer Console", 48 px) that v3.1.1's
-markup lacks. Our window is 48 px shorter and centred 24 px lower, so its
-regions are compared with `ref_offset` (header and rows above the injected ones:
-`[0, -24]`; the Shader Based Rendering row below them: `[0, +24]`). The other
-settings tabs have no capture artifact; their content sits 4 px low because of
-our taller header inputs (engine-side, not compensated).
+`node tools/uidiff/capture-v7.js [--out DIR] [name...]` recaptures the references (`--list`
+prints the names, `--probe "<js>"` enters the sandbox game and prints an expression). It serves
+v7's `public/` read-only and never runs v7's npm server; how each state is reached (pointer-lock
+shim, sandbox bots and kills, the stubbed social socket, the mocked server list) is in
+`doc/ref/krunker-v7.1.4/README.md`. Needs `chromium-browser` (`KN_CHROME=...`) and
+`net-bridge/node_modules` (ws).

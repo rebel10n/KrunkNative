@@ -8,263 +8,119 @@
     {
       "name": "timer",
       "rect": [
-        18,
-        16,
-        104,
-        34
+        7,
+        7,
+        121,
+        50
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#ffffff",
-        "#ca56eb"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "#timerHolder: timer icon + #timerVal (box is translucent)"
+      "note": "#timerHolder: timer icon + 03:45"
     },
     {
-      "name": "ping",
+      "name": "match-info",
       "rect": [
-        138,
-        8,
-        40,
+        7,
+        58,
+        68,
         28
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": true,
-      "note": "#pingText rgba(255,255,255,.5) and the signal icon are translucent"
+      "note": "#matchInfo: Free for All / on Kanji"
     },
     {
-      "name": "game-mode",
+      "name": "ping",
       "rect": [
-        10,
-        60,
-        80,
-        18
+        133,
+        7,
+        38,
+        16
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#ffffff"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "#curGameInfo first line `Free for All` (`on <map>` is rgba .6)"
-    },
-    {
-      "name": "chat-rows",
-      "rect": [
-        14,
-        538,
-        180,
-        62
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#fc03ec"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "#chatList rows: coloured message glyphs (row boxes are rgba(0,0,0,.2))"
+      "note": "#pingDisplay 0 PING"
     },
     {
       "name": "chat-input",
       "rect": [
-        10,
-        603,
-        180,
-        26
+        7,
+        611,
+        243,
+        36
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": true,
-      "note": "#chatInput placeholder is rgba(255,255,255,.7) on rgba(0,0,0,.4): translucent only, double-blended over the reference background"
+      "note": "#chatInputHolder: channel icon, Enter Message, mic [V]"
     },
     {
-      "name": "chat-mic",
+      "name": "player-card",
       "rect": [
-        195,
-        603,
-        45,
-        24
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true,
-      "note": "#voiceDisplay has opacity .5: translucent only"
-    },
-    {
-      "name": "class-icon",
-      "rect": [
-        12,
-        634,
-        66,
-        66
+        7,
+        653,
+        243,
+        60
       ],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "mask": "colors",
-      "mask_colors": [
-        "#3d3d3d",
-        "#72503e",
-        "#282828",
-        "#bc9c7a",
-        "#dfd7d4",
-        "#95381e",
-        "#cfbc8f",
-        "#a9785d",
-        "#b2acaa"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "class icon (pixelated, transparent texels excluded)"
+      "note": "#bottomLeftPlayer: class image, FFA, health bar, 100"
     },
     {
-      "name": "health-value",
+      "name": "weapons",
       "rect": [
-        85,
-        636,
-        95,
-        24
+        1190,
+        540,
+        83,
+        130
       ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#ffffff",
-        "#eb4343"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "#healthValue `100` + red cross (`| 100` is rgba .8)"
-    },
-    {
-      "name": "health-bar",
-      "rect": [
-        82,
-        664,
-        190,
-        38
-      ],
-      "kind": "flat",
-      "fuzz": 6,
-      "max_pct": 1.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#9eeb56"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "6 .healthBarSeg fills (opaque #9eeb56)"
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#weapHolder: Assault Rifle / [E] Pistol / [Q] Combat Knife"
     },
     {
       "name": "ammo",
       "rect": [
-        1125,
-        650,
-        140,
-        40
+        1146,
+        675,
+        127,
+        38
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#ffffff",
-        "#ffd542"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "#ammoVal + `!!!` (#ammoMax is rgba .7)"
+      "note": "#ammoHolder: 28 | 28 + ammo icon"
     },
     {
-      "name": "weapon-active",
+      "name": "scoreboard",
       "rect": [
-        1180,
-        538,
-        96,
-        30
-      ],
-      "kind": "image",
-      "fuzz": 10,
-      "max_pct": 2.5,
-      "mask": "colors",
-      "mask_colors": [
-        "#ffffff"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "active .weapItem icon (opacity 1)"
-    },
-    {
-      "name": "weapon-keys",
-      "rect": [
-        1250,
-        568,
-        26,
+        451,
+        330,
+        377,
         60
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#ffffff"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "[E] / [Q] key labels"
-    },
-    {
-      "name": "weapon-holstered",
-      "rect": [
-        1170,
-        568,
-        80,
-        66
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "skip": true,
-      "note": "holstered .weapItem icons have opacity .7: translucent only"
+      "note": "#centerLeaderDisplay: Name / Score / Kills / Deaths + Local User"
     },
     {
       "name": "crosshair",
       "rect": [
-        584,
-        298,
-        112,
-        120
+        590,
+        310,
+        100,
+        100
       ],
-      "kind": "scene",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true,
-      "note": "default crosshair bars over the 3D scene"
-    },
-    {
-      "name": "scoreboard",
-      "rect": [
-        481,
-        345,
-        316,
-        24
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "mask": "colors",
-      "mask_colors": [
-        "#ffffff"
-      ],
-      "mask_color_fuzz": 2.5,
-      "note": "#leaderContainerD .newLeaderItem row: rank/name/score glyphs (row box is translucent)"
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 4.0,
+      "note": "crosshair: v7 draws it on #game-overlay, the engine with hud.css divs"
     }
   ]
 }

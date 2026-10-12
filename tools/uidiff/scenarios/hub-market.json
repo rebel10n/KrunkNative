@@ -1,8 +1,15 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/hub/hub-market.png",
-  "size": [1280, 720],
+  "ref": "doc/ref/krunker-v7.1.4/hub/hub-market.png",
+  "size": [
+    1280,
+    720
+  ],
   "background": "#000000",
-  "state": {"page": "hub", "pageQuery": "p=market"},
+  "state": {
+    "page": "hub",
+    "pageQuery": "p=market",
+    "anim_time": 0.8
+  },
   "frames": 3,
-  "note": "Social hub (ui/social.html), guest, view p=market."
+  "note": "Social hub (ui/social.html), guest, p=market."
 }

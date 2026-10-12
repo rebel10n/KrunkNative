@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v3.1.1/ingame/ingame-killfeed.png",
+  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-killfeed.png",
   "size": [
     1280,
     720
@@ -11,25 +11,25 @@
     "connected": true,
     "ready": true,
     "inGame": true,
-    "mapName": "Soul Sanctum",
+    "mapName": "Kanji",
     "modeName": "Free for All",
-    "name": "Guest_1",
-    "region": "New Jersey",
-    "anim_time": 0.0,
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 0.8,
     "hud": {
       "health": 100,
       "maxHealth": 100,
       "healthSegments": 6,
-      "ammo": 24,
-      "ammoMax": 30,
+      "ammo": 28,
+      "ammoMax": 28,
       "ammoLimit": false,
       "melee": false,
       "reloading": false,
       "reloadPercent": 0,
-      "timerText": "02:16",
-      "kills": 0,
+      "timerText": "03:45",
+      "kills": 1,
       "deaths": 0,
-      "score": 0,
+      "score": 75,
       "weaponName": "Assault Rifle",
       "weaponIcon": "icon_2",
       "classIndex": 0,
@@ -38,7 +38,7 @@
       "aim": 0,
       "spread": 100,
       "scoreboard": false,
-      "ping": 2,
+      "ping": 0,
       "loadout": [
         {
           "name": "Assault Rifle",
@@ -60,21 +60,7 @@
     },
     "chat": [
       {
-        "text": "You have entered the Soul Sanctum",
-        "color": "#fc03ec"
-      },
-      {
-        "text": "Guest_1 joined the game",
-        "color": "#fc03ec"
-      },
-      {
-        "text": "Guest_1: gg",
-        "color": "#ffffff",
-        "name": "Guest_1",
-        "msg": "gg"
-      },
-      {
-        "text": "Guest_2 joined the game",
+        "text": "Spawned a Bot",
         "color": "#fc03ec"
       }
     ],
@@ -82,14 +68,14 @@
       {
         "killer": "You",
         "killerIsYou": true,
-        "victim": "Guest_2",
+        "victim": "Bot",
         "weapon": "Assault Rifle",
         "weaponIcon": "icon_2",
-        "headshot": true,
+        "headshot": false,
         "age_ms": 500
       }
     ]
   },
   "frames": 3,
-  "note": "One kill-feed row top right, 4 chat rows, 24|30."
+  "note": "The local player killed a sandbox bot (spawned with pressButton(107)): kill feed + Spawned a Bot."
 }

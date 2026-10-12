@@ -6,25 +6,12 @@
   },
   "regions": [
     {
-      "name": "logo",
-      "rect": [
-        600,
-        12,
-        720,
-        216
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "note": "img/logo_4.png scaled by #uiBase"
-    },
-    {
       "name": "login-button",
       "rect": [
         0,
         0,
-        309,
-        75
+        280,
+        63
       ],
       "kind": "text",
       "fuzz": 12,
@@ -35,185 +22,197 @@
       "name": "menu-items",
       "rect": [
         0,
-        75,
-        123,
-        1005
+        59,
+        115,
+        1021
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#menuItemContainer: 6 icons + labels"
+      "note": "#menuItemContainer: 7 items (no Exit: browser page)"
     },
     {
-      "name": "spectate",
+      "name": "logo",
       "rect": [
-        132,
-        72,
-        138,
-        30
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "Spectate label + switch"
-    },
-    {
-      "name": "merch",
-      "rect": [
-        132,
-        102,
-        135,
-        120
+        631,
+        11,
+        659,
+        223
       ],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "#merchImg (scaleBob 0.4s ease-in-out alternate); anim_time picked by sweeping the renderer over 0..1.6 s and matching this reference's merch crop"
+      "note": "#mainLogo (logo_6) + #mainLogoFace f_0"
     },
     {
-      "name": "top-right-bar",
+      "name": "season",
       "rect": [
-        1635,
+        1155,
+        140,
+        156,
+        56
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#seasonLabel Season 7"
+    },
+    {
+      "name": "header-right",
+      "rect": [
+        1383,
         0,
-        285,
+        537,
         63
       ],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "signal icon + 4 social sprite buttons"
+      "note": "#headerRight: region, ping, social icons, client/editor images"
     },
     {
-      "name": "loading-streams",
+      "name": "top-left-info",
       "rect": [
-        1710,
+        126,
         66,
-        210,
-        33
+        236,
+        349
       ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "#streamContainer"
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#tlInfHold: home store ad box, New to Krunker?, Season 7 battle pass"
     },
     {
-      "name": "class-name-tag",
+      "name": "now-playing",
       "rect": [
-        1650,
-        393,
-        99,
-        36
+        628,
+        839,
+        665,
+        44
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#menuClassNameTag: Guest"
+      "note": "#mapInfoHld: Now Playing: ffa on Kanji"
+    },
+    {
+      "name": "bottom-buttons",
+      "rect": [
+        628,
+        879,
+        665,
+        80
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Host Game / Server Finder / Invite / Join / police buttons"
+    },
+    {
+      "name": "streams",
+      "rect": [
+        1628,
+        73,
+        282,
+        234
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#streamContainer: Loading Streams..."
+    },
+    {
+      "name": "terms",
+      "rect": [
+        1438,
+        1015,
+        482,
+        65
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#termsInfo: Contact / Experiments / Terms / Changelog"
+    },
+    {
+      "name": "chat",
+      "rect": [
+        128,
+        1013,
+        363,
+        52
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatHolder: chat input bar (menu)"
+    },
+    {
+      "name": "customize-button",
+      "rect": [
+        1477,
+        930,
+        427,
+        69
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#customizeButton"
+    },
+    {
+      "name": "class-icon",
+      "rect": [
+        1819,
+        831,
+        85,
+        85
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#menuClassIcn: primary weapon preview"
+    },
+    {
+      "name": "class-text",
+      "rect": [
+        1611,
+        858,
+        198,
+        58
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "#menuClassSubtext / #menuClassName over the 3D preview's legs"
     },
     {
       "name": "class-preview",
       "rect": [
-        1560,
-        432,
-        285,
-        144
+        1344,
+        540,
+        460,
+        291
       ],
       "kind": "scene",
       "fuzz": 12,
       "max_pct": 3.0,
       "skip": true,
-      "note": "3D class preview canvas"
-    },
-    {
-      "name": "class-text",
-      "rect": [
-        1590,
-        574,
-        225,
-        57
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true,
-      "note": "#menuClassSubtext/#menuClassName drawn over the 3D preview character"
-    },
-    {
-      "name": "class-icon-button",
-      "rect": [
-        1527,
-        636,
-        54,
-        60
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "note": "class icon button left of Customize"
-    },
-    {
-      "name": "customize-button",
-      "rect": [
-        1584,
-        636,
-        231,
-        60
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "Customize button"
-    },
-    {
-      "name": "bottom-buttons",
-      "rect": [
-        609,
-        897,
-        699,
-        57
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "Host Game / Servers / Ranked / Invite / Join"
-    },
-    {
-      "name": "empty-left",
-      "rect": [
-        135,
-        240,
-        450,
-        630
-      ],
-      "kind": "flat",
-      "fuzz": 6,
-      "max_pct": 0.5,
-      "note": "nothing may be painted here (scenario background only)"
-    },
-    {
-      "name": "empty-bottom-right",
-      "rect": [
-        1350,
-        720,
-        570,
-        165
-      ],
-      "kind": "flat",
-      "fuzz": 6,
-      "max_pct": 0.5,
-      "note": "nothing may be painted here"
+      "note": "3D class preview (v7's three.js preview vs the engine's)"
     },
     {
       "name": "click-to-play",
       "rect": [
-        804,
-        507,
-        312,
-        54
+        824,
+        518,
+        273,
+        44
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 5.0,
-      "note": "#instructions `grow` (from 30px/opacity .3 to 32px/1, 0.8s ease alternate): anim_time picked by sweeping the renderer and matching the reference's ink size/opacity"
+      "max_pct": 3.0,
+      "note": "#instructions CLICK TO PLAY"
     }
   ]
 }

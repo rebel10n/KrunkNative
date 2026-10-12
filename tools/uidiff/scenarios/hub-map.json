@@ -1,8 +1,0 @@
-{
-  "ref": "doc/ref/krunker-v3.1.1/hub/hub-map.png",
-  "size": [1280, 720],
-  "background": "#000000",
-  "state": {"page": "hub", "pageQuery": "p=map&q=Burg"},
-  "frames": 3,
-  "note": "Social hub map page: the offline server has no map rows (No Games found...)."
-}
