@@ -1,0 +1,36 @@
+{
+ "name": "v7_terrain",
+ "spawns": [
+  [
+   0,
+   100,
+   0
+  ]
+ ],
+ "camPos": [
+  0,
+  200,
+  -40
+ ],
+ "terrainSeed": "kn-terrain",
+ "terrainTSeed": "kn-trees",
+ "terrainWidth": 1000,
+ "terrainHeight": 1000,
+ "terrainMntMlt": 1,
+ "terrainEase": 12,
+ "objects": [
+  {
+   "i": 0,
+   "p": [
+    2000,
+    -10,
+    2000
+   ],
+   "s": [
+    10,
+    10,
+    10
+   ]
+  }
+ ]
+}

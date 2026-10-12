@@ -1,0 +1,36 @@
+{
+ "name": "v7_br_zone",
+ "spawns": [
+  [
+   0,
+   0,
+   0
+  ]
+ ],
+ "camPos": [
+  0,
+  20,
+  -40
+ ],
+ "zone": true,
+ "zoneSize": 200,
+ "zoneSpeed": 50,
+ "zoneStages": 2,
+ "zoneWait": 5,
+ "zoneHeight": 1000,
+ "objects": [
+  {
+   "i": 0,
+   "p": [
+    0,
+    -10,
+    0
+   ],
+   "s": [
+    800,
+    10,
+    800
+   ]
+  }
+ ]
+}

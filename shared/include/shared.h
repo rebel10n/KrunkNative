@@ -345,6 +345,12 @@ typedef struct {
     float spread;                       // SERVER_NODE "ssp" 0..50
     const char *node_tag;               // SERVER_NODE "nt" <= 70 chars (in raw), NULL none
 
+    // ---- map-logic WP-B (shared/src/world.c, build.c)
+    unsigned char tel_checkpoint:1;     // TELEPORTER "tcp" (telCheckPoint): to the player's check point
+    unsigned char dynamic:1;            // a player build (game.buildObj): removed by removeBuilds
+    int build_index;                    // buildObjs.js index of a build (typeInd; dynamic objects only)
+    // ---- end WP-B
+
     CollisionType collision_type;
 
     vec3 position;
@@ -515,6 +521,11 @@ typedef struct {
     size_t ai_spawner_count;
     const cJSON **bot_spawners;                // BOT_SPAWNER records (addBot: pending map bots, WP-F)
     size_t bot_spawner_count;
+
+    // ---- map-logic WP-B (shared/include/terrain.h, world.h): runtime world data of the map
+    struct Terrain_t *world_terrain;           // map.terrain, built lazily by map_terrain(), freed by map_fini
+    unsigned char world_terrain_failed:1;      // generation ran out of memory: don't retry
+    // ---- end WP-B
 } Map;
 
 extern const MapConfig g_default_map_config;
@@ -753,6 +764,12 @@ typedef struct {
     double received;
     double client_time;
     unsigned short clock_epoch;
+    // ---- map-logic WP-B: v7.1.4 input[13] (CONTROLS "resetLast" 2 / "reset" 1: the Parkour
+    // resetToLast / resetToStart, players.js) and input[14] (the "interact" key held: airdrop
+    // claims, hold-interact prompts). Sent in NetInputPacket.flags (NET_INPUT_RESET_* / _INTERACT).
+    unsigned char reset:2;
+    unsigned char interact_held:1;
+    // ---- end WP-B
 } Input;
 
 // Exact anchored lag compensation (server.cfg lag_comp_anchor 1, shared/src/player.c): the
@@ -785,6 +802,8 @@ struct Game_t;
 #define PLAYER_NAME_SIZE 32
 #define PLAYER_DAMAGE_SLOTS 8
 #define PLAYER_CHECKPOINT_LIST_MAX 256 // single-use check points one player can remember
+#define PLAYER_SCORE_OBJS_MAX 256      // map-logic WP-B: score zones one player can have taken (scoreObjs)
+#define PLAYER_COLLIDING_OBJS_MAX 64   // map-logic WP-B: enter / exit trigger objects a player is inside (collidingObjs)
 
 typedef struct {
     int uid;      // dealer uid, -1 = free slot
@@ -1132,6 +1151,26 @@ typedef struct Player_t {
     unsigned char has_account:1;  // player.account (server: a backend account or the host's own machine,
                                   // which covers the offline sandbox, decisions.md): reqAccount streaks
     // ---- end WP-B combat state ----
+    // ---- map-logic WP-B: v7.1.4 world state of the player (shared/src/world.c)
+    unsigned char no_pvp:1;            // noPVP: inside a NOPVP_ZONE this tick (no damage given or taken)
+    unsigned char force_pvp:1;         // forcePVP: inside a PVP_ZONE (team undefined: only forcePVP pairs fight)
+    unsigned char has_init_pos:1;      // setInitPos ran (the first spawn of the round)
+    unsigned char has_checkpoint_data:1; // checkPointData = [timeLog, gameTime] stored by the last check point
+    vec3 init_pos;                     // initPos: resetToStart target
+    float reset_timer;                 // resetTimer (ms): 250 after a parkour reset, input [13] ignored meanwhile
+    int time_log;                      // timeLog: score zones logged this round ("gt")
+    float game_time;                   // gameTime (ms): the ownTime speed-run clock (Parkour)
+    int last_timer_sent;               // lastTimer: the last clock value sent (tenths of a second), -1 none
+    int checkpoint_time_log;           // checkPointData[0]
+    float checkpoint_game_time;        // checkPointData[1] (ms)
+    int score_objs[PLAYER_SCORE_OBJS_MAX];         // scoreObjs: score zones (object index) taken this round
+    int score_obj_count;
+    int colliding_objs[PLAYER_COLLIDING_OBJS_MAX]; // collidingObjs: onEnterObject / onExitObject objects inside
+    int colliding_obj_count;
+    uint64_t colliding_seen;           // bit i: colliding_objs[i] was touched this tick (vA541)
+    int build_index;                   // buildIndex: the Build Tool's buildObjs.js pick (0..3)
+    unsigned char select_build:1;      // selectBuild: aiming with the Build Tool (the pick wheel is up)
+    // ---- end WP-B
 } Player;
 
 typedef struct {
@@ -1381,6 +1420,43 @@ typedef struct {
 #define GAME_SCORE_CAP 13000        // players.score: public games cap the score
 #define GAME_LEADERBOARD_MAX 16     // players.syncLeaders: 16 rows
 
+// ---- map-logic WP-B: v7.1.4 world runtime state of a game (shared/include/world.h)
+// The battle-royale zone (libs/Zone.js). The authority runs the circle; clients tween to each
+// NET_PACKET_ZONE over 900 ms (zone_circle() gives the value to draw).
+typedef struct {
+    unsigned char active:1;      // map.zone exists (zone && zoneSize && zoneSpeed)
+    unsigned char waiting:1;     // a stage wait ("Zone closing in ") is running
+    unsigned char visible:1;     // client: hidden once a received size reaches 0
+    unsigned char synced:1;      // client: a NET_PACKET_ZONE arrived this round
+    float size, height;          // _size / _height (limits applied)
+    float shrink_speed;          // circleShrinkSpeed (units/s)
+    float wait_time;             // waitTimer (ms) of one stage, _waitTimer
+    int stages_start;            // _stages
+    int stages;                  // stages left
+    float wait_timer;            // ms left of the running stage wait
+    float broadcast_timer;       // zoneTimer (ms) until the next "zn" + outside damage
+    vec3 position, scale;        // circlePosition / circleSize (x, z used; scale.y = height)
+    vec3 target_position, target_scale; // targetCirclePosition / targetCircleSize
+    // client tween (Zone.update with a value: TWEEN 900 ms linear from the current values)
+    float tween_from[4], tween_to[4], tween_time;
+} WorldZone;
+
+typedef struct {
+    int object;                  // map object index (uid)
+    int node;                    // PATH_NODE nid it was moved to
+    vec3 origin;                 // orgX / orgY / orgZ: the object's position before the first move
+} WorldMovedObject;
+
+typedef struct {
+    WorldZone zone;
+    WorldMovedObject *moved;     // manager.movedObjs (uid, node pairs), in move order
+    size_t moved_count, moved_cap;
+    int build_count;             // game.buildCount (config.buildMax 1200)
+    size_t static_object_count;  // map objects before any build (builds are appended after them)
+    unsigned char save_colls:1;  // game.saveColls: some object listens to onEnterObject / onExitObject
+} GameWorld;
+// ---- end WP-B
+
 typedef struct Game_t {
     GameConfig config;
     GameMode *mode;
@@ -1443,6 +1519,8 @@ typedef struct Game_t {
     VoteKick *vote_kick;
 
     void *server; // TODO
+
+    GameWorld world; // map-logic WP-B (shared/include/world.h): zone, moved objects, builds
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);
@@ -1655,6 +1733,10 @@ enum {
     NET_INPUT_JUMP = 1 << 2,
     NET_INPUT_CROUCH = 1 << 3,
     NET_INPUT_RELOAD = 1 << 4,
+    // map-logic WP-B: input[13] reset (1 resetToStart, 2 resetToLast) and input[14] interact held
+    NET_INPUT_RESET_START = 1 << 5,
+    NET_INPUT_RESET_LAST = 1 << 6,
+    NET_INPUT_INTERACT = 1 << 7,
 };
 
 #pragma pack(push, 1)
@@ -2106,6 +2188,9 @@ typedef enum {
     NET_OBJECT_RESPAWN = 1,     // "ro" uid: active again, health back (mesh shown)
     NET_OBJECT_GATE = 2,        // "gte" uid, active: a gate opened (0) / closed (1)
     NET_OBJECT_BANK = 3,        // "bnk" uid, deposited
+    // map-logic WP-B (shared/src/world.c): object node moves
+    NET_OBJECT_MOVE_TO_NODE = 4,   // "mo" uid, node: teleportToNode (feet on PATH_NODE nid `value`)
+    NET_OBJECT_MOVE_FROM_NODE = 5, // "mf" uid: teleportFromNode (back to its original position)
 } NetObjectStateKind;
 
 typedef struct {
@@ -2113,6 +2198,52 @@ typedef struct {
     uint8_t kind;               // NetObjectStateKind
     int32_t value;              // gate: active; bank: deposited
 } NetObjectStatePacket;
+
+// ---- map-logic WP-B packets (NET_PACKET_BLOCK_WORLD 130-139; shared/src/world.c, zone.c, build.c).
+// Sent only by v7 servers (NET_PROTOCOL_MINOR_V7); clients handle them in client/src/world_events.c.
+#define NET_PACKET_ZONE (NET_PACKET_BLOCK_WORLD + 0)        // S->C all: NetZonePacket ("zn" every 1 s, init syncData.zone)
+#define NET_PACKET_BUILD (NET_PACKET_BLOCK_WORLD + 1)       // S->C all: NetBuildPacket ("bo"; init syncData.dyno)
+#define NET_PACKET_LOG_TIME (NET_PACKET_BLOCK_WORLD + 2)    // S->C to the player: NetLogTimePacket ("gt" / the speed-run "t")
+#define NET_PACKET_OBJECT_ANIM (NET_PACKET_BLOCK_WORLD + 3) // S->C: NetObjectAnimPacket ("ana" with isObj true)
+// NET_PACKET_CHECKPOINT (101) keeps its id; v7 servers add a NetCheckpointPacket payload ("chp" / "chp" true).
+
+typedef struct {
+    float x, z;                 // circlePosition x / z
+    float size_x, size_z;       // circleSize x / z (radius; 0 hides the zone)
+} NetZonePacket;
+
+typedef struct {
+    int32_t uid;                // the new map object's index
+    uint8_t build_index;        // buildObjs.js index (0 Build Block, 1 Platform, 2 Wall, 3 Stairs)
+    int8_t direction;           // dir (rotDir / ramp direction 0..3)
+    float position[3];          // x, y (the build's feet), z
+    float size[3];              // w, h, l (0 = the build object's own size)
+} NetBuildPacket;
+
+enum {
+    NET_LOG_TIME_ZONE = 0,      // "gt" time, zoneIndex: a score zone was logged
+    NET_LOG_TIME_CLOCK = 1,     // "t" of an ownTime mode: the player's own speed-run clock
+    NET_LOG_TIME_FINISH = 2,    // "t" after the last score zone (the final time)
+};
+typedef struct {
+    int32_t time_ms;            // game.gameTimer (ms) or the player's gameTime (ownTime)
+    int32_t time_log;           // timeLog (zone index + 1)
+    uint8_t kind;               // NET_LOG_TIME_*
+    uint8_t show_ms;            // the mode shows milliseconds (showMS)
+} NetLogTimePacket;
+
+#define NET_ANIM_CLIP_SIZE 33   // trigger "ast" / Play Animation clip names are <= 32 chars
+typedef struct {
+    int32_t uid;                // map object index (isObj) or AI sid
+    uint8_t is_object;          // 4th "ana" argument: a map object (1) or an AI (0)
+    uint8_t raw;                // 1: clip is a custom clip name; 0: one of config.clipNames
+    char clip[NET_ANIM_CLIP_SIZE];
+} NetObjectAnimPacket;
+
+typedef struct {
+    uint8_t reset;              // "chp" true: the player's check points were cleared
+} NetCheckpointPacket;
+// ---- end WP-B packets
 
 #define NET_SOUND_NAME_SIZE 24
 typedef struct {

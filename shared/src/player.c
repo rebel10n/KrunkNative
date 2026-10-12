@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <world.h> // map-logic WP-B: tris, zones, score zones, terrain, resets
 #include <ai.h>
 #include <spawnables.h>
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
@@ -201,8 +202,9 @@ void player_spawn(Player *player) {
     // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker).
     mode_player_spawned(player->game, player);
 
-    // A player that reached a check point respawns there (shared/src/triggers.c).
+    // A player that reached a check point respawns there (shared/src/world.c).
     if (game_is_authority(player->game)) game_spawn_at_checkpoint(player->game, player);
+    world_player_spawned(player->game, player); // WP-B: setInitPos, noPVP / forcePVP off
     ks_game_on_player_spawn(player->game, player); // KrunkScript: player script state reset, server onPlayerSpawn
 }
 
@@ -798,8 +800,12 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
     int has_ramp_height = 0, side_pushed = 0;
     float max_ramp_height = 0.0f;
 
+    world_player_tris(player);        // WP-B: the tris (cpx) capsule pass before the objects (player.js:1337-1350)
+    world_player_colls_begin(player); // WP-B: collidingObjs of onEnterObject / onExitObject
+
     for (size_t i = 0; i < game->map->object_count; i++) {
         const Object *object = game->map->objects[i];
+        if (object->complex_coll) continue; // WP-B: cpx objects collide through their tris only (applyToQuad skips them)
         MovementBox box;
         movement_box(object, &box);
         const float top = box.top, bottom = box.bottom;
@@ -809,6 +815,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             if (player->in_object == (int) i + 1) player->in_object = 0; // left the onEnter trigger
             continue;
         }
+        world_player_colls_touch(player, (int) i); // WP-B: vA541 (saveColls)
 
         const int event = game_object_event(object);
 
@@ -841,10 +848,12 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             continue; // walk-through: the jumpPad / zone / collision else-chain is skipped
         }
 
-        if (event == TRIGGER_EVENT_ON_ENTER) {
-            // onEnter: fires when the player steps in (inObject != sid); nothing else of the
-            // object applies (the jumpPad / zone / collision else-chain is skipped)
-            if (player->in_object != (int) i + 1) game_on_trigger(game, player, (Object *) object, NULL);
+        const int exit_event = object->trig && object->trig->event_index == TRIGGER_V7_EVENT_ON_EXIT_OBJECT;
+        if (event == TRIGGER_EVENT_ON_ENTER || exit_event) {
+            // v7 onEnterObject / onExitObject (WP-B): collidingObjs; onEnterObject fires the tick
+            // the object joins it, onExitObject when it leaves (world_player_colls_end). Nothing
+            // else of the object applies (the jumpPad / zone / collision else-chain is skipped)
+            if (world_player_colls_enter(player, (int) i) && event == TRIGGER_EVENT_ON_ENTER) game_on_trigger(game, player, (Object *) object, NULL);
             player->in_object = (int) i + 1;
             continue;
         }
@@ -866,12 +875,11 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             // TODO: bounce sound (bounce_0 once per pad entry: !was_on_pad)
             player->on_pad = 1;
         } else if (object->score_zone) {
-            // TODO: score
+            world_player_score_zone(player, object); // WP-B: scoreObjs once, score(scoreP), logTime
         } else if (
             !object->objective && !object->bomb_site &&
-            (!object->premium || !1) && // TODO: check premium
-            (!object->verified || !1) && // TODO: check verified
-            (!object->team_zone || player->game->mode->config.teams && object->team != player->team)
+            // WP-B: premium / verified / partner / KPD / team / KR zones pass the qualifying players
+            !world_zone_passable(player, object)
         ) {
             if (object->teleporter) {
                 game_check_teleport(game, player, (Object *) object);
@@ -1096,6 +1104,9 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             }
         }
     }
+
+    world_player_colls_end(player);  // WP-B: onExitObject for the objects left this tick
+    world_player_pvp_zones(player);  // WP-B: noPVP / forcePVP (COLLISION_TYPE_NONE volumes)
 }
 
 // players.jump: blocked by a noJump weapon (Minigun) and for a tick after a headClipFix ceiling
@@ -1469,6 +1480,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
 
     // v7.1.4 charge system (player.js: right after the aim update, not in replays)
     if (!recon) combat_update_charge(player, input, delta);
+    // map-logic WP-B: the Build Tool pick (player.js:1109-1124: aim held with a build weapon)
+    player->select_build = 0;
+    if (input->scope && player->weapon && player->weapon->build) player_select_build(player, yaw_delta, pitch_delta);
 
     // v7.1.4: a headClipFix ceiling hit last tick blocks crouching (and jumping) for this one;
     // classes without canCrch never crouch.
@@ -1688,6 +1702,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // TODO (pColl): players.playerCollision for classes with player collision
         if (!player->noclip) player_do_map_collisions(player, input, move_dir, can_jump, delta, recon);
         else player->was_on_ground = can_jump ? 1 : 0;
+        if (player->noclip) world_player_pvp_zones(player); // WP-B: v7 clears noPVP / forcePVP in noclip too
 
         if (!player->did_jump && player->ramp_fix && fabsf(player->position.y - *player->ramp_fix) <= game_constants.climb_height) {
             if (!player->on_ramp) {
@@ -1704,7 +1719,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
 
         if (!player->making_progress && !recon) player->interact_progress = 0.0f;
-        // TODO: terrain ray cast
+        world_player_terrain(player, recon); // WP-B: terrain ground snap (player.js:1779-1797)
 
         player->air_time = player->on_ground ? 0 : player->air_time + delta;
     }
@@ -1789,10 +1804,13 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
                 will_shoot = 1;
             }
 
-            if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
+            // map-logic WP-B: players.build runs whenever the timers allow (player.js:1911-1914),
+            // with the fire input as `place`; the Build Tool never takes the shoot path
+            if (player->weapon->build && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
+                player_build(player, will_shoot);
+            } else if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
                 if (player->weapon->grapple_range || player->weapon->build) {
-                    // v7.1.4 tryGrapple / build (Grappler, Build Tool): grapple physics and build
-                    // pieces are WP-A phase 2 / map-logic; until then these never fire.
+                    // v7.1.4 tryGrapple (Grappler): grapple physics are WP-A phase 2; until then it never fires.
                 } else if (player->weapon->melee) {
                     player_melee(player);
                 } else {
@@ -1857,6 +1875,8 @@ weapon_done:;
     // TODO: trading?
     // TODO: player collisions
     // TODO: update interact
+
+    world_player_reset_input(player, input->reset, recon, delta * 1000.0f); // WP-B: input[13] Parkour resets
 }
 
 // playerStep: stepVal swings between +-PI/2 * stpFr (class step frequency) with the distance
@@ -2193,7 +2213,8 @@ int game_object_shootable(const Object *object) {
 }
 
 static int combat_can_damage(const Player *dealer, const Player *victim) {
-    return !dealer->team || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team);
+    if (!world_pvp_allows(dealer, victim)) return 0; // WP-B: v7 noPVP / forcePVP pairs (forcePVP: no team)
+    return !dealer->team || world_pvp_ignores_team(dealer, victim) || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team);
 }
 
 // lineInRect against every shootable object and (authority only) every other living player's
@@ -2673,6 +2694,16 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
 
     combat_trace(player, origin, dir, authority && ray >= 0, &hits);
     hit_list_sort(&hits);
+    // map-logic WP-B: shoot raycasts the terrain too (players.js:2982-2990; pushed first, so it wins
+    // ties): nothing behind it is reached and the tracer ends on it
+    const float terrain_t = world_terrain_fraction(game, origin, dir);
+    if (terrain_t > 0.0f) {
+        size_t kept = 0;
+        for (size_t i = 0; i < hits.count; i++)
+            if (hits.items[i].t < terrain_t) hits.items[kept++] = hits.items[i];
+        hits.count = kept;
+        hit_list_push(&hits, (Hit) {NULL, NULL, terrain_t}); // the terrain: no object, player or AI
+    }
 
     // v7.1.4: dmg x charge (vLN1167: chrgTime charge, fullChrgMlt on a full-charge shot) x
     // attributes.dmg; pierce subtracts from the charged base without the attribute.
@@ -2747,6 +2778,7 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
                               weapon->effect_on_hit > 0 && ai_effect_count > 0 ? weapon->effect_on_hit - 1 : -1, ai_effect_count);
             damage -= weapon->pierce ? base * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         } else {
+            if (!hit->object) break; // WP-B: the terrain stops the bullet
             // G.obj: destructible health ("4", "do", onDestroy) and onShoot / onDamage triggers
             game_object_hit(game, (Object *) hit->object, player, dealt, 0, GAME_HIT_SHOT);
             if (!hit->object->penetrable) break;

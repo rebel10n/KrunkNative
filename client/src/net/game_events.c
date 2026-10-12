@@ -26,6 +26,7 @@
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
+#include <world_events.h>  // map-logic WP-B: NET_PACKET_ZONE / BUILD / LOG_TIME / OBJECT_ANIM
 #include <map_triggers.h>  // map trigger events: "do"/"ro"/"gte"/"bnk", "chp", "s", "scr", "am" popups (client/src/map_triggers.c)
 #include <math.h>
 #include <stdio.h>
@@ -733,6 +734,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_UPGRADES:
         case NET_PACKET_WEAPON_STREAK:
             return combat_events_handle(client, type, payload, length); // WP-B (client/src/net/combat_events.c)
+        case NET_PACKET_ZONE:
+        case NET_PACKET_BUILD:
+        case NET_PACKET_LOG_TIME:
+        case NET_PACKET_OBJECT_ANIM:
+            return client_world_handle_event(client, type, payload, length); // map-logic WP-B (client/src/world_events.c)
         default:
             return hud_modes_handle_event(client, type, payload, length); // mode packets (client/src/ui/hud_modes.c)
     }
@@ -740,6 +746,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
 
 // New session or round (INIT): no clock, no end screen, nobody dead yet.
 void client_game_events_reset(Client *client) {
+    client_world_reset(); // WP-B: no speed-run time yet
     player_accounts_on_init();
     hud_modes_reset(client);
     hud_popups_on_init(); // "init": bN = 0

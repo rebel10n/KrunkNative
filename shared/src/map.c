@@ -1,6 +1,7 @@
 #include <shared.h>
 #include <map_catalog.h>
 #include <prefabs.h>
+#include <terrain.h> // map_terrain_free (WP-B)
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
@@ -385,6 +386,7 @@ static void map_parse_interface(Object *object, const cJSON *raw_obj, const int 
             object->node = map_int(raw_obj, "n");
             object->stop_momentum = (unsigned char) map_has(raw_obj, "m");
             object->team = (unsigned int) map_int(raw_obj, "tm");
+            object->tel_checkpoint = (unsigned char) map_has(raw_obj, "tcp"); // WP-B: telCheckPoint = tcp != null
             break;
         default:
             break;
@@ -1115,6 +1117,7 @@ void map_fini(Map *map) {
     map->object_count = 0;
     map->objects = NULL;
 
+    map_terrain_free(map); // WP-B: the cached map.terrain
     free(map->modes);
     free(map->tris);
     free(map->path_nodes);

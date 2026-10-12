@@ -4,6 +4,7 @@
 // damage with linear falloff, 0.2x self damage). Krunker speeds are units per
 // millisecond; the simulation keeps those units and converts the tick delta.
 #include <shared.h>
+#include <world.h> // map-logic WP-B: PvP filter, terrain
 #include <ai.h>
 #include <math.h>
 #include <string.h>
@@ -119,6 +120,7 @@ void game_explosion(Game *game, const vec3 position, const float radius, const f
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
         if (!player || !player->active) continue;
+        if (!world_pvp_allows(owner, player)) continue; // WP-B: v7 explosion noPVP / forcePVP filter
 
         const float dx = player->position.x - position.x;
         const float dy = player->position.y - position.y;
@@ -179,11 +181,19 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         }
     }
 
+    // WP-B: projectiles.js:215 the terrain stops the step too
+    const float terrain_t = world_terrain_fraction(game, projectile->position, step);
+    if (terrain_t > 0.0f && terrain_t <= 1.0f && terrain_t < best.t) {
+        best = (ProjectileHit) {NULL, NULL, terrain_t};
+        *hit_any = 1;
+    }
+
     const float step_length = projectile->speed * dt_ms;
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
         if (!player || !player->active || player->uid == projectile->owner_uid) continue;
+        if (!world_pvp_allows(game_find_player(game, projectile->owner_uid), player)) continue; // WP-B: noPVP / forcePVP
 
         // p = fetchState(q, m.stateConst): every tick of the flight tests the rewound box
         PlayerStoredState state;

@@ -9,6 +9,7 @@
 // The offline client's game is the authority itself: it already holds the state, only the
 // render side (meshes, shadows, HUD, sounds) follows the events.
 #include <map_triggers.h>
+#include <world.h> // map-logic WP-B: node moves, check point reset
 #include <audio.h>
 #include <html_ui.h>
 #include <shadow.h>
@@ -52,6 +53,14 @@ static void object_state(Client *client, const NetObjectStatePacket *packet) {
         case NET_OBJECT_BANK:
             if (mirror) object->deposited = packet->value;
             return; // no mesh change
+        case NET_OBJECT_MOVE_TO_NODE: // "mo": Game.teleportToNode (moves the mesh too)
+            if (mirror) world_teleport_object_to_node(&client->game, object, packet->value);
+            shadow_load_map(client->game.map);
+            return;
+        case NET_OBJECT_MOVE_FROM_NODE: // "mf": Game.teleportFromNode
+            if (mirror) world_reset_object_position(&client->game, object);
+            shadow_load_map(client->game.map);
+            return;
         default:
             return;
     }
@@ -103,9 +112,18 @@ int client_triggers_handle_event(Client *client, const int type, const void *pay
             object_state(client, &packet);
             return 1;
         }
-        case NET_PACKET_CHECKPOINT:
+        case NET_PACKET_CHECKPOINT: {
+            // io_checkPointSet(reset): v7 servers send NetCheckpointPacket; "chp" true clears the
+            // local player's check points (checkPoint, checkPointList, checkPointData)
+            NetCheckpointPacket packet = {0};
+            if (length >= sizeof(packet)) memcpy(&packet, payload, sizeof(packet));
+            if (packet.reset) {
+                if (client->me && !client->game.is_local) world_clear_checkpoints(&client->game, client->me);
+                return 1;
+            }
             hud_popups_checkpoint(); // checkpointSet(): overlay.checkText "Checkpoint!" (showMedals)
             return 1;
+        }
         case NET_PACKET_SOUND: {
             TRIGGERS_READ(NetSoundPacket, packet);
             play_sound(client, &packet);

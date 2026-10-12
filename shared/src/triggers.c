@@ -172,26 +172,7 @@ void game_play_sound(Game *game, const char *name, const int uid, const vec3 pos
 
 // ---------------------------------------------------------------- positions
 
-void game_change_position(Game *game, Player *player, const vec3 feet, const int recon, const int stop_momentum,
-                          const int has_direction, const int direction) {
-    player->position = feet;      // x / y / z and oldX / oldY / oldZ
-    player->last_position = feet;
-    if (has_direction) player->direction.y = -((float) direction + 1.0f) * (float) M_PI / 2.0f;
-    if (stop_momentum) {
-        player->velocity = (vec3) {0.0f, 0.0f, 0.0f};
-        player->step_val = 0.0f;
-    }
-    if (recon && game_is_authority(game)) { // doRecon: the player's own client snaps to it
-        player->recon_snap = 1; // and the next tick's "l" carries the full state (net_send_reconciliation)
-        const NetPositionPacket packet = {
-            .x = feet.x, .y = feet.y, .z = feet.z,
-            .stop_momentum = (uint8_t) !!stop_momentum,
-            .has_direction = (uint8_t) !!has_direction,
-            .direction = direction,
-        };
-        game_send(game, player->uid, NET_PACKET_POSITION, &packet, sizeof(packet));
-    }
-}
+// game_change_position (players.changePosition): shared/src/world.c (map-logic WP-B).
 
 // getSpawnPoint(player.team, player) (only the point: changePosition keeps the view).
 static vec3 spawn_point(Game *game, Player *player) {
@@ -544,43 +525,8 @@ void game_trigger_ai_death(Game *game, Player *source, GameAI *ai) {
 
 // ---------------------------------------------------------------- check points / teleporters
 
-void game_set_checkpoint(Game *game, Player *player, Object *object) {
-    const int uid = map_object_uid(game, object);
-    if (uid < 0 || player->checkpoint == uid + 1) return;  // a0.checkPoint != a1.uid
-    if (!teams_allow(game, (int) object->team, player)) return;
-    if (object->single_use) {
-        for (int i = 0; i < player->checkpoint_list_count; i++) {
-            if (player->checkpoint_list[i] == uid) return;
-        }
-        if (player->checkpoint_list_count < PLAYER_CHECKPOINT_LIST_MAX) player->checkpoint_list[player->checkpoint_list_count++] = uid;
-    }
-    player->checkpoint = uid + 1;
-    if (game_is_authority(game)) game_send(game, player->uid, NET_PACKET_CHECKPOINT, NULL, 0); // io.send(a0.id, "chp")
-}
-
-void game_check_teleport(Game *game, Player *player, Object *object) {
-    if (object->node == 1 || object->tel_cooldown > 0.0f || !teams_allow(game, (int) object->team, player)) return;
-    for (size_t i = 0; i < game->map->object_count; i++) {
-        Object *to = game->map->objects[i];
-        if (!to->teleporter || to->channel != object->channel || to->node <= 0 || to == object) continue;
-        if (!teams_allow(game, (int) to->team, player)) continue;
-        if (to->node == 2) to->tel_cooldown = 2000.0f;
-        game_change_position(game, player, to->position, 0, to->stop_momentum, to->force_dir, to->direction);
-        break;
-    }
-}
-
-// The respawn of a player that reached a check point: its bottom centre, facing its direction.
-int game_spawn_at_checkpoint(Game *game, Player *player) {
-    if (!game->map || player->checkpoint <= 0 || (size_t) player->checkpoint > game->map->object_count) return 0;
-    const Object *object = game->map->objects[player->checkpoint - 1];
-    if (!object->checkpoint) return 0;
-    player->position = object->position;
-    player->last_position = object->position;
-    player->direction.x = 0.0f;
-    player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) object->direction);
-    return 1;
-}
+// game_set_checkpoint / game_check_teleport / game_spawn_at_checkpoint: shared/src/world.c
+// (map-logic WP-B: checkPointData, telCheckPoint, "chp" with the reset payload).
 
 // ---------------------------------------------------------------- per tick
 

@@ -425,9 +425,9 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.kind < 4 ? kinds[packet.kind] : "?", packet.value);
             break;
         }
-        case NET_PACKET_CHECKPOINT: // "chp"
-            if (length) { client_net_log_bad_payload("checkpoint", type, payload, length); break; }
-            printf("{\"type\":\"checkpoint\",\"id\":%u}", (unsigned int) type);
+        case NET_PACKET_CHECKPOINT: // "chp" (v7: NetCheckpointPacket, reset = "chp" true)
+            if (length && length != sizeof(NetCheckpointPacket)) { client_net_log_bad_payload("checkpoint", type, payload, length); break; }
+            printf("{\"type\":\"checkpoint\",\"id\":%u,\"reset\":%u}", (unsigned int) type, length ? (unsigned int) ((const uint8_t *) payload)[0] : 0u);
             break;
         case NET_PACKET_SOUND: { // "s"
             LOG_READ(NetSoundPacket, "sound");

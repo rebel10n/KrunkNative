@@ -150,6 +150,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
+	./$(DEBUG_DIR)/world_v7_test
 	./$(DEBUG_DIR)/editor_bus_test
 	./$(DEBUG_DIR)/weapons_v7_test
 	./$(DEBUG_DIR)/combat_test

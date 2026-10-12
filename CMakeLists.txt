@@ -490,6 +490,13 @@ else ()
         target_link_libraries(map_v7_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # world_v7_test (map-logic WP-B): tris, terrain, BR zone, score / check points / resets, zones, PvP, moves, builds
+    add_executable(world_v7_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/world_v7_test.c)
+    target_link_libraries(world_v7_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(world_v7_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 

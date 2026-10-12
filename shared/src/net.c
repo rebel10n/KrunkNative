@@ -116,6 +116,9 @@ void net_packet_from_input(NetInputPacket *packet, const Input *input) {
     if (input->jump) packet->flags |= NET_INPUT_JUMP;
     if (input->crouch) packet->flags |= NET_INPUT_CROUCH;
     if (input->reload) packet->flags |= NET_INPUT_RELOAD;
+    if (input->reset == 1) packet->flags |= NET_INPUT_RESET_START; // WP-B input[13]
+    if (input->reset == 2) packet->flags |= NET_INPUT_RESET_LAST;
+    if (input->interact_held) packet->flags |= NET_INPUT_INTERACT; // WP-B input[14]
 }
 
 void net_packet_to_input(Input *input, const NetInputPacket *packet) {
@@ -134,6 +137,8 @@ void net_packet_to_input(Input *input, const NetInputPacket *packet) {
     input->jump = !!(packet->flags & NET_INPUT_JUMP);
     input->crouch = !!(packet->flags & NET_INPUT_CROUCH);
     input->reload = !!(packet->flags & NET_INPUT_RELOAD);
+    input->reset = packet->flags & NET_INPUT_RESET_LAST ? 2 : packet->flags & NET_INPUT_RESET_START ? 1 : 0; // WP-B input[13]
+    input->interact_held = !!(packet->flags & NET_INPUT_INTERACT);                                        // WP-B input[14]
 }
 
 void net_packet_from_player(NetStatePacket *packet, const Player *player) {

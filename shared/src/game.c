@@ -317,6 +317,7 @@ void game_start_round(Game *game) {
 
     // finishInit: the mode's clock (gameTime), waitTimers, conditions, objectives, gameStart
     if (game->mode) mode_round_start(game);
+    world_round_start(game); // WP-B: resetZone, movedObjs, saveColls (shared/src/world.c)
 }
 
 static void game_send_timer(Game *game, const int uid, const int seconds, const int end) {
@@ -471,6 +472,7 @@ void game_send_round_state(Game *game, const int uid) {
     if (!game->ready || !game_is_authority(game)) return;
 
     game_send_object_state(game, uid); // init dest / gates / banks (shared/src/triggers.c)
+    world_send_state(game, uid);        // init zone / mov (shared/src/world.c, WP-B)
 
     if (game->end_timer > 0.0f) {
         game_send_timer(game, uid, (int) game->end_timer, 1);
@@ -674,9 +676,9 @@ void game_tick_world(Game *game, const float now, const float delta, const float
         if (!player->active) continue; // Poisoned / Zapped can kill in tickPlayer
         player_store_state(player); // players.js update: tickPlayer, storeState, then the deathY check
 
-        // KrunkNative (deliberate difference): v3.1.1 players.js update() kills at deathY even in
-        // noclip; a noclipping player (a dev/host tool) may fly under the map instead.
-        if (!player->noclip && player->position.y <= game->map->death_y) {
+        // v7.1.4 players.js tickPlayer: y <= deathY kills unless godMode (noclip players too; v3.1.1
+        // had no godMode exception). map-logic WP-B.
+        if (!player->god_mode && player->position.y <= game->map->death_y) {
             // the CTF flag goes home in mode_on_kill (mode_in_kill_zone)
             player_kill(player, NULL, NULL, 0);
         }
@@ -688,6 +690,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
     if (authority && !game->end_timer) spawnables_update(game, delta); // #19 (WP-D)
     if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn
     if (authority && !game->end_timer) zone_update(game, delta); // #24 (WP-B)
+    world_tick(game, delta); // WP-B: ownTime clocks (players.tickPlayer), the client zone tween
     if (authority && game->leaders_dirty) game_sync_leaders(game, NET_TARGET_ALL);
 
     // Last: the hook re-inits the game (frees the players iterated above).
