@@ -3,7 +3,7 @@ name: Deploy edges
 # After every successful Deploy kru on main (workflow_run), or by hand: builds server_bin for the
 # edges' Debian releases (deploy/ansible/build.sh: bullseye = clara, bookworm = ashburn,
 # trixie = angeles + chitown) and runs deploy/ansible/edges.yml (by default the edge infra:
-# firewall, user, release, gameserver; DNS needs a token with Zone DNS:Edit), chitown first: the rest only after
+# firewall, fail2ban (this repo's drop-ins only; abulxt owns the base), user, release, gameserver; DNS needs a token with Zone DNS:Edit), chitown first: the rest only after
 # chitown's instance 1 answers the server-info query again. This RESTARTS the live game
 # servers of the selected edges (players are dropped). The edges also run abulxt: only the
 # KrunkNative release + kn-gameserver@ units are touched (no firewall, no DNS here).
@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       tags:
-        description: "edges.yml tags (firewall,user,release,gameserver[,dns])"
+        description: "edges.yml tags (firewall,fail2ban,user,release,gameserver[,dns])"
         type: string
-        default: firewall,user,release,gameserver
+        default: firewall,fail2ban,user,release,gameserver
       hosts:
         description: "Edges: all, or a comma list of chitown,clara,angeles,ashburn (chitown always goes first)"
         type: string
@@ -126,7 +126,7 @@ jobs:
       EDGES: ${{ needs.plan.outputs.edges }}
       COMMIT12: ${{ needs.plan.outputs.commit12 }}
       DRY_RUN: ${{ inputs.dry_run || false }}
-      TAGS: ${{ inputs.tags || 'firewall,user,release,gameserver' }}
+      TAGS: ${{ inputs.tags || 'firewall,fail2ban,user,release,gameserver' }}
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v7

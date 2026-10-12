@@ -1,0 +1,6 @@
+# fail2ban-contract v1 -- base daemon settings. Owner: {{ fail2ban_owner }}.
+# Managed by Ansible (vendored fail2ban role); local edits are overwritten.
+# Bans older than dbpurgeage are not restored on restart: keep it above the
+# longest bantime (recidive, bantime.maxtime).
+[DEFAULT]
+dbpurgeage = {{ fail2ban_dbpurgeage }}

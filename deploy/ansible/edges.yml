@@ -1,12 +1,14 @@
 # Edge game servers: vcpus-1 server_bin instances per host + their DNS records.
 # edge_firewall runs first: the vendored host-firewall role opens the game ports
-# (edge-firewall-contract v1, README "Edge firewall"; firewall.yml runs it alone).
+# (edge-firewall-contract v1, README "Edge firewall"; firewall.yml runs it alone). fail2ban
+# follows (fail2ban-contract v1, README "fail2ban"): abulxt owns the base, this repo adds drop-ins.
 # Units run while kn_gameserver_enabled is true (group_vars/edges/main.yml; live since 2026-10-11).
 - name: KrunkNative edges (dedicated servers)
   hosts: edges
   become: false
   roles:
     - { role: edge_firewall, tags: [firewall] }
+    - { role: fail2ban, tags: [fail2ban] }
     - { role: kn_user, tags: [user, gameserver] }
     - { role: kn_release, tags: [release, gameserver] }
     - { role: kn_gameserver, tags: [gameserver] }

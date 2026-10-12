@@ -1,0 +1,72 @@
+---
+# fail2ban-contract v1 (vendored role, see ../VERSION). Each repo sets these
+# from its own inventory; nothing repo-specific lives here.
+
+# Off = the role does nothing on the host.
+fail2ban_manage: true
+# Render the base (/etc/fail2ban/jail.local, fail2ban.d, the nftables.service
+# hook, the optional sshd drop-in). Exactly ONE repo sets this per host.
+fail2ban_own_base: false
+# Shown in the base's "# Owner:" line (required when fail2ban_own_base).
+fail2ban_owner: ""
+
+# --- Base inputs (only read by the base owner) -------------------------------
+# Never banned. 127.0.0.1/8 and ::1 are always added; with fail2ban_ignoreip_self
+# so are the host's own addresses (facts, link-local skipped).
+fail2ban_ignoreip: []
+fail2ban_ignoreip_self: true
+# GitHub-hosted runners (api.github.com/meta "actions", fetched on the
+# controller at render time: several thousand CIDRs, and the list changes, so
+# fail2ban restarts whenever GitHub edits it). Off by default: CI logs in with a
+# key, and key logins never count as failures in the sshd jail's normal mode.
+fail2ban_ignoreip_github_actions: false
+
+# Ban actions: fail2ban's own nftables table (inet f2b-table, input hook,
+# priority -1), so bans run before any filter table at priority 0 (the
+# edge_firewall base, iptables-nft) whatever that table's policy says.
+fail2ban_banaction: "nftables[type=multiport]"
+fail2ban_banaction_allports: "nftables[type=allports]"
+
+# sshd jail. mode normal counts auth failures and invalid users only; "aggressive"
+# also bans banner grabbers and pre-auth disconnects (catches more MaxStartups
+# fillers, but also any monitor that opens and closes port 22).
+fail2ban_sshd_port: 22
+fail2ban_sshd_mode: normal
+fail2ban_sshd_maxretry: 5
+fail2ban_sshd_findtime: 10m
+fail2ban_sshd_bantime: 1h
+# Repeat offenders: each new ban doubles, capped at maxtime.
+fail2ban_bantime_increment: true
+fail2ban_bantime_maxtime: 1w
+
+# recidive: IPs banned this many times in findtime lose every TCP port.
+fail2ban_recidive_maxretry: 5
+fail2ban_recidive_findtime: 1d
+fail2ban_recidive_bantime: 1w
+# Must exceed the longest bantime, or a restart forgets the ban.
+fail2ban_dbpurgeage: 8d
+
+# sshd daemon settings (base owner only), rendered to
+# /etc/ssh/sshd_config.d/10-fail2ban-contract.conf; {} = no file. Applied with
+# sshd -t, a reload and a fresh-login check under a rollback timer.
+#   fail2ban_sshd_settings: { MaxStartups: "50:30:200", LoginGraceTime: 30 }
+fail2ban_sshd_settings: {}
+# Seconds before the armed sshd rollback restores the previous drop-in.
+fail2ban_rollback_seconds: 120
+
+# Files the base owner deletes (hand-installed jails this contract replaces).
+fail2ban_retire_files: []
+
+# --- Drop-ins (every repo) ----------------------------------------------------
+# This repo's extra jails, rendered to /etc/fail2ban/jail.d/<priority>-<name>.local
+# (and filters to /etc/fail2ban/filter.d/<name>-<filter>.conf):
+#   - name: krunknative     # [a-z0-9-]
+#     priority: 60          # 10..99
+#     source: "..."         # optional: where the inputs live (header line)
+#     comment: ["..."]      # optional extra "# " header lines
+#     filters:              # optional; a jail refers to one as filter = <name>-<filter name>
+#       - { name: login, failregex: ['^bad login from <HOST>$'], journalmatch: "_SYSTEMD_UNIT=x.service" }
+#     jails:                # section -> options (ignoreip, banaction, times come from the base)
+#       kn-login: { enabled: true, port: "443", filter: krunknative-login, backend: systemd, maxretry: 10 }
+# Jail names must not collide with the base (sshd, recidive) or another drop-in.
+fail2ban_dropins: []

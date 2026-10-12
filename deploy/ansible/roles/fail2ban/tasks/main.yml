@@ -1,0 +1,263 @@
+---
+# fail2ban-contract v1 (vendored role, see ../VERSION; byte-identical in
+# abulxt and KrunkNative deploy/ansible/roles/fail2ban).
+#   base owner:  /etc/fail2ban/jail.local, fail2ban.d/50-fail2ban-contract.local,
+#                /etc/systemd/system/nftables.service.d/50-fail2ban-contract.conf,
+#                /etc/ssh/sshd_config.d/10-fail2ban-contract.conf (sshd.yml),
+#                the packages, and fail2ban_retire_files.
+#   every repo:  jail.d/<priority>-<name>.local (+ filter.d/<name>-<filter>.conf).
+# Changed files are applied by `fail2ban-client -t` (failure: restore the
+# pre-render snapshot and stop), then a restart (owner) or a reload (drop-ins only).
+- name: fail2ban
+  when: fail2ban_manage | bool
+  block:
+    - name: Validate base settings
+      ansible.builtin.assert:
+        that:
+          - not (fail2ban_own_base | bool) or (fail2ban_owner | length > 0)
+          - (fail2ban_rollback_seconds | int) >= 90
+          - fail2ban_sshd_mode in ['normal', 'ddos', 'extra', 'aggressive']
+          - fail2ban_ignoreip is not string
+          - fail2ban_sshd_settings is mapping
+        fail_msg: >-
+          fail2ban_owner is required with fail2ban_own_base; rollback needs >= 90s;
+          fail2ban_sshd_mode is normal|ddos|extra|aggressive; fail2ban_ignoreip is a list;
+          fail2ban_sshd_settings is a mapping.
+        quiet: true
+
+    - name: Validate drop-ins
+      ansible.builtin.assert:
+        that:
+          - fail2ban_dropin.name is match('^[a-z0-9][a-z0-9-]*$')
+          - (fail2ban_dropin.priority | int) >= 10
+          - (fail2ban_dropin.priority | int) <= 99
+          - fail2ban_dropin.jails | default({}) is mapping
+          - fail2ban_dropin.filters | default([]) is not string
+          - >-
+            fail2ban_dropin.jails | default({}) | list
+            | select('in', ['DEFAULT', 'INCLUDES', 'Definition', 'Init', 'sshd', 'recidive']) | list | length == 0
+          - >-
+            (fail2ban_dropin.jails | default({}) | list
+             + fail2ban_dropin.filters | default([]) | map(attribute='name', default='') | list)
+            | reject('match', '^[A-Za-z0-9][A-Za-z0-9_.-]*$') | list | length == 0
+        fail_msg: >-
+          Drop-in {{ fail2ban_dropin.name | default('?') }}: name [a-z0-9-], priority 10..99, jails is a
+          mapping, filters a list of {name, failregex}, names [A-Za-z0-9_.-], and the base jails
+          (sshd, recidive) are not redefined.
+        quiet: true
+      loop: "{{ fail2ban_dropins }}"
+      loop_control:
+        loop_var: fail2ban_dropin
+        label: "{{ fail2ban_dropin.name | default('?') }}"
+
+    - name: Is fail2ban installed?
+      ansible.builtin.command: dpkg-query -W -f=${Status} fail2ban
+      register: fail2ban_pkg
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Base not installed - drop-ins skipped
+      ansible.builtin.debug:
+        msg: >-
+          fail2ban is not installed: the repo that owns the base has not run its fail2ban play
+          yet. This repo's drop-ins are written on its next run after that.
+      when:
+        - not (fail2ban_own_base | bool)
+        - "'install ok installed' not in fail2ban_pkg.stdout"
+
+    - name: Render and apply
+      when: (fail2ban_own_base | bool) or ('install ok installed' in fail2ban_pkg.stdout)
+      block:
+        # Unauthenticated api.github.com allows 60 requests/hour per address: the
+        # controller's GITHUB_TOKEN (set in Actions; `gh auth token` locally) lifts that.
+        - name: Fetch GitHub Actions runner ranges (api.github.com/meta, on the controller)
+          ansible.builtin.set_fact:
+            fail2ban_github_actions_cidrs: >-
+              {{ (lookup('ansible.builtin.url', 'https://api.github.com/meta', split_lines=false,
+                         headers=({'Authorization': 'Bearer ' ~ lookup('ansible.builtin.env', 'GITHUB_TOKEN')}
+                                  if lookup('ansible.builtin.env', 'GITHUB_TOKEN') else {}))
+                  | from_json).actions }}
+          run_once: true
+          when:
+            - fail2ban_own_base | bool
+            - fail2ban_ignoreip_github_actions | bool
+
+        - name: Assemble ignoreip
+          ansible.builtin.set_fact:
+            fail2ban_ignoreip_effective: >-
+              {{ (['127.0.0.1/8', '::1'] + fail2ban_ignoreip
+                  + (((ansible_facts.all_ipv4_addresses | default([]))
+                      + (ansible_facts.all_ipv6_addresses | default([]) | reject('match', '(?i)^fe80:') | list))
+                     | sort if fail2ban_ignoreip_self | bool else [])
+                  + (fail2ban_github_actions_cidrs | default([]) if fail2ban_ignoreip_github_actions | bool else []))
+                 | map('string') | unique | list }}
+          when: fail2ban_own_base | bool
+
+        - name: Config directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop: >-
+            {{ ['/etc/fail2ban', '/etc/fail2ban/jail.d', '/etc/fail2ban/filter.d']
+               + (['/etc/fail2ban/fail2ban.d', '/etc/systemd/system/nftables.service.d'] if fail2ban_own_base | bool else []) }}
+
+        # Restored if `fail2ban-client -t` rejects the new files. A fresh install
+        # has nothing to restore: the contract's files are removed instead.
+        - name: Snapshot current fail2ban files for rollback
+          ansible.builtin.command: tar -C / -czf /etc/fail2ban.rollback.tgz etc/fail2ban  # noqa: command-instead-of-module
+          changed_when: false
+          when:
+            - not ansible_check_mode
+            - "'install ok installed' in fail2ban_pkg.stdout"
+            - (fail2ban_own_base | bool) or (fail2ban_dropins | length > 0)
+
+        - name: Render base jails /etc/fail2ban/jail.local
+          ansible.builtin.template:
+            src: jail.local.j2
+            dest: /etc/fail2ban/jail.local
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          register: fail2ban_base_jail
+          when: fail2ban_own_base | bool
+
+        - name: Render base daemon settings
+          ansible.builtin.template:
+            src: fail2ban.local.j2
+            dest: /etc/fail2ban/fail2ban.d/50-fail2ban-contract.local
+            owner: root
+            group: root
+            mode: "0644"
+          register: fail2ban_base_daemon
+          when: fail2ban_own_base | bool
+
+        - name: Retire replaced files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ fail2ban_retire_files if fail2ban_own_base | bool else [] }}"
+          register: fail2ban_retired
+
+        - name: Render drop-in filters
+          ansible.builtin.template:
+            src: filter.conf.j2
+            dest: "/etc/fail2ban/filter.d/{{ item.0.name }}-{{ item.1.name }}.conf"
+            owner: root
+            group: root
+            mode: "0644"
+          loop: "{{ fail2ban_dropins | subelements('filters', skip_missing=true) }}"
+          loop_control:
+            label: "{{ item.0.name }}-{{ item.1.name }}.conf"
+          register: fail2ban_dropin_filters
+
+        - name: Render drop-ins
+          ansible.builtin.template:
+            src: dropin.local.j2
+            dest: "/etc/fail2ban/jail.d/{{ '%02d' | format(fail2ban_dropin.priority | int) }}-{{ fail2ban_dropin.name }}.local"
+            owner: root
+            group: root
+            mode: "0644"
+          loop: "{{ fail2ban_dropins }}"
+          loop_control:
+            loop_var: fail2ban_dropin
+            label: "{{ '%02d' | format(fail2ban_dropin.priority | int) }}-{{ fail2ban_dropin.name }}.local"
+          register: fail2ban_dropin_files
+
+        - name: nftables.service hook (restart fail2ban after every ruleset load)
+          ansible.builtin.template:
+            src: nftables-hook.conf.j2
+            dest: /etc/systemd/system/nftables.service.d/50-fail2ban-contract.conf
+            owner: root
+            group: root
+            mode: "0644"
+          register: fail2ban_nft_hook
+          when: fail2ban_own_base | bool
+
+        - name: Reload systemd units (nftables.service hook)
+          ansible.builtin.systemd:
+            daemon_reload: true
+          when: fail2ban_nft_hook is changed
+
+        # Debian's packages do not enable nftables.service (dh --no-enable
+        # --no-start): installing nftables only adds the nft binary the ban
+        # actions need. The role never enables or starts nftables.service.
+        - name: Install fail2ban
+          ansible.builtin.apt:
+            name: "{{ ['fail2ban', 'python3-systemd'] + (['nftables'] if fail2ban_banaction is match('nftables') else []) }}"
+            state: present
+            install_recommends: false
+          register: fail2ban_installed
+          when: fail2ban_own_base | bool
+
+        - name: Apply changed jails
+          when:
+            - not ansible_check_mode
+            - >-
+              (fail2ban_base_jail is changed) or (fail2ban_base_daemon is changed) or (fail2ban_retired is changed)
+              or (fail2ban_dropin_filters is changed) or (fail2ban_dropin_files is changed)
+              or (fail2ban_installed is changed)
+          block:
+            - name: Check the full configuration (fail2ban-client -t)
+              ansible.builtin.command: fail2ban-client -t
+              register: fail2ban_check
+              changed_when: false
+              failed_when: false
+
+            - name: Rejected configuration - restore previous files and stop
+              when: fail2ban_check.rc != 0
+              block:
+                - name: Restore /etc/fail2ban from the pre-render snapshot
+                  ansible.builtin.shell: rm -rf /etc/fail2ban && tar -C / -xpzf /etc/fail2ban.rollback.tgz
+                  changed_when: true
+                  when: "'install ok installed' in fail2ban_pkg.stdout"
+                - name: Fresh install - stop fail2ban and remove the contract's files
+                  ansible.builtin.shell: |
+                    systemctl stop fail2ban || true
+                    rm -f /etc/fail2ban/jail.local /etc/fail2ban/fail2ban.d/50-fail2ban-contract.local
+                    {% for d in fail2ban_dropins %}
+                    rm -f /etc/fail2ban/jail.d/{{ '%02d' | format(d.priority | int) }}-{{ d.name }}.local /etc/fail2ban/filter.d/{{ d.name }}-*.conf
+                    {% endfor %}
+                  changed_when: true
+                  when: "'install ok installed' not in fail2ban_pkg.stdout"
+                - name: Fail loudly
+                  ansible.builtin.fail:
+                    msg: "fail2ban-client -t rejected the new files (previous files restored; a running fail2ban keeps its old config): {{ fail2ban_check.stdout_lines[-5:] + fail2ban_check.stderr_lines[-5:] }}"
+
+            - name: Enable and restart fail2ban (base changed; bans come back from its database)
+              ansible.builtin.systemd:
+                name: fail2ban
+                enabled: true
+                state: restarted
+              when: fail2ban_own_base | bool
+
+            - name: Reload fail2ban (drop-ins changed)
+              ansible.builtin.systemd:
+                name: fail2ban
+                state: reloaded
+              when: not (fail2ban_own_base | bool)
+
+            - name: fail2ban answers and runs the sshd jail
+              ansible.builtin.command: fail2ban-client status sshd
+              register: fail2ban_status
+              changed_when: false
+              retries: 10
+              delay: 2
+              until: fail2ban_status.rc == 0
+
+        - name: Keep fail2ban enabled and running
+          ansible.builtin.systemd:
+            name: fail2ban
+            enabled: true
+            state: started
+          when:
+            - fail2ban_own_base | bool
+            - not ansible_check_mode
+
+        - name: sshd settings
+          ansible.builtin.include_tasks: sshd.yml
+          when: fail2ban_own_base | bool

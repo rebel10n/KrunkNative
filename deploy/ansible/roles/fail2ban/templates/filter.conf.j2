@@ -1,0 +1,10 @@
+# fail2ban-contract v1 filter {{ item.0.name }}-{{ item.1.name }} (drop-in {{ item.0.name }}).
+# Managed by Ansible: rendered by the vendored fail2ban role (deploy/ansible/roles/fail2ban).
+[Definition]
+failregex = {{ item.1.failregex | default([]) | join('\n            ') }}
+ignoreregex = {{ item.1.ignoreregex | default([]) | join('\n              ') }}
+{% if item.1.journalmatch | default('') %}
+
+[Init]
+journalmatch = {{ item.1.journalmatch }}
+{% endif %}

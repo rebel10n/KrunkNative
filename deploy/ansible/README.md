@@ -7,9 +7,10 @@ Ansible for the KrunkNative central node (`kru`) and the edge game servers.
 | `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), `/opt/krunknative` clone |
 | `edges.yml` | `edges` | host firewall drop-in (game ports), user `kn`, `server_bin` x (vcpus-1, min 1), `<edge>-<n>.krunk.io` DNS |
 | `firewall.yml` | `edges` | only the host firewall (vendored `edge_firewall` role), see [Edge firewall](#edge-firewall) |
+| `fail2ban.yml` | `kru`, `edges` | only fail2ban (vendored `fail2ban` role; base on kru, drop-ins on the edges), see [fail2ban](#fail2ban) |
 | `site.yml` | all | both |
 
-Tags: `user openresty repo release brain web updates bridge rtc gameserver dns firewall`.
+Tags: `user openresty repo release brain web updates bridge rtc gameserver dns firewall fail2ban`.
 
 Client updates (`kn_updates`, doc/backend.md 9.8): `https://assets.krunk.io/updates/` serves
 `/opt/krunknative-updates/public/` (OpenResty `kn.d/updates.conf`): the channel manifest CI's
@@ -252,3 +253,89 @@ both repos in the same change window (abulxt `inventory/group_vars/edge.yml`, Kr
 
 Never let both repos own the base at the same time (they would fight over the `# Owner:`
 line).
+
+## fail2ban
+
+Every host of both repos (the four edges, amph, kru) runs fail2ban under one shared contract,
+**fail2ban-contract v1**, implemented by one role. **`roles/fail2ban` is vendored** exactly like
+`roles/edge_firewall`: byte-identical in abulxt and KrunkNative (`deploy/ansible/roles/fail2ban`),
+re-stamped with `roles/fail2ban/check-vendored.sh --stamp` after an edit, then checked:
+
+```sh
+roles/fail2ban/check-vendored.sh ~/jails/unblocker/src/abulxt/deploy/ansible/roles/fail2ban
+```
+
+Per host exactly one repo owns the base (`fail2ban_own_base: true`): abulxt on the edges and
+amph, KrunkNative on kru. Both repos set the same `fail2ban_*` variables in the same order
+(this repo: `group_vars/all.yml`; kru's ownership, approval gate and sshd settings in `group_vars/central/main.yml`), and keep `fail2ban_ignoreip` identical.
+
+- Base (owner only): `/etc/fail2ban/jail.local` with `[DEFAULT]` ignoreip (127.0.0.1/8, ::1,
+  `fail2ban_ignoreip`, the host's own addresses, optionally GitHub's Actions ranges), backend
+  systemd, ban actions `nftables[type=multiport]` / `nftables[type=allports]`,
+  `bantime.increment` (each repeat ban doubles, capped at `fail2ban_bantime_maxtime` 1w);
+  `[sshd]` (mode normal, port 22, journalmatch for ssh.service / sshd / sshd-session, 5
+  failures in 10m = 1h ban); `[recidive]` (5 bans in 1d = every TCP port for 1w).
+  `fail2ban.d/50-fail2ban-contract.local` (`dbpurgeage` 8d, longer than any ban, so a restart
+  keeps them), the nftables.service hook below, the optional sshd drop-in, the packages
+  (fail2ban, python3-systemd, nftables for the `nft` binary: Debian never enables
+  nftables.service on install and the role never does) and `fail2ban_retire_files`.
+- Drop-ins (every repo): `fail2ban_dropins` entries `{name, priority, source, comment,
+  filters, jails}` render `/etc/fail2ban/jail.d/<priority>-<name>.local` (+
+  `filter.d/<name>-<filter>.conf`). Jails inherit ignoreip, ban action and times from the
+  base and never redefine sshd or recidive. Today neither repo has one: no HTTP jails, because
+  edge clients share school and carrier NAT addresses, and amph's HTTP arrives via Cloudflare
+  and the edges. A non-owner run on a host without fail2ban only prints a note.
+- `fail2ban_sshd_settings` (owner only, `{}` = none): `/etc/ssh/sshd_config.d/10-fail2ban-contract.conf`.
+  sshd keeps the first value it reads, so it beats `sshd_config` and `11-*`..`99-*`, not `00-*`.
+  Edges and kru: `MaxStartups 50:30:200` (scanners filled 10:30:100 and sshd dropped CI's
+  connections) and `LoginGraceTime 30`. amph: none.
+
+**Firewall coexistence.** Bans live in fail2ban's own nftables table `inet f2b-table` (hook
+input, priority -1), which runs before edge_firewall's `inet filter` and iptables-nft (both
+priority 0), whatever those accept. The edge_firewall base starts with `flush ruleset`, which
+drops that table and its bans; the base's `/etc/systemd/system/nftables.service.d/50-fail2ban-contract.conf`
+(`ExecReload=` / `ExecStartPost=` `systemctl --no-block try-restart fail2ban`) restarts fail2ban
+after every load, and fail2ban restores the bans from its database. The edge_firewall rollback
+(`nft -f /etc/nftables.rollback.nft`) puts the table back as snapshotted (it is part of
+`nft list ruleset`; `nft -c` accepts it on nft 0.9.8 and 1.1.3). After any other flush,
+fail2ban's next ban fails `actioncheck`, recreates the table and re-bans. edge_firewall itself
+is unchanged.
+
+**Lockout.** ignoreip covers the admin workstation's egress, amph (the byod watchdog SSHes
+into every edge from 5.188.124.55), kru, meal, the edges, the private ranges and each host's own
+addresses. CI logs in with keys: in mode normal, key logins, pre-auth closes and MaxStartups
+drops never count as failures, so GitHub's runners are not listed.
+`fail2ban_ignoreip_github_actions: true` adds api.github.com/meta "actions" (about 7000
+CIDRs, fetched on the controller with its `GITHUB_TOKEN` if set, since anonymous requests are
+limited to 60/hour; fail2ban restarts whenever GitHub edits the list); turn it on before
+`fail2ban_sshd_mode: aggressive`, which also counts pre-auth closes. recidive blocks every
+TCP port of an address, the web and game ports included. Unban: `fail2ban-client unban <ip>`.
+
+Safe apply, only when a rendered file changed: `/etc/fail2ban` is tarred to
+`/etc/fail2ban.rollback.tgz` before rendering; `fail2ban-client -t` (on failure the files are
+restored, a running fail2ban keeps its config, the play fails); then the owner restarts
+fail2ban (a non-owner reloads it) and `fail2ban-client status sshd` must answer. The sshd
+drop-in: `sshd -t`, a transient `fail2ban-sshd-rollback.timer` (120 s) that restores the
+previous file, `systemctl reload ssh` (open sessions stay), a fresh SSH login, disarm.
+
+One fail2ban command per repo (from `deploy/ansible`; add `--check --diff` first, and
+`--limit <host>` to go one host at a time):
+
+| repo | command |
+| --- | --- |
+| abulxt | `ansible-playbook playbooks/fail2ban.yml --vault-password-file <file>` |
+| KrunkNative | `ansible-playbook fail2ban.yml` |
+
+Handover of a host's base works like the firewall's (above): flip `fail2ban_own_base` in both
+repos together, run the new owner first (only `# Owner:` lines change), then the old owner
+(no change).
+
+This repo: on the edges the role only adds drop-ins (none today), so `edges.yml` and the
+Deploy edges workflow (tag `fail2ban`) change nothing there. On kru it owns the base but stays
+off (`fail2ban_manage: false` in `group_vars/central/main.yml`) until the user approves it,
+because Deploy kru runs `central.yml` on every push. First apply by hand, then set it true:
+
+```sh
+ansible-playbook fail2ban.yml --limit kru -e fail2ban_manage=true --check --diff
+ansible-playbook fail2ban.yml --limit kru -e fail2ban_manage=true
+```

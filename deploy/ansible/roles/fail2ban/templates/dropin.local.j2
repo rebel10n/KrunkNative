@@ -1,0 +1,13 @@
+# fail2ban-contract v1 drop-in: {{ fail2ban_dropin.name }}{{ (' (inputs: ' ~ fail2ban_dropin.source ~ ')') if fail2ban_dropin.source | default('') else '' }}.
+# Managed by Ansible: rendered by the vendored fail2ban role (deploy/ansible/roles/fail2ban).
+# ignoreip, banaction and the ban times come from the base (jail.local).
+{% for fail2ban_line in fail2ban_dropin.comment | default([]) %}
+# {{ fail2ban_line }}
+{% endfor %}
+{% for fail2ban_jail, fail2ban_opts in (fail2ban_dropin.jails | default({})).items() %}
+
+[{{ fail2ban_jail }}]
+{% for fail2ban_key, fail2ban_value in fail2ban_opts.items() %}
+{{ fail2ban_key }} = {{ (fail2ban_value | string | lower) if fail2ban_value is boolean else fail2ban_value }}
+{% endfor %}
+{% endfor %}

@@ -1,0 +1,111 @@
+---
+# fail2ban-contract v1: base owner's sshd drop-in (vendored role, see ../VERSION).
+# Input: fail2ban_sshd_settings ({} = no file). sshd keeps the FIRST value it
+# reads and Debian's sshd_config includes sshd_config.d/*.conf at its top, in
+# name order: 10-fail2ban-contract.conf beats the main file and 11-..99-*, not 00-*.
+# Note: the include's `when` is inherited by the meta task below; Ansible
+# ignores it there (warning only).
+#
+#   1. save the current drop-in, render the new one, `sshd -t` the whole config.
+#   2. arm a transient timer that restores the saved drop-in and reloads sshd.
+#   3. reload sshd (open sessions stay), log in again on a fresh connection.
+#   4. disarm the timer. If step 3 fails the play fails and the timer rolls back.
+
+- name: Save the current sshd drop-in for rollback
+  ansible.builtin.shell: |
+    rm -f /etc/ssh/fail2ban-contract.rollback
+    if [ -f /etc/ssh/sshd_config.d/10-fail2ban-contract.conf ]; then
+      cp -p /etc/ssh/sshd_config.d/10-fail2ban-contract.conf /etc/ssh/fail2ban-contract.rollback
+    fi
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Render sshd drop-in
+  ansible.builtin.template:
+    src: sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-fail2ban-contract.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: fail2ban_sshd_file
+  when: fail2ban_sshd_settings | length > 0
+
+- name: No sshd settings - no drop-in
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/10-fail2ban-contract.conf
+    state: absent
+  register: fail2ban_sshd_absent
+  when: fail2ban_sshd_settings | length == 0
+
+- name: Apply the changed sshd settings safely
+  when:
+    - not ansible_check_mode
+    - (fail2ban_sshd_file is changed) or (fail2ban_sshd_absent is changed)
+  block:
+    - name: Check the full sshd configuration (sshd -t)
+      ansible.builtin.command: /usr/sbin/sshd -t
+      register: fail2ban_sshd_check
+      changed_when: false
+      failed_when: false
+
+    - name: Rejected sshd configuration - restore and stop
+      when: fail2ban_sshd_check.rc != 0
+      block:
+        - name: Restore the previous sshd drop-in
+          ansible.builtin.shell: |
+            if [ -f /etc/ssh/fail2ban-contract.rollback ]; then
+              cp -p /etc/ssh/fail2ban-contract.rollback /etc/ssh/sshd_config.d/10-fail2ban-contract.conf
+            else
+              rm -f /etc/ssh/sshd_config.d/10-fail2ban-contract.conf
+            fi
+          changed_when: true
+        - name: Fail loudly
+          ansible.builtin.fail:
+            msg: "sshd -t rejected the new drop-in (restored, sshd not reloaded): {{ fail2ban_sshd_check.stderr }}"
+
+    # systemd module can't reset-failed or ignore a unit that doesn't exist.
+    - name: Clear any leftover sshd rollback unit  # noqa: command-instead-of-module
+      ansible.builtin.shell: |
+        systemctl stop fail2ban-sshd-rollback.timer fail2ban-sshd-rollback.service 2>/dev/null
+        systemctl reset-failed fail2ban-sshd-rollback.timer fail2ban-sshd-rollback.service 2>/dev/null
+        true
+      changed_when: false
+
+    - name: Arm the sshd rollback timer, seconds = {{ fail2ban_rollback_seconds }}
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - --unit=fail2ban-sshd-rollback
+          - --description=fail2ban-contract sshd rollback (armed by Ansible)
+          - "--on-active={{ fail2ban_rollback_seconds }}"
+          - /bin/sh
+          - -c
+          - >-
+            if [ -f /etc/ssh/fail2ban-contract.rollback ]; then
+            cp -p /etc/ssh/fail2ban-contract.rollback /etc/ssh/sshd_config.d/10-fail2ban-contract.conf;
+            else rm -f /etc/ssh/sshd_config.d/10-fail2ban-contract.conf; fi; systemctl reload ssh
+      changed_when: true
+
+    - name: Reload sshd (open sessions stay)
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+
+    - name: Drop the multiplexed SSH connection
+      ansible.builtin.meta: reset_connection
+
+    - name: Log in again on a fresh SSH connection (rollback fires if this fails)
+      ansible.builtin.wait_for_connection:
+        delay: 2
+        timeout: "{{ (fail2ban_rollback_seconds | int) - 45 }}"
+
+    - name: Disarm the sshd rollback timer
+      ansible.builtin.shell: |
+        set -e
+        if ! systemctl is-active --quiet fail2ban-sshd-rollback.timer; then
+          echo "rollback timer is gone: it already fired (or never armed); the old sshd drop-in is back" >&2
+          exit 1
+        fi
+        systemctl stop fail2ban-sshd-rollback.timer
+        systemctl reset-failed fail2ban-sshd-rollback.timer fail2ban-sshd-rollback.service 2>/dev/null || true
+      changed_when: true

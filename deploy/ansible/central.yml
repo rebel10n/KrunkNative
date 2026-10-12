@@ -2,6 +2,8 @@
   hosts: central
   become: false
   roles:
+    # fail2ban-contract v1 (README "fail2ban"): kru's base is ours; off until fail2ban_manage.
+    - { role: fail2ban, tags: [fail2ban] }
     - { role: kn_user, tags: [user] }
     - { role: openresty, tags: [openresty] }
     - { role: kn_repo, tags: [repo] }

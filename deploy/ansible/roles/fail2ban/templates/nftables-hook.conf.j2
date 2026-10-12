@@ -1,0 +1,10 @@
+# fail2ban-contract v1 -- Owner: {{ fail2ban_owner }}. Managed by Ansible
+# (vendored fail2ban role, deploy/ansible/roles/fail2ban).
+# /etc/nftables.conf starts with `flush ruleset`, which also drops fail2ban's
+# table inet f2b-table and every ban in it. Restart fail2ban after each load so
+# it recreates the table and restores the bans from its database. try-restart
+# does nothing while fail2ban is stopped (at boot it starts After=nftables).
+# Never enables nftables.service.
+[Service]
+ExecStartPost=-/bin/systemctl --no-block try-restart fail2ban.service
+ExecReload=-/bin/systemctl --no-block try-restart fail2ban.service

@@ -30,3 +30,61 @@ kn_web_origins:
   - "https://www.{{ kn_domain }}"
   - "https://krunknative.pages.dev"
   - "https://krunker.party"
+
+# --- fail2ban: vendored fail2ban role (fail2ban-contract v1) ---
+# README.md "fail2ban". The same variables, in the same order, are set in
+# abulxt (deploy/ansible/inventory/group_vars/abulxt.yml) and KrunkNative
+# (deploy/ansible/group_vars/all.yml); per-group overrides follow them there
+# (group_vars/central/main.yml: kru's base is ours).
+fail2ban_manage: true
+# Base (jail.local, sshd + recidive, ignoreip, ban actions): exactly one repo
+# sets true per host. abulxt owns it on the edges (and amph); KrunkNative on kru.
+fail2ban_own_base: false
+fail2ban_owner: "krunknative (inputs: deploy/ansible group_vars/all.yml, group_vars/central/main.yml)"
+# Never banned, on every host of both repos (plus 127.0.0.1/8, ::1 and each
+# host's own addresses). Keep in sync with abulxt group_vars/abulxt.yml.
+fail2ban_ignoreip:
+  # amph, abulxt origin (eth0, ens19): the byod watchdog SSHes into every edge from .55
+  - 5.188.124.41
+  - 5.188.124.55
+  # kru, KrunkNative central node (CT 120 on meal)
+  - 5.188.124.56
+  # admin workstation egress (seen as the source of the admin's SSH logins)
+  - 5.188.124.57
+  # meal, the Proxmox host
+  - 5.188.124.253
+  # edges' primary addresses (clara, angeles, chitown, ashburn)
+  - 92.38.149.24
+  - 92.223.30.23
+  - 2.56.222.45
+  - 45.82.161.87
+  # private ranges: meal's LAN 172.16.5.0/24 (kru, amph ens20), docker bridges
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+fail2ban_ignoreip_self: true
+# CI (GitHub-hosted runners) logs in with keys: key logins and pre-auth closes
+# never count in the sshd jail's normal mode, so the runners stay unlisted.
+# true adds api.github.com/meta "actions" (thousands of CIDRs; fail2ban
+# restarts whenever GitHub changes the list). Needed if the mode goes aggressive.
+fail2ban_ignoreip_github_actions: false
+fail2ban_banaction: "nftables[type=multiport]"
+fail2ban_banaction_allports: "nftables[type=allports]"
+fail2ban_sshd_port: 22
+fail2ban_sshd_mode: normal
+fail2ban_sshd_maxretry: 5
+fail2ban_sshd_findtime: 10m
+fail2ban_sshd_bantime: 1h
+fail2ban_bantime_increment: true
+fail2ban_bantime_maxtime: 1w
+fail2ban_recidive_maxretry: 5
+fail2ban_recidive_findtime: 1d
+fail2ban_recidive_bantime: 1w
+fail2ban_dbpurgeage: 8d
+# sshd daemon settings: kru only (group_vars/central/main.yml).
+fail2ban_sshd_settings: {}
+fail2ban_rollback_seconds: 120
+# This repo's jails beyond sshd + recidive: none yet (server_bin and kn_brain log
+# no auth failures fail2ban could key on). On the edges this repo only ever adds
+# drop-ins; with none, edges.yml's fail2ban role changes nothing there.
+fail2ban_dropins: []

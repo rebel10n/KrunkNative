@@ -1,0 +1,7 @@
+# fail2ban-contract v1 -- sshd settings. Owner: {{ fail2ban_owner }}.
+# Managed by Ansible (vendored fail2ban role); local edits are overwritten.
+# sshd keeps the first value it reads: this file beats sshd_config and
+# sshd_config.d/11-*..99-*, not 00-*.
+{% for fail2ban_sshd_key, fail2ban_sshd_value in fail2ban_sshd_settings.items() %}
+{{ fail2ban_sshd_key }} {{ fail2ban_sshd_value }}
+{% endfor %}

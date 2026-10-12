@@ -1,0 +1,45 @@
+# fail2ban-contract v1 -- base jails, read after jail.conf and jail.d/*.conf.
+# Owner: {{ fail2ban_owner }}. Managed by Ansible; local edits are overwritten.
+#
+# Rendered by the vendored fail2ban role, shipped byte-identical in abulxt and
+# KrunkNative at deploy/ansible/roles/fail2ban (VERSION and check-vendored.sh
+# there). Exactly ONE repo renders this base (fail2ban_own_base). Every repo,
+# base owner included, adds jails in its own drop-in,
+# /etc/fail2ban/jail.d/<priority>-<name>.local (sshd and recidive stay here).
+#
+# Bans go to fail2ban's own nftables table inet f2b-table (hook input,
+# priority -1): it runs before any filter chain at priority 0 (edge_firewall's
+# inet filter, iptables-nft), whatever that chain accepts. A `flush ruleset`
+# (edge_firewall reload or rollback, nftables restart) empties it; the
+# nftables.service drop-in 50-fail2ban-contract.conf then restarts fail2ban,
+# which recreates the table and restores the bans from its database.
+
+[DEFAULT]
+ignoreip = {{ fail2ban_ignoreip_effective | join('\n           ') }}
+ignoreself = true
+backend = systemd
+banaction = {{ fail2ban_banaction }}
+banaction_allports = {{ fail2ban_banaction_allports }}
+bantime.increment = {{ 'true' if fail2ban_bantime_increment | bool else 'false' }}
+bantime.maxtime = {{ fail2ban_bantime_maxtime }}
+
+[sshd]
+enabled = true
+mode = {{ fail2ban_sshd_mode }}
+port = {{ fail2ban_sshd_port }}
+backend = systemd
+# Debian's unit is ssh.service; OpenSSH >= 9.8 logs auth from sshd-session.
+journalmatch = _SYSTEMD_UNIT=ssh.service + _SYSTEMD_UNIT=sshd.service + _COMM=sshd + _COMM=sshd-session
+maxretry = {{ fail2ban_sshd_maxretry }}
+findtime = {{ fail2ban_sshd_findtime }}
+bantime = {{ fail2ban_sshd_bantime }}
+
+[recidive]
+enabled = true
+# Reads fail2ban's own log file, not the journal.
+backend = auto
+logpath = /var/log/fail2ban.log
+banaction = %(banaction_allports)s
+maxretry = {{ fail2ban_recidive_maxretry }}
+findtime = {{ fail2ban_recidive_findtime }}
+bantime = {{ fail2ban_recidive_bantime }}
