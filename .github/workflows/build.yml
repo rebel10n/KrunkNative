@@ -1,11 +1,22 @@
 name: Build
 
+# Pushes to slop/main also publish the native clients to the rolling prerelease
+# `client-latest` (job client-latest); the dedicated servers are release.yml's.
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, slop]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, slop]
   workflow_dispatch:
+
+# One running + one pending run per branch (superseded pushes are skipped, a running build is
+# not cancelled: agents push faster than a build takes); PR runs cancel their predecessor.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 env:
   # Emscripten release used by the `web` job (matches the local toolchain).
@@ -13,8 +24,32 @@ env:
   EM_CACHE_FOLDER: emsdk-cache
 
 jobs:
+  # Build version for kn_version.h (tools/release/version-meta.sh): git describe needs the
+  # history and tags, the build jobs check out shallow and get it as -DKRUNKNATIVE_VERSION_*.
+  meta:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
+      describe: ${{ steps.meta.outputs.describe }}
+      commit: ${{ steps.meta.outputs.commit }}
+      commit12: ${{ steps.meta.outputs.commit12 }}
+      commit_time: ${{ steps.meta.outputs.commit_time }}
+      build_time: ${{ steps.meta.outputs.build_time }}
+      protocol: ${{ steps.meta.outputs.protocol }}
+      kn_build: ${{ steps.meta.outputs.kn_build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version metadata
+        id: meta
+        run: tools/release/version-meta.sh "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
   linux:
     name: Linux (GCC)
+    needs: meta
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -45,7 +80,7 @@ jobs:
 
       # The in-house HTML/CSS engine is part of the default build (HTML_ENGINE=ON).
       - name: Build (Release)
-        run: make release
+        run: make release CMAKE_FLAGS="${{ needs.meta.outputs.cmake_flags }}"
 
       # CI has only the tracked files: the game content under assets/*/* is gitignored
       # (only maps/, img/ and shaders/ are tracked), so nothing here may start client_bin
@@ -76,6 +111,7 @@ jobs:
 
   windows:
     name: Windows (MinGW-w64)
+    needs: meta
     runs-on: windows-latest
     defaults:
       run:
@@ -99,7 +135,7 @@ jobs:
 
       # The HTML engine is pure C (Lexbor + FreeType), so MinGW builds it too.
       - name: Build (Release)
-        run: make release
+        run: make release CMAKE_FLAGS="${{ needs.meta.outputs.cmake_flags }}"
 
       - name: Run tests
         run: ./cmake-build-release/proc_input_test.exe
@@ -182,6 +218,7 @@ jobs:
   # skipped, with a warning, when there is none for their arch. The `desktop` entry keeps
   # Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
   macos:
+    needs: meta
     name: macOS (Clang, ${{ matrix.gl == 'angle' && 'ANGLE/Metal' || 'desktop GL 4.1' }}, ${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -242,7 +279,7 @@ jobs:
 
       - name: Build (Release)
         if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
-        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }}"
+        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }} ${{ needs.meta.outputs.cmake_flags }}"
 
       - name: Run tests
         if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
@@ -467,14 +504,16 @@ jobs:
           path: platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkNative.app
           if-no-files-found: error
 
-  net-bridge:
-    name: net-bridge (typecheck)
+  # `make check`: the debug build, every test of `make test`, `make lint` (actionlint +
+  # shellcheck on the workflows, CMakePresets.json, ui/js) and the net-bridge typecheck. Plus
+  # shellcheck of the CI/deploy scripts.
+  check:
+    name: make check (tests, lint, net-bridge typecheck)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: net-bridge
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: actions/setup-node@v7
         with:
@@ -482,5 +521,112 @@ jobs:
           cache: npm
           cache-dependency-path: net-bridge/package-lock.json
 
-      - run: npm ci
-      - run: npm run typecheck
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config shellcheck \
+            libwayland-dev wayland-protocols libx11-dev libxcursor-dev libxinerama-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev \
+            libxcb-present-dev libegl-dev
+          # pinned; `make lint` runs it (it skips without one) and it runs shellcheck on run: blocks
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: net-bridge dependencies
+        working-directory: net-bridge
+        run: npm ci
+
+      - name: make check
+        run: make check
+
+      - name: shellcheck (CI and deploy scripts)
+        run: shellcheck tools/release/*.sh tools/angle/*.sh deploy/ansible/build.sh
+
+  # Rolling prerelease `client-latest`: the linux/windows/macos artifacts above (binaries +
+  # ui/, no game content: assets/ is not in git) zipped per platform, on pushes to slop/main
+  # and dispatches. Same rules as server-latest (tools/release/publish.sh): never "Latest",
+  # only moves forward.
+  client-latest:
+    name: Publish client-latest
+    needs: [meta, linux, windows, macos]
+    if: >-
+      !cancelled() && needs.linux.result == 'success' && needs.windows.result == 'success' &&
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/slop' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create/upload, moving the client-latest tag
+    concurrency:
+      group: publish-client-latest
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT: ${{ needs.meta.outputs.commit }}
+      COMMIT12: ${{ needs.meta.outputs.commit12 }}
+      COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
+      BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+      DESCRIBE: ${{ needs.meta.outputs.describe }}
+      PROTOCOL: ${{ needs.meta.outputs.protocol }}
+      KN_BUILD: ${{ needs.meta.outputs.kn_build }}
+      BRANCH: ${{ github.ref_name }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: KrunkNative-{linux,windows,macos}-*
+          path: client-artifacts
+
+      # upload-artifact drops the executable bits: restore them before zipping
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p client-pkg
+          base="https://github.com/$GH_REPO/releases/download/client-latest"
+          rows=""
+          for dir in client-artifacts/KrunkNative-*; do
+            [ -d "$dir" ] || continue
+            plat="$(basename "$dir" | sed 's/^KrunkNative-//; s/-mingw$//')"
+            name="krunknative-client-$plat"
+            find "$dir" -maxdepth 1 -type f \( -name client_bin -o -name server_bin \) -exec chmod 0755 {} +
+            {
+              echo "KrunkNative client ($plat), $DESCRIBE"
+              echo "Commit $COMMIT, built $BUILD_TIME, protocol $PROTOCOL"
+              echo
+              echo "Binaries and the ui/ menu only. The game content (assets/: models, textures,"
+              echo "sounds, fonts) is not in git or CI: put this next to an assets/ directory, e.g."
+              echo "the one from the v1.0.0 package (https://github.com/$GH_REPO/releases/tag/v1.0.0)."
+            } > "$dir/README.txt"
+            (cd "$dir" && zip -qr9 "$GITHUB_WORKSPACE/client-pkg/$name.zip" .)
+            (cd client-pkg && sha256sum "$name.zip" > "$name.zip.sha256")
+            rows+="| $plat | [$name.zip]($base/$name.zip) | [sha256]($base/$name.zip.sha256) |"$'\n'
+          done
+          ls -la client-pkg
+          {
+            echo "Rolling build of the KrunkNative native client, replaced on every push to \`slop\`/\`main\`. Binaries and \`ui/\` only: the game content (\`assets/\`) comes from the [v1.0.0](https://github.com/$GH_REPO/releases/tag/v1.0.0) package."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | [\`$COMMIT12\`](https://github.com/$GH_REPO/commit/$COMMIT) ($BRANCH) |"
+            echo "| Version | \`$DESCRIBE\` |"
+            echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
+            echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
+            echo
+            echo "| Platform | Package | Checksum |"
+            echo "|---|---|---|"
+            printf '%s' "$rows"
+            echo
+            echo "<!-- kn-build $KN_BUILD -->"
+          } > notes.md
+          cat notes.md
+
+      - name: Publish
+        run: tools/release/publish.sh client-latest "Native client (latest build)" notes.md client-pkg/*
