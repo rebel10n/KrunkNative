@@ -22,7 +22,7 @@
 #include <app_mode.h> // app_route_url_target (openSales)
 #include <render_settings.h>
 #include "../viewer/viewer_store.h"
-#include <sprays.h> // SPRAYS_BASE_COUNT
+#include <sprays.h> // SPRAYS_BASE_COUNT, social_v7.h (store spray indices)
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -453,21 +453,41 @@ static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
     return out;
 }
 
-// ent[1]: selectedSprayIndex; Random (-2) is UTILS.randInt(0, Game.sprays.length - 1) per ENT.
-// Game.sprays are everyone's; a type-4 store spray only while it is owned (offline: all are),
-// anything else is the default spray 0 (addSpray's Game.sprays[0] fallback).
+// ent[1]: selectedSprayIndex as a v7.1.4 store index (players.spray falls back to 2482 for
+// anything that is not a SPRAY item). KrunkNative's default sprays (v3.1.1's Game.sprays, picks
+// 0..52) are the free store items 2482 + i; Random (-2) is one of them per ENT. A type-4 store
+// spray only while it is owned (offline: all are), anything else is the default 2482.
 int ui_loadout_spray(void) {
     const int pick = sel(SEL_SPRAY);
-    if (pick == -2) return rand() % SPRAYS_BASE_COUNT;
-    if (pick >= 0 && pick < SPRAYS_BASE_COUNT) return pick;
+    if (pick == -2) return store_spray_from_legacy(rand() % SPRAYS_BASE_COUNT);
+    if (pick >= 0 && pick < SPRAYS_BASE_COUNT) return store_spray_from_legacy(pick);
     const ViewerSkin *skin = store_skin(pick);
-    if (!skin || skin->type != 4) return 0;
+    if (!skin || skin->type != 4) return SPRAY_DEFAULT_INDEX;
     if (all_skins_unlocked()) return pick;
     int n = 0, owned = 0;
     OwnedSkin *skins = owned_skins(&n, 0);
     for (int i = 0; i < n && !owned; i++) owned = skins[i].ind == pick;
     free(skins);
-    return owned ? pick : 0;
+    return owned ? pick : SPRAY_DEFAULT_INDEX;
+}
+
+// updateSprayWheel: the owned SPRAY items other than the equipped one (acc.skins order; v7 puts the
+// favourites first, KrunkNative keeps no favourites), at most SPRAY_WHEEL_MAX, then the equipped
+// spray (sprayIndex <= 0 -> 2482). Returns the count written to `out` (<= max).
+int ui_loadout_spray_wheel(int *out, const int max) {
+    if (!out || max <= 0) return 0;
+    const int pick = sel(SEL_SPRAY);
+    const int equipped = pick >= 0 ? store_spray_from_legacy(pick) : SPRAY_DEFAULT_INDEX;
+    int count = 0, n = 0;
+    OwnedSkin *skins = owned_skins(&n, 0);
+    for (int i = 0; i < n && count < SPRAY_WHEEL_MAX && count < max - 1; i++) {
+        const ViewerSkin *skin = store_skin(skins[i].ind);
+        if (skin && skin->type == 4 && skins[i].ind != equipped) out[count++] = skins[i].ind;
+    }
+    free(skins);
+    const ViewerSkin *eq = store_skin(equipped);
+    out[count++] = eq && eq->type == 4 ? equipped : SPRAY_DEFAULT_INDEX;
+    return count;
 }
 
 // getRandomOwnedSkin(weapon, type): a random owned weapon skin of `weapon` (1-based, type < 0) or item

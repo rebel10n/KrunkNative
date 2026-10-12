@@ -51,6 +51,8 @@ void hud_ui_hit(Client*, int kill);
 #include <hud_gui.h> // map-G: the map's custom GUI (hud_gui.c)
 #include <lobby_ui.h> // WP-E: the end screen's match vote cards (net/lobby_events.c)
 #include <badges.h>   // WP-E: v7 badges on the boards
+#include <hud_social.h> // WP-E part 2b: mute lists, chat channels
+#include <voice_chat.h> // voice_is_speaking: the player list speaker icon
 #include <cJSON.h>
 #include <limits.h>
 #include <ctype.h>
@@ -726,10 +728,14 @@ static char *hud_plist_rows(void) {
         sb_append(&sb, "'>");
         sb_append_esc(&sb, name);
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : NULL);
-        sb_append(&sb, "</a></td><td class='pListActions'>");
-        if (info && info->account_id > 0) { // level >= 1: an account
-            sb_appendf(&sb, "<span title='Chat mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 0)'>chat</span>", p->uid);
-            sb_appendf(&sb, "<span title='Voice mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 1)'>record_voice_over</span>", p->uid);
+        sb_append(&sb, "</a>");
+        if (voice_is_speaking(p->name)) sb_append(&sb, "<span class='pListVoice material-icons'>volume_up</span>"); // voiceChatQueues[alias]
+        sb_append(&sb, "</td><td class='pListActions'>");
+        if (info && info->account_id > 0) { // level >= 1: an account; the buttons show mutedChat/VoiceAccountIds
+            sb_appendf(&sb, "<span title='Chat mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 0)'>%s</span>",
+                       p->uid, social_chat_muted(info->account_id) ? "speaker_notes_off" : "chat");
+            sb_appendf(&sb, "<span title='Voice mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 1)'>%s</span>",
+                       p->uid, social_voice_muted(info->account_id) ? "voice_over_off" : "record_voice_over");
         }
         sb_append(&sb, "</td></tr>");
     }
@@ -1789,16 +1795,20 @@ static void hud_chat_row_channel(const HtmlElem row, const int channel) {
     html_dom_set_display(row, channel == g_chat_channel || channel == -1 ? "" : "none");
 }
 
-// The channel of an incoming player line: io_addChat forces -1 outside team modes. KrunkNative's
-// chat packet has no channel yet, so team-mode lines are global (0).
-static int hud_chat_line_channel(const Client *client, const int player_line) {
-    const int teams = client && client->game.mode && client->game.mode->config.teams;
-    return teams && player_line ? 0 : -1;
+static int hud_chat_teams(const Client *client) {
+    return client && client->game.mode && client->game.mode->config.teams;
 }
 
-// f2018: appends one #chatMsg_N row (see hud_chat_row_html for the three kinds); the oldest
-// rows go first beyond config.chatListLength.
-static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
+// The channel of an incoming player line: io_addChat forces -1 outside team modes. The v3 chat
+// packet (older servers) has no channel, so its team-mode lines are global (0); v7 servers send
+// NET_PACKET_CHAT_V7 with the channel (hud_ui_add_chat_channel).
+static int hud_chat_line_channel(const Client *client, const int player_line) {
+    return hud_chat_teams(client) && player_line ? 0 : -1;
+}
+
+// f2018: appends one #chatMsg_N row (see hud_chat_row_html for the three kinds) on `channel`;
+// the oldest rows go first beyond config.chatListLength.
+static void hud_add_chat_row_on(const char *name, const char *msg, const char *color, const int channel) {
     const HtmlElem list = html_dom_by_id("chatList");
     if (!list || !msg || !msg[0]) return;
 
@@ -1808,10 +1818,37 @@ static void hud_add_chat_row(const char *name, const char *msg, const char *colo
     hud_chat_row_html(name, msg, color, html, sizeof(html));
 
     const HtmlElem row = html_dom_create("div", id);
-    hud_chat_row_channel(row, hud_chat_line_channel(menu_ui()->client, name && name[0]));
+    hud_chat_row_channel(row, channel);
     html_dom_set_html(row, html);
     html_dom_append(list, row);
     html_dom_scroll_to_bottom(list);
+}
+
+static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
+    hud_add_chat_row_on(name, msg, color, hud_chat_line_channel(menu_ui()->client, name && name[0]));
+}
+
+// io_addChat(channel, ...) of a v7 "ch": the channel is forced to -1 outside team modes.
+void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, const int channel) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    hud_add_chat_row_on(name, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1);
+}
+
+// index.js (per menu update): the team channel switches back to global when the mode has no teams
+// (switchChat(chatSwitch) without its chat line). v7 also forces the team channel in competitive
+// games (Game.isComp), which KrunkNative's ranked modes do not use.
+static void hud_chat_channel_check(const Client *client) {
+    if (g_chat_channel != CHAT_CHANNEL_TEAM || hud_chat_teams(client)) return;
+    g_chat_channel = CHAT_CHANNEL_GLOBAL;
+    const HtmlElem sw = html_dom_by_id("chatSwitch");
+    if (sw) html_dom_set_attr(sw, "data-tab", "public");
+    const HtmlElem list = html_dom_by_id("chatList");
+    for (HtmlElem row = list ? html_dom_first_child(list) : 0; row; row = html_dom_next(row)) {
+        char ch[8] = "";
+        html_dom_get_attr(row, "data-tab", ch, sizeof(ch));
+        const int c = atoi(ch);
+        html_dom_set_display(row, c == g_chat_channel || c == -1 ? "" : "none");
+    }
 }
 
 // window.switchChat(#chatSwitch): toggles the text & voice channel (team modes only; forced
@@ -3331,6 +3368,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     alive_was = alive;
     hud_apply_visibility(client, in_game, in_game && !html_ui_is_menu_open());
     hud_v7modes_tick(client, in_game, g_hud_layout_epoch); // rounds, KR tags, big head, speed run (hud_v7modes.c)
+    social_prop_hud_tick(client, in_game && g_hud_ui.visible > 0, g_hud_layout_epoch); // WP-E: prop controls + taunt keys (hud_social.c)
     hud_gui_update(client); // map-G: the map's custom "gui" elements in #customGUIHolder (hud_gui.c)
     ui_notify_tick(now * 1000.0); // v3.1.1 mod notify.ts toast (ui_notify.c)
 
@@ -3474,6 +3512,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     if (scoreboard_changed) hud_render_scoreboard(ui->extra.scoreboard, board_html);
     if (cross_changed) hud_render_crosshair(&ui->extra, ui->reloading || ui->inspecting);
     hud_seed_chat(client);
+    hud_chat_channel_check(client);
 
     // TODO: call hud_ui_add_killfeed() when the game exposes kill events (player_kill()
     // only deactivates the victim today) and hud_ui_hit() when hitscan damage lands
@@ -3498,17 +3537,16 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         free(rows);
         return 1;
     }
-    if (!strcmp(name, "muteUser")) { // muteUser(this, id, 0 chat / 1 voice): the button flips
-        // KrunkNative keeps no per-account mute list yet (chat / voice packets carry no account
-        // id): only the icon follows, like v7's speaker_notes_off / voice_over_off.
+    if (!strcmp(name, "muteUser")) { // muteUser(this, id, 0 chat / 1 voice): player.accid in or out of the mute list
         const int voice = argc > 2 && args[2].kind == HTML_ARG_NUM && args[2].num != 0.0;
         const HtmlElem btn = argc > 0 && args[0].kind == HTML_ARG_THIS ? (HtmlElem) args[0].num : ev ? ev->target : 0;
-        if (btn) {
-            char text[32] = "";
-            html_dom_get_text(btn, text, sizeof(text));
-            const int muted = voice ? !strcmp(text, "voice_over_off") : !strcmp(text, "speaker_notes_off");
-            html_dom_set_text(btn, voice ? (muted ? "record_voice_over" : "voice_over_off") : (muted ? "chat" : "speaker_notes_off"));
-        }
+        int uid = -1;
+        if (argc > 1 && args[1].kind == HTML_ARG_NUM) uid = (int) args[1].num;
+        else if (argc > 1 && args[1].kind == HTML_ARG_STR && args[1].str) uid = atoi(args[1].str);
+        const NetPlayerInfoPacket *info = uid >= 0 ? player_accounts_get(uid) : NULL;
+        if (!info || info->account_id <= 0) return 1; // Game.players.findById(id).accid
+        const int muted = social_toggle_mute(info->account_id, voice);
+        if (btn) html_dom_set_text(btn, voice ? (muted ? "voice_over_off" : "record_voice_over") : (muted ? "speaker_notes_off" : "chat"));
         return 1;
     }
     if (!strcmp(name, "clearFocus")) return 1; // spectator focus: not in KrunkNative's spectate.c yet

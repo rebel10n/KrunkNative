@@ -1101,6 +1101,8 @@ typedef struct Player_t {
     float last_interact;          // players.interact: game.now of the last "int" (config.interactTimer)
     int spray_index;              // player.sprayIndex (ENT ent[1]): sprays.js index or a type-4 store.skins index
     float last_spray;             // players.spray: game.now of the last spray (config.sprayTimer)
+    int sprays_placed;            // WP-E: spraysPlaced, the next "<sid>_<n>" slot (cycles at game_spray_limit)
+    float taunt_ready_at;         // WP-E: lastTaunt (game.now + taunt tm), 0 = never taunted (players.taunt)
 
     float *ramp_fix;
 
@@ -1697,6 +1699,7 @@ typedef struct Game_t {
     unsigned char move_lock:1;
     unsigned char is_local:1;
     unsigned char ready:1;
+    unsigned char is_sandbox:1;   // WP-E: v7 game.isSandbox (the offline sandbox server, server/src/sandbox.c): spray wheel, maxSpraysF
 
     float end_timer;              // seconds of end screen left (> 0 = round over)
 
@@ -1785,7 +1788,9 @@ void game_player_interact_v7(Game*, Player*, int type, int uid, int secondary);
 void game_player_confirm_interact(Game*, Player*, int kind); // "cnfm": kind 0 trigger (pendingTrigger), 2 prize wheel
 void game_player_drop_weapon(Game*, Player*);  // "drpw": players.dropWeapon(player) of the weapon in hand
 void game_player_drop_all(Game*, Player*);     // dropWeapon(player, true): at a death / leave, picked weapons go back to their pickups
-void game_player_spray(Game*, Player*); // players.spray: NET_PACKET_SPRAY + the "spray" sound when the view ray hits a wide enough face
+void game_player_spray(Game*, Player*); // players.spray: NET_PACKET_SPRAY_V7 / NET_PACKET_SPRAY + the "spray" sound when the view ray hits a wide enough face
+// WP-E "spry"[, index] (shared/include/social_v7.h): game_spray_pick(wheel_index, owned), then players.spray
+void game_player_spray_pick(Game*, Player*, int wheel_index, int owned);
 // players.js changeInteract types (the #interactMsg line and lastInteractData.type).
 typedef enum {
     GAME_INTERACT_NONE = -1,

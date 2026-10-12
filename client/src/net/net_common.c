@@ -8,6 +8,7 @@
 
 #include <client.h>
 #include <ai.h>
+#include <social_v7.h> // WP-E part 2b packets
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -507,6 +508,44 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             printf("{\"type\":\"spray\",\"id\":%u,\"uid\":%d,\"index\":%d,\"position\":[%g,%g,%g],\"y_rot\":%d,\"x_rot\":%d}",
                    (unsigned int) type, packet.uid, packet.spray_index, packet.position[0], packet.position[1], packet.position[2],
                    packet.y_rot, packet.x_rot);
+            break;
+        }
+        case NET_PACKET_SPRAY_V7: { // v7 "spry" (C->S, 4 bytes) / "sp" (S->C)
+            if (length == sizeof(NetSprayRequestPacket)) {
+                NetSprayRequestPacket request;
+                memcpy(&request, payload, sizeof(request));
+                printf("{\"type\":\"spry\",\"id\":%u,\"index\":%d}", (unsigned int) type, request.index);
+                break;
+            }
+            LOG_READ(NetSprayV7Packet, "spray_v7");
+            printf("{\"type\":\"spray_v7\",\"id\":%u,\"uid\":%d,\"slot\":%u,\"skin\":%d,\"position\":[%g,%g,%g],\"rot\":[%d,%d,%d]}",
+                   (unsigned int) type, packet.uid, (unsigned int) packet.slot, packet.skin, packet.position[0], packet.position[1],
+                   packet.position[2], packet.y_rot, packet.x_rot, packet.z_rot);
+            break;
+        }
+        case NET_PACKET_CHAT_V7: { // v7 "ct" (C->S: channel + text) / "ch" (S->C)
+            if (length == sizeof(NetChatV7Packet)) {
+                NetChatV7Packet packet;
+                memcpy(&packet, payload, sizeof(packet));
+                packet.chat.name[sizeof(packet.chat.name) - 1] = 0;
+                packet.chat.text[sizeof(packet.chat.text) - 1] = 0;
+                printf("{\"type\":\"chat_v7\",\"id\":%u,\"channel\":%d,\"account\":%d,\"uid\":%d,\"name\":\"%s\",\"text\":\"%s\"}", (unsigned int) type,
+                       packet.channel, packet.account_id, packet.chat.uid, packet.chat.name, packet.chat.text);
+                break;
+            }
+            char text[NET_CHAT_TEXT_SIZE] = "";
+            const size_t n = length > 1 ? (length - 1u < sizeof(text) - 1 ? length - 1u : sizeof(text) - 1) : 0;
+            if (n) memcpy(text, (const char *) payload + 1, n);
+            text[n] = 0;
+            printf("{\"type\":\"ct\",\"id\":%u,\"channel\":%u,\"text\":\"%s\"}", (unsigned int) type, length ? (unsigned int) ((const uint8_t *) payload)[0] : 0u, text);
+            break;
+        }
+        case NET_PACKET_SOCIAL_V7: // the server takes the v7 social packets (uint8 version)
+            printf("{\"type\":\"social_v7\",\"id\":%u,\"version\":%u}", (unsigned int) type, length ? (unsigned int) ((const uint8_t *) payload)[0] : 0u);
+            break;
+        case NET_PACKET_TAUNT: {
+            LOG_READ(NetTauntPacket, "taunt");
+            printf("{\"type\":\"taunt\",\"id\":%u,\"index\":%u}", (unsigned int) type, (unsigned int) packet.index);
             break;
         }
         case NET_PACKET_SKINS: {

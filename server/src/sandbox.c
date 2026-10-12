@@ -227,6 +227,7 @@ int sandbox_start(const SandboxConfig *cfg) {
     g_server->game.lag_comp = (unsigned char) !!g_gs_config.lag_comp;
     g_server->game.lag_comp_anchor = (unsigned char) (g_gs_config.lag_comp_anchor & 3);
     g_server->game.lag_comp_scale = g_gs_config.lag_comp_scale;
+    g_server->game.is_sandbox = 1; // v7 game.isSandbox: the spray wheel for everyone, maxSpraysF (shared/src/social_v7.c)
     g_server->next_client_id = 0;
     pthread_mutex_init(&g_server->lock, NULL);
 

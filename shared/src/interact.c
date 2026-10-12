@@ -8,6 +8,7 @@
 // nothing). Gates / banks keep their state in shared/src/triggers.c; pickups keep theirs in the
 // trigger runtime (TriggerRuntime.pickups, reset by trigger_round_reset).
 #include <shared.h>
+#include <social_v7.h>
 #include <modes.h>
 #include "modes/mode_internal.h"
 #include "triggers_internal.h"
@@ -311,16 +312,14 @@ static float round2(const float v) {
     return roundf(v * 100.0f) / 100.0f; // JS v.round(2)
 }
 
-// Krunker v3.1.1 players.spray (src/data/players.js): the view ray (sprayRange long, from the
-// eye) against map.manager.objects; on the nearest hit face the decal (sprayScale wide; no
-// sprays.js / type-4 store entry of v3.1.1 sets sizeReq) is pushed back inside the face, a
-// face too small for it is no spray. config.isComp (the competitive host) has no
-// KrunkNative counterpart. KrunkNative boxes are base-centred (position = bottom centre,
-// scale = full size): Krunker's G.y / G.height are the centre / half height.
-void game_player_spray(Game *game, Player *player) {
-    if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
-    if (game->now - player->last_spray < GAME_SPRAY_TIMER) return;
-
+// Krunker v7.1.4 players.spray / sprayPosition (src/data/players.js:1943-2072; the ray is v3.1.1's):
+// the view ray (sprayRange long, from the eye) against map.manager.objects; on the nearest hit face
+// the decal (sprayScale * sclW wide, * sclH high) is pushed back inside the face, a face too small
+// for it is no spray. Objects with noVis ("v") are skipped, so sprays never land on invisible
+// walls. config.isComp (the competitive host) has no KrunkNative counterpart. KrunkNative boxes
+// are base-centred (position = bottom centre, scale = full size): Krunker's G.y / G.height are
+// the centre / half height. `skin` is the store item game_spray_pick chose.
+static void spray_place(Game *game, Player *player, const int skin) {
     const float yaw = player->direction.y, pitch = player->direction.x;
     const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
     const vec3 dir = {
@@ -340,50 +339,82 @@ void game_player_spray(Game *game, Player *player) {
     }
     if (!hit) return;
 
+    const StoreSpray *item = store_spray(skin);
     const float w = hit->scale.x * 0.5f, h = hit->scale.y * 0.5f, l = hit->scale.z * 0.5f;
     const float cx = hit->position.x, cy = hit->position.y + h, cz = hit->position.z;
     const float range = GAME_SPRAY_RANGE * best - 0.1f;
     float y = eye.y + range * sinf(pitch);
     float x = eye.x + range * sinf(yaw + (float) M_PI) * cosf(pitch);
     float z = eye.z + range * cosf(yaw + (float) M_PI) * cosf(pitch);
-    int x_dr = 0, y_dr = 0; // a0 (rotation.y) / a1 (rotation.x)
-    if (y >= cy + h) y_dr = -90;
-    else if (y <= cy - h) y_dr = 90;
+    int x_dr = 0, y_dr = 0, z_dr = 0; // rotation.y / rotation.x / rotation.z (degrees)
+    const int yaw_90 = (int) floorf(yaw / ((float) M_PI / 2.0f) + 0.5f) * 90; // Math.round(xDire / (PI / 2)) * 90
+    if (y >= cy + h) y_dr = -90, z_dr = yaw_90;
+    else if (y <= cy - h) y_dr = 90, z_dr = -yaw_90;
     else if (x <= cx - w) x_dr = -90;
     else if (x >= cx + w) x_dr = 90;
     else if (z <= cz - l) x_dr = 180;
 
-    const float half = GAME_SPRAY_SCALE / 2.0f;
+    const float half_w = GAME_SPRAY_SCALE * (item ? item->scl_w : 1.0f) / 2.0f; // sprayScale * (sclW || 1) / 2
+    const float half_h = GAME_SPRAY_SCALE * (item ? item->scl_h : 1.0f) / 2.0f;
     if (y_dr) {
-        if (w < half || l < half) return;
-        if (z - half < cz - l) z = cz - l + half;
-        else if (z + half > cz + l) z = cz + l - half;
-        if (x - half < cx - w) x = cx - w + half;
-        else if (x + half > cx + w) x = cx + w - half;
+        if (w < half_w || l < half_h) return;
+        if (z - half_h < cz - l) z = cz - l + half_h;
+        else if (z + half_h > cz + l) z = cz + l - half_h;
+        if (x - half_w < cx - w) x = cx - w + half_w;
+        else if (x + half_w > cx + w) x = cx + w - half_w;
     } else {
-        if (h < half) return;
+        if (h < half_h) return;
         if (x_dr == 90 || x_dr == -90) {
-            if (l < half) return;
-            if (z - half < cz - l) z = cz - l + half;
-            else if (z + half > cz + l) z = cz + l - half;
+            if (l < half_w) return;
+            if (z - half_w < cz - l) z = cz - l + half_w;
+            else if (z + half_w > cz + l) z = cz + l - half_w;
         } else {
-            if (w < half) return;
-            if (x - half < cx - w) x = cx - w + half;
-            else if (x + half > cx + w) x = cx + w - half;
+            if (w < half_w) return;
+            if (x - half_w < cx - w) x = cx - w + half_w;
+            else if (x + half_w > cx + w) x = cx + w - half_w;
         }
-        if (y + half > cy + h) y = cy + h - half;
+        if (y + half_h > cy + h) y = cy + h - half_h;
     }
 
     player->last_spray = game->now;
-    game_play_sound(game, "spray", player->uid, player->position, 0.4f, 0.0f); // playSound(networkSounds "spray", 0.4, sid, .., true)
-    const NetSprayPacket packet = {
+    char sound[32] = "spray"; // "spray" + (spraySnd ? "_" + spraySnd : "")
+    if (item && item->spray_snd) snprintf(sound, sizeof(sound), "spray_%d", item->spray_snd);
+    game_play_sound(game, sound, player->uid, player->position, 0.4f, 0.0f); // playSound(networkSounds, 0.4, sid, .., true)
+
+    const int limit = game_spray_limit(game, player);
+    if (player->sprays_placed >= limit || player->sprays_placed < 0) player->sprays_placed = 0;
+    const int slot = player->sprays_placed++; // "<sid>_<spraysPlaced>"
+    const NetSprayV7Packet v7 = {
         .uid = player->uid,
-        .spray_index = player->spray_index,
+        .slot = (uint16_t) slot,
+        .skin = skin,
         .position = {round2(x), round2(y), round2(z)},
         .y_rot = (int16_t) x_dr,
         .x_rot = (int16_t) y_dr,
+        .z_rot = (int16_t) z_dr,
+        .dye = -1,
     };
-    game_send(game, NET_TARGET_ALL, NET_PACKET_SPRAY, &packet, sizeof(packet)); // IO.broadcast("sp", ...)
+    game_send(game, NET_TARGET_ALL, NET_PACKET_SPRAY_V7, &v7, sizeof(v7)); // broadcast("sp", ...): v7 peers
+    // Older peers keep one decal per player and resolve 0..52 as v3.1.1's Game.sprays (server/src/net.c
+    // gives NET_PACKET_SPRAY only to them).
+    const NetSprayPacket packet = {
+        .uid = player->uid,
+        .spray_index = store_spray_to_legacy(skin),
+        .position = {v7.position[0], v7.position[1], v7.position[2]},
+        .y_rot = (int16_t) x_dr,
+        .x_rot = (int16_t) y_dr,
+    };
+    game_send(game, NET_TARGET_ALL, NET_PACKET_SPRAY, &packet, sizeof(packet));
+}
+
+void game_player_spray(Game *game, Player *player) {
+    game_player_spray_pick(game, player, -1, 0);
+}
+
+void game_player_spray_pick(Game *game, Player *player, const int wheel_index, const int owned) {
+    if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
+    if (game->now - player->last_spray < GAME_SPRAY_TIMER) return;
+    spray_place(game, player, game_spray_pick(game, player, wheel_index, owned));
 }
 
 // ---------------------------------------------------------------- players.interact
@@ -642,6 +673,16 @@ void game_player_drop_all(Game *game, Player *p) {
         pickup_send(game, NET_TARGET_ALL, pickup_uid); // broadcast("inat", -1, null, null, uid, weapon, true, true, pos)
     }
     memset(p->last_picked, 0, sizeof(p->last_picked));
+}
+
+// WP-E "spry"[, index] (v7 server/index.ts handleSpray): like io_int, the queued inputs first so
+// the ray uses the look the player had when it pressed the key; nothing while the end screen shows.
+void game_player_spray_request(Game *game, Player *player, const int wheel_index, const int owned) {
+    if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
+    if (game->end_timer > 0.0f) return;
+    player_drain_inputs(player);
+    if (!player->active) return;
+    game_player_spray_pick(game, player, wheel_index, owned);
 }
 
 // v3-shaped "int" (old clients, tests, bots): 0 spray, 1 interact with the target the server's own

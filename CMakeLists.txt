@@ -478,6 +478,13 @@ else ()
         target_link_libraries(sandbox_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # social_test (player-viewer WP-E part 2b): v7 chat / voice channels, multi-spray, taunts over the sandbox
+    add_executable(social_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/social_test.c)
+    target_link_libraries(social_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(social_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # sandbox_config_test (map-logic WP-E): the offline sandbox plays a map's embedded config, its
     # players count as having an account; GAME_CONFIG / NETWORK_DATA only to protocol-1.3 peers
     add_executable(sandbox_config_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/sandbox_config_test.c)

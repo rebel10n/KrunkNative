@@ -5,8 +5,15 @@
 //   addVoiceStream one Howl per clip in voiceStreamQueues[alias]; plays when loaded, first in
 //                  its queue and its player is known; longer than voiceChatMaxLength * 1.2: gone
 //   remSpeaker     a clip ended: next one in the queue plays
+// v7.1.4 (src/index.js:2221-2358, player-viewer WP-E part 2b) on top: the clip carries the text &
+// voice channel, micVolume and micQuality ("vc", dataUrl, channel, micVolume, micQuality); a
+// received clip plays when its channel is -1 or ours, scaled by the speaker's micVolume, unless
+// its account is in mute_voice or muteSpec drops it; voiceChatType 1 places it at the speaker's
+// head (refDistance voiceDistance * 5, rolloff 1); voiceChatTrigger 0 makes the key a toggle.
 // The protocol / server side is shared/src/voice.c.
 #include <voice_chat.h>
+#include <hud_social.h>      // social_server_v7, mute_voice
+#include <player_accounts.h> // the account id of an older server's speaker (mute_voice)
 #include <streamer.h>
 #include <voice.h>
 #include <audio.h>
@@ -38,6 +45,16 @@
 #define VOICE_CAPTURE_FRAMES (VOICE_SAMPLE_RATE * 2) // ring buffer: 2 s
 #define VOICE_FALLBACK_RATE 8000       // WAV clips without libopus
 #define VOICE_ICON_MS 300.0            // overlay ah: speaker icon frame
+
+// v7.1.4 voice settings (settings.js audio tab; client_apply_setting -> voice_apply_setting)
+static struct {
+    int mic_quality;      // micQuality: MediaRecorder bitsPerSecond
+    float mic_volume;     // micVolume: sent with every clip
+    int chat_type;        // voiceChatType: 0 default, 1 spatial / proximity
+    float distance;       // voiceDistance: (slider || 1) * 5
+    int mute_spec;        // muteSpec
+    int trigger;          // voiceChatTrigger: 0 press (toggle), 1 continuous (hold)
+} g_vset = {VOICE_MIC_QUALITY_DEFAULT, 1.0f, 0, 25.0f, 0, 1};
 
 static int voice_log_enabled(void) {
     static int cached = -1;
@@ -629,7 +646,10 @@ static char *clip_encode(const float *pcm, const size_t samples, size_t *out_len
         int error = 0;
         OpusEncoder *encoder = g_opus.encoder_create(VOICE_SAMPLE_RATE, 1, OPUS_APPLICATION_AUDIO, &error);
         if (!encoder) return NULL;
-        g_opus.encoder_ctl(encoder, OPUS_SET_BITRATE_REQUEST, (int32_t) VOICE_OPUS_BITRATE);
+        // MediaRecorder({bitsPerSecond: micQuality}): Chrome gives the Opus encoder VOICE_OPUS_BITRATE of
+        // v3.1.1's 6000; other qualities scale alike
+        const int32_t bitrate = (int32_t) ((long long) VOICE_OPUS_BITRATE * g_vset.mic_quality / VOICE_BITS_PER_SECOND);
+        g_opus.encoder_ctl(encoder, OPUS_SET_BITRATE_REQUEST, bitrate);
         uint8_t *storage = malloc((size_t) (frames ? frames : 1) * 1276);
         const uint8_t **packets = malloc(sizeof(*packets) * (size_t) (frames ? frames : 1));
         int *sizes = malloc(sizeof(*sizes) * (size_t) (frames ? frames : 1));
@@ -686,7 +706,10 @@ typedef struct {
     int ready;          // isReady
     int loading;        // web: decodeAudioData still running
     int web_id;
-    float volume;       // Howl volume: master * voice * 2 at creation
+    float volume;       // Howl volume: master * voice * 2 at creation (v7: * the speaker's micVolume)
+    int sid;            // the speaker's uid (srcObj), -1 unknown
+    int spatial;        // v7 voiceChatType 1: positioned at the speaker's head
+    float ref_distance; // settings voiceDistance (slider * 5)
     VoicePcm pcm;
 } VoiceClip;
 
@@ -703,6 +726,8 @@ typedef struct {
     ma_audio_buffer_ref buffer;
     ma_sound sound;
 } VoiceInstance;
+
+static Client *g_voice_client; // the client of the last voice_update (srcObj positions at play time)
 
 static struct {
     VoiceQueue queues[VOICE_MAX_SPEAKERS];
@@ -762,10 +787,23 @@ static void clip_play(VoiceClip *clip, const char *name) {
         return;
     }
     instance->buffer.sampleRate = clip->pcm.rate;
-    if (ma_sound_init_from_data_source(engine, &instance->buffer, MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, &instance->sound) != MA_SUCCESS) {
+    // v7 voiceChatType 1: hm.pos(srcObj head) at play time, pannerAttr refDistance voiceDistance,
+    // rolloff 1 (Howler's inverse model; v7 sets the panner only for a queue's first clip, the
+    // later ones fall back to Howler's refDistance 1: every clip gets the setting here).
+    const Player *src = clip->spatial && g_voice_client && clip->sid >= 0 ? game_find_player(&g_voice_client->game, clip->sid) : NULL;
+    const ma_uint32 flags = src ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
+    if (ma_sound_init_from_data_source(engine, &instance->buffer, flags, NULL, &instance->sound) != MA_SUCCESS) {
         ma_audio_buffer_ref_uninit(&instance->buffer);
         rem_speaker(name, 0, 0);
         return;
+    }
+    if (src) {
+        ma_sound_set_position(&instance->sound, src->position.x, src->position.y + src->height - game_constants.camera_height, src->position.z);
+        ma_sound_set_attenuation_model(&instance->sound, ma_attenuation_model_inverse);
+        ma_sound_set_min_distance(&instance->sound, clip->ref_distance);
+        ma_sound_set_max_distance(&instance->sound, 10000.0f); // Howler panner maxDistance
+        ma_sound_set_rolloff(&instance->sound, 1.0f);
+        ma_sound_set_doppler_factor(&instance->sound, 0.0f);
     }
     instance->in_use = 1;
     instance->clip = clip;
@@ -905,8 +943,9 @@ static void voice_poll_loading(void) {
 #endif
 }
 
-// window.addVoiceStream(player, name, audio)
-static void add_voice_stream(const int has_src, const char *name, const char *audio) {
+// window.addVoiceStream(player, name, audio) / v7 queueVoiceChatAudio: `volume` multiplies the Howl
+// volume (v7: the speaker's micVolume), `sid` is srcObj (for proximity voice).
+static void add_voice_stream(const int has_src, const char *name, const char *audio, const float volume, const int sid) {
     VoiceQueue *queue = queue_find(name);
     if (!queue) {
         if (g_play.queue_count >= VOICE_MAX_SPEAKERS) return;
@@ -927,7 +966,10 @@ static void add_voice_stream(const int has_src, const char *name, const char *au
     clip->refs = 1;
     snprintf(clip->name, sizeof(clip->name), "%s", name);
     clip->has_src = has_src;
-    clip->volume = audio_get_volume(AUDIO_CAT_MASTER) * audio_get_volume(AUDIO_CAT_VOICE) * 2.0f;
+    clip->volume = audio_get_volume(AUDIO_CAT_MASTER) * audio_get_volume(AUDIO_CAT_VOICE) * volume * 2.0f;
+    clip->sid = sid;
+    clip->spatial = has_src && g_vset.chat_type == 1; // !!sourcePlayer && !!voiceChatType
+    clip->ref_distance = g_vset.distance;
     queue->clips[queue->count++] = clip;
 
 #ifdef __EMSCRIPTEN__
@@ -943,14 +985,36 @@ static void add_voice_stream(const int has_src, const char *name, const char *au
 #endif
 }
 
-// window.voiceChat(audio, name, sid)
+// v7 queueVoiceChatAudio's drops: muteSpec (we have no sid: spectating, or the speaker is not
+// active) and the speaker's account in mutedVoiceAccountIds.
+static int voice_dropped(const Client *client, const Player *speaker, const int account_id) {
+    if (g_vset.mute_spec && (!client || !client->me || spectate_active() || (speaker && !speaker->active))) return 1;
+    return social_voice_muted(account_id);
+}
+
+// window.voiceChat(audio, name, sid) (older servers: every channel, full volume)
 static void voice_chat(Client *client, const char *audio, const char *name, const int sid) {
     if (!(audio_get_volume(AUDIO_CAT_VOICE) > 0.0f)) return; // if (SOUND.volumes[1])
     char scrambled[VOICE_NAME_MAX];
     name = streamer_name(name, scrambled, sizeof(scrambled)); // streamerModeEnabled && Filter: UTILS.scrambleS(hk)
     const Player *player = client && sid >= 0 ? game_find_player(&client->game, sid) : NULL;
+    const NetPlayerInfoPacket *info = sid >= 0 ? player_accounts_get(sid) : NULL;
+    if (voice_dropped(client, player, info ? info->account_id : 0)) return;
     voice_log("recv %s sid=%d %zu bytes%s", name, sid, strlen(audio), player ? "" : " (unknown player)");
-    add_voice_stream(player != NULL, name, audio);
+    add_voice_stream(player != NULL, name, audio, 1.0f, sid);
+}
+
+// v7 io_voiceChat(audio, name, sid, channel, volume, isFinal, accountId): SOUND.volumes[1] * volume
+// must be > 0 and the channel -1 or ours (vLN02023). isFinal (never set by v7's server) is ignored.
+static void voice_chat_v7(Client *client, const char *audio, const char *name, const int sid, const VoiceV7Meta *meta) {
+    if (!(audio_get_volume(AUDIO_CAT_VOICE) * meta->volume > 0.0f)) return;
+    if (meta->channel != CHAT_CHANNEL_ALL && meta->channel != hud_ui_chat_channel()) return;
+    char scrambled[VOICE_NAME_MAX];
+    name = streamer_name(name, scrambled, sizeof(scrambled));
+    const Player *player = client && sid >= 0 ? game_find_player(&client->game, sid) : NULL;
+    if (voice_dropped(client, player, meta->account_id)) return;
+    voice_log("recv v7 %s sid=%d ch=%d vol=%.2f %zu bytes%s", name, sid, meta->channel, (double) meta->volume, strlen(audio), player ? "" : " (unknown player)");
+    add_voice_stream(player != NULL, name, audio, meta->volume, sid);
 }
 
 static void instances_update(void) {
@@ -985,6 +1049,7 @@ void voice_audio_fini(void) {
 // ---------------------------------------------------------------- receive
 
 static SocialAssembly g_receive;
+static SocialAssembly g_receive_v7;
 
 void voice_on_packet(Client *client, const void *payload, const uint16_t length) {
     char *msg = NULL;
@@ -994,6 +1059,40 @@ void voice_on_packet(Client *client, const void *payload, const uint16_t length)
     const char *audio = NULL;
     if (voice_parse_relay(msg, alias, sizeof(alias), &audio)) voice_chat(client, audio, alias, (int) (int32_t) sid);
     free(msg);
+}
+
+void voice_on_packet_v7(Client *client, const void *payload, const uint16_t length) {
+    char *msg = NULL;
+    uint32_t sid = 0;
+    if (social_assembly_push(&g_receive_v7, payload, length, &msg, &sid) != 1) return;
+    char alias[VOICE_NAME_MAX];
+    const char *audio = NULL;
+    VoiceV7Meta meta;
+    if (voice_parse_relay_v7(msg, &meta, alias, sizeof(alias), &audio)) voice_chat_v7(client, audio, alias, (int) (int32_t) sid, &meta);
+    free(msg);
+}
+
+void voice_apply_setting(const char *key, const char *value) {
+    if (!key || !value) return;
+    if (!strcmp(key, "micQuality")) {
+        const int q = atoi(value); // parseInt(SETTINGS.tmp.micQuality)
+        g_vset.mic_quality = q > 0 ? q : VOICE_MIC_QUALITY_DEFAULT;
+    } else if (!strcmp(key, "micVolume")) {
+        const float v = (float) atof(value);
+        g_vset.mic_volume = v == v ? v : 1.0f;
+    } else if (!strcmp(key, "voiceChatType")) {
+        g_vset.chat_type = atoi(value) ? 1 : 0;
+        // settings.list.voiceDistance.hide = value == 0: #voiceDistance_div follows
+        const HtmlElem row = html_dom_by_id("voiceDistance_div");
+        if (row) html_dom_set_style(row, "display", g_vset.chat_type ? "block" : "none");
+    } else if (!strcmp(key, "voiceDistance")) {
+        const int d = atoi(value);
+        g_vset.distance = (float) (d ? d : 1) * 5.0f; // (parseInt(v) || 1) * 5
+    } else if (!strcmp(key, "muteSpec")) {
+        g_vset.mute_spec = !strcmp(value, "true") || !strcmp(value, "1");
+    } else if (!strcmp(key, "voiceChatTrigger")) {
+        g_vset.trigger = atoi(value) == 0 && value[0] == '0' ? 0 : 1;
+    }
 }
 
 // ---------------------------------------------------------------- capture
@@ -1148,7 +1247,7 @@ static void capture_drain(void) {
 // v3.1.1's capture, verbatim: getUserMedia -> one MediaRecorder per stream, started and
 // stopped by C (voice_update), every stop -> Blob -> readAsDataURL -> a queued clip that C
 // takes and sends. No UI logic here: C owns cB / cC / the interval / #voiceDisplay.
-EM_JS(void, voice_web_open, (const char *device), {
+EM_JS(void, voice_web_open, (const char *device, int bits), {
     var v = window.knVoice = window.knVoice || {clips: [], decodes: {}, nextId: 1, state: 0};
     var id = UTF8ToString(device);
     v.state = 1;
@@ -1162,7 +1261,7 @@ EM_JS(void, voice_web_open, (const char *device), {
             // with only the newest one, so the previous one is released instead of leaked.
             if (v.stream && v.stream !== stream) v.stream.getTracks().forEach(function (t) { t.stop(); });
             v.stream = stream;
-            v.recorder = new MediaRecorder(stream, {mimetype: "audio/ogg", bitsPerSecond: 6000});
+            v.recorder = new MediaRecorder(stream, {mimetype: "audio/ogg", bitsPerSecond: bits}); // micQuality
             var parts = [];
             v.recorder.addEventListener("dataavailable", function (e) { parts.push(e.data); });
             v.recorder.addEventListener("stop", function () {
@@ -1297,7 +1396,12 @@ static void dump_sent(const char *url, const uint32_t seq) {
 static void send_clip(Client *client, const char *url, const size_t len, const int frames) {
     voice_log("send clip %u: %d frames, %zu bytes", g_rec.seq, frames, len);
     dump_sent(url, g_rec.seq);
-    voice_send_clip(url, len, g_rec.seq++, voice_send_packet, client);
+    if (social_server_v7(client)) { // v7: io.send("vc", dataUrl, vLN02023, micVolume, micQuality)
+        const VoiceV7Send meta = {.channel = hud_ui_chat_channel(), .volume = g_vset.mic_volume, .quality = g_vset.mic_quality};
+        voice_send_clip_v7(url, len, g_rec.seq++, &meta, voice_send_packet, client);
+    } else {
+        voice_send_clip(url, len, g_rec.seq++, voice_send_packet, client);
+    }
     if (voice_echo_enabled() && client && client->me) voice_chat(client, url, client->me->name, client->me->uid);
 }
 
@@ -1360,15 +1464,17 @@ static void session_refused(void) {
     voice_log("microphone unavailable");
 }
 
-void voice_toggle_record(Client *client, const int down) {
+void voice_toggle_record(Client *client, int down) {
     if (ui_text_input_focused()) return;       // document.activeElement.tagName != "INPUT" (+ any text field)
     if (!client || !(client->me || spectate_active())) return; // player || window.spectating
+    // v7 voiceChatTrigger 0 (Press / Toggle): a press flips the recording, a release keeps it
+    if (g_vset.trigger == 0) down = down ? !g_rec.recording : g_rec.recording;
     if (down && !g_rec.recording && g_rec.ready) {
         if (g_rec.pending) return;
         voice_log("record");
 #ifdef __EMSCRIPTEN__
         g_rec.pending = 1;
-        voice_web_open(g_rec.input);
+        voice_web_open(g_rec.input, g_vset.mic_quality);
 #else
         if (capture_open()) session_opened();
         else session_refused();
@@ -1387,6 +1493,7 @@ int voice_recording(void) {
 }
 
 void voice_update(Client *client) {
+    g_voice_client = client;
 #ifdef __EMSCRIPTEN__
     static int inputs_listed;
     if (!inputs_listed) {
@@ -1474,6 +1581,7 @@ void voice_fini(void) {
     voice_audio_fini();
     voice_reset_queues();
     social_assembly_free(&g_receive);
+    social_assembly_free(&g_receive_v7);
     free(g_rec.pcm);
     g_rec.pcm = NULL;
     g_rec.samples = g_rec.cap = 0;

@@ -311,8 +311,9 @@ rtc-build: ## Build the WebRTC gateway (net-bridge/rtc/kn-rtc, needs Go)
 rtc: rtc-build ## Run the WebRTC <-> UDP gateway (signaling http $(RTC_HTTP), ICE udp $(RTC_ICE))
 	$(RTC_BIN) -http $(RTC_HTTP) -ice-addr $(RTC_ICE) -info-file $(DIST_WEB)/rtc.json
 
-test-net: build ## knet transport unit test (loss/dup/reorder) + 2-client UDP end-to-end (headless)
+test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice channels + sprays (social_test), 2-client UDP end-to-end (headless)
 	./$(DEBUG_DIR)/knet_test
+	./$(DEBUG_DIR)/social_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
 

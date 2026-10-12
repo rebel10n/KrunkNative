@@ -12,6 +12,7 @@
 #include <ks_storage.h>      // WP6: trigger storage / KR reward hooks (server/src/ks_storage.c)
 #include <ks_game.h>
 #include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
+#include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -120,6 +121,8 @@ static int net_peer_takes(const ClientConnection *client, const int type) {
         (type >= NET_PACKET_BLOCK_AIRDROP && type < NET_PACKET_BLOCK_LOBBY)) return ks_server_peer_v7(client);
     // player-viewer WP-E: the HUD / death screen / social packets (NET_PACKET_BLOCK_SOCIAL, 240-249)
     if (type >= NET_PACKET_BLOCK_SOCIAL && type < NET_PACKET_BLOCK_SOCIAL + 10) return ks_server_peer_v7(client);
+    // WP-E part 2b: v7 peers get every spray as NET_PACKET_SPRAY_V7 (multi-spray), older ones the v3 "sp"
+    if (type == NET_PACKET_SPRAY) return !ks_server_peer_v7(client);
     return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
 }
 
@@ -349,6 +352,14 @@ static void net_handle_map_request(ClientConnection *client, const NetPacket *pa
     }
 }
 
+// WP-E part 2b (shared/include/social_v7.h): a v7 peer may send the v7 chat / voice / spray / taunt
+// packets to this server.
+static void net_send_social_caps(const ClientConnection *client) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_V7) return;
+    const uint8_t version = NET_SOCIAL_V7_VERSION;
+    net_send_packet(client->fd, NET_PACKET_SOCIAL_V7, &version, sizeof(version));
+}
+
 static void net_send_init(ClientConnection *client) {
     accounts_send_billboard(client); // init "bill" (config gameserver.billboards), before the map loads
     net_send_map_info(client);
@@ -367,6 +378,7 @@ static void net_send_init(ClientConnection *client) {
     };
 
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
+    net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
 }
 
@@ -792,6 +804,7 @@ void net_add_client(ClientConnection *client) {
     client->next_ping_at = 0.0; // first probe right away (pi on connect)
     client->social = (SocialAssembly) {0};
     client->voice = (SocialAssembly) {0};
+    client->voice_v7 = (SocialAssembly) {0};
     memset(&client->custom_values, 0, sizeof(client->custom_values)); // WP-C: no custVals yet
     g_server->clients[g_server->client_count] = *client;
 
@@ -836,6 +849,7 @@ void net_remove_client(ClientConnection *client) {
     net_release_player_number(client);
     social_assembly_free(&client->social);
     social_assembly_free(&client->voice);
+    social_assembly_free(&client->voice_v7);
     CLOSE_CLIENT_FD(client);
 
     if (index + 1 < g_server->client_count) {
@@ -854,9 +868,30 @@ void net_remove_client(ClientConnection *client) {
     if (new_clients) g_server->clients = new_clients;
 }
 
+_Static_assert(sizeof(NetChatV7Packet) <= NET_MAX_PAYLOAD, "NetChatV7Packet exceeds NET_MAX_PAYLOAD");
+
+static int net_team_mode(void) {
+    return g_server->game.mode && g_server->game.mode->config.teams;
+}
+
+static int net_teammates(const ClientConnection *a, const ClientConnection *b) {
+    return a->player && b->player && a->player->team == b->player->team;
+}
+
+// One player chat line to `to`: v7 peers get NET_PACKET_CHAT_V7 ("ch", channel, ..., accountId),
+// older peers the v3 NET_PACKET_CHAT.
+static void net_send_player_chat(ClientConnection *to, const ClientConnection *from, const int channel, const char *text) {
+    NetChatV7Packet packet = {.channel = (int8_t) channel, .account_id = from->acct.account_id};
+    net_packet_chat(&packet.chat, from->id, NET_CHAT_PLAYER, from->name, text);
+    if (ks_server_peer_v7(to)) net_send_packet(to->fd, NET_PACKET_CHAT_V7, &packet, sizeof(packet));
+    else net_send_packet(to->fd, NET_PACKET_CHAT, &packet.chat, sizeof(packet.chat));
+}
+
 // io_ct: burst limit (closing the socket like the v3.1.1 server, code 4008),
-// 70 characters, blank lines dropped, then "ch" to everyone.
-static int net_handle_chat(ClientConnection *client, const NetPacket *packet) {
+// 70 characters, blank lines dropped, then "ch" to everyone. v7.1.4 sendPlayerChat: the team
+// channel only exists in team modes, and its lines go to the sender's team only (the sender
+// included); v3 "ct" is the global channel.
+static int net_handle_chat(ClientConnection *client, const char *payload, const size_t length, const int requested_channel) {
     if (!net_chat_allow(&client->chat_limiter, (float) net_time())) {
         server_log("Kicking %s: chat rate limit exceeded", client->name);
         net_remove_client(client);
@@ -864,16 +899,21 @@ static int net_handle_chat(ClientConnection *client, const NetPacket *packet) {
     }
 
     char text[NET_CHAT_TEXT_SIZE];
-    if (!net_chat_sanitize(text, sizeof(text), (const char *) packet->payload, packet->length)) return 1;
+    if (!net_chat_sanitize(text, sizeof(text), payload, length)) return 1;
 
     if (chat_command_handle(net_chat_host(), client->id, text)) { // "/" commands answer the sender only
         server_log("[cmd] %s: %s", client->name, text);
         return 1;
     }
 
-    server_log("[chat] %s: %s", client->name, text);
+    const int channel = requested_channel == CHAT_CHANNEL_TEAM && net_team_mode() && client->player ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL;
+    server_log("[chat%s] %s: %s", channel == CHAT_CHANNEL_TEAM ? " team" : "", client->name, text);
     ks_server_on_chat(client, text); // KrunkScript onChatMessage (not for "/" commands)
-    net_broadcast_chat_except(NULL, client->id, NET_CHAT_PLAYER, client->name, text);
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *to = &g_server->clients[i];
+        if (channel == CHAT_CHANNEL_TEAM && !net_teammates(client, to)) continue;
+        net_send_player_chat(to, client, channel, text);
+    }
     return 1;
 }
 
@@ -924,21 +964,57 @@ static void net_handle_social(ClientConnection *client, const NetPacket *packet)
     free(reply);
 }
 
-static int net_voice_send(void *user, const int peer, const NetPacketType type, const void *payload, const uint16_t length) {
-    (void) user;
-    return net_send_packet(g_server->clients[peer].fd, type, payload, length);
+// One clip of `speaker` to every other connection. v7 peers get NET_PACKET_VOICE_V7 ("vc", audio,
+// name, sid, channel, volume, isFinal, accountId) and play it when the channel is -1 or theirs;
+// older peers get the v3 NET_PACKET_VOICE. KrunkNative fix: v7's server relays a team-channel clip
+// to everyone and only the receivers' own channel filters it, so enemies on their team channel
+// heard it too; here team-channel clips (channel 1 in a team mode) reach the speaker's team only.
+static void net_relay_voice(const ClientConnection *speaker, const char *audio, const VoiceV7Meta *meta) {
+    const int team_only = meta->channel == CHAT_CHANNEL_TEAM && net_team_mode();
+    size_t v3_len = 0, v7_len = 0;
+    char *v3 = NULL, *v7 = NULL;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *to = &g_server->clients[i];
+        if (to == speaker) continue; // "Skip echoing back to the sender"
+        if (team_only && !net_teammates(speaker, to)) continue;
+        const int peer_v7 = ks_server_peer_v7(to);
+        if (peer_v7 && !v7) v7 = voice_relay_v7_message(meta, speaker->name, audio, &v7_len);
+        if (!peer_v7 && !v3) v3 = voice_relay_message(speaker->name, audio, &v3_len);
+        const char *msg = peer_v7 ? v7 : v3;
+        if (!msg) continue;
+        social_send_message(peer_v7 ? (NetPacketType) NET_PACKET_VOICE_V7 : NET_PACKET_VOICE, (uint32_t) speaker->id, msg,
+                            peer_v7 ? v7_len : v3_len, net_social_send, to);
+    }
+    free(v3);
+    free(v7);
 }
 
-// io_vc (shared/src/voice.c): a clip from a connection that has a v3.1.1 player (voice_player) goes
-// to every other connection as ["vc", audio, alias, sid].
+// io_vc (v3.1.1): a clip from a connection that has a player (voice_player) goes to every other
+// connection as ["vc", audio, alias, sid]; v7 peers see it on every channel at full volume.
 static void net_handle_voice(ClientConnection *client, const NetPacket *packet) {
-    const VoiceSpeaker speaker = {
-        .sid = client->id, // player.sid: the uid net_spawn_client gives this connection's player
-        .alias = client->name,
-        .has_player = client->voice_player,
-        .peer = (int) (client - g_server->clients),
-    };
-    voice_relay(&client->voice, packet->payload, packet->length, &speaker, (int) g_server->client_count, net_voice_send, NULL);
+    char *audio = NULL;
+    if (social_assembly_push(&client->voice, packet->payload, packet->length, &audio, NULL) != 1) return;
+    // `if (!player || typeof audio !== "string" || !audio.length) return;` and the 256 KiB cap
+    const size_t len = strlen(audio);
+    if (client->voice_player && len && len <= VOICE_MAX_DATA) {
+        const VoiceV7Meta meta = {.channel = CHAT_CHANNEL_ALL, .volume = 1.0f, .account_id = client->acct.account_id};
+        net_relay_voice(client, audio, &meta);
+    }
+    free(audio);
+}
+
+// v7.1.4 "vc", dataUrl, channel, micVolume, micQuality (server/index.ts:4241-4263): dropped without
+// a player, unless it is a data:audio/ URL of at most 750 000 characters; volume clamped to 0..1.
+static void net_handle_voice_v7(ClientConnection *client, const NetPacket *packet) {
+    char *msg = NULL;
+    if (social_assembly_push(&client->voice_v7, packet->payload, packet->length, &msg, NULL) != 1) return;
+    VoiceV7Send sent;
+    const char *audio = NULL;
+    if (client->voice_player && voice_parse_send_v7(msg, &sent, &audio)) {
+        const VoiceV7Meta meta = {.channel = sent.channel, .volume = sent.volume, .is_final = 0, .account_id = client->acct.account_id};
+        net_relay_voice(client, audio, &meta);
+    }
+    free(msg);
 }
 
 // packetHandlers.ts requireDev for the dev packets, through the chat commands' gate
@@ -1074,6 +1150,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
             if (client->peer_minor >= NET_PROTOCOL_MINOR_V7 && g_server->game.ready) { // WP-E: its INIT went out before the HELLO
                 game_config_send(&g_server->game, client->id);
+                net_send_social_caps(client);
                 if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
             }
             break;
@@ -1132,7 +1209,23 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             break;
         }
         case NET_PACKET_CHAT_SEND:
-            if (packet->length && packet->length <= sizeof(NetChatSendPacket)) return net_handle_chat(client, packet);
+            if (packet->length && packet->length <= sizeof(NetChatSendPacket))
+                return net_handle_chat(client, (const char *) packet->payload, packet->length, CHAT_CHANNEL_GLOBAL);
+            break;
+        case NET_PACKET_CHAT_V7: // WP-E: "ct", channel, msg (getChatTeam: 1 is the team channel, anything else global)
+            if (packet->length > 1 && packet->length <= sizeof(NetChatV7SendPacket))
+                return net_handle_chat(client, (const char *) packet->payload + 1, packet->length - 1u, packet->payload[0] == 1 ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL);
+            break;
+        case NET_PACKET_SPRAY_V7: { // WP-E: "spry"[, wheel index] (handleSpray)
+            NetSprayRequestPacket spray = {.index = -1};
+            if (!client->player || packet->length != sizeof(spray)) break;
+            memcpy(&spray, packet->payload, sizeof(spray));
+            const int owned = spray.index >= 0 && accounts_owns_skin(client, spray.index); // canUseSkin
+            game_player_spray_request(&g_server->game, client->player, spray.index, owned);
+            break;
+        }
+        case NET_PACKET_TAUNT: // WP-E: "prpt", i (handleModeTaunt -> players.taunt)
+            if (client->player && packet->length == sizeof(NetTauntPacket)) game_player_taunt(&g_server->game, client->player, packet->payload[0]);
             break;
         case NET_PACKET_STREAK_SLOTS: { // WP-B: v7 ENT streakIndexes (streakIndex1..3), before the ENT
             if (packet->length != sizeof(NetStreakSlotsPacket)) break;
@@ -1198,6 +1291,9 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             break;
         case NET_PACKET_VOICE_SEND:
             net_handle_voice(client, packet);
+            break;
+        case NET_PACKET_VOICE_V7:
+            net_handle_voice_v7(client, packet);
             break;
         default:
             on_client_event(client);

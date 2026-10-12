@@ -25,6 +25,7 @@
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
+#include <hud_social.h>    // WP-E part 2b: NET_PACKET_CHAT_V7 / VOICE_V7 / SPRAY_V7 (social_v7.h)
 #include <lobby_ui.h>      // WP-E: GAME_CONFIG / NETWORK_DATA / MATCH_VOTE_STATE (client/src/net/lobby_events.c)
 #include <world_events.h>  // map-logic WP-B: NET_PACKET_ZONE / BUILD / LOG_TIME / OBJECT_ANIM
 #include <map_triggers.h>  // map trigger events: "do"/"ro"/"gte"/"bnk", "chp", "s", "scr", "am" popups (client/src/map_triggers.c)
@@ -60,6 +61,12 @@ void client_chat_send(Client *client, const char *text) {
     if (!client->offline && client->net_socket < 0) return;
     if (!net_chat_allow(&limiter, (float) glfwGetTime())) return;
 
+    if (social_server_v7(client)) { // v7 f1909: "ct", channel (#chatSwitch), msg
+        NetChatV7SendPacket v7 = {.channel = (uint8_t) (hud_ui_chat_channel() == CHAT_CHANNEL_TEAM ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL)};
+        memcpy(v7.text, packet.text, sizeof(v7.text));
+        client_net_send(client, NET_PACKET_CHAT_V7, &v7, (uint16_t) (1 + strlen(v7.text) + 1));
+        return;
+    }
     client_net_send(client, NET_PACKET_CHAT_SEND, &packet, (uint16_t) (strlen(packet.text) + 1));
 }
 
@@ -223,6 +230,10 @@ static void events_chat(const NetChatPacket *packet) {
     name[sizeof(name) - 1] = 0;
     text[sizeof(text) - 1] = 0;
 
+    if (packet->kind == NET_CHAT_PLAYER && packet->uid >= 0) { // mute_chat by the sender's account (v7 "ch" carries it)
+        const NetPlayerInfoPacket *info = player_accounts_get(packet->uid);
+        if (info && social_chat_muted(info->account_id)) return;
+    }
     ui_console_on_chat(packet->kind == NET_CHAT_PLAYER ? (name[0] ? name : "unknown") : NULL, text, packet->kind);
 
     switch (packet->kind) {
@@ -414,6 +425,9 @@ int client_map_hold(Client *client, const NetPacket *packet) {
         case NET_PACKET_PING:
         case NET_PACKET_PING_RESULT:
         case NET_PACKET_CHAT:
+        case NET_PACKET_CHAT_V7:
+        case NET_PACKET_VOICE:
+        case NET_PACKET_VOICE_V7:
             return 0; // not tied to the map
         default:
             break;
@@ -665,6 +679,19 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             sprays_add(client, &spray);
             return 1;
         }
+        case NET_PACKET_SPRAY_V7: { // v7 "sp": addSpray("<sid>_<n>", sprayIndex, x, y, z, rotY, rotX, rotZ, dyeId)
+            EVENTS_READ(NetSprayV7Packet, spray);
+            sprays_add_v7(client, &spray);
+            return 1;
+        }
+        case NET_PACKET_SOCIAL_V7: // the server takes the v7 chat / voice / spray / taunt packets
+            if (length >= 1) social_on_server_caps(((const uint8_t *) payload)[0]);
+            return 1;
+        case NET_PACKET_CHAT_V7: { // v7 "ch": io_addChat(channel, ..., accountId)
+            EVENTS_READ(NetChatV7Packet, chat);
+            social_on_chat_v7(client, &chat);
+            return 1;
+        }
         case NET_PACKET_CHEAT: {
             EVENTS_READ(NetCheatPacket, cheat);
             events_cheat(client, &cheat);
@@ -712,6 +739,9 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         }
         case NET_PACKET_VOICE: // "vc": window.voiceChat(audio, alias, sid)
             voice_on_packet(client, payload, length);
+            return 1;
+        case NET_PACKET_VOICE_V7: // v7 "vc": io_voiceChat(audio, name, sid, channel, volume, isFinal, accountId)
+            voice_on_packet_v7(client, payload, length);
             return 1;
         case NET_PACKET_SPECTATE: {
             // "start" with spectating = true: our ENT asked to spectate (client/src/spectate.c)

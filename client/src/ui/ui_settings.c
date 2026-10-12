@@ -64,6 +64,8 @@ static const char *CORE_SETTINGS[] = {
     // input/camera settings (ui_controls.c)
     "fpsFOV", "scrollDir", "showWeapon", "showWeaponSec", "showWeaponMel", "shwChat", "slidCont",
     "sound", "voiceVolume", "assetVolume",
+    // v7 voice chat (voice.c): micQuality / micVolume ride in "vc", proximity voice, muteSpec, toggle
+    "micQuality", "micVolume", "voiceChatType", "voiceDistance", "muteSpec", "voiceChatTrigger",
     // Controller (CONTROLS.cntrlInput, ui_controls.c / gamepad.c)
     "sensitivityXCntrl", "sensitivityYCntrl", "aimSensitivityXCntrl", "aimSensitivityYCntrl",
     "deadZoneL", "deadZoneR", "triggerThres", "invertYCntrl", "vibration", "gradSpeed",
@@ -821,6 +823,12 @@ void ui_settings_apply_values(const HtmlElem root) {
         }
     }
     free(found);
+    // settings.list.voiceDistance.hide = voiceChatType == 0: the captured row is display:none
+    // (voice.c shows / hides it on a live change)
+    char type[8] = "";
+    ui_setting_to_string(ui_setting_value("voiceChatType"), type, sizeof(type));
+    const HtmlElem distance = atoi(type) ? html_dom_by_id("voiceDistance_div") : 0;
+    if (distance) html_dom_set_style(distance, "display", "block");
 }
 
 void ui_settings_push_saved(void) {
@@ -1215,6 +1223,9 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
         ui_controls_set_speed_limit(1.0f); // q.speedLmt = 1
     }
     else if (!strcmp(key, "audioInput")) voice_set_audio_input(value); // settings.tmp.audioInput
+    else if (!strcmp(key, "micQuality") || !strcmp(key, "micVolume") || !strcmp(key, "voiceChatType") || !strcmp(key, "voiceDistance") ||
+             !strcmp(key, "muteSpec") || !strcmp(key, "voiceChatTrigger"))
+        voice_apply_setting(key, value); // WP-E: v7 voice chat settings (voice.c)
     else return; // cosmetic Krunker settings the engine has no counterpart for (kept in the store only)
 
     printf("[ui] setting %s=%s\n", key, value);

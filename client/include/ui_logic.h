@@ -273,6 +273,7 @@ void hud_ui_damage_number(Client*, float x, float y, float z, int value, int cri
 // One #chatList row (Krunker gB/gy): name+msg = player line, else color = server line
 // (type 2), else a plain game line (type 1).
 void hud_ui_add_chat(const char *name, const char *msg, const char *color);
+void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, int channel); // WP-E: a v7 "ch" line on its channel (-1 all)
 void hud_ui_clear_chat(void);                    // empty #chatList, no join lines seeded
 // hud_ui_add_killfeed with explicit "You" flags and the row's age (into its 4 s life). A NULL
 // killer (not "You") is a self-kill: weapon + victim only. Old Scoreboard puts the row in #chatList.
@@ -347,6 +348,7 @@ int  ui_controls_bind_alt(int id);               // the alternate key (v7 Contro
 int  ui_controls_v7_bind(const char *bind, int index, int alt); // CONTROLS.binds[bind][index].val / altVal (index -1: scalar)
 int  ui_controls_dom_key(int glfw_key);          // GLFW key -> DOM keyCode, -1 unknown
 const char *ui_controls_key_name(int code, char *buf, size_t n); // UTILS.getKeyName
+int ui_controls_v7_val(const char *bind, int index); // CONTROLS.binds.<bind>[index].val (index -1: scalar), -1 none
 char *ui_controls_window_html(void);             // windows[6].gen() (malloc'd)
 void ui_controls_change(const char *bind, int alt, int index);    // changeCont(bind, alt, index)
 void ui_controls_unbind(const char *bind, int alt, int index);    // unbindCont
@@ -422,7 +424,8 @@ void ui_loadout_cosmetics(PlayerCosmetics *out); // skin colour + hat/body/waist
 void ui_loadout_ent_look(int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins); // ENT: cosmetics + weapon/melee skins, Random resolved to owned items
 void ui_loadout_preview_skins(int class_index, PlayerSkins *out); // the class preview's weapon/melee skins (Random shows none)
 void ui_loadout_cosmetics_v7(int class_index, PlayerCosmeticsV7 *out, int resolve_random); // WP-F: head/back/shoe/pet/wrist/charms/card picks (ENT V9, preview)
-int  ui_loadout_spray(void);                    // ENT ent[1]: the selected spray (sprayindex), Random resolved, unowned -> 0
+int  ui_loadout_spray(void);                    // ENT ent[1]: the selected spray as a v7 store index, Random resolved, unowned -> 2482
+int  ui_loadout_spray_wheel(int *out, int max); // WP-E: the spray wheel's store indices (owned sprays, then the equipped one)
 void ui_loadout_class_bubble(int index);         // selectClass speech line
 void ui_loadout_switch_tab(int tab);             // windows[2].switchTab(tab, true): Class / Loadout / Customize / Other
 void ui_loadout_show_police_pop(void);           // shoPolicePop

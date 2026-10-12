@@ -1408,7 +1408,15 @@ void c2d_image_size(const C2DImage *img, int *w, int *h) {
 }
 
 void c2d_draw_image(Canvas2D *c, C2DImage *img, double dx, double dy, double dw, double dh) {
+    if (!img || img->state != 1) return;
+    c2d_draw_image_sub(c, img, 0, 0, img->w, img->h, dx, dy, dw, dh);
+}
+
+void c2d_draw_image_sub(Canvas2D *c, C2DImage *img, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh) {
     if (!img || img->state != 1 || !finite2(dx, dy) || !finite2(dw, dh) || dw == 0 || dh == 0) return;
+    if (!finite2(sx, sy) || !finite2(sw, sh) || sw == 0 || sh == 0 || img->w <= 0 || img->h <= 0) return;
+    const float u0 = (float) (sx / img->w), v0 = (float) (sy / img->h);
+    const float u1 = (float) ((sx + sw) / img->w), v1 = (float) ((sy + sh) / img->h);
     if (dw < 0) {
         dx += dw;
         dw = -dw;
@@ -1426,12 +1434,12 @@ void c2d_draw_image(Canvas2D *c, C2DImage *img, double dx, double dy, double dw,
     const uint32_t first = (uint32_t) (v - c->verts);
     const P2 p0 = mat_apply(&dm, dx, dy), p1 = mat_apply(&dm, dx + dw, dy);
     const P2 p2_ = mat_apply(&dm, dx + dw, dy + dh), p3 = mat_apply(&dm, dx, dy + dh);
-    put(v + 0, p0, 0, 0, col);
-    put(v + 1, p1, 1, 0, col);
-    put(v + 2, p2_, 1, 1, col);
-    put(v + 3, p0, 0, 0, col);
-    put(v + 4, p2_, 1, 1, col);
-    put(v + 5, p3, 0, 1, col);
+    put(v + 0, p0, u0, v0, col);
+    put(v + 1, p1, u1, v0, col);
+    put(v + 2, p2_, u1, v1, col);
+    put(v + 3, p0, u0, v0, col);
+    put(v + 4, p2_, u1, v1, col);
+    put(v + 5, p3, u0, v1, col);
     add_cmd(c, CMD_DRAW, MODE_IMAGE, img, first, 6, 0);
 }
 

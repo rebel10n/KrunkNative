@@ -24,6 +24,8 @@
 #include <console.h>   // the developer console takes the keyboard while open (ui_console.c)
 #include <ui_interact.h> // v7 interaction: "int" / "intSec" type, uid, "drpw", "cnfm" (ui_interact.c)
 #include <voice_chat.h> // voiceKey -> toggleRecord (client/src/voice.c)
+#include <hud_social.h> // WP-E: spray / spray wheel, taunts, quick chat (hud_social.c)
+#include <sprays.h>     // the spray wheel takes the mouse wheel
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -453,6 +455,15 @@ static int v7_index(const char *bind, const int index) {
         if (!strcmp(V7_BINDS[i].bind, bind) && V7_BINDS[i].index == (V7_BINDS[i].index < 0 ? -1 : index)) return i;
     }
     return -1;
+}
+
+static void ensure_loaded(void);
+
+// CONTROLS.binds.<bind>[index].val (scalar binds: index -1), -1 when unknown / unbound.
+int ui_controls_v7_val(const char *bind, const int index) {
+    ensure_loaded();
+    const int i = v7_index(bind, index);
+    return i >= 0 ? g_ctl.val[i] : -1;
 }
 
 // v7 ControlBind name or altName -> (index, alt) (CONTROLS.getBindByName, scalar binds only)
@@ -1091,6 +1102,12 @@ static int v7_is(const char *bind, const int code) {
     return i >= 0 && code >= 0 && (g_ctl.val[i] == code || g_ctl.alt[i] == code);
 }
 
+// The same for element `index` of an array bind (taunt[i], message[i]).
+static int v7_is_at(const char *bind, const int index, const int code) {
+    const int i = v7_index(bind, index);
+    return i >= 0 && code >= 0 && (g_ctl.val[i] == code || g_ctl.alt[i] == code);
+}
+
 int ui_controls_scoreboard_held(void) {
     return !ui_text_input_focused() && ui_controls_down(UI_CONTROL_BOARD);
 }
@@ -1108,6 +1125,7 @@ static void voice_key(Client *client, const int code, const int down) {
 
 void ui_controls_reset_keys(void) {
     g_voice_key = -1;
+    sprays_wheel_close(); // keys are gone: the held spray wheel key too
     memset(g_ctl.keys, 0, sizeof(g_ctl.keys));
     memset(g_ctl.did_pressed, 0, sizeof(g_ctl.did_pressed));
     g_ctl.shoot = g_ctl.aim = 0;
@@ -1151,9 +1169,13 @@ static void press_button(Client *client, const int code) {
     if (client && spectate_press_key(client, code)) return;
     Player *me = client ? client->me : NULL;
     if (!me || !me->active) return;
-    if (bind_is(UI_CONTROL_SPRAY, code)) { // io.send("int", 0): the authority places it (players.spray)
-        const NetInteractPacket spray = {.action = 0};
-        client_net_send(client, NET_PACKET_INTERACT, &spray, sizeof(spray));
+    // sprayWheelKey (premium / sandbox): opens the wheel; else sprayKey: "spry" (v7) / "int" 0 (v3)
+    social_spray_press(client, bind_is(UI_CONTROL_SPRAY, code), v7_is("sprayWheel", code));
+    for (int i = 0; i < TAUNT_COUNT; i++) { // Prop team: "prpt", i
+        if (v7_is_at("taunt", i, code)) social_taunt(client, i);
+    }
+    for (int i = 0; i < MESSAGE_COUNT; i++) { // f2028(i): quick chat
+        if (v7_is_at("message", i, code)) social_quick_chat(client, g_ctl.messages[i]);
     }
     if (v7_is("confirm", code)) ui_interact_confirm(client); // confirmKey: "cnfm" (a pending KR trigger)
     if (bind_is(UI_CONTROL_INTERACT, code)) ui_interact_key(client, 0);     // io.send("int", type, id)
@@ -1199,8 +1221,9 @@ static void press_code(Client *client, const int code) {
     press_button(client, code);
 }
 
-// CONTROLS N(code, 0) (+ releaseButton: the leaderboard is polled)
-static void release_code(const int code) {
+// CONTROLS N(code, 0) (+ releaseButton: the leaderboard is polled; the spray wheel's key sprays)
+static void release_code(Client *client, const int code) {
+    if (v7_is("sprayWheel", code)) social_spray_release(client ? client : menu_ui()->client, 1);
     const int slot = key_slot(code);
     if (bind_is(UI_CONTROL_VOICE, code)) g_voice_key = 0;
     if (slot >= 0) g_ctl.keys[slot] = 0;
@@ -1231,7 +1254,7 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     if (g_ctl.chat_focused) {
         if (press && code >= 0 && bind_is(UI_CONTROL_CHAT, code)) return chat_key(client);
         if (menu) return 0; // the page edits the focused input
-        if (action == GLFW_RELEASE) release_code(code); // keyups still reach N()
+        if (action == GLFW_RELEASE) release_code(client, code); // keyups still reach N()
         if (press && key == GLFW_KEY_ESCAPE) {
             chat_blur();
             return 0; // main.c opens the menu (Krunker: the pointer lock is lost)
@@ -1254,7 +1277,7 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     if (action == GLFW_PRESS && ui_text_input_focused()) return 0; // a field (any page) keeps the key: no game bind
     if (press && code >= 0 && bind_is(UI_CONTROL_CHAT, code) && chat_key(client)) return 1;
     if (press) press_code(client, code);
-    else release_code(code);
+    else release_code(client, code);
     return 0;
 }
 
@@ -1283,7 +1306,7 @@ int ui_controls_mouse_event(Client *client, const int button, const int action, 
         press_code(client, code);
     } else if (action == GLFW_RELEASE) {
         gamepad_set_active(0); // canvas mouseup: aa(event) with inputType != "cntrlInput"
-        release_code(code);
+        release_code(client, code);
     }
     return 1;
 }
@@ -1296,6 +1319,8 @@ int ui_controls_scroll_event(Client *client, const double dy, const int in_game)
         capture_bind(KEY_SCROLL); // #menuWindow wheel while waiting for a key
         return 1;
     }
+    // v7 controls.js wheel: an open spray wheel takes the scroll (sprayWheelChange), no key 20000
+    if (social_spray_scroll(dy)) return 1;
     // window.Bf5: the wheel sets the free-cam speed / follow distance (then Q() as usual).
     if (client) spectate_scroll(client, dy > 0.0);
     // v3.1.1 offline mod (mods.ts installScrollWheelPatch / patchScrollInput): with a live
@@ -1337,7 +1362,7 @@ static void controller_n(Client *client, const int code, const int down) {
     voice_key(client, code, down);
     if (!ui_controls_enabled(client) && code != 27) return;
     if (down) press_code(client, code);
-    else release_code(code);
+    else release_code(client, code);
 }
 
 // Q(null, binds[id].val) (down) / U(null, binds[id].val) (up)
@@ -1505,7 +1530,7 @@ void ui_controls_end_frame(void) {
     memset(g_ctl.did_pressed, 0, sizeof(g_ctl.did_pressed));
     g_ctl.pending_swap = 0;
     if (g_ctl.scroll_pressed) {
-        release_code(KEY_SCROLL);
+        release_code(NULL, KEY_SCROLL);
         g_ctl.scroll_pressed = 0;
     }
 }

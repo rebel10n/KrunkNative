@@ -8,6 +8,8 @@
 #include <vfx.h>
 #include <ai_render.h>
 #include <nametags.h>
+#include <sprays.h> // WP-E: the v7 spray wheel overlay
+#include <hud_social.h> // WP-E: social_reset_server
 #include <camera_feel.h>
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
 #include <html_ui.h>
@@ -739,6 +741,7 @@ int main(int argc, char **argv) {
     render_target_fini();
     html_ui_fini();
     voice_fini();
+    sprays_wheel_fini(); // its canvas (GL)
     audio_fini();
     headless_shutdown();
     client_settings_exit(); // Discord RPC close; relaunch when a "*" setting asked for a restart
@@ -1050,6 +1053,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     client->net_ent_size = net_ent_size_for(init->major, init->minor, init->patch);
     client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
     client->net_server_patch = init->major == NET_PROTOCOL_MAJOR ? init->patch : 0; // WP-C (ENT V8)
+    social_reset_server(); // WP-E part 2b: v7 social packets after the server's NET_PACKET_SOCIAL_V7
     if (client->map_loaded) client_unload_map(client);
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
@@ -1684,6 +1688,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
 
     if (!scenario) vfx_render_screen(client); // overlay-canvas muzzle flash + damage overlay
     if (!scenario) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
+    if (!scenario) sprays_wheel_render(client, delta); // WP-E: v7 spray wheel (game-overlay canvas)
     if (!scenario) ks_overlay_frame(frame_delta); // KrunkScript overlay canvas: script render(), below the HTML page
     input_script_frame_end(client, delta, frame_delta); // KRUNKNATIVE_INPUT_LOG row
 }

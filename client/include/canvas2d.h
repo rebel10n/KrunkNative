@@ -127,6 +127,8 @@ int c2d_image_state(const C2DImage*); // 1 ready, 0 loading, -1 failed
 void c2d_image_size(const C2DImage*, int *w, int *h);
 // drawImage(img, dx, dy, dw, dh); not-ready images draw nothing.
 void c2d_draw_image(Canvas2D*, C2DImage*, double dx, double dy, double dw, double dh);
+// drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh): the source rect (image px) into the destination.
+void c2d_draw_image_sub(Canvas2D*, C2DImage*, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh);
 
 // Frame
 int c2d_is_empty(const Canvas2D*);  // the layer shows nothing and nothing is pending

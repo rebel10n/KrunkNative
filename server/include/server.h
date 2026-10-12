@@ -127,6 +127,7 @@ typedef struct {
     double next_recon_at;          // net_time() of the next periodic RECON ("l", NET_RECON_SEND_HZ)
     SocialAssembly social;         // social hub request being reassembled (shared/include/social.h)
     SocialAssembly voice;          // voice clip being reassembled (shared/include/voice.h, io_vc)
+    SocialAssembly voice_v7;       // WP-E: a NET_PACKET_VOICE_V7 clip being reassembled (v7 "vc" with channel)
 
     Player *player;
     ServerAccount acct;            // backend account + match stats (server/src/accounts.c)
