@@ -94,3 +94,11 @@ A records are deliberately not redirected: released native clients have them com
 and neither 301 nor 308 helps there (CORS preflights and WebSocket upgrades do not follow
 redirects, game servers are not HTTP). They keep pointing at the same tunnel / IPs until
 the old clients are gone.
+
+## Cache purge
+
+`deploy.sh` ends by purging Cloudflare's edge cache for the page hosts (`KN_PURGE_HOSTS`,
+default `krunk.io www.krunk.io`, zone `KN_PURGE_ZONE`) so every client loads the new build on
+its next page load. CI (deploy-kru.yml) runs the same script, so every deploy purges. The
+hashed `client.<hash>.*` files and `?v=` assets change URL with each build and are not purged.
+The token needs Zone Read + Cache Purge on the zone; `KN_PURGE_HOSTS=` skips the purge.

@@ -4,7 +4,7 @@ name: Deploy kru
 # the central node (assets., matchmaker., coordinator.krunk.io, play.krunk.io), then publish
 # the front end (krunk.io) to Cloudflare Pages (deploy/pages). `make pages` does the same by hand.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
-#          CLOUDFLARE_API_TOKEN (Pages: Edit), CLOUDFLARE_ACCOUNT_ID.
+#          CLOUDFLARE_API_TOKEN (Pages: Edit + Zone Read/Cache Purge on krunk.io), CLOUDFLARE_ACCOUNT_ID.
 on:
   push:
     branches: [slop]
