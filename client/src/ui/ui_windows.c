@@ -171,7 +171,7 @@ static char *windows_dir(void) {
 #else
     const char *dir = getenv("KRUNKNATIVE_UI_DIR"); // main.c's ui dir override
     if (dir && *dir) return concat(dir, "/windows/");
-    return concat(assets_path(), "../ui/windows/");
+    return concat(ui_default_path(), "windows/");
 #endif
 }
 

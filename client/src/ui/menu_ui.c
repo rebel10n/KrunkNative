@@ -28,6 +28,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <update_ui.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1392,6 +1393,7 @@ void client_menu_tick(Client *client) {
     client_hud_html_tick(client, (float) glfwGetTime()); // HTML HUD (hud_ui.c)
     hud_zombies_tick(client); // power-up timers, finiteAmmo reserve, zombie round (hud_zombies.c)
     ui_console_tick(client); // developer console (ui_console.c)
+    update_ui_tick(client);  // Outdated / Update now (update_ui.c)
     ui_interact_tick(client); // the interact prompt and hold progress (ui_interact.c)
 
     // Round end: the end screen frees the pointer (Krunker exits pointer lock so its

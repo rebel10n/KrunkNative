@@ -663,7 +663,7 @@ int main(int argc, char **argv) {
     // the browser renders the same page and the C UI logic drives it through web_dom.c.
     {
         const char *ui_dir_override = getenv("KRUNKNATIVE_UI_DIR"); // alternate page tree (tests/dev)
-        char *ui_dir = ui_dir_override && *ui_dir_override ? concat(ui_dir_override, "/") : concat(assets_path(), "../ui/");
+        char *ui_dir = ui_dir_override && *ui_dir_override ? concat(ui_dir_override, "/") : concat(ui_default_path(), "");
         int fb_width, fb_height;
         glfwGetFramebufferSize(INSTANCE.window, &fb_width, &fb_height);
 

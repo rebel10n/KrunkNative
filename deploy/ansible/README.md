@@ -9,7 +9,15 @@ Ansible for the KrunkNative central node (`kru`) and the edge game servers.
 | `firewall.yml` | `edges` | only the host firewall (vendored `edge_firewall` role), see [Edge firewall](#edge-firewall) |
 | `site.yml` | all | both |
 
-Tags: `user openresty repo release brain web bridge rtc gameserver dns firewall`.
+Tags: `user openresty repo release brain web updates bridge rtc gameserver dns firewall`.
+
+Client updates (`kn_updates`, doc/backend.md 9.8): `https://assets.krunk.io/updates/` serves
+`/opt/krunknative-updates/public/` (OpenResty `kn.d/updates.conf`): the channel manifest CI's
+`client.yml` job `updates` publishes with `kn-updates publish`, the update packages and the game
+content as hardlinked objects of the web asset tree. Off until `kn_updates_enabled: true`
+(`group_vars/central/main.yml`; Deploy kru runs central.yml on every push). Enable it there, apply
+with `ansible-playbook central.yml --tags openresty,updates` (no full deploy needed), then set the
+repository variable `KN_UPDATES_UPLOAD=1`.
 
 Routing on kru (Cloudflare tunnel ingress, managed in Cloudflare): `assets.krunk.io -> :8081`,
 `matchmaker.krunk.io -> :8082`, `coordinator.krunk.io -> :8083`, `play.krunk.io -> :8084` (the

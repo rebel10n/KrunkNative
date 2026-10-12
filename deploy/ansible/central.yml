@@ -8,6 +8,7 @@
     - { role: kn_release, tags: [release, brain] }
     - { role: kn_brain, tags: [brain] }
     - { role: kn_web, tags: [web] }
+    - { role: kn_updates, tags: [updates], when: kn_updates_enabled | bool }
     - { role: kn_bridge, tags: [bridge] }
     - { role: kn_rtc, tags: [rtc] }
   post_tasks:

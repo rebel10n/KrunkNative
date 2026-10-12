@@ -147,8 +147,9 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation, editor bus, editor model and nav mesh tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation, editor bus, editor model, nav mesh and client update tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
+	./$(DEBUG_DIR)/update_test
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/server_names_test
 	./$(DEBUG_DIR)/lagcomp_test
@@ -372,6 +373,14 @@ backend-run: build services ## Foreground variant of backend-up (ctrl-c stops al
 	BUILD_DIR=$(DEBUG_DIR) GAMESERVERS=$(GAMESERVERS) services/scripts/backend-up.sh $(BACKEND_ARGS)
 
 # --------------------------------------------------------------------------- checks
+
+# Client updates (launcher/, doc/backend.md "Client updates"): the launcher against a local updates
+# store made by tools/release/kn-updates.py, served on a free port; the last step runs the client
+# headless (EGL_DEVICE=...; LAUNCHER_E2E_ARGS=--no-client skips it).
+LAUNCHER_E2E_ARGS ?=
+.PHONY: launcher-e2e
+launcher-e2e: build ## Launcher + updates server end to end: executable update, self-update, content diff, deb, corrupt package, the client's Update now
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_e2e.py $(DEBUG_DIR) $(LAUNCHER_E2E_ARGS)
 
 .PHONY: smoke smoke-native smoke-web lint check
 check: test ks-test editor-mcp-test lint bridge-check ## Everything CI runs that does not need a display

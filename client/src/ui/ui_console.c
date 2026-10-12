@@ -28,6 +28,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <update_ui.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
@@ -309,6 +310,7 @@ void ui_console_on_cheat(const int flag, const int on) {
 
 static const ConArg A_CMD[] = {{"cmd", ARG_STRING, 1}};
 static const ConArg A_TEXT[] = {{"text", ARG_STRING, 0}};
+static const ConArg A_UPDATE[] = {{"check|now|download", ARG_STRING, 0}};
 static const ConArg A_BIND[] = {{"key", ARG_STRING, 1}, {"command", ARG_STRING, 1}};
 static const ConArg A_KEY[] = {{"key", ARG_STRING, 0}};
 static const ConArg A_ALIAS[] = {{"name", ARG_STRING, 1}, {"command", ARG_STRING, 1}};
@@ -1185,6 +1187,12 @@ static void cmd_netinfo(const int argc, char **argv, const char *rest) {
     }
 }
 
+// update [check|now|download]: the client update (update_ui.c, doc/backend.md "Client updates")
+static void cmd_update(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    update_ui_console(argc, argv);
+}
+
 static void register_commands(void) {
     if (g_con.cmd_count) return;
     register_local("help", ARGS(A_CMD), "list commands", cmd_help);
@@ -1205,6 +1213,7 @@ static void register_commands(void) {
     register_local("version", NO_ARGS, "show current client version", cmd_version);
     register_local("build", NO_ARGS, "alias for version", cmd_version);
     register_local("verison", NO_ARGS, "alias for version", cmd_version);
+    register_local("update", ARGS(A_UPDATE), "check for a newer client (update check), install it through the launcher (update now) or download it", cmd_update);
     register_local("toggle", ARGS(A_VAR), "toggle a server boolean command (god, noclip, ...)", cmd_toggle);
     register_local("say", ARGS(A_TEXT), "say something in chat", cmd_say);
     register_local("status", NO_ARGS, "show current server connection details", cmd_status);

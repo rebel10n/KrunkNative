@@ -3189,7 +3189,11 @@ int net_packet_read_spawn(NetSpawnPacket*, const NetPacket*); // 78-byte (no cos
 uint32_t net_map_hash(const cJSON *map, char **json_out, size_t *size_out);
 
 char *concat(const char*, const char*);
-const char *assets_path();
+const char *assets_path();         // the game content: KRUNKNATIVE_ASSETS_DIR, else assets_default_path()
+// "./assets/" from the install / repo root, "../assets/" from cmake-build-*: cwd-based, never the
+// KRUNKNATIVE_ASSETS_DIR override.
+const char *assets_default_path();
+const char *ui_default_path();     // "./ui/" or "../ui/": the menu page beside assets_default_path()
 int ensure_asset_file(const char*); // web: fetch into MEMFS on demand, native: no-op returning 1
 // The URL an asset path ("/assets/textures/x.png") is downloaded from, malloc'd (caller frees):
 // web: web_asset_url (asset host + ?v=<version>), native: a copy of the path. NULL on OOM.

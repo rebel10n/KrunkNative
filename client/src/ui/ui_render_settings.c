@@ -160,7 +160,7 @@ static int ui_file_exists(const char *relative) {
     const char *override = getenv("KRUNKNATIVE_UI_DIR"); // same lookup as main.c's html_ui_init
     char full[1024];
     if (override && *override) snprintf(full, sizeof(full), "%s/%s", override, relative);
-    else snprintf(full, sizeof(full), "%s../ui/%s", assets_path(), relative);
+    else snprintf(full, sizeof(full), "%s%s", ui_default_path(), relative);
     FILE *f = fopen(full, "rb");
     if (f) fclose(f);
     return f != NULL;

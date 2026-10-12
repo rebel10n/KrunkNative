@@ -52,6 +52,7 @@
 #include <spectate.h> // state.spectate
 #include <hud_map.h>  // state.customMap (the minimap of custom-map games)
 #include <backend_ui.h> // store_skin_preview: killcard player card banners
+#include <update_ui.h> // state.update: the Outdated box
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -229,6 +230,7 @@ static void warn_unknown_keys(void) {
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "ranked",  // the Ranked window's state: {rating: /mm/queue/rating, party: a poll response, tab}
+        "update",  // the menu's Outdated / Update now box (update_ui_scenario)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -244,7 +246,7 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
 
     // assets_path() is "./assets/" (repo root) or "../assets/" (cmake-build-*): the
     // scenario's repo-relative paths resolve against the same root.
-    const char *assets = assets_path();
+    const char *assets = assets_default_path();
     const size_t alen = strlen(assets);
     snprintf(g_sc.root_dir, sizeof(g_sc.root_dir), "%.*s", (int) (alen >= 7 ? alen - 7 : 0), assets);
 
@@ -821,6 +823,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
     ranked_ui_scenario(st("ranked"));   // the Ranked window's rank card / party (ranked_ui.c)
+    update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);
 
     run_frames(client, 2);

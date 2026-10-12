@@ -1838,6 +1838,114 @@ failures and heartbeat expiry); `brain_auth_e2e` = `services/brain/tests/federat
 <build>` (auth+community, finder, a third-party community coordinator, an online_mode server linked
 to it and an offline standalone one, headless clients in both modes, rcon relay, replay check).
 
+### 9.8 Client updates: launcher, updates server, Outdated (client-updates)
+
+Native clients go outdated like servers (8.12) and update themselves through a **launcher**. The web
+client is always the latest (served by the site) and has none of this.
+
+**Updates server**: static files on kru behind OpenResty, `https://assets.krunk.io/updates/` (a
+`/updates/` location on the existing `assets.krunk.io` tunnel route: no DNS or tunnel change;
+role `kn_updates`, root `/opt/krunknative-updates/public/`). Written only by
+`tools/release/kn-updates.py`:
+
+| path | content | cache |
+| --- | --- | --- |
+| `client/<channel>.json` (`latest`) | channel manifest, written last | `no-cache` |
+| `client/builds/<commit12>/krunknative-client-<plat>.{tar.gz,zip}` | executable-only update packages (last 3 builds) | immutable |
+| `assets/<version>.json` | game content list `{"format":1,"version","files":[[path,sha256,size],...]}` | immutable |
+| `assets/objects/<aa>/<sha256>` | content-addressed files: hardlinks into the web asset tree `/opt/krunknative-web/assets` (no extra disk) | immutable |
+
+Channel manifest (`format` 1; relative URLs resolve against the manifest's URL):
+`{"format":1,"channel":"latest","published","build":{kn-build: describe, commit, commit_time,
+build_time, protocol},"outdated_grace_h":48,"page":<release page>,"platforms":{"<plat>":{"update":
+{"url","sha256","size"},"downloads":{"tar.gz"|"zip"|"deb"|"rpm": url}}},"assets":{"version",
+"manifest","sha256","size","objects","files","bytes","packaged":[paths the packages ship]}}`. Platforms: `linux-amd64`,
+`linux-amd64-polyfilled`, `linux-aarch64`, `linux-aarch64-polyfilled`, `windows-amd64`,
+`macos-aarch64`, `macos-amd64`; the update package is the `.zip` on Windows, else the `.tar.gz`.
+Full packages (with the game content) are not hosted: the launcher downloads the content.
+
+**Content split**. The packages ship the code-coupled, git-tracked part of `assets/` (shaders, maps,
+img, editor, `skins.json`, `previews.json`): those files belong to the executable update, and the
+content index leaves them out (`kn-updates stage` lists them in `build.json` as `package_assets`, the
+manifest as `assets.packaged`, and a sync never removes them).
+Everything else (models, textures, sounds, fonts: the web asset tree on kru) is the content set,
+versioned by the hash of its file list.
+
+**Publishing** (CI, `client.yml` job `updates`, off until the repository variable
+`KN_UPDATES_UPLOAD` is `1`): `kn-updates stage` picks each platform's update package from the
+`client-pkg-*` artifacts, checks their `.sha256` and writes `build.json` (kn-build line, sha256 and size
+per package, GitHub download links); rsync to `kru:/opt/krunknative-updates/incoming/<commit12>/`;
+`ssh kru kn-updates publish <dir>` verifies the packages, moves them to `builds/`, indexes the content
+(hash cache; objects hardlinked), writes the content list, then the channel manifest, and prunes builds
+/ lists / objects beyond the last 3 publishes. Only moves forward (an older commit_time is skipped).
+`kn-updates assets` re-indexes after the web asset tree changed (the role runs it, also with
+`--tags web_assets`); `kn-updates status` prints what is live. The web asset tree must be updated by
+replacing files (rsync's default temp + rename), never in place: objects share its inodes.
+
+**Launcher** (`launcher/`, target `kn_launcher`, binary `krunknative` / `KrunkNative.exe` (GUI
+subsystem) / the `.app`'s `Contents/MacOS/KrunkNative`, next to `client_bin`): what players start
+(deb/rpm `/usr/bin/krunknative`, the `.desktop` entry, the Windows shortcut, the `.app`). A small GLFW
+window (title, status, progress bar, Retry / Play / Quit after an error; FreeType with
+`ui/css/fonts`, same GL backend as the client) or `--cli` / `--headless` (progress lines on stdout).
+Before the game it:
+
+1. reads `kn-install.json` (next to it, or `../Resources` in a `.app`: `{"format":1,"platform",
+   "package":"tar.gz|zip|deb|rpm|app","channel","root"}`), rolls back an update a crash interrupted
+   (journal in `<root>/.kn-update/`) and fetches the channel manifest (`--updates-url`,
+   `KRUNKNATIVE_UPDATES_URL`, default `https://assets.krunk.io/updates/client/latest.json`, `off`
+   disables);
+2. when the manifest's build is newer than its own (`kn_update_compare`, 8.12's rule: same commit or
+   a newer commit_time = current; an older protocol, no build info or older than latest − grace =
+   outdated; else update available) installs the update package: download (sha256 + size checked),
+   extract (tar.gz/zip, unsafe paths refused), run the staged `client_bin --version` (a build that
+   cannot run on this system is never installed), then swap every packaged file into the root with a
+   journal (`ui/` as a whole; replaced files kept until the commit line, any failure rolls back). The
+   running launcher is renamed aside like any file (also on Windows), so the new launcher runs from
+   the next start. deb/rpm installs (and read-only roots) are left to the package manager: the window
+   names the download;
+3. syncs the game content when the manifest's content version differs from
+   `<assets>/.kn-assets.json`: downloads the list, diffs it (a file the last list vouches for with the
+   right size is kept; a file of the right size the list does not vouch for is hashed and adopted),
+   downloads only the missing / changed objects (4 parallel keep-alive connections, each verified),
+   deletes files the previous list had and the new one does not (never the user's own files), records
+   the list. First install = everything (~1.6 GB);
+4. copies the package's own `assets/` files into the content dir when that is another directory;
+5. starts `client_bin` (cwd = the directory with `ui/`; `KRUNKNATIVE_ASSETS_DIR=<content dir>`,
+   `KRUNKNATIVE_LAUNCHER=<launcher>`; POSIX `exec`, Windows a new process). Unknown arguments and
+   everything after `--` go to the client.
+
+Content dir: `<root>/assets` when writable (portable tar.gz/zip), else the user data dir
+(`${XDG_DATA_HOME:-~/.local/share}/krunknative/assets`, `~/Library/Application Support/KrunkNative/assets`
+(always on macOS: never inside the signed bundle), `%LOCALAPPDATA%\KrunkNative\assets`); always the user
+data dir for deb/rpm; `--assets-dir` / `KRUNKNATIVE_ASSETS_DIR` override. `assets_path()` honours
+`KRUNKNATIVE_ASSETS_DIR`; `ui/` stays beside the cwd-based default (`assets_default_path()`).
+Other flags: `--no-update`, `--check` (exit 3 = newer build), `--no-launch`, `--wait-pid PID`.
+HTTP: `launcher/src/http_fetch.c` (POSIX: `client/src/net/http_conn.c`, the brain client's
+connection code with OpenSSL; Windows: WinHTTP with the system certificate store).
+
+**Client** (`client/src/ui/update_ui.c`): reads the manifest 3 s after start and hourly (headless
+runs only with `KRUNKNATIVE_UPDATES_URL`), and when a newer build exists shows a box in the menu's
+left column above v7's notices: **Outdated** (orange) or **Update available** (yellow), the latest
+version, **Update now** (only under the launcher, for self-updating installs: starts the launcher
+with `--wait-pid` and quits; never forced mid-game) and **Download** (the deb/rpm/archive for this
+install, else the release page; only `github.com/rebel10n/KrunkNative/` and the updates host are
+opened). Console: `update` (status), `update check`, `update now` (menu open only), `update download`.
+
+**Tests**: `update_test` (in `make test`: manifest parsing, URL resolution, version comparison, asset
+lists and diffing, the install marker, tar.gz/zip extraction incl. traversal and escaping symlinks,
+the journaled swap with rollback and crash recovery, package asset mirroring);
+`make launcher-e2e` (`launcher/tests/launcher_e2e.py`: a store made by `kn-updates.py` served on a
+free port; executable + launcher self-update, content diff, deb deferral, corrupt package, the
+client's own Outdated check and `update now`).
+
+**kru setup**: off until `kn_updates_enabled: true` in `deploy/ansible/group_vars/central/main.yml`
+(Deploy kru runs central.yml on every push; with the switch off it adds nothing to kru). Then
+`ansible-playbook central.yml --tags openresty,updates` (the `kn.d/` include in nginx.conf, the store
+directories, `/usr/local/bin/kn-updates`, the `/updates/` location, the first content index) and the
+repository variable `KN_UPDATES_UPLOAD=1`.
+Optional: a Cloudflare cache rule making `assets.krunk.io/updates/client/builds/*` and
+`/updates/assets/objects/*` eligible for caching (both immutable; the manifest stays `no-cache`).
+
 ## 10. Deployment
 
 `deploy/` (svc-matchmaker); details in `deploy/README.md`.

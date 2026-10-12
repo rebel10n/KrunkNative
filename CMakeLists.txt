@@ -339,6 +339,13 @@ else ()
         message(STATUS "Client: OpenSSL (libssl) not found; the backend client is http:// only")
     endif ()
 
+    # Client updates (launcher/, doc/backend.md "Client updates"): the menu's Outdated check reads
+    # the updates manifest itself (launcher/src/update_core.c + http_fetch.c, WinHTTP on Windows)
+    # and "Update now" restarts through the launcher (install.c / fs.c: kn_proc_spawn_detached).
+    set(KN_UPDATE_CLIENT_SOURCES launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/fs.c launcher/src/install.c)
+    target_sources(${CLIENT_BINARY} PRIVATE ${KN_UPDATE_CLIENT_SOURCES})
+    target_include_directories(${CLIENT_BINARY} PRIVATE launcher/include)
+
     if (KRUNKNATIVE_HTML_ENGINE)
         # HTML UI (in-house engine): Lexbor + engine/*.c + html_ui.c + html_dom_core.c,
         # KRUNKNATIVE_HTML_ENGINE=1 on the whole client target.
@@ -370,10 +377,37 @@ else ()
     endif ()
 
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32)
+        target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32 winhttp)
         target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
         target_link_libraries(kn_server_core PUBLIC ws2_32)
     endif ()
+
+    # LAUNCHER (launcher/, doc/backend.md "Client updates"): what players start. It updates the
+    # executables + ui/ and syncs the game content from the updates server, then runs client_bin.
+    # Output: krunknative (KrunkNative.exe, a GUI-subsystem exe), next to client_bin in packages.
+    # Same GL backend, FreeType and OpenSSL as client_bin, no other runtime dependency.
+    set(LAUNCHER_SOURCES
+        launcher/src/launcher.c launcher/src/launcher_ui.c launcher/src/launcher_ui.h
+        launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/archive.c launcher/src/fs.c
+        launcher/src/install.c launcher/src/assets_sync.c
+        client/src/net/http_conn.c client/src/headless.c client/src/png_write.c client/src/stb_image.c
+        shared/src/auth_join.c)
+    add_executable(kn_launcher WIN32 ${LAUNCHER_SOURCES})
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set_target_properties(kn_launcher PROPERTIES OUTPUT_NAME KrunkNative)
+        target_link_libraries(kn_launcher PRIVATE winhttp)
+    else ()
+        set_target_properties(kn_launcher PROPERTIES OUTPUT_NAME krunknative)
+    endif ()
+    target_include_directories(kn_launcher PRIVATE launcher/include client/include shared/include)
+    target_link_libraries(kn_launcher PRIVATE glfw freetype kn_build_info Threads::Threads m)
+    krunknative_link_gl(kn_launcher)
+    krunknative_link_headless(kn_launcher)
+    if (OpenSSL_FOUND AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(kn_launcher PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        target_compile_definitions(kn_launcher PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+    endif ()
+    target_link_libraries(kn_launcher PRIVATE ${CMAKE_DL_LIBS})
 
     # TESTS
     add_executable(proc_input_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/proc_input_test.c)
@@ -595,6 +629,14 @@ else ()
         target_link_libraries(editor_export_test PRIVATE ws2_32)
     endif ()
     add_test(NAME editor_export_test COMMAND editor_export_test ${CMAKE_SOURCE_DIR})
+
+    # update_test (launcher/, doc/backend.md "Client updates"): manifest parsing, version
+    # comparison, asset diffing, URL resolution, package extraction and the journaled swap
+    add_executable(update_test launcher/tests/update_test.c launcher/src/update_core.c launcher/src/archive.c
+                   launcher/src/fs.c launcher/src/install.c client/src/stb_image.c shared/src/auth_join.c)
+    target_include_directories(update_test PRIVATE launcher/include client/include shared/include)
+    target_link_libraries(update_test PRIVATE cJSON m)
+    add_test(NAME update_test COMMAND update_test)
 
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)

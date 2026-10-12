@@ -93,6 +93,11 @@ http {
         }
 {% endif %}
 
+{% if kn_updates_enabled | default(false) | bool %}
+        # Locations other roles add (kn_updates: /updates/), one file each.
+        include {{ openresty_prefix }}/nginx/conf/kn.d/*.conf;
+
+{% endif %}
         location = /healthz {
             default_type text/plain;
             return 200 "ok\n";

@@ -2,12 +2,7 @@
 #include <auth_join.h>
 #include <string.h>
 
-typedef struct {
-    uint32_t h[8];
-    uint8_t block[64];
-    size_t fill;
-    uint64_t total;
-} Sha256;
+typedef KnSha256 Sha256;
 
 static const uint32_t K[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -80,6 +75,19 @@ static void sha_final(Sha256 *s, uint8_t out[32]) {
         out[i * 4 + 2] = (uint8_t) (s->h[i] >> 8);
         out[i * 4 + 3] = (uint8_t) s->h[i];
     }
+}
+
+void kn_sha256_init(KnSha256 *s) { sha_init(s); }
+void kn_sha256_update(KnSha256 *s, const void *data, size_t len) { sha_update(s, data, len); }
+void kn_sha256_final(KnSha256 *s, uint8_t out[32]) { sha_final(s, out); }
+
+void kn_sha256_hex(const uint8_t digest[32], char out_hex[65]) {
+    static const char hex[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) {
+        out_hex[i * 2] = hex[digest[i] >> 4];
+        out_hex[i * 2 + 1] = hex[digest[i] & 15];
+    }
+    out_hex[64] = 0;
 }
 
 void kn_sha256_bytes(const void *data, size_t len, uint8_t out[32]) {

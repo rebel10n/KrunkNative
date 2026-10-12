@@ -1,0 +1,77 @@
+# Client updates store (defaults/main.yml). Only with kn_updates_enabled: true
+# (group_vars/central/main.yml; otherwise central.yml skips the role and nginx.conf has no kn.d
+# include). Apply on its own with
+#   ansible-playbook central.yml --tags openresty,updates
+# (openresty: the kn.d include in nginx.conf). CI's client.yml job `updates` uploads builds
+# into incoming/ and runs `kn-updates publish` over ssh; this role only prepares the host and
+# re-indexes the game content.
+- name: Updates store directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ kn_updates_root }}"
+    - "{{ kn_updates_root }}/public"
+    - "{{ kn_updates_root }}/public/client"
+    - "{{ kn_updates_root }}/public/client/builds"
+    - "{{ kn_updates_root }}/public/assets"
+    - "{{ kn_updates_root }}/public/assets/objects"
+    - "{{ kn_updates_root }}/state"
+    - "{{ kn_updates_root }}/incoming"
+
+- name: The objects share a file system with the web asset tree (hardlinks)
+  ansible.builtin.shell: |
+    set -eu
+    [ "$(stat -c %d {{ kn_updates_root | quote }}/public/assets/objects)" = "$(stat -c %d {{ kn_updates_web_assets | quote }})" ] \
+      || { echo "different file systems: objects would be copies (~1.5 GB)"; exit 1; }
+  args:
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: kn-updates (tools/release/kn-updates.py)
+  ansible.builtin.copy:
+    src: "{{ kn_repo_root }}/tools/release/kn-updates.py"
+    dest: "{{ kn_updates_bin }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: OpenResty include directory
+  ansible.builtin.file:
+    path: "{{ openresty_prefix }}/nginx/conf/kn.d"
+    state: directory
+    mode: "0755"
+
+- name: /updates/ location for OpenResty
+  ansible.builtin.template:
+    src: updates.conf.j2
+    dest: "{{ openresty_prefix }}/nginx/conf/kn.d/updates.conf"
+    mode: "0644"
+  register: kn_updates_conf
+
+- name: OpenResty config test
+  ansible.builtin.command: "{{ openresty_prefix }}/nginx/sbin/nginx -t -q -p {{ openresty_prefix }}/nginx/ -c {{ openresty_conf }}"
+  changed_when: false
+  when: kn_updates_conf.changed and not ansible_check_mode
+
+- name: Reload OpenResty for the /updates/ location
+  ansible.builtin.systemd_service:
+    name: openresty
+    state: reloaded
+  when: kn_updates_conf.changed and not ansible_check_mode
+
+# The content index: every file of the web asset tree except the ones the published packages ship
+# (shaders, maps, ...), as hardlinked objects; rewrites the channel manifest when it changed.
+- name: Index the game content (kn-updates assets)
+  ansible.builtin.command:
+    argv: ["{{ kn_updates_bin }}", "assets", "--root", "{{ kn_updates_root }}", "--web-assets", "{{ kn_updates_web_assets }}",
+           "--keep", "{{ kn_updates_keep }}"]
+  register: kn_updates_assets
+  changed_when: "'assets now' in kn_updates_assets.stdout or 'indexing only' in kn_updates_assets.stdout"
+  when: kn_updates_index | bool and not ansible_check_mode
+  tags: [updates, web_assets]

@@ -18,6 +18,7 @@
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
 #include <math.h>
 #include <stdio.h>
+#include <update_ui.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -590,6 +591,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
+    update_ui_handle,          // update_ui.c: knUpdateNow / knUpdateDownload (the Outdated box)
 };
 
 static int h_fallback(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {

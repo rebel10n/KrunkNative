@@ -46,6 +46,14 @@ const char *assets_path() {
     return "/assets/";
 }
 
+const char *assets_default_path() {
+    return "/assets/";
+}
+
+const char *ui_default_path() {
+    return "/ui/";
+}
+
 static int web_mkdir_parents(const char *path) {
     char buffer[512];
     const size_t length = strlen(path);
@@ -222,7 +230,29 @@ void asset_prefetch_wait(const char *const *paths, const size_t count) {
     if (g_asset_yield_hook && paths && count) g_asset_yield_hook(paths[0]);
 }
 
+// KRUNKNATIVE_ASSETS_DIR (the launcher sets it: the game content in a user-writable data dir),
+// else the cwd-based default below. Read once; child windows inherit the variable.
 const char *assets_path() {
+    static char override[1024];
+    static int checked;
+    if (!checked) {
+        checked = 1;
+        const char *dir = getenv("KRUNKNATIVE_ASSETS_DIR");
+        const size_t len = dir ? strlen(dir) : 0;
+        if (len && len + 2 < sizeof(override))
+            snprintf(override, sizeof(override), "%s%s", dir, dir[len - 1] == '/' || dir[len - 1] == '\\' ? "" : "/");
+    }
+    return override[0] ? override : assets_default_path();
+}
+
+// ui/ beside the default assets dir, without going through it: "./assets/../ui/" does not resolve
+// when ./assets is missing (the launcher's layout keeps the game content elsewhere).
+const char *ui_default_path() {
+    const char *assets = assets_default_path();
+    return assets && !strncmp(assets, "../", 3) ? "../ui/" : "./ui/";
+}
+
+const char *assets_default_path() {
     char path[256];
     if (!getcwd(path, sizeof(path))) return NULL;
 

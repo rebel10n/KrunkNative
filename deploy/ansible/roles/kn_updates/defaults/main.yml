@@ -1,0 +1,15 @@
+# Client updates store (doc/backend.md "Client updates", tools/release/kn-updates.py), served by
+# OpenResty as https://assets.krunk.io/updates/ (the assets.krunk.io tunnel route: no DNS change):
+#   /opt/krunknative-updates/public/client/latest.json             channel manifest (CI publishes it)
+#   /opt/krunknative-updates/public/client/builds/<commit12>/...   executable-only update packages
+#   /opt/krunknative-updates/public/assets/<version>.json          game content list
+#   /opt/krunknative-updates/public/assets/objects/<aa>/<sha256>   content objects: hardlinks into
+#                                                                  kn_web's asset tree (no extra disk)
+#   /opt/krunknative-updates/{state,incoming}/                     not served
+kn_updates_root: /opt/krunknative-updates
+kn_updates_web_assets: "{{ kn_web_base | default('/opt/krunknative-web') }}/assets"
+kn_updates_bin: /usr/local/bin/kn-updates
+# Builds / content lists kept for clients that are mid-update (kn-updates --keep).
+kn_updates_keep: 3
+# Re-index the content after every run (cheap: a hash cache; objects are hardlinks).
+kn_updates_index: true

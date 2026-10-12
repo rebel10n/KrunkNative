@@ -39,11 +39,7 @@ int backend_social_send_text(const char *json) { (void) json; return 0; }
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifdef KRUNKNATIVE_HAVE_TLS
-#include <openssl/err.h>
-#include <openssl/ssl.h>
-#include <openssl/x509v3.h>
-#endif
+#include <http_conn.h>
 
 #define HTTP_TIMEOUT_MS 8000
 #define HTTP_MAX_BODY (4u * 1024u * 1024u)
@@ -52,58 +48,6 @@ int backend_social_send_text(const char *json) { (void) json; return 0; }
 #define WS_BACKOFF_MAX_MS 10000
 
 // ------------------------------------------------------------------ small helpers
-
-typedef struct {
-    char host[128];
-    char port[8];
-    char base[128]; // path prefix, "" or "/prefix"
-    int tls;        // https:// / wss://
-} BrainAddr;
-
-// http(s)://host[:port][/base] (also ws:// / wss://); TLS needs KRUNKNATIVE_HAVE_TLS
-static int parse_url(const char *url, BrainAddr *a) {
-    memset(a, 0, sizeof(*a));
-    const char *p = url;
-    if (!strncmp(p, "http://", 7)) p += 7;
-    else if (!strncmp(p, "ws://", 5)) p += 5;
-    else if (!strncmp(p, "https://", 8) || !strncmp(p, "wss://", 6)) {
-#ifdef KRUNKNATIVE_HAVE_TLS
-        p += p[0] == 'h' ? 8 : 6;
-        a->tls = 1;
-#else
-        static int warned;
-        if (!warned++) fprintf(stderr, "[backend] %s needs TLS, but this client was built without OpenSSL\n", url);
-        return 0;
-#endif
-    }
-    const char *host_end = p;
-    while (*host_end && *host_end != ':' && *host_end != '/') host_end++;
-    const size_t host_len = (size_t) (host_end - p);
-    if (!host_len || host_len >= sizeof(a->host)) return 0;
-    memcpy(a->host, p, host_len);
-    p = host_end;
-    if (*p == ':') {
-        p++;
-        size_t n = 0;
-        while (*p >= '0' && *p <= '9' && n + 1 < sizeof(a->port)) a->port[n++] = *p++;
-        a->port[n] = 0;
-    }
-    if (!a->port[0]) strcpy(a->port, a->tls ? "443" : "80");
-    if (*p == '/') snprintf(a->base, sizeof(a->base), "%s", p);
-    size_t n = strlen(a->base);
-    while (n && a->base[n - 1] == '/') a->base[--n] = 0;
-    return 1;
-}
-
-// The request target of an http(s) URL: everything from the first '/' after host[:port]
-// ("" for none). Not BrainAddr.base: that one is char[128] and cut a signed-in seek-game
-// (?game=...&token=<32 hex>) short by a character, so the brain saw a guest.
-static const char *url_target(const char *url) {
-    const char *p = strstr(url, "://");
-    p = p ? p + 3 : url;
-    while (*p && *p != '/') p++;
-    return p;
-}
 
 static int64_t now_ms(void) {
     struct timespec ts;
@@ -114,150 +58,6 @@ static int64_t now_ms(void) {
 static void sleep_ms(const int ms) {
     struct timespec ts = {ms / 1000, (long) (ms % 1000) * 1000000L};
     nanosleep(&ts, NULL);
-}
-
-// Blocking connect with a timeout (non-blocking connect + poll), then blocking again.
-static int connect_to(const BrainAddr *a, const int timeout_ms) {
-    struct addrinfo hints = {0}, *res = NULL;
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(a->host, a->port, &hints, &res) != 0 || !res) return -1;
-    int fd = -1;
-    for (struct addrinfo *ai = res; ai && fd < 0; ai = ai->ai_next) {
-        fd = (int) socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (fd < 0) continue;
-        struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) != 0) {
-            close(fd);
-            fd = -1;
-        }
-    }
-    freeaddrinfo(res);
-    if (fd >= 0) {
-        const int one = 1;
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    }
-    return fd;
-}
-
-static int send_all(const int fd, const void *data, size_t len) {
-    const char *p = data;
-    while (len) {
-        const ssize_t w = send(fd, p, len, MSG_NOSIGNAL);
-        if (w < 0 && errno == EINTR) continue;
-        if (w <= 0) return 0;
-        p += w;
-        len -= (size_t) w;
-    }
-    return 1;
-}
-
-// ------------------------------------------------------------------ connection (plain or TLS)
-
-typedef struct {
-    int fd;
-#ifdef KRUNKNATIVE_HAVE_TLS
-    SSL *ssl;
-#endif
-} Conn;
-
-#ifdef KRUNKNATIVE_HAVE_TLS
-static SSL_CTX *g_tls_ctx;
-static pthread_once_t g_tls_once = PTHREAD_ONCE_INIT;
-
-static void tls_init_once(void) {
-    g_tls_ctx = SSL_CTX_new(TLS_client_method());
-    if (!g_tls_ctx) return;
-    SSL_CTX_set_min_proto_version(g_tls_ctx, TLS1_2_VERSION);
-    SSL_CTX_set_verify(g_tls_ctx, SSL_VERIFY_PEER, NULL);
-    if (SSL_CTX_set_default_verify_paths(g_tls_ctx) != 1) fprintf(stderr, "[backend] TLS: no system CA store\n");
-}
-#endif
-
-// Connects (and runs the TLS handshake, verifying the certificate for a->host). 0 on failure.
-static int conn_open(Conn *c, const BrainAddr *a, const int timeout_ms) {
-    memset(c, 0, sizeof(*c));
-    c->fd = connect_to(a, timeout_ms);
-    if (c->fd < 0) return 0;
-    struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
-    setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#ifdef KRUNKNATIVE_HAVE_TLS
-    if (a->tls) {
-        pthread_once(&g_tls_once, tls_init_once);
-        c->ssl = g_tls_ctx ? SSL_new(g_tls_ctx) : NULL;
-        if (!c->ssl || !SSL_set_fd(c->ssl, c->fd) || !SSL_set_tlsext_host_name(c->ssl, a->host) ||
-            !SSL_set1_host(c->ssl, a->host) || SSL_connect(c->ssl) != 1) {
-            const long verify = c->ssl ? SSL_get_verify_result(c->ssl) : X509_V_OK;
-            fprintf(stderr, "[backend] TLS to %s failed%s%s\n", a->host, verify != X509_V_OK ? ": " : "",
-                    verify != X509_V_OK ? X509_verify_cert_error_string(verify) : "");
-            ERR_clear_error();
-            if (c->ssl) SSL_free(c->ssl);
-            c->ssl = NULL;
-            close(c->fd);
-            c->fd = -1;
-            return 0;
-        }
-    }
-#endif
-    return 1;
-}
-
-static void conn_close(Conn *c) {
-#ifdef KRUNKNATIVE_HAVE_TLS
-    if (c->ssl) {
-        SSL_shutdown(c->ssl);
-        SSL_free(c->ssl);
-        c->ssl = NULL;
-    }
-#endif
-    if (c->fd >= 0) close(c->fd);
-    c->fd = -1;
-}
-
-static int conn_send(Conn *c, const void *data, size_t len) {
-#ifdef KRUNKNATIVE_HAVE_TLS
-    if (c->ssl) {
-        const char *p = data;
-        while (len) {
-            const int w = SSL_write(c->ssl, p, len > 1 << 30 ? 1 << 30 : (int) len);
-            if (w <= 0) return 0;
-            p += w;
-            len -= (size_t) w;
-        }
-        return 1;
-    }
-#endif
-    return send_all(c->fd, data, len);
-}
-
-// >0 bytes, 0 closed, <0 error (errno EAGAIN on a receive timeout)
-static ssize_t conn_recv(Conn *c, void *buf, const size_t len) {
-#ifdef KRUNKNATIVE_HAVE_TLS
-    if (c->ssl) {
-        const int r = SSL_read(c->ssl, buf, len > 1 << 30 ? 1 << 30 : (int) len);
-        if (r > 0) return r;
-        const int e = SSL_get_error(c->ssl, r);
-        if (e == SSL_ERROR_ZERO_RETURN) return 0;
-        if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) errno = EAGAIN;
-        ERR_clear_error();
-        return -1;
-    }
-#endif
-    for (;;) {
-        const ssize_t r = recv(c->fd, buf, len, 0);
-        if (r < 0 && errno == EINTR) continue;
-        return r;
-    }
-}
-
-// Decrypted bytes waiting inside the TLS layer (poll() on the fd cannot see them).
-static int conn_pending(const Conn *c) {
-#ifdef KRUNKNATIVE_HAVE_TLS
-    if (c->ssl) return SSL_pending(c->ssl) > 0;
-#endif
-    (void) c;
-    return 0;
 }
 
 typedef struct {
@@ -386,16 +186,16 @@ static size_t dechunk(char *body, const size_t len) {
 }
 
 static void http_run(HttpJob *job) {
-    BrainAddr a;
+    HttpAddr a;
     char *req_body = job->body;
     job->body = NULL;
     job->status = 0;
-    if (!parse_url(job->url, &a)) {
+    if (!http_url_parse(job->url, &a)) {
         free(req_body);
         return;
     }
-    Conn c;
-    if (!conn_open(&c, &a, HTTP_TIMEOUT_MS)) {
+    HttpConn c;
+    if (!http_conn_open(&c, &a, HTTP_TIMEOUT_MS)) {
         free(req_body);
         return;
     }
@@ -403,7 +203,7 @@ static void http_run(HttpJob *job) {
     Bytes req = {0};
     char head[640];
     const size_t body_len = req_body ? strlen(req_body) : 0;
-    const char *target = url_target(job->url);
+    const char *target = http_url_target(job->url);
     bytes_push(&req, job->method, strlen(job->method));
     bytes_push(&req, " ", 1);
     if (!target[0]) bytes_push(&req, "/", 1);
@@ -419,21 +219,21 @@ static void http_run(HttpJob *job) {
     bytes_push(&req, "\r\n", 2);
     if (req_body) bytes_push(&req, req_body, body_len);
     free(req_body);
-    const int sent = req.data && conn_send(&c, req.data, req.len);
+    const int sent = req.data && http_conn_send(&c, req.data, req.len);
     free(req.data);
     if (!sent) {
-        conn_close(&c);
+        http_conn_close(&c);
         return;
     }
 
     Bytes resp = {0};
     char buf[8192];
     for (;;) {
-        const ssize_t r = conn_recv(&c, buf, sizeof(buf));
+        const ssize_t r = http_conn_recv(&c, buf, sizeof(buf));
         if (r <= 0) break;
         if (!bytes_push(&resp, buf, (size_t) r) || resp.len > HTTP_MAX_BODY) break;
     }
-    conn_close(&c);
+    http_conn_close(&c);
     if (!resp.data) return;
 
     int status = 0;
@@ -546,7 +346,7 @@ static void ws_queue_in(char *text, const char *event) {
     pthread_mutex_unlock(&g_lock);
 }
 
-static int ws_send_frame(Conn *c, const int opcode, const char *data, const size_t len) {
+static int ws_send_frame(HttpConn *c, const int opcode, const char *data, const size_t len) {
     unsigned char head[14];
     size_t n = 0;
     head[n++] = (unsigned char) (0x80 | opcode);
@@ -567,12 +367,12 @@ static int ws_send_frame(Conn *c, const int opcode, const char *data, const size
     char *masked = malloc(len ? len : 1);
     if (!masked) return 0;
     for (size_t i = 0; i < len; i++) masked[i] = (char) (data[i] ^ mask[i & 3]);
-    const int ok = conn_send(c, head, n) && conn_send(c, masked, len);
+    const int ok = http_conn_send(c, head, n) && http_conn_send(c, masked, len);
     free(masked);
     return ok;
 }
 
-static int ws_handshake(Conn *c, const BrainAddr *a, const char *path) {
+static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *path) {
     static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     unsigned char raw[16];
     char key[25];
@@ -591,12 +391,12 @@ static int ws_handshake(Conn *c, const BrainAddr *a, const char *path) {
         "GET %s HTTP/1.1\r\nHost: %s:%s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
         "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: KrunkNative\r\n\r\n",
         path, a->host, a->port, key);
-    if (len <= 0 || (size_t) len >= sizeof(req) || !conn_send(c, req, (size_t) len)) return 0;
+    if (len <= 0 || (size_t) len >= sizeof(req) || !http_conn_send(c, req, (size_t) len)) return 0;
     // read the response head byte by byte (it is tiny), stop at the blank line
     char resp[2048];
     size_t n = 0;
     while (n + 1 < sizeof(resp)) {
-        const ssize_t r = conn_recv(c, resp + n, 1);
+        const ssize_t r = http_conn_recv(c, resp + n, 1);
         if (r <= 0) return 0;
         n++;
         if (n >= 4 && !memcmp(resp + n - 4, "\r\n\r\n", 4)) break;
@@ -607,10 +407,10 @@ static int ws_handshake(Conn *c, const BrainAddr *a, const char *path) {
 }
 
 // Reads exactly len bytes, polling `quit` conditions every 100 ms. 0 on failure.
-static int recv_exact(Conn *c, void *out, size_t len) {
+static int recv_exact(HttpConn *c, void *out, size_t len) {
     char *p = out;
     while (len) {
-        const ssize_t r = conn_recv(c, p, len);
+        const ssize_t r = http_conn_recv(c, p, len);
         if (r < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
         if (r <= 0) return 0;
         p += r;
@@ -620,7 +420,7 @@ static int recv_exact(Conn *c, void *out, size_t len) {
 }
 
 // One open session: returns when the socket drops or the URL changed.
-static void ws_session(Conn *c, const unsigned generation) {
+static void ws_session(HttpConn *c, const unsigned generation) {
     Bytes message = {0};
     int message_text = 1;
     for (;;) {
@@ -641,7 +441,7 @@ static void ws_session(Conn *c, const unsigned generation) {
         if (!ok) break;
 
         struct pollfd pfd = {c->fd, POLLIN, 0};
-        const int ready = conn_pending(c) ? 1 : poll(&pfd, 1, 30);
+        const int ready = http_conn_pending(c) ? 1 : poll(&pfd, 1, 30);
         if (ready < 0 && errno == EINTR) continue;
         if (ready < 0) break;
         if (ready == 0) continue;
@@ -715,9 +515,9 @@ static void *ws_thread(void *arg) {
         const unsigned generation = g_ws_generation;
         pthread_mutex_unlock(&g_lock);
 
-        BrainAddr a;
-        Conn c;
-        if (url[0] && parse_url(url, &a) && conn_open(&c, &a, 5000)) {
+        HttpAddr a;
+        HttpConn c;
+        if (url[0] && http_url_parse(url, &a) && http_conn_open(&c, &a, 5000)) {
             char path[400];
             snprintf(path, sizeof(path), "%s/social/ws?enc=json", a.base);
             if (ws_handshake(&c, &a, path)) {
@@ -734,7 +534,7 @@ static void *ws_thread(void *arg) {
                 pthread_mutex_unlock(&g_lock);
                 ws_queue_in(NULL, "__close");
             }
-            conn_close(&c);
+            http_conn_close(&c);
         }
         sleep_ms(backoff);
         backoff = backoff * 2 > WS_BACKOFF_MAX_MS ? WS_BACKOFF_MAX_MS : backoff * 2;

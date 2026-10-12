@@ -1,0 +1,35 @@
+#pragma once
+// Blocking HTTP(S)/WS(S) client connections (POSIX sockets, OpenSSL when the build found it:
+// KRUNKNATIVE_HAVE_TLS, peers verified against the system CA store and the host name). Shared by
+// the brain client (client/src/net/backend_native.c) and the launcher's downloader
+// (launcher/src/http_fetch.c). Not available on Windows (WinHTTP there) or the web.
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#include <stddef.h>
+#include <sys/types.h>
+
+typedef struct {
+    char host[128];
+    char port[8];
+    char base[128]; // path prefix, "" or "/prefix"
+    int tls;        // https:// / wss://
+} HttpAddr;
+
+// http(s)://host[:port][/base] (also ws:// / wss://); TLS needs KRUNKNATIVE_HAVE_TLS. 1 = parsed.
+int http_url_parse(const char *url, HttpAddr *a);
+const char *http_url_target(const char *url);
+
+typedef struct {
+    int fd;
+    void *ssl; // SSL* (KRUNKNATIVE_HAVE_TLS), NULL for plain connections
+} HttpConn;
+
+// Connects (and runs the TLS handshake, verifying the certificate for a->host). 0 on failure.
+// timeout_ms bounds the connect and every later send/receive (SO_SNDTIMEO / SO_RCVTIMEO).
+int http_conn_open(HttpConn *c, const HttpAddr *a, int timeout_ms);
+void http_conn_close(HttpConn *c);
+int http_conn_send(HttpConn *c, const void *data, size_t len);
+// >0 bytes, 0 closed, <0 error (errno EAGAIN on a receive timeout)
+ssize_t http_conn_recv(HttpConn *c, void *buf, size_t len);
+// Decrypted bytes waiting inside the TLS layer (poll() on the fd cannot see them).
+int http_conn_pending(const HttpConn *c);
+#endif

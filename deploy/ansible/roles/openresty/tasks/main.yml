@@ -47,6 +47,13 @@
     state: directory
     mode: "0755"
 
+- name: OpenResty include directory (kn.d/*.conf, e.g. role kn_updates)
+  ansible.builtin.file:
+    path: "{{ openresty_prefix }}/nginx/conf/kn.d"
+    state: directory
+    mode: "0755"
+  when: kn_updates_enabled | default(false) | bool
+
 - name: OpenResty logs directory
   ansible.builtin.file:
     path: "{{ openresty_prefix }}/nginx/logs"

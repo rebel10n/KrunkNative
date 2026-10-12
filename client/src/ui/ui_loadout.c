@@ -1236,7 +1236,7 @@ static void changelog_load(void) {
     char *path = concat("/ui/windows/", "versions.txt");
 #else
     const char *dir = getenv("KRUNKNATIVE_UI_DIR");
-    char *path = dir && *dir ? concat(dir, "/windows/versions.txt") : concat(assets_path(), "../ui/windows/versions.txt");
+    char *path = dir && *dir ? concat(dir, "/windows/versions.txt") : concat(ui_default_path(), "windows/versions.txt");
 #endif
     unsigned char *data = NULL;
     size_t length = 0;

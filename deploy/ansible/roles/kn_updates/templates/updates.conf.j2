@@ -1,0 +1,19 @@
+# {{ ansible_managed }} (deploy/ansible role kn_updates)
+# Client updates store (doc/backend.md "Client updates"), included in the OpenResty server block.
+# Everything below /updates/ is immutable (content-addressed objects, per-commit packages, per-version
+# content lists) except the channel manifests, which change with every publish.
+location ~ ^/updates/.*/\. {
+    return 404; # kn-updates' temporary files
+}
+location ~ ^/updates/client/([a-z0-9._-]+\.json)$ {
+    alias {{ kn_updates_root }}/public/client/$1;
+    default_type application/json;
+    add_header Cache-Control "no-cache" always;
+    add_header Access-Control-Allow-Origin "*" always;
+}
+location /updates/ {
+    alias {{ kn_updates_root }}/public/;
+    autoindex off;
+    add_header Cache-Control "public, max-age=31536000, immutable"; # 2xx/3xx only: never cache a 404
+    add_header Access-Control-Allow-Origin "*" always;
+}

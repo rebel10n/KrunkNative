@@ -16,6 +16,17 @@
 #define AUTH_SERVER_HASH_LEN 64      // hex chars of a serverHash
 
 void kn_sha256_bytes(const void *data, size_t len, uint8_t out[32]);
+// Incremental SHA-256 (the client's updater hashes packages and asset files as they stream in).
+typedef struct {
+    uint32_t h[8];
+    uint8_t block[64];
+    size_t fill;
+    uint64_t total;
+} KnSha256;
+void kn_sha256_init(KnSha256 *s);
+void kn_sha256_update(KnSha256 *s, const void *data, size_t len);
+void kn_sha256_final(KnSha256 *s, uint8_t out[32]);
+void kn_sha256_hex(const uint8_t digest[32], char out_hex[65]);
 // out_hex: 65 bytes (64 hex + NUL). NULL strings count as "".
 void kn_server_hash(const char *server_nonce, const char *public_key, const char *client_nonce, char out_hex[65]);
 // 1 when s is 1..64 lowercase hex chars (nonce / hash validation).
