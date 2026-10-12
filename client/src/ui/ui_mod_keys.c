@@ -39,16 +39,6 @@ static void keys_load(void) {
     g_keys.ctrl_tp_enabled = html_storage_get(CTRL_TP_KEY, value, sizeof(value)) >= 0 && !strcmp(value, "1");
 }
 
-// console.clear(): the browser console on the web, the client's terminal natively.
-static void console_clear(void) {
-#ifdef __EMSCRIPTEN__
-    EM_ASM({ console.clear(); });
-#else
-    fputs("\x1B[2J\x1B[3J\x1B[H", stdout);
-    fflush(stdout);
-#endif
-}
-
 static void toggle_ctrl_tp(void) {
     g_keys.ctrl_tp_enabled = !g_keys.ctrl_tp_enabled;
     html_storage_set(CTRL_TP_KEY, g_keys.ctrl_tp_enabled ? "1" : "0"); // String(+window.ctrlTpEnabled)
@@ -60,11 +50,7 @@ static void toggle_ctrl_tp(void) {
 int ui_mod_keys_keydown(Client *client, const int key, const int input) {
     keys_load();
     switch (key) {
-        case GLFW_KEY_F1:
-            if (input) return 0;
-            if (client) client_net_send(client, NET_PACKET_CLEAR_LOG, NULL, 0); // window.io.send("clearLog")
-            console_clear();
-            return 0;
+        // F1 (mods.ts: clearLog + console.clear()) is the Game Settings bind now (ui_controls.c)
         case GLFW_KEY_F4:
             if (input) return 0;
             app_reload("/"); // location.href = "/"

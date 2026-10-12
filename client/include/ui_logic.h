@@ -346,7 +346,9 @@ enum {
     UI_CONTROL_RESET = 38, UI_CONTROL_RESET_LAST = 39,
     // KrunkNative addition: Reconnect (F5, cont_reconnectKey), the console's `reconnect`
     UI_CONTROL_RECONNECT = 40,
-    UI_CONTROL_COUNT = 41
+    // KrunkNative addition: Game Settings (F1, cont_settingsKey) opens Settings on its Game tab
+    UI_CONTROL_SETTINGS = 41,
+    UI_CONTROL_COUNT = 42
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).

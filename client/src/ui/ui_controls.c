@@ -224,6 +224,8 @@ static const V7Bind V7_BINDS[] = {
     // v7 has no such bind (the browser's F5 reloads the page); the native client reconnects
     // in place instead (console `reconnect`), the web build still reloads (reconnect_key).
     {"reconnect", -1, "reconnectKey", 116, -1, UI_CONTROL_RECONNECT},
+    // KrunkNative addition: Game Settings, F1 (keyCode 112): Settings opened on its Game tab.
+    {"settings", -1, "settingsKey", 112, -1, UI_CONTROL_SETTINGS},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -1165,6 +1167,27 @@ static void show_player_list(void *user) {
     menu_show_window(23, 0);
 }
 
+// Settings on its Game tab: 2 in the basic view (General, Display, Game, Sound), 4 in the
+// advanced one (General, Controls, Display, Render, Game, Sound); windows[0].changeTab(N).
+static void show_game_settings(void *user) {
+    (void) user;
+    const HtmlArg arg = {HTML_ARG_NUM, menu_ui()->settings_view ? 4.0 : 2.0, NULL};
+    HtmlEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = "click";
+    ev.value = "";
+    html_ui_dispatch("windows.0.changeTab", &ev, &arg, 1);
+    if (menu_ui()->active_window != 1) menu_show_window(1, 1);
+}
+
+static void game_settings_key(Client *client) {
+    if (ui_controls_enabled(client)) { // in game: free the pointer like pListKey
+        ui_controls_reset_keys();
+        client_set_menu_open(client, 1);
+    }
+    html_timer_add(0.0, show_game_settings, NULL);
+}
+
 // window.pressButton(keyCode), the parts with an in-game effect.
 static void press_button(Client *client, const int code) {
     // pListKey (Alt): only while the game owns the input (N()'s `!controls.enabled` return)
@@ -1279,6 +1302,11 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     // Reconnect works in game and in the menu, but not while typing (chat, a menu field)
     if (press && code >= 0 && bind_is(UI_CONTROL_RECONNECT, code) && !g_ctl.chat_focused && !ui_text_input_focused()) {
         reconnect_key();
+        return 1;
+    }
+    // Game Settings (F1): in game and in the menu, not while typing
+    if (press && code >= 0 && bind_is(UI_CONTROL_SETTINGS, code) && !g_ctl.chat_focused && !ui_text_input_focused()) {
+        game_settings_key(client);
         return 1;
     }
 
