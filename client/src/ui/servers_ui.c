@@ -1391,7 +1391,7 @@ static char *gen_list(void) {
     char *download = servers_ui_download_button_html(NULL); // the latest server build (ci-release)
     sb_append(&sb, download);
     free(download);
-    sb_append(&sb, "<div id='hostMenuBtn' onclick='windows[0].tabIndex=0;showWindow(1);'><span class='material-icons' style='color:#fff;font-size:40px;margin-bottom:-1px;'>miscellaneous_services</span></div></div><div id=\"hideFull\" style=\"display:inline-block;float:right;margin-right:20px;margin-top:3px;\"><span style='color:#fff'>Hide Full</span><label class='switch2' style='margin-top: 4px;margin-left: 11px;'><input type='checkbox' onclick='toggleHF(this.checked);windows[1].searchList()'");
+    sb_append(&sb, "<div id='hostMenuBtn' style='display:inline-block;vertical-align:middle' onclick='windows[0].tabIndex=0;showWindow(1);'><span class='material-icons' style='color:#fff;font-size:40px;margin-bottom:-1px;'>miscellaneous_services</span></div></div><div id=\"hideFull\" style=\"display:inline-block;float:right;margin-right:20px;margin-top:3px;\"><span style='color:#fff'>Hide Full</span><label class='switch2' style='margin-top: 4px;margin-left: 11px;'><input type='checkbox' onclick='toggleHF(this.checked);windows[1].searchList()'");
     if (hide_full()) sb_append(&sb, " checked");
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
     char *servers = get_servers();
@@ -2695,9 +2695,11 @@ char *servers_ui_entry_badge_html(const cJSON *entry) {
 char *servers_ui_download_button_html(const cJSON *list_response) {
     servers_ui_note_list_response(list_response);
     StrBuf sb = {0};
-    sb_append(&sb, "<a class='downloadServer' onclick='downloadServer()' style='cursor:pointer' title='");
+    // An icon button beside #hostMenuBtn (v7's header row has no room for a text link next to the
+    // search box and Hide Full); the text is the tooltip.
+    sb_append(&sb, "<a class='downloadServer' onclick='downloadServer()' style='cursor:pointer;display:inline-block;vertical-align:middle;width:40px;height:40px;margin-right:8px;background-color:#2196f3;border-radius:4px;text-align:center' title='Download server: ");
     sb_append_esc(&sb, release_url_ok(g_server_download) ? g_server_download : SERVERS_RELEASE_PAGE);
-    sb_append(&sb, "'><span class='material-icons' style='vertical-align:middle;font-size:20px'>file_download</span> Download server</a>");
+    sb_append(&sb, "'><span class='material-icons' style='color:#fff;font-size:34px;margin-top:3px'>file_download</span></a>");
     char *s = sb_finish(&sb);
     return s ? s : strdup("");
 }
