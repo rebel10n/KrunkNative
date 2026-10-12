@@ -54,7 +54,6 @@ static ClientRenderSettings g_rs = {
     .speed_color = "#ffea78", .speed_color_max = "#ff0000",
     .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_style = 0, .health_num = 0,
     .health_col_team = "#9eeb56", .health_col_enemy = "#eb5656",
-    .xp_bar_color = "#FBC02D", .xp_bar_opacity = 1.0f,
     .chat_filter = 0, .show_messages = 1, .show_unboxings = 1, .chat_text_outline = 0,
     .chat_opacity = 1.0f, .chat_bg_opacity = 0.2f, .chat_height = 2.5f, .chat_timer = 0.0f,
     .crosshair_type = 1, .crosshair_style = 0, .crosshair_opacity = 1.0f,
@@ -368,8 +367,6 @@ static const RsEntry RS_TABLE[] = {
     RS_B("healthNum", health_num, NULL),
     RS_S("healthColT", health_col_team, NULL),
     RS_S("healthColE", health_col_enemy, NULL),
-    RS_S("xpBarCol", xp_bar_color, mark_dom),           // #igXPBarProg background
-    RS_F("xpBarOpac", xp_bar_opacity, mark_dom),        // #igXPBar opacity
     RS_B("chatFilter", chat_filter, NULL),
     RS_B("showMessages", show_messages, NULL),
     RS_B("showUnboxings", show_unboxings, NULL),
@@ -700,9 +697,6 @@ static int apply_dom(void) {
     display_if("leaderDisplay", g_rs.old_scoreboard, "block");
     display_if("killFeed", !g_rs.old_scoreboard && g_rs.show_kills, "inline-grid"); // v7.1.4 showKills: inline-grid
 
-    style_if("igXPBarProg", "background-color", g_rs.xp_bar_color);
-    fmt(buf, sizeof(buf), "%g", g_rs.xp_bar_opacity);
-    style_if("igXPBar", "opacity", buf);
     // vignette.set: 1 removes the inline opacity (stylesheet value), else opacity = v
     fmt(buf, sizeof(buf), "%g", g_rs.vignette);
     style_if("vignette", "opacity", g_rs.vignette == 1.0f ? "" : buf);

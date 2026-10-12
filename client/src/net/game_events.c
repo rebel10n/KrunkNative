@@ -36,6 +36,7 @@
 #define SERVER_CHAT_COLOR "#fc03ec" // gB type 2 default
 
 void client_net_send(Client *client, const NetPacketType type, const void *payload, const uint16_t length) {
+    client_net_tally_egress(length); // WP-E: #egressPacketCount
     if (client->offline) {
         client_offline_send(client, type, payload, length); // the sandbox server's connection (net/offline.c)
         return;
@@ -620,6 +621,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_LEADERBOARD: {
             EVENTS_READ(NetLeaderboardPacket, board);
             events_apply_board(client, &board);
+            return 1;
+        }
+        case NET_PACKET_LEADER_STATS: { // WP-E: v7 "7" columns (mode.leaderStats) in the server's board order
+            EVENTS_READ(NetLeaderStatsPacket, stats);
+            hud_ui_set_leader_stats(&stats);
             return 1;
         }
         case NET_PACKET_TIMER: {

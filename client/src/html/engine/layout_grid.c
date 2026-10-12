@@ -18,8 +18,9 @@
  * item in both axes except replaced elements with a natural aspect ratio
  * (img, canvas, video, input[type=color]: start-aligned like Chrome; other
  * form controls stretch).  auto-fit collapses the empty repeated tracks
- * (and their gutters).  Not supported: subgrid, masonry, `order`,
- * align-content / justify-content other than normal, last-baseline.
+ * (and their gutters); justify-content / align-content (start, end,
+ * center, space-between/around/evenly; normal and stretch stretch the auto
+ * tracks).  Not supported: subgrid, masonry, `order`, last-baseline.
  *
  * Track sizing follows CSS Grid 1 section 12 in both axes:
  *   1. base = fixed min breadth, or the items' min-content (auto/min-content
@@ -596,6 +597,7 @@ typedef struct Axis {
     int live;                /* tracks not collapsed                         */
     float gap;
     int a;                   /* AX_ROW / AX_COL                              */
+    uint8_t distrib;         /* justify-content (columns) / align-content (rows): CssJustifyContent */
 } Axis;
 
 static int axis_init(Axis *ax, const Grid *g, int a, float gap)
@@ -806,8 +808,8 @@ static void size_tracks(Axis *ax, const Grid *g, const uint8_t *need, float avai
             free_sp -= cols[i];
         }
     }
-    /* 4. stretch auto max tracks with what is left */
-    if (free_sp > 0.001f) {
+    /* 4. stretch auto max tracks with what is left (content distribution normal / stretch) */
+    if (free_sp > 0.001f && ax->distrib == CSS_JUSTIFY_CONTENT_NORMAL) {
         int autos = 0;
         for (int i = 0; i < n; i++) autos += fn[i].mx == BR_AUTO;
         if (autos) {
@@ -818,13 +820,42 @@ static void size_tracks(Axis *ax, const Grid *g, const uint8_t *need, float avai
     free(minc);
 }
 
-static void axis_positions(Axis *ax)
+static float axis_total(const Axis *ax);
+
+/* Track offsets; `avail` >= 0 (the definite content size) applies justify-content /
+ * align-content to the free space: a leading offset plus extra space between the live
+ * tracks.  Negative free space keeps start for the space-* values (their fallback is
+ * start / center: space-between -> start, space-around / evenly -> center) and overflows
+ * both sides for center (unsafe, like Blink). */
+static void axis_positions(Axis *ax, float avail)
 {
-    float x = 0;
+    float lead = 0, between = 0;
+    if (avail >= 0 && ax->distrib != CSS_JUSTIFY_CONTENT_NORMAL && ax->distrib != CSS_JUSTIFY_CONTENT_FLEX_START) {
+        int live_n = 0;
+        for (int i = 0; i < ax->n; i++) live_n += !(ax->collapsed && ax->collapsed[i]);
+        float free_sp = avail - axis_total(ax);
+        switch (ax->distrib) {
+        case CSS_JUSTIFY_CONTENT_FLEX_END: lead = free_sp; break;
+        case CSS_JUSTIFY_CONTENT_CENTER: lead = free_sp * 0.5f; break;
+        case CSS_JUSTIFY_CONTENT_SPACE_BETWEEN:
+            if (free_sp > 0 && live_n > 1) between = free_sp / (float)(live_n - 1);
+            break;
+        case CSS_JUSTIFY_CONTENT_SPACE_AROUND:
+            if (free_sp > 0 && live_n > 0) { between = free_sp / (float)live_n; lead = between * 0.5f; }
+            else lead = free_sp * 0.5f;
+            break;
+        case CSS_JUSTIFY_CONTENT_SPACE_EVENLY:
+            if (free_sp > 0) { between = free_sp / (float)(live_n + 1); lead = between; }
+            else lead = free_sp * 0.5f;
+            break;
+        default: break;
+        }
+    }
+    float x = lead;
     int any = 0;
     for (int i = 0; i < ax->n; i++) {
         int live = !(ax->collapsed && ax->collapsed[i]);
-        if (live && any) x += ax->gap;
+        if (live && any) x += ax->gap + between;
         ax->pos[i] = x;
         x += ax->size[i];
         any |= live;
@@ -1015,6 +1046,7 @@ void layout_grid_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             g.ntracks[AX_ROW] = g.off[AX_ROW] + g.lines[AX_ROW].n_explicit;
             Axis rows;
             if (axis_init(&rows, &g, AX_ROW, gap_px(&s->row_gap, avail_h))) {
+                rows.distrib = s->align_content;
                 size_tracks(&rows, &g, NULL, avail_h, avail_h < 0 ? 1 : 0);
                 *content_h = axis_total(&rows);
                 axis_free(&rows);
@@ -1033,10 +1065,13 @@ void layout_grid_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         axis_free(&cols); free(need); free(row_asc); grid_free(&g); return;
     }
 
+    cols.distrib = s->justify_content;
+    rows.distrib = s->align_content;
+
     /* columns */
     column_contributions(t, &cols, &g, need, 0);
     size_tracks(&cols, &g, need, cw, 0);
-    axis_positions(&cols);
+    axis_positions(&cols, cw);
 
     /* rows: item heights laid out in their column areas, baseline-aligned
      * items shifted by their group's shim */
@@ -1057,7 +1092,7 @@ void layout_grid_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         need[k] = (uint8_t)(need[k] && item_needs_contribution(&rows, it, avail_h < 0 ? 1 : 0));
     }
     size_tracks(&rows, &g, need, avail_h, avail_h < 0 ? 1 : 0);
-    axis_positions(&rows);
+    axis_positions(&rows, avail_h);
 
     /* final layout */
     for (int k = 0; k < g.n; k++) {

@@ -500,6 +500,11 @@ int mode_input_locked(const struct Player_t*);               // lockPlayer
 int mode_team_score(const struct Game_t*, int team);
 void mode_send_state(struct Game_t*, int uid);       // NET_PACKET_MODE_STATE to `uid` (NET_TARGET_ALL: one per player)
 void mode_send_end(struct Game_t*, ModeWinner, struct Player_t **sorted, size_t count); // NET_PACKET_MODE_END
+// WP-E: one mode.leaderStats value of a player as v7 syncLeaders sends it (config.endForm for
+// objective / confirms / denies / dmg / zombies / downs / points, else the player field).
+int mode_leader_stat_value(const struct Player_t*, const char *key);
+// players.syncLeaders order: leaderSort, else killSort, else orderByScore (stable).
+void mode_sort_leaders(const struct Game_t*, struct Player_t **players, size_t count);
 
 // ---- WP-D: v7.1.4 mode keys read by the simulation (player.c / projectile.c / effects.c are
 // WP-B / player-B files; they call these instead of reading GameModeConfig). Every accessor

@@ -85,8 +85,7 @@ typedef struct {
     int nametag_style;       // nametagStyle 0..3
     int health_num;          // healthNum
     char health_col_team[RS_COLOR_MAX], health_col_enemy[RS_COLOR_MAX]; // healthColT/E
-    char xp_bar_color[RS_COLOR_MAX];         // xpBarCol: #igXPBarProg background
-    float xp_bar_opacity;    // xpBarOpac: #igXPBar opacity
+    // (v3's xpBarCol / xpBarOpac are gone with the in-game XP bar: v7.1.4 has neither)
     int chat_filter, show_messages, show_unboxings, chat_text_outline; // chat flags (chat owner)
     float chat_opacity, chat_bg_opacity, chat_height, chat_timer; // chatOp (#chatList), chatBGOp, chatHeight (x100 px), chatTimer (s)
     int crosshair_type;      // crosshairSho: 0 off, 1 default, 2 custom, 3 layered, 4 image, 5 precision

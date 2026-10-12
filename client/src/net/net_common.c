@@ -525,8 +525,42 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
     fflush(stdout);
 }
 
+// WP-E: the packet tally (io-client trackPacketStats). Ingress runs on the transport thread under
+// net_lock, egress on the main thread: both go through g_tally_lock.
+static pthread_mutex_t g_tally_lock = PTHREAD_MUTEX_INITIALIZER;
+static ClientNetTally g_tally;
+static double g_tally_last_state = -1.0; // arrival of the previous NET_PACKET_STATE (seconds)
+#define TALLY_TICK_GAP 0.004             // STATE packets closer than this belong to one server sync
+
+void client_net_tally_take(ClientNetTally *out) {
+    pthread_mutex_lock(&g_tally_lock);
+    *out = g_tally;
+    memset(&g_tally, 0, sizeof(g_tally));
+    pthread_mutex_unlock(&g_tally_lock);
+}
+
+void client_net_tally_egress(const uint16_t length) {
+    pthread_mutex_lock(&g_tally_lock);
+    g_tally.egress_packets++;
+    g_tally.egress_bytes += length + NET_PACKET_HEADER_SIZE;
+    pthread_mutex_unlock(&g_tally_lock);
+}
+
+static void client_net_tally_ingress(const NetPacket *packet) {
+    pthread_mutex_lock(&g_tally_lock);
+    g_tally.ingress_packets++;
+    g_tally.ingress_bytes += packet->length + NET_PACKET_HEADER_SIZE;
+    if (packet->type == NET_PACKET_STATE) { // v7 counts its "k" sync messages
+        const double now = glfwGetTime();
+        if (g_tally_last_state < 0.0 || now - g_tally_last_state > TALLY_TICK_GAP) g_tally.ticks++;
+        g_tally_last_state = now;
+    }
+    pthread_mutex_unlock(&g_tally_lock);
+}
+
 void client_net_queue_packet(Client *client, const NetPacket *packet) {
     pthread_mutex_lock(&client->net_lock);
+    client_net_tally_ingress(packet);
 
     // The server explains a kick right before it closes the socket; the transport
     // reports the close before the main thread drains this queue, so keep the text

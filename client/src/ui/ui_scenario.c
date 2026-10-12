@@ -94,6 +94,7 @@ typedef struct {
     char out[1024];
     int w, h, frames;
     double anim_time_s;
+    double after_ms;      // state.after_ms > 0: capture exactly this long after the state was applied
     int preview;
 
     int bg_is_color;
@@ -221,7 +222,7 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
-        "clientChrome", "settingsView", "windowActions",
+        "clientChrome", "settingsView", "windowActions", "after_ms",
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -273,6 +274,9 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     warn_unknown_keys();
     g_sc.anim_time_s = obj_num(g_sc.state, "anim_time", 0.0);
     if (g_sc.anim_time_s < 0.0) g_sc.anim_time_s = 0.0;
+    // one-shot animations (the death screen's 1.5 s slide-in): the reference was taken a fixed
+    // time after the event, so the capture follows the state by that much instead of the cycle
+    g_sc.after_ms = obj_num(g_sc.state, "after_ms", 0.0);
     g_sc.preview = st_bool("preview", 0);
 
     // background: "#rrggbb" or an image path; default opaque black
@@ -811,6 +815,7 @@ int ui_scenario_run(Client *client) {
     scenario_frame(client, 0.0, 1);
     if (!run_until(client, boot_done, SCENARIO_BOOT_MAX_FRAMES, "the page, map and local server")) return 1;
     if (!ui_scenario_apply(client)) return 1;
+    const double applied_ms = g_sc.clock_ms;
     run_frames(client, SCENARIO_SETTLE_FRAMES);
 
     // capture clock: the first k * cycle + anim_time after the settle frames, reached by
@@ -818,7 +823,8 @@ int ui_scenario_run(Client *client) {
     const double anim_ms = g_sc.anim_time_s * 1000.0;
     const double earliest = g_sc.clock_ms + (double) g_sc.frames * SCENARIO_FRAME_MS;
     const double k = ceil((earliest - anim_ms) / SCENARIO_ANIM_CYCLE_MS);
-    const double capture_ms = (k > 0.0 ? k : 0.0) * SCENARIO_ANIM_CYCLE_MS + anim_ms;
+    double capture_ms = (k > 0.0 ? k : 0.0) * SCENARIO_ANIM_CYCLE_MS + anim_ms;
+    if (g_sc.after_ms > 0.0 && applied_ms + g_sc.after_ms >= earliest) capture_ms = applied_ms + g_sc.after_ms;
     const double first_ms = capture_ms - (double) (g_sc.frames - 1) * SCENARIO_FRAME_MS;
 
     g_sc.clock_ms = first_ms - SCENARIO_FRAME_MS; // timed state is applied one frame before the first

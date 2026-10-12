@@ -284,6 +284,8 @@ void hud_ui_hit_elapsed(Client*, int kill, double elapsed_ms); // hud_ui_hit `el
 // samples from the game; `state.scoreboard` rows replace the local-player-only board.
 void hud_ui_set_override(const cJSON *hud);
 void hud_ui_set_override_scoreboard(const cJSON *rows);
+// WP-E: NET_PACKET_LEADER_STATS (v7 "7" leaderStats columns, board order); NULL forgets it (new round).
+void hud_ui_set_leader_stats(const NetLeaderStatsPacket *packet);
 void hud_ui_set_clock(double now_s);             // HUD clock (hit marker, 20 Hz pacing); < 0 = GLFW clock
 
 // ---- menu_ui.c

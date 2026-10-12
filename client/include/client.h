@@ -736,6 +736,17 @@ int client_net_note_next(int *level, char *out, size_t size); // 1 = one line ta
 const char *client_net_transport_name(const Client*);         // "WebRTC", "WebSocket", "UDP", "TCP", "offline", "-"
 void client_net_info(const Client*, char *out, size_t size);  // the console's `netinfo`
 void client_net_queue_packet(Client*, const NetPacket*);
+// WP-E: v7 io-client packet tally (settings showNetStat: #ingressPacketCount, #egressPacketCount,
+// #tickPacketCount). Every received / sent frame counts; a tick is one server player sync ("k":
+// one burst of NET_PACKET_STATE). client_net_tally_take() returns the counts since the last take
+// and resets them (resetPacketTally).
+typedef struct {
+    int ingress_packets, ingress_bytes;
+    int egress_packets, egress_bytes;
+    int ticks;
+} ClientNetTally;
+void client_net_tally_take(ClientNetTally *out);
+void client_net_tally_egress(uint16_t length);
 void client_net_log_packet(const char*, NetPacketType, const void*, uint16_t);
 int client_net_send_packet(int, NetPacketType, const void*, uint16_t);
 

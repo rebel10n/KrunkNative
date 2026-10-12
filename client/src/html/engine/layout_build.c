@@ -10,6 +10,7 @@
  */
 #include "layout_internal.h"
 #include "css_values.h"
+#include "image.h"     /* image_resolve_url: content: url() on <img> */
 
 /* ------------------------------------------------------------------------- */
 /* ctx                                                                        */
@@ -265,6 +266,12 @@ static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b)
         size_t len;
         const char *src = elem_attr(b->node, "src", &len);
         float w = 0, h = 0;
+        char key[512];
+        if (b->style && b->style->content.kind == CSS_CONTENT_URL && b->style->content.str) {
+            /* content: url(...) replaces the image: resolved against its stylesheet, root-relative */
+            key[0] = '/';
+            if (image_resolve_url(b->style->content.str, b->style->content.base, key + 1, sizeof(key) - 1)) { src = key; len = strlen(key); }
+        }
         if (src && len) {
             char *s = malloc(len + 1);
             if (s) { memcpy(s, src, len); s[len] = 0; }
@@ -1290,7 +1297,7 @@ static int structural_changed(const CssComputed *a, const CssComputed *b)
     return a->display != b->display || a->position != b->position || a->float_ != b->float_
         || a->overflow_x != b->overflow_x || a->overflow_y != b->overflow_y
         || (a->clip_path.kind != CSS_CLIP_PATH_NONE) != (b->clip_path.kind != CSS_CLIP_PATH_NONE)
-        || a->content.kind != b->content.kind || a->content.str != b->content.str;
+        || a->content.kind != b->content.kind || a->content.str != b->content.str || a->content.base != b->content.base;
 }
 
 /* Properties layout reads (everything else is paint-only). */
@@ -1311,7 +1318,7 @@ static int layout_changed(const CssComputed *a, const CssComputed *b)
     if (!len_eq(&a->width, &b->width) || !len_eq(&a->height, &b->height) || !len_eq(&a->min_width, &b->min_width)
         || !len_eq(&a->min_height, &b->min_height) || !len_eq(&a->max_width, &b->max_width) || !len_eq(&a->max_height, &b->max_height)) return 1;
     if (a->text_overflow != b->text_overflow || a->vertical_align != b->vertical_align || !len_eq(&a->vertical_align_length, &b->vertical_align_length)) return 1;
-    if (a->flex_direction != b->flex_direction || a->flex_wrap != b->flex_wrap || a->justify_content != b->justify_content
+    if (a->flex_direction != b->flex_direction || a->flex_wrap != b->flex_wrap || a->justify_content != b->justify_content || a->align_content != b->align_content
         || a->align_items != b->align_items || a->flex_grow != b->flex_grow || a->flex_shrink != b->flex_shrink
         || !len_eq(&a->flex_basis, &b->flex_basis)) return 1;
     if (a->grid_column_count != b->grid_column_count || !len_eq(&a->row_gap, &b->row_gap) || !len_eq(&a->column_gap, &b->column_gap)) return 1;

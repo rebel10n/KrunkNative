@@ -8,7 +8,8 @@
 // Parity notes (documented differences):
 // - Box / Text / Image are canvas drawings in v7 (below the HTML UI, above the 3D view); here
 //   they are elements in the holder with the same centre, size, colour, opacity and z order.
-//   Text keeps v7's anchor: centred on x, alphabetic baseline at y + f / 2.
+//   Text keeps v7's anchor: the element's (x - w / 2, y - h / 2) like every kind (overlayHelpers
+//   customGUI), text centred on it, alphabetic baseline f / 2 below it.
 // - "Div (HTML)": v7 assigns style.width / height as bare numbers, which the browser ignores
 //   (a v7 bug, fixed here: they are px); the click hook (KrunkScript onDIVClicked) is the
 //   KrunkScript agent's.
@@ -215,10 +216,11 @@ static void gui_build(const Client *client, const Map *map) {
                 gui_px(e->elem, "margin-top", -e->h / 2.0f);
                 html_dom_set_style(e->elem, "background-color", e->color);
                 break;
-            case 1: // fillText(text, x - round(width / 2), y + f / 2), "<f>px GameFont"
+            case 1: // fillText(text, x - w / 2 - round(width / 2), y - h / 2 + f / 2), "<f>px GameFont"
                 gui_px(e->elem, "font-size", (float) e->font);
                 gui_px(e->elem, "line-height", (float) e->font);
-                gui_px(e->elem, "margin-top", -0.3f * (float) e->font); // baseline (~0.8 f below the top) at y + f / 2
+                gui_px(e->elem, "margin-left", -e->w / 2.0f);
+                gui_px(e->elem, "margin-top", -0.3f * (float) e->font - e->h / 2.0f); // baseline (~0.8 f below the top) at y - h / 2 + f / 2
                 html_dom_set_style(e->elem, "font-family", "GameFont");
                 html_dom_set_style(e->elem, "white-space", "pre");
                 html_dom_set_style(e->elem, "color", e->color);

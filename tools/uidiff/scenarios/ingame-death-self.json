@@ -60,6 +60,7 @@
     },
     "chat": [],
     "dead": true,
+    "after_ms": 820,
     "killcard": {
       "stats": [
         2000,
@@ -70,6 +71,6 @@
       ]
     }
   },
-  "frames": 3,
+  "frames": 6,
   "note": "Killed with no killer: `You Died` + stats."
 }

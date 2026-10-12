@@ -28,7 +28,7 @@ img/death-ui/icon_{0..12}.png
 img/death-ui/icon_0_1.png
 img/death-ui/icon_{14..31}.png
 img/medals/medal_{0..55}.png
-img/perks/{1..8}.png
+img/perks/{1..9}.png
 img/headshot_0.png
 img/wallbang_0.png = v3:img/wallbang_0.png
 img/death_0_1.png

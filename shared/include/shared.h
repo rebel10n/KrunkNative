@@ -2055,7 +2055,8 @@ int net_peer_has_wpc(int minor, int patch); // the peer's HELLO / INIT minor.pat
 #define NET_PACKET_BLOCK_COMBAT 190     // 190-194 player-viewer WP-B: other combat packets
 #define NET_PACKET_BLOCK_PROTOCOL 195   // 195-199 player-viewer WP-C: protocol / input
 #define NET_PACKET_BLOCK_KRUNKSCRIPT 200 // 200-239 KrunkScript (doc/v7/krunkscript.md)
-#define NET_PACKET_BLOCK_END 240
+#define NET_PACKET_BLOCK_SOCIAL 240     // 240-249 player-viewer WP-E: HUD, death screen, social
+#define NET_PACKET_BLOCK_END 250
 uint16_t net_ent_size_for(int major, int minor, int patch); // the ENT a client sends to an INIT major.minor.patch server: V8 from 1.3.1, V7 from 1.2, V6 for 1.1, else V4
 
 typedef struct {
@@ -2726,6 +2727,22 @@ typedef struct {
 #define NET_PACKET_PERKS (NET_PACKET_BLOCK_COMBAT + 0)         // S->C to all: NetPerksPacket ("upk" sid, perks)
 #define NET_PACKET_UPGRADES (NET_PACKET_BLOCK_COMBAT + 1)      // S->C to all: NetUpgradesPacket (v7 inat upgrades[]: krumMachine slots)
 #define NET_PACKET_WEAPON_STREAK (NET_PACKET_BLOCK_COMBAT + 2) // S->C to the killer: NetWeaponStreakPacket ("wstk" weapon, count)
+
+// ---- WP-E packets (player-viewer: HUD, death screen, social), ids in NET_PACKET_BLOCK_SOCIAL
+// (240-249). Sent only to peers that announced NET_PROTOCOL_MINOR_V7 (server/src/net.c
+// net_peer_takes); older peers ignore unknown ids. Client side: client/src/net/game_events.c.
+#define NET_PACKET_LEADER_STATS (NET_PACKET_BLOCK_SOCIAL + 0) // S->C: NetLeaderStatsPacket (v7 "7" [sid, ...mode.leaderStats])
+#define NET_LEADER_STATS_MAX 4                                // the longest v7 leaderStats (Deposit, Zombies)
+
+// players.syncLeaders: the board rows in the mode's leader order (leaderSort / killSort /
+// orderByScore, at most 16) with one value per mode.leaderStats key (endForm applied, see
+// mode_leader_stat_value). Sent right after NET_PACKET_LEADERBOARD.
+typedef struct {
+    uint8_t count;
+    uint8_t stat_count;                                   // mode.leaderStats length (<= NET_LEADER_STATS_MAX)
+    int32_t uid[GAME_LEADERBOARD_MAX];
+    int32_t values[GAME_LEADERBOARD_MAX][NET_LEADER_STATS_MAX];
+} NetLeaderStatsPacket;
 
 typedef struct {
     uint8_t effect;                // EffectId

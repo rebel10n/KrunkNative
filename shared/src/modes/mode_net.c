@@ -313,6 +313,43 @@ void mode_send_end(Game *game, const ModeWinner winner, Player **sorted, const s
     game_send(game, NET_TARGET_ALL, NET_PACKET_MODE_END, &packet, sizeof(packet));
 }
 
+int mode_leader_stat_value(const Player *player, const char *key) {
+    if (!player || !key) return 0;
+    const ModePlayerState *m = &player->mode;
+    if (!strcmp(key, "score") || !strcmp(key, "points")) return player->score;     // endForm.points: score
+    if (!strcmp(key, "kills")) return (int) player->kills;
+    if (!strcmp(key, "deaths") || !strcmp(key, "downs")) return (int) player->deaths; // endForm.downs: deaths
+    if (!strcmp(key, "caps")) return m->caps;
+    if (!strcmp(key, "objective")) return m->objective_score;                     // endForm.objective: objectiveScore || 0
+    if (!strcmp(key, "weaponTier")) return m->weapon_tier;
+    if (!strcmp(key, "confirms")) return m->confirms;
+    if (!strcmp(key, "denies")) return m->denies;
+    if (!strcmp(key, "deposits")) return m->deposits;
+    if (!strcmp(key, "pickups")) return m->pickups;
+    if (!strcmp(key, "lives")) return m->lives;
+    if (!strcmp(key, "zombies")) return m->ai_kills;                              // endForm.zombies: aiKills || 0
+    if (!strcmp(key, "dmg")) return (int) lroundf(player->damage_dealt);         // endForm.dmg: round(dmgDealt || 0)
+    return 0;
+}
+
+static int mode_leaders_by_score(const Player *a, const Player *b) { return b->score - a->score; }
+static int mode_leaders_by_kills(const Player *a, const Player *b) { return (int) b->kills - (int) a->kills; }
+
+void mode_sort_leaders(const Game *game, Player **players, const size_t count) {
+    const GameModeConfig *config = game && game->mode ? &game->mode->config : NULL;
+    const ModeSortFn sort = config && config->kill_sort ? mode_leaders_by_kills
+                          : config && config->leader_sort ? config->leader_sort : mode_leaders_by_score;
+    for (size_t i = 1; i < count; i++) {
+        Player *player = players[i];
+        size_t at = i;
+        while (at > 0 && sort(players[at - 1], player) > 0) {
+            players[at] = players[at - 1];
+            at--;
+        }
+        players[at] = player;
+    }
+}
+
 void mode_send_medal(Game *game, const Player *player, const char *text, const int score) {
     NetMedalPacket packet;
     memset(&packet, 0, sizeof(packet));

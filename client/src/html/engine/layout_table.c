@@ -13,6 +13,25 @@
  */
 #include "layout_internal.h"
 
+/* <tr height="N">: the presentational hint maps to the row's CSS height (HTML 15.3.x: a
+ * dimension value, so "10px;" reads as 10, like Chrome). 0 = none. */
+static float row_attr_height(const Box *r)
+{
+    lxb_dom_node_t *node = r->node;
+    if (!node || node->type != LXB_DOM_NODE_TYPE_ELEMENT) return 0;
+    size_t len = 0;
+    const lxb_char_t *v = lxb_dom_element_get_attribute(lxb_dom_interface_element(node), (const lxb_char_t *)"height", 6, &len);
+    if (!v || !len) return 0;
+    char buf[32];
+    size_t n = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
+    memcpy(buf, v, n); buf[n] = 0;
+    char *end;
+    double d = strtod(buf, &end);
+    if (end == buf || d <= 0 || *end == '%') return 0;
+    const float z = r->style && r->style->zoom > 0.0f ? r->style->zoom : 1.0f;
+    return (float)d * z;
+}
+
 #define TBL_MAX_COLS 64
 
 typedef struct ColInfo {
@@ -212,6 +231,7 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
         layout_resolve_edges(t, r, cw);
         float row_h = 0;
         if (r->style->height.kind == CSS_LEN_VALUE && r->style->height.pct == 0 && !(r->flags & BOXF_ANONYMOUS)) row_h = r->style->height.px;
+        else if (r->style->height.kind == CSS_LEN_AUTO && !(r->flags & BOXF_ANONYMOUS)) row_h = row_attr_height(r);
         int ci = 0;
         for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
             if (c->type != BOX_TABLE_CELL) continue;

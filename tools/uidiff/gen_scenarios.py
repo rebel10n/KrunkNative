@@ -234,9 +234,15 @@ def hud_regions(rc, extra=()):
     return regs
 
 
-def game(name, state, regs, note, size=(1280, 720)):
+def game(name, state, regs, note, size=(1280, 720), frames=3):
     add(name, {"ref": "%s/ingame/%s.png" % (REF, name), "size": list(size), "background": GAME_BG, "state": state,
-               "frames": 3, "note": note}, regs)
+               "frames": frames, "note": note}, regs)
+
+
+# The death screen slides in (death-ui-moveup / chat-moveup, 1.5 s ease): capture-v7.js took the
+# reference settle(800) after the kill, so the render is taken that long after the death too.
+DEATH_FRAMES = 6
+DEATH_AFTER_MS = 820
 
 
 game("ingame-plain", game_state(hud()), hud_regions(rects("ingame/ingame-plain")),
@@ -271,20 +277,20 @@ DEATH_REGS = [
 ]
 rc = rects("ingame/ingame-death")
 game("ingame-death",
-     game_state(hud(health=0, deaths=1), chat=BOT_CHAT, dead=True,
+     game_state(hud(health=0, deaths=1), chat=BOT_CHAT, dead=True, after_ms=DEATH_AFTER_MS,
                 killcard={"killer": "Bot", "weapon": "Desert Eagle", "weaponIcon": "icon_11", "level": 1, "myLevel": 1,
                           "score": 0, "classIndex": 10, "stats": [4000, 0, "0%", 0, 0]}),
      [R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder (moves right while dead)")] + DEATH_REGS,
-     "Killed by a sandbox bot (server-side players.kill): v7's head-to-head death screen.")
+     "Killed by a sandbox bot (server-side players.kill): v7's head-to-head death screen.", frames=DEATH_FRAMES)
 rc = rects("ingame/ingame-death-self")
 game("ingame-death-self",
-     game_state(hud(health=0, deaths=1), dead=True, killcard={"stats": [2000, 0, "0%", 0, 0]}),
+     game_state(hud(health=0, deaths=1), dead=True, after_ms=DEATH_AFTER_MS, killcard={"stats": [2000, 0, "0%", 0, 0]}),
      [R("chat", pad(rc["chatHolder"], 2), "text", "#chatHolder"),
       R("death-self", [595, 580, 90, 110], "text", "`You` / `Died` (death-row-center-self)"),
       R("death-time", [705, 570, 150, 25], "text", "Time Survived: differs per run", skip=True),
       R("death-stats", [705, 595, 150, 90], "text", "Shots Fired / Accuracy / Kills / Score rows"),
       R("empty-top-left", [0, 0, 300, 100], "flat", "HUD hidden", expect="background")],
-     "Killed with no killer: `You Died` + stats.")
+     "Killed with no killer: `You Died` + stats.", frames=DEATH_FRAMES)
 rc = rects("ingame/ingame-endscreen")
 game("ingame-endscreen", game_state(hud(), endscreen={"place": 1, "result": 1, "text": "#1 VICTORY", "nextRound": "00:00"}),
      [R("victory-text", [420, 300, 440, 100], "text", "`#1 VICTORY` is drawn on v7's overlay canvas (vicTitle)", skip=True),

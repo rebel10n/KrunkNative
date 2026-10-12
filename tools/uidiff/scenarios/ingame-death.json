@@ -65,6 +65,7 @@
       }
     ],
     "dead": true,
+    "after_ms": 820,
     "killcard": {
       "killer": "Bot",
       "weapon": "Desert Eagle",
@@ -82,6 +83,6 @@
       ]
     }
   },
-  "frames": 3,
+  "frames": 6,
   "note": "Killed by a sandbox bot (server-side players.kill): v7's head-to-head death screen."
 }

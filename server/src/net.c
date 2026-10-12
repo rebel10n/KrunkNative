@@ -118,6 +118,8 @@ static int net_peer_takes(const ClientConnection *client, const int type) {
     // map-logic WP-H: zombies (150-159) and airdrop (177-179) packets, v7 peers only
     if ((type >= NET_PACKET_BLOCK_ZOMBIES && type < NET_PACKET_BLOCK_ZOMBIES + 10) ||
         (type >= NET_PACKET_BLOCK_AIRDROP && type < NET_PACKET_BLOCK_LOBBY)) return ks_server_peer_v7(client);
+    // player-viewer WP-E: the HUD / death screen / social packets (NET_PACKET_BLOCK_SOCIAL, 240-249)
+    if (type >= NET_PACKET_BLOCK_SOCIAL && type < NET_PACKET_BLOCK_SOCIAL + 10) return ks_server_peer_v7(client);
     return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
 }
 

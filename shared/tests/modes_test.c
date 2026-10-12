@@ -1292,6 +1292,57 @@ static void test_net(Game *game) {
     CHECK(count_sent(NET_PACKET_MODE_STATE) >= 1, "sent");
 }
 
+// WP-E: players.syncLeaders "7": mode.leaderStats columns (endForm applied) in the leader order.
+static NetLeaderStatsPacket leader_stats_sent(int *found) {
+    NetLeaderStatsPacket stats;
+    memset(&stats, 0, sizeof(stats));
+    const SentPacket *sent = last_sent(NET_PACKET_LEADER_STATS, NET_TARGET_ALL);
+    *found = sent && sent->length == sizeof(stats);
+    if (*found) memcpy(&stats, sent->payload, sizeof(stats));
+    return stats;
+}
+
+static void test_leader_stats(Game *game) {
+    printf("Running leader stats test...\n");
+    CHECK(NET_PACKET_LEADER_STATS == NET_PACKET_BLOCK_SOCIAL && NET_PACKET_BLOCK_END == 250, "WP-E block 240-249");
+    CHECK(sizeof(NetLeaderStatsPacket) <= NET_MAX_PAYLOAD, "LEADER_STATS fits a frame (%zu)", sizeof(NetLeaderStatsPacket));
+
+    start_mode(game, MODE_ID_FFA); // ["score", "kills", "deaths"], orderByScore
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    a->score = 100, a->kills = 1, a->deaths = 4;
+    b->score = 300, b->kills = 3, b->deaths = 2;
+    g_sent_count = 0;
+    game_sync_leaders(game, NET_TARGET_ALL);
+    int found;
+    NetLeaderStatsPacket stats = leader_stats_sent(&found);
+    CHECK(found && stats.count == 2 && stats.stat_count == 3, "FFA: 2 rows x 3 columns (%d x %d)", stats.count, stats.stat_count);
+    CHECK(stats.uid[0] == 2 && stats.uid[1] == 1, "by score (%d, %d)", stats.uid[0], stats.uid[1]);
+    CHECK(stats.values[0][0] == 300 && stats.values[0][1] == 3 && stats.values[0][2] == 2, "score / kills / deaths");
+
+    start_mode(game, MODE_ID_ZOM); // ["points", "zombies", "downs", "dmg"]
+    a = add_player(game, 1, 0);
+    a->score = 450, a->deaths = 2, a->damage_dealt = 99.6f;
+    a->mode.ai_kills = 7;
+    g_sent_count = 0;
+    game_sync_leaders(game, NET_TARGET_ALL);
+    stats = leader_stats_sent(&found);
+    CHECK(found && stats.count == 1 && stats.stat_count == 4, "Zombies: 4 columns (%d)", stats.stat_count);
+    CHECK(stats.values[0][0] == 450 && stats.values[0][1] == 7 && stats.values[0][2] == 2 && stats.values[0][3] == 100,
+          "points = score, zombies = aiKills, downs = deaths, dmg = round(dmgDealt) (%d %d %d %d)",
+          stats.values[0][0], stats.values[0][1], stats.values[0][2], stats.values[0][3]);
+
+    start_mode(game, MODE_ID_RAID); // botsAsAI: bots stay off the board
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    b->is_bot = 1;
+    b->score = 999;
+    g_sent_count = 0;
+    game_sync_leaders(game, NET_TARGET_ALL);
+    stats = leader_stats_sent(&found);
+    CHECK(found && stats.count == 1 && stats.uid[0] == 1 && stats.stat_count == 1, "Raid: no bots, [\"score\"] (%d rows)", stats.count);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *sandstorm = NULL;
@@ -1337,6 +1388,7 @@ int main(void) {
     test_spawn_v7(&game);
     test_zombies_raid(&game);
     test_net_v7(&game);
+    test_leader_stats(&game);
 
     if (g_failures) {
         printf("modes_test: %d of %d check(s) failed\n", g_failures, g_checks);

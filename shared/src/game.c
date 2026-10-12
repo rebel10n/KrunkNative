@@ -266,24 +266,18 @@ Player *game_find_player(Game *game, const int uid) {
     return NULL;
 }
 
-// UTILS.orderByScore: higher score first; ties keep the join order (stable).
+// players.syncLeaders: the mode's leader order (leaderSort / killSort / orderByScore, stable).
 static size_t game_sorted_players(Game *game, Player **out, const size_t max) {
+    Player *all[256]; // every player is ranked, then the top `max` rows are kept
     size_t count = 0;
 
-    for (size_t i = 0; i < game->player_count && count < max; i++) {
-        Player *player = game->players[i];
-        if (!player) continue;
-
-        size_t at = count;
-        while (at > 0 && out[at - 1]->score < player->score) {
-            out[at] = out[at - 1];
-            at--;
-        }
-
-        out[at] = player;
-        count++;
+    const int bots_as_ai = game->mode && game->mode->config.bots_as_ai; // !isBot || !mode.botsAsAI
+    for (size_t i = 0; i < game->player_count && count < sizeof(all) / sizeof(all[0]); i++) {
+        if (game->players[i] && !(bots_as_ai && game->players[i]->is_bot)) all[count++] = game->players[i];
     }
-
+    mode_sort_leaders(game, all, count);
+    if (count > max) count = max;
+    memcpy(out, all, count * sizeof(*out));
     return count;
 }
 
@@ -319,6 +313,20 @@ void game_sync_leaders(Game *game, const int uid) {
     NetLeaderboardPacket board;
     game_fill_board(game, &board);
     game_send(game, uid, NET_PACKET_LEADERBOARD, &board, sizeof(board));
+
+    // WP-E: the v7 "7" columns (mode.leaderStats, default ["score"]) in the same order
+    NetLeaderStatsPacket stats;
+    memset(&stats, 0, sizeof(stats));
+    static const char *const score_only[] = {"score", NULL};
+    const char *const *keys = game->mode && game->mode->config.leader_stats ? game->mode->config.leader_stats : score_only;
+    while (keys[stats.stat_count] && stats.stat_count < NET_LEADER_STATS_MAX) stats.stat_count++;
+    stats.count = board.count;
+    for (int i = 0; i < board.count; i++) {
+        const Player *player = game_find_player(game, board.entries[i].uid);
+        stats.uid[i] = board.entries[i].uid;
+        for (int k = 0; k < stats.stat_count; k++) stats.values[i][k] = mode_leader_stat_value(player, keys[k]);
+    }
+    game_send(game, uid, NET_PACKET_LEADER_STATS, &stats, sizeof(stats));
 
     if (uid == NET_TARGET_ALL) game->leaders_dirty = 0;
 }
