@@ -7,7 +7,7 @@ kn_release_bins: [kn_brain, kn_migrate]
 # Client updates store (role kn_updates, doc/backend.md 9.8): https://assets.krunk.io/updates/.
 # Off until the user approves it: true adds the /updates/ location to OpenResty, creates
 # /opt/krunknative-updates and indexes the game content (Deploy kru runs central.yml on every push).
-kn_updates_enabled: false
+kn_updates_enabled: true
 kn_release_migrations: true
 
 # config.currentSeason (roles/kn_brain/defaults: kn_brain_current_season). Krunker v7.1.4 is

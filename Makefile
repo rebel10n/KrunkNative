@@ -99,7 +99,7 @@ export ANGLE_DIR
 angle: ## Build the pinned ANGLE (Metal on macOS; Vulkan/GL on Linux) into ANGLE_DIR (several GB of checkout in ANGLE_DIR.work)
 	tools/angle/build-angle.sh "$(ANGLE_DIR)"
 
-.PHONY: run run-release server server-release server-dist server-install network
+.PHONY: run launcher launcher-release run-release server server-release server-dist server-install network
 # make run starts the local backend (accounts, matchmaking) when config/config.json exists and
 # no brain answers on BRAIN_PORT; BACKEND=0 skips it (the client then plays on the default
 # server and shows "Failed to connect" for account actions).
@@ -115,6 +115,14 @@ run: build ## Run the debug client (ARGS="--offline" MAP=<name>; starts the loca
 	  $(MAKE) --no-print-directory backend-up BRAIN_PORT=$(BRAIN_PORT) || echo "[run] backend-up failed: accounts are unavailable (see make backend-status)"; \
 	fi
 	cd $(DEBUG_DIR) && $(RUN_BRAIN_ENV) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
+
+# The launcher (launcher/, doc/backend.md 9.8): updates check + game content sync, then client_bin.
+# The dev build has no kn-install.json, so it never replaces the build; content syncs into ./assets.
+launcher: build ## Run the debug launcher (ARGS="--cli --no-update -- --offline"; UPDATES_URL=off skips the server)
+	cd $(DEBUG_DIR) && KRUNKNATIVE_ASSETS_DIR=$(CURDIR)/assets/ $(if $(UPDATES_URL),KRUNKNATIVE_UPDATES_URL=$(UPDATES_URL),) ./krunknative $(ARGS)
+
+launcher-release: release ## Run the release launcher (ARGS=...)
+	cd $(RELEASE_DIR) && KRUNKNATIVE_ASSETS_DIR=$(CURDIR)/assets/ $(if $(UPDATES_URL),KRUNKNATIVE_UPDATES_URL=$(UPDATES_URL),) ./krunknative $(ARGS)
 
 run-release: release ## Run the release client
 	cd $(RELEASE_DIR) && ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
