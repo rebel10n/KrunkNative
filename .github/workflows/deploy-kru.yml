@@ -20,6 +20,10 @@ permissions:
 env:
   EM_VERSION: 6.0.12
   EM_CACHE_FOLDER: emsdk-cache
+  # Go for the WebTransport relay and the WebRTC gateway (net-bridge/wt, net-bridge/rtc: kn-rtc,
+  # --tags rtc) that central.yml builds on the controller: must equal the `go` line of their
+  # go.mod files (checked in the deploy job). Bump together with them.
+  GO_VERSION: 1.26.0
 
 jobs:
   deploy:
@@ -55,6 +59,30 @@ jobs:
       - name: Build services (dist/deploy/bookworm)
         run: TARGETS="kn_brain kn_migrate" deploy/ansible/build.sh bookworm
 
+      # Pinned Go, never the runner's preinstalled one; GOTOOLCHAIN=local so a go.mod asking
+      # for a newer Go fails here instead of silently downloading another toolchain.
+      - name: Check the Go pin against net-bridge/*/go.mod
+        run: |
+          set -euo pipefail
+          for mod in net-bridge/*/go.mod; do
+            want="$(awk '$1 == "go" { print $2 }' "$mod")"
+            echo "$mod: go $want"
+            [ "$want" = "$GO_VERSION" ] || { echo "::error file=$mod::go $want, deploy-kru.yml pins GO_VERSION=$GO_VERSION"; exit 1; }
+          done
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+          cache: true
+          cache-dependency-path: net-bridge/*/go.sum
+
+      - name: Go toolchain
+        run: |
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go version
+
       - name: SSH setup
         env:
           KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
@@ -68,13 +96,6 @@ jobs:
 
       # Assets are only in the checkout as the tracked subset (maps, shaders, skins):
       # the 1.5 GB content tree already on kru is left as is (kn_web_sync_assets=false).
-      # Go for the WebTransport relay and the WebRTC gateway (net-bridge/wt, net-bridge/rtc),
-      # which central.yml builds: pinned here instead of the runner's preinstalled Go.
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: net-bridge/wt/go.mod
-          cache-dependency-path: net-bridge/*/go.sum
-
       - name: Deploy (ansible central.yml)
         working-directory: deploy/ansible
         env:
