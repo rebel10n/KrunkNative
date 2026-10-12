@@ -438,7 +438,7 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
     // (a genGeo prefab's computed size is its generated geometry's: SPAWN_POINT's 7x11x7)
     const int real_default = (pf->has_default_size == 1 || (pf->has_default_size == 2 && HAS(EP_GENGEO))) && !aid;
     double default_size[3] = {pf->default_size[0], pf->default_size[1], pf->default_size[2]};
-    if (IS("SERVER_NODE")) { // generateServerNode: defaultSize = [5 + spread, 5, 5 + spread]
+    if (IS("SERVER_NODE") || IS("SPAWN_POINT")) { // generateServerNode / generateSpawn: defaultSize = [5 | 7 + spread, 5 | 11, 5 | 7 + spread]
         double spread = pf_or(p, "ssp", 0);
         if (!num_truthy(spread)) spread = 0;
         default_size[0] += spread;

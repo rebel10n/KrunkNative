@@ -356,8 +356,46 @@ static void zone_color(const char *s, const char *fallback, float out[3]) {
     for (int i = 0; i < 3; i++) out[i] = c[i] / 255.0f;
 }
 
-// Editor.regenZone: Zone.fromConfig(mapConfig, true) when mapConfig.zone
+// Editor.regenOcean: Ocean.fromConfig(mapConfig) when mapConfig.ocean. The editor previews it as
+// a flat plane (ocW x ocL at y = ocYOff, ocCol at ocOpac); the reflective Water.js port is the
+// game's (client/src/ocean.c, which builds from a loaded Map). Intentional difference from v7.1.4:
+// no mirror reflection or wave distortion in the editor view.
+void ed_ocean_regen(void) {
+    part_drop(&g_ed.proj->ocean);
+    const cJSON *mc = g_ed.proj->map_config;
+    if (!mc || !ed_json_truthy(cJSON_GetObjectItemCaseSensitive(mc, "ocean"))) return;
+    // Ocean.js limitMM ranges
+    const float w = (float) clampd(ed_json_num(mc, "ocW", 1000), 100, 20000), l = (float) clampd(ed_json_num(mc, "ocL", 1000), 100, 20000);
+    const float y = (float) clampd(ed_json_num(mc, "ocYOff", -1), -1000, 1000);
+    const float opacity = (float) clampd(ed_json_num(mc, "ocOpac", 0.9), 0, 1);
+    float c[3];
+    zone_color(ed_json_str(mc, "ocCol", ""), "#001e0f", c);
+    TerrBuf b = {0};
+    if (tb_reserve(&b, 4, 6)) {
+        tb_vertex(&b, -w / 2, y, -l / 2, 0, 0, c[0], c[1], c[2]);
+        tb_vertex(&b, w / 2, y, -l / 2, w / 100, 0, c[0], c[1], c[2]);
+        tb_vertex(&b, w / 2, y, l / 2, w / 100, l / 100, c[0], c[1], c[2]);
+        tb_vertex(&b, -w / 2, y, l / 2, 0, l / 100, c[0], c[1], c[2]);
+        static const unsigned int tri[6] = {0, 2, 1, 0, 3, 2};
+        for (int k = 0; k < 6; k++) b.i[b.ni++] = tri[k];
+        BasicMaterial *m = basic_material_init();
+        if (m) {
+            m->color.w = opacity;
+            m->unlit = 1;
+            m->use_vertex_color = 1;
+            m->double_sided = 1;
+            m->base.transparent = opacity < 1;
+            m->no_depth_write = opacity < 1;
+        }
+        part_set(&g_ed.proj->ocean, &b, m);
+    }
+    tb_free(&b);
+}
+
+// Editor.regenZone: Zone.fromConfig(mapConfig, true) when mapConfig.zone (and regenOcean: every
+// regenZone caller is one of v7's regenAll paths)
 void ed_zone_regen(void) {
+    ed_ocean_regen();
     part_drop(&g_ed.proj->zone);
     const cJSON *mc = g_ed.proj->map_config;
     if (!mc || !ed_json_truthy(cJSON_GetObjectItemCaseSensitive(mc, "zone"))) return;
@@ -412,4 +450,5 @@ void ed_terrain_fini(void) {
     part_drop(&g_ed.proj->terrain);
     part_drop(&g_ed.proj->clutter);
     part_drop(&g_ed.proj->zone);
+    part_drop(&g_ed.proj->ocean);
 }

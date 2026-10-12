@@ -531,16 +531,7 @@ void editor_script_popup(void) {
     editor_message("The KrunkScript window is not available yet.");
 }
 
-// textureKey (T): viewModelList for gen prefabs with variants, else viewTextureList. The
-// list pickers are WP3's (doc/v7/editor.md); until they land, v7's own guard message.
-void editor_texture_list(void) {
-    const EditorObject *o = g_ed.proj ? g_ed.proj->selected : NULL;
-    if (!o || !(editor_prefab_has(o->prefab, EP_TEXTURABLE) || (editor_prefab_has(o->prefab, EP_GEN) && editor_prefabs[o->prefab].variants))) {
-        editor_message("Select a texturable object first");
-        return;
-    }
-    editor_message("The texture / model list is not available yet.");
-}
+// textureKey (T): editor_texture_list() is editor_inspector.c's (the WP3 list pickers)
 
 // ---------------------------------------------------------------------------
 // handlers (inline on* names of editor.html and of the generated markup)
@@ -783,6 +774,7 @@ static void install_handlers(void) {
     };
     for (size_t i = 0; i < sizeof(own) / sizeof(own[0]); i++) table[count++] = own[i];
     ed_gui_install(table, &count, sizeof(table) / sizeof(table[0]));
+    ed_inspector_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_panels_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_prompt_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_net_install(table, &count, sizeof(table) / sizeof(table[0])); // after the own entries: openPub
@@ -1113,7 +1105,8 @@ static void dump_ctl(const HtmlElem ctl, EdBuf *b) {
             }
         } else if (!strcmp(tag, "select")) {
             static HtmlElem o[4096];
-            const int m = html_dom_query_all(c[i], "option", o, 4096);
+            int m = html_dom_query_all(c[i], "option", o, 4096);
+            if (m > 4096) m = 4096; // the total count: the first 4096 are stored (v7ref.js slices the same)
             t1[0] = t2[0] = 0;
             char sel[128] = "";
             if (m > 0) {
@@ -1332,6 +1325,26 @@ static void run_script_text(const char *text) {
         else if (!strcmp(cmd, "window")) editor_show_window(atoi(arg));
         else if (!strcmp(cmd, "closewindow")) editor_close_window();
         else if (!strcmp(cmd, "add") && arg) ed_obj_create(atoi(arg)); // createObjects[i]()
+        else if (!strcmp(cmd, "clear")) ed_map_clear();                 // KE.clearMap()
+        else if (!strcmp(cmd, "set") && arg) {
+            // set:<label>[#n]=<value>: a user edit of the right panel's nth control labelled so
+            // (pending panel rebuilds first, as the page would have shown them)
+            if (g_ed.dirty_panel && g_ed.proj->selected) {
+                g_ed.dirty_panel = 0;
+                ed_panel_right_object();
+            }
+            char *eq = strchr(arg, '=');
+            if (eq) {
+                *eq = 0;
+                int nth = 0;
+                char *hash = strrchr(arg, '#'); // "#<digits>" at the end: the nth (labels may hold '#': "Script #")
+                if (hash && hash[1] && strspn(hash + 1, "0123456789") == strlen(hash + 1)) {
+                    *hash = 0;
+                    nth = atoi(hash + 1);
+                }
+                if (!ed_gui_set_by_label(g_ed.el_right_list, arg, nth, eq + 1)) fprintf(stderr, "[editor] set: no control \"%s\" #%d\n", arg, nth);
+            }
+        }
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c

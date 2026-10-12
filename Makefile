@@ -154,7 +154,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/triggers_test
 	./$(DEBUG_DIR)/trigger_authority_test
 	./$(DEBUG_DIR)/editor_bus_test
-	./$(DEBUG_DIR)/editor_serialize_test .
+	./$(DEBUG_DIR)/editor_serialize_test . --golden doc/ref/krunker-v7.1.4/editor/inspector-edits.json
 	./$(DEBUG_DIR)/weapons_v7_test
 	./$(DEBUG_DIR)/combat_test
 	./$(DEBUG_DIR)/zombies_test
@@ -391,6 +391,10 @@ editor-mcp: configure ## Build kn_editor_mcp (debug: cmake-build-debug/tools/edi
 
 editor-mcp-test: build ## kn_editor_mcp test suite over MCP stdio (every tool, round trips, undo, validation, renders)
 	$(PYTHON) -I tools/editor-mcp/tests/mcp_test.py --bin $(DEBUG_DIR)/tools/editor-mcp/kn_editor_mcp $(EDITOR_MCP_TEST_ARGS)
+
+.PHONY: editor-inspector-test
+editor-inspector-test: build ## Object inspector + Environment/Terrain/Zone/Ocean panels vs v7.1.4: panel dumps and edits (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/inspector_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 
 # its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
 EDITOR_MCP_BUILD := cmake-build-mcp-release

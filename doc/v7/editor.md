@@ -1260,6 +1260,12 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | Wireframe (`forceWire`) | desktop GL only: OpenGL ES (web, ANGLE) has no `glPolygonMode` and draws filled (`scene.c`) |
 | Drag & drop import | native only (GLFW drop); the web build has no drop glue yet |
 | File menu | gains KrunkNative's **Projects** submenu (several maps, detached views, the editor bus) |
+| The Trigger Event folder never renders in v7's page (the hook script's `Object.prototype.events` accessor swallows `vO234.events`) | **fix**: shown (WP4's `ed_triggers_panel`); the v7 dumps of prefabs 29 / 55 lack it |
+| AI_SPAWNER "Offset Shot" binds the misspelt `objConfig.shoOffH`: always shows off, never edits `shotOffH` | **fix**: the switch shows and edits the object's `shof` (`editor_inspector.c`) |
+| ENVIRONMENT_ZONE "Emissive" has no stringified getter, so the input shows its `#ffffff` default | **fix**: shows the zone's `skyDomeEmis` |
+| T-key spray list: `selectSpray(i)` stores the store position, not the spray index the Spray select and `spt` use | **fix**: the item passes the spray's index |
+| Ocean (`Ocean.js` / Water.js) in the editor view | the editor previews a flat plane (`ocCol` at `ocOpac`, `ocW` x `ocL` at `ocYOff`); the reflective water is the game's (`client/src/ocean.c`) |
+| Asset browsers v7 adds for the inspector (`selectShootHit`, `selectMelee(Hit)`, `selectProjModel`, `selectCloud(EN)`, `selectEmissiveCloud(EN)`, `selectAmb(EN)`) | the buttons are there; `ed_net_select` opens them once WP6's Assets / Sounds windows land |
 
 ---
 
@@ -1665,6 +1671,25 @@ KRUNKNATIVE_EDITOR_SCRIPT="window:N;dump:window:/tmp/wN.txt" client_bin --editor
 - Run on the NVIDIA EGL device (`KRUNKNATIVE_EGL_DEVICE=nvidia`) once per change to the overlay GL code.
 
 ### WP3: Object inspector, materials, environment/ocean/zone panels
+
+**Status (landed):** `editor_inspector.c` builds v7's object panel (UI:1267-5831) in blueprint key
+order: the header controls, Transform (+ the group Reflect), Style (texture folder with type /
+variant / asset / stretch / scale / transparency / rotation / offset / movement / frame animation,
+model variants, encoding, colours, shading, fog, shadows, alpha test, render side, mimic sprite),
+Technical & Logic (score, perks, interaction, health / respawn, hitbox, the AI and bot folders,
+weapon pickup, interface, teleporter, script) and the type folders (faces, ENVIRONMENT_ZONE's
+environment, lighting, billboard, particles, text, spawn, liquid, sound, animations). A selected
+group shows v7's bulk-edit header (Texture, Color, Key + Execute, Reflect). The Trigger Event /
+Trigger Actions folders are WP4's `ed_triggers_panel()` (`ED_HAVE_TRIGGERS_PANEL`; until it lands
+a fallback stands in). `editor_env.c` has v7's Environment (cloud asset ids, soundscapes 1-19 +
+custom sound, Render folder), Terrain, Zone (stages, wait, height) and Ocean panels, and
+`editor_terrain.c` the ocean preview plane. `editor_gui.c` adds `selectClick`, the "smaller"
+folder and the Pickr swatches (`updateColorSwatches`); the T key and the selectClick icons open
+`viewTextureList` / `viewModelList` (textures x variants, model variants, sprays, skins, with
+search). Checks: `make editor-inspector-test` (`tools/editor/inspector_check.py`): 94/97 right
+panel dumps identical to v7's, 97/97 with the documented differences (section 1.13); the 41 edit
+cases of `tools/editor/inspector_edits.json` (v7 golden `inspector-edits.json`, `v7ref.js` state
+`edits`) match v7 and round-trip in `editor_serialize_test`; uidiff `editor-inspector`.
 
 **Owns:**
 - `editor_inspector.c`: the v7 object panel per section 1.4, all prefab gates and type folders, the group bulk-edit header.

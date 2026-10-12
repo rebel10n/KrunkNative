@@ -147,7 +147,7 @@ typedef struct EditorProject {
     uint32_t next_batch;
     const char *batch_label;
 
-    EdTerrPart terrain, clutter, zone;
+    EdTerrPart terrain, clutter, zone, ocean;
     unsigned bus_revision; // last revision / selection announced on the editor bus
     uint32_t bus_selected;
 } EditorProject;
@@ -399,7 +399,7 @@ struct EdCtl {
 
 enum {
     EG_PANEL_BUTTONS, EG_RULE, EG_FOLDER_STANDARD, EG_FOLDER_SMALL, EG_TEXT, EG_NUMBER, EG_COLOR,
-    EG_SWITCH, EG_SLIDER, EG_SELECT, EG_BUTTON, EG_VECTOR3, EG_KEY, EG_TOOLBAR_OPTION,
+    EG_SWITCH, EG_SLIDER, EG_SELECT, EG_BUTTON, EG_VECTOR3, EG_KEY, EG_TOOLBAR_OPTION, EG_SELECT_CLICK,
 };
 
 typedef struct {
@@ -432,7 +432,7 @@ void ed_gui_reset_panel(int panel);
 EdCtl *ed_gui_ctl(int panel, int kind);
 void ed_gui_panel_buttons(EdBuild *b, int right, const char *label, int blank);
 void ed_gui_rule(EdBuild *b);
-void ed_gui_folder_begin(EdBuild *b, const char *name, int small, int closed_default, int sub, const char *state_key);
+void ed_gui_folder_begin(EdBuild *b, const char *name, int small, int closed_default, int sub, const char *state_key); // small: 0 standard, 1 small, 2 smaller
 void ed_gui_folder_end(EdBuild *b, int small);
 EdCtl *ed_gui_text(EdBuild *b, const char *name, const char *placeholder, int sub);
 EdCtl *ed_gui_number(EdBuild *b, const char *name, const char *placeholder, double min, int sub);
@@ -443,6 +443,7 @@ EdCtl *ed_gui_select(EdBuild *b, const char *name, const EdOption *options, int 
 EdCtl *ed_gui_button(EdBuild *b, const char *label, EdActionFn fn);
 EdCtl *ed_gui_button_line(EdBuild *b, const char *name, const char *label, EdActionFn fn, int sub);
 EdCtl *ed_gui_vector3(EdBuild *b, const char *name, double min);
+EdCtl *ed_gui_select_click(EdBuild *b, const char *name, const EdOption *options, int count, int sub, const char *icon, EdActionFn on_click);
 EdCtl *ed_gui_key(EdBuild *b, const char *name, int editable, const char *const *extra, int extra_count, int sub);
 // value binding: call right after creating the control, before ed_gui_end
 void ed_ctl_bind_json(EdCtl *c, cJSON *obj, const char *key);
@@ -451,6 +452,7 @@ void ed_ctl_bind_obj(EdCtl *c, const char *prop);
 void ed_gui_emit_value(EdBuild *b, EdCtl *c);
 
 void ed_gui_install(HtmlHandlerEntry *table, size_t *count, size_t max); // GUI.* handler names
+int ed_gui_set_by_label(HtmlElem root, const char *label, int nth, const char *value); // a user edit of the nth control labelled so
 void ed_gui_tick(void);
 void ed_gui_color_hide(void);
 int ed_gui_key_capture(int key, int action);      // GUI.update.key.keydown
@@ -461,6 +463,7 @@ void ed_toolbar_account_check(void);             // per frame: rebuild on login 
 void ed_panel_left_show(void);
 void ed_panel_right_blank(void);
 void ed_panel_right_object(void);
+void ed_inspector_install(HtmlHandlerEntry *table, size_t *count, size_t max); // editor_inspector.c: KE.selectTex / .. / searchItems
 void ed_panel_right_environment(void);
 void ed_panel_right_object_list(void);             // Object > Scene Graph (panel.right.objectList)
 void ed_import_map_popup(void);                    // importMapPopup (File > Import Project)
@@ -545,7 +548,8 @@ void ed_net_install(HtmlHandlerEntry *table, size_t *count, size_t max);
 // ---- editor_terrain.c: Editor.regenTerrain / regenZone (meshes in g_ed.scene); editor_env.c the panels
 int ed_terrain_panel_show(const char *name);            // editor_env.c: "terrain" "zone"; 0 = not one of them
 void ed_terrain_regen(void);
-void ed_zone_regen(void);
+void ed_zone_regen(void);                                // + ed_ocean_regen (every caller is a regenAll)
+void ed_ocean_regen(void);                               // Editor.regenOcean: the ocean preview plane
 void ed_terrain_fini(void);                              // page_leave: drop both before the scene
 
 // ---- editor_tools.c: Customize / Tools / Grouping panels, replaceObject, createGroup, loadFile
@@ -559,6 +563,8 @@ void ed_create_group(EditorObject *replaced, EditorObject **members, size_t coun
 void ed_json_input(int file);                           // jsonInput(file)
 void ed_json_input_for(int file, EditorObject *target); // jsonInput(file, t) (NULL = selection)
 void ed_export_group(void);                             // exportGroup (Object > Group > Prefab > Export)
+void ed_group_edit(const char *key, const cJSON *value); // editGroup(key, value): every member of the selected group
+void ed_group_reflect(void);                            // advancedOptions.groupReflect: reflectObjects(true)
 
 // ---- editor_quickgui.c: right-click Quick GUI, hitbox fixer, object painter
 void ed_quickgui_show(EditorObject *o, double fb_x, double fb_y); // updateQuickGUI

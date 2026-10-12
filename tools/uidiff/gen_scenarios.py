@@ -383,6 +383,21 @@ for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3
         regs)
 
 
+# the object inspector (editor WP3, editor_inspector.c): a new cube's panel with Transform and Style
+# open (v7ref.js state right-object-cube). The 3D view and the stats box show the cube differently
+# (three.js vs the native view): only the toolbar, the version text and the right panel are compared.
+rc = rects("editor/right-object-cube")
+regs = [r for r in editor_chrome(rc) if r["name"] in ("toolbar", "version", "left-panel")]
+regs.append(R("right-panel", pad(rc["right-panel"], 0, EW, EH), "text", "right panel: the Cube's object panel (Transform, Style open)", max_pct=4.0))
+add("editor-inspector", {"ref": REF + "/editor/right-object-cube.png", "size": [EW, EH], "background": "#000000",
+                         "state": {"page": "editor", "pageQuery": "new",
+                                   "pageActions": ["closeWindow"] + ["KE.kn.script('%s')" % c for c in  # one command per call
+                                                                     ("clear", "add:0", "select:0", "open:transformH", "open:styleH")],
+                                   "anim_time": ANIM},
+                         "frames": 3, "note": "Map editor, new map, a new Cube selected: the object panel (Transform, Style open)."},
+    regs)
+
+
 def main():
     for d in ("scenarios", "regions"):
         os.makedirs(os.path.join(HERE, d), exist_ok=True)

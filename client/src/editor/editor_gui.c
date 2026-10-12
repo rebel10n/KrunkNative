@@ -206,6 +206,7 @@ static void lower_id(const char *name, char *out, const size_t n) {
     out[i] = 0;
 }
 
+// small: 0 = _html.folder.standard, 1 = small ("[sub]subheader"), 2 = smaller ("[sub]subsubheader")
 void ed_gui_folder_begin(EdBuild *b, const char *name, const int small, const int closed_default, const int sub, const char *state_key) {
     EdCtl *c = ed_gui_ctl(b->panel, small ? EG_FOLDER_SMALL : EG_FOLDER_STANDARD);
     snprintf(c->path, sizeof(c->path), "%d.%s", b->panel, state_key ? state_key : name);
@@ -223,7 +224,7 @@ void ed_gui_folder_begin(EdBuild *b, const char *name, const int small, const in
     } else {
         edb_addf(&b->html, "<div id=\"%sH\" class=\"%ssubheader\" style=\"cursor: pointer\"\n"
                            "                  onclick=\"GUI.update.folder(this);GUI.action(%d, this)\"><i class=\"material-icons\">keyboard_arrow_%s</i><a>",
-                 id, sub ? "sub" : "", c->id, closed ? "right" : "down");
+                 id, small == 2 ? (sub ? "subsub" : "sub") : sub ? "sub" : "", c->id, closed ? "right" : "down");
         edb_add_escaped(&b->html, name);
         edb_addf(&b->html, "</a></div>\n                  <div id=\"%sB\" style=\"%s\">", id, closed ? "display:none" : "");
     }
@@ -325,6 +326,20 @@ EdCtl *ed_gui_button_line(EdBuild *b, const char *name, const char *label, const
     edb_add_escaped(&b->html, label);
     edb_add(&b->html, "</div>");
     line_end(b);
+    return c;
+}
+
+// selectClick (v7 UI:184): a select plus an icon button (line "nodiv"); the icon is its own
+// button control (GUI.action on the DIV runs the blueprint's onClick)
+EdCtl *ed_gui_select_click(EdBuild *b, const char *name, const EdOption *options, const int count, const int sub, const char *icon, const EdActionFn on_click) {
+    EdCtl *btn = ed_gui_ctl(b->panel, EG_BUTTON);
+    btn->action = on_click;
+    EdCtl *c = ed_gui_ctl(b->panel, EG_SELECT_CLICK);
+    c->arg = sub;
+    snprintf(c->path, sizeof(c->path), "%d|%s", btn->id, icon ? icon : "");
+    g_select_opts[b->panel][c->id % 10000] = options;
+    g_select_count[b->panel][c->id % 10000] = count;
+    g_ctl_names[b->panel][c->id % 10000] = name;
     return c;
 }
 
@@ -443,10 +458,17 @@ void ed_gui_emit_value(EdBuild *b, EdCtl *c) {
             line_end(b);
             break;
         }
-        case EG_SELECT: {
+        case EG_SELECT:
+        case EG_SELECT_CLICK: {
             const EdOption *opts = g_select_opts[b->panel][index];
             const int count = g_select_count[b->panel][index];
-            line_begin(b, name, sub);
+            static const char *subs[] = {"", "subsection", "subsubsection"};
+            if (c->kind == EG_SELECT_CLICK) // _html.line.nodiv + _html.input.resizable.selectClick
+                edb_addf(&b->html, "<div class=\"inlineItem\">\n                  <div class=\"section %s\">", sub >= 1 && sub <= 2 ? subs[sub] : "");
+            if (c->kind == EG_SELECT_CLICK) {
+                edb_add_escaped(&b->html, name);
+                edb_add(&b->html, "</div>\n                  <div class=\"multiItem\">");
+            } else line_begin(b, name, sub);
             edb_addf(&b->html, "<select onchange=\"GUI.action(%d, this)\">", c->id);
             for (int i = 0; i < count; i++) {
                 const EdOption *o = &opts[i];
@@ -463,7 +485,12 @@ void ed_gui_emit_value(EdBuild *b, EdCtl *c) {
                 edb_add(&b->html, "</option>");
             }
             edb_add(&b->html, "</select>");
-            line_end(b);
+            if (c->kind == EG_SELECT_CLICK) {
+                const char *bar = strchr(c->path, '|');
+                edb_addf(&b->html, "\n                  <div class=\"iconButton\" onclick=\"GUI.action(%d, this)\"><span class=\"material-icons\" style=\"line-height: 1.2;\">", atoi(c->path));
+                edb_add_escaped(&b->html, bar ? bar + 1 : "");
+                edb_add(&b->html, "</span></div></div></div>\n");
+            } else line_end(b);
             break;
         }
         case EG_VECTOR3: {
@@ -790,6 +817,61 @@ void ed_gui_color_hide(void) {
     g_pickr_drag = 0;
 }
 
+// KE.updateColorSwatches (E:3312), on every Pickr "show": the 14 most-used colours of the map
+// (object colours other than #FFFFFF, emissives other than #000000; ties keep first-seen order,
+// as Object.entries + a stable sort), else #fbc02d #2196F3 #b2f252 #ed4242
+#define PICKR_SWATCHES 14
+static char g_swatch[PICKR_SWATCHES][32];
+static int g_swatch_count;
+
+static void pickr_swatches(void) {
+    typedef struct { const char *col; int n; } Count;
+    Count *counts = NULL;
+    size_t nc = 0, cap = 0;
+    for (size_t i = 0; g_ed.proj && i < g_ed.proj->count; i++) {
+        const cJSON *d = g_ed.proj->objects[i]->data;
+        for (int k = 0; k < 2; k++) {
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(d, k ? "e" : "c");
+            if (!cJSON_IsString(v) || !v->valuestring[0] || !strcmp(v->valuestring, k ? "#000000" : "#FFFFFF")) continue;
+            size_t j = 0;
+            while (j < nc && strcmp(counts[j].col, v->valuestring)) j++;
+            if (j == nc) {
+                if (nc == cap) {
+                    cap = cap ? cap * 2 : 32;
+                    Count *n = realloc(counts, cap * sizeof(*n));
+                    if (!n) break;
+                    counts = n;
+                }
+                counts[nc++] = (Count) {v->valuestring, 0};
+            }
+            counts[j].n++;
+        }
+    }
+    g_swatch_count = 0;
+    for (int s = 0; s < PICKR_SWATCHES; s++) { // stable selection of the largest counts
+        size_t best = nc;
+        for (size_t j = 0; j < nc; j++) if (counts[j].n > 0 && (best == nc || counts[j].n > counts[best].n)) best = j;
+        if (best == nc) break;
+        snprintf(g_swatch[g_swatch_count++], sizeof(g_swatch[0]), "%s", counts[best].col);
+        counts[best].n = 0;
+    }
+    free(counts);
+    if (!g_swatch_count) {
+        static const char *const def[] = {"#fbc02d", "#2196F3", "#b2f252", "#ed4242"};
+        for (int i = 0; i < 4; i++) snprintf(g_swatch[g_swatch_count++], sizeof(g_swatch[0]), "%s", def[i]);
+    }
+    // Pickr's swatch buttons: <button type="button" style="color: rgba(..)" aria-label="color swatch">
+    EdBuf b;
+    edb_init(&b);
+    for (int i = 0; i < g_swatch_count; i++) {
+        const int c = parse_color(g_swatch[i]);
+        edb_addf(&b, "<button type=\"button\" style=\"color: rgba(%d, %d, %d, 1)\" aria-label=\"color swatch\" onmousedown=\"GUI.kn.swatch(%d)\"></button>",
+                 (c >> 16) & 255, (c >> 8) & 255, c & 255, i);
+    }
+    html_dom_set_html(html_dom_query(g_pickr, ".pcr-swatches"), b.buf ? b.buf : "");
+    edb_free(&b);
+}
+
 static void pickr_show(const HtmlElem target) {
     pickr_ensure();
     if (!g_pickr) return;
@@ -799,6 +881,7 @@ static void pickr_show(const HtmlElem target) {
     const int c = parse_color(value);
     rgb_to_hsv((c >> 16) & 255, (c >> 8) & 255, c & 255, &g_pickr_h, &g_pickr_s, &g_pickr_v);
     html_dom_set_class(g_pickr, "visible", 1);
+    pickr_swatches();
     // .on("show"): place next to the input, flipped to stay inside the window
     HtmlRect rect;
     float vw = 0, vh = 0;
@@ -877,6 +960,17 @@ static int h_kn_pickr(void *user, const HtmlEvent *ev, const HtmlArg *args, cons
     const float s = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
     ed_gui_pickr_drag(ev->x * s, ev->y * s, 0);
     return 0;
+}
+
+// .on("swatchselect"): the swatch colour into the field (toHEXA: upper case)
+static int h_kn_swatch(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user; (void) ev;
+    const int i = argc >= 1 ? (int) args[0].num : -1;
+    if (i < 0 || i >= g_swatch_count || !g_pickr_target) return 1;
+    const int c = parse_color(g_swatch[i]);
+    rgb_to_hsv((c >> 16) & 255, (c >> 8) & 255, c & 255, &g_pickr_h, &g_pickr_s, &g_pickr_v);
+    pickr_apply();
+    return 1;
 }
 
 int ed_gui_color_change_elem(const HtmlElem target) {
@@ -1009,6 +1103,7 @@ static int h_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
             value = cJSON_CreateString(ev->value ? ev->value : "");
             break;
         case EG_SELECT:
+        case EG_SELECT_CLICK:
             if (c->value_is_string) value = cJSON_CreateString(ev->value ? ev->value : "");
             else value = cJSON_CreateNumber(ev->value ? strtod(ev->value, NULL) : 0);
             break;
@@ -1034,6 +1129,54 @@ static int h_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
     return 1;
 }
 
+// A user edit by label (the editor script "set:<label>[#n]=<value>", tools/editor/inspector_check.py):
+// the nth .inlineItem under root whose .section reads `label` gets the value (a checkbox: "1" /
+// "true" checks it) and its control's GUI.action handler runs, as the page's own
+// oninput / onchange / onclick would. 0 = no such control.
+int ed_gui_set_by_label(const HtmlElem root, const char *label, const int nth, const char *value) {
+    enum { MAX_ITEMS = 4096 };
+    HtmlElem *items = malloc(MAX_ITEMS * sizeof(*items));
+    if (!items) return 0;
+    int n = html_dom_query_all(root, ".inlineItem", items, MAX_ITEMS);
+    if (n > MAX_ITEMS) n = MAX_ITEMS;
+    HtmlElem ctl = 0;
+    for (int i = 0, seen = 0; i < n && !ctl; i++) {
+        char text[256] = "";
+        html_dom_get_text(html_dom_query(items[i], ".section"), text, sizeof(text));
+        char *t = text;
+        while (*t == ' ' || *t == '\n' || *t == '\t') t++;
+        size_t l = strlen(t);
+        while (l && (t[l - 1] == ' ' || t[l - 1] == '\n' || t[l - 1] == '\t')) t[--l] = 0;
+        if (strcmp(t, label) || seen++ != nth) continue;
+        ctl = html_dom_query(items[i], "input, select");
+    }
+    free(items);
+    if (!ctl) return 0;
+    char type[32] = "";
+    html_dom_get_attr(ctl, "type", type, sizeof(type));
+    const int checkbox = !strcmp(type, "checkbox");
+    if (checkbox) html_dom_set_checked(ctl, !strcmp(value, "1") || !strcmp(value, "true"));
+    else html_dom_set_value(ctl, value);
+    static const char *const attrs[] = {"oninput", "onchange", "onclick"};
+    for (int k = 0; k < 3; k++) {
+        char h[512] = "";
+        if (html_dom_get_attr(ctl, attrs[k], h, sizeof(h)) <= 0) continue;
+        const char *p = strstr(h, "GUI.action(");
+        if (!p) continue;
+        if (!strcmp(type, "number") && html_dom_has_class(ctl, "sliderVal")) { // GUI.update.slider.val: clamp
+            HtmlEvent e = {.type = "change", .target = ctl, .value = value};
+            h_update_slider_val(NULL, &e, NULL, 0);
+        }
+        char v[256] = "";
+        html_dom_get_value(ctl, v, sizeof(v));
+        HtmlEvent e = {.type = k == 2 ? "click" : k ? "change" : "input", .target = ctl, .value = v, .checked = html_dom_get_checked(ctl)};
+        HtmlArg a[2] = {{HTML_ARG_NUM, atoi(p + 11), NULL}, {HTML_ARG_THIS, 0, NULL}};
+        html_ui_dispatch("GUI.action", &e, a, 2);
+        return 1;
+    }
+    return 0;
+}
+
 static int h_noop(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) ev; (void) args; (void) argc;
     return 1;
@@ -1053,6 +1196,7 @@ void ed_gui_install(HtmlHandlerEntry *table, size_t *count, const size_t max) {
         {"GUI.update.color.pickr.hide", h_pickr_hide},
         {"GUI.update.toolbar", h_update_toolbar},
         {"GUI.kn.pickr", h_kn_pickr},
+        {"GUI.kn.swatch", h_kn_swatch},
         {"stopBubbling", h_noop},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]) && *count < max; i++) table[(*count)++] = entries[i];

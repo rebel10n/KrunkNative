@@ -1123,6 +1123,10 @@ static void act_group_custom(EdCtl *c) {
 
 static void act_group_reflect(EdCtl *c) { (void) c; reflect_objects(1); }
 
+// the object panel's group header (editor_inspector.c, v7 layout)
+void ed_group_edit(const char *key, const cJSON *value) { edit_group(key, value); }
+void ed_group_reflect(void) { reflect_objects(1); }
+
 // jsonInput(file, target): import a prefab in place of the selection
 // jsonInput(file, t): t = the Quick GUI's object (by uuid: the prompt is asynchronous),
 // 0 = the selection

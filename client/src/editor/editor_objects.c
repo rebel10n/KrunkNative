@@ -175,9 +175,9 @@ cJSON *ed_prop_get(const EditorObject *o, const char *prop) {
         return vec_json(ed_obj_vec(o, "s", (vec3) {p->default_size[0], p->default_size[1], p->default_size[2]}), 2);
     }
     if (!strcmp(prop, "rot")) {
-        // GUI shows degrees unless settings.degToRad (editor.radToDeg)
+        // v7 _html.vector3: "Rotation" in degrees when settings.degToRad ("Anti Radians"), radians otherwise
         vec3 r = ed_obj_vec(o, "r", (vec3) {0});
-        if (!editor_setting_bool("degToRad")) {
+        if (editor_setting_bool("degToRad")) {
             r.x = r.x * 180.0f / (float) M_PI;
             r.y = r.y * 180.0f / (float) M_PI;
             r.z = r.z * 180.0f / (float) M_PI;
@@ -228,7 +228,7 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
         if (isnan(v.y)) v.y = 0.0f;
         if (isnan(v.z)) v.z = 0.0f;
         if (!strcmp(prop, "rot")) {
-            if (!editor_setting_bool("degToRad")) {
+            if (editor_setting_bool("degToRad")) { // KE.degToRad(values)
                 v.x = v.x * (float) M_PI / 180.0f;
                 v.y = v.y * (float) M_PI / 180.0f;
                 v.z = v.z * (float) M_PI / 180.0f;

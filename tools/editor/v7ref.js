@@ -13,6 +13,8 @@
 //   editor-1920.{png,html.gz,rects.json}   the editor with the Welcome window closed (uidiff ref)
 //   prefabs/<id>.json, prefabs/<id>.right.dump.txt   KE.createObjects[id]()'s serialize() and
 //                        right (object) panel, for every prefab the menus can create
+//   inspector-edits.json  the objects after tools/editor/inspector_edits.json's panel edits (WP3)
+//   right-object-cube.{png,rects.json,dump.txt}  a new cube's object panel, Transform + Style open (WP3)
 // Determinism: no network but the static serve (https/wss blocked), empty localStorage (default kro_editor settings), a seeded Math.random before any
 // page script, the hook's session timer box removed, CSS animations paused at 800 ms, the Welcome
 // counters run to their maximum. The page is served on a free 127.0.0.1 port, so v7's
@@ -309,6 +311,18 @@ for (const p of ['environment', 'terrain', 'zone', 'ocean', 'tools', 'prefab', '
   });
 }
 
+// the object inspector (WP3's uidiff scenario editor-inspector): a cube with Transform and Style open
+state('right-object-cube', async (c) => {
+  await reset(c);
+  await c.eval(`(() => { KE.clearMap(); KE.createObjects[0](); document.getElementById('transformH').click();
+    document.getElementById('styleH').click(); return 1; })()`);
+  await sleep(500);
+  await shot(c, 'right-object-cube');
+  write('right-object-cube.rects.json', JSON.stringify(await c.eval(RECTS), null, 0) + '\n');
+  write('right-object-cube.dump.txt', await c.eval('__knDump.panel("right")'));
+  await c.eval('(() => { KE.clearMap(); GUI.panel.right.blank.show(); return 1; })()');
+});
+
 state('prefabs', async (c) => {
   await reset(c);
   const ids = await c.eval(`(() => { const o = []; for (const i in KE.createObjects) o.push(+i); return o; })()`);
@@ -331,6 +345,55 @@ state('prefabs', async (c) => {
   write('prefabs/skipped.txt', skipped.map((s) => s + '\n').join(''));
   await c.eval('(() => { KE.clearMap(); GUI.panel.right.blank.show(); return 1; })()');
   console.error('[v7ref] prefabs: ' + (ids.length - skipped.length) + ' written, skipped: ' + skipped.join('; '));
+});
+
+// inspector edits (doc/v7/editor.md WP3): every case of tools/editor/inspector_edits.json on a
+// cleared map, each [label, value] set on the right panel's nth control so labelled as a user edit
+// (the value, then its oninput / onchange / onclick), then the object's serialize(). Written as an
+// editor_serialize_test golden ({"maps": {"inspector-edits": [[edited, ObjectInstance.deserialize(
+// edited).serialize()], ...]}}: the native model must load v7's result as v7 does) plus the case
+// list; tools/editor/inspector_check.py replays the cases in the native editor and compares its
+// objects with the second form (the native editor holds objects in that form).
+state('edits', async (c) => {
+  await reset(c);
+  const spec = JSON.parse(fs.readFileSync(path.join(REPO, 'tools', 'editor', 'inspector_edits.json'), 'utf8'));
+  const pairs = [], cases = [];
+  for (const k of spec.cases) {
+    // async: the generated geometry (genGeo, e.g. SPAWN_POINT / SERVER_NODE sizes) settles first
+    const r = await c.eval(`(async () => { try {
+      const settle = () => new Promise((res) => setTimeout(res, 250));
+      KE.clearMap(); GUI.panel.right.blank.show(); KE.createObjects[${k.prefab}]();
+      await settle();
+      const o = KE.objInsts[KE.objInsts.length - 1];
+      const miss = [], errs = [];
+      for (const [lab, val] of ${JSON.stringify(k.set)}) {
+        const m = /^(.*?)(?:#(\\d+))?$/.exec(lab), want = m[1], nth = +(m[2] || 0);
+        let seen = 0, ctl = null;
+        for (const it of document.querySelectorAll('.right.panel .list .inlineItem')) {
+          const sec = it.querySelector('.section');
+          if (!sec || sec.textContent.trim() !== want) continue;
+          if (seen++ === nth) { ctl = it.querySelector('input, select'); break; }
+        }
+        if (!ctl) { miss.push(lab); continue; }
+        try {
+          if (ctl.type === 'checkbox') { ctl.checked = val === '1' || val === 'true'; ctl.onclick.call(ctl); }
+          else { ctl.value = val; if (ctl.oninput) ctl.oninput.call(ctl); if (ctl.onchange) ctl.onchange.call(ctl); }
+        } catch (e) { errs.push(lab + ': ' + e); } // a setter's mesh update can throw offline (no texture loaded)
+      }
+      await settle();
+      const obj = o.serialize();
+      let again = null;
+      try { const o2 = o.constructor.deserialize(JSON.parse(JSON.stringify(obj))); await settle(); again = o2.serialize(); } catch (e) { errs.push('deserialize: ' + e); }
+      return {obj, again, miss, errs};
+    } catch (e) { return {error: String(e)}; } })()`);
+    if (r.error) throw new Error('edits ' + k.name + ': ' + r.error);
+    cases.push(Object.assign({name: k.name, prefab: k.prefab}, r.miss.length ? {miss: r.miss} : {}, r.errs.length ? {errors: r.errs} : {}));
+    pairs.push([r.obj, r.again || r.obj]);
+  }
+  write('inspector-edits.json', JSON.stringify({cases, maps: {'inspector-edits': pairs}}, null, 1) + '\n');
+  await c.eval('(() => { KE.clearMap(); GUI.panel.right.blank.show(); return 1; })()');
+  console.error('[v7ref] edits: ' + cases.length + ' cases' + (cases.some((x) => x.miss) ? ', missing controls: ' +
+    cases.filter((x) => x.miss).map((x) => x.name + ' ' + x.miss.join('/')).join('; ') : ''));
 });
 
 // ---------------------------------------------------------------- main

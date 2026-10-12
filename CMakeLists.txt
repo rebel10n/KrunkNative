@@ -545,7 +545,8 @@ else ()
     target_include_directories(editor_serialize_test PRIVATE client/src/editor)
     target_link_libraries(editor_serialize_test PRIVATE cJSON m)
     enable_testing()
-    add_test(NAME editor_serialize_test COMMAND editor_serialize_test ${CMAKE_SOURCE_DIR})
+    add_test(NAME editor_serialize_test COMMAND editor_serialize_test ${CMAKE_SOURCE_DIR}
+             --golden ${CMAKE_SOURCE_DIR}/doc/ref/krunker-v7.1.4/editor/inspector-edits.json) # WP3: the inspector edits
 
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)

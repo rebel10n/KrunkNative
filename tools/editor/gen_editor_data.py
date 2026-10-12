@@ -220,6 +220,10 @@ def main():
         "kss": ed["kss"],
         "defaults": {k: config[k] for k in ("shadowRes", "shadowDst", "lightDistance", "lightIntensity",
                                             "ambIntensity", "sunAngleX", "sunAngleY")},
+        # object inspector (WP3): model variant names by prefab id (variant id = index) and the
+        # model's src (the T-key list's img/editor-models/<src>[_<id>].png)
+        "prefabVariants": {str(i): {"src": p.get("src") or "", "names": [v["name"] for v in p["variants"]]}
+                           for i, p in enumerate(prefabs) if p.get("variants")},
     }
     text = json.dumps(blob, separators=(",", ":"), ensure_ascii=True)
     lines.append("// the editor's configuration lists, parsed once by editor_data_json()")
