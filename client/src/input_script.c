@@ -28,6 +28,8 @@
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended
 //   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
+//   1200 frames /tmp/f 120       write this and the next 119 finished frames (page included) as
+//                                /tmp/f_0000.png ... (input_script_frame_presented)
 //   3000 quit                    close the window
 // Events run at the start of the first frame whose time is >= t, before the input is
 // sampled, so a key held from t=0 to t=1500 is down for the inputs of [0, 1500).
@@ -40,6 +42,7 @@
 #include <console.h> // `con`: ui_console_exec
 #include <GLFW/glfw3.h>
 #include <png_write.h>
+#include <frame_target.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +64,8 @@ static struct {
     int menu_mode;    // the first event is `menu`: time runs from the menu, `play` just enters the game
     int respawn_pending; // `respawn` ran while dead: Play again as soon as the death delay allows
     char shot[160];   // pending `shot` path (written at frame end)
+    char frames[160]; // `frames` prefix: one PNG per frame while frames_left > 0
+    int frames_left, frames_index;
     float time;       // ms since play
     float look_yaw, look_pitch;
     float fixed_delta;
@@ -107,6 +112,7 @@ static void script_load(void) {
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
         }
+        if (!strcmp(e->cmd, "frames")) sscanf(rest, "%159s %f", e->arg, &e->v[0]); // frames <prefix> <count>
         g_script.count++;
     }
     fclose(file);
@@ -233,6 +239,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
         client_enter_game(client);
     } else if (!strcmp(e->cmd, "shot")) {
         strncpy(g_script.shot, e->arg, sizeof(g_script.shot) - 1);
+    } else if (!strcmp(e->cmd, "frames")) {
+        // frames <prefix> <count>: write this and the next count-1 frames as <prefix>_NNNN.png
+        snprintf(g_script.frames, sizeof(g_script.frames), "%s", e->arg);
+        g_script.frames_left = e->v[0] >= 1.0f ? (int) e->v[0] : 1;
     } else if (!strcmp(e->cmd, "quit")) {
         if (g_script.log) fflush(g_script.log);
         glfwSetWindowShouldClose(client->window, 1);
@@ -287,26 +297,31 @@ void input_script_adjust_input(Client *client, Input *input) {
     g_script.look_yaw = g_script.look_pitch = 0.0f;
 }
 
-static void write_pending_shot(Client *client) {
-    if (!g_script.shot[0]) return;
+// Reads the window's picture (frame_target_framebuffer(), bottom row first) and writes it top row first, opaque.
+static void write_frame_png(Client *client, const char *path) {
     int width, height;
     glfwGetFramebufferSize(client->window, &width, &height);
     unsigned char *pixels = malloc((size_t) width * height * 4);
     unsigned char *flipped = malloc((size_t) width * height * 4);
 
     if (pixels && flipped) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, frame_target_framebuffer()); // the window's picture (frame_target.h)
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
         glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
         const size_t row = (size_t) width * 4;
         for (int y = 0; y < height; y++) memcpy(flipped + (size_t) y * row, pixels + (size_t) (height - 1 - y) * row, row);
         for (size_t i = 3; i < row * (size_t) height; i += 4) flipped[i] = 255;
-        png_write_rgba(g_script.shot, flipped, width, height);
+        png_write_rgba(path, flipped, width, height);
     }
 
     free(pixels);
     free(flipped);
+}
+
+static void write_pending_shot(Client *client) {
+    if (!g_script.shot[0]) return;
+    write_frame_png(client, g_script.shot);
     g_script.shot[0] = 0;
 }
 
@@ -365,4 +380,13 @@ void input_script_page_frame_end(Client *client, const float frame_delta) {
     if (!g_script.active || !g_script.playing) return;
     write_pending_shot(client);
     g_script.time += frame_delta * 1000.0f;
+}
+
+void input_script_frame_presented(Client *client) {
+    if (!g_script.active || !g_script.playing || g_script.frames_left <= 0) return;
+    char path[200];
+    snprintf(path, sizeof(path), "%s_%04d.png", g_script.frames, g_script.frames_index++);
+    write_frame_png(client, path);
+    fprintf(stderr, "[input_script] frame %s\n", path); // orders the captures against the log
+    g_script.frames_left--;
 }

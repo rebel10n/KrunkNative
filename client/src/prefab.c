@@ -954,9 +954,13 @@ unsigned int prefab_canvas_end(Canvas2D *c, const char *key) {
     const int width = c2d_width(c), height = c2d_height(c);
     if (width <= 0 || height <= 0) return 0;
 
+    // Leaderboard canvases redraw from a network packet (map_post_leaderboard_rows) before the
+    // frame's render_target_begin() clear: framebuffer, viewport and clear colour go back.
     GLint previous_fbo = 0, viewport[4];
+    GLfloat clear_color[4];
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_fbo);
     glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clear_color);
 
     unsigned int layer = 0, fbo = 0;
     glGenTextures(1, &layer);
@@ -989,6 +993,7 @@ unsigned int prefab_canvas_end(Canvas2D *c, const char *key) {
 
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) previous_fbo);
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
     glDeleteFramebuffers(1, &fbo);
     glDeleteTextures(1, &layer);
 

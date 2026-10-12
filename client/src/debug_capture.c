@@ -6,6 +6,7 @@
 #include <debug_capture.h>
 #include <app_mode.h>
 #include <png_write.h>
+#include <frame_target.h>
 #include <html_ui.h>
 #include <html_dom.h>
 #include <console.h>
@@ -126,7 +127,7 @@ static void debug_capture_write(Client *client) {
     unsigned char *flipped = malloc((size_t) width * (size_t) height * 4);
 
     if (pixels && flipped) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, frame_target_framebuffer()); // the window's picture (frame_target.h)
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
         glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 

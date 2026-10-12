@@ -16,6 +16,12 @@
 #include <errno.h>
 #endif
 
+static void (*g_asset_yield_hook)(const char *path);
+
+void asset_set_yield_hook(void (*hook)(const char *path)) {
+    g_asset_yield_hook = hook;
+}
+
 char *concat(const char *a, const char *b) {
     const size_t len_a = strlen(a);
     const size_t len_b = strlen(b);
@@ -107,6 +113,7 @@ int ensure_asset_file(const char *path) {
     if (!access(path, F_OK)) return 1;
     if (web_asset_known_missing(path)) return 0;
 
+    if (g_asset_yield_hook) g_asset_yield_hook(path);
     char *url = web_asset_url(path);
 
     void *data = NULL;
@@ -183,11 +190,14 @@ int asset_prefetch(const char *path) {
 // Gives up after ~20 s; anything still missing is then fetched on demand as before.
 void asset_prefetch_wait(const char *const *paths, const size_t count) {
     for (size_t i = 0; i < count; i++) asset_prefetch(paths[i]);
+    int hooked = 0;
 
     for (int waited = 0; waited < 20000; waited += 4) {
         int pending = 0;
         for (size_t i = 0; i < count && !pending; i++) pending = asset_prefetch(paths[i]) == 0;
         if (!pending) return;
+        if (!hooked && g_asset_yield_hook && count) g_asset_yield_hook(paths[0]);
+        hooked = 1;
         emscripten_sleep(4);
     }
 }
@@ -195,7 +205,7 @@ void asset_prefetch_wait(const char *const *paths, const size_t count) {
 #else
 
 int ensure_asset_file(const char *path) {
-    (void) path;
+    if (g_asset_yield_hook && path && *path) g_asset_yield_hook(path); // where the web build may block
     return 1;
 }
 
@@ -209,8 +219,7 @@ int asset_prefetch(const char *path) {
 }
 
 void asset_prefetch_wait(const char *const *paths, const size_t count) {
-    (void) paths;
-    (void) count;
+    if (g_asset_yield_hook && paths && count) g_asset_yield_hook(paths[0]);
 }
 
 const char *assets_path() {

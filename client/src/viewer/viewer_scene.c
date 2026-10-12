@@ -31,6 +31,7 @@
 #include "viewer_internal.h"
 #include <cosmetics.h>
 #include <gltf.h>
+#include <frame_target.h>
 #include <pets.h>
 #include <render_settings.h>
 #include <skin_fx.h>
@@ -1268,7 +1269,7 @@ unsigned char *vscene_capture(const int w, const int h, const int gradient) {
         free(rows);
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, frame_target_framebuffer()); // the window (frame_target.h)
     glDeleteFramebuffers(1, &fbo);
     glDeleteRenderbuffers(1, &depth);
     glDeleteTextures(1, &color);

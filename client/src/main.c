@@ -12,6 +12,7 @@
 #include <hud_social.h> // WP-E: social_reset_server
 #include <camera_feel.h>
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
+#include <frame_target.h>  // web: the frame draws offscreen, the canvas gets it whole
 #include <html_ui.h>
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
@@ -774,6 +775,7 @@ int main(int argc, char **argv) {
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
     sky_fini();    // sky dome VAO/buffers/program (sky.c)
     render_target_fini();
+    frame_target_fini();
     html_ui_fini();
     voice_fini();
     sprays_wheel_fini(); // its canvas (GL)
@@ -803,8 +805,12 @@ void client_frame(Client *client) {
     client->last_frame_time = frame_time;
 
     gamepad_frame_begin(); // updateMouseInp's gamepad.active reset leads the game frame (gamepad.c)
+    // Web: asset fetches inside the frame yield to the browser, which then composites the
+    // canvas; the frame draws offscreen and reaches the canvas whole (frame_target.h).
+    frame_target_begin(client);
     client_tick(client, now, delta);
     gamepad_frame(client, 1); // the gamepad loop after the game frame (its rAF is registered after the game's)
+    frame_target_present(client);
     headless_swap_buffers(client->window); // glfwSwapBuffers; headless: the pbuffer just flushes
     glfwPollEvents();
     client_render_frame_end(client); // swap interval (vsync), frame cap sleep, FPS count
@@ -1481,6 +1487,7 @@ void client_tick(Client *client, const float now, const float delta) {
         viewer_embed_frame(client, delta);   // the item view's 3D showcase over its iframe box (viewer_embed.h)
         spin_wheel_render_confetti(client);  // canvas-confetti draws above the page
     }
+    input_script_frame_presented(client); // `frames`: every finished frame (input_script.c)
     debug_capture_frame_end(client); // KRUNKNATIVE_SCREENSHOT: reads the finished frame
 }
 

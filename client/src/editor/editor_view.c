@@ -22,6 +22,7 @@
 // starts `client_bin --editor --mcp-bus <file>`, which joins the editor bus.
 #include "editor_internal.h"
 #include <headless.h>
+#include <frame_target.h>
 #include <sky.h>
 #include <math.h>
 #include <stdio.h>
@@ -70,7 +71,7 @@ static int target_ensure(EdTarget *t, const int w, const int h) {
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->color, 0);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, t->depth);
     const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, frame_target_framebuffer()); // the window (frame_target.h)
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         fprintf(stderr, "[editor] offscreen framebuffer %dx%d incomplete (0x%x)\n", w, h, status);
         return 0;
@@ -160,7 +161,7 @@ unsigned char *ed_render_project(EditorProject *p, const Camera *cam, const floa
         free(tmp);
         for (size_t i = 3; i < (size_t) w * h * 4; i += 4) px[i] = 255;
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, frame_target_framebuffer()); // the window (frame_target.h)
     glViewport(0, 0, g_ed.fb_w > 0 ? g_ed.fb_w : w, g_ed.fb_h > 0 ? g_ed.fb_h : h);
     return px;
 }
@@ -507,7 +508,7 @@ void ed_view_frame(const float now, const float dt) {
         if (!target_ensure(&v->target, fw, fh)) continue;
         glBindFramebuffer(GL_FRAMEBUFFER, v->target.fbo);
         draw_project(p, &v->cam, v->yaw, v->pitch, 0, fw, fh, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, frame_target_framebuffer()); // the window (frame_target.h)
         if (!v->win || !main) continue;
         const unsigned int prog = blit_program();
         glFlush(); // the texture is complete before the other context samples it

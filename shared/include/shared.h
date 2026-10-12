@@ -3183,6 +3183,11 @@ int asset_prefetch(const char*);
 // web: asset_prefetch() every path (full paths under assets_path()) and wait until all have
 // arrived or failed, so a load step pays one round trip instead of one per file. Native: no-op.
 void asset_prefetch_wait(const char *const *paths, size_t count);
+// Called with the path wherever an asset load may yield to the browser on the web (a blocking
+// ensure_asset_file() fetch, asset_prefetch_wait()), before it does; natively at every
+// ensure_asset_file() / asset_prefetch_wait() call, so tests can emulate those yields
+// (client/src/frame_target.c, KRUNKNATIVE_YIELD_CHECK). NULL (the default) turns it off.
+void asset_set_yield_hook(void (*hook)(const char *path));
 int read_file(const char*, unsigned char**, size_t*);
 // Path redirect consulted by read_file() (and the client's texture loader): the client's
 // resource swapper (client/src/ui/ui_client_settings.c) maps a file to its swapped copy.
