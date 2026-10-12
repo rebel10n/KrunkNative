@@ -299,6 +299,48 @@ scenario('ingame-endscreen', 'ingame', async (c) => {
   await c.eval(`(() => { sandboxGame.endGame(); return 1; })()`);
   await settle(c, 1200);
 });
+// The chat at other window sizes: #chatHolder sits in #uiBase (scaleBase: scale = min(w / 2210,
+// h / 1170) with scaleUI 0.7) at its .onMenu place (left 150, bottom 20) in the menu and its
+// .onGame place (left 15, bottom 130) in game; ESC drops .onGame (toggleControlUI(false)) and the
+// chat goes back beside the menu. chat-ingame-lines writes sandbox lines until
+// #chatList reaches its max-height (chatHeight 2.5 = 250 px) and scrolls to the newest.
+const CHAT_SIZES = { '1024': [1024, 768], tall: [720, 1280] };
+for (const [tag, size] of Object.entries(CHAT_SIZES)) {
+  scenario('menu-' + tag, 'menu', async (c) => { await menuBase(c); await settle(c); }, { size });
+  scenario('ingame-pause-' + tag, 'ingame', async (c) => {
+    await withBot(c);
+    await c.eval('document.exitPointerLock(), 1');
+    await c.eval(flatPage('#000000'));
+    await settle(c, 800);
+  }, { size });
+}
+for (const [tag, size] of Object.entries(Object.assign({ '1920': [1920, 1080] }, CHAT_SIZES))) {
+  scenario('ingame-chat-' + tag, 'ingame', async (c) => { await withBot(c); await settle(c, 800); }, { size });
+}
+// ESC while spectating: toggleControlUI(false) drops .onGame, toggleMenuHider(true) .onSpect, so
+// the chat leaves the spectator's corner for its .onMenu place.
+scenario('ingame-spectate-menu', 'ingame', async (c) => {
+  await c.eval(CONNECTED_MENU);
+  await c.eval(SPAWN_BOT);
+  await sleep(800);
+  await c.eval('setSpect(true), 1');
+  await c.eval(LOCK_SHIM);
+  await c.eval('RENDER.renderer.domElement.requestPointerLock(), 1');
+  await sleep(2500);
+  await c.eval('document.exitPointerLock(), 1');
+  await c.eval(flatPage('#000000'));
+  await settle(c, 800);
+});
+// the sandbox has no chat server ("ct" is never answered): its spawnBot / clearBots binds
+// (pressButton(107) / (109)) write "Spawned a Bot" / "Cleared Bots" lines instead
+async function chatLines(c, n) {
+  for (let i = 0; i < n; i++) {
+    await c.eval(`(() => { pressButton(${i % 2 ? 109 : 107}); return 1; })()`);
+    await sleep(120);
+  }
+}
+scenario('ingame-chat-lines', 'ingame', async (c) => { await enterGame(c); await chatLines(c, 12); await settle(c, 800); });
+
 // The results that follow config.endAnim (GUI.endScreen tabs) are not captured: io_endGame
 // only schedules them for a connected socket, and the sandbox never reaches f1911 even with
 // io.connected forced (the local player is deactivated by the sandbox's own end first).

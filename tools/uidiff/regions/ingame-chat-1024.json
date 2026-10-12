@@ -1,0 +1,35 @@
+{
+  "scenario": "ingame-chat-1024",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "chat-input",
+      "rect": [
+        5,
+        680,
+        195,
+        29
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatInputHolder: channel icon, Enter Message, mic [V]"
+    },
+    {
+      "name": "chat-rows",
+      "rect": [
+        5,
+        661,
+        195,
+        23
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatList rows"
+    }
+  ]
+}

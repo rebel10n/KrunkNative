@@ -17,6 +17,9 @@ links, with the transformations documented in ``ui/README.md``:
 - ``<canvas id="canvas">`` (the web build's WebGL target) becomes the first body child,
   ``css/krunknative.css`` + ``css/hud.css`` (ours) are linked after Krunker's stylesheets
   and ``js/kn-shim.js`` + ``js/loader.js`` (web glue) load before ``</body>``.
+- the "Experiments" footer link (``abTestsPopup()``, v7's A/B test opt-in popup) and the
+  separator after it are dropped from ``#termsInfo`` (intentional difference: KrunkNative
+  runs no A/B tests), so Contact / Terms / Changelog stay evenly spaced.
 
 Stylesheets (``STYLESHEETS``) are copied with the same URL rewriting (assets host and
 root-relative ``url()``s made relative, query strings dropped); nothing else changes.
@@ -59,7 +62,13 @@ def _ext_link(m):
     return '<a%s href="#" data-ext-href="%s"' % (attrs, href)
 
 
+# v7's "Experiments" footer link plus the separator after it (KN has no A/B tests)
+AB_TESTS_LINK_RE = re.compile(r'<span class="terms"[^>]*onclick="abTestsPopup\(\)"[^>]*>[^<]*</span>\s*'
+                              r'(?:<span class="verticalSeparatorInline"></span>\s*)?')
+
+
 def transform_index(html):
+    html = AB_TESTS_LINK_RE.sub("", html)
     html = re.sub(r"<script\b[^>]*>.*?</script>\s*", "", html, flags=re.S | re.I)
     html = re.sub(r"<!--.*?-->\s*", "", html, flags=re.S)
     html = re.sub(r"<meta property=\"og:[^>]*>\s*", "", html)

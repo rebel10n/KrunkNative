@@ -60,6 +60,7 @@ static struct {
 static PFNEGLGETPLATFORMDISPLAYEXTPROC p_eglGetPlatformDisplayEXT;
 
 #ifndef KRUNKNATIVE_GL_ANGLE // desktop GL: EGL device enumeration (KRUNKNATIVE_EGL_DEVICE)
+static char g_egl_device_desc[96]; // headless_gl_backend(): the EGL device open_display picked
 static PFNEGLQUERYDEVICESEXTPROC p_eglQueryDevicesEXT;
 static PFNEGLQUERYDEVICESTRINGEXTPROC p_eglQueryDeviceStringEXT;
 
@@ -170,6 +171,7 @@ static int open_display(void) {
         g_egl.display = open_device(d);
         if (g_egl.display != EGL_NO_DISPLAY) {
             fprintf(stderr, "[headless] using EGL device %d (%s)\n", order[i], device_kind(d));
+            snprintf(g_egl_device_desc, sizeof(g_egl_device_desc), "EGL device %d, %s", order[i], device_kind(d));
             return 1;
         }
         fprintf(stderr, "[headless] EGL device %d (%s) failed to initialize (0x%x)\n", order[i], device_kind(d), eglGetError());
@@ -183,6 +185,7 @@ static int open_display(void) {
             g_egl.display = p_eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
             if (g_egl.display != EGL_NO_DISPLAY && eglInitialize(g_egl.display, NULL, NULL)) {
                 fprintf(stderr, "[headless] using EGL_MESA_platform_surfaceless (%s)\n", eglQueryString(g_egl.display, EGL_VENDOR));
+                snprintf(g_egl_device_desc, sizeof(g_egl_device_desc), "EGL_MESA_platform_surfaceless");
                 return 1;
             }
             g_egl.display = EGL_NO_DISPLAY;
@@ -386,6 +389,29 @@ static int create_context(const int width, const int height) {
     return 1;
 }
 
+static const char *glfw_platform_name(void) {
+    switch (glfwGetPlatform()) {
+    case GLFW_PLATFORM_X11: return "X11";
+    case GLFW_PLATFORM_WAYLAND: return "Wayland";
+    case GLFW_PLATFORM_WIN32: return "Win32";
+    case GLFW_PLATFORM_COCOA: return "Cocoa";
+    case GLFW_PLATFORM_NULL: return "no window";
+    default: return "?";
+    }
+}
+
+const char *headless_gl_backend(void) {
+    static char desc[192];
+#ifdef KRUNKNATIVE_GL_ANGLE
+    if (g_headless) snprintf(desc, sizeof(desc), "ANGLE %s (OpenGL ES 3.0), headless EGL pbuffer", g_angle_backend ? g_angle_backend->name : "?");
+    else snprintf(desc, sizeof(desc), "ANGLE %s (OpenGL ES 3.0), GLFW %s window", g_angle_backend ? g_angle_backend->name : "?", glfw_platform_name());
+#else
+    if (g_headless) snprintf(desc, sizeof(desc), "desktop OpenGL (glad), headless EGL pbuffer on %s", g_egl_device_desc[0] ? g_egl_device_desc : "?");
+    else snprintf(desc, sizeof(desc), "desktop OpenGL (glad), GLFW %s window", glfw_platform_name());
+#endif
+    return desc;
+}
+
 int headless_glfw_init(void) {
     if (g_headless) glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_NULL);
 #ifdef KRUNKNATIVE_GL_ANGLE
@@ -486,6 +512,14 @@ void headless_shutdown(void) {
 }
 
 #else // no EGL (web, macOS/Windows desktop GL, or Linux without libEGL): GLFW only
+
+const char *headless_gl_backend(void) {
+#ifdef __EMSCRIPTEN__
+    return "WebGL 2 (OpenGL ES 3.0), browser canvas";
+#else
+    return "desktop OpenGL (glad), GLFW window";
+#endif
+}
 
 int headless_glfw_init(void) {
     if (g_headless) {

@@ -17,7 +17,8 @@ editor.md, player-viewer.md (this directory).
 | Embedded map config | It applies offline too. v7's sandbox discards it; we don't. |
 | "player spawn" trigger event | It fires to map objects. v7.1.4 never dispatches it, but zombie_high relies on it. |
 | Backend-only triggers | Triggers that give or take KR, save player data, or check premium/verified/level do nothing (or evaluate false) unless kn_brain supplies account data. |
-| Settings presets | v7's Default / Pro / Performance / Custom, plus a KN "Beautiful" preset (highest quality). |
+| Settings presets | v7's Default / Pro / Performance / Custom, plus a KN "Beautiful" preset (highest quality): a fifth General-tab box and `#settingsPreset` option, its values in one table (`BEAUTIFUL`, client/src/ui/ui_settings.c). |
+| Footer "Experiments" link | Dropped with its separator (v7's `abTestsPopup()` A/B test opt-in; KN runs no A/B tests). tools/ui-import removes it, so a re-import keeps it out. |
 | Editor one-sided scaling | Keep Ctrl-hold to disable snapping, except while dragging an X/Z scale handle on prefabs that support one-sided scaling. |
 | Seasons | The season system, Battle Pass and challenges are in scope at full v7.1.4 parity (user, 2026-10-12). Crafting and trading stay out of scope until requested. |
 

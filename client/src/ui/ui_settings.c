@@ -533,37 +533,42 @@ static const SettingPreset PRESETS[] = {
     {"bulletTracers", NULL, "false"}, {"scopeBorders", "true", NULL}, {"useDamageOverlay", "false", "false"},
 };
 
-// KrunkNative addition: the "Beautiful" preset (index 4, offered after Performance in
-// #settingsPreset; v7.1.4 has Default/Pro/Performance/Custom only). Like Pro/Performance
-// it sets these keys and every other setting to its default, and it persists the same
-// way (preIndex = 4; leaving Custom saves krk_customPre, going back to Custom restores it).
-// Every render setting was chosen against what KrunkNative implements (render_settings.h):
-//   resolution 1        native framebuffer size, no supersampling (2x quadruples the fill
-//                       cost for little visible gain; on the web dpr already scales it)
-//   antiAlias           4x MSAA on the scene FBO
-//   highResShad         4096 sun shadow map instead of 1024 (shadow.c); shadows on
-//   softShad, shadowsDynamic  Krunker's best shadow flags; not ported yet (shadow.c), set so
-//                       they apply once they land
-//   lighting 2          high: Phong + map point lights (basic.c); default is 1
+// KrunkNative addition: the "Beautiful" preset (index 4: a fifth .setSugBox2 "Highest graphics
+// quality" after Performance, and an option of #settingsPreset; v7.1.4 has Default / Pro /
+// Performance / Custom only, doc/v7/decisions.md). Like Pro/Performance it sets these keys and
+// every other setting to its default, and it persists the same way (preIndex = 4; leaving
+// Custom saves krk_customPre, going back to Custom restores it). This table is the one place
+// its values live. Each is the top of what v7's settings list offers (settings.js), checked
+// against what KrunkNative renders (render_settings.h):
+//   resolution 2        slider max: the scene FBO at 2x the window (dpr x 2 on the web),
+//                       supersampled down; with antiAlias the smoothest edges on offer
+//   antiAlias           MSAA on the scene FBO
+//   postProcessing      on (the map's post shaders)
+//   shadows, highResShad  sun shadow map, 4096 instead of 1024 (shadow.c)
+//   softShad, shadowsDynamic  v7's best shadow flags; not ported yet (shadow.c), set so they
+//                       apply once they land
+//   lighting 3          "Physical": MeshStandardMaterial (GGX + rect-area lights, basic.frag);
+//                       v7's default is 1 (Normal)
+//   reflection 6        2048 px ocean mirror (v7 options 1..6 = 32..2048; stored, ocean.c
+//                       still uses the map's ocRefRes)
 //   particlesDist 1000  slider max: particles and impacts drawn at any distance (vfx.c)
 //   renderDist 100      slider max: camera far = 6000
-//   weaponShine, sniperFlap  Krunker's quality extras (stored; viewmodel flags)
+//   weaponShine, sniperFlap  v7's quality extras (viewmodel flags)
 //   updateRate 0        no frame cap; mapDet/ambientShading/textureAnim/objectAnim/particles/
-//                       trails/muzzle flash/tracers/damage overlay on, noTex/lowSpec off
-//   postProcessing      on (CopyShader in v3.1.1: no visible effect)
-// Kept at Krunker's defaults on purpose: fov/fpsFOV (v7.1.4: 100 / 90; wide FOVs stretch the edges),
+//                       explosions/trails/muzzle flash/tracers/casings/impact holes/damage
+//                       overlay on, noTex/lowSpec off
+// Kept at v7's defaults on purpose: fov/fpsFOV (100 / 90; wide FOVs stretch the edges),
 // screenShake, showSpdLines, aspectRatio (window), saturationn/hue/vignette/menu filters
 // (colour grading is taste, the defaults are the maps' intended colours), HUD/viewmodel,
-// and the KrunkNative-only vsync/windowMode (device choices, not quality). Texture filtering
-// is not a setting: v3.1.1 samples map textures nearest-neighbour by design.
+// and the KrunkNative-only vsync/windowMode (device choices, not quality).
 static const struct { const char *key, *value; } BEAUTIFUL[] = {
-    {"resolution", "1"}, {"updateRate", "0"}, {"antiAlias", "true"}, {"postProcessing", "true"},
+    {"resolution", "2"}, {"updateRate", "0"}, {"antiAlias", "true"}, {"postProcessing", "true"},
     {"lowSpec", "false"}, {"noTex", "false"}, {"mapDet", "true"}, {"particles", "true"},
-    {"particlesDist", "1000"}, {"renderDist", "100"}, {"shadows", "true"}, {"softShad", "true"},
-    {"highResShad", "true"}, {"shadowsDynamic", "true"}, {"ambientShading", "true"},
+    {"particlesDist", "1000"}, {"renderDist", "100"}, {"reflection", "6"}, {"shadows", "true"},
+    {"softShad", "true"}, {"highResShad", "true"}, {"shadowsDynamic", "true"}, {"ambientShading", "true"},
     {"showTrails", "true"}, {"yourTrails", "true"}, {"muzzleFlash", "true"}, {"bulletTracers", "true"},
     {"sniperFlap", "true"}, {"textureAnim", "true"}, {"objectAnim", "true"}, {"weaponShine", "true"},
-    {"lighting", "2"}, {"useDamageOverlay", "true"}, {"bulletCasings", "true"}, {"impactHoles", "true"},
+    {"lighting", "3"}, {"useDamageOverlay", "true"}, {"bulletCasings", "true"}, {"impactHoles", "true"},
     {"showExplo", "true"},
 };
 #define PRESET_BEAUTIFUL 4
@@ -784,9 +789,24 @@ static void audio_input_options(const HtmlElem select) {
     sb_free(&sb);
 }
 
+// The General tab's preset boxes (v7 windows[0] tabIndex 0: setSugBox2 Default / Pro /
+// Performance / Custom, each with its .setSugInf tooltip) get KrunkNative's Beautiful box
+// after Performance, in the same markup, so it is clicked and hovered like the others. Added
+// here rather than in ui/windows (a re-import of the v7 templates would drop it); the five
+// boxes share the row (css/krunknative.css narrows .setSugBox2).
+static void sync_preset_boxes(const HtmlElem root) {
+    if (html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(4)\"]")) return;
+    const HtmlElem perf = html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(3)\"]");
+    if (!perf) return;
+    html_dom_insert_html(perf, HTML_INSERT_AFTER_END,
+                         "<div class=\"setSugBox2\" onclick=\"selectSettingPre(4)\">Beautiful<div class=\"segSugIH\">"
+                         "<div class=\"setSugInf\">Highest graphics quality</div></div></div>");
+}
+
 void ui_settings_apply_values(const HtmlElem root) {
     if (!root) return;
     sync_preset_select();
+    sync_preset_boxes(root);
     HtmlElem *found = malloc(sizeof(HtmlElem) * UI_QUERY_MAX);
     if (!found) return;
 

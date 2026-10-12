@@ -42,6 +42,7 @@
 #include <app_mode.h> // game / social hub / editor / viewer pages (app_mode.c)
 #include <viewer_embed.h> // the store item view's 3D showcase (viewer/viewer.c)
 #include <backend_ui.h> // brain backend: account, matchmaker, --brain / --connect (net/backend_startup.c)
+#include <startup_banner.h> // startup log: build, platform, GL (startup_banner.c)
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
 #include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
@@ -602,6 +603,7 @@ int main(int argc, char **argv) {
     // Natively the vsync/updateRate settings re-sync it (client_render_frame_end).
     headless_swap_interval(0);
 #endif
+    startup_banner(); // build, platform, GL backend + renderer (web: v7's console badges)
     // v3.1.1 render defaults (camera far from renderDist, window mode, KRUNKNATIVE_RESOLUTION
     // / _FRAME_CAP / _VSYNC overrides) before the page pushes the stored settings.
     if (!SCENARIO_ACTIVE()) client_render_settings_init(&INSTANCE);

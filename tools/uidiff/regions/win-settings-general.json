@@ -58,12 +58,26 @@
       "note": "#menuWindow top (tabs / search / header)"
     },
     {
-      "name": "window-body",
+      "name": "preset-boxes",
       "rect": [
         279,
         147,
         722,
-        509
+        132
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "Default / Pro / Performance / Beautiful / Custom: KN adds the Beautiful box"
+    },
+    {
+      "name": "window-body",
+      "rect": [
+        279,
+        275,
+        722,
+        381
       ],
       "kind": "text",
       "fuzz": 12,

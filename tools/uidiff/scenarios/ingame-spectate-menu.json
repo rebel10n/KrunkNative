@@ -1,0 +1,30 @@
+{
+  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-spectate-menu.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "name": "Local User",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "spectate": true,
+    "chat": [
+      {
+        "text": "Spawned a Bot",
+        "color": "#fc03ec"
+      }
+    ]
+  },
+  "frames": 3,
+  "note": "ESC while spectating: .onGame and .onSpect dropped, the chat back at .onMenu."
+}

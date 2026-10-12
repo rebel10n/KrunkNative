@@ -125,15 +125,15 @@
     {
       "name": "terms",
       "rect": [
-        1438,
+        1693,
         1015,
-        482,
+        227,
         65
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#termsInfo: Contact / Experiments / Terms / Changelog"
+      "note": "#termsInfo right part: | Terms | Changelog (KN has no Experiments link)"
     },
     {
       "name": "chat",

@@ -145,3 +145,10 @@ html.kn-preview-bg #canvas {
   height: 100%;
   background-color: #fff;
 }
+
+/* Settings > General preset boxes: v7's four .setSugBox2 (279px + 4px borders + 10px margin)
+ * fill the row; KrunkNative adds a fifth, Beautiful (ui_settings.c sync_preset_boxes), so the
+ * five share the same row width: 5 x (219 + 8 + 10) = 1185px, v7's 4 x (279 + 8 + 10) = 1188px. */
+.setSugBox2 {
+  width: 219px;
+}

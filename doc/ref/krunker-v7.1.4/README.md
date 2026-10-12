@@ -18,6 +18,10 @@ these images. The v3.1.1 references stay in `doc/ref/krunker-v3.1.1/`.
   `ingame-spectate` (`setSpect(true)` before the pointer lock: the free cam's `#spectateUI`) and
   `ingame-minimap` (v7's `customsData` cleared and `toggleMinimap(true)`: production hides the
   minimap on custom maps, and the captures load Kanji as one).
+- chat at other window sizes (menu-ux): `menu/menu-1024`, `menu/menu-tall` (720x1280),
+  `ingame/ingame-chat-{1024,1920,tall}` (a bot spawned: one chat line), `ingame/ingame-pause-{1024,tall}`
+  (ESC after that), `ingame/ingame-spectate-menu` (ESC while spectating) and `ingame/ingame-chat-lines`
+  (12 spawnBot / clearBots lines: `#chatList` at its max-height, scrolled to the newest).
 - `hub/`: the social hub (`hub-*`) as a guest: views loading, login and settings popups.
 - `viewer/`: the model viewer `public/viewer.html?<query>` at 800x600 (WP-F): showcase item views,
   cosmetic render pages, a player wearing every slot and `dev-*` edits through the dev config

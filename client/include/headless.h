@@ -49,5 +49,9 @@ void headless_swap_buffers(GLFWwindow *window);
 void headless_swap_interval(int interval);
 // Framebuffer size callback: recreates the pbuffer at the new size (no-op when not headless).
 void headless_resize(int width, int height);
+// The GL path in use, for the startup log (startup_banner.c): "desktop OpenGL (glad), GLFW X11
+// window", "... headless EGL pbuffer on EGL device 0, nvidia", "ANGLE vulkan (OpenGL ES 3.0), ...",
+// "WebGL 2 (OpenGL ES 3.0), browser canvas". Valid once the context exists.
+const char *headless_gl_backend(void);
 // Destroys the EGL context/surface (no-op when not headless). Call before glfwTerminate().
 void headless_shutdown(void);

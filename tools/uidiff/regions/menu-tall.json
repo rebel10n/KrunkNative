@@ -1,0 +1,22 @@
+{
+  "scenario": "menu-tall",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "chat-input",
+      "rect": [
+        47,
+        1254,
+        139,
+        22
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatInputHolder: channel icon, Enter Message, mic [V]"
+    }
+  ]
+}

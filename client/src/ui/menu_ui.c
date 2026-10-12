@@ -698,8 +698,9 @@ static void menu_update_ping(const Client *client) {
 }
 
 // Map load (v7 src/data/map.js): mapInfo.textContent = (custom map ? mode.alias :
-// mode.name) + " on " + map.name; the menu's #infoHolder (Contact / Experiments / Terms /
-// Changelog) shows once a game session exists (io.connect: infoHolder.style.display = null).
+// mode.name) + " on " + map.name; the menu's #infoHolder (Contact / Terms / Changelog; KN
+// drops v7's Experiments link, ui/README.md) shows once a game session exists (io.connect:
+// infoHolder.style.display = null).
 void menu_set_game_name(const char *name) {
     HtmlElem info = by_id("mapInfo");
     if (info) html_dom_set_text(info, name ? name : "");

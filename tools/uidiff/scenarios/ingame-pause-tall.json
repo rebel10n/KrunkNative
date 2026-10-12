@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-pause-tall.png",
+  "size": [
+    720,
+    1280
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "name": "Local User",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "chat": [
+      {
+        "text": "Spawned a Bot",
+        "color": "#fc03ec"
+      }
+    ]
+  },
+  "frames": 3,
+  "note": "ESC in game at 720x1280 (a bot spawned first): the chat back at .onMenu."
+}

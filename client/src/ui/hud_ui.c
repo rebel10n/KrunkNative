@@ -3021,10 +3021,20 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     HudUi *ui = &g_hud_ui;
     HtmlElem el;
 
-    const int on_game = in_game && !ui->dead; // toggleGameUI(false) drops .onGame while dead
+    // #uiBase.onGame (main.css: the chat's in-game place) is UI.toggleControlUI(controls.enabled):
+    // set while the game has the pointer, dropped when the menu opens over it (ESC pause, where
+    // .onMenu puts the chat back beside the menu). The death screen keeps it (v7: "onGame
+    // onDeathScrn"; .onDeathScrn's later rule places the chat). Mobile controls also toggle
+    // .onGameM (the chat is hidden under the touch controls).
+    (void) in_game;
+    const int on_game = visible;
     if (on_game != ui->in_game) {
         ui->in_game = on_game;
-        if ((el = html_dom_by_id("uiBase"))) html_dom_set_class(el, "onGame", on_game);
+        if ((el = html_dom_by_id("uiBase"))) {
+            html_dom_set_class(el, "onGame", on_game);
+            if (ui_mobile_active()) html_dom_set_class(el, "onGameM", on_game);
+            else html_dom_set_class(el, "onGameM", 0);
+        }
     }
     // #chatUI: v7 only ever writes it from the showUI setting (settings.js showUI.set:
     // chatUI.style.display = val ? "block" : "none"), so the chat is up beside the menu (also

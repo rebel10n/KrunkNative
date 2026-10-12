@@ -103,7 +103,14 @@ def chrome(rc, w=1280, h=720, dimmed=False):
         regs.append(R("bottom-buttons", pad([x, my, bw, y + bh - my], 2, w, h), "text",
                       k + "Host Game / Server Finder / Invite / Join / police buttons"))
     opt("streams", "streamContainer", "text", "#streamContainer: Loading Streams...")
-    opt("terms", "termsInfo", "text", "#termsInfo: Contact / Experiments / Terms / Changelog")
+    if "termsInfo" in rc:
+        # KrunkNative drops v7's "Experiments" link and its separator (tools/ui-import/index_page.py,
+        # an intentional difference), so the right-aligned #termsInfo is narrower and only its right
+        # part ("| Terms | Changelog", 150 of its 320 px at 1280x720) lines up with the reference.
+        x, y, tw, th = rc["termsInfo"]
+        part = int(round(tw * 150 / 320))
+        regs.append(R("terms", pad([x + tw - part, y, part, th], 2, w, h), "text",
+                      k + "#termsInfo right part: | Terms | Changelog (KN has no Experiments link)"))
     opt("chat", "chatHolder", "text", "#chatHolder: chat input bar (menu)")
     opt("customize-button", "customizeButton", "text", "#customizeButton")
     opt("class-icon", "menuClassIcn", "image", "#menuClassIcn: primary weapon preview")
@@ -176,7 +183,15 @@ for name, win, extra, note in WINDOWS:
     x, y, w, h = rc["menuWindow"]
     head = min(h, 82)
     regs.append(R("window-header", pad([x, y, w, head], 2), "text", "#menuWindow top (tabs / search / header)"))
-    if h > head + 4:
+    if h > head + 4 and extra.get("settingsTab") == 0:
+        # General tab: KrunkNative's fifth preset box (Beautiful, ui_settings.c sync_preset_boxes)
+        # narrows the row of .setSugBox2 boxes, an intentional difference; the rest of the body
+        # is compared as usual.
+        row = 128
+        regs.append(R("preset-boxes", pad([x, y + head, w, row], 2), "text",
+                      "Default / Pro / Performance / Beautiful / Custom: KN adds the Beautiful box", skip=True))
+        regs.append(R("window-body", pad([x, y + head + row, w, h - head - row], 2), "text", "#menuWindow body"))
+    elif h > head + 4:
         regs.append(R("window-body", pad([x, y + head, w, h - head], 2), "text",
                       BODY_SKIP.get(name, "#menuWindow body"), skip=name in BODY_SKIP))
     st = {"window": win}
@@ -347,6 +362,52 @@ pause.append(R("crosshair", [590, 310, 100, 100], "scene", "v7 keeps drawing the
 add("ingame-pause-esc", {"ref": REF + "/ingame/ingame-pause-esc.png", "size": [1280, 720], "background": GAME_BG,
                          "state": dict(scen["menu-1280"]["state"], inGame=True, name="Local User"), "frames": 3,
                          "note": "Pointer lock released in game: the menu over the (hidden) scene."}, pause)
+
+# --------------------------------------------------------------------------- chat at other sizes
+# #chatHolder follows #uiBase's scale (scaleBase) and its .onMenu / .onGame places (main.css):
+# the menu, ESC over a game (.onGame dropped: back beside the menu) and in game at 1024x768,
+# 1920x1080 and a tall 720x1280 window, plus #chatList grown to its max-height (chatHeight
+# 2.5 = 250 px) and scrolled to the newest of 12 lines. Only the chat is compared here.
+CHAT_SIZES = {"1024": (1024, 768), "1920": (1920, 1080), "tall": (720, 1280)}
+BOT_LINES = [{"text": "Spawned a Bot" if i % 2 == 0 else "Cleared Bots", "color": "#fc03ec"} for i in range(12)]
+
+
+def chat_regions(rc, w, h):
+    regs = []
+    for name, key, note in (("chat-input", "chatInputHolder", "#chatInputHolder: channel icon, Enter Message, mic [V]"),
+                            ("chat-rows", "chatList", "#chatList rows")):
+        if key in rc:
+            regs.append(R(name, pad(rc[key], 2, w, h), "text", note))
+    return regs
+
+
+for tag, (w, h) in CHAT_SIZES.items():
+    if tag != "1920":
+        rc = rects("menu/menu-" + tag)
+        add("menu-" + tag, {"ref": "%s/menu/menu-%s.png" % (REF, tag), "size": [w, h], "background": MENU_BG,
+                            "state": dict(scen["menu-1280"]["state"]), "frames": 3,
+                            "note": "The menu at %dx%d: only the chat is compared (#chatHolder at .onMenu)." % (w, h)},
+            chat_regions(rc, w, h))
+        rc = rects("ingame/ingame-pause-" + tag)
+        add("ingame-pause-" + tag, {"ref": "%s/ingame/ingame-pause-%s.png" % (REF, tag), "size": [w, h],
+                                    "background": GAME_BG,
+                                    "state": dict(scen["menu-1280"]["state"], inGame=True, name="Local User",
+                                                  chat=BOT_CHAT), "frames": 3,
+                                    "note": "ESC in game at %dx%d (a bot spawned first): the chat back at .onMenu." % (w, h)},
+            chat_regions(rc, w, h))
+    rc = rects("ingame/ingame-chat-" + tag)
+    game("ingame-chat-" + tag, game_state(hud(), chat=BOT_CHAT), chat_regions(rc, w, h),
+         "In game at %dx%d with the Spawned a Bot line: the chat at .onGame." % (w, h), size=(w, h))
+rc = rects("ingame/ingame-chat-lines")
+game("ingame-chat-lines", game_state(hud(), chat=BOT_LINES), chat_regions(rc, 1280, 720),
+     "12 sandbox lines: #chatList at its 250 px max-height, scrolled to the newest.")
+
+rc = rects("ingame/ingame-spectate-menu")
+add("ingame-spectate-menu", {"ref": REF + "/ingame/ingame-spectate-menu.png", "size": [1280, 720], "background": GAME_BG,
+                             "state": dict(scen["menu-1280"]["state"], inGame=True, name="Local User", spectate=True,
+                                           chat=BOT_CHAT), "frames": 3,
+                             "note": "ESC while spectating: .onGame and .onSpect dropped, the chat back at .onMenu."},
+    chat_regions(rc, 1280, 720))
 
 # --------------------------------------------------------------------------- hub
 # social.html with a socket that opens and never answers: the guest chrome with every view

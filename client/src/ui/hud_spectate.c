@@ -135,6 +135,10 @@ static void hs_apply_hidden(const int still_spectating) {
     hs_set_display("vignette", "none");
     hs_set_display("aimRecticle", "none");
     if (still_spectating) hs_set_display("chatUI", "block");
+    // toggleControlUI(false) drops .onGame (toggleMenuHider(true) drops .onSpect): the chat
+    // goes back to its .onMenu place beside the menu instead of staying at the in-game one.
+    const HtmlElem base = html_dom_by_id("uiBase");
+    if (base && html_dom_has_class(base, "onGame")) html_dom_set_class(base, "onGame", 0);
 }
 
 /* ------------------------------------------------------------ player rows (fF / fG) */

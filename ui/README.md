@@ -25,6 +25,9 @@ by `tools/ui-import/import.py` (details and options: `tools/ui-import/README.md`
   data-ext-href=...`, opened in a browser by C); `<canvas id="canvas">` (the web build's
   WebGL target) added as the first body child, `css/krunknative.css` + `css/hud.css` linked
   after Krunker's stylesheets, `js/kn-shim.js` + `js/loader.js` before `</body>`.
+  Intentional difference: the footer's "Experiments" link (`abTestsPopup()`, v7's A/B test
+  opt-in) and the separator after it are dropped, so Contact / Terms / Changelog stay evenly
+  spaced; KrunkNative runs no A/B tests.
 - Stylesheets `css/main.css`, `css/bundled/bundledStyles.min.css`, `css/main_custom.css`,
   `css/flag.css`, `css/material-icons.css`, `css/material-icons-outlined.css`,
   `css/material-symbols-outlined.css`, `css/google-play.css`, `css/google-secular-one.css`,

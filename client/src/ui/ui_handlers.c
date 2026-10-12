@@ -479,7 +479,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"logBtnFRVR", h_noop},
     {"XsollaPopup", h_noop},
     {"dropsPopup", h_noop},
-    {"abTestsPopup", h_noop},
+    {"abTestsPopup", h_noop}, // its footer link is dropped by tools/ui-import (index_page.py)
     {"expertMode", h_noop},
     {"purchaseCancel", h_purchase_cancel},
     // v7 menu chrome
