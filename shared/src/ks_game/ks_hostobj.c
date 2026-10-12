@@ -928,7 +928,9 @@ static KsValue api_ai_list(KsScript *s, void *u, const KsValue *args, int argc)
     if (!kg || kg->side != KS_SIDE_SERVER || !game) return ks_undef();
     KsValue list = ks_arr_new(s);
     GameAIs *ais = game->ai;
-    for (int i = 0; ais && i < ais->count; i++) ks_arr_push(s, list, ks_game_wrap_ai(s, game, ais->ais[i].sid));
+    // AI.ais: an AI removed this tick (game_ai_remove, dropped at the next AI tick) is no longer listed
+    for (int i = 0; ais && i < ais->count; i++)
+        if (game_ai_find(game, ais->ais[i].sid)) ks_arr_push(s, list, ks_game_wrap_ai(s, game, ais->ais[i].sid));
     return list;
 }
 
