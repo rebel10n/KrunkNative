@@ -1,134 +1,121 @@
-// Map editor panels: Krunker v3.1.1 ui/editor.js `_toolbar`, `panel.left.essential`,
-// `panel.right.{blank,object,environment,...}` and `_window`, built with editor_gui.c.
+// Map editor panels: Krunker v3.1.1 ui/editor.js `_toolbar`, `panel.right.blank`, the right panel
+// switch and `_window`, built with editor_gui.c, plus the control helpers every panel file uses
+// (editor_panel_kit.h). The object panel is editor_inspector.c, the environment / terrain / zone
+// panels editor_env.c and the left Essential panel editor_gameconfig.c.
 #include "editor_internal.h"
+#include "editor_panel_kit.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { PANEL_LEFT, PANEL_RIGHT, PANEL_WINDOW, PANEL_TOOLBAR };
 
 static int g_locked[2];
 static char g_right_active[32] = "blank";
-static char g_left_active[32] = "";
 
 int ed_panel_locked(const int right) { return g_locked[right ? 1 : 0]; }
 const char *ed_panel_right_active(void) { return g_right_active; }
 
 // ---------------------------------------------------------------------------
-// data (config lists)
-
-static cJSON *g_data;
-
-const cJSON *editor_data_json(void) {
-    if (!g_data) g_data = cJSON_Parse(editor_data_text);
-    return g_data;
-}
-
-const cJSON *editor_data_get(const char *key) {
-    return cJSON_GetObjectItemCaseSensitive(editor_data_json(), key);
-}
-
-// ---------------------------------------------------------------------------
 // control helpers: create + bind + emit
 
-static EdCtl *finish(EdBuild *b, EdCtl *c, const EdChangeFn fn) {
+EdCtl *edp_finish(EdBuild *b, EdCtl *c, const EdChangeFn fn) {
     c->on_change = fn;
     ed_gui_emit_value(b, c);
     return c;
 }
 
-static EdCtl *obj_switch(EdBuild *b, const char *name, const char *prop, const int sub, const EdChangeFn fn) {
+EdCtl *edp_obj_switch(EdBuild *b, const char *name, const char *prop, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_switch(b, name, sub);
     ed_ctl_bind_obj(c, prop);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *obj_slider(EdBuild *b, const char *name, const char *prop, const double mn, const double mx, const double step, const int sub, const EdChangeFn fn) {
+EdCtl *edp_obj_slider(EdBuild *b, const char *name, const char *prop, const double mn, const double mx, const double step, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_slider(b, name, mn, mx, step, sub);
     ed_ctl_bind_obj(c, prop);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *obj_select(EdBuild *b, const char *name, const char *prop, const EdOption *opts, const int n, const int sub, const EdChangeFn fn) {
+EdCtl *edp_obj_select(EdBuild *b, const char *name, const char *prop, const EdOption *opts, const int n, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_select(b, name, opts, n, sub);
     ed_ctl_bind_obj(c, prop);
     c->value_is_string = n > 0 && opts[0].svalue != NULL;
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *obj_color(EdBuild *b, const char *name, const char *prop, const int sub) {
+EdCtl *edp_obj_color(EdBuild *b, const char *name, const char *prop, const int sub) {
     EdCtl *c = ed_gui_color(b, name, sub);
     ed_ctl_bind_obj(c, prop);
-    return finish(b, c, NULL);
+    return edp_finish(b, c, NULL);
 }
 
-static EdCtl *obj_text(EdBuild *b, const char *name, const char *prop, const char *placeholder, const int sub, const EdChangeFn fn) {
+EdCtl *edp_obj_text(EdBuild *b, const char *name, const char *prop, const char *placeholder, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_text(b, name, placeholder, sub);
     ed_ctl_bind_obj(c, prop);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *obj_number(EdBuild *b, const char *name, const char *prop, const char *placeholder, const int sub) {
+EdCtl *edp_obj_number(EdBuild *b, const char *name, const char *prop, const char *placeholder, const int sub) {
     EdCtl *c = ed_gui_number(b, name, placeholder, 0, sub);
     ed_ctl_bind_obj(c, prop);
-    return finish(b, c, NULL);
+    return edp_finish(b, c, NULL);
 }
 
-static EdCtl *obj_vector3(EdBuild *b, const char *name, const char *prop, const EdChangeFn fn) {
+EdCtl *edp_obj_vector3(EdBuild *b, const char *name, const char *prop, const EdChangeFn fn) {
     // Krunker passes min only for Size (min: 0); Position / Rotation get min=""
     EdCtl *c = ed_gui_vector3(b, name, !strcmp(prop, "size") ? 0 : NAN);
     ed_ctl_bind_obj(c, prop);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_switch(EdBuild *b, const char *name, cJSON *obj, const char *key, const int sub, const EdChangeFn fn) {
+EdCtl *edp_json_switch(EdBuild *b, const char *name, cJSON *obj, const char *key, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_switch(b, name, sub);
     ed_ctl_bind_json(c, obj, key);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_slider(EdBuild *b, const char *name, cJSON *obj, const char *key, const double mn, const double mx, const double step, const int sub, const EdChangeFn fn) {
+EdCtl *edp_json_slider(EdBuild *b, const char *name, cJSON *obj, const char *key, const double mn, const double mx, const double step, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_slider(b, name, mn, mx, step, sub);
     ed_ctl_bind_json(c, obj, key);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_text(EdBuild *b, const char *name, cJSON *obj, const char *key, const char *placeholder, const int sub, const EdChangeFn fn) {
+EdCtl *edp_json_text(EdBuild *b, const char *name, cJSON *obj, const char *key, const char *placeholder, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_text(b, name, placeholder, sub);
     ed_ctl_bind_json(c, obj, key);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_select(EdBuild *b, const char *name, cJSON *obj, const char *key, const EdOption *opts, const int n, const int sub, const EdChangeFn fn) {
+EdCtl *edp_json_select(EdBuild *b, const char *name, cJSON *obj, const char *key, const EdOption *opts, const int n, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_select(b, name, opts, n, sub);
     ed_ctl_bind_json(c, obj, key);
     c->value_is_string = n > 0 && opts[0].svalue != NULL;
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_color(EdBuild *b, const char *name, cJSON *obj, const char *key, const int sub, const EdChangeFn fn) {
+EdCtl *edp_json_color(EdBuild *b, const char *name, cJSON *obj, const char *key, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_color(b, name, sub);
     ed_ctl_bind_json(c, obj, key);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_number(EdBuild *b, const char *name, cJSON *obj, const char *key, const char *placeholder, const int sub, const EdChangeFn fn) {
+EdCtl *edp_json_number(EdBuild *b, const char *name, cJSON *obj, const char *key, const char *placeholder, const int sub, const EdChangeFn fn) {
     EdCtl *c = ed_gui_number(b, name, placeholder, 0, sub);
     ed_ctl_bind_json(c, obj, key);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_key_extra(EdBuild *b, const char *name, cJSON *obj, const char *key, const int editable, const int sub, const EdChangeFn fn, const char *extra) {
+static EdCtl *edp_json_key_extra(EdBuild *b, const char *name, cJSON *obj, const char *key, const int editable, const int sub, const EdChangeFn fn, const char *extra) {
     EdCtl *c = ed_gui_key(b, name, editable, NULL, 0, sub);
     ed_ctl_bind_json(c, obj, key);
     if (extra) snprintf(c->path, sizeof(c->path), "%s", extra);
-    return finish(b, c, fn);
+    return edp_finish(b, c, fn);
 }
 
-static EdCtl *json_key(EdBuild *b, const char *name, cJSON *obj, const char *key, const int editable, const int sub, const EdChangeFn fn) {
-    return json_key_extra(b, name, obj, key, editable, sub, fn, NULL);
+static EdCtl *edp_json_key(EdBuild *b, const char *name, cJSON *obj, const char *key, const int editable, const int sub, const EdChangeFn fn) {
+    return edp_json_key_extra(b, name, obj, key, editable, sub, fn, NULL);
 }
 
 // _html.arrow(direction): the arrow icons of the fly keys
@@ -145,11 +132,11 @@ static const char *arrow_html(const char *dir) {
 static void key_line(EdBuild *b, const char *name, const char *keys) {
     cJSON *tmp = cJSON_CreateObject();
     cJSON_AddStringToObject(tmp, "val", keys);
-    json_key(b, name, tmp, "val", 0, 0, NULL);
+    edp_json_key(b, name, tmp, "val", 0, 0, NULL);
     cJSON_Delete(tmp); // the markup is written; the control is never active
 }
 
-static cJSON *child_obj(cJSON *parent, const char *key) {
+cJSON *edp_child_obj(cJSON *parent, const char *key) {
     cJSON *o = cJSON_GetObjectItemCaseSensitive(parent, key);
     if (!cJSON_IsObject(o)) {
         cJSON_DeleteItemFromObjectCaseSensitive(parent, key);
@@ -158,7 +145,7 @@ static cJSON *child_obj(cJSON *parent, const char *key) {
     return o;
 }
 
-static void ensure_default(cJSON *obj, const char *key, const cJSON *def) {
+void edp_ensure_default(cJSON *obj, const char *key, const cJSON *def) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (v && !cJSON_IsNull(v)) return;
     cJSON_DeleteItemFromObjectCaseSensitive(obj, key);
@@ -166,21 +153,20 @@ static void ensure_default(cJSON *obj, const char *key, const cJSON *def) {
 }
 
 // options built from a JSON string list; the arrays live for the panel's lifetime
-#define OPT_POOL 4096
-static EdOption g_opt_pool[OPT_POOL];
+EdOption g_opt_pool[OPT_POOL];
 static int g_opt_used;
-static char g_opt_names[OPT_POOL][48];
+char g_opt_names[OPT_POOL][48];
 
-static EdOption *opts_alloc(const int n) {
+EdOption *edp_opts_alloc(const int n) {
     if (g_opt_used + n > OPT_POOL) g_opt_used = 0;
     EdOption *o = &g_opt_pool[g_opt_used];
     g_opt_used += n;
     return o;
 }
 
-static EdOption *opts_from_names(const cJSON *names, int *count) {
+EdOption *edp_opts_from_names(const cJSON *names, int *count) {
     const int n = cJSON_GetArraySize(names);
-    EdOption *o = opts_alloc(n);
+    EdOption *o = edp_opts_alloc(n);
     for (int i = 0; i < n; i++) {
         const cJSON *it = cJSON_GetArrayItem(names, i);
         o[i] = (EdOption) {cJSON_IsString(it) ? it->valuestring : "", i, NULL};
@@ -190,7 +176,7 @@ static EdOption *opts_from_names(const cJSON *names, int *count) {
 }
 
 // UTILS.formatConstName
-static const char *const_name(const char *s, char *out, const size_t n) {
+const char *edp_const_name(const char *s, char *out, const size_t n) {
     size_t j = 0;
     int start = 1;
     for (size_t i = 0; s[i] && j + 1 < n; i++) {
@@ -204,6 +190,11 @@ static const char *const_name(const char *s, char *out, const size_t n) {
     }
     out[j] = 0;
     return out;
+}
+
+void edp_div_begin(EdBuild *b, const char *id, const int show) {
+    // _build "div": `"<div id=" + id + " " + (show ? null : 'style="display: none"') + ">"`
+    edb_addf(&b->html, "<div id=%s %s>", id, show ? "null" : "style=\"display: none\"");
 }
 
 // ---------------------------------------------------------------------------
@@ -418,145 +409,21 @@ void ed_toolbar_show(void) {
 }
 
 // ---------------------------------------------------------------------------
-// left panel: Essential (map name, messages, death height, game/server/weapon config)
-
-static void on_death_height(EdCtl *c, const cJSON *v) { (void) c; (void) v; } // updateDeathBarrier (drawn per frame)
-
-static void add_config_ctl(EdBuild *b, cJSON *target, const cJSON *w, const int sub) {
-    const char *name = ed_json_str(w, "name", "");
-    const char *var = ed_json_str(w, "varN", "");
-    ensure_default(target, var, cJSON_GetObjectItemCaseSensitive(w, "def"));
-    if (!strcmp(var, "aID")) {
-        static char label[64];
-        snprintf(label, sizeof(label), "%s ID", name);
-        json_text(b, label, target, var, "ID", sub, NULL);
-    } else if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(w, "bool"))) {
-        json_switch(b, name, target, var, sub, NULL);
-    } else if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(w, "input"))) {
-        json_text(b, name, target, var, "", sub, NULL);
-    } else if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(w, "select"))) {
-        int n;
-        EdOption *opts = opts_from_names(cJSON_GetObjectItemCaseSensitive(w, "options"), &n);
-        json_select(b, name, target, var, opts, n, sub, NULL);
-    } else {
-        const double mx = ed_json_num(w, "maxF", ed_json_num(w, "maxP", ed_json_num(w, "max", 1)));
-        json_slider(b, name, target, var, ed_json_num(w, "min", 0), mx, ed_json_num(w, "step", 1), sub, NULL);
-    }
-}
-
-void ed_panel_left_show(void) {
-    if (ed_project_background()) { // working on another project: rebuild once it is shown again
-        g_ed.ui_stale = 1;
-        return;
-    }
-    if (g_locked[0] && strcmp(g_left_active, "essential")) return;
-    snprintf(g_left_active, sizeof(g_left_active), "essential");
-    EdBuild b;
-    ed_gui_begin(&b, PANEL_LEFT);
-    ed_gui_panel_buttons(&b, 0, "Essential", 0);
-    json_text(&b, "Name", g_ed.proj->map_config, "name", "Name", 0, NULL);
-    json_text(&b, "Welcome Msg", g_ed.proj->map_config, "welMsg", "Welcome", 0, NULL);
-    json_text(&b, "Mod URL", g_ed.proj->map_config, "modURL", "Mod URL", 0, NULL);
-    extern void ed_select_mod(EdCtl *);
-    ed_gui_button(&b, "Select Mod", ed_select_mod);
-    json_slider(&b, "Death Height", g_ed.proj->map_config, "dthY", -1000, 3000, 1, 0, on_death_height);
-    ed_gui_rule(&b);
-
-    ed_gui_folder_begin(&b, "Game", 0, 0, 0, "game");
-    const cJSON *game = editor_data_get("gameConfig");
-    for (int cat = 0; cat < 2; cat++) {
-        ed_gui_folder_begin(&b, cat ? "Player" : "Camera", 1, 1, 0, cat ? "game.player" : "game.camera");
-        const cJSON *w;
-        cJSON_ArrayForEach(w, game) {
-            if (cJSON_GetObjectItemCaseSensitive(w, "cost")) continue;
-            if ((int) ed_json_num(w, "cat", 0) != cat) continue;
-            add_config_ctl(&b, g_ed.proj->game_config, w, 1);
-        }
-        ed_gui_folder_end(&b, 1);
-    }
-    cJSON *modes = child_obj(g_ed.proj->server_config, "modes");
-    ed_gui_folder_begin(&b, "Modes", 1, 1, 0, "game.modes");
-    int index = 0;
-    const cJSON *m;
-    cJSON_ArrayForEach(m, editor_data_get("modes")) {
-        char key[8];
-        snprintf(key, sizeof(key), "%d", index);
-        if (!cJSON_GetObjectItemCaseSensitive(m, "cost") && !ed_json_truthy(cJSON_GetObjectItemCaseSensitive(m, "pcg"))) {
-            if (!cJSON_GetObjectItemCaseSensitive(modes, key)) cJSON_AddBoolToObject(modes, key, index == 0);
-            json_switch(&b, ed_json_str(m, "name", ""), modes, key, 1, NULL);
-        }
-        index++;
-    }
-    ed_gui_folder_end(&b, 1);
-    cJSON *classes = child_obj(g_ed.proj->server_config, "classes");
-    ed_gui_folder_begin(&b, "Classes", 1, 1, 0, "game.classes");
-    index = 0;
-    cJSON_ArrayForEach(m, editor_data_get("classes")) {
-        char key[8];
-        snprintf(key, sizeof(key), "%d", index);
-        if (!cJSON_GetObjectItemCaseSensitive(m, "cost")) {
-            if (!cJSON_GetObjectItemCaseSensitive(classes, key)) cJSON_AddBoolToObject(classes, key, 1);
-            json_switch(&b, ed_json_str(m, "name", ""), classes, key, 1, NULL);
-        }
-        index++;
-    }
-    ed_gui_folder_end(&b, 1);
-    cJSON *settings = child_obj(g_ed.proj->server_config, "settings");
-    ed_gui_folder_begin(&b, "Settings", 1, 1, 0, "game.settings");
-    cJSON_ArrayForEach(m, editor_data_get("serverConfig")) {
-        if (cJSON_GetObjectItemCaseSensitive(m, "cost") || ed_json_truthy(cJSON_GetObjectItemCaseSensitive(m, "hideE"))) continue;
-        add_config_ctl(&b, settings, m, 1);
-    }
-    ed_gui_folder_end(&b, 1);
-    ed_gui_folder_end(&b, 0);
-
-    ed_gui_folder_begin(&b, "Weapon Config", 0, 1, 0, "weapons");
-    cJSON *weps = child_obj(g_ed.proj->server_config, "weps");
-    index = 0;
-    const cJSON *weapon;
-    cJSON_ArrayForEach(weapon, editor_data_get("weapons")) {
-        char key[8], state[32];
-        snprintf(key, sizeof(key), "%d", index);
-        snprintf(state, sizeof(state), "weapons.w%d", index);
-        cJSON *wc = child_obj(weps, key);
-        ed_gui_folder_begin(&b, ed_json_str(weapon, "name", ""), 1, 1, 0, state);
-        const cJSON *x;
-        cJSON_ArrayForEach(x, editor_data_get("weaponConfig")) {
-            const char *var = ed_json_str(x, "varN", "");
-            const cJSON *def = cJSON_GetObjectItemCaseSensitive(weapon, var);
-            if (!def || cJSON_IsNull(def)) continue;
-            ensure_default(wc, var, def);
-            if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(x, "bool"))) json_switch(&b, ed_json_str(x, "name", ""), wc, var, 1, NULL);
-            else json_slider(&b, ed_json_str(x, "name", ""), wc, var, ed_json_num(x, "min", 0), ed_json_num(x, "max", 1), ed_json_num(x, "step", 1), 1, NULL);
-        }
-        ed_gui_folder_end(&b, 1);
-        index++;
-    }
-    ed_gui_folder_end(&b, 0);
-    ed_gui_end(&b, g_ed.el_left_list);
-}
-
-void ed_select_mod(EdCtl *c) {
-    (void) c;
-    editor_show_window(5); // advancedOptions.selectMod: showWindow(5) (editor_net.c)
-}
-
-// ---------------------------------------------------------------------------
 // right panel
 
-static int right_can_show(const char *name) {
+int edp_right_can_show(const char *name) {
     return !g_locked[1] || !strcmp(g_right_active, name);
 }
 
-static void right_begin(EdBuild *b, const char *name) {
+void edp_right_begin(EdBuild *b, const char *name) {
     snprintf(g_right_active, sizeof(g_right_active), "%s", name);
     ed_gui_begin(b, PANEL_RIGHT);
 }
 
 // for the panels of editor_tools.c / editor_terrain.c: 0 when the locked panel is another one
 int ed_panel_right_begin(EdBuild *b, const char *name) {
-    if (!right_can_show(name)) return 0;
-    right_begin(b, name);
+    if (!edp_right_can_show(name)) return 0;
+    edp_right_begin(b, name);
     return 1;
 }
 
@@ -565,599 +432,10 @@ void ed_panel_right_blank(void) {
         g_ed.ui_stale = 1;
         return;
     }
-    if (!right_can_show("blank")) return;
+    if (!edp_right_can_show("blank")) return;
     EdBuild b;
-    right_begin(&b, "blank");
+    edp_right_begin(&b, "blank");
     ed_gui_panel_buttons(&b, 1, "", 1);
-    ed_gui_end(&b, g_ed.el_right_list);
-}
-
-static void refresh_panel(EdCtl *c, const cJSON *v) { (void) c; (void) v; g_ed.dirty_panel = 1; }
-static void rebuild_sel(EdCtl *c, const cJSON *v) { (void) c; (void) v; if (g_ed.proj->selected) ed_obj_rebuild(g_ed.proj->selected); }
-
-static void on_faces(EdCtl *c, const cJSON *v) {
-    // object: e.objConfig.faces, key: index -> A.faces = objConfig.faces; A.regen()
-    EditorObject *o = g_ed.proj->selected;
-    if (!o) return;
-    cJSON *faces = ed_prop_get(o, "faces");
-    const int index = c->arg;
-    cJSON_ReplaceItemInArray(faces, index, cJSON_CreateBool(ed_json_truthy(v)));
-    ed_prop_set(o, "faces", faces);
-    cJSON_Delete(faces);
-    ed_obj_rebuild(o);
-}
-
-// Krunker's object panel also edits instance properties ObjectInstance never serializes
-// (aiName, canWallJump, canDestroy, chance, the AI behaviour / sound ids, a BOT's assetID,
-// ...): they live on the instance only, so here on EditorObject.scratch (never exported).
-static cJSON *g_scratch;
-
-// SHOWCASE "Item": Editor.skinList = every STORE.skins entry but types 4/5, named
-// "<name> [<getItemDesc>]" (assets/skins.json is the store's skin table in index order).
-static EdOption *g_skin_opts;
-static int g_skin_count = -1;
-
-static const EdOption *skin_options(int *count) {
-    if (g_skin_count < 0) {
-        g_skin_count = 0;
-        char *path = concat(assets_path(), "skins.json");
-        unsigned char *buf = NULL;
-        size_t len = 0;
-        cJSON *skins = NULL;
-        if (path && ensure_asset_file(path) && !read_file(path, &buf, &len)) skins = cJSON_ParseWithLength((const char *) buf, len);
-        free(buf);
-        free(path);
-        const cJSON *weapons = editor_data_get("weapons");
-        const int n = cJSON_GetArraySize(skins);
-        g_skin_opts = n > 0 ? calloc((size_t) n, sizeof(EdOption)) : NULL;
-        for (int i = 0; g_skin_opts && i < n; i++) {
-            const cJSON *t = cJSON_GetArrayItem(skins, i);
-            const int type = (int) ed_json_num(t, "type", 0);
-            if (type == 4 || type == 5) continue;
-            const char *desc = type == 1 ? "Head" : type == 2 ? "Back" : type == 3 ? "Melee" : type == 6 ? "Waist" : type == 7 ? "Face"
-                             : ed_json_str(cJSON_GetArrayItem(weapons, (int) ed_json_num(t, "weapon", 1) - 1), "name", "");
-            const char *name = ed_json_str(t, "name", "");
-            const size_t sz = strlen(name) + strlen(desc) + 4;
-            char *label = malloc(sz);
-            if (!label) continue;
-            snprintf(label, sz, "%s [%s]", name, desc);
-            // skinList is an object keyed by the label: a repeated label keeps its first
-            // position and takes the later index
-            int dup = -1;
-            for (int k = 0; k < g_skin_count && dup < 0; k++) if (!strcmp(g_skin_opts[k].name, label)) dup = k;
-            if (dup >= 0) {
-                g_skin_opts[dup].value = i;
-                free(label);
-                continue;
-            }
-            g_skin_opts[g_skin_count++] = (EdOption) {label, i, NULL};
-        }
-        cJSON_Delete(skins);
-    }
-    *count = g_skin_count;
-    return g_skin_opts;
-}
-
-static void regen_sel_panel(EdCtl *c, const cJSON *v) {
-    (void) c; (void) v;
-    if (g_ed.proj->selected) ed_obj_rebuild(g_ed.proj->selected);
-    g_ed.dirty_panel = 1;
-}
-
-static int g_panel_action; // the selected TRIGGER's action when the panel was built
-
-static int action_is_text(const int a) {
-    const cJSON *act = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(editor_data_get("triggers"), "actions"), a);
-    return act && (!strcmp(ed_json_str(act, "type", ""), "Text") || ed_json_truthy(cJSON_GetObjectItemCaseSensitive(act, "custom")));
-}
-
-static void on_trigger_action(EdCtl *c, const cJSON *v) {
-    // Action onChange: refresh the panel when the old or the new action is Text / custom
-    (void) c;
-    const int now = (int) cJSON_GetNumberValue(v);
-    if (action_is_text(g_panel_action) || action_is_text(now)) g_ed.dirty_panel = 1;
-    g_panel_action = now;
-}
-
-void ed_panel_right_object(void) {
-    if (ed_project_background()) { // working on another project: rebuild once it is shown again
-        g_ed.ui_stale = 1;
-        return;
-    }
-    if (g_locked[1] && strcmp(g_right_active, "object")) return;
-    EditorObject *o = g_ed.proj->selected;
-    if (!o) {
-        g_locked[1] = g_locked[1] && strcmp(g_right_active, "object") ? g_locked[1] : g_locked[1];
-        ed_panel_right_blank();
-        return;
-    }
-    if (!o->scratch) o->scratch = cJSON_CreateObject();
-    g_scratch = o->scratch;
-    const int p = o->prefab;
-    const EditorPrefab *pf = &editor_prefabs[p];
-#define HAS(f) ((pf->flags & (f)) != 0)
-    EdBuild b;
-    right_begin(&b, "object");
-    ed_gui_panel_buttons(&b, 1, pf->label, 0);
-
-    if (HAS(EP_AI)) json_text(&b, "AI Name", g_scratch, "aiName", "BOT", 0, NULL);
-    if (!HAS(EP_TOOL) || HAS(EP_BOUNCE)) obj_switch(&b, "Visible", "visible", 0, NULL);
-    if (!HAS(EP_TOOL) && !HAS(EP_FORCECOLLISION) && !HAS(EP_NOCOLLISION)) obj_switch(&b, "Collidable", "collidable", 0, NULL);
-    if (HAS(EP_EDITPEN)) obj_switch(&b, "Penetrable", "penetrable", 0, NULL);
-    if (HAS(EP_CANWALLJUMP)) json_switch(&b, "Wall Jumpable", g_scratch, "canWallJump", 0, NULL);
-    if (HAS(EP_BOOSTABLE)) obj_slider(&b, "Boost", "boost", -10, 10, 0.1, 0, NULL);
-    if (HAS(EP_BOUNCE)) {
-        obj_slider(&b, "Bounce", "bounce", 0.1, 3, 0.1, 0, NULL);
-        obj_switch(&b, "Crouch Reduces", "crouch", 0, NULL);
-    }
-    if (HAS(EP_EDGENOISE)) obj_slider(&b, "Edge Noise", "edgeNoise", -5, 5, 0.1, 0, NULL);
-    if (HAS(EP_HASBORDER)) obj_switch(&b, "Border", "border", 0, NULL);
-    if (HAS(EP_HASSPIN)) obj_slider(&b, "Spin", "spin", -20, 20, 0, 0, NULL);
-    if (!strcmp(pf->name, "CYLINDER")) obj_switch(&b, "Open Ended", "openEnded", 0, NULL);
-    if (HAS(EP_CUSTOMDIRECTION)) obj_slider(&b, "Direction", "direction", 0, 3, 1, 0, NULL);
-    if (HAS(EP_OPTIONALDIRECTION)) obj_switch(&b, "Force Direction", "forceDir", 0, NULL);
-    if (HAS(EP_TEAMABLE)) {
-        static const EdOption two[] = {{"Team 1", 0, NULL}, {"Team 2", 1, NULL}};
-        static const EdOption three[] = {{"Default", 0, NULL}, {"Team 1", 1, NULL}, {"Team 2", 2, NULL}};
-        if (HAS(EP_NODEFAULT)) obj_select(&b, "Team", "team", two, 2, 0, NULL);
-        else obj_select(&b, "Team", "team", three, 3, 0, NULL);
-    }
-    if (HAS(EP_GEN)) obj_slider(&b, "Model Scale", "mSize", 0.1, 100, 0.1, 0, NULL);
-    if (!strcmp(pf->name, "SHOWCASE")) {
-        int n;
-        const EdOption *skins = skin_options(&n);
-        obj_select(&b, "Item", "itemID", skins, n, 0, rebuild_sel);
-    }
-    if (HAS(EP_OBJECTIVELINK)) obj_slider(&b, "Objective Id", "objectiveId", -1, 10, 1, 0, NULL);
-    ed_gui_rule(&b);
-
-    ed_gui_folder_begin(&b, "Transform", 0, 0, 0, "object.transform");
-    obj_vector3(&b, "Position", "pos", NULL);
-    obj_vector3(&b, "Rotation", "rot", NULL);
-    if (HAS(EP_SCALABLE)) obj_vector3(&b, "Size", "size", NULL);
-    ed_gui_folder_end(&b, 0);
-
-    if (!HAS(EP_NOTSTYLEABLE)) {
-        ed_gui_folder_begin(&b, "Style", 0, 0, 0, "object.style");
-        if (HAS(EP_TEXTURABLE) || HAS(EP_MOVINGTEXTURE)) {
-            ed_gui_folder_begin(&b, "Texture", 1, 1, 0, "object.style.texture");
-            if (HAS(EP_TEXTURABLE)) {
-                // textureList: Default first, then every other texture by formatted name
-                EdOption *opts = opts_alloc(EDITOR_TEXTURE_COUNT);
-                int n = 0;
-                opts[n++] = (EdOption) {"Default", 0, "DEFAULT"};
-                for (int i = 0; i < EDITOR_TEXTURE_COUNT; i++) {
-                    if (!strcmp(editor_textures[i], "DEFAULT")) continue;
-                    const int slot = (int) (&opts[n] - g_opt_pool);
-                    opts[n++] = (EdOption) {const_name(editor_textures[i], g_opt_names[slot], sizeof(g_opt_names[slot])), 0, editor_textures[i]};
-                }
-                obj_select(&b, "Type", "texture", opts, n, 1, refresh_panel);
-                if (HAS(EP_ASSETTEXTURES)) {
-                    obj_number(&b, "Asset ID", "assetTexture", "Texture Asset ID", 1);
-                    ed_gui_button(&b, "Select Custom", ed_net_select)->arg = 1; // selectTexture
-                }
-                if (HAS(EP_CANSTRETCH)) obj_switch(&b, "Stretch", "texStretch", 1, NULL);
-                ed_gui_folder_begin(&b, "Offset", 1, 0, 1, "object.style.texture.offset");
-                obj_slider(&b, "X", "texOffX", 0, 1, 0.1, 2, NULL);
-                obj_slider(&b, "Y", "texOffY", 0, 1, 0.1, 2, NULL);
-                ed_gui_folder_end(&b, 1);
-            }
-            if (HAS(EP_MOVINGTEXTURE)) {
-                static const EdOption axes[] = {{"X", 0, NULL}, {"Y", 1, NULL}};
-                ed_gui_folder_begin(&b, "Movement", 1, 0, 1, "object.style.texture.movement");
-                obj_slider(&b, "Speed", "movingSpeed", -20, 20, 0.1, 2, NULL);
-                obj_select(&b, "Axis", "movingAxis", axes, 2, 2, NULL);
-                ed_gui_folder_end(&b, 1);
-            }
-            ed_gui_folder_end(&b, 1);
-        }
-        if (HAS(EP_AI)) {
-            json_text(&b, "Asset ID", g_scratch, "assetID", "ID", 1, regen_sel_panel);
-            ed_gui_button(&b, "Select Custom", ed_net_select)->arg = 0; // selectModel
-        }
-        if (HAS(EP_EDITCOLOR)) obj_color(&b, "Color", "color", 0);
-        if (HAS(EP_EDITEMISSIVE)) obj_color(&b, "Emissive", "emissive", 0);
-        if (HAS(EP_EDITOPAC)) obj_slider(&b, "Opacity", "opacity", 0, 1, 0.1, 0, NULL);
-        if (HAS(EP_CUSTOM)) obj_switch(&b, "Texture Smoothing", "texSmooth", 0, NULL);
-        if (!HAS(EP_COMPLEX) && !HAS(EP_TOOL)) obj_switch(&b, "Shading", "ambient", 0, NULL);
-        if (HAS(EP_EDITFOG)) obj_switch(&b, "Fog", "fog", 0, NULL);
-        if (!strcmp(pf->name, "LIGHT_CONE")) obj_switch(&b, "Full Cone", "fullcone", 0, NULL);
-        ed_gui_folder_end(&b, 0);
-    }
-    if (HAS(EP_EDITFACES)) {
-        static const char *faces[6] = {"Right", "Left", "Top", "Bottom", "Back", "Front"};
-        ed_gui_folder_begin(&b, "Render Faces", 0, 0, 0, "object.faces");
-        cJSON *fv = ed_prop_get(o, "faces");
-        for (int i = 0; i < 6; i++) {
-            EdCtl *c = ed_gui_switch(&b, faces[i], 0);
-            char key[4];
-            snprintf(key, sizeof(key), "%d", i);
-            cJSON *tmp = cJSON_CreateObject();
-            cJSON_AddItemToObject(tmp, key, cJSON_Duplicate(cJSON_GetArrayItem(fv, i), 1));
-            ed_ctl_bind_json(c, tmp, key);
-            finish(&b, c, on_faces);
-            c->arg = i; // after the markup: arg is the line's sub level until then
-            c->bind = EB_NONE; // value handled by on_faces
-            c->json = NULL;
-            cJSON_Delete(tmp);
-        }
-        cJSON_Delete(fv);
-        ed_gui_folder_end(&b, 0);
-    }
-    if (HAS(EP_LIGHT)) {
-        ed_gui_folder_begin(&b, "Lighting", 0, 0, 0, "object.lighting");
-        obj_slider(&b, "Intensity", "intensity", 0, 2, 0.1, 0, NULL);
-        obj_slider(&b, "Distance", "distance", 0, 1000, 0.1, 0, NULL);
-        obj_slider(&b, "Decay", "decay", 0, 2, 0.1, 0, NULL);
-        ed_gui_folder_end(&b, 0);
-    }
-
-    if (!HAS(EP_NOTTECHNICAL)) {
-        // The Technical folder holds the optional controls below; Krunker only adds it when
-        // any applies. Build it into a side buffer and keep it when non-empty.
-        EdBuild t = b;
-        EdBuf saved = b.html;
-        edb_init(&t.html);
-        b.html = t.html;
-        const size_t ctl_marker = 0;
-        (void) ctl_marker;
-        int any = 0;
-        if (!strcmp(pf->name, "DEPOSIT_BOX")) {
-            obj_slider(&b, "Withdraw Amount", "withdraw", 0, 100000, 1, 0, NULL);
-            obj_slider(&b, "Deposit Amount", "deposit", 0, 100000, 1, 0, NULL);
-            any = 1;
-        }
-        int custom_score = 0;
-        if (HAS(EP_CUSTOMSCORE)) custom_score = 1;
-        if (!strcmp(pf->name, "CHECK_POINT") || !strcmp(pf->name, "TRIGGER") || HAS(EP_AI)) custom_score = 2;
-        if (custom_score == 1) obj_slider(&b, HAS(EP_INTERACT) ? "Amount" : "Score", "score", HAS(EP_INTERACT) || HAS(EP_AI) ? 0 : 1, 10000, 1, 0, NULL);
-        if (custom_score == 2) obj_switch(&b, "Single Use", "single", 0, NULL);
-        any |= custom_score != 0;
-        if (HAS(EP_INTERACT) || HAS(EP_INTERACT2)) {
-            if (HAS(EP_INTERACT)) {
-                static const EdOption methods[] = {{"Cost Score", 0, NULL}, {"Require Score", 1, NULL}, {"Require Kills", 2, NULL}};
-                obj_select(&b, "Method", "method", methods, 3, 0, NULL);
-                if (HAS(EP_CANUNDO)) {
-                    obj_switch(&b, "Closeable", "closeable", 0, NULL);
-                    obj_switch(&b, "Starts Hidden", "startClosed", 0, NULL);
-                }
-            }
-            obj_switch(&b, "No Popup", "hidden", 0, NULL);
-            any = 1;
-        }
-        if (HAS(EP_HASHEALTH)) {
-            json_switch(&b, "Destructible", g_scratch, "canDestroy", 0, NULL);
-            if (strcmp(pf->name, "GATE")) json_switch(&b, "Start Destroyed", g_scratch, "startDestroyed", 0, NULL);
-            if (!strcmp(pf->name, "TRIGGER")) json_switch(&b, "Destroy On Use", g_scratch, "selfDestruct", 0, NULL);
-            obj_slider(&b, "Health", "health", 0, 20000, 10, 0, NULL);
-            ed_gui_folder_begin(&b, "Respawn", 1, 0, 0, "object.tech.respawn");
-            obj_slider(&b, "Timer (s)", "respawnT", 0, 300, 0.1, 1, NULL);
-            obj_switch(&b, "Random", "respawnR", 1, NULL);
-            ed_gui_folder_end(&b, 1);
-            any = 1;
-        }
-        if (!strcmp(pf->name, "WEAPON_PICKUP")) {
-            EdOption *opts = opts_alloc(32);
-            int n = 0, wi = 0;
-            const cJSON *w;
-            cJSON_ArrayForEach(w, editor_data_get("weapons")) {
-                if (ed_json_str(w, "src", NULL)) opts[n++] = (EdOption) {ed_json_str(w, "name", ""), wi, NULL};
-                wi++;
-            }
-            ed_gui_folder_begin(&b, "Weapon", 1, 0, 0, "object.tech.weapon");
-            obj_select(&b, "Type", "weaponId", opts, n, 1, rebuild_sel);
-            obj_switch(&b, "Replaceable", "weaponReplace", 1, NULL);
-            obj_switch(&b, "Random", "randWep", 1, NULL);
-            ed_gui_folder_end(&b, 1);
-            any = 1;
-        }
-        if (!strcmp(pf->name, "TRIGGER") || HAS(EP_AI)) {
-            const cJSON *trig = editor_data_get("triggers");
-            const cJSON *events = cJSON_GetObjectItemCaseSensitive(trig, "events");
-            const cJSON *actions = cJSON_GetObjectItemCaseSensitive(trig, "actions");
-            if (HAS(EP_AI)) json_switch(&b, "Can Trigger", g_scratch, "canTrigger", 0, NULL);
-            EdOption *ev = opts_alloc(cJSON_GetArraySize(events));
-            int n = 0, i = 0;
-            const cJSON *it;
-            cJSON_ArrayForEach(it, events) {
-                const char *name = cJSON_IsString(it) ? it->valuestring : "";
-                const int ai_event = strstr(name, "onAI") != NULL;
-                if ((HAS(EP_AI) && ai_event) || (!strcmp(pf->name, "TRIGGER") && !ai_event)) ev[n++] = (EdOption) {name, i, NULL};
-                i++;
-            }
-            obj_select(&b, "Event", "event", ev, n, 0, NULL);
-            obj_slider(&b, "Event Value", "constantEvent", 0, 10000, 1, 0, NULL);
-            EdOption *ac = opts_alloc(cJSON_GetArraySize(actions));
-            n = 0;
-            i = 0;
-            cJSON_ArrayForEach(it, actions) ac[n++] = (EdOption) {ed_json_str(it, "name", ""), i++, NULL};
-            obj_select(&b, "Action", "action", ac, n, 0, on_trigger_action);
-            cJSON *action = ed_prop_get(o, "action");
-            g_panel_action = (int) cJSON_GetNumberValue(action);
-            const cJSON *cur = cJSON_GetArrayItem(actions, (int) cJSON_GetNumberValue(action));
-            cJSON_Delete(action);
-            if (cur && !strcmp(ed_json_str(cur, "type", ""), "Text")) obj_text(&b, "Value", "constantTxt", "Text", 0, NULL);
-            else obj_slider(&b, "Value", "constant", -10000, 10000, 1, 0, NULL);
-            json_slider(&b, "Action Chance (%)", g_scratch, "chance", 0, 100, 1, 0, NULL);
-            any = 1;
-        }
-        const int iface = strcmp(pf->name, "WEAPON_PICKUP") && HAS(EP_CANINTERFACE);
-        if (iface || HAS(EP_CANTARGETINTERFACE)) {
-            ed_gui_folder_begin(&b, "Interface", 1, 0, 0, "object.tech.interface");
-            if (iface) obj_slider(&b, "ID", "interfaceId", 0, ed_json_num(editor_data_json(), "interfaceIDMax", 1000), 1, 1, NULL);
-            if (HAS(EP_CANTARGETINTERFACE)) obj_slider(&b, "Target", "interfaceIdT", 0, 1000, 1, 1, NULL);
-            ed_gui_folder_end(&b, 1);
-            any = 1;
-        }
-        if (!strcmp(pf->name, "TELEPORTER")) {
-            static const EdOption nodes[] = {{"Sending", 0, NULL}, {"Receiving", 1, NULL}, {"Both", 2, NULL}};
-            obj_select(&b, "Node", "node", nodes, 3, 0, NULL);
-            obj_slider(&b, "Channel", "channel", 0, 100, 1, 0, NULL);
-            obj_switch(&b, "Stop Momentum", "momentum", 0, NULL);
-            any = 1;
-        }
-        if (HAS(EP_CANBEDYNAMIC)) {
-            ed_gui_folder_begin(&b, "Dynamic", 1, 0, 0, "object.tech.dynamic");
-            obj_switch(&b, "Enabled", "dynamic", 1, NULL);
-            obj_slider(&b, "Gravity", "gravity", 0, 5, 0.1, 1, NULL);
-            ed_gui_folder_end(&b, 1);
-            any = 1;
-        }
-        if (HAS(EP_AI)) {
-            ed_gui_folder_begin(&b, "Behavior", 1, 0, 0, "object.tech.behavior");
-            json_slider(&b, "Behavior Type", g_scratch, "behaviorType", 0, 20, 1, 1, NULL);
-            json_slider(&b, "Speed", g_scratch, "speed", 0, 5, 0.1, 1, NULL);
-            json_slider(&b, "Turn Speed", g_scratch, "turnSpd", 0, 30, 1, 1, NULL);
-            obj_slider(&b, "Gravity", "gravity", 0, 1, 0.1, 1, NULL);
-            json_slider(&b, "Firerate", g_scratch, "frate", 200, 10000, 50, 1, NULL);
-            json_slider(&b, "Vision Distance", g_scratch, "visDis", 10, 1000, 10, 1, NULL);
-            json_switch(&b, "Xray Vision", g_scratch, "xrayVis", 1, NULL);
-            json_switch(&b, "Can Shoot", g_scratch, "canShoot", 1, NULL);
-            json_switch(&b, "Can Hit", g_scratch, "canHit", 1, NULL);
-            json_slider(&b, "Projectile Type", g_scratch, "projType", 0, 5, 1, 1, NULL);
-            json_text(&b, "Reward Type", g_scratch, "rewardType", "id,id,id", 1, NULL);
-            ed_gui_folder_end(&b, 1);
-            any = 1;
-        }
-        EdBuf inner = b.html;
-        b.html = saved;
-        if (any) {
-            ed_gui_folder_begin(&b, "Technical", 0, 0, 0, "object.tech");
-            edb_add(&b.html, inner.buf ? inner.buf : "");
-            ed_gui_folder_end(&b, 0);
-        }
-        edb_free(&inner);
-    }
-
-    if (!strcmp(pf->name, "BILLBOARD")) {
-        ed_gui_folder_begin(&b, "Billboard", 0, 0, 0, "object.billboard");
-        obj_slider(&b, "Poster", "poster", 1, 6, 1, 0, NULL);
-        obj_switch(&b, "Show AD", "showAd", 0, NULL);
-        ed_gui_folder_end(&b, 0);
-    }
-    if (!strcmp(pf->name, "PARTICLES")) {
-        int n;
-        ed_gui_folder_begin(&b, "Particles", 0, 0, 0, "object.particles");
-        EdOption *ids = opts_from_names(editor_data_get("particleIDS"), &n);
-        for (int i = 0; i < n; i++) {
-            const int slot = (int) (&ids[i] - g_opt_pool);
-            ids[i].name = const_name(ids[i].name, g_opt_names[slot], sizeof(g_opt_names[slot]));
-        }
-        obj_select(&b, "Texture", "part", ids, n, 0, NULL);
-        EdOption *blend = opts_from_names(editor_data_get("particleBlending"), &n);
-        for (int i = 0; i < n; i++) {
-            const int slot = (int) (&blend[i] - g_opt_pool);
-            blend[i].name = const_name(blend[i].name, g_opt_names[slot], sizeof(g_opt_names[slot]));
-        }
-        obj_select(&b, "Blending", "partB", blend, n, 0, NULL);
-        obj_slider(&b, "Count", "partC", 0, 300, 1, 0, NULL);
-        obj_slider(&b, "Size", "partS", 0, 30, 0.1, 0, NULL);
-        obj_slider(&b, "Scale", "partSC", -10, 10, 0.1, 0, NULL);
-        ed_gui_folder_begin(&b, "Movement", 1, 0, 0, "object.particles.movement");
-        obj_slider(&b, "Speed", "partSP", -10, 10, 0.1, 1, NULL);
-        obj_slider(&b, "Deceleration", "partD", -1, 1, 0.1, 1, NULL);
-        obj_slider(&b, "Gravity", "partG", -10, 10, 0.1, 1, NULL);
-        ed_gui_folder_end(&b, 1);
-        ed_gui_folder_end(&b, 0);
-    }
-    if (HAS(EP_HASTEXT)) {
-        static const EdOption align[] = {{"Left", 0, NULL}, {"Center", 1, NULL}, {"Right", 2, NULL}};
-        ed_gui_folder_begin(&b, "Text", 0, 0, 0, "object.text");
-        obj_text(&b, "Content", "text", "Content", 0, rebuild_sel);
-        obj_select(&b, "Align", "tAlign", align, 3, 0, NULL);
-        ed_gui_folder_begin(&b, "Font", 1, 0, 0, "object.text.font");
-        obj_slider(&b, "Size", "fsize", 10, 120, 1, 1, NULL);
-        obj_color(&b, "Color", "fcolor", 1);
-        ed_gui_folder_end(&b, 1);
-        ed_gui_folder_begin(&b, "Background", 1, 0, 0, "object.text.background");
-        obj_color(&b, "Color", "bcolor", 1);
-        obj_switch(&b, "Visible", "backVisible", 1, NULL);
-        ed_gui_folder_end(&b, 1);
-        ed_gui_folder_end(&b, 0);
-    }
-    if (p == ED_PREFAB_SPAWN_POINT) {
-        ed_gui_folder_begin(&b, "Spawn Point", 0, 0, 0, "object.spawn");
-        obj_switch(&b, "Starting Area", "cmpSpwn", 0, rebuild_sel);
-        ed_gui_folder_end(&b, 0);
-    }
-    if (!strcmp(pf->name, "LIQUID")) {
-        ed_gui_folder_begin(&b, "Wave", 0, 0, 0, "object.wave");
-        ed_gui_folder_begin(&b, "Liquid", 1, 0, 0, "object.wave.liquid");
-        obj_slider(&b, "Speed", "wSpeed", 0, 25, 0.1, 1, NULL);
-        obj_slider(&b, "Height", "wHeight", 0, 5, 0.1, 1, NULL);
-        ed_gui_folder_end(&b, 1);
-        ed_gui_folder_begin(&b, "Depth", 1, 0, 0, "object.wave.depth");
-        obj_slider(&b, "X", "tilesX", 2, 100, 1, 1, NULL);
-        obj_slider(&b, "Z", "tilesZ", 2, 100, 1, 1, NULL);
-        ed_gui_folder_end(&b, 1);
-        ed_gui_folder_end(&b, 0);
-    }
-    cJSON *act = ed_prop_get(o, "action");
-    const int action14 = HAS(EP_HASSOUND) && (int) cJSON_GetNumberValue(act) == 14;
-    cJSON_Delete(act);
-    if (!strcmp(pf->name, "SOUND_EMITTER") || action14) {
-        int n;
-        ed_gui_folder_begin(&b, "Sound", 0, 0, 0, "object.sound");
-        EdOption *snd = opts_alloc(cJSON_GetArraySize(editor_data_get("emitterSounds")));
-        n = 0;
-        const cJSON *it;
-        cJSON_ArrayForEach(it, editor_data_get("emitterSounds")) {
-            snd[n] = (EdOption) {cJSON_IsString(it) ? it->valuestring : "", n, NULL};
-            n++;
-        }
-        obj_select(&b, "Type", "snd", snd, n, 0, NULL);
-        // "assetSound": ObjectInstance never stores it in v3.1.1 (no setter, not serialized)
-        json_number(&b, "Asset ID", g_scratch, "assetSound", "Sound Asset ID", 0, NULL);
-        ed_gui_button(&b, "Select Custom", ed_net_select)->arg = 2; // selectAudio
-        obj_slider(&b, "Volume", "vol", 0.05, 2, 0.01, 0, NULL);
-        obj_slider(&b, "Rate", "rate", 0.5, 4, 0.1, 0, NULL);
-        if (!strcmp(pf->name, "SOUND_EMITTER")) {
-            obj_slider(&b, "Reference Distance", "dist", 0, 5000, 1, 0, NULL);
-            obj_slider(&b, "Roll-off", "roll", 0, 1, 0.01, 0, NULL);
-        } else {
-            static const EdOption from[] = {{"Trigger", 0, NULL}, {"Player", 1, NULL}};
-            obj_select(&b, "Emit From", "emitfrom", from, 2, 0, NULL);
-        }
-        ed_gui_folder_end(&b, 0);
-    }
-    if (HAS(EP_AI)) {
-        static const char *ids[4][3] = {{"Death Sound ID", "deathSound", "3"}, {"Idle Sound ID", "idleSound", "4"},
-                                        {"Attack Sound ID", "atkSound", "5"}, {"Agro Sound ID", "agroSound", "6"}};
-        ed_gui_folder_begin(&b, "Sound", 0, 0, 0, "object.sound");
-        for (int i = 0; i < 4; i++) {
-            json_number(&b, ids[i][0], g_scratch, ids[i][1], "Sound Asset ID", 0, NULL);
-            ed_gui_button(&b, "Select Sound", ed_net_select)->arg = atoi(ids[i][2]);
-        }
-        ed_gui_folder_end(&b, 0);
-    }
-#undef HAS
-    ed_gui_end(&b, g_ed.el_right_list);
-}
-
-void ed_select_texture(EdCtl *c) {
-    (void) c;
-    editor_show_window(7); // advancedOptions.selectTexture: showWindow(7) (editor_net.c)
-}
-
-// environment (Component > Environment)
-static void env_changed(EdCtl *c, const cJSON *v) {
-    (void) c; (void) v;
-    editor_apply_lighting();
-}
-
-static void env_color(EdBuild *b, const char *name, const char *key, const int sub) {
-    // A[C] getters: stringifyColor(mapConfig[C]); setters store parseColor (a number)
-    cJSON *tmp = cJSON_CreateObject();
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_ed.proj->map_config, key);
-    char hex[16] = "#000000";
-    if (cJSON_IsNumber(v)) snprintf(hex, sizeof(hex), "#%06x", (int) cJSON_GetNumberValue(v) & 0xffffff);
-    else if (cJSON_IsString(v)) snprintf(hex, sizeof(hex), "%s", v->valuestring);
-    cJSON_AddStringToObject(tmp, key, hex);
-    EdCtl *c = ed_gui_color(b, name, sub);
-    ed_ctl_bind_json(c, tmp, key);
-    finish(b, c, NULL);
-    cJSON_Delete(tmp);
-    c->bind = EB_NONE;
-    c->json = NULL;
-    c->arg = sub;
-    snprintf(c->path, sizeof(c->path), "%s", key);
-    extern void ed_env_color_changed(EdCtl *, const cJSON *);
-    c->on_change = ed_env_color_changed;
-}
-
-void ed_env_color_changed(EdCtl *c, const cJSON *v) {
-    if (!cJSON_IsString(v)) return;
-    const int color = (int) strtol(v->valuestring + (v->valuestring[0] == '#'), NULL, 16);
-    ed_json_set_num(g_ed.proj->map_config, c->path, color);
-    editor_apply_lighting();
-}
-
-static void on_sky_mode(EdCtl *c, const cJSON *v) {
-    (void) c;
-    const int dome = (int) cJSON_GetNumberValue(v) != 0;
-    ed_json_set_bool(g_ed.proj->map_config, "skyDome", dome);
-    html_dom_set_display(html_dom_by_id("sky_0"), dome ? "none" : "");
-    html_dom_set_display(html_dom_by_id("sky_1"), dome ? "" : "none");
-    editor_apply_lighting();
-}
-
-static void on_cloud(EdCtl *c, const cJSON *v) {
-    (void) c;
-    html_dom_set_display(html_dom_by_id("cloud"), ed_json_truthy(v) ? "" : "none");
-    editor_apply_lighting();
-}
-
-static void div_begin(EdBuild *b, const char *id, const int show) {
-    // _build "div": `"<div id=" + id + " " + (show ? null : 'style="display: none"') + ">"`
-    edb_addf(&b->html, "<div id=%s %s>", id, show ? "null" : "style=\"display: none\"");
-}
-
-void ed_panel_right_environment(void) {
-    if (ed_project_background()) { // working on another project: rebuild once it is shown again
-        g_ed.ui_stale = 1;
-        return;
-    }
-    if (!right_can_show("environment")) return;
-    EdBuild b;
-    right_begin(&b, "environment");
-    ed_gui_panel_buttons(&b, 1, "Environment", 0);
-    cJSON *mc = g_ed.proj->map_config;
-    const int dome = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(mc, "skyDome"));
-    static const EdOption sky[] = {{"Solid", 0, NULL}, {"Gradient", 1, NULL}};
-    cJSON *tmp = cJSON_CreateObject();
-    cJSON_AddNumberToObject(tmp, "skyDome", dome);
-    EdCtl *c = ed_gui_select(&b, "Sky", sky, 2, 0);
-    ed_ctl_bind_json(c, tmp, "skyDome");
-    finish(&b, c, on_sky_mode);
-    c->bind = EB_NONE;
-    cJSON_Delete(tmp);
-    div_begin(&b, "sky_0", !dome);
-    env_color(&b, "Color", "sky", 1);
-    edb_add(&b.html, "</div>\n");
-    div_begin(&b, "sky_1", dome);
-    ed_gui_folder_begin(&b, "Color", 1, 0, 1, "env.sky.color"); // sub: 1 -> "subsubheader"
-    env_color(&b, "Top", "skyDomeCol0", 2);
-    env_color(&b, "Middle", "skyDomeCol1", 2);
-    env_color(&b, "Bottom", "skyDomeCol2", 2);
-    ed_gui_folder_end(&b, 1);
-    json_switch(&b, "Cloud Texture", mc, "skyDomeTex", 1, on_cloud);
-    div_begin(&b, "cloud", ed_json_truthy(cJSON_GetObjectItemCaseSensitive(mc, "skyDomeTex")));
-    env_color(&b, "Emissive", "skyDomeEmis", 2);
-    json_slider(&b, "Speed", mc, "skyDomeMovT", -20, 20, 0.1, 2, env_changed);
-    static const EdOption axes[] = {{"X", 0, NULL}, {"Y", 1, NULL}};
-    json_select(&b, "Axis", mc, "skyDomeMovD", axes, 2, 2, env_changed);
-    edb_add(&b.html, "</div>\n</div>\n");
-    ed_gui_rule(&b);
-
-    ed_gui_folder_begin(&b, "Ambient", 0, 0, 0, "env.ambient");
-    static const EdOption scapes[] = {{"Default", 1, NULL}, {"City", 2, NULL}, {"Desert", 3, NULL}, {"Market", 4, NULL}, {"Scary", 5, NULL},
-                                      {"Storm", 6, NULL}, {"Purgatory", 7, NULL}, {"Black Market", 8, NULL}, {"Tomb", 11, NULL}};
-    json_select(&b, "Sound", mc, "ambInd", scapes, 9, 0, NULL);
-    json_slider(&b, "Intensity", mc, "ambientI", 0.1, 3, 0.1, 0, env_changed);
-    env_color(&b, "Color", "ambient", 0);
-    ed_gui_folder_end(&b, 0);
-
-    ed_gui_folder_begin(&b, "Light", 0, 0, 0, "env.light");
-    env_color(&b, "Color", "light", 0);
-    json_slider(&b, "Distance", mc, "lightD", 10, 5000, 1, 0, env_changed);
-    json_slider(&b, "Intensity", mc, "lightI", 0.1, 3, 0.1, 0, env_changed);
-    ed_gui_folder_begin(&b, "Angle", 1, 0, 0, "env.light.angle");
-    json_slider(&b, "X", mc, "sunAngX", 0, 360, 1, 1, env_changed);
-    json_slider(&b, "Y", mc, "sunAngY", 0, 360, 1, 1, env_changed);
-    ed_gui_folder_end(&b, 1);
-    ed_gui_folder_end(&b, 0);
-
-    ed_gui_folder_begin(&b, "Shadows", 0, 0, 0, "env.shadows");
-    json_slider(&b, "Resolution", mc, "shadowR", 128, 4096, 1, 0, NULL);
-    json_slider(&b, "Distance", mc, "shadowD", 128, 4096, 1, 0, NULL);
-    ed_gui_folder_end(&b, 0);
-
-    ed_gui_folder_begin(&b, "Weather", 0, 0, 0, "env.weather");
-    ed_gui_folder_begin(&b, "Fog", 1, 0, 0, "env.weather.fog");
-    env_color(&b, "Color", "fog", 2);
-    json_slider(&b, "Distance", mc, "fogD", 10, 15000, 1, 2, env_changed);
-    ed_gui_folder_end(&b, 1);
-    ed_gui_folder_end(&b, 0);
     ed_gui_end(&b, g_ed.el_right_list);
 }
 
@@ -1222,16 +500,16 @@ static void window_controls(EdBuild *b) {
     cJSON *s = g_ed.settings;
     if (g_controls_tab == 0) {
         ed_gui_folder_begin(b, "Movement", 0, 0, 0, "controls.movement");
-        json_key_extra(b, "Fly forward", s, "fowardKey", 1, 0, win_settings_changed, arrow_html("up"));
-        json_key_extra(b, "Fly backwards", s, "backwardKey", 1, 0, win_settings_changed, arrow_html("down"));
-        json_key_extra(b, "Fly left", s, "leftKey", 1, 0, win_settings_changed, arrow_html("left"));
-        json_key_extra(b, "Fly right", s, "rightKey", 1, 0, win_settings_changed, arrow_html("right"));
-        json_key(b, "Fly up", s, "upKey", 1, 0, win_settings_changed);
-        json_key(b, "Fly down", s, "downKey", 1, 0, win_settings_changed);
+        edp_json_key_extra(b, "Fly forward", s, "fowardKey", 1, 0, win_settings_changed, arrow_html("up"));
+        edp_json_key_extra(b, "Fly backwards", s, "backwardKey", 1, 0, win_settings_changed, arrow_html("down"));
+        edp_json_key_extra(b, "Fly left", s, "leftKey", 1, 0, win_settings_changed, arrow_html("left"));
+        edp_json_key_extra(b, "Fly right", s, "rightKey", 1, 0, win_settings_changed, arrow_html("right"));
+        edp_json_key(b, "Fly up", s, "upKey", 1, 0, win_settings_changed);
+        edp_json_key(b, "Fly down", s, "downKey", 1, 0, win_settings_changed);
         key_line(b, "Hold to fly faster", "Shift");
         ed_gui_folder_begin(b, "Speed", 1, 0, 0, "controls.speed");
-        json_number(b, "Normal", s, "speedNormal", "", 1, win_settings_changed);
-        json_number(b, "Sprinting", s, "speedSprint", "", 1, win_settings_changed);
+        edp_json_number(b, "Normal", s, "speedNormal", "", 1, win_settings_changed);
+        edp_json_number(b, "Sprinting", s, "speedSprint", "", 1, win_settings_changed);
         ed_gui_button_line(b, "Reset Speed", "Reset", win_reset_speed, 1);
         ed_gui_folder_end(b, 1);
         ed_gui_folder_end(b, 0);
@@ -1246,8 +524,8 @@ static void window_controls(EdBuild *b) {
         key_line(b, "Redo", "Ctrl + Y or Shift + Ctrl + Z");
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Object", 0, 0, 0, "controls.object");
-        json_key(b, "Face Selection Mode", s, "faceModeKey", 1, 0, win_settings_changed);
-        json_key(b, "Group Selection Mode", s, "groupModeKey", 1, 0, win_settings_changed);
+        edp_json_key(b, "Face Selection Mode", s, "faceModeKey", 1, 0, win_settings_changed);
+        edp_json_key(b, "Group Selection Mode", s, "groupModeKey", 1, 0, win_settings_changed);
         key_line(b, "Delete element", "Del or Backspace");
         key_line(b, "Toggle snapping", "Control");
         key_line(b, "Toggle collidable", "Shift + C");
@@ -1330,7 +608,7 @@ static void reset_all(EdCtl *c) {
 static int g_settings_tab;
 
 static EdCtl *div_switch(EdBuild *b, const char *name, const char *key, const char *div, const int invert) {
-    EdCtl *c = json_switch(b, name, g_ed.settings, key, 0, on_toggle_div);
+    EdCtl *c = edp_json_switch(b, name, g_ed.settings, key, 0, on_toggle_div);
     snprintf(c->path, sizeof(c->path), "%s", div);
     c->arg = invert;
     return c;
@@ -1349,20 +627,20 @@ static void window_settings(EdBuild *b) {
     cJSON *s = g_ed.settings;
     if (g_settings_tab == 0) {
         ed_gui_button_line(b, "Controls", "Open Controls", open_controls, 0);
-        json_slider(b, "Auto Backup", s, "autoBackup", 0, 25, 1, 0, on_grid);
-        json_slider(b, "UI Scale", s, "uiScale", 0.5, 1.5, 0.1, 0, on_grid);
-        json_switch(b, "Pointer Lock", s, "pointerLock", 0, on_grid);
-        json_switch(b, "Disable Warnings", s, "disableWarnings", 0, on_grid);
+        edp_json_slider(b, "Auto Backup", s, "autoBackup", 0, 25, 1, 0, on_grid);
+        edp_json_slider(b, "UI Scale", s, "uiScale", 0.5, 1.5, 0.1, 0, on_grid);
+        edp_json_switch(b, "Pointer Lock", s, "pointerLock", 0, on_grid);
+        edp_json_switch(b, "Disable Warnings", s, "disableWarnings", 0, on_grid);
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Render", 0, 1, 0, "settings.render");
-        json_slider(b, "Resolution", s, "resMltV", 0.1, 2, 0.1, 0, on_grid);
+        edp_json_slider(b, "Resolution", s, "resMltV", 0.1, 2, 0.1, 0, on_grid);
         // v3.1.1 binds this switch to key "resMltV" (a Krunker bug): it shows the resolution
         // value's truthiness and its onChange stores antiAlias. GUI.action also writes the
         // checkbox into settings.resMltV; that part is not copied (it would break Resolution).
         {
             cJSON *tmp = cJSON_CreateObject();
             cJSON_AddBoolToObject(tmp, "aa", ed_json_truthy(cJSON_GetObjectItemCaseSensitive(s, "resMltV")));
-            EdCtl *aa = json_switch(b, "Anti-aliasing", tmp, "aa", 0, on_anti_alias);
+            EdCtl *aa = edp_json_switch(b, "Anti-aliasing", tmp, "aa", 0, on_anti_alias);
             aa->bind = EB_NONE;
             aa->json = NULL;
             cJSON_Delete(tmp);
@@ -1370,55 +648,55 @@ static void window_settings(EdBuild *b) {
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "History", 0, 1, 0, "settings.history");
         div_switch(b, "Disable", "disableHistory", "grid", 1);
-        div_begin(b, "grid", !editor_setting_bool("disableHistory"));
-        json_slider(b, "Limit", s, "historyLimit", 0, 1000, 1, 1, on_grid);
+        edp_div_begin(b, "grid", !editor_setting_bool("disableHistory"));
+        edp_json_slider(b, "Limit", s, "historyLimit", 0, 1000, 1, 1, on_grid);
         edb_add(&b->html, "</div>\n");
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Game", 0, 1, 0, "settings.game");
-        json_switch(b, "Show Real Hitbox", s, "showRealHitbox", 0, on_grid);
+        edp_json_switch(b, "Show Real Hitbox", s, "showRealHitbox", 0, on_grid);
         ed_gui_folder_end(b, 0);
     } else if (g_settings_tab == 1) {
-        json_switch(b, "Dark Mode", s, "darkMode", 0, on_grid);
+        edp_json_switch(b, "Dark Mode", s, "darkMode", 0, on_grid);
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Grid", 0, 0, 0, "settings.grid");
         div_switch(b, "Visible", "gridVisibility", "grid", 0);
-        div_begin(b, "grid", editor_setting_bool("gridVisibility"));
-        json_slider(b, "Opacity", s, "gridOpacity", 0.05, 1, 0.05, 1, on_grid);
-        json_number(b, "Size", s, "gridSize", "", 1, on_grid);
-        json_number(b, "Spacing", s, "gridSpacing", "", 1, on_grid);
+        edp_div_begin(b, "grid", editor_setting_bool("gridVisibility"));
+        edp_json_slider(b, "Opacity", s, "gridOpacity", 0.05, 1, 0.05, 1, on_grid);
+        edp_json_number(b, "Size", s, "gridSize", "", 1, on_grid);
+        edp_json_number(b, "Spacing", s, "gridSpacing", "", 1, on_grid);
         edb_add(&b->html, "</div>\n");
         ed_gui_button_line(b, "Reset Grid", "Reset", grid_reset, 0);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Death Barrier", 0, 0, 0, "settings.db");
         div_switch(b, "Visible", "dbVisibility", "deathBarrier", 0);
-        div_begin(b, "deathBarrier", editor_setting_bool("dbVisibility"));
-        json_slider(b, "Opacity", s, "dbOpacity", 0.05, 1, 0.05, 1, on_grid);
+        edp_div_begin(b, "deathBarrier", editor_setting_bool("dbVisibility"));
+        edp_json_slider(b, "Opacity", s, "dbOpacity", 0.05, 1, 0.05, 1, on_grid);
         edb_add(&b->html, "</div>\n");
         ed_gui_button_line(b, "Reset Barrier", "Reset", db_reset, 0);
         ed_gui_folder_end(b, 0);
     } else if (g_settings_tab == 2) {
-        json_switch(b, "Trigger Connections", s, "triggerCons", 0, on_grid);
-        json_switch(b, "Select through invisible objects [ALT]", s, "selectThroughInvis", 0, on_grid);
-        json_switch(b, "Object Border Visuals", s, "borderVisuals", 0, on_grid);
-        json_switch(b, "Highlight", s, "objectHighlight", 0, on_grid);
-        json_switch(b, "Create Near", s, "createObjectNear", 0, on_grid);
+        edp_json_switch(b, "Trigger Connections", s, "triggerCons", 0, on_grid);
+        edp_json_switch(b, "Select through invisible objects [ALT]", s, "selectThroughInvis", 0, on_grid);
+        edp_json_switch(b, "Object Border Visuals", s, "borderVisuals", 0, on_grid);
+        edp_json_switch(b, "Highlight", s, "objectHighlight", 0, on_grid);
+        edp_json_switch(b, "Create Near", s, "createObjectNear", 0, on_grid);
         ed_gui_button_line(b, "Lightcone Boundingbox", "Toggle", NULL, 0);
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Config", 0, 0, 0, "settings.config");
-        json_switch(b, "Anti Radians", s, "degToRad", 0, on_grid);
-        json_switch(b, "Preserve Folders", s, "preserveFolderState", 0, on_grid);
+        edp_json_switch(b, "Anti Radians", s, "degToRad", 0, on_grid);
+        edp_json_switch(b, "Preserve Folders", s, "preserveFolderState", 0, on_grid);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "Snapping", 0, 0, 0, "settings.snapping");
-        json_slider(b, "Translation", s, "translationSnapping", 0.001, 25, 0.001, 0, on_grid);
-        json_slider(b, "Rotation", s, "rotationSnapping", 0.001, 45, 0.001, 0, on_grid);
-        json_slider(b, "Scale", s, "scaleSnapping", 0.001, 25, 0.001, 0, on_grid);
+        edp_json_slider(b, "Translation", s, "translationSnapping", 0.001, 25, 0.001, 0, on_grid);
+        edp_json_slider(b, "Rotation", s, "rotationSnapping", 0.001, 45, 0.001, 0, on_grid);
+        edp_json_slider(b, "Scale", s, "scaleSnapping", 0.001, 25, 0.001, 0, on_grid);
         ed_gui_button_line(b, "Reset Snapping", "Reset", snapping_reset, 0);
         ed_gui_folder_end(b, 0);
     } else {
         static const EdOption open_on[] = {{"Middle Click", 0, NULL}, {"Right Click", 1, NULL}};
         div_switch(b, "Enabled", "quickGUI", "quickGUISettings", 0);
-        div_begin(b, "quickGUISettings", editor_setting_bool("quickGUI"));
-        json_select(b, "Open On", s, "quickGUIOpen", open_on, 2, 1, on_grid);
+        edp_div_begin(b, "quickGUISettings", editor_setting_bool("quickGUI"));
+        edp_json_select(b, "Open On", s, "quickGUIOpen", open_on, 2, 1, on_grid);
         edb_add(&b->html, "</div>\n");
     }
     edb_add(&b->html, "</div>");

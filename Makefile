@@ -145,7 +145,7 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation and editor bus tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation, editor bus and editor model tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/lagcomp_test
@@ -154,6 +154,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/triggers_test
 	./$(DEBUG_DIR)/trigger_authority_test
 	./$(DEBUG_DIR)/editor_bus_test
+	./$(DEBUG_DIR)/editor_serialize_test .
 	./$(DEBUG_DIR)/weapons_v7_test
 	./$(DEBUG_DIR)/combat_test
 	./$(DEBUG_DIR)/zombies_test

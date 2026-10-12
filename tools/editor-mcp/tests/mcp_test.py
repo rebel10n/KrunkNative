@@ -557,6 +557,16 @@ def compile_map(c):
         check(not ks["publishable"] and e["code"] == "script.compile_error" and e["line"] == 1 and e["col"] == 9, "KrunkScript error with position: %s" % e)
     bad = m.sc("map_new", {"name": "x", "template": "empty"})["id"]
     m.call("map_compile", {"project": bad}, ok=False)  # no spawns -> validation error blocks
+    # complex collision: the bake reproduces the triangles v7.1.4 exported with the map
+    path = os.path.join(c.root, "assets", "maps", "v7", "shipment.json")
+    src = json.load(open(path))
+    sp = m.sc("map_open", {"path": path})["id"]
+    t = m.sc("map_compile", {"project": sp, "inline": True, "force": True})
+    tri = lambda a: sorted(tuple(a[i:i + 9]) for i in range(0, len(a), 9))
+    check(t["bake"]["triangles"] == len(src["tris"]) // 9 and tri(json.loads(t["json"])["tris"]) == tri(src["tris"]),
+          "map_compile bakes shipment's tris as v7 did (%s)" % t["bake"]["tris"])
+    n = m.sc("map_compile", {"project": sp, "inline": True, "force": True, "bake_tris": False})
+    check("tris" not in json.loads(n["json"]), "bake_tris:false leaves tris out")
 
 
 @test

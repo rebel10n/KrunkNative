@@ -198,7 +198,9 @@ Each diagnostic is `{severity, code, message, object_ids?, spawn?, line?, col?}`
 It blocks on validation errors unless `force:true`, and it verifies that the output loads in `map_init`.
 Bake steps:
 
-- `tris` for complex-collision objects is reported as not baked yet;
+- `tris`: complex-collision (`cpx`) cubes, cylinders, spheres and planes are baked into `tris` with the editor's own
+  bake (`client/src/editor/editor_model.c`, linked GL-free; it reproduces the triangles v7.1.4 exports); custom assets
+  need their model and stay boxes (`bake_tris:false` skips it);
 - v7 exports carry no lightmaps.
 
 ## Safety
@@ -258,7 +260,7 @@ schemas come from `tools/list`.
 | `generate_platform_path` | W | points or start + end + count, size, jitter, seed, max_gap, max_rise, props |
 | `fill_area` | W | bbox*, prefab, count or spacing, jitter, scale_range, random_yaw, on_ground, avoid_overlap, avoid_spawns, seed, props |
 | `map_validate` | R | featured, reachability, max_diagnostics, min_severity |
-| `map_compile` | W | output, inline, round, pool_sizes, fold_colors, strip_defaults, drop_editor_only, encode_scripts, scripts {client, server}, force |
+| `map_compile` | W | output, inline, round, pool_sizes, fold_colors, strip_defaults, drop_editor_only, encode_scripts, bake_tris, scripts {client, server}, force |
 | `playtest` | R | seconds, bots, mode, path [[x,y,z]...], screenshot, seed |
 | `render_view` | R | position + target, or position + yaw / pitch, or ids; fov, ortho, framing, fog, width, height |
 | `render_multiview` | R | ids, framing, fog, width, height → 4 images (iso, front, top, right) |

@@ -26,11 +26,13 @@ file(GLOB KN_MCP_HEADERS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
 # KrunkScript (doc/v7/krunkscript.md): the front end in shared/src/ks comes with SHARED_SOURCES;
 # src/ks_bridge.c reaches ks_validate through weak references, so the server still links (and
 # reports "compiler not linked") in a tree without it.
-add_executable(kn_editor_mcp ${KN_MCP_SOURCES} ${KN_MCP_HEADERS} ${KN_MCP_SCHEMA_C} ${SHARED_SOURCES} ${SHARED_HEADERS})
+# client/src/editor/editor_model.c: the editor's GL-free data model (the complex-collision bake of map_compile)
+set(KN_MCP_EDITOR_MODEL ${CMAKE_SOURCE_DIR}/client/src/editor/editor_model.c ${CMAKE_SOURCE_DIR}/client/src/editor/editor_data.c)
+add_executable(kn_editor_mcp ${KN_MCP_SOURCES} ${KN_MCP_HEADERS} ${KN_MCP_SCHEMA_C} ${KN_MCP_EDITOR_MODEL} ${SHARED_SOURCES} ${SHARED_HEADERS})
 if (NOT MSVC)
     set_source_files_properties(${KN_MCP_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wno-unused-parameter")
 endif ()
-target_include_directories(kn_editor_mcp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/shared/include)
+target_include_directories(kn_editor_mcp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/shared/include ${CMAKE_SOURCE_DIR}/client/src/editor)
 target_link_libraries(kn_editor_mcp PRIVATE cJSON pcg_basic m)
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_link_libraries(kn_editor_mcp PRIVATE ws2_32)

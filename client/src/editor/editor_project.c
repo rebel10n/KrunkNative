@@ -15,6 +15,7 @@
 // Ctrl+Alt+N (new; Ctrl+N stays the browser's), Ctrl+W (close) and File > Projects. Closing a
 // project or the window with unsaved changes asks first (Save / Discard / Cancel).
 #include "editor_internal.h"
+#include "editor_model.h"
 #include <app_mode.h>
 #include <html_ui.h>
 #include <math.h>
@@ -94,7 +95,6 @@ EditorProject *ed_project_create(void) {
     EditorProject *prev;
     ed_project_enter(p, &prev);
     ed_map_defaults();
-    p->extra_map = cJSON_CreateObject();
     ed_project_leave(prev);
     list_add(p);
     return p;
@@ -108,9 +108,10 @@ static void project_free(EditorProject *p) {
     ed_history_clear();
     ed_terrain_fini();
     cJSON_Delete(p->map_config);
-    cJSON_Delete(p->game_config);
     cJSON_Delete(p->server_config);
     cJSON_Delete(p->extra_map);
+    cJSON_Delete(p->gui);
+    cJSON_Delete(p->scripts);
     free(p->pending_group);
     free(p->undos);
     free(p->redos);
@@ -395,7 +396,7 @@ long ed_project_save(EditorProject *p, const char *path, const int adopt, const 
     if (p == g_ed.shown) ed_history_poll();
     cJSON *map = ed_map_export(0);
     ed_project_leave(prev);
-    char *text = pretty ? cJSON_Print(map) : cJSON_PrintUnformatted(map);
+    char *text = pretty ? cJSON_Print(map) : ed_model_print(map); // compact: JSON.stringify's bytes
     cJSON_Delete(map);
     if (!text) return -1;
     char resolved[1024];

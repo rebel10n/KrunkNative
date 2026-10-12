@@ -8,8 +8,11 @@
 //   editor_io.c       getMapExport / importMap / save, storage, files, clipboard, test map
 //   editor_gui.c      GUI._build: blueprint controls -> Krunker markup, GUI.action dispatch,
 //                     folders, sliders, numbers, the colour picker (Pickr "nano")
-//   editor_panels.c   toolbar, left "Essential" map panel, right object / environment / ...
-//                     panels, windows (Controls, Settings, Quick Add)
+//   editor_panels.c   toolbar, right panel switch, blank panel, windows (Controls, Settings,
+//                     Quick Add); the panel control kit (editor_panel_kit.h)
+//   editor_inspector.c the right object panel (the inspector)
+//   editor_env.c      the right environment / terrain / zone panels
+//   editor_gameconfig.c the left "Essential" map panel (map, game, server, weapon config)
 //   editor_render.c   editor GL: bounding boxes, helper volumes, grid, death barrier,
 //                     sun marker, transform gizmo; ray picking; gizmo drag math
 //   editor_data.c     generated Krunker data tables (tools/editor/gen_editor_data.py)
@@ -118,11 +121,12 @@ typedef struct EditorProject {
     EditorGroup *groups; size_t group_count;
     int obj_count[3];      // objCount: [non-collidable, collidable, spawns]
 
-    // map-level state (mapConfig / gameConfig / serverConfig)
-    cJSON *map_config;
-    cJSON *game_config;
-    cJSON *server_config;  // {modes:{}, classes:{}, settings:{}, weps:{}}
-    cJSON *extra_map;      // imported map fields the editor does not model (kept for export)
+    // map-level state (editor_model.h EdMapState: mapConfig / serverConfig / custom GUI / scripts)
+    cJSON *map_config;     // mapConfig: every v7 default + imported values
+    cJSON *server_config;  // {modes:{}, classes:{}, settings:{}, weps:{}, cls:{}, prks:{}} (index-keyed)
+    cJSON *extra_map;      // imported top-level keys that are not mapConfig defaults (kept for export)
+    cJSON *gui;            // custom GUI elements (EditorOverlay.customGUIs)
+    cJSON *scripts;        // {"client": code, "server": code} (KrunkScript, decoded)
 
     // history
     EditorHistoryEntry *undos; size_t undo_count, undo_cap;
@@ -329,9 +333,11 @@ void ed_group_stop(int all);
 void ed_groups_sync(void);                         // updateGroups: members follow their placeholder
 EditorGroup *ed_group_of(const EditorObject *owner);
 
-// ---- editor_io.c
+// ---- editor_io.c (the map JSON itself: editor_model.c)
 void ed_map_defaults(void);
+void ed_map_set_all_classes(const char *var, const cJSON *value); // cls[i][var] on every class (the v3 "game" values)
 cJSON *ed_map_export(int full);                    // getMapExport(e): map JSON (owned by caller)
+cJSON *ed_map_export_flags(int flags);             // ED_EXPORT_* (editor_model.h)
 char *ed_map_export_string(void);
 int ed_map_import(const char *text);               // importMap; 0 on failure (message shown)
 void ed_map_clear(void);
@@ -342,7 +348,9 @@ void ed_file_import(void);
 void ed_file_save_as(void);
 void ed_clipboard_copy(const char *text);
 char *ed_clipboard_paste(void);
-void ed_quick_start(void);
+void ed_quick_start(void);                         // quickStart: loadQuick(0)
+const cJSON *ed_templates_get(void);               // assets/editor/templates.json {game, script, defaultMaps}; NULL if missing
+int ed_load_quick(int index, int script, int default_map); // window.loadQuick: import a template / default map
 
 // ---- editor_gui.c
 typedef enum {
@@ -487,8 +495,8 @@ void ed_net_script_publish(const char *arg);             // KRUNKNATIVE_EDITOR_S
 void ed_net_reset(void);                                // page leave: drop cached lists
 void ed_net_install(HtmlHandlerEntry *table, size_t *count, size_t max);
 
-// ---- editor_terrain.c: Terrain / Zone panels, Editor.regenTerrain / regenZone (meshes in g_ed.scene)
-int ed_terrain_panel_show(const char *name);            // "terrain" "zone"; 0 = not one of them
+// ---- editor_terrain.c: Editor.regenTerrain / regenZone (meshes in g_ed.scene); editor_env.c the panels
+int ed_terrain_panel_show(const char *name);            // editor_env.c: "terrain" "zone"; 0 = not one of them
 void ed_terrain_regen(void);
 void ed_zone_regen(void);
 void ed_terrain_fini(void);                              // page_leave: drop both before the scene

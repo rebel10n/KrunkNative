@@ -1,12 +1,14 @@
-// Map editor objects: Krunker v3.1.1 libs/ObjectInstance.js (properties, serialize) and the
-// object half of editor.js (addObject/removeObject/duplicate/copy/paste/groups/history).
+// Map editor objects: Krunker v7.1.4 libs/ObjectInstance.js (properties) and the object half
+// of editor.js (addObject/removeObject/duplicate/copy/paste/groups/history).
 //
 // Every object is kept in its serialized form (EditorObject.data, the JSON ObjectInstance
-// .serialize() writes, colours inline). Properties are read and written through the
-// table below, which encodes the constructor defaults and the serialize() rules (e.g.
-// `collidable` is `l: 1` when false, `visible` is `v: 1` when false), so an imported map
-// round-trips unchanged, including keys the editor GUI does not know.
+// .serialize() writes, colours inline). editor_model.c (GL-free) owns that form: ed_obj_new
+// and every property write pass the object through ed_model_object() (v7's deserialize +
+// serialize), and ed_model_prop_get/set hold the ObjectInstance property table, so the
+// inspector, the bus and the export all see exactly what v7 would serialize. Object keys v7
+// does not know are kept (editor_model.h).
 #include "editor_internal.h"
+#include "editor_model.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,121 +90,17 @@ static int present(const cJSON *obj, const char *key) {
 // ---------------------------------------------------------------------------
 // ObjectInstance properties
 
-typedef enum {
-    PT_NUM,           // number; absent == def; written rounded to `dec` decimals, omitted when == def
-    PT_INT,           // parseInt
-    PT_BOOL_PRESENT,  // true <=> key present (written as 1)
-    PT_BOOL_ABSENT,   // true <=> key absent (false writes 1)
-    PT_STR,           // string, omitted when == sdef
-    PT_COLOR,         // "#RRGGBB" string, omitted when == sdef (case-insensitive)
-    PT_ALWAYS_INT,    // teamable "tm": always written
-} PropType;
-
-typedef struct {
-    const char *prop;
-    const char *key;
-    PropType type;
-    double def;
-    int dec;
-    const char *sdef;
-    int rebuild;      // regen(): the mesh depends on it
-} PropDef;
-
-static const PropDef PROPS[] = {
-    {"penetrable", "pe", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"visible", "v", PT_BOOL_ABSENT, 0, 0, NULL, 1},
-    {"boost", "b", PT_NUM, 0, 2, NULL, 0},
-    {"bounce", "bm", PT_NUM, 1, 2, NULL, 0},
-    {"crouch", "cr", PT_BOOL_ABSENT, 0, 0, NULL, 0},
-    {"edgeNoise", "en", PT_NUM, 0, 1, NULL, 1},
-    {"part", "pr", PT_INT, 0, 0, NULL, 0},
-    {"partC", "pc", PT_INT, 0, 0, NULL, 0},
-    {"partS", "ps", PT_NUM, 0, 1, NULL, 0},
-    {"partSP", "psp", PT_NUM, 0, 1, NULL, 0},
-    {"partG", "pg", PT_NUM, 0, 1, NULL, 0},
-    {"partD", "pd", PT_NUM, 0, 1, NULL, 0},
-    {"partSC", "psc", PT_NUM, 0, 1, NULL, 0},
-    {"partB", "pb", PT_INT, 0, 0, NULL, 0},
-    {"team", "tm", PT_ALWAYS_INT, 0, 0, NULL, 1},
-    {"color", "c", PT_COLOR, 0, 0, "#FFFFFF", 1},
-    {"emissive", "e", PT_COLOR, 0, 0, "#000000", 1},
-    {"opacity", "o", PT_NUM, 1, 1, NULL, 1},
-    {"direction", "d", PT_INT, 0, 0, NULL, 1},
-    {"forceDir", "fd", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"texStretch", "tsr", PT_BOOL_PRESENT, 0, 0, NULL, 1},
-    {"movingSpeed", "ts", PT_NUM, 0, 1, NULL, 1},
-    {"movingAxis", "td", PT_INT, 0, 0, NULL, 1},
-    {"single", "su", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"weaponReplace", "wr", PT_BOOL_ABSENT, 0, 0, NULL, 0},
-    {"randWep", "rw", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"poster", "bb", PT_INT, 0, 0, NULL, 1},
-    {"showAd", "sad", PT_BOOL_PRESENT, 0, 0, NULL, 1},
-    {"border", "bo", PT_BOOL_PRESENT, 0, 0, NULL, 1},
-    {"spin", "spn", PT_INT, 0, 0, NULL, 0},
-    {"channel", "ch", PT_INT, 0, 0, NULL, 0},
-    {"node", "n", PT_INT, 0, 0, NULL, 0},
-    {"momentum", "m", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"ambient", "ab", PT_BOOL_ABSENT, 0, 0, NULL, 1},
-    {"fog", "nf", PT_BOOL_ABSENT, 0, 0, NULL, 1},
-    {"hidden", "nm", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"method", "md", PT_INT, 0, 0, NULL, 0},
-    {"closeable", "cl", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"startClosed", "stc", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"event", "te", PT_INT, 0, 0, NULL, 0},
-    {"action", "ta", PT_INT, 0, 0, NULL, 0},
-    {"constant", "tc", PT_INT, 0, 0, NULL, 0},
-    {"constantEvent", "tce", PT_INT, 0, 0, NULL, 0},
-    {"constantTxt", "tct", PT_STR, 0, 0, "", 0},
-    {"text", "st", PT_STR, 0, 0, "", 1},
-    {"fcolor", "sc", PT_COLOR, 0, 0, "#000000", 1},
-    {"bcolor", "sb", PT_COLOR, 0, 0, "#FFFFFF", 1},
-    {"backVisible", "bv", PT_BOOL_ABSENT, 0, 0, NULL, 1},
-    {"fsize", "sf", PT_INT, 10, 0, NULL, 1},
-    {"tAlign", "sa", PT_INT, 0, 0, NULL, 1},
-    {"respawnT", "rt", PT_NUM, 0, 1, NULL, 0},
-    {"respawnR", "rr", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"classIndx", "ci", PT_INT, 0, 0, NULL, 0},
-    {"skill", "sk", PT_INT, 0, 0, NULL, 0},
-    {"hpMlt", "hm", PT_INT, 1, 0, NULL, 0},
-    {"interfaceId", "in", PT_INT, 0, 0, NULL, 0},
-    {"interfaceIdT", "tin", PT_INT, 0, 0, NULL, 0},
-    {"withdraw", "wd", PT_INT, 1000, 0, NULL, 0},
-    {"deposit", "dp", PT_INT, 1000, 0, NULL, 0},
-    {"objectiveId", "obi", PT_INT, 0, 0, NULL, 0},
-    {"wHeight", "wh", PT_INT, 0.5, 0, NULL, 1},
-    {"wSpeed", "ws", PT_INT, 10, 0, NULL, 1},
-    {"tilesX", "tx", PT_INT, 10, 0, NULL, 1},
-    {"tilesZ", "tz", PT_INT, 10, 0, NULL, 1},
-    {"fullcone", "fc", PT_BOOL_PRESENT, 0, 0, NULL, 1},
-    {"snd", "es", PT_INT, 0, 0, NULL, 0},
-    {"vol", "ev", PT_NUM, 1, 2, NULL, 0},
-    {"dist", "ed", PT_INT, 0, 0, NULL, 0},
-    {"roll", "ero", PT_NUM, 0, 2, NULL, 0},
-    {"rate", "er", PT_NUM, 1, 1, NULL, 0},
-    {"emitfrom", "ef", PT_INT, 0, 0, NULL, 0},
-    {"assetID", "aid", PT_STR, 0, 0, "", 1},
-    {"cmpSpwn", "cp", PT_BOOL_PRESENT, 0, 0, NULL, 1},
-    {"texSmooth", "txs", PT_BOOL_ABSENT, 0, 0, NULL, 1},
-    {"dynamic", "dyn", PT_BOOL_PRESENT, 0, 0, NULL, 0},
-    {"gravity", "gy", PT_NUM, 0, 1, NULL, 0},
-    {"itemID", "skin", PT_INT, 0, 0, NULL, 1},
-    {"intensity", "li", PT_NUM, 1, 1, NULL, 1},
-    {"distance", "lds", PT_NUM, 0, 1, NULL, 1},
-    {"decay", "ld", PT_NUM, 1, 1, NULL, 1},
-    {"openEnded", "opn", PT_BOOL_PRESENT, 0, 0, NULL, 1},
-    {"assetTexture", "at", PT_INT, 0, 0, NULL, 1},
-    {"texOffX", "tox", PT_NUM, 0, 1, NULL, 1},
-    {"texOffY", "toy", PT_NUM, 0, 1, NULL, 1},
-};
-
-static const PropDef *prop_def(const char *prop) {
-    for (size_t i = 0; i < sizeof(PROPS) / sizeof(PROPS[0]); i++) {
-        if (!strcmp(PROPS[i].prop, prop)) return &PROPS[i];
-    }
-    return NULL;
+// the object's data re-derived through ObjectInstance (after a raw key write)
+static void obj_normalize(EditorObject *o) {
+    cJSON *norm = ed_model_object(o->data, ED_MODEL_EXACT_TRANSFORM);
+    if (!norm) return;
+    cJSON_Delete(o->data);
+    o->data = norm;
 }
 
-static int ladder(const EditorObject *o) { return !strcmp(editor_prefabs[o->prefab].name, "LADDER"); }
+static int ladder(const EditorObject *o) {
+    return !strcmp(editor_prefabs[o->prefab].name, "LADDER") || !strcmp(editor_prefabs[o->prefab].name, "ROPE_LADDER");
+}
 
 static const char *texture_name(const EditorObject *o) {
     const cJSON *t = ed_json_path(o->data, "t");
@@ -210,7 +108,7 @@ static const char *texture_name(const EditorObject *o) {
         if (t->valuestring[0]) return t->valuestring;
         return ladder(o) ? "FLOOR" : "DEFAULT";
     }
-    int index = cJSON_IsNumber(t) && cJSON_GetNumberValue(t) != 0 ? (int) cJSON_GetNumberValue(t) : ladder(o) ? 2 : 0;
+    int index = cJSON_IsNumber(t) ? (int) cJSON_GetNumberValue(t) : ladder(o) ? 2 : 0;
     if (index < 0 || index >= EDITOR_TEXTURE_COUNT) index = 0;
     return editor_textures[index];
 }
@@ -220,10 +118,6 @@ static int texture_index(const char *name) {
         if (!strcasecmp(editor_textures[i], name)) return i;
     }
     return 0; // getTextureIdByName
-}
-
-static double prop_score_default(const EditorObject *o) {
-    return editor_prefab_has(o->prefab, EP_INTERACT) ? 0.0 : 1.0;
 }
 
 vec3 ed_obj_vec(const EditorObject *o, const char *key, const vec3 fallback) {
@@ -249,18 +143,13 @@ static cJSON *vec_json(const vec3 v, const int decimals) {
 }
 
 void ed_obj_set_vec(EditorObject *o, const char *key, const vec3 v) {
+    // p / s / r, then ObjectInstance: update()'s scale rule (max(0.01, s).round(2) unless
+    // dontRound; noScaleX; the prefab size when not scalable), r only when rotated (not noRotation)
     cJSON_DeleteItemFromObjectCaseSensitive(o->data, key);
-    if (!strcmp(key, "r") && !ed_round(v.x, 2) && !ed_round(v.y, 2) && !ed_round(v.z, 2)) return; // r only when rotated
-    if (!strcmp(key, "s") && !editor_prefab_has(o->prefab, EP_DONTROUND)) {
-        // ObjectInstance.update(): scale is max(1, s).roundToNearest(1) unless dontRound
-        vec3 r = v;
-        r.x = ceilf(fmaxf(1.0f, r.x) - 1e-6f);
-        r.y = ceilf(fmaxf(1.0f, r.y) - 1e-6f);
-        r.z = ceilf(fmaxf(1.0f, r.z) - 1e-6f);
-        cJSON_AddItemToObject(o->data, key, vec_json(r, 2));
-        return;
-    }
-    cJSON_AddItemToObject(o->data, key, vec_json(v, 2));
+    if (!strcmp(key, "r") && !ed_round(v.x, 2) && !ed_round(v.y, 2) && !ed_round(v.z, 2)) return;
+    const int dec = !strcmp(key, "s") && editor_prefab_has(o->prefab, EP_DONTROUND) ? 5 : 2;
+    cJSON_AddItemToObject(o->data, key, vec_json(v, dec));
+    obj_normalize(o);
 }
 
 static cJSON *faces_json(const EditorObject *o) {
@@ -297,54 +186,38 @@ cJSON *ed_prop_get(const EditorObject *o, const char *prop) {
     }
     if (!strcmp(prop, "texture")) return cJSON_CreateString(texture_name(o));
     if (!strcmp(prop, "collidable")) {
+        if (editor_prefab_has(o->prefab, EP_NOCOLLISION)) return cJSON_CreateBool(0); // (the setter applies noCollision last)
         if (editor_prefab_has(o->prefab, EP_FORCECOLLISION)) return cJSON_CreateBool(1);
-        if (editor_prefab_has(o->prefab, EP_NOCOLLISION)) return cJSON_CreateBool(0);
         return cJSON_CreateBool(!present(d, "col") && !present(d, "l"));
     }
     if (!strcmp(prop, "health")) return cJSON_CreateNumber(ed_json_num(d, "h", ed_json_num(d, "hp", 0.0)));
     if (!strcmp(prop, "weaponId")) return cJSON_CreateNumber(ed_json_num(d, "wid", ed_json_num(d, "w", 0.0)));
-    if (!strcmp(prop, "score")) return cJSON_CreateNumber(ed_json_num(d, "sp", prop_score_default(o)));
     if (!strcmp(prop, "mSize")) return cJSON_CreateNumber(ed_json_num(d, "ms", editor_prefabs[o->prefab].scale));
     if (!strcmp(prop, "faces")) return faces_json(o);
-    if (!strcmp(prop, "bounce")) {
-        const double b = ed_json_num(d, "bm", 0.0);
-        return cJSON_CreateNumber(b ? b : 1.0); // e.bm || 1
-    }
-
-    const PropDef *def = prop_def(prop);
-    if (!def) return cJSON_CreateNull();
-    switch (def->type) {
-        case PT_BOOL_PRESENT: return cJSON_CreateBool(present(d, def->key));
-        case PT_BOOL_ABSENT: return cJSON_CreateBool(!present(d, def->key));
-        case PT_STR: return cJSON_CreateString(ed_json_str(d, def->key, def->sdef));
-        case PT_COLOR: {
-            const cJSON *v = ed_json_path(d, def->key);
-            if (cJSON_IsNumber(v)) {
-                char hex[16];
-                snprintf(hex, sizeof(hex), "#%06x", (int) cJSON_GetNumberValue(v) & 0xffffff);
-                return cJSON_CreateString(hex);
-            }
-            return cJSON_CreateString(cJSON_IsString(v) ? v->valuestring : def->sdef);
-        }
-        default: {
-            const double v = ed_json_num(d, def->key, def->def);
-            return cJSON_CreateNumber(v ? v : def->def); // `e.x || def`
-        }
-    }
+    if (!strcmp(prop, "lightTarget")) return vec_json(ed_obj_vec(o, "lt", (vec3) {0}), 2);
+    cJSON *v = ed_model_prop_get(d, o->prefab, prop);
+    if (v) return v;
+    // KrunkNative: inspector values ObjectInstance has no field for (EditorObject.scratch)
+    const cJSON *scratch = o->scratch ? cJSON_GetObjectItemCaseSensitive(o->scratch, prop) : NULL;
+    return scratch ? cJSON_Duplicate(scratch, 1) : cJSON_CreateNull();
 }
 
 int ed_prop_needs_rebuild(const char *prop) {
-    if (!strcmp(prop, "pos") || !strcmp(prop, "rot") || !strcmp(prop, "size") || !strcmp(prop, "texture") ||
-        !strcmp(prop, "faces") || !strcmp(prop, "mSize") || !strcmp(prop, "collidable")) return 1;
-    const PropDef *def = prop_def(prop);
-    return def ? def->rebuild : 0;
+    // the mesh (map_init of the object) depends on everything but the pure logic / AI values;
+    // rebuilding is cheap (one object), so only the obvious non-visual keys are skipped
+    static const char *const logic[] = {"score", "single", "singleP", "event", "action", "constant", "constant2", "constantType",
+                                        "constantTxt", "constantCust", "constantEvent", "chance", "interfaceId", "interfaceIdT",
+                                        "withdraw", "deposit", "respawnT", "respawnR", "snd", "assetSound", "vol", "rate",
+                                        "emitfrom", "dist", "distM", "roll", "delay", "condition", "actionCost", "actionMethod", NULL};
+    for (int i = 0; logic[i]; i++) if (!strcmp(logic[i], prop)) return 0;
+    return 1;
 }
 
 void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
     cJSON *d = o->data;
     const int prefab = o->prefab;
 
-    if (!strcmp(prop, "pos") || !strcmp(prop, "size") || !strcmp(prop, "rot")) {
+    if (!strcmp(prop, "pos") || !strcmp(prop, "size") || !strcmp(prop, "rot") || !strcmp(prop, "lightTarget")) {
         if (!cJSON_IsArray(value) || cJSON_GetArraySize(value) < 3) return;
         vec3 v = {
             (float) value_num(cJSON_GetArrayItem(value, 0)),
@@ -364,6 +237,10 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
         } else if (!strcmp(prop, "size")) {
             if (!editor_prefab_has(prefab, EP_SCALABLE)) return;
             ed_obj_set_vec(o, "s", v);
+        } else if (!strcmp(prop, "lightTarget")) {
+            cJSON_DeleteItemFromObjectCaseSensitive(d, "lt");
+            cJSON_AddItemToObject(d, "lt", vec_json(v, 2));
+            obj_normalize(o);
         } else {
             ed_obj_set_vec(o, "p", v);
         }
@@ -374,17 +251,17 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
         const char *name = cJSON_IsString(value) ? value->valuestring : "DEFAULT";
         cJSON_DeleteItemFromObjectCaseSensitive(d, "t");
         cJSON_DeleteItemFromObjectCaseSensitive(d, "at"); // texture select resets assetTexture
+        cJSON_DeleteItemFromObjectCaseSensitive(d, "tv"); // ... and the variant (variants are per texture)
         const int index = texture_index(name);
-        if (index) cJSON_AddNumberToObject(d, "t", index);
+        if (index || ladder(o)) cJSON_AddNumberToObject(d, "t", index);
+        obj_normalize(o);
         return;
     }
     if (!strcmp(prop, "collidable")) {
         cJSON_DeleteItemFromObjectCaseSensitive(d, "l");
         cJSON_DeleteItemFromObjectCaseSensitive(d, "col");
-        int on = ed_json_truthy(value);
-        if (editor_prefab_has(prefab, EP_FORCECOLLISION)) on = 1;
-        if (editor_prefab_has(prefab, EP_NOCOLLISION)) on = 0;
-        if (!on) cJSON_AddNumberToObject(d, "l", 1);
+        if (!ed_json_truthy(value)) cJSON_AddNumberToObject(d, "l", 1);
+        obj_normalize(o); // forceCollision / noCollision
         return;
     }
     if (!strcmp(prop, "health")) {
@@ -392,6 +269,7 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
         cJSON_DeleteItemFromObjectCaseSensitive(d, "hp");
         const int v = (int) value_num(value);
         if (v) cJSON_AddNumberToObject(d, "h", v);
+        obj_normalize(o);
         return;
     }
     if (!strcmp(prop, "weaponId")) {
@@ -399,134 +277,74 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
         cJSON_DeleteItemFromObjectCaseSensitive(d, "wid");
         const int v = (int) value_num(value);
         if (v > 0) cJSON_AddNumberToObject(d, "w", v);
-        return;
-    }
-    if (!strcmp(prop, "score")) {
-        cJSON_DeleteItemFromObjectCaseSensitive(d, "sp");
-        const int v = (int) value_num(value);
-        if (v > (editor_prefab_has(prefab, EP_INTERACT) ? 0 : 1)) cJSON_AddNumberToObject(d, "sp", v);
+        obj_normalize(o);
         return;
     }
     if (!strcmp(prop, "mSize")) {
+        // TransformControls modelScale clamps to 0.01..100; serialize writes it rounded to 2 decimals
         cJSON_DeleteItemFromObjectCaseSensitive(d, "ms");
         const double v = value_num(value);
         if (v != editor_prefabs[prefab].scale) cJSON_AddNumberToObject(d, "ms", v);
-        return;
-    }
-    if (!strcmp(prop, "bounce")) {
-        cJSON_DeleteItemFromObjectCaseSensitive(d, "bm");
-        const double v = ed_round(value_num(value), 2);
-        if (v != 1.0) cJSON_AddNumberToObject(d, "bm", v);
+        obj_normalize(o);
         return;
     }
     if (!strcmp(prop, "faces")) {
         cJSON_DeleteItemFromObjectCaseSensitive(d, "f");
-        if (!cJSON_IsArray(value)) return;
-        int bits = 0, all = 1;
-        for (int i = 0; i < 6; i++) {
-            const int on = ed_json_truthy(cJSON_GetArrayItem(value, i));
-            all &= on;
-            bits = (bits << 1) | on;
+        if (cJSON_IsArray(value)) {
+            int bits = 0, all = 1;
+            for (int i = 0; i < 6; i++) {
+                const int on = ed_json_truthy(cJSON_GetArrayItem(value, i));
+                all &= on;
+                bits = (bits << 1) | on;
+            }
+            if (!all) {
+                char hex[8];
+                snprintf(hex, sizeof(hex), "%x", bits);
+                cJSON_AddStringToObject(d, "f", hex);
+            }
         }
-        if (!all && editor_prefab_has(prefab, EP_EDITFACES)) {
-            char hex[8];
-            snprintf(hex, sizeof(hex), "%x", bits);
-            cJSON_AddStringToObject(d, "f", hex);
-        }
+        obj_normalize(o);
         return;
     }
-    if (!strcmp(prop, "penetrable") && !editor_prefab_has(prefab, EP_EDITPEN)) return;
-    if ((!strcmp(prop, "color") || !strcmp(prop, "fcolor") || !strcmp(prop, "bcolor")) && !strcmp(prop, "color") && !editor_prefab_has(prefab, EP_EDITCOLOR)) return;
-    if (!strcmp(prop, "emissive") && !editor_prefab_has(prefab, EP_EDITEMISSIVE)) return;
-    if (!strcmp(prop, "opacity") && !editor_prefab_has(prefab, EP_EDITOPAC)) return;
-
-    const PropDef *def = prop_def(prop);
-    if (!def) return;
-    cJSON_DeleteItemFromObjectCaseSensitive(d, def->key);
-    switch (def->type) {
-        case PT_BOOL_PRESENT:
-            if (ed_json_truthy(value)) cJSON_AddNumberToObject(d, def->key, 1);
-            break;
-        case PT_BOOL_ABSENT:
-            if (!ed_json_truthy(value)) cJSON_AddNumberToObject(d, def->key, 1);
-            break;
-        case PT_STR: {
-            const char *s = cJSON_IsString(value) ? value->valuestring : "";
-            if (strcmp(s, def->sdef)) cJSON_AddStringToObject(d, def->key, s);
-            break;
-        }
-        case PT_COLOR: {
-            const char *s = cJSON_IsString(value) ? value->valuestring : def->sdef;
-            if (strcasecmp(s, def->sdef)) cJSON_AddStringToObject(d, def->key, s);
-            break;
-        }
-        case PT_ALWAYS_INT:
-            cJSON_AddNumberToObject(d, def->key, (int) value_num(value));
-            break;
-        case PT_INT: {
-            const int v = (int) value_num(value);
-            if (v && v != def->def) cJSON_AddNumberToObject(d, def->key, v);
-            break;
-        }
-        case PT_NUM: {
-            const double v = ed_round(value_num(value), def->dec);
-            if (v != def->def) cJSON_AddNumberToObject(d, def->key, v);
-            break;
-        }
-    }
+    if (ed_model_prop_set(&o->data, prefab, prop, value)) return;
+    // KrunkNative: inspector values ObjectInstance has no field for stay on the instance
+    // (EditorObject.scratch, never exported)
+    if (!o->scratch) o->scratch = cJSON_CreateObject();
+    cJSON_DeleteItemFromObjectCaseSensitive(o->scratch, prop);
+    if (value) cJSON_AddItemToObject(o->scratch, prop, cJSON_Duplicate(value, 1));
 }
 
 // ---------------------------------------------------------------------------
 // lifecycle
 
-static int prefab_from_json(const cJSON *data) {
-    const cJSON *i = ed_json_path(data, "i");
-    if (!i || cJSON_IsNull(i)) i = ed_json_path(data, "id");
-    if (cJSON_IsNumber(i)) {
-        const int id = (int) cJSON_GetNumberValue(i);
-        return id >= 0 && id < EDITOR_PREFAB_COUNT ? id : 0;
-    }
-    if (cJSON_IsString(i)) {
-        char *end = NULL;
-        const long id = strtol(i->valuestring, &end, 10);
-        if (end && *end == 0 && end != i->valuestring) return id >= 0 && id < EDITOR_PREFAB_COUNT ? (int) id : 0;
-        for (int p = 0; p < EDITOR_PREFAB_COUNT; p++) {
-            if (!strcasecmp(editor_prefabs[p].name, i->valuestring)) return p;
-        }
-    }
-    return 0; // "Invalid Object": falls back to a cube
-}
-
 EditorObject *ed_obj_new(const cJSON *serialized, const int keep_uuid) {
     EditorObject *o = calloc(1, sizeof(EditorObject));
     if (!o) return NULL;
-    o->data = serialized ? cJSON_Duplicate(serialized, 1) : cJSON_CreateObject();
-    if (!o->data) {
+    cJSON *in = serialized ? cJSON_Duplicate(serialized, 1) : cJSON_CreateObject();
+    if (!in) {
         free(o);
         return NULL;
     }
-    o->prefab = prefab_from_json(o->data);
-    const cJSON *uuid = ed_json_path(o->data, "objUUID");
+    // ObjectInstance.deserialize(): an invalid prefab ("Invalid Object" in v7) becomes a cube
+    if (ed_model_prefab(in) < 0) {
+        cJSON_DeleteItemFromObjectCaseSensitive(in, "i");
+        cJSON_DeleteItemFromObjectCaseSensitive(in, "id");
+    }
+    if (!cJSON_IsArray(ed_json_path(in, "p"))) {
+        cJSON_DeleteItemFromObjectCaseSensitive(in, "p");
+        cJSON_AddItemToObject(in, "p", vec_json((vec3) {0}, 2));
+    }
+    o->data = ed_model_object(in, ED_MODEL_EXACT_TRANSFORM);
+    o->prefab = ed_model_prefab(in);
+    const cJSON *uuid = ed_json_path(in, "objUUID");
     o->uuid = keep_uuid && cJSON_IsNumber(uuid) ? (uint32_t) cJSON_GetNumberValue(uuid) : ++g_ed.proj->next_uuid;
     if (o->uuid > g_ed.proj->next_uuid) g_ed.proj->next_uuid = o->uuid;
-    cJSON_DeleteItemFromObjectCaseSensitive(o->data, "objUUID");
-    cJSON_DeleteItemFromObjectCaseSensitive(o->data, "meshUUID");
-
-    // normalise the prefab key to "i" (serialize: t.i = id when non-zero)
-    cJSON_DeleteItemFromObjectCaseSensitive(o->data, "i");
-    cJSON_DeleteItemFromObjectCaseSensitive(o->data, "id");
-    if (o->prefab) cJSON_AddNumberToObject(o->data, "i", o->prefab);
-
-    if (!cJSON_IsArray(ed_json_path(o->data, "p"))) ed_obj_set_vec(o, "p", (vec3) {0});
-    const EditorPrefab *prefab = &editor_prefabs[o->prefab];
-    if (!cJSON_IsArray(ed_json_path(o->data, "s")) || !editor_prefab_has(o->prefab, EP_SCALABLE)) {
-        // this.size = e.s || this.defaultSize; non-scalable prefabs keep defaultSize (update())
-        if (!cJSON_IsArray(ed_json_path(o->data, "s")) || prefab->has_default_size) {
-            cJSON_DeleteItemFromObjectCaseSensitive(o->data, "s");
-            cJSON_AddItemToObject(o->data, "s", vec_json((vec3) {prefab->default_size[0], prefab->default_size[1], prefab->default_size[2]}, 2));
-        }
+    cJSON_Delete(in);
+    if (!o->data || o->prefab < 0) {
+        cJSON_Delete(o->data);
+        free(o);
+        return NULL;
     }
-    if (editor_prefab_has(o->prefab, EP_TEAMABLE) && !ed_json_path(o->data, "tm")) cJSON_AddNumberToObject(o->data, "tm", 0);
     return o;
 }
 
@@ -1027,7 +845,8 @@ void ed_group_stop(const int all) {
 }
 
 void ed_groups_sync(void) {
-    // updateGroups: members follow the placeholder's translation, Y rotation and scale
+    // updateGroups: members follow the placeholder's translation and Y rotation. v7.1.4 has a
+    // scale branch but never enables it (E:4964), so the owner's scale does not reach the members
     for (size_t gi = 0; gi < g_ed.proj->group_count; gi++) {
         EditorGroup *g = &g_ed.proj->groups[gi];
         EditorObject *owner = ed_obj_find(g->owner);
@@ -1037,28 +856,24 @@ void ed_groups_sync(void) {
         const vec3 r = ed_obj_vec(owner, "r", (vec3) {0});
         const vec3 d = {p.x - g->pos.x, p.y - g->pos.y, p.z - g->pos.z};
         const float dr = r.y - g->rot_y;
-        const vec3 k = {g->scale.x ? s.x / g->scale.x : 1, g->scale.y ? s.y / g->scale.y : 1, g->scale.z ? s.z / g->scale.z : 1};
-        if (!d.x && !d.y && !d.z && !dr && k.x == 1 && k.y == 1 && k.z == 1) continue;
+        g->scale = s;
+        if (!d.x && !d.y && !d.z && !dr) continue;
         const float c = cosf(dr), sn = sinf(dr);
         for (size_t i = 0; i < g->count; i++) {
             EditorObject *m = ed_obj_find(g->objects[i]);
             if (!m) continue;
             vec3 mp = ed_obj_vec(m, "p", (vec3) {0});
-            vec3 ms = ed_obj_vec(m, "s", (vec3) {1, 1, 1});
             vec3 mr = ed_obj_vec(m, "r", (vec3) {0});
-            // relative to the old pivot, scaled, rotated about Y, moved to the new pivot
-            float rx = (mp.x - g->pos.x) * k.x, ry = (mp.y - g->pos.y) * k.y, rz = (mp.z - g->pos.z) * k.z;
+            // relative to the old pivot, rotated about Y, moved to the new pivot
+            const float rx = mp.x - g->pos.x, ry = mp.y - g->pos.y, rz = mp.z - g->pos.z;
             const float nx = rx * c + rz * sn, nz = -rx * sn + rz * c;
             mp = (vec3) {p.x + nx, p.y + ry, p.z + nz};
-            ms = (vec3) {ms.x * k.x, ms.y * k.y, ms.z * k.z};
             mr.y += dr;
             ed_obj_set_vec(m, "p", mp);
-            if (editor_prefab_has(m->prefab, EP_SCALABLE)) ed_obj_set_vec(m, "s", ms);
             ed_obj_set_vec(m, "r", mr);
             ed_obj_rebuild(m);
         }
         g->pos = p;
-        g->scale = s;
         g->rot_y = r.y;
         ed_mark_changed();
     }
@@ -1089,9 +904,18 @@ static void history_push(EditorHistoryEntry **list, size_t *count, size_t *cap, 
         *cap = ncap;
     }
     (*list)[(*count)++] = e;
-    // Krunker drops the newest entry (undos.pop()) once over the limit; a bus batch is
-    // never cut in half by it (the limit counts steps of the UI, batches are one step)
-    if (limit && *count > limit && !e.batch) entry_free(&(*list)[--(*count)]);
+    // over the limit the oldest step goes (a bus batch as a whole). Intentional difference from
+    // v7.1.4: v7 pops the newest entry (undos.pop()), so the edit just made could not be undone
+    // (doc/v7/editor.md 1.13)
+    while (limit && *count > limit) {
+        size_t n = 1;
+        const uint32_t batch = (*list)[0].batch;
+        while (batch && n < *count && (*list)[n].batch == batch) n++;
+        if (n >= *count) break; // never drop the step just added
+        for (size_t i = 0; i < n; i++) entry_free(&(*list)[i]);
+        memmove(*list, *list + n, (*count - n) * sizeof(EditorHistoryEntry));
+        *count -= n;
+    }
 }
 
 // removed objects that undo can revive keep their uuid and meshes (per project)
@@ -1143,17 +967,18 @@ void ed_history_add(const int action, EditorObject *o, cJSON *state) {
 static cJSON *map_snapshot(void) {
     cJSON *s = cJSON_CreateObject();
     cJSON_AddItemToObject(s, "map", cJSON_Duplicate(g_ed.proj->map_config, 1));
-    cJSON_AddItemToObject(s, "game", cJSON_Duplicate(g_ed.proj->game_config, 1));
     cJSON_AddItemToObject(s, "server", cJSON_Duplicate(g_ed.proj->server_config, 1));
     cJSON_AddItemToObject(s, "extra", cJSON_Duplicate(g_ed.proj->extra_map, 1));
+    cJSON_AddItemToObject(s, "gui", cJSON_Duplicate(g_ed.proj->gui, 1));
+    cJSON_AddItemToObject(s, "scripts", cJSON_Duplicate(g_ed.proj->scripts, 1));
     return s;
 }
 
 static void map_restore(const cJSON *s) {
     EditorProject *p = g_ed.proj;
-    static const char *const keys[4] = {"map", "game", "server", "extra"};
-    cJSON **dst[4] = {&p->map_config, &p->game_config, &p->server_config, &p->extra_map};
-    for (int i = 0; i < 4; i++) {
+    static const char *const keys[5] = {"map", "server", "extra", "gui", "scripts"};
+    cJSON **dst[5] = {&p->map_config, &p->server_config, &p->extra_map, &p->gui, &p->scripts};
+    for (int i = 0; i < 5; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(s, keys[i]);
         if (!v) continue;
         cJSON_Delete(*dst[i]);

@@ -967,6 +967,13 @@ static void run_script(void) {
             }
             for (size_t i = 0; f && i < g_ed.proj->group_count; i++) fprintf(f, "GROUP owner=%u members=%zu\n", g_ed.proj->groups[i].owner, g_ed.proj->groups[i].count);
             if (f) fclose(f);
+        } else if (!strcmp(cmd, "export") && arg) {
+            // export:<file>: the map export (getMapExport), as the File > Export download
+            char *t = ed_map_export_string();
+            FILE *f = fopen(arg, "w");
+            if (f && t) fputs(t, f);
+            if (f) fclose(f);
+            free(t);
         } else if (!strcmp(cmd, "copyobjs") && arg) {
             // copyobjs:I:cut:group (copyObjects with object I as the placeholder)
             int i = 0, cut = 0, grp = 0;

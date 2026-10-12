@@ -1,5 +1,4 @@
-// Map editor: the Terrain and Zone right panels (ui/editor.js panel.right.terrain / .zone)
-// and what they generate in the 3D view: Editor.regenTerrain (libs/Terrain.js, the
+// Map editor: what the Terrain and Zone right panels (editor_env.c) generate in the 3D view: Editor.regenTerrain (libs/Terrain.js, the
 // simplex-noise 2.4.0 heightmap with biome colours and the terrainTSeed clutter of
 // data/prefabs.js addTerrObj) and Editor.regenZone (libs/Zone.js, the battle-royale
 // cylinder). Both live in g_ed.proj->scene as ordinary BasicMaterial meshes owned here.
@@ -34,9 +33,6 @@ enum { O_TREE = TERRAIN_OBJ_TREE, O_STUMP = TERRAIN_OBJ_STUMP, O_LOOT = TERRAIN_
 static double clampd(const double v, const double lo, const double hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 // Terrain.EASE_LIST (libs/easing.js key order), the terrainEase options
-static const char *const k_ease_names[13] = {"linear", "easeInQuad", "easeOutQuad", "easeInOutQuad", "easeInCubic", "easeOutCubic",
-                                             "easeInOutCubic", "easeInQuart", "easeOutQuart", "easeInOutQuart", "easeInQuint",
-                                             "easeOutQuint", "easeInOutQuint"};
 
 // ---------------------------------------------------------------------------
 // geometry building (CPU, world space) and upload
@@ -416,101 +412,4 @@ void ed_terrain_fini(void) {
     part_drop(&g_ed.proj->terrain);
     part_drop(&g_ed.proj->clutter);
     part_drop(&g_ed.proj->zone);
-}
-
-// ---------------------------------------------------------------------------
-// panels (ui/editor.js panel.right.terrain / panel.right.zone)
-
-static EdCtl *bound(EdBuild *b, EdCtl *c, const char *key, const EdChangeFn fn) {
-    ed_ctl_bind_json(c, g_ed.proj->map_config, key);
-    c->on_change = fn;
-    ed_gui_emit_value(b, c);
-    return c;
-}
-
-static void on_terrain(EdCtl *c, const cJSON *v) { (void) c; (void) v; ed_terrain_regen(); }
-static void on_zone(EdCtl *c, const cJSON *v) { (void) c; (void) v; ed_zone_regen(); }
-
-static void on_ease(EdCtl *c, const cJSON *v) {
-    (void) c; (void) v;
-    ed_panel_right_show("terrain"); // y.panel.state.refresh("panel_right_terrain")
-    ed_terrain_regen();
-}
-
-static void random_seed(const char *key) {
-    // Math.random().toString(36).substring(4): base-36 digits of a random fraction minus "0.xx"
-    char s[16];
-    double f = (double) rand() / ((double) RAND_MAX + 1.0);
-    int n = 0;
-    for (int i = 0; i < 13 && n + 1 < (int) sizeof(s); i++) {
-        f *= 36;
-        const int d = (int) f;
-        f -= d;
-        if (i >= 2) s[n++] = "0123456789abcdefghijklmnopqrstuvwxyz"[d];
-    }
-    s[n] = 0;
-    ed_json_set_str(g_ed.proj->map_config, key, s);
-    ed_mark_changed();
-    ed_panel_right_show("terrain");
-    ed_terrain_regen();
-}
-
-static void act_seed(EdCtl *c) { (void) c; random_seed("terrainSeed"); }
-static void act_tseed(EdCtl *c) { (void) c; random_seed("terrainTSeed"); }
-
-static void panel_terrain(void) {
-    EdBuild b;
-    if (!ed_panel_right_begin(&b, "terrain")) return;
-    ed_gui_panel_buttons(&b, 1, "Terrain", 0);
-    bound(&b, ed_gui_text(&b, "Seed", "Seed", 0), "terrainSeed", on_terrain);
-    ed_gui_button_line(&b, "Random", "Generate", act_seed, 1);
-    bound(&b, ed_gui_text(&b, "Tree Seed", "Seed", 0), "terrainTSeed", on_terrain);
-    ed_gui_button_line(&b, "Random", "Generate", act_tseed, 1);
-    static EdOption eases[13];
-    for (int i = 0; i < 13; i++) eases[i] = (EdOption) {k_ease_names[i], i, NULL};
-    bound(&b, ed_gui_select(&b, "Easing", eases, 13, 1), "terrainEase", on_ease);
-    ed_gui_rule(&b);
-    ed_gui_folder_begin(&b, "Dimensions", 0, 0, 0, "terrain.dimensions");
-    bound(&b, ed_gui_slider(&b, "Width", 0, 8000, 1, 0), "terrainWidth", on_terrain);
-    bound(&b, ed_gui_slider(&b, "Length", 0, 8000, 1, 0), "terrainHeight", on_terrain);
-    bound(&b, ed_gui_slider(&b, "Height", 0, 5, 0.05, 0), "terrainMntMlt", on_terrain);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Style", 0, 0, 0, "terrain.style");
-    ed_gui_folder_begin(&b, "Color", 1, 0, 0, "terrain.style.color");
-    bound(&b, ed_gui_color(&b, "Snow", 1), "terrainSnwCol", on_terrain);
-    bound(&b, ed_gui_color(&b, "Mountain", 1), "terrainMntCol", on_terrain);
-    bound(&b, ed_gui_color(&b, "Grass", 1), "terrainGrsCol", on_terrain);
-    bound(&b, ed_gui_color(&b, "Dirt", 1), "terrainDrtCol", on_terrain);
-    bound(&b, ed_gui_color(&b, "Sand", 1), "terrainSndCol", on_terrain);
-    ed_gui_folder_end(&b, 1);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_end(&b, g_ed.el_right_list);
-}
-
-static void panel_zone(void) {
-    EdBuild b;
-    if (!ed_panel_right_begin(&b, "zone")) return;
-    ed_gui_panel_buttons(&b, 1, "Zone", 0);
-    bound(&b, ed_gui_switch(&b, "Enabled", 0), "zone", on_zone);
-    bound(&b, ed_gui_slider(&b, "Speed", 1, 10, 0.1, 0), "zoneSpeed", NULL);
-    bound(&b, ed_gui_switch(&b, "Random Endpoint", 0), "zoneRnd", on_zone);
-    ed_gui_rule(&b);
-    ed_gui_folder_begin(&b, "Dimensions", 0, 0, 0, "zone.dimensions");
-    bound(&b, ed_gui_slider(&b, "Size", 0, 10000, 10, 0), "zoneSize", on_zone);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Style", 0, 0, 0, "zone.style");
-    ed_gui_folder_begin(&b, "Color", 1, 0, 0, "zone.style.color");
-    bound(&b, ed_gui_color(&b, "1", 1), "zoneCol0", on_zone);
-    bound(&b, ed_gui_color(&b, "2", 1), "zoneCol1", on_zone);
-    bound(&b, ed_gui_color(&b, "3", 1), "zoneCol2", on_zone);
-    ed_gui_folder_end(&b, 1);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_end(&b, g_ed.el_right_list);
-}
-
-int ed_terrain_panel_show(const char *name) {
-    if (!strcmp(name, "terrain")) panel_terrain();
-    else if (!strcmp(name, "zone")) panel_zone();
-    else return 0;
-    return 1;
 }

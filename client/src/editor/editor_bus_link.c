@@ -46,6 +46,7 @@
 // Events ({"t":"ev","ev",...}): projects {instances}, change {project,revision,objects,dirty},
 // selection {project,uuid}, clipboard {count}.
 #include "editor_internal.h"
+#include "editor_model.h"
 #include <app_mode.h>
 #include <editor_bus.h>
 #include <headless.h>
@@ -443,7 +444,7 @@ static void replace_object(EditorObject *o, const cJSON *data, const cJSON *colo
 }
 
 static int map_key_known(const char *k) {
-    return cJSON_GetObjectItemCaseSensitive(g_ed.proj->map_config, k) != NULL;
+    return ed_model_map_key_known(k); // a mapConfig default (editor_model.c)
 }
 
 static void map_changed(const int terrain, const int zone) {
@@ -748,19 +749,11 @@ static cJSON *tool_batch(EditorProject *p, const cJSON *args, const char **err, 
             cJSON_DeleteItemFromObjectCaseSensitive(p->extra_map, it->valuestring);
             // known keys go back to their default (the editor always has every map key)
             if (map_key_known(it->valuestring)) {
-                // a fresh set of defaults (ed_map_defaults rebuilds all three configs)
-                cJSON *saved = p->map_config, *saved_game = p->game_config, *saved_server = p->server_config;
-                p->map_config = p->game_config = p->server_config = NULL;
-                ed_map_defaults();
-                cJSON *def = cJSON_DetachItemFromObjectCaseSensitive(p->map_config, it->valuestring);
-                cJSON_Delete(p->map_config);
-                cJSON_Delete(p->game_config);
-                cJSON_Delete(p->server_config);
-                p->map_config = saved;
-                p->game_config = saved_game;
-                p->server_config = saved_server;
-                cJSON_DeleteItemFromObjectCaseSensitive(p->map_config, it->valuestring);
-                if (def) cJSON_AddItemToObject(p->map_config, it->valuestring, def);
+                EdMapState defaults;
+                ed_model_map_init(&defaults);
+                cJSON *def = cJSON_DetachItemFromObjectCaseSensitive(defaults.map_config, it->valuestring);
+                ed_model_map_free(&defaults);
+                if (def) cJSON_ReplaceItemInObjectCaseSensitive(p->map_config, it->valuestring, def);
             }
             terrain |= !strncmp(it->valuestring, "terrain", 7);
             zone |= !strncmp(it->valuestring, "zone", 4);
@@ -843,7 +836,10 @@ static cJSON *run_tool_in(EditorProject *p, const char *tool, const cJSON *args,
     }
     if (!strcmp(tool, "export")) {
         cJSON *res = cJSON_CreateObject();
-        cJSON_AddItemToObject(res, "map", ed_map_export(ed_json_truthy(cJSON_GetObjectItemCaseSensitive(args, "full"))));
+        // the mirror of kn_editor_mcp: sizes stay inline "s" (the bus "replace" / "add" objects
+        // carry no xyz pool)
+        const int full = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(args, "full"));
+        cJSON_AddItemToObject(res, "map", ed_map_export_flags(full ? ED_EXPORT_RAW | ED_EXPORT_NO_SIZE_POOL : 0));
         add_counts(res, p);
         return res;
     }

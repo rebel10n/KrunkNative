@@ -1,5 +1,6 @@
 // map_validate, map_compile and playtest.
 #define _GNU_SOURCE
+#include "editor_model.h" // client/src/editor (GL-free)
 #include "jsonw.h"
 #include "mcp.h"
 #include "schema.h"
@@ -108,6 +109,7 @@ static int t_compile(Ctx *ctx, const cJSON *args, ToolResult *r) {
     const int fold = js_bool(args, "fold_colors", 1);
     const int defaults = js_bool(args, "strip_defaults", 1);
     const int encode = js_bool(args, "encode_scripts", 1);
+    const int bake_tris = js_bool(args, "bake_tris", 1);
     char err[512];
 
     // validation first: errors block unless force
@@ -131,7 +133,8 @@ static int t_compile(Ctx *ctx, const cJSON *args, ToolResult *r) {
     cJSON *palette = cJSON_CreateArray();
     cJSON *xyz = cJSON_CreateArray();
     Pool pool_tab = {0};
-    int xyz_n = 0, dropped = 0, cpx = 0;
+    int xyz_n = 0, dropped = 0, cpx = 0, cpx_baked = 0, tri_count = 0;
+    cJSON *tris = cJSON_CreateArray();
     for (cJSON *o = objects->child; o;) {
         cJSON *next = o->next;
         const int prefab = obj_prefab(o);
@@ -141,10 +144,23 @@ static int t_compile(Ctx *ctx, const cJSON *args, ToolResult *r) {
             o = next;
             continue;
         }
-        if (js_get(o, "cpx")) cpx++;
         // sizes / colours resolved against the source document
         double s[3];
         obj_size(&view, o, s);
+        if (js_get(o, "cpx")) {
+            // the editor's complex-collision bake (client/src/editor/editor_model.c, getMapExport f967):
+            // world-space triangles of the generated geometry, before the transform is rounded
+            cpx++;
+            if (bake_tris && schema_prefab_has_flag(prefab, "canComplexColl")) {
+                cJSON *tmp = cJSON_Duplicate(o, 1);
+                cJSON_DeleteItemFromObjectCaseSensitive(tmp, "s");
+                cJSON_AddItemToObject(tmp, "s", js_vec3_new(s));
+                const int n = ed_model_object_tris(tmp, prefab, tris);
+                cJSON_Delete(tmp);
+                tri_count += n;
+                cpx_baked += n > 0;
+            }
+        }
         cJSON_DeleteItemFromObjectCaseSensitive(o, "si");
         cJSON_DeleteItemFromObjectCaseSensitive(o, "s");
         const int ai = schema_prefab_has_flag(prefab, "ai");
@@ -182,6 +198,9 @@ static int t_compile(Ctx *ctx, const cJSON *args, ToolResult *r) {
     else cJSON_Delete(palette);
     if (pool && xyz_n) cJSON_AddItemToObject(m, "xyz", xyz);
     else cJSON_Delete(xyz);
+    cJSON_DeleteItemFromObjectCaseSensitive(m, "tris");
+    if (cJSON_GetArraySize(tris)) cJSON_AddItemToObject(m, "tris", tris);
+    else cJSON_Delete(tris);
     // spawns rounded
     cJSON *spawns = cJSON_GetObjectItemCaseSensitive(m, "spawns");
     for (cJSON *s = spawns ? spawns->child : NULL; s; s = s->next) {
@@ -246,9 +265,14 @@ static int t_compile(Ctx *ctx, const cJSON *args, ToolResult *r) {
     cJSON_AddNumberToObject(o, "native_objects", native_objects);
     cJSON *bake = cJSON_AddObjectToObject(o, "bake");
     if (cpx) {
-        char msg[200];
-        snprintf(msg, sizeof(msg), "%d object(s) ask for complex collision (cpx): baking their triangles into \"tris\" is not supported yet; they collide as boxes", cpx);
+        char msg[300];
+        if (!bake_tris) snprintf(msg, sizeof(msg), "%d object(s) ask for complex collision (cpx): not baked (bake_tris:false); without \"tris\" they collide as boxes", cpx);
+        else if (cpx_baked < cpx)
+            snprintf(msg, sizeof(msg), "%d triangles baked from %d of %d complex-collision object(s); the rest (custom assets: the triangles need the model) collide as boxes",
+                     tri_count, cpx_baked, cpx);
+        else snprintf(msg, sizeof(msg), "%d triangles baked from %d complex-collision object(s)", tri_count, cpx);
         cJSON_AddStringToObject(bake, "tris", msg);
+        cJSON_AddNumberToObject(bake, "triangles", tri_count);
     } else cJSON_AddStringToObject(bake, "tris", "no complex-collision objects");
     cJSON_AddStringToObject(bake, "lightmaps", "v7.1.4 exports carry no lightmaps (lighting is computed at load)");
     cJSON *ks = cJSON_AddObjectToObject(o, "krunkscript");
@@ -295,9 +319,10 @@ const ToolDef g_tools_check[] = {
     {"map_compile", "Compile map",
      "Produce the publishable v7.1.4 form: editor-only objects dropped, editor spawn/camera objects moved to spawns / camPos, "
      "p/s/r rounded (round, default 2), defaults stripped, colours folded into a palette (ci/ei), sizes pooled (xyz/si), "
+     "complex-collision objects baked into tris (bake_tris, the editor's own bake), "
      "KrunkScript checked and base64-encoded (scripts {client, server} replaces them). Blocks on validation errors unless force. "
      "Verifies the output loads in KrunkNative. output writes it (allowed dirs); inline:true returns the JSON.",
-     S({"type":"object","properties":{PROJECT_ARG,"output":{"type":"string"},"inline":{"type":"boolean"},"round":{"type":"integer","default":2},"pool_sizes":{"type":"boolean","default":true},"fold_colors":{"type":"boolean","default":true},"strip_defaults":{"type":"boolean","default":true},"drop_editor_only":{"type":"boolean","default":true},"encode_scripts":{"type":"boolean","default":true},"scripts":{"type":"object","properties":{"client":{"type":"string"},"server":{"type":"string"}}},"force":{"type":"boolean"}}}),
+     S({"type":"object","properties":{PROJECT_ARG,"output":{"type":"string"},"inline":{"type":"boolean"},"round":{"type":"integer","default":2},"pool_sizes":{"type":"boolean","default":true},"fold_colors":{"type":"boolean","default":true},"strip_defaults":{"type":"boolean","default":true},"drop_editor_only":{"type":"boolean","default":true},"encode_scripts":{"type":"boolean","default":true},"bake_tris":{"type":"boolean","default":true},"scripts":{"type":"object","properties":{"client":{"type":"string"},"server":{"type":"string"}}},"force":{"type":"boolean"}}}),
      0, 0, 1, 0, t_compile},
     {"playtest", "Playtest map",
      "Run the map in KrunkNative's game simulation (shared game code, offline authority, no window): bots play for `seconds` "

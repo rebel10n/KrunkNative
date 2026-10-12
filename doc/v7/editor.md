@@ -1228,7 +1228,7 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 |---|---|
 | Snapping label reads OFF at boot | **fix**: label reflects the real state |
 | Ctrl+C also creates a cube | **fix**: C/G/R ignore Ctrl and Shift |
-| History over-limit drops the newest entry; redo of an update re-applies the old state | **fix both**: drop the oldest; redo re-applies the newer state. Redo stays one-way, the same as v7. KN currently mirrors the v3.1.1 bug. |
+| History over-limit drops the newest entry; redo of an update re-applies the old state | **fix both**: drop the oldest; redo re-applies the newer state. Redo stays one-way, the same as v7. Done (WP1, `editor_objects.c`). |
 | `duplicateGroup` ReferenceError | fix (no observable behaviour) |
 | Wheel dolly speed frozen at 70 | keep (feel parity) |
 | "Toggle snapping: Control" not implemented | keep KN's Ctrl-hold disables snapping (already documented as a KN addition) |
@@ -1240,6 +1240,17 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | `importMapBackup` reads global `event` | n/a in C |
 | Script import decodes base64 as ASCII | **fix**: decode as UTF-8 |
 | `camera.far` 10000 until `renderDist` is changed | **fix**: apply `renderDist` at start |
+| Object keys ObjectInstance never reads (v3.1.1 `dyn` / `gy` / `sad`, anything unknown) are dropped by `serialize()` | **keep them** after the v7 keys, so maps round-trip without loss (`editor_model.c`) |
+| An invalid texture name or index throws ("Invalid texture id."), an invalid prefab id aborts the whole import ("Invalid Object") | **fix**: the texture loads as DEFAULT; an object with an invalid prefab id is skipped on import (a cube when pasted) |
+| Non-scalable model prefabs take their size from the loaded model's bounds | **keep the imported `s`** (the bounds v7 exported); a new object uses the generator's OBJ bounds |
+| ENVIRONMENT_ZONE `skyDomeEmis` is tested on the output object, so it is always written `#000000` | **fix**: the zone's own colour is written |
+| Select-type server settings (`tmSize`) export `parseInt(<config>[varN])`, i.e. `null` | **fix**: the option index is written |
+| An import keeps the old `colors` / `xyz` (and empty `game` / `gui`) as mapConfig keys, so a stale palette is re-exported | **fix**: dropped on import |
+| `botPaths` import as CUBE objects (no BOT_PATH_NODE prefab; `getPrefabIdByName` returns 0) | **drop** them (never produced by v7) |
+| A legacy trigger's object-level `ta` 14/34/54 writes the sound keys next to `tas` once (the next export drops them) | keep (v7's export; the round-trip test checks the second export as the fixed point) |
+| `camPos` / `spawns` export the exact transform, objects the rounded one | keep: the editor holds exact transforms (`ED_MODEL_EXACT_TRANSFORM`), the export rounds objects |
+| The left panel's v3 "Game" folder (no v7 equivalent until WP4's Class Config) | interim: it shows class 0 and a change writes every class's `cls` entry, as v7's import of a `game` block does |
+| Group members follow the owner's scale (KrunkNative) | **removed**: translation and Y rotation only, as v7 (the scale branch is disabled) |
 
 ---
 
@@ -1555,6 +1566,19 @@ WP0, owned by WP2, provides the v7.1.4 reference capture that every package test
 - Structural dumps are the primary parity check. Pixel diffs (`tools/uidiff`) are secondary, because Chromium and the native engine differ in font rasterisation.
 
 ### WP1: Data model and serialization (foundation; land first)
+
+**Status (landed):** `client/src/editor/editor_model.c` (GL-free) is the ObjectInstance constructor +
+`serialize()`, getMapExport / importMap, the `tris` bake and the property table; `editor_objects.c`
+and `editor_io.c` sit on it. `editor_serialize_test` checks it against v7's own `ObjectInstance`
+(goldens made with `tools/editor/dump_oi_golden.js`; the whole corpus of `assets/maps` and the 53 v7
+reference maps, 184 801 objects, matches) and round-trips every `assets/maps` map; the baked `tris`
+equal the ones v7 shipped. `editor_panels.c` is split into `editor_inspector.c`, `editor_env.c`
+(+ the terrain / zone panels from `editor_terrain.c`) and `editor_gameconfig.c` over
+`editor_panel_kit.h`. Templates are loaded at run time from `assets/editor/templates.json`
+(~250 KB). WP2-6 build on: `ed_prop_get/set` by v7 property name (every OI field, incl. AI / bot /
+ENVIRONMENT_ZONE), `ed_model_action_*` for the multi-action list, `EditorProject.gui` / `.scripts`,
+`ed_map_set_all_classes`, `ed_load_quick`, the generated `kss` / `mapCats` / `assetCat` / class and
+effect values, and `EditorPrefab.variants` / `.fake_scale` / `.ed_cat`.
 
 **Owns:**
 - `tools/editor/gen_editor_data.py` and `dump_*.js`, retargeted to `R/src`, which is readable and needs no source-map extraction.

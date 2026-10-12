@@ -7,6 +7,7 @@ assets/*/*
 !assets/maps/*
 !assets/img/*
 !assets/shaders/*
+!assets/editor/*
 /AGENTS.md
 net-bridge/node_modules
 cmake-build-web/

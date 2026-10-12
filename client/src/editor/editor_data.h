@@ -14,17 +14,21 @@ typedef struct {
     float scale;             // prefab.scale: model scale (gen prefabs), 1 otherwise
     int line_col;            // prefab.lineCol (bounding box line colour), -1 = collidable green / non-collidable blue
     float opacity;           // prefab.opacity (editor material)
+    int variants;            // prefab.variants.length: model variants ("tv"), 0 = none
+    int fake_scale;          // prefab.fakeScale: 1 = X/Z linked, 2 = Y/Z linked (TransformControls), 0 = off
+    const char *ed_cat;      // prefab.edCat ("lights"), NULL = none
     EditorPrefabFlags flags; // EP_* (editor_prefab_flags.h; 128 bits: v3 flags 0-63, v7 flags 64+)
 } EditorPrefab;
 
 extern const EditorPrefab editor_prefabs[EDITOR_PREFAB_COUNT];
 extern const char *const editor_textures[EDITOR_TEXTURE_COUNT]; // prefabs.textures[i].name ("WALL", ...)
+extern const unsigned char editor_texture_variants[EDITOR_TEXTURE_COUNT]; // prefabs.textures[i].variants.length
 extern const char editor_data_text[];
 
 static inline int editor_prefab_has(const int prefab, const EditorPrefabFlags flag) {
     return prefab >= 0 && prefab < EDITOR_PREFAB_COUNT && (editor_prefabs[prefab].flags & flag) != 0;
 }
 
-// Parsed editor_data_text (owned by editor_data.c's cache; never freed).
+// Parsed editor_data_text (editor_model.c's cache; never freed).
 const cJSON *editor_data_json(void);
 const cJSON *editor_data_get(const char *key);

@@ -528,6 +528,16 @@ else ()
         target_link_libraries(world_v7_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # editor_serialize_test (doc/v7/editor.md WP1): the editor's GL-free data model
+    # (client/src/editor/editor_model.c) against v7.1.4's own ObjectInstance serialization
+    # (client/tests/data/editor_v7_golden.json) and import / export round trips over assets/maps
+    add_executable(editor_serialize_test client/tests/editor_serialize_test.c client/src/editor/editor_model.c
+                   client/src/editor/editor_model.h client/src/editor/editor_data.c client/src/editor/editor_data.h)
+    target_include_directories(editor_serialize_test PRIVATE client/src/editor)
+    target_link_libraries(editor_serialize_test PRIVATE cJSON m)
+    enable_testing()
+    add_test(NAME editor_serialize_test COMMAND editor_serialize_test ${CMAKE_SOURCE_DIR})
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 

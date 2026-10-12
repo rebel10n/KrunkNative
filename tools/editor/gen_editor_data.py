@@ -5,21 +5,27 @@
 
 tools/maps/dump_v7.js loads the readable v7.1.4 data/prefabs.js, config.js, data/triggers.js,
 data/gameModes.js, data/classes.js, data/weapons.js and data/effects.js under node (the same
-dump tools/maps/gen_prefab_data.py builds the shared prefab / trigger tables from); this script
-writes
+dump tools/maps/gen_prefab_data.py builds the shared prefab / trigger tables from), and
+tools/editor/dump_editor_v7.js the editor-only data (class / effect values, KrunkScript syntax,
+templates, map / asset categories); this script writes
 
-- the prefab table (name, label, default size, model scale, line colour, opacity, every
-  boolean flag the editor GUI reads) as C structs (client/src/editor/editor_prefab_flags.h has
-  the EP_* bits: the v3.1.1 flag bits keep their positions, the v7 flags follow from bit 64, so
-  EditorPrefabFlags is 128 bits wide), and
+- the prefab table (name, label, default size, model scale, line colour, opacity, model variant
+  count, fakeScale mode, editor menu category, every boolean flag the editor GUI reads) as C
+  structs (client/src/editor/editor_prefab_flags.h has the EP_* bits: the v3.1.1 flag bits keep
+  their positions, the v7 flags follow from bit 64, so EditorPrefabFlags is 128 bits wide), and
+  the texture names and variant counts,
 - the configuration lists the editor panels are built from (serverConfig, weaponConfig,
   classConfig, effectConfig, modes, classes, weapons, effects, textures, particles, emitter /
-  step sounds, trigger events / conditions / actions, limits) as one JSON string parsed once at
-  run time (editor_data_json()).
+  step sounds, trigger events / conditions / actions, limits, mapCats, assetCat, custom GUI lists,
+  perks, KrunkScript templates / autocomplete / aliases) as one JSON string parsed once at run time
+  (editor_data_json()), and
+- assets/editor/templates.json: the Templates window data (18 script templates and the game
+  templates as map JSON strings, the default map list). It is ~250 KB, so it is loaded at run
+  time (ed_templates_get) instead of being compiled in.
 
-"gameConfig" is the v3.1.1 map-wide "game" panel, which v7 replaced with the per-class "cls"
-config. Until the editor migrates "game" into "cls" (doc/v7/editor.md WP1 / WP4) it stays, frozen
-in tools/editor/v3_game_config.json.
+"gameConfig" is the v3.1.1 map-wide "game" panel (tools/editor/v3_game_config.json). v7 replaced it
+with the per-class "cls" config; the editor imports a "game" block into every class and its left
+panel's Game folder writes every class until the v7 Class Config panel lands (doc/v7/editor.md WP4).
 """
 
 import json
@@ -31,6 +37,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(REPO, "client", "src", "editor", "editor_data.c")
+TEMPLATES_OUT = os.path.join(REPO, "assets", "editor", "templates.json")
 V7_PUBLIC = "/home/user/jails/kru/src/Krunker_v7.1.4/public"
 
 # The v3.1.1 editor flags, bits 0..63 (their positions are kept: code may store the low word).
@@ -56,10 +63,17 @@ NON_FLAGS = {"id", "name", "src", "defaultSize", "scale", "lineCol", "opacity", 
              "variants", "gen", "CP", "CPY", "mlt", "alphaTest", "blending", "frameT", "frames", "width"}
 
 
-def dump_v7():
-    out = subprocess.run(["node", os.path.join(REPO, "tools", "maps", "dump_v7.js")], check=True,
-                         capture_output=True, text=True, cwd="/tmp").stdout
+def run_node(script):
+    out = subprocess.run(["node", script], check=True, capture_output=True, text=True, cwd="/tmp").stdout
     return json.loads(out)
+
+
+def dump_v7():
+    return run_node(os.path.join(REPO, "tools", "maps", "dump_v7.js"))
+
+
+def dump_editor_v7():
+    return run_node(os.path.join(HERE, "dump_editor_v7.js"))
 
 
 def format_const_name(name):
@@ -104,6 +118,7 @@ def flag_set(prefab, flag):
 
 def main():
     data = dump_v7()
+    ed = dump_editor_v7()
     prefabs, textures, config = data["prefabs"], data["textures"], data["config"]
 
     v7_flags = set()
@@ -133,18 +148,26 @@ def main():
             size = model_size(p)
             computed = 2 if size else 0
         line_col = p.get("lineCol")
-        lines.append("    {%s, %s, {%s}, %d, %s, %d, %s, %s}," % (
+        fake = p.get("fakeScale")
+        lines.append("    {%s, %s, {%s}, %d, %s, %d, %s, %d, %d, %s, %s}," % (
             c_str(p["name"]), c_str(format_const_name(p["name"]) if p["name"] else ""),
             ", ".join(c_float(v) for v in (size or [1, 1, 1])), (computed or 1) if size else 0,
             c_float(p.get("scale", 1) or 1),
             line_col if line_col is not None else -1,
             c_float(p.get("opacity", 1) if p.get("opacity") is not None else 1),
+            len(p.get("variants") or []),
+            (2 if fake == 2 else 1) if fake else 0,
+            c_str(p["edCat"]) if p.get("edCat") else "NULL",
             " | ".join(on) if on else "0",
         ))
     lines.append("};")
     lines.append("")
     lines.append("const char *const editor_textures[EDITOR_TEXTURE_COUNT] = {")
     lines.append("    " + ", ".join(c_str(t["name"]) for t in textures) + ",")
+    lines.append("};")
+    lines.append("")
+    lines.append("const unsigned char editor_texture_variants[EDITOR_TEXTURE_COUNT] = {")
+    lines.append("    " + ", ".join(str(len(t.get("variants") or [])) for t in textures) + ",")
     lines.append("};")
     lines.append("")
 
@@ -161,9 +184,10 @@ def main():
         "interfaceIDMax": config["interfaceIDMax"],
         "modes": [{k: m.get(k) for k in ("name", "id", "cost") if m.get(k) is not None} |
                   ({"pcg": True} if m.get("preventCustomGames") else {}) for m in data["modes"]],
-        "classes": [{k: c.get(k) for k in ("name", "cost") if c.get(k) is not None} for c in data["classes"]],
+        # every Class / Effect Config value (the export drops values equal to them)
+        "classes": ed["classes"],
         "weapons": [{k: w.get(k) for k in weapon_keys if w.get(k) is not None} for w in data["weapons"]],
-        "effects": [{k: e.get(k) for k in ("name", "id") if e.get(k) is not None} for e in data["effects"]],
+        "effects": ed["effects"],
         "textures": [{k: t.get(k) for k in ("name", "alias", "src") if t.get(k)} |
                      ({"variants": [v["name"] for v in t["variants"]]} if t.get("variants") else {}) for t in textures],
         "particleIDS": config["particleIDS"],
@@ -186,7 +210,14 @@ def main():
         "limits": {k: config[k] for k in ("spawnLimit", "signLimit", "objectLimit", "objectColLimit", "objectLimitF",
                                           "objectColLimitF", "aiLimit", "botLimit", "lbLimit", "wheelLimit", "anchorLimit",
                                           "triangleLimit", "interfaceLimit", "triggerActionLimit", "guiLimit",
-                                          "signFontMax", "signTextLimit")},
+                                          "signFontMax", "signTextLimit")} | ed["limits"],
+        "mapCats": ed["mapCats"],
+        "assetCat": ed["assetCat"],
+        "custGUITypes": ed["custGUITypes"],
+        "perks": ed["perks"],  # PERK_MACHINE "zp" options (config.zombiePerks)
+        "inputTypesGUI": ed["inputTypesGUI"],
+        "zoneColors": ed["zoneColors"],
+        "kss": ed["kss"],
         "defaults": {k: config[k] for k in ("shadowRes", "shadowDst", "lightDistance", "lightIntensity",
                                             "ambIntensity", "sunAngleX", "sunAngleY")},
     }
@@ -210,6 +241,10 @@ def main():
         fh.write("\n".join(header_flags) + "\n")
     with open(OUT, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
+    os.makedirs(os.path.dirname(TEMPLATES_OUT), exist_ok=True)
+    with open(TEMPLATES_OUT, "w", encoding="utf-8") as fh:
+        json.dump(ed["templates"], fh, separators=(",", ":"), ensure_ascii=False)
+        fh.write("\n")
     print("wrote %s (%d prefabs, %d textures, %d flags, %d bytes of config)" % (
         os.path.relpath(OUT, REPO), len(prefabs), len(textures), len(flags), len(text)))
     return 0

@@ -530,7 +530,10 @@ static void select_asset(const char *id, const int type) {
             ed_mark_changed();
         }
     } else if (type) {
-        ed_json_set_str(g_ed.proj->game_config, "aID", id);
+        // the Game folder's player model: every class's "aID" (the v3 map-wide game config)
+        cJSON *v = cJSON_CreateString(id);
+        ed_map_set_all_classes("aID", v);
+        cJSON_Delete(v);
         ed_panel_left_show();
     } else {
         // new ObjectInstance({i: 44, aid: e, p: near or [0,0,0]}, true)
