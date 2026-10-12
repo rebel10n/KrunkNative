@@ -5,6 +5,7 @@
 //   render.js updateEnvironment(idx): the camera's ENVIRONMENT_ZONE (index.js: the first zone
 //   whose box holds the camera, pointInBox3D) re-runs init(zone data, mode, keep scene) with the
 //   map's shadow extents and updates the shadow map; leaving every zone restores the map (-1).
+#include <gl.h> // glad natively, GLES3 on the web (before GLFW)
 #include <map_environment.h>
 #include <client.h>
 #include <world.h>

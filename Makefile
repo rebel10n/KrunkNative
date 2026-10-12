@@ -359,6 +359,10 @@ lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@command -v actionlint >/dev/null && actionlint || echo "actionlint not installed, skipping"
 	$(PYTHON) -c "import json; json.load(open('CMakePresets.json'))"
 	@for f in ui/js/*.js; do node --check $$f || exit 1; done
+	@# GL calls must go through gl.h (glad / GLES); GLFW's system GL header links on Linux only
+	@bad=$$(for f in $$(grep -lE '\bgl[A-Z][A-Za-z0-9]+\(' client/src/*.c client/src/*/*.c client/src/*/*/*.c 2>/dev/null); do \
+		grep -qE '#include [<"](gl\.h|editor_internal\.h)[>"]' $$f || echo $$f; done); \
+		if [ -n "$$bad" ]; then echo "GL calls without #include <gl.h>: $$bad"; exit 1; fi
 	@echo "lint ok"
 
 .PHONY: ks-test
