@@ -1,4 +1,4 @@
-"""Krunker v3.1.1 social hub page import (``make ui-import`` step, loaded by import.py).
+"""Krunker social hub page import (v7.1.4 with ``v7=True``, else v3.1.1) (``make ui-import`` step, loaded by import.py).
 
 Copies ``public/social.html`` and the stylesheets/images it uses from the v3.1.1
 reference tree into ``ui/``, with the same transformations as the menu page
@@ -35,8 +35,12 @@ SOCIAL_TEXTURES = ("previews/cosmetics/6_9.png", "previews/melee/melee_18.png", 
                    "previews/cosmetics/2_65.png", "previews/cosmetics/1_129.png")
 
 
-def _transform_html(html):
+def _transform_html(html, v7=False):
     html = re.sub(r"<script\b[^>]*>.*?</script>\s*", "", html, flags=re.S | re.I)
+    if v7:
+        html = re.sub(r"\?(?:build|v)=[A-Za-z0-9]+", "", html)
+        html = re.sub(r"https?://assets\.krunker\.io/", "/", html)
+        html = re.sub(r"<meta (property=\"og:|name=\"(description|keywords)\")[^>]*>\s*", "", html)
     html = re.sub(r"<!--.*?-->\s*", "", html, flags=re.S)
     html = re.sub(r"<meta (property=\"og:|name=\"(description|keywords)\")[^>]*>\s*", "", html)
     html = re.sub(r"\?build=[A-Za-z0-9]+", "", html)
@@ -45,13 +49,13 @@ def _transform_html(html):
     # Web build: the page boots the same client.js as index.html (in hub mode, from its
     # file name). The WebGL canvas GLFW needs stays hidden: the hub draws no 3D.
     if 'id="canvas"' not in html:
-        html = html.replace("<body>\n", '<body>\n\n<canvas id="canvas" tabindex="-1" style="display:none"></canvas>\n', 1)
+        html = re.sub(r"(<body[^>]*>\n?)", r'\1\n<canvas id="canvas" tabindex="-1" style="display:none"></canvas>\n', html, count=1)
     if "js/kn-shim.js" not in html:
         html = html.replace("</body>", '<script src="js/kn-shim.js"></script>\n<script src="js/loader.js"></script>\n</body>', 1)
     return html
 
 
-def import_social(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC):
+def import_social(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC, v7=False):
     """Returns the number of files rewritten. Missing reference tree: logged and skipped."""
     src_html = os.path.join(src_root, "social.html")
     if not os.path.exists(src_html):
@@ -59,9 +63,20 @@ def import_social(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC):
         return 0
     written = 0
     with open(src_html, "r", encoding="utf-8") as fh:
-        html = _transform_html(fh.read())
+        html = _transform_html(fh.read(), v7)
     if write_if_changed(os.path.join(ui_dir, "social.html"), html):
         written += 1
+    if v7:
+        # v7: stylesheets with the menu's URL rewriting; images come from the page's own
+        # references (menu_assets.collect_page_refs) and menu-assets-v7.txt
+        import index_page
+        for name in SOCIAL_CSS:
+            with open(os.path.join(src_root, "css", name), "r", encoding="utf-8") as fh:
+                css = index_page.rewrite_css(fh.read(), "css")
+            if write_if_changed(os.path.join(ui_dir, "css", name), css):
+                written += 1
+        log("social: social.html + %d stylesheets, %d rewritten" % (len(SOCIAL_CSS), written))
+        return written
     for name in SOCIAL_CSS:
         with open(os.path.join(src_root, "css", name), "rb") as fh:
             data = fh.read()

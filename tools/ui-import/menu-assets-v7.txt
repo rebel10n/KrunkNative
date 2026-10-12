@@ -1,0 +1,129 @@
+# Krunker v7.1.4 files the C UI logic (client/src/ui/, client/src/nametags.c) generates
+# paths to, copied byte-identical from the v7.1.4 public/ tree into ui/ at the same relative
+# path by menu_assets.py (`make ui-import`). Everything the imported pages, their stylesheets
+# and the window templates reference themselves is collected automatically
+# (menu_assets.collect_page_refs); list here only what C writes. One path per line; `{a..b}`
+# expands to the integers a..b (`{a..b..step}` every step-th); `dest = src` copies
+# public/<src> to ui/<dest>; `dest = v3:src` takes it from the v3.1.1 tree instead (files the
+# v7.1.4 reconstruction lacks); `#` starts a comment.
+
+# site root: favicons, the Pro settings preset's crosshairImage/customScope/customADSDot
+favicon.png = img/favicon.png
+pro_ads.png
+pro_crosshair.png
+pro_scope.png
+
+# menu chrome written by C: the logo face (#mainLogoFace, index.html's randInt(0, 15) pick)
+img/menu/faces/f_{0..15}.png
+img/noimg.png = v3:img/noimg.png
+
+# Host Game / Custom Games map cards (shared/src/map_catalog.c map_catalog_thumb: the 32 official maps)
+img/maps/map_{0..31}.png
+
+# in-game HUD (client/src/ui/hud_ui.c): weapon icons (weaponConfig.icon of ids 0..28 and
+# the streak/equipment ones), class icons, death screen, medals, perks, power-ups
+textures/weapons/icon_{0..31}.png
+textures/classes/icon_{-1..15}.png
+img/death-ui/icon_{0..12}.png
+img/death-ui/icon_0_1.png
+img/death-ui/icon_{14..31}.png
+img/medals/medal_{0..55}.png
+img/perks/{1..8}.png
+img/headshot_0.png
+img/wallbang_0.png = v3:img/wallbang_0.png
+img/death_0_1.png
+img/vic.png
+img/def.png
+img/dra.png
+img/modes/{ctf,ffa,kc,point,tdm}.png
+textures/flag_b.png
+textures/flag_r.png
+textures/objective_1.png
+textures/reticles/reticle_{0..11}.png
+
+# Change Loadout pickers (client/src/ui/ui_loadout.c): default previews
+textures/previews/cosmetics/{1,2,3,5,6,7,8,9,11,14,15,16}_default.png
+textures/previews/attach/attach_0.png
+
+# Controls window mouse buttons (img/mouse/<code>.png)
+img/mouse/{10001,10003}.png
+
+# the Changelog source is copied by import.py (windows/versions.txt = docs/versions.txt)
+
+# Change Loadout pickers: weaponConfig.src previews (ui_loadout.c) and the Select Spray defaults
+textures/previews/weapons/weapon_1.png
+textures/previews/weapons/weapon_2.png
+textures/previews/weapons/weapon_3.png
+textures/previews/weapons/weapon_4.png
+textures/previews/weapons/weapon_5.png
+textures/previews/weapons/weapon_6.png
+textures/previews/weapons/weapon_7.png
+textures/previews/weapons/weapon_8.png
+textures/previews/weapons/weapon_9.png
+textures/previews/weapons/weapon_10.png
+textures/previews/weapons/weapon_11.png
+textures/previews/weapons/weapon_12.png
+textures/previews/weapons/weapon_14.png
+textures/previews/weapons/weapon_15.png
+textures/previews/weapons/weapon_16.png
+textures/previews/weapons/weapon_17.png
+textures/previews/weapons/weapon_19.png
+textures/sprays/{0..38}.png
+textures/sprays/{54..59}.png
+textures/sprays/{63..66}.png
+textures/sprays/{79,83,87,88}.png
+textures/melee/icon_0.png
+
+# signed-in hub / leaderboards / account (social_ui.c, account_ui.c, store_ui.c): level icons
+# (levelIconId, the odd ids; v7.1.4's tree only has 1, 3 and 5: the rest from v3.1.1), the
+# ELO rank badge, the daily reward card and the prize wheel cards
+img/levels/1.png
+img/levels/3.png
+img/levels/5.png
+img/levels/{7..99..2}.png = v3:
+img/ranks/icon_0.png = v3:img/ranks/icon_0.png
+img/claim_{0..1}.png = v3:
+img/shop/spins/0_0.png = v3:img/shop/spins/0_0.png
+img/shop/spins/0_1.png = v3:img/shop/spins/0_1.png
+img/shop/spins/1_0.png = v3:img/shop/spins/1_0.png
+img/shop/spins/1_1.png = v3:img/shop/spins/1_1.png
+img/shop/spins/1_2.png = v3:img/shop/spins/1_2.png
+img/shop/spins/2_0.png = v3:img/shop/spins/2_0.png
+img/shop/spins/2_1.png = v3:img/shop/spins/2_1.png
+img/shop/spins/2_2.png = v3:img/shop/spins/2_2.png
+img/shop/spins/2_3.png = v3:img/shop/spins/2_3.png
+img/shop/spins/2_4.png = v3:img/shop/spins/2_4.png
+img/shop/spins/3_0.png = v3:img/shop/spins/3_0.png
+img/shop/spins/4_0.png
+img/shop/spins/4_1.png = v3:img/shop/spins/4_1.png
+img/shop/spins/6_0.png = v3:img/shop/spins/6_0.png
+img/shop/spins/6_1.png
+
+# social hub (social_ui.c): store / app badges, Clan Wars art and region rewards
+img/steam.png
+img/android.png
+img/ios.png
+img/editor.png
+img/black_m.png
+img/crossed_swords_0.svg = v3:img/crossed_swords_0.svg
+img/shaking_hands.svg = v3:img/shaking_hands.svg
+img/backgrounds/bg_test.png
+textures/previews/cosmetics/6_9.png
+textures/previews/melee/melee_18.png
+textures/previews/cosmetics/2_66.png
+textures/previews/cosmetics/1_128.png
+textures/previews/cosmetics/6_8.png
+textures/previews/cosmetics/6_10.png
+textures/previews/cosmetics/2_65.png
+textures/previews/cosmetics/1_129.png
+
+# map triggers' Jump Scare (index.js jumpScares[0].img "jumpS_2.png", client/src/map_triggers.c)
+scares/jumpS_2.png = scares/2.png
+
+# Store (client/src/ui/store_ui.c): Purchase KR cards, the premium card, ticket thumbnails
+img/shop/{0..7}.png
+img/prem_crd.png
+img/shop/filter/vignette.png
+textures/previews/cosmetics/13_0_{1..8}.png
+# Change Loadout selector tabs (ui_loadout.c)
+img/customize/{class,loadout,outfit,other}.png

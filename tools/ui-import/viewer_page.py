@@ -17,9 +17,10 @@ transformations of the menu page (``ui/README.md``):
 (``public/libs/dat.gui.min.js``, the string passed to its CSS injector), unchanged.
 ``css/viewer-kn.css`` is KrunkNative's own (hand-maintained).
 
-When node is available the store tables of the viewer
-(``client/src/viewer/viewer_store_table.c``) are regenerated too
-(``tools/ui-import/gen_viewer_store.js``, from ``public/js/src/viewer.js.map``).
+With node available, ``--ref v3`` (and ``--viewer-store``) also regenerate the viewer's
+store tables (``client/src/viewer/viewer_store_table.c``) with
+``tools/ui-import/gen_viewer_store.js``, which reads v7.1.4's store (``assets/skins.json`` and
+v7's store.js / config.js; the ``viewer.js.map`` argument passed below is ignored).
 """
 
 import os
@@ -30,13 +31,13 @@ import subprocess
 KRUNKER_PUBLIC = "/home/user/jails/kru/src/Krunker_v3.1.1/public"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-DAT_GUI_CSS_HEADER = ("/* dat.gui 0.7 stylesheet, injected at run time by Krunker v3.1.1's "
+DAT_GUI_CSS_HEADER = ("/* dat.gui 0.7 stylesheet, injected at run time by Krunker's "
                       "public/libs/dat.gui.min.js (extracted unchanged by tools/ui-import/viewer_page.py). */\n")
 
 
 def _transform_html(html):
     html = re.sub(r"<script\b[^>]*>.*?</script>\s*", "", html, flags=re.S | re.I)
-    html = re.sub(r"\?build=[A-Za-z0-9]+", "", html)
+    html = re.sub(r"\?(?:build|v)=[A-Za-z0-9]+", "", html)
     html = re.sub(r"(href|src)=\"/(?!/)", r'\1="', html)
     html = html.replace('<link rel="shortcut icon" type="image/png" href="img/favicon.png"/>',
                         '<link rel="shortcut icon" type="image/png" href="favicon.png"/>')
@@ -64,7 +65,7 @@ def _dat_gui_css(src_root):
     return DAT_GUI_CSS_HEADER + css
 
 
-def import_viewer(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC):
+def import_viewer(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC, store_table=True):
     """Returns the number of files rewritten. Missing reference tree: logged and skipped."""
     src_html = os.path.join(src_root, "viewer.html")
     if not os.path.exists(src_html):
@@ -82,7 +83,9 @@ def import_viewer(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC):
 
     source_map = os.path.join(src_root, "js", "src", "viewer.js.map")
     node = shutil.which("node")
-    if node and os.path.exists(source_map):
+    if not store_table:
+        log("viewer: viewer_store_table.c left as is (--viewer-store regenerates it)")
+    elif node and os.path.exists(source_map):
         subprocess.run([node, os.path.join(HERE, "gen_viewer_store.js"), source_map], check=True)
     else:
         log("viewer: node or viewer.js.map missing, viewer_store_table.c not regenerated")

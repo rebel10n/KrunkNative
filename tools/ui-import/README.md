@@ -1,15 +1,46 @@
 # tools/ui-import
 
-One-shot (but idempotent) importer that turns the Krunker v3.1.1 UI sources
-into the static inputs the native HTML engine consumes. The Makefile target
-`make ui-import` runs:
+One-shot (but idempotent) importer that turns the Krunker UI sources into the static
+inputs the native HTML engine consumes. The Makefile target `make ui-import` runs:
 
 ```sh
 python3 -I tools/ui-import/import.py --ui ui
 ```
 
-Outputs are committed to the tree; re-running only rewrites files whose
-content changed.
+`--ref v7` (the default) imports Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/public`,
+`--public` overrides); `--ref v3` the former Krunker v3.1.1 import (the sections below marked
+v3.1.1). Outputs are committed to the tree; re-running only rewrites files whose content changed.
+
+## Krunker v7.1.4 (`--ref v7`)
+
+| Step | Module | Output |
+|---|---|---|
+| menu page | `index_page.py` | `ui/index.html` from `public/index.html` (every `<script>`, comments, og/PWA links removed; `?build=`/`?v=` stripped; `https://assets.krunker.io/` and root-relative URLs made relative; external `<a href>` -> `href="#" data-ext-href`; `<canvas id="canvas">`, `css/krunknative.css` + `css/hud.css`, `js/kn-shim.js` + `js/loader.js` added) and its stylesheets (`main.css`, `bundled/bundledStyles.min.css`, `main_custom.css`, `flag.css`, `material-icons*.css`, `material-symbols-outlined.css`, `google-play.css`, plus `google-secular-one.css`) with the same URL rewriting, nothing else changed |
+| fonts | `import.py` | every font file the stylesheets name is copied; each `.woff2` gets a `.ttf` next to it (material icon fonts named after their family: `material-icons.ttf`, `material-icons-outlined.ttf`; other faces after the woff2), and the ligature tables `client/src/html/engine/material_icons_liga.h` + `material_icons_outlined_liga.h` |
+| windows | `windows_v7.py` | `ui/windows/` from `krunker-windows-v7.json.gz` (below): `<n>.html` = showWindow(n), `settings-{basic,advanced}-<t>.html`, `controls-<t>.html`, `windows.json` (header, sticky, class, inline style per window), `versions.txt` (= `public/docs/versions.txt`, the Changelog) |
+| hub / viewer | `social_page.py`, `viewer_page.py` | `ui/social.html` (+ `social.css`, `social_custom.css`), `ui/viewer.html` (+ `dat-gui.css`); `--viewer-store` also regenerates `client/src/viewer/viewer_store_table.c` |
+| editor | `editor_page.py` | only with `--editor-page`: v7's `editor.html` + editor CSS + CodeMirror CSS (`ui/libs/codemirror/`). Off by default while `client/src/editor/` drives the v3.1.1 editor page |
+| images | `menu_assets.py` | every local file the pages, stylesheets and window templates reference (`collect_page_refs`), plus `menu-assets-v7.txt` (what C generates; `dest = v3:src` / `pattern = v3:` take files the v7.1.4 reconstruction lacks from v3.1.1). References v7 itself 404s on are listed, grouped by directory |
+
+### Window captures (`capture_v7_windows.js`)
+
+`node tools/ui-import/capture_v7_windows.js [out.json.gz]` loads v7's own client (`public/index.html`
+with `js/index.js`) in headless Chromium against a read-only static serve of v7's `public/`
+(`v7_page.js`; v7's npm server is never run: it writes into the reference tree). With no
+matchmaker the page starts its offline sandbox; the capture sets a returning guest
+(`krunker_haslogin`), undoes the sandbox's menu chrome (`CONNECTED_MENU`: `fullMenu()` plus the
+elements `f2064` hides), then calls `showWindow(n, true)` for every `windows[]` entry and records
+`#windowHeader`, `#menuWindow`'s class, inline style and markup, every settings tab of both views
+(`windows[0].settingType` / `tabIndex`) and the five Change Controls tabs. The result is
+committed as `krunker-windows-v7.json.gz` (gzipped JSON) so `make ui-import` needs no browser.
+Needs `chromium-browser` (`KN_CHROME=`) and `net-bridge/node_modules` (`ws`, `tools/kref/cdp.js`).
+
+`windows_v7.py` keeps the captured markup unchanged except: `?build=` stripped, the cosmetic
+pickers' `#skinList` cut to their first 4 cards (templates; C lists the items), the host window's
+Advanced tab bodies over 32 KB emptied (per-weapon/class matrices), and the hidden per-weapon
+clones of the settings rows (`<key>_<weapon>_div`) dropped (no per-weapon settings storage yet).
+
+## Krunker v3.1.1 (`--ref v3`)
 
 ## What it produces
 
@@ -98,6 +129,10 @@ ignores user site-packages), i.e. installed system-wide:
 
 ```
 --ui DIR            ui directory (default <repo>/ui)
+--ref v7|v3         Krunker reference (default v7)
+--public DIR        the reference's public/ tree (default per --ref)
+--viewer-store      also regenerate client/src/viewer/viewer_store_table.c (v7)
+--editor-page       v7: also import editor.html + its CSS
 --windows-out DIR   window output dir (default <ui>/windows)
 --liga-header PATH  generated header (default client/src/html/engine/material_icons_liga.h)
 --force             regenerate .ttf files even if present

@@ -1,4 +1,4 @@
-"""Krunker v3.1.1 map editor page import (``make ui-import`` step, loaded by import.py).
+"""Krunker map editor page import (v7.1.4 with ``v7=True``, else v3.1.1) (``make ui-import`` step, loaded by import.py).
 
 Copies ``public/editor.html`` and the stylesheets it links from the v3.1.1
 reference tree into ``ui/``, applying the same transformations as the menu page
@@ -26,13 +26,16 @@ import re
 KRUNKER_PUBLIC = "/home/user/jails/kru/src/Krunker_v3.1.1/public"
 
 EDITOR_CSS = ("editor.css", "editor_dark.css", "editor_custom.css", "pickr.css")
+# v7 also links CodeMirror 5.61 and its monokai theme (the KrunkScript editor)
+EDITOR_LIBS_V7 = ("libs/codemirror/5.61.0/codemirror.min.css", "libs/codemirror/5.61.0/theme/monokai.min.css")
 SHARED_CSS = ("google-secular-one.css", "material-icons.css")  # imported with the menu
 
 
 def _transform_html(html):
     html = re.sub(r"<script\b[^>]*>.*?</script>\s*", "", html, flags=re.S | re.I)
     html = re.sub(r"<meta property=\"og:[^>]*>\s*", "", html)
-    html = re.sub(r"\?build=[A-Za-z0-9]+", "", html)
+    html = re.sub(r"\?(?:build|v)=[A-Za-z0-9]+", "", html)
+    html = re.sub(r"https?://assets\.krunker\.io/", "/", html)
     html = re.sub(r"(href|src)=\"/(?!/)", r'\1="', html)
     html = html.replace('<link rel="shortcut icon" type="image/png" href="img/favicon.png"/>',
                         '<link rel="shortcut icon" type="image/png" href="favicon.png"/>')
@@ -46,7 +49,7 @@ def _transform_html(html):
     return html
 
 
-def import_editor(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC):
+def import_editor(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC, v7=False):
     """Returns the number of files rewritten. Missing reference tree: logged and skipped."""
     src_html = os.path.join(src_root, "editor.html")
     if not os.path.exists(src_html):
@@ -60,8 +63,15 @@ def import_editor(ui_dir, write_if_changed, log, src_root=KRUNKER_PUBLIC):
     for name in EDITOR_CSS:
         with open(os.path.join(src_root, "css", name), "rb") as fh:
             data = fh.read()
+        if v7:
+            import index_page
+            data = index_page.rewrite_css(data.decode("utf-8"), "css").encode("utf-8")
         if write_if_changed(os.path.join(ui_dir, "css", name), data):
             written += 1
+    for rel in (EDITOR_LIBS_V7 if v7 else ()):
+        with open(os.path.join(src_root, rel), "rb") as fh:
+            if write_if_changed(os.path.join(ui_dir, rel), fh.read()):
+                written += 1
     for name in SHARED_CSS:
         if not os.path.exists(os.path.join(ui_dir, "css", name)):
             log("editor: warning: ui/css/%s missing (menu import)" % name)
