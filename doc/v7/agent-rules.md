@@ -27,3 +27,6 @@ The shared checkout /home/user/src/KrunkNative is the integration tree: it must 
 9. "kn-coord-check" in briefs means: a full native Debug build plus the Emscripten web build of your tree
    (`cmake -S <wt> -B <wt>-build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build <wt>-build`, then
    `source ~/emsdk/emsdk_env.sh && emcmake cmake -S <wt> -B <wt>-web -DWEB_DIST_DIR=<wt>-webdist && cmake --build <wt>-web`).
+10. Many agents run the e2e scripts at once. New or changed e2e tests take their ports from
+    `kn_proto.free_ports()` (server/tests/kn_proto.py), never fixed numbers, and must not kill processes
+    they didn't start.
