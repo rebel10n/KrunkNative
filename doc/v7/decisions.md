@@ -34,6 +34,7 @@ editor.md, player-viewer.md (this directory).
 | 195-199 | player-viewer WP-C: protocol/input |
 | 200-239 | KrunkScript |
 | 240-249 | player-viewer WP-E (`NET_PACKET_BLOCK_SOCIAL`; `NET_PACKET_BLOCK_END` is 250): 240 LEADER_STATS; 241 DEATH_INFO, 242 PC_STAT; 243 END_MEDALS (part 2c: endData.mdls); 244 SKIN_FOUND (season system: v7 "skin" / "skinF"); 245 CHAT_V7, 246 VOICE_V7, 247 SPRAY_V7, 248 TAUNT, 249 SOCIAL_V7 (shared/include/social_v7.h) |
+| 250-254 | KN spawn menu (`NET_PACKET_BLOCK_SANDBOX`; `NET_PACKET_BLOCK_END` is 255): 250 SPAWN_REQ, 251 SPAWN_RESULT, 252 LOADOUT_EXTRA, 253 SPAWNED_OBJ, 254 spare. These are the last free ids of the one-byte type: new packets after this need a protocol decision. |
 
 New packets are gated on `NET_PROTOCOL_MINOR` (3 = `NET_PROTOCOL_MINOR_V7`, set by map-A; don't bump it again without asking the coordinator). The client negotiates per server, from the INIT version.
 
