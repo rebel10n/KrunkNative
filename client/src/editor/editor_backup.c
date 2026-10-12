@@ -8,6 +8,7 @@
 // Intentional difference from v7.1.4: at most ED_BACKUP_MAX backups are kept (the oldest go):
 // localStorage has a few MB where IndexedDB had no practical limit, and v7 never prunes.
 #include "editor_internal.h"
+#include <ks_game.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,11 +46,8 @@ static void index_write(const cJSON *list) {
 
 static void backup_key(const double timestamp, char *out, const size_t n) { snprintf(out, n, "knEditorBackup.%.0f", timestamp); }
 
-static double now_ms(void) {
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return (double) ts.tv_sec * 1000.0 + (double) (ts.tv_nsec / 1000000);
-}
+// Unix ms; ks_wall_ms is portable (MinGW has no timespec_get / TIME_UTC)
+static double now_ms(void) { return ks_wall_ms(); }
 
 void ed_backup_do(void) {
     if (!g_ed.proj || !g_ed.proj->map_config) return;

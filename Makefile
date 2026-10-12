@@ -366,6 +366,9 @@ lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@bad=$$(for f in $$(grep -lE '\bgl[A-Z][A-Za-z0-9]+\(' client/src/*.c client/src/*/*.c client/src/*/*/*.c 2>/dev/null); do \
 		grep -qE '#include [<"](gl\.h|editor_internal\.h)[>"]' $$f || echo $$f; done); \
 		if [ -n "$$bad" ]; then echo "GL calls without #include <gl.h>: $$bad"; exit 1; fi
+	@# MinGW's C runtime has no timespec_get/TIME_UTC: use ks_wall_ms() or guard it with _WIN32
+	@bad=$$(grep -lE '\btimespec_get\(' $$(git ls-files '*.c') | xargs -r grep -L '_WIN32'); \
+		if [ -n "$$bad" ]; then echo "timespec_get without a _WIN32 path: $$bad"; exit 1; fi
 	@echo "lint ok"
 
 .PHONY: ks-test
