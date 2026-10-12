@@ -1,0 +1,219 @@
+name: Deploy edges
+
+# Dispatch only: builds server_bin for the edges' Debian releases (deploy/ansible/build.sh:
+# bullseye = clara, bookworm = ashburn, trixie = angeles + chitown) and runs
+# deploy/ansible/edges.yml --tags release,gameserver, chitown first: the rest only after
+# chitown's instance 1 answers the server-info query again. This RESTARTS the live game
+# servers of the selected edges (players are dropped). The edges also run abulxt: only the
+# KrunkNative release + kn-gameserver@ units are touched (no firewall, no DNS here).
+#
+# Secrets: EDGES_SSH_KEY (CI-only ed25519, comment krunknative-github-ci-edges, in each edge's
+#          root authorized_keys with no-agent/X11/port-forwarding), EDGES_KNOWN_HOSTS (the edges'
+#          host keys), and KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS: kn_gameserver reads the
+#          coordinator secrets (KN_BRAIN_INTERNAL_SECRET / JOIN_SECRET) from kru's
+#          /etc/krunknative/secrets.env at deploy time (slurp, no_log) into the 0640 server-<n>.cfg.
+on:
+  workflow_dispatch:
+    inputs:
+      hosts:
+        description: "Edges: all, or a comma list of chitown,clara,angeles,ashburn (chitown always goes first)"
+        type: string
+        default: all
+      dry_run:
+        description: "ansible --check --diff only (builds, connects, changes nothing)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-edges
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      first: ${{ steps.plan.outputs.first }}
+      rest: ${{ steps.plan.outputs.rest }}
+      edges: ${{ steps.plan.outputs.edges }}
+      cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
+      commit12: ${{ steps.meta.outputs.commit12 }}
+      describe: ${{ steps.meta.outputs.describe }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version metadata
+        id: meta
+        run: tools/release/version-meta.sh "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
+      # edge name -> inventory host (deploy/ansible/inventory/hosts.yml)
+      - name: Hosts
+        id: plan
+        env:
+          HOSTS: ${{ inputs.hosts }}
+        run: |
+          set -euo pipefail
+          declare -A inv=([chitown]=com.chitown [clara]=com.clara [angeles]=com.angeles [ashburn]=amph.ashburn)
+          sel="$(tr -d ' ' <<< "$HOSTS" | tr '[:upper:]' '[:lower:]')"
+          [ "$sel" = all ] && sel="chitown,clara,angeles,ashburn"
+          first="" rest="" edges=""
+          IFS=, read -r -a names <<< "$sel"
+          for n in "${names[@]}"; do
+            [ -n "${inv[$n]:-}" ] || { echo "::error::unknown edge '$n' (chitown clara angeles ashburn)"; exit 1; }
+            [[ ",$edges," == *",$n,"* ]] && continue
+            edges="${edges:+$edges,}$n"
+            if [ "$n" = chitown ]; then first="${inv[$n]}"; else rest="${rest:+$rest,}${inv[$n]}"; fi
+          done
+          [ -n "$edges" ] || { echo "::error::no edges selected"; exit 1; }
+          { echo "first=$first"; echo "rest=$rest"; echo "edges=$edges"; } | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: server_bin (Debian ${{ matrix.codename }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      matrix:
+        codename: [bullseye, bookworm, trixie]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build
+        env:
+          TARGETS: server_bin
+          KN_CMAKE_ARGS: ${{ needs.plan.outputs.cmake_flags }}
+          KN_BUILD_ROOT: ${{ runner.temp }}/kn-build
+        run: deploy/ansible/build.sh "${{ matrix.codename }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deploy-${{ matrix.codename }}
+          path: dist/deploy/${{ matrix.codename }}/bin/server_bin
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy:
+    name: Deploy ${{ needs.plan.outputs.edges }}${{ inputs.dry_run && ' (dry run)' || '' }}
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FIRST: ${{ needs.plan.outputs.first }}
+      REST: ${{ needs.plan.outputs.rest }}
+      EDGES: ${{ needs.plan.outputs.edges }}
+      COMMIT12: ${{ needs.plan.outputs.commit12 }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync ansible-core
+          ansible-galaxy collection install -r deploy/ansible/requirements.yml
+
+      # kn_release ships dist/deploy/<codename>/bin (kn_build_codename from the host's facts)
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: deploy-*
+          path: dist/deploy-artifacts
+
+      - name: Stage binaries
+        run: |
+          set -euo pipefail
+          for c in bullseye bookworm trixie; do
+            install -D -m 0755 "dist/deploy-artifacts/deploy-$c/server_bin" "dist/deploy/$c/bin/server_bin"
+          done
+          ls -la dist/deploy/*/bin
+
+      # Keys and host keys come only from secrets (never echoed). ci_config is deploy/ansible/ssh_config
+      # with kru -> KRU_HOST:KRU_PORT + its key and the edges -> the CI edge key.
+      - name: SSH setup
+        env:
+          EDGES_SSH_KEY: ${{ secrets.EDGES_SSH_KEY }}
+          EDGES_KNOWN_HOSTS: ${{ secrets.EDGES_KNOWN_HOSTS }}
+          KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
+          KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
+          KRU_HOST: ${{ secrets.KRU_HOST }}
+          KRU_PORT: ${{ secrets.KRU_PORT }}
+        run: |
+          set -euo pipefail
+          [ -n "$EDGES_SSH_KEY" ] && [ -n "$EDGES_KNOWN_HOSTS" ] && [ -n "$KRU_SSH_KEY" ] && [ -n "$KRU_HOST" ] \
+            || { echo "::error::missing EDGES_SSH_KEY / EDGES_KNOWN_HOSTS / KRU_SSH_KEY / KRU_HOST secret"; exit 1; }
+          install -d -m 700 ~/.ssh
+          (umask 077; printf '%s\n' "$EDGES_SSH_KEY" > ~/.ssh/id_edges; printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru)
+          printf '%s\n%s\n' "$KRU_KNOWN_HOSTS" "$EDGES_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          awk -v kh="$KRU_HOST" -v kp="${KRU_PORT:-22}" '
+            $1 == "Host" { host = $2 }
+            host == "kru" && $1 == "HostName" { print "  HostName " kh; print "  Port " kp; print "  IdentityFile ~/.ssh/id_kru"; print "  IdentitiesOnly yes"; next }
+            $1 == "IdentityFile" { print "  IdentityFile ~/.ssh/id_edges"; print "  IdentitiesOnly yes"; next }
+            { print }' deploy/ansible/ssh_config > ~/.ssh/ci_config
+          chmod 600 ~/.ssh/ci_config
+          echo "ANSIBLE_SSH_ARGS=-F $HOME/.ssh/ci_config -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ControlMaster=auto -o ControlPersist=60s" >> "$GITHUB_ENV"
+
+      - name: Connectivity
+        working-directory: deploy/ansible
+        run: ansible -m ansible.builtin.ping "kru,${FIRST:+$FIRST,}$REST"
+
+      # Instance 1 of an edge answers the server-info query (services/scripts/kn-query.py);
+      # once the new server_bin reports its commit (kn_version.h), it must be this build's.
+      - name: Health check helper
+        run: |
+          cat > "$RUNNER_TEMP/edge-health.sh" << 'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          for edge in "$@"; do
+            target="$edge-1.krunk.io:21015"
+            for try in $(seq 1 18); do
+              if info="$(python3 -I services/scripts/kn-query.py --json --timeout 3 "$target" 2> /dev/null)"; then
+                commit="$(jq -r '.commit // empty' <<< "$info")"
+                echo "$target: $(jq -c '{name, map, players, max, version, commit, protocol}' <<< "$info")"
+                if [ "$DRY_RUN" != true ] && [ -n "$commit" ] && [ "${commit:0:12}" != "${COMMIT12:0:${#commit}}" ]; then
+                  echo "::error::$target runs $commit, expected $COMMIT12"; exit 1
+                fi
+                continue 2
+              fi
+              sleep 5
+            done
+            echo "::error::$target does not answer the server-info query"; exit 1
+          done
+          EOF
+          chmod +x "$RUNNER_TEMP/edge-health.sh"
+
+      - name: Deploy chitown first
+        if: env.FIRST != ''
+        working-directory: deploy/ansible
+        run: |
+          set -euo pipefail
+          check=(); [ "$DRY_RUN" = true ] && check=(--check --diff)
+          ansible-playbook edges.yml --tags release,gameserver --limit "$FIRST" "${check[@]}"
+
+      - name: chitown health
+        if: env.FIRST != ''
+        run: '"$RUNNER_TEMP/edge-health.sh" chitown'
+
+      - name: Deploy the other edges
+        if: env.REST != ''
+        working-directory: deploy/ansible
+        run: |
+          set -euo pipefail
+          check=(); [ "$DRY_RUN" = true ] && check=(--check --diff)
+          ansible-playbook edges.yml --tags release,gameserver --limit "$REST" "${check[@]}"
+
+      - name: Health
+        run: |
+          set -euo pipefail
+          IFS=, read -r -a edges <<< "$EDGES"
+          "$RUNNER_TEMP/edge-health.sh" "${edges[@]}"
+
+      - name: Cleanup keys
+        if: always()
+        run: rm -f ~/.ssh/id_edges ~/.ssh/id_kru ~/.ssh/ci_config

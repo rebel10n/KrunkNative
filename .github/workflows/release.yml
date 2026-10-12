@@ -1,0 +1,336 @@
+name: Release
+
+# Dedicated-server builds as public GitHub release assets (CI artifacts need a GitHub login):
+#   push to slop/main, dispatch  -> rolling prerelease `server-latest`, assets replaced
+#   push of a tag server-v*       -> release <tag>, kept
+# Assets: krunknative-server-<platform>.{tar.gz,zip} + .sha256 for linux-x86_64 (Debian 12
+# container, deploy/ansible/build.sh), linux-x86_64-bullseye (Debian 11), windows-x86_64 (MinGW)
+# and macos-arm64 (tools/release/package-server.sh). The release notes carry the commit, the
+# protocol (NET_PROTOCOL_MAJOR.MINOR) and the build time, plus one machine-readable line
+#   <!-- kn-build {"describe":..,"commit":..,"commit_time":..,"build_time":..,"protocol":..} -->
+# that kn_brain polls to flag outdated servers (doc/backend.md).
+# Neither release is ever marked "Latest": v1.0.0 (the full game package) stays the repo's
+# Latest release; server-latest is a prerelease and server-v* use --latest=false.
+# server-latest only moves forward: a run whose commit is older than the published one (main
+# lagging slop) builds but does not publish.
+on:
+  push:
+    branches: [slop, main]
+    tags: ["server-v*"]
+  workflow_dispatch:
+
+# One running + one pending run per ref: superseded pushes are skipped, a running build is
+# never cancelled (agents push faster than a build takes; cancelling would starve it).
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      describe: ${{ steps.meta.outputs.describe }}
+      commit: ${{ steps.meta.outputs.commit }}
+      commit12: ${{ steps.meta.outputs.commit12 }}
+      commit_time: ${{ steps.meta.outputs.commit_time }}
+      build_time: ${{ steps.meta.outputs.build_time }}
+      protocol: ${{ steps.meta.outputs.protocol }}
+      cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
+      kn_build: ${{ steps.meta.outputs.kn_build }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git describe needs the tags
+
+      - name: Version metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          tools/release/version-meta.sh "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Release tag
+        id: tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag=server-latest; fi
+          echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux x86_64 (Debian ${{ matrix.codename }})
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - codename: bookworm
+            platform: linux-x86_64
+          - codename: bullseye
+            platform: linux-x86_64-bullseye
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Same container build as the edges get (glibc 2.36 / 2.31, distro OpenSSL + libcurl).
+      - name: Build server_bin
+        env:
+          TARGETS: server_bin
+          KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
+          KN_BUILD_ROOT: ${{ runner.temp }}/kn-build
+        run: deploy/ansible/build.sh "${{ matrix.codename }}"
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/dist/deploy/${{ matrix.codename }}/bin:/b:ro" "debian:${{ matrix.codename }}" bash -c '
+            if grep -q bullseye /etc/os-release; then
+              printf "%s\n" "deb http://archive.debian.org/debian bullseye main" > /etc/apt/sources.list
+              rm -f /etc/apt/sources.list.d/*
+              echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
+              ssl=libssl1.1
+            else
+              ssl=libssl3
+            fi
+            apt-get update -qq > /dev/null
+            apt-get install -y -qq --no-install-recommends libcurl4 "$ssl" libcrypt1 ca-certificates > /dev/null
+            /b/server_bin --version'
+
+      - name: Package
+        env:
+          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+          KN_COMMIT: ${{ needs.meta.outputs.commit }}
+          KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+          KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
+        run: tools/release/package-server.sh "${{ matrix.platform }}" "dist/deploy/${{ matrix.codename }}/bin/server_bin" out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-${{ matrix.platform }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows x86_64 (MinGW-w64)
+    needs: meta
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # curl: https:// finder heartbeat and central auth (server/src/http_client.c); zip: packaging.
+      - name: Setup MSYS2 / MinGW-w64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            zip
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-curl
+
+      - name: Build server
+        env:
+          KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086 # KN_CMAKE_ARGS is a list of -D flags
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKRUNKNATIVE_HTML_ENGINE=OFF $KN_CMAKE_ARGS
+          cmake --build build --target server
+          ./build/server.exe --version
+
+      # Every DLL under the MSYS2 prefix that server.exe needs, recursively (as build.yml does
+      # for the full package); system DLLs under C:/Windows are left out.
+      - name: Runtime DLLs
+        run: |
+          set -euo pipefail
+          mkdir -p dlls
+          todo=(build/server.exe)
+          while [ ${#todo[@]} -gt 0 ]; do
+            target="${todo[0]}"; todo=("${todo[@]:1}")
+            while read -r dll; do
+              [ -n "$dll" ] || continue
+              name="$(basename "$dll")"
+              [ -f "dlls/$name" ] && continue
+              cp "$dll" "dlls/$name"
+              todo+=("$dll")
+            done < <(ldd "$target" | awk '{ print $3 }' | grep -Ei '/(mingw64|ucrt64)/bin/' || true)
+          done
+          ls -la dlls
+
+      - name: Package
+        env:
+          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+          KN_COMMIT: ${{ needs.meta.outputs.commit }}
+          KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+          KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
+        run: tools/release/package-server.sh windows-x86_64 build/server.exe out --libs dlls
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-windows-x86_64
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: macOS arm64
+    needs: meta
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Never `brew update`/upgrade (see build.yml). knsvc (linked by server_bin) needs libcrypto:
+      # Homebrew's keg-only OpenSSL, bundled into the package by package-server.sh.
+      - name: Build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_UPGRADE: 1
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+        run: |
+          set -euo pipefail
+          missing=()
+          for tool in cmake ninja pkg-config; do command -v "$tool" > /dev/null || missing+=("$tool"); done
+          if [ ${#missing[@]} -gt 0 ]; then brew install "${missing[@]}"; fi
+          for formula in openssl@3 openssl@4; do
+            prefix="$(brew --prefix "$formula" 2> /dev/null || true)"
+            if [ -n "$prefix" ] && [ -d "$prefix/include/openssl" ]; then
+              echo "OPENSSL_ROOT_DIR=$prefix" >> "$GITHUB_ENV"
+              echo "OpenSSL: $prefix"
+              break
+            fi
+          done
+
+      # Server only: desktop GL keeps the (unused) client configure free of ANGLE; ANGLE is
+      # never compiled in CI (build.yml downloads the pinned prebuilt for the client).
+      - name: Build server_bin
+        env:
+          KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086 # KN_CMAKE_ARGS is a list of -D flags
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKRUNKNATIVE_HTML_ENGINE=OFF \
+            -DKRUNKNATIVE_GL_BACKEND=desktop $KN_CMAKE_ARGS
+          cmake --build build --target server_bin
+
+      - name: Package
+        env:
+          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+          KN_COMMIT: ${{ needs.meta.outputs.commit }}
+          KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+          KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
+        run: |
+          set -euo pipefail
+          tools/release/package-server.sh macos-arm64 build/server_bin out
+          # the packaged binary must run from its own directory with the bundled dylibs only
+          mkdir t && tar -xzf out/krunknative-server-macos-arm64.tar.gz -C t
+          t/krunknative-server-macos-arm64/server_bin --version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-macos-arm64
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish ${{ needs.meta.outputs.tag }}
+    needs: [meta, linux, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create/upload, moving the server-latest tag
+    # slop and main both feed server-latest: one publisher at a time
+    concurrency:
+      group: publish-${{ needs.meta.outputs.tag }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.meta.outputs.tag }}
+      COMMIT: ${{ needs.meta.outputs.commit }}
+      COMMIT12: ${{ needs.meta.outputs.commit12 }}
+      COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
+      BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+      DESCRIBE: ${{ needs.meta.outputs.describe }}
+      PROTOCOL: ${{ needs.meta.outputs.protocol }}
+      KN_BUILD: ${{ needs.meta.outputs.kn_build }}
+      BRANCH: ${{ github.ref_name }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: server-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Check downloads
+        run: |
+          set -euo pipefail
+          ls -la release-assets
+          (cd release-assets && sha256sum -c ./*.sha256)
+
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          base="https://github.com/$GH_REPO/releases/download/$TAG"
+          row() { echo "| $1 | [$2]($base/$2) | [sha256]($base/$2.sha256) |"; }
+          {
+            if [ "$TAG" = server-latest ]; then
+              echo "Rolling build of the KrunkNative dedicated server, replaced on every push to \`slop\`/\`main\`. Servers listed in the server browser that run an older build or protocol show as **Outdated**."
+            else
+              echo "KrunkNative dedicated server $TAG."
+            fi
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | [\`$COMMIT12\`](https://github.com/$GH_REPO/commit/$COMMIT) ($BRANCH) |"
+            echo "| Version | \`$DESCRIBE\` |"
+            echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
+            echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
+            echo
+            echo "| Platform | Package | Checksum |"
+            echo "|---|---|---|"
+            row "Linux x86_64 (Debian 12+, Ubuntu 22.04+)" krunknative-server-linux-x86_64.tar.gz
+            row "Linux x86_64 (Debian 11, glibc 2.31)" krunknative-server-linux-x86_64-bullseye.tar.gz
+            row "Windows x86_64" krunknative-server-windows-x86_64.zip
+            row "macOS arm64" krunknative-server-macos-arm64.tar.gz
+            echo
+            echo "Unpack, edit \`cfg/server.cfg\` and run \`./server_bin\` (README.txt in the package). Check a download with \`sha256sum -c <package>.sha256\`."
+            echo
+            echo "<!-- kn-build $KN_BUILD -->"
+          } > notes.md
+          cat notes.md
+
+      # tools/release/publish.sh: assets first (replaced in place), then the notes with the
+      # kn-build line, then the tag, so a poller never sees metadata for missing assets;
+      # server-latest only moves forward (an older commit than the published one is skipped).
+      - name: Publish
+        run: |
+          set -euo pipefail
+          if [ "$TAG" = server-latest ]; then title="Dedicated server (latest build)"; else title="Dedicated server ${TAG#server-}"; fi
+          tools/release/publish.sh "$TAG" "$title" notes.md release-assets/*
+          echo "### [$TAG](https://github.com/$GH_REPO/releases/tag/$TAG): $COMMIT12, protocol $PROTOCOL" >> "$GITHUB_STEP_SUMMARY"
