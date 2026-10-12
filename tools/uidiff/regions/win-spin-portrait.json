@@ -55,9 +55,8 @@
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true,
-      "note": "#spinHistoryBtn: KrunkNative has no spin history (no button)"
+      "max_pct": 8.0,
+      "note": "#spinHistoryBtn: Spin History; the scaled button lands 1px lower than in Chromium (its borders)"
     }
   ]
 }

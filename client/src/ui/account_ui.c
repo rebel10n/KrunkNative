@@ -36,8 +36,8 @@
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT "Please wait..." // generic.wait
-#define REWARD_MIN_LVL 5             // config.rewardMinLvl
-#define REWARD_TIME_MS 21600000.0    // config.rewardTime
+#define REWARD_MIN_LVL 1             // the Free KR wheel's minLvl (v3.1.1's daily reward: config.rewardMinLvl 5)
+#define REWARD_TIME_MS 43200000.0    // config.rewardTime (12 h in v7.1.4)
 
 static Client *g_client;
 static AccountInfo g_acc;
@@ -142,6 +142,31 @@ const AccountInfo *account_get(void) { return g_logged_in ? &g_acc : NULL; }
 
 static void mark_header(void);
 static void rerender_windows(void);
+
+static void reward_tick(int force);
+
+void account_remove_skin(const int skin_index) {
+    if (!g_logged_in || !g_acc.data) return;
+    cJSON *skins = cJSON_GetArrayItem(g_acc.data, 10);
+    cJSON *entry;
+    int i = 0;
+    cJSON_ArrayForEach(entry, skins) {
+        cJSON *ind = cJSON_GetObjectItem(entry, "ind"), *cnt = cJSON_GetObjectItem(entry, "cnt");
+        if (cJSON_IsNumber(ind) && ind->valueint == skin_index) {
+            const int n = (cJSON_IsNumber(cnt) ? cnt->valueint : 1) - 1;
+            if (n > 0) cJSON_ReplaceItemInObject(entry, "cnt", cJSON_CreateNumber(n));
+            else cJSON_DeleteItemFromArray(skins, i);
+            return;
+        }
+        i++;
+    }
+}
+
+void account_set_last_reward(const double ms) {
+    if (!g_logged_in || !g_acc.data) return;
+    cJSON_ReplaceItemInArray(g_acc.data, 11, cJSON_CreateNumber(ms));
+    reward_tick(1);
+}
 
 void account_set_funds(const double funds) {
     if (!g_logged_in) return;
@@ -388,6 +413,7 @@ static void try_restore(void) {
 
 static void clear_account(void) {
     g_logged_in = 0;
+    store_ui_account_changed();
     clan_ui_reset();
     cJSON_Delete(g_acc.stats);
     cJSON_Delete(g_acc.data);
@@ -549,7 +575,7 @@ static void on_social(void *user, const cJSON *frame) {
         set_badges(cJSON_GetArrayItem(frame, 2)); // WP-E part 2c: the info's "badges"
         mark_header();
         rerender_windows();
-    } else if (!strcmp(label, "spin")) {
+    } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH")) {
         store_ui_frame(frame);
     } else if (battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd
     } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // io_cln / io_clnL (windows[12])
@@ -1108,10 +1134,14 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "claimReward") && g_logged_in) {
-        // v3.1.1 gates the reward behind an ad (alert "Ad Failed"); KrunkNative has no ads:
-        // ask the brain once the timer ran out and a match was played
+        // v7.1.4 plays an ad, then opens the Free KR wheel (prizeWheel(4)) whose spin asks the
+        // brain (["fkr"]); KrunkNative has no ads: the wheel opens once the timer ran out and a
+        // match was played this session
         const double last = g_acc.data ? num_at(g_acc.data, 11) : 0.0;
-        if (g_reward_played && REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last) <= 0) backend_social_send_text("[\"clm\"]");
+        if (g_reward_played && REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last) <= 0) {
+            ui_loadout_clear_pops();
+            store_ui_free_kr_wheel();
+        }
         return 1;
     }
     if (!strcmp(name, "windows.29.switchTab")) {
@@ -1933,6 +1963,14 @@ void account_ui_scenario(const cJSON *account) {
     g_chal = cJSON_IsArray(chal) ? cJSON_Duplicate(chal, 1) : NULL;
     g_medal_counts = cJSON_IsObject(medals) ? cJSON_Duplicate(medals, 1) : NULL;
     battlepass_ui_scenario(cJSON_GetObjectItem(account, "battlepass")); // {data, progress, tab, end, now}
+    const cJSON *skins = cJSON_GetObjectItem(account, "skins");
+    if (cJSON_IsArray(skins)) { // the inventory [{ind, cnt}] (data slot 10; funds 5, lastReward 11)
+        g_acc.data = cJSON_CreateArray();
+        for (int i = 0; i < 49; i++) cJSON_AddItemToArray(g_acc.data, cJSON_CreateNull());
+        cJSON_ReplaceItemInArray(g_acc.data, 5, cJSON_CreateNumber(g_acc.funds));
+        cJSON_ReplaceItemInArray(g_acc.data, 10, cJSON_Duplicate(skins, 1));
+        cJSON_ReplaceItemInArray(g_acc.data, 11, cJSON_CreateNumber(0));
+    }
     email_state(cJSON_GetObjectItem(account, "email")); // {email, verified, pending, mail}
     g_acc.has_2fa = cnum(account, "twofa") != 0.0;
     g_tab_index = (int) cnum(account, "tab"); // windows[4].tabIndex

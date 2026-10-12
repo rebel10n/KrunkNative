@@ -550,6 +550,10 @@ static const SocialRoute k_routes[] = {
     {"uploadM", sh_upload_map},
     {"spin", sh_spin},
     {"fkr", sh_free_kr},
+    {"spinH", sh_spin_history},
+    {"sfkr", sh_noop},        /* v7.1.4 Free KR ad: started / loaded / failed (no ads here) */
+    {"lfkr", sh_noop},
+    {"fkrf", sh_noop},
     {"clm", sh_claim},
     {"chg", sh_challenges},   /* WP-E part 2c (progress.c) */
     {"bdg", sh_badge_select},

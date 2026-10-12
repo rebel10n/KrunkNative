@@ -106,7 +106,10 @@ void acct_revoke_token(const char *token);
 typedef struct SkinInfo {
     int rarity, weapon, type, seas, min_rec;
     unsigned char limited, blocked, no_spin, illicit, no_sale, no_quick_sell;
+    unsigned char black_m, opensea, m_seas, req; /* v7.1.4 getSpnItems filters (req: has a checkReq requirement) */
+    int spin_wheel;                              /* TICKET items: index of its spinWheel (store.c), -1 none */
     char lim_t[24];
+    char lim_g[32];                              /* limG */
     char name[48];
 } SkinInfo;
 const SkinInfo *acct_skin(int64_t index);   /* NULL when unknown / no skins file */
@@ -238,6 +241,7 @@ void sh_delete_creation(SocialSession *s, const cJSON *f);  /* "delC" */
 void sh_upload_files(SocialSession *s, const cJSON *f);  /* "uploadMo" / "uploadA" */
 void sh_spin(SocialSession *s, const cJSON *f);          /* "spin" (store.c) */
 void sh_free_kr(SocialSession *s, const cJSON *f);       /* "fkr" */
+void sh_spin_history(SocialSession *s, const cJSON *f);  /* "spinH" */
 void sh_claim(SocialSession *s, const cJSON *f);         /* "clm" */
 /* player-viewer WP-E part 2c (progress.c): badges, v7 challenges, medal counts */
 void sh_challenges(SocialSession *s, const cJSON *f);    /* "chg" */

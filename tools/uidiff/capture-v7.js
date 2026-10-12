@@ -76,7 +76,7 @@ const RECT_IDS = ['windowHeader', 'menuWindow', 'windowHolder', 'signedOutHeader
   'topLeftMain',
   // the prize wheel screen (win-spin*)
   'spinWindow', 'spinInfo', 'spinItems', 'spinButton', 'spinKR', 'spinHistoryBtn', 'spinItem', 'spinItemCanvas',
-  'spinItemName', 'spinUIBtns'];
+  'spinItemName', 'spinUIBtns', 'spinNextBtn', 'spinAgainBtn', 'spinEquipBtn', 'spinHistoryPop', 'shopSideSellB'];
 const RECTS = `(() => { const o = {}; for (const id of ${JSON.stringify(RECT_IDS)}) { const e = document.getElementById(id);
   if (!e) continue; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
   const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
@@ -228,6 +228,63 @@ for (const [tag, size] of SPIN_SIZES) {
     await settle(c, 600);
   }, { size });
 }
+// Signed in with spin tickets (two Season 7 Starter, one Ultra) and the Free KR wheel claimable:
+// the Store's home tab (Heroic card: 1x / 10x / Redeem), its Prize Wheels tab, and the wheel's
+// Spin History popup (io_saveSpinHistory with SPIN_HISTORY's rows)
+const SPIN_SKINS = [{ ind: 6423, cnt: 2 }, { ind: 6426, cnt: 1 }, { ind: 15, cnt: 1 }];
+const SPIN_HISTORY = [{ ind: 15, dte: 1791800000000, fds: 50 }, { ind: 5996, dte: 1791790000000, fds: 50 },
+  { ind: 6043, dte: 1791780000000, fds: 100 }, { ind: 6062, dte: 1791000000000, fds: 0 }, { ind: 6087, dte: 1790000000000, fds: 500 }];
+async function spinAccount(c, extra) {
+  const acc = seasonAccount('free');
+  await menuBase(c);
+  const tuple = new Array(49).fill(null);
+  Object.assign(tuple, { 0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: acc.funds || 0, 6: acc.score || 0, 7: null, 8: 0, 9: 0, 10: SPIN_SKINS, 11: 0,
+    12: 0, 13: 0, 14: 0, 15: acc.stats || {}, 16: 0, 21: 0, 23: acc.name, 44: [], 45: [], 47: 0 });
+  let ok = false; // the pause can land outside the bundle (hook.js: every name null): retry
+  for (let i = 0; i < 8 && !ok; i++) {
+    await exposeBundle(c, ['io_accountResponse', 'io_saveSpinHistory']).catch(() => 0);
+    ok = await c.eval("typeof (window.__kn || {}).io_accountResponse === 'function'");
+  }
+  if (!ok) console.error('[capture-v7] spinAccount: the bundle scope was not reached');
+  const r = await c.eval(`(() => { try { closWind();
+    __kn.io_accountResponse(null, 1, ${JSON.stringify(acc.name)}, ${JSON.stringify(tuple)}, null); ${extra}
+    return 1; } catch (e) { return String(e.stack); } })()`);
+  if (r !== 1) console.error('[capture-v7] spinAccount: ' + r);
+}
+scenario('win-shop-spin', 'windows', async (c) => {
+  await spinAccount(c, 'windows[13].tabIndex = 0; windows[13].subTab = 0; showWindow(14, true);');
+  await settle(c, 1500);
+});
+scenario('win-shop-wheels', 'windows', async (c) => {
+  await spinAccount(c, 'windows[13].tabIndex = 1; showWindow(14, true);');
+  await settle(c, 1500);
+});
+scenario('win-spin-history', 'windows', async (c) => {
+  await spinAccount(c, `prizeWheel(0, null, false, false, true); __kn.io_saveSpinHistory(${JSON.stringify(SPIN_HISTORY)});`);
+  await settle(c, 1500);
+});
+// win-spin-multi: the Starter wheel's 10x spin (prizeWheel(0, null, 10)) answered with ten rolls
+// and items (a brain_social_ws run's), revealed: the highest rarity first and "Next Item"
+const MULTI = { rolls: [11.3775, 56.5799, 73.6815, 57.9684, 81.7105, 26.9725, 24.0595, 82.6168, 13.3432, 51.2703],
+  items: [6043, 6062, 6083, 6020, 5996, 6087, 6083, 6033, 6082, 6031] };
+scenario('win-spin-multi', 'windows', async (c) => {
+  const acc = seasonAccount('free');
+  await menuBase(c);
+  const tuple = new Array(49).fill(null);
+  Object.assign(tuple, { 0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: acc.funds || 0, 6: acc.score || 0, 7: null, 8: 0, 9: 0, 10: [], 11: 0,
+    12: 0, 13: 0, 14: 0, 15: acc.stats || {}, 16: 0, 21: 0, 23: acc.name, 44: [], 45: [], 47: 0 });
+  const ex = await exposeBundle(c, ['io_accountResponse', 'io_spinResponse']);
+  if (ex !== 1) console.error('[capture-v7] win-spin-multi: the bundle scope was not reached');
+  const r = await c.eval(`(() => { try { closWind();
+    __kn.io_accountResponse(null, 1, ${JSON.stringify(acc.name)}, ${JSON.stringify(tuple)}, null);
+    prizeWheel(0, null, 10, false, true);
+    __kn.io_spinResponse(null, ${JSON.stringify(MULTI.rolls)}, ${JSON.stringify(MULTI.items)}, ${(acc.funds || 0) - 500}, null);
+    return 1; } catch (e) { return String(e.stack); } })()`);
+  if (r !== 1) console.error('[capture-v7] win-spin-multi: ' + r);
+  for (let i = 0; i < 480 && await c.eval('spinItem.style.display') !== 'block'; i++) await sleep(1000);
+  await sleep(3000);
+  await settle(c, 600);
+});
 win('win-join', 24);
 win('win-download', 25);
 win('win-ranked', 27);

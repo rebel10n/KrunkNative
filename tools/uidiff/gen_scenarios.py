@@ -300,7 +300,8 @@ for tag, (sw, sh) in SPIN_SIZES:
             R("spin-items", pad(rc["spinItems"], 2, sw, sh), "image", "#spinItems: four random previews + More", skip=True)]
     if "spinHistoryBtn" in rc:
         regs.append(R("spin-history", pad(rc["spinHistoryBtn"], 2, sw, sh), "text",
-                      "#spinHistoryBtn: KrunkNative has no spin history (no button)", skip=True))
+                      "#spinHistoryBtn: Spin History" + ("" if sw == 1280 else "; the scaled button lands 1px lower than in Chromium (its borders)"),
+                      max_pct=3.0 if sw == 1280 else 8.0))
     add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [sw, sh], "background": MENU_BG,
                "state": dict(scen["menu-1280"]["state"], window=None, spin=0), "frames": 3,
                "note": "Store prize wheel (Starter), %dx%d" % (sw, sh)}, regs)
@@ -310,13 +311,65 @@ for tag, (sw, sh) in SPIN_SIZES:
     regs = [R("item", disc, "scene", "the won item over the wheel: v7's three.js model vs KrunkNative's preview image", skip=True),
             # the card's text column only: the item (3D in v7, an image here) shows through the card's sides
             R("item-name", pad(text_column(rc["spinItemName"]), 2, sw, sh), "text", "#spinItemName text: Digital AK / Assault Rifle / NEW"
-              + ("; at 720 px the subtitle is a 7px font whose glyphs land 1px apart" if sw < 1000 else ""),
-              max_pct=6.5 if sw < 1000 else None),
+              + ("; at 720 px the subtitle is a 7px font whose glyphs land 1px apart (and random confetti)" if sw < 1000 else ""),
+              max_pct=9.0 if sw < 1000 else None),
             R("item-buttons", pad(rc["spinUIBtns"], 2, sw, sh), "text", "#spinUIBtns: respin 50 KR, ?, Equip Item")]
     add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [sw, sh], "background": MENU_BG,
                "state": dict(scen["menu-1280"]["state"], window=None, spin=0, spinResult={"rand": 40, "item": 15},
                              name="Player", account=season_account("free")), "frames": 3,
                "note": "Store prize wheel (Starter): the won item's reveal, %dx%d" % (sw, sh)}, regs)
+
+# win-spin-multi: the Starter wheel's 10x spin answered with ten rolls / items (capture-v7.js MULTI),
+# revealed: the highest rarity first (Lineae, Rare), the respin button at 10 x 50 KR and Next Item
+MULTI = {"rand": [11.3775, 56.5799, 73.6815, 57.9684, 81.7105, 26.9725, 24.0595, 82.6168, 13.3432, 51.2703],
+         "item": [6043, 6062, 6083, 6020, 5996, 6087, 6083, 6033, 6082, 6031]}
+rc = rects("windows/win-spin-multi")
+x, y, w, h = rc["spinWindow"]
+r = w / 4.0
+regs = [R("item", pad([x + w / 2.0 - r, y + h / 2.0 - r, 2 * r, 2 * r], 4), "scene",
+          "the won item over the wheel: v7's three.js model vs KrunkNative's preview image", skip=True),
+        R("item-name", pad(text_column(rc["spinItemName"])), "text", "#spinItemName text: Lineae / Sniper Rifle / NEW"),
+        R("item-buttons", pad(rc["spinUIBtns"]), "text", "#spinUIBtns: respin 500 KR, ?, Equip Item, Next Item"),
+        R("spin-info", pad(rc["spinInfo"]), "text", "#spinInfo")]
+add("win-spin-multi", {"ref": "%s/windows/win-spin-multi.png" % REF, "size": [1280, 720], "background": MENU_BG,
+                       "state": dict(scen["menu-1280"]["state"], window=None, spin=0, spinMulti=True, spinResult=MULTI,
+                                     name="Player", account=season_account("free")), "frames": 3,
+                       "note": "Store prize wheel (Starter) 10x spin: the first (highest rarity) item revealed"}, regs)
+
+# Signed in with spin tickets (capture-v7.js SPIN_SKINS): the Store home (Heroic card), the Prize
+# Wheels tab (ticket counts, Ultra's "You have 1", View Tickets "You have 3") and the Spin History
+# popup (SPIN_HISTORY, dates in the machine's time zone like v7's toDateString)
+SPIN_SKINS = [{"ind": 6423, "cnt": 2}, {"ind": 6426, "cnt": 1}, {"ind": 15, "cnt": 1}]
+SPIN_HISTORY = [{"ind": 15, "dte": 1791800000000, "fds": 50}, {"ind": 5996, "dte": 1791790000000, "fds": 50},
+                {"ind": 6043, "dte": 1791780000000, "fds": 100}, {"ind": 6062, "dte": 1791000000000, "fds": 0},
+                {"ind": 6087, "dte": 1790000000000, "fds": 500}]
+spin_acc = dict(season_account("free"), skins=SPIN_SKINS)
+for name, extra, note in (("win-shop-spin", {"window": 14}, "Store home tab signed in: the Heroic card"),
+                          ("win-shop-wheels", {"window": 14, "windowActions": [["windows.13.switchTab", 1]]},
+                           "Store Prize Wheels tab signed in, with spin tickets")):
+    rc = rects("windows/" + name)
+    x, y, w, h = rc["menuWindow"]
+    regs = [R("window-header", pad([x, y, w, 82]), "text", "#menuWindow top (tabs, the Prize Wheels line)"),
+            R("window-body", pad([x, y + 82, w, h - 82]), "text",
+              "#menuWindow body: the wheel cards; each shows a random item of its pool (yateShuffle), so only measured",
+              skip=True)]
+    if "shopSideSellB" in rc:
+        hx, hy, hw_, hh = rc["shopSideSellB"]
+        regs = [R("heroic-card-text", pad([hx, hy + hh * 2 // 3, hw_, hh // 3]), "text",
+                  "#shopSideSellB lower third: Heroic Spin / 500 KR | ticket (the random item picture sits above;"
+                  " the title's 30px black text-shadow glow differs at the glyph edges)", max_pct=5.0)]
+    add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [1280, 720], "background": MENU_BG,
+               "state": dict(scen["menu-1280"]["state"], name="Player", account=spin_acc, **extra), "frames": 3, "note": note}, regs)
+rc = rects("windows/win-spin-history")
+add("win-spin-history", {"ref": "%s/windows/win-spin-history.png" % REF, "size": [1280, 720], "background": MENU_BG,
+                         "state": dict(scen["menu-1280"]["state"], window=None, spin=0, spinHistory=SPIN_HISTORY,
+                                       name="Player", account=spin_acc), "frames": 3,
+                         "note": "The Starter wheel's Spin History popup (a spinH reply)"},
+    [R("history-popup", pad(rc["spinHistoryPop"]), "text", "#spinHistoryPop: Stats / Recent Items / Load More, the date range, five items")])
+
+# ------------------------------------------------------------------------ in-game
+# In-game references are v7's sandbox (Free for All on Kanji, local player "Local User") with the
+# 3D canvas hidden over flat black, so the render compares over the same flat black. The
 
 # profile-layout: the signed-in Profile window (showWindow(5), windows[4].gen(): 1280 px wide when
 # signed in, 955 px for the guest form) with a long name, a clan and a high level, at the menu

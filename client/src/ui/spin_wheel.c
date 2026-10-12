@@ -27,7 +27,7 @@ static struct {
     unsigned program, vao, vbo;
     int failed;
     int u_mode, u_center, u_radius, u_slice_rotation, u_slice_count, u_slice_from, u_slice_to, u_slice_rgb;
-    int u_pointer_rotation, u_pointer_scale, u_shadow_sigma;
+    int u_pointer_rotation, u_pointer_count, u_pointer_scale, u_shadow_sigma;
     Confetto confetti[CONFETTI_MAX];
     int confetti_count;
     double confetti_time; // glfwGetTime of the last confetti step
@@ -60,6 +60,7 @@ static int ensure_program(void) {
     g_sw.u_slice_to = glGetUniformLocation(p, "slice_to");
     g_sw.u_slice_rgb = glGetUniformLocation(p, "slice_rgb");
     g_sw.u_pointer_rotation = glGetUniformLocation(p, "pointer_rotation");
+    g_sw.u_pointer_count = glGetUniformLocation(p, "pointer_count");
     g_sw.u_pointer_scale = glGetUniformLocation(p, "pointer_scale");
     g_sw.u_shadow_sigma = glGetUniformLocation(p, "shadow_sigma");
 
@@ -158,7 +159,8 @@ void spin_wheel_render(Client *client) {
     glUniform1fv(g_sw.u_slice_from, SPIN_WHEEL_MAX_SLICES, d->slice_from);
     glUniform1fv(g_sw.u_slice_to, SPIN_WHEEL_MAX_SLICES, d->slice_to);
     glUniform3fv(g_sw.u_slice_rgb, SPIN_WHEEL_MAX_SLICES, &d->slice_rgb[0][0]);
-    glUniform1f(g_sw.u_pointer_rotation, d->pointer_rotation);
+    glUniform1fv(g_sw.u_pointer_rotation, SPIN_WHEEL_MAX_POINTERS, d->pointer_rotation);
+    glUniform1i(g_sw.u_pointer_count, d->pointer_count);
     glUniform1f(g_sw.u_pointer_scale, d->pointer_scale);
     glUniform1f(g_sw.u_shadow_sigma, SHADOW_SIGMA);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (6 * VERTEX_FLOATS * sizeof(float)), v, GL_STREAM_DRAW);

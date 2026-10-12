@@ -2,7 +2,7 @@
 // The prize wheel's 2D canvas (#spinWindow) and the unboxing confetti, drawn with GL.
 //
 // v7.1.4 draws the wheel every frame into a 2D canvas (index.js updateSpinUi: #2b2b2b disc,
-// one pie slice per rarity sized by its odds, the red pointer rotated by spinRotation, the
+// one pie slice per rarity sized by its odds, a red pointer per item rotated to its roll, the
 // #2b2b2b centre disc; pointer and centre with shadowBlur 20) and fires canvas-confetti when the
 // wheel stops. The page has no 2D canvas natively or on the web, so store_ui.c (the spin logic,
 // client/src/ui/store_ui.c) fills a SpinWheelDraw each frame and client/src/ui/spin_wheel.c
@@ -12,6 +12,7 @@
 #include <client.h>
 
 #define SPIN_WHEEL_MAX_SLICES 8
+#define SPIN_WHEEL_MAX_POINTERS 16 // one per item of a multi-spin (wheel.multi is 10)
 
 typedef struct SpinWheelDraw {
     int visible;
@@ -22,7 +23,8 @@ typedef struct SpinWheelDraw {
     int slices;
     float slice_from[SPIN_WHEEL_MAX_SLICES], slice_to[SPIN_WHEEL_MAX_SLICES]; // radians, canvas arc angles
     float slice_rgb[SPIN_WHEEL_MAX_SLICES][3];
-    float pointer_rotation;    // spinRotation
+    int pointer_count;         // vA630.length
+    float pointer_rotation[SPIN_WHEEL_MAX_POINTERS]; // vA630: each pointer's angle
     float pointer_scale;       // spinButtonOpacity (the pointer shrinks away once the item shows)
 } SpinWheelDraw;
 

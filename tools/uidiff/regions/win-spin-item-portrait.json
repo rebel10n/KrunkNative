@@ -29,8 +29,8 @@
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 6.5,
-      "note": "#spinItemName text: Digital AK / Assault Rifle / NEW; at 720 px the subtitle is a 7px font whose glyphs land 1px apart"
+      "max_pct": 9.0,
+      "note": "#spinItemName text: Digital AK / Assault Rifle / NEW; at 720 px the subtitle is a 7px font whose glyphs land 1px apart (and random confetti)"
     },
     {
       "name": "item-buttons",

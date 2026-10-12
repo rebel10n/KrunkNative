@@ -917,8 +917,7 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 | `page_size` / `leaderboard_cache_s` | `100` / `30` | leaderboard rows / per (query, region) cache |
 | `skins_file` / `assets_dir` | `assets/skins.json` / `assets` | store skins in `store.skins` index order (wheels, quick sell, market filters) / map catalogue JSON |
 | `current_season` | `7` | `config.currentSeason`: the Battle Pass, season stats / leaderboards and season badges of this season, and wheels only roll skins of it; raising it rolls the season over at the next start (7.8) |
-| `reward_time_s` / `reward_min_level` / `daily_reward_kr` | `21600` / `5` / `50` | `config.rewardTime` between Free KR spins / daily rewards (shared `lastReward`), `config.rewardMinLvl`, KR of `clm` |
-| `free_wheel_cooldown_s` | `21600` | the "Free" wheel (index 4) once per this |
+| `reward_time_s` / `reward_min_level` / `daily_reward_kr` | `43200` / `5` / `50` | `config.rewardTime` between Free KR spins / daily rewards (shared `lastReward`), `config.rewardMinLvl`, KR of `clm` |
 
 ### 7.2 Schema (PostgreSQL names; same tables on sqlite / mysql)
 
@@ -1083,8 +1082,9 @@ Other labels (request -> reply):
 | `["edMp", name]` | `["edMp", mapJson \| null]` (own maps; devs / creation mods any) |
 | `["fvM", id, kind, 1\|0]`, `["ftC", id, 1\|0, kind]`, `["delC", id, kind]` | favourite; feature (devs); delete (creator, devs, creation mods) -> `["po", "SUCCESS", null, "Deleted"]` (kind 0 map, 1 mod, 2 asset) |
 | `["uploadMo", ...]`, `["uploadA", ...]` | `["upMp", "File uploads are not supported on this server"(, 1)]` (v3.1.1 posts the files to `/upload-user-mod` / `/upload-user-asset`, not hosted) |
-| `["spin", wheel(, twitch)]` | `["spin", null, randNum, skinIndex, funds, 0]` / `["spin", err]`: v3.1.1 `store.wheels` (0 Starter 50 KR, 1 Elite 100, 2 Heroic 500, 3 Valour locked, 4 Free (lvl 5, cooldown), 5 Free KR -> `fkr`, 6 Twitch refused); rarity roll and `getSpnItems` like `io_spin`; the skin goes to the inventory |
-| `["fkr", captcha]` | `["spinKR", lastReward, randNum, rewardIndex, funds]` / `["spinKR", null, null, null, null, err]`: `store.freeKR[i].kr[level >= 20]`, once per `reward_time_s` |
+| `["spin", wheel, ticket, multi]` | `["spin", null, randNum(s), itemID(s), funds, ticket\|null]` / `["spin", err]`: v7.1.4 `store.wheels` (0 Starter 50 KR, 1 Elite 100, 2 Heroic 500; `multi` = 10 rolls at the price each, numbers become arrays) or a TICKET item's `spinWheel` (`wheel` null, `ticket` = its store index: consumed, no KR; Ultra (3) only spins this way, Free KR (4) through `fkr`). Each roll picks the slice its `randNum` lands on, then an item of `getSpnItems` (that rarity, `bigRar` and up for big rolls, this season unless `mSeas`, no `noSpin`/`blocked`/`limited`/`blackM`/`opensea`/`req`, matching `limType`/`limGroup`). Charged per roll and granted in one transaction (`kr_transactions` / `skin_transactions`, source `spin`, ref `<wheel>:<KR>` or `t<ticket>:0`). v7.1.4's server has no spin code: this is the contract its client implies |
+| `["spinH", offset]` | `["spinH", [{ind, dte, fds}]]`: the won items newest first, 50 from `offset` (`dte` epoch ms, `fds` KR spent; v3.1.1-era rows cost their wheel's price); `null` for guests |
+| `["fkr"]` | `["spinKR", lastReward, randNum, freeKRIndex, funds]` / `["spinKR", null, null, null, null, err]`: the Free KR wheel (rarities 50/39/10/1 %, `store.freeKR` 5/10/20/500 KR, level 1), once per `reward_time_s`; `sfkr` / `lfkr` / `fkrf` (v7's ad events) are accepted |
 | `["clm"]` | `["clm", lastReward, funds]` / `["pRes", null, err]`: daily reward (level >= `reward_min_level`, `daily_reward_kr`, same clock as `fkr`); `["unbx"]` is accepted |
 | `["rpt", name, reason, details]` / `["grp", name]` | `["rpr", ok]` / `["rps", rows]` (staff) |
 | `["chg"]` | `["chgL", activeChallenges]`: `[{CI, T, DAT, REW, IC, N, PV, PT, TR?, PER}]` (v7 `account.activeChallenges`; TR = ms left of a daily / weekly one; 3 daily + 3 weekly rotate per account and UTC day / week) (WP-E part 2c, `progress.c`) |

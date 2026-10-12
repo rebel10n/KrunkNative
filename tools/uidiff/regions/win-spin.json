@@ -56,8 +56,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": true,
-      "note": "#spinHistoryBtn: KrunkNative has no spin history (no button)"
+      "note": "#spinHistoryBtn: Spin History"
     }
   ]
 }

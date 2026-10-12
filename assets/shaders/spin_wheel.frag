@@ -3,7 +3,7 @@
 //   fill #2b2b2b arc(center, R)                                outer disc
 //   rotate(sliceRotation); per rarity fill colour arc(0.95 R)  pie slices sized by the odds
 //   shadowColor black, shadowBlur 20 (kept for the rest of the frame):
-//   rotate(spinRotation); fill #F44336 triangle                the pointer (half width 0.7 x 0.6 R)
+//   per item: rotate(vA630[k]); fill #F44336 triangle         the pointers (half width 0.7 x 0.6 R)
 //   fill #2b2b2b arc(center, 0.6 R)                            centre disc (under #spinButton)
 // Edges are 3x3 supersampled like the canvas's antialiasing; the shadows are analytic Gaussians
 // (shadowBlur 20 = sigma 10). Output is premultiplied (blend ONE, ONE_MINUS_SRC_ALPHA).
@@ -20,7 +20,8 @@ uniform int slice_count;
 uniform float slice_from[8];
 uniform float slice_to[8];
 uniform vec3 slice_rgb[8];
-uniform float pointer_rotation;
+uniform float pointer_rotation[16];
+uniform int pointer_count;
 uniform float pointer_scale;
 uniform float shadow_sigma;
 
@@ -74,18 +75,22 @@ vec4 wheel_sample(vec2 p) {
         vec3 rgb = slice_color(angle, covered);
         dst = over(dst, rgb, covered);
     }
-    // the pointer, in its rotated frame: canvas rotate(t) maps local q to device R(t) q
-    float cs = cos(pointer_rotation), sn = sin(pointer_rotation);
-    vec2 q = vec2(cs * d.x + sn * d.y, -sn * d.x + cs * d.y);
+    // the pointers (one per item), each in its rotated frame: canvas rotate(t) maps local q to
+    // device R(t) q; drawn in order, each with its shadow over the ones before
     float inner = radius * 0.6;
     vec2 tip = vec2(0.0, inner * -1.2 * pointer_scale);
     vec2 right = vec2(inner * 0.7 * pointer_scale, 0.0);
     vec2 left = vec2(-inner * 0.7 * pointer_scale, 0.0);
     if (pointer_scale > 0.0) {
-        float sd = triangle_sdf(q, tip, right, left);
-        float shadow = gauss_cdf(-sd / shadow_sigma) * smoothstep(0.0, 0.15, pointer_scale);
-        dst = over(dst, vec3(0.0), shadow);
-        if (sd < 0.0) dst = over(dst, vec3(0.956863, 0.262745, 0.211765), 1.0); // #F44336
+        for (int k = 0; k < 16; k++) {
+            if (k >= pointer_count) break;
+            float cs = cos(pointer_rotation[k]), sn = sin(pointer_rotation[k]);
+            vec2 q = vec2(cs * d.x + sn * d.y, -sn * d.x + cs * d.y);
+            float sd = triangle_sdf(q, tip, right, left);
+            float shadow = gauss_cdf(-sd / shadow_sigma) * smoothstep(0.0, 0.15, pointer_scale);
+            dst = over(dst, vec3(0.0), shadow);
+            if (sd < 0.0) dst = over(dst, vec3(0.956863, 0.262745, 0.211765), 1.0); // #F44336
+        }
     }
     dst = over(dst, vec3(0.0), gauss_cdf((inner - r) / shadow_sigma));
     if (r < inner) dst = over(dst, DISC, 1.0);

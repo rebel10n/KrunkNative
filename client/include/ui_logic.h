@@ -460,6 +460,8 @@ void ui_loadout_select_tab(int tab);             // the same from selectClass: r
 void ui_loadout_show_police_pop(void);           // shoPolicePop
 void ui_loadout_hide_police_pop(void);           // hidePolicePop
 void ui_loadout_clear_pops(void);                // clearPops
+void ui_loadout_reset_pops(void);                // resetPops (the popup holder stays up)
+int social_estimate_value(int skin);             // data/prices.js prices.estimateValue (0 unknown)
 int  ui_police_active(void);                     // Officer Buddy is in the class preview
 void menu_idle_reset(void);                      // menu_ui.c: CONTROLS.idleTimer = 0 (any key, window, menu toggle)
 float menu_preview_backdrop_alpha(void);         // menu_ui.c: class preview backdrop (0.5, 0.875 under the K.P.D popup)

@@ -515,26 +515,33 @@ static kn_db_result *run_ensure_central(kn_dbconn *c, int n, const char *const *
 }
 const kn_proc P_ENSURE_CENTRAL = {"ensure_central", NULL, run_ensure_central};
 
-/* ------------------------------------------------------------------ store (postgres/0106) */
+/* ------------------------------------------------------------------ store (postgres/0106 for the KR wheel / daily reward) */
 
-/* (id, wheel, price, skin, cooldown_ms, now_ms) -> {funds, skin, count} */
-static kn_db_result *run_spin(kn_dbconn *c, int n, const char *const *p) {
+/* v7.1.4 prize wheel spin (store.c), C on every driver (one transaction):
+ * (id, ref, price_each, skins "a,b,c", ticket) -> {funds}. A ticket >= 0 is consumed first
+ * (a TICKET item's spinWheel: no KR); else every roll is charged price_each with its own
+ * kr_transactions row. Each won skin is granted with a skin_transactions row (source "spin",
+ * ref "<wheel>:<price_each>" or "t<ticket>:0": the spin history reads them back). */
+static kn_db_result *run_spin_multi(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
-    if (PI(4) > 0 &&
-        dbx_exec(&x, SQL(.any = "UPDATE players SET player_lastfreespin = {int:$2} WHERE player_id = $1"
-                                " AND player_lastfreespin <= {int:$2} - {int:$3}"),
-                 KN_DB_ARGS(P(0), P(5), P(4))) == 0)
-        dbx_refuse(&x, "Spin Error 5");
-    int64_t funds = 0, count = 0;
-    db_add_funds(&x, PI(0), -PI(2), "spin", P(1), &funds);
-    db_add_skin(&x, PI(0), PI(3), 1, "spin", P(1), &count);
+    const int64_t id = PI(0), price = PI(2), ticket = P(4) ? PI(4) : -1;
+    const char *ref = P(1), *list = P(3);
+    if (!list || !*list) return kn_db_result_user_error("Error generating item");
+    if (ticket >= 0) db_add_skin(&x, id, ticket, -1, "ticket", ref, NULL);
+    for (const char *q = list; *q && !dbx_failed(&x);) {
+        char *end = NULL;
+        const long long skin = strtoll(q, &end, 10);
+        if (!end || end == q) break;
+        if (price > 0) db_add_funds(&x, id, -price, "spin", ref, NULL);
+        db_add_skin(&x, id, skin, 1, "spin", ref, NULL);
+        q = *end == ',' ? end + 1 : end;
+    }
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddNumberToObject(o, "funds", (double)funds);
-    cJSON_AddNumberToObject(o, "skin", (double)PI(3));
-    cJSON_AddNumberToObject(o, "count", (double)count);
-    return dbx_json(&x, "kn_spin", o);
+    cJSON_AddNumberToObject(o, "funds",
+                            (double)dbx_int(&x, SQL(.any = "SELECT player_funds FROM players WHERE player_id = $1"), KN_DB_ARGS(P(0)), 0));
+    return dbx_json(&x, "spin", o);
 }
-const kn_proc P_SPIN = {"spin", "SELECT kn_spin($1, $2, $3, $4, $5, $6)", run_spin};
+const kn_proc P_SPIN_MULTI = {"spin_multi", NULL, run_spin_multi};
 
 static kn_db_result *daily_kr(Dbx *x, const char *id, const char *kr, const char *cd, const char *now,
                               const char *source) {

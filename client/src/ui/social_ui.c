@@ -2036,6 +2036,8 @@ static int estimate_value(const int skin) {
     return skin >= 0 && (size_t) skin < sizeof(k_prices) / sizeof(k_prices[0]) ? k_prices[skin] : 0;
 }
 
+int social_estimate_value(const int skin) { return estimate_value(skin); }
+
 static const int k_rarity_sell[] = {1, 3, 10, 100, 500, 2500, 10000}; // store.rarities[r].sell
 
 static const ViewerSkin *hub_skin(const int index) {

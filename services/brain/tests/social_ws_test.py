@@ -226,6 +226,9 @@ class Internal:
 FAILS = []
 
 
+ROOT = "."  # the repository root (argv[2]): assets/skins.json for the wheel checks
+
+
 def check(cond, what):
     print(("ok   " if cond else "FAIL ") + what, flush=True)
     if not cond:
@@ -459,21 +462,74 @@ async def scenario(base, internal_url, secret):
         r = await a.call("po", "delC", r[4][0]["map_id"], 0)
         check(r[1] == "SUCCESS", "creator deletes the map")
 
-    # store: prize wheels, Free KR wheel, daily reward; ranked elo deltas
+    # store: v7.1.4 prize wheels (single, 10x multi, tickets), spin history, Free KR wheel,
+    # daily reward; ranked elo deltas
     carol = "carol" + stamp
+    with open(os.path.join(ROOT, "assets", "skins.json")) as fp:
+        skins = json.load(fp)
+    season = 7  # accounts.current_season (default): store wheels roll this season's items
+
+    def slice_of(rarities, roll):  # the wheel slice a roll in [0, 100) lands on
+        for i, share in enumerate(rarities):
+            if roll < share:
+                return i
+            roll -= share
+        return max(i for i, share in enumerate(rarities) if share > 0)
+
+    def check_rolls(rolls, items, rarities, big_rar, what):
+        ok = len(rolls) == len(items) and all(0 <= n < 100 for n in rolls)
+        for n, i in zip(rolls, items):
+            k, r = skins[i], slice_of(rarities, n)
+            ok = ok and (k.get("rarity", 0) == r or (big_rar and r >= big_rar and k.get("rarity", 0) >= big_rar))
+            ok = ok and (k.get("mSeas") or k.get("seas", 1) == season) and not k.get("noSpin") and not k.get("limT")
+        check(ok, what + ": every item has the rarity of its roll's slice, this season's pool: %r" % list(zip(rolls, items)))
+
+    starter, heroic = [75, 22, 3, 0, 0, 0], [0, 48, 35, 14, 2.49, 0.5, 0.01]
     async with Social(ws_url, json_mode=True) as c:
         r = await c.call("a", "a", 0, [carol, "carol_pw1", None])
         carol_id = r[2]
-        r = await c.call("spin", "spin", 0)
-        check(r[1] is None and 0 <= r[2] < 100 and isinstance(r[3], int) and r[4] == 950, "Starter wheel spin: %r" % r)
-        skin_won = r[3]
+        r = await c.call("spin", "spin", 0, None, False)
+        check(r[1] is None and isinstance(r[3], int) and r[4] == 950 and r[5] is None, "Starter wheel spin: %r" % r)
+        check_rolls([r[2]], [r[3]], starter, 0, "Starter spin")
+        won = [r[3]]
+        r = await c.call("spin", "spin", 0, None, True)
+        check(r[1] is None and len(r[2]) == 10 and len(r[3]) == 10 and r[4] == 450, "Starter 10x spin costs 10 x 50 KR: %r" % r)
+        check_rolls(r[2], r[3], starter, 0, "Starter 10x")
+        won += r[3]
         r = await c.call("0", "r", "market", "inventory", carol_id, carol, None, 0)
-        check(any(x["i"] == skin_won for x in r[3]), "won skin in inventory")
-        r = await c.call("spin", "spin", 3)
-        check(r[1] == "Wheel unavailable", "locked wheel refused")
-        r = await c.call("spinKR", "fkr", "captcha")
-        check(r[1] > 0 and 0 <= r[3] <= 6 and r[4] > 950, "Free KR wheel: %r" % r)
-        r = await c.call("spinKR", "fkr", "captcha")
+        inv = {x["i"]: x.get("c", 1) for x in r[3]}
+        check(all(i in inv for i in won), "won skins in the inventory")
+        r = await c.call("spin", "spin", 2, None, True)
+        check(r[1] == "Not enough KR", "Heroic 10x needs 5000 KR: %r" % r)
+        for wheel, err in ((3, "Wheel unavailable"), (4, "Wheel unavailable"), (9, "Invalid spin")):
+            r = await c.call("spin", "spin", wheel, None, False)
+            check(r[1] == err, "wheel %d refused (%s): %r" % (wheel, err, r))
+        r = await c.call("spin", "spin", None, 5, False)
+        check(r[1] == "Invalid spin", "only TICKET items redeem: %r" % r)
+        async with Internal(internal_url, secret) as g:
+            err, _ = await g.op("give_skin", id=carol_id, skin=6426, source="test")  # Season 7 Ultra Ticket
+            check(err is None, "give an Ultra ticket")
+            for _ in range(12):  # 6000 KR (one reward is capped at 500)
+                err, _ = await g.op("rewards", items=[[carol_id, 500]])
+        r = await c.call("spin", "spin", None, 6426, False)
+        check(r[1] is None and isinstance(r[3], int) and r[4] == 6450 and r[5] == 6426, "Ultra ticket redeemed, no KR: %r" % r)
+        check_rolls([r[2]], [r[3]], [0, 28, 53, 13.5, 4.46, 1, 0.04], 5, "Ultra ticket")
+        r = await c.call("spin", "spin", None, 6426, False)
+        check(r[1] == "Item not owned", "a ticket redeems once: %r" % r)
+        r = await c.call("spin", "spin", 2, None, True)
+        check(r[1] is None and len(r[3]) == 10 and r[4] == 1450, "Heroic 10x: %r" % r[1:])
+        check_rolls(r[2], r[3], heroic, 5, "Heroic 10x")
+        r = await c.call("spinH", "spinH", 0)
+        h = r[1]
+        check(isinstance(h, list) and len(h) == 22 and all(isinstance(x["dte"], (int, float)) and x["dte"] > 0 for x in h),
+              "spin history: 22 won items: %r" % (h and h[:2]))
+        check(sum(x["fds"] for x in h) == 50 * 11 + 500 * 10 and h[0]["fds"] == 500, "spin history KR spent per item")
+        check(h[10]["fds"] == 0 and h[11]["fds"] == 50, "the ticket's item cost no KR: %r" % h[10])
+        r = await c.call("spinH", "spinH", 20)
+        check(len(r[1]) == 2, "spin history paging (offset 20)")
+        r = await c.call("spinKR", "fkr")
+        check(r[1] > 0 and 0 <= r[3] <= 3 and r[4] - 1450 == [5, 10, 20, 500][r[3]], "Free KR wheel: %r" % r)
+        r = await c.call("spinKR", "fkr")
         check(r[5] == "Reward not ready yet", "Free KR once per rewardTime")
         r = await c.call("pRes", "clm")
         check(r[2] == "Must be level 5", "daily reward needs level 5: %r" % r)
@@ -529,7 +585,9 @@ def main():
     if len(sys.argv) < 3:
         print(__doc__)
         return 2
+    global ROOT
     brain, root = sys.argv[1], os.path.abspath(sys.argv[2])
+    ROOT = root
     with open(os.path.join(root, "config", "config.json")) as fp:
         db = json.load(fp).get("database", {})
     dbname = os.environ.get("KN_TEST_DB_NAME", "krunknative_svcacc")

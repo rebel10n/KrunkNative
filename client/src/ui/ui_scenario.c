@@ -234,7 +234,9 @@ static void warn_unknown_keys(void) {
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
         "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
-        "spinResult", // {rand, item}: the wheel's spin reply (the won item's reveal)
+        "spinResult", // {rand, item} (arrays for a multi-spin): the wheel's spin reply (the won item's reveal)
+        "spinMulti",  // with spin: the wheel's Nx spin (prizeWheel(i, null, multi))
+        "spinHistory", // with spin: a "spinH" reply [{ind, dte, fds}] (the Spin History popup)
         "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
     };
     const cJSON *item;
@@ -850,12 +852,19 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open) apply_window(client);
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window
     if (menu_open && st_has("spin")) {
-        store_ui_scenario_wheel(st_int("spin", 0));
+        store_ui_scenario_wheel(st_int("spin", 0), st_bool("spinMulti", 0));
         const cJSON *result = st("spinResult");
         if (cJSON_IsObject(result)) {
             run_frames(client, 2); // the wheel's geometry first (store_ui_tick)
-            store_ui_scenario_result(cJSON_GetNumberValue(cJSON_GetObjectItem(result, "rand")),
-                                     (int) cJSON_GetNumberValue(cJSON_GetObjectItem(result, "item")));
+            store_ui_scenario_result(result);
+        }
+        const cJSON *history = st("spinHistory");
+        if (cJSON_IsArray(history)) { // the brain's "spinH" reply: the Spin History popup opens
+            cJSON *frame = cJSON_CreateArray();
+            cJSON_AddItemToArray(frame, cJSON_CreateString("spinH"));
+            cJSON_AddItemToArray(frame, cJSON_Duplicate(history, 1));
+            store_ui_frame(frame);
+            cJSON_Delete(frame);
         }
     }
 

@@ -77,15 +77,19 @@ int  clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
 void clan_ui_reset(void);                   // account changed: drop clanData
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
+void account_remove_skin(int skin_index);   // acc.removeSkin: -1 of skin (a redeemed spin ticket)
+void account_set_last_reward(double ms);    // acc.lastReward (the Free KR wheel's clock)
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)
 void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin): its asset-host URL (html_dom_asset_url)
 char *store_window_gen(void);               // windows[13].gen(): the v7.1.4 Store (guest and signed in), malloc'd
 int  store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
-void store_ui_frame(const cJSON *frame);    // "spin" replies
+void store_ui_frame(const cJSON *frame);    // "spin" / "spinKR" / "spinH" replies
+void store_ui_free_kr_wheel(void);          // claimReward(): the Free KR wheel
+void store_ui_account_changed(void);        // a login / logout: the spin history is the old account's
 void store_ui_tick(void);                   // per frame: spin screen geometry + reveal
-void store_ui_scenario_wheel(int index);    // --render-scenario state.spin: prizeWheel(index) with noAnim
-void store_ui_scenario_result(double rand_num, int item); // state.spinResult: the spin's reply, the spin skipped
+void store_ui_scenario_wheel(int index, int multi); // --render-scenario state.spin(+spinMulti): prizeWheel(index, null, multi) with noAnim
+void store_ui_scenario_result(const cJSON *result); // state.spinResult {rand, item}: the spin's reply, the spin skipped
 
 // ---- servers_ui.c (ClientManager + windows[1])
 void servers_ui_init(Client*, int brain_mode); // brain_mode: matchmake at startup instead of the default server

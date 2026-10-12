@@ -1935,6 +1935,8 @@ static void reset_pops(void) {
     ui_loadout_hide_police_pop();
 }
 
+void ui_loadout_reset_pops(void) { reset_pops(); }
+
 // clearPops()
 void ui_loadout_clear_pops(void) {
     ui_dialog_cancel(); // a pending confirm/prompt (ui_dialog.c) counts as "Cancel"
