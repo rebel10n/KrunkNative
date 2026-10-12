@@ -496,6 +496,60 @@ static void test_textarea(void)
     host_focus(NULL, 0);
 }
 
+/* the code view (widgets_set_code_view) and text editing from C: hard lines only
+ * (a long line does not wrap), tab stops, the gutter shifting the text, caret
+ * rect, selection / replace as one undo step, multi-line paste kept in a textarea. */
+static void test_code_view(void)
+{
+    HtmlElem e = by_id("ta");
+    TextFont *f = text_font(g_text, "gamefont", 16, 400, 0);
+    const float sp = text_measure(f, " ", 1, 0);
+    int a = -1, b = -1;
+    float cx, cy, cw, ch;
+    WidgetsCodeView cv;
+    memset(&cv, 0, sizeof cv);
+    cv.tab_size = 4;
+    cv.gutter = 1;
+    cv.gutter_pad_left = 5;
+    cv.gutter_pad_right = 3;
+    cv.gutter_min_w = 20;
+    cv.gutter_gap = 2;
+    cv.text_pad = 4;
+    set_geom(e, 0, 0, 120, 80, 1, 1, 1, 1, 2, 2, 2, 2);
+    widgets_set_value(g_w, e, "aaaa bbbb cccc dddd eeee\n\tx");
+    widgets_set_code_view(g_w, e, &cv);
+    host_focus(NULL, e);
+    widgets_set_selection(g_w, e, 0, 0);
+    KEY(e, 264, 0);                                        /* Down: the next hard line */
+    CHECK(widgets_selection(g_w, e, &a, &b) && a == 25 && b == 25, "no soft wrap in a code view: Down goes to line 2 (%d)", a);
+    widgets_set_selection(g_w, e, 26, 26);                 /* after the tab */
+    CHECK(widgets_caret_rect(g_w, e, &cx, &cy, &cw, &ch), "caret rect");
+    /* content x 3 + gutter (5 + 20 + 3) + gap 2 + pad 4 + one tab stop (4 spaces) */
+    CHECK_NEAR(cx, 3 + 28 + 2 + 4 + 4 * sp, 0.6, "caret after a tab: the gutter, the gap, the pad and the tab stop");
+    CHECK_NEAR(cy, 3 + 22, 0.6, "caret on line 2");
+    CHECK(widgets_replace_range(g_w, e, 0, 4, "Q"), "replace");
+    CHECK_STR(widgets_get_value(g_w, e), "Q bbbb cccc dddd eeee\n\tx", "replace [0, 4) by Q");
+    CHECK(widgets_selection(g_w, e, &a, &b) && a == 1 && b == 1, "the caret after the replacement");
+    KEY(e, 'Z', CTRL);
+    CHECK_STR(widgets_get_value(g_w, e), "aaaa bbbb cccc dddd eeee\n\tx", "the replacement is one undo step");
+    widgets_set_selection(g_w, e, 4, 99);
+    CHECK(widgets_selection(g_w, e, &a, &b) && a == 4 && b == 27, "set_selection clamps to the value (%d %d)", a, b);
+    /* a multi-line paste keeps its line breaks in a textarea (CRLF -> LF) */
+    widgets_set_value(g_w, e, "");
+    {
+        WidgetsCodeSpan span = {0, 1, {255, 0, 0, 255, 0}, WIDGETS_SPAN_UNDERLINE};
+        widgets_set_code_spans(g_w, e, &span, 1);
+    }
+    widgets_replace_range(g_w, e, 0, 0, "one\r\ntwo");
+    KEY(e, 'A', CTRL);
+    KEY(e, 'X', CTRL);
+    KEY(e, 'V', CTRL);
+    KEY(e, 'V', CTRL);
+    CHECK_STR(widgets_get_value(g_w, e), "one\ntwoone\ntwo", "a textarea paste keeps the line breaks");
+    widgets_set_code_view(g_w, e, NULL);
+    host_focus(NULL, 0);
+}
+
 /* zoom scales the themed control sizes */
 static void test_zoomed_controls(void)
 {
@@ -1353,6 +1407,7 @@ int main(int argc, char **argv)
     test_text_editing();
     test_clipboard_editing();
     test_textarea();
+    test_code_view();
     test_zoomed_controls();
     test_number();
     test_range_events();

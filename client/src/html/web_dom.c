@@ -226,6 +226,281 @@ EM_JS(void, kn_js_scroll_to_bottom, (int id), {
     if (el) el.scrollTop = el.scrollHeight;
 });
 
+// ---- text editing + code view (html_dom.h): offsets are UTF-8 bytes in C, UTF-16 indices
+// in the page. The code view is a <div class="kn-code-overlay"> (gutter + <pre> of coloured
+// spans + the caret-line bar) under the textarea, whose own text is transparent; the overlay
+// follows its scroll, value and selection. window.__knText holds the helpers (installed once).
+EM_JS(void, kn_js_text_init, (void), {
+    if (window.__knText) return;
+    var T = {};
+    T.u8 = function (s, end) { // UTF-8 length of s[0, end)
+        var n = 0;
+        for (var i = 0; i < end && i < s.length; i++) {
+            var c = s.charCodeAt(i);
+            if (c < 0x80) n += 1;
+            else if (c < 0x800) n += 2;
+            else if (c >= 0xD800 && c < 0xDC00 && i + 1 < s.length) { n += 4; i++; }
+            else n += 3;
+        }
+        return n;
+    };
+    T.u16 = function (s, bytes) { // UTF-16 index of UTF-8 offset `bytes`
+        var n = 0, i = 0;
+        while (i < s.length && n < bytes) {
+            var c = s.charCodeAt(i);
+            if (c < 0x80) n += 1;
+            else if (c < 0x800) n += 2;
+            else if (c >= 0xD800 && c < 0xDC00 && i + 1 < s.length) { n += 4; i++; }
+            else n += 3;
+            i++;
+        }
+        return i;
+    };
+    T.css = function (c) {
+        c = c >>> 0;
+        return 'rgba(' + (c >>> 24) + ',' + ((c >>> 16) & 255) + ',' + ((c >>> 8) & 255) + ',' + ((c & 255) / 255) + ')';
+    };
+    T.esc = function (s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+    T.style = null;
+    // overlay geometry: the textarea's box, its padding-left = gutter + text pad
+    T.place = function (el) {
+        var st = el.__knCode;
+        if (!st) return;
+        var o = st.ov.style;
+        o.left = el.offsetLeft + 'px'; o.top = el.offsetTop + 'px';
+        o.width = el.offsetWidth + 'px'; o.height = el.offsetHeight + 'px';
+        var lines = el.value.split('\n').length;
+        var cfg = st.cfg;
+        var gw = 0;
+        if (cfg.gutter) {
+            st.meas.textContent = String(lines);
+            gw = cfg.pl + Math.max(cfg.minw, st.meas.getBoundingClientRect().width) + cfg.pr + cfg.extra;
+        }
+        st.gw = gw;
+        st.gutter.style.width = gw + 'px';
+        el.style.paddingLeft = (gw + cfg.gap + cfg.tpad) + 'px';
+        st.text.style.left = (gw + cfg.gap) + 'px';
+        st.pre.style.paddingLeft = cfg.tpad + 'px';
+        T.scroll(el);
+    };
+    T.scroll = function (el) {
+        var st = el.__knCode;
+        if (!st) return;
+        st.pre.style.transform = 'translate(' + (-el.scrollLeft) + 'px,' + (-el.scrollTop) + 'px)';
+        st.gnum.style.transform = 'translateY(' + (-el.scrollTop) + 'px)';
+        var v = el.value, a = el.selectionStart, b = el.selectionEnd;
+        var line = v.slice(0, b).split('\n').length - 1;
+        st.active.style.display = st.cfg.active && a === b ? '' : 'none';
+        st.active.style.top = (st.padTop + line * st.lh - el.scrollTop) + 'px';
+    };
+    // the overlay's font and line box follow the textarea's (font-size changes with the
+    // script font setting)
+    T.font = function (el) {
+        var st = el.__knCode, cs = getComputedStyle(el);
+        var key = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+        if (st.font === key) return;
+        st.font = key;
+        st.meas.style.font = key;          // the shorthand without the textarea's line-height
+        st.meas.style.lineHeight = 'normal';
+        st.meas.textContent = 'Xg';
+        st.lh = Math.ceil(st.meas.getBoundingClientRect().height) || Math.ceil(parseFloat(cs.fontSize) * 1.2);
+        el.style.lineHeight = st.lh + 'px';
+        var font = 'font:' + getComputedStyle(el).font + ';tab-size:' + st.cfg.tab + ';-moz-tab-size:' + st.cfg.tab;
+        st.pre.style.cssText = 'margin:0;white-space:pre;transform-origin:0 0;' + font + ';color:' + st.color + ';padding-top:' + st.padTop + 'px';
+        st.gnum.style.cssText = font + ';padding-top:' + st.padTop + 'px;padding-right:' + (st.cfg.pr + st.cfg.extra) + 'px';
+        st.active.style.height = st.lh + 'px';
+    };
+    // pre + gutter from the value, the spans and the line marks
+    T.render = function (el) {
+        var st = el.__knCode;
+        if (!st) return;
+        T.font(el);
+        var v = el.value, lines = v.split('\n'), spans = st.spans || [], marks = st.marks || {};
+        var html = [], gut = [], si = 0, bytes = 0;
+        for (var ln = 0; ln < lines.length; ln++) {
+            var text = lines[ln], out = '', pos = 0;
+            var lb = bytes, le = bytes + T.u8(text, text.length);
+            while (si < spans.length && spans[si][1] <= lb) si++;
+            var k = si;
+            while (pos < text.length) {
+                var at = lb + T.u8(text, pos);
+                while (k < spans.length && spans[k][1] <= at) k++;
+                if (k < spans.length && spans[k][0] <= at) {
+                    var end = Math.min(T.u16(text, spans[k][1] - lb), text.length);
+                    if (end <= pos) end = pos + 1;
+                    out += '<span style="color:' + T.css(spans[k][2]) + (spans[k][3] & 1 ? ';text-decoration:underline' : '') + '">' + T.esc(text.slice(pos, end)) + '</span>';
+                    pos = end;
+                } else {
+                    var nx = k < spans.length ? Math.min(T.u16(text, spans[k][0] - lb), text.length) : text.length;
+                    if (nx <= pos) nx = pos + 1;
+                    out += T.esc(text.slice(pos, nx));
+                    pos = nx;
+                }
+            }
+            var m = marks[ln + 1];
+            if (m && m.bg && !m.full) out = '<span style="background:' + T.css(m.bg) + '">' + out + '</span>';
+            html.push('<div style="height:' + st.lh + 'px' + (m && m.bg && m.full ? ';background:' + T.css(m.bg) : '') + '">' + (out || ' ') + '</div>');
+            gut.push('<div style="height:' + st.lh + 'px;position:relative">' + (ln + 1) +
+                     (m && m.marker ? '<span style="position:absolute;left:100%;width:' + st.cfg.extra + 'px;text-align:center;color:' + T.css(m.mcol || st.cfg.gfg) + '">' + String.fromCodePoint(m.marker) + '</span>' : '') + '</div>');
+            bytes = le + 1;
+        }
+        st.pre.innerHTML = html.join('');
+        st.gnum.innerHTML = gut.join('');
+        T.place(el);
+    };
+    T.view = function (el, cfg) {
+        var st = el.__knCode;
+        if (!cfg) {
+            if (!st) return;
+            st.ov.remove();
+            el.style.background = el.style.color = el.style.caretColor = el.style.paddingLeft = el.style.lineHeight = '';
+            el.classList.remove('kn-code-ta');
+            el.removeEventListener('scroll', st.onscroll);
+            delete el.__knCode;
+            return;
+        }
+        if (!T.style) {
+            T.style = document.createElement('style');
+            document.head.appendChild(T.style);
+        }
+        T.style.textContent = '.kn-code-ta::selection{background:' + T.css(cfg.sel || 0x3390ffff) + '}';
+        if (!st) {
+            var cs = getComputedStyle(el);
+            st = el.__knCode = { spans: [], marks: {} };
+            st.ov = document.createElement('div');
+            st.ov.className = 'kn-code-overlay';
+            st.ov.style.cssText = 'position:absolute;overflow:hidden;pointer-events:none;box-sizing:border-box;background:' + cs.backgroundColor + ';z-index:' + (parseInt(cs.zIndex) || 0);
+            st.gutter = document.createElement('div');
+            st.gutter.style.cssText = 'position:absolute;left:0;top:0;bottom:0;overflow:hidden;text-align:right;box-sizing:border-box';
+            st.gnum = document.createElement('div');
+            st.gutter.appendChild(st.gnum);
+            st.text = document.createElement('div');
+            st.text.style.cssText = 'position:absolute;top:0;right:0;bottom:0;overflow:hidden';
+            st.active = document.createElement('div');
+            st.active.style.cssText = 'position:absolute;left:0;right:0';
+            st.pre = document.createElement('pre');
+            st.pre.style.cssText = 'margin:0;white-space:pre;transform-origin:0 0';
+            st.text.appendChild(st.active);
+            st.text.appendChild(st.pre);
+            st.meas = document.createElement('span');
+            // an inline-block: its height is the line box (line-height normal), not the glyph box
+            st.meas.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;display:inline-block;line-height:normal';
+            st.ov.appendChild(st.gutter);
+            st.ov.appendChild(st.text);
+            st.ov.appendChild(st.meas);
+            el.parentNode.insertBefore(st.ov, el);
+            // one line box for both (line-height: normal differs between a textarea and a pre):
+            // T.font, on every render
+            st.padTop = parseFloat(cs.paddingTop) || 0;
+            st.color = cs.color;
+            st.font = null;
+            el.style.background = 'transparent';
+            el.style.color = 'transparent';
+            el.style.position = el.style.position || cs.position;
+            el.style.zIndex = (parseInt(cs.zIndex) || 0) + 1;
+            el.style.overflow = 'auto'; // the browser's own scrolling (the native code view scrolls inside the widget)
+            el.classList.add('kn-code-ta');
+            st.onscroll = function () { T.scroll(el); };
+            el.addEventListener('scroll', st.onscroll);
+            el.addEventListener('input', function () { if (el.__knCode) T.render(el); });
+            document.addEventListener('selectionchange', function () { if (el.__knCode && document.activeElement === el) T.scroll(el); });
+        }
+        st.cfg = cfg;
+        st.gutter.style.background = T.css(cfg.gbg);
+        st.gutter.style.color = T.css(cfg.gfg);
+        st.gutter.style.display = cfg.gutter ? '' : 'none';
+        st.font = null; // re-applied with this configuration
+        st.active.style.background = T.css(cfg.active);
+        el.style.caretColor = cfg.caret ? T.css(cfg.caret) : st.color;
+        T.render(el);
+    };
+    window.__knText = T;
+});
+
+static void text_init(void) {
+    static int done;
+    if (!done) kn_js_text_init();
+    done = 1;
+}
+
+EM_JS(int, kn_js_text_selection, (int id, int *out), {
+    var el = knEl(id), T = window.__knText;
+    if (!el || typeof el.selectionStart !== 'number') return 0;
+    HEAP32[out >> 2] = T.u8(el.value, el.selectionStart);
+    HEAP32[(out >> 2) + 1] = T.u8(el.value, el.selectionEnd);
+    return 1;
+});
+
+EM_JS(void, kn_js_text_set_selection, (int id, int a, int b), {
+    var el = knEl(id), T = window.__knText;
+    if (!el || typeof el.setSelectionRange !== 'function') return;
+    el.setSelectionRange(T.u16(el.value, a), T.u16(el.value, b));
+    // keep the caret in view (setSelectionRange does not scroll an unfocused textarea)
+    if (el.__knCode) {
+        var st = el.__knCode, line = el.value.slice(0, el.selectionEnd).split('\n').length - 1, y = line * st.lh;
+        if (y < el.scrollTop) el.scrollTop = y;
+        else if (y + st.lh > el.scrollTop + el.clientHeight - 2 * st.padTop) el.scrollTop = y + st.lh - el.clientHeight + 2 * st.padTop;
+        T.scroll(el);
+    }
+});
+
+EM_JS(void, kn_js_text_replace, (int id, int a, int b, const char *text), {
+    var el = knEl(id), T = window.__knText;
+    if (!el || typeof el.setSelectionRange !== 'function') return;
+    var t = UTF8ToString(text), v = el.value, ia = T.u16(v, a), ib = T.u16(v, b), ok = false;
+    // insertText keeps the browser's undo stack; setRangeText when the field is not focused
+    if (document.activeElement === el) {
+        el.setSelectionRange(ia, ib);
+        try { ok = t.length ? document.execCommand('insertText', false, t) : (ia === ib || document.execCommand('delete')); } catch (e) { ok = false; }
+    }
+    if (!ok) el.setRangeText(t, ia, ib, 'end');
+    if (el.__knCode) T.render(el);
+});
+
+EM_JS(int, kn_js_text_caret_rect, (int id, float *out), {
+    var el = knEl(id);
+    if (!el || typeof el.selectionEnd !== 'number') return 0;
+    var cs = getComputedStyle(el), st = el.__knCode;
+    var v = el.value, pos = el.selectionEnd, ls = v.lastIndexOf('\n', pos - 1) + 1;
+    var line = v.slice(0, ls).split('\n').length - 1, col = '', tab = st ? st.cfg.tab : 8;
+    for (var i = ls; i < pos; i++) col += v[i] === '\t' ? ' '.repeat(tab - col.length % tab) : v[i];
+    var c = window.__knText.cv || (window.__knText.cv = document.createElement('canvas').getContext('2d'));
+    c.font = cs.font;
+    var lh = st ? st.lh : (parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2);
+    var r = el.getBoundingClientRect(), o = out >> 2;
+    HEAPF32[o] = r.left + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0) + c.measureText(col).width - el.scrollLeft;
+    HEAPF32[o + 1] = r.top + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) + line * lh - el.scrollTop;
+    HEAPF32[o + 2] = 1;
+    HEAPF32[o + 3] = lh;
+    return 1;
+});
+
+EM_JS(void, kn_js_code_view, (int id, int on, int tab, int gutter, uint32_t gfg, uint32_t gbg, float pl, float pr, float minw, float extra,
+                              float gap, float tpad, uint32_t active, uint32_t caret, uint32_t sel), {
+    var el = knEl(id);
+    if (!el) return;
+    window.__knText.view(el, on ? { tab: tab > 0 ? tab : 4, gutter: gutter, gfg: gfg >>> 0, gbg: gbg >>> 0, pl: pl, pr: pr, minw: minw,
+                                    extra: extra, gap: gap, tpad: tpad, active: active >>> 0, caret: caret >>> 0, sel: sel >>> 0 } : null);
+});
+
+EM_JS(void, kn_js_code_spans, (int id, const int *data, int n), {
+    var el = knEl(id);
+    if (!el || !el.__knCode) return;
+    var o = data >> 2, spans = [];
+    for (var i = 0; i < n; i++, o += 4) spans.push([HEAP32[o], HEAP32[o + 1], HEAPU32[o + 2], HEAP32[o + 3]]);
+    el.__knCode.spans = spans;
+    window.__knText.render(el);
+});
+
+EM_JS(void, kn_js_code_lines, (int id, const int *data, int n), {
+    var el = knEl(id);
+    if (!el || !el.__knCode) return;
+    var o = data >> 2, marks = {};
+    for (var i = 0; i < n; i++, o += 5) marks[HEAP32[o]] = { bg: HEAPU32[o + 1], full: HEAP32[o + 2], marker: HEAPU32[o + 3], mcol: HEAPU32[o + 4] };
+    el.__knCode.marks = marks;
+    window.__knText.render(el);
+});
+
 EM_JS(int, kn_js_element_at, (float x, float y), {
     var el = null;
     try { el = document.elementFromPoint(x, y); } catch (e) { return 0; }
@@ -409,6 +684,79 @@ int html_dom_get_checked(const HtmlElem e) { return e ? kn_js_get_checked((int) 
 void html_dom_focus(const HtmlElem e) { if (e) kn_js_focus((int) e); }
 void html_dom_blur(const HtmlElem e) { if (e) kn_js_blur((int) e); }
 void html_dom_scroll_to_bottom(const HtmlElem e) { if (e) kn_js_scroll_to_bottom((int) e); }
+
+int html_dom_text_selection(const HtmlElem e, int *start, int *end) {
+    int v[2] = {0, 0};
+    text_init();
+    const int ok = e ? kn_js_text_selection((int) e, v) : 0;
+    if (start) *start = v[0];
+    if (end) *end = v[1];
+    return ok;
+}
+
+void html_dom_text_set_selection(const HtmlElem e, const int start, const int end) {
+    text_init();
+    if (e) kn_js_text_set_selection((int) e, start, end);
+}
+
+void html_dom_text_replace(const HtmlElem e, const int start, const int end, const char *text) {
+    text_init();
+    if (e) kn_js_text_replace((int) e, start, end, text ? text : "");
+}
+
+int html_dom_text_caret_rect(const HtmlElem e, HtmlRect *out) {
+    float v[4] = {0, 0, 0, 0};
+    text_init();
+    const int ok = e ? kn_js_text_caret_rect((int) e, v) : 0;
+    if (out) {
+        out->x = v[0];
+        out->y = v[1];
+        out->w = v[2];
+        out->h = v[3];
+    }
+    return ok;
+}
+
+void html_dom_code_view(const HtmlElem e, const HtmlCodeView *c) {
+    text_init();
+    if (!e) return;
+    if (!c) kn_js_code_view((int) e, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    else kn_js_code_view((int) e, 1, c->tab_size, c->gutter, c->gutter_fg, c->gutter_bg, c->gutter_pad_left, c->gutter_pad_right, c->gutter_min_w,
+                         c->gutter_extra, c->gutter_gap, c->text_pad, c->active_line_bg, c->caret, c->selection_bg);
+}
+
+// The span / line arrays cross as plain int32 records (start, end, color, flags) /
+// (line, bg, full, marker, marker_color).
+void html_dom_code_spans(const HtmlElem e, const HtmlCodeSpan *spans, const int n) {
+    text_init();
+    if (!e) return;
+    int *buf = malloc(sizeof(int) * 4 * (size_t) (n > 0 ? n : 1));
+    if (!buf) return;
+    for (int i = 0; i < n; i++) {
+        buf[i * 4] = spans[i].start;
+        buf[i * 4 + 1] = spans[i].end;
+        buf[i * 4 + 2] = (int) spans[i].color;
+        buf[i * 4 + 3] = spans[i].flags;
+    }
+    kn_js_code_spans((int) e, buf, n > 0 ? n : 0);
+    free(buf);
+}
+
+void html_dom_code_lines(const HtmlElem e, const HtmlCodeLine *lines, const int n) {
+    text_init();
+    if (!e) return;
+    int *buf = malloc(sizeof(int) * 5 * (size_t) (n > 0 ? n : 1));
+    if (!buf) return;
+    for (int i = 0; i < n; i++) {
+        buf[i * 5] = lines[i].line;
+        buf[i * 5 + 1] = (int) lines[i].bg;
+        buf[i * 5 + 2] = lines[i].full;
+        buf[i * 5 + 3] = (int) lines[i].marker;
+        buf[i * 5 + 4] = (int) lines[i].marker_color;
+    }
+    kn_js_code_lines((int) e, buf, n > 0 ? n : 0);
+    free(buf);
+}
 
 HtmlElem html_dom_element_at(const float x, const float y) { return (HtmlElem) kn_js_element_at(x, y); }
 HtmlElem html_dom_active_element(void) { return (HtmlElem) kn_js_active_element(); }
@@ -684,7 +1032,7 @@ static int web_menu_pointer(const HtmlEvent *ev) {
 // "input|windows.1.searchList") or "listener:<elemId>:<type>" for the shim's
 // addEventListener equivalents (elemId empty = window/document).
 EMSCRIPTEN_KEEPALIVE int kn_ui_event(const char *handler, const char *args_json, const int target, const char *value,
-                                     const int checked, const int key, const int button, const float x, const float y) {
+                                     const int checked, const int key, const int button, const float x, const float y, const int mods) {
     if (!handler || !*handler) return 1;
 
     HtmlEvent ev = {0};
@@ -695,6 +1043,7 @@ EMSCRIPTEN_KEEPALIVE int kn_ui_event(const char *handler, const char *args_json,
     ev.button = button;
     ev.x = x;
     ev.y = y;
+    ev.mods = mods; // GLFW_MOD_* bits from the event's shiftKey / ctrlKey / altKey / metaKey (kn-shim send)
 
     if (!strncmp(handler, "listener:", 9)) {
         char elem_id[64];

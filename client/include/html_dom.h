@@ -53,6 +53,36 @@ void     html_dom_focus(HtmlElem);
 void     html_dom_blur(HtmlElem);
 void     html_dom_scroll_to_bottom(HtmlElem);                        // scrollTop = scrollHeight
 
+// ---- text controls (<textarea>, text <input>) edited from C. Offsets are UTF-8 byte offsets
+// into the value (the web backend converts from the browser's UTF-16 indices).
+int      html_dom_text_selection(HtmlElem, int *start, int *end);    // selectionStart/End (start <= end); 0 = not a text control
+void     html_dom_text_set_selection(HtmlElem, int start, int end);  // setSelectionRange: caret at end, scrolled into view
+void     html_dom_text_replace(HtmlElem, int start, int end, const char *text); // setRangeText(text, start, end, "end"), one undo step; fires no input event natively
+int      html_dom_text_caret_rect(HtmlElem, HtmlRect *out);          // the caret box, viewport CSS px; 0 = unknown
+
+// ---- code view: a <textarea> drawn as a code editor (KrunkScript window, client/src/editor/
+// editor_script.c): no soft wrap, tab stops, a line-number gutter, the caret line, per-line
+// backgrounds and per-byte-range text colours. Colours are 0xRRGGBBAA (alpha 0 = none).
+// Native: the engine paints it (widgets.c); web: a <pre> overlay under a transparent-text textarea.
+typedef struct HtmlCodeView {
+    int tab_size;              // columns per tab stop (CodeMirror tabSize)
+    int gutter;                // line numbers
+    uint32_t gutter_fg, gutter_bg;
+    float gutter_pad_left, gutter_pad_right, gutter_min_w; // number column (CSS px)
+    float gutter_extra;        // marker column right of the numbers (CSS px)
+    float gutter_gap;          // space between the gutter and the rows (CSS px)
+    float text_pad;            // text inset after the gutter (CSS px)
+    uint32_t active_line_bg;   // the caret line while nothing is selected
+    uint32_t caret;            // 0 = the text colour
+    uint32_t selection_bg;     // 0 = the default
+} HtmlCodeView;
+enum { HTML_CODE_UNDERLINE = 1 };
+typedef struct { int start, end; uint32_t color; int flags; } HtmlCodeSpan;   // value bytes, sorted, disjoint
+typedef struct { int line; uint32_t bg; int full; uint32_t marker; uint32_t marker_color; } HtmlCodeLine; // 1-based line; bg behind its text (full: the whole row); marker: a gutter code point
+void     html_dom_code_view(HtmlElem, const HtmlCodeView *cfg);      // NULL: back to a plain textarea
+void     html_dom_code_spans(HtmlElem, const HtmlCodeSpan *spans, int n);
+void     html_dom_code_lines(HtmlElem, const HtmlCodeLine *lines, int n);
+
 // ---- geometry (valid after layout; 0/false when display:none)
 int      html_dom_get_rect(HtmlElem, HtmlRect *out);
 float    html_dom_offset_width(HtmlElem);
@@ -72,6 +102,7 @@ typedef struct {
     int         key;       // keydown/keypress: GLFW key code natively, DOM keyCode on web (Enter=257/13, Escape=256/27 are normalised: use html_key_is_enter/escape)
     int         button;    // mouse button 0/1/2
     float       x, y;      // CSS px
+    int         mods;      // key events: modifier bits as GLFW_MOD_* (1 Shift, 2 Control, 4 Alt, 8 Super)
 } HtmlEvent;
 int html_key_is_enter(int key);
 int html_key_is_escape(int key);

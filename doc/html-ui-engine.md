@@ -73,6 +73,16 @@ elements stay valid. All geometry is in CSS px from the viewport's top-left.
   `get_style` (inline style only, -1 when unset).
 - **Form state**: `set_value/get_value`, `set_checked/get_checked`, `focus`, `blur`,
   `scroll_to_bottom`.
+- **Text editing** (`<textarea>`, text inputs; UTF-8 byte offsets, the web backend converts
+  from UTF-16): `text_selection` (selectionStart/End), `text_set_selection`, `text_replace`
+  (setRangeText as one undo step; natively it fires no `input`, on the web `insertText` may, so
+  callers guard re-entry) and `text_caret_rect` (the caret box in viewport px).
+- **Code view**: `code_view(el, cfg)` turns a `<textarea>` into a code editor (no soft wrap,
+  tab stops, line-number gutter + marker column, caret-line background, caret / selection
+  colours; NULL turns it off), `code_spans` (sorted byte ranges with a colour, optional
+  underline) and `code_lines` (per-line backgrounds and gutter markers). Natively the widget
+  paints it (`widgets.c`); on the web `web_dom.c` lays a `<pre>` overlay under the textarea,
+  whose own text is transparent. Used by the editor's KrunkScript window.
 - **Geometry** (valid after layout; 0 while `display:none`): `get_rect`
   (getBoundingClientRect), `offset_width/height`, `viewport(w, h, dpr)`,
   `observe_resize(el, fn, user)` (ResizeObserver equivalent, coalesced per frame),
@@ -94,7 +104,7 @@ handler table (`html_ui_set_handlers`, installed by `ui_handlers_install()`):
   `input`, `change`, `keydown`, `keypress`, `mouseenter`, `mouseover`, `focus`, `blur`,
   `resize`), the element the handler is attached to, its value/checked state, the key
   (GLFW code natively, DOM keyCode on the web: test with `html_key_is_enter/escape`),
-  the mouse button and position.
+  the modifier keys (`mods`, GLFW_MOD_* bits on both), the mouse button and position.
 - A handler returns 0 to prevent the default action (like `return false`).
 - Names the table does not know go to the fallback handler; `html_ui_current_handler()`
   tells it which name is being dispatched. Krunker functions the real page never

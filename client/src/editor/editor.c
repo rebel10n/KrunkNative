@@ -410,11 +410,16 @@ void editor_test_map(const int host, const int at_camera) {
     // testMap(e, t) (E:2183-2215): saveVal(e ? "custToLoad" : "custMap", getMapExport()); with
     // t (right click on the play button) the map gets player: {pos, rot: [pitch, yaw]} from the
     // editor camera; then "/" opens (a new tab, or the testInEditor iframe)
+    ed_script_flush();
     ed_map_store();
     char *text = ed_map_export_string();
     if (!text) return;
     cJSON *map = cJSON_Parse(text);
     free(text);
+    if (map && !ed_script_prepare_test(map, host)) { // KrunkScript: Test drops the server script, compiles the client one
+        cJSON_Delete(map);
+        return;
+    }
     if (map && at_camera && !host) {
         const vec3 c = g_ed.proj->camera.position;
         cJSON *player = cJSON_AddObjectToObject(map, "player");
@@ -524,12 +529,6 @@ static int is_typing(void) {
         if (!strcmp(type, NON_TEXT[i])) return 0;
     }
     return 1;
-}
-
-// scriptPopup (key 0, the Scripting menu): the KrunkScript code window is WP5's
-// (doc/v7/editor.md); until it lands the request is a notice.
-void editor_script_popup(void) {
-    editor_message("The KrunkScript window is not available yet.");
 }
 
 // textureKey (T): editor_texture_list() is editor_inspector.c's (the WP3 list pickers)
@@ -750,6 +749,7 @@ static int h_fallback(void *u, const HtmlEvent *ev, const HtmlArg *a, const int 
 static int h_keydown(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
     (void) u; (void) a; (void) n;
     if (html_key_is_escape(ev->key)) {
+        if (ed_script_escape()) return 0;                 // the script window's hint list
         if (g_ed.window_index > 0) editor_close_window(); // keyCode 27: closeWindow()
         return 0;
     }
@@ -781,6 +781,7 @@ static void install_handlers(void) {
     ed_net_install(table, &count, sizeof(table) / sizeof(table[0])); // after the own entries: openPub
     ed_quickgui_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_project_install(table, &count, sizeof(table) / sizeof(table[0]));
+    ed_script_install(table, &count, sizeof(table) / sizeof(table[0]));
     html_ui_set_handlers(table, count, NULL, h_fallback);
     html_ui_set_listener(NULL, "keydown", h_keydown);
     html_ui_set_listener(NULL, "knpointerdown", l_page_pointer);
@@ -957,6 +958,7 @@ static void page_enter(Client *client, const char *query) {
 static void page_leave(Client *client) {
     (void) client;
     if (!g_ed.active) return;
+    ed_script_close(); // the script window's edits into the map before it is stored
     ed_bus_stop();
     ed_views_fini();
 #ifndef __EMSCRIPTEN__
@@ -973,6 +975,7 @@ static void page_leave(Client *client) {
     ed_quickgui_reset();
     ed_net_reset();
     ed_prompt_reset();
+    ed_script_reset();
     if (g_ed.looking) glfwSetInputMode(g_ed.client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     g_ed.active = 0;
     ed_projects_fini();
@@ -1352,11 +1355,13 @@ static void run_script_text(const char *text) {
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c
         else if (ed_net_script(cmd, arg)) {} // net: (editor_net.c, tools/editor/publish_e2e.py)
+        else if (!strcmp(cmd, "script")) ed_script_command(arg); // editor_script.c: open, tab:server, load:FILE, type:TEXT, validate, ...
         else if (!strcmp(cmd, "dump") && arg) {
             char *path = strchr(arg, ':');
             if (path) {
                 *path++ = 0;
-                dump_panel(arg, path);
+                if (!strcmp(arg, "script")) ed_script_dump(path);
+                else dump_panel(arg, path);
             }
         }
         else if (!strcmp(cmd, "select")) {
@@ -1454,6 +1459,7 @@ static void page_tick(Client *client, const float now, const float dt) {
     move_camera(fminf(dt, 0.1f));
     tele_tick();
     ed_window_tick(dt);
+    ed_script_tick();
     ed_backup_tick(now);
     ed_toolbar_account_check(); // _toolbar.show() again on login / account change
     if (now >= g_ed.proj->history_next) {
@@ -1754,7 +1760,8 @@ static int page_key(Client *client, const int key, const int scancode, const int
         set_move(key, mods, 0);
         return 0;
     }
-    if (action == GLFW_PRESS && ed_project_key(key, mods)) return 1; // Ctrl+Tab, Ctrl+S, ... (editor_project.c)
+    // Ctrl+Tab, Ctrl+S, ... (editor_project.c); Ctrl+S in the script window validates it instead
+    if (action == GLFW_PRESS && !(key == GLFW_KEY_S && ed_script_focused()) && ed_project_key(key, mods)) return 1;
     if (key == GLFW_KEY_ESCAPE) {
         if (ed_prompt_open()) {
             ed_prompt_cancel();

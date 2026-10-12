@@ -9,7 +9,8 @@ menu page (``ui/README.md``):
   behaviour is C (``client/src/editor/``), the QuickSettings panels and the Pickr
   colour picker are rebuilt by it over ``html_dom.h``.
 - ``?build=xxxx`` query strings are stripped and root-relative URLs made relative.
-- ``css/editor-kn.css`` (KrunkNative's own: transparent 3D area over the GL scene) is
+- ``css/editor-kn.css`` (KrunkNative's own: transparent 3D area over the GL scene) and
+  ``css/editor-script.css`` (the KrunkScript window, from Krunker's scripting.css) are
   linked after Krunker's stylesheets; ``<canvas id="canvas">`` (the web build's WebGL
   target) is the first body child and ``js/kn-shim.js`` + ``js/loader.js`` (web glue)
   load before ``</body>``, as in ``ui/index.html``.
@@ -42,6 +43,10 @@ def _transform_html(html):
     kn_link = '<link rel="stylesheet" href="css/editor-kn.css"/>\n'
     if "css/editor-kn.css" not in html:
         html = html.replace("</head>", kn_link + "</head>", 1)
+    # the KrunkScript window (WP5: scripting.html's CSS, client/src/editor/editor_script.c)
+    script_link = '<link rel="stylesheet" href="css/editor-script.css"/>\n'
+    if "css/editor-script.css" not in html:
+        html = html.replace("</head>", script_link + "</head>", 1)
     # web build: the GLFW/WebGL canvas first in <body> (under the page, css/editor-kn.css)
     # and the two glue scripts before </body>, exactly like ui/index.html
     html = re.sub(r'(<body[^>]*>\n?)', r'\1<canvas id="canvas" tabindex="-1"></canvas>\n', html, count=1)

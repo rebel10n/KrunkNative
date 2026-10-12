@@ -45,6 +45,7 @@ extern const ToolDef g_tools_logic[];
 extern const ToolDef g_tools_build[];
 extern const ToolDef g_tools_check[];
 extern const ToolDef g_tools_render[];
+extern const ToolDef g_tools_script[];
 
 // Common argument helpers
 Project *tool_project(Ctx *ctx, const cJSON *args, ToolResult *r); // NULL after tr_error

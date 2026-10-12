@@ -8,6 +8,7 @@
 
 #include "html_ui_backend.h"
 #include <html_dom.h>
+#include <string.h>
 
 // ------------------------------------------------------------------ backend
 
@@ -136,6 +137,22 @@ int html_dom_get_checked(const HtmlElem e) { (void) e; return 0; }
 void html_dom_focus(const HtmlElem e) { (void) e; }
 void html_dom_blur(const HtmlElem e) { (void) e; }
 void html_dom_scroll_to_bottom(const HtmlElem e) { (void) e; }
+int html_dom_text_selection(const HtmlElem e, int *start, int *end) {
+    (void) e;
+    if (start) *start = 0;
+    if (end) *end = 0;
+    return 0;
+}
+void html_dom_text_set_selection(const HtmlElem e, const int start, const int end) { (void) e; (void) start; (void) end; }
+void html_dom_text_replace(const HtmlElem e, const int start, const int end, const char *text) { (void) e; (void) start; (void) end; (void) text; }
+int html_dom_text_caret_rect(const HtmlElem e, HtmlRect *out) {
+    (void) e;
+    if (out) memset(out, 0, sizeof(*out));
+    return 0;
+}
+void html_dom_code_view(const HtmlElem e, const HtmlCodeView *cfg) { (void) e; (void) cfg; }
+void html_dom_code_spans(const HtmlElem e, const HtmlCodeSpan *spans, const int n) { (void) e; (void) spans; (void) n; }
+void html_dom_code_lines(const HtmlElem e, const HtmlCodeLine *lines, const int n) { (void) e; (void) lines; (void) n; }
 
 int html_dom_get_rect(const HtmlElem e, HtmlRect *out) {
     (void) e;

@@ -541,8 +541,10 @@ else ()
     # (client/src/editor/editor_model.c) against v7.1.4's own ObjectInstance serialization
     # (client/tests/data/editor_v7_golden.json) and import / export round trips over assets/maps
     add_executable(editor_serialize_test client/tests/editor_serialize_test.c client/src/editor/editor_model.c
-                   client/src/editor/editor_model.h client/src/editor/editor_data.c client/src/editor/editor_data.h)
-    target_include_directories(editor_serialize_test PRIVATE client/src/editor)
+                   client/src/editor/editor_model.h client/src/editor/editor_data.c client/src/editor/editor_data.h
+                   client/src/editor/editor_script_lang.c shared/src/ks/ks_lex.c shared/src/ks/ks_parse.c
+                   shared/src/ks/ks_check.c shared/src/ks/ks_api_table.c)
+    target_include_directories(editor_serialize_test PRIVATE client/src/editor shared/include)
     target_link_libraries(editor_serialize_test PRIVATE cJSON m)
     enable_testing()
     add_test(NAME editor_serialize_test COMMAND editor_serialize_test ${CMAKE_SOURCE_DIR}

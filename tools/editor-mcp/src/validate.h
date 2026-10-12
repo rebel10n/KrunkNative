@@ -26,6 +26,9 @@ cJSON *validate_project(Ctx *ctx, Project *p, const cJSON *opts);
 // diagnostics {severity, code, message, side, line, col} to `diags`; returns the error count.
 // *available = 0 when the compiler is not linked (the stub).
 int ks_bridge_check_scripts(const cJSON *map_json, cJSON *diags, int *available);
+// One script's source (decoded) on side server (1) / client (0): the same diagnostics; returns
+// 1 on a compile error.
+int ks_bridge_check_source(const char *src, size_t len, int server, cJSON *diags, int *available);
 // Decodes a scripts.<side> value (base64 or raw) into malloc'd source text.
 char *ks_bridge_decode(const char *text, size_t *len);
 const char *ks_bridge_status(void);

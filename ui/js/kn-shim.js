@@ -85,10 +85,12 @@
     // key events carry no position: x = 1 tells C that Shift is held (the console's Shift+Tab)
     var x = ev && typeof ev.clientX === 'number' ? ev.clientX : (ev && ev.shiftKey ? 1 : 0);
     var y = ev && typeof ev.clientY === 'number' ? ev.clientY : 0;
+    // modifier keys as GLFW_MOD_* bits (HtmlEvent.mods)
+    var mods = ev ? (ev.shiftKey ? 1 : 0) | (ev.ctrlKey ? 2 : 0) | (ev.altKey ? 4 : 0) | (ev.metaKey ? 8 : 0) : 0;
     try {
       var r = global.Module.ccall('kn_ui_event', 'number',
-        ['string', 'string', 'number', 'string', 'number', 'number', 'number', 'number', 'number'],
-        [handler, argsJson, knId(target), value, checked, key, button, x, y]);
+        ['string', 'string', 'number', 'string', 'number', 'number', 'number', 'number', 'number', 'number'],
+        [handler, argsJson, knId(target), value, checked, key, button, x, y, mods]);
       // bit 1: C asked for event.stopPropagation() (the native engine stops the ancestors' handlers)
       if ((r & 2) && ev && ev.stopPropagation) ev.stopPropagation();
       return (r & 1) !== 0;

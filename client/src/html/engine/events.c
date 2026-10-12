@@ -656,6 +656,7 @@ static void fill_event(EventSystem *es, HtmlEvent *ev, const char *type, HtmlEle
     ev->button = button;
     ev->x = es->mouse_x;
     ev->y = es->mouse_y;
+    ev->mods = es->mods;
 }
 
 /* DOM keyCode of a native (GLFW) key for `event.keyCode == N` guards: printable keys

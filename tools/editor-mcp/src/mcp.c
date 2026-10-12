@@ -126,7 +126,7 @@ const char *tool_str(const cJSON *args, const char *key, const char *def) {
 
 // ---------------------------------------------------------------- registry
 
-static const ToolDef *const k_tables[] = {g_tools_project, g_tools_objects, g_tools_logic, g_tools_build, g_tools_check, g_tools_render, NULL};
+static const ToolDef *const k_tables[] = {g_tools_project, g_tools_objects, g_tools_logic, g_tools_build, g_tools_check, g_tools_render, g_tools_script, NULL};
 
 static const ToolDef *find_tool(const char *name) {
     for (int t = 0; k_tables[t]; t++) {

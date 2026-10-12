@@ -1,0 +1,7 @@
+H KRUNKSCRIPT
+T Client * [C]
+T Server
+B Validate Script
+C client lines=90 font=13px
+K * GAME.PLAYERS.getSelf() | obj action()
+S 195 195

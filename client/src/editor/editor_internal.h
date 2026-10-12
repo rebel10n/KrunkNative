@@ -24,6 +24,8 @@
 //   editor_overlay.c  EditorOverlay: the 2D layer over the view (FPS counter)
 //   editor_backup.c   timed backups (initAutoBackup / LocalDB) and window 15's list
 //   editor_prompt.c   prompt() / confirm() stand-ins and Krunker's genericPopup / clearPops
+//   editor_script.c   the KrunkScript window (scriptPopup / updateScript, scripting.html);
+//                     editor_script_lang.c its GL- and DOM-free language side
 //   editor_data.c     generated Krunker data tables (tools/editor/gen_editor_data.py)
 //   editor_project.c  open maps (EditorProject): tabs, new/open/close/save, switching (KrunkNative)
 //   editor_view.c     offscreen project renders, detached 3D view windows (KrunkNative)
@@ -293,7 +295,7 @@ void editor_warning(const char *id, int on, const char *text, const char *icon);
 void editor_clear_warnings(void);
 void editor_teleport_popup(void);
 void editor_teleport(int reset, float x, float y, float z);
-void editor_script_popup(void);          // scriptPopup (key 0, Scripting menu): WP5's KrunkScript window
+void editor_script_popup(void);          // scriptPopup (key 0, Scripting menu): the KrunkScript window (editor_script.c)
 void editor_texture_list(void);          // textureKey (T): viewModelList / viewTextureList (WP3 pickers)
 #define ED_WINDOW_COUNT 15                // window.windows[] (showWindow 1..15)
 void editor_message(const char *text);   // chatList info line (Krunker uses alert())
@@ -303,6 +305,18 @@ void editor_settings_save(void);
 const char *editor_default_settings(void);  // Editor.defaultSettings (JSON)
 void editor_apply_lighting(void);
 void editor_scale_ui(void);              // scaleUI (window resize, UI Scale)        // initScene/regenAll: map lighting -> g_render_lighting, sky
+
+// ---- editor_script.c: the KrunkScript code window (WP5; language side: editor_script_lang.c)
+void ed_script_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+void ed_script_close(void);                          // keeps the code (beforeunload: updateScript(true))
+int ed_script_focused(void);                         // a script textarea has the focus
+int ed_script_escape(void);                          // Escape: closes the hint list; 1 = it was open
+void ed_script_flush(void);                          // edits not yet kept -> the project
+void ed_script_tick(void);
+void ed_script_reset(void);                          // page leave
+int ed_script_prepare_test(cJSON *map, int host);    // testMap's script rules; 0 = abort the test
+void ed_script_command(const char *arg);             // KRUNKNATIVE_EDITOR_SCRIPT "script:..."
+int ed_script_dump(const char *path);                // "dump:script:FILE"
 
 // ---- editor_objects.c
 EditorObject *ed_obj_new(const cJSON *serialized, int keep_uuid);  // deserialize (copies)

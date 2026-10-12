@@ -71,6 +71,29 @@ static void add_diag(cJSON *diags, const char *severity, const char *code, const
     cJSON_AddItemToArray(diags, o);
 }
 
+int ks_bridge_check_source(const char *src, const size_t len, const int server, cJSON *diags, int *available) {
+    const char *side = server ? "server" : "client";
+    *available = compiler_linked();
+    if (ks_is_compiled_js && ks_is_compiled_js(src, len)) {
+        char m[200];
+        snprintf(m, sizeof(m), "%s script is compiled JavaScript: KrunkNative does not run it", side);
+        add_diag(diags, "warning", "script.compiled_js", side, NULL, m);
+        return 0;
+    }
+    if (!*available) {
+        char m[200];
+        snprintf(m, sizeof(m), "%s script (%zu bytes) not checked: the KrunkScript compiler is not linked", side, len);
+        add_diag(diags, "info", "script.unchecked", side, NULL, m);
+        return 0;
+    }
+    KsDiag err = {0}, warns[16];
+    int wcount = 0;
+    const int rc = ks_validate(src, len, server ? KS_SIDE_SERVER : KS_SIDE_CLIENT, &err, warns, 16, &wcount);
+    if (rc != 0) add_diag(diags, "error", "script.compile_error", side, &err, NULL);
+    for (int w = 0; w < wcount && w < 16; w++) add_diag(diags, "warning", "script.warning", side, &warns[w], NULL);
+    return rc != 0;
+}
+
 int ks_bridge_check_scripts(const cJSON *map_json, cJSON *diags, int *available) {
     *available = compiler_linked();
     const cJSON *scripts = js_get(map_json, "scripts");
@@ -92,24 +115,7 @@ int ks_bridge_check_scripts(const cJSON *map_json, cJSON *diags, int *available)
         size_t len = 0;
         char *src = ks_bridge_decode(v->valuestring, &len);
         if (!src) continue;
-        if (ks_is_compiled_js && ks_is_compiled_js(src, len)) {
-            char m[200];
-            snprintf(m, sizeof(m), "%s script is compiled JavaScript: KrunkNative does not run it", sides[s]);
-            add_diag(diags, "warning", "script.compiled_js", sides[s], NULL, m);
-        } else if (!*available) {
-            char m[200];
-            snprintf(m, sizeof(m), "%s script (%zu bytes) not checked: the KrunkScript compiler is not linked", sides[s], len);
-            add_diag(diags, "info", "script.unchecked", sides[s], NULL, m);
-        } else {
-            KsDiag err = {0}, warns[16];
-            int wcount = 0;
-            const int rc = ks_validate(src, len, s == 0 ? KS_SIDE_CLIENT : KS_SIDE_SERVER, &err, warns, 16, &wcount);
-            if (rc != 0) {
-                add_diag(diags, "error", "script.compile_error", sides[s], &err, NULL);
-                errors++;
-            }
-            for (int w = 0; w < wcount && w < 16; w++) add_diag(diags, "warning", "script.warning", sides[s], &warns[w], NULL);
-        }
+        errors += ks_bridge_check_source(src, len, s, diags, available);
         free(src);
     }
     return errors;

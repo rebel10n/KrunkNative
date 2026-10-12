@@ -47,6 +47,7 @@
 // selection {project,uuid}, clipboard {count}.
 #include "editor_internal.h"
 #include "editor_model.h"
+#include "editor_script_lang.h"
 #include <app_mode.h>
 #include <editor_bus.h>
 #include <headless.h>
@@ -707,6 +708,17 @@ static cJSON *paste_objects(EditorProject *p, const cJSON *objects, const cJSON 
     return res;
 }
 
+// a map's "scripts" ({client, server}: base64 or raw, as an export carries them) -> the
+// project's decoded scripts; a missing side is the template ("")
+static void set_scripts(EditorProject *p, const cJSON *v) {
+    for (int k = 0; k < 2; k++) {
+        const char *t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(v, k ? "server" : "client"));
+        char *dec = t ? ed_model_b64_decode(t) : NULL;
+        ed_ks_script_store(p->scripts, k, dec ? dec : t ? t : "");
+        free(dec);
+    }
+}
+
 static cJSON *tool_batch(EditorProject *p, const cJSON *args, const char **err, char *msg, const size_t mn) {
     const cJSON *colors = cJSON_GetObjectItemCaseSensitive(args, "colors");
     const cJSON *add = cJSON_GetObjectItemCaseSensitive(args, "add"), *rep = cJSON_GetObjectItemCaseSensitive(args, "replace"),
@@ -741,6 +753,10 @@ static cJSON *tool_batch(EditorProject *p, const cJSON *args, const char **err, 
         ed_history_add_map();
         int terrain = 0, zone = 0, ocean = 0;
         cJSON_ArrayForEach(it, mset) {
+            if (!strcmp(it->string, "scripts")) {
+                set_scripts(p, it); // KrunkScript: the project's code (the script window follows)
+                continue;
+            }
             cJSON *target = map_key_known(it->string) ? p->map_config : p->extra_map;
             cJSON_DeleteItemFromObjectCaseSensitive(target, it->string);
             if (!cJSON_IsNull(it)) cJSON_AddItemToObject(target, it->string, cJSON_Duplicate(it, 1));
@@ -750,6 +766,10 @@ static cJSON *tool_batch(EditorProject *p, const cJSON *args, const char **err, 
         }
         cJSON_ArrayForEach(it, munset) {
             if (!cJSON_IsString(it)) continue;
+            if (!strcmp(it->valuestring, "scripts")) {
+                set_scripts(p, NULL); // both back to the template
+                continue;
+            }
             cJSON_DeleteItemFromObjectCaseSensitive(p->extra_map, it->valuestring);
             // known keys go back to their default (the editor always has every map key)
             if (map_key_known(it->valuestring)) {

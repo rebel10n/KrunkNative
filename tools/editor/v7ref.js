@@ -16,6 +16,14 @@
 //                        without public/js/hook.js, as `logic`: see reloadPage)
 //   inspector-edits.json  the objects after tools/editor/inspector_edits.json's panel edits (WP3)
 //   right-object-cube.{png,rects.json,dump.txt}  a new cube's object panel, Transform + Style open (WP3)
+//   scripting*.{png,dump.txt}   the KrunkScript window (scripting.html, lost from the tree:
+//                        tools/editor/fetch_scripting_ref.sh recovers it into --scripting DIR,
+//                        default ~/.cache/krunknative/scripting-ref) opened by v7's own
+//                        KE.scriptPopup(), its window.open turned into an iframe at the same
+//                        place (10% / 10%, 80% x 80%: KrunkNative's in-page window). Dump format
+//                        of client/src/editor/editor_script.c ed_script_dump: H label, T tabs
+//                        (" *" selected, [E] / [V] / [C] icons), B status button, C shown tab (lines,
+//                        font), E error-marked lines, K hint rows ("* " = active), S selection.
 // Determinism: no network but the static serve (https/wss blocked), empty localStorage (default kro_editor settings), a seeded Math.random before any
 // page script, the hook's session timer box removed, CSS animations paused at 800 ms, the Welcome
 // counters run to their maximum. The page is served on a free 127.0.0.1 port, so v7's
@@ -46,6 +54,34 @@ const { CDP } = require('../kref/cdp.js');
 
 const REPO = path.resolve(__dirname, '..', '..');
 let OUT = path.join(REPO, 'doc', 'ref', 'krunker-v7.1.4', 'editor');
+let SCRIPTING = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'krunknative', 'scripting-ref');
+const scriptingPage = () => fs.existsSync(path.join(SCRIPTING, 'scripting.html'));
+
+// The reference tree plus the recovered scripting page (/scripting.html, /css/scripting.css,
+// /kn-cm/... CodeMirror) when it is there. GET/HEAD only; never writes.
+const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css' };
+function overlayServer() {
+  const http = require('http');
+  return new Promise((resolve) => {
+    let inner = null;
+    const server = http.createServer((req, res) => {
+      const rel = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
+      const mine = rel === '/scripting.html' || rel === '/css/scripting.css' || rel.startsWith('/kn-cm/');
+      const file = path.join(SCRIPTING, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
+      if (!mine || !file.startsWith(SCRIPTING) || (req.method !== 'GET' && req.method !== 'HEAD') || !fs.existsSync(file)) {
+        // everything else: the reference tree's own server
+        const prox = http.request({ host: '127.0.0.1', port: inner.address().port, path: req.url, method: req.method }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
+        prox.on('error', () => { res.writeHead(502); res.end(); });
+        return req.pipe(prox);
+      }
+      const st = fs.statSync(file);
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Content-Length': st.size, 'Cache-Control': 'no-store' });
+      if (req.method === 'HEAD') return res.end();
+      fs.createReadStream(file).pipe(res);
+    });
+    staticServer(V7_PUBLIC, 0).then((s) => { inner = s; server.on('close', () => s.close()); server.listen(0, '127.0.0.1', () => resolve(server)); });
+  });
+}
 const W = 1920, H = 937;
 const ANIM_MS = 800;
 
@@ -172,7 +208,7 @@ const RECTS = `(() => { const o = {}; const put = (k, e) => { if (!e) return; co
 // ---------------------------------------------------------------- session
 
 async function openEditor() {
-  const server = await staticServer(V7_PUBLIC, 0);
+  const server = scriptingPage() ? await overlayServer() : await staticServer(V7_PUBLIC, 0);
   const httpPort = server.address().port;
   const port = await freePort();
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'kn-v7ref-chrome-'));
@@ -536,6 +572,72 @@ state('tools', async (c) => {
   await c.eval('(() => { KE.clearMap(); GUI.panel.right.blank.show(); return 1; })()');
 });
 
+// ---------------------------------------------------------------- the KrunkScript window
+
+// the script window in ed_script_dump's format (client/src/editor/editor_script.c)
+const SCRIPT_DUMP = `(() => { const w = KE.scriptWin; if (!w || !w.cm) return 'closed\\n';
+  const d = w.document, out = [], txt = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+  out.push('H ' + txt(d.getElementById('label').textContent));
+  for (const t of d.querySelectorAll('#tabHolder .tab')) { const ic = t.querySelector('.tabIcon');
+    out.push('T ' + txt(t.textContent) + (t.classList.contains('selected') ? ' *' : '') + (ic.classList.contains('iconE') ? ' [E]' : '') + (ic.classList.contains('iconV') ? ' [V]' : '') + (ic.classList.contains('iconC') ? ' [C]' : '')); }
+  out.push('B ' + txt(d.getElementById('compile').innerText));
+  const key = d.querySelector('#tabHolder .tab.selected').id, cm = w.cm[key];
+  out.push('C ' + key + ' lines=' + cm.lineCount() + ' font=' + cm.getWrapperElement().style.fontSize);
+  for (const m of cm.getAllMarks()) if (m.className === 'code-error') { const r = m.find(); if (r) out.push('E ' + r.to.line); }
+  for (const li of d.querySelectorAll('.CodeMirror-hints li')) { const a = li.querySelector('a'), t = li.textContent;
+    out.push('K ' + (li.classList.contains('CodeMirror-hint-active') ? '* ' : '') + (a ? t.slice(0, t.length - a.textContent.length - 1) : t) + ' | ' + (a ? a.textContent : '')); }
+  out.push('S ' + cm.indexFromPos(cm.getCursor('from')) + ' ' + cm.indexFromPos(cm.getCursor('to')));
+  return out.join('\\n') + '\\n'; })()`;
+
+// The client script of the error state: the fixture tools/editor/script_window_test.py loads
+// natively
+const BAD_SCRIPT = fs.readFileSync(path.join(REPO, 'client', 'tests', 'data', 'editor_script_bad.krnk'), 'utf8');
+
+async function scriptingOpen(c, fresh) {
+  await reset(c);
+  // scriptPopup's window.open -> an iframe at the same place; load -> initCodeMirror as in v7
+  const ok = await c.eval(`(() => new Promise((res) => {
+    if (!(KE.scriptWin && KE.scriptWin.cm)) {
+      const realOpen = window.open;
+      window.open = (url) => { const f = document.createElement('iframe'); f.id = 'knScriptRef'; f.src = url;
+        f.style.cssText = 'position:fixed;left:10%;top:10%;width:80%;height:80%;border:0;margin:0;z-index:1000;box-shadow:0 0 20px rgba(0,0,0,0.6)';
+        document.body.appendChild(f); return f.contentWindow; };
+      try { KE.scriptPopup(); } finally { window.open = realOpen; }
+    }
+    const t0 = Date.now();
+    // opener: the page calls opener.KE (changeTab -> KE.updateTab, the status button)
+    const poll = () => { const w = KE.scriptWin; if (w && w.cm && w.cm.client && w.cm.server) { w.opener = window; res(1); } else if (Date.now() - t0 > 20000) res(0); else setTimeout(poll, 100); };
+    poll(); }))()`);
+  if (!ok) throw new Error('scripting: initCodeMirror never ran');
+  await sleep(400);
+  if (fresh) return; // the window as scriptPopup leaves it
+  // back to the template on the client tab, nothing marked (the states reuse the window)
+  await c.eval(`(() => { const w = KE.scriptWin; const sel = w.document.querySelector('#tabHolder .tab.selected');
+    if (sel.id !== 'client') w.changeTab(w.document.getElementById('client'));
+    for (const k of ['client', 'server']) { w.cm[k].setValue(KE.scripts[k].code || w.cm[k].getValue()); w.cm[k].setCursor({line: 0, ch: 0}); w.cm[k].highlightErrors(); w.updateTabIcons(k, false, false); }
+    if (w.cm.client.state.completionActive) w.cm.client.state.completionActive.close();
+    w.compile.innerText = 'Validate Script'; w.compile.style.backgroundColor = null; return 1; })()`);
+  await sleep(700); // updateTab's "Saving..." resets after 500 ms
+}
+
+async function scriptingState(c, name, setup, wait = 400) {
+  if (!scriptingPage()) { console.error('[v7ref] ' + name + ': no recovered scripting.html in ' + SCRIPTING + ' (tools/editor/fetch_scripting_ref.sh)'); return; }
+  await scriptingOpen(c, name === 'scripting');
+  if (setup) { await c.eval(`(() => { const w = KE.scriptWin; ${setup}; return 1; })()`); await sleep(wait); }
+  await shot(c, name);
+  write(name + '.dump.txt', await c.eval(SCRIPT_DUMP));
+}
+
+state('scripting', (c) => scriptingState(c, 'scripting'));
+state('scripting-server', (c) => scriptingState(c, 'scripting-server', `w.changeTab(w.document.getElementById('server'))`, 800));
+// io_ksC with an error naming line 5 (E:1963-1991; the editor socket is offline here, so its
+// effects are replayed: highlightErrors, the red status button, the tab icon)
+state('scripting-error', (c) => scriptingState(c, 'scripting-error', `w.cm.client.setValue(${JSON.stringify(BAD_SCRIPT)});
+  w.compile.innerText = 'Failed - errors found!'; w.compile.style.backgroundColor = '#f44336'; w.cm.client.highlightErrors([5]); w.updateTabIcons('client', true, false)`));
+// show-hint while typing: "\tGAME.PLAYERS.ge" on a new line 8 of the template (cursorActivity)
+state('scripting-hint', (c) => scriptingState(c, 'scripting-hint', `const cm = w.cm.client; cm.focus(); cm.replaceRange('\\n', {line: 7, ch: 0}); cm.setCursor({line: 7, ch: 0});
+  cm.replaceRange('\\tGAME.PLAYERS.ge', {line: 7, ch: 0}); cm.setCursor({line: 7, ch: 16})`, 600));
+
 // ---------------------------------------------------------------- main
 
 (async () => {
@@ -543,6 +645,7 @@ state('tools', async (c) => {
   const names = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--out') OUT = path.resolve(args[++i]);
+    else if (args[i] === '--scripting') SCRIPTING = path.resolve(args[++i]);
     else if (args[i] === '--list') { console.log(Object.keys(S).join('\n')); return; }
     else names.push(args[i]);
   }

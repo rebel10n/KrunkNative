@@ -428,6 +428,114 @@ void html_dom_scroll_to_bottom(const HtmlElem e)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Text editing + code view (widgets.c)                                       */
+/* ------------------------------------------------------------------------- */
+
+static Widgets *live_widgets(const HtmlElem e)
+{
+    Engine *g = engine_get();
+    return alive(engine_dom(g), e) ? engine_widgets(g) : NULL;
+}
+
+int html_dom_text_selection(const HtmlElem e, int *start, int *end)
+{
+    Widgets *w = live_widgets(e);
+    if (start) *start = 0;
+    if (end) *end = 0;
+    return w ? widgets_selection(w, e, start, end) : 0;
+}
+
+void html_dom_text_set_selection(const HtmlElem e, const int start, const int end)
+{
+    Widgets *w = live_widgets(e);
+    if (!w) return;
+    widgets_set_selection(w, e, start, end);
+    engine_mark_paint(engine_get(), e);
+}
+
+void html_dom_text_replace(const HtmlElem e, const int start, const int end, const char *text)
+{
+    Widgets *w = live_widgets(e);
+    if (w && widgets_replace_range(w, e, start, end, text ? text : "")) engine_mark_paint(engine_get(), e);
+}
+
+int html_dom_text_caret_rect(const HtmlElem e, HtmlRect *out)
+{
+    Widgets *w = live_widgets(e);
+    if (out) memset(out, 0, sizeof(*out));
+    if (!w || !out) return 0;
+    engine_flush_layout(engine_get());
+    return widgets_caret_rect(w, e, &out->x, &out->y, &out->w, &out->h);
+}
+
+static CssColor code_color(const uint32_t rgba)
+{
+    CssColor c;
+    memset(&c, 0, sizeof(c));
+    c.r = (uint8_t) (rgba >> 24);
+    c.g = (uint8_t) (rgba >> 16);
+    c.b = (uint8_t) (rgba >> 8);
+    c.a = (uint8_t) rgba;
+    return c;
+}
+
+void html_dom_code_view(const HtmlElem e, const HtmlCodeView *cfg)
+{
+    Widgets *w = live_widgets(e);
+    if (!w) return;
+    if (!cfg) {
+        widgets_set_code_view(w, e, NULL);
+    } else {
+        WidgetsCodeView v = {
+            .tab_size = cfg->tab_size, .gutter = cfg->gutter,
+            .gutter_fg = code_color(cfg->gutter_fg), .gutter_bg = code_color(cfg->gutter_bg),
+            .gutter_pad_left = cfg->gutter_pad_left, .gutter_pad_right = cfg->gutter_pad_right,
+            .gutter_min_w = cfg->gutter_min_w, .gutter_extra = cfg->gutter_extra, .gutter_gap = cfg->gutter_gap, .text_pad = cfg->text_pad,
+            .active_line_bg = code_color(cfg->active_line_bg), .caret = code_color(cfg->caret),
+            .selection_bg = code_color(cfg->selection_bg),
+        };
+        widgets_set_code_view(w, e, &v);
+    }
+    engine_mark_paint(engine_get(), e);
+}
+
+void html_dom_code_spans(const HtmlElem e, const HtmlCodeSpan *spans, const int n)
+{
+    Widgets *w = live_widgets(e);
+    if (!w) return;
+    WidgetsCodeSpan *tmp = n > 0 ? malloc((size_t) n * sizeof(*tmp)) : NULL;
+    int m = 0;
+    for (int i = 0; tmp && i < n; i++) {
+        if (spans[i].end <= spans[i].start) continue;
+        tmp[m].start = spans[i].start;
+        tmp[m].end = spans[i].end;
+        tmp[m].color = code_color(spans[i].color);
+        tmp[m].flags = spans[i].flags & HTML_CODE_UNDERLINE ? WIDGETS_SPAN_UNDERLINE : 0;
+        m++;
+    }
+    widgets_set_code_spans(w, e, tmp, m);
+    free(tmp);
+    engine_mark_paint(engine_get(), e);
+}
+
+void html_dom_code_lines(const HtmlElem e, const HtmlCodeLine *lines, const int n)
+{
+    Widgets *w = live_widgets(e);
+    if (!w) return;
+    WidgetsCodeLine *tmp = n > 0 ? malloc((size_t) n * sizeof(*tmp)) : NULL;
+    for (int i = 0; tmp && i < n; i++) {
+        tmp[i].line = lines[i].line;
+        tmp[i].bg = code_color(lines[i].bg);
+        tmp[i].full = lines[i].full;
+        tmp[i].marker = lines[i].marker;
+        tmp[i].marker_color = code_color(lines[i].marker_color);
+    }
+    widgets_set_code_lines(w, e, tmp, tmp ? n : 0);
+    free(tmp);
+    engine_mark_paint(engine_get(), e);
+}
+
+/* ------------------------------------------------------------------------- */
 /* Geometry                                                                   */
 /* ------------------------------------------------------------------------- */
 

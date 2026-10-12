@@ -43,10 +43,13 @@ The v3.1.1 editor is at `/home/user/jails/kru/src/Krunker_v3.1.1/src/editor.js`
 `v3E:` and `v3U:` point at those files.
 
 **Missing from the reference.** `R/public/scripting.html` (the KrunkScript code
-window that E:2275 opens) is not in any tree on disk. Also missing is
-`/libs/codemirror/5/addon/mode/simple.js`, which H loads. As a result, the
-CodeMirror mode, token colours and tab markup are not recoverable. Section 1.8
-lists what can be inferred.
+window that E:2275 opens) is not in any tree on disk. It was recovered from the
+Wayback Machine's krunker.io snapshots (2021-10 .. 2025-02 are the same page apart
+from build ids; WP5 uses the 2025-02-03 one, from the era whose editor page loads
+monokai like H): `tools/editor/fetch_scripting_ref.sh` fetches it, its
+`css/scripting.css` and the CodeMirror 5.61.1 files it loads into `~/.cache`
+(pinned hashes; Krunker's script is never committed). Section 1.8 describes it; the
+reference capture (`v7ref.js scripting*`) opens it with v7's own `KE.scriptPopup()`.
 
 ---
 
@@ -752,7 +755,7 @@ Each zone prefab has a `lineCol` wireframe colour. All zone prefabs are listed i
 
 **Opening.**
 - Toolbar "Scripting", or hotkey **0** (`scriptingKey`), calls `scriptPopup` (E:2264-2284).
-- It opens `./scripting.html` as a **separate browser window** at 80% of the screen. If it is already open, it is focused instead.
+- It opens `./scripting.html` as a **separate browser window** at 10% / 10%, 80% x 80% of the editor window. If it is already open, it is focused instead.
 - The window closes when the editor unloads.
 - On load the editor calls:
   ```
@@ -762,24 +765,23 @@ Each zone prefab has a `lineCol` wireframe colour. All zone prefabs are listed i
   ```
   `scriptFont` defaults to 13 and is set by the Settings ▸ General ▸ Scripting slider (5..30).
 
-**Window contract.** Inferred from the calls, because the page itself is lost:
-- `cm.client` and `cm.server` are CodeMirror instances. Each supports `getValue()` and `highlightErrors(lines[]|undefined)`.
-- A `compile` status button.
-- `updateTabIcons(key, errored, validated)`.
-- `alert(msg)`.
-- The window calls back into `KE.updateTab(key)` (save the current tab, switch `currentKey`) and `KE.updateScript(saveOnly)`.
+**The page** (scripting.html + css/scripting.css, recovered: see section 0):
+- `#tabHolder` (36 px, `#222`): tabs `#client` / `#server` (`.tab`, GameFont 12 px `#888`, the selected one `#292d3e`), each with a `.tabIcon` (Material Icons: `.iconE` `error_outline` `#ef2929`, `.iconV` `task_alt` `#98ff00`, `.iconC` `circle` `#888`), and `#label` "KRUNKSCRIPT" on the right.
+- One CodeMirror 5.61.1 per tab (`fromTextArea` on `#scriptArea_client` / `_server`), at top 36 px, `setSize(null, innerHeight - compile.clientHeight - 30)`; the hidden tab's wrapper is `display:none`.
+- `#compile` (bottom, `#2196f3`, monospace 20 px bold, "Validate Script") calls `opener.KE.updateScript()`.
+- Options: `lineNumbers`, `matchBrackets`, `indentWithTabs`, `tabSize 4`, `indentUnit 4`, `styleActiveLine`, `autoCloseBrackets`, `foldGutter` (gutters line numbers + fold), theme **material-palenight** (`.CodeMirror-line span {color:#fff}`, active line `rgba(0,0,0,.2)`, `.code-error` `rgba(255,0,0,.3)`). Keys: `Ctrl-/` toggleComment, `Ctrl-Space` the hint, `Alt-F` findPersistent, `Ctrl-Q` foldCode; on the document `Ctrl+S` = `opener.KE.updateScript()`, F5 / Ctrl+R are prevented; `beforeunload` = `updateScript(true)`.
+- `setFont(px)` sets the CodeMirror and hint rows' font size. CodeMirror measured its gutters at scripting.css's 22 px first, so with the default 13 px the number column stays 35 px wide and the text starts at 54 px (until the line count gains a digit).
+- `highlightErrors(lines)`: `markText({line: n-1, ch: 0}, {line: n, ch: 0}, {className: "code-error"})` per line; no argument clears.
+- `updateTabIcons(key, errored, validated, changed)`; a CodeMirror `change` calls it with `(key, false, false, true)` (the grey circle); the editor's three-argument calls clear the circle.
+- `changeTab(el)`: switches the shown CodeMirror and calls `opener.KE.updateTab(id)`.
 
-**Tabs.** There are two: **client** and **server**. The server script runs only on hosted games, not in Test.
+**Syntax highlighting.** `CodeMirror.defineSimpleMode("krunkscript", ...)`, rules in order (start state):
+`comment /\s*#[^\n\r]*/`; `keyword /\b(public|static|action|break|continue|return|if|else|for|in|while|addTo|remove|lengthOf|notEmpty|hasProp|toStr|toNum)\b/`; `[def, null] /\b([_a-zA-Z][_a-zA-Z0-9]*)(\()/`; `type /\b(bool|num|str|obj)\b/`; `atom /\b(GAME|true|false)\b/`; `variable /\b[_a-zA-Z][_a-zA-Z0-9]*\b/`; `number /\d+\.?\d*/`; `string /("[^"\n\r]*")|('[^'\n\r]*')/`; `/[\{\[\(]/` indent; `/[\}\]\)]/` dedent; meta `lineComment "#"`, `fold "brace"`. Palenight colours: comment `#676e95`, keyword `#c792ea`, def `#82aaff`, type `#decb6b`, atom `#f78c6c`, variable `#f07178`, number `#ff5370`, string `#c3e88d`, the rest `#fff`; gutter `#676e95` on `#292d3e`, cursor `#fc0`.
 
-**Syntax highlighting.** The mode definition is lost.
-- `editor.html` loads CodeMirror 5.61, `addon/mode/simple.js` and the **monokai** theme, so the mode was a `defineSimpleMode` with monokai colours.
-- The token set has to come from `krunkscript.md`: the lexer's types `num str bool obj` plus `[]`, and keywords `action public return if else while for`, etc.
-- Leftover CSS: `.CodeMirror {font-size:14px; min-height:300px}`; `.CodeMirror-line span {color:#fff}` (editor.css:2881-2889).
-
-**Autocomplete.**
-- 211 `{text, type}` entries (KSS:6-639), covering the `GAME.*` namespaces from ADMIN through UTILS plus `GAME.log` etc. The text includes parameter names, so the entries double as signature hints.
-- Aliases: `UTILS → GAME.UTILS`, `Math → GAME.UTILS.math` (KSS:640).
-- The trigger key and popup UI are lost. CodeMirror show-hint is **not** loaded by `editor.html`, so the popup was custom.
+**Autocomplete** (show-hint, `completeSingle: false`, on every `cursorActivity` while no hint is active, and `Ctrl-Space`):
+- The word is the `[\w.]+` run before the cursor. Nothing when `"word"` or `'word'` occurs in the line.
+- The list: the 211 `{text, type}` entries (KSS:6-639) whose text starts with the word (case-insensitive), or that do once an alias (`UTILS → GAME.UTILS`, `Math → GAME.UTILS.math`, KSS:640) stands for its expansion; at most 500, each rendered `text <a>type</a>` (`a` floated right). Picking inserts `text` over the word.
+- v7 bug: the alias rewrite is applied to every listed entry and kept in the shared table.
 
 **Templates.** `templates.client` and `templates.server` (KSS:3-4) are the commented skeletons of every `public action` hook:
 - Client: start, update, render, onPlayerSpawn, onPlayerDeath, onPlayerUpdate, onKeyPress/Up/Held, onControllerPress/Up/Held, onMouseClick/Up/Scroll, onDIVClicked, onNetworkMessage.
@@ -1284,6 +1286,12 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | Export GLTF / Export MTL build from three's meshes (Lambert copies of what the renderer made) | the meshes are built from the object data, GL-free (`editor_export.c`): the shapes of `prefab.c` and the prefab OBJ models; asset models, ladders, sprites, lights, AI, canvases and random billboards are left out; the material colour is the object's `c` (no vertex colours); one node per object |
 | OBJMTLExporter cuts the last character off the texture name and keeps the slash (`map_Kd /wall_0.pn`, zip entry `wall_0.pn`; every asset texture is `texture.pn`) | **fix**: `map_Kd wall_0.png`, asset textures `<id>_texture.png` |
 | GLTFExporter re-encodes each texture upside down (flipY) | the PNG is embedded as is and `TEXCOORD_0` is flipped (same result) |
+| KrunkScript window opens `scripting.html` as a second browser window | an **in-page window** (`#knScriptWin`) at the same place (10% / 10%, 80% x 80%) with a close button; CodeMirror is the engine's code view (`html_dom_code_view`), folding and the find dialog are not ported (the fold gutter shows its markers) (`editor_script.c`) |
+| Validation is the `ksC` / `ksT` socket round trip (offline: "Please Reconnect to Validate Script") | **local**: the C checker (`ks_validate`, as ksc), immediate; diagnostics also run live (300 ms after an edit) and mark the error line; KrunkNative lists them under the code (`#knScriptErrors`, v7 used `alert()`); the button and tab icons still change on Validate only |
+| The code reaches `KE.scripts` on Validate, tab switch and window close only | it is kept in the project as typed (300 ms), so exports and saves never miss edits; "Script Saved" still shows on those three |
+| show-hint's alias rewrite touches every listed entry and stays in the shared table | **fix**: only the entries matched through the alias show it (`editor_script_lang.c`) |
+| The `def` rule swallows a call's `(` but the bare `)` rule dedents, so auto-indent drops a level after any line with a call | **fix**: the call's `(` counts as an opening bracket (`editor_script_lang.c`) |
+| Test-play `ksT` compiles to JS | the client script is compiled with `ks_compile` (the game runs the source); an error is reported (chat line + the window on the error) and the test does not start |
 
 ---
 
@@ -1498,13 +1506,15 @@ The native editor (`client/src/editor/*`, about 11.3k lines) is a near-complete 
 
 | Feature | St | Owner | Gap |
 |---|---|---|---|
-| Script window (client/server tabs), open via menu or key 0 | M | – | WP5 |
-| Syntax highlighting (monokai), font size setting | M | – | Needs an engine widget (code view). |
-| Autocomplete (211 entries + aliases) | M | – | – |
-| Validate (errors, line highlights, tab icons, status button) | M | – | Needs the KrunkScript compiler API from `krunkscript.md`. |
-| Templates (client/server skeletons) and 18 script template maps | M | – | – |
-| Storage `scripts{client,server}` base64, omit-if-template | M | `editor_io.c` | Today `scripts` survives only through `extra_map` (opaque). |
-| Test: drop the server script, compile the client, pass it to the game; Host keeps both | M | `editor.c:editor_test_map`, `app_mode.c:app_test_map` | The game side runs scripts: `krunkscript.md`. |
+| Script window (client/server tabs), open via menu or key 0 | P | `editor_script.c` | In-page window (1.13). |
+| Syntax highlighting (the krunkscript mode, material-palenight), line numbers, fold markers, active line, matching brackets, font size setting | P | `editor_script_lang.c`, engine code view | Folding itself and Alt-F find are not ported. |
+| Autocomplete (211 entries + aliases, show-hint keys) | P | `editor_script_lang.c` | – |
+| Editing keys: closebrackets (pairs, type-over, explode, Backspace), smart indent, Tab / Shift-Tab, Ctrl-/ | P | `editor_script.c` | – |
+| Validate (errors, line highlights, tab icons, status button) | P | `editor_script.c` | Local and live (1.13); diagnostics list. |
+| Templates (client/server skeletons) and 18 script template maps | P | WP1 / WP2 | – |
+| Storage `scripts{client,server}` base64, omit-if-template | P | `editor_model.c` | – |
+| Test: drop the server script, compile the client, pass it to the game; Host keeps both | P | `editor_script.c`, `editor.c:editor_test_map` | – |
+| Editor bus / MCP | P | `editor_bus_link.c`, `tools/editor-mcp` `script_get` / `script_set` | KrunkNative addition. |
 
 ### 3.9 Map settings
 
@@ -1767,10 +1777,26 @@ teleporter channels). Asset buttons (Select Asset / Icon / Image / Custom) go th
 
 ### WP5: KrunkScript code editor
 
+**Status (landed):** `editor_script.c` is the window (scriptPopup / updateScript / updateTab /
+io_ksC and scripting.html's page logic) as an in-page `#knScriptWin` (`ui/css/editor-script.css`
+= scripting.css), `editor_script_lang.c` (GL- and DOM-free) the krunkscript mode, show-hint,
+matchBrackets, closebrackets, the simple mode's indentation, toggleComment, the script store and
+the diagnostics (`ks_validate`). The engine gained a generic code view of a `<textarea>`
+(`html_dom_code_view` / `_spans` / `_lines`: gutter, colours, caret line, marks, no wrap, tab
+stops; `widgets.c`, and on the web an overlay `<pre>` in `web_dom.c`) and C-side text editing
+(`html_dom_text_selection` / `_set_selection` / `_replace` / `_caret_rect`), plus `HtmlEvent.mods`.
+The reference is v7's own page (section 0): `v7ref.js scripting*` writes
+`doc/ref/krunker-v7.1.4/editor/scripting*.{png,dump.txt}` in the format of the native
+`dump:script:FILE`; `tools/editor/script_window_test.py` (`make editor-script-test`) checks the
+four states against it, the diagnostics against ksc, editing, the UTF-8 export and the test-play
+hand-off; `editor_serialize_test` checks the language side and the store round trip; uidiff
+`editor-script-1920`; MCP `script_get` / `script_set`. Open: folding, find (Alt-F), the
+`validatedTest` cache (Test always compiles).
+
 **Owns:**
 - A new `editor_script.c`: script state `{client, server}`, tabs, validate/save, status button, tab icons, error-line highlights, autocomplete popup, templates, font size.
 - A new in-page script window in `ui/editor.html`. The v7 page (`scripting.html`) is lost. KN also runs each page as its own process, so the window becomes an **in-page window** rather than a second OS window. This is an intentional difference.
-- The HTML-engine code view: a `<textarea>` mode that paints per-token colour spans (monokai palette), a line-highlight background and a gutter with line numbers. This lives in `client/src/html/engine/widgets.c` / `paint.c`; coordinate with the engine owners and keep it generic.
+- The HTML-engine code view: a `<textarea>` mode that paints per-token colour spans (the recovered page's material-palenight theme; the monokai CSS that `editor.html` links is not what the window used), a line-highlight background and a gutter with line numbers. This lives in `client/src/html/engine/widgets.c` / `paint.c`; coordinate with the engine owners and keep it generic.
 - The `web_dom.c` equivalent: on the web, a plain textarea plus an overlay `<pre>` is acceptable.
 - The test-play path: drop the server script for Test, compile the client script before handing it off, keep both for Host.
 
@@ -1788,7 +1814,7 @@ KRUNKNATIVE_EDITOR_SCRIPT="script:open;script:tab:server;dump:window:/tmp/s.txt"
 - Feed a script with a known error and assert the highlighted lines and the "Failed - errors found!" state.
 - Check the base64 export round-trip with non-ASCII text.
 - Test-play hand-off: `custMap` must not contain `scripts.server`.
-- Pixel-check the highlight colours against the monokai theme CSS (`R/public/libs/codemirror/5.61.0/theme/monokai.min.css`). There is no v7 window to capture.
+- Pixel-check the window against v7's own (recovered) page: uidiff `editor-script-1920`.
 
 ### WP6: Tools, assets, import/export formats, publishing
 

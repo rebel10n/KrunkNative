@@ -602,6 +602,47 @@ def compile_map(c):
 
 
 @test
+def scripts(c):
+    """script_get / script_set: the editor's export form (UTF-8 base64, the template omitted),
+    diagnostics as ksc reports them, one undo step per write."""
+    m = c.mcp
+    pid = m.sc("map_new", {"name": "scripted", "template": "empty"})["id"]
+    g = m.sc("script_get", {"project": pid})
+    for side in ("client", "server"):
+        s = g["scripts"][side]
+        check(s["is_template"] and not s["in_map"] and s["ok"] and s["source"].startswith("# "), "%s shows the template" % side)
+    src = "# h\u00e9llo \u2713\npublic action start() {\n\tGAME.log(\"\u00fc\");\n}\n"
+    w = m.sc("script_set", {"project": pid, "side": "client", "source": src})
+    check(w["script"]["ok"] and w["script"]["in_map"] and not w["script"]["is_template"], "client script stored")
+    check(m.sc("script_get", {"project": pid, "side": "client"})["scripts"]["client"]["source"] == src, "non-ASCII source round-trips")
+    out = os.path.join(c.tmp, "scripted.json")
+    m.sc("map_save", {"project": pid, "path": out})
+    d = json.load(open(out, encoding="utf-8"))
+    check(base64.b64decode(d["scripts"]["client"]).decode("utf-8") == src and "server" not in d["scripts"], "saved as UTF-8 base64, server omitted")
+    bad = "public action start() {\n\tnum x = 1;\n\tx = \"s\";\n}\n"
+    r = m.call("script_set", {"project": pid, "side": "server", "source": bad}, ok=False)
+    diag = r["structuredContent"]["diagnostics"][0]
+    check(diag["code"] == "script.compile_error" and diag["line"] == 3, "a compile error is refused with its position: %s" % diag)
+    # the same position as ksc
+    ksc = os.path.join(os.path.dirname(c.bin), "..", "..", "ksc")
+    if os.access(ksc, os.X_OK):
+        bad_path = os.path.join(c.tmp, "bad.krnk")
+        with open(bad_path, "w") as f:
+            f.write(bad)
+        k = json.loads(subprocess.run([ksc, "check", "--json", "--side", "server", bad_path], capture_output=True, text=True).stdout)
+        e = k["scripts"][0]["errors"][0]
+        check((e["line"], e["col"]) == (diag["line"], diag["col"]) and e["message"] in diag["message"], "matches ksc: %s vs %s" % (e, diag))
+    m.sc("script_set", {"project": pid, "side": "server", "source": bad, "force": True})
+    gs = m.sc("script_get", {"project": pid, "side": "server"})["scripts"]["server"]
+    check(not gs["ok"] and gs["diagnostics"][0]["line"] == 3, "forced script reports its error")
+    m.sc("undo", {"project": pid})
+    check(m.sc("script_get", {"project": pid, "side": "server"})["scripts"]["server"]["is_template"], "undo restores the template")
+    m.sc("script_set", {"project": pid, "side": "client", "source": ""})
+    check("scripts" not in json.loads(m.sc("map_compile", {"project": pid, "inline": True, "force": True})["json"]), "\"\" removes the script")
+    m.call("script_set", {"project": pid, "side": "both", "source": "x"}, ok=False)
+
+
+@test
 def renders(c):
     if c.no_render:
         print("    (skipped: --no-render)")
@@ -727,6 +768,14 @@ def live_editor(c):
         check(len(images_of(r)) == 4 and all(is_png(i["data"]) for i in images_of(r)), "editor multiview: 4 PNGs")
         t = m.call("render_topdown", {"project": live, "width": 300, "depth": 300})
         check(len(images_of(t)) == 1, "editor top-down")
+        # KrunkScript through the editor: the bus map_set lands in the project's scripts, and the
+        # editor's own export (the refreshed mirror) carries it back
+        code = "# from MCP \u00e9\npublic action start() {\n}\n"
+        m.sc("script_set", {"project": live, "side": "client", "source": code})
+        got = m.sc("script_get", {"project": live, "side": "client"})["scripts"]["client"]
+        check(got["source"] == code and got["in_map"], "script written through the editor: %r" % got.get("source"))
+        m.sc("undo", {"project": live})
+        check(m.sc("script_get", {"project": live, "side": "client"})["scripts"]["client"]["is_template"], "editor undo of the script")
     finally:
         if m:
             m.close()

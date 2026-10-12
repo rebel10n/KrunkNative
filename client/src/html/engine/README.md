@@ -23,7 +23,7 @@ References: doc/ref/krunker-v3.1.1/.
 | gl backend | gl_backend.c/.h, assets/shaders/html_ui.{vert,frag} | gl_backend.h | submits DisplayLists through one program; premultiplied composite; restores the client's GL state |
 | anim | anim.c/.h | anim.h | @keyframes + transitions, timing functions, interpolation; output written over the computed style by engine.c |
 | events | events.c/.h | events.h | hit testing via layout, hover/active/focus state, inline `on*` handler parsing + bubbling dispatch, wheel scrolling, resize observers |
-| widgets | widgets.c/.h | widgets.h | form controls: text/number/password, textarea, checkbox, radio, range (+ ::-webkit-slider-thumb / -runnable-track), color, select (state, Chrome 152 painting, keyboard/mouse) |
+| widgets | widgets.c/.h | widgets.h | form controls: text/number/password, textarea, checkbox, radio, range (+ ::-webkit-slider-thumb / -runnable-track), color, select (state, Chrome 152 painting, keyboard/mouse); the code view of a textarea (gutter, colour spans, line marks, no wrap) and text editing from C (selection, replace, caret rect) |
 | engine | engine.c/.h | client/src/html/html_ui_backend.h, engine.h | backend entry points (init/update/render/input), frame orchestration (anim -> restyle -> incremental layout -> observers -> paint -> submit), host adapters for layout/paint/events/widgets |
 | DOM ops | dom_ops.c | client/include/html_dom.h | native html_dom_* (handlers/timers/storage are in client/src/html/html_dom_core.c) |
 

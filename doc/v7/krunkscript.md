@@ -1555,7 +1555,7 @@ names `stick_axis_left`, `stick_axis_right` (`REF/src/libs/gamepadInput.js:24-30
 | Kill/spawn events | client hooks from the kill/spawn packets; server hooks from `players.kill`/spawn |
 | Round lifecycle | `start` per `init`, `onGameEnd` at round end, `TIME.freeze/unfreeze` on the round timer |
 | Settings | `SETTINGS.set` changes and persists user settings (`client_settings`) |
-| Editor | v7 script window, templates `SYN:3-4`, export as base64 (`EDT:3519-3526`); KN editor support is optional (WP6) |
+| Editor | v7 script window, templates `SYN:3-4`, export as base64 (`EDT:3519-3526`); KN: the editor's script window (doc/v7/editor.md WP5, `client/src/editor/editor_script.c`) checks with `ks_validate` live and compiles the client script before Test |
 
 ---
 

@@ -62,7 +62,7 @@ Without `--live` / `--no-live` one registration serves both modes:
 ```
 stdio / HTTP ─ mcp.c (JSON-RPC 2.0, lifecycle, tools, resources, prompts, logging)
                  │
-     tools_project.c  tools_objects.c  tools_logic.c  tools_build.c  tools_check.c  render.c  playtest.c
+     tools_project.c  tools_objects.c  tools_logic.c  tools_build.c  tools_check.c  tools_script.c  render.c  playtest.c
                  │            (every mutation: edit_begin -> mutate the document -> edit_commit)
              project.c ── file projects: Doc + snapshot undo/redo (doc.c)
                  │     └─ live projects: mirror of the editor's export {full:true}; commit diffs the
@@ -261,6 +261,8 @@ schemas come from `tools/list`.
 | `fill_area` | W | bbox*, prefab, count or spacing, jitter, scale_range, random_yaw, on_ground, avoid_overlap, avoid_spawns, seed, props |
 | `map_validate` | R | featured, reachability, max_diagnostics, min_severity |
 | `map_compile` | W | output, inline, round, pool_sizes, fold_colors, strip_defaults, drop_editor_only, encode_scripts, bake_tris, scripts {client, server}, force |
+| `script_get` | R | side (client / server / both), source — decoded KrunkScript (the template when the map has none), lines, ksc's diagnostics |
+| `script_set` | W | side*, source* ("" = the template), force — stored as the editor exports it (UTF-8 base64, the template omitted); a compile error is refused unless force; live projects reach the editor's script window over the bus |
 | `playtest` | R | seconds, bots, mode, path [[x,y,z]...], screenshot, seed |
 | `render_view` | R | position + target, or position + yaw / pitch, or ids; fov, ortho, framing, fog, width, height |
 | `render_multiview` | R | ids, framing, fog, width, height → 4 images (iso, front, top, right) |

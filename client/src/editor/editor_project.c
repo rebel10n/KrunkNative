@@ -387,6 +387,7 @@ static int write_text_file(const char *path, const char *text) {
 }
 
 long ed_project_save(EditorProject *p, const char *path, const int adopt, const int pretty) {
+    ed_script_flush(); // the script window's latest edits
     // writes the map JSON (the assets/maps format, getMapExport); returns bytes, -1 on failure
     if (!p) return -1;
     const char *target = path && *path ? path : p->path;
