@@ -5,8 +5,9 @@ and covers every tool.
     python3 -I tools/editor-mcp/tests/mcp_test.py [--bin PATH] [--root DIR] [--no-render] [-k NAME]
 
 Defaults: --bin <root>/cmake-build-debug/tools/editor-mcp/kn_editor_mcp, --root = the checkout.
-Renders and the playtest screenshot need client_bin (headless EGL); they are skipped with a note
-when it is missing (--no-render skips them always). Exit status 0 = all passed.
+Renders and the playtest screenshot need client_bin (headless EGL) and the gitignored game content
+(assets/css/fonts/...); they are skipped with a note when either is missing (--no-render skips
+them always). Exit status 0 = all passed.
 """
 
 import argparse
@@ -156,7 +157,8 @@ def protocol(c):
     one = json.loads(m.request("resources/read", {"uri": "krunker://prefabs/TRIGGER"})["result"]["contents"][0]["text"])
     check(any(p["key"] == "te" for p in one["properties"]), "TRIGGER schema has te")
     cat = json.loads(m.request("resources/read", {"uri": "krunker://catalog"})["result"]["contents"][0]["text"])
-    check(any(e["key"] == "burg" for e in cat), "catalog lists burg")
+    check(any(e["key"] == "burg_new" and e["path"] == "assets/maps/v7/burg_new.json" for e in cat), "catalog lists v7 Burg")
+    check(any(e["key"] == "v3_burg" and e["path"] == "assets/maps/burg.json" for e in cat), "catalog keeps v3 Burg")
     check("error" in m.request("resources/read", {"uri": "krunker://nope"}), "unknown resource errors")
     check(len(m.request("resources/templates/list")["result"]["resourceTemplates"]) >= 2, "resource templates")
     prompts = m.request("prompts/list")["result"]["prompts"]
@@ -182,7 +184,8 @@ def save_and_compare(c, ref, path, fmt=None):
 @test
 def round_trip(c):
     m = c.mcp
-    for name, rel in (("burg", "assets/maps/burg.json"), ("kanji", "assets/maps/kanji.json"),
+    # the v3.1.1 maps (catalogue keys v3_<stem>): "burg" / "kanji" resolve to the v7.1.4 files now
+    for name, rel in (("v3_burg", "assets/maps/burg.json"), ("v3_kanji", "assets/maps/kanji.json"),
                       ("Bhop_VIP", "assets/maps/custom/Bhop_VIP.json"), ("Krunk_Plaza", "assets/maps/custom/Krunk_Plaza.json")):
         p = m.sc("map_open", {"path": name})
         out = os.path.join(c.tmp, "rt_%s.json" % name)
@@ -213,7 +216,7 @@ def safety(c):
     m.call("map_save", {"project": "burg", "path": "/etc/kn_test.json"}, ok=False)
     m.call("map_save", {"project": "burg", "path": os.path.join(c.tmp, "x.txt")}, ok=False)
     m.call("map_open", {"path": "../../../../etc/passwd"}, ok=False)
-    m.call("map_save", {"project": "burg", "path": os.path.join(c.tmp, "rt_burg.json")}, ok=False)  # exists, no overwrite
+    m.call("map_save", {"project": "burg", "path": os.path.join(c.tmp, "rt_v3_burg.json")}, ok=False)  # exists, no overwrite
     ro = Mcp(c.bin, c.root, c.ws, ["--read-only", "--open", "burg"])
     ro.initialize()
     ro.call("objects_delete", {"ids": [1]}, ok=False)
@@ -708,6 +711,13 @@ def main():
         p = os.path.join(c.root, d, "client_bin")
         if os.access(p, os.X_OK):
             c.client = p
+    # client_bin needs the game content (fonts, models, textures), which is gitignored: a checkout
+    # without it (CI) runs the client-less paths, like a missing client_bin
+    content = os.path.join(c.root, "assets", "css", "fonts", "font2.ttf")
+    if c.client and not os.path.isfile(content):
+        print("note: %s missing (game content not installed): renders, playtest screenshot and live editor skipped"
+              % os.path.relpath(content, c.root))
+        c.client = None
     c.tmp = tempfile.mkdtemp(prefix="kn-mcp-test-")
     c.ws = os.path.join(c.tmp, "ws")
     os.makedirs(c.ws)

@@ -23,7 +23,7 @@ static int resolve_map_path(Ctx *ctx, const char *ref, char *out, const size_t s
         if (idx >= 0) {
             const MapCatalogEntry *e = map_catalog_at((size_t) idx);
             char rel[PATH_MAX];
-            snprintf(rel, sizeof(rel), "assets/maps/%s%s.json", e->source == MAP_SOURCE_OFFICIAL ? "" : "custom/", e->key);
+            snprintf(rel, sizeof(rel), "assets/%s", e->path); // the catalogue's file (maps/v7/, maps/custom/, v3 maps/)
             return ctx_safe_path(ctx, rel, 0, out, size, err, errsz);
         }
         if (idx == -2) {
