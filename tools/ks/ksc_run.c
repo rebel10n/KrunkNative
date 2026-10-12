@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <sys/timeb.h>
+#endif
 
 #include "ks.h"
 
@@ -25,19 +28,29 @@ static void run_log(void *user, int is_error, const char *line)
     printf("%s%s\n", is_error ? "!" : "", line);
 }
 
+// Wall clock in ms. MinGW's C runtime has no C11 timespec_get/TIME_UTC: _ftime64 there.
+static double wall_ms(void)
+{
+#ifdef _WIN32
+    struct __timeb64 tb;
+    _ftime64(&tb);
+    return (double)tb.time * 1000.0 + (double)tb.millitm;
+#else
+    struct timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+#endif
+}
+
 static double run_now(void *user)
 {
     (void)user;
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return (double)ts.tv_sec * 1000.0 + (double)(ts.tv_nsec / 1000000);
+    return (double)(long long)wall_ms(); // whole ms, as before
 }
 
 static double mono_ms(void)
 {
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+    return wall_ms();
 }
 
 static char *slurp(const char *path, size_t *len)
