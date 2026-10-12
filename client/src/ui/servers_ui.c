@@ -18,6 +18,7 @@
 #include <ui_logic.h>
 #include <map_catalog.h>
 #include <online_mode.h> // server finder URL, online / offline mode
+#include <build_info.h>   // kn_build_protocol (seek-game proto)
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -354,6 +355,8 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     g_account_game[0] = 0;
     backend_url_encode(enc, sizeof(enc), g_region);
     int n = snprintf(path, sizeof(path), "/mm/seek-game?hostname=krunknative&region=%s&autoChangeGame=%s", enc, auto_change ? "true" : "false");
+    // the protocol this client speaks: the brain never matches it to a node of another major
+    n += snprintf(path + n, sizeof(path) - (size_t) n, "&proto=%s", kn_build_protocol());
     if (game_id && game_id[0]) {
         backend_url_encode(enc, sizeof(enc), game_id);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&game=%s", enc);
@@ -596,6 +599,13 @@ static void rebuild_finder_rows(void) {
         cJSON_AddNumberToObject(meta, "port", port->valueint);
         if (online) cJSON_AddTrueToObject(meta, "onlineMode");
         cJSON_AddTrueToObject(meta, "finder");
+        // build version flags for the row badge (servers_ui_entry_badge_html)
+        cJSON_AddBoolToObject(meta, "outdated", servers_ui_entry_outdated(e));
+        cJSON_AddBoolToObject(meta, "incompatible", servers_ui_entry_incompatible(e));
+        const char *version = cJSON_GetStringValue(cJSON_GetObjectItem(e, "version"));
+        const char *protocol = cJSON_GetStringValue(cJSON_GetObjectItem(e, "protocol"));
+        if (version) cJSON_AddStringToObject(meta, "version", version);
+        if (protocol) cJSON_AddStringToObject(meta, "protocol", protocol);
         cJSON_AddItemToArray(t, meta);
         cJSON_AddItemToArray(g_finder_rows, t);
         g_finder_players += players > 0 ? players : 0;
@@ -690,6 +700,9 @@ static char *get_servers(void) {
                 sb_append(&sb, " <span class='material-icons' style='color:rgba(0,0,0,0.4);font-size:22px;vertical-align:middle' title='Online mode: verified accounts'>lock</span>");
                 if (guest) sb_append(&sb, "<span class='grey' style='font-size:16px'> Account required</span>");
             }
+            char *badge = servers_ui_entry_badge_html(t); // Outdated / Incompatible (build versions)
+            sb_append(&sb, badge);
+            free(badge);
             sb_appendf(&sb, "<div class='serverPCount'>%d/%d</div>", players < max_players ? players : max_players, max_players);
             if (finder) {
                 // like a custom game's node id: the server's own name
@@ -725,6 +738,7 @@ static void on_finder(void *user, const int status, const char *body, const size
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *servers = cJSON_GetObjectItem(res, "servers");
     if (cJSON_IsArray(servers)) {
+        servers_ui_note_list_response(res); // download_url / downloads (build versions)
         cJSON_Delete(g_finder_servers);
         g_finder_servers = cJSON_Duplicate(servers, 1);
     } else if (status != 200) {
@@ -858,7 +872,9 @@ static char *gen_list(void) {
     if (servers) sb_append(&sb, servers);
     free(servers);
     snprintf(total, sizeof(total), "%.0f", (backend_available() == 1 ? g_total_players : 0) + g_finder_players); // after get_servers: + finder-only
-    sb_appendf(&sb, "</div><div style='height:10px'></div><b style='color:rgba(0,0,0,0.6)'>%s In Game<span style='float:right;color:rgba(0,0,0,0.6)'>%s on Social</span></b></div>", total, social);
+    char *download = servers_ui_download_button_html(NULL); // the latest server build (ci-release)
+    sb_appendf(&sb, "</div><div style='height:10px'></div><b style='color:rgba(0,0,0,0.6)'>%s In Game &nbsp; %s<span style='float:right;color:rgba(0,0,0,0.6)'>%s on Social</span></b></div>", total, download, social);
+    free(download);
     return sb_finish(&sb);
 }
 
@@ -868,6 +884,7 @@ static void on_game_list(void *user, const int status, const char *body, const s
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *games = cJSON_GetObjectItem(res, "games");
     if (cJSON_IsArray(games)) {
+        servers_ui_note_list_response(res); // download_url / downloads (build versions)
         cJSON_Delete(g_games);
         g_games = cJSON_Duplicate(games, 1);
         const cJSON *total = cJSON_GetObjectItem(res, "totalPlayerCount");
@@ -1012,6 +1029,10 @@ static void games_load_more(const HtmlEvent *ev);
 
 int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
+    if (!strcmp(name, "downloadServer")) { // the latest server build (servers_ui_open_download)
+        servers_ui_open_download();
+        return 1;
+    }
     if (!strcmp(name, "directConnect")) {
         char text[160] = "";
         HtmlElem input = html_dom_by_id("directConnect");
@@ -1453,4 +1474,101 @@ void servers_ui_tick(Client *client) {
             seek(g_game_id, 1, NULL);
         }
     }
+}
+
+// ------------------------------------------------------------------ build versions (ci-release)
+// The brain flags every listed server (doc/backend.md "Build version", services/brain/releases.c):
+// finder /servers entries carry "outdated" / "incompatible", /mm/game-list tuples carry them in
+// meta, and both answers carry the latest release: "latest", "download_url" (release page) and
+// "downloads" {linux, windows, macos}. Self-contained helpers: the Servers window markup calls
+// them from its rows and its header.
+
+#define SERVERS_RELEASE_PAGE "https://github.com/rebel10n/KrunkNative/releases/tag/server-latest"
+#define SERVERS_RELEASE_PREFIX "https://github.com/rebel10n/KrunkNative/"
+
+static char g_server_download[512]; // the URL "Download server" opens (allowlisted)
+
+// Only the project's own GitHub pages are opened from these (they come from the brain).
+static int release_url_ok(const char *url) {
+    if (!url || strncmp(url, SERVERS_RELEASE_PREFIX, strlen(SERVERS_RELEASE_PREFIX)) != 0 || strlen(url) >= sizeof(g_server_download))
+        return 0;
+    for (const char *p = url; *p; p++)
+        if ((unsigned char) *p <= 0x20 || *p == '"' || *p == '\'' || *p == '\\' || *p == '<' || *p == '>' || *p == 0x7f) return 0;
+    return 1;
+}
+
+// A list answer (finder /servers or /mm/game-list): remember where "Download server" goes. The
+// asset for this platform natively; the release page on the web (any OS) and as the fallback.
+void servers_ui_note_list_response(const cJSON *response) {
+    if (!cJSON_IsObject(response)) return;
+    const char *page = cJSON_GetStringValue(cJSON_GetObjectItem(response, "download_url"));
+    const char *asset = NULL;
+#ifndef __EMSCRIPTEN__
+    const cJSON *downloads = cJSON_GetObjectItem(response, "downloads");
+#if defined(_WIN32)
+    asset = cJSON_GetStringValue(cJSON_GetObjectItem(downloads, "windows"));
+#elif defined(__APPLE__)
+    asset = cJSON_GetStringValue(cJSON_GetObjectItem(downloads, "macos"));
+#elif defined(__linux__)
+    asset = cJSON_GetStringValue(cJSON_GetObjectItem(downloads, "linux"));
+#endif
+#endif
+    const char *url = release_url_ok(asset) ? asset : release_url_ok(page) ? page : NULL;
+    if (url) snprintf(g_server_download, sizeof(g_server_download), "%s", url);
+}
+
+// downloadServer(): opens it (ui_open_external: system browser natively, window.open on the web)
+void servers_ui_open_download(void) {
+    ui_open_external(release_url_ok(g_server_download) ? g_server_download : SERVERS_RELEASE_PAGE);
+}
+
+// The meta object of a game-list tuple, or a finder /servers entry itself.
+static const cJSON *entry_fields(const cJSON *entry) {
+    return cJSON_IsArray(entry) ? cJSON_GetArrayItem(entry, 4) : entry;
+}
+
+int servers_ui_entry_outdated(const cJSON *entry) {
+    return cJSON_IsTrue(cJSON_GetObjectItem(entry_fields(entry), "outdated"));
+}
+
+int servers_ui_entry_incompatible(const cJSON *entry) {
+    return cJSON_IsTrue(cJSON_GetObjectItem(entry_fields(entry), "incompatible"));
+}
+
+// "" or one badge span (malloc'd, caller frees): "Incompatible" (another protocol major: the
+// brain never matches it) wins over "Outdated" (older than the latest server release).
+char *servers_ui_entry_badge_html(const cJSON *entry) {
+    const cJSON *f = entry_fields(entry);
+    const char *version = cJSON_GetStringValue(cJSON_GetObjectItem(f, "version"));
+    if (!version || !version[0]) version = cJSON_GetStringValue(cJSON_GetObjectItem(f, "build"));
+    const char *proto = cJSON_GetStringValue(cJSON_GetObjectItem(f, "protocol"));
+    if (!proto || !proto[0]) proto = cJSON_GetStringValue(cJSON_GetObjectItem(f, "proto"));
+    StrBuf sb = {0};
+    if (servers_ui_entry_incompatible(entry)) {
+        sb_append(&sb, " <span class='serverBadge serverIncompatible' style='color:#fff;background:#e53935;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' title='Protocol ");
+        sb_append_esc(&sb, proto && proto[0] ? proto : "?");
+        sb_appendf(&sb, ": this client speaks %s'>Incompatible</span>", kn_build_protocol());
+    } else if (servers_ui_entry_outdated(entry)) {
+        sb_append(&sb, " <span class='serverBadge serverOutdated' style='color:#fff;background:#fb8c00;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' title='Older than the latest server release");
+        if (version && version[0]) {
+            sb_append(&sb, " (runs ");
+            sb_append_esc(&sb, version);
+            sb_append(&sb, ")");
+        }
+        sb_append(&sb, "'>Outdated</span>");
+    }
+    char *s = sb_finish(&sb);
+    return s ? s : strdup("");
+}
+
+// The "Download server" link (malloc'd, caller frees). list_response (may be NULL) is noted
+// first (servers_ui_note_list_response); the link itself carries no URL: downloadServer().
+char *servers_ui_download_button_html(const cJSON *list_response) {
+    servers_ui_note_list_response(list_response);
+    StrBuf sb = {0};
+    sb_append(&sb, "<a class='downloadServer' onclick='downloadServer()' style='cursor:pointer' title='");
+    sb_append_esc(&sb, release_url_ok(g_server_download) ? g_server_download : SERVERS_RELEASE_PAGE);
+    sb_append(&sb, "'><span class='material-icons' style='vertical-align:middle;font-size:20px'>file_download</span> Download server</a>");
+    char *s = sb_finish(&sb);
+    return s ? s : strdup("");
 }

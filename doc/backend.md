@@ -474,6 +474,8 @@ brain draining).
 | `webUrl` | string | optional: ws(s) URL web clients use (net-bridge `/native`) |
 | `timeLeft` | int | seconds left in the round |
 | `draining` | bool | the server is shutting down (not joinable) |
+| `proto`, `build`, `commit`, `commitTime` | string, string, string, int | build identity of the server (`proto` "M.m", git describe, 12-hex commit, unix s): see 8.12 |
+| `outdated`, `incompatible` | bool | added by `/mm/game-list` (8.12); not sent by servers |
 
 ### Routes
 
@@ -578,7 +580,7 @@ Node -> brain:
 
 | type | fields | notes |
 | --- | --- | --- |
-| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version`, `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `onlineMode`? (0/1, default 0: only signed-in players are matched to it), `password`? (bool: never quick-joined), `modes`?, `maps`? | first frame |
+| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version` (game version, `"1.0.0"`), `build`?, `commit`?, `commitTime`?, `buildTime`?, `protocol`? (build identity, 8.12), `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `onlineMode`? (0/1, default 0: only signed-in players are matched to it), `password`? (bool: never quick-joined), `modes`?, `maps`? | first frame |
 | `snapshot` | `lobbies: [tuple...]` | full lobby set, every 5 s (replaces the node's set) |
 | `lobby-up` | `lobby: tuple` | upsert one lobby (joins/leaves, 250 ms debounce) |
 | `lobby-down` | `lobbyId` | lobby removed (local or namespaced id) |
@@ -1355,12 +1357,15 @@ demuxes the `FF FF FF FF` prefix, which no game datagram starts with).
 * request: `FF FF FF FF "KNINFO" [00 <nonce <= 32 printable bytes>]`
 * reply: `FF FF FF FF "KNinfo" 00 <JSON <= 1200 bytes>`:
   `{"v":1,"game":"krunknative","name","map","mode","modeId","players","max","bots",
-  "tags":[...],"community","online_mode","password","region","version","port","nonce"}`.
+  "tags":[...],"community","online_mode","password","region","version","port","nonce",
+  "commit","commit_time","build_time","protocol"}` (`version` = the build's git describe; 8.12).
   Tags: `online`/`offline`, `password`, `ranked`, `custom`, `draining`, `community`
   (linked to a coordinator), then `tags`. Snapshot refreshed 4x a second by the tick.
 * `services/scripts/kn-query.py HOST[:PORT] ...` prints it.
 * Finder (opt-in, `finder_url`): `POST <finder_url>/servers/heartbeat`
-  `{"v":1,"host","port","query_port","name","community","online_mode"[,"shutdown":true]}`
+  `{"v":1,"host","port","query_port","name","community","online_mode","version","commit",
+  "commit_time","build_time","protocol"[,"shutdown":true]}` (the build fields are informational:
+  the listing uses the verified query reply)
   every `interval` s from the reply `{"ok":true,"interval":N}` (default 60), plus one with
   `shutdown` on exit. `host` is `""` (= the request's source IP) while `public_host` is
   loopback. The finder lists only what it verified by polling the query. HTTPS needs
@@ -1442,6 +1447,50 @@ direct connect / community servers (coord-auth). Kept: offline / practice play
 (`local_game.c`, "play offline" on the error screen, editor Test Map), the server
 browser and join. `/mm/host-game` and node `host-request` stay on the coordinator for
 admin tooling (6.3); clients never call them.
+
+### 8.12 Build version and outdated servers
+
+Every binary embeds its build identity (`shared/include/build_info.h`, generated
+`kn_version.h` from `cmake/kn_version.cmake` at every build): git describe (`--match
+'server-v*' --match 'v[0-9]*' --exclude '*-parity*' --always --dirty`), 12-hex commit, its
+committer date, the build time and the protocol `NET_PROTOCOL_MAJOR.MINOR`. CI builds without
+git pass `-DKRUNKNATIVE_VERSION_{DESCRIBE,COMMIT,COMMIT_TIME,BUILD_TIME}`. Shown by
+`server_bin --version` / `client_bin --version` / `kn_brain --version`, the server's startup log
+and `status`, the KNINFO reply and finder heartbeat (8.8), the coordinator `hello` (5.2) and every
+lobby tuple's meta (`proto`, `build`, `commit`, `commitTime`). The INIT packet is unchanged
+(fixed size; a tail would need a protocol bump).
+
+**Latest release** (`services/brain/releases.c`, rule in `release_info.c`, module `releases`,
+every role). kn_brain polls `servers.releases_url` (default
+`https://api.github.com/repos/rebel10n/KrunkNative/releases?per_page=30`, no token) every
+`servers.latest_poll_s` (600; 0 = off) on a worker thread (libcurl), with `If-None-Match`
+(a 304 keeps the cache) and backoff to `X-RateLimit-Reset` on 403/429 or a spent limit. The
+latest server build is the `server-latest` / `server-v*` release (not drafts) with the newest
+`commit_time` in the body line `<!-- kn-build {"describe","commit","commit_time","build_time",
+"protocol"} -->` (`.github/workflows/release.yml`). Overrides: `servers.latest_version`
+(describe or commit; no poll then) and `servers.download_url` (the page shown to players).
+
+**Outdated** (`release_server_outdated`): a server is outdated when
+1. its protocol major.minor is lower than this coordinator's own, or
+2. the latest release is known, the server's commit is not the latest commit, and its commit
+   is older than the latest commit by more than `servers.outdated_grace_h` (48 h; dirty builds
+   compare by commit time like any other), or
+3. the latest release is known and the server reports no build info (an older server_bin), or
+4. `servers.latest_version` is set and neither the server's describe nor its commit match it.
+
+**Incompatible**: the server announces another protocol MAJOR than the client (`?proto=M.m`;
+clients without it count as the coordinator's major). Minors interoperate.
+
+Exposed per entry as `outdated` / `incompatible` (finder `GET /servers`, `meta` of `/mm/game-list`
+tuples) plus top-level `latest` `{version, commit, commit_time, build_time, protocol, tag}`,
+`download_url` (release page, default `https://github.com/rebel10n/KrunkNative/releases/tag/server-latest`)
+and `downloads` `{linux, linux_bullseye, windows, macos}` (asset URLs). Matchmaking
+(`/mm/seek-game`, the client sends `proto`): never a lobby of another protocol major (requested by
+id: `IncompatibleVersion` 409 with `autoChangeGame=false`, else moved); up-to-date lobbies with
+room win over outdated ones, which are still used when nothing else has room. The client's
+Servers window shows an Outdated / Incompatible badge and a "Download server" link
+(`downloadServer()`: the OS asset natively, the release page on the web; only
+`https://github.com/rebel10n/KrunkNative/` URLs are opened).
 
 ## 9. Client integration (client-integration)
 
@@ -1609,7 +1658,9 @@ echoed the nonce (and is younger than two intervals) are listed, with every fiel
 or `finder.max_failures` (3) failed polls. Limits: `finder.submit_per_min` (30) per IP,
 `finder.max_per_ip` (64) entries. `GET /servers?map=&mode=&tag=&space=1&online_mode=0|1&
 community=&region=&q=&limit=` -> `{ok, servers:[{host, port, query_port, name, map, mode, modeId,
-players, max, tags, community, online_mode, password, region, version, ping_ms, last_seen}]}`.
+players, max, tags, community, online_mode, password, region, version, commit, commit_time,
+build_time, protocol, ping_ms, last_seen, outdated, incompatible}], latest, download_url, downloads}`
+(`?proto=M.m` = the asking client's protocol for `incompatible`; 8.12).
 
 **Client modes** (`client/include/online_mode.h`, `client/src/net/online_mode.c`). `--mode
 online|offline`, `KRUNKNATIVE_MODE`, web `?mode=`, storage `knMode` (Settings > Client > Account

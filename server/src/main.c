@@ -5,6 +5,7 @@
 #include <rcon.h>
 #include <bots.h>
 #include <ks_server.h> // KrunkScript server host
+#include <build_info.h>
 #include <pthread.h>
 #include <pcg_basic.h>
 #include <errno.h>
@@ -640,6 +641,8 @@ int main(int argc, char **argv) {
     }
     if (args.version) {
         printf("KrunkNative server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
+        // build identity (shared/include/build_info.h): what the finder / coordinator compare
+        printf("build %s\n", kn_build_string());
         return 0;
     }
     if (args.rcon_target) return rcon_client_main(args.rcon_target, args.rcon_password, args.rcon_argc, args.rcon_argv);
@@ -753,6 +756,7 @@ int main(int argc, char **argv) {
 
     server_log("Starting KrunkNative server v%d.%d.%d%s", g_server_version.major, g_server_version.minor, g_server_version.patch,
                interactive ? "" : " (headless)");
+    server_log("Build %s", kn_build_string());
 
     if (g_server->game.ready) {
         const cJSON *name = cJSON_GetObjectItem(g_server->game.maps[g_server->game.current_map_index], "name");

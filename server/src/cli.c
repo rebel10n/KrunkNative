@@ -2,6 +2,7 @@
 #include <server_accounts.h>
 #include <server_config.h>
 #include <brain.h>
+#include <build_info.h>
 #include <map_catalog.h>
 #include <ctype.h>
 #include <errno.h>
@@ -389,6 +390,7 @@ static void cli_cmd_status(const char *args) {
     server_log("KrunkNative server v%d.%d.%d, listening on port %u",
                g_server_version.major, g_server_version.minor, g_server_version.patch,
                (unsigned int) g_server->config.listen_port);
+    server_log("  build      %s", kn_build_string());
     server_log("  uptime     %s", uptime);
     if (game->ready) {
         server_log("  map        %s (%d/%lu)", cli_map_name((size_t) game->current_map_index), game->current_map_index, (unsigned long) game->map_count);

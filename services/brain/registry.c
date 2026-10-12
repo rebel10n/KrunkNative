@@ -149,6 +149,9 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
     copy_str(l->mode, sizeof(l->mode), kn_json_str(meta, "modeName", cJSON_IsString(mode) ? mode->valuestring : ""));
     copy_str(l->map, sizeof(l->map), kn_json_str(meta, "map", kn_json_str(meta, "mapName", kn_json_str(meta, "i", ""))));
     copy_str(l->version, sizeof(l->version), kn_json_str(meta, "v", ""));
+    /* meta.proto "M.m" (server_bin with build info); absent = a 1.x server */
+    const char *proto = kn_json_str(meta, "proto", "");
+    l->proto_major = proto[0] >= '0' && proto[0] <= '9' ? atoi(proto) : -1;
 }
 
 /* o[key] = value with JS assignment semantics: replaced in place, else appended. */
@@ -411,6 +414,15 @@ static int version_ok(const MmLobby *l, const char *version) {
     return !version || !*version || !l->version[0] || !strcmp(l->version, version);
 }
 
+/* the client can speak the lobby's protocol (same major; release_info.h) */
+static int proto_ok(const MmLobby *l, const MmPickQuery *q) {
+    return q->proto_major <= 0 || l->proto_major < 0 || l->proto_major == q->proto_major;
+}
+
+static int lobby_outdated(const MmLobby *l, const MmPickQuery *q) {
+    return q->outdated ? q->outdated(l, q->outdated_ud) != 0 : 0;
+}
+
 static int region_eq(const MmNode *n, const char *region) {
     return !region || !*region || !strcmp(n->region, region);
 }
@@ -420,21 +432,26 @@ static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, con
                        int use_soft_cap, MmPick *out) {
     MmNode *best_n = NULL;
     MmLobby *best = NULL;
-    int best_taken = -1;
+    int best_taken = -1, best_outdated = 1;
     for (size_t i = 0; i < r->node_count; i++) {
         MmNode *n = r->nodes[i];
         if (!region_eq(n, region)) continue;
         for (size_t j = 0; j < n->lobby_count; j++) {
             MmLobby *l = &n->lobbies[j];
-            if (l->custom || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) || !version_ok(l, q->version)) continue;
+            if (l->custom || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) || !version_ok(l, q->version) ||
+                !proto_ok(l, q))
+                continue;
             int taken = registry_lobby_taken(r, l, q->now_ms);
             int cap = registry_lobby_cap(l, p);
             if (use_soft_cap && p->soft_cap > 0 && p->soft_cap < cap) cap = p->soft_cap;
             if (taken >= cap) continue;
-            if (taken > best_taken) {
+            /* up-to-date before outdated, then the most populated */
+            const int outdated = lobby_outdated(l, q);
+            if (!best || outdated < best_outdated || (outdated == best_outdated && taken > best_taken)) {
                 best = l;
                 best_n = n;
                 best_taken = taken;
+                best_outdated = outdated;
             }
         }
     }
@@ -450,7 +467,10 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     if (q->game_id && *q->game_id) {
         MmNode *n = NULL;
         MmLobby *l = registry_lobby(r, q->game_id, &n);
-        if (l && lobby_joinable(n, l) && !q->authed && registry_lobby_needs_account(n, l)) {
+        if (l && lobby_joinable(n, l) && !proto_ok(l, q)) {
+            /* another protocol major: the client could not play there */
+            if (!q->auto_change) return MM_PICK_INCOMPATIBLE;
+        } else if (l && lobby_joinable(n, l) && !q->authed && registry_lobby_needs_account(n, l)) {
             /* a guest asking for an online_mode lobby: the server would refuse it */
             if (!q->auto_change) return MM_PICK_ACCOUNT_REQUIRED;
         } else if (l && lobby_joinable(n, l)) {
@@ -482,7 +502,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
             const MmLobby *l = &r->nodes[i]->lobbies[j];
             if (l->custom || !lobby_auto_ok(r->nodes[i], l, q)) continue;
             any = 1;
-            if (version_ok(l, q->version)) any_version = 1;
+            if (version_ok(l, q->version) && proto_ok(l, q)) any_version = 1;
         }
     }
     out->changed = 0;

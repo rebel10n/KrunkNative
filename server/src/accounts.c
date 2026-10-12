@@ -3,6 +3,7 @@
 #include <server_accounts.h>
 #include <server_log.h>
 #include <brain.h>
+#include <build_info.h>
 #include <central_auth.h>
 #include <rcon.h>
 #include <auth_join.h>
@@ -182,6 +183,12 @@ static cJSON *acc_lobby_tuple(void) {
         cJSON_AddStringToObject(meta, "i", map);
     }
     cJSON_AddStringToObject(meta, "v", ACC_VERSION);
+    // build identity (build_info.h): the brain flags outdated lobbies and matches protocols
+    // (services/brain/release_info.c); federated with the tuple like every meta field
+    cJSON_AddStringToObject(meta, "proto", kn_build_protocol());
+    cJSON_AddStringToObject(meta, "build", kn_build_info()->describe);
+    cJSON_AddStringToObject(meta, "commit", kn_build_info()->commit);
+    cJSON_AddNumberToObject(meta, "commitTime", (double) kn_build_info()->commit_time);
     cJSON_AddBoolToObject(meta, "cs", g_acc.custom);
     if (custom_map) cJSON_AddStringToObject(meta, "m", map);
     else cJSON_AddNullToObject(meta, "m");
@@ -238,6 +245,12 @@ static cJSON *acc_hello(void) {
     cJSON_AddNumberToObject(hello, "publicPort", g_gs_config.public_port ? g_gs_config.public_port : g_server->config.listen_port);
     if (g_gs_config.web_url[0]) cJSON_AddStringToObject(hello, "webUrl", g_gs_config.web_url);
     cJSON_AddStringToObject(hello, "version", ACC_VERSION);
+    const KnBuildInfo *build = kn_build_info();
+    cJSON_AddStringToObject(hello, "build", build->describe);
+    cJSON_AddStringToObject(hello, "commit", build->commit);
+    cJSON_AddNumberToObject(hello, "commitTime", (double) build->commit_time);
+    cJSON_AddStringToObject(hello, "buildTime", build->build_time);
+    cJSON_AddStringToObject(hello, "protocol", kn_build_protocol());
     cJSON_AddNumberToObject(hello, "maxPlayers", g_server->config.max_players);
     cJSON_AddBoolToObject(hello, "custom", g_gs_config.custom_games);
     cJSON_AddNumberToObject(hello, "maxLobbies", 1);

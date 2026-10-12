@@ -72,6 +72,14 @@ int  servers_ui_account_required(void);     // 1 = the last seek was an online-m
 char *servers_ui_region_options(const char *selected); // region <option>s (2-letter codes, place name as title); malloc'd
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 char *servers_window_gen(int id, const char **header);
+// Build versions (ci-release; brain fields: doc/backend.md "Build version"). entry = a game-list
+// tuple or a finder /servers entry. The _html helpers return malloc'd markup (caller frees).
+void  servers_ui_note_list_response(const cJSON *response); // finder / game-list answer: download URL
+int   servers_ui_entry_outdated(const cJSON *entry);
+int   servers_ui_entry_incompatible(const cJSON *entry);
+char *servers_ui_entry_badge_html(const cJSON *entry);      // "" or an Outdated / Incompatible badge
+char *servers_ui_download_button_html(const cJSON *list_response); // "Download server" -> downloadServer()
+void  servers_ui_open_download(void);                       // downloadServer(): the release page / OS asset
 int  servers_ui_host_game(const char *config_json); // /mm/host-game: disabled (hosting = server_bin), 0 unless KRUNKNATIVE_ALLOW_CLIENT_HOST
 // Join a lobby with a ticket the brain issued elsewhere (ranked match): native TCP host:port,
 // web web_url or /native?target=.

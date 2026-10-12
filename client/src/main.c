@@ -1,6 +1,7 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <client.h>
+#include <build_info.h>
 #include <vfx.h>
 #include <ai_render.h>
 #include <nametags.h>
@@ -215,7 +216,7 @@ static void print_usage_to(FILE *out, const char *program) {
                  "          [--brain <url>] [--connect <host[:port]>] [map.json]\n"
                  "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
                  "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
-                 "       %s --help\n", program, program, program, program);
+                 "       %s --help | --version\n", program, program, program, program);
     editor_usage(out); // client/src/editor/editor_bus_link.c
 }
 
@@ -351,6 +352,14 @@ static int parse_startup_args(int argc, char **argv, int *offline, const char **
 }
 
 int main(int argc, char **argv) {
+    // --version before anything needs assets or a GL context (build identity: build_info.h)
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--version")) {
+            printf("KrunkNative client %s\n", kn_build_string());
+            return 0;
+        }
+    }
+    printf("KrunkNative client %s\n", kn_build_string());
     debug_capture_startup(); // KRUNKNATIVE_CAMERA/SCREENSHOT runs ignore stored settings (debug_capture.c)
 
     char *rand_memory = malloc(1);

@@ -19,6 +19,7 @@
 #include "brain_internal.h"
 #include "finder.h"
 #include "finder_table.h"
+#include "releases.h"
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
@@ -231,7 +232,13 @@ static void h_list(kn_http_req *req, void *ud) {
     if (kn_http_query_get(req, "limit", tmp, sizeof(tmp)) > 0) f.limit = atoi(tmp);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "ok", 1);
-    cJSON_AddItemToObject(o, "servers", finder_list(g_f.t, &f, kn_now_ms()));
+    cJSON *servers = finder_list(g_f.t, &f, kn_now_ms());
+    cJSON_AddItemToObject(o, "servers", servers);
+    /* outdated / incompatible per server + latest, download_url, downloads (releases.h);
+     * ?proto=M.m is the asking client's protocol */
+    char proto[16] = "";
+    kn_http_query_get(req, "proto", proto, sizeof(proto));
+    releases_annotate_finder(o, servers, releases_client_major(proto));
     reply(req, 200, o);
 }
 

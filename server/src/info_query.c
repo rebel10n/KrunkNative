@@ -1,5 +1,6 @@
 // Server-info query responder and finder heartbeat (server/include/info_query.h).
 #include <bots.h>
+#include <build_info.h>
 #include <info_query.h>
 #include <http_client.h>
 #include <server_cli.h>
@@ -70,7 +71,13 @@ void info_query_update(const float now) {
     info.password = cfg->password[0] != 0;
     snprintf(info.community, sizeof(info.community), "%s", accounts_community_name());
     snprintf(info.region, sizeof(info.region), "%s", cfg->region);
-    snprintf(info.version, sizeof(info.version), "%d.%d.%d", g_server_version.major, g_server_version.minor, g_server_version.patch);
+    // build identity (build_info.h): the finder flags servers older than the latest release
+    const KnBuildInfo *build = kn_build_info();
+    snprintf(info.version, sizeof(info.version), "%s", build->describe);
+    snprintf(info.commit, sizeof(info.commit), "%s", build->commit);
+    info.commit_time = build->commit_time;
+    snprintf(info.build_time, sizeof(info.build_time), "%s", build->build_time);
+    snprintf(info.protocol, sizeof(info.protocol), "%s", kn_build_protocol());
     info.port = cfg->public_port ? cfg->public_port : cfg->listen_port;
     iq_add_tag(&info, cfg->online_mode ? "online" : "offline");
     if (cfg->password[0]) iq_add_tag(&info, "password");
@@ -150,6 +157,12 @@ static int iq_heartbeat(const int shutdown) {
     cJSON_AddStringToObject(body, "name", cfg->name);
     cJSON_AddStringToObject(body, "community", accounts_community_name());
     cJSON_AddBoolToObject(body, "online_mode", cfg->online_mode);
+    const KnBuildInfo *build = kn_build_info(); // informational: the listing uses the verified KNINFO reply
+    cJSON_AddStringToObject(body, "version", build->describe);
+    cJSON_AddStringToObject(body, "commit", build->commit);
+    cJSON_AddNumberToObject(body, "commit_time", (double) build->commit_time);
+    cJSON_AddStringToObject(body, "build_time", build->build_time);
+    cJSON_AddStringToObject(body, "protocol", kn_build_protocol());
     if (shutdown) cJSON_AddBoolToObject(body, "shutdown", 1);
     char *text = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);

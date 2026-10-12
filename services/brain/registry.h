@@ -35,6 +35,7 @@ typedef struct MmLobby {
     char mode[32];                   /* meta.modeName */
     char map[64];
     char version[32];                /* meta.v */
+    int proto_major;                 /* meta.proto "M.m" major (-1 = not announced: a 1.x server) */
     cJSON *tuple;                    /* owned: [gameId, region, players, max, meta] */
 } MmLobby;
 
@@ -142,7 +143,8 @@ typedef enum MmPickError {
     MM_PICK_GAME_FULL,             /* requested id full and autoChangeGame off */
     MM_PICK_NO_MATCH,              /* lobbies exist but none matches the version query */
     MM_PICK_NONE,                  /* nothing with room */
-    MM_PICK_ACCOUNT_REQUIRED       /* requested lobby is online_mode, the player a guest, autoChangeGame off */
+    MM_PICK_ACCOUNT_REQUIRED,      /* requested lobby is online_mode, the player a guest, autoChangeGame off */
+    MM_PICK_INCOMPATIBLE           /* requested lobby speaks another protocol major, autoChangeGame off */
 } MmPickError;
 
 typedef struct MmPickQuery {
@@ -153,6 +155,12 @@ typedef struct MmPickQuery {
     const char *version;           /* dataQuery.v (NULL = any) */
     int authed;                    /* signed-in account: may be sent to online_mode lobbies */
     int64_t now_ms;
+    int proto_major;               /* client's protocol major (seek ?proto=): never matched to a
+                                    * lobby announcing another one; 0 = any */
+    /* outdated lobbies (releases.c, release_info.h rule) lose ties: an up-to-date lobby with
+     * room is picked over any outdated one. NULL = no preference. */
+    int (*outdated)(const MmLobby *l, void *ud);
+    void *outdated_ud;
 } MmPickQuery;
 
 typedef struct MmPick {

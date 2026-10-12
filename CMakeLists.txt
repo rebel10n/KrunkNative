@@ -39,6 +39,31 @@ include_directories(shared/include)
 file(GLOB_RECURSE SHARED_SOURCES shared/src/*.c)
 file(GLOB_RECURSE SHARED_HEADERS shared/include/*.h)
 
+# Build version (shared/include/build_info.h): cmake/kn_version.cmake writes
+# generated/kn_version.h (git describe, commit, commit time, build time) at configure time and
+# at every build; only shared/src/build_info.c reads it, in library kn_build_info, which the
+# client, server_bin and kn_brain link. CI builds without git pass the KRUNKNATIVE_VERSION_*
+# values (a non-empty value wins over git).
+set(KRUNKNATIVE_VERSION_DESCRIBE "" CACHE STRING "Build version override (git describe)")
+set(KRUNKNATIVE_VERSION_COMMIT "" CACHE STRING "Build commit override (hex)")
+set(KRUNKNATIVE_VERSION_COMMIT_TIME "" CACHE STRING "Build commit time override (unix seconds)")
+set(KRUNKNATIVE_VERSION_BUILD_TIME "" CACHE STRING "Build time override (ISO-8601 UTC)")
+set(KN_VERSION_HEADER "${CMAKE_BINARY_DIR}/generated/kn_version.h")
+set(KN_VERSION_ARGS
+    "-DKN_SRC_DIR=${CMAKE_SOURCE_DIR}" "-DKN_OUT=${KN_VERSION_HEADER}"
+    "-DKN_OVR_DESCRIBE=${KRUNKNATIVE_VERSION_DESCRIBE}" "-DKN_OVR_COMMIT=${KRUNKNATIVE_VERSION_COMMIT}"
+    "-DKN_OVR_COMMIT_TIME=${KRUNKNATIVE_VERSION_COMMIT_TIME}" "-DKN_OVR_BUILD_TIME=${KRUNKNATIVE_VERSION_BUILD_TIME}")
+execute_process(COMMAND "${CMAKE_COMMAND}" ${KN_VERSION_ARGS} -P "${CMAKE_SOURCE_DIR}/cmake/kn_version.cmake")
+add_custom_target(kn_version
+    COMMAND "${CMAKE_COMMAND}" ${KN_VERSION_ARGS} -P "${CMAKE_SOURCE_DIR}/cmake/kn_version.cmake"
+    BYPRODUCTS "${KN_VERSION_HEADER}"
+    COMMENT "Build version (kn_version.h)"
+    VERBATIM)
+list(FILTER SHARED_SOURCES EXCLUDE REGEX "/shared/src/build_info\\.c$")
+add_library(kn_build_info STATIC shared/src/build_info.c shared/include/build_info.h)
+target_include_directories(kn_build_info PRIVATE "${CMAKE_BINARY_DIR}/generated" shared/lib/cJSON)
+add_dependencies(kn_build_info kn_version)
+
 set(CLIENT_BINARY client_bin)
 file(GLOB_RECURSE CLIENT_SOURCES client/src/*.c)
 file(GLOB_RECURSE CLIENT_HEADERS client/include/*.h)
@@ -116,7 +141,7 @@ if (EMSCRIPTEN)
         ${SERVER_CORE_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES}) # the offline sandbox server (server_sandbox.h)
     target_compile_definitions(client PRIVATE KRUNKNATIVE_CLIENT)
     target_include_directories(client PRIVATE client/include server/include)
-    target_link_libraries(client PRIVATE freetype cJSON pcg_basic m)
+    target_link_libraries(client PRIVATE freetype cJSON pcg_basic kn_build_info m)
 
     # HTML UI on the web: the browser page is the UI. The C UI logic drives the page's
     # DOM through web_dom.c (html_dom.h) and ui/js/kn-shim.js; the engine itself is not
@@ -294,7 +319,7 @@ else ()
     # CLIENT
     add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
     target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
-    target_link_libraries(${CLIENT_BINARY} PRIVATE glfw freetype Threads::Threads m)
+    target_link_libraries(${CLIENT_BINARY} PRIVATE glfw freetype kn_build_info Threads::Threads m)
     # the offline sandbox server (server_sandbox.h): the server core + its no-network backend
     target_sources(${CLIENT_BINARY} PRIVATE ${SERVER_CORE_STANDALONE_SOURCES})
     target_link_libraries(${CLIENT_BINARY} PRIVATE kn_server_core)
@@ -329,7 +354,7 @@ else ()
     # SERVER: the core library + server_bin's network frontend
     add_library(kn_server_core STATIC ${SERVER_CORE_SOURCES} ${SERVER_HEADERS})
     target_include_directories(kn_server_core PUBLIC server/include)
-    target_link_libraries(kn_server_core PUBLIC Threads::Threads m)
+    target_link_libraries(kn_server_core PUBLIC kn_build_info Threads::Threads m)
 
     add_executable(${SERVER_BINARY} ${SERVER_HEADERS} ${SERVER_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
     target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)

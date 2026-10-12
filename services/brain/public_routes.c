@@ -10,6 +10,7 @@
 #include <strings.h>
 
 #include "brain_internal.h"
+#include "releases.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
@@ -31,6 +32,7 @@ static int error_status(const char *name) {
     if (!strcmp(name, "GameFull")) return 409;
     if (!strcmp(name, "BadRequest")) return 400;
     if (!strcmp(name, "AccountRequired")) return 403;
+    if (!strcmp(name, "IncompatibleVersion")) return 409;
     return 503;
 }
 
@@ -182,6 +184,10 @@ static void h_game_list(kn_http_req *req, void *ud) {
     cJSON_AddBoolToObject(o, "success", 1);
     cJSON_AddNumberToObject(o, "totalPlayerCount", total);
     cJSON_AddItemToObject(o, "games", games);
+    /* meta.outdated / meta.incompatible + latest, download_url, downloads (releases.h) */
+    char proto[16] = "";
+    kn_http_query_get(req, "proto", proto, sizeof(proto));
+    releases_annotate_tuples(o, games, releases_client_major(proto));
     brain_reply_json(req, 200, o);
     cJSON_Delete(o);
 }
@@ -279,8 +285,9 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         kn_http_respond_error(req, 499, "gone");
         return;
     }
-    char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "";
+    char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "", proto[16] = "";
     kn_http_query_get(req, "region", region, sizeof(region));
+    kn_http_query_get(req, "proto", proto, sizeof(proto)); /* the client's protocol "M.m" */
     kn_http_query_get(req, "game", game, sizeof(game));
     if (kn_http_query_get(req, "dataQuery", dq, sizeof(dq)) > 0 && mm_settings()->policy.require_version) {
         cJSON *q = kn_json_parse(dq, strlen(dq));
@@ -295,12 +302,16 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         .version = version[0] ? version : NULL,
         .authed = account_id > 0, /* a valid session: online_mode lobbies verify accounts */
         .now_ms = kn_wall_ms(),
+        /* never a lobby of another protocol major; up-to-date lobbies first (releases.h).
+         * Clients from before ?proto= are 1.x like every server so far. */
+        .proto_major = proto[0] ? releases_client_major(proto) : 1,
+        .outdated = releases_lobby_outdated,
     };
     MmPick pick;
     MmPickError e = registry_pick(b->registry, &mm_settings()->policy, &q, &pick);
     if (e != MM_PICK_OK) {
         static const char *names[] = {"", "InvalidGameId", "GameFull", "NoServersMatchQuery", "NoAvailableServers",
-                                      "AccountRequired"};
+                                      "AccountRequired", "IncompatibleVersion"};
         reply_error(req, error_status(names[e]), names[e]);
         return;
     }

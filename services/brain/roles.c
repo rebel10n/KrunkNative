@@ -64,6 +64,7 @@ int brain_module_enabled(const char *name) {
         {"accounts", BRAIN_ROLE_AUTH | BRAIN_ROLE_COMMUNITY},
         {"auth", BRAIN_ROLE_AUTH},
         {"finder", BRAIN_ROLE_FINDER},
+        {"releases", BRAIN_ROLE_ALL},  /* latest server release: finder list + matchmaking */
         {"store", BRAIN_ROLE_AUTH | BRAIN_ROLE_COMMUNITY},
     };
     for (size_t i = 0; i < sizeof(k_map) / sizeof(k_map[0]); i++) {

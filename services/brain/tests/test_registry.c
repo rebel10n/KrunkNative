@@ -28,6 +28,12 @@ static void add_lobby(Registry *r, MmNode *n, const char *lid, int players, int 
     cJSON_Delete(t);
 }
 
+static int outdated_aaaa(const MmLobby *l, void *ud) {
+    (void) ud;
+    const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(l->tuple, 4), "commit"));
+    return c && !strcmp(c, "aaaaaaaaaaaa");
+}
+
 int main(void) {
     Registry *r = registry_new();
     MmPolicy p = {.cross_region = 1, .default_max_players = 8};
@@ -190,6 +196,46 @@ int main(void) {
         CHECK(registry_node_hello(o, "CHITOWN1", h1b, "brainA", "local", 3000) == on && !on->online_mode);
         cJSON_Delete(h1b);
         registry_free(o);
+    }
+
+    /* ci-release: protocol majors never cross (meta.proto, ?proto=), outdated lobbies lose ties */
+    {
+        Registry *v = registry_new();
+        MmPolicy pv = {.cross_region = 1, .default_max_players = 8};
+        MmNode *n1 = add_node(v, "EDGE1", "CH", 0);
+        MmNode *n2 = add_node(v, "EDGE2", "CH", 0);
+        MmNode *n3 = add_node(v, "EDGE3", "CH", 0);
+        cJSON *t1 = cJSON_Parse("[\"old\",\"CH\",6,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"proto\":\"1.3\",\"commit\":\"aaaaaaaaaaaa\"}]");
+        cJSON *t2 = cJSON_Parse("[\"new\",\"CH\",2,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"proto\":\"1.3\",\"commit\":\"bbbbbbbbbbbb\"}]");
+        cJSON *t3 = cJSON_Parse("[\"two\",\"CH\",7,8,{\"i\":\"Burg\",\"v\":\"1.0\",\"cs\":false,\"proto\":\"2.0\"}]");
+        CHECK(registry_lobby_upsert(v, n1, t1) == 0 && registry_lobby_upsert(v, n2, t2) == 0 && registry_lobby_upsert(v, n3, t3) == 0);
+        cJSON_Delete(t1);
+        cJSON_Delete(t2);
+        cJSON_Delete(t3);
+        CHECK(registry_lobby(v, "EDGE3:two", NULL)->proto_major == 2);
+        /* a 1.x client: never the 2.0 lobby although it is the fullest */
+        MmPickQuery q1 = {.region = "CH", .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE1:old"));
+        /* outdated EDGE1 (commit aaaa...) loses to the up-to-date one even with fewer players */
+        q1.outdated = outdated_aaaa;
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE2:new"));
+        /* only outdated lobbies left with room: still matched (preference, not exclusion) */
+        registry_lobby_remove(v, n2, "new");
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE1:old"));
+        /* asking for the 2.0 lobby by id */
+        MmPickQuery qid = {.region = "CH", .game_id = "EDGE3:two", .auto_change = 0, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(v, &pv, &qid, &pick) == MM_PICK_INCOMPATIBLE);
+        qid.auto_change = 1;
+        CHECK(registry_pick(v, &pv, &qid, &pick) == MM_PICK_OK && pick.changed && !strcmp(pick.lobby->game_id, "EDGE1:old"));
+        /* only incompatible lobbies: no match */
+        registry_lobby_remove(v, n1, "old");
+        CHECK(registry_pick(v, &pv, &q1, &pick) == MM_PICK_NO_MATCH);
+        /* a 2.x client, and no client protocol (0 = any) */
+        MmPickQuery q2 = {.region = "CH", .auto_change = 1, .now_ms = 2000, .proto_major = 2};
+        CHECK(registry_pick(v, &pv, &q2, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "EDGE3:two"));
+        MmPickQuery qany = {.region = "CH", .auto_change = 1, .now_ms = 2000};
+        CHECK(registry_pick(v, &pv, &qany, &pick) == MM_PICK_OK);
+        registry_free(v);
     }
 
     /* remote refresh */

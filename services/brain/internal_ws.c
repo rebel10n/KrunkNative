@@ -490,8 +490,9 @@ static void handle_hello(NodeConn *c, const cJSON *frame) {
     c->helloed = 1;
     n->conn = (struct NodeConn *) c;
     n->takeover = 1;
-    KN_INFO("internal", "node \"%s\" registered (region=%s, host=%s:%d, from %s)", n->node_id, n->region,
-            n->public_host, n->public_port, c->remote);
+    KN_INFO("internal", "node \"%s\" registered (region=%s, host=%s:%d, from %s, build %s protocol %s)", n->node_id,
+            n->region, n->public_host, n->public_port, c->remote, kn_json_str(frame, "build", "?"),
+            kn_json_str(frame, "protocol", "?"));
     const MmSettings *s = mm_settings();
     cJSON *w = cJSON_CreateObject();
     cJSON_AddStringToObject(w, "type", "welcome");

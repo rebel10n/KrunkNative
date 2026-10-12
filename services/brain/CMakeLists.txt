@@ -27,6 +27,9 @@ set(KN_BRAIN_SOURCES
     auth_state.c
     finder.c
     finder_table.c
+    # ci-release: latest server release (GitHub Releases poll) + the outdated rule
+    release_info.c
+    releases.c
     # coord-store: multi-statement database operations (kn_procs, db_procs.h)
     db_common.c
     db_accounts.c
@@ -42,7 +45,7 @@ add_executable(kn_brain ${KN_BRAIN_SOURCES})
 target_include_directories(kn_brain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # svc-accounts: shared/include for map_catalog.h (creations.c; shim in shared_shim.c)
 target_include_directories(kn_brain PRIVATE ${CMAKE_SOURCE_DIR}/shared/include)
-target_link_libraries(kn_brain PRIVATE knsvc_db)
+target_link_libraries(kn_brain PRIVATE knsvc_db kn_build_info)
 # coord-auth: community hasJoined over https:// (auth.c) needs libcurl; http:// works without
 find_package(CURL QUIET)
 if (CURL_FOUND)
@@ -65,6 +68,13 @@ target_sources(kn_brain_auth_test PRIVATE ${CMAKE_SOURCE_DIR}/shared/src/auth_jo
 target_link_libraries(kn_brain_auth_test PRIVATE knsvc)
 add_test(NAME brain_auth_finder COMMAND kn_brain_auth_test)
 set_tests_properties(brain_auth_finder PROPERTIES LABELS "knsvc;brain")
+
+# ci-release: kn-build release metadata + the outdated / incompatible rule (pure).
+add_executable(kn_brain_releases_test tests/test_releases.c release_info.c)
+target_include_directories(kn_brain_releases_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_releases_test PRIVATE knsvc)
+add_test(NAME brain_releases COMMAND kn_brain_releases_test)
+set_tests_properties(brain_releases PROPERTIES LABELS "knsvc;brain")
 set_tests_properties(brain_registry PROPERTIES LABELS "knsvc;brain")
 
 # svc-accounts: accounts + social socket end to end against PostgreSQL (own schema;
@@ -131,4 +141,4 @@ target_link_libraries(kn_fakenode PRIVATE knsvc)
 target_compile_definitions(kn_fakenode PRIVATE _GNU_SOURCE)
 
 # Build the test + tool with the brain (services_all picks up kn_brain).
-add_dependencies(kn_brain kn_brain_registry_test kn_fakenode)
+add_dependencies(kn_brain kn_brain_registry_test kn_fakenode kn_brain_releases_test)
