@@ -23,7 +23,6 @@ import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 ONLY = [int(m) for m in sys.argv[2:]]
-BASE_PORT = 22611
 WORK = tempfile.mkdtemp(prefix="kn-modes-e2e-")
 HELLO, INIT, SPAWN, STATE, KILL, MODE_STATE = 1, 2, 4, 6, 10, 40
 OBJECTIVE_V7, DOM_UPDATE, SPAWNABLE_V7, MODE_SYNC_V7 = 140, 142, 148, 149
@@ -121,8 +120,8 @@ def main():
     with open(os.path.join(WORK, "none.json"), "w") as f:
         f.write("{}")
     ids = ONLY or list(range(len(MODES)))
-    for n, mode_id in enumerate(ids):
-        run_mode(mode_id, MODES[mode_id], BASE_PORT + (n % 8))
+    for mode_id in ids:
+        run_mode(mode_id, MODES[mode_id], kn_proto.free_ports(1)[0])  # ephemeral: concurrent runs
 
 
 try:

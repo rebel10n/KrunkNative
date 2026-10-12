@@ -26,8 +26,7 @@ sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
-PORT = 22431
-RCON_PORT = 22498
+PORT, RCON_PORT = kn_proto.free_ports(2)  # ephemeral: concurrent runs must not share servers
 WORK = tempfile.mkdtemp(prefix="kn-ai-e2e-")
 SPAWN, CHAT_SEND, CHAT = 4, 8, 9
 AI_ADD, AI_SYNC = 90, 91

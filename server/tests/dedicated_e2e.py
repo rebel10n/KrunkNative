@@ -38,9 +38,9 @@ import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 DB = os.environ.get("KN_TEST_DB", f"kn_ds_e2e_{os.getpid()}")
-BRAIN_PORT = 5391
-PORTS = [22311, 22312, 22313]
-RCON_PORT = 22399
+# ephemeral ports: with fixed ones (5391, 22311-22313, 22399) concurrent runs reached each other's
+# coordinator, servers and rcon (rcon status/players/lagcomp/send/kick and guest seek-game failed)
+BRAIN_PORT, RCON_PORT, *PORTS = kn_proto.free_ports(5)
 WORK = tempfile.mkdtemp(prefix="kn-ds-e2e-")
 HAT_OWNED, HAT_UNOWNED = 1890, 1487  # store.skins indices (class_preview.c defaults)
 # weapon skins: array positions in assets/skins.json (not the per-type "id"): Lykos (AK, the Triggerman
@@ -164,7 +164,9 @@ def run():
     procs.append(subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--set", f"database.name={DB}", "--set", f"brain.port={BRAIN_PORT}",
                                    "--set", "brain.region=local", "--set", "brain.federation=true"],
                                   stdout=brain_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL))
-    check("coordinator up", bool(wait_for(lambda: http("/mm/status")[0] == 200)))
+    # our own kn_brain must be the one answering (it exits when the port is taken)
+    up = bool(wait_for(lambda: http("/mm/status")[0] == 200)) and procs[-1].poll() is None
+    check("coordinator up", up, "" if up else log("brain.log")[-300:])
     start_server(0, f"rcon_password rc-pw\nrcon_port {RCON_PORT}\n")
     start_server(1, "sv_password letmein\n")
     start_server(2, f"online_mode 1\nauth_url http://127.0.0.1:{BRAIN_PORT}\n")

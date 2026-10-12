@@ -84,9 +84,9 @@ static int map_flag_is_set(const cJSON *item) {
     return map_truthy(item);
 }
 
-// parseInt(value) || 0 for a number or numeric string field
-static int map_int(const cJSON *obj, const char *key) {
-    const cJSON *item = cJSON_GetObjectItem(obj, key);
+// A JSON value as an int: numbers truncated (NaN / out of range -> 0, never UB), numeric strings
+// atoi'd, anything else (missing, bool, null) 0.
+static int map_item_int(const cJSON *item) {
     if (cJSON_IsNumber(item)) {
         const double v = cJSON_GetNumberValue(item);
         return v == v && v > -2147483648.0 && v < 2147483648.0 ? (int) v : 0;
@@ -94,6 +94,9 @@ static int map_int(const cJSON *obj, const char *key) {
     if (cJSON_IsString(item)) return atoi(cJSON_GetStringValue(item));
     return 0;
 }
+
+// parseInt(value) || 0 for a number or numeric string field
+static int map_int(const cJSON *obj, const char *key) { return map_item_int(cJSON_GetObjectItem(obj, key)); }
 
 void load_default_maps() {
     map_catalog_load_official();
@@ -836,9 +839,11 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
             (float) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_spawn, 2)),
         };
 
-        const int team = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_spawn, 3));
-        const int dir = cJSON_IsNumber(cJSON_GetArrayItem(raw_spawn, 4)) ? (int) cJSON_GetNumberValue(cJSON_GetArrayItem(raw_spawn, 4)) : 0;
-        const int comp = cJSON_GetArrayItem(raw_spawn, 5) != NULL && cJSON_GetNumberValue(cJSON_GetArrayItem(raw_spawn, 5)) != 0;
+        // v7 map.js:1474 keeps spawn[3] as is: a 3-element row has team undefined (falsy = any team).
+        // cJSON_GetNumberValue would give NaN there, and (int) NaN is undefined behaviour.
+        const int team = map_item_int(cJSON_GetArrayItem(raw_spawn, 3));
+        const int dir = map_item_int(cJSON_GetArrayItem(raw_spawn, 4)); // parseInt(spawn[4]) || 0
+        const int comp = map_truthy(cJSON_GetArrayItem(raw_spawn, 5));  // !!spawn[5]
 
         Spawn *spawn = calloc(1, sizeof(Spawn));
         if (!spawn) continue;

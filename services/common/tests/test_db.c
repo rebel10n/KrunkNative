@@ -6,7 +6,10 @@
 
 #include <unistd.h>
 
-#define SCHEMA "kn_svccore_test"
+/* Per-process names: concurrent runs (parallel agents, CI) share the krunknative_svccore database,
+ * and test_reconnect terminates every backend with our application_name, so fixed names let one
+ * run drop another's schema, kill its pool and steal its NOTIFYs. */
+static char g_schema[48], g_app[48], g_chan[48];
 
 static kn_loop *loop;
 static int pending;
@@ -62,9 +65,13 @@ static void on_syntax(kn_db_result *r, void *ud) {
 static void test_basic(kn_db *db) {
     kn_db_query(db, "INSERT INTO accounts (name, kr, verified, bio, stats, ratio) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
                 KN_DB_ARGS("alice", "150", "true", "hi", "{\"kills\":3}", "0.5"), on_insert, NULL);
+    pending = 1;
+    run_until_done(5000);
+    /* one at a time: on two pool connections bob could commit first and take id 1 (on_select
+     * expects alice = 1, bob = 2) */
     kn_db_query(db, "INSERT INTO accounts (name) VALUES ($1) RETURNING id",
                 KN_DB_ARGS("bob'); DROP TABLE accounts; --"), on_insert, NULL);
-    pending = 2;
+    pending = 1;
     run_until_done(5000);
     /* pool queries are unordered: the reads start once the inserts completed */
     kn_db_query(db, "SELECT * FROM accounts ORDER BY id", 0, NULL, on_select, NULL);
@@ -178,18 +185,18 @@ static void test_transactions(kn_db *db) {
 /* ---- LISTEN/NOTIFY */
 static int notified;
 static void on_notify(const char *channel, const char *payload, void *ud) {
-    CHECK_EQ_STR(channel, "kn_svccore_chan");
+    CHECK_EQ_STR(channel, g_chan);
     CHECK_EQ_STR(payload, "{\"lobby\":\"x\"}");
     notified++;
     pending--;
 }
 
 static void test_notify(kn_db *db) {
-    CHECK(kn_db_listen(db, "kn_svccore_chan", on_notify, NULL) == 0);
+    CHECK(kn_db_listen(db, g_chan, on_notify, NULL) == 0);
     /* give the listener a moment to connect + LISTEN */
     uint64_t end = kn_now_ms() + 1000;
     while (kn_now_ms() < end) kn_loop_run_once(loop, 20);
-    kn_db_notify(db, "kn_svccore_chan", "{\"lobby\":\"x\"}");
+    kn_db_notify(db, g_chan, "{\"lobby\":\"x\"}");
     kn_db_notify(db, "other_chan", "ignored");
     pending = 1;
     run_until_done(5000);
@@ -208,9 +215,11 @@ static void on_after_kill(kn_db_result *r, void *ud) {
 
 static void test_reconnect(kn_db *db, kn_dbconn *admin) {
     (void)db;
-    kn_db_result *r = kn_dbconn_exec(admin,
-        "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = 'kn_svccore_test' AND pid <> pg_backend_pid()",
-        0, NULL);
+    char sql[256];
+    snprintf(sql, sizeof sql,
+             "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = '%s' AND pid <> pg_backend_pid()",
+             g_app);
+    kn_db_result *r = kn_dbconn_exec(admin, sql, 0, NULL);
     CHECK(kn_db_ok(r));
     printf("terminated %s pool backends\n", kn_db_get(r, 0, 0));
     kn_db_result_free(r);
@@ -231,7 +240,7 @@ static void test_reconnect(kn_db *db, kn_dbconn *admin) {
     /* NOTIFY still works after the listener reconnected */
     end = kn_now_ms() + 1500;
     while (kn_now_ms() < end) kn_loop_run_once(loop, 20);
-    kn_db_notify(db, "kn_svccore_chan", "{\"lobby\":\"x\"}");
+    kn_db_notify(db, g_chan, "{\"lobby\":\"x\"}");
     pending = 1;
     run_until_done(5000);
     CHECK_EQ_INT(notified, 2);
@@ -252,14 +261,21 @@ int main(void) {
     kn_db_config dbc;
     kn_config *cfg = test_db_config(&dbc);
     kn_dbconn *admin = test_db_connect_or_skip(&dbc);
-    test_exec(admin, "DROP SCHEMA IF EXISTS " SCHEMA " CASCADE; CREATE SCHEMA " SCHEMA ";"
-                     "CREATE TABLE " SCHEMA ".accounts (id serial PRIMARY KEY, name text UNIQUE NOT NULL,"
-                     " kr bigint NOT NULL DEFAULT 0, verified boolean NOT NULL DEFAULT false, bio text,"
-                     " stats jsonb, ratio double precision)");
+    snprintf(g_schema, sizeof g_schema, "kn_svccore_test_%d", (int)getpid());
+    snprintf(g_app, sizeof g_app, "kn_svccore_test_%d", (int)getpid());
+    snprintf(g_chan, sizeof g_chan, "kn_svccore_chan_%d", (int)getpid());
+    char sql[512];
+    snprintf(sql, sizeof sql,
+             "DROP SCHEMA IF EXISTS %s CASCADE; CREATE SCHEMA %s;"
+             "CREATE TABLE %s.accounts (id serial PRIMARY KEY, name text UNIQUE NOT NULL,"
+             " kr bigint NOT NULL DEFAULT 0, verified boolean NOT NULL DEFAULT false, bio text,"
+             " stats jsonb, ratio double precision)",
+             g_schema, g_schema, g_schema);
+    test_exec(admin, sql);
     loop = kn_loop_new();
-    dbc.search_path = SCHEMA;
+    dbc.search_path = g_schema;
     dbc.pool_size = 4;
-    dbc.application_name = "kn_svccore_test";
+    dbc.application_name = g_app;
     kn_db *db = kn_db_new(loop, &dbc);
     CHECK(kn_db_wait_ready(db, 5000) == 0);
     test_basic(db);
@@ -274,7 +290,8 @@ int main(void) {
     kn_db_free(db);
     CHECK_EQ_INT(closed_cbs, 5);
 
-    test_exec(admin, "DROP SCHEMA " SCHEMA " CASCADE");
+    snprintf(sql, sizeof sql, "DROP SCHEMA %s CASCADE", g_schema);
+    test_exec(admin, sql);
     kn_dbconn_close(admin);
     kn_loop_free(loop);
     kn_config_free(cfg);

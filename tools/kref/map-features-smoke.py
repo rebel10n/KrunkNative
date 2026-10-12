@@ -62,8 +62,9 @@ CASES = {
     "checkpoint": ("assets/maps/custom/Bhop_VIP.json", [(1500, (16745, 12, 0))], has(r'"type":"checkpoint"')),
     "death-zone": ("assets/maps/kanji.json", [(1500, (-130, -87, -92))], has(r'"type":"kill"')),
     "boost-pad": ("assets/maps/kanji.json", [(1500, (71, -154, -269)), (1550, "state"), (1900, "state")], state_rose(4.0)),
-    # AI (shared/src/ai.c): the map's BOTs reach the client
-    "map-ai": ("assets/maps/soul_sanctum.json", [(2500, "state")], has(r'"type":"ai_add"')),
+    # AI (shared/src/ai.c): the map's BOTs reach the client. client_bin negotiates protocol minor 3,
+    # so since the v7 AI port it gets only the v7 block: AI_ADD_V7 (162), not v3's AI_ADD (90)
+    "map-ai": ("assets/maps/soul_sanctum.json", [(2500, "state")], has(r'"type":"ai_add_v7"')),
     # v7.1.4 trigger runtime (WP-C, shared/src/triggers_v7.c) on the v7-format custom maps
     "v7-enter-kill": ("assets/maps/custom/ESP_Parkour.json", [(1500, (122, 5, 45))], has(r'"type":"kill"')),
     "v7-player-spawn": ("assets/maps/custom/zombie_high.json", [(2500, "state")], has(r'"type":"unknown","id":48')), # onPlayerSpawn -> Change Class / Clear Loadout ("inat")

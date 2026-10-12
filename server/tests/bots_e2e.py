@@ -27,8 +27,7 @@ sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
-PORTS = [22411, 22412]
-RCON_PORT = 22499
+RCON_PORT, *PORTS = kn_proto.free_ports(3)  # ephemeral: concurrent runs must not share servers
 WORK = tempfile.mkdtemp(prefix="kn-bots-e2e-")
 SPAWN, KILL, LEADERBOARD, LEAVE, STATE, PLAYER_INFO, SKINS = 4, 10, 14, 20, 6, 34, 35
 results = []

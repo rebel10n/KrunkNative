@@ -111,7 +111,9 @@ static void test_entry(const size_t index, const int verbose) {
 // One round of the shared game on every catalogue map (the list map_catalog_list builds).
 static void test_game_init_all(void) {
     const size_t count = map_catalog_count();
-    int all[64];
+    int all[256]; // 68 maps since the v7 catalogue (was int[64]: a stack overflow past 64)
+    CHECK(count <= sizeof(all) / sizeof(all[0]), "catalogue fits the test's index array: %zu", count);
+    if (count > sizeof(all) / sizeof(all[0])) return;
     for (size_t i = 0; i < count; i++) all[i] = (int) i;
     size_t n = 0;
     const cJSON **maps = map_catalog_list(all, count, &n);

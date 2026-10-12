@@ -12,6 +12,30 @@ JOIN, AUTH_CHALLENGE, REDIRECT = 72, 73, 74
 SKINS = 35  # S->C before every SPAWN: uid i + PlayerSkins (primary, secondary, melee) 3i
 
 
+def free_ports(n):
+    """n distinct ports free for both TCP and UDP right now (a server_bin game port is both: the TCP
+    game socket and the UDP transport / server-info query). Tests take their ports from here instead
+    of fixed numbers, so concurrent runs (parallel agents, CI jobs) cannot reach each other's
+    coordinator, servers or rcon."""
+    held, ports = [], []
+    while len(ports) < n:
+        t = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        t.bind(("0.0.0.0", 0))
+        port = t.getsockname()[1]
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            u.bind(("0.0.0.0", port))
+        except OSError:
+            t.close()
+            u.close()
+            continue
+        held += [t, u]
+        ports.append(port)
+    for s in held:
+        s.close()
+    return ports
+
+
 def cstr(s, n):
     b = s.encode()[: n - 1]
     return b + b"\0" * (n - len(b))

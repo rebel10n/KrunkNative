@@ -58,7 +58,7 @@ static void test_send(Game *game, const int uid, const int type, const void *pay
     packet->uid = uid;
     packet->type = type;
     packet->length = length;
-    memcpy(packet->payload, payload, length);
+    if (length) memcpy(packet->payload, payload, length); // payload may be NULL when empty
 }
 
 static void reset_sent(void) {
