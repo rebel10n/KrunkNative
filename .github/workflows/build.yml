@@ -562,6 +562,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release create/upload, moving the client-latest tag
+      actions: read # this run's artifacts
     concurrency:
       group: publish-client-latest
       cancel-in-progress: false
@@ -580,10 +581,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: KrunkNative-{linux,windows,macos}-*
-          path: client-artifacts
+      # one directory per artifact (download-artifact unpacks a lone match without one)
+      - name: Download client artifacts
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate --jq '.artifacts[].name' \
+            | grep -E '^KrunkNative-(linux|windows|macos)-' | while read -r name; do
+              gh run download "$GITHUB_RUN_ID" -n "$name" -D "client-artifacts/$name"
+            done
+          ls client-artifacts
 
       # upload-artifact drops the executable bits: restore them before zipping
       - name: Package
