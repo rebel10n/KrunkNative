@@ -66,6 +66,8 @@ int net_udp_enabled(void) {
 
 int net_udp_fd(void) { return g_udp.fd; }
 
+static const ServerTransport g_udp_transport;
+
 static UdpPeer *udp_peer_by_fd(const int fd) {
     if (fd < NET_VIRTUAL_FD_BASE) return NULL;
     const int slot = (fd - NET_VIRTUAL_FD_BASE) & 0xffff;
@@ -207,6 +209,7 @@ int net_udp_open(const char *host, const unsigned short port) {
     }
     g_udp.fd = fd;
     net_set_virtual_send(udp_send);
+    server_transport_register(&g_udp_transport); // net_broadcast_states flushes it every tick
     server_log("Listening on UDP port %u (game + server-info query)", (unsigned int) port);
     return fd;
 }
@@ -378,6 +381,7 @@ void net_udp_service(void) {
         ClientConnection conn = {0};
         conn.fd = peer->fd;
         conn.addr = peer->addr;
+        conn.transport = &g_udp_transport;
         joiners[joiner_count++] = conn;
     }
     pthread_mutex_unlock(&g_udp.lock);
@@ -450,7 +454,48 @@ void net_udp_shutdown(void) {
         udp_peer_free(peer);
     }
     net_set_virtual_send(NULL);
+    server_transport_unregister(&g_udp_transport);
     NET_UDP_CLOSE(g_udp.fd);
     g_udp.fd = -1;
     pthread_mutex_unlock(&g_udp.lock);
 }
+
+// ------------------------------------------------------------------ server core transport
+
+// The connection's knet inbox: whole packets (server.h ServerTransport.poll).
+static int udp_transport_poll(ClientConnection *client) {
+    NetPacket packet;
+    int result;
+    while ((result = net_udp_next_packet(client->fd, &packet)) > 0) {
+        if (!net_handle_packet(client, &packet)) return 0;
+    }
+    if (result < 0) {
+        net_remove_client(client);
+        return 0;
+    }
+    return 1;
+}
+
+// One knet message per frame (STATE rides the unreliable channel).
+static void udp_transport_send_frames(const int fd, const uint8_t *frames, const size_t length) {
+    for (size_t at = 0; at + NET_PACKET_HEADER_SIZE <= length;) {
+        const uint16_t size = (uint16_t) ((frames[at + 1] << 8) | frames[at + 2]);
+        net_send_packet(fd, (NetPacketType) frames[at], frames + at + NET_PACKET_HEADER_SIZE, size);
+        at += NET_PACKET_HEADER_SIZE + size;
+    }
+}
+
+static double udp_transport_input_received_at(const int fd) {
+    (void) fd;
+    return 0.0; // inputs are stamped when the tick handles them
+}
+
+static const ServerTransport g_udp_transport = {
+    .name = "udp",
+    .poll = udp_transport_poll,
+    .send_frames = udp_transport_send_frames,
+    .close = net_udp_close,
+    .pong_received_at = net_udp_pong_received_at,
+    .input_received_at = udp_transport_input_received_at,
+    .flush = net_udp_flush_all,
+};

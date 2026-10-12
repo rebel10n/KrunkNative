@@ -7,7 +7,8 @@
 #include <time.h>
 
 static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
-static Replxx *g_log_replxx;
+static ServerLogWriter g_log_writer;
+static void *g_log_writer_user;
 static FILE *g_log_file;
 static _Thread_local char *g_capture_buf;
 static _Thread_local size_t g_capture_size;
@@ -47,9 +48,10 @@ static void server_log_to_file(const char *line) {
     fflush(g_log_file);
 }
 
-void server_log_set_replxx(Replxx *replxx) {
+void server_log_set_writer(const ServerLogWriter writer, void *user) {
     pthread_mutex_lock(&g_log_lock);
-    g_log_replxx = replxx;
+    g_log_writer = writer;
+    g_log_writer_user = writer ? user : NULL;
     pthread_mutex_unlock(&g_log_lock);
 }
 
@@ -84,8 +86,8 @@ static void server_log_write(FILE *stream, const char *fmt, va_list args) {
     pthread_mutex_lock(&g_log_lock);
     server_log_to_file(buffer);
 
-    if (g_log_replxx) {
-        replxx_write(g_log_replxx, buffer, length);
+    if (g_log_writer) {
+        g_log_writer(g_log_writer_user, buffer, length);
     } else {
         fputs(buffer, stream);
         fflush(stream);
@@ -111,8 +113,8 @@ void server_log_error(const char *fmt, ...) {
 }
 
 // io_clearLog (v3.1.1 packetHandlers.ts, the mod's F1): console.clear() on a TTY, the raw
-// clear sequence otherwise ("\x1Bc" on win32). Through replxx while the CLI owns the
-// terminal, so the prompt is repainted under the cleared screen.
+// clear sequence otherwise ("\x1Bc" on win32). Through the writer (replxx) while the CLI owns
+// the terminal, so the prompt is repainted under the cleared screen.
 void server_log_clear(void) {
 #ifdef _WIN32
     static const char clear[] = "\x1B" "c";
@@ -120,8 +122,8 @@ void server_log_clear(void) {
     static const char clear[] = "\x1B[2J\x1B[3J\x1B[H";
 #endif
     pthread_mutex_lock(&g_log_lock);
-    if (g_log_replxx) {
-        replxx_write(g_log_replxx, clear, (int) sizeof(clear) - 1);
+    if (g_log_writer) {
+        g_log_writer(g_log_writer_user, clear, (int) sizeof(clear) - 1);
     } else {
         fputs(clear, stdout);
         fflush(stdout);

@@ -20,6 +20,15 @@
 #define CLI_PATH_SEPARATOR '/'
 #endif
 
+// The server log through replxx while the console owns the terminal (server_cli.h).
+static void cli_log_write(void *user, const char *text, const int length) {
+    replxx_write(user, text, length);
+}
+
+void server_log_set_replxx(Replxx *replxx) {
+    server_log_set_writer(replxx ? cli_log_write : NULL, replxx);
+}
+
 #define CLI_PROMPT "\x1b[1;32mkrunk\x1b[0m> "
 #define CLI_PROMPT_PLAIN "krunk> "
 #define CLI_HISTORY_MAX 1000

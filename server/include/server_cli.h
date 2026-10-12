@@ -1,6 +1,21 @@
 #pragma once
 #include <server.h>
 #include <server_log.h>
+#include <replxx.h>
+
+// server_bin's frontend: the console (replxx), the TCP listener (net_tcp.c: net_main,
+// net_cleanup) and process lifecycle, on top of the server core (server.h).
+extern Replxx *g_replxx;
+
+ReplxxActionResult cli_sigint(int, void*);
+void cli_main();
+
+void net_main();    // net thread: TCP listen / accept, the UDP transport, every connection's packets
+void net_cleanup();
+
+// Route the server log through this replxx instance (NULL = plain stdout/stderr).
+// Call with NULL before replxx_end().
+void server_log_set_replxx(Replxx *replxx);
 
 // Interactive server console (replxx) and process lifecycle helpers shared by
 // main.c and cli.c.

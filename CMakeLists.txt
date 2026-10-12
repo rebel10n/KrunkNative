@@ -58,6 +58,31 @@ set(SERVER_BINARY server_bin)
 file(GLOB_RECURSE SERVER_SOURCES server/src/*.c)
 file(GLOB_RECURSE SERVER_HEADERS server/include/*.h)
 
+# Server core (server/include/server.h): connections, packet dispatch, broadcast, the tick
+# step, accounts and config. server_bin links it with its network frontend (the rest of
+# server/src: TCP/UDP sockets, rcon, brain link, finder, CLI); the client links it as the
+# offline sandbox server (server/src/sandbox.c) with the no-network backend below. No GL,
+# sockets or threads of its own.
+set(SERVER_CORE_SOURCES
+    server/src/net.c
+    server/src/accounts.c
+    server/src/config.c
+    server/src/log.c
+    server/src/events.c
+    server/src/server_core.c
+)
+# What the core needs from the backend link in a build without it (the client): brain.c
+# compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
+# central auth and rcon hooks.
+set(SERVER_CORE_STANDALONE_SOURCES
+    server/src/brain.c
+    server/src/sandbox_backend.c
+)
+list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/server/src/sandbox_backend.c)
+foreach (src IN LISTS SERVER_CORE_SOURCES)
+    list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/${src})
+endforeach ()
+
 if (EMSCRIPTEN)
     # ------------------------------------------------------------------
     # Web build (emcmake cmake ...): client only, output dist/web/client.js
@@ -295,10 +320,14 @@ else ()
         krunknative_add_html_sources(${CLIENT_BINARY} SOURCES html_ui.c html_dom_core.c stub.c)
     endif ()
 
-    # SERVER
+    # SERVER: the core library + server_bin's network frontend
+    add_library(kn_server_core STATIC ${SERVER_CORE_SOURCES} ${SERVER_HEADERS})
+    target_include_directories(kn_server_core PUBLIC server/include)
+    target_link_libraries(kn_server_core PUBLIC Threads::Threads m)
+
     add_executable(${SERVER_BINARY} ${SERVER_HEADERS} ${SERVER_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
     target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_SERVER)
-    target_link_libraries(${SERVER_BINARY} PRIVATE replxx Threads::Threads m)
+    target_link_libraries(${SERVER_BINARY} PRIVATE kn_server_core replxx Threads::Threads m)
     target_include_directories(${SERVER_BINARY} PRIVATE server/include)
     # https:// for the finder heartbeat and central auth hasJoined (server/src/http_client.c);
     # without libcurl server_bin only speaks plain http:// to them.
@@ -311,6 +340,7 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32)
         target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
+        target_link_libraries(kn_server_core PUBLIC ws2_32)
     endif ()
 
     # TESTS

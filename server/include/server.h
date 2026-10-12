@@ -1,9 +1,13 @@
 #pragma once
+// The server core (kn_server_core): connection table, packet dispatch, broadcast, the game
+// tick step and the accounts gate. server_bin links it with its network frontend (TCP / UDP
+// sockets, rcon, brain link, finder, CLI: server_cli.h); the client links it as the offline
+// sandbox server (server/src/sandbox.c, server_sandbox.h) over an in-memory transport. No GL,
+// sockets or threads of its own: the frontend owns the I/O and the threads.
 #include <shared.h>
 #include <social.h> // social hub requests (SocialAssembly)
 #include <voice.h> // voice chat relay (io_vc)
 #include <chat_commands.h>
-#include <replxx.h>
 #include <pthread.h>
 
 #ifdef WIN32
@@ -71,9 +75,12 @@ typedef struct {
     uint8_t skins_owned[512];          // bitset of owned store.skins indices (4096), enforced on ENT
 } ServerAccount;
 
+struct ServerTransport;
+
 typedef struct {
     int fd;
     struct sockaddr_in addr;
+    const struct ServerTransport *transport; // the frontend that accepted it (set before net_add_client)
     NetPacketBuffer read_buffer;
     int id;
     int player_number;
@@ -130,14 +137,49 @@ typedef struct {
     Game game;
 } Server;
 
-extern Replxx *g_replxx;
 extern Server *g_server;
 
-ReplxxActionResult cli_sigint(int, void*);
-void cli_main();
+// A connection's byte transport: TCP (server/src/net_tcp.c), UDP (net_udp.c) or the
+// in-process sandbox (sandbox.c). Every hook runs with g_server->lock held unless noted.
+typedef struct ServerTransport {
+    const char *name;
+    // Read what arrived for the connection and hand each whole packet to net_handle_packet().
+    // Returns 0 once the connection was removed (net_handle_packet returned 0, or the peer
+    // is gone and the transport called net_remove_client), else 1.
+    int (*poll)(ClientConnection *client);
+    // Send one tick's whole frames ([type, length hi, length lo, payload]...) to fd.
+    void (*send_frames)(int fd, const uint8_t *frames, size_t length);
+    void (*close)(int fd);
+    // server_time() when the data carrying the latest PONG / INPUT of fd arrived, 0 unknown.
+    double (*pong_received_at)(int fd);
+    double (*input_received_at)(int fd);
+    // Send whatever is queued for every peer now (end of tick), NULL when sends are immediate.
+    void (*flush)(void);
+} ServerTransport;
 
-void net_main();
-void net_cleanup();
+// Transports whose flush runs at the end of every tick (net_broadcast_states).
+void server_transport_register(const ServerTransport *transport);
+void server_transport_unregister(const ServerTransport *transport);
+void server_transport_flush_all(void);
+
+// The server's wall clock (seconds): CLOCK_MONOTONIC, or the sandbox's own clock
+// (server_set_clock) so an in-process server follows the client's frame time.
+double server_time(void);
+void server_set_clock(double (*clock)(void)); // NULL = CLOCK_MONOTONIC
+
+// Krunker's game hooks (GameHooks.send / next_round / respawn / reward / alloc_uid) on
+// g_server->game. Caller holds g_server->lock.
+void net_install_game_hooks(void);
+// Every connection's pending packets through net_handle_packet, then the kicks the chat
+// commands queued. Caller holds g_server->lock (server_bin's net thread, the sandbox step).
+void net_poll_clients(void);
+int net_handle_packet(ClientConnection*, const NetPacket*); // 0 = the client was removed
+void net_add_client(ClientConnection*); // takes a copy; caller holds g_server->lock
+
+// One server tick (main.c's loop body, the sandbox step): g_server->now / tick_wall, bot
+// slots, game_tick, accounts_tick, idle kicks, the per-tick broadcast. Caller holds the lock.
+void server_core_tick(float now, float delta, double tick_wall);
+
 void net_broadcast_states();
 void net_check_idle_clients(float);
 void net_remove_client(ClientConnection*); // disconnect + free; caller holds g_server->lock

@@ -1,8 +1,11 @@
+// The server core's connections (server.h): packet dispatch, spawns, map changes, chat
+// commands and the per-tick broadcast. The bytes move through each connection's transport
+// (ClientConnection.transport): TCP sockets (net_tcp.c), UDP peers (net_udp.c) or the
+// in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
 #include <server.h>
 #include <server_log.h>
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
-#include <server_net_udp.h>  // UDP game transport: virtual client fds (net-udp)
 #include <ai.h>
 #include <bots.h>            // Krunker v7.1.4 bot players (shared/src/bots.c)
 #include <errno.h>
@@ -13,42 +16,16 @@
 #include <pcg_basic.h>
 
 #ifdef WIN32
-#include <windows.h>
 #include <ws2tcpip.h> // inet_pton
-#define NET_ERRNO WSAGetLastError()
-#define CLOSE_SOCKET closesocket
-#define WOULD_BLOCK(err) ((err) == WSAEWOULDBLOCK)
-#define SLEEP_MILLIS(ms) Sleep(ms)
-#else
-#include <unistd.h>
-#include <poll.h>
-#include <netinet/tcp.h>
-#define NET_ERRNO errno
-#define CLOSE_SOCKET close
-#define WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
-#define SLEEP_MILLIS(ms) do { struct timespec ts = {0, (ms) * 1000000L}; nanosleep(&ts, NULL); } while (0)
 #endif
 
-// Client fds may be virtual (UDP peers, server/src/net_udp.c): they close through the transport.
-#define CLOSE_RAW_SOCKET CLOSE_SOCKET
-#define CLOSE_CLIENT_FD(fd) ((fd) >= NET_VIRTUAL_FD_BASE ? net_udp_close(fd) : (void) CLOSE_RAW_SOCKET(fd))
-
-#define NET_ERROR(fd, ...) { server_log_error(__VA_ARGS__); if ((fd) >= 0) CLOSE_SOCKET(fd); g_server->should_quit = 1; return; }
+// Client fds close through their transport (sockets, UDP peers, sandbox connections).
+#define CLOSE_CLIENT_FD(client) ((client)->transport->close((client)->fd))
 
 // Wall clock for ping RTTs: g_server->now only advances once per tick.
 static double net_time() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double) ts.tv_sec + (double) ts.tv_nsec / 1e9;
+    return server_time();
 }
-
-// When poll() last saw each client fd readable (net thread). The thread then waits for
-// g_server->lock, which the tick holds while it runs: a PONG is stamped with that wake-up so
-// the ping measures the connection, not how long the tick kept the lock. (Intentional
-// difference: v3.1.1's io_po reads Date.now() when Node's event loop gets to the message,
-// so a running tick is included there.)
-#define NET_READABLE_FDS 1024
-static double g_net_readable_at[NET_READABLE_FDS];
 
 static ClientConnection *net_client_by_id(const int id) {
     for (size_t i = 0; i < g_server->client_count; i++) {
@@ -259,24 +236,6 @@ static void net_mark_client_spawned(ClientConnection *client) {
     client->has_idle_position = 1;
 }
 
-static void net_set_nonblocking(const int fd) {
-#ifdef WIN32
-    unsigned long non_blocking = 1;
-    ioctlsocket(fd, FIONBIO, &non_blocking);
-#else
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-#endif
-}
-
-// Krunker's ws sockets run with Nagle off (ws calls socket.setNoDelay()). With Nagle on, a
-// small PING/STATE written while the previous tick's segment is unacked waits for the
-// peer's delayed ACK (40 ms on Linux loopback): the random 5-130 ms local pings.
-static void net_set_nodelay(const int fd) {
-    const int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *) &one, sizeof(one));
-}
-
 // One tick's frames for one client go out in a single send(): Krunker sends its per-tick
 // sync as one ws message, and ~one send() per player per client per tick (with
 // net_send_packet() spinning on EAGAIN) held g_server->lock for milliseconds at full lobbies.
@@ -298,41 +257,10 @@ static int net_batch_append(NetSendBatch *batch, const NetPacketType type, const
     return 1;
 }
 
-// Sends the batch. When the socket buffer is full (a stalled peer) nothing is written and the
-// tick's snapshots are dropped: the next tick carries fresher ones (intentional: Krunker's ws
-// would queue them in user space instead). A partial write is finished, since a cut frame
-// would desync the stream; that only waits on a peer that is draining.
-static void net_batch_flush(const int fd, NetSendBatch *batch) {
-    if (fd >= NET_VIRTUAL_FD_BASE) { // UDP peer: one knet message per frame (STATE rides the unreliable channel)
-        for (size_t at = 0; at + NET_PACKET_HEADER_SIZE <= batch->length;) {
-            const uint16_t length = (uint16_t) ((batch->data[at + 1] << 8) | batch->data[at + 2]);
-            net_send_packet(fd, (NetPacketType) batch->data[at], batch->data + at + NET_PACKET_HEADER_SIZE, length);
-            at += NET_PACKET_HEADER_SIZE + length;
-        }
-        batch->length = 0;
-        return;
-    }
-    size_t sent = 0;
-    while (sent < batch->length) {
-#ifdef WIN32
-        const int wrote = send(fd, (const char *) batch->data + sent, (int) (batch->length - sent), 0);
-#else
-        const ssize_t wrote = send(fd, batch->data + sent, batch->length - sent, MSG_NOSIGNAL);
-#endif
-        if (wrote > 0) {
-            sent += (size_t) wrote;
-            continue;
-        }
-        if (wrote < 0 && WOULD_BLOCK(NET_ERRNO)) {
-            if (!sent) break;
-#ifndef WIN32
-            struct pollfd pfd = {.fd = fd, .events = POLLOUT};
-            poll(&pfd, 1, 5);
-#endif
-            continue;
-        }
-        break; // closed / reset: net_poll_client() removes it on its next recv
-    }
+// Sends the batch through the connection's transport (TCP: one send(), UDP: one knet message
+// per frame, sandbox: the in-memory queue).
+static void net_batch_flush(const ClientConnection *client, NetSendBatch *batch) {
+    if (batch->length) client->transport->send_frames(client->fd, batch->data, batch->length);
     batch->length = 0;
 }
 
@@ -745,7 +673,7 @@ static void net_process_pending_kicks(void) {
 void net_add_client(ClientConnection *client) {
     if (g_server->config.max_players && g_server->client_count >= g_server->config.max_players) {
         server_log("Rejecting client: server full (%zu/%u)", g_server->client_count, (unsigned int) g_server->config.max_players);
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
@@ -756,21 +684,21 @@ void net_add_client(ClientConnection *client) {
         const NetErrorPacket error = {.message = "Banned", .code = "004003"};
         net_send_packet(client->fd, NET_PACKET_ERROR, &error, sizeof(error));
         server_log("Rejecting %s: IP banned", client->address);
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
     NetErrorPacket refuse = {{0}};
     if (accounts_refuse_connect(client->address, &refuse)) { // draining ("GAME UPDATING")
         net_send_packet(client->fd, NET_PACKET_ERROR, &refuse, sizeof(refuse));
         server_log("Rejecting %s: %s", client->address, refuse.message);
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
     ClientConnection *new_clients = realloc(g_server->clients, (g_server->client_count + 1) * sizeof(ClientConnection));
 
     if (!new_clients) {
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
@@ -779,7 +707,7 @@ void net_add_client(ClientConnection *client) {
     client->player_number = net_alloc_player_number();
 
     if (!client->player_number) {
-        CLOSE_CLIENT_FD(client->fd);
+        CLOSE_CLIENT_FD(client);
         return;
     }
 
@@ -845,7 +773,7 @@ void net_remove_client(ClientConnection *client) {
     net_release_player_number(client);
     social_assembly_free(&client->social);
     social_assembly_free(&client->voice);
-    CLOSE_CLIENT_FD(client->fd);
+    CLOSE_CLIENT_FD(client);
 
     if (index + 1 < g_server->client_count) {
         memmove(&g_server->clients[index], &g_server->clients[index + 1], (g_server->client_count - index - 1) * sizeof(ClientConnection));
@@ -893,8 +821,7 @@ static void net_handle_pong(ClientConnection *client, const NetPacket *packet) {
     if (pong.seq != client->ping_seq) return;
 
     const double now = net_time();
-    const double readable_at = client->fd >= NET_VIRTUAL_FD_BASE ? net_udp_pong_received_at(client->fd) // datagram arrival (net_udp.c)
-                               : client->fd >= 0 && client->fd < NET_READABLE_FDS ? g_net_readable_at[client->fd] : 0.0;
+    const double readable_at = client->transport->pong_received_at(client->fd); // datagram arrival / socket readable
     const double received_at = readable_at > client->ping_sent_at && readable_at < now ? readable_at : now;
     client->ping_ms = net_ping_update(client->ping_ms, (float) (received_at - client->ping_sent_at));
     client->ping_seq = 0;
@@ -1034,7 +961,7 @@ static void net_handle_input_frame(ClientConnection *client, const NetInputPacke
 // is constant up to float rounding.
 static double net_input_arrival(const ClientConnection *client) {
     const double now = net_time();
-    const double readable_at = client->fd >= 0 && client->fd < NET_READABLE_FDS ? g_net_readable_at[client->fd] : 0.0;
+    const double readable_at = client->transport->input_received_at(client->fd);
     const double wall = readable_at > 0.0 && readable_at <= now && now - readable_at < 1.0 ? readable_at : now;
     return g_server->game.state_now + (wall - g_server->tick_wall);
 }
@@ -1070,7 +997,7 @@ void net_resume_ent(ClientConnection *client, const int spectate) {
 }
 
 // Returns 0 when the client was removed.
-static int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
+int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     const int first_packet = !client->first_packet_seen;
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     switch (packet->type) {
@@ -1176,186 +1103,25 @@ static int net_handle_packet(ClientConnection *client, const NetPacket *packet) 
 }
 
 int net_poll_client(ClientConnection *client) {
-    char buffer[1024];
-    int read;
-
-    if (client->fd >= NET_VIRTUAL_FD_BASE) { // UDP peer: whole packets from its knet inbox
-        NetPacket packet;
-        int result;
-        while ((result = net_udp_next_packet(client->fd, &packet)) > 0) {
-            if (!net_handle_packet(client, &packet)) return 0;
-        }
-        if (result < 0) {
-            net_remove_client(client);
-            return 0;
-        }
-        return 1;
-    }
-
-    if ((read = recv(client->fd, buffer, sizeof(buffer), 0)) <= 0) {
-        if (read < 0 && WOULD_BLOCK(NET_ERRNO)) return 1;
-
-        net_remove_client(client);
-        return 0;
-    }
-
-    if (!net_buffer_push(&client->read_buffer, buffer, (size_t) read)) {
-        net_remove_client(client);
-        return 0;
-    }
-
-    NetPacket packet;
-    int result;
-
-    while ((result = net_buffer_next(&client->read_buffer, &packet)) > 0) {
-        if (!net_handle_packet(client, &packet)) return 0;
-    }
-
-    if (result < 0) {
-        net_remove_client(client);
-        return 0;
-    }
-
-    return 1;
+    return client->transport->poll(client);
 }
 
-// Block until the listen socket or a client socket has data (5 ms at most, so pending kicks
-// and should_quit are still seen promptly). A fixed 1 ms sleep here delayed every PONG
-// (and input) by up to a millisecond plus timer slack.
-#define NET_WAIT_MAX_FDS 128
-#define NET_WAIT_TIMEOUT_MS 5
-static void net_wait_readable(const int server_socket) {
-#ifdef WIN32
-    (void) server_socket;
-    SLEEP_MILLIS(1);
-#else
-    struct pollfd fds[NET_WAIT_MAX_FDS];
-    nfds_t count = 0;
-    fds[count++] = (struct pollfd) {.fd = server_socket, .events = POLLIN};
-
-    const int udp_fd = net_udp_fd();
-    if (udp_fd >= 0) fds[count++] = (struct pollfd) {.fd = udp_fd, .events = POLLIN};
-    const nfds_t first_client = count;
-
-    pthread_mutex_lock(&g_server->lock);
-    for (size_t i = 0; i < g_server->client_count && count < NET_WAIT_MAX_FDS; i++) {
-        if (g_server->clients[i].fd >= NET_VIRTUAL_FD_BASE) continue; // UDP peers share udp_fd
-        fds[count++] = (struct pollfd) {.fd = g_server->clients[i].fd, .events = POLLIN};
+void net_poll_clients(void) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        if (!net_poll_client(&g_server->clients[i])) i--;
     }
-    pthread_mutex_unlock(&g_server->lock);
-
-    // a client closed meanwhile only makes this return early (POLLNVAL)
-    if (poll(fds, count, NET_WAIT_TIMEOUT_MS) <= 0) return;
-
-    const double now = net_time();
-    for (nfds_t i = first_client; i < count; i++) {
-        if ((fds[i].revents & POLLIN) && fds[i].fd >= 0 && fds[i].fd < NET_READABLE_FDS) g_net_readable_at[fds[i].fd] = now;
-    }
-#endif
+    net_process_pending_kicks(); // chat /kick, /ban, /banip (and the CLI running them)
 }
 
-void net_main() {
-
-#ifdef WIN32
-    WSADATA wsa_data;
-    WSAStartup(MAKEWORD(2, 2), &wsa_data);
-#endif
-
-    const int server_socket = (int) socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (server_socket < 0) NET_ERROR(-1, "Failed to create server socket, quitting...");
-
-    // Rebind right after a restart even while old connections sit in TIME_WAIT.
-    // Windows' SO_REUSEADDR would let a second server share a listening port, so
-    // it gets SO_EXCLUSIVEADDRUSE instead (TIME_WAIT never blocks a bind there).
-    const int reuse = 1;
-#ifdef WIN32
-    setsockopt(server_socket, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *) &reuse, sizeof(reuse));
-#else
-    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (const char *) &reuse, sizeof(reuse));
-#endif
-
+void net_install_game_hooks(void) {
     // Match events leave the shared game through these hooks (see GameHooks).
-    pthread_mutex_lock(&g_server->lock);
     g_server->game.hooks.user = g_server;
     g_server->game.hooks.send = net_game_send;
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
-    pthread_mutex_unlock(&g_server->lock);
-
-    struct sockaddr_in listen_addr;
-
-    listen_addr.sin_family = AF_INET;
-    listen_addr.sin_addr.s_addr = INADDR_ANY;
-    if (g_gs_config.listen_host[0] && strcmp(g_gs_config.listen_host, "0.0.0.0") &&
-        inet_pton(AF_INET, g_gs_config.listen_host, &listen_addr.sin_addr) != 1) {
-        NET_ERROR(server_socket, "Invalid gameserver.listen_host '%s' (IPv4 address expected), quitting...", g_gs_config.listen_host);
-    }
-    listen_addr.sin_port = htons(g_server->config.listen_port);
-
-    if (bind(server_socket, (struct sockaddr *) &listen_addr, sizeof(listen_addr)) < 0) {
-        NET_ERROR(server_socket, "Failed to bind to port %d (is it in use?), quitting...", g_server->config.listen_port);
-    }
-
-    if (listen(server_socket, 5) < 0) NET_ERROR(server_socket, "Failed to listen on port %d, quitting...", g_server->config.listen_port);
-
-    net_set_nonblocking(server_socket);
-
-    server_log("Listening on port %d", g_server->config.listen_port);
-
-    // UDP game transport on the same port number (KRUNKNATIVE_NET_UDP=0: TCP only). It also
-    // answers server-info queries, so info_query.c opens no socket of its own.
-    if (net_udp_enabled()) net_udp_open(g_gs_config.listen_host, g_server->config.listen_port);
-
-    while (!g_server->should_quit) {
-        net_udp_receive(); // datagrams in (stamps PONG arrival before the lock), acks/resends out
-
-        pthread_mutex_lock(&g_server->lock);
-
-        net_udp_service(); // new UDP peers -> net_add_client, dead ones flagged
-        for (size_t i = 0; i < g_server->client_count; i++) {
-            if (!net_poll_client(&g_server->clients[i])) i--;
-        }
-        net_process_pending_kicks(); // chat /kick, /ban, /banip (and the CLI running them)
-
-        pthread_mutex_unlock(&g_server->lock);
-        net_udp_flush_all(); // the handlers' replies leave now, not after the next poll
-
-        struct sockaddr_in client_addr;
-#ifdef WIN32
-        int client_addr_size = sizeof(client_addr);
-#else
-        socklen_t client_addr_size = sizeof(client_addr);
-#endif
-
-        const int client = (int) accept(server_socket, (struct  sockaddr *) &client_addr, &client_addr_size);
-
-        if (client < 0) {
-            if (WOULD_BLOCK(NET_ERRNO)) {
-                net_wait_readable(server_socket);
-                continue;
-            }
-
-            break;
-        }
-
-        net_set_nonblocking(client);
-        net_set_nodelay(client);
-
-        ClientConnection conn = {};
-
-        conn.fd = client;
-        conn.addr = client_addr;
-
-        pthread_mutex_lock(&g_server->lock);
-        net_add_client(&conn);
-        pthread_mutex_unlock(&g_server->lock);
-    }
-
-    CLOSE_SOCKET(server_socket);
 }
-
 
 // kickIdleSocket: ["error", "Kicked for inactivity", "000005"], then close.
 static void net_kick_idle(ClientConnection *client, const char *phase) {
@@ -1464,7 +1230,7 @@ static void net_broadcast_states_tick(void);
 // thread would only flush them after its next poll wake-up).
 void net_broadcast_states() {
     net_broadcast_states_tick();
-    net_udp_flush_all();
+    server_transport_flush_all();
 }
 
 static void net_broadcast_states_tick(void) {
@@ -1487,20 +1253,13 @@ static void net_broadcast_states_tick(void) {
 
     static NetSendBatch batch; // main thread only
     for (size_t i = 0; i < g_server->client_count; i++) {
-        const int fd = g_server->clients[i].fd;
+        const ClientConnection *client = &g_server->clients[i];
         batch.length = 0;
         for (size_t j = 0; j < state_count; j++) {
             if (net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]))) continue;
-            net_batch_flush(fd, &batch); // full (> ~140 players): send and start the next batch
+            net_batch_flush(client, &batch); // full (> ~140 players): send and start the next batch
             net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]));
         }
-        net_batch_flush(fd, &batch);
+        net_batch_flush(client, &batch);
     }
-}
-
-void net_cleanup() {
-    net_udp_shutdown(); // after server_disconnect_all: the last ERROR / LEAVE still reach UDP peers
-#ifdef WIN32
-    WSACleanup();
-#endif
 }

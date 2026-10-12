@@ -146,15 +146,6 @@ static void server_configure_bots(const GsConfig *cfg) {
     server_log("Bots: %s %d, difficulty %g (%s)", cfg->bot_quota > 0 ? "fill to" : "keep", quota, (double) difficulty, cfg->bot_difficulty);
 }
 
-// The quota's lobby size: the round's max players; ranked matches get no quota bots.
-static void server_bot_slots(void) {
-    char tags[4][24];
-    const int n = accounts_info_tags(tags, 4);
-    int ranked = 0;
-    for (int i = 0; i < n; i++) ranked |= !strcmp(tags[i], "ranked");
-    g_server->game.bots->slots = ranked ? -1 : g_server->config.max_players;
-}
-
 static void server_tick_drain(void) {
     if (!g_drain_requested || g_server->should_quit) return;
     if (!g_drain_active) {
@@ -576,13 +567,7 @@ static void server_run_tick_loop(void) {
         last_tick = tick_start;
 
         pthread_mutex_lock(&g_server->lock);
-        g_server->now = now;
-        g_server->tick_wall = tick_start; // net_input_arrival: wall clock -> game.state_now
-        if (g_server->game.bots) server_bot_slots(); // bot quota: the lobby size (per mode), none in ranked
-        game_tick(&g_server->game, now, delta);
-        accounts_tick(now); // brain events, join timeouts, stats commits, lobby pushes
-        net_check_idle_clients(now);
-        net_broadcast_states();
+        server_core_tick(now, delta, tick_start); // game_tick, accounts, idle kicks, the per-tick broadcast
         info_query_update(now);
         server_tick_drain();
 
