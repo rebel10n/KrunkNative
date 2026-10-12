@@ -8,7 +8,7 @@ client.js with a new wasm), fills in the loader.js <meta> knobs of every page an
 _headers (immutable hashed files; Pages revalidates everything else), _redirects
 (/assets/* -> the asset host) and 404.html (unknown paths are 404s, not the SPA fallback). --ga-id puts Google Analytics into every page (ga.py).
 
-usage: stage.py <dist/web> <out dir> --asset-base URL --brain URL [--bridge URL] [--wt URL|off] [--ga-id G-...|off]
+usage: stage.py <dist/web> <out dir> --asset-base URL --brain URL [--bridge URL] [--rtc URL|off] [--wt URL|off] [--ga-id G-...|off]
 """
 import argparse
 import hashlib
@@ -21,7 +21,7 @@ import sys
 import ga
 
 CLIENT_FILES = ("client.js", "client.wasm", "client.data")
-KNOBS = ("kn-build", "kn-asset-base", "kn-brain", "kn-bridge", "kn-wt")
+KNOBS = ("kn-build", "kn-asset-base", "kn-brain", "kn-bridge", "kn-rtc", "kn-wt")
 
 # Pages' default for everything else (pages, js/, css/, img/, windows/) is
 # "public, max-age=0, must-revalidate" + ETag: always revalidated, never stale.
@@ -53,6 +53,7 @@ def main():
     ap.add_argument("--asset-base", default="")
     ap.add_argument("--brain", default="")
     ap.add_argument("--bridge", default="", help='net-bridge /native WebSocket URL; "" = same origin')
+    ap.add_argument("--rtc", default="off", help='WebRTC gateway signaling URL (net-bridge/rtc); "off" = no WebRTC (no rtc.json fetch)')
     ap.add_argument("--wt", default="off", help='WebTransport relay URL; "off" = WebSocket only (no wt.json fetch)')
     ap.add_argument("--ga-id", default="off", help='GA4 measurement id (KN_GA_ID); "" or "off" = no analytics')
     args = ap.parse_args()
@@ -78,7 +79,7 @@ def main():
         os.rename(os.path.join(args.out, name), os.path.join(args.out, "%s.%s.%s" % (stem, build, ext)))
 
     values = {"kn-build": build, "kn-asset-base": args.asset_base, "kn-brain": args.brain, "kn-bridge": args.bridge,
-              "kn-wt": args.wt}
+              "kn-rtc": args.rtc, "kn-wt": args.wt}
     pages = 0
     for name in sorted(os.listdir(args.out)):
         if not name.endswith(".html"):

@@ -262,6 +262,19 @@ wt-build: ## Build the WebTransport relay (net-bridge/wt/kn-wt, needs Go)
 wt: wt-build ## Run the WebTransport <-> UDP relay on UDP $(WT_ADDR) (WT_CERT=/WT_KEY= for a real certificate)
 	$(WT_BIN) -addr $(WT_ADDR) -info-file $(DIST_WEB)/wt.json $(if $(WT_CERT),-cert $(WT_CERT) -key $(WT_KEY))
 
+# WebRTC gateway (net-bridge/rtc, doc/transport.md): signaling over HTTP on RTC_HTTP, ICE/DTLS on
+# the one UDP port RTC_ICE; DataChannel messages 1:1 to the game server's UDP port. Writes
+# $(DIST_WEB)/rtc.json (the gateway URL; the web client fetches it when kn-rtc is empty).
+RTC_BIN  := $(BRIDGE_DIR)/rtc/kn-rtc
+RTC_HTTP ?= 127.0.0.1:8085
+RTC_ICE  ?= :21100
+.PHONY: rtc rtc-build
+rtc-build: ## Build the WebRTC gateway (net-bridge/rtc/kn-rtc, needs Go)
+	cd $(BRIDGE_DIR)/rtc && go build -trimpath -o kn-rtc .
+
+rtc: rtc-build ## Run the WebRTC <-> UDP gateway (signaling http $(RTC_HTTP), ICE udp $(RTC_ICE))
+	$(RTC_BIN) -http $(RTC_HTTP) -ice-addr $(RTC_ICE) -info-file $(DIST_WEB)/rtc.json
+
 test-net: build ## knet transport unit test (loss/dup/reorder) + 2-client UDP end-to-end (headless)
 	./$(DEBUG_DIR)/knet_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)

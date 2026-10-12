@@ -1,0 +1,158 @@
+# net-bridge/rtc (kn-rtc) on the central node (defaults/main.yml). Layout:
+#   {{ kn_rtc_base }}/kn-rtc        static Go binary (built on the controller)
+#   {{ kn_etc_dir }}/rtc.env        listen addresses, allowlist, limits
+#   kn-rtc.service                  user {{ kn_user }}, http 127.0.0.1:{{ kn_rtc_http_port }}, udp {{ kn_rtc_public_ip }}:{{ kn_rtc_ice_port }}
+#
+# Host firewall: kru's nftables ruleset is Debian's default (input policy accept, not managed
+# here), so udp {{ kn_rtc_ice_port }} needs no rule; the gateway binds only that one port.
+
+- name: Gateway allowlist (edge game servers by name and IP)
+  ansible.builtin.set_fact:
+    kn_rtc_targets: >-
+      {%- set out = [] -%}
+      {%- set ports = kn_rtc_target_port_lo ~ '-' ~ kn_rtc_target_port_hi -%}
+      {%- for h in kn_rtc_edge_hosts -%}
+        {%- for n in range(1, (kn_rtc_target_port_hi | int) - (kn_rtc_target_port_lo | int) + 2) -%}
+          {%- set _ = out.append(hostvars[h].kn_edge_name ~ '-' ~ n ~ '.' ~ kn_domain ~ ':' ~ ports) -%}
+        {%- endfor -%}
+        {%- set _ = out.append(hostvars[h].kn_public_ip ~ ':' ~ ports) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: The allowlist is not empty
+  ansible.builtin.assert:
+    that: kn_rtc_targets | length > 0
+    fail_msg: "No edges in the inventory: the gateway would have nothing to connect to."
+    quiet: true
+
+- name: The ICE address is on this host
+  ansible.builtin.assert:
+    that: kn_rtc_public_ip in ansible_all_ipv4_addresses
+    fail_msg: "{{ kn_rtc_public_ip }} is not an address of {{ inventory_hostname }} ({{ ansible_all_ipv4_addresses }}): set kn_rtc_public_ip."
+    quiet: true
+  when: ansible_all_ipv4_addresses is defined
+
+# Static and reproducible (-trimpath, empty build id): an unchanged source gives a
+# byte-identical binary (no copy, no restart).
+- name: Build kn-rtc on the controller (go build)
+  ansible.builtin.shell: |
+    set -eu
+    mkdir -p {{ (kn_rtc_binary | dirname) | quote }}
+    cd {{ (kn_repo_root ~ '/net-bridge/rtc') | quote }}
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o {{ kn_rtc_binary | quote }} .
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  check_mode: false
+
+- name: Gateway directory
+  ansible.builtin.file:
+    path: "{{ kn_rtc_base }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Gateway binary
+  ansible.builtin.copy:
+    src: "{{ kn_rtc_binary }}"
+    dest: "{{ kn_rtc_base }}/kn-rtc"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart kn_rtc
+
+- name: Gateway settings
+  ansible.builtin.template:
+    src: rtc.env.j2
+    dest: "{{ kn_etc_dir }}/rtc.env"
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  notify: Restart kn_rtc
+
+- name: Gateway unit
+  ansible.builtin.template:
+    src: kn-rtc.service.j2
+    dest: /etc/systemd/system/kn-rtc.service
+    mode: "0644"
+  notify: Restart kn_rtc
+
+- name: Enable kn-rtc
+  ansible.builtin.systemd_service:
+    name: kn-rtc
+    enabled: true
+    state: started
+    daemon_reload: true
+  # --check on a fresh host: the unit file above was not really written.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Restart now if anything changed (before the health check)
+  ansible.builtin.meta: flush_handlers
+
+- name: Gateway answers on loopback
+  ansible.builtin.uri:
+    url: "http://{{ kn_rtc_http_host }}:{{ kn_rtc_http_port }}/healthz"
+    status_code: [200]
+  register: kn_rtc_health
+  retries: 5
+  delay: 2
+  until: kn_rtc_health.status == 200
+  when: not ansible_check_mode
+
+# ------------------------------------------------------------------ Cloudflare
+# Same remote-managed tunnel as kn_bridge: {{ kn_rtc_hostname }} itself (DNS + the hostname rule
+# -> the bridge) is kn_bridge's; this adds a path rule for {{ kn_rtc_path }} just before the first
+# rule that would otherwise take it ({{ kn_rtc_hostname }} without a path, or the catch-all).
+
+- name: Cloudflare routing for {{ kn_rtc_hostname }}{{ kn_rtc_path }}
+  when: kn_rtc_cf_manage | bool and kn_rtc_cf_api_token | length > 0 and kn_rtc_cf_account_id | length > 0
+  delegate_to: localhost
+  become: false
+  run_once: true
+  block:
+    - name: Tunnel configuration
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/accounts/{{ kn_rtc_cf_account_id }}/cfd_tunnel/{{ kn_rtc_cf_tunnel_id }}/configurations"
+        headers: { Authorization: "Bearer {{ kn_rtc_cf_api_token }}" }
+        return_content: true
+      register: kn_rtc_tunnel
+      check_mode: false
+      no_log: true
+
+    - name: Ingress with the {{ kn_rtc_path }} path rule before {{ kn_rtc_hostname }} (every other rule kept)
+      ansible.builtin.set_fact:
+        kn_rtc_tunnel_config: "{{ kn_rtc_tunnel.json.result.config }}"
+        kn_rtc_ingress_new: >-
+          {%- set rule = {'hostname': kn_rtc_hostname, 'path': '^' ~ kn_rtc_path ~ '(/|$)', 'service': 'http://localhost:' ~ kn_rtc_http_port} -%}
+          {%- set ns = namespace(out=[], done=false) -%}
+          {%- for r in kn_rtc_tunnel.json.result.config.ingress -%}
+            {%- if r.hostname is defined and r.hostname == kn_rtc_hostname and r.path is defined and r.path == rule.path -%}
+              {%- if not ns.done -%}{%- set ns.out = ns.out + [r | combine(rule)] -%}{%- set ns.done = true -%}{%- endif -%}
+            {%- elif not ns.done and ((r.hostname is defined and r.hostname == kn_rtc_hostname and r.path is not defined) or (loop.last and r.hostname is not defined)) -%}
+              {%- set ns.out = ns.out + [rule, r] -%}{%- set ns.done = true -%}
+            {%- else -%}
+              {%- set ns.out = ns.out + [r] -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ ns.out if ns.done else ns.out + [rule] }}
+
+    - name: Update the tunnel ingress
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/accounts/{{ kn_rtc_cf_account_id }}/cfd_tunnel/{{ kn_rtc_cf_tunnel_id }}/configurations"
+        method: PUT
+        headers: { Authorization: "Bearer {{ kn_rtc_cf_api_token }}" }
+        body_format: json
+        body:
+          config: "{{ kn_rtc_tunnel_config | combine({'ingress': kn_rtc_ingress_new}) }}"
+      when: kn_rtc_ingress_new != kn_rtc_tunnel_config.ingress
+      changed_when: true
+      no_log: true
+
+- name: Cloudflare routing skipped
+  ansible.builtin.debug:
+    msg: "CF_API_TOKEN / CF_ACCOUNT_ID not set: the {{ kn_rtc_hostname }}{{ kn_rtc_path }} tunnel path rule was not checked (source ~/.config/kn-secrets/cloudflare.env)."
+  when: kn_rtc_cf_manage | bool and (kn_rtc_cf_api_token | length == 0 or kn_rtc_cf_account_id | length == 0)

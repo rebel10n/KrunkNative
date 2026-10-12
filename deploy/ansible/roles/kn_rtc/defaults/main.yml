@@ -1,0 +1,45 @@
+# kn-rtc on the central node: the web client's WebRTC DataChannel <-> UDP gateway
+# (net-bridge/rtc, doc/transport.md). Browsers POST their SDP offer to
+#   https://{{ kn_rtc_hostname }}{{ kn_rtc_path }}?target=<edge>-<n>.krunk.io:<port>
+# (Cloudflare proxy -> tunnel path rule -> 127.0.0.1:{{ kn_rtc_http_port }}); ICE/DTLS then goes
+# straight to {{ kn_rtc_public_ip }}:{{ kn_rtc_ice_port }}/udp (one port, ICE UDP mux, ICE-lite),
+# and every DataChannel message is relayed 1:1 to the edge game server's UDP port.
+# false: the unit is stopped + disabled and the tunnel left alone. UDP {{ kn_rtc_ice_port }} must reach kru
+# from the internet: it passes kru's Proxmox CT firewall (host meal, /etc/pve/firewall/120.fw,
+# `IN ACCEPT -p udp -dport 21100`), kru's own nftables accepts everything.
+kn_rtc_enabled: true
+kn_rtc_hostname: "play.{{ kn_domain }}"   # shared with kn_bridge (path rule before its hostname rule)
+kn_rtc_path: /rtc
+kn_rtc_http_host: 127.0.0.1
+kn_rtc_http_port: 8085
+# The one UDP port browsers reach. kru has its public address on eth1 (no NAT), so the gateway
+# binds exactly that address and advertises it as its only host candidate.
+kn_rtc_public_ip: 5.188.124.56
+kn_rtc_ice_port: 21100
+kn_rtc_base: /opt/krunknative-rtc
+# Static Go binary built on the controller (go build, toolchain from net-bridge/rtc/go.mod).
+kn_rtc_binary: "{{ kn_artifact_root }}/kn-rtc/kn-rtc"
+
+# Allowlist (KRUNK_NATIVE_TARGETS): exactly the edge game servers, as kn_bridge
+# (<edge>-<n>.krunk.io and each edge's kn_public_ip, ports lo..hi). No loopback, no default.
+kn_rtc_target_port_lo: 21015
+kn_rtc_target_port_hi: 21025
+kn_rtc_edge_hosts: "{{ groups['edges'] | default([]) }}"
+
+# Abuse limits (net-bridge/rtc/main.go). A session is closed when the edge sends nothing for
+# the idle timeout, or when ICE + DTLS + the data channel are not up within the connect timeout.
+kn_rtc_max_per_ip: 8
+kn_rtc_max_sessions: 1024
+kn_rtc_idle_timeout_ms: 30000
+kn_rtc_connect_timeout_ms: 10000
+# cloudflared connects from loopback; Cloudflare sets CF-Connecting-IP (keys the per-IP cap).
+kn_rtc_client_ip_header: cf-connecting-ip
+# Page origins allowed to POST offers (CORS): the Pages front end.
+kn_rtc_origins: "{{ kn_web_origins }}"
+
+# Cloudflare tunnel ingress (controller side, like kn_bridge). Skipped without CF_API_TOKEN /
+# CF_ACCOUNT_ID (CI): source ~/.config/kn-secrets/cloudflare.env.
+kn_rtc_cf_manage: true
+kn_rtc_cf_api_token: "{{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}"
+kn_rtc_cf_account_id: "{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}"
+kn_rtc_cf_tunnel_id: e6c3b632-03cd-409a-892c-a0cc37362e73

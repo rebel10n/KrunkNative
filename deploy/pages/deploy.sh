@@ -10,6 +10,7 @@ cd "$(dirname "$0")/../.."
 : "${KN_ASSET_BASE:=https://assets.krunk.io/}"
 : "${KN_BRAIN_URL:=https://coordinator.krunk.io}"
 : "${KN_BRIDGE_URL:=wss://play.krunk.io/native}"  # net-bridge on kru (deploy/ansible role kn_bridge)
+: "${KN_RTC_URL:=https://play.krunk.io/rtc}"     # WebRTC gateway on kru (deploy/ansible role kn_rtc, net_rtc.c); off = none
 : "${KN_WT_URL:=off}"                             # no WebTransport relay deployed yet (net_wt.c)
 : "${KN_PAGES_STAGE:=dist/pages}"
 KN_GA_ID="${KN_GA_ID-G-6EGYKRF020}"              # Google Analytics (deploy/pages/ga.py); set empty or off to disable
@@ -24,7 +25,7 @@ export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-${CF_API_TOKEN:-}}"
 export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-${CF_ACCOUNT_ID:-}}"
 [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "deploy.sh: no Cloudflare credentials" >&2; exit 1; }
 
-python3 deploy/pages/stage.py dist/web "$KN_PAGES_STAGE" --asset-base "$KN_ASSET_BASE" --brain "$KN_BRAIN_URL" --bridge "$KN_BRIDGE_URL" --wt "$KN_WT_URL" --ga-id "$KN_GA_ID"
+python3 deploy/pages/stage.py dist/web "$KN_PAGES_STAGE" --asset-base "$KN_ASSET_BASE" --brain "$KN_BRAIN_URL" --bridge "$KN_BRIDGE_URL" --rtc "$KN_RTC_URL" --wt "$KN_WT_URL" --ga-id "$KN_GA_ID"
 sha=$(git rev-parse --short=12 HEAD 2>/dev/null || echo local)
 npx --yes "wrangler@$WRANGLER_VERSION" pages deploy "$KN_PAGES_STAGE" \
     --project-name "$KN_PAGES_PROJECT" --branch "$KN_PAGES_BRANCH" \

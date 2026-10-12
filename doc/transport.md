@@ -1,4 +1,4 @@
-# Game transport (UDP / WebTransport)
+# Game transport (UDP / WebRTC / WebTransport)
 
 Game traffic runs over **knet**, a small UDP protocol in `shared/src/knet.c`
 (`shared/include/knet.h`). It has no sockets: it is pure state machines, so the same code
@@ -10,7 +10,7 @@ as before.
 | Path | Transport | Code |
 |---|---|---|
 | native client ↔ server_bin | UDP (knet), TCP fallback | `client/src/net/net_udp.c`, `server/src/net_udp.c` |
-| browser ↔ server_bin | WebTransport datagrams → `kn-wt` relay → UDP (knet), WebSocket fallback | `client/src/net/net_wt.c`, `net-bridge/wt/` |
+| browser ↔ server_bin | WebRTC DataChannel → `kn-rtc` gateway → UDP (knet), then WebTransport → `kn-wt` relay → UDP, then WebSocket fallback | `client/src/net/net_rtc.c`, `net_wt.c`, `net-bridge/rtc/`, `net-bridge/wt/` |
 | legacy | TCP / WebSocket via net-bridge `/native` | `client/src/net/net.c`, `net_web.c` |
 
 server_bin listens on TCP **and** UDP on the same port number. `KRUNKNATIVE_NET_UDP=0`
@@ -34,7 +34,8 @@ answers on the game socket.
   - `0x20` unreliable: `[flags1][id2][len2][type1][payload]`, one whole game frame.
 - `DISCONNECT` (both directions): `[0x07][token4]`.
 
-The MTU is 1000 bytes, which fits a WebTransport datagram on any path QUIC accepts.
+The MTU is 1000 bytes, which fits a WebTransport datagram on any path QUIC accepts, and a
+DataChannel message in one SCTP chunk.
 
 ## Channels
 
@@ -61,12 +62,73 @@ Other limits: 10 s without a datagram is a timeout, a keepalive goes out after 0
 silence, at most 192 KB of reliable data is in flight, and a peer that leaves more than
 8 MB unacked is dropped.
 
+## Web transports
+
+The wasm client runs the same knet session (`client/src/net/net_wt.c`) over a browser
+datagram API, one backend at a time, in this order (`net_web_connect`):
+
+1. **WebRTC** (`net_rtc.c`, gateway `net-bridge/rtc`, `kn-rtc`): one RTCDataChannel
+   `knet` with `{ordered: false, maxRetransmits: 0}`, so every message is one datagram, lost or
+   not, and knet does the acks and resends. Signaling is one WHIP-style request: the page
+   POSTs its SDP offer (`Content-Type: application/sdp`) to `<gateway>?target=host:port` and
+   the `201` body is the answer. There is no trickle ICE. The gateway is ICE-lite and its
+   answer already carries its only candidate: a host candidate on one fixed UDP port (pion ICE
+   UDP mux, every session shares it). The browser needs no candidates of its own in the offer,
+   because its connectivity checks reach that port and the gateway learns its address as a
+   peer-reflexive candidate. After ICE and DTLS, the gateway dials the target's UDP port and
+   relays DataChannel messages 1:1, both ways. It holds no game state.
+2. **WebTransport** (`net_wt.c`, relay `net-bridge/wt`, `kn-wt`): datagrams relayed 1:1 the
+   same way. It needs a certificate for the relay and a direct UDP path.
+3. **WebSocket** (`net_web.c`, net-bridge `/native`): the TCP byte stream, as before.
+
+A backend that fails before the knet handshake completes is skipped until the next server
+switch. The failure can be a refused or unreachable gateway, a session that does not open
+within 6 s, or no knet answer within 3 s. A session that drops after it was up retries the
+same order after 2 s. The HUD and menu ping is the server's PING/PONG measurement over the
+active transport, so over WebRTC it is the RTT through the gateway. The knet RTT of the
+session is in `_kn_wt_stats()` (JSON, with the transport name) and in the console line when
+the session ends.
+
+Both gateways fill the knet `CONNECT_RESPONSE` forwarded-address field with the browser's
+address. For kn-rtc this is the ICE peer's real UDP source. server_bin trusts that field only
+from loopback. On a gateway that serves remote game servers, such as kn-rtc and net-bridge
+on kru, the edges see the gateway's address.
+
+**NAT, STUN and TURN.** The gateway has a public address, so neither is needed. The browser
+sends its checks from behind any NAT, including symmetric NAT and CGNAT, and the gateway
+answers the source address it saw (ICE-lite: it never sends checks to the browser's own
+candidates). Only networks that block outbound UDP to that port fail, such as some corporate
+or school firewalls. They fall back to the next transport after the open timeout. A gateway
+behind a 1:1 NAT advertises its public address with `-public-ip`. A gateway behind a port
+forward must forward the same port number.
+
+**Phase 2** (not built): one kn-rtc per edge, next to its game servers. The DTLS path is then
+browser → edge directly (one hop less than via kru), and the forwarded address comes from
+loopback, so edge bans and logs see the browser's real IP. Each edge opens its ICE port in the
+`edge_firewall` drop-in (`60-krunknative.nft`, `udp` list, outside abulxt's ports), and serves
+signaling under its own name, for example `https://<edge>.krunk.io/rtc` through Cloudflare. The
+matchmaker would return a per-server `rtcUrl` next to the target, and net_rtc.c would use it
+instead of `kn-rtc`.
+
 ## Running
 
 - Native: there is nothing to configure. `KRUNKNATIVE_NET_TRANSPORT=udp|tcp` on the
   client forces one transport. The default tries UDP, and falls back to TCP when there is
   no answer within 1.5 s.
-- Web: `make wt` runs the relay on UDP `:8443` (`WT_ADDR=`) and writes
+- Web, WebRTC: `make rtc` runs the gateway, with signaling on `http://127.0.0.1:8085/rtc`
+  (`RTC_HTTP=`) and ICE on UDP `:21100` (`RTC_ICE=`; a wildcard address binds every
+  interface, a specific IP binds only that one). It writes `dist/web/rtc.json`
+  (`{"url"}`), which the page fetches when its `kn-rtc` knob is empty. The deployed page sets
+  `<meta name="kn-rtc">` (`ui/js/loader.js`, filled by `deploy/pages/stage.py` from
+  `KN_RTC_URL`, default `https://play.krunk.io/rtc`: role `kn_rtc` on kru); `off` disables
+  WebRTC. Page parameters:
+  `?rtc=<url>`, `?transport=rtc|wt|ws` (one transport only). Targets are allowlisted exactly
+  like net-bridge (`KRUNK_NATIVE_TARGETS`, `KRUNK_NATIVE_ALLOW_LOOPBACK`). Limits:
+  `KRUNK_NATIVE_MAX_PER_IP`, `_MAX_SESSIONS`, `_RTC_IDLE_TIMEOUT_MS` (30 s with no datagram
+  from the server), `_CONNECT_TIMEOUT_MS` (10 s for ICE, DTLS and the channel),
+  `_CLIENT_IP_HEADER` (`cf-connecting-ip` behind cloudflared). CORS: `-origins` /
+  `KRUNK_NATIVE_RTC_ORIGINS`. Deployment: `deploy/ansible` role `kn_rtc`.
+- Web, WebTransport: `make wt` runs the relay on UDP `:8443` (`WT_ADDR=`) and writes
   `dist/web/wt.json` (`{"url","certHash"}`). The page fetches that file and uses
   `serverCertificateHashes` for the self-signed dev certificate. That certificate is
   valid for 13 days and is regenerated at every start. On edge hosts, pass
@@ -88,5 +150,15 @@ silence, at most 192 KB of reliable data is in flight, and a peer that leaves mo
   TCP. `make test-net` runs the clean and lossy variants.
 - `tools/kref/wt-e2e.sh BUILD WEB_DIST`: server, relay, net-bridge and headless
   Chromium. It passes when the page connected over WebTransport.
+- `tools/kref/rtc-e2e.sh BUILD WEB_DIST [seconds]`: server, kn-rtc, net-bridge and headless
+  Chromium with `?transport=rtc`. It clicks to play, walks and shoots. It passes when the
+  session came up over WebRTC and the page got in game, and it reports knet RTT
+  (min/median/max), the HUD ping and the gateway's per-direction counters. `KN_RTC_DROP=15`
+  makes the gateway drop that percentage in each direction. `KN_UDP_LOSS="0 5 5"` adds the
+  server-side simulation, and `KN_TEST_MAP=` streams a custom map. Measured on loopback:
+  knet RTT median 2 ms. With 15% drop each way plus 5% dup and 5% reorder, a 146 KB custom map
+  streamed and the player got in game (RTT median 2 ms, max 6 ms). Against the deployed
+  gateway (browser -> kru -> angeles-11 edge), knet RTT median was 86 ms and the HUD ping 85 ms.
+  Over the WebSocket bridge on the same path, the HUD ping was about 100 ms.
 - Loss simulation (on the receive side, off by default) uses `KRUNKNATIVE_NET_DROP`,
   `_DUP` and `_REORDER` (percent), and works in server_bin and client_bin.

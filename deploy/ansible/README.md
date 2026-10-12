@@ -4,12 +4,12 @@ Ansible for the KrunkNative central node (`kru`) and the edge game servers.
 
 | playbook | hosts | what |
 | --- | --- | --- |
-| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, net-bridge :8084 (`play.krunk.io`), `/opt/krunknative` clone |
+| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), `/opt/krunknative` clone |
 | `edges.yml` | `edges` | host firewall drop-in (game ports), user `kn`, `server_bin` x (vcpus-1, min 1), `<edge>-<n>.krunk.io` DNS |
 | `firewall.yml` | `edges` | only the host firewall (vendored `edge_firewall` role), see [Edge firewall](#edge-firewall) |
 | `site.yml` | all | both |
 
-Tags: `user openresty repo release brain web bridge gameserver dns firewall`.
+Tags: `user openresty repo release brain web bridge rtc gameserver dns firewall`.
 
 Routing on kru (Cloudflare tunnel ingress, managed in Cloudflare): `assets.krunk.io -> :8081`,
 `matchmaker.krunk.io -> :8082`, `coordinator.krunk.io -> :8083`, `play.krunk.io -> :8084` (the
@@ -89,6 +89,51 @@ curl https://play.krunk.io/healthz           # {"ok":true,"sessions":..,"nativeC
 The edges see every bridged player as kru's address (5.188.124.56): their server_bin only honours
 the bridge's FORWARDED frame from loopback, so the bridge sends it only to loopback targets. An
 IP ban on an edge would therefore hit all web players; ban by account instead.
+
+## WebRTC gateway (play.krunk.io/rtc)
+
+The web client's preferred transport (doc/transport.md "Web transports"): knet datagrams over
+an unordered, unreliable RTCDataChannel to `net-bridge/rtc` (`kn-rtc`, Go + pion/webrtc,
+pinned in its go.mod/go.sum), which relays every message 1:1 to the edge game server's UDP
+port. Role `kn_rtc` (tag `rtc`; `kn_rtc_enabled: false` stops and disables the unit and leaves
+the tunnel alone):
+
+- Signaling: `POST https://play.krunk.io/rtc?target=<edge>-<n>.krunk.io:<port>` with the SDP
+  offer, answered with the SDP answer. The request goes Cloudflare proxy -> tunnel ->
+  `127.0.0.1:8085`. The tunnel ingress gets one path rule, `play.krunk.io` + `^/rtc(/|$)` ->
+  `http://localhost:8085`, inserted just before the `play.krunk.io` -> :8084 bridge rule. Every
+  other rule is kept, and kn_bridge's ingress task leaves path rules alone. The same
+  `CF_API_TOKEN` / `CF_ACCOUNT_ID` are needed as for kn_bridge; without them the step is skipped.
+- Media: ICE-lite plus DTLS/SCTP straight to `5.188.124.56:21100/udp` (`kn_rtc_public_ip`,
+  `kn_rtc_ice_port`). This is one UDP port for every session (ICE UDP mux), bound to that
+  address only. The role asserts that the address is on the host. No certificate is needed and
+  no STUN/TURN: the gateway has a public address, and browsers behind any NAT reach it.
+- `kn-rtc.service`: user `kn`, kn_brain hardening, plus `AF_NETLINK` (pion lists the
+  interfaces). The static binary is built on the controller (`go build`, CGO off, reproducible)
+  into `/opt/krunknative-rtc/kn-rtc`. Settings are in `/etc/krunknative/rtc.env` (root:kn 0640,
+  no secrets).
+- Allowlist and limits mirror kn_bridge: the edges by name and IP, ports 21015-21025, no
+  loopback and no default target. Also 8 sessions per `CF-Connecting-IP`, 1024 in total, 10 s
+  for ICE + DTLS + the channel, and 30 s without a datagram from the edge. CORS and Origin are
+  limited to `kn_web_origins`.
+- Host firewall: kru's nftables is Debian's default accept-all ruleset (not managed here), so
+  no rule is needed on the host.
+- Upstream firewall: kru is CT 120 on the Proxmox host `meal`, whose PVE firewall rejects
+  inbound by default. `/etc/pve/firewall/120.fw` carries `IN ACCEPT -p udp -dport 21100`
+  (added 2026-10-11, not managed here). Moving the port means changing that rule too. To
+  check from outside, send UDP to another port and watch `nstat -az UdpNoPorts` on kru.
+
+```sh
+set -a; . ~/.config/kn-secrets/cloudflare.env; set +a
+ansible-playbook central.yml --tags rtc --check --diff
+ansible-playbook central.yml --tags rtc
+ssh kru journalctl -u kn-rtc -f     # one line per session: client -> edge, close reason, datagram counters
+curl https://play.krunk.io/rtc -X OPTIONS -H 'Origin: https://krunk.io' -i   # 204 + CORS headers
+```
+
+The edges see WebRTC players as kru's address, as with the bridge (forwarded addresses are
+trusted from loopback only). Phase 2, a gateway on each edge, removes both that and the extra
+hop (doc/transport.md).
 
 ## Edge firewall
 

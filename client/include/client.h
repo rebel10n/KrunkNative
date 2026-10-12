@@ -596,7 +596,16 @@ int net_web_connect(Client*); // WebSocket transport (net_web.c)
 void net_web_target_url(char *out, size_t size, const char *host, int port); // bridge URL for host:port
 void net_web_disconnect(Client*);
 void net_web_request_reconnect(Client*);
-// WebTransport + knet (net_wt.c): tried by net_web_connect before the WebSocket.
+// knet over a browser datagram transport (net_wt.c), tried by net_web_connect before the
+// WebSocket: WebRTC DataChannel (net_rtc.c) first, then WebTransport (net_wt.c).
+typedef struct {
+    const char *name;                            // "webrtc" / "webtransport" (logs, stats)
+    int (*wanted)(void);                         // configured for this page and supported by the browser
+    void (*open)(const char *target, int gen);   // async; reports through kn_dg_on_open/_datagram/_close(gen)
+    void (*send)(const uint8_t *data, int length);
+    void (*close)(void);
+} NetDgramBackend;
+extern const NetDgramBackend net_rtc_backend;
 int net_wt_connect(Client*);
 int net_wt_active(void);
 int net_wt_busy(void);
