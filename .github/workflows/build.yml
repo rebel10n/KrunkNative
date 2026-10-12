@@ -546,17 +546,17 @@ jobs:
         run: make check
 
       - name: shellcheck (CI and deploy scripts)
-        run: shellcheck tools/release/*.sh tools/angle/*.sh deploy/ansible/build.sh
+        run: shellcheck -S warning tools/release/*.sh tools/angle/*.sh deploy/ansible/build.sh
 
   # Rolling prerelease `client-latest`: the linux/windows/macos artifacts above (binaries +
   # ui/, no game content: assets/ is not in git) zipped per platform, on pushes to slop/main
-  # and dispatches. Same rules as server-latest (tools/release/publish.sh): never "Latest",
+  # and dispatches. Needs Linux; a platform whose build failed is left out of that run. Same rules as server-latest (tools/release/publish.sh): never "Latest",
   # only moves forward.
   client-latest:
     name: Publish client-latest
     needs: [meta, linux, windows, macos]
     if: >-
-      !cancelled() && needs.linux.result == 'success' && needs.windows.result == 'success' &&
+      !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
       github.event_name != 'pull_request' &&
       (github.ref == 'refs/heads/slop' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest

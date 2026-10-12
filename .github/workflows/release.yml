@@ -255,9 +255,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # server-latest publishes once the Linux builds are in: a platform whose build failed is left
+  # out of this run (its old asset is removed, no mixed versions) and named in the notes.
+  # server-v* releases need every platform.
   publish:
     name: Publish ${{ needs.meta.outputs.tag }}
     needs: [meta, linux, windows, macos]
+    if: >-
+      !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
+      (needs.meta.outputs.tag == 'server-latest' || (needs.windows.result == 'success' && needs.macos.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release create/upload, moving the server-latest tag
@@ -297,7 +303,10 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/$GH_REPO/releases/download/$TAG"
-          row() { echo "| $1 | [$2]($base/$2) | [sha256]($base/$2.sha256) |"; }
+          row() {
+            if [ -f "release-assets/$2" ]; then echo "| $1 | [$2]($base/$2) | [sha256]($base/$2.sha256) |"
+            else echo "| $1 | not built in this run ([build failed]($RUN_URL)) | |"; fi
+          }
           {
             if [ "$TAG" = server-latest ]; then
               echo "Rolling build of the KrunkNative dedicated server, replaced on every push to \`slop\`/\`main\`. Servers listed in the server browser that run an older build or protocol show as **Outdated**."
