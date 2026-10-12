@@ -309,6 +309,39 @@ for tag, (sw, sh) in SPIN_SIZES:
                              name="Player", account=season_account("free")), "frames": 3,
                "note": "Store prize wheel (Starter): the won item's reveal, %dx%d" % (sw, sh)}, regs)
 
+# profile-layout: the signed-in Profile window (showWindow(5), windows[4].gen(): 1280 px wide when
+# signed in, 955 px for the guest form) with a long name, a clan and a high level, at the menu
+# sizes. capture-v7.js seasonWin('win-profile-acc-*', 5, 'profile') hands v7 the same account.
+PROFILE_ACCOUNT = {"name": "xXLongPlayerNameXx", "clan": "KRUNK", "score": 12500000,
+                   "stats": {"s": 50000, "h": 21000, "hs": 3000, "c0": 40000}}
+# rows of the General Stats view in #menuWindow's own pixels at 1280x720 (764 px wide there),
+# measured on the 1280 reference; scaled by the window's width at the other sizes
+PROFILE_ROWS = [
+    ("profile-tabs", 8, 58, "home / Friends / Partner / Settings / promo: KrunkNative has no Connections tab "
+                            "(window.canConnectExternalAccounts, Twitch / Metamask)", True),
+    ("account", 62, 160, "Your Account: the picture beside the Name / Clan / Level box (the clipped header of the bug)", False),
+    ("stats-header", 224, 68, "Your Stats and the XP bar", False),
+    ("stat-tabs", 292, 36, "the stat tabs: KrunkNative adds Medals (kn_brain medal counts)", True),
+    ("stat-grid", 328, 126, "General Stats: the .pSt cards", False),
+    ("logout", 460, 42, "Logout / Logout of all Sessions", False),
+]
+for tag, (w, h) in {"1280": (1280, 720), "1920": (1920, 1080), "1024": (1024, 768)}.items():
+    name = "win-profile-acc-" + tag
+    rc = rects("windows/" + name)
+    regs = [r for r in chrome(rc, w, h, dimmed=True) if r["name"] in ("menu-items", "logo")]
+    x, y, mw, _ = rc["menuWindow"]
+    for r in regs:  # the logo runs behind the window's tab row (compared as profile-tabs): stop above it
+        if r["name"] == "logo" and r["rect"][1] + r["rect"][3] > y - 2:
+            r["rect"][3] = y - 2 - r["rect"][1]
+    k = mw / 764.0
+    for rname, ry, rh, note, skip in PROFILE_ROWS:
+        regs.append(R(rname, pad([x + 6 * k, y + ry * k, mw - 12 * k, rh * k], 2, w, h), "text", note, skip=skip))
+    st = dict(scen["menu-1280"]["state"], window=5, name=PROFILE_ACCOUNT["name"])
+    st["account"] = dict(season_account("free"), **PROFILE_ACCOUNT)
+    add(name, {"ref": "%s/windows/%s.png" % (REF, name), "size": [w, h], "background": MENU_BG, "state": st, "frames": 3,
+               "note": "Profile, signed in at %dx%d: long name, clan, level 106 (the window is 1280 px wide like v7's)" % (w, h)},
+        regs)
+
 # ------------------------------------------------------------------------ in-game
 # In-game references are v7's sandbox (Free for All on Kanji, local player "Local User") with the
 # 3D canvas hidden over flat black, so the render compares over the same flat black. The

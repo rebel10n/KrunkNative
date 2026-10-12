@@ -1292,19 +1292,19 @@ static void xp_bar_text(char *out, const size_t n) {
     snprintf(out, n, "%d / %d", (int) (g_acc.score - m), (int) (pow((g_acc.level + 1) / RANK_VAR, 2) - m));
 }
 
-// UTILS.commaFloat(v): thousands separators, the fraction kept
+// UTILS.commaFloat(v.toFixed(decimals)): thousands separators on the integer part, the
+// toFixed fraction kept as is (v7 passes the toFixed string: SPK "12,500,000.00", KDR "0.0000")
 static void comma_float(char *out, const size_t n, const double v, const int decimals) {
-    char whole[32], frac[16] = "";
-    comma_number(whole, sizeof(whole), v < 0 ? -floor(-v) : floor(v));
-    if (decimals > 0) {
-        char tmp[32];
-        snprintf(tmp, sizeof(tmp), "%.*f", decimals, fabs(v) - floor(fabs(v)));
-        snprintf(frac, sizeof(frac), "%s", tmp + 1); // ".1234"
-        size_t len = strlen(frac); // JS number -> string: no trailing zeros
-        while (len > 1 && frac[len - 1] == '0') frac[--len] = 0;
-        if (len == 1) frac[0] = 0;
+    char fixed[64], whole[48];
+    snprintf(fixed, sizeof(fixed), "%.*f", decimals > 0 ? decimals : 0, v);
+    char *dot = strchr(fixed, '.');
+    if (dot) *dot = 0;
+    comma_number(whole, sizeof(whole), strtod(fixed, NULL));
+    if (fixed[0] == '-' && whole[0] != '-') { // -0.5 -> "-0"
+        memmove(whole + 1, whole, strlen(whole) + 1);
+        whole[0] = '-';
     }
-    snprintf(out, n, "%s%s", whole, frac);
+    snprintf(out, n, "%s%s%s", whole, dot ? "." : "", dot ? dot + 1 : "");
 }
 
 static void pst(StrBuf *sb, const char *label, const char *value) {
@@ -1366,11 +1366,11 @@ static char *gen_account(void) {
         pst_num(&sb, "Junk", 0, 0);
         pst(&sb, "Inventory", " ~0");
         pst_num(&sb, "Score", g_acc.score, 0);
-        pst_num(&sb, "SPK", round(g_acc.score / fmax(g_acc.kills, 1) * 100) / 100, 2);
+        pst_num(&sb, "SPK", g_acc.score / fmax(g_acc.kills, 1), 2);
         pst_num(&sb, "Kills", g_acc.kills, 0);
         pst_num(&sb, "Deaths", g_acc.deaths, 0);
-        pst_num(&sb, "KDR", round(g_acc.kills / fmax(g_acc.deaths, 1) * 10000) / 10000, 4);
-        pst_num(&sb, "KPG", round(g_acc.kills / fmax(g_acc.games, 1) * 10000) / 10000, 4);
+        pst_num(&sb, "KDR", g_acc.kills / fmax(g_acc.deaths, 1), 4);
+        pst_num(&sb, "KPG", g_acc.kills / fmax(g_acc.games, 1), 4);
         pst_num(&sb, "Games", g_acc.games, 0);
         snprintf(a, sizeof(a), "%g", round(g_acc.wins / fmax(losses, 1) * 1000) / 1000);
         pst(&sb, "W/L", a);
@@ -1960,7 +1960,16 @@ char *account_window_gen(const int id, const char **header) {
 }
 
 void account_window_post(const int id) {
-    if (id != 5 || backend_available() != 1 || g_logged_in) return;
+    if (id != 5) return;
+    if (g_logged_in && (backend_available() == 1 || g_scenario)) {
+        // windows[4].gen(): this.width = account ? 1280 : 955. The captured style is the guest's
+        // 955 px, too narrow for the signed-in profile (its Name / Clan / Level box is 1004 px
+        // beside the 181 px picture: it wrapped under it and its right column was clipped).
+        const HtmlElem mw = html_dom_by_id("menuWindow");
+        if (mw) html_dom_set_style(mw, "width", "1280px");
+        return;
+    }
+    if (backend_available() != 1 || g_logged_in) return;
     // v3.1.1 prefills the login form with getSavedVal("krunker_username")
     char name[64];
     storage_get("krunker_username", name, sizeof(name));

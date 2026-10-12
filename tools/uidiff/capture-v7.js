@@ -264,10 +264,14 @@ function seasonAccount(kind) {
   const acc = JSON.parse(fs.readFileSync(path.join(REPO, 'tools', 'uidiff', 'season_fixture.json'), 'utf8'));
   if (kind === 'vip') Object.assign(acc.battlepass.progress, { tier: 1, items_claimed: '20001,21001,21004' });
   if (kind === 'chal') { acc.battlepass.tab = 1; acc.challenges = acc.challenges.filter((x) => x.T !== 'weekly'); }
+  if (kind === 'profile') Object.assign(acc, PROFILE_ACCOUNT);
   return acc;
 }
+// profile-layout: the signed-in Profile window with a long name, a clan and a high level
+// (gen_scenarios.py PROFILE_ACCOUNT, the same overrides)
+const PROFILE_ACCOUNT = { name: 'xXLongPlayerNameXx', clan: 'KRUNK', score: 12500000, stats: { s: 50000, h: 21000, hs: 3000, c0: 40000 } };
 
-function seasonWin(name, window, kind) {
+function seasonWin(name, window, kind, opts) {
   scenario(name, 'windows', async (c) => {
     const acc = seasonAccount(kind), bp = acc.battlepass || {};
     const sc = { state: { window } };
@@ -289,12 +293,15 @@ function seasonWin(name, window, kind) {
       showWindow(${sc.state.window}, true); return 1; } catch (e) { return String(e.stack); } })()`);
     if (r !== 1) console.error('[capture-v7] ' + name + ': ' + r);
     await settle(c, 1500);
-  });
+  }, opts);
 }
 seasonWin('win-battlepass', 6, 'free');
 seasonWin('win-battlepass-vip', 6, 'vip');
 seasonWin('win-battlepass-chal', 6, 'chal');
 seasonWin('win-challenges-acc', 33, 'free');
+// the Profile window (windows[4]: this.width = account ? 1280 : 955) at the menu sizes
+const PROFILE_SIZES = { '1280': [1280, 720], '1920': [1920, 1080], '1024': [1024, 768] };
+for (const [tag, size] of Object.entries(PROFILE_SIZES)) seasonWin('win-profile-acc-' + tag, 5, 'profile', { size });
 
 // in game
 async function hudBase(c) { await enterGame(c); await settle(c, 800); }
