@@ -186,6 +186,7 @@ void player_spawn(Player *player) {
     player->reload_timer = 0.0f;
 
     player_update_height(player);
+    player_movement_spawn(player); // WP-A: wall-jump limits and v7 movement state
     player_swap_weapon(player, 0, 1, 0, 0);
 
     // getSpawnPoint(player.team, player): every mode, offline and server, bots included.
@@ -540,72 +541,275 @@ void player_reset_feel(Player *player) {
     for (int i = 0; i < 4; i++) player->recoil_tween[i] = 0.0f;
 }
 
-void player_reset_step(Player *player, const int recon) {
-    if (!recon && player->render_you && player->velocity.y) player_feel_land(player);
-    if (!recon && player->velocity.y) player->land_events++; // resetStep: step_N at 0.7 (sound_events.c)
+// ---------------------------------------------------------------- v7.1.4 movement
+// Krunker v7.1.4 src/data/player.js procInputs (859-2012), players.js setOnGround / resetStep /
+// playerStep / jump / tryJump (24-32, 1612-1750) and data/movement.js[0] "Default" (dir / mov /
+// vel). v7 values are per ms; KrunkNative keeps delta in seconds and its game_constants scaled
+// by 1000, so the code below converts with `dt` (the frame in ms) where v7 mixes per-ms knobs.
+// doc/v7/player-viewer.md 1.1.7 lists every change from v3.1.1 this region carries.
 
-    // TODO: landing step sound (sound_events)
+#define MOVEMENT_SLIDE_LOCK 0.1f          // canSlideT = 100 ms after a slide starts (resetStep)
+#define MOVEMENT_QUAD_SIZE 150.0f         // config.quadSize: the collision grid cell (MapManager)
+#define MOVEMENT_PAD_MIN_HALF_HEIGHT 3.0f // addPad: h = max(sy, 3) around the pad's y
+#define MOVEMENT_CYLINDER_STEP_EPSILON 0.00001f // cylinder step-up (v3.1.1: only when config.isComp)
 
-    if (!player->game->config.can_slide || player->game->mode->config.real_movement || !player->crouch_val || !player->can_slide) return;
-
-    player->can_slide = 0;
-
-    player->slide_timer =
-        game_constants.slide_time *
-        player->game->config.slide_time *
-        player->game->map->config.slide_time *
-        player->crouch_val
-    ;
-
-    const float slide_mlt = (
-        player->on_terrain ?
-        game_constants.player_terrain_slide_velocity_mlt :
-        game_constants.player_slide_velocity_mlt
-    ) * player->game->map->config.slide_accel;
-
-    player->velocity.x *= slide_mlt;
-    player->velocity.z *= slide_mlt;
+static const ClassConfig *movement_class(const Player *player) {
+    const Game *game = player->game;
+    const size_t count = game->class_count ? game->class_count : CLASS_COUNT;
+    const ClassConfig *classes = game->classes ? game->classes : g_classes;
+    if (player->class_index < 0 || (size_t) player->class_index >= count) return NULL;
+    return &classes[player->class_index];
 }
 
-int player_collides(Player *player, const Object *object, const float pad) {
-    switch (object->collision_type) {
-        case COLLISION_TYPE_NONE:
-            return 0;
-        case COLLISION_TYPE_BOX: {
-            const int in_x = player->position.x + player->scale > object->position.x - (object->scale.x * 0.5f + pad) && player->position.x - player->scale < object->position.x + (object->scale.x * 0.5f + pad);
-            const int in_z = player->position.z + player->scale > object->position.z - (object->scale.z * 0.5f + pad) && player->position.z - player->scale < object->position.z + (object->scale.z * 0.5f + pad);
-            const int in_y = player->position.y + player->height >= object->position.y && player->position.y <= object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
+// this.config: the player's class movement knobs (zeros read as the v7 defaults)
+static const ClassMovement *movement_knobs(const Player *player) {
+    static const ClassMovement none = {0};
+    const ClassConfig *class_config = movement_class(player);
+    return class_config ? &class_config->movement : &none;
+}
 
-            return in_x && in_y && in_z;
+// game.mode movement keys (gameModes/*.js: gravMlt, jumpMlt, groundAccel, frSlid, noSliding,
+// noWallJ, wallJ / wallJM / wallJD / wallJV / wallJYV). Multipliers read 1 when unset.
+typedef struct {
+    float gravity_mlt, jump_mlt, ground_accel;     // gravMlt, jumpMlt, groundAccel (1 = none)
+    float wall_jump_decel, wall_jump_vel;          // wallJD, wallJV: 0 = the class value
+    float wall_jump_y_vel;                         // wallJYV (1)
+    int wall_jump_set, wall_jump, wall_jump_max;   // wallJ / wallJM
+    int free_slide, no_sliding, no_wall_jump;      // frSlid, noSliding, noWallJ
+} MovementModeKeys;
+
+static MovementModeKeys movement_mode(const Player *player) {
+    // TODO (WP-D): read the mode keys through modes.h's accessors when they land:
+    //   .gravity_mlt = mode_grav_mlt(game), .jump_mlt = mode_jump_mlt(game),
+    //   .ground_accel = mode_ground_accel(game), .free_slide = mode_fr_slid(game),
+    //   .no_sliding = mode_no_sliding(game), .no_wall_jump = mode_no_wall_jump(game), and
+    //   mode_wall_jump(game, &wall_jump, &wall_jump_max, &.wall_jump_decel, &.wall_jump_vel,
+    //   &.wall_jump_y_vel) setting .wall_jump_set / .wall_jump / .wall_jump_max.
+    // No mode KrunkNative ships today sets any of them.
+    (void) player;
+    const MovementModeKeys keys = {.gravity_mlt = 1.0f, .jump_mlt = 1.0f, .ground_accel = 1.0f, .wall_jump_y_vel = 1.0f};
+    return keys;
+}
+
+static int movement_real(const Player *player) {
+    return player->game->mode && player->game->mode->config.real_movement;
+}
+
+#define MOVEMENT_OR(value, def) ((value) ? (value) : (def))
+
+// The double v7 computes for a value KrunkNative keeps as a float: table values and crouchVal /
+// yaw / pitch are decimals with at most 6 digits, so rounding gives JS's exact double back.
+// Used where v7's exact double arithmetic decides a tick (the slide's last tick, a move
+// direction 90 degrees off the look direction).
+static double movement_js(const float value) {
+    return round((double) value * 1e6) / 1e6;
+}
+
+// slideTimer: the physics counts v7's double ms (slide_ms); slide_timer (s) mirrors it for the
+// network, sounds and UI, and a slide_timer written elsewhere (reconciliation) wins.
+static double movement_slide_ms(Player *player) {
+    if ((float) (player->slide_ms / 1000.0) != player->slide_timer) player->slide_ms = (double) player->slide_timer * 1000.0;
+    return player->slide_ms;
+}
+
+static void movement_set_slide_ms(Player *player, const double ms) {
+    player->slide_ms = ms;
+    player->slide_timer = (float) (ms / 1000.0);
+}
+
+// this.config.hbS / hbH: the class pads every collision test adds to the player's box
+static float movement_pad_w(const Player *player) {
+    const ClassConfig *class_config = movement_class(player);
+    return class_config ? class_config->hitbox_pad_w : 0.0f;
+}
+
+static float movement_pad_h(const Player *player) {
+    const ClassConfig *class_config = movement_class(player);
+    return class_config ? class_config->hitbox_pad_h : 0.0f;
+}
+
+// wallJP: config.wallJP, 0 in noWallJ modes
+static float movement_wall_jump_power(const Player *player) {
+    return movement_mode(player).no_wall_jump ? 0.0f : player->game->config.wall_jump;
+}
+
+// setClass: wallJump = mode.wallJ ?? class wallJ, wallJumpMax = mode.wallJM ?? class wallJM
+void player_movement_spawn(Player *player) {
+    const ClassConfig *class_config = movement_class(player);
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode = &mode_keys;
+    player->wall_jump = mode->wall_jump_set ? mode->wall_jump : class_config && class_config->wall_jump;
+    player->wall_jump_max = mode->wall_jump_set ? mode->wall_jump_max : class_config ? class_config->wall_jump_max : 0;
+    // Intentional difference: v7 keeps wallJumpC across a death until the next landing, so a life
+    // can start with wall jumps already spent; a new life starts with all of them.
+    player->wall_jump_count = 0;
+    player->can_slide_timer = 0.0f;
+    player->on_pad = player->was_on_pad = 0;
+    player->was_on_ground = 1;
+    player->stop_crouch = player->was_stop_crouch = 0;
+    player->height_old = player->height;
+}
+
+// A map object's collision box in v7 terms: centre x/z, half width w / length l, bottom and top.
+// KrunkNative objects keep the map's bottom-centred p and full size s. v7 sizes a jump pad from
+// the map (addPad: w = sx/2, l = sz/2, y = p.y, h = max(sy, 3), so the box spans p.y -+ h; v3.1.1
+// used fixed 5 x 1 x 5 half extents) and a cylinder's radius is min(sx, sz) / 2.
+typedef struct {
+    float x, z, w, l, bottom, top;
+} MovementBox;
+
+static void movement_box(const Object *object, MovementBox *box) {
+    box->x = object->position.x;
+    box->z = object->position.z;
+    if (object->jump_pad) {
+        const float h = MAX(object->scale.y, MOVEMENT_PAD_MIN_HALF_HEIGHT);
+        box->w = object->scale.x * 0.5f;
+        box->l = object->scale.z * 0.5f;
+        box->bottom = object->position.y - h;
+        box->top = object->position.y + h;
+    } else {
+        if (object->collision_type == COLLISION_TYPE_CYLINDER) {
+            box->w = box->l = MIN(object->scale.x, object->scale.z) * 0.5f;
+        } else {
+            box->w = object->scale.x * 0.5f;
+            box->l = object->scale.z * 0.5f;
         }
-        case COLLISION_TYPE_CYLINDER: {
-            // players.js collides (collT "cylinder"): y <= top && y + height >= bottom, inclusive like
-            // the box test. A strict top bound drops a player standing flush on the cylinder (y == top)
-            // out of the collision every other tick: onGround flickers, resetStep (step sound) fires
-            // at 30 Hz and air friction makes the player glide (Soul Sanctum's spawn disk).
-            const int in_y = player->position.y + player->height >= object->position.y && player->position.y <= object->position.y + object->scale.y + (player->game->config.disable_borders || !object->is_border ? 0.0f : game_constants.border_height);
-            return in_y && hypotf(player->position.x - object->position.x, player->position.z - object->position.z) <= object->scale.x * 0.5f + player->scale + pad;
-        }
+        box->bottom = object->position.y;
+        box->top = object->position.y + object->scale.y;
+    }
+}
+
+static float movement_border(const Player *player, const Object *object) {
+    return object->is_border && !player->game->config.disable_borders ? game_constants.border_height : 0.0f;
+}
+
+// MapManager.getGridArrays(x, y, z): the player only tests the objects registered in its grid
+// cell. applyToQuad registers an object in every config.quadSize cell its box reaches, inflated
+// by playerScale (config, not the class pad) + 0.1 sideways, playerHeight + 0.1 vertically and
+// borderH above a border (disableB or not).
+static int movement_in_cell(const int cell[3], const MovementBox *box, const Object *object) {
+    const float half_h = (box->top - box->bottom) * 0.5f, centre_y = (box->top + box->bottom) * 0.5f;
+    const float ex = box->w + game_constants.player_scale + 0.1f, ez = box->l + game_constants.player_scale + 0.1f;
+    const float ey = half_h + game_constants.player_height + 0.1f;
+    const float border = object->is_border ? game_constants.border_height : 0.0f;
+    return cell[0] >= (int) floorf((box->x - ex) / MOVEMENT_QUAD_SIZE) && cell[0] <= (int) floorf((box->x + ex) / MOVEMENT_QUAD_SIZE) &&
+           cell[2] >= (int) floorf((box->z - ez) / MOVEMENT_QUAD_SIZE) && cell[2] <= (int) floorf((box->z + ez) / MOVEMENT_QUAD_SIZE) &&
+           cell[1] >= (int) floorf((centre_y - ey) / MOVEMENT_QUAD_SIZE) && cell[1] <= (int) floorf((centre_y + ey + border) / MOVEMENT_QUAD_SIZE);
+}
+
+// collidesE(obj, scale + hbS, collPad): an inclusive box test for every kind of object
+// (cylinders too), reaching borderH above a border.
+static int movement_collides_padded(const Player *player, const Object *object, const MovementBox *box, const float pad) {
+    const float s = player->scale + movement_pad_w(player);
+    const vec3 p = player->position;
+    return p.x - s <= box->x + box->w + pad && p.x + s >= box->x - box->w - pad &&
+           p.z - s <= box->z + box->l + pad && p.z + s >= box->z - box->l - pad &&
+           p.y <= box->top + movement_border(player, object) && p.y + movement_pad_h(player) + player->height >= box->bottom;
+}
+
+// collides(obj): cylinders by distance (no border, no hbH), boxes strictly inside sideways.
+static int movement_collides(const Player *player, const Object *object, const MovementBox *box) {
+    const float s = player->scale + movement_pad_w(player);
+    const vec3 p = player->position;
+    if (object->collision_type == COLLISION_TYPE_CYLINDER) {
+        if (!(p.y <= box->top && p.y + player->height >= box->bottom)) return 0;
+        return hypotf(p.x - box->x, p.z - box->z) <= box->w + s;
+    }
+    return p.x - s < box->x + box->w && p.x + s > box->x - box->w && p.z - s < box->z + box->l && p.z + s > box->z - box->l &&
+           p.y <= box->top + movement_border(player, object) && p.y + movement_pad_h(player) + player->height >= box->bottom;
+}
+
+// Player.collides / collidesE for code outside the movement loop (interact prompts, sounds,
+// modes): pad > 0 is the padded inclusive test, 0 the solid one.
+int player_collides(Player *player, const Object *object, const float pad) {
+    if (object->collision_type == COLLISION_TYPE_NONE) return 0;
+    MovementBox box;
+    movement_box(object, &box);
+    return pad > 0.0f ? movement_collides_padded(player, object, &box, pad) : movement_collides(player, object, &box);
+}
+
+// players.setOnGround (lastGround is only read by v7 modes KrunkNative does not have yet)
+static void movement_set_on_ground(Player *player) {
+    player->on_ground = 1;
+}
+
+// players.resetStep: a landing (only from the air, and only moving down: v3.1.1 also slid when a
+// grounded player stepped down a ramp or ledge) resets the wall-jump count, plays the land feel
+// and starts a slide when crouched, then locks new slides for 100 ms. Fall damage is the
+// authority's (players.js isServer).
+void player_reset_step(Player *player, const int recon) {
+    if (player->was_on_ground || !(player->last_position.y > player->position.y)) return;
+
+    const float land_velocity = player->velocity.y;
+    player->wall_jump_count = 0;
+
+    if (!recon && player->render_you && land_velocity) player_feel_land(player);
+    if (!recon && land_velocity) player->land_events++; // step_N at 0.7 (sound_events.c)
+
+    Game *game = player->game;
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode = &mode_keys;
+    const int no_sliding = mode->no_sliding && !player_has_perk(player, PERK_SLIDE) && !player_has_perk(player, PERK_SLIDE_EXPLODE);
+    const int slide = !movement_real(player) && player->crouch_val && player->can_slide && player->can_slide_timer <= 0.0f &&
+                      game->config.can_slide && !no_sliding;
+
+    if (slide) {
+        const ClassConfig *class_config = movement_class(player);
+        player->can_slide = 0;
+        player->can_slide_timer = MOVEMENT_SLIDE_LOCK;
+        // config.slideTime * (slidTime || 1) * (slT || 1) * crouchVal, in v7's double ms
+        movement_set_slide_ms(player, movement_js(game_constants.slide_time * 1000.0f) * movement_js(MOVEMENT_OR(game->config.slide_time, 1.0f)) *
+                                      movement_js(class_config ? MOVEMENT_OR(class_config->slide_time_mlt, 1.0f) : 1.0f) * movement_js(player->crouch_val));
+        // Intentional difference: v7 reads the players manager's onTerrain here (always undefined,
+        // so terrain never weakens the slide boost); this reads the player's.
+        float slide_mlt = (player->on_terrain ? game_constants.player_terrain_slide_velocity_mlt : game_constants.player_slide_velocity_mlt) *
+                          (class_config ? MOVEMENT_OR(class_config->slide_accel_mlt, 1.0f) : 1.0f);
+        slide_mlt *= game->config.slide_speed; // game.config.slidSpd || 0
+        player->velocity.x *= slide_mlt;
+        player->velocity.z *= slide_mlt;
     }
 
-    return 0;
+    if (game_is_authority(game) && game->config.fall_damage > 0.0f) {
+        float damage = fabsf(land_velocity);
+        if (damage > game->config.fall_damage_threshold) {
+            damage *= 10.0f * game->config.fall_damage;
+            damage = floorf(damage * 10.0f + 0.5f) / 10.0f; // changeHealth: dmg.round(1)
+            if (player_change_health(player, NULL, damage, 0)) player_kill(player, NULL, NULL, 0);
+        }
+    }
 }
 
+// The walls a ladder climb or wall jump can use (map.c wall_jumpable = !notWallJ) and the solid
+// objects of the v7 collision chain.
 void player_do_map_collisions(Player *player, const Input *input, const float move_dir, const int can_jump, const float delta, const int recon) {
-    float *max_ramp_height = NULL;
+    Game *game = player->game;
+    const float dt = delta * 1000.0f;
+    const float pad_w = movement_pad_w(player), pad_h = movement_pad_h(player);
+    const float s = player->scale + pad_w;
+    const int has_move = input->move_dir >= 0;
+    const ClassMovement *knobs = movement_knobs(player);
+    player->was_on_ground = can_jump ? 1 : 0;
 
-    // TODO: grid arrays (perf)
-    for (size_t i = 0; i < player->game->map->object_count; i++) {
-        const Object *object = player->game->map->objects[i];
-        const int collides_padded = player_collides(player, object, game_constants.collision_padding);
+    const int cell[3] = {
+        (int) floorf(player->position.x / MOVEMENT_QUAD_SIZE),
+        (int) floorf(player->position.y / MOVEMENT_QUAD_SIZE),
+        (int) floorf(player->position.z / MOVEMENT_QUAD_SIZE),
+    };
+    int has_ramp_height = 0, side_pushed = 0;
+    float max_ramp_height = 0.0f;
 
-        if (!object->active || !collides_padded) {
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *object = game->map->objects[i];
+        MovementBox box;
+        movement_box(object, &box);
+        const float top = box.top, bottom = box.bottom;
+
+        if (!object->active || object->collision_type == COLLISION_TYPE_NONE || !movement_in_cell(cell, &box, object) ||
+            !movement_collides_padded(player, object, &box, game_constants.collision_padding)) {
             if (player->in_object == (int) i + 1) player->in_object = 0; // left the onEnter trigger
             continue;
         }
 
-        const int collides = player_collides(player, object, 0.0f);
-        Game *game = player->game;
         const int event = game_object_event(object);
 
         // (the gate / bank / terminal interact prompts: game_interact_prompt, shared/src/interact.c)
@@ -646,12 +850,21 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
         }
 
         if (object->jump_pad) {
-            const float bounce_vel = object->bounce * 0.1f * (player->crouch_val == 1.0f && object->crouch ? 0.5f : 1.0f);
-
-            player->velocity.y = bounce_vel;
+            // v7 jump pads push along d: 0 up, 1 down, 2 +x, 4 -x, 3 +z, 5 -z (the pitch/yaw maths
+            // of player.js, evaluated). A horizontal pad only writes the non-zero axis (x pads also
+            // zero z: v7 writes bounce * cos(PI/2) there); bm 0 pads do nothing sideways.
+            const float bounce = object->bounce * 0.1f / (player->crouch_val == 1.0f && object->crouch ? 2.0f : 1.0f);
+            switch (object->direction) {
+                case 1: player->velocity.y = -bounce; break;
+                case 2: if (bounce) { player->velocity.x = bounce; player->velocity.z = 0.0f; } break;
+                case 3: if (bounce) player->velocity.z = bounce; break;
+                case 4: if (bounce) { player->velocity.x = -bounce; player->velocity.z = 0.0f; } break;
+                case 5: if (bounce) player->velocity.z = -bounce; break;
+                default: player->velocity.y = bounce; break;
+            }
             player->on_ground = 0;
-
-            // TODO: bounce sound
+            // TODO: bounce sound (bounce_0 once per pad entry: !was_on_pad)
+            player->on_pad = 1;
         } else if (object->score_zone) {
             // TODO: score
         } else if (
@@ -661,12 +874,12 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             (!object->team_zone || player->game->mode->config.teams && object->team != player->team)
         ) {
             if (object->teleporter) {
-                game_check_teleport(player->game, player, (Object *) object);
+                game_check_teleport(game, player, (Object *) object);
                 continue;
             }
 
             if (object->checkpoint) {
-                game_set_checkpoint(player->game, player, (Object *) object);
+                game_set_checkpoint(game, player, (Object *) object);
                 continue;
             }
 
@@ -683,64 +896,84 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             // A TRIGGER without onEnter / onInteract is a solid block (objects.js addTrigger:
             // Krunker's `trigger` flag in this chain is the CTF flag zone, not this prefab).
 
-            if (object->kill && !player->god_mode) {
+            if (object->kill) {
                 // TODO: reset flag
-                player_kill(player, NULL, NULL, 0);
+                if (!player->god_mode) player_kill(player, NULL, NULL, 0);
                 continue;
             }
 
             if (object->ladder) {
-                if (player->position.y >= object->position.y + object->scale.y || player->crouch_val) continue;
+                // below the top, not crouched, not grappling (no grapple yet). v7 dropped the
+                // bottom clamp: climbing down carries on below the ladder.
+                if (!(player->position.y < top) || player->crouch_val != 0.0f) continue;
 
                 player->velocity.y = 0.0f;
                 player->on_ladder = 1;
                 player->on_terrain = 0;
 
-                // TODO: step src
-
-                if (input->move_dir >= 0) {
+                if (has_move) {
                     const float ladder_dir = (float) M_PI * 0.5f * (float) object->direction;
                     const float dir = (fabsf(normalize_angle(ladder_dir - (move_dir - player->direction.y))) - (float) M_PI * 0.5f) / ((float) M_PI * 0.5f);
 
                     if (dir > 0.0f) {
-                        player->position.y += game_constants.ladder_speed * player->game->map->config.ladder_accel * player->weapon->speed_mlt * dir * delta;
-                        player->position.y = CLAMP(player->position.y, object->position.y, object->position.y + object->scale.y);
+                        player->position.y += game_constants.ladder_speed * MOVEMENT_OR(knobs->ladder_accel, 1.0f) * player->weapon->speed_mlt * dir * delta;
+                        if (player->position.y >= top) player->position.y = top;
                     }
                 }
 
                 continue;
             }
 
-            if (!object->ramp && object->collision_type != COLLISION_TYPE_CYLINDER && !can_jump && object->position.y + object->scale.y - player->position.y > game_constants.climb_height && object->wall_jumpable) {
-                if (player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f - game_constants.collision_padding) {
+            if (object->no_player_col) continue; // noPCol: walk-through
+
+            // ropeLadder: climbable from any side, relative to the player's own facing; still solid
+            if (object->rope_ladder && player->position.y < top && player->crouch_val == 0.0f) {
+                player->velocity.y = 0.0f;
+                player->on_ladder = 1;
+                player->on_terrain = 0;
+                if (has_move) {
+                    const float facing = atan2f(cosf(player->direction.y), sinf(player->direction.y)); // getDir(sin, cos, 0, 0)
+                    const float dir = (fabsf(normalize_angle(facing - (move_dir - player->direction.y))) - (float) M_PI * 0.5f) / ((float) M_PI * 0.5f);
+                    if (dir > 0.0f) {
+                        player->position.y += game_constants.ladder_speed * MOVEMENT_OR(knobs->ladder_accel, 1.0f) * player->weapon->speed_mlt * dir * delta;
+                        if (player->position.y >= top) player->position.y = top;
+                    }
+                }
+            }
+
+            // Wall-jump surfaces: every solid but ramps and cylinders, unless notWallJ (wj)
+            // (v3.1.1: only blocks built wallJumpable), higher than climbHeight above the feet.
+            if (!object->ramp && object->collision_type != COLLISION_TYPE_CYLINDER && !can_jump && player->position.y < top &&
+                top - player->position.y > game_constants.climb_height && object->wall_jumpable) {
+                if (player->last_position.x - s >= box.x + box.w - game_constants.collision_padding) {
                     player->on_wall = 1;
-                } else if (player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f + game_constants.collision_padding) {
+                } else if (player->last_position.x + s <= box.x - box.w + game_constants.collision_padding) {
                     player->on_wall = 2;
-                } else if (player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f - game_constants.collision_padding) {
+                } else if (player->last_position.z - s >= box.z + box.l - game_constants.collision_padding) {
                     player->on_wall = 3;
-                } else if (player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f + game_constants.collision_padding) {
+                } else if (player->last_position.z + s <= box.z - box.l + game_constants.collision_padding) {
                     player->on_wall = 4;
                 }
             }
 
-            if (!collides) continue;
+            if (!movement_collides(player, object, &box)) continue;
 
             if (object->ramp) {
-                if (player->position.y >= object->position.y + object->scale.y) continue;
+                if (!(player->position.y < top)) continue;
 
                 const float ramp_direction = (float) M_PI * 0.5f * (float) object->direction;
-                const vec2 player_dir = {player->position.x + player->scale * cosf(ramp_direction), player->position.z + player->scale * sinf(ramp_direction)};
+                const vec2 player_dir = {player->position.x + s * cosf(ramp_direction), player->position.z + s * sinf(ramp_direction)};
 
                 const float progress = MAX(0.0f, MIN(1.0f, progress_on_line(object->ramp->start, object->ramp->end, player_dir)));
-                const float collision_height = object->position.y + (object->scale.y + 0.01f) * progress;
+                const float collision_height = bottom + (object->scale.y + 0.01f) * progress;
 
-                if (!max_ramp_height) {
-                    max_ramp_height = calloc(1, sizeof(float));
-                    if (max_ramp_height) *max_ramp_height = collision_height;
+                if (!has_ramp_height) {
+                    has_ramp_height = 1;
+                    max_ramp_height = collision_height;
                 }
 
-                if ((player->position.y <= collision_height || can_jump) && (!max_ramp_height || *max_ramp_height <= collision_height)) {
-                    if (max_ramp_height) *max_ramp_height = collision_height;
+                if ((player->position.y <= collision_height || can_jump) && max_ramp_height <= collision_height) {
+                    max_ramp_height = collision_height;
 
                     if (object->ramp->boost) {
                         player->position.y = collision_height;
@@ -752,19 +985,19 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                         player->velocity.z += boost_velocity * cosf(-ramp_direction + (float) M_PI * 0.5f) * cosf(boost_direction);
                         player->velocity.y += boost_velocity * sinf(boost_direction);
                     } else {
-                        if (player->last_position.y > player->position.y) player_reset_step(player, recon);
+                        player_reset_step(player, recon); // before the snap: lands only when the ramp is below the old y
 
                         player->position.y = collision_height;
                         player->velocity.y = 0.0f;
                         player->on_wall = 0;
-                        player->on_ground = 1;
+                        movement_set_on_ground(player);
                         player->on_terrain = 0;
 
                         if (!player->ramp_fix) player->ramp_fix = calloc(1, sizeof(float));
 
                         if (player->ramp_fix) {
                             player->on_ramp = 1;
-                            *player->ramp_fix = object->position.y + object->scale.y * roundf(progress);
+                            *player->ramp_fix = bottom + object->scale.y * roundf(progress);
                         }
                     }
                 }
@@ -773,40 +1006,46 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             }
 
             if (object->collision_type == COLLISION_TYPE_CYLINDER) {
-                int y_collision = 1;
+                int y_collision = 0;
 
-                if (player->last_position.y >= object->position.y + object->scale.y) {
-                    if (player->last_position.y > player->position.y) player_reset_step(player, recon);
-
-                    player->position.y = object->position.y + object->scale.y;
-                    player->velocity.y = 0.0f;
-                    player->on_ground = 1;
+                if (player->last_position.y >= top) {
+                    player->position.y = top;
+                    player_reset_step(player, recon);
+                    if (!player->was_on_pad) player->velocity.y = 0.0f;
+                    movement_set_on_ground(player);
                     player->on_terrain = 0;
-                } else if (player->last_position.y + player->height <= object->position.y) {
-                    player->position.y = object->position.y - player->height;
-                    player->velocity.y = 0.0f;
-                } else if (player->position.y < object->position.y + object->scale.y && object->position.y + object->scale.y - player->position.y <= game_constants.climb_height && player->last_position.y < object->position.y + object->scale.y && can_jump) {
-                    player->position.y += (object->position.y + object->scale.y - player->position.y) * 0.3f;
-                    player->on_ground = 1;
+                    y_collision = 1;
+                } else if (player->last_position.y + player->height + pad_h <= bottom) {
+                    player->position.y = bottom - player->height;
+                    if (!player->was_on_pad) player->velocity.y = 0.0f;
+                } else if (player->position.y < top && top - player->position.y <= game_constants.climb_height && player->last_position.y < top && can_jump) {
+                    player->position.y += (top - player->position.y) * 0.3f + MOVEMENT_CYLINDER_STEP_EPSILON;
+                    movement_set_on_ground(player);
                     player->on_terrain = 0;
+                    y_collision = 1;
                 } else {
-                    const float direction = atan2f(player->position.z - object->position.z, player->position.x - object->position.x);
+                    const float direction = atan2f(player->position.z - box.z, player->position.x - box.x);
 
-                    player->position.x = object->position.x + (object->scale.x * 0.5f + player->scale) * cosf(direction);
-                    player->position.z = object->position.z + (object->scale.x * 0.5f + player->scale) * sinf(direction);
+                    player->position.x = box.x + (box.w + s) * cosf(direction);
+                    player->position.z = box.z + (box.w + s) * sinf(direction);
 
-                    y_collision = 0;
+                    // a second side push in the same tick (another cylinder) stops the player
+                    if (side_pushed) {
+                        player->velocity.x = 0.0f;
+                        player->velocity.z = 0.0f;
+                    }
+                    side_pushed = 1;
                 }
 
                 if (y_collision) {
-                    const float direction = atan2f(player->position.z - object->position.z, player->position.x - object->position.x) - object->spin * delta * game_constants.disk_spin;
-                    const float distance = hypotf(player->position.x - object->position.x, player->position.z - object->position.z);
+                    const float direction = atan2f(player->position.z - box.z, player->position.x - box.x) - object->spin * delta * game_constants.disk_spin;
+                    const float distance = hypotf(player->position.x - box.x, player->position.z - box.z);
 
                     const float old_x = player->position.x;
                     const float old_z = player->position.z;
 
-                    player->position.x = object->position.x + distance * cosf(direction);
-                    player->position.z = object->position.z + distance * sinf(direction);
+                    player->position.x = box.x + distance * cosf(direction);
+                    player->position.z = box.z + distance * sinf(direction);
 
                     player->x_vel_cylinder = player->position.x - old_x;
                     player->z_vel_cylinder = player->position.z - old_z;
@@ -815,63 +1054,99 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                 continue;
             }
 
+            const float border = movement_border(player, object);
             if (
-                (!object->is_border || player->game->config.disable_borders) &&
-                player->position.y < object->position.y + object->scale.y &&
-                object->position.y + object->scale.y - player->position.y <= game_constants.climb_height &&
-                player->last_position.y < object->position.y + object->scale.y && can_jump
+                !border && player->position.y < top && top - player->position.y <= game_constants.climb_height &&
+                player->last_position.y < top && can_jump
             ) {
-                player->position.y += delta * 30.0f;
-                player->position.y = MIN(player->position.y, object->position.y + object->scale.y);
+                player->position.y += dt * 0.03f;
+                if (player->position.y > top) player->position.y = top;
 
-                player->on_ground = 1;
+                movement_set_on_ground(player);
                 player->on_terrain = 0;
-            } else if (player->last_position.y >= object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0.0f : game_constants.border_height)) {
+            } else if (player->last_position.y >= top + border) {
                 // TODO: step src
-
-                if (player->last_position.y > player->position.y) player_reset_step(player, recon);
-
-                player->position.y = object->position.y + object->scale.y + (!object->is_border || player->game->config.disable_borders ? 0.0f : game_constants.border_height);
-                player->velocity.y = 0.0f;
-                player->on_ground = 1;
+                player->position.y = top + border;
+                player_reset_step(player, recon);
+                if (!player->was_on_pad) player->velocity.y = 0.0f;
+                movement_set_on_ground(player);
                 player->on_terrain = 0;
-            } else if (player->last_position.x - player->scale >= object->position.x + object->scale.x * 0.5f - 0.00001f) {
-                player->position.x = object->position.x + object->scale.x * 0.5f + player->scale;
+            } else if (player->last_position.x - s >= box.x + box.w - 0.00001f) {
+                player->position.x = box.x + box.w + s;
                 player->velocity.x = 0.0f;
-            } else if (player->last_position.x + player->scale <= object->position.x - object->scale.x * 0.5f + 0.00001f) {
-                player->position.x = object->position.x - object->scale.x * 0.5f - player->scale;
+            } else if (player->last_position.x + s <= box.x - box.w + 0.00001f) {
+                player->position.x = box.x - box.w - s;
                 player->velocity.x = 0.0f;
-            } else if (player->last_position.z - player->scale >= object->position.z + object->scale.z * 0.5f - 0.00001f) {
-                player->position.z = object->position.z + object->scale.z * 0.5f + player->scale;
+            } else if (player->last_position.z - s >= box.z + box.l - 0.00001f) {
+                player->position.z = box.z + box.l + s;
                 player->velocity.z = 0.0f;
-            } else if (player->last_position.z + player->scale <= object->position.z - object->scale.z * 0.5f + 0.00001f) {
-                player->position.z = object->position.z - object->scale.z * 0.5f - player->scale;
+            } else if (player->last_position.z + s <= box.z - box.l + 0.00001f) {
+                player->position.z = box.z - box.l - s;
                 player->velocity.z = 0.0f;
-            } else if (player->last_position.y + player->height <= object->position.y) {
-                player->position.y = object->position.y - player->height;
-                player->velocity.y = 0.0f;
+            } else if (player->last_position.y + player->height + pad_h <= bottom) {
+                // a ceiling: with headClipFix the pre-crouch height keeps an uncrouching player
+                // under it, and crouch and jump wait a tick (stopCrouch)
+                player->stop_crouch = 1;
+                player->position.y = bottom - (player->was_stop_crouch && game->config.head_clip_fix ? player->height_old : player->height) - pad_w;
+                if (!player->was_on_pad) player->velocity.y = 0.0f;
+            } else if (game->config.head_clip_fix && player->last_position.y + player->height_old + pad_h <= bottom) {
+                player->stop_crouch = 1;
+                player->position.y = bottom - player->height - pad_w;
+                if (!player->was_on_pad) player->velocity.y = 0.0f;
             }
         }
     }
-
-    free(max_ramp_height);
 }
 
+// players.jump: blocked by a noJump weapon (Minigun) and for a tick after a headClipFix ceiling
+// hit; Jump Boost / Rooted effects and the mode's jumpMlt / jumpVel scale it; ovrJump sets the
+// vertical velocity instead of adding to it. jumpCooldown is jpC * 0 in v7 (always 0).
 void player_jump(Player *player) {
+    if ((player->weapon && player->weapon->no_jump) || player->was_stop_crouch) return;
+
+    Game *game = player->game;
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode = &mode_keys;
+
     player->did_act = 1;
-    player->jump_timer = (player->terrain_slipping ? game_constants.player_slipping_jump_cooldown : 0.0f) * player->game->map->config.jump_cooldown;
+    player->jump_timer = 0.0f;
     player->did_jump = 1;
     player->did_wall_jump = 1;
     player->on_terrain = 0;
 
-    const float jump_push = game_constants.jump_push * player->game->config.jump_mlt;
-    const float jump_vel = game_constants.jump_velocity * player->game->config.jump_mlt * (player->game->mode->config.real_movement ? 0.92f : 1.0f);
+    const float attr_jump = MOVEMENT_OR(player_attr_jump(player), 1.0f);
+    const float mode_jump = MOVEMENT_OR(mode->jump_mlt, 1.0f);
+    // mode.jumpVel (no v7.1.4 mode sets it) is not among the WP-D mode keys yet
+    float jump_vel = game_constants.jump_velocity * game->config.jump_mlt * attr_jump * mode_jump;
+    if (movement_real(player)) jump_vel *= 0.92f;
+    jump_vel *= player_attr_rooted(player);
+    const float jump_push = game_constants.jump_push * game->config.jump_mlt * attr_jump * mode_jump;
+
+    const float up = (jump_vel - jump_vel * (game_constants.crouch_jump * player->crouch_val)) *
+                     (player->weapon->jump_mlt ? player->weapon->jump_mlt : player->weapon->speed_mlt) *
+                     (player->aim_val != 1.0f ? 1.0f : game_constants.jump_aim_slow);
+    if (movement_knobs(player)->override_jump) player->velocity.y = up;
+    else player->velocity.y += up;
+
     const float vel = hypotf(player->velocity.x, player->velocity.z);
+    player->velocity.x -= jump_push * vel * sinf(player->direction.y);
+    player->velocity.z -= jump_push * vel * cosf(player->direction.y);
+}
 
-    player->velocity.y += jump_vel * (1 - game_constants.crouch_jump * player->crouch_val) * (player->weapon->jump_mlt ? player->weapon->jump_mlt : player->weapon->speed_mlt) * (player->aim_val != 1.0f ? 1.0f : game_constants.jump_aim_slow);
-
-    player->velocity.x -= vel * jump_push * sinf(player->direction.y);
-    player->velocity.z -= vel * jump_push * cosf(player->direction.y);
+// players.tryJump: autoJump jumps on every grounded tick the key is held (v7 sends jump while
+// held); otherwise the key must be released between jumps.
+static void movement_try_jump(Player *player, const int jump, const int recon) {
+    const int blocked = (player->weapon && player->weapon->no_jump) || player->was_stop_crouch; // jump() returns early
+    if (player->game->config.auto_jump && jump) {
+        player_jump(player);
+        if (!recon && player->render_you && !blocked) player_feel_jump(player);
+        return;
+    }
+    if (player->did_jump && !jump) player->did_jump = 0;
+    if (!player->did_jump && jump) {
+        player_jump(player);
+        if (!recon && player->render_you && !blocked) player_feel_jump(player);
+    }
 }
 
 void player_swap_weapon(Player *player, const int index, const int force_swap, const int instant_swap, const int recon) {
@@ -1035,13 +1310,19 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     // again so no input (prediction, replay or a hostile network frame) has an out-of-range look.
     rounded.x_dir = player_round3(player_clamp_pitch(raw_input->x_dir));
     rounded.y_dir = player_round3(player_wrap_yaw(raw_input->y_dir));
+    const ClassMovement *knobs = movement_knobs(player);
+    const MovementModeKeys mode_keys = movement_mode(player);
+    const MovementModeKeys *mode_movement = &mode_keys;
+    if (knobs->lock_pitch) rounded.x_dir = 0.0f; // class lckCmYR
     const Input *input = &rounded;
     // KrunkScript onPlayerUpdate + disableDefault masks; disablePlayerBehaviour skips the rest (PLJ:894-948)
     if (player->game->ks && ks_game_on_player_update(player->game, player, &rounded)) return;
 
-    // Math.max(0, Math.min(input[1], config.dltMx)): NaN and negative deltas become 0.
-    const float delta = input->delta > 0.0f ? MIN(input->delta, game_constants.max_delta) : 0.0f;
-    const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir;
+    // v7.1.4: Math.max(0.1, Math.min(input[1], config.dltMx)); NaN, 0 and negative deltas run as
+    // 0.1 ms (v3.1.1: 0).
+    const float delta = input->delta > game_constants.min_delta ? MIN(input->delta, game_constants.max_delta) : game_constants.min_delta;
+    // config.movDirs[input[4]] + class movDrP * PI
+    const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir + knobs->move_dir_offset * (float) M_PI;
 
     if (player->noclip) player->on_ground = 1;
 
@@ -1075,8 +1356,23 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
     }
 
-    player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
-    player->direction.y = input->y_dir;
+    // movement.js[0].dir: below a turn speed of 1 (class trnSp * trnSpd) the look turns at most
+    // speed * 0.01 rad per ms
+    const ClassConfig *turn_class = movement_class(player);
+    const float turn = MOVEMENT_OR(knobs->turn_rate, 1.0f) * (turn_class ? MOVEMENT_OR(turn_class->turn_speed, 1.0f) : 1.0f);
+    if (!ks_player_allows(player, KS_PLAYER_DEFAULT_ROTATION)) {
+        // KrunkScript defaultRotation = false: the script turns the player (player.js:969)
+    } else if (turn >= 1.0f) {
+        player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        player->direction.y = input->y_dir;
+    } else {
+        const float pi2 = (float) M_PI * 2.0f, step = turn * 0.01f * delta * 1000.0f;
+        const float d = fmodf(player->direction.y - input->y_dir + pi2, pi2);
+        const float move = MIN(MIN(fabsf(d - pi2), d), step);
+        player->direction.y = fmodf(player->direction.y + (d - (float) M_PI >= 0.0f ? 1.0f : -1.0f) * move + pi2, pi2);
+        if (player->direction.x < input->x_dir) player->direction.x = MIN(player->direction.x + step, input->x_dir);
+        else if (player->direction.x > input->x_dir) player->direction.x = MAX(player->direction.x - step, input->x_dir);
+    }
 
     const int feel_loadout_index = player->loadout_index;
 
@@ -1174,119 +1470,136 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     // v7.1.4 charge system (player.js: right after the aim update, not in replays)
     if (!recon) combat_update_charge(player, input, delta);
 
-    if (input->crouch && player->crouch_val < 1.0f && !player->on_ladder) {
-        player->crouch_val = MIN(1.0f, player->crouch_val + game_constants.crouch_speed * delta);
+    // v7.1.4: a headClipFix ceiling hit last tick blocks crouching (and jumping) for this one;
+    // classes without canCrch never crouch.
+    player->was_stop_crouch = player->game->config.head_clip_fix && player->stop_crouch;
+    player->stop_crouch = 0;
+    const int crouch = input->crouch && !knobs->no_crouch;
 
-        if (player->on_ground) {
-            if (!recon && player->render_you) player->bob_anim.y -= game_constants.crouch_anim * 1.4f * delta;
-        } else {
-            player->position.y += game_constants.crouch_speed * delta;
-        }
-    } else if (!input->crouch && player->crouch_val > 0.0f) {
-        player->crouch_val = MAX(0.0f, player->crouch_val - game_constants.crouch_speed * delta);
+    if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && !player->was_stop_crouch) { // defaultMovement
+        if (crouch && player->crouch_val < 1.0f && !player->on_ladder) {
+            player->crouch_val = MIN(1.0f, player->crouch_val + game_constants.crouch_speed * delta);
 
-        if (player->on_ground) {
-            if (!recon && player->render_you) player->bob_anim.y += game_constants.crouch_anim * delta;
-        } else {
-            player->position.y -= game_constants.crouch_speed * delta;
+            if (player->on_ground) {
+                if (!recon && player->render_you) player->bob_anim.y -= game_constants.crouch_anim * 1.4f * delta;
+            } else {
+                player->position.y += game_constants.crouch_speed * delta;
+            }
+        } else if (!crouch && player->crouch_val > 0.0f) {
+            player->crouch_val = MAX(0.0f, player->crouch_val - game_constants.crouch_speed * delta);
+
+            if (player->on_ground) {
+                if (!recon && player->render_you) player->bob_anim.y += game_constants.crouch_anim * delta;
+            } else {
+                player->position.y -= game_constants.crouch_speed * delta;
+            }
         }
+
+        if (player->crouch_val) player->crouch_val = roundf(player->crouch_val * 1000.0f) / 1000.0f; // crouchVal.round(3)
     }
 
-    if (player->crouch_val) player->crouch_val = roundf(player->crouch_val * 1000.0f) / 1000.0f; // crouchVal.round(3)
-
+    player->height_old = player->height; // updateHeight: heightOld
     player_update_height(player);
 
     const int contact = player->on_ground || player->on_ladder;
 
     if (!move_lock) {
+        const float dt = delta * 1000.0f;
+        const double dt_ms = round((double) delta * 10000.0) / 10.0; // v7's frame in ms (whole ms, or the 0.1 floor)
+        const float ground_accel_mlt = MOVEMENT_OR(mode_movement->ground_accel, 1.0f); // mode.groundAccel: ground and air
         float accel;
 
-        if (contact) accel = (player->terrain_slipping ? game_constants.slipping_speed : game_constants.player_speed) * player->speed;
-        else accel = game_constants.air_speed * player->game->map->config.air_accel * (player->game->mode->config.real_movement ? 0.72f : 1.0f);
+        // grA / 100 and arA / 100 per ms (KrunkNative keeps them x1000 per s)
+        if (contact) accel = MOVEMENT_OR(knobs->ground_accel, 0.042f) * 10.0f * player->speed * ground_accel_mlt;
+        else accel = MOVEMENT_OR(knobs->air_accel, 0.0047f) * 10.0f * (movement_real(player) ? 0.72f : 1.0f) * ground_accel_mlt;
 
         accel *= player->aim_val == 1.0f ? game_constants.aim_slow : 1.0f;
-        accel *= player->crouch_val ? game_constants.crouch_slow : 1.0f;
-        accel *= player->game->mode->config.speed_mlt[player->team];
-        accel *= player->weapon->speed_mlt;
-        accel *= (player->noclip ? 2.0f : 1.0f) * delta;
+        accel *= player->game->mode ? MOVEMENT_OR(player->game->mode->config.speed_mlt[player->team], 1.0f) : 1.0f;
+        accel *= player->crouch_val ? MOVEMENT_OR(knobs->crouch_speed, game_constants.crouch_slow) : 1.0f;
+        accel *= player->weapon->speed_mlt * delta;
+        accel *= player->weapon->shoot_charge && input->shoot ? 0.35f : 1.0f; // charging (Charge Rifle)
 
         float decel;
 
         if (player->on_ladder) decel = game_constants.ladder_decel;
-        else if (player->terrain_slipping) decel = game_constants.terrain_slip_decel;
         else if (player->on_terrain) decel = game_constants.terrain_decel;
-        else if (player->on_ground) decel = game_constants.ground_decel;
-        else decel = game_constants.air_decel;
+        else if (player->on_ground) decel = MOVEMENT_OR(knobs->ground_decel, game_constants.ground_decel);
+        else decel = MOVEMENT_OR(knobs->air_decel, game_constants.air_decel);
 
-        if (player->crouch_val <= 0.5) player->can_slide = 1;
-
-        if (!player->on_ground || !player->crouch_val) {
-            player->slide_timer = 0.0f;
+        if (player->can_slide_timer > 0.0f) {
+            player->can_slide_timer -= delta;
+            if (player->can_slide_timer <= MOVEMENT_TIMER_EPSILON) player->can_slide_timer = 0.0f;
         }
 
-        if (player->slide_timer) {
-            player->slide_timer = player->slide_timer - delta > MOVEMENT_TIMER_EPSILON ? player->slide_timer - delta : 0.0f;
+        if (player->crouch_val <= 0.5f) player->can_slide = 1;
 
-            if (player->slide_timer > 0.0f) {
+        double slide_ms = movement_slide_ms(player);
+        if (!player->on_ground || !player->crouch_val) slide_ms = 0.0;
+
+        if (slide_ms) {
+            // TODO (WP-B perks): Drift Fuze (perk 5) explodes every 750 ms while sliding (server)
+            slide_ms -= dt_ms;
+            if (slide_ms <= 0.0) slide_ms = 0.0;
+            movement_set_slide_ms(player, slide_ms);
+
+            if (slide_ms > 0.0) {
                 accel *= 0.25f;
                 decel = player->on_terrain ? game_constants.terrain_slide_decel : game_constants.slide_decel;
 
+                // v7 slides always follow the look direction (v3.1.1's "Non FPS Sliding" setting
+                // slidCont is gone); frSlid slides toward the held movement key, bkSlid backwards
+                // on the S keys (movDirs 4..6).
                 const float vel = hypotf(player->velocity.x, player->velocity.z);
-                const float dir = (float) M_PI / 2.0f - player->direction.y;
+                float yaw = player->direction.y;
+                const int v7_dir = input->move_dir >= 0 ? (input->move_dir + 1) % 8 : -1; // config.movDirs index
+                const ClassConfig *class_config = movement_class(player);
+                if ((knobs->free_slide || mode_movement->free_slide) && v7_dir >= 0) yaw -= (float) M_PI / 4.0f * (float) (v7_dir - 1);
+                else if (class_config && class_config->back_slide && v7_dir >= 4 && v7_dir <= 6) yaw += (float) M_PI;
+                const float dir = atan2f(cosf(yaw), sinf(yaw)); // getDir(sin, cos, 0, 0)
 
-                if (player->slid_cont) {
-                    player->velocity.x = vel * cosf(dir + (float) M_PI);
-                    player->velocity.z = vel * sinf(dir + (float) M_PI);
-                } else {
-                    const float vel_dir = atan2f(-player->velocity.z, -player->velocity.x);
-                    const float angle_delta = normalize_angle(vel_dir - dir) * 0.18f;
-
-                    player->velocity.x = vel * cosf(vel_dir + (float) M_PI - angle_delta);
-                    player->velocity.z = vel * sinf(vel_dir + (float) M_PI - angle_delta);
-                }
+                player->velocity.x = vel * cosf(dir + (float) M_PI);
+                player->velocity.z = vel * sinf(dir + (float) M_PI);
             }
         }
+
+        movement_set_slide_ms(player, slide_ms);
 
         player->jump_timer = MAX(0.0f, player->jump_timer - delta);
 
-        if (player->jump_timer <= 0.0f && (player->on_ground || player->game->map->config.infinite_jump)) {
-            if (player->did_jump && !input->jump) player->did_jump = 0;
-            if (input->jump && (!player->did_jump || player->game->config.auto_jump)) {
-                player_jump(player);
-                if (!recon && player->render_you) player_feel_jump(player);
-            }
+        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && player->jump_timer <= 0.0f && !knobs->disable_jump && (player->on_ground || knobs->infinite_jump)) {
+            movement_try_jump(player, input->jump, recon);
         }
 
         if (!contact) {
-            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && player->game->config.wall_jump > 0.0f && player->crouch_val ? 0.3f : 1.0f;
-            player->velocity.y -= delta * game_constants.gravity * player->game->config.gravity_mlt * wall_mlt;
+            const float wall_power = movement_wall_jump_power(player);
+            const float wall_decel = mode_movement->wall_jump_decel ? mode_movement->wall_jump_decel : MOVEMENT_OR(knobs->wall_jump_decel, 0.3f);
+            const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && wall_power > 0.0f && player->crouch_val ? wall_decel : 1.0f;
+            player->velocity.y -= delta * (game_constants.gravity * player->game->config.gravity_mlt * MOVEMENT_OR(mode_movement->gravity_mlt, 1.0f)) * wall_mlt;
         }
 
         // 95.js: ac *= limitMM(1 - a0[12], 0, 1) (input[12]: the controller's Gradual Speed)
         accel *= CLAMP(1.0f - input->slowdown, 0.0f, 1.0f);
+        if (player->noclip) accel *= 2.0f;
+        // speedBoost (admin) is not in KrunkNative yet
+        accel *= player_attr_speed(player);
+        accel *= player_attr_rooted(player);
+        // TODO (WP-D): Kranked bonuses.speed, mode_speed_mlt(game, player)
+        accel *= player_has_perk(player, PERK_SPEED) ? 1.15f : 1.0f;
 
-        // Diagonal movDirs: config.strafeSpd (1.2) unless the mode uses realMov.
-        if (input->move_dir >= 0 && input->move_dir % 2 && !player->game->mode->config.real_movement) {
-            accel *= player->game->config.strafe_speed > 0.0f ? player->game->config.strafe_speed : 1.0f;
-        }
+        // movement.js[0].mov (defaultMovement): diagonal movDirs get config.strafeSpd unless realMov
+        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && input->move_dir >= 0) {
+            const float yaw_origin = player->direction.y; // TODO: camType 1 without camRot uses the camera offset
+            float strafe = 1.0f;
+            if (input->move_dir % 2 && !movement_real(player)) strafe = player->game->config.strafe_speed;
 
-        if (input->move_dir >= 0) {
-            const float yaw_origin = player->direction.y; // TODO: support different cam types?
+            // in double like v7: 90 degrees off the look direction the cosine is a tiny difference
+            // of two angles, and float error there drifts the player sideways over a long climb
+            const double angle = -M_PI / 2.0 + M_PI / 4.0 * input->move_dir + movement_js(knobs->move_dir_offset) * M_PI - movement_js(yaw_origin);
+            player->velocity.x += (float) (accel * strafe * cos(angle));
+            player->velocity.z += (float) (accel * strafe * sin(angle));
 
-            player->velocity.x += accel * cosf(move_dir - yaw_origin);
-            player->velocity.z += accel * sinf(move_dir - yaw_origin);
-
-            if (player->noclip) player->velocity.y += accel * player->direction.x * (input->move_dir > 2 && input->move_dir < 6 ? -1.0f : 1.0f);
-        }
-
-        // Air strafe (config.airStrf): turning while holding right/left (movDirs 3/7)
-        // swings the air velocity with the camera.
-        if (!contact && yaw_delta && player->game->config.air_strafe && ((input->move_dir == 2 && yaw_delta > 0.0f) || (input->move_dir == 6 && yaw_delta < 0.0f))) {
-            const float vel = hypotf(player->velocity.x, player->velocity.z);
-            const float dir = atan2f(-player->velocity.z, -player->velocity.x) + yaw_delta * 0.73f;
-
-            player->velocity.x = vel * cosf(dir + (float) M_PI);
-            player->velocity.z = vel * sinf(dir + (float) M_PI);
+            // movDir > 0 (movDirs 4..7: back, back-diagonals, left) flies down
+            if (player->noclip) player->velocity.y += accel * strafe * (player->direction.x * (input->move_dir >= 3 && input->move_dir <= 6 ? -1.0f : 1.0f));
         }
 
         if (!contact) {
@@ -1301,46 +1614,85 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             }
         }
 
-        if (player->velocity.x) {
-            player->position.x += player->velocity.x * player->game->map->config.speed.x * delta * 1000.0f;
-            player->velocity.x *= powf(decel, delta * 1000.0f);
-            player->velocity.x = CROP(player->velocity.x, game_constants.min_decel);
+        // Air strafe (config.airStrf, v7 currentSeason >= 7): turning swings the air velocity by
+        // the full yaw change while holding right or forward-right (turning right) and left or
+        // forward-left (turning left). v3.1.1: x0.73, pure strafe keys only.
+        if (!contact && yaw_delta && player->game->config.air_strafe &&
+            (((input->move_dir == 2 || input->move_dir == 1) && yaw_delta > 0.0f) || ((input->move_dir == 6 || input->move_dir == 7) && yaw_delta < 0.0f))) {
+            const float vel = hypotf(player->velocity.x, player->velocity.z);
+            const float dir = atan2f(-player->velocity.z, -player->velocity.x) + yaw_delta;
+
+            player->velocity.x = vel * cosf(dir + (float) M_PI);
+            player->velocity.z = vel * sinf(dir + (float) M_PI);
         }
 
-        if (player->velocity.y) {
-            player->position.y += player->velocity.y * player->game->map->config.speed.y * delta * 1000.0f;
-
-            if (player->noclip) {
-                player->velocity.y *= powf(decel, delta * 1000.0f);
-            } else if (player->velocity.y > 0.0f) {
-                player->velocity.y -= delta * 0.032f;
-            } else if (player->velocity.y < -0.3f) {
-                player->velocity.y = -0.3f;
+        // movement.js[0].vel
+        const float speed_x = MOVEMENT_OR(knobs->speed_x, 1.0f), speed_y = MOVEMENT_OR(knobs->speed_y, 1.0f), speed_z = MOVEMENT_OR(knobs->speed_z, 1.0f);
+        if (!ks_player_allows(player, KS_PLAYER_DEFAULT_VELOCITY)) {
+            // KrunkScript defaultVelocity = false: no integration or friction (player.js:1264)
+        } else if (player->game->config.fixed_movement && !player->noclip) {
+            // fixMov: the exact integral of the per-ms decay, x += (v d^t - v) / ln d
+            if (player->velocity.x) {
+                const float v = player->velocity.x * powf(decel, dt);
+                player->position.x += (v - player->velocity.x) / logf(decel) * speed_x;
+                player->velocity.x = CROP(v, game_constants.min_decel);
             }
-        }
+            if (player->velocity.y) {
+                const float v = player->velocity.y * powf(0.9993f, dt);
+                player->position.y += (v - player->velocity.y) / logf(0.9993f) * speed_y;
+                player->velocity.y = v;
+            }
+            if (player->velocity.z) {
+                const float v = player->velocity.z * powf(decel, dt);
+                player->position.z += (v - player->velocity.z) / logf(decel) * speed_z;
+                player->velocity.z = CROP(v, game_constants.min_decel);
+            }
+        } else {
+            if (player->velocity.x) {
+                player->position.x += player->velocity.x * speed_x * dt;
+                player->velocity.x *= powf(decel, dt);
+                player->velocity.x = CROP(player->velocity.x, game_constants.min_decel);
+            }
 
-        if (player->velocity.z) {
-            player->position.z += player->velocity.z * player->game->map->config.speed.z * delta * 1000.0f;
-            player->velocity.z *= powf(decel, delta * 1000.0f);
-            player->velocity.z = CROP(player->velocity.z, game_constants.min_decel);
+            if (player->velocity.y) {
+                player->position.y += player->velocity.y * speed_y * dt;
+
+                if (player->noclip) {
+                    player->velocity.y *= powf(decel, dt);
+                } else if (player->velocity.y > 0.0f) {
+                    player->velocity.y -= delta * 0.032f;
+                } else if (player->velocity.y <= -0.3f) {
+                    player->velocity.y = -0.3f;
+                }
+            }
+
+            if (player->velocity.z) {
+                player->position.z += player->velocity.z * speed_z * dt;
+                player->velocity.z *= powf(decel, dt);
+                player->velocity.z = CROP(player->velocity.z, game_constants.min_decel);
+            }
         }
 
         if (!input->shoot && !recon) player->doing_interact = 0;
 
-        const int can_jump = player->on_ground && !player->did_jump;
+        const int can_jump = player->on_ground && !player->did_jump; // wasOnGround
 
+        player->was_on_pad = player->on_pad;
         player->on_ground = player->noclip;
         player->on_ladder = 0;
         player->on_wall = 0;
         player->on_ramp = 0;
+        player->on_pad = 0;
         player->making_progress = 0;
 
+        // TODO (pColl): players.playerCollision for classes with player collision
         if (!player->noclip) player_do_map_collisions(player, input, move_dir, can_jump, delta, recon);
+        else player->was_on_ground = can_jump ? 1 : 0;
 
         if (!player->did_jump && player->ramp_fix && fabsf(player->position.y - *player->ramp_fix) <= game_constants.climb_height) {
             if (!player->on_ramp) {
                 player->position.y = *player->ramp_fix;
-                player->on_ground = 1;
+                movement_set_on_ground(player);
                 player->velocity.y = 0.0f;
 
                 free(player->ramp_fix);
@@ -1372,8 +1724,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             player->bob_anim.y -= (player->last_position.y - player->position.y) * game_constants.bob_mlt_y;
         }
 
-        // playerStep (the step sound is TODO: sound_events can follow step_dir_neg flips)
-        if (player->is_you && contact && input->move_dir >= 0) player_step(player, delta_pos);
+        // playerStep: every grounded player that moved at least 0.1 this tick (v3.1.1: the local
+        // player holding a movement key; the step sound is sound_events' step_dir_neg flips)
+        if (contact && delta_pos >= 0.1f) player_step(player, delta_pos);
 
         if (player->render_you) {
             if (contact && input->move_dir >= 0) {
@@ -1381,9 +1734,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             } else {
                 player->step_val *= powf(game_constants.step_pull, delta * 1000.0f);
             }
-
-            if (player->step_chase != player->step_val) player->step_chase += (player->step_val - player->step_chase) * 0.15f;
         }
+
+        if (player->step_chase != player->step_val) player->step_chase += (player->step_val - player->step_chase) * 0.15f;
 
         // Krunker spread: movement/fall spreadPlus x weapon movSpread, crouch and recoil terms,
         // scaled by the hip-fire amount plus adSpread of the aimed share (v7.1.4 player.js;
@@ -1464,28 +1817,34 @@ weapon_done:;
         player->on_ground = 0;
     }
 
-    if (!move_lock && player->wall_jump && !player->on_ground && !player->on_ladder && player->on_wall && player->game->config.wall_jump > 0.0f) {
+    // Wall jump: at most wallJumpMax per airborne period (v3.1.1: unlimited); the class / mode
+    // wallJV, wallJYV and config.wallJP shape it.
+    if (!move_lock && player->wall_jump && player->wall_jump_count < player->wall_jump_max && !player->on_ground && !player->on_ladder &&
+        player->on_wall && movement_wall_jump_power(player) > 0.0f) {
         if (player->did_wall_jump && !input->jump) player->did_wall_jump = 0;
 
         if (!player->did_wall_jump && input->jump) {
             player->did_wall_jump = 1;
+            player->wall_jump_count++;
             if (!recon && player->is_you) player_feel_wall_jump(player);
 
-            const float velocity = (player->game->mode->config.real_movement ? 0.7f : 1.0f) * 0.03f;
-            player->velocity.y = (player->game->mode->config.real_movement ? 0.9f : 1.0f) * 0.058f;
+            const int real = movement_real(player);
+            const float power = movement_wall_jump_power(player);
+            const float velocity = (mode_movement->wall_jump_vel ? mode_movement->wall_jump_vel : MOVEMENT_OR(knobs->wall_jump_vel, 0.03f)) * (real ? 0.7f : 1.0f);
+            player->velocity.y = (real ? 0.9f : 1.0f) * 0.058f * MOVEMENT_OR(mode_movement->wall_jump_y_vel, 1.0f);
 
             switch (player->on_wall) {
                 case 1:
-                    player->velocity.x = velocity * player->game->config.wall_jump;
+                    player->velocity.x = velocity * power;
                     break;
                 case 2:
-                    player->velocity.x = -velocity * player->game->config.wall_jump;
+                    player->velocity.x = -velocity * power;
                     break;
                 case 3:
-                    player->velocity.z = velocity * player->game->config.wall_jump;
+                    player->velocity.z = velocity * power;
                     break;
                 case 4:
-                    player->velocity.z = -velocity * player->game->config.wall_jump;
+                    player->velocity.z = -velocity * power;
                     break;
                 default:
                     break;
@@ -1500,15 +1859,16 @@ weapon_done:;
     // TODO: update interact
 }
 
-// playerStep: stepVal swings between +-PI/2 with the distance covered (3D, x1.4 on a
-// ladder for the local player); crouched remote players step 1.6x faster.
+// playerStep: stepVal swings between +-PI/2 * stpFr (class step frequency) with the distance
+// covered (3D, x1.4 on a ladder for the local player); crouched remote players step 1.6x faster.
 void player_step(Player *player, float distance) {
     if (!distance) return;
     if (!player->render_you && player->crouch_val) distance *= 1.6f;
 
     player->step_val += distance * MOVEMENT_STEP_MLT * (player->step_dir_neg ? -1.0f : 1.0f);
+    const float limit = (float) M_PI / 2.0f * MOVEMENT_OR(movement_knobs(player)->step_freq, 1.0f);
 
-    if ((player->step_val >= (float) M_PI / 2.0f && !player->step_dir_neg) || (player->step_val <= -(float) M_PI / 2.0f && player->step_dir_neg)) {
+    if ((player->step_val >= limit && !player->step_dir_neg) || (player->step_val <= -limit && player->step_dir_neg)) {
         player->step_dir_neg ^= 1;
         player->step_events++; // playerStep sound (sound_events.c)
     }

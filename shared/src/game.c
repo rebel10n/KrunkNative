@@ -29,6 +29,7 @@ const GameConfig g_default_game_config = {
     .impulse_mlt = 1.0f,
     .wall_jump = 1.0f,
     .strafe_speed = 1.2f,
+    .slide_speed = 1.0f,
     .can_slide = 1,
     .air_strafe = 0,
     .auto_jump = 0,

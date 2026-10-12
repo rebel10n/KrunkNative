@@ -551,6 +551,35 @@ void map_object_rotation(const Object *object, float out[9]);
 void map_reset(Map*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
 
+// ---- WP-A: v7.1.4 per-class movement knobs (config.js classConfig "Movement", player.js,
+// movement.js). No official v7 class sets one; custom maps can (config.cls). A field left 0 reads
+// as the v7 default named in its comment, so the class table lists only changes. v7 defaults
+// reproduce the v3.1.1 constants. Accel/decel are in v7 units (per ms; grA/arA per 100 ms).
+typedef struct ClassMovement {
+    int scheme;             // movSch: game.movement index (0 Default; the others are not ported yet)
+    float speed_x;          // speedX, 0 = 1: x step multiplier in the integration
+    float speed_y;          // speedY, 0 = 1
+    float speed_z;          // speedZ, 0 = 1
+    float move_dir_offset;  // movDrP (x PI) added to the movement direction, default 0
+    float turn_rate;        // trnSp, 0 = 1: below 1 the look turns at most trnSp * 0.01 rad/ms
+    float ground_accel;     // grA, 0 = 0.042 (/100 per ms)
+    float ground_decel;     // grDec, 0 = 0.99 per ms
+    float air_accel;        // arA, 0 = 0.0047 (/100 per ms)
+    float air_decel;        // airDec, 0 = 0.9996 per ms
+    float crouch_speed;     // crchSpd, 0 = 0.3: crouched acceleration multiplier
+    float ladder_accel;     // ldA, 0 = 1
+    float wall_jump_decel;  // wallJD, 0 = 0.3: gravity multiplier while wall sliding
+    float wall_jump_vel;    // wallJV, 0 = 0.03: horizontal wall-jump push
+    float step_freq;        // stpFr, 0 = 1: step period multiplier (feel)
+    unsigned char no_crouch:1;        // !canCrch
+    unsigned char disable_jump:1;     // disJump
+    unsigned char infinite_jump:1;    // infJ: jump while airborne
+    unsigned char override_jump:1;    // ovrJump: the jump sets velocity.y instead of adding to it
+    unsigned char free_slide:1;       // frSlid: slides follow the held movement key
+    unsigned char player_collision:1; // pColl: players are solid boxes (not ported yet)
+    unsigned char lock_pitch:1;       // lckCmYR: input pitch forced to 0
+} ClassMovement;
+
 // Krunker v7.1.4 class (src/data/classes.js, shared/src/classes.c). Fields marked "0 = 1" read
 // as 1 when unset, so custom/mode classes only set what they change.
 typedef struct {
@@ -581,6 +610,7 @@ typedef struct {
     int face;              // face: class face store item
     float hitbox_pad_w;    // hbS: added to the game's hitBoxPad sideways (player.hitboxPadW)
     float hitbox_pad_h;    // hbH: added to the game's hitBoxPad on top (player.hitboxPadH)
+    ClassMovement movement; // WP-A
 } ClassConfig;
 
 #define CLASS_COUNT 16
@@ -986,6 +1016,19 @@ typedef struct Player_t {
     float x_vel_cylinder;
     float z_vel_cylinder;
 
+    // ---- WP-A: v7.1.4 movement state (player.js procInputs, players.js resetStep / jump) ----
+    int wall_jump_count;          // wallJumpC: wall jumps since the last landing
+    int wall_jump_max;            // wallJumpMax: mode wallJM, else class wallJM (setClass)
+    float can_slide_timer;        // canSlideT (s): a landing cannot start a slide for 100 ms after one
+    float height_old;             // heightOld: height before this tick's crouch change (headClipFix)
+    double slide_ms;              // slideTimer in v7's double ms (its exact last slide tick); slide_timer mirrors it in s
+    unsigned char on_pad:1;       // onPad: a jump pad launched the player this tick
+    unsigned char was_on_pad:1;   // wasOnPad: onPad of the previous tick (top/side contacts keep velocity.y)
+    unsigned char was_on_ground:1;// wasOnGround: grounded and not jumping when this tick's collisions began
+    unsigned char stop_crouch:1;  // stopCrouch: hit a ceiling this tick
+    unsigned char was_stop_crouch:1; // wasStopCrouch: headClipFix blocks crouch and jump for one tick
+    // ---- end WP-A movement state ----
+
     float jump_rotate;
 
     float land_bob_y;
@@ -1105,6 +1148,7 @@ Player *player_init(struct Game_t*);
 void player_spawn(Player*);
 void player_swap_weapon(Player*, int, int, int, int);
 void player_update_height(Player*); // players.updateHeight: height from crouch_val
+void player_movement_spawn(Player*); // WP-A setClass: wall-jump limits (class / mode) and the v7 movement state
 void player_kill(Player*, Player*, PlayerKillInfo*, int); // victim, killer (NULL = suicide/fall), info, skip_rewards
 int player_change_health(Player*, Player*, float, int); // victim, dealer, damage (<0 heals), crit; 1 = victim died (authority only)
 void player_score(Player*, int, int); // player, amount, is_kill_reward
@@ -1188,6 +1232,13 @@ typedef struct {
     float impulse_mlt;
     float wall_jump;
     float strafe_speed;
+    // WP-A: v7.1.4 movement settings (config.js serverConfig; same names and types as map-E's
+    // serverConfig block, so either patch can carry them)
+    float slide_speed;                // slidSpd 0..2 (1): slide boost multiplier, 0 stops the slide
+    float fall_damage;                // fallDmg 0..10 (0 = off): landing damage |vy| * 10 * fallDmg (authority)
+    float fall_damage_threshold;      // fallDmgThr 0..10: landing |vy| (units per ms) above which it applies
+    unsigned char fixed_movement;     // fixMov: exact exponential integration (movement.js)
+    unsigned char head_clip_fix;      // headClipFix (comp 1): a ceiling hit blocks crouch / jump for a tick
     unsigned int can_slide:1;
     unsigned int air_strafe:1;
     unsigned int auto_jump:1;
