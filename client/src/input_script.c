@@ -6,7 +6,8 @@
 //                                     (Xvfb/llvmpipe) replays at a chosen 30/60/144 fps step
 //
 // Script: one event per line, "<t_ms> <command> [args]", '#' starts a comment. Times count
-// game time (summed frame deltas) from the frame the local player became active after `play`.
+// summed frame deltas (the round-end slow motion does not stretch them) from the frame the
+// local player became active after `play`.
 //   0 play                       close the menu and enter the game (waits for the map)
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js)
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
@@ -17,7 +18,8 @@
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
 //   100 wheel 1 | wheel -1       one mouse wheel event (up / down) through the scroll callback
 //   100 blur                     the window loses focus (alt-tab)
-//   100 state                    log the held weapon slot and the menu / pointer lock state
+//   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended
+//   100 con end                  a one-word developer console command
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
 //   3000 quit                    close the window
 // Events run at the start of the first frame whose time is >= t, before the input is
@@ -27,6 +29,7 @@
 #include <camera_feel.h>
 #include <ui_logic.h>
 #include <html_ui.h>
+#include <console.h> // `con`: ui_console_exec
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <stdio.h>
@@ -163,9 +166,13 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "state")) {
         // state: one log line with the held slot and the menu/lock state (scripted checks)
         const Player *me = client->me;
-        fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d\n", g_script.time,
-                me ? me->loadout_index : -1, me ? (int) me->loadout_size : 0,
-                me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked);
+        fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d pos=%.3f,%.3f,%.3f ammo=%d aim=%.2f ended=%d\n",
+                g_script.time, me ? me->loadout_index : -1, me ? (int) me->loadout_size : 0,
+                me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked,
+                me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f,
+                me && me->ammo && me->loadout_size ? (int) me->ammo[me->loadout_index] : -1, me ? me->aim_val : 0.0f, client_round_ended(client));
+    } else if (!strcmp(e->cmd, "con")) {
+        ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
     } else if (!strcmp(e->cmd, "blur")) {
         client_window_focus_lost(client); // alt-tab (the GLFW focus callback)
     } else if (!strcmp(e->cmd, "shot")) {
@@ -218,7 +225,7 @@ void input_script_adjust_input(Client *client, Input *input) {
     g_script.look_yaw = g_script.look_pitch = 0.0f;
 }
 
-void input_script_frame_end(Client *client, const float delta) {
+void input_script_frame_end(Client *client, const float delta, const float frame_delta) {
     if (!g_script.active || !g_script.playing) return;
 
     const Player *p = client->me;
@@ -265,5 +272,7 @@ void input_script_frame_end(Client *client, const float delta) {
         g_script.shot[0] = 0;
     }
 
-    g_script.time += delta * 1000.0f;
+    // The frame time, not the world's: the end-of-round slow motion scales the world delta
+    // down to 0 for the whole results screen, which would hold every later event back.
+    g_script.time += frame_delta * 1000.0f;
 }

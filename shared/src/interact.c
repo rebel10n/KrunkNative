@@ -195,6 +195,9 @@ void game_player_spray(Game *game, Player *player) {
 
 void game_player_interact(Game *game, Player *player, const int action, const int secondary) {
     if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
+    // The end screen: the server's players are inactive already (players.clear); the offline
+    // game keeps its players for the endAnim (end_keep_players), so no spray/door/pickup either.
+    if (game->end_timer > 0.0f) return;
     // gameserver.ts io_int drains player.inputs first: the spray ray (and the interact /
     // drop position) must use the look and position of the frames sent before the "int".
     player_drain_inputs(player);

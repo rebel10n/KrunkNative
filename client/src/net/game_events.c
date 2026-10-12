@@ -697,6 +697,10 @@ void client_game_events_reset(Client *client) {
     client->net_round_seconds = -1;
     client->net_end_seconds = -1;
     client->net_end_result = INT32_MIN;
+    // "init" -> CONTROLS.reset(): keys = {}, didPressed = {}. A key held through the end
+    // screen does not move or jump the next round's first frames; it needs a new press
+    // (GLFW_REPEAT never re-presses, ui_controls.c).
+    ui_controls_reset_keys();
     client->net_damage_from_valid = 0;
     client->net_death_time = 0.0;
     client->net_death_menu_pending = 0;

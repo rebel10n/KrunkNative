@@ -1467,6 +1467,16 @@ static void client_tick_game(Client *client, const float now, const float frame_
             client->mouse_state.scroll_delta = 0;
             client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
         }
+        // Round over (victory/defeat title, slow motion, results): only the look stays.
+        // KrunkNative (deliberate difference): v3.1.1 keeps its controls enabled through the
+        // endAnim title, so WASD/jump/shots still predict locally in shrinking slow motion
+        // (nothing is sent: !endAnimationTimeLeft) until CONTROLS.disable() after endAnim.
+        // Here the end screen takes every action at once: no move, jump, crouch/slide,
+        // shoot, reload, ADS, swap or wheel; physics still settles (a jump in the air lands).
+        // Nothing is kept for later: didPressed/aba6 are per frame, INIT resets the keys.
+        if (client_round_ended(client)) {
+            input = (Input) {.move_dir = -1, .delta = input.delta, .x_dir = input.x_dir, .y_dir = input.y_dir};
+        }
         // controls.js: the pitch is clamped and xDr = rotation.y % Math.PI2 before the input
         // frame takes them, so the yaw sent (and predicted) never grows without bound.
         input.x_dir = player_clamp_pitch(input.x_dir);
@@ -1552,5 +1562,5 @@ static void client_tick_game(Client *client, const float now, const float frame_
 
     if (!scenario) vfx_render_screen(client); // overlay-canvas muzzle flash + damage overlay
     if (!scenario) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
-    input_script_frame_end(client, delta); // KRUNKNATIVE_INPUT_LOG row
+    input_script_frame_end(client, delta, frame_delta); // KRUNKNATIVE_INPUT_LOG row
 }

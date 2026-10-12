@@ -646,6 +646,7 @@ void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the sock
 void client_recon_reset(Client*);                                 // CONTROLS.reset(): our spawn, a new session
 void client_recon_record(Client*, const Input*);                  // a predicted input: pending + the "q" batch
 int  client_recon_sending(const Client*);                         // inputs may leave: alive, round not over (net/recon.c)
+int  client_round_ended(const Client*);                           // END seen while playing, until the next INIT (net/recon.c)
 void client_recon_on_death(Client*);                              // our KILL: the unsent "q" window is dropped
 void client_recon_after_tick(Client*);                            // the frame's shot knockback -> input.velObj
 void client_recon_apply(Client*, const NetReconPacket*);          // "l": snap + replay

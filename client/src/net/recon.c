@@ -133,7 +133,14 @@ static void batch_flush(Client *client) {
 // is not over (END seen while playing, until the next INIT; menu_view.c's `ended`).
 int client_recon_sending(const Client *client) {
     if (client->game.is_local || !client->me || !client->me->active) return 0;
-    return !(client->net_end_seconds >= 0 && client->net_end_result != INT32_MIN);
+    return !client_round_ended(client);
+}
+
+// END reached us while playing or spectating (the victory/defeat title, the endAnim slow
+// motion, the results), until the next INIT. Offline too: the local game's END comes
+// through the same events (game_events.c events_end / client_game_events_reset).
+int client_round_ended(const Client *client) {
+    return client->net_end_seconds >= 0 && client->net_end_result != INT32_MIN;
 }
 
 // tmpInpts.push(b9) + the "q" window: called with each input right after it was queued for
