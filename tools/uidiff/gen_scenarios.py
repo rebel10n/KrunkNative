@@ -374,6 +374,18 @@ game("ingame-minimap",
      hud_regions(rc, [R("minimap", pad(rc["miniMapOverlay"], 2), "text",
                         "#miniMapCanvas: Kanji's mmId image turned with the view, the N/E/S/W ring, our arrow")]),
      "The minimap on Kanji (an official map in KrunkNative; the reference clears v7's customsData) at a fixed pose.")
+# the same on other maps (capture-v7.js minimapScenario: the pose v7's sandbox spawned at)
+for mm_name, mm_map, mm_file, mm_pose, mm_what in (
+        ("ingame-minimap-sandstorm", "Sandstorm", "maps/sandstorm_v3.json", [-39, 33, -210, 0, 0], "Sandstorm's mmId image"),
+        ("ingame-minimap-burg", "Burg", "maps/burg_new.json", [246, 0, -210, -3.141592653589793, 0], "Burg's mmId image"),
+        ("ingame-minimap-311-burg", "Burg", "maps/311_burg.json", [102, 0, -365, -1.5707963267948966, 0],
+         "v3.1.1 Burg (no mmId): its blocks, darker the higher")):
+    rc = rects("ingame/" + mm_name)
+    game(mm_name,
+         game_state(hud(), customMap=False, mapName=mm_map, mapFile=mm_file, pose=mm_pose),
+         hud_regions(rc, [R("minimap", pad(rc["miniMapOverlay"], 2), "text",
+                            "#miniMapCanvas: %s turned with the view, the N/E/S/W ring, our arrow" % mm_what)]),
+         "The minimap on %s (%s) at the pose v7's sandbox spawned at." % (mm_map, mm_file))
 rc = rects("ingame/ingame-endscreen")
 game("ingame-endscreen", game_state(hud(), endscreen={"place": 1, "result": 1, "text": "#1 VICTORY", "nextRound": "00:00"}),
      [R("victory-text", [420, 300, 440, 100], "text", "`#1 VICTORY` is drawn on v7's overlay canvas (vicTitle)", skip=True),

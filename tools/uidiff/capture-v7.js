@@ -339,17 +339,25 @@ scenario('ingame-spectate', 'ingame', async (c) => {
   await settle(c, 800);
 });
 // The minimap (Minimap.js): v7 production hides it on custom maps (customsData && isProd), and
-// the captures load Kanji as one, so customsData is cleared and the minimap reset as for an
-// official map. The view is pinned at a known pose (the scenario's `pose`).
-const MM_POSE = [0, 0, 0, 0, 0];
-scenario('ingame-minimap', 'ingame', async (c) => {
-  await enterGame(c);
-  await c.eval(`(() => { Game.customsData = null; toggleMinimap(true); return 1; })()`);
-  await settle(c, 800);
-  console.error('[capture-v7] ingame-minimap pose: ' + JSON.stringify(await c.eval(`(() => { const p = Game.players.list.find(q => q.isYou);
-    return p ? [p.x, p.y, p.z, CONTROLS.xDr, CONTROLS.yDr, CONTROLS.object.position.x, CONTROLS.object.position.z] : null; })()`)));
-  void MM_POSE;
-});
+// the captures load their map as one, so customsData is cleared and the minimap reset as for an
+// official map. The pose v7's sandbox spawned at is logged for the KrunkNative scenario's `pose`
+// (gen_scenarios.py: [x, y, z, xDr, yDr]). ingame-minimap is Kanji (the captures' default map);
+// the others load another map (`map`: v7's public/maps/<file>, or a KrunkNative assets/maps/ file
+// for the v3.1.1 maps v7 does not ship): sandstorm / burg draw their mmId image, 311-burg (no
+// mmId) draws its blocks.
+function minimapScenario(name, map) {
+  scenario(name, 'ingame', async (c) => {
+    await enterGame(c);
+    await c.eval(`(() => { Game.customsData = null; toggleMinimap(true); return 1; })()`);
+    await settle(c, 800);
+    console.error(`[capture-v7] ${name} pose: ` + JSON.stringify(await c.eval(`(() => { const p = Game.players.list.find(q => q.isYou);
+      return p ? [p.x, p.y, p.z, CONTROLS.xDr, CONTROLS.yDr, CONTROLS.object.position.x, CONTROLS.object.position.z] : null; })()`)));
+  }, map ? { map } : {});
+}
+minimapScenario('ingame-minimap');
+minimapScenario('ingame-minimap-sandstorm', 'sandstorm_v3.json');
+minimapScenario('ingame-minimap-burg', 'burg_new.json');
+minimapScenario('ingame-minimap-311-burg', 'kn:311_burg.json');
 
 // the sandbox's own game end (game.js endGame(): the "end" packet, v7's end animation)
 scenario('ingame-endscreen', 'ingame', async (c) => {
@@ -428,10 +436,17 @@ const SEED_RNG = `(() => { let a = 0x4b4e; Math.random = function () { a |= 0; a
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = function (fn, delay) { return typeof delay === 'number' ? setTimeout(fn, delay) : raf(fn); };
 })();`;
-// Kanji with its game config narrowed to Free for All (the map's own config lists 13 modes,
-// of which the sandbox plays a random one)
-const MAP_JSON = (() => { const m = JSON.parse(fs.readFileSync(path.join(V7_PUBLIC, 'maps', 'kanji.json'), 'utf8'));
-  if (m.config) m.config.modes = [0]; return JSON.stringify(m); })();
+// The sandbox's map (Kanji unless the scenario names one: "<file>" in v7's public/maps, or
+// "kn:<file>" in KrunkNative's assets/maps) with its game config narrowed to Free for All (the
+// map's own config lists up to 13 modes, of which the sandbox plays a random one)
+function mapJson(file) {
+  const kn = /^kn:/.test(file || '');
+  const src = kn ? path.join(REPO, 'assets', 'maps', file.slice(3)) : path.join(V7_PUBLIC, 'maps', file || 'kanji.json');
+  const m = JSON.parse(fs.readFileSync(src, 'utf8'));
+  if (m.config) m.config.modes = [0];
+  else m.config = { modes: [0] };
+  return JSON.stringify(m);
+}
 
 async function openPage(o) {
   const server = await staticServer(V7_PUBLIC, o.httpPort);
@@ -446,7 +461,7 @@ async function openPage(o) {
   const base = `http://127.0.0.1:${o.httpPort}/`;
   await c.send('Page.navigate', { url: base + 'manifest.json' });
   await sleep(300);
-  const storage = Object.assign({}, GUEST_STORAGE, o.page === 'index.html' ? { custMap: MAP_JSON } : {});
+  const storage = Object.assign({}, GUEST_STORAGE, o.page === 'index.html' ? { custMap: mapJson(o.map) } : {});
   await c.eval(`(() => { localStorage.clear(); const s = ${JSON.stringify(storage)}; for (const k in s) localStorage.setItem(k, s[k]); return 1; })()`);
   await c.send('Page.addScriptToEvaluateOnNewDocument', { source: SEED_RNG });
   await c.send('Page.navigate', { url: base + o.page + (o.query ? '?' + o.query : '') });
@@ -460,7 +475,7 @@ async function capture(sc, idx) {
   // (base + 1000 + 0..7) off the defaults, for parallel runs.
   const base = +process.env.KN_CAPTURE_PORT_BASE || 0;
   const { c, close, errors } = await openPage({ w: sc.size[0], h: sc.size[1], port: (base || 9500) + (idx % 8), httpPort: (base ? base + 1000 : 6900) + (idx % 8),
-    page: sc.page, query: sc.query || '', settle: 12000 });
+    page: sc.page, query: sc.query || '', map: sc.map, settle: 12000 });
   try {
     await sc.run(c);
     const dir = path.join(OUT, sc.dir);

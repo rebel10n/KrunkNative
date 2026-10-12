@@ -9,5 +9,7 @@ kn_web_base: /opt/krunknative-web
 kn_web_sync_assets: true
 kn_web_assets_src: "{{ kn_repo_root }}/assets/"
 # assets/css/{textures,models,sound} duplicate the top-level dirs (~450 MB); the
-# client only reads css/fonts from there.
-kn_web_assets_exclude: ["/README.md", "/user-assets/", "/css/textures/", "/css/models/", "/css/sound/", "*.blend", "*.psd"]
+# client only reads css/fonts from there. user-assets/ (~19 MB) is synced: the web client
+# fetches it (the minimap images of every official map, user-asset textures, AI models and
+# sounds), and so does the launcher, whose content index (role kn_updates) is this tree.
+kn_web_assets_exclude: ["/README.md", "/css/textures/", "/css/models/", "/css/sound/", "*.blend", "*.psd"]

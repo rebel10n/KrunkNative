@@ -7,9 +7,9 @@
 # The archive is reproducible: the same files give the same bytes (GNU tar: sorted, owner 0, fixed
 # mtime 2026-01-01, symlinks followed; gzip -n), so a bundle can be rebuilt and checked anywhere.
 #
-# What goes in (the filter kn_web uses for the web host, deploy/ansible/roles/kn_web, but with
-# user-assets/, which the native client plays from disk): every file of assets/ except README.md,
-# css/{textures,models,sound}/ (copies of the top-level dirs), *.blend, *.psd and version.txt.
+# What goes in (the filter kn_web uses for the web host, deploy/ansible/roles/kn_web): every file of
+# assets/ except README.md, css/{textures,models,sound}/ (copies of the top-level dirs), *.blend,
+# *.psd and version.txt.
 #   --part content  (default) only what git does not track: the exe packages already carry the
 #                   code-coupled, git-tracked part (shaders/ maps/ img/ editor/ skins.json previews.json)
 #   --part all      everything (an offline install from one archive)

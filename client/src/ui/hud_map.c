@@ -14,8 +14,11 @@
 //   - v7 bug fixed: the spectator's specMiniMap key toggles a setting that does not exist
 //     (setSetting("specMiniMap"), index.js:16357), so it does nothing. Here it hides / shows
 //     the minimap while spectating (a session toggle, like showSpectatorNameTags).
-//   Maps with an "mmId" (Kanji among the official ones) draw that user asset image
+//   Maps with an "mmId" (all 27 official v7 maps) draw that user asset image
 //   (user-assets/<id>/texture.png, updateImage / drawImage) instead of their blocks.
+//   - Difference: v7 draws neither the image nor the blocks until the image has loaded, so a
+//     missing image (a 404 from the asset host) leaves an empty map. KrunkNative loads it
+//     synchronously (ensure_asset_file) and draws the blocks when it cannot be loaded.
 //
 // Death markers (game-overlay.js addDeathMarker / f1566): a skull at the death spot of a
 // teammate, ourselves, or anyone while spectating, sized max(0.3, 1 - d / 600) * 70 overlay
@@ -200,7 +203,10 @@ static void mm_update_image(const Map *map) {
     if (asset <= 0) return;
     char path[1024];
     snprintf(path, sizeof(path), "%suser-assets/%d/texture.png", assets_path(), asset);
-    if (!ensure_asset_file(path)) return;
+    if (!ensure_asset_file(path)) {
+        fprintf(stderr, "[minimap] %s: not found, drawing the map's blocks\n", path);
+        return;
+    }
     int n = 0;
     stbi_set_flip_vertically_on_load_thread(0);
     g_mm.image = stbi_load(path, &g_mm.image_w, &g_mm.image_h, &n, 4);
@@ -393,18 +399,17 @@ static void mm_update(Client *client, const double dt) {
     const float yaw = me && me->active ? me->direction.y : client->camera.rotation.y; // controls.xDr
     if (type == 1) cc_rotate(c, yaw);
 
-    // useImage: the "mmId" image over the square around the bounds' centre (unscaled width)
-    if (g_mm.image_asset > 0) {
-        if (g_mm.image) {
-            const float half = g_mm.unscaled_width / 2.0f;
-            const float x0 = mm_conv(g_mm.cen[0] - half, 0), x1 = mm_conv(g_mm.cen[0] + half, 0);
-            const float z0 = mm_conv(g_mm.cen[2] - half, 2), z1 = mm_conv(g_mm.cen[2] + half, 2);
-            const float w = x1 - x0, h = z1 - z0;
-            cc_save(c);
-            cc_translate(c, mm_conv(g_mm.cen[0], 0), mm_conv(g_mm.cen[2], 2));
-            cc_draw_image(c, g_mm.image, g_mm.image_w, g_mm.image_h, -w / 2.0f, -h / 2.0f, w, h);
-            cc_restore(c);
-        }
+    // useImage: the "mmId" image over the square around the bounds' centre (unscaled width);
+    // the blocks when the map has none, or when it could not be loaded (see the top)
+    if (g_mm.image_asset > 0 && g_mm.image) {
+        const float half = g_mm.unscaled_width / 2.0f;
+        const float x0 = mm_conv(g_mm.cen[0] - half, 0), x1 = mm_conv(g_mm.cen[0] + half, 0);
+        const float z0 = mm_conv(g_mm.cen[2] - half, 2), z1 = mm_conv(g_mm.cen[2] + half, 2);
+        const float w = x1 - x0, h = z1 - z0;
+        cc_save(c);
+        cc_translate(c, mm_conv(g_mm.cen[0], 0), mm_conv(g_mm.cen[2], 2));
+        cc_draw_image(c, g_mm.image, g_mm.image_w, g_mm.image_h, -w / 2.0f, -h / 2.0f, w, h);
+        cc_restore(c);
     } else if (map && map->object_count) { // map blocks, lowest first, hsl(220, 25%, 35 - y / MAX_HEIGHT * 20 %)
         const Object **list = malloc(map->object_count * sizeof(*list));
         size_t n = 0;
