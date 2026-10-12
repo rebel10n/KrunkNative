@@ -43,10 +43,7 @@ static double (*g_clock)(void);
 
 static double now_ms(void)
 {
-    if (g_clock) return g_clock();
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return floor((double) ts.tv_sec * 1000.0 + (double) ts.tv_nsec / 1e6);
+    return g_clock ? g_clock() : ks_wall_ms(); // portable (MinGW has no timespec_get)
 }
 
 void ks_server_set_clock(double (*clock)(void))

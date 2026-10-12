@@ -50,6 +50,8 @@ Game *ks_game_of(KsScript*);             // the Game of an instance loaded by ks
 void *ks_game_host_user(KsScript*);      // host_user given to ks_game_load
 // Seed for UTILS.rand* (ks_script_seed); ks_game_load seeds from the map + a host value.
 void ks_game_seed(Game*, uint64_t seed);
+// Wall clock (Unix ms) of TIME.now and the rate-limit windows when the host has no clock.
+double ks_wall_ms(void);
 
 // Hook calls (one host entry each; runtime errors are contained and logged). Missing hooks
 // and missing scripts are no-ops. ks_game_call returns ks_script_call_hook's result (0 ok,

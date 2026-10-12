@@ -11,6 +11,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <sys/timeb.h>
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 // ---------------------------------------------------------------------------
 // State
@@ -74,17 +81,25 @@ static void free_refs(KsGame *kg)
     kg->ref_count = kg->ref_cap = 0;
 }
 
-static double wall_ms(void)
+// Wall clock in ms. MinGW's C runtime has no C11 timespec_get/TIME_UTC: _ftime64 there
+// (same as ks_stdlib.c).
+double ks_wall_ms(void)
 {
+#ifdef _WIN32
+    struct __timeb64 tb;
+    _ftime64(&tb);
+    return (double) tb.time * 1000.0 + (double) tb.millitm;
+#else
     struct timespec ts;
     if (timespec_get(&ts, TIME_UTC) != TIME_UTC) return (double) time(NULL) * 1000.0;
     return floor((double) ts.tv_sec * 1000.0 + (double) ts.tv_nsec / 1e6);
+#endif
 }
 
 double ks_game_now_ms(KsGame *kg)
 {
     if (kg && kg->host && kg->host->now_ms) return kg->host->now_ms(kg->host_user);
-    return wall_ms();
+    return ks_wall_ms();
 }
 
 // ---------------------------------------------------------------------------
