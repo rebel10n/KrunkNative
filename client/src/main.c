@@ -112,6 +112,7 @@ void client_unload_map(Client*);
 void client_tick(Client*, float, float);
 void client_tick_net(Client*);
 void resize_viewport(GLFWwindow*, int, int);
+static void client_sync_window_size(Client*);
 void scroll_callback(GLFWwindow*, double, double);
 static void cursor_pos_callback(GLFWwindow*, double, double);
 static void mouse_button_callback(GLFWwindow*, int, int, int);
@@ -306,17 +307,28 @@ static void web_canvas_size(int *width, int *height) {
     *height = css_height >= 1.0 ? (int) css_height : 720;
 }
 
+// Browser resizes are only noted here and applied by the next frame (web_sync_canvas_size): the
+// callback is registered right after the window exists, and startup yields to the browser at every
+// asset fetch (ASYNCIFY), so a resize while the page, the settings or the map load must not be lost
+// (it was, with the callback registered after startup) nor resize the canvas in the middle of a
+// startup step. 1 at start: the first frame measures the canvas.
+static int g_web_resize_pending = 1;
+
 static bool web_on_resize(const int event_type, const EmscriptenUiEvent *event, void *user_data) {
     (void) event_type;
     (void) event;
+    (void) user_data;
+    g_web_resize_pending = 1;
+    return true;
+}
 
-    Client *client = user_data;
+static void web_sync_canvas_size(Client *client) {
+    if (!g_web_resize_pending) return;
+    g_web_resize_pending = 0;
+
     int width, height;
-
     web_canvas_size(&width, &height);
     glfwSetWindowSize(client->window, width, height); // emscripten GLFW resizes the canvas and fires resize_viewport()
-
-    return true;
 }
 
 static void web_main_loop(void *user_data) {
@@ -619,7 +631,9 @@ int main(int argc, char **argv) {
     glfwSetMouseButtonCallback(INSTANCE.window, mouse_button_callback);
     glfwSetKeyCallback(INSTANCE.window, key_callback);
     glfwSetCharCallback(INSTANCE.window, char_callback);
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+    emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, 0, web_on_resize); // before startup's fetches yield
+#else
     glfwSetWindowFocusCallback(INSTANCE.window, window_focus_callback); // alt-tab = pointer lock lost
 #endif
     if (!SCENARIO_ACTIVE()) gamepad_init(&INSTANCE); // controller hotplug (GLFW joysticks / browser gamepads)
@@ -748,8 +762,6 @@ int main(int argc, char **argv) {
 #endif
 
 #ifdef __EMSCRIPTEN__
-    emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, &INSTANCE, 0, web_on_resize);
-
     // The browser drives the frame loop (requestAnimationFrame). main() returns
     // and the emscripten runtime stays alive because EXIT_RUNTIME is off; the
     // page going away is the only shutdown.
@@ -808,6 +820,10 @@ void client_frame(Client *client) {
 
     client->last_frame_time = frame_time;
 
+#ifdef __EMSCRIPTEN__
+    web_sync_canvas_size(client); // a browser resize since the last frame (startup included)
+#endif
+    client_sync_window_size(client); // before anything draws: viewport, HTML layout, pbuffer
     gamepad_frame_begin(); // updateMouseInp's gamepad.active reset leads the game frame (gamepad.c)
     // Web: asset fetches inside the frame yield to the browser, which then composites the
     // canvas; the frame draws offscreen and reaches the canvas whole (frame_target.h).
@@ -1214,11 +1230,50 @@ void client_tick_net(Client *client) {
     free(packets);
 }
 
+// The framebuffer size resize_viewport() last applied to the viewport, the HTML layout and the
+// headless pbuffer (0x0: not yet). client_sync_window_size() compares it with the window's.
+static int g_applied_fb_width, g_applied_fb_height;
+
 void resize_viewport(GLFWwindow *window, const int width, const int height) {
     if (headless_current_window() != window) return;
     headless_resize(width, height); // headless: the pbuffer follows the null-platform window
     glViewport(0, 0, width, height);
     html_ui_resize(width, height);
+    g_applied_fb_width = width;
+    g_applied_fb_height = height;
+
+    static int log = -1; // KRUNKNATIVE_RESIZE_LOG=1: what each resize applied (client/tests/resize_early_e2e.py)
+    if (log < 0) {
+        const char *env = getenv("KRUNKNATIVE_RESIZE_LOG");
+        log = env && *env && strcmp(env, "0") != 0;
+    }
+    if (log) {
+        GLint viewport[4] = {0};
+        float page_width = 0.0f, page_height = 0.0f;
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        html_dom_viewport(&page_width, &page_height, NULL);
+        fprintf(stderr, "[resize] %dx%d viewport %dx%d page %.0fx%.0f\n", width, height, viewport[2], viewport[3], page_width, page_height);
+    }
+}
+
+// Window size changes are applied idempotently, not only on GLFW's framebuffer-size event: every
+// frame compares the framebuffer size with the size resize_viewport() last applied. An event that
+// never came or came with a stale size (a synthetic ConfigureNotify) left the viewport, the HTML
+// layout and the headless pbuffer at the old size until the next resize ("resizing the window
+// before it loads the game"), and a resize while startup blocks the loop drew the first frame at
+// the old size (events wait for its glfwPollEvents). The camera aspect comes from the viewport
+// (scene.c); the scene / frame targets query the size every frame.
+// The installed callback is called, so a hub/editor/viewer page (app_mode.c) hears it too.
+static void client_sync_window_size(Client *client) {
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(client->window, &width, &height);
+    if (width <= 0 || height <= 0) return; // minimized: keep the last size
+    if (width == g_applied_fb_width && height == g_applied_fb_height) return;
+
+    const GLFWframebuffersizefun callback = glfwSetFramebufferSizeCallback(client->window, NULL);
+    glfwSetFramebufferSizeCallback(client->window, callback);
+    if (callback) callback(client->window, width, height);
+    else resize_viewport(client->window, width, height);
 }
 
 // The HTML layer works in framebuffer pixels; GLFW reports cursor positions in
