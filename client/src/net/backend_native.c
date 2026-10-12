@@ -9,6 +9,7 @@
 #include <backend.h>
 #include <cJSON.h>
 #include "backend_internal.h"
+#include <headless.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -333,6 +334,13 @@ void backend_init(const char *cli_url) {
     char saved[256] = "";
     if ((!url || !url[0]) && html_storage_get("knBrainUrl", saved, sizeof(saved)) > 0) url = saved; // client setting
     char local[256] = "";
+    if ((!url || !url[0]) && headless_enabled()) {
+        // headless runs (tests, captures, smoke) never reach the production coordinator unless
+        // a URL is given explicitly (--brain / KRUNKNATIVE_BRAIN_URL)
+        backend_store_url("");
+        printf("[backend] headless: no account service (set KRUNKNATIVE_BRAIN_URL to use one)\n");
+        return;
+    }
     if (!url || !url[0]) {
         // nothing configured: the mode's account service (online: coordinator.krunk.io), probed first
         snprintf(local, sizeof(local), "%s", online_default_account_url());
