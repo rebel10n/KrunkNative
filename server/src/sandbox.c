@@ -6,6 +6,7 @@
 #include <server_config.h>
 #include <server_log.h>
 #include <knet.h>   // NET_LOOPBACK_FD_BASE, net_set_loopback_send
+#include <ks_server.h> // KrunkScript server host
 #include <bots.h>
 #include <ai.h>
 #include <modes.h>
@@ -246,6 +247,7 @@ int sandbox_start(const SandboxConfig *cfg) {
 
     pthread_mutex_lock(&g_server->lock);
     net_install_game_hooks();
+    ks_server_round_init(); // KrunkScript: the map's server script runs in the sandbox too
     accounts_init(); // standalone: lobby id, first round's lobby size / round length
     pthread_mutex_unlock(&g_server->lock);
 
@@ -275,6 +277,7 @@ void sandbox_stop(void) {
     pthread_mutex_lock(&g_server->lock);
     accounts_shutdown();
     while (g_server->client_count) net_remove_client(&g_server->clients[0]); // closes every link's server end
+    ks_server_shutdown(); // KrunkScript onServerClosed, then the script is freed
     pthread_mutex_unlock(&g_server->lock);
 
     Game *game = &g_server->game;

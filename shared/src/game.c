@@ -3,6 +3,7 @@
 #include <bots.h>
 #include <world.h>
 #include <triggers_v7.h>
+#include <ks_game.h> // KrunkScript hook points (onGameEnd, TIME.freeze)
 #include <spawnables.h>
 #include <pcg_basic.h>
 #include <string.h>
@@ -418,6 +419,7 @@ void game_end_round(Game *game) {
     }
 
     if (game->mode) mode_send_end(game, winner, sorted, count);
+    ks_game_on_game_end(game); // KrunkScript onGameEnd(), after mode.onEnd (GJS:4665-4667)
 
     memset(game->projectiles, 0, sizeof(game->projectiles));
 
@@ -537,6 +539,7 @@ static int game_tick_round(Game *game, const float delta) {
 
     if (game->round_timer <= 0.0f && game->mode && game->mode->config.game_time == 0.0f) return 0; // gameTime 0: no clock
     if (game->round_endless) return 0; // /endless: endTimer "inf" skips the gameTimer countdown
+    if (ks_game_round_frozen(game)) return 0; // KrunkScript GAME.TIME.freeze(): gameTimer 0 stops the countdown
 
     game->round_timer -= delta;
 

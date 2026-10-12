@@ -4,6 +4,7 @@
 #include <info_query.h>
 #include <rcon.h>
 #include <bots.h>
+#include <ks_server.h> // KrunkScript server host
 #include <pthread.h>
 #include <pcg_basic.h>
 #include <errno.h>
@@ -763,6 +764,7 @@ int main(int argc, char **argv) {
 
     // backend: lobby id, bans file, per-mode lobby size / round length, brain thread
     pthread_mutex_lock(&g_server->lock);
+    ks_server_round_init(); // KrunkScript: the startup map's server script, start()
     accounts_init();
     info_query_update(0.0f); // the query snapshot exists before any transport can answer queries
     pthread_mutex_unlock(&g_server->lock);
@@ -809,6 +811,7 @@ int main(int argc, char **argv) {
     const size_t client_count = g_server->client_count;
     server_disconnect_all();
     if (client_count) server_log("Disconnected %lu client%s", (unsigned long) client_count, client_count == 1 ? "" : "s");
+    ks_server_shutdown(); // KrunkScript onServerClosed (the net thread has stopped)
 
     net_cleanup();
     rcon_stop();

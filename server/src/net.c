@@ -8,6 +8,8 @@
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
 #include <ai.h>
 #include <bots.h>            // Krunker v7.1.4 bot players (shared/src/bots.c)
+#include <ks_server.h>       // KrunkScript server host (server/src/ks_server_host.c)
+#include <ks_game.h>
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -402,6 +404,7 @@ static void net_start_spectating(ClientConnection *client) {
 
     if (client->player) {
         Player *player = client->player;
+        ks_server_on_leave(client); // KrunkScript onPlayerLeave: the player leaves the match
         player->active = 0;
         game_player_left(&g_server->game, player);
 
@@ -523,6 +526,7 @@ static void net_change_map_internal(const int map_index, const int mode_index, c
     for (size_t i = 0; i < g_server->client_count; i++) g_server->clients[i].joined = 0;
 
     game_init(&g_server->game, map_index, mode_index, 0);
+    ks_server_round_init(); // KrunkScript: (re)load the map's server script, start()
     accounts_round_changed(); // lobby size / round length per mode, billboard rotation, match id
 
     server_log("Loaded map %d mode %d", g_server->game.current_map_index, g_server->game.current_mode_index);
@@ -756,6 +760,8 @@ void net_remove_client(ClientConnection *client) {
     accounts_on_disconnect(client); // partial stats commit, player-leave to the brain
     on_client_disconnect(client);
     net_set_spectating(client, 0);
+    ks_server_on_leave(client); // KrunkScript onPlayerLeave, before the player is removed
+    ks_server_on_disconnect(client);
     if (client->player) {
         client->player->active = 0;
         game_player_left(&g_server->game, client->player);
@@ -809,6 +815,7 @@ static int net_handle_chat(ClientConnection *client, const NetPacket *packet) {
     }
 
     server_log("[chat] %s: %s", client->name, text);
+    ks_server_on_chat(client, text); // KrunkScript onChatMessage (not for "/" commands)
     net_broadcast_chat_except(NULL, client->id, NET_CHAT_PLAYER, client->name, text);
     return 1;
 }
@@ -1002,6 +1009,10 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     switch (packet->type) {
         case NET_PACKET_HELLO:
+            ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
+            break;
+        case NET_PACKET_SCRIPT_MSG: // KrunkScript GAME.NETWORK.send from the client script
+            ks_server_on_script_msg(client, packet);
             break;
         case NET_PACKET_FORWARDED: // net-bridge: the browser's address, before its HELLO
             if (first_packet) net_handle_forwarded(client, packet);
@@ -1214,6 +1225,7 @@ static void net_send_reconciliation(void) {
     for (size_t i = 0; i < g_server->client_count; i++) {
         ClientConnection *client = &g_server->clients[i];
         Player *player = client->player;
+        if (ks_game_flag(&g_server->game, KS_FLAG_NO_SERVER_SYNC)) break; // KrunkScript DEFAULT.disableServerSync
         if (!net_recon_due(player, now, &client->next_recon_at)) continue;
 
         NetReconPacket packet;

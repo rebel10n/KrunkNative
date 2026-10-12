@@ -3,6 +3,7 @@
 #include <server.h>
 #include <server_accounts.h>
 #include <bots.h>
+#include <ks_server.h> // KrunkScript server host
 #include <string.h>
 #include <time.h>
 
@@ -71,6 +72,7 @@ void server_core_tick(const float now, const float delta, const double tick_wall
     g_server->tick_wall = tick_wall; // net_input_arrival: wall clock -> game.state_now
     if (g_server->game.bots) server_bot_slots(); // bot quota: the lobby size (per mode), none in ranked
     game_tick(&g_server->game, now, delta);
+    ks_server_tick(delta); // KrunkScript update() after the game update (GJS:4960), custom sync values
     accounts_tick(now); // brain events, join timeouts, stats commits, lobby pushes
     net_check_idle_clients(now);
     net_broadcast_states();

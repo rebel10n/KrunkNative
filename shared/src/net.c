@@ -405,7 +405,18 @@ uint32_t net_map_hash(const cJSON *map, char **json_out, size_t *size_out) {
         }
     }
 
-    char *json = cJSON_PrintUnformatted(map);
+    // KrunkScript 2.1 (GJS:625-628): the server script never leaves the server. Clients hash
+    // and receive the map without scripts.server (both sides strip it, so hashes agree).
+    char *json;
+    const cJSON *scripts = cJSON_GetObjectItemCaseSensitive(map, "scripts");
+    if (cJSON_IsObject(scripts) && cJSON_GetObjectItemCaseSensitive(scripts, "server")) {
+        cJSON *copy = cJSON_Duplicate(map, 1);
+        cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(copy, "scripts"), "server");
+        json = copy ? cJSON_PrintUnformatted(copy) : NULL;
+        cJSON_Delete(copy);
+    } else {
+        json = cJSON_PrintUnformatted(map);
+    }
     if (!json) return 0;
 
     const size_t size = strlen(json);

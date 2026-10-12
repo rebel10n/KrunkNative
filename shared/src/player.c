@@ -1,6 +1,7 @@
 #include <shared.h>
 #include <ai.h>
 #include <math.h>
+#include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
@@ -189,6 +190,7 @@ void player_spawn(Player *player) {
 
     // A player that reached a check point respawns there (shared/src/triggers.c).
     if (game_is_authority(player->game)) game_spawn_at_checkpoint(player->game, player);
+    ks_game_on_player_spawn(player->game, player); // KrunkScript: player script state reset, server onPlayerSpawn
 }
 
 void player_queue_input(Player *player, const Input *input) {
@@ -1010,6 +1012,8 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     rounded.x_dir = player_round3(player_clamp_pitch(raw_input->x_dir));
     rounded.y_dir = player_round3(player_wrap_yaw(raw_input->y_dir));
     const Input *input = &rounded;
+    // KrunkScript onPlayerUpdate + disableDefault masks; disablePlayerBehaviour skips the rest (PLJ:894-948)
+    if (player->game->ks && ks_game_on_player_update(player->game, player, &rounded)) return;
 
     // Math.max(0, Math.min(input[1], config.dltMx)): NaN and negative deltas become 0.
     const float delta = input->delta > 0.0f ? MIN(input->delta, game_constants.max_delta) : 0.0f;
@@ -2023,6 +2027,8 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     }
 
     combat_send_health(game, victim, dealer);
+    // KrunkScript onPlayerDamage: damage > 0 that leaves the victim alive (PLS:4295-4299)
+    if (damage > 0.0f && victim->health > 0.0f) ks_game_on_player_damage(game, victim, dealer, damage);
 
     return victim->health <= 0.0f;
 }
@@ -2116,6 +2122,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         const NetKillStreakPacket kst = {.uid = killer->uid, .streak = streak_message};
         game_send(game, NET_TARGET_ALL, NET_PACKET_KILL_STREAK, &kst, sizeof(kst));
     }
+    ks_game_on_player_death(game, player, killer); // KrunkScript onPlayerDeath(id, killerID) (PLS:4889-4891)
 }
 
 void player_melee(Player *player) {

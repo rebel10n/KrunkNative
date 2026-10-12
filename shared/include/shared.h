@@ -1205,6 +1205,7 @@ typedef struct Game_t {
     GameHooks hooks;
     // WP-A (shared/include/triggers_v7.h): the KrunkScript hooks of the trigger runtime, NULL none
     const struct TriggerScriptHooks *script_hooks;
+    struct KsGame *ks;            // KrunkScript instance of this Game (shared/include/ks_game.h), NULL none
     GameProjectile projectiles[GAME_MAX_PROJECTILES];
     struct GameAIs_t *ai;         // Krunker game.AI (shared/include/ai.h): NULL until the first AI
     struct GameBots_t *bots;      // Krunker v7.1.4 game.bots (shared/include/bots.h): NULL until the first bot
@@ -1589,6 +1590,20 @@ typedef struct {
     char name[PLAYER_NAME_SIZE];    // sender name ("" for server lines)
     char text[NET_CHAT_TEXT_SIZE];  // raw text; the HUD escapes it
 } NetChatPacket;
+
+// ---- KrunkScript packets (doc/v7/krunkscript.md 2.5-2.8), ids in NET_PACKET_BLOCK_KRUNKSCRIPT
+// (200-239). Payload layouts and helpers: shared/include/ks_net.h. The server sends them only to
+// connections whose HELLO announced NET_PROTOCOL_MINOR_V7; clients send SCRIPT_MSG only to such
+// servers (INIT minor) or offline.
+#define NET_PACKET_SCRIPT_MSG (NET_PACKET_BLOCK_KRUNKSCRIPT + 0)  // both ways: KsNetChunkHeader + message body (v7 "sd")
+#define NET_PACKET_SCRIPT_LOG (NET_PACKET_BLOCK_KRUNKSCRIPT + 1)  // S->C: uint8 is_error + text (v7 "ksL", GAME.log of the server script)
+#define NET_PACKET_SCRIPT_SYNC (NET_PACKET_BLOCK_KRUNKSCRIPT + 2) // S->C to the player: its custom sync values (registerSyncValues)
+#define NET_PACKET_SCRIPT_CHAT (NET_PACKET_BLOCK_KRUNKSCRIPT + 3) // S->C: NetScriptChatPacket, GAME.CHAT.send / broadcast (kind 2 + colour)
+
+typedef struct {
+    uint32_t color;                 // 0xRRGGBB of the line (v7 default #fc03ec)
+    NetChatPacket chat;             // kind NET_CHAT_SERVER, uid -1
+} NetScriptChatPacket;
 
 typedef struct {
     int32_t victim_uid;

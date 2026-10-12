@@ -71,6 +71,7 @@ set(SERVER_CORE_SOURCES
     server/src/events.c
     server/src/server_core.c
     server/src/sandbox.c
+    server/src/ks_server_host.c
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -424,6 +425,13 @@ else ()
     target_link_libraries(sandbox_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(sandbox_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # ks_server_test: the KrunkScript server host (server/src/ks_server_host.c) over the sandbox
+    add_executable(ks_server_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/ks_server_test.c)
+    target_link_libraries(ks_server_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(ks_server_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # trigger_authority_test: map triggers / interact fire on an authority game only (is_local or a server)
