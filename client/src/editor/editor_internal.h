@@ -555,13 +555,18 @@ HtmlElem ed_generic_popup(const char *html, const char *cls);
 void ed_clear_pops(void);
 int ed_popup_is(const char *cls);                   // the generic popup is open with that class
 
-// ---- editor_net.c: asset / mod / texture browsers (windows 2, 5, 7), publishing (social socket)
-// "Select Custom" / "Select Sound" / "Select Mod" buttons; c->arg: 0 selectModel (BOT assetID),
-// 1 selectTexture, 2 selectAudio (assetSound), 3 selectDeath, 4 selectIdle, 5 selectAttack,
-// 6 selectAgro, 7 selectMod
+// ---- editor_net.c: asset / mod / texture / sound / My Games windows (2, 5, 7, 9, 14), publishing
+// (social socket). "Select Custom" / "Select Sound" / "Select Mod" buttons; c->arg: 0 selectModel,
+// 1 selectTexture, 2 selectAudio (assetSound), 3 selectDeath, 4 selectIdle, 5 selectShoot,
+// 6 selectAgro, 7 selectMod, 8 selectShootHit, 9 selectMelee, 10 selectMeleeHit, 11 selectProjModel,
+// 12 selectCloudEN, 13 selectEmissiveCloudEN, 14 selectAmbEN, 20 selectEmissiveCloud, 21 selectCloud,
+// 22 selectAmb
 void ed_net_select(EdCtl *c);
-int ed_net_window_gen(int index, EdBuf *out);           // windows 2, 5, 7, 8 into out; 0 = not one of them
-void ed_net_view_assets(int type);                      // viewAssets(type): the Assets window for a CUSTOM_ASSET / BOT model
+int ed_net_window_gen(int index, EdBuf *out);           // windows 2, 5, 7, 9, 14 into out; 0 = not one of them
+void ed_net_view_assets(int type);                      // 0: viewAssets([0, 3], "createObjects") (CUSTOM_ASSET); 1: viewModels (a Select Asset target)
+void ed_net_my_assets(void);                            // KE.myAssets (Account > My Assets)
+void ed_net_publish_asset(void);                        // KE.publishAssetPopup (Publish > Asset)
+int ed_net_script(const char *cmd, const char *arg);    // KRUNKNATIVE_EDITOR_SCRIPT "net:..." (1 = handled)
 void ed_net_publish(void);                              // toolbar Publish... (publishMap)
 void ed_net_frame(void);                                // page_tick after the 3D view is drawn (publish thumbnail)
 int ed_net_keydown(const HtmlEvent *ev);                // Enter in a browser search field; 1 = handled
@@ -578,11 +583,14 @@ void ed_terrain_fini(void);                              // page_leave: drop bot
 
 // ---- editor_tools.c: Customize / Tools / Grouping panels, replaceObject, createGroup, loadFile
 int ed_panel_right_begin(EdBuild *b, const char *name);  // editor_panels.c: 0 = another panel is locked
-int ed_tools_panel_show(const char *name);              // "customize" "tools" "grouping"; 0 = not one of them
+int ed_tools_panel_show(const char *name);              // "tools" "prefab"; 0 = not one of them
+int ed_tools_script(const char *cmd, const char *arg);  // KRUNKNATIVE_EDITOR_SCRIPT tool:... (1 = handled)
+const char *ed_object_painter_json(void);             // the Object Painter's JSON (type 0) or scrap preset; NULL = none
 void ed_find_center(const cJSON *arr, double out[6]);   // findCenter: [x, minY, z, w, h, d]
 void ed_merge_objects(cJSON *arr);                      // mergeObjects
 void ed_reflect_array(cJSON *arr, int axis);            // reflect(e, t, false)
 void ed_obj_replace(EditorObject *target, const char *json, const char *type, int group); // replaceObject
+void ed_obj_replace_at(vec3 pos, const char *json, int group); // replaceObject(fakeSelected(pos), json, true, false, group): nothing removed
 void ed_create_group(EditorObject *replaced, EditorObject **members, size_t count, double rot_y, int remove);
 void ed_json_input(int file);                           // jsonInput(file)
 void ed_json_input_for(int file, EditorObject *target); // jsonInput(file, t) (NULL = selection)
@@ -603,3 +611,8 @@ void ed_quickgui_install(HtmlHandlerEntry *table, size_t *count, size_t max);
 typedef void (*EdFileFn)(void *user, const char *path);
 void ed_pick_file(const char *accept, EdFileFn fn, void *user); // loadFile: a picked file's path
 void ed_download(const char *text, const char *name);   // editor_io.c: download(text, name)
+// editor_io.c: a binary download (natively written to the user maps directory, the web build
+// saves a Blob of `mime`); the GLTF / MTL exports (editor_export.c)
+void ed_download_bytes(const void *data, size_t size, const char *name, const char *mime);
+void ed_file_export_gltf(void); // editor_export.c: File > Export GLTF (exportScene)
+void ed_file_export_mtl(void);  // File > Export MTL (exportScene2)

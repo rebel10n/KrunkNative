@@ -561,3 +561,46 @@ void ed_file_import(void) {
     editor_message(msg);
 #endif
 }
+
+// download(blob, name): a binary file (the GLTF / MTL exports, editor_export.c). The web build
+// saves a Blob of `mime`; natively the file goes to the user maps directory under that name.
+#ifdef __EMSCRIPTEN__
+EM_JS(void, kn_editor_download_bytes, (const char *name, const void *data, int size, const char *mime), {
+    var blob = new Blob([HEAPU8.slice(data, data + size)], {type: UTF8ToString(mime)});
+    var a = document.createElement("a");
+    a.style.display = "none";
+    a.href = URL.createObjectURL(blob);
+    a.download = UTF8ToString(name);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+});
+#endif
+
+void ed_download_bytes(const void *data, const size_t size, const char *name, const char *mime) {
+    if (!data || !name) return;
+#ifdef __EMSCRIPTEN__
+    kn_editor_download_bytes(name, data, (int) size, mime ? mime : "application/octet-stream");
+#else
+    (void) mime;
+    char dir[600], safe[128], path[800], msg[900];
+    user_maps_dir(dir, sizeof(dir));
+    size_t j = 0;
+    for (size_t i = 0; name[i] && j + 1 < sizeof(safe); i++) {
+        const char c = name[i];
+        safe[j++] = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ? c : '_';
+    }
+    safe[j] = 0;
+    if (!j || safe[0] == '.') snprintf(safe, sizeof(safe), "map%s", strrchr(name, '.') ? strrchr(name, '.') : "");
+    snprintf(path, sizeof(path), "%s/%s", dir, safe);
+    FILE *f = fopen(path, "wb");
+    int ok = 0;
+    if (f) {
+        ok = fwrite(data, 1, size, f) == size;
+        ok &= fclose(f) == 0;
+    }
+    snprintf(msg, sizeof(msg), ok ? "Saved %s." : "Could not write %s.", path);
+    editor_message(msg);
+#endif
+}

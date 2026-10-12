@@ -370,15 +370,21 @@ add("editor-1920", {"ref": REF + "/editor/editor-1920.png", "size": [EW, EH], "b
                     "state": {"page": "editor", "pageQuery": "new", "pageActions": ["closeWindow"], "anim_time": ANIM},
                     "frames": 3, "note": "Map editor (ui/editor.html), new map, Welcome window closed."},
     editor_chrome(rc))
+# editor WP6 (editor_net.c): the API windows. v7's capture has no API, so its lists show "Loading..."
+# forever; the render has no brain either: net:pending puts the list in that state (else the native
+# list shows its empty text, an intentional difference checked by tools/editor/windows_check.py)
 for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3)", "Settings window, General tab"),
-                                ("editor-win-controls", "window1", "showWindow(1)", "Controls window, Default tab")):
+                                ("editor-win-controls", "window1", "showWindow(1)", "Controls window, Default tab"),
+                                ("editor-win-assets", "window2", ["showWindow(2)", "KE.kn.script('net:pending:2')"], "Assets window, New tab, request pending"),
+                                ("editor-win-sounds", "window9", ["showWindow(9)", "KE.kn.script('net:pending:9')"], "Sounds window, New tab, request pending")):
     rc = rects("editor/" + ref)
     regs = [r for r in editor_chrome(rc, True) if r["name"] in ("toolbar", "version", "left-panel")]
     # Secular One rasterises about 1 px higher natively (FreeType vs Chromium): 4 %
     regs.append(R("window", pad(rc["menuWindow"], 2, EW, EH), "text", "#menuWindow: " + note, max_pct=4.0))
+    actions = action if isinstance(action, list) else [action]
     add(name, {"ref": "%s/editor/%s.png" % (REF, ref), "size": [EW, EH], "background": "#000000",
-               "state": {"page": "editor", "pageQuery": "new", "pageActions": [action], "anim_time": ANIM},
-               "frames": 3, "note": "Map editor, new map, %s (%s)." % (note, action)},
+               "state": {"page": "editor", "pageQuery": "new", "pageActions": actions, "anim_time": ANIM},
+               "frames": 3, "note": "Map editor, new map, %s (%s)." % (note, actions[0])},
         regs)
 
 

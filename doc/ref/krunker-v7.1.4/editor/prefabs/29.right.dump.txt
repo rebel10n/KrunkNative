@@ -75,6 +75,9 @@ Fs Hitbox closed
 L[subsection] Width Mlt : sval=1 range[0.1,10,0.1]=1
 L[subsection] Height Mlt : sval=1 range[0.1,20,0.1]=1
 -
+Fs Trigger Event closed
+L[] Event : select#28[onShoot..onCustomValGreater]=onShoot
+L[] Event Value : sval=0 range[0,10000,1]=0
 Fs Trigger Actions closed
 L[] Action Chance (%) : sval=0 range[0,100,1]=0
 B Add Action

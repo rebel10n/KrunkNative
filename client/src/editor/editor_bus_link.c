@@ -447,10 +447,13 @@ static int map_key_known(const char *k) {
     return ed_model_map_key_known(k); // a mapConfig default (editor_model.c)
 }
 
-static void map_changed(const int terrain, const int zone) {
+// terrain* / sizeMlt -> regenTerrain, zone* -> regenZone (which also regens the ocean),
+// oc* -> regenOcean (the ocean preview plane, editor_terrain.c)
+static void map_changed(const int terrain, const int zone, const int ocean) {
     editor_apply_lighting();
     if (terrain) ed_terrain_regen();
     if (zone) ed_zone_regen();
+    else if (ocean) ed_ocean_regen();
     ed_panel_refresh_all();
     ed_mark_changed();
 }
@@ -736,13 +739,14 @@ static cJSON *tool_batch(EditorProject *p, const cJSON *args, const char **err, 
     cJSON *uuids = cJSON_AddArrayToObject(res, "uuids");
     if (cJSON_GetArraySize(mset) || cJSON_GetArraySize(munset)) {
         ed_history_add_map();
-        int terrain = 0, zone = 0;
+        int terrain = 0, zone = 0, ocean = 0;
         cJSON_ArrayForEach(it, mset) {
             cJSON *target = map_key_known(it->string) ? p->map_config : p->extra_map;
             cJSON_DeleteItemFromObjectCaseSensitive(target, it->string);
             if (!cJSON_IsNull(it)) cJSON_AddItemToObject(target, it->string, cJSON_Duplicate(it, 1));
             terrain |= !strncmp(it->string, "terrain", 7) || !strcmp(it->string, "sizeMlt");
             zone |= !strncmp(it->string, "zone", 4);
+            ocean |= !strncmp(it->string, "oc", 2);
         }
         cJSON_ArrayForEach(it, munset) {
             if (!cJSON_IsString(it)) continue;
@@ -757,8 +761,9 @@ static cJSON *tool_batch(EditorProject *p, const cJSON *args, const char **err, 
             }
             terrain |= !strncmp(it->valuestring, "terrain", 7);
             zone |= !strncmp(it->valuestring, "zone", 4);
+            ocean |= !strncmp(it->valuestring, "oc", 2);
         }
-        map_changed(terrain, zone);
+        map_changed(terrain, zone, ocean);
     }
     cJSON_ArrayForEach(it, rep) replace_object(ed_obj_find(json_uuid(cJSON_GetObjectItemCaseSensitive(it, "uuid"))), cJSON_GetObjectItemCaseSensitive(it, "data"), colors);
     cJSON_ArrayForEach(it, rem) {

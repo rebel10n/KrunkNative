@@ -127,8 +127,8 @@ void ed_fix_hitbox(EditorObject *e) {
 
 int ed_object_painter_click(const vec3 hit) {
     // shift + left click with Object Painter on and a JSON: 1 = handled
-    const char *json = ed_json_str(g_ed.advanced, "objectPainterJson", "");
-    if (!ed_json_truthy(cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "objectPainter")) || !json[0]) return 0;
+    const char *json = ed_object_painter_json(); // the JSON field or a scrap preset (editor_tools.c)
+    if (!json) return 0;
     // fakeSelected(x, y + 0.5, z): owner.position = position = the point, scale 1, no
     // rotation. replaceObject places at owner.position.y - scale.y / 2, which is the
     // serialized p.y of a unit box centred there. The fake is never in the scene, so

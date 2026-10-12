@@ -9,7 +9,7 @@
 #include <string.h>
 
 // the map's asset browsers (advancedOptions.selectEmissiveCloud / selectCloud / selectAmb):
-// ed_net_select codes it does not open yet (editor_net.c, WP6)
+// ed_net_select codes (editor_net.c opens the Textures / Sounds window)
 enum { ENV_SEL_EMISSIVE_CLOUD = 20, ENV_SEL_CLOUD = 21, ENV_SEL_AMB = 22 };
 
 // environment (Component > Environment)

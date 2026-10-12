@@ -548,6 +548,19 @@ else ()
     add_test(NAME editor_serialize_test COMMAND editor_serialize_test ${CMAKE_SOURCE_DIR}
              --golden ${CMAKE_SOURCE_DIR}/doc/ref/krunker-v7.1.4/editor/inspector-edits.json) # WP3: the inspector edits
 
+    # editor_export_test (doc/v7/editor.md WP6): File > Export GLTF / Export MTL
+    # (client/src/editor/editor_export.c, GL-free) against goldens and read back with fast_obj / cgltf
+    add_executable(editor_export_test client/tests/editor_export_test.c client/src/editor/editor_export.c
+                   client/src/editor/editor_export.h client/src/editor/editor_model.c client/src/editor/editor_data.c
+                   client/src/fast_obj.c ${SHARED_SOURCES} ${SHARED_HEADERS})
+    target_compile_definitions(editor_export_test PRIVATE ED_EXPORT_NO_EDITOR)
+    target_include_directories(editor_export_test PRIVATE client/src/editor client/include shared/include)
+    target_link_libraries(editor_export_test PRIVATE cJSON pcg_basic m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(editor_export_test PRIVATE ws2_32)
+    endif ()
+    add_test(NAME editor_export_test COMMAND editor_export_test ${CMAKE_SOURCE_DIR})
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 

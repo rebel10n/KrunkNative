@@ -303,8 +303,8 @@ static void toolbar_action(EdCtl *c) {
             }
             break;
         }
-        case TB_EXPORT_GLTF: // exportScene / exportScene2: WP6 (doc/v7/editor.md, editor_export.c)
-        case TB_EXPORT_MTL: editor_message("This export is not available yet."); break;
+        case TB_EXPORT_GLTF: ed_file_export_gltf(); break; // exportScene (editor_export.c)
+        case TB_EXPORT_MTL: ed_file_export_mtl(); break;   // exportScene2 (editor_export.c)
         case TB_UNDO: ed_history_execute(0); break;
         case TB_REDO: ed_history_execute(1); break;
         case TB_DELETE: ed_obj_delete_selected(); break;
@@ -335,13 +335,13 @@ static void toolbar_action(EdCtl *c) {
         case TB_TEMPLATES: editor_show_window(10); break;
         case TB_TOOLS: ed_panel_right_show("tools"); break;
         case TB_PUBLISH_GAME: ed_net_publish(); break; // publishMap (editor_net.c)
-        case TB_PUBLISH_ASSET: editor_message("Asset publishing is not available yet."); break; // publishAssetPopup: WP6
+        case TB_PUBLISH_ASSET: ed_net_publish_asset(); break; // publishAssetPopup (editor_net.c)
         case TB_PUBLISH_GUIDE: editor_show_window(11); break;
         case TB_LOGIN: // loginPopup: KrunkNative signs in through the hub (account_ui.c keeps the session)
             if (!app_route_url("/social.html")) editor_message("Log in from the Krunker Hub.");
             break;
         case TB_MY_GAMES: editor_show_window(14); break;
-        case TB_MY_ASSETS: editor_show_window(2); break; // myAssets: windows[1] tab 1 (editor_net.c)
+        case TB_MY_ASSETS: ed_net_my_assets(); break; // myAssets: windows[1] tab 1 (editor_net.c)
         case TB_CONTROLS: editor_show_window(1); break;
         case TB_GUIDE: editor_show_window(8); break;
         case TB_DOCUMENTATION: open_documentation(); break;
@@ -1248,24 +1248,6 @@ void ed_window_tick(const float dt) {
     }
 }
 
-// windows[8] "Sounds" (asset category 17): the list itself is editor_net.c's (WP6); offline
-// it shows what v7 shows before its API answers
-static int g_sounds_tab;
-
-static void window_sounds(EdBuild *b) {
-    static const char *tabs[3] = {"New", "My Sounds", "Search"};
-    edb_add(&b->html, "<div style='margin-bottom:15px'><div class=\"windowHeader\">\n\t\t\t\t<div style='display: block;'>Sounds <div class='publishAsset' onclick='KE.publishAssetPopup()'>Publish</div></div>\n\t\t\t</div>\n\t\t\t<div class='menuTabsNew'>\n\t\t\t\t");
-    for (int i = 0; i < 3; i++) edb_addf(&b->html, "<div class=\"menuTabNew %s\" onclick=\"windows[8].switchTab(%d)\">%s</div>", g_sounds_tab == i ? " tabANew" : "", i, tabs[i]);
-    edb_add(&b->html, "\n\t\t\t</div></div>\n\t\t\t<div style='color:rgba(0,0,0,0.3)' id='assetSList'>");
-    if (g_sounds_tab == 2) {
-        edb_add(&b->html, "<input type='text' id='assSrch' class='smlInput' placeholder='Sound Name' onkeydown='windows[8].searchKey()' />"
-                          "<div class='searchBtn' onclick='windows[8].searchAssets()'>Search</div><div style='color:rgba(0,0,0,0.5);margin-top:10px' id='searchResultsS'></div>");
-    } else {
-        edb_add(&b->html, "<div class='loadMoreW'>Loading...</div>");
-    }
-    edb_add(&b->html, "</div>");
-}
-
 // windows[9] "Templates": script templates, game templates, default maps (loadQuick), then
 // the Import / Load / New / Guide tiles
 static void templ_pairs(EdBuf *h, const cJSON *list, const int script, const int map) {
@@ -1369,12 +1351,6 @@ static void window_videos(EdBuild *b, const int tips) {
     edb_add(&b->html, "</div>");
 }
 
-// windows[13] "Maps" (My Games): the list is WP6's (listMaps over kn_brain); until then what
-// v7 shows while API_CLIENT.listMaps has not answered
-static void window_maps(EdBuild *b) {
-    edb_add(&b->html, "<div style='color:rgba(0,0,0,0.3)' id='mapList'><div class='loadMoreW'>Loading...</div></div>");
-}
-
 // windows[14] "Load Backup": newest first, "date - name"; click to import; Clear All
 static void window_backups(EdBuild *b) {
     EdBuf *h = &b->html;
@@ -1405,14 +1381,12 @@ void ed_window_show(const int index) {
         case 4: window_quick_add(&b); break;
         case 6: window_quick_customize(&b); break;
         case 8: window_welcome(&b); break;
-        case 9: window_sounds(&b); break;
         case 10: window_templates(&b); break;
         case 11: window_publishing(&b); break;
         case 12: window_videos(&b, 0); break;
         case 13: window_videos(&b, 1); break;
-        case 14: window_maps(&b); break;
         case 15: window_backups(&b); break;
-        case 2: case 5: case 7: ed_net_window_gen(index, &b.html); break; // editor_net.c (Assets, Mods, Textures)
+        case 2: case 5: case 7: case 9: case 14: ed_net_window_gen(index, &b.html); break; // editor_net.c (Assets, Mods, Textures, Sounds, Maps)
         default: break;
     }
     ed_gui_end(&b, g_ed.el_menu_window);
@@ -1435,25 +1409,6 @@ static int h_switch_tab(void *user, const HtmlEvent *ev, const HtmlArg *args, co
         g_controls_tab = tab;
         editor_show_window(1);
     }
-    return 1;
-}
-
-static int h_sounds_tab(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user; (void) ev;
-    const int tab = argc >= 1 ? (int) args[0].num : 0;
-    if (tab != g_sounds_tab) {
-        g_sounds_tab = tab;
-        editor_show_window(9);
-    }
-    return 1;
-}
-
-static int h_sounds_search(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user; (void) args; (void) argc;
-    const char *name = html_ui_current_handler();
-    if (name && !strcmp(name, "windows.8.searchKey") && !html_key_is_enter(ev->key)) return 1;
-    const HtmlElem r = html_dom_by_id("searchResultsS");
-    if (r) html_dom_set_text(r, "No Sounds found"); // the sound search is WP6's (editor_net.c)
     return 1;
 }
 
@@ -1496,8 +1451,6 @@ static int h_page_calls(void *user, const HtmlEvent *ev, const HtmlArg *args, co
         g_ed.mods &= ~GLFW_MOD_SHIFT;
     } else if (!strcmp(name, "KE.publishMap")) {
         ed_net_publish();
-    } else if (!strcmp(name, "KE.publishAssetPopup")) {
-        editor_message("Asset publishing is not available yet.");
     } else if (!strcmp(name, "openLink")) {
         // openLink(url, target): //docs.krunker.io, ...
         if (argc >= 1 && args[0].kind == HTML_ARG_STR) {
@@ -1519,9 +1472,6 @@ void ed_panels_install(HtmlHandlerEntry *table, size_t *count, const size_t max)
         {"windows.3.deleteButton", h_quick},
         {"windows.3.showCustomize", h_quick},
         {"windows.3.search", h_quick},
-        {"windows.8.switchTab", h_sounds_tab},
-        {"windows.8.searchAssets", h_sounds_search},
-        {"windows.8.searchKey", h_sounds_search},
         {"windows.14.clear", h_backup},
         {"KE.importMapBackup", h_backup},
         {"loadQuick", h_page_calls},
@@ -1531,7 +1481,6 @@ void ed_panels_install(HtmlHandlerEntry *table, size_t *count, const size_t max)
         {"importMapKey", h_page_calls},
         {"KE.loadFile", h_page_calls},
         {"KE.publishMap", h_page_calls},
-        {"KE.publishAssetPopup", h_page_calls},
         {"openLink", h_page_calls},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]) && *count < max; i++) table[(*count)++] = entries[i];

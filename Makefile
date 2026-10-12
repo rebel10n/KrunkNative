@@ -400,6 +400,18 @@ editor-mcp-test: build ## kn_editor_mcp test suite over MCP stdio (every tool, r
 editor-inspector-test: build ## Object inspector + Environment/Terrain/Zone/Ocean panels vs v7.1.4: panel dumps and edits (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/inspector_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 
+.PHONY: editor-windows-test
+editor-windows-test: build ## Assets / Mods / Textures / Sounds / My Games windows vs v7.1.4 (headless, no brain; tools/editor/windows_check.py)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/windows_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
+.PHONY: editor-publish-test
+editor-publish-test: build ## Editor publishing / My Games / asset windows against a local kn_brain (headless; needs config/config.json DB creds or KN_TEST_DB_DRIVER=sqlite)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/publish_e2e.py $(DEBUG_DIR)
+
+.PHONY: editor-tools-test
+editor-tools-test: build ## Tools / Prefabs panels, Optimize Faces and Color Merging vs v7.1.4 (headless; tools/editor/tools_check.py)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/tools_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 # its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
 EDITOR_MCP_BUILD := cmake-build-mcp-release
 editor-mcp-install: ## Install a release kn_editor_mcp to EDITOR_MCP_PREFIX/bin (default ~/.local/bin; schema embedded)

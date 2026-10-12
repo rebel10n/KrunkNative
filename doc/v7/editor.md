@@ -1232,8 +1232,8 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | `duplicateGroup` ReferenceError | fix (no observable behaviour) |
 | Wheel dolly speed frozen at 70 | keep (feel parity) |
 | "Toggle snapping: Control" not implemented | keep KN's Ctrl-hold disables snapping (already documented as a KN addition) |
-| Mis-bound switches (Anti-aliasing → `resMltV`, Frame Ceiling → thickness, Quick GUI Fix Hitbox `this`) | **fix** |
-| Color Merging loop-variable bug; Colorize Gold no-op | **fix** Color Merging. Gold: implement as `#ffd700` colour + emissive (document) or hide. Pick hide unless map-logic needs it. |
+| Mis-bound switches (Anti-aliasing → `resMltV`, Frame Ceiling → thickness, Quick GUI Fix Hitbox `this`) | **fix** (Frame: "Has Ceiling" edits `frameCeiling`, so the Tools dump shows it off where v7 shows the thickness as on; Fix Hitbox: `editor_quickgui.c`) |
+| Color Merging loop-variable bug; Colorize Gold no-op | **fix** Color Merging: every object is visited once (`editor_tools.c`; `tools_check.py` models v7's loop, which reproduces v7's capture, and checks the native fix). Gold: the v7 button stays (the Tools dump stays v7's) and colours every object `#FFD700` with emissive `#4D4100` (WP6) |
 | `la` omitted at 15 (default 45); particle defaults 1 vs 0 | **match on write** so exports are byte-compatible with v7; read with v7's load defaults |
 | `sci` written as `null` | **fix**: write `sci` from `scriptId` (`map-logic.md` decides runtime use) |
 | Bot `speedMlt` never written | keep (BOT_SPAWNER is `localOnly`) |
@@ -1250,7 +1250,6 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | A legacy trigger's object-level `ta` 14/34/54 writes the sound keys next to `tas` once (the next export drops them) | keep (v7's export; the round-trip test checks the second export as the fixed point) |
 | `camPos` / `spawns` export the exact transform, objects the rounded one | keep: the editor holds exact transforms (`ED_MODEL_EXACT_TRANSFORM`), the export rounds objects |
 | The left panel's v3 "Game" folder (no v7 equivalent until WP4's Class Config) | **removed**: v7's Class Config edits each class (`editor_gameconfig.c`); a legacy `game` block is still copied into every class on import |
-| The v7 reference dumps of TRIGGER / AI_SPAWNER (`prefabs/29`, `55`) lack the "Trigger Event" folder | a capture artifact of the served `public/js/hook.js` (an `Object.prototype.events` accessor), not v7: the native panel shows it; `v7ref.js logic` captures without the hook (`doc/ref/.../editor/README.md`) |
 | Teleporter connection lines take the hue of the node 0 end's `node` (always red) | **fix**: hue `channel × 3.6` (`editor_render.c`) |
 | A folder header finds its body with `getElementById` in KN's first port | v7 looks inside the header's parent (`querySelector("[id='xB']")`); KN does the same, so Class Config's repeated Camera / Movement / ... folders open their own body (`editor_gui.c`) |
 | "Element Label" has two `onChange` handlers; only the delayed refresh survives | keep: the label is stored as typed and sanitised by the export |
@@ -1265,12 +1264,26 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | Wireframe (`forceWire`) | desktop GL only: OpenGL ES (web, ANGLE) has no `glPolygonMode` and draws filled (`scene.c`) |
 | Drag & drop import | native only (GLFW drop); the web build has no drop glue yet |
 | File menu | gains KrunkNative's **Projects** submenu (several maps, detached views, the editor bus) |
-| The Trigger Event folder never renders in v7's page (the hook script's `Object.prototype.events` accessor swallows `vO234.events`) | **fix**: shown (WP4's `ed_triggers_panel`); the v7 dumps of prefabs 29 / 55 lack it |
+| The Trigger Event folder never renders in v7's page as served (the hook script's `Object.prototype.events` accessor swallows `vO234.events`) | **fix**: shown (WP4's `ed_triggers_panel`). `v7ref.js` captures `prefabs` and `logic` without `public/js/hook.js`, so the v7 dumps of prefabs 29 / 55 show it too (`doc/ref/.../editor/README.md`) |
 | AI_SPAWNER "Offset Shot" binds the misspelt `objConfig.shoOffH`: always shows off, never edits `shotOffH` | **fix**: the switch shows and edits the object's `shof` (`editor_inspector.c`) |
 | ENVIRONMENT_ZONE "Emissive" has no stringified getter, so the input shows its `#ffffff` default | **fix**: shows the zone's `skyDomeEmis` |
 | T-key spray list: `selectSpray(i)` stores the store position, not the spray index the Spray select and `spt` use | **fix**: the item passes the spray's index |
 | Ocean (`Ocean.js` / Water.js) in the editor view | the editor previews a flat plane (`ocCol` at `ocOpac`, `ocW` x `ocL` at `ocYOff`); the reflective water is the game's (`client/src/ocean.c`) |
-| Asset browsers v7 adds for the inspector (`selectShootHit`, `selectMelee(Hit)`, `selectProjModel`, `selectCloud(EN)`, `selectEmissiveCloud(EN)`, `selectAmb(EN)`) | the buttons are there; `ed_net_select` opens them once WP6's Assets / Sounds windows land |
+| Asset browsers v7 adds for the inspector (`selectShootHit`, `selectMelee(Hit)`, `selectProjModel`, `selectCloud(EN)`, `selectEmissiveCloud(EN)`, `selectAmb(EN)`) | done (WP6): `ed_net_select` opens the Assets / Textures / Sounds window with v7's `from` and `KE.selectAsset` applies the id (`editor_net.c`) |
+| The API windows (2 / 5 / 7 / 9 / 14) without an answering API show "Loading..." forever | the list shows its empty text ("No Assets found", ..., "No Games found!") when there is no brain (`windows_check.py`) |
+| `config.modTabs` / `mapTabs` / `assetTabs` indices | mapped onto kn_brain's `/api` index space (0 Popular, 1 Featured, 2 New, 3 Favorites, 4 My Games / My Mods), as the hub does; `username` goes only with My Assets (kn_brain filters by it whenever it is given) |
+| Card thumbnails, prefab `data.json`, mod zips on user-assets.krunker.io | the asset tree's `user-assets/<id>/` (native: the local file or `noimg.png`; web: the asset host); a map card shows the `map_image` kn_brain stored |
+| `publishMap` sends `plm` | kn_brain has no `plm`: the editor looks the name up in the account's My Games (`/api/maps` index 4) for "Update Game" / "Publish v<n>" |
+| `uploadM` / `uploadA` post the files to `/upload-user-asset` (FormData) | `uploadM` carries the thumbnail inline (kn_brain's v3.1.1 shape + v7's Post to Hub / Mobile Friendly flags, which kn_brain ignores); the thumbnail defaults to the 3D view (Select picks a PNG), at most 200 kB of data URL; `uploadA` is v7's frame and kn_brain answers "File uploads are not supported on this server" (no asset hosting); a `pubR` reply ends in "Upload Request Failed" (no multipart POST in the client) |
+| `ulb` / `mfnds` wait for a reply forever when the server never answers | "No reply from the server" after 8 s (kn_brain has neither yet); `ulb`'s `upMp` reply is a success popup (v7 writes it into the absent `#gameUpResp`) |
+| `editMap(null)` (no such map) does nothing | "Map not found" popup |
+| The Sounds window writes its empty / error text into `#assetTList` (the Textures list) | its own `#assetSList` |
+| `mapResp` share link / update-video URL come from an archive.org capture (`https://web.archive.org/web/.../https://youtube.com/...`) | the plain URLs |
+| Prefabs panel: the Object Painter div is built shown when `objectPainterType` is set (`addDiv(.., objectPainterType)`), so a rebuilt panel hides the JSON field of an active painter | **fix**: the div follows the Object Painter switch (`editor_tools.c`) |
+| Optimize Faces / Color Merging change objects outside the history poll's one-second steps | each is one undo step (KrunkNative) |
+| Export GLTF / Export MTL build from three's meshes (Lambert copies of what the renderer made) | the meshes are built from the object data, GL-free (`editor_export.c`): the shapes of `prefab.c` and the prefab OBJ models; asset models, ladders, sprites, lights, AI, canvases and random billboards are left out; the material colour is the object's `c` (no vertex colours); one node per object |
+| OBJMTLExporter cuts the last character off the texture name and keeps the slash (`map_Kd /wall_0.pn`, zip entry `wall_0.pn`; every asset texture is `texture.pn`) | **fix**: `map_Kd wall_0.png`, asset textures `<id>_texture.png` |
+| GLTFExporter re-encodes each texture upside down (flipY) | the PNG is embedded as is and `TEXCOORD_0` is flipped (same result) |
 
 ---
 
@@ -1691,8 +1704,8 @@ custom sound, Render folder), Terrain, Zone (stages, wait, height) and Ocean pan
 `editor_terrain.c` the ocean preview plane. `editor_gui.c` adds `selectClick`, the "smaller"
 folder and the Pickr swatches (`updateColorSwatches`); the T key and the selectClick icons open
 `viewTextureList` / `viewModelList` (textures x variants, model variants, sprays, skins, with
-search). Checks: `make editor-inspector-test` (`tools/editor/inspector_check.py`): 94/97 right
-panel dumps identical to v7's, 97/97 with the documented differences (section 1.13); the 41 edit
+search). Checks: `make editor-inspector-test` (`tools/editor/inspector_check.py`): 95/97 right
+panel dumps identical to v7's (29 since WP6's hook-free capture), 97/97 with the documented differences (section 1.13); the 41 edit
 cases of `tools/editor/inspector_edits.json` (v7 golden `inspector-edits.json`, `v7ref.js` state
 `edits`) match v7 and round-trip in `editor_serialize_test`; uidiff `editor-inspector`.
 
@@ -1778,6 +1791,30 @@ KRUNKNATIVE_EDITOR_SCRIPT="script:open;script:tab:server;dump:window:/tmp/s.txt"
 - Pixel-check the highlight colours against the monokai theme CSS (`R/public/libs/codemirror/5.61.0/theme/monokai.min.css`). There is no v7 window to capture.
 
 ### WP6: Tools, assets, import/export formats, publishing
+
+**Status (landed):** `editor_net.c` is v7's API windows, asset selection and publishing: Assets (2,
+sort select, `onlyShow`, kinds incl. sound / video, `testSound`, owner delete, right-click copies the
+id), Mods (5, v7 tabs), Textures (7), Sounds (9), My Games (14: `openEdit` with Load in Editor
+(`edMp`), leaderboard (`ulb`), funds (`mfnds`, 10 % fee), delete (`delC`)); `KE.selectAsset` with
+every v7 `from` case (`ed_net_select` codes 0-14 and 20-22), prefab assets from
+`user-assets/<id>/data.json` (`ed_obj_replace_at`); Publish > Game (`publishGamePopup`: 24
+categories, Post to Hub, Mobile Friendly, "Publish v<n>" for an update, `mapResp` share link) and
+Publish > Asset (`publishAssetPopup` / `updateAssetType` / `uploadAsset`); Account > My Assets. No
+kn_brain or database change: the flows use kn_brain's existing `uploadM`, `edMp`, `delC`, `uploadA`
+(refused) and `/api/maps|mods|assets|search` (the 1.13 rows above list where that differs from v7).
+`editor_export.c` writes Export GLTF (glTF 2.0 JSON, embedded buffer and PNGs) and Export MTL (a
+store-only zip of OBJ + MTL + PNGs) from the object data, GL-free. `editor_tools.c` has v7's Tools
+panel (Optimizations: Optimize Faces, Color Merging; the v3 Customize panel merged in) and Prefabs
+panel (Object Painter with the 8 scrap presets). `v7ref.js` captures `prefabs` without
+`public/js/hook.js` (29 / 55 now show Trigger Event) and adds the states `tools` and `net-*` (the
+publishing popups). Checks: `make editor-windows-test` (`windows_check.py`: windows 2 / 5 / 7 / 9 /
+14 and the 7 popups vs v7, with the documented difference), `make editor-publish-test` /
+`ctest -R brain_editor_publish_e2e` (`publish_e2e.py`: publish, update, publish asset, My Games,
+Load in Editor, leaderboard timeout, selection, delete against a local kn_brain on a scratch
+database), `make editor-tools-test` (`tools_check.py`), `ctest -R editor_export_test` (OBJ / MTL /
+GLTF goldens, fast_obj / cgltf / zip read-back), uidiff `editor-win-assets` / `editor-win-sounds`.
+Open: kn_brain asset hosting (`uploadA` files, `/user-assets`), `plm`, `ulb`, `mfnds`, storing Post to
+Hub / Mobile Friendly, mod `loadMore` paging.
 
 **Owns:**
 - `editor_tools.c`: the v7 Tools panel layout, Optimize Faces, Color Merging, the Prefabs panel with scrap presets, Colorize Gold per 1.13, the 1.13 fixes to Frame/Quick GUI.

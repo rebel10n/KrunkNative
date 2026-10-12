@@ -306,7 +306,7 @@ static void on_env_cloud(EdCtl *c, const cJSON *v) {
 }
 
 // advancedOptions buttons of the panel (the select* asset browsers are editor_net.c's;
-// c->arg: ed_net_select's codes, 8+ = the v7 browsers editor_net.c does not open yet)
+// c->arg: ed_net_select's codes; editor_net.c opens the Assets / Textures / Sounds window)
 enum {
     SEL_MODEL = 0, SEL_TEXTURE = 1, SEL_AUDIO = 2, SEL_DEATH = 3, SEL_IDLE = 4, SEL_ATTACK = 5, SEL_AGRO = 6,
     SEL_SHOOT_HIT = 8, SEL_MELEE, SEL_MELEE_HIT, SEL_PROJ_MODEL, SEL_CLOUD_EN, SEL_EMISSIVE_CLOUD_EN, SEL_AMB_EN,

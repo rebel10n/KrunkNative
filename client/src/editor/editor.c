@@ -1347,9 +1347,11 @@ static void run_script_text(const char *text) {
             }
         }
         else if (ed_triggers_script(cmd, arg) || ed_gameconfig_script(cmd, arg) || ed_customgui_script(cmd, arg)) {} // trig: / cfg: / gui: (logic UI tests)
+        else if (ed_tools_script(cmd, arg)) {} // tool: (editor_tools.c, tools_check.py)
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c
+        else if (ed_net_script(cmd, arg)) {} // net: (editor_net.c, tools/editor/publish_e2e.py)
         else if (!strcmp(cmd, "dump") && arg) {
             char *path = strchr(arg, ':');
             if (path) {

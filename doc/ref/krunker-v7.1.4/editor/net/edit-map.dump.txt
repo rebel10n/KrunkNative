@@ -1,0 +1,20 @@
+H 
+X VisMap
+X Load in Editor
+X Leaderboard Display:
+X Type:
+I select#2[Score..Time]=Score
+X Custom Type:
+I text()=null
+X Order:
+I select#2[ASC..DESC]=ASC
+X Update Leaderboard
+X Map Funds:
+X Funds
+X 1,234
+X KR
+X KR Fee
+X None
+I number(Enter KR Amount)=null
+X Withdraw
+X Deposit

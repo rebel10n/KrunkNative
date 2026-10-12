@@ -1,9 +1,10 @@
-// Map editor: the Customize, Tools and Grouping right panels (Krunker v3.1.1
-// ui/editor.js panel.right.customize / tools / grouping) and the editor.js methods behind
-// their buttons: drunkMap, timelapseMap, scaleMap, reflectObjects, frameObject,
-// breakableMap, colorizeMap, textToObjects, convert (image / voxel), mergeObjects,
-// layoutPlanner / replicate, editGroup, jsonInput, plus replaceObject / createGroup /
-// findCenter, which the Quick GUI and the hitbox fixer (editor_quickgui.c) use too.
+// Map editor: the Tools and Prefabs right panels (Krunker v7.1.4 ui/editor.js panel.right.tools
+// UI:6087-6200, which merges v3.1.1's Customize panel, and panel.right.prefab UI:6202-6257) and the
+// editor.js methods behind their buttons: optimizeFaces, mergeColors, drunkMap, timelapseMap,
+// scaleMap, reflectObjects, frameObject, breakableMap, colorizeMap, textToObjects, convert (image /
+// voxel), layoutPlanner / replicate, the Object Painter's scraps, editGroup, jsonInput, plus
+// replaceObject / createGroup / findCenter, which the Quick GUI, the inspector's group header and
+// the hitbox fixer use too.
 //
 // Differences (intentional):
 // - prompt()/confirm() are the in-page dialog of editor_prompt.c (asynchronous).
@@ -11,6 +12,10 @@
 //   kdialog dialog when installed, else the prompt asks for a file path.
 // - download() (convert without Import, reflect): the web build downloads the file;
 //   natively it is written to the user maps directory (editor_io.c) and copied.
+// - Intentional differences from v7.1.4 (doc/v7/editor.md 1.13): Color Merging visits every object
+//   once (v7 reuses the loop index), Frame's "Has Ceiling" edits frameCeiling (v7 binds the
+//   thickness), Colorize > Gold colours the map gold (a no-op in v7), the Object Painter's div
+//   follows the switch; Optimize Faces and Color Merging are one undo step each.
 #include "editor_internal.h"
 #include <ctype.h>
 #include <math.h>
@@ -236,7 +241,8 @@ static int str_in(const char *s, const char *const *list, const size_t n) {
 
 // replaceObject(e, t, n, i, r): put the objects of JSON t in place of e (i = the replaced
 // prefab type for the hitbox fixer, r = group them under a placeholder)
-void ed_obj_replace(EditorObject *e, const char *text, const char *type, const int group) {
+// replaceObject(e, json, i, t, n); fake = e is fakeSelected(): never removed, not in the scene
+static void replace_objects(EditorObject *e, const char *text, const char *type, const int group, const int fake) {
     if (!e) {
         editor_message("You must select a object first");
         return;
@@ -260,7 +266,7 @@ void ed_obj_replace(EditorObject *e, const char *text, const char *type, const i
     const vec3 ep = ed_obj_vec(e, "p", (vec3) {0});
     const vec3 es = ed_obj_vec(e, "s", (vec3) {1, 1, 1});
     const vec3 er = ed_obj_vec(e, "r", (vec3) {0});
-    if (!type && !group) ed_obj_remove(e, 0, 1);
+    if (!type && !group && !fake) ed_obj_remove(e, 0, 1);
     double deg = (int) ed_json_num(g_ed.advanced, "rotation", 0); // parseInt(advancedOptions.rotation)
     static const char *const keep_rot[] = {"VEHICLE", "CONTAINER", "CONTAINERR", "TREE"};
     if (type && str_in(type, keep_rot, 4)) {
@@ -300,13 +306,29 @@ void ed_obj_replace(EditorObject *e, const char *text, const char *type, const i
         if (group && added) added[count++] = o;
         ed_obj_add(o, 1, 1);
     }
-    if (group) ed_create_group(e, added, count, deg == 90 || deg == 180 || deg == 270 ? 0 : th, 1);
+    if (group) ed_create_group(fake ? NULL : e, added, count, deg == 90 || deg == 180 || deg == 270 ? 0 : th, !fake);
     if (!group) ed_obj_select(NULL); // hideTransform (n is always true here)
     free(added);
     cJSON_Delete(root);
     ed_json_set_num(g_ed.advanced, "rotation", 0);
-    if (!strcmp(ed_panel_right_active(), "grouping")) ed_panel_right_show("grouping");
+    if (!strcmp(ed_panel_right_active(), "prefab")) ed_panel_right_show("prefab"); // the Rotation slider back to 0
     ed_mark_changed();
+}
+
+void ed_obj_replace(EditorObject *e, const char *text, const char *type, const int group) { replace_objects(e, text, type, group, 0); }
+
+void ed_obj_replace_at(const vec3 pos, const char *text, const int group) {
+    // replaceObject(fakeSelected(x, y, z), json, true, false, group): the fake's position is the
+    // point, its scale 1, so the objects land at y - 0.5 (owner.position.y - scale.y / 2)
+    cJSON *d = cJSON_CreateObject();
+    const double p[3] = {pos.x, pos.y - 0.5, pos.z}, s[3] = {1, 1, 1};
+    cJSON_AddItemToObject(d, "p", cJSON_CreateDoubleArray(p, 3));
+    cJSON_AddItemToObject(d, "s", cJSON_CreateDoubleArray(s, 3));
+    EditorObject *fake = ed_obj_new(d, 0);
+    cJSON_Delete(d);
+    if (!fake) return;
+    replace_objects(fake, text, "", group, 1);
+    ed_obj_free(fake);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,7 +479,7 @@ static void refresh_counts(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Customize (Map > Customize)
+// Tools: Customize-era actions (v3.1.1 Customize panel, now in Tools)
 
 static void do_drunk(void *user, const char *ok) {
     (void) user;
@@ -615,16 +637,25 @@ static void reflect_objects(const int group) {
                 cJSON_Delete(dv);
                 if ((dir == 0 && (d == 0 || d == 2)) || (dir == 2 && (d == 1 || d == 3))) set_prop_num(o, "direction", abs(dir + 2 - d));
             }
+            // v7: the faces of the reflected axis swap ([faces[2d], faces[2d + 1]])
+            cJSON *fa = ed_prop_get(o, "faces");
+            if (cJSON_GetArraySize(fa) >= 6) {
+                cJSON *lo = cJSON_DetachItemFromArray(fa, dir * 2 + 1);
+                cJSON_InsertItemInArray(fa, dir * 2, lo);
+                ed_prop_set(o, "faces", fa);
+            }
+            cJSON_Delete(fa);
             apply_object_change(o);
         }
     }
     free(members);
     if (group) {
         ed_json_set_num(g_ed.advanced, "groupReflectDir", 0);
-        ed_panel_right_show("grouping");
+        g_ed.dirty_panel = 1; // refresh("panel_right_object")
     } else {
+        // v7 refreshes the Customize panel it no longer has; the Tools panel shows the reset select
         ed_json_set_num(g_ed.advanced, "reflectDir", 0);
-        ed_panel_right_show("customize");
+        if (!strcmp(ed_panel_right_active(), "tools")) ed_panel_right_show("tools");
     }
 }
 
@@ -674,7 +705,7 @@ static void act_frame(EdCtl *c) {
     ed_json_set_num(g_ed.advanced, "frameThickness", 0);
     ed_json_set_bool(g_ed.advanced, "frameCeiling", 0);
     ed_json_set_bool(g_ed.advanced, "frameFloor", 0);
-    ed_panel_right_show("customize");
+    if (!strcmp(ed_panel_right_active(), "tools")) ed_panel_right_show("tools"); // v7: refresh("panel_right_customize")
 }
 
 static void do_breakable(void *user, const char *ok) {
@@ -732,7 +763,22 @@ static void colorize(const char *list, const int random) {
 }
 
 static void act_colorize_random(EdCtl *c) { (void) c; colorize(NULL, 1); }
-static void act_colorize_gold(EdCtl *c) { (void) c; } // colorizeMap(false, true): a no-op in v3.1.1
+// Colorize > Gold: colorizeMap(false, true) is a no-op in v7.1.4 (the gold flag is never read).
+// Intentional difference from v7.1.4 (doc/v7/editor.md 1.13): every object becomes gold, colour
+// #FFD700 with a dark gold emissive #4D4100 (30 %), so the button does what it says.
+static void act_colorize_gold(EdCtl *c) {
+    (void) c;
+    ed_history_poll();
+    const uint32_t batch = ed_history_batch_begin("colorize gold");
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
+        set_prop_str(o, "color", "#FFD700");
+        set_prop_str(o, "emissive", "#4D4100");
+        apply_object_change(o);
+    }
+    ed_history_poll();
+    ed_history_batch_end(batch);
+}
 
 static void colorize_input(void *user, const char *value) {
     (void) user;
@@ -744,7 +790,7 @@ static void act_colorize_input(EdCtl *c) {
     ed_prompt("Input colors. (Seperate using a comma)", "", colorize_input, NULL);
 }
 
-// vector3 proxies: Customize "Scale" = scaleMap[XYZ], Tools "Cubes/Space in XYZ" = planner[XYZ]Dir/Space
+// vector3 proxies: Transform "Scale" = scaleMap[XYZ], Tools "Cubes/Space in XYZ" = planner[XYZ]Dir/Space
 static cJSON *g_proxy;
 
 static void proxy_load(const char *name, const char *fmt) {
@@ -768,44 +814,6 @@ static void proxy_store(EdCtl *c, const cJSON *v) {
         snprintf(key, sizeof(key), fmt, xyz[i]);
         ed_json_set_num(g_ed.advanced, key, cJSON_GetNumberValue(cJSON_GetArrayItem(v, i)));
     }
-}
-
-static void panel_customize(void) {
-    EdBuild b;
-    if (!ed_panel_right_begin(&b, "customize")) return;
-    ed_gui_panel_buttons(&b, 1, "Customize", 0);
-    ed_gui_button_line(&b, "Drunk Map", "Execute", act_drunk, 0);
-    ed_gui_rule(&b);
-    ed_gui_folder_begin(&b, "Timelapse", 0, 0, 0, "customize.timelapse");
-    with(&b, ed_gui_slider(&b, "Timer", 100, 5000, 1, 0), g_ed.advanced, "timelapseMS", NULL);
-    with(&b, ed_gui_switch(&b, "Follow Objects", 0), g_ed.advanced, "timelapseFollow", NULL);
-    ed_gui_button(&b, "Execute", act_timelapse);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Transform", 0, 0, 0, "customize.transform");
-    proxy_load("scaleMap", "scaleMap%s");
-    with(&b, ed_gui_vector3(&b, "Scale", NAN), g_proxy, "scaleMap", proxy_store);
-    ed_gui_button(&b, "Scale", act_scale_map);
-    static const EdOption dirs[] = {{"X", 0, NULL}, {"Y", 1, NULL}, {"Z", 2, NULL}};
-    with(&b, ed_gui_select(&b, "Reflection", dirs, 3, 0), g_ed.advanced, "reflectDir", NULL);
-    ed_gui_button(&b, "Reflect", act_reflect_map);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Frame", 0, 0, 0, "customize.frame");
-    with(&b, ed_gui_number(&b, "Wall Thickness", "Thickness", NAN, 0), g_ed.advanced, "frameThickness", NULL);
-    with(&b, ed_gui_switch(&b, "Has Ceiling", 0), g_ed.advanced, "frameCeiling", NULL);
-    with(&b, ed_gui_switch(&b, "Has Floor", 0), g_ed.advanced, "frameFloor", NULL);
-    ed_gui_button(&b, "Frame It", act_frame);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Breakable", 0, 0, 0, "customize.breakable");
-    with(&b, ed_gui_slider(&b, "Health", 1, 500, 1, 0), g_ed.advanced, "breakableHealth", NULL);
-    with(&b, ed_gui_switch(&b, "Force Collision", 0), g_ed.advanced, "breakableCollision", NULL);
-    ed_gui_button(&b, "Execute", act_breakable);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Colorize", 0, 0, 0, "customize.colorize");
-    ed_gui_button_line(&b, "Random", "Execute", act_colorize_random, 0);
-    ed_gui_button_line(&b, "Gold", "Execute", act_colorize_gold, 0);
-    ed_gui_button_line(&b, "Input", "Execute", act_colorize_input, 0);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_end(&b, g_ed.el_right_list);
 }
 
 // ---------------------------------------------------------------------------
@@ -1029,43 +1037,287 @@ static void act_planner(EdCtl *c) {
     cJSON_Delete(o);
 }
 
+// ---------------------------------------------------------------------------
+// Optimizations (v7: Optimize Faces, Color Merging)
+
+// advancedOptions keys the editor's defaults (editor.c) do not hold yet
+static void advanced_defaults(void) {
+    if (!cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "colorRange")) cJSON_AddNumberToObject(g_ed.advanced, "colorRange", 1500);
+    if (!cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "objectPainterType")) cJSON_AddNumberToObject(g_ed.advanced, "objectPainterType", 0);
+}
+
+// UTILS.getPercentDiff(after, before): Math.round((before - after) / after * 100) as JS prints it
+static void percent_diff(const double after, const double before, char *out, const size_t n) {
+    const double v = (before - after) / after * 100;
+    if (isnan(v)) snprintf(out, n, "NaN");
+    else if (isinf(v)) snprintf(out, n, "%sInfinity", v < 0 ? "-" : "");
+    else snprintf(out, n, "%.0f", floor(v + 0.5) + 0.0);
+}
+
+typedef struct {
+    double pos[3], size[3]; // the box centre and size
+    int faces[6];
+    int cube, candidate, blocker, changed;
+} FaceBox;
+
+// i(a, b, axis): b covers a's max side; f974: b covers a's min side; f975: a's cross section within b's
+static int covers_max(const FaceBox *a, const FaceBox *b, const int k) {
+    return a->pos[k] + a->size[k] / 2 >= b->pos[k] - b->size[k] / 2 && b->pos[k] + b->size[k] / 2 > a->pos[k] + a->size[k] / 2;
+}
+static int covers_min(const FaceBox *a, const FaceBox *b, const int k) {
+    return a->pos[k] - a->size[k] / 2 <= b->pos[k] + b->size[k] / 2 && b->pos[k] - b->size[k] / 2 < a->pos[k] - a->size[k] / 2;
+}
+static int within(const FaceBox *a, const FaceBox *b, const int k, const int l) {
+    return a->size[k] <= b->size[k] && a->size[l] <= b->size[l] && fabs(a->pos[k] - b->pos[k]) + a->size[k] / 2 <= b->size[k] / 2 &&
+           fabs(a->pos[l] - b->pos[l]) + a->size[l] / 2 <= b->size[l] / 2;
+}
+
+static int prop_truthy(const EditorObject *o, const char *prop) {
+    cJSON *v = ed_prop_get(o, prop);
+    const int t = ed_json_truthy(v);
+    cJSON_Delete(v);
+    return t;
+}
+
+// Editor.optimizeFaces (E:6280): for axis-aligned visible CUBE pairs, a face fully covered by an
+// opaque neighbour (not a FLAG / LINK texture) is switched off. Alerts "N% Face Reduction" (N
+// relative to the faces left, as v7's getPercentDiff). One undo step.
+static void optimize_faces(void) {
+    const size_t n = g_ed.proj->count;
+    ed_obj_select(NULL); // hideTransform
+    FaceBox *box = calloc(n ? n : 1, sizeof(FaceBox));
+    if (!box) return;
+    int before = 0, after = 0;
+    for (size_t i = 0; i < n; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
+        FaceBox *f = &box[i];
+        f->cube = !strcmp(editor_prefabs[o->prefab].name, "CUBE");
+        const vec3 p = ed_obj_vec(o, "p", (vec3) {0}), r = ed_obj_vec(o, "r", (vec3) {0});
+        cJSON *sz = ed_prop_get(o, "size");
+        for (int k = 0; k < 3; k++) f->size[k] = cJSON_GetNumberValue(cJSON_GetArrayItem(sz, k));
+        cJSON_Delete(sz);
+        f->pos[0] = p.x;
+        f->pos[1] = p.y + f->size[1] / 2; // pos[1] += size[1] / 2: the box centre
+        f->pos[2] = p.z;
+        cJSON *fa = ed_prop_get(o, "faces");
+        for (int k = 0; k < 6; k++) f->faces[k] = ed_json_truthy(cJSON_GetArrayItem(fa, k));
+        cJSON_Delete(fa);
+        if (f->cube) for (int k = 0; k < 6; k++) before += f->faces[k];
+        const int flat = r.x == 0 && r.y == 0 && r.z == 0;
+        f->candidate = f->cube && flat && prop_truthy(o, "visible");
+        cJSON *op = ed_prop_get(o, "opacity");
+        cJSON *tex = ed_prop_get(o, "texture");
+        const char *t = cJSON_IsString(tex) ? tex->valuestring : "";
+        f->blocker = f->candidate && cJSON_IsNumber(op) && op->valuedouble == 1 && strcmp(t, "FLAG") && strcmp(t, "LINK");
+        cJSON_Delete(op);
+        cJSON_Delete(tex);
+    }
+    for (size_t i = 0; i < n; i++) {
+        FaceBox *a = &box[i];
+        if (!a->candidate) continue;
+        for (size_t j = 0; j < n; j++) {
+            const FaceBox *b = &box[j];
+            if (i == j || !b->blocker) continue;
+            static const int cross[3][2] = {{1, 2}, {0, 2}, {1, 0}};
+            for (int k = 0; k < 3; k++) {
+                if (!within(a, b, cross[k][0], cross[k][1])) continue;
+                if (covers_max(a, b, k) && a->faces[k * 2]) a->faces[k * 2] = 0, a->changed = 1;
+                if (covers_min(a, b, k) && a->faces[k * 2 + 1]) a->faces[k * 2 + 1] = 0, a->changed = 1;
+            }
+        }
+    }
+    ed_history_poll();
+    const uint32_t batch = ed_history_batch_begin("optimize faces");
+    for (size_t i = 0; i < n; i++) {
+        if (box[i].cube) for (int k = 0; k < 6; k++) after += box[i].faces[k];
+        if (!box[i].changed) continue;
+        EditorObject *o = g_ed.proj->objects[i];
+        cJSON *fa = cJSON_CreateArray();
+        for (int k = 0; k < 6; k++) cJSON_AddItemToArray(fa, cJSON_CreateBool(box[i].faces[k]));
+        ed_prop_set(o, "faces", fa);
+        cJSON_Delete(fa);
+        apply_object_change(o);
+    }
+    ed_history_poll();
+    ed_history_batch_end(batch);
+    free(box);
+    char pct[32], msg[64];
+    percent_diff(after, before, pct, sizeof(pct));
+    snprintf(msg, sizeof(msg), "%s%% Face Reduction", pct);
+    editor_message(msg);
+}
+
+static void act_optimize_faces(EdCtl *c) { (void) c; optimize_faces(); }
+
+// a colour value as mergeColors reads it: a number is stringified (UTILS.stringifyColor), then
+// upper-cased; 0 = null / not a colour
+static int color_upper(const cJSON *v, char *out, const size_t n) {
+    if (cJSON_IsNumber(v)) snprintf(out, n, "#%06x", (unsigned) v->valuedouble & 0xffffffu);
+    else if (cJSON_IsString(v)) snprintf(out, n, "%s", v->valuestring);
+    else return 0;
+    for (char *s = out; *s; s++) *s = (char) toupper((unsigned char) *s);
+    return 1;
+}
+
+// parseInt(c.slice(1), 16); -1 = NaN (never within range)
+static long color_value(const char *c) {
+    char *end = NULL;
+    if (!c[0] || !isxdigit((unsigned char) c[1])) return -1;
+    return strtol(c + 1, &end, 16);
+}
+
+#define MERGE_PALETTE_MAX 4096
+
+// one colour key of Editor.mergeColors: 1 = merged into a palette entry
+static int merge_one(EditorObject *o, const char *prop, const char *skip, char (*pal)[16], int *count, const double range) {
+    cJSON *v = ed_prop_get(o, prop);
+    int merged = 0;
+    char c[16];
+    // `color != "#FFFFFF" && color != null` (emissive: "#000000"), compared before the case change
+    if (v && !(cJSON_IsString(v) && !strcmp(v->valuestring, skip)) && color_upper(v, c, sizeof(c))) {
+        int known = 0;
+        for (int k = 0; k < *count && !known; k++) known = !strcmp(pal[k], c);
+        if (!known) {
+            const long x = color_value(c);
+            for (int k = 0; k < *count && x >= 0; k++) {
+                const long y = color_value(pal[k]);
+                if (y >= 0 && fabs((double) (x - y)) <= range) {
+                    snprintf(c, sizeof(c), "%s", pal[k]);
+                    merged = 1;
+                    break;
+                }
+            }
+            if (!merged && *count < MERGE_PALETTE_MAX) snprintf(pal[(*count)++], 16, "%s", c);
+        }
+        if (!cJSON_IsString(v) || strcmp(v->valuestring, c)) {
+            cJSON *nv = cJSON_CreateString(c); // the setter stores the upper-case string
+            ed_prop_set(o, prop, nv);
+            cJSON_Delete(nv);
+            apply_object_change(o);
+        }
+    }
+    cJSON_Delete(v);
+    return merged;
+}
+
+// Editor.mergeColors (E:6212): each colour / emissive snaps to the first palette colour (seeded with
+// #FFFFFF, #000000, then every colour not merged) whose integer value is within colorRange.
+// Alerts "N Colors Merged". One undo step.
+// Intentional difference from v7.1.4: v7 reuses the object loop's index for the palette loops, so
+// objects are skipped or visited again depending on the palette; here every object is visited once.
+static void merge_colors(void) {
+    advanced_defaults();
+    const cJSON *rv = cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "colorRange");
+    double range = cJSON_IsNumber(rv) ? trunc(rv->valuedouble) : cJSON_IsString(rv) ? (double) atoi(rv->valuestring) : 0;
+    if (range == 0) range = 1500; // parseInt(colorRange) || 1500
+    char (*pal)[16] = calloc(MERGE_PALETTE_MAX, 16);
+    if (!pal) return;
+    int count = 2, merged = 0;
+    snprintf(pal[0], 16, "#FFFFFF");
+    snprintf(pal[1], 16, "#000000");
+    ed_history_poll();
+    const uint32_t batch = ed_history_batch_begin("merge colors");
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
+        merged += merge_one(o, "color", "#FFFFFF", pal, &count, range);
+        merged += merge_one(o, "emissive", "#000000", pal, &count, range);
+    }
+    ed_history_poll();
+    ed_history_batch_end(batch);
+    free(pal);
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%d Colors Merged", merged);
+    editor_message(msg);
+}
+
+static void do_merge_colors(void *user, const char *ok) {
+    (void) user;
+    if (ok) merge_colors();
+}
+
+static void act_merge_colors(EdCtl *c) {
+    (void) c;
+    ed_confirm("Are you sure you want to merge similar colors? (This will effect the entire map)", do_merge_colors, NULL);
+}
+
+// panel.right.tools (UI:6087-6200): v7 merges v3.1.1's Customize panel into it
 static void panel_tools(void) {
     EdBuild b;
     if (!ed_panel_right_begin(&b, "tools")) return;
+    advanced_defaults();
     ed_gui_panel_buttons(&b, 1, "Tools", 0);
     ed_gui_rule(&b);
-    ed_gui_folder_begin(&b, "Text Generator", 0, 0, 0, "tools.textGenerator");
+    ed_gui_folder_begin(&b, "Optimizations", 0, 0, 0, "tools.optimizations");
+    ed_gui_button_line(&b, "Optimize Faces", "Execute", act_optimize_faces, 0);
+    ed_gui_rule(&b);
+    ed_gui_folder_begin(&b, "Color Merging", 0, 0, 0, "tools.optimizations.colorMerging");
+    with(&b, ed_gui_slider(&b, "Color Range", 500, 50000, 100, 0), g_ed.advanced, "colorRange", NULL);
+    ed_gui_button(&b, "Merge Colors", act_merge_colors);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_folder_begin(&b, "Text Generator", 0, 1, 0, "tools.textGenerator");
     ed_gui_button_line(&b, "Enter Text", "Open", act_text_gen, 0);
     ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Image Converter", 0, 0, 0, "tools.imageConverter");
+    ed_gui_folder_begin(&b, "Image Converter", 0, 1, 0, "tools.imageConverter");
     with(&b, ed_gui_number(&b, "Size", "", NAN, 0), g_ed.settings, "imageSize", settings_changed);
     with(&b, ed_gui_number(&b, "Depth", "", NAN, 0), g_ed.settings, "imageDepth", settings_changed);
     with(&b, ed_gui_switch(&b, "Collidable", 0), g_ed.settings, "imageCol", settings_changed);
     ed_gui_button_line(&b, "Convert", "Convert", act_image_convert, 0);
     ed_gui_button_line(&b, "Import", "Import", act_image_import, 0);
     ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Voxel Manager", 0, 0, 0, "tools.voxelManager");
+    ed_gui_folder_begin(&b, "Voxel Manager", 0, 1, 0, "tools.voxelManager");
     with(&b, ed_gui_switch(&b, "Merge", 0), g_ed.settings, "mergeVoxels", settings_changed);
     with(&b, ed_gui_number(&b, "Size", "", NAN, 0), g_ed.settings, "voxelSize", settings_changed);
     ed_gui_button_line(&b, "Convert", "Convert", act_voxel_convert, 0);
     ed_gui_button_line(&b, "Import", "Import", act_voxel_import, 0);
     ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Layout Planner", 0, 0, 0, "tools.layoutPlanner");
-    ed_gui_folder_begin(&b, "Cube", 1, 0, 0, "tools.layoutPlanner.cube");
-    with(&b, ed_gui_number(&b, "Size", "", NAN, 1), g_ed.advanced, "plannerSize", NULL);
-    with(&b, ed_gui_color(&b, "Color", 1), g_ed.advanced, "plannerColor", NULL);
-    ed_gui_folder_end(&b, 1);
+    ed_gui_folder_begin(&b, "Layout Planner", 0, 1, 0, "tools.layoutPlanner");
+    with(&b, ed_gui_switch(&b, "Merge", 0), g_ed.settings, "mergeVoxels", settings_changed);
+    with(&b, ed_gui_number(&b, "Size", "", NAN, 0), g_ed.advanced, "plannerSize", NULL);
+    with(&b, ed_gui_color(&b, "Color", 0), g_ed.advanced, "plannerColor", NULL);
     proxy_load("Dir", "planner%sDir");
     proxy_load("Space", "planner%sSpace");
     with(&b, ed_gui_vector3(&b, "Cubes in XYZ", NAN), g_proxy, "Dir", proxy_store);
     with(&b, ed_gui_vector3(&b, "Space in XYZ", NAN), g_proxy, "Space", proxy_store);
     ed_gui_button(&b, "Execute", act_planner);
     ed_gui_folder_end(&b, 0);
+    ed_gui_folder_begin(&b, "Timelapse", 0, 1, 0, "tools.timelapse");
+    with(&b, ed_gui_slider(&b, "Timer", 100, 5000, 1, 0), g_ed.advanced, "timelapseMS", NULL);
+    with(&b, ed_gui_switch(&b, "Follow Objects", 0), g_ed.advanced, "timelapseFollow", NULL);
+    ed_gui_button(&b, "Execute", act_timelapse);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_folder_begin(&b, "Transform", 0, 1, 0, "tools.transform");
+    proxy_load("scaleMap", "scaleMap%s");
+    with(&b, ed_gui_vector3(&b, "Scale", NAN), g_proxy, "scaleMap", proxy_store);
+    ed_gui_button(&b, "Scale", act_scale_map);
+    static const EdOption dirs[] = {{"X", 0, NULL}, {"Y", 1, NULL}, {"Z", 2, NULL}};
+    with(&b, ed_gui_select(&b, "Reflection", dirs, 3, 0), g_ed.advanced, "reflectDir", NULL);
+    ed_gui_button(&b, "Reflect", act_reflect_map);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_folder_begin(&b, "Frame", 0, 1, 0, "tools.frame");
+    with(&b, ed_gui_number(&b, "Wall Thickness", "Thickness", NAN, 0), g_ed.advanced, "frameThickness", NULL);
+    // intentional difference from v7.1.4: v7 binds "Has Ceiling" to frameThickness (it shows on
+    // while the thickness is set and edits the thickness); it edits frameCeiling here
+    with(&b, ed_gui_switch(&b, "Has Ceiling", 0), g_ed.advanced, "frameCeiling", NULL);
+    with(&b, ed_gui_switch(&b, "Has Floor", 0), g_ed.advanced, "frameFloor", NULL);
+    ed_gui_button(&b, "Frame It", act_frame);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_folder_begin(&b, "Breakable", 0, 1, 0, "tools.breakable");
+    with(&b, ed_gui_slider(&b, "Health", 1, 500, 1, 0), g_ed.advanced, "breakableHealth", NULL);
+    with(&b, ed_gui_switch(&b, "Force Collision", 0), g_ed.advanced, "breakableCollision", NULL);
+    ed_gui_button(&b, "Execute", act_breakable);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_folder_begin(&b, "Colorize", 0, 1, 0, "tools.colorize");
+    ed_gui_button_line(&b, "Random", "Execute", act_colorize_random, 0);
+    ed_gui_button_line(&b, "Gold", "Execute", act_colorize_gold, 0);
+    ed_gui_button_line(&b, "Input", "Execute", act_colorize_input, 0);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_button_line(&b, "Drunk Map", "Execute", act_drunk, 0);
     ed_gui_end(&b, g_ed.el_right_list);
 }
 
 // ---------------------------------------------------------------------------
-// Grouping (Object > Group > Edit)
+// group edits (the object panel's group header, editor_inspector.c)
 
 static void edit_group(const char *key, const cJSON *value) {
     // editGroup(key, value): set one property on every member of the selected group
@@ -1083,45 +1335,6 @@ static void edit_group(const char *key, const cJSON *value) {
     }
     refresh_counts();
 }
-
-static void on_group_texture(EdCtl *c, const cJSON *v) {
-    (void) c;
-    edit_group("texture", v);
-}
-
-static void group_color(void *user, const char *value) {
-    (void) user;
-    if (!value || !*value) return;
-    cJSON *v = cJSON_CreateString(value);
-    edit_group("color", v);
-    cJSON_Delete(v);
-}
-
-static void act_group_color(EdCtl *c) {
-    (void) c;
-    ed_prompt("Input color", "", group_color, NULL);
-}
-
-static void group_custom(void *user, const char *value) {
-    (void) user;
-    if (!value || !*value) return;
-    // eval(prmpt): a JSON literal here (numbers, booleans, "strings", [arrays])
-    cJSON *v = cJSON_Parse(value);
-    if (!v) {
-        editor_message("Invalid value");
-        return;
-    }
-    const char *key = ed_json_str(g_ed.advanced, "editCustomKey", "");
-    if (*key) edit_group(key, v);
-    cJSON_Delete(v);
-}
-
-static void act_group_custom(EdCtl *c) {
-    (void) c;
-    ed_prompt("Input value", "", group_custom, NULL);
-}
-
-static void act_group_reflect(EdCtl *c) { (void) c; reflect_objects(1); }
 
 // the object panel's group header (editor_inspector.c, v7 layout)
 void ed_group_edit(const char *key, const cJSON *value) { edit_group(key, value); }
@@ -1188,10 +1401,32 @@ void ed_export_group(void) {
 static void act_json(EdCtl *c) { (void) c; ed_json_input(0); }
 static void act_file(EdCtl *c) { (void) c; ed_json_input(1); }
 
-static void on_auto_group(EdCtl *c, const cJSON *v) {
-    // v3.1.1 calls this.setSettings on the blueprint entry (a TypeError): the value
-    // changes for the session but is never saved
-    (void) c; (void) v;
+// ---------------------------------------------------------------------------
+// Prefabs (Object > Prefab > Tools): panel.right.prefab (UI:6202-6257)
+
+// the Object Painter's scrap presets (E:66-89 `scraps`, Type 1..8; Type 0 = the JSON field)
+static const struct { const char *name, *json; } k_scraps[] = {
+    {"Junk", "[{\"p\":[259.7,63.9,6.1],\"s\":[8.29,3.15,8.6],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":59,\"tct\":\"0.01\"}],\"rsc\":25,\"sd\":1,\"ms\":5,\"aid\":\"30082\",\"inm\":\"pickup Junk\"}]"},
+    {"Cloth", "[{\"p\":[112.9,64,-31.5],\"s\":[6.87,1.22,11.62],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":60,\"tct\":\"3238\"}],\"rsc\":20,\"sd\":1,\"ms\":5,\"aid\":\"30162\",\"inm\":\"pickup Cloth\"}]"},
+    {"Wood", "[{\"p\":[-32.2,58,-93.2],\"s\":[3.38,0.65,16.87],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":60,\"tct\":\"3237\"}],\"rsc\":40,\"sd\":1,\"ms\":4,\"aid\":\"30061\",\"inm\":\"pickup Wood\"}]"},
+    {"Wires", "[{\"p\":[91.9,-139.1,-161.6],\"s\":[12.52,4.18,7.76],\"i\":29,\"pl\":1,\"cdy\":1,\"r\":[0,1.2,0],\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":60,\"tct\":\"3239\"}],\"rsc\":10,\"sd\":1,\"ms\":4,\"aid\":\"30163\",\"inm\":\"pickup Wires\"}]"},
+    {"Tin can", "[{\"p\":[-136,-144,-100.5],\"s\":[2.22,4.57,2.22],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":60,\"tct\":\"4044\"}],\"rsc\":20,\"sd\":1,\"ms\":3,\"aid\":\"30167\",\"inm\":\"pickup Tin Can\"}]"},
+    {"Chocolate", "[{\"p\":[-136,-144,-100.5],\"s\":[2.22,4.57,2.22],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":60,\"tct\":\"4786\"}],\"rsc\":20,\"sd\":1,\"ms\":3,\"aid\":\"39525\",\"inm\":\"pickup Chocolate\"}]"},
+    {"Carrot", "[{\"p\":[-136,-144,-100.5],\"s\":[2.22,4.57,2.22],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":60,\"tct\":\"4787\"}],\"rsc\":20,\"sd\":1,\"ms\":3,\"aid\":\"39526\",\"inm\":\"pickup Carrot\"}]"},
+    {"Frog", "[{\"p\":[0,9,-32],\"s\":[2.32,2.49,2.73],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":60,\"tct\":\"5366\"}],\"rsc\":2,\"sd\":1,\"aid\":\"46480\",\"inm\":\"pickup Frog\"}]"},
+};
+
+const char *ed_object_painter_json(void) {
+    // Shift+click painting (E:2823): objectPainterType 0 = objectPainterJson (when not empty), else
+    // scraps[type - 1]; NULL = nothing to paint
+    if (!ed_json_truthy(cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "objectPainter"))) return NULL;
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "objectPainterType");
+    const int type = cJSON_IsNumber(t) ? (int) t->valuedouble : cJSON_IsString(t) ? atoi(t->valuestring) : 0;
+    if (type == 0) {
+        const char *json = ed_json_str(g_ed.advanced, "objectPainterJson", "");
+        return json[0] ? json : NULL;
+    }
+    return type >= 1 && type <= (int) (sizeof(k_scraps) / sizeof(k_scraps[0])) ? k_scraps[type - 1].json : NULL;
 }
 
 static void on_painter(EdCtl *c, const cJSON *v) {
@@ -1199,87 +1434,58 @@ static void on_painter(EdCtl *c, const cJSON *v) {
     html_dom_set_display(html_dom_by_id("objPaint"), ed_json_truthy(v) ? "" : "none");
 }
 
-static EdOption *texture_options(int *count) {
-    static EdOption opts[EDITOR_TEXTURE_COUNT + 1];
-    static char names[EDITOR_TEXTURE_COUNT + 1][48];
-    int n = 0;
-    opts[n++] = (EdOption) {"Default", 0, "DEFAULT"};
-    for (int i = 0; i < EDITOR_TEXTURE_COUNT; i++) {
-        if (!strcmp(editor_textures[i], "DEFAULT")) continue;
-        // UTILS.formatConstName
-        size_t j = 0;
-        int start = 1;
-        for (const char *s = editor_textures[i]; *s && j + 1 < sizeof(names[n]); s++) {
-            if (*s == '_') {
-                names[n][j++] = ' ';
-                start = 1;
-                continue;
-            }
-            names[n][j++] = start ? (char) toupper((unsigned char) *s) : (char) tolower((unsigned char) *s);
-            start = 0;
-        }
-        names[n][j] = 0;
-        opts[n] = (EdOption) {names[n], 0, editor_textures[i]};
-        n++;
-    }
-    *count = n;
-    return opts;
-}
-
-static void panel_grouping(void) {
+static void panel_prefab(void) {
     EdBuild b;
-    if (!ed_panel_right_begin(&b, "grouping")) return;
-    // the custom keys: every ObjectInstance.prototype setter
-    static const char *const setters[] = {"pos", "rot", "size", "assetTexture", "texture", "collidable", "penetrable", "visible", "color", "emissive",
-                                          "opacity", "direction", "movingSpeed", "movingAxis", "score", "border", "highlighted", "method", "fog", "texOffX", "texOffY"};
-    static EdOption keys[sizeof(setters) / sizeof(setters[0])];
-    for (size_t i = 0; i < sizeof(setters) / sizeof(setters[0]); i++) keys[i] = (EdOption) {setters[i], 0, setters[i]};
-    ed_gui_panel_buttons(&b, 1, "Grouping", 0);
+    if (!ed_panel_right_begin(&b, "prefab")) return;
+    advanced_defaults();
+    ed_gui_panel_buttons(&b, 1, "Prefabs", 0);
     ed_gui_rule(&b);
-    ed_gui_folder_begin(&b, "Transform", 0, 0, 0, "grouping.transform");
-    ed_gui_folder_begin(&b, "Reflect", 1, 0, 0, "grouping.transform.reflect");
-    static const EdOption dirs[] = {{"X", 0, NULL}, {"Y", 1, NULL}, {"Z", 2, NULL}};
-    with(&b, ed_gui_select(&b, "Direction", dirs, 3, 1), g_ed.advanced, "groupReflectDir", NULL);
-    ed_gui_button(&b, "Execute", act_group_reflect);
-    ed_gui_folder_end(&b, 1);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Style", 0, 0, 0, "grouping.style");
-    int tn;
-    EdOption *tex = texture_options(&tn);
-    EdCtl *t = ed_gui_select(&b, "Texture", tex, tn, 0);
-    t->value_is_string = 1;
-    with(&b, t, g_ed.advanced, "texture", on_group_texture);
-    ed_gui_button_line(&b, "Color", "Open", act_group_color, 0);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Custom", 0, 0, 0, "grouping.custom");
-    EdCtl *k = ed_gui_select(&b, "Key", keys, (int) (sizeof(setters) / sizeof(setters[0])), 0);
-    k->value_is_string = 1;
-    with(&b, k, g_ed.advanced, "editCustomKey", NULL);
-    ed_gui_button(&b, "Execute", act_group_custom);
-    ed_gui_folder_end(&b, 0);
-    ed_gui_folder_begin(&b, "Prefab", 0, 0, 0, "grouping.prefab");
-    with(&b, ed_gui_switch(&b, "Auto Group", 0), g_ed.settings, "assetAutoGroup", on_auto_group);
+    with(&b, ed_gui_switch(&b, "Auto Group", 0), g_ed.settings, "assetAutoGroup", settings_changed);
     with(&b, ed_gui_slider(&b, "Rotation", 0, 359, 1, 0), g_ed.advanced, "rotation", NULL);
-    ed_gui_folder_begin(&b, "Import", 1, 0, 0, "grouping.prefab.import");
+    ed_gui_folder_begin(&b, "Import", 1, 0, 0, "prefab.import");
     ed_gui_button_line(&b, "Json", "Import", act_json, 1);
     ed_gui_button_line(&b, "File", "Import", act_file, 1);
     ed_gui_folder_end(&b, 1);
     with(&b, ed_gui_switch(&b, "Object Painter", 0), g_ed.advanced, "objectPainter", on_painter);
-    // the "div" blueprint type: `<div id=objPaint null>` when shown (v3.1.1 writes null)
+    // the "div" blueprint: `<div id=objPaint null>` when shown. Intentional difference from v7.1.4:
+    // v7 builds it shown when objectPainterType is set (addDiv(.., objectPainterType)), so a rebuilt
+    // panel hides the JSON field of an active painter; here it follows the Object Painter switch
     const int show = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "objectPainter"));
     edb_addf(&b.html, "<div id=objPaint %s>", show ? "null" : "style=\"display: none\"");
     with(&b, ed_gui_text(&b, "JSON", "JSON", 1), g_ed.advanced, "objectPainterJson", NULL);
+    static EdOption types[1 + sizeof(k_scraps) / sizeof(k_scraps[0])];
+    types[0] = (EdOption) {"JSON", 0, NULL};
+    for (size_t i = 0; i < sizeof(k_scraps) / sizeof(k_scraps[0]); i++) types[i + 1] = (EdOption) {k_scraps[i].name, (double) (i + 1), NULL};
+    with(&b, ed_gui_select(&b, "Type", types, (int) (sizeof(types) / sizeof(types[0])), 1), g_ed.advanced, "objectPainterType", NULL);
     edb_add(&b.html, "</div>\n");
-    ed_gui_folder_end(&b, 0);
     ed_gui_end(&b, g_ed.el_right_list);
 }
 
 // ---------------------------------------------------------------------------
 
 int ed_tools_panel_show(const char *name) {
-    if (!strcmp(name, "customize")) panel_customize();
-    else if (!strcmp(name, "tools")) panel_tools();
-    else if (!strcmp(name, "grouping")) panel_grouping();
+    if (!strcmp(name, "tools")) panel_tools();
+    else if (!strcmp(name, "prefab")) panel_prefab();
     else return 0;
+    return 1;
+}
+
+// KRUNKNATIVE_EDITOR_SCRIPT "tool:..." (tools/editor/tools_check.py): tool:import:<file> (importMap
+// of a JSON file), tool:optimizeFaces, tool:mergeColors[:<range>] (no confirm). 1 = handled.
+int ed_tools_script(const char *cmd, const char *arg) {
+    if (strcmp(cmd, "tool") || !arg) return 0;
+    if (!strncmp(arg, "import:", 7)) {
+        char *text = read_text_file(arg + 7);
+        if (!text || !ed_map_import(text)) fprintf(stderr, "[editor] tool:import: cannot import %s\n", arg + 7);
+        free(text);
+    } else if (!strcmp(arg, "optimizeFaces")) {
+        optimize_faces();
+    } else if (!strncmp(arg, "mergeColors", 11)) {
+        advanced_defaults();
+        if (arg[11] == ':') ed_json_set_num(g_ed.advanced, "colorRange", atof(arg + 12));
+        merge_colors();
+    } else {
+        fprintf(stderr, "[editor] tool: unknown \"%s\"\n", arg);
+    }
     return 1;
 }

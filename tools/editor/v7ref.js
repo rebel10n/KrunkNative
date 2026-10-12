@@ -12,7 +12,8 @@
 //                        KRUNKNATIVE_EDITOR_SCRIPT="dump:<which>:<file>", client/src/editor/editor.c)
 //   editor-1920.{png,html.gz,rects.json}   the editor with the Welcome window closed (uidiff ref)
 //   prefabs/<id>.json, prefabs/<id>.right.dump.txt   KE.createObjects[id]()'s serialize() and
-//                        right (object) panel, for every prefab the menus can create
+//                        right (object) panel, for every prefab the menus can create (captured
+//                        without public/js/hook.js, as `logic`: see reloadPage)
 //   inspector-edits.json  the objects after tools/editor/inspector_edits.json's panel edits (WP3)
 //   right-object-cube.{png,rects.json,dump.txt}  a new cube's object panel, Transform + Style open (WP3)
 // Determinism: no network but the static serve (https/wss blocked), empty localStorage (default kro_editor settings), a seeded Math.random before any
@@ -207,6 +208,7 @@ function write(rel, data) {
 async function shot(c, name) {
   await c.eval(TIDY);
   await sleep(150);
+  fs.mkdirSync(path.dirname(path.join(OUT, name)), { recursive: true });
   await c.shot(path.join(OUT, name + '.png'));
 }
 
@@ -296,6 +298,30 @@ state('teleport', async (c) => {
   await reset(c);
 });
 
+// the publishing / My Games popups (editor WP6, editor_net.c): KE.account is faked (a free account,
+// premiumT 0) since v7's login needs the live socket; the publish popup's map field stays empty
+// (no mapToPub). net/<name>.{png,dump.txt}
+const NET_POPUPS = {
+  'publish-game': 'KE.publishGamePopup(true)',
+  'update-game': 'KE.publishGamePopup(false, {map_id: 7, map_name: "VisMap", map_description: "about", map_updatecounter: 1, ca: 2, mob: 1})',
+  'publish-asset': 'KE.publishAssetPopup()',
+  'publish-asset-sound': 'KE.publishAssetPopup(); gameType.value = 3; KE.updateAssetType(3)',
+  'edit-map': 'openEdit("VisMap", 7, 1234)',
+  'map-resp': 'KE.mapResp("Game Uploaded!", "VisMap")',
+  'delete-map': 'deleteCreationConf(7, 0)',
+};
+for (const [name, call] of Object.entries(NET_POPUPS)) {
+  state('net-' + name, async (c) => {
+    await reset(c);
+    await c.eval(`(() => { KE.account = {name: 'visuser', id: 1, premiumT: 0, funds: 0}; ${call}; return 1; })()`);
+    await sleep(500);
+    await shot(c, 'net/' + name);
+    write('net/' + name + '.dump.txt', await c.eval('__knDump.popup()'));
+    await c.eval('(() => { KE.account = null; clearPops(); return 1; })()');
+    await reset(c);
+  });
+}
+
 state('left-essential', async (c) => {
   await reset(c);
   write('left-essential.dump.txt', await c.eval('__knDump.panel("left")'));
@@ -323,7 +349,21 @@ state('right-object-cube', async (c) => {
   await c.eval('(() => { KE.clearMap(); GUI.panel.right.blank.show(); return 1; })()');
 });
 
+// public/js/hook.js defines a non-configurable Object.prototype.events accessor, which hides the
+// "Trigger Event" folder of TRIGGER (29) / AI_SPAWNER (55) (vO234.events never becomes an own key
+// of the Technical blueprint): like `logic`, this state loads the page without the hook.
+async function reloadPage(c, hook) {
+  await c.send('Network.setBlockedURLs', { urls: hook ? ['https://*', 'wss://*'] : ['https://*', 'wss://*', '*/js/hook.js*'] });
+  await c.eval('(() => { window.onbeforeunload = null; return 1; })()'); // "You have unsaved changes!" would block the reload
+  await c.send('Page.reload', {});
+  await c.waitFor('typeof KE === "object" && typeof GUI === "object" && !!document.getElementById("_toolbar").children.length', 60000);
+  await sleep(2500);
+  await c.eval(DUMP_LIB);
+  if (!hook && await c.eval(`Object.prototype.hasOwnProperty('events')`)) throw new Error('hook.js still loaded');
+}
+
 state('prefabs', async (c) => {
+  await reloadPage(c, false);
   await reset(c);
   const ids = await c.eval(`(() => { const o = []; for (const i in KE.createObjects) o.push(+i); return o; })()`);
   const skipped = [];
@@ -343,8 +383,8 @@ state('prefabs', async (c) => {
     write(`prefabs/${i}.right.dump.txt`, await c.eval('__knDump.panel("right")'));
   }
   write('prefabs/skipped.txt', skipped.map((s) => s + '\n').join(''));
-  await c.eval('(() => { KE.clearMap(); GUI.panel.right.blank.show(); return 1; })()');
   console.error('[v7ref] prefabs: ' + (ids.length - skipped.length) + ' written, skipped: ' + skipped.join('; '));
+  await reloadPage(c, true); // back to the page the other states capture (with the hook)
 });
 
 // inspector edits (doc/v7/editor.md WP3): every case of tools/editor/inspector_edits.json on a
@@ -456,28 +496,44 @@ const LOGIC_LIB = `(() => {
 state('logic', async (c) => {
   await reset(c);
   const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'logic_cases.json'), 'utf8')).cases;
-  await c.send('Network.setBlockedURLs', { urls: ['https://*', 'wss://*', '*/js/hook.js*'] });
   for (const k of cases) {
     // every case starts from a fresh page (the server / map config and the GUI list are page state)
     console.error('[v7ref] logic ' + k.name);
-    await c.eval('(() => { window.onbeforeunload = null; return 1; })()'); // "You have unsaved changes!" would block the reload
-    await c.send('Page.reload', {});
-    await c.waitFor('typeof KE === "object" && typeof GUI === "object" && !!document.getElementById("_toolbar").children.length', 60000);
-    await sleep(2500);
-    await c.eval(DUMP_LIB);
-    if (await c.eval(`Object.prototype.hasOwnProperty('events')`)) throw new Error('logic: hook.js still loaded');
+    await reloadPage(c, false);
     await c.eval(LOGIC_LIB);
     const r = await c.eval(`__knLogic.run(${JSON.stringify(k)})`);
     write(`logic/${k.name}.json`, r.json + '\n');
     write(`logic/${k.name}.dump.txt`, r.dump);
   }
-  // back to the page the other states capture (with the hook)
-  await c.send('Network.setBlockedURLs', { urls: ['https://*', 'wss://*'] });
-  await c.eval('(() => { window.onbeforeunload = null; return 1; })()');
-  await c.send('Page.reload', {});
-  await c.waitFor('typeof KE === "object" && typeof GUI === "object" && !!document.getElementById("_toolbar").children.length', 60000);
-  await sleep(2500);
-  await c.eval(DUMP_LIB);
+  await reloadPage(c, true); // back to the page the other states capture (with the hook)
+});
+
+// ---------------------------------------------------------------- tools (editor WP6)
+// tools/editor/tools_cases.json in v7: each map imported (KE.importMap) into a cleared editor,
+// then KE.optimizeFaces() or KE.mergeColors() (advancedOptions.colorRange = range; confirm()
+// answers true). Writes tools/<case>.json: {alert, before, after}, before / after = every
+// object's serialize() (tools/editor/tools_check.py compares the native editor with them).
+state('tools', async (c) => {
+  await reset(c);
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'tools_cases.json'), 'utf8')).cases;
+  for (const k of cases) {
+    const r = await c.eval(`(async () => { try {
+      const settle = () => new Promise((res) => setTimeout(res, 250));
+      closeWindow(); clearPops(); KE.clearMap(); GUI.panel.right.blank.show();
+      KE.importMap(${JSON.stringify(JSON.stringify(k.map))});
+      await settle();
+      const before = KE.objInsts.map((o) => o.serialize());
+      window.__knAlerts = [];
+      if (${JSON.stringify(k.tool)} === 'mergeColors') { KE.advancedOptions.colorRange = ${JSON.stringify(k.range || 1500)}; KE.mergeColors(); }
+      else KE.optimizeFaces();
+      await settle();
+      return {alert: window.__knAlerts.join('\\n'), before, after: KE.objInsts.map((o) => o.serialize())};
+    } catch (e) { return {error: String(e)}; } })()`);
+    if (r.error) throw new Error('tools ' + k.name + ': ' + r.error);
+    write(`tools/${k.name}.json`, JSON.stringify(r, null, 1) + '\n');
+    console.error('[v7ref] tools ' + k.name + ': ' + r.alert);
+  }
+  await c.eval('(() => { KE.clearMap(); GUI.panel.right.blank.show(); return 1; })()');
 });
 
 // ---------------------------------------------------------------- main

@@ -19,7 +19,9 @@ rasterise fonts differently. Everything here is regenerated, never hand-edited.
 | `left-essential.dump.txt` | the left panel (map config) |
 | `right-<name>.{png,dump.txt}` | `GUI.panel.right.<name>.show()`: environment, terrain, zone, ocean, tools, prefab, objectList, gui, blank |
 | `logic/<case>.json`, `logic/<case>.dump.txt` | `tools/editor/logic_cases.json` replayed by GUI.action on the panel blueprints (editor WP4): a trigger case's object `serialize()` and right panel, a GUI / config case's `{config, gui}` of `getMapExport()` and its right / left panel; captured without `js/hook.js` (below) |
-| `prefabs/<id>.json`, `prefabs/<id>.right.dump.txt` | after `KE.clearMap()`: `KE.createObjects[id]()`, the new object's `serialize()` and the right (object) panel; `prefabs/skipped.txt` lists the ids not created |
+| `tools/<case>.json` | `tools/editor/tools_cases.json` (editor WP6): the map imported, `KE.optimizeFaces()` or `KE.mergeColors()` (`colorRange` = the case's range); `{alert, before, after}` with every object's `serialize()` (`tools/editor/tools_check.py`) |
+| `net/<popup>.{png,dump.txt}` | the publishing / My Games popups (editor WP6) with a faked free `KE.account`: `publishGamePopup(true)`, `publishGamePopup(false, row)`, `publishAssetPopup()` (Model and Sound), `openEdit`, `mapResp`, `deleteCreationConf` (`tools/editor/windows_check.py`) |
+| `prefabs/<id>.json`, `prefabs/<id>.right.dump.txt` | after `KE.clearMap()`: `KE.createObjects[id]()`, the new object's `serialize()` and the right (object) panel; `prefabs/skipped.txt` lists the ids not created; captured without `js/hook.js` (below) |
 
 ## Dump format
 
@@ -62,10 +64,10 @@ over CDP (`tools/kref/cdp.js`) on another free port. Determinism:
 The page's host is not `127.0.0.1:8080`, so v7's `config.isProd` is true, as on krunker.io: the
 `localOnly` prefabs (40 EVENT, 41 TERMINAL, 95 BOT_SPAWNER) are neither listed in the menus nor
 created, and the Event Objects counter stays hidden. 44 CUSTOM_ASSET opens the asset browser
-and has no object. `prefabs/29.right.dump.txt` (TRIGGER) and `prefabs/55.right.dump.txt` (AI_SPAWNER)
-lack v7's "Trigger Event" folder: a capture artifact, not v7. The served `public/js/hook.js` defines
-an `Object.prototype.events` accessor, so `vO234.events = {...}` (UI:4081) never becomes an own key
-of the Technical blueprint and `_build` skips it; the real editor shows the folder (Can Trigger,
-Event, Event Value) between Hitbox and Trigger Actions, and so does the native panel
+and has no object. The `prefabs` and `logic` states load the page without the served
+`public/js/hook.js`: it defines an `Object.prototype.events` accessor, so `vO234.events = {...}`
+(UI:4081) never becomes an own key of the Technical blueprint and `_build` skips the "Trigger
+Event" folder of TRIGGER (29) and AI_SPAWNER (55). Without the hook the folder (Can Trigger, Event,
+Event Value) shows between Hitbox and Trigger Actions, as in the real editor and the native panel
 (`client/src/editor/editor_triggers.c`). Windows that need Krunker's API (2 Assets, 5 Mods, 7 Textures, 9 Sounds,
 14 Maps) show their offline `Loading...` state.

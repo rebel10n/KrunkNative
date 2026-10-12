@@ -120,6 +120,10 @@ Fs Nametag closed
 L[subsection] Level : sval=0 range[0,999,1]=0
 L[subsection] Health Scale : sval=1 range[0,10,0.1]=1
 -
+Fs Trigger Event closed
+L[] Can Trigger : switch=0
+L[] Event : select#4[onAIDeath..onAIKillPlayer]=onAIDeath
+L[] Event Value : sval=0 range[0,10000,1]=0
 Fs Trigger Actions closed
 L[] Action Chance (%) : sval=0 range[0,100,1]=0
 B Add Action

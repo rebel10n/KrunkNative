@@ -17,9 +17,6 @@ One headless native editor run (EGL, no window on any display), two checks:
    ObjectInstance.deserialize(edited).serialize(), the form the native editor holds objects in).
 
 Documented differences (doc/v7/editor.md 1.13; editor_inspector.c's header):
-- The Trigger Event / Trigger Actions folders (TRIGGER, AI_SPAWNER) are WP4's (editor_triggers.c);
-  v7's capture never shows Trigger Event (a hook-script accessor swallows it). Both folders are
-  left out of the "documented" comparison.
 - AI_SPAWNER "Offset Shot" shows the object's value (v7: always off, misspelt binding).
 - ENVIRONMENT_ZONE "Emissive" shows the zone's colour (v7: "#ffffff", no getter).
 - Edits: "sci" is the script id (v7 drops it); "s" is not compared (no case edits a size; model
@@ -29,7 +26,6 @@ import argparse
 import glob
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -50,24 +46,12 @@ def json_eq(a, b):
     return a == b
 
 
-def drop_folders(lines, names):
-    """The lines without the small folders named (header up to the next folder header of the same
-    or a higher level)."""
-    out, skip = [], False
-    for l in lines:
-        if re.match(r"^(F|Fs) ", l):
-            skip = any(l.startswith("Fs %s " % n) for n in names)
-        if not skip:
-            out.append(l)
-    return out
-
-
 def documented(name, lines):
     if name == "55":
         lines = [l.replace("Offset Shot : switch=0", "Offset Shot : switch=1") for l in lines]
     if name == "79":
         lines = [l.replace("L[subsubsection] Emissive : color=#ffffff", "L[subsubsection] Emissive : color=#000000") for l in lines]
-    return drop_folders(lines, ("Trigger Event", "Trigger Actions"))
+    return lines
 
 
 def main():
