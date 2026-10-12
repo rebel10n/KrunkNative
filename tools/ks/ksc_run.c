@@ -19,6 +19,7 @@
 #endif
 
 #include "ks.h"
+#include "ks_import_js.h"
 
 int ksc_run(int argc, char **argv);
 
@@ -128,9 +129,19 @@ int ksc_run(int argc, char **argv)
     free(raw);
     if (!src) return 2;
     if (ks_is_compiled_js(src, slen)) {
-        printf("%s\n", KS_COMPILED_JS_MESSAGE);
+        // compiled JS runs through the importer (WP7), as in the game
+        KsDiag ierr = {0};
+        size_t ilen = 0;
+        char *imported = ks_import_js(src, slen, side, &ilen, &ierr);
         free(src);
-        return 1;
+        if (!imported) {
+            char msg[300];
+            ks_diag_format(&ierr, msg, sizeof msg);
+            fprintf(stderr, "%s: error: %s: %s\n", file, KS_COMPILED_JS_MESSAGE, msg);
+            return 1;
+        }
+        src = imported;
+        slen = ilen;
     }
     KsDiag err = {0};
     KsProgram *prog = ks_compile(src, slen, side, &err, NULL, 0, NULL);

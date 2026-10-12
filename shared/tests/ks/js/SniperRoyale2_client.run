@@ -1,0 +1,5 @@
+# Directives for ks_vm_test (appended to the imported script): the server's "customSky"
+# message sets the sky dome texture ((num) data.Id: undefined -> 0), other ids do nothing.
+#! call onNetworkMessage "customSky" {}
+#! call onNetworkMessage "other" {}
+#! call onNetworkMessage "customSky"

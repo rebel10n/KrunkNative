@@ -25,6 +25,7 @@
 #include "editor_script_lang.h"
 
 #include <ks.h>
+#include <ks_import_js.h>
 #include <ui_logic.h>
 #include <GLFW/glfw3.h>
 #include <math.h>
@@ -1031,12 +1032,34 @@ int ed_script_prepare_test(cJSON *map, const int host) {
     size_t len = 0;
     char *src = ks_decode_script(client, strlen(client), &len);
     if (!src) return 1;
-    if (ks_is_compiled_js(src, len)) {
-        free(src);
-        return 1; // the game logs KS_COMPILED_JS_MESSAGE and runs nothing
-    }
     KsDiag err;
     memset(&err, 0, sizeof(err));
+    if (ks_is_compiled_js(src, len)) {
+        // the game runs it through the importer (doc/v7/krunkscript.md WP7): test what it runs
+        size_t ilen = 0;
+        char *imported = ks_import_js(src, len, KS_SIDE_CLIENT, &ilen, &err);
+        free(src);
+        if (!imported) {
+            char msg[320];
+            ks_diag_format(&err, msg, sizeof(msg));
+            char line[400];
+            snprintf(line, sizeof(line), "Client Script: %s: %s", KS_COMPILED_JS_MESSAGE, msg);
+            editor_message(line);
+            return 0;
+        }
+        KsProgram *prog = ks_compile(imported, ilen, KS_SIDE_CLIENT, &err, NULL, 0, NULL);
+        free(imported);
+        if (prog) {
+            ks_program_free(prog);
+            return 1;
+        }
+        char msg[320];
+        ks_diag_format(&err, msg, sizeof(msg));
+        char line[400];
+        snprintf(line, sizeof(line), "Client Script (imported from compiled JavaScript): %s", msg);
+        editor_message(line);
+        return 0;
+    }
     KsProgram *prog = ks_compile(src, len, KS_SIDE_CLIENT, &err, NULL, 0, NULL);
     free(src);
     if (prog) {

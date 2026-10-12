@@ -8,6 +8,8 @@
 //                      warnings ("<line>:<col> <message>", one per line).
 // <dir>/err/*.krnk     negative tests; <name>.err holds the expected first error
 //                      ("<line>:<col> <message>").
+// <dir>/js/*.js        compiled-JS scripts (WP7 importer, ks_import_js.h): the import must
+//                      equal <name>.krnk byte for byte and pass the checker with no warnings.
 // A first line "# side: server" selects the server side for ok/ and err/ tests.
 // Plus unit checks of the AST shape, the GAME.* table and the script text helpers.
 #include <dirent.h>
@@ -18,6 +20,7 @@
 #include "ks.h"
 #include "ks_api.h"
 #include "ks_ast.h"
+#include "ks_import_js.h"
 
 static int g_fail, g_pass;
 
@@ -302,6 +305,141 @@ static void test_api_table(void) {
     CHECK(ks_api_entry(KS_API_COUNT) == NULL, "out of range");
 }
 
+// ---------------------------------------------------------------------------
+// Compiled-JS importer (WP7)
+
+static char *import_js(const char *js, size_t len, KsDiag *err) {
+    size_t n = 0;
+    char *out = ks_import_js(js, len, KS_SIDE_CLIENT, &n, err);
+    CHECK(!out || n == strlen(out), "import length");
+    return out;
+}
+
+static int test_import_dir(const char *root) {
+    char dir[1024];
+    snprintf(dir, sizeof dir, "%s/js", root);
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    int count = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        const size_t l = strlen(e->d_name);
+        if (l < 4 || strcmp(e->d_name + l - 3, ".js") != 0) continue;
+        char path[2048];
+        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        size_t len = 0;
+        char *js = slurp(path, &len);
+        snprintf(path, sizeof path, "%s/%.*s.krnk", dir, (int) (l - 3), e->d_name);
+        char *want = slurp(path, NULL);
+        CHECK(js && want, "%s: fixture and golden", e->d_name);
+        if (!js || !want) {
+            free(js);
+            free(want);
+            continue;
+        }
+        count++;
+        CHECK(ks_is_compiled_js(js, len), "%s: detected as compiled JS", e->d_name);
+        KsDiag err = {0};
+        char *got = import_js(js, len, &err);
+        CHECK(got != NULL, "%s: import: %d:%d %s", e->d_name, err.line, err.col, err.message);
+        if (got) {
+            CHECK(strcmp(got, want) == 0, "%s: import differs from %.*s.krnk", e->d_name, (int) (l - 3), e->d_name);
+            KsDiag warns[8];
+            int nwarn = 0;
+            const int rc = ks_validate(got, strlen(got), KS_SIDE_CLIENT, &err, warns, 8, &nwarn);
+            CHECK(rc == 0, "%s: imported script type-checks: %d:%d %s", e->d_name, err.line, err.col, err.message);
+            CHECK(nwarn == 0, "%s: %d warnings (first %d:%d %s)", e->d_name, nwarn, warns[0].line, warns[0].col,
+                  warns[0].message);
+            // CRLF line endings import the same
+            char *crlf = malloc(len * 2 + 1);
+            size_t m = 0;
+            for (size_t i = 0; i < len; i++) {
+                if (js[i] == '\n') crlf[m++] = '\r';
+                crlf[m++] = js[i];
+            }
+            char *got2 = import_js(crlf, m, &err);
+            CHECK(got2 && strcmp(got2, want) == 0, "%s: CRLF import", e->d_name);
+            free(got2);
+            free(crlf);
+        }
+        free(got);
+        free(js);
+        free(want);
+    }
+    closedir(d);
+    return count;
+}
+
+// Unrecognised shapes fail with a diagnostic at the JS position.
+static void test_import_errors(const char *root) {
+    char path[1024];
+    snprintf(path, sizeof path, "%s/js/SniperRoyale2_client.js", root);
+    char *js = slurp(path, NULL);
+    CHECK(js != NULL, "SniperRoyale2 fixture");
+    if (!js) return;
+    char *end = strstr(js, "let LC = 0;\n");
+    CHECK(end != NULL, "prelude end");
+    if (!end) {
+        free(js);
+        return;
+    }
+    end[strlen("let LC = 0;\n")] = 0;
+    const size_t plen = strlen(js); // 23 prelude lines: bodies start on line 24
+    static const char epi[] = "return {start: function(){}};\n";
+    static const struct { const char *body; int line; const char *msg; } cases[] = {
+        {"function V_start() {\ntry {\nLC = 0;\nif (V_a == 1) {\n};\n} catch (e) {EH(e.message)};\n}\n", 27, "Loose equality"},
+        {"let V_a = typeof V_b;\n", 24, "Unrecognised identifier \"typeof\""},
+        {"let V_a = [];\n", 24, "Cannot recover the type of \"a\""},
+        {"let V_a = `x`;\n", 24, "Template literals"},
+        {"function V_f(V_x) {\n}\n", 24, "Cannot recover the parameter types of action \"f\""},
+        {"let V_a = [1];\nlet V_b = [2];\nfunction V_start() {\nthis.GAME.V_log.bind(this)(V_a[BC(V_b,0,1,1)]);\n}\n", 27,
+         "BC() checks a different array"},
+        {"let V_a = foo;\n", 24, "Unrecognised identifier \"foo\""},
+        {"let V_a = N(1);\n", 24, "Helper N() outside of its compiled pattern"},
+        {"let V_a = 'x\\q';\n", 24, "Unsupported escape sequence"},
+        {"let V_a = 1;\nfunction V_start() {\nV_a = this.GAME.V_PLAYERS.V_list.bind(this)().V_x;\nwith (V_a) {}\n}\n", 27,
+         "\"with\" statement"},
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        const size_t bl = strlen(cases[i].body);
+        char *src = malloc(plen + bl + sizeof epi);
+        memcpy(src, js, plen);
+        memcpy(src + plen, cases[i].body, bl);
+        memcpy(src + plen + bl, epi, sizeof epi);
+        KsDiag err = {0};
+        char *out = import_js(src, strlen(src), &err);
+        CHECK(out == NULL, "import error case %zu rejected", i);
+        CHECK(err.line == cases[i].line && strstr(err.message, cases[i].msg),
+              "import error case %zu: got %d:%d %s, want %d: %s", i, err.line, err.col, err.message, cases[i].line,
+              cases[i].msg);
+        free(out);
+        free(src);
+    }
+    {
+        const char body[] = "let V_a = 1;\nlet V_b = 2;\n"; // no epilogue
+        char *src = malloc(plen + sizeof body);
+        memcpy(src, js, plen);
+        memcpy(src + plen, body, sizeof body);
+        KsDiag err = {0};
+        char *out = import_js(src, strlen(src), &err);
+        CHECK(out == NULL && err.line == 26 && strstr(err.message, "Missing the module epilogue"), "no epilogue: %d %s",
+              err.line, err.message);
+        free(out);
+        free(src);
+    }
+    // a changed prelude line is not the v7 compiler's output
+    char *bad = strstr(js, "const L = (x) => (x.length||0)");
+    if (bad) {
+        bad[17] = 'X';
+        KsDiag err = {0};
+        char *out = import_js(js, strlen(js), &err);
+        CHECK(out == NULL && err.line == 8 && strstr(err.message, "prelude"), "prelude mismatch: %d %s", err.line,
+              err.message);
+        free(out);
+    }
+    free(js);
+}
+
 int main(int argc, char **argv) {
     const char *root = argc > 1 ? argv[1] : "shared/tests/ks";
     int nc, nok, nerr;
@@ -314,6 +452,9 @@ int main(int argc, char **argv) {
     test_strings();
     test_helpers();
     test_api_table();
+    const int njs = test_import_dir(root);
+    CHECK(njs >= 2, "compiled-JS fixtures found: %d", njs);
+    test_import_errors(root);
     printf("ks_front_test: %d corpus, %d ok, %d err scripts; %d checks passed, %d failed\n", nc, nok, nerr, g_pass,
            g_fail);
     return g_fail ? 1 : 0;

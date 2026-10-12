@@ -1,0 +1,3 @@
+# Directives for ks_vm_test: two update frames over the synthetic lowering patterns.
+#! call update 16
+#! call update 3

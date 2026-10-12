@@ -1,0 +1,112 @@
+# KrunkScript recovered from the v7 compiler's JavaScript output (KrunkNative ks_import_js).
+bool usingMenu = false;
+num playerSelected = 0;
+num commandSelected = 0;
+num playerShifted = 0;
+str[] admins = str["Iniquity_Games", "HellFir3", "SITF21", "MinerZapped", "L-U-C-A-07", "Sorable", "QuackyTTV", "MoonJuiceAlt", "west2nv"];
+bool check = false;
+public action render(num delta) {
+    if (usingMenu) {
+        GAME.OVERLAY.drawRect(490, 90, 1055, 620, 0, "#000", 1);
+        GAME.OVERLAY.drawRect(500, 100, 1035, 600, 0, "#fff", 1);
+        GAME.OVERLAY.drawText("Code INIQ", 1000, 130, 0, 30, "center", "#000", 1);
+        obj[] players = GAME.PLAYERS.list();
+        GAME.OVERLAY.drawRect(545, 145, 945, 495, 0, "#ddd", 1);
+
+
+
+
+
+
+
+        for (num i = 0; i < ((lengthOf players) - playerShifted) && i < 14; i++) {
+            if ((i % 2) == 0) {
+                GAME.OVERLAY.drawRect(550, 150 + (35 * i), 935, 30, 0, "#999", 1);
+            }
+            if ((i % 2) == 1) {
+                GAME.OVERLAY.drawRect(550, 150 + (35 * i), 935, 30, 0, "#666", 1);
+            }
+            GAME.OVERLAY.drawText(players[i + playerShifted].username, 600, 170 + (35 * i), 0, 15, "left", "#000", 1);
+            if (i == (playerSelected - playerShifted)) {
+                GAME.OVERLAY.drawRect(1237 + 35 * commandSelected, 152 + 35 * (playerSelected - playerShifted), 36, 26, 0, "#333", 1);
+            }
+            GAME.OVERLAY.drawRect(1240, 155 + (35 * i), 30, 20, 0, "#80f", 1);
+            GAME.OVERLAY.drawText("tpto", 1255, 167 + (35 * i), 0, 11, "center", "#000", 1);
+            GAME.OVERLAY.drawRect(1275, 155 + (35 * i), 30, 20, 0, "#00f", 1);
+            GAME.OVERLAY.drawText("tpme", 1290, 167 + (35 * i), 0, 11, "center", "#000", 1);
+            GAME.OVERLAY.drawRect(1310, 155 + (35 * i), 30, 20, 0, "#0ff", 1);
+            GAME.OVERLAY.drawText("fix", 1325, 167 + (35 * i), 0, 11, "center", "#000", 1);
+            GAME.OVERLAY.drawRect(1345, 155 + (35 * i), 30, 20, 0, "#0f0", 1);
+            GAME.OVERLAY.drawText("kill", 1360, 167 + (35 * i), 0, 11, "center", "#000", 1);
+            GAME.OVERLAY.drawRect(1380, 155 + (35 * i), 30, 20, 0, "#ff0", 1);
+            GAME.OVERLAY.drawText("kick", 1395, 167 + (35 * i), 0, 11, "center", "#000", 1);
+            GAME.OVERLAY.drawRect(1415, 155 + (35 * i), 30, 20, 0, "#f00", 1);
+            GAME.OVERLAY.drawText("ban", 1430, 167 + (35 * i), 0, 11, "center", "#000", 1);
+            GAME.OVERLAY.drawRect(1450, 155 + (35 * i), 30, 20, 0, "#000", 1);
+            GAME.OVERLAY.drawText("+", 1465, 167 + (35 * i), 0, 11, "center", "#fff", 1);
+        }
+    }
+}
+public action onKeyPress(str key, num code) {
+    obj player = GAME.PLAYERS.getSelf();
+    if (key == "o") {
+        check = false;
+        playerSelected = 0;
+        commandSelected = 0;
+        playerShifted = 0;
+
+
+        for (num i = 0; i < lengthOf admins; i++) {
+            if ((str) player.username == admins[i]) {
+                check = true;
+            }
+        }
+        if (check) {
+            usingMenu = !usingMenu;
+        }
+    }
+    if (usingMenu) {
+        obj[] players = GAME.PLAYERS.list();
+        if (key == "=") {
+            if (commandSelected < 6) {
+                commandSelected++;
+            } else {
+                commandSelected = 0;
+            }
+        }
+        if (key == "-") {
+            if (commandSelected > 0) {
+                commandSelected--;
+            } else {
+                commandSelected = 6;
+            }
+        }
+        if (key == "p") {
+
+
+            GAME.NETWORK.send((str) commandSelected, {playerSelected: players[playerSelected].id});
+            GAME.log(players[playerSelected].username);
+        }
+    }
+}
+public action onMouseScroll(num dir) {
+    if (usingMenu) {
+        obj[] players = GAME.PLAYERS.list();
+        if (dir == 1) {
+            if (playerSelected > 0) {
+                playerSelected--;
+            }
+            if (playerShifted > playerSelected) {
+                playerShifted--;
+            }
+        }
+        if (dir == -1) {
+            if (playerSelected < (lengthOf players) - 1) {
+                playerSelected++;
+            }
+            if (playerShifted <= playerSelected - 14) {
+                playerShifted++;
+            }
+        }
+    }
+}

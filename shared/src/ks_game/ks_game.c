@@ -4,6 +4,7 @@
 // points below are called from shared/src/player.c and game.c.
 #include "ks_game_internal.h"
 
+#include <ks_import_js.h>
 #include <triggers_v7.h>
 
 #include <math.h>
@@ -198,13 +199,27 @@ int ks_game_load(Game *game, const KsSide side, const char *src, const size_t le
     ks_game_unload(game);
     if (!src || !len) return 0;
 
+    // Compiled-JS map scripts (SniperRoyale2, Verb_Arena: the v7 compiler's output, 1.16) run
+    // as the KrunkScript the importer recovers (WP7); outside that shape they run nothing.
+    KsDiag err = {0};
+    char *imported = NULL;
+    const uint32_t source_hash = ks_source_hash(src, len); // of the map's text (ks_server_round_init compares it)
     if (ks_is_compiled_js(src, len)) {
-        host_log(NULL, host, host_user, 1, KS_COMPILED_JS_MESSAGE);
-        return -1;
+        imported = ks_import_js(src, len, side, NULL, &err);
+        if (!imported) {
+            char line[320];
+            ks_diag_format(&err, line, sizeof(line));
+            char msg[480];
+            snprintf(msg, sizeof(msg), "%s (%s script, %s)", KS_COMPILED_JS_MESSAGE, side == KS_SIDE_SERVER ? "server" : "client", line);
+            host_log(NULL, host, host_user, 1, msg);
+            return -1;
+        }
+        host_log(NULL, host, host_user, 0, KS_IMPORT_JS_MESSAGE);
     }
 
-    KsDiag err = {0};
-    KsProgram *prog = ks_compile(src, len, side, &err, NULL, 0, NULL);
+    KsProgram *prog = imported ? ks_compile(imported, strlen(imported), side, &err, NULL, 0, NULL)
+                               : ks_compile(src, len, side, &err, NULL, 0, NULL);
+    free(imported);
     if (!prog) {
         char line[320];
         ks_diag_format(&err, line, sizeof(line));
@@ -224,7 +239,7 @@ int ks_game_load(Game *game, const KsSide side, const char *src, const size_t le
     kg->host_user = host_user;
     kg->wrap = (KsHost) {.side = side, .log = kg_log, .now_ms = kg_now, .api = host ? host->api : NULL};
     kg->prog = prog;
-    kg->source_hash = ks_source_hash(src, len);
+    kg->source_hash = source_hash;
     reset_runtime_state(kg);
     kg->rate_t0 = ks_game_now_ms(kg);
     if (side == KS_SIDE_SERVER) triggers_set_script_hooks(game, &g_trigger_hooks);

@@ -4,7 +4,8 @@
 // (SCRIPT_MSG), GAME.CHAT (SCRIPT_CHAT / CHAT), the custom sync values (SCRIPT_SYNC), the
 // exact v7 rate limits, the server hooks, the round lifecycle (globals persist on the
 // server, onServerClosed on a map change), the server half of `scripts` never reaching a
-// client, and the corpus server scripts run by the host.
+// client, the corpus server scripts run by the host, and a compiled-JS server script run
+// through the importer (WP7).
 // Run from the repository root: ./<build>/ks_server_test
 #include <server_sandbox.h>
 #include <server.h>
@@ -617,6 +618,56 @@ static void test_corpus(void)
     }
 }
 
+// A server script shipped as the v7 compiler's JavaScript (1.16 lowering; the corpus maps only
+// ship client scripts like this, the server host takes the same path): the importer runs it,
+// a new round keeps its instance (the map text's hash is stable), its hooks work.
+static void test_compiled_js(void)
+{
+    char *prelude = read_text("shared/tests/ks/js/SniperRoyale2_client.js");
+    CHECK(prelude != NULL, "read the compiled-JS fixture");
+    if (!prelude) return;
+    char *end = strstr(prelude, "let LC = 0;\n");
+    CHECK(end != NULL, "prelude end");
+    if (!end) {
+        free(prelude);
+        return;
+    }
+    end[strlen("let LC = 0;\n")] = 0;
+    static const char body[] =
+        "let V_rounds = 0;\n"
+        "function V_start() {\ntry {\nLC = 0;\n(V_rounds)++;\n"
+        "this.GAME.V_log.bind(this)(\"js start\", S(V_rounds));\n} catch (e) {EH(e.message)};\n}\n"
+        "function V_onNetworkMessage(V_id, V_data, V_playerID) {\ntry {\nLC = 0;\nif (V_id === \"check\") {\n"
+        "this.GAME.V_NETWORK.V_send.bind(this)(\"check\", {V_status: A(V_data.V_age,F) >= 13 ? \"Passed\" : \"Failed\"}, V_playerID);\n"
+        "};\n} catch (e) {EH(e.message)};\n}\n"
+        "return {start: V_start.bind(this), onNetworkMessage: V_onNetworkMessage.bind(this), update: function(){}};\n";
+    const size_t plen = strlen(prelude);
+    char *js = malloc(plen + sizeof(body));
+    memcpy(js, prelude, plen);
+    memcpy(js + plen, body, sizeof(body));
+    free(prelude);
+
+    cJSON *map = with_scripts("v3_burg", js, NULL);
+    const cJSON *maps[1] = {map};
+    const SandboxConfig cfg = {.maps = maps, .map_count = 1, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "compiled JS: start");
+    CHECK(ks_game_script(&g_server->game) != NULL, "compiled JS: imported and loaded");
+    Client *a = connect_client(NET_PROTOCOL_MINOR_V7);
+    pump(20);
+    sandbox_host(0, -1); // next round on the same map: the same instance, start() again
+    pump(5);
+    CHECK(has_log(a, "js start 2"), "compiled JS: globals persist across rounds (js start 2)");
+    client_msg(a, "check", "age", NULL, 20);
+    pump(3);
+    const Msg *m = find_msg(a, "check", 0);
+    CHECK(m && !strcmp(m->json, "status=Passed"), "compiled JS: onNetworkMessage reply %s", m ? m->json : "(none)");
+    CHECK(count_log_prefix(a, "RUNTIME ERROR") == 0, "compiled JS: no runtime error");
+    sandbox_stop();
+    free_clients();
+    cJSON_Delete(map);
+    free(js);
+}
+
 int main(void)
 {
     KsDiag err;
@@ -625,6 +676,7 @@ int main(void)
     g_cs = ks_script_new(prog, &host, NULL);
     test_host();
     test_corpus();
+    test_compiled_js();
     ks_script_free(g_cs);
     ks_program_free(prog);
     if (g_failures) {

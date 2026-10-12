@@ -1,0 +1,2 @@
+> SCENE.setSkyDome    {texture:0}
+!RUNTIME ERROR: Cannot read properties of undefined (reading 'Id')

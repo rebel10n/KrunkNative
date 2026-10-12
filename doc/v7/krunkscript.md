@@ -1,8 +1,19 @@
 # KrunkScript (Krunker v7.1.4) — implementable specification for KrunkNative
 
-Status: survey/spec only (no code in this change). Target: Krunker **v7.1.4**, ported **in place**.
+Status: spec, implemented by the work packages of 6.8 (table below). Target: Krunker **v7.1.4**,
+ported **in place**.
 There is no v3.1.1 compatibility mode or runtime toggle; v3.1.1 is preserved on the `v3.1.1`
 branch/tag. v3.1.1 map JSON must still load: a map without a `scripts` field simply runs no script.
+
+| WP | Status | Where |
+|---|---|---|
+| WP1 front end | landed | `shared/src/ks/ks_lex.c`, `ks_parse.c`, `ks_check.c`, `ks_api_table.c`, `ksc check`, `ks_front_test` |
+| WP2 runtime | landed | `shared/src/ks/ks_compile.c`, `ks_vm.c`, `ks_value.c`, `ks_number.c`, `ks_serial.c`, `ks_stdlib.c`, `ksc run`, `ks_vm_test` |
+| WP3 server host | landed | `shared/src/ks_game/`, `server/src/ks_server_host.c`, `ks_server_test`, `server/tests/ks_e2e.py` |
+| WP4 client host | landed | `client/src/ks/` |
+| WP5 overlay canvas | landed | `client/src/ks/canvas2d.c`, `ks_overlay*.c`, `canvas2d_test` |
+| WP6 persistence | landed | `server/src/ks_storage.c`, `ks_storage_test`, `server/tests/ks_storage_e2e.py` |
+| WP7 compiled-JS importer | landed: `SniperRoyale2` and `Verb_Arena` run | `shared/src/ks/ks_import_js.c` (`shared/include/ks_import_js.h`), used by `ks_game_load` (server and client hosts), `ksc import-js`, `ksc check` / `ksc run`, editor test play, editor-mcp; tests: `ks_front_test` + `ks_vm_test` over `shared/tests/ks/js/`, `ks_server_test` (compiled-JS server script) |
 
 This document is the only input the implementation agents need. Every rule cites its source.
 
@@ -98,9 +109,11 @@ trigger -> KrunkScript integration: two trigger objects with `"tas":[{"ta":58,"t
   in script text (`GJS:163-168`). KN: in script text, map U+FF08 to `(` and U+FF09 to `)` before
   lexing. [REF]
 * A script whose text starts with `"use strict";` and contains `const SM = (m) =>` is **compiled
-  JS** (2 corpus maps). KN cannot run JS; see work package WP7 (optional importer). The baseline
-  behaviour is to log `KrunkScript: compiled JavaScript scripts are not supported` and run no
-  script for that side. [KN]
+  JS** (2 corpus maps). KN cannot run JS: the WP7 importer (`ks_import_js.h`) recognises the 1.16
+  lowering and translates it back to KrunkScript source, which then compiles as usual (the host
+  logs `KrunkScript: running the compiled JavaScript script through the importer`). A script
+  outside that shape logs `KrunkScript: compiled JavaScript scripts are not supported (<side>
+  script, <line>:<col> <reason>)` and runs nothing for that side. [KN]
 * Line endings: LF, CRLF or CR. Line/column numbers in diagnostics are 1-based; a tab counts as one
   column. [KN]
 
@@ -1722,7 +1735,8 @@ Properties like `GAME.CAMERA.position.x` and `GAME.CAMERA.envZone` are `PROP` en
 | `client/src/ks/canvas2d.c`, `client/include/canvas2d.h` | WP5 | Canvas2D subset: state stack, affine transforms, path (lines, arcs, ellipses, quadratic/cubic béziers flattened), nonzero fill (stencil-then-cover or ear-clipping of flattened polygons), stroke (joins: miter/bevel/round), text via the HUD font, images via `load_texture` |
 | `client/src/ks/ks_overlay.c` | WP5 | `GAME.OVERLAY` on canvas2d |
 | `server/src/ks_storage.c` | WP6 | kn_brain storage backend; offline file store when the server core runs as the sandbox (no brain) |
-| `tools/ks/ksc.c` | WP1/2 | CLI: `ksc check file.krnk`, `ksc run file.krnk --hooks start,update:16 --log` with a mock host |
+| `tools/ks/ksc.c` | WP1/2 | CLI: `ksc check file.krnk`, `ksc run file.krnk --hooks start,update:16 --log` with a mock host, `ksc import-js file.js\|map.json` (WP7) |
+| `shared/src/ks/ks_import_js.c`, `shared/include/ks_import_js.h` | WP7 | compiled-JS importer: prelude match, JS-subset lexer/parser undoing the 1.16 helper patterns, KrunkScript emitter (keeps the original line numbers from `BC`/`RE`/`FC`) |
 | `shared/tests/ks/*.krnk` + `*.out` | all | conformance suite (6.7) |
 | `shared/tests/ks_conformance_test.c` | WP2 | runs the suite (CMake target `ks_test`, part of `make test`) |
 
@@ -1783,7 +1797,7 @@ then:
 | **WP4 Client host** | client hooks (keys, mouse, controller, DIV clicks, spawn/death, update/render ordering), UI (html_dom), SCENE/obj3D/bones/lights/signs, SOUND, CAMERA, INPUTS, COOKIES, SETTINGS, PLATFORM, MODS stubs | ks.h, WP3 for networking | Popup Window, Bouncing Ball, Flashlight, Attaching templates behave; web build compiles (no pthreads; GLES3-only calls) |
 | **WP5 Overlay canvas** | `canvas2d` module + `GAME.OVERLAY` | none (standalone, test with its own scenario) | golden screenshots for rects, rotated rects, circles/ellipses, lines, arcs, béziers, text alignments, images; Simple .io Game and Snake Demo render |
 | **WP6 Persistence & services** | STORAGE (kn_brain + offline file store), Save/Load Data trigger interplay, COOKIES persistence check, giveKR/kick/ban backends, optional editor script window (edit `scripts.client/server`, base64 export) | WP3 | storage unit tests (validation messages, 10 s limit, locks), offline round-trip |
-| WP7 (optional) | importer for compiled-JS client scripts (the 1.16 lowering is regular enough to translate back to KrunkScript AST: recognise the prelude, `function V_x(..){try{LC=0;...}catch...}`, `this.GAME.V_A.V_b.bind(this)(...)`, `BC(...)`, `A(x,F)`, `S()`, `L()`, `let V_x`) | WP1 | `SniperRoyale2` and `Verb_Arena` scripts run |
+| WP7 (optional, landed) | importer for compiled-JS client scripts (the 1.16 lowering is regular enough to translate back to KrunkScript AST: recognise the prelude, `function V_x(..){try{LC=0;...}catch...}`, `this.GAME.V_A.V_b.bind(this)(...)`, `BC(...)`, `A(x,F)`, `S()`, `L()`, `let V_x`) | WP1 | `SniperRoyale2` and `Verb_Arena` scripts run |
 
 WP1, WP2 (with hand-built ASTs), WP3 (with a stub VM) and WP5 can start in parallel on day 1. WP4 starts
 once `ks.h` is frozen; it needs WP2 for end-to-end runs.
@@ -1803,7 +1817,7 @@ once `ks.h` is frozen; it needs WP2 for end-to-end runs.
 | Canvas 2D | v7 used the browser canvas | `canvas2d.c` subset (WP5) |
 | DOM/CSS | v7 used the browser DOM | KN's in-house HTML engine already implements the DOM ops (`html_dom.h`); `style[prop]` via `html_dom_set_style` |
 | Async callbacks | storage/asset callbacks arrive later | queue on the `Game`, invoke from the main thread as new host entries |
-| Compiled-JS maps | 2 maps ship JS | WP7 importer or unsupported |
+| Compiled-JS maps | 2 maps ship JS | WP7 importer: JS -> KrunkScript source (types from literals, hook signatures and the `GAME.*` table) |
 
 ---
 
@@ -1830,7 +1844,7 @@ once `ks.h` is frozen; it needs WP2 for end-to-end runs.
 | 17 | `RAYCAST.from` | broken in v7.1.4, stub in live | `undefined` |
 | 18 | Point/spot/dir/rect lights in the KN renderer | renderer is directional+ambient | implement point/spot when the renderer supports them; until then create invisible placeholder objects (methods work, no light) and warn once |
 | 19 | Editor test play runs server scripts? | v7: no | no (parity) |
-| 20 | Compiled-JS map scripts | 2 corpus maps | unsupported until WP7 |
+| 20 | Compiled-JS map scripts | 2 corpus maps | WP7 importer translates the 1.16 lowering back to KrunkScript; other JS is rejected with a diagnostic. Not observed in the corpus and translated from the prelude's helper definitions: `DE`, `delete`, `HP`, `NE`, `FC`, `for (let V_e of OE(x))`, `.push` |
 
 ---
 

@@ -375,10 +375,10 @@ lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@echo "lint ok"
 
 .PHONY: ks-test
-ks-test: build ## KrunkScript: front end + runtime tests (ks_front_test, ks_vm_test) and `ksc check` over the corpus
+ks-test: build ## KrunkScript: front end + runtime tests (ks_front_test, ks_vm_test) and `ksc check` over the corpus and the compiled-JS fixtures
 	./$(DEBUG_DIR)/ks_front_test shared/tests/ks
 	./$(DEBUG_DIR)/ks_vm_test shared/tests/ks
-	./$(DEBUG_DIR)/ksc check --quiet shared/tests/ks/corpus/*.krnk
+	./$(DEBUG_DIR)/ksc check --quiet shared/tests/ks/corpus/*.krnk shared/tests/ks/js/*.js
 
 # kn_editor_mcp: the Krunker map editor MCP server (tools/editor-mcp/README.md). The test drives
 # it over MCP stdio and covers every tool; renders use the headless client_bin (EGL, no window)

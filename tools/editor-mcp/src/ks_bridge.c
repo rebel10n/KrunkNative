@@ -10,6 +10,7 @@
 #include "util.h"
 #include "validate.h"
 #include <ks.h>
+#include <ks_import_js.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 #pragma weak ks_decode_script
 #pragma weak ks_is_compiled_js
 #pragma weak ks_diag_format
+#pragma weak ks_import_js
 
 static int compiler_linked(void) { return ks_validate != NULL; }
 
@@ -71,24 +73,43 @@ static void add_diag(cJSON *diags, const char *severity, const char *code, const
     cJSON_AddItemToArray(diags, o);
 }
 
-int ks_bridge_check_source(const char *src, const size_t len, const int server, cJSON *diags, int *available) {
+int ks_bridge_check_source(const char *source, const size_t source_len, const int server, cJSON *diags, int *available) {
     const char *side = server ? "server" : "client";
+    const char *src = source;
+    size_t len = source_len;
     *available = compiler_linked();
+    char *imported = NULL;
     if (ks_is_compiled_js && ks_is_compiled_js(src, len)) {
         char m[200];
-        snprintf(m, sizeof(m), "%s script is compiled JavaScript: KrunkNative does not run it", side);
-        add_diag(diags, "warning", "script.compiled_js", side, NULL, m);
-        return 0;
+        if (!ks_import_js) {
+            snprintf(m, sizeof(m), "%s script is compiled JavaScript: the importer is not linked", side);
+            add_diag(diags, "warning", "script.compiled_js", side, NULL, m);
+            return 0;
+        }
+        // the game runs it through the importer (doc/v7/krunkscript.md WP7): check what it runs
+        KsDiag ierr = {0};
+        size_t ilen = 0;
+        imported = ks_import_js(src, len, server ? KS_SIDE_SERVER : KS_SIDE_CLIENT, &ilen, &ierr);
+        if (!imported) {
+            add_diag(diags, "error", "script.compiled_js", side, &ierr, NULL);
+            return 1;
+        }
+        snprintf(m, sizeof(m), "%s script is compiled JavaScript: checked as the KrunkScript the importer recovers", side);
+        add_diag(diags, "info", "script.compiled_js", side, NULL, m);
+        src = imported;
+        len = ilen;
     }
     if (!*available) {
         char m[200];
         snprintf(m, sizeof(m), "%s script (%zu bytes) not checked: the KrunkScript compiler is not linked", side, len);
         add_diag(diags, "info", "script.unchecked", side, NULL, m);
+        free(imported);
         return 0;
     }
     KsDiag err = {0}, warns[16];
     int wcount = 0;
     const int rc = ks_validate(src, len, server ? KS_SIDE_SERVER : KS_SIDE_CLIENT, &err, warns, 16, &wcount);
+    free(imported);
     if (rc != 0) add_diag(diags, "error", "script.compile_error", side, &err, NULL);
     for (int w = 0; w < wcount && w < 16; w++) add_diag(diags, "warning", "script.warning", side, &warns[w], NULL);
     return rc != 0;

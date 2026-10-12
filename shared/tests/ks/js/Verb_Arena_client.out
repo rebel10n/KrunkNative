@@ -1,0 +1,5 @@
+!RUNTIME ERROR: Cannot read properties of null (reading 'username')
+> NETWORK.send 2 {playerSelected:9}
+Bob
+> NETWORK.send 6 {playerSelected:7}
+Iniquity_Games

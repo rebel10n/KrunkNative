@@ -73,8 +73,9 @@ typedef struct KsHost {
 // Fullwidth parentheses U+FF08/U+FF09 become ASCII ( ). Returns a malloc'd,
 // NUL-terminated buffer (caller frees) and its length in *out_len, or NULL on OOM.
 char *ks_decode_script(const char *text, size_t len, size_t *out_len);
-// 1 when `source` is a compiled-JS script ("use strict"; ... const SM = (m) =>),
-// which KN does not run (1.1): log KS_COMPILED_JS_MESSAGE and run nothing.
+// 1 when `source` is a compiled-JS script ("use strict"; ... const SM = (m) =>). Loaders
+// translate it with ks_import_js (ks_import_js.h); only when that fails do they log
+// KS_COMPILED_JS_MESSAGE and run nothing (1.1).
 int ks_is_compiled_js(const char *source, size_t len);
 #define KS_COMPILED_JS_MESSAGE "KrunkScript: compiled JavaScript scripts are not supported"
 

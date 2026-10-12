@@ -1,0 +1,23 @@
+# Directives for ks_vm_test (appended to the imported script). Without a self player the
+# admin check of "o" reads null.username: a contained runtime error, the menu stays closed.
+#! call onKeyPress "o" 79
+#! call render 16
+#! call onKeyPress "p" 80
+# Player 0 is the admin "Iniquity_Games": "o" opens the admin menu
+#! self 0 Iniquity_Games
+#! call onKeyPress "o" 79
+#! call render 16
+#! call onMouseScroll -1
+#! call onMouseScroll -1
+#! call onKeyPress "=" 187
+#! call onKeyPress "=" 187
+#! call onKeyPress "p" 80
+#! call onMouseScroll 1
+#! call onKeyPress "-" 189
+#! call onKeyPress "-" 189
+#! call onKeyPress "-" 189
+#! call onKeyPress "p" 80
+#! call render 16
+# "o" again closes it: "p" does nothing
+#! call onKeyPress "o" 79
+#! call onKeyPress "p" 80

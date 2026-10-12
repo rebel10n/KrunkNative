@@ -19,13 +19,20 @@
 //                              STORAGE.load (a new host entry)
 //   #! gc                      force a full collection
 //   #! seed N                  ks_script_seed
+//   #! self N [NAME]           PLAYERS.getSelf returns mock player N (renamed NAME)
 //
 // Mock host (client and server): PLAYERS.list/findByID return two "Player" host objects
 // (id, username, health rw coerced, position sub-object, respawn() method, isYou),
-// PLAYERS.getSelf -> null, CAMERA.position.x rw PROP, TIME.now = 1700000000000,
-// TIME.fixedDelta = 16, STORAGE.load(acct, map, cb) stores cb, AI.spawn raises a host error.
+// PLAYERS.getSelf -> null (see `#! self`), CAMERA.position.x rw PROP, TIME.now = 1700000000000,
+// TIME.fixedDelta = 16, STORAGE.load(acct, map, cb) stores cb, AI.spawn raises a host error,
+// SCENE.setSkyDome / NETWORK.send log "> <path> <args>" (objects one level deep).
+//
+// Then the compiled-JS importer (WP7, ks_import_js.h): every DIR/js/*.js is imported, run
+// like a corpus script (smoke + fuzz) and, with DIR/js/NAME.run (directives as above,
+// appended to the imported source), compared with DIR/js/NAME.out.
 #include "ks.h"
 #include "ks_api.h"
+#include "ks_import_js.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -113,6 +120,7 @@ typedef struct Mock {
     double cam_x;
     KsValue callback;
     int has_callback;
+    int self;   // PLAYERS.getSelf: players[self - 1], 0 = null
 } Mock;
 
 static KsValue vec_get(KsScript *s, void *native, uint32_t id, int axis)
@@ -268,6 +276,45 @@ static KsValue h_players_find(KsScript *s, void *user, const KsValue *args, int 
     return ks_null();
 }
 static KsValue h_null(KsScript *s, void *u, const KsValue *a, int n) { (void)s; (void)u; (void)a; (void)n; return ks_null(); }
+static KsValue h_self(KsScript *s, void *u, const KsValue *a, int n)
+{
+    (void)a; (void)n;
+    Mock *m = u;
+    return m->self > 0 && m->self <= 2 ? player_value(s, m, m->self - 1) : ks_null();
+}
+static void trace_value(KsScript *s, Mock *m, KsValue v)
+{
+    char t[128];
+    if (v.tag == KS_OBJ) {
+        cap_put(&m->out, "{", 1);
+        KsValue k, val;
+        for (size_t i = 0; ks_obj_entry(s, v, i, &k, &val); i++) {
+            if (i) cap_put(&m->out, ",", 1);
+            ks_to_string(s, k, t, sizeof t);
+            cap_put(&m->out, t, strlen(t));
+            cap_put(&m->out, ":", 1);
+            ks_to_string(s, val, t, sizeof t);
+            cap_put(&m->out, t, strlen(t));
+        }
+        cap_put(&m->out, "}", 1);
+        return;
+    }
+    ks_to_string(s, v, t, sizeof t);
+    cap_put(&m->out, t, strlen(t));
+}
+static KsValue h_trace(KsScript *s, Mock *m, const char *path, const KsValue *a, int n)
+{
+    cap_put(&m->out, "> ", 2);
+    cap_put(&m->out, path, strlen(path));
+    for (int i = 0; i < n; i++) {
+        cap_put(&m->out, " ", 1);
+        trace_value(s, m, a[i]);
+    }
+    cap_put(&m->out, "\n", 1);
+    return ks_undef();
+}
+static KsValue h_skydome(KsScript *s, void *u, const KsValue *a, int n) { return h_trace(s, u, "SCENE.setSkyDome", a, n); }
+static KsValue h_net_send(KsScript *s, void *u, const KsValue *a, int n) { return h_trace(s, u, "NETWORK.send", a, n); }
 static KsValue h_cam_x(KsScript *s, void *user, const KsValue *a, int n) { (void)s; (void)a; (void)n; return ks_num(((Mock *)user)->cam_x); }
 static KsValue h_cam_x_set(KsScript *s, void *user, const KsValue *a, int n)
 {
@@ -311,7 +358,9 @@ static void mock_init_api(void)
 {
     g_api[KS_API_PLAYERS_LIST].fn = h_players_list;
     g_api[KS_API_PLAYERS_FINDBYID].fn = h_players_find;
-    g_api[KS_API_PLAYERS_GETSELF].fn = h_null;
+    g_api[KS_API_PLAYERS_GETSELF].fn = h_self;
+    g_api[KS_API_SCENE_SETSKYDOME].fn = h_skydome;
+    g_api[KS_API_NETWORK_SEND].fn = h_net_send;
     g_api[KS_API_CAMERA_POSITION_X].fn = h_cam_x;
     g_api[KS_API_CAMERA_POSITION_X].set = h_cam_x_set;
     g_api[KS_API_TIME_FIXEDDELTA].fn = h_fixed_delta;
@@ -429,6 +478,19 @@ static char *run_program(const char *src, size_t len)
             if (m->has_callback) {
                 int ok;
                 ks_call_value(s, m->callback, args, argc, &ok);
+            }
+        } else if (!strncmp(p + 3, "self ", 5)) {
+            char *end;
+            long i = strtol(p + 8, &end, 10);
+            if (i >= 0 && i < 2) {
+                m->self = (int)i + 1;
+                while (*end == ' ') end++;
+                size_t k = 0;
+                while (end[k] && end[k] != '\n' && end[k] != '\r' && k + 1 < sizeof m->players[i].name) k++;
+                if (k) {
+                    memcpy(m->players[i].name, end, k);
+                    m->players[i].name[k] = 0;
+                }
             }
         } else if (!strncmp(p + 3, "gc", 2)) {
             extern void ks_gc_collect(KsScript *);
@@ -648,17 +710,11 @@ static int is_allowed(const char *allow, const char *name, const char *line)
     return strstr(allow, key) != NULL;
 }
 
-static int run_corpus_file(const char *dir, const char *name, const char *allow)
+static int run_corpus_source(const char *name, const char *src, size_t len, const char *allow)
 {
-    char path[1024];
-    snprintf(path, sizeof path, "%s/corpus/%s", dir, name);
-    size_t len;
-    char *src = slurp(path, &len);
-    if (!src) return 1;
     KsSide side = strstr(name, "_server") ? KS_SIDE_SERVER : KS_SIDE_CLIENT;
     KsDiag err = {0};
     KsProgram *prog = ks_compile(src, len, side, &err, NULL, 0, NULL);
-    free(src);
     if (!prog) {
         fprintf(stderr, "FAIL corpus %s: compile %d:%d %s\n", name, err.line, err.col, err.message);
         return 1;
@@ -746,16 +802,10 @@ static const char *const g_hooks[] = {
     "onPlayerLeave", "onGameEnd", "onAdFinished", "onServerClosed",
 };
 
-static int fuzz_corpus_file(const char *dir, const char *name)
+static int fuzz_corpus_source(const char *name, const char *src, size_t len)
 {
-    char path[1024];
-    snprintf(path, sizeof path, "%s/corpus/%s", dir, name);
-    size_t len;
-    char *src = slurp(path, &len);
-    if (!src) return 1;
     KsSide side = strstr(name, "_server") ? KS_SIDE_SERVER : KS_SIDE_CLIENT;
     KsProgram *prog = ks_compile(src, len, side, NULL, NULL, 0, NULL);
-    free(src);
     if (!prog) return 1;
     Mock *m = calloc(1, sizeof *m);
     if (!m) abort();
@@ -777,6 +827,69 @@ static int fuzz_corpus_file(const char *dir, const char *name)
     free(m->out.p);
     free(m);
     return 0;
+}
+
+static int run_corpus_file(const char *dir, const char *name, const char *allow)
+{
+    char path[1024];
+    snprintf(path, sizeof path, "%s/corpus/%s", dir, name);
+    size_t len;
+    char *src = slurp(path, &len);
+    if (!src) return 1;
+    int bad = run_corpus_source(name, src, len, allow);
+    bad += fuzz_corpus_source(name, src, len);
+    free(src);
+    return bad;
+}
+
+// ---------------------------------------------------------------------------
+// Compiled-JS map scripts through the importer (WP7): DIR/js/*.js
+
+static int run_imported_js(const char *dir, const char *name)
+{
+    char path[1024];
+    snprintf(path, sizeof path, "%s/js/%s", dir, name);
+    size_t len;
+    char *js = slurp(path, &len);
+    if (!js) return 1;
+    KsSide side = strstr(name, "_server") ? KS_SIDE_SERVER : KS_SIDE_CLIENT;
+    KsDiag err = {0};
+    size_t klen = 0;
+    char *src = ks_import_js(js, len, side, &klen, &err);
+    free(js);
+    if (!src) {
+        fprintf(stderr, "FAIL js %s: import %d:%d %s\n", name, err.line, err.col, err.message);
+        return 1;
+    }
+    int bad = run_corpus_source(name, src, klen, NULL);
+    bad += fuzz_corpus_source(name, src, klen);
+
+    // NAME.run: directives run against the imported script, output compared with NAME.out
+    char base[1024];
+    snprintf(base, sizeof base, "%s/js/%.*s", dir, (int)(strlen(name) - 3), name);
+    snprintf(path, sizeof path, "%s.run", base);
+    size_t rlen;
+    char *run = slurp(path, &rlen);
+    if (run) {
+        char *prog = malloc(klen + rlen + 2);
+        if (!prog) abort();
+        memcpy(prog, src, klen);
+        prog[klen] = '\n';
+        memcpy(prog + klen + 1, run, rlen + 1);
+        char *got = run_program(prog, klen + 1 + rlen);
+        snprintf(path, sizeof path, "%s.out", base);
+        char *want = slurp(path, NULL);
+        if (!want || strcmp(got, want) != 0) {
+            fprintf(stderr, "FAIL js %s\n--- got ---\n%s--- want ---\n%s", name, got, want ? want : "(missing .out)\n");
+            bad++;
+        }
+        free(want);
+        free(got);
+        free(prog);
+        free(run);
+    }
+    free(src);
+    return bad;
 }
 
 static void fuzz_deserialize(void)
@@ -869,14 +982,26 @@ int main(int argc, char **argv)
     int corpus_fail = 0;
     for (int i = 0; i < nc; i++) {
         corpus_fail += run_corpus_file(dir, files[i], allow);
-        corpus_fail += fuzz_corpus_file(dir, files[i]);
         free(files[i]);
     }
     fuzz_deserialize();
     free(files);
     free(allow);
 
-    printf("ks_vm_test: %d unit checks (%d failed), %d programs (%d failed), %d corpus scripts (%d failed)\n",
-           g_checks, g_fail, n, run_fail, nc, corpus_fail);
+    char js_dir[1024];
+    snprintf(js_dir, sizeof js_dir, "%s/js", dir);
+    files = NULL;
+    int nj = list_dir(js_dir, ".js", &files);
+    int js_fail = 0;
+    for (int i = 0; i < nj; i++) {
+        js_fail += run_imported_js(dir, files[i]);
+        free(files[i]);
+    }
+    free(files);
+    CHECK(nj >= 2);
+    corpus_fail += js_fail;
+
+    printf("ks_vm_test: %d unit checks (%d failed), %d programs (%d failed), %d corpus scripts + %d imported JS "
+           "scripts (%d failed)\n", g_checks, g_fail, n, run_fail, nc, nj, corpus_fail);
     return g_fail || run_fail || corpus_fail ? 1 : 0;
 }
