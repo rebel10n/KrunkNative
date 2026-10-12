@@ -500,6 +500,7 @@ typedef struct {
     // Live match state from the server (client/src/net/game_events.c). Read by the HUD.
     int net_ping_ms;               // smoothed RTT from PING_RESULT, -1 = unknown (Krunker "-")
     uint16_t net_ent_size;         // ENT size the server's INIT protocol accepts (net_ent_size_for): V7 from 1.2, V6 for 1.1, else V4
+    uint8_t net_server_minor;      // WP-B: INIT minor (NET_PROTOCOL_MINOR_V7 servers take the v7 combat packets)
     int net_round_seconds;         // round clock (TIMER), -1 = no round clock received yet
     int net_end_seconds;           // end screen "Next Round in" seconds, -1 = no end screen
     int net_end_result;            // END result: 1 victory, 0 defeat, -1 draw
@@ -649,6 +650,17 @@ void client_frame(Client*); // one iteration of the main loop: tick, swap, poll 
 void client_chat_send(Client*, const char *text); // Enter-to-chat: sends one line (trimmed, max 70 chars)
 int client_handle_game_packet(Client*, const NetPacket*); // 1 = handled (KILL/HIT/HEALTH/CHAT/...)
 int client_handle_game_event(Client*, int type, const void *payload, uint16_t length); // same, typed payload
+// WP-B v7 combat packets (client/src/net/combat_events.c): effects, streaks, Nuke, Juggernaut, perks.
+int combat_events_handle(Client*, int type, const void *payload, uint16_t length); // 1 = handled
+void combat_send_streak_slots(Client*);      // the streakIndex1..3 loadout, right before every ENT
+void combat_call_in_streak(Client*, int slot); // window.callInStreak(slot): the streak keys
+// The sight a player's weapons take (attach.js index): the local player's saved attachIndex,
+// others' Player.attach_index (0 Reflex until the v7 SPAWN carries attachIndex, WP-C).
+int player_attach_index(const Player*);
+// window.updateScope(scopeIndex, savedScope) (v7.1.4 aimRecticles.js): the #recticleImg source for
+// the saved scopeIndex (getSavedVal, 0 Default) into buf; NULL when scopeIndex is -1 (no overlay).
+// A custom (-2) image must be an http(s) URL and not .svg, else scope_0.
+const char *combat_scope_overlay_src(char *buf, size_t n);
 void client_net_send(Client*, NetPacketType, const void*, uint16_t); // the socket, or offline the sandbox connection
 // Prediction / reconciliation (client/src/net/recon.c, Krunker tmpInpts / "q" / reconcilePlayer).
 void client_recon_reset(Client*);                                 // CONTROLS.reset(): our spawn, a new session

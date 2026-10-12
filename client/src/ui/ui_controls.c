@@ -788,8 +788,11 @@ static void press_button(Client *client, const int code) {
     if (bind_is(UI_CONTROL_INTERACT_SEC, code)) ui_terminal_interact(client, 1); // io.send("int", 1, true)
     if (bind_is(UI_CONTROL_DROP, code)) log_once(UI_CONTROL_DROP, "drop (int 2)");
     if (bind_is(UI_CONTROL_INSPECT, code)) player_inspect_weapon(me); // Game.players.wInspect(player)
-    for (int i = 0; i < 5; i++) {
-        if (bind_is(UI_CONTROL_STREAK0 + i, code)) log_once(UI_CONTROL_STREAK0 + i, "killstreak (k)");
+    for (int i = 0; i < 5; i++) { // v7.1.4 streak loadout: slots 0-2 (callInStreak); 3-4 are v3 leftovers
+        if (bind_is(UI_CONTROL_STREAK0 + i, code)) {
+            if (i < STREAK_SLOTS) combat_call_in_streak(client, i);
+            else log_once(UI_CONTROL_STREAK0 + i, "killstreak (k)");
+        }
     }
     if (bind_is(UI_CONTROL_WEAPON_VIS, code) && me->weapon) {
         if (me->weapon->melee) flip_setting("showWeaponMel");

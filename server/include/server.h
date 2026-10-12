@@ -91,6 +91,8 @@ typedef struct {
     int spray_index;               // ENT sprayIndex (gameserver.ts ent[1]: player.sprayIndex), 0 for older ENTs
     PlayerSkins skins;             // ENT weapon skins + meleeIndex (ent[2], ent[9]), owned ones only once enforced
     float lag_comp;                // ENT lagComp (ent[11] slider) clamped to 0.1..1, 1 for older ENTs
+    int streak_indexes[3];         // WP-B: STREAK_SLOTS (v7 ENT streakIndexes), applied at spawn
+    unsigned char streak_indexes_set:1; // 0: the default pick (Nuke only)
     char name[SERVER_PLAYER_NAME_MAX];
     char address[CHAT_CMD_ADDRESS_SIZE]; // dotted peer address (chat /ip, /banip)
     unsigned char op:1;            // CLI `op`: passes the DEV checks of chat commands while perms are on

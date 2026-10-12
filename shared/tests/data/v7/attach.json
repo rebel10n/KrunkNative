@@ -1,0 +1,30 @@
+[
+ {
+  "id": 0,
+  "name": "Reflex Sight",
+  "src": "attach_0",
+  "dotSrc": "dot_0",
+  "aimOffY": 0.16,
+  "scale": 1.2,
+  "expScale": 12
+ },
+ {
+  "id": 1,
+  "name": "Acog Scope",
+  "src": "attach_1",
+  "dotSrc": "dot_0",
+  "minRec": 20,
+  "req$fn": true,
+  "zRec": 0.9,
+  "aimOffY": 0.22,
+  "zoomMlt": 1.35,
+  "zOff": 0.35,
+  "yOff": {
+   "1": 0.01,
+   "14": -0.01
+  },
+  "scale": 1.1,
+  "expScale": 8,
+  "noVertM": true
+ }
+]

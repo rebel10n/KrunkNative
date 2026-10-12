@@ -396,6 +396,16 @@ else ()
         target_link_libraries(class_spawn_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # weapons_v7_test / combat_test (WP-B): v7.1.4 class / weapon / effect / streak tables against
+    # shared/tests/data/v7 (tools/kref/v7-dump.js), and the charge / hitbox / streak / effect maths
+    foreach (wpb_test weapons_v7_test combat_test)
+        add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
+        target_link_libraries(${wpb_test} PRIVATE m)
+        if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+            target_link_libraries(${wpb_test} PRIVATE ws2_32) # shared/src/net.c
+        endif ()
+    endforeach ()
+
     # recon_test: client prediction + server reconciliation over a simulated laggy link
     add_executable(recon_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/recon_test.c)
     target_link_libraries(recon_test PRIVATE m)

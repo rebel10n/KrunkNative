@@ -65,8 +65,8 @@ static struct {
     int preloaded;
 } g_sound;
 
-// weapon.sound per weapon (Krunker.Unpacked-v3.1.1/27.js), and whether it ejects casings
-// (!nCase). Matched on Weapon.name; the shared weapon table carries no sound field.
+// weapon.sound per weapon (v7.1.4 src/data/weapons.js; Weapon.sound carries the same name), and
+// whether it ejects casings (!nCase). Matched on Weapon.name.
 static const struct {
     const char *weapon;
     const char *sound;
@@ -86,10 +86,21 @@ static const struct {
     {"Alien Blaster", "weapon_12", 0},
     {"Crossbow", "weapon_14", 0},
     {"Famas", "weapon_15", 1},
-    {"Sawed Off", "weapon_6", 0},
+    {"Sawed Off", "weapon_16", 0}, // v7.1.4: weapon_6 -> weapon_16
     {"Auto Pistol", "weapon_17", 1},
     {"Bomb", "weapon_18", 0},
     {"Blaster", "weapon_19", 0},
+    // v7.1.4 weapons 19-28 (WP-B)
+    {"Build Tool", "weapon_20", 0},
+    {"Grappler", "weapon_21", 1},
+    {"Tehchy-9", "weapon_22", 1},
+    {"Noob Tube", "weapon_23", 0},
+    {"Slimer", "weapon_24", 1},
+    {"Zapper", "weapon_25", 1},
+    {"Minigun", "weapon_26", 1},
+    {"War Machine", "weapon_27", 0},
+    {"Akimbo Pistol", "weapon_28", 1},
+    {"Charge Rifle", "weapon_29", 1},
 };
 
 // Krunker's amvVols: per-ambience volume, 0.12 otherwise.

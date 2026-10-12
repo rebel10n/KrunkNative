@@ -296,6 +296,7 @@ static const struct {
     {"reSpd", GS_NUM, 0.5f, 2, offsetof(GameConfig, reload_speed), 1},
     {"t1Dmg", GS_NUM, 0, 2, offsetof(GameConfig, team1_damage), 1},
     {"t2Dmg", GS_NUM, 0, 2, offsetof(GameConfig, team2_damage), 1},
+    {"hitBoxPad", GS_NUM, -2, 2, offsetof(GameConfig, hitbox_pad), 1}, // WP-B v7.1.4 (def 0.6, Ranked 0.1)
 };
 
 static void gs_set_bool(GameConfig *g, const char *var, const int on) {
@@ -314,11 +315,12 @@ static void gs_set_bool(GameConfig *g, const char *var, const int on) {
     else if (!strcmp(var, "allowSpect")) g->allow_spectate = on;
     else if (!strcmp(var, "thirdPerson")) g->third_person = on;
     else if (!strcmp(var, "nameTags")) g->hide_nametags = on;
+    else if (!strcmp(var, "chrgWeps")) g->no_charge_weapons = !on; // WP-B v7.1.4 Chargable Weapons (def true)
 }
 
 static const char *const k_host_bools[] = {
     "canSlide", "airStrf", "autoJump", "bDrop", "hpRegen", "killRewards", "headshotOnly", "noSecondary",
-    "noStreaks", "disableB", "throwMel", "selTeam", "allowSpect", "thirdPerson", "nameTags",
+    "noStreaks", "disableB", "throwMel", "selTeam", "allowSpect", "thirdPerson", "nameTags", "chrgWeps",
 };
 
 // Team names live as long as the process (GameConfig keeps char pointers).
@@ -335,6 +337,7 @@ void gs_game_config_from_json(GameConfig *g, const cJSON *obj) {
         char *field = (char *) g + k_host_keys[i].offset;
         if (k_host_keys[i].bit) *(float *) field = (float) v;
         else *(int *) field = (int) v;
+        if (k_host_keys[i].offset == offsetof(GameConfig, hitbox_pad)) g->hitbox_pad_set = 1; // set: no Ranked default
     }
 
     for (size_t i = 0; i < sizeof(k_host_bools) / sizeof(k_host_bools[0]); i++) {

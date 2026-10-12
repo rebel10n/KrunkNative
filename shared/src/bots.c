@@ -656,8 +656,10 @@ static int bot_alloc_uid(Game *game) {
 }
 
 static int bot_class_allowed(const Game *game, const int index) {
-    // NextBotManager.isBotClassAllowed: no Rocketeer (7). KrunkNative: no Runner (9, knife only) either.
-    return index >= 0 && (size_t) index < game->class_count && index != 7 && index != 9 && game->classes[index].loadout;
+    // NextBotManager.isBotClassAllowed: no Rocketeer (7). KrunkNative: no Runner (9, knife only) either,
+    // nor v7.1.4's hidden Survivor (14: its Build Tool never fires outside build modes, WP-B).
+    return index >= 0 && (size_t) index < game->class_count && index != 7 && index != 9 && index != CLASS_ID_SURVIVOR &&
+           game->classes[index].loadout;
 }
 
 static int bot_random_class(const Game *game) {

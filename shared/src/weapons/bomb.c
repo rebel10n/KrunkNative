@@ -1,7 +1,8 @@
 #include <weapons.h>
 
-// Krunker v3.1.1 weapon 17 (27.js / src/data/weapons.js). Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: sound, transp, noAo, nCase, noCross, nMuz, type, icnPad.
+// Krunker v7.1.4 weapon 17 (src/data/weapons.js; values checked against shared/tests/data/v7/weapons.json
+// by shared/tests/weapons_v7_test.c). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: transp, noAo, nCase, noCross, nMuz, type, icnPad.
 const Weapon g_bomb = {
     .name = "Bomb",
     .src = "weapon_18",
@@ -28,54 +29,15 @@ const Weapon g_bomb = {
     .hold_width = 1.2f,
     .rotation = {0.0f, 1.5707963267948966f, -0.4f},
     .has_rotation = 1,
+    .burst_rate = 0.05f,
 
     .origin = {0.0001f, 0.0001f, 0.0001f},
     .offset = {0.0f, -0.8f, -3.5f},
     .left_hold = {0.82f, -0.3f, 0.33f},
     .right_hold = {-0.82f, -0.3f, 0.33f},
-};
 
-// {
-// name: "Bomb",
-// src: "weapon_18",
-// icon: "icon_18",
-// sound: "weapon_18",
-// transp: true,
-// bomb: true,
-// equipment: true,
-// nInsp: true,
-// noAim: true,
-// noAo: true,
-// nCase: true,
-// noCross: true,
-// nMuz: true,
-// type: 3,
-// aimSpd: 140,
-// swapTime: 250,
-// spdMlt: 0.65,
-// scale: 0.63,
-// holdW: 1.2,
-// zoom: 1,
-// rot: [0, Math.PI / 2, -0.4],
-// leftHoldY: -0.3,
-// rightHoldY: -0.3,
-// leftHoldZ: 0.33,
-// rightHoldX: -0.82,
-// leftHoldX: 0.82,
-// rightHoldZ: 0.33,
-// xOff: 0,
-// yOff: -0.8,
-// zOff: -3.5,
-// xOrg: 0.0001,
-// yOrg: 0.0001,
-// zOrg: 0.0001,
-// cLean: 0,
-// cRot: 0,
-// cDrop: 0.12,
-// jYMlt: 0.95,
-// spread: 120,
-// recover: 0.98,
-// recoverF: 0.98,
-// leanMlt: 0.3,
-// icnPad: 9
-// }
+    // ---- Krunker v7.1.4 (WP-B) ----
+    .sound = "weapon_18",
+    .type = 3,
+    .no_cross = 1,
+};

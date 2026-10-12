@@ -3,6 +3,20 @@
 
 struct Player_t;
 
+// Krunker projectile flight (v7.1.4 weapons.js pj_* fields, projectiles.js stored[]). Krunker
+// units: spd units/ms, grav units/ms^2. Moved here from shared.h so each Weapon carries one.
+typedef struct {
+    float speed;        // spd (units/ms)
+    float gravity;      // grav (units/ms^2)
+    float range;        // max flight distance
+    float damage;       // direct hit damage
+    float explode;      // explosion radius, 0 none
+    float explode_damage; // eDmg at the centre
+    float hit_box;      // hitB: sphere test radius around the target's middle, 0 = player box
+    unsigned char no_impact:1; // nImp: no impact particles
+    unsigned char dont_pred:1; // dontPred: no lag compensation (stateConst 0; the Crossbow)
+} ProjectileConfig;
+
 typedef struct {
     const char *name;
     const char *src;
@@ -113,9 +127,46 @@ typedef struct {
     vec3 left_hold;
     vec3 right_hold;
 
-    // JS `cSpread` as (x, y) pairs; pellet i of a shot uses pair ammo_left * shots + i.
+    // JS `cSpread` as (x, y) pairs. v7 nests two patterns ([[..], [..]]) and pellet i of a shot
+    // uses pattern ammo_left % 2, pair i: pairs [(ammo % 2) * shots, +shots). One-pattern
+    // weapons repeat it.
     const vec2 *custom_spread;
     unsigned int custom_spread_count;
+
+    // ---- WP-B: Krunker v7.1.4 fields (src/data/weapons.js). "0 = x" marks a v7 default. ----
+    const char *sound;          // sound: assets/sound/<sound>.mp3 shot (client/src/sound_events.c)
+    unsigned char type;         // weaponTypes.js: 0 primary, 1 secondary, 2 melee, 3 equipment
+    int kill_score;             // kill: ["", N] replaces the base 50 kill score, 0 = none
+    int min_rec;                // minRec: account level to pick it, 0 = open
+    int mag_reserve;            // magReserve: reserve magazines (finiteAmmo modes)
+    float leg_mlt;              // lsMlt, 0 = 0.5: legshot multiplier (not on headshots)
+    float move_spread;          // movSpread, 0 = 1: spreadPlus gained per unit moved / fallen
+    float aim_spread;           // adSpread: share of the hip spread kept while fully aimed
+    // Charge system (game setting chrgWeps, players.js / player.js chargeTime)
+    float charge_time;          // chrgTime (s), 0 = not chargeable (the knife uses the class throwChrg)
+    float charge_mlt;           // chrgMlt, 0 = 0.9: projectile dmgMlt = 1 - chrgMlt * (1 - charge)
+    float charge_decay;         // chrgDec: charge seconds lost per second while not charging
+    float full_charge_mlt;      // fullChrgMlt: damage x of the full-charge shot (Charge Rifle 50)
+    unsigned char over_charge:1;     // ovrChrg: past chrgTime * 1.2 the charge resets (overCharged)
+    unsigned char shoot_charge:1;    // shootChrg: charges with the trigger held, not while aiming
+    unsigned char rate_charge:1;     // rateChrg: fire interval x max(0.7, (1 - charge) * 1.5)
+    unsigned char full_charge_shot:1;// fullChrgSht: normal shots cost no ammo, the full charge fires one round
+    unsigned char bypass_charge:1;   // bypassChrg: normal shots keep the charge
+    unsigned char no_comp:1;         // noComp: not in competitive lobbies
+    unsigned char custom_only:1;     // customOnly: custom games only
+    unsigned char no_reload:1;       // noReload
+    unsigned char no_swap:1;         // noSwap: can't switch away (Minigun, War Machine)
+    unsigned char no_jump:1;         // noJump (Minigun)
+    unsigned char remove_on_empty:1; // removeOnEmpty: dropped from the loadout when empty
+    unsigned char no_proj_spread:1;  // noProjSpread
+    unsigned char build:1;           // build (Build Tool)
+    unsigned char no_cross:1;        // noCross: no crosshair
+    unsigned char can_upgrade:1;     // canUpgrade (krumMachine)
+    int effect_on_hit;          // effectOnHit + 1 (0 = none): EffectId given on hit, floor(charge * 10) stacks
+    int deployable;             // deployable + 1 (0 = none): the spawnable a shot places (Slimer pads)
+    float deploy_range;         // deployRang
+    float grapple_range;        // grapRang (Grappler)
+    ProjectileConfig projectile_config; // pj_*: speed 0 = none (also the bullet-drop flight of hitscan guns)
 } Weapon;
 
 extern const Weapon g_awp;
@@ -137,16 +188,47 @@ extern const Weapon g_sawed_off;
 extern const Weapon g_auto_pistol;
 extern const Weapon g_bomb;
 extern const Weapon g_blaster;
+// v7.1.4 weapons 19-28 (shared/src/weapons/v7_*.c)
+extern const Weapon g_build_tool;
+extern const Weapon g_grappler;
+extern const Weapon g_tehchy9;
+extern const Weapon g_noob_tube;
+extern const Weapon g_slimer;
+extern const Weapon g_zapper;
+extern const Weapon g_minigun;
+extern const Weapon g_war_machine;
+extern const Weapon g_akimbo_pistol;
+extern const Weapon g_charge_rifle;
 
-// Krunker v3.1.1 weapon attachments (src/data/attach.js / 86.js). `dotSrc` is never read by the client.
+// Krunker v7.1.4 weapon attachments (src/data/attach.js). `dotSrc` is never read by the client.
 typedef struct {
     const char *name;
     const char *src;     // models/attach/<src>.obj + textures/attach/<src>.png
     float aim_offset_y;  // added to the weapon's aimOffY while aiming
     float scale;
+    float zoom_mlt;      // zoomMlt, 0 = 1: ADS zoom x (Acog 1.35; FOV only, spread untouched)
+    float z_recoil;      // zRec, 0 = the weapon's recoilZM (viewmodel recoil push)
+    float z_offset;      // zOff: sight mesh z offset
+    float exp_scale;     // expScale (explosion preview scale, cosmetic)
+    int min_rec;         // minRec: class rank (stats c<classIndex>) to pick it, 0 = open
 } WeaponAttachment;
 
-#define ATTACHMENT_COUNT 1
+#define ATTACHMENT_COUNT 2
+#define ATTACHMENT_ACOG 1
+// The sight y offset of the Acog per weapon id (attach.js yOff {1: 0.01, 14: -0.01}), 0 elsewhere.
+float weapon_attachment_y_offset(const WeaponAttachment*, int weapon_id);
+// The ADS zoom of `weapon` with `attachment` (v7 players.js: weapon.zoom * zoomMlt).
+float weapon_aim_zoom(const Weapon*, const WeaponAttachment*);
+
+// v7.1.4 scope overlays (src/data/aimRecticles.js): the saved scopeIndex picks an entry, whose
+// `id` names textures/scopes/scope_<id>.png; -1 no overlay, -2 the saved custom image.
+typedef struct {
+    const char *name;
+    int id;
+} ScopeOverlay;
+
+#define SCOPE_OVERLAY_COUNT 7
+extern const ScopeOverlay g_scope_overlays[SCOPE_OVERLAY_COUNT];
 // getSavedVal("attachIndex") || 0: every player uses the Reflex Sight until attachment selection exists.
 #define DEFAULT_ATTACHMENT_INDEX 0
 
@@ -155,9 +237,20 @@ extern const WeaponAttachment g_attachments[ATTACHMENT_COUNT];
 // The attachment mounted on `weapon` for a player with `attach_index`, or NULL (weapon.attach == null or no such entry).
 const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index);
 
-// Indexed exactly like Krunker v3.1.1's weaponConfig (class loadouts and packets use these ids).
-#define WEAPON_COUNT 19
+// Indexed exactly like Krunker v7.1.4's weaponConfig (class loadouts and packets use these ids;
+// 0-18 keep their v3.1.1 meaning).
+#define WEAPON_COUNT 29
 #define WEAPON_ID_PISTOL 2
 #define WEAPON_ID_KNIFE 12
+#define WEAPON_ID_CROSSBOW 13
+#define WEAPON_ID_BUILD_TOOL 19
+#define WEAPON_ID_GRAPPLER 20
+#define WEAPON_ID_SLIMER 23
+#define WEAPON_ID_ZAPPER 24
+#define WEAPON_ID_MINIGUN 25
+#define WEAPON_ID_WAR_MACHINE 26
+#define WEAPON_ID_CHARGE_RIFLE 28
 
 extern const Weapon *g_weapons[WEAPON_COUNT];
+// v7.1.4 upgradeWeapons.js entry of weapon `id` (krumMachine upgrades), NULL out of range.
+const Weapon *weapon_upgraded(int id);

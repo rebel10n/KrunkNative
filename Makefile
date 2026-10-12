@@ -151,6 +151,8 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/editor_bus_test
+	./$(DEBUG_DIR)/weapons_v7_test
+	./$(DEBUG_DIR)/combat_test
 
 # --------------------------------------------------------------------------- html-engine
 # The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).

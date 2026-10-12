@@ -317,7 +317,7 @@ static void test_projectile_state_const(Game *game, Player *shooter) {
 // A client on a 60 Hz frame timeline sends its frames in "q" batches over an uplink with constant,
 // jittered (+-30 ms) or spiked (one 200 ms stall) delay; the server keeps a 64 Hz history of a
 // target strafing at 100 u/s and resolves every frame as a shot. A shot "hits" when the rewound
-// box is within the hitbox half width (scale + hitBoxPad) of where the client saw the target:
+// box is within the hitbox half width (scale + hitboxPadW, v7.1.4: 0.6) of where the client saw the target:
 // fired at f, the client showed the target as of f - downlink - interpolation.
 #define SIM_TICK (1.0 / 64.0)
 #define SIM_UP 0.075
@@ -409,7 +409,7 @@ static SimResult simulate(Game *game, Player *shooter, Player *target, const Sim
             r.extra_shots += exact - by_arrival > 20.0f;
 
             const float seen = sim_x(fired[k] - SIM_DOWN - INTERP_S);
-            const float half = target->scale + 1.0f; // hitBoxPad
+            const float half = target->scale + player_hitbox_pad_w(target); // v7.1.4 hitboxPadW (game hitBoxPad 0.6)
             PlayerStoredState a, b;
             players_fetch_state(target, exact, &a);
             players_fetch_state(target, by_arrival, &b);

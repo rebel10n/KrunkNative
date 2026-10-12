@@ -241,6 +241,7 @@ void mode_set_player_loadout(Player *player, const int *weapons, const int count
     player->reloads = new_reloads;
     player->loadout_size = size;
     player->can_throw = 1;
+    player->upgraded_slots = 0; // v7.1.4 updateLoadout without upgrades[]: no krumMachine slots (WP-B)
 
     const int index = keep_index && player->loadout_index < size ? player->loadout_index : 0;
     player->loadout_index = -1; // force the swap below to re-equip

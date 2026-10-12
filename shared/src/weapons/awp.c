@@ -1,7 +1,8 @@
 #include <weapons.h>
 
-// Krunker v3.1.1 weapon 0 (27.js / src/data/weapons.js). Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: sound, trail, flap, noAo, type, muzOff, muzMlt, rumble, rumbleDur, icnPad.
+// Krunker v7.1.4 weapon 0 (src/data/weapons.js; values checked against shared/tests/data/v7/weapons.json
+// by shared/tests/weapons_v7_test.c). Times are converted from ms to s and
+// recoil from per-ms to per-s; fields not ported yet: trail, flap, noAo, type, muzOff, muzMlt, rumble, rumbleDur, icnPad.
 const Weapon g_awp = {
     .name = "Sniper Rifle",
     .src = "weapon_1",
@@ -19,7 +20,7 @@ const Weapon g_awp = {
 
     .ammo = 3,
     .swap_time = 0.3f,
-    .reload_time = 1.5f,
+    .reload_time = 1.9f,
     .aim_speed = 0.12f,
     .speed_mlt = 0.95f,
     .damage = 100.0f,
@@ -28,7 +29,7 @@ const Weapon g_awp = {
     .range = 1000.0f,
     .drop_start = 230.0f,
     .damage_drop = 30.0f,
-    .rate = 0.9f,
+    .rate = 1.0f,
     .spread = 260.0f,
     .recoil = 9.0f,
     .recoil_r = 0.05f,
@@ -49,6 +50,7 @@ const Weapon g_awp = {
     .crouch_drop = 0.1f,
     .scale = 0.00115608717587935f,
     .hold_width = 1.0f,
+    .burst_rate = 0.05f,
 
     .origin = {0.0f, -0.55f, -0.8f},
     .offset = {0.8f, -0.65f, -1.8f},
@@ -60,94 +62,11 @@ const Weapon g_awp = {
     .recoil_anim_aim_time = 0.5f,
     .recoil_tween_y = 0.24f,
     .recoil_anim_mask = 1,
-};
 
-// {
-// name: "Sniper Rifle",
-// src: "weapon_1",
-// icon: "icon_1",
-// sound: "weapon_1",
-// secondary: false,
-// noSpread: false,
-// projectile: {
-//   disable: true,
-//   mat: "BASIC",
-//   color: 16777179,
-//   dmg: 100,
-//   spd: 2.5,
-//   lookDir: true,
-//   grav: 0.0001,
-//   scale: 1.4,
-//   length: 10,
-//   range: 7000,
-//   snd: 0
-// },
-// akimbo: false,
-// noAim: false,
-// animWhileAim: true,
-// trail: true,
-// flap: {
-//   src: "flap_0",
-//   rot: 2.1,
-//   scl: 1,
-//   zOff: 0.43,
-//   xOff: 0.17,
-//   yOff: 0.53
-// },
-// physRang: 0,
-// physPow: 0,
-// noAo: true,
-// nAuto: true,
-// type: 0,
-// scope: true,
-// swapTime: 300,
-// aimSpd: 120,
-// spdMlt: 0.95,
-// ammo: 3,
-// dmg: 100,
-// hsMlt: 1.5,
-// pierce: 0.2,
-// reload: 1500,
-// range: 1000,
-// dropStart: 230,
-// dmgDrop: 30,
-// scale: 0.00115608717587935,
-// leftHoldY: -0.65,
-// rightHoldY: -0.68,
-// leftHoldZ: 2.1,
-// rightHoldZ: 0.75,
-// holdW: 1,
-// xOff: 0.8,
-// yOff: -0.65,
-// zOff: -1.8,
-// xOrg: 0,
-// yOrg: -0.55,
-// zOrg: -0.8,
-// cLean: 0.2,
-// cRot: 0.2,
-// cDrop: 0.1,
-// inspectR: 0.2,
-// inspectM: 0.1,
-// muzOff: 8,
-// muzMlt: 1.6,
-// rate: 900,
-// spread: 260,
-// zoom: 2.7,
-// leanMlt: 1.5,
-// recoil: 0.009,
-// recoilR: 0.05,
-// recover: 0.993,
-// recoverY: 0.997,
-// recoverF: 0.975,
-// recoilYM: 0.55,
-// recoilZ: 1.5,
-// recoilAnim: {
-//   time: 280,
-//   aimTime: 500,
-//   recoilTweenY: 0.24
-// },
-// jumpYM: 0.15,
-// rumble: 0.9,
-// rumbleDur: 500,
-// icnPad: 9
-// }
+    // ---- Krunker v7.1.4 (WP-B) ----
+    .sound = "weapon_1",
+    .type = 0,
+    .mag_reserve = 5,
+    .can_upgrade = 1,
+    .projectile_config = {.speed = 2.5f, .gravity = 0.0001f, .range = 7000.0f, .damage = 100.0f},
+};

@@ -1,0 +1,50 @@
+[
+ {
+  "spd": 0.38,
+  "grav": 0.0002,
+  "spn": 0.035,
+  "scale": 1,
+  "linger": 5000,
+  "length": 1,
+  "dmg": 180,
+  "range": 1500
+ },
+ {
+  "spd": 0.1,
+  "grav": 0,
+  "spn": 0.04,
+  "hitB": 4,
+  "scale": 6.1,
+  "length": 6.1,
+  "dmg": 1,
+  "range": 500,
+  "life": 24000
+ },
+ {
+  "s": "streak_3",
+  "spn": 0.008,
+  "spnD": "y",
+  "spd": 0.4,
+  "scale": 5,
+  "length": 5,
+  "scaleMlt": 2,
+  "explode": 150,
+  "dmg": 150,
+  "eDmg": 150,
+  "range": 1500,
+  "life": 24000,
+  "dontPred": true,
+  "info": {
+   "stk": 3
+  },
+  "yD": -1.5707963267948966,
+  "rot": 3.141592653589793,
+  "blend": 1,
+  "noLookAt": true,
+  "depthW": true,
+  "explodeData": {
+   "smCnt": 5,
+   "lgCnt": 0
+  }
+ }
+]

@@ -446,6 +446,10 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->spray_index = client->spray_index; // applyEntData: player.sprayIndex = ent[1]
     client->player->skins = client->skins;             // applyEntData: player.skins = ent[2], meleeIndex = ent[9]
     client->player->lag_comp = client->lag_comp;       // applyLagCompFromEnt: player.lagComp = ent[11]
+    // WP-B: v7 player.streakIndexs (ENT) and player.account for reqAccount streaks: a backend
+    // account, or the host's own machine (the offline sandbox counts as an account, decisions.md)
+    player_set_streak_indexes(client->player, client->streak_indexes_set ? client->streak_indexes : NULL);
+    client->player->has_account = (unsigned char) (client->acct.account_id > 0 || client->local);
     player_spawn(client->player);
     client->joined = 1;
     net_mark_client_spawned(client);
@@ -1054,6 +1058,17 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
         }
         case NET_PACKET_CHAT_SEND:
             if (packet->length && packet->length <= sizeof(NetChatSendPacket)) return net_handle_chat(client, packet);
+            break;
+        case NET_PACKET_STREAK_SLOTS: { // WP-B: v7 ENT streakIndexes (streakIndex1..3), before the ENT
+            if (packet->length != sizeof(NetStreakSlotsPacket)) break;
+            const NetStreakSlotsPacket *slots = (const NetStreakSlotsPacket *) packet->payload;
+            for (int i = 0; i < STREAK_SLOTS; i++) client->streak_indexes[i] = slots->indexes[i];
+            client->streak_indexes_set = 1;
+            if (client->player) player_set_streak_indexes(client->player, client->streak_indexes);
+            break;
+        }
+        case NET_PACKET_USE_STREAK: // WP-B: "k<slot>" -> players.checkStreak (v7.1.4 sandbox semantics)
+            if (client->player && packet->length == sizeof(NetUseStreakPacket)) player_check_streak(client->player, packet->payload[0]);
             break;
         case NET_PACKET_INTERACT: { // io_int
             NetInteractPacket interact = {0};

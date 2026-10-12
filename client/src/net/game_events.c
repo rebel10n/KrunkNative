@@ -695,6 +695,14 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_POSITION:
         case NET_PACKET_POPUP:
             return client_triggers_handle_event(client, type, payload, length); // client/src/map_triggers.c
+        case NET_PACKET_EFFECT:
+        case NET_PACKET_STREAK:
+        case NET_PACKET_NUKE:
+        case NET_PACKET_JUGGERNAUT:
+        case NET_PACKET_PERKS:
+        case NET_PACKET_UPGRADES:
+        case NET_PACKET_WEAPON_STREAK:
+            return combat_events_handle(client, type, payload, length); // WP-B (client/src/net/combat_events.c)
         default:
             return hud_modes_handle_event(client, type, payload, length); // mode packets (client/src/ui/hud_modes.c)
     }

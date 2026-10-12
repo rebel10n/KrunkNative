@@ -162,6 +162,13 @@ typedef struct {
     int health;                      // aK3 (0 = class health)
     int ammo_limit;                  // ammoLimit (0 none)
     float hitbox_pad;                // hitBoxPad (0 = 1)
+    // WP-B v7.1.4 physPow knockback modifiers (players.js shoot): impulseMlt (only with
+    // has_impulse_mlt: 0 is valid, Zombies / Classic), noImpulseDist (full push at any distance),
+    // nonObjImpulse (a fixed 0.04 push whatever the ray hits: Impulse mode).
+    float impulse_mlt;
+    unsigned char has_impulse_mlt:1;
+    unsigned char no_impulse_dist:1;
+    unsigned char non_obj_impulse:1;
 
     // render.js initScene(map, mode) overrides: `q.x != null ? q.x : map.x`. Only used
     // when the matching has_* flag is set (Stalker); colours are 0xRRGGBB.

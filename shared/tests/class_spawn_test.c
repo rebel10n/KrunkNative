@@ -1,5 +1,5 @@
 // Spawns every class in a local Game on Sandstorm and Kanji, checks the class/loadout setup against
-// Krunker v3.1.1 (53.js / 27.js) and drives a short input script (walk, jump, crouch, aim, shoot,
+// Krunker v7.1.4 (src/data/classes.js / weapons.js) and drives a short input script (walk, jump, crouch, aim, shoot,
 // reload, swap) asserting the player state never goes NaN/inf.
 #include <math.h>
 #include <shared.h>
@@ -17,29 +17,35 @@ typedef struct {
     float speed;
 } ExpectedClass;
 
-// Copied from Krunker v3.1.1 53.js (regen defaults to config.regenVal = 0.1, speed to 1).
+// Copied from Krunker v7.1.4 src/data/classes.js (v7 changes: Hunter speed 1.05 -> 1.0, Run N Gun
+// HP 100 -> 90, Spray N Pray HP 170 -> 180 and speed 0.95 -> 0.9, Rocketeer gets a secondary, Agent
+// HP 100 -> 110, Trooper speed 1.0 -> 0.9; new Survivor and Infiltrator).
 static const ExpectedClass expected_classes[] = {
     {"Triggerman", 1, 1, 0, 100, 6, 0.1f, 1.05f},
-    {"Hunter", 0, 1, 0, 60, 5, 0.1f, 1.05f},
-    {"Run N Gun", 3, 0, 1, 100, 6, 0.1f, 1.18f},
-    {"Spray N Pray", 6, 0, 0, 170, 7, 0.05f, 0.95f},
+    {"Hunter", 0, 1, 0, 60, 5, 0.1f, 1.0f},
+    {"Run N Gun", 3, 0, 1, 90, 6, 0.1f, 1.18f},
+    {"Spray N Pray", 6, 0, 0, 180, 7, 0.05f, 0.9f},
     {"Vince", 5, 1, 0, 90, 6, 0.1f, 1.0f},
     {"Detective", 4, 0, 0, 100, 6, 0.1f, 1.0f},
     {"Marksman", 7, 1, 0, 90, 6, 0.1f, 1.0f},
-    {"Rocketeer", 8, 0, 0, 130, 7, 0.1f, 0.86f},
-    {"Agent", 9, 0, 1, 100, 6, 0.1f, 1.2f},
+    {"Rocketeer", 8, 1, 0, 130, 7, 0.1f, 0.86f},
+    {"Agent", 9, 0, 1, 110, 6, 0.1f, 1.2f},
     {"Runner", 12, 0, 1, 120, 6, 0.2f, 1.0f},
     {"Deagler", 10, 0, 0, 60, 5, 0.1f, 1.0f},
     {"Bowman", 13, 1, 0, 100, 6, 0.1f, 1.0f},
     {"Commando", 14, 1, 0, 100, 6, 0.1f, 1.0f},
-    {"Trooper", 18, 0, 1, 100, 6, 0.1f, 1.0f},
+    {"Trooper", 18, 0, 1, 100, 6, 0.1f, 0.9f},
+    {"Survivor", 19, 0, 1, 150, 6, 0.1f, 0.8f},
+    {"Infiltrator", 28, 1, 0, 90, 5, 0.1f, 1.0f},
 };
 
-// v3.1.1 weapon names by id (27.js order).
+// v7.1.4 weapon names by id (src/data/weapons.js order; 0-18 as in v3.1.1).
 static const char *expected_weapons[] = {
     "Sniper Rifle", "Assault Rifle", "Pistol", "Submachine Gun", "Revolver", "Shotgun", "Machine Gun",
     "Semi Auto", "Rocket Launcher", "Akimbo Uzi", "Desert Eagle", "Alien Blaster", "Combat Knife",
     "Crossbow", "Famas", "Sawed Off", "Auto Pistol", "Bomb", "Blaster",
+    "Build Tool", "Grappler", "Tehchy-9", "Noob Tube", "Slimer", "Zapper", "Minigun", "War Machine",
+    "Akimbo Pistol", "Charge Rifle",
 };
 
 static int failures = 0;
@@ -80,8 +86,8 @@ static void check_weapon_table(void) {
             CHECK(w->rate > 0.0f, "%s rate", w->name);
             CHECK(w->reload_time > 0.0f, "%s reload_time", w->name);
         }
-        if (w->custom_spread) {
-            CHECK(w->shots > 0 && w->custom_spread_count >= w->ammo * w->shots, "%s cSpread has %u pairs, needs %u", w->name, w->custom_spread_count, w->ammo * w->shots);
+        if (w->custom_spread) { // v7.1.4 cSpread[ammo % 2]: two patterns of `shots` pairs
+            CHECK(w->shots > 0 && w->custom_spread_count == 2 * w->shots, "%s cSpread has %u pairs, needs %u", w->name, w->custom_spread_count, 2 * w->shots);
         }
         if (w->burst) CHECK(w->burst_count > 1 && w->burst_rate > 0.0f, "%s burst", w->name);
     }
@@ -172,7 +178,10 @@ static void check_class(Game *game, const int class_index, const char *map_name)
     tick(player, &input, 2);
     input.shoot = 0;
     tick(player, &input, 60);
-    if (!player->weapon->melee) CHECK(player->ammo[0] < ammo_before, "%s did not fire (%d -> %d)", expected->name, ammo_before, player->ammo[0]);
+    // v7.1.4: the Build Tool builds instead of firing (not ported), the Charge Rifle's normal
+    // shots cost no ammo (fullChrgSht): both fire without spending a round here.
+    const int spends_ammo = !player->weapon->melee && !player->weapon->build && !player->weapon->full_charge_shot;
+    if (spends_ammo) CHECK(player->ammo[0] < ammo_before, "%s did not fire (%d -> %d)", expected->name, ammo_before, player->ammo[0]);
     if (player->weapon->burst) CHECK(ammo_before - player->ammo[0] == (int) player->weapon->burst_count, "%s one click should fire a %u-round burst (fired %d)", expected->name, player->weapon->burst_count, ammo_before - player->ammo[0]);
     else if (player->weapon->no_auto && !player->weapon->melee) CHECK(ammo_before - player->ammo[0] == 1, "%s semi-auto click fired %d", expected->name, ammo_before - player->ammo[0]);
     CHECK(player_state_ok(player), "%s NaN after shooting", expected->name);

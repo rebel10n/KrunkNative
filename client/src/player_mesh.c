@@ -843,9 +843,14 @@ void player_generate_meshes(Player *player, const int render_you) {
                 }
 
                 // Sight attachment: only on the first-person (U) and preview (V) models, like jLrR6.
-                const WeaponAttachment *attachment = weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX);
+                // v7.1.4: the player's pick (Reflex / Acog), the Acog's per-weapon yOff and its zOff.
+                const WeaponAttachment *attachment = weapon_attachment(weapon, player_attach_index(player));
                 if (attachment && (render_you || player->uid == -1)) {
                     arms->attachment = generate_attachment_mesh(weapon, attachment, &arms->anchor);
+                    if (arms->attachment) {
+                        arms->attachment->transform.position.y -= weapon_attachment_y_offset(attachment, player->loadout[i]);
+                        arms->attachment->transform.position.z -= attachment->z_offset;
+                    }
                 }
 
                 // TODO: flaps
@@ -918,7 +923,11 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float anim_mlt_lean = player->render_you ? (1.0f - aim_val_mlt) * game_constants.anim_mlt : 0.0f; // a3 = Z * animMult
     // JS: (1 - (1 - Z) * (weapon.recoilYMA || 1)) * animMult; no v3.1.1 weapon defines recoilYMA.
     const float recoil_y_mlt = (1.0f - aim_val_mlt) * game_constants.anim_mlt;
-    const float recoil_z_mlt = 1.0f - (player->weapon->recoil_z_mlt ? player->weapon->recoil_z_mlt : 0.5f) * aim_mlt;
+    // v7.1.4: the sight's zRec (Acog 0.9) replaces the weapon's recoilZM
+    const WeaponAttachment *recoil_attachment = weapon_attachment(player->weapon, player_attach_index(player));
+    const float recoil_z_base = recoil_attachment && recoil_attachment->z_recoil ? recoil_attachment->z_recoil :
+                                player->weapon->recoil_z_mlt ? player->weapon->recoil_z_mlt : 0.5f;
+    const float recoil_z_mlt = 1.0f - recoil_z_base * aim_mlt;
     const float anim_rotate_mlt = (1.0f - (player->weapon->z_rotation ? player->weapon->z_rotation : 0.3f) * aim_mlt) * (player->weapon->z_rotation_mlt ? player->weapon->z_rotation_mlt : 1.0f) * weapon_bobbing_mlt;
     const float anim_y_mlt = 1.0f - (player->weapon->jump_y_mlt ? player->weapon->jump_y_mlt : 1.0f) * aim_mlt;
     const float lean_aim_mlt = 1.0f - aim_mlt * 0.45f; // a8 = 1 - (1 - a0) * 0.45
@@ -1018,7 +1027,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     }
 
     // aA = attach && attach.aimOffY + (weapon.aimOffY || 0) || 0 (TODO: settings weaponADSOffY scaling)
-    const WeaponAttachment *attachment = weapon_attachment(player->weapon, DEFAULT_ATTACHMENT_INDEX);
+    const WeaponAttachment *attachment = weapon_attachment(player->weapon, player_attach_index(player));
     float aim_offset_y = attachment ? attachment->aim_offset_y + player->weapon->aim_offset_y : 0.0f;
     // weaponADSOffY: if (renderYou && weaponADSOffY != 1) aA = (aA || 0.1) * weaponADSOffY
     if (player->render_you && settings->weapon_ads_off_y != 1.0f) aim_offset_y = (aim_offset_y ? aim_offset_y : 0.1f) * settings->weapon_ads_off_y;

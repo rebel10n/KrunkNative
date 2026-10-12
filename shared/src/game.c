@@ -6,6 +6,7 @@
 #include <ks_game.h> // KrunkScript hook points (onGameEnd, TIME.freeze)
 #include <spawnables.h>
 #include <pcg_basic.h>
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 
@@ -563,15 +564,19 @@ static void game_tick_regen(Game *game, Player *player, const float delta) {
     if (player->hit_timer > 0.0f) player->hit_timer -= delta;
 
     player->regen_ticker -= delta;
-    if (player->regen_ticker > 0.0f) return;
+    if (player->regen_ticker <= 0.0f) {
+        player->regen_ticker = GAME_REGEN_TICK;
+        player->regen_tick_count++; // v7.1.4 tickerC
+        // v7.1.4: no regen while a Juggernaut
+        const int regen_on = player->hit_timer <= 0.0f && !player->is_juggernaut && game->config.health_regen &&
+                             !(game->mode && game->mode->config.no_regen) && !player->mode.no_regen &&
+                             game->classes && player->class_index >= 0 && player->class_index < (int) game->class_count;
+        const float regen = regen_on ? game->classes[player->class_index].regen : 0.0f;
+        if (regen > 0.0f) player_change_health(player, NULL, -(float) player->max_health * regen, 0);
+        player_effects_regen_tick(player); // v7.1.4 Poisoned every 8th tick, Zapped every 2nd (shared/src/effects.c)
+    }
 
-    player->regen_ticker = GAME_REGEN_TICK;
-    if (player->hit_timer > 0.0f) return;
-    if (!game->config.health_regen || (game->mode && game->mode->config.no_regen) || player->mode.no_regen) return;
-    if (!game->classes || player->class_index < 0 || player->class_index >= (int) game->class_count) return;
-
-    const float regen = game->classes[player->class_index].regen;
-    if (regen > 0.0f) player_change_health(player, NULL, -(float) player->max_health * regen, 0);
+    if (player->active) player_tick_effects(player, delta); // attributeTimers
 }
 
 void game_tick(Game *game, const float now, const float delta) {
@@ -595,6 +600,8 @@ void game_tick_world(Game *game, const float now, const float delta, const float
 
             if (!game->nuke_timer) {
                 int nuke_reward = 0;
+                const NetNukePacket detonated = {.state = 1};
+                game_send(game, NET_TARGET_ALL, NET_PACKET_NUKE, &detonated, sizeof(detonated)); // v7.1.4 "n", 1
 
                 for (size_t i = 0; i < game->player_count; i++) {
                     Player *player = game->players[i];
@@ -609,7 +616,17 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                     player_kill(player, game->nuke_player, &kill_info, 1);
                 }
 
-                if (nuke_reward) player_score(game->nuke_player, nuke_reward, 1);
+                if (nuke_reward) {
+                    // v7.1.4: "6" [Nuke medal, reward] and the "4" hit marker, then the score
+                    NetKillMedalsPacket medals;
+                    memset(&medals, 0, sizeof(medals));
+                    medals.count = 1;
+                    snprintf(medals.medals[0].text, sizeof(medals.medals[0].text), "Nuke");
+                    medals.medals[0].score = nuke_reward;
+                    medals.kills = (int32_t) game->nuke_player->kills;
+                    game_send(game, game->nuke_player->uid, NET_PACKET_KILL_MEDALS, &medals, sizeof(medals));
+                    player_score(game->nuke_player, nuke_reward, 1);
+                }
             }
         }
 
@@ -651,6 +668,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
         if (!authority || !player->active || game->end_timer > 0.0f) continue; // end screen: kept players only animate
 
         game_tick_regen(game, player, delta);
+        if (!player->active) continue; // Poisoned / Zapped can kill in tickPlayer
         player_store_state(player); // players.js update: tickPlayer, storeState, then the deathY check
 
         // KrunkNative (deliberate difference): v3.1.1 players.js update() kills at deathY even in

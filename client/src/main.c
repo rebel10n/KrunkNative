@@ -1015,6 +1015,7 @@ void client_send_cycle_packet(Client *client) {
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
     client->net_ent_size = net_ent_size_for(init->major, init->minor);
+    client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
     if (client->map_loaded) client_unload_map(client);
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
@@ -1319,6 +1320,7 @@ void client_enter_game(Client *client) {
 
     if (client->offline || socket >= 0) {
         client->spawn_requested = 1; // SPAWN clears it
+        combat_send_streak_slots(client); // WP-B: v7 ENT streakIndexes, ahead of the ENT (1.3+ servers)
         client_net_send(client, NET_PACKET_ENT, &packet, ent_size);
     } else {
         client->in_game = 0;

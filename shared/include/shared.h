@@ -551,21 +551,121 @@ void map_object_rotation(const Object *object, float out[9]);
 void map_reset(Map*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
 
+// Krunker v7.1.4 class (src/data/classes.js, shared/src/classes.c). Fields marked "0 = 1" read
+// as 1 when unset, so custom/mode classes only set what they change.
 typedef struct {
     const char *name;
     int icon_index;
-    const char **texts;
+    const char **texts;   // txts: selectClass speech lines
+    int text_count;
     const int *loadout;
     unsigned char secondary:1;
     unsigned char wall_jump:1;
+    unsigned char hide:1;       // hide: not in the class picker (Deagler, Survivor)
+    unsigned char no_mobile:1;  // noMobile
+    unsigned char no_sleeve:1;  // noSleeve: no arm sleeves on the viewmodel
+    unsigned char leap:1;       // leap: melee lunge
+    unsigned char back_slide:1; // bkSlid
     int colors[6];
     int health;
     int health_segments;
     float regen;
     float speed;
+    int wall_jump_max;     // wallJM: wall jumps per airborne period (0 with wall_jump = none)
+    float throw_charge;    // throwChrg (s): knife-throw charge time (0 = config.throwCharge 0.9 s)
+    float slide_time_mlt;  // slT, 0 = 1
+    float slide_accel_mlt; // slA, 0 = 1
+    float turn_speed;      // trnSpd, 0 = 1
+    float melee_rate;      // melRate, 0 = 1
+    int min_rec;           // minRec: account level gate (req); 0 = open
+    int face;              // face: class face store item
+    float hitbox_pad_w;    // hbS: added to the game's hitBoxPad sideways (player.hitboxPadW)
+    float hitbox_pad_h;    // hbH: added to the game's hitBoxPad on top (player.hitboxPadH)
 } ClassConfig;
 
-extern const ClassConfig g_classes[14];
+#define CLASS_COUNT 16
+#define CLASS_ID_SURVIVOR 14
+#define CLASS_ID_INFILTRATOR 15
+extern const ClassConfig g_classes[CLASS_COUNT];
+
+// ---- WP-B: Krunker v7.1.4 status effects, perks and killstreaks (shared/src/effects.c) ----
+
+// effects.js: stackable effects; player.effects[i] is the stack count and execute() writes the
+// player.attributes value below. Timed stacks wear off one at a time (attributeTimers).
+typedef enum {
+    EFFECT_BOOSTED,         // speed: +10% move speed per stack
+    EFFECT_SLEIGHT_OF_HAND, // reload: -10% reload time per stack
+    EFFECT_RAPID_FIRE,      // fRate: -5% fire interval per stack
+    EFFECT_SIPHON,          // siphon: the killer heals 10 HP per stack
+    EFFECT_ROOTED,          // rooted: -25% move speed per stack, 25 s
+    EFFECT_DIZZY,           // drunk: camera sway, 35 s
+    EFFECT_POISONED,        // enraged: 10 damage every 4 s, 40 s
+    EFFECT_JUMP_BOOST,      // jump: +10% jump per stack
+    EFFECT_ZAPPED,          // zap: 1 damage per stack every 1 s to zappedBy, 5 s
+    EFFECT_STRENGTH,        // dmg: +10% damage per stack
+    EFFECT_COUNT
+} EffectId;
+
+#define EFFECT_STACK_MAX 10 // the largest effects.js `max`
+
+typedef struct {
+    const char *name;
+    const char *key;   // the player.attributes key
+    float timer;       // seconds per stack, 0 = until death
+    float def;         // the attribute with no stacks
+    int max;           // stack cap
+    float mlt;         // per stack
+    float hp;          // siphon / poison / zap: HP per tick (0 = none)
+    int medal;         // mid: the "am" medal icon
+} EffectConfig;
+
+extern const EffectConfig g_effects[EFFECT_COUNT];
+
+// player.attributes (effects.js keys). effects_reset() sets every value to its `def`.
+typedef struct {
+    float speed, reload, fire_rate, siphon, rooted, drunk, enraged, jump, zap, damage;
+} PlayerAttributes;
+
+// Perks (player.perks: PERK_MACHINE map objects and the Perk Bottle pickup, players.givePerk).
+enum {
+    PERK_HEALTH = 0,        // maxHealth / health 250
+    PERK_RAPID_FIRE = 1,    // fire interval x0.66
+    PERK_FAST_RELOAD = 2,   // reload time x0.5
+    PERK_SPEED = 3,         // move speed x1.15
+    PERK_SLIDE = 4,         // may slide in noSliding modes
+    PERK_SLIDE_EXPLODE = 5, // may slide; sliding blasts AIs every 750 ms
+    PERK_WEAPON_SLOT = 6,   // weaponLimit 2 -> 3
+};
+#define PLAYER_PERK_MAX 8
+#define GAME_MAX_ZOMBIE_PERKS 4 // config.maxZombiePerks
+
+// streaks.js: one pick per slot (streakIndex1..3, ENT streakIndexes), earned at realKillStreak == kills.
+typedef enum {
+    STREAK_NUKE,
+    STREAK_AIRDROP,
+    STREAK_REFILL,      // devOnly
+    STREAK_BOMBARDMENT, // devOnly
+    STREAK_SLIMER,
+    STREAK_JUGGERNAUT,
+    STREAK_WAR_MACHINE,
+    STREAK_COUNT
+} StreakId;
+
+#define STREAK_SLOTS 3
+
+typedef struct {
+    const char *name;
+    int slot;              // the loadout slot it can be picked in
+    int kills;             // realKillStreak needed
+    unsigned char req_account:1; // reqAccount: guests can't earn it (sandbox and offline can)
+    unsigned char no_customs:1;  // noCustoms: not in custom games
+    unsigned char dev_only:1;    // devOnly
+} StreakConfig;
+
+extern const StreakConfig g_streaks[STREAK_COUNT];
+// index.js streakIndex1..3 defaults (f1795): slots 0 and 1 none, slot 2 the Nuke.
+extern const int g_default_streak_indexes[STREAK_SLOTS];
+// ---- end WP-B effects/perks/streaks types ----
 
 typedef enum {
     TEAM_OPTIONS_NONE,
@@ -760,6 +860,7 @@ typedef struct {
     double time;       // Game.state_now when stored
     vec3 position;     // x, y, z (feet)
     float height;      // h
+    float adjusted_height; // ah (v7.1.4): height with the head scaled by headMlt, the hit box top
 } PlayerStoredState;
 
 typedef struct Player_t {
@@ -961,6 +1062,33 @@ typedef struct Player_t {
     PlayerStoredState state_history[PLAYER_STATE_HISTORY_MAX]; // stateHistory ring, newest at state_history_head
     int state_history_head;
     int state_history_count;
+    // ---- WP-B: v7.1.4 combat state (shared/src/player.c combat region, shared/src/effects.c) ----
+    float charge_time;            // chargeTime (s): Crossbow / knife throw / Zapper / Charge Rifle charge
+    unsigned char full_charge:1;  // fullCharge: held to chrgTime on a weapon without ovrChrg
+    unsigned char over_charged:1; // overCharged: held past chrgTime * 1.2 (ovrChrg); un-aim to charge again
+    unsigned char is_juggernaut:1;// isJuggernaut (Juggernaut streak): 2000 HP, Minigun, no regen
+    float head_mlt;               // headMlt (0 = 1): head hitbox scale (Big Head FFA), spawn "headMlt"
+    float adjusted_height;        // adjustedHeight: height with the head scaled by head_mlt (hit tests)
+    PlayerAttributes attributes;  // effects.js attributes (effects_reset at spawn)
+    unsigned char effects[EFFECT_COUNT];          // stacks per effect
+    float effect_timers[EFFECT_COUNT][EFFECT_STACK_MAX]; // attributeTimers (s), one per timed stack
+    unsigned char effect_timer_count[EFFECT_COUNT];
+    int zapped_by;                // zappedBy: uid credited with Zapped damage, -1 none
+    unsigned int regen_tick_count;// tickerC: 500 ms ticks (poison every 8th, zap every 2nd)
+    int perks[PLAYER_PERK_MAX];   // player.perks
+    int perk_count;
+    int streak_indexes[STREAK_SLOTS];      // streakIndexs: the picked streak per slot, -1 none
+    unsigned int real_kill_streak;         // realKillStreak: resets at the highest picked streak
+    unsigned char streaks_owned[STREAK_COUNT]; // player.streaks[i].cnt: earned, not yet called in
+    int start_health;             // startHealth: maxHealth before Juggernaut
+    float throw_charge;           // throwCharge (s): class throwChrg || config.throwCharge
+    int attach_index;             // attachIndex (ENT / spawn): the sight on attach weapons, 0 Reflex, 1 Acog, -1 none
+    unsigned char upgraded_slots; // player.upgrades: bit per loadout slot holding its upgradeWeapons entry (krumMachine)
+    int weapon_streak;            // weaponStreak: kills in a row with streak_weapon ("wstk")
+    int streak_weapon;            // currentStreakWeapon, -1 none
+    unsigned char has_account:1;  // player.account (server: a backend account or the host's own machine,
+                                  // which covers the offline sandbox, decisions.md): reqAccount streaks
+    // ---- end WP-B combat state ----
 } Player;
 
 typedef struct {
@@ -1005,6 +1133,46 @@ void player_store_state(Player*);
 float player_get_state_const(const Player*);
 int players_fetch_state(const Player *target, float ping_ms, PlayerStoredState *out);
 
+// ---- WP-B: v7.1.4 effects, perks, streaks and hit maths (shared/src/effects.c, player.c) ----
+void effects_reset(Player*);                       // spawn: no effects, attributes at their def
+#define PLAYER_EFFECTS_V7 1 // player_give_effect & co. exist (modes guard their effect calls on it)
+void player_give_effect(Player*, int effect, int count); // players.giveEffect (authority sends "pk")
+void player_remove_effect(Player*, int effect, int one); // removeEffect (one stack) / clearEffect
+void player_set_effect_stacks(Player*, int effect, int count); // client mirror of "pk": stacks + attribute, no packet
+void player_tick_effects(Player*, float delta);    // attributeTimers countdown (authority)
+void player_effects_regen_tick(Player*);           // the 500 ms ticker's poison / zap damage (authority)
+float player_attr_speed(const Player*);  // attributes.speed (Boosted), 1 by default
+float player_attr_rooted(const Player*); // attributes.rooted, 1 by default
+float player_attr_jump(const Player*);   // attributes.jump (Jump Boost), 1 by default
+float player_attr_reload(const Player*); // attributes.reload * perk 2 (x0.5)
+float player_attr_fire_rate(const Player*); // attributes.fRate * perk 1 (x0.66)
+float player_attr_damage(const Player*); // attributes.dmg (Strength)
+int player_has_perk(const Player*, int perk);
+void player_give_perk(Player*, int perk);           // players.givePerk (authority broadcasts "upk")
+int player_has_equipment(const Player*);            // hasEquipment: an equipment weapon in the loadout
+const Weapon *player_slot_weapon(const Player*, int slot); // players.getWeapon: the upgraded entry for an upgraded slot
+void player_upgrade_weapon(Player*, int slot);      // krumMachine: upgrade a slot, full upgraded ammo ("upgr", authority)
+void player_set_upgrades(Player*, unsigned char slots); // client mirror of NET_PACKET_UPGRADES
+void player_give_weapon(Player*, int weapon_id);    // players.giveWeapon (streak equipment), authority
+void player_remove_weapon(Player*, int weapon_id);  // players.removeWeapon
+void player_set_juggernaut(Player*, int on);        // game.setJuggernaut
+void player_set_streak_indexes(Player*, const int indexes[STREAK_SLOTS]); // ENT streakIndexes (sanitised)
+void player_update_streaks(Player*);                // updateStreaks after a kill (authority)
+int player_use_streak(Player*, int streak);         // useStreak: 1 when it activated
+void player_check_streak(Player*, int slot);        // checkStreak: the streak key / "k<slot>"
+int game_start_nuke(struct Game_t*, Player*);       // streaks.js Nuke.start: 0 when one is running
+float player_hitbox_pad_w(const Player*);           // hitboxPadW: game hitBoxPad + class hbS
+float player_hitbox_pad_h(const Player*);           // hitboxPadH: game hitBoxPad + class hbH
+// Hit zones of a hit at world height `hit_y` on `target` (players.js shoot): head when within
+// headScale * headMlt of the top of the box `base_y + adjusted_height`, legs below legHeight
+// minus the crouch drop. Used by hitscan, melee and projectiles.
+int player_hit_is_head(const Player *target, float base_y, float adjusted_height, float hit_y);
+int player_hit_is_leg(const Player *target, float base_y, float hit_y);
+// Damage of one weapon hit after head / leg multipliers (noHeadShot, per-weapon lsMlt, no leg
+// multiplier on a headshot) and headshotOnly; `damage` is after falloff.
+float player_hit_damage(const struct Game_t*, const Weapon*, float damage, int head, int leg);
+// ---- end WP-B ----
+
 typedef struct {
     int max_players;
     int min_players;
@@ -1042,6 +1210,11 @@ typedef struct {
     float health_mlt;
     float fire_rate;
     float reload_speed;
+    // WP-B (v7.1.4 game settings): hitBoxPad (def 0.6, defC 0.1 on competitive hosts) and
+    // chrgWeps (def true). hitbox_pad < 0 is valid (-2..2), so `hitbox_pad_set` marks a value.
+    float hitbox_pad;
+    unsigned int hitbox_pad_set:1;
+    unsigned int no_charge_weapons:1; // !chrgWeps
 
     int *maps;
     int map_count;
@@ -1113,17 +1286,7 @@ typedef struct {
 // (Krunker spd is units/ms); `range` counts down with the distance flown.
 #define GAME_MAX_PROJECTILES 64
 
-typedef struct {
-    float speed;        // spd (units/ms)
-    float gravity;      // grav (units/ms^2)
-    float range;        // max flight distance
-    float damage;       // direct hit damage
-    float explode;      // explosion radius, 0 none
-    float explode_damage; // eDmg at the centre
-    float hit_box;      // hitB: sphere test radius around the target's middle, 0 = player box
-    unsigned char no_impact:1; // nImp: no impact particles
-    unsigned char dont_pred:1; // dontPred: no lag compensation (stateConst 0; the Crossbow)
-} ProjectileConfig;
+// ProjectileConfig: shared/include/weapons.h (every Weapon carries its v7 pj_* block).
 
 typedef struct {
     int id;             // Krunker m.sid: slot index, stable while active
@@ -1141,7 +1304,19 @@ typedef struct {
     int ai_kind;        // projectiles.stored index of an AI shot (owner -1, "orb_0"), 0 = a player's weapon
     float state_const;  // stateConst: the owner's getStateConst at launch (ms), 0 dontPred / AI
     ProjectileConfig config;
+    int effect;         // WP-B effectInd: EffectId given on a hit, -1 none (Zapper)
+    int effect_count;   // effectC: stacks (floor(charge * 10))
 } GameProjectile;
+
+// WP-B: one shot's projectiles.init options (v7.1.4 players.js shoot / melee): the charge
+// scales speed (knife throw: v = max(0.3, d)) and damage (ceil(dmg * d) * dmgMlt).
+typedef struct {
+    float speed_mlt;    // v (0 = 1)
+    float damage_d;     // d: ceil(dmg * d) (0 = 1)
+    float damage_mlt;   // dmgMlt (0 = 1)
+    int effect;         // effectInd, -1 none
+    int effect_count;   // effectC
+} ProjectileShot;
 
 // Krunker v3.1.1 match constants (src/config.js) in seconds.
 #define GAME_END_TIMER 25.0f        // config.endTimer (end screen / map vote)
@@ -1210,6 +1385,7 @@ typedef struct Game_t {
     struct GameAIs_t *ai;         // Krunker game.AI (shared/include/ai.h): NULL until the first AI
     struct GameBots_t *bots;      // Krunker v7.1.4 game.bots (shared/include/bots.h): NULL until the first bot
 
+    const EffectConfig *effects;  // WP-B: per-game effects.js table (custom-game prks overrides), NULL = g_effects
     float nuke_timer;
     Player *nuke_player;
 
@@ -1296,6 +1472,9 @@ int game_mode_id(const Game*);           // the current round's Krunker mode id,
 // Projectiles (shared/src/projectile.c), authority only.
 const ProjectileConfig *projectile_config_for(const Weapon*, int thrown_melee); // NULL: the weapon fires no projectile
 void game_spawn_projectile(Game*, Player *owner, int weapon_index, const ProjectileConfig*, vec3 origin, float yaw, float pitch, int thrown_melee);
+// WP-B: game_spawn_projectile with the v7 shot options (NULL = none).
+void game_spawn_projectile_ex(Game*, Player *owner, int weapon_index, const ProjectileConfig*, vec3 origin, float yaw, float pitch,
+                              int thrown_melee, const ProjectileShot *shot);
 void game_tick_projectiles(Game*, float delta);
 void game_explosion(Game*, vec3 position, float radius, float damage, Player *owner, int weapon_index);
 
@@ -2051,6 +2230,67 @@ typedef struct {
     int32_t uid;                   // the killer
     int32_t streak;                // killStreak, a multiple of 5
 } NetKillStreakPacket;
+
+// ---- WP-B combat packets (v7.1.4), ids in NET_PACKET_BLOCK_EFFECTS (170-176) and
+// NET_PACKET_BLOCK_COMBAT (190-194). Old peers ignore unknown ids; a client sends the C->S
+// ones only to servers that announced NET_PROTOCOL_MINOR_V7. Handled client-side in
+// client/src/net/combat_events.c, server-side in server/src/net.c.
+#define NET_PACKET_EFFECT (NET_PACKET_BLOCK_EFFECTS + 0)       // S->C to the player: NetEffectPacket ("pk" index, count)
+#define NET_PACKET_STREAK (NET_PACKET_BLOCK_EFFECTS + 1)       // S->C to the player: NetStreakPacket ("st" index, count)
+#define NET_PACKET_USE_STREAK (NET_PACKET_BLOCK_EFFECTS + 2)   // C->S: NetUseStreakPacket ("k<slot>": checkStreak)
+#define NET_PACKET_NUKE (NET_PACKET_BLOCK_EFFECTS + 3)         // S->C to all: NetNukePacket ("n" 0 incoming / 1 detonated)
+#define NET_PACKET_JUGGERNAUT (NET_PACKET_BLOCK_EFFECTS + 4)   // S->C to all: NetJuggernautPacket ("jg" sid, on)
+#define NET_PACKET_STREAK_SLOTS (NET_PACKET_BLOCK_EFFECTS + 5) // C->S before ENT: NetStreakSlotsPacket (ENT streakIndexes)
+// NET_PACKET_BLOCK_EFFECTS + 6: reserved for "bbm" (Bombardment, devOnly, not ported)
+#define NET_PACKET_PERKS (NET_PACKET_BLOCK_COMBAT + 0)         // S->C to all: NetPerksPacket ("upk" sid, perks)
+#define NET_PACKET_UPGRADES (NET_PACKET_BLOCK_COMBAT + 1)      // S->C to all: NetUpgradesPacket (v7 inat upgrades[]: krumMachine slots)
+#define NET_PACKET_WEAPON_STREAK (NET_PACKET_BLOCK_COMBAT + 2) // S->C to the killer: NetWeaponStreakPacket ("wstk" weapon, count)
+
+typedef struct {
+    uint8_t effect;                // EffectId
+    uint8_t count;                 // stacks, 0 = cleared
+} NetEffectPacket;
+
+typedef struct {
+    uint8_t streak;                // StreakId
+    uint8_t count;                 // earned and not yet called in
+} NetStreakPacket;
+
+typedef struct {
+    uint8_t slot;                  // 0..STREAK_SLOTS-1
+} NetUseStreakPacket;
+
+typedef struct {
+    uint8_t state;                 // 0 incoming (10 s siren), 1 detonated
+} NetNukePacket;
+
+typedef struct {
+    int32_t uid;
+    uint8_t on;
+    int32_t max_health;            // the new maxHealth (2000, or the class value when off)
+} NetJuggernautPacket;
+
+typedef struct {
+    int8_t indexes[STREAK_SLOTS];  // streakIndex1..3, -1 none (sanitised by player_set_streak_indexes)
+} NetStreakSlotsPacket;
+
+typedef struct {
+    int32_t uid;
+    uint8_t count;
+    int8_t perks[PLAYER_PERK_MAX];
+    int32_t max_health;            // maxHealth after the perks (perk 0: 250)
+} NetPerksPacket;
+typedef struct {
+    int32_t weapon;                // currentStreakWeapon (weapon id)
+    int32_t count;                 // weaponStreak
+} NetWeaponStreakPacket;
+
+typedef struct {
+    int32_t uid;
+    uint8_t slots;                 // bit per loadout slot: upgradeWeapons entry
+    int32_t ammo[NET_LOADOUT_MAX]; // the slots' ammo after the upgrade
+} NetUpgradesPacket;
+// ---- end WP-B combat packets ----
 #pragma pack(pop)
 
 typedef struct {

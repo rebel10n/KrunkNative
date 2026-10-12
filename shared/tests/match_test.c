@@ -112,7 +112,8 @@ static void test_combat(Game *game) {
     aim_at(a, b->position.y + 7.0f, 50.0f);
     shoot(a);
     const float body = 23.0f - 5.0f * 50.0f / 700.0f;
-    CHECK(near(b->health, 100.0f - body, 0.05f), "body shot: health %.2f, expected %.2f", b->health, 100.0f - body);
+    // v7.1.4 changeHealth rounds the damage to 0.1
+    CHECK(near(b->health, 100.0f - body, 0.1f), "body shot: health %.2f, expected %.2f", b->health, 100.0f - body);
 
     const SentPacket *hit = find_sent(NET_PACKET_HIT, 1, 0);
     CHECK(hit != NULL, "HIT packet to the shooter");
@@ -294,7 +295,7 @@ static void test_projectiles(Game *game) {
     aim_at(a, b->position.y + 7.0f, 50.0f);
     shoot(a);
     const float through = 23.0f - 23.0f * 0.5f - 5.0f * 50.0f / 700.0f;
-    CHECK(near(100.0f - b->health, through, 0.05f), "wallbang damage %.2f, expected %.2f", 100.0f - b->health, through);
+    CHECK(near(100.0f - b->health, through, 0.1f), "wallbang damage %.2f, expected %.2f", 100.0f - b->health, through);
 
     wall.penetrable = 0;
     const float before_solid = b->health;

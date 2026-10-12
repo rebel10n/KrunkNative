@@ -1,15 +1,17 @@
 #include <shared.h>
 #include <ai.h>
-#include <math.h>
+#include <spawnables.h>
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
+#include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
 
-// Krunker v3.1.1 combat constants (src/config.js), used by the spread update and
-// the hitscan/damage code below.
+// Krunker combat constants (v3.1.1 / v7.1.4 src/config.js), used by the spread update and
+// the hitscan/damage code below. Head / leg zones: shared/src/effects.c (player_hit_*).
 #define COMBAT_HEAD_SCALE 2.0f      // config.headScale: headshot band below the top of the hitbox
-#define COMBAT_LEG_HEIGHT 4.2f      // config.legHeight: leg shots deal half damage
+#define COMBAT_THROW_CHARGE 0.9f    // v7 config.throwCharge (s): knife-throw charge of a class without throwChrg
+#define COMBAT_OVER_CHARGE 1.2f     // v7 config.overCharge: ovrChrg weapons reset at chrgTime * 1.2
 #define COMBAT_DENSITY_FLESH 0.2f   // config.materialDens.flesh
 #define COMBAT_DENSITY_DEFAULT 0.5f // config.materialDens.default
 #define COMBAT_FIST_DAMAGE 35.0f    // melee without the knife (after a throw)
@@ -26,6 +28,8 @@
 
 void player_melee(Player*);
 void player_shoot(Player*);
+static void combat_spawn(Player*, const ClassConfig*);
+static void combat_update_charge(Player*, const Input*, float delta);
 void player_step(Player*, float);
 void player_cancel_inspect(Player*);
 
@@ -45,6 +49,9 @@ Player *player_init(Game *game) {
     for (int i = 0; i < PLAYER_DAMAGE_SLOTS; i++) player->damage_received[i].uid = -1;
     player->lag_comp = 1.0f;                        // players.js: this.lagComp = 1
     player->c_send_rate = GAME_LAG_COMP_SEND_RATE;  // this.cSendRate = 10
+    player->head_mlt = 1.0f;                        // v7.1.4 headMlt
+    player_set_streak_indexes(player, NULL);        // v7.1.4 streakIndex1..3 defaults (Nuke only)
+    effects_reset(player);
 
     return player;
 }
@@ -100,7 +107,11 @@ void player_spawn(Player *player) {
     const int primary_index = primary >= 0 && primary < (int) weapon_count && weapons[primary] ? primary : fallback_weapon;
     // setClass(game, classIndex, secIndex): the picked secondary when it is a secondary weapon, else the Pistol.
     const int picked_secondary = player->secondary_index;
-    const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary
+    // v7.1.4: customOnly secondaries (Grappler) need a custom game (KN has none yet) and noComp
+    // ones stay out of competitive (Ranked) rounds.
+    const int ranked = player->game->mode && player->game->mode->config.is_ranked;
+    const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary &&
+        !weapons[picked_secondary]->custom_only && !(ranked && weapons[picked_secondary]->no_comp)
         ? picked_secondary : WEAPON_ID_PISTOL < (int) weapon_count ? WEAPON_ID_PISTOL : -1;
     const int melee_index = WEAPON_ID_KNIFE < (int) weapon_count ? WEAPON_ID_KNIFE : primary_index;
 
@@ -119,6 +130,7 @@ void player_spawn(Player *player) {
     player->max_health = mode_health > 0 ? mode_health : (int) ((float) class_config->health * health_mlt);
     player->health = (float) player->max_health;
     player->wall_jump = class_config->wall_jump;
+    combat_spawn(player, class_config); // WP-B: v7 throwCharge, effects / perks / juggernaut reset
     player->loadout_size = loadout_size;
 
     player->loadout = calloc((size_t) loadout_size, sizeof(int));
@@ -863,6 +875,13 @@ void player_jump(Player *player) {
 }
 
 void player_swap_weapon(Player *player, const int index, const int force_swap, const int instant_swap, const int recon) {
+    // v7.1.4 swapWeapon: a noSwap weapon in hand (Minigun, War Machine) only gives way to another
+    // noSwap one (a loadout change forces the swap).
+    if (!force_swap && player->weapon && player->weapon->no_swap && player->loadout && index >= 0 && index < player->loadout_size) {
+        const Weapon *target = player->game->weapons[player->loadout[index]];
+        if (target && !target->no_swap) return;
+    }
+
     int loadout_changed = force_swap || player->loadout_index != index;
     player->loadout_index = index;
 
@@ -870,9 +889,11 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
         player->reload_timer = 0.0f;
         player->did_shoot = 0;
         player->burst_count = 0;
+        player->charge_time = 0.0f; // v7.1.4: chargeTime = 0, fullCharge = false
+        player->full_charge = 0;
     }
 
-    player->weapon = player->game->weapons[player->loadout[player->loadout_index]];
+    player->weapon = player_slot_weapon(player, player->loadout_index); // v7.1.4 getWeapon: upgraded slots
 
     if (!player->weapon) {
         player->weapon = player->game->weapons[player->loadout[0]];
@@ -923,8 +944,11 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
 
 void player_reload(Player *player) {
     if (player->reload_timer || player->ammo[player->loadout_index] >= player->weapon->ammo) return;
+    if (player->weapon->no_reload) return; // v7.1.4 noReload (streak equipment)
 
-    player->reload_timer = player->weapon->reload_time * (player->game->config.reload_speed > 0.0f ? player->game->config.reload_speed : 1.0f); // (reSpd || 1)
+    // reload * (reSpd || 1) * attributes.reload (Sleight of Hand) * (perk 2 ? 0.5 : 1)
+    player->reload_timer = player->weapon->reload_time * (player->game->config.reload_speed > 0.0f ? player->game->config.reload_speed : 1.0f) *
+                           player_attr_reload(player);
     player->burst_count = 0;
 
     player_cancel_inspect(player);
@@ -1147,6 +1171,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
     }
 
+    // v7.1.4 charge system (player.js: right after the aim update, not in replays)
+    if (!recon) combat_update_charge(player, input, delta);
+
     if (input->crouch && player->crouch_val < 1.0f && !player->on_ladder) {
         player->crouch_val = MIN(1.0f, player->crouch_val + game_constants.crouch_speed * delta);
 
@@ -1358,13 +1385,16 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             if (player->step_chase != player->step_val) player->step_chase += (player->step_val - player->step_chase) * 0.15f;
         }
 
-        // Krunker spread: movement/fall spreadPlus, crouch and recoil terms, scaled by
-        // the hip-fire amount (KrunkNative aim_val 1 = aimed, Krunker aimVal 0 = aimed).
-        player->spread_plus += delta_pos * COMBAT_SPREAD_MOVE + fabsf(player->last_position.y - player->position.y) * COMBAT_SPREAD_FALL;
+        // Krunker spread: movement/fall spreadPlus x weapon movSpread, crouch and recoil terms,
+        // scaled by the hip-fire amount plus adSpread of the aimed share (v7.1.4 player.js;
+        // KrunkNative aim_val 1 = aimed, Krunker aimVal 0 = aimed). KN bug fixed: movSpread (Akimbo
+        // Uzi 0.01, Akimbo Pistol 0.1) used to be ignored (doc/v7/player-viewer.md 5.2).
+        const float move_spread = player->weapon->move_spread ? player->weapon->move_spread : 1.0f;
+        player->spread_plus += (delta_pos * COMBAT_SPREAD_MOVE + fabsf(player->last_position.y - player->position.y) * COMBAT_SPREAD_FALL) * move_spread;
         player->spread_plus *= powf(COMBAT_SPREAD_RECOVER, delta * 1000.0f);
         player->spread = player->weapon->no_spread ? 0.0f : MAX(player->weapon->min_spread,
             (player->weapon->spread - player->weapon->spread * COMBAT_CROUCH_SPREAD * player->crouch_val +
-             player->recoil_anim * COMBAT_SPREAD_MLT + player->spread_plus) * (1.0f - player->aim_val));
+             player->recoil_anim * COMBAT_SPREAD_MLT + player->spread_plus) * ((1.0f - player->aim_val) + player->aim_val * player->weapon->aim_spread));
 
         // Intentional difference: a reconciliation replay (recon) stops here. v3.1.1 runs the
         // reload / timers / shoot code in replays too and relies on the predicted reloads[]
@@ -1407,7 +1437,10 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             }
 
             if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
-                if (player->weapon->melee) {
+                if (player->weapon->grapple_range || player->weapon->build) {
+                    // v7.1.4 tryGrapple / build (Grappler, Build Tool): grapple physics and build
+                    // pieces are WP-A phase 2 / map-logic; until then these never fire.
+                } else if (player->weapon->melee) {
                     player_melee(player);
                 } else {
                     if (player->ammo[player->loadout_index] > 0) {
@@ -1486,7 +1519,8 @@ void player_step(Player *player, float distance) {
 // melee, changeHealth, kill, score) and src/data/kills.js (reward). Only the
 // authority (native server, offline local server, is_local games) applies damage;
 // clients predict recoil/spread and learn the outcome from HIT/HEALTH/KILL packets.
-// Lag compensation (storeState / fetchState) is below. Not ported yet: kill streak rewards. AI
+// Lag compensation (storeState / fetchState) is below. Kill streaks, effects and perks:
+// shared/src/effects.c. AI
 // targets: shared/src/ai.c (game_ai_damage); map object hits (destructibles, trigger
 // events): shared/src/triggers.c (game_object_hit).
 
@@ -1655,13 +1689,21 @@ static const PlayerStoredState *player_state_entry(const Player *player, const i
     return &player->state_history[index];
 }
 
-// players.js storeState: unshift {time: game.now, h, x, y, z}, then drop every entry at least
+// v7.1.4 adjustedHeight (players.updateHeight): the height with the head band scaled by headMlt,
+// the top of the hit box (ah in stateHistory).
+static float combat_adjusted_height(const Player *player) {
+    const float head_mlt = player->head_mlt > 0.0f ? player->head_mlt : 1.0f;
+    return player->height - COMBAT_HEAD_SCALE + COMBAT_HEAD_SCALE * head_mlt;
+}
+
+// players.js storeState: unshift {time: game.now, h, ah, x, y, z}, then drop every entry at least
 // config.stateHistory old (they are the oldest ones: time only grows).
 void player_store_state(Player *player) {
     const Game *game = player->game;
 
     player->state_history_head = (player->state_history_head + 1) % PLAYER_STATE_HISTORY_MAX;
-    player->state_history[player->state_history_head] = (PlayerStoredState) {game->state_now, player->position, player->height};
+    player->state_history[player->state_history_head] = (PlayerStoredState) {game->state_now, player->position, player->height,
+                                                                             combat_adjusted_height(player)};
     if (player->state_history_count < PLAYER_STATE_HISTORY_MAX) player->state_history_count++;
 
     while (player->state_history_count > 0 &&
@@ -1701,7 +1743,7 @@ float player_get_state_const(const Player *player) {
 int players_fetch_state(const Player *target, const float ping_ms, PlayerStoredState *out) {
     const Game *game = target->game;
     if (!game->lag_comp) { // offline / lag_comp 0: where the target is now
-        *out = (PlayerStoredState) {game->state_now, target->position, target->height};
+        *out = (PlayerStoredState) {game->state_now, target->position, target->height, combat_adjusted_height(target)};
         return 1;
     }
     if (!target->state_history_count) return 0;
@@ -1726,6 +1768,7 @@ typedef struct {
     Player *player;
     float t;
     GameAI *ai;         // players.js shoot / melee: game.AI.ais boxes (authority)
+    PlayerStoredState state; // a player hit: the rewound box it was traced against (head / leg zones)
 } Hit;
 
 typedef struct {
@@ -1793,8 +1836,9 @@ static int combat_can_damage(const Player *dealer, const Player *victim) {
     return !dealer->team || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team);
 }
 
-// lineInRect against every shootable object and (authority only) every other
-// living player's hitbox: x/z +-(scale + hitBoxPad), y from the feet to height + pad.
+// lineInRect against every shootable object and (authority only) every other living player's
+// hitbox: x/z +-(scale + hitboxPadW), y from the feet to adjustedHeight + hitboxPadH (v7.1.4:
+// game hitBoxPad 0.6, 0.1 in Ranked, + class hbS / hbH; v3.1.1 padded by mode.hitBoxPad || 1).
 static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, const int include_players, HitList *hits) {
     Game *game = shooter->game;
 
@@ -1810,7 +1854,6 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
 
     if (!include_players) return;
 
-    const float pad = game->mode && game->mode->config.hitbox_pad ? game->mode->config.hitbox_pad : 1.0f;
     const float state_const = player_get_state_const(shooter);
 
     for (size_t i = 0; i < game->player_count; i++) {
@@ -1821,12 +1864,12 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
         PlayerStoredState state;
         if (!players_fetch_state(other, state_const, &state)) continue;
 
-        const float half = other->scale + pad;
-        const vec3 box_scale = {half * 2.0f, state.height + pad, half * 2.0f};
+        const float half = other->scale + player_hitbox_pad_w(other);
+        const vec3 box_scale = {half * 2.0f, state.adjusted_height + player_hitbox_pad_h(other), half * 2.0f};
         const float t = line_in_rect(origin, dir, state.position, box_scale);
         if (t <= 0.0f || t > 1.0f) continue;
 
-        hit_list_push(hits, (Hit) {NULL, other, t});
+        hit_list_push(hits, (Hit) {NULL, other, t, NULL, state});
     }
 
     // game.AI.ais: x/z +-scale, y .. y + 2 * scale (no hitBoxPad)
@@ -1858,23 +1901,14 @@ static const Weapon *combat_weapon_at(const Game *game, const int index) {
     return index >= 0 && index < (int) count ? weapons[index] : NULL;
 }
 
-// weapons.js fields the native Weapon struct does not carry yet: `kill` (custom
-// kill score replacing the base 50) and `scope` (sniper scope: No/Quick Scope).
+// weapons.js `kill` (["", N]: replaces the base 50, v7 adds the Rocket's 75) and `scope`
+// (No / Quick Scope: Sniper Rifle and v7's Charge Rifle).
 static int combat_weapon_kill_score(const Weapon *weapon) {
-    static const struct { const char *name; int score; } table[] = {
-        {"Pistol", 75}, {"Revolver", 50}, {"Desert Eagle", 50}, {"Alien Blaster", 50},
-        {"Crossbow", 75}, {"Auto Pistol", 50}, {"Blaster", 75},
-    };
-
-    if (!weapon || !weapon->name) return 0;
-    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
-        if (!strcmp(weapon->name, table[i].name)) return table[i].score;
-    }
-    return 0;
+    return weapon ? weapon->kill_score : 0;
 }
 
 static int combat_weapon_scope(const Weapon *weapon) {
-    return weapon && weapon->name && !strcmp(weapon->name, "Sniper Rifle");
+    return weapon && weapon->scope;
 }
 
 // One kills.js reward pair (tmpList.push(name, score)); returns the score for getScore().
@@ -1903,6 +1937,7 @@ static int combat_kill_reward(Game *game, Player *killer, Player *victim, const 
         if (info && info->thrown) score += combat_medal(medals, "Bullseye", 150);
         else if (info && info->fists) score += combat_medal(medals, "Beatdown", 175);
         else score += combat_medal(medals, "Execution", 150);
+        if (info && info->headshot) score += combat_medal(medals, "Headshot", 25); // v7.1.4 kills.js
     } else {
         const int custom = combat_weapon_kill_score(weapon);
         const int scope = combat_weapon_scope(weapon);
@@ -2005,6 +2040,7 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
 
     if (dealer && dealer->team == 1) damage *= game->config.team1_damage;
     else if (dealer && dealer->team == 2) damage *= game->config.team2_damage;
+    damage = floorf(damage * 10.0f + 0.5f) / 10.0f; // v7.1.4 changeHealth: dmg.round(1)
 
     if (dealer && dealer != victim && damage > 0.0f) {
         const NetHitPacket hit = {
@@ -2065,7 +2101,16 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         if (streaks) {
             killer->streak++;
             killer->kill_streak++;
+            killer->real_kill_streak++; // v7.1.4 realKillStreak -> updateStreaks (streak loadout)
             killer->death_streak = 0;
+            player_update_streaks(killer);
+            // v7.1.4 weaponStreak / "wstk": kills in a row with one weapon (not the Nuke's weaponless kills)
+            if (kill_info && kill_info->weapon_id >= 0) {
+                killer->weapon_streak = killer->streak_weapon == weapon_index ? killer->weapon_streak + 1 : 1;
+                killer->streak_weapon = weapon_index;
+                const NetWeaponStreakPacket wstk = {.weapon = weapon_index, .count = killer->weapon_streak};
+                game_send(game, killer->uid, NET_PACKET_WEAPON_STREAK, &wstk, sizeof(wstk));
+            }
             if (killer->kill_streak % 5 == 0) streak_message = (int) killer->kill_streak; // X = killStreak
             if (game->now - killer->last_kill_time >= GAME_FEED_TIMER) killer->streak = 0;
         }
@@ -2118,6 +2163,8 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     game->leaders_dirty = 1;
 
     mode_on_kill(game, player, killer, weapon_index); // lives, mode.onKill (flags, Gun Game, tags, ...)
+    // v7.1.4 Siphon: the killer heals attributes.siphon
+    if (killer && killer != player && killer->active && killer->attributes.siphon > 0.0f) player_change_health(killer, NULL, -killer->attributes.siphon, 0);
     if (streak_message && killer) { // IO.broadcast("kst", Q.sid, X): killStreakMessage on every client
         const NetKillStreakPacket kst = {.uid = killer->uid, .streak = streak_message};
         game_send(game, NET_TARGET_ALL, NET_PACKET_KILL_STREAK, &kst, sizeof(kst));
@@ -2126,12 +2173,27 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
 }
 
 void player_melee(Player *player) {
+    // v7.1.4 melee: `!player.disableMelee && config.canMelee` (KrunkScript; 1 without a script)
+    if (!ks_player_allows(player, KS_PLAYER_CAN_MELEE)) return;
     // 95.js: weapon.canThrow && jKFi4 == 0 && canThrow (fully aimed); the readable jail src/data/players.js has aimVal <= 0.1.
     const int is_throw = player->can_throw && player->weapon->can_throw && player->aim_val == 1.0f;
+    const ClassConfig *class_config = player->game->classes && player->class_index >= 0 && (size_t) player->class_index < player->game->class_count
+        ? &player->game->classes[player->class_index] : NULL;
 
-    player->reloads[player->loadout_index] = player->weapon->rate * (player->game->config.fire_rate > 0.0f ? player->game->config.fire_rate : 1.0f); // (fiRat || 1)
+    // rate * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * class melRate
+    player->reloads[player->loadout_index] = player->weapon->rate * (player->game->config.fire_rate > 0.0f ? player->game->config.fire_rate : 1.0f) *
+                                             player_attr_fire_rate(player) * (class_config && class_config->melee_rate > 0.0f ? class_config->melee_rate : 1.0f);
     player->did_shoot = 1;
     player->did_act = 1;
+
+    // v7.1.4 knife-throw charge: d = clamp(chargeTime / throwCharge, 0.1, 1) (chrgWeps), then reset
+    float throw_d = 1.0f;
+    if (is_throw && !player->game->config.no_charge_weapons) {
+        const float full = player->throw_charge > 0.0f ? player->throw_charge : COMBAT_THROW_CHARGE;
+        throw_d = CLAMP(player->charge_time / full, 0.1f, 1.0f);
+    }
+    player->charge_time = 0.0f;
+    player->full_charge = 0;
 
     // TODO: gamepad rumble?
     // isYou: weapon.anim(player, TWEEN, canThrow ? (throw ? 3 : 1) : 2), cancelInspect (swsh sounds: sound_events.c)
@@ -2145,7 +2207,10 @@ void player_melee(Player *player) {
         player->can_throw = !!player->unlimited_ammo;
         player->shot_count++;
         const vec3 origin = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
-        game_spawn_projectile(player->game, player, WEAPON_ID_KNIFE, projectile_config_for(player->weapon, 1), origin, player->direction.y, player->direction.x, 1);
+        // stored[0] with {d, v: max(0.3, d)}: ceil(180 * d) damage, 0.38 * v speed
+        const ProjectileShot shot = {.speed_mlt = fmaxf(0.3f, throw_d), .damage_d = throw_d, .effect = -1};
+        game_spawn_projectile_ex(player->game, player, WEAPON_ID_KNIFE, projectile_config_for(player->weapon, 1), origin, player->direction.y,
+                                 player->direction.x, 1, &shot);
         return;
     }
 
@@ -2160,8 +2225,8 @@ void player_melee(Player *player) {
     combat_trace(player, origin, dir, 1, &hits);
     hit_list_sort(&hits);
 
-    // Every target in range soaks the full swing unless the weapon pierces.
-    float damage = player->can_throw ? player->weapon->damage : COMBAT_FIST_DAMAGE;
+    // Every target in range soaks the full swing unless the weapon pierces (x attributes.dmg, v7.1.4).
+    float damage = (player->can_throw ? player->weapon->damage : COMBAT_FIST_DAMAGE) * player_attr_damage(player);
 
     for (size_t i = 0; i < hits.count && damage > 0.0f; i++) {
         Player *victim = hits.items[i].player;
@@ -2215,7 +2280,7 @@ static void combat_send_shot(Player *player, const int ray, const float pitch, c
 
 // One ray of player_shoot(): physPow push (i < 0) or bullet damage with falloff,
 // headshot/leg multipliers and wallbang through penetrable objects.
-static void combat_fire_ray(Player *player, const int ray, const float pitch, const float yaw, const float shot_height) {
+static void combat_fire_ray(Player *player, const int ray, const float pitch, const float yaw, const float shot_height, const float charge) {
     Game *game = player->game;
     const Weapon *weapon = player->weapon;
     const int authority = game_is_authority(game);
@@ -2226,10 +2291,33 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     const vec3 dir = combat_shot_vector(range, pitch, yaw);
     HitList hits = {0};
 
+    // v7.1.4 knockback: config impulseMlt x mode impulseMlt; noImpulseDist drops the distance term
+    const GameModeConfig *mode_config = game->mode ? &game->mode->config : NULL;
+    const float impulse_mlt = game->config.impulse_mlt * (mode_config && mode_config->has_impulse_mlt ? mode_config->impulse_mlt : 1.0f);
+    const int no_impulse_dist = mode_config && mode_config->no_impulse_dist;
+
+    // nonObjImpulse modes push the physPow ray a fixed 0.04 (x1 with noImpulseDist), hit or not
+    if (ray < 0 && mode_config && mode_config->non_obj_impulse) {
+        const float impulse = (no_impulse_dist ? 1.0f : 0.04f) * impulse_mlt;
+        const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
+                           impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};
+        player->velocity.x -= push.x;
+        player->velocity.z -= push.z;
+        player->velocity.y -= push.y;
+        player->on_ground = 0;
+        if (!authority) {
+            player->shot_vel_obj = push;
+            player->has_shot_vel_obj = 1;
+        }
+    }
+
     combat_trace(player, origin, dir, authority && ray >= 0, &hits);
     hit_list_sort(&hits);
 
-    float damage = weapon->damage;
+    // v7.1.4: dmg x charge (vLN1167: chrgTime charge, fullChrgMlt on a full-charge shot) x
+    // attributes.dmg; pierce subtracts from the charged base without the attribute.
+    const float base = weapon->damage * charge;
+    float damage = base * player_attr_damage(player);
     int wallbang = 0;
     const Hit *last = NULL; // Krunker G: the last target the bullet reached (tracer end)
 
@@ -2238,7 +2326,10 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
         last = hit;
 
         if (ray < 0) {
-            const float impulse = (1.0f - hit->t) * weapon->physical_power * game->config.impulse_mlt;
+            // v7.1.4: no object push in nonObjImpulse modes, nor off noPCol / noImpulse ("ip") objects
+            const Object *object = hit->object;
+            if ((mode_config && mode_config->non_obj_impulse) || (object && (object->no_player_col || object->no_impulse)) || hit->t < 0.0f) break;
+            const float impulse = (no_impulse_dist ? 1.0f : 1.0f - hit->t) * weapon->physical_power * impulse_mlt;
             const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
                                impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};
             player->velocity.x -= push.x;
@@ -2254,17 +2345,27 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
         }
 
         const float drop = fminf(1.0f, 1.0f - (1.0f - hit->t) * range / (range - weapon->drop_start));
-        float dealt = damage - weapon->damage_drop * drop;
+        // v7.1.4: falloff clamps at 0 and a 0 bullet stops (v3.1.1 could go negative)
+        float dealt = fmaxf(0.0f, damage - weapon->damage_drop * drop);
+        if (dealt == 0.0f) break;
 
         if (hit->player) {
             Player *victim = hit->player;
             const float hit_y = shot_height + range * hit->t * sinf(pitch);
-            const int head = victim->position.y + victim->height - hit_y < COMBAT_HEAD_SCALE;
-            const int leg = victim->position.y + COMBAT_LEG_HEIGHT > hit_y;
+            // v7.1.4 zones: head within headScale * headMlt of adjustedHeight, legs below legHeight
+            // minus the crouch drop, x weapon hsMlt (unless noHeadShot) / lsMlt (not on heads).
+            // KN bug fixed: noHeadShot was ignored (Auto Pistol, 5.2). v7 bug fixed: v7 measures the
+            // zones from the target's live position, not the rewound box the ray hit.
+            const int head = player_hit_is_head(victim, hit->state.position.y, hit->state.adjusted_height, hit_y);
+            const int leg = player_hit_is_leg(victim, hit->state.position.y, hit_y);
+            dealt = player_hit_damage(game, weapon, dealt, head, leg);
 
-            if (head) dealt *= weapon->headshot_mlt ? weapon->headshot_mlt : 1.5f;
-            if (leg) dealt *= 0.5f;
-            if (!head && game->config.headshots_only) dealt = 0.0f;
+            // effectOnHit: floor(charge * 10) stacks (no stock hitscan weapon has one)
+            const int effect_count = (int) floorf(charge * 10.0f);
+            if (weapon->effect_on_hit > 0 && effect_count > 0) {
+                player_give_effect(victim, weapon->effect_on_hit - 1, effect_count);
+                if (weapon->effect_on_hit - 1 == EFFECT_ZAPPED) victim->zapped_by = player->uid;
+            }
 
             if (player_change_health(victim, player, dealt, head)) {
                 PlayerKillInfo info = {
@@ -2276,17 +2377,17 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
                 player_kill(victim, player, &info, 0);
             }
 
-            damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_FLESH * weapon->pierce : damage;
+            damage -= weapon->pierce ? base * COMBAT_DENSITY_FLESH * weapon->pierce : damage;
         } else if (hit->ai) {
             // G.ai: changeHealth(-dmg, player), killScore, "4"; the bullet goes on like a wall it pierces
             game_ai_damage(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0);
-            damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
+            damage -= weapon->pierce ? base * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         } else {
             // G.obj: destructible health ("4", "do", onDestroy) and onShoot / onDamage triggers
             game_object_hit(game, (Object *) hit->object, player, dealt, 0, GAME_HIT_SHOT);
             if (!hit->object->penetrable) break;
             wallbang = 1;
-            damage -= weapon->pierce ? weapon->damage * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
+            damage -= weapon->pierce ? base * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         }
 
         if (damage <= 0.0f) break;
@@ -2297,32 +2398,97 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     free(hits.items);
 }
 
+// v7.1.4 removeOnEmpty: the emptied streak equipment leaves the loadout (the Juggernaut's Minigun
+// ends the Juggernaut). v7 bug fixed: v7 only does this in the shooter's own client (renderYou,
+// with serverIO only in the sandbox), so on a dedicated server the empty weapon stayed.
+static void combat_remove_if_empty(Player *player, const int weapon_id) {
+    if (!game_is_authority(player->game) || !player->weapon->remove_on_empty || player->ammo[player->loadout_index] > 0) return;
+    if (weapon_id == WEAPON_ID_MINIGUN && player->is_juggernaut) player_set_juggernaut(player, 0);
+    else player_remove_weapon(player, weapon_id);
+}
+
+// v7.1.4 players.tryDeployable (authority): the first map object along the look ray within
+// deployRang gets the weapon's spawnable (medals.js index `deployable`, the Slime Pad) at the hit
+// point; the emptied Slimer leaves the loadout. The pad's face orientation (xD / zD) is not
+// carried by spawnable_drop yet.
+static void combat_try_deploy(Player *player, const int weapon_id) {
+    Game *game = player->game;
+    if (!game_is_authority(game)) return;
+    const Weapon *weapon = player->weapon;
+    const float eye = player->position.y + player->height - game_constants.camera_height;
+    const vec3 origin = {player->position.x, eye, player->position.z};
+    const vec3 dir = combat_shot_vector(weapon->deploy_range, player->direction.x, player->direction.y);
+    HitList hits = {0};
+    combat_trace(player, origin, dir, 0, &hits);
+    hit_list_sort(&hits);
+    if (hits.count && weapon->deployable > 0) {
+        const float t = hits.items[0].t;
+        const vec3 at = {roundf((origin.x + dir.x * t) * 10.0f) / 10.0f, roundf((origin.y + dir.y * t) * 10.0f) / 10.0f,
+                         roundf((origin.z + dir.z * t) * 10.0f) / 10.0f};
+        spawnable_drop(game, weapon->deployable - 1, player, 0, at);
+    }
+    free(hits.items);
+    if (player->ammo[player->loadout_index] <= 0) player_remove_weapon(player, weapon_id);
+}
+
 void player_shoot(Player *player) {
+    // v7.1.4 shoot: `!player.disableShooting && config.canShoot` (KrunkScript; 1 without a script)
+    if (!ks_player_allows(player, KS_PLAYER_CAN_SHOOT)) return;
     // TODO: increase shots stat
+    Game *game = player->game;
+    const Weapon *weapon = player->weapon;
+    const int weapon_id = combat_weapon_index(player);
+    const int full = player->full_charge; // procInputs: shoot(..., fullCharge)
+    const int charging = !game->config.no_charge_weapons;
 
-    if (!player->unlimited_ammo) player->ammo[player->loadout_index]--;
+    // fullChrgSht weapons (Charge Rifle) spend a round only on the full-charge shot
+    if (!player->unlimited_ammo && (!weapon->full_charge_shot || full) && player->ammo[player->loadout_index] > 0) player->ammo[player->loadout_index]--;
 
-    player->did_shoot = 1;
     player->did_act = 1;
 
-    if (player->burst_count) player->burst_count--;
-    else player->burst_count = player->weapon->burst ? player->weapon->burst_count - 1 : 0;
+    // v7.1.4 charge: vLN1167 = min(1, chargeTime / chrgTime) unless bypassChrg (which keeps
+    // charging between normal shots); rateChrg shortens the interval as the charge builds.
+    float charge = 1.0f;
+    if (!weapon->bypass_charge) {
+        if (weapon->charge_time > 0.0f && charging) charge = MIN(1.0f, player->charge_time / weapon->charge_time);
+        player->did_shoot = 1;
+        player->charge_time = 0.0f;
+        player->full_charge = 0;
+    }
+    float rate_charge = 1.0f;
+    if (weapon->rate_charge && weapon->charge_time > 0.0f) {
+        rate_charge = 1.0f - MIN(1.0f, player->charge_time / weapon->charge_time);
+        rate_charge = MAX(0.7f, rate_charge * 1.5f);
+    }
+    if (full) { // the full-charge shot: fullChrgMlt damage (Charge Rifle 50 x 15 = 750), no spread
+        player->full_charge = 0;
+        player->charge_time = 0.0f;
+        charge = weapon->full_charge_mlt > 0.0f ? weapon->full_charge_mlt : 1.0f;
+    } else {
+        player->did_shoot = 1;
+    }
 
-    player->reloads[player->loadout_index] = (player->burst_count && player->weapon->burst ? player->weapon->burst_rate : player->weapon->rate) * (player->game->config.fire_rate > 0.0f ? player->game->config.fire_rate : 1.0f); // (fiRat || 1)
+    if (player->burst_count) player->burst_count--;
+    else player->burst_count = weapon->burst ? weapon->burst_count - 1 : 0;
+
+    // (burst ? burstR : rate) * (fiRat || 1) * attributes.fRate * (perk 1 ? 0.66 : 1) * rateChrg
+    player->reloads[player->loadout_index] = (player->burst_count && weapon->burst ? weapon->burst_rate : weapon->rate) *
+                                             (game->config.fire_rate > 0.0f ? game->config.fire_rate : 1.0f) *
+                                             player_attr_fire_rate(player) * rate_charge;
 
     // TODO: update player ammo (HUD)
     // TODO: play sound
 
-    player->recoil_force += player->weapon->recoil;
+    player->recoil_force += weapon->recoil * (full ? 3.5f : 1.0f);
 
     // TODO: gamepad rumble?
 
 #ifdef KRUNKNATIVE_CLIENT
-    if (!player->game->server) { // the view's lean: not on a server's player (the in-process sandbox server)
+    if (!game->server) { // the view's lean: not on a server's player (the in-process sandbox server)
         const float rand_recoil = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * (float) M_PI;
 
-        player->recoil.x += player->weapon->recoil_r * sinf(rand_recoil);
-        player->recoil.z += player->weapon->recoil_r * 0.3f * cosf(rand_recoil);
+        player->recoil.x += weapon->recoil_r * sinf(rand_recoil);
+        player->recoil.z += weapon->recoil_r * 0.3f * cosf(rand_recoil);
 
         if (player->render_you) {
             player_feel_recoil(player);
@@ -2332,41 +2498,57 @@ void player_shoot(Player *player) {
 #endif
     // TODO: muzzle flash & casings
 
-    const int is_projectile = player->weapon->projectile && (!player->weapon->projectile_disable || player->game->config.bullet_drop);
+    // deployRang (Slimer): tryDeployable places the weapon's spawnable (Slime Pad) instead of firing
+    if (weapon->deploy_range > 0.0f) {
+        combat_try_deploy(player, weapon_id);
+        return;
+    }
+
+    // bullet drop (bDrop) turns the pj_disable guns into projectiles with their own pj_* flight
+    const int is_projectile = weapon->projectile && weapon->projectile_config.speed > 0.0f && (!weapon->projectile_disable || game->config.bullet_drop);
     const float shot_height = player->position.y + player->height - game_constants.camera_height;
 
     vec2 shot_angles = {};
 
     if (is_projectile) {
-        // config.projSpreads[shotCntP % 12] scales the spread of each projectile.
+        // config.projSpreads[shotCntP % 12] scales the spread of each projectile (noProjSpread: none).
         static const float proj_spreads[] = {0.1f, -0.8f, 0.3f, 1.0f, 0.1f, -0.4f, -0.1f, 0.3f, 0.5f, -0.45f, 0.2f, -0.2f};
         player->shot_count++;
-        const float projectile_spread = proj_spreads[player->shot_count % (sizeof(proj_spreads) / sizeof(proj_spreads[0]))];
-        const float spread = (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment * projectile_spread;
+        const float projectile_spread = weapon->no_proj_spread ? 0.0f : proj_spreads[player->shot_count % (sizeof(proj_spreads) / sizeof(proj_spreads[0]))];
+        const float spread = (player->spread + weapon->inaccuracy) * game_constants.spread_adjustment * projectile_spread;
 
         shot_angles.x = player->direction.x + player->recoil_anim_y * game_constants.recoil_mlt + spread;
         shot_angles.y = player->direction.y + spread;
 
+        // {dmgMlt: 1 - (chrgMlt || 0.9) * (1 - charge), effectInd / effectC: floor(charge * 10)}
+        const float charge_mlt = weapon->charge_mlt > 0.0f ? weapon->charge_mlt : 0.9f;
+        const ProjectileShot shot = {
+            .damage_mlt = 1.0f - charge_mlt * (1.0f - charge),
+            .effect = weapon->effect_on_hit > 0 ? weapon->effect_on_hit - 1 : -1,
+            .effect_count = (int) floorf(charge * 10.0f),
+        };
         const vec3 origin = {player->position.x, shot_height, player->position.z};
-        game_spawn_projectile(player->game, player, combat_weapon_index(player), projectile_config_for(player->weapon, 0),
-                              origin, shot_angles.y, shot_angles.x, 0);
+        game_spawn_projectile_ex(game, player, weapon_id, &weapon->projectile_config, origin, shot_angles.y, shot_angles.x, 0, &shot);
     }
 
-    if (!is_projectile || player->weapon->physical_power) {
+    if (!is_projectile || weapon->physical_power) {
         // A projectile weapon only casts its physPow ray (weapons.js shots: 0 for the RPG).
-        const int rays = is_projectile ? 0 : player->weapon->shots ? (int) player->weapon->shots : 1;
-        for (int i = player->weapon->physical_power ? -1 : 0; i < rays; i++) {
-            if (player->weapon->custom_spread && i >= 0) {
-                const unsigned int offset = player->ammo[player->loadout_index] * player->weapon->shots;
+        const int rays = is_projectile ? 0 : weapon->shots ? (int) weapon->shots : 1;
+        for (int i = weapon->physical_power ? -1 : 0; i < rays; i++) {
+            if (weapon->custom_spread && i >= 0) {
+                // v7.1.4 cSpread[ammo % 2]: two patterns of `shots` pairs (one-pattern tables repeat)
+                const unsigned int shots = weapon->shots ? weapon->shots : 1;
+                const unsigned int offset = (player->ammo[player->loadout_index] % 2) * shots + (unsigned int) i;
 
-                const vec2 spread = player->weapon->custom_spread[offset + i];
+                const vec2 spread = weapon->custom_spread[offset % weapon->custom_spread_count];
                 const float spread_mlt = (float) pcg32_random() / (float) UINT32_MAX * 0.02f + 0.3f;
 
                 // swizzle spread (x is pitch, y is yaw)
                 shot_angles.x = player->direction.x + spread.y * spread_mlt;
                 shot_angles.y = player->direction.y + spread.x * spread_mlt;
             } else {
-                const float spread_range = i >= 0 ? (player->spread + player->weapon->inaccuracy) * game_constants.spread_adjustment : 0.0f;
+                // the full-charge shot has no spread
+                const float spread_range = i >= 0 && !full ? (player->spread + weapon->inaccuracy) * game_constants.spread_adjustment : 0.0f;
                 const vec2 spread = {
                     ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * spread_range,
                     ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * spread_range,
@@ -2378,8 +2560,65 @@ void player_shoot(Player *player) {
 
             shot_angles.x += player->recoil_anim_y * game_constants.recoil_mlt;
 
-            combat_fire_ray(player, i, shot_angles.x, shot_angles.y, shot_height);
+            combat_fire_ray(player, i, shot_angles.x, shot_angles.y, shot_height, charge);
         }
+    }
+
+    combat_remove_if_empty(player, weapon_id);
+}
+
+// v7.1.4 setClass / Player.reset combat state: throwCharge from the class, no effects, perks,
+// charge or Juggernaut, realKillStreak 0; the earned streaks are kept (player.streaks).
+static void combat_spawn(Player *player, const ClassConfig *class_config) {
+    effects_reset(player);
+    player->upgraded_slots = 0;
+    player->weapon_streak = 0;
+    player->streak_weapon = -1;
+    player->is_juggernaut = 0;
+    player->real_kill_streak = 0;
+    player->throw_charge = class_config->throw_charge > 0.0f ? class_config->throw_charge : COMBAT_THROW_CHARGE;
+    player->start_health = player->max_health;
+    if (player->head_mlt <= 0.0f) player->head_mlt = 1.0f;
+}
+
+// v7.1.4 player.js procInputs charge (game setting chrgWeps): shootChrg weapons charge while
+// the trigger is held, the others (Crossbow, Zapper, the knife throw) while aiming in. Past
+// chrgTime the charge creeps on at delta * 0.1 / (160 / (chrgTime * (overCharge - 1))) ms per
+// ms (chrgTime * 0.125 s per s); ovrChrg weapons reset at chrgTime * 1.2 and stay overCharged
+// until un-aimed, the others clamp at chrgTime as fullCharge. chrgDec weapons decay instead of
+// resetting when released. mode.forceCharge has no KN mode yet.
+static void combat_update_charge(Player *player, const Input *input, const float delta) {
+    const Weapon *weapon = player->weapon;
+    if (!weapon || player->game->config.no_charge_weapons) return;
+
+    const int charging = weapon->shoot_charge ? input->shoot : player->aim_val > 0.0f; // Krunker aimVal < 1
+    const float full = weapon->charge_time > 0.0f ? weapon->charge_time : player->throw_charge > 0.0f ? player->throw_charge : COMBAT_THROW_CHARGE;
+    const int chargeable = (weapon->charge_time > 0.0f && player->ammo && player->ammo[player->loadout_index] > 0) ||
+                           (player->can_throw && weapon->can_throw);
+
+    if (charging && !player->over_charged && player->swap_timer <= 0.0f && chargeable) {
+        player->charge_time += player->charge_time >= full ? delta * 0.1f / (0.16f / (full * (COMBAT_OVER_CHARGE - 1.0f))) : delta;
+        if (weapon->over_charge) {
+            if (player->charge_time >= full * COMBAT_OVER_CHARGE) {
+                player->charge_time = 0.0f;
+                player->full_charge = 0;
+                player->over_charged = 1;
+            }
+        } else if (player->charge_time >= full) {
+            player->full_charge = 1;
+            player->charge_time = full;
+        }
+    } else if (weapon->charge_decay > 0.0f && player->charge_time > 0.0f) {
+        player->charge_time -= weapon->charge_decay * delta;
+        player->full_charge = 0;
+        if (player->charge_time <= 0.0f) {
+            player->charge_time = 0.0f;
+            if (player->aim_val == 0.0f) player->over_charged = 0;
+        }
+    } else {
+        player->full_charge = 0;
+        player->charge_time = 0.0f;
+        if (player->aim_val == 0.0f) player->over_charged = 0;
     }
 }
 
