@@ -22,6 +22,7 @@
 #include <modes.h>       // gameModes alias / name (server rows, host modes)
 #include <game_config.h> // WP-E host types (GAME_HOST_CUSTOM, hostTypes titles)
 #include <ui_host_config.h> // WP-E: the Host Game window's mode / advanced / server bodies
+#include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
 #include <strings.h>
 #include <ctype.h>
 #include <math.h>
@@ -36,15 +37,17 @@
 #define SERVER_BROWSER_RATE_MS 10000.0 // config.serverBrowserRate
 #define RESTORE_WAIT_SECONDS 2.0       // startup seek waits this long for the saved session
 
-// config.regionNames. KrunkNative's regions are its edge locations, and the id the game
-// servers announce (server.cfg `region`, deploy/ansible kn_gameserver_region) is the 2-letter
-// code shown everywhere (server browser groups, the menu's region label, the region pickers);
-// the place name is only a tooltip.
+// config.regionNames. KrunkNative's regions are its edge locations; the id the game servers
+// announce (server.cfg `region`, deploy/ansible kn_gameserver_region) is the 2-letter code.
+// Links carry the short form (?game=CH2:kz862: the code + the node's instance number,
+// shared/include/server_names.h); the server browser, the region pickers and the menu's
+// region label show the long names (the region's place name, a server's "Chicago 2": the
+// city + the instance number), the code / node id as the tooltip.
 static const struct {
-    const char *id, *code, *name;
+    const char *id, *code, *name, *city;
 } k_regions[] = {
-    {"SV", "SV", "Santa Clara"}, {"LA", "LA", "Los Angeles"}, {"CH", "CH", "Chicago"}, {"VA", "VA", "Ashburn, Virginia"},
-    {"local", "LO", "Local"},
+    {"SV", "SV", "Santa Clara", "Santa Clara"}, {"LA", "LA", "Los Angeles", "Los Angeles"}, {"CH", "CH", "Chicago", "Chicago"},
+    {"VA", "VA", "Ashburn, Virginia", "Ashburn"}, {"local", "LO", "Local", "Local"},
 };
 
 static Client *g_client;
@@ -52,11 +55,12 @@ static int g_brain_mode;
 static int g_started;            // the startup seek ran
 static double g_start_time;
 static char g_region[32];        // region id the client seeks in
-static char g_game_id[160];      // gameId: the lobby this client is in (or joining)
+static char g_game_id[160];      // gameId: the lobby this client is in (or joining), canonical (CHITOWN2:kz862)
+static char g_game_region[32];   // its region (the seek answer's), for the short link form ("" = unknown)
 static int g_seek_inflight;
 static char g_seek_game[160];    // the game id the running seek asked for ("" = any)
 static char g_account_game[160]; // AccountRequired: the online-mode lobby a guest asked for (joined after login)
-static void page_game_url(const char *id);
+static void page_game_url(const char *id, const char *region);
 // Source-console style pinning: a server the user picked by hand (console `connect`, Direct
 // Connect, the finder list) or a console `disconnect` is never overridden by automatic
 // matchmaking (the startup seek, the account-change reseek, a late seek answer). Only an
@@ -105,12 +109,45 @@ static const char *region_name(const char *id) {
     return id && id[0] ? id : "?";
 }
 
-// The place name, for tooltips ("" unknown).
+// The place name ("" unknown).
 static const char *region_full_name(const char *id) {
     for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
         if (id && !strcmp(k_regions[i].id, id)) return k_regions[i].name;
     }
     return "";
+}
+
+// The long name the browser groups and the region pickers show: the place name, else the id.
+static const char *region_long_name(const char *id) {
+    const char *name = region_full_name(id);
+    return name[0] ? name : region_name(id);
+}
+
+// The region's city for server names ("" unknown).
+static const char *region_city(const char *id) {
+    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
+        if (id && !strcmp(k_regions[i].id, id)) return k_regions[i].city;
+    }
+    return "";
+}
+
+// A server's proper name (browser rows, the menu's region label) from its game or node id:
+// an edge node (CHITOWN2 in CH, short id CH2) is its region's city + instance number,
+// "Chicago 2"; any other node its id with the instance number apart ("NY 2", "LOC").
+static void server_display_name(const char *id, const char *region, char *out, const size_t n) {
+    char node[96], short_node[KN_SHORT_NODE_MAX];
+    snprintf(node, sizeof(node), "%.*s", (int) strcspn(id ? id : "", ":"), id ? id : "");
+    kn_node_short_id(node, region, short_node, sizeof(short_node));
+    size_t stem = strlen(node);
+    while (stem > 0 && isdigit((unsigned char) node[stem - 1])) stem--;
+    const char *digits = node + stem, *city = region_city(region);
+    if (city[0] && strcmp(short_node, node) && !strncasecmp(short_node, region, strlen(region))) {
+        snprintf(out, n, "%s%s%s", city, digits[0] ? " " : "", digits);
+    } else if (stem && digits[0]) {
+        snprintf(out, n, "%.*s %s", (int) stem, node, digits);
+    } else {
+        snprintf(out, n, "%s", node);
+    }
 }
 
 // <option>s of the region pickers (Settings > Default Region, the ranked queue): every known
@@ -131,9 +168,9 @@ char *servers_ui_region_options(const char *selected) {
         sb_append(&sb, "<option value='");
         sb_append_esc(&sb, seen[i]);
         sb_append(&sb, "' title='");
-        sb_append_esc(&sb, region_full_name(seen[i]));
-        sb_appendf(&sb, "'%s>", selected && !strcmp(selected, seen[i]) ? " selected" : "");
         sb_append_esc(&sb, region_name(seen[i]));
+        sb_appendf(&sb, "'%s>", selected && !strcmp(selected, seen[i]) ? " selected" : "");
+        sb_append_esc(&sb, region_long_name(seen[i]));
         sb_append(&sb, "</option>");
     }
     return sb_finish(&sb);
@@ -155,11 +192,14 @@ static int hide_full(void) {
 // ------------------------------------------------------------------ joining
 
 // joinServer(host, port, gameId, clientKey): point the transport at the game server.
-static void join_server(const char *host, const int port, const char *game_id, const char *client_key, const char *web_url) {
+// region: the lobby's (a seek answer's; NULL = unknown, looked up in the game list).
+static void join_server(const char *host, const int port, const char *game_id, const char *client_key, const char *web_url,
+                        const char *region) {
     Client *client = g_client;
     g_pin = PIN_NONE; // a matchmade (or server-redirected) session
     g_last_direct = 0;
     snprintf(g_game_id, sizeof(g_game_id), "%s", game_id ? game_id : "");
+    snprintf(g_game_region, sizeof(g_game_region), "%s", region ? region : "");
 
 #ifdef __EMSCRIPTEN__
     // web: the page connects once (the startup seek); later switches reload with ?game=
@@ -185,7 +225,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
     pthread_mutex_unlock(&client->net_lock);
 
     printf("[mm] joining %s at %s:%d\n", g_game_id, host, port);
-    page_game_url(g_game_id);
+    page_game_url(g_game_id, NULL);
     client_net_switch_server(client);
 }
 
@@ -204,14 +244,14 @@ void servers_ui_redirect(const char *game_id, const char *host, const int port, 
     }
     if (host && host[0] && port > 0) {
         if (g_pin != PIN_NONE) direct_join(host, port); // a direct server sends us on: still direct
-        else join_server(host, port, game_id, NULL, NULL);
+        else join_server(host, port, game_id, NULL, NULL, NULL);
     }
 }
 
 void servers_ui_join_ticket(const char *host, const int port, const char *game_id, const char *ticket, const char *web_url) {
     if (!g_client || !host) return;
-    join_server(host, port, game_id, ticket, web_url);
-    page_game_url(NULL); // a ranked match (gameConfig.isFromQueue): the link is "/"
+    join_server(host, port, game_id, ticket, web_url, NULL);
+    page_game_url(NULL, NULL); // a ranked match (gameConfig.isFromQueue): the link is "/"
 }
 
 // v3.1.1 matchmaker error names -> i18n matchmaker.* texts (the startup seek's catch)
@@ -231,11 +271,40 @@ static const char *seek_error_text(const char *error) {
 int servers_ui_account_required(void) { return g_account_game[0] && !account_get(); }
 
 // ------------------------------------------------------------------ game links
-// v3.1.1 ClientManager.generateHref(id) = "/?game=" + id, the id unescaped: the address bar
-// and invite links read ?game=CHITOWN2:kz862. Only what would break the query is escaped
+// v3.1.1 ClientManager.generateHref(id) = "/?game=" + id, the id unescaped. KrunkNative writes
+// the short form of the id (shared/include/server_names.h): the address bar and invite links
+// read ?game=CH2:kz862 for the lobby CHITOWN2:kz862 (region CH); old long links still work, the
+// brain resolves both (registry_lobby_find). Only what would break the query is escaped
 // (% & # + space, quotes, controls). Readers accept both forms: servers_ui_query and
 // URLSearchParams decode %3A. The page URL is web only (html_page_set_url: no-op natively).
-static char g_link_game[160];    // the lobby the address bar / Invite name ("" = none)
+static char g_link_game[160];    // the lobby the address bar / Invite name, link form ("" = none)
+
+// The region of a lobby the client knows: the current one (its seek answer), else the game
+// list's tuple. NULL = unknown.
+static const char *game_region(const char *id) {
+    if (!id || !id[0]) return NULL;
+    if (g_game_region[0] && !strcmp(id, g_game_id)) return g_game_region;
+    const cJSON *t;
+    cJSON_ArrayForEach(t, g_games) {
+        const char *gid = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
+        const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(t, 1));
+        if (gid && region && region[0] && !strcmp(gid, id)) return region;
+    }
+    return NULL;
+}
+
+// The link form of a game id: its short node id when the lobby's region is known (region, else
+// game_region), else the id as it is (a short id stays short, an unknown long one long).
+static void game_link_id(const char *id, const char *region, char *out, const size_t n) {
+    if (!region || !region[0]) region = game_region(id);
+    if (region && region[0]) kn_game_link_id(id, region, out, n);
+    else snprintf(out, n, "%s", id ? id : "");
+}
+
+// The same lobby: a ?game= id (either form) and the canonical id of the lobby we are in.
+static int is_current_game(const char *id) {
+    return g_game_id[0] && kn_game_id_matches(id, g_game_id, game_region(g_game_id));
+}
 
 static size_t link_escape(char *out, const size_t n, const char *id) {
     size_t len = 0;
@@ -275,10 +344,12 @@ static void page_write_query(const char *first) {
 }
 
 // The address bar follows the lobby (ClientManager.seek replaceState; "/" when there is none,
-// like devConsole's disconnect), so a reload (F5) joins the same game again.
-static void page_write_game(const char *id) {
-    snprintf(g_link_game, sizeof(g_link_game), "%s", id ? id : "");
+// like devConsole's disconnect), so a reload (F5) joins the same game again: its link form
+// (?game=CH2:kz862), which the startup seek resolves back to the lobby.
+static void page_write_game(const char *id, const char *region) {
+    game_link_id(id, region, g_link_game, sizeof(g_link_game));
     g_link_offline[0] = 0;
+    id = g_link_game;
     char first[480] = "";
     if (id && id[0]) {
         char esc[460];
@@ -312,9 +383,9 @@ static void page_write_offline(const Client *client) {
     page_write_query(want);
 }
 
-static void page_game_url(const char *id) {
+static void page_game_url(const char *id, const char *region) {
     if (g_client && g_client->offline) return;
-    page_write_game(id);
+    page_write_game(id, region);
 }
 
 // Sessions without a matchmade lobby id: a direct server (console connect, Direct Connect,
@@ -336,7 +407,7 @@ static void on_link_list(void *user, const int status, const char *body, const s
         const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
         if (id && h && cJSON_IsNumber(p) && p->valueint == g_client->net_port && !strcasecmp(h, g_client->net_address)) {
             printf("[mm] direct server %s:%d is lobby %s\n", h, p->valueint, id);
-            page_game_url(id);
+            page_game_url(id, cJSON_GetStringValue(cJSON_GetArrayItem(t, 1)));
             break;
         }
     }
@@ -348,13 +419,13 @@ static void link_tick(Client *client) {
     if (was_offline < 0) was_offline = client->offline;
     if (client->offline != was_offline) {
         was_offline = client->offline;
-        if (client->offline && g_link_game[0]) page_write_game(NULL); // left for the offline game
+        if (client->offline && g_link_game[0]) page_write_game(NULL, NULL); // left for the offline game
     }
     if (client->offline) {
         page_write_offline(client); // its map, once it plays one (web only)
     } else if (g_link_offline[0]) {
         // left the offline game for a server: its lobby (if any) instead of ?offline / ?sandbox
-        page_write_game(g_pin == PIN_NONE ? g_game_id : NULL);
+        page_write_game(g_pin == PIN_NONE ? g_game_id : NULL, NULL);
     }
     if (g_pin != PIN_DIRECT || !client->net_connected || client->offline) {
         if (g_pin != PIN_DIRECT) g_link_lookup[0] = 0;
@@ -368,7 +439,7 @@ static void link_tick(Client *client) {
 }
 
 // copyInviteLink: location.protocol + "//" + location.host + "/?game=" + gameId (native: the
-// public web client's origin).
+// public web client's origin), the id in its short link form (page_write_game).
 void servers_ui_invite_link(char *out, const size_t n) {
     char origin[256], esc[480];
     html_page_origin(origin, sizeof(origin));
@@ -402,7 +473,8 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         g_quick_join_left = 0;
         g_account_game[0] = 0;
         join_server(host->valuestring, port->valueint, cJSON_IsString(game) ? game->valuestring : "",
-                    cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL);
+                    cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL,
+                    cJSON_IsString(region) ? region->valuestring : NULL);
     } else if (quiet && g_quick_join_left > 0) {
         void servers_quick_join_next(void);
         servers_quick_join_next();
@@ -491,10 +563,12 @@ static void start_seek(const char *game_id) {
 static void switch_server(const char *id) {
     if (!id || !id[0]) return;
 #ifdef __EMSCRIPTEN__
-    // the parameters that pick an offline game go (page_game_param); the id stays readable
-    // (generateHref: "?game=CHITOWN2:kz862", not %3A)
-    char esc[480];
-    link_escape(esc, sizeof(esc), id);
+    // the parameters that pick an offline game go (page_game_param); the id stays readable in
+    // its short link form (generateHref: "?game=CH2:kz862", not %3A); the reload's seek
+    // resolves it (a short id or one the list does not name goes as it is)
+    char link[160], esc[480];
+    game_link_id(id, NULL, link, sizeof(link));
+    link_escape(esc, sizeof(esc), link);
     EM_ASM({
         var p = new URLSearchParams(location.search);
         p.delete("game");
@@ -513,40 +587,12 @@ static void switch_server(const char *id) {
 
 // v3.1.1 f9(text) - the Join window (joinGame: gameURL.value) and openJoinWindow's clipboard:
 // a game link "[http(s)://][www.]<site>/?game=<id>" (any of our sites; %3A or a bare ':')
-// or a bare lobby id "NODE:lobby" switches to that game; anything else (re)opens the Join
-// window (showWindow(24)). Party links are not ported (no parties): the window again.
+// or a bare lobby id "NODE:lobby" (either form: CH2:kz862 or CHITOWN2:kz862) switches to that
+// game; anything else (re)opens the Join window (showWindow(24)). Party links are not ported
+// (no parties): the window again. Parsing: shared/src/server_names.c kn_game_link_parse.
 int servers_ui_join_link(const char *text) {
-    char buf[512], id[160];
-    while (text && (*text == ' ' || *text == '\t')) text++;
-    snprintf(buf, sizeof(buf), "%s", text ? text : "");
-    size_t n = strlen(buf);
-    while (n && (buf[n - 1] == ' ' || buf[n - 1] == '\t' || buf[n - 1] == '\r' || buf[n - 1] == '\n')) buf[--n] = 0;
-    id[0] = 0;
-    const char *q = strstr(buf, "/?");
-    if (q && (strncmp(buf, "http", 4) == 0 || strchr(buf, '.') < q || strchr(buf, ':') < q)) {
-        // a link: its query's game= (the page's ?game= reader decodes %XX / '+')
-        const char *g = strstr(q + 1, "game=");
-        if (g && (g[-1] == '?' || g[-1] == '&')) {
-            size_t len = 0;
-            for (g += 5; *g && *g != '&' && *g != '#' && len + 1 < sizeof(id); g++) {
-                if (*g == '%' && isxdigit((unsigned char) g[1]) && isxdigit((unsigned char) g[2])) {
-                    char hex[3] = {g[1], g[2], 0};
-                    id[len++] = (char) strtol(hex, NULL, 16);
-                    g += 2;
-                } else {
-                    id[len++] = *g == '+' ? ' ' : *g;
-                }
-            }
-            id[len] = 0;
-        }
-    } else {
-        // /^([A-Z]+):(\w+)$/ - KrunkNative node ids carry digits (CHITOWN2:kz862)
-        const char *colon = strchr(buf, ':');
-        int ok = colon && colon > buf && colon[1];
-        for (const char *p = buf; ok && p < colon; p++) ok = isupper((unsigned char) *p) || (p > buf && isdigit((unsigned char) *p));
-        for (const char *p = colon ? colon + 1 : buf; ok && *p; p++) ok = isalnum((unsigned char) *p) || *p == '_';
-        if (ok) snprintf(id, sizeof(id), "%s", buf);
-    }
+    char id[160];
+    kn_game_link_parse(text, id, sizeof(id));
     if (!id[0] || !g_brain_mode || backend_available() != 1) {
         menu_show_window(MENU_WINDOW_JOIN, 0);
         return 0;
@@ -557,15 +603,30 @@ int servers_ui_join_link(const char *text) {
     return 1;
 }
 
-// setGameInstanceId: fetchGameInfo(id) -> menuRegionLabel = regionNames[regionId]
+// The Connect window / console `connect` given a game link or a lobby id (CH2:kz862, the
+// invite link) instead of host[:port]: join that game through the matchmaker. 0 = not a game
+// id (or no brain): the caller connects to it as an address.
+int servers_ui_connect_game(const char *text) {
+    char id[160];
+    if (!kn_game_link_parse(text, id, sizeof(id)) || !g_brain_mode || backend_available() != 1) return 0;
+    printf("[mm] connect: game %s\n", id);
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    switch_server(id);
+    return 1;
+}
+
+// setGameInstanceId: fetchGameInfo(id) -> menuRegionLabel = regionNames[regionId]; KrunkNative
+// labels the server itself ("Chicago 2", server_display_name)
 static void on_game_info(void *user, const int status, const char *body, const size_t length) {
     (void) user;
     (void) length;
     cJSON *tuple = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *region = cJSON_GetArrayItem(tuple, 1);
     if (cJSON_IsString(region)) {
+        char name[128];
         snprintf(g_region, sizeof(g_region), "%s", region->valuestring);
-        menu_set_region_label(region_name(region->valuestring));
+        server_display_name(cJSON_GetStringValue(cJSON_GetArrayItem(tuple, 0)), region->valuestring, name, sizeof(name));
+        menu_set_region_label(name);
     }
     cJSON_Delete(tuple);
 }
@@ -680,7 +741,7 @@ static int search_matches(const cJSON *t) {
     if (!g_search[0]) return 1;
     const char *alias = row_alias(t);
     const char *h = row_h(t)[0] ? row_h(t) : row_i(t);
-    char label[192], label2[200], node[96];
+    char label[192], label2[200], node[96], short_node[KN_SHORT_NODE_MAX], proper[128];
     if (!row_official(t) && !row_custom(t) && !old_browser() && alias[0]) snprintf(label, sizeof(label), "%s_%s", alias, h);
     else snprintf(label, sizeof(label), "%s", h);
     if (row_custom(t) || old_browser()) snprintf(label2, sizeof(label2), "%s_%s", alias, label);
@@ -688,8 +749,12 @@ static int search_matches(const cJSON *t) {
     snprintf(node, sizeof(node), "%s", tuple_str(t, 0));
     char *colon = strchr(node, ':');
     if (colon) *colon = 0;
+    // KrunkNative: a server is also found by its short id (CH2) and its proper name (Chicago 2)
+    kn_node_short_id(node, tuple_str(t, 1), short_node, sizeof(short_node));
+    server_display_name(node, tuple_str(t, 1), proper, sizeof(proper));
     return str_has_ci(h, g_search) || str_has_ci(node, g_search) || str_has_ci(label, g_search) || str_has_ci(alias, g_search) ||
-           str_has_ci(label2, g_search) || str_has_ci(tuple_str(t, 1), g_search) || str_has_ci(region_full_name(tuple_str(t, 1)), g_search);
+           str_has_ci(label2, g_search) || str_has_ci(tuple_str(t, 1), g_search) || str_has_ci(region_full_name(tuple_str(t, 1)), g_search) ||
+           str_has_ci(short_node, g_search) || str_has_ci(proper, g_search);
 }
 
 typedef struct {
@@ -877,7 +942,7 @@ static int build_groups(ServerGroup *groups, const int max) {
                 if (find_group(groups, count, region) < 0 && count < max) {
                     ServerGroup *g = &groups[count];
                     snprintf(g->key, sizeof(g->key), "%s", region);
-                    if (show_region()) snprintf(g->name, sizeof(g->name), "%s", region_name(region));
+                    if (show_region()) snprintf(g->name, sizeof(g->name), "%s", region_long_name(region));
                     else snprintf(g->name, sizeof(g->name), "%s", !strcmp(def, region) ? "Default Region" : !strcmp(g_region, region) ? "Current Region" : "Hidden Region");
                     if (!strcmp(def, region)) g->order = 1;
                     g->region_rank = count;
@@ -1021,16 +1086,25 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     sb_append(sb, badge);
     free(badge);
     sb_appendf(sb, "<div class='serverPCount'>%d/%d</div>", row_players(t), tuple_int(t, 3));
-    if (custom || !old || official) {
-        sb_append(sb, "<div class='serverRegion'>");
+    // v7 shows tuple[0].split(":")[0] on custom / official rows and in the mode-grouped browser.
+    // KrunkNative: on every brain lobby, as the server's proper name ("Chicago 2", the node id
+    // CHITOWN2 as tooltip): a region group holds several servers (finder rows: their host).
+    if (custom || !old || official || !finder) {
+        sb_append(sb, "<div class='serverRegion'");
         if (!show_region()) {
+            sb_append(sb, ">");
             sb_append(sb, !strcmp(def, tuple_str(t, 1)) ? "DEFAULT" : !strcmp(g_region, tuple_str(t, 1)) ? "CURRENT" : "HIDDEN");
         } else {
-            char node[96];
+            char node[96], proper[128];
             snprintf(node, sizeof(node), "%s", id);
             char *colon = strchr(node, ':');
             if (colon) *colon = 0;
+            if (finder) snprintf(proper, sizeof(proper), "%s", node);
+            else server_display_name(node, tuple_str(t, 1), proper, sizeof(proper));
+            sb_append(sb, " title='");
             sb_append_esc(sb, node);
+            sb_append(sb, "'>");
+            sb_append_esc(sb, proper);
         }
         sb_append(sb, " -&nbsp;</div>");
     }
@@ -1060,9 +1134,9 @@ static char *get_servers(void) {
         const ServerGroup *g = &groups[h];
         const int open = g_expanded == h;
         sb_appendf(&sb, "<div class='setHed' style='margin-top:20px;' onmouseenter='playTick()' onclick='playSelect(0.1);setExpandedRegion(%d)' style='cursor: pointer;'", open ? -1 : h);
-        if (old && strcmp(g->key, "custom") && strcmp(g->key, "official") && region_full_name(g->key)[0]) {
-            sb_append(&sb, " title='"); // KrunkNative: the region code's place name
-            sb_append_esc(&sb, region_full_name(g->key));
+        if (old && show_region() && strcmp(g->key, "custom") && strcmp(g->key, "official") && region_full_name(g->key)[0]) {
+            sb_append(&sb, " title='"); // KrunkNative: the place name's region code (the links' prefix)
+            sb_append_esc(&sb, region_name(g->key));
             sb_append(&sb, "'");
         }
         sb_appendf(&sb, "><span class='material-icons plusOrMinus'>%s</span> ", open ? "expand_more" : "navigate_next");
@@ -1145,7 +1219,7 @@ static void direct_join(const char *host, const int port) {
     g_last_direct = 1;
     g_game_id[0] = 0;
     g_account_game[0] = 0;
-    page_game_url(NULL); // the lobby id (if a brain lists host:port) follows once connected
+    page_game_url(NULL, NULL); // the lobby id (if a brain lists host:port) follows once connected
     pthread_mutex_lock(&g_client->net_lock);
     memset(&g_client->net_join, 0, sizeof(g_client->net_join));
     snprintf(g_client->net_address, sizeof(g_client->net_address), "%s", host);
@@ -1170,7 +1244,7 @@ void servers_ui_disconnect(void) {
     g_pin = PIN_IDLE;
     g_left_offline = g_client->offline;
     printf("[mm] disconnected by the user (reconnect: %s)\n", g_last_direct ? "same server" : g_game_id);
-    page_game_url(NULL); // devConsole disconnect: "/"
+    page_game_url(NULL, NULL); // devConsole disconnect: "/"
     if (g_client->offline) local_game_stop(g_client);
     client_net_stop(g_client, "Disconnected");
 }
@@ -1257,10 +1331,12 @@ char *servers_connect_window_gen(void) {
     return sb_finish(&sb);
 }
 
-// connectServer(): the window's field (or an address argument)
+// connectServer(): the window's field (or an address argument); a game link / lobby id
+// (CH2:kz862) joins that game instead
 static void connect_server(const char *text) {
     char host[160], err[160] = "";
     int port;
+    if (servers_ui_connect_game(text)) return;
     if (!parse_connect_address(text, host, sizeof(host), &port, err, sizeof(err))) {
         HtmlElem resp = html_dom_by_id("connectResp");
         if (resp) {
@@ -2446,7 +2522,7 @@ void servers_ui_tick(Client *client) {
         // (the startup seek took the page's own ?game=; a later one, e.g. a hub Join link,
         // switches unless it names the lobby we are in: on the web a switch reloads the page)
         if (g_pending_game[0] && g_brain_mode) {
-            if (strcmp(g_pending_game, g_game_id)) switch_server(g_pending_game);
+            if (!is_current_game(g_pending_game)) switch_server(g_pending_game); // either id form
         } else if (g_pending_play[0]) {
             const MapCatalogEntry *e = NULL;
             const int idx = map_catalog_find(g_pending_play);

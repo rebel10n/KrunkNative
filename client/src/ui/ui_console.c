@@ -925,12 +925,17 @@ static void stop_net(Client *client) {
 // KrunkNative servers are reached directly (host[:port]; UDP, then TCP; the web build goes
 // through the bridge's /native?target=). Like a Source console the server is pinned:
 // matchmaking never moves the session elsewhere until Play / the server browser
-// (servers_ui.c g_pin), and `reconnect` comes back here.
+// (servers_ui.c g_pin), and `reconnect` comes back here. A game link or lobby id
+// (connect CH2:kz862, an invite link) joins that game through the matchmaker instead.
 static void cmd_connect(const int argc, char **argv, const char *rest) {
     char input[CON_TEXT_MAX];
     if (rest && *rest) snprintf(input, sizeof(input), "%s", rest);
     else join_args(argc, argv, 0, input, sizeof(input));
     trim(input);
+    if (input[0] && con_client() && servers_ui_connect_game(input)) {
+        appendf(COL_INFO, "Joining game %s...", input);
+        return;
+    }
     char target[CON_TEXT_MAX];
     snprintf(target, sizeof(target), "%s", input[0] ? input : "local");
     char low[CON_TEXT_MAX];

@@ -106,7 +106,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.node_ttl_s` | `30` | node/lobby row TTL (v3.1.1 `STALE_AFTER_MS`) |
 | `brain.heartbeat_s` | `5` | how often the owning brain refreshes its rows |
 | `brain.ping_interval_s` | `10` | internal WS ping interval (v3.1.1 `PING_INTERVAL_MS`) |
-| `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are the 2-letter region codes the client shows (`SV`, `LA`, `CH`, `VA`) |
+| `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are the 2-letter region codes (`SV`, `LA`, `CH`, `VA`): the prefix of short game links (`?game=CH2:kz862`); the client shows their place names |
 | `brain.federation` | `true` | use the shared database's rows (false or no DB = in-memory, this brain only) |
 | `brain.matchmaking.cross_region` | `true` | quick join falls back to other regions when the requested one has no room |
 | `brain.matchmaking.max_players` | `8` | cap when a lobby reports none |
@@ -455,8 +455,18 @@ brain draining).
 (`var [id, region, players, max, meta] = tuple`).
 
 * `gameId` = `"<nodeId>:<localLobbyId>"` (the brain namespaces the node's local id
-  on ingest, as registry.ts does; the Servers window shows `gameId.split(":")[0]`
-  as the region label of custom games, so short node ids like `NY` read well).
+  on ingest, as registry.ts does). It is the canonical id (JOIN `game_id`, the join
+  ticket's `nid`/`lid`, reservations, `mm_lobbies`).
+* Links use its short form `"<short node>:<localLobbyId>"` (`shared/src/server_names.c`):
+  a node in a 2-letter region whose id stem (without the trailing instance number) is
+  longer than 2 chars is the region code + instance number (`CHITOWN2` in `CH` ->
+  `CH2`, so `?game=CH2:kz862`); stems of up to 4 chars stay (`NY`, `NY2`, `LOC`); longer
+  ones keep their first 3 letters/digits (`KRUNKCLUB1` -> `KRU1`). `?game=`,
+  `/mm/game-info?game=` and `/mm/seek-game?game=` accept both forms
+  (`registry_lobby_find`: canonical first, else the short node id, case-insensitive, of
+  a lobby with that local id in the lobby's or its node's region). The Servers window
+  shows the server's proper name instead (`Chicago 2`: the region's city + instance
+  number; other nodes their id, `NY 2`), the node id as tooltip.
 * `meta` keys (sent by the game server, passed through; the brain adds `nodeId`,
   `lobbyId`, `brain`):
 
@@ -1160,7 +1170,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 
 | key | default | meaning |
 | --- | --- | --- |
-| `region` | `local` | brain region id (v3.1.1 `MM_NODE_REGION`): the 2-letter code shown in the server browser (`SV`, `LA`, `CH`, `VA`) |
+| `region` | `local` | brain region id (v3.1.1 `MM_NODE_REGION`): the 2-letter code (`SV`, `LA`, `CH`, `VA`), the prefix of short game links; the server browser shows its place name |
 | `node_id` | `LOC` | node id (v3.1.1 `MM_NODE_ID`), prefix of the lobby id `"<node_id>:<5 chars>"`; no `:` |
 | `name` | `KrunkNative` | server name (hello, lobby meta `name`) |
 | `listen_host` / `listen_port` (alias `port`) | `0.0.0.0` / `21015` | TCP bind address / port |
@@ -1628,13 +1638,17 @@ menu re-seeks the same lobby so the server attaches (or drops) the account.
    `webUrl` if set, else `ws(s)://<origin>/native?target=host:port`. Right after HELLO
    both send `NET_PACKET_JOIN {game_id, client_key = clientId, session, name}`
    (`client/src/net/net_join.c`).
-4. `GET /mm/game-info?game=ID` -> `#menuRegionLabel` = `regionNames[region]`.
+4. `GET /mm/game-info?game=ID` -> `#menuRegionLabel` = the server's proper name
+   (`Chicago 2`; v3.1.1: `regionNames[region]`).
 
 Servers window (2): `GET /mm/game-list` + `GET /api/player-count` (cached
 `serverBrowserRate` 10 s), region groups, Custom Games group (`meta.cs`), search, Hide
 Full, Quick Join (`quickJoinRegion`: up to 10 populated lobbies, else a region seek),
 `checkedSwitchServer` (`game-info` first, FULL/ERROR). Switching: native re-seeks and
-reconnects in place; web reloads with `?game=<id>` like v3.1.1. Games window (10):
+reconnects in place; web reloads with `?game=<id>` like v3.1.1. Region groups show the
+place name (`Chicago`), rows the server's proper name (`Chicago 2`); the address bar,
+Invite and the reload use the short id (`?game=CH2:kz862`, 4 "Lobby tuple"); Join, Connect
+and console `connect` take a link or either id form. Games window (10):
 `GET /api/maps?index=&pos=&accountId=` pages. Host Game: `GET /mm/host-game?region=R&config=JSON[&token=T]`,
 config `{"private","maps":[name],"modes":[modeId],"map","mode","passCode"}`; the reply
 is joined like a seek (needs an idle node, see 6).

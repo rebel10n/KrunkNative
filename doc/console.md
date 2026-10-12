@@ -44,7 +44,7 @@ silent (only the `] line` echo), as in the mod.
 | unbind key | "unbound k" | same |
 | alias [name] [cmd] | session aliases, registered as commands ("alias for: …") | same |
 | exec a;b | runs `;`-separated commands | same |
-| connect [local\|host] | points the matchmaker at a host and seeks a game | connects the TCP client to `host[:port]` (IPv4/localhost; "local" = 127.0.0.1:default). Prints "Connecting through …" and "Server: tcp://…". On the web: "endpoint updated; live seek is unavailable on this page" |
+| connect [local\|host] | points the matchmaker at a host and seeks a game | connects the TCP client to `host[:port]` (IPv4/localhost; "local" = 127.0.0.1:default). Prints "Connecting through …" and "Server: tcp://…". On the web: "endpoint updated; live seek is unavailable on this page". A game link or lobby id (`connect CH2:kz862`, the long `CHITOWN2:kz862` too) joins that game through the matchmaker ("Joining game …") |
 | disconnect | resets the endpoints and goes back to "/" | leaves the session/offline game, back to the default server, menu open. On the web: `location.href = '/'` |
 | quit | `window.close()` | closes the window (web: `window.close()`) |
 | reconnect | `location.reload()` | reconnects to the last server or lobby, also after `disconnect` (offline, or after a `disconnect` from the offline game: restarts it on the same map). The Reconnect bind (F5 by default, Settings > Controls > General) runs it natively; on the web that key stays `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |

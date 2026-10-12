@@ -47,6 +47,8 @@ set(KN_BRAIN_SOURCES
     progress.c
     ../../shared/src/progression.c
     ../../shared/src/badges.c
+    # server-names: game ids and their short link form (registry_lobby_find)
+    ../../shared/src/server_names.c
 )
 
 # Sources another agent has listed but not landed yet must not break configure
@@ -67,8 +69,8 @@ target_compile_options(kn_brain PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_compile_definitions(kn_brain PRIVATE _GNU_SOURCE)
 
 # Registry unit test (pure, no DB).
-add_executable(kn_brain_registry_test tests/test_registry.c registry.c)
-target_include_directories(kn_brain_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_SOURCE_DIR}/shared/src/server_names.c)
+target_include_directories(kn_brain_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/shared/include)
 target_link_libraries(kn_brain_registry_test PRIVATE knsvc)
 add_test(NAME brain_registry COMMAND kn_brain_registry_test)
 

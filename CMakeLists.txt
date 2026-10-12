@@ -385,6 +385,10 @@ else ()
     # knet UDP transport (shared/src/knet.c only: no game code, no sockets)
     add_executable(knet_test shared/include/knet.h shared/src/knet.c shared/tests/knet_test.c)
 
+    # game ids and their short ?game= link form (shared/src/server_names.c: brain + client)
+    add_executable(server_names_test shared/include/server_names.h shared/src/server_names.c shared/tests/server_names_test.c)
+    add_test(NAME server_names_test COMMAND server_names_test)
+
     # editor bus (shared/src/editor_bus.c: framing, scopes, tokens, unix socket + TCP fallback)
     add_executable(editor_bus_test shared/include/editor_bus.h shared/src/editor_bus.c shared/tests/editor_bus_test.c)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

@@ -12,6 +12,7 @@
 #include <strings.h>
 
 #include "knsvc/json.h"
+#include "server_names.h"
 
 static void copy_str(char *dst, size_t cap, const char *src) {
     if (!cap) return;
@@ -275,6 +276,29 @@ MmLobby *registry_lobby(Registry *r, const char *game_id, MmNode **node_out) {
     return NULL;
 }
 
+/* A requested ?game= id: the canonical "<nodeId>:<lobbyId>", else its short link form
+ * "<short node>:<lobbyId>" (shared/src/server_names.c: CH2:kz862 for CHITOWN2:kz862 in CH),
+ * matched against the lobby's region (tuple[1], what clients see) and its node's region. */
+MmLobby *registry_lobby_find(Registry *r, const char *id, MmNode **node_out) {
+    MmLobby *exact = registry_lobby(r, id, node_out);
+    if (exact || !id) return exact;
+    const char *colon = strchr(id, ':');
+    if (!colon || colon == id || !colon[1]) return NULL;
+    for (size_t i = 0; i < r->node_count; i++) {
+        MmNode *n = r->nodes[i];
+        for (size_t j = 0; j < n->lobby_count; j++) {
+            MmLobby *l = &n->lobbies[j];
+            if (strcmp(l->local_id, colon + 1) != 0) continue;
+            const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(l->tuple, 1));
+            if (kn_game_id_matches(id, l->game_id, region) || kn_game_id_matches(id, l->game_id, n->region)) {
+                if (node_out) *node_out = n;
+                return l;
+            }
+        }
+    }
+    return NULL;
+}
+
 /* ---- remote view */
 
 /* Remote nodes with dirty == -1 are marked stale during a refresh. */
@@ -468,7 +492,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     /* 1. requested lobby */
     if (q->game_id && *q->game_id) {
         MmNode *n = NULL;
-        MmLobby *l = registry_lobby(r, q->game_id, &n);
+        MmLobby *l = registry_lobby_find(r, q->game_id, &n);
         if (l && lobby_joinable(n, l) && !proto_ok(l, q)) {
             /* another protocol major: the client could not play there */
             if (!q->auto_change) return MM_PICK_INCOMPATIBLE;

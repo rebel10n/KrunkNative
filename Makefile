@@ -150,6 +150,7 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation, editor bus and editor model tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/knet_test
+	./$(DEBUG_DIR)/server_names_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/world_v7_test

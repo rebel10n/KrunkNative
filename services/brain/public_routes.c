@@ -217,7 +217,7 @@ static void h_game_info(kn_http_req *req, void *ud) {
     Brain *b = ud;
     char game[MM_GAME_ID_MAX] = "";
     kn_http_query_get(req, "game", game, sizeof(game));
-    MmLobby *l = game[0] ? registry_lobby(b->registry, game, NULL) : NULL;
+    MmLobby *l = game[0] ? registry_lobby_find(b->registry, game, NULL) : NULL; /* either id form */
     if (!l) l = game_info_pick(b->registry);
     if (!l) {
         reply_error(req, 503, "NoAvailableServers");

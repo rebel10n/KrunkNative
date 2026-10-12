@@ -243,6 +243,59 @@ int main(void) {
         registry_free(v);
     }
 
+    /* short game ids (shared/src/server_names.c): ?game=CH2:kz862 is CHITOWN2:kz862 */
+    {
+        Registry *s = registry_new();
+        MmPolicy ps = {.cross_region = 1, .default_max_players = 8};
+        MmNode *ch1 = add_node(s, "CHITOWN1", "CH", 0);
+        MmNode *ch2 = add_node(s, "CHITOWN2", "CH", 0);
+        MmNode *sv1 = add_node(s, "CLARA1", "SV", 0);
+        MmNode *ny = add_node(s, "NY", "us-nj", 1);              /* a short community node id */
+        MmNode *club = add_node(s, "KRUNKCLUB1", "local", 1);    /* a long one: KRU1 */
+        MmNode *bob = add_node(s, "BOBSERVER1", "CH", 1);        /* community node in an edge region: CH1 */
+        CHECK(ch1 && ch2 && sv1 && ny && club && bob);
+        add_lobby(s, ch1, "aaaaa", 1, 8, 0, "1.0");
+        add_lobby(s, ch2, "kz862", 2, 8, 0, "1.0");
+        add_lobby(s, sv1, "kz862", 3, 8, 0, "1.0");              /* same lobby id, other node */
+        add_lobby(s, ny, "nnnnn", 0, 8, 1, "1.0");
+        add_lobby(s, club, "ccccc", 0, 8, 1, "1.0");
+        add_lobby(s, bob, "bbbbb", 0, 8, 1, "1.0");
+        MmNode *owner = NULL;
+        /* canonical ids still resolve (old links) */
+        CHECK(registry_lobby_find(s, "CHITOWN2:kz862", &owner) && owner == ch2);
+        /* short form: region code + instance number; the lobby id picks between nodes */
+        owner = NULL;
+        MmLobby *sl = registry_lobby_find(s, "CH2:kz862", &owner);
+        CHECK(sl && owner == ch2 && !strcmp(sl->game_id, "CHITOWN2:kz862"));
+        CHECK(registry_lobby_find(s, "SV1:kz862", &owner) && owner == sv1);
+        CHECK(registry_lobby_find(s, "ch2:kz862", &owner) && owner == ch2); /* typed lowercase */
+        CHECK(registry_lobby_find(s, "CH1:aaaaa", &owner) && owner == ch1);
+        CHECK(registry_lobby_find(s, "CH1:bbbbb", &owner) && owner == bob);
+        CHECK(registry_lobby_find(s, "NY:nnnnn", &owner) && owner == ny);
+        CHECK(registry_lobby_find(s, "KRU1:ccccc", &owner) && owner == club);
+        /* wrong node, wrong lobby, no lobby part: unknown */
+        CHECK(registry_lobby_find(s, "CH1:kz862", NULL) == NULL);
+        CHECK(registry_lobby_find(s, "LA2:kz862", NULL) == NULL);
+        CHECK(registry_lobby_find(s, "CH2:zzzzz", NULL) == NULL);
+        CHECK(registry_lobby_find(s, "CH2:", NULL) == NULL);
+        CHECK(registry_lobby_find(s, "kz862", NULL) == NULL);
+        /* registry_lobby stays exact (reservations, federation rows) */
+        CHECK(registry_lobby(s, "CH2:kz862", NULL) == NULL);
+        /* seek-game ?game=<short>: the canonical lobby, not a quick-join replacement */
+        MmPickQuery qs = {.region = "SV", .game_id = "CH2:kz862", .auto_change = 0, .now_ms = 2000};
+        CHECK(registry_pick(s, &ps, &qs, &pick) == MM_PICK_OK && pick.node == ch2 && !pick.changed &&
+              !strcmp(pick.lobby->game_id, "CHITOWN2:kz862"));
+        qs.game_id = "CH2:gone1";
+        CHECK(registry_pick(s, &ps, &qs, &pick) == MM_PICK_INVALID_GAME);
+        /* a lobby whose tuple names another region than its node's hello: both match */
+        cJSON *t = cJSON_Parse("[\"rrrrr\",\"LA\",0,8,{\"i\":\"Burg\"}]");
+        CHECK(registry_lobby_upsert(s, ch1, t) == 0);
+        cJSON_Delete(t);
+        CHECK(registry_lobby_find(s, "LA1:rrrrr", &owner) && owner == ch1);
+        CHECK(registry_lobby_find(s, "CH1:rrrrr", &owner) && owner == ch1);
+        registry_free(s);
+    }
+
     /* remote refresh */
     registry_remote_begin(r);
     MmNode *rm = registry_remote_node(r, "SGP");

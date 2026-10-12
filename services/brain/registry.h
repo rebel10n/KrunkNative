@@ -115,6 +115,9 @@ int registry_lobby_upsert(Registry *r, MmNode *n, const cJSON *tuple);
 void registry_lobby_remove(Registry *r, MmNode *n, const char *lobby_id);
 void registry_lobbies_set(Registry *r, MmNode *n, const cJSON *tuples);
 MmLobby *registry_lobby(Registry *r, const char *game_id, MmNode **node_out);
+/* A client-supplied id (?game=, /mm/game-info): the canonical game id or its short link
+ * form (shared/include/server_names.h, CH2:kz862 = CHITOWN2:kz862 in region CH). */
+MmLobby *registry_lobby_find(Registry *r, const char *id, MmNode **node_out);
 
 /* ---- remote view (federation refresh): drop every non-local node not in keep */
 void registry_remote_begin(Registry *r);      /* mark remote nodes stale */
