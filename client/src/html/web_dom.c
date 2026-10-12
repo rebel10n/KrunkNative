@@ -448,6 +448,12 @@ void html_dom_observe_resize(const HtmlElem e, const HtmlResizeFn fn, void *user
     kn_js_observe((int) e, 1);
 }
 
+// controls.js keydown/keyup preventDefault while CONTROLS.enabled: the shim's window
+// bubble listeners ask after GLFW's capture listener ran the key through C (ui_controls.c).
+EMSCRIPTEN_KEEPALIVE int kn_ui_key_prevent(void) {
+    return ui_controls_take_game_key();
+}
+
 EMSCRIPTEN_KEEPALIVE void kn_ui_resize_observed(const int id) {
     if (id <= 0) return;
     for (int i = 0; i < g_resize_queue_count; i++) {

@@ -218,6 +218,7 @@ void hud_ui_end_screen_tab(const char *tab);
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled
 int  hud_ui_end_screen_interactive(void);   // end-screen results up: pointer free, mouse goes to the page
 int  hud_ui_toggle_end_screen(Client*);     // UI.toggleEndScreen: results <-> menu (Escape, controller Start); 1 = acted
+char *hud_ui_player_list_html(void);        // windows[22].gen(): "Player List" (pListKey, showWindow(23)); malloc'd
 // "<victim> committed <random config.suicides entry>" kill-feed row (no killer/weapon).
 #define HUD_UI_HAVE_KILLFEED_SUICIDE 1
 void hud_ui_add_killfeed_suicide(Client*, const char *victim, int victim_is_you);
@@ -310,6 +311,7 @@ cJSON *ui_controls_export_json(void);            // CONTROLS.export() (caller fr
 void ui_controls_import_json(const cJSON *controls); // settings.import's "controls" object
 int  ui_controls_capturing(void);                // waiting for "Press any Key"
 int  ui_controls_take_swallowed_key(void);       // web: the capture consumed the current keydown
+int  ui_controls_take_game_key(void);            // web: the game owned the current key event (preventDefault it)
 // GLFW events from main.c. Return 1 when consumed (main.c then does nothing else).
 int  ui_controls_key_event(Client*, int key, int scancode, int action, int mods);
 int  ui_controls_mouse_event(Client*, int button, int action, int in_game);

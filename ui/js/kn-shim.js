@@ -200,6 +200,28 @@
     if ((isEscOrEnter(e) || isFieldKey(e)) && !knListen('', 'keydown', e.target, e)) e.preventDefault();
   }, true);
 
+  // controls.js keydown/keyup: e.preventDefault() while CONTROLS.enabled (the game owns
+  // the input). These bubble listeners run after GLFW's window capture listener, which has
+  // already taken the key through C; C answers whether the game owned it. A key whose
+  // keydown was prevented gets its keyup prevented too: pListKey (Alt) frees the pointer
+  // on keydown, and a bare Alt release would otherwise focus the browser's menu bar
+  // (Firefox, Chrome on Windows) and keep the keyboard away from the page.
+  var gameKeys = {};
+  function gameKey() {
+    if (!active || !engineReady() || !global.Module._kn_ui_key_prevent) return false;
+    try { return global.Module._kn_ui_key_prevent() !== 0; } catch (x) { return false; }
+  }
+  global.addEventListener('keydown', function (e) {
+    if (!gameKey()) return;
+    e.preventDefault();
+    gameKeys[e.keyCode] = 1;
+  });
+  global.addEventListener('keyup', function (e) {
+    if (gameKey() || gameKeys[e.keyCode]) e.preventDefault();
+    delete gameKeys[e.keyCode];
+  });
+  global.addEventListener('blur', function () { gameKeys = {}; });
+
   // Side buttons: never let the browser navigate back/forward (M4/M5 are game binds).
   function noNavigate(e) { if (active && (e.button === 3 || e.button === 4)) e.preventDefault(); }
   global.addEventListener('mouseup', noNavigate, true);

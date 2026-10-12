@@ -608,6 +608,7 @@ static char *gen_9(void) { // Select Spray: owned sprays signed in (ui_loadout.c
 }
 static char *gen_21(void) { return gen_static("21"); } // Advertise (guest: "Please Login to Submit a Bid")
 static char *gen_29(void) { return gen_static("29"); } // Support
+static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (pListKey, hud_ui.c)
 static char *gen_30(void) { return strdup(""); }       // Krunker Mail: signed in only (account_ui.c)
 static char *gen_13(void) { return clan_window_gen(); } // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
 // windows[35] Premium ("Things you get with Premium:"), opened by the Store Premium tab's link.
@@ -664,6 +665,7 @@ static const WindowDef WINDOWS[] = {
     {17, "17", "Select Back", 0, gen_17},
     {20, "20", "Select Secondary", 0, gen_20},
     {21, "21", "Advertise", 0, gen_21},
+    {23, "23", "Player List", 0, gen_23},
     {26, "26", "Select Melee", 0, gen_26},
     {29, "29", "Support", 0, gen_29},
     {30, "30", "Krunker Mail", 0, gen_30},

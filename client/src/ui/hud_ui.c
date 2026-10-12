@@ -27,6 +27,7 @@
 // browser can screenshot the HUD without clicking Play; `?kn_hud_demo=1`
 // (KRUNKNATIVE_HUD_DEMO=1) adds kill-feed rows and hit markers on a loop.
 #include <player_accounts.h>
+#include <backend_ui.h> // account_get: the local player's clan in the player list
 #include <client.h>
 
 // Game-event entry points (prototypes belong in client/include/ui_logic.h):
@@ -481,6 +482,62 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
         hud_scoreboard_row_html_acc(out, size, &len, i + 1, hud_player_name(client, players[i]), players[i]->score, players[i] == client->me,
                                     player_accounts_get(players[i]->uid));
     }
+}
+
+// The " [clan]" tag of a player list row: COLORS.getClanCol(clan, clanR, "#353535") ("DEV"
+// is blue; KrunkNative has no clan ranks, so no rainbow / rank colours).
+static void hud_plist_clan(StrBuf *sb, const char *clan) {
+    if (!clan || !clan[0]) return;
+    sb_appendf(sb, "<span class='' style='color:%s'> [", strcmp(clan, "DEV") ? "#353535" : "#40C4FF");
+    sb_append_esc(sb, clan);
+    sb_append(sb, "]</span>");
+}
+
+// windows[22] "Player List" (showWindow(23), opened by pListKey): the header with the
+// player count, the local player's row, then every player in Game.players.list as a
+// profile link. Not ported, as KrunkNative has no backend for them: the row buttons
+// (Kick Spec / Votekick / Kick / Ban / Kill / TP2 / TPME / TPAll / police, which need host or
+// staff punish packets and v2k), the ranked elo icon (no per-player maxElo) and isHacker's
+// red link (no flag). config.isProd (not a localhost/LAN host) leaves the local player out
+// of the list, as on krunker.io; the local player always has the top row.
+char *hud_ui_player_list_html(void) {
+    const Client *client = menu_ui()->client;
+    const size_t count = client && client->game.players ? client->game.player_count : 0;
+    size_t listed = 0;
+    for (size_t i = 0; i < count; i++) listed += client->game.players[i] != NULL;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='margin-top:0px' class='setHed'>");
+    if (listed) sb_appendf(&sb, "Player List<div style='float: right;'>[%zu]</div><hr>", listed); // windows.players.header
+    else sb_append(&sb, "<center>No players currently...<center>");                       // windows.players.none
+    sb_append(&sb, "</div><div style='background-color:gainsboro;border-radius:6px;padding:5px'>");
+    // isLobbyHost: this client runs the game (offline / hosted), like menu_ui.c's idle kick
+    const int remote = client && client->net_connected && !client->offline && !client->game.is_local;
+    const char *host = client ? client->net_address : "";
+    const int prod = remote && host[0] && strcmp(host, "127.0.0.1") && strcmp(host, "localhost") && strncmp(host, "192.168.", 8);
+    const Player *me = client ? client->me : NULL;
+    if (me) {
+        sb_append(&sb, "<div><span class='settNameSmall'>");
+        if (!remote) sb_append(&sb, "<i class='material-icons' style='font-size:25px'>stars</i>");
+        sb_append_esc(&sb, hud_player_name(client, me));
+        const NetPlayerInfoPacket *info = player_accounts_get(me->uid);
+        const AccountInfo *acc = account_get();
+        hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
+        sb_append(&sb, "</span><span style='float:right'></span></div>");
+    }
+    for (size_t i = 0; i < count; i++) {
+        const Player *p = client->game.players[i];
+        if (!p || (prod && p == me)) continue; // Game.players.list.filter(ho => !config.isProd || !ho.isYou)
+        const NetPlayerInfoPacket *info = player_accounts_get(p->uid);
+        const char *name = hud_player_name(client, p);
+        sb_append(&sb, "<div><span class='settNameSmall'><a target='_blank' class='grey' href='/social.html?p=profile&q=");
+        sb_append_esc(&sb, name);
+        sb_append(&sb, "'>");
+        sb_append_esc(&sb, name);
+        hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : NULL);
+        sb_append(&sb, "</a></span><span style='float:right'></span></div>");
+    }
+    sb_append(&sb, "</div>");
+    return sb_finish(&sb);
 }
 
 // FNV-1a over the board markup: rewrite #leaderContainerD only when it changed.

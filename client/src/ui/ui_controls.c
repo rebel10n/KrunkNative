@@ -188,6 +188,7 @@ static struct {
 
     int chat_focused;        // #chatInput has focus (focusChat(1) / focusChat())
     int swallowed_key;       // web: a capture consumed this key event before the page sees it
+    int game_key;            // web: the game owned this key event (controls.js preventDefault)
     unsigned char logged[UI_CONTROL_COUNT];
 
     UiInputSettings settings; // Krunker defaults until client_apply_setting pushes values
@@ -563,6 +564,12 @@ static void capture_bind(const int code) {
 #endif
 }
 
+int ui_controls_take_game_key(void) {
+    const int g = g_ctl.game_key;
+    g_ctl.game_key = 0;
+    return g;
+}
+
 int ui_controls_take_swallowed_key(void) {
     const int s = g_ctl.swallowed_key;
     g_ctl.swallowed_key = 0;
@@ -753,9 +760,21 @@ static void flip_setting(const char *key) {
     ui_settings_set(key, &value);
 }
 
+static void show_player_list(void *user) {
+    (void) user;
+    menu_show_window(23, 0);
+}
+
 // window.pressButton(keyCode), the parts with an in-game effect.
 static void press_button(Client *client, const int code) {
-    if (bind_is(UI_CONTROL_PLAYER_LIST, code)) log_once(UI_CONTROL_PLAYER_LIST, "player list (window 23)");
+    // pListKey (Alt): only while the game owns the input (N()'s `!controls.enabled` return)
+    // and not from a text field; CONTROLS.resetKeys(), CONTROLS.toggle(false) (the pointer
+    // is freed, the menu shows), then setTimeout(() => showWindow(23), 0).
+    if (bind_is(UI_CONTROL_PLAYER_LIST, code) && ui_controls_enabled(client) && !ui_text_input_focused()) {
+        ui_controls_reset_keys();
+        client_set_menu_open(client, 1);
+        html_timer_add(0.0, show_player_list, NULL);
+    }
     // sBoardKey: g6(1) -> hud_ui polls ui_controls_scoreboard_held()
     // window.Bf5: F free cam, H/0 objective cams, 1-9 players, R first/third person (raw keyCodes).
     if (client && spectate_press_key(client, code)) return;
@@ -820,6 +839,10 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     const int press = action == GLFW_PRESS;
     const int menu = html_ui_is_menu_open();
     g_ctl.swallowed_key = 0; // only ever about the key event being dispatched right now
+    // controls.js keydown/keyup: `if (controls.enabled) e.preventDefault()`, decided before
+    // the key acts (pListKey frees the pointer); the chat key's keydown goes to
+    // pressButton without it. The web backend reads it (web_dom.c kn_ui_key_prevent).
+    g_ctl.game_key = ui_controls_enabled(client) && !ui_text_input_focused() && !(press && code >= 0 && bind_is(UI_CONTROL_CHAT, code));
 
     if (press && ui_controls_capturing()) {
         // Krunker's keydown hands the chat key to pressButton (it focuses the chat)

@@ -121,7 +121,7 @@ if (EMSCRIPTEN)
         -sSTACK_SIZE=8388608
         -sFORCE_FILESYSTEM=1
         -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,stringToNewUTF8,stackSave,stackRestore,stackAlloc
-        -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_kn_ui_event,_kn_ui_resize_observed
+        -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_kn_ui_event,_kn_ui_resize_observed,_kn_ui_key_prevent
         -lwebsocket.js
         --preload-file ${CMAKE_SOURCE_DIR}/ui/windows@/ui/windows
     )
