@@ -211,6 +211,19 @@ static void set_nonblock(const int fd) {
 #endif
 }
 
+#ifndef _WIN32
+// AF_UNIX stream socket, close-on-exec. SOCK_CLOEXEC is Linux/BSD only (not macOS): fcntl there.
+static int unix_stream_socket(void) {
+#ifdef SOCK_CLOEXEC
+    return socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#else
+    const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd >= 0) fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
+    return fd;
+#endif
+}
+#endif
+
 static int make_dir_private(const char *dir) {
 #ifdef _WIN32
     _mkdir(dir);
@@ -567,7 +580,7 @@ int edbus_listen(const EdBusPaths *p) {
 #ifdef _WIN32
     return -1;
 #else
-    const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    const int fd = unix_stream_socket();
     if (fd < 0) return -1;
     struct sockaddr_un sa;
     memset(&sa, 0, sizeof(sa));
@@ -635,7 +648,7 @@ int edbus_connect(const EdBusPaths *p) {
 #ifdef _WIN32
     return -1;
 #else
-    const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    const int fd = unix_stream_socket();
     if (fd < 0) return -1;
     struct sockaddr_un sa;
     memset(&sa, 0, sizeof(sa));
