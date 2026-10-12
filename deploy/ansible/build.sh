@@ -11,6 +11,8 @@ repo="$(cd "$(dirname "$0")/../.." && pwd)"
 docker="${DOCKER:-docker}"
 build_root="${KN_BUILD_ROOT:-${TMPDIR:-/tmp}/kn-deploy-build}"
 # TARGETS="kn_brain kn_migrate" builds a subset (default: all three).
+# KN_CMAKE_ARGS: extra -D flags for the configure step (CI: the build version from
+# tools/release/version-meta.sh, -DKRUNKNATIVE_VERSION_*; the container has no git).
 read -r -a targets <<< "${TARGETS:-kn_brain kn_migrate server_bin}"
 codenames=("$@")
 [ ${#codenames[@]} -gt 0 ] || codenames=(bookworm bullseye)
@@ -22,9 +24,11 @@ for codename in "${codenames[@]}"; do
     mkdir -p "$out/bin" "$bdir"
     echo "[build] $codename -> $out/bin"
     # The repo is mounted read-only; only the build dir and the output are writable.
+    # shellcheck disable=SC2016 # the script expands its variables inside the container
     "$docker" run --rm \
         -v "$repo:/src:ro" -v "$bdir:/build" -v "$out:/out" \
         -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e TARGETS="${targets[*]}" \
+        -e KN_CMAKE_ARGS="${KN_CMAKE_ARGS:-}" \
         "debian:$codename" bash -euo pipefail -c '
             export DEBIAN_FRONTEND=noninteractive
             # bullseye is EOL: the deb.debian.org security pocket 404s. Use archive.debian.org
@@ -41,7 +45,7 @@ for codename in "${codenames[@]}"; do
             apt-get install -y -qq --no-install-recommends cmake ninja-build gcc g++ libc6-dev make \
                 pkg-config libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libcrypt-dev libcurl4-openssl-dev python3 >/dev/null
             cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-                -DKRUNKNATIVE_HTML_ENGINE=OFF -DGLFW_BUILD_X11=OFF -DGLFW_BUILD_WAYLAND=OFF >/build/configure.log
+                -DKRUNKNATIVE_HTML_ENGINE=OFF -DGLFW_BUILD_X11=OFF -DGLFW_BUILD_WAYLAND=OFF $KN_CMAKE_ARGS >/build/configure.log
             cmake --build /build --target $TARGETS
             for t in $TARGETS; do
                 f=$(find /build -type f -name "$t" -perm -u+x | head -1)
