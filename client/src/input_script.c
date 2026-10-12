@@ -12,7 +12,8 @@
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
 //                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
-//   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER, any A-Z / 0-9
+//   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER, any A-Z / 0-9,
+//                                F1-F12
 //   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
@@ -141,6 +142,10 @@ static int script_key(const char *name) {
     if (name[0] >= '0' && name[0] <= '9' && !name[1]) return GLFW_KEY_0 + (name[0] - '0');
     if (!strcmp(name, "ESC")) return GLFW_KEY_ESCAPE;
     if (!strcmp(name, "ENTER")) return GLFW_KEY_ENTER;
+    if (name[0] == 'F' && name[1] >= '1' && name[1] <= '9') { // F1..F12 (F5: the Reconnect bind)
+        const int f = atoi(name + 1);
+        if (f >= 1 && f <= 12) return GLFW_KEY_F1 + f - 1;
+    }
     return GLFW_KEY_UNKNOWN;
 }
 

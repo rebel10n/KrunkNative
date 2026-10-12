@@ -317,6 +317,10 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
 
+.PHONY: reconnect-test
+reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/reconnect_key_e2e.py $(DEBUG_DIR)
+
 $(BRIDGE_DIR)/node_modules: $(BRIDGE_DIR)/package.json $(BRIDGE_DIR)/package-lock.json
 	cd $(BRIDGE_DIR) && npm ci
 	@touch $@
@@ -452,7 +456,7 @@ smoke-web: ## Load the web build offline in headless Chromium and screenshot it 
 	(cd $(DIST_WEB) && $(PYTHON) -m http.server $(PORT) >/dev/null 2>&1) & srv=$$!; sleep 1; \
 	timeout 120 $$chrome --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
 	  --window-size=1280,720 --virtual-time-budget=20000 --enable-logging=stderr --v=0 \
-	  --screenshot=/tmp/smoke-web.png "http://localhost:$(PORT)/?offline=1" 2>&1 | grep CONSOLE | cut -c1-200 > /tmp/smoke-web.log; \
+	  --screenshot=/tmp/smoke-web.png "http://localhost:$(PORT)/?offline=1&map=burg" 2>&1 | grep CONSOLE | cut -c1-200 > /tmp/smoke-web.log; \
 	kill $$srv 2>/dev/null; \
 	[ -f /tmp/smoke-web.png ] && echo "smoke-web ok: /tmp/smoke-web.png ($$(wc -l < /tmp/smoke-web.log) console lines in /tmp/smoke-web.log)"
 

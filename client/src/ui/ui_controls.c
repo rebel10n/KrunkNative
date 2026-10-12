@@ -26,6 +26,7 @@
 #include <voice_chat.h> // voiceKey -> toggleRecord (client/src/voice.c)
 #include <hud_social.h> // WP-E: spray / spray wheel, taunts, quick chat (hud_social.c)
 #include <sprays.h>     // the spray wheel takes the mouse wheel
+#include <app_mode.h>   // app_reload: the Reconnect key on the web
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -219,6 +220,10 @@ static const V7Bind V7_BINDS[] = {
     {"killSB", -1, "sandboxKill", -1, -1, -1},
     {"spawnBot", -1, "sandboxSpawnBot", 107, -1, -1},
     {"clearBots", -1, "sandboxClearBots", 109, -1, -1},
+    // KrunkNative addition (not a v7.1.4 ControlBind): Reconnect, F5 (keyCode 116) by default.
+    // v7 has no such bind (the browser's F5 reloads the page); the native client reconnects
+    // in place instead (console `reconnect`), the web build still reloads (reconnect_key).
+    {"reconnect", -1, "reconnectKey", 116, -1, UI_CONTROL_RECONNECT},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -278,6 +283,8 @@ static const ControlRow TAB_GENERAL[] = {
     {"Inspect", "inspect", -1, 0, "Weapon"}, {"Spray", "spray", -1, 0, "Weapon"},
     {"Spray Wheel (Hold)", "sprayWheel", -1, 0, "Weapon"}, {"Player List", "playerList", -1, 0, "Interface"},
     {"InGame Leaderboard", "scoreBoard", -1, 0, "Interface"}, {"Hide Players", "hidePlayers", -1, 0, "Players"},
+    // KrunkNative addition, last so v7's rows keep their places (binds.reconnect above)
+    {"Reconnect", "reconnect", -1, 0, "Connection"},
 };
 static const ControlRow TAB_CHAT[] = {
     {"Chat", "chat", -1, 0, "Interface & Audio"}, {"Voice", "voiceChat", -1, 0, "Interface & Audio"},
@@ -1235,6 +1242,20 @@ static void release_code(Client *client, const int code) {
 
 // ---------------------------------------------------------------- GLFW events
 
+// The Reconnect bind (F5): the console's `reconnect` natively (the same server or lobby, the
+// offline game restarted on its map). On the web it stays the page reload (mods.ts F5:
+// location.reload()); the address bar keeps ?game=<id> / ?offline=1&map= / ?sandbox
+// (servers_ui.c), so the reload lands back in the same game.
+static void reconnect_key(void) {
+#ifdef __EMSCRIPTEN__
+    g_ctl.game_key = 0; // no preventDefault: the browser's own F5 reloads too
+    app_reload(NULL);
+#else
+    printf("[controls] reconnect key\n");
+    ui_console_exec("reconnect");
+#endif
+}
+
 int ui_controls_key_event(Client *client, const int key, const int scancode, const int action, const int mods) {
     ensure_loaded();
     const int code = ui_controls_dom_key(key);
@@ -1254,6 +1275,12 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     }
 
     if (ui_console_key_event(client, key, scancode, action, mods)) return 1; // dev console + mods.ts keys (ui_console.c)
+
+    // Reconnect works in game and in the menu, but not while typing (chat, a menu field)
+    if (press && code >= 0 && bind_is(UI_CONTROL_RECONNECT, code) && !g_ctl.chat_focused && !ui_text_input_focused()) {
+        reconnect_key();
+        return 1;
+    }
 
     if (g_ctl.chat_focused) {
         if (press && code >= 0 && bind_is(UI_CONTROL_CHAT, code)) return chat_key(client);

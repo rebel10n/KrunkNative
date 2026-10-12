@@ -49,6 +49,7 @@
 #include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
 #include <lobby_ui.h> // WP-E: lobby packets, match vote cards (net/lobby_events.c)
 #include <game_config.h> // WP-E: GAME_CONFIG on INIT, the round's networkData
+#include <map_catalog.h> // startup map lookup (--map, --sandbox, ?map=, ?sandbox)
 #include <ks_client.h> // KrunkScript client host: the map's client script (ks/ks_client_host.c)
 #include <ks_game.h> // ks_game_free
 
@@ -231,8 +232,12 @@ static int g_look_unsampled;  // WP-C: this frame sampled no input frame (netRat
 static int g_look_valid;
 
 static void print_usage_to(FILE *out, const char *program) {
-    fprintf(out, "Usage: %s [--offline] [--headless] [--windowed|--fullscreen|--borderless] [--hub|--viewer [query]]\n"
-                 "          [--brain <url>] [--connect <host[:port]>] [map.json]\n"
+    fprintf(out, "Usage: %s [--offline|--sandbox] [--map <name>] [--headless] [--windowed|--fullscreen|--borderless]\n"
+                 "          [--hub|--viewer [query]] [--brain <url>] [--connect <host[:port]>] [map.json]\n"
+                 "  --offline       play on the in-process sandbox server (no network); a random rotation map\n"
+                 "                  unless --map / map.json (console `offline`, web ?offline=1)\n"
+                 "  --sandbox       --offline on the sandbox map, v7's blank Test map (console `sandbox`, web ?sandbox)\n"
+                 "  --map <name>    start on a catalogue map: key, name or path under assets/maps (web ?map=)\n"
                  "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
                  "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
                  "       %s --help | --version\n", program, program, program, program);
@@ -246,9 +251,12 @@ static void print_usage(const char *program) {
 #ifdef __EMSCRIPTEN__
 
 // Query parameters replace command line arguments on the web:
-//   ?offline=1     run the in-process local server (same as --offline), on Burg unless ?map
-//   ?sandbox       offline on v7.1.4's sandbox map (config.blankMap = maps/custom/Test.json)
-//   ?map=<name>    start on assets/maps/<name>.json
+//   ?offline=1     run the in-process local server (same as --offline): a random rotation
+//                  map unless ?map
+//   ?sandbox       offline on v7.1.4's sandbox map (--sandbox; ?test too, as in v7's index.js)
+//   ?map=<name>    start on that map (--map: local_game_map_lookup, else assets/maps/<name>.json)
+// While offline the address bar keeps ?offline=1&map=<key> / ?sandbox up to date
+// (servers_ui.c), so a reload (F5) lands on the same map.
 //   social.html, editor.html, viewer.html boot in that page's app mode (app_mode.c)
 //   ?ws=<url>      WebSocket server URL (see net_web.c)
 static int web_query_flag(const char *name) {
@@ -337,8 +345,16 @@ EM_JS(void, web_take_look, (double *dx, double *dy), {
 
 #endif
 
-static int parse_startup_args(int argc, char **argv, int *offline, const char **map_path, const char **scenario, const char **scenario_out) {
+static int file_exists(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (file) fclose(file);
+    return file != NULL;
+}
+
+static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox, const char **map_name, const char **map_path, const char **scenario, const char **scenario_out) {
     *offline = 0;
+    *sandbox = 0;
+    *map_name = NULL;
     *map_path = NULL;
     *scenario = NULL;
     *scenario_out = NULL;
@@ -350,6 +366,10 @@ static int parse_startup_args(int argc, char **argv, int *offline, const char **
         }
         if (!strcmp(argv[i], "--offline")) {
             *offline = 1;
+        } else if (!strcmp(argv[i], "--sandbox")) {
+            *offline = *sandbox = 1;
+        } else if (!strcmp(argv[i], "--map") && i + 1 < argc) {
+            *map_name = argv[++i];
         } else if (!strcmp(argv[i], "--windowed") || !strcmp(argv[i], "--fullscreen") || !strcmp(argv[i], "--borderless")) {
             // window mode for this session (render_settings.h); overrides the stored windowMode
             client_render_force_window_mode(argv[i][2] == 'w' ? RS_WINDOWED : argv[i][2] == 'f' ? RS_FULLSCREEN : RS_BORDERLESS);
@@ -407,13 +427,15 @@ int main(int argc, char **argv) {
 
     cJSON *startup_map = NULL;
     int offline = 0;
+    int sandbox = 0;
+    const char *startup_map_name = NULL;
     const char *startup_map_path = NULL;
     const char *scenario_path = NULL;
     const char *scenario_out = NULL;
 
     backend_parse_args(&argc, argv);  // --brain <url> / --connect <host[:port]> (net/backend_startup.c)
     app_mode_parse_args(&argc, argv); // --hub/--editor/--viewer [query] (app_mode.c)
-    if (!parse_startup_args(argc, argv, &offline, &startup_map_path, &scenario_path, &scenario_out)) {
+    if (!parse_startup_args(argc, argv, &offline, &sandbox, &startup_map_name, &startup_map_path, &scenario_path, &scenario_out)) {
         return -1;
     }
 
@@ -430,44 +452,53 @@ int main(int argc, char **argv) {
     }
 
 #ifdef __EMSCRIPTEN__
-    char *web_map_path = NULL;
-
+    // the page's query instead of the command line (web_query_flag above)
     if (web_query_flag("offline")) offline = 1;
-
+    if (web_query_flag("sandbox") || web_query_flag("test")) offline = sandbox = 1;
     char *web_map_name = web_query_string("map");
-
-    // ?sandbox / ?offline without ?map: v7.1.4 loadSandbox(config.blankMap), else Burg
-    const int web_sandbox = web_query_flag("sandbox") || web_query_flag("test");
-    if (web_sandbox) offline = 1;
-    if (offline && !(web_map_name && web_map_name[0])) {
-        free(web_map_name);
-        web_map_name = strdup(web_sandbox ? "custom/Test" : "burg");
-    }
-
-    if (web_map_name && web_map_name[0]) {
-        const size_t name_length = strlen(web_map_name);
-        const int has_extension = name_length > 5 && !strcmp(web_map_name + name_length - 5, ".json");
-
-        char *relative = concat("maps/", web_map_name);
-        char *with_extension = relative && !has_extension ? concat(relative, ".json") : relative;
-
-        if (with_extension) web_map_path = concat(assets_path(), with_extension);
-        if (with_extension != relative) free(with_extension);
-        free(relative);
-
-        startup_map_path = web_map_path;
-    }
-
-    free(web_map_name);
+    if (web_map_name && web_map_name[0]) startup_map_name = web_map_name;
 #endif
+
+    // --sandbox / ?sandbox without a map: v7.1.4 loadSandbox(config.blankMap)
+    if (sandbox && !startup_map_name && !startup_map_path) startup_map_name = LOCAL_GAME_SANDBOX_MAP;
+    // a map.json argument that is no file may name a catalogue map ("client_bin --offline kanji")
+    if (startup_map_path && !startup_map_name && !file_exists(startup_map_path) && local_game_map_lookup(startup_map_path) >= 0) {
+        startup_map_name = startup_map_path;
+        startup_map_path = NULL;
+    }
+    char *named_map_path = NULL;
+    if (startup_map_name) {
+        // the catalogue's own (cached, sanitised) JSON, so the game knows which map it plays
+        // (the address bar's ?map=, servers_ui.c); otherwise a file under assets/maps
+        const int index = local_game_map_lookup(startup_map_name);
+        if (index >= 0) {
+            startup_map = (cJSON *) map_catalog_json((size_t) index);
+            if (!startup_map) {
+                fprintf(stderr, "Failed to load map %s (%s)\n", startup_map_name, map_catalog_at((size_t) index)->path);
+                return -1;
+            }
+            printf("startup map %s: %s\n", startup_map_name, map_catalog_at((size_t) index)->path);
+            startup_map_path = NULL;
+        } else {
+            const size_t name_length = strlen(startup_map_name);
+            const int has_extension = name_length > 5 && !strcmp(startup_map_name + name_length - 5, ".json");
+            char *relative = concat("maps/", startup_map_name);
+            char *with_extension = relative && !has_extension ? concat(relative, ".json") : relative;
+            if (with_extension) named_map_path = concat(assets_path(), with_extension);
+            if (with_extension != relative) free(with_extension);
+            free(relative);
+            startup_map_path = named_map_path;
+        }
+    }
 
     if (startup_map_path && load_json_file(startup_map_path, &startup_map)) {
         fprintf(stderr, "Failed to load map JSON: %s\n", startup_map_path);
         return -1;
     }
 
+    free(named_map_path);
 #ifdef __EMSCRIPTEN__
-    free(web_map_path);
+    free(web_map_name);
 #endif
 
     static Client INSTANCE = {};

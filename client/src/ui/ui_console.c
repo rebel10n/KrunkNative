@@ -319,6 +319,7 @@ static const ConArg A_NAME_ID[] = {{"name|id", ARG_STRING, 1}};
 static const ConArg A_ON_OFF[] = {{"on|off", ARG_BOOLEAN, 1}};
 static const ConArg A_TARGET[] = {{"target", ARG_STRING, 1}};
 static const ConArg A_NAME[] = {{"name", ARG_STRING, 1}};
+static const ConArg A_MAP_OPT[] = {{"map", ARG_STRING, 1}};
 static const ConArg A_MODE[] = {{"alias", ARG_STRING, 1}};
 static const ConArg A_TEAM[] = {{"red|blue", ARG_STRING, 0}};
 static const ConArg A_UNBAN[] = {{"accountId|name|id", ARG_STRING, 1}};
@@ -997,13 +998,28 @@ static void cmd_quit(const int argc, char **argv, const char *rest) {
 
 // reconnect: location.reload() in devConsole; KrunkNative reconnects to the last server
 // (a `connect` target, a Direct Connect server or the matchmade lobby, sought again for a
-// fresh join ticket), also after `disconnect`. Offline: the local game starts over.
+// fresh join ticket), also after `disconnect`. Offline (also after a `disconnect` from the
+// offline game): the local game starts over on the same map. The Reconnect key (F5 by
+// default, ui_controls.c) runs this command.
 static void cmd_reconnect(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
     Client *client = con_client();
     if (!client) return;
     if (client->offline) {
         local_game_host(client, client->game.ready ? client->game.current_map_index : -1, client->game.ready ? game_mode_id(&client->game) : 0);
+        append("Restarted the offline game.", COL_INFO);
+        return;
+    }
+    if (servers_ui_reconnect_offline()) {
+        // `disconnect` left the offline game: it starts again on the map it played
+        const Game *game = &client->game;
+        if (game->ready && game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count) {
+            client->offline_start_map = game->maps[game->current_map_index];
+        }
+        client->net_should_quit = 1; // as menu_request_play: no transport retries behind it
+        if (local_game_start(client)) append("Restarted the offline game.", COL_INFO);
+        else append("reconnect failed: the offline game did not start", COL_ERROR);
+        client->offline_start_map = NULL;
         return;
     }
     if (!servers_ui_reconnect()) {
@@ -1024,20 +1040,56 @@ static void clear_ping_counter(void) {
     if (icon) html_dom_set_style(icon, "color", "gray");
 }
 
-// offline: playCustomMap() (the single player game) + clearPingCounter()
-static void cmd_offline(const int argc, char **argv, const char *rest) {
-    (void) argc; (void) argv; (void) rest;
-    Client *client = con_client();
-    if (!client) return;
+// playCustomMap() (the single player game) + clearPingCounter(): leave the server for the
+// in-process sandbox server. `catalog_index` (-1 none) is the map it starts on, or the one a
+// running offline game reloads on (local_game_pick_map).
+static void go_offline(Client *client, const int catalog_index, const char *command) {
 #ifndef __EMSCRIPTEN__
     if (!client->offline) stop_net(client);
 #else
     if (!client->offline && client->net_connected) client_net_disconnect(client, "Offline", "000000");
     client->net_connected = 0;
 #endif
+    if (catalog_index >= 0 && local_game_pick_map(client, catalog_index) < 0) {
+        appendf(COL_ERROR, "%s failed: map %s could not be loaded", command, map_catalog_at((size_t) catalog_index)->key);
+        return;
+    }
     menu_host_offline();
+    client->offline_start_map = NULL; // consumed by local_game_start (or a running game reloaded)
     clear_ping_counter();
-    if (!client->offline) append("offline failed: the offline game did not start", COL_ERROR);
+    if (!client->offline) appendf(COL_ERROR, "%s failed: the offline game did not start", command);
+}
+
+// offline [map]: the offline game (--offline / web ?offline=1): the running one stays, else it
+// starts on the startup map or a random rotation map; a map (catalogue key, name or path under
+// assets/maps: local_game_map_lookup) picks where it plays (--map / ?map=).
+static void cmd_offline(const int argc, char **argv, const char *rest) {
+    char name[CON_TEXT_MAX];
+    if (rest && *rest) snprintf(name, sizeof(name), "%s", rest);
+    else join_args(argc, argv, 0, name, sizeof(name));
+    trim(name);
+    Client *client = con_client();
+    if (!client) return;
+    const int index = name[0] ? local_game_map_lookup(name) : -1;
+    if (name[0] && index < 0) {
+        appendf(COL_ERROR, "offline: map '%s' not found. Use maps to list choices.", name);
+        return;
+    }
+    go_offline(client, index, "offline");
+}
+
+// sandbox: the offline game on the sandbox map (--sandbox / web ?sandbox): v7.1.4's
+// config.blankMap, what the editor's Test plays with no map of its own (LOCAL_GAME_SANDBOX_MAP).
+static void cmd_sandbox(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    Client *client = con_client();
+    if (!client) return;
+    const int index = local_game_map_lookup(LOCAL_GAME_SANDBOX_MAP);
+    if (index < 0) {
+        append("sandbox failed: the map catalogue has no sandbox map (" LOCAL_GAME_SANDBOX_MAP ")", COL_ERROR);
+        return;
+    }
+    go_offline(client, index, "sandbox");
 }
 
 static void cmd_ahk(const int argc, char **argv, const char *rest) {
@@ -1127,7 +1179,8 @@ static void register_commands(void) {
     register_local("disconnect", NO_ARGS, "disconnect and stay in the menu", cmd_disconnect);
     register_local("quit", NO_ARGS, "close the window", cmd_quit);
     register_local("reconnect", NO_ARGS, "reconnect to the last server", cmd_reconnect);
-    register_local("offline", NO_ARGS, "switch to offline mode", cmd_offline);
+    register_local("offline", ARGS(A_MAP_OPT), "switch to offline mode (the in-process server), optionally on a map", cmd_offline);
+    register_local("sandbox", NO_ARGS, "play offline on the sandbox (editor test) map", cmd_sandbox);
     register_local("ahk", NO_ARGS, "show current antihack key", cmd_ahk);
     register_local("version", NO_ARGS, "show current client version", cmd_version);
     register_local("build", NO_ARGS, "alias for version", cmd_version);
@@ -1495,7 +1548,7 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         for (int i = 0; arg == 0 && i < count; i++) cand_add(c, templates[i].name, prefix);
     } else if (cmd_is(cmd, WORDS("ping", "kick", "ban", "unban", "ip", "banip"))) {
         if (arg == 0) con_player_candidates(c, prefix);
-    } else if (!strcmp(cmd, "map")) {
+    } else if (cmd_is(cmd, WORDS("map", "offline"))) {
         if (arg == 0) con_map_candidates(c, prefix);
     } else if (!strcmp(cmd, "mode")) {
         if (arg == 0) con_mode_candidates(c, prefix);

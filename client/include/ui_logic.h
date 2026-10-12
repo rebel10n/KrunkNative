@@ -344,7 +344,9 @@ enum {
     // WP-C: v7.1.4 binds.reset / binds.resetLast (input[13]); KrunkNative ids, stored as cont_resetKey /
     // cont_resetLastKey like v7
     UI_CONTROL_RESET = 38, UI_CONTROL_RESET_LAST = 39,
-    UI_CONTROL_COUNT = 40
+    // KrunkNative addition: Reconnect (F5, cont_reconnectKey), the console's `reconnect`
+    UI_CONTROL_RECONNECT = 40,
+    UI_CONTROL_COUNT = 41
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).

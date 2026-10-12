@@ -770,6 +770,18 @@ int local_game_host_custom(Client*, const cJSON *map);
 // until the offline game stops. NULL drops it.
 #define LOCAL_GAME_HAVE_HOST_CONFIG 1
 void local_game_host_config(Client*, const cJSON *request, int host_type);
+// The offline sandbox's map: v7.1.4 config.blankMap (index.js: ?sandbox / ?test, and the
+// editor's Test with no map stored loadSandbox it), the catalogue's community map "Test"
+// (maps/custom/Test.json). One name for --sandbox, web ?sandbox and the console `sandbox`.
+#define LOCAL_GAME_SANDBOX_MAP "Test"
+// A map named on the command line, in ?map= or by a console command -> its catalogue index
+// (-1 none): an exact catalogue key, a path under assets/maps ("custom/ESP_Parkour",
+// "maps/v7/kanji.json"), else map_catalog_resolve's names ("Kanji", "soul sanctum").
+int local_game_map_lookup(const char *name);
+// The catalogue map `catalog_index` in the client's map list (map_catalog_slot): the offline
+// game reloads on it when it runs, else the next local_game_start starts on it
+// (offline_start_map). Returns its slot, -1 when the map could not be loaded.
+int local_game_pick_map(Client*, int catalog_index);
 
 void client_frame(Client*); // one iteration of the main loop: tick, swap, poll events
 

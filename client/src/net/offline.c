@@ -20,6 +20,7 @@
 // applies (WP-E, decisions.md "Embedded map config") and reaches this client as GAME_CONFIG.
 #include <client.h>
 #include <server_sandbox.h>
+#include <map_catalog.h>
 #include <ks_storage.h> // WP6: the sandbox's offline GAME.STORAGE / Save Data store
 #include <html_dom.h>   // html_storage_get / set
 #include <knet.h>
@@ -225,6 +226,41 @@ void local_game_host(Client *client, const int map_index, const int mode_id) {
     sandbox_set_maps(client->game.maps, client->game.map_count); // the catalogue may have added maps (map_catalog_slot)
     sandbox_host(map_index >= 0 && (size_t) map_index < client->game.map_count ? map_index : -1, mode_id);
     offline_sync(client);
+}
+
+int local_game_map_lookup(const char *name) {
+    if (!name || !*name) return -1;
+    const int key = map_catalog_index_of_key(name);
+    if (key >= 0) return key;
+    // a path under assets/maps: "custom/ESP_Parkour", "maps/custom/ESP_Parkour.json"
+    const char *stem = !strncmp(name, "maps/", 5) ? name + 5 : name;
+    size_t length = strlen(stem);
+    if (length > 5 && !strcmp(stem + length - 5, ".json")) length -= 5;
+    char path[256];
+    if (length < sizeof(path) - 12) {
+        snprintf(path, sizeof(path), "maps/%.*s.json", (int) length, stem);
+        for (size_t i = 0; i < map_catalog_count(); i++) {
+            const MapCatalogEntry *entry = map_catalog_at(i);
+            if (entry && entry->path && !strcmp(entry->path, path)) return (int) i;
+        }
+    }
+    if (strchr(name, '/')) return -1;
+    const int found = map_catalog_resolve(name, NULL, 0, NULL); // -2 ambiguous
+    return found >= 0 ? found : -1;
+}
+
+int local_game_pick_map(Client *client, const int catalog_index) {
+    if (catalog_index < 0) return -1;
+    const int slot = map_catalog_slot(&client->game.maps, &client->game.map_count, (size_t) catalog_index);
+    if (slot < 0) {
+        const MapCatalogEntry *entry = map_catalog_at((size_t) catalog_index);
+        fprintf(stderr, "offline: map %s could not be loaded\n", entry ? entry->key : "?");
+        return -1;
+    }
+    const Game *game = &client->game;
+    if (client->offline) local_game_host(client, slot, game->ready && mode_config(game_mode_id(game)) ? game_mode_id(game) : offline_mode_id(client));
+    else client->offline_start_map = client->game.maps[slot];
+    return slot;
 }
 
 // The editor's Test Map: one map slot of the client's list holds our copy of the last tested

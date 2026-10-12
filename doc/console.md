@@ -37,7 +37,7 @@ silent (only the `] line` echo), as in the mod.
 
 | Command | v3.1.1 behaviour | Native |
 |---|---|---|
-| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (60 commands) |
+| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (73 commands) |
 | clear | empties the log | same |
 | echo / print text | prints the text | same |
 | bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
@@ -47,8 +47,9 @@ silent (only the `] line` echo), as in the mod.
 | connect [local\|host] | points the matchmaker at a host and seeks a game | connects the TCP client to `host[:port]` (IPv4/localhost; "local" = 127.0.0.1:default). Prints "Connecting through …" and "Server: tcp://…". On the web: "endpoint updated; live seek is unavailable on this page" |
 | disconnect | resets the endpoints and goes back to "/" | leaves the session/offline game, back to the default server, menu open. On the web: `location.href = '/'` |
 | quit | `window.close()` | closes the window (web: `window.close()`) |
-| reconnect | `location.reload()` | reconnects (offline: reloads the map). On the web: `location.reload()` |
-| offline | `playCustomMap()` + clearPingCounter | starts the embedded offline game, ping 0 |
+| reconnect | `location.reload()` | reconnects to the last server or lobby, also after `disconnect` (offline, or after a `disconnect` from the offline game: restarts it on the same map). The Reconnect bind (F5 by default, Settings > Controls > General) runs it natively; on the web that key stays `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |
+| offline [map] | `playCustomMap()` + clearPingCounter | starts the embedded offline game, ping 0 (`--offline`, web `?offline=1`); a map (catalogue key, name or path under assets/maps) picks where it plays, like `--map` / `?map=` |
+| sandbox | – (v7.1.4: `?sandbox` / `?test` load `config.blankMap`) | KrunkNative: the offline game on the sandbox map, the catalogue's `Test` (maps/custom/Test.json, what the editor's Test plays with no map of its own); `--sandbox`, web `?sandbox` |
 | ahk | `IO AHK: <ahNum> (base: 29819)` | `IO AHK: 0 (base: 29819)` (the native protocol never rotates it) |
 | version / build / verison | `Version: jhiLQ` | same |
 | toggle var | sends `/var` | same |
@@ -237,9 +238,9 @@ added to the game's list when it is picked.
   signatures, candidate notes) #cccccc instead of #b8b8b8.
 - No hotkey fires while a text field has focus (`ui_text_input_focused()`: an input,
   textarea, select or contenteditable element, #chatInput or #terminalInput). This covers
-  the mods.ts keys (F1, F4, F5, F6, T, B, F8, the console key binds), game binds, the
-  voice key, Ctrl TP clicks, gamepad presses and main.c's F11 / N. v3.1.1 still let F5
-  (reload) and F6 (editor) through. The console key (`) still closes the console from
+  the mods.ts keys (F1, F4, F6, T, B, F8, the console key binds), game binds (Reconnect,
+  F5, included), the voice key, Ctrl TP clicks, gamepad presses and main.c's F11 / N.
+  v3.1.1 still let F5 (reload) and F6 (editor) through. The console key (`) still closes the console from
   its own input, as in v3.1.1.
 - devConsole mirrors the browser's `console.*` output into the log. KrunkNative has no
   JavaScript console, so only game lines appear.

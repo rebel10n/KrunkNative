@@ -65,6 +65,7 @@ static void page_game_url(const char *id);
 enum { PIN_NONE, PIN_DIRECT, PIN_IDLE };
 static int g_pin;
 static int g_last_direct;        // the last session was a direct one: `reconnect` reuses net_address
+static int g_left_offline;       // `disconnect` left the offline game: `reconnect` starts it again
 static int g_quick_join_left;    // quickJoinRegion: remaining candidates
 static char **g_quick_join;      // candidate game ids
 static int g_quick_join_count, g_quick_join_next;
@@ -246,24 +247,69 @@ static size_t link_escape(char *out, const size_t n, const char *id) {
     return len;
 }
 
-// The address bar follows the lobby (ClientManager.seek replaceState; "/" when there is none,
-// like devConsole's disconnect). The page's other parameters stay; offline / sandbox pages
-// (?offline=1 ...) are not touched.
-static void page_write_game(const char *id) {
-    snprintf(g_link_game, sizeof(g_link_game), "%s", id ? id : "");
+// The page parameters that pick the game (main.c's web query, servers_ui_query): the address
+// bar rewrites them together, the others (?ws=, ?brain=, ...) stay.
+static int page_game_param(const char *tok) {
+    static const char *const NAMES[] = {"game", "offline", "sandbox", "test", "map", "testMap"};
+    for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
+        const size_t n = strlen(NAMES[i]);
+        if (!strncmp(tok, NAMES[i], n) && (tok[n] == '=' || !tok[n])) return 1;
+    }
+    return 0;
+}
+
+static char g_link_offline[200]; // the offline game's query written last ("" = none)
+
+// "/?<first>&<the page's other parameters>": the game parameters replaced by `first` ("" = none)
+static void page_write_query(const char *first) {
     char query[512];
     if (html_page_query(query, sizeof(query)) < 0) return; // native: no address bar
-    char href[768] = "/", esc[480];
+    char href[768] = "/";
     size_t len = 1;
-    if (id && id[0]) {
-        link_escape(esc, sizeof(esc), id);
-        len += (size_t) snprintf(href + len, sizeof(href) - len, "?game=%s", esc);
-    }
+    if (first && first[0]) len += (size_t) snprintf(href + len, sizeof(href) - len, "?%s", first);
     for (char *tok = strtok(query, "&"); tok && len < sizeof(href); tok = strtok(NULL, "&")) {
-        if (!tok[0] || !strncmp(tok, "game=", 5) || !strcmp(tok, "game")) continue;
+        if (!tok[0] || page_game_param(tok)) continue;
         len += (size_t) snprintf(href + len, sizeof(href) - len, "%c%s", len == 1 ? '?' : '&', tok);
     }
     html_page_set_url(href, 0);
+}
+
+// The address bar follows the lobby (ClientManager.seek replaceState; "/" when there is none,
+// like devConsole's disconnect), so a reload (F5) joins the same game again.
+static void page_write_game(const char *id) {
+    snprintf(g_link_game, sizeof(g_link_game), "%s", id ? id : "");
+    g_link_offline[0] = 0;
+    char first[480] = "";
+    if (id && id[0]) {
+        char esc[460];
+        link_escape(esc, sizeof(esc), id);
+        snprintf(first, sizeof(first), "game=%s", esc);
+    }
+    page_write_query(first);
+}
+
+// The offline game's address: ?sandbox on the sandbox map, else ?offline=1&map=<catalogue key>
+// (main.c reads both: --sandbox / --offline --map), so a reload (F5) plays the same map again.
+// A map outside the catalogue (the editor's Test Map: ?offline=1&testMap=1, a published map)
+// keeps the page's query.
+static void page_write_offline(const Client *client) {
+    const Game *game = &client->game;
+    if (!game->ready || !game->map || !game->map->raw_data) return;
+    const int index = map_catalog_index_of_json(game->map->raw_data);
+    const MapCatalogEntry *entry = index >= 0 ? map_catalog_at((size_t) index) : NULL;
+    if (!entry) return;
+    char want[sizeof(g_link_offline)];
+    if (!strcmp(entry->key, LOCAL_GAME_SANDBOX_MAP)) {
+        snprintf(want, sizeof(want), "sandbox");
+    } else {
+        char esc[160];
+        link_escape(esc, sizeof(esc), entry->key);
+        snprintf(want, sizeof(want), "offline=1&map=%s", esc);
+    }
+    if (!strcmp(want, g_link_offline)) return;
+    snprintf(g_link_offline, sizeof(g_link_offline), "%s", want);
+    g_link_game[0] = 0;
+    page_write_query(want);
 }
 
 static void page_game_url(const char *id) {
@@ -303,6 +349,12 @@ static void link_tick(Client *client) {
     if (client->offline != was_offline) {
         was_offline = client->offline;
         if (client->offline && g_link_game[0]) page_write_game(NULL); // left for the offline game
+    }
+    if (client->offline) {
+        page_write_offline(client); // its map, once it plays one (web only)
+    } else if (g_link_offline[0]) {
+        // left the offline game for a server: its lobby (if any) instead of ?offline / ?sandbox
+        page_write_game(g_pin == PIN_NONE ? g_game_id : NULL);
     }
     if (g_pin != PIN_DIRECT || !client->net_connected || client->offline) {
         if (g_pin != PIN_DIRECT) g_link_lookup[0] = 0;
@@ -439,11 +491,21 @@ static void start_seek(const char *game_id) {
 static void switch_server(const char *id) {
     if (!id || !id[0]) return;
 #ifdef __EMSCRIPTEN__
+    // the parameters that pick an offline game go (page_game_param); the id stays readable
+    // (generateHref: "?game=CHITOWN2:kz862", not %3A)
+    char esc[480];
+    link_escape(esc, sizeof(esc), id);
     EM_ASM({
         var p = new URLSearchParams(location.search);
-        p.set('game', UTF8ToString($0));
-        location.search = '?' + p.toString();
-    }, id);
+        p.delete("game");
+        p.delete("offline");
+        p.delete("sandbox");
+        p.delete("test");
+        p.delete("map");
+        p.delete("testMap");
+        var rest = p.toString();
+        location.search = "?game=" + UTF8ToString($0) + (rest ? "&" + rest : "");
+    }, esc);
 #else
     seek(id, 0, NULL);
 #endif
@@ -1106,10 +1168,19 @@ void servers_ui_disconnect(void) {
     if (!g_client) return;
     if (g_pin != PIN_IDLE) g_last_direct = g_pin == PIN_DIRECT || !g_brain_mode || !g_game_id[0];
     g_pin = PIN_IDLE;
+    g_left_offline = g_client->offline;
     printf("[mm] disconnected by the user (reconnect: %s)\n", g_last_direct ? "same server" : g_game_id);
     page_game_url(NULL); // devConsole disconnect: "/"
     if (g_client->offline) local_game_stop(g_client);
     client_net_stop(g_client, "Disconnected");
+}
+
+// Console `reconnect` after a `disconnect` from the offline game (and nothing joined since):
+// 1 = start the offline game again instead of a server. Consumes the flag.
+int servers_ui_reconnect_offline(void) {
+    const int again = g_left_offline && g_pin == PIN_IDLE && g_client && !g_client->offline;
+    g_left_offline = 0;
+    return again;
 }
 
 // Console `reconnect`: the last server again, through the same transport fallback (UDP,

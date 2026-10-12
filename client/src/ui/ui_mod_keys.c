@@ -1,9 +1,11 @@
 // The rest of the v3.1.1 offline build's client mod keys
 // (/home/user/jails/kru/src/Krunker_v3.1.1/mod/mods.ts), ported 1:1:
 //   - the document keydown switch: F1 io.send("clearLog") + console.clear(), F4
-//     location.href = "/", F5 location.reload(), F6 window.open("editor.html"),
+//     location.href = "/", F6 window.open("editor.html"),
 //     T toggles Ctrl TP (localStorage "ctrlTp", notify "Ctrl TP - Enabled/Disabled");
-//     F1/F4/T are ignored while an INPUT/TEXTAREA has focus, F5/F6 never are;
+//     F1/F4/T are ignored while an INPUT/TEXTAREA has focus, F6 never is. Its F5
+//     location.reload() is the Reconnect bind now (ui_controls.c reconnect_key: rebindable,
+//     the console's `reconnect` natively, still location.reload() on the web);
 //   - Ctrl TP: while it is enabled and ControlLeft is held, the canvas' left mousedown is
 //     taken from the game (no shot) and teleports: a ray from the camera centre (far 6000)
 //     against what the scene draws, minus the local player, then io.send("tp", x,
@@ -66,9 +68,6 @@ int ui_mod_keys_keydown(Client *client, const int key, const int input) {
         case GLFW_KEY_F4:
             if (input) return 0;
             app_reload("/"); // location.href = "/"
-            return 0;
-        case GLFW_KEY_F5:
-            app_reload(NULL); // location.reload()
             return 0;
         case GLFW_KEY_F6:
             printf("Creating editor window\n");
