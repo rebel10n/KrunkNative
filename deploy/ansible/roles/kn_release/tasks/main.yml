@@ -18,6 +18,12 @@
     perms: true
     use_ssh_args: true
     rsync_opts: "{{ ['--chmod=D755,F755', '--chown=root:root'] + (kn_release_bins | map('regex_replace', '^', '--include=') | list) + ['--exclude=*'] }}"
+  register: kn_release_bin_sync
+  # rsync opens its own ssh connection (not the ControlMaster): an edge's sshd drops new connections
+  # at random once internet scanners fill MaxStartups ("kex_exchange_identification ... reset"). Retry.
+  until: kn_release_bin_sync is succeeded
+  retries: 6
+  delay: 10
 
 - name: Service data files (maps, skins.json)
   register: kn_release_data_sync
@@ -31,6 +37,9 @@
     use_ssh_args: true
     rsync_opts: ["--chmod=D755,F644", "--chown=root:root", "--mkpath"]
   loop: "{{ kn_release_assets }}"
+  until: kn_release_data_sync is succeeded # MaxStartups drops: see the binaries task
+  retries: 6
+  delay: 10
 
 - name: Database migrations
   register: kn_release_mig_sync
@@ -45,6 +54,9 @@
     use_ssh_args: true
     rsync_opts: ["--chmod=D755,F644", "--chown=root:root", "--mkpath"]
   when: kn_release_migrations | default(false) | bool
+  until: kn_release_mig_sync is succeeded # MaxStartups drops: see the binaries task
+  retries: 6
+  delay: 10
 
 - name: Flip current -> releases/{{ kn_release_id }}
   ansible.builtin.file:
