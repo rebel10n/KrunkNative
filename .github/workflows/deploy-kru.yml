@@ -1,14 +1,15 @@
 name: Deploy kru
 
-# Manual (Actions > Deploy kru > Run workflow on main) while the v7.1.4 rollout waits for a go:
-# build the web client + services, run deploy/ansible/central.yml against
+# Push to main (or a manual run): build the web client + services, run deploy/ansible/central.yml against
 # the central node (assets., matchmaker., coordinator.krunk.io, play.krunk.io), then publish
 # the front end (krunk.io) to Cloudflare Pages (deploy/pages). `make pages` does the same by hand.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
 #          CLOUDFLARE_API_TOKEN (Pages: Edit + Zone Read/Cache Purge on krunk.io), CLOUDFLARE_ACCOUNT_ID.
-# Pushes don't deploy: kn-brain runs --migrate, so a deploy applies new DB migrations. To
-# deploy on every push again, add `push: branches: [main]` back.
+# kn-brain runs --migrate, so a deploy applies new DB migrations. A successful run starts
+# Deploy edges (workflow_run), so the game servers follow the services.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

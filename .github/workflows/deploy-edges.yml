@@ -1,8 +1,9 @@
 name: Deploy edges
 
-# Dispatch only: builds server_bin for the edges' Debian releases (deploy/ansible/build.sh:
-# bullseye = clara, bookworm = ashburn, trixie = angeles + chitown) and runs
-# deploy/ansible/edges.yml --tags release,gameserver, chitown first: the rest only after
+# After every successful Deploy kru on main (workflow_run), or by hand: builds server_bin for the
+# edges' Debian releases (deploy/ansible/build.sh: bullseye = clara, bookworm = ashburn,
+# trixie = angeles + chitown) and runs deploy/ansible/edges.yml (by default the edge infra:
+# firewall, user, release, gameserver; DNS needs a token with Zone DNS:Edit), chitown first: the rest only after
 # chitown's instance 1 answers the server-info query again. This RESTARTS the live game
 # servers of the selected edges (players are dropped). The edges also run abulxt: only the
 # KrunkNative release + kn-gameserver@ units are touched (no firewall, no DNS here).
@@ -13,8 +14,16 @@ name: Deploy edges
 #          coordinator secrets (KN_BRAIN_INTERNAL_SECRET / JOIN_SECRET) from kru's
 #          /etc/krunknative/secrets.env at deploy time (slurp, no_log) into the 0640 server-<n>.cfg.
 on:
+  workflow_run:
+    workflows: ["Deploy kru"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
+      tags:
+        description: "edges.yml tags (firewall,user,release,gameserver[,dns])"
+        type: string
+        default: firewall,user,release,gameserver
       hosts:
         description: "Edges: all, or a comma list of chitown,clara,angeles,ashburn (chitown always goes first)"
         type: string
@@ -34,7 +43,11 @@ permissions:
 jobs:
   plan:
     name: Plan
-    if: github.ref == 'refs/heads/main' # deploys only from main
+    # deploys only from main: a dispatch on main, or Deploy kru finishing successfully on main
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     outputs:
       first: ${{ steps.plan.outputs.first }}
@@ -47,16 +60,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Version metadata
         id: meta
-        run: tools/release/version-meta.sh "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+        run: tools/release/version-meta.sh "$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
 
       # edge name -> inventory host (deploy/ansible/inventory/hosts.yml)
       - name: Hosts
         id: plan
         env:
-          HOSTS: ${{ inputs.hosts }}
+          HOSTS: ${{ inputs.hosts || 'all' }}
         run: |
           set -euo pipefail
           declare -A inv=([chitown]=com.chitown [clara]=com.clara [angeles]=com.angeles [ashburn]=amph.ashburn)
@@ -85,6 +99,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Build
         env:
@@ -110,9 +125,13 @@ jobs:
       REST: ${{ needs.plan.outputs.rest }}
       EDGES: ${{ needs.plan.outputs.edges }}
       COMMIT12: ${{ needs.plan.outputs.commit12 }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      DRY_RUN: ${{ inputs.dry_run || false }}
+      TAGS: ${{ inputs.tags || 'firewall,user,release,gameserver' }}
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Install tools
         run: |
@@ -195,7 +214,7 @@ jobs:
         run: |
           set -euo pipefail
           check=(); [ "$DRY_RUN" = true ] && check=(--check --diff)
-          ansible-playbook edges.yml --tags release,gameserver --limit "$FIRST" "${check[@]}"
+          ansible-playbook edges.yml --tags "$TAGS" --limit "$FIRST" "${check[@]}"
 
       - name: chitown health
         if: env.FIRST != ''
@@ -207,7 +226,7 @@ jobs:
         run: |
           set -euo pipefail
           check=(); [ "$DRY_RUN" = true ] && check=(--check --diff)
-          ansible-playbook edges.yml --tags release,gameserver --limit "$REST" "${check[@]}"
+          ansible-playbook edges.yml --tags "$TAGS" --limit "$REST" "${check[@]}"
 
       - name: Health
         run: |
