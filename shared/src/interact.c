@@ -11,6 +11,7 @@
 #include <modes.h>
 #include "modes/mode_internal.h"
 #include "triggers_internal.h"
+#include <zombies.h> // map-logic WP-H: zombies machines (13-15), airdrop claims (10)
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -271,6 +272,9 @@ void game_interact_scan(const Game *game, const Player *player, GameInteractScan
             else if (o->bank) change_interact(&s, (int) i, GAME_INTERACT_BANK, 0, -1, 0);
             else change_interact(&s, (int) i, GAME_INTERACT_KEY, 0, -1, 0);
         }
+        // the zombies machines (map-logic WP-H, shared/src/zombies.c): mystery box 13, perk 14, krum 15
+        const int machine = zombies_interact_prompt(game, player, o, (int) i);
+        if (machine != GAME_INTERACT_NONE) change_interact(&s, (int) i, machine, 0, -1, 0);
         // collidesE(obj, collPad): onHoldMouse, "Hold [M1]" with priority 1
         if (o->active && trigger_has_event(o, TRIGGER_EVENT_ON_HOLD_MOUSE) && player_collides((Player *) player, o, game_constants.collision_padding)) {
             change_interact(&s, (int) i, GAME_INTERACT_TRIGGER, 0, 1, 0);
@@ -289,6 +293,11 @@ void game_interact_scan(const Game *game, const Player *player, GameInteractScan
             }
         }
     }
+
+    // map-logic WP-H: a landed airdrop in reach, changeInteract(drop, 10, null, 1); `index` is the
+    // drop's slot in game->zombies.drops, not a map object
+    const int drop = airdrop_interact_prompt(game, player);
+    if (drop >= 0) change_interact(&s, drop, GAME_INTERACT_CLAIM, 0, 1, 0);
 }
 
 int game_interact_prompt(const Game *game, const Player *player, int *object_index) {
@@ -554,7 +563,12 @@ void game_player_interact_v7(Game *game, Player *player, const int type, const i
             case GAME_INTERACT_KEY:
                 if (!trigger_wait_blocks(game)) use_interact_key(game, player, o, uid);
                 break;
-            default: // 9 prize wheels (KR store), 13-15 zombies machines: their packages
+            case GAME_INTERACT_MYSTERY_BOX:
+            case GAME_INTERACT_PERK:
+            case GAME_INTERACT_KRUM: // map-logic WP-H (shared/src/zombies.c)
+                zombies_player_interact(game, player, type, uid);
+                break;
+            default: // 9 prize wheels (KR store)
                 break;
         }
     }

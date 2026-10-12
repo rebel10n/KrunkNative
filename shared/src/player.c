@@ -2,6 +2,7 @@
 #include <world.h> // map-logic WP-B: tris, zones, score zones, terrain, resets
 #include <ai.h>
 #include <spawnables.h>
+#include <zombies.h> // map-logic WP-H: finiteAmmo, double points, machines, airdrops
 #include <game_config.h> // WP-E: config.classes, forceC
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
 #include <triggers_v7.h> // WP-C: onPlayerSpawn / Damage / Die / Kill map triggers
@@ -205,6 +206,11 @@ void player_spawn(Player *player) {
 
     // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker).
     mode_player_spawned(player->game, player);
+    // map-logic WP-H (Player.reset): full finiteAmmo reserves, no shared boxes
+    player->shared_boxes = 0;
+    player->sharing_is_caring = 0;
+    zombies_reserves_reset(player);
+    if (zombies_finite_ammo(player)) zombies_send_reserves(player);
 
     // A player that reached a check point respawns there (shared/src/world.c).
     if (game_is_authority(player->game)) game_spawn_at_checkpoint(player->game, player);
@@ -830,6 +836,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             continue;
         }
         world_player_colls_touch(player, (int) i); // WP-B: vA541 (saveColls)
+        if (object->prefab == PREFAB_PERK_MACHINE) zombies_perk_machine_touch(game, player, (int) i); // WP-H gotFreeP
 
         const int event = game_object_event(object);
 
@@ -1120,6 +1127,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
     }
 
     world_player_colls_end(player);  // WP-B: onExitObject for the objects left this tick
+    airdrop_player_collide(player, input, delta); // WP-H: the airdrop claim hold (player.js:1718)
     world_player_pvp_zones(player);  // WP-B: noPVP / forcePVP (COLLISION_TYPE_NONE volumes)
 }
 
@@ -1244,7 +1252,8 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
 
 void player_reload(Player *player) {
     if (player->reload_timer || (int) player->ammo[player->loadout_index] >= mode_ammo_limit(player->game, (int) player->weapon->ammo)) return;
-    if (player->weapon->no_reload) return; // v7.1.4 noReload (streak equipment)
+    if (player->weapon->no_reload && !zombies_finite_ammo(player)) return; // v7.1.4 noReload (streak equipment; finiteAmmo reloads it)
+    if (!zombies_reload_allowed(player)) return; // WP-H: finiteAmmo with an empty reserve
 
     // reload * (reSpd || 1) * attributes.reload (Sleight of Hand) * (perk 2 ? 0.5 : 1) * (kranked
     // bonuses.reload) * (mode.reloadMlt) (players.js reload)
@@ -1798,7 +1807,8 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
 
             if (!player->reload_timer) {
                 player->did_shoot = 0;
-                player->ammo[player->loadout_index] = (unsigned int) mode_ammo_limit(player->game, (int) player->weapon->ammo);
+                if (zombies_finite_ammo(player)) zombies_reload_finish(player); // WP-H: from the reserve
+                else player->ammo[player->loadout_index] = (unsigned int) mode_ammo_limit(player->game, (int) player->weapon->ammo);
             }
         }
 
@@ -2230,7 +2240,8 @@ int game_object_shootable(const Object *object) {
 
 static int combat_can_damage(const Player *dealer, const Player *victim) {
     if (!world_pvp_allows(dealer, victim)) return 0; // WP-B: v7 noPVP / forcePVP pairs (forcePVP: no team)
-    return !dealer->team || world_pvp_ignores_team(dealer, victim) || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team);
+    return !dealer->team || world_pvp_ignores_team(dealer, victim) || dealer->team != victim->team || (dealer->game->mode && dealer->game->mode->config.dmg_team) ||
+           dealer->game->config.friendly_fire; // v7 game.config.frFire
 }
 
 // lineInRect against every shootable object and (authority only) every other living player's
@@ -2272,7 +2283,7 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
     // game.AI.ais: x/z +-scale, y .. y + 2 * height (no hitBoxPad); v7: not the shooter's team AIs
     for (int i = 0; game->ai && i < game->ai->count; i++) {
         GameAI *ai = &game->ai->ais[i];
-        if (!ai->active || (shooter->team && shooter->team == ai->team && !(game->mode && game->mode->config.dmg_team))) continue;
+        if (!ai->active || (shooter->team && shooter->team == ai->team && !(game->mode && game->mode->config.dmg_team) && !game->config.friendly_fire)) continue;
         const float t = game_ai_line_hit(ai, origin, dir);
         if (t <= 0.0f || t > 1.0f) continue;
         hit_list_push(hits, (Hit) {NULL, NULL, t, ai});
@@ -2375,6 +2386,7 @@ void player_score(Player *player, int amount, const int is_kill) {
     if (!game_is_authority(game) || !amount) return;
 
     amount = mode_score_scale(game, player, amount, is_kill); // v7 killMlt / oneflag carrier multipliers (WP-D)
+    if (amount > 0 && zombies_double_points(game)) amount *= 2; // WP-H: doublePointsTimer
     player->score += mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
     const int cap = mode_score_cap(game); // v7 noScrLimit: no cap (WP-D)
     if (cap && player->score > cap) {
@@ -2437,8 +2449,7 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     if (dealer && damage > 0.0f && dealer->dmg_mlt > 0.0f) damage *= dealer->dmg_mlt; // v7.1.4 bots: player.dmgMlt
     if (dealer && dealer->smite && damage > 0.0f) damage = 10000.0f; // /smite: weapon/melee/explosion dmg = 10000
 
-    if (dealer && dealer->team == 1) damage *= game->config.team1_damage;
-    else if (dealer && dealer->team == 2) damage *= game->config.team2_damage;
+    if (dealer && dealer->team > 0 && dealer->team < GAME_CONFIG_TEAMS) damage *= game->config.team_damage[dealer->team]; // t<team>Dmg (sdm teams 3-5 too)
     damage = floorf(damage * 10.0f + 0.5f) / 10.0f; // v7.1.4 changeHealth: dmg.round(1)
 
     if (dealer && dealer != victim && damage > 0.0f) {
@@ -2532,7 +2543,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     // Assists: config.assistMin damage within config.assistTime.
     for (size_t i = 0; i < game->player_count; i++) {
         Player *other = game->players[i];
-        if (!other || other == killer || other == player || (game->mode && game->mode->config.no_assists)) continue;
+        if (!other || other == killer || other == player || (game->mode && game->mode->config.no_assists) || game->config.no_assists) continue;
 
         for (int k = 0; k < PLAYER_DAMAGE_SLOTS; k++) {
             const PlayerDamage *damage = &player->damage_received[k];
@@ -2640,6 +2651,7 @@ void player_melee(Player *player) {
         if (hits.items[i].ai && !mode_waiting(game)) game_ai_damage(game, hits.items[i].ai, player, player->smite ? 10000.0f : damage, 0); // G.ai: !waitTimers
         // G.obj: destructible health and onMelee / onDamage / onPunch triggers
         if (hits.items[i].object) game_object_hit(game, (Object *) hits.items[i].object, player, player->smite ? 10000.0f : damage, 0, GAME_HIT_MELEE);
+        if (hits.items[i].object) zombies_melee_object(game, player, hits.items[i].object); // WP-H: share a ready box
 
         if (victim && player_change_health(victim, player, mode_melee_damage(game, player, victim, damage), 0)) { // onMelee (Stalker)
             PlayerKillInfo info = {.weapon_id = weapon_index, .fists = !player->can_throw, .distance = hits.items[i].t};
@@ -2729,6 +2741,12 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             if (hits.items[i].t < terrain_t) hits.items[kept++] = hits.items[i];
         hits.count = kept;
         hit_list_push(&hits, (Hit) {NULL, NULL, terrain_t}); // the terrain: no object, player or AI
+    }
+    if (authority && ray >= 0) { // map-logic WP-H: canShoot spawnables (Skull EE) before the first wall
+        float stop_t = 2.0f;
+        for (size_t i = 0; i < hits.count && stop_t > 1.0f; i++)
+            if (!hits.items[i].player && !hits.items[i].ai) stop_t = hits.items[i].t;
+        zombies_shoot_spawnables(game, player, origin, dir, stop_t);
     }
 
     // v7.1.4: dmg x charge (vLN1167: chrgTime charge, fullChrgMlt on a full-charge shot) x

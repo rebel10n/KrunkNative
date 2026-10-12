@@ -7,6 +7,7 @@
 #include <ks_game.h> // KrunkScript hook points (onGameEnd, TIME.freeze)
 #include <spawnables.h>
 #include <game_config.h> // WP-E: v7 custom game config, map config, match votes
+#include <zombies.h> // map-logic WP-H: machines, power-ups, airdrops
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
@@ -339,6 +340,7 @@ void game_start_round(Game *game) {
     // finishInit: resetAll / resetPickups / triggerQueue / globalVals (WP-C), then the mode's clock
     // (gameTime), waitTimers, conditions, objectives, gameStart, then multiObjectTrigger("onGameStart")
     trigger_round_reset(game);
+    zombies_round_start(game); // WP-H finishInit: mystery boxes / krum machines, power-ups, airdrops
     if (game->mode) mode_round_start(game);
     world_round_start(game); // WP-B: resetZone, movedObjs, saveColls (shared/src/world.c)
     trigger_multi_event(game, TRIGGER_EVENT_ON_GAME_START, NULL);
@@ -503,6 +505,7 @@ void game_send_round_state(Game *game, const int uid) {
 
     game_send_object_state(game, uid); // init dest / gates / banks (shared/src/triggers.c)
     world_send_state(game, uid);        // init zone / mov (shared/src/world.c, WP-B)
+    zombies_send_state(game, uid);      // init pwup / mybx / krm, the wave, airdrops (WP-H)
 
     if (game->end_timer > 0.0f) {
         game_send_timer(game, uid, (int) game->end_timer, 1);
@@ -724,6 +727,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
 
     if (authority && !game->end_timer) game_ai_tick(game, world_delta * 1000.0f * game->config.delta_mlt); // AI.update(delta * deltaMlt) + AI.sync
     if (authority && !game->end_timer) game_tick_projectiles(game, delta);
+    zombies_tick(game, delta); // WP-H #8 power-ups, #14 airdrops, #21-22 machines (clients: timers, falls)
     game_tick_map_objects(game, delta * 1000.0f); // teleporter cooldowns; authority: onTimer triggers, destructible respawns
     if (authority && !game->end_timer) spawnables_update(game, delta); // #19 (WP-D)
     if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn

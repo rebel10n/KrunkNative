@@ -290,7 +290,7 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
                 }
                 // effectInd (Zapper): Zapped stacks, credited to the owner, unless a teammate
                 if (projectile->effect >= 0 && (!owner || !owner->team || owner->team != hit.player->team ||
-                                                (game->mode && game->mode->config.dmg_team))) {
+                                                (game->mode && game->mode->config.dmg_team) || game->config.friendly_fire)) {
                     player_give_effect(hit.player, projectile->effect, projectile->effect_count);
                     if (projectile->effect == EFFECT_ZAPPED && owner) hit.player->zapped_by = owner->uid;
                 }

@@ -9,6 +9,7 @@
 #include <ui_interact.h>
 #include <ui_logic.h>
 #include <html_ui.h>
+#include <zombies.h> // map-logic WP-H: machine / airdrop prompts
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -149,6 +150,35 @@ static void build_prompt(const Client *client, char *html, const size_t size) {
             }
             snprintf(html, size, "Press %s to %s%s", pending ? confirm : key,
                      pending ? "Confirm" : object && object->interact_msg ? object->interact_msg : "Interact", tag);
+            break;
+        }
+        case GAME_INTERACT_MYSTERY_BOX: { // map-logic WP-H (players.js updateInteract 13)
+            const ZombieMachine *m = zombies_machine(&client->game, scan.index);
+            const int price = zombies_mystery_box_price(&client->game, me, object);
+            if (m && m->state >= 2 && m->pending_weapon != ZOMBIES_NONE) snprintf(html, size, "Press %s for weapon", key);
+            else snprintf(html, size, "Press %s for a Random Weapon <span style='color:%s'>[Cost %d]</span>", key,
+                          me->score >= price ? INTERACT_ENOUGH_COLOR : INTERACT_NOT_ENOUGH_COLOR, price);
+            break;
+        }
+        case GAME_INTERACT_PERK: { // 14
+            const int price = object->score_points ? (int) object->score_points : 1;
+            if (me->perk_count >= GAME_MAX_ZOMBIE_PERKS) snprintf(html, size, "<span style='color:%s'>Perk limit reached</span>", INTERACT_NOT_ENOUGH_COLOR);
+            else snprintf(html, size, "Press %s to buy %s <span style='color:%s'>[Cost %d]</span>", key, g_zombie_perk_names[object->zombie_perk % ZOMBIES_PERK_COUNT],
+                          me->score >= price ? INTERACT_ENOUGH_COLOR : INTERACT_NOT_ENOUGH_COLOR, price);
+            break;
+        }
+        case GAME_INTERACT_KRUM: { // 15
+            const ZombieMachine *m = zombies_machine(&client->game, scan.index);
+            const int price = object->score_points ? (int) object->score_points : 1;
+            if (m && m->state >= 2 && m->pending_weapon != ZOMBIES_NONE) snprintf(html, size, "Press %s to take your upgraded weapon", key);
+            else snprintf(html, size, "Press %s to Krum It <span style='color:%s'>[Cost %d]</span>", key,
+                          me->score >= price ? INTERACT_ENOUGH_COLOR : INTERACT_NOT_ENOUGH_COLOR, price);
+            break;
+        }
+        case GAME_INTERACT_CLAIM: { // 10: "Hold [key] to Claim <name>" in the rarity colour (index = drop slot)
+            if (scan.index < 0 || scan.index >= AIRDROP_MAX) break;
+            const AirDropPackage *package = &g_airdrop_packages[client->game.zombies.drops[scan.index].index];
+            snprintf(html, size, "Hold %s to Claim <span style='color:%s'>%s</span>", key, g_airdrop_rarity_colors[package->rarity], package->name);
             break;
         }
         default:

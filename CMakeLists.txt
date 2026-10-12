@@ -406,6 +406,13 @@ else ()
 
     # weapons_v7_test / combat_test (WP-B): v7.1.4 class / weapon / effect / streak tables against
     # shared/tests/data/v7 (tools/kref/v7-dump.js), and the charge / hitbox / streak / effect maths
+    # zombies_test (map-logic WP-H): waves, power-ups, machines, perks, finiteAmmo, airdrops
+    add_executable(zombies_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/zombies_test.c)
+    target_link_libraries(zombies_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(zombies_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     foreach (wpb_test weapons_v7_test combat_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)

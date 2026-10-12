@@ -14,6 +14,7 @@
 // - The built-in kinds' own trigger actions (Jack O' Lantern 62, Mirror Image 65) are backend KR
 //   actions, no-ops without kn_brain (Decision 4): the kinds carry no trigger.
 #include <ai.h>
+#include <zombies.h> // map-logic WP-H: insta-kill
 #include <map_ai.h>
 #include <map_catalog.h>
 #include <modes.h>
@@ -1059,6 +1060,7 @@ static void ai_aggro(Game *game, GameAI *ai, const int is_player, Player *player
 // AI.changeHealth(amount, source, forceTarget, set) for a player (or no) source.
 int game_ai_change_health(Game *game, GameAI *ai, float amount, Player *source, const int force_target, const int set) {
     const int was_active = ai->active;
+    if (source && zombies_insta_kill(game) && ai->health) amount = -(ai->health * 2.0f); // WP-H: instaKillTimer (AI.changeHealth)
     if (ai->health) {
         const float before = ai->health;
         if (set) ai->health = amount;

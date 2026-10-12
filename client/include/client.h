@@ -721,6 +721,8 @@ int client_handle_game_packet(Client*, const NetPacket*); // 1 = handled (KILL/H
 int client_handle_game_event(Client*, int type, const void *payload, uint16_t length); // same, typed payload
 // WP-B v7 combat packets (client/src/net/combat_events.c): effects, streaks, Nuke, Juggernaut, perks.
 int combat_events_handle(Client*, int type, const void *payload, uint16_t length); // 1 = handled
+// map-logic WP-H zombies / airdrop packets (client/src/net/zombie_events.c)
+int zombie_events_handle(Client*, int type, const void *payload, uint16_t length); // 1 = handled
 void combat_send_streak_slots(Client*);      // the streakIndex1..3 loadout, right before every ENT
 void combat_call_in_streak(Client*, int slot); // window.callInStreak(slot): the streak keys
 // The sight a player's weapons take (attach.js index): the local player's saved attachIndex,

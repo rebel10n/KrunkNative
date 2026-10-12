@@ -109,11 +109,14 @@ void net_broadcast_chat(const char *from, const char *msg) {
 
 // Game hooks (GameHooks.send): player uid == ClientConnection.id.
 // WP-D: the v7 mode packets (NET_PACKET_BLOCK_MODES, 140-149) only go to peers that announced
-// NET_PROTOCOL_MINOR_V7 in their HELLO. WP-E: the lobby packets (NET_PACKET_BLOCK_LOBBY, 180-189:
+// NET_PROTOCOL_MINOR_V7 in their HELLO; so do map-logic WP-H's zombies / airdrop packets. WP-E: the lobby packets (NET_PACKET_BLOCK_LOBBY, 180-189:
 // match votes, network data, game config) too.
 static int net_peer_takes(const ClientConnection *client, const int type) {
     if (!game_ai_packet_for_peer(type, client->peer_minor)) return 0; // v3.1.1 vs v7 AI packets (shared/src/ai.c)
     if (type >= NET_PACKET_BLOCK_LOBBY && type < NET_PACKET_BLOCK_LOBBY + 10) return client->peer_minor >= NET_PROTOCOL_MINOR_V7;
+    // map-logic WP-H: zombies (150-159) and airdrop (177-179) packets, v7 peers only
+    if ((type >= NET_PACKET_BLOCK_ZOMBIES && type < NET_PACKET_BLOCK_ZOMBIES + 10) ||
+        (type >= NET_PACKET_BLOCK_AIRDROP && type < NET_PACKET_BLOCK_LOBBY)) return ks_server_peer_v7(client);
     return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
 }
 

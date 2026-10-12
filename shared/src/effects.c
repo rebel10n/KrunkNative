@@ -8,6 +8,8 @@
 #include <shared.h>
 #include "modes/mode_internal.h"
 #include <triggers_v7.h> // WP-C: onNukeStart
+#include <zombies.h> // map-logic WP-H: airdrops
+#include <game_config.h> // WP-E: game_config_is_custom
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -314,7 +316,7 @@ const Weapon *player_slot_weapon(const Player *player, const int slot) {
     return weapon_at(player->game, id);
 }
 
-static void send_upgrades(Player *player) {
+void player_send_upgrades(Player *player) {
     NetUpgradesPacket packet;
     memset(&packet, 0, sizeof(packet));
     packet.uid = player->uid;
@@ -331,7 +333,7 @@ void player_upgrade_weapon(Player *player, const int slot) {
     const Weapon *weapon = player_slot_weapon(player, slot);
     if (weapon) player->ammo[slot] = weapon->ammo;
     if (slot == player->loadout_index) player->weapon = weapon;
-    if (game_is_authority(player->game)) send_upgrades(player);
+    if (game_is_authority(player->game)) player_send_upgrades(player);
 }
 
 void player_set_upgrades(Player *player, const unsigned char slots) {
@@ -374,7 +376,7 @@ static void apply_loadout(Player *player, const int *ids, const int count, int i
     else player->weapon = player_slot_weapon(player, index);
     if (game_is_authority(player->game)) {
         mode_send_loadout(player->game, player);
-        if (upgrades || old_upgrades) send_upgrades(player);
+        if (upgrades || old_upgrades) player_send_upgrades(player);
     }
 }
 
@@ -477,9 +479,10 @@ static void streak_send(Player *player, const int streak) {
 }
 
 // players.addStreak: reqAccount streaks need an account (the offline sandbox counts as one,
-// decisions.md), noCustoms ones are off in custom games (KN has no custom-game flag yet).
+// decisions.md), noCustoms ones (the Airdrop) are off in custom games and the sandbox.
 static void streak_add(Player *player, const int streak) {
     if (g_streaks[streak].req_account && !player->has_account) return;
+    if (g_streaks[streak].no_customs && game_config_is_custom(player->game)) return; // isCustom (WP-E, WP-H)
     if (player->streaks_owned[streak] < 255) player->streaks_owned[streak]++;
     streak_send(player, streak);
 }
@@ -512,12 +515,13 @@ int game_start_nuke(Game *game, Player *player) {
     return 1;
 }
 
-// streaks.js activate(); Airdrop, Refill and Bombardment are not ported (Airdrop: map-logic WP-H,
-// the dev-only two never activate for non-dev accounts).
+// streaks.js activate(); Refill and Bombardment are not ported (the dev-only two never activate
+// for non-dev accounts). The Airdrop is map-logic WP-H's (shared/src/airdrop.c).
 static int streak_activate(Player *player, const int streak) {
     Game *game = player->game;
     switch (streak) {
         case STREAK_NUKE: return game_start_nuke(game, player);
+        case STREAK_AIRDROP: return airdrop_streak_activate(game, player);
         case STREAK_SLIMER:
             if (!player->active || player_has_equipment(player)) return 0;
             player_give_weapon(player, WEAPON_ID_SLIMER);

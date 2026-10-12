@@ -738,6 +738,16 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_UPGRADES:
         case NET_PACKET_WEAPON_STREAK:
             return combat_events_handle(client, type, payload, length); // WP-B (client/src/net/combat_events.c)
+        case NET_PACKET_BLOCK_ZOMBIES + 0: // map-logic WP-H (client/src/net/zombie_events.c): mybx / krm, smybx,
+        case NET_PACKET_BLOCK_ZOMBIES + 1: // pwup, upz, uamo reserves, sic
+        case NET_PACKET_BLOCK_ZOMBIES + 2:
+        case NET_PACKET_BLOCK_ZOMBIES + 3:
+        case NET_PACKET_BLOCK_ZOMBIES + 4:
+        case NET_PACKET_BLOCK_ZOMBIES + 5:
+        case NET_PACKET_BLOCK_AIRDROP + 0: // ad, rad, krp
+        case NET_PACKET_BLOCK_AIRDROP + 1:
+        case NET_PACKET_BLOCK_AIRDROP + 2:
+            return zombie_events_handle(client, type, payload, length);
         case NET_PACKET_GAME_CONFIG:
         case NET_PACKET_NETWORK_DATA:
         case NET_PACKET_MATCH_VOTE_STATE:

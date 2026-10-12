@@ -855,6 +855,7 @@ struct Game_t;
 #define PLAYER_SCORE_OBJS_MAX 256      // map-logic WP-B: score zones one player can have taken (scoreObjs)
 #define PLAYER_COLLIDING_OBJS_MAX 64   // map-logic WP-B: enter / exit trigger objects a player is inside (collidingObjs)
 #define PLAYER_PICKED_MAX 64           // WP-C: lastPicked slots (weapon ids 0..63)
+#define PLAYER_RESERVE_MAX 8           // map-logic WP-H: finiteAmmo reserves (one per loadout weapon)
 
 typedef struct {
     int uid;      // dealer uid, -1 = free slot
@@ -1230,6 +1231,16 @@ typedef struct Player_t {
     int pending_spin;             // pendingSpin: PRIZE_WHEEL uid + 1 awaiting "cnfm" 2, 0 none
     int last_picked[PLAYER_PICKED_MAX]; // lastPicked[weapon id]: uid + 1 of the pickup it came from, 0 none
     // ---- end WP-C ----
+    // ---- map-logic WP-H: zombies economy (shared/src/zombies.c, shared/include/zombies.h)
+    // finiteAmmo reserveAmmos. v7 keeps one per loadout slot and carries it along when the
+    // loadout changes; KN keys them by weapon id, which is the same thing for a loadout that
+    // never holds a weapon twice (player_reserve_ammo).
+    int reserve_weapons[PLAYER_RESERVE_MAX];
+    int reserve_ammo[PLAYER_RESERVE_MAX];
+    int reserve_count;
+    int shared_boxes;                  // sharedBoxes: mystery box weapons shared with a melee hit
+    unsigned char sharing_is_caring:1; // sharingIsCaring (5 shared): half price boxes, no teddy
+    // ---- end WP-H
 } Player;
 
 typedef struct {
@@ -1295,6 +1306,7 @@ int player_has_equipment(const Player*);            // hasEquipment: an equipmen
 const Weapon *player_slot_weapon(const Player*, int slot); // players.getWeapon: the upgraded entry for an upgraded slot
 void player_upgrade_weapon(Player*, int slot);      // krumMachine: upgrade a slot, full upgraded ammo ("upgr", authority)
 void player_set_upgrades(Player*, unsigned char slots); // client mirror of NET_PACKET_UPGRADES
+void player_send_upgrades(Player*);                 // NET_PACKET_UPGRADES of the current slots (map-logic WP-H)
 void player_give_weapon(Player*, int weapon_id);    // players.giveWeapon (streak equipment), authority
 void player_remove_weapon(Player*, int weapon_id);  // players.removeWeapon
 void player_set_juggernaut(Player*, int on);        // game.setJuggernaut
@@ -1563,6 +1575,66 @@ typedef struct {
 } GameWorld;
 // ---- end WP-B
 
+// ---- map-logic WP-H: zombies machines, power-ups, waves and airdrops (shared/include/zombies.h)
+#define ZOMBIES_MAX_MACHINES 16  // mystery boxes / krum machines / perk machines per map
+#define ZOMBIES_MAX_PENDING 64   // zWaveData.tmpCnts (wave caps 30 + 10 + 5 + 4)
+#define ZOMBIES_POWERUPS 3       // instaKill, fireSale, doublePoints ("pwup" index)
+#define AIRDROP_MAX 16
+#define ZOMBIES_NONE (-2)        // pendingWeapon / purchasedBy undefined
+
+typedef struct {
+    int uid;                     // map object index
+    int state;                   // 0 idle, 1 rolling (mystery box) / upgrading (krum), 2 ready to collect
+    float timer;                 // ms left of the state
+    int pending_weapon;          // pendingWeapon: weapon id, -1 the teddy (mystery box), ZOMBIES_NONE
+    int purchased_by;            // purchasedBy: player uid, -1 anyone (a shared box), ZOMBIES_NONE
+} ZombieMachine;
+
+typedef struct {
+    int sid;                     // slot + 1
+    int owner_uid;               // the caller, -1 none
+    vec3 position;               // x, z; y falls from the call height + 500
+    float fall;                  // fallDist left
+    int index;                   // airDropPackages index
+    int imitate;                 // a trapped package's look for everyone but the owner, -1 none
+    float claim_time;            // ms of interact hold
+    unsigned char active:1;
+    unsigned char can_claim:1;   // landed
+} AirDrop;
+
+typedef struct {
+    float powerups[ZOMBIES_POWERUPS]; // instaKillTimer / fireSaleTimer / doublePointsTimer (ms)
+    ZombieMachine boxes[ZOMBIES_MAX_MACHINES]; // map.manager.mysteryBoxes (Object.active is the box's active)
+    int box_count;
+    ZombieMachine krums[ZOMBIES_MAX_MACHINES]; // map.manager.krumMachines
+    int krum_count;
+    int perk_machines[ZOMBIES_MAX_MACHINES];   // PERK_MACHINE object indexes
+    unsigned char perk_free_taken[ZOMBIES_MAX_MACHINES]; // gotFreeP: the crouch +50 was taken
+    int perk_machine_count;
+    // zom.js (authority)
+    int wave;                    // zWave (clients: the last "upz")
+    float spawn_timer;           // zombieSpawnTim (ms)
+    unsigned char skip_check;    // skipZCheck
+    int conc;                    // zWaveData.concZomb
+    int counts[4];               // zWaveData.zombCnts: Walker, Brute, Flesh Colossal, Runner
+    unsigned char pending[ZOMBIES_MAX_PENDING]; // tmpCnts: template per zombie left to spawn
+    int pending_count;
+    int left;                    // zLeft
+    float hp_mlt, dmg_mlt, spd_mlt;
+    int frog_round, drone_round; // zFrogSpawnRound / zDroneSpawnRound
+    unsigned char pap_active, pap_completed; // eePAPActive / eePAPCompleted (the Zombie Portal easter egg)
+    int pap_order[3];            // eePAPOrder: template indexes (Walker, Brute, Runner shuffled)
+    int pap_progress;
+    float dance_timer;           // eeDanceTimer (ms)
+    unsigned char dance_completed;
+    int dance_skulls;
+    char special[24];            // the last "upz" special wave name (clients)
+    // airDrop.js
+    AirDrop drops[AIRDROP_MAX];
+    int drop_count;              // slots used
+} GameZombies;
+// ---- end WP-H
+
 typedef struct Game_t {
     GameConfig config;
     GameMode *mode;
@@ -1633,6 +1705,7 @@ typedef struct Game_t {
     // ---- WP-C: the v7.1.4 trigger runtime (shared/src/triggers_v7.c): globalVals, triggerQueue,
     // trigger chains, per-object custVals, playerSounds, pickups. Allocated on first use, NULL none.
     struct TriggerRuntime_t *trigger_rt;
+    GameZombies zombies; // map-logic WP-H (shared/include/zombies.h): machines, power-ups, waves, airdrops
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);

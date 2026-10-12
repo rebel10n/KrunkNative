@@ -16,6 +16,7 @@
 #include <spawnables.h>
 #include <modes.h>
 #include <ai.h>
+#include <zombies.h> // map-logic WP-H: reserves, perks
 #include <math.h>
 #include <string.h>
 #include "modes/mode_internal.h"
@@ -120,6 +121,7 @@ int spawnable_drop(Game *game, const int type, Player *owner, const int data, co
 }
 
 static void spawnable_destroy(Game *game, const int slot) {
+    if (game->mode->spawnables[slot].type == SPAWNABLE_ZOMBIE_PORTAL) mode_zombies_portal_closed(game); // onDestroy (WP-H)
     game->mode->spawnables[slot].active = 0;
     mode_send_spawnable(game, slot); // "dsp sid"
 }
@@ -132,7 +134,7 @@ static int spawnable_stop(const Game *game, const Player *player, const ModeSpaw
         case SPAWNABLE_AMMO_PACK:
         case SPAWNABLE_WEAPON_BOX:
         case SPAWNABLE_PERK_BOTTLE:
-            return player->is_bot;
+            return player->is_bot || player->perk_count >= ZOMBIES_PERK_COUNT; // WP-H: perks.length < zombiePerks.length
         case SPAWNABLE_GOLDEN_EGG:
             return 1; // Egg Basket melee skin + account egg list: not in KN
         case SPAWNABLE_KR_TAG:
@@ -142,7 +144,13 @@ static int spawnable_stop(const Game *game, const Player *player, const ModeSpaw
             return player->is_bot || player->can_throw;
         case SPAWNABLE_MINIGUN:
         case SPAWNABLE_GRENADE_LAUNCHER:
-            return player->is_bot;
+            return player->is_bot || player_has_equipment(player); // WP-H: hasEquipment()
+        case SPAWNABLE_FREE_UPGRADE: { // WP-H: !canUpgrade(): the held slot is base and upgradable
+            const int s = player->loadout_index;
+            const Weapon *w = player->loadout && s >= 0 && s < player->loadout_size && player->loadout[s] >= 0 &&
+                              (size_t) player->loadout[s] < game->weapon_count ? game->weapons[player->loadout[s]] : NULL;
+            return !w || !w->can_upgrade || (s < 8 && (player->upgraded_slots >> s & 1));
+        }
         default:
             return 0;
     }
@@ -230,6 +238,8 @@ static void spawnable_pickup(Game *game, Player *player, const int slot) {
                 }
                 if (!other->can_throw) spawnable_refill_knife(game, other);
                 mode_send_loadout(game, other);
+                zombies_reserves_reset(other); // WP-H: resetAmmo(true, true) refills the reserves too
+                if (zombies_finite_ammo(other)) zombies_send_reserves(other);
             }
             break;
         case SPAWNABLE_NUKE: // every non-ally AI dies, every player +400
@@ -242,6 +252,10 @@ static void spawnable_pickup(Game *game, Player *player, const int slot) {
             }
             for (size_t i = 0; i < game->player_count; i++) {
                 if (game->players[i]) player_score(game->players[i], 400, 0);
+            }
+            {
+                const NetNukePacket nuke = {.state = 1}; // broadcast("n", 1): the detonation flash (WP-H)
+                game_send(game, NET_TARGET_ALL, NET_PACKET_NUKE, &nuke, sizeof(nuke));
             }
             break;
         case SPAWNABLE_JOE_TAG:
