@@ -42,7 +42,7 @@ while the shipped kn_brain has no SQLite store), `kn_gameserver_enabled` (edges 
 true), `kn_gameserver_ports_open` (escape hatch, true everywhere: edge_firewall opens the ports),
 `edge_firewall_own_base` (see below).
 
-CI: `.github/workflows/deploy-kru.yml` (manual dispatch on main) builds and runs `central.yml` with
+CI: `.github/workflows/deploy-kru.yml` (push to slop) builds and runs `central.yml` with
 secrets `KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS`. That includes `kn_bridge` (the bundle is
 built on the runner with its Node; the Cloudflare DNS/tunnel step is skipped without CF secrets).
 

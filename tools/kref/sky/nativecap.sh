@@ -13,7 +13,7 @@ for m in "$@"; do
 for p in json.load(open('${POSES:-/home/user/src/KrunkNative/doc/ref/krunker-v3.1.1/sky/poses.json}'))['$m']:
     x,y,z=p['pos']; print(p['name'], f\"{x},{y},{z},{p['pitch']},{p['yaw']}\")" | while read name cam; do
     (cd $ROOT && KRUNKNATIVE_CAMERA="$cam" KRUNKNATIVE_HIDE_UI=1 KRUNKNATIVE_FOV=90 KRUNKNATIVE_CAPTURE_FRAMES=20 KRUNKNATIVE_SCREENSHOT=$OUT/$m-$name.png \
-      timeout 120 "${RUN[@]}" $BIN --offline assets/maps/$m.json > $OUT/$m-$name.log 2>&1) || echo "FAIL $m $name"
+      timeout 120 "${RUN[@]}" $BIN --offline assets/maps/311_$m.json > $OUT/$m-$name.log 2>&1) || echo "FAIL $m $name"
     [ -f $OUT/$m-$name.png ] || echo "MISSING $m-$name"
   done
 done

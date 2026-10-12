@@ -32,7 +32,7 @@ editor.md, player-viewer.md (this directory).
 | 190-194 | player-viewer WP-B: 190 PERKS (upk; map-logic's zombies block must not add a second one), 191 UPGRADES, 192 WEAPON_STREAK |
 | 195-199 | player-viewer WP-C: protocol/input |
 | 200-239 | KrunkScript |
-| 240-249 | player-viewer WP-E (`NET_PACKET_BLOCK_SOCIAL`; `NET_PACKET_BLOCK_END` is 250): 240 LEADER_STATS; 241 DEATH_INFO, 242 PC_STAT; 243 END_MEDALS (part 2c: endData.mdls); 244 SKIN_FOUND (season system: v7 "skin" / "skinF"); 245 CHAT_V7, 246 VOICE_V7, 247 SPRAY_V7, 248 TAUNT, 249 SOCIAL_V7 (shared/include/social_v7.h) |
+| 240-249 | player-viewer WP-E (`NET_PACKET_BLOCK_SOCIAL`; `NET_PACKET_BLOCK_END` is 250): 240 LEADER_STATS; 241 DEATH_INFO, 242 PC_STAT; 243 END_MEDALS (part 2c: endData.mdls); 244 reserved; 245 CHAT_V7, 246 VOICE_V7, 247 SPRAY_V7, 248 TAUNT, 249 SOCIAL_V7 (shared/include/social_v7.h) |
 
 New packets are gated on `NET_PROTOCOL_MINOR` (3 = `NET_PROTOCOL_MINOR_V7`, set by map-A; don't bump it again without asking the coordinator). The client negotiates per server, from the INIT version.
 

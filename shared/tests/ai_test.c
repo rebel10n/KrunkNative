@@ -708,7 +708,7 @@ static void test_cost(void) {
 
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    const int soul = map_catalog_index_of_key("v3_soul_sanctum"); // the v3.1.1 Soul Sanctum
+    const int soul = map_catalog_index_of_key("311_soul_sanctum"); // the v3.1.1 Soul Sanctum
     const int soul7 = map_catalog_index_of_key("sanctum");        // the v7.1.4 official one
     const cJSON *soul_json = soul >= 0 ? map_catalog_json((size_t) soul) : NULL;
     const cJSON *soul7_json = soul7 >= 0 ? map_catalog_json((size_t) soul7) : NULL;

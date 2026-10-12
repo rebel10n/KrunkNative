@@ -172,7 +172,7 @@ def client(minor):
 
 
 def main():
-    with open("assets/maps/sandstorm.json") as f:
+    with open("assets/maps/311_sandstorm.json") as f:
         m = json.load(f)
     m["scripts"] = {"server": base64.b64encode(SERVER_SCRIPT.encode()).decode(), "client": "public action start() { }"}
     map_path = os.path.join(WORK, "ks_map.json")

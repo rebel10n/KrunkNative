@@ -491,7 +491,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (startup_map_path && load_json_file(startup_map_path, &startup_map)) {
+    // map_catalog_load_file: a renamed map's old path (assets/maps/v7/kanji.json) loads its new file
+    if (startup_map_path && map_catalog_load_file(startup_map_path, &startup_map)) {
         fprintf(stderr, "Failed to load map JSON: %s\n", startup_map_path);
         return -1;
     }

@@ -776,7 +776,9 @@ void local_game_host_config(Client*, const cJSON *request, int host_type);
 #define LOCAL_GAME_SANDBOX_MAP "Test"
 // A map named on the command line, in ?map= or by a console command -> its catalogue index
 // (-1 none): an exact catalogue key, a path under assets/maps ("custom/ESP_Parkour",
-// "maps/v7/kanji.json"), else map_catalog_resolve's names ("Kanji", "soul sanctum").
+// "maps/kanji.json", "311_kanji"), an old path of a renamed map that is no file any more
+// ("v7/kanji", "custom/old_burg": map_catalog_index_of_file), else map_catalog_resolve's names
+// and old keys ("Kanji", "soul sanctum", "v3_burg" = 311_burg).
 int local_game_map_lookup(const char *name);
 // The catalogue map `catalog_index` in the client's map list (map_catalog_slot): the offline
 // game reloads on it when it runs, else the next local_game_start starts on it

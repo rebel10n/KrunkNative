@@ -228,6 +228,12 @@ void local_game_host(Client *client, const int map_index, const int mode_id) {
     offline_sync(client);
 }
 
+static int readable_file(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (file) fclose(file);
+    return file != NULL;
+}
+
 int local_game_map_lookup(const char *name) {
     if (!name || !*name) return -1;
     const int key = map_catalog_index_of_key(name);
@@ -244,8 +250,16 @@ int local_game_map_lookup(const char *name) {
             if (entry && entry->path && !strcmp(entry->path, path)) return (int) i;
         }
     }
-    if (strchr(name, '/')) return -1;
-    const int found = map_catalog_resolve(name, NULL, 0, NULL); // -2 ambiguous
+    if (strchr(name, '/')) {
+        // a file that exists (as given or under assets/maps) is that file, not a catalogue map
+        char *under_assets = length < sizeof(path) - 12 ? concat(assets_path(), path) : NULL;
+        const int exists = readable_file(name) || (under_assets && ensure_asset_file(under_assets) && readable_file(under_assets));
+        free(under_assets);
+        // else an old path of a renamed map: "v7/kanji", "custom/old_burg", "assets/maps/burg.json"
+        // (v7's Burg; v3.1.1's is 311_burg now, map_catalog.h)
+        return exists ? -1 : map_catalog_index_of_file(name);
+    }
+    const int found = map_catalog_resolve(name, NULL, 0, NULL); // -2 ambiguous; "v3_burg" / "old_burg" too
     return found >= 0 ? found : -1;
 }
 

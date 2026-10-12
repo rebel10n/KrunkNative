@@ -245,7 +245,7 @@ static void run_map(Game *game, const char *name, const cJSON *json) {
 
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    static const char *names[] = {"burg", "kanji", "sandstorm"};
+    static const char *names[] = {"311_burg", "311_kanji", "311_sandstorm"}; // the v3.1.1 maps
     static Game game;
     for (size_t m = 0; m < sizeof(names) / sizeof(names[0]); m++) {
         char path[256];

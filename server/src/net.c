@@ -1150,7 +1150,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     const int first_packet = !client->first_packet_seen;
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     switch (packet->type) {
-        case NET_PACKET_HELLO:; // ";": a declaration may not follow a label before C23 (GCC 10 on bullseye)
+        case NET_PACKET_HELLO:
             NetHelloPacket hello;
             if (net_packet_read_hello(&hello, packet)) { // the peer's protocol minor.patch (v7 AI / WP-C gates)
                 client->peer_minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;

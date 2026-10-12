@@ -310,7 +310,7 @@ static void walk(Sim *sim, const double seconds, const int dir, const float fps)
 // changePosition(recon) push and io_tp teleport on the server mid-walk.
 static void case_server_moves(const float latency, const float jitter) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
     walk(sim, 1.5, 2, 60.0f);
 
     // push: a trigger moves the player (stopMomentum) while inputs are in flight
@@ -348,7 +348,7 @@ static void case_server_moves(const float latency, const float jitter) {
 // Shotgun physPow knockback (players.js shoot velObj): the replay has to re-apply it.
 static float knockback_run(const float latency, const float jitter, const int control) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 4, latency, jitter)) { CHECK(0, "map"); free(sim); return -1.0f; } // Vince: Shotgun
+    if (!sim_init(sim, "311_sandstorm.json", 4, latency, jitter)) { CHECK(0, "map"); free(sim); return -1.0f; } // Vince: Shotgun
     sim->control_no_vel_obj = control;
     CHECK(sim->c->weapon && sim->c->weapon->physical_power > 0.0f, "class 4 should hold a physPow weapon");
     walk(sim, 0.5, -1, 60.0f);
@@ -388,7 +388,7 @@ static void case_knockback(const float latency, const float jitter) {
 // control: snapping without the replay (what KrunkNative did before, minus ignoring "l") rubber-bands
 static void case_control_no_replay(const float latency, const float jitter) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
     sim->control_no_replay = 1;
     const double start = sim->now;
     while (sim->now - start < 6.0 && sim->c->active) {
@@ -405,7 +405,7 @@ static void case_control_no_replay(const float latency, const float jitter) {
 // A client that flips noclip on its own (no permission) is pulled back by the next "l".
 static void case_noclip(const float latency, const float jitter) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
     walk(sim, 1.0, -1, 60.0f);
 
     // server-authorized noclip, flying up and forward
@@ -445,7 +445,7 @@ static void case_noclip(const float latency, const float jitter) {
 
     // client-only noclip (blocked cheat): the server keeps walking it, "l" pulls it back
     sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, latency, jitter)) { CHECK(0, "map"); free(sim); return; }
     walk(sim, 1.5, -1, 60.0f);
     sim->c->noclip = 1;
     sim->max_correction = 0.0f;
@@ -474,7 +474,7 @@ static void case_noclip(const float latency, const float jitter) {
 // gap #8: a respawn restarts the client counter at 0; the server accepts the new life at once.
 static void case_respawn(void) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, 50.0f, 10.0f)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, 50.0f, 10.0f)) { CHECK(0, "map"); free(sim); return; }
     walk(sim, 3.0, 2, 60.0f);
     CHECK(sim->s->input_seq > 100, "first life input_seq %d", sim->s->input_seq);
 
@@ -585,7 +585,7 @@ static void case_rotation_math(void) {
 // STATE packets (client_apply_state + player_update) must turn smoothly the short way.
 static void case_turn_right(void) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
 
     Player *watched = player_init(&sim->client); // the turning player as another client sees it
     watched->uid = 2;
@@ -668,7 +668,7 @@ static void case_turn_right(void) {
 // player_accept_input sees them) must never reach the physics, the STATE or the "l".
 static void case_bad_rotation(void) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, 0.0f, 0.0f)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, 0.0f, 0.0f)) { CHECK(0, "map"); free(sim); return; }
     const float values[] = {NAN, INFINITY, -INFINITY, 3.4028235e38f, -3.4028235e38f, 1e30f, -1e30f, 2.2e9f, -2.2e9f,
                             1e-45f, -0.0f, 123456.0f, 6.2831855f, -6.2831855f};
     const size_t n = sizeof(values) / sizeof(values[0]);
@@ -708,7 +708,7 @@ static void case_bad_rotation(void) {
 // previous one, and prediction + reconciliation stay exact.
 static void case_net_rate(const float fps, const int rate, const unsigned int want_per_second) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
     sim->net_rate = rate;
     sim->fixed_frames = 1;
     const double start = sim->now;
@@ -749,7 +749,7 @@ static void case_net_rate_math(void) {
 // with autoJump a jump on every landing while held; both predicted exactly.
 static void case_held_jump(const int auto_jump) {
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, 80.0f, 20.0f)) { CHECK(0, "map"); free(sim); return; }
     sim->server.config.auto_jump = sim->client.config.auto_jump = (unsigned char) auto_jump;
     sim->net_rate = 144;
     walk(sim, 1.0, -1, 120.0f);
@@ -816,7 +816,7 @@ static void case_v7_recon_packets(void) {
 
     // a client that predicted wall jumps the server did not see is reset by the next "l"
     Sim *sim = calloc(1, sizeof(Sim));
-    if (!sim_init(sim, "sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
+    if (!sim_init(sim, "311_sandstorm.json", 0, 50.0f, 15.0f)) { CHECK(0, "map"); free(sim); return; }
     walk(sim, 1.0, 2, 60.0f);
     sim->c->wall_jump_count = 99;
     sim->c->can_slide_timer = 0.09f;
@@ -834,9 +834,9 @@ int main(void) {
     const float latencies[] = {0.0f, 50.0f, 150.0f};
     for (size_t i = 0; i < sizeof(latencies) / sizeof(latencies[0]); i++) {
         const float jitter = latencies[i] > 0.0f ? latencies[i] * 0.3f : 0.0f;
-        case_movement("sandstorm.json", latencies[i], jitter, 60.0f);
-        case_movement("kanji.json", latencies[i], jitter, 144.0f);
-        case_movement("sandstorm.json", latencies[i], jitter, 30.0f);
+        case_movement("311_sandstorm.json", latencies[i], jitter, 60.0f);
+        case_movement("311_kanji.json", latencies[i], jitter, 144.0f);
+        case_movement("311_sandstorm.json", latencies[i], jitter, 30.0f);
     }
     for (size_t i = 0; i < sizeof(latencies) / sizeof(latencies[0]); i++) {
         const float jitter = latencies[i] * 0.3f;

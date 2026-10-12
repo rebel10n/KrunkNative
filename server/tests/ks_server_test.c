@@ -327,10 +327,10 @@ static void test_host(void)
 {
     // map 0: the test script (raw source); map 1: no script; map 2: a base64 script (1.1)
     cJSON *maps_json[3] = {
-        with_scripts("v3_burg", k_script, "public action start() { }"),
-        with_scripts("v3_littletown", NULL, NULL),
+        with_scripts("311_burg", k_script, "public action start() { }"),
+        with_scripts("311_littletown", NULL, NULL),
         // base64 of: public action start() { GAME.log("b64 start"); }
-        with_scripts("v3_littletown", "cHVibGljIGFjdGlvbiBzdGFydCgpIHsgR0FNRS5sb2coImI2NCBzdGFydCIpOyB9", NULL),
+        with_scripts("311_littletown", "cHVibGljIGFjdGlvbiBzdGFydCgpIHsgR0FNRS5sb2coImI2NCBzdGFydCIpOyB9", NULL),
     };
     const cJSON *maps[3] = {maps_json[0], maps_json[1], maps_json[2]};
     const SandboxConfig cfg = {.maps = maps, .map_count = 3, .map_index = 0, .mode_id = MODE_ID_FFA};
@@ -581,7 +581,7 @@ static void test_corpus(void)
         char *client = read_text(path);
         CHECK(server != NULL, "read %s", names[t]);
         if (!server) continue;
-        cJSON *map = with_scripts("v3_burg", server, client);
+        cJSON *map = with_scripts("311_burg", server, client);
         const cJSON *maps[1] = {map};
         const SandboxConfig cfg = {.maps = maps, .map_count = 1, .map_index = 0, .mode_id = MODE_ID_FFA};
         CHECK(sandbox_start(&cfg), "%s: start", names[t]);
@@ -647,7 +647,7 @@ static void test_compiled_js(void)
     memcpy(js + plen, body, sizeof(body));
     free(prelude);
 
-    cJSON *map = with_scripts("v3_burg", js, NULL);
+    cJSON *map = with_scripts("311_burg", js, NULL);
     const cJSON *maps[1] = {map};
     const SandboxConfig cfg = {.maps = maps, .map_count = 1, .map_index = 0, .mode_id = MODE_ID_FFA};
     CHECK(sandbox_start(&cfg), "compiled JS: start");

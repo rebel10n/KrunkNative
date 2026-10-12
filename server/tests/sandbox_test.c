@@ -106,11 +106,11 @@ static void chat(TestClient *c, const char *text) {
 }
 
 static const cJSON **load_maps(size_t *count) {
-    // the v3.1.1 Burg and Littletown (catalogue "v3_" entries): /cycle picks its map with the game
+    // the v3.1.1 Burg and Littletown (catalogue "311_" entries): /cycle picks its map with the game
     // RNG, which the maps' contents advance, so the test keeps the maps it was written against
     static const cJSON *maps[2];
-    maps[0] = map_catalog_json((size_t) map_catalog_index_of_key("v3_burg"));
-    maps[1] = map_catalog_json((size_t) map_catalog_index_of_key("v3_littletown"));
+    maps[0] = map_catalog_json((size_t) map_catalog_index_of_key("311_burg"));
+    maps[1] = map_catalog_json((size_t) map_catalog_index_of_key("311_littletown"));
     *count = 2;
     return maps;
 }

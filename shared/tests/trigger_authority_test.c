@@ -101,8 +101,8 @@ static void run(const cJSON *map, const Kind kind) {
 
 int main(void) {
     cJSON *map = NULL;
-    if (load_json_file("assets/maps/soul_sanctum.json", &map)) {
-        printf("Failed to load assets/maps/soul_sanctum.json (run from the repository root)\n");
+    if (load_json_file("assets/maps/311_soul_sanctum.json", &map)) {
+        printf("Failed to load assets/maps/311_soul_sanctum.json (run from the repository root)\n");
         return 1;
     }
     run(map, AUTH_LOCAL);

@@ -220,7 +220,7 @@ static void host_catalog_map(const int catalog_index, const int mode) {
 }
 
 // A Games-window row (name, creatorname) -> catalogue index: rows by "Krunker" are the
-// official maps, the others community maps (old_burg is "Burg" by "Community"); a bare
+// official maps (and the 311_ maps, "Burg (3.1.1)"), the others community maps; a bare
 // name (playMap) prefers the official map, like the server's cmd_map. -1 = unknown.
 static int catalog_index_for_row(const char *name, const char *creator) {
     const int want_custom = creator && creator[0] && strcmp(creator, "Krunker") != 0;

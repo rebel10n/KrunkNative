@@ -236,7 +236,7 @@ static cJSON *catalog_json(const Ctx *ctx) {
         cJSON_AddStringToObject(o, "name", e->name);
         cJSON_AddStringToObject(o, "source", e->source == MAP_SOURCE_OFFICIAL ? "official" : "community");
         char path[PATH_MAX];
-        snprintf(path, sizeof(path), "assets/%s", e->path); // the catalogue's file (maps/v7/, maps/custom/, v3 maps/)
+        snprintf(path, sizeof(path), "assets/%s", e->path); // the catalogue's file (maps/, maps/custom/)
         cJSON_AddStringToObject(o, "path", path);
         cJSON_AddBoolToObject(o, "rotation", e->rotation);
         cJSON_AddStringToObject(o, "creator", e->creator ? e->creator : "");

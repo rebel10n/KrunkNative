@@ -6,7 +6,7 @@
 Reads the official list of v7 src/data/maps.js (name, fileName; the index is the v7 mapIndex) and
 copies, unmodified:
 
-- public/maps/<fileName>.json  -> assets/maps/v7/<fileName>.json  (32 maps, reference data)
+- public/maps/<fileName>.json  -> assets/maps/<fileName>.json  (32 maps, reference data)
 - public/img/maps/map_<i>.png  -> ui/img/maps/map_<i>.png         (the Host Game / Games window
                                                                    thumbnails, by v7 mapIndex)
 
@@ -40,7 +40,7 @@ def main():
     copies = []
     for index, (name, file_name) in enumerate(maps):
         copies.append((os.path.join(V7, "public", "maps", file_name + ".json"),
-                       os.path.join(REPO, "assets", "maps", "v7", file_name + ".json")))
+                       os.path.join(REPO, "assets", "maps", file_name + ".json")))
         thumb = os.path.join(V7, "public", "img", "maps", "map_%d.png" % index)
         if os.path.exists(thumb):
             copies.append((thumb, os.path.join(REPO, "ui", "img", "maps", "map_%d.png" % index)))

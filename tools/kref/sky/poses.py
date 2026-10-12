@@ -2,7 +2,7 @@ import json, math, sys
 maps = {'sandstorm':None,'kanji':None,'subzero':None,'undergrowth':None,'oasis':None,'freight':None,'lostworld':None,'citadel':None,'industry':None}
 out = {}
 for m in maps:
-    d = json.load(open(f'/home/user/src/KrunkNative/assets/maps/{m}.json'))
+    d = json.load(open(f'/home/user/src/KrunkNative/assets/maps/311_{m}.json'))
     px, py, pz = d['camPos']
     # map centre from object bounds
     xs=[o['p'][0] for o in d['objects'] if 'p' in o]; zs=[o['p'][2] for o in d['objects'] if 'p' in o]

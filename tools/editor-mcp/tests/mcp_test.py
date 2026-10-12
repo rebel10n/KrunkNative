@@ -157,8 +157,8 @@ def protocol(c):
     one = json.loads(m.request("resources/read", {"uri": "krunker://prefabs/TRIGGER"})["result"]["contents"][0]["text"])
     check(any(p["key"] == "te" for p in one["properties"]), "TRIGGER schema has te")
     cat = json.loads(m.request("resources/read", {"uri": "krunker://catalog"})["result"]["contents"][0]["text"])
-    check(any(e["key"] == "burg_new" and e["path"] == "assets/maps/v7/burg_new.json" for e in cat), "catalog lists v7 Burg")
-    check(any(e["key"] == "v3_burg" and e["path"] == "assets/maps/burg.json" for e in cat), "catalog keeps v3 Burg")
+    check(any(e["key"] == "burg_new" and e["path"] == "assets/maps/burg_new.json" for e in cat), "catalog lists v7 Burg")
+    check(any(e["key"] == "311_burg" and e["path"] == "assets/maps/311_burg.json" for e in cat), "catalog keeps v3 Burg")
     check("error" in m.request("resources/read", {"uri": "krunker://nope"}), "unknown resource errors")
     check(len(m.request("resources/templates/list")["result"]["resourceTemplates"]) >= 2, "resource templates")
     prompts = m.request("prompts/list")["result"]["prompts"]
@@ -184,8 +184,8 @@ def save_and_compare(c, ref, path, fmt=None):
 @test
 def round_trip(c):
     m = c.mcp
-    # the v3.1.1 maps (catalogue keys v3_<stem>): "burg" / "kanji" resolve to the v7.1.4 files now
-    for name, rel in (("v3_burg", "assets/maps/burg.json"), ("v3_kanji", "assets/maps/kanji.json"),
+    # the v3.1.1 maps (catalogue keys 311_<stem>): "burg" / "kanji" resolve to the v7.1.4 maps
+    for name, rel in (("311_burg", "assets/maps/311_burg.json"), ("311_kanji", "assets/maps/311_kanji.json"),
                       ("Bhop_VIP", "assets/maps/custom/Bhop_VIP.json"), ("Krunk_Plaza", "assets/maps/custom/Krunk_Plaza.json")):
         p = m.sc("map_open", {"path": name})
         out = os.path.join(c.tmp, "rt_%s.json" % name)
@@ -216,7 +216,7 @@ def safety(c):
     m.call("map_save", {"project": "burg", "path": "/etc/kn_test.json"}, ok=False)
     m.call("map_save", {"project": "burg", "path": os.path.join(c.tmp, "x.txt")}, ok=False)
     m.call("map_open", {"path": "../../../../etc/passwd"}, ok=False)
-    m.call("map_save", {"project": "burg", "path": os.path.join(c.tmp, "rt_v3_burg.json")}, ok=False)  # exists, no overwrite
+    m.call("map_save", {"project": "burg", "path": os.path.join(c.tmp, "rt_311_burg.json")}, ok=False)  # exists, no overwrite
     ro = Mcp(c.bin, c.root, c.ws, ["--read-only", "--open", "burg"])
     ro.initialize()
     ro.call("objects_delete", {"ids": [1]}, ok=False)
@@ -590,7 +590,7 @@ def compile_map(c):
     bad = m.sc("map_new", {"name": "x", "template": "empty"})["id"]
     m.call("map_compile", {"project": bad}, ok=False)  # no spawns -> validation error blocks
     # complex collision: the bake reproduces the triangles v7.1.4 exported with the map
-    path = os.path.join(c.root, "assets", "maps", "v7", "shipment.json")
+    path = os.path.join(c.root, "assets", "maps", "shipment.json")
     src = json.load(open(path))
     sp = m.sc("map_open", {"path": path})["id"]
     t = m.sc("map_compile", {"project": sp, "inline": True, "force": True})
@@ -728,7 +728,7 @@ def live_editor(c):
     cfg = os.path.join(c.tmp, "edcfg")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg})
-    ed = subprocess.Popen([c.client, "--editor", "--mcp-bus", "--bus-dir", bus, "--mcp-auto-accept", "assets/maps/kanji.json"],
+    ed = subprocess.Popen([c.client, "--editor", "--mcp-bus", "--bus-dir", bus, "--mcp-auto-accept", "assets/maps/311_kanji.json"],
                           cwd=c.root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     m = None
     try:

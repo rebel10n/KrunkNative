@@ -306,8 +306,9 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     // `client_bin <map.json>` (the map list becomes [that map] + the rotation). Without
     // it the client keeps its default rotation list (what the host/games windows show)
     // and the seeded RNG below makes its random map pick repeatable.
-    // state.mapFile (part 2a): an explicit map JSON under assets/ ("maps/v7/kanji.json": v7's own
-    // Kanji, the map v7's references load) instead of the mapName lookup
+    // state.mapFile (part 2a): an explicit map JSON under assets/ ("maps/kanji.json": v7's own
+    // Kanji, the map v7's references load; "maps/311_kanji.json": the v3.1.1 Kanji) instead of
+    // the mapName lookup
     const char *map_name = st_str("mapName");
     const char *map_file = st_str("mapFile");
     if (map_file && map_file[0]) {

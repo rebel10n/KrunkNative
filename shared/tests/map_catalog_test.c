@@ -1,6 +1,7 @@
 // The map catalogue (shared/src/map_catalog.c): v7.1.4's 32 official maps (index = v7 mapIndex)
-// and the community maps (v3.1.1 custom_maps + the v3.1.1 official maps as "v3_<key>"). Every
-// map file loads, its JSON "name" is the catalogue name, map_init() builds it (objects, spawns,
+// and the community maps (v3.1.1 custom_maps, the v3.1.1 official maps as "311_<key>" and its
+// old_* maps as "152_<key>"). Every map file loads, its JSON "name" is the catalogue name (the
+// 311_ / 152_ files' own name + " (3.1.1)" / " (1.5.2)"), old keys and file stems resolve, map_init() builds it (objects, spawns,
 // v7 prefabs, pooled "si" sizes), ids / rotation / Games-window lists match, and cmd_map style
 // lookups resolve like packetHandlers.ts. Also plays one game_init() on every map.
 // Run from the repository root: ./<build>/map_catalog_test [-v]
@@ -25,21 +26,36 @@ static int g_checks;
     } while (0)
 
 // map_id values the v3.1.1 offline server sent (doc/ref/krunker-v3.1.1/windows/win-games.html);
-// fnv1a of the lower-cased name, so the v7 maps of the same name share them
+// fnv1a of the lower-cased name, so the v7 maps of the v3.1.1 official maps' names share them
 static const struct {
     const char *key;
     uint32_t id;
 } k_ids[] = {
-    {"v3_soul_sanctum", 2717856513u}, {"v3_subzero", 1389891507u}, {"v3_undergrowth", 2699178862u},
-    {"v3_lostworld", 2026576977u}, {"v3_newtown", 4056084657u}, {"v3_oasis", 2101154094u}, {"v3_sandstorm", 88334292u},
-    {"v3_shipyard", 2613134335u}, {"v3_freight", 1010451404u}, {"v3_industry", 312130495u}, {"v3_kanji", 1336255044u},
-    {"v3_littletown", 3836435553u}, {"v3_burg", 1257833875u}, {"v3_citadel", 1963634499u}, {"v3_evacuation", 4241009034u},
-    {"zombie_high", 569198284u}, {"old_sandstorm", 88334292u}, {"slide_moonlight", 3690042710u},
+    {"sanctum", 2717856513u}, {"subzero_new", 1389891507u}, {"undergrowth", 2699178862u},
+    {"lostworld_s6", 2026576977u}, {"oasis_v3", 2101154094u}, {"sandstorm_v3", 88334292u},
+    {"shipyard", 2613134335u}, {"freight", 1010451404u}, {"industry", 312130495u}, {"kanji", 1336255044u},
+    {"littletown", 3836435553u}, {"burg_new", 1257833875u}, {"citadel", 1963634499u}, {"evacuation", 4241009034u},
+    {"zombie_high", 569198284u}, {"slide_moonlight", 3690042710u},
     {"SniperRoyale2", 2800345118u}, {"Test", 2949673445u}, {"Verb_Arena", 682138864u}, {"eterno_jump", 739315237u},
     {"Krunk_Plaza", 537274925u}, {"Slide_Neon_Stage", 197077862u}, {"Bhop_VIP", 3459552096u},
     {"ClashRoyale", 2789783172u}, {"ESP_Parkour", 2793053018u}, {"FortniteTiltedT", 563473844u},
-    {"sanctum", 2717856513u}, {"sandstorm_v3", 88334292u}, {"kanji", 1336255044u}, {"krunk_plaza_v2", 537274925u},
+    {"krunk_plaza_v2", 537274925u},
 };
+
+static int legacy_key(const char *key) { return !strncmp(key, "311_", 4) || !strncmp(key, "152_", 4); }
+
+// the "name" in the 311_ / 152_ file itself: the display name without " (3.1.1)" / " (1.5.2)"
+static void check_file_name(const MapCatalogEntry *e) {
+    char path[256];
+    snprintf(path, sizeof(path), "assets/%s", e->path);
+    cJSON *raw = NULL;
+    CHECK(!load_json_file(path, &raw), "%s: %s does not load", e->key, path);
+    const char *name = raw ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(raw, "name")) : NULL;
+    char want[64];
+    snprintf(want, sizeof(want), "%s (%s)", name ? name : "?", !strncmp(e->key, "311_", 4) ? "3.1.1" : "1.5.2");
+    CHECK(name && !strcmp(want, e->name), "%s: file name '%s', display '%s'", e->key, name ? name : "?", e->name);
+    cJSON_Delete(raw);
+}
 
 static int count_prefab(const Map *map, const int prefab) {
     int n = 0;
@@ -58,7 +74,7 @@ static void test_entry(const size_t index, const int verbose) {
           cJSON_IsString(name) ? name->valuestring : "?", e->name);
     const cJSON *creator = cJSON_GetObjectItemCaseSensitive(json, "creator");
     const char *want_creator = cJSON_IsString(creator) && creator->valuestring[0] ? creator->valuestring
-                               : e->source == MAP_SOURCE_OFFICIAL || !strncmp(e->key, "v3_", 3) ? "Krunker" : "Community";
+                               : e->source == MAP_SOURCE_OFFICIAL || !strncmp(e->key, "311_", 4) ? "Krunker" : "Community";
     CHECK(!strcmp(e->creator, want_creator), "%s: creator %s != body %s", e->key, e->creator, want_creator);
     const cJSON *mod = cJSON_GetObjectItemCaseSensitive(json, "modURL");
     CHECK(!strcmp(e->mod_url, cJSON_IsString(mod) ? mod->valuestring : ""), "%s: modURL mismatch", e->key);
@@ -131,19 +147,26 @@ static void test_game_init_all(void) {
 int main(const int argc, char **argv) {
     const int verbose = argc > 1 && !strcmp(argv[1], "-v");
     const size_t count = map_catalog_count();
-    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 32 && count == 32 + 21 + 15, "catalogue has %zu maps: v7.1.4's 32 + 21 community + 15 v3", count);
+    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 32 && count == 32 + 12 + 15 + 9,
+          "catalogue has %zu maps: v7.1.4's 32 + 12 community + 15 311_ + 9 152_", count);
 
     // official maps: catalogue index == v7.1.4 mapIndex; keys unique; community maps in readdir
-    // order, then the v3.1.1 official maps
+    // order, then the v3.1.1 official maps (311_), then its old_* maps (152_)
     for (size_t i = 0; i < count; i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
         if (i < MAP_CATALOG_OFFICIAL_COUNT) CHECK(e->source == MAP_SOURCE_OFFICIAL && e->index == (int) i && e->hostable, "%s index", e->key);
         else CHECK(e->source == MAP_SOURCE_CUSTOM && e->index == -1 && !e->rotation && !e->hostable, "%s custom flags", e->key);
         CHECK(map_catalog_index_of_key(e->key) == (int) i, "%s key not unique", e->key);
-        const int v3 = !strncmp(e->key, "v3_", 3);
-        if (i > MAP_CATALOG_OFFICIAL_COUNT && !v3) CHECK(strcmp(map_catalog_at(i - 1)->key, e->key) < 0, "%s not in readdir order", e->key);
-        CHECK(e->path && !strncmp(e->path, i < MAP_CATALOG_OFFICIAL_COUNT ? "maps/v7/" : v3 ? "maps/" : "maps/custom/", v3 ? 5 : 8),
-              "%s path %s", e->key, e->path ? e->path : "?");
+        const int legacy = legacy_key(e->key);
+        if (i > MAP_CATALOG_OFFICIAL_COUNT && !legacy && !legacy_key(map_catalog_at(i - 1)->key))
+            CHECK(strcmp(map_catalog_at(i - 1)->key, e->key) < 0, "%s not in readdir order", e->key);
+        if (i > 0 && legacy_key(map_catalog_at(i - 1)->key)) CHECK(legacy, "%s after the 311_ / 152_ maps", e->key);
+        // the file stem is the key: maps/<key>.json (v7, 311_, 152_), maps/custom/<key>.json (community)
+        char want[96];
+        snprintf(want, sizeof(want), i < MAP_CATALOG_OFFICIAL_COUNT || legacy ? "maps/%s.json" : "maps/custom/%s.json", e->key);
+        CHECK(e->path && !strcmp(e->path, want), "%s path %s", e->key, e->path ? e->path : "?");
+        CHECK(map_catalog_index_of_file(e->path) == (int) i, "%s: index_of_file(%s)", e->key, e->path);
+        if (legacy) check_file_name(e);
     }
     CHECK(!strcmp(map_catalog_at(0)->key, "burg_new") && !strcmp(map_catalog_at(10)->name, "Kanji") &&
           !strcmp(map_catalog_at(18)->name, "Tortuga") && !strcmp(map_catalog_at(31)->name, "Soul Sanctum"), "v7 data/maps.js order");
@@ -168,14 +191,58 @@ int main(const int argc, char **argv) {
         const int index = map_catalog_index_of_key(k_ids[i].key);
         CHECK(index >= 0 && map_catalog_map_id(map_catalog_at((size_t) index)) == k_ids[i].id, "map_id of %s", k_ids[i].key);
     }
+    // the display names make the 311_ / 152_ ids their own (v3.1.1's old_burg shared Burg's)
+    const uint32_t burg_id = map_catalog_map_id(map_catalog_at(0));
+    CHECK(map_catalog_map_id(map_catalog_at((size_t) map_catalog_index_of_key("311_burg"))) != burg_id &&
+          map_catalog_map_id(map_catalog_at((size_t) map_catalog_index_of_key("152_burg"))) != burg_id &&
+          map_catalog_map_id(map_catalog_at((size_t) map_catalog_index_of_key("152_burg"))) !=
+              map_catalog_map_id(map_catalog_at((size_t) map_catalog_index_of_key("311_burg"))), "311_ / 152_ map ids");
+    CHECK(!strcmp(map_catalog_at((size_t) map_catalog_index_of_key("311_burg"))->name, "Burg (3.1.1)") &&
+          !strcmp(map_catalog_at((size_t) map_catalog_index_of_key("152_burg"))->name, "Burg (1.5.2)"), "display names");
+
+    // the old keys (map_catalog.h aliases); the v3.1.1 stems name the v7 maps now, but newtown
+    static const struct { const char *old, *key; } k_renamed[] = {
+        {"v3_burg", "311_burg"}, {"v3_soul_sanctum", "311_soul_sanctum"}, {"V3_KANJI", "311_kanji"}, {"old_burg", "152_burg"},
+        {"old_undergrowth", "152_undergrowth"}, {"newtown", "311_newtown"}, {"kanji", "kanji"}, {"burg_new", "burg_new"},
+        {"311_oasis", "311_oasis"},
+    };
+    for (size_t i = 0; i < sizeof(k_renamed) / sizeof(k_renamed[0]); i++) {
+        CHECK(map_catalog_index_of_alias(k_renamed[i].old) == map_catalog_index_of_key(k_renamed[i].key), "alias %s", k_renamed[i].old);
+    }
+    CHECK(map_catalog_index_of_alias("burg") == -1 && map_catalog_index_of_alias("sandstorm") == -1, "stems are names, not aliases");
+    CHECK(map_catalog_index_of_old_key("OLD_BURG") == map_catalog_index_of_key("152_burg") && map_catalog_index_of_old_key("burg") == -1,
+          "old keys only");
+    CHECK(map_catalog_index_of_alias("nosuchmap") == -1 && map_catalog_index_of_alias("v3_lumber") == -1, "no alias");
+    CHECK(map_catalog_index_of_file("assets/maps/burg.json") == 0 && map_catalog_index_of_file("sandstorm") == 2 &&
+          map_catalog_index_of_file("maps/soul_sanctum.json") == 31 && map_catalog_index_of_file("newtown") == map_catalog_index_of_key("311_newtown") &&
+          map_catalog_index_of_file("v3_kanji.json") == map_catalog_index_of_key("311_kanji") &&
+          map_catalog_index_of_file("maps/v7/kanji.json") == 10 &&
+          map_catalog_index_of_file("assets/maps/custom/old_kanji.json") == map_catalog_index_of_key("152_kanji") &&
+          map_catalog_index_of_file("custom/Test") == map_catalog_index_of_key("Test") &&
+          map_catalog_index_of_file("/tmp/nosuchmap.json") == -1, "index_of_file");
+    cJSON *moved = NULL;
+    CHECK(!map_catalog_load_file("assets/maps/v7/sanctum.json", &moved) && moved &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(moved, "name")), "Soul Sanctum"), "load_file of a moved map");
+    cJSON_Delete(moved);
+    moved = NULL;
+    CHECK(!map_catalog_load_file("assets/maps/custom/old_kanji.json", &moved) && moved &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(moved, "name")), "Kanji"), "load_file of an old_ map");
+    cJSON_Delete(moved);
+    moved = NULL;
+    CHECK(map_catalog_load_file("assets/maps/nosuchmap.json", &moved) == -1 && !moved, "load_file of a missing map");
 
     // cmd_map lookups: official names first, then community keys
     CHECK(map_catalog_find("burg") == 0, "find burg");
     CHECK(map_catalog_find("Soul") == 31, "find soul");
     CHECK(map_catalog_find("soul sanctum") == 31, "find soul sanctum");
     CHECK(map_catalog_find("tortuga") == 18, "find tortuga");
-    CHECK(map_catalog_find("v3_soul_sanctum") == map_catalog_index_of_key("v3_soul_sanctum"), "find v3_soul_sanctum");
-    CHECK(map_catalog_find("old_burg") == map_catalog_index_of_key("old_burg"), "find old_burg");
+    CHECK(map_catalog_find("311_soul_sanctum") == map_catalog_index_of_key("311_soul_sanctum"), "find 311_soul_sanctum");
+    CHECK(map_catalog_find("v3_soul_sanctum") == map_catalog_index_of_key("311_soul_sanctum"), "find v3_soul_sanctum");
+    CHECK(map_catalog_find("152_burg") == map_catalog_index_of_key("152_burg"), "find 152_burg");
+    CHECK(map_catalog_find("old_burg") == map_catalog_index_of_key("152_burg"), "find old_burg (not v7's Old_Burg)");
+    CHECK(map_catalog_find("old") == 24, "find old: v7's Old_Burg");
+    CHECK(map_catalog_find("sandstorm") == 2 && map_catalog_find("311_s") == map_catalog_index_of_key("311_sandstorm"), "find sandstorm");
+    CHECK(map_catalog_find("newtown") == map_catalog_index_of_key("311_newtown"), "find newtown (a v3.1.1 stem)");
     CHECK(map_catalog_find("zombie") == map_catalog_index_of_key("zombie_high"), "find zombie");
     CHECK(map_catalog_find("SLIDE_") == map_catalog_index_of_key("Slide_Neon_Stage"), "find SLIDE_");
     CHECK(map_catalog_find("5") == 5, "find 5");
@@ -185,10 +252,15 @@ int main(const int argc, char **argv) {
     const char *const soul[] = {"Soul Sanctum", "soul sanctum", "SOUL SANCTUM", "\"Soul Sanctum\"", "Soul_Sanctum", "soulsanctum",
                                 "'soul sanctum'", "sanctum"};
     for (size_t i = 0; i < sizeof(soul) / sizeof(soul[0]); i++) CHECK(map_catalog_resolve(soul[i], NULL, 0, NULL) == 31, "resolve %s", soul[i]);
-    CHECK(map_catalog_resolve("v3_soul_sanctum", NULL, 0, NULL) == map_catalog_index_of_key("v3_soul_sanctum"), "resolve v3 key");
+    CHECK(map_catalog_resolve("311_soul_sanctum", NULL, 0, NULL) == map_catalog_index_of_key("311_soul_sanctum"), "resolve 311 key");
+    CHECK(map_catalog_resolve("v3_soul_sanctum", NULL, 0, NULL) == map_catalog_index_of_key("311_soul_sanctum"), "resolve v3 key");
+    CHECK(map_catalog_resolve("Kanji (3.1.1)", NULL, 0, NULL) == map_catalog_index_of_key("311_kanji"), "resolve 3.1.1 name");
+    CHECK(map_catalog_resolve("burg 1.5.2", NULL, 0, NULL) == map_catalog_index_of_key("152_burg"), "resolve 1.5.2 name");
+    CHECK(map_catalog_resolve("newtown", NULL, 0, NULL) == map_catalog_index_of_key("311_newtown"), "resolve newtown");
+    CHECK(map_catalog_resolve("burg", NULL, 0, NULL) == 0, "resolve burg (v7)");
     CHECK(map_catalog_resolve("kanji", NULL, 0, NULL) == 10, "resolve kanji (the v7 key)");
     CHECK(map_catalog_resolve("Freight", NULL, 0, NULL) == 6, "resolve Freight");
-    CHECK(map_catalog_resolve("old burg", NULL, 0, NULL) == map_catalog_index_of_key("old_burg"), "resolve old burg");
+    CHECK(map_catalog_resolve("old burg", NULL, 0, NULL) == map_catalog_index_of_key("152_burg"), "resolve old burg");
     CHECK(map_catalog_resolve("zombie", NULL, 0, NULL) == map_catalog_index_of_key("zombie_high"), "resolve zombie");
     CHECK(map_catalog_resolve("trop", NULL, 0, NULL) == 19, "resolve trop");
     int cands[8];
@@ -201,14 +273,14 @@ int main(const int argc, char **argv) {
 
     // Games window tabs: Featured = the 32 official maps; Popular / New = those, then the rest
     int tab[128];
-    CHECK(map_catalog_games_tab(0, tab, 128) == count && tab[0] == 0 && tab[32] == map_catalog_index_of_key("v3_soul_sanctum"), "popular");
+    CHECK(map_catalog_games_tab(0, tab, 128) == count && tab[0] == 0 && tab[32] == map_catalog_index_of_key("311_soul_sanctum"), "popular");
     CHECK(map_catalog_games_tab(1, tab, 128) == 32 && tab[0] == 0 && tab[31] == 31, "featured");
-    CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[32] == map_catalog_index_of_key("v3_subzero"), "new");
+    CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[32] == map_catalog_index_of_key("311_subzero"), "new");
     CHECK(map_catalog_games_tab(3, tab, 128) == 0, "favorites");
     CHECK(map_catalog_games_tab(4, tab, 128) == count, "mine");
     char thumb[64];
     CHECK(map_catalog_thumb(map_catalog_at(31), thumb, sizeof(thumb)) && !strcmp(thumb, "img/maps/map_31.png") &&
-          !map_catalog_thumb(map_catalog_at((size_t) map_catalog_index_of_key("v3_kanji")), thumb, sizeof(thumb)), "thumbnails");
+          !map_catalog_thumb(map_catalog_at((size_t) map_catalog_index_of_key("311_kanji")), thumb, sizeof(thumb)), "thumbnails");
 
     // map_catalog_slot: find-or-append
     const cJSON **list = NULL;

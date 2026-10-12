@@ -34,7 +34,7 @@ open(out + '/b.script', 'w').write('\n'.join(b) + '\n')
 PY
 cd "$SRC" || exit 1
 RUN=(env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 KRUNKNATIVE_EGL_DEVICE="${EGL_DEVICE:-nvidia}" KRUNKNATIVE_SERVER_PORT=$PORT KRUNKNATIVE_WINDOW_SIZE=960x540)
-"$BUILD/server_bin" --port "$PORT" --headless assets/maps/sandstorm.json > "$OUT/server.log" 2>&1 &
+"$BUILD/server_bin" --port "$PORT" --headless assets/maps/311_sandstorm.json > "$OUT/server.log" 2>&1 &
 SERVER=$!
 sleep 2
 XDG_CONFIG_HOME=$OUT/cfg-b XDG_STATE_HOME=$OUT/cfg-b KRUNKNATIVE_HIDE_UI=1 KRUNKNATIVE_INPUT_SCRIPT=$OUT/b.script KRUNKNATIVE_PLAYER_LOG=$OUT/native-frames.jsonl \

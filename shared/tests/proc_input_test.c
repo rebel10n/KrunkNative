@@ -235,7 +235,8 @@ const char *get_project_root() {
 
 static int g_failures = 0;
 
-// The map a fixture names (meta.map): assets/maps/<map>.json, configured once per switch.
+// The map a fixture names (meta.map): assets/maps/<map>.json (the v3.1.1 recordings name their
+// 311_ map: the geometry they were recorded on), configured once per switch.
 // game_configure free()s a previous map list it assumes is malloc()'d, so map_count is reset first.
 static char g_map_name[64];
 
@@ -599,7 +600,7 @@ int main(const int argc, char **argv) {
     if (argc > 2) return replay_main(argc, argv);
 
     Game game = {};
-    if (!use_map(&game, "sandstorm")) return 1;
+    if (!use_map(&game, "311_sandstorm")) return 1;
 
     Player *player = player_init(&game);
 
@@ -615,13 +616,13 @@ int main(const int argc, char **argv) {
         printf("\n");
     }
 
-    if (!use_map(&game, "sandstorm")) return 1;
+    if (!use_map(&game, "311_sandstorm")) return 1;
     run_input_rule_tests(player);
     printf("\n");
 
     // Soul Sanctum's spawn stands on a cylinder top (y 3): v7 collides with it inclusively,
     // so the player stays grounded (no onGround flicker, no step sound every other tick).
-    if (!use_map(&game, "soul_sanctum")) return 1;
+    if (!use_map(&game, "311_soul_sanctum")) return 1;
     printf("Running Soul Sanctum spawn landing test...\n");
     const int failures = g_failures;
     player_spawn(player);

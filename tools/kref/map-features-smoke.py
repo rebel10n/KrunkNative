@@ -46,25 +46,25 @@ PLACE = "{t} {verb} {x} {y} {z} 0 0"
 
 CASES = {
     # map triggers (shared/src/triggers.c) on Soul Sanctum, the v3.1.1 map that uses them
-    "trigger-jumpscare": ("assets/maps/soul_sanctum.json", [(1500, (454, 220, -105))], has(r'"type":"jump_scare"')),
-    "trigger-teleport-interface": ("assets/maps/soul_sanctum.json", [(1500, (358, 220, -102))], has(r'"type":"position"')),
-    "trigger-toggle-gate": ("assets/maps/soul_sanctum.json", [(1500, (89, 220, 82))], has(r'"type":"object_state","id":100,"uid":\d+,"kind":"gate"')),
-    "trigger-refill-knife": ("assets/maps/soul_sanctum.json", [(1500, (-117, 220, -118))], has(r'"type":"unknown","id":53')),
-    "trigger-collision-damage": ("assets/maps/soul_sanctum.json", [(1500, (-97, 203, 0))], has(r'"type":"(health|kill)"')),
-    "trigger-end-round": ("assets/maps/soul_sanctum.json", [(1500, (172, -251, -272))], has(r'"type":"end"')),
+    "trigger-jumpscare": ("assets/maps/311_soul_sanctum.json", [(1500, (454, 220, -105))], has(r'"type":"jump_scare"')),
+    "trigger-teleport-interface": ("assets/maps/311_soul_sanctum.json", [(1500, (358, 220, -102))], has(r'"type":"position"')),
+    "trigger-toggle-gate": ("assets/maps/311_soul_sanctum.json", [(1500, (89, 220, 82))], has(r'"type":"object_state","id":100,"uid":\d+,"kind":"gate"')),
+    "trigger-refill-knife": ("assets/maps/311_soul_sanctum.json", [(1500, (-117, 220, -118))], has(r'"type":"unknown","id":53')),
+    "trigger-collision-damage": ("assets/maps/311_soul_sanctum.json", [(1500, (-97, 203, 0))], has(r'"type":"(health|kill)"')),
+    "trigger-end-round": ("assets/maps/311_soul_sanctum.json", [(1500, (172, -251, -272))], has(r'"type":"end"')),
     # interaction (shared/src/interact.c): a score gate bought with the interact key
-    "interact-gate-purchase": ("assets/maps/soul_sanctum.json",
+    "interact-gate-purchase": ("assets/maps/311_soul_sanctum.json",
                                [(1200, "con score 300"), (2500, (700, 314, -239)), (3200, "down G"), (3400, "up G")],
                                has(r'"type":"object_state","id":100,"uid":\d+,"kind":"gate","value":0')),
     # map zones / pads (shared/src/player.c, triggers.c)
     "teleporter": ("assets/maps/custom/ESP_Parkour.json", [(1500, (241, -33, -2)), (1700, "state")], state_near(140, 0, 0, 8)),
     "score-zone": ("assets/maps/custom/Bhop_VIP.json", [(1500, (16745, 12, 0))], has(r'"type":"score"')),
     "checkpoint": ("assets/maps/custom/Bhop_VIP.json", [(1500, (16745, 12, 0))], has(r'"type":"checkpoint"')),
-    "death-zone": ("assets/maps/kanji.json", [(1500, (-130, -87, -92))], has(r'"type":"kill"')),
-    "boost-pad": ("assets/maps/kanji.json", [(1500, (71, -154, -269)), (1550, "state"), (1900, "state")], state_rose(4.0)),
+    "death-zone": ("assets/maps/311_kanji.json", [(1500, (-130, -87, -92))], has(r'"type":"kill"')),
+    "boost-pad": ("assets/maps/311_kanji.json", [(1500, (71, -154, -269)), (1550, "state"), (1900, "state")], state_rose(4.0)),
     # AI (shared/src/ai.c): the map's BOTs reach the client. client_bin negotiates protocol minor 3,
     # so since the v7 AI port it gets only the v7 block: AI_ADD_V7 (162), not v3's AI_ADD (90)
-    "map-ai": ("assets/maps/soul_sanctum.json", [(2500, "state")], has(r'"type":"ai_add_v7"')),
+    "map-ai": ("assets/maps/311_soul_sanctum.json", [(2500, "state")], has(r'"type":"ai_add_v7"')),
     # v7.1.4 trigger runtime (WP-C, shared/src/triggers_v7.c) on the v7-format custom maps
     "v7-enter-kill": ("assets/maps/custom/ESP_Parkour.json", [(1500, (122, 5, 45))], has(r'"type":"kill"')),
     "v7-player-spawn": ("assets/maps/custom/zombie_high.json", [(2500, "state")], has(r'"type":"unknown","id":48')), # onPlayerSpawn -> Change Class / Clear Loadout ("inat")

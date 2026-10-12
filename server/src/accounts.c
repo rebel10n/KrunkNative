@@ -1460,7 +1460,8 @@ static const cJSON *acc_local_custom_map(const char *name) {
         const MapCatalogEntry *e = map_catalog_at(i);
         if (e && ((e->name && !strcasecmp(e->name, name)) || (e->key && !strcasecmp(e->key, name)))) return map_catalog_json(i);
     }
-    return NULL;
+    const int renamed = map_catalog_index_of_old_key(name); // an older client's "v3_burg" / "old_burg"
+    return renamed >= 0 ? map_catalog_json((size_t) renamed) : NULL;
 }
 
 static void acc_host_apply(const cJSON *frame, const cJSON *custom_map);

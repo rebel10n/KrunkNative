@@ -2039,7 +2039,7 @@ v7 `data/maps.js` lists **32** official maps whose indices differ from v3/KN.
 
 **Decision:** under the in-place policy, the official catalogue becomes v7's 32 entries and indices. This is required because hostTypes, `config.maps`, comp lists and the end-of-game `mts` reference these indices.
 - Importing the v7 map JSON files is a content import, as `make assets-import` already does for textures. It is isolated in WP-A step A6 so it can be scheduled separately.
-- The v3 versions of the maps stay available as custom maps (`old_*`).
+- The v3 versions of the maps stay available as custom maps: v7's 32 files sit at `assets/maps/<fileName>.json` under their v7 names, the v3.1.1 official maps at `assets/maps/311_<name>.json` (catalogue key `311_<name>`, shown as "Burg (3.1.1)") and v3.1.1's own `old_*` maps at `assets/maps/152_<name>.json` ("Burg (1.5.2)"). The old keys (`v3_<name>`, `old_<name>`) and v3.1.1 file stems (`burg`, `sandstorm`, ...) resolve to them through the alias table in `map_catalog.c` (decisions.md, "Official maps").
 
 ## 5. Server vs client responsibilities and packets
 

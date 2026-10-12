@@ -409,7 +409,7 @@ static const NetMatchVoteStatePacket *votes_to(const int uid) {
 static void test_votes(void) {
     printf("endData.mts / maVote / init tally...\n");
     cJSON *maps_json[4];
-    const char *names[4] = {"assets/maps/v7/kanji.json", "assets/maps/v7/burg_new.json", "assets/maps/v7/lumber.json", "assets/maps/v7/arena.json"};
+    const char *names[4] = {"assets/maps/kanji.json", "assets/maps/burg_new.json", "assets/maps/lumber.json", "assets/maps/arena.json"};
     for (int i = 0; i < 4; i++) {
         maps_json[i] = load(names[i]);
         CHECK(maps_json[i] != NULL, "%s", names[i]);
@@ -527,9 +527,9 @@ static void test_account_hook(void) {
 }
 
 int main(void) {
-    cJSON *sandstorm = load("assets/maps/sandstorm.json");
+    cJSON *sandstorm = load("assets/maps/311_sandstorm.json");
     if (!sandstorm) {
-        printf("Failed to load assets/maps/sandstorm.json (run from the repository root)\n");
+        printf("Failed to load assets/maps/311_sandstorm.json (run from the repository root)\n");
         return 1;
     }
     test_tables();

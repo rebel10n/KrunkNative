@@ -48,7 +48,7 @@ const URL = `http://127.0.0.1:${PORT}/`;
 // Scenario: map, start pose, duration (ms), class (cls), weapon override (wep),
 // Game.config overrides (cfg), per-tick function f(t) -> {mv, jump (held), crouch, aim,
 // dyaw, dpitch (rad/ms)}, and the deltas to record.
-const S = 'sandstorm';
+const S = '311_sandstorm'; // the v3.1.1 Sandstorm (assets/maps/311_sandstorm.json)
 const M = 'shared/tests/maps/v7_player_movement'; // a path: KrunkNative test fixture, else assets/maps/<map>.json
 const W = -Math.PI / 2;
 const SC = {
@@ -74,9 +74,9 @@ const SC = {
   // up the ramp (object 8, rises toward +x) and on to its top
   ramp: { map: S, pos: [10, 13, -4], yaw: W, dur: 2600, deltas: [17, 7], f: t => ({ mv: t < 2200 ? 1 : -1 }) },
   spawn: { map: S, pos: [0, 15, 0], yaw: W, dur: 800, deltas: [17, 7], settle: 0, f: t => ({ mv: -1 }) },
-  jump_pad: { map: 'kanji', pos: [75, -140, -270], yaw: W, dur: 2400, deltas: [33, 7], f: t => ({ mv: -1 }) },
-  // soul_sanctum: drop onto the spawn disk (cylinder top y 3), stand, walk, stop on it
-  soul_spawn: { map: 'soul_sanctum', pos: [1, 4, 0], yaw: W, dur: 1600, deltas: [33, 17], f: t => ({ mv: t >= 300 && t < 800 ? 1 : -1 }) },
+  jump_pad: { map: '311_kanji', pos: [75, -140, -270], yaw: W, dur: 2400, deltas: [33, 7], f: t => ({ mv: -1 }) },
+  // 311_soul_sanctum: drop onto the spawn disk (cylinder top y 3), stand, walk, stop on it
+  soul_spawn: { map: '311_soul_sanctum', pos: [1, 4, 0], yaw: W, dur: 1600, deltas: [33, 17], f: t => ({ mv: t >= 300 && t < 800 ? 1 : -1 }) },
 
   // new v7 scenarios (doc/v7/player-viewer.md 1.1.8)
   // W1: Run N Gun (wallJM 2): jump at the wall z 12..26, then tap jump while on it
@@ -118,7 +118,7 @@ const SC = {
   // J4: autoJump with jump held across several landings
   auto_jump_hold: { map: S, pos: [0, 13, 0], yaw: W, dur: 3000, deltas: [17, 7], cfg: { autoJump: true }, f: t => ({ mv: -1, jump: t >= 100 && t < 2600 }) },
   // P1: walk onto the edge of Kanji's pad (hitbox from the map scale)
-  jump_pad_edge: { map: 'kanji', pos: [75, -140, -258], yaw: 0, dur: 2600, deltas: [17, 7], f: t => ({ mv: t < 500 ? 1 : -1 }) },
+  jump_pad_edge: { map: '311_kanji', pos: [75, -140, -258], yaw: 0, dur: 2600, deltas: [17, 7], f: t => ({ mv: t < 500 ? 1 : -1 }) },
   // C1: jump onto a border wall (object 257, bo: 1): the box reaches borderH = 500 higher
   border_jump: { map: S, pos: [206, 33, -2], yaw: 0, dur: 1600, deltas: [17, 7], f: t => ({ mv: t < 900 ? 1 : -1, jump: t >= 100 && t < 150 }) },
   // C1: drop into a border's extension (object 257, top 87): v3.1.1's box reached 250 above the

@@ -1412,8 +1412,8 @@ static void test_chat(void) {
 
 int main(void) {
     cJSON *sandstorm = NULL;
-    if (load_json_file("assets/maps/sandstorm.json", &sandstorm) && load_json_file("../assets/maps/sandstorm.json", &sandstorm)) {
-        printf("Failed to load assets/maps/sandstorm.json (run from the repository root)\n");
+    if (load_json_file("assets/maps/311_sandstorm.json", &sandstorm) && load_json_file("../assets/maps/311_sandstorm.json", &sandstorm)) {
+        printf("Failed to load assets/maps/311_sandstorm.json (run from the repository root)\n");
         return 1;
     }
 

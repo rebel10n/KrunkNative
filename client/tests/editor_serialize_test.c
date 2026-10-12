@@ -714,8 +714,8 @@ int main(int argc, char **argv) {
     logic_cases(repo);
     template_tas(repo);
     script_checks();
-    static const char *const dirs[3] = {"assets/maps", "assets/maps/custom", "assets/maps/v7"};
-    for (int i = 0; i < 3; i++) {
+    static const char *const dirs[2] = {"assets/maps", "assets/maps/custom"}; // v7's maps + 311_ / 152_, community
+    for (int i = 0; i < 2; i++) {
         snprintf(path, sizeof(path), "%s/%s", repo, dirs[i]);
         round_trip_dir(path);
     }

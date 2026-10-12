@@ -539,7 +539,7 @@ static void test_spray_rules(void) {
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *sprays = spray_map();
-    const cJSON *burg = map_catalog_json((size_t) map_catalog_index_of_key("v3_burg"));
+    const cJSON *burg = map_catalog_json((size_t) map_catalog_index_of_key("311_burg"));
     CHECK(sprays && burg, "maps");
 
     if (start(burg, MODE_ID_TDM)) {

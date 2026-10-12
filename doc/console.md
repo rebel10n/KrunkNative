@@ -194,7 +194,7 @@ and adds completion for arguments:
 | kill | player names in the game and the active AIs' names |
 | summon | the summonable AI names (Angered Soul, Gatekeeper, Lord of Souls, Soul Fiend, Wandering Soul, Weeping Soul) |
 | ping, kick, ban, unban, ip, banip | player names in the game |
-| map | the v3.1.1 map catalogue (shared/include/map_catalog.h): official maps by name, community maps by file name |
+| map | the map catalogue (shared/include/map_catalog.h): v7's official maps by name, community maps (among them the v3.1.1 maps, `311_kanji`, and its old ones, `152_burg`) by file name |
 | mode | mode aliases (offline also `default` / `reset`) |
 | team | red / blue |
 | connect | local, the last server address |

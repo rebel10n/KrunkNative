@@ -581,7 +581,7 @@ int main(void) {
     test_parse();
 
     cJSON *arena = cJSON_Parse(k_arena);
-    const int sandstorm_key = map_catalog_index_of_key("v3_sandstorm"); // the v3.1.1 Sandstorm
+    const int sandstorm_key = map_catalog_index_of_key("311_sandstorm"); // the v3.1.1 Sandstorm
     const cJSON *sandstorm = sandstorm_key >= 0 ? map_catalog_json((size_t) sandstorm_key) : NULL;
     if (!arena || !sandstorm) {
         printf("Failed to load the maps (run from the repository root)\n");

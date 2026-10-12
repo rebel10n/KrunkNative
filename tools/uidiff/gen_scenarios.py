@@ -125,6 +125,11 @@ def chrome(rc, w=1280, h=720, dimmed=False):
     return regs
 
 
+
+# the local server's map: the v3.1.1 Kanji these scenarios have always run on (its file is
+# assets/maps/311_kanji.json; "maps/kanji.json" is v7's Kanji, which ingame-minimap loads)
+V3_KANJI = "maps/311_kanji.json"
+
 rc = rects("menu/menu-1280")
 regs = chrome(rc)
 regs.append(R("click-to-play", pad(rc["instructions"], 3), "text", "#instructions CLICK TO PLAY (animations at 0.8 s)"))
@@ -132,6 +137,7 @@ regs.append(R("spectate", pad(rc["spectButton"], 2), "text", "#spectButton label
 add("menu-1280", {"ref": REF + "/menu/menu-1280.png", "size": [1280, 720], "background": MENU_BG,
                   "state": {"menu": True, "window": None, "connected": True, "ready": True, "inGame": False,
                             "name": "Guest", "classIndex": 0, "region": "...", "mapName": "Kanji",
+                            "mapFile": V3_KANJI,
                             "gameName": "ffa on Kanji", "anim_time": ANIM},
                   "frames": 3, "note": "Returning guest's menu, no window (v7.1.4 sandbox chrome undone: CONNECTED_MENU)."},
     regs)
@@ -224,6 +230,7 @@ BOT_CHAT = [{"text": "Spawned a Bot", "color": "#fc03ec"}]
 
 def game_state(hudv, chat=(), **kw):
     st = {"menu": False, "window": None, "connected": True, "ready": True, "inGame": True, "mapName": "Kanji",
+          "mapFile": V3_KANJI,
           "modeName": "Free for All", "name": "Local User", "region": "...", "anim_time": ANIM, "hud": hudv,
           "chat": list(chat)}
     st.update(kw)
@@ -342,7 +349,7 @@ game("ingame-spectate",
      "Spectating the sandbox (Spectate toggle on): free cam, v7's #spectateUI.")
 rc = rects("ingame/ingame-minimap")
 game("ingame-minimap",
-     game_state(hud(), customMap=False, mapFile="maps/v7/kanji.json", pose=[144, -139, -182, -1.5707963267948966, 0]),
+     game_state(hud(), customMap=False, mapFile="maps/kanji.json", pose=[144, -139, -182, -1.5707963267948966, 0]),
      hud_regions(rc, [R("minimap", pad(rc["miniMapOverlay"], 2), "text",
                         "#miniMapCanvas: Kanji's mmId image turned with the view, the N/E/S/W ring, our arrow")]),
      "The minimap on Kanji (an official map in KrunkNative; the reference clears v7's customsData) at a fixed pose.")

@@ -43,7 +43,7 @@ wait_bus() { # log file, seconds
 
 echo "== editor: --editor --mcp-bus --mcp-auto-accept kanji.json burg.json (headless)"
 "${HEADLESS[@]}" "$CLIENT" --editor --mcp-bus --bus-dir "$TMP/bus" --mcp-auto-accept \
-    assets/maps/kanji.json assets/maps/burg.json > "$TMP/editor.log" 2>&1 &
+    assets/maps/311_kanji.json assets/maps/311_burg.json > "$TMP/editor.log" 2>&1 &
 EDITOR_PID=$!
 if ! wait_bus "$TMP/editor.log" 60; then
     echo "FAIL: the editor did not start the bus"; tail -20 "$TMP/editor.log"; exit 1
@@ -168,7 +168,7 @@ grep -q "permission auto for kn_editor_mcp\|permission auto for" "$TMP/editor.lo
     || { echo "FAIL the editor did not log the auto-accept"; status=1; }
 
 echo "== deny path: --mcp-auto-deny"
-"${HEADLESS[@]}" "$CLIENT" --editor --mcp-bus --bus-dir "$TMP/bus-deny" --mcp-auto-deny assets/maps/burg.json > "$TMP/editor-deny.log" 2>&1 &
+"${HEADLESS[@]}" "$CLIENT" --editor --mcp-bus --bus-dir "$TMP/bus-deny" --mcp-auto-deny assets/maps/311_burg.json > "$TMP/editor-deny.log" 2>&1 &
 DENY_PID=$!
 if ! wait_bus "$TMP/editor-deny.log" 60; then
     echo "FAIL: the deny editor did not start the bus"; status=1

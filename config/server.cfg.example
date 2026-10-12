@@ -17,7 +17,7 @@ maxplayers      8
 sv_password     ""                 // players need this to join ("" = open)
 
 // ---- game
-mapcycle        Burg,Sandstorm,Kanji,Littletown
+mapcycle        Burg,Sandstorm,Kanji,Littletown // v7's maps by name; catalogue keys work too: 311_kanji (the v3.1.1 Kanji), 152_burg
 mode            ffa                // ffa | tdm | ctf | point | ... | rotation (a list rotates)
 round_seconds   0                  // 0 = the mode's game time
 lag_comp        1                  // hits rewind targets to where the shooter saw them (v3.1.1 fetchState)

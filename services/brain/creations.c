@@ -10,8 +10,9 @@
  *   GET /api/streams?index=                    -> v3.1.1 placeholder (no streams)
  *   GET /api/prices[?id=]                      -> {} / 0 (v3.1.1 placeholder)
  *
- * Maps = the v3.1.1 catalogue (shared/include/map_catalog.h: 15 official + 21
- * community maps, in the offline server's tab orders) followed by the maps
+ * Maps = the map catalogue (shared/include/map_catalog.h: v7.1.4's 32 official maps, then 12
+ * community maps and the v3.1.1 311_* / 152_* maps in the v3.1.1 offline server's tab orders)
+ * followed by the maps
  * players published (published_maps). Tabs (publicRoutes.ts sortMaps):
  * 0 Popular, 1 Featured, 2 New, 3 Favorites (accountId's), 4 all / My Games
  * (accountId's published maps when given). 42 rows per page.

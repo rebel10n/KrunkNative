@@ -101,7 +101,7 @@ def main():
     log = open(log_path, "w")
     env = dict(os.environ, ASAN_OPTIONS="abort_on_error=1:detect_leaks=0", UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1")
     proc = subprocess.Popen([f"{BUILD}/server_bin", "--no-cli", "--cfg", "none", "--config", os.path.join(work, "none.json"),
-                             "--offline-mode", "--port", str(PORT), "--mode", "ffa", "assets/maps/burg.json"],
+                             "--offline-mode", "--port", str(PORT), "--mode", "ffa", "assets/maps/311_burg.json"],
                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
     rng = random.Random(SEED)
     try:

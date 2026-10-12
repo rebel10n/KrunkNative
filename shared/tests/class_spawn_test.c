@@ -354,7 +354,7 @@ int main(void) {
     check_weapon_table();
     check_cosmetics_packets();
 
-    const char *maps[] = {"sandstorm", "kanji"};
+    const char *maps[] = {"311_sandstorm", "311_kanji"}; // the v3.1.1 maps
     for (size_t m = 0; m < sizeof(maps) / sizeof(maps[0]); m++) {
         char path[128];
         snprintf(path, sizeof(path), "assets/maps/%s.json", maps[m]);

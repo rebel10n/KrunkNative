@@ -6,6 +6,7 @@
 #include <bots.h>
 #include <ks_server.h> // KrunkScript server host
 #include <build_info.h>
+#include <map_catalog.h> // map_catalog_load_file
 #include <pthread.h>
 #include <pcg_basic.h>
 #include <errno.h>
@@ -686,7 +687,8 @@ int main(int argc, char **argv) {
 
     cJSON *startup_map = NULL;
 
-    if (args.map_path && load_json_file(args.map_path, &startup_map)) {
+    // map_catalog_load_file: a renamed map's old path (assets/maps/burg.json) loads its 311_ file
+    if (args.map_path && map_catalog_load_file(args.map_path, &startup_map)) {
         fprintf(stderr, "Failed to load map JSON: %s\n", args.map_path);
         return 1;
     }

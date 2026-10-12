@@ -296,11 +296,11 @@ static const char *k_script =
     "    if (id == \"ban\") { GAME.ADMIN.ban(playerID); }\n"
     "}\n";
 
-// v3_burg with the script and two "player spawn" triggers: Save Data "Trig" (increase by 7)
+// 311_burg with the script and two "player spawn" triggers: Save Data "Trig" (increase by 7)
 // and Load Data
 static cJSON *storage_map(void)
 {
-    cJSON *map = cJSON_Duplicate(map_catalog_json((size_t) map_catalog_index_of_key("v3_burg")), 1);
+    cJSON *map = cJSON_Duplicate(map_catalog_json((size_t) map_catalog_index_of_key("311_burg")), 1);
     cJSON_DeleteItemFromObject(map, "scripts");
     cJSON *scripts = cJSON_AddObjectToObject(map, "scripts");
     cJSON_AddStringToObject(scripts, "server", k_script);

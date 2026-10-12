@@ -12,6 +12,7 @@
     "ready": true,
     "inGame": true,
     "mapName": "Kanji",
+    "mapFile": "maps/kanji.json",
     "modeName": "Free for All",
     "name": "Local User",
     "region": "...",
@@ -60,7 +61,6 @@
     },
     "chat": [],
     "customMap": false,
-    "mapFile": "maps/v7/kanji.json",
     "pose": [
       144,
       -139,

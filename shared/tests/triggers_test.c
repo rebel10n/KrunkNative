@@ -960,7 +960,7 @@ int main(void) {
         {"assets/maps/custom/zombie_high.json", 284}, {"assets/maps/custom/Krunk_Plaza.json", 41},
         {"assets/maps/custom/Verb_Arena.json", 41}, {"assets/maps/custom/Slide_Neon_Stage.json", 54},
         {"assets/maps/custom/eterno_jump.json", 7}, {"assets/maps/custom/slide_moonlight.json", 5},
-        {"assets/maps/soul_sanctum.json", 19},
+        {"assets/maps/311_soul_sanctum.json", 19},
     };
     for (size_t i = 0; i < sizeof(maps) / sizeof(maps[0]); i++) test_map(maps[i].path, maps[i].triggers);
     for (int i = 0; i < g_json_count; i++) cJSON_Delete(g_jsons[i]);

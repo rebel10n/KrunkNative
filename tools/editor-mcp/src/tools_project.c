@@ -24,7 +24,7 @@ static int resolve_map_path(Ctx *ctx, const char *ref, char *out, const size_t s
         if (idx >= 0) {
             const MapCatalogEntry *e = map_catalog_at((size_t) idx);
             char rel[PATH_MAX];
-            snprintf(rel, sizeof(rel), "assets/%s", e->path); // the catalogue's file (maps/v7/, maps/custom/, v3 maps/)
+            snprintf(rel, sizeof(rel), "assets/%s", e->path); // the catalogue's file (maps/, maps/custom/)
             return ctx_safe_path(ctx, rel, 0, out, size, err, errsz);
         }
         if (idx == -2) {
@@ -907,7 +907,7 @@ const ToolDef g_tools_project[] = {
      S({"type":"object","properties":{}}), 1, 0, 1, 0, t_projects_list},
     {"map_open", "Open a map",
      "Open a map file as a project and focus it. path: a .json under the allowed dirs (relative paths are relative to the "
-     "KrunkNative root), or a catalog name (\"burg\", \"Kanji\", \"old_burg\"). editor:true opens it in the live editor instead.",
+     "KrunkNative root), or a catalog name (\"burg\", \"Kanji\", \"311_kanji\", \"152_burg\"). editor:true opens it in the live editor instead.",
      S({"type":"object","properties":{"path":{"type":"string"},"editor":{"type":"boolean"},"reload":{"type":"boolean","description":"re-read an already open file (drops unsaved changes)"},"focus":{"type":"boolean","default":true}},"required":["path"]}),
      0, 0, 1, 0, t_map_open},
     {"project_open", "Open a project", "Alias of map_open (path, editor, reload).",

@@ -1,6 +1,6 @@
 #!/bin/bash
 # KrunkNative world capture at a pinned camera pose (client/src/debug_capture.c).
-# usage: world-native.sh <map name | map.json path> "<x,y,z,pitch,yaw>" <out.png> [build dir]
+# usage: world-native.sh <v3.1.1 map name (its assets/maps/311_<name>.json) | map.json path> "<x,y,z,pitch,yaw>" <out.png> [build dir]
 # Env: SRC (repo root to run from, default: this checkout), CFG (XDG_CONFIG_HOME so the
 # user's stored settings do not leak in; default an empty /tmp dir; put a
 # krunknative/knSettings.json there for setting runs, e.g. {"lighting":2}), FOV (default 90),
@@ -12,7 +12,7 @@ SRC=${SRC:-$(cd "$(dirname "$0")/../.." && pwd)}
 CFG=${CFG:-/tmp/kn-world-cfg}; mkdir -p "$CFG"
 case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
 case "$BUILD" in /*) ;; *) BUILD="$PWD/$BUILD" ;; esac
-case "$MAP" in *.json) MAPFILE=$(cd "$(dirname "$MAP")" && pwd)/$(basename "$MAP") ;; *) MAPFILE="assets/maps/$MAP.json" ;; esac
+case "$MAP" in *.json) MAPFILE=$(cd "$(dirname "$MAP")" && pwd)/$(basename "$MAP") ;; *) MAPFILE="assets/maps/311_$MAP.json" ;; esac # a v3.1.1 map name (world-ref.js): its 311_ file
 cd "$SRC" || exit 1
 if [ -z "${EGL_DEVICE:-}" ]; then
   RUN=(xvfb-run -a -s "-screen 0 1280x720x24" env LIBGL_ALWAYS_SOFTWARE=1)

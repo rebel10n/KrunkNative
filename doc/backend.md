@@ -1160,7 +1160,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 | `mode_max_players` | `{}` | per-mode lobby size, keys = mode alias/name/id (`{"tdm":10}`) |
 | `team_size` | `0` | team modes: lobby size = 2 × team_size (0 = off) |
 | `mode_team_size` | `{}` | per-mode team size; `mode_max_players` wins over team sizes |
-| `maps` | `[]` (Krunker rotation) | rotation: map catalogue names, keys or indices (`shared/include/map_catalog.h`: `"Burg"`, `"old_burg"`, `"13"`) |
+| `maps` | `[]` (Krunker rotation) | rotation: map catalogue names, keys or indices (`shared/include/map_catalog.h`: `"Burg"`, `"311_burg"` (the v3.1.1 Burg), `"152_burg"`, `"13"`; the old keys `"v3_burg"` / `"old_burg"` still resolve) |
 | `modes` | `["ffa"]` | rotation modes (aliases/names/ids) or `"rotation"` (Krunker's public mode rotation) |
 | `custom_map_dirs` | `[]` | extra directories of map JSONs appended to the rotation (catalogue keys are skipped) |
 | `round_seconds` | `0` | round length override for every mode (0 = the mode's game time) |

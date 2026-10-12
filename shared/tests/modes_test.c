@@ -1527,8 +1527,8 @@ static void test_progression(Game *game) {
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *sandstorm = NULL;
-    if (load_json_file("assets/maps/sandstorm.json", &sandstorm) && load_json_file("../assets/maps/sandstorm.json", &sandstorm)) {
-        printf("Failed to load assets/maps/sandstorm.json (run from the repository root)\n");
+    if (load_json_file("assets/maps/311_sandstorm.json", &sandstorm) && load_json_file("../assets/maps/311_sandstorm.json", &sandstorm)) {
+        printf("Failed to load assets/maps/311_sandstorm.json (run from the repository root)\n");
         return 1;
     }
     g_test_maps[0] = sandstorm;
