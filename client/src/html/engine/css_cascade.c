@@ -342,9 +342,16 @@ static int apply_decl(CssComputed *out, const CssDecl *d, const CssComputed *par
 
 /* Computed-value-time fixups that depend on several properties:
  * border-*-width / outline-width compute to 0 when the style is none or
- * hidden (CSS Backgrounds 3). */
+ * hidden (CSS Backgrounds 3); overflow visible/clip on one axis computes to
+ * auto/hidden when the other axis is hidden/scroll/auto (CSS Overflow 3). */
 static void fixup_computed(CssComputed *c)
 {
+    const int vis_x = c->overflow_x == CSS_OVERFLOW_VISIBLE || c->overflow_x == CSS_OVERFLOW_CLIP;
+    const int vis_y = c->overflow_y == CSS_OVERFLOW_VISIBLE || c->overflow_y == CSS_OVERFLOW_CLIP;
+    if (vis_x != vis_y) {
+        uint8_t *o = vis_x ? &c->overflow_x : &c->overflow_y;
+        *o = *o == CSS_OVERFLOW_VISIBLE ? CSS_OVERFLOW_AUTO : CSS_OVERFLOW_HIDDEN;
+    }
     for (int i = 0; i < 4; i++) {
         if (c->border_style[i] == CSS_BORDER_STYLE_NONE || c->border_style[i] == CSS_BORDER_STYLE_HIDDEN) {
             c->border_width[i] = 0.0f;

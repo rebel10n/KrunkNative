@@ -3,8 +3,8 @@
  *
  * Build (throwaway, from the repository root):
  *   cc -std=c11 -g -Wall -Wextra -Iclient/src/html/engine \
- *      client/src/html/engine/svg.c client/src/html/engine/tests/test_svg.c -lm -o /tmp/test_svg
- *   /tmp/test_svg [repo_root]
+ *      client/src/html/engine/svg.c client/src/html/engine/tests/test_svg.c -lm -o test_svg
+ *   ./test_svg [repo_root]
  *
  * Checks sniffing, intrinsic sizes, the viewBox -> viewport mapping that
  * Chrome applies to SVG images (preserveAspectRatio meet/slice/none, the
@@ -218,7 +218,7 @@ static void test_page_icons(const char *root) {
         /* hub Clan Wars nav icon: <img style="width:60px"> */
         {"ui/img/crossed_swords_0.svg", 512, 512, 60, 60, {12, 14, 47, 47}},
         {"ui/img/shaking_hands.svg", 980, 628, 100, 100, {3, 21, 95, 78}},   /* letterboxed (meet) */
-        {"ui/img/medal.svg", 400, 400, 40, 40, {-1, -1, -1, -1}},
+        {"ui/img/medals/badge_0.svg", 400, 400, 40, 40, {-1, -1, -1, -1}}, /* v3.1.1 img/medal.svg, moved in v7.1.4 */
     };
     char path[1024];
     for (size_t i = 0; i < sizeof icons / sizeof icons[0]; i++) {

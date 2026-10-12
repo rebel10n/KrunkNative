@@ -196,6 +196,20 @@ static void test_shaping(TextSystem *ts) {
         CHECK(n == 1 && g[0].glyph_index, "inventory ligature %s -> 1 glyph", used[i]);
     }
 
+    // Material Icons Outlined (v7 menu items, header social buttons): its own ligature table
+    TextFont *outl = text_font(ts, "material icons outlined", 24, 400, 0);
+    CHECK(text_face_is_icon_font(text_font_face(outl)), "material icons outlined flagged as icon font");
+    static const char *const outlined[] = {"person", "storefront", "flag", "public", "sports_esports", "color_lens",
+        "settings", "exit_to_app", "tiktok", "discord", "reddit"};
+    for (size_t i = 0; i < sizeof outlined / sizeof *outlined; i++) {
+        n = text_shape(outl, outlined[i], strlen(outlined[i]), 0, g, 64, &total);
+        CHECK(n == 1 && g[0].glyph_index && g[0].face == text_font_face(outl), "outlined ligature %s -> 1 glyph", outlined[i]);
+    }
+    n = text_shape(icon, "person", 6, 0, g, 64, &total);
+    const unsigned filled_gi = n == 1 ? g[0].glyph_index : 0;
+    n = text_shape(outl, "person", 6, 0, g, 64, &total);
+    CHECK(n == 1 && filled_gi && g[0].glyph_index != filled_gi, "outlined person is not the filled glyph index");
+
     // kerning: header.ttf has a kern table, L/T = -108/1000 em
     float l = text_measure(head, "L", 1, 0), t = text_measure(head, "T", 1, 0), lt = text_measure(head, "LT", 2, 0);
     printf("  headerfont kerning: L %.3f + T %.3f = %.3f, LT = %.3f (kern %.3f, expect %.3f)\n", l, t, l + t, lt, lt - l - t, -108 * 32 / 1000.0f);
@@ -451,6 +465,8 @@ int main(int argc, char **argv) {
     CHECK(!text_register_face(ts, "headerfont", "css/fonts/header.ttf", 400, TEXT_STYLE_NORMAL), "register headerfont");
     // registered exactly as the cascade sees it: the woff2 url from material-icons.css
     CHECK(!text_register_face(ts, "material icons", "css/fonts/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2", 400, TEXT_STYLE_NORMAL), "register material icons (woff2 -> ttf)");
+    // v7.1.4's material-icons-outlined.css woff2 -> the import's material-icons-outlined.ttf
+    CHECK(!text_register_face(ts, "material icons outlined", "css/fonts/gok-H7zzDkdnRel8-DQ6KAXJ69wP1tGnf4ZGhUce.woff2", 400, TEXT_STYLE_NORMAL), "register material icons outlined (woff2 -> ttf)");
 
     test_fonts_and_metrics(ts);
     test_shaping(ts);

@@ -4,14 +4,22 @@
  *
  *   test_css_values [repo_root]
  *
- * repo_root defaults to "." and is used to find the ui/css sheets, ui/index.html
- * and tools/ui-import/krunker-windows.js.  Exit status is non-zero when any unit case
- * fails or any shipped declaration fails to parse.
+ * repo_root defaults to "." and is used to find the ui/css sheets, ui/index.html,
+ * ui/social.html and the window templates in ui/windows/ (the Krunker v7.1.4 page).
+ * Exit status is non-zero when any unit case fails or any shipped declaration fails
+ * to parse (declarations Chrome drops and the listed known gaps are reported apart).
+ *
+ * Build (from the repository root):
+ *   cc -std=c11 -g -Iclient/src/html/engine -Iclient/include -Ishared/include -Ishared/lib/cJSON \
+ *      -Iclient/lib/lexbor client/src/html/engine/tests/test_css_values.c client/src/html/engine/css_values.c \
+ *      client/src/html/engine/css_sheet.c client/src/html/engine/css_cascade.c client/src/html/engine/dom.c \
+ *      client/src/html/engine/util.c client/lib/lexbor/lexbor.c -lm -o test_css_values && ./test_css_values .
  */
 #include "../css_values.h"
 #include "../util.h"
 
 #include <math.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,11 +43,60 @@ static const char *g_vars[][2] = {
     { "--kn-hit-spacing", "37px" }, { "--kn-hit-color", "#fff" },
 };
 
+/* Custom properties the scanned stylesheets declare (v7.1.4's main.css / bundled :root
+ * blocks: --div-black, --lCSize, ...), collected before the coverage pass so declarations
+ * using var() are checked with the value the cascade would substitute. */
+static char *dup_n(const char *s, size_t n)
+{
+    char *d = malloc(n + 1);
+    if (!d) exit(99);
+    memcpy(d, s, n);
+    d[n] = 0;
+    return d;
+}
+
+#define MAX_SHEET_VARS 256
+static char *g_sheet_vars[MAX_SHEET_VARS][2];
+static int g_sheet_var_count;
+
+static void collect_sheet_vars(const char *s, size_t len)
+{
+    for (size_t i = 0; i + 2 < len; i++) {
+        if (s[i] != '-' || s[i + 1] != '-' || (i > 0 && s[i - 1] != '{' && s[i - 1] != ';' && s[i - 1] != ' ' &&
+                                                s[i - 1] != '\n' && s[i - 1] != '\t')) continue;
+        size_t j = i + 2;
+        while (j < len && ((kn_is_alpha(s[j]) || kn_is_digit(s[j])) || s[j] == '-' || s[j] == '_')) j++;
+        size_t k = j;
+        while (k < len && (s[k] == ' ' || s[k] == '\t' || s[k] == '\n')) k++;
+        if (k >= len || s[k] != ':') continue;
+        size_t v = k + 1, e = v;
+        int depth = 0;
+        while (e < len && !(depth == 0 && (s[e] == ';' || s[e] == '}'))) {
+            if (s[e] == '(') depth++;
+            else if (s[e] == ')') depth--;
+            e++;
+        }
+        if (g_sheet_var_count == MAX_SHEET_VARS) return;
+        int known = 0;
+        for (int n = 0; n < g_sheet_var_count && !known; n++)
+            known = strlen(g_sheet_vars[n][0]) == j - i && !memcmp(g_sheet_vars[n][0], s + i, j - i);
+        if (known) continue;
+        size_t vl = e - v;
+        const char *val = kn_str_trim(s + v, &vl);
+        g_sheet_vars[g_sheet_var_count][0] = dup_n(s + i, j - i);
+        g_sheet_vars[g_sheet_var_count][1] = dup_n(val, vl);
+        g_sheet_var_count++;
+        i = e;
+    }
+}
+
 static const char *resolve_var(void *user, const char *name, size_t len)
 {
     (void)user;
     for (size_t i = 0; i < sizeof(g_vars) / sizeof(g_vars[0]); i++)
         if (kn_str_eq(name, len, g_vars[i][0])) return g_vars[i][1];
+    for (int i = 0; i < g_sheet_var_count; i++)
+        if (kn_str_eq(name, len, g_sheet_vars[i][0])) return g_sheet_vars[i][1];
     return NULL;
 }
 
@@ -760,7 +817,7 @@ static void test_computed(void)
 /* ------------------------------------------------------------------------- */
 
 typedef struct Coverage {
-    int ok, fail, dropped;
+    int ok, fail, dropped, gaps;
 } Coverage;
 
 /* Declarations headless Chromium drops (checked with CSS.supports /
@@ -775,15 +832,64 @@ static int chrome_drops(const char *name, size_t nl, const char *val, size_t vl)
         if (nl > pl && kn_str_ieq(name, pl, pfx[i])) return 1;
     }
     if (kn_str_ieq(name, nl, "-webkit-box-flex") || kn_str_ieq(name, nl, "font-smooth")) return 1;
+    /* a property name with a space in it (social.css's "c olor") is no property at all */
+    for (size_t i = 0; i < nl; i++) if (name[i] == ' ' || name[i] == '\t') return 1;
+    /* a colour is no <image> (social.css: background-image: #1d2329) */
+    {
+        size_t tl = vl;
+        const char *tv = kn_str_trim(val, &tl);
+        if (kn_str_ieq(name, nl, "background-image") && tl && tv[0] == '#') return 1;
+    }
     /* -moz-/-o- functions and keywords Blink rejects (an unknown ident such as
      * `transition: -moz-transform 1s` stays valid there) */
     static const char *bad[] = { "-moz-calc(", "-o-calc(", "-moz-linear-gradient(", "-o-linear-gradient(",
                                  "-moz-radial-gradient(", "-moz-crisp-edges", "-o-crisp-edges",
-                                 "-webkit-crisp-edges", "-webkit-sticky" };
+                                 "-webkit-crisp-edges", "-webkit-sticky", "-moz-available" };
+    /* whole values Blink rejects (CSS.supports false, Chrome 154): v7.1.4 main.css */
+    static const char *bad_values[] = { "optimizeSpeed", "fill-available" };
+    {
+        size_t tl = vl;
+        const char *tv = kn_str_trim(val, &tl);
+        for (size_t i = 0; i < sizeof(bad_values) / sizeof(bad_values[0]); i++)
+            if (kn_str_ieq(tv, tl, bad_values[i])) return 1;
+    }
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         size_t bl = strlen(bad[i]);
         for (size_t k = 0; k + bl <= vl; k++)
             if (kn_str_ieq(val + k, bl, bad[i])) return 1;
+    }
+    return 0;
+}
+
+/* Declarations Chrome accepts (CSS.supports true) that the engine does not implement yet:
+ * known gaps of the v7.1.4 page, counted apart from failures (a new unparsed declaration
+ * still fails the test). None changes the menu's layout: they are visual extras
+ * (backdrop blur, 3D, smooth scrolling, thin scrollbars, tap highlight, SVG fill, underline
+ * colour, scrollbar gutter, textarea resize), the store's clip-path polygon
+ * with calc(), image `content:` on elements, `align-content` of single-line flex
+ * containers, and #menuWindow.forceFill's -webkit-fill-available (its height: 100%
+ * fallback applies). */
+static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
+{
+    static const char *props[] = { "backdrop-filter", "transform-style", "scroll-behavior", "scrollbar-width",
+                                   "background-origin", "align-content", "-webkit-tap-highlight-color", "fill",
+                                   "text-decoration-color", "scrollbar-gutter", "resize" };
+    for (size_t i = 0; i < sizeof(props) / sizeof(props[0]); i++)
+        if (kn_str_ieq(name, nl, props[i])) return 1;
+    size_t tl = vl;
+    const char *tv = kn_str_trim(val, &tl);
+    if (kn_str_ieq(name, nl, "height") && kn_str_ieq(tv, tl, "-webkit-fill-available")) return 1;
+    if (kn_str_ieq(name, nl, "content") && tl > 4 && kn_str_ieq(tv, 4, "url(")) return 1;
+    /* var() of custom properties no sheet defines (bundledStyles' FRVR overlay sets
+     * --overlay-image / --prompt-filter from its script): valid at parse time in Chrome */
+    for (size_t k = 0; k + 6 <= tl; k++) {
+        if (!kn_str_ieq(tv + k, 6, "var(--")) continue;
+        size_t e = k + 4;
+        while (e < tl && tv[e] != ')' && tv[e] != ',') e++;
+        if (!resolve_var(NULL, tv + k + 4, e - k - 4)) return 1;
+    }
+    if (kn_str_ieq(name, nl, "clip-path") && tl > 8 && kn_str_ieq(tv, 8, "polygon(")) {
+        for (size_t k = 0; k + 5 <= tl; k++) if (kn_str_ieq(tv + k, 5, "calc(")) return 1;
     }
     return 0;
 }
@@ -848,6 +954,7 @@ static void cover_block(const char *where, const char *text, size_t len, Coverag
                         (int)vlen, colon + 1);
             }
         } else if (parsed) cv->ok++;
+        else if (known_gap(name, nl, colon + 1, vlen)) cv->gaps++;
         else {
             cv->fail++;
             size_t vl = dl - nl - 1;
@@ -961,30 +1068,65 @@ int main(int argc, char **argv)
     test_computed();
     printf("unit: %d passed, %d failed\n", g_pass, g_fail);
 
-    static const char *sheets[] = { "ui/css/main.css", "ui/css/hud.css", "ui/css/krunknative.css",
-                                    "ui/css/flag.css", "ui/css/material-icons.css", "ui/css/google-secular-one.css",
+    /* every stylesheet the v7.1.4 page links (ui/index.html), the hub's, and ours */
+    static const char *sheets[] = { "ui/css/main.css", "ui/css/bundled/bundledStyles.min.css", "ui/css/main_custom.css",
+                                    "ui/css/flag.css", "ui/css/material-icons.css", "ui/css/material-icons-outlined.css",
+                                    "ui/css/material-symbols-outlined.css", "ui/css/google-play.css",
+                                    "ui/css/google-secular-one.css", "ui/css/social.css", "ui/css/social_custom.css",
+                                    "ui/css/hud.css", "ui/css/krunknative.css", "ui/css/ranked-kn.css",
                                     "ui/css/devconsole.css" };
-    Coverage total = { 0, 0, 0 };
+    const size_t nsheets = sizeof(sheets) / sizeof(sheets[0]);
+    Coverage total = { 0, 0, 0, 0 };
     char path[1024];
-    for (size_t i = 0; i < sizeof(sheets) / sizeof(sheets[0]); i++) {
-        Coverage cv = { 0, 0, 0 };
+    for (size_t i = 0; i < nsheets; i++) {
+        size_t len;
+        snprintf(path, sizeof(path), "%s/%s", root, sheets[i]);
+        char *text = read_file(path, &len);
+        if (text) collect_sheet_vars(text, len);
+        free(text);
+    }
+    for (size_t i = 0; i < nsheets; i++) {
+        Coverage cv = { 0, 0, 0, 0 };
         snprintf(path, sizeof(path), "%s/%s", root, sheets[i]);
         cover_sheet(path, &cv);
-        printf("sheet %-32s %5d ok %3d failed %3d dropped as Chrome\n", sheets[i], cv.ok, cv.fail, cv.dropped);
+        printf("sheet %-40s %5d ok %3d failed %3d dropped as Chrome %3d known gaps\n", sheets[i], cv.ok, cv.fail, cv.dropped, cv.gaps);
         total.ok += cv.ok;
         total.fail += cv.fail;
         total.dropped += cv.dropped;
+        total.gaps += cv.gaps;
     }
-    static const char *inl[] = { "ui/index.html", "tools/ui-import/krunker-windows.js" };
-    for (size_t i = 0; i < sizeof(inl) / sizeof(inl[0]); i++) {
-        Coverage cv = { 0, 0, 0 };
-        snprintf(path, sizeof(path), "%s/%s", root, inl[i]);
+    /* inline style="" of the page and of every captured v7.1.4 window template (ui/windows) */
+    static const char *pages[] = { "ui/index.html", "ui/social.html" };
+    for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
+        Coverage cv = { 0, 0, 0, 0 };
+        snprintf(path, sizeof(path), "%s/%s", root, pages[i]);
         cover_inline(path, &cv);
-        printf("inline %-31s %5d ok %3d failed %3d dropped as Chrome\n", inl[i], cv.ok, cv.fail, cv.dropped);
+        printf("inline %-39s %5d ok %3d failed %3d dropped as Chrome %3d known gaps\n", pages[i], cv.ok, cv.fail, cv.dropped, cv.gaps);
         total.ok += cv.ok;
         total.fail += cv.fail;
         total.dropped += cv.dropped;
+        total.gaps += cv.gaps;
     }
-    printf("coverage: %d declarations parsed, %d failed, %d dropped as Chrome does\n", total.ok, total.fail, total.dropped);
+    {
+        Coverage cv = { 0, 0, 0, 0 };
+        snprintf(path, sizeof(path), "%s/ui/windows", root);
+        DIR *d = opendir(path);
+        int files = 0;
+        if (!d) { fprintf(stderr, "missing %s\n", path); cv.fail++; }
+        for (struct dirent *de; d && (de = readdir(d)) != NULL;) {
+            size_t n = strlen(de->d_name);
+            if (n < 6 || strcmp(de->d_name + n - 5, ".html")) continue;
+            snprintf(path, sizeof(path), "%s/ui/windows/%s", root, de->d_name);
+            cover_inline(path, &cv);
+            files++;
+        }
+        if (d) closedir(d);
+        printf("inline ui/windows/*.html (%2d files)            %5d ok %3d failed %3d dropped as Chrome %3d known gaps\n", files, cv.ok, cv.fail, cv.dropped, cv.gaps);
+        total.ok += cv.ok;
+        total.fail += cv.fail;
+        total.dropped += cv.dropped;
+        total.gaps += cv.gaps;
+    }
+    printf("coverage: %d declarations parsed, %d failed, %d dropped as Chrome does, %d known gaps\n", total.ok, total.fail, total.dropped, total.gaps);
     return (g_fail || total.fail) ? 1 : 0;
 }

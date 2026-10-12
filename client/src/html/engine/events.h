@@ -91,25 +91,41 @@ extern "C" {
  *                                       `return name(...)`, in which case a
  *                                       handler result of 0 cancels default. */
 typedef struct HandlerCall {
-    const char *name;                  /* interned: "showWindow", "windows.0.changeTab", "SOUND.play", "window.open", "kn.hideErrorNotification" */
+    const char *name;                  /* interned: "showWindow", "windows.0.changeTab", "SOUND.play", "window.open", "kn.hideErrorNotification",
+                                          "windows.20.tabIndex=" (an assignment: one arg, the value) */
     HtmlArg args[EV_HANDLER_MAX_ARGS]; /* str fields are interned (never freed) */
     int argc;
     uint8_t returns;
     uint8_t prevent_default;
+    uint8_t stop_propagation;          /* `event.stopPropagation()`: no ancestor handler runs */
+    uint8_t guard_neg;                 /* run when `guard` is false (the ':' branch) */
+    const char *guard;                 /* interned condition name (`cond ? a() : b()`), dispatched with no
+                                          arguments: its handler's return value is the condition; NULL = none */
+    int guard_key;                     /* > 0: run only when the event's keyCode is this (`13 == event.keyCode && f()`,
+                                          `if (event.keyCode == 13) f()`) */
+    uint8_t tern_mask;                 /* bit a: args[a] is `this.checked ? args[a].num : tern_else[a]` */
+    float tern_else[EV_HANDLER_MAX_ARGS];
 } HandlerCall;
 
 /* Parses an (entity-decoded) inline handler attribute.
  *
- * Grammar:
- *   program := stmt (';' stmt)* [';']            (empty statements allowed)
- *   stmt    := 'return' ('false' | 'true' | call) | call | special
+ * Grammar (the subset of JavaScript Krunker's markup uses, v3.1.1 and v7.1.4):
+ *   program := stmt ((';' | ',') stmt)* [';']    (empty statements allowed; the comma
+ *              operator sequences calls: playSelect(),showWindow(6))
+ *   stmt    := 'return' ('false' | 'true' | '!1' | '!0' | call) | call | assign
+ *            | 'event.stopPropagation()' | 'event.preventDefault()'
+ *            | 'if' '(' keytest ')' stmt | keytest '&&' call
+ *            | path '?' call ':' call                  (guard: the path's handler answers)
+ *   keytest := N '==' [window.]event.keyCode | [window.]event.keyCode '==' N
+ *   assign  := path '=' arg                            -> call "path=" with the value
  *   call    := callee '(' [arg (',' arg)*] ')'
  *   callee  := ['window.'] ident (('.' ident) | ('[' digits ']'))*
  *              rendered with '.' separators: windows[0].changeTab -> "windows.0.changeTab";
  *              a leading "window." is dropped unless it is the whole
  *              qualifier (window.open stays "window.open")
- *   arg     := 'str' | "str" (\' \" \\ \n escapes) | number (-?d+(.d+)?)
- *            | true | false | this | this.value | this.checked | event
+ *   arg     := 'str' | "str" | `str` (\' \" \\ \n escapes, no ${}) | number ([-+]?(d+|d*.d+))
+ *            | true | false | !1 | !0 | this | this.value | this.checked | event
+ *            | this.checked '?' number ':' number
  *            | ident[.ident]*  (bare identifier, incl. undefined/null -> HTML_ARG_STR of its text)
  *   special := errorNotification.style.display = 'none'  -> call "kn.hideErrorNotification"
  *

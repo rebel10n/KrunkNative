@@ -3418,7 +3418,12 @@ static void custom_set(CssComputed *c, const char *name, const char *value)
             return;
         }
     }
-    if (!value || c->custom_count >= CSS_MAX_CUSTOM_PROPS) return;
+    if (!value) return;
+    if (c->custom_count >= CSS_MAX_CUSTOM_PROPS) {
+        static int warned;
+        if (!warned++) fprintf(stderr, "[css] more than %d custom properties on one element: %s dropped\n", CSS_MAX_CUSTOM_PROPS, name);
+        return;
+    }
     c->custom[c->custom_count].name = name;
     c->custom[c->custom_count].value = value;
     c->custom_count++;

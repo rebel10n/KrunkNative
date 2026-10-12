@@ -1,8 +1,8 @@
 /*
  * test_widgets.c - form-control tests for widgets.c.
  *
- * Loads the settings header + General tab (ui/windows/settings-head.html,
- * settings-tab-0.html) plus a few extra controls into a Dom, runs the real
+ * Loads v7.1.4's Game Settings window on its General tab
+ * (ui/windows/settings-advanced-0.html) plus a few extra controls into a Dom, runs the real
  * cascade (UA sheet + ui/css/main.css) and drives widgets.c through its
  * public API with a stub host (geometry table, event log).  Checks:
  *   - control classification (unknown/undefined/input types -> text)
@@ -19,7 +19,7 @@
  *     chevron/caret/placeholder)
  *   - with KN_WIDGETS_GL: renders the General tab control row through
  *     gl_backend into /tmp/kn_widgets_row.ppm for a visual check against
- *     doc/ref/krunker-v3.1.1/windows/win-settings-general.png.
+ *     doc/ref/krunker-v7.1.4/windows/win-settings-general.png.
  *
  * Build: see the CMakeLists.txt block at the end of this file.
  * Usage: test_widgets [repo root]   Exit code: number of failed checks.
@@ -193,6 +193,7 @@ int html_ui_dispatch(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     return 1;
 }
 int html_ui_dispatch_listener(const char *elem_id, const HtmlEvent *ev) { (void)elem_id; (void)ev; return 1; }
+int html_ui_take_stop_propagation(void) { return 0; }
 
 static void log_reset(void) { g_nlog = 0; }
 static int log_count(const char *entry)
@@ -238,24 +239,22 @@ static const char *k_extra =
 
 static int load_document(void)
 {
-    size_t hlen, tlen, clen;
-    char *head = read_file("ui/windows/settings-head.html", &hlen);
-    char *tab = read_file("ui/windows/settings-tab-0.html", &tlen);
+    size_t tlen, clen;
+    /* v7.1.4's Game Settings window on its General tab (advanced view): the header
+     * (search, presets, view switch, tab row) and #settHolder with the rows */
+    char *tab = read_file("ui/windows/settings-advanced-0.html", &tlen);
     char *css = read_file("ui/css/main.css", &clen);
     KnStrBuf sb = {0};
     int rc;
-    if (!head || !tab || !css) return -1;
-    kn_sb_append_cstr(&sb, "<!DOCTYPE html><html><head></head><body><div id=\"menuWindow\">");
-    kn_sb_append(&sb, head, hlen);
-    kn_sb_append_cstr(&sb, "<div id=\"settHolder\">");
+    if (!tab || !css) return -1;
+    kn_sb_append_cstr(&sb, "<!DOCTYPE html><html><head></head><body><div id=\"menuWindow\" class=\"stickyHeader dark\">");
     kn_sb_append(&sb, tab, tlen);
-    kn_sb_append_cstr(&sb, "</div></div>");
+    kn_sb_append_cstr(&sb, "</div>");
     kn_sb_append_cstr(&sb, k_extra);
     kn_sb_append_cstr(&sb, "</body></html>");
     g_dom = dom_create();
     rc = dom_load_html(g_dom, sb.data, sb.len);
     kn_sb_free(&sb);
-    free(head);
     free(tab);
     g_ua = css_sheet_load(KN_UA_CSS, strlen(KN_UA_CSS), "ua.css");
     g_main = css_sheet_load(css, clen, "ui/css/main.css");
@@ -298,10 +297,11 @@ static void test_intrinsic(void)
     HtmlElem region = dom_query(g_dom, 0, "#setBod_local select");
     CHECK(lang && region && lang != region, "found the two localisation selects");
 
-    /* .inputGrey2 url input, 12px gamefont: 20 * round(0.731em) + (round(1.757em) - 9) = 180 + 12 */
+    /* .inputGrey2 url input, 15px gamefont (v7.1.4: FrVrKrunkerBold2). Chrome 154 on the same
+     * document (tests/data: see the header): content box 218 x 21 */
     CHECK(widgets_intrinsic_size(g_w, by_id("turl"), NULL, &w, &h), "url intrinsic");
-    CHECK_NEAR(w, 192, 0.5f, "url input content width (capture: 127 device px = 202 css border box)");
-    CHECK_NEAR(h, 17, 0.5f, "url input content height = line-height normal of 12px gamefont");
+    CHECK_NEAR(w, 218, 0.5f, "url input content width (Chrome: 230 css border box - 12 padding)");
+    CHECK_NEAR(h, 21, 0.5f, "url input content height = line-height normal of 15px gamefont");
 
     /* #settSearch: 16px gamefont -> 18 + 4 */
     CHECK(widgets_intrinsic_size(g_w, by_id("settSearch"), NULL, &w, &h), "search intrinsic");
@@ -309,15 +309,15 @@ static void test_intrinsic(void)
 
     /* selects: 4 + ceil(widest) + 1 + 15 by 1 + lh + 1 */
     CHECK(widgets_intrinsic_size(g_w, region, NULL, &w, &h), "region select intrinsic");
-    CHECK_NEAR(w, 4 + 41 + 1 + 15, 0.5f, "\"Local\" select content width (capture: 45 device px = 71.7 css border box)");
-    CHECK_NEAR(h, 19, 0.5f, "\"Local\" select content height");
+    CHECK_NEAR(w, 149, 0.5f, "Default Region select content width from its widest option (Silicon Valley; Chrome 149)");
+    CHECK_NEAR(h, 23, 0.5f, "Default Region select content height (Chrome 23)");
     CHECK(widgets_intrinsic_size(g_w, lang, NULL, &w, &h), "language select intrinsic");
-    CHECK_NEAR(w, 4 + 89 + 16, 0.5f, "Language select width from the longest option (Portuguese)");
+    CHECK_NEAR(w, 129, 0.5f, "Language select width from the longest option (Chrome 129)");
     CHECK(widgets_intrinsic_size(g_w, by_id("settingsPreset"), NULL, &w, &h), "preset select intrinsic");
     CHECK_NEAR(h, 22, 0.5f, "14px preset select content height (capture: 21 device px = 33.5 css border box = 6+1+20+1+6)");
 
     CHECK(widgets_intrinsic_size(g_w, by_id("cb"), NULL, &w, &h) && w == 13 && h == 13, "checkbox 13x13");
-    CHECK(widgets_intrinsic_size(g_w, by_id("slid_lagComp"), NULL, &w, &h) && w == 129 && h == 25, "appearance:none range: 129 x the track height (auto = the 25px thumb)");
+    CHECK(widgets_intrinsic_size(g_w, by_id("slid_lagComp"), NULL, &w, &h) && w == 129 && h == 36, "appearance:none range: 129 x the thumb height (v7 .sliderM thumb 15x36): got %g x %g", w, h);
     CHECK(widgets_intrinsic_size(g_w, by_id("tc"), NULL, &w, &h) && w == 44 && h == 23, "color 44x23 content (50x27 border box)");
     CHECK(!widgets_intrinsic_size(g_w, by_id("th"), NULL, &w, &h), "hidden has no intrinsic size");
 }
@@ -449,9 +449,9 @@ static void test_textarea(void)
     CHECK(widgets_kind(g_w, e) == WIDGET_TEXTAREA, "textarea kind");
     CHECK_STR(widgets_get_value(g_w, e), "first\nsecond", "default value = text, leading newline dropped, CRLF -> LF");
     CHECK(widgets_intrinsic_size(g_w, b, NULL, &w, &h), "textarea intrinsic size");
-    CHECK_NEAR(w, 10 * 12 + 15, 0.5, "cols=10: 10 * avgCharWidth (12) + scrollbar");
+    CHECK_NEAR(w, 10 * 11 + 15, 0.5, "cols=10: 10 * avgCharWidth (11, FrVrKrunkerBold2 16px) + scrollbar (Chrome 125)");
     CHECK_NEAR(h, 3 * 22, 0.5, "rows=3 lines of 22px");
-    CHECK(widgets_intrinsic_size(g_w, e, NULL, &w, &h) && fabsf(w - (20 * 12 + 15)) < 0.5f && fabsf(h - 44) < 0.5f,
+    CHECK(widgets_intrinsic_size(g_w, e, NULL, &w, &h) && fabsf(w - (20 * 11 + 15)) < 0.5f && fabsf(h - 44) < 0.5f,
           "default 20 cols x 2 rows (%g x %g)", w, h);
     set_geom(e, 0, 0, 200, 80, 1, 1, 1, 1, 2, 2, 2, 2);
     host_focus(NULL, e);
@@ -744,7 +744,8 @@ static void test_select(void)
     HtmlElem lang = dom_query(g_dom, 0, "#setBod_local .settName:nth-child(2) select");
     float x, y, w, h;
     int idx;
-    set_geom(lang, 785, 279, 109 + 12, 19 + 12, 0, 0, 0, 0, 6, 6, 6, 6);
+    /* v7.1.4's Language select: 17 options, 15px gamefont, 129 x 23 content + 6px padding */
+    set_geom(lang, 785, 279, 129 + 12, 23 + 12, 0, 0, 0, 0, 6, 6, 6, 6);
     widgets_set_viewport(g_w, 1280, 720);
     log_reset();
     CHECK(widgets_select_index(g_w, lang) == 0, "English selected initially");
@@ -755,15 +756,16 @@ static void test_select(void)
     CHECK(g_focus == lang, "opening focuses the select");
     CHECK(widgets_overlay_rect(g_w, &x, &y, &w, &h), "overlay rect");
     CHECK_NEAR(x, 785, 0.01f, "popup left = select left");
-    CHECK_NEAR(y, 279 + 31, 0.01f, "popup top = select bottom");
-    CHECK_NEAR(w, 121, 0.01f, "popup width = select width (options fit)");
-    CHECK_NEAR(h, 5 * 18 + 2, 0.01f, "popup height = 5 rows x (max(1.2em, lh) + 1) + border");
+    CHECK_NEAR(y, 279 + 35, 0.01f, "popup top = select bottom");
+    CHECK_NEAR(w, 141, 0.01f, "popup width = select width (options fit)");
+    /* rows: max(1.2em = 18, line-height normal 21) + 1 = 22 */
+    CHECK_NEAR(h, 17 * 22 + 2, 0.01f, "popup height = 17 rows x (max(1.2em, lh) + 1) + border");
 
-    widgets_pointer_moved(g_w, 800, y + 1 + 2 * 18 + 5);  /* row 2 = German */
-    CHECK(widgets_mouse_down(g_w, lang, 800, y + 1 + 2 * 18 + 5, EV_BUTTON_LEFT, 0) & EV_WIDGET_CONSUMED, "press on a row is consumed");
-    widgets_mouse_up(g_w, lang, 800, y + 1 + 2 * 18 + 5, EV_BUTTON_LEFT);
+    widgets_pointer_moved(g_w, 800, y + 1 + 2 * 22 + 5);  /* row 2 = Deutsch */
+    CHECK(widgets_mouse_down(g_w, lang, 800, y + 1 + 2 * 22 + 5, EV_BUTTON_LEFT, 0) & EV_WIDGET_CONSUMED, "press on a row is consumed");
+    widgets_mouse_up(g_w, lang, 800, y + 1 + 2 * 22 + 5, EV_BUTTON_LEFT);
     CHECK(widgets_popup_owner(g_w) == 0, "popup closed after choosing");
-    CHECK(widgets_select_index(g_w, lang) == 2, "German chosen (index %d)", widgets_select_index(g_w, lang));
+    CHECK(widgets_select_index(g_w, lang) == 2, "Deutsch chosen (index %d)", widgets_select_index(g_w, lang));
     CHECK_STR(widgets_get_value(g_w, lang), "de", "value de");
     CHECK(log_count("input@?") == 1 && log_count("change@?") == 1, "choose fires input + change");
     CHECK(dom_has_attr(g_dom, dom_query(g_dom, lang, "option[value=de]"), "selected"), "selected attr moved");
@@ -772,7 +774,7 @@ static void test_select(void)
     /* keyboard while closed: Down changes immediately */
     log_reset();
     widgets_key(g_w, lang, 264, 0, EV_PRESS, 0);
-    CHECK(widgets_select_index(g_w, lang) == 3, "ArrowDown while closed selects Korean");
+    CHECK(widgets_select_index(g_w, lang) == 3, "ArrowDown while closed selects Nederlands");
     CHECK(log_count("change@?") == 1, "keyboard change fires change");
     /* keyboard while open: Up moves the hover, Enter commits */
     widgets_key(g_w, lang, EV_KEY_ENTER, 0, EV_PRESS, 0);
@@ -780,7 +782,7 @@ static void test_select(void)
     widgets_key(g_w, lang, 265, 0, EV_PRESS, 0);
     widgets_key(g_w, lang, 265, 0, EV_PRESS, 0);
     widgets_key(g_w, lang, EV_KEY_ENTER, 0, EV_PRESS, 0);
-    CHECK(widgets_popup_owner(g_w) == 0 && widgets_select_index(g_w, lang) == 1, "Up Up Enter -> Spanish (%d)", widgets_select_index(g_w, lang));
+    CHECK(widgets_popup_owner(g_w) == 0 && widgets_select_index(g_w, lang) == 1, "Up Up Enter -> Espanol (%d)", widgets_select_index(g_w, lang));
     /* click outside closes without choosing */
     widgets_open_select(g_w, lang, 790, 285);
     CHECK(widgets_mouse_down(g_w, 0, 10, 10, EV_BUTTON_LEFT, 0) == EV_WIDGET_CONSUMED, "press outside the popup is swallowed");
@@ -790,10 +792,10 @@ static void test_select(void)
     CHECK(widgets_select_index(g_w, lang) == 0 && idx == 1, "set_value picks by option value");
     host_focus(NULL, 0);
     /* popup flips above when it would overflow the viewport */
-    set_geom(lang, 785, 700, 121, 31, 0, 0, 0, 0, 6, 6, 6, 6);
+    set_geom(lang, 785, 700, 141, 35, 0, 0, 0, 0, 6, 6, 6, 6);
     widgets_open_select(g_w, lang, 790, 705);
     widgets_overlay_rect(g_w, &x, &y, &w, &h);
-    CHECK_NEAR(y, 700 - 92, 0.01f, "popup flips above near the bottom");
+    CHECK_NEAR(y, 700 - (17 * 22 + 2), 0.01f, "popup flips above near the bottom");
     widgets_close_popup(g_w);
     host_focus(NULL, 0);
 }
@@ -1047,7 +1049,7 @@ static void test_paint(void)
     HtmlElem region = dom_query(g_dom, 0, "#setBod_local select"), search = by_id("settSearch");
     int i;
 
-    /* range .sliderM 250x15, value 1: thumb 15x25 #2196f3 r4 at x = 235, centred (y = -5) */
+    /* range .sliderM 250x15, value max: v7.1.4's thumb 15x36 #fff r2 at x = 235, centred (y = -10.5) */
     {
         WidgetGeom g = {0, 0, 250, 15, {0, 0, 0, 0}, {0, 0, 0, 0}};
         dl_clear(&dl);
@@ -1057,11 +1059,11 @@ static void test_paint(void)
         if (i >= 0) {
             const DlItem *it = &dl.items[i];
             CHECK_NEAR(it->u.rrect.rect.x, 235, 0.01f, "thumb x at value=max");
-            CHECK_NEAR(it->u.rrect.rect.y, -5, 0.01f, "thumb centred on the 15px track (overhangs 5px)");
+            CHECK_NEAR(it->u.rrect.rect.y, -10.5, 0.01f, "thumb centred on the 15px track (overhangs 10.5px)");
             CHECK_NEAR(it->u.rrect.rect.w, 15, 0.01f, "thumb width from ::-webkit-slider-thumb");
-            CHECK_NEAR(it->u.rrect.rect.h, 25, 0.01f, "thumb height from ::-webkit-slider-thumb");
-            CHECK_NEAR(it->u.rrect.radii.tl, 4, 0.01f, "thumb radius 4");
-            CHECK(it->u.rrect.color.r == 0x21 && it->u.rrect.color.g == 0x96 && it->u.rrect.color.b == 0xf3, "thumb colour #2196f3");
+            CHECK_NEAR(it->u.rrect.rect.h, 36, 0.01f, "thumb height from ::-webkit-slider-thumb");
+            CHECK_NEAR(it->u.rrect.radii.tl, 2, 0.01f, "thumb radius 2");
+            CHECK(it->u.rrect.color.r == 0xff && it->u.rrect.color.g == 0xff && it->u.rrect.color.b == 0xff, "thumb colour #fff");
         }
         CHECK(find_op(&dl, 0, DL_RECT) < 0, "appearance:none range paints no native track (the CSS background is the track)");
     }
@@ -1271,10 +1273,10 @@ static void test_gl_render(void)
     widgets_key(g_w, aspect, 263, 0, EV_PRESS, EV_MOD_SHIFT);
     widgets_paint(g_w, aspect, &g, &a);
     /* open the language popup last (overlay) */
-    set_geom(lang, 100, 60, 121, 31, 0, 0, 0, 0, 6, 6, 6, 6);
+    set_geom(lang, 100, 60, 141, 35, 0, 0, 0, 0, 6, 6, 6, 6);
     widgets_set_viewport(g_w, W, H);
     widgets_open_select(g_w, lang, 110, 70);
-    widgets_pointer_moved(g_w, 110, 60 + 31 + 1 + 18 + 5);
+    widgets_pointer_moved(g_w, 110, 60 + 35 + 1 + 22 + 5);
     widgets_paint_overlay(g_w, &a);
     CHECK(dl.n > 20, "render list has items (%d)", dl.n);
 
@@ -1288,9 +1290,9 @@ static void test_gl_render(void)
     /* thumb pixel: x = 10 + 235 + 7 = 252, y = 115 + 7 */
     {
         const unsigned char *p = img + ((H - 1 - 122) * W + 252) * 4;
-        CHECK(abs(p[0] - 0x21) < 8 && abs(p[1] - 0x96) < 8 && abs(p[2] - 0xf3) < 8, "thumb pixel is #2196f3 (%d %d %d)", p[0], p[1], p[2]);
-        p = img + ((H - 1 - 111) * W + 252) * 4; /* 4px above the track: still thumb (5px overhang) */
-        CHECK(abs(p[0] - 0x21) < 8 && abs(p[2] - 0xf3) < 8, "thumb overhangs the track (%d %d %d)", p[0], p[1], p[2]);
+        CHECK(p[0] > 247 && p[1] > 247 && p[2] > 247, "thumb pixel is #fff (%d %d %d)", p[0], p[1], p[2]);
+        p = img + ((H - 1 - 106) * W + 252) * 4; /* 9px above the track: still thumb (10.5px overhang) */
+        CHECK(p[0] > 247 && p[2] > 247, "thumb overhangs the track (%d %d %d)", p[0], p[1], p[2]);
         p = img + ((H - 1 - 172) * W + 30) * 4;
         CHECK(abs(p[0] - 0xeb) < 8 && abs(p[1] - 0x56) < 8, "swatch pixel is #eb5656 (%d %d %d)", p[0], p[1], p[2]);
     }
@@ -1320,11 +1322,11 @@ int main(int argc, char **argv)
         g_text = text_create(ui_dir);
         CHECK(g_text != NULL, "text_create");
         if (g_text) {
-            text_register_face(g_text, "gamefont", "css/fonts/font2.ttf", 400, TEXT_STYLE_NORMAL);
+            text_register_face(g_text, "gamefont", "css/fonts/FrVrKrunkerBold2.ttf", 400, TEXT_STYLE_NORMAL); /* v7.1.4 main.css gamefont */
             text_register_face(g_text, "headerfont", "css/fonts/header.ttf", 400, TEXT_STYLE_NORMAL);
         }
     }
-    snprintf(fontpath, sizeof fontpath, "%s/ui/css/fonts/font2.ttf", g_root);
+    snprintf(fontpath, sizeof fontpath, "%s/ui/css/fonts/FrVrKrunkerBold2.ttf", g_root);
     if (FT_Init_FreeType(&g_ft) == 0 && FT_New_Face(g_ft, fontpath, 0, &g_gamefont) != 0) g_gamefont = NULL;
     CHECK(g_gamefont != NULL, "gamefont loaded for char widths");
 
@@ -1382,12 +1384,12 @@ int main(int argc, char **argv)
 }
 
 /*
-Throwaway CMakeLists.txt (e.g. /tmp/kn_widgets/CMakeLists.txt):
+Throwaway CMakeLists.txt (in a scratch directory; KN = the repository):
 
 cmake_minimum_required(VERSION 3.16)
 project(kn_widgets_test C)
 set(CMAKE_C_STANDARD 11)
-set(KN /home/user/src/KrunkNative)
+set(KN /path/to/KrunkNative)
 foreach(dep ZLIB BZIP2 PNG HARFBUZZ BROTLI)
   set(FT_DISABLE_${dep} TRUE CACHE BOOL "" FORCE)
 endforeach()
@@ -1398,13 +1400,18 @@ add_subdirectory(${KN}/client/lib/lexbor lexbor)
 add_subdirectory(${KN}/client/lib/freetype freetype)
 add_subdirectory(${KN}/client/lib/glad glad)
 add_subdirectory(${KN}/client/lib/glfw glfw)
+add_subdirectory(${KN}/shared/lib/cJSON cJSON)
 set(E ${KN}/client/src/html/engine)
-add_executable(test_widgets ${E}/tests/test_widgets.c ${E}/widgets.c ${E}/dom.c ${E}/util.c
+add_executable(test_widgets ${E}/tests/test_widgets.c ${E}/widgets.c ${E}/events.c ${E}/dom.c ${E}/util.c
     ${E}/css_sheet.c ${E}/css_values.c ${E}/css_cascade.c ${E}/text.c
     ${E}/gl_backend.c ${KN}/client/src/shader.c ${KN}/shared/src/utils.c)
-target_include_directories(test_widgets PRIVATE ${E} ${KN}/client/include ${KN}/shared/include)
-target_compile_definitions(test_widgets PRIVATE KN_REPO_ROOT="${KN}" KN_WIDGETS_GL)
-target_compile_options(test_widgets PRIVATE -g -O1 -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer)
-target_link_options(test_widgets PRIVATE -fsanitize=address,undefined)
-target_link_libraries(test_widgets PRIVATE lexbor freetype glad glfw m)
+target_include_directories(test_widgets PRIVATE ${E} ${KN}/client/include ${KN}/shared/include
+    ${KN}/shared/lib/cJSON ${KN}/client/lib/lexbor)
+target_compile_definitions(test_widgets PRIVATE KN_REPO_ROOT="${KN}" KN_WIDGETS_GL KN_EVENTS_STANDALONE)
+target_compile_options(test_widgets PRIVATE -g -O1 -Wall -Wextra)
+target_link_libraries(test_widgets PRIVATE lexbor freetype glad glfw cJSON m)
+
+Run from a directory named cmake-build-debug next to the repository's assets/ (the GL part loads
+../assets/shaders through assets_path(); elsewhere it is skipped):
+  cd $KN/cmake-build-debug && LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a <build>/test_widgets $KN
 */

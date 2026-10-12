@@ -43,7 +43,7 @@ extern "C" {
 #define CSS_MAX_TRANSITIONS     2
 #define CSS_MAX_BOX_SHADOWS     4
 #define CSS_MAX_GRID_TRACKS     8
-#define CSS_MAX_CUSTOM_PROPS    12
+#define CSS_MAX_CUSTOM_PROPS    96  /* v7.1.4: main.css 21 + bundledStyles.min.css 34 :root properties, + hud.css / social.css */
 #define CSS_MAX_CLIP_POINTS     8
 #define CSS_MAX_FONT_FAMILIES   4
 

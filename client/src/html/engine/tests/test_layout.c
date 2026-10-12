@@ -9,11 +9,11 @@
  *         transform, sticky, rtl scrollbar, custom scrollbar width, ellipsis,
  *         text-transform, min-content, hit testing, <br>/nowrap, inline
  *         fragments, select intrinsic width, incremental boundary relayout).
- * Part 2: the v3.1.1 menu from doc/ref/krunker-v3.1.1/menu/real-1280.dom.html
- *         (Chrome's live DOM incl. its inline styles) with the shipped sheets,
- *         at 1280x720, compared against rects derived from the CSS and pixel
- *         edges measured in real-1280.png.  Prints the expected/measured/delta
- *         table.
+ * Part 2: the v7.1.4 menu from tests/data/v7-menu-1280.html (Chrome's live DOM
+ *         incl. its inline styles) with the shipped sheets, at 1280x720,
+ *         compared against Chrome's getBoundingClientRect of every visible
+ *         element with an id (tests/data/v7-menu-1280.rects).  Prints the
+ *         expected/measured/delta table.
  *
  * Usage: test_layout [repo root]      exit code = number of failures
  */
@@ -612,6 +612,59 @@ static void t_grid_named(void)
 }
 
 /* align-self overrides the flex container's align-items per item. */
+/* display: contents (v7's #headerRightSocial): the element has no box, its children are
+ * flex items of the parent; text inside takes the contents element's style. Custom
+ * properties in calc() (hud.css crosshair arms: top: calc(var(--s) / -2)). */
+static void t_display_contents_calc_var(void)
+{
+    Fx *fx = fx_html(
+        "<div id=dc style='display:flex;width:300px;height:20px'>"
+        "<div id=dc0 style='width:10px;height:10px'></div>"
+        "<div id=dcc style='display:contents'><div id=dc1 style='width:20px;height:10px'></div>"
+        "<div id=dc2 style='width:30px;height:10px'></div></div></div>"
+        "<div id=cv style='--s:100px;position:absolute;left:200px;top:300px'>"
+        "<div id=cv0 style='position:absolute;top:calc(var(--s) / -2);left:calc(var(--s) * 0.5 - 2px);width:4px;height:4px'></div></div>", NULL);
+    HtmlRect dc = rc(fx, "dc");
+    CHECK_NEAR(rc(fx, "dc1").x - dc.x, 10, 0.01, "display:contents: first child is the 2nd flex item");
+    CHECK_NEAR(rc(fx, "dc2").x - dc.x, 30, 0.01, "display:contents: second child is the 3rd flex item");
+    CHECK_NEAR(rc(fx, "dc1").y - dc.y, 0, 0.01, "display:contents: same flex line");
+    HtmlElem dcc = dom_by_id(fx->dom, "dcc");
+    CHECK(dcc && !((ElemData *)dom_elem_data(fx->dom, dcc))->box, "display:contents: no box of its own");
+    HtmlRect cv0 = rc(fx, "cv0");
+    CHECK_NEAR(cv0.y, 250, 0.01, "calc(var(--s) / -2)");
+    CHECK_NEAR(cv0.x, 248, 0.01, "calc(var(--s) * 0.5 - 2px)");
+    /* the custom property set through the inline-style API (hud.css #knCrosshair) */
+    dom_set_style(fx->dom, dom_by_id(fx->dom, "cv"), "--s", "60px");
+    fx_layout(fx);
+    CHECK_NEAR(rc(fx, "cv0").y, 270, 0.01, "calc(var(--s) / -2) after dom_set_style(--s)");
+    fx_free(fx);
+    /* the same through stylesheet rules (ui/css/hud.css #knCrosshair / .knCrossArm-*) */
+    fx = fx_html("<div id=kc><div id=kct class='arm t'></div><div id=kcb class='arm b'></div></div>",
+                 /* v7.1.4's main.css defines 21 :root custom properties: all inherited */
+                 ":root { --a0:0;--a1:0;--a2:0;--a3:0;--a4:0;--a5:0;--a6:0;--a7:0;--a8:0;--a9:0;--b0:0;--b1:0;--b2:0;"
+                 "--b3:0;--b4:0;--b5:0;--b6:0;--b7:0;--b8:0;--b9:0;--c0:0; }\n"
+                 "#kc { --kn-cross-size: 182px; position: absolute; top: 300px; left: 400px; width: 0; height: 0; }\n"
+                 ".arm { position: absolute; width: 4px; height: 21px; left: -2px; }\n"
+                 ".t { top: calc(var(--kn-cross-size) / -2); }\n.b { top: calc(var(--kn-cross-size) / 2 - 21px); }\n");
+    CHECK_NEAR(rc(fx, "kct").y, 300 - 91, 0.01, "sheet: calc(var(--kn-cross-size) / -2)");
+    CHECK_NEAR(rc(fx, "kcb").y, 300 + 91 - 21, 0.01, "sheet: calc(var(--kn-cross-size) / 2 - 21px)");
+    dom_set_style(fx->dom, dom_by_id(fx->dom, "kc"), "--kn-cross-size", "58px");
+    fx_layout(fx);
+    CHECK_NEAR(rc(fx, "kct").y, 300 - 29, 0.01, "sheet: calc(var(--kn-cross-size) / -2) after inline --cs");
+    fx_free(fx);
+}
+
+/* v7's empty Player List: an empty <table> with overflow-y: scroll and a percentage height
+ * inside an auto-height block. Tables are not scroll containers (Chrome ignores overflow
+ * scrolling on them) and the percentage height is indefinite: the table is 0 tall. */
+static void t_empty_table_overflow(void)
+{
+    Fx *fx = fx_html("<div id=pl><table id=pt style='margin-top:8px;overflow-y:scroll;height:calc(100% - 75px)'><tbody></tbody></table></div>", NULL);
+    CHECK_NEAR(rc(fx, "pt").h, 0, 0.01, "empty table with overflow-y:scroll: 0 tall");
+    CHECK_NEAR(rc(fx, "pl").h, 0, 0.01, "its auto-height parent: 0 (the margin collapses through)");
+    fx_free(fx);
+}
+
 static void t_flex_align_self(void)
 {
     Fx *fx = fx_html(
@@ -1324,21 +1377,36 @@ static void report(const char *what, const char *source, HtmlRect got, float x, 
 
 static HtmlRect rect_of(Box *b) { HtmlRect r = { 0, 0, 0, 0 }; if (b) layout_box_rect_in_viewport(b, &r); return r; }
 
+/* Part 2: Krunker v7.1.4's live menu DOM (tests/data/v7-menu-1280.html: Chrome's DOM with its
+ * inline styles, scripts/canvases removed, animations off; tools: see the .rects header) laid
+ * out with the shipped v7 sheets at 1280x720 and compared against Chrome's
+ * getBoundingClientRect of every visible element with an id (tests/data/v7-menu-1280.rects). */
+#define MENU_TOL 2.0f
 static void t_menu(void)
 {
     Fx *fx = calloc(1, sizeof(Fx));
     fx->vw = 1280; fx->vh = 720;
     fx->dom = dom_create();
     size_t len;
-    char *html = read_file("doc/ref/krunker-v3.1.1/menu/real-1280.dom.html", &len);
+    char *html = read_file("client/src/html/engine/tests/data/v7-menu-1280.html", &len);
     dom_load_html(fx->dom, html, len);
-    free(html);
-    static const char *sheets[] = { "ui/css/main.css", "ui/css/flag.css", "ui/css/google-secular-one.css", "ui/css/material-icons.css" };
-    for (int i = 0; i < 4; i++) {
+    static const char *sheets[] = { "ui/css/main.css", "ui/css/bundled/bundledStyles.min.css", "ui/css/main_custom.css",
+                                    "ui/css/flag.css", "ui/css/material-icons.css", "ui/css/material-icons-outlined.css",
+                                    "ui/css/material-symbols-outlined.css", "ui/css/google-play.css" };
+    for (int i = 0; i < 8; i++) {
         char *css = read_file(sheets[i], &len);
         fx->sheets[fx->ns++] = css_sheet_load(css, len, sheets[i]);
         free(css);
     }
+    /* the page's own <style> blocks (index.html's #aHolder rules, the capture's animation-off rule) */
+    for (const char *p = html; (p = strstr(p, "<style>")) != NULL && fx->ns < 8;) {
+        p += 7;
+        const char *e = strstr(p, "</style>");
+        if (!e) break;
+        fx->sheets[fx->ns++] = css_sheet_load(p, (size_t)(e - p), "inline");
+        p = e;
+    }
+    free(html);
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     fx_layout(fx);
@@ -1346,131 +1414,32 @@ static void t_menu(void)
     double ms = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
     printf("menu: restyle+build+layout %.2f ms\n", ms);
 
-    const float k = 0.627f;     /* #uiBase transform: scale(0.627) (Chrome DOM) */
     printf("\n| %-28s | %-9s | %-30s | %-30s | %-23s |\n", "element", "source", "expected x y w h (viewport px)", "measured x y w h", "delta x y w h");
     printf("|------------------------------|-----------|--------------------------------|--------------------------------|-------------------------|\n");
-    Box *ui = bx(fx, "uiBase");
-    report("#uiBase", "css", rect_of(ui), 0, 0, 2040 * k, 1147.5f * k, 0.5f);
-    if (ui) {
-        CHECK_NEAR(layout_offset_width(ui), 2040, 0.01, "#uiBase offsetWidth");
-        CHECK_NEAR(layout_offset_height(ui), 1147.5, 0.01, "#uiBase offsetHeight");
-    }
-    report("#menuItemContainer", "css", rc(fx, "menuItemContainer"), 0, 70 * k, 130 * k, 1077.5f * k, 0.5f);
-    HtmlElem items[8];
-    size_t ni = dom_query_all(fx->dom, 0, ".menuItem", items, 8);
-    CHECK(ni == 7, "7 .menuItem (got %zu)", ni);
-    float seams[8] = { 43.9f, 140.5f, NAN, 333.5f, 430.5f, 526.5f, 623.5f, 719.5f };   /* png seam rows */
-    for (size_t i = 0; i < ni; i++) {
-        Box *b = (Box *)dom_elem_data(fx->dom, items[i])->box;
+    char *rects = read_file("client/src/html/engine/tests/data/v7-menu-1280.rects", &len);
+    int rows = 0;
+    char seen[2048] = " ";
+    for (char *line = strtok(rects, "\n"); line; line = strtok(NULL, "\n")) {
+        char id[64], key[70];
+        float x, y, w, h;
+        if (line[0] == '#' || sscanf(line, "%63s %f %f %f %f", id, &x, &y, &w, &h) != 5) continue;
+        /* a duplicated id (two #editorBtnM): only the first element is addressable */
+        snprintf(key, sizeof(key), " %s ", id);
+        if (strstr(seen, key)) continue;
+        if (strlen(seen) + strlen(key) < sizeof(seen)) strcat(seen, key + 1);
+        HtmlElem e = dom_by_id(fx->dom, id);
+        /* form controls get their natural size from widgets.c, which this test does not run */
+        char tag[16] = "";
+        if (e) { const char *tn = dom_tag(fx->dom, e); if (tn) snprintf(tag, sizeof(tag), "%s", tn); }
+        if (!strcmp(tag, "input") || !strcmp(tag, "select") || !strcmp(tag, "textarea")) continue;
+        ElemData *ed = e ? dom_elem_data(fx->dom, e) : NULL;
         char what[40];
-        snprintf(what, sizeof(what), ".menuItem[%zu]", i);
-        report(what, "css", rect_of(b), 0, (70 + 1077.5f / 7 * (float)i) * k, 130 * k, 1077.5f / 7 * k, 0.5f);
-        if (!isnan(seams[i]) && !isnan(seams[i + 1]))
-            report(what, "png", rect_of(b), 0, seams[i], 81.5f, seams[i + 1] - seams[i], 1.5f);
+        snprintf(what, sizeof(what), "#%s", id);
+        report(what, "chrome", rect_of(ed ? (Box *)ed->box : NULL), x, y, w, h, MENU_TOL);
+        rows++;
     }
-    report("#signedOutHeaderBar", "png", rc(fx, "signedOutHeaderBar"), 0, 0, 205, 44, 1.5f);
-    HtmlElem hr = dom_query(fx->dom, 0, ".headerBarRight");
-    report(".headerBarRight", "png", rect_of(hr ? (Box *)dom_elem_data(fx->dom, hr)->box : NULL), 1091, 0, 189, 44, 1.5f);
-    static const struct { const char *id; float x0, x1; } btn[] = {
-        { "menuBtnHost", 409, 525 }, { "menuBtnBrowser", 532, 626 }, { "menuBtnRanked", 633, 720 },
-        { "inviteButton", 727, 801 }, { "menuBtnJoin", 808, 870 } };
-    for (int i = 0; i < 5; i++) {
-        char what[40];
-        snprintf(what, sizeof(what), "#%s", btn[i].id);
-        /* rows 603 / 632 are partially covered (57 % / ~50 %): edges 603.4 .. 632.5 */
-        report(what, "png", rc(fx, btn[i].id), btn[i].x0, 603.4f, btn[i].x1 - btn[i].x0, 29.1f, 1.5f);
-    }
-    report("#customizeButton", "png", rc(fx, "customizeButton"), 1058, 427, 151, 35, 1.5f);
-    /* abs child of the column flex #menuClassContainer: static position centred like a sole item
-     * (margin box incl. margin-top:-350px); "Guest" ink in the capture: x 1116..1149, baseline 279 */
-    report("#menuClassNameTag", "png", rc(fx, "menuClassNameTag"), 1116, NAN, NAN, NAN, 1.0f);
-    {
-        Box *tag = bx(fx, "menuClassNameTag");
-        const TextRun *gr = tag ? first_run(tag) : NULL;
-        if (gr) {
-            Mat2D m;
-            Box *mc = bx(fx, "menuClassContainer");
-            layout_box_matrix(mc, &m);
-            float by = (mc->y + m.b * (gr->x - mc->x) + m.d * (gr->y - mc->y) + m.f) * k;
-            printf("Guest: tag local y %.4f h %.4f, run baseline local %.4f, viewport baseline %.4f, x-height %.4f\n",
-                   tag->y, tag->h, gr->y, by, tag->fm.x_height);
-            CHECK_NEAR(by, 279.0f, 1.0f, "\"Guest\" baseline (capture)");
-        }
-    }
-    report("#policeButton", "png", rc(fx, "policeButton"), 1020, 423, 29, 39, 1.5f);
-    /* logo: 1024x302 at height 225 -> 762.9 wide, centred on 1020 design px, top 15 */
-    float lw = 1024.0f * 225.0f / 302.0f;
-    report("#mainLogo", "css", rc(fx, "mainLogo"), (1020 - lw / 2) * k, 15 * k, lw * k, 225 * k, 0.5f);
-    report("#classPreviewCanvas", "css", rc(fx, "classPreviewCanvas"), NAN, NAN, 660 * k * 0.8f, 350 * k * 0.8f, 0.5f);
-    HtmlRect ins = rc(fx, "instructions");
-    HtmlRect ins_c = { ins.x + ins.w / 2, ins.y + ins.h / 2, 0, 0 };
-    report("#instructions centre", "css", ins_c, 1020 * k, 573.75f * k, NAN, NAN, 0.5f);
-    report("#instructionHolder", "css", rc(fx, "instructionHolder"), 0, 0, 2040 * k, 1147.5f * k, 0.5f);
-    /* menu class container: abs right:-100 top:140 bottom:130 -> box 140..1017.5, scale(.8) about its centre */
-    report("#menuClassContainer", "css", rc(fx, "menuClassContainer"), NAN, (140 + 877.5f * 0.1f) * k, NAN, 877.5f * 0.8f * k, 0.5f);
-    printf("\n");
-
-    /* geometry helpers on the scaled tree */
-    Box *mi0 = ni ? (Box *)dom_elem_data(fx->dom, items[0])->box : NULL;
-    if (mi0) {
-        float lx, ly;
-        layout_point_to_box(mi0, 40, 90, &lx, &ly);
-        CHECK(NEAR(lx, 40 / k, 0.01) && NEAR(ly, 90 / k, 0.01), "point_to_box through the #uiBase scale (%.2f,%.2f)", lx, ly);
-        Box *h = layout_hit_test(fx->tree, 40, 90, 1);
-        int inside = 0;
-        for (Box *p = h; p; p = p->parent) if (p == mi0) inside = 1;
-        CHECK(inside, "hit test lands in the first .menuItem (%s)", box_id(h));
-    }
-
-    /* incremental: font-size change on #instructions (the `grow` animation) */
-    HtmlElem ie = dom_by_id(fx->dom, "instructions");
-    HtmlRect before_items = rc(fx, "menuItemContainer");
-    dom_set_style(fx->dom, ie, "font-size", "30px");
-    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
-    layout_invalidate_node(fx->tree, dom_elem_node(fx->dom, ie), 0);
-    clock_gettime(CLOCK_MONOTONIC, &t0);
-    int n = layout_run(fx->tree, fx->vw, fx->vh);
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    double inc_ms = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
-    Box *ib = bx(fx, "instructions");
-    Box *boundary = NULL;
-    for (Box *p = ib ? ib->parent : NULL; p; p = p->parent) if (p->flags & BOXF_LAYOUT_BOUNDARY) { boundary = p; break; }
-    CHECK(n == 1 && boundary && strcmp(box_id(boundary), "instructionHolder") == 0,
-          "grow: one boundary relayout at #instructionHolder (%d, %s) in %.3f ms", n, boundary ? box_id(boundary) : "-", inc_ms);
-    printf("grow: incremental relayout %.3f ms (%d boundary)\n", inc_ms, n);
-    HtmlRect inc = rc(fx, "instructions");
-    HtmlRect after_items = rc(fx, "menuItemContainer");
-    CHECK(memcmp(&before_items, &after_items, sizeof(HtmlRect)) == 0, "grow: unrelated boxes untouched");
-    fx_layout(fx);   /* full rebuild for comparison */
-    HtmlRect full = rc(fx, "instructions");
-    CHECK(NEAR(inc.x, full.x, 0.01) && NEAR(inc.y, full.y, 0.01) && NEAR(inc.w, full.w, 0.01) && NEAR(inc.h, full.h, 0.01),
-          "grow: incremental == full layout (%.2f,%.2f %.2fx%.2f vs %.2f,%.2f %.2fx%.2f)", inc.x, inc.y, inc.w, inc.h, full.x, full.y, full.w, full.h);
-    CHECK(layout_run(fx->tree, fx->vw, fx->vh) == 0, "clean tree: layout_run is a no-op");
-
-    /* live scroller cases on the menu: a flex container forced to scroll */
-    {
-        static const char *force = "#menuClassContainer { overflow-y: scroll; }";
-        fx->sheets[fx->ns++] = css_sheet_load(force, strlen(force), "force");
-        dom_mark_all_dirty(fx->dom);
-        fx_layout(fx);
-        Box *mc = bx(fx, "menuClassContainer");
-        LayoutScrollbar sb;
-        CHECK(mc && (mc->flags & BOXF_SCROLL_CONTAINER) && layout_scrollbar(fx->tree, mc, 1, &sb) && NEAR(mc->scrollbar_w, 12, 0.01),
-              "#menuClassContainer overflow-y:scroll (flex) reserves a 12px bar (flags %x, scrollbar_w %.1f)",
-              mc ? mc->flags : 0, mc ? mc->scrollbar_w : -1);
-        if (mc) {
-            Box *cv = bx(fx, "classPreviewCanvas");
-            /* flex column, align-items center: items centred in content box minus the bar */
-            if (cv) CHECK_NEAR(cv->x + cv->w * 0.5f - mc->x, (mc->w - 12) * 0.5f, 0.01, "#menuClassContainer: items centred left of the bar");
-        }
-    }
-
-    if (getenv("KN_LAYOUT_DUMP")) {
-        KnStrBuf sb = { 0 };
-        layout_dump(layout_tree_root(fx->tree), &sb);
-        fputs(sb.data ? sb.data : "", stdout);
-        kn_sb_free(&sb);
-    }
+    free(rects);
+    CHECK(rows > 60, "v7 menu rects compared (%d)", rows);
     fx_free(fx);
 }
 
@@ -1483,9 +1452,11 @@ int main(int argc, char **argv)
     snprintf(ui, sizeof(ui), "%s/ui", g_root);
     g_ts = text_create(ui);
     if (!g_ts) { fprintf(stderr, "text_create failed\n"); return 99; }
-    text_register_face(g_ts, "gamefont", "css/fonts/font2.ttf", 400, TEXT_STYLE_NORMAL);
+    /* v7.1.4 main.css: gamefont = FrVrKrunkerBold2.ttf (v3.1.1 used font2.ttf) */
+    text_register_face(g_ts, "gamefont", "css/fonts/FrVrKrunkerBold2.ttf", 400, TEXT_STYLE_NORMAL);
     text_register_face(g_ts, "headerfont", "css/fonts/header.ttf", 400, TEXT_STYLE_NORMAL);
     text_register_face(g_ts, "material icons", "css/fonts/material-icons.ttf", 400, TEXT_STYLE_NORMAL);
+    text_register_face(g_ts, "material icons outlined", "css/fonts/material-icons-outlined.ttf", 400, TEXT_STYLE_NORMAL);
     layout_ctx_init(&g_ctx);
     g_ctx.text = g_ts;
     g_ctx.image_size = png_size;
@@ -1502,6 +1473,8 @@ int main(int argc, char **argv)
     t_grid_placement();
     t_abs_static_inline();
     t_flex_align_self();
+    t_display_contents_calc_var();
+    t_empty_table_overflow();
     t_grid_named();
     t_zoom();
     t_half_leading_floor();

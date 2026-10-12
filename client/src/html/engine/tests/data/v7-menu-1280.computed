@@ -1,0 +1,4348 @@
+# selector	property	getComputedStyle value (Chrome/154.0.0.0, 1280x720, v7-menu-1280.html; written by tests/capture_computed.js)
+html	--base-scale	0.15625vw
+html	--base-scale-width	0.15625vw
+html	--blue	#2196f3
+html	--border-width-hairline	calc(1 * 0.15625vw)
+html	--border-width-medium	calc(3 * 0.15625vw)
+html	--border-width-none	calc(none * 0.15625vw)
+html	--border-width-thick	calc(4 * 0.15625vw)
+html	--border-width-thin	calc(2 * 0.15625vw)
+html	--div-black	rgba(20, 20, 20, 0.75)
+html	--div-grey	rgba(108, 108, 108, 0.4)
+html	--div-shadow	0px 0px 3px 1px rgba(0, 0, 0, 0.75)
+html	--font-size-display	calc(24 * 0.15625vw)
+html	--font-size-lg	calc(16 * 0.15625vw)
+html	--font-size-md	calc(14 * 0.15625vw)
+html	--font-size-sm	calc(12 * 0.15625vw)
+html	--font-size-xl	calc(18 * 0.15625vw)
+html	--font-size-xs	calc(10 * 0.15625vw)
+html	--font-size-xxl	calc(20 * 0.15625vw)
+html	--font-size-xxs	calc(8 * 0.15625vw)
+html	--font-size-xxxs	calc(6 * 0.15625vw)
+html	--genericPromptBackgroundOverlayColor	#faff00
+html	--genericPromptButtonColor	#faff00
+html	--green	#b2f252
+html	--lCB	rotateY(-180deg)
+html	--lCBT	rotateX(-90deg)
+html	--lCDelay	400ms
+html	--lCDuration	3s
+html	--lCF	rotateY(0deg)
+html	--lCL	rotateY(-90deg)
+html	--lCR	rotateY(90deg)
+html	--lCSize	64px
+html	--lCT	rotateX(90deg)
+html	--lCTiming	ease
+html	--lCZ0	translateZ(calc(64px * 0.8))
+html	--lCZ1	translateZ(64px)
+html	--lCZ2	translateZ(calc(64px / 2))
+html	--mm-scale	1
+html	--one-pixel-scaled	calc(1 * 0.15625vw)
+html	--red	#ed4242
+html	--screen-margin	calc(16 * 0.15625vw)
+html	--spacing-nano	calc(4 * 0.15625vw)
+html	--spacing-quark	calc(2 * 0.15625vw)
+html	--spacing-sm	calc(32 * 0.15625vw)
+html	--spacing-xs	calc(24 * 0.15625vw)
+html	--spacing-xxl	calc(64 * 0.15625vw)
+html	--spacing-xxs	calc(16 * 0.15625vw)
+html	--spacing-xxxs	calc(8 * 0.15625vw)
+html	--spacing_inset-xxxs	calc(8 * 0.15625vw)
+html	--spacing_sides-xxs	calc(16 * 0.15625vw)
+html	--spacing_sides-xxxs	calc(8 * 0.15625vw)
+html	--yellow	#fbc02d
+html	color	rgb(53, 53, 53)
+html	background-color	rgb(214, 198, 198)
+html	font-size	16px
+html	font-weight	400
+html	font-style	normal
+html	font-family	gamefont
+html	line-height	normal
+html	letter-spacing	normal
+html	text-align	start
+html	text-transform	none
+html	white-space	normal
+html	visibility	visible
+html	cursor	auto
+html	pointer-events	auto
+html	user-select	none
+html	direction	ltr
+html	image-rendering	auto
+html	text-shadow	none
+html	display	block
+html	position	static
+html	float	none
+html	clear	none
+html	box-sizing	content-box
+html	overflow-x	hidden
+html	overflow-y	hidden
+html	z-index	auto
+html	opacity	1
+html	top	auto
+html	right	auto
+html	bottom	auto
+html	left	auto
+html	margin-top	0px
+html	margin-right	0px
+html	margin-bottom	0px
+html	margin-left	0px
+html	padding-top	0px
+html	padding-right	0px
+html	padding-bottom	0px
+html	padding-left	0px
+html	border-top-width	0px
+html	border-left-width	0px
+html	border-bottom-width	0px
+html	border-top-style	none
+html	border-left-style	none
+html	border-bottom-style	none
+html	border-left-color	rgb(53, 53, 53)
+html	border-bottom-color	rgb(53, 53, 53)
+html	border-top-left-radius	0px
+html	border-bottom-right-radius	0px
+html	outline-style	none
+html	background-image	none
+html	background-size	auto
+html	background-repeat	repeat
+html	box-shadow	none
+html	object-fit	fill
+html	text-decoration-line	none
+html	text-overflow	clip
+html	vertical-align	baseline
+html	flex-direction	row
+html	justify-content	normal
+html	align-items	normal
+html	flex-grow	0
+html	row-gap	normal
+#loadingBg1	background-color	rgba(0, 0, 0, 0)
+#loadingBg1	overflow-x	visible
+#loadingBg1	overflow-y	visible
+#loadingBg	background-color	rgba(0, 0, 0, 0)
+#loadingBg	pointer-events	none
+#loadingBg	display	none
+#loadingBg	position	fixed
+#loadingBg	overflow-x	visible
+#loadingBg	overflow-y	visible
+#loadingBg	top	-16px
+#loadingBg	right	-16px
+#loadingBg	bottom	-16px
+#loadingBg	left	-16px
+#loadingBg	background-size	cover
+#game-overlay	background-color	rgba(0, 0, 0, 0)
+#game-overlay	visibility	hidden
+#game-overlay	pointer-events	none
+#game-overlay	image-rendering	-webkit-optimize-contrast
+#game-overlay	position	absolute
+#game-overlay	overflow-x	clip
+#game-overlay	overflow-y	clip
+#game-overlay	z-index	1
+#game-overlay	top	0px
+#game-overlay	right	0px
+#game-overlay	bottom	0px
+#game-overlay	left	0px
+#frvrMenuMobileHolder	background-color	rgba(0, 0, 0, 0)
+#frvrMenuMobileHolder	overflow-x	visible
+#frvrMenuMobileHolder	overflow-y	visible
+#uiBase	background-color	rgba(0, 0, 0, 0)
+#uiBase	pointer-events	none
+#uiBase	position	absolute
+#uiBase	overflow-x	visible
+#uiBase	overflow-y	visible
+#uiBase	z-index	1
+#uiBase	top	0px
+#uiBase	right	-930px
+#uiBase	bottom	-523.109px
+#uiBase	left	0px
+#errorNotification	background-color	rgb(255, 255, 255)
+#errorNotification	display	none
+#errorNotification	z-index	999
+#errorNotification	top	20px
+#errorNotification	right	auto
+#errorNotification	bottom	auto
+#errorNotification	left	50%
+#errorNotification	padding-top	20px
+#errorNotification	padding-right	20px
+#errorNotification	padding-bottom	20px
+#errorNotification	padding-left	20px
+#errorNotification	box-shadow	rgb(166, 166, 166) 0px 9px 0px 0px
+#aHider	display	none
+#aHider	position	static
+#aHider	z-index	auto
+#aHider	top	auto
+#aHider	right	auto
+#aHider	bottom	auto
+#aHider	left	auto
+#aHolder	text-align	center
+#aHolder	display	block
+#aHolder	position	absolute
+#aHolder	z-index	2147483647
+#aHolder	top	calc(100% - 140px)
+#aHolder	right	0px
+#aHolder	left	0px
+#aMerger	text-align	left
+#aMerger	display	inline-block
+#aMerger	position	static
+#aMerger	z-index	auto
+#aMerger	top	auto
+#aMerger	right	auto
+#aMerger	left	auto
+#baseLinks	display	block
+#aContainer	background-color	rgba(0, 0, 0, 0.6)
+#aContainer	cursor	pointer
+#aContainer	overflow-x	hidden
+#aContainer	overflow-y	hidden
+#aContainer	padding-top	10px
+#aContainer	padding-right	10px
+#aContainer	padding-bottom	10px
+#aContainer	padding-left	10px
+#aContainer	border-top-left-radius	6px
+#aContainer	border-bottom-right-radius	6px
+#aContainer > div:nth-child(2) > div:nth-child(1)	text-align	-webkit-center
+#twoFAPop	background-color	rgba(0, 0, 0, 0.8)
+#twoFAPop	text-align	center
+#twoFAPop	display	none
+#twoFAPop	z-index	2147483647
+#twoFAPop	top	auto
+#twoFAPop	right	auto
+#twoFAPop	bottom	auto
+#twoFAPop	left	auto
+#twoFAWindow	color	rgb(255, 255, 255)
+#twoFAWindow	background-color	rgb(53, 53, 53)
+#twoFAWindow	font-size	20px
+#twoFAWindow	display	block
+#twoFAWindow	overflow-x	hidden
+#twoFAWindow	overflow-y	auto
+#twoFAWindow	z-index	auto
+#twoFAWindow	top	50%
+#twoFAWindow	left	50%
+#twoFAWindow	padding-top	15px
+#twoFAWindow	padding-right	15px
+#twoFAWindow	padding-bottom	15px
+#twoFAWindow	padding-left	15px
+#twoFAWindow	border-left-color	rgb(255, 255, 255)
+#twoFAWindow	border-bottom-color	rgb(255, 255, 255)
+#twoFAWindow	border-top-left-radius	8px
+#twoFAWindow	border-bottom-right-radius	8px
+#twoFAWindow	box-shadow	rgba(0, 0, 0, 0.5) 2px 2px 8px 0px
+#twoFAqr	color	rgb(53, 53, 53)
+#twoFAqr	background-color	rgba(0, 0, 0, 0)
+#twoFAqr	display	none
+#twoFAqr	position	static
+#twoFAqr	overflow-x	visible
+#twoFAqr	overflow-y	visible
+#twoFAqr	top	auto
+#twoFAqr	left	auto
+#twoFAqr	padding-top	0px
+#twoFAqr	padding-right	0px
+#twoFAqr	padding-bottom	0px
+#twoFAqr	padding-left	0px
+#twoFAqr	border-left-color	rgb(53, 53, 53)
+#twoFAqr	border-bottom-color	rgb(53, 53, 53)
+#twoFAqr	border-top-left-radius	0px
+#twoFAqr	border-bottom-right-radius	0px
+#twoFAqr	box-shadow	none
+#twoFAmsg	color	rgba(0, 0, 0, 0.4)
+#twoFAmsg	font-size	23px
+#twoFAmsg	display	block
+#twoFAmsg	margin-top	5px
+#twoFAmsg	padding-right	5px
+#twoFAmsg	padding-left	5px
+#twoFAmsg	border-left-color	rgba(0, 0, 0, 0.4)
+#twoFAmsg	border-bottom-color	rgba(0, 0, 0, 0.4)
+#twoFAForm	color	rgb(53, 53, 53)
+#twoFAForm	background-color	rgba(0, 0, 0, 0)
+#twoFAForm	position	static
+#twoFAForm	overflow-x	visible
+#twoFAForm	overflow-y	visible
+#twoFAForm	top	auto
+#twoFAForm	left	auto
+#twoFAForm	padding-top	0px
+#twoFAForm	padding-right	0px
+#twoFAForm	padding-bottom	0px
+#twoFAForm	padding-left	0px
+#twoFAForm	border-left-color	rgb(53, 53, 53)
+#twoFAForm	border-bottom-color	rgb(53, 53, 53)
+#twoFAForm	border-top-left-radius	0px
+#twoFAForm	border-bottom-right-radius	0px
+#twoFAForm	box-shadow	none
+#twoFAbtn	background-color	rgb(92, 224, 90)
+#twoFAbtn	font-size	26px
+#twoFAbtn	cursor	pointer
+#twoFAbtn	position	static
+#twoFAbtn	overflow-x	visible
+#twoFAbtn	overflow-y	visible
+#twoFAbtn	top	auto
+#twoFAbtn	left	auto
+#twoFAbtn	margin-top	7px
+#twoFAbtn	padding-top	5px
+#twoFAbtn	padding-right	5px
+#twoFAbtn	padding-bottom	5px
+#twoFAbtn	padding-left	5px
+#twoFAbtn	border-top-left-radius	3px
+#twoFAbtn	border-bottom-right-radius	3px
+#twoFAbtn	box-shadow	none
+#consentBlock	background-color	rgba(0, 0, 0, 0.8)
+#consentBlock	text-align	center
+#consentBlock	display	none
+#consentBlock	z-index	2147483647
+#consentBlock	top	auto
+#consentBlock	right	auto
+#consentBlock	bottom	auto
+#consentBlock	left	auto
+#consentShake	background-color	rgba(0, 0, 0, 0)
+#consentShake	display	block
+#consentShake	position	static
+#consentShake	z-index	auto
+#consentWindow	background-color	rgb(255, 255, 255)
+#consentWindow	position	absolute
+#consentWindow	top	40%
+#consentWindow	left	50%
+#consentWindow	padding-top	10px
+#consentWindow	padding-right	10px
+#consentWindow	padding-bottom	10px
+#consentWindow	padding-left	10px
+#fullMenHider	position	static
+#fullMenHider	z-index	auto
+#fullMenHider	top	auto
+#fullMenHider	right	auto
+#fullMenHider	bottom	auto
+#fullMenHider	left	auto
+#vignette	position	absolute
+#vignette	z-index	1
+#vignette	opacity	0
+#vignette	top	0px
+#vignette	right	0px
+#vignette	bottom	0px
+#vignette	left	0px
+#vignette	box-shadow	rgb(0, 0, 0) 0px 0px 1000px 0px inset
+#overlay	position	absolute
+#overlay	z-index	1
+#overlay	top	0px
+#overlay	right	0px
+#overlay	bottom	0px
+#overlay	left	0px
+#overlay	background-size	100% 100%
+#overlay	background-repeat	no-repeat
+#imgFlash	background-color	rgb(255, 255, 255)
+#imgFlash	display	none
+#imgFlash	position	absolute
+#imgFlash	background-size	100% 100%
+#imgFlash	background-repeat	no-repeat
+#infoHolder	color	rgb(255, 255, 255)
+#infoHolder	font-size	30px
+#infoHolder	border-left-color	rgb(255, 255, 255)
+#infoHolder	border-bottom-color	rgb(255, 255, 255)
+#mapInfoHolder	color	rgb(53, 53, 53)
+#mapInfoHolder	display	flex
+#mapInfoHolder	position	absolute
+#mapInfoHolder	z-index	20
+#mapInfoHolder	top	1170.11px
+#mapInfoHolder	right	0px
+#mapInfoHolder	bottom	0px
+#mapInfoHolder	left	1657.42px
+#mapInfoHolder	padding-right	15px
+#mapInfoHolder	border-left-color	rgb(53, 53, 53)
+#mapInfoHolder	border-bottom-color	rgb(53, 53, 53)
+#mapInfoHolder	flex-direction	column
+#mapInfoHolder	align-items	flex-end
+#termsInfo	background-color	rgba(0, 0, 0, 0.5)
+#termsInfo	display	block
+#termsInfo	position	static
+#termsInfo	z-index	auto
+#termsInfo	top	auto
+#termsInfo	right	auto
+#termsInfo	bottom	auto
+#termsInfo	left	auto
+#termsInfo	margin-right	-15px
+#termsInfo	padding-top	5px
+#termsInfo	padding-bottom	15px
+#termsInfo	padding-left	20px
+#termsInfo	border-top-left-radius	6px
+#termsInfo	flex-direction	row
+#termsInfo	align-items	normal
+#purchaseHolder	display	none
+#purchaseHolder	position	absolute
+#purchaseHolder	z-index	2147483647
+#purchaseBack	background-color	rgba(0, 0, 0, 0.75)
+#purchaseBack	display	block
+#purchaseBack	z-index	auto
+#purchaseSelector	background-color	rgb(36, 36, 36)
+#purchaseSelector	font-size	28px
+#purchaseSelector	display	block
+#purchaseSelector	z-index	auto
+#purchaseSelector	top	30%
+#purchaseSelector	left	50%
+#purchaseSelector	padding-top	25px
+#purchaseSelector	padding-right	25px
+#purchaseSelector	padding-bottom	25px
+#purchaseSelector	padding-left	25px
+#purchaseSelector	border-top-left-radius	6px
+#purchaseSelector	border-bottom-right-radius	6px
+#purchaseSelector	box-shadow	rgba(0, 0, 0, 0.3) 0px 0px 10px 10px
+#xsollaPayB	color	rgb(255, 255, 255)
+#xsollaPayB	background-color	rgb(122, 56, 170)
+#xsollaPayB	font-size	15px
+#xsollaPayB	text-align	center
+#xsollaPayB	cursor	pointer
+#xsollaPayB	display	inline-block
+#xsollaPayB	position	static
+#xsollaPayB	top	auto
+#xsollaPayB	left	auto
+#xsollaPayB	padding-top	10px
+#xsollaPayB	padding-right	10px
+#xsollaPayB	padding-bottom	10px
+#xsollaPayB	padding-left	10px
+#xsollaPayB	border-left-color	rgb(255, 255, 255)
+#xsollaPayB	border-bottom-color	rgb(255, 255, 255)
+#xsollaPayB	box-shadow	none
+#xsollaPayB	vertical-align	super
+#paypal-button	background-color	rgba(0, 0, 0, 0)
+#paypal-button	display	inline-block
+#paypal-button	position	static
+#paypal-button	top	auto
+#paypal-button	left	auto
+#paypal-button	margin-top	10px
+#paypal-button	padding-top	0px
+#paypal-button	padding-right	0px
+#paypal-button	padding-bottom	0px
+#paypal-button	padding-left	0px
+#paypal-button	border-top-left-radius	0px
+#paypal-button	border-bottom-right-radius	0px
+#paypal-button	box-shadow	none
+#paypal-button	vertical-align	bottom
+#applePayB	color	rgb(255, 255, 255)
+#applePayB	background-color	rgba(66, 66, 66, 0.8)
+#applePayB	font-size	15px
+#applePayB	text-align	center
+#applePayB	cursor	pointer
+#applePayB	display	inline-block
+#applePayB	position	static
+#applePayB	top	auto
+#applePayB	left	auto
+#applePayB	margin-top	6px
+#applePayB	padding-top	10px
+#applePayB	padding-right	10px
+#applePayB	padding-bottom	10px
+#applePayB	padding-left	10px
+#applePayB	border-left-color	rgb(255, 255, 255)
+#applePayB	border-bottom-color	rgb(255, 255, 255)
+#applePayB	box-shadow	none
+#applePayB	vertical-align	super
+#androidPayB	color	rgb(255, 255, 255)
+#androidPayB	background-color	rgba(66, 66, 66, 0.8)
+#androidPayB	font-size	15px
+#androidPayB	text-align	center
+#androidPayB	cursor	pointer
+#androidPayB	display	inline-block
+#androidPayB	position	static
+#androidPayB	top	auto
+#androidPayB	left	auto
+#androidPayB	margin-top	6px
+#androidPayB	padding-top	10px
+#androidPayB	padding-right	10px
+#androidPayB	padding-bottom	10px
+#androidPayB	padding-left	10px
+#androidPayB	border-left-color	rgb(255, 255, 255)
+#androidPayB	border-bottom-color	rgb(255, 255, 255)
+#androidPayB	box-shadow	none
+#androidPayB	vertical-align	super
+#cashPayB	color	rgb(255, 255, 255)
+#cashPayB	background-color	rgba(59, 187, 99, 0.8)
+#cashPayB	font-size	15px
+#cashPayB	text-align	center
+#cashPayB	cursor	pointer
+#cashPayB	display	inline-block
+#cashPayB	position	static
+#cashPayB	top	auto
+#cashPayB	left	auto
+#cashPayB	margin-top	6px
+#cashPayB	padding-top	10px
+#cashPayB	padding-right	10px
+#cashPayB	padding-bottom	10px
+#cashPayB	padding-left	10px
+#cashPayB	border-left-color	rgb(255, 255, 255)
+#cashPayB	border-bottom-color	rgb(255, 255, 255)
+#cashPayB	box-shadow	none
+#cashPayB	vertical-align	super
+#cryptoPayB	color	rgb(255, 255, 255)
+#cryptoPayB	background-color	rgb(230, 142, 37)
+#cryptoPayB	font-size	15px
+#cryptoPayB	text-align	center
+#cryptoPayB	cursor	pointer
+#cryptoPayB	display	inline-block
+#cryptoPayB	position	static
+#cryptoPayB	top	auto
+#cryptoPayB	left	auto
+#cryptoPayB	margin-top	6px
+#cryptoPayB	padding-top	10px
+#cryptoPayB	padding-right	10px
+#cryptoPayB	padding-bottom	10px
+#cryptoPayB	padding-left	10px
+#cryptoPayB	border-left-color	rgb(255, 255, 255)
+#cryptoPayB	border-bottom-color	rgb(255, 255, 255)
+#cryptoPayB	box-shadow	none
+#cryptoPayB	vertical-align	super
+#purchaseResponse	background-color	rgba(0, 0, 0, 0.5)
+#purchaseResponse	display	none
+#purchaseResponse	position	absolute
+#purchaseResponse	z-index	2147483647
+#purchaseRespH	background-color	rgb(255, 255, 255)
+#purchaseRespH	font-size	23px
+#purchaseRespH	display	block
+#purchaseRespH	z-index	auto
+#purchaseRespH	top	40%
+#purchaseRespH	left	50%
+#purchaseRespH	padding-top	15px
+#purchaseRespH	padding-right	25px
+#purchaseRespH	padding-bottom	15px
+#purchaseRespH	padding-left	25px
+#purchaseRespH	box-shadow	rgba(0, 0, 0, 0.5) 0px 0px 4px 1px
+#menuHolder	position	absolute
+#menuHolder	z-index	10
+#menuHolder	top	0px
+#menuHolder	right	0px
+#menuHolder	bottom	0px
+#menuHolder	left	0px
+#mMenuHolDef	position	static
+#mMenuHolDef	z-index	auto
+#mMenuHolDef	top	auto
+#mMenuHolDef	right	auto
+#mMenuHolDef	bottom	auto
+#mMenuHolDef	left	auto
+#spinUI	font-size	18px
+#spinUI	display	none
+#spinUI	position	absolute
+#spinUI	top	20px
+#spinTHold	display	block
+#spinTHold	top	6px
+#spinTHold	left	28px
+#spinKR	color	rgb(255, 255, 255)
+#spinKR	background-color	rgba(0, 0, 0, 0.8)
+#spinKR	font-size	36px
+#spinKR	display	inline-block
+#spinKR	position	static
+#spinKR	top	auto
+#spinKR	left	auto
+#spinKR	padding-top	10px
+#spinKR	padding-right	20px
+#spinKR	padding-bottom	10px
+#spinKR	padding-left	20px
+#spinKR	border-left-color	rgb(255, 255, 255)
+#spinKR	border-bottom-color	rgb(255, 255, 255)
+#spinKR	border-top-left-radius	4px
+#spinKR	border-bottom-right-radius	4px
+#spinKR	vertical-align	top
+#spinItems	display	block
+#spinItems	z-index	999999
+#spinItems	top	10px
+#spinItems	left	50%
+#spinInfo	color	rgb(255, 255, 255)
+#spinInfo	background-color	rgba(0, 0, 0, 0.8)
+#spinInfo	font-size	25px
+#spinInfo	text-align	left
+#spinInfo	display	block
+#spinInfo	top	5px
+#spinInfo	right	20px
+#spinInfo	padding-top	10px
+#spinInfo	padding-right	20px
+#spinInfo	padding-bottom	10px
+#spinInfo	padding-left	20px
+#spinInfo	border-left-color	rgb(255, 255, 255)
+#spinInfo	border-bottom-color	rgb(255, 255, 255)
+#spinInfo	border-top-left-radius	4px
+#spinInfo	border-bottom-right-radius	4px
+#spinHolder	text-align	center
+#spinHolder	display	block
+#spinHolder	z-index	10
+#spinHolder	top	50%
+#spinHolder	bottom	230px
+#spinHolder	left	50%
+#spinRaysH	position	static
+#spinRaysH	z-index	auto
+#spinRaysH	top	auto
+#spinRaysH	bottom	auto
+#spinRaysH	left	auto
+#spinItem	display	none
+#spinItem	z-index	11
+#spinItem	bottom	auto
+#spinItem	left	auto
+#spinItemCanvas	display	inline-block
+#spinItemCanvas	position	static
+#spinItemCanvas	z-index	auto
+#spinItemCanvas	top	auto
+#spinItemName	color	rgb(255, 255, 255)
+#spinItemName	text-shadow	rgb(28, 28, 28) -1px -1px 0px, rgb(28, 28, 28) 1px -1px 0px, rgb(28, 28, 28) -1px 1px 0px, rgb(28, 28, 28) 1px 1px 0px, rgb(28, 28, 28) -2px -2px 0px, rgb(28, 28, 28) 2px -2px 0px, rgb(28, 28, 28) -2px 2px 0px, rgb(28, 28, 28) 2px 2px 0px, rgb(28, 28, 28) -3px -3px 0px, rgb(28, 28, 28) 3px -3px 0px, rgb(28, 28, 28) -3px 3px 0px, rgb(28, 28, 28) 3px 3px 0px
+#spinItemName	display	none
+#spinItemName	z-index	12
+#spinItemName	bottom	auto
+#spinItemName	border-left-color	rgb(255, 255, 255)
+#spinItemName	border-bottom-color	rgb(255, 255, 255)
+#spinItemName	background-image	linear-gradient(to right, rgba(0, 0, 0, 0) 0%, rgba(20, 20, 20, 0.7) 40%, rgba(20, 20, 20, 0.9) 60%, rgba(0, 0, 0, 0) 100%)
+#spinButton	background-color	rgb(244, 67, 54)
+#spinButton	cursor	pointer
+#spinButton	z-index	13
+#spinButton	right	0px
+#spinButton	bottom	0px
+#spinButton	border-top-left-radius	50%
+#spinButton	border-bottom-right-radius	50%
+#spinText	color	rgb(255, 255, 255)
+#spinText	background-color	rgba(0, 0, 0, 0)
+#spinText	font-size	0px
+#spinText	z-index	auto
+#spinText	right	auto
+#spinText	bottom	auto
+#spinText	border-left-color	rgb(255, 255, 255)
+#spinText	border-bottom-color	rgb(255, 255, 255)
+#spinText	border-top-left-radius	0px
+#spinText	border-bottom-right-radius	0px
+#spinText	vertical-align	middle
+#spinHeader	position	static
+#spinHeader	top	auto
+#spinHeader	left	auto
+#spinHeader	vertical-align	baseline
+#spinCost	color	rgba(255, 255, 255, 0.5)
+#spinCost	position	static
+#spinCost	top	auto
+#spinCost	left	auto
+#spinCost	border-left-color	rgba(255, 255, 255, 0.5)
+#spinCost	border-bottom-color	rgba(255, 255, 255, 0.5)
+#spinCost	vertical-align	baseline
+#spinWindow	visibility	hidden
+#spinWindow	overflow-x	clip
+#spinWindow	overflow-y	clip
+#spinWindow	z-index	auto
+#spinWindow	bottom	auto
+#spinUIBtns	display	none
+#spinUIBtns	position	absolute
+#spinUIBtns	z-index	2147483647
+#spinUIBtns	bottom	142px
+#spinUIBtns	left	50%
+#spinAgainBtn	color	rgb(255, 255, 255)
+#spinAgainBtn	background-color	rgba(0, 0, 0, 0.3)
+#spinAgainBtn	font-size	22px
+#spinAgainBtn	line-height	39px
+#spinAgainBtn	text-align	center
+#spinAgainBtn	cursor	pointer
+#spinAgainBtn	text-shadow	rgb(32, 32, 32) -1px -1px 0px, rgb(32, 32, 32) 1px -1px 0px, rgb(32, 32, 32) -1px 1px 0px, rgb(32, 32, 32) 1px 1px 0px, rgb(32, 32, 32) -2px -2px 0px, rgb(32, 32, 32) 2px -2px 0px, rgb(32, 32, 32) -2px 2px 0px, rgb(32, 32, 32) 2px 2px 0px, rgb(32, 32, 32) -3px -3px 0px, rgb(32, 32, 32) 3px -3px 0px, rgb(32, 32, 32) -3px 3px 0px, rgb(32, 32, 32) 3px 3px 0px
+#spinAgainBtn	display	inline-block
+#spinAgainBtn	position	relative
+#spinAgainBtn	z-index	auto
+#spinAgainBtn	bottom	auto
+#spinAgainBtn	left	auto
+#spinAgainBtn	margin-right	3px
+#spinAgainBtn	margin-bottom	6px
+#spinAgainBtn	margin-left	3px
+#spinAgainBtn	padding-top	5px
+#spinAgainBtn	padding-right	22px
+#spinAgainBtn	padding-bottom	13px
+#spinAgainBtn	padding-left	22px
+#spinAgainBtn	border-top-width	4px
+#spinAgainBtn	border-left-width	4px
+#spinAgainBtn	border-bottom-width	4px
+#spinAgainBtn	border-top-style	solid
+#spinAgainBtn	border-left-style	solid
+#spinAgainBtn	border-bottom-style	solid
+#spinAgainBtn	border-left-color	rgb(180, 71, 255)
+#spinAgainBtn	border-bottom-color	rgb(180, 71, 255)
+#spinAgainBtn	border-top-left-radius	4px
+#spinAgainBtn	border-bottom-right-radius	4px
+#spinAgainBtn	vertical-align	bottom
+#spinInfoBtn	color	rgb(255, 255, 255)
+#spinInfoBtn	background-color	rgb(0, 184, 0)
+#spinInfoBtn	font-size	22px
+#spinInfoBtn	line-height	35px
+#spinInfoBtn	text-align	center
+#spinInfoBtn	cursor	pointer
+#spinInfoBtn	display	inline-block
+#spinInfoBtn	position	relative
+#spinInfoBtn	z-index	auto
+#spinInfoBtn	bottom	auto
+#spinInfoBtn	left	auto
+#spinInfoBtn	margin-right	3px
+#spinInfoBtn	margin-bottom	6px
+#spinInfoBtn	margin-left	3px
+#spinInfoBtn	padding-top	5px
+#spinInfoBtn	padding-right	10px
+#spinInfoBtn	padding-bottom	13px
+#spinInfoBtn	padding-left	10px
+#spinInfoBtn	border-top-width	4px
+#spinInfoBtn	border-left-width	4px
+#spinInfoBtn	border-bottom-width	4px
+#spinInfoBtn	border-top-style	solid
+#spinInfoBtn	border-left-style	solid
+#spinInfoBtn	border-bottom-style	solid
+#spinInfoBtn	border-left-color	rgb(255, 255, 255)
+#spinInfoBtn	border-bottom-color	rgb(255, 255, 255)
+#spinInfoBtn	border-top-left-radius	4px
+#spinInfoBtn	border-bottom-right-radius	4px
+#spinInfoBtn	box-shadow	rgb(0, 132, 0) 0px -7px 0px 0px inset
+#spinInfoBtn	vertical-align	bottom
+#spinEquipBtn	color	rgb(255, 255, 255)
+#spinEquipBtn	background-color	rgba(0, 0, 0, 0.3)
+#spinEquipBtn	font-size	22px
+#spinEquipBtn	line-height	35px
+#spinEquipBtn	text-align	center
+#spinEquipBtn	cursor	pointer
+#spinEquipBtn	display	inline-block
+#spinEquipBtn	position	relative
+#spinEquipBtn	z-index	auto
+#spinEquipBtn	bottom	auto
+#spinEquipBtn	left	auto
+#spinEquipBtn	margin-right	3px
+#spinEquipBtn	margin-bottom	6px
+#spinEquipBtn	margin-left	3px
+#spinEquipBtn	padding-top	5px
+#spinEquipBtn	padding-right	22px
+#spinEquipBtn	padding-bottom	13px
+#spinEquipBtn	padding-left	22px
+#spinEquipBtn	border-top-width	4px
+#spinEquipBtn	border-left-width	4px
+#spinEquipBtn	border-bottom-width	4px
+#spinEquipBtn	border-top-style	solid
+#spinEquipBtn	border-left-style	solid
+#spinEquipBtn	border-bottom-style	solid
+#spinEquipBtn	border-left-color	rgb(49, 202, 236)
+#spinEquipBtn	border-bottom-color	rgb(49, 202, 236)
+#spinEquipBtn	border-top-left-radius	4px
+#spinEquipBtn	border-bottom-right-radius	4px
+#spinEquipBtn	vertical-align	bottom
+#spinNextBtn	color	rgb(255, 255, 255)
+#spinNextBtn	background-color	rgba(0, 0, 0, 0.3)
+#spinNextBtn	font-size	22px
+#spinNextBtn	line-height	35px
+#spinNextBtn	text-align	center
+#spinNextBtn	cursor	pointer
+#spinNextBtn	display	inline-block
+#spinNextBtn	position	relative
+#spinNextBtn	z-index	auto
+#spinNextBtn	bottom	auto
+#spinNextBtn	left	auto
+#spinNextBtn	margin-right	3px
+#spinNextBtn	margin-bottom	6px
+#spinNextBtn	margin-left	3px
+#spinNextBtn	padding-top	5px
+#spinNextBtn	padding-right	22px
+#spinNextBtn	padding-bottom	13px
+#spinNextBtn	padding-left	22px
+#spinNextBtn	border-top-width	4px
+#spinNextBtn	border-left-width	4px
+#spinNextBtn	border-bottom-width	4px
+#spinNextBtn	border-top-style	solid
+#spinNextBtn	border-left-style	solid
+#spinNextBtn	border-bottom-style	solid
+#spinNextBtn	border-left-color	rgb(49, 202, 236)
+#spinNextBtn	border-bottom-color	rgb(49, 202, 236)
+#spinNextBtn	border-top-left-radius	4px
+#spinNextBtn	border-bottom-right-radius	4px
+#spinNextBtn	vertical-align	bottom
+#purchaseLoad	background-color	rgba(0, 0, 0, 0.2)
+#purchaseLoad	text-align	center
+#purchaseLoad	display	none
+#purchaseLoad	position	absolute
+#purchaseLoad	z-index	2
+#purchLoadRing	display	inline-block
+#purchLoadRing	position	static
+#purchLoadRing	top	auto
+#purchLoadRing	left	auto
+#purchaseLabel	color	rgba(255, 255, 255, 0.5)
+#purchaseLabel	font-size	25px
+#purchaseLabel	position	static
+#purchaseLabel	top	auto
+#purchaseLabel	left	auto
+#purchaseLabel	margin-top	20px
+#purchaseLabel	border-left-color	rgba(255, 255, 255, 0.5)
+#purchaseLabel	border-bottom-color	rgba(255, 255, 255, 0.5)
+#hiddenClasses	display	none
+#menuClassPicker0	display	block
+#menuClassPicker1	display	block
+#menuClassPicker2	display	block
+#menuClassPicker3	display	block
+#menuClassPicker4	display	block
+#menuClassPicker5	display	block
+#menuClassPicker6	display	block
+#menuClassPicker7	display	block
+#menuClassPicker8	display	block
+#menuClassPicker9	display	block
+#menuClassPicker10	display	block
+#menuClassPicker11	display	block
+#menuClassPicker12	display	block
+#menuClassPicker13	display	block
+#subLogoButtons	position	absolute
+#subLogoButtons	top	964.109px
+#subLogoButtons	right	331.016px
+#subLogoButtons	bottom	139px
+#subLogoButtons	left	1105px
+#mapInfoHld	color	rgb(255, 255, 255)
+#mapInfoHld	font-size	20px
+#mapInfoHld	text-align	left
+#mapInfoHld	position	static
+#mapInfoHld	top	auto
+#mapInfoHld	right	auto
+#mapInfoHld	bottom	auto
+#mapInfoHld	left	auto
+#mapInfoHld	margin-bottom	20px
+#mapInfoHld	padding-bottom	15px
+#mapInfoHld	padding-left	7px
+#mapInfoHld	border-bottom-width	5px
+#mapInfoHld	border-bottom-style	solid
+#mapInfoHld	border-left-color	rgb(255, 255, 255)
+#mapInfoHld	border-bottom-color	rgb(88, 88, 88)
+#mapInfo	display	inline-block
+#mapInfo	margin-bottom	0px
+#mapInfo	padding-bottom	0px
+#mapInfo	padding-left	0px
+#mapInfo	border-bottom-width	0px
+#mapInfo	border-bottom-style	none
+#mapInfo	border-bottom-color	rgb(255, 255, 255)
+#mapVote	font-size	16px
+#mapVote	float	right
+#mapVote	margin-top	-4px
+#mapVote	margin-bottom	0px
+#mapVote	padding-bottom	0px
+#mapVote	padding-left	0px
+#mapVote	border-bottom-width	0px
+#mapVote	border-bottom-style	none
+#mapVote	border-bottom-color	rgb(255, 255, 255)
+#mapVote	vertical-align	top
+#menuBtnHost	color	rgb(255, 255, 255)
+#menuBtnHost	background-color	rgba(0, 0, 0, 0.3)
+#menuBtnHost	font-size	20.5px
+#menuBtnHost	line-height	45px
+#menuBtnHost	text-align	center
+#menuBtnHost	cursor	pointer
+#menuBtnHost	display	inline-block
+#menuBtnHost	position	relative
+#menuBtnHost	top	0px
+#menuBtnHost	right	0px
+#menuBtnHost	bottom	0px
+#menuBtnHost	left	0px
+#menuBtnHost	margin-right	3px
+#menuBtnHost	margin-bottom	6px
+#menuBtnHost	margin-left	3px
+#menuBtnHost	padding-top	5px
+#menuBtnHost	padding-right	22px
+#menuBtnHost	padding-bottom	13px
+#menuBtnHost	padding-left	22px
+#menuBtnHost	border-top-width	4px
+#menuBtnHost	border-left-width	4px
+#menuBtnHost	border-bottom-width	4px
+#menuBtnHost	border-top-style	solid
+#menuBtnHost	border-left-style	solid
+#menuBtnHost	border-bottom-style	solid
+#menuBtnHost	border-left-color	rgb(180, 71, 255)
+#menuBtnHost	border-bottom-color	rgb(180, 71, 255)
+#menuBtnHost	border-top-left-radius	4px
+#menuBtnHost	border-bottom-right-radius	4px
+#menuBtnHost	vertical-align	bottom
+#menuBtnBrowser	color	rgb(255, 255, 255)
+#menuBtnBrowser	background-color	rgba(0, 0, 0, 0.3)
+#menuBtnBrowser	font-size	20.5px
+#menuBtnBrowser	line-height	45px
+#menuBtnBrowser	text-align	center
+#menuBtnBrowser	cursor	pointer
+#menuBtnBrowser	display	inline-block
+#menuBtnBrowser	position	relative
+#menuBtnBrowser	top	0px
+#menuBtnBrowser	right	0px
+#menuBtnBrowser	bottom	0px
+#menuBtnBrowser	left	0px
+#menuBtnBrowser	margin-right	3px
+#menuBtnBrowser	margin-bottom	6px
+#menuBtnBrowser	margin-left	3px
+#menuBtnBrowser	padding-top	5px
+#menuBtnBrowser	padding-right	22px
+#menuBtnBrowser	padding-bottom	13px
+#menuBtnBrowser	padding-left	22px
+#menuBtnBrowser	border-top-width	4px
+#menuBtnBrowser	border-left-width	4px
+#menuBtnBrowser	border-bottom-width	4px
+#menuBtnBrowser	border-top-style	solid
+#menuBtnBrowser	border-left-style	solid
+#menuBtnBrowser	border-bottom-style	solid
+#menuBtnBrowser	border-left-color	rgb(255, 71, 71)
+#menuBtnBrowser	border-bottom-color	rgb(255, 71, 71)
+#menuBtnBrowser	border-top-left-radius	4px
+#menuBtnBrowser	border-bottom-right-radius	4px
+#menuBtnBrowser	vertical-align	bottom
+#inviteButton	color	rgb(255, 255, 255)
+#inviteButton	background-color	rgba(0, 0, 0, 0.3)
+#inviteButton	font-size	20.5px
+#inviteButton	line-height	45px
+#inviteButton	text-align	center
+#inviteButton	cursor	pointer
+#inviteButton	display	inline-block
+#inviteButton	position	relative
+#inviteButton	top	0px
+#inviteButton	right	0px
+#inviteButton	bottom	0px
+#inviteButton	left	0px
+#inviteButton	margin-right	3px
+#inviteButton	margin-bottom	6px
+#inviteButton	margin-left	3px
+#inviteButton	padding-top	5px
+#inviteButton	padding-right	22px
+#inviteButton	padding-bottom	13px
+#inviteButton	padding-left	22px
+#inviteButton	border-top-width	4px
+#inviteButton	border-left-width	4px
+#inviteButton	border-bottom-width	4px
+#inviteButton	border-top-style	solid
+#inviteButton	border-left-style	solid
+#inviteButton	border-bottom-style	solid
+#inviteButton	border-left-color	rgb(250, 80, 174)
+#inviteButton	border-bottom-color	rgb(250, 80, 174)
+#inviteButton	border-top-left-radius	4px
+#inviteButton	border-bottom-right-radius	4px
+#inviteButton	vertical-align	bottom
+#menuBtnJoin	color	rgb(255, 255, 255)
+#menuBtnJoin	background-color	rgba(0, 0, 0, 0.3)
+#menuBtnJoin	font-size	20.5px
+#menuBtnJoin	line-height	45px
+#menuBtnJoin	text-align	center
+#menuBtnJoin	cursor	pointer
+#menuBtnJoin	display	inline-block
+#menuBtnJoin	position	relative
+#menuBtnJoin	top	0px
+#menuBtnJoin	right	0px
+#menuBtnJoin	bottom	0px
+#menuBtnJoin	left	0px
+#menuBtnJoin	margin-right	3px
+#menuBtnJoin	margin-bottom	6px
+#menuBtnJoin	margin-left	3px
+#menuBtnJoin	padding-top	5px
+#menuBtnJoin	padding-right	22px
+#menuBtnJoin	padding-bottom	13px
+#menuBtnJoin	padding-left	22px
+#menuBtnJoin	border-top-width	4px
+#menuBtnJoin	border-left-width	4px
+#menuBtnJoin	border-bottom-width	4px
+#menuBtnJoin	border-top-style	solid
+#menuBtnJoin	border-left-style	solid
+#menuBtnJoin	border-bottom-style	solid
+#menuBtnJoin	border-left-color	rgb(250, 80, 174)
+#menuBtnJoin	border-bottom-color	rgb(250, 80, 174)
+#menuBtnJoin	border-top-left-radius	4px
+#menuBtnJoin	border-bottom-right-radius	4px
+#menuBtnJoin	vertical-align	bottom
+#policeButton	color	rgb(255, 255, 255)
+#policeButton	background-color	rgba(0, 0, 0, 0.3)
+#policeButton	font-size	20.5px
+#policeButton	line-height	45px
+#policeButton	text-align	center
+#policeButton	cursor	pointer
+#policeButton	display	inline-block
+#policeButton	position	relative
+#policeButton	top	0px
+#policeButton	right	0px
+#policeButton	bottom	0px
+#policeButton	left	0px
+#policeButton	margin-right	3px
+#policeButton	margin-bottom	6px
+#policeButton	margin-left	3px
+#policeButton	padding-top	5px
+#policeButton	padding-right	15px
+#policeButton	padding-bottom	13px
+#policeButton	padding-left	15px
+#policeButton	border-top-width	4px
+#policeButton	border-left-width	4px
+#policeButton	border-bottom-width	4px
+#policeButton	border-top-style	solid
+#policeButton	border-left-style	solid
+#policeButton	border-bottom-style	solid
+#policeButton	border-left-color	rgb(65, 74, 109)
+#policeButton	border-bottom-color	rgb(65, 74, 109)
+#policeButton	border-top-left-radius	6px
+#policeButton	border-bottom-right-radius	6px
+#policeButton	vertical-align	bottom
+#tlInfHold	position	absolute
+#tlInfHold	z-index	20
+#tlInfHold	top	78px
+#tlInfHold	right	1796.09px
+#tlInfHold	bottom	758.109px
+#tlInfHold	left	147px
+#homeStoreAd	background-color	rgba(0, 0, 0, 0.5)
+#homeStoreAd	cursor	pointer
+#homeStoreAd	position	static
+#homeStoreAd	z-index	auto
+#homeStoreAd	top	auto
+#homeStoreAd	right	auto
+#homeStoreAd	bottom	auto
+#homeStoreAd	left	auto
+#homeStoreAd	margin-top	9px
+#homeStoreAd	padding-top	10px
+#homeStoreAd	padding-right	10px
+#homeStoreAd	padding-bottom	10px
+#homeStoreAd	padding-left	10px
+#homeStoreAd	border-top-left-radius	4px
+#homeStoreAd	border-bottom-right-radius	4px
+#homeStoreAdC	background-color	rgba(0, 0, 0, 0)
+#homeStoreAdC	position	relative
+#homeStoreAdC	top	0px
+#homeStoreAdC	right	0px
+#homeStoreAdC	bottom	0px
+#homeStoreAdC	left	0px
+#homeStoreAdC	margin-top	0px
+#homeStoreAdC	padding-top	0px
+#homeStoreAdC	padding-right	0px
+#homeStoreAdC	padding-bottom	0px
+#homeStoreAdC	padding-left	0px
+#homeStoreAdC	border-top-left-radius	0px
+#homeStoreAdC	border-bottom-right-radius	0px
+#homeStoreAdTx	color	rgb(255, 255, 255)
+#homeStoreAdTx	font-size	17px
+#homeStoreAdTx	position	absolute
+#homeStoreAdTx	top	12px
+#homeStoreAdTx	right	20.9062px
+#homeStoreAdTx	bottom	188px
+#homeStoreAdTx	left	16px
+#homeStoreAdTx	border-left-color	rgb(255, 255, 255)
+#homeStoreAdTx	border-bottom-color	rgb(255, 255, 255)
+#bundleQuickBuyB	color	rgb(255, 255, 255)
+#bundleQuickBuyB	background-color	rgb(204, 81, 248)
+#bundleQuickBuyB	position	absolute
+#bundleQuickBuyB	top	180px
+#bundleQuickBuyB	right	11px
+#bundleQuickBuyB	bottom	10px
+#bundleQuickBuyB	left	195.906px
+#bundleQuickBuyB	padding-top	5px
+#bundleQuickBuyB	padding-right	20px
+#bundleQuickBuyB	padding-bottom	5px
+#bundleQuickBuyB	padding-left	20px
+#bundleQuickBuyB	border-left-color	rgb(255, 255, 255)
+#bundleQuickBuyB	border-bottom-color	rgb(255, 255, 255)
+#bundleQuickBuyB	border-top-left-radius	5px
+#bundleQuickBuyB	border-bottom-right-radius	5px
+#newUserGuide	color	rgb(255, 255, 255)
+#newUserGuide	background-color	rgba(0, 0, 0, 0.5)
+#newUserGuide	cursor	pointer
+#newUserGuide	margin-top	10px
+#newUserGuide	padding-top	10px
+#newUserGuide	padding-right	10px
+#newUserGuide	padding-bottom	10px
+#newUserGuide	padding-left	10px
+#newUserGuide	border-left-color	rgb(255, 255, 255)
+#newUserGuide	border-bottom-color	rgb(255, 255, 255)
+#newUserGuide	border-top-left-radius	4px
+#newUserGuide	border-bottom-right-radius	4px
+#helpPIcon	color	rgb(53, 53, 53)
+#helpPIcon	display	inline
+#helpPIcon	overflow-x	clip
+#helpPIcon	overflow-y	clip
+#helpPIcon	margin-top	-5px
+#helpPIcon	margin-bottom	-10px
+#helpPIcon	margin-left	-5px
+#helpPIcon	padding-top	0px
+#helpPIcon	padding-right	0px
+#helpPIcon	padding-bottom	0px
+#helpPIcon	padding-left	0px
+#helpPIcon	border-left-color	rgb(53, 53, 53)
+#helpPIcon	border-bottom-color	rgb(53, 53, 53)
+#helpPIcon	border-top-left-radius	5px
+#helpPIcon	border-bottom-right-radius	5px
+#krDiscountAd	color	rgb(255, 255, 255)
+#krDiscountAd	background-color	rgba(0, 0, 0, 0.5)
+#krDiscountAd	cursor	pointer
+#krDiscountAd	display	none
+#krDiscountAd	margin-top	10px
+#krDiscountAd	padding-top	10px
+#krDiscountAd	padding-right	10px
+#krDiscountAd	padding-bottom	10px
+#krDiscountAd	padding-left	10px
+#krDiscountAd	border-left-color	rgb(255, 255, 255)
+#krDiscountAd	border-bottom-color	rgb(255, 255, 255)
+#krDiscountAd	border-top-left-radius	4px
+#krDiscountAd	border-bottom-right-radius	4px
+#twitchDropsAd	color	rgb(255, 255, 255)
+#twitchDropsAd	background-color	rgba(0, 0, 0, 0.5)
+#twitchDropsAd	cursor	pointer
+#twitchDropsAd	display	none
+#twitchDropsAd	margin-top	10px
+#twitchDropsAd	padding-top	10px
+#twitchDropsAd	padding-right	10px
+#twitchDropsAd	padding-bottom	10px
+#twitchDropsAd	padding-left	10px
+#twitchDropsAd	border-top-width	2px
+#twitchDropsAd	border-left-width	2px
+#twitchDropsAd	border-bottom-width	2px
+#twitchDropsAd	border-top-style	solid
+#twitchDropsAd	border-left-style	solid
+#twitchDropsAd	border-bottom-style	solid
+#twitchDropsAd	border-left-color	rgb(150, 97, 247)
+#twitchDropsAd	border-bottom-color	rgb(150, 97, 247)
+#twitchDropsAd	border-top-left-radius	4px
+#twitchDropsAd	border-bottom-right-radius	4px
+#twitchDropsTimer	color	rgb(150, 97, 247)
+#twitchDropsTimer	font-size	15px
+#twitchDropsTimer	display	block
+#twitchDropsTimer	margin-left	0px
+#twitchDropsTimer	border-left-color	rgb(150, 97, 247)
+#twitchDropsTimer	border-bottom-color	rgb(150, 97, 247)
+#twitchDropsTimer	vertical-align	baseline
+#freeKRAd	color	rgb(255, 255, 255)
+#freeKRAd	background-color	rgba(0, 0, 0, 0.5)
+#freeKRAd	cursor	pointer
+#freeKRAd	display	none
+#freeKRAd	margin-top	10px
+#freeKRAd	padding-top	10px
+#freeKRAd	padding-right	10px
+#freeKRAd	padding-bottom	10px
+#freeKRAd	padding-left	10px
+#freeKRAd	border-left-color	rgb(255, 255, 255)
+#freeKRAd	border-bottom-color	rgb(255, 255, 255)
+#freeKRAd	border-top-left-radius	4px
+#freeKRAd	border-bottom-right-radius	4px
+#doubleClassXPAd	color	rgb(255, 255, 255)
+#doubleClassXPAd	background-color	rgba(0, 0, 0, 0.5)
+#doubleClassXPAd	cursor	pointer
+#doubleClassXPAd	display	none
+#doubleClassXPAd	margin-top	10px
+#doubleClassXPAd	padding-top	10px
+#doubleClassXPAd	padding-right	10px
+#doubleClassXPAd	padding-bottom	10px
+#doubleClassXPAd	padding-left	10px
+#doubleClassXPAd	border-left-color	rgb(255, 255, 255)
+#doubleClassXPAd	border-bottom-color	rgb(255, 255, 255)
+#doubleClassXPAd	border-top-left-radius	4px
+#doubleClassXPAd	border-bottom-right-radius	4px
+#doubleXPAd	color	rgb(255, 255, 255)
+#doubleXPAd	background-color	rgba(0, 0, 0, 0.5)
+#doubleXPAd	cursor	pointer
+#doubleXPAd	display	none
+#doubleXPAd	margin-top	10px
+#doubleXPAd	padding-top	10px
+#doubleXPAd	padding-right	10px
+#doubleXPAd	padding-bottom	10px
+#doubleXPAd	padding-left	10px
+#doubleXPAd	border-left-color	rgb(255, 255, 255)
+#doubleXPAd	border-bottom-color	rgb(255, 255, 255)
+#doubleXPAd	border-top-left-radius	4px
+#doubleXPAd	border-bottom-right-radius	4px
+#eventAd	color	rgb(255, 255, 255)
+#eventAd	background-color	rgba(0, 0, 0, 0.5)
+#eventAd	cursor	pointer
+#eventAd	display	none
+#eventAd	margin-top	10px
+#eventAd	padding-top	10px
+#eventAd	padding-right	10px
+#eventAd	padding-bottom	10px
+#eventAd	padding-left	10px
+#eventAd	border-left-color	rgb(255, 255, 255)
+#eventAd	border-bottom-color	rgb(255, 255, 255)
+#eventAd	border-top-left-radius	4px
+#eventAd	border-bottom-right-radius	4px
+#eventAdImg	color	rgb(53, 53, 53)
+#eventAdImg	display	inline
+#eventAdImg	overflow-x	clip
+#eventAdImg	overflow-y	clip
+#eventAdImg	margin-top	-5px
+#eventAdImg	margin-bottom	-22px
+#eventAdImg	margin-left	-5px
+#eventAdImg	padding-top	0px
+#eventAdImg	padding-right	0px
+#eventAdImg	padding-bottom	0px
+#eventAdImg	padding-left	0px
+#eventAdImg	border-left-color	rgb(53, 53, 53)
+#eventAdImg	border-bottom-color	rgb(53, 53, 53)
+#eventAdName	background-color	rgba(0, 0, 0, 0)
+#eventAdName	display	inline-block
+#eventAdName	margin-top	0px
+#eventAdName	margin-left	4px
+#eventAdName	padding-top	0px
+#eventAdName	padding-right	0px
+#eventAdName	padding-bottom	0px
+#eventAdName	padding-left	0px
+#eventAdName	border-top-left-radius	0px
+#eventAdName	border-bottom-right-radius	0px
+#eventAdName	vertical-align	top
+#eventAdDesc	color	rgb(251, 192, 45)
+#eventAdDesc	font-size	15px
+#eventAdDesc	display	block
+#eventAdDesc	margin-left	0px
+#eventAdDesc	border-left-color	rgb(251, 192, 45)
+#eventAdDesc	border-bottom-color	rgb(251, 192, 45)
+#eventAdDesc	vertical-align	baseline
+#updateAd	color	rgb(255, 255, 255)
+#updateAd	background-color	rgba(0, 0, 0, 0.5)
+#updateAd	cursor	pointer
+#updateAd	display	none
+#updateAd	margin-top	10px
+#updateAd	padding-top	10px
+#updateAd	padding-right	10px
+#updateAd	padding-bottom	10px
+#updateAd	padding-left	10px
+#updateAd	border-left-color	rgb(255, 255, 255)
+#updateAd	border-bottom-color	rgb(255, 255, 255)
+#updateAd	border-top-left-radius	4px
+#updateAd	border-bottom-right-radius	4px
+#updateAdIcon	background-color	rgba(0, 0, 0, 0)
+#updateAdIcon	line-height	65px
+#updateAdIcon	text-align	center
+#updateAdIcon	display	inline-block
+#updateAdIcon	margin-top	-5px
+#updateAdIcon	margin-bottom	-10px
+#updateAdIcon	margin-left	-5px
+#updateAdIcon	padding-top	0px
+#updateAdIcon	padding-right	0px
+#updateAdIcon	padding-bottom	0px
+#updateAdIcon	padding-left	0px
+#updateAdIcon	border-top-left-radius	3px
+#updateAdIcon	border-bottom-right-radius	3px
+#updateAdIcon	background-image	url("img/news.png")
+#updateAdIcon	background-size	cover
+#updateAdVersion	color	rgb(251, 192, 45)
+#updateAdVersion	font-size	15px
+#updateAdVersion	display	block
+#updateAdVersion	margin-left	0px
+#updateAdVersion	border-left-color	rgb(251, 192, 45)
+#updateAdVersion	border-bottom-color	rgb(251, 192, 45)
+#updateAdVersion	vertical-align	baseline
+#battlepassAd	color	rgb(255, 255, 255)
+#battlepassAd	background-color	rgba(0, 0, 0, 0.5)
+#battlepassAd	cursor	pointer
+#battlepassAd	margin-top	10px
+#battlepassAd	padding-top	10px
+#battlepassAd	padding-right	10px
+#battlepassAd	padding-bottom	10px
+#battlepassAd	padding-left	10px
+#battlepassAd	border-left-color	rgb(255, 255, 255)
+#battlepassAd	border-bottom-color	rgb(255, 255, 255)
+#battlepassAd	border-top-left-radius	4px
+#battlepassAd	border-bottom-right-radius	4px
+#bpAdIcon	background-color	rgba(0, 0, 0, 0.37)
+#bpAdIcon	line-height	85px
+#bpAdIcon	text-align	center
+#bpAdIcon	display	inline-block
+#bpAdIcon	margin-top	-5px
+#bpAdIcon	margin-right	-4px
+#bpAdIcon	margin-bottom	-10px
+#bpAdIcon	margin-left	-5px
+#bpAdIcon	padding-top	0px
+#bpAdIcon	padding-right	0px
+#bpAdIcon	padding-bottom	0px
+#bpAdIcon	padding-left	0px
+#bpAdIcon	border-top-left-radius	3px
+#bpAdIcon	border-bottom-right-radius	3px
+#bpAdIcon	background-image	url("img/battlepass/logo_0.png")
+#bpAdIcon	background-size	contain
+#bpAdIcon	background-repeat	no-repeat
+#modVote	color	rgb(255, 255, 255)
+#modVote	background-color	rgba(0, 0, 0, 0.5)
+#modVote	cursor	pointer
+#modVote	display	none
+#modVote	margin-top	10px
+#modVote	padding-top	10px
+#modVote	padding-right	10px
+#modVote	padding-bottom	10px
+#modVote	padding-left	10px
+#modVote	border-left-color	rgb(255, 255, 255)
+#modVote	border-bottom-color	rgb(255, 255, 255)
+#modVote	border-top-left-radius	4px
+#modVote	border-bottom-right-radius	4px
+#modVoteIcon	background-color	rgba(0, 0, 0, 0.37)
+#modVoteIcon	text-align	center
+#modVoteIcon	display	inline-block
+#modVoteIcon	margin-top	-5px
+#modVoteIcon	margin-right	-4px
+#modVoteIcon	margin-bottom	-5px
+#modVoteIcon	margin-left	-5px
+#modVoteIcon	padding-top	0px
+#modVoteIcon	padding-right	0px
+#modVoteIcon	padding-bottom	0px
+#modVoteIcon	padding-left	0px
+#modVoteIcon	border-top-left-radius	3px
+#modVoteIcon	border-bottom-right-radius	3px
+#modVoteIcon	background-size	contain
+#modVoteIcon	background-repeat	no-repeat
+#modVoteName	font-size	15px
+#modVoteName	display	block
+#modVoteName	margin-left	0px
+#modVoteName	vertical-align	baseline
+#modVoteHold	color	rgb(53, 53, 53)
+#modVoteHold	display	block
+#modVoteHold	margin-top	5px
+#modVoteHold	margin-left	0px
+#modVoteHold	border-left-color	rgb(53, 53, 53)
+#modVoteHold	border-bottom-color	rgb(53, 53, 53)
+#modVoteHold	vertical-align	baseline
+#guidePopupH	background-color	rgba(0, 0, 0, 0.8)
+#guidePopupH	text-align	center
+#guidePopupH	display	none
+#guidePopupH	position	absolute
+#guidePopupH	z-index	9999
+#guidePopup	background-color	rgb(59, 59, 59)
+#guidePopup	display	block
+#guidePopup	overflow-x	auto
+#guidePopup	overflow-y	scroll
+#guidePopup	z-index	99999
+#guidePopup	top	260px
+#guidePopup	left	50%
+#guidePopup	border-top-left-radius	6px
+#guidePopup	border-bottom-right-radius	6px
+#moveGuidSlid	display	inline-block
+#moveGuidSlid	overflow-x	clip
+#moveGuidSlid	overflow-y	clip
+#moveGuidSlid	margin-right	20px
+#moveGuidSlid	margin-left	20px
+#moveGuidSlid	padding-bottom	0px
+#moveGuidSlid	border-bottom-width	0px
+#moveGuidSlid	border-bottom-style	none
+#moveGuidSlid	border-bottom-color	rgb(53, 53, 53)
+#moveGuidSlid	vertical-align	top
+#topLeftAdHolder	color	rgba(255, 255, 255, 0.4)
+#topLeftAdHolder	background-color	rgba(0, 0, 0, 0.5)
+#topLeftAdHolder	text-align	left
+#topLeftAdHolder	display	none
+#topLeftAdHolder	position	absolute
+#topLeftAdHolder	z-index	20
+#topLeftAdHolder	top	15px
+#topLeftAdHolder	left	147px
+#topLeftAdHolder	padding-top	10px
+#topLeftAdHolder	padding-right	10px
+#topLeftAdHolder	padding-bottom	10px
+#topLeftAdHolder	padding-left	10px
+#topLeftAdHolder	border-left-color	rgba(255, 255, 255, 0.4)
+#topLeftAdHolder	border-bottom-color	rgba(255, 255, 255, 0.4)
+#topLeftAdHolder	border-top-left-radius	4px
+#topLeftAdHolder	border-bottom-right-radius	4px
+#topLeftAdHolder > div:nth-child(1) > div:nth-child(1)	text-align	-webkit-center
+#teamSelector	color	rgb(255, 255, 255)
+#teamSelector	display	none
+#teamSelector	position	absolute
+#teamSelector	bottom	225px
+#teamSelector	left	50%
+#teamSelector	border-left-color	rgb(255, 255, 255)
+#teamSelector	border-bottom-color	rgb(255, 255, 255)
+#teamNm1	display	inline
+#teamNm1	position	static
+#teamNm1	bottom	auto
+#teamNm1	left	auto
+#selectT	font-size	13.3333px
+#selectT	user-select	text
+#selectT	display	none
+#selectT	position	static
+#selectT	box-sizing	border-box
+#selectT	margin-top	3px
+#selectT	margin-right	3px
+#selectT	margin-bottom	3px
+#selectT	margin-left	4px
+#selectT	vertical-align	baseline
+#teamNm2	color	rgba(255, 255, 255, 0.5)
+#teamNm2	display	inline
+#teamNm2	position	static
+#teamNm2	bottom	auto
+#teamNm2	left	auto
+#teamNm2	border-left-color	rgba(255, 255, 255, 0.5)
+#teamNm2	border-bottom-color	rgba(255, 255, 255, 0.5)
+#gameNameHolder	display	flex
+#gameNameHolder	position	absolute
+#gameNameHolder	z-index	9999999
+#gameNameHolder	top	-35px
+#gameNameHolder	right	1089px
+#gameNameHolder	bottom	1016.11px
+#gameNameHolder	left	1105px
+#gameNameHolder	flex-direction	column
+#gameNameHolder	align-items	center
+#mainLogo	display	block
+#mainLogo	position	static
+#mainLogo	overflow-x	clip
+#mainLogo	overflow-y	clip
+#mainLogo	z-index	auto
+#mainLogo	top	auto
+#mainLogo	right	auto
+#mainLogo	bottom	auto
+#mainLogo	left	auto
+#mainLogo	margin-top	50px
+#mainLogo	margin-bottom	-40px
+#mainLogo	flex-direction	row
+#mainLogo	align-items	normal
+#mainLogoFace	display	block
+#mainLogoFace	overflow-x	clip
+#mainLogoFace	overflow-y	clip
+#mainLogoFace	z-index	auto
+#mainLogoFace	top	208px
+#mainLogoFace	right	-79px
+#mainLogoFace	bottom	-27px
+#mainLogoFace	left	8px
+#mainLogoFace	margin-left	6px
+#mainLogoFace	flex-direction	row
+#mainLogoFace	align-items	normal
+#seasonLabel	color	rgb(255, 255, 255)
+#seasonLabel	font-size	23px
+#seasonLabel	text-shadow	rgb(20, 20, 20) -1px -1px 0px, rgb(20, 20, 20) 1px -1px 0px, rgb(20, 20, 20) -1px 1px 0px, rgb(20, 20, 20) 1px 1px 0px, rgb(20, 20, 20) -2px -2px 0px, rgb(20, 20, 20) 2px -2px 0px, rgb(20, 20, 20) -2px 2px 0px, rgb(20, 20, 20) 2px 2px 0px, rgb(20, 20, 20) -3px -3px 0px, rgb(20, 20, 20) 3px -3px 0px, rgb(20, 20, 20) -3px 3px 0px, rgb(20, 20, 20) 3px 3px 0px, rgb(20, 20, 20) -4px -4px 0px, rgb(20, 20, 20) 4px -4px 0px, rgb(20, 20, 20) -4px 4px 0px, rgb(20, 20, 20) 4px 4px 0px, rgb(20, 20, 20) -5px -5px 0px, rgb(20, 20, 20) 5px -5px 0px, rgb(20, 20, 20) -5px 5px 0px, rgb(20, 20, 20) 5px 5px 0px, rgb(20, 20, 20) -6px -6px 0px, rgb(20, 20, 20) 6px -6px 0px, rgb(20, 20, 20) -6px 6px 0px, rgb(20, 20, 20) 6px 6px 0px, rgb(20, 20, 20) -6px 0px 0px, rgb(20, 20, 20) 6px 0px 0px, rgb(20, 20, 20) 0px 6px 0px, rgb(20, 20, 20) 0px -6px 0px
+#seasonLabel	position	absolute
+#seasonLabel	z-index	999999999
+#seasonLabel	top	172px
+#seasonLabel	right	618.891px
+#seasonLabel	bottom	1028.11px
+#seasonLabel	left	1105px
+#seasonLabel	margin-left	314px
+#seasonLabel	padding-top	3px
+#seasonLabel	padding-right	12px
+#seasonLabel	padding-bottom	6px
+#seasonLabel	padding-left	12px
+#seasonLabel	border-left-color	rgb(255, 255, 255)
+#seasonLabel	border-bottom-color	rgb(255, 255, 255)
+#seasonLabel	border-top-left-radius	4px
+#seasonLabel	border-bottom-right-radius	4px
+#topRightAdHolder	color	rgba(255, 255, 255, 0.4)
+#topRightAdHolder	background-color	rgba(0, 0, 0, 0.5)
+#topRightAdHolder	text-align	left
+#topRightAdHolder	display	none
+#topRightAdHolder	position	absolute
+#topRightAdHolder	z-index	20
+#topRightAdHolder	top	86px
+#topRightAdHolder	right	340px
+#topRightAdHolder	padding-top	10px
+#topRightAdHolder	padding-right	10px
+#topRightAdHolder	padding-bottom	10px
+#topRightAdHolder	padding-left	10px
+#topRightAdHolder	border-left-color	rgba(255, 255, 255, 0.4)
+#topRightAdHolder	border-bottom-color	rgba(255, 255, 255, 0.4)
+#topRightAdHolder	border-top-left-radius	4px
+#topRightAdHolder	border-bottom-right-radius	4px
+#topRightAdHolder > div:nth-child(1) > div:nth-child(1)	text-align	-webkit-center
+#streamContainer	color	rgba(255, 255, 255, 0.4)
+#streamContainer	background-color	rgba(0, 0, 0, 0.5)
+#streamContainer	text-align	left
+#streamContainer	position	absolute
+#streamContainer	z-index	20
+#streamContainer	top	86px
+#streamContainer	right	14px
+#streamContainer	bottom	892.109px
+#streamContainer	left	1876px
+#streamContainer	padding-top	10px
+#streamContainer	padding-right	10px
+#streamContainer	padding-bottom	10px
+#streamContainer	padding-left	10px
+#streamContainer	border-left-color	rgba(255, 255, 255, 0.4)
+#streamContainer	border-bottom-color	rgba(255, 255, 255, 0.4)
+#streamContainer	border-top-left-radius	4px
+#streamContainer	border-bottom-right-radius	4px
+#streamCon	color	rgb(53, 53, 53)
+#streamCon	background-color	rgba(0, 0, 0, 0)
+#streamCon	display	none
+#streamCon	position	static
+#streamCon	z-index	auto
+#streamCon	top	auto
+#streamCon	right	auto
+#streamCon	bottom	auto
+#streamCon	left	auto
+#streamCon	padding-top	0px
+#streamCon	padding-right	0px
+#streamCon	padding-bottom	0px
+#streamCon	padding-left	0px
+#streamCon	border-left-color	rgb(53, 53, 53)
+#streamCon	border-bottom-color	rgb(53, 53, 53)
+#streamCon	border-top-left-radius	0px
+#streamCon	border-bottom-right-radius	0px
+#loadingStreams	color	rgba(244, 60, 60, 0.5)
+#loadingStreams	display	inline
+#loadingStreams	border-left-color	rgba(244, 60, 60, 0.5)
+#loadingStreams	border-bottom-color	rgba(244, 60, 60, 0.5)
+#streamEvent	display	block
+#streamEventEmbed	cursor	pointer
+#streamItem0	cursor	pointer
+#streamItem0	display	block
+#streamItem1	cursor	pointer
+#streamItem1	display	block
+#streamItem2	cursor	pointer
+#streamItem2	display	block
+#streamItem3	cursor	pointer
+#streamItem3	display	block
+#friendCon	color	rgb(53, 53, 53)
+#friendCon	background-color	rgba(0, 0, 0, 0)
+#friendCon	display	none
+#friendCon	position	static
+#friendCon	z-index	auto
+#friendCon	top	auto
+#friendCon	right	auto
+#friendCon	bottom	auto
+#friendCon	left	auto
+#friendCon	padding-top	0px
+#friendCon	padding-right	0px
+#friendCon	padding-bottom	0px
+#friendCon	padding-left	0px
+#friendCon	border-left-color	rgb(53, 53, 53)
+#friendCon	border-bottom-color	rgb(53, 53, 53)
+#friendCon	border-top-left-radius	0px
+#friendCon	border-bottom-right-radius	0px
+#adCon	color	rgb(53, 53, 53)
+#adCon	background-color	rgba(0, 0, 0, 0)
+#adCon	display	none
+#adCon	position	relative
+#adCon	z-index	auto
+#adCon	top	auto
+#adCon	right	auto
+#adCon	bottom	auto
+#adCon	left	auto
+#adCon	padding-top	0px
+#adCon	padding-right	0px
+#adCon	padding-bottom	0px
+#adCon	padding-left	0px
+#adCon	border-left-color	rgb(53, 53, 53)
+#adCon	border-bottom-color	rgb(53, 53, 53)
+#adCon	border-top-left-radius	0px
+#adCon	border-bottom-right-radius	0px
+#adCon > div:nth-child(1) > div:nth-child(1)	text-align	-webkit-center
+#newsHolder	background-color	rgba(0, 0, 0, 0.5)
+#newsHolder	text-align	left
+#newsHolder	display	none
+#newsHolder	position	absolute
+#newsHolder	z-index	20
+#newsHolder	top	86px
+#newsHolder	right	14px
+#newsHolder	padding-top	10px
+#newsHolder	padding-right	10px
+#newsHolder	padding-bottom	10px
+#newsHolder	padding-left	10px
+#newsHolder	border-top-left-radius	4px
+#newsHolder	border-bottom-right-radius	4px
+#newsHed	color	rgb(255, 255, 255)
+#newsHed	font-size	18px
+#newsHed	line-height	23px
+#newsHed	text-align	center
+#newsHed	position	absolute
+#newsHed	z-index	10
+#newsHed	bottom	0px
+#newsHed	left	0px
+#newsHed	padding-top	6px
+#newsHed	padding-right	10px
+#newsHed	padding-bottom	6px
+#newsHed	padding-left	6px
+#newsHed	border-left-color	rgb(255, 255, 255)
+#newsHed	border-bottom-color	rgb(255, 255, 255)
+#newsHed	background-image	linear-gradient(to right, rgb(207, 129, 222), rgb(175, 48, 199))
+#newsStat	color	rgba(255, 255, 255, 0.5)
+#newsStat	background-color	rgba(0, 0, 0, 0.9)
+#newsStat	font-size	18px
+#newsStat	line-height	23px
+#newsStat	position	absolute
+#newsStat	z-index	10
+#newsStat	right	20px
+#newsStat	bottom	0px
+#newsStat	padding-top	6px
+#newsStat	padding-right	10px
+#newsStat	padding-bottom	6px
+#newsStat	padding-left	10px
+#newsStat	border-left-color	rgba(255, 255, 255, 0.5)
+#newsStat	border-bottom-color	rgba(255, 255, 255, 0.5)
+#newsStat	border-top-left-radius	6px
+#newsStatV	color	rgb(255, 255, 255)
+#newsStatV	background-color	rgba(0, 0, 0, 0)
+#newsStatV	display	inline
+#newsStatV	position	static
+#newsStatV	z-index	auto
+#newsStatV	right	auto
+#newsStatV	bottom	auto
+#newsStatV	padding-top	0px
+#newsStatV	padding-right	0px
+#newsStatV	padding-bottom	0px
+#newsStatV	padding-left	0px
+#newsStatV	border-left-color	rgb(255, 255, 255)
+#newsStatV	border-bottom-color	rgb(255, 255, 255)
+#newsStatV	border-top-left-radius	0px
+#newsBody	position	static
+#newsBody	overflow-x	hidden
+#newsBody	overflow-y	scroll
+#spectButton	color	rgba(255, 255, 255, 0.5)
+#spectButton	font-size	18px
+#spectButton	display	flex
+#spectButton	position	absolute
+#spectButton	z-index	2
+#spectButton	top	561.547px
+#spectButton	right	973.484px
+#spectButton	bottom	660.562px
+#spectButton	left	1105px
+#spectButton	border-left-color	rgba(255, 255, 255, 0.5)
+#spectButton	border-bottom-color	rgba(255, 255, 255, 0.5)
+#spectButton	align-items	center
+#specBtn	font-size	13.3333px
+#specBtn	user-select	text
+#specBtn	display	none
+#specBtn	position	static
+#specBtn	float	none
+#specBtn	box-sizing	border-box
+#specBtn	top	auto
+#specBtn	right	auto
+#specBtn	bottom	auto
+#specBtn	left	auto
+#specBtn	margin-top	3px
+#specBtn	margin-right	3px
+#specBtn	margin-bottom	3px
+#specBtn	margin-left	4px
+#specBtn	vertical-align	baseline
+#menuClassContainer	text-align	right
+#menuClassContainer	position	absolute
+#menuClassContainer	z-index	99999
+#menuClassContainer	top	475.109px
+#menuClassContainer	right	21px
+#menuClassContainer	bottom	90px
+#menuClassContainer	left	1552px
+#menuClassContainer	flex-direction	column
+#menuClassContainer	justify-content	center
+#menuClassContainer	align-items	center
+#bubbleContainer	top	209px
+#bubbleContainer	right	420px
+#bubbleContainer	bottom	329px
+#bubbleContainer	left	-3px
+#bubbleContainer	flex-direction	row
+#bubbleContainer	justify-content	normal
+#bubbleContainer	align-items	normal
+#txtBubble	color	rgba(0, 0, 0, 0.6)
+#txtBubble	background-color	rgb(255, 255, 255)
+#txtBubble	font-weight	900
+#txtBubble	text-align	center
+#txtBubble	position	relative
+#txtBubble	z-index	auto
+#txtBubble	top	0px
+#txtBubble	right	0px
+#txtBubble	bottom	0px
+#txtBubble	left	0px
+#txtBubble	margin-top	50px
+#txtBubble	margin-bottom	50px
+#txtBubble	padding-top	20px
+#txtBubble	padding-right	20px
+#txtBubble	padding-bottom	20px
+#txtBubble	padding-left	20px
+#txtBubble	border-left-color	rgba(0, 0, 0, 0.6)
+#txtBubble	border-bottom-color	rgba(0, 0, 0, 0.6)
+#txtBubble	border-top-left-radius	12px
+#txtBubble	border-bottom-right-radius	12px
+#classPreviewCanvas	visibility	hidden
+#classPreviewCanvas	display	inline
+#classPreviewCanvas	position	static
+#classPreviewCanvas	overflow-x	clip
+#classPreviewCanvas	overflow-y	clip
+#classPreviewCanvas	z-index	auto
+#classPreviewCanvas	top	auto
+#classPreviewCanvas	right	auto
+#classPreviewCanvas	bottom	auto
+#classPreviewCanvas	left	auto
+#classPreviewCanvas	margin-right	-113px
+#classPreviewCanvas	margin-bottom	-120px
+#classPreviewCanvas	flex-direction	row
+#classPreviewCanvas	justify-content	normal
+#classPreviewCanvas	align-items	normal
+#menuClassNameTag	color	rgb(255, 255, 255)
+#menuClassNameTag	font-size	19px
+#menuClassNameTag	display	none
+#menuClassNameTag	z-index	100
+#menuClassNameTag	top	auto
+#menuClassNameTag	right	auto
+#menuClassNameTag	bottom	auto
+#menuClassNameTag	left	auto
+#menuClassNameTag	margin-top	-350px
+#menuClassNameTag	border-left-color	rgb(255, 255, 255)
+#menuClassNameTag	border-bottom-color	rgb(255, 255, 255)
+#menuClassNameTag	flex-direction	row
+#menuClassNameTag	justify-content	normal
+#menuClassNameTag	align-items	normal
+#menuClassSubtext	color	rgba(255, 255, 255, 0.5)
+#menuClassSubtext	font-size	17px
+#menuClassSubtext	text-shadow	rgb(32, 32, 32) -1px -1px 0px, rgb(32, 32, 32) 1px -1px 0px, rgb(32, 32, 32) -1px 1px 0px, rgb(32, 32, 32) 1px 1px 0px, rgb(32, 32, 32) -2px -2px 0px, rgb(32, 32, 32) 2px -2px 0px, rgb(32, 32, 32) -2px 2px 0px, rgb(32, 32, 32) 2px 2px 0px, rgb(32, 32, 32) -3px -3px 0px, rgb(32, 32, 32) 3px -3px 0px, rgb(32, 32, 32) -3px 3px 0px, rgb(32, 32, 32) 3px 3px 0px
+#menuClassSubtext	display	block
+#menuClassSubtext	position	static
+#menuClassSubtext	z-index	100
+#menuClassSubtext	top	auto
+#menuClassSubtext	right	auto
+#menuClassSubtext	bottom	auto
+#menuClassSubtext	left	auto
+#menuClassSubtext	margin-bottom	-3px
+#menuClassSubtext	border-left-color	rgba(255, 255, 255, 0.5)
+#menuClassSubtext	border-bottom-color	rgba(255, 255, 255, 0.5)
+#menuClassName	color	rgb(255, 255, 255)
+#menuClassName	font-size	30px
+#menuClassName	text-shadow	rgb(32, 32, 32) -1px -1px 0px, rgb(32, 32, 32) 1px -1px 0px, rgb(32, 32, 32) -1px 1px 0px, rgb(32, 32, 32) 1px 1px 0px, rgb(32, 32, 32) -2px -2px 0px, rgb(32, 32, 32) 2px -2px 0px, rgb(32, 32, 32) -2px 2px 0px, rgb(32, 32, 32) 2px 2px 0px, rgb(32, 32, 32) -3px -3px 0px, rgb(32, 32, 32) 3px -3px 0px, rgb(32, 32, 32) -3px 3px 0px, rgb(32, 32, 32) 3px 3px 0px, rgb(32, 32, 32) -4px -4px 0px, rgb(32, 32, 32) 4px -4px 0px, rgb(32, 32, 32) -4px 4px 0px, rgb(32, 32, 32) 4px 4px 0px
+#menuClassName	display	block
+#menuClassName	position	static
+#menuClassName	z-index	101
+#menuClassName	top	auto
+#menuClassName	right	auto
+#menuClassName	bottom	auto
+#menuClassName	left	auto
+#menuClassName	border-left-color	rgb(255, 255, 255)
+#menuClassName	border-bottom-color	rgb(255, 255, 255)
+#menuClassIcn	background-color	rgba(0, 0, 0, 0.4)
+#menuClassIcn	display	inline
+#menuClassIcn	position	relative
+#menuClassIcn	overflow-x	clip
+#menuClassIcn	overflow-y	clip
+#menuClassIcn	z-index	auto
+#menuClassIcn	top	0px
+#menuClassIcn	right	0px
+#menuClassIcn	bottom	0px
+#menuClassIcn	left	0px
+#menuClassIcn	margin-left	10px
+#menuClassIcn	border-top-width	4px
+#menuClassIcn	border-left-width	4px
+#menuClassIcn	border-bottom-width	4px
+#menuClassIcn	border-top-style	solid
+#menuClassIcn	border-left-style	solid
+#menuClassIcn	border-bottom-style	solid
+#menuClassIcn	border-left-color	rgba(255, 255, 255, 0.4)
+#menuClassIcn	border-bottom-color	rgba(255, 255, 255, 0.4)
+#menuClassIcn	border-top-left-radius	4px
+#menuClassIcn	border-bottom-right-radius	4px
+#menuClassIcn	vertical-align	bottom
+#menuClassIcn	flex-direction	row
+#menuClassIcn	justify-content	normal
+#menuClassIcn	align-items	normal
+#customizeButton	color	rgb(255, 255, 255)
+#customizeButton	background-color	rgba(0, 0, 0, 0.3)
+#customizeButton	font-size	27px
+#customizeButton	line-height	40px
+#customizeButton	text-align	center
+#customizeButton	cursor	pointer
+#customizeButton	text-shadow	rgb(32, 32, 32) -1px -1px 0px, rgb(32, 32, 32) 1px -1px 0px, rgb(32, 32, 32) -1px 1px 0px, rgb(32, 32, 32) 1px 1px 0px, rgb(32, 32, 32) -2px -2px 0px, rgb(32, 32, 32) 2px -2px 0px, rgb(32, 32, 32) -2px 2px 0px, rgb(32, 32, 32) 2px 2px 0px, rgb(32, 32, 32) -3px -3px 0px, rgb(32, 32, 32) 3px -3px 0px, rgb(32, 32, 32) -3px 3px 0px, rgb(32, 32, 32) 3px 3px 0px
+#customizeButton	display	inline-block
+#customizeButton	position	relative
+#customizeButton	top	0px
+#customizeButton	right	0px
+#customizeButton	bottom	0px
+#customizeButton	left	0px
+#customizeButton	margin-top	0px
+#customizeButton	margin-bottom	6px
+#customizeButton	padding-top	15px
+#customizeButton	padding-right	15px
+#customizeButton	padding-bottom	22px
+#customizeButton	padding-left	15px
+#customizeButton	border-top-width	4px
+#customizeButton	border-left-width	4px
+#customizeButton	border-bottom-width	4px
+#customizeButton	border-top-style	solid
+#customizeButton	border-left-style	solid
+#customizeButton	border-bottom-style	solid
+#customizeButton	border-left-color	rgb(49, 202, 236)
+#customizeButton	border-bottom-color	rgb(49, 202, 236)
+#customizeButton	border-top-left-radius	4px
+#customizeButton	border-bottom-right-radius	4px
+#customizeButton	vertical-align	bottom
+#signedOutHeaderBar	background-color	rgba(0, 0, 0, 0.5)
+#signedOutHeaderBar	display	flex
+#signedOutHeaderBar	position	absolute
+#signedOutHeaderBar	top	0px
+#signedOutHeaderBar	right	1890px
+#signedOutHeaderBar	bottom	1173.11px
+#signedOutHeaderBar	left	0px
+#signedOutHeaderBar	padding-right	6px
+#signedOutHeaderBar	padding-left	6px
+#signedOutHeaderBar	border-bottom-right-radius	6px
+#signedOutHeaderBar	align-items	center
+#signedInHeaderBar	background-color	rgba(0, 0, 0, 0.5)
+#signedInHeaderBar	display	none
+#signedInHeaderBar	position	absolute
+#signedInHeaderBar	top	0px
+#signedInHeaderBar	left	0px
+#signedInHeaderBar	padding-left	12px
+#signedInHeaderBar	border-bottom-right-radius	10px
+#signedInHeaderBar	align-items	center
+#menuUsernameContainer	cursor	pointer
+#menuUsernameContainer	vertical-align	top
+#menuMiniProfilePic	color	rgb(53, 53, 53)
+#menuMiniProfilePic	image-rendering	pixelated
+#menuMiniProfilePic	overflow-x	clip
+#menuMiniProfilePic	overflow-y	clip
+#menuMiniProfilePic	margin-right	10px
+#menuMiniProfilePic	border-left-color	rgb(53, 53, 53)
+#menuMiniProfilePic	border-bottom-color	rgb(53, 53, 53)
+#menuMiniProfilePic	border-top-left-radius	32px
+#menuMiniProfilePic	border-bottom-right-radius	32px
+#menuAccountUsername	vertical-align	bottom
+#menuKRCount	color	rgba(255, 255, 255, 0.6)
+#menuKRCount	margin-top	0px
+#menuKRCount	border-left-color	rgba(255, 255, 255, 0.6)
+#menuKRCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#menuKRCount	vertical-align	super
+#menuJNKCount	color	rgba(255, 255, 255, 0.6)
+#menuJNKCount	margin-top	0px
+#menuJNKCount	border-left-color	rgba(255, 255, 255, 0.6)
+#menuJNKCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#menuJNKCount	vertical-align	baseline
+#mailContainer	position	relative
+#mailCount	background-color	rgb(235, 47, 47)
+#mailCount	font-size	10px
+#mailCount	line-height	21px
+#mailCount	text-align	center
+#mailCount	display	block
+#mailCount	position	absolute
+#mailCount	z-index	2
+#mailCount	top	-1px
+#mailCount	right	-10px
+#mailCount	border-top-width	3px
+#mailCount	border-left-width	3px
+#mailCount	border-bottom-width	3px
+#mailCount	border-top-style	solid
+#mailCount	border-left-style	solid
+#mailCount	border-bottom-style	solid
+#mailCount	border-left-color	rgb(71, 71, 71)
+#mailCount	border-bottom-color	rgb(71, 71, 71)
+#mailCount	border-top-left-radius	20px
+#mailCount	border-bottom-right-radius	20px
+#mailIcon	font-size	37px
+#mailIcon	font-family	"material icons"
+#mailIcon	line-height	37px
+#mailIcon	white-space	nowrap
+#mailIcon	cursor	pointer
+#mailIcon	position	static
+#menuLvlHold	background-color	rgba(0, 0, 0, 0.9)
+#menuLvlHold	display	block
+#menuLvlHold	padding-top	2px
+#menuLvlHold	padding-right	2px
+#menuLvlHold	padding-bottom	2px
+#menuLvlHold	padding-left	2px
+#menuLvlHold	border-top-left-radius	3px
+#menuLvlHold	border-bottom-right-radius	3px
+#menuLevelBar	background-color	rgba(0, 0, 0, 0)
+#menuLevelBar	padding-top	0px
+#menuLevelBar	padding-right	0px
+#menuLevelBar	padding-bottom	0px
+#menuLevelBar	padding-left	0px
+#menuLevelBar	background-image	linear-gradient(to right, rgb(255, 106, 11), rgb(251, 192, 45), 94%, rgb(255, 255, 255))
+#mLevelCont	color	rgb(255, 255, 255)
+#mLevelCont	background-color	rgba(0, 0, 0, 0.8)
+#mLevelCont	display	inline-block
+#mLevelCont	position	static
+#mLevelCont	top	auto
+#mLevelCont	left	auto
+#mLevelCont	margin-left	20px
+#mLevelCont	padding-right	15px
+#mLevelCont	padding-left	15px
+#mLevelCont	border-left-color	rgb(255, 255, 255)
+#mLevelCont	border-bottom-color	rgb(255, 255, 255)
+#mLevelCont	align-items	normal
+#mLevelContV	background-color	rgba(0, 0, 0, 0)
+#mLevelContV	font-size	30px
+#mLevelContV	line-height	70px
+#mLevelContV	text-align	left
+#mLevelContV	margin-left	0px
+#mLevelContV	padding-right	0px
+#mLevelContV	padding-left	0px
+#mLevelContV	border-bottom-right-radius	0px
+#mLevelContV	vertical-align	top
+#headerRight	background-color	rgba(0, 0, 0, 0.5)
+#headerRight	display	flex
+#headerRight	position	absolute
+#headerRight	top	0px
+#headerRight	right	0px
+#headerRight	bottom	1173.11px
+#headerRight	left	1954.67px
+#headerRight	padding-right	12px
+#headerRight	padding-left	20px
+#headerRight	align-items	center
+#menuServerInfoContainer	color	rgb(255, 255, 255)
+#menuServerInfoContainer	background-color	rgba(0, 0, 0, 0)
+#menuServerInfoContainer	position	static
+#menuServerInfoContainer	top	auto
+#menuServerInfoContainer	right	auto
+#menuServerInfoContainer	bottom	auto
+#menuServerInfoContainer	left	auto
+#menuServerInfoContainer	padding-right	0px
+#menuServerInfoContainer	padding-left	0px
+#menuServerInfoContainer	border-left-color	rgb(255, 255, 255)
+#menuServerInfoContainer	border-bottom-color	rgb(255, 255, 255)
+#menuServerInfoContainer	flex-direction	column
+#menuServerInfoContainer	align-items	flex-end
+#menuRegionLabel	cursor	pointer
+#menuRegionLabel	margin-bottom	3px
+#menuRegionLabel	justify-content	center
+#menuRegionLabel	align-items	center
+#menuFPSDisplay	color	rgba(255, 255, 255, 0.75)
+#menuFPSDisplay	font-size	12px
+#menuFPSDisplay	display	none
+#menuFPSDisplay	margin-right	5px
+#menuFPSDisplay	border-left-color	rgba(255, 255, 255, 0.75)
+#menuFPSDisplay	border-bottom-color	rgba(255, 255, 255, 0.75)
+#menuFPSDisplay	justify-content	normal
+#menuFPSDisplay	align-items	normal
+#menuFPS	color	rgb(158, 235, 86)
+#menuFPS	display	inline
+#menuFPS	margin-right	0px
+#menuFPS	border-left-color	rgb(158, 235, 86)
+#menuFPS	border-bottom-color	rgb(158, 235, 86)
+#menuPingDisplay	color	rgba(255, 255, 255, 0.75)
+#menuPingDisplay	font-size	12px
+#menuPingDisplay	display	block
+#menuPingDisplay	border-left-color	rgba(255, 255, 255, 0.75)
+#menuPingDisplay	border-bottom-color	rgba(255, 255, 255, 0.75)
+#menuPingDisplay	justify-content	normal
+#menuPingDisplay	align-items	normal
+#menuPingIcon	color	rgb(128, 128, 128)
+#menuPingIcon	font-size	20px
+#menuPingIcon	font-family	"material icons"
+#menuPingIcon	line-height	20px
+#menuPingIcon	white-space	nowrap
+#menuPingIcon	display	inline-block
+#menuPingIcon	border-left-color	rgb(128, 128, 128)
+#menuPingIcon	border-bottom-color	rgb(128, 128, 128)
+#menuPingIcon	vertical-align	bottom
+#menuPingText	display	inline
+#menuPingText	margin-left	5px
+#headerRightSocial	color	rgb(255, 255, 255)
+#headerRightSocial	background-color	rgba(0, 0, 0, 0)
+#headerRightSocial	display	contents
+#headerRightSocial	position	static
+#headerRightSocial	top	auto
+#headerRightSocial	right	auto
+#headerRightSocial	bottom	auto
+#headerRightSocial	left	auto
+#headerRightSocial	padding-right	0px
+#headerRightSocial	padding-left	0px
+#headerRightSocial	border-left-color	rgb(255, 255, 255)
+#headerRightSocial	border-bottom-color	rgb(255, 255, 255)
+#headerRightSocial	align-items	normal
+#editorBtnM	color	rgb(53, 53, 53)
+#editorBtnM	cursor	pointer
+#editorBtnM	image-rendering	crisp-edges
+#editorBtnM	display	block
+#editorBtnM	overflow-x	clip
+#editorBtnM	overflow-y	clip
+#editorBtnM	margin-top	-3px
+#editorBtnM	margin-right	-10px
+#editorBtnM	margin-left	-5px
+#editorBtnM	border-left-color	rgb(53, 53, 53)
+#editorBtnM	border-bottom-color	rgb(53, 53, 53)
+#menuItemContainer	background-color	rgba(0, 0, 0, 0.5)
+#menuItemContainer	display	flex
+#menuItemContainer	position	absolute
+#menuItemContainer	top	70px
+#menuItemContainer	right	2080px
+#menuItemContainer	bottom	0px
+#menuItemContainer	left	0px
+#menuItemContainer	flex-direction	column
+#menuBtnProfile	font-size	13px
+#menuBtnProfile	display	block
+#menuBtnProfile	margin-top	-26px
+#menuBtnProfile	flex-direction	row
+#menuBtnProfile	justify-content	normal
+#menuBtnProfile	align-items	normal
+#menuBtnProfile	flex-grow	0
+#menuBtnShop	font-size	13px
+#menuBtnShop	display	block
+#menuBtnShop	margin-top	-26px
+#menuBtnShop	flex-direction	row
+#menuBtnShop	justify-content	normal
+#menuBtnShop	align-items	normal
+#menuBtnShop	flex-grow	0
+#menuBtnChall	font-size	13px
+#menuBtnChall	display	block
+#menuBtnChall	margin-top	-26px
+#menuBtnChall	flex-direction	row
+#menuBtnChall	justify-content	normal
+#menuBtnChall	align-items	normal
+#menuBtnChall	flex-grow	0
+#menuBtnSocial	display	block
+#menuBtnSocial	margin-top	-26px
+#menuBtnSocial	flex-direction	row
+#menuBtnSocial	justify-content	normal
+#menuBtnSocial	align-items	normal
+#menuBtnSocial	flex-grow	0
+#menuBtnMaps	display	block
+#menuBtnMaps	margin-top	-26px
+#menuBtnMaps	flex-direction	row
+#menuBtnMaps	justify-content	normal
+#menuBtnMaps	align-items	normal
+#menuBtnMaps	flex-grow	0
+#menuBtnMods	display	block
+#menuBtnMods	margin-top	-26px
+#menuBtnMods	flex-direction	row
+#menuBtnMods	justify-content	normal
+#menuBtnMods	align-items	normal
+#menuBtnMods	flex-grow	0
+#menuBtnSettings	display	block
+#menuBtnSettings	margin-top	-26px
+#menuBtnSettings	flex-direction	row
+#menuBtnSettings	justify-content	normal
+#menuBtnSettings	align-items	normal
+#menuBtnSettings	flex-grow	0
+#clientExit	color	rgb(255, 255, 255)
+#clientExit	background-color	rgba(0, 0, 0, 0)
+#clientExit	text-align	center
+#clientExit	cursor	pointer
+#clientExit	display	none
+#clientExit	position	static
+#clientExit	top	auto
+#clientExit	right	auto
+#clientExit	bottom	auto
+#clientExit	left	auto
+#clientExit	border-left-color	rgb(255, 255, 255)
+#clientExit	border-bottom-color	rgb(255, 255, 255)
+#clientExit	justify-content	space-around
+#clientExit	align-items	center
+#clientExit	flex-grow	1
+#menuBtnExit	display	block
+#menuBtnExit	margin-top	-20%
+#menuBtnExit	flex-direction	row
+#menuBtnExit	justify-content	normal
+#menuBtnExit	align-items	normal
+#menuBtnExit	flex-grow	0
+#expertModeBtn	color	rgb(255, 255, 255)
+#expertModeBtn	background-color	rgba(0, 0, 0, 0.3)
+#expertModeBtn	font-size	19px
+#expertModeBtn	line-height	31px
+#expertModeBtn	text-align	center
+#expertModeBtn	cursor	pointer
+#expertModeBtn	text-shadow	rgb(32, 32, 32) -1px -1px 0px, rgb(32, 32, 32) 1px -1px 0px, rgb(32, 32, 32) -1px 1px 0px, rgb(32, 32, 32) 1px 1px 0px, rgb(32, 32, 32) -2px -2px 0px, rgb(32, 32, 32) 2px -2px 0px, rgb(32, 32, 32) -2px 2px 0px, rgb(32, 32, 32) 2px 2px 0px, rgb(32, 32, 32) -3px -3px 0px, rgb(32, 32, 32) 3px -3px 0px, rgb(32, 32, 32) -3px 3px 0px, rgb(32, 32, 32) 3px 3px 0px
+#expertModeBtn	display	none
+#expertModeBtn	position	absolute
+#expertModeBtn	bottom	5px
+#expertModeBtn	left	145px
+#expertModeBtn	margin-bottom	6px
+#expertModeBtn	padding-top	4px
+#expertModeBtn	padding-right	4px
+#expertModeBtn	padding-bottom	4px
+#expertModeBtn	padding-left	4px
+#expertModeBtn	border-top-width	4px
+#expertModeBtn	border-left-width	4px
+#expertModeBtn	border-bottom-width	4px
+#expertModeBtn	border-top-style	solid
+#expertModeBtn	border-left-style	solid
+#expertModeBtn	border-bottom-style	solid
+#expertModeBtn	border-left-color	rgb(180, 71, 255)
+#expertModeBtn	border-bottom-color	rgb(180, 71, 255)
+#expertModeBtn	border-top-left-radius	4px
+#expertModeBtn	border-bottom-right-radius	4px
+#expertModeBtn	vertical-align	bottom
+#phonePop	position	absolute
+#phonePop	top	592.109px
+#phonePop	right	-233px
+#phonePop	bottom	-33px
+#phonePop	left	1105px
+#phoneImg	display	inline
+#phoneImg	position	static
+#phoneImg	overflow-x	clip
+#phoneImg	overflow-y	clip
+#phoneImg	top	auto
+#phoneImg	right	auto
+#phoneImg	bottom	auto
+#phoneImg	left	auto
+#phoneImg	margin-bottom	-700px
+#phoneImg	margin-left	998px
+#mMenuHolComp	display	none
+#mMenuHolComp	position	static
+#mMenuHolComp	z-index	auto
+#mMenuHolComp	top	auto
+#mMenuHolComp	right	auto
+#mMenuHolComp	bottom	auto
+#mMenuHolComp	left	auto
+#compClassPHolder	background-color	rgba(0, 0, 0, 0.6)
+#compClassPHolder	text-align	center
+#compClassPHolder	display	block
+#compClassPHolder	position	absolute
+#compClassPHolder	z-index	5
+#compClassPHolder	top	0px
+#compClassPHolder	padding-top	20px
+#compClassPHolder	padding-bottom	20px
+#compClassHold	background-color	rgba(0, 0, 0, 0)
+#compClassHold	display	inline-block
+#compClassHold	position	static
+#compClassHold	z-index	auto
+#compClassHold	top	auto
+#compClassHold	padding-top	0px
+#compClassHold	padding-bottom	0px
+#compTScrsB	text-align	center
+#compTScrsB	display	block
+#compTScrsB	position	absolute
+#compTScrsB	top	133px
+#compT1Scr	color	rgb(235, 64, 52)
+#compT1Scr	background-color	rgba(0, 0, 0, 0.6)
+#compT1Scr	font-size	50px
+#compT1Scr	line-height	100px
+#compT1Scr	text-shadow	rgb(255, 255, 255) -1px -1px 0px, rgb(255, 255, 255) 1px -1px 0px, rgb(255, 255, 255) -1px 1px 0px, rgb(255, 255, 255) 1px 1px 0px, rgb(255, 255, 255) -2px -2px 0px, rgb(255, 255, 255) 2px -2px 0px, rgb(255, 255, 255) -2px 2px 0px, rgb(255, 255, 255) 2px 2px 0px, rgb(255, 255, 255) -3px -3px 0px, rgb(255, 255, 255) 3px -3px 0px, rgb(255, 255, 255) -3px 3px 0px, rgb(255, 255, 255) 3px 3px 0px, rgb(255, 255, 255) -4px -4px 0px, rgb(255, 255, 255) 4px -4px 0px, rgb(255, 255, 255) -4px 4px 0px, rgb(255, 255, 255) 4px 4px 0px
+#compT1Scr	padding-left	60px
+#compT1Scr	border-left-color	rgb(235, 64, 52)
+#compT1Scr	border-bottom-color	rgb(235, 64, 52)
+#compT1Scr	vertical-align	top
+#compT2Scr	color	rgb(52, 137, 235)
+#compT2Scr	background-color	rgba(0, 0, 0, 0.6)
+#compT2Scr	font-size	50px
+#compT2Scr	line-height	100px
+#compT2Scr	text-shadow	rgb(255, 255, 255) -1px -1px 0px, rgb(255, 255, 255) 1px -1px 0px, rgb(255, 255, 255) -1px 1px 0px, rgb(255, 255, 255) 1px 1px 0px, rgb(255, 255, 255) -2px -2px 0px, rgb(255, 255, 255) 2px -2px 0px, rgb(255, 255, 255) -2px 2px 0px, rgb(255, 255, 255) 2px 2px 0px, rgb(255, 255, 255) -3px -3px 0px, rgb(255, 255, 255) 3px -3px 0px, rgb(255, 255, 255) -3px 3px 0px, rgb(255, 255, 255) 3px 3px 0px, rgb(255, 255, 255) -4px -4px 0px, rgb(255, 255, 255) 4px -4px 0px, rgb(255, 255, 255) -4px 4px 0px, rgb(255, 255, 255) 4px 4px 0px
+#compT2Scr	padding-right	60px
+#compT2Scr	border-left-color	rgb(52, 137, 235)
+#compT2Scr	border-bottom-color	rgb(52, 137, 235)
+#compT2Scr	vertical-align	top
+#compTimBox	color	rgba(255, 255, 255, 0.7)
+#compTimBox	font-size	27px
+#compTimBox	text-align	center
+#compTimBox	display	block
+#compTimBox	position	absolute
+#compTimBox	bottom	150px
+#compTimBox	border-left-color	rgba(255, 255, 255, 0.7)
+#compTimBox	border-bottom-color	rgba(255, 255, 255, 0.7)
+#cmpDatBox	color	rgb(255, 255, 255)
+#cmpDatBox	font-size	30px
+#cmpDatBox	display	block
+#cmpDatBox	position	absolute
+#cmpDatBox	z-index	99
+#cmpDatBox	bottom	20px
+#cmpDatBox	left	20px
+#cmpDatBox	padding-left	20px
+#cmpDatBox	border-left-width	20px
+#cmpDatBox	border-left-style	solid
+#cmpDatBox	border-left-color	rgb(253, 93, 0)
+#cmpDatBox	border-bottom-color	rgb(255, 255, 255)
+#cmpDatBox	border-top-left-radius	6px
+#cmpDatBox	border-bottom-right-radius	6px
+#cmpDatSub	color	rgba(255, 255, 255, 0.7)
+#cmpDatSub	font-size	26px
+#cmpDatSub	position	static
+#cmpDatSub	z-index	auto
+#cmpDatSub	bottom	auto
+#cmpDatSub	left	auto
+#cmpDatSub	padding-left	0px
+#cmpDatSub	border-left-width	0px
+#cmpDatSub	border-left-style	none
+#cmpDatSub	border-left-color	rgba(255, 255, 255, 0.7)
+#cmpDatSub	border-bottom-color	rgba(255, 255, 255, 0.7)
+#cmpDatSub	border-top-left-radius	0px
+#cmpDatSub	border-bottom-right-radius	0px
+#compBtnLst	background-color	rgba(0, 0, 0, 0.6)
+#compBtnLst	text-align	center
+#compBtnLst	display	block
+#compBtnLst	position	absolute
+#compBtnLst	bottom	0px
+#compBtnLst	padding-top	10px
+#compBtnLst	padding-bottom	30px
+#cmpSpectBtn	color	rgb(255, 255, 255)
+#cmpSpectBtn	background-color	rgb(235, 64, 52)
+#cmpSpectBtn	font-size	26px
+#cmpSpectBtn	cursor	pointer
+#cmpSpectBtn	display	inline-block
+#cmpSpectBtn	position	static
+#cmpSpectBtn	bottom	auto
+#cmpSpectBtn	margin-top	20px
+#cmpSpectBtn	margin-right	5px
+#cmpSpectBtn	margin-left	5px
+#cmpSpectBtn	padding-right	10px
+#cmpSpectBtn	padding-bottom	10px
+#cmpSpectBtn	padding-left	10px
+#cmpSpectBtn	border-top-width	4px
+#cmpSpectBtn	border-left-width	4px
+#cmpSpectBtn	border-bottom-width	4px
+#cmpSpectBtn	border-top-style	solid
+#cmpSpectBtn	border-left-style	solid
+#cmpSpectBtn	border-bottom-style	solid
+#cmpSpectBtn	border-left-color	rgb(255, 255, 255)
+#cmpSpectBtn	border-bottom-color	rgb(255, 255, 255)
+#cmpSpectBtn	border-top-left-radius	6px
+#cmpSpectBtn	border-bottom-right-radius	6px
+#cmpSpectTgl	background-color	rgba(0, 0, 0, 0)
+#cmpSpectTgl	font-size	40px
+#cmpSpectTgl	font-family	"material icons"
+#cmpSpectTgl	line-height	40px
+#cmpSpectTgl	white-space	nowrap
+#cmpSpectTgl	margin-top	0px
+#cmpSpectTgl	margin-right	0px
+#cmpSpectTgl	margin-bottom	12px
+#cmpSpectTgl	margin-left	0px
+#cmpSpectTgl	padding-top	0px
+#cmpSpectTgl	padding-right	0px
+#cmpSpectTgl	padding-bottom	0px
+#cmpSpectTgl	padding-left	0px
+#cmpSpectTgl	border-top-width	0px
+#cmpSpectTgl	border-left-width	0px
+#cmpSpectTgl	border-bottom-width	0px
+#cmpSpectTgl	border-top-style	none
+#cmpSpectTgl	border-left-style	none
+#cmpSpectTgl	border-bottom-style	none
+#cmpSpectTgl	border-top-left-radius	0px
+#cmpSpectTgl	border-bottom-right-radius	0px
+#cmpSpectTgl	vertical-align	middle
+#vsHolder	position	absolute
+#vsHolder	overflow-x	clip
+#vsHolder	overflow-y	clip
+#vsHolder	top	50%
+#vsHolder	left	50%
+#compPlListL	text-align	left
+#compPlListL	display	block
+#compPlListL	position	absolute
+#compPlListL	top	50%
+#compPlListL	left	50%
+#compPlListR	text-align	right
+#compPlListR	display	block
+#compPlListR	position	absolute
+#compPlListR	top	50%
+#compPlListR	left	50%
+#popupHolder	text-align	center
+#popupHolder	display	none
+#popupHolder	position	absolute
+#popupHolder	z-index	2147483647
+#popupBack	background-color	rgba(0, 0, 0, 0.75)
+#popupBack	display	block
+#popupBack	z-index	auto
+#popupContent	color	rgb(255, 255, 255)
+#popupContent	background-color	rgb(53, 53, 53)
+#popupContent	text-align	left
+#popupContent	display	block
+#popupContent	z-index	auto
+#popupContent	top	50%
+#popupContent	left	50%
+#popupContent	padding-top	15px
+#popupContent	padding-right	15px
+#popupContent	padding-bottom	15px
+#popupContent	padding-left	15px
+#popupContent	border-left-color	rgb(255, 255, 255)
+#popupContent	border-bottom-color	rgb(255, 255, 255)
+#popupContent	border-top-left-radius	10px
+#popupContent	border-bottom-right-radius	10px
+#popupContent	box-shadow	rgba(0, 0, 0, 0.5) 2px 2px 8px 0px
+#itemViewPop	color	rgb(255, 255, 255)
+#itemViewPop	background-color	rgba(156, 156, 156, 0.7)
+#itemViewPop	text-align	left
+#itemViewPop	display	block
+#itemViewPop	z-index	auto
+#itemViewPop	top	50%
+#itemViewPop	left	50%
+#itemViewPop	padding-top	15px
+#itemViewPop	padding-right	15px
+#itemViewPop	padding-bottom	15px
+#itemViewPop	padding-left	15px
+#itemViewPop	border-left-color	rgb(255, 255, 255)
+#itemViewPop	border-bottom-color	rgb(255, 255, 255)
+#itemViewPop	border-top-left-radius	5px
+#itemViewPop	border-bottom-right-radius	5px
+#itemViewPop	background-image	url("img/shop/filter/vignette.png")
+#itemViewPop	background-size	cover
+#policePop	display	block
+#policePop	z-index	9999
+#policePopC	background-color	rgb(53, 53, 53)
+#policePopC	z-index	auto
+#policePopC	top	50%
+#policePopC	left	50%
+#policePopC	padding-top	10px
+#policePopC	padding-right	20px
+#policePopC	padding-bottom	10px
+#policePopC	padding-left	20px
+#policePopC	border-top-left-radius	6px
+#policePopC	border-bottom-right-radius	6px
+#bundlePop	color	rgb(255, 255, 255)
+#bundlePop	background-color	rgb(53, 53, 53)
+#bundlePop	text-align	left
+#bundlePop	display	block
+#bundlePop	z-index	auto
+#bundlePop	top	50%
+#bundlePop	left	50%
+#bundlePop	padding-top	15px
+#bundlePop	padding-right	15px
+#bundlePop	padding-bottom	15px
+#bundlePop	padding-left	15px
+#bundlePop	border-left-color	rgb(255, 255, 255)
+#bundlePop	border-bottom-color	rgb(255, 255, 255)
+#bundlePop	border-top-left-radius	10px
+#bundlePop	border-bottom-right-radius	10px
+#bundlePop	box-shadow	rgba(0, 0, 0, 0.5) 2px 2px 8px 0px
+#premiumPop	color	rgb(255, 255, 255)
+#premiumPop	background-color	rgb(53, 53, 53)
+#premiumPop	text-align	left
+#premiumPop	display	block
+#premiumPop	z-index	auto
+#premiumPop	top	50%
+#premiumPop	left	50%
+#premiumPop	padding-top	15px
+#premiumPop	padding-right	15px
+#premiumPop	padding-bottom	15px
+#premiumPop	padding-left	15px
+#premiumPop	border-left-color	rgb(255, 255, 255)
+#premiumPop	border-bottom-color	rgb(255, 255, 255)
+#premiumPop	border-top-left-radius	10px
+#premiumPop	border-bottom-right-radius	10px
+#premiumPop	box-shadow	rgba(0, 0, 0, 0.5) 2px 2px 8px 0px
+#spinHistoryPop	color	rgba(255, 255, 255, 0.8)
+#spinHistoryPop	background-color	rgb(53, 53, 53)
+#spinHistoryPop	font-size	32px
+#spinHistoryPop	display	block
+#spinHistoryPop	z-index	9
+#spinHistoryPop	top	50%
+#spinHistoryPop	left	50%
+#spinHistoryPop	margin-right	-50%
+#spinHistoryPop	padding-top	5px
+#spinHistoryPop	padding-right	5px
+#spinHistoryPop	padding-bottom	5px
+#spinHistoryPop	padding-left	5px
+#spinHistoryPop	border-left-color	rgba(255, 255, 255, 0.8)
+#spinHistoryPop	border-bottom-color	rgba(255, 255, 255, 0.8)
+#spinHistoryPop	border-top-left-radius	4px
+#spinHistoryPop	border-bottom-right-radius	4px
+#spinHistoryPop	box-shadow	rgba(0, 0, 0, 0.5) 2px 2px 8px 0px
+#genericPop	display	block
+#genericPop	position	static
+#genericPop	z-index	auto
+#windowHolder	display	none
+#windowHolder	position	relative
+#windowHeader	color	rgba(255, 255, 255, 0.6)
+#windowHeader	font-size	25px
+#windowHeader	text-transform	uppercase
+#windowHeader	position	static
+#windowHeader	margin-bottom	10px
+#windowHeader	border-left-color	rgba(255, 255, 255, 0.6)
+#windowHeader	border-bottom-color	rgba(255, 255, 255, 0.6)
+#windowCloser	display	block
+#windowCloser	position	absolute
+#windowCloser	z-index	99998
+#windowCHolder	text-align	center
+#windowCHolder	display	block
+#windowCHolder	position	absolute
+#windowCHolder	z-index	99999
+#menuWindow	background-color	rgb(255, 255, 255)
+#menuWindow	font-size	20px
+#menuWindow	text-align	left
+#menuWindow	overflow-x	hidden
+#menuWindow	overflow-y	auto
+#menuWindow	z-index	auto
+#menuWindow	top	50%
+#menuWindow	left	50%
+#menuWindow	padding-top	20px
+#menuWindow	padding-right	20px
+#menuWindow	padding-bottom	20px
+#menuWindow	padding-left	20px
+#menuWindow	border-top-left-radius	6px
+#menuWindow	border-bottom-right-radius	6px
+#menuWindow	box-shadow	rgb(166, 166, 166) 0px 9px 0px 0px
+#endUI	text-align	center
+#endUI	display	none
+#endUI	position	absolute
+#endChals	text-align	left
+#endChals	display	block
+#endChals	z-index	10
+#endChals	top	10px
+#endChals	left	10px
+#victorySubHolder	display	block
+#victorySubHolder	top	-160px
+#victorySub	display	inline
+#victorySub	position	static
+#victorySub	overflow-x	clip
+#victorySub	overflow-y	clip
+#victorySub	top	auto
+#endInfo	top	0px
+#endInfo	margin-top	-35px
+#teamTotal0	background-color	rgba(0, 0, 0, 0.5)
+#teamTotal0	font-size	20px
+#teamTotal0	position	static
+#teamTotal0	top	auto
+#teamTotal0	margin-top	0px
+#teamTotal0	margin-right	15px
+#teamTotal0	padding-top	5px
+#teamTotal0	padding-bottom	5px
+#teamTotal0	border-top-left-radius	6px
+#teamTotal0	border-bottom-right-radius	6px
+#teamTotal0	vertical-align	super
+#endTimer	color	rgb(217, 217, 217)
+#endTimer	font-size	30px
+#endTimer	font-style	italic
+#endTimer	line-height	15px
+#endTimer	text-shadow	rgb(0, 0, 0) 0px 0px 3px, rgb(0, 0, 0) 0px 0px 3px, rgb(0, 0, 0) 0px 0px 3px, rgb(0, 0, 0) 0px 0px 3px, rgb(0, 0, 0) 0px 0px 3px, rgb(0, 0, 0) 0px 0px 3px
+#endTimer	display	inline-block
+#endTimer	position	static
+#endTimer	z-index	10000
+#endTimer	top	auto
+#endTimer	margin-top	188px
+#endTimer	border-left-color	rgb(217, 217, 217)
+#endTimer	border-bottom-color	rgb(217, 217, 217)
+#teamTotal1	background-color	rgba(0, 0, 0, 0.5)
+#teamTotal1	font-size	20px
+#teamTotal1	position	static
+#teamTotal1	top	auto
+#teamTotal1	margin-top	0px
+#teamTotal1	margin-left	15px
+#teamTotal1	padding-top	5px
+#teamTotal1	padding-bottom	5px
+#teamTotal1	border-top-left-radius	6px
+#teamTotal1	border-bottom-right-radius	6px
+#teamTotal1	vertical-align	super
+#endMidHolder	bottom	150px
+#endMidHolder	left	50%
+#endMidHolder	margin-top	20px
+#endAHolderL	display	inline-block
+#endAHolderL	position	static
+#endAHolderL	z-index	214748361
+#endAHolderL	opacity	0
+#endAHolderL	bottom	auto
+#endAHolderL	left	auto
+#endAHolderL	margin-top	0px
+#endAHolderL	margin-right	10px
+#endAHolderL	margin-left	10px
+#endAMerger	text-align	left
+#endAMerger	z-index	auto
+#endAMerger	opacity	1
+#endAMerger	margin-right	0px
+#endAMerger	margin-left	0px
+#endAContainer	background-color	rgba(0, 0, 0, 0.5)
+#endAContainer	cursor	pointer
+#endAContainer	display	block
+#endAContainer	overflow-x	hidden
+#endAContainer	overflow-y	hidden
+#endAContainer	padding-top	10px
+#endAContainer	padding-right	10px
+#endAContainer	padding-bottom	10px
+#endAContainer	padding-left	10px
+#endAContainer	border-top-left-radius	6px
+#endAContainer	border-bottom-right-radius	6px
+#endAContainer > div:nth-child(1) > div:nth-child(1)	text-align	-webkit-center
+#endTabbedView	display	inline-block
+#endTabbedView	position	static
+#endTabbedView	bottom	auto
+#endTabbedView	left	auto
+#endTabbedView	margin-top	0px
+#endTabbedView	vertical-align	top
+#endAHolderR	display	inline-block
+#endAHolderR	position	static
+#endAHolderR	z-index	214748361
+#endAHolderR	opacity	0
+#endAHolderR	bottom	auto
+#endAHolderR	left	auto
+#endAHolderR	margin-top	0px
+#endAHolderR	margin-left	10px
+#endAHolderR > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1)	text-align	-webkit-center
+#matchVoteHolder	top	220px
+#matchVoteHolder	left	50%
+#matchVoteHolder	border-top-left-radius	4px
+#matchVoteHolder	border-bottom-right-radius	4px
+#aimRecticle	position	absolute
+#aimRecticle	z-index	1
+#aimRecticle	opacity	0
+#aimRecticle	top	0px
+#aimRecticle	right	0px
+#aimRecticle	bottom	0px
+#aimRecticle	left	0px
+#topBox	background-color	rgb(0, 0, 0)
+#topBox	z-index	auto
+#topBox	opacity	1
+#topBox	top	961.547px
+#leftBox	background-color	rgb(0, 0, 0)
+#leftBox	z-index	auto
+#leftBox	opacity	1
+#leftBox	right	1445px
+#recticleImg	overflow-x	clip
+#recticleImg	overflow-y	clip
+#recticleImg	z-index	auto
+#recticleImg	opacity	1
+#recticleImg	top	621.547px
+#recticleImg	right	1530px
+#recticleImg	bottom	-58.4375px
+#recticleImg	left	1105px
+#recticleImg	margin-right	-1105px
+#bottomBox	background-color	rgb(0, 0, 0)
+#bottomBox	z-index	auto
+#bottomBox	opacity	1
+#bottomBox	bottom	961.547px
+#rightBox	background-color	rgb(0, 0, 0)
+#rightBox	z-index	auto
+#rightBox	opacity	1
+#rightBox	left	1445px
+#aimDot	position	absolute
+#aimDot	overflow-x	clip
+#aimDot	overflow-y	clip
+#aimDot	opacity	0
+#aimDot	top	621.547px
+#aimDot	right	1085px
+#aimDot	bottom	601.562px
+#aimDot	left	1105px
+#chatHolder	position	absolute
+#chatHolder	z-index	1
+#chatHolder	top	1168.11px
+#chatHolder	right	1647px
+#chatHolder	bottom	20px
+#chatHolder	left	150px
+#chatList	background-color	rgba(0, 0, 0, 0.4)
+#chatList	text-align	left
+#chatList	direction	rtl
+#chatList	position	relative
+#chatList	overflow-x	hidden
+#chatList	overflow-y	auto
+#chatList	z-index	999999
+#chatList	top	0px
+#chatList	right	0px
+#chatList	bottom	0px
+#chatList	left	0px
+#chatList	border-top-left-radius	5px
+#chatInputHolder	color	rgb(255, 255, 255)
+#chatInputHolder	background-color	rgba(20, 20, 20, 0.75)
+#chatInputHolder	font-size	9px
+#chatInputHolder	text-align	center
+#chatInputHolder	display	inline-grid
+#chatInputHolder	position	static
+#chatInputHolder	box-sizing	border-box
+#chatInputHolder	z-index	auto
+#chatInputHolder	top	auto
+#chatInputHolder	right	auto
+#chatInputHolder	bottom	auto
+#chatInputHolder	left	auto
+#chatInputHolder	border-left-color	rgb(255, 255, 255)
+#chatInputHolder	border-bottom-color	rgb(255, 255, 255)
+#chatInputHolder	border-top-left-radius	4px
+#chatInputHolder	border-bottom-right-radius	4px
+#chatSwitchHolder	background-color	rgba(0, 0, 0, 0)
+#chatSwitchHolder	display	inline-block
+#chatSwitchHolder	margin-right	0px
+#chatSwitchHolder	margin-bottom	0px
+#chatSwitchHolder	margin-left	0px
+#chatSwitchHolder	padding-top	0px
+#chatSwitchHolder	padding-right	0px
+#chatSwitchHolder	padding-bottom	0px
+#chatSwitchHolder	padding-left	0px
+#chatSwitchHolder	vertical-align	bottom
+#chatSwitch	color	rgb(255, 255, 255)
+#chatSwitch	font-size	33px
+#chatSwitch	font-family	"material icons"
+#chatSwitch	line-height	33px
+#chatSwitch	white-space	nowrap
+#chatSwitch	cursor	pointer
+#chatSwitch	margin-top	0px
+#chatSwitch	margin-bottom	3px
+#chatSwitch	border-left-color	rgb(255, 255, 255)
+#chatSwitch	border-bottom-color	rgb(255, 255, 255)
+#chatSwitch	vertical-align	middle
+#chatInput	color	rgb(255, 255, 255)
+#chatInput	background-color	rgba(0, 0, 0, 0.4)
+#chatInput	font-size	14px
+#chatInput	text-align	start
+#chatInput	cursor	text
+#chatInput	user-select	text
+#chatInput	display	inline-block
+#chatInput	box-sizing	border-box
+#chatInput	overflow-x	clip
+#chatInput	overflow-y	clip
+#chatInput	margin-top	0px
+#chatInput	margin-bottom	0px
+#chatInput	padding-top	6px
+#chatInput	padding-right	6px
+#chatInput	padding-bottom	6px
+#chatInput	padding-left	10px
+#chatInput	border-top-width	2px
+#chatInput	border-left-width	2px
+#chatInput	border-bottom-width	2px
+#chatInput	border-top-style	solid
+#chatInput	border-left-style	solid
+#chatInput	border-bottom-style	solid
+#chatInput	border-left-color	rgba(0, 0, 0, 0.1)
+#chatInput	border-bottom-color	rgba(0, 0, 0, 0.1)
+#chatInput	border-top-left-radius	4px
+#chatInput	border-bottom-right-radius	4px
+#voiceIcon	color	rgb(255, 255, 255)
+#voiceIcon	background-color	rgba(0, 0, 0, 0)
+#voiceIcon	font-size	36px
+#voiceIcon	font-family	"material icons"
+#voiceIcon	line-height	36px
+#voiceIcon	white-space	nowrap
+#voiceIcon	display	inline-block
+#voiceIcon	margin-top	0px
+#voiceIcon	margin-right	0px
+#voiceIcon	margin-bottom	0px
+#voiceIcon	margin-left	0px
+#voiceIcon	padding-top	0px
+#voiceIcon	padding-right	0px
+#voiceIcon	padding-bottom	0px
+#voiceIcon	padding-left	0px
+#voiceIcon	border-left-color	rgb(255, 255, 255)
+#voiceIcon	border-bottom-color	rgb(255, 255, 255)
+#recTimer	color	rgb(255, 255, 255)
+#recTimer	background-color	rgba(0, 0, 0, 0)
+#recTimer	font-size	18px
+#recTimer	display	inline-block
+#recTimer	overflow-x	hidden
+#recTimer	overflow-y	hidden
+#recTimer	margin-right	0px
+#recTimer	margin-bottom	0px
+#recTimer	margin-left	0px
+#recTimer	padding-top	0px
+#recTimer	padding-right	0px
+#recTimer	padding-bottom	0px
+#recTimer	padding-left	0px
+#recTimer	border-left-color	rgb(255, 255, 255)
+#recTimer	border-bottom-color	rgb(255, 255, 255)
+#recTimer	vertical-align	top
+#blockerDiv	background-color	rgb(0, 0, 0)
+#blockerDiv	display	none
+#blockerDiv	position	absolute
+#jumpSIMG	display	none
+#jumpSIMG	position	absolute
+#jumpSIMG	overflow-x	clip
+#jumpSIMG	overflow-y	clip
+#jumpSIMG	z-index	2147483647
+#jumpSIMG	top	0px
+#jumpSIMG	left	0px
+#jumpSVIDHolder	background-color	rgb(0, 0, 0)
+#jumpSVIDHolder	text-align	center
+#jumpSVIDHolder	display	none
+#jumpSVIDHolder	position	absolute
+#jumpSVIDHolder	z-index	2147483647
+#spectateUI	color	rgb(255, 255, 255)
+#spectateUI	text-align	center
+#spectateUI	display	none
+#spectateUI	border-left-color	rgb(255, 255, 255)
+#spectateUI	border-bottom-color	rgb(255, 255, 255)
+#spectateHUD	font-size	25px
+#spectateHUD	line-height	40px
+#spectateHUD	text-shadow	rgb(0, 0, 0) -1px -1px 0px, rgb(0, 0, 0) 1px -1px 0px, rgb(0, 0, 0) -1px 1px 0px, rgb(0, 0, 0) 1px 1px 0px
+#spectateHUD	display	block
+#spectateHUD	position	relative
+#spectateHUD	top	20px
+#spectateHUD	left	50%
+#spec0	color	rgb(53, 53, 53)
+#spec0	text-align	right
+#spec0	display	inline-block
+#spec0	position	static
+#spec0	top	auto
+#spec0	left	auto
+#spec0	border-left-color	rgb(53, 53, 53)
+#spec0	border-bottom-color	rgb(53, 53, 53)
+#spec0	vertical-align	top
+#specHeaderTm0	color	rgb(255, 255, 255)
+#specHeaderTm0	background-color	rgb(86, 153, 235)
+#specHeaderTm0	font-size	27px
+#specHeaderTm0	text-shadow	none
+#specHeaderTm0	display	none
+#specHeaderTm0	margin-bottom	10px
+#specHeaderTm0	padding-top	5px
+#specHeaderTm0	padding-right	10px
+#specHeaderTm0	padding-bottom	5px
+#specHeaderTm0	border-left-color	rgb(255, 255, 255)
+#specHeaderTm0	border-bottom-color	rgb(255, 255, 255)
+#specHeaderTm0	vertical-align	baseline
+#specNameTm0	color	rgb(53, 53, 53)
+#specNameTm0	background-color	rgba(0, 0, 0, 0)
+#specNameTm0	font-size	17px
+#specNameTm0	text-align	left
+#specNameTm0	white-space	nowrap
+#specNameTm0	display	block
+#specNameTm0	float	left
+#specNameTm0	overflow-x	hidden
+#specNameTm0	overflow-y	hidden
+#specNameTm0	margin-bottom	0px
+#specNameTm0	margin-left	20px
+#specNameTm0	padding-top	0px
+#specNameTm0	padding-right	0px
+#specNameTm0	padding-bottom	0px
+#specNameTm0	border-left-color	rgb(53, 53, 53)
+#specNameTm0	border-bottom-color	rgb(53, 53, 53)
+#specNameTm0	text-overflow	ellipsis
+#specNameTm0	vertical-align	top
+#specScoreTm0	background-color	rgba(0, 0, 0, 0)
+#specScoreTm0	display	inline
+#specScoreTm0	margin-bottom	0px
+#specScoreTm0	padding-top	0px
+#specScoreTm0	padding-right	0px
+#specScoreTm0	padding-bottom	0px
+#specTeam0	padding-right	10px
+#specTimer	color	rgb(255, 255, 255)
+#specTimer	background-color	rgba(0, 0, 0, 0.4)
+#specTimer	font-size	30px
+#specTimer	text-shadow	none
+#specTimer	display	block
+#specTimer	margin-right	0px
+#specTimer	margin-left	0px
+#specTimer	padding-top	5px
+#specTimer	padding-right	10px
+#specTimer	padding-bottom	5px
+#specTimer	padding-left	10px
+#specTimer	border-left-color	rgb(255, 255, 255)
+#specTimer	border-bottom-color	rgb(255, 255, 255)
+#specTimer	vertical-align	baseline
+#specGameInfo	color	rgb(251, 192, 45)
+#specGameInfo	font-size	17px
+#specGameInfo	display	block
+#specGameInfo	margin-right	0px
+#specGameInfo	margin-left	0px
+#specGameInfo	border-left-color	rgb(251, 192, 45)
+#specGameInfo	border-bottom-color	rgb(251, 192, 45)
+#specGameInfo	vertical-align	baseline
+#spec1	color	rgb(53, 53, 53)
+#spec1	text-align	left
+#spec1	display	inline-block
+#spec1	position	static
+#spec1	top	auto
+#spec1	left	auto
+#spec1	border-left-color	rgb(53, 53, 53)
+#spec1	border-bottom-color	rgb(53, 53, 53)
+#spec1	vertical-align	top
+#specHeaderTm1	color	rgb(255, 255, 255)
+#specHeaderTm1	background-color	rgb(235, 86, 86)
+#specHeaderTm1	font-size	27px
+#specHeaderTm1	text-shadow	none
+#specHeaderTm1	display	none
+#specHeaderTm1	margin-bottom	10px
+#specHeaderTm1	padding-top	5px
+#specHeaderTm1	padding-bottom	5px
+#specHeaderTm1	padding-left	10px
+#specHeaderTm1	border-left-color	rgb(255, 255, 255)
+#specHeaderTm1	border-bottom-color	rgb(255, 255, 255)
+#specHeaderTm1	vertical-align	baseline
+#specScoreTm1	background-color	rgba(0, 0, 0, 0)
+#specScoreTm1	display	inline
+#specScoreTm1	margin-bottom	0px
+#specScoreTm1	padding-top	0px
+#specScoreTm1	padding-bottom	0px
+#specScoreTm1	padding-left	0px
+#specNameTm1	color	rgb(53, 53, 53)
+#specNameTm1	background-color	rgba(0, 0, 0, 0)
+#specNameTm1	font-size	17px
+#specNameTm1	text-align	right
+#specNameTm1	white-space	nowrap
+#specNameTm1	display	block
+#specNameTm1	float	right
+#specNameTm1	overflow-x	hidden
+#specNameTm1	overflow-y	hidden
+#specNameTm1	margin-right	20px
+#specNameTm1	margin-bottom	0px
+#specNameTm1	padding-top	0px
+#specNameTm1	padding-bottom	0px
+#specNameTm1	padding-left	0px
+#specNameTm1	border-left-color	rgb(53, 53, 53)
+#specNameTm1	border-bottom-color	rgb(53, 53, 53)
+#specNameTm1	text-overflow	ellipsis
+#specNameTm1	vertical-align	top
+#specTeam1	padding-left	10px
+#specGMessage	color	rgba(255, 255, 255, 0.8)
+#specGMessage	font-size	12px
+#specGMessage	line-height	25px
+#specGMessage	position	absolute
+#specGMessage	top	85px
+#specGMessage	border-left-color	rgba(255, 255, 255, 0.8)
+#specGMessage	border-bottom-color	rgba(255, 255, 255, 0.8)
+#specGMessage	vertical-align	top
+#specNames	background-color	rgba(0, 0, 0, 0.3)
+#specNames	font-size	25px
+#specNames	display	block
+#specNames	position	absolute
+#specNames	top	20px
+#specNames	left	20px
+#specNames	padding-top	8px
+#specNames	padding-right	20px
+#specNames	padding-bottom	12px
+#specNames	padding-left	20px
+#specNames	border-top-left-radius	7px
+#specNames	border-bottom-right-radius	7px
+#specStats	background-color	rgba(20, 20, 20, 0.75)
+#specStats	position	absolute
+#specStats	top	20px
+#specStats	left	15px
+#specStats	border-top-left-radius	4px
+#specStats	border-bottom-right-radius	4px
+#specStatsInner	color	rgb(53, 53, 53)
+#specStatsInner	background-color	rgba(108, 108, 108, 0.4)
+#specStatsInner	font-size	15px
+#specStatsInner	text-align	left
+#specStatsInner	white-space	nowrap
+#specStatsInner	display	block
+#specStatsInner	position	static
+#specStatsInner	overflow-x	hidden
+#specStatsInner	overflow-y	hidden
+#specStatsInner	top	auto
+#specStatsInner	left	auto
+#specStatsInner	margin-top	3px
+#specStatsInner	margin-right	3px
+#specStatsInner	margin-bottom	3px
+#specStatsInner	margin-left	3px
+#specStatsInner	padding-top	10px
+#specStatsInner	padding-right	10px
+#specStatsInner	padding-bottom	8px
+#specStatsInner	padding-left	10px
+#specStatsInner	border-left-color	rgb(53, 53, 53)
+#specStatsInner	border-bottom-color	rgb(53, 53, 53)
+#specStatsInner	border-top-left-radius	0px
+#specStatsInner	border-bottom-right-radius	0px
+#specStatsInner	text-overflow	ellipsis
+#specSUS	color	rgb(255, 0, 0)
+#specSUS	font-size	23px
+#specSUS	text-align	left
+#specSUS	white-space	nowrap
+#specSUS	position	absolute
+#specSUS	overflow-x	hidden
+#specSUS	overflow-y	hidden
+#specSUS	top	112px
+#specSUS	left	13px
+#specSUS	padding-top	10px
+#specSUS	padding-right	10px
+#specSUS	padding-bottom	8px
+#specSUS	padding-left	10px
+#specSUS	border-left-color	rgb(255, 0, 0)
+#specSUS	border-bottom-color	rgb(255, 0, 0)
+#specSUS	border-top-left-radius	7px
+#specSUS	border-bottom-right-radius	7px
+#specSUS	text-overflow	ellipsis
+#specControlHolder	color	rgb(53, 53, 53)
+#specControlHolder	background-color	rgba(20, 20, 20, 0.75)
+#specControlHolder	font-size	20px
+#specControlHolder	text-align	left
+#specControlHolder	display	block
+#specControlHolder	position	absolute
+#specControlHolder	right	20px
+#specControlHolder	bottom	20px
+#specControlHolder	border-left-color	rgb(53, 53, 53)
+#specControlHolder	border-bottom-color	rgb(53, 53, 53)
+#specControlHolder	border-top-left-radius	4px
+#specControlHolder	border-bottom-right-radius	4px
+#specObjCam	color	rgb(251, 192, 45)
+#specObjCam	display	block
+#specObjCam	float	right
+#specObjCam	margin-left	10px
+#specObjCam	border-left-color	rgb(251, 192, 45)
+#specObjCam	border-bottom-color	rgb(251, 192, 45)
+#specFreeCam	color	rgb(251, 192, 45)
+#specFreeCam	float	right
+#specFreeCam	margin-left	10px
+#specFreeCam	border-left-color	rgb(251, 192, 45)
+#specFreeCam	border-bottom-color	rgb(251, 192, 45)
+#specIns	display	inline
+#specFirstP	color	rgb(251, 192, 45)
+#specFirstP	float	right
+#specFirstP	margin-left	10px
+#specFirstP	border-left-color	rgb(251, 192, 45)
+#specFirstP	border-bottom-color	rgb(251, 192, 45)
+#specFocus	color	rgb(251, 192, 45)
+#specFocus	float	right
+#specFocus	margin-left	10px
+#specFocus	border-left-color	rgb(251, 192, 45)
+#specFocus	border-bottom-color	rgb(251, 192, 45)
+#specNamesF	color	rgb(251, 192, 45)
+#specNamesF	float	right
+#specNamesF	margin-left	10px
+#specNamesF	border-left-color	rgb(251, 192, 45)
+#specNamesF	border-bottom-color	rgb(251, 192, 45)
+#kpdVision	color	rgb(251, 192, 45)
+#kpdVision	display	block
+#kpdVision	float	right
+#kpdVision	margin-left	10px
+#kpdVision	border-left-color	rgb(251, 192, 45)
+#kpdVision	border-bottom-color	rgb(251, 192, 45)
+#specMinimap	color	rgb(251, 192, 45)
+#specMinimap	float	right
+#specMinimap	margin-left	10px
+#specMinimap	border-left-color	rgb(251, 192, 45)
+#specMinimap	border-bottom-color	rgb(251, 192, 45)
+#specKPDContr	background-color	rgba(0, 0, 0, 0.4)
+#specKPDContr	font-size	30px
+#specKPDContr	display	block
+#specKPDContr	position	absolute
+#specKPDContr	z-index	9999999
+#specKPDContr	bottom	20px
+#specKPDContr	left	50%
+#specKPDContr	padding-top	20px
+#specKPDContr	padding-right	20px
+#specKPDContr	padding-bottom	20px
+#specKPDContr	padding-left	20px
+#specKPDContr	border-top-left-radius	5px
+#specKPDContr	border-bottom-right-radius	5px
+#specKPDTxt	background-color	rgba(0, 0, 0, 0)
+#specKPDTxt	position	static
+#specKPDTxt	z-index	auto
+#specKPDTxt	bottom	auto
+#specKPDTxt	left	auto
+#specKPDTxt	margin-bottom	16px
+#specKPDTxt	padding-top	0px
+#specKPDTxt	padding-right	0px
+#specKPDTxt	padding-bottom	0px
+#specKPDTxt	padding-left	0px
+#specKPDTxt	border-top-left-radius	0px
+#specKPDTxt	border-bottom-right-radius	0px
+#specKRHid	color	rgb(53, 53, 53)
+#specKRHid	background-color	rgba(0, 0, 0, 0)
+#specKRHid	position	static
+#specKRHid	z-index	auto
+#specKRHid	bottom	auto
+#specKRHid	left	auto
+#specKRHid	padding-top	0px
+#specKRHid	padding-right	0px
+#specKRHid	padding-bottom	0px
+#specKRHid	padding-left	0px
+#specKRHid	border-left-color	rgb(53, 53, 53)
+#specKRHid	border-bottom-color	rgb(53, 53, 53)
+#specKRHid	border-top-left-radius	0px
+#specKRHid	border-bottom-right-radius	0px
+#kpdVoteN	color	rgb(251, 192, 45)
+#kpdVoteN	font-size	22px
+#kpdVoteN	display	inline-block
+#kpdVoteN	border-left-color	rgb(251, 192, 45)
+#kpdVoteN	border-bottom-color	rgb(251, 192, 45)
+#kpdVoteY	color	rgb(251, 192, 45)
+#kpdVoteY	font-size	22px
+#kpdVoteY	display	inline-block
+#kpdVoteY	margin-left	14px
+#kpdVoteY	border-left-color	rgb(251, 192, 45)
+#kpdVoteY	border-bottom-color	rgb(251, 192, 45)
+#twitchHolder	background-color	rgba(0, 0, 0, 0.8)
+#twitchHolder	display	none
+#twitchHolder	position	absolute
+#twitchHolder	z-index	999999
+#twitchHolder	top	0px
+#twitchHolder	right	0px
+#twitchHolder	bottom	0px
+#twitchHolder	left	0px
+#gameUI	text-align	center
+#gameUI	position	static
+#gameUI	top	auto
+#gameUI	right	auto
+#gameUI	bottom	auto
+#gameUI	left	auto
+#customGUIHolder	display	none
+#customGUIHolder	z-index	auto
+#gameUIHider	z-index	auto
+#inGameUI	display	none
+#midGameUIHider	display	block
+#centerLeaderDisplay	color	rgba(255, 255, 255, 0.7)
+#centerLeaderDisplay	font-size	20px
+#centerLeaderDisplay	text-align	left
+#centerLeaderDisplay	display	none
+#centerLeaderDisplay	position	absolute
+#centerLeaderDisplay	overflow-x	auto
+#centerLeaderDisplay	overflow-y	auto
+#centerLeaderDisplay	z-index	2
+#centerLeaderDisplay	top	50%
+#centerLeaderDisplay	left	50%
+#centerLeaderDisplay	border-left-color	rgba(255, 255, 255, 0.7)
+#centerLeaderDisplay	border-bottom-color	rgba(255, 255, 255, 0.7)
+#centerLeaderDisplay	row-gap	10px
+#leaderContainerD	color	rgb(255, 255, 255)
+#leaderContainerD	background-color	rgba(20, 20, 20, 0.75)
+#leaderContainerD	display	block
+#leaderContainerD	position	static
+#leaderContainerD	overflow-x	visible
+#leaderContainerD	overflow-y	visible
+#leaderContainerD	z-index	auto
+#leaderContainerD	top	auto
+#leaderContainerD	left	auto
+#leaderContainerD	border-left-color	rgb(255, 255, 255)
+#leaderContainerD	border-bottom-color	rgb(255, 255, 255)
+#leaderContainerD	border-top-left-radius	4px
+#leaderContainerD	border-bottom-right-radius	4px
+#leaderContainerD	row-gap	normal
+#leaderContainer0	color	rgb(255, 255, 255)
+#leaderContainer0	background-color	rgba(20, 20, 20, 0.75)
+#leaderContainer0	display	block
+#leaderContainer0	position	static
+#leaderContainer0	overflow-x	visible
+#leaderContainer0	overflow-y	visible
+#leaderContainer0	z-index	auto
+#leaderContainer0	top	auto
+#leaderContainer0	left	auto
+#leaderContainer0	border-left-color	rgb(255, 255, 255)
+#leaderContainer0	border-bottom-color	rgb(255, 255, 255)
+#leaderContainer0	border-top-left-radius	4px
+#leaderContainer0	border-bottom-right-radius	4px
+#leaderContainer0	row-gap	normal
+#leaderContainer1	color	rgb(255, 255, 255)
+#leaderContainer1	background-color	rgba(20, 20, 20, 0.75)
+#leaderContainer1	display	block
+#leaderContainer1	position	static
+#leaderContainer1	overflow-x	visible
+#leaderContainer1	overflow-y	visible
+#leaderContainer1	z-index	auto
+#leaderContainer1	top	auto
+#leaderContainer1	left	auto
+#leaderContainer1	border-left-color	rgb(255, 255, 255)
+#leaderContainer1	border-bottom-color	rgb(255, 255, 255)
+#leaderContainer1	border-top-left-radius	4px
+#leaderContainer1	border-bottom-right-radius	4px
+#leaderContainer1	row-gap	normal
+#topRight	text-align	right
+#topRight	position	absolute
+#topRight	z-index	10
+#topRight	top	15px
+#topRight	right	15px
+#leaderboardHolder	color	rgba(255, 255, 255, 0.7)
+#leaderboardHolder	background-color	rgba(20, 20, 20, 0.75)
+#leaderboardHolder	font-size	23px
+#leaderboardHolder	text-align	left
+#leaderboardHolder	display	none
+#leaderboardHolder	position	static
+#leaderboardHolder	float	right
+#leaderboardHolder	z-index	3
+#leaderboardHolder	top	auto
+#leaderboardHolder	right	auto
+#leaderboardHolder	margin-bottom	10px
+#leaderboardHolder	border-left-color	rgba(255, 255, 255, 0.7)
+#leaderboardHolder	border-bottom-color	rgba(255, 255, 255, 0.7)
+#leaderboardHolder	border-top-left-radius	4px
+#leaderboardHolder	border-bottom-right-radius	4px
+#leaderContainer	color	rgb(255, 255, 255)
+#leaderContainer	background-color	rgba(108, 108, 108, 0.4)
+#leaderContainer	display	block
+#leaderContainer	float	none
+#leaderContainer	z-index	auto
+#leaderContainer	margin-top	3px
+#leaderContainer	margin-right	3px
+#leaderContainer	margin-bottom	3px
+#leaderContainer	margin-left	3px
+#leaderContainer	padding-top	10px
+#leaderContainer	padding-right	15px
+#leaderContainer	padding-bottom	10px
+#leaderContainer	padding-left	15px
+#leaderContainer	border-left-color	rgb(255, 255, 255)
+#leaderContainer	border-bottom-color	rgb(255, 255, 255)
+#leaderContainer	border-top-left-radius	0px
+#leaderContainer	border-bottom-right-radius	0px
+#scoreZoneCount	color	rgba(255, 255, 255, 0.6)
+#scoreZoneCount	background-color	rgba(20, 20, 20, 0.75)
+#scoreZoneCount	font-size	17px
+#scoreZoneCount	display	none
+#scoreZoneCount	margin-bottom	10px
+#scoreZoneCount	border-left-color	rgba(255, 255, 255, 0.6)
+#scoreZoneCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#scoreZoneCount	border-top-left-radius	4px
+#scoreZoneCount	border-bottom-right-radius	4px
+#scoreZoneVal	color	rgba(255, 255, 255, 0.6)
+#scoreZoneVal	background-color	rgba(0, 0, 0, 0)
+#scoreZoneVal	display	inline
+#scoreZoneVal	margin-top	0px
+#scoreZoneVal	margin-right	0px
+#scoreZoneVal	margin-bottom	0px
+#scoreZoneVal	margin-left	0px
+#scoreZoneVal	padding-top	0px
+#scoreZoneVal	padding-right	0px
+#scoreZoneVal	padding-bottom	0px
+#scoreZoneVal	padding-left	0px
+#scoreZoneVal	border-left-color	rgba(255, 255, 255, 0.6)
+#scoreZoneVal	border-bottom-color	rgba(255, 255, 255, 0.6)
+#livesCount	color	rgba(255, 255, 255, 0.6)
+#livesCount	background-color	rgba(20, 20, 20, 0.75)
+#livesCount	font-size	17px
+#livesCount	display	none
+#livesCount	margin-bottom	10px
+#livesCount	border-left-color	rgba(255, 255, 255, 0.6)
+#livesCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#livesCount	border-top-left-radius	4px
+#livesCount	border-bottom-right-radius	4px
+#livesDisp	color	rgba(255, 255, 255, 0.6)
+#livesDisp	background-color	rgba(0, 0, 0, 0)
+#livesDisp	display	inline
+#livesDisp	margin-top	0px
+#livesDisp	margin-right	0px
+#livesDisp	margin-bottom	0px
+#livesDisp	margin-left	0px
+#livesDisp	padding-top	0px
+#livesDisp	padding-right	0px
+#livesDisp	padding-bottom	0px
+#livesDisp	padding-left	0px
+#livesDisp	border-left-color	rgba(255, 255, 255, 0.6)
+#livesDisp	border-bottom-color	rgba(255, 255, 255, 0.6)
+#killCount	color	rgba(255, 255, 255, 0.6)
+#killCount	background-color	rgba(20, 20, 20, 0.75)
+#killCount	font-size	17px
+#killCount	display	none
+#killCount	margin-bottom	10px
+#killCount	border-left-color	rgba(255, 255, 255, 0.6)
+#killCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#killCount	border-top-left-radius	4px
+#killCount	border-bottom-right-radius	4px
+#killsIcon	background-color	rgba(0, 0, 0, 0)
+#killsIcon	image-rendering	crisp-edges
+#killsIcon	display	inline
+#killsIcon	overflow-x	clip
+#killsIcon	overflow-y	clip
+#killsIcon	margin-top	0px
+#killsIcon	margin-right	0px
+#killsIcon	margin-bottom	0px
+#killsIcon	margin-left	0px
+#killsIcon	padding-top	0px
+#killsIcon	padding-right	0px
+#killsIcon	padding-bottom	0px
+#killsIcon	padding-left	0px
+#killsVal	color	rgba(255, 255, 255, 0.7)
+#killsVal	background-color	rgba(0, 0, 0, 0)
+#killsVal	display	inline
+#killsVal	margin-top	0px
+#killsVal	margin-right	0px
+#killsVal	margin-bottom	0px
+#killsVal	margin-left	0px
+#killsVal	padding-top	0px
+#killsVal	padding-right	0px
+#killsVal	padding-bottom	0px
+#killsVal	padding-left	0px
+#killsVal	border-left-color	rgba(255, 255, 255, 0.7)
+#killsVal	border-bottom-color	rgba(255, 255, 255, 0.7)
+#deathCount	color	rgba(255, 255, 255, 0.6)
+#deathCount	background-color	rgba(20, 20, 20, 0.75)
+#deathCount	font-size	17px
+#deathCount	display	none
+#deathCount	margin-bottom	10px
+#deathCount	border-left-color	rgba(255, 255, 255, 0.6)
+#deathCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#deathCount	border-top-left-radius	4px
+#deathCount	border-bottom-right-radius	4px
+#deathsIcon	background-color	rgba(0, 0, 0, 0)
+#deathsIcon	image-rendering	crisp-edges
+#deathsIcon	display	inline
+#deathsIcon	overflow-x	clip
+#deathsIcon	overflow-y	clip
+#deathsIcon	margin-top	0px
+#deathsIcon	margin-right	0px
+#deathsIcon	margin-bottom	0px
+#deathsIcon	margin-left	0px
+#deathsIcon	padding-top	0px
+#deathsIcon	padding-right	0px
+#deathsIcon	padding-bottom	0px
+#deathsIcon	padding-left	0px
+#deathsVal	color	rgba(255, 255, 255, 0.7)
+#deathsVal	background-color	rgba(0, 0, 0, 0)
+#deathsVal	display	inline
+#deathsVal	margin-top	0px
+#deathsVal	margin-right	0px
+#deathsVal	margin-bottom	0px
+#deathsVal	margin-left	0px
+#deathsVal	padding-top	0px
+#deathsVal	padding-right	0px
+#deathsVal	padding-bottom	0px
+#deathsVal	padding-left	0px
+#deathsVal	border-left-color	rgba(255, 255, 255, 0.7)
+#deathsVal	border-bottom-color	rgba(255, 255, 255, 0.7)
+#streakCount	color	rgba(255, 255, 255, 0.6)
+#streakCount	background-color	rgba(20, 20, 20, 0.75)
+#streakCount	font-size	17px
+#streakCount	display	none
+#streakCount	margin-bottom	10px
+#streakCount	border-left-color	rgba(255, 255, 255, 0.6)
+#streakCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#streakCount	border-top-left-radius	4px
+#streakCount	border-bottom-right-radius	4px
+#streakIcon	background-color	rgba(0, 0, 0, 0)
+#streakIcon	image-rendering	crisp-edges
+#streakIcon	display	inline
+#streakIcon	overflow-x	clip
+#streakIcon	overflow-y	clip
+#streakIcon	margin-top	0px
+#streakIcon	margin-right	0px
+#streakIcon	margin-bottom	0px
+#streakIcon	margin-left	0px
+#streakIcon	padding-top	0px
+#streakIcon	padding-right	0px
+#streakIcon	padding-bottom	0px
+#streakIcon	padding-left	0px
+#streakVal	color	rgba(255, 255, 255, 0.7)
+#streakVal	background-color	rgba(0, 0, 0, 0)
+#streakVal	display	inline
+#streakVal	margin-top	0px
+#streakVal	margin-right	0px
+#streakVal	margin-bottom	0px
+#streakVal	margin-left	0px
+#streakVal	padding-top	0px
+#streakVal	padding-right	0px
+#streakVal	padding-bottom	0px
+#streakVal	padding-left	0px
+#streakVal	border-left-color	rgba(255, 255, 255, 0.7)
+#streakVal	border-bottom-color	rgba(255, 255, 255, 0.7)
+#kdCount	color	rgba(255, 255, 255, 0.6)
+#kdCount	background-color	rgba(20, 20, 20, 0.75)
+#kdCount	font-size	17px
+#kdCount	display	none
+#kdCount	margin-bottom	10px
+#kdCount	border-left-color	rgba(255, 255, 255, 0.6)
+#kdCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#kdCount	border-top-left-radius	4px
+#kdCount	border-bottom-right-radius	4px
+#kdIcon	background-color	rgba(0, 0, 0, 0)
+#kdIcon	image-rendering	crisp-edges
+#kdIcon	display	inline
+#kdIcon	overflow-x	clip
+#kdIcon	overflow-y	clip
+#kdIcon	margin-top	0px
+#kdIcon	margin-right	0px
+#kdIcon	margin-bottom	0px
+#kdIcon	margin-left	0px
+#kdIcon	padding-top	0px
+#kdIcon	padding-right	0px
+#kdIcon	padding-bottom	0px
+#kdIcon	padding-left	0px
+#kdVal	color	rgba(255, 255, 255, 0.7)
+#kdVal	background-color	rgba(0, 0, 0, 0)
+#kdVal	display	inline
+#kdVal	margin-top	0px
+#kdVal	margin-right	0px
+#kdVal	margin-bottom	0px
+#kdVal	margin-left	0px
+#kdVal	padding-top	0px
+#kdVal	padding-right	0px
+#kdVal	padding-bottom	0px
+#kdVal	padding-left	0px
+#kdVal	border-left-color	rgba(255, 255, 255, 0.7)
+#kdVal	border-bottom-color	rgba(255, 255, 255, 0.7)
+#scoreCount	color	rgba(255, 255, 255, 0.6)
+#scoreCount	background-color	rgba(20, 20, 20, 0.75)
+#scoreCount	font-size	17px
+#scoreCount	display	none
+#scoreCount	margin-bottom	10px
+#scoreCount	border-left-color	rgba(255, 255, 255, 0.6)
+#scoreCount	border-bottom-color	rgba(255, 255, 255, 0.6)
+#scoreCount	border-top-left-radius	4px
+#scoreCount	border-bottom-right-radius	4px
+#myScoreVal	color	rgba(255, 255, 255, 0.7)
+#myScoreVal	background-color	rgba(0, 0, 0, 0)
+#myScoreVal	display	inline
+#myScoreVal	margin-top	0px
+#myScoreVal	margin-right	0px
+#myScoreVal	margin-bottom	0px
+#myScoreVal	margin-left	0px
+#myScoreVal	padding-top	0px
+#myScoreVal	padding-right	0px
+#myScoreVal	padding-bottom	0px
+#myScoreVal	padding-left	0px
+#myScoreVal	border-left-color	rgba(255, 255, 255, 0.7)
+#myScoreVal	border-bottom-color	rgba(255, 255, 255, 0.7)
+#killFeed	display	inline-grid
+#killFeed	position	static
+#killFeed	z-index	auto
+#killFeed	top	auto
+#killFeed	right	auto
+#killFeed	row-gap	5px
+#bloodDisplay	image-rendering	crisp-edges
+#bloodDisplay	display	none
+#bloodDisplay	position	absolute
+#bloodDisplay	overflow-x	clip
+#bloodDisplay	overflow-y	clip
+#bloodDisplay	top	0px
+#bloodDisplay	left	0px
+#chalDisplay	position	absolute
+#chalDisplay	z-index	5
+#chalDisplay	top	40px
+#chalName	color	rgb(255, 255, 255)
+#chalName	font-size	80px
+#chalName	line-height	120px
+#chalName	text-transform	uppercase
+#chalName	white-space	nowrap
+#chalName	display	none
+#chalName	position	static
+#chalName	z-index	auto
+#chalName	top	auto
+#chalName	padding-right	40px
+#chalName	padding-left	40px
+#chalName	border-left-color	rgb(255, 255, 255)
+#chalName	border-bottom-color	rgb(255, 255, 255)
+#chalName	background-image	linear-gradient(to right, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.3) 40%, rgba(0, 0, 0, 0.3) 60%, rgba(0, 0, 0, 0) 100%)
+#propControlHolder	background-color	rgba(20, 20, 20, 0.75)
+#propControlHolder	font-size	20px
+#propControlHolder	text-align	left
+#propControlHolder	display	none
+#propControlHolder	position	absolute
+#propControlHolder	right	20px
+#propControlHolder	bottom	20px
+#propControlHolder	border-top-left-radius	4px
+#propControlHolder	border-bottom-right-radius	4px
+#pickRandProp	color	rgb(251, 192, 45)
+#pickRandProp	float	right
+#pickRandProp	margin-left	10px
+#pickRandProp	border-left-color	rgb(251, 192, 45)
+#pickRandProp	border-bottom-color	rgb(251, 192, 45)
+#pickProp	color	rgb(251, 192, 45)
+#pickProp	float	right
+#pickProp	margin-left	10px
+#pickProp	border-left-color	rgb(251, 192, 45)
+#pickProp	border-bottom-color	rgb(251, 192, 45)
+#rotProp	color	rgb(251, 192, 45)
+#rotProp	float	right
+#rotProp	margin-left	10px
+#rotProp	border-left-color	rgb(251, 192, 45)
+#rotProp	border-bottom-color	rgb(251, 192, 45)
+#rotRProp	color	rgb(251, 192, 45)
+#rotRProp	float	right
+#rotRProp	margin-left	10px
+#rotRProp	border-left-color	rgb(251, 192, 45)
+#rotRProp	border-bottom-color	rgb(251, 192, 45)
+#taunt0	color	rgb(251, 192, 45)
+#taunt0	float	right
+#taunt0	margin-left	10px
+#taunt0	border-left-color	rgb(251, 192, 45)
+#taunt0	border-bottom-color	rgb(251, 192, 45)
+#taunt1	color	rgb(251, 192, 45)
+#taunt1	float	right
+#taunt1	margin-left	10px
+#taunt1	border-left-color	rgb(251, 192, 45)
+#taunt1	border-bottom-color	rgb(251, 192, 45)
+#taunt2	color	rgb(251, 192, 45)
+#taunt2	float	right
+#taunt2	margin-left	10px
+#taunt2	border-left-color	rgb(251, 192, 45)
+#taunt2	border-bottom-color	rgb(251, 192, 45)
+#taunt3	color	rgb(251, 192, 45)
+#taunt3	float	right
+#taunt3	margin-left	10px
+#taunt3	border-left-color	rgb(251, 192, 45)
+#taunt3	border-bottom-color	rgb(251, 192, 45)
+#taunt4	color	rgb(251, 192, 45)
+#taunt4	float	right
+#taunt4	margin-left	10px
+#taunt4	border-left-color	rgb(251, 192, 45)
+#taunt4	border-bottom-color	rgb(251, 192, 45)
+#taunt5	color	rgb(251, 192, 45)
+#taunt5	float	right
+#taunt5	margin-left	10px
+#taunt5	border-left-color	rgb(251, 192, 45)
+#taunt5	border-bottom-color	rgb(251, 192, 45)
+#weapHolder	position	absolute
+#weapHolder	z-index	1
+#weapHolder	right	15px
+#weapHolder	bottom	90px
+#weapHolder	row-gap	5px
+#perkHolder	position	absolute
+#perkHolder	z-index	1
+#perkHolder	right	15px
+#perkHolder	bottom	345px
+#bottomRight	position	absolute
+#bottomRight	z-index	3
+#bottomRight	right	15px
+#bottomRight	bottom	15px
+#botRHider	position	static
+#botRHider	z-index	auto
+#botRHider	right	auto
+#botRHider	bottom	auto
+#bhHolder	display	none
+#bhHolder	margin-right	20px
+#bhHolder	margin-bottom	-4px
+#bhHolder	vertical-align	bottom
+#krTagHolder	display	inline-block
+#krTagHolder	margin-right	20px
+#krTagHolder	vertical-align	bottom
+#giftTagHolder	display	inline-block
+#giftTagHolder	margin-right	20px
+#giftTagHolder	margin-bottom	-4px
+#giftTagHolder	vertical-align	bottom
+#powerUpHolder	display	inline-block
+#powerUpHolder	margin-right	20px
+#powerUpHolder	margin-bottom	-4px
+#powerUpHolder	vertical-align	bottom
+#killStreakHolder	display	inline-block
+#killStreakHolder	margin-right	20px
+#killStreakHolder	vertical-align	bottom
+#ammoHolder	background-color	rgba(20, 20, 20, 0.75)
+#ammoHolder	font-size	29px
+#ammoHolder	letter-spacing	-2px
+#ammoHolder	display	inline-block
+#ammoHolder	border-top-left-radius	6px
+#ammoHolder	border-bottom-right-radius	6px
+#ammoHolder	background-image	url("img/blank_2.png")
+#ammoHolder	background-size	0% 100%
+#ammoHolder	background-repeat	no-repeat
+#ammoVal	color	rgb(255, 255, 255)
+#ammoVal	background-color	rgba(0, 0, 0, 0)
+#ammoVal	display	inline-block
+#ammoVal	margin-top	0px
+#ammoVal	margin-right	0px
+#ammoVal	margin-bottom	0px
+#ammoVal	margin-left	10px
+#ammoVal	padding-top	0px
+#ammoVal	padding-right	0px
+#ammoVal	padding-bottom	0px
+#ammoVal	padding-left	0px
+#ammoVal	border-left-color	rgb(255, 255, 255)
+#ammoVal	border-bottom-color	rgb(255, 255, 255)
+#ammoMax	color	rgba(255, 255, 255, 0.7)
+#ammoMax	background-color	rgba(0, 0, 0, 0)
+#ammoMax	display	inline-block
+#ammoMax	margin-top	0px
+#ammoMax	margin-right	0px
+#ammoMax	margin-bottom	0px
+#ammoMax	margin-left	0px
+#ammoMax	padding-top	0px
+#ammoMax	padding-right	0px
+#ammoMax	padding-bottom	0px
+#ammoMax	padding-left	0px
+#ammoMax	border-left-color	rgba(255, 255, 255, 0.7)
+#ammoMax	border-bottom-color	rgba(255, 255, 255, 0.7)
+#ammoIcon	background-color	rgba(0, 0, 0, 0)
+#ammoIcon	display	inline
+#ammoIcon	overflow-x	clip
+#ammoIcon	overflow-y	clip
+#ammoIcon	margin-top	0px
+#ammoIcon	margin-right	10px
+#ammoIcon	margin-bottom	0px
+#ammoIcon	margin-left	5px
+#ammoIcon	padding-top	0px
+#ammoIcon	padding-right	0px
+#ammoIcon	padding-bottom	0px
+#ammoIcon	padding-left	0px
+#ammoIcon	vertical-align	bottom
+#topMidHold	position	absolute
+#topMidHold	top	-5px
+#roundsDisplay	color	rgb(255, 255, 255)
+#roundsDisplay	background-color	rgba(0, 0, 0, 0.4)
+#roundsDisplay	display	none
+#roundsDisplay	position	static
+#roundsDisplay	z-index	3
+#roundsDisplay	top	auto
+#roundsDisplay	margin-top	10px
+#roundsDisplay	margin-bottom	10px
+#roundsDisplay	border-left-color	rgb(255, 255, 255)
+#roundsDisplay	border-bottom-color	rgb(255, 255, 255)
+#roundsDisplay	border-top-left-radius	6px
+#roundsDisplay	border-bottom-right-radius	6px
+#roundsDisplay	vertical-align	top
+#roundTSc1	color	rgba(255, 255, 255, 0.6)
+#roundTSc1	font-size	42px
+#roundTSc1	line-height	96px
+#roundTSc1	display	inline-block
+#roundTSc1	z-index	auto
+#roundTSc1	margin-top	0px
+#roundTSc1	margin-bottom	0px
+#roundTSc1	padding-right	30px
+#roundTSc1	padding-left	30px
+#roundTSc1	border-bottom-width	6px
+#roundTSc1	border-bottom-style	solid
+#roundTSc1	border-left-color	rgba(255, 255, 255, 0.6)
+#roundTSc1	border-bottom-color	rgb(235, 64, 52)
+#roundTSc1	border-top-left-radius	0px
+#roundTSc1	border-bottom-right-radius	0px
+#roundsVal	color	rgb(255, 255, 255)
+#roundsVal	font-size	29px
+#roundsVal	display	inline
+#roundsVal	margin-top	0px
+#roundsVal	margin-right	0px
+#roundsVal	margin-bottom	0px
+#roundsVal	margin-left	0px
+#roundsVal	border-left-color	rgb(255, 255, 255)
+#roundsVal	border-bottom-color	rgb(255, 255, 255)
+#roundSub	color	rgba(255, 255, 255, 0.8)
+#roundSub	font-size	19px
+#roundSub	display	block
+#roundSub	margin-top	0px
+#roundSub	margin-right	0px
+#roundSub	margin-bottom	0px
+#roundSub	margin-left	0px
+#roundSub	border-left-color	rgba(255, 255, 255, 0.8)
+#roundSub	border-bottom-color	rgba(255, 255, 255, 0.8)
+#roundTSc2	color	rgba(255, 255, 255, 0.6)
+#roundTSc2	font-size	42px
+#roundTSc2	line-height	96px
+#roundTSc2	display	inline-block
+#roundTSc2	z-index	auto
+#roundTSc2	margin-top	0px
+#roundTSc2	margin-bottom	0px
+#roundTSc2	padding-right	30px
+#roundTSc2	padding-left	30px
+#roundTSc2	border-bottom-width	6px
+#roundTSc2	border-bottom-style	solid
+#roundTSc2	border-left-color	rgba(255, 255, 255, 0.6)
+#roundTSc2	border-bottom-color	rgb(52, 137, 235)
+#roundTSc2	border-top-left-radius	0px
+#roundTSc2	border-bottom-right-radius	0px
+#gameMessage	color	rgb(255, 255, 255)
+#gameMessage	font-size	22px
+#gameMessage	position	static
+#gameMessage	z-index	10
+#gameMessage	top	auto
+#gameMessage	border-left-color	rgb(255, 255, 255)
+#gameMessage	border-bottom-color	rgb(255, 255, 255)
+#roundMessage	color	rgb(255, 255, 255)
+#roundMessage	font-size	22px
+#roundMessage	position	static
+#roundMessage	z-index	10
+#roundMessage	top	auto
+#roundMessage	margin-top	20px
+#roundMessage	border-left-color	rgb(255, 255, 255)
+#roundMessage	border-bottom-color	rgb(255, 255, 255)
+#topLeftHolder	text-align	left
+#topLeftHolder	position	absolute
+#topLeftHolder	z-index	10
+#topLeftHolder	top	15px
+#topLeftHolder	left	15px
+#topLeftMain	position	static
+#topLeftMain	z-index	auto
+#topLeftMain	top	auto
+#topLeftMain	left	auto
+#miniMapOverlay	color	rgb(255, 255, 255)
+#miniMapOverlay	font-size	25px
+#miniMapOverlay	display	none
+#miniMapOverlay	border-left-color	rgb(255, 255, 255)
+#miniMapOverlay	border-bottom-color	rgb(255, 255, 255)
+#miniMapCanvas	color	rgb(53, 53, 53)
+#miniMapCanvas	visibility	hidden
+#miniMapCanvas	image-rendering	-webkit-optimize-contrast
+#miniMapCanvas	display	inline
+#miniMapCanvas	overflow-x	clip
+#miniMapCanvas	overflow-y	clip
+#miniMapCanvas	border-left-color	rgb(53, 53, 53)
+#miniMapCanvas	border-bottom-color	rgb(53, 53, 53)
+#timerHolder	background-color	rgba(20, 20, 20, 0.75)
+#timerHolder	z-index	3
+#timerHolder	margin-right	10px
+#timerHolder	margin-bottom	10px
+#timerHolder	border-top-left-radius	4px
+#timerHolder	border-bottom-right-radius	4px
+#timerHolder	vertical-align	top
+#timerInner	background-color	rgba(108, 108, 108, 0.4)
+#timerInner	display	inline-block
+#timerInner	z-index	auto
+#timerInner	margin-top	3px
+#timerInner	margin-right	3px
+#timerInner	margin-bottom	3px
+#timerInner	margin-left	3px
+#timerInner	padding-top	10px
+#timerInner	padding-right	10px
+#timerInner	padding-bottom	10px
+#timerInner	padding-left	10px
+#timerInner	border-top-left-radius	0px
+#timerInner	border-bottom-right-radius	0px
+#timerInner	vertical-align	baseline
+#timerIcon	background-color	rgba(0, 0, 0, 0)
+#timerIcon	image-rendering	crisp-edges
+#timerIcon	overflow-x	clip
+#timerIcon	overflow-y	clip
+#timerIcon	margin-top	0px
+#timerIcon	margin-right	0px
+#timerIcon	margin-bottom	0px
+#timerIcon	margin-left	0px
+#timerIcon	padding-top	0px
+#timerIcon	padding-right	0px
+#timerIcon	padding-bottom	0px
+#timerIcon	padding-left	0px
+#timerVal	color	rgb(255, 255, 255)
+#timerVal	background-color	rgba(0, 0, 0, 0)
+#timerVal	font-size	32px
+#timerVal	display	inline
+#timerVal	margin-top	0px
+#timerVal	margin-right	0px
+#timerVal	margin-bottom	0px
+#timerVal	margin-left	0px
+#timerVal	padding-top	0px
+#timerVal	padding-right	0px
+#timerVal	padding-bottom	0px
+#timerVal	padding-left	3px
+#timerVal	border-left-color	rgb(255, 255, 255)
+#timerVal	border-bottom-color	rgb(255, 255, 255)
+#matchInfo	color	rgb(255, 255, 255)
+#matchInfo	font-size	15px
+#matchInfo	display	inline-block
+#matchInfo	z-index	3
+#matchInfo	border-left-color	rgb(255, 255, 255)
+#matchInfo	border-bottom-color	rgb(255, 255, 255)
+#topLeftData	display	inline-block
+#topLeftData	position	static
+#topLeftData	z-index	auto
+#topLeftData	top	auto
+#topLeftData	left	auto
+#topLeftData	vertical-align	top
+#fpsDisplay	color	rgba(255, 255, 255, 0.5)
+#fpsDisplay	font-size	14px
+#fpsDisplay	display	none
+#fpsDisplay	border-left-color	rgba(255, 255, 255, 0.5)
+#fpsDisplay	border-bottom-color	rgba(255, 255, 255, 0.5)
+#ingameFPS	color	rgb(158, 235, 86)
+#ingameFPS	display	inline
+#ingameFPS	border-left-color	rgb(158, 235, 86)
+#ingameFPS	border-bottom-color	rgb(158, 235, 86)
+#ingameFPS	vertical-align	baseline
+#pingDisplay	color	rgba(255, 255, 255, 0.5)
+#pingDisplay	font-size	14px
+#pingDisplay	display	block
+#pingDisplay	margin-bottom	5px
+#pingDisplay	border-left-color	rgba(255, 255, 255, 0.5)
+#pingDisplay	border-bottom-color	rgba(255, 255, 255, 0.5)
+#pingText	color	rgb(158, 235, 86)
+#pingText	display	inline
+#pingText	margin-bottom	0px
+#pingText	border-left-color	rgb(158, 235, 86)
+#pingText	border-bottom-color	rgb(158, 235, 86)
+#ingressDisplay	color	rgba(255, 255, 255, 0.5)
+#ingressDisplay	font-size	14px
+#ingressDisplay	display	none
+#ingressDisplay	margin-left	0px
+#ingressDisplay	border-left-color	rgba(255, 255, 255, 0.5)
+#ingressDisplay	border-bottom-color	rgba(255, 255, 255, 0.5)
+#ingressIcon	font-size	32px
+#ingressIcon	font-family	"material icons"
+#ingressIcon	line-height	32px
+#ingressIcon	white-space	nowrap
+#ingressIcon	display	inline-block
+#ingressIcon	margin-top	-5px
+#ingressIcon	margin-right	-5px
+#ingressPacketCount	text-align	right
+#ingressPacketCount	display	inline-block
+#ingressDataSize	text-align	right
+#ingressDataSize	display	inline-block
+#egressDisplay	color	rgba(255, 255, 255, 0.5)
+#egressDisplay	font-size	14px
+#egressDisplay	display	none
+#egressDisplay	margin-left	0px
+#egressDisplay	border-left-color	rgba(255, 255, 255, 0.5)
+#egressDisplay	border-bottom-color	rgba(255, 255, 255, 0.5)
+#egressIcon	font-size	32px
+#egressIcon	font-family	"material icons"
+#egressIcon	line-height	32px
+#egressIcon	white-space	nowrap
+#egressIcon	display	inline-block
+#egressIcon	margin-top	-5px
+#egressIcon	margin-right	-5px
+#egressPacketCount	text-align	right
+#egressPacketCount	display	inline-block
+#egressDataSize	text-align	right
+#egressDataSize	display	inline-block
+#tickDisplay	color	rgba(255, 255, 255, 0.5)
+#tickDisplay	font-size	14px
+#tickDisplay	display	none
+#tickDisplay	margin-left	0px
+#tickDisplay	border-left-color	rgba(255, 255, 255, 0.5)
+#tickDisplay	border-bottom-color	rgba(255, 255, 255, 0.5)
+#tickPacketCount	text-align	right
+#tickPacketCount	display	inline-block
+#topLeftBottom	position	static
+#topLeftBottom	z-index	auto
+#topLeftBottom	top	auto
+#topLeftBottom	left	auto
+#teamScores	background-color	rgba(0, 0, 0, 0.3)
+#teamScores	display	none
+#teamScores	margin-bottom	10px
+#teamScores	padding-top	5px
+#teamScores	padding-right	10px
+#teamScores	padding-bottom	5px
+#teamScores	padding-left	10px
+#teamScores	border-top-left-radius	6px
+#teamScores	border-bottom-right-radius	6px
+#voteToKick	color	rgba(255, 255, 255, 0.7)
+#voteToKick	background-color	rgba(0, 0, 0, 0.3)
+#voteToKick	font-size	12px
+#voteToKick	display	none
+#voteToKick	z-index	3
+#voteToKick	margin-bottom	10px
+#voteToKick	padding-top	10px
+#voteToKick	padding-right	10px
+#voteToKick	padding-bottom	10px
+#voteToKick	padding-left	10px
+#voteToKick	border-left-color	rgba(255, 255, 255, 0.7)
+#voteToKick	border-bottom-color	rgba(255, 255, 255, 0.7)
+#voteToKick	border-top-left-radius	6px
+#voteToKick	border-bottom-right-radius	6px
+#voteHeader	color	rgb(251, 192, 45)
+#voteHeader	background-color	rgba(255, 255, 255, 0.3)
+#voteHeader	text-align	center
+#voteHeader	text-transform	uppercase
+#voteHeader	display	block
+#voteHeader	z-index	auto
+#voteHeader	margin-top	-10px
+#voteHeader	margin-bottom	5px
+#voteHeader	margin-left	-10px
+#voteHeader	padding-top	5px
+#voteHeader	padding-right	5px
+#voteHeader	padding-bottom	5px
+#voteHeader	padding-left	5px
+#voteHeader	border-left-color	rgb(251, 192, 45)
+#voteHeader	border-bottom-color	rgb(251, 192, 45)
+#voteHeader	border-top-left-radius	4px
+#voteHeader	border-bottom-right-radius	0px
+#voteKickInfo	background-color	rgba(0, 0, 0, 0)
+#voteKickInfo	display	block
+#voteKickInfo	z-index	auto
+#voteKickInfo	margin-bottom	0px
+#voteKickInfo	padding-top	0px
+#voteKickInfo	padding-right	0px
+#voteKickInfo	padding-bottom	0px
+#voteKickInfo	padding-left	0px
+#voteKickInfo	border-top-left-radius	0px
+#voteKickInfo	border-bottom-right-radius	0px
+#voteKickNum	background-color	rgba(0, 0, 0, 0)
+#voteKickNum	display	block
+#voteKickNum	z-index	auto
+#voteKickNum	margin-bottom	0px
+#voteKickNum	padding-top	0px
+#voteKickNum	padding-right	0px
+#voteKickNum	padding-bottom	0px
+#voteKickNum	padding-left	0px
+#voteKickNum	border-top-left-radius	0px
+#voteKickNum	border-bottom-right-radius	0px
+#voteKickName	background-color	rgba(0, 0, 0, 0)
+#voteKickName	display	block
+#voteKickName	z-index	auto
+#voteKickName	margin-bottom	0px
+#voteKickName	padding-top	0px
+#voteKickName	padding-right	0px
+#voteKickName	padding-bottom	0px
+#voteKickName	padding-left	0px
+#voteKickName	border-top-left-radius	0px
+#voteKickName	border-bottom-right-radius	0px
+#voteKickKeys	background-color	rgba(0, 0, 0, 0)
+#voteKickKeys	display	block
+#voteKickKeys	z-index	auto
+#voteKickKeys	margin-bottom	0px
+#voteKickKeys	padding-top	0px
+#voteKickKeys	padding-right	0px
+#voteKickKeys	padding-bottom	0px
+#voteKickKeys	padding-left	0px
+#voteKickKeys	border-top-left-radius	0px
+#voteKickKeys	border-bottom-right-radius	0px
+#kickVoteY	color	rgb(251, 192, 45)
+#kickVoteY	display	inline
+#kickVoteY	border-left-color	rgb(251, 192, 45)
+#kickVoteY	border-bottom-color	rgb(251, 192, 45)
+#kickVoteN	color	rgb(251, 192, 45)
+#kickVoteN	display	inline
+#kickVoteN	border-left-color	rgb(251, 192, 45)
+#kickVoteN	border-bottom-color	rgb(251, 192, 45)
+#voteToForfeit	color	rgba(255, 255, 255, 0.7)
+#voteToForfeit	background-color	rgba(0, 0, 0, 0.3)
+#voteToForfeit	font-size	12px
+#voteToForfeit	display	none
+#voteToForfeit	z-index	3
+#voteToForfeit	margin-bottom	10px
+#voteToForfeit	padding-top	10px
+#voteToForfeit	padding-right	10px
+#voteToForfeit	padding-bottom	10px
+#voteToForfeit	padding-left	10px
+#voteToForfeit	border-left-color	rgba(255, 255, 255, 0.7)
+#voteToForfeit	border-bottom-color	rgba(255, 255, 255, 0.7)
+#voteToForfeit	border-top-left-radius	6px
+#voteToForfeit	border-bottom-right-radius	6px
+#voteForfeitInfo	background-color	rgba(0, 0, 0, 0)
+#voteForfeitInfo	display	block
+#voteForfeitInfo	z-index	auto
+#voteForfeitInfo	margin-bottom	0px
+#voteForfeitInfo	padding-top	0px
+#voteForfeitInfo	padding-right	0px
+#voteForfeitInfo	padding-bottom	0px
+#voteForfeitInfo	padding-left	0px
+#voteForfeitInfo	border-top-left-radius	0px
+#voteForfeitInfo	border-bottom-right-radius	0px
+#voteForfeitNum	background-color	rgba(0, 0, 0, 0)
+#voteForfeitNum	display	block
+#voteForfeitNum	z-index	auto
+#voteForfeitNum	margin-bottom	0px
+#voteForfeitNum	padding-top	0px
+#voteForfeitNum	padding-right	0px
+#voteForfeitNum	padding-bottom	0px
+#voteForfeitNum	padding-left	0px
+#voteForfeitNum	border-top-left-radius	0px
+#voteForfeitNum	border-bottom-right-radius	0px
+#voteForfeitKeys	background-color	rgba(0, 0, 0, 0)
+#voteForfeitKeys	display	block
+#voteForfeitKeys	z-index	auto
+#voteForfeitKeys	margin-bottom	0px
+#voteForfeitKeys	padding-top	0px
+#voteForfeitKeys	padding-right	0px
+#voteForfeitKeys	padding-bottom	0px
+#voteForfeitKeys	padding-left	0px
+#voteForfeitKeys	border-top-left-radius	0px
+#voteForfeitKeys	border-bottom-right-radius	0px
+#networkLag	color	rgba(255, 255, 255, 0.7)
+#networkLag	background-color	rgba(0, 0, 0, 0.3)
+#networkLag	font-size	12px
+#networkLag	text-align	center
+#networkLag	display	none
+#networkLag	z-index	3
+#networkLag	margin-bottom	10px
+#networkLag	padding-top	10px
+#networkLag	padding-right	10px
+#networkLag	padding-bottom	10px
+#networkLag	padding-left	10px
+#networkLag	border-left-color	rgba(255, 255, 255, 0.7)
+#networkLag	border-bottom-color	rgba(255, 255, 255, 0.7)
+#networkLag	border-top-left-radius	6px
+#networkLag	border-bottom-right-radius	6px
+#networkLagHed	color	rgb(251, 192, 45)
+#networkLagHed	background-color	rgba(0, 0, 0, 0)
+#networkLagHed	display	block
+#networkLagHed	z-index	auto
+#networkLagHed	margin-bottom	0px
+#networkLagHed	padding-top	0px
+#networkLagHed	padding-right	0px
+#networkLagHed	padding-bottom	0px
+#networkLagHed	padding-left	0px
+#networkLagHed	border-left-color	rgb(251, 192, 45)
+#networkLagHed	border-bottom-color	rgb(251, 192, 45)
+#networkLagHed	border-top-left-radius	0px
+#networkLagHed	border-bottom-right-radius	0px
+#speakerDisplay	z-index	0
+#skinRewards	font-size	12px
+#skinRewards	display	none
+#skinRewards	z-index	3
+#skinRewards	margin-bottom	10px
+#skinRewards	border-top-left-radius	6px
+#skinRewards	border-bottom-right-radius	6px
+#debugStats	display	none
+#debugStats	z-index	3
+#debugStats	margin-bottom	10px
+#hiddenMsg	color	rgb(255, 255, 255)
+#hiddenMsg	font-size	27px
+#hiddenMsg	line-height	75px
+#hiddenMsg	display	none
+#hiddenMsg	position	absolute
+#hiddenMsg	top	50%
+#hiddenMsg	left	50%
+#hiddenMsg	margin-top	280px
+#hiddenMsg	border-left-color	rgb(255, 255, 255)
+#hiddenMsg	border-bottom-color	rgb(255, 255, 255)
+#speedRunHolder	display	none
+#speedRunHolder	position	absolute
+#speedRunHolder	right	10px
+#speedRunHolder	bottom	35px
+#speedRunReset	color	rgb(255, 255, 255)
+#speedRunReset	background-color	rgba(20, 20, 20, 0.75)
+#speedRunReset	font-size	20px
+#speedRunReset	text-align	left
+#speedRunReset	display	inline-block
+#speedRunReset	position	static
+#speedRunReset	right	auto
+#speedRunReset	bottom	auto
+#speedRunReset	border-left-color	rgb(255, 255, 255)
+#speedRunReset	border-bottom-color	rgb(255, 255, 255)
+#speedRunReset	border-top-left-radius	4px
+#speedRunReset	border-bottom-right-radius	4px
+#speedRunReset	vertical-align	bottom
+#speedRunRstKey	color	rgb(251, 192, 45)
+#speedRunRstKey	display	inline
+#speedRunRstKey	border-left-color	rgb(251, 192, 45)
+#speedRunRstKey	border-bottom-color	rgb(251, 192, 45)
+#speedRunRstLKey	color	rgb(251, 192, 45)
+#speedRunRstLKey	display	inline
+#speedRunRstLKey	border-left-color	rgb(251, 192, 45)
+#speedRunRstLKey	border-bottom-color	rgb(251, 192, 45)
+#speedRunBox	background-color	rgba(20, 20, 20, 0.75)
+#speedRunBox	display	inline-block
+#speedRunBox	position	static
+#speedRunBox	right	auto
+#speedRunBox	bottom	auto
+#speedRunBox	border-top-left-radius	4px
+#speedRunBox	border-bottom-right-radius	4px
+#speedRunInfo	color	rgb(255, 255, 255)
+#speedRunInfo	background-color	rgba(0, 0, 0, 0)
+#speedRunInfo	font-size	22px
+#speedRunInfo	text-align	left
+#speedRunInfo	margin-top	10px
+#speedRunInfo	margin-right	0px
+#speedRunInfo	margin-bottom	10px
+#speedRunInfo	margin-left	0px
+#speedRunInfo	padding-top	0px
+#speedRunInfo	padding-right	0px
+#speedRunInfo	padding-bottom	5px
+#speedRunInfo	padding-left	0px
+#speedRunInfo	border-bottom-width	2px
+#speedRunInfo	border-bottom-style	solid
+#speedRunInfo	border-left-color	rgb(255, 255, 255)
+#speedRunInfo	border-bottom-color	rgba(255, 255, 255, 0.7)
+#speedRunList	background-color	rgba(0, 0, 0, 0)
+#speedRunList	margin-top	0px
+#speedRunList	margin-right	0px
+#speedRunList	margin-bottom	0px
+#speedRunList	margin-left	0px
+#speedRunList	padding-top	0px
+#speedRunList	padding-right	0px
+#speedRunList	padding-bottom	0px
+#speedRunList	padding-left	0px
+#speedRunTimer	color	rgb(0, 255, 26)
+#speedRunTimer	background-color	rgba(0, 0, 0, 0)
+#speedRunTimer	font-size	50px
+#speedRunTimer	text-align	right
+#speedRunTimer	margin-top	10px
+#speedRunTimer	margin-right	0px
+#speedRunTimer	margin-bottom	0px
+#speedRunTimer	margin-left	0px
+#speedRunTimer	padding-top	0px
+#speedRunTimer	padding-right	0px
+#speedRunTimer	padding-bottom	0px
+#speedRunTimer	padding-left	0px
+#speedRunTimer	border-left-color	rgb(0, 255, 26)
+#speedRunTimer	border-bottom-color	rgb(0, 255, 26)
+#interactMsg	color	rgb(241, 241, 241)
+#interactMsg	background-color	rgba(0, 0, 0, 0.2)
+#interactMsg	font-size	25px
+#interactMsg	line-height	75px
+#interactMsg	position	absolute
+#interactMsg	left	50%
+#interactMsg	padding-right	45px
+#interactMsg	padding-left	45px
+#interactMsg	border-top-width	2px
+#interactMsg	border-left-width	2px
+#interactMsg	border-bottom-width	2px
+#interactMsg	border-top-style	solid
+#interactMsg	border-left-style	solid
+#interactMsg	border-bottom-style	solid
+#interactMsg	border-left-color	rgb(255, 255, 255)
+#interactMsg	border-bottom-color	rgb(255, 255, 255)
+#interactMsg	border-top-left-radius	4px
+#interactMsg	border-bottom-right-radius	4px
+#reloadMsg	color	rgb(241, 241, 241)
+#reloadMsg	background-color	rgba(0, 0, 0, 0.2)
+#reloadMsg	font-size	25px
+#reloadMsg	line-height	75px
+#reloadMsg	display	none
+#reloadMsg	position	absolute
+#reloadMsg	bottom	35px
+#reloadMsg	left	50%
+#reloadMsg	padding-right	60px
+#reloadMsg	padding-left	60px
+#reloadMsg	border-top-width	2px
+#reloadMsg	border-left-width	2px
+#reloadMsg	border-bottom-width	2px
+#reloadMsg	border-top-style	solid
+#reloadMsg	border-left-style	solid
+#reloadMsg	border-bottom-style	solid
+#reloadMsg	border-left-color	rgb(255, 255, 255)
+#reloadMsg	border-bottom-color	rgb(255, 255, 255)
+#reloadMsg	border-top-left-radius	4px
+#reloadMsg	border-bottom-right-radius	4px
+#bottomLeftHolder	text-align	left
+#bottomLeftHolder	position	absolute
+#bottomLeftHolder	z-index	10
+#bottomLeftHolder	bottom	15px
+#bottomLeftHolder	left	15px
+#bottomLeftPlayer	background-color	rgba(20, 20, 20, 0.75)
+#bottomLeftPlayer	display	inline-grid
+#bottomLeftPlayer	position	static
+#bottomLeftPlayer	z-index	auto
+#bottomLeftPlayer	bottom	auto
+#bottomLeftPlayer	left	auto
+#bottomLeftPlayer	border-top-left-radius	4px
+#bottomLeftPlayer	border-bottom-right-radius	4px
+#bottomLeftPlayerLeft	background-color	rgba(108, 108, 108, 0.4)
+#bottomLeftPlayerLeft	display	block
+#bottomLeftPlayerLeft	margin-top	3px
+#bottomLeftPlayerLeft	margin-right	3px
+#bottomLeftPlayerLeft	margin-bottom	3px
+#bottomLeftPlayerLeft	margin-left	3px
+#bottomLeftPlayerLeft	border-top-left-radius	0px
+#bottomLeftPlayerLeft	border-bottom-right-radius	0px
+#bottomLeftClassImg	background-color	rgba(0, 0, 0, 0)
+#bottomLeftClassImg	image-rendering	crisp-edges
+#bottomLeftClassImg	display	inline
+#bottomLeftClassImg	overflow-x	clip
+#bottomLeftClassImg	overflow-y	clip
+#bottomLeftClassImg	margin-top	0px
+#bottomLeftClassImg	margin-right	0px
+#bottomLeftClassImg	margin-bottom	0px
+#bottomLeftClassImg	margin-left	0px
+#bottomLeftPlayerMid	background-color	rgba(0, 0, 0, 0)
+#bottomLeftPlayerMid	display	grid
+#bottomLeftPlayerMid	border-top-left-radius	0px
+#bottomLeftPlayerMid	border-bottom-right-radius	0px
+#bottomLeftPlayerMid	row-gap	3px
+#bottomLeftTeamHolder	justify-content	center
+#bottomLeftTeamType	color	rgb(255, 255, 255)
+#bottomLeftTeamType	background-color	rgba(108, 108, 108, 0.4)
+#bottomLeftTeamType	font-size	12px
+#bottomLeftTeamType	text-align	center
+#bottomLeftTeamType	display	block
+#bottomLeftTeamType	z-index	2
+#bottomLeftTeamType	padding-top	9px
+#bottomLeftTeamType	padding-right	10px
+#bottomLeftTeamType	padding-bottom	9px
+#bottomLeftTeamType	padding-left	10px
+#bottomLeftTeamType	border-left-color	rgb(255, 255, 255)
+#bottomLeftTeamType	border-bottom-color	rgb(255, 255, 255)
+#bottomLeftTeamType	justify-content	normal
+#bottomLeftTeamType	row-gap	normal
+#bottomLeftTeamName	color	rgb(255, 255, 255)
+#bottomLeftTeamName	background-color	rgba(108, 108, 108, 0.4)
+#bottomLeftTeamName	white-space	nowrap
+#bottomLeftTeamName	display	block
+#bottomLeftTeamName	overflow-x	hidden
+#bottomLeftTeamName	overflow-y	hidden
+#bottomLeftTeamName	z-index	2
+#bottomLeftTeamName	padding-top	6px
+#bottomLeftTeamName	padding-right	6px
+#bottomLeftTeamName	padding-bottom	6px
+#bottomLeftTeamName	padding-left	10px
+#bottomLeftTeamName	border-left-color	rgb(255, 255, 255)
+#bottomLeftTeamName	border-bottom-color	rgb(255, 255, 255)
+#bottomLeftTeamName	text-overflow	ellipsis
+#bottomLeftTeamName	justify-content	normal
+#bottomLeftTeamName	row-gap	normal
+#bottomLeftHealthBar	background-color	rgba(108, 108, 108, 0.4)
+#bottomLeftHealthBar	display	flex
+#bottomLeftHealthBar	padding-top	9px
+#bottomLeftHealthBar	padding-right	9px
+#bottomLeftHealthBar	padding-bottom	9px
+#bottomLeftHealthBar	padding-left	9px
+#bottomLeftHealthBar	row-gap	normal
+#bottomLeftPlayerRight	background-color	rgba(108, 108, 108, 0.4)
+#bottomLeftPlayerRight	display	grid
+#bottomLeftPlayerRight	margin-top	3px
+#bottomLeftPlayerRight	margin-right	3px
+#bottomLeftPlayerRight	margin-bottom	3px
+#bottomLeftPlayerRight	margin-left	3px
+#bottomLeftPlayerRight	padding-top	3px
+#bottomLeftPlayerRight	padding-right	7px
+#bottomLeftPlayerRight	padding-bottom	3px
+#bottomLeftPlayerRight	padding-left	9px
+#bottomLeftPlayerRight	border-top-left-radius	0px
+#bottomLeftPlayerRight	border-bottom-right-radius	0px
+#bottomLeftPlayerRight	justify-content	center
+#bottomLeftPlayerRight	align-items	center
+#bottomLeftChallIcon	background-color	rgba(0, 0, 0, 0)
+#bottomLeftChallIcon	image-rendering	crisp-edges
+#bottomLeftChallIcon	display	block
+#bottomLeftChallIcon	overflow-x	clip
+#bottomLeftChallIcon	overflow-y	clip
+#bottomLeftChallIcon	margin-top	0px
+#bottomLeftChallIcon	margin-right	0px
+#bottomLeftChallIcon	margin-bottom	0px
+#bottomLeftChallIcon	margin-left	0px
+#bottomLeftChallIcon	padding-top	0px
+#bottomLeftChallIcon	padding-right	0px
+#bottomLeftChallIcon	padding-bottom	0px
+#bottomLeftChallIcon	padding-left	0px
+#bottomLeftChallIcon	justify-content	normal
+#bottomLeftChallIcon	align-items	normal
+#bottomLeftHealth	color	rgb(255, 255, 255)
+#bottomLeftHealth	background-color	rgba(0, 0, 0, 0)
+#bottomLeftHealth	font-size	20px
+#bottomLeftHealth	display	block
+#bottomLeftHealth	margin-top	0px
+#bottomLeftHealth	margin-right	0px
+#bottomLeftHealth	margin-bottom	0px
+#bottomLeftHealth	margin-left	0px
+#bottomLeftHealth	padding-top	0px
+#bottomLeftHealth	padding-right	0px
+#bottomLeftHealth	padding-bottom	0px
+#bottomLeftHealth	padding-left	0px
+#bottomLeftHealth	border-left-color	rgb(255, 255, 255)
+#bottomLeftHealth	border-bottom-color	rgb(255, 255, 255)
+#bottomLeftHealth	justify-content	normal
+#bottomLeftHealth	align-items	normal
+#zPerksHolder	display	inline-block
+#zPerksHolder	position	static
+#zPerksHolder	z-index	auto
+#zPerksHolder	bottom	auto
+#zPerksHolder	left	auto
+#zPerksHolder	vertical-align	bottom
+#hitmarker	display	none
+#hitmarker	position	absolute
+#hitmarker	overflow-x	clip
+#hitmarker	overflow-y	clip
+#hitmarker	z-index	6
+#hitmarker	top	50%
+#hitmarker	left	50%
+#hitmarker	margin-right	-50%
+#deathUIHolder	display	block
+#instructionsFadeBG	background-color	rgb(34, 34, 34)
+#instructionsFadeBG	position	absolute
+#instructionsFadeBG	z-index	auto
+#instructionsFadeBG	opacity	0
+#instructionsFadeBG	top	0px
+#instructionsFadeBG	right	0px
+#instructionsFadeBG	bottom	0px
+#instructionsFadeBG	left	0px
+#instructionsFadeBG	background-size	cover
+#instructionsFadeBG	background-repeat	no-repeat
+#instructionsUpdateBG	background-color	rgba(0, 0, 0, 0.5)
+#instructionsUpdateBG	display	none
+#instructionsUpdateBG	position	absolute
+#instructionsUpdateBG	z-index	auto
+#instructionsUpdateBG	top	0px
+#instructionsUpdateBG	right	0px
+#instructionsUpdateBG	bottom	0px
+#instructionsUpdateBG	left	0px
+#instructionsUpdateBG	background-size	cover
+#instructionsUpdateBG	background-repeat	no-repeat
+#instructionHolder	background-color	rgba(0, 0, 0, 0.5)
+#instructionHolder	position	absolute
+#instructionHolder	z-index	auto
+#instructionHolder	top	0px
+#instructionHolder	right	0px
+#instructionHolder	bottom	0px
+#instructionHolder	left	0px
+#instructionHider	background-color	rgba(0, 0, 0, 0)
+#instructionHider	position	static
+#instructionHider	top	auto
+#instructionHider	right	auto
+#instructionHider	bottom	auto
+#instructionHider	left	auto
+#frvrFTUEVideoHolder	color	rgb(255, 255, 255)
+#frvrFTUEVideoHolder	display	none
+#frvrFTUEVideoHolder	position	absolute
+#frvrFTUEVideoHolder	z-index	1000
+#frvrFTUEVideoHolder	top	46%
+#frvrFTUEVideoHolder	left	50%
+#frvrFTUEVideoHolder	margin-right	-50%
+#frvrFTUEVideoHolder	border-left-color	rgb(255, 255, 255)
+#frvrFTUEVideoHolder	border-bottom-color	rgb(255, 255, 255)
+#instructions	color	rgba(255, 255, 255, 0.8)
+#instructions	font-size	32px
+#instructions	position	absolute
+#instructions	z-index	9
+#instructions	top	621.547px
+#instructions	right	1902.34px
+#instructions	bottom	577.562px
+#instructions	left	1105px
+#instructions	margin-right	-1105px
+#instructions	border-left-color	rgba(255, 255, 255, 0.8)
+#instructions	border-bottom-color	rgba(255, 255, 255, 0.8)
+#instructionsUpdate	color	rgba(255, 255, 255, 0.8)
+#instructionsUpdate	background-color	rgb(53, 53, 53)
+#instructionsUpdate	font-size	32px
+#instructionsUpdate	display	none
+#instructionsUpdate	z-index	9
+#instructionsUpdate	top	50%
+#instructionsUpdate	right	auto
+#instructionsUpdate	bottom	auto
+#instructionsUpdate	left	50%
+#instructionsUpdate	margin-right	-50%
+#instructionsUpdate	padding-top	5px
+#instructionsUpdate	padding-right	5px
+#instructionsUpdate	padding-bottom	5px
+#instructionsUpdate	padding-left	5px
+#instructionsUpdate	border-left-color	rgba(255, 255, 255, 0.8)
+#instructionsUpdate	border-bottom-color	rgba(255, 255, 255, 0.8)
+#instructionsUpdate	border-top-left-radius	4px
+#instructionsUpdate	border-bottom-right-radius	4px
+#instructionsUpdate	box-shadow	rgba(0, 0, 0, 0.5) 2px 2px 8px 0px
+#instructionsUpdateCredit	color	rgb(255, 255, 255)
+#instructionsUpdateCredit	background-color	rgba(0, 0, 0, 0)
+#instructionsUpdateCredit	font-size	23px
+#instructionsUpdateCredit	cursor	pointer
+#instructionsUpdateCredit	text-shadow	rgb(28, 28, 28) -1px -1px 0px, rgb(28, 28, 28) 1px -1px 0px, rgb(28, 28, 28) -1px 1px 0px, rgb(28, 28, 28) 1px 1px 0px, rgb(28, 28, 28) -2px -2px 0px, rgb(28, 28, 28) 2px -2px 0px, rgb(28, 28, 28) -2px 2px 0px, rgb(28, 28, 28) 2px 2px 0px
+#instructionsUpdateCredit	display	none
+#instructionsUpdateCredit	top	auto
+#instructionsUpdateCredit	right	auto
+#instructionsUpdateCredit	bottom	5px
+#instructionsUpdateCredit	left	5px
+#instructionsUpdateCredit	border-left-color	rgb(255, 255, 255)
+#instructionsUpdateCredit	border-bottom-color	rgb(255, 255, 255)
+#mobileUI	background-color	rgba(0, 0, 0, 0)
+#mobileUI	display	none
+#mobileUI	position	absolute
+#mobileUI	overflow-x	visible
+#mobileUI	overflow-y	visible
+#mobileUI	z-index	9999999
+#mobileUI	top	0px
+#mobileUI	left	0px
+#mobileJoystick	display	block
+#mobileJoystick	top	auto
+#mobileJoystick	left	auto
+#mobileJump	cursor	pointer
+#mobileJump	pointer-events	all
+#mobileJump	display	block
+#mobileJump	top	auto
+#mobileJump	left	auto
+#mobileJump	padding-top	5px
+#mobileJump	padding-right	5px
+#mobileJump	padding-bottom	5px
+#mobileJump	padding-left	5px
+#mobileJump	background-image	url("img/mobile/icon_5.png")
+#mobileJump	background-size	cover
+#mobileCrouch	cursor	pointer
+#mobileCrouch	pointer-events	all
+#mobileCrouch	display	block
+#mobileCrouch	top	auto
+#mobileCrouch	left	auto
+#mobileCrouch	padding-top	5px
+#mobileCrouch	padding-right	5px
+#mobileCrouch	padding-bottom	5px
+#mobileCrouch	padding-left	5px
+#mobileCrouch	background-image	url("img/mobile/icon_3.png")
+#mobileCrouch	background-size	cover
+#mobileEsc	cursor	pointer
+#mobileEsc	pointer-events	all
+#mobileEsc	display	block
+#mobileEsc	top	auto
+#mobileEsc	left	auto
+#mobileEsc	padding-top	2px
+#mobileEsc	padding-right	2px
+#mobileEsc	padding-bottom	2px
+#mobileEsc	padding-left	2px
+#mobileEsc	background-image	url("img/mobile/icon_6.png")
+#mobileEsc	background-size	cover
+#mobileShoot	cursor	pointer
+#mobileShoot	pointer-events	all
+#mobileShoot	display	block
+#mobileShoot	top	auto
+#mobileShoot	left	auto
+#mobileShoot	padding-top	2px
+#mobileShoot	padding-right	2px
+#mobileShoot	padding-bottom	2px
+#mobileShoot	padding-left	2px
+#mobileShoot	background-image	url("img/mobile/icon_1.png")
+#mobileShoot	background-size	cover
+#mobileAimShoot	cursor	pointer
+#mobileAimShoot	pointer-events	all
+#mobileAimShoot	display	block
+#mobileAimShoot	top	auto
+#mobileAimShoot	left	auto
+#mobileAimShoot	padding-top	2px
+#mobileAimShoot	padding-right	2px
+#mobileAimShoot	padding-bottom	2px
+#mobileAimShoot	padding-left	2px
+#mobileAimShoot	background-image	url("img/mobile/icon_1.png")
+#mobileAimShoot	background-size	cover
+#mobileScope	cursor	pointer
+#mobileScope	pointer-events	all
+#mobileScope	display	block
+#mobileScope	top	auto
+#mobileScope	left	auto
+#mobileScope	padding-top	2px
+#mobileScope	padding-right	2px
+#mobileScope	padding-bottom	2px
+#mobileScope	padding-left	2px
+#mobileScope	background-image	url("img/mobile/icon_2.png")
+#mobileScope	background-size	cover
+#mobileReload	cursor	pointer
+#mobileReload	pointer-events	all
+#mobileReload	display	block
+#mobileReload	top	auto
+#mobileReload	left	auto
+#mobileReload	padding-top	2px
+#mobileReload	padding-right	2px
+#mobileReload	padding-bottom	2px
+#mobileReload	padding-left	2px
+#mobileReload	background-image	url("img/mobile/icon_0.png")
+#mobileReload	background-size	cover
+#mobileSwap	cursor	pointer
+#mobileSwap	pointer-events	all
+#mobileSwap	display	block
+#mobileSwap	top	auto
+#mobileSwap	left	auto
+#mobileSwap	padding-top	2px
+#mobileSwap	padding-right	2px
+#mobileSwap	padding-bottom	2px
+#mobileSwap	padding-left	2px
+#mobileSwap	background-image	url("img/mobile/icon_4.png")
+#mobileSwap	background-size	cover
+#mobileKSwap	cursor	pointer
+#mobileKSwap	pointer-events	all
+#mobileKSwap	display	block
+#mobileKSwap	top	auto
+#mobileKSwap	left	auto
+#mobileKSwap	padding-top	2px
+#mobileKSwap	padding-right	2px
+#mobileKSwap	padding-bottom	2px
+#mobileKSwap	padding-left	2px
+#mobileKSwap	background-image	url("img/mobile/icon_7.png")
+#mobileKSwap	background-size	cover
+#devConsoleOverlay	background-color	rgba(0, 0, 0, 0)
+#devConsoleOverlay	pointer-events	none
+#devConsoleOverlay	display	none
+#devConsoleOverlay	position	fixed
+#devConsoleOverlay	overflow-x	visible
+#devConsoleOverlay	overflow-y	visible
+#devConsoleOverlay	z-index	999999
+#devConsoleOverlay	top	0px
+#devConsoleOverlay	right	0px
+#devConsoleOverlay	bottom	0px
+#devConsoleOverlay	left	0px
+@hover #twoFAbtn
+#twoFAbtn	opacity	0.8
+@hover #consentWindow > div:nth-child(3) > div:nth-child(1)
+#consentWindow > div:nth-child(3) > div:nth-child(1)	opacity	0.7
+@hover #consentWindow > div:nth-child(3) > div:nth-child(2)
+#consentWindow > div:nth-child(3) > div:nth-child(2)	opacity	0.7
+@hover #newUserGuide > div:nth-child(2)
+#newUserGuide > div:nth-child(2)	opacity	0.8
+@hover #krDiscountAd > div:nth-child(2)
+#krDiscountAd > div:nth-child(2)	opacity	0.8
+@hover #twitchDropsAd > div:nth-child(2)
+#twitchDropsAd > div:nth-child(2)	opacity	0.8
+@hover #freeKRAd > div:nth-child(2)
+#freeKRAd > div:nth-child(2)	opacity	0.8
+@hover #doubleClassXPAd > div:nth-child(2)
+#doubleClassXPAd > div:nth-child(2)	opacity	0.8
+@hover #doubleXPAd > div:nth-child(2)
+#doubleXPAd > div:nth-child(2)	opacity	0.8
+@hover #eventAdName
+#eventAdName	opacity	0.8
+@hover #updateAd > div:nth-child(2)
+#updateAd > div:nth-child(2)	opacity	0.8
+@hover #battlepassAd > div:nth-child(2)
+#battlepassAd > div:nth-child(2)	opacity	0.8
+@hover #modVote > div:nth-child(2)
+#modVote > div:nth-child(2)	opacity	0.8
+@hover #homeStoreAd
+#homeStoreAd	opacity	0.8
+@hover #streamItem0 > div:nth-child(2)
+#streamItem0 > div:nth-child(2)	opacity	0.7
+@hover #streamItem1 > div:nth-child(2)
+#streamItem1 > div:nth-child(2)	opacity	0.7
+@hover #streamItem2 > div:nth-child(2)
+#streamItem2 > div:nth-child(2)	opacity	0.7
+@hover #streamItem3 > div:nth-child(2)
+#streamItem3 > div:nth-child(2)	opacity	0.7
+@hover #termsInfo > span:nth-child(1)
+#termsInfo > span:nth-child(1)	text-decoration-line	underline
+@hover #termsInfo > span:nth-child(3)
+#termsInfo > span:nth-child(3)	text-decoration-line	underline
+@hover #termsInfo > span:nth-child(5)
+#termsInfo > span:nth-child(5)	text-decoration-line	underline
+@hover #termsInfo > span:nth-child(7)
+#termsInfo > span:nth-child(7)	text-decoration-line	underline
+@hover #errorNotification > div:nth-child(1) > a:nth-child(1)
+#errorNotification > div:nth-child(1) > a:nth-child(1)	text-decoration-line	underline
+@hover #errorNotification > div:nth-child(3) > a:nth-child(1)
+#errorNotification > div:nth-child(3) > a:nth-child(1)	text-decoration-line	underline
+@hover #consentWindow > div:nth-child(2) > a:nth-child(1)
+#consentWindow > div:nth-child(2) > a:nth-child(1)	text-decoration-line	underline
+@hover #consentWindow > div:nth-child(2) > a:nth-child(2)
+#consentWindow > div:nth-child(2) > a:nth-child(2)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(1) > div:nth-child(3) > a:nth-child(7)
+#guidePopup > div:nth-child(1) > div:nth-child(3) > a:nth-child(7)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(2) > div:nth-child(2) > span:nth-child(1) > a:nth-child(1)
+#guidePopup > div:nth-child(2) > div:nth-child(2) > span:nth-child(1) > a:nth-child(1)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(3) > div:nth-child(2) > span:nth-child(1) > a:nth-child(1)
+#guidePopup > div:nth-child(3) > div:nth-child(2) > span:nth-child(1) > a:nth-child(1)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(3) > div:nth-child(3) > span:nth-child(1) > a:nth-child(1)
+#guidePopup > div:nth-child(3) > div:nth-child(3) > span:nth-child(1) > a:nth-child(1)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(3) > div:nth-child(3) > span:nth-child(1) > a:nth-child(2)
+#guidePopup > div:nth-child(3) > div:nth-child(3) > span:nth-child(1) > a:nth-child(2)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(5) > div:nth-child(3) > span:nth-child(2) > a:nth-child(1)
+#guidePopup > div:nth-child(5) > div:nth-child(3) > span:nth-child(2) > a:nth-child(1)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(5) > div:nth-child(4) > span:nth-child(2) > a:nth-child(1)
+#guidePopup > div:nth-child(5) > div:nth-child(4) > span:nth-child(2) > a:nth-child(1)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(5) > div:nth-child(5) > span:nth-child(2) > a:nth-child(1)
+#guidePopup > div:nth-child(5) > div:nth-child(5) > span:nth-child(2) > a:nth-child(1)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(5) > div:nth-child(6) > span:nth-child(2) > a:nth-child(1)
+#guidePopup > div:nth-child(5) > div:nth-child(6) > span:nth-child(2) > a:nth-child(1)	text-decoration-line	underline
+@hover #guidePopup > div:nth-child(5) > div:nth-child(7) > span:nth-child(2) > a:nth-child(1)
+#guidePopup > div:nth-child(5) > div:nth-child(7) > span:nth-child(2) > a:nth-child(1)	text-decoration-line	underline
+@hover #mailIcon
+#mailIcon	opacity	0.9
+@hover #signedInHeaderBar > div:nth-child(1) > div:nth-child(3)
+#menuKRCount	text-decoration-line	underline
+@hover #signedInHeaderBar > div:nth-child(1) > div:nth-child(5)
+#menuJNKCount	text-decoration-line	underline
+@hover #menuItemContainer > div:nth-child(1)
+#menuItemContainer > div:nth-child(1) > span:nth-child(1)	color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(1) > span:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(1) > span:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #menuItemContainer > div:nth-child(2)
+#menuItemContainer > div:nth-child(2) > span:nth-child(1)	color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(2) > span:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(2) > span:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #menuItemContainer > div:nth-child(3)
+#menuItemContainer > div:nth-child(3) > span:nth-child(1)	color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(3) > span:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(3) > span:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #menuItemContainer > div:nth-child(5)
+#menuItemContainer > div:nth-child(5) > span:nth-child(1)	color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(5) > span:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(5) > span:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #menuItemContainer > div:nth-child(6)
+#menuItemContainer > div:nth-child(6) > span:nth-child(1)	color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(6) > span:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(6) > span:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #menuItemContainer > div:nth-child(7)
+#menuItemContainer > div:nth-child(7) > span:nth-child(1)	color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(7) > span:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#menuItemContainer > div:nth-child(7) > span:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #clientExit
+#clientExit > span:nth-child(1)	color	rgb(255, 255, 255)
+#clientExit > span:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#clientExit > span:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #spinAgainBtn
+#spinAgainBtn	border-left-color	rgb(255, 255, 255)
+#spinAgainBtn	border-bottom-color	rgb(255, 255, 255)
+@hover #spinEquipBtn
+#spinEquipBtn	border-left-color	rgb(255, 255, 255)
+#spinEquipBtn	border-bottom-color	rgb(255, 255, 255)
+@hover #spinNextBtn
+#spinNextBtn	border-left-color	rgb(255, 255, 255)
+#spinNextBtn	border-bottom-color	rgb(255, 255, 255)
+@hover #menuBtnHost
+#menuBtnHost	border-left-color	rgb(255, 255, 255)
+#menuBtnHost	border-bottom-color	rgb(255, 255, 255)
+@hover #menuBtnBrowser
+#menuBtnBrowser	border-left-color	rgb(255, 255, 255)
+#menuBtnBrowser	border-bottom-color	rgb(255, 255, 255)
+@hover #inviteButton
+#inviteButton	border-left-color	rgb(255, 255, 255)
+#inviteButton	border-bottom-color	rgb(255, 255, 255)
+@hover #menuBtnJoin
+#menuBtnJoin	border-left-color	rgb(255, 255, 255)
+#menuBtnJoin	border-bottom-color	rgb(255, 255, 255)
+@hover #customizeButton
+#customizeButton	border-left-color	rgb(255, 255, 255)
+#customizeButton	border-bottom-color	rgb(255, 255, 255)
+@hover #signedOutHeaderBar > div:nth-child(1)
+#signedOutHeaderBar > div:nth-child(1)	border-left-color	rgb(255, 255, 255)
+#signedOutHeaderBar > div:nth-child(1)	border-bottom-color	rgb(255, 255, 255)
+@hover #headerRightSocial > div:nth-child(2)
+#headerRightSocial > div:nth-child(2)	opacity	0.9
+@hover #headerRightSocial > div:nth-child(3)
+#headerRightSocial > div:nth-child(3)	opacity	0.9
+@hover #headerRightSocial > div:nth-child(4)
+#headerRightSocial > div:nth-child(4)	opacity	0.9
+@hover #devConsoleOverlay > div:nth-child(1) > div:nth-child(1) > span:nth-child(2)
+#devConsoleOverlay > div:nth-child(1) > div:nth-child(1) > span:nth-child(2)	color	rgb(255, 255, 255)
+#devConsoleOverlay > div:nth-child(1) > div:nth-child(1) > span:nth-child(2)	border-left-color	rgb(255, 255, 255)
+#devConsoleOverlay > div:nth-child(1) > div:nth-child(1) > span:nth-child(2)	border-bottom-color	rgb(255, 255, 255)
+@hover #devConsoleOverlay > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > form:nth-child(2) > button:nth-child(2)
+#devConsoleOverlay > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > form:nth-child(2) > button:nth-child(2)	background-color	rgb(138, 138, 138)

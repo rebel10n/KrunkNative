@@ -509,17 +509,31 @@ static int tag_is_skipped(int tag)
         || tag == LXB_TAG_OPTION || tag == LXB_TAG_OPTGROUP;
 }
 
-static Box *build_text_box(LayoutTree *t, Box *parent, lxb_dom_node_t *node, const char *src, size_t len)
+/* `style` is the text's own (inherited) style: the parent box's, or a display:contents
+ * element's when the text is a child of one (NULL = the parent box's). */
+static Box *build_text_box_styled(LayoutTree *t, Box *parent, lxb_dom_node_t *node, const char *src, size_t len, const CssComputed *style)
 {
-    Box *b = layout_new_box(t, BOX_TEXT, node, parent->style);
-    b->text = build_text(t, src, len, parent->style, &b->text_len);
+    const int own = style && style != parent->style;
+    if (!style) style = parent->style;
+    Box *b = layout_new_box(t, BOX_TEXT, node, style);
+    b->text = build_text(t, src, len, style, &b->text_len);
     b->flags |= BOXF_INLINE_LEVEL;
-    b->font = parent->font;
-    b->fm = parent->fm;
-    if (parent->style->visibility != CSS_VISIBILITY_VISIBLE) b->flags |= BOXF_HIDDEN;
-    if (parent->style->pointer_events == CSS_POINTER_EVENTS_NONE) b->flags |= BOXF_NO_POINTER;
+    if (own) {
+        b->parent = parent;
+        layout_resolve_font(t, b);
+    } else {
+        b->font = parent->font;
+        b->fm = parent->fm;
+    }
+    if (style->visibility != CSS_VISIBILITY_VISIBLE) b->flags |= BOXF_HIDDEN;
+    if (style->pointer_events == CSS_POINTER_EVENTS_NONE) b->flags |= BOXF_NO_POINTER;
     layout_append_child(parent, b);
     return b;
+}
+
+static Box *build_text_box(LayoutTree *t, Box *parent, lxb_dom_node_t *node, const char *src, size_t len)
+{
+    return build_text_box_styled(t, parent, node, src, len, NULL);
 }
 
 static void build_pseudo(LayoutTree *t, Box *parent, lxb_dom_node_t *node, CssComputed *style, int pseudo)
@@ -579,23 +593,39 @@ static Box *build_element(LayoutTree *t, Box *parent, lxb_dom_node_t *node, cons
     return b;
 }
 
-static void build_children(LayoutTree *t, Box *parent, lxb_dom_node_t *elem)
+/* `text_style`: the style of text children (NULL = the parent box's; set while expanding a
+ * display:contents element, whose children are built into the nearest box). */
+static void build_children_styled(LayoutTree *t, Box *parent, lxb_dom_node_t *elem, const CssComputed *text_style)
 {
     ElemData *ed = layout_elem_data(elem);
     if (ed && ed->before) build_pseudo(t, parent, elem, ed->before, 1);
     for (lxb_dom_node_t *c = elem->first_child; c; c = c->next) {
         if (c->type == LXB_DOM_NODE_TYPE_TEXT) {
             lexbor_str_t *d = &lxb_dom_interface_text(c)->char_data.data;
-            if (d->length) build_text_box(t, parent, c, (const char *)d->data, d->length);
+            if (d->length) build_text_box_styled(t, parent, c, (const char *)d->data, d->length, text_style);
         } else if (c->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-            if (tag_is_skipped(node_tag(c))) continue;
+            const int tag = node_tag(c);
+            if (tag_is_skipped(tag)) continue;
             ElemData *ced = layout_elem_data(c);
             if (!ced || !ced->computed) continue;
             if (ced->computed->display == CSS_DISPLAY_NONE) continue;
+            /* display: contents (CSS Display 3 2.5): no box of its own, its children (and
+             * ::before/::after) are laid out as children of the parent box, e.g. flex items
+             * of v7's #headerRight. Replaced elements keep their box (they behave like
+             * display: none there in Chrome, but none of the pages uses that). */
+            if (ced->computed->display == CSS_DISPLAY_CONTENTS && !replaced_type_for_tag(tag)) {
+                build_children_styled(t, parent, c, ced->computed);
+                continue;
+            }
             build_element(t, parent, c, ced->computed, 0);
         }
     }
     if (ed && ed->after) build_pseudo(t, parent, elem, ed->after, 2);
+}
+
+static void build_children(LayoutTree *t, Box *parent, lxb_dom_node_t *elem)
+{
+    build_children_styled(t, parent, elem, NULL);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1229,6 +1259,9 @@ int layout_children_changed(LayoutTree *t, lxb_dom_node_t *node)
     if (!t || !node) return LAYOUT_RESTYLE_NONE;
     ElemData *ed = layout_elem_data(node);
     if (!ed || !ed->box) {
+        /* display: contents: its children live in the nearest ancestor box */
+        if (ed && ed->computed && ed->computed->display == CSS_DISPLAY_CONTENTS && rebuild_root_for_node(node))
+            return rebuild_for_node(t, node);
         /* not rendered (display:none or inside one): nothing to do unless an ancestor renders it */
         return LAYOUT_RESTYLE_NONE;
     }
@@ -1364,7 +1397,12 @@ int layout_restyled(LayoutTree *t, lxb_dom_node_t *node, const CssComputed *old_
          * animation running there (the menu's #merchImg / #instructions while in game)
          * must not rebuild the nearest rendered ancestor's children on every tick. */
         lxb_dom_node_t *p = node->parent;
-        while (p && p->type != LXB_DOM_NODE_TYPE_ELEMENT) p = p->parent;
+        for (;;) { /* display: contents ancestors render through their parent's box */
+            while (p && p->type != LXB_DOM_NODE_TYPE_ELEMENT) p = p->parent;
+            ElemData *ped = p ? layout_elem_data(p) : NULL;
+            if (!ped || ped->box || !ped->computed || ped->computed->display != CSS_DISPLAY_CONTENTS) break;
+            p = p->parent;
+        }
         ElemData *ped = p ? layout_elem_data(p) : NULL;
         if (!ped || !ped->box) return LAYOUT_RESTYLE_NONE;
         if (!rebuild_root_for_node(node->parent)) return LAYOUT_RESTYLE_NONE;

@@ -96,6 +96,7 @@ static int parse_string(Cur *c, char *buf, size_t cap, size_t *out_len)
     c->p++;
     while (!at_end(c) && *c->p != q) {
         char ch = *c->p++;
+        if (q == '`' && ch == '$' && !at_end(c) && *c->p == '{') return -1; /* template substitution */
         if (ch == '\\' && !at_end(c)) {
             char e = *c->p++;
             switch (e) {
@@ -121,7 +122,7 @@ static int parse_number(Cur *c, double *out)
     char buf[64];
     const char *s = c->p;
     if (!at_end(c) && (*c->p == '-' || *c->p == '+')) c->p++;
-    if (at_end(c) || !kn_is_digit(*c->p)) return -1;
+    if (at_end(c) || !(kn_is_digit(*c->p) || (*c->p == '.' && c->p + 1 < c->end && kn_is_digit(c->p[1])))) return -1;
     while (!at_end(c) && kn_is_digit(*c->p)) c->p++;
     if (!at_end(c) && *c->p == '.') {
         c->p++;
@@ -149,15 +150,21 @@ static int parse_arg(Cur *c, HtmlArg *arg)
     memset(arg, 0, sizeof(*arg));
     skip_ws(c);
     if (at_end(c)) return -1;
-    if (*c->p == '\'' || *c->p == '"') {
+    if (*c->p == '\'' || *c->p == '"' || *c->p == '`') {
         if (parse_string(c, buf, sizeof(buf), &len) < 0) return -1;
         arg->kind = HTML_ARG_STR;
         arg->str = kn_atom(buf, len);
         return 0;
     }
-    if (*c->p == '-' || *c->p == '+' || kn_is_digit(*c->p)) {
+    if (*c->p == '-' || *c->p == '+' || *c->p == '.' || kn_is_digit(*c->p)) {
         arg->kind = HTML_ARG_NUM;
         return parse_number(c, &arg->num);
+    }
+    if (*c->p == '!' && c->p + 1 < c->end && (c->p[1] == '0' || c->p[1] == '1')) { /* minified !0 / !1 */
+        arg->kind = HTML_ARG_BOOL;
+        arg->num = c->p[1] == '0';
+        c->p += 2;
+        return 0;
     }
     if (parse_path(c, buf, sizeof(buf)) < 0) return -1;
     if (!strcmp(buf, "true")) { arg->kind = HTML_ARG_BOOL; arg->num = 1; return 0; }
@@ -179,26 +186,28 @@ static const char *normalise_callee(const char *path)
     return kn_atom_cstr(path);
 }
 
-/* callee '(' args ')' ; cursor at the callee. */
+/* callee '(' args ')' ; cursor at the callee.  `path = value` (an assignment) becomes the
+ * call "path=" with the value as its one argument. */
 static int parse_call(Cur *c, HandlerCall *call)
 {
     char path[256];
     if (parse_path(c, path, sizeof(path)) < 0) return -1;
     skip_ws(c);
     if (at_end(c) || *c->p != '(') {
-        /* special-case the one bare assignment in the UI */
         if (!at_end(c) && *c->p == '=' && !(c->p + 1 < c->end && c->p[1] == '=')) {
-            char val[64];
-            size_t vlen;
             c->p++;
-            skip_ws(c);
-            if (at_end(c) || (*c->p != '\'' && *c->p != '"')) return -1;
-            if (parse_string(c, val, sizeof(val), &vlen) < 0) return -1;
-            if (!strcmp(path, "errorNotification.style.display") && !strcmp(val, "none")) {
+            if (parse_arg(c, &call->args[0]) < 0) return -1;
+            if (!strcmp(path, "errorNotification.style.display") && call->args[0].kind == HTML_ARG_STR &&
+                !strcmp(call->args[0].str, "none")) {
                 call->name = kn_atom_cstr("kn.hideErrorNotification");
                 call->argc = 0;
                 return 0;
             }
+            char name[260];
+            snprintf(name, sizeof(name), "%s=", normalise_callee(path));
+            call->name = kn_atom_cstr(name);
+            call->argc = 1;
+            return 0;
         }
         return -1;
     }
@@ -212,14 +221,136 @@ static int parse_call(Cur *c, HandlerCall *call)
     }
     for (;;) {
         if (call->argc >= EV_HANDLER_MAX_ARGS) return -1;
-        if (parse_arg(c, &call->args[call->argc]) < 0) return -1;
-        call->argc++;
+        HtmlArg *arg = &call->args[call->argc];
+        if (parse_arg(c, arg) < 0) return -1;
         skip_ws(c);
+        if (arg->kind == HTML_ARG_THIS_CHECKED && !at_end(c) && *c->p == '?') { /* this.checked ? a : b */
+            HtmlArg yes, no;
+            c->p++;
+            if (parse_arg(c, &yes) < 0 || yes.kind != HTML_ARG_NUM) return -1;
+            skip_ws(c);
+            if (at_end(c) || *c->p != ':') return -1;
+            c->p++;
+            if (parse_arg(c, &no) < 0 || no.kind != HTML_ARG_NUM) return -1;
+            arg->kind = HTML_ARG_NUM;
+            arg->num = yes.num;
+            call->tern_mask |= (uint8_t)(1u << call->argc);
+            call->tern_else[call->argc] = (float) no.num;
+            skip_ws(c);
+        }
+        call->argc++;
         if (at_end(c)) return -1;
         if (*c->p == ',') { c->p++; continue; }
         if (*c->p == ')') { c->p++; return 0; }
         return -1;
     }
+}
+
+/* `N == [window.]event.keyCode` or `[window.]event.keyCode == N` at the cursor; the key code
+ * in *key.  Restores the cursor and returns -1 when the text is something else. */
+static int parse_keytest(Cur *c, int *key)
+{
+    const char *save = c->p;
+    char path[64];
+    double num = 0;
+    skip_ws(c);
+    if (!at_end(c) && kn_is_digit(*c->p)) {
+        if (parse_number(c, &num) < 0) goto fail;
+        skip_ws(c);
+        if (c->end - c->p < 2 || c->p[0] != '=' || c->p[1] != '=') goto fail;
+        c->p += 2;
+        if (!at_end(c) && *c->p == '=') c->p++;
+        skip_ws(c);
+        if (parse_path(c, path, sizeof(path)) < 0) goto fail;
+    } else {
+        if (parse_path(c, path, sizeof(path)) < 0) goto fail;
+        skip_ws(c);
+        if (c->end - c->p < 2 || c->p[0] != '=' || c->p[1] != '=') goto fail;
+        c->p += 2;
+        if (!at_end(c) && *c->p == '=') c->p++;
+        skip_ws(c);
+        if (parse_number(c, &num) < 0) goto fail;
+    }
+    if (strcmp(path, "event.keyCode") && strcmp(path, "window.event.keyCode")) goto fail;
+    *key = (int) num;
+    return 0;
+fail:
+    c->p = save;
+    return -1;
+}
+
+/* One statement; may write two calls (a ternary).  Returns the number written, -1 on error. */
+static int parse_stmt(Cur *c, HandlerCall *out, int room)
+{
+    HandlerCall *call = &out[0];
+    int key = 0;
+    if (room < 1) return -1;
+    memset(call, 0, sizeof(*call));
+    if (take_word(c, "return")) {
+        skip_ws(c);
+        if (take_word(c, "false") || (c->end - c->p >= 2 && c->p[0] == '!' && c->p[1] == '1' && (c->p += 2))) {
+            call->prevent_default = 1;
+            return 1;
+        }
+        if (take_word(c, "true") || (c->end - c->p >= 2 && c->p[0] == '!' && c->p[1] == '0' && (c->p += 2))) return 0;
+        if (parse_call(c, call) < 0) return -1;
+        call->returns = 1;
+        return 1;
+    }
+    if (take_word(c, "if")) { /* if (event.keyCode == 13) stmt */
+        skip_ws(c);
+        if (at_end(c) || *c->p != '(') return -1;
+        c->p++;
+        if (parse_keytest(c, &key) < 0) return -1;
+        skip_ws(c);
+        if (at_end(c) || *c->p != ')') return -1;
+        c->p++;
+        int n = parse_stmt(c, out, room);
+        for (int i = 0; i < n; i++) out[i].guard_key = key;
+        return n;
+    }
+    if (parse_keytest(c, &key) == 0) { /* 13 == event.keyCode && f() */
+        skip_ws(c);
+        if (c->end - c->p < 2 || c->p[0] != '&' || c->p[1] != '&') return -1;
+        c->p += 2;
+        skip_ws(c);
+        if (parse_call(c, call) < 0) return -1;
+        call->guard_key = key;
+        return 1;
+    }
+    const char *save = c->p;
+    char path[256];
+    if (parse_path(c, path, sizeof(path)) == 0) {
+        skip_ws(c);
+        if (!at_end(c) && *c->p == '?') { /* cond ? a() : b() */
+            if (room < 2) return -1;
+            const char *guard = normalise_callee(path);
+            c->p++;
+            skip_ws(c);
+            if (parse_call(c, &out[0]) < 0) return -1;
+            skip_ws(c);
+            if (at_end(c) || *c->p != ':') return -1;
+            c->p++;
+            skip_ws(c);
+            memset(&out[1], 0, sizeof(out[1]));
+            if (parse_call(c, &out[1]) < 0) return -1;
+            out[0].guard = out[1].guard = guard;
+            out[1].guard_neg = 1;
+            return 2;
+        }
+        if ((!strcmp(path, "event.stopPropagation") || !strcmp(path, "event.preventDefault")) && !at_end(c) && *c->p == '(') {
+            c->p++;
+            skip_ws(c);
+            if (at_end(c) || *c->p != ')') return -1;
+            c->p++;
+            if (path[6] == 's') call->stop_propagation = 1;
+            else call->prevent_default = 1;
+            return 1;
+        }
+    }
+    c->p = save;
+    if (parse_call(c, call) < 0) return -1;
+    return 1;
 }
 
 int events_parse_handler(const char *text, HandlerCall *out, int max)
@@ -232,29 +363,13 @@ int events_parse_handler(const char *text, HandlerCall *out, int max)
     for (;;) {
         skip_ws(&c);
         if (at_end(&c)) break;
-        if (*c.p == ';') { c.p++; continue; }
-        if (count >= max) return -1;
-        HandlerCall *call = &out[count];
-        memset(call, 0, sizeof(*call));
-        if (take_word(&c, "return")) {
-            skip_ws(&c);
-            if (take_word(&c, "false")) {
-                call->prevent_default = 1;
-                count++;
-            } else if (take_word(&c, "true")) {
-                /* no-op */
-            } else {
-                if (parse_call(&c, call) < 0) return -1;
-                call->returns = 1;
-                count++;
-            }
-        } else {
-            if (parse_call(&c, call) < 0) return -1;
-            count++;
-        }
+        if (*c.p == ';' || *c.p == ',') { c.p++; continue; }
+        int n = parse_stmt(&c, out + count, max - count);
+        if (n < 0) return -1;
+        count += n;
         skip_ws(&c);
         if (at_end(&c)) break;
-        if (*c.p != ';') return -1;
+        if (*c.p != ';' && *c.p != ',') return -1;
         c.p++;
     }
     return count;
@@ -543,13 +658,34 @@ static void fill_event(EventSystem *es, HtmlEvent *ev, const char *type, HtmlEle
     ev->y = es->mouse_y;
 }
 
+/* DOM keyCode of a native (GLFW) key for `event.keyCode == N` guards: printable keys
+ * (space, digits, A-Z) share their codes; the named ones are mapped. */
+static int dom_key_code(int key)
+{
+    switch (key) {
+        case 257: case 335: return 13; /* Enter, keypad Enter */
+        case 256: return 27;           /* Escape */
+        case 258: return 9;            /* Tab */
+        case 259: return 8;            /* Backspace */
+        case 261: return 46;           /* Delete */
+        case 262: return 39; case 263: return 37; case 264: return 40; case 265: return 38; /* arrows */
+        default: return key;
+    }
+}
+
 /* Runs the parsed statements of one on<type> attribute; returns 0 when the
- * default action was cancelled. */
-static int run_handler(const EvHandlerEntry *ent, HtmlEvent *ev)
+ * default action was cancelled.  *stop is set by `event.stopPropagation()`. */
+static int run_handler(const EvHandlerEntry *ent, HtmlEvent *ev, int *stop)
 {
     int result = 1;
     for (int i = 0; i < ent->count; i++) {
         const HandlerCall *call = &ent->calls[i];
+        if (call->guard_key > 0 && dom_key_code(ev->key) != call->guard_key) continue;
+        if (call->guard) {
+            const int truthy = html_ui_dispatch(call->guard, ev, NULL, 0) != 0;
+            if (truthy == call->guard_neg) continue;
+        }
+        if (call->stop_propagation) *stop = 1;
         if (!call->name) {
             if (call->prevent_default) result = 0;
             continue;
@@ -562,8 +698,10 @@ static int run_handler(const EvHandlerEntry *ent, HtmlEvent *ev)
                 case HTML_ARG_THIS_CHECKED: args[a].num = ev->checked; break;
                 default: break;
             }
+            if ((call->tern_mask >> a) & 1u) args[a].num = ev->checked ? call->args[a].num : call->tern_else[a];
         }
         int r = html_ui_dispatch(call->name, ev, args, call->argc);
+        if (html_ui_take_stop_propagation()) *stop = 1; /* the handler called stopPropagation() */
         if (call->returns && r == 0) result = 0;
     }
     return result;
@@ -588,7 +726,9 @@ static int dispatch_inline(EventSystem *es, const HtmlElem *chain, int n, const 
         ev.target = e;
         ev.value = value;
         ev.checked = elem_checked(es, e);
-        if (!run_handler(&local, &ev)) result = 0;
+        int stop = 0;
+        if (!run_handler(&local, &ev, &stop)) result = 0;
+        if (stop) break; /* event.stopPropagation(): no ancestor's on<type> runs */
     }
     return result;
 }

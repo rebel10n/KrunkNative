@@ -26,6 +26,7 @@
 
 #include "text.h"
 #include "material_icons_liga.h"
+#include "material_icons_outlined_liga.h"
 
 #include <gl.h>
 
@@ -61,6 +62,7 @@ struct TextFace {
     int weight;
     int style;
     int is_icon;
+    int liga_set;        // icon fonts: 0 = Material Icons, 1 = Material Icons Outlined ligature table
     int is_fallback;
     int id;
     FT_Face ft;          // NULL until loaded
@@ -110,8 +112,8 @@ struct TextSystem {
     int fake_bold_advance;
     float gamma, contrast;
 
-    // ligature index: table ranges per first byte
-    uint16_t liga_lo[256], liga_hi[256];
+    // ligature index per icon font table (TEXT_LIGA_SETS): ranges per first byte
+    uint16_t liga_lo[2][256], liga_hi[2][256];
 
     // atlas
     GLuint tex;
@@ -195,16 +197,26 @@ static float env_float(const char *name, float def) {
 
 // ---- system ------------------------------------------------------------------
 
+// The ligature tables of the icon fonts (tools/ui-import generates both headers): Google's
+// Material Icons and Material Icons Outlined (v7.1.4's menu items) name the same icons with
+// the same PUA codepoints, but each font has its own glyph indices and icon set.
+static const MaterialIconLiga *const k_liga_tables[2] = {material_icons_liga, material_icons_outlined_liga};
+static const int k_liga_counts[2] = {MATERIAL_ICONS_LIGA_COUNT, MATERIAL_ICONS_OUTLINED_LIGA_COUNT};
+
 static void text_build_liga_index(TextSystem *ts) {
-    for (int c = 0; c < 256; c++) { ts->liga_lo[c] = 0; ts->liga_hi[c] = 0; }
-    int i = 0;
-    while (i < MATERIAL_ICONS_LIGA_COUNT) {
-        unsigned char c = (unsigned char) material_icons_liga[i].name[0];
-        int j = i;
-        while (j < MATERIAL_ICONS_LIGA_COUNT && (unsigned char) material_icons_liga[j].name[0] == c) j++;
-        ts->liga_lo[c] = (uint16_t) i;
-        ts->liga_hi[c] = (uint16_t) j;
-        i = j;
+    for (int set = 0; set < 2; set++) {
+        const MaterialIconLiga *table = k_liga_tables[set];
+        const int count = k_liga_counts[set];
+        for (int c = 0; c < 256; c++) { ts->liga_lo[set][c] = 0; ts->liga_hi[set][c] = 0; }
+        int i = 0;
+        while (i < count) {
+            unsigned char c = (unsigned char) table[i].name[0];
+            int j = i;
+            while (j < count && (unsigned char) table[j].name[0] == c) j++;
+            ts->liga_lo[set][c] = (uint16_t) i;
+            ts->liga_hi[set][c] = (uint16_t) j;
+            i = j;
+        }
     }
 }
 
@@ -219,6 +231,7 @@ static TextFace *text_add_face(TextSystem *ts, const char *family, const char *p
     f->style = style;
     f->is_fallback = is_fallback;
     f->is_icon = strncmp(f->family, "material icons", 14) == 0 || strncmp(f->family, "material symbols", 16) == 0;
+    f->liga_set = f->is_icon && strstr(f->family, "outlined") ? 1 : 0;
     f->cur_size64 = -1;
     ts->face_count++;
     return f;
@@ -394,7 +407,14 @@ int text_register_face(TextSystem *ts, const char *family, const char *path, int
             char lower[TEXT_FAMILY_MAX];
             str_lower_copy(lower, sizeof lower, family, strlen(family));
             if (!strncmp(lower, "material icons", 14)) {
-                snprintf(alt, sizeof alt, "%s/material-icons.ttf", dir);
+                // the import names the converted font after its family: "material icons
+                // outlined" -> material-icons-outlined.ttf
+                char slug[TEXT_FAMILY_MAX];
+                size_t k = 0;
+                for (const char *q = lower; *q && k + 1 < sizeof slug; q++) slug[k++] = (*q >= 'a' && *q <= 'z') || (*q >= '0' && *q <= '9') ? *q : '-';
+                slug[k] = 0;
+                snprintf(alt, sizeof alt, "%s/%s.ttf", dir, slug);
+                if (!file_exists(alt)) snprintf(alt, sizeof alt, "%s/material-icons.ttf", dir);
                 if (file_exists(alt)) snprintf(full, sizeof full, "%s", alt);
             }
         }
@@ -416,7 +436,10 @@ static int face_load(TextSystem *ts, TextFace *f) {
     f->has_kerning = FT_HAS_KERNING(f->ft) ? 1 : 0;
     f->cur_size64 = -1;
     if (!f->is_fallback && !f->is_icon && f->ft->family_name &&
-        !strncmp(f->ft->family_name, "Material Icons", 14)) f->is_icon = 1;
+        !strncmp(f->ft->family_name, "Material Icons", 14)) {
+        f->is_icon = 1;
+        f->liga_set = strstr(f->ft->family_name, "Outlined") ? 1 : 0;
+    }
     return 1;
 }
 
@@ -686,15 +709,17 @@ static int is_skipped_cp(uint32_t cp) {
            (cp >= 0x2066 && cp <= 0x2069);
 }
 
-// Longest Material Icons ligature name starting at s; returns its length or 0.
-static int text_match_liga(const TextSystem *ts, const char *s, size_t len, const MaterialIconLiga **out) {
+// Longest ligature name of the face's icon table starting at s; returns its length or 0.
+static int text_match_liga(const TextSystem *ts, const TextFace *face, const char *s, size_t len, const MaterialIconLiga **out) {
     unsigned char c = (unsigned char) s[0];
+    const int set = face->liga_set;
+    const MaterialIconLiga *table = k_liga_tables[set];
     int best_len = 0;
-    for (int i = ts->liga_lo[c]; i < ts->liga_hi[c]; i++) {
-        const char *name = material_icons_liga[i].name;
+    for (int i = ts->liga_lo[set][c]; i < ts->liga_hi[set][c]; i++) {
+        const char *name = table[i].name;
         size_t n = strlen(name);
         if (n > len || (int) n <= best_len) continue;
-        if (!memcmp(name, s, n)) { best_len = (int) n; *out = &material_icons_liga[i]; }
+        if (!memcmp(name, s, n)) { best_len = (int) n; *out = &table[i]; }
     }
     return best_len;
 }
@@ -739,7 +764,7 @@ int text_shape(TextFont *font, const char *utf8, size_t len, float letter_spacin
         uint32_t gi;
 
         const MaterialIconLiga *liga = NULL;
-        int liga_len = primary->is_icon ? text_match_liga(ts, utf8 + i, len - i, &liga) : 0;
+        int liga_len = primary->is_icon ? text_match_liga(ts, primary, utf8 + i, len - i, &liga) : 0;
         if (liga_len) {
             i += (size_t) liga_len;
             face = primary;

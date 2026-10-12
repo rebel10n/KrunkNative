@@ -4,7 +4,7 @@
  * Built from a throwaway CMake project (no repository target yet), rendered
  * on llvmpipe under Xvfb:
  *
- *   R=/home/user/src/KrunkNative; B=/tmp/kn_image_test
+ *   R=$PWD; B=$HOME/.cache/kn_image_test     # from the repository root
  *   mkdir -p $B && cat > $B/CMakeLists.txt <<EOF
  *   cmake_minimum_required(VERSION 3.16)
  *   project(kn_image_test C)
@@ -14,17 +14,17 @@
  *   add_subdirectory(\${R}/client/lib/glfw glfw)
  *   add_subdirectory(\${R}/shared/lib/cJSON cJSON)
  *   add_executable(test_image \${R}/client/src/html/engine/tests/test_image.c
- *       \${R}/client/src/html/engine/image.c \${R}/client/src/stb_image.c \${R}/shared/src/utils.c)
+ *       \${R}/client/src/html/engine/image.c \${R}/client/src/html/engine/svg.c
+ *       \${R}/client/src/stb_image.c \${R}/shared/src/utils.c)
  *   target_include_directories(test_image PRIVATE \${R}/client/include \${R}/client/src/html/engine
- *       \${R}/shared/include \${R}/shared/lib/cJSON)
+ *       \${R}/shared/include \${R}/shared/lib/cJSON \${R}/client/lib/nanosvg)
  *   target_link_libraries(test_image PRIVATE glad glfw cJSON m)
  *   EOF
  *   cmake -S $B -B $B/build -G Ninja -DGLFW_BUILD_EXAMPLES=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_DOCS=OFF
  *   cmake --build $B/build
  *   LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a $B/build/test_image $R/ui/
  *
- * Expected sizes come from doc/ui-feature-inventory.md section 5 and
- * `identify` over ui/; reference pixels from `convert <png> -crop 1x1+X+Y txt:`
+ * Expected sizes come from `identify` over ui/ (the v7.1.4 page); reference pixels from `convert <png> -crop 1x1+X+Y txt:`
  * (straight alpha, converted to premultiplied here).
  */
 #include <math.h>
@@ -60,32 +60,57 @@ typedef struct Expected {
     int w, h;
 } Expected;
 
-/* <img src> references (inventory: 43 <img>, 38 with src) resolved from the
- * document root.  Window fragments (ui/windows/) are spliced into
- * index.html, so their <img> URLs resolve against the document too. */
+/* <img src> references of the v7.1.4 page (ui/index.html, PNGs) plus the images the C UI
+ * writes into it (class / weapon icons, map cards, the Client window's installers), resolved
+ * from the document root; sizes from `identify` over ui/. */
 static const Expected k_img_src[] = {
-    {"img/android.png", "index.html", 646, 250},
     {"img/app_0.png", "index.html", 256, 256},
     {"img/app_1.png", "index.html", 256, 256},
+    {"img/backgrounds/vs_2.png", "index.html", 2500, 2500},
     {"img/blood.png", "index.html", 256, 256},
-    {"img/favicon.png", "index.html", 16, 16},
-    {"img/ios.png", "index.html", 498, 167},
-    {"img/linux.png", "index.html", 128, 128},
-    {"img/logo_4.png", "index.html", 1024, 302},
-    {"img/mac.png", "index.html", 128, 128},
-    {"img/maps/map_0.png", "index.html", 200, 80},
-    {"img/maps/map_1.png", "index.html", 200, 80},
-    {"img/maps/map_10.png", "index.html", 200, 80},
-    {"img/merch.png", "index.html", 512, 512},
-    {"img/noimg.png", "index.html", 110, 50},
+    {"img/btc_icn.png", "index.html", 256, 353},
+    {"img/client.png", "index.html", 646, 250},
+    {"img/doublexp.png", "index.html", 632, 512},
+    {"img/editor.png", "index.html", 646, 250},
+    {"img/guide/host1.png", "index.html", 734, 320},
+    {"img/guide/invite.png", "index.html", 419, 134},
+    {"img/guide/kick.png", "index.html", 642, 337},
+    {"img/guide/kpd.png", "index.html", 432, 180},
+    {"img/guide/report.png", "index.html", 586, 120},
+    {"img/guide/report2.png", "index.html", 503, 163},
+    {"img/guide/startserv.png", "index.html", 676, 250},
+    {"img/logo_6.png", "index.html", 2048, 685},
+    {"img/mmok.png", "index.html", 676, 676},
+    {"img/newp.png", "index.html", 109, 109},
     {"img/phone_r.png", "index.html", 256, 512},
+    {"img/player_pfp.png", "index.html", 16, 16},
     {"img/police.png", "index.html", 128, 128},
+    {"img/shop/5.png", "index.html", 210, 170},
+    {"img/shop/spins/4_0.png", "index.html", 210, 170},
+    {"img/shop/spins/6_1.png", "index.html", 210, 170},
     {"img/skull_0.png", "index.html", 32, 32},
     {"img/skull_1.png", "index.html", 64, 60},
     {"img/skull_2.png", "index.html", 64, 64},
+    {"img/skull_3.png", "index.html", 64, 64},
+    {"img/social/discord.png", "index.html", 128, 128},
+    {"img/social/reddit.png", "index.html", 128, 128},
     {"img/timer.png", "index.html", 32, 32},
-    {"img/windows.png", "index.html", 128, 128},
+    {"img/twitch.png", "index.html", 326, 345},
+    {"img/youtube.png", "index.html", 128, 128},
     {"textures/ammo_0.png", "index.html", 128, 128},
+    {"textures/hitmarker_3.png", "index.html", 150, 150},
+    {"textures/recticle.png", "index.html", 1024, 1024},
+    {"textures/reticles/reticle_0.png", "index.html", 32, 32},
+    {"img/favicon.png", "index.html", 16, 16},
+    {"img/noimg.png", "index.html", 110, 50},
+    {"img/maps/map_0.png", "index.html", 200, 80},
+    {"img/maps/map_1.png", "index.html", 200, 80},
+    {"img/maps/map_10.png", "index.html", 200, 80},
+    {"img/windows.png", "index.html", 128, 128},
+    {"img/mac.png", "index.html", 128, 128},
+    {"img/linux.png", "index.html", 128, 128},
+    {"img/android.png", "index.html", 646, 250},
+    {"img/ios.png", "index.html", 498, 167},
     {"textures/classes/icon_0.png", "index.html", 8, 8},
     {"textures/classes/icon_1.png", "index.html", 8, 8},
     {"textures/classes/icon_2.png", "index.html", 8, 8},
@@ -100,9 +125,6 @@ static const Expected k_img_src[] = {
     {"textures/classes/icon_11.png", "index.html", 8, 8},
     {"textures/classes/icon_12.png", "index.html", 8, 8},
     {"textures/classes/icon_13.png", "index.html", 8, 8},
-    {"textures/hitmarker_3.png", "index.html", 150, 150},
-    {"textures/recticle.png", "index.html", 1024, 1024},
-    {"textures/reticles/reticle_0.png", "index.html", 32, 32},
     {"textures/weapons/icon_0.png", "index.html", 256, 128},
     {"textures/weapons/icon_1.png", "index.html", 256, 128},
     {"textures/weapons/icon_2.png", "index.html", 256, 128},
@@ -119,29 +141,19 @@ static const Expected k_img_src[] = {
     {"textures/melee/icon_0.png", "index.html", 256, 128},
 };
 
-/* url() references written in ui/css/ (relative to the sheet). */
+/* url() references of css/main.css (raster images that exist in ui/). */
 static const Expected k_css_url[] = {
+    {"../img/acp_0.png", "css/main.css", 638, 208},
+    {"../img/acp_1.png", "css/main.css", 532, 300},
+    {"../img/acp_2.png", "css/main.css", 638, 208},
+    {"../img/battlepass/bg_window_2.png", "css/main.css", 1310, 704},
+    {"../img/battlepass/clock.png", "css/main.css", 128, 128},
+    {"../img/battlepass/lock.png", "css/main.css", 128, 128},
+    {"../img/battlepass/logo_0.png", "css/main.css", 386, 344},
     {"../img/blank_2.png", "css/main.css", 32, 32},
-    {"../img/country-flag.png", "css/flag.css", 512, 512},
-    {"../img/giveaway.png", "css/main.css", 1027, 578},
-    {"../img/menu-icons/chall.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/chall-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/games.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/games-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/maps.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/maps-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/mods.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/mods-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/profile.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/profile-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/ranked.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/ranked-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/settings.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/settings-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/shop.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/shop-white.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/social.png", "css/main.css", 128, 128},
-    {"../img/menu-icons/social-white.png", "css/main.css", 128, 128},
+    {"../img/doublexp.png", "css/main.css", 632, 512},
+    {"../img/hp_0.png", "css/main.css", 32, 32},
+    {"../img/medals/medal_0.png", "css/main.css", 256, 256},
     {"../img/mobile/icon_0.png", "css/main.css", 256, 256},
     {"../img/mobile/icon_1.png", "css/main.css", 256, 256},
     {"../img/mobile/icon_2.png", "css/main.css", 256, 256},
@@ -149,27 +161,20 @@ static const Expected k_css_url[] = {
     {"../img/mobile/icon_4.png", "css/main.css", 256, 256},
     {"../img/mobile/icon_5.png", "css/main.css", 256, 256},
     {"../img/mobile/icon_6.png", "css/main.css", 256, 256},
-    {"../img/social-buttons/discord-hover.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/discord-normal.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/discord-pressed.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/down_hover.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/down_normal.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/down_pressed.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/reddit-hover.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/reddit-normal.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/reddit-pressed.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/twitter-hover.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/twitter-normal.png", "css/main.css", 80, 92},
-    {"../img/social-buttons/twitter-pressed.png", "css/main.css", 80, 92},
+    {"../img/mobile/icon_7.png", "css/main.css", 256, 256},
+    {"../img/mouse/left.png", "css/main.css", 220, 220},
+    {"../img/news.png", "css/main.css", 562, 562},
+    {"../img/prem_bg.png", "css/main.css", 1277, 562},
+    {"../img/server_i.png", "css/main.css", 512, 512},
+    {"../img/shop/filter/vignette.png", "css/main.css", 210, 160},
+    {"../img/skull_0.png", "css/main.css", 32, 32},
+    {"../textures/weapons/icon_1.png", "css/main.css", 256, 128},
 };
 
-/* Referenced but absent from ui/ (inventory "Surprises" 11): must fail. */
+/* Referenced by v7.1.4's main.css but absent from its public/ tree (and so from ui/): must fail. */
 static const Expected k_missing[] = {
-    {"../img/world_0.png", "css/main.css", 0, 0},
-    {"../img/chals/icon_0.png", "css/main.css", 0, 0},
-    {"../img/social-buttons/fandom-hover.png", "css/main.css", 0, 0},
-    {"../img/social-buttons/fandom-normal.png", "css/main.css", 0, 0},
-    {"../img/social-buttons/fandom-pressed.png", "css/main.css", 0, 0},
+    {"../img/backgrounds/free_kr.png", "css/main.css", 0, 0},
+    {"../img/backgrounds/whatsnew.png", "css/main.css", 0, 0},
 };
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -307,28 +312,26 @@ static void test_pixels(ImageCache *cache) {
         free(px);
     }
 
-    /* logo_4.png: no vertical flip + premultiplication of semi-transparent texels.
-     * convert logo_4.png -crop 1x1+0+0 txt:   -> (0,0,0,0)
-     * convert logo_4.png -crop 1x1+418+0 txt: -> (16,16,16,77)
-     * convert logo_4.png -crop 1x1+276+5 txt: -> (16,16,16,147)
-     * convert logo_4.png -crop 1x1+513+301 txt: -> (16,16,16,254)
-     * row 0 mean alpha 0.1515, row 301 mean alpha 0.00136 */
-    const ImageEntry *logo = image_get(cache, "img/logo_4.png", "index.html");
-    CHECK(!logo->failed && logo->w == 1024 && logo->h == 302, "logo_4 load");
+    /* logo_6.png (v7.1.4's menu logo): no vertical flip + premultiplication of semi-transparent
+     * texels. convert logo_6.png -crop 1x1+X+Y txt:
+     *   (0,0) -> (255,255,255,0), (936,0) -> (255,255,255,70), (975,0) -> (255,255,255,189),
+     *   (1000,300) -> (0,0,0,255); row 0 mean alpha 0.061217, row 684 mean alpha 0.144204 */
+    const ImageEntry *logo = image_get(cache, "img/logo_6.png", "index.html");
+    CHECK(!logo->failed && logo->w == 2048 && logo->h == 685, "logo_6 load");
 
     if (!logo->failed) {
-        unsigned char *px = read_texture(logo->tex, 1024, 302);
-        expect_pixel("logo_4", px, 1024, 0, 0, 0, 0, 0, 0);
-        expect_pixel("logo_4", px, 1024, 418, 0, 16, 16, 16, 77);
-        expect_pixel("logo_4", px, 1024, 276, 5, 16, 16, 16, 147);
-        expect_pixel("logo_4", px, 1024, 513, 301, 16, 16, 16, 254);
+        unsigned char *px = read_texture(logo->tex, 2048, 685);
+        expect_pixel("logo_6", px, 2048, 0, 0, 255, 255, 255, 0);
+        expect_pixel("logo_6", px, 2048, 936, 0, 255, 255, 255, 70);
+        expect_pixel("logo_6", px, 2048, 975, 0, 255, 255, 255, 189);
+        expect_pixel("logo_6", px, 2048, 1000, 300, 0, 0, 0, 255);
 
-        const double top = row_mean_alpha(px, 1024, 0);
-        const double bottom = row_mean_alpha(px, 1024, 301);
-        CHECK(fabs(top - 0.151517 * 255) < 1.0, "logo_4 row 0 mean alpha %.2f, expected %.2f (flipped?)", top,
-              0.151517 * 255);
-        CHECK(fabs(bottom - 0.0013557 * 255) < 0.5, "logo_4 row 301 mean alpha %.2f, expected %.2f (flipped?)",
-              bottom, 0.0013557 * 255);
+        const double top = row_mean_alpha(px, 2048, 0);
+        const double bottom = row_mean_alpha(px, 2048, 684);
+        CHECK(fabs(top - 0.0612171 * 255) < 1.0, "logo_6 row 0 mean alpha %.2f, expected %.2f (flipped?)", top,
+              0.0612171 * 255);
+        CHECK(fabs(bottom - 0.144204 * 255) < 1.0, "logo_6 row 684 mean alpha %.2f, expected %.2f (flipped?)",
+              bottom, 0.144204 * 255);
         free(px);
     }
 }
@@ -359,14 +362,14 @@ static void test_texture_state(ImageCache *cache) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     /* mips are built from premultiplied texels: every level keeps rgb <= a,
-     * and a non-square NPOT chain (giveaway 1027x578) is complete down to 1x1 */
+     * and a non-square NPOT chain (prem_bg 1277x562) is complete down to 1x1 */
     {
-        const ImageEntry *logo = image_get(cache, "img/logo_4.png", "index.html");
+        const ImageEntry *logo = image_get(cache, "img/logo_6.png", "index.html");
         glBindTexture(GL_TEXTURE_2D, logo->tex);
         GLint lw = 0, lh = 0;
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 2, GL_TEXTURE_WIDTH, &lw);
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 2, GL_TEXTURE_HEIGHT, &lh);
-        CHECK(lw == 256 && lh == 75, "logo_4 level 2 %dx%d", lw, lh);
+        CHECK(lw == 512 && lh == 171, "logo_6 level 2 %dx%d", lw, lh);
         unsigned char *px = malloc((size_t) lw * lh * 4);
         glGetTexImage(GL_TEXTURE_2D, 2, GL_RGBA, GL_UNSIGNED_BYTE, px);
         int premul_ok = 1;
@@ -374,16 +377,16 @@ static void test_texture_state(ImageCache *cache) {
             const unsigned char *p = px + i * 4;
             premul_ok &= p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3];
         }
-        CHECK(premul_ok, "logo_4 level 2 has rgb > alpha (mips not premultiplied)");
+        CHECK(premul_ok, "logo_6 level 2 has rgb > alpha (mips not premultiplied)");
         free(px);
 
-        const ImageEntry *give = image_get(cache, "img/giveaway.png", "index.html");
+        const ImageEntry *give = image_get(cache, "img/prem_bg.png", "index.html");
         glBindTexture(GL_TEXTURE_2D, give->tex);
         glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &v);
-        CHECK(v == 10, "giveaway MAX_LEVEL %d, expected 10", v);
+        CHECK(v == 10, "prem_bg MAX_LEVEL %d, expected 10", v);
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 10, GL_TEXTURE_WIDTH, &lw);
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 10, GL_TEXTURE_HEIGHT, &lh);
-        CHECK(lw == 1 && lh == 1, "giveaway level 10 %dx%d", lw, lh);
+        CHECK(lw == 1 && lh == 1, "prem_bg level 10 %dx%d", lw, lh);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
@@ -453,7 +456,7 @@ static void test_failures(ImageCache *cache) {
 
     /* failures are cached: the same entry comes back, no second log line */
     const int before = image_cache_count(cache);
-    const ImageEntry *again = image_get(cache, "../img/world_0.png", "css/main.css");
+    const ImageEntry *again = image_get(cache, "../img/backgrounds/free_kr.png", "css/main.css");
     CHECK(again->failed && image_cache_count(cache) == before, "failed entry not cached");
 
     /* the same file through different spellings is one entry */

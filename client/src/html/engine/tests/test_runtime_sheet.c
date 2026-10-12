@@ -1,19 +1,20 @@
 /*
  * test_runtime_sheet.c - a stylesheet added after the page was styled
  * (html_ui_add_stylesheet -> html_ui_backend_add_stylesheet in engine.c): the
- * page is loaded with its six sheets and restyled, the developer console's
- * markup (client/src/ui/ui_console.c, from Krunker v3.1.1 mod/devConsole.ts) is
- * appended to <body>, then ui/css/devconsole.css is appended as a seventh sheet
- * and the whole document marked dirty exactly like the engine does. Checks that
+ * v7.1.4 page (ui/index.html) is loaded with its ten <link> sheets and its <style>
+ * block and restyled, the developer console's markup (client/src/ui/ui_console.c,
+ * from Krunker v3.1.1 mod/devConsole.ts) is appended to <body>, then
+ * ui/css/devconsole.css is appended as the last sheet and the whole document
+ * marked dirty exactly like the engine does. Checks that
  * the new rules apply (and win ties as the last sheet), that class toggles
  * (.hints.isOpen) keep working, and that the sheet's @font-face is visible.
  *
- * Throwaway build (write to /tmp/kn-sheet/CMakeLists.txt):
+ * Throwaway build (a CMakeLists.txt in a scratch directory; R = the repository):
  *
  *   cmake_minimum_required(VERSION 3.16)
  *   project(kn_sheet_test C)
  *   set(CMAKE_C_STANDARD 11)
- *   set(R /home/user/src/KrunkNative)
+ *   set(R /path/to/KrunkNative)
  *   set(E ${R}/client/src/html/engine)
  *   add_subdirectory(${R}/client/lib/lexbor lexbor)
  *   add_executable(test_runtime_sheet ${E}/tests/test_runtime_sheet.c ${E}/dom.c ${E}/css_sheet.c
@@ -44,13 +45,16 @@ static int g_pass;
 static const char *g_root = KN_REPO_ROOT;
 static Dom *g_dom;
 static CssSheet *g_ua;
-static CssSheet *g_sheets[8];
+static CssSheet *g_sheets[14];
 static int g_n_sheets;
 
-static const char *k_page_sheets[6] = {
-    "ui/css/main.css", "ui/css/flag.css", "ui/css/google-secular-one.css",
-    "ui/css/material-icons.css", "ui/css/krunknative.css", "ui/css/hud.css",
+/* ui/index.html's <link> sheets, in order (relative to ui/: the url() bases) */
+static const char *k_page_sheets[] = {
+    "css/main.css", "css/bundled/bundledStyles.min.css", "css/main_custom.css", "css/flag.css",
+    "css/material-icons.css", "css/material-icons-outlined.css", "css/material-symbols-outlined.css",
+    "css/google-play.css", "css/krunknative.css", "css/hud.css",
 };
+#define N_PAGE_SHEETS ((int)(sizeof(k_page_sheets) / sizeof(k_page_sheets[0])))
 static const char *const k_display[] = {"inline", "block", "none", "inline-block", "flex", "inline-flex", "grid",
                                         "inline-grid", "table", "inline-table", "table-row", "table-cell",
                                         "table-row-group", "list-item", "contents"};
@@ -143,13 +147,20 @@ int main(int argc, char **argv)
         printf("FAIL dom_load_html\n");
         return 1;
     }
-    free(html);
     g_ua = css_sheet_load(KN_UA_CSS, strlen(KN_UA_CSS), "ua.css");
-    for (int i = 0; i < 6; i++) {
-        char *css = read_file(k_page_sheets[i], &len);
-        g_sheets[g_n_sheets++] = css_sheet_load(css, len, k_page_sheets[i]);
+    for (int i = 0; i < N_PAGE_SHEETS; i++) {
+        char rel[256];
+        size_t clen;
+        snprintf(rel, sizeof(rel), "ui/%s", k_page_sheets[i]);
+        char *css = read_file(rel, &clen);
+        g_sheets[g_n_sheets++] = css_sheet_load(css, clen, k_page_sheets[i]);
         free(css);
     }
+    /* the page's <style> block (the ad rules) */
+    const char *st = strstr(html, "<style>");
+    const char *st_end = st ? strstr(st, "</style>") : NULL;
+    if (st_end) g_sheets[g_n_sheets++] = css_sheet_load(st + 7, (size_t)(st_end - st - 7), "index.html");
+    free(html);
     restyle();
 
     /* the console markup before its sheet: plain UA/author defaults */
