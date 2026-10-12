@@ -5,6 +5,17 @@
 #include <freetype/freetype.h>
 #include <pthread.h>
 
+#ifdef _WIN32
+// <windows.h> (minwindef.h) defines `near` and `far` as empty macros. In a translation unit
+// that included it first (net.c, ...), Camera's near/far members vanished ("declaration does
+// not declare anything"), so Camera and Client had a different layout there than everywhere
+// else: the offline client crashed in client_net_queue_packet (pthread_mutex_lock on a
+// garbage net_lock). A TU that includes <windows.h> after this header and then uses
+// camera.near fails to compile instead of miscompiling.
+#undef near
+#undef far
+#endif
+
 #define NAME texture_cache_map
 #define KEY_TY char*
 #define VAL_TY unsigned int

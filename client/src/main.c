@@ -17,6 +17,7 @@
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
 #include <debug_capture.h>
+#include <install_root.h> // startup chdir of packaged installs
 #include <map_post.h>
 #include <sky.h>
 #include <shadow.h>
@@ -401,6 +402,7 @@ int main(int argc, char **argv) {
         }
     }
     printf("KrunkNative client %s\n", kn_build_string());
+    install_root_chdir(); // packaged installs started from elsewhere: ui/ + assets/ (install_root.h)
     debug_capture_startup(); // KRUNKNATIVE_CAMERA/SCREENSHOT runs ignore stored settings (debug_capture.c)
 
     char *rand_memory = malloc(1);

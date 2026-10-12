@@ -1,0 +1,433 @@
+name: Client
+
+# Native client packages as public release assets, named like fastfetch's
+# (krunknative-client-<os>-<arch>[-polyfilled].<ext> + .sha256, tools/release/package-client.sh):
+#   push to main, dispatch       -> rolling prerelease `client-latest`, assets replaced
+#   push of a tag client-v*       -> release <tag>, kept
+#
+#   linux-amd64 linux-aarch64      .tar.gz .zip .deb .rpm  Ubuntu 22.04 build, distro OpenSSL 3 (glibc 2.35+)
+#   linux-*-polyfilled             .tar.gz .zip .deb .rpm  static deps + polyfill-glibc: glibc 2.17+
+#   windows-amd64                  .zip                    MinGW-w64, fully static
+#   macos-aarch64 macos-amd64      .tar.gz .zip            KrunkNative.app, ANGLE (Metal), static OpenSSL, macOS 11+
+# The packages hold the launcher (krunknative / KrunkNative.exe, the entry point), client_bin,
+# server_bin, ui/ and the git-tracked part of assets/ (shaders, maps, ...); the launcher downloads
+# the rest of the game content on the first start. Each Linux job also installs its packages in
+# old and new distro containers and runs --version (tools/release/test-client-linux.sh).
+# The release notes carry the same machine-readable line as the server releases (release.yml):
+#   <!-- kn-build {"describe":..,"commit":..,"commit_time":..,"build_time":..,"protocol":..} -->
+# client-latest only moves forward and is never marked "Latest" (tools/release/publish.sh).
+# CI never builds ANGLE (the pinned prebuilt of tools/angle/angle.lock) and caches the macOS OpenSSL.
+on:
+  push:
+    branches: [main]
+    tags: ["client-v*"]
+  workflow_dispatch:
+
+# One running + one pending run per ref: superseded pushes are skipped, a running build is never
+# cancelled (agents push faster than a build takes).
+concurrency:
+  group: client-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    name: Version
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/client-v') # CI runs on main only
+    runs-on: ubuntu-latest
+    outputs:
+      describe: ${{ steps.meta.outputs.describe }}
+      commit: ${{ steps.meta.outputs.commit }}
+      commit12: ${{ steps.meta.outputs.commit12 }}
+      commit_time: ${{ steps.meta.outputs.commit_time }}
+      build_time: ${{ steps.meta.outputs.build_time }}
+      protocol: ${{ steps.meta.outputs.protocol }}
+      cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
+      kn_build: ${{ steps.meta.outputs.kn_build }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git describe needs the tags
+
+      - name: Version metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          tools/release/version-meta.sh "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Release tag
+        id: tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag=client-latest; fi
+          echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
+
+  # Both Linux variants per arch on Ubuntu 22.04 (tools/release/build-client-linux.sh), natively
+  # on an x86_64 and an arm64 runner.
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
+      KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+      KN_COMMIT: ${{ needs.meta.outputs.commit }}
+      KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
+      KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+      KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
+      CHANNEL: ${{ needs.meta.outputs.tag == 'client-latest' && 'latest' || needs.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build (dynamic)
+        run: tools/release/build-client-linux.sh --deps dynamic "$RUNNER_TEMP/bin/dynamic"
+
+      - name: Build (polyfilled)
+        run: tools/release/build-client-linux.sh polyfilled "$RUNNER_TEMP/bin/polyfilled"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq --no-install-recommends rpm zip > /dev/null
+          tools/release/package-client.sh "linux-${{ matrix.arch }}" "$RUNNER_TEMP/bin/dynamic" "out/linux-${{ matrix.arch }}" --channel "$CHANNEL"
+          tools/release/package-client.sh "linux-${{ matrix.arch }}-polyfilled" "$RUNNER_TEMP/bin/polyfilled" "out/linux-${{ matrix.arch }}-polyfilled" --channel "$CHANNEL"
+          cat "$RUNNER_TEMP"/bin/*/build-info.txt
+          ls -la out/*
+
+      # Install each package the way users do, in old and new distros, and run --version (no
+      # game content in CI, so no render: tools/release/test-client-linux.sh with a content dir
+      # does that locally). The polyfilled build has to load on glibc 2.28.
+      - name: Distro compatibility
+        run: |
+          set -euo pipefail
+          a="${{ matrix.arch }}"
+          {
+            echo "debian:bullseye out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.tar.gz"
+            echo "ubuntu:20.04 out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.deb"
+            echo "almalinux:8 out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.rpm"
+            echo "fedora:latest out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.rpm"
+            echo "debian:trixie out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.zip"
+            echo "ubuntu:22.04 out/linux-$a/krunknative-client-linux-$a.deb"
+            echo "debian:trixie out/linux-$a/krunknative-client-linux-$a.deb"
+            echo "fedora:latest out/linux-$a/krunknative-client-linux-$a.rpm"
+          } > compat.txt
+          # xargs runs them 4 at a time; any failed install or --version fails the job
+          xargs -P 4 -L 1 tools/release/test-client-linux.sh < compat.txt | tee compat-results.txt
+          [ "$(grep -c 'version=ok' compat-results.txt)" = "$(wc -l < compat.txt)" ]
+          { echo "### Linux ${{ matrix.arch }} packages"; echo '```'; cat "$RUNNER_TEMP"/bin/*/build-info.txt compat-results.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: client-pkg-linux-${{ matrix.arch }}
+          path: out/linux-${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: client-pkg-linux-${{ matrix.arch }}-polyfilled
+          path: out/linux-${{ matrix.arch }}-polyfilled/*
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows amd64 (MinGW-w64)
+    needs: meta
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
+      KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+      KN_COMMIT: ${{ needs.meta.outputs.commit }}
+      KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
+      KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+      KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
+      CHANNEL: ${{ needs.meta.outputs.tag == 'client-latest' && 'latest' || needs.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup MSYS2 / MinGW-w64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            zip
+            unzip
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+
+      # -static: no libgcc/libstdc++/winpthread DLLs; FreeType without its optional DLLs.
+      # Workspace-relative paths: $RUNNER_TEMP is a D:\ path in the MSYS2 shell.
+      - name: Build
+        run: tools/release/build-client.sh windows win-bin
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          tools/release/package-client.sh windows-amd64 win-bin out --channel "$CHANNEL"
+          mkdir t && unzip -q out/krunknative-client-windows-amd64.zip -d t
+          ldd t/krunknative-client-windows-amd64/client.exe
+          t/krunknative-client-windows-amd64/client.exe --version
+          t/krunknative-client-windows-amd64/server.exe --version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: client-pkg-windows-amd64
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: macOS ${{ matrix.arch }} (ANGLE/Metal)
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            angle: macos-arm64
+            runner: macos-latest
+          # macos-15-intel is the supported x86_64 label until ~Aug 2027
+          - arch: amd64
+            angle: macos-x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      ANGLE_DIR: ${{ github.workspace }}/angle-dist
+      KN_OPENSSL_PREFIX: ${{ github.workspace }}/openssl-dist
+      KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
+      KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+      KN_COMMIT: ${{ needs.meta.outputs.commit }}
+      KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
+      KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+      KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
+      CHANNEL: ${{ needs.meta.outputs.tag == 'client-latest' && 'latest' || needs.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # A package without ANGLE would not render: no prebuilt for this arch fails the job.
+      - name: Fetch prebuilt ANGLE
+        run: |
+          set -euo pipefail
+          out="$(tools/angle/fetch-angle.sh "${{ matrix.angle }}" "$ANGLE_DIR")"
+          [ "$out" = available=true ] || { echo "::error::no prebuilt ANGLE for ${{ matrix.angle }} in tools/angle/angle.lock"; exit 1; }
+
+      # build-openssl.sh's static OpenSSL (macOS 11.0 target), ~5 min to build, cached per pin
+      - name: Cache OpenSSL
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.KN_OPENSSL_PREFIX }}
+          key: openssl-${{ hashFiles('tools/release/build-openssl.sh') }}-macos-${{ matrix.arch }}
+
+      # The runner images ship cmake, ninja and pkg-config: install only what is missing and
+      # never `brew update`/upgrade (build.yml).
+      - name: Build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_UPGRADE: 1
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+        run: |
+          set -euo pipefail
+          missing=()
+          for tool in cmake ninja pkg-config; do command -v "$tool" > /dev/null || missing+=("$tool"); done
+          if [ ${#missing[@]} -gt 0 ]; then brew install "${missing[@]}"; fi
+
+      - name: Build
+        run: tools/release/build-client.sh macos "$RUNNER_TEMP/bin"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          tools/release/package-client.sh "macos-${{ matrix.arch }}" "$RUNNER_TEMP/bin" out --channel "$CHANNEL"
+          # the packaged app runs from anywhere with its bundled dylibs only
+          mkdir t && tar -xzf "out/krunknative-client-macos-${{ matrix.arch }}.tar.gz" -C t
+          codesign --verify --deep --strict t/KrunkNative.app
+          (cd / && "$GITHUB_WORKSPACE/t/KrunkNative.app/Contents/MacOS/client_bin" --version)
+          otool -L t/KrunkNative.app/Contents/MacOS/client_bin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: client-pkg-macos-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # client-latest publishes once the Linux packages are in: a platform whose build failed is left
+  # out of this run (publish.sh removes its old assets: no mixed versions) and named in the notes.
+  # client-v* releases need every platform.
+  publish:
+    name: Publish ${{ needs.meta.outputs.tag }}
+    needs: [meta, linux, windows, macos]
+    if: >-
+      !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
+      (needs.meta.outputs.tag == 'client-latest' || (needs.windows.result == 'success' && needs.macos.result == 'success'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create/upload, moving the client-latest tag
+    concurrency:
+      group: publish-${{ needs.meta.outputs.tag }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.meta.outputs.tag }}
+      COMMIT: ${{ needs.meta.outputs.commit }}
+      COMMIT12: ${{ needs.meta.outputs.commit12 }}
+      COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
+      BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+      DESCRIBE: ${{ needs.meta.outputs.describe }}
+      PROTOCOL: ${{ needs.meta.outputs.protocol }}
+      KN_BUILD: ${{ needs.meta.outputs.kn_build }}
+      BRANCH: ${{ github.ref_name }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: client-pkg-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Check downloads
+        run: |
+          set -euo pipefail
+          ls -la release-assets
+          (cd release-assets && sha256sum -c ./*.sha256)
+
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          base="https://github.com/$GH_REPO/releases/download/$TAG"
+          row() { # row <label> <platform> <ext>...
+            local label="$1" plat="$2" links="" ext f
+            shift 2
+            for ext in "$@"; do
+              f="krunknative-client-$plat.$ext"
+              [ -f "release-assets/$f" ] && links+="[$ext]($base/$f) ([sha256]($base/$f.sha256)) "
+            done
+            if [ -n "$links" ]; then echo "| $label | $links|"
+            else echo "| $label | not built in this run ([build failed]($RUN_URL)) |"; fi
+          }
+          {
+            if [ "$TAG" = client-latest ]; then
+              echo "Rolling build of the KrunkNative game client, replaced on every push to \`main\`. Clients that run an older build or protocol than this are flagged outdated."
+            else
+              echo "KrunkNative game client $TAG."
+            fi
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | [\`$COMMIT12\`](https://github.com/$GH_REPO/commit/$COMMIT) ($BRANCH) |"
+            echo "| Version | \`$DESCRIBE\` |"
+            echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
+            echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
+            echo
+            echo "| Platform | Downloads |"
+            echo "|---|---|"
+            row "Linux x86_64 (any distro, glibc 2.17+)" linux-amd64-polyfilled tar.gz zip deb rpm
+            row "Linux x86_64 (glibc 2.35+, OpenSSL 3: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-amd64 tar.gz zip deb rpm
+            row "Linux aarch64 (any distro, glibc 2.17+)" linux-aarch64-polyfilled tar.gz zip deb rpm
+            row "Linux aarch64 (glibc 2.35+, OpenSSL 3)" linux-aarch64 tar.gz zip deb rpm
+            row "Windows 10+ x64" windows-amd64 zip
+            row "macOS 11+ Apple silicon" macos-aarch64 tar.gz zip
+            row "macOS 11+ Intel" macos-amd64 tar.gz zip
+            echo
+            echo "Unpack and run \`krunknative\` (Windows: \`KrunkNative.exe\`; macOS: open \`KrunkNative.app\`, unsigned: right-click > Open the first time), or install the .deb/.rpm and start KrunkNative from the applications menu. The first start downloads the game content (about 1.7 GB); the launcher keeps the client up to date. README.txt in each package has the details. Not sure which Linux package? Take the polyfilled one. Check a download with \`sha256sum -c <file>.sha256\`."
+            echo
+            echo "<!-- kn-build $KN_BUILD -->"
+          } > notes.md
+          cat notes.md
+
+      # tools/release/publish.sh: assets first (replaced in place), then the notes with the
+      # kn-build line, then the tag; client-latest only moves forward.
+      - name: Publish
+        run: |
+          set -euo pipefail
+          if [ "$TAG" = client-latest ]; then title="Native client (latest build)"; else title="Native client ${TAG#client-}"; fi
+          tools/release/publish.sh "$TAG" "$title" notes.md release-assets/*
+          echo "### [$TAG](https://github.com/$GH_REPO/releases/tag/$TAG): $COMMIT12, protocol $PROTOCOL" >> "$GITHUB_STEP_SUMMARY"
+
+  # Updates server (doc/backend.md 9.8): this run's update packages to kru, then `kn-updates publish`
+  # there writes https://assets.krunk.io/updates/client/latest.json. The game content is indexed on kru
+  # from its web asset tree; the assets/ files the packages ship are left out of it.
+  updates:
+    name: Upload to the updates server
+    needs: [meta, publish]
+    if: >-
+      !cancelled() && needs.publish.result == 'success' && github.ref == 'refs/heads/main' &&
+      vars.KN_UPDATES_UPLOAD == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: updates-upload
+      cancel-in-progress: false
+    env:
+      KN_BUILD: ${{ needs.meta.outputs.kn_build }}
+      COMMIT12: ${{ needs.meta.outputs.commit12 }}
+      KRU_HOST: ${{ secrets.KRU_HOST }}
+      KRU_PORT: ${{ secrets.KRU_PORT }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: client-pkg-*
+          path: client-pkg
+          merge-multiple: true
+
+      # krunknative-client-<plat>.{tar.gz,zip,deb,rpm} (+ .sha256): the .tar.gz (.zip on Windows) of each
+      # platform is its update package; every file is linked from the manifest on the GitHub release.
+      - name: Stage (update packages + build.json)
+        run: >-
+          python3 -I tools/release/kn-updates.py stage --kn-build "$KN_BUILD" --packages client-pkg
+          --download-base "https://github.com/$GITHUB_REPOSITORY/releases/download/client-latest"
+          --out "stage/$COMMIT12"
+
+      - name: SSH setup
+        env:
+          KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
+          KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru
+          chmod 600 ~/.ssh/id_kru
+          printf '%s\n' "$KRU_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # kn-updates publish: verifies the packages, indexes the content, writes the manifest last and
+      # only moves forward (an older commit than the published one is skipped).
+      - name: Upload and publish
+        run: |
+          set -euo pipefail
+          ssh_cmd="ssh -i $HOME/.ssh/id_kru -p ${KRU_PORT:-22} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          rsync -rt --chmod=D755,F644 -e "$ssh_cmd" "stage/$COMMIT12/" "root@$KRU_HOST:/opt/krunknative-updates/incoming/$COMMIT12/"
+          $ssh_cmd "root@$KRU_HOST" /usr/local/bin/kn-updates publish "/opt/krunknative-updates/incoming/$COMMIT12"
+          echo "### updates: published $COMMIT12 to https://assets.krunk.io/updates/client/latest.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup key
+        if: always()
+        run: rm -f ~/.ssh/id_kru

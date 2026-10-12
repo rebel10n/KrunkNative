@@ -1,7 +1,7 @@
 name: Build
 
-# Pushes to main also publish the native clients to the rolling prerelease
-# `client-latest` (job client-latest); the dedicated servers are release.yml's.
+# CI builds and checks only: the client packages (`client-latest`, `client-v*`) are client.yml's,
+# the dedicated servers release.yml's.
 on:
   push:
     branches: [main]
@@ -552,92 +552,3 @@ jobs:
 
       - name: shellcheck (CI and deploy scripts)
         run: shellcheck -S warning tools/release/*.sh tools/angle/*.sh deploy/ansible/build.sh
-
-  # Rolling prerelease `client-latest`: the linux/windows/macos artifacts above (binaries +
-  # ui/, no game content: assets/ is not in git) zipped per platform, on pushes to main
-  # and dispatches. Needs Linux; a platform whose build failed is left out of that run. Same rules as server-latest (tools/release/publish.sh): never "Latest",
-  # only moves forward.
-  client-latest:
-    name: Publish client-latest
-    needs: [meta, linux, windows, macos]
-    if: >-
-      !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
-      github.event_name != 'pull_request' &&
-      github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # gh release create/upload, moving the client-latest tag
-      actions: read # this run's artifacts
-    concurrency:
-      group: publish-client-latest
-      cancel-in-progress: false
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      COMMIT: ${{ needs.meta.outputs.commit }}
-      COMMIT12: ${{ needs.meta.outputs.commit12 }}
-      COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
-      BUILD_TIME: ${{ needs.meta.outputs.build_time }}
-      DESCRIBE: ${{ needs.meta.outputs.describe }}
-      PROTOCOL: ${{ needs.meta.outputs.protocol }}
-      KN_BUILD: ${{ needs.meta.outputs.kn_build }}
-      BRANCH: ${{ github.ref_name }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - uses: actions/checkout@v7
-
-      # one directory per artifact (download-artifact unpacks a lone match without one)
-      - name: Download client artifacts
-        run: |
-          set -euo pipefail
-          gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate --jq '.artifacts[].name' \
-            | grep -E '^KrunkNative-(linux|windows|macos)-' | while read -r name; do
-              gh run download "$GITHUB_RUN_ID" -n "$name" -D "client-artifacts/$name"
-            done
-          ls client-artifacts
-
-      # upload-artifact drops the executable bits: restore them before zipping
-      - name: Package
-        run: |
-          set -euo pipefail
-          mkdir -p client-pkg
-          base="https://github.com/$GH_REPO/releases/download/client-latest"
-          rows=""
-          for dir in client-artifacts/KrunkNative-*; do
-            [ -d "$dir" ] || continue
-            plat="$(basename "$dir" | sed 's/^KrunkNative-//; s/-mingw$//')"
-            name="krunknative-client-$plat"
-            find "$dir" -maxdepth 1 -type f \( -name client_bin -o -name server_bin \) -exec chmod 0755 {} +
-            {
-              echo "KrunkNative client ($plat), $DESCRIBE"
-              echo "Commit $COMMIT, built $BUILD_TIME, protocol $PROTOCOL"
-              echo
-              echo "Binaries and the ui/ menu only. The game content (assets/: models, textures,"
-              echo "sounds, fonts) is not in git or CI: put this next to an assets/ directory, e.g."
-              echo "the one from the v1.0.0 package (https://github.com/$GH_REPO/releases/tag/v1.0.0)."
-            } > "$dir/README.txt"
-            (cd "$dir" && zip -qr9 "$GITHUB_WORKSPACE/client-pkg/$name.zip" .)
-            (cd client-pkg && sha256sum "$name.zip" > "$name.zip.sha256")
-            rows+="| $plat | [$name.zip]($base/$name.zip) | [sha256]($base/$name.zip.sha256) |"$'\n'
-          done
-          ls -la client-pkg
-          {
-            echo "Rolling build of the KrunkNative native client, replaced on every push to \`main\`. Binaries and \`ui/\` only: the game content (\`assets/\`) comes from the [v1.0.0](https://github.com/$GH_REPO/releases/tag/v1.0.0) package."
-            echo
-            echo "| | |"
-            echo "|---|---|"
-            echo "| Commit | [\`$COMMIT12\`](https://github.com/$GH_REPO/commit/$COMMIT) ($BRANCH) |"
-            echo "| Version | \`$DESCRIBE\` |"
-            echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
-            echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
-            echo
-            echo "| Platform | Package | Checksum |"
-            echo "|---|---|---|"
-            printf '%s' "$rows"
-            echo
-            echo "<!-- kn-build $KN_BUILD -->"
-          } > notes.md
-          cat notes.md
-
-      - name: Publish
-        run: tools/release/publish.sh client-latest "Native client (latest build)" notes.md client-pkg/*

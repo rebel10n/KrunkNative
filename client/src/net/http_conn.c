@@ -107,12 +107,45 @@ static int send_all(const int fd, const void *data, size_t len) {
 static SSL_CTX *g_tls_ctx;
 static pthread_once_t g_tls_once = PTHREAD_ONCE_INIT;
 
+#ifdef KRUNKNATIVE_TLS_STATIC
+// Static OpenSSL (the polyfilled Linux and the macOS packages, tools/release/build-client-linux.sh,
+// build-openssl.sh): its OPENSSLDIR is the build host's, which the user's system may not have,
+// and the distro's openssl.cnf may name groups or providers this OpenSSL doesn't know
+// (SSL_CTX_new would fail). So no config file, and the CA bundle is the first of the usual
+// locations, unless SSL_CERT_FILE / SSL_CERT_DIR point somewhere (set_default_verify_paths
+// honours them).
+static void tls_load_ca_bundle(SSL_CTX *ctx) {
+    if (getenv("SSL_CERT_FILE") || getenv("SSL_CERT_DIR")) return;
+    static const char *const BUNDLES[] = {
+        "/etc/ssl/certs/ca-certificates.crt",                // Debian, Ubuntu, Arch, Gentoo, Alpine
+        "/etc/pki/tls/certs/ca-bundle.crt",                  // Fedora, RHEL, CentOS
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // Fedora, RHEL 7+
+        "/etc/ssl/ca-bundle.pem",                            // openSUSE
+        "/etc/ssl/cert.pem",                                 // macOS, Alpine, Void
+    };
+    for (size_t i = 0; i < sizeof(BUNDLES) / sizeof(BUNDLES[0]); i++) {
+        if (access(BUNDLES[i], R_OK) == 0 && SSL_CTX_load_verify_locations(ctx, BUNDLES[i], NULL) == 1) return;
+    }
+    ERR_clear_error();
+    if (SSL_CTX_load_verify_locations(ctx, NULL, "/etc/ssl/certs") != 1) {
+        ERR_clear_error();
+        fprintf(stderr, "[http] TLS: no CA bundle found (set SSL_CERT_FILE)\n");
+    }
+}
+#endif
+
 static void tls_init_once(void) {
+#ifdef KRUNKNATIVE_TLS_STATIC
+    OPENSSL_init_ssl(OPENSSL_INIT_NO_LOAD_CONFIG, NULL);
+#endif
     g_tls_ctx = SSL_CTX_new(TLS_client_method());
     if (!g_tls_ctx) return;
     SSL_CTX_set_min_proto_version(g_tls_ctx, TLS1_2_VERSION);
     SSL_CTX_set_verify(g_tls_ctx, SSL_VERIFY_PEER, NULL);
     if (SSL_CTX_set_default_verify_paths(g_tls_ctx) != 1) fprintf(stderr, "[http] TLS: no system CA store\n");
+#ifdef KRUNKNATIVE_TLS_STATIC
+    tls_load_ca_bundle(g_tls_ctx);
+#endif
 }
 #endif
 

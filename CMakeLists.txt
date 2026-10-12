@@ -332,9 +332,17 @@ else ()
     # Optional TLS for the backend client (client/src/net/backend_native.c: https:// auth service
     # and server finder, wss:// social socket). Without OpenSSL only http:// / ws:// work.
     find_package(OpenSSL COMPONENTS SSL Crypto QUIET)
+    # KRUNKNATIVE_TLS_STATIC (with -DOPENSSL_USE_STATIC_LIBS=TRUE: the polyfilled Linux and the
+    # macOS packages, tools/release/build-client-linux.sh / build-client.sh): the static libssl runs
+    # on other systems, so client_bin and kn_launcher (client/src/net/http_conn.c) neither load their
+    # openssl.cnf nor rely on the build host's OPENSSLDIR for the CA store.
+    option(KRUNKNATIVE_TLS_STATIC "Client TLS: static OpenSSL for portable packages (no system openssl.cnf, probe the CA bundle)" OFF)
     if (OpenSSL_FOUND AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(${CLIENT_BINARY} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
         target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+        if (KRUNKNATIVE_TLS_STATIC)
+            target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_TLS_STATIC=1)
+        endif ()
     else ()
         message(STATUS "Client: OpenSSL (libssl) not found; the backend client is http:// only")
     endif ()
@@ -406,6 +414,9 @@ else ()
     if (OpenSSL_FOUND AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(kn_launcher PRIVATE OpenSSL::SSL OpenSSL::Crypto)
         target_compile_definitions(kn_launcher PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+        if (KRUNKNATIVE_TLS_STATIC)
+            target_compile_definitions(kn_launcher PRIVATE KRUNKNATIVE_TLS_STATIC=1)
+        endif ()
     endif ()
     target_link_libraries(kn_launcher PRIVATE ${CMAKE_DL_LIBS})
 

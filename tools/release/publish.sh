@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publishes release assets for CI (release.yml: server-latest / server-v*, build.yml: client-latest).
+# Publishes release assets for CI (release.yml: server-latest / server-v*, client.yml: client-latest / client-v*).
 #
 # Usage: tools/release/publish.sh <tag> <title> <notes.md> <asset>...
 # Env:   GH_TOKEN, GH_REPO (owner/name), COMMIT (full sha), COMMIT_TIME (unix seconds)
