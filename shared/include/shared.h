@@ -1047,6 +1047,7 @@ typedef struct Player_t {
     unsigned char unlimited_ammo:1;
     unsigned char force_hide:1;
     unsigned char smite:1;      // /smite: every hit this player deals does 10000 damage (Krunker player.smite)
+    unsigned char notarget:1;   // /notarget (KrunkNative, Source's notarget): bots and AIs never pick this player as a target
     unsigned char interpolate:1;
     unsigned char force_pos:1;  // Krunker forcePos: the next remote state snaps instead of interpolating (spawn / first sighting)
     unsigned char inspecting:1;

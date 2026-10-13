@@ -1266,6 +1266,7 @@ static void register_commands(void) {
     register_server("god", ARGS(A_TOGGLE), "toggle god mode (self or target)");
     register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self or target)");
     register_server("smite", ARGS(A_TOGGLE), "toggle smite-on-hit (self or target)");
+    register_server("notarget", ARGS(A_TOGGLE), "toggle notarget: bots and AIs ignore you (self or target)");
     register_server("forcehide", ARGS(A_TOGGLE), "toggle forcehide (self or target)");
     register_server("unlimitedammo", ARGS(A_TOGGLE), "toggle unlimited ammo (self or target)");
     register_server("c", NO_ARGS, "show connected players and menu count");

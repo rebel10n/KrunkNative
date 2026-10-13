@@ -842,7 +842,7 @@ static AICandidate ai_find_target(Game *game, GameAI *self, const vec3 point, co
     const float range = self->vision;
     for (size_t i = 0; players && i < game->player_count; i++) {
         Player *p = game->players[i];
-        if (!p || !p->active) continue;
+        if (!p || !p->active || p->notarget) continue; // /notarget
         if (!furthest && ai_ignored(self, p->uid)) continue;
         const float distance = ai_d3d(point, p->position);
         if (!(distance <= range)) continue;
@@ -877,7 +877,7 @@ static int ai_target_position(Game *game, GameAI *ai, vec3 *out, float *crouch, 
     switch (ai->target.kind) {
         case AI_TARGET_PLAYER: {
             const Player *p = game_find_player(game, ai->target.id);
-            if (!p) return 0;
+            if (!p || p->notarget) return 0; // /notarget drops a current target too
             *out = p->position;
             *crouch = p->crouch_val;
             *is_player = 1;

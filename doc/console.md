@@ -97,6 +97,7 @@ always handled on the client.
 | game | text | dev | "Game command received: …" | ✔ |
 | god | [target] [on\|off] | cheat | godMode + refill; "God mode ON[ on X]" | ✔ (`Player.god_mode`, "h" sent); **offline** "God mode ON" |
 | smite | [target] [on\|off] | cheat | 10000 damage per hit | ✔ (`Player.smite`, applied in `player_change_health`); **offline** |
+| notarget | [target] [on\|off] | cheat | KrunkNative (Source's notarget): bots and AIs never target the player, and drop a current target; "Notarget ON[ on X]" | ✔ (`Player.notarget`, bots.c `bot_is_enemy`, ai.c `ai_find_target`); **offline** |
 | noclip | [target] [on\|off] | cheat | "noc" to the target | ✔ (`NET_CHEAT_NOCLIP` sets the client's `me->noclip`, chat "Noclip - Enabled"); **offline** |
 | kill | [target] | cheat | suicide / kills every match: "Killed N players + M AIs: …" / "Kill target 'x' not found." | ✔ online (players and AIs: name or sid, exact beats partial); **offline** "You killed yourself." / "Killed player X." |
 | forcehide | [target] [on\|off] | dev | "fh" to the target | ✔ (`NET_CHEAT_FORCE_HIDE`, chat "Hide - Enabled"); **offline** |

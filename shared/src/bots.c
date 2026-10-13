@@ -1155,7 +1155,7 @@ static int bot_probe(const Game *game, const Player *self, const float yaw) {
 
 // Enemy for this bot: alive, not itself, other team (team 0 = everyone), noBots for tfue.
 static int bot_is_enemy(const GameBot *bot, const Player *self, const Player *other) {
-    if (!other || other == self || !other->active) return 0;
+    if (!other || other == self || !other->active || other->notarget) return 0; // /notarget
     if (bot->type == BOT_TYPE_TFUE && !bot->config.target_bots && other->is_bot) return 0; // findNearestTo noBots
     if (!bot->config.target_team && self->team && self->team == other->team) return 0;
     return 1;
@@ -1193,7 +1193,7 @@ static BotProfile bot_profile(const float difficulty) {
 static Player *bot_target(Game *game, const GameBot *bot) {
     if (bot->target_uid < 0) return NULL;
     Player *t = game_find_player(game, bot->target_uid);
-    return t && t->active ? t : NULL;
+    return t && t->active && !t->notarget ? t : NULL; // /notarget drops a current target too
 }
 
 // Turn `value` toward `want` by at most rate * dt along the shortest arc.

@@ -808,6 +808,18 @@ static void cmd_smite(ChatCtx *c) {
     reply(c, "Smite %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
 }
 
+// notarget (KrunkNative, like Source's): bots and AIs ignore the player (bots.c bot_is_enemy,
+// ai.c ai_find_target) and drop them if already targeted. Shots still hit both ways.
+static void cmd_notarget(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_CHEAT)) return;
+    ToggleTarget t;
+    if (!toggle_target(c, "Notarget", &t)) return;
+    const int next = chat_parse_toggle(t.mode_arg, t.player->notarget);
+    t.player->notarget = (unsigned char) next;
+    char suffix[PLAYER_NAME_SIZE + 24];
+    reply(c, "Notarget %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
+}
+
 static void cmd_noclip(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_CHEAT)) return;
     ToggleTarget t;
@@ -1650,6 +1662,7 @@ static const ChatCommand COMMANDS[] = {
     {{"god", NULL, "[target] [on|off]", "toggle god mode (self or target)", CHAT_PERM_CHEAT}, cmd_god},
     {{"smite", NULL, "[target] [on|off]", "toggle smite-on-hit (self or target)", CHAT_PERM_CHEAT}, cmd_smite},
     {{"noclip", NULL, "[target] [on|off]", "toggle noclip (self or target)", CHAT_PERM_CHEAT}, cmd_noclip},
+    {{"notarget", NULL, "[target] [on|off]", "toggle notarget: bots and AIs ignore you (self or target)", CHAT_PERM_CHEAT}, cmd_notarget},
     {{"kill", NULL, "[target]", "kill yourself or every matching player", CHAT_PERM_CHEAT}, cmd_kill},
     {{"team", NULL, "<red|blue>", "switch teams", CHAT_PERM_ANY}, cmd_team},
     {{"teams", NULL, "", "list teams and players", CHAT_PERM_ANY}, cmd_teams},
