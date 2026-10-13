@@ -663,6 +663,23 @@ else ()
     target_link_libraries(qr_code_test PRIVATE cJSON)
     add_test(NAME qr_code_test COMMAND qr_code_test ${CMAKE_SOURCE_DIR})
 
+    # meshopt_test: the EXT_meshopt_compression decoder (client/lib/meshopt, client/src/gltf_meshopt.c)
+    # against the meshoptimizer npm decoder's goldens (client/tests/data/meshopt_golden.json)
+    add_executable(meshopt_test client/tests/meshopt_test.c client/src/gltf_meshopt.c)
+    target_include_directories(meshopt_test PRIVATE client/include)
+    target_link_libraries(meshopt_test PRIVATE cJSON m)
+    add_test(NAME meshopt_test COMMAND meshopt_test ${CMAKE_SOURCE_DIR})
+
+    # mod_pack_test: map resource packs (client/src/mod_pack.c, zip_read.c): the override applies on
+    # the pack's map and is gone after a map change (client/tests/data/mod_pack_test.zip). POSIX.
+    if (NOT WIN32)
+        add_executable(mod_pack_test client/tests/mod_pack_test.c client/src/mod_pack.c client/src/zip_read.c
+                       client/src/stb_image.c ${SHARED_HEADERS} ${SHARED_SOURCES})
+        target_include_directories(mod_pack_test PRIVATE client/include)
+        target_link_libraries(mod_pack_test PRIVATE cJSON m)
+        add_test(NAME mod_pack_test COMMAND mod_pack_test ${CMAKE_SOURCE_DIR})
+    endif ()
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 
@@ -737,6 +754,7 @@ else ()
     add_executable(gltf_test
         tools/gltf_test/gltf_test.c
         client/src/gltf.c
+        client/src/gltf_meshopt.c
         client/src/pets.c
         client/src/skin_fx.c
         client/src/cosmetics.c

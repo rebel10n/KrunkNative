@@ -3,8 +3,8 @@
 //
 // Q(): a picked or dropped file is
 //   *.zip  a mod pack: every textures/<key>.png goes to RENDER.updateTexture(key), every
-//          models/<key>.obj / .gltf / .glb to RENDER.updateMesh(key), then Z() (zip.js; here a small reader
-//          over stb_image's inflate),
+//          models/<key>.obj / .gltf / .glb to RENDER.updateMesh(key), then Z() (zip.js; here
+//          client/src/zip_read.c over stb_image's inflate),
 //   *.obj / *.gltf / *.glb  the model of the selected cosmetic (Load Custom <slot>: key
 //          <type dir><id>[_<tex>]) or of the current weapon ("weapons/<src>"); a GLTF / GLB
 //          replaces the animated model of a hasAnim item ("<key>.<fileExt>"); FBX is not
@@ -19,6 +19,7 @@
 #include <cosmetics.h>
 #include <html_ui.h>
 #include <png_write.h>
+#include <zip_read.h>
 #include <stb_image.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -209,10 +210,7 @@ static void rebuild_now(void *user) {
     vscene_rebuild_player();
 }
 
-// ---- zip (local headers; stored and deflated entries)
-
-static unsigned int le16(const unsigned char *p) { return (unsigned int) p[0] | (unsigned int) p[1] << 8; }
-static unsigned int le32(const unsigned char *p) { return le16(p) | le16(p + 2) << 16; }
+// ---- zip (client/src/zip_read.c)
 
 static int write_temp(const char *name, const unsigned char *data, const size_t length, char *out, const size_t n) {
     const char *base = strrchr(name, '/');
@@ -266,45 +264,14 @@ static void import_zip_entry(const char *name, const unsigned char *data, const 
     }
 }
 
+static int import_zip_cb(const char *name, const unsigned char *data, const size_t length, void *user) {
+    (void) user;
+    import_zip_entry(name, data, length);
+    return 1;
+}
+
 static int import_zip(const unsigned char *zip, const size_t length) {
-    size_t pos = 0;
-    int entries = 0;
-    while (pos + 30 <= length && le32(zip + pos) == 0x04034b50) {
-        const unsigned int flags = le16(zip + pos + 6), method = le16(zip + pos + 8);
-        size_t compressed = le32(zip + pos + 18), size = le32(zip + pos + 22);
-        const unsigned int name_length = le16(zip + pos + 26), extra = le16(zip + pos + 28);
-        if (pos + 30 + name_length + extra > length) break;
-
-        char name[256];
-        snprintf(name, sizeof(name), "%.*s", (int) name_length, (const char *) zip + pos + 30);
-        const size_t data_at = pos + 30 + name_length + extra;
-
-        if (flags & 8) {
-            // sizes in the data descriptor: take them from the central directory entry
-            for (size_t c = 0; c + 46 <= length; c++) {
-                if (le32(zip + c) == 0x02014b50 && le16(zip + c + 28) == name_length && !memcmp(zip + c + 46, name, name_length)) {
-                    compressed = le32(zip + c + 20);
-                    size = le32(zip + c + 24);
-                    break;
-                }
-            }
-        }
-        if (data_at + compressed > length) break;
-
-        if (name_length && name[name_length - 1] != '/') {
-            if (method == 0) {
-                import_zip_entry(name, zip + data_at, compressed);
-            } else if (method == 8) {
-                int out_length = 0;
-                char *out = stbi_zlib_decode_noheader_malloc((const char *) zip + data_at, (int) compressed, &out_length);
-                if (out && (size_t) out_length == size) import_zip_entry(name, (const unsigned char *) out, (size_t) out_length);
-                free(out);
-            }
-        }
-        entries++;
-        pos = data_at + compressed + ((flags & 8) ? (le32(zip + data_at + compressed) == 0x08074b50 ? 16 : 12) : 0);
-    }
-    return entries;
+    return zip_read_entries(zip, length, import_zip_cb, NULL);
 }
 
 // ---- Q(): one file

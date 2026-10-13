@@ -2,6 +2,7 @@
 #include <gl.h>
 #include <client.h>
 #include <gltf.h>
+#include <gltf_meshopt.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -555,7 +556,8 @@ static int node_in_scene(const cgltf_data *data, const cgltf_node *node) {
 
 static int extension_supported(const char *name) {
     static const char *const supported[] = {"KHR_mesh_quantization", "KHR_texture_transform", "KHR_materials_emissive_strength",
-                                            "KHR_materials_pbrSpecularGlossiness", "KHR_materials_unlit"};
+                                            "KHR_materials_pbrSpecularGlossiness", "KHR_materials_unlit",
+                                            "EXT_meshopt_compression"};
     for (size_t i = 0; i < sizeof(supported) / sizeof(supported[0]); i++)
         if (!strcmp(name, supported[i])) return 1;
     return 0;
@@ -607,16 +609,16 @@ GltfModel *gltf_model_load(const char *path) {
             return NULL;
         }
     }
-    for (size_t i = 0; i < data->buffer_views_count; i++) {
-        if (data->buffer_views[i].has_meshopt_compression) {
-            fprintf(stderr, "gltf: %s uses EXT_meshopt_compression, not supported\n", path);
-            cgltf_free(data);
-            return NULL;
-        }
-    }
     result = cgltf_load_buffers(&options, data, path);
     if (result != cgltf_result_success) {
         fprintf(stderr, "gltf: cannot load the buffers of %s (cgltf result %d)\n", path, (int) result);
+        cgltf_free(data);
+        return NULL;
+    }
+    // EXT_meshopt_compression (v7's AI / map .glb user assets): decode into the views' own data
+    char meshopt_error[128];
+    if (!gltf_meshopt_decode(data, meshopt_error, sizeof(meshopt_error))) {
+        fprintf(stderr, "gltf: %s: EXT_meshopt_compression: %s\n", path, meshopt_error);
         cgltf_free(data);
         return NULL;
     }
@@ -687,6 +689,12 @@ void gltf_model_restore(const char *path) {
         if (strcmp(m->path, path) != 0) continue;
         m->shadowed = m->is_override; // overrides out of the way for good, the original back
     }
+}
+
+void gltf_model_forget(const char *path) {
+    if (!path) return;
+    for (GltfModel *m = g_gltf_models; m; m = m->next)
+        if (!m->shadowed && !strcmp(m->path, path)) m->shadowed = 1;
 }
 
 int gltf_model_animated(const GltfModel *model) {
@@ -1086,6 +1094,14 @@ MeshTransform *gltf_instance_bone(GltfInstance *instance, const char *name) {
         }
     }
     return NULL;
+}
+
+size_t gltf_instance_node_count(const GltfInstance *instance) {
+    return instance && instance->model && instance->model->data ? instance->model->data->nodes_count : 0;
+}
+
+const MeshTransform *gltf_instance_node(const GltfInstance *instance, const size_t index) {
+    return index < gltf_instance_node_count(instance) ? &instance->nodes[index].transform : NULL;
 }
 
 int gltf_instance_clip_running(const GltfInstance *instance) {

@@ -14,8 +14,9 @@
 // re-uploaded per instance (the cosmetics are small), so BasicMaterial and the shadow pass need
 // no skinning shader. Normals are not used: basic.frag derives flat normals from the geometry.
 //
-// Not supported (the model loads without them, with a warning): EXT_meshopt_compression and
-// other required compression extensions (the model fails to load), EXT_texture_webp images,
+// EXT_meshopt_compression (v7's AI / map .glb user assets) is decoded at load
+// (client/src/gltf_meshopt.c). Not supported (the model loads without them, with a warning): other
+// required compression extensions (KHR_draco_mesh_compression: the model fails to load), EXT_texture_webp images,
 // non-triangle primitives, PBR metal/roughness/normal/occlusion maps (BasicMaterial is
 // Lambert/Phong like the rest of the scene), KHR_materials_* extensions. Env maps (skin `env`)
 // are a BasicMaterial feature still to come.
@@ -54,6 +55,9 @@ typedef struct GltfInstance {
 // NULL when the file is missing or cannot be used. Models stay cached for the process.
 GltfModel *gltf_model_load(const char *path);
 int gltf_model_animated(const GltfModel*); // has animations (clips)
+// The file behind `path` changed (a resource pack came or went, mod_pack.c): the next
+// gltf_model_load(path) parses it again; instances keep the model they were made from.
+void gltf_model_forget(const char *path);
 // The viewer's imports (v7 RENDER.updateMesh(key, data, "gltf" | "glb")): from now on
 // gltf_model_load(path) answers the model parsed from `source`; the model `path` had stays alive
 // for the instances that use it. 0 when `source` cannot be loaded (nothing changes).
@@ -76,6 +80,9 @@ void gltf_set_clock_override(double seconds); // < 0: back to glfwGetTime()
 // getBone: the transform of the first skin joint named `name` (SkeletonUtils.getBoneByName),
 // NULL when none. Writes to it last until the next sampled clip moves that node; skins follow it.
 MeshTransform *gltf_instance_bone(GltfInstance*, const char *name);
+// Every node's current transform (bones included), in the file's node order: tools/gltf_test.
+size_t gltf_instance_node_count(const GltfInstance*);
+const MeshTransform *gltf_instance_node(const GltfInstance*, size_t index);
 // playClip(name, reps): reps > 0 plays that clip alone `reps` times and clamps on its last frame;
 // reps 0 loops it (no restart when it already is the looping clip, and no effect while a reps > 0
 // clip is still playing: v7's isRunning guard). Unknown names: no change.

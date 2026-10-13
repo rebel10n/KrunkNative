@@ -939,6 +939,14 @@ void audio_stop(const char *name) {
     stop_matching(clip, 1, VOICE_2D);
 }
 
+void audio_reload(const char *name) {
+    if (!g_audio.ready) return;
+    const int clip = clip_find(name, 0);
+    if (clip < 0) return;
+    stop_matching(clip, 0, VOICE_2D); // its voices hold the decoded samples
+    clip_free(&g_audio.clips[clip]);  // UNLOADED: the next play reads the file again
+}
+
 void audio_stop_3d_loops(void) {
     if (!g_audio.ready) return;
     stop_matching(-1, 1, VOICE_3D_LOOP);

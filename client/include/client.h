@@ -871,6 +871,11 @@ void client_animate_object_texture(Object*, float);
 unsigned int load_texture(char*);
 GlyphCacheEntry *load_glyph(char);
 Geometry *load_obj_model(char*, int);
+// The file behind a cached texture / OBJ model changed (a resource pack came or went,
+// mod_pack.c): read it again (through file_redirect) into the same GL texture / Geometry, so
+// every material and mesh holding it follows. 0 when `path` is not cached or cannot be read.
+int texture_cache_reload(const char *path);
+int geometry_cache_reload(const char *path);
 // Fills geometry->bound_center/bound_radius from its local vertices (loaders.c); geometry
 // whose vertices move in the shader (liquid waves) must leave the radius at 0.
 void geometry_set_bounds(Geometry*, const vertex *vertices, size_t vertex_count);

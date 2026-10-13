@@ -103,6 +103,9 @@ void audio_play_3d_fade(const char *name, vec3 position, float range, float volu
 void audio_stop(const char *name);
 void audio_stop_3d_loops(void);
 void audio_stop_all(void);
+// The file of `name` changed (a resource pack came or went, mod_pack.c): its playing voices
+// stop and the next play reads and decodes the file again (v7 SOUND.updateSound).
+void audio_reload(const char *name);
 
 // Voice handles (KrunkScript GAME.SOUND sound objects, client/src/ks/ks_sound.c): one play
 // returns a handle (0 = not played) that later calls address; a finished one-shot or a stopped

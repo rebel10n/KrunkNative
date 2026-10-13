@@ -4,7 +4,9 @@
 //     the model loads, has meshes and clips, and its clips move its nodes over time;
 //   - pets.js follow AI: a pet moves toward its holder, slows down within 40 units, bobs, turns;
 //   - a v7 OBJ pet (pets/pet_0, Ghostie) loads with its material options (frames, glow);
-//   - the hue cycle (UTILS.hexFromHue) and the frames / pulse / rgb animations (skin_fx_tick).
+//   - the hue cycle (UTILS.hexFromHue) and the frames / pulse / rgb animations (skin_fx_tick);
+//   - v7's EXT_meshopt_compression AI / map models (user-assets/<id>/model.glb, gltf_meshopt.c):
+//     each loads with meshes, a sane size, and its clips (when it has any) move it.
 //   gltf_test [--headless]      (from the repo root; KRUNKNATIVE_HEADLESS=1 works too)
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -49,6 +51,11 @@ static double model_pose(GltfInstance *model) {
         mesh_update_transform_matrix(model->meshes[i]);
         for (int k = 0; k < 16; k++) sum += fabs((double) model->meshes[i]->transform_matrix[k]) * (double) (k + 1) * (double) (i + 1);
     }
+    for (size_t n = 0; n < gltf_instance_node_count(model); n++) { // bones: skinned meshes keep their own matrix
+        const MeshTransform *t = gltf_instance_node(model, n);
+        const float v[9] = {t->position.x, t->position.y, t->position.z, t->rotation.x, t->rotation.y, t->rotation.z, t->scale.x, t->scale.y, t->scale.z};
+        for (int k = 0; k < 9; k++) sum += fabs((double) v[k]) * (double) (k + 1) * (double) (n + 1) * 0.001;
+    }
     float weights[64];
     const int n = gltf_instance_morph_weights(model, weights, 64);
     for (int i = 0; i < n && i < 64; i++) sum += (double) weights[i] * 1000.0 * (double) (i + 1);
@@ -85,6 +92,50 @@ static void check_gltf_pet(const int store_index, const char *what) {
     const double pose2 = model_pose(pet->model);
     CHECK(fabs(pose1 - pose0) > 1e-6 || fabs(pose2 - pose0) > 1e-6, "%s: the clips move the model (%.6f %.6f %.6f)", what, pose0, pose1, pose2);
     pet_free(pet);
+}
+
+// gltfpack output (KHR_mesh_quantization + EXT_meshopt_compression): Mirror Image (50578, AI.js
+// kind 3), the Laboratory (50329-50331) and Tortuga (50572-50577) map AIs, 48931 and 52615
+static void check_meshopt_models(void) {
+    static const int ids[] = {48931, 50329, 50330, 50331, 50572, 50573, 50575, 50576, 50577, 50578, 52615};
+    int loaded = 0;
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        char path[256];
+        snprintf(path, sizeof(path), "%suser-assets/%d/model.glb", assets_path(), ids[i]);
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            printf("skip: %s (make assets-import-live)\n", path);
+            continue;
+        }
+        fclose(f);
+        GltfModel *model = gltf_model_load(path);
+        CHECK(model != NULL, "%s: loads (EXT_meshopt_compression decoded)", path);
+        if (!model) continue;
+        loaded++;
+        GltfInstance *instance = gltf_instance_create(model, 1.0f);
+        CHECK(instance && instance->mesh_count > 0, "%s: has meshes", path);
+        if (!instance) continue;
+        float radius = 0.0f;
+        for (size_t m = 0; m < instance->mesh_count; m++) {
+            const Geometry *g = instance->meshes[m]->geometry;
+            if (g && g->bound_radius > radius) radius = g->bound_radius;
+            CHECK(g && g->index_count > 0, "%s: mesh %zu has triangles", path, m);
+        }
+        // local space: KHR_mesh_quantization positions are integers the node scale brings down;
+        // skinned / morphed primitives are re-uploaded per frame and have no static bounds (0)
+        CHECK(radius == 0.0f || (radius > 0.01f && radius < 70000.0f), "%s: bounding radius %.3f", path, radius);
+        if (gltf_model_animated(model)) {
+            gltf_instance_update(instance, 0.0);
+            const double pose0 = model_pose(instance);
+            gltf_instance_update(instance, 0.37);
+            const double pose1 = model_pose(instance);
+            gltf_instance_update(instance, 0.91);
+            const double pose2 = model_pose(instance);
+            CHECK(fabs(pose1 - pose0) > 1e-6 || fabs(pose2 - pose0) > 1e-6, "%s: the clips move the model", path);
+        }
+        gltf_instance_fini(instance); // frees it
+    }
+    printf("meshopt models: %d loaded\n", loaded);
 }
 
 static void check_follow(void) {
@@ -186,6 +237,7 @@ int main(int argc, char **argv) {
     check_gltf_pet(2837, "Moonfeather back_103.gltf");
     check_follow();
     check_effects();
+    check_meshopt_models();
 
     glfwDestroyWindow(window);
     glfwTerminate();

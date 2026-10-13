@@ -1,4 +1,4 @@
-// player-viewer WP-E part 2a: the Krunker v7.1.4 minimap and death markers.
+// player-viewer WP-E part 2a: the Krunker v7.1.4 minimap, death markers and airdrop markers.
 //
 // Minimap (v7 src/libs/Minimap.js, game-overlay.js render): a 300 x minimapScale px canvas in
 // #miniMapOverlay. While playing (type 1) it is centred on the camera and turns with the view
@@ -31,7 +31,16 @@
 //   - v7 draws your own marker with img/death_0_1.png and other players' with img/death_2_1.png
 //     (game-overlay.js f1566). death_2_1.png is not in v7.1.4's public tree; it comes from
 //     Krunker's live asset host (tools/ui-import/fetch_live_assets.py, ui/img).
-// Both are elements of #inGameUI (below the HUD, scaled with #uiBase like the overlay canvas).
+//
+// Airdrop markers (game-overlay.js render, after f1566): over every landed (canClaim) airdrop
+// that the camera is not within 10 units of, img/streaks/package/<icon>.png at y + 13, sized
+// max(0.3, 1 - d / 600) * 70 overlay px wide (aspect kept), hue-rotated by the overlay's
+// rainbow (0.3 deg / ms) for animate packages. A trap shows the icon of the package it imitates
+// to everyone but its owner (the look zombies_render.c gives the crate). The icons are not in
+// v7.1.4's public tree; they come from Krunker's live asset host (ui/img). Difference: v7 draws
+// them at whatever canvas globalAlpha the previous marker left (an objective or death marker's
+// opacity setting); KrunkNative draws them opaque.
+// All are elements of #inGameUI (below the HUD, scaled with #uiBase like the overlay canvas).
 #include <hud_map.h>
 #include <cpu_canvas.h>
 #include <spectate.h>
@@ -40,6 +49,7 @@
 #include <html_dom.h>
 #include <map_catalog.h>
 #include <modes.h>
+#include <zombies.h>
 #include <cJSON.h>
 #include <stb_image.h>
 #include <math.h>
@@ -490,6 +500,20 @@ typedef struct {
 
 static DeathMarker g_dm[DM_MAX];
 static HtmlElem g_dm_holder;
+static HtmlElem g_ad_holder; // airdrop markers: drawn after the death markers, so above them
+
+// #knDeathMarkers and #knAirDropMarkers, first in #inGameUI (below the HUD)
+static int overlay_holders(void) {
+    if (g_dm_holder && g_ad_holder) return 1;
+    const HtmlElem host = html_dom_by_id("inGameUI");
+    if (!host) return 0;
+    html_dom_insert_html(host, HTML_INSERT_AFTER_BEGIN,
+        "<div id='knDeathMarkers' style='position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none'></div>"
+        "<div id='knAirDropMarkers' style='position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none'></div>");
+    g_dm_holder = html_dom_by_id("knDeathMarkers");
+    g_ad_holder = html_dom_by_id("knAirDropMarkers");
+    return g_dm_holder && g_ad_holder;
+}
 
 void hud_death_marker_add(const vec3 position, const int is_you) {
     const int display = (int) setting_num("deathMarkers", 0); // 0 all, 1 self only, 2 team only, 3 none
@@ -516,14 +540,7 @@ static void dm_hide(DeathMarker *m) {
 
 static HtmlElem dm_element(DeathMarker *m) {
     if (m->el) return m->el;
-    if (!g_dm_holder) {
-        const HtmlElem host = html_dom_by_id("inGameUI");
-        if (!host) return 0;
-        html_dom_insert_html(host, HTML_INSERT_AFTER_BEGIN,
-            "<div id='knDeathMarkers' style='position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none'></div>");
-        g_dm_holder = html_dom_by_id("knDeathMarkers");
-        if (!g_dm_holder) return 0;
-    }
+    if (!g_dm_holder && !overlay_holders()) return 0;
     m->el = html_dom_create("img", NULL);
     m->img_is_you = -1;
     html_dom_set_style(m->el, "position", "absolute");
@@ -587,6 +604,97 @@ static void dm_tick(Client *client, const double dt, const int drawn) {
     }
 }
 
+/* ------------------------------------------------------------ airdrop markers */
+
+typedef struct {
+    HtmlElem el;
+    int shown;
+    int icon;       // the img/streaks/package/<icon>.png the element shows, -1 none yet
+    char key[96];
+} AirDropMarker;
+
+static AirDropMarker g_ad[AIRDROP_MAX];
+static double g_ad_hue; // the overlay's rainbow.val (degrees)
+
+static void ad_hide(AirDropMarker *m) {
+    if (m->el && m->shown) html_dom_set_display(m->el, "none");
+    m->shown = 0;
+}
+
+static HtmlElem ad_element(AirDropMarker *m) {
+    if (m->el) return m->el;
+    if (!overlay_holders()) return 0;
+    m->el = html_dom_create("img", NULL);
+    m->icon = -1;
+    html_dom_set_style(m->el, "position", "absolute");
+    html_dom_set_style(m->el, "transform", "translate(-50%, -50%)");
+    html_dom_set_display(m->el, "none");
+    html_dom_append(g_ad_holder, m->el);
+    m->shown = 0;
+    m->key[0] = 0;
+    return m->el;
+}
+
+static void ad_tick(Client *client, const double dt, const int drawn) {
+    // rainbow: val += delta * 0.3, back to 0 at 360 (game-overlay.js, every overlay frame)
+    g_ad_hue += dt * 0.3;
+    if (g_ad_hue >= 360.0) g_ad_hue = 0.0;
+    const GameZombies *z = &client->game.zombies;
+    const vec3 cam = client->camera.position;
+    const int me = client->me ? client->me->uid : -1;
+    for (int i = 0; i < AIRDROP_MAX; i++) {
+        AirDropMarker *m = &g_ad[i];
+        const AirDrop *d = i < z->drop_count ? &z->drops[i] : NULL;
+        if (!drawn || !d || !d->active || !d->can_claim) {
+            ad_hide(m);
+            continue;
+        }
+        // pointInBox3D(camera, drop, 10): a drop has no width / height / length
+        const vec3 p = d->position;
+        const int near = fabsf(cam.x - p.x) <= DM_HIDE_DIST && fabsf(cam.y - p.y) <= DM_HIDE_DIST && fabsf(cam.z - p.z) <= DM_HIDE_DIST;
+        const float ty = p.y + 13.0f;
+        const float dx = cam.x - p.x, dy = cam.y - ty, dz = cam.z - p.z;
+        const double size = fmax(0.3, 1.0 - sqrt(dx * dx + dy * dy + dz * dz) / 600.0) * 70.0;
+        double sx = 0.0, sy = 0.0;
+        if (near || size < 1.0 || !hud_ui_project(client, p.x, ty, p.z, &sx, &sy)) {
+            ad_hide(m);
+            continue;
+        }
+        // the package the drop looks like (zombies_render.c): a trap shows what it imitates
+        const int look = d->imitate >= 0 && me != d->owner_uid ? d->imitate : d->index;
+        if (look < 0 || look >= AIRDROP_PACKAGE_COUNT) {
+            ad_hide(m);
+            continue;
+        }
+        const AirDropPackage *package = &g_airdrop_packages[look];
+        const HtmlElem el = ad_element(m);
+        if (!el) continue;
+        if (m->icon != package->icon) { // "/img/streaks/package/" + (icon || 0) + ".png"
+            m->icon = package->icon;
+            char src[64];
+            snprintf(src, sizeof(src), "./img/streaks/package/%d.png", package->icon);
+            html_dom_set_attr(el, "src", src);
+        }
+        char key[96];
+        snprintf(key, sizeof(key), "%.3f|%.3f|%.2f|%.1f", sx * 100.0, sy * 100.0, size, package->animate ? g_ad_hue : -1.0);
+        if (strcmp(key, m->key)) {
+            snprintf(m->key, sizeof(m->key), "%s", key);
+            char v[48];
+            snprintf(v, sizeof(v), "%.3f%%", sx * 100.0);
+            html_dom_set_style(el, "left", v);
+            snprintf(v, sizeof(v), "%.3f%%", sy * 100.0);
+            html_dom_set_style(el, "top", v);
+            snprintf(v, sizeof(v), "%.2fpx", size);
+            html_dom_set_style(el, "width", v);
+            if (package->animate) snprintf(v, sizeof(v), "hue-rotate(%.1fdeg)", g_ad_hue);
+            else snprintf(v, sizeof(v), "none");
+            html_dom_set_style(el, "filter", v);
+        }
+        if (!m->shown) html_dom_set_display(el, "block");
+        m->shown = 1;
+    }
+}
+
 /* ------------------------------------------------------------ frame */
 
 void hud_map_on_init(Client *client) {
@@ -632,4 +740,5 @@ void hud_map_tick(Client *client) {
     const int drawn = game->ready && client->in_game && !html_ui_is_menu_open() && client->net_end_seconds < 0 && !dead;
     if (enabled && drawn) mm_update(client, dt);
     dm_tick(client, dt, drawn);
+    ad_tick(client, dt, drawn);
 }

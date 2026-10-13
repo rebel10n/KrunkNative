@@ -56,6 +56,50 @@ unsigned int load_texture(char *path) {
     return texture_id;
 }
 
+int texture_cache_reload(const char *path) {
+    texture_cache_map_itr cached = vt_get(&g_texture_cache, (char *) path);
+    if (vt_is_end(cached)) return 0;
+    const unsigned int texture_id = cached.data->val;
+    ensure_asset_file(path);
+    stbi_set_flip_vertically_on_load_thread(1); // as load_texture
+    int width, height, _;
+    char swapped[1024];
+    unsigned char *pixels = stbi_load(file_redirect(path, swapped, sizeof(swapped)), &width, &height, &_, 4);
+    stbi_set_flip_vertically_on_load_thread(0);
+    if (!pixels) {
+        fprintf(stderr, "failed to reload texture %s: %s\n", path, stbi_failure_reason());
+        return 0;
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    g_active_texture = texture_id;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(pixels);
+    return 1;
+}
+
+int geometry_cache_reload(const char *path) {
+    geometry_cache_map_itr cached = vt_get(&g_geometry_cache, (char *) path);
+    if (vt_is_end(cached)) return 0;
+    char *key = cached.data->key;
+    Geometry *old = cached.data->val;
+    vt_erase_itr(&g_geometry_cache, cached);
+    Geometry *fresh = load_obj_model(key, 0); // parses the file again and caches it under a new key
+    if (!fresh) {
+        vt_insert(&g_geometry_cache, key, old); // unreadable: keep the model it had
+        return 0;
+    }
+    glDeleteVertexArrays(1, &old->vao);
+    glDeleteBuffers(1, &old->ebo);
+    *old = *fresh; // every mesh holding `old` now draws the new buffers
+    geometry_cache_map_itr again = vt_get(&g_geometry_cache, key);
+    if (!vt_is_end(again)) again.data->val = old;
+    free(fresh);
+    free(key);
+    return 1;
+}
+
 GlyphCacheEntry *load_glyph(const char c) {
     glyph_cache_map_itr cached = vt_get(&g_glyph_cache, c);
     if (!vt_is_end(cached)) return cached.data->val;
@@ -137,7 +181,8 @@ Geometry *load_obj_model(char *path, const int transform_y) {
     if (!geometry) return NULL;
 
     ensure_asset_file(path);
-    fastObjMesh *mesh = fast_obj_read(path);
+    char swapped[1024];
+    fastObjMesh *mesh = fast_obj_read(file_redirect(path, swapped, sizeof(swapped))); // resource pack / swapper
 
     if (!mesh) {
         fprintf(stderr, "failed to load model %s\n", path);

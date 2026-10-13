@@ -118,6 +118,8 @@ char *asset_url(const char *path) {
 // file is available, 0 otherwise (a missing file is reported once).
 int ensure_asset_file(const char *path) {
     if (!path || !*path) return 0;
+    char redirected[1024];
+    path = file_redirect(path, redirected, sizeof(redirected)); // a resource pack's file (mod_pack.c)
     if (!access(path, F_OK)) return 1;
     if (web_asset_known_missing(path)) return 0;
 
@@ -189,6 +191,8 @@ EM_JS(int, web_asset_prefetch, (const char *path_ptr), {
 
 int asset_prefetch(const char *path) {
     if (!path || !*path) return -1;
+    char redirected[1024];
+    path = file_redirect(path, redirected, sizeof(redirected)); // a resource pack's file (mod_pack.c)
     if (web_asset_known_missing(path)) return -1;
     return web_asset_prefetch(path);
 }
@@ -287,14 +291,21 @@ const char *assets_default_path() {
 #endif
 
 static FileRedirectFn g_file_redirect;
+static FileRedirectFn g_file_overlay;
 
 void file_set_redirect(const FileRedirectFn fn) {
     g_file_redirect = fn;
 }
 
+void file_set_overlay(const FileRedirectFn fn) {
+    g_file_overlay = fn;
+}
+
 const char *file_redirect(const char *path, char *buf, const size_t n) {
-    if (!g_file_redirect || !path || !buf || !n) return path;
-    return g_file_redirect(path, buf, n) ? buf : path;
+    if (!path || !buf || !n) return path;
+    if (g_file_overlay && g_file_overlay(path, buf, n)) return buf; // the map's resource pack
+    if (g_file_redirect && g_file_redirect(path, buf, n)) return buf; // the resource swapper
+    return path;
 }
 
 int read_file(const char *path, unsigned char **buf, size_t *length) {

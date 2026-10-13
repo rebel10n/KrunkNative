@@ -34,6 +34,8 @@
 #include <time.h>
 #include <stb_image.h>
 #include <audio.h>
+#include <gltf.h>     // gltf_model_forget (mod_pack.c hooks)
+#include <mod_pack.h> // map resource packs (mod_pack.c)
 #include <sound_events.h>
 #include <voice_chat.h> // voice chat: recorder interval, clips, playback (voice.c)
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
@@ -427,6 +429,9 @@ int main(int argc, char **argv) {
 
     vt_init(&g_geometry_cache);
     vt_init(&g_texture_cache);
+    // map resource packs: what is already loaded follows a pack coming or going (mod_pack.c)
+    const ModPackHooks mod_hooks = {texture_cache_reload, geometry_cache_reload, gltf_model_forget, audio_reload};
+    mod_pack_set_hooks(&mod_hooks);
     vt_init(&g_glyph_cache);
 
     char *game_font_path = concat(assets_path(), "css/fonts/font2.ttf");
@@ -790,6 +795,7 @@ int main(int argc, char **argv) {
     }
 
     local_game_stop(&INSTANCE);
+    mod_pack_shutdown(); // the extracted resource pack files
     ks_client_unload(&INSTANCE); // KrunkScript: script objects / DIVs / sounds
     ks_game_free(&INSTANCE.game);
     client_class_preview_fini(&INSTANCE);
@@ -1146,6 +1152,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     lobby_vote_reset();                 // WP-E: the end screen's vote cards go
     // INIT carries the Krunker mode id (modes.js index), not a rotation index
     game_init(&client->game, init->map_index, game_mode_index_for(&client->game, init->mode_index), 0);
+    mod_pack_map_loaded(client->game.map ? client->game.map->raw_data : NULL); // the map's modURL resource pack
     client_load_map(client);
     client->map_loaded = client->game.ready;
     // KrunkScript: the map's client script, reloaded every INIT, then start(); script packets

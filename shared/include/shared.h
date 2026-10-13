@@ -3225,6 +3225,10 @@ int read_file(const char*, unsigned char**, size_t*);
 // hook (the server, tools, tests): every path is read as given.
 typedef int (*FileRedirectFn)(const char *path, char *out, size_t n);
 void file_set_redirect(FileRedirectFn fn);
+// A second redirect consulted before that one: the loaded map's resource pack (the client's
+// client/src/mod_pack.c, v7 loadModPack). On the web ensure_asset_file() / asset_prefetch()
+// follow both, so a redirected file is not downloaded.
+void file_set_overlay(FileRedirectFn fn);
 const char *file_redirect(const char *path, char *buf, size_t n); // `buf` when redirected, else `path`
 int load_json_file(const char*, cJSON**);
 int parse_hex_color(const char*, vec4*);

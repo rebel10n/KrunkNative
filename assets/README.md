@@ -62,8 +62,11 @@ the zombie portal / perk bottle pickups, a few previews and `models/weapons/weap
 `ui/img` gets the rest (322 HUD / menu images, committed). Sources: `UTILS.assetsUrl` ->
 `https://assets.krunker.io/<path>`, `UTILS.userAssetsUrl` -> `https://user-assets.krunker.io/<path>`.
 The ~100 references neither host serves (e.g. `sound/weapon_18.mp3`, `land_0`, `ambient_10|13`,
-`limited_5..7`, the Hackusate weapon skin textures) 404 for v7 too. The zombie `.glb` models use
-`EXT_meshopt_compression`, which `client/src/gltf.c` does not decode yet (the v3.1.1 stand-ins stay).
+`limited_5..7`, the Hackusate weapon skin textures) 404 for v7 too. The AI / map `.glb` models
+(gltfpack output) use `EXT_meshopt_compression`, decoded at load by `client/src/gltf_meshopt.c`
+(`client/lib/meshopt`, checked against the meshoptimizer npm decoder by `meshopt_test`). A map's
+resource pack (`modURL`, e.g. zombie_high's `user-assets/md23677/mod.zip`) replaces textures,
+models and sounds while that map is loaded (`client/src/mod_pack.c`).
 
 ## Krunker v3.1.1 content (legacy)
 
