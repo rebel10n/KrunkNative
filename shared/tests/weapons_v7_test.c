@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 static int failures = 0;
 static int checks = 0;
@@ -160,11 +161,11 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
 }
 
 static void check_weapon(const int id, const cJSON *js) {
-    check_weapon_entry(g_weapons[id], id, js, 0);
+    check_weapon_entry(rules_weapon(id), id, js, 0);
 }
 
 static void check_class(const int id, const cJSON *js) {
-    const ClassConfig *c = &g_classes[id];
+    const ClassConfig *c = &rules_classes()[id];
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(js, "name"));
     CHECK(name && c->name && !strcmp(c->name, name), "class %d is %s, v7 %s", id, c->name, name ? name : "?");
     CHECK(c->loadout && c->loadout[0] == (int) cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(js, "loadout"), 0)->valuedouble, "%s loadout", c->name);
@@ -240,13 +241,13 @@ int main(void) {
               c->min_rec == (int) num(a, "minRec", 0), "%s values", c->name);
     }
     // Acog: zoom x1.35 on the AR (1.6 -> 2.16), yOff per weapon
-    CHECK(near(weapon_aim_zoom(g_weapons[1], &g_attachments[ATTACHMENT_ACOG]), 1.6 * 1.35) &&
-          near(weapon_aim_zoom(g_weapons[1], &g_attachments[0]), 1.6), "Acog zoom");
+    CHECK(near(weapon_aim_zoom(rules_weapon(1), &g_attachments[ATTACHMENT_ACOG]), 1.6 * 1.35) &&
+          near(weapon_aim_zoom(rules_weapon(1), &g_attachments[0]), 1.6), "Acog zoom");
     CHECK(near(weapon_attachment_y_offset(&g_attachments[ATTACHMENT_ACOG], 1), 0.01) &&
           near(weapon_attachment_y_offset(&g_attachments[ATTACHMENT_ACOG], 14), -0.01) &&
           near(weapon_attachment_y_offset(&g_attachments[ATTACHMENT_ACOG], 3), 0.0), "Acog yOff");
     // The MG lost forceAttach in v7: the player's sight applies
-    CHECK(weapon_attachment(g_weapons[6], ATTACHMENT_ACOG) == &g_attachments[ATTACHMENT_ACOG], "MG takes the Acog");
+    CHECK(weapon_attachment(rules_weapon(6), ATTACHMENT_ACOG) == &g_attachments[ATTACHMENT_ACOG], "MG takes the Acog");
 
     CHECK(cJSON_GetArraySize(scopes) == SCOPE_OVERLAY_COUNT, "scope overlay count");
     for (int i = 0; i < SCOPE_OVERLAY_COUNT && i < cJSON_GetArraySize(scopes); i++) {

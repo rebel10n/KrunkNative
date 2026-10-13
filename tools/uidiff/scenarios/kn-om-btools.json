@@ -6,7 +6,7 @@
   "background": "#000000",
   "state": {
     "menu": true,
-    "window": 54,
+    "window": 100,
     "connected": true,
     "ready": true,
     "inGame": true,
@@ -42,5 +42,5 @@
   },
   "frames": 30,
   "ref": "doc/ref/krunknative/kn-om-btools.png",
-  "note": "KrunkNative Object Manager (window 54; a KN baseline): the Tools pane with the btools' Move picked (the Tool Gun equipped), Snap 10 and the Physics Gun's Release set to Drop."
+  "note": "KrunkNative Object Manager (window 100; a KN baseline): the Tools pane with the btools' Move picked (the Tool Gun equipped), Snap 10 and the Physics Gun's Release set to Drop."
 }

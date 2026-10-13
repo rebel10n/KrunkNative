@@ -29,10 +29,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 // ---------------------------------------------------------------- Krunker tables
 
-// Weapons: g_weapons (name, preview src, secondary) is Krunker's weaponConfig in id order.
+// Weapons: rules_weapons() (name, preview src, secondary) is Krunker's weaponConfig in id order.
 // The rest is UI-only weaponConfig data of v7.1.4 (src/data/weapons.js): `attach != null`
 // (v7 has no forceAttach), `scope`, `charm` and the secondaries' `minRec` unlock level.
 typedef struct {
@@ -49,10 +50,10 @@ static const unsigned char WEAPON_MIN_REC[V7_WEAPON_COUNT] = {[10] = 15, [11] = 
 
 static const LoadoutWeapon *weapon_at(const int id) {
     static LoadoutWeapon w;
-    if (id < 0 || id >= WEAPON_COUNT || !g_weapons[id]) return NULL;
-    w.name = g_weapons[id]->name ? g_weapons[id]->name : "";
-    w.src = g_weapons[id]->src;
-    w.secondary = g_weapons[id]->secondary;
+    if (id < 0 || id >= WEAPON_COUNT || !rules_weapon(id)) return NULL;
+    w.name = rules_weapon(id)->name ? rules_weapon(id)->name : "";
+    w.src = rules_weapon(id)->src;
+    w.secondary = rules_weapon(id)->secondary;
     w.attach = id < V7_WEAPON_COUNT && WEAPON_ATTACH[id];
     w.scope = id < V7_WEAPON_COUNT && WEAPON_SCOPE[id];
     w.charm = id >= V7_WEAPON_COUNT || !WEAPON_NO_CHARM[id];
@@ -68,8 +69,8 @@ typedef struct {
 
 static LoadoutClass class_at(const int index) {
     const Client *client = menu_ui()->client;
-    const size_t count = client->game.class_count ? client->game.class_count : sizeof(g_classes) / sizeof(g_classes[0]);
-    const ClassConfig *classes = client->game.classes ? client->game.classes : g_classes;
+    const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
+    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
     const ClassConfig *c = index >= 0 && (size_t) index < count ? &classes[index] : &classes[0];
     LoadoutClass out = {c->loadout ? c->loadout[0] : 0, c->secondary};
     return out;

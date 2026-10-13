@@ -9,6 +9,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 void player_shoot(Player*); // shared/src/player.c
 void player_do_map_collisions(Player*, const Input*, float move_dir, int can_jump, float delta, int recon); // shared/src/player.c
@@ -257,10 +258,10 @@ static void test_projectiles(Game *game) {
     place(b, 0.0f, -60.0f);
 
     // Crossbow bolt (dmg 200, spd 0.68/ms, no gravity) at Bob's chest.
-    const Weapon *crossbow = g_weapons[13];
+    const Weapon *crossbow = rules_weapon(13);
     const ProjectileConfig *bolt = projectile_config_for(crossbow, 0);
     CHECK(bolt && bolt->damage == 200.0f, "crossbow projectile config");
-    CHECK(!projectile_config_for(g_weapons[1], 0), "the Assault Rifle fires no projectile");
+    CHECK(!projectile_config_for(rules_weapon(1), 0), "the Assault Rifle fires no projectile");
 
     g_sent_count = 0;
     const float eye = a->position.y + a->height - game_constants.camera_height;

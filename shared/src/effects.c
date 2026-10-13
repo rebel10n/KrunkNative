@@ -13,6 +13,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 // effects.js (timer in s; `mid` is the "am" medal icon).
 const EffectConfig g_effects[EFFECT_COUNT] = {
@@ -290,7 +291,7 @@ void player_give_perk(Player *player, const int perk) {
 
 static const Weapon *weapon_at(const Game *game, const int id) {
     const size_t count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
-    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : g_weapons;
+    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
 
@@ -586,7 +587,7 @@ static float game_hitbox_pad(const Game *game) {
 static const ClassConfig *player_class(const Player *player) {
     const Game *game = player->game;
     const size_t count = game->class_count ? game->class_count : CLASS_COUNT;
-    const ClassConfig *classes = game->classes ? game->classes : g_classes;
+    const ClassConfig *classes = game->classes ? game->classes : rules_classes();
     return player->class_index >= 0 && (size_t) player->class_index < count ? &classes[player->class_index] : NULL;
 }
 

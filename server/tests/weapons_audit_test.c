@@ -591,12 +591,14 @@ int main(int argc, char **argv) {
     join(&g_b);
     for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
         if (only >= 0 && (last >= 0 ? (id < only || id > last) : id != only)) continue;
+        if (!g_server->game.weapons[id]) continue; // the ids between the ruleset's table and WEAPON_ID_KN_BASE
         for (int path = 0; path < PATH_COUNT; path++) run_case(id, path);
     }
     // the table
     int broken = 0;
     for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
         if (only >= 0 && (last >= 0 ? (id < only || id > last) : id != only)) continue;
+        if (!g_server->game.weapons[id]) continue;
         for (int path = 0; path < PATH_COUNT; path++) {
             const Cell *c = &g_cells[id][path];
             printf("%-2d %-15s %-6s %-22s", id, g_server->game.weapons[id]->name, k_path_names[path], c->how);

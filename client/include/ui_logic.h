@@ -33,7 +33,7 @@
 #define MENU_CLASS_LOADOUT_MAX 4
 typedef struct {
     int index;
-    const char *name;    // borrowed from Game.classes / g_classes
+    const char *name;    // borrowed from Game.classes / rules_classes()
     const char *weapon;  // primary weapon name, "" when unknown
     int hp;
     char icon[48];       // textures/classes/icon_N.png
@@ -470,8 +470,11 @@ void hud_objectives_fini(void);                   // its canvas (GL)
 // END hud_objectives block
 
 // BEGIN object_manager_ui block (client/src/ui/object_manager_ui.c): the KrunkNative Object Manager
-// (F1 spawn menu, shared/include/object_manager.h). Not a v7 window: id 54 follows the Connect window.
-#define OBJECT_MANAGER_WINDOW 54
+// (F1 spawn menu, shared/include/object_manager.h). Not a Krunker window: KrunkNative's own windows
+// take ids from KN_WINDOW_BASE, above every Krunker page's windows[] (v10 uses 53 customize and
+// 54 title_selection; doc/v10/ui.md). Builds before the ruleset seam had it at 54.
+#define KN_WINDOW_BASE 100
+#define OBJECT_MANAGER_WINDOW (KN_WINDOW_BASE + 0)
 void object_manager_ui_toggle(Client*);          // the F1 bind: open (pointer freed) / close (pointer back)
 int  object_manager_ui_escape(void);             // Escape on the window: 1 = back to the game
 int  object_manager_ui_search_focused(void);     // its search box has the keyboard (F1 still toggles)

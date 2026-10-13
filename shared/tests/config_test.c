@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 static int g_failures;
 
@@ -286,7 +287,7 @@ static void test_class_overrides(const cJSON *map) {
     CHECK(!strcmp(game.classes[0].name, "Tank") && !class_overrides(&game.classes[0])->can_shoot, "cls name / canShoot");
     CHECK(p->loadout_size == 2, "secondary off: primary + knife (%d)", p->loadout_size);
     CHECK(p->weapon && p->weapon->ammo == 99 && fabsf(p->weapon->rate - 0.2f) < 1e-6f && !strcmp(p->weapon->name, "Hose"), "weps on the spawned AR");
-    CHECK(g_weapons[1]->ammo != 99 && strcmp(g_weapons[1]->name, "Hose"), "the base table is untouched");
+    CHECK(rules_weapon(1)->ammo != 99 && strcmp(rules_weapon(1)->name, "Hose"), "the base table is untouched");
     CHECK(class_overrides(&game.classes[1])->cam_type == 2 && game.classes[1].movement.scheme == 6 && near(game.classes[1].movement.air_accel, 0.03), "camera / movement scheme");
     CHECK(!game.classes[2].ext.set && class_overrides(&game.classes[2])->can_shoot && class_overrides(&game.classes[2])->ortho_f == 50.0f, "untouched classes read the v7 defaults");
     CHECK(game.effects && game.effects[0].max == 3 && g_effects[0].max != 3, "prks on the game's effect table");
@@ -294,7 +295,7 @@ static void test_class_overrides(const cJSON *map) {
     // a new apply without overrides is back on the base tables
     cJSON *plain = cJSON_Parse("{}");
     game_config_apply(&game, plain, GAME_CONFIG_CLAMP_HOSTED, GAME_HOST_CUSTOM);
-    CHECK(game.weapons[1] == g_weapons[1] && game.classes[0].health == g_classes[0].health && !game.classes[0].ext.set && !game.effects, "overrides reset");
+    CHECK(game.weapons[1] == rules_weapon(1) && game.classes[0].health == rules_classes()[0].health && !game.classes[0].ext.set && !game.effects, "overrides reset");
     cJSON_Delete(plain);
 
     // config.classes: classes[0] when the pick is not listed
@@ -320,7 +321,7 @@ static void test_map_config(cJSON *sandstorm) {
     Game pub;
     game_on(&pub, eterno);
     game_init(&pub, 0, 0, 1);
-    CHECK(pub.ready && pub.config.game_time == g_default_game_config.game_time && !pub.config.class_list_count && pub.classes[9].wall_jump == g_classes[9].wall_jump,
+    CHECK(pub.ready && pub.config.game_time == g_default_game_config.game_time && !pub.config.class_list_count && pub.classes[9].wall_jump == rules_classes()[9].wall_jump,
           "a public game ignores the map config");
     game_off(&pub);
 
@@ -348,7 +349,7 @@ static void test_map_config(cJSON *sandstorm) {
     CHECK(game.weapons[0]->ammo == 1 && fabsf(game.weapons[0]->reload_time - 5.0f) < 1e-6f && game.effects && game.effects[5].max == 10, "Krunk_Plaza weps / prks");
 
     game_init(&game, 2, 0, 1);
-    CHECK(game.ready && game.config.game_time == g_default_game_config.game_time && !game.config.class_list_count && game.classes[0].health == g_classes[0].health,
+    CHECK(game.ready && game.config.game_time == g_default_game_config.game_time && !game.config.class_list_count && game.classes[0].health == rules_classes()[0].health,
           "a map without config: back to the sandbox's own settings");
 
     // the host's request wins over the map preset
@@ -396,7 +397,7 @@ static void test_sync(const cJSON *map) {
     game_config_on_init(&client); // this INIT had one
     CHECK(client.config.game_time == 13, "kept for the INIT it came with");
     game_config_on_init(&client); // the next INIT had none
-    CHECK(client.config.game_time == g_default_game_config.game_time && client.weapons[1] == g_weapons[1] && !client.effects, "reset without GAME_CONFIG");
+    CHECK(client.config.game_time == g_default_game_config.game_time && client.weapons[1] == rules_weapon(1) && !client.effects, "reset without GAME_CONFIG");
     game_off(&server);
     game_off(&client);
 }

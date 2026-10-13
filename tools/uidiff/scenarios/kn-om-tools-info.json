@@ -6,7 +6,7 @@
   "background": "#000000",
   "state": {
     "menu": true,
-    "window": 54,
+    "window": 100,
     "connected": true,
     "ready": true,
     "inGame": true,
@@ -34,5 +34,5 @@
   },
   "frames": 30,
   "ref": "doc/ref/krunknative/kn-om-tools-info.png",
-  "note": "KrunkNative Object Manager (window 54; a KN baseline): the NPCs tab with the Tools pane, the Info tool picked (its hint) and the Tool Gun equipped."
+  "note": "KrunkNative Object Manager (window 100; a KN baseline): the NPCs tab with the Tools pane, the Info tool picked (its hint) and the Tool Gun equipped."
 }

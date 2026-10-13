@@ -169,7 +169,8 @@ def phase_new_server():
     bare, _, _ = connect([1, 3], ent_size=ENT_V7, name="Bare")
     new, new_init, new_size = connect([1, 3, 1], name="New")
     pump([old, bare, new], 2.0)
-    check("INIT announces 1.3.1", new_init is not None and new_init[1:3] == (3, 1), str(new_init))
+    # 1.4 (NET_PROTOCOL_MINOR_EXT, the v10 envelope) keeps every 1.3.1 size: patch 1 rides along
+    check("INIT announces 1.3.1 or later", new_init is not None and (new_init[1] > 3 or new_init[1:3] == (3, 1)) and new_init[2] >= 1, str(new_init))
     check("ENT size from INIT: V9 to a 1.3.1 server", new_size == ENT_V9, str(new_size))
 
     m_old, m_bare, m_new = me(old), me(bare), me(new)

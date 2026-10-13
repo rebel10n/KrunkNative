@@ -15,7 +15,7 @@
 //                            everyone after each change and after every SPAWN of such a player
 //   NET_PACKET_SPAWNED_OBJ   S->C NetSpawnedObjPacket [+ the map object record JSON]: a spawned
 //                            thing appears / goes; replayed to joiners (object_manager_send_state).
-//                            One id for every kind (OM_KIND_*): 254 stays spare.
+//                            One id for every kind (OM_KIND_*). 254 is NET_PACKET_EXT (net_ext.h).
 //
 // Console (shared/src/chat_commands.c, doc/console.md): `give <weapon|entity> [player]` runs
 // OM_ACTION_ADD_WEAPON / OM_ACTION_SPAWN_ENTITY for a player, `drop` OM_ACTION_DROP_HELD (or v7's
@@ -91,7 +91,7 @@ typedef enum {
     OM_KIND_PUDDLE,     // KrunkNative Piss: a puddle (GamePuddle.id) + NetPuddlePayload (shared/include/piss.h); never in the undo list
 } ObjectManagerKind;
 
-// ---- catalogue (both sides): the Entities and NPCs tabs (the Weapons tab lists g_weapons)
+// ---- catalogue (both sides): the Entities and NPCs tabs (the Weapons tab lists the ruleset's weapons)
 typedef enum {
     OM_ENTRY_AI = 0,      // a built-in AI kind (ai.c ai_builtin), data = its index
     OM_ENTRY_AI_TEMPLATE, // a Soul Sanctum AI (game_ai_resolve_template by name)

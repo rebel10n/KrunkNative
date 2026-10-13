@@ -12,6 +12,7 @@
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 // Krunker combat constants (v3.1.1 / v7.1.4 src/config.js), used by the spread update and
 // the hitscan/damage code below. Head / leg zones: shared/src/effects.c (player_hit_*).
@@ -106,10 +107,10 @@ void player_spawn(Player *player) {
     player->making_progress = 0;
     player->doing_interact = 0;
 
-    const size_t class_count = player->game->class_count ? player->game->class_count : sizeof(g_classes) / sizeof(g_classes[0]);
-    const ClassConfig *classes = player->game->classes ? player->game->classes : g_classes;
-    const size_t weapon_count = player->game->weapon_count ? player->game->weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
-    Weapon **weapons = player->game->weapons ? player->game->weapons : (Weapon**) g_weapons;
+    const size_t class_count = player->game->class_count ? player->game->class_count : rules_class_count();
+    const ClassConfig *classes = player->game->classes ? player->game->classes : rules_classes();
+    const size_t weapon_count = player->game->weapon_count ? player->game->weapon_count : rules_weapon_count();
+    Weapon **weapons = player->game->weapons ? player->game->weapons : (Weapon**) rules_weapons();
 
     // setClass (v3.1.1 src/data/players.js): mode overrides, then primary + optional secondary + knife.
     // WP-E (v7 player.js:649-664): config.classes first (classes[0] when not listed), and the
@@ -597,7 +598,7 @@ void player_reset_feel(Player *player) {
 static const ClassConfig *movement_class(const Player *player) {
     const Game *game = player->game;
     const size_t count = game->class_count ? game->class_count : CLASS_COUNT;
-    const ClassConfig *classes = game->classes ? game->classes : g_classes;
+    const ClassConfig *classes = game->classes ? game->classes : rules_classes();
     if (player->class_index < 0 || (size_t) player->class_index >= count) return NULL;
     return &classes[player->class_index];
 }
@@ -2389,8 +2390,8 @@ static int combat_weapon_index(const Player *player) {
 }
 
 static const Weapon *combat_weapon_at(const Game *game, const int index) {
-    const size_t count = game->weapon_count ? game->weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
-    const Weapon *const *weapons = game->weapons ? (const Weapon *const *) game->weapons : (const Weapon *const *) g_weapons;
+    const size_t count = game->weapon_count ? game->weapon_count : rules_weapon_count();
+    const Weapon *const *weapons = game->weapons ? (const Weapon *const *) game->weapons : (const Weapon *const *) rules_weapons();
     return index >= 0 && index < (int) count ? weapons[index] : NULL;
 }
 
@@ -2581,8 +2582,11 @@ static void combat_kill_progress(Game *game, Player *killer, const PlayerKillInf
     const int wep = info && info->weapon_id >= 0 ? weapon_index : -1;
     game_challenge(game, killer, "k", 1, wep, -1);
     // players.kill: a weapon kill adds the weapon to uniqueWeaponKills -> challenges.update("uwk", length)
-    if (wep >= 0 && wep < 64 && !(killer->unique_weapon_kills & (1ull << wep))) {
-        killer->unique_weapon_kills |= 1ull << wep;
+    // bit = the weapon id; KrunkNative's (WEAPON_ID_KN_BASE..) fold onto the top bits, above every
+    // Krunker table (v10: 31 weapons)
+    const int bit = wep >= WEAPON_ID_KN_BASE ? 63 - (wep - WEAPON_ID_KN_BASE) : wep;
+    if (wep >= 0 && bit >= 0 && bit < 64 && !(killer->unique_weapon_kills & (1ull << bit))) {
+        killer->unique_weapon_kills |= 1ull << bit;
         int unique = 0;
         for (uint64_t m = killer->unique_weapon_kills; m; m &= m - 1) unique++;
         game_challenge(game, killer, "uwk", unique, -1, -1);

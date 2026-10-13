@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 enum {
     F_SIT_OFF, F_SIT_OFF_Z, F_SCL_MLT, F_TRANS, F_ALPHA, F_FRAMES, F_FRAME_T, F_SIDE, F_GLOW, F_NO_EMIS,
@@ -527,7 +528,7 @@ static void on_dye_edit(void) {
 
 static void build_dye(Slot *slot, Record *rec) {
     const int class_index = g_viewer.e.class_index.num;
-    const ClassConfig *cls = &g_classes[class_index >= 0 && class_index < CLASS_COUNT ? class_index : 0];
+    const ClassConfig *cls = &rules_classes()[class_index >= 0 && class_index < CLASS_COUNT ? class_index : 0];
     // config.skinColors[skinColIndex] (the array position the dropdown's id names) || colors[0]
     const int skin_color = g_viewer.e.skin_col.num;
     const int skin = skin_color >= 0 && skin_color < g_viewer_skin_color_count ? g_viewer_skin_colors[skin_color].col : cls->colors[0];

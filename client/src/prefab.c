@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pcg_basic.h>
+#include <ruleset.h>
 
 // geos.js generateCube (v7): bottom vertices getColor(colr, (darken || 1) * 0.7) when the
 // object has "amb" (v3.1.1 used config.ambientVal 0.5); rungs and ladders take the same.
@@ -1969,7 +1970,7 @@ static Mesh *prefab_build_showcase(Object *object, const cJSON *raw_obj) {
     if (!mesh) return NULL;
     BasicMaterial *material = (BasicMaterial *) mesh->material;
 
-    const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= WEAPON_COUNT ? g_weapons[skin->weapon - 1] : NULL;
+    const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= WEAPON_COUNT ? rules_weapon(skin->weapon - 1) : NULL;
     float ms = prefab_json_float(cJSON_GetObjectItem(raw_obj, "ms"), 0.0f);
     ms = ms != 0.0f ? fminf(fmaxf(ms, 0.01f), 100.0f) : 1.0f;
     const float item_scale = skin->m_scl != 0.0f ? skin->m_scl : weapon && weapon->scale != 0.0f ? weapon->scale : 1.0f;
@@ -2062,8 +2063,8 @@ Mesh *prefab_weapon_mesh(const Weapon *weapon, const int no_texture) {
 // pose (y + pickupOff, rotateY / X / Z) is the caller's (map_post.c). NULL for an unknown id.
 // Weapon transparency / glow flags (seeThrough, transp) are not in KN's weapon table (documented).
 Mesh *prefab_pickup_mesh(const int weapon_id, const int no_texture, float *scale) {
-    if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !g_weapons[weapon_id]) return NULL;
-    const Weapon *weapon = g_weapons[weapon_id];
+    if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !rules_weapon(weapon_id)) return NULL;
+    const Weapon *weapon = rules_weapon(weapon_id);
     if (weapon->stream && !weapon->src) { // KrunkNative Piss: no model, the hose (genHose's mustard default colour) x2
         Mesh *hose = player_hose_mesh(weapon->stream, weapon->stream->color);
         if (hose && scale) *scale = 2.0f;

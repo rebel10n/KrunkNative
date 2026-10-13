@@ -1,0 +1,88 @@
+#include <math.h>
+#include <shared.h>
+
+static const float arm_scale = 1.2f;
+static const float arm_inset = -0.1f;
+static const float chest_width = 2.6f;
+
+static const float player_height = 11.0f;
+static const float leg_height = 4.2f;
+static const float head_scale = 2.0f;
+
+// Krunker v10.0.2 physics constants: the same values as v7.1.4 (doc/v10/gameplay.md section 1).
+// TODO(v10-gameplay): v10's differences (hurtboxScale, posed hitboxes) go in here.
+const GameConstants g_constants_v10 = {
+    .billboard_count = 6,
+    .mouse_sensitivity = 0.0024f,
+    .world_uv_scale = 60.0f,
+    .player_height = player_height,
+    .border_height = 500.0f, // v7.1.4 config.borderH (v3.1.1: 250)
+    .camera_height = 1.5f,
+    .climb_height = 3.0f,
+    .min_delta = 0.0001f,
+    .max_delta = 0.033f,
+    .jump_velocity = 0.072f,
+    .jump_aim_slow = 0.85f,
+    .jump_push = 0.1f,
+    .crouch_jump = 0.25f,
+    .crouch_speed = 7.0f,
+    .crouch_lean = (float) M_PI * -0.1f,
+    .player_speed = 0.42f,
+    .slipping_speed = 0.3f,
+    .air_speed = 0.047f,
+    .aim_slow = 0.55f,
+    .crouch_slow = 0.3f,
+    .player_slipping_jump_cooldown = 0.5f,
+    .terrain_slide_threshold = 1.9f,
+    .terrain_slip_decel = 0.99f,
+    .terrain_slide_decel = 0.9996f,
+    .terrain_decel = 0.99f,
+    .slide_decel = 0.999f,
+    .air_decel = 0.9996f,
+    .ground_decel = 0.99f,
+    .ladder_decel = 0.97f,
+    .crouch_distance = 3.0f,
+    .gravity = 0.15f,
+    .arm_scale = arm_scale,
+    .arm_inset = arm_inset,
+    .chest_width = chest_width,
+    .chest_scale = 1.3f,
+    .leg_scale = 1.3f,
+    .leg_height = leg_height,
+    .head_scale = head_scale,
+    .body_height = player_height - head_scale - leg_height,
+    .player_scale = (arm_scale * 2.0f + chest_width + arm_inset) * 0.5f,
+    .min_decel = 0.0001f,
+    .slide_time = 0.35f,
+    .player_slide_velocity_mlt = 1.2f,
+    .player_terrain_slide_velocity_mlt = 0.4f,
+    .idle_anim_speed = 1.5f,
+    .interpolation = 1.1f,
+    .lean_sensitivity = 0.05f,
+    .lean_max = 0.16f,
+    .lean_pull = 0.99f,
+    .lean_pull_z = 0.99f,
+    .lean_mlt_z = 0.03f,
+    .bob_pull_y = 0.985f,
+    .bob_pull_z = 0.99f,
+    .bob_mlt_y = 0.024f,
+    .bob_mlt_z = 0.02f,
+    .crouch_anim = 0.8f,
+    .collision_padding = 1.1f,
+    .booster_speed = 2.0f,
+    .ladder_speed = 35.0f,
+    .ladder_scale = 0.5f,
+    .ladder_width = 3.2f,
+    .death_y = -100.0f,
+    .recoil_mlt = 0.3f,
+    .spread_adjustment = 0.00063f,
+    .upper_arm_length = 2.7f,
+    .lower_arm_length = 2.7f,
+    .arm_offset = -0.8f,
+    .anim_mlt = 1.2f,
+    .aim_anim_mlt = 0.18f,
+    .crouch_anim_mlt = 0.5f,
+    .step_anim = 0.075f,
+    .step_pull = 0.995f,
+    .disk_spin = 0.2f,
+};

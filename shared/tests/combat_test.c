@@ -8,6 +8,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 void player_shoot(Player*);  // shared/src/player.c
 void player_melee(Player*);
@@ -137,7 +138,7 @@ static void test_zones(Game *game, Player *shooter, Player *target) {
     CHECK(player_hit_is_leg(target, 0.0f, 1.1f) && !player_hit_is_leg(target, 0.0f, 1.3f), "crouched legs below 4.2 - 3");
     target->crouch_val = 0.0f;
 
-    const Weapon *auto_pistol = g_weapons[16], *semi = g_weapons[7], *sniper = g_weapons[0];
+    const Weapon *auto_pistol = rules_weapon(16), *semi = rules_weapon(7), *sniper = rules_weapon(0);
     CHECK(fabsf(player_hit_damage(game, auto_pistol, 16.0f, 1, 0) - 17.6f) < 1e-3f, "Auto Pistol head 16 x 1.1 = 17.6 (KN no-headshot bug fixed; v3 noHeadShot gone)");
     CHECK(fabsf(player_hit_damage(game, semi, 35.0f, 0, 1) - 19.0015f) < 1e-3f, "Semi Auto leg 35 x 0.5429");
     CHECK(fabsf(player_hit_damage(game, semi, 35.0f, 1, 0) - 50.9985f) < 1e-3f, "Semi Auto head 35 x 1.4571");
@@ -264,7 +265,7 @@ static void test_charge(Game *game) {
     place(infiltrator, 0.0f, 300.0f);
     place(target, 0.0f, 250.0f);
     player_store_state(target);
-    CHECK(infiltrator->weapon == g_weapons[WEAPON_ID_CHARGE_RIFLE], "Infiltrator holds the Charge Rifle");
+    CHECK(infiltrator->weapon == rules_weapon(WEAPON_ID_CHARGE_RIFLE), "Infiltrator holds the Charge Rifle");
     aim_at(infiltrator, 0.0f, target->position.y + 6.0f, target->position.z);
     infiltrator->charge_time = 0.0f;
     infiltrator->swap_timer = 0.0f; // the spawn equip
@@ -381,7 +382,7 @@ static void test_streaks(Game *game) {
     CHECK(p->streaks_owned[STREAK_WAR_MACHINE] == 1 && p->real_kill_streak == 15, "15: War Machine");
 
     player_check_streak(p, 0);
-    CHECK(p->loadout[0] == WEAPON_ID_SLIMER && p->weapon == g_weapons[WEAPON_ID_SLIMER] && player_has_equipment(p), "Slimer in hand");
+    CHECK(p->loadout[0] == WEAPON_ID_SLIMER && p->weapon == rules_weapon(WEAPON_ID_SLIMER) && player_has_equipment(p), "Slimer in hand");
     player_check_streak(p, 1);
     CHECK(p->streaks_owned[STREAK_WAR_MACHINE] == 1, "no War Machine while holding equipment");
     while (p->ammo[p->loadout_index] > 0) { // deploy both pads
@@ -412,7 +413,7 @@ static void test_streaks(Game *game) {
     CHECK(p->real_kill_streak == before, "noStreaks: no counting");
     game->config.no_streaks = 0;
 
-    CHECK(g_weapons[8]->kill_score == 75, "Rocket kill score 75 (v7)");
+    CHECK(rules_weapon(8)->kill_score == 75, "Rocket kill score 75 (v7)");
 
     // "wstk": kills in a row per weapon; another weapon restarts at 1, the Nuke's kills don't count
     player_spawn(p);
@@ -431,12 +432,12 @@ static void test_streaks(Game *game) {
 static void test_upgrades(Game *game) {
     printf("upgradeWeapons (krumMachine slots)...\n");
     Player *p = add_player(game, 50, 0); // Triggerman: AR, Pistol, Knife
-    CHECK(p->weapon == g_weapons[1] && p->weapon->ammo == 28, "base AR");
+    CHECK(p->weapon == rules_weapon(1) && p->weapon->ammo == 28, "base AR");
     player_upgrade_weapon(p, 0);
     CHECK(p->weapon == weapon_upgraded(1) && !strcmp(p->weapon->name, "Zombie Assaulter") && p->ammo[0] == 35 &&
           p->weapon->damage == 28.0f && fabsf(p->weapon->rate - 0.09f) < 1e-6f, "slot 0 upgraded: Zombie Assaulter, 35 rounds");
     player_swap_weapon(p, 1, 0, 1, 0);
-    CHECK(p->weapon == g_weapons[2], "the Pistol slot stays base");
+    CHECK(p->weapon == rules_weapon(2), "the Pistol slot stays base");
     player_swap_weapon(p, 0, 0, 1, 0);
     CHECK(p->weapon == weapon_upgraded(1), "back to the upgraded slot");
     player_give_weapon(p, WEAPON_ID_SLIMER); // the loadout shifts: the upgrade follows the AR
@@ -445,7 +446,7 @@ static void test_upgrades(Game *game) {
     CHECK(p->loadout[0] == 1 && p->upgraded_slots == 1, "and back");
     CHECK(weapon_upgraded(13)->projectile_config.explode == 100.0f && !weapon_upgraded(13)->projectile_config.dont_pred, "explosive upgraded bolts");
     player_spawn(p);
-    CHECK(!p->upgraded_slots && p->weapon == g_weapons[1], "spawn drops the upgrades");
+    CHECK(!p->upgraded_slots && p->weapon == rules_weapon(1), "spawn drops the upgrades");
 }
 
 // map-D's v7 mode keys in the weapon / combat code: reloadMlt, kranked bonuses.reload /

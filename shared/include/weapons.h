@@ -283,14 +283,24 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 #define WEAPON_ID_MINIGUN 25
 #define WEAPON_ID_WAR_MACHINE 26
 #define WEAPON_ID_CHARGE_RIFLE 28
-// KrunkNative-only ids follow v7's table (doc/v7/decisions.md "Tool Gun"): in g_weapons and the
-// game's weapon table (Game.weapons), so loadouts, pickups and packets take them, but not in
-// WEAPON_COUNT, so v7's lists (loadout, market, host config, challenges) never show them.
-#define WEAPON_ID_TOOL_GUN 29
-#define WEAPON_ID_PISS 30 // KrunkNative Piss (doc/v7/decisions.md "Piss")
-#define WEAPON_ID_PHYS_GUN 31
-#define WEAPON_TABLE_COUNT 32
+// KrunkNative-only ids sit at WEAPON_ID_KN_BASE, above every Krunker ruleset's own table (v7.1.4
+// has 29 weapons, v10.0.2 31: its 29 Boulder and 30 Compressor took the ids KN used before;
+// doc/v10/version-toggle.md "Id clashes"). Ids between a ruleset's last Krunker weapon and the KN
+// base are NULL in its table. The KN weapons are in each ruleset's table (Game.weapons), so
+// loadouts, pickups and packets take them, but outside WEAPON_COUNT, so v7's lists (loadout,
+// market, host config, challenges) never show them (doc/v7/decisions.md "Tool Gun").
+#define WEAPON_ID_KN_BASE 64
+#define WEAPON_ID_TOOL_GUN (WEAPON_ID_KN_BASE + 0)
+#define WEAPON_ID_PISS (WEAPON_ID_KN_BASE + 1) // KrunkNative Piss (doc/v7/decisions.md "Piss")
+#define WEAPON_ID_PHYS_GUN (WEAPON_ID_KN_BASE + 2)
+#define WEAPON_TABLE_COUNT (WEAPON_ID_KN_BASE + 3)
+// The ids builds before the ruleset seam gave the KN weapons (29 Tool Gun, 30 Piss, 31 Physics
+// Gun, right after v7's table). weapon_id_from_legacy maps a stored or typed id of that era (host
+// config "weps" keys, `give <id>`) to today's, for rulesets whose Krunker table ends before 29.
+#define WEAPON_ID_LEGACY_KN_BASE 29
+int weapon_id_from_legacy(int id, int krunker_weapon_count);
 
-extern const Weapon *g_weapons[WEAPON_TABLE_COUNT];
+// The weapon tables live in the rulesets (shared/include/ruleset.h; shared/src/rules/<ver>/):
+// ruleset_current()->weapons, or Game.weapons with a game in scope.
 // v7.1.4 upgradeWeapons.js entry of weapon `id` (krumMachine upgrades), NULL out of range.
 const Weapon *weapon_upgraded(int id);

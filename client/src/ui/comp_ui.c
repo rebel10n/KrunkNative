@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 static int g_shown;     // #mMenuHolComp is up (f1904 took the comp branch)
 static char g_msg[NET_GAME_MESSAGE_SIZE];
@@ -41,7 +42,7 @@ static int class_offered(const Game *game, const int index) {
 
 static const ClassConfig *class_at(const Game *game, const int index) {
     const size_t count = game->class_count ? game->class_count : CLASS_COUNT;
-    const ClassConfig *classes = game->classes ? game->classes : g_classes;
+    const ClassConfig *classes = game->classes ? game->classes : rules_classes();
     return index >= 0 && (size_t) index < count ? &classes[index] : NULL;
 }
 

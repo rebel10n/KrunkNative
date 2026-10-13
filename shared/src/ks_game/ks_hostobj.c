@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define ARG(i) ((i) < argc ? args[(i)] : ks_undef())
 
@@ -220,7 +221,7 @@ static int weapon_count_of(const Game *g) { return g->weapon_count ? (int) g->we
 static const Weapon *weapon_at(const Game *g, const int i)
 {
     if (i < 0 || i >= weapon_count_of(g)) return NULL;
-    return g->weapons ? g->weapons[i] : g_weapons[i];
+    return g->weapons ? g->weapons[i] : rules_weapon(i);
 }
 static int is_primary(const Weapon *w) { return w && !w->secondary && !w->melee && !w->equipment; }
 
@@ -285,11 +286,11 @@ static void pl_class_index_set(KsScript *s, void *native, uint32_t id, KsValue v
     if (!on_server(r)) return;
     Game *game = p->game;
     const int index = parse_int0(s, v);
-    const int class_count = game->class_count ? (int) game->class_count : (int) (sizeof(g_classes) / sizeof(g_classes[0]));
+    const int class_count = game->class_count ? (int) game->class_count : (int) (rules_class_count());
     if (index < 0 || index >= class_count || index == p->class_index) return;
     p->class_index = index;
     // updateItems: the class's loadout (primary, its secondary, knife) and stats
-    const ClassConfig *cc = game->classes ? &game->classes[index] : &g_classes[index];
+    const ClassConfig *cc = game->classes ? &game->classes[index] : &rules_classes()[index];
     int ids[3], n = 0;
     const int primary = cc->loadout ? cc->loadout[0] : 1;
     if (weapon_at(game, primary)) ids[n++] = primary;

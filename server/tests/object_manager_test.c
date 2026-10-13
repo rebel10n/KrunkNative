@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 static int g_failures;
 static int g_checks;
@@ -234,7 +235,7 @@ static void test_loadout(TestClient *a, TestClient *b) {
     pump(2);
     CHECK(r.status == OM_STATUS_OK, "add Shotgun (status %u)", r.status);
     CHECK(p->loadout_size == base + 1 && p->loadout[base] == 5 && p->loadout_base == base, "Shotgun in slot %d (size %d)", base, p->loadout_size);
-    CHECK(p->ammo[base] == g_weapons[5]->ammo, "fresh ammo");
+    CHECK(p->ammo[base] == rules_weapon(5)->ammo, "fresh ammo");
     CHECK(count_type(b, NET_PACKET_LOADOUT_EXTRA) == 1, "the other v7 player hears it");
     CHECK(conn(a)->om_extra_count == 1 && conn(a)->om_extras[0] == 5, "the connection keeps it");
 
@@ -249,7 +250,7 @@ static void test_loadout(TestClient *a, TestClient *b) {
 
     // switching: slot pick, wheel through every slot (wraps both ways), a noSwap extra in hand
     input(a, base, 0);
-    CHECK(p->loadout_index == base && p->weapon == g_weapons[5], "slot pick -> the Shotgun (index %d)", p->loadout_index);
+    CHECK(p->loadout_index == base && p->weapon == rules_weapon(5), "slot pick -> the Shotgun (index %d)", p->loadout_index);
     r = request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_MINIGUN, 0.0f);
     pump(2);
     CHECK(p->loadout_size == base + 2 && p->loadout[base + 1] == WEAPON_ID_MINIGUN, "Minigun in slot %d", base + 1);
@@ -408,7 +409,7 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
     const ObjectManagerEntry *npcs = object_manager_entries(OM_TAB_NPCS, &npc_count);
     const ObjectManagerEntry *entities = object_manager_entries(OM_TAB_ENTITIES, &entity_count);
     CHECK(npcs && npc_count >= 12 && entities && entity_count >= 20, "catalogues (%d NPCs, %d entities)", npc_count, entity_count);
-    CHECK(object_manager_entries(OM_TAB_WEAPONS, NULL) == NULL, "the Weapons tab has no entries (g_weapons)");
+    CHECK(object_manager_entries(OM_TAB_WEAPONS, NULL) == NULL, "the Weapons tab has no entries (rules_weapons())");
 
     // every NPC kind spawns at the crosshair floor (the cap stops the rest)
     pump(200);
@@ -982,7 +983,7 @@ static void test_tool_gun(TestClient *a, TestClient *b) {
     p->god_mode = q->god_mode = 1;
     pump(200);
     CHECK(object_manager_tool_info(OM_TOOL_DELETER) && !strcmp(object_manager_tool_info(OM_TOOL_DELETER)->name, "Deleter"), "tools catalogue");
-    CHECK(g_weapons[WEAPON_ID_TOOL_GUN] == &g_tool_gun && g_tool_gun.kn_tool && !object_manager_weapon_listed(WEAPON_ID_TOOL_GUN) &&
+    CHECK(rules_weapon(WEAPON_ID_TOOL_GUN) == &g_tool_gun && g_tool_gun.kn_tool && !object_manager_weapon_listed(WEAPON_ID_TOOL_GUN) &&
           object_manager_weapon_allowed(WEAPON_ID_TOOL_GUN), "the Tool Gun is an extra slot, not a Weapons tile");
 
     // without the Tool Gun in hand: refused
@@ -1238,7 +1239,7 @@ static void test_edits(TestClient *a, TestClient *b) {
     clean_up(a);
     clean_up(b);
     pump(200);
-    CHECK(g_weapons[WEAPON_ID_PHYS_GUN] == &g_phys_gun && g_phys_gun.kn_physgun && object_manager_weapon_allowed(WEAPON_ID_PHYS_GUN) &&
+    CHECK(rules_weapon(WEAPON_ID_PHYS_GUN) == &g_phys_gun && g_phys_gun.kn_physgun && object_manager_weapon_allowed(WEAPON_ID_PHYS_GUN) &&
           !object_manager_weapon_listed(WEAPON_ID_PHYS_GUN), "the Physics Gun: an extra slot, not a Weapons tile");
     CHECK(object_manager_tool_info(OM_TOOL_MOVE)->handles && object_manager_tool_info(OM_TOOL_RESIZE)->handles, "Move / Resize are handle tools");
 

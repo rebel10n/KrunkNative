@@ -1,5 +1,6 @@
 #include <string.h>
 #include <weapons.h>
+#include <ruleset.h>
 
 // Krunker v7.1.4 src/data/upgradeWeapons.js: a second 29-entry table indexed like weapons.js
 // (`upgraded: true`), used for a loadout slot a krumMachine upgraded (player.upgrades[slot]).
@@ -24,7 +25,7 @@ static void burst(Weapon *w, const unsigned int count, const float rate) {
 
 static void build(void) {
     for (int i = 0; i < WEAPON_COUNT; i++) {
-        g_upgraded[i] = *g_weapons[i];
+        g_upgraded[i] = *rules_weapon(i);
         Weapon *w = &g_upgraded[i];
         w->sound = "weapon_upgraded"; // every upgraded weapon shares one shot sound
         w->min_rec = 0;

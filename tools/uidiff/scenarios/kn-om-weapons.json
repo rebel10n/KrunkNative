@@ -6,7 +6,7 @@
   "background": "#000000",
   "state": {
     "menu": true,
-    "window": 54,
+    "window": 100,
     "connected": true,
     "ready": true,
     "inGame": true,
@@ -45,5 +45,5 @@
   },
   "frames": 30,
   "ref": "doc/ref/krunknative/kn-om-weapons.png",
-  "note": "KrunkNative Object Manager (F1, window 54; no Krunker reference: the ref is a KN baseline): the Weapons tab in game after three extra loadout weapons were added through the offline sandbox server (owned marks, the status line, Clear Extras 3/24)."
+  "note": "KrunkNative Object Manager (F1, window 100; no Krunker reference: the ref is a KN baseline): the Weapons tab in game after three extra loadout weapons were added through the offline sandbox server (owned marks, the status line, Clear Extras 3/24)."
 }

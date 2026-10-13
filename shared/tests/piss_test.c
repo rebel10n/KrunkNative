@@ -14,6 +14,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 static int g_failures, g_checks;
 
@@ -97,7 +98,7 @@ static int hold(Player *player, const int frames, const int shoot) {
 
 // where the arc from the hose meets y 0 (the floor's top)
 static vec3 floor_landing(const Player *p, const float pitch) {
-    const WeaponStream *s = g_weapons[WEAPON_ID_PISS]->stream;
+    const WeaponStream *s = rules_weapon(WEAPON_ID_PISS)->stream;
     const vec3 src = piss_stream_source(p, s, pitch, 0.0f);
     const vec3 v = {0.0f, sinf(pitch) * s->speed, -cosf(pitch) * s->speed};
     const float a = 0.5f * s->gravity, b = -v.y, c = -src.y;
@@ -119,15 +120,15 @@ static const GamePuddle *puddle_of(const Game *game, const int owner) {
 
 static void test_weapon(void) {
     printf("Weapon table: the Piss after v7's weapons...\n");
-    const Weapon *w = g_weapons[WEAPON_ID_PISS];
+    const Weapon *w = rules_weapon(WEAPON_ID_PISS);
     CHECK(WEAPON_ID_PISS >= WEAPON_COUNT && WEAPON_ID_PISS < WEAPON_TABLE_COUNT, "a KrunkNative id after v7's %d", WEAPON_COUNT);
-    CHECK(w && !strcmp(w->name, "Piss") && w->stream, "g_weapons[%d] is the Piss with a stream", WEAPON_ID_PISS);
+    CHECK(w && !strcmp(w->name, "Piss") && w->stream, "rules_weapon(%d) is the Piss with a stream", WEAPON_ID_PISS);
     CHECK(w && fabsf(w->rate - 0.055f) < 1e-6f && w->ammo == 999 && fabsf(w->damage - 4.0f) < 1e-6f, "rate 55 ms, 999 rounds, 4 a hit");
     CHECK(w && w->stream->puddle_dps == 18.0f && w->stream->puddle_tick == 250.0f && w->stream->puddle_life == 5000.0f &&
           w->stream->puddle_radius == 3.2f && w->stream->puddles_max == 64, "puddles: 18 dps / 250 ms, 5 s, radius 3.2, 64 a game");
     CHECK(object_manager_weapon_listed(WEAPON_ID_PISS), "an Object Manager Weapons tile");
     int in_loadout = 0;
-    for (int c = 0; c < CLASS_COUNT; c++) in_loadout |= g_classes[c].loadout && g_classes[c].loadout[0] == WEAPON_ID_PISS;
+    for (int c = 0; c < CLASS_COUNT; c++) in_loadout |= rules_classes()[c].loadout && rules_classes()[c].loadout[0] == WEAPON_ID_PISS;
     CHECK(!in_loadout, "in no class loadout");
 }
 
@@ -302,7 +303,7 @@ int main(void) {
     Player *target = add_player(&game, 2);
     Player *third = add_player(&game, 3);
     give_piss(p);
-    CHECK(p->weapon == g_weapons[WEAPON_ID_PISS], "the extra slot holds the Piss");
+    CHECK(p->weapon == rules_weapon(WEAPON_ID_PISS), "the extra slot holds the Piss");
 
     test_weapon();
     test_stream_hit(&game, p, target);

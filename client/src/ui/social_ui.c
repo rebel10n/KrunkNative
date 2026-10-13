@@ -41,6 +41,7 @@
 #endif
 
 #include "../viewer/viewer_store.h"
+#include <ruleset.h>
 
 #define HUB_KEY_MAX 128
 #define MARKET_MIN_LVL 15       // config.marketMinLVl (v7.1.4)
@@ -1511,8 +1512,8 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     sb_appendf(&sb, "<div class='pSt' title='Amount of users banned from calls you made to KPD' style='padding-left: 8px;padding-right: 8px;width: 124px;'>Bans from calls<strong>%s</strong></div>", v);
 #undef PST
     sb_append(&sb, "</div><div class='statTabB3 hide'>");
-    for (size_t c = 0; c < sizeof(g_classes) / sizeof(g_classes[0]); c++) {
-        const ClassConfig *cc = &g_classes[c];
+    for (size_t c = 0; c < rules_class_count(); c++) {
+        const ClassConfig *cc = &rules_classes()[c];
         if (!cc->name || !cc->name[0]) continue;
         char key[16];
         snprintf(key, sizeof(key), "c%zu", c);
@@ -1523,7 +1524,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         const double clo = lvl > 1 ? pow(lvl / 0.03, 2) : 0, chi = pow((lvl + 1) / 0.03, 2);
         lvl = lvl + 1 > 1 ? lvl + 1 : 1;
         const int w = cc->loadout ? cc->loadout[0] : -1;
-        const char *weapon = w >= 0 && w < WEAPON_COUNT && g_weapons[w] && g_weapons[w]->name ? g_weapons[w]->name : "";
+        const char *weapon = w >= 0 && w < WEAPON_COUNT && rules_weapon(w) && rules_weapon(w)->name ? rules_weapon(w)->name : "";
         sb_appendf(&sb, "<div class='classCard'><img class='classImg' src='./textures/classes/icon_%zu.png'/><div class='className'>%s</div><div class='classWeap'>%s</div><div class='classXPBar'><div class='clsXPBarC' style='width:%d%%'></div><div class='clsXPBarV'>%lld / %lld</div></div><div class='classLvl'>Lvl %d</div></div>",
                    c, cc->name, weapon, prog, (long long) (xp - clo), (long long) (chi - clo), lvl);
     }
@@ -2070,7 +2071,7 @@ static const char *skin_type_label(const ViewerSkin *s) {
         case 5: return "Dye Item";
         case 6: return "Waist Item";
         case 7: return "Face Item";
-        default: return s->weapon >= 1 && s->weapon <= WEAPON_COUNT && g_weapons[s->weapon - 1] ? g_weapons[s->weapon - 1]->name : "";
+        default: return s->weapon >= 1 && s->weapon <= WEAPON_COUNT && rules_weapon(s->weapon - 1) ? rules_weapon(s->weapon - 1)->name : "";
     }
 }
 
@@ -2789,7 +2790,7 @@ static void items_search(const char *text) {
         const ViewerSkin *sk = &g_viewer_skins[i];
         int hit = !text || !*text;
         if (!hit && sk->name && contains_ci_str(sk->name, text)) hit = 1;
-        if (!hit && sk->weapon >= 1 && sk->weapon <= WEAPON_COUNT && g_weapons[sk->weapon - 1] && contains_ci_str(g_weapons[sk->weapon - 1]->name, text)) hit = 1;
+        if (!hit && sk->weapon >= 1 && sk->weapon <= WEAPON_COUNT && rules_weapon(sk->weapon - 1) && contains_ci_str(rules_weapon(sk->weapon - 1)->name, text)) hit = 1;
         if (!hit && sk->creator && contains_ci_str(sk->creator, text)) hit = 1;
         if (sk->flags & VS_BLOCKED) hit = 0;
         if (hit) g_items.list[g_items.count++] = i;
@@ -2820,7 +2821,7 @@ static void items_filter_change(const HtmlElem sel) {
     } else if (!strcmp(id, "itemWeapon")) {
         if (!strcmp(text, "All")) items_filter("weapon", "all");
         for (int i = 0; i < WEAPON_COUNT; i++) {
-            if (g_weapons[i] && g_weapons[i]->name && !strcmp(g_weapons[i]->name, text)) {
+            if (rules_weapon(i) && rules_weapon(i)->name && !strcmp(rules_weapon(i)->name, text)) {
                 char v[8];
                 snprintf(v, sizeof(v), "%d", i + 1);
                 items_filter("weapon", v);
@@ -2855,8 +2856,8 @@ static void items_page(const char *a, const char *k) {
     for (int i = 0; i < g_viewer_rarity_count; i++) sb_appendf(&sb, "<option onclick='itemFilter(`rarity`,%d)'>%s</option>", i, g_viewer_rarities[i].name);
     sb_append(&sb, "</select><select id='itemWeapon' onchange='itemFilterChange(this)'><option disabled selected>Weapon</option><option onclick='itemFilter(`weapon`,`all`)'>All</option>");
     for (int i = 0; i < WEAPON_COUNT; i++) {
-        if (!g_weapons[i] || g_weapons[i]->melee || g_weapons[i]->equipment) continue;
-        sb_appendf(&sb, "<option onclick='itemFilter(`weapon`,%d)'>%s</option>", i + 1, g_weapons[i]->name);
+        if (!rules_weapon(i) || rules_weapon(i)->melee || rules_weapon(i)->equipment) continue;
+        sb_appendf(&sb, "<option onclick='itemFilter(`weapon`,%d)'>%s</option>", i + 1, rules_weapon(i)->name);
     }
     sb_append(&sb, "</select><select id='itemCosm' onchange='itemFilterChange(this)'><option disabled selected>Cosmetics</option><option onclick='itemFilter(`type`,`all`)'>All</option>");
     for (int i = 1; i < g_viewer_type_count; i++) {
@@ -3012,7 +3013,7 @@ static void inventory_count(const int uid, const int cnt) {
 // filterPopup / sortPopup (v7: genericPopup(..., "filterPop" | "sortPop"); the panel's state
 // lives on in g_filter_state between popups, as v7 keeps the popup's innerHTML)
 static int filter_weapon_shown(const int a) {
-    return g_weapons[a] && !g_weapons[a]->melee && !g_weapons[a]->equipment;
+    return rules_weapon(a) && !rules_weapon(a)->melee && !rules_weapon(a)->equipment;
 }
 
 static void filter_state_save(const int sort) {
@@ -3076,7 +3077,7 @@ static void market_filter_popup(const int sort) {
     for (int a = 0; a < WEAPON_COUNT && a < 40; ++a) {
         if (!filter_weapon_shown(a)) continue;
         sb_appendf(&sb, "<div class='wepSel' style='color:#fff'>%s<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='wep%s%d'%s><span class='filterSlider'></span></label></div>",
-                   g_weapons[a]->name, pre, a, st->checked[1][a] ? " checked" : "");
+                   rules_weapon(a)->name, pre, a, st->checked[1][a] ? " checked" : "");
     }
     sb_appendf(&sb, "</div><div class='filterDiv' id='%sDiv_2' style='display:none;'>", nav);
     for (int a = 1; a < g_viewer_type_count && a < 40; ++a) {

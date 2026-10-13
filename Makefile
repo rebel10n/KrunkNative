@@ -171,6 +171,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, bil
 	./$(DEBUG_DIR)/combat_test
 	./$(DEBUG_DIR)/charge_grapple_test
 	./$(DEBUG_DIR)/piss_test
+	./$(DEBUG_DIR)/ruleset_test
 	./$(DEBUG_DIR)/projectiles_render_test
 	./$(DEBUG_DIR)/billboard_ad_test --headless
 	./$(DEBUG_DIR)/zombies_test

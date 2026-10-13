@@ -33,6 +33,7 @@
 #include <weapons.h>
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
 #include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
+#include <ruleset.h>
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT "Please wait..." // generic.wait
@@ -1569,7 +1570,7 @@ static void select_badge_pop(void) {
 // ------------------------------------------------------------------ WP-E part 2c: challenges
 
 static const char *weapon_name_at(const int index) {
-    return index >= 0 && index < WEAPON_COUNT && g_weapons[index] ? g_weapons[index]->name : NULL;
+    return index >= 0 && index < WEAPON_COUNT && rules_weapon(index) ? rules_weapon(index)->name : NULL;
 }
 
 // challenges.updateNames(): N or i18n chall.name.<ky>
@@ -1758,7 +1759,7 @@ static char *gen_challenges(void) {
         chal_header(&sb, "hed_2", 30, "Weapon Challenges", done, total, 0, NULL);
         sb_append(&sb, "<div style='margin-top:10px;text-align:center;'>");
         for (int i = 0; i < WEAPON_COUNT; i++) {
-            const Weapon *w = g_weapons[i];
+            const Weapon *w = rules_weapon(i);
             int d, t;
             chal_count("weapon", "wep", i, &d, &t);
             if (!w || w->type == 3 || w->custom_only || !t) continue; // weaponTypes.EQUIPMENT, customOnly
@@ -1783,7 +1784,7 @@ static char *gen_challenges(void) {
         chal_cards(&sb, "map", "mp", g_chal_ind, "Check back later for new challenges!");
     } else if (!strcmp(g_chal_typ, "weapon")) {
         const char *wname = weapon_name_at(g_chal_ind);
-        const Weapon *w = g_chal_ind >= 0 && g_chal_ind < WEAPON_COUNT ? g_weapons[g_chal_ind] : NULL;
+        const Weapon *w = g_chal_ind >= 0 && g_chal_ind < WEAPON_COUNT ? rules_weapon(g_chal_ind) : NULL;
         char title[96];
         snprintf(title, sizeof(title), "%s Challenges", wname ? wname : "");
         chal_count("weapon", "wep", g_chal_ind, &done, &total);

@@ -5,6 +5,7 @@
 #include <shared.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 typedef struct {
     const char *name;
@@ -70,7 +71,7 @@ static void check_weapon_table(void) {
     CHECK(sizeof(expected_weapons) / sizeof(expected_weapons[0]) == WEAPON_COUNT, "expected weapon list size");
 
     for (int i = 0; i < WEAPON_COUNT; i++) {
-        const Weapon *w = g_weapons[i];
+        const Weapon *w = rules_weapon(i);
         CHECK(w != NULL, "weapon %d missing", i);
         if (!w) continue;
 

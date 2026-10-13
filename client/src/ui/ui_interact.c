@@ -13,6 +13,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define INTERACT_KEY_COLOR "#FBC02D"        // COLORS.interactPopup.key
 #define INTERACT_ENOUGH_COLOR "#9eeb56"     // COLORS.interactPopup.enough
@@ -54,7 +55,7 @@ static void comma_format(const int value, char *out, const size_t size) {
 
 static const Weapon *weapon_at(const Game *game, const int id) {
     const size_t count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
-    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : g_weapons;
+    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
 

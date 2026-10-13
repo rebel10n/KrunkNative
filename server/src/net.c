@@ -14,6 +14,7 @@
 #include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
 #include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
 #include <comp_lobby.h>     // v7 comp lobby (lobbyPlayers): ranked matches and comp hosts
+#include <net_ext.h>         // NET_PACKET_EXT (254): the v10+ envelope
 #include <object_manager.h>  // KrunkNative Object Manager (spawn menu): ids 250-254
 #include <errno.h>
 #include <math.h>
@@ -123,7 +124,9 @@ static int net_peer_takes(const ClientConnection *client, const int type) {
         (type >= NET_PACKET_BLOCK_AIRDROP && type < NET_PACKET_BLOCK_LOBBY)) return ks_server_peer_v7(client);
     // player-viewer WP-E: the HUD / death screen / social packets (NET_PACKET_BLOCK_SOCIAL, 240-249)
     if (type >= NET_PACKET_BLOCK_SOCIAL && type < NET_PACKET_BLOCK_SOCIAL + 10) return ks_server_peer_v7(client);
-    // KrunkNative Object Manager (NET_PACKET_BLOCK_SANDBOX, 250-254): v7 peers only
+    // NET_PACKET_EXT (254, net_ext.h): peers that announced 1.4
+    if (type == NET_PACKET_EXT) return client->peer_minor >= NET_PROTOCOL_MINOR_EXT;
+    // KrunkNative Object Manager (NET_PACKET_BLOCK_SANDBOX, 250-253): v7 peers only
     if (type >= NET_PACKET_BLOCK_SANDBOX && type < NET_PACKET_BLOCK_END) return ks_server_peer_v7(client);
     // WP-E part 2b: v7 peers get every spray as NET_PACKET_SPRAY_V7 (multi-spray), older ones the v3 "sp"
     if (type == NET_PACKET_SPRAY) return !ks_server_peer_v7(client);
@@ -1545,6 +1548,14 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
         case NET_PACKET_VOICE_V7:
             net_handle_voice_v7(client, packet);
             break;
+        case NET_PACKET_EXT: {
+            // v10+ envelope (net_ext.h). No client -> server subtype is handled yet: chrsp, dlnkW and
+            // joinedRank land with their features; unknown subtypes are ignored.
+            uint16_t subtype;
+            if (client->peer_minor < NET_PROTOCOL_MINOR_EXT || !net_ext_unpack(packet->payload, packet->length, &subtype, NULL, NULL)) break;
+            (void) subtype;
+            break;
+        }
         default:
             on_client_event(client);
             break;

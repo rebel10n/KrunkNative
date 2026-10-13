@@ -5,6 +5,7 @@
 // included and its mesh / scene / loader calls are stubbed below.
 // Run: ./<build>/projectiles_render_test
 #include "../src/projectiles_render.c"
+#include <ruleset.h>
 
 static int g_failures, g_checks;
 
@@ -115,7 +116,7 @@ int main(void) {
     g_me.loadout = g_loadout;
     g_me.loadout_size = 3;
     g_me.loadout_index = 2;
-    g_me.weapon = g_weapons[WEAPON_ID_KNIFE];
+    g_me.weapon = rules_weapon(WEAPON_ID_KNIFE);
     g_me.height = 11.0f;
     g_me.throw_speed_mlt = 1.0f;
     g_client.me = &g_me;

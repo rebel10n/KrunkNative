@@ -8,6 +8,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 void player_shoot(Player*);  // shared/src/player.c
 void player_melee(Player*);
@@ -274,7 +275,7 @@ static void test_shotgun_melee(Game *game, Player *target) {
     int melee_slot = -1;
     for (int i = 0; i < vince->loadout_size; i++) {
         const int index = vince->loadout[i];
-        if (index >= 0 && index < WEAPON_COUNT && g_weapons[index]->melee) melee_slot = i;
+        if (index >= 0 && index < WEAPON_COUNT && rules_weapon(index)->melee) melee_slot = i;
     }
     CHECK(melee_slot >= 0, "a melee slot");
     if (melee_slot >= 0) {
@@ -292,8 +293,8 @@ static void test_projectile_state_const(Game *game, Player *shooter) {
     printf("Running projectile stateConst test...\n");
     const Weapon *rocket = NULL, *crossbow = NULL;
     for (int i = 0; i < WEAPON_COUNT; i++) {
-        if (!strcmp(g_weapons[i]->name, "Rocket Launcher")) rocket = g_weapons[i];
-        if (!strcmp(g_weapons[i]->name, "Crossbow")) crossbow = g_weapons[i];
+        if (!strcmp(rules_weapon(i)->name, "Rocket Launcher")) rocket = rules_weapon(i);
+        if (!strcmp(rules_weapon(i)->name, "Crossbow")) crossbow = rules_weapon(i);
     }
     CHECK(rocket && crossbow, "rocket and crossbow weapons");
     if (!rocket || !crossbow) return;

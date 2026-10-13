@@ -1,6 +1,7 @@
 #include <object_manager.h>
 #include <piss.h> // KrunkNative Piss puddles
 #include <shared.h>
+#include <ruleset.h>
 #include <ai.h>
 #include <map_ai.h>
 #include <bots.h>
@@ -91,6 +92,9 @@ void game_configure(
     Weapon **weapons, const size_t weapon_count,
     ClassConfig *classes, size_t class_count
 ) {
+    // the process ruleset (ruleset.h) supplies the default tables; the game keeps its pointer
+    const Ruleset *rules = ruleset_current();
+    game->rules = rules;
     if (config) game->config = *config;
     else game->config = g_default_game_config;
     game_config_sync_teams(&game->config); // WP-E: team1/2_name point at this copy's team_names
@@ -147,10 +151,10 @@ void game_configure(
         game->weapons = weapons;
         game->weapon_count = weapon_count;
     } else {
-        game->weapon_count = sizeof(g_weapons) / sizeof(g_weapons[0]);
+        game->weapon_count = rules->weapon_count;
         game->weapons = calloc(game->weapon_count, sizeof(Weapon*));
 
-        if (game->weapons) memcpy(game->weapons, g_weapons, sizeof(g_weapons));
+        if (game->weapons) memcpy(game->weapons, rules->weapons, game->weapon_count * sizeof(Weapon*));
         else game->weapon_count = 0;
     }
 
@@ -163,10 +167,10 @@ void game_configure(
         game->classes = classes;
         game->class_count = class_count;
     } else {
-        game->class_count = sizeof(g_classes) / sizeof(g_classes[0]);
+        game->class_count = rules->class_count;
         game->classes = calloc(game->class_count, sizeof(ClassConfig));
 
-        if (game->classes) memcpy(game->classes, g_classes, sizeof(g_classes));
+        if (game->classes) memcpy(game->classes, rules->classes, game->class_count * sizeof(ClassConfig));
         else game->class_count = 0;
     }
 }

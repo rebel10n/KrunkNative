@@ -18,6 +18,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 static int g_failures, g_checks;
 
@@ -84,7 +85,7 @@ static void test_charge_rifle(Game *game) {
     printf("Charge Rifle: hold to charge, the full charge blasts...\n");
     Player *p = add_player(game, 1, CLASS_ID_INFILTRATOR);
     Player *target = add_player(game, 2, 3);
-    CHECK(p->weapon == g_weapons[WEAPON_ID_CHARGE_RIFLE], "Infiltrator holds the Charge Rifle");
+    CHECK(p->weapon == rules_weapon(WEAPON_ID_CHARGE_RIFLE), "Infiltrator holds the Charge Rifle");
     equip(p, WEAPON_ID_CHARGE_RIFLE);
     stand(p, 0.0f, 0.0f);
     stand(target, 0.0f, -40.0f);
@@ -165,9 +166,9 @@ static void test_grapple(Game *game) {
     Player *p = add_player(game, 3, 0);
     // the Object Manager / a custom game's secondary; here straight into the loadout
     p->loadout[1] = WEAPON_ID_GRAPPLER;
-    p->ammo[1] = g_weapons[WEAPON_ID_GRAPPLER]->ammo;
+    p->ammo[1] = rules_weapon(WEAPON_ID_GRAPPLER)->ammo;
     equip(p, WEAPON_ID_GRAPPLER);
-    CHECK(p->weapon == g_weapons[WEAPON_ID_GRAPPLER], "holding the Grappler");
+    CHECK(p->weapon == rules_weapon(WEAPON_ID_GRAPPLER), "holding the Grappler");
     stand(p, 0.0f, 0.0f);
     for (int i = 0; i < 10; i++) frame(p, 0, 0); // settle on the floor
     const float y0 = p->position.y;
@@ -181,7 +182,7 @@ static void test_grapple(Game *game) {
           "the hook on the wall face at the eye height (%.2f %.2f %.2f)", p->grapple.point.x, p->grapple.point.y, p->grapple.point.z);
     // the frame that hooks runs the rope after the weapon code: no reel yet
     CHECK(fabsf(p->grapple.range - range0) < 0.01f, "rope = 200 + height - cameraHeight + 0.001 = %.3f (%.3f)", range0, p->grapple.range);
-    CHECK(fabsf(p->reloads[p->loadout_index] - 0.3f) < 1e-4f && p->ammo[p->loadout_index] == g_weapons[WEAPON_ID_GRAPPLER]->ammo,
+    CHECK(fabsf(p->reloads[p->loadout_index] - 0.3f) < 1e-4f && p->ammo[p->loadout_index] == rules_weapon(WEAPON_ID_GRAPPLER)->ammo,
           "tryGrapple spends the 300 ms fire timer, no ammo");
     CHECK(p->charge_time == 0.0f, "tryGrapple: chargeTime = 0");
 

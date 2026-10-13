@@ -202,3 +202,37 @@ states: see ranked.md.
   kn_brain endpoints if wanted; they are not gameplay.
 - Version toggle: the knet protocol stays one protocol. Add a ruleset id to the join/JOIN
   packet so the server can refuse cross-version clients, rather than per-version wire formats.
+
+## 7. KrunkNative packet ids: the NET_PACKET_EXT envelope
+
+Coordinator decision (2026-10-13): the 1-byte knet type stays. 250-253 are the Object Manager's
+and 254 is `NET_PACKET_EXT`, an envelope whose payload is a little-endian u16 subtype followed
+by the subtype's body (at most 510 bytes). Every packet added from v10.0.2 on is an EXT subtype.
+It needs protocol 1.4 (`NET_PROTOCOL_MINOR` 4 = `NET_PROTOCOL_MINOR_EXT`): servers send EXT only
+to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. Source of truth:
+`shared/include/net_ext.h` (`NetExtSubtype`, `net_ext_pack` / `net_ext_unpack`).
+
+| Subtype | Name | v10 wire id | Direction |
+|---|---|---|---|
+| 0x0100 | `NET_EXT_ENTITY_SPAWN` | `e+` | S to C |
+| 0x0101 | `NET_EXT_ENTITY_REMOVE` | `e-` | S to C |
+| 0x0102 | `NET_EXT_ENTITY_STATE` | `es` | S to C |
+| 0x0103 | `NET_EXT_ENTITY_EVENT` | `ee` | S to C |
+| 0x0104 | `NET_EXT_ENTITY_ATTACH` | `ea+` | S to C |
+| 0x0105 | `NET_EXT_ENTITY_DETACH` | `ea-` | S to C |
+| 0x0200 | `NET_EXT_PLAYER_POSE` | `pz` | S to C |
+| 0x0201 | `NET_EXT_PLAYER_LOCKS` | `plk` | S to C |
+| 0x0300 | `NET_EXT_SKIN_DEFINITION_CHANGED` | `sdc` | S to C |
+| 0x0301 | `NET_EXT_SPIN_WHEELS_UPDATED` | `swu` | S to C |
+| 0x0400 | `NET_EXT_DISCORD_LINK_WAIT` | `dlnkW` | C to S |
+| 0x0401 | `NET_EXT_DISCORD_LINK_RESULT` | `dlnkR` | S to C |
+| 0x0500 | `NET_EXT_CHARGE_CONSENT_REQUEST` | `chreq` | S to C |
+| 0x0501 | `NET_EXT_CHARGE_CONSENT_RESPONSE` | `chrsp` | C to S |
+| 0x0600 | `NET_EXT_JOINED_RANK` | `joinedRank` | C to S |
+| 0x0700.. | `NET_EXT_BLOCK_PROTOCOL` | (KN: ruleset / version toggle) | both |
+| 0x8000.. | `NET_EXT_BLOCK_KN` | (KrunkNative-only) | both |
+
+Each range belongs to the feature that implements it; body layouts are documented next to their
+structs. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) are not ported and have no subtype.
+The `SYNC_PLAYER` controlled-entity tail is not an EXT: it extends the existing state packet the
+usual way (a longer form for 1.4 peers).

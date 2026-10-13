@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 int player_collides(Player*, const Object*, float pad); // shared/src/player.c (collidesE)
 int game_object_shootable(const Object*);               // shared/src/player.c (the hitscan object filter)
@@ -29,7 +30,7 @@ int game_object_shootable(const Object*);               // shared/src/player.c (
 
 static const Weapon *weapon_at(const Game *game, const int id) {
     const size_t count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
-    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : g_weapons;
+    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
 

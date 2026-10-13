@@ -83,7 +83,11 @@ typedef struct {
     float disk_spin;
 } GameConstants;
 
-extern const GameConstants game_constants;
+// The current ruleset's constants (shared/include/ruleset.h: one ruleset per process, switched with
+// ruleset_set_current between games). game_constants reads through the pointer, so the v7 / v10
+// tables (shared/src/rules/<ver>/constants*.c) need no change at the call sites.
+extern const GameConstants *g_rules_constants;
+#define game_constants (*g_rules_constants)
 
 // Krunker v7.1.4 data/prefabs.js prefab ids (map object "i"; doc/v7/map-logic.md §1.4).
 // Ids 0-59 keep their v3.1.1 index; 33 and 55 were renamed (the v3 names stay as aliases);
@@ -701,7 +705,7 @@ typedef struct {
 #define CLASS_COUNT 16
 #define CLASS_ID_SURVIVOR 14
 #define CLASS_ID_INFILTRATOR 15
-extern const ClassConfig g_classes[CLASS_COUNT];
+// The class tables are the rulesets' (shared/include/ruleset.h; rules_classes() / Game.classes).
 
 // ---- WP-B: Krunker v7.1.4 status effects, perks and killstreaks (shared/src/effects.c) ----
 
@@ -1808,8 +1812,11 @@ typedef struct {
     float tick_period; // the latest puddle's weapon puddle_tick (ms)
 } GamePuddles;
 
+struct Ruleset_t;
+
 typedef struct Game_t {
     GameConfig config;
+    const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;
     Map *map;
 
@@ -2191,8 +2198,12 @@ typedef struct {
 // 1.3: the Krunker v7.1.4 map schema (WP-A, doc/v7/map-logic.md §7.2): prefabs 0-96, no TERMINAL
 // objects, so object uids differ from a 1.2 peer's on the same map. New v7 packets (blocks below)
 // are only sent to peers that announced at least NET_PROTOCOL_MINOR_V7.
-#define NET_PROTOCOL_MINOR 3
+// 1.4: NET_PACKET_EXT (254, shared/include/net_ext.h), the u16-subtyped envelope of every packet
+// added from Krunker v10.0.2 on; it goes only to peers that announced NET_PROTOCOL_MINOR_EXT. A 1.3
+// peer gets everything it got before.
+#define NET_PROTOCOL_MINOR 4
 #define NET_PROTOCOL_MINOR_V7 3
+#define NET_PROTOCOL_MINOR_EXT 4
 // HELLO / INIT patch (player-viewer WP-C, doc/v7/decisions.md): 1.3.1 peers read and send the longer
 // ENT V8 (attachIndex, challMode, anonMode), SPAWN V3 (attachIndex, headMlt) and RECON V2 (wallJumpC,
 // canSlideT, the exact slide ms). A 1.3.0 peer checks exact sizes and drops those, so they only go
@@ -2215,7 +2226,8 @@ int net_peer_has_wpc(int minor, int patch); // the peer's HELLO / INIT minor.pat
 #define NET_PACKET_BLOCK_PROTOCOL 195   // 195-199 player-viewer WP-C: protocol / input
 #define NET_PACKET_BLOCK_KRUNKSCRIPT 200 // 200-239 KrunkScript (doc/v7/krunkscript.md)
 #define NET_PACKET_BLOCK_SOCIAL 240     // 240-249 player-viewer WP-E: HUD, death screen, social
-#define NET_PACKET_BLOCK_SANDBOX 250    // 250-254 KrunkNative Object Manager (shared/include/object_manager.h)
+#define NET_PACKET_BLOCK_SANDBOX 250    // 250-253 KrunkNative Object Manager (shared/include/object_manager.h)
+// 254 NET_PACKET_EXT: the v10+ envelope with a u16 subtype (shared/include/net_ext.h); new packets go there
 #define NET_PACKET_BLOCK_END 255
 uint16_t net_ent_size_for(int major, int minor, int patch); // the ENT a client sends to an INIT major.minor.patch server: V8 from 1.3.1, V7 from 1.2, V6 for 1.1, else V4
 

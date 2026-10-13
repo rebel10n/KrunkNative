@@ -33,6 +33,7 @@
 #include <audio.h>
 #include <math.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define ZR_MYSTERY_BOX_OFFSET 10.0f   // config.mysteryBoxOffset
 #define ZR_KRUM_OFFSET 10.0f          // config.krumMachineOffset
@@ -84,7 +85,7 @@ static uint32_t zr_rand(void) {
 
 static const Weapon *zr_weapon(const Game *game, const int id) {
     const size_t count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
-    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : g_weapons;
+    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
 

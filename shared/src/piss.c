@@ -5,6 +5,7 @@
 #include <weapons.h>
 #include <math.h>
 #include <string.h>
+#include <ruleset.h>
 
 vec3 piss_stream_source(const Player *player, const WeaponStream *stream, const float pitch, const float yaw) {
     const float forward = stream->pelvis_forward;
@@ -22,7 +23,7 @@ vec3 piss_stream_at(const vec3 source, const vec3 velocity, const float gravity,
 
 static const WeaponStream *piss_weapon_stream(const Game *game, const int weapon_id) {
     const size_t count = game->weapon_count ? game->weapon_count : WEAPON_TABLE_COUNT;
-    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : g_weapons;
+    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
     const Weapon *weapon = weapon_id >= 0 && (size_t) weapon_id < count ? all[weapon_id] : NULL;
     return weapon ? weapon->stream : NULL;
 }

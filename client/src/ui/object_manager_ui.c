@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h> // strncasecmp
+#include <ruleset.h>
 
 #define OM_TAB_STORAGE "kn_omTab"
 #define OM_TOOL_STORAGE "kn_omTool"
@@ -207,7 +208,7 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
     if (g_om.tab == OM_TAB_WEAPONS) {
         for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
             if (!object_manager_weapon_listed(id)) continue;
-            const Weapon *w = g_weapons[id];
+            const Weapon *w = rules_weapon(id);
             if (!om_matches(w->name)) continue;
             char name[96];
             om_escape(name, sizeof(name), w->name);
@@ -684,7 +685,7 @@ static void om_on_result(const NetSpawnResultPacket *r) {
         om_set_status(text, 1);
         return;
     }
-    const Weapon *w = r->item >= 0 && r->item < WEAPON_TABLE_COUNT && r->action != OM_ACTION_TOOL ? g_weapons[r->item] : NULL;
+    const Weapon *w = r->item >= 0 && r->item < WEAPON_TABLE_COUNT && r->action != OM_ACTION_TOOL ? rules_weapon(r->item) : NULL;
     char text[160] = "";
     switch (r->action) {
         case OM_ACTION_ADD_WEAPON: snprintf(text, sizeof(text), "%s added to your loadout", w ? w->name : "Weapon"); break;

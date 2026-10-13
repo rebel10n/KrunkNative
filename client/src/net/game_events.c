@@ -35,11 +35,13 @@
 #include <cosmetics.h>     // player card items (cosmetic_item)
 #include "../viewer/viewer_store.h" // store skins / rarities (the killer's weapon skin)
 #include <game_config.h>   // game_config_is_custom (the report prompt)
+#include <net_ext.h> // NET_PACKET_EXT (254)
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define SERVER_CHAT_COLOR "#fc03ec" // gB type 2 default
 
@@ -83,8 +85,8 @@ static Player *events_find_player(Client *client, const int uid) {
 }
 
 static const Weapon *events_weapon(const Client *client, const int index) {
-    const size_t count = client->game.weapon_count ? client->game.weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
-    const Weapon *const *weapons = client->game.weapons ? (const Weapon *const *) client->game.weapons : (const Weapon *const *) g_weapons;
+    const size_t count = client->game.weapon_count ? client->game.weapon_count : rules_weapon_count();
+    const Weapon *const *weapons = client->game.weapons ? (const Weapon *const *) client->game.weapons : (const Weapon *const *) rules_weapons();
     return index >= 0 && index < (int) count ? weapons[index] : NULL;
 }
 
@@ -921,6 +923,14 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_LOG_TIME:
         case NET_PACKET_OBJECT_ANIM:
             return client_world_handle_event(client, type, payload, length); // map-logic WP-B (client/src/world_events.c)
+        case NET_PACKET_EXT: { // v10+ envelope (shared/include/net_ext.h)
+            uint16_t subtype;
+            if (!net_ext_unpack(payload, length, &subtype, NULL, NULL)) return 1;
+            // No S -> C subtype has a handler yet (entities, pose, locks ... land with their features);
+            // unknown subtypes are ignored, never an error
+            (void) subtype;
+            return 1;
+        }
         default:
             return hud_modes_handle_event(client, type, payload, length); // mode packets (client/src/ui/hud_modes.c)
     }

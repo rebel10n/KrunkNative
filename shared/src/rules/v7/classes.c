@@ -1,7 +1,7 @@
 #include <shared.h>
 
 // Krunker v7.1.4 classes (src/data/classes.js), generated from shared/tests/data/v7/classes.json
-// (tools/kref/v7-dump.js). loadout ids index g_weapons. Times in s (throwChrg ms -> s).
+// (tools/kref/v7-dump.js). loadout ids index the ruleset's weapon table. Times in s (throwChrg ms -> s).
 // Every class-editor knob v7 sets from config.classConfig that equals the engine constant
 // (camera, movement scheme, vehicle, grA/arA/grDec/airDec, ...) is left out: 0 means the default.
 // The Infiltrator's 7th colour (0x999999) is dropped: playerMesh reads colours 0-5 only.
@@ -282,7 +282,7 @@ const ClassConfig infiltrator = {
     .face = 5234,
 };
 
-const ClassConfig g_classes[CLASS_COUNT] = {
+const ClassConfig g_classes_v7[CLASS_COUNT] = {
     triggerman, hunter, run_n_gun, spray_n_pray, vince, detective, marksman, rocketeer, agent,
     runner, deagler, bowman, commando, trooper, survivor, infiltrator,
 };

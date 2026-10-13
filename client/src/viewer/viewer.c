@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define VIEWER_GUI_WIDTH 322           // e.width = 322
 #define VIEWER_RENDER_DELAY_MS 750.0   // $(): setTimeout(..., 750)
@@ -154,12 +155,12 @@ static void Z(void) {
 }
 
 static int classes_count(void) {
-    return (int) (sizeof(g_classes) / sizeof(g_classes[0]));
+    return (int) (rules_class_count());
 }
 
 static const ClassConfig *current_class(void) {
     const int index = g_viewer.e.class_index.num;
-    return &g_classes[index >= 0 && index < classes_count() ? index : 0];
+    return &rules_classes()[index >= 0 && index < classes_count() ? index : 0];
 }
 
 // .options(obj): the labels / values of an option object, in key order
@@ -505,7 +506,7 @@ static void G(void) {
     PUSH_M(vg_add_bool(g_ui.player, &e->show_legs, "Show Legs", on_change_z));
 
     options_reset();
-    for (int i = 0; i < classes_count(); i++) options_push(g_classes[i].name, i);
+    for (int i = 0; i < classes_count(); i++) options_push(rules_classes()[i].name, i);
     PUSH_M(add_options(g_ui.player, &e->class_index, "Class", on_class));
 
     slot_rows(&e->face, ITEM_FACE, "Face", fn_custom_face, fn_render_face, &e->show_face);
@@ -554,7 +555,7 @@ static void W(const int first) {
 
     options_reset();
     options_push("None", -1);
-    const Weapon *primary_weapon = primary >= 0 && primary < WEAPON_COUNT ? g_weapons[primary] : NULL;
+    const Weapon *primary_weapon = primary >= 0 && primary < WEAPON_COUNT ? rules_weapon(primary) : NULL;
     if (primary_weapon && primary_weapon->has_attach) {
         for (int i = 0; i < ATTACHMENT_COUNT; i++) options_push(g_attachments[i].name, i);
     }
@@ -563,7 +564,7 @@ static void W(const int first) {
     if (cls->secondary) {
         options_reset();
         for (int i = 0; i < WEAPON_COUNT; i++) {
-            if (g_weapons[i] && g_weapons[i]->secondary) options_push(g_weapons[i]->name, i);
+            if (rules_weapon(i) && rules_weapon(i)->secondary) options_push(rules_weapon(i)->name, i);
         }
         PUSH_B(add_options(g_ui.weapons, &e->secondary, "Secondary", on_secondary));
 

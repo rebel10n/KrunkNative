@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define OM_SUB_AI 0        // OM_KIND_NPC: an AI (sid)
 #define OM_SUB_BOT 1       //              a bot (GameBot.id)
@@ -59,16 +60,16 @@ static ObjectManager *om_of(Game *game) {
 
 static const Weapon *om_weapon(const Game *game, const int id) {
     const size_t count = game && game->weapon_count ? game->weapon_count : WEAPON_TABLE_COUNT;
-    Weapon *const *all = game && game->weapons ? game->weapons : (Weapon *const *) g_weapons;
+    Weapon *const *all = game && game->weapons ? game->weapons : (Weapon *const *) rules_weapons();
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
 
 // ---------------------------------------------------------------- catalogue
 
 int object_manager_weapon_listed(const int weapon_id) {
-    if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !g_weapons[weapon_id]) return 0;
+    if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !rules_weapon(weapon_id)) return 0;
     if (weapon_id >= WEAPON_COUNT) return weapon_id == WEAPON_ID_PISS; // KrunkNative-only weapons: the Piss is a Weapons tile
-    return weapon_id != WEAPON_ID_KNIFE && !g_weapons[weapon_id]->bomb; // every class has the knife; bombs are site-mode only
+    return weapon_id != WEAPON_ID_KNIFE && !rules_weapon(weapon_id)->bomb; // every class has the knife; bombs are site-mode only
 }
 
 // The Tool Gun is no Weapons-tile (the Tools pane equips it) and never a pickup, but an extra slot
@@ -228,7 +229,7 @@ static void om_normalise(const char *in, char *out, const size_t n) {
 }
 
 const char *object_manager_give_name(const int kind, const int id) {
-    if (kind == OM_GIVE_WEAPON) return object_manager_weapon_allowed(id) ? g_weapons[id]->name : NULL;
+    if (kind == OM_GIVE_WEAPON) return object_manager_weapon_allowed(id) ? rules_weapon(id)->name : NULL;
     if (kind == OM_GIVE_ENTITY) return object_manager_entity_giveable(id) ? k_entities[id].name : NULL;
     return NULL;
 }
@@ -250,7 +251,8 @@ int object_manager_give_lookup(const char *query, int *id, int *matches) {
     int digits = 1;
     for (const char *c = q; *c; c++) digits &= isdigit((unsigned char) *c) != 0;
     if (digits) { // a weapon id
-        const int w = atoi(q);
+        // ids typed or scripted before the ruleset seam: 29-31 were the KN weapons (weapons.h)
+        const int w = weapon_id_from_legacy(atoi(q), rules_krunker_weapon_count());
         if (!object_manager_weapon_allowed(w)) return OM_GIVE_NONE;
         if (id) *id = w;
         if (matches) *matches = 1;
@@ -260,7 +262,7 @@ int object_manager_give_lookup(const char *query, int *id, int *matches) {
     for (int pass = 0; pass < 3; pass++) {
         int weapon = -1, weapons = 0, entity = -1, entities = 0;
         for (int w = 0; w < WEAPON_TABLE_COUNT; w++) {
-            if (object_manager_weapon_allowed(w) && om_name_matches(g_weapons[w]->name, q, pass)) {
+            if (object_manager_weapon_allowed(w) && om_name_matches(rules_weapon(w)->name, q, pass)) {
                 weapon = w;
                 weapons++;
             }

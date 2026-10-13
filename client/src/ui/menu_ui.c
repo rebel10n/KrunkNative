@@ -32,6 +32,7 @@
 #include <download_ui.h> // showWindow(25) / ?download (client/src/ui/download_ui.c)
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -282,10 +283,10 @@ static unsigned g_class_filter_key;
 // Mirrors Game.classes as the real class window renders them (name, primary weapon, HP).
 static void menu_build_classes(void) {
     const Client *client = g_ui.client;
-    const size_t count = client->game.class_count ? client->game.class_count : sizeof(g_classes) / sizeof(g_classes[0]);
-    const ClassConfig *classes = client->game.classes ? client->game.classes : g_classes;
-    const Weapon *const *weapons = client->game.weapons ? (const Weapon *const *) client->game.weapons : g_weapons;
-    const size_t weapon_count = client->game.weapons ? client->game.weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
+    const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
+    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
+    const Weapon *const *weapons = client->game.weapons ? (const Weapon *const *) client->game.weapons : rules_weapons();
+    const size_t weapon_count = client->game.weapons ? client->game.weapon_count : rules_weapon_count();
 
     g_ui.class_count = 0;
     g_class_filter_key = menu_class_filter_key(&client->game);
@@ -1169,8 +1170,8 @@ static void menu_apply_state(Client *client) {
 
 // The old `classes` / `maps` events: re-read Game when its tables change.
 static void menu_refresh_tables(const Client *client) {
-    const ClassConfig *classes = client->game.classes ? client->game.classes : g_classes;
-    const size_t class_count = client->game.class_count ? client->game.class_count : sizeof(g_classes) / sizeof(g_classes[0]);
+    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
+    const size_t class_count = client->game.class_count ? client->game.class_count : rules_class_count();
     if (classes != g_ui.last_classes || class_count != g_ui.last_class_count || menu_class_filter_key(&client->game) != g_class_filter_key) {
         menu_build_classes();
         menu_update_class_box();

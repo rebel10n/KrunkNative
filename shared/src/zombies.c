@@ -12,6 +12,7 @@
 #include "modes/mode_internal.h"
 #include <math.h>
 #include <string.h>
+#include <ruleset.h>
 
 const char *const g_zombie_perk_names[ZOMBIES_PERK_COUNT] = {
     "Krum", "Double-Up", "Western Hands", "Swift", "Power Slide", "Drift Fuze", "Holster",
@@ -34,7 +35,7 @@ static int waiting(const Game *game) {
 
 static const Weapon *weapon_by_id(const Game *game, const int id) {
     const size_t count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
-    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : g_weapons;
+    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
 

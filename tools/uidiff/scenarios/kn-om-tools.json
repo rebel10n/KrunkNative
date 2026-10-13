@@ -6,7 +6,7 @@
   "background": "#000000",
   "state": {
     "menu": true,
-    "window": 54,
+    "window": 100,
     "connected": true,
     "ready": true,
     "inGame": true,
@@ -34,5 +34,5 @@
   },
   "frames": 30,
   "ref": "doc/ref/krunknative/kn-om-tools.png",
-  "note": "KrunkNative Object Manager (window 54; a KN baseline): the Objects tab with the Tools pane, the Rotator picked, which equipped the Tool Gun through the offline sandbox server (the pane's Tool Gun line, the status line 'Tool: Rotator')."
+  "note": "KrunkNative Object Manager (window 100; a KN baseline): the Objects tab with the Tools pane, the Rotator picked, which equipped the Tool Gun through the offline sandbox server (the pane's Tool Gun line, the status line 'Tool: Rotator')."
 }

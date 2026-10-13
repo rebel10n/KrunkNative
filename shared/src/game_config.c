@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 // ---------------------------------------------------------------- option tables
 
@@ -733,7 +734,7 @@ const char *game_config_validate(const cJSON *config) {
     cJSON_ArrayForEach(entry, modes) {
         if (!cJSON_IsNumber(entry) || !gc_mode((int) entry->valuedouble) || floor(entry->valuedouble) != entry->valuedouble) return "Invalid Mode in Config.";
     }
-    const int class_count = (int) (sizeof(g_classes) / sizeof(g_classes[0]));
+    const int class_count = (int) (rules_class_count());
     const cJSON *classes = gc_item(config, "classes");
     cJSON_ArrayForEach(entry, classes) {
         if (!cJSON_IsNumber(entry) || entry->valuedouble < 0 || entry->valuedouble >= class_count || floor(entry->valuedouble) != entry->valuedouble) {
@@ -1103,8 +1104,10 @@ static void gc_apply_weapons(Game *game, GameConfigState *st, const cJSON *weps)
     const size_t key_count = sizeof(k_weapon_options) / sizeof(k_weapon_options[0]);
     const cJSON *entry;
     cJSON_ArrayForEach(entry, weps) {
-        const int id = gc_entry_id(entry, st->weapon_count);
-        if (id < 0 || !cJSON_IsObject(entry) || !st->base_weapons[id]) continue;
+        // a host config saved before the ruleset seam keys the KN weapons 29-31 (weapons.h)
+        const int raw = gc_entry_id(entry, st->weapon_count);
+        const int id = raw < 0 ? -1 : weapon_id_from_legacy(raw, game->rules ? game->rules->krunker_weapon_count : WEAPON_COUNT);
+        if (id < 0 || (size_t) id >= st->weapon_count || !cJSON_IsObject(entry) || !st->base_weapons[id]) continue;
         Weapon *w = &st->weapons[id];
         int touched = game->weapons[id] == w;
         for (size_t k = 0; k < key_count; k++) {
@@ -1444,7 +1447,7 @@ int game_config_apply(Game *game, const cJSON *cfg, const int clamp, const int h
 
     GameConfig c = game->config; // maps / modes pointers stay
     game_config_read(&c, cfg, clamp, host_index);
-    gc_read_class_list(&c, gc_item(cfg, "classes"), game->class_count ? game->class_count : sizeof(g_classes) / sizeof(g_classes[0]));
+    gc_read_class_list(&c, gc_item(cfg, "classes"), game->class_count ? game->class_count : rules_class_count());
     game->config = c;
     game_config_sync_teams(&game->config);
 

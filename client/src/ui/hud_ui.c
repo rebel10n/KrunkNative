@@ -63,6 +63,7 @@ void hud_ui_hit(Client*, int kill);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -341,7 +342,7 @@ static const char *hud_weapon_icon_src(const Weapon *slot, const int can_throw, 
 // weaponConfig index of `w` (the default table; maps / custom games reuse its ids), 0 unknown.
 static int weapon_index_of(const Weapon *w) {
     for (int i = 0; i < WEAPON_TABLE_COUNT; i++) { // KrunkNative-only weapons too (the Piss)
-        if (g_weapons[i] == w) return i;
+        if (rules_weapon(i) == w) return i;
     }
     return 0;
 }
@@ -965,8 +966,8 @@ static float hud_spread(const Player *me) {
 
 static void hud_loadout(const Player *me, HudUiExtra *extra) {
     const Game *game = me->game;
-    const size_t weapon_count = game->weapon_count ? game->weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
-    const Weapon **weapons = game->weapons ? (const Weapon**) game->weapons : (const Weapon**) g_weapons;
+    const size_t weapon_count = game->weapon_count ? game->weapon_count : rules_weapon_count();
+    const Weapon **weapons = game->weapons ? (const Weapon**) game->weapons : (const Weapon**) rules_weapons();
 
     extra->loadout_size = 0;
     extra->loadout_index = me->loadout_index;
@@ -3030,8 +3031,8 @@ static int hud_json_int(const cJSON *obj, const char *key, const int fallback) {
 
 static const Weapon *hud_weapon_by_name(const Game *game, const char *name) {
     if (!name || !name[0]) return NULL;
-    const size_t count = game->weapon_count ? game->weapon_count : sizeof(g_weapons) / sizeof(g_weapons[0]);
-    const Weapon *const *weapons = game->weapons ? (const Weapon *const *) game->weapons : (const Weapon *const *) g_weapons;
+    const size_t count = game->weapon_count ? game->weapon_count : rules_weapon_count();
+    const Weapon *const *weapons = game->weapons ? (const Weapon *const *) game->weapons : (const Weapon *const *) rules_weapons();
     for (size_t i = 0; i < count; i++) {
         if (weapons[i] && weapons[i]->name && !strcmp(weapons[i]->name, name)) return weapons[i];
     }

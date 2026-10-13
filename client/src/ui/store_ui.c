@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 // data/store.js wheels / a TICKET item's spinWheel (skins.json)
 typedef struct {
@@ -352,7 +353,7 @@ static const char *item_desc(const ViewerSkin *skin) {
                                             "Collectible", "Wrist", "Charm", "Spin Ticket", "Back", "Head", "Player Card"};
     if (!skin) return "";
     if (skin->type > 0 && skin->type < 17) return k_types[skin->type];
-    const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= WEAPON_COUNT ? g_weapons[skin->weapon - 1] : NULL;
+    const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= WEAPON_COUNT ? rules_weapon(skin->weapon - 1) : NULL;
     return weapon && weapon->name ? weapon->name : "";
 }
 

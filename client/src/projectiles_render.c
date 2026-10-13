@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define PROJ_MAX 64
 // 95.js: the owner's predicted physObj flies 3000 units unless "pre" ends it first.
@@ -107,7 +108,7 @@ static const Weapon *proj_weapon(const Client *client, const int index) {
     const Game *game = &client->game;
     if (index < 0) return NULL;
     if (game->weapons && (size_t) index < game->weapon_count) return game->weapons[index];
-    if (index < WEAPON_COUNT) return g_weapons[index];
+    if (index < WEAPON_COUNT) return rules_weapon(index);
     return NULL;
 }
 

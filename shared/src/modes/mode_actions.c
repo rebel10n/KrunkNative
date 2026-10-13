@@ -6,6 +6,7 @@
 #include <pcg_basic.h>
 #include <string.h>
 #include <math.h>
+#include <ruleset.h>
 
 float mode_random(void) {
     return (float) ldexp((double) pcg32_random(), -32);
@@ -246,7 +247,7 @@ int mode_gun_loadout(const Game *game, const Player *player, int *out) {
 void mode_set_player_loadout(Player *player, const int *weapons, const int count, const int keep_index) {
     Game *game = player->game;
     const size_t weapon_count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
-    Weapon **all = game->weapons ? game->weapons : (Weapon **) g_weapons;
+    Weapon **all = game->weapons ? game->weapons : (Weapon **) rules_weapons();
 
     int loadout[NET_LOADOUT_MAX + 1];
     int size = 0;

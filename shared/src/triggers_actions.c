@@ -23,6 +23,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <ruleset.h>
 
 #define CHAIN_OK(game, chain) trigger_chain_left(game, chain)
 
@@ -96,7 +97,7 @@ static void save_data(Game *game, Player *h, const TriggerSource *j, const Trigg
 
 static const Weapon *weapon_at(const Game *game, const int id) {
     const size_t count = game->weapon_count ? game->weapon_count : WEAPON_COUNT;
-    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : g_weapons;
+    const Weapon *const *all = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
 
@@ -183,7 +184,7 @@ static void play_sound(Game *game, const int target, const Player *h, const Trig
 // The class's loadout (setClass: primary, the picked secondary when the class has one, the knife),
 // health and speed, for Change Class mid-life (updateItems(game, io, true, ..., true)).
 static void apply_class(Game *game, Player *h, const int class_index) {
-    const ClassConfig *classes = game->classes ? game->classes : g_classes;
+    const ClassConfig *classes = game->classes ? game->classes : rules_classes();
     const ClassConfig *c = &classes[class_index];
     h->class_index = class_index;
     int loadout[3];

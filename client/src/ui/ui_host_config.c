@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ruleset.h>
 
 // windows[7].wepConf / clsConf / effectConf: the Advanced matrices are open
 static int g_wep_conf, g_cls_conf, g_effect_conf;
@@ -47,8 +48,8 @@ static int preset_has(const cJSON *list, const int value) {
 
 // The base entry of a table: the game's own weapon / class / effect (v7 Game.weapons / classes / effects).
 static const void *base_entry(const GameConfigTable table, const int id) {
-    if (table == GAME_CONFIG_WEAPON) return id >= 0 && id < WEAPON_COUNT ? g_weapons[id] : NULL;
-    if (table == GAME_CONFIG_CLASS) return id >= 0 && id < CLASS_COUNT ? &g_classes[id] : NULL;
+    if (table == GAME_CONFIG_WEAPON) return id >= 0 && id < WEAPON_COUNT ? rules_weapon(id) : NULL;
+    if (table == GAME_CONFIG_CLASS) return id >= 0 && id < CLASS_COUNT ? &rules_classes()[id] : NULL;
     if (table == GAME_CONFIG_EFFECT) return id >= 0 && id < EFFECT_COUNT ? &g_effects[id] : NULL;
     return NULL;
 }
@@ -58,8 +59,8 @@ static int table_count(const GameConfigTable table) {
 }
 
 static const char *entry_name(const GameConfigTable table, const int id) {
-    if (table == GAME_CONFIG_WEAPON) return g_weapons[id]->name;
-    if (table == GAME_CONFIG_CLASS) return g_classes[id].name;
+    if (table == GAME_CONFIG_WEAPON) return rules_weapon(id)->name;
+    if (table == GAME_CONFIG_CLASS) return rules_classes()[id].name;
     return g_effects[id].name;
 }
 
@@ -203,7 +204,7 @@ char *ui_host_config_tab_html(const HostConfigTab tab, const int host_type, cons
         for (int id = 0; id < CLASS_COUNT; id++) {
             const int on = !cJSON_GetArraySize(classes) || preset_has(classes, id);
             sb_appendf(&sb, "<label class='hostOpt' onmouseenter='playTick()'><span class='optName'>%s</span><img loading='lazy' class='optImg' src='textures/classes/icon_%d.png' />"
-                            "<input id='gameClass%d' type='checkbox'%s><div class='optCheck'></div></label>", g_classes[id].name, id, id, on ? "checked" : "");
+                            "<input id='gameClass%d' type='checkbox'%s><div class='optCheck'></div></label>", rules_classes()[id].name, id, id, on ? "checked" : "");
         }
         sb_append(&sb, "</div></div>");
     } else if (tab == HOST_CONFIG_TAB_ADVANCED) {

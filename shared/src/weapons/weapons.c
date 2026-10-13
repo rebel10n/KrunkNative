@@ -1,20 +1,15 @@
 #include <stddef.h>
 #include <weapons.h>
 
-// Same order as Krunker v7.1.4's weapon table (src/data/weapons.js): the index is the weapon id.
-// Ids 0-18 keep their v3.1.1 meaning; 19-28 are new in v7; KrunkNative's own follow (weapons.h).
-const Weapon *g_weapons[WEAPON_TABLE_COUNT] = {
-    &g_awp, &g_ak47, &g_pistol, &g_smg, &g_revolver,
-    &g_shotgun, &g_lmg, &g_semi_auto, &g_rpg,
-    &g_akimbo, &g_deagle, &g_alien_blaster, &g_knife,
-    &g_crossbow, &g_famas, &g_sawed_off, &g_auto_pistol,
-    &g_bomb, &g_blaster,
-    &g_build_tool, &g_grappler, &g_tehchy9, &g_noob_tube, &g_slimer,
-    &g_zapper, &g_minigun, &g_war_machine, &g_akimbo_pistol, &g_charge_rifle,
-    &g_tool_gun, // KrunkNative (WEAPON_ID_TOOL_GUN)
-    [WEAPON_ID_PISS] = &g_piss,         // KrunkNative (decisions.md "Piss")
-    [WEAPON_ID_PHYS_GUN] = &g_phys_gun, // KrunkNative (object_manager.h OM_ACTION_EDIT)
-};
+// The weapon tables are the rulesets' (shared/src/rules/<ver>/weapons_<ver>.c, ruleset.h).
+
+int weapon_id_from_legacy(const int id, const int krunker_weapon_count) {
+    // ids 29-31 were the KN weapons until the ruleset seam; a ruleset whose Krunker table reaches
+    // 29 (v10: Boulder, Compressor) means its own weapon by them
+    if (id >= WEAPON_ID_LEGACY_KN_BASE && id < WEAPON_ID_LEGACY_KN_BASE + (WEAPON_TABLE_COUNT - WEAPON_ID_KN_BASE) &&
+        id >= krunker_weapon_count) return WEAPON_ID_KN_BASE + (id - WEAPON_ID_LEGACY_KN_BASE);
+    return id;
+}
 
 // v7.1.4 src/data/attach.js. The Acog's `noVertM` has no reader; its `req` is the per-class rank
 // gate (minRec 20 on stats c<classIndex>), left to the loadout UI.
