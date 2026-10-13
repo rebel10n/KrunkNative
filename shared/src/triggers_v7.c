@@ -293,7 +293,7 @@ void trigger_source_object(TriggerSource *j, Object *object) {
     j->interface_id = object->interface_id;
     j->interface_target = object->trig ? object->trig->interface_target : 0;
     // GameObject y of a TRIGGER is its centre (addTrigger: y + h / 2 * hbh)
-    j->position = (vec3) {object->position.x, object->position.y + object->scale.y * 0.5f, object->position.z};
+    j->position = (vec3) {object->position.x, object->position.y + object_box_size(object).y * 0.5f, object->position.z};
 }
 
 // MAP_AI_HAVE_TRIGGER_API (map-F): GameAIData.interface_id ("in") exists.

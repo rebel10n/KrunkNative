@@ -1109,9 +1109,10 @@ static int bot_segment_hits(const Game *game, const vec3 a, const vec3 d, const 
     for (size_t i = 0; i < map->object_count; i++) {
         const Object *o = map->objects[i];
         if (!bot_object_solid(o) || (!ramps && o->ramp)) continue;
-        const float hx = o->scale.x * 0.5f, hz = o->scale.z * 0.5f;
+        const vec3 size = object_box_size(o);
+        const float hx = size.x * 0.5f, hz = size.z * 0.5f;
         const float bx0 = o->position.x - hx, bx1 = o->position.x + hx;
-        const float by0 = o->position.y, by1 = o->position.y + o->scale.y;
+        const float by0 = o->position.y, by1 = o->position.y + size.y;
         const float bz0 = o->position.z - hz, bz1 = o->position.z + hz;
         if (max_x < bx0 || min_x > bx1 || max_y < by0 || min_y > by1 || max_z < bz0 || min_z > bz1) continue;
         float t0 = 0.0f, t1 = 1.0f;

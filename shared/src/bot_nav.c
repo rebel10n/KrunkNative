@@ -251,14 +251,15 @@ static BotNav *nav_build(const Map *map) {
     float bx0 = 1e9f, bx1 = -1e9f, bz0 = 1e9f, bz1 = -1e9f;
     for (size_t i = 0; i < map->object_count; i++) {
         const Object *o = map->objects[i];
-        if (!nav_box_solid(o) || o->scale.x <= 0.0f || o->scale.z <= 0.0f) continue;
+        const vec3 size = object_box_size(o);
+        if (!nav_box_solid(o) || size.x <= 0.0f || size.z <= 0.0f) continue;
         NavBox *b = &nav->boxes[nav->box_count++];
-        b->x0 = o->position.x - o->scale.x * 0.5f;
-        b->x1 = o->position.x + o->scale.x * 0.5f;
-        b->z0 = o->position.z - o->scale.z * 0.5f;
-        b->z1 = o->position.z + o->scale.z * 0.5f;
+        b->x0 = o->position.x - size.x * 0.5f;
+        b->x1 = o->position.x + size.x * 0.5f;
+        b->z0 = o->position.z - size.z * 0.5f;
+        b->z1 = o->position.z + size.z * 0.5f;
         b->y0 = o->position.y;
-        b->y1 = o->position.y + (o->scale.y > 0.01f ? o->scale.y : 0.01f);
+        b->y1 = o->position.y + (size.y > 0.01f ? size.y : 0.01f);
         if (o->ramp) {
             b->ramp = 1;
             b->rsx = o->ramp->start.x;

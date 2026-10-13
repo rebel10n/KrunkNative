@@ -247,7 +247,7 @@ void game_on_trigger(Game *game, Player *source, Object *object, int *chain) {
         .trig = object->trig,
         .team = (int) object->team,
         .interface_id = object->interface_id,
-        .position = {object->position.x, object->position.y + object->scale.y * 0.5f, object->position.z},
+        .position = {object->position.x, object->position.y + object_box_size(object).y * 0.5f, object->position.z},
     };
     trigger_fire(game, source, &j, chain);
 }

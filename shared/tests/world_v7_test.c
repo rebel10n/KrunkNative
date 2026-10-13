@@ -4,7 +4,8 @@
 // (reference values from v7 libs/Terrain.js run under node), the multi-stage BR zone and its
 // damage, score zones with logTime, check points, teleporter tcp, the Parkour resets, the
 // account / team / KR zones, NoPVP / PVP and the damage filter, collidingObjs, node moves,
-// object animations, builds, the deathY godMode rule and the input[13] / [14] wire bits.
+// object animations, builds, the deathY godMode rule, the input[13] / [14] wire bits and the
+// GameObject boxes of props (Lumber: hbw / hbh assets and triggers vs the full-s model props).
 // Run from the repository root: ./<build>/world_v7_test
 #include <world.h>
 #include <account.h>
@@ -555,6 +556,132 @@ static void test_own_time(void) {
     cJSON_Delete(json);
 }
 
+// ---------------------------------------------------------------- prop collision (GameObject box)
+
+// Walk with move key `dir` (yaw 0: 2 = +x, 6 = -x, 0 = -z, 4 = +z) for `frames` 60 fps frames.
+static void walk(Player *player, const int dir, const int frames) {
+    for (int i = 0; i < frames; i++) {
+        const Input input = {.seq = player->input_seq + 1, .move_dir = dir, .delta = 1.0f / 60.0f};
+        player_proc_input(player, &input, 0, 0);
+    }
+}
+
+// Stand on the floor at `y`, `gap` beyond the object's +x (side 1) or -x (side -1) box face at its
+// centre z, settle, then walk at it: the x where the player stops.
+static float stop_x(Player *p, const Object *o, const float y, const float half_w, const int side, const float gap) {
+    place(p, o->position.x + (float) side * (half_w + p->scale + gap), y + 0.01f, o->position.z);
+    for (int i = 0; i < 20; i++) frame(p, 0);
+    walk(p, side > 0 ? 6 : 2, 180);
+    return p->position.x;
+}
+
+// v7 MapManager: addMesh / addCylinder / the machines collide as the full "s" box, addAsset and
+// addTrigger as s * (hbw, hbh, hbw) with the bottom kept at p.y (MapManager.js:2846-2849,
+// 2045-2048). Lumber's chopped tree (CUSTOM_ASSET aid 26479, s 64.16 x 153.6 x 65.47,
+// hbw = hbh = 0.1) blocked the whole canopy AABB before.
+static void test_prop_collision(void) {
+    printf("Running prop collision (Lumber, v7 GameObject boxes) test...\n");
+    cJSON *json = load_map("assets/maps/lumber.json");
+    Game game;
+    game_on(&game, json, 0);
+    CHECK(game.ready, "Lumber loaded");
+    if (!game.ready) return;
+    Player *p = add_player(&game, 1, 0);
+
+    Object *tree = object_at(&game, PREFAB_CUSTOM_ASSET, 236.93f, -89.87f);
+    Object *trunk = object_at(&game, PREFAB_TRIGGER, 237.0f, -90.0f); // the map's invisible chop trigger
+    CHECK(tree && tree->collision_type == COLLISION_TYPE_BOX && near(tree->hitbox_w, 0.1f, 1e-6f), "the solid tree, hbw 0.1");
+    CHECK(trunk && trunk->no_vis, "its invisible 9 x 99 x 9 trigger");
+    if (!tree || !trunk) return;
+    const vec3 box = object_box_size(tree);
+    CHECK(near(box.x, 6.416f, 1e-3f) && near(box.y, 15.36f, 1e-3f) && near(box.z, 6.547f, 1e-3f) && near(tree->scale.x, 64.16f, 1e-3f),
+          "tree box %.3f x %.3f x %.3f = s * 0.1, s kept for the render", box.x, box.y, box.z);
+
+    // The tree is planted through a platform (top y 50) walled at x 260. The trunk alone (the
+    // trigger out of the way): stops at the trunk face, not at the canopy face (+-32.08).
+    const float floor_y = 50.0f;
+    trunk->active = 0;
+    float x = stop_x(p, tree, floor_y, box.x * 0.5f, 1, 15.0f);
+    CHECK(near(x, tree->position.x + box.x * 0.5f + p->scale, 0.05f) && p->on_ground, "+x: stops at the trunk, x %.3f (trunk face %.3f)", x,
+          tree->position.x + box.x * 0.5f);
+    x = stop_x(p, tree, floor_y, box.x * 0.5f, -1, 15.0f);
+    CHECK(near(x, tree->position.x - box.x * 0.5f - p->scale, 0.05f), "-x: stops at the trunk, x %.3f", x);
+    // under the canopy, beside the trunk: walk from outside the canopy (z max -57.1) past the trunk
+    // and on through the far canopy face (z min -122.6; the platform ends at z -115)
+    place(p, tree->position.x + 12.0f, floor_y + 0.01f, -40.0f);
+    for (int i = 0; i < 20; i++) frame(p, 0);
+    walk(p, 0, 150);
+    CHECK(p->position.z < -105.0f && near(p->position.x, tree->position.x + 12.0f, 0.05f), "through the canopy: x %.3f z %.3f", p->position.x,
+          p->position.z);
+    // no floor on the canopy (old top y 200.6): dropped beside the trunk, lands on the platform
+    place(p, tree->position.x + 12.0f, tree->position.y + 153.6f + 5.0f, tree->position.z);
+    for (int i = 0; i < 600; i++) frame(p, 0);
+    CHECK(near(p->position.y, floor_y, 0.05f) && p->on_ground, "no canopy floor: y %.3f", p->position.y);
+
+    // with the map's trigger on (v7: a TRIGGER is a solid box): stops at the 9 x 9 trigger
+    trunk->active = 1;
+    x = stop_x(p, trunk, floor_y, 4.5f, 1, 15.0f);
+    CHECK(near(x, 237.0f + 4.5f + p->scale, 0.05f), "+x with the trigger: x %.3f", x);
+
+    // the model props keep v7 addMesh's full s box (w = sx / 2): crate, barrel, stack
+    static const struct { int prefab; float x, z, half; const char *name; } props[] = {
+        {PREFAB_CRATE, -50.0f, -183.0f, 6.0f, "crate"},
+        {PREFAB_BARREL, -120.0f, -145.0f, 2.96f, "barrel"},
+        {PREFAB_STACK, -192.0f, -234.0f, 6.04f, "stack"},
+    };
+    for (size_t i = 0; i < sizeof(props) / sizeof(props[0]); i++) {
+        Object *o = object_at(&game, props[i].prefab, props[i].x, props[i].z);
+        CHECK(o && o->collision_type == COLLISION_TYPE_BOX, "%s found", props[i].name);
+        if (!o) continue;
+        const vec3 s = object_box_size(o);
+        CHECK(s.x == o->scale.x && s.y == o->scale.y && s.z == o->scale.z && near(s.x * 0.5f, props[i].half, 1e-3f), "%s box = s", props[i].name);
+        x = stop_x(p, o, o->position.y, s.x * 0.5f, 1, 8.0f);
+        CHECK(near(x, o->position.x + s.x * 0.5f + p->scale, 0.05f), "%s: stops at its box face, x %.3f", props[i].name, x);
+    }
+    // l / col props (Lumber's other trees and logs) stay non-solid
+    int no_col = 0;
+    for (size_t i = 0; i < game.map->object_count; i++) {
+        const Object *o = game.map->objects[i];
+        no_col += o->prefab == PREFAB_CUSTOM_ASSET && o != tree && o->collision_type == COLLISION_TYPE_NONE;
+    }
+    CHECK(no_col == 108, "108 noCol custom assets (%d)", no_col);
+    cJSON_Delete(json);
+
+    // hbw / hbh only on CUSTOM_ASSET and TRIGGER (plain and asset), never on addMesh props; a
+    // v3.1.1 record (no hbh / hbw) keeps its full box
+    cJSON *t = cJSON_Parse("{\"name\":\"hb\",\"spawns\":[[0,0,0]],\"objects\":["
+                           "{\"p\":[0,-10,0],\"s\":[600,10,600]},"
+                           "{\"p\":[100,0,0],\"s\":[20,40,30],\"i\":44,\"aid\":\"1\",\"hbw\":0.5,\"hbh\":0.25},"
+                           "{\"p\":[-100,0,0],\"s\":[20,40,30],\"i\":29,\"hbw\":0.5,\"hbh\":2},"
+                           "{\"p\":[0,0,100],\"s\":[20,40,30],\"i\":29,\"aid\":\"1\",\"hbw\":20,\"hbh\":0},"
+                           "{\"p\":[0,0,-100],\"s\":[20,40,30],\"i\":1,\"hbw\":0.5,\"hbh\":0.5},"
+                           "{\"p\":[200,0,0],\"s\":[20,40,30],\"i\":44,\"aid\":\"1\"}]}");
+    game_on(&game, t, 0);
+    CHECK(game.ready, "hb map loaded");
+    if (!game.ready) return;
+    static const struct { int prefab; float x, z, w, h, l; } hb[] = {
+        {PREFAB_CUSTOM_ASSET, 100.0f, 0.0f, 10.0f, 10.0f, 15.0f},
+        {PREFAB_TRIGGER, -100.0f, 0.0f, 10.0f, 80.0f, 15.0f},
+        {PREFAB_TRIGGER, 0.0f, 100.0f, 200.0f, 40.0f, 300.0f}, // limitMM(hbw, 0.1, 10); hbh 0 -> 1
+        {PREFAB_CRATE, 0.0f, -100.0f, 20.0f, 40.0f, 30.0f},    // addMesh ignores hbw / hbh
+        {PREFAB_CUSTOM_ASSET, 200.0f, 0.0f, 20.0f, 40.0f, 30.0f},
+    };
+    for (size_t i = 0; i < sizeof(hb) / sizeof(hb[0]); i++) {
+        const Object *o = object_at(&game, hb[i].prefab, hb[i].x, hb[i].z);
+        const vec3 s = o ? object_box_size(o) : (vec3) {0};
+        CHECK(o && near(s.x, hb[i].w, 1e-4f) && near(s.y, hb[i].h, 1e-4f) && near(s.z, hb[i].l, 1e-4f), "hb[%zu]: %.3f x %.3f x %.3f", i, s.x, s.y, s.z);
+    }
+    p = add_player(&game, 1, 0);
+    const Object *asset = object_at(&game, PREFAB_CUSTOM_ASSET, 100.0f, 0.0f);
+    x = stop_x(p, asset, 0.0f, 5.0f, 1, 20.0f);
+    CHECK(near(x, 105.0f + p->scale, 0.05f), "asset hbw 0.5: stops at x %.3f", x);
+    // hbh 0.25: the box is 10 high from p.y (not 40); dropped on it, the player stands at y 10
+    place(p, 100.0f, 30.0f, 0.0f);
+    for (int i = 0; i < 120; i++) frame(p, 0);
+    CHECK(near(p->position.y, 10.0f, 0.05f) && p->on_ground, "on the hbh-lowered asset: y %.3f", p->position.y);
+    cJSON_Delete(t);
+}
+
 // ---------------------------------------------------------------- wire bits
 
 static void test_input_bits(void) {
@@ -576,6 +703,7 @@ int main(void) {
     test_zones();
     test_own_time();
     test_input_bits();
+    test_prop_collision();
     if (g_failures) {
         printf("world_v7_test FAILED: %d of %d checks\n", g_failures, g_checks);
         return 1;

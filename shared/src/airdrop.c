@@ -117,7 +117,7 @@ static float calc_fall(const Game *game, const vec3 position) {
     for (size_t i = 0; game->map && i < game->map->object_count; i++) {
         const Object *o = game->map->objects[i];
         if (!o->active || o->complex_coll || (o->no_shoot && !o->ramp)) continue;
-        const float t = line_in_rect(origin, segment, o->position, o->scale);
+        const float t = line_in_rect(origin, segment, o->position, object_box_size(o));
         if (t > 0.0f && t < 1.0f && (!nearest || t < nearest)) nearest = t;
     }
     const float terrain = world_terrain_fraction(game, origin, segment);

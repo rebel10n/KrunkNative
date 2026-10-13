@@ -316,8 +316,9 @@ int world_zone_passable(const Player *player, const Object *object) {
 // collidesE(obj, scale + hbS, collPad): the padded box test of the collision loop
 static int world_collides_padded(const Player *player, const Object *object) {
     const float pad = game_constants.collision_padding;
-    const float w = object->scale.x * 0.5f + pad + player->scale, l = object->scale.z * 0.5f + pad + player->scale;
-    const float top = object->position.y + object->scale.y;
+    const vec3 size = object_box_size(object);
+    const float w = size.x * 0.5f + pad + player->scale, l = size.z * 0.5f + pad + player->scale;
+    const float top = object->position.y + size.y;
     return player->position.x > object->position.x - w && player->position.x < object->position.x + w &&
            player->position.z > object->position.z - l && player->position.z < object->position.z + l &&
            player->position.y + player->height >= object->position.y && player->position.y <= top;

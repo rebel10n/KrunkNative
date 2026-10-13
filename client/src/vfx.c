@@ -538,7 +538,7 @@ static float ray_hit(const Game *game, const vec3 origin, const vec3 ray, const 
         const Object *object = game->map->objects[i];
         if (!object_is_shootable(object)) continue;
 
-        const float t = line_in_rect(origin, ray, object->position, object->scale);
+        const float t = line_in_rect(origin, ray, object->position, object_box_size(object)); // the server's combat_trace box
         if (t <= 0.0f || t > 1.0f) continue;
 
         if (best < 0.0f || t < best) {

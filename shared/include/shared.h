@@ -329,7 +329,7 @@ typedef struct {
     float darken;                       // "da"
     int step_sound;                     // "sat" 0..4 (config.stepSounds)
     float spawn_chance;                 // "rsc" 0..100 (%) for a start-destroyed object at round reset
-    float hitbox_h, hitbox_w;           // "hbh" / "hbw" 0.1..10 (1)
+    float hitbox_h, hitbox_w;           // "hbh" / "hbw" 0.1..10 (1): CUSTOM_ASSET / TRIGGER box, object_box_size()
     int spin_axis;                      // "spa" 0 y / 1 x
     float anim_speed;                   // "as" (parseFloat || 0)
     const char *anim_start;             // "ast" <= 32 chars of the trigger text charset (in raw), NULL none
@@ -364,6 +364,20 @@ typedef struct {
     Ramp *ramp;
     void *mesh;
 } Object;
+
+// Full size of a map object's v7 GameObject box (bottom centre `position`). `scale` is the
+// authored "s", the render size. Only addAsset (CUSTOM_ASSET) and addTrigger (TRIGGER, plain or
+// asset) apply the hit box multipliers (v7 MapManager.js:2846-2849 / 2045-2048):
+// w = l = s/2 * hbw, h = s/2 * hbh, y = p.y + h, so the bottom stays at p.y. Every other builder
+// (addMesh model props, addCylinder, the machines...) takes the full s, which v7 also does. A Lumber
+// tree (CUSTOM_ASSET hbw = hbh = 0.1) collides as its trunk, not as its 64 x 154 x 65 canopy.
+// Use this, not `scale`, wherever the code stands in for the GameObject: movement, shots, AIs, bots.
+static inline vec3 object_box_size(const Object *object) {
+    const int hit_box = object->prefab == PREFAB_CUSTOM_ASSET || object->prefab == PREFAB_TRIGGER;
+    const float hbw = hit_box && object->hitbox_w > 0.0f ? object->hitbox_w : 1.0f;
+    const float hbh = hit_box && object->hitbox_h > 0.0f ? object->hitbox_h : 1.0f;
+    return (vec3) {object->scale.x * hbw, object->scale.y * hbh, object->scale.z * hbw};
+}
 
 typedef struct {
     vec3 position;

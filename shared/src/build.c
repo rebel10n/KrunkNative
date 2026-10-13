@@ -237,7 +237,8 @@ typedef struct {
 } BuildBox;
 
 static BuildBox build_box(const Object *o) {
-    return (BuildBox) {o->position.x, o->position.y + o->scale.y * 0.5, o->position.z, o->scale.x * 0.5, o->scale.y * 0.5, o->scale.z * 0.5};
+    const vec3 s = object_box_size(o);
+    return (BuildBox) {o->position.x, o->position.y + s.y * 0.5, o->position.z, s.x * 0.5, s.y * 0.5, s.z * 0.5};
 }
 
 static double js_min(const double a, const double b) { return a != a || b != b ? NAN : a < b ? a : b; }

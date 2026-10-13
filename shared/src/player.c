@@ -710,14 +710,15 @@ static void movement_box(const Object *object, MovementBox *box) {
         box->bottom = object->position.y - h;
         box->top = object->position.y + h;
     } else {
+        const vec3 size = object_box_size(object); // CUSTOM_ASSET / TRIGGER: s * hbw / hbh
         if (object->collision_type == COLLISION_TYPE_CYLINDER) {
-            box->w = box->l = MIN(object->scale.x, object->scale.z) * 0.5f;
+            box->w = box->l = MIN(size.x, size.z) * 0.5f;
         } else {
-            box->w = object->scale.x * 0.5f;
-            box->l = object->scale.z * 0.5f;
+            box->w = size.x * 0.5f;
+            box->l = size.z * 0.5f;
         }
         box->bottom = object->position.y;
-        box->top = object->position.y + object->scale.y;
+        box->top = object->position.y + size.y;
     }
 }
 
@@ -2327,7 +2328,7 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
         const Object *object = game->map->objects[i];
         if (!combat_object_shootable(object)) continue;
 
-        const float t = line_in_rect(origin, dir, object->position, object->scale);
+        const float t = line_in_rect(origin, dir, object->position, object_box_size(object));
         if (t <= 0.0f || t > 1.0f) continue;
 
         hit_list_push(hits, (Hit) {object, NULL, t});
@@ -2836,13 +2837,14 @@ static void combat_send_shot(Player *player, const int ray, const float pitch, c
     if (last && last->object) {
         const Object *object = last->object;
         const float x = packet.hit[0], y = packet.hit[1], z = packet.hit[2];
+        const vec3 size = object_box_size(object);
 
         packet.has_normal = 1;
-        if (y >= object->position.y + object->scale.y) packet.normal_pitch = (float) M_PI / 2.0f;
+        if (y >= object->position.y + size.y) packet.normal_pitch = (float) M_PI / 2.0f;
         else if (y <= object->position.y) packet.normal_pitch = -(float) M_PI / 2.0f;
-        else if (x <= object->position.x - object->scale.x * 0.5f) packet.normal_yaw = -(float) M_PI / 2.0f;
-        else if (x >= object->position.x + object->scale.x * 0.5f) packet.normal_yaw = (float) M_PI / 2.0f;
-        else if (z <= object->position.z - object->scale.z * 0.5f) packet.normal_yaw = (float) M_PI;
+        else if (x <= object->position.x - size.x * 0.5f) packet.normal_yaw = -(float) M_PI / 2.0f;
+        else if (x >= object->position.x + size.x * 0.5f) packet.normal_yaw = (float) M_PI / 2.0f;
+        else if (z <= object->position.z - size.z * 0.5f) packet.normal_yaw = (float) M_PI;
     }
 
     game_send(game, NET_TARGET_EXCEPT(player->uid), NET_PACKET_SHOT, &packet, sizeof(packet)); // players + spectators
@@ -3097,7 +3099,7 @@ static void combat_try_grapple(Player *player, const int fire) {
     for (size_t i = 0; game->map && i < game->map->object_count; i++) {
         const Object *object = game->map->objects[i];
         if (!combat_object_shootable(object) || object->no_grapple) continue;
-        const float t = line_in_rect(origin, dir, object->position, object->scale);
+        const float t = line_in_rect(origin, dir, object->position, object_box_size(object));
         if (t > 0.0f && t <= 1.0f && t < best) best = t;
     }
     if (best > 1.0f) return;

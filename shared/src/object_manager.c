@@ -346,8 +346,9 @@ static int om_ray(const Game *game, const vec3 origin, const vec3 segment, float
     for (size_t i = 0; game->map && i < game->map->object_count; i++) {
         const Object *o = game->map->objects[i];
         if (!o->active || o->no_shoot || o->collision_type == COLLISION_TYPE_NONE) continue;
-        if (o->scale.x <= 0.0f || o->scale.y <= 0.0f || o->scale.z <= 0.0f) continue;
-        const float t = line_in_rect(origin, segment, o->position, o->scale);
+        const vec3 size = object_box_size(o);
+        if (size.x <= 0.0f || size.y <= 0.0f || size.z <= 0.0f) continue;
+        const float t = line_in_rect(origin, segment, o->position, size);
         if (t > 0.0f && t <= 1.0f && t < *best_t) {
             *best_t = t;
             *best_object = (int) i;
@@ -369,10 +370,11 @@ int object_manager_aim(const Game *game, const Player *player, const float pitch
     out->normal = (vec3) {0.0f, 1.0f, 0.0f};
     if (object >= 0) { // the face of the box nearest to the hit point
         const Object *o = game->map->objects[object];
+        const vec3 size = object_box_size(o);
         const float d[6] = {
-            fabsf(out->point.y - (o->position.y + o->scale.y)), fabsf(out->point.y - o->position.y),
-            fabsf(out->point.x - (o->position.x + o->scale.x * 0.5f)), fabsf(out->point.x - (o->position.x - o->scale.x * 0.5f)),
-            fabsf(out->point.z - (o->position.z + o->scale.z * 0.5f)), fabsf(out->point.z - (o->position.z - o->scale.z * 0.5f)),
+            fabsf(out->point.y - (o->position.y + size.y)), fabsf(out->point.y - o->position.y),
+            fabsf(out->point.x - (o->position.x + size.x * 0.5f)), fabsf(out->point.x - (o->position.x - size.x * 0.5f)),
+            fabsf(out->point.z - (o->position.z + size.z * 0.5f)), fabsf(out->point.z - (o->position.z - size.z * 0.5f)),
         };
         const vec3 normals[6] = {{0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
         int face = 0;

@@ -46,8 +46,9 @@ static int collides_box(const Player *p, const vec3 c, const vec3 h, const float
 
 // The GameObject of a KN object (base centre, full size): centre y + h / 2, half extents s / 2.
 static int collides_padded(const Player *p, const Object *o, const float pad) {
-    const vec3 c = {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z};
-    const vec3 h = {o->scale.x * 0.5f, o->scale.y * 0.5f, o->scale.z * 0.5f};
+    const vec3 s = object_box_size(o);
+    const vec3 c = {o->position.x, o->position.y + s.y * 0.5f, o->position.z};
+    const vec3 h = {s.x * 0.5f, s.y * 0.5f, s.z * 0.5f};
     return collides_box(p, c, h, pad);
 }
 
@@ -354,7 +355,7 @@ static void spray_place(Game *game, Player *player, const int skin) {
     for (size_t i = 0; i < game->map->object_count; i++) {
         const Object *o = game->map->objects[i];
         if (!game_object_shootable(o) || o->no_vis) continue; // !noShoot && !noVis && active
-        const float t = line_in_rect(eye, dir, o->position, o->scale);
+        const float t = line_in_rect(eye, dir, o->position, object_box_size(o));
         if (t <= 0.0f || t > 1.0f || (hit && t >= best)) continue; // L.sort(orderByDst)[0]
         hit = o;
         best = t;
@@ -362,7 +363,8 @@ static void spray_place(Game *game, Player *player, const int skin) {
     if (!hit) return;
 
     const StoreSpray *item = store_spray(skin);
-    const float w = hit->scale.x * 0.5f, h = hit->scale.y * 0.5f, l = hit->scale.z * 0.5f;
+    const vec3 size = object_box_size(hit);
+    const float w = size.x * 0.5f, h = size.y * 0.5f, l = size.z * 0.5f;
     const float cx = hit->position.x, cy = hit->position.y + h, cz = hit->position.z;
     const float range = GAME_SPRAY_RANGE * best - 0.1f;
     float y = eye.y + range * sinf(pitch);

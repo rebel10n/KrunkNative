@@ -787,9 +787,10 @@ static int ai_can_see_from(const Game *game, const vec3 feet, const float height
     for (size_t i = 0; i < game->map->object_count; i++) {
         const Object *object = game->map->objects[i];
         if (!ai_object_blocks(object) || object->complex_coll) continue;
-        const double hx = object->scale.x * 0.5, hz = object->scale.z * 0.5;
+        const vec3 size = object_box_size(object);
+        const double hx = size.x * 0.5, hz = size.z * 0.5;
         const double a = (object->position.x - hx - ox) * ix, b = (object->position.x + hx - ox) * ix;
-        const double c = (object->position.y - oy) * iy, d = (object->position.y + object->scale.y - oy) * iy;
+        const double c = (object->position.y - oy) * iy, d = (object->position.y + size.y - oy) * iy;
         const double e = (object->position.z - hz - oz) * iz, f = (object->position.z + hz - oz) * iz;
         const double near = js_max(js_max(js_min(a, b), js_min(c, d)), js_min(e, f));
         const double far = js_min(js_min(js_max(a, b), js_max(c, d)), js_max(e, f));
@@ -1371,7 +1372,8 @@ static void ai_collide_map(Game *game, GameAI *ai, const float q, const float ml
         const Object *o = game->map->objects[i];
         if (!ai_object_collides(o)) continue;
         // v7 boxes: centre x / y / z, half width / height / length
-        const float w = o->scale.x * 0.5f, h = o->scale.y * 0.5f, l = o->scale.z * 0.5f;
+        const vec3 size = object_box_size(o);
+        const float w = size.x * 0.5f, h = size.y * 0.5f, l = size.z * 0.5f;
         const float x = o->position.x, y = o->position.y + h, z = o->position.z;
         if (!ai_collides_acc(ai, x, y, z, w, h, l)) continue;
         vec3 *p = &ai->position;

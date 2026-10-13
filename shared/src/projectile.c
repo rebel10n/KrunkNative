@@ -189,7 +189,7 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         if (!projectile_object_blocks(object)) continue;
         if (game_ai_projectile_skips_objects(game, projectile)) break; // projOb.noObjC (WP-F, shared/src/ai.c)
 
-        const float t = line_in_rect(projectile->position, step, object->position, object->scale);
+        const float t = line_in_rect(projectile->position, step, object->position, object_box_size(object));
         if (t > 0.0f && t <= 1.0f && t < best.t) {
             best = (ProjectileHit) {NULL, NULL, t, (Object *) object};
             *hit_any = 1;
