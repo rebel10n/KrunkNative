@@ -15,6 +15,7 @@
 #include <html_dom.h>
 #include <cJSON.h>
 #include <emscripten.h>
+#include <gl.h>
 #include <GLFW/glfw3.h>
 #include <ui_logic.h>
 #include <stdio.h>
@@ -154,6 +155,31 @@ EM_JS(void, kn_js_canvas_put, (int id, const unsigned char *rgba, int w, int h),
     var ctx = el.getContext('2d');
     if (!ctx) return;
     ctx.putImageData(new ImageData(new Uint8ClampedArray(HEAPU8.buffer, rgba, w * h * 4).slice(), w, h), 0, 0);
+});
+
+// html_dom_canvas_gl, tex 0: a transparent bitmap again.
+EM_JS(void, kn_js_canvas_clear, (int id), {
+    var el = knEl(id);
+    var ctx = el && el.getContext ? el.getContext('2d') : null;
+    if (ctx) ctx.clearRect(0, 0, el.width, el.height);
+});
+
+// html_dom_canvas_gl's frame: like kn_js_canvas_put, without the copy (the ImageData is used at once).
+EM_JS(void, kn_js_canvas_put_now, (int id, const unsigned char *rgba, int w, int h), {
+    var el = knEl(id);
+    if (!el || !el.getContext) return;
+    if (el.width !== w) el.width = w;
+    if (el.height !== h) el.height = h;
+    var ctx = el.getContext('2d');
+    if (ctx) ctx.putImageData(new ImageData(new Uint8ClampedArray(HEAPU8.buffer, rgba, w * h * 4), w, h), 0, 0);
+});
+
+// html_dom_canvas_gl's cost (tests read it): calls that delivered a frame, mean / max ms of the
+// whole call and the mean of its stages (read the buffer, convert, putImageData, start the next read).
+EM_JS(void, kn_js_canvas_gl_stats, (int frames, double mean_ms, double max_ms, double get_ms, double convert_ms,
+                                    double put_ms, double read_ms, int w, int h), {
+    window.__knCanvasGl = {frames: frames, meanMs: mean_ms, maxMs: max_ms, getMs: get_ms, convertMs: convert_ms,
+                           putMs: put_ms, readMs: read_ms, width: w, height: h};
 });
 
 EM_JS(void, kn_js_set_attr, (int id, const char *name, const char *value), {
@@ -697,6 +723,154 @@ void html_dom_set_attr(const HtmlElem e, const char *name, const char *value) {
 
 void html_dom_canvas_put(const HtmlElem e, const unsigned char *rgba, const int w, const int h) {
     if (e && rgba && w > 0 && h > 0) kn_js_canvas_put((int) e, rgba, w, h);
+}
+
+// ---- html_dom_canvas_gl: a GL render target shown in the page's own <canvas>
+//
+// The page is the browser's DOM above the WebGL canvas, so the render target's pixels must reach
+// the page's canvas element (a 2D canvas, at its place in the page's paint order). The copy never
+// stalls on the GPU: readPixels goes into a pixel-pack buffer with a fence (WebGL2), and the pixels
+// are put into the canvas once the fence has signalled, normally the next frame (WebGL updates a
+// fence's status only between tasks). Two buffers, so a read is in flight every frame; while both
+// are busy a frame is skipped. The canvas shows the render one frame late.
+#define WEB_GL_CANVASES 4
+// WebGL2's getBufferSubData (Emscripten's GL library); the GLES 3.0 headers don't declare it.
+void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, void *data);
+#define WEB_GL_CANVAS_STATS_EVERY 30
+
+typedef struct {
+    HtmlElem e;
+    GLuint pbo[2];
+    GLsync fence[2];
+    int w[2], h[2];         // size of the read in each buffer
+    size_t pbo_size[2];
+    int next;               // buffer the next read goes into
+    unsigned char *pixels;  // straight RGBA, row 0 on top (putImageData)
+    size_t pixels_size;
+} WebGlCanvas;
+
+static WebGlCanvas g_gl_canvases[WEB_GL_CANVASES];
+static struct { int frames; double total_ms, max_ms, get_ms, convert_ms, put_ms, read_ms; } g_gl_canvas_stats;
+
+static WebGlCanvas *web_gl_canvas(const HtmlElem e, const int create) {
+    WebGlCanvas *free_slot = NULL;
+    for (int i = 0; i < WEB_GL_CANVASES; i++) {
+        if (g_gl_canvases[i].e == e) return &g_gl_canvases[i];
+        if (!g_gl_canvases[i].e && !free_slot) free_slot = &g_gl_canvases[i];
+    }
+    if (!create || !free_slot) return NULL;
+    memset(free_slot, 0, sizeof(*free_slot));
+    free_slot->e = e;
+    return free_slot;
+}
+
+static void web_gl_canvas_forget(WebGlCanvas *c) {
+    for (int i = 0; i < 2; i++) {
+        if (c->fence[i]) glDeleteSync(c->fence[i]);
+        if (c->pbo[i]) glDeleteBuffers(1, &c->pbo[i]);
+    }
+    free(c->pixels);
+    memset(c, 0, sizeof(*c));
+}
+
+// The GL rows are bottom-up and premultiplied; putImageData takes straight alpha, top-down.
+static void web_gl_canvas_deliver(WebGlCanvas *c, const int i) {
+    const int w = c->w[i], h = c->h[i];
+    const size_t size = (size_t) w * (size_t) h * 4;
+    if (c->pixels_size < size * 2) {
+        unsigned char *grown = realloc(c->pixels, size * 2);
+        if (!grown) return;
+        c->pixels = grown;
+        c->pixels_size = size * 2;
+    }
+    unsigned char *raw = c->pixels + size, *out = c->pixels;
+    const double t0 = emscripten_get_now();
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, c->pbo[i]);
+    glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr) size, raw);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    const double t1 = emscripten_get_now();
+    for (int y = 0; y < h; y++) {
+        const unsigned char *src = raw + (size_t) (h - 1 - y) * (size_t) w * 4;
+        unsigned char *dst = out + (size_t) y * (size_t) w * 4;
+        for (int x = 0; x < w * 4; x += 4) {
+            const unsigned a = src[x + 3];
+            if (a == 255 || a == 0) {
+                memcpy(dst + x, src + x, 4);
+                continue;
+            }
+            for (int k = 0; k < 3; k++) {
+                const unsigned v = (src[x + k] * 255u + a / 2) / a;
+                dst[x + k] = (unsigned char) (v > 255 ? 255 : v);
+            }
+            dst[x + 3] = (unsigned char) a;
+        }
+    }
+    const double t2 = emscripten_get_now();
+    kn_js_canvas_put_now((int) c->e, out, w, h);
+    g_gl_canvas_stats.get_ms += t1 - t0;
+    g_gl_canvas_stats.convert_ms += t2 - t1;
+    g_gl_canvas_stats.put_ms += emscripten_get_now() - t2;
+}
+
+void html_dom_canvas_gl(const HtmlElem e, const unsigned tex, const unsigned fbo, const int w, const int h) {
+    if (!e) return;
+    if (!tex || w <= 0 || h <= 0) {
+        WebGlCanvas *c = web_gl_canvas(e, 0);
+        if (c) web_gl_canvas_forget(c);
+        kn_js_canvas_clear((int) e);
+        return;
+    }
+    WebGlCanvas *c = web_gl_canvas(e, 1);
+    if (!c) return;
+    const double start = emscripten_get_now();
+    int delivered = 0;
+    for (int k = 0; k < 2; k++) { // the older read first
+        const int i = (c->next + k) & 1;
+        if (!c->fence[i]) continue;
+        const GLenum status = glClientWaitSync(c->fence[i], 0, 0);
+        if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED) continue;
+        glDeleteSync(c->fence[i]);
+        c->fence[i] = 0;
+        web_gl_canvas_deliver(c, i);
+        delivered = 1;
+    }
+    const int i = c->next;
+    const double read_start = emscripten_get_now();
+    if (!c->fence[i]) {
+        GLint prev_read = 0, prev_align = 4;
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
+        glGetIntegerv(GL_PACK_ALIGNMENT, &prev_align);
+        const size_t size = (size_t) w * (size_t) h * 4;
+        if (!c->pbo[i]) glGenBuffers(1, &c->pbo[i]);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, c->pbo[i]);
+        if (c->pbo_size[i] != size) {
+            glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr) size, NULL, GL_STREAM_READ);
+            c->pbo_size[i] = size;
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, prev_align);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint) prev_read);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        c->fence[i] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        c->w[i] = w;
+        c->h[i] = h;
+        c->next = i ^ 1;
+    }
+    if (delivered) g_gl_canvas_stats.read_ms += emscripten_get_now() - read_start;
+    if (delivered) {
+        const double ms = emscripten_get_now() - start;
+        g_gl_canvas_stats.frames++;
+        g_gl_canvas_stats.total_ms += ms;
+        if (ms > g_gl_canvas_stats.max_ms) g_gl_canvas_stats.max_ms = ms;
+        if (g_gl_canvas_stats.frames % WEB_GL_CANVAS_STATS_EVERY == 0) {
+            const double n = g_gl_canvas_stats.frames;
+            kn_js_canvas_gl_stats(g_gl_canvas_stats.frames, g_gl_canvas_stats.total_ms / n, g_gl_canvas_stats.max_ms,
+                                  g_gl_canvas_stats.get_ms / n, g_gl_canvas_stats.convert_ms / n, g_gl_canvas_stats.put_ms / n,
+                                  g_gl_canvas_stats.read_ms / n, w, h);
+        }
+    }
 }
 
 void html_dom_remove_attr(const HtmlElem e, const char *name) { if (e && name) kn_js_remove_attr((int) e, name); }

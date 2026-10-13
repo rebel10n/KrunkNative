@@ -404,7 +404,7 @@ static void test_box_shadow(void)
         CHECK_F(it->u.box_shadow.rect.w, 200);
     }
 
-    /* #knPreviewHole: 0 0 0 4000px rgba(0,0,0,.5) inside overflow:hidden */
+    /* a cut-out (#knSpinHole): 0 0 0 4000px rgba(0,0,0,.5) inside overflow:hidden */
     reset_tree(); fresh_ctx();
     root = mk_root();
     Box *holder = mk(root, BOX_BLOCK, 100, 100, 600, 400);
@@ -830,6 +830,17 @@ static void test_text_shadow(void)
     if (expect_ops("visibility", &g_dl, ops3)) CHECK(g_dl.items[0].u.rect.color.r == 2);
 }
 
+static int gl_canvas_hook(void *user, const Box *box, uint32_t *tex, float *w, float *h, int *flip_y)
+{
+    (void) user;
+    (void) box;
+    *tex = 77;
+    *w = 660;
+    *h = 350;
+    *flip_y = 1;
+    return 1;
+}
+
 static void test_replaced(void)
 {
     printf("replaced images, object-fit cover, canvas\n");
@@ -856,6 +867,25 @@ static void test_replaced(void)
         CHECK_F(it->u.image.uv[2], 0.7f);
         CHECK_F(it->u.image.uv[1], 0);
         CHECK_F(it->u.image.uv[3], 1);
+    }
+
+    /* html_dom_canvas_gl: a GL render target (row 0 at the bottom) fills the canvas box flipped */
+    reset_tree(); fresh_ctx();
+    root = mk_root();
+    canvas = mk(root, BOX_CANVAS, 10, 20, 660, 350);
+    canvas->flags |= BOXF_BLOCK_LEVEL;
+    g_ctx.host.canvas_image = gl_canvas_hook;
+    build(root);
+    const int ops2[] = {DL_IMAGE, -1};
+    if (expect_ops("gl canvas", &g_dl, ops2)) {
+        const DlItem *it = &g_dl.items[0];
+        CHECK(it->u.image.tex == 77 && it->u.image.premultiplied);
+        CHECK_F(it->u.image.dst.w, 660);
+        CHECK_F(it->u.image.dst.h, 350);
+        CHECK_F(it->u.image.uv[0], 0);
+        CHECK_F(it->u.image.uv[2], 1);
+        CHECK_F(it->u.image.uv[1], 1);
+        CHECK_F(it->u.image.uv[3], 0);
     }
 }
 
@@ -1244,7 +1274,7 @@ static void test_url_base_and_cutout(void)
     build(root);
     CHECK(g_last_image_base && !strcmp(g_last_image_base, "index.html"));
 
-    /* #knPreviewHole inside #uiBase scale(0.627): cut-out edges on whole device px */
+    /* a cut-out inside #uiBase scale(0.627): edges on whole device px */
     reset_tree(); fresh_ctx();
     root = mk_root();
     Box *base = mk(root, BOX_BLOCK, 0, 0, 2040, 1148);

@@ -68,6 +68,9 @@ void engine_before_move(Engine *g, HtmlElem e);
 /* html_dom_canvas_put: a <canvas>'s bitmap (straight RGBA8, row 0 on top), w x h px.
  * Uploaded as a texture the paint of the canvas box draws; 0 on failure. */
 int engine_canvas_put(Engine *g, HtmlElem e, const unsigned char *rgba, int w, int h);
+/* html_dom_canvas_gl: the canvas paints the client's GL texture (premultiplied RGBA, w x h,
+ * row 0 at the bottom; not owned, sampled at every submit); tex 0 forgets it. */
+void engine_canvas_gl(Engine *g, HtmlElem e, unsigned tex, int w, int h);
 /* Only the paint output changed (widget value, scroll offset). */
 void engine_mark_paint(Engine *g, HtmlElem e); /* e = 0: everything */
 

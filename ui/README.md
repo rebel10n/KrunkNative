@@ -183,10 +183,12 @@ captures: `doc/ref/krunker-v7.1.4/hub/`.
 - Clicking the dimmed `#instructionHolder` plays (a click with a window open
   just closes the window); ESC closes a window, otherwise toggles the menu.
 - The class preview is Krunker's `#classPreviewCanvas` (750x600 CSS px inside
-  the scaled `#menuClassContainer`), left transparent. The UI logic reads its
-  screen rectangle on setup, resize, menu open/close, class change and whenever
-  its layout changes (resize observer) and the client renders the selected
-  class's player model there.
+  the scaled `#menuClassContainer`). The UI logic reads its screen rectangle on
+  setup, resize, menu open/close, class change and whenever its layout changes
+  (resize observer); the client renders the selected class's player model at
+  the box's device-pixel size and the page shows it as the canvas's bitmap
+  (`html_dom_canvas_gl`), transparent around the model, so the canvas stays in
+  the page's paint order (above `#instructionHolder`'s shade, under popups).
 - Guests cannot set a name in Krunker's chrome; the Account window's username
   field ("Login"/"Register") doubles as the nickname.
 - Links that leave the page in Krunker (`Hub` = `social.html`, Discord, Terms,

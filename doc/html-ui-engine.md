@@ -89,6 +89,14 @@ elements stay valid. All geometry is in CSS px from the viewport's top-left.
   uploads a texture that the canvas box paints (an untouched canvas paints nothing), on the web
   `web_dom.c` writes the page's real canvas. Like Chrome, a canvas has no UA size: its natural
   size is the bitmap's (300 x 150 by default).
+- **Canvas GL frame**: `canvas_gl(el, tex, fbo, w, h)` makes a GL render target the canvas's
+  bitmap, like a WebGL canvas's drawing buffer: premultiplied RGBA8, row 0 at the bottom, rendered
+  by the client every frame before `html_ui_render()` (the class preview, `class_preview.c`). The
+  canvas keeps its place in the page's paint order, so shades below it show through its
+  transparent pixels and what lies above covers it (no holes). Natively the engine samples `tex`
+  when it paints the box (no copy); on the web `web_dom.c` reads `fbo` back without stalling
+  (pixel-pack buffer + fence, one frame late) and `putImageData`s it into the page's canvas
+  (`window.__knCanvasGl` holds the copy's cost). `tex` 0: transparent again.
 - **Geometry** (valid after layout; 0 while `display:none`): `get_rect`
   (getBoundingClientRect), `offset_width/height`, `viewport(w, h, dpr)`,
   `observe_resize(el, fn, user)` (ResizeObserver equivalent, coalesced per frame),
@@ -253,7 +261,7 @@ in `client_menu_tick()`), and the client uses its built-in menu text and HUD.
 | `KRUNKNATIVE_HTML_FALLBACK_FONT=<path>[:<path>...]` | text: fallback faces for missing glyphs |
 | `KRUNKNATIVE_AUTOPLAY=1` (web `?kn_autoplay=1`) | enter the game as soon as page and map are ready (headless HUD screenshots) |
 | `KRUNKNATIVE_HUD_DEMO=1` (web `?kn_hud_demo=1`) | loop kill-feed rows and hit markers |
-| `KRUNKNATIVE_PREVIEW_TEST=1`, `KRUNKNATIVE_PREVIEW_DUMP=<file.ppm>`, `KRUNKNATIVE_PREVIEW_WORLD=1` | class-preview debugging (`client/src/ui/class_preview.c`) |
+| `KRUNKNATIVE_PREVIEW_TEST=1`, `KRUNKNATIVE_PREVIEW_DUMP=<file.ppm>`, `KRUNKNATIVE_PREVIEW_LOG=1`, `KRUNKNATIVE_PREVIEW_WORLD=1` | class-preview debugging (`client/src/ui/class_preview.c`) |
 
 ## Checks
 

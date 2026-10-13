@@ -367,39 +367,9 @@ static void ut_style(const char *id, const char *prop, const char *value) {
     else fprintf(stderr, "ui_test: #%s not found (style %s)\n", id, prop);
 }
 
-// krunknative.js updatePreviewHole(canvas): cut #instructionHolder's 50 % dim
-// open over #classPreviewCanvas (the engine draws the class preview underneath).
-static void ut_preview_hole(void) {
-    const HtmlElem holder = ut_elem("instructionHolder"), canvas = ut_elem("classPreviewCanvas");
-    HtmlRect hr, cr;
-    if (!holder || !canvas || !html_dom_get_rect(holder, &hr) || !html_dom_get_rect(canvas, &cr) || !cr.w || !cr.h) {
-        if (holder) html_dom_set_class(holder, "kn-hole", 0);
-        return;
-    }
-    HtmlElem hole = ut_elem("knPreviewHole");
-    if (!hole) {
-        hole = html_dom_create("div", "knPreviewHole");
-        html_dom_append(holder, hole);
-    }
-    const float ow = html_dom_offset_width(holder);
-    float k = ow > 0.0f ? hr.w / ow : 1.0f;
-    if (k == 0.0f) k = 1.0f;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.2fpx", (cr.x - hr.x) / k);
-    html_dom_set_style(hole, "left", buf);
-    snprintf(buf, sizeof(buf), "%.2fpx", (cr.y - hr.y) / k);
-    html_dom_set_style(hole, "top", buf);
-    snprintf(buf, sizeof(buf), "%.2fpx", cr.w / k);
-    html_dom_set_style(hole, "width", buf);
-    snprintf(buf, sizeof(buf), "%.2fpx", cr.h / k);
-    html_dom_set_style(hole, "height", buf);
-    html_dom_set_class(holder, "kn-hole", 1);
-}
-
 // krunknative.js setupDom() + applyMenuOpen(true) + updatePlayInstructions()
 // (connected, map ready: "CLICK TO PLAY") + updateClassBox() for class 0 / Guest
-// + scaleBase() with the default scaleUI 0.8 for a w x h viewport +
-// sendPreviewRect()'s updatePreviewHole().
+// + scaleBase() with the default scaleUI 0.8 for a w x h viewport.
 static void ut_menu_preset(int w, int h) {
     HtmlElem e;
     // setupDom()
@@ -462,7 +432,6 @@ static void ut_menu_preset(int w, int h) {
         snprintf(buf, sizeof(buf), "%.3fpx", h / sx);
         ut_style("uiBase", "height", buf);
     }
-    ut_preview_hole();
     html_ui_set_menu_open(1);
 }
 

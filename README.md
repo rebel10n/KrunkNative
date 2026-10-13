@@ -146,7 +146,7 @@ Leave `KRUNKNATIVE_PACKET_LOG` unset, or set it to `0`, to disable packet loggin
 | `KRUNKNATIVE_HTML_TEXT_GAMMA=<gamma>:<contrast>` | text gamma/contrast (default 2.2:0.5) |
 | `KRUNKNATIVE_AUTOPLAY=1` | enter the game as soon as the page and map are ready |
 | `KRUNKNATIVE_PREVIEW_TEST=1` | force a fixed class-preview rectangle while the menu is open |
-| `KRUNKNATIVE_PREVIEW_DUMP=<file.ppm>` | dump the raw framebuffer after the class-preview draw |
+| `KRUNKNATIVE_PREVIEW_DUMP=<file.ppm>` | dump the class preview's render target (the canvas's bitmap, over black) |
 | `KRUNKNATIVE_PREVIEW_WORLD=1` | also place a third-person copy of the preview model in the world scene |
 
 More engine knobs (text rendering, HUD demo) are listed in

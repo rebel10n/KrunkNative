@@ -92,6 +92,15 @@ void     html_dom_code_lines(HtmlElem, const HtmlCodeLine *lines, int n);
 // <canvas> bitmap (getContext("2d").putImageData after width = w / height = h): straight
 // RGBA8, row 0 on top, w x h px. The C UI draws on the CPU (client/src/ui/canvas2d.c).
 void     html_dom_canvas_put(HtmlElem canvas, const unsigned char *rgba, int w, int h);
+// <canvas> showing a GL render target, like a WebGL canvas's drawing buffer: the client renders
+// premultiplied RGBA8 (w x h px, row 0 at the bottom, GL's order) into colour attachment 0 of
+// `fbo` = texture `tex`, then calls this, every frame it renders, before html_ui_render(). The
+// canvas box keeps its place in the page's paint order (what is above it covers it, what is
+// below shows through its transparent pixels). Natively the engine samples `tex` when it paints
+// the box (no copy; the caller owns tex/fbo and passes tex 0 before deleting them); on the web
+// web_dom.c reads `fbo` back and puts the pixels into the page's real canvas. tex 0: the canvas
+// shows nothing (transparent) again.
+void     html_dom_canvas_gl(HtmlElem canvas, unsigned tex, unsigned fbo, int w, int h);
 int      html_dom_get_rect(HtmlElem, HtmlRect *out);
 // What a player sees of the element (tests: the input script's `vis`): 1 when it is rendered
 // (no display:none on it or an ancestor), not visibility:hidden, its opacity (times its

@@ -479,33 +479,6 @@ void ui_scenario_draw_background(void) {
     if (scissor) glEnable(GL_SCISSOR_TEST);
 }
 
-// class_preview.c dims the scene behind the model (PREVIEW_BACKDROP_ALPHA 0.5) inside the
-// hole the page cuts into #instructionHolder. Without the preview that rect would show
-// the background undimmed: fill it with the dimmed flat colour instead. An image
-// background (a reference capture) already holds the real preview pixels there.
-#define SCENARIO_PREVIEW_BACKDROP_ALPHA 0.5f
-
-void ui_scenario_preview_backdrop(Client *client) {
-    const ClassPreview *p = &client->class_preview;
-    if (!g_sc.active || !g_sc.bg_is_color || !html_ui_is_menu_open() || !p->has_rect || !p->visible) return;
-    const int x = (int) lroundf(p->x), top = (int) lroundf(p->y);
-    const int w = (int) lroundf(p->width), h = (int) lroundf(p->height);
-    if (w <= 0 || h <= 0) return;
-    GLfloat clear[4];
-    GLint box[4];
-    glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
-    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
-    glGetIntegerv(GL_SCISSOR_BOX, box);
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(x, g_sc.h - top - h, w, h);
-    const float k = 1.0f - SCENARIO_PREVIEW_BACKDROP_ALPHA;
-    glClearColor(g_sc.bg_rgb[0] * k, g_sc.bg_rgb[1] * k, g_sc.bg_rgb[2] * k, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(clear[0], clear[1], clear[2], clear[3]);
-    glScissor(box[0], box[1], box[2], box[3]);
-    if (!scissor) glDisable(GL_SCISSOR_TEST);
-}
-
 /* ------------------------------------------------------------ frames */
 
 // One client frame at virtual time `clock_ms` (the real main loop's client_frame with
@@ -996,5 +969,4 @@ int ui_scenario_run(Client *client) { (void) client; return 1; }
 void ui_scenario_end(void) {}
 void ui_scenario_draw_background(void) {}
 int ui_scenario_draws_preview(void) { return 0; }
-void ui_scenario_preview_backdrop(Client *client) { (void) client; }
 #endif // KRUNKNATIVE_HTML_ENGINE && !__EMSCRIPTEN__

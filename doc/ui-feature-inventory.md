@@ -26,7 +26,7 @@ renders: doc/ref/krunker-v3.1.1/.
 4. `z-index` values exceed int32 (`99999999999999999999`): clamp to 2147483647 like Chrome, ties by document order.
 5. `#chatList` and `.classList` use `direction: rtl` to put the scrollbar on the left; `.classList` is `overflow-y: scroll`.
 6. `position: sticky` (`.settingsHeader`, `.serverHeader`) inside the `#menuWindow` scroller.
-7. `#knPreviewHole` uses `box-shadow: 0 0 0 4000px rgba(0,0,0,.5)` clipped by `overflow:hidden`.
+7. `#knSpinHole` (the prize wheel) uses `box-shadow: 0 0 0 4000px rgba(0,0,0,.5)` clipped by `overflow:hidden`; the class preview is `#classPreviewCanvas`'s own bitmap (`html_dom_canvas_gl`).
 8. Malformed markup to parse like Chrome: `</br>` (= `<br>`), stray `</img>`/`</input>`, `type="undefined"`/`type="input"` (= text), 564 `&quot;` in handler attributes.
 9. Duplicate ids (`customWSet110..120`, `androidPayB`, `endAMerger`, `endAContainer`, `setHed_mobile`, `setBod_mobile`): first match wins.
 10. `animation: sprayAnm` has no keyframes. `@keyframes grow` has only `from` and animates `font-size` (re-layout every frame, `0.8s infinite alternate` on `#instructions`).
@@ -151,14 +151,14 @@ All raster assets are PNG (color types 2, 3 with tRNS, 6). Only `img/medal.svg` 
 |---|---:|---:|---|
 | style.display | 28 | 46 | menuHolder, menuHider, speakerDisplay, supportMapCreator, gameNameHolder, spectButton, spinUI, respinUI, endUI, instructionHolder, baseLinks, newLeaderDisplay, terminalHolder, windowHolder, loadingBg, consentBlock, bdayBlock, menuFPSDisplay, teamSelector, `.settName`/`.setHed`/`setBod_*`; ~40 HUD ids (inGameUI, aimRecticle, overlay, vignette, topLeftHolder, topRight, bottomLeftHolder, botRightHider, weapDisplay, bottomRight, igXPBar, chatUI, killCardHolder, leaderDisplay, kill/death/streak/scoreCount, fpsDisplay, pingDisplay, killFeed, ammoDisplay, reloadMsg, timerDisplay, …) |
 | style.visibility / opacity / transform | 2 / 1 / 6 | – / 10 / – | menuClassContainer; vignette, teamName, igXPBar, chatList, aimRecticle, knCrosshair, knHitmarker, weapon icons; `#uiBase scale()`, `#bubbleContainer scale(1/0)` |
-| style width/height/left/top/bottom | 11 / 4 | – | uiBase, classPreviewCanvas, knPreviewHole, chatHolder, voiceDisplay |
+| style width/height/left/top/bottom | 11 / 4 | – | uiBase, classPreviewCanvas, chatHolder, voiceDisplay |
 | style pointerEvents/overflowY/background/backgroundSize/backgroundColor/color/maxHeight/marginRight | 3 | 5 | instructionHolder, menuWindow, canvas, ammoDisplay (`N% auto`), igXPBarProg, pingIcon, chatList, feed icon |
 | style.setProperty(--kn-*) | – | 6 | `--kn-cross-size` per frame; hit-marker vars per animation frame |
-| classList toggle/add/remove | 7 | 3 | `html.kn-menu-open`, `html.kn-hud-visible`, `html.kn-preview-bg`, `#uiBase.onMenu/.onGame`, `#instructionHolder.kn-hole`, `#menuWindow.stickyHeader`, `.menuTabNew.tabANew` |
+| classList toggle/add/remove | 7 | 3 | `html.kn-menu-open`, `html.kn-hud-visible`, `html.kn-preview-bg`, `#uiBase.onMenu/.onGame`, `#menuWindow.stickyHeader`, `.menuTabNew.tabANew` |
 | innerHTML | 10 | 7 | menuWindow (whole windows up to 138 KB), windowHeader, instructions, menuClassSubtext, menuClassNameTag, txtBubble, settHolder; healthValue, healthBar, weapDisplay, curGameInfo, leaderContainerD, chat rows, kill-feed rows |
 | insertAdjacentHTML/Element | – | 3 | kill feed |
 | textContent / nodeValue | 6 | 10 | menuRegionLabel, menuClassName, inviteButton, accResp, `.plusOrMinus`; ammoVal, ammoMax, timerVal, killsVal, deathsVal, myScoreVal, ingameFPS, pingText |
-| createElement/appendChild/removeChild/replaceChild/createTextNode | 3 | 21 | knPreviewHole, knCrosshair(+4), knHitmarker(+4), chat rows, kill-feed rows (cap 8, remove after 4 s) |
+| createElement/appendChild/removeChild/replaceChild/createTextNode | 3 | 21 | knCrosshair(+4), knHitmarker(+4), chat rows, kill-feed rows (cap 8, remove after 4 s) |
 | id/className/src writes, img.onerror | 1 | 15 | hudClassImg, challIcon, feed images |
 | value read/write, checked | 15 | – | `slid_<key>`, `slid_input_<key>`, accName, settSearch, settings controls |
 | getAttribute / querySelector(All) / closest | 6 / 9 / 1 | 2 | onclick/onchange/href/data-ext-href/src; `input[type=range][id^=slid_]`, `input[type=checkbox][onclick]`, `select[onchange]`, `.settName`, `.setHed`, `.plusOrMinus`, `#menuWindow .menuTabNew` |
@@ -168,4 +168,4 @@ All raster assets are PNG (color types 2, 3 with tRNS, 6). Only `img/medal.svg` 
 
 Events: mousedown (#instructionHolder: play / close window; #windowHolder backdrop closes), click (document, intercepts `<a>`), keydown capture (inputs: Escape blurs, Enter on #accName commits; stops propagation), keyup capture, keydown window (Escape closes window / toggles menu), resize (scaleBase), DOMContentLoaded ×3, ResizeObserver ×3, img.onerror ×3.
 
-Bridge events in: menu, state, classes, maps, connect, bridgeReady, hud, killfeed, hit. Calls out: ready, menu, play ×2, previewRect, reconnect, setClass ×2, setMap, setName ×2, setSetting ×4, log. Dynamic ids: `slid_<key>`, `slid_input_<key>`, `setHed_*`/`setBod_*`, `weapItem_N`, `chatMsg_N`, `feed_N`, `gameMapN`, knPreviewHole, knCrosshair, knHitmarker.
+Bridge events in: menu, state, classes, maps, connect, bridgeReady, hud, killfeed, hit. Calls out: ready, menu, play ×2, previewRect, reconnect, setClass ×2, setMap, setName ×2, setSetting ×4, log. Dynamic ids: `slid_<key>`, `slid_input_<key>`, `setHed_*`/`setBod_*`, `weapItem_N`, `chatMsg_N`, `feed_N`, `gameMapN`, knCrosshair, knHitmarker.

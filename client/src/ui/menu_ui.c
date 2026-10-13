@@ -351,98 +351,9 @@ const MenuMap *menu_map_by_name(const char *name) {
 
 // ---------------------------------------------------------------- previewRect
 
-// Cut the dimming layer (#instructionHolder) open over the preview canvas so the
-// engine's render underneath shows undimmed, like Krunker's own canvas that sits
-// above the overlay. Coordinates are the holder's local (scaled #uiBase) space; the
-// hole covers exactly the whole-pixel viewport rect the preview draws its own dimmed
-// backdrop into (x, y, w, h), so the two never leave a one-pixel seam.
-// While a popup is open (K.P.D: Officer Buddy, dialogs), #popupBack (rgba(0,0,0,0.75), z-index 20,
-// below #menuClassContainer's 99999) gets the same hole: in Krunker the model stays
-// bright above the popup backdrop (menu_preview_backdrop_alpha() darkens the box).
-static void place_hole(const char *parent_id, const char *hole_id, const char *shadow, const int on,
-                       const float x, const float y, const float w, const float h) {
-    HtmlElem parent = by_id(parent_id);
-    if (!parent) return;
-    HtmlElem hole = by_id(hole_id);
-    if (!on) {
-        if (hole) html_dom_set_display(hole, "none");
-        return;
-    }
-    if (!hole) {
-        hole = html_dom_create("div", hole_id);
-        if (!hole) return;
-        html_dom_append(parent, hole);
-    }
-    HtmlRect pr = {0};
-    html_dom_get_rect(parent, &pr);
-    const float offset_width = html_dom_offset_width(parent);
-    float k = offset_width > 0.0f ? pr.w / offset_width : 1.0f;
-    if (k == 0.0f) k = 1.0f;
-    char v[48];
-    snprintf(v, sizeof(v), "%.4fpx", (x - pr.x) / k);
-    html_dom_set_style(hole, "left", v);
-    snprintf(v, sizeof(v), "%.4fpx", (y - pr.y) / k);
-    html_dom_set_style(hole, "top", v);
-    snprintf(v, sizeof(v), "%.4fpx", w / k);
-    html_dom_set_style(hole, "width", v);
-    snprintf(v, sizeof(v), "%.4fpx", h / k);
-    html_dom_set_style(hole, "height", v);
-    if (shadow) {
-        html_dom_set_style(hole, "position", "absolute");
-        html_dom_set_style(hole, "pointer-events", "none");
-        html_dom_set_style(hole, "box-shadow", shadow);
-        html_dom_set_display(hole, "block");
-    }
-}
-
-// #popupHolder is showing (K.P.D, confirm/prompt dialogs, ...): its 75% backdrop sits
-// below #menuClassContainer (z-index 99999), so the preview model stays bright.
-static int popup_open(void) {
-    return inline_style_is(by_id("popupHolder"), "display", "block");
-}
-
-static void update_preview_hole(const int visible, const float x, const float y, const float w, const float h) {
-    HtmlElem holder = by_id("instructionHolder");
-    if (!holder) return;
-    // #instructionsFadeBG (#222, faded out by menu_dom_init's opacity 0 over 0.7s; on the
-    // web it stays up while the game loads) lies below #instructionHolder, i.e. above the
-    // preview's own backdrop: in the hole it must show #222 already dimmed by the holder's
-    // 50% (#111), or the box reads as a lighter inset panel until the fade is over.
-    HtmlElem fade = by_id("instructionsFadeBG");
-    if (!visible) {
-        html_dom_set_class(holder, "kn-hole", 0);
-        if (fade) html_dom_set_class(fade, "kn-hole", 0);
-    } else {
-        place_hole("instructionHolder", "knPreviewHole", NULL, 1, x, y, w, h);
-        html_dom_set_class(holder, "kn-hole", 1);
-        if (fade) {
-            place_hole("instructionsFadeBG", "knFadeHole", NULL, 1, x, y, w, h);
-            html_dom_set_class(fade, "kn-hole", 1);
-        }
-    }
-    const int police = visible && popup_open();
-    HtmlElem back = by_id("popupBack");
-    if (back) {
-        html_dom_set_style(back, "background-color", police ? "transparent" : "");
-        html_dom_set_style(back, "overflow", police ? "hidden" : "");
-    }
-    place_hole("popupBack", "knPopupHole", "0 0 0 4000px rgba(0, 0, 0, 0.75)", police, x, y, w, h);
-}
-
-// The class preview's own backdrop inside its box: #instructionHolder's 50% black, and
-// under the K.P.D popup also #popupBack's 75% (1 - 0.5 * 0.25).
-float menu_preview_backdrop_alpha(void) {
-    return popup_open() && g_ui.menu_open ? 0.875f : 0.5f;
-}
-
-// The preview box in whole device pixels: the class preview dims and draws exactly
-// [x, x + w) x [y, y + h) of the framebuffer (class_preview.c), and the holes cut into the
-// page's shades must cover the same pixels, or a column/row at the edge is left undimmed
-// (no shade at all) or dimmed twice. The rect goes to both as CSS px = device px / dpr, so
-// x * dpr lands on a whole pixel for the engine's cut-out snapping and the browser's raster
-// alike. Natively the page is laid out in framebuffer px (dpr 1, html_cursor_scale), so
-// this is the canvas rect rounded to whole px; on the web dpr = devicePixelRatio
-// (e.g. 1.25 under 125% scaling) and the CSS rect is fractional.
+// The class preview's canvas box in whole device pixels: class_preview.c renders a bitmap of
+// exactly w x h device px, which the page draws 1:1 over the box (natively the page is laid out
+// in framebuffer px, dpr 1; on the web dpr = devicePixelRatio, e.g. 1.25 under 125% scaling).
 static void preview_device_rect(const HtmlRect *r, const float dpr, int *x, int *y, int *w, int *h) {
     *x = (int) lroundf(r->x * dpr);
     *y = (int) lroundf(r->y * dpr);
@@ -450,19 +361,15 @@ static void preview_device_rect(const HtmlRect *r, const float dpr, int *x, int 
     *h = (int) lroundf(r->h * dpr);
 }
 
+// sendPreviewRect: where #classPreviewCanvas is and whether it shows. The preview is the canvas's
+// own content (html_dom_canvas_gl), painted at its place in the page, so the page's shades
+// (#instructionHolder's 50%, #popupBack's 75% above it) dim around and over it as in Krunker.
 void menu_send_preview_rect(void) {
     HtmlElem canvas = by_id("classPreviewCanvas");
     float vw, vh, dpr = 1.0f;
     html_dom_viewport(&vw, &vh, &dpr);
     if (dpr <= 0.0f) dpr = 1.0f;
-    if (!g_ui.dom_ready) {
-        HtmlRect r = {0};
-        int x, y, w, h;
-        if (canvas && g_ui.menu_open) html_dom_get_rect(canvas, &r);
-        preview_device_rect(&r, dpr, &x, &y, &w, &h);
-        update_preview_hole(canvas && g_ui.menu_open, (float) x / dpr, (float) y / dpr, (float) w / dpr, (float) h / dpr);
-        return;
-    }
+    if (!g_ui.dom_ready) return;
 
     int visible = 0, x = 0, y = 0, w = 0, h = 0;
     if (canvas && g_ui.menu_open) {
@@ -473,7 +380,6 @@ void menu_send_preview_rect(void) {
         visible = !hidden;
         preview_device_rect(&r, dpr, &x, &y, &w, &h);
     }
-    update_preview_hole(visible, (float) x / dpr, (float) y / dpr, (float) w / dpr, (float) h / dpr);
 
     char key[96];
     snprintf(key, sizeof(key), "%d,%d,%d,%d,%d,%g", visible, x, y, w, h, dpr);
@@ -1309,7 +1215,7 @@ static void setup_dom(void) {
     set_display("frvrFTUEVideoHolder", "none");
     set_display("expertModeBtn", "none");
     // The class preview canvas keeps the size the three.js renderer gives it (750x600 CSS
-    // px); it stays transparent and the engine draws the player model behind it.
+    // px); class_preview.c renders the player model into it (html_dom_canvas_gl).
     set_style("classPreviewCanvas", "width", "750px");
     set_style("classPreviewCanvas", "height", "600px");
     set_style("classPreviewCanvas", "opacity", "1");

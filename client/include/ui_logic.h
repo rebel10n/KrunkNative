@@ -340,7 +340,6 @@ int  ui_scenario_run(Client*);                   // frames + state + PNG; proces
 void ui_scenario_end(void);                      // remove the temporary storage dir
 void ui_scenario_draw_background(void);          // after the frame's glClear, instead of the world
 int  ui_scenario_draws_preview(void);            // state.preview: first-person weapon + class preview
-void ui_scenario_preview_backdrop(Client*);      // no state.preview: only the class preview's dimmed backdrop
 #endif
 // END ui_scenario block
 
@@ -513,7 +512,6 @@ void ui_loadout_reset_pops(void);                // resetPops (the popup holder 
 int social_estimate_value(int skin);             // data/prices.js prices.estimateValue (0 unknown)
 int  ui_police_active(void);                     // Officer Buddy is in the class preview
 void menu_idle_reset(void);                      // menu_ui.c: CONTROLS.idleTimer = 0 (any key, window, menu toggle)
-float menu_preview_backdrop_alpha(void);         // menu_ui.c: class preview backdrop (0.5, 0.875 under the K.P.D popup)
 void ui_games_switch_tab(int tab);               // ui_windows.c: windows[9].switchTab (Custom Games tabs)
 // ui_dialog.c: window.confirm/prompt/alert (web: the browser's; native: the page's
 // #confPop popup) and external links (web: window.open; native: system browser, http(s) only).

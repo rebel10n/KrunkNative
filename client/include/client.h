@@ -493,6 +493,7 @@ void scene_render(const Scene*, Camera*);
 void scene_draw_state(int cull_back, int additive_blend, int depth_write);
 // Called the same way: this draw ignores the depth buffer (three.js depthTest: false).
 void scene_draw_no_depth_test(void);
+void scene_set_alpha_target(int on); // class_preview.c: blended draws keep a premultiplied destination alpha (three.js alpha canvas)
 void scene_draw_cull_front(void); // map-G: after scene_draw_state(1, ...): three.js BackSide (cull front faces)
 void scene_fini(Scene*);
 
@@ -550,6 +551,11 @@ typedef struct {
     const void *map;      // game.map the meshes were generated against
     int step_dir;         // Krunker stepDir for the in-place walk cycle
     double last_time;     // glfwGetTime() of the previous render
+
+    // Render target the page's #classPreviewCanvas shows (html_dom_canvas_gl)
+    unsigned int fbo, color_tex, depth_rb;
+    int target_width, target_height; // allocated size (device px), 0 = none
+    int shown;            // the canvas shows color_tex (a frame was rendered)
 } ClassPreview;
 
 // A server projectile mirrored on the client (Krunker "pr" / "pre").
@@ -714,7 +720,7 @@ void client_hud_html_tick(Client*, float); // HTML HUD (client/src/ui/hud_ui.c)
 
 // Class preview (client/src/ui/class_preview.c). Rect is in CSS px (menu_send_preview_rect in menu_ui.c).
 void client_class_preview_set_rect(Client*, int, float, float, float, float, float);
-void client_class_preview_render(Client*); // after the world/HUD, before html_ui_render()
+void client_class_preview_render(Client*); // renders the canvas's frame; before html_ui_render()
 void client_class_preview_fini(Client*);
 
 void on_client_socket_connect(Client*);

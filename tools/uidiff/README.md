@@ -93,8 +93,8 @@ client starts as usual with these differences:
 - the world is never drawn: after the frame's `glClear` the `background` is painted
   (flat colour, or the image stretched over the framebuffer). The first-person weapon
   and the class preview are drawn only with `state.preview: true`; without it the
-  preview rectangle gets the preview's own 50 % backdrop over a flat background (an
-  image background already holds the real preview pixels);
+  preview canvas stays empty (transparent: the page's shade covers its box like the
+  rest of the background);
 - the window's stencil buffer is filled with 0xFF before the UI draws: its contents are
   undefined on real drivers (non-zero on NVIDIA, 0 on llvmpipe), so a renderer that
   assumes a clean stencil fails here on llvmpipe too;

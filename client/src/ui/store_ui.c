@@ -1193,8 +1193,8 @@ static void set_px(HtmlElem el, const char *prop, const double px) {
 // The menu's dimming layer (#instructionHolder, 50% black) lies under #menuHolder (z-index 10) in
 // Krunker, so the wheel canvas inside #spinUI is drawn undimmed above it. Our wheel is drawn
 // under the whole page (spin_wheel.c), so while it shows the holder's background is swapped for
-// a circular hole over the wheel disc whose spread shadow dims everything else, the way
-// menu_ui.c keeps the class preview bright (#knPreviewHole). The holder's own content
+// a circular hole over the wheel disc whose spread shadow dims everything else (the class
+// preview needs no hole: it is its canvas's own bitmap, html_dom_canvas_gl). The holder's own content
 // (#instructionHider: CLICK TO PLAY / the loading ring, centred under the disc) is hidden
 // meanwhile: Krunker's wheel canvas covers it, ours would show it through the disc.
 static int g_hole_on;

@@ -32,51 +32,12 @@ body {
 }
 
 /* The class preview: Krunker's three.js canvas, kept at its size and position
- * (#menuClassContainer / #classPreviewCanvas in main.css) but left empty; the
- * engine renders the selected class's player model into its screen rectangle
- * (client/src/ui/class_preview.c) underneath the page. */
+ * (#menuClassContainer / #classPreviewCanvas in main.css). Its bitmap is the
+ * selected class's player model, rendered by client/src/ui/class_preview.c
+ * (html_dom_canvas_gl), transparent around the model: the canvas is part of the
+ * page's paint order like Krunker's, above #instructionHolder's shade. */
 #classPreviewCanvas {
   background: transparent;
-}
-
-/* The dimming layer behind the menu is #instructionHolder (50% black in
- * main.css). Krunker's preview canvas sits above it; ours is rendered by the
- * engine underneath the page, so while the preview is visible the holder's
- * own background is swapped for a spread box-shadow cast by a transparent box
- * placed exactly over #classPreviewCanvas (menu_ui.c keeps it in sync with
- * the preview rectangle). Every pixel outside the box stays rgba(0,0,0,0.5). */
-#instructionHolder.kn-hole {
-  background-color: transparent;
-  overflow: hidden;
-}
-#knPreviewHole {
-  display: none;
-  position: absolute;
-  pointer-events: none;
-  box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5);
-}
-#instructionHolder.kn-hole #knPreviewHole {
-  display: block;
-}
-/* #instructionsFadeBG (#222, opacity 1 -> 0 while the menu comes up) lies below
- * the holder, so it would cover the preview's dimmed backdrop with undimmed #222
- * and leave a lighter box until the fade ends. It gets the same hole; the hole
- * box paints #222 already dimmed by the holder's 50% (#111), and the element's
- * opacity fades both together. The engine paints a cut-out box's background
- * on the same device pixels as its shadow's hole (paint.c cutout_rect). */
-#instructionsFadeBG.kn-hole {
-  background-color: transparent;
-  overflow: hidden;
-}
-#knFadeHole {
-  display: none;
-  position: absolute;
-  pointer-events: none;
-  background-color: #111;
-  box-shadow: 0 0 0 4000px #222;
-}
-#instructionsFadeBG.kn-hole #knFadeHole {
-  display: block;
 }
 
 /* Things that literally cannot exist here: ad iframes and the captcha. */

@@ -681,14 +681,14 @@ static DlRadii inner_radii(DlRadii r, const float bw[4])
 }
 
 /* Spread at which an outer box-shadow is a viewport cut-out overlay
- * (`0 0 0 4000px rgba(0,0,0,.5)` on #knPreviewHole / #knPopupHole). */
+ * (`0 0 0 4000px rgba(0,0,0,.5)` on store_ui.c's #knSpinHole). */
 #define PAINT_CUTOUT_SPREAD 1000.0f
 
-/* The cut-out must coincide with the class preview's own backdrop, which
- * client_class_preview fills at lroundf(x, y, w, h) of the viewport rect
- * (hard edges).  So instead of the CSS-px snapping, map the unsnapped box to
- * device px, round x, y, w, h independently the same way and map back: the
- * hole's edges then sit on whole device pixels (no partially dimmed seam). */
+/* The cut-out must coincide with what the client draws under the page at
+ * lroundf(x, y, w, h) of the viewport rect (hard edges).  So instead of the
+ * CSS-px snapping, map the unsnapped box to device px, round x, y, w, h
+ * independently the same way and map back: the hole's edges then sit on whole
+ * device pixels (no partially dimmed seam). */
 static DlRect cutout_rect(const Painter *p, const Box *b, DlRect snapped)
 {
     float x, y;
@@ -1108,8 +1108,8 @@ static void paint_background(Painter *p, const Box *b, DlRect border_rect, DlRad
 
 static void paint_decorations_rect(Painter *p, const Box *b, DlRect rect, unsigned edge_mask)
 {
-    /* A cut-out box (#knFadeHole) also paints its background inside the hole:
-     * same device-pixel rect as the shadow's hole, or the two leave a seam. */
+    /* A cut-out box also paints its background inside the hole: same
+     * device-pixel rect as the shadow's hole, or the two leave a seam. */
     const CssComputed *cs = b->style;
     if (cs && cs->box_shadow_count && !cs->box_shadow.inset && cs->box_shadow.spread >= PAINT_CUTOUT_SPREAD && !box_is_inline(b))
         rect = cutout_rect(p, b, rect);
@@ -1358,9 +1358,10 @@ static void paint_replaced_content(Painter *p, const Box *b)
     const PaintHost *h = &p->ctx->host;
     const int nearest = s->image_rendering == CSS_IMAGE_RENDERING_PIXELATED ||
                         s->image_rendering == CSS_IMAGE_RENDERING_CRISP_EDGES;
-    if (b->type == BOX_CANVAS) { /* html_dom_canvas_put's bitmap, none until the page draws */
+    int flip_y = 0;
+    if (b->type == BOX_CANVAS) { /* html_dom_canvas_put / _gl's bitmap, none until the page draws */
         memset(&img, 0, sizeof img);
-        if (!h->canvas_image || !h->canvas_image(h->user, b, &img.tex, &img.w, &img.h)) return;
+        if (!h->canvas_image || !h->canvas_image(h->user, b, &img.tex, &img.w, &img.h, &flip_y)) return;
         img.premultiplied = 1;
     } else {
         const char *src = h->image_src ? h->image_src(h->user, b) : b->src;
@@ -1372,6 +1373,10 @@ static void paint_replaced_content(Painter *p, const Box *b)
     float uv[4];
     object_fit_rect(s->object_fit, snap_rect(p, content), img.w, img.h, &dst, uv);   /* Blink: snapped content rect */
     if (rect_empty(dst)) return;
+    if (flip_y) { /* a GL render target: v = 1 is its top row */
+        uv[1] = 1.0f - uv[1];
+        uv[3] = 1.0f - uv[3];
+    }
     const DlRadii radii = radii_for_rect(s, border.w, border.h);
     const int clip = !radii_zero(radii);
     if (clip) emit_push_clip(p, padding_rect_of(border, b), inner_radii(radii, b->border));

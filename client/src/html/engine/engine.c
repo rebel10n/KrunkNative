@@ -123,8 +123,9 @@ struct Engine {
     int in_flush;
     int in_after_layout;
 
-    /* <canvas> bitmaps written by html_dom_canvas_put (premultiplied RGBA8, MAX_LEVEL 0) */
-    struct EngineCanvas { HtmlElem e; unsigned tex; int w, h; } *canvases;
+    /* <canvas> bitmaps written by html_dom_canvas_put (premultiplied RGBA8, MAX_LEVEL 0, owned)
+     * or shown with html_dom_canvas_gl (the client's render target: external, row 0 at the bottom) */
+    struct EngineCanvas { HtmlElem e; unsigned tex; int w, h; int external; } *canvases;
     int n_canvases, cap_canvases;
 
     /* animation side table: base (un-animated) computed style per element */
@@ -535,7 +536,7 @@ static struct EngineCanvas *canvas_find(Engine *g, const HtmlElem e)
 
 static void canvas_drop(Engine *g, const int i)
 {
-    if (g->canvases[i].tex) {
+    if (g->canvases[i].tex && !g->canvases[i].external) {
         GLuint tex = g->canvases[i].tex;
         glDeleteTextures(1, &tex);
     }
@@ -544,7 +545,7 @@ static void canvas_drop(Engine *g, const int i)
 
 /* The bitmap of a <canvas> box: what the page drew with html_dom_canvas_put, 0 = none
  * (an untouched canvas paints nothing, like a fresh transparent bitmap). */
-static int paint_canvas_image_hook(void *user, const Box *box, uint32_t *tex, float *w, float *h)
+static int paint_canvas_image_hook(void *user, const Box *box, uint32_t *tex, float *w, float *h, int *flip_y)
 {
     Engine *g = user;
     if (!g || !box || !box->node) return 0;
@@ -554,25 +555,68 @@ static int paint_canvas_image_hook(void *user, const Box *box, uint32_t *tex, fl
     *tex = c->tex;
     *w = (float) c->w;
     *h = (float) c->h;
+    *flip_y = c->external;
     return 1;
+}
+
+static struct EngineCanvas *canvas_slot(Engine *g, const HtmlElem e, int *created)
+{
+    struct EngineCanvas *c = canvas_find(g, e);
+    *created = 0;
+    if (c) return c;
+    if (g->n_canvases == g->cap_canvases) {
+        const int cap = g->cap_canvases ? g->cap_canvases * 2 : 4;
+        struct EngineCanvas *grown = realloc(g->canvases, (size_t) cap * sizeof(*grown));
+        if (!grown) return NULL;
+        g->canvases = grown;
+        g->cap_canvases = cap;
+    }
+    c = &g->canvases[g->n_canvases++];
+    memset(c, 0, sizeof(*c));
+    c->e = e;
+    *created = 1;
+    return c;
+}
+
+/* html_dom_canvas_gl: the canvas box paints the client's GL texture `tex` (premultiplied
+ * RGBA, w x h, row 0 at the bottom) as its bitmap, sampled live at every submit: no copy,
+ * the client renders into it before html_ui_render(). The client owns the texture; tex 0
+ * forgets it (the canvas paints nothing). */
+void engine_canvas_gl(Engine *g, const HtmlElem e, const unsigned tex, const int w, const int h)
+{
+    if (!g || !e) return;
+    if (!tex || w <= 0 || h <= 0) {
+        struct EngineCanvas *c = canvas_find(g, e);
+        if (c) {
+            canvas_drop(g, (int) (c - g->canvases));
+            engine_mark_paint(g, e);
+        }
+        return;
+    }
+    int created;
+    struct EngineCanvas *c = canvas_slot(g, e, &created);
+    if (!c) return;
+    if (!created && c->tex == tex && c->external && c->w == w && c->h == h) return;
+    if (c->tex && !c->external) {
+        GLuint own = c->tex;
+        glDeleteTextures(1, &own);
+    }
+    c->tex = tex;
+    c->external = 1;
+    c->w = w;
+    c->h = h;
+    engine_mark_paint(g, e); /* the display list gains / resizes / retargets the image */
 }
 
 int engine_canvas_put(Engine *g, const HtmlElem e, const unsigned char *rgba, const int w, const int h)
 {
     if (!g || !e || !rgba || w <= 0 || h <= 0) return 0;
-    struct EngineCanvas *c = canvas_find(g, e);
-    int created = 0;
-    if (!c) {
-        if (g->n_canvases == g->cap_canvases) {
-            const int cap = g->cap_canvases ? g->cap_canvases * 2 : 4;
-            struct EngineCanvas *grown = realloc(g->canvases, (size_t) cap * sizeof(*grown));
-            if (!grown) return 0;
-            g->canvases = grown;
-            g->cap_canvases = cap;
-        }
-        c = &g->canvases[g->n_canvases++];
-        memset(c, 0, sizeof(*c));
-        c->e = e;
+    int created;
+    struct EngineCanvas *c = canvas_slot(g, e, &created);
+    if (!c) return 0;
+    if (c->external) { /* back from html_dom_canvas_gl to an own bitmap */
+        c->tex = 0;
+        c->external = 0;
         created = 1;
     }
     /* the engine composites premultiplied (image.h) */

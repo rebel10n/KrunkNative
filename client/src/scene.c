@@ -228,6 +228,20 @@ typedef struct {
 
 static SceneDrawState g_draw_pending;
 static SceneDrawState g_draw_current;
+static int g_alpha_target; // scene_set_alpha_target()
+
+// A render target the page composites with its alpha (premultiplied), like three.js's transparent
+// WebGL canvas: blended draws add their coverage to the destination alpha (three.js NormalBlending:
+// blendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ONE_MINUS_SRC_ALPHA)) instead of
+// glBlendFunc's alpha * alpha. Additive draws stay (SRC_ALPHA, ONE) for both, as in three.js.
+void scene_set_alpha_target(const int on) {
+    g_alpha_target = on ? 1 : 0;
+}
+
+static void scene_blend_func(const int additive) {
+    if (g_alpha_target && !additive) glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    else glBlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+}
 
 void scene_draw_state(const int cull_back, const int additive_blend, const int depth_write) {
     g_draw_pending.cull_back = cull_back ? 1 : 0;
@@ -259,7 +273,7 @@ static void scene_apply_draw_state(void) {
         have->cull_back = want->cull_back;
     }
     if (want->additive_blend != have->additive_blend) {
-        glBlendFunc(GL_SRC_ALPHA, want->additive_blend ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+        scene_blend_func(want->additive_blend);
         have->additive_blend = want->additive_blend;
     }
     if (want->depth_write != have->depth_write) {

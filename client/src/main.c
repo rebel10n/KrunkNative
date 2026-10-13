@@ -1573,11 +1573,8 @@ void client_tick(Client *client, const float now, const float delta) {
     if (debug_capture_hide_ui()) {
         // KRUNKNATIVE_HIDE_UI (debug_capture.c): world only, no page/preview
     } else if (!SCENARIO_ACTIVE() || SCENARIO_PREVIEW()) {
-        client_class_preview_render(client); // selected class model inside the menu's preview box
+        client_class_preview_render(client); // selected class model: the frame of the page's #classPreviewCanvas
     }
-#ifdef UI_SCENARIO_SUPPORTED
-    else ui_scenario_preview_backdrop(client); // the preview's dimmed backdrop without the model
-#endif
     if (!SCENARIO_ACTIVE()) client_render_settings_tick(client); // DOM pieces the display settings control (after the HUD pass)
     if (!debug_capture_hide_ui()) {
         spin_wheel_render(client);           // the prize wheel's canvas under its #spinButton (ui/spin_wheel.c)

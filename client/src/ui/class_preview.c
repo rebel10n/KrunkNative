@@ -3,11 +3,14 @@
 // Krunker's menu renders the selected class into `classPreviewCanvas` with a
 // dedicated three.js scene (index.js: `dJ()` builds a preview player with
 // `players.jLrR6(player, false, true)` and the render loop steps it with
-// `players.Te7(dF, delta * 0.015, true)` + `updateMsh(dF, true)`). Our HTML page
-// has no WebGL canvas of its own: the UI logic reads where its preview box is
-// (menu_send_preview_rect in menu_ui.c, html_dom_get_rect) and we draw the same
-// third-person PlayerMesh into that rectangle of the framebuffer, after the world
-// and before html_ui_render() so the page composites on top.
+// `players.Te7(dF, delta * 0.015, true)` + `updateMsh(dF, true)`) and a transparent
+// WebGLRenderer. We do the same: the third-person PlayerMesh is rendered into an
+// offscreen render target at the canvas's device-pixel size (transparent where the
+// model isn't, premultiplied alpha), and the page shows it as the bitmap of its
+// #classPreviewCanvas (html_dom_canvas_gl). The canvas therefore keeps its place in
+// the page's paint order, as in Krunker: it lies above #instructionHolder's 50% shade
+// and under whatever covers it (#popupHolder's backdrop), and the page needs no holes.
+// menu_send_preview_rect (menu_ui.c) reports the canvas box (html_dom_get_rect).
 //
 // Everything here is client renderer state; the preview Player is a private copy
 // that never joins client->game.players.
@@ -15,7 +18,7 @@
 #include <client.h>
 #include <html_ui.h>
 #include <html_dom.h> // html_dom_viewport
-#include <ui_logic.h> // menu_preview_backdrop_alpha
+#include <ui_logic.h> // ui_loadout_*, ui_police_active
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,10 +42,6 @@
 #define PREVIEW_LIGHT_X 10.0f
 #define PREVIEW_LIGHT_Y 17.0f
 #define PREVIEW_LIGHT_Z (-10.0f)
-// Krunker's preview canvas is transparent and sits above the 50% black menu
-// backdrop (#instructionHolder), so the scene behind the model stays dimmed. Our
-// page cuts an undimmed hole at the rect instead, so we dim it ourselves first.
-// The alpha comes from menu_preview_backdrop_alpha() (0.5; 0.875 under the K.P.D popup).
 // The preview player is created with init(0, 0, 0, "preview") and never turned:
 // yaw 0 faces -Z, i.e. towards the camera, turned slightly to its left.
 #define PREVIEW_YAW 0.0f
@@ -51,14 +50,15 @@
 // Debug hooks (environment variables, read once):
 // - KRUNKNATIVE_PREVIEW_TEST=1 forces the rectangle below (CSS px) while the menu
 //   is open, so the C side can be checked without the page sending previewRect.
-// - KRUNKNATIVE_PREVIEW_DUMP=<file.ppm> writes the framebuffer right after the
-//   preview draw (before the page is composited) once, PREVIEW_DUMP_FRAME frames in.
-// - KRUNKNATIVE_PREVIEW_LOG=1 prints the box's framebuffer rect whenever it changes
-//   (client/tests/preview_hole_e2e.py checks the page's shade around it).
+// - KRUNKNATIVE_PREVIEW_DUMP=<file.ppm> writes the preview's render target (premultiplied,
+//   i.e. over black) once, PREVIEW_DUMP_FRAME frames in.
+// - KRUNKNATIVE_PREVIEW_LOG=1 prints the canvas box in device px whenever it changes and
+//   the first frame the canvas shows (client/tests/preview_hole_e2e.py).
 // - KRUNKNATIVE_PREVIEW_WORLD=1 also keeps a copy of the third-person model in the
 //   world scene in front of the idle menu camera, animated like an in-game player
 //   (player_update_meshes(.., 0), map lighting), to compare with other players.
 #define PREVIEW_DUMP_FRAME 60
+#define PREVIEW_MAX_SIZE 4096 // render target edge limit (device px)
 #define PREVIEW_WORLD_DISTANCE 30.0f
 #define PREVIEW_TEST_RECT_X 1000.0f
 #define PREVIEW_TEST_RECT_Y 200.0f
@@ -298,7 +298,8 @@ static void preview_world_dummy_tick(Client *client, const float delta) {
 }
 
 static void preview_dump(const char *path, const int width, const int height) {
-    // GL_RGBA/GL_UNSIGNED_BYTE: the one read-back format OpenGL ES guarantees (KN_GLES)
+    // The bound framebuffer (the preview's target). GL_RGBA/GL_UNSIGNED_BYTE: the one
+    // read-back format OpenGL ES guarantees (KN_GLES)
     unsigned char *pixels = malloc((size_t) width * height * 4);
     FILE *file = pixels ? fopen(path, "wb") : NULL;
 
@@ -311,10 +312,66 @@ static void preview_dump(const char *path, const int width, const int height) {
             for (int x = 0; x < width; x++) fwrite(src + (size_t) x * 4, 1, 3, file);
         }
         fclose(file);
-        printf("[preview] framebuffer written to %s\n", path);
+        printf("[preview] render target written to %s\n", path);
     }
 
     free(pixels);
+}
+
+// The preview's render target: colour texture + depth renderbuffer at the canvas's device
+// size. Returns 0 when it can't be (re)allocated.
+static int preview_target(ClassPreview *preview, const int width, const int height) {
+    if (preview->fbo && preview->target_width == width && preview->target_height == height) return 1;
+
+    GLint prev_fbo = 0, prev_tex = 0, prev_rb = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+    glGetIntegerv(GL_RENDERBUFFER_BINDING, &prev_rb);
+
+    if (!preview->fbo) {
+        glGenFramebuffers(1, &preview->fbo);
+        glGenTextures(1, &preview->color_tex);
+        glGenRenderbuffers(1, &preview->depth_rb);
+    }
+    glBindTexture(GL_TEXTURE_2D, preview->color_tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // complete for the page's mipmap filters too
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glBindRenderbuffer(GL_RENDERBUFFER, preview->depth_rb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+    glBindFramebuffer(GL_FRAMEBUFFER, preview->fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, preview->color_tex, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, preview->depth_rb);
+    const int complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) prev_fbo);
+    glBindTexture(GL_TEXTURE_2D, (GLuint) prev_tex);
+    glBindRenderbuffer(GL_RENDERBUFFER, (GLuint) prev_rb);
+
+    preview->target_width = complete ? width : 0;
+    preview->target_height = complete ? height : 0;
+    if (!complete) fprintf(stderr, "[preview] render target %dx%d incomplete\n", width, height);
+    return complete;
+}
+
+// The page's canvas shows nothing (no frame yet, or none any more).
+static void preview_hide(ClassPreview *preview) {
+    if (!preview->shown) return;
+    const HtmlElem canvas = html_dom_by_id("classPreviewCanvas");
+    if (canvas) html_dom_canvas_gl(canvas, 0, 0, 0, 0);
+    preview->shown = 0;
+}
+
+static void preview_target_free(ClassPreview *preview) {
+    preview_hide(preview);
+    if (preview->fbo) glDeleteFramebuffers(1, &preview->fbo);
+    if (preview->color_tex) glDeleteTextures(1, &preview->color_tex);
+    if (preview->depth_rb) glDeleteRenderbuffers(1, &preview->depth_rb);
+    preview->fbo = preview->color_tex = preview->depth_rb = 0;
+    preview->target_width = preview->target_height = 0;
 }
 
 void client_class_preview_render(Client *client) {
@@ -344,96 +401,103 @@ void client_class_preview_render(Client *client) {
 
     if (world_dummy) preview_world_dummy_tick(client, delta); // drawn by the next frame's world pass
 
+    // Hidden menu / preview box: nothing to draw (the page doesn't paint the canvas either).
     if (!html_ui_is_menu_open() || !preview->has_rect || !preview->visible) return;
     if (preview->width <= 0.0f || preview->height <= 0.0f) return;
 
-    // CSS px -> framebuffer px. The rect is whole device px / dpr (menu_ui.c
-    // preview_device_rect), so it lands on exactly the pixels of the page's holes.
-    // Scale by framebuffer / CSS viewport, which is what the page's px are worth here:
-    // - natively the page is laid out in framebuffer px (html_ui_resize gets the framebuffer
-    //   size, html_cursor_scale maps the cursor into it): 1, also on HiDPI / Retina windows
-    //   (scaling by framebuffer/window put the dim and the model off the hole there);
-    // - on the web the canvas is round(CSS px * devicePixelRatio): x * (fb / vw) is within
-    //   0.5 px of the whole x * dpr, so it rounds to it. Emscripten's GLFW stops following
-    //   devicePixelRatio after its first change (one matchMedia query for the starting ratio,
-    //   e.g. a second browser zoom step) and keeps a canvas the browser stretches; dpr would
-    //   then put the box off by the zoom ratio, fb / vw keeps it over the hole.
-    int fb_width, fb_height;
-    glfwGetFramebufferSize(client->window, &fb_width, &fb_height);
-    if (fb_width <= 0 || fb_height <= 0) return;
-
-    float view_width = 0.0f, view_height = 0.0f;
-    html_dom_viewport(&view_width, &view_height, NULL);
-    const float scale_x = view_width > 0.0f ? (float) fb_width / view_width : preview->dpr;
-    const float scale_y = view_height > 0.0f ? (float) fb_height / view_height : preview->dpr;
-
-    const int rect_x = (int) lroundf(preview->x * scale_x);
-    const int rect_top = (int) lroundf(preview->y * scale_y);
-    const int rect_width = (int) lroundf(preview->width * scale_x);
-    const int rect_height = (int) lroundf(preview->height * scale_y);
-    const int rect_y = fb_height - rect_top - rect_height; // GL viewports are bottom-up
-
-    if (rect_width <= 0 || rect_height <= 0) return;
-    if (rect_log) { // KRUNKNATIVE_PREVIEW_LOG: the box's device-px rect whenever it changes
-        static int last[6];
-        const int now_rect[6] = {rect_x, rect_top, rect_width, rect_height, fb_width, fb_height};
-        if (memcmp(last, now_rect, sizeof(last)) != 0) {
-            memcpy(last, now_rect, sizeof(last));
-            printf("[preview] rect %d,%d %dx%d (framebuffer %dx%d)\n", rect_x, rect_top, rect_width, rect_height, fb_width, fb_height);
+    // The canvas's device-pixel size, like three.js's renderer.setSize(css) * setPixelRatio(dpr):
+    // menu_send_preview_rect hands over whole device px / dpr (natively the page is laid out in
+    // framebuffer px, dpr 1; on the web dpr = devicePixelRatio), so the page draws the bitmap
+    // 1:1 over the canvas box.
+    const int width = (int) lroundf(preview->width * preview->dpr);
+    const int height = (int) lroundf(preview->height * preview->dpr);
+    if (width <= 0 || height <= 0 || width > PREVIEW_MAX_SIZE || height > PREVIEW_MAX_SIZE) return;
+    if (rect_log) { // KRUNKNATIVE_PREVIEW_LOG: the canvas box in device px whenever it changes
+        static int last[4];
+        const int box[4] = {(int) lroundf(preview->x * preview->dpr), (int) lroundf(preview->y * preview->dpr), width, height};
+        if (memcmp(last, box, sizeof(last)) != 0) {
+            memcpy(last, box, sizeof(last));
+            printf("[preview] rect %d,%d %dx%d (dpr %g)\n", box[0], box[1], box[2], box[3], preview->dpr);
+            fflush(stdout); // in order with the capture's stderr lines (preview_hole_e2e.py)
         }
     }
 
-    // Dim the world inside the box like Krunker's menu backdrop does (UI coords are
-    // framebuffer pixels from the top-left; ui_update() ran with the full viewport).
-    // The page cuts its hole into #instructionHolder whenever the rect is visible
-    // (menu_ui.c update_preview_hole), so this backdrop must be drawn from then on,
-    // also while the model can't be built yet (map/assets still loading, the web's
-    // on-demand fetches): otherwise the box shows the world undimmed, a lighter inset
-    // panel in the menu's shadow until the preview player exists.
-    // Leave the destination alpha alone: on the web the WebGL canvas has an alpha
-    // channel that the browser composites (premultiplied) over the page, so a
-    // blended quad writing alpha 0.75 would let the page background through and
-    // lighten the box instead of darkening it.
-    glDisable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-    ui_fill_rect(client->ui, (vec4) {0.0f, 0.0f, 0.0f, menu_preview_backdrop_alpha()}, (float) rect_x, (float) rect_top, (float) rect_width, (float) rect_height);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-    if (!client->game.ready || !client->game.map) return; // meshes need map config and weapons
+    // Until the model can be built (map config and weapons still loading, the web's on-demand
+    // fetches) the canvas shows nothing: the page's own shade covers the box like the rest.
+    if (!client->game.ready || !client->game.map) {
+        preview_hide(preview);
+        return;
+    }
 
     if (preview->player && (preview->class_index != client->menu_class_index || preview->map != client->game.map || preview_cosmetics_changed(preview->player))) {
         preview_player_destroy(client);
     }
 
-    if (!preview->player && !preview_player_create(client)) return;
+    if (!preview->player && !preview_player_create(client)) {
+        preview_hide(preview);
+        return;
+    }
+
+    const HtmlElem canvas = html_dom_by_id("classPreviewCanvas");
+    if (!canvas || !preview_target(preview, width, height)) return;
 
     preview_animate(preview->player, &preview->step_dir, delta);
     preview_frame(client);
     player_update_meshes(preview->player, 1);
 
-    // Draw into the rectangle only: viewport gives the projection its aspect (660/350 in Krunker),
-    // scissor keeps the depth clear and the draws inside the box.
-    glViewport(rect_x, rect_y, rect_width, rect_height);
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(rect_x, rect_y, rect_width, rect_height);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    // Render into the target: transparent where the model isn't, premultiplied alpha (three.js
+    // WebGLRenderer({alpha: true}) on Krunker's classPreviewCanvas). Save the state touched here.
+    GLint prev_fbo = 0, prev_viewport[4];
+    GLfloat prev_clear[4];
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+    glGetIntegerv(GL_VIEWPORT, prev_viewport);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, prev_clear);
+    const GLboolean prev_scissor = glIsEnabled(GL_SCISSOR_TEST);
+    const GLboolean prev_blend = glIsEnabled(GL_BLEND);
+    const GLboolean prev_depth = glIsEnabled(GL_DEPTH_TEST);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, preview->fbo);
+    glViewport(0, 0, width, height); // the projection's aspect (660/350 in Krunker's box)
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
 
     RenderLighting saved_lighting;
     preview_lighting_apply(&saved_lighting);
+    scene_set_alpha_target(1);
     scene_render(preview->scene, &preview->camera); // aspect comes from the viewport
+    scene_set_alpha_target(0);
     g_render_lighting = saved_lighting;
 
-    glDisable(GL_SCISSOR_TEST);
-    glViewport(0, 0, fb_width, fb_height); // back to the full framebuffer (resize_viewport())
+    if (dump_path && ++frames == PREVIEW_DUMP_FRAME) preview_dump(dump_path, width, height);
 
-    if (dump_path && ++frames == PREVIEW_DUMP_FRAME) preview_dump(dump_path, fb_width, fb_height);
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) prev_fbo);
+    glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);
+    glClearColor(prev_clear[0], prev_clear[1], prev_clear[2], prev_clear[3]);
+    if (prev_scissor) glEnable(GL_SCISSOR_TEST);
+    if (prev_blend) glEnable(GL_BLEND);
+    else glDisable(GL_BLEND);
+    if (prev_depth) glEnable(GL_DEPTH_TEST);
+    else glDisable(GL_DEPTH_TEST);
+
+    // The page paints the canvas box with this frame (natively it samples the texture at
+    // html_ui_render; the web copies it into the real canvas).
+    html_dom_canvas_gl(canvas, preview->color_tex, preview->fbo, width, height);
+    if (rect_log && !preview->shown) {
+        printf("[preview] first frame %dx%d\n", width, height);
+        fflush(stdout);
+    }
+    preview->shown = 1;
 }
 
 void client_class_preview_fini(Client *client) {
     ClassPreview *preview = &client->class_preview;
 
     preview_player_destroy(client);
+    preview_target_free(preview);
 
     if (preview->scene) {
         scene_fini(preview->scene);

@@ -318,6 +318,26 @@ void html_dom_canvas_put(const HtmlElem e, const unsigned char *rgba, const int 
     engine_canvas_put(g, e, rgba, w, h);
 }
 
+/* html_dom_canvas_gl: canvas.width / height follow the render target like a WebGL canvas's
+ * drawing buffer; the box then samples the client's texture itself (engine_canvas_gl). */
+void html_dom_canvas_gl(const HtmlElem e, const unsigned tex, const unsigned fbo, const int w, const int h)
+{
+    Engine *g = engine_get();
+    Dom *dom = engine_dom(g);
+    (void) fbo; /* the web backend reads it back; natively the texture is drawn directly */
+    if (!alive(dom, e)) return;
+    if (tex && w > 0 && h > 0) {
+        char want[16];
+        const char *v = dom_get_attr(dom, e, "width", NULL);
+        snprintf(want, sizeof want, "%d", w);
+        if (!v || strcmp(want, v)) html_dom_set_attr(e, "width", want);
+        v = dom_get_attr(dom, e, "height", NULL);
+        snprintf(want, sizeof want, "%d", h);
+        if (!v || strcmp(want, v)) html_dom_set_attr(e, "height", want);
+    }
+    engine_canvas_gl(g, e, tex, w, h);
+}
+
 void html_dom_remove_attr(const HtmlElem e, const char *name)
 {
     Engine *g = engine_get();
