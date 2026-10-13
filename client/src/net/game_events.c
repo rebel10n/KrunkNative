@@ -5,7 +5,8 @@
 // g5 = "7", fD = "t", fq = "end", gB = "ch", fK = "pi").
 //
 // Runs on the main thread from client_tick_net(); the transports only queue packets.
-#include <player_accounts.h> // PLAYER_INFO / BILLBOARD (doc/backend.md section 8)
+#include <player_accounts.h> // PLAYER_INFO (doc/backend.md section 8)
+#include <billboard_ad.h>     // BILLBOARD / BILLBOARD_IMAGE: the server's ad on every map billboard
 #include <ks_client.h> // KrunkScript client host: hooks and script packets
 #include <backend_ui.h>      // NET_PACKET_REDIRECT: servers_ui_redirect
 #include <online_mode.h>     // NET_PACKET_AUTH_CHALLENGE: online-mode join (net/online_mode.c)
@@ -840,7 +841,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         }
         case NET_PACKET_BILLBOARD: {
             EVENTS_READ(NetBillboardPacket, billboard);
-            player_accounts_on_billboard(&billboard);
+            billboard_ad_on_packet(&billboard); // applied by the next INIT (billboard_ad.h)
+            return 1;
+        }
+        case NET_PACKET_BILLBOARD_IMAGE: {
+            EVENTS_READ(NetBillboardImagePacket, billboard_image);
+            billboard_ad_on_image_packet(&billboard_image);
             return 1;
         }
         case NET_PACKET_PING_RESULT: {
@@ -920,6 +926,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
 void client_game_events_reset(Client *client) {
     client_world_reset(); // WP-B: no speed-run time yet
     player_accounts_on_init();
+    billboard_ad_on_init(); // the server's ad for this map, before client_load_map builds it
     hud_modes_reset(client);
     hud_popups_on_init(); // "init": bN = 0
     hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt

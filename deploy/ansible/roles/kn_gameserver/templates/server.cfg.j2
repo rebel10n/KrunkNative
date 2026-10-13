@@ -18,7 +18,7 @@ max_players     {{ kn_gameserver_max_players }}
 modes           {{ kn_gs_modes | join(',') if (kn_gs_modes is iterable and kn_gs_modes is not string) else kn_gs_modes }}
 {% endif %}
 {% if kn_gameserver_billboard %}
-// In-map billboards (v3.1.1 billboards / game.updateBillboards; default "Your Ad Here").
+// Shown on every billboard of every map instead of its poster (doc/backend.md "Billboards").
 billboard       "{{ kn_gameserver_billboard }}"
 {% endif %}
 online_mode     {{ 1 if n in kn_gameserver_online_instances else 0 }}

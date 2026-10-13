@@ -32,6 +32,8 @@ bot_difficulty  normal             // easy | normal | hard | max | a number (lik
 // host_type    comp               // play the rotation as a v7 host type: custom | comp | rent | zombies | raid
 // map_config   1                  // each map's embedded "config" applies (game.* keys on top), as in a hosted game
 motd            "Welcome to $'s new home"
+// billboard    "Your Ad Here"     // shown on every map billboard (all maps, both clients) instead of its poster; "" = the maps' own posters
+// billboard_image textures/pubs/b_3.png  // optional image ad: an asset path under assets/ (.png/.jpg, no URL); wins over the text when it loads
 
 // ---- accounts
 online_mode     0                  // 1: every player is verified by the central auth service (hasJoined)

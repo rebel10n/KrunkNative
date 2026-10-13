@@ -456,13 +456,21 @@ void accounts_send_infos_to(ClientConnection *target) {
 
 void accounts_send_billboard(ClientConnection *client) {
     const GsBillboard *bb = gs_billboard_for_cycle(&g_gs_config, g_acc.billboard_cycle);
-    if (!bb) return; // engine defaults, exactly as before (no packet)
-    NetBillboardPacket packet;
-    memset(&packet, 0, sizeof(packet));
-    snprintf(packet.txt, sizeof(packet.txt), "%s", bb->txt);
-    snprintf(packet.txt_col, sizeof(packet.txt_col), "%s", bb->txt_col);
-    snprintf(packet.bg_col, sizeof(packet.bg_col), "%s", bb->bg_col);
-    net_send_packet(client->fd, NET_PACKET_BILLBOARD, &packet, sizeof(packet));
+    if (!bb) return; // no billboard: the maps keep their own posters (no packet)
+    if (bb->txt[0]) {
+        NetBillboardPacket packet;
+        memset(&packet, 0, sizeof(packet));
+        snprintf(packet.txt, sizeof(packet.txt), "%s", bb->txt);
+        snprintf(packet.txt_col, sizeof(packet.txt_col), "%s", bb->txt_col);
+        snprintf(packet.bg_col, sizeof(packet.bg_col), "%s", bb->bg_col);
+        net_send_packet(client->fd, NET_PACKET_BILLBOARD, &packet, sizeof(packet));
+    }
+    if (bb->image[0]) { // older clients ignore the unknown type
+        NetBillboardImagePacket image;
+        memset(&image, 0, sizeof(image));
+        snprintf(image.path, sizeof(image.path), "%s", bb->image);
+        net_send_packet(client->fd, NET_PACKET_BILLBOARD_IMAGE, &image, sizeof(image));
+    }
 }
 
 // ------------------------------------------------------------------ stats commits

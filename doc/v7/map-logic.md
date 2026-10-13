@@ -281,7 +281,7 @@ KN keeps the old names as aliases in `map.c`'s name table for string lookups. Id
 | 8 | STACK | same+ | stack_0 ×6 | AABB | — |
 | 9 | RAMP | changed | `addRamp` plane; `ec` encloses the sides with triangles (`prefabs.js:3018`); `fct/fs`, `ten`, `tro`, `tsm`, `sat`, `smm` | ramp `{sX,sZ,eX,eZ}` `type:2`; `nai` | boost `b` clamped ±`boostRange` 100; `boostDr=asin(h/len)` (`MapManager.addRamp:1405-1493`) |
 | 10 | SCORE_ZONE | changed | tool | zone | `sp` (default 1, `map.js:1134`); scores once per life and calls `logTime` (§2.1) |
-| 11 | BILLBOARD | changed | `addFixedPlane` side 2; `bb` clamped to 1..`config.billboards.length-1` (6), random when absent; default size z 20 (v3 10); `msp`, `alt` | plane | v3 `sad` (show ad) and the ad text are **removed** (`map.js:908`) |
+| 11 | BILLBOARD | changed | `addFixedPlane` side 2; `bb` clamped to 1..`config.billboards.length-1` (6), random when absent; default size z 20 (v3 10); `msp`, `alt` | plane | v3 `sad` (show ad) and the ad text are **removed** (`map.js:908`); KN: a server billboard replaces every poster (decisions.md "Billboard ads") |
 | 12 | DEATH_ZONE | changed | tool | zone (forceCollision) | kill. **New:** health, `cdy`, `sd`, `rsc`, `rt`, `rr`, `in` (destructible and interface-togglable; `MapManager.addDeathZone:560`) |
 | 13 | PARTICLES | same | `PARTICLES.area` | none | `pr` type (0 default, 1 grass, 2 fog, 3 ember; `config.particleIDS`), `psp`, `pd`, `pc`, `pg`, `psc`, `ps`, `d`, `c`, `pb` blending 0-4 (`map.js:823`) |
 | 14 | OBJECTIVE | changed | `generateObjective`; texture `objective_4` with glow `#ffd542` pulse (v3 `objective_0`) | zone | `obi` 1..10 → uid `obi-1`, otherwise auto (`MapManager.addObjective:452-500`) |

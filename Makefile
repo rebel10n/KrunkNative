@@ -155,7 +155,7 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport, lag compensation, editor bus, editor model, nav mesh, client update, meshopt and resource pack tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt and resource pack tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/update_test
 	./$(DEBUG_DIR)/knet_test
@@ -171,6 +171,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/combat_test
 	./$(DEBUG_DIR)/charge_grapple_test
 	./$(DEBUG_DIR)/projectiles_render_test
+	./$(DEBUG_DIR)/billboard_ad_test --headless
 	./$(DEBUG_DIR)/zombies_test
 	./$(DEBUG_DIR)/config_test
 	./$(DEBUG_DIR)/comp_ranked_test
@@ -380,6 +381,10 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 	./$(DEBUG_DIR)/social_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
+
+.PHONY: billboard-e2e
+billboard-e2e: build ## server.cfg billboard / billboard_image: packets before INIT for late joiners and map changes, unset and URL configs send none
+	timeout 300 $(PYTHON) -I server/tests/billboard_e2e.py $(DEBUG_DIR)
 
 .PHONY: reconnect-test
 reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)

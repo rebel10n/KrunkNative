@@ -1556,7 +1556,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 | `custom_games` | `true` | accept hosted custom games from the brain (hello `custom`) |
 | `motd` | `[]` | server chat line(s) sent to every player on their first spawn (`$` = their name) |
 | `join_message` / `leave_message` | `"$ joined the game"` / `"$ left the game"` | v3.1.1 `config.serverMessages[0/1]`, `""` = off |
-| `billboard` / `billboards` / `billboards_file` | none | billboard ads (below) |
+| `billboard` / `billboards` / `billboards_file` / `billboard_image` | none | billboard ads on every map BILLBOARD (below); `""` = none |
 | `idle_kick_seconds` | `60` | v3.1.1 `SERVER_IDLE_TIMEOUT_MS`, 0 = never. The clock restarts on connect, (re)spawn, every map change and each move; never kicked: spectators, the end screen, DEV peers (ops, DEV accounts, the server's own machine), the custom lobby's host and `noKick` modes (v7.1.4's own idle kick, the client's menu kick, skips the game host and developers; v7 has no server kick) |
 | `idle_move_threshold` | `1` | units a player must move to count as active |
 | `perms` | `false` | v3.1.1 `PERMS`: DEV chat commands only for ops and loopback |
@@ -1574,19 +1574,35 @@ above.
 
 **Billboards.** v3.1.1 ships `billboards.json` (`[{txt, txtCol, bgCol}]`) and the
 server rotates one entry per map cycle (`gameserver.ts pickBillboard`) into the
-`init` packet's `bill` slot; the client's `game.updateBillboards` paints it on every
-map object `BILLBOARD` with `sad` ("show ad"), defaults `"Your Ad Here"`, `#e3e3e3`,
-`#000000`. Here: `"billboard": "text"` or `{txt,txtCol,bgCol}`, `"billboards": [...]`
-(strings or objects) and/or `"billboards_file": "<v3.1.1 billboards.json>"`; one entry
-per round, in order. The server sends `NET_PACKET_BILLBOARD` before every INIT; the
-client (`prefab.c prefab_ad_texture`) draws the text at the largest fitting size on
-the background colour. No billboard configured = no packet = the defaults.
+`init` packet's `bill` slot; the client's `game.updateBillboards` painted it on the
+map's `BILLBOARD` objects with `sad` ("show ad"). v7.1.4 dropped both (its billboards
+only show the six `pubs/b_<bb>` posters; `utils.js createCanvasAD` is still shipped).
+Here (doc/v7/decisions.md "Billboard ads"): `"billboard": "text"` or
+`{txt,txtCol,bgCol,image}`, `"billboards": [...]` (strings or objects) and/or
+`"billboards_file": "<v3.1.1 billboards.json>"`, plus `"billboard_image": "<asset path>"`
+(the image of every entry without one, or an image-only billboard); one entry per round,
+in order. `""` / an entry with neither text nor image is no billboard.
+
+While a billboard is set, **every** `BILLBOARD` object of every map (v7 posters, random
+or fixed `bb`, v3 `sad` ones, mimicSprite ones) shows it: the image when it loads,
+else the text drawn like `createCanvasAD` (2048 x 1024, `bgCol` fill, GameFont at the
+largest size that fits with an 80 px margin, `txtCol` with a `rgba(0,0,0,0.5)` outline,
+`client/src/billboard_ad.c`). Lighting, emissive and opacity of the object stay; its
+`col` tint, frames and scrolling do not. SIGN, LEADERBOARD and textured planes / sky
+domes are map content and are never replaced. The server sends `NET_PACKET_BILLBOARD`
+(text) and `NET_PACKET_BILLBOARD_IMAGE` (image) before every INIT, so late joiners and
+map changes get it; an INIT without them (no billboard, another server, offline) gives
+the maps their own posters back. `billboard_image` is a path under `assets/`
+(`textures/pubs/b_3.png`, `user-assets/<id>/texture.png`; `.png` / `.jpg`, no `..`,
+no URL: the native client only fetches from the asset host). Verify with
+`make billboard-e2e` and `billboard_ad_test` (`make test`).
 
 ### 8.2 Native protocol additions (`shared/include/shared.h`)
 
 | packet | dir | struct | when |
 | --- | --- | --- | --- |
-| `NET_PACKET_BILLBOARD` (33) | S→C | `{char txt[64]; char txt_col[8]; char bg_col[8];}` | before every INIT, when configured |
+| `NET_PACKET_BILLBOARD` (33) | S→C | `{char txt[64]; char txt_col[8]; char bg_col[8];}` | before every INIT, when the billboard has text |
+| `NET_PACKET_BILLBOARD_IMAGE` (36) | S→C | `{char path[128];}` (asset path under `assets/`) | before every INIT, after BILLBOARD, when the billboard has an image (older clients ignore it) |
 | `NET_PACKET_PLAYER_INFO` (34) | S→C | `{int32 uid, account_id, level; uint8 flags; char clan[8];}` flags: 1 premium, 2 verified/featured, 4 dev/op, 8 mod | brain-linked servers: after every SPAWN broadcast, and every player's to a joiner / spectator |
 | `NET_PACKET_JOIN` (72) | C→S | `{char game_id[48], client_key[352], session[64], name[32];}` (496 bytes; the 464-byte V1 without `name` is accepted) | right after HELLO, before the first ENT |
 

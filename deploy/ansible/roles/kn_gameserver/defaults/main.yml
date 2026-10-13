@@ -33,7 +33,7 @@ kn_gameserver_stop_reason_file: /run/krunknative-deploy/gameserver-stop-reason
 # in a round when it runs out get "GAME UPDATING" and rejoin with a fresh ticket. One v7 public
 # round is 4 minutes.
 kn_gameserver_drain_timeout: 240
-# In-map billboard text (server.cfg billboard); empty = the engine default "Your Ad Here".
+# Billboard text on every map billboard (server.cfg billboard); empty = the maps keep their own posters.
 kn_gameserver_billboard: ""
 # online_mode 1 (accounts verified via auth_url hasJoined) on these instances; the
 # rest are offline-mode (guests welcome, nothing saved).

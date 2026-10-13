@@ -14,6 +14,7 @@
 #include <render_settings.h>
 #include <prefabs.h>
 #include <canvas2d.h>
+#include <billboard_ad.h>
 #include <user_asset.h>
 #include "viewer/viewer_store.h"
 #include <weapons.h>
@@ -1156,6 +1157,31 @@ static unsigned int prefab_sign_texture(const Object *object, const cJSON *raw_o
     return prefab_canvas_end(c, key);
 }
 
+// The server's billboard ad on a BILLBOARD (billboard_ad.h): its image (an asset path) when it
+// loads, else the text on utils.js createCanvasAD's 2048 x 1024 canvas. 0 = keep the poster.
+static unsigned int prefab_billboard_ad_texture(const BillboardAd *ad) {
+    if (ad->image[0]) {
+        static char failed[NET_BILLBOARD_IMAGE_MAX]; // tried once per path, not once per billboard
+        if (strcmp(failed, ad->image)) {
+            char *path = concat(assets_path(), ad->image);
+            const unsigned int texture = path ? load_texture(path) : 0; // ensure_asset_file + cache
+            free(path);
+            if (texture) return texture;
+            snprintf(failed, sizeof(failed), "%s", ad->image);
+        }
+    }
+    if (!ad->txt[0]) return 0;
+
+    char key[160];
+    snprintf(key, sizeof(key), "billboard-ad:%s|%s|%s", ad->txt, ad->txt_col, ad->bg_col);
+    texture_cache_map_itr cached = vt_get(&g_texture_cache, key);
+    if (!vt_is_end(cached)) return cached.data->val;
+    Canvas2D *c = prefab_canvas_begin(BILLBOARD_AD_WIDTH, BILLBOARD_AD_HEIGHT);
+    if (!c) return 0;
+    billboard_ad_draw(c, ad);
+    return prefab_canvas_end(c, key);
+}
+
 // ---- models (MapManager.addMesh -> render.js loadMesh)
 
 // loadMesh merges every static instance of a model group (src or variant texture) that is
@@ -1501,6 +1527,7 @@ static Mesh *prefab_build_plane(Object *object, const cJSON *raw_obj, PrefabStyl
     material->double_sided = 1;
 
     const int no_textures = client_render_settings()->no_textures;
+    unsigned int ad_texture = 0; // the server's billboard ad (BILLBOARD only)
     switch (kind) {
         case PLANE_KIND_BILLBOARD: {
             // bb: isNumber(bb) ? limitMM(parseInt(bb), 1, billboards - 1) : randInt(1, billboards - 1)
@@ -1515,7 +1542,17 @@ static Mesh *prefab_build_plane(Object *object, const cJSON *raw_obj, PrefabStyl
             }
             snprintf(st->src, sizeof(st->src), "pubs/b_%d", id);
             st->asset = 0;
-            material->texture = prefab_style_texture(st, 0);
+            // the server's billboard replaces the poster (the random draw above still happens, so
+            // the map's other random picks do not move); it survives noTex like a SIGN canvas and
+            // shows its own colours (no "col" tint)
+            const BillboardAd *ad = billboard_ad_for_object(object);
+            ad_texture = ad ? prefab_billboard_ad_texture(ad) : 0;
+            if (ad_texture) {
+                material->texture = ad_texture;
+                material->color.x = material->color.y = material->color.z = 1.0f;
+            } else {
+                material->texture = prefab_style_texture(st, 0);
+            }
             break;
         }
         case PLANE_KIND_RUNE:
@@ -1551,7 +1588,12 @@ static Mesh *prefab_build_plane(Object *object, const cJSON *raw_obj, PrefabStyl
             break;
     }
 
-    prefab_apply_texture_keys(material, object, raw_obj, kind != PLANE_KIND_SIGN && kind != PLANE_KIND_RUNE);
+    if (ad_texture) {
+        // the whole ad: the map's texture rotation stays, its poster frames / scrolling / offsets do not
+        material->texture_rotation = object->tex_rotation * (float) M_PI / 180.0f;
+    } else {
+        prefab_apply_texture_keys(material, object, raw_obj, kind != PLANE_KIND_SIGN && kind != PLANE_KIND_RUNE);
+    }
     prefab_apply_lighting_controls(material, object);
 
     switch (kind) {
@@ -1598,7 +1640,10 @@ static Mesh *prefab_build_plane(Object *object, const cJSON *raw_obj, PrefabStyl
     }
 
     // mimicSprite: SpriteMaterial instead (PLANE / BILLBOARD / RUNE / LIGHT_BAR / SIGN)
-    if (object->sprite && kind != PLANE_KIND_LIQUID && kind != PLANE_KIND_SPRAY) prefab_make_sprite(mesh, material, object, st);
+    if (object->sprite && kind != PLANE_KIND_LIQUID && kind != PLANE_KIND_SPRAY) {
+        prefab_make_sprite(mesh, material, object, st);
+        if (ad_texture) material->color.x = material->color.y = material->color.z = 1.0f; // the ad's own colours
+    }
     return mesh;
 }
 

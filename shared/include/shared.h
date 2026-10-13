@@ -2048,6 +2048,7 @@ typedef enum {
     NET_PACKET_BILLBOARD = 33,   // S->C before every INIT: NetBillboardPacket (Krunker init "bill" -> game.updateBillboards)
     NET_PACKET_PLAYER_INFO = 34, // S->C after SPAWN: NetPlayerInfoPacket, a player's account (level, clan, flags) for HUD/nametags
     NET_PACKET_SKINS = 35,       // S->C right before every SPAWN: NetSkinsPacket, the player's weapon / melee skins (Krunker spawn skins, meleeIndex)
+    NET_PACKET_BILLBOARD_IMAGE = 36, // S->C before every INIT, after BILLBOARD: NetBillboardImagePacket (server.cfg billboard_image)
     // Game mode packets (shared/src/modes, Krunker v3.1.1 modes.js), numbered from 40 so the
     // core protocol above can grow without colliding.
     NET_PACKET_MODE_STATE = 40,  // S->C: NetModeStatePacket, full mode snapshot (round start, joiners)
@@ -2506,14 +2507,30 @@ typedef struct {
 #define NET_ERROR_CODE_UPDATING "004004" // "GAME UPDATING": draining, or stopping for an update
 #define NET_ERROR_CODE_SHUTDOWN "004006" // the server stopped (restart / shutdown / console quit)
 
-// NET_PACKET_BILLBOARD: the server's billboard config (v3.1.1 game.updateBillboards: txt,
-// txtCol, bgCol) painted on every "sad" BILLBOARD map object. Empty fields = the engine
-// defaults ("Your Ad Here", #e3e3e3, #000000).
+// NET_PACKET_BILLBOARD: the server's billboard ad (server.cfg billboard, the v3.1.1 init "bill":
+// txt, txtCol, bgCol). While a server sends one, every BILLBOARD map object of every map shows
+// it instead of its poster, drawn like utils.js createCanvasAD (client/src/billboard_ad.c,
+// doc/v7/decisions.md). Sent only when the server has billboard text; empty colours = the
+// engine defaults (#e3e3e3 on #000000).
 typedef struct {
     char txt[64];
     char txt_col[8];       // "#rrggbb"
     char bg_col[8];
 } NetBillboardPacket;
+
+// NET_PACKET_BILLBOARD_IMAGE: the server's billboard image (server.cfg billboard_image), an
+// asset path under assets/ (billboard_image_path_ok). Shown on every BILLBOARD instead of the
+// text ad when it loads. A separate packet so older clients (which ignore unknown types) and
+// the fixed NetBillboardPacket size stay compatible.
+#define NET_BILLBOARD_IMAGE_MAX 128
+typedef struct {
+    char path[NET_BILLBOARD_IMAGE_MAX];
+} NetBillboardImagePacket;
+
+// A billboard_image value both sides accept: a relative path under assets/ (letters, digits,
+// "_-./"), no "..", "//" or leading "/", ending in .png / .jpg / .jpeg. URLs are refused (the
+// native client has no HTTP fetch outside the asset host). 1 when acceptable.
+int billboard_image_path_ok(const char *path);
 
 // NET_PACKET_PLAYER_INFO: account data of a player (uid) for the scoreboard, nametags
 // and kill feed. account_id / level 0 = guest.

@@ -765,6 +765,26 @@ else ()
         target_link_libraries(canvas2d_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # billboard_ad_test: the server's billboard ad (client/src/billboard_ad.c): packets -> INIT,
+    # the BILLBOARD surfaces of five maps, the createCanvasAD canvas (headless GL, --headless;
+    # run from the repo root).
+    add_executable(billboard_ad_test
+        client/tests/billboard_ad_test.c
+        client/src/billboard_ad.c
+        client/src/ks/canvas2d.c
+        client/src/shader.c
+        client/src/png_write.c
+        client/src/headless.c
+        client/src/stb_image.c
+        ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(billboard_ad_test PRIVATE client/include)
+    target_link_libraries(billboard_ad_test PRIVATE freetype glfw Threads::Threads m)
+    krunknative_link_gl(billboard_ad_test)
+    krunknative_link_headless(billboard_ad_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(billboard_ad_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # gltf_test: the GLTF loader (client/src/gltf.c) on v7.1.4 animated store models through the
     # pet path (client/src/pets.c), the pets.js follow AI and the skin animations (skin_fx.c).
     # Headless GL (--headless); run from the repo root (WP-F, doc/v7/player-viewer.md).

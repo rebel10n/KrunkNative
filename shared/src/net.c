@@ -614,3 +614,23 @@ void player_send_event() { /* SHIM */ }
 void game_broadcast() { /* SHIM */ }
 
 #endif
+
+// server.cfg billboard_image / NET_PACKET_BILLBOARD_IMAGE (shared/include/shared.h)
+int billboard_image_path_ok(const char *path) {
+    if (!path || !path[0] || path[0] == '/') return 0;
+    const size_t len = strlen(path);
+    if (len >= NET_BILLBOARD_IMAGE_MAX || strstr(path, "..") || strstr(path, "//")) return 0;
+    for (const char *p = path; *p; p++) {
+        const char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' || c == '/')) return 0;
+    }
+    static const char *const extensions[] = {".png", ".jpg", ".jpeg"};
+    for (size_t i = 0; i < sizeof(extensions) / sizeof(extensions[0]); i++) {
+        const size_t n = strlen(extensions[i]);
+        if (len <= n) continue;
+        size_t k = 0;
+        while (k < n && (path[len - n + k] | 0x20) == extensions[i][k]) k++; // ASCII case-insensitive
+        if (k == n) return 1;
+    }
+    return 0;
+}

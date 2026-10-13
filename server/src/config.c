@@ -230,25 +230,39 @@ static void gs_read_color(const cJSON *obj, const char *key, char *dst, const ch
     else gs_copy(dst, 8, s);
 }
 
+// An empty billboard ("" or an entry without text and image) is no billboard: the maps keep
+// their own posters, as in v7.1.4.
+static int gs_set_billboard_image(GsBillboard *bb, const char *image) {
+    if (!image || !image[0]) return 0;
+    if (!billboard_image_path_ok(image)) {
+        server_log_error("config: billboard image '%s' is not an asset path (.png/.jpg under assets/, no URL), ignored", image);
+        return 0;
+    }
+    gs_copy(bb->image, sizeof(bb->image), image);
+    return 1;
+}
+
 static int gs_add_billboard(GsConfig *cfg, const cJSON *entry) {
     if (cfg->billboard_count >= GS_MAX_LIST) return 0;
     GsBillboard *bb = &cfg->billboards[cfg->billboard_count];
     memset(bb, 0, sizeof(*bb));
+    gs_copy(bb->txt_col, sizeof(bb->txt_col), "#e3e3e3"); // game.updateBillboards defaults
+    gs_copy(bb->bg_col, sizeof(bb->bg_col), "#000000");
 
     if (cJSON_IsString(entry)) {
         gs_copy(bb->txt, sizeof(bb->txt), entry->valuestring);
-        gs_copy(bb->txt_col, sizeof(bb->txt_col), "#e3e3e3");
-        gs_copy(bb->bg_col, sizeof(bb->bg_col), "#000000");
     } else if (cJSON_IsObject(entry)) {
         gs_read_str(entry, "txt", bb->txt, sizeof(bb->txt));
         if (!bb->txt[0]) gs_read_str(entry, "text", bb->txt, sizeof(bb->txt));
-        gs_read_color(entry, "txtCol", bb->txt_col, "#e3e3e3"); // game.updateBillboards defaults
+        gs_read_color(entry, "txtCol", bb->txt_col, "#e3e3e3");
         gs_read_color(entry, "bgCol", bb->bg_col, "#000000");
+        const cJSON *image = gs_item(entry, "image");
+        if (cJSON_IsString(image)) gs_set_billboard_image(bb, image->valuestring);
     } else {
         return 0;
     }
 
-    if (!bb->txt[0]) gs_copy(bb->txt, sizeof(bb->txt), "Your Ad Here");
+    if (!bb->txt[0] && !bb->image[0]) return 0; // unset
     cfg->billboard_count++;
     return 1;
 }
@@ -425,6 +439,22 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     const cJSON *entry;
     cJSON_ArrayForEach(entry, billboards) gs_add_billboard(cfg, entry);
     if (cJSON_IsString(billboards_file) && billboards_file->valuestring[0]) gs_load_billboards_file(cfg, billboards_file->valuestring);
+    // billboard_image: the image of every entry that has none, or the only billboard
+    const cJSON *billboard_image = gs_item(s, "billboard_image");
+    if (cJSON_IsString(billboard_image) && billboard_image->valuestring[0]) {
+        GsBillboard probe;
+        memset(&probe, 0, sizeof(probe));
+        if (gs_set_billboard_image(&probe, billboard_image->valuestring)) {
+            for (int i = 0; i < cfg->billboard_count; i++)
+                if (!cfg->billboards[i].image[0]) gs_copy(cfg->billboards[i].image, sizeof(cfg->billboards[i].image), probe.image);
+            if (!cfg->billboard_count) {
+                cJSON *only = cJSON_CreateObject();
+                cJSON_AddStringToObject(only, "image", probe.image);
+                gs_add_billboard(cfg, only);
+                cJSON_Delete(only);
+            }
+        }
+    }
 
     // moderation
     gs_read_float(s, "idle_kick_seconds", &cfg->idle_timeout, 0.0f, 86400.0f);

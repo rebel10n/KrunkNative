@@ -14,11 +14,14 @@
 #define GS_STR_SMALL 64
 #define GS_STR_LARGE 256
 
-// v3.1.1 billboards.json entry / game.updateBillboards(): txt, txtCol, bgCol.
+// v3.1.1 billboards.json entry / game.updateBillboards(): txt, txtCol, bgCol, plus the
+// KrunkNative billboard_image (an asset path, NET_PACKET_BILLBOARD_IMAGE). An entry has text,
+// an image or both; it overrides every BILLBOARD of every map (doc/v7/decisions.md).
 typedef struct {
     char txt[64];
     char txt_col[8];
     char bg_col[8];
+    char image[NET_BILLBOARD_IMAGE_MAX];
 } GsBillboard;
 
 typedef struct {
