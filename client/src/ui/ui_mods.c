@@ -289,12 +289,26 @@ static void ensure_bind_rows(void) {
     mods_refresh_ui();
 }
 
-// The switches' click listeners: the checkbox state the page now shows.
+// The switches' click listeners: the checkbox state the page now shows. A switch input we
+// have not seen yet (a fresh render of the settings tab: the captured window templates carry
+// both rows, unchecked, so ensure_setting_rows does not insert them) is first set from the
+// stored value (and marked data-kn-synced); only a later difference is the player's click. Reading the fresh unchecked
+// box as a click stored devConsoleEnabled = false every time Settings opened.
+static void poll_switch(const char *selector, const int value, void (*set)(int)) {
+    const HtmlElem input = html_dom_query(0, selector);
+    if (!input) return;
+    char mark[4];
+    if (html_dom_get_attr(input, "data-kn-synced", mark, sizeof(mark)) < 0) {
+        html_dom_set_attr(input, "data-kn-synced", "1");
+        if (html_dom_get_checked(input) != value) html_dom_set_checked(input, value);
+        return;
+    }
+    if (html_dom_get_checked(input) != value) set(html_dom_get_checked(input));
+}
+
 static void poll_switches(void) {
-    HtmlElem input = html_dom_query(0, "[data-dev-console-setting] input[type='checkbox']");
-    if (input && html_dom_get_checked(input) != g_mods.dev_enabled) mods_set_dev_enabled(html_dom_get_checked(input));
-    input = html_dom_query(0, "[data-force-offline-setting] input[type='checkbox']");
-    if (input && html_dom_get_checked(input) != g_mods.force_offline) mods_set_force_offline(html_dom_get_checked(input));
+    poll_switch("[data-dev-console-setting] input[type='checkbox']", g_mods.dev_enabled, mods_set_dev_enabled);
+    poll_switch("[data-force-offline-setting] input[type='checkbox']", g_mods.force_offline, mods_set_force_offline);
 }
 
 void ui_mods_tick(Client *client) {

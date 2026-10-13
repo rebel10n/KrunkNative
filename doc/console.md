@@ -37,8 +37,8 @@ silent (only the `] line` echo), as in the mod.
 
 | Command | v3.1.1 behaviour | Native |
 |---|---|---|
-| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (78 commands, with `give` / `drop`) |
-| clear | empties the log | same |
+| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (84 commands, with `give` / `drop` and `cls`) |
+| clear | empties the log | same; Krunker Box Office alias `cls` |
 | echo / print text | prints the text | same |
 | bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
 | unbind key | "unbound k" | same |
@@ -65,8 +65,8 @@ silent (only the `] line` echo), as in the mod.
 The console sends `/cmd args` through the chat. In singleplayer, devConsole first runs its
 own versions (marked **offline** below), which answer in the console only. In
 singleplayer, chat lines also go through them, with or without the slash (the mod's
-io.send wrapper). The other commands run in the offline game's chat handler. `/bhop` is
-always handled on the client.
+io.send wrapper). The other commands run in the offline game's chat handler. `/bhop` and
+`/clear` are always handled on the client.
 
 | Command | Args | Perm | v3.1.1 behaviour (server reply, magenta Server line) | Native status |
 |---|---|---|---|---|
@@ -105,6 +105,7 @@ always handled on the client.
 | score | [amount] | dev | "+N score (total T)." / "Usage: /score <amount> (default 100)." | ✔ online; **offline** "Usage: score <amount> (default 100)." |
 | summon | [name] | dev | spawns a Soul Sanctum AI | ✔ "Summonable: …" / "Unknown summon 'x'. Try: …" / "Summoned Soul Fiend (21)." (templates = the first BOT per name on soul_sanctum.json, game.ts aliases weep / wander / fiend / angered / gate / lord) |
 | bhop | [on\|off\|held] | client | "Bhop - Disabled" / "Bhop - Hold Jump/Crouch" in the console + notify | ✔ (`ui_bhop_set_mode` + `ui_notify`) |
+| clear | – | client | Krunker Box Office: empties your own chat log (#chatList); local only, nothing is sent and other players' chat is untouched | ✔ (`hud_ui_clear_chat`, chat only: in the console `clear` / `/clear` is the console's own) |
 
 ## Bots (Krunker v7.1.4 `bot_*`)
 

@@ -215,6 +215,9 @@ preview-hole-test-web: ## The same for the web build in headless Chromium at sev
 resize-early-test: build ## Window resizes during startup / stale resize events reach the viewport and HTML layout (private Xvfb + xfwm4 + xdotool)
 	timeout 600 $(PYTHON) -I client/tests/resize_early_e2e.py $(DEBUG_DIR)
 
+console-settings-test: build ## Dev console switch survives Settings opens / restarts, console clear / cls, chat /clear (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_settings_e2e.py $(DEBUG_DIR)
+
 gltf-test: build ## GLTF loader on v7 animated store models via the pet path, pets.js follow AI, skin animations (headless GL)
 	env -u DISPLAY -u WAYLAND_DISPLAY ./$(DEBUG_DIR)/gltf_test --headless
 
@@ -229,7 +232,7 @@ ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon li
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test slowmo-arms-test preview-hole-test preview-hole-test-web
+.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test console-settings-test slowmo-arms-test preview-hole-test preview-hole-test-web
 assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js

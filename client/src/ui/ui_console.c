@@ -1233,6 +1233,7 @@ static void register_commands(void) {
     if (g_con.cmd_count) return;
     register_local("help", ARGS(A_CMD), "list commands", cmd_help);
     register_local("clear", NO_ARGS, "clear console output", cmd_clear);
+    register_local("cls", NO_ARGS, "alias for clear", cmd_clear);
     register_local("echo", ARGS(A_TEXT), "print text to console", cmd_echo);
     register_local("print", ARGS(A_TEXT), "alias for echo", cmd_echo);
     register_local("editor", NO_ARGS, "open the current map in the map editor (an unsaved copy)", cmd_editor);
@@ -1417,6 +1418,16 @@ static int bhop_command(const char *line) {
     return 1;
 }
 
+// KrunkNative: "/clear" empties your own chat log (#chatList), locally; nothing is sent.
+static int clear_chat_command(const char *line) {
+    char low[16];
+    snprintf(low, sizeof(low), "%.15s", line);
+    lower(low);
+    if (strcmp(low, "/clear")) return 0;
+    hud_ui_clear_chat();
+    return 1;
+}
+
 int ui_console_chat_command(Client *client, const char *text) {
     if (client) g_con.client = client;
     if (!text) return 0;
@@ -1424,6 +1435,7 @@ int ui_console_chat_command(Client *client, const char *text) {
     snprintf(line, sizeof(line), "%s", text);
     trim(line);
     if (bhop_command(line)) return 1;
+    if (clear_chat_command(line)) return 1;
     return run_offline_server_command(line); // `label === "ct" && this.socket === null`
 }
 
