@@ -1,0 +1,38 @@
+# Edge origin: abulxt's OpenResty edges (byod.abstracteducation.loan) serve the krunk.io
+# service names (kn_edge_origin_hosts) and relay them here, instead of the Cloudflare proxy
+# + tunnel (deploy/ansible/README.md "Edge origin").
+#
+#   browser -> edge :443 (Let's Encrypt, on-demand) -> https://<kru public ip>:443
+#     host nginx (unmanaged otherwise; this role adds one vhost): pinned self-signed cert
+#     (SNI kn_edge_origin_sni), edge source allowlist, X-KN-Edge-Token check
+#   -> OpenResty 127.0.0.1:{{ kn_edge_origin_port }} (role openresty): routes by Host,
+#      real IP from X-Real-IP, the services on 8081..8085 as the tunnel reaches them.
+#
+# kru is CT 120 on the Proxmox host meal, whose firewall only lets tcp 22/80/443 (and udp
+# 21100 for kn-rtc) through, so the edges come in on the host nginx's :443: no new port,
+# nothing to change on meal.
+#
+# kn_edge_origin_enabled (group_vars/central/main.yml) false: the vhost is removed and
+# nothing else changes (Cloudflare keeps working); true renders it.
+
+# The certificate the edges pin and the shared token. Generated once on the controller
+# (deploy/ansible/README.md "Edge origin") and copied from there when present; without the
+# directory (CI) the copies already on kru are kept. The token is the same value as
+# krunkio_origin_token in abulxt's vault, the certificate the same as abulxt's
+# roles/edge_relay/files/krunkio-origin.crt.
+kn_edge_origin_local_dir: "{{ lookup('ansible.builtin.env', 'HOME') }}/.config/kn-secrets/edge-origin"
+kn_edge_origin_dir: "{{ kn_etc_dir }}/edge-origin"
+
+# The host nginx vhost (sites-available + a sites-enabled link that sorts last, so the
+# existing first server stays the default for :443).
+kn_edge_origin_vhost: /etc/nginx/sites-available/krunknative-edge-origin.conf
+kn_edge_origin_vhost_link: /etc/nginx/sites-enabled/zz-krunknative-edge-origin.conf
+
+# Who may connect: the edges' networks (ashburn sends from 45.82.161.85, not its primary .87,
+# so whole /24s, the same subnets abulxt opens on amph) and loopback for local tests.
+kn_edge_origin_allow: >-
+  {{ (groups['edges'] | default([]) | map('extract', hostvars, 'kn_public_ip') | select('defined')
+      | map('regex_replace', '\.\d+$', '.0/24') | unique | list) + ['127.0.0.1'] }}
+
+# Requests larger than this are refused by the host nginx (kn_brain caps bodies at 1 MiB).
+kn_edge_origin_client_max_body_size: 16m

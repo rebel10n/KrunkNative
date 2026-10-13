@@ -39,7 +39,8 @@ kn_rtc_origins: "{{ kn_web_origins }}"
 
 # Cloudflare tunnel ingress (controller side, like kn_bridge). Skipped without CF_API_TOKEN /
 # CF_ACCOUNT_ID (CI): source ~/.config/kn-secrets/cloudflare.env.
-kn_rtc_cf_manage: true
+# kn_cloudflare_tunnel (group_vars/central/main.yml): false once play. points at the edges.
+kn_rtc_cf_manage: "{{ kn_cloudflare_tunnel | default(true) }}"
 kn_rtc_cf_api_token: "{{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}"
 kn_rtc_cf_account_id: "{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}"
 kn_rtc_cf_tunnel_id: e6c3b632-03cd-409a-892c-a0cc37362e73

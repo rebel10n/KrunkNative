@@ -1,0 +1,131 @@
+# Edge origin vhost on the host nginx (defaults/main.yml). Off: the vhost is removed.
+- name: Edge origin vhost absent (kn_edge_origin_enabled is false)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ kn_edge_origin_vhost_link }}"
+    - "{{ kn_edge_origin_vhost }}"
+  notify: Reload nginx
+  when: not (kn_edge_origin_enabled | bool)
+
+- name: Edge origin
+  when: kn_edge_origin_enabled | bool
+  block:
+    - name: Edge origin directory
+      ansible.builtin.file:
+        path: "{{ kn_edge_origin_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Edge origin material on the controller
+      ansible.builtin.stat:
+        path: "{{ kn_edge_origin_local_dir }}/{{ item }}"
+      loop: [origin.crt, origin.key, token]
+      register: kn_edge_origin_local
+      delegate_to: localhost
+      become: false
+      check_mode: false
+
+    # Copied only when the controller has them (by hand); CI keeps what is on the host.
+    - name: Edge origin certificate, key and token from the controller
+      ansible.builtin.copy:
+        src: "{{ item.stat.path }}"
+        dest: "{{ kn_edge_origin_dir }}/{{ item.item }}"
+        owner: root
+        group: root
+        mode: "{{ '0644' if item.item == 'origin.crt' else '0600' }}"
+      loop: "{{ kn_edge_origin_local.results | selectattr('stat.exists') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: "{{ item.item != 'origin.crt' }}"
+      notify: Reload nginx
+
+    - name: Edge origin material on the host
+      ansible.builtin.stat:
+        path: "{{ kn_edge_origin_dir }}/{{ item }}"
+      loop: [origin.crt, origin.key, token]
+      register: kn_edge_origin_remote
+
+    - name: Edge origin material is complete
+      ansible.builtin.assert:
+        that: kn_edge_origin_remote.results | selectattr('stat.exists') | list | length == 3
+        fail_msg: >-
+          {{ kn_edge_origin_dir }} lacks origin.crt/origin.key/token: run central.yml --tags edge_origin
+          once from a controller with {{ kn_edge_origin_local_dir }} (README "Edge origin").
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Edge origin token
+      ansible.builtin.slurp:
+        src: "{{ kn_edge_origin_dir }}/token"
+      register: kn_edge_origin_token_file
+      no_log: true
+      when: kn_edge_origin_remote.results[2].stat.exists
+
+    - name: Edge origin token value
+      ansible.builtin.set_fact:
+        kn_edge_origin_token: >-
+          {{ (kn_edge_origin_token_file.content | b64decode | trim) if kn_edge_origin_token_file.content is defined
+             else lookup('ansible.builtin.file', kn_edge_origin_local_dir ~ '/token', errors='ignore') | default('', true) | trim }}
+      no_log: true
+
+    - name: Edge origin token is usable
+      ansible.builtin.assert:
+        that: kn_edge_origin_token is match('^[0-9a-f]{32,}$')
+        fail_msg: "{{ kn_edge_origin_dir }}/token must be 32+ lowercase hex characters (openssl rand -hex 32)."
+        quiet: true
+      no_log: true
+      when: not ansible_check_mode
+
+    # nginx -t before the reload; a failing config is put back and the play stops.
+    - name: Edge origin vhost
+      block:
+        - name: Edge origin vhost (sites-available)
+          ansible.builtin.template:
+            src: edge-origin.nginx.conf.j2
+            dest: "{{ kn_edge_origin_vhost }}"
+            owner: root
+            group: root
+            mode: "0600"
+            backup: true
+          diff: false  # holds the token
+          no_log: true
+          register: kn_edge_origin_vhost_file
+          notify: Reload nginx
+
+        - name: Edge origin vhost enabled (sorts after the existing sites)
+          ansible.builtin.file:
+            src: "{{ kn_edge_origin_vhost }}"
+            dest: "{{ kn_edge_origin_vhost_link }}"
+            state: link
+          register: kn_edge_origin_vhost_link_file
+          notify: Reload nginx
+
+        - name: Host nginx accepts the configuration
+          ansible.builtin.command: nginx -t -q
+          changed_when: false
+          when: (kn_edge_origin_vhost_file.changed or kn_edge_origin_vhost_link_file.changed) and not ansible_check_mode
+      rescue:
+        - name: Put the previous vhost back
+          ansible.builtin.copy:
+            src: "{{ kn_edge_origin_vhost_file.backup_file }}"
+            dest: "{{ kn_edge_origin_vhost }}"
+            remote_src: true
+            mode: "0600"
+          when: kn_edge_origin_vhost_file.backup_file is defined
+
+        - name: Remove the new vhost (there was none before)
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ kn_edge_origin_vhost_link }}"
+            - "{{ kn_edge_origin_vhost }}"
+          when: kn_edge_origin_vhost_file.backup_file is not defined
+
+        - name: Stop here
+          ansible.builtin.fail:
+            msg: "nginx -t rejected the edge origin vhost; the previous state is back and nginx was not reloaded."

@@ -18,3 +18,6 @@ openresty_assets_dir: /opt/krunknative-web/assets
 openresty_api_routes: false
 openresty_coordinator_upstream: "127.0.0.1:8083"
 openresty_finder_upstream: "127.0.0.1:8082"
+# Edge ingress (kn_edge_origin_enabled, README "Edge origin"): the other two services it routes to.
+openresty_bridge_upstream: "127.0.0.1:8084"
+openresty_rtc_upstream: "127.0.0.1:8085"

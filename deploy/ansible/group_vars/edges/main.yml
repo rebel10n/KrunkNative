@@ -44,3 +44,7 @@ kn_gameserver_enabled: true
 
 # In-map billboard text on every edge server.
 kn_gameserver_billboard: "FRVR please hire me"
+
+# cf_dns (tag dns): <edge>-<n>.krunk.io A records through the Cloudflare API. false once the
+# zone has moved off Cloudflare (README "Edge origin": the records are then kept by hand).
+kn_cf_dns_manage: true

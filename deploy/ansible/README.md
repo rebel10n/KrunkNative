@@ -4,13 +4,13 @@ Ansible for the Krunker Box Office central node (`kru`) and the edge game server
 
 | playbook | hosts | what |
 | --- | --- | --- |
-| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), `/opt/krunknative` clone |
+| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), edge origin (host nginx :443 vhost + OpenResty 127.0.0.1:8086, off until `kn_edge_origin_enabled`), `/opt/krunknative` clone |
 | `edges.yml` | `edges` | host firewall drop-in (game ports), user `kn`, `server_bin` x (vcpus-1, min 1), `<edge>-<n>.krunk.io` DNS |
 | `firewall.yml` | `edges` | only the host firewall (vendored `edge_firewall` role), see [Edge firewall](#edge-firewall) |
 | `fail2ban.yml` | `kru`, `edges` | only fail2ban (vendored `fail2ban` role; base on kru, drop-ins on the edges), see [fail2ban](#fail2ban) |
 | `site.yml` | all | both |
 
-Tags: `user openresty repo release brain web updates bridge rtc gameserver dns firewall fail2ban`.
+Tags: `user openresty repo release brain web updates bridge rtc edge_origin gameserver dns firewall fail2ban`.
 
 Client updates (`kn_updates`, doc/backend.md 9.8): `https://assets.krunk.io/updates/` serves
 `/opt/krunknative-updates/public/` (OpenResty `kn.d/updates.conf`): the channel manifest CI's
@@ -25,7 +25,8 @@ Routing on kru (Cloudflare tunnel ingress, managed in Cloudflare): `assets.krunk
 last one is kept by the `kn_bridge` role, see [net-bridge](#net-bridge-playkrunkio)). The page itself (`krunk.io`,
 `www.`) is on Cloudflare Pages: `make pages`, see `deploy/pages/README.md` (also caching and
 the krunker.party redirect: the site 301s, `coordinator.`/`matchmaker.krunker.party` keep
-working for old clients and are not redirected). Not managed here:
+working for old clients and are not redirected). With `kn_edge_origin_enabled` the same four
+krunk.io names are also reachable through abulxt's edges, see [Edge origin](#edge-origin-abulxts-edges-instead-of-cloudflare). Not managed here:
 the host's nginx (:80/:443), cloudflared, the pm2 app krunkbox (:2025, kru.eli.gift), user `kru`.
 
 ## Run
@@ -127,6 +128,50 @@ overridden. One apply converges. A second apply, then `--check --diff` twice, an
 touching every shipped file (new mtimes, as in a fresh CI checkout) report `changed=0` with no
 handler. A changed drain timeout drains a connected player for the old `shutdown_grace`, then
 sends GAME UPDATING, while the empty instance restarts at once.
+
+## Edge origin (abulxt's edges instead of Cloudflare)
+
+`assets.`, `coordinator.`, `matchmaker.` and `play.krunk.io` can be served by abulxt's OpenResty
+edges instead of the Cloudflare proxy + tunnel: each name is a DNS-only CNAME to
+`byod.abstracteducation.loan` (the edges' round-robin, kept healthy by abulxt's watchdog). The
+front end (`krunk.io`, `www.`) and the game servers (`<edge>-<n>.krunk.io`) are not part of it.
+
+```
+browser -> edge :443 (Let's Encrypt on demand, shared Redis on amph; abulxt edge_relay
+           conf.d/20-krunkio.conf, assets. cached there)
+        -> https://5.188.124.56:443, SNI kn-origin.krunk.io (the host nginx; meal's firewall
+           passes 22/80/443 to kru, so no new port): pinned self-signed certificate, edge /24s
+           only, X-KN-Edge-Token, else 403
+        -> OpenResty 127.0.0.1:8086 (role openresty): Host -> the static site / :8082 / :8083 /
+           :8084 (/rtc -> :8085), client address from X-Real-IP (also passed on as
+           CF-Connecting-IP, which kn-bridge and kn-rtc read)
+```
+
+Role `kn_edge_origin` (tag `edge_origin`) renders `/etc/nginx/sites-available/krunknative-edge-origin.conf`
+(linked as `sites-enabled/zz-krunknative-edge-origin.conf`, after the existing sites, so the
+default `:443` server does not change), runs `nginx -t` and puts the previous file back if it
+fails. `kn_edge_origin_enabled: false` (`group_vars/central/main.yml`) removes the vhost and the
+8086 listener; nothing else changes, the tunnel keeps working. The certificate, its key and the
+token live in `/etc/krunknative/edge-origin/` (root 0700). They are generated once on the
+controller and copied from `~/.config/kn-secrets/edge-origin/` when that directory exists (CI
+keeps what is on kru):
+
+```sh
+d=~/.config/kn-secrets/edge-origin; install -d -m 700 $d; cd $d
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+  -subj /CN=kn-origin.krunk.io -addext subjectAltName=DNS:kn-origin.krunk.io -keyout origin.key -out origin.crt
+(umask 077; openssl rand -hex 32 > token)
+```
+
+`origin.crt` is abulxt's `roles/edge_relay/files/krunkio-origin.crt`, `token` its vaulted
+`krunkio_origin_token`: rotate both repos together. Logs: `/var/log/nginx/krunknative-edge-origin.log`
+(browser address, edge, host). The rtc media path does not change: ICE/DTLS goes straight to
+`5.188.124.56:21100/udp`, only the `/rtc` signaling POST goes through the edges.
+
+After the cutover set `kn_cloudflare_tunnel: false` (kn_bridge / kn_rtc stop putting the
+`play.krunk.io` tunnel CNAME and ingress rules back when run with Cloudflare credentials), and
+after the zone has left Cloudflare `kn_cf_dns_manage: false` (`group_vars/edges/main.yml`; the
+`<edge>-<n>` A records are then kept by hand at the new DNS host).
 
 ## net-bridge (play.krunk.io)
 

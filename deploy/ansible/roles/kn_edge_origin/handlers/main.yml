@@ -1,0 +1,6 @@
+# The host's nginx (not OpenResty): a reload keeps open connections.
+- name: Reload nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded
+  ignore_errors: "{{ ansible_check_mode }}"

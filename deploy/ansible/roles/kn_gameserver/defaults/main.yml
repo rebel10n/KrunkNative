@@ -36,9 +36,10 @@ kn_gameserver_auth_url: "{{ kn_coordinator_url }}"
 # Address the game sockets bind to (= the A record of <edge>-<n>).
 kn_gameserver_listen_host: "{{ kn_public_ip }}"
 # Internal game-server <-> coordinator link (kn_brain internal_ws, matchmaking /mm/seek-game).
-# wss:// through Cloudflare to kn-brain-coord on the central node; server_bin verifies the
-# certificate against the system CA store. The node advertises public_host/port + region in
-# its hello (the TCP peer is the tunnel). "" = standalone (finder-listed only).
+# wss:// through Cloudflare (or, with the edge origin, abulxt's edges) to kn-brain-coord on the
+# central node; server_bin verifies the certificate against the system CA store. The node
+# advertises public_host/port + region in its hello (the TCP peer is the tunnel or the edge).
+# "" = standalone (finder-listed only).
 kn_gameserver_coordinator_url: "wss://coordinator.{{ kn_domain }}/mm/internal/ws"
 # The secret is brain.internal_secret of that coordinator: read from the central node's
 # {{ kn_etc_dir }}/secrets.env (role kn_brain) at deploy time, written only into the 0640

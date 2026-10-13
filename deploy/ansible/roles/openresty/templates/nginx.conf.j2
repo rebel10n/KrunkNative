@@ -2,6 +2,93 @@
 # OpenResty for KrunkNative: the static web build on loopback only. The host's
 # nginx keeps :80/:443; cloudflared ingress maps assets.krunk.io (and the legacy
 # krunk.io origin) -> localhost:8081. The page itself is on Cloudflare Pages (deploy/pages).
+{% macro static_site(edge) %}
+
+        # current -> releases/<id> (role kn_web); assets live outside the releases.
+        root {{ openresty_web_root }};
+        index index.html;
+        disable_symlinks off;
+
+        # Game content (~1.5 GB), shared by every release, fetched on demand.
+        # Also served cross-origin as assets.{{ kn_domain }} to the Pages front end.
+        location /assets/ {
+{% if edge %}
+            # CORS preflight (a Range request from another origin may need one).
+            if ($request_method = OPTIONS) {
+                add_header Access-Control-Allow-Origin "*" always;
+                add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+                add_header Access-Control-Allow-Headers "Range, If-None-Match, If-Modified-Since" always;
+                add_header Access-Control-Max-Age 86400 always;
+                return 204;
+            }
+{% endif %}
+            alias {{ openresty_assets_dir }}/;
+            add_header Cache-Control $kn_assets_cache always;
+            add_header Access-Control-Allow-Origin "*" always;
+{% if edge %}
+            add_header Access-Control-Expose-Headers "Content-Length, Content-Range, Accept-Ranges, ETag" always;
+{% endif %}
+        }
+        location = /assets/version.txt {
+            alias {{ openresty_assets_dir }}/version.txt;
+            default_type text/plain;
+            add_header Cache-Control "no-store" always;
+            add_header Access-Control-Allow-Origin "*" always;
+        }
+
+        # The page and the wasm loader change with every release.
+        location = /index.html { add_header Cache-Control "no-cache" always; }
+        location ~ ^/(client\.(js|wasm|data)|js/) {
+            add_header Cache-Control "no-cache" always;
+        }
+
+{% if openresty_api_routes %}
+        location ~ ^/(auth|mm|api|social)/ {
+            proxy_pass http://{{ openresty_coordinator_upstream }};
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_read_timeout 3600s;
+            proxy_buffering off;
+        }
+        location ~ ^/(servers|finder)/ {
+            proxy_pass http://{{ openresty_finder_upstream }};
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $remote_addr;
+        }
+{% endif %}
+
+{% if kn_updates_enabled | default(false) | bool %}
+        # Locations other roles add (kn_updates: /updates/), one file each.
+        include {{ openresty_prefix }}/nginx/conf/kn.d/*.conf;
+
+{% endif %}
+        location = /healthz {
+            default_type text/plain;
+            return 200 "ok\n";
+        }
+
+        location / {
+            try_files $uri $uri/ =404;
+        }{% endmacro %}
+{% macro edge_proxy(upstream, timeout) %}
+            proxy_pass http://{{ upstream }};
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $kn_edge_connection;
+            # The services read the client from these (kn_brain: X-Real-IP with trust_proxy;
+            # kn-bridge/kn-rtc: KRUNK_NATIVE_CLIENT_IP_HEADER, still cf-connecting-ip for the tunnel).
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header CF-Connecting-IP $remote_addr;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_buffering off;
+            client_max_body_size 16m; # kn_brain answers its own 413 above 1 MiB
+            proxy_read_timeout {{ timeout }};
+            proxy_send_timeout {{ timeout }};{% endmacro %}
 user {{ openresty_worker_user }} {{ openresty_worker_group }};
 worker_processes {{ openresty_worker_processes }};
 pid logs/nginx.pid;
@@ -49,62 +136,67 @@ http {
         listen {{ l }};
 {% endfor %}
         server_name {{ kn_domain }} _;
+{{ static_site(false) }}
+    }
+{% if kn_edge_origin_enabled | default(false) | bool %}
 
-        # current -> releases/<id> (role kn_web); assets live outside the releases.
-        root {{ openresty_web_root }};
-        index index.html;
-        disable_symlinks off;
+    # ---- Edge ingress (role kn_edge_origin, README "Edge origin") ----------------------
+    # abulxt's edges -> host nginx :443 (pinned cert, edge allowlist, X-KN-Edge-Token) ->
+    # here. Only the host nginx connects (loopback); it passes the browser's address in
+    # X-Real-IP after the token check, so realip trusts that header here instead of
+    # CF-Connecting-IP. Same content and services as the tunnel reaches.
+    map $http_upgrade $kn_edge_connection {
+        ~*^websocket$ upgrade;
+        default       "";
+    }
 
-        # Game content (~1.5 GB), shared by every release, fetched on demand.
-        # Also served cross-origin as assets.{{ kn_domain }} to the Pages front end.
-        location /assets/ {
-            alias {{ openresty_assets_dir }}/;
-            add_header Cache-Control $kn_assets_cache always;
-            add_header Access-Control-Allow-Origin "*" always;
-        }
-        location = /assets/version.txt {
-            alias {{ openresty_assets_dir }}/version.txt;
-            default_type text/plain;
-            add_header Cache-Control "no-store" always;
-            add_header Access-Control-Allow-Origin "*" always;
-        }
+    server {
+        listen 127.0.0.1:{{ kn_edge_origin_port }};
+        server_name {{ kn_edge_origin_hosts.assets }};
+        set_real_ip_from 127.0.0.1;
+        real_ip_header X-Real-IP;
+{{ static_site(true) }}
+    }
 
-        # The page and the wasm loader change with every release.
-        location = /index.html { add_header Cache-Control "no-cache" always; }
-        location ~ ^/(client\.(js|wasm|data)|js/) {
-            add_header Cache-Control "no-cache" always;
-        }
-
-{% if openresty_api_routes %}
-        location ~ ^/(auth|mm|api|social)/ {
-            proxy_pass http://{{ openresty_coordinator_upstream }};
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host $host;
-            proxy_set_header X-Forwarded-For $remote_addr;
-            proxy_read_timeout 3600s;
-            proxy_buffering off;
-        }
-        location ~ ^/(servers|finder)/ {
-            proxy_pass http://{{ openresty_finder_upstream }};
-            proxy_set_header Host $host;
-            proxy_set_header X-Forwarded-For $remote_addr;
-        }
-{% endif %}
-
-{% if kn_updates_enabled | default(false) | bool %}
-        # Locations other roles add (kn_updates: /updates/), one file each.
-        include {{ openresty_prefix }}/nginx/conf/kn.d/*.conf;
-
-{% endif %}
-        location = /healthz {
-            default_type text/plain;
-            return 200 "ok\n";
-        }
-
+    server {
+        listen 127.0.0.1:{{ kn_edge_origin_port }};
+        server_name {{ kn_edge_origin_hosts.coordinator }};
+        set_real_ip_from 127.0.0.1;
+        real_ip_header X-Real-IP;
         location / {
-            try_files $uri $uri/ =404;
+{{ edge_proxy(openresty_coordinator_upstream, '1d') }}
         }
     }
+
+    server {
+        listen 127.0.0.1:{{ kn_edge_origin_port }};
+        server_name {{ kn_edge_origin_hosts.matchmaker }};
+        set_real_ip_from 127.0.0.1;
+        real_ip_header X-Real-IP;
+        location / {
+{{ edge_proxy(openresty_finder_upstream, '1d') }}
+        }
+    }
+
+    # play.: net-bridge (/native WebSocket, /healthz) and the WebRTC gateway's signaling
+    # (/rtc, the same split as the tunnel's path rule). Media goes straight to kru's UDP port.
+    server {
+        listen 127.0.0.1:{{ kn_edge_origin_port }};
+        server_name {{ kn_edge_origin_hosts.play }};
+        set_real_ip_from 127.0.0.1;
+        real_ip_header X-Real-IP;
+        location ~ ^/rtc(/|$) {
+{{ edge_proxy(openresty_rtc_upstream, '60s') }}
+        }
+        location / {
+{{ edge_proxy(openresty_bridge_upstream, '1d') }}
+        }
+    }
+
+    server {
+        listen 127.0.0.1:{{ kn_edge_origin_port }} default_server;
+        server_name _;
+        return 404;
+    }
+{% endif %}
 }

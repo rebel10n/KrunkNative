@@ -1,0 +1,53 @@
+# {{ ansible_managed }} (deploy/ansible role kn_edge_origin)
+# Edge origin (README "Edge origin"): abulxt's edges relay {{ kn_edge_origin_hosts.values() | join(', ') }}
+# here over TLS. The edges pin this vhost's self-signed certificate (SNI {{ kn_edge_origin_sni }}),
+# connect from the edge networks below and send X-KN-Edge-Token; anything else gets 403.
+# The request then goes to OpenResty 127.0.0.1:{{ kn_edge_origin_port }}, which routes by Host.
+# The rest of this nginx (krunker.zip, certbot) is not managed by KrunkNative.
+
+map $http_upgrade $kn_edge_origin_connection {
+    ~*^websocket$ upgrade;
+    default       "";
+}
+
+# Client IP is the browser's (X-Real-IP set by the edge), the edge is $remote_addr.
+log_format kn_edge_origin '$http_x_real_ip via $remote_addr [$time_local] "$request" $status '
+                          '$body_bytes_sent rt=$request_time host="$host" edge="$http_x_kn_edge"';
+
+server {
+    listen 443 ssl;
+    server_name {{ kn_edge_origin_sni }} {{ kn_edge_origin_hosts.values() | join(' ') }};
+
+    ssl_certificate     {{ kn_edge_origin_dir }}/origin.crt;
+    ssl_certificate_key {{ kn_edge_origin_dir }}/origin.key;
+
+    access_log /var/log/nginx/krunknative-edge-origin.log kn_edge_origin;
+
+{% for net in kn_edge_origin_allow %}
+    allow {{ net }};
+{% endfor %}
+    deny all;
+
+    if ($http_x_kn_edge_token != "{{ kn_edge_origin_token }}") {
+        return 403;
+    }
+
+    client_max_body_size {{ kn_edge_origin_client_max_body_size }};
+
+    location / {
+        proxy_pass http://127.0.0.1:{{ kn_edge_origin_port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $kn_edge_origin_connection;
+        # Trusted only after the token check above; OpenResty takes the client from here.
+        proxy_set_header X-Real-IP $http_x_real_ip;
+        proxy_set_header X-Forwarded-For $http_x_real_ip;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-KN-Edge-Token "";
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+    }
+}

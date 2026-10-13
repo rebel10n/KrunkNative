@@ -12,4 +12,4 @@
     - { role: kn_user, tags: [user, gameserver] }
     - { role: kn_release, tags: [release, gameserver] }
     - { role: kn_gameserver, tags: [gameserver] }
-    - { role: cf_dns, tags: [dns] }
+    - { role: cf_dns, tags: [dns], when: kn_cf_dns_manage | default(true) | bool }

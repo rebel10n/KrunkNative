@@ -39,7 +39,8 @@ kn_bridge_client_ip_header: cf-connecting-ip
 
 # Cloudflare (controller side, like cf_dns): DNS CNAME + tunnel ingress rule. Skipped with a
 # note when CF_API_TOKEN / CF_ACCOUNT_ID are not in the environment (CI).
-kn_bridge_cf_manage: true
+# kn_cloudflare_tunnel (group_vars/central/main.yml): false once play. points at the edges.
+kn_bridge_cf_manage: "{{ kn_cloudflare_tunnel | default(true) }}"
 kn_bridge_cf_api_token: "{{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}"
 kn_bridge_cf_account_id: "{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}"
 kn_bridge_cf_tunnel_id: e6c3b632-03cd-409a-892c-a0cc37362e73

@@ -1,4 +1,4 @@
-- name: KrunkNative central node (web + finder + coordinator + net-bridge + WebRTC gateway)
+- name: KrunkNative central node (web + finder + coordinator + net-bridge + WebRTC gateway + edge origin)
   hosts: central
   become: false
   roles:
@@ -13,15 +13,20 @@
     - { role: kn_updates, tags: [updates], when: kn_updates_enabled | bool }
     - { role: kn_bridge, tags: [bridge] }
     - { role: kn_rtc, tags: [rtc] }
+    # README "Edge origin": host nginx vhost for abulxt's edges (off: removed).
+    - { role: kn_edge_origin, tags: [edge_origin] }
   post_tasks:
     - name: Health checks on loopback
       ansible.builtin.uri:
         url: "{{ item }}"
         status_code: [200]
+        # the edge ingress routes by Host: /healthz of assets. (the others ignore Host)
+        headers: { Host: "{{ kn_edge_origin_hosts.assets }}" }
       loop: >-
         {{ ['http://127.0.0.1:8081/healthz', 'http://127.0.0.1:8081/', 'http://127.0.0.1:8082/servers',
             'http://127.0.0.1:8083/mm/status', 'http://127.0.0.1:8084/healthz']
-           + (['http://127.0.0.1:8085/healthz'] if kn_rtc_enabled | default(false) | bool else []) }}
+           + (['http://127.0.0.1:8085/healthz'] if kn_rtc_enabled | default(false) | bool else [])
+           + (['http://127.0.0.1:' ~ kn_edge_origin_port ~ '/healthz'] if kn_edge_origin_enabled | bool else []) }}
       register: kn_health
       retries: 5
       delay: 2
