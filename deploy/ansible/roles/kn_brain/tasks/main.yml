@@ -2,7 +2,7 @@
 # sqlite, mariadb): the runtime libraries must exist even if only one is used.
 - name: Runtime libraries for kn_brain
   ansible.builtin.apt:
-    name: "{{ kn_brain_runtime_packages }}"
+    name: "{{ kn_brain_runtime_packages + [kn_brain_hiredis_package] }}"
     state: present
     install_recommends: false
 
@@ -50,21 +50,33 @@
   loop: "{{ kn_brain_effective }}"
   when: item.db == 'none' and (kn_brain_instances | selectattr('name', 'equalto', item.name) | first).db != 'none'
 
+# Keys are added when missing, never rewritten (roles kn_postgres / kn_redis add theirs to the
+# same file, possibly first on a fresh host).
 - name: Secrets env file exists (never overwritten)
   ansible.builtin.shell: |
     set -eu
     f={{ kn_etc_dir }}/secrets.env
-    [ -s "$f" ] && exit 0
-    umask 027
+    grep -qs '^KN_BRAIN_INTERNAL_SECRET=' "$f" && exit 0
+    umask 077
+    [ -e "$f" ] || { : > "$f"; chown root:root "$f"; chmod 0600 "$f"; }
     s={{ (kn_brain_internal_secret | quote) if kn_brain_internal_secret else '$(head -c 32 /dev/urandom | od -An -tx1 | tr -d " \n")' }}
-    printf 'KN_BRAIN_INTERNAL_SECRET=%s\nKN_BRAIN_JOIN_SECRET=%s\n' "$s" "$s" > "$f"
-    chown root:{{ kn_group }} "$f"; chmod 0640 "$f"
+    printf 'KN_BRAIN_INTERNAL_SECRET=%s\nKN_BRAIN_JOIN_SECRET=%s\n' "$s" "$s" >> "$f"
     echo created
   args:
     executable: /bin/bash
   register: kn_secrets
   changed_when: "'created' in kn_secrets.stdout"
   no_log: true
+
+# Only root reads it (systemd's EnvironmentFile, the deploy's slurp, kn-db-cutover): 0600 root:root
+# (it was root:kn 0640 before the database and Redis passwords joined it).
+- name: Secrets env file mode
+  ansible.builtin.file:
+    path: "{{ kn_etc_dir }}/secrets.env"
+    owner: root
+    group: root
+    mode: "0600"
+  ignore_errors: "{{ ansible_check_mode }}"
 
 # EnvironmentFile syntax: JSON-quoted values (= double quotes with \\ and \" escapes, which systemd reads).
 - name: SMTP env file (outbound mail, never logged)
@@ -101,6 +113,25 @@
       [Install]
       WantedBy=multi-user.target
     mode: "0644"
+
+# The database of each instance that has one: KN_DATABASE_* in <name>-db.env. Created as SQLite
+# (what the unit passed on its command line before) and never rewritten here: kn-db-cutover
+# switches it (role kn_db_cutover), so a later deploy cannot silently move an instance back.
+- name: Database env of each instance (created once)
+  ansible.builtin.copy:
+    dest: "{{ kn_etc_dir }}/{{ item.name }}-db.env"
+    content: |
+      # Managed by deploy/ansible (role kn_brain) / kn-db-cutover: kn-brain-{{ item.name }}'s database.
+      KN_DATABASE_DRIVER=sqlite
+      KN_DATABASE_PATH={{ kn_state_dir }}/{{ item.name }}.db
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+    force: false
+  loop: "{{ kn_brain_effective | selectattr('db', 'in', ['sqlite', 'postgres']) | list }}"
+  loop_control:
+    label: "{{ item.name }}-db.env"
+  notify: Restart kn_brain
 
 - name: Install kn_brain units
   ansible.builtin.template:

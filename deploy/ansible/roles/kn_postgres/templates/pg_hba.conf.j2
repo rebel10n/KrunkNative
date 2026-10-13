@@ -1,0 +1,5 @@
+# {{ ansible_managed }} (deploy/ansible role kn_postgres)
+# TYPE  DATABASE                USER                    ADDRESS         METHOD
+local   all                     postgres                                peer
+host    {{ kn_postgres_db }}    {{ kn_postgres_user }}  127.0.0.1/32    scram-sha-256
+host    {{ kn_postgres_db }}    {{ kn_postgres_user }}  ::1/128         scram-sha-256

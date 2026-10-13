@@ -27,6 +27,7 @@
 
 #include "acct_internal.h"
 #include "auth_state.h"
+#include "hot.h"
 #include "brain_internal.h"
 #include "roles.h"
 #include "knsvc/config.h"
@@ -38,10 +39,17 @@
 #define MOD "auth"
 #define HASH_MAX 64
 
+/* A per-process limiter plus its shared window in the Redis hot tier (hot_limit). */
+typedef struct Limit {
+    AuthLimiter *l;
+    const char *bucket;
+    int limit, window_s;
+} Limit;
+
 static struct {
     Brain *b;
     AuthJoins *joins;
-    AuthLimiter *login, *reg, *join, *has_joined;
+    Limit login, reg, join, has_joined;
     kn_timer_id purge_timer;
     int check_ip;
 } g_auth;
@@ -91,8 +99,9 @@ static void req_token(kn_http_req *req, const cJSON *body, char *out, size_t cap
     if (bearer) snprintf(out, cap, "%s", bearer);
 }
 
-static int limited(AuthLimiter *l, kn_http_req *req) {
-    if (auth_limiter_hit(l, req->remote_addr ? req->remote_addr : "", kn_now_ms())) return 0;
+static int limited(const Limit *l, kn_http_req *req) {
+    const char *ip = req->remote_addr ? req->remote_addr : "";
+    if (hot_limit(l->bucket, ip, l->limit, l->window_s, auth_limiter_hit(l->l, ip, kn_now_ms()))) return 0;
     reply_err(req, 429, "Too many requests");
     return 1;
 }
@@ -152,7 +161,7 @@ static void on_session(void *ud, const char *err, const cJSON *account) {
 }
 
 static void password_auth(kn_http_req *req, int action) {
-    if (limited(action == 0 ? g_auth.reg : g_auth.login, req)) return;
+    if (limited(action == 0 ? &g_auth.reg : &g_auth.login, req)) return;
     cJSON *body = kn_http_body_json(req);
     const char *name = body_str(body, "username", "name");
     const char *pass = body_str(body, "password", "pass");
@@ -245,6 +254,71 @@ static int valid_hash(const char *h) {
     return 1;
 }
 
+/* Join records in the hot tier, so hasJoined finds a join made through another auth brain
+ * (local record first; Redis only on a local miss). <prefix>join:<serverHash> = {id, username, ip, profile}. */
+static void join_share(const char *server_hash, const cJSON *account, const char *ip, const cJSON *profile) {
+    if (!hot_up()) return;
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) kn_json_int(account, "id", 0));
+    cJSON_AddStringToObject(o, "username", kn_json_str(account, "username", ""));
+    cJSON_AddStringToObject(o, "ip", ip ? ip : "");
+    cJSON_AddItemToObject(o, "profile", cJSON_Duplicate(profile, 1));
+    char *text = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    char k[HASH_MAX + 16];
+    snprintf(k, sizeof k, "join:%s", server_hash);
+    if (text) hot_put(k, text, AUTH_JOIN_TTL_MS);
+    free(text);
+}
+
+typedef void (*JoinFoundFn)(void *ud, const cJSON *profile); /* NULL = not joined */
+
+typedef struct JoinLookup {
+    char hash[HASH_MAX + 8], name[64], ip[64];
+    JoinFoundFn cb;
+    void *ud;
+} JoinLookup;
+
+/* A shared record found: adopt it locally (with its remaining lifetime), then run the
+ * usual username / IP checks of auth_joins_get. */
+static void join_fetched(void *ud, const char *value, size_t len, int64_t pttl_ms) {
+    JoinLookup *j = ud;
+    const cJSON *profile = NULL;
+    cJSON *o = value ? cJSON_ParseWithLength(value, len) : NULL;
+    if (o && pttl_ms > 0) {
+        const uint64_t now = kn_now_ms();
+        const uint64_t age = pttl_ms < AUTH_JOIN_TTL_MS ? (uint64_t) (AUTH_JOIN_TTL_MS - pttl_ms) : 0;
+        if (auth_joins_put(g_auth.joins, j->hash, kn_json_int(o, "id", 0), kn_json_str(o, "username", ""),
+                           kn_json_str(o, "ip", ""), cJSON_GetObjectItemCaseSensitive(o, "profile"), now - age) == 0)
+            profile = auth_joins_get(g_auth.joins, j->hash, j->name, j->ip, g_auth.check_ip, now);
+    }
+    j->cb(j->ud, profile);
+    cJSON_Delete(o);
+    free(j);
+}
+
+/* Local record, else the hot tier's; cb exactly once (maybe synchronously). */
+static void join_lookup(const char *hash, const char *name, const char *ip, JoinFoundFn cb, void *ud) {
+    const cJSON *p = auth_joins_get(g_auth.joins, hash, name, ip, g_auth.check_ip, kn_now_ms());
+    if (p || !hot_up()) {
+        cb(ud, p);
+        return;
+    }
+    JoinLookup *j = calloc(1, sizeof *j);
+    char k[HASH_MAX + 16];
+    snprintf(k, sizeof k, "join:%s", hash);
+    if (j) {
+        snprintf(j->hash, sizeof j->hash, "%s", hash);
+        snprintf(j->name, sizeof j->name, "%s", name);
+        snprintf(j->ip, sizeof j->ip, "%s", ip ? ip : "");
+        j->cb = cb;
+        j->ud = ud;
+        if (hot_get(k, join_fetched, j) == 0) return;
+        free(j);
+    }
+    cb(ud, NULL);
+}
+
 static void on_join_account(void *ud, const char *err, const cJSON *account) {
     AuthReq *a = ud;
     if (err || !account) {
@@ -255,6 +329,7 @@ static void on_join_account(void *ud, const char *err, const cJSON *account) {
     cJSON *profile = profile_of(account);
     const int rc = auth_joins_put(g_auth.joins, a->server_hash, kn_json_int(account, "id", 0),
                                   kn_json_str(account, "username", ""), a->ip, profile, kn_now_ms());
+    if (!rc) join_share(a->server_hash, account, a->ip, profile);
     cJSON_Delete(profile);
     if (rc) {
         reply_err(a->req, 503, "Server error.");
@@ -270,7 +345,7 @@ static void on_join_account(void *ud, const char *err, const cJSON *account) {
 
 static void h_join(kn_http_req *req, void *ud) {
     (void) ud;
-    if (limited(g_auth.join, req)) return;
+    if (limited(&g_auth.join, req)) return;
     cJSON *body = kn_http_body_json(req);
     const char *hash = body_str(body, "serverHash", "serverId");
     if (!valid_hash(hash)) {
@@ -295,9 +370,30 @@ static void h_join(kn_http_req *req, void *ud) {
     acct_auth(&rq, on_join_account, a);
 }
 
+typedef struct HasJoinedReq {
+    kn_http_req *req;
+    char name[64];
+} HasJoinedReq;
+
+static void has_joined_found(void *ud, const cJSON *profile) {
+    HasJoinedReq *h = ud;
+    kn_http_req *req = h->req;
+    if (!profile) {
+        brain_cors_headers(req);
+        kn_http_respond(req, 204, NULL, NULL, 0); /* Mojang: 204 = not joined */
+    } else {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "id", (double) kn_json_int(profile, "id", 0));
+        cJSON_AddStringToObject(o, "username", kn_json_str(profile, "username", h->name));
+        cJSON_AddItemToObject(o, "profile", cJSON_Duplicate(profile, 1));
+        reply(req, 200, o);
+    }
+    free(h);
+}
+
 static void h_has_joined(kn_http_req *req, void *ud) {
     (void) ud;
-    if (limited(g_auth.has_joined, req)) return;
+    if (limited(&g_auth.has_joined, req)) return;
     char name[64] = "", hash[HASH_MAX + 8] = "", ip[64] = "";
     if (kn_http_query_get(req, "username", name, sizeof(name)) <= 0 ||
         kn_http_query_get(req, "serverHash", hash, sizeof(hash)) <= 0 || !valid_hash(hash)) {
@@ -305,17 +401,14 @@ static void h_has_joined(kn_http_req *req, void *ud) {
         return;
     }
     kn_http_query_get(req, "ip", ip, sizeof(ip));
-    const cJSON *profile = auth_joins_get(g_auth.joins, hash, name, ip, g_auth.check_ip, kn_now_ms());
-    if (!profile) {
-        brain_cors_headers(req);
-        kn_http_respond(req, 204, NULL, NULL, 0); /* Mojang: 204 = not joined */
+    HasJoinedReq *h = calloc(1, sizeof *h);
+    if (!h) {
+        reply_err(req, 503, "Server error.");
         return;
     }
-    cJSON *o = cJSON_CreateObject();
-    cJSON_AddNumberToObject(o, "id", (double) kn_json_int(profile, "id", 0));
-    cJSON_AddStringToObject(o, "username", kn_json_str(profile, "username", name));
-    cJSON_AddItemToObject(o, "profile", cJSON_Duplicate(profile, 1));
-    reply(req, 200, o);
+    h->req = req;
+    snprintf(h->name, sizeof h->name, "%s", name);
+    join_lookup(hash, name, ip, has_joined_found, h);
 }
 
 /* ---------------------------------------------------------------- hasJoined for the community role */
@@ -421,6 +514,17 @@ static void *remote_hj_thread(void *arg) {
     return NULL;
 }
 
+typedef struct LocalHj {
+    AuthHasJoinedCb cb;
+    void *ud;
+} LocalHj;
+
+static void local_hj_found(void *ud, const cJSON *profile) {
+    LocalHj *l = ud;
+    l->cb(l->ud, profile ? NULL : "Failed to verify username", profile);
+    free(l);
+}
+
 void auth_has_joined_async(Brain *b, const char *username, const char *server_hash, const char *ip,
                            AuthHasJoinedCb cb, void *ud) {
     if (!username || !*username || !valid_hash(server_hash)) {
@@ -428,8 +532,14 @@ void auth_has_joined_async(Brain *b, const char *username, const char *server_ha
         return;
     }
     if (g_auth.joins) { /* this process is the auth service too */
-        const cJSON *p = auth_joins_get(g_auth.joins, server_hash, username, ip, g_auth.check_ip, kn_now_ms());
-        cb(ud, p ? NULL : "Failed to verify username", p);
+        LocalHj *l = calloc(1, sizeof *l);
+        if (!l) {
+            cb(ud, "Server error.", NULL);
+            return;
+        }
+        l->cb = cb;
+        l->ud = ud;
+        join_lookup(server_hash, username, ip, local_hj_found, l);
         return;
     }
     const char *base = kn_config_str(b->cfg, "community.auth_url", "https://coordinator.krunk.io");
@@ -469,12 +579,26 @@ int auth_init(Brain *b) {
     g_auth.b = b;
     const struct kn_config *cfg = b->cfg;
     g_auth.joins = auth_joins_new();
-    g_auth.login = auth_limiter_new((int) kn_config_int(cfg, "auth.login_per_min", 10), 60 * 1000);
-    g_auth.reg = auth_limiter_new((int) kn_config_int(cfg, "auth.register_per_hour", 5), 3600 * 1000);
-    g_auth.join = auth_limiter_new((int) kn_config_int(cfg, "auth.join_per_min", 60), 60 * 1000);
-    g_auth.has_joined = auth_limiter_new((int) kn_config_int(cfg, "auth.has_joined_per_min", 1200), 60 * 1000);
+    const struct {
+        Limit *l;
+        const char *bucket, *key;
+        int def, window_s;
+    } limits[] = {
+        {&g_auth.login, "auth_login", "auth.login_per_min", 10, 60},
+        {&g_auth.reg, "auth_register", "auth.register_per_hour", 5, 3600},
+        {&g_auth.join, "auth_join", "auth.join_per_min", 60, 60},
+        {&g_auth.has_joined, "auth_has_joined", "auth.has_joined_per_min", 1200, 60},
+    };
+    for (size_t i = 0; i < sizeof limits / sizeof limits[0]; i++) {
+        Limit *l = limits[i].l;
+        l->bucket = limits[i].bucket;
+        l->limit = (int) kn_config_int(cfg, limits[i].key, limits[i].def);
+        l->window_s = limits[i].window_s;
+        l->l = auth_limiter_new(l->limit, (uint64_t) l->window_s * 1000);
+        if (!l->l) return -1;
+    }
     g_auth.check_ip = kn_config_bool(cfg, "auth.check_ip", 0);
-    if (!g_auth.joins || !g_auth.login || !g_auth.reg || !g_auth.join || !g_auth.has_joined) return -1;
+    if (!g_auth.joins) return -1;
     g_auth.purge_timer = kn_loop_add_timer(b->loop, 5000, 5000, purge_tick, NULL);
     kn_http_route(b->http, "POST", "/auth/register", h_register, b);
     kn_http_route(b->http, "POST", "/auth/login", h_login, b);
@@ -494,9 +618,9 @@ void auth_shutdown(Brain *b) {
     if (g_auth.purge_timer) kn_loop_cancel_timer(b->loop, g_auth.purge_timer);
     g_auth.purge_timer = 0;
     auth_joins_free(g_auth.joins);
-    auth_limiter_free(g_auth.login);
-    auth_limiter_free(g_auth.reg);
-    auth_limiter_free(g_auth.join);
-    auth_limiter_free(g_auth.has_joined);
+    auth_limiter_free(g_auth.login.l);
+    auth_limiter_free(g_auth.reg.l);
+    auth_limiter_free(g_auth.join.l);
+    auth_limiter_free(g_auth.has_joined.l);
     memset(&g_auth, 0, sizeof(g_auth));
 }

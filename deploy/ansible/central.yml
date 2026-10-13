@@ -5,10 +5,16 @@
     # fail2ban-contract v1 (README "fail2ban"): kru's base is ours; off until fail2ban_manage.
     - { role: fail2ban, tags: [fail2ban] }
     - { role: kn_user, tags: [user] }
+    - { role: kn_disk, tags: [disk] }
     - { role: openresty, tags: [openresty] }
     - { role: kn_repo, tags: [repo] }
     - { role: kn_release, tags: [release, brain] }
+    # redis-tier (doc/backend.md 3.11): our own PostgreSQL + Redis (both off unless enabled in
+    # group_vars), then kn_brain, then the one-time SQLite -> PostgreSQL move of the coordinator.
+    - { role: kn_postgres, tags: [postgres, brain] }
+    - { role: kn_redis, tags: [redis, brain] }
     - { role: kn_brain, tags: [brain] }
+    - { role: kn_db_cutover, tags: [cutover, brain] }
     - { role: kn_web, tags: [web] }
     - { role: kn_updates, tags: [updates], when: kn_updates_enabled | bool }
     - { role: kn_bridge, tags: [bridge] }

@@ -56,6 +56,8 @@ set(KN_BRAIN_SOURCES
     # email-verify: v7.1.4 2FA (TOTP), email verification and outbound mail (0109_account_security)
     account_security.c
     db_security.c
+    # redis-tier: optional Redis / Valkey hot tier (stubs without hiredis; doc/backend.md 3.11)
+    hot.c
 )
 
 # Sources another agent has listed but not landed yet must not break configure
@@ -74,6 +76,12 @@ if (CURL_FOUND)
 endif ()
 target_compile_options(kn_brain PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_compile_definitions(kn_brain PRIVATE _GNU_SOURCE)
+# redis-tier: the hot tier links hiredis only through knsvc_redis (KNSVC_REDIS); without it
+# hot.c compiles to stubs and the brain runs on its database alone.
+if (TARGET knsvc_redis)
+    target_link_libraries(kn_brain PRIVATE knsvc_redis)
+    target_compile_definitions(kn_brain PRIVATE KN_HAVE_REDIS=1)
+endif ()
 
 # Registry unit test (pure, no DB).
 add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_SOURCE_DIR}/shared/src/server_names.c)
@@ -219,10 +227,56 @@ foreach (drv IN ITEMS sqlite mysql)
         ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
 endforeach ()
 
+# redis-tier: the hot tier (doc/backend.md 3.11). The suites again with every brain on a
+# throwaway redis-server / valkey-server (tests/with_redis.py: KN_REDIS_URL; fails when the
+# brains never used it), on sqlite and postgres; plus the failover test (two brains, Redis
+# killed mid-run). All skip (77) without a server binary / database / python websockets.
+if (Python3_FOUND AND TARGET knsvc_redis)
+    set(_kn_wr ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/with_redis.py)
+    foreach (drv IN ITEMS postgres sqlite)
+        string(TOUPPER ${drv} DRV)
+        if (NOT KNSVC_STORE_${DRV})
+            continue()
+        endif ()
+        set(_sfx _${drv}_redis)
+        if (drv STREQUAL "postgres")
+            set(_sfx _redis)
+        endif ()
+        foreach (suite IN ITEMS social_ws ranked season)
+            add_test(NAME brain_${suite}${_sfx}
+                COMMAND ${_kn_wr} ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/${suite}_test.py
+                        $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+            set_tests_properties(brain_${suite}${_sfx} PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77
+                ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;redis;${drv}")
+        endforeach ()
+        add_test(NAME brain_federation${_sfx}
+            COMMAND ${_kn_wr} ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_test.sh ${CMAKE_BINARY_DIR})
+        set_tests_properties(brain_federation${_sfx} PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77
+            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;redis;${drv}")
+        add_test(NAME brain_redis_failover_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/redis_failover_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_redis_failover_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;redis;${drv}")
+    endforeach ()
+endif ()
+
+# redis-tier: kn_dbcopy SQLite -> PostgreSQL (the production cutover's copy + verification)
+if (Python3_FOUND AND TARGET kn_dbcopy)
+    add_test(NAME brain_dbcopy
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/dbcopy_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_dbcopy PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;postgres;sqlite")
+endif ()
+
 # Fake game server node for integration tests (speaks the internal WS protocol).
 add_executable(kn_fakenode tools/kn_fakenode.c)
 target_link_libraries(kn_fakenode PRIVATE knsvc)
 target_compile_definitions(kn_fakenode PRIVATE _GNU_SOURCE)
 
+# redis-tier: closed-loop load generator for the hot endpoints (tests/load_test.py)
+add_executable(kn_loadgen tools/kn_loadgen.c)
+target_link_libraries(kn_loadgen PRIVATE knsvc Threads::Threads)
+target_compile_definitions(kn_loadgen PRIVATE _GNU_SOURCE)
+
 # Build the test + tool with the brain (services_all picks up kn_brain).
-add_dependencies(kn_brain kn_brain_registry_test kn_fakenode kn_brain_releases_test)
+add_dependencies(kn_brain kn_brain_registry_test kn_fakenode kn_brain_releases_test kn_loadgen)

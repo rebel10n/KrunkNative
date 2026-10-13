@@ -1,0 +1,6 @@
+# Disk housekeeping on the central node (deploy/README.md "Disk on kru"). Everything off by default:
+# capping the journal deletes old logs, so it waits for an explicit value in group_vars.
+# kru (2026-10-13): 2.1 GB free of 32 GB; the journal is 2.5 GB back to 2025-07 (journald's default
+# cap is 10 % of the file system = 3.2 GB, so it would still grow by ~0.7 GB); apt's cache 0.5 GB.
+kn_journald_max_use: ""      # e.g. "1G": journald drop-in SystemMaxUse (vacuums the rest at once)
+kn_disk_apt_clean: false     # apt-get clean after the run

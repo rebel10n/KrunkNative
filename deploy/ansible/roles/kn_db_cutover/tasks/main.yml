@@ -1,0 +1,77 @@
+# kn-db-cutover (files/kn-db-cutover): installed whenever the role runs; the cutover itself only
+# with kn_coordinator_db == "postgres" and kn_postgres_enabled. Idempotent: done (marker + the
+# instance's db env saying postgres) -> CHANGED=0; a hold file (a failed or refused attempt, or a
+# manual rollback) -> skipped with a warning until it is removed.
+- name: Tools the cutover uses
+  ansible.builtin.apt:
+    name: [sqlite3, curl]
+    state: present
+    install_recommends: false
+
+- name: kn-db-cutover
+  ansible.builtin.copy:
+    src: kn-db-cutover
+    dest: /usr/local/sbin/kn-db-cutover
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: kn-db-cutover settings
+  ansible.builtin.copy:
+    dest: "{{ kn_etc_dir }}/db-cutover.env"
+    content: |
+      # Managed by KrunkNative deploy/ansible (role kn_db_cutover): settings of /usr/local/sbin/kn-db-cutover.
+      KN_CUTOVER_INSTANCE={{ kn_db_cutover_instance }}
+      KN_CUTOVER_ETC={{ kn_etc_dir }}
+      KN_CUTOVER_STATE_DIR={{ kn_state_dir }}
+      KN_CUTOVER_SVC_CURRENT={{ kn_svc_current }}
+      KN_CUTOVER_BRAIN_PORT={{ kn_db_cutover_brain_port }}
+      KN_CUTOVER_MIN_FREE_MB={{ kn_db_cutover_min_free_mb }}
+      KN_CUTOVER_HEALTH_TIMEOUT_S={{ kn_db_cutover_health_timeout_s }}
+      KN_CUTOVER_PG_HOST=127.0.0.1
+      KN_CUTOVER_PG_PORT={{ kn_postgres_port | default(5434) }}
+      KN_CUTOVER_PG_NAME={{ kn_postgres_db | default('krunknative') }}
+      KN_CUTOVER_PG_USER={{ kn_postgres_user | default('krunknative') }}
+      KN_CUTOVER_PG_POOL={{ kn_db_cutover_pg_pool }}
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Cutover to PostgreSQL
+  when: kn_coordinator_db | default('sqlite') == 'postgres' and kn_postgres_enabled | default(false) | bool
+  block:
+    # kn_brain's units were just rendered (they read <instance>-db.env); restart them now, still on
+    # SQLite, so the cutover stops and starts the unit that will run afterwards.
+    - name: Apply pending kn_brain restarts first
+      ansible.builtin.meta: flush_handlers
+
+    - name: Preflight (check mode)
+      ansible.builtin.command: /usr/local/sbin/kn-db-cutover check
+      register: kn_cutover_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_check_mode
+
+    - name: Preflight result
+      ansible.builtin.debug:
+        msg: "{{ kn_cutover_check.stdout_lines + kn_cutover_check.stderr_lines }}"
+      when: ansible_check_mode
+
+    - name: Move {{ kn_db_cutover_instance }} from SQLite to PostgreSQL (once; rolls back by itself on failure)
+      ansible.builtin.command: /usr/local/sbin/kn-db-cutover run
+      register: kn_cutover
+      changed_when: "'CHANGED=1' in kn_cutover.stdout"
+      when: not ansible_check_mode
+
+    - name: Cutover log
+      ansible.builtin.debug:
+        msg: "{{ kn_cutover.stderr_lines | default([]) + kn_cutover.stdout_lines | default([]) }}"
+      when: not ansible_check_mode and (kn_cutover.changed or 'hold present' in kn_cutover.stderr | default(''))
+
+- name: The coordinator stays on what it runs on now
+  ansible.builtin.debug:
+    msg: >-
+      kn_coordinator_db is {{ kn_coordinator_db | default('sqlite') }}: no cutover. Already on PostgreSQL? Go back with
+      `kn-db-cutover rollback --yes` on the host (deploy/README.md "Database cutover").
+  when: kn_coordinator_db | default('sqlite') != 'postgres'

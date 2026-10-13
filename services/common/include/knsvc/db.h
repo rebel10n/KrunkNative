@@ -151,6 +151,20 @@ int kn_db_tx_rollback(kn_db_tx *tx, kn_db_cb cb, void *ud);
 int kn_db_listen(kn_db *db, const char *channel, kn_db_notify_cb cb, void *ud);
 int kn_db_notify(kn_db *db, const char *channel, const char *payload); /* fire and forget */
 
+/* External pub/sub transport (the brain's optional Redis hot tier, doc/backend.md 3.11).
+ * Once set, kn_db_notify() publishes through ops->publish when that returns 0 (else
+ * through the database as above), and every kn_db_listen() also subscribes through
+ * ops->subscribe. The database path keeps listening (postgres LISTEN; the kn_pubsub
+ * poll every slow_poll_ms instead of notify_poll_ms while the transport reports itself
+ * up with kn_db_pubsub_transport_up), so a writer whose transport is down still
+ * reaches every listener. Call before the first kn_db_listen; -1 afterwards. */
+typedef struct kn_db_pubsub_ops {
+    int (*publish)(void *ctx, const char *channel, const char *payload);  /* 0 = sent */
+    int (*subscribe)(void *ctx, const char *channel, kn_db_notify_cb cb, void *ud);
+} kn_db_pubsub_ops;
+int kn_db_set_pubsub(kn_db *db, const kn_db_pubsub_ops *ops, void *ctx, int slow_poll_ms);
+void kn_db_pubsub_transport_up(kn_db *db, int up);
+
 /* ---- results */
 typedef enum kn_db_type {
     KN_DB_T_TEXT = 0,

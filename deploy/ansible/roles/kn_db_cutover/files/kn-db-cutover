@@ -1,0 +1,213 @@
+#!/bin/bash
+# kn-db-cutover: move a kn_brain instance (the coordinator) from its SQLite file to PostgreSQL,
+# once, safely and unattended (deploy/README.md "Database cutover", doc/backend.md 3.11).
+# Installed by deploy/ansible role kn_db_cutover; settings in /etc/krunknative/db-cutover.env.
+#
+#   kn-db-cutover status              where the instance's database is, the marker, the hold
+#   kn-db-cutover check               preflight only (disk, tools, PostgreSQL login); changes nothing
+#   kn-db-cutover run [--force]       the cutover (no-op when done; --force ignores a hold)
+#   kn-db-cutover rollback --yes      back to the SQLite file (writes made on PostgreSQL since the
+#                                     cutover are NOT copied back; they stay in PostgreSQL)
+#
+# run: preflight (free disk >= max(MIN_FREE_MB, 3 x db + 512 MB), kn_dbcopy / kn_migrate in the
+# release, PostgreSQL login) -> kn_migrate the PostgreSQL schema (service still up) -> stop the
+# instance -> sqlite3 .backup -> kn_dbcopy (copy + verify counts and checksums) -> switch
+# <instance>-db.env to postgres + marker -> start -> health (HTTP up and a database-backed answer).
+# Any failure after the stop restores the SQLite env, starts the instance again, sets the hold
+# file (no automatic retry on the next deploy) and exits non-zero. Prints CHANGED=1 when it switched.
+set -euo pipefail
+
+CONF=${KN_CUTOVER_CONF:-/etc/krunknative/db-cutover.env}
+# the settings file (role kn_db_cutover); KN_CUTOVER_* already in the environment win
+envsnap=$(declare -px | grep -E '^declare -x KN_CUTOVER_' || true)
+# shellcheck source=/dev/null
+[ -r "$CONF" ] && . "$CONF"
+eval "$envsnap"
+INSTANCE=${KN_CUTOVER_INSTANCE:-coord}
+ETC=${KN_CUTOVER_ETC:-/etc/krunknative}
+STATE=${KN_CUTOVER_STATE_DIR:-/var/lib/krunknative}
+SVC=${KN_CUTOVER_SVC_CURRENT:-/opt/krunknative-svc/current}
+PORT=${KN_CUTOVER_BRAIN_PORT:-8083}
+MIN_FREE_MB=${KN_CUTOVER_MIN_FREE_MB:-1024}
+HEALTH_S=${KN_CUTOVER_HEALTH_TIMEOUT_S:-60}
+PG_HOST=${KN_CUTOVER_PG_HOST:-127.0.0.1}
+PG_PORT=${KN_CUTOVER_PG_PORT:-5434}
+PG_NAME=${KN_CUTOVER_PG_NAME:-krunknative}
+PG_USER=${KN_CUTOVER_PG_USER:-krunknative}
+PG_POOL=${KN_CUTOVER_PG_POOL:-8}
+
+UNIT=kn-brain-$INSTANCE
+DBENV=$ETC/$INSTANCE-db.env
+SQLITE=$STATE/$INSTANCE.db
+MARKER=$STATE/.cutover-postgres-$INSTANCE
+HOLD=$STATE/.cutover-hold-$INSTANCE
+LOG=$STATE/cutover-$INSTANCE.log
+LOCK=/run/kn-db-cutover-$INSTANCE.lock
+
+say() { printf '%s kn-db-cutover: %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG" >&2; }
+HOLD_ON_DIE=0
+die() {
+    say "ERROR: $*"
+    if [ "$HOLD_ON_DIE" = 1 ]; then # an unattended run that refused: do not retry on every deploy
+        printf 'refused %s: %s\n' "$(date -u +%FT%TZ)" "$*" > "$HOLD"
+        say "hold set ($HOLD): deploys skip the cutover until rm $HOLD (or kn-db-cutover run --force)"
+    fi
+    exit 1
+}
+
+env_driver() { sed -n 's/^KN_DATABASE_DRIVER=//p' "$DBENV" 2>/dev/null | tail -1; }
+
+write_env() { # sqlite | postgres, atomically
+    local tmp
+    tmp=$(mktemp "$DBENV.XXXXXX")
+    if [ "$1" = postgres ]; then
+        printf '%s\n' "# Managed by kn-db-cutover (KrunkNative): $UNIT's database since $(date -u +%FT%TZ)." \
+            "# Back to SQLite: kn-db-cutover rollback --yes (deploy/README.md \"Database cutover\")." \
+            "KN_DATABASE_DRIVER=postgres" "KN_DATABASE_HOST=$PG_HOST" "KN_DATABASE_PORT=$PG_PORT" \
+            "KN_DATABASE_NAME=$PG_NAME" "KN_DATABASE_USER=$PG_USER" "KN_DATABASE_POOL_SIZE=$PG_POOL" > "$tmp"
+    else
+        printf '%s\n' "# Managed by deploy/ansible (role kn_brain) / kn-db-cutover: $UNIT's database." \
+            "KN_DATABASE_DRIVER=sqlite" "KN_DATABASE_PATH=$SQLITE" > "$tmp"
+    fi
+    chown root:kn "$tmp" 2>/dev/null || true
+    chmod 0640 "$tmp"
+    mv -f "$tmp" "$DBENV"
+}
+
+pg_env() { # the tools reach PostgreSQL like kn_brain will: env overrides, password from secrets.env
+    set -a
+    # shellcheck source=/dev/null
+    . "$ETC/secrets.env"
+    set +a
+    export KN_DATABASE_DRIVER=postgres KN_DATABASE_HOST=$PG_HOST KN_DATABASE_PORT=$PG_PORT \
+        KN_DATABASE_NAME=$PG_NAME KN_DATABASE_USER=$PG_USER KN_LOG_LEVEL=warn
+    unset KN_DATABASE_PATH KN_DATABASE_SEARCH_PATH
+}
+
+healthy() { # HTTP answers and the accounts path reaches the database (bogus token -> 401, not 503)
+    local end=$((SECONDS + HEALTH_S)) s m
+    while [ $SECONDS -lt $end ]; do
+        s=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:$PORT/mm/status" || true)
+        m=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$PORT/auth/me?token=00000000000000000000000000000000" || true)
+        if [ "$s" = 200 ] && [ "$m" = 401 ]; then return 0; fi
+        sleep 0.5
+    done
+    say "health: /mm/status=$s /auth/me(bogus)=$m after ${HEALTH_S}s"
+    return 1
+}
+
+preflight() {
+    [ "$(id -u)" = 0 ] || die "run as root"
+    for t in sqlite3 curl df systemctl; do command -v "$t" >/dev/null || die "missing $t"; done
+    for t in kn_dbcopy kn_migrate kn_brain; do [ -x "$SVC/bin/$t" ] || die "missing $SVC/bin/$t (release without the cutover tools)"; done
+    [ -f "$SQLITE" ] || die "no SQLite database $SQLITE"
+    grep -qs '^KN_DATABASE_PASSWORD=' "$ETC/secrets.env" || die "KN_DATABASE_PASSWORD missing from $ETC/secrets.env (role kn_postgres)"
+    systemctl cat "$UNIT" 2>/dev/null | grep -q "EnvironmentFile=.*$INSTANCE-db.env" ||
+        die "$UNIT does not read $DBENV (role kn_brain must render the unit first)"
+    systemctl cat "$UNIT" | grep -q -- '--database.driver' && die "$UNIT forces --database.driver: refusing"
+    local db_mb free_mb need_mb
+    db_mb=$(( ($(stat -c %s "$SQLITE") + $(stat -c %s "$SQLITE-wal" 2>/dev/null || echo 0) + 1048575) / 1048576 ))
+    free_mb=$(df -Pm "$STATE" | awk 'NR == 2 {print $4}')
+    need_mb=$(( 3 * db_mb + 512 ))
+    [ "$need_mb" -lt "$MIN_FREE_MB" ] && need_mb=$MIN_FREE_MB
+    say "preflight: $SQLITE ${db_mb} MB, ${free_mb} MB free on $(df -P "$STATE" | awk 'NR == 2 {print $6}'), need ${need_mb} MB"
+    [ "$free_mb" -ge "$need_mb" ] || die "refusing: only ${free_mb} MB free, the backup + PostgreSQL copy + headroom need ${need_mb} MB (free space first: deploy/README.md \"Disk on kru\")"
+    ( pg_env; "$SVC/bin/kn_migrate" --config "$SVC/config/config.json" --dir "$SVC/services/db/migrations" --status >/dev/null ) ||
+        die "PostgreSQL $PG_HOST:$PG_PORT/$PG_NAME not reachable as $PG_USER (role kn_postgres)"
+}
+
+rollback_now() { # after a failure behind the stop: SQLite again, started, hold set
+    say "rolling back to SQLite: $*"
+    write_env sqlite
+    [ -e "$MARKER" ] && mv -f "$MARKER" "$MARKER.failed-$(date -u +%Y%m%dT%H%M%SZ)"
+    printf 'automatic rollback %s: %s\n' "$(date -u +%FT%TZ)" "$*" > "$HOLD"
+    systemctl restart "$UNIT" || true
+    if healthy; then say "rolled back: $UNIT serves from $SQLITE again"; else say "$UNIT is NOT healthy on SQLite either: check journalctl -u $UNIT"; fi
+    say "hold set ($HOLD): the next deploy will not retry; fix, then: rm $HOLD (or kn-db-cutover run --force)"
+    exit 1
+}
+
+cmd=${1:-status}
+shift || true
+case "$cmd" in
+status)
+    echo "instance: $UNIT ($DBENV: ${DBENV:+$(env_driver || true)})"
+    [ -e "$MARKER" ] && echo "marker: $(cat "$MARKER")" || echo "marker: none (not cut over)"
+    [ -e "$HOLD" ] && echo "hold: $(cat "$HOLD")" || echo "hold: none"
+    exit 0
+    ;;
+check)
+    exec 9>"$LOCK"
+    flock -n 9 || die "another kn-db-cutover is running"
+    if [ "$(env_driver)" = postgres ]; then echo "already on postgres"; exit 0; fi
+    preflight
+    echo "preflight ok"
+    exit 0
+    ;;
+run)
+    exec 9>"$LOCK"
+    flock -n 9 || die "another kn-db-cutover is running"
+    force=0
+    [ "${1:-}" = --force ] && force=1
+    if [ "$(env_driver)" = postgres ]; then
+        [ -e "$MARKER" ] || say "warning: $DBENV says postgres but there is no marker (switched by hand?)"
+        echo "already on postgres: nothing to do"
+        echo "CHANGED=0"
+        exit 0
+    fi
+    if [ -e "$HOLD" ] && [ $force = 0 ]; then
+        say "hold present ($(cat "$HOLD")): not retrying; rm $HOLD or run --force"
+        echo "CHANGED=0"
+        exit 0
+    fi
+    HOLD_ON_DIE=1
+    preflight
+    ts=$(date -u +%Y%m%dT%H%M%SZ)
+    bak="$STATE/$INSTANCE.db.bak-cutover-$ts"
+    say "migrating the PostgreSQL schema (service still up)"
+    ( pg_env; "$SVC/bin/kn_migrate" --config "$SVC/config/config.json" --dir "$SVC/services/db/migrations" ) >>"$LOG" 2>&1 || die "kn_migrate on PostgreSQL failed (nothing changed; see $LOG)"
+    t0=$(date +%s%3N)
+    say "stopping $UNIT"
+    systemctl stop "$UNIT"
+    trap 'rollback_now "interrupted"' INT TERM
+    say "backup $SQLITE -> $bak"
+    sqlite3 "$SQLITE" ".backup '$bak'" || rollback_now "sqlite3 .backup failed"
+    chmod 0640 "$bak"
+    chown kn:kn "$bak" 2>/dev/null || true
+    [ -s "$bak-wal" ] || rm -f "$bak-wal" "$bak-shm"
+    say "copying into PostgreSQL + verifying (kn_dbcopy)"
+    rc=0
+    ( pg_env; "$SVC/bin/kn_dbcopy" --config "$SVC/config/config.json" --sqlite "$bak" --replace --report "$bak.verify.txt" ) >>"$LOG" 2>&1 || rc=$?
+    [ -s "$bak-wal" ] || rm -f "$bak-wal" "$bak-shm" # kn_dbcopy's read-only open of the WAL-mode copy
+    [ $rc = 0 ] || rollback_now "kn_dbcopy exit $rc (3 = checksum mismatch); report $bak.verify.txt"
+    grep -q '^verify: identical' "$bak.verify.txt" || rollback_now "verification report not identical ($bak.verify.txt)"
+    printf 'cut over %s; backup %s; %s\n' "$(date -u +%FT%TZ)" "$bak" "$(grep '^verify:' "$bak.verify.txt")" > "$MARKER"
+    write_env postgres
+    say "starting $UNIT on PostgreSQL"
+    systemctl start "$UNIT" || rollback_now "systemctl start failed"
+    healthy || rollback_now "not healthy on PostgreSQL"
+    trap - INT TERM
+    rm -f "$HOLD"
+    ms=$(( $(date +%s%3N) - t0 ))
+    say "done: $UNIT serves from PostgreSQL $PG_HOST:$PG_PORT/$PG_NAME; downtime $((ms / 1000)).$(printf '%03d' $((ms % 1000))) s (stop -> healthy)"
+    echo "CHANGED=1"
+    ;;
+rollback)
+    [ "${1:-}" = --yes ] || die "rollback switches $UNIT back to $SQLITE; writes made on PostgreSQL since the cutover stay there. Confirm with: kn-db-cutover rollback --yes"
+    exec 9>"$LOCK"
+    flock -n 9 || die "another kn-db-cutover is running"
+    [ -f "$SQLITE" ] || die "no SQLite database $SQLITE to go back to"
+    say "manual rollback to SQLite"
+    systemctl stop "$UNIT"
+    write_env sqlite
+    [ -e "$MARKER" ] && mv -f "$MARKER" "$MARKER.rolled-back-$(date -u +%Y%m%dT%H%M%SZ)"
+    printf 'manual rollback %s\n' "$(date -u +%FT%TZ)" > "$HOLD"
+    systemctl start "$UNIT"
+    healthy || die "$UNIT not healthy on SQLite: journalctl -u $UNIT"
+    say "rolled back: $UNIT on $SQLITE; hold set ($HOLD) so deploys do not cut over again"
+    ;;
+*)
+    sed -n '2,20p' "$0"
+    exit 2
+    ;;
+esac

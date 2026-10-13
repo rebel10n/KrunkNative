@@ -75,6 +75,18 @@ foreach (_d IN ITEMS POSTGRES:PostgreSQL_FOUND SQLITE:SQLite3_FOUND MYSQL:KN_MYS
     endif ()
 endforeach ()
 
+# Optional Redis / Valkey client (knsvc_redis, knsvc/redis.h): the brain's hot tier
+# (doc/backend.md 3.11). hiredis >= 0.14; only services link it, never the game targets.
+set(KN_HIREDIS_FOUND FALSE)
+if (PkgConfig_FOUND)
+    pkg_check_modules(KN_HIREDIS QUIET IMPORTED_TARGET hiredis)
+endif ()
+option(KNSVC_REDIS "Build the optional Redis/Valkey hot tier client (hiredis)" ${KN_HIREDIS_FOUND})
+if (KNSVC_REDIS AND NOT KN_HIREDIS_FOUND)
+    message(FATAL_ERROR "services: KNSVC_REDIS=ON but hiredis (pkg-config hiredis) was not found")
+endif ()
+message(STATUS "services: redis hot tier (hiredis ${KN_HIREDIS_VERSION}) = ${KNSVC_REDIS}")
+
 set(KNSVC_AVAILABLE ON PARENT_SCOPE)
 if (KNSVC_STORE_POSTGRES OR KNSVC_STORE_SQLITE OR KNSVC_STORE_MYSQL)
     set(KNSVC_DB_AVAILABLE ON PARENT_SCOPE)
@@ -95,7 +107,7 @@ endif ()
 
 # `make services`: every backend library, tool, test and the brain.
 add_custom_target(services_all)
-foreach (t IN ITEMS knsvc knsvc_db kn_migrate kn_brain)
+foreach (t IN ITEMS knsvc knsvc_db knsvc_redis kn_migrate kn_dbcopy kn_brain kn_loadgen)
     if (TARGET ${t})
         add_dependencies(services_all ${t})
     endif ()

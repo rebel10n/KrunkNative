@@ -1,0 +1,25 @@
+# {{ ansible_managed }} (deploy/ansible role kn_redis). Contains the ACL password: root:redis 0640.
+# kn_brain's hot tier only (doc/backend.md 3.11): caches, presence, rate-limit windows, pub/sub.
+bind {{ kn_redis_bind | join(' ') }}
+protected-mode yes
+port {{ kn_redis_port }}
+tcp-backlog 511
+timeout 0
+tcp-keepalive 60
+supervised systemd
+daemonize no
+loglevel notice
+logfile ""
+databases 4
+# No persistence, on purpose: everything is rebuilt from PostgreSQL or is short-lived, and a
+# snapshot restored after a crash could bring back sessions revoked while Redis was down.
+save ""
+appendonly no
+dir {{ kn_redis_dir }}
+maxmemory {{ kn_redis_maxmemory }}
+# every key kn_brain writes has a TTL except the presence set (rebuilt within a minute)
+maxmemory-policy volatile-lru
+lazyfree-lazy-eviction yes
+# ACL: no default user; kn_brain may only touch its prefix (keys and channels) and no admin commands
+user default off
+user {{ kn_redis_user }} on >{{ kn_redis_password }} ~{{ kn_redis_prefix }}* &{{ kn_redis_prefix }}* +@all -@dangerous

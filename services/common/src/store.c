@@ -50,6 +50,10 @@ struct kn_db {
     int64_t ps_seen[PUBSUB_SEEN];
     size_t ps_seen_pos;
     pending_notify *ps_pending;
+    /* external transport (kn_db_set_pubsub) */
+    const kn_db_pubsub_ops *xps;
+    void *xps_ctx;
+    int xps_slow_ms, xps_up, ps_cur_ms;
     int freeing;
 };
 
@@ -440,10 +444,15 @@ static void ps_tick(kn_loop *loop, void *ud) {
     }
 }
 
+static int ps_interval(const kn_db *db) {
+    return db->xps && db->xps_up && db->xps_slow_ms > db->cfg.notify_poll_ms ? db->xps_slow_ms : db->cfg.notify_poll_ms;
+}
+
 static void ps_start_polling(kn_db *db) {
     if (db->ps_polling || db->ps_state != 2 || !db->nsubs) return;
     db->ps_polling = 1;
-    uint64_t ms = (uint64_t)db->cfg.notify_poll_ms;
+    db->ps_cur_ms = ps_interval(db);
+    uint64_t ms = (uint64_t)db->ps_cur_ms;
     db->ps_timer = kn_loop_add_timer(db->loop, ms, ms, ps_tick, db);
 }
 
@@ -480,8 +489,27 @@ static void ps_ensure(kn_db *db) {
     kn_db_query_sql(db, &PS_DDL, 0, NULL, ps_ddl_done, db);
 }
 
+int kn_db_set_pubsub(kn_db *db, const kn_db_pubsub_ops *ops, void *ctx, int slow_poll_ms) {
+    if (!db || db->freeing || db->nsubs || db->xps) return -1;
+    db->xps = ops;
+    db->xps_ctx = ctx;
+    db->xps_slow_ms = slow_poll_ms > 0 ? slow_poll_ms : 1000;
+    return 0;
+}
+
+void kn_db_pubsub_transport_up(kn_db *db, int up) {
+    if (!db || !db->xps || db->freeing) return;
+    db->xps_up = up ? 1 : 0;
+    if (db->ps_polling && db->ps_cur_ms != ps_interval(db)) { /* re-arm the poll at the new pace */
+        kn_loop_cancel_timer(db->loop, db->ps_timer);
+        db->ps_polling = 0;
+        ps_start_polling(db);
+    }
+}
+
 int kn_db_listen(kn_db *db, const char *channel, kn_db_notify_cb cb, void *ud) {
     if (!db || !channel || !cb || db->freeing) return -1;
+    if (db->xps && db->xps->subscribe) db->xps->subscribe(db->xps_ctx, channel, cb, ud);
     if (db->apool && db->drv->async->listen && (db->drv->caps & KN_DB_CAP_NOTIFY))
         return db->drv->async->listen(db->apool, channel, cb, ud);
     sub *n = realloc(db->subs, (db->nsubs + 1) * sizeof *n);
@@ -499,6 +527,7 @@ int kn_db_listen(kn_db *db, const char *channel, kn_db_notify_cb cb, void *ud) {
 
 int kn_db_notify(kn_db *db, const char *channel, const char *payload) {
     if (!db || !channel || db->freeing) return -1;
+    if (db->xps && db->xps->publish && db->xps->publish(db->xps_ctx, channel, payload ? payload : "") == 0) return 0;
     if (db->apool && db->drv->async->notify && (db->drv->caps & KN_DB_CAP_NOTIFY))
         return db->drv->async->notify(db->apool, channel, payload);
     if (db->ps_state == 2) {

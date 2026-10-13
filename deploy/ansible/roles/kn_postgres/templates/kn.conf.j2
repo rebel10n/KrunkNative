@@ -1,0 +1,6 @@
+# {{ ansible_managed }} (deploy/ansible role kn_postgres): the cluster kn_brain uses.
+listen_addresses = '{{ kn_postgres_listen }}'
+port = {{ kn_postgres_port }}
+{% for k, v in kn_postgres_settings | dictsort %}
+{{ k }} = {{ v }}
+{% endfor %}

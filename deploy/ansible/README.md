@@ -4,13 +4,13 @@ Ansible for the Krunker Box Office central node (`kru`) and the edge game server
 
 | playbook | hosts | what |
 | --- | --- | --- |
-| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), edge origin (host nginx :443 vhost + OpenResty 127.0.0.1:8086, off until `kn_edge_origin_enabled`), `/opt/krunknative` clone |
+| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, PostgreSQL 127.0.0.1:5434 + Redis 127.0.0.1:6380 for kn_brain (see [Database cutover](#database-cutover-postgresql--redis-on-kru)), net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), edge origin (host nginx :443 vhost + OpenResty 127.0.0.1:8086, off until `kn_edge_origin_enabled`), `/opt/krunknative` clone |
 | `edges.yml` | `edges` | host firewall drop-in (game ports), user `kn`, `server_bin` x (vcpus-1, min 1), `<edge>-<n>.krunk.io` DNS |
 | `firewall.yml` | `edges` | only the host firewall (vendored `edge_firewall` role), see [Edge firewall](#edge-firewall) |
 | `fail2ban.yml` | `kru`, `edges` | only fail2ban (vendored `fail2ban` role; base on kru, drop-ins on the edges), see [fail2ban](#fail2ban) |
 | `site.yml` | all | both |
 
-Tags: `user openresty repo release brain web updates bridge rtc edge_origin gameserver dns firewall fail2ban`.
+Tags: `user disk openresty repo release postgres redis brain cutover web updates bridge rtc edge_origin gameserver dns firewall fail2ban`.
 
 Client updates (`kn_updates`, doc/backend.md 9.8): `https://assets.krunk.io/updates/` serves
 `/opt/krunknative-updates/public/` (OpenResty `kn.d/updates.conf`): the channel manifest CI's
@@ -44,7 +44,8 @@ ansible-playbook edges.yml --tags dns
 
 Layout on hosts: `/opt/krunknative-svc/{releases/<id>,current}` (binaries, maps, migrations,
 release config), `/opt/krunknative-web/{releases/<id>,current,assets}`, state
-`/var/lib/krunknative`, secrets `/etc/krunknative/secrets.env` (generated once, root:kn 0640;
+`/var/lib/krunknative`, secrets `/etc/krunknative/secrets.env` (generated once, root 0600; also holds the generated
+`KN_DATABASE_PASSWORD` / `KN_REDIS_PASSWORD`;
 set `kn_brain_internal_secret` from an ansible-vault file to pin it). The last 3 releases are kept.
 
 Outbound mail (kn_brain's email verification, `doc/backend.md` 7.9): `KN_SMTP_HOST`, `KN_SMTP_PORT`,
@@ -73,7 +74,8 @@ Unset (no host or password): the file is left as it is and kn_brain sends no mai
 need a verified email.
 
 Switches: `kn_coordinator_db` (`sqlite` | `none` | `postgres`; sqlite falls back to `--no-db`
-while the shipped kn_brain has no SQLite store), `kn_gameserver_enabled` (edges stay down until
+while the shipped kn_brain has no SQLite store; postgres = [Database cutover](#database-cutover-postgresql--redis-on-kru)),
+`kn_postgres_enabled` / `kn_redis_enabled` (roles default off; on for kru in `group_vars/central`), `kn_gameserver_enabled` (edges stay down until
 true), `kn_gameserver_ports_open` (escape hatch, true everywhere: edge_firewall opens the ports),
 `edge_firewall_own_base` (see below).
 
@@ -172,6 +174,83 @@ After the cutover set `kn_cloudflare_tunnel: false` (kn_bridge / kn_rtc stop put
 `play.krunk.io` tunnel CNAME and ingress rules back when run with Cloudflare credentials), and
 after the zone has left Cloudflare `kn_cf_dns_manage: false` (`group_vars/edges/main.yml`; the
 `<edge>-<n>` A records are then kept by hand at the new DNS host).
+
+## Database cutover (PostgreSQL + Redis on kru)
+
+`doc/backend.md` 3.11 has the design (what Redis holds, failure modes, security, the measurements
+and the load test). `group_vars/central/main.yml` sets `kn_postgres_enabled: true`,
+`kn_redis_enabled: true` and `kn_coordinator_db: postgres` (the roles' own defaults stay off and
+`sqlite`, so other inventories get nothing). The first `central.yml` run with that (CI's Deploy kru
+after the push) does, unattended:
+
+| step | role / tool | on failure |
+| --- | --- | --- |
+| PostgreSQL: our own cluster `<newest installed>/krunknative` on 127.0.0.1:5434 (`pg_createcluster`; kru's stopped 17/main + 18/main are left alone), scram on loopback only, sandboxed unit, role + database `krunknative`, `KN_DATABASE_PASSWORD` generated into `secrets.env` | `kn_postgres` | the play stops; kn_brain still on SQLite |
+| Redis: `kn-redis.service` on 127.0.0.1:6380 (the package's 6379 instance masked), ACL user `kn_brain` on `kn:*` only, no persistence, `KN_REDIS_PASSWORD` generated, `/etc/krunknative/redis.env` | `kn_redis` | same |
+| the kn-brain units read `/etc/krunknative/<instance>-db.env` (created as the SQLite file they used before) and `redis.env`; restarted, still on SQLite, now with the hot tier | `kn_brain` | same |
+| **backup -> stop writers -> migrate -> verify -> switch -> start -> verify** with `kn-db-cutover run` (below) | `kn_db_cutover` | rolls back to SQLite by itself, sets a hold, fails the job |
+
+`kn-db-cutover run` (`roles/kn_db_cutover/files/kn-db-cutover`, log `/var/lib/krunknative/cutover-coord.log`):
+
+1. preflight: `kn_dbcopy` / `kn_migrate` in the release, PostgreSQL login with the generated
+   password, the unit reads `coord-db.env`, free disk >= max(1024 MB, 3 x coord.db + 512 MB)
+   (`kn_db_cutover_min_free_mb`); otherwise it refuses, sets the hold and fails the job, changing nothing;
+2. `kn_migrate` the PostgreSQL schema (kn-brain-coord still serving);
+3. stop kn-brain-coord (the only writer: the finder runs `--no-db`, game servers never touch the
+   database; they reconnect within their 1-30 s backoff);
+4. `sqlite3 coord.db ".backup coord.db.bak-cutover-<time>"`;
+5. `kn_dbcopy --sqlite <backup> --replace`: copy in one transaction + verify row counts and checksums
+   of every table (report `<backup>.verify.txt`);
+6. `coord-db.env` -> postgres (`KN_DATABASE_*`, pool 8), marker `/var/lib/krunknative/.cutover-postgres-coord`;
+7. start kn-brain-coord; healthy = `/mm/status` 200 and `/auth/me` with a bogus token 401 (the
+   accounts path reached PostgreSQL) within 60 s;
+8. any failure in 4-7 restores `coord-db.env` = SQLite, restarts, checks health, writes the hold
+   `/var/lib/krunknative/.cutover-hold-coord` (later deploys skip the cutover instead of retrying on
+   every push) and exits 1. Measured on the production-sized copy in the container harness:
+   **3.6-3.8 s** from stop to healthy (copy + verify 2.6 s of it).
+
+Every later run is a no-op (`CHANGED=0`; a second apply of the whole play reports `changed=0`).
+
+Go / no-go before pushing it: coord.db 7.6 MB and 2.1 GB free on kru (need 1 GB): go, but cap the
+journal first if possible ([Disk on kru](#disk-on-kru)); expect ~5 s of coordinator downtime
+(logins, joins, social sockets reconnect; matches in progress are not affected); watch the job's
+"Cutover log" output.
+
+On kru (root):
+
+```sh
+kn-db-cutover status                 # driver in coord-db.env, marker, hold
+kn-db-cutover check                  # preflight only
+kn-db-cutover rollback --yes         # back to coord.db; sets the hold. Writes made on PostgreSQL since
+                                     # the cutover stay in PostgreSQL (not copied back)
+rm /var/lib/krunknative/.cutover-hold-coord   # allow the next deploy to try again, or:
+kn-db-cutover run --force            # try again now
+journalctl -u kn-brain-coord | grep -E 'db: driver|hot:'   # what it runs on
+```
+
+Redis can go away at any time: the brains log `hot: redis ... down: serving from the database` and
+keep serving (`systemctl stop kn-redis` is safe). To turn the hot tier off for good: set
+`kn_redis_enabled: false`, then on kru `rm /etc/krunknative/redis.env && systemctl restart
+kn-brain-coord kn-brain-finder`. To leave PostgreSQL: `kn-db-cutover rollback --yes` and
+`kn_coordinator_db: sqlite`. Postgres data: `/var/lib/postgresql/<ver>/krunknative`; connect with
+`runuser -u postgres -- psql -p 5434 krunknative`.
+
+## Disk on kru
+
+2026-10-13: 2.1 GB free of 32 GB (94 %). Ours: the journal 2.5 GB (back to 2025-07; journald's
+default cap is 10 % = 3.2 GB, so it still grows ~0.7 GB), the updates store 2.5 GB (1.9 GB of content
+objects are hardlinks of the web asset tree, not extra space; 3 x 221 MB client builds), apt's cache
+0.47 GB, `/var/log/btmp.1` 163 MB, releases ~10 MB each (3 kept). Not ours: `/home/kru` 12 GB,
+`/home/glorp` 4.2 GB. Proposals, in order of safety:
+
+* `apt-get clean` (0.47 GB, nothing lost): `kn_disk_apt_clean: true` (role `kn_disk`);
+* cap the journal: `kn_journald_max_use: 1G` (role `kn_disk`: a journald drop-in + one
+  `journalctl --vacuum-size`) frees ~1.5 GB, deleting entries older than a few months;
+* keep two client builds in the updates store instead of three (~0.22 GB; `kn-updates` prune setting);
+* `/home/kru` (12 GB) and `/home/glorp` belong to others: ask, never clean from here.
+
+The cutover needs about 1 GB (backup + PostgreSQL cluster and WAL, `max_wal_size` 256 MB) and
+refuses below that.
 
 ## net-bridge (play.krunk.io)
 

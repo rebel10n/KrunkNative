@@ -14,6 +14,21 @@
     "search_path": "",
     "migrations_dir": "services/db/migrations"
   },
+  "redis": {
+    "_comment": "Optional Redis / Valkey hot tier of kn_brain (doc/backend.md 3.11): empty url = off. The database stays the source of truth; with Redis down the brain serves from the database. Put the password in KN_REDIS_PASSWORD, not here.",
+    "url": "",
+    "username": "",
+    "password": "",
+    "prefix": "kn:",
+    "connect_timeout_ms": 1000,
+    "command_timeout_ms": 500,
+    "pubsub": true,
+    "pubsub_fallback_poll_ms": 1000,
+    "session_cache_s": 60,
+    "rate_limits": true,
+    "presence": true,
+    "presence_ttl_s": 90
+  },
   "log": {
     "level": "info",
     "format": "text",

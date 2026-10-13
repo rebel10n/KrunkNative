@@ -1,0 +1,145 @@
+# PostgreSQL for kn_brain (defaults/main.yml). Only with kn_postgres_enabled: true. Creates its own
+# cluster ({{ kn_postgres_cluster }}, port {{ kn_postgres_port }}, loopback only) next to whatever the
+# host already has, a role + database owned by it, and the password KN_DATABASE_PASSWORD in
+# {{ kn_etc_dir }}/secrets.env (generated on the host at the first run, never logged or echoed).
+# The switch of the coordinator from SQLite is role kn_db_cutover's.
+- name: PostgreSQL packages
+  when: kn_postgres_enabled | bool
+  block:
+    - name: Installed PostgreSQL versions
+      ansible.builtin.shell: ls -1 /usr/lib/postgresql 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1
+      register: kn_pg_installed
+      changed_when: false
+      check_mode: false
+
+    - name: PostgreSQL server (none installed yet)
+      ansible.builtin.apt:
+        name: [postgresql, postgresql-common]
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+      when: not kn_postgres_version and not kn_pg_installed.stdout
+
+    - name: PostgreSQL server {{ kn_postgres_version }}
+      ansible.builtin.apt:
+        name: ["postgresql-{{ kn_postgres_version }}", postgresql-common]
+        state: present
+        install_recommends: false
+      when: kn_postgres_version | string | length > 0
+
+    - name: Version in use
+      ansible.builtin.shell: ls -1 /usr/lib/postgresql | grep -E '^[0-9]+$' | sort -n | tail -1
+      register: kn_pg_detect
+      changed_when: false
+      check_mode: false
+      when: not kn_postgres_version
+
+    - name: Remember the version
+      ansible.builtin.set_fact:
+        kn_pg_ver: "{{ kn_postgres_version if kn_postgres_version else kn_pg_detect.stdout }}"
+        kn_pg_etc: "/etc/postgresql/{{ kn_postgres_version if kn_postgres_version else kn_pg_detect.stdout }}/{{ kn_postgres_cluster }}"
+
+    - name: A PostgreSQL version was found
+      ansible.builtin.assert:
+        that: kn_pg_ver | string | length > 0
+        fail_msg: "no PostgreSQL server under /usr/lib/postgresql (check mode on a fresh host?)"
+      when: not ansible_check_mode
+
+- name: PostgreSQL cluster, role and database
+  when: kn_postgres_enabled | bool and (kn_pg_ver | default('') | string | length > 0)
+  block:
+    - name: Cluster {{ kn_pg_ver }}/{{ kn_postgres_cluster }}
+      ansible.builtin.command:
+        argv: [pg_createcluster, "{{ kn_pg_ver }}", "{{ kn_postgres_cluster }}", --port, "{{ kn_postgres_port }}",
+               --start-conf, auto, --, --auth-local=peer, --auth-host=scram-sha-256, --data-checksums,
+               --encoding=UTF8, --locale=C.UTF-8]
+        creates: "{{ kn_pg_etc }}/postgresql.conf"
+      notify: Restart kn postgres
+
+    - name: Settings (conf.d)
+      ansible.builtin.template:
+        src: kn.conf.j2
+        dest: "{{ kn_pg_etc }}/conf.d/50-krunknative.conf"
+        owner: postgres
+        group: postgres
+        mode: "0644"
+      notify: Restart kn postgres
+
+    - name: Client authentication (loopback, scram)
+      ansible.builtin.template:
+        src: pg_hba.conf.j2
+        dest: "{{ kn_pg_etc }}/pg_hba.conf"
+        owner: postgres
+        group: postgres
+        mode: "0640"
+      notify: Restart kn postgres
+
+    - name: Unit sandbox directory
+      ansible.builtin.file:
+        path: "/etc/systemd/system/postgresql@{{ kn_pg_ver }}-{{ kn_postgres_cluster }}.service.d"
+        state: directory
+        mode: "0755"
+
+    - name: Unit sandbox (this cluster only)
+      ansible.builtin.template:
+        src: hardening.conf.j2
+        dest: "/etc/systemd/system/postgresql@{{ kn_pg_ver }}-{{ kn_postgres_cluster }}.service.d/50-krunknative.conf"
+        mode: "0644"
+      notify: Restart kn postgres
+
+    - name: Apply pending restarts before using the cluster
+      ansible.builtin.meta: flush_handlers
+
+    - name: Cluster running and enabled
+      ansible.builtin.systemd_service:
+        name: "postgresql@{{ kn_pg_ver }}-{{ kn_postgres_cluster }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: Database password in secrets.env (generated once, never shown)
+      ansible.builtin.shell: |
+        set -eu
+        f={{ kn_etc_dir | quote }}/secrets.env
+        umask 077
+        [ -e "$f" ] || { : > "$f"; chown root:root "$f"; chmod 0600 "$f"; }
+        grep -q '^KN_DATABASE_PASSWORD=' "$f" && exit 0
+        printf 'KN_DATABASE_PASSWORD=%s\n' "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" >> "$f"
+        echo created
+      args:
+        executable: /bin/bash
+      register: kn_pg_secret
+      changed_when: "'created' in kn_pg_secret.stdout"
+      no_log: true
+
+    - name: Role and database (created once; the password re-applied only when it no longer works)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        set -a; . {{ kn_etc_dir | quote }}/secrets.env; set +a
+        export PGCONNECT_TIMEOUT=5
+        for i in $(seq 1 30); do runuser -u postgres -- psql -p {{ kn_postgres_port }} -qAtc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+        q() { runuser -u postgres -- env KN_DATABASE_PASSWORD="$KN_DATABASE_PASSWORD" psql -p {{ kn_postgres_port }} -v ON_ERROR_STOP=1 -qAt "$@"; }
+        changed=0
+        if [ "$(q -c "SELECT 1 FROM pg_roles WHERE rolname = '{{ kn_postgres_user }}'")" != 1 ]; then
+          printf '%s\n' '\getenv pw KN_DATABASE_PASSWORD' "CREATE ROLE {{ kn_postgres_user }} LOGIN PASSWORD :'pw';" | q
+          changed=1
+        fi
+        if [ "$(q -c "SELECT 1 FROM pg_database WHERE datname = '{{ kn_postgres_db }}'")" != 1 ]; then
+          q -c "CREATE DATABASE {{ kn_postgres_db }} OWNER {{ kn_postgres_user }} ENCODING 'UTF8' TEMPLATE template0"
+          q -d {{ kn_postgres_db }} -c "REVOKE ALL ON DATABASE {{ kn_postgres_db }} FROM PUBLIC; REVOKE CREATE ON SCHEMA public FROM PUBLIC; ALTER SCHEMA public OWNER TO {{ kn_postgres_user }}"
+          changed=1
+        fi
+        if ! PGPASSWORD="$KN_DATABASE_PASSWORD" psql -h 127.0.0.1 -p {{ kn_postgres_port }} -U {{ kn_postgres_user }} -d {{ kn_postgres_db }} -qAtc 'SELECT 1' >/dev/null 2>&1; then
+          printf '%s\n' '\getenv pw KN_DATABASE_PASSWORD' "ALTER ROLE {{ kn_postgres_user }} PASSWORD :'pw';" | q
+          changed=1
+        fi
+        PGPASSWORD="$KN_DATABASE_PASSWORD" psql -h 127.0.0.1 -p {{ kn_postgres_port }} -U {{ kn_postgres_user }} -d {{ kn_postgres_db }} -qAtc 'SELECT 1' >/dev/null
+        [ $changed = 1 ] && echo changed || echo ok
+      args:
+        executable: /bin/bash
+      register: kn_pg_role
+      changed_when: "'changed' in kn_pg_role.stdout"
+      when: not ansible_check_mode
+      no_log: true

@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "hot.h"
 #include "knsvc/buf.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
@@ -119,6 +120,29 @@ static void presence_add(SocialSession *s) {
     s->next = s_online;
     if (s_online) s_online->prev = s;
     s_online = s;
+    hot_presence_add(s->account_id);
+}
+
+/* Unlink and, when it was the account's last socket here, drop this brain from its presence. */
+static void presence_leave(SocialSession *s) {
+    const int64_t id = s->account_id;
+    const int linked = s->prev || s->next || s_online == s;
+    presence_remove(s);
+    if (!linked || id <= 0) return;
+    for (SocialSession *o = s_online; o; o = o->next)
+        if (o->account_id == id) return;
+    hot_presence_remove(id);
+}
+
+/* hot.h presence refresh: this brain's online account ids */
+static size_t presence_ids(int64_t *ids, size_t max) {
+    size_t n = 0;
+    for (SocialSession *s = s_online; s; s = s->next) {
+        if (s->account_id <= 0) continue;
+        if (n < max) ids[n] = s->account_id;
+        n++;
+    }
+    return n;
 }
 
 /* ------------------------------------------------------------------ sending */
@@ -170,13 +194,20 @@ int social_require_auth(SocialSession *s) {
     return 0;
 }
 
-void social_push_account_ex(int64_t account_id, cJSON *frame, int json_only) {
+/* This brain's sockets of the account (also what other brains' pushes arrive as, hot.h). */
+static void push_local(int64_t account_id, cJSON *frame, int json_only) {
     if (!frame) return;
     for (SocialSession *s = s_online; s; s = s->next) {
         if (s->account_id == account_id && social_open(s) && (!json_only || s->json))
             social_send(s, cJSON_Duplicate(frame, 1));
     }
     cJSON_Delete(frame);
+}
+
+void social_push_account_ex(int64_t account_id, cJSON *frame, int json_only) {
+    if (!frame) return;
+    hot_push(account_id, frame, json_only); /* sockets of the account on other brains (Redis presence) */
+    push_local(account_id, frame, json_only);
 }
 
 void social_push_account(int64_t account_id, cJSON *frame) { social_push_account_ex(account_id, frame, 0); }
@@ -368,21 +399,16 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
     social_unhold(s);
 }
 
-static void revoke_done(SocialSession *s, kn_db_result *res, void *extra) {
-    (void) s;
-    (void) extra;
-    if (!kn_db_ok(res)) KN_WARN(MOD, "logout: %s", kn_db_error(res));
-}
+static void logout_revoked(void *ud) { social_unhold(ud); }
 
 static void sh_auth(SocialSession *s, const cJSON *f) {
     const int64_t action = fa_int(f, 1, 1);
     if (action == -1) {
-        /* logout: forget the account; the client drops its saved token, so revoke it */
-        presence_remove(s);
-        if (s->token[0])
-            social_query(s, SQL(.pg = "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))",
-                                .any = "DELETE FROM sessions WHERE token_hash = {hash:$1}"), KN_DB_ARGS(s->token),
-                         revoke_done, NULL);
+        /* logout: forget the account; the client drops its saved token, so revoke it
+         * (acct_revoke_token also drops it from the hot tier's session cache once deleted) */
+        presence_leave(s);
+        /* the socket's next frames wait for the delete, as with every other database write */
+        if (s->token[0]) acct_revoke_token_then(s->token, logout_revoked, social_hold(s));
         s->account_id = 0;
         s->username[0] = 0;
         s->email_verified = s->email_state_known = 0;
@@ -467,19 +493,40 @@ static void sh_twofa(SocialSession *s, const cJSON *f) {
     acct_auth(&rq, auth_reply, w);
 }
 
-static void las_done(SocialSession *s, kn_db_result *res, void *extra) {
-    (void) extra;
-    if (!kn_db_ok(res)) social_error(s, acct_db_error(res, "las"));
+typedef struct LasCtx {
+    SocialSession *s;
+    int64_t account_id;
+} LasCtx;
+
+/* not social_query: the cached sessions must be dropped even when the socket closed meanwhile */
+static void las_done(kn_db_result *res, void *ud) {
+    LasCtx *c = ud;
+    if (kn_db_ok(res)) hot_session_forget_account(c->account_id);
+    else if (social_open(c->s)) social_error(c->s, acct_db_error(res, "las"));
+    social_unhold(c->s);
+    free(c);
 }
 
 /* ["las"] log out every other session of the account (index.js logoutSessions) */
 static void sh_logout_all(SocialSession *s, const cJSON *f) {
     (void) f;
     if (!social_require_auth(s)) return;
+    LasCtx *c = calloc(1, sizeof *c);
+    if (!c || !g_acct_brain || !g_acct_brain->db) {
+        free(c);
+        social_error(s, "Server unavailable");
+        return;
+    }
+    c->s = social_hold(s);
+    c->account_id = s->account_id;
     char me[24];
-    social_query(s, SQL(.pg = "DELETE FROM sessions WHERE account_id = $1 AND token_hash <> sha256(convert_to($2, 'UTF8'))",
-                        .any = "DELETE FROM sessions WHERE account_id = $1 AND token_hash <> {hash:$2}"),
-                 KN_DB_ARGS(social_viewer(s, me), s->token), las_done, NULL);
+    if (kn_db_query_sql(g_acct_brain->db,
+                        SQL(.pg = "DELETE FROM sessions WHERE account_id = $1 AND token_hash <> sha256(convert_to($2, 'UTF8'))",
+                            .any = "DELETE FROM sessions WHERE account_id = $1 AND token_hash <> {hash:$2}"),
+                        KN_DB_ARGS(social_viewer(s, me), s->token), las_done, c) != 0) {
+        social_unhold(s);
+        free(c);
+    }
 }
 
 static void sh_pong(SocialSession *s, const cJSON *f) {
@@ -659,7 +706,7 @@ static void on_close(kn_ws *ws, int code, const char *reason, void *ud) {
     (void) code;
     (void) reason;
     SocialSession *s = ud;
-    presence_remove(s);
+    presence_leave(s);
     clear_pending(s);
     queue_clear(s);
     s->ws = NULL;
@@ -696,10 +743,45 @@ static void ws_route(kn_http_req *req, void *ud) {
     s_open_count++;
 }
 
+/* GET /mm/presence: signed-in social sockets here and, with the Redis hot tier, on every brain */
+typedef struct PresenceReq {
+    kn_http_req *req;
+} PresenceReq;
+
+static void presence_reply(kn_http_req *req, int64_t global) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "local", social_ws_online());
+    if (global >= 0) cJSON_AddNumberToObject(o, "global", (double) global);
+    else cJSON_AddNullToObject(o, "global");
+    cJSON_AddStringToObject(o, "redis", hot_state());
+    brain_reply_json(req, 200, o);
+    cJSON_Delete(o);
+}
+
+static void presence_counted(void *ud, int64_t count) {
+    PresenceReq *p = ud;
+    presence_reply(p->req, count);
+    free(p);
+}
+
+static void h_presence(kn_http_req *req, void *ud) {
+    (void) ud;
+    PresenceReq *p = calloc(1, sizeof *p);
+    if (p) {
+        p->req = req;
+        if (hot_presence_count(presence_counted, p) == 0) return;
+        free(p);
+    }
+    presence_reply(req, -1);
+}
+
 int social_ws_init(Brain *b) {
     if (!b->http) return 0;
     kn_http_route(b->http, "GET", "/api/ws", ws_route, NULL);
     kn_http_route(b->http, "GET", "/social/ws", ws_route, NULL);
+    kn_http_route(b->http, "GET", "/mm/presence", h_presence, NULL);
+    hot_presence_source(presence_ids);
+    hot_push_handler(push_local);
     KN_INFO(MOD, "social socket on /api/ws and /social/ws%s", b->db ? "" : " (no database: guests only)");
     return 0;
 }

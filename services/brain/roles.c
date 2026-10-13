@@ -61,6 +61,7 @@ int brain_module_enabled(const char *name) {
         unsigned roles;
     } k_map[] = {
         {"registry", BRAIN_ROLE_ALL},  /* in-memory; public-routes / internal-ws read it */
+        {"hot", BRAIN_ROLE_ALL},       /* optional Redis hot tier (hot.h): every role */
         {"accounts", BRAIN_ROLE_AUTH | BRAIN_ROLE_COMMUNITY},
         {"auth", BRAIN_ROLE_AUTH},
         {"finder", BRAIN_ROLE_FINDER},

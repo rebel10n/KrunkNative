@@ -101,6 +101,8 @@ void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud);
 void acct_change_password(int64_t id, const char *old_pass, const char *new_pass, AcctReplyFn cb, void *ud);
 /* Revoke one session token (logout). Fire and forget. */
 void acct_revoke_token(const char *token);
+/* Same; done(ud) once the row is deleted (or failed; also when nothing was sent). */
+void acct_revoke_token_then(const char *token, void (*done)(void *ud), void *ud);
 
 /* ---- Krunker store data (store.c): assets/skins.json = src/data/store.js skins, by index */
 typedef struct SkinInfo {

@@ -1,0 +1,11 @@
+# One-time move of the coordinator (kn-brain-coord) from SQLite to PostgreSQL (kn-db-cutover;
+# deploy/README.md "Database cutover"). Runs when kn_coordinator_db is "postgres" (role kn_brain's
+# variable; group_vars/central/main.yml) and the marker / hold files say it has not happened yet.
+kn_db_cutover_instance: coord
+kn_db_cutover_brain_port: 8083
+# Refuse when less is free (also refuses below 3 x the database + 512 MB).
+kn_db_cutover_min_free_mb: 1024
+kn_db_cutover_health_timeout_s: 60
+# database.pool_size of the instance on PostgreSQL (the SQLite default is 2): on the load test 16
+# connections served ~4.6x the session checks of 4 (fsync-bound commits overlap); 8 on 2 vCPUs.
+kn_db_cutover_pg_pool: 8

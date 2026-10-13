@@ -2,8 +2,11 @@
 # Each instance = one systemd unit kn-brain-<name>.service on loopback; the
 # Cloudflare tunnel maps the public hostnames to these ports.
 kn_brain_config: "{{ kn_svc_current }}/config/config.json"
-# Coordinator database: "sqlite" once coord-store's adapter lands (database.driver),
-# "none" runs --no-db (accounts unavailable), "postgres" uses kn_brain_pg_*.
+# Coordinator database: "sqlite" (/var/lib/krunknative/coord.db), "none" runs --no-db (accounts
+# unavailable), "postgres": role kn_db_cutover moves coord.db into role kn_postgres' database once
+# (kn-db-cutover) and the instance then reads /etc/krunknative/coord-db.env = postgres. Instances
+# with a database read <kn_etc_dir>/<name>-db.env (KN_DATABASE_*), written here as SQLite when
+# missing and switched only by kn-db-cutover (run / rollback).
 kn_coordinator_db: sqlite
 kn_brain_instances:
   - name: finder
@@ -43,3 +46,6 @@ kn_brain_smtp_from: "{{ lookup('ansible.builtin.env', 'KN_SMTP_FROM') | default(
 # market, trade, clan, publish). Krunker v7.1.4 gates nothing on email: [].
 kn_brain_email_require_verified: []
 kn_brain_runtime_packages: [libssl3, libcrypt1, libpq5, libsqlite3-0, libmariadb3]
+# hiredis (the Redis hot tier, knsvc_redis) by Debian release: 11/12 ship 0.14, 13 ships 1.1.
+kn_brain_hiredis_package: >-
+  {{ 'libhiredis1.1.0' if (ansible_facts.distribution_major_version | int) >= 13 else 'libhiredis0.14' }}

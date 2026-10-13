@@ -1,0 +1,19 @@
+# {{ ansible_managed }} (deploy/ansible role kn_postgres): sandbox of this cluster's unit only.
+# No MemoryDenyWriteExecute: the JIT (postgresql-<ver>-jit) maps executable memory.
+[Service]
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native

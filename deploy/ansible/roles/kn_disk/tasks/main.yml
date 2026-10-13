@@ -1,0 +1,29 @@
+- name: Journal size cap
+  when: kn_journald_max_use | length > 0
+  block:
+    - name: journald drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        mode: "0755"
+
+    - name: journald SystemMaxUse={{ kn_journald_max_use }}
+      ansible.builtin.copy:
+        dest: /etc/systemd/journald.conf.d/50-krunknative.conf
+        content: |
+          # Managed by KrunkNative deploy/ansible (role kn_disk).
+          [Journal]
+          SystemMaxUse={{ kn_journald_max_use }}
+        mode: "0644"
+      register: kn_journald_conf
+      notify: Restart journald
+
+    - name: Vacuum to the cap now
+      ansible.builtin.command: journalctl --vacuum-size={{ kn_journald_max_use }}
+      when: kn_journald_conf.changed
+      changed_when: true
+
+- name: apt cache
+  ansible.builtin.command: apt-get clean
+  when: kn_disk_apt_clean | bool
+  changed_when: false

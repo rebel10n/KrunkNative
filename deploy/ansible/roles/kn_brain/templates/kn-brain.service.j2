@@ -3,7 +3,7 @@
 # (cloudflared ingress {{ item.host }} -> localhost:{{ item.port }}).
 [Unit]
 Description=KrunkNative kn_brain {{ item.name }} ({{ item.roles }})
-After=network-online.target
+After=network-online.target kn-redis.service
 Wants=network-online.target
 PartOf=krunknative.target
 
@@ -16,7 +16,14 @@ WorkingDirectory={{ kn_state_dir }}
 EnvironmentFile={{ kn_etc_dir }}/secrets.env
 # KN_SMTP_* (outbound mail: email verification), optional; written from the controller's env.
 EnvironmentFile=-{{ kn_etc_dir }}/smtp.env
-ExecStart={{ kn_svc_current }}/bin/kn_brain --config {{ kn_brain_config }}{{ ' --no-db' if item.db == 'none' else ' --migrate' }} --brain.roles={{ item.roles }} --brain.host=127.0.0.1 --brain.port={{ item.port }} --brain.trust_proxy=true --brain.id={{ item.name }} --brain.public_url=https://{{ item.host }}{% if item.db == 'sqlite' %} --database.driver=sqlite --database.path={{ kn_state_dir }}/{{ item.name }}.db{% elif item.db == 'postgres' %} --database.driver=postgres{% endif %}
+# KN_REDIS_URL / _USERNAME / _PREFIX (role kn_redis; password KN_REDIS_PASSWORD in secrets.env):
+# the optional hot tier. Absent or Redis down = the database alone (doc/backend.md 3.11).
+EnvironmentFile=-{{ kn_etc_dir }}/redis.env
+{% if item.db != 'none' %}
+# KN_DATABASE_* (SQLite file or PostgreSQL; switched only by kn-db-cutover, role kn_db_cutover).
+EnvironmentFile={{ kn_etc_dir }}/{{ item.name }}-db.env
+{% endif %}
+ExecStart={{ kn_svc_current }}/bin/kn_brain --config {{ kn_brain_config }}{{ ' --no-db' if item.db == 'none' else ' --migrate' }} --brain.roles={{ item.roles }} --brain.host=127.0.0.1 --brain.port={{ item.port }} --brain.trust_proxy=true --brain.id={{ item.name }} --brain.public_url=https://{{ item.host }}
 
 KillSignal=SIGTERM
 TimeoutStopSec=10

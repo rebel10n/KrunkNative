@@ -1,0 +1,6 @@
+- name: Restart kn redis
+  ansible.builtin.systemd_service:
+    name: kn-redis
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"

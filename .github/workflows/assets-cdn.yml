@@ -103,7 +103,7 @@ jobs:
             sleep 10
           done
           [ "$got" = "$want" ] || { echo "::error::${cdn}assets/version.txt is '$got', not $want"; exit 1; }
-          h=$(curl -fsS -o /dev/null -D - -H 'Origin: https://krunk.io' -H 'Range: bytes=0-15' "${cdn}assets/img/icon.png?v=$want")
+          h=$(curl -fsS --retry 6 --retry-delay 10 --retry-all-errors -o /dev/null -D - -H 'Origin: https://krunk.io' -H 'Range: bytes=0-15' "${cdn}assets/img/icon.png?v=$want")
           echo "$h"
           grep -qi '^access-control-allow-origin: \*' <<< "$h" || { echo "::error::no CORS header"; exit 1; }
           grep -qi '^HTTP/[0-9.]* 206' <<< "$h" || echo "::warning::no 206 for a byte range"

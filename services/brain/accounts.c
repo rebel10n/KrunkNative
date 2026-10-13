@@ -6,6 +6,7 @@
  * Protocol: doc/backend.md "Accounts & social socket".
  */
 #include "acct_internal.h"
+#include "hot.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -300,6 +301,7 @@ typedef struct AuthCtx {
     int account_id;
     char *twofa_hash;   /* the account's 2FA (TOTP) secret, NULL = no 2FA */
     char twofa[32];     /* code the client gave */
+    uint64_t hot_t0;    /* session cache miss: Redis time of the lookup (hot.h) */
     char *rehash;       /* password rehash pending until 2FA passes */
     const char *fail_msg;
     AcctReplyFn cb;
@@ -327,8 +329,8 @@ static const char *ip_param(const AuthCtx *c) { return c->ip[0] ? c->ip : NULL; 
 
 /* Drop the oldest sessions beyond accounts.max_sessions (fire and forget). */
 static void trim_cb(kn_db_result *res, void *ud) {
-    (void) ud;
     if (!kn_db_ok(res)) KN_WARN(MOD, "session trim: %s", kn_db_error(res));
+    else if (kn_db_affected(res) > 0) hot_session_forget_account((int64_t) (intptr_t) ud);
 }
 
 static const kn_sql SQL_TRIM_SESSIONS = {
@@ -344,7 +346,8 @@ static void trim_sessions(int account_id) {
     if (g_acct.max_sessions <= 0) return;
     char id[24], max[24];
     kn_db_query_sql(g_acct_brain->db, &SQL_TRIM_SESSIONS,
-                    KN_DB_ARGS(acct_itoa(id, account_id), acct_itoa(max, g_acct.max_sessions)), trim_cb, NULL);
+                    KN_DB_ARGS(acct_itoa(id, account_id), acct_itoa(max, g_acct.max_sessions)), trim_cb,
+                    (void *) (intptr_t) account_id);
 }
 
 static const char *ban_message(const cJSON *account) {
@@ -516,6 +519,7 @@ static void token_lookup_done(kn_db_result *res, void *ud) {
         auth_fail(c, msg);
         return;
     }
+    if (c->hot_t0) hot_session_store(c->token, kn_json_int(account, "id", 0), c->hot_t0);
     cJSON_AddStringToObject(account, "token", c->token); /* keep the client's token (socialWs.ts) */
     c->cb(c->ud, NULL, account);
     cJSON_Delete(account);
@@ -559,6 +563,26 @@ static void register_precheck_done(kn_db_result *res, void *ud) {
         return;
     }
     if (acct_hash_async(c->pass, NULL, register_hashed, c) != 0) auth_fail(c, "Server busy, try again.");
+}
+
+/* Token resume: the hot tier's session cache first (a hit reads the account without
+ * touching the sessions row), else the database (P_SESSION_ACCOUNT slides the expiry). */
+static void token_session_db(AuthCtx *c) {
+    char ttl[24];
+    kn_db_call(g_acct_brain->db, &P_SESSION_ACCOUNT, KN_DB_ARGS(c->token, acct_itoa(ttl, g_acct.session_ttl_s)),
+               token_lookup_done, c);
+}
+
+static void token_cache_done(void *ud, int64_t account_id, uint64_t t0_us) {
+    AuthCtx *c = ud;
+    if (account_id > 0) {
+        char id[24];
+        c->hot_t0 = 0;
+        kn_db_call(g_acct_brain->db, &P_ACCOUNT_JSON, KN_DB_ARGS(acct_itoa(id, account_id)), token_lookup_done, c);
+        return;
+    }
+    c->hot_t0 = t0_us;
+    token_session_db(c);
 }
 
 void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
@@ -615,25 +639,43 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
 
     if (rq->token && *rq->token && strlen(rq->token) < sizeof c->token) {
         snprintf(c->token, sizeof c->token, "%s", rq->token);
-        char ttl[24];
-        kn_db_call(g_acct_brain->db, &P_SESSION_ACCOUNT,
-                    KN_DB_ARGS(c->token, acct_itoa(ttl, g_acct.session_ttl_s)), token_lookup_done, c);
+        if (hot_session_lookup(c->token, token_cache_done, c) != 0) token_session_db(c);
         return;
     }
     auth_fail(c, rq->name ? "Invalid login." : "Invalid credentials.");
 }
 
+typedef struct RevokeCtx {
+    char token[80];
+    void (*done)(void *ud);
+    void *ud;
+} RevokeCtx;
+
 static void revoke_cb(kn_db_result *res, void *ud) {
-    (void) ud;
+    RevokeCtx *r = ud;
     if (!kn_db_ok(res)) KN_WARN(MOD, "logout: %s", kn_db_error(res));
+    else hot_session_forget(r->token); /* after the commit: hot.h */
+    if (r->done) r->done(r->ud);
+    memset(r->token, 0, sizeof r->token);
+    free(r);
 }
 
-void acct_revoke_token(const char *token) {
-    if (!token || !*token || !g_acct_brain || !g_acct_brain->db) return;
+void acct_revoke_token_then(const char *token, void (*done)(void *ud), void *ud) {
+    RevokeCtx *r = token && *token && strlen(token) < sizeof r->token && g_acct_brain && g_acct_brain->db
+                       ? calloc(1, sizeof *r) : NULL;
+    if (!r) {
+        if (done) done(ud);
+        return;
+    }
+    snprintf(r->token, sizeof r->token, "%s", token);
+    r->done = done;
+    r->ud = ud;
     static const kn_sql q = {.pg = "DELETE FROM sessions WHERE token_hash = sha256(convert_to($1, 'UTF8'))",
                              .any = "DELETE FROM sessions WHERE token_hash = {hash:$1}"};
-    kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(token), revoke_cb, NULL);
+    kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(r->token), revoke_cb, r);
 }
+
+void acct_revoke_token(const char *token) { acct_revoke_token_then(token, NULL, NULL); }
 
 /* ------------------------------------------------------------------ internal ops (game servers) */
 
@@ -751,6 +793,12 @@ static void internal_auth(int action, const cJSON *args, AcctReplyFn cb, void *u
     acct_auth(&rq, auth_bridge_cb, bridge);
 }
 
+static void password_set_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (kn_db_ok(res)) hot_session_forget_account(o->id); /* every older session was revoked */
+    op_json_done(res, ud);
+}
+
 static void password_rehashed(void *ud, int ok, const char *new_hash) {
     OpCtx *o = ud;
     char id[24], ttl[24];
@@ -765,7 +813,7 @@ static void password_rehashed(void *ud, int ok, const char *new_hash) {
     /* new hash, every other session revoked, one fresh session returned */
     kn_db_call(g_acct_brain->db, &P_SET_PASSWORD,
                 KN_DB_ARGS(acct_itoa(id, o->id), new_hash, o->token, acct_itoa(ttl, g_acct.session_ttl_s)),
-                op_json_done, o);
+                password_set_done, o);
 }
 
 static void password_verified(void *ud, int ok, const char *new_hash) {

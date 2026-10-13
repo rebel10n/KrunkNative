@@ -87,6 +87,26 @@ Every service (`kn_brain`, `server_bin`, `kn_migrate`) loads the same file with
 | `log.format` | `text` | `text` or `json` (one object per line; env `KN_LOG_FORMAT`) |
 | `log.file` | stderr | append log lines to this file (env `KN_LOG_FILE`) |
 
+### redis (optional hot tier, 3.11)
+
+Off unless `redis.url` is set and kn_brain was built with hiredis (`KNSVC_REDIS`); env `KN_REDIS_<KEY>`.
+With it set but Redis absent or down, every brain works exactly as without it (the database alone).
+
+| key | default | meaning |
+| --- | --- | --- |
+| `redis.url` | `""` (off) | `redis://[user[:password]@]host[:port][/db]` or `unix:///path[?db=N]` (`valkey://` = `redis://`; `rediss://` is refused: no TLS client, see 3.11) |
+| `redis.username` | `""` | ACL user (production: `kn_brain`); overrides the URL's |
+| `redis.password` | `""` | prefer `KN_REDIS_PASSWORD` (deployment: `/etc/krunknative/secrets.env`); overrides the URL's |
+| `redis.db` | the URL's, else `0` | `SELECT` on the command connection |
+| `redis.prefix` | `kn:` | prefix of every key and channel (several networks or test runs can share a server) |
+| `redis.connect_timeout_ms` / `redis.command_timeout_ms` | `1000` / `500` | a connection not ready, or a reply not back, in time is dropped and reconnected (250 ms .. 5 s backoff); the waiting callers fall back to the database |
+| `redis.pubsub` | `true` | carry the database's pub/sub channels (`kn_db_notify`, 3.6) over Redis |
+| `redis.pubsub_fallback_poll_ms` | `1000` | sqlite/mysql: `kn_pubsub` poll interval while Redis carries the channels (`database.notify_poll_ms` again when it is down) |
+| `redis.session_cache_s` | `60` | session token -> account id cache lifetime (0 = off) |
+| `redis.rate_limits` | `true` | the auth / finder rate limits count across every brain |
+| `redis.presence` | `true` | signed-in social sockets per brain (`/mm/presence`) and social pushes to other brains |
+| `redis.presence_ttl_s` | `90` | a brain refreshes its accounts every third of this; a dead brain's entries expire after it |
+
 ### brain (svc-matchmaker)
 
 All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
@@ -131,12 +151,13 @@ that is built in (libpq, libsqlite3, libmariadb / libmysqlclient; 3.6).
 | library | headers | links | used by |
 | --- | --- | --- | --- |
 | `knsvc` | `buf.h log.h config.h json.h loop.h http.h ws.h crypto.h msgpack.h smtp.h` (umbrella `knsvc.h`) | cJSON, libcrypto (+ libssl: wss://, SMTP TLS), libm, pthreads | `kn_brain`, `server_bin` (brain client), tools |
-| `knsvc_db` | `db.h store.h migrate.h` | `knsvc` + the built-in drivers' client libraries | `kn_brain`, `kn_migrate` |
+| `knsvc_db` | `db.h store.h migrate.h` | `knsvc` + the built-in drivers' client libraries | `kn_brain`, `kn_migrate`, `kn_dbcopy` |
+| `knsvc_redis` | `redis.h` | `knsvc` + hiredis (>= 0.14) | `kn_brain` (3.11); optional (`KNSVC_REDIS`, ON when hiredis is found) |
 
 Build: part of the normal native build when OpenSSL is found (`knsvc_db`, `kn_migrate`
 and the brain additionally need at least one store driver: options
 `KNSVC_STORE_POSTGRES` / `KNSVC_STORE_SQLITE` / `KNSVC_STORE_MYSQL`, each ON by default
-when its library is found); `-DKRUNKNATIVE_SERVICES=OFF` skips `services/`
+when its library is found; `KNSVC_REDIS` likewise for the Redis hot tier, 3.11); `-DKRUNKNATIVE_SERVICES=OFF` skips `services/`
 entirely, and the game targets never depend on it except `server_bin`'s optional brain
 client (`if (TARGET knsvc)`). Make: `make services` (all backend targets),
 `make db-migrate`, `make db-status`, `make services-test` (`ctest -L knsvc`).
@@ -347,7 +368,9 @@ interface. Applications use `knsvc/db.h`; drivers implement `knsvc/store.h`.
   **Latency**: a cross-coordinator event arrives within `notify_poll_ms` plus one query
   instead of ~1 ms, so the federation's view of another coordinator's lobbies, host
   requests and `assign` heads-ups lags by up to ~0.1-0.3 s (the 1 s registry refresh
-  and the 500 ms host-request poll stay as the fallback, as on postgres).
+  and the 500 ms host-request poll stay as the fallback, as on postgres). With the Redis hot tier
+  (3.11) `kn_db_set_pubsub()` installs Redis as the transport: notifies go over Redis while it is
+  up, listeners keep the database path too (the poll slowed to `redis.pubsub_fallback_poll_ms`).
 * **Synchronous API** for tools, tests and procs: `kn_dbconn_open/exec/exec_sql/call/
   exec_script/close`, `kn_dbconn_driver_name/dialect/native` (`kn_dbconn_pg`,
   `kn_db_result_pg` remain for postgres-only code).
@@ -429,6 +452,10 @@ interface. Applications use `knsvc/db.h`; drivers implement `knsvc/store.h`.
 | `knsvc_migrate` | order, idempotence, atomic failure, checksum warning, duplicates, dry run, status, and the repository's own migrations into a fresh schema twice |
 | `knsvc_store_sqlite` / `_mysql` / `_postgres` | the store layer on each driver (`tests/test_store.c`): typed results + alias suffixes, injection-shaped params, unique/syntax error classes, the `{macros}`, 60 concurrent inserts, prepared statements, commit / rollback / aborted-transaction rule, kn_proc commit + rollback on a user refusal + inside a transaction, pub/sub, `kn_dbconn` + dialect-directory migrations with atomic failure, free with queued work |
 | `brain_social_ws_sqlite` / `_mysql`, `brain_federation_*`, `brain_ranked_*` | the brain suites (6, 7.7) on sqlite (temp file, always runs) and MySQL/MariaDB |
+| `knsvc_redis` | `knsvc/redis.h` against a throwaway `valkey-server` / `redis-server` (3.11): AUTH / SELECT / a wrong password, binary-safe strings, nil and error replies, 2000 pipelined commands in order, EVAL, pub/sub, kill -9 (pending callbacks fail, commands refused, state callback, reconnect + re-SUBSCRIBE), a SIGSTOPped server (command timeout), free with pending commands |
+| `brain_social_ws_redis` / `_sqlite_redis`, `brain_ranked_*redis`, `brain_season_*redis`, `brain_federation_*redis` | the same suites with every brain on a throwaway Redis (`tests/with_redis.py`, fails when the brains never used it), on PostgreSQL and SQLite |
+| `brain_redis_failover_sqlite` / `_postgres` | `tests/redis_failover_test.py`: two brains, one database, one Redis: shared session cache, join records, rate limits, presence and a chat push across brains; Redis killed -9 under load (no request fails), restarted (both reconnect, presence and cache refill); logout / password change drop cached sessions on both brains at once |
+| `brain_dbcopy` | `tests/dbcopy_test.py`: `kn_dbcopy` SQLite -> PostgreSQL (3.11): checksums, follower counters, int64 premium time, sequences past SQLite's counter, refusal / `--replace` / `--verify-only`, kn_brain logging in a copied account on PostgreSQL |
 
 DB tests skip (exit 77) when their server is unreachable. PostgreSQL: create the test
 database once with `sudo -u postgres createdb -O krunknative krunknative_svccore`.
@@ -462,6 +489,141 @@ clean under clang `-fsanitize=address,undefined` with leak detection.
   on a free port: STARTTLS / implicit TLS with a self-signed certificate, AUTH PLAIN / LOGIN,
   5xx and 4xx paths, STARTTLS injection, the parsed MIME message, no credentials in the
   transcript, the queue with retries while a loop timer keeps ticking).
+
+### 3.11 Redis hot tier (`redis.h`, `services/brain/hot.c`, redis-tier)
+
+An optional Redis / Valkey in front of the brain's database. PostgreSQL (or the SQLite file of a
+small coordinator) stays the source of truth; Redis only holds what can be rebuilt from it or may
+be lost: caches, short-lived records, counters and a message bus.
+
+**What it speeds up, and what it does not.** Gameplay never touches it: a match runs in memory in
+`server_bin` on the edges, which talk to their brain over the internal WebSocket and never to a
+database. Redis serves the brain's backend paths: session checks (`/auth/me`, token resumes of the
+social socket, the game servers' `token` op, seek-game with a token), the central-auth join
+records (`/auth/join` -> `/auth/hasJoined`), rate limits, presence and social pushes (chat, gifts,
+`ua` after a commit) across brains, leaderboard pages, and the cross-brain pub/sub of the
+federation (6.1). Logins and registrations are dominated by PBKDF2 and their writes; stats commits
+and the economy stay transactions in PostgreSQL.
+
+**Measured on kru (read only, 2026-10-13 00:40 UTC).** Nothing is hot today. kn-brain-coord: 16 MB
+RSS, 0.72 s CPU in its first 10 min; finder 5 MB, 0.19 s; `/mm/status` 0.2 ms, `/servers` 0.4 ms on
+loopback. coord.db 7.6 MB: 17 accounts, 17 sessions, 306 `match_results` in 28 h (peak 58 commits
+per hour, 0.016/s), 19 logins/registrations in total, 38.7k `inventory` rows (staff grants). 20 game
+servers (4 online_mode) linked, 0 players at that moment: the internal WebSocket carries a snapshot
+per node every 5 s plus pings (~5 frames/s). `brain.federation` is false (one coordinator), so there
+is no `kn_pubsub` table and no 100 ms polling at all. No request log exists (OpenResty `access_log
+off`, kn_brain logs no requests), so rates come from the tables and the journal. The host itself is
+the constraint: 2 vCPU with load ~13 and CPU pressure 54 % (`/proc/pressure/cpu`, from non-KrunkNative
+processes), and 2.1 GB free of 32 GB (journal 2.5 GB, updates store 2.5 GB). Under heavy traffic the
+first wall is PostgreSQL's commit latency on the session check (below: ~300 checks/s with the default
+4 connections), long before CPU: that is the path the cache removes.
+
+**Load test** (`services/brain/tests/load_test.py` + `kn_loadgen`; Release build, one kn_brain with
+every role, 200 accounts, 10 s closed loop per endpoint, 2 x 64 keep-alive connections; a 32-thread
+workstation with local PostgreSQL 18 and Valkey 9, loopback; PBKDF2 at 10000 iterations; numbers move
+by ~10-20 % between runs). req/s | p99 ms:
+
+| mode | session `/auth/me` | login | finder `/servers` | `/mm/presence` | leaderboard (WS) |
+| --- | --- | --- | --- | --- | --- |
+| sqlite | 14527 \| 13.3 | 2964 \| 5.5 | 74923 \| 3.0 | 80190 \| 3.2 | 4622 \| 19.4 |
+| postgres (pool 4) | 298 \| 492.6 | 299 \| 43.3 | 73298 \| 3.1 | 85056 \| 2.8 | 4623 \| 17.5 |
+| postgres + redis (pool 4) | 12946 \| 15.4 | 290 \| 44.5 | 74107 \| 3.0 | 65052 \| 2.8 | 4620 \| 16.1 |
+| sqlite + redis | 21667 \| 7.6 | 2958 \| 5.2 | 74846 \| 3.0 | 67198 \| 2.7 | 4625 \| 16.4 |
+| postgres (pool 16) | 1210 \| 132.4 | 561 \| 67.1 | 71351 \| 3.3 | 86217 \| 2.6 | 4615 \| 24.5 |
+| postgres + redis (pool 16) | 23603 \| 7.0 | 580 \| 26.6 | 61024 \| 7.1 | 55017 \| 5.4 | 4599 \| 59.9 |
+
+A session check on PostgreSQL is a write (it slides the session's expiry) and waits for the commit's
+fsync; the cache answers it from Redis plus one read of the account (bans and funds stay current),
+so it is 40x (pool 4) / 20x (pool 16) faster there. SQLite commits without fsync per transaction
+(WAL, `synchronous=NORMAL`), hence its fast but single-writer numbers. The finder list and presence
+are in memory in every mode (presence adds one Redis call for the global count); leaderboard pages
+come from the per-brain 1 s cache here and are capped by the social socket's 20 frames/s per socket
+(128 sockets x 18/s); with several brains the shared page saves one query per brain and TTL. Login
+does not change (hashing and writes).
+
+**Why our own Redis.** abulxt's edges already share a Redis on amph (6379, opened to the edges); it
+is that project's critical store (every on-demand TLS certificate of its customers' domains) with
+another owner, so KrunkNative never writes to it nor depends on it: a flush, an eviction policy, a
+password rotation or an outage there must not log our players out, and our keys must not compete
+with its memory. We reuse its pattern instead: a Redis per project on a central host, reachable only
+over loopback / private addresses with its own password, later read replicas next to the edges.
+Ours is `kn-redis.service` on kru (127.0.0.1:6380, role `kn_redis`); amph and abulxt are never
+touched.
+
+**Keys** (`redis.prefix`, default `kn:`; every multi-key operation is one Lua `EVAL`, so standalone or
+replicated Redis / Valkey >= 6.2, not Redis Cluster):
+
+| key | type | lifetime | written | rebuilt from / invalidated |
+| --- | --- | --- | --- | --- |
+| `sess:<sha256(token)>` | string: account id | `session_cache_s` (60 s) | a session check that went to the database | miss -> `P_SESSION_ACCOUNT` (slides the expiry). Logout, `las`, a password change and session trims delete it (and every cached session of the account through `sessidx:<id>`) after the database commit. The raw token never reaches Redis |
+| `sessidx:<account>` | set of hashes | 2 x `session_cache_s` | with each cached session | revoke-all |
+| `sessrev:<account>`, `sessdead:<hash>` | string: Redis time (us) | 2 x `session_cache_s` | at revocation | tombstones: a check that started before a revocation does not store its (now stale) answer |
+| `join:<serverHash>` | JSON `{id, username, ip, profile}` | 30 s (`AUTH_JOIN_TTL_MS`) | `/auth/join` | hasJoined on another auth brain; adopted with its remaining lifetime and checked like a local record |
+| `rl:<bucket>:<ip>` | counter | the window (60 s / 1 h) | every allowed hit (`auth_login`, `auth_register`, `auth_join`, `auth_has_joined`, `finder_submit`) | fixed window; the per-process limiter still runs first, and a key over the shared count is refused locally until its window ends (async: a burst can pass one extra hit per brain) |
+| `online` | sorted set: account -> expiry ms | members expire with the refresh | social login / every `presence_ttl_s`/3 | `/mm/presence` global count (expired members pruned on read); re-registered at once when Redis comes back |
+| `pres:<account>` | hash: brain id -> expiry ms | `presence_ttl_s` | same | where an account has sockets: pushes to other brains |
+| `lb:<query>:<region>[:s<season>]` | JSON rows | `accounts.leaderboard_cache_s` (30 s) | read-through on a local miss | the database query; expires |
+
+Channels: `<prefix><channel>` for the federation's `kn_mm_lobby`, `kn_mm_host`, `kn_mm_host_done`,
+`kn_mm_assign` (`kn_db_set_pubsub`, 3.6: a notify is published on Redis while it is up, else through
+the database; listeners always keep the database path too, the sqlite/mysql poll slowed to
+`pubsub_fallback_poll_ms`, so a brain whose Redis link is down still reaches everyone), and
+`<prefix>push:<brain id>` (a social push for an account that also has sockets on that brain; the
+publishing brain reads `pres:<account>` in the same script). Every brain sharing a database must have
+the same `redis.*` (or none), or notifications between the two groups go only through the database.
+
+**Authoritative in PostgreSQL**: accounts, credentials, sessions (the cache only shortcuts their
+check), bans, players / stats / KR / inventory / every ledger, clans, social data, the market and
+trades, seasons and the Battle Pass, ranked ratings and queues, published maps, KrunkScript storage,
+`mm_*` registry rows (federation). Nothing is written to Redis that is not also in the database or
+deliberately ephemeral.
+
+**Failure modes.** The hot tier never answers for the database: when a command cannot be sent the
+caller takes the database path synchronously, and a sent command that fails (connection lost, no
+reply within `command_timeout_ms`) completes as a miss. Redis down or restarting (persistence is off
+on purpose): session checks write to the database again until the cache refills; presence restarts
+from each brain's refresh (the brains re-register immediately on reconnect); rate-limit windows start
+over; leaderboard pages are queried again; pub/sub messages published during the gap are lost, which
+the federation already tolerates (1 s registry refresh, 500 ms host-request poll); pushes to sockets
+on another brain are lost for the gap. A hung Redis costs each pending call at most
+`command_timeout_ms`, then the connection is dropped and rebuilt in the background (250 ms .. 5 s).
+`brain_redis_failover_*` and the cutover harness kill it under load: no request failed. Why no
+persistence: a snapshot restored after a crash could resurrect a session revoked while Redis was down
+(the revocation's tombstone never reached it). Residual risk: a brain cut off from Redis while Redis
+stays up for the others cannot drop cached sessions it revokes; they stay valid on the other brains
+for at most `session_cache_s` (60 s). Bans are not affected (the account is read from the database on
+every check).
+
+**Security.** Bound to loopback (`bind 127.0.0.1`, `protected-mode yes`); `user default off` and one
+ACL user `kn_brain` limited to `~kn:*` keys, `&kn:*` channels and no `@dangerous` commands (no
+FLUSHALL, CONFIG, KEYS, DEBUG...); the password is generated on the host into `secrets.env`
+(`KN_REDIS_PASSWORD`, never in the repository or logs) and in `/etc/kn-redis/redis.conf` (root:redis
+0640); systemd sandboxing (`ProtectSystem=strict`, no capabilities, `MemoryDenyWriteExecute`, ...).
+Between regions hiredis 0.14 (Debian 11/12) has no TLS, so `rediss://` is refused: replicas in other
+regions go over WireGuard / the private network or a TLS tunnel (stunnel / spiped), never over a
+public port; a replica gets `replica-read-only yes`, `masterauth` and its own ACL user.
+
+**Multi-region (later).** A read replica per region next to the edges serves `sess:` / `lb:` reads
+and the pub/sub (Redis forwards PUBLISH to replicas' subscribers), writes go to kru's primary; with a
+PostgreSQL primary on kru the brain of a far region then waits for neither for the hot paths.
+
+**Phase 2 (not built).** The registry (`mm_nodes` / `mm_lobbies` / `mm_reservations`) as hashes with
+`PEXPIRE node_ttl_s` instead of heartbeat rows plus every brain's 1 s reload (rebuilt by the game
+servers' 5 s snapshots after a Redis restart); the finder table shared by several finders; leaderboards
+as sorted sets updated write-behind by stats commits (`ZINCRBY`) and rebuilt from `players` every few
+minutes; `P_SESSION_ACCOUNT` sliding the expiry at most once a minute (or `synchronous_commit = off`
+for that statement) so the database path is cheap too.
+
+**Moving a coordinator to PostgreSQL.** `kn_dbcopy --sqlite FILE` (`services/common/tools/kn_dbcopy.c`)
+copies every table of a coordinator's SQLite file into the configured, already migrated PostgreSQL
+database in one transaction (parents first, user triggers off so `follows_count` does not count twice,
+values converted by the destination type, sequences past the copied ids and SQLite's AUTOINCREMENT
+counters), then verifies per table the row count and a SHA-256 over the rows normalised by type and
+sorted (exit 0 identical, 3 mismatch, 1 error; refuses a destination with accounts unless `--replace`;
+`--verify-only`). On a copy of production's coord.db: 54 tables, 78130 rows copied in 1.5 s, verified
+identical in 1.9 s; it found that `players.player_premium` holds 315360000000 (ten years of premium in
+ms) which overflowed PostgreSQL's `integer`: migration `postgres/0110_premium_bigint.sql`. Production
+runs it through `kn-db-cutover` (deploy/ansible/README.md "Database cutover").
 
 ## 4. Brain: public HTTP routes
 
@@ -528,6 +690,7 @@ brain draining).
 | `GET /mm/brains` | (Krunker Box Office) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
 | `GET /mm/status` | (Krunker Box Office) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
 | `GET /api/player-count`, `/social/player-count` | same | `{"playerCount":N}` |
+| `GET /mm/presence` | (Krunker Box Office) | `{"local":N,"global":N\|null,"redis":"off"\|"up"\|"down"}` signed-in social sockets on this brain / on every brain (3.11; `null` without Redis) |
 | `POST /mm/admin/drain?node=ID` | (Krunker Box Office) | Bearer `brain.internal_secret`; see 6.4 |
 
 seek-game details:
@@ -2155,6 +2318,13 @@ Optional: a Cloudflare cache rule making `assets.krunk.io/updates/client/builds/
   `api.` -> `/api/`, `social.` -> `/social/`, `play.<host>` = web client + `/native` +
   all routes same-origin; region host = web client + `/native` + `/ping`. TLS via
   certbot, CORS snippet like the jail's `cors.conf`.
+* PostgreSQL + Redis on kru (redis-tier, 3.11): roles `kn_postgres` (own cluster
+  `<ver>/krunknative` on 127.0.0.1:5434, role + database `krunknative`, `KN_DATABASE_PASSWORD`
+  generated into `secrets.env`), `kn_redis` (`kn-redis.service` on 127.0.0.1:6380, ACL user
+  `kn_brain`, `KN_REDIS_PASSWORD`, `/etc/krunknative/redis.env`) and `kn_db_cutover` (`kn-db-cutover`:
+  the coordinator's one-time move from coord.db, rolled back by itself on failure). Each kn-brain
+  unit reads its database from `/etc/krunknative/<instance>-db.env`. Runbook, rollback and disk:
+  `deploy/ansible/README.md` "Database cutover".
 * Multi-region: `deploy/deploy.sh [-n] [--certbot] push|status|render|drain` over
   `deploy/inventory` (`<host> region= brain=1 gameservers=N first_port= node_prefix=
   bridge=1 nginx=brain|node brain_url=`). One shared PostgreSQL; one brain per region

@@ -1,0 +1,45 @@
+# {{ ansible_managed }} (deploy/ansible role kn_redis)
+[Unit]
+Description=KrunkNative Redis (kn_brain hot tier: caches, presence, pub/sub; nothing authoritative)
+After=network.target
+Before=krunknative.target
+
+[Service]
+Type=notify
+User=redis
+Group=redis
+ExecStart={{ kn_redis_server_bin }} {{ kn_redis_etc }}/redis.conf
+TimeoutStartSec=30
+TimeoutStopSec=10
+Restart=always
+RestartSec=2
+LimitNOFILE=10032
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths={{ kn_redis_dir }}
+ReadOnlyPaths={{ kn_redis_etc }}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+# PostgreSQL for kn_brain on the central node (doc/backend.md 3.11, deploy/README.md "Database cutover").
+# OFF by default: other inventories get nothing. group_vars/central/main.yml turns it on for kru.
+kn_postgres_enabled: false
+# "" = the newest PostgreSQL already installed (/usr/lib/postgresql/<ver>), else the distribution's
+# `postgresql` package is installed and used. kru has 17 and 18 (pgdg) installed: 18.
+kn_postgres_version: ""
+# Our own cluster (pg_createcluster): never the host's existing ones (kru has 17/main and 18/main,
+# not KrunkNative's, configured for 5433 / 5432 and stopped: left alone).
+kn_postgres_cluster: krunknative
+kn_postgres_port: 5434
+kn_postgres_listen: 127.0.0.1
+kn_postgres_db: krunknative
+kn_postgres_user: krunknative
+# Small and bounded (kru: 2 vCPU, 8 GB shared with the edge-less web stack, ~2 GB disk free).
+kn_postgres_settings:
+  max_connections: 40
+  shared_buffers: 128MB
+  effective_cache_size: 512MB
+  work_mem: 4MB
+  maintenance_work_mem: 32MB
+  max_wal_size: 256MB
+  min_wal_size: 64MB
+  wal_keep_size: 0
+  checkpoint_timeout: 10min
+  password_encryption: scram-sha-256
+  log_min_duration_statement: 500
+  log_line_prefix: "'%m [%p] %q%u@%d '"
+  idle_in_transaction_session_timeout: 60s

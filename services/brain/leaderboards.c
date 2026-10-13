@@ -12,6 +12,7 @@
  * rows carry the value under the query's name.
  */
 #include "acct_internal.h"
+#include "hot.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +57,7 @@ static CacheEntry s_cache[CACHE_SLOTS];
 typedef struct LeaderCtx {
     char query[32];
     int64_t region;
+    char hot_key[96];   /* shared page in the Redis hot tier (hot.h), "" = none */
 } LeaderCtx;
 
 static void send_rows(SocialSession *s, const char *query, cJSON *rows) {
@@ -76,7 +78,7 @@ static CacheEntry *cache_find(const char *query, int64_t region) {
     return NULL;
 }
 
-static void cache_store(const char *query, int64_t region, const cJSON *rows) {
+static CacheEntry *cache_store(const char *query, int64_t region, const cJSON *rows) {
     CacheEntry *e = cache_find(query, region);
     if (!e) {
         e = &s_cache[0];
@@ -93,6 +95,7 @@ static void cache_store(const char *query, int64_t region, const cJSON *rows) {
     e->region = region;
     e->at_ms = kn_now_ms();
     e->rows = cJSON_Duplicate(rows, 1);
+    return e;
 }
 
 static void leaders_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -100,17 +103,25 @@ static void leaders_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON *rows = NULL;
     if (kn_db_ok(res)) {
         rows = kn_db_result_to_json(res);
-        if (rows) cache_store(c->query, c->region, rows);
+        if (rows) {
+            cache_store(c->query, c->region, rows);
+            if (c->hot_key[0]) { /* read-through: the other brains reuse this page until it expires */
+                char *text = cJSON_PrintUnformatted(rows);
+                if (text) hot_put(c->hot_key, text, cache_ttl_ms());
+                free(text);
+            }
+        }
     } else {
         acct_db_error(res, "leaders");
     }
     send_rows(s, c->query, rows);
 }
 
-static void season_page(SocialSession *s, const LeaderQuery *q, int64_t region) {
+static void season_page(SocialSession *s, const LeaderQuery *q, int64_t region, const char *hot_key) {
     LeaderCtx *c = calloc(1, sizeof *c);
     if (!c) return;
     snprintf(c->query, sizeof c->query, "%s", q->name);
+    snprintf(c->hot_key, sizeof c->hot_key, "%s", hot_key ? hot_key : "");
     c->region = region;
     char reg[24], lim[24], season[24];
     acct_itoa(reg, region);
@@ -128,6 +139,61 @@ static void season_page(SocialSession *s, const LeaderQuery *q, int64_t region) 
     social_query(s, &text, KN_DB_ARGS(reg, lim, season), leaders_done, c);
 }
 
+static void player_page(SocialSession *s, const LeaderQuery *q, int64_t region, const char *hot_key);
+
+/* The page from the database (season tables or player_rows / clans). */
+static void leaders_db(SocialSession *s, const LeaderQuery *q, int season, int64_t region, const char *hot_key) {
+    if (season) season_page(s, q, region, hot_key);
+    else player_page(s, q, region, hot_key);
+}
+
+typedef struct LeaderHot {
+    SocialSession *s;
+    const LeaderQuery *q;
+    int season;
+    int64_t region;
+    char key[96];
+} LeaderHot;
+
+static void leaders_hot_done(void *ud, const char *value, size_t len, int64_t pttl_ms) {
+    LeaderHot *h = ud;
+    cJSON *rows = value ? cJSON_ParseWithLength(value, len) : NULL;
+    if (cJSON_IsArray(rows)) {
+        CacheEntry *e = cache_store(h->q->name, h->region, rows);
+        const int ttl = cache_ttl_ms();
+        if (e && pttl_ms >= 0 && pttl_ms < ttl) e->at_ms -= (uint64_t) (ttl - pttl_ms); /* expire with the shared copy */
+        if (social_open(h->s)) send_rows(h->s, h->q->name, rows);
+        else cJSON_Delete(rows);
+    } else {
+        cJSON_Delete(rows);
+        if (social_open(h->s)) leaders_db(h->s, h->q, h->season, h->region, h->key);
+    }
+    social_unhold(h->s);
+    free(h);
+}
+
+/* Local cache missed: the shared page in Redis (one database query per page and TTL
+ * for every brain), else the database. */
+static void leaders_fetch(SocialSession *s, const LeaderQuery *q, int season, int64_t region) {
+    char k[96];
+    if (season) snprintf(k, sizeof k, "lb:%s:%lld:s%d", q->name, (long long) region, acct_current_season());
+    else snprintf(k, sizeof k, "lb:%s:%lld", q->name, (long long) region);
+    if (hot_up()) {
+        LeaderHot *h = calloc(1, sizeof *h);
+        if (h) {
+            h->s = social_hold(s);
+            h->q = q;
+            h->season = season;
+            h->region = region;
+            snprintf(h->key, sizeof h->key, "%s", k);
+            if (hot_get(k, leaders_hot_done, h) == 0) return;
+            social_unhold(s);
+            free(h);
+        }
+    }
+    leaders_db(s, q, season, region, hot_up() ? k : NULL);
+}
+
 void leaders_page(SocialSession *s, const char *query, int64_t region) {
     const LeaderQuery *q = NULL;
     for (size_t i = 0; i < sizeof k_queries / sizeof k_queries[0]; i++)
@@ -142,7 +208,7 @@ void leaders_page(SocialSession *s, const char *query, int64_t region) {
             send_rows(s, sq->name, cJSON_Duplicate(e->rows, 1));
             return;
         }
-        season_page(s, sq, region);
+        leaders_fetch(s, sq, 1, region);
         return;
     }
     if (!q) {
@@ -155,9 +221,14 @@ void leaders_page(SocialSession *s, const char *query, int64_t region) {
         send_rows(s, q->name, cJSON_Duplicate(e->rows, 1));
         return;
     }
+    leaders_fetch(s, q, 0, region);
+}
+
+static void player_page(SocialSession *s, const LeaderQuery *q, int64_t region, const char *hot_key) {
     LeaderCtx *c = calloc(1, sizeof *c);
     if (!c) return;
     snprintf(c->query, sizeof c->query, "%s", q->name);
+    snprintf(c->hot_key, sizeof c->hot_key, "%s", hot_key ? hot_key : "");
     c->region = region;
     char reg[24], lim[24];
     acct_itoa(reg, region);

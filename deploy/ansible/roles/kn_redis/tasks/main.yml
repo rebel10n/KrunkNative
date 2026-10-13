@@ -1,0 +1,118 @@
+# KrunkNative's own Redis (defaults/main.yml). Only with kn_redis_enabled: true. Our own unit
+# kn-redis.service on 127.0.0.1:{{ kn_redis_port }} with an ACL user and no persistence; the package's
+# default instance (6379, no password) is stopped and masked. The password KN_REDIS_PASSWORD lives in
+# {{ kn_etc_dir }}/secrets.env (generated on the host at the first run, never logged or echoed);
+# {{ kn_etc_dir }}/redis.env points every kn_brain at it (KN_REDIS_URL / KN_REDIS_USERNAME).
+- name: Redis hot tier
+  when: kn_redis_enabled | bool
+  block:
+    - name: Redis server package
+      ansible.builtin.apt:
+        name: "{{ kn_redis_package }}"
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: The package's default instance stays off (ours is kn-redis)
+      ansible.builtin.systemd_service:
+        name: "{{ 'valkey-server' if 'valkey' in kn_redis_package else 'redis-server' }}"
+        state: stopped
+        enabled: false
+        masked: true
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: Data and config directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: redis
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ kn_redis_dir }}", owner: redis, mode: "0750" }
+        - { path: "{{ kn_redis_etc }}", owner: root, mode: "0750" }
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: Redis password in secrets.env (generated once, never shown)
+      ansible.builtin.shell: |
+        set -eu
+        f={{ kn_etc_dir | quote }}/secrets.env
+        umask 077
+        [ -e "$f" ] || { : > "$f"; chown root:root "$f"; chmod 0600 "$f"; }
+        grep -q '^KN_REDIS_PASSWORD=' "$f" && exit 0
+        printf 'KN_REDIS_PASSWORD=%s\n' "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" >> "$f"
+        echo created
+      args:
+        executable: /bin/bash
+      register: kn_redis_secret
+      changed_when: "'created' in kn_redis_secret.stdout"
+      no_log: true
+
+    - name: Read the password for the server's ACL
+      ansible.builtin.slurp:
+        src: "{{ kn_etc_dir }}/secrets.env"
+      register: kn_redis_secrets_file
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Server config (holds the ACL password, root:redis 0640)
+      ansible.builtin.template:
+        src: redis.conf.j2
+        dest: "{{ kn_redis_etc }}/redis.conf"
+        owner: root
+        group: redis
+        mode: "0640"
+      vars:
+        kn_redis_password: >-
+          {{ (kn_redis_secrets_file.content | b64decode).splitlines()
+             | select('match', '^KN_REDIS_PASSWORD=') | first | regex_replace('^KN_REDIS_PASSWORD=', '') }}
+      no_log: true
+      when: not ansible_check_mode
+      notify: Restart kn redis
+
+    - name: Unit kn-redis.service
+      ansible.builtin.template:
+        src: kn-redis.service.j2
+        dest: /etc/systemd/system/kn-redis.service
+        mode: "0644"
+      notify: Restart kn redis
+
+    - name: kn_brain's Redis settings (redis.env; the password is in secrets.env)
+      ansible.builtin.copy:
+        dest: "{{ kn_etc_dir }}/redis.env"
+        content: |
+          # Managed by KrunkNative deploy/ansible (role kn_redis): kn_brain's hot tier (doc/backend.md 3.11).
+          KN_REDIS_URL=redis://127.0.0.1:{{ kn_redis_port }}
+          KN_REDIS_USERNAME={{ kn_redis_user }}
+          KN_REDIS_PREFIX={{ kn_redis_prefix }}
+        owner: root
+        group: "{{ kn_group }}"
+        mode: "0640"
+
+    - name: Apply pending restarts
+      ansible.builtin.meta: flush_handlers
+
+    - name: kn-redis running and enabled
+      ansible.builtin.systemd_service:
+        name: kn-redis
+        state: started
+        enabled: true
+        daemon_reload: true
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: kn-redis answers the ACL user
+      ansible.builtin.shell: |
+        set -eu
+        set -a; . {{ kn_etc_dir | quote }}/secrets.env; set +a
+        for i in $(seq 1 20); do
+          r=$(REDISCLI_AUTH="$KN_REDIS_PASSWORD" {{ kn_redis_cli_bin }} --no-auth-warning -p {{ kn_redis_port }} --user {{ kn_redis_user }} PING 2>&1 || true)
+          [ "$r" = PONG ] && exit 0
+          sleep 0.5
+        done
+        echo "kn-redis did not answer PING: $r"; exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: not ansible_check_mode
+      no_log: false

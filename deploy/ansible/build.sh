@@ -14,6 +14,8 @@ build_root="${KN_BUILD_ROOT:-${TMPDIR:-/tmp}/kn-deploy-build}"
 # KN_CMAKE_ARGS: extra -D flags for the configure step (CI: the build version from
 # tools/release/version-meta.sh, -DKRUNKNATIVE_VERSION_*; the container has no git).
 read -r -a targets <<< "${TARGETS:-kn_brain kn_migrate server_bin}"
+# kn_dbcopy ships with kn_brain: the coordinator's SQLite -> PostgreSQL cutover (role kn_db_cutover)
+case " ${targets[*]} " in *" kn_brain "*) case " ${targets[*]} " in *" kn_dbcopy "*) ;; *) targets+=(kn_dbcopy) ;; esac ;; esac
 codenames=("$@")
 [ ${#codenames[@]} -gt 0 ] || codenames=(bookworm bullseye)
 
@@ -41,9 +43,11 @@ for codename in "${codenames[@]}"; do
                 echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
             fi
             apt-get update -qq >/dev/null
-            # libsqlite3-dev / libmariadb-dev: store adapters are AUTO (built when found).
+            # libsqlite3-dev / libmariadb-dev: store adapters are AUTO (built when found);
+            # libhiredis-dev: the optional Redis hot tier of kn_brain (KNSVC_REDIS, doc/backend.md 3.11).
             apt-get install -y -qq --no-install-recommends cmake ninja-build gcc g++ libc6-dev make \
-                pkg-config libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libcrypt-dev libcurl4-openssl-dev python3 >/dev/null
+                pkg-config libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libcrypt-dev libcurl4-openssl-dev \
+                libhiredis-dev python3 >/dev/null
             cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
                 -DKRUNKNATIVE_HTML_ENGINE=OFF -DGLFW_BUILD_X11=OFF -DGLFW_BUILD_WAYLAND=OFF $KN_CMAKE_ARGS >/build/configure.log
             cmake --build /build --target $TARGETS

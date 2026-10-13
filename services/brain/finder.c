@@ -18,6 +18,7 @@
 #include "auth_state.h"
 #include "brain_internal.h"
 #include "finder.h"
+#include "hot.h"
 #include "finder_table.h"
 #include "releases.h"
 #include "knsvc/config.h"
@@ -40,6 +41,7 @@ static struct {
     Brain *b;
     FinderTable *t;
     AuthLimiter *submit_limit;
+    int submit_per_min;
     int fd4, fd6;
     kn_timer_id timer;
 } g_f = {.fd4 = -1, .fd6 = -1};
@@ -177,7 +179,7 @@ static void h_heartbeat(kn_http_req *req, void *ud) {
         return;
     }
     const char *ip = req->remote_addr ? req->remote_addr : "";
-    if (!auth_limiter_hit(g_f.submit_limit, ip, kn_now_ms())) {
+    if (!hot_limit("finder_submit", ip, g_f.submit_per_min, 60, auth_limiter_hit(g_f.submit_limit, ip, kn_now_ms()))) {
         reply_err(req, 429, "Too many requests");
         return;
     }
@@ -272,7 +274,8 @@ int finder_init(Brain *b) {
     fc.heartbeat_interval_s = (int) kn_config_int(cfg, "finder.heartbeat_interval_s", 60);
     if (fc.max_failures < 1) fc.max_failures = 1;
     g_f.t = finder_table_new(&fc);
-    g_f.submit_limit = auth_limiter_new((int) kn_config_int(cfg, "finder.submit_per_min", 30), 60 * 1000);
+    g_f.submit_per_min = (int) kn_config_int(cfg, "finder.submit_per_min", 30);
+    g_f.submit_limit = auth_limiter_new(g_f.submit_per_min, 60 * 1000);
     if (!g_f.t || !g_f.submit_limit) return -1;
     g_f.fd4 = open_udp(AF_INET);
     g_f.fd6 = open_udp(AF_INET6);

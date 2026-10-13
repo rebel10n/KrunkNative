@@ -1,0 +1,18 @@
+# KrunkNative's own Redis / Valkey: kn_brain's hot tier (doc/backend.md 3.11). Nothing in it is
+# authoritative. Never abulxt's Redis on amph (its on-demand TLS certificate store): a separate
+# instance, service and password. OFF by default; group_vars/central/main.yml turns it on for kru.
+kn_redis_enabled: false
+# Debian 12 (kru): redis-server 7.0. Debian 13 ships valkey-server (same config syntax): set both.
+kn_redis_package: redis-server
+kn_redis_server_bin: /usr/bin/redis-server
+kn_redis_cli_bin: /usr/bin/redis-cli
+kn_redis_port: 6380
+# Loopback only. A regional replica later adds the WireGuard / private address here (and TLS or a
+# tunnel between regions: doc/backend.md 3.11 "Security").
+kn_redis_bind: [127.0.0.1]
+kn_redis_user: kn_brain
+kn_redis_maxmemory: 128mb
+kn_redis_dir: /var/lib/kn-redis
+kn_redis_etc: /etc/kn-redis
+# kn_brain's redis.* keys (redis.env); the password stays in secrets.env (KN_REDIS_PASSWORD).
+kn_redis_prefix: "kn:"

@@ -22,6 +22,7 @@
 #include "social_ws.h"
 #include "roles.h"
 #include "finder.h"
+#include "hot.h"
 #include "releases.h"
 #include "build_info.h"
 #include "knsvc/config.h"
@@ -46,6 +47,7 @@ static int registry_module_init(Brain *b) {
  * line each here (anchored edit) plus their sources in CMakeLists.txt. */
 static const BrainModule k_brain_modules[] = {
     {"registry", registry_module_init, NULL},
+    {"hot", hot_init, hot_shutdown}, /* optional Redis hot tier (hot.h): before anything listens */
     {"releases", releases_init, releases_shutdown}, /* latest server build (releases.h) */
     {"federation", federation_init, federation_shutdown},
     /* svc-accounts modules go here (accounts, social WS) */

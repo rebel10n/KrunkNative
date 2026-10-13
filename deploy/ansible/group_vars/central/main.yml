@@ -2,7 +2,7 @@
 # on :8082 (matchmaker.), auth+community on :8083 (coordinator.). The host's nginx
 # (:80/:443), cloudflared, the pm2 app krunkbox (:2025, kru.eli.gift) and the login
 # user `kru` are not managed here.
-kn_release_bins: [kn_brain, kn_migrate]
+kn_release_bins: [kn_brain, kn_migrate, kn_dbcopy]
 
 # Client updates store (role kn_updates, doc/backend.md 9.8): https://assets.krunk.io/updates/.
 # Off until the user approves it: true adds the /updates/ location to OpenResty, creates
@@ -46,3 +46,18 @@ kn_edge_origin_hosts:
 # play.krunk.io record points at the edges: otherwise a run with those variables puts the
 # proxied tunnel CNAME back.
 kn_cloudflare_tunnel: true
+
+# redis-tier (doc/backend.md 3.11, deploy/README.md "Database cutover"): our own PostgreSQL cluster
+# (127.0.0.1:5434) and Redis (127.0.0.1:6380) on kru, and the coordinator moved from coord.db to
+# PostgreSQL by the first deploy that has them (kn-db-cutover: backup, copy, verify, switch; rolls
+# back to SQLite by itself on failure and then holds). Passwords are generated on kru into
+# /etc/krunknative/secrets.env. Back to SQLite: `kn-db-cutover rollback --yes` on kru.
+kn_postgres_enabled: true
+kn_redis_enabled: true
+kn_coordinator_db: postgres
+
+# Disk on kru (role kn_disk, deploy/README.md "Disk on kru"): 2.1 GB free on 2026-10-13. apt's cache
+# goes after every run; the journal is capped at 2G (it was 2.5 GB back to 2025-07 and journald's
+# default cap of 10 % would let it reach 3.2 GB), which drops only the oldest ~0.5 GB of 2025 logs.
+kn_disk_apt_clean: true
+kn_journald_max_use: "2G"
