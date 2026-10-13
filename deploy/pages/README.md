@@ -8,14 +8,15 @@ one at run time (kn-config.json, below); services stay on the central node:
 | --- | --- | --- |
 | `krunk.io`, `www.krunk.io` | dist/web without assets/ (index/social/editor/viewer, ui/, client.<hash>.*, kn-config.json) | GitHub Pages (`rebel10n/KrunkNative`, deploy-kru.yml job `pages`, custom domain `krunk.io`, HTTPS enforced) |
 | `krunknative-assets.pages.dev` | asset origin `cdn`: `/assets/` (the game content, 19.3k files, 1.9 GB) | Cloudflare Pages project `krunknative-assets`, its pages.dev URL only (assets-cdn.yml) |
-| `assets.krunk.io` | asset origin `own`: `/assets/`, and `/updates/` for the launcher | kru OpenResty :8081 (tunnel; later abulxt's edges, deploy/ansible role kn_edge_origin) |
-| `coordinator.krunk.io` | kn_brain auth + community + matchmaker | kru :8083 (tunnel) |
-| `matchmaker.krunk.io` | kn_brain finder (`/servers`) | kru :8082 (tunnel) |
-| `play.krunk.io` | net-bridge: `wss://play.krunk.io/native?target=<edge>-<n>.krunk.io:<port>` -> game server TCP | kru :8084 (tunnel, deploy/ansible `kn_bridge`) |
-| `<edge>-<n>.krunk.io` | game servers, DNS only | edges (deploy/ansible cf_dns) |
+| `assets.krunk.io` | asset origin `own`: `/assets/`, and `/updates/` for the launcher | kru OpenResty :8081 (abulxt edges, deploy/ansible role kn_edge_origin) |
+| `coordinator.krunk.io` | kn_brain auth + community + matchmaker | kru :8083 (abulxt edges) |
+| `matchmaker.krunk.io` | kn_brain finder (`/servers`) | kru :8082 (abulxt edges) |
+| `play.krunk.io` | net-bridge: `wss://play.krunk.io/native?target=<edge>-<n>.krunk.io:<port>` -> game server TCP | kru :8084 (abulxt edges, deploy/ansible `kn_bridge`) |
+| `<edge>-<n>.krunk.io` | game servers, DNS only | edges (A records by hand at Spaceship; deploy/ansible `kn_dns_check` checks them) |
 
-Names this setup owns: the DNS records `krunk.io` and `www.krunk.io` (CNAME to
-`rebel10n.github.io`, DNS only) and the Cloudflare Pages project `krunknative-assets`. It only *uses* `assets.krunk.io` (the own origin): its DNS and server
+DNS: the krunk.io zone is on Spaceship (since 2026-10-13); every record is set by hand in its
+panel, nothing here calls a DNS API. Names this setup owns: the DNS records `krunk.io` (GitHub's
+A records) and `www.krunk.io` (CNAME to `rebel10n.github.io`) and the Cloudflare Pages project `krunknative-assets`. It only *uses* `assets.krunk.io` (the own origin): its DNS and server
 belong to the edge-origin work (deploy/ansible role kn_edge_origin), which must keep what the page
 relies on there (CORS `*`, `/assets/version.txt` no-store, `?v=` caching, byte ranges).
 

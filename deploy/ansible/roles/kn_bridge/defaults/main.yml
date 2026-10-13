@@ -33,14 +33,7 @@ kn_bridge_max_sessions: 1024
 kn_bridge_idle_timeout_ms: 90000
 kn_bridge_ws_ping_ms: 30000
 kn_bridge_connect_timeout_ms: 10000
-# cloudflared connects from loopback; Cloudflare sets CF-Connecting-IP (overwriting any
-# client-supplied value), which keys the per-IP cap.
+# OpenResty (kru, behind the abulxt edges) sets CF-Connecting-IP to the browser's address,
+# overwriting any client-supplied value; it keys the per-IP cap.
 kn_bridge_client_ip_header: cf-connecting-ip
 
-# Cloudflare (controller side, like cf_dns): DNS CNAME + tunnel ingress rule. Skipped with a
-# note when CF_API_TOKEN / CF_ACCOUNT_ID are not in the environment (CI).
-# kn_cloudflare_tunnel (group_vars/central/main.yml): false once play. points at the edges.
-kn_bridge_cf_manage: "{{ kn_cloudflare_tunnel | default(true) }}"
-kn_bridge_cf_api_token: "{{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}"
-kn_bridge_cf_account_id: "{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}"
-kn_bridge_cf_tunnel_id: e6c3b632-03cd-409a-892c-a0cc37362e73

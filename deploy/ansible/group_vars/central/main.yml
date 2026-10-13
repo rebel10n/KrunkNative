@@ -30,9 +30,8 @@ fail2ban_sshd_settings:
 
 # Edge origin (role kn_edge_origin, README "Edge origin"): abulxt's OpenResty edges serve these
 # names (DNS: CNAME byod.abstracteducation.loan) and relay them to kru's host nginx :443 ->
-# OpenResty 127.0.0.1:kn_edge_origin_port, in place of the Cloudflare proxy + tunnel. Off until the
-# cutover (Deploy kru runs central.yml on every push): true adds the vhost and the edge ingress;
-# the tunnel keeps working either way. The front end (krunk.io, www.) is not here (GitHub Pages).
+# OpenResty 127.0.0.1:kn_edge_origin_port, in place of the former Cloudflare proxy + tunnel
+# (Deploy kru runs central.yml on every push): true adds the vhost and the edge ingress. The front end (krunk.io, www.) is not here (GitHub Pages).
 kn_edge_origin_enabled: true    # on since 2026-10-13 (krunk.io cutover to the abulxt edges)
 kn_edge_origin_port: 8086
 kn_edge_origin_sni: "kn-origin.{{ kn_domain }}"
@@ -41,11 +40,6 @@ kn_edge_origin_hosts:
   coordinator: "coordinator.{{ kn_domain }}"
   matchmaker: "matchmaker.{{ kn_domain }}"
   play: "play.{{ kn_domain }}"
-# Cloudflare tunnel management by kn_bridge / kn_rtc (play.krunk.io CNAME -> tunnel, ingress
-# rules), only when CF_API_TOKEN + CF_ACCOUNT_ID are in the environment. Set false once the
-# play.krunk.io record points at the edges: otherwise a run with those variables puts the
-# proxied tunnel CNAME back.
-kn_cloudflare_tunnel: false   # 2026-10-13: assets/matchmaker/play/coordinator.krunk.io are CNAMEs to the abulxt edges
 
 # redis-tier (doc/backend.md 3.11, deploy/README.md "Database cutover"): our own PostgreSQL cluster
 # (127.0.0.1:5434) and Redis (127.0.0.1:6380) on kru, and the coordinator moved from coord.db to

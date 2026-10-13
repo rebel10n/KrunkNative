@@ -32,15 +32,8 @@ kn_rtc_max_per_ip: 8
 kn_rtc_max_sessions: 1024
 kn_rtc_idle_timeout_ms: 30000
 kn_rtc_connect_timeout_ms: 10000
-# cloudflared connects from loopback; Cloudflare sets CF-Connecting-IP (keys the per-IP cap).
+# OpenResty sets CF-Connecting-IP to the browser's address (keys the per-IP cap).
 kn_rtc_client_ip_header: cf-connecting-ip
 # Page origins allowed to POST offers (CORS): the Pages front end.
 kn_rtc_origins: "{{ kn_web_origins }}"
 
-# Cloudflare tunnel ingress (controller side, like kn_bridge). Skipped without CF_API_TOKEN /
-# CF_ACCOUNT_ID (CI): source ~/.config/kn-secrets/cloudflare.env.
-# kn_cloudflare_tunnel (group_vars/central/main.yml): false once play. points at the edges.
-kn_rtc_cf_manage: "{{ kn_cloudflare_tunnel | default(true) }}"
-kn_rtc_cf_api_token: "{{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}"
-kn_rtc_cf_account_id: "{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}"
-kn_rtc_cf_tunnel_id: e6c3b632-03cd-409a-892c-a0cc37362e73

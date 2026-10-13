@@ -1,0 +1,24 @@
+# Runs on the controller (delegate_to localhost) once per edge host. Read-only.
+- name: Resolve {{ kn_edge_name }}-1..{{ kn_gameserver_count }}.{{ kn_domain }}
+  ansible.builtin.command:
+    argv: [dig, +short, +time=3, +tries=2, A, "{{ kn_edge_name }}-{{ n }}.{{ kn_domain }}", "@{{ kn_dns_check_resolver }}"]
+  loop: "{{ range(1, (kn_gameserver_count | int) + 1) | list }}"
+  loop_control:
+    loop_var: n
+    label: "{{ kn_edge_name }}-{{ n }}.{{ kn_domain }}"
+  register: kn_dns_answers
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  delegate_to: localhost
+  become: false
+
+- name: Records to add or fix in Spaceship DNS
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.n | string | regex_replace('^', kn_edge_name ~ '-') }}.{{ kn_domain }} should be
+      A {{ kn_public_ip }} (DNS only); {{ kn_dns_check_resolver }} answers
+      "{{ item.stdout_lines | join(' ') if item.rc == 0 else 'error: ' ~ item.stderr }}"
+  loop: "{{ kn_dns_answers.results | rejectattr('stdout_lines', 'equalto', [kn_public_ip]) | list }}"
+  loop_control:
+    label: "{{ kn_edge_name }}-{{ item.n }}.{{ kn_domain }}"

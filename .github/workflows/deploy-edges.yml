@@ -132,7 +132,6 @@ jobs:
       COMMIT12: ${{ needs.plan.outputs.commit12 }}
       DRY_RUN: ${{ inputs.dry_run || false }}
       TAGS: ${{ inputs.tags || 'firewall,fail2ban,user,release,gameserver' }}
-      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:

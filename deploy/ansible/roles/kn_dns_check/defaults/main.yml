@@ -1,0 +1,6 @@
+# Per-instance DNS for the edges: <edge>-<n>.krunk.io A <kn_public_ip>, DNS only. The krunk.io
+# zone is on Spaceship (launch1/launch2.spaceship.net, since 2026-10-13) and its records are kept
+# by hand in Spaceship's DNS panel: nothing here writes DNS. This role only checks, from the
+# controller, that every instance name resolves to its edge, and warns (never fails) when one
+# does not, so a new edge or a raised kn_gameserver_count gets its records added there.
+kn_dns_check_resolver: launch1.spaceship.net   # ask the zone's own server: no resolver cache

@@ -1,4 +1,5 @@
-# Edge game servers: vcpus-1 server_bin instances per host + their DNS records.
+# Edge game servers: vcpus-1 server_bin instances per host (+ a check of their DNS records,
+# which are kept by hand at Spaceship: role kn_dns_check).
 # edge_firewall runs first: the vendored host-firewall role opens the game ports
 # (edge-firewall-contract v1, README "Edge firewall"; firewall.yml runs it alone). fail2ban
 # follows (fail2ban-contract v1, README "fail2ban"): abulxt owns the base, this repo adds drop-ins.
@@ -12,4 +13,4 @@
     - { role: kn_user, tags: [user, gameserver] }
     - { role: kn_release, tags: [release, gameserver] }
     - { role: kn_gameserver, tags: [gameserver] }
-    - { role: cf_dns, tags: [dns], when: kn_cf_dns_manage | default(true) | bool }
+    - { role: kn_dns_check, tags: [dns] }

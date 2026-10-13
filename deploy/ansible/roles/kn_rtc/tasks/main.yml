@@ -1,5 +1,5 @@
 # kn_rtc_enabled (defaults/main.yml): false keeps the gateway installed-but-off (stopped and
-# disabled if it exists) and leaves the Cloudflare tunnel alone; true deploys it (deploy.yml).
+# disabled if it exists); true deploys it (deploy.yml).
 - name: Deploy kn-rtc
   ansible.builtin.include_tasks: deploy.yml
   when: kn_rtc_enabled | bool

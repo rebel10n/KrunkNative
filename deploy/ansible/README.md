@@ -20,7 +20,7 @@ content as hardlinked objects of the web asset tree. Off until `kn_updates_enabl
 with `ansible-playbook central.yml --tags openresty,updates` (no full deploy needed), then set the
 repository variable `KN_UPDATES_UPLOAD=1`.
 
-Routing on kru (Cloudflare tunnel ingress, managed in Cloudflare): `assets.krunk.io -> :8081`,
+Routing on kru (the abulxt edges -> kru's OpenResty, [Edge origin](#edge-origin-abulxts-edges-instead-of-cloudflare)): `assets.krunk.io -> :8081`,
 `matchmaker.krunk.io -> :8082`, `coordinator.krunk.io -> :8083`, `play.krunk.io -> :8084` (the
 last one is kept by the `kn_bridge` role, see [net-bridge](#net-bridge-playkrunkio)). The page itself (`krunk.io`,
 `www.`) is on GitHub Pages (deploy-kru.yml job `pages`), see `deploy/pages/README.md` (also caching and
@@ -170,10 +170,12 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 
 (browser address, edge, host). The rtc media path does not change: ICE/DTLS goes straight to
 `5.188.124.56:21100/udp`, only the `/rtc` signaling POST goes through the edges.
 
-After the cutover set `kn_cloudflare_tunnel: false` (kn_bridge / kn_rtc stop putting the
-`play.krunk.io` tunnel CNAME and ingress rules back when run with Cloudflare credentials), and
-after the zone has left Cloudflare `kn_cf_dns_manage: false` (`group_vars/edges/main.yml`; the
-`<edge>-<n>` A records are then kept by hand at the new DNS host).
+DNS: the krunk.io zone is on Spaceship (`launch1`/`launch2.spaceship.net`, since 2026-10-13) and
+every record is kept by hand in Spaceship's DNS panel; nothing in this repository writes DNS or
+uses the Cloudflare API for it any more (the cf_dns role and kn_bridge / kn_rtc's tunnel CNAME and
+ingress tasks are gone). `edges.yml --tags dns` (role `kn_dns_check`) only checks that every
+`<edge>-<n>.krunk.io` resolves to its edge at `launch1.spaceship.net` and prints the records to add
+there (a new edge, a raised `kn_gameserver_count`).
 
 ## Database cutover (PostgreSQL + Redis on kru)
 
@@ -276,16 +278,10 @@ TCP to the edge. Role `kn_bridge` (tag `bridge`):
 - Limits: 8 sessions per client IP (`CF-Connecting-IP`; cloudflared connects from loopback),
   1024 in total, 90 s idle close, WebSocket ping every 30 s (Cloudflare drops idle sockets after
   100 s), 10 s TCP connect timeout, 128 KiB max message. Refusals are 403/429/503.
-- Cloudflare (controller side, needs `CF_API_TOKEN` + `CF_ACCOUNT_ID` from
-  `~/.config/kn-secrets/cloudflare.env`; skipped with a note without them, e.g. in CI): DNS
-  `play.krunk.io` CNAME `<tunnel id>.cfargotunnel.com` (proxied), and the tunnel ingress rule
-  `play.krunk.io -> http://localhost:8084`. The tunnel is remote-managed (cloudflared runs with
-  a token), so the role reads the configuration over the API and PUTs it back with the rule
-  replaced in place or inserted just before the catch-all; every other rule is kept, and nothing
-  is written when it is already there.
+- Routing: `play.krunk.io` is a DNS-only CNAME to the abulxt edges (Spaceship DNS, by hand), which
+  relay to kru's OpenResty and on to `127.0.0.1:8084` ([Edge origin](#edge-origin-abulxts-edges-instead-of-cloudflare)).
 
 ```sh
-set -a; . ~/.config/kn-secrets/cloudflare.env; set +a
 ansible-playbook central.yml --tags bridge --check --diff
 ansible-playbook central.yml --tags bridge
 ssh kru journalctl -u kn-bridge -f          # one line per session: client IP -> edge, close reason
@@ -301,15 +297,11 @@ IP ban on an edge would therefore hit all web players; ban by account instead.
 The web client's preferred transport (doc/transport.md "Web transports"): knet datagrams over
 an unordered, unreliable RTCDataChannel to `net-bridge/rtc` (`kn-rtc`, Go + pion/webrtc,
 pinned in its go.mod/go.sum), which relays every message 1:1 to the edge game server's UDP
-port. Role `kn_rtc` (tag `rtc`; `kn_rtc_enabled: false` stops and disables the unit and leaves
-the tunnel alone):
+port. Role `kn_rtc` (tag `rtc`; `kn_rtc_enabled: false` stops and disables the unit):
 
 - Signaling: `POST https://play.krunk.io/rtc?target=<edge>-<n>.krunk.io:<port>` with the SDP
-  offer, answered with the SDP answer. The request goes Cloudflare proxy -> tunnel ->
-  `127.0.0.1:8085`. The tunnel ingress gets one path rule, `play.krunk.io` + `^/rtc(/|$)` ->
-  `http://localhost:8085`, inserted just before the `play.krunk.io` -> :8084 bridge rule. Every
-  other rule is kept, and kn_bridge's ingress task leaves path rules alone. The same
-  `CF_API_TOKEN` / `CF_ACCOUNT_ID` are needed as for kn_bridge; without them the step is skipped.
+  offer, answered with the SDP answer. The request goes abulxt edge -> kru's OpenResty
+  (`/rtc` on `play.krunk.io`) -> `127.0.0.1:8085` ([Edge origin](#edge-origin-abulxts-edges-instead-of-cloudflare)).
 - Media: ICE-lite plus DTLS/SCTP straight to `5.188.124.56:21100/udp` (`kn_rtc_public_ip`,
   `kn_rtc_ice_port`). This is one UDP port for every session (ICE UDP mux), bound to that
   address only. The role asserts that the address is on the host. No certificate is needed and
