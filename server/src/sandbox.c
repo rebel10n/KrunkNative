@@ -207,6 +207,7 @@ int sandbox_start(const SandboxConfig *cfg) {
     // gameserver defaults, then the offline game's rules (server_sandbox.h)
     gs_config_defaults(&g_gs_config);
     g_gs_config.idle_timeout = 0.0f;   // never kicked for inactivity offline
+    g_gs_config.idle_menu_timeout = 0.0f;
     g_gs_config.bans_file[0] = 0;
     g_gs_config.brain_url[0] = 0;
     g_gs_config.password[0] = 0;
@@ -221,6 +222,7 @@ int sandbox_start(const SandboxConfig *cfg) {
     g_server->config.listen_port = 0;
     g_server->config.max_players = (unsigned short) g_gs_config.max_players;
     g_server->config.idle_timeout = g_gs_config.idle_timeout;
+    g_server->config.idle_menu_timeout = g_gs_config.idle_menu_timeout;
     g_server->config.idle_move_threshold = g_gs_config.idle_move_threshold;
     g_server->config.perms = 0;
     g_server->config.cheats_open = 1; // v3.1.1's perms-off server: cheats for everyone (the one local player)

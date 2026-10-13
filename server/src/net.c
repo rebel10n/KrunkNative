@@ -362,6 +362,36 @@ static void net_mark_client_spawned(ClientConnection *client) {
     client->last_significant_move_at = g_server->now;
     client->idle_position = client->player->position;
     client->has_idle_position = 1;
+    client->has_idle_look = 0; // the new life's first input frame is the look / keys reference
+}
+
+// The idle clock restarts: the player did something (net_check_idle_clients).
+static void net_note_activity(ClientConnection *client) {
+    client->last_significant_move_at = g_server->now;
+}
+
+// What the player holds in an input frame, as one comparable value: the move keys and the buttons
+// (the reset / interact bits included). Swaps, the wheel and slot picks are presses of their own.
+static int net_input_keys(const Input *input) {
+    return (input->move_dir + 1) | input->shoot << 4 | input->scope << 5 | input->jump << 6 | input->crouch << 7 |
+           input->reload << 8 | input->interact_held << 9 | input->reset << 10;
+}
+
+// An accepted input frame is activity when the player turned its view, pressed or released a
+// key, swapped or scrolled weapons: v7.1.4's own idle timer (controls.js) resets on every key
+// event and every mouse move. Empty frames with the same look (the client keeps sending them
+// while nobody touches it) are not.
+static void net_note_input_activity(ClientConnection *client, const Input *input) {
+    const int keys = net_input_keys(input);
+    if (!client->has_idle_look) {
+        client->has_idle_look = 1;
+    } else if (fabsf(input->x_dir - client->idle_look[0]) > 1e-4f || fabsf(input->y_dir - client->idle_look[1]) > 1e-4f ||
+               keys != client->idle_keys || input->swap || input->scroll || input->select_slot) {
+        net_note_activity(client);
+    }
+    client->idle_look[0] = input->x_dir;
+    client->idle_look[1] = input->y_dir;
+    client->idle_keys = keys;
 }
 
 // One tick's frames for one client go out in a single send(): Krunker sends its per-tick
@@ -1295,7 +1325,7 @@ static void net_handle_input_frame(ClientConnection *client, const NetInputPacke
     net_packet_to_input(&input, net_input);
     input.arrival = arrival;
     input.received = received; // the packet's arrival: exact lag compensation's input clock (LagCompClock)
-    player_accept_input(client->player, &input);
+    if (player_accept_input(client->player, &input)) net_note_input_activity(client, &input); // replays do not count
 
     LagCompClock *clock = &client->player->lag_clock;
     if (clock->anomaly_new) {
@@ -1348,10 +1378,42 @@ void net_resume_ent(ClientConnection *client, const int spectate) {
     }
 }
 
+// Packets only a player's own action sends (a click, a key, a chat line): each one restarts the
+// idle clock, alive, dead or in the menu (the respawn click is the ENT). Not: what clients send
+// on their own (HELLO, JOIN, PONG, map / social / script traffic) and input frames, which count
+// only when they change something (net_note_input_activity).
+static int net_packet_is_activity(const uint8_t type) {
+    switch (type) {
+        case NET_PACKET_ENT:
+        case NET_PACKET_STREAK_SLOTS:
+        case NET_PACKET_PC_STAT:
+        case NET_PACKET_CHAT_SEND:
+        case NET_PACKET_CHAT_V7:
+        case NET_PACKET_MATCH_VOTE:
+        case NET_PACKET_COMP_SET:
+        case NET_PACKET_SPECTATE_TARGET:
+        case NET_PACKET_SPRAY_V7:
+        case NET_PACKET_SPAWN_REQ:
+        case NET_PACKET_TAUNT:
+        case NET_PACKET_USE_STREAK:
+        case NET_PACKET_INTERACT:
+        case NET_PACKET_CONFIRM_INTERACT:
+        case NET_PACKET_PREMIUM_ACTION:
+        case NET_PACKET_TELEPORT:
+        case NET_PACKET_CYCLE:
+        case NET_PACKET_VOICE_SEND:
+        case NET_PACKET_VOICE_V7:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 // Returns 0 when the client was removed.
 int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     const int first_packet = !client->first_packet_seen;
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
+    if (net_packet_is_activity(packet->type)) net_note_activity(client);
     switch (packet->type) {
         case NET_PACKET_HELLO:; // ";": a declaration may not follow a label before C23 (GCC 10 on bullseye)
             NetHelloPacket hello;
@@ -1607,15 +1669,24 @@ static int net_idle_exempt(const ClientConnection *client) {
     return net_client_is_dev(client) || accounts_is_custom_host(client) || (mode && mode->no_kick);
 }
 
-// gameserver.ts checkIdleTimeouts (v3.1.1 server): 60 s without moving 1 unit kicks,
-// dead players included; before the first spawn the clock runs from the connect, or from
-// the last map change (markPlayerUnspawned: the players.clear() of a new map restarts it, so
-// someone who is not respawned on the new map is not kicked for the time before it).
-// Nobody is idle on the end screen (players.clear() leaves no player to check); the
-// respawn of the next round counts as movement.
+// The server idle kick, after gameserver.ts checkIdleTimeouts (v3.1.1) but with v7.1.4's idea of
+// activity. v3.1.1 only counted a 1-unit move, so a player shooting or aiming from one spot, or
+// strafing in place, was kicked; v7.1.4's idle timer (controls.js / index.js CONTROLS.idleTimer)
+// restarts on every key event and mouse move. Here the clock (last_significant_move_at)
+// restarts on the connect, every (re)spawn, a map change (markPlayerUnspawned), the death, a
+// 1-unit move, an input frame that turns the view or presses / releases a key
+// (net_note_input_activity) and every packet only a player's own action sends (ENT = the respawn
+// click, chat, votes, sprays...: net_packet_is_activity).
+//   alive:                      kicked after idle_kick_seconds without any of that
+//   dead / before the spawn:    kicked after idle_menu_kick_seconds (0 = never). v7 kicks from
+//     the menu itself, on the client (menu_ui.c, config.kickTimer 120 s, public lobbies); this is
+//     the backstop for clients that do not (older builds, bridged browsers that lost focus).
+// Never kicked: spectators, the end screen (players.clear() leaves no player to check), the
+// exemptions above.
 void net_check_idle_clients(const float now) {
     const float timeout = g_server->config.idle_timeout;
-    if (timeout <= 0.0f) return;
+    const float menu_timeout = g_server->config.idle_menu_timeout;
+    if (timeout <= 0.0f && menu_timeout <= 0.0f) return;
 
     const float threshold = g_server->config.idle_move_threshold;
     const float threshold_sq = threshold * threshold;
@@ -1631,8 +1702,12 @@ void net_check_idle_clients(const float now) {
 
         if (!player || !player->active) {
             if (net_is_spectating(client)) continue; // spectators are never idle-kicked (index.js: !window.Bf5)
+            if (client->has_idle_position) { // died since the last check: the menu's clock starts (showMenu idleTimer = 0)
+                client->has_idle_position = 0;
+                client->last_significant_move_at = now;
+            }
 
-            if (now - client->last_significant_move_at >= timeout) {
+            if (menu_timeout > 0.0f && now - client->last_significant_move_at >= menu_timeout) {
                 net_kick_idle(client, client->spawned_at > 0.0f ? "in game (dead)" : "before spawn");
                 i--;
             }
@@ -1654,7 +1729,7 @@ void net_check_idle_clients(const float now) {
             client->last_significant_move_at = now;
         }
 
-        if (now - client->last_significant_move_at >= timeout) {
+        if (timeout > 0.0f && now - client->last_significant_move_at >= timeout) {
             net_kick_idle(client, "in game");
             i--;
         }

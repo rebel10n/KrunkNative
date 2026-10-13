@@ -1557,8 +1557,9 @@ Precedence: **CLI flags > environment > config file > defaults**.
 | `motd` | `[]` | server chat line(s) sent to every player on their first spawn (`$` = their name) |
 | `join_message` / `leave_message` | `"$ joined the game"` / `"$ left the game"` | v3.1.1 `config.serverMessages[0/1]`, `""` = off |
 | `billboard` / `billboards` / `billboards_file` / `billboard_image` | none | billboard ads on every map BILLBOARD (below); `""` = none |
-| `idle_kick_seconds` | `60` | v3.1.1 `SERVER_IDLE_TIMEOUT_MS`, 0 = never. The clock restarts on connect, (re)spawn, every map change and each move; never kicked: spectators, the end screen, DEV peers (ops, DEV accounts, the server's own machine), the custom lobby's host and `noKick` modes (v7.1.4's own idle kick, the client's menu kick, skips the game host and developers; v7 has no server kick) |
-| `idle_move_threshold` | `1` | units a player must move to count as active |
+| `idle_kick_seconds` | `60` | seconds an alive player may do nothing before the kick (v3.1.1 `SERVER_IDLE_TIMEOUT_MS`), 0 = never. Activity is v7.1.4's (controls.js idleTimer: any key, any mouse move): an input frame that turns the view or presses / releases a key, a move of `idle_move_threshold`, the respawn click (ENT), chat, votes, sprays, interacts. The clock also restarts on connect, (re)spawn, death and every map change. Never kicked: spectators, the end screen, DEV peers (ops, DEV accounts, the server's own machine), the custom lobby's host and `noKick` modes |
+| `idle_menu_kick_seconds` | `300` | the same for a dead player or one in the menu (before the spawn, after a death), 0 = never. v7.1.4 kicks from the menu on the client (config.kickTimer 120 s, public lobbies only); this is the server's backstop |
+| `idle_move_threshold` | `1` | units a player must move to count as active (input frames that change something count anyway) |
 | `perms` | `false` | v3.1.1 `PERMS`: DEV chat commands only for ops and loopback |
 | `ops` | `[]` | account ids (numbers) or account usernames that are op (DEV) when they join; names only match accounts, never guests |
 | `bans_file` | `""` | JSON `{"ips":[...],"accounts":[ids],"names":[usernames]}`; loaded at start, `/banip` / `/unbanip` changes saved back (atomic rename) |

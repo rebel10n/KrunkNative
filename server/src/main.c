@@ -735,6 +735,7 @@ int main(int argc, char **argv) {
     g_server->config.listen_port = cfg->listen_port;
     g_server->config.max_players = (unsigned short) cfg->max_players; // per mode: accounts_round_changed()
     g_server->config.idle_timeout = cfg->idle_timeout;
+    g_server->config.idle_menu_timeout = cfg->idle_menu_timeout;
     g_server->config.idle_move_threshold = cfg->idle_move_threshold;
     g_server->config.perms = cfg->perms; // --perms, PERMS=1 or gameserver.perms
     g_server->config.cheats_open = cfg->cheats_open;

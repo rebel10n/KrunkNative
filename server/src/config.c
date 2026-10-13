@@ -47,6 +47,7 @@ void gs_config_defaults(GsConfig *cfg) {
     gs_copy(cfg->join_message, sizeof(cfg->join_message), "$ joined the game"); // config.serverMessages[0]
     gs_copy(cfg->leave_message, sizeof(cfg->leave_message), "$ left the game"); // serverMessages[1]
     cfg->idle_timeout = 60.0f;          // gameserver.ts SERVER_IDLE_TIMEOUT_MS
+    cfg->idle_menu_timeout = 300.0f;    // a backstop behind the client's v7 menu kick (config.kickTimer 120 s)
     cfg->idle_move_threshold = 1.0f;    // SERVER_IDLE_MOVE_THRESHOLD
     cfg->allow_guests = 1;
     cfg->join_timeout = 5.0f;
@@ -459,6 +460,7 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
 
     // moderation
     gs_read_float(s, "idle_kick_seconds", &cfg->idle_timeout, 0.0f, 86400.0f);
+    gs_read_float(s, "idle_menu_kick_seconds", &cfg->idle_menu_timeout, 0.0f, 86400.0f);
     gs_read_float(s, "idle_move_threshold", &cfg->idle_move_threshold, 0.0f, 1000.0f);
     gs_read_bool(s, "perms", &cfg->perms);
     {

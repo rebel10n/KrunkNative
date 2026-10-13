@@ -401,7 +401,7 @@ static void cli_cmd_status(const char *args) {
     server_log("  players    %lu/%u connected, %lu in game", (unsigned long) g_server->client_count, (unsigned int) g_server->config.max_players, (unsigned long) in_game);
     server_log("  tick rate  %u Hz target, %.1f Hz measured, slowest tick %.2f ms",
                (unsigned int) g_server->config.tick_rate, g_server_tick_stats.measured_tick_rate, g_server_tick_stats.max_tick_ms);
-    server_log("  idle kick  %.0f s", g_server->config.idle_timeout);
+    server_log("  idle kick  %.0f s alive, %.0f s dead / in the menu", g_server->config.idle_timeout, g_server->config.idle_menu_timeout);
     server_log("  hostname   %s%s", g_gs_config.name, g_gs_config.password[0] ? " (password)" : "");
     server_log("  auth       %s", g_gs_config.online_mode ? "online mode (accounts verified)" : "offline mode (guests)");
     server_log("  network    %s%s%s", g_gs_config.brain_url[0] ? "coordinator " : "standalone",

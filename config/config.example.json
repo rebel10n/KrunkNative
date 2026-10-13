@@ -245,6 +245,7 @@
     ],
     "billboards_file": "",
     "idle_kick_seconds": 60,
+    "idle_menu_kick_seconds": 300,
     "idle_move_threshold": 1,
     "perms": false,
     "cheats": "auth",

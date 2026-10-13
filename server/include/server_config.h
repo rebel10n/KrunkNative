@@ -73,7 +73,8 @@ typedef struct {
     int billboard_count;
 
     // ---- moderation
-    float idle_timeout;                  // seconds, 0 = never
+    float idle_timeout;                  // seconds alive without any activity, 0 = never
+    float idle_menu_timeout;             // seconds dead / in the menu without any activity, 0 = never
     float idle_move_threshold;
     int perms;                           // v3.1.1 PERMS: DEV chat commands only for ops / loopback
     int cheats_open;                     // gameserver.cheats "all": v3.1.1 perms-off cheats for everyone (default "auth")

@@ -523,6 +523,7 @@ static void test_idle_kick_map_change(void) {
     const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = MODE_ID_FFA};
     CHECK(sandbox_start(&cfg), "sandbox_start (idle)");
     g_server->config.idle_timeout = 2.0f; // the sandbox has no idle kick: a server_bin's, shortened
+    g_server->config.idle_menu_timeout = 2.0f; // the guest never spawns: the dead / menu clock
 
     static TestClient host, guest;
     memset(&host, 0, sizeof(host));

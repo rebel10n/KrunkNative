@@ -32,6 +32,7 @@ typedef struct {
     unsigned short listen_port;
     unsigned short max_players;
     float idle_timeout;
+    float idle_menu_timeout;
     float idle_move_threshold;
     int perms;                     // --perms / PERMS=1: DEV-only chat commands need an op'd or loopback client
     int cheats_open;               // --open-cheats / gameserver.cheats "all": cheats for everyone while perms are off
@@ -137,9 +138,12 @@ typedef struct {
 
     float connected_at;
     float spawned_at;
-    float last_significant_move_at; // the idle clock: connect, (re)spawn, map change, a 1-unit move
+    float last_significant_move_at; // the idle clock: connect, (re)spawn, map change, any activity (net_note_activity)
     vec3 idle_position;
+    float idle_look[2];             // the look (x_dir, y_dir) of the last input frame: a turn is activity
+    int idle_keys;                  // the last input frame's keys (net_input_keys): a press or release is activity
     unsigned char has_idle_position:1;
+    unsigned char has_idle_look:1;
     unsigned char joined:1;        // spawned in the current round (respawned by the next round)
     unsigned char announced:1;     // "<name> joined the game" was broadcast for this connection
     unsigned char voice_player:1;  // v3.1.1 ctx.player for io_vc: set by every non-spectate ENT, cleared
