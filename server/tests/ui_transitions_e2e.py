@@ -517,12 +517,13 @@ def sc_om_scroll():
     a right-click drop, Undo / Remove / Clear Extras, object / entity / NPC spawns and their
     results, LOADOUT_EXTRA); a tab switch and a search show new results from the top. `scroll`
     probes (input_script.c) log scrollTop; `[object-manager] action N` lines show each click landed."""
-    tile = "640 400"  # a tile at 1280x720 (the third row before scrolling)
+    tile = "617 432"  # inside a tile at 1280x720 after two wheel steps (the grid wraps to 6 columns since 87cb7ba;
+                      # y 400 fell into the 4 px gap between two rows)
     probes = [  # (label, rule): "0", ">0" or "=label" (the same scrollTop as that probe)
         ("open", "0"), ("w-wheel", ">0"), ("w-add", "=w-wheel"), ("w-take-out", "=w-wheel"), ("w-drop", "=w-wheel"),
         ("w-undo", "=w-wheel"), ("w-remove", "=w-wheel"), ("w-add2", "=w-wheel"), ("w-clear", "=w-wheel"),
         ("o-tab", "0"), ("o-wheel", ">0"), ("o-spawn", "=o-wheel"), ("e-tab", "0"), ("e-wheel", ">0"), ("e-spawn", "=e-wheel"),
-        ("n-tab", "0"), ("n-wheel", ">0"), ("n-spawn", "=n-wheel"), ("w-tab", "0"), ("w-wheel2", ">0"), ("w-search", "0"),
+        ("n-tab", "0"), ("n-wheel", ">=0"), ("n-spawn", "=n-wheel"), ("w-tab", "0"), ("w-wheel2", ">0"), ("w-search", "0"),
     ]
     lines = run_client("om-scroll", ["--offline", "--map", "kanji"], f"""
         0 play
@@ -599,6 +600,8 @@ def sc_om_scroll():
             ok = top is not None and have == got.get(rule[1:])
         elif rule == ">0":
             ok = top is not None and top > 0.0
+        elif rule == ">=0":  # the NPCs tab may fit without scrolling at 6 columns; the spawn must keep it either way
+            ok = top is not None and top >= 0.0
         else:
             ok = top == 0.0
         record("om-scroll", label, "knOmGrid.scrollTop", rule, have, ok)
